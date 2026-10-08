@@ -154,6 +154,12 @@ pub(crate) enum FalhaAoAbrirVersao {
     InstalacaoIncompleta,
     /// Instalada e o executável sumiu.
     ExecutavelAusente,
+    /// O executável não é mais o que se instalou.
+    ///
+    /// A guarda da linha legada: o atualizador de uma versão aberta pelo
+    /// launcher troca o app do depósito por outra linha. O conserto é apagar e
+    /// baixar de novo, e a tela oferece isso num botão só.
+    InstalacaoAlterada,
     /// O catálogo não diz o executável deste sistema.
     ExecutavelNaoDeclarado,
     /// O catálogo diz um executável fora da instalação.
@@ -188,6 +194,7 @@ impl From<Recusa> for FalhaAoAbrirVersao {
             },
             Recusa::InstalacaoIncompleta { .. } => Self::InstalacaoIncompleta,
             Recusa::ExecutavelAusente { .. } => Self::ExecutavelAusente,
+            Recusa::InstalacaoAlterada { .. } => Self::InstalacaoAlterada,
             Recusa::ExecutavelNaoDeclarado { .. } => Self::ExecutavelNaoDeclarado,
             Recusa::ExecutavelInvalido { .. } => Self::ExecutavelInvalido,
             // A coerência é conferida ao entrar, contra o que o servidor
@@ -1147,6 +1154,36 @@ mod o_launcher_ligado_ao_produto {
         assert!(
             matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
             "o caminho de abrir devolveu algo que não é nem sucesso nem `NaoIniciou`: {resultado:?}"
+        );
+    }
+
+    /// **A guarda da linha legada, na casca.** O atualizador de uma versão
+    /// aberta pelo launcher trocaria o executável do depósito; abrir de novo
+    /// recusa com o nome certo, para a tela oferecer baixar outra vez.
+    #[test]
+    fn um_executavel_trocado_no_deposito_e_recusado_com_o_nome_certo() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let m = instalado(
+            &config,
+            &manifesto_json(&[("0.15.2", "0.15")], None),
+            "0.15.2",
+        );
+        let executavel = Deposito::em(super::raiz_do_deposito(&config))
+            .pasta_da_versao(&Versao::nova("0.15.2").unwrap())
+            .join("bin/seele");
+        std::fs::write(&executavel, b"o app de outra linha").unwrap();
+
+        assert_eq!(
+            preparar(
+                &config,
+                &m,
+                &chave(),
+                &Pedido::MaisNovaDaLinha(linha("0.15")),
+                Ato::Abrir,
+                &Intencao::default()
+            ),
+            Err(FalhaAoAbrirVersao::InstalacaoAlterada)
         );
     }
 

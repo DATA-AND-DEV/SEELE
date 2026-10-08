@@ -156,6 +156,16 @@ pub enum Recusa {
         /// Onde ele deveria estar.
         onde: PathBuf,
     },
+    /// O executável não é mais o que se instalou: a soma no marcador não bate.
+    ///
+    /// É a guarda da linha legada. O atualizador de uma versão aberta pelo
+    /// launcher troca o `.app` inteiro, e o marcador, que fica fora dele,
+    /// continua dizendo «instalada». Abrir assim seria abrir outra versão com
+    /// os dados desta linha. O conserto é baixar de novo.
+    InstalacaoAlterada {
+        /// A que foi pedida.
+        versao: Versao,
+    },
     /// O manifesto não diz qual é o executável desta versão neste sistema.
     ExecutavelNaoDeclarado {
         /// A que foi pedida.
@@ -336,6 +346,19 @@ impl<'a> Resolvedor<'a> {
                 versao,
                 onde: executavel,
             });
+        }
+
+        // **A soma do marcador contra o disco, a cada resolução.** Ver
+        // [`Recusa::InstalacaoAlterada`]. Um marcador sem a soma é de antes
+        // dela, e `instalacao` responde «não sei» para ele: aí não há com o que
+        // conferir, e inventar uma recusa seria pior.
+        if let Some(instalacao) = self.deposito.instalacao(&versao) {
+            let agora = std::fs::read(&executavel)
+                .map(|bytes| crate::deposito::resumo_em_hexadecimal(&bytes))
+                .unwrap_or_default();
+            if !agora.eq_ignore_ascii_case(&instalacao.resumo_do_executavel) {
+                return Err(Recusa::InstalacaoAlterada { versao });
+            }
         }
 
         Ok(VersaoResolvida {
@@ -923,6 +946,32 @@ mod testes {
                 corrigida_em: Some("0.15.3-teste".to_owned()),
                 ato: Ato::Hospedar,
             })
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **A guarda da linha legada.** O atualizador de uma versão aberta pelo
+    /// launcher troca o `.app` inteiro, e o marcador, que fica fora dele,
+    /// continua dizendo «instalada». A soma do executável é o que percebe a
+    /// troca, e a recusa tem nome próprio: o conserto é baixar de novo.
+    #[test]
+    fn um_executavel_trocado_depois_de_instalado_e_recusado_por_isso() {
+        let raiz = pasta("executavel-trocado");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["0.15.2-teste"], &[]);
+        instalar(&deposito, &m, "0.15.2-teste");
+        let versao = Versao::nova("0.15.2-teste").unwrap();
+        std::fs::write(
+            deposito.pasta_da_versao(&versao).join(EXECUTAVEL),
+            b"o app de outra linha",
+        )
+        .unwrap();
+        let sem_revogacao = vigente(&m, &deposito);
+
+        assert_eq!(
+            Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao)
+                .resolver(&Pedido::MaisNova, Ato::Abrir),
+            Err(Recusa::InstalacaoAlterada { versao })
         );
         let _ = std::fs::remove_dir_all(&raiz);
     }

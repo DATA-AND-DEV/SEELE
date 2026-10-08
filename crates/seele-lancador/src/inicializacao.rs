@@ -28,6 +28,15 @@ use crate::resolucao::VersaoResolvida;
 /// A mesma que `apps/seele-app/src/main.rs` já lê em `config_dir`.
 pub const VARIAVEL_DE_DADOS: &str = "SEELE_HOME";
 
+/// A variável que diz à versão aberta que quem a abriu foi o launcher.
+///
+/// Valor `1`. Aberta assim, a versão mora no depósito do launcher, e o
+/// atualizador do Tauri trocaria o app de lá pela versão do topo do manifesto —
+/// outra linha. A 0.15.2 e a 0.16 a leem e escondem e recusam o atualizador
+/// (spec 0.16, D-linha-1). Uma versão de antes dela a ignora, e é por isso que a
+/// linha legada sai numa 0.15.2, e não na 0.15.1.
+pub const VARIAVEL_DO_LANCADOR: &str = "SEELE_LANCADOR";
+
 /// O que iniciar, e com o quê. Montado, não executado.
 ///
 /// Separado da execução de propósito: é o que permite provar, em teste e sem
@@ -52,10 +61,13 @@ impl Lancamento {
         Self {
             programa: resolvida.executavel.clone(),
             argumentos,
-            ambiente: vec![(
-                VARIAVEL_DE_DADOS.to_owned(),
-                resolvida.dados.to_string_lossy().into_owned(),
-            )],
+            ambiente: vec![
+                (
+                    VARIAVEL_DE_DADOS.to_owned(),
+                    resolvida.dados.to_string_lossy().into_owned(),
+                ),
+                (VARIAVEL_DO_LANCADOR.to_owned(), "1".to_owned()),
+            ],
         }
     }
 
@@ -198,6 +210,43 @@ mod testes {
         assert_eq!(
             lancamento.argumentos,
             vec!["--hospedar", "seele://exemplo.invalido"]
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **A guarda da linha legada, do lado de quem abre.** A versão aberta
+    /// precisa saber que quem a abriu foi o launcher: aberta assim, ela mora
+    /// no depósito, e o atualizador dela trocaria o app de lá por outra linha.
+    /// A 0.15.2 e a 0.16 escondem e recusam o atualizador com isto.
+    #[test]
+    fn a_versao_aberta_sabe_que_quem_a_abriu_foi_o_launcher() {
+        let raiz = pasta("aberta-pelo-launcher");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.0.0-teste"], &[]);
+        let p = m.mais_nova().clone();
+        deposito
+            .instalar(
+                &p,
+                ALVO,
+                &pacote("1.0.0-teste"),
+                &crate::cenario::chave(),
+                &DesempacotadorDeTeste,
+            )
+            .unwrap();
+        let sem_revogacao = vigente(&m, &deposito);
+        let resolvida = Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao)
+            .resolver(&Pedido::MaisNova, Ato::Abrir)
+            .unwrap();
+
+        let lancamento = Lancamento::de(&resolvida, vec![]);
+
+        assert!(
+            lancamento
+                .ambiente
+                .contains(&(VARIAVEL_DO_LANCADOR.to_owned(), "1".to_owned())),
+            "sem a variável, a versão aberta mostra o próprio botão de atualizar e \
+             troca o app do depósito: {:?}",
+            lancamento.ambiente
         );
         let _ = std::fs::remove_dir_all(&raiz);
     }
