@@ -1017,9 +1017,9 @@ O guarda passa a ler também `src/mods.rs`, a incluir `FalhaAoInstalarMod` e a a
 **Arquivo:** `apps/seele-app/src/main.rs`, e só ele.
 
 **Na 0.16.**
-- `ler_imagem_mod` e `enviar_imagem_mod` são a capacidade `volume`, que nasceu na API 5. O P51-11 só tem objeto enquanto a API 6 mantiver o `volume`, e isso é da F3.
-- Até a F3 mexer no código (depois do K3 e do K4), o comando existe, e consertar o registro dele não custa nada.
-- **Antes de despachar a onda 3, confirme com a orquestradora** se o rascunho da v6 mantém o `volume`. Se não mantiver, o P51-11 sai do lote, e o P51-09 fica sozinho.
+- `ler_imagem_mod` e `enviar_imagem_mod` são a capacidade `volume`, que nasceu na API 5.
+- **A API 6 mantém o `volume`** (ADR 0048), confirmado pela F3 em 08/10. A capa e a foto do PERFIS, os mapas da MESA e o fundo do ESTILO dependem dela. O P51-11 tem objeto.
+- No celular, a capacidade pode ficar ausente por plataforma, se a ponte web não tiver `ler_imagem_mod`. No desktop nada muda.
 
 **Estado em `d4eb6f1`:** nada feito.
 
@@ -1688,7 +1688,7 @@ O que esta frente absorve na API 6, ou deixa para ela:
 - **O retrato que não fala com o MOD.** Se o retrato deve mandar `midia`/`falhou` quando a imagem não decodifica (K2), é evento novo da v6.
 - **A recusa do som de contribuição no pedido de tocar** (K5), e o «recusada, com os números» do som grande demais (K4): o texto público entra na v6.
 - **O contrato de `tocando`** (P49-6, `563bc37`) entra no texto da v6.
-- **O `volume` na API 6** decide se o P51-11 do E tem objeto. Pergunta da onda 3.
+- **O `volume` fica na API 6** (ADR 0048, confirmado pela F3 em 08/10), e o P51-11 do E tem objeto.
 - **O Snapshot que os MODs leem** já leva os nomes dos aparelhos (`capture`, `playback`). A regra «nada da máquina vai aos MODs» é das leituras da v6, por lista branca.
 
 ## Vão para outros planos

@@ -21,3 +21,8 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - Ruling: o E pergunta à orquestradora, antes da onda 3, se a v6 mantém o `volume`; sem ele, o P51-11 sai — custo se errado: um conserto de registro num comando que a F3 tiraria.
   - Ruling: o Z registra também o fechamento das pendências 52, 53 e 54, porque nenhum lote de código edita `docs/pendencias.md` — custo se errado: nenhum.
   - Ruling: o M2 troca só a oração do quarto no parágrafo dos 60 s de `docs/ponto-de-encontro.md`, que é a cadeia do Lote C no G1; a frase fica mais precisa e não ganha cadeia — custo se errado: o dono pode querer o parágrafo intocado.
+- **A orquestradora aprovou o `lotes.md` (`46f227a`)**, ponto a ponto.
+  - **Dívida com dono:** fechar o app hospedando (a metade casca do P50-4) fica sem aviso até o Plano 2 chamar a `Hospedagem::despedir` que o G-servidor cria. O dono da dívida é o Plano 2.
+  - **E / P51-11:** a F3 confirmou que a API 6 mantém a capacidade `volume` (ADR 0048). O P51-11 tem objeto, e a pergunta da onda 3 está respondida.
+  - **`sementes_do_fuzz.rs`:** a F1 regenera as sementes quando o número do protocolo subir para 9. O M1 mexe só no trecho do `datagrama_do_encontro`, e a orquestradora resolve o encontro na integração.
+- **Passo 2, a onda 1:** C · H · K2 · M1 · ferramentas · P54, em paralelo, cada um num worktree isolado e num branch `0.16/lotes-<id>` a partir de `0.16/lotes`. O `target/` de cada worktree é semeado por clone APFS do `target/debug` do worktree `abertos-da-1.0`, que tem o mesmo `Cargo.lock` (cerca de 41 s por clone).
