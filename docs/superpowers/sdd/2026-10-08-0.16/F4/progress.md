@@ -115,3 +115,46 @@ publicado.
   `seele-video` e do `seele-instalador` (`deny` em vez de `forbid`, a folha de
   lints copiada e o guarda `folha_de_lints`). O guarda do `RustAllocator` espera
   o crate do motor, e portanto essa decisão.
+
+### 08/10, a exceção do `unsafe` e os guardas do `.wasm`
+
+A orquestradora aprovou a exceção no molde do 0041 e do 0043, com quatro
+condições, e as quatro estão feitas:
+1. **`deny` na folha, `allow` só em `fronteira.rs`**, nos dois crates. O
+   `folha_de_lints` passa a esperar quatro folhas próprias. Provado: com
+   `forbid` no motor, ele reprova.
+2. **Nenhum `unsafe` fora da fronteira**: `xtask/tests/fronteira_do_celular.rs`.
+   - Um `unsafe` no `lib.rs` não compila, pelo `deny`.
+   - O mesmo com `#[allow(unsafe_code)]` compila, e o guarda o nomeia. O
+     `folha_de_lints` sozinho não pegava isso: ele confere a folha, e não onde
+     os `allow` estão.
+3. **`// SAFETY:` em cada bloco**: `#![deny(clippy::undocumented_unsafe_blocks)]`
+   dentro de cada `fronteira.rs`, e não na folha, que só pode divergir no
+   `unsafe_code`. Provado: um bloco sem o comentário reprova no clippy.
+4. **A emenda do ADR 0057**, com o porquê e o precedente, e a linha do índice.
+
+Também feito:
+- **O motor de MODs** (`crates/seele-motor-web`): o motor seguro, rodado no
+  nativo, e a fronteira só no `wasm`. O guarda do `RustAllocator` roda dentro do
+  `.wasm`: com `Runtime::new()`, o MOD aloca 64 blocos de 2 MiB e o guarda
+  reprova.
+- **As importações fixas do motor**: 14, todas da lista. Uma nova reprova até
+  alguém a revisar.
+- **Os bytes-ouro dentro do `.wasm`**: as 37 mensagens do cliente e as 46 do
+  servidor cruzam a fronteira de verdade com o JSON passando pelo JavaScript
+  (`xtask/web/ouro.mjs`).
+- **O passo sem `WASI_SDK`**: o `.cargo/config.toml` aponta a variável para uma
+  pasta que não existe. Provado: sem a linha, o `build.rs` baixou 464 MB sem
+  conferir, e o passo reprovou.
+- **`cargo xtask web`** roda os sete passos, e o job de MOD do CI passou a
+  rodá-lo, com os dois alvos instalados. Um guarda prende isso.
+
+**A descarga que fixou os hashes do wasi-sdk:**
+- data: 08/10/2026;
+- origem: `https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/`;
+- arquivos: `wasi-sdk-24.0-arm64-macos.tar.gz` (108 199 177 B,
+  `aeae9993…f51b0b3a`) e `wasi-sdk-24.0-x86_64-linux.tar.gz` (118 879 731 B,
+  `c6c38aab…d4167a0bc5`);
+- os tamanhos batem com os que a API do GitHub informa para o release;
+- o release não publica checksum, e uma busca pelos hashes não achou segunda
+  fonte.
