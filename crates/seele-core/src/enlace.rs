@@ -338,10 +338,22 @@ pub enum Motivo {
 /// contra uma decisão que só uma pessoa pode tomar é a casca dizendo
 /// «reconectando» para quem precisa ler uma lista e responder — ADR 0045, «um
 /// servidor que troca de MOD pergunta de novo», e perguntar exige alguém.
+///
+/// As três da sala pessoal — [`DisconnectReason::ChamadaEncerrada`],
+/// [`DisconnectReason::NinguemAtendeu`] e [`DisconnectReason::ChamadaRecusada`]
+/// — são terminais pela spec de 23/09/2026 («Protocolo»): reconectar abriria a
+/// sala de quem acabou de desligar, ou tocaria de novo para quem não atendeu.
+/// Nenhum servidor as manda ainda; elas entram aqui com o fio, para a sala não
+/// nascer com uma bateria tocando de novo.
 fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
     matches!(
         motivo,
-        DisconnectReason::Kicked | DisconnectReason::Banned | DisconnectReason::ModsMudaram
+        DisconnectReason::Kicked
+            | DisconnectReason::Banned
+            | DisconnectReason::ModsMudaram
+            | DisconnectReason::ChamadaEncerrada
+            | DisconnectReason::NinguemAtendeu
+            | DisconnectReason::ChamadaRecusada
     )
 }
 
@@ -5541,6 +5553,10 @@ mod tests {
             DisconnectReason::ModsRecusados,
             DisconnectReason::ModsMudaram,
             DisconnectReason::ModsIndisponiveis,
+            DisconnectReason::ChamadaEncerrada,
+            DisconnectReason::NinguemAtendeu,
+            DisconnectReason::ChamadaRecusada,
+            DisconnectReason::ModsDeOutraApi { apis: 1 << 7 },
         ] {
             let acaba = match motivo {
                 // Alguém decidiu que esta pessoa não fica. Reconectar desfaz.
@@ -5549,6 +5565,12 @@ mod tests {
                 // máquina não aceitou. Reconectar encontra o mesmo não, e quem
                 // desfaz é uma pessoa lendo a lista nova.
                 DisconnectReason::ModsMudaram => true,
+                // A sala pessoal: quem recebia encerrou, não atendeu ou
+                // recusou. Reconectar abriria ou tocaria de novo uma ligação
+                // que alguém decidiu acabar (spec de 23/09).
+                DisconnectReason::ChamadaEncerrada
+                | DisconnectReason::NinguemAtendeu
+                | DisconnectReason::ChamadaRecusada => true,
                 // A bateria é o conserto: o servidor volta, ou o cliente
                 // reconecta e busca o histórico que faltou. O doc de
                 // `FellBehind` diz isso com todas as letras.
@@ -5571,7 +5593,10 @@ mod tests {
                 // ou encontra um servidor que não consegue anunciá-los nunca
                 // chegou a ter sessão.
                 | DisconnectReason::ModsRecusados
-                | DisconnectReason::ModsIndisponiveis => false,
+                | DisconnectReason::ModsIndisponiveis
+                // A API de MOD que o cliente não roda: nasce no `Hello`, antes
+                // do convite, e não há sessão para acabar.
+                | DisconnectReason::ModsDeOutraApi { .. } => false,
             };
             assert_eq!(
                 a_sessao_acabou_aqui(motivo),

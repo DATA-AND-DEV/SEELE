@@ -757,6 +757,61 @@ pub enum DisconnectReason {
     ///
     /// Appended last, for the reason [`AlertReason::RateLimited`] gives.
     ModsIndisponiveis,
+
+    // ---- a linha 1, do ordinal 18 em diante, numa lista só ----
+    //
+    // Decidido em 08/10/2026 (`7abfb500`): as três da sala pessoal e a da API
+    // de MOD. A razão «servidor de outra linha» **não** está aqui: entre
+    // linhas o par não lê o corpo, e a linha viaja só pelo byte 0 (ADR 0058).
+    /// Quem recebia encerrou a ligação. Spec de 23/09/2026, «Protocolo».
+    ///
+    /// **Terminal no cliente:** reconectar abriria a sala de alguém que acabou
+    /// de desligar.
+    ChamadaEncerrada,
+
+    /// O toque venceu o prazo sem ninguém atender. Spec de 23/09/2026.
+    ///
+    /// Terminal, e diferente de [`Self::ChamadaRecusada`]: quem liga lê «NÃO
+    /// ATENDEU», e não «RECUSOU» (decisão do dono de 23/09).
+    NinguemAtendeu,
+
+    /// Quem recebia recusou a ligação, inclusive por ter bloqueado quem liga.
+    /// Spec de 23/09/2026.
+    ChamadaRecusada,
+
+    /// O servidor exige MODs de uma API que este cliente não roda (D-fio-7).
+    ///
+    /// Sai antes do convite ser gasto, pela lista de [`ClientMessage::Hello`]
+    /// `apis_de_mod`, e diz «atualize o app» em vez de anunciar MODs que nunca
+    /// vão carregar.
+    ///
+    /// As APIs vão como máscara de bits, e não como lista, para esta razão
+    /// continuar `Copy` como as outras: ver [`mascara_de_apis`].
+    ModsDeOutraApi {
+        /// As APIs que o servidor exige e o cliente não roda: o bit `k` ligado
+        /// é a API `k`.
+        apis: u64,
+    },
+}
+
+/// As APIs de MOD como máscara de bits: o bit `k` ligado é a API `k`.
+///
+/// APIs acima de 63 não cabem e ficam de fora: são 57 versões de servidor além
+/// da 1.0, e a razão que usa esta máscara diz «atualize o app» com qualquer
+/// bit ligado.
+#[must_use]
+pub fn mascara_de_apis(apis: &[u32]) -> u64 {
+    apis.iter()
+        .filter_map(|api| 1_u64.checked_shl(*api))
+        .fold(0, |mascara, bit| mascara | bit)
+}
+
+/// As APIs de uma máscara de [`mascara_de_apis`], da menor para a maior.
+#[must_use]
+pub fn apis_da_mascara(mascara: u64) -> Vec<u32> {
+    (0..64_u32)
+        .filter(|api| mascara & (1_u64 << api) != 0)
+        .collect()
 }
 
 /// How loud an alert is.
@@ -5336,6 +5391,57 @@ mod a_api_de_mod_no_fio {
             panic!("o anúncio voltou como outra coisa");
         };
         assert_eq!(mods[0].api, 6);
+    }
+}
+
+#[cfg(test)]
+mod as_razoes_da_linha_1 {
+    //! As razões de fim que a linha 1 acrescentou, do ordinal 18 em diante,
+    //! numa lista só: as três da sala pessoal e a da API de MOD (decisão de
+    //! 08/10/2026, `7abfb500`).
+    use super::*;
+
+    fn ordinal(razao: DisconnectReason) -> u8 {
+        let quadro = encode(&ServerMessage::Disconnecting { reason: razao }).unwrap();
+        quadro[2]
+    }
+
+    #[test]
+    fn as_razoes_novas_moram_do_18_em_diante_nesta_ordem() {
+        assert_eq!(ordinal(DisconnectReason::ChamadaEncerrada), 18);
+        assert_eq!(ordinal(DisconnectReason::NinguemAtendeu), 19);
+        assert_eq!(ordinal(DisconnectReason::ChamadaRecusada), 20);
+        assert_eq!(ordinal(DisconnectReason::ModsDeOutraApi { apis: 0 }), 21);
+    }
+
+    #[test]
+    fn a_razao_da_api_leva_as_apis_que_o_servidor_exige() {
+        let razao = DisconnectReason::ModsDeOutraApi {
+            apis: mascara_de_apis(&[7, 8]),
+        };
+        let quadro = encode(&ServerMessage::Disconnecting { reason: razao }).unwrap();
+        let ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi { apis },
+        } = decode::<ServerMessage>(&quadro).unwrap()
+        else {
+            panic!("a razão voltou como outra");
+        };
+        assert_eq!(apis_da_mascara(apis), vec![7, 8]);
+    }
+
+    #[test]
+    fn a_mascara_vai_e_volta_e_ignora_o_que_nao_cabe() {
+        assert_eq!(mascara_de_apis(&[]), 0);
+        assert_eq!(mascara_de_apis(&[0]), 1);
+        assert_eq!(mascara_de_apis(&[6]), 1 << 6);
+        assert_eq!(mascara_de_apis(&[6, 6]), 1 << 6, "repetir não soma");
+        assert_eq!(mascara_de_apis(&[63]), 1 << 63);
+        assert_eq!(mascara_de_apis(&[64, 1_000]), 0, "acima de 63 não cabe");
+        assert_eq!(
+            apis_da_mascara(mascara_de_apis(&[3, 4, 5, 6])),
+            vec![3, 4, 5, 6]
+        );
+        assert_eq!(apis_da_mascara(u64::MAX).len(), 64);
     }
 }
 

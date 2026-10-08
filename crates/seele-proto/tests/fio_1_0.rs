@@ -644,6 +644,25 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
         ("recusa:9".to_owned(), recusa_por_versao(9).to_vec()),
     ];
 
+    // As razões de fim da linha 1, do ordinal 18 em diante: os bytes de um
+    // `Disconnecting` com cada uma, porque é nele que elas viajam.
+    for (nome, razao) in [
+        ("ChamadaEncerrada", DisconnectReason::ChamadaEncerrada),
+        ("NinguemAtendeu", DisconnectReason::NinguemAtendeu),
+        ("ChamadaRecusada", DisconnectReason::ChamadaRecusada),
+        (
+            "ModsDeOutraApi",
+            DisconnectReason::ModsDeOutraApi {
+                apis: seele_proto::control::mascara_de_apis(&[7]),
+            },
+        ),
+    ] {
+        todos.push((
+            format!("motivo:{nome}"),
+            encode(&ServerMessage::Disconnecting { reason: razao }).unwrap(),
+        ));
+    }
+
     let mut voz = [0_u8; seele_proto::HEADER_LEN + 2];
     let len = MediaHeader {
         version: MEDIA_HEADER_VERSION,
@@ -907,6 +926,10 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "ModsRecusados",
                 "ModsMudaram",
                 "ModsIndisponiveis",
+                "ChamadaEncerrada",
+                "NinguemAtendeu",
+                "ChamadaRecusada",
+                "ModsDeOutraApi",
             ],
         ),
         (

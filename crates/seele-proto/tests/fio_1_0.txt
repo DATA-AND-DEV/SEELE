@@ -84,6 +84,10 @@ servidor:MembroBanido	092c2b
 quadro:enquadramento	00000003090b00
 recusa:8	080b00
 recusa:9	090b00
+motivo:ChamadaEncerrada	090b12
+motivo:NinguemAtendeu	090b13
+motivo:ChamadaRecusada	090b14
+motivo:ModsDeOutraApi	090b158001
 datagrama:voz	01deadbeef123400096000fcff
 fluxo:abertura-de-tela	0100000005000007800438
 fluxo:tipo:anexo	01
