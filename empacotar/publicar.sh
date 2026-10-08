@@ -1124,6 +1124,23 @@ bateria() {
     etapa_da_bateria "uma bancada de MOD reprovou, ou não há Node nesta máquina." \
         "Rode «cargo xtask check-runtime» e leia: ele diz qual bancada caiu." \
         cargo xtask check-runtime
+    # **Os crates do celular dentro do `.wasm`** (ADR 0057, emenda de
+    # 08/10/2026), que esta bateria não rodava. O `cargo test` prova o núcleo no
+    # nativo, e não o que só existe no `wasm`: os bytes-ouro da linha 1 pela
+    # fronteira do `seele-web`, e o motor de MODs do `seele-motor-web` com as
+    # importações fixas e o teto de memória, que no `wasm32-wasip1` só vale com
+    # o `RustAllocator`. Os sete passos moram em `xtask/src/web.rs`, e são os
+    # mesmos que o `validar` do `release.yml` e o job de MOD do `ci.yml` rodam.
+    #
+    # Precisa dos alvos `wasm32-unknown-unknown` e `wasm32-wasip1`, do Node, de
+    # `curl` e de `tar`, e baixa o wasi-sdk uma vez por máquina, conferido pelo
+    # SHA-256 fixado. Só há hash fixado para o Mac arm64 e o Linux x86_64: numa
+    # máquina sem ele, a etapa reprova antes de começar e diz por quê, em vez de
+    # compilar com um SDK que ninguém conferiu. Depois da primeira vez, leva uns
+    # quinze segundos.
+    etapa_da_bateria "os crates do celular reprovaram dentro do .wasm, ou falta nesta máquina um alvo wasm, o Node ou o hash fixado do wasi-sdk." \
+        "Rode «cargo xtask web» e leia: ele diz o passo que caiu, ou o que falta e como resolver." \
+        cargo xtask web
     # **As conferências de regra que o `validar` do `release.yml` roda, e esta
     # bateria não rodava** (m3 da revisão final do Plano 1). O `check-api` é o
     # único guarda de que todo nome, momento e evento que uma `api/vN.json`

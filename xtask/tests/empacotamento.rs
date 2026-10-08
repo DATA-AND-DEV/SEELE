@@ -674,6 +674,15 @@ case "$*" in
         fi
         exit 0
         ;;
+    # Os crates do celular dentro do `.wasm`. Ao reprovar, o de verdade diz o
+    # passo que caiu e o porquê, inclusive numa máquina sem o hash do wasi-sdk.
+    *'xtask web'*)
+        if [ "${FALSO_XTASK_WEB:-ok}" != ok ]; then
+            echo 'web: FALHOU antes de começar: esta máquina (x86_64-macos) não tem SHA-256 fixado do wasi-sdk' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
     # As três conferências de regra que o `validar` do `release.yml` roda. Ao
     # reprovar, cada uma diz o que quebrou, e é essa linha que quem publica
     # tem de ler.
@@ -4066,6 +4075,70 @@ fn uma_bancada_de_mod_vermelha_para_a_publicacao_antes_de_empacotar() {
     assert!(
         saida.nada_foi_empacotado(),
         "a bancada reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn os_crates_do_celular_vermelhos_no_wasm_param_a_publicacao_antes_de_empacotar() {
+    // **O que só o `.wasm` prova** (os bytes-ouro pela fronteira do `seele-web`,
+    // o teto de memória e as importações do `seele-motor-web`) roda no
+    // `cargo xtask web`, e esta bateria é por onde as versões saem. Um passo
+    // que só o CI despachado à mão rodasse seria um guarda que ninguém vê
+    // reprovar (ADR 0057, emenda de 08/10/2026).
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_XTASK_WEB", "reprova"),
+        ],
+    );
+
+    assert!(
+        saida.diario.contains("cargo xtask web"),
+        "a bateria de quem publica não rodou os crates do celular no .wasm:\n{}",
+        saida.diario
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "os crates do celular reprovaram no .wasm e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("Rode «cargo xtask web»"),
+        "a queixa não diz como rodar à mão:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não tem SHA-256 fixado do wasi-sdk"),
+        "o porquê da recusa não chegou a quem publica:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "os crates do celular reprovaram e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn o_sem_bateria_pula_tambem_os_crates_do_celular() {
+    // A saída de emergência pula a bateria inteira, e os crates do celular não
+    // podem virar uma etapa que roda mesmo assim.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_XTASK_WEB", "reprova")],
+    );
+    assert!(
+        !saida.diario.contains("xtask web"),
+        "o --sem-bateria deixou de pular os crates do celular:\n{}",
         saida.diario
     );
 }
