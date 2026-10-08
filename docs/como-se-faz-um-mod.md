@@ -368,8 +368,12 @@ a pilha inteira, até o teto da linha. A pilha só vem quando o lançado é um
 cada linha é cortada em 512 caracteres. O que o teto segurou não some calado:
 a linha seguinte diz quantas foram seguradas (`suprimidas=`). Se o seu código
 se calar depois da rajada, o próprio produto escreve essa linha, em WARN, em até
-meio segundo, sem esperar o MOD parar — e deixa ao seu código a vez seguinte:
-quem continua escrevendo leva a conta na própria linha, e o produto não fala.
+meio segundo, sem esperar o MOD parar. Ele só a escreve com uma vaga de sobra
+no teto, deixando a seguinte para o seu código: quem tenta escrever ao menos
+uma linha a cada quarto de segundo leva a conta na própria linha, e o produto
+não fala. Quem escreve mais espaçado — várias linhas de uma vez, a cada meio
+segundo, por exemplo — pode ver a linha do produto entre as suas, ocupando uma
+vaga que sobrou.
 
 **Na 0.15.0 o `console` não existe**, e `console.warn(…)` lá é um
 `ReferenceError`. Um MOD que precisa rodar nas duas versões pergunta antes:
