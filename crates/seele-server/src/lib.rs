@@ -911,12 +911,73 @@ impl Daemon {
         persistence::messages::Messages::new(&mut guard).history(channel, None, limite)
     }
 
-    /// Stops accepting and closes the endpoint.
+    /// Para de aceitar e fecha o endpoint, **na hora e sem avisar ninguém**.
+    ///
+    /// Síncrono de propósito: é o que o `Drop` de quem hospeda pode chamar, e
+    /// um `drop` não espera nada. Quem estava dentro lê a conexão caindo, e não
+    /// um motivo. Quem pode esperar chama [`Self::encerrar_avisando`], que avisa
+    /// cada sessão antes e só então chega aqui.
     pub fn shutdown(&self) {
-        // specs/04-servidor-seele.md wants clients told `ManutencaoProgramada`
-        // and given 3 s. That needs the per-connection registry M3 brings; for
-        // now the close is abrupt and honest about it.
         self.endpoint.close(0_u32.into(), b"shutting down");
+    }
+
+    /// Avisa cada sessão de que o servidor vai cair, espera elas se
+    /// despedirem até `prazo`, e só então fecha o endpoint.
+    ///
+    /// # O defeito que isto conserta
+    ///
+    /// Quem hospeda saía por [`Self::shutdown`], e quem estava dentro lia uma
+    /// queda de transporte: a casca dizia «não foi possível alcançar o
+    /// servidor», e a bateria batia cinco minutos numa porta que ninguém ia
+    /// atender. O protocolo tinha a frase certa, `ServerShuttingDown`, e ninguém
+    /// a mandava. O `specs/04-servidor-seele.md` pede o aviso; o que faltava era
+    /// como alcançar cada sessão sem um registro delas, e a resposta é o
+    /// barramento, que toda sessão já escuta.
+    ///
+    /// # Como
+    ///
+    /// Difunde [`server::Event::ServidorEncerrando`] com `reason`. Cada sessão o
+    /// atende no braço da expulsão: escreve `Disconnecting { reason }`, espera
+    /// até 1 s pela entrega (`session::despedir`) e fecha a conexão.
+    ///
+    /// A espera é pelo **endpoint**, com `wait_idle` sob `prazo`: ele volta
+    /// quando não sobra conexão nenhuma, o que quer dizer que cada sessão se
+    /// despediu e que o fechamento dela já saiu para o outro lado. Não há
+    /// registro de sessões vivas para esperar por ele (`session::Registry` só
+    /// conta), e o endpoint já é quem sabe quantas conexões há.
+    ///
+    /// O prazo é o teto, e não a espera de sempre: sem ninguém conectado o
+    /// endpoint já está ocioso, e isto volta na hora. Quem o gasta inteiro é
+    /// uma conexão que não se despede — uma ainda no aperto de mão, que não
+    /// assinou o barramento, ou um par que não confirma a entrega. Essa é
+    /// fechada sem aviso pelo [`Self::shutdown`] do fim.
+    ///
+    /// # O que isto não faz
+    ///
+    /// Não espera o fechamento terminar depois do [`Self::shutdown`]: quem vai
+    /// reabrir a porta, ou derrubar o runtime em seguida, chama
+    /// [`Self::wait_idle`] depois.
+    pub async fn encerrar_avisando(
+        &self,
+        reason: seele_proto::control::DisconnectReason,
+        prazo: std::time::Duration,
+    ) {
+        // Sem sessão nenhuma escutando, o `send` falha, e não há a quem avisar.
+        let _ = self
+            .server
+            .events
+            .send(server::Event::ServidorEncerrando { reason });
+        if tokio::time::timeout(prazo, self.endpoint.wait_idle())
+            .await
+            .is_err()
+        {
+            tracing::info!(
+                conexoes = self.endpoint.open_connections(),
+                ?prazo,
+                "o prazo da despedida acabou com conexões ainda abertas; elas fecham sem aviso"
+            );
+        }
+        self.shutdown();
     }
 
     /// Espera o endpoint terminar de fechar.

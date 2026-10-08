@@ -362,7 +362,10 @@ impl Hospedagem {
         }
     }
 
-    /// Encerra o servidor e devolve a porta.
+    /// Encerra o servidor **avisando quem está dentro**, e devolve a porta.
+    ///
+    /// É o SAIR de quem hospeda: a casca chama isto pelo comando `disconnect`,
+    /// depois de desmontar o próprio cliente.
     ///
     /// Consome, e a espera está aqui de propósito. Fechar uma conversa e abrir
     /// outra é o caso normal, e sem esperar isso falha com "endereço já em
@@ -370,16 +373,34 @@ impl Hospedagem {
     /// novo. O custo cai onde a pessoa já espera uma pausa, ao fechar, e não
     /// onde ela espera rapidez, ao abrir.
     ///
-    /// São três esperas e cada uma tem um motivo: as conexões terminarem, a
-    /// tarefa de aceitação soltar a referência dela, e o driver do QUIC
-    /// devolver o socket depois que a última referência some.
+    /// São quatro esperas e cada uma tem um motivo: cada sessão ler que o
+    /// servidor está encerrando (até `PRAZO_DO_AVISO`, meio segundo), as conexões
+    /// terminarem, a tarefa de aceitação soltar a referência dela, e o driver
+    /// do QUIC devolver o socket depois que a última referência some.
+    ///
+    /// # O aviso
+    ///
+    /// Era `shutdown()` cru, e quem estava dentro lia uma queda de transporte:
+    /// a tela dizia «não foi possível alcançar o servidor», e a bateria batia
+    /// cinco minutos numa porta fechada. Agora cada sessão lê
+    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO») e acaba. Ver
+    /// [`Daemon::encerrar_avisando`].
+    ///
+    /// O roteador vem **antes** do aviso aqui, e depois em [`Self::despedir`]:
+    /// no SAIR o processo continua vivo, e as duas esperas cabem; na saída do
+    /// app só cabe o que vier antes de o runtime cair, e o aviso vale mais.
     pub async fn encerrar(mut self) {
         // Primeiro a porta do roteador. Uma regra deixada para trás aponta para
         // uma máquina que não vai mais atender, e só some quando o prazo vence.
         if let Some(escada) = self.escada.take() {
             escada.descer().await;
         }
-        self.server.shutdown();
+        self.server
+            .encerrar_avisando(
+                seele_proto::control::DisconnectReason::ServerShuttingDown,
+                PRAZO_DO_AVISO,
+            )
+            .await;
         self.server.wait_idle().await;
         if let Some(aceitando) = self.aceitando.take() {
             let _ = aceitando.await;
@@ -390,13 +411,74 @@ impl Hospedagem {
         // não dá para observar de fora.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
+
+    /// A despedida da **saída do app**: avisa quem está dentro e devolve a
+    /// porta do roteador, tudo dentro de `teto`.
+    ///
+    /// Para o Plano 2 chamar da casca, no `ExitRequested` segurado: depois
+    /// disto o runtime cai, e o que não tiver saído até ali não sai mais. Por
+    /// isso cada passo tem a sua fatia do teto, e nenhum espera sem prazo:
+    ///
+    /// 1. **o aviso**, metade do teto: cada sessão lê `ServerShuttingDown` e
+    ///    fecha ([`Daemon::encerrar_avisando`]), e o endpoint fecha depois;
+    /// 2. **o fechamento sair**, um quarto: `wait_idle` espera o endpoint
+    ///    terminar de mandar o fechamento das conexões que o prazo do aviso
+    ///    deixou para trás. Sem ele, o runtime cai com esse fechamento na fila,
+    ///    e quem estava conectado só descobre pelos 20 s do tempo ocioso do
+    ///    transporte;
+    /// 3. **o roteador**, o último quarto: devolver a porta pedida pelo degrau
+    ///    3. Uma regra que sobra só some quando o prazo dela vence.
+    ///
+    /// É a ordem inversa da de [`Self::encerrar`], e de propósito: aqui o aviso
+    /// vale mais que o roteador. A regra esquecida no roteador expira sozinha; a
+    /// pessoa que lê «não foi possível alcançar o servidor» procura defeito na
+    /// casa dela.
+    ///
+    /// Não espera a porta UDP voltar ao sistema, ao contrário de
+    /// [`Self::encerrar`]: o processo está saindo, e ninguém vai reabri-la.
+    pub async fn despedir(mut self, teto: std::time::Duration) {
+        self.server
+            .encerrar_avisando(
+                seele_proto::control::DisconnectReason::ServerShuttingDown,
+                teto / 2,
+            )
+            .await;
+        let _ = tokio::time::timeout(teto / 4, self.server.wait_idle()).await;
+        if let Some(escada) = self.escada.take() {
+            if tokio::time::timeout(teto / 4, escada.descer())
+                .await
+                .is_err()
+            {
+                tracing::info!(
+                    "a porta do roteador não foi devolvida dentro do teto da despedida; ela \
+                     some quando o prazo dela vencer"
+                );
+            }
+        }
+    }
 }
+
+/// Quanto o SAIR de quem hospeda espera, no máximo, cada sessão ler que o
+/// servidor está encerrando.
+///
+/// Meio segundo. Numa rede de casa a despedida leva uma ida e volta e a
+/// confirmação de entrega, dezenas de milissegundos, e o endpoint já fica
+/// ocioso antes disso. O teto existe para quem não se despede — alguém no meio
+/// do aperto de mão, um par que não confirma a entrega —, e é ele que quem
+/// aperta SAIR paga no pior caso. O `session::despedir` espera até 1 s pela
+/// entrega de cada sessão; com o prazo menor que isso, uma sessão lenta não
+/// segura o SAIR, e é fechada pelo `shutdown` do fim.
+const PRAZO_DO_AVISO: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Drop for Hospedagem {
     /// Sinaliza o fechamento, sem esperar — `drop` não pode aguardar.
     ///
     /// Quem vai reabrir a porta em seguida deve chamar [`Hospedagem::encerrar`]
     /// antes de descartar.
+    ///
+    /// **E sem avisar ninguém**: quem estava dentro lê a conexão caindo. Quem
+    /// pode esperar chama [`Hospedagem::encerrar`] (o SAIR) ou
+    /// [`Hospedagem::despedir`] (a saída do app), que avisam antes.
     fn drop(&mut self) {
         self.server.shutdown();
     }
