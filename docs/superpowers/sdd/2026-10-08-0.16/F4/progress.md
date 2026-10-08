@@ -19,7 +19,7 @@ publicado.
 | 0.2 · medição 1: o Ed25519 do Safari no `verify` | **feita** no Mac e no Simulador: passa. O iPhone fica com o dono (`prova.py iphone`) | `spikes/ed25519-do-navegador/README.md` |
 | 0.3 · preparar a medição 3 (ALPN no iPhone) | **feita**; a bancada (Chromium e Simulador) mediu, e o iPhone fica com o dono | `spikes/alpn-no-mesmo-socket/README.md` |
 | 0.4 · spike do executor de MODs | **feito**: recomenda **AB**. O custo no iPhone fica com o dono (`prova.py iphone`) | `spikes/mods-no-navegador/README.md` |
-| 0.5 · passos do dono, medições 3 a 6 | a fazer | `F4/medicoes-do-dono.md` |
+| 0.5 · passos do dono, medições 3 a 6 | **feita**, com a página da voz preparada para vir de uma origem estática | `F4/medicoes-do-dono.md` |
 | 0.6 · pedidos ao contrato de fio | depois da 0.2 e da medição 3 | `F4/pedidos-ao-fio.md` |
 
 ## Registro
@@ -71,3 +71,16 @@ publicado.
     - o `build.rs` do `rquickjs-sys` baixa o wasi-sdk sem checksum.
 - O plano ganhou a regra «na tela, nunca linha» (aviso da orquestradora, vindo
   da F6) e a forma AB na Tarefa 3.2.
+- **A página da voz vem de uma origem estática** (`f025fc7`). O servidor e o
+  hash vêm do fragmento, que é guardado e apagado. A identidade conta as
+  aberturas, e o web app aceita o link colado. Conferida no Chromium e no
+  Simulador a partir de `localhost:8099`, e a `prova.py` antiga passa inteira.
+- **Os passos do dono** estão em `F4/medicoes-do-dono.md`: a medição 1 no
+  iPhone, a 3, a 4, a 5, a 6 e o custo dos MODs no iPhone. A origem provisória
+  basta para medir.
+- **O AB foi aceito** pela orquestradora (spec-mestre `00935dac`). As duas
+  condições viraram tarefas com guarda: o `RustAllocator` (3.2, Step 2) e o
+  wasi-sdk verificado (3.2b).
+- **Achado de passagem:** um `spike-voz-no-navegador` de 07/10 ainda escuta a
+  4433 no checkout principal (PID 70937). Não é desta sessão e ficou como
+  estava.
