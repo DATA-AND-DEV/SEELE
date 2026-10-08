@@ -71,6 +71,8 @@ não toca no `seele-core/src/encontro.rs`, então a Task 9 não espera.
 | 11 | o ENC/2 no fuzz | feita | `ff203557` |
 | 12 | o ADR 0062 e as frases públicas | feita | `3c12e223` |
 | 13 | o portão da VPS | feita | `e9b31450` (o `publicar.sh`, à parte; a F6 simulou o merge com o `36274663` e ele entra limpo), `8f006d8c` (a receita) |
+| 14–16 | o cookie (D-enc-4) e o teto por prefixo (D-enc-3) | feitas | `86caf16e`, `47233d9a` |
+| 17–18 | o `sondar` com o `DESAFIO`, o fuzz, os docs e o ADR | feitas | `86caf16e`, `ba8b7b85` |
 
 ## A revisão independente (08/10) e os consertos
 
@@ -93,10 +95,20 @@ ICMP) não mata o `servir` (`07b6b702`, o classificador provado aqui; o `servir`
 num Windows de verdade não foi medido); a folga do datagrama não promete mais
 campo novo sem versão nova (`cf1d6964`).
 
-**Pendentes com o dono (pela orquestradora):**
-- **D-enc-3**, um teto de marcas vivas por prefixo no quarto (proposto: 128);
-- **D-enc-4**, um cookie de ida e volta no `MORO2`, a única defesa contra origem
-  forjada. Muda o fio: tem de entrar antes da Task 8 e da VPS.
+**Decididas pelo dono (08/10), e feitas:**
+- **D-enc-4, o cookie de ida e volta** (`86caf16e`): o `MORO2` leva o cookie no
+  último campo, o ponto responde `DESAFIO` sem guardar nada e sem gastar o
+  balde, e o `MOROU` leva o cookie corrente. HMAC-SHA256 sobre o `sha2` (os
+  vetores da RFC 4231), janela de 120 s, preso ao IP; o segredo do `getrandom`,
+  só em memória. Cinco reversões, uma delas medida pelas duas famílias do
+  loopback (o cookie do `::1` não vale no `127.0.0.1`). O fuzz: 4,4 milhões de
+  execuções em 31 s, sem falha.
+- **D-enc-3, 128 marcas vivas por prefixo** (`47233d9a`).
+- Os docs e o ADR (`ba8b7b85`): o segredo do ponto, e «o que sobra» sem a origem
+  forjada calando uma sala.
+
+**O fio do ENC/2 está completo** para a integração: `MORO2` (com o cookie),
+`QUEM2`, `MOROU`, `DESAFIO`, `AQUI2`, `NINGUEM` e `RECUSA`.
 
 **Os docs falam no presente do que a Task 8 faz** (o anfitrião dizendo o
 relógio torto e a recusa no `seele.log`). A Task 8 tem de entrar na mesma 0.16.
