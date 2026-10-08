@@ -2448,18 +2448,42 @@ mod testes {
         );
     }
 
-    /// O corpo de uma função deste módulo, sem as linhas de comentário: do
-    /// texto `assinatura` até a primeira chave que fecha na coluna zero.
+    /// O corpo de uma função deste módulo, sem as linhas de comentário: da
+    /// `assinatura`, escrita no começo de uma linha, até a primeira chave que
+    /// fecha na coluna zero.
+    ///
+    /// **Ancorada no começo da linha, e gritando quando não acha.** A primeira
+    /// versão procurava a assinatura em qualquer lugar do arquivo, e ela também
+    /// está no texto deste módulo de testes: com a função renomeada, o resto
+    /// do arquivo depois do literal do teste virava o «corpo», e o guarda
+    /// passava pelo próprio texto (medido na re-revisão do lote M1, com
+    /// `mandar_pelo_server` renomeada e o `NaoSaiu` montado à mão). Aqui a
+    /// assinatura vem com a quebra de linha real na frente, que nenhum literal
+    /// deste arquivo tem, e um alvo que sumiu reprova dizendo isso.
     fn corpo_de(assinatura: &str) -> String {
-        include_str!("encontro.rs")
-            .split(assinatura)
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-            .unwrap_or_default()
+        let ancorada = format!("\n{assinatura}");
+        let fonte = include_str!("encontro.rs");
+        let Some((_, resto)) = fonte.split_once(&ancorada) else {
+            panic!(
+                "não achei «{assinatura}» no começo de uma linha deste módulo: a função mudou de \
+                 nome ou de forma, e o guarda não tem o que conferir. Mude o guarda junto com ela"
+            );
+        };
+        let Some((corpo, _)) = resto.split_once("\n}\n") else {
+            panic!("«{assinatura}» não fecha na coluna zero: o guarda não acha o fim do corpo");
+        };
+        let corpo: String = corpo
             .lines()
             .filter(|linha| !linha.trim_start().starts_with("//"))
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        assert!(
+            !corpo.trim().is_empty() && !corpo.contains("fn corpo_de("),
+            "o corpo de «{assinatura}» veio vazio, ou engoliu este módulo de testes: o guarda \
+             passaria sem conferir nada. Ele precisa não ser vazio, e parar no fim da função:\n\
+             {corpo}"
+        );
+        corpo
     }
 
     #[test]

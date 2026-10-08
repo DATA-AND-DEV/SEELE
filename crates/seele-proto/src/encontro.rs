@@ -275,8 +275,10 @@ impl std::fmt::Display for Marca {
 /// que sumiu, o exemplo de cima deixaria de compilar por outro motivo e o
 /// guarda ficaria vazio (medido no 1.97.1, com os campos públicos e um
 /// `E0599`). O gêmeo abaixo, com os mesmos imports e a mesma `Marca::nova`,
-/// **tem** de compilar, e é ele que prova que o único erro de cima é o do campo
-/// privado.
+/// **tem** de compilar: ele prova que os imports e a `Marca::nova` de cima
+/// estão certos, e só isso. Um campo renomeado ou a mais em `Marcas`, com os
+/// campos públicos, daria outro erro (`E0560`, `E0063`) que o stable também
+/// aceita, e esse caso o gêmeo não cobre.
 ///
 /// ```
 /// use seele_proto::encontro::{Marca, Marcas};
