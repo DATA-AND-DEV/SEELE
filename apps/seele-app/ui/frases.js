@@ -126,6 +126,35 @@ const MOTIVOS = {
     "ESTE SERVIDOR RODA MODS QUE ESTA VERSÃO DO APP NÃO RODA.\n" +
     "Atualize o app para entrar.",
 
+  // ---- a volta da bateria, recusada dentro do TLS ----
+  //
+  // As duas vestiam CREDENCIAL RECUSADA, e a frase mandava conferir convite e
+  // senha que não chegaram a quem atendeu: a recusa é antes do `Hello`. Do
+  // aperto de mão sai só o `ClientHello` do TLS, como na recusa pela impressão
+  // de `fraseDeErro`, e por isso nenhuma das duas diz que nada saiu.
+  //
+  // A primeira cobre duas recusas da volta: a impressão esperada que não
+  // confere (`InviteMismatch`) e quem mostrou o certificado do servidor sem
+  // provar a chave dele (`ChaveNaoProvada`). E a impressão esperada pode ter
+  // vindo do link colado ou da lista de servidores. Esta tela só recebe o
+  // `EndReason`, sem a origem, sem as impressões e sem saber qual das duas foi,
+  // então a frase diz o que vale nos quatro casos: quem atendeu não é o
+  // servidor desta sessão, o convite, a senha e o apelido não chegaram a ele,
+  // e o remédio é falar com quem hospeda por outro canal. Nada de «convite»
+  // como dono da impressão, nem de «link»: é o que `fraseDeErro` separa por
+  // `deOnde`, e aqui não dá.
+  //
+  // A segunda é o alarme de chave trocada do ADR 0003. As impressões não
+  // atravessam a ponte aqui (o motivo do fim é um nome só), e ficam no
+  // `seele.log`, na linha da volta recusada.
+  ServidorTrocouNaVolta:
+    "QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\n" +
+    "O convite, a senha e o apelido não chegaram a ele. " +
+    "Confirme com quem hospeda, por outro canal, antes de entrar de novo.",
+  ChaveMudouNaVolta:
+    "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
+    "Confirme por outro canal antes de entrar de novo.",
+
   LinkLost: "ENLACE PERDIDO",
 };
 
@@ -420,6 +449,19 @@ function fraseDeErro(erro, apelido, deOnde) {
         "exigido-por-este-servidor": "Desligue o MOD e salve antes de apagar.",
       }[motivo] ?? motivo;
     }
+    // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,
+    // como a lista assinada os escreve — nunca uma recusa genérica. Serve a
+    // `FalhaAoHospedar` e a `conferir_esta_versao`, que usam o mesmo nome.
+    if (erro.EstaVersaoRevogada) {
+      const { defeito, corrigida_em: corrigida } = erro.EstaVersaoRevogada;
+      return (
+        "ESTA VERSÃO DO SEELE FOI REVOGADA.\n" +
+        `O defeito: ${defeito}\n` +
+        (corrigida
+          ? `A ${corrigida} corrige. Atualize antes de hospedar ou de entrar.`
+          : "Atualize antes de hospedar ou de entrar.")
+      );
+    }
     if (erro.PinChanged) {
       return (
         "A CHAVE DO SERVIDOR MUDOU.\n" +
@@ -677,6 +719,16 @@ const FRASES = {
         "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
         "Confira o endereço e a porta UDP de quem hospeda. No Mac, confira também " +
         "a permissão de rede local em Ajustes.",
+    // **O impostor que repete o certificado do servidor**, e que chegava aqui
+    // como versão incompatível: a frase mandava atualizar o SEELE nas duas
+    // máquinas. O certificado é público; a chave que o assina, não, e o TLS a
+    // cobrou antes do `Hello`. Por isso a segunda linha diz o que não saiu,
+    // com o escopo «a ele» da recusa pela impressão (ver `InviteMismatch`, em
+    // `fraseDeErro`).
+    ChaveNaoProvada:
+        "QUEM ATENDEU NÃO PROVOU SER ESTE SERVIDOR.\n" +
+        "Ele mostrou o certificado do servidor sem a chave que o assina. " +
+        "O convite, a senha e o apelido não chegaram a ele.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",
@@ -746,6 +798,14 @@ const FRASES = {
     PortaOcupada:
       "A PORTA 8383 JÁ ESTÁ EM USO.\nQuase sempre é outro SEELE aberto — feche o outro e tente de novo.",
     NaoSubiu: "NÃO CONSEGUI SUBIR O SERVIDOR AQUI",
+    // ADR 0046: a lista de revogação que chegou não abriu, ou é mais velha que
+    // a guardada nesta máquina — a forma de alguém esconder uma revogação é
+    // servir uma lista antiga. O ato para em vez de seguir calado. A outra
+    // recusa, a da versão revogada, traz o defeito e o conserto e é montada em
+    // `fraseDeErro`, que é onde as recusas com campos são lidas.
+    ListaDeRevogacaoRecusada:
+      "A LISTA DE VERSÕES REVOGADAS QUE CHEGOU NÃO CONFERE.\n" +
+      "Ela não abriu, ou é mais antiga que a que esta máquina já viu. Tente de novo mais tarde.",
 
     // O catálogo de MODs — ADR 0045.
     //
@@ -903,6 +963,12 @@ const FRASES = {
       "Feche outras cópias do SEELE e tente de novo.",
     NadaEscolhido:
       "NÃO HÁ VERSÃO NOVA ESCOLHIDA PARA INSTALAR.\n" + "Procure de novo antes de instalar.",
+    // Spec 0.16, D-linha-1: esta versão foi aberta pelo launcher de outra
+    // versão do servidor, e o atualizador dela trocaria o app guardado lá. Sem
+    // «linha» na frase: o ADR 0033 tirou a palavra da tela.
+    AbertaPeloLancador:
+      "ESTA VERSÃO FOI ABERTA POR OUTRO SEELE, QUE CUIDA DELA.\n" +
+      "Quem a atualiza é ele: não há nada a fazer aqui.",
 };
 
 /**

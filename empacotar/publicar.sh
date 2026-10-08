@@ -147,10 +147,12 @@ VERSAO=""
 # não distingue «não há versão nova» de «olhei no lugar errado». Enquanto ela
 # estiver lá, publicar só na casa nova não deixa ninguém para trás.
 #
-# O guarda do `xtask` que segura o endereço antigo na lista do `tauri.conf.json`
-# **fica**: ele fala do que o app procura, não de onde este script publica, e o
-# app tem que continuar procurando nos dois enquanto houver gente chegando pela
-# ponte.
+# **Desde a 0.16 o app procura só na casa nova** (spec da 0.16, §1, «O que muda
+# no papel»). O guarda do `xtask` que segurava o endereço antigo na lista do
+# `tauri.conf.json` foi apagado por decisão, como ele mesmo pedia, e no lugar
+# dele está `o_atualizador_procura_so_na_casa_que_publica`. A ponte continua de
+# pé pelo outro lado: quem está na 0.9.x acha a 0.10.0 na casa antiga, e ela
+# carrega a lista com os dois endereços.
 REPOS="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES}"
 # E o do código, que é outro desde que ele foi fechado.
 #
@@ -172,6 +174,7 @@ SEM_BATERIA=nao
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
+LINHA_LEGADA=nao
 
 COMMIT=""
 TOCOU_WINDOWS=nao
@@ -233,6 +236,8 @@ uso() {
 "  --sem-assinatura             segue sem a chave do projeto (release que não" \
 "                               atualiza ninguém)" \
 "  --conferir                   só as conferências prévias; não compila nada" \
+"  --linha-legada               um conserto da linha do Servidor 0.15: o rascunho" \
+"                               sai sem poder virar o latest do GitHub" \
 "  --decidir <pedidos> <falhas> a regra de publicação, sozinha, sem compilar" \
 "" \
 "ambiente:" \
@@ -242,7 +247,9 @@ uso() {
 "  TAURI_SIGNING_PRIVATE_KEY             a chave do projeto (fica só aqui)" \
 "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD    a senha dela" \
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
-"  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)"
+"  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)" \
+"  SEELE_MANIFESTO_ANTERIOR              manifestos a acumular além do publicado" \
+"                                        (a 0.16.0 recebe o da 0.15.2 por aqui)"
 }
 
 # ------------------------------------------------------------- a decisão
@@ -810,6 +817,7 @@ while [ "$#" -gt 0 ]; do
         --sem-bateria) SEM_BATERIA=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
+        --linha-legada) LINHA_LEGADA=sim; shift ;;
         -h|--help|--ajuda) uso; exit 0 ;;
         -*) uso >&2; morrer "não conheço a opção «${1}»." ;;
         *)
@@ -1740,6 +1748,86 @@ sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/
     done
 }
 
+# Passa os assuntos que o `git log` já devolveu a `notas_das_mudancas`.
+#
+# Lidos antes, e não num pipe, para que o status do git possa ser testado. O
+# `$(…)` tira a quebra do fim, e o `read` da outra ponta descarta uma última
+# linha que não a tenha: por isso o `printf` com `\n`, e só quando há o que ler.
+# Uma faixa sem commits é entrada vazia, e não uma linha vazia, que contaria
+# como um assunto sem classe.
+resumir_assuntos() {
+    {
+        if [ -n "$1" ]; then
+            printf '%s\n' "$1"
+        fi
+    } | notas_das_mudancas
+}
+
+# A faixa desta versão: da tag publicada antes dela até o HEAD.
+#
+# Define `ANTERIOR` e `FAIXA`. É só `git tag` e uma comparação de versões, sem
+# rede e sem compilar, e por isso as conferências podem pedi-la — e o corpo do
+# release, no fim, a pede de novo em vez de depender de elas terem rodado.
+#
+# **Volta 1, com `ANTERIOR` e `FAIXA` vazias, quando o `git tag` falha.** A lista
+# de tags era lida numa substituição de comando e passada a `tag_anterior` por um
+# pipe: o status do git se perdia, e um git que não leu as tags era contado como
+# «não há versão anterior», que é a primeira publicação. Quem chama decide o que
+# fazer com a falha.
+faixa_da_versao() {
+    ANTERIOR=""
+    FAIXA=""
+    if ! fv_tags=$(git -C "$RAIZ" tag --list 'v*'); then
+        return 1
+    fi
+    ANTERIOR=$(printf '%s\n' "$fv_tags" | tag_anterior "$VERSAO")
+    if [ -n "$ANTERIOR" ]; then
+        FAIXA="$ANTERIOR..HEAD"
+    else
+        # A primeira publicação. Dizer isso é melhor que listar o histórico
+        # inteiro como se tudo fosse novidade desta versão.
+        FAIXA=""
+    fi
+}
+
+# Os assuntos da faixa que o resumo não sabe classificar, ditos **agora**.
+#
+# O aviso mora em `notas_das_mudancas`, e ela só era chamada ao montar o corpo
+# do release, depois da bateria, dos três builds e do «--- publicando ---»: quem
+# publica lia que um assunto não dizia pelo prefixo se muda o produto horas
+# depois de começar, e o `--conferir` saía sem nunca classificar. O conselho do
+# aviso — contar em `empacotar/notas/<versão>.md` — também não se segue depois
+# de começar sem abortar, porque `conferir_arvore` exige `empacotar/` limpo.
+#
+# Aqui a classificação roda **só pelos avisos**: a saída padrão, que é o corpo,
+# vai para o ralo, e o corpo de verdade continua montado no fim, como sempre. O
+# custo é um `git log` entre duas tags.
+#
+# **Aqui o git que falha para o script.** O `git tag` e o `git log` são lidos
+# fora de um pipe, e o status de cada um é testado: um git que não leu as tags
+# dizia «é a primeira versão publicada», e um que não leu os commits dizia
+# «classificadas», sem ter lido nenhum. Nas conferências a falha é barata de
+# dizer e cara de calar.
+conferir_notas() {
+    if ! faixa_da_versao; then
+        morrer "não consegui listar as tags do repositório (o git tag --list falhou)." \
+            "Sem elas não sei qual é a faixa de v$VERSAO, e não tenho como dizer o que o" \
+            "resumo das mudanças não classifica." \
+            "Confira o repositório:  git -C '$RAIZ' tag --list 'v*'"
+    fi
+    if [ -z "$FAIXA" ]; then
+        passo "v$VERSAO é a primeira versão publicada: não há mudanças a classificar"
+        return 0
+    fi
+    if ! cn_assuntos=$(git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA"); then
+        morrer "não consegui ler os commits de $FAIXA (o git log falhou)." \
+            "Sem eles não sei se algum assunto escapa da classificação do resumo." \
+            "Confira o repositório:  git -C '$RAIZ' log $FAIXA"
+    fi
+    resumir_assuntos "$cn_assuntos" >/dev/null
+    passo "mudanças desde $ANTERIOR classificadas (o que o resumo não classifica está dito acima, se houve)"
+}
+
 # =========================================================================
 
 printf -- '--- conferindo antes de compilar ---\n'
@@ -1752,6 +1840,9 @@ conferir_chave
 conferir_docker
 conferir_windows
 conferir_github
+# Por último, para que o aviso seja a última coisa que quem publica lê antes do
+# veredito, e não uma linha perdida entre as perguntas ao Docker e ao Windows.
+conferir_notas
 # Depois das conferências e **antes** de empacotar: descobrir que a bateria
 # reprovou vale minutos aqui e uma hora e meia depois do Linux.
 printf -- '--- tudo conferido ---\n'
@@ -1884,7 +1975,17 @@ open(sys.argv[2], "wb").write(base64.b64decode(open(sys.argv[1], encoding="ascii
         aviso "veio arquivo do Windows, mas nenhum instalador de $VERSAO."
         return 1
     fi
-    passo "Windows: instalador em entrega/"
+    # **E o portátil, que é o que o launcher guarda ao lado de outra versão**
+    # (spec 0.16, §1). Sem ele a versão sai sem linha no launcher do Windows,
+    # e ninguém saberia: o instalador chega, a página sai inteira, e o defeito
+    # só aparece no dia em que alguém tenta abrir esta linha por outra.
+    if [ -z "$(find "$RAIZ/entrega" -type f -name "*_${VERSAO}_*-portatil.tar.gz" 2>/dev/null)" ]; then
+        aviso "veio o instalador do Windows, mas nenhum pacote portátil de $VERSAO." \
+            "O windows.ps1 de lá é de antes do portátil? O launcher precisa dele para" \
+            "guardar esta versão ao lado de outra."
+        return 1
+    fi
+    passo "Windows: instalador e portátil em entrega/"
 }
 
 for sistema in $SISTEMAS; do
@@ -1976,13 +2077,15 @@ NOTAS="$TEMPORARIO/corpo.md"
 # não achava em lugar nenhum, e o histórico do repositório, que é onde a
 # resposta sempre esteve, não é o lugar onde alguém procura depois de clicar num
 # link de download.
-ANTERIOR=$(git -C "$RAIZ" tag --list 'v*' | tag_anterior "$VERSAO")
-if [ -n "$ANTERIOR" ]; then
-    FAIXA="$ANTERIOR..HEAD"
-else
-    # A primeira publicação. Dizer isso é melhor que listar o histórico inteiro
-    # como se tudo fosse novidade desta versão.
-    FAIXA=""
+#
+# **Aqui a falha do git só é dita, e a publicação segue.** As conferências já
+# leram as tags e os commits uma vez; um segundo erro do git no mesmo script é
+# raro demais para abortar o que horas de build acabaram de montar. O que não
+# pode é o corpo afirmar o que o script não leu sem que quem publica saiba.
+if ! faixa_da_versao; then
+    aviso "não consegui listar as tags de novo ao montar o corpo do release (o git tag --list falhou)." \
+        "O corpo vai dizer que esta é a primeira versão publicada, e pode não ser." \
+        "Confira o rascunho antes de publicar."
 fi
 
 {
@@ -2009,7 +2112,15 @@ fi
         # e quem pulou uma versão fica sem saber se o que está lendo cobre a
         # distância que ele andou.
         printf '%s\n\n' "_As mudanças de \`$ANTERIOR\` até \`v$VERSAO\`._"
-        git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas
+        if assuntos=$(git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA"); then
+            resumir_assuntos "$assuntos"
+        else
+            # Sem o resumo, e sem a frase «nenhuma mudança de produto» que o
+            # `notas_das_mudancas` diria a uma entrada vazia.
+            aviso "não consegui ler os commits de $FAIXA ao montar o corpo do release (o git log falhou)." \
+                "A seção de mudanças do corpo sai sem o resumo." \
+                "Confira o rascunho antes de publicar."
+        fi
         printf '\n'
         changelog_dos_commits "$FAIXA"
     else
@@ -2080,8 +2191,12 @@ PEDIDO="$TEMPORARIO/pedido.json"
 # Aqui e não no `windows.ps1` porque a chave do projeto mora **nesta** máquina,
 # e mandá-la para a máquina do Windows por SSH seria pôr a chave onde ela não
 # precisa estar.
+#
+# **O portátil passa pelo mesmo laço, e pelo mesmo motivo** (spec 0.16, §1): o
+# `manifesto.py` só o põe no `versions[]` com o `.sig` ao lado, e sem ele a
+# linha não existe no launcher do Windows.
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-    for ai_um in "$RAIZ"/entrega/*-instalador.exe; do
+    for ai_um in "$RAIZ"/entrega/*-instalador.exe "$RAIZ"/entrega/*-portatil.tar.gz; do
         [ -f "$ai_um" ] || continue
         if [ -f "$ai_um.sig" ]; then
             continue
@@ -2116,7 +2231,35 @@ for pub_repo in $REPOS; do
     printf '\n'
     passo "publicando em $pub_repo"
 
-    if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$pub_repo"; then
+    # **Acumulado** (spec 0.16, §1): o manifesto novo começa do que está
+    # publicado, e não do zero. Sem isso, cada release apagaria a lista das
+    # anteriores, e o launcher esqueceria o que existe.
+    #
+    # `SEELE_MANIFESTO_ANTERIOR` acrescenta outros, separados por espaço. É por
+    # onde a 0.16.0 recebe o da 0.15.2, que nunca foi `latest` e por isso não
+    # está no endereço de cima. Ver `docs/versoes-lado-a-lado.md`, §3.
+    ma_anteriores=""
+    ma_baixado="$TEMPORARIO/anterior-$pub_repo-latest.json"
+    mkdir -p "$(dirname "$ma_baixado")"
+    rm -f "$ma_baixado"
+    curl -fsSL "https://github.com/$pub_repo/releases/latest/download/latest.json" \
+        -o "$ma_baixado" > /dev/null 2>&1 || true
+    if [ -s "$ma_baixado" ]; then
+        ma_anteriores="--anterior $ma_baixado"
+    else
+        aviso "não baixei o latest.json publicado em $pub_repo." \
+            "O manifesto sai só com esta versão e o que SEELE_MANIFESTO_ANTERIOR trouxer," \
+            "e o launcher de quem atualizar esquece as outras."
+    fi
+    for ma_extra in ${SEELE_MANIFESTO_ANTERIOR:-}; do
+        if [ ! -s "$ma_extra" ]; then
+            morrer "SEELE_MANIFESTO_ANTERIOR aponta para «$ma_extra», que não existe ou está vazio."
+        fi
+        ma_anteriores="$ma_anteriores --anterior $ma_extra"
+    done
+
+    # shellcheck disable=SC2086 # as opções do anterior são palavras separadas de propósito
+    if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$pub_repo" $ma_anteriores; then
         morrer "o manifesto de $pub_repo não saiu." \
             "Sem ele o botão de atualizar do app não acha este release."
     fi
@@ -2153,8 +2296,12 @@ for pub_repo in $REPOS; do
     else
         pub_alvo=""
     fi
+    # **A linha legada nunca vira o `latest`** (spec 0.16, D-linha-1). Como
+    # `latest`, quem está na 0.15.1 receberia a 0.15.2 pelo atualizador, e o
+    # launcher leria o manifesto do release errado. `make_latest` vai como
+    # texto porque é assim que a API do GitHub o define.
     if ! python3 -c 'import json, sys
-tag, commit, notas, destino = sys.argv[1:5]
+tag, commit, notas, destino, legada = sys.argv[1:6]
 corpo = {
     "tag_name": tag,
     "name": "SEELE " + tag,
@@ -2164,8 +2311,10 @@ corpo = {
 }
 if commit:
     corpo["target_commitish"] = commit
+if legada == "sim":
+    corpo["make_latest"] = "false"
 with open(destino, "w", encoding="utf-8") as saida:
-    json.dump(corpo, saida)' "v$VERSAO" "$pub_alvo" "$NOTAS" "$PEDIDO"; then
+    json.dump(corpo, saida)' "v$VERSAO" "$pub_alvo" "$NOTAS" "$PEDIDO" "$LINHA_LEGADA"; then
         morrer "não consegui montar o pedido de criação do release."
     fi
 
@@ -2294,6 +2443,19 @@ if [ "$(printf '%s' "$RASCUNHOS" | grep -c .)" -gt 1 ]; then
 "olha primeiro para o novo. Publicar só um deixa metade das pessoas numa versão" \
 "que ninguém mais toca — e um atualizador que não acha nada não sabe dizer se" \
 "não há versão nova ou se ele olhou no lugar errado." \
+""
+fi
+if [ "$LINHA_LEGADA" = sim ]; then
+    printf '%s\n' \
+"**Este é um conserto da linha do Servidor 0.15, e ele não pode virar o latest.**" \
+"Ao publicar o rascunho, DESMARQUE «Set as the latest release». O pedido já foi" \
+"com make_latest=false, mas a tela do GitHub pode marcar a caixa de novo. Como" \
+"latest, quem está na 0.15.1 receberia esta versão pelo atualizador, e o" \
+"launcher leria o manifesto do release errado." \
+"" \
+"Depois de publicar a 0.16, um conserto da linha legada só chega ao launcher se" \
+"o latest.json do release latest for refeito com ele: docs/versoes-lado-a-lado.md," \
+"seção 3." \
 ""
 fi
 printf '%s\n' \

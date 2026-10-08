@@ -915,13 +915,45 @@ function fraseDaPreferencia(linha) {
  */
 function fraseDaMidia(midias) {
   if (!midias) return "";
+  const partes = partesDaMidia(midias);
+  if (partes.length === 0) return "mídia: nenhuma em uso agora";
+  return `mídia: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
+}
+
+/** As situações que têm alguém, em palavra: «1 carregando», «2 prontas». */
+function partesDaMidia(midias) {
   const partes = [];
   if (midias.carregando) partes.push(`${midias.carregando} carregando`);
   if (midias.pronta) partes.push(emQuantidade(midias.pronta, "pronta", "prontas"));
   if (midias.recusada) partes.push(emQuantidade(midias.recusada, "recusada", "recusadas"));
-  if (partes.length === 0) return "mídia: nenhuma em uso agora";
-  const porque = midias.motivos.length ? ` — ${midias.motivos.join("; ")}` : "";
-  return `mídia: ${partes.join(" · ")}${porque}`;
+  return partes;
+}
+
+/** Os motivos das recusas, depois de um travessão, ou nada. */
+function porqueDaMidia(midias) {
+  return midias.motivos.length ? ` — ${midias.motivos.join("; ")}` : "";
+}
+
+/**
+ * A mídia da região e das páginas de cada MOD, uma frase por MOD.
+ *
+ * O bloco que a aba ganhou com a pendência 49, item 5: os onze lugares contam
+ * a mídia de quem pinta cada um, e a faixa e as superfícies de um MOD não são
+ * lugar nenhum deles. A soma é `midiasDaRegiaoEDasPaginas`, em `base.js`.
+ *
+ * **A mídia de um cartão aparece aqui e em «O cartão de cada pessoa».** Os
+ * cartões que um MOD dá à lista moram na região dele: são duas vistas da mesma
+ * mídia, e não duas mídias.
+ */
+function frasesDaMidiaDosMods() {
+  const porMod = midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods);
+  if (porMod.size === 0) return ["nenhum MOD tem região nem página de pé agora"];
+  return [...porMod].map(([id, midias]) => {
+    const partes = partesDaMidia(midias);
+    return partes.length === 0
+      ? `a região e as páginas de ${id}: nenhuma mídia montada`
+      : `a região e as páginas de ${id}: ${partes.join(" · ")}${porqueDaMidia(midias)}`;
+  });
 }
 
 /**
@@ -1008,11 +1040,38 @@ function linhaDeQuemPinta(linha) {
   return item;
 }
 
-/** Desenha «quem pinta cada lugar»: os onze, sempre. */
+/**
+ * Desenha «quem pinta cada lugar»: os onze, sempre — e, logo abaixo, a mídia
+ * da região e das páginas de cada MOD.
+ */
 function desenharQuemPinta() {
   const lista = $("lista-quem-pinta");
   if (!lista) return;
   repovoar(lista, quemPintaCadaPonto().map(linhaDeQuemPinta));
+  desenharAMidiaDosMods(lista);
+}
+
+/**
+ * O bloco «a região e as páginas de cada MOD», numa lista irmã da dos onze.
+ *
+ * **Irmã, e não mais uma linha dela.** A lista dos lugares é a lista inteira
+ * deles — «os onze, sempre» —, e um MOD não é um lugar. Criada aqui na
+ * primeira vez e reaproveitada depois, com as classes que a aba já usa: nem o
+ * `index.html` nem a folha mudam por ela.
+ */
+function desenharAMidiaDosMods(lista) {
+  let bloco = lista.nextElementSibling;
+  if (bloco?.dataset.midiaDosMods !== "sim") {
+    bloco = elemento("ul", "server-dispositivos");
+    bloco.dataset.midiaDosMods = "sim";
+    lista.after(bloco);
+  }
+  const item = elemento("li", "server-dispositivo mods-linha-gestao");
+  const texto = elemento("div", "mods-linha-texto");
+  texto.append(elemento("span", "mods-id", "A região e as páginas de cada MOD"));
+  for (const frase of frasesDaMidiaDosMods()) texto.append(elemento("span", "mods-versao", frase));
+  item.append(texto);
+  repovoar(bloco, [item]);
 }
 
 /** A aba está na frente? Só então vale redesenhar a cada mudança. */

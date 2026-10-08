@@ -21,6 +21,11 @@ seele-server = { path = "../../crates/seele-server" }
 # junto de nenhuma versão do produto. A peça que decide entre a 0.10.5 e a
 # 0.11.0 não pode ser parte de uma delas.
 seele-lancador = { path = "../../crates/seele-lancador" }
+# O esquema dos bancos da 0.15, lido **só para leitura** na primeira abertura
+# da 0.16, antes de copiá-los para a linha legada (`versoes::esquema_do_banco`).
+# Não pelo `seele-server`: o caminho dele abre o banco migrando. A mesma versão
+# e a mesma feature do `seele-server`, para não acrescentar crate ao grafo.
+rusqlite = { version = "0.40.1", features = ["bundled"] }
 # Abrir o pacote de uma versão baixada do catálogo — ADR 0046. As mesmas duas
 # que o `seele-instalador` usa, e pelo mesmo motivo: é o formato que o
 # atualizador já publica.
@@ -108,6 +113,17 @@ tauri = { version = "2", features = ["test"] }
 # O registro de servidores escreve em disco, e o teste dele precisa de uma pasta
 # de configuração que não seja a de quem está rodando o teste.
 tempfile = "3.27.0"
+# A soma que o `manifesto.py` escreve por pacote, conferida em
+# `tests/manifesto_hibrido.rs`. A mesma versão do `seele-lancador`: não
+# acrescenta crate ao grafo.
+sha2 = "0.11.0"
+# A chave de teste e o assinador do launcher, para `versoes.rs` provar com uma
+# lista assinada de verdade que a revogação chega ao ato. Ver a feature
+# `fixtures` no `Cargo.toml` do `seele-lancador`.
+seele-lancador = { path = "../../crates/seele-lancador", features = ["fixtures"] }
+# A lista de revogação de teste viaja em base64, como no manifesto. A mesma
+# versão do `seele-lancador`: não acrescenta crate ao grafo.
+base64 = "0.22"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -25,7 +25,9 @@
 
 # E os arquivos cujos **bytes** são o contrato saem do conversor por inteiro:
 # `-text` é «não normalize na entrada nem converta na saída». A regra de cima
-# já bastaria hoje; esta sobrevive a alguém afrouxá-la.
+# bastaria para os vetores que só chegam pelo checkout; para um arquivo escrito
+# numa máquina Windows e conferido pelo hash da cópia de trabalho (`api/*.json`,
+# abaixo), não basta. Nos dois casos, esta sobrevive a alguém afrouxá-la.
 
 # Os vetores cruzados: catálogo e revogações de verdade, assinados de verdade
 # pelo indexador, conferidos por este build.

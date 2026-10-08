@@ -204,6 +204,10 @@ async function conectar(alvo, apelido, token) {
   mostrarEtapa(null);
 
   try {
+    // ADR 0046: entrar é um ato, e a lista de revogação vale para esta versão
+    // também. À parte porque o erro do `connect` é o da FFI; a recusa cai no
+    // mesmo `catch` de baixo, com a frase dela.
+    await invoke("conferir_esta_versao");
     // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
@@ -836,13 +840,16 @@ let servidorEscolhido = null;
 /** A imagem escolhida, já encolhida pelo Rust, esperando um servidor. */
 let iconePreparado = null;
 
-/** A versão escolhida, ou `null` para «esta mesma». */
-let versaoEscolhida = null;
+/**
+ * A linha de servidor escolhida, como `linhas_para_hospedar` a devolve, ou
+ * `null` para «a desta janela».
+ */
+let linhaEscolhida = null;
 
 /** Mostra a tela de preparar, com as versões e a regra da imagem. */
 async function abrirPreparar() {
   iconePreparado = null;
-  versaoEscolhida = null;
+  linhaEscolhida = null;
   $("preparar-erro").hidden = true;
   $("preparar-etapa").hidden = true;
   $("preparar-versao-aviso").hidden = true;
@@ -904,56 +911,79 @@ function pintarIconePreparado() {
 }
 
 /**
- * Lista as versões instaladas, quando há mais de uma.
+ * Lista as versões do servidor em que se pode hospedar — ADR 0046, com a
+ * emenda de 08/10/2026.
  *
- * Com uma só, o bloco inteiro fica escondido: uma escolha sem alternativa é
- * ruído na tela de quem só quer hospedar.
+ * A desta janela primeiro, e é a padrão. As outras vêm do catálogo guardado,
+ * com as APIs de MOD que cada uma roda (a 0.15 roda 3, 4 e 5), e as que não
+ * estão nesta máquina dizem que serão baixadas. **Sempre visível, mesmo com uma
+ * só**: um bloco que some e uma coisa que não existe são indistinguíveis para
+ * quem olha, e a pergunta que chegou foi «não mostra as versões disponíveis».
+ *
+ * Sem «linha» no texto da tela: o ADR 0033 tirou a palavra da interface.
  */
 async function desenharVersoesParaHospedar() {
-  let versoes = [];
+  let linhas = [];
   try {
-    versoes = await invoke("versoes_instaladas");
+    linhas = await invoke("linhas_para_hospedar");
   } catch (falha) {
-    console.warn("versoes:", falha);
+    console.warn("linhas para hospedar:", falha);
   }
-  const abriveis = versoes.filter((v) => v.abrivel || v.em_uso);
-  // **Sempre visível, mesmo com uma só.** Escondê-lo era o que fazia a pergunta
-  // «não mostra as versões disponíveis» ter razão: para quem olha, um bloco que
-  // some e uma coisa que não existe são indistinguíveis. Com uma versão só, o
-  // bloco diz que é uma só e onde arrumar outra.
-  $("preparar-versoes").hidden = abriveis.length === 0;
-  $("preparar-versao-unica").hidden = abriveis.length !== 1;
-  if (abriveis.length === 0) return;
+  $("preparar-versoes").hidden = linhas.length === 0;
+  $("preparar-versao-unica").hidden = linhas.length !== 1;
+  if (linhas.length === 0) return;
 
   repovoar(
     $("preparar-lista-versoes"),
-    abriveis.map((v) => {
-      const linha = elemento("li");
+    linhas.map((l) => {
+      const item = elemento("li");
       const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
       const texto = elemento("span", "server-dispositivo-nome");
-      texto.append(elemento("span", "mods-id", v.versao));
-      if (v.em_uso) texto.append(elemento("span", "mods-versao", "esta janela"));
+      texto.append(elemento("span", "mods-id", `SERVIDOR ${l.servidor}`));
+      const apis = l.apis.length > 0 ? `MODs da API ${l.apis.join(", ")}` : "sem MODs";
+      texto.append(elemento("span", "mods-versao", apis));
+      if (l.esta) {
+        texto.append(elemento("span", "mods-versao", "esta janela"));
+      } else if (!l.instalada) {
+        texto.append(
+          elemento(
+            "span",
+            "mods-versao",
+            l.tem_pacote ? "será baixada" : "sem pacote para este sistema",
+          ),
+        );
+      }
       caixa.append(texto);
 
       const botao = elemento("button", "botao-fantasma");
       botao.type = "button";
-      const escolhida = v.em_uso ? versaoEscolhida === null : versaoEscolhida === v.versao;
+      const escolhida = l.esta ? linhaEscolhida === null : linhaEscolhida?.linha === l.linha;
       botao.textContent = escolhida ? "ESCOLHIDA" : "USAR ESTA";
-      botao.disabled = escolhida;
+      botao.disabled = escolhida || (!l.esta && !l.instalada && !l.tem_pacote);
       botao.addEventListener("click", () => {
-        versaoEscolhida = v.em_uso ? null : v.versao;
-        // **A frase existe porque o nome e a imagem não atravessam.** Quem
-        // hospeda passa a ser a outra janela, e o protocolo só aceita
-        // `rename_server` de dentro dela — perder as escolhas em silêncio seria
-        // o «o produto sabe e não conta» de novo.
-        $("preparar-versao-aviso").hidden = versaoEscolhida === null;
+        linhaEscolhida = l.esta ? null : l;
+        // **A frase existe porque o nome, a imagem e as conversas não
+        // atravessam.** Quem hospeda passa a ser a outra janela, com as
+        // conversas daquela versão do servidor, e o protocolo só aceita
+        // `rename_server` de dentro dela.
+        const aviso = $("preparar-versao-aviso");
+        aviso.hidden = linhaEscolhida === null;
+        if (linhaEscolhida !== null) {
+          aviso.textContent =
+            `Quem hospeda é outra janela do SEELE, com as conversas do Servidor ` +
+            `${l.servidor}: o que você escreveu aqui não aparece lá. O nome e a ` +
+            "imagem você define lá." +
+            (l.perde_conversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
+        }
         $("preparar-confirmar").textContent =
-          versaoEscolhida === null ? "HOSPEDAR" : `ABRIR A ${versaoEscolhida} PARA HOSPEDAR`;
+          linhaEscolhida === null
+            ? "HOSPEDAR"
+            : `${l.instalada ? "ABRIR" : "BAIXAR E ABRIR"} O SERVIDOR ${l.servidor} PARA HOSPEDAR`;
         desenharVersoesParaHospedar().catch((f) => console.warn("versoes:", f));
       });
       caixa.append(botao);
-      linha.append(caixa);
-      return linha;
+      item.append(caixa);
+      return item;
     }),
   );
 }
@@ -1001,15 +1031,27 @@ async function confirmarPreparar() {
   const nomePublico = $("campo-nome-publico").value.trim() || null;
 
   try {
-    if (versaoEscolhida !== null) {
+    if (linhaEscolhida !== null) {
+      const etapa = $("preparar-etapa");
+      etapa.hidden = false;
+      if (!linhaEscolhida.instalada) {
+        etapa.textContent = `baixando o SEELE do Servidor ${linhaEscolhida.servidor}…`;
+        try {
+          await invoke("baixar_versao", { linha: linhaEscolhida.linha });
+        } catch (falha) {
+          // Já estar guardada não é falha: o que se quer depois é abrir.
+          if (!(falha && typeof falha === "object" && "JaInstalada" in falha)) throw falha;
+        }
+      }
       await invoke("abrir_versao", {
-        versao: versaoEscolhida,
+        versao: null,
+        linha: linhaEscolhida.linha,
         hospedar: true,
         nomePublico,
         link: null,
       });
-      $("preparar-etapa").hidden = false;
-      $("preparar-etapa").textContent = `abrindo a versão ${versaoEscolhida} para hospedar`;
+      etapa.textContent =
+        `o SEELE do Servidor ${linhaEscolhida.servidor} abriu noutra janela para hospedar`;
       return;
     }
 
@@ -1034,7 +1076,9 @@ async function confirmarPreparar() {
     // sem isto falhariam sem dizer nada.
     if (!$("tela-preparar").hidden) {
       erro.hidden = false;
-      erro.textContent = fraseDeErro(falha);
+      // As recusas do launcher têm frases próprias em `camada-versoes.js`; o
+      // resto cai na `fraseDeErro` de sempre, que é para onde ela devolve.
+      erro.textContent = fraseDaVersao(falha);
     }
   } finally {
     confirmar.disabled = false;

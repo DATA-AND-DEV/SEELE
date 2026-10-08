@@ -49,9 +49,9 @@ const escolhidoDe = { captura: null, saida: null };
 /**
  * Id do aparelho para o nome dele, de cada lado.
  *
- * Existe para a linha `PADRÃO DA MÁQUINA` poder dizer no que ela deu. Ver
- * [`marcarUmaLista`]: a lista é construída num lugar, que tem os nomes, e
- * marcada noutro, que só tem o id do que abriu.
+ * Existe para a linha `PADRÃO DA MÁQUINA` poder dizer no que ela deu, quando o
+ * padrão é a escolha. Ver [`marcarUmaLista`]: a lista é construída num lugar,
+ * que tem os nomes, e marcada noutro, que só tem o id do que abriu.
  */
 const nomeDe = { captura: new Map(), saida: new Map() };
 
@@ -301,12 +301,32 @@ function marcarUmaLista(chave, lista, aberto) {
     // teria renomeado o aparelho em vez da linha.
     if (id !== null) continue;
     const nome = botao.querySelector(".server-dispositivo-nome");
-    const resolvido = aberto === null ? null : nomeDe[chave].get(aberto);
-    if (nome) {
-      nome.textContent = resolvido
-        ? `PADRÃO DA MÁQUINA · ${resolvido}`
-        : "PADRÃO DA MÁQUINA";
+    if (!nome) continue;
+
+    // **O que a linha diz depende de o padrão ser a escolha.**
+    //
+    // O aparelho aberto só é o «no que o padrão deu» quando ninguém escolheu
+    // outro: com o monitor 27QHD240 escolhido à mão e os alto-falantes do
+    // MacBook como padrão do macOS, a linha dizia `PADRÃO DA MÁQUINA · 27QHD240`
+    // e, logo abaixo, os alto-falantes saíam marcados `PADRÃO` — a tela chamava
+    // de padrão da máquina o aparelho que a pessoa mesma escolheu, e o padrão
+    // de verdade aparecia como se fosse outra coisa (pendência 54).
+    //
+    // Com um aparelho escolhido, a linha diz o padrão **do sistema**, a linha de
+    // `dataset.padrao === "sim"`: é o que a pessoa teria se a escolhesse de
+    // volta. Sem nenhuma linha marcada, a máquina não disse qual é o padrão, e
+    // a linha fica sem nome em vez de inventar um.
+    let resolvido = null;
+    if (escolhidoDe[chave] !== null) {
+      resolvido = lista.querySelector(
+        '.server-dispositivo[data-padrao="sim"] .server-dispositivo-nome',
+      )?.textContent;
+    } else if (aberto !== null) {
+      resolvido = nomeDe[chave].get(aberto);
     }
+    nome.textContent = resolvido
+      ? `PADRÃO DA MÁQUINA · ${resolvido}`
+      : "PADRÃO DA MÁQUINA";
   }
 }
 
@@ -1348,6 +1368,19 @@ async function contarAAtualizacaoQueNaoPegou() {
 contarAAtualizacaoQueNaoPegou().catch((falha) =>
   console.warn("a atualização anterior:", falha),
 );
+
+// **Aberta pelo launcher de outra linha, esta janela não se atualiza** (spec
+// 0.16, D-linha-1). O atualizador trocaria o app guardado no depósito do
+// launcher por outra linha. O comando recusa de qualquer jeito; a seção some
+// para não oferecer um botão que só sabe recusar.
+invoke("abertura")
+  .then((aberta) => {
+    if (!aberta?.pelo_lancador) return;
+    const secao = $("secao-atualizacao");
+    const item = secao?.closest("li");
+    if (item) item.hidden = true;
+  })
+  .catch((falha) => console.warn("abertura:", falha));
 
 /** Pergunta se há versão nova. Não baixa nada. */
 async function procurarAtualizacao() {

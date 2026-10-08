@@ -246,18 +246,77 @@ impl std::fmt::Display for Marca {
 /// conta própria, os dois divergiram: o anfitrião registrava a escuta como
 /// `anfitriao`, o cliente perguntava pela impressão digital, e a resposta
 /// nunca veio (análise de 22/09/2026, §2.1).
+///
+/// # Por que os campos são privados
+///
+/// Com os campos públicos, quem estivesse fora deste módulo montava
+/// `Marcas { escuta: aviso.clone(), … }` sem passar por [`Marcas::do_servidor`],
+/// e a escuta com a marca do aviso é exatamente o eco que vira furo contra si
+/// mesmo. O único jeito de ter `Marcas` é [`Marcas::do_servidor`], e o que se
+/// lê delas sai por [`Marcas::aviso`], [`Marcas::escuta`] e
+/// [`Marcas::servidor`].
+///
+/// O exemplo abaixo é o guarda disto: ele **não pode compilar**, e o teste de
+/// documentação reprova no dia em que um campo voltar a ser público.
+///
+/// ```compile_fail,E0451
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let _eco = Marcas {
+///     aviso: aviso.clone(),
+///     escuta: aviso.clone(),
+///     servidor: aviso,
+/// };
+/// ```
+///
+/// **O código de erro (`E0451`) só é conferido no nightly.** No stable, um
+/// `compile_fail` passa com qualquer erro: com um nome trocado ou um import
+/// que sumiu, o exemplo de cima deixaria de compilar por outro motivo e o
+/// guarda ficaria vazio (medido no 1.97.1, com os campos públicos e um
+/// `E0599`). O gêmeo abaixo, com os mesmos imports e a mesma `Marca::nova`,
+/// **tem** de compilar: ele prova que os imports e a `Marca::nova` de cima
+/// estão certos, e só isso. Um campo renomeado ou a mais em `Marcas`, com os
+/// campos públicos, daria outro erro (`E0560`, `E0063`) que o stable também
+/// aceita, e esse caso o gêmeo não cobre.
+///
+/// ```
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let marcas = Marcas::do_servidor(
+///     "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9",
+/// )
+/// .expect("uma impressão digital dá marcas");
+/// assert_eq!(marcas.aviso(), &aviso);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marcas {
-    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
-    /// furar.
-    pub aviso: Marca,
-    /// Sob a qual a escuta de avisos se registra no quarto.
-    pub escuta: Marca,
-    /// Sob a qual o socket do servidor se registra no quarto.
-    pub servidor: Marca,
+    aviso: Marca,
+    escuta: Marca,
+    servidor: Marca,
 }
 
 impl Marcas {
+    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
+    /// furar.
+    #[must_use]
+    pub fn aviso(&self) -> &Marca {
+        &self.aviso
+    }
+
+    /// Sob a qual a escuta de avisos se registra no quarto.
+    #[must_use]
+    pub fn escuta(&self) -> &Marca {
+        &self.escuta
+    }
+
+    /// Sob a qual o socket do servidor se registra no quarto.
+    #[must_use]
+    pub fn servidor(&self) -> &Marca {
+        &self.servidor
+    }
+
     /// As marcas de um servidor guardado, tiradas da impressão digital.
     ///
     /// Partem dos dezesseis primeiros caracteres, que o `seele://` carrega em
@@ -269,9 +328,16 @@ impl Marcas {
     /// `QUEM <fp16>s`, e trocar qualquer um dos dois o deixaria falando sozinho.
     ///
     /// Devolve `None` para um texto que não forma marca: curto demais, ou com
-    /// algo que não é letra nem número.
+    /// algo que não é letra nem número **em qualquer posição**, e não só nos
+    /// dezesseis primeiros.
     #[must_use]
     pub fn do_servidor(impressao_digital: &str) -> Option<Self> {
+        if !impressao_digital
+            .chars()
+            .all(|caractere| caractere.is_ascii_alphanumeric())
+        {
+            return None;
+        }
         let prefixo = impressao_digital.get(..16)?;
         Some(Self {
             aviso: Marca::nova(prefixo)?,
@@ -839,17 +905,17 @@ mod testes {
         let marcas =
             Marcas::do_servidor(IMPRESSAO).expect("uma impressão digital sempre dá marcas");
         assert_eq!(
-            marcas.aviso.texto(),
+            marcas.aviso().texto(),
             "3cbcfb0212da738f",
             "a marca do aviso mudou: todo cliente 0.15.0 passa a bater com uma marca que o anfitrião ignora"
         );
         assert_eq!(
-            marcas.servidor.texto(),
+            marcas.servidor().texto(),
             "3cbcfb0212da738fs",
             "a marca do servidor mudou: todo cliente 0.15.0 pergunta por uma marca que ninguém registra"
         );
         assert_eq!(
-            marcas.escuta.texto(),
+            marcas.escuta().texto(),
             "3cbcfb0212da738fe",
             "a marca da escuta mudou: quem procura o anfitrião pergunta por uma marca que a escuta não registra"
         );
@@ -868,18 +934,21 @@ mod testes {
             let marcas =
                 Marcas::do_servidor(impressao).expect("uma impressão digital sempre dá marcas");
             assert_ne!(
-                marcas.escuta, marcas.aviso,
-                "a escuta se registra com a marca do aviso: o AQUI que responde ao próprio MORO \
-                 passa no filtro e vira um furo contra si mesmo"
+                marcas.escuta(),
+                marcas.aviso(),
+                "com a impressão {impressao}, a escuta se registra com a marca do aviso: o AQUI \
+                 que responde ao próprio MORO passa no filtro e vira um furo contra si mesmo"
             );
             assert_ne!(
-                marcas.servidor, marcas.aviso,
-                "o servidor se registra com a marca do aviso"
+                marcas.servidor(),
+                marcas.aviso(),
+                "com a impressão {impressao}, o servidor se registra com a marca do aviso"
             );
             assert_ne!(
-                marcas.servidor, marcas.escuta,
-                "servidor e escuta com a mesma marca: o quarto guarda um endereço por marca, e um \
-                 apaga o outro"
+                marcas.servidor(),
+                marcas.escuta(),
+                "com a impressão {impressao}, servidor e escuta têm a mesma marca: o quarto guarda \
+                 um endereço por marca, e um apaga o outro"
             );
         }
     }
@@ -900,6 +969,15 @@ mod testes {
             Marcas::do_servidor("3cbcfb02 2da738f89c156de86eb280a"),
             None,
             "um espaço virou marca: a marca é o único campo que volta na resposta do ponto"
+        );
+        // O T1a da pendência 51, item 17: o texto inteiro, e não só os 16
+        // primeiros. O doc promete `None` para «algo que não é letra nem
+        // número», e o que vinha depois do 16º caractere não era olhado.
+        assert_eq!(
+            Marcas::do_servidor("0123456789abcdef!!!"),
+            None,
+            "um texto com algo que não é letra nem número depois do 16º caractere deu marcas: \
+             o doc de `do_servidor` promete recusá-lo, e uma impressão torta passa por boa"
         );
     }
 }

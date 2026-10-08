@@ -1,16 +1,57 @@
 //! Medida descartável: um quinn::Endpoint, dois ALPNs (seele/1 e h3), certificado
 //! escolhido por ALPN no ClientHello, e o wtransport adotando a conexão h3.
+//!
+//! Desde 08/10, preparado para a medição 3 do ADR 0057 (o iPhone):
+//! - **uma chave só** assina o longo e o curto, como o `seeled` faria;
+//! - o endpoint A2 serve um curto de **chave própria**, como controle: se o
+//!   iPhone recusar o A e aceitar o A2, a culpa é da chave repetida;
+//! - o endpoint MUDO lê e joga fora (um servidor travado, um firewall que
+//!   descarta), e a porta FECHADA não tem ninguém: os dois «fora do ar» que a
+//!   página compara com a recusa;
+//! - cada conexão sai no stderr como uma linha JSON, com a hora em que abriu, a
+//!   hora em que fechou e o motivo. É assim que se vê o ocioso de 20 s.
+//!
+//! Uso: `alpn-demux [--lan] [--porta-base N]`. Sem `--lan`, escuta em
+//! 127.0.0.1 em portas livres. Com `--lan`, escuta em 0.0.0.0, para o iPhone.
 
 use std::any::Any;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
+use rcgen::PublicKeyData;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use rustls::server::{ClientHello, ResolvesServerCert};
 use rustls::sign::CertifiedKey;
 use sha2::{Digest, Sha256};
+
+static INICIO: OnceLock<Instant> = OnceLock::new();
+
+fn agora_ms() -> u128 {
+    INICIO.get_or_init(Instant::now).elapsed().as_millis()
+}
+
+/// Texto para dentro de uma string JSON.
+fn j(texto: &str) -> String {
+    let mut s = String::with_capacity(texto.len() + 2);
+    s.push('"');
+    for c in texto.chars() {
+        match c {
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            c if (c as u32) < 0x20 => s.push_str(&format!("\\u{:04x}", c as u32)),
+            c => s.push(c),
+        }
+    }
+    s.push('"');
+    s
+}
+
+/// Uma linha de registro: `{"t_ms": …, <campos>}` no stderr.
+fn registro(campos: &str) {
+    eprintln!("{{\"t_ms\":{},{campos}}}", agora_ms());
+}
 
 #[derive(Debug)]
 struct PorAlpn {
@@ -37,8 +78,9 @@ fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-fn certificado(curto: bool) -> Result<(CertificateDer<'static>, PrivateKeyDer<'static>)> {
-    let chave = rcgen::KeyPair::generate()?;
+/// O longo, como o `seeled` o gera (`tls.rs:38-47`): a validade padrão do
+/// `rcgen`, de 1975 a 4096. O curto, com no máximo 13 dias, como no ADR.
+fn certificado(chave: &rcgen::KeyPair, curto: bool) -> Result<CertificateDer<'static>> {
     // O curto não nomeia endereço nenhum: mede se o navegador confere nome com hash.
     let nomes: Vec<String> = if curto { vec!["seele.invalid".into()] } else { vec!["localhost".into(), "127.0.0.1".into()] };
     let mut params = rcgen::CertificateParams::new(nomes)?;
@@ -47,11 +89,11 @@ fn certificado(curto: bool) -> Result<(CertificateDer<'static>, PrivateKeyDer<'s
         params.not_before = agora - time::Duration::days(1);
         params.not_after = agora + time::Duration::days(12);
     }
-    let cert = params.self_signed(&chave)?;
-    Ok((
-        cert.der().clone(),
-        PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(chave.serialize_der())),
-    ))
+    Ok(params.self_signed(chave)?.der().clone())
+}
+
+fn chave_der(chave: &rcgen::KeyPair) -> PrivateKeyDer<'static> {
+    PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(chave.serialize_der()))
 }
 
 fn config(resolvedor: Arc<dyn ResolvesServerCert>) -> Result<quinn::ServerConfig> {
@@ -63,7 +105,9 @@ fn config(resolvedor: Arc<dyn ResolvesServerCert>) -> Result<quinn::ServerConfig
     tls.alpn_protocols = vec![b"seele/1".to_vec(), b"h3".to_vec()];
     let quic = quinn::crypto::rustls::QuicServerConfig::try_from(tls)?;
     let mut cfg = quinn::ServerConfig::with_crypto(Arc::new(quic));
-    // Os números do seeled (seele-proto/src/transport.rs e seele-server/src/tls.rs).
+    // Os números do seeled: 20 s de ocioso e 5 s de keepalive
+    // (seele-proto/src/transport.rs:33 e :39). A conexão que o wtransport adota
+    // é esta, então herda os dois.
     let mut t = quinn::TransportConfig::default();
     t.max_idle_timeout(Some(Duration::from_secs(20).try_into()?));
     t.keep_alive_interval(Some(Duration::from_secs(5)));
@@ -74,7 +118,9 @@ fn config(resolvedor: Arc<dyn ResolvesServerCert>) -> Result<quinn::ServerConfig
 
 async fn atender(endpoint: quinn::Endpoint, rotulo: &'static str) {
     while let Some(chegando) = endpoint.accept().await {
+        let de = chegando.remote_address();
         tokio::spawn(async move {
+            let inicio = agora_ms();
             let r: Result<()> = async {
                 let mut conectando = chegando.accept()?;
                 let dados: Box<dyn Any> = conectando.handshake_data().await?;
@@ -82,7 +128,8 @@ async fn atender(endpoint: quinn::Endpoint, rotulo: &'static str) {
                     .downcast::<quinn::crypto::rustls::HandshakeData>()
                     .map_err(|_| anyhow!("sem HandshakeData"))?
                     .protocol;
-                eprintln!("[{rotulo}] ALPN {:?}", alpn.as_deref().map(String::from_utf8_lossy));
+                let alpn_texto = alpn.as_deref().map(String::from_utf8_lossy).unwrap_or_default().into_owned();
+                registro(&format!("\"ev\":\"chegou\",\"ponto\":{},\"de\":{},\"alpn\":{}", j(rotulo), j(&de.to_string()), j(&alpn_texto)));
                 match alpn.as_deref() {
                     Some(b"seele/1") => {
                         let conexao = conectando.await?;
@@ -98,28 +145,60 @@ async fn atender(endpoint: quinn::Endpoint, rotulo: &'static str) {
                     }
                     Some(b"h3") => {
                         let pedido = wtransport::endpoint::IncomingSessionFuture::with_quic_connecting(conectando).await?;
-                        eprintln!("[{rotulo}] WT caminho {} origem {:?}", pedido.path(), pedido.origin());
+                        registro(&format!(
+                            "\"ev\":\"pedido\",\"ponto\":{},\"de\":{},\"caminho\":{},\"origem\":{}",
+                            j(rotulo),
+                            j(&de.to_string()),
+                            j(pedido.path()),
+                            j(pedido.origin().unwrap_or("(nenhuma)"))
+                        ));
                         let conexao = pedido.accept().await?;
-                        eprintln!("[{rotulo}] WT max_datagram_size {:?}", conexao.max_datagram_size());
+                        registro(&format!(
+                            "\"ev\":\"aberta\",\"ponto\":{},\"de\":{},\"max_datagram\":{}",
+                            j(rotulo),
+                            j(&de.to_string()),
+                            conexao.max_datagram_size().unwrap_or(0)
+                        ));
+                        // Eco de datagrama: é o «ping» da página.
                         let c2 = conexao.clone();
                         tokio::spawn(async move {
                             while let Ok(d) = c2.receive_datagram().await {
                                 let _ = c2.send_datagram(d.payload());
                             }
                         });
-                        // Um quadro com o enquadramento do frame.rs (4 bytes BE + corpo),
-                        // lido e escrito pelo quinn::RecvStream/SendStream de dentro.
-                        let (mut envio, mut recebe) = conexao.accept_bi().await?;
-                        let r = recebe.quic_stream_mut();
-                        let mut tam = [0u8; 4];
-                        r.read_exact(&mut tam).await?;
-                        let mut q = vec![0u8; u32::from_be_bytes(tam) as usize];
-                        r.read_exact(&mut q).await?;
-                        let s = envio.quic_stream_mut();
-                        s.write_all(&tam).await?;
-                        s.write_all(&q).await?;
-                        s.finish()?;
-                        let _ = conexao.closed().await;
+                        // Eco de quadro (4 bytes BE + corpo), em quantos fluxos a página abrir.
+                        let c3 = conexao.clone();
+                        tokio::spawn(async move {
+                            while let Ok((mut envio, mut recebe)) = c3.accept_bi().await {
+                                tokio::spawn(async move {
+                                    let r = recebe.quic_stream_mut();
+                                    let mut tam = [0u8; 4];
+                                    if r.read_exact(&mut tam).await.is_err() {
+                                        return;
+                                    }
+                                    let mut q = vec![0u8; u32::from_be_bytes(tam) as usize];
+                                    if r.read_exact(&mut q).await.is_err() {
+                                        return;
+                                    }
+                                    let s = envio.quic_stream_mut();
+                                    let _ = s.write_all(&tam).await;
+                                    let _ = s.write_all(&q).await;
+                                    let _ = s.finish();
+                                    // Até o FIN da página: soltar o fluxo antes
+                                    // manda STOP_SENDING, e o `close()` dela
+                                    // falharia por culpa deste eco.
+                                    while let Ok(Some(_)) = r.read_chunk(64, true).await {}
+                                });
+                            }
+                        });
+                        let motivo = conexao.closed().await;
+                        registro(&format!(
+                            "\"ev\":\"fechou\",\"ponto\":{},\"de\":{},\"durou_ms\":{},\"motivo\":{}",
+                            j(rotulo),
+                            j(&de.to_string()),
+                            agora_ms() - inicio,
+                            j(&motivo.to_string())
+                        ));
                     }
                     outro => return Err(anyhow!("ALPN inesperado {outro:?}")),
                 }
@@ -127,9 +206,38 @@ async fn atender(endpoint: quinn::Endpoint, rotulo: &'static str) {
             }
             .await;
             if let Err(e) = r {
-                eprintln!("[{rotulo}] conexão: {e:#}");
+                // A recusa do navegador chega aqui, como alerta TLS.
+                registro(&format!(
+                    "\"ev\":\"falhou\",\"ponto\":{},\"de\":{},\"depois_de_ms\":{},\"erro\":{}",
+                    j(rotulo),
+                    j(&de.to_string()),
+                    agora_ms() - inicio,
+                    j(&format!("{e:#}"))
+                ));
             }
         });
+    }
+}
+
+/// O MUDO: lê tudo e não responde nada. Registra o primeiro pacote de cada
+/// origem e, a cada 5 s, quantos chegaram.
+async fn mudo(socket: tokio::net::UdpSocket) {
+    let mut buf = vec![0u8; 65536];
+    let mut vistos = std::collections::BTreeMap::<SocketAddr, u64>::new();
+    let mut ultima_conta = Instant::now();
+    loop {
+        let Ok((_, de)) = socket.recv_from(&mut buf).await else { return };
+        let n = vistos.entry(de).or_insert(0);
+        *n += 1;
+        if *n == 1 {
+            registro(&format!("\"ev\":\"mudo_primeiro_pacote\",\"de\":{}", j(&de.to_string())));
+        }
+        if ultima_conta.elapsed() > Duration::from_secs(5) {
+            ultima_conta = Instant::now();
+            for (de, n) in &vistos {
+                registro(&format!("\"ev\":\"mudo_conta\",\"de\":{},\"pacotes\":{n}", j(&de.to_string())));
+            }
+        }
     }
 }
 
@@ -194,38 +302,88 @@ async fn cliente_seele(destino: SocketAddr) -> Result<Vec<u8>> {
     Ok(v)
 }
 
+fn contem(palheiro: &[u8], agulha: &[u8]) -> bool {
+    palheiro.windows(agulha.len()).any(|w| w == agulha)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    INICIO.get_or_init(Instant::now);
+    let args: Vec<String> = std::env::args().collect();
+    let lan = args.iter().any(|a| a == "--lan");
+    let base: u16 = args
+        .iter()
+        .position(|a| a == "--porta-base")
+        .and_then(|i| args.get(i + 1))
+        .map(|p| p.parse())
+        .transpose()?
+        .unwrap_or(0);
+    let ip: IpAddr = if lan { Ipv4Addr::UNSPECIFIED.into() } else { Ipv4Addr::LOCALHOST.into() };
+    let porta = |n: u16| if base == 0 { 0 } else { base + n };
+
     let provider = rustls::crypto::ring::default_provider();
-    let (longo_der, longo_chave) = certificado(false)?;
-    let (curto_der, curto_chave) = certificado(true)?;
-    let longo = Arc::new(CertifiedKey::from_der(vec![longo_der.clone()], longo_chave, &provider)?);
-    let curto = Arc::new(CertifiedKey::from_der(vec![curto_der.clone()], curto_chave, &provider)?);
+
+    // Uma chave só, P-256 (o padrão do rcgen, que é o que o
+    // generate_simple_self_signed do seeled usa), para o longo e o curto.
+    let chave = rcgen::KeyPair::generate()?;
+    let spki = chave.subject_public_key_info();
+    let longo_der = certificado(&chave, false)?;
+    let curto_der = certificado(&chave, true)?;
+    let mesma_chave = contem(&longo_der, &spki) && contem(&curto_der, &spki);
+    anyhow::ensure!(mesma_chave, "o SPKI da chave não está nos dois certificados");
+
+    // O controle: um curto com chave própria.
+    let outra = rcgen::KeyPair::generate()?;
+    let curto_outra_der = certificado(&outra, true)?;
+    anyhow::ensure!(!contem(&curto_outra_der, &spki), "o controle saiu com a mesma chave");
+
+    let longo = Arc::new(CertifiedKey::from_der(vec![longo_der.clone()], chave_der(&chave), &provider)?);
+    let curto = Arc::new(CertifiedKey::from_der(vec![curto_der.clone()], chave_der(&chave), &provider)?);
+    let curto_outra = Arc::new(CertifiedKey::from_der(vec![curto_outra_der.clone()], chave_der(&outra), &provider)?);
 
     let a = quinn::Endpoint::server(
         config(Arc::new(PorAlpn { longo: longo.clone(), curto }))?,
-        "127.0.0.1:0".parse()?,
+        SocketAddr::new(ip, porta(0)),
     )?;
-    let b = quinn::Endpoint::server(config(Arc::new(SoLongo(longo)))?, "127.0.0.1:0".parse()?)?;
+    let a2 = quinn::Endpoint::server(
+        config(Arc::new(PorAlpn { longo: longo.clone(), curto: curto_outra }))?,
+        SocketAddr::new(ip, porta(1)),
+    )?;
+    let b = quinn::Endpoint::server(config(Arc::new(SoLongo(longo)))?, SocketAddr::new(ip, porta(2)))?;
+    let surdo = tokio::net::UdpSocket::bind(SocketAddr::new(ip, porta(3))).await?;
+    // A porta FECHADA: abre, anota o número, fecha. Ninguém escuta nela.
+    let porta_fechada = {
+        let s = std::net::UdpSocket::bind(SocketAddr::new(ip, porta(4)))?;
+        s.local_addr()?.port()
+    };
+
     let porta_a = a.local_addr()?.port();
+    let porta_a2 = a2.local_addr()?.port();
     let porta_b = b.local_addr()?.port();
+    let porta_mudo = surdo.local_addr()?.port();
     tokio::spawn(atender(a, "A"));
+    tokio::spawn(atender(a2, "A2"));
     tokio::spawn(atender(b, "B"));
+    tokio::spawn(mudo(surdo));
 
     let visto = cliente_seele(SocketAddr::from(([127, 0, 0, 1], porta_a))).await?;
     let h_longo = hex(&Sha256::digest(&longo_der));
     let h_curto = hex(&Sha256::digest(&curto_der));
+    let h_curto_outra = hex(&Sha256::digest(&curto_outra_der));
     let h_visto = hex(&Sha256::digest(&visto));
-    eprintln!(
-        "[cliente seele/1] recebeu o {} (sha256 {})",
-        if h_visto == h_longo { "LONGO" } else if h_visto == h_curto { "CURTO" } else { "?" },
-        &h_visto[..16]
-    );
+    registro(&format!(
+        "\"ev\":\"cliente_seele1\",\"recebeu\":{}",
+        j(if h_visto == h_longo { "LONGO" } else if h_visto == h_curto { "CURTO" } else { "?" })
+    ));
 
     println!(
-        "{{\"porta_a\":{porta_a},\"porta_b\":{porta_b},\"curto\":\"{h_curto}\",\"longo\":\"{h_longo}\",\"seele1_viu_longo\":{}}}",
+        "{{\"porta_a\":{porta_a},\"porta_a2\":{porta_a2},\"porta_b\":{porta_b},\"porta_mudo\":{porta_mudo},\"porta_fechada\":{porta_fechada},\
+\"curto\":\"{h_curto}\",\"curto_outra_chave\":\"{h_curto_outra}\",\"longo\":\"{h_longo}\",\
+\"mesma_chave\":{mesma_chave},\"spki_sha256\":\"{}\",\"seele1_viu_longo\":{}}}",
+        hex(&Sha256::digest(&spki)),
         h_visto == h_longo
     );
-    tokio::time::sleep(Duration::from_secs(120)).await;
+    // Fica de pé até ser morto: a medição do iPhone dura o quanto o dono quiser.
+    std::future::pending::<()>().await;
     Ok(())
 }

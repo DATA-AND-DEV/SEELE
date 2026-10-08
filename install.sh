@@ -138,7 +138,15 @@ if [ "$SISTEMA" = macos ]; then
     # Pelo `hw.optional.arm64`, e não pelo `uname -m`: num terminal sob
     # Rosetta, o `uname -m` de um Mac Apple Silicon diz x86_64, e recusaria a
     # máquina certa. Num Mac Intel o `sysctl -in` devolve vazio, que é «não».
-    if [ "$(sysctl -in hw.optional.arm64 2>/dev/null || true)" != 1 ]; then
+    #
+    # **Com `/usr/sbin` e `/sbin` no fim do `PATH` desta chamada.** É lá que o
+    # macOS guarda o `sysctl`, e um `curl | sh` num `sh` mínimo, num contêiner ou
+    # sob `env -i` nem sempre os tem: o comando não era achado, o
+    # `2>/dev/null || true` engolia o erro, e o vazio é exatamente a resposta de
+    # um Mac Intel — um Mac Apple Silicon recebia «este Mac é Intel». No **fim**
+    # e não por caminho absoluto, para que um `sysctl` que a pessoa já tenha no
+    # `PATH` continue sendo o que responde.
+    if [ "$(PATH="$PATH:/usr/sbin:/sbin" sysctl -in hw.optional.arm64 2>/dev/null || true)" != 1 ]; then
         erro "o pacote do macOS desta versão é só para Apple Silicon, e este Mac é Intel.
        $COMPILAR"
     fi

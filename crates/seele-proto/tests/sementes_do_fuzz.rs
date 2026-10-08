@@ -218,20 +218,20 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
 
     let marcas = Marcas::do_servidor(IMPRESSAO).expect("a impressão forma marcas");
     let mut do_encontro = DoAlvo::new();
-    do_encontro.insert("onde".to_owned(), encontro::onde(&marcas.escuta));
+    do_encontro.insert("onde".to_owned(), encontro::onde(marcas.escuta()));
     do_encontro.insert(
         "leve".to_owned(),
         encontro::leve(
             "198.51.100.7:41234".parse().expect("endereço"),
-            &marcas.aviso,
+            marcas.aviso(),
         ),
     );
-    do_encontro.insert("moro".to_owned(), encontro::moro(&marcas.servidor));
-    do_encontro.insert("quem".to_owned(), encontro::quem(&marcas.servidor));
+    do_encontro.insert("moro".to_owned(), encontro::moro(marcas.servidor()));
+    do_encontro.insert("quem".to_owned(), encontro::quem(marcas.servidor()));
     do_encontro.insert(
         "aqui".to_owned(),
         encontro::aqui(
-            &marcas.aviso,
+            marcas.aviso(),
             "203.0.113.9:50000".parse().expect("endereço"),
         ),
     );

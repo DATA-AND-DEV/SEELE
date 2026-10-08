@@ -422,3 +422,42 @@ Deste documento, **nenhum**: ele é análise. Do que ele recomenda: reimplantar 
 ponto de encontro reverte com um `systemctl` e um binário antigo; as correções de
 documentação revertem com `git revert`; o UPnP preferindo 8383 reverte em uma
 linha; a multiconexão reverte **alto**, e o ADR 0031 já escreveu por quê.
+
+## Adendo — 2026-10-08 · `onde_mora` virou `onde_mora_hoje`, e onde ela mora hoje
+
+A tabela de §2.1 cita `seele-core/src/encontro.rs:333` (`onde_mora`), e a frase
+logo abaixo dela diz que o caminho é descrito «como ele está no commit»
+(`3c59eec`). A linha fica como está: ela é verdade naquele commit. Este adendo
+diz o que mudou depois, para quem chega pela tabela e não acha a função.
+
+**A função trocou de nome e de forma em 29/09/2026.** `f390e98` criou
+`onde_mora_hoje`, que devolve um `OndeMora` (`Achado`, `NinguemMora`,
+`PontoMudo`, `PontoNaoResolve`, `SemMarca`) em vez de um par de `Option`: «o
+ponto não respondeu» e «o ponto respondeu e ninguém mora lá» passaram a ser
+respostas diferentes. `d2ac298` tirou a `onde_mora` antiga, e o app passou a
+ler o tipo novo.
+
+**Onde ela mora hoje**, pelas âncoras de texto, que não envelhecem como os
+números de linha:
+
+- `pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration)`,
+  em `crates/seele-core/src/encontro.rs`. É a consulta: resolve o nome do ponto
+  dentro do prazo, pergunta pelas duas marcas e por um `ONDE` que prova que o
+  ponto está no ar.
+- `pub async fn onde_mora_hoje(ponto: &str, impressao: &str)`, em
+  `crates/seele-ffi/src/lib.rs`, é a porta do app. É a `ffi:6646` da tabela,
+  com o mesmo nome: lá ela devolvia o par de `Option` da `onde_mora` de baixo,
+  e hoje devolve o `OndeMora`. Ela forma as marcas com `Marcas::do_servidor`, a
+  mesma função com que o anfitrião se registra.
+- A escuta que a resposta traz só vira o aviso do `LEVE` pela regra de
+  `bilhete_desta_volta` (`crates/seele-core/src/encontro.rs`), que pede o
+  servidor da mesma resposta no mesmo IP (o I1 da revisão final do Plano 1).
+
+O lote M1 da F5 da 0.16 (08/10/2026) mudou a consulta por dentro, sem mudar o
+que `OndeMora` diz para fora: ela tenta os endereços do ponto um de cada vez,
+IPv4 primeiro, quando nenhuma pergunta sai pelo primeiro, e uma volta recusada
+depois da primeira conta como volta e espera a resposta tardia. E o teste que
+§2.1 cita, `um_ponto_que_nao_conhece_a_pergunta_apenas_cala`
+(`crates/seele-conformance/tests/quarto.rs`), chama-se hoje
+`um_ponto_mudo_ou_que_responde_lixo_volta_mudo_dentro_do_prazo`, que é o que ele
+mede.

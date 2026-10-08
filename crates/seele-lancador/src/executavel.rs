@@ -48,7 +48,7 @@ use std::path::PathBuf;
 
 /// Quantos caracteres o caminho declarado pode ter.
 ///
-/// `SEELE.app/Contents/MacOS/SEELE` tem trinta. O teto existe porque um caminho
+/// `SEELE.app/Contents/MacOS/seele-app` tem 34. O teto existe porque um caminho
 /// longo demais falha na abertura, com a frase do sistema, em vez de aqui.
 const TETO: usize = 256;
 
@@ -223,7 +223,7 @@ mod testes {
     #[test]
     fn os_caminhos_que_os_tres_sistemas_declaram_passam() {
         for texto in [
-            "SEELE.app/Contents/MacOS/SEELE",
+            "SEELE.app/Contents/MacOS/seele-app",
             "SEELE.exe",
             "bin/seele",
             "bin\\seele.exe",
@@ -270,7 +270,7 @@ mod testes {
     fn todo_caminho_aceito_fica_dentro_da_instalacao() {
         let raiz = Path::new("/tmp/versoes/1.0.0-teste");
         for texto in [
-            "SEELE.app/Contents/MacOS/SEELE",
+            "SEELE.app/Contents/MacOS/seele-app",
             "SEELE.exe",
             "bin\\seele.exe",
             "a/b/c/d/e",

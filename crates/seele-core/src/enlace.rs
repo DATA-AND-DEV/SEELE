@@ -297,15 +297,23 @@ pub enum Motivo {
     /// A bateria interna descarregou: cinco minutos sem reconectar.
     Descarregou,
     /// O servidor recusou, e insistir não muda a resposta.
-    Recusado(String),
+    ///
+    /// Leva o [`ConnectError`] inteiro, e não um texto dele: a casca traduz a
+    /// recusa pelo tipo (`fim_da_recusa`, na FFI). Um texto só servia ao log,
+    /// e a tela recebia `CredentialRejected` para toda recusa — a chave que
+    /// mudou, o servidor que não é o do convite e os MODs que mudaram viravam a
+    /// mesma «credencial recusada».
+    Recusado(ConnectError),
     /// Alguém pediu para sair.
     Pedido,
     /// Um operador acabou com esta sessão, e o motivo veio no fio.
     ///
     /// Separado de [`Self::Recusado`] porque a casca precisa dizer **qual** foi:
-    /// «você foi expulso» e «você foi banido» são frases diferentes, e
-    /// `EndReason::CredentialRejected` — o que `Recusado` vira do outro lado do
-    /// FFI — mandaria a pessoa conferir a senha de uma conta que está certa.
+    /// «você foi expulso» e «você foi banido» são frases diferentes. `Recusado`
+    /// é a volta da bateria que o servidor (ou o TLS) não aceitou, e a FFI a
+    /// traduz pelo [`ConnectError`] que ela leva; nenhum desses motivos é
+    /// `Kicked` nem `Banned`, e cair numa frase de credencial mandaria a pessoa
+    /// conferir a senha de uma conta que está certa.
     Moderado(DisconnectReason),
 }
 
@@ -2940,8 +2948,13 @@ impl Motor {
             }
             // Uma recusa não melhora com insistência, e insistir contra uma
             // credencial rejeitada é a diferença entre reconectar e martelar.
+            //
+            // **E acaba dizendo qual foi.** A tentativa que falha e deixa a
+            // bateria correndo tem o `debug!` do braço de baixo; esta, que
+            // acaba com a sessão, saía sem linha nenhuma no `seele.log`.
             Err(erro) if !vale_insistir(&erro) => {
-                self.encerrar(Motivo::Recusado(format!("{erro:?}")));
+                tracing::warn!(?erro, "a volta da bateria foi recusada, e a sessão acaba");
+                self.encerrar(Motivo::Recusado(erro));
             }
             Err(erro) => {
                 tracing::debug!(?erro, "tentativa de reconexão falhou");
@@ -4965,16 +4978,17 @@ impl PinStore for PinsDesteAperto {
 ///
 /// A frase diz só o que vale em toda saída: o aperto falhou depois de o
 /// verificador aceitar a chave, no resto do TLS ou depois dele. Em qual dos
-/// dois, quem diz é `falha`, e quase todo erro aponta um só: `TlsRefused` e
-/// `SemResposta` saem do próprio TLS (`client::classify_connection_error`);
-/// `HandshakeTimeout`, `Refused`, `ProtocolViolation` e `ModsNaoAceitos`, do
-/// aperto do protocolo, depois dele. `Unreachable` pode ser dos dois: a
-/// conexão que caiu no meio do TLS, ou o fluxo de controle e um quadro do
-/// aperto do protocolo que não passaram depois dele; ali, o `warn!` de
-/// `crate::client` que vem antes desta linha no `seele.log` diz qual. Com
-/// `TlsRefused`, foi o próprio TLS que caiu, como no impostor de cima, e ali
-/// dizer que o TLS terminou faria quem investiga achar que quem atendeu provou
-/// ter a chave.
+/// dois, quem diz é `falha`, e quase todo erro aponta um só: `ChaveNaoProvada`,
+/// `TlsRefused` e `SemResposta` saem do próprio TLS
+/// (`client::classify_connection_error`); `HandshakeTimeout`, `Refused`,
+/// `ProtocolViolation` e `ModsNaoAceitos`, do aperto do protocolo, depois dele.
+/// `Unreachable` pode ser dos dois: a conexão que caiu no meio do TLS, ou o
+/// fluxo de controle e um quadro do aperto do protocolo que não passaram depois
+/// dele; ali, o `warn!` de `crate::client` que vem antes desta linha no
+/// `seele.log` diz qual. Com `ChaveNaoProvada`, foi o próprio TLS que caiu, na
+/// assinatura de quem atendeu, como no impostor de cima, e ali dizer que o TLS
+/// terminou faria quem investiga achar que quem atendeu provou ter a chave. Com
+/// `TlsRefused`, o TLS também caiu, por outro alerta.
 fn desfazer_o_pin_deste_aperto(
     pins: &dyn PinStore,
     chave_do_pin: &str,
@@ -5040,6 +5054,9 @@ fn desfazer_pin_orfao(
 /// - A impressão que não confere (`InviteMismatch`) e a chave fixada que mudou
 ///   (`PinChanged`) vão em `warn!`, com o endereço e as duas impressões:
 ///   impressão não é segredo, e sem as duas ninguém confere nada.
+/// - Quem mostrou o certificado sem provar a chave (`ChaveNaoProvada`) também
+///   vai em `warn!`, com o endereço: é o mesmo evento por outro caminho, e em
+///   `info!` ele se lia como um endereço que só não respondeu.
 /// - As outras falhas vão em `info!`, que é o nível que o `seele.log` grava.
 ///
 /// `entrou` é o endereço que venceu, quando algum venceu: a linha diz que a
@@ -5069,6 +5086,15 @@ fn registrar_a_falha_do_candidato(
             ?entrou,
             "a chave fixada deste candidato mudou: recusado dentro do TLS, antes do `Hello` \
              (ADR 0003)"
+        ),
+        // Sem impressões: a que ele mostrou é a do certificado que repetiu, e
+        // a linha do pin desfeito (`desfazer_o_pin_deste_aperto`) já a traz
+        // quando o verificador chegou a fixá-la.
+        ConnectError::ChaveNaoProvada => tracing::warn!(
+            ?onde,
+            ?entrou,
+            "este candidato mostrou um certificado sem provar ter a chave dele: recusado \
+             dentro do TLS, antes do `Hello`"
         ),
         outra => tracing::info!(?onde, erro = %outra, ?entrou, "este endereço do convite não deu"),
     }
@@ -5453,6 +5479,7 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
     match erro {
         ConnectError::PinChanged { .. }
         | ConnectError::InviteMismatch { .. }
+        | ConnectError::ChaveNaoProvada
         | ConnectError::Refused { .. }
         | ConnectError::TlsRefused
         | ConnectError::ProtocolViolation => true,
@@ -5481,6 +5508,10 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         ConnectError::PinChanged { .. }
         | ConnectError::Refused { .. }
         | ConnectError::InviteMismatch { .. } => false,
+        // Quem atendeu não provou ter a chave do servidor que mostrou. Insistir
+        // é perguntar de novo a quem já não provou, e é o comportamento que um
+        // impostor espera.
+        ConnectError::ChaveNaoProvada => false,
         // **Só uma pessoa desfaz isto**, e é a metade simétrica do que
         // `a_sessao_acabou_aqui` já dizia para `DisconnectReason::ModsMudaram`:
         // a reconexão encontra o mesmo anúncio e o mesmo não. Insistir manda
@@ -5691,6 +5722,25 @@ mod tests {
         }));
         assert!(vale_insistir(&ConnectError::Unreachable));
         assert!(vale_insistir(&ConnectError::HandshakeTimeout));
+    }
+
+    #[test]
+    fn quem_nao_prova_a_chave_respondeu_e_insistir_nao_muda_a_resposta() {
+        // Era `TlsRefused`, que a bateria repete: insistir mandaria um aperto
+        // de mão a quem já não provou ter a chave, a cada batida, por cinco
+        // minutos. E é resposta de alguém, como a impressão que não confere:
+        // perder a corrida para o «não alcancei» de um endereço morto
+        // esconderia o impostor atrás de uma falha de rede.
+        assert!(
+            alguem_respondeu(&ConnectError::ChaveNaoProvada),
+            "quem mostrou o certificado sem a chave perde a corrida para um endereço \
+             morto, e a tela diz «não alcancei» sobre um impostor"
+        );
+        assert!(
+            !vale_insistir(&ConnectError::ChaveNaoProvada),
+            "a bateria insiste contra quem não provou a chave do servidor, e a volta \
+             martela o impostor em vez de acabar"
+        );
     }
 
     /// Um conjunto de MODs a aceitar não é uma queda de rede.
@@ -6116,11 +6166,17 @@ mod tests {
         .await
         .expect("o aperto de mão com o impostor não terminou");
 
+        // **Com o nome de quem não provou a chave**, e não `TlsRefused`: este
+        // a FFI traduz por versão incompatível, e a tela mandava atualizar o
+        // SEELE nas duas máquinas por causa de um impostor. O nome sai do
+        // alerta que o `rustls` daqui manda (`decrypt_error`, 51); se uma
+        // versão nova mudar o número, é aqui que reprova.
         assert_eq!(
             resultado.err(),
-            Some(ConnectError::TlsRefused),
-            "o impostor sem a chave não caiu no TLS como `TlsRefused`, e o teste mediu \
-             outra coisa"
+            Some(ConnectError::ChaveNaoProvada),
+            "o impostor que mostrou o certificado sem a chave não saiu como \
+             `ChaveNaoProvada`: a tela o chamaria de versão incompatível, ou o teste \
+             mediu outra coisa"
         );
         assert_eq!(
             loja.pinned(chave),
@@ -6139,9 +6195,9 @@ mod tests {
             );
         };
         assert!(
-            desfeito.contains("TlsRefused"),
-            "a linha do pin desfeito não traz o erro que o aperto deu (`TlsRefused`), e sim \
-             outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
+            desfeito.contains("ChaveNaoProvada"),
+            "a linha do pin desfeito não traz o erro que o aperto deu (`ChaveNaoProvada`), e \
+             sim outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
              {desfeito}"
         );
         assert!(
@@ -6974,9 +7030,10 @@ mod tests {
         );
         let mut recusada = false;
         while let Ok(aviso) = avisos_rx.try_recv() {
-            if let Aviso::Encerrado(Motivo::Recusado(texto)) = &aviso {
-                recusada |= texto.contains("InviteMismatch");
-            }
+            recusada |= matches!(
+                aviso,
+                Aviso::Encerrado(Motivo::Recusado(ConnectError::InviteMismatch { .. }))
+            );
         }
         assert!(
             recusada,
@@ -6988,6 +7045,44 @@ mod tests {
             Some(impressao),
             "a recusa da volta mexeu no pino daquele endereço, que continua sendo a prova de \
              quem atende ali"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_volta_recusada_diz_no_registro_por_que_a_sessao_acabou() {
+        // A volta recusada acabava com a sessão sem uma linha no `seele.log`:
+        // só a tentativa que falha e deixa a bateria correndo tinha o `debug!`
+        // dela. A que acaba com tudo saía calada, e quem relatava «caiu e não
+        // voltou» não tinha o que mostrar.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e `tentar` roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (endereco, impressao, _) = servidor_que_conta_os_hellos();
+        let (mut motor, _) = motor_que_volta_a(endereco, &impressao, false);
+        let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+
+        motor.tentar().await;
+
+        let mut recusada = false;
+        while let Ok(aviso) = avisos_rx.try_recv() {
+            recusada |= matches!(aviso, Aviso::Encerrado(Motivo::Recusado(_)));
+        }
+        assert!(
+            recusada,
+            "a volta pela impressão que não confere não acabou recusada, e o teste mediu \
+             outra coisa"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("a volta da bateria foi recusada")
+                && linha.contains("InviteMismatch")),
+            "a volta recusada acabou com a sessão sem dizer no `seele.log` qual recusa foi: \
+             quem relata «caiu e não voltou» não tem o que mostrar. Linhas: {linhas:?}"
         );
     }
 
@@ -7183,6 +7278,74 @@ mod tests {
                 && linha.contains("Unreachable")),
             "a falha comum de um candidato perdedor sumiu do log quando outro entrou, ou deixou \
              de ir em `info`, como no caminho sem vencedor. Rastro: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_candidato_perdedor_que_nao_prova_a_chave_vai_ao_log_como_aviso() {
+        // O impostor que repete o certificado de um servidor sem ter a chave
+        // dele é o mesmo evento que a recusa pela impressão, por outro caminho:
+        // alguém com a identidade errada num endereço da corrida. A linha da
+        // corrida (com o endereço e quem entrou) ia em `info`, como uma falha
+        // comum, porque `registrar_a_falha_do_candidato` só subia para `warn` a
+        // impressão que não confere e a chave trocada.
+        //
+        // O impostor primeiro, para ele perder antes de o verdadeiro vencer (a
+        // corrida dispara um candidato a cada 250 ms, e o impostor falha em
+        // milissegundos). Sem impressão esperada: o verificador o aceita como
+        // primeiro contato, e o TLS cai na assinatura.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e a corrida inteira roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (onde_do_impostor, _) = impostor_que_repete_o_certificado();
+        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) = servidor_que_conta_os_hellos();
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        let destinos = vec![
+            destino_na_chave(onde_do_impostor, "chave-do-impostor", None),
+            destino_na_chave(
+                onde_do_verdadeiro,
+                "chave-do-verdadeiro",
+                Some(&impressao_do_verdadeiro),
+            ),
+        ];
+
+        let entrou = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_com_bilhete(
+                destinos,
+                None,
+                SigningKey::from_bytes(&[11; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("a corrida não terminou");
+        assert!(
+            entrou.is_ok(),
+            "o candidato verdadeiro não venceu a corrida ({:?}), e o teste mediu outra coisa",
+            entrou.err()
+        );
+
+        let linhas = rastro.linhas();
+        let do_impostor = format!("{onde_do_impostor:?}");
+        let do_verdadeiro = format!("{onde_do_verdadeiro:?}");
+        let Some(da_corrida) = linhas
+            .iter()
+            .find(|linha| linha.contains(&do_impostor) && linha.contains(&do_verdadeiro))
+        else {
+            panic!(
+                "a falha do impostor que perdeu a corrida não deixou a linha da corrida, com o \
+                 endereço dele e o de quem entrou. Rastro: {linhas:?}"
+            );
+        };
+        assert!(
+            da_corrida.starts_with("WARN"),
+            "o candidato perdedor que mostrou o certificado sem provar a chave foi ao log como \
+             falha comum, e não como aviso: quem lê o `seele.log` não separa o impostor de um \
+             endereço que não respondeu. Linha: {da_corrida}"
         );
     }
 

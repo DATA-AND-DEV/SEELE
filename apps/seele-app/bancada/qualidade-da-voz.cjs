@@ -9,6 +9,7 @@
 // | «padrão» aparece por extenso quando ninguém escolheu | um número que ninguém escolheu, mostrado como escolha, faz a pessoa achar que já mexeu |
 // | o corte fica **na** barra do medidor | um medidor sem a marca é uma barra que se mexe; o que se ajusta é onde ela corta |
 // | fechar a tela para o teste | um microfone aberto por uma tela que ninguém olha é um microfone esquecido |
+// | «PADRÃO DA MÁQUINA · aparelho» só diz o aparelho quando o padrão é a escolha | com um aparelho escolhido à mão, a linha do padrão que repete o nome dele mostra o aparelho da escolha onde a pessoa lê o padrão do sistema (P54) |
 //
 // # O que ela não homologa
 //
@@ -188,6 +189,181 @@ function controles(extra = {}) {
         "filtro, e um número congelado deixa de acompanhá-lo",
     );
     console.log("F01 OK: a régua vem do Rust e distingue escolha de padrão");
+
+    // ---- P54: «PADRÃO DA MÁQUINA · aparelho» só diz o aparelho quando o padrão é a escolha ----
+    //
+    // O relato é de 08/10: com o monitor 27QHD240 escolhido e os alto-falantes do
+    // MacBook como padrão do macOS, a lista de saídas mostrou «PADRÃO DA MÁQUINA ·
+    // 27QHD240» e, logo abaixo, «Alto-falantes (MacBook Pro) PADRÃO». A linha do
+    // padrão só pode dizer no que o padrão deu quando o padrão é a escolha; com
+    // um aparelho escolhido à mão ela diz o padrão **do sistema**, que é o que a
+    // pessoa teria se a escolhesse de volta.
+    //
+    // Os dois lados passam pelo mesmo código, e os nomes são diferentes de
+    // propósito: a saída que lesse o mapa de nomes da entrada sairia daqui com o
+    // nome do outro lado.
+    const aparelhos = {
+      microfone: {
+        padrao: { id: "mic-embutido", name: "Microfone (MacBook Pro)", default: true },
+        outro: { id: "mic-usb", name: "Interface USB", default: false },
+      },
+      saida: {
+        padrao: { id: "alto-falantes", name: "Alto-falantes (MacBook Pro)", default: true },
+        outro: { id: "monitor", name: "27QHD240", default: false },
+      },
+    };
+    const semPadrao = (aparelho) => ({ ...aparelho, default: false });
+    /** Uma cena: o que a máquina lista, o que está escolhido e o que a voz abriu. */
+    const cena = (nome, { escolhido, aberto, padraoNaLista = true }) => {
+      const por = (lado) => {
+        const { padrao, outro } = aparelhos[lado];
+        return {
+          dispositivos: padraoNaLista ? [padrao, outro] : [semPadrao(padrao), outro],
+          escolhido: escolhido === null ? null : outro.id,
+          aberto: aberto === null ? null : aberto === "padrao" ? padrao.id : outro.id,
+        };
+      };
+      const [m, s] = [por("microfone"), por("saida")];
+      return {
+        nome,
+        microfones: m.dispositivos,
+        saidas: s.dispositivos,
+        microfoneEscolhido: m.escolhido,
+        saidaEscolhida: s.escolhido,
+        // O snapshot é o da bancada, com os dois aparelhos que a voz abriu. Sem
+        // aberto não há sessão, e o retrato é `null` como o Rust o devolve.
+        snapshot:
+          aberto === null
+            ? null
+            : retrato({
+                capture: { id: m.aberto, name: "aberto", is_default: false },
+                playback: { id: s.aberto, name: "aberto", is_default: false },
+              }),
+      };
+    };
+    const cenas = [
+      cena("o padrão é a escolha e a voz abriu o padrão do sistema", {
+        escolhido: null,
+        aberto: "padrao",
+      }),
+      cena("o padrão é a escolha e a voz abriu outro aparelho", {
+        escolhido: null,
+        aberto: "outro",
+      }),
+      cena("outro aparelho escolhido à mão, e é ele que está aberto", {
+        escolhido: "outro",
+        aberto: "outro",
+      }),
+      cena("outro aparelho escolhido à mão, sem sessão aberta", {
+        escolhido: "outro",
+        aberto: null,
+      }),
+      cena("outro aparelho escolhido à mão, e a máquina não marca padrão nenhum", {
+        escolhido: "outro",
+        aberto: "outro",
+        padraoNaLista: false,
+      }),
+    ];
+    const vistas = await page.evaluate(async (cenas) => {
+      /** As linhas de uma lista, como a pessoa as lê: nome e marca. */
+      const ler = (lista) =>
+        Array.from($(lista).querySelectorAll(".server-dispositivo")).map((botao) => ({
+          id: botao.dataset.dispositivo,
+          nome: botao.querySelector(".server-dispositivo-nome").textContent,
+          marca: botao.querySelector(".server-dispositivo-marca").textContent,
+        }));
+      const lidas = [];
+      for (const c of cenas) {
+        window.testTable.microfones = c.microfones;
+        window.testTable.saidas = c.saidas;
+        window.testTable.microfone_escolhido = c.microfoneEscolhido;
+        window.testTable.saida_escolhida = c.saidaEscolhida;
+        window.testTable.snapshot = c.snapshot;
+        await desenharDispositivos();
+        await atualizarServer();
+        lidas.push({
+          microfone: ler("lista-microfones"),
+          saida: ler("lista-saidas"),
+        });
+      }
+      return lidas;
+    }, cenas);
+    const linha = (linhas, id) => linhas.find((l) => l.id === id);
+    const padraoPuro = "PADRÃO DA MÁQUINA";
+    for (const lado of ["microfone", "saida"]) {
+      const { padrao, outro } = aparelhos[lado];
+      const quando = (i) => `${lado}, ${cenas[i].nome}`;
+      const da = (i) => linha(vistas[i][lado], "");
+
+      assert.equal(
+        da(0).nome,
+        `${padraoPuro} · ${padrao.name}`,
+        `${quando(0)}: a linha do padrão deixou de dizer no que o padrão deu, e ` +
+          `quem escolheu o padrão perde a única linha que mostra o que ele abriu: ${da(0).nome}`,
+      );
+      assert.equal(
+        da(1).nome,
+        `${padraoPuro} · ${outro.name}`,
+        `${quando(1)}: o padrão é a escolha, então a linha diz no que ele deu, ` +
+          `mesmo quando não é o aparelho que a máquina marca como padrão: ${da(1).nome}`,
+      );
+
+      assert.equal(
+        da(2).nome,
+        `${padraoPuro} · ${padrao.name}`,
+        `${quando(2)}: com «${outro.name}» escolhido à mão a linha do padrão traz o ` +
+          `nome dele, e quem a lê entende que o padrão da máquina é «${outro.name}» — ` +
+          `o padrão do sistema é «${padrao.name}»: ${da(2).nome}`,
+      );
+      assert.ok(
+        !da(2).nome.includes(outro.name),
+        `${quando(2)}: o aparelho escolhido à mão apareceu na linha do padrão: ${da(2).nome}`,
+      );
+      assert.equal(
+        da(2).marca,
+        "",
+        `${quando(2)}: a linha do padrão ganhou uma marca sem ser a escolhida: ${da(2).marca}`,
+      );
+      assert.equal(
+        linha(vistas[2][lado], outro.id).marca,
+        "EM USO",
+        `${quando(2)}: o aparelho escolhido e aberto deixou de dizer EM USO na linha dele`,
+      );
+      assert.equal(
+        linha(vistas[2][lado], padrao.id).marca,
+        "PADRÃO",
+        `${quando(2)}: o padrão do sistema deixou de ser marcado na linha dele`,
+      );
+
+      assert.equal(
+        da(3).nome,
+        `${padraoPuro} · ${padrao.name}`,
+        `${quando(3)}: sem sessão não há aparelho aberto, e a linha do padrão não ` +
+          `diz o padrão do sistema: ${da(3).nome}`,
+      );
+      assert.equal(
+        linha(vistas[3][lado], outro.id).marca,
+        "ESCOLHIDO",
+        `${quando(3)}: sem sessão o aparelho escolhido deixou de dizer ESCOLHIDO`,
+      );
+
+      assert.equal(
+        da(4).nome,
+        padraoPuro,
+        `${quando(4)}: a máquina não marcou aparelho nenhum como padrão, a linha do ` +
+          `padrão não tem nome a dizer, e escreveu um mesmo assim: ${da(4).nome}`,
+      );
+    }
+    console.log("P54 OK: a linha do padrão só diz o aparelho quando o padrão é a escolha");
+    // O que as cenas deixaram não é do que vem depois: o retrato e as listas voltam.
+    await page.evaluate(async (r) => {
+      window.testTable.microfones = [];
+      window.testTable.saidas = [];
+      window.testTable.microfone_escolhido = null;
+      window.testTable.saida_escolhida = null;
+      window.testTable.snapshot = r;
+      await desenharDispositivos();
+    }, retrato());
 
     // ---- O medidor, e a marca do corte dentro dele ----
     const medidor = await page.evaluate(async () => {

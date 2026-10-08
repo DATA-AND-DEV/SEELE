@@ -1,9 +1,11 @@
 # Versões lado a lado — o contrato do manifesto e o que falta publicar
 
 O [ADR 0046](adr/0046-toda-versao-continua-de-pe.md) decidiu que o app vira
-launcher: cliente, servidor, protocolo e API de MOD sobem juntos com o mesmo
-número, toda versão publicada continua hospedável, e cada uma tem o seu
-diretório de dados. Esta página é o que aquela decisão precisa por escrito para
+launcher, e a emenda de 08/10/2026 o fez **por linha de servidor**: a versão do
+servidor sobe junto com o protocolo e a API de MODs, o app tem número próprio,
+o launcher guarda o app mais novo de cada linha, e cada linha tem o seu
+diretório de dados. O app 0.16 fala o Servidor 1.0; a única linha além dela é a
+do Servidor 0.15. Esta página é o que aquela decisão precisa por escrito para
 virar código dos dois lados: **o formato do manifesto**, **onde a lista de
 revogação mora** e **o que ainda falta no `SEELE-RELEASES`**.
 
@@ -95,23 +97,48 @@ a seção 4 desta página.
 Mora onde sempre morou: `releases/latest/download/latest.json`, no release do
 GitHub do `SEELE-RELEASES`. Nenhum serviço novo a hospedar.
 
+**Híbrido, desde a 0.16.** O topo continua no formato do `tauri-plugin-updater`
+— é o que o atualizador da 0.15.1 lê, e ele exige `url` e `signature` em todo
+alvo do topo (`updater.rs:1388-1398` do plugin 2.10.1). Ao lado vão `schema: 2` e
+`versions[]`, que o launcher lê. Quem escreve é o `empacotar/manifesto.py`, e o
+teste `apps/seele-app/tests/manifesto_hibrido.rs` lê o arquivo gerado com o
+`RemoteRelease` do próprio plugin e com o `Manifesto` do launcher.
+
 ```json
 {
+  "version": "0.16.0",
+  "notes": "…",
+  "pub_date": "2026-10-20T00:00:00Z",
+  "platforms": {
+    "darwin-aarch64": { "url": "…/SEELE_0.16.0_aarch64.app.tar.gz", "signature": "…" },
+    "windows-x86_64": { "url": "…/SEELE_0.16.0_x64-instalador.exe", "signature": "…" }
+  },
   "schema": 2,
   "versions": [
     {
-      "version": "0.11.0",
-      "pub_date": "2026-09-20T00:00:00Z",
+      "version": "0.16.0",
+      "pub_date": "2026-10-20T00:00:00Z",
       "notes": "…",
-      "unit": { "protocol": 4, "mod_api": 1 },
+      "unit": { "protocol": 9, "mod_api": 6, "server": "1.0", "mod_apis": [6] },
       "platforms": {
         "darwin-aarch64": {
-          "url": "https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/download/v0.11.0/…",
-          "signature": "<base64 do .sig, como hoje>",
+          "url": "…/v0.16.0/SEELE_0.16.0_aarch64.app.tar.gz",
+          "signature": "<base64 do .sig>",
           "sha256": "<64 dígitos hexadecimais>",
-          "executable": "SEELE.app/Contents/MacOS/SEELE"
+          "executable": "SEELE.app/Contents/MacOS/seele-app"
+        },
+        "windows-x86_64": {
+          "url": "…/v0.16.0/SEELE_0.16.0_x64-portatil.tar.gz",
+          "signature": "<base64 do .sig>",
+          "sha256": "<64 dígitos hexadecimais>",
+          "executable": "SEELE.exe"
         }
       }
+    },
+    {
+      "version": "0.15.2",
+      "unit": { "protocol": 8, "mod_api": 5, "server": "0.15", "mod_apis": [3, 4, 5] },
+      "platforms": { "…": "…" }
     }
   ],
   "revocations": {
@@ -120,6 +147,24 @@ GitHub do `SEELE-RELEASES`. Nenhum serviço novo a hospedar.
   }
 }
 ```
+
+**O topo e o `versions[]` apontam para pacotes diferentes no Windows, de
+propósito.** O topo é do atualizador, que troca a instalação de Program Files
+pelo `-instalador.exe`. O `versions[]` é do launcher, que guarda a versão ao lado
+de outra e precisa do `-portatil.tar.gz` (a mesma carga do instalador num
+tar.gz). O portátil **nunca** vai para o topo: o atualizador da 0.15.1 o mandaria
+executar como instalador. O `.deb` do Linux também não entra no `versions[]`,
+porque instala no sistema.
+
+**`unit.protocol` e `unit.mod_api` continuam obrigatórios.** O `Unidade` da
+0.15.1 os exige, e um manifesto sem eles seria recusado inteiro por quem ainda
+está nela. `unit.server` (a versão do servidor, que dá a linha: `1.0` e `1.3` são
+da linha `1`, e `0.15` é a linha `0.15`) e `unit.mod_apis` são acréscimos, e
+chegam opcionais pela regra do `schema`.
+
+**O executável do Mac é `SEELE.app/Contents/MacOS/seele-app`**, medido no `.app`
+da 0.15.1 (`CFBundleExecutable`). Até 08/10/2026 esta página dizia
+`…/MacOS/SEELE`, e estava errada.
 
 E o documento de revogação, cujos **bytes exatos** são o que a assinatura
 cobre:
@@ -140,11 +185,14 @@ cobre:
 
 ### As regras que não são óbvias no exemplo
 
-**A ordem de `versions` é o contrato, e a primeira é a mais nova.** Não há
-ordenação calculada em lugar nenhum do launcher, e a razão está publicada: para
-o semver, `0.10.5-1` é uma pré-lançamento de `0.10.5` e portanto anterior a
-ela; no `SEELE-RELEASES`, a `v0.10.5-1` saiu **depois** da `v0.10.5`. Um
-launcher que ordenasse sozinho ofereceria a versão errada como «a mais nova».
+**A ordem de `versions` é o contrato, e a primeira é a mais nova.** Dentro de
+uma linha, a ordem é a de publicação, e não há ordenação de versões calculada
+em lugar nenhum: para o semver, `0.10.5-1` é uma pré-lançamento de `0.10.5` e
+portanto anterior a ela; no `SEELE-RELEASES`, a `v0.10.5-1` saiu **depois** da
+`v0.10.5`. **Entre linhas, a mais nova vem primeiro**, e aí há ordem calculada,
+porque o número da linha é nosso e não tem sufixo: a 1 vem depois da 0.15 em
+qualquer leitura. É o que faz um conserto da 0.15 publicado depois da 0.16 ficar
+atrás dela, e o topo do Tauri continuar sendo o da linha mais nova.
 
 **Campo desconhecido é ignorado; `schema` desconhecido é recusado.** É o
 contrário da regra do `mod.json`, e de propósito. Um `mod.json` é escrito por
@@ -234,7 +282,7 @@ criou assinou o pacote. Ali quem responde é a assinatura do ADR 0026.
 
 ---
 
-## 3. As lacunas exatas, para uma tarefa no `SEELE-RELEASES`
+## 3. As lacunas, e o que a 0.16 fechou
 
 Nada abaixo foi editado por esta tarefa: o `SEELE-RELEASES` é outro
 repositório. O que está publicado hoje, conferido em 10/09/2026, é o
@@ -248,17 +296,40 @@ que se perde enquanto as lacunas não forem fechadas está na coluna da direita.
 
 | # | lacuna | onde se conserta | sem isso |
 |---|---|---|---|
-| 1 | `latest.json` descreve uma versão, não todas | `empacotar/manifesto.py`, que é o único lugar onde a regra do manifesto mora, e o `release.yml` que o chama | o seletor de versão tem uma opção só, e o ADR 0046 vale no código e não no produto |
-| 2 | não há `sha256` por pacote | mesmo arquivo; é uma linha por pacote | um download truncado é recusado pela assinatura, com o motivo errado: «não veio de nós» em vez de «veio pela metade» |
-| 3 | não há `executable` por pacote | mesmo arquivo, uma constante por alvo | o launcher não sabe o que iniciar, e recusa com `ExecutavelNaoDeclarado` — ao instalar e ao abrir. É o único caminho que toda máquina encontra hoje, e é a lacuna que bloqueia o launcher em produção. O valor por alvo é `SEELE.app/Contents/MacOS/SEELE`, `SEELE.exe` e `bin/seele`, sempre **relativo** à raiz da instalação: o launcher recusa caminho absoluto ou com `..` |
-| 4 | não há `unit` (protocolo e API de MOD) por versão | precisa sair do build: são `seele_proto::version::PROTOCOL_VERSION` e o número da API de `api/v1.json` | a conferência de coerência do ADR 0046 não acontece, e a defesa volta a ser só o `negotiate` — que é justamente o que o ADR tirou do posto principal |
+| 1 | `latest.json` descreve uma versão, não todas — **fechada na 0.16** (`manifesto.py` híbrido) | `empacotar/manifesto.py`, que é o único lugar onde a regra do manifesto mora, e o `release.yml` que o chama | o seletor de versão tem uma opção só, e o ADR 0046 vale no código e não no produto |
+| 2 | não há `sha256` por pacote — **fechada na 0.16** | mesmo arquivo; é uma linha por pacote | um download truncado é recusado pela assinatura, com o motivo errado: «não veio de nós» em vez de «veio pela metade» |
+| 3 | não há `executable` por pacote — **fechada na 0.16**, com o do Mac corrigido para `SEELE.app/Contents/MacOS/seele-app` | mesmo arquivo, uma constante por alvo | o launcher não sabe o que iniciar, e recusa com `ExecutavelNaoDeclarado` — ao instalar e ao abrir. Até a 0.16 era o único caminho que toda máquina encontrava, e o «GUARDAR A MAIS NOVA» nunca instalou nada por causa dele. O valor por alvo é `SEELE.app/Contents/MacOS/seele-app` e `SEELE.exe` (o portátil), sempre **relativo** à raiz da instalação: o launcher recusa caminho absoluto ou com `..` |
+| 4 | não há `unit` (protocolo e API de MOD) por versão — **fechada na 0.16**: o `manifesto.py` lê `PROTOCOL_VERSION`, `MOD_API_VERSION`, `APIS_ACEITAS` e `VERSAO_DO_SERVIDOR` do código compilado, e um guarda confere a leitura contra as constantes | precisa sair do build: são `seele_proto::version::PROTOCOL_VERSION` e o número da API de `api/v1.json` | a conferência de coerência do ADR 0046 não acontece, e a defesa volta a ser só o `negotiate` — que é justamente o que o ADR tirou do posto principal |
 | 5 | não há bloco `revocations`, e não há procedimento para emitir um | uma ferramenta nova ao lado de `empacotar/manifesto.py`, que assina o documento com a mesma chave do atualizador | não há como revogar uma versão furada, que é a única exceção ao «toda versão para sempre» |
-| 6 | o manifesto lista só o release corrente | o `release.yml` precisa **ler o manifesto anterior** e acrescentar a versão nova no topo, em vez de escrever um do zero | cada release apaga a lista de todas as anteriores, e o launcher esquece o que existe |
+| 6 | o manifesto lista só o release corrente — **fechada na 0.16**: `--anterior`, que o `publicar.sh` e o `release.yml` preenchem com o `latest.json` publicado | o `release.yml` precisa **ler o manifesto anterior** e acrescentar a versão nova no topo, em vez de escrever um do zero | cada release apaga a lista de todas as anteriores, e o launcher esquece o que existe |
 | 7 | os pacotes das versões antigas estão em releases antigos, e o manifesto único vai apontar para lá | nada a fazer no formato: as URLs já são absolutas por release | — |
 
-A número 6 é a que muda mais o `release.yml`, e é a que não dá para adiar: um
-manifesto de versões que se reescreve do zero a cada release é um manifesto de
-uma versão com outro nome.
+A número 5 continua aberta: emitir uma revogação «pode vir depois» (spec 0.16,
+§2, F6). O lado que **lê** a lista está ligado desde a 0.16.
+
+### Publicar a linha legada, e um conserto dela depois
+
+**A 0.15.2** sai do branch `linha/0.15`, antes do app 0.16 (spec 0.16, §4):
+
+1. `./empacotar/publicar.sh 0.15.2 --linha-legada`. O rascunho é criado com
+   `make_latest: false`.
+2. Ao publicar o rascunho, **desmarcar «Set as the latest release»**: a tela do
+   GitHub pode marcar a caixa de novo. Como `latest`, quem está na 0.15.1
+   receberia a 0.15.2 pelo atualizador, e o launcher leria o manifesto do release
+   errado.
+3. O `latest.json` da 0.15.2 já sai híbrido, com `versions` = [0.15.2].
+
+**A 0.16.0** recebe o manifesto da 0.15.2, que nunca foi `latest`:
+`SEELE_MANIFESTO_ANTERIOR=<o latest.json da v0.15.2> ./empacotar/publicar.sh 0.16.0`.
+O `latest.json` publicado naquele dia é o da 0.15.1, sem `schema`, e o
+`manifesto.py` diz que nada dele entra.
+
+**Um conserto da linha legada depois da 0.16** (uma 0.15.3) só chega ao launcher
+se o `latest.json` do release `latest` for refeito com ele. O `manifesto.py` já
+preserva o topo quando a linha nova não é a mais nova, então o arquivo que ele
+escreve para a 0.15.3 serve também ao release `latest`: o dono sobe esse arquivo
+nos dois releases. Não está automatizado, de propósito: é a única publicação que
+mexe num release já publicado.
 
 ### O que **não** é lacuna
 
@@ -295,37 +366,62 @@ atos, e abrir não é um ato.
 
 ---
 
-## 5. Dados por versão, e a frase que a tela tem de dizer
+## 5. Dados por linha, e a frase que a tela tem de dizer
 
-Cada versão abre `<raiz>/dados/<versão>/`, e o launcher aponta a variável
-`SEELE_HOME` para lá — que é a variável que `config_dir` no `seele-app` já lê
-primeiro, antes de `XDG_CONFIG_HOME` e de `HOME`. Não há mecanismo novo, e a
-consequência é boa: uma versão **anterior** ao launcher, iniciada por ele,
-também obedece.
+Cada linha abre `<raiz>/dados/servidor-<linha>/` — `dados/servidor-0.15`, e não
+`dados/0.15.2` —, e o launcher aponta a variável `SEELE_HOME` para lá, que é a
+variável que `config_dir` no `seele-app` já lê primeiro. Não há mecanismo novo,
+e a consequência é boa: uma versão **anterior** ao launcher, iniciada por ele,
+também obedece. Por linha, e não por versão, para um conserto da linha (a
+0.15.3) herdar os dados da 0.15.2 sem cópia nenhuma.
 
-A assimetria entre subir e descer não é escolha de produto — vem de
-`persistence/schema.rs`, que é «append only once shipped», com um teste
-reprovando qualquer passo de volta:
+A linha que está aberta não mora no depósito: o app 0.16 usa a pasta dele
+(`~/.config/seele`, ou `%APPDATA%\tech.datadev.seele` no Windows), e o depósito
+fica dentro dela, em `lancador/`.
 
-- **subir**: os dados são **copiados** da versão mais nova entre as mais
-  velhas, e a versão nova migra o que copiou. Cópia e não mudança de lugar, o
-  que deixa a origem de pé para se poder voltar a ela.
-- **descer**: não há nada mais velho de onde copiar, e a versão começa vazia.
+### A primeira abertura da 0.16
 
-`Deposito::plano_de_dados` responde isso **sem tocar em disco**, e o campo
+Spec 0.16, §1. Antes de qualquer outra coisa — antes de a janela existir e antes
+da migração dos MODs da pasta —, a 0.16 copia a pasta dela para
+`dados/servidor-0.15`, **deixando o depósito (`lancador/`) de fora** e com o
+marcador `PRONTA` escrito por último. A cópia leva a identidade junto, então a
+pessoa é a mesma nas duas linhas.
+
+- **Não copia um banco do futuro.** Um banco com esquema acima do 13 (o da
+  0.15.1, lido em `54f542f`) já foi migrado por uma versão mais nova, e
+  copiá-lo daria à 0.15.2 um banco que o `migrate()` dela não recusa. A linha
+  0.15 abre vazia, e a tela diz.
+- **Uma cópia que entraria em si mesma é recusada.** O depósito mora dentro da
+  origem; `Deposito::semear_linha` recusa um destino dentro da origem que não
+  foi deixado de fora.
+- **Onde houve 0.15, a linha legada é baixada uma vez**, em segundo plano. Sem
+  rede, ela é baixada quando alguém precisar dela — ao entrar num servidor 0.15
+  ou ao hospedar nele.
+- **A ordem é estrutural.** No Tauri 2.11.6 as janelas do `tauri.conf.json`
+  nascem antes do `setup` do app (`app.rs:2521-2531`); a janela é
+  `create: false` e nasce no `setup`, depois da cópia.
+
+### A frase
+
+`Deposito::plano_da_linha` responde **sem tocar em disco**, e o campo
 `perde_conversas` é a frase: ele é verdadeiro só quando as duas coisas valem ao
-mesmo tempo — esta versão começa vazia **e** existe conversa em outra. Numa
-máquina em que nunca houve conversa nenhuma não há o que avisar, e avisar ali é
-ensinar a ignorar o aviso.
+mesmo tempo — esta linha começa vazia **e** existe conversa em outro lugar
+(noutra linha do depósito, ou na pasta do próprio app). Numa máquina em que
+nunca houve conversa nenhuma não há o que avisar, e avisar ali é ensinar a
+ignorar o aviso.
+
+A tela diz, **antes** de abrir outra linha, que as conversas de uma não aparecem
+na outra: no painel de servidores, ao entrar, e na tela de preparar, ao
+hospedar. Sem a palavra «linha»: o ADR 0033 a tirou do texto de tela, e a frase
+diz «Servidor 0.15».
 
 **A cópia também pode parar no meio, e ela tem o marcador dela.** A instalação
 separa «a pasta existe» de «a pasta chegou inteira» com o `INSTALADA`, escrito
-por último; o diretório de dados passa a ter o equivalente, um `PRONTA` escrito
-depois da cópia terminar. Sem ele, uma semeadura interrompida — a máquina
-desliga durante a cópia — deixava a pasta da versão nova criada e pela metade,
-e a abertura seguinte a lia como «esta versão já tem os dados dela»: a versão
-abria sem as conversas e **nada era dito**. Com o marcador, aquela pasta é o
-que é — um resto —, a semeadura recomeça da origem, que não mudou, e o que a
+por último; o diretório de dados tem o equivalente, o `PRONTA`, escrito depois da
+cópia terminar. Sem ele, uma semeadura interrompida deixava a pasta criada e
+pela metade, e a abertura seguinte a lia como «esta linha já tem os dados dela»:
+a linha abria sem as conversas e **nada era dito**. Com o marcador, aquela pasta
+é o que é — um resto —, a semeadura recomeça da origem, que não mudou, e o que a
 tentativa anterior deixou não se mistura com a cópia boa. O marcador da origem
 também não viaja na cópia: copiado primeiro, ele marcaria como inteira uma
 cópia que ainda está no meio.

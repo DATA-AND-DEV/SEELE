@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>executor de MOD · motor dentro do iframe</title>
+<script>
+// Candidata AB: as duas defesas juntas. Um iframe `sandbox="allow-scripts"`
+// (origem opaca, sem armazenamento) cria de um `blob:` o Worker do motor da
+// candidata A. O código do MOD continua dentro do QuickJS; se um dia escapar
+// do motor, cai num Worker sem a origem da página. A CSP, por cabeçalho, é
+// `default-src 'none'; script-src 'sha256-<este script>' 'wasm-unsafe-eval';
+// worker-src blob:`. Descartável.
+(() => {
+  "use strict";
+  const pai = parent;
+  let w = null;
+  addEventListener("message", (e) => {
+    if (e.source !== pai) return;
+    const m = e.data;
+    if (m.tipo === "iniciar") {
+      try {
+        const url = URL.createObjectURL(new Blob([m.codigoDoWorker], { type: "text/javascript" }));
+        w = new Worker(url);
+        w.onmessage = (ev) => pai.postMessage(ev.data, "*");
+        w.onerror = (ev) => pai.postMessage({ tipo: "falhou", erro: "worker: " + ev.message }, "*");
+        w.postMessage({ tipo: "iniciar", modulo: m.bytes, fonte: m.fonte, capacidades: m.capacidades });
+      } catch (err) {
+        pai.postMessage({ tipo: "falhou", erro: String(err) }, "*");
+      }
+    } else if (w) {
+      w.postMessage(m);
+    }
+  });
+  pai.postMessage({ tipo: "carregou" }, "*");
+})();
+</script>

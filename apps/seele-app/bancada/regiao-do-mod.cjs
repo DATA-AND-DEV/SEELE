@@ -230,6 +230,7 @@ class Elemento {
       fillRect(...a) { pintado.push(["retangulo", ...a]); },
       strokeRect(...a) { pintado.push(["retangulo-vazado", ...a]); },
       fillText(texto) { pintado.push(["texto", texto]); },
+      drawImage(imagem) { pintado.push(["imagem", imagem?.src]); },
       measureText: (texto) => ({ width: String(texto).length * 7 }),
       font: "", textBaseline: "", fillStyle: "", strokeStyle: "",
       lineWidth: 0, lineCap: "", lineJoin: "",
@@ -412,8 +413,64 @@ function relogioDeMentira() {
   };
 }
 
+// ------------------------------------------------------ o `Image` de mentira
+
+/**
+ * O `uri` de uma imagem cujo cabeçalho diz PNG e cujo corpo não abre.
+ *
+ * O sniff do Rust só lê o cabeçalho: bytes assim passam por ele com o papel
+ * `imagem`, cabem no teto, e só o decodificador do navegador os recusa
+ * (pendência 51, item 7).
+ */
+const URI_QUE_NAO_DECODIFICA = "data:image/png;base64,iVBORw0KGgoCORPOQUEBRADO";
+
+/**
+ * O começo do `uri` de uma imagem cuja decodificação só termina quando a prova
+ * manda — é como se sai, ou se pede outra, **no meio** do `decode()`.
+ */
+const URI_QUE_DEMORA = "data:image/png;base64,iVBORw0KGgoDEMORA";
+
+/**
+ * Um `Image` de mentira, com o `decode()` que a região espera.
+ *
+ * Por padrão a imagem decodifica, que é o caso de toda mídia que chega certa.
+ * Duas exceções, pelo `uri`:
+ * - `URI_QUE_NAO_DECODIFICA`: o `decode()` recusa, como o navegador recusa um
+ *   corpo corrompido (`EncodingError`);
+ * - um que começa com `URI_QUE_DEMORA`: o `decode()` fica em `Imagem.presas`
+ *   (`{ src, pronto, falhou }`) até a prova soltar.
+ *
+ * `Imagem.decodificadas` anota, em ordem, cada `uri` que alguém mandou
+ * decodificar: é por ela que uma prova sabe que o caminho passou pelo
+ * `decode()`, e não só pelo `src`.
+ */
+function imagemDeMentira() {
+  class Imagem {
+    constructor() {
+      this.src = "";
+    }
+    decode() {
+      Imagem.decodificadas.push(this.src);
+      if (this.src === URI_QUE_NAO_DECODIFICA) {
+        return Promise.reject(new Error("EncodingError: The source image cannot be decoded."));
+      }
+      if (this.src.startsWith(URI_QUE_DEMORA)) {
+        return new Promise((pronto, falhou) => Imagem.presas.push({ src: this.src, pronto, falhou }));
+      }
+      return Promise.resolve();
+    }
+  }
+  Imagem.decodificadas = [];
+  Imagem.presas = [];
+  return Imagem;
+}
+
 /**
  * Um contexto com o DOM mínimo e `mods-regiao.js` dentro.
+ *
+ * O `Image` é sempre o de mentira (`imagemDeMentira`), e sai em `Imagem`: a
+ * região só dá uma imagem por pronta depois do `decode()`, e sem um `Image` no
+ * contexto o `new Image()` lançaria.
  *
  * @param {object} opcoes `{ audio, relogio, console }`: o WebAudio de mentira
  *   desta prova (`audioDeMentira`), um relógio que só anda quando ela manda
@@ -431,6 +488,7 @@ function bancada(opcoes = {}) {
   doc.body = doc.createElement("body");
   // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
   const Audio = opcoes.audio ?? audioDeMentira();
+  const Imagem = imagemDeMentira();
 
   const contexto = vm.createContext({
     console: opcoes.console ?? console,
@@ -444,6 +502,7 @@ function bancada(opcoes = {}) {
     atob,
     AudioContext: Audio,
     OfflineAudioContext: Audio.ForaDoTempo,
+    Image: Imagem,
     requestAnimationFrame: (fn) => {
       quadros.push(fn);
       return quadros.length;
@@ -474,6 +533,8 @@ function bancada(opcoes = {}) {
   return {
     doc,
     quadros,
+    /** O `Image` desta janela: o que foi decodificado, e o que está preso. */
+    Imagem,
     RegiaoDeMod: contexto.api.RegiaoDeMod,
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
@@ -508,11 +569,14 @@ function dono(b, midia) {
   const anotadas = [];
   let mudancas = 0;
   const pedidosDeSom = [];
+  const pedidosDeArquivo = [];
   return {
     ditos,
     registrados,
     anotadas,
     pedidosDeSom,
+    /** O que a região mandou ao seletor do sistema, um pedido por clique. */
+    pedidosDeArquivo,
     /** Quantas vezes a região avisou que o estado de uma mídia mudou. */
     mudancas: () => mudancas,
     api: {
@@ -541,6 +605,12 @@ function dono(b, midia) {
       },
       midiaMudou: () => {
         mudancas += 1;
+      },
+      // O seletor do sistema, que aqui só anota o pedido e responde como
+      // quem fechou sem escolher.
+      escolherArquivo: (pedido) => {
+        pedidosDeArquivo.push(pedido);
+        return Promise.resolve(null);
       },
     },
   };
@@ -1491,6 +1561,32 @@ function aChaveDoCampoNaoPartePar() {
   r.soltar();
 }
 
+/**
+ * **A finalidade de um pedido de arquivo é cortada por ponto de código** (K1-m2,
+ * o mesmo defeito da chave do campo, em `pedidoDeArquivo`). Ela vai pelo
+ * `invoke("escolher_para_o_mod")` até um `Option<String>` do Rust, e metade de
+ * um par substituto na posição 200 é uma cadeia que o `serde_json` recusa: o
+ * corpo inteiro volta recusado, e o seletor nem abre.
+ */
+async function aFinalidadeDoArquivoNaoPartePar() {
+  const caso = "a finalidade do arquivo";
+  const b = bancada();
+  const d = dono(b);
+  const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const finalidade = `${"a".repeat(199)}😀`;
+  r.aplicar([{ forma: "arquivo", chave: "retrato", dentro: "ENVIAR", finalidade }]);
+  acharTag(r.raiz, "button")?.disparar("click");
+  await volta();
+  const pedida = d.pedidosDeArquivo[0]?.finalidade;
+  confere(
+    caso,
+    typeof pedida === "string" && pedida.isWellFormed() && pedida === finalidade,
+    "a finalidade de 200 pontos de código, terminada num par substituto, foi cortada pelo meio do par: o "
+      + `\`serde_json\` recusa o pedido inteiro, e o seletor não abre: ${JSON.stringify(pedida?.slice(-3))}`,
+  );
+  r.soltar();
+}
+
 function oRodapeEReconciliadoSemMoverOBotao() {
   const b = bancada();
   const d = dono(b);
@@ -1727,6 +1823,15 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       `recusa dita · ${nome}`,
       !d.anotadas.some((texto) => texto.includes("[object Object]")),
       `a recusa do Rust virou «[object Object]»: ${JSON.stringify(d.anotadas)}`,
+    );
+    // **E anotada**, para a aba DIAGNÓSTICO (pendência 49, item 5): o fundo de
+    // uma tela não chamava `anotarMidia`, e a recusa dele só existia no
+    // `seele.log` e no evento do MOD.
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      `recusa anotada · ${nome}`,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && anotadas[0].motivo.includes(pedaco),
+      `o fundo recusado da tela não ficou anotado «recusada» com o motivo, e a aba não o conta: ${JSON.stringify(anotadas)}`,
     );
     regiao.soltar();
   }
@@ -2251,6 +2356,553 @@ async function oFundoEORetratoTambemDizemOEstado() {
         + "DIAGNÓSTICO diria «carregando» de algo que já foi recusado",
     );
     umaRegiao.soltar();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 10b. Uma imagem só vale depois do `decode()` (pendência 51, item 7).
+// ---------------------------------------------------------------------------
+
+/**
+ * **O cabeçalho diz imagem, e o corpo não abre.** O sniff do Rust só lê o
+ * cabeçalho: bytes com o começo de um PNG e o corpo corrompido chegam com o
+ * papel `imagem` e cabem no teto. Até a 0.16, os três caminhos da região que
+ * pintam imagem sem um `<img>` que avise — o retrato, o fundo de mídia (por
+ * CSS) e o fundo de tela (só `onload`) — davam essa imagem por «pronta» e
+ * ficavam calados: um quadrado vazio na tela, e nenhuma linha no registro, no
+ * evento do MOD ou na aba DIAGNÓSTICO.
+ *
+ * Agora a imagem só vale depois do `decode()`, e a recusa dele cai no
+ * `recusar` de `.then(aplicar, recusar)`, o mesmo da busca: anotada
+ * «recusada», dita ao registro, dita ao MOD onde o caminho já falava com ele —
+ * o fundo por `midia`/`falhou`, o fundo de tela por `tela`/`fundo-falhou` — e
+ * os bytes que ela reservou voltam à conta. O tropeço de aplicar cai no
+ * `.catch` do fim, e não aqui (ver `aplicarQueLancaNaoViraRecusa`).
+ * **O retrato não fala com o MOD**, e continua sem falar: um evento novo seria
+ * promessa nova da API.
+ *
+ * E o `<img>` do retrato ganha o ouvinte de `error` que o da mídia já tinha
+ * (`naoAbriu`, em `montarMidia`): a imagem que decodificou e depois não abriu
+ * vai pelo mesmo caminho de recusa.
+ */
+async function umaImagemQueNaoDecodificaERecusadaEDita() {
+  const casos = [
+    {
+      nome: "o retrato",
+      no: { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
+      evento: null,
+      nadaPintado: (elem) => !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial",
+    },
+    {
+      nome: "o fundo de mídia",
+      no: { forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+      evento: { nome: "midia", estado: "falhou" },
+      nadaPintado: (elem) => !elem.style.backgroundImage,
+    },
+    {
+      nome: "o fundo de tela",
+      no: { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } },
+      evento: { nome: "tela", estado: "fundo-falhou" },
+      nadaPintado: (elem) => !elem.__fundoDaTela?.imagem,
+    },
+  ];
+  for (const caso of casos) {
+    const nome = `${caso.nome} que não decodifica`;
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 40 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([caso.no]);
+    // O fundo de uma tela só é buscado quando ela tem onde pintar, e a
+    // primeira montagem ainda não tem pincel.
+    if (caso.no.forma === "tela") {
+      regiao.raiz.children[0].darPincel();
+      regiao.aplicar([caso.no]);
+    }
+    await assentar();
+    const elem = regiao.raiz.children[0];
+    confere(
+      nome,
+      b.Imagem.decodificadas.includes(URI_QUE_NAO_DECODIFICA),
+      "a imagem não passou pelo `decode()`: o caminho a deu por pronta sem saber se ela abre",
+    );
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      nome,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && /não decodificou/.test(anotadas[0].motivo),
+      "a imagem que o navegador não decodifica não ficou anotada «recusada» com o motivo, e a aba "
+        + `DIAGNÓSTICO a conta de pé: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      nome,
+      d.anotadas.some((texto) => texto.includes(`«${caso.no.chave}»`) && texto.includes("não decodificou")),
+      `a recusa não chegou ao registro com a chave e o motivo, e o seele.log fica calado: ${JSON.stringify(d.anotadas)}`,
+    );
+    const aoMod = d.ditos.filter((dito) => dito.nome === "midia" || dito.nome === "tela");
+    if (caso.evento) {
+      confere(
+        nome,
+        aoMod.length === 1
+          && aoMod[0].nome === caso.evento.nome
+          && aoMod[0].chave === caso.no.chave
+          && aoMod[0].estado === caso.evento.estado
+          && /não decodificou/.test(String(aoMod[0].porque ?? "")),
+        `o MOD não recebeu «${caso.evento.nome}»/«${caso.evento.estado}» com o motivo, e acha que a imagem `
+          + `está na tela: ${JSON.stringify(aoMod)}`,
+      );
+    } else {
+      confere(
+        nome,
+        aoMod.length === 0,
+        `o retrato passou a falar com o MOD, e um evento novo é promessa nova da API: ${JSON.stringify(aoMod)}`,
+      );
+    }
+    confere(
+      nome,
+      regiao.bytesDeMidia === 0,
+      `a imagem recusada continua ocupando ${regiao.bytesDeMidia} bytes do teto da região`,
+    );
+    confere(nome, caso.nadaPintado(elem), "a imagem que não decodificou foi pintada assim mesmo");
+    regiao.soltar();
+  }
+
+  // **O `<img>` do retrato que decodificou e depois não abriu.** O mesmo
+  // caminho de recusa: a inicial volta, os bytes voltam, a aba e o registro
+  // dizem — e o MOD continua sem evento.
+  {
+    const nome = "o retrato cujo <img> não abriu";
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 40 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" }]);
+    await assentar();
+    const elem = regiao.raiz.children[0];
+    const img = acharTag(elem, "img");
+    confere(
+      nome,
+      Boolean(img) && regiao.midiasAnotadas()[0]?.situacao === "pronta" && regiao.bytesDeMidia === 40,
+      `o retrato que decodifica não montou: ${JSON.stringify(regiao.midiasAnotadas())}, ${regiao.bytesDeMidia} bytes`,
+    );
+    img?.disparar("error");
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      nome,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && /não decodificou/.test(anotadas[0].motivo),
+      `o <img> do retrato que não abriu continuou anotado «pronta»: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      nome,
+      !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial" && regiao.bytesDeMidia === 0,
+      "o <img> quebrado continuou cobrindo a inicial, ou os bytes dele continuam no teto: "
+        + `img=${Boolean(acharTag(elem, "img"))}, estado=${elem.dataset.estadoDoRetrato}, ${regiao.bytesDeMidia} bytes`,
+    );
+    confere(
+      nome,
+      d.anotadas.some((texto) => texto.includes("«rosto»")),
+      `o <img> do retrato que não abriu não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      nome,
+      !d.ditos.some((dito) => dito.nome === "midia"),
+      `o retrato passou a falar com o MOD: ${JSON.stringify(d.ditos)}`,
+    );
+    confere(nome, img?.ouvintesDePe() === 0, "o ouvinte de `error` ficou preso ao <img> que saiu");
+    regiao.soltar();
+  }
+}
+
+/**
+ * **O fundo de uma tela diz em que pé está, como as outras mídias** (pendência
+ * 49, item 5; T2 m4 do Plano 1D). `buscarFundoDaTela` carregava a imagem sem
+ * chamar `anotarMidia`: um mapa carregando, pronto ou recusado não era contado
+ * por bloco nenhum da aba DIAGNÓSTICO.
+ *
+ * «carregando» ao pedir, «pronta» depois do `decode()`, e a anotação some
+ * quando a declaração tira o fundo e quando a tela sai — contar o mapa de uma
+ * tela que não existe mais é a aba mentindo. E a recusa de um pedido que o MOD
+ * já trocou não pisa a anotação do pedido de agora.
+ */
+async function oFundoDeTelaDizOEstado() {
+  const caso = "o fundo de tela anotado";
+  const b = bancada();
+  const d = dono(b, (caminho) => Promise.resolve({ uri: `${URI_QUE_DEMORA}-${caminho}`, papel: "imagem", bytes: 8 }));
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tela = (fundo) => ({
+    forma: "tela", chave: "mapa", largura: 10, altura: 10, ...(fundo ? { fundo: { fonte: fundo } } : {}),
+  });
+  regiao.aplicar([tela("img/a.png")]);
+  const elem = regiao.raiz.children[0];
+  const pincel = elem.darPincel();
+  regiao.aplicar([tela("img/a.png")]);
+  await assentar();
+  const situacoes = () => regiao.midiasAnotadas().map((m) => m.situacao).join(",");
+  confere(caso, situacoes() === "carregando", `o fundo pedido não disse que está carregando: «${situacoes()}»`);
+
+  b.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(
+    caso,
+    situacoes() === "pronta" && pincel.pintado.some((p) => p[0] === "imagem"),
+    `o fundo decodificado não virou «pronta», ou não foi pintado: «${situacoes()}», ${JSON.stringify(pincel.pintado)}`,
+  );
+
+  // A declaração tira o fundo: a tela fica, e a anotação sai.
+  regiao.aplicar([tela(null)]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `a declaração tirou o fundo e a aba continua contando o mapa: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+
+  // **A recusa de um pedido trocado.** O MOD pede «b» e, enquanto ela
+  // decodifica, troca para «c»: a recusa de «b» chega depois, e a anotação
+  // que vale é a de «c».
+  regiao.aplicar([tela("img/b.png")]);
+  await assentar();
+  regiao.aplicar([tela("img/c.png")]);
+  await assentar();
+  const [deB, deC] = [b.Imagem.presas.shift(), b.Imagem.presas.shift()];
+  deC?.pronto();
+  await assentar();
+  deB?.falhou(new Error("EncodingError: The source image cannot be decoded."));
+  await assentar();
+  confere(
+    caso,
+    situacoes() === "pronta",
+    `a recusa de um fundo que o MOD já trocou pisou a anotação do fundo de agora: «${situacoes()}»`,
+  );
+
+  // Um fundo declarado sem origem não é mídia nenhuma: o «pronta» do anterior
+  // não fica valendo por ele.
+  regiao.aplicar([{ ...tela(null), fundo: {} }]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `um fundo sem origem herdou a anotação do fundo anterior: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+
+  // A tela sai da declaração: a anotação sai com ela.
+  regiao.aplicar([tela("img/d.png")]);
+  await assentar();
+  b.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(caso, situacoes() === "pronta", `o fundo «d» não ficou pronto: «${situacoes()}»`);
+  regiao.aplicar([]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `a tela saiu e o fundo dela continua anotado: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+  regiao.soltar();
+
+  // **A sessão acaba no meio do `decode()`**: o mapa que termina de
+  // decodificar não vira o fundo de uma tela que já não fala com ninguém.
+  const b2 = bancada();
+  const d2 = dono(b2, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 8 }));
+  const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+  regiao2.aplicar([tela("img/e.png")]);
+  const elem2 = regiao2.raiz.children[0];
+  const pincel2 = elem2.darPincel();
+  regiao2.aplicar([tela("img/e.png")]);
+  await assentar();
+  d2.api.podeFalar = () => false;
+  b2.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(
+    `${caso} · a sessão acaba no meio`,
+    !elem2.__fundoDaTela?.imagem && !pincel2.pintado.some((p) => p[0] === "imagem"),
+    `o mapa decodificado depois de a sessão acabar virou o fundo da tela: ${JSON.stringify(pincel2.pintado)}`,
+  );
+  regiao2.soltar();
+}
+
+/**
+ * O `anotarRecusa` de verdade, o de `base.js`, até um `invoke` de mentira.
+ *
+ * O dono de mentira desta bancada anota a frase que a região manda, e só. Quem
+ * põe o `onde` (`recusa-de-mod`), o id do MOD na frente da frase e o id em
+ * campo próprio é o dono de `base.js` (`donoDaRegiao`), e quem leva a linha ao
+ * comando `registrar_da_janela` é `registrarNoAnfitriao`. As duas declarações
+ * de verdade rodam aqui num contexto próprio, como no bloco «o elo» de
+ * `contribuicoes-e-camadas.cjs`, com o que elas leem ao montar o dono.
+ */
+function registroDeVerdade() {
+  const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+  const invocados = [];
+  const ctx = vm.createContext({
+    console,
+    geracaoDaSessao: 7,
+    modsCarregados: new Map(),
+    invoke: (cmd, args) => {
+      invocados.push({ cmd, args });
+      return Promise.resolve();
+    },
+    avisarQueAMidiaMudou: () => {},
+  });
+  for (const de of ["function registrarNoAnfitriao(", "function donoDaRegiao("]) {
+    const inicio = base.indexOf(de);
+    const fim = base.indexOf("\n}\n", inicio);
+    if (inicio < 0 || fim < inicio) throw new Error(`«${de}» mudou de forma, e o recorte de base.js não a achou`);
+    vm.runInContext(base.slice(inicio, fim + 3), ctx);
+  }
+  return {
+    /** Os argumentos de cada `registrar_da_janela` que saiu. */
+    linhas: () => invocados.filter((i) => i.cmd === "registrar_da_janela").map((i) => i.args),
+    /** O `anotarRecusa` do dono de verdade de um MOD carregado, numa sessão de pé. */
+    anotarRecusaDe: (id) => {
+      const instancia = { geracao: 7, admite: () => true };
+      ctx.modsCarregados.set(id, instancia);
+      return ctx.donoDaRegiao({ id, hash: "h" }, instancia).anotarRecusa;
+    },
+  };
+}
+
+/**
+ * **Um passo de aplicar que lança não é uma recusa** (rodada 1 de conserto do
+ * lote K2). Com o `decode()` encadeado dentro do `then`, o `catch` da recusa
+ * passou a pegar também o que lança **depois** de a imagem ter decodificado —
+ * um `midiaMudou` de dono que lança, um `drawImage` que lança. A imagem já
+ * estava na tela, e o `catch` a dizia «recusada», devolvia os bytes dela e
+ * mandava `falhou` ao MOD: a aba, a conta e o MOD diziam o contrário da tela.
+ *
+ * Só a busca e o `decode()` caem na recusa. O estado fica o que a tela mostra:
+ * montado, contado e «pronta». O tropeço é dito no `console` da janela e **no
+ * `seele.log` de quem opera**, pelo `anotarRecusa` de verdade
+ * (`registroDeVerdade`): uma linha só, no `onde` das outras linhas de mídia
+ * (`recusa-de-mod`), com o id do MOD na frente e em campo próprio — e não como
+ * a recusa que ela não é. E nenhuma promessa fica sem quem a pegue.
+ */
+async function aplicarQueLancaNaoViraRecusa() {
+  const soltas = [];
+  const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+  process.on("unhandledRejection", pegar);
+  const comAvisos = () => {
+    const avisos = [];
+    const janela = { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) };
+    return { avisos, b: bancada({ console: janela }) };
+  };
+  /** O tropeço chegou ao `seele.log` como uma linha só, do MOD «a/b», e não como recusa. */
+  const conferirORegistro = (nome, registro, chave, pedaco) => {
+    const linhas = registro.linhas();
+    const linha = linhas[0];
+    confere(
+      nome,
+      linhas.length === 1
+        && linha.nivel === "aviso" && linha.onde === "recusa-de-mod" && linha.modId === "a/b"
+        && String(linha.oQue).startsWith(`a/b: mídia «${chave}»`)
+        && String(linha.oQue).includes("tropeçou") && String(linha.oQue).includes(pedaco)
+        && !String(linha.oQue).includes("falhou no"),
+      "o tropeço de aplicar não chegou ao seele.log como uma linha só, no `onde` das linhas de mídia e com o id "
+        + `do MOD em campo próprio — ou chegou dito como recusa: ${JSON.stringify(linhas)}`,
+    );
+  };
+  try {
+    // O retrato e o fundo de mídia: o `midiaMudou` do dono passa a lançar
+    // depois do «carregando», e o «pronta» o chama.
+    const casos = [
+      [
+        "o retrato",
+        { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
+        (elem) => Boolean(acharTag(elem, "img")) && elem.dataset.estadoDoRetrato === "imagem",
+      ],
+      [
+        "o fundo de mídia",
+        { forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+        (elem) => Boolean(elem.style.backgroundImage),
+      ],
+    ];
+    for (const [qual, no, montou] of casos) {
+      const nome = `aplicar que lança · ${qual}`;
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 40 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      regiao.aplicar([no]);
+      await assentar();
+      d.api.midiaMudou = () => {
+        throw new Error("o aviso da gestão caiu");
+      };
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const elem = regiao.raiz.children[0];
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        montou(elem) && regiao.bytesDeMidia === 40 && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "a imagem decodificou e o passo de aplicar lançou, e o caminho a tratou como recusa: a tela, a conta e a "
+          + `aba ficaram em desacordo — montou=${montou(elem)}, ${regiao.bytesDeMidia} bytes, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "midia"),
+        `o tropeço de aplicar foi dito ao MOD como recusa: ${JSON.stringify(d.ditos)}`,
+      );
+      conferirORegistro(nome, registro, no.chave, "o aviso da gestão caiu");
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o aviso da gestão caiu")),
+        `o tropeço de aplicar não foi dito no console da janela: ${JSON.stringify(avisos)}`,
+      );
+      d.api.midiaMudou = () => {};
+      regiao.soltar();
+    }
+
+    // O fundo de tela: o `drawImage` do pincel lança ao repintar com o mapa.
+    {
+      const nome = "aplicar que lança · o fundo de tela";
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 8 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      const tela = { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } };
+      regiao.aplicar([tela]);
+      const elem = regiao.raiz.children[0];
+      const pincel = elem.darPincel();
+      pincel.drawImage = () => {
+        throw new Error("o pincel caiu");
+      };
+      regiao.aplicar([tela]);
+      await assentar();
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        Boolean(elem.__fundoDaTela?.imagem) && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "o mapa decodificou e a repintura lançou, e o fundo foi anotado como recusado com a imagem posta: "
+          + `imagem=${Boolean(elem.__fundoDaTela?.imagem)}, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "tela"),
+        `o tropeço da repintura saiu como «fundo-falhou» ao MOD: ${JSON.stringify(d.ditos)}`,
+      );
+      conferirORegistro(nome, registro, "mapa", "o pincel caiu");
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o pincel caiu")),
+        `o tropeço da repintura não foi dito no console da janela: ${JSON.stringify(avisos)}`,
+      );
+      regiao.soltar();
+    }
+    await assentar();
+  } finally {
+    process.off("unhandledRejection", pegar);
+  }
+  confere(
+    "aplicar que lança",
+    soltas.length === 0,
+    `o tropeço de aplicar terminou numa promessa que ninguém pegou: ${soltas.join(" | ")}`,
+  );
+}
+
+/**
+ * **Os bytes são reservados antes do `decode()`, e devolvidos quando ele
+ * recusa.** Somar só depois abriria uma corrida: duas imagens decodificando
+ * juntas passariam as duas pela conferência do teto, cada uma vendo a conta
+ * sem a outra. É a mesma regra do «Contados **agora**» do som, em
+ * `montarMidia`.
+ *
+ * E as três perguntas de sempre depois do `await` do `decode()`: quem sai no
+ * meio dele não vê a imagem montada, nem os bytes contados.
+ */
+async function osBytesSaoReservadosAntesDoDecode() {
+  const nos = {
+    retrato: (chave, fonte) => ({ forma: "retrato", chave, fonte, inicial: "A" }),
+    fundo: (chave, fonte) => ({ forma: "caixa", chave, fundoDeMidia: { fonte }, dentro: "Lia" }),
+  };
+  for (const [forma, no] of Object.entries(nos)) {
+    const nome = `a reserva · ${forma}`;
+    const b = bancada();
+    const metade = Math.floor(b.PERFIS.regiao.bytesDeMidia / 2) + 1;
+    const d = dono(b, (caminho) => Promise.resolve({ uri: `${URI_QUE_DEMORA}-${caminho}`, papel: "imagem", bytes: metade }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([no("a", "img/a.png"), no("b", "img/b.png")]);
+    await assentar();
+    confere(
+      nome,
+      b.Imagem.presas.length === 1 && regiao.bytesDeMidia === metade,
+      "duas imagens que juntas passam do teto foram as duas decodificar: a conta só soma depois do "
+        + `\`decode()\`, e as duas cabem cada uma sem a outra (${b.Imagem.presas.length} decodificando, `
+        + `${regiao.bytesDeMidia} bytes contados)`,
+    );
+    const situacoes = () => regiao.midiasAnotadas().map((m) => m.situacao).sort().join(",");
+    confere(nome, situacoes() === "carregando,recusada", `a segunda não foi recusada pelo teto: ${situacoes()}`);
+    b.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      nome,
+      situacoes() === "pronta,recusada" && regiao.bytesDeMidia === metade,
+      `a que decodificou não ficou pronta, ou a conta mudou: ${situacoes()}, ${regiao.bytesDeMidia} bytes`,
+    );
+    regiao.soltar();
+
+    // **Sair no meio do `decode()`.** A decodificação termina depois, e nada
+    // monta nem fica contado.
+    const b2 = bancada();
+    const d2 = dono(b2, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-saida`, papel: "imagem", bytes: 40 }));
+    const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+    regiao2.aplicar([no("c", "img/c.png")]);
+    await assentar();
+    const elem = regiao2.raiz.children[0];
+    confere(
+      `${nome} · sair no meio`,
+      b2.Imagem.presas.length === 1 && regiao2.bytesDeMidia === 40,
+      `a imagem não ficou reservada enquanto decodificava: ${regiao2.bytesDeMidia} bytes`,
+    );
+    regiao2.soltar();
+    b2.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      `${nome} · sair no meio`,
+      regiao2.bytesDeMidia === 0 && !acharTag(elem, "img") && !elem.style.backgroundImage,
+      `a imagem montou depois de a região sair, ou os bytes ficaram contados: ${regiao2.bytesDeMidia} bytes`,
+    );
+
+    // **O `decode()` que recusa devolve a reserva.**
+    const b3 = bancada();
+    const d3 = dono(b3, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-recusa`, papel: "imagem", bytes: 40 }));
+    const regiao3 = new b3.RegiaoDeMod("a/b", d3.api, b3.raiz());
+    regiao3.aplicar([no("d", "img/d.png")]);
+    await assentar();
+    b3.Imagem.presas[0]?.falhou(new Error("EncodingError: The source image cannot be decoded."));
+    await assentar();
+    confere(
+      `${nome} · a recusa devolve`,
+      regiao3.bytesDeMidia === 0 && regiao3.midiasAnotadas()[0]?.situacao === "recusada",
+      `a imagem que o \`decode()\` recusou continua ocupando ${regiao3.bytesDeMidia} bytes do teto: `
+        + `${JSON.stringify(regiao3.midiasAnotadas())}`,
+    );
+    regiao3.soltar();
+
+    // **A sessão acaba no meio do `decode()`.** A região continua de pé, mas
+    // `podeFalar()` já diz que esta instância não é a de agora: a imagem que
+    // termina de decodificar não monta, e a reserva volta — uma vez só, e o
+    // descarte que vem depois não a devolve de novo.
+    const b4 = bancada();
+    const d4 = dono(b4, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 40 }));
+    const regiao4 = new b4.RegiaoDeMod("a/b", d4.api, b4.raiz());
+    regiao4.aplicar([no("e", "img/e.png")]);
+    await assentar();
+    const elem4 = regiao4.raiz.children[0];
+    d4.api.podeFalar = () => false;
+    b4.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      b4.Imagem.presas.length === 1 && regiao4.bytesDeMidia === 0
+        && !acharTag(elem4, "img") && !elem4.style.backgroundImage,
+      "a imagem decodificada depois de a sessão acabar montou, ou ficou contada: "
+        + `${regiao4.bytesDeMidia} bytes, img=${Boolean(acharTag(elem4, "img"))}, `
+        + `fundo=${JSON.stringify(elem4.style.backgroundImage ?? "")}`,
+    );
+    regiao4.soltar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      regiao4.bytesDeMidia === 0,
+      `o descarte devolveu de novo a reserva que já tinha voltado: ${regiao4.bytesDeMidia} bytes`,
+    );
   }
 }
 
@@ -3484,6 +4136,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     oRodapeEReconciliadoSemMoverOBotao,
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     aChaveDoCampoNaoPartePar,
+    aFinalidadeDoArquivoNaoPartePar,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,
@@ -3502,6 +4155,10 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     umDonoSemAnotarRecusaNaoTrocaARecusaDoMod,
     aMidiaAnotadaDizOsTresEstados,
     oFundoEORetratoTambemDizemOEstado,
+    umaImagemQueNaoDecodificaERecusadaEDita,
+    oFundoDeTelaDizOEstado,
+    osBytesSaoReservadosAntesDoDecode,
+    aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
     oSomQueNaoDecodificaEDito,
