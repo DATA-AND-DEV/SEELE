@@ -1687,6 +1687,9 @@ mod o_launcher_ligado_ao_produto {
     }
 
     /// Uma pasta de app da 0.15: um banco com o esquema pedido e a identidade.
+    /// O esquema é gravado como o `migrate()` grava: uma linha por migração,
+    /// até a 13 da 0.15, e a pedida por último. Só as que precisa: um esquema
+    /// «do futuro distante» não vira milhares de inserções.
     fn config_da_0_15(dir: &std::path::Path, esquema: i64) {
         let banco = rusqlite::Connection::open(dir.join("seele.db")).unwrap();
         banco
@@ -1694,9 +1697,9 @@ mod o_launcher_ligado_ao_produto {
                 "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);",
             )
             .unwrap();
-        for v in 1..=esquema {
+        for v in (1..=esquema.min(super::ESQUEMA_DA_0_15)).chain(std::iter::once(esquema)) {
             banco
-                .execute("INSERT INTO schema_version VALUES (?1, 0)", [v])
+                .execute("INSERT OR IGNORE INTO schema_version VALUES (?1, 0)", [v])
                 .unwrap();
         }
         std::fs::write(dir.join("identity.key"), b"a chave da pessoa").unwrap();
@@ -1735,18 +1738,28 @@ mod o_launcher_ligado_ao_produto {
 
     /// Um banco que a 0.16 já migrou não é dado da 0.15: copiá-lo daria à
     /// 0.15.2 um banco do futuro, e o `migrate()` dela não recusa.
+    ///
+    /// **O 14 é o caso que importa, e fica**: é o esquema da 0.16 (a migração
+    /// 14 da F1 põe `api` em `mods`), ou seja, a pasta que a 0.16 já migrou. Ele
+    /// também é o que pega uma regressão que passasse a comparar com o esquema
+    /// do próprio build — que agora é 14, e 14 > 14 é falso. O 9999 cobre o
+    /// futuro distante, e sozinho não pegaria aquela regressão.
     #[test]
     fn um_banco_ja_migrado_nao_vira_dado_da_linha_legada() {
-        let dir = tempfile::tempdir().unwrap();
-        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15 + 1);
-        let config = dir.path().to_string_lossy().into_owned();
-        assert_eq!(
-            super::primeira_abertura(&config),
-            super::DadosDaLinhaLegada::BancoJaMigrado {
-                esquema: super::ESQUEMA_DA_0_15 + 1
-            }
-        );
-        assert!(!Deposito::em(super::raiz_do_deposito(&config)).tem_dados_da_linha(&linha("0.15")));
+        for esquema in [super::ESQUEMA_DA_0_15 + 1, 9999] {
+            let dir = tempfile::tempdir().unwrap();
+            config_da_0_15(dir.path(), esquema);
+            let config = dir.path().to_string_lossy().into_owned();
+            assert_eq!(
+                super::primeira_abertura(&config),
+                super::DadosDaLinhaLegada::BancoJaMigrado { esquema },
+                "com o esquema {esquema}"
+            );
+            assert!(
+                !Deposito::em(super::raiz_do_deposito(&config)).tem_dados_da_linha(&linha("0.15")),
+                "com o esquema {esquema}, um banco do futuro virou dado da linha 0.15"
+            );
+        }
     }
 
     /// O banco de um servidor guardado também conta: um só migrado já basta
