@@ -89,3 +89,35 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - **A re-revisão achou um defeito nesse guarda:** ele casava com o próprio texto num renome, o que foi medido. A assinatura passou a ser ancorada no começo da linha, e o guarda grita quando o alvo some.
   - **Para a integração.** O `sementes_do_fuzz.rs` só mudou no trecho do `datagrama_do_encontro`: os campos de `Marcas` viraram os leitores. O `seele-app` e os testes do `seele-ffi` não rodaram no lote, e o risco é baixo, porque nenhum leitor de campo de `Marcas` está fora do diff.
   - **Para o M2:** o doc de `onde_mora_hoje` ficou atrás do código, como manda o brief.
+- **C → integrado** (`fbeff8e..c18a287`, merge `7979cda`), em 4 rodadas.
+  - **Commits por item:** P51-05 `0844129`, P51-08 `37a5d90`, P51-10 com a metade do app do P51-26 `9f90888`, P51-12 `53587a1`.
+  - **A revisão achou um Importante que nascia de uma decisão do controlador.** As linhas INFO servidas dividiam o balde com os avisos, e um aviso segurado não atrasava: ele era descartado. Com mais de 32 mídias, a recusa da 35ª sumia. É o defeito de 23/09 de volta.
+  - **A decisão foi corrigida:** um balde por MOD **e por classe** (`Aviso`, `Servida`, `Depuracao`), com o transbordo também por classe.
+  - **O resto das rodadas:**
+    - o `revogar` diz as contas fora do cadeado, por `Session::dizer_as_contas_do_registro`, que o lote F vai chamar na saída do app;
+    - `transbordo=true` e `mod_id_ilegivel`;
+    - um guarda que prende os comandos aos baldes da sessão;
+    - a linha DEBUG da mídia vinda do servidor ficou sob teto, com um teste que prova a classe contra `Aviso`.
+  - **Ficam para o Z decidir:** quatro portas sem balde fora do lote (`pedido_a_caminho_dito`, `pedido_recusado_na_saida_dito`, `mod_nativo_colher` e `mod_nativo_entregar`).
+- **Onda 1 fechada**: os seis lotes estão em `0.16/lotes`, no `7979cda`.
+  - **A conferência do branch combinado:** o fmt e o `clippy --workspace --all-targets --all-features -D warnings` saíram limpos. Os testes passaram:
+
+    | alvo | testes |
+    |---|---|
+    | `seele-app --bin` | 211 |
+    | `seele-app --test frontend` | 261 |
+    | `seele-core --lib` | 432 |
+    | `seele-ffi --lib` | 124, mais 1 ignorado |
+    | `seele-proto` | 259, 5, 1 e 3 doctests |
+    | `seele-server --lib` | 555 |
+    | `xtask` | 50, 4, 96, 1, 1 e 2 |
+    | `check-runtime` | verde |
+    | conformidade | 15, 15, 6, 10, 2, 9 e 6 |
+
+    A conformidade rodou `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados` e `anexos`. O `quarto_pelo_link` ficou de fora, por causa da porta 8384.
+  - **Uma medida errada, corrigida.** A primeira rodada do xtask, com um `target/` emprestado de outro worktree, deu três vermelhos no `adr_index`: o binário reaproveitado guardava o `CARGO_MANIFEST_DIR` de outra árvore. Com o `target/` deste worktree, o mesmo teste dá 4 de 4.
+  - **Ficam para as ondas seguintes:**
+    - o F chama `dizer_as_contas_do_registro` em `despedir_se`;
+    - o K3 prova o desenho do bloco «a região e as páginas de cada MOD» em `diagnostico-de-mods.cjs`;
+    - o M2 reescreve o doc de `onde_mora_hoje`.
+  - **Os menores adiados** estão no ledger da frente, para a revisão final e para o Z.
