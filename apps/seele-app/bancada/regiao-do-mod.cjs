@@ -2614,6 +2614,123 @@ async function oFundoDeTelaDizOEstado() {
 }
 
 /**
+ * **Um passo de aplicar que lança não é uma recusa** (rodada 1 de conserto do
+ * lote K2). Com o `decode()` encadeado dentro do `then`, o `catch` da recusa
+ * passou a pegar também o que lança **depois** de a imagem ter decodificado —
+ * um `midiaMudou` de dono que lança, um `drawImage` que lança. A imagem já
+ * estava na tela, e o `catch` a dizia «recusada», devolvia os bytes dela e
+ * mandava `falhou` ao MOD: a aba, a conta e o MOD diziam o contrário da tela.
+ *
+ * Só a busca e o `decode()` caem na recusa. O tropeço de aplicar é dito no
+ * `console` da janela, e o estado fica o que a tela mostra: montado, contado e
+ * «pronta». E nenhuma promessa fica sem quem a pegue.
+ */
+async function aplicarQueLancaNaoViraRecusa() {
+  const soltas = [];
+  const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+  process.on("unhandledRejection", pegar);
+  const comAvisos = () => {
+    const avisos = [];
+    const janela = { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) };
+    return { avisos, b: bancada({ console: janela }) };
+  };
+  try {
+    // O retrato e o fundo de mídia: o `midiaMudou` do dono passa a lançar
+    // depois do «carregando», e o «pronta» o chama.
+    const casos = [
+      [
+        "o retrato",
+        { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
+        (elem) => Boolean(acharTag(elem, "img")) && elem.dataset.estadoDoRetrato === "imagem",
+      ],
+      [
+        "o fundo de mídia",
+        { forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+        (elem) => Boolean(elem.style.backgroundImage),
+      ],
+    ];
+    for (const [qual, no, montou] of casos) {
+      const nome = `aplicar que lança · ${qual}`;
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 40 }));
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      regiao.aplicar([no]);
+      await assentar();
+      d.api.midiaMudou = () => {
+        throw new Error("o aviso da gestão caiu");
+      };
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const elem = regiao.raiz.children[0];
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        montou(elem) && regiao.bytesDeMidia === 40 && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "a imagem decodificou e o passo de aplicar lançou, e o caminho a tratou como recusa: a tela, a conta e a "
+          + `aba ficaram em desacordo — montou=${montou(elem)}, ${regiao.bytesDeMidia} bytes, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "midia") && d.anotadas.length === 0,
+        `o tropeço de aplicar foi dito como recusa ao MOD ou ao registro: ${JSON.stringify(d.ditos)} ${JSON.stringify(d.anotadas)}`,
+      );
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o aviso da gestão caiu")),
+        `o tropeço de aplicar foi engolido calado: ${JSON.stringify(avisos)}`,
+      );
+      d.api.midiaMudou = () => {};
+      regiao.soltar();
+    }
+
+    // O fundo de tela: o `drawImage` do pincel lança ao repintar com o mapa.
+    {
+      const nome = "aplicar que lança · o fundo de tela";
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 8 }));
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      const tela = { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } };
+      regiao.aplicar([tela]);
+      const elem = regiao.raiz.children[0];
+      const pincel = elem.darPincel();
+      pincel.drawImage = () => {
+        throw new Error("o pincel caiu");
+      };
+      regiao.aplicar([tela]);
+      await assentar();
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        Boolean(elem.__fundoDaTela?.imagem) && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "o mapa decodificou e a repintura lançou, e o fundo foi anotado como recusado com a imagem posta: "
+          + `imagem=${Boolean(elem.__fundoDaTela?.imagem)}, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "tela") && d.anotadas.length === 0,
+        `o tropeço da repintura saiu como «fundo-falhou» ao MOD ou ao registro: ${JSON.stringify(d.ditos)} ${JSON.stringify(d.anotadas)}`,
+      );
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o pincel caiu")),
+        `o tropeço da repintura foi engolido calado: ${JSON.stringify(avisos)}`,
+      );
+      regiao.soltar();
+    }
+    await assentar();
+  } finally {
+    process.off("unhandledRejection", pegar);
+  }
+  confere(
+    "aplicar que lança",
+    soltas.length === 0,
+    `o tropeço de aplicar terminou numa promessa que ninguém pegou: ${soltas.join(" | ")}`,
+  );
+}
+
+/**
  * **Os bytes são reservados antes do `decode()`, e devolvidos quando ele
  * recusa.** Somar só depois abriria uma corrida: duas imagens decodificando
  * juntas passariam as duas pela conferência do teto, cada uma vendo a conta
@@ -3974,6 +4091,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     umaImagemQueNaoDecodificaERecusadaEDita,
     oFundoDeTelaDizOEstado,
     osBytesSaoReservadosAntesDoDecode,
+    aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
     oSomQueNaoDecodificaEDito,

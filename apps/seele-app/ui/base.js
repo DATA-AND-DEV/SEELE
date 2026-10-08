@@ -1197,6 +1197,36 @@ function avatarContribuido(pessoaId) {
     avisarQueAMidiaMudou();
   };
   avisarQueAMidiaMudou();
+  // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca e
+  // o `decode()` caem em `recusar`. Um redesenho que lança depois de o avatar
+  // ter virado a imagem da pessoa não o diz «recusado» nem o tira da conta com
+  // o `uri` ainda posto: o tropeço vai ao `console`, e o estado fica o que a
+  // tela mostra (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
+  const aplicar = (midia) => {
+    if (!midia || estado.cancelado) return;
+    if (!dono.podeFalar()) {
+      estado.bytes = 0;
+      return;
+    }
+    estado.uri = midia.uri;
+    estado.situacao = "pronta";
+    avisarQueAMidiaMudou();
+    redesenharAvatares();
+  };
+  const recusar = (falha) => {
+    // A reserva volta antes de qualquer pergunta: um avatar recusado não
+    // ocupa o teto de quem vier depois, nem numa sessão que acabou.
+    estado.bytes = 0;
+    if (estado.cancelado || !dono.podeFalar()) return;
+    const porque = motivoDaFalha(falha);
+    estado.situacao = "recusada";
+    estado.motivo = porque;
+    avisarQueAMidiaMudou();
+    dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
+    // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+    // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+    dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+  };
   const fonte = contribuicao.conteudo.doServidor;
   dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
     .then((midia) => {
@@ -1212,33 +1242,16 @@ function avatarContribuido(pessoaId) {
       // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
       // cima soma os `bytes` dos outros retratos desta instância, e dois
       // avatares decodificando juntos passariam os dois por ela se a reserva
-      // esperasse. A imagem que não abre os devolve, no `catch`.
+      // esperasse. A imagem que não abre os devolve, em `recusar`.
       estado.bytes = midia.bytes;
-      return provarImagem(midia.uri).then(() => {
-        if (estado.cancelado) return;
-        if (!dono.podeFalar()) {
-          estado.bytes = 0;
-          return;
-        }
-        estado.uri = midia.uri;
-        estado.situacao = "pronta";
-        avisarQueAMidiaMudou();
-        redesenharAvatares();
-      });
+      return provarImagem(midia.uri).then(() => midia);
     })
+    .then(aplicar, recusar)
     .catch((falha) => {
-      // A reserva volta antes de qualquer pergunta: um avatar recusado não
-      // ocupa o teto de quem vier depois, nem numa sessão que acabou.
-      estado.bytes = 0;
-      if (estado.cancelado || !dono.podeFalar()) return;
-      const porque = motivoDaFalha(falha);
-      estado.situacao = "recusada";
-      estado.motivo = porque;
-      avisarQueAMidiaMudou();
-      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
-      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
-      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-      dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+      console.warn(
+        `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+        falha,
+      );
     });
   return null;
 }

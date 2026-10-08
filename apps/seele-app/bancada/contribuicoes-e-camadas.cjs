@@ -2303,6 +2303,74 @@ function anotando(...anotadas) {
         }
       }
 
+      // **Um redesenho que lança não é uma recusa** (rodada 1 de conserto do
+      // lote K2). A imagem decodificou e virou o avatar; se o redesenho lança
+      // depois, o `catch` da recusa a dizia «recusada», zerava os bytes e
+      // deixava o `uri` posto — o avatar visível, recusado e fora da conta. O
+      // tropeço é dito no `console`, e o estado fica o que a tela mostra.
+      {
+        const uri = "data:image/png;base64,AB";
+        const contribuicao = {
+          mod: "seele/perfis", instancia: {},
+          conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
+        };
+        const registroDeAntes = contexto.contribuicoesDosMods;
+        const donoDeAntes = contexto.donoDaRegiao;
+        const avisarDeAntes = contexto.avisarQueAMidiaMudou;
+        const consoleDeAntes = contexto.console;
+        const faladas = [];
+        const ditas = [];
+        const avisos = [];
+        const soltas = [];
+        const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+        contexto.contribuicoesDosMods = {
+          escolherSubstituicao: () => ({ escolhida: contribuicao }),
+          porHandle: new Map(),
+        };
+        contexto.donoDaRegiao = () => ({
+          podeFalar: () => true,
+          falar: (dados) => faladas.push(dados),
+          anotarRecusa: (texto) => ditas.push(String(texto)),
+          carregarMidiaDoServidor: () => Promise.resolve({ uri, papel: "imagem", bytes: 2 }),
+        });
+        contexto.avisarQueAMidiaMudou = () => {};
+        contexto.redesenharAvatares = () => {
+          throw new Error("o redesenho caiu");
+        };
+        contexto.console = { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) };
+        process.on("unhandledRejection", pegar);
+        try {
+          contexto.avatarContribuido(17);
+          await new Promise((resolve) => setImmediate(resolve));
+          await new Promise((resolve) => setImmediate(resolve));
+          confere(
+            "R4e · o redesenho que lança",
+            contribuicao.retrato?.situacao === "pronta" && contribuicao.retrato?.bytes === 2
+              && contribuicao.retrato?.uri === uri,
+            "o avatar decodificou e o redesenho lançou, e o avatar ficou recusado, fora da conta ou sem a imagem: "
+              + `${JSON.stringify(contribuicao.retrato)}`,
+          );
+          confere(
+            "R4e · o redesenho que lança",
+            faladas.length === 0 && ditas.length === 0,
+            `o tropeço do redesenho foi dito como recusa ao MOD ou ao registro: ${JSON.stringify(faladas)} ${JSON.stringify(ditas)}`,
+          );
+          confere(
+            "R4e · o redesenho que lança",
+            avisos.some((aviso) => aviso.includes("o redesenho caiu")) && soltas.length === 0,
+            `o tropeço do redesenho foi engolido calado, ou terminou numa promessa que ninguém pegou: ${JSON.stringify(avisos)} `
+              + `${soltas.join(" | ")}`,
+          );
+        } finally {
+          process.off("unhandledRejection", pegar);
+          contexto.contribuicoesDosMods = registroDeAntes;
+          contexto.donoDaRegiao = donoDeAntes;
+          contexto.avisarQueAMidiaMudou = avisarDeAntes;
+          contexto.console = consoleDeAntes;
+          delete contexto.redesenharAvatares;
+        }
+      }
+
       // **A sessão acaba no meio do `decode()`.** O avatar reservou os bytes
       // antes de decodificar; quando a decodificação termina, `podeFalar()` já
       // diz que a instância não é a de agora. A imagem não vira o avatar, e a

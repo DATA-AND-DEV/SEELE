@@ -1489,6 +1489,28 @@ class RegiaoDeMod {
   }
 
   /**
+   * Diz no `console` da janela que um passo de uma imagem lançou **depois da
+   * busca e do `decode()`**.
+   *
+   * **Não é uma recusa.** A imagem chegou e abriu; o que lançou foi aplicá-la —
+   * um `midiaMudou` de dono que lança, uma repintura que lança — ou o próprio
+   * caminho de recusa. Cada caminho de imagem encadeia
+   * `.then(aplicar, recusar)`, e é por isso que o tropeço de `aplicar` não cai
+   * em `recusar`: lá ele diria «recusada» de uma imagem que está na tela,
+   * devolveria os bytes dela e mandaria `falhou` ao MOD — a tela, a conta, a
+   * aba e o MOD em desacordo. O estado fica o que o passo deixou, e o tropeço
+   * vai para quem depura a janela, sem virar uma promessa que ninguém pega.
+   *
+   * @param {string} onde Qual caminho: «o retrato», «o fundo», «o fundo da tela».
+   * @param {string} chave A chave do nó, cortada como em `dizerRecusaDeMidia`.
+   * @param {unknown} falha O que lançou.
+   */
+  dizerTropecoDaMidia(onde, chave, falha) {
+    const nome = [...String(chave ?? "")].slice(0, 120).join("");
+    console.warn(`MOD ${this.id}: ${onde} «${nome}» tropeçou depois da busca, e o tropeço não foi dito como recusa`, falha);
+  }
+
+  /**
    * O retrato de uma pessoa: imagem quando há, inicial quando não há.
    *
    * Forma própria e não `midia` porque a composição é diferente: um avatar tem
@@ -1516,6 +1538,24 @@ class RegiaoDeMod {
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
+    // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca
+    // e o `decode()` caem em `recusar`. Ver `dizerTropecoDaMidia`.
+    const aplicar = (midia) => {
+      if (!midia || cancelado || this.solta) return;
+      if (!this.dono.podeFalar()) { devolver(); return; }
+      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
+      elem.style.backgroundSize = "cover";
+      elem.style.backgroundPosition = "center";
+      this.anotarMidia(elem, "pronta");
+    };
+    const recusar = (falha) => {
+      if (cancelado || this.solta) return;
+      devolver();
+      const porque = motivoDaFalha(falha);
+      this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
+    };
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
       // **As duas recusas são anotadas, além de ditas ao registro.** A linha
@@ -1535,24 +1575,11 @@ class RegiaoDeMod {
       // **Reservados antes do `decode()`**, como o som em `montarMidia`: duas
       // imagens decodificando juntas passariam as duas pela conferência de
       // cima, cada uma vendo a conta sem a outra. A recusa do `decode()` cai
-      // no `catch`, que devolve.
+      // em `recusar`, que devolve.
       bytes = midia.bytes; this[bolso.conta] += bytes;
-      return provarImagem(midia.uri).then(() => {
-        if (cancelado || this.solta) return;
-        if (!this.dono.podeFalar()) { devolver(); return; }
-        elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
-        elem.style.backgroundSize = "cover";
-        elem.style.backgroundPosition = "center";
-        this.anotarMidia(elem, "pronta");
-      });
-    }).catch(falha => {
-      if (cancelado || this.solta) return;
-      devolver();
-      const porque = motivoDaFalha(falha);
-      this.anotarMidia(elem, "recusada", porque);
-      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
-      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
-    });
+      return provarImagem(midia.uri).then(() => midia);
+    }).then(aplicar, recusar)
+      .catch((falha) => this.dizerTropecoDaMidia("o fundo", plano.no.chave, falha));
   }
 
   montarRetrato(elem, plano) {
@@ -1592,6 +1619,28 @@ class RegiaoDeMod {
       this.anotarMidia(elem, "recusada", porque);
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${oQue}`);
     };
+    // **Aplicar fica fora da recusa** (`.then(aplicar, …)`): só a busca e o
+    // `decode()` caem em `recusar`. Ver `dizerTropecoDaMidia`. O aviso à
+    // gestão (`anotarMidia`) vem por último: ele chama o dono, e um dono que
+    // lança encontra o `<img>` já montado, com o ouvinte, e os bytes contados.
+    const aplicar = (midia) => {
+      if (!midia || estado.cancelado || this.solta) return;
+      if (!this.dono.podeFalar()) { tirarAImagem(); return; }
+      const img = elemento("img", "regiao-de-mod-retrato-imagem");
+      img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+      img.src = midia.uri;
+      estado.elemento = img;
+      // A imagem que decodificou e depois não abriu vai pelo mesmo caminho de
+      // recusa — o molde é `naoAbriu`, em `montarMidia`.
+      estado.naoAbriu = () => {
+        if (estado.cancelado || this.solta) return;
+        recusar("o navegador não decodificou a imagem", "o elemento de imagem não abriu (evento error)");
+      };
+      img.addEventListener("error", estado.naoAbriu);
+      elem.append(img);
+      elem.dataset.estadoDoRetrato = "imagem";
+      this.anotarMidia(elem, "pronta");
+    };
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
@@ -1623,32 +1672,15 @@ class RegiaoDeMod {
       }
       // **Reservados antes do `decode()`**, como o som em `montarMidia`: dois
       // retratos decodificando juntos passariam os dois pela conferência de
-      // cima. A recusa do `decode()` cai no `catch`, que os devolve.
+      // cima. A recusa do `decode()` cai em `recusar`, que os devolve.
       estado.bytes = midia.bytes;
       this[conta] += midia.bytes;
-      return provarImagem(midia.uri).then(() => {
-        if (estado.cancelado || this.solta) return;
-        if (!this.dono.podeFalar()) { tirarAImagem(); return; }
-        const img = elemento("img", "regiao-de-mod-retrato-imagem");
-        img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
-        img.src = midia.uri;
-        estado.elemento = img;
-        elem.append(img);
-        elem.dataset.estadoDoRetrato = "imagem";
-        this.anotarMidia(elem, "pronta");
-        // A imagem que decodificou e depois não abriu vai pelo mesmo caminho
-        // de recusa — o molde é `naoAbriu`, em `montarMidia`.
-        estado.naoAbriu = () => {
-          if (estado.cancelado || this.solta) return;
-          recusar("o navegador não decodificou a imagem", "o elemento de imagem não abriu (evento error)");
-        };
-        img.addEventListener("error", estado.naoAbriu);
-      });
-    }).catch((falha) => {
+      return provarImagem(midia.uri).then(() => midia);
+    }).then(aplicar, (falha) => {
       if (estado.cancelado || this.solta) return;
       const porque = motivoDaFalha(falha);
       recusar(porque, porque);
-    });
+    }).catch((falha) => this.dizerTropecoDaMidia("o retrato", plano.no.chave, falha));
   }
 
   atualizarRetrato(elem, plano) {
@@ -2048,30 +2080,20 @@ class RegiaoDeMod {
     }
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
 
-    vindo.then((midia) => {
-      // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
-      // a região pode estar solta, e a sessão pode ter acabado.
-      if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+    // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca
+    // e o `decode()` caem em `recusar`. Uma repintura que lança encontra o
+    // mapa posto e anotado «pronta», e não vira «fundo-falhou» — ver
+    // `dizerTropecoDaMidia`.
+    const aplicar = (img) => {
+      if (!img || fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (fundo.pedido !== chave) return;
-      if (midia.papel !== "imagem") {
-        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
-        return;
-      }
-      // O `onload` virou o `decode()` da própria imagem que se pinta. Ele não
-      // tinha par: a imagem que o navegador não abria não chegava a lugar
-      // nenhum, e a tela ficava sem o mapa e sem uma palavra. A recusa do
-      // `decode()` cai no `catch`, que a diz ao MOD e ao registro.
-      return provarImagem(midia.uri).then((img) => {
-        if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
-        if (fundo.pedido !== chave) return;
-        fundo.imagem = img;
-        this.anotarMidia(elem, "pronta");
-        // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
-        // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
-        this.pintarTela(elem, plano);
-      });
-    }).catch((falha) => {
+      fundo.imagem = img;
+      this.anotarMidia(elem, "pronta");
+      // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
+      // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
+      this.pintarTela(elem, plano);
+    };
+    const recusar = (falha) => {
       if (fundo.cancelado || this.solta) return;
       const porque = motivoDaFalha(falha);
       // A anotação é a do pedido **de agora**: a recusa de um fundo que o MOD
@@ -2085,7 +2107,24 @@ class RegiaoDeMod {
         porque,
       });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo da tela: ${porque}`);
-    });
+    };
+    vindo.then((midia) => {
+      // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
+      // a região pode estar solta, e a sessão pode ter acabado.
+      if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+      if (fundo.pedido !== chave) return;
+      if (midia.papel !== "imagem") {
+        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
+        return;
+      }
+      // O `onload` virou o `decode()` da própria imagem que se pinta. Ele não
+      // tinha par: a imagem que o navegador não abria não chegava a lugar
+      // nenhum, e a tela ficava sem o mapa e sem uma palavra. A recusa do
+      // `decode()` cai em `recusar`, que a diz ao MOD e ao registro.
+      return provarImagem(midia.uri);
+    }).then(aplicar, recusar)
+      .catch((falha) => this.dizerTropecoDaMidia("o fundo da tela", plano.no.chave, falha));
   }
 
   /** Pinta os traços que o MOD declarou, e só eles. */
