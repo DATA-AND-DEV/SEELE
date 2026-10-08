@@ -542,14 +542,14 @@ mod tests {
         // inalcançável, hospedar continua funcionando, o link continua saindo
         // com os mesmos endereços de sempre, e a espera a mais é no máximo o
         // prazo escolhido — não uma espera de rede sem fim.
-        let antes = std::env::var(crate::alcance::encontro::VARIAVEL).ok();
-        let restaurar = |valor: Option<String>| match valor {
-            Some(valor) => std::env::set_var(crate::alcance::encontro::VARIAVEL, valor),
-            None => std::env::remove_var(crate::alcance::encontro::VARIAVEL),
-        };
+        //
+        // A variável volta pelo `Drop` do guarda, inclusive se um `expect`
+        // abaixo entrar em pânico, e a trava dele impede o outro teste que a
+        // troca de correr junto.
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
 
         // Sem degrau 4 nenhum: é o servidor de antes desta mudança, e é a régua.
-        std::env::set_var(crate::alcance::encontro::VARIAVEL, "nao");
+        ambiente.pedir("nao");
         let relogio = std::time::Instant::now();
         let sem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
@@ -560,7 +560,7 @@ mod tests {
         sem.encerrar().await;
 
         // Com um ponto de encontro que não responde nunca.
-        std::env::set_var(crate::alcance::encontro::VARIAVEL, BURACO_NEGRO);
+        ambiente.pedir(BURACO_NEGRO);
         let relogio = std::time::Instant::now();
         let com = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
             .await
@@ -569,7 +569,9 @@ mod tests {
         let convite_de_agora = com.convite();
         let degrau_de_agora = com.alcance().map(crate::alcance::Alcance::degrau);
         com.encerrar().await;
-        restaurar(antes);
+        // As duas subidas acabaram: a variável e a trava voltam já, e não
+        // depois das asserções.
+        drop(ambiente);
 
         // Nada do que funcionava mudou: mesmo degrau, mesmos endereços.
         assert_eq!(

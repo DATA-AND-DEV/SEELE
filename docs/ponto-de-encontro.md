@@ -15,9 +15,9 @@ conta isso a um terceiro endereço, quando quem manda pede.
 E guarda em memória o endereço em que cada anfitrião disse morar, para dizê-lo a
 quem perguntar por ele: é **o quarto**, descrito abaixo. Esse endereço vale 60
 segundos desde o último aviso do anfitrião; vencido, deixa de ser dito a quem
-pergunta, mas não sai da memória na hora: fica lá até o quarto encher, até um
-aviso novo em nome do mesmo anfitrião o substituir, ou até o ponto reiniciar.
-Não há mais nada.
+pergunta, mas não sai da memória na hora: fica lá até o quarto encher e chegar
+uma marca nova (`Quarto::morar`), até um aviso novo em nome do mesmo anfitrião
+o substituir, ou até o ponto reiniciar. Não há mais nada.
 
 Nenhuma máquina atrás de NAT sabe o próprio endereço público: o roteador
 reescreve isso na saída e o interior nunca vê o resultado. Alguém de fora precisa
@@ -45,9 +45,10 @@ passam por **o quarto**, que existe desde 2026-09-03: um mapa de
 a resposta a `QUEM` sai dele; a função sem estado, sozinha, cala o `QUEM` e
 responde o `MORO` como um `ONDE`. Os 60 segundos são a validade de uma entrada,
 contados do último `MORO`, e não o tempo que ela leva para sumir: vencida, ela
-deixa de responder ao `QUEM`, e continua na memória até o quarto encher (aí o
-que venceu é varrido), um `MORO` novo da mesma marca a substituir, ou o ponto
-reiniciar. Nada sobrevive a um reinício, e nada vai a disco em nenhum momento.
+deixa de responder ao `QUEM`, e continua na memória até o quarto encher e chegar
+uma marca nova (`Quarto::morar`; aí o que venceu é varrido), um `MORO` novo da
+mesma marca a substituir, ou o ponto reiniciar. Nada sobrevive a um reinício, e
+nada vai a disco em nenhum momento.
 
 O que o operador do ponto de encontro consegue **ler** por causa do quarto: que
 uma marca está no ar, ou esteve até a última varredura, e em que endereço. Nada
