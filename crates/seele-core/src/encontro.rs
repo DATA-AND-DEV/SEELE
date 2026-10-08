@@ -654,6 +654,13 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
 ///
 /// # Como pergunta
 ///
+/// O nome do ponto vira os endereços dele, IPv4 primeiro. A consulta pergunta
+/// ao primeiro, e passa ao seguinte só quando **nada saiu** por ele: o socket
+/// da família dele não abriu, ou o sistema recusou as três perguntas da
+/// primeira volta. Uma linha `info` diz que ela passou. Um endereço que recebeu
+/// as perguntas e calou não leva a consulta ao seguinte: o ponto está no ar ou
+/// fora do ar pelos dois (`consultar`).
+///
 /// Três perguntas por volta, num socket só: `QUEM` pelo servidor, `QUEM` pela
 /// escuta, e um `ONDE` cuja única função é o ponto provar que está no ar. É
 /// ele que separa «o ponto não respondeu» de «o ponto respondeu e ninguém mora
@@ -676,8 +683,20 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
 ///   um ponto que está no ar;
 /// - **o ponto só responde numa volta repetida**: cada volta perdida custa meio
 ///   segundo, e a que respondeu custa o de cima;
-/// - **nenhuma pergunta sai** (sem rota, o sistema recusa as três) **ou a
-///   leitura falha**: volta na hora, como [`OndeMora::PontoMudo`];
+/// - **nada sai pela primeira volta de um endereço** (o socket não abriu; sem
+///   rota, o sistema recusa as três): a consulta passa na hora ao endereço
+///   seguinte, que paga o próprio caso desta lista. Sem endereço seguinte,
+///   volta na hora, como [`OndeMora::PontoMudo`];
+/// - **o sistema recusa uma volta depois da primeira**: a recusada conta como
+///   volta. As perguntas da anterior saíram, e a consulta espera a resposta a
+///   elas até a hora da volta seguinte, como se a recusada tivesse saído; a
+///   ida e volta do `ONDE` se mede da última volta que saiu. Custa o mesmo que
+///   a volta perdida;
+/// - **a leitura do socket falha**: a consulta acaba ali, com o que chegou
+///   até então: como [`OndeMora::PontoMudo`] se nada respondeu antes; se o
+///   ponto já respondeu, como [`OndeMora::NinguemMora`], ou
+///   [`OndeMora::Achado`] com o que chegou. Não passa ao endereço seguinte: as
+///   perguntas saíram;
 /// - **o ponto cala nas três voltas, ou o nome não resolve a tempo**: o prazo
 ///   inteiro. Resolver o nome conta dentro dele.
 ///
@@ -686,11 +705,13 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
 /// Ela entra na lista de candidatos, na frente dos guardados. Não substitui a
 /// conferência da identidade de quem atender naquele endereço.
 ///
-/// O resultado vai para o log, com o ponto e o que ele disse. É o dado que
-/// faltava quando a pergunta nunca saía e nada dizia isso. Cada caminho que
+/// O resultado vai para o log, com o ponto, o que ele disse e quanto a
+/// consulta levou (`levou=`, com a resolução do nome dentro). É o dado que
+/// faltava quando a pergunta nunca saía e nada dizia isso, e o tempo é o que a
+/// medida de campo do G1 só achava numa captura de pacotes. Cada caminho que
 /// acaba sem resposta deixa também a sua causa, em `info` (o único nível que o
 /// `seele.log` grava): o prazo que venceu, o envio que o sistema recusou, a
-/// leitura que falhou.
+/// leitura que falhou, o endereço que a consulta deixou pelo seguinte.
 pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> OndeMora {
     // **O prazo cobre a consulta inteira, e resolver o nome é parte dela.**
     // Numa rede sem internet (duas máquinas na mesma casa, o caso que menos
@@ -698,7 +719,8 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
     // um servidor de DNS que não vai responder. Isto roda antes de qualquer
     // tentativa de conexão, e uma pergunta acessória que atrasa a principal é
     // pior que não perguntar.
-    let ate = tokio::time::Instant::now() + prazo;
+    let comecou = tokio::time::Instant::now();
+    let ate = comecou + prazo;
     let resposta = match tokio::time::timeout_at(ate, resolver_ponto(ponto)).await {
         // `resolver_ponto` já deixou no log por que não achou.
         Ok(destinos) if destinos.is_empty() => OndeMora::PontoNaoResolve,
@@ -712,7 +734,12 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
             OndeMora::PontoNaoResolve
         }
     };
-    tracing::info!(%ponto, ?resposta, "quarto: onde o anfitrião mora hoje");
+    tracing::info!(
+        %ponto,
+        ?resposta,
+        levou = ?comecou.elapsed(),
+        "quarto: onde o anfitrião mora hoje"
+    );
     resposta
 }
 
@@ -826,7 +853,8 @@ async fn perguntar_a(
 ///   pela ida e volta do `ONDE`;
 /// - na hora da volta seguinte, com o ponto no ar e o teto ainda por vencer
 ///   (o `ONDE` se perdeu, ou a ida e volta é longa);
-/// - na hora, quando nenhuma pergunta da volta saiu ou a leitura falhou;
+/// - na hora, quando nenhuma pergunta da primeira volta saiu ou a leitura
+///   falhou;
 /// - no prazo, quando nada respondeu.
 ///
 /// Separado de [`perguntar_a`] só para o teste poder dar o socket. É assim que
@@ -1617,6 +1645,17 @@ mod testes {
             "o prazo que venceu na resolução do nome deixou de dizer no rastro (`info`, o único \
              nível que o seele.log grava) que foi o prazo: um DNS mudo e um link malformado \
              voltam a parecer a mesma coisa. Rastro: {linhas:?}"
+        );
+        // E quanto a consulta levou, na linha do resultado: a medida de campo
+        // do G1 lia esse tempo numa captura de pacotes, porque o `seele.log`
+        // não o trazia.
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("onde o anfitrião mora hoje")
+                && linha.contains("levou=")),
+            "a linha do resultado da consulta ao quarto não diz quanto ela levou (`levou=`): \
+             quem mede uma conexão lenta volta a precisar de uma captura de pacotes para saber \
+             quanto dela foi o quarto. Rastro: {linhas:?}"
         );
     }
 

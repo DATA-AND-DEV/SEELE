@@ -1639,6 +1639,13 @@ impl Room {
             // e isso é da F4.
             ServerMessage::HashesDoNavegador { .. } => {}
 
+            // A API 6 de MODs (rascunho da F3, §14): o aviso da metade de
+            // servidor às janelas e o tema como dado do servidor. O tipo e o
+            // fio existem desde o Servidor 1.0, e nenhum servidor os manda
+            // ainda; entregá-los às janelas e aplicar o tema antes de desenhar
+            // a sessão é da casca da API 6.
+            ServerMessage::ModAviso { .. } | ServerMessage::TemaMudou { .. } => {}
+
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
             // Quem age nestas duas mensagens é o `enlace::Motor` —

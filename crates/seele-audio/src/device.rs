@@ -49,6 +49,21 @@ pub fn retorno_de_erro(errors: Arc<StreamCounters>) -> impl FnMut(cpal::Error) +
     move |error: cpal::Error| errors.record_stream_error(classificar(&error))
 }
 
+/// Quantos fluxos de entrada este processo já construiu, microfone ou
+/// loopback.
+///
+/// É o que prova que o toque da sala abre só a saída
+/// (`tests/toque_so_de_saida.rs`), e é o número que o diagnóstico mostra
+/// (tarefa 7h da sala).
+static FLUXOS_DE_ENTRADA: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Quantos fluxos de entrada este processo já construiu. Ver
+/// [`FLUXOS_DE_ENTRADA`].
+#[must_use]
+pub fn fluxos_de_entrada_construidos() -> u64 {
+    FLUXOS_DE_ENTRADA.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Builds an input stream for one concrete device sample format.
 ///
 /// Generic so that every format shares the single tested implementation in
@@ -59,6 +74,7 @@ fn input_stream<T: RawSample + cpal::SizedSample>(
     mut sink: CaptureSink,
     errors: Arc<StreamCounters>,
 ) -> Result<cpal::Stream, cpal::Error> {
+    FLUXOS_DE_ENTRADA.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     device.build_input_stream(
         config,
         move |data: &[T], _info: &cpal::InputCallbackInfo| sink.on_capture(data),
@@ -303,6 +319,15 @@ pub enum DeviceError {
         #[source]
         source: crate::resample::ConversionError,
     },
+
+    /// The ring of the personal room could not get a thread of its own, or
+    /// that thread ended without saying whether the output opened.
+    ///
+    /// Its own variant rather than [`DeviceError::NoOutputDevice`]: the device
+    /// may be fine, and «no speakers» sends whoever investigates to the wrong
+    /// place.
+    #[error("the ring tone thread failed: {0}")]
+    LinhaDoToque(String),
 }
 
 impl DeviceError {
@@ -317,7 +342,9 @@ impl DeviceError {
     pub fn side(&self) -> Side {
         match self {
             Self::NoInputDevice | Self::CaptureDeviceGone { .. } => Side::Input,
-            Self::NoOutputDevice | Self::PlaybackDeviceGone { .. } => Side::Output,
+            Self::NoOutputDevice | Self::PlaybackDeviceGone { .. } | Self::LinhaDoToque(_) => {
+                Side::Output
+            }
             Self::UnsupportedSampleFormat { side, .. }
             | Self::Device { side, .. }
             | Self::Resample { side, .. } => *side,
@@ -802,6 +829,151 @@ pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
         capture,
         playback,
     })
+}
+
+/// O toque da sala pessoal tocando, numa linha de execução própria.
+///
+/// Uma linha própria porque `cpal::Stream` não é `Send` em toda plataforma
+/// (ver [`AudioIo`]): ele nasce e morre na mesma linha, e o que sai daqui é só
+/// o pedido de parar. **Abre só a saída.** Largar o `Tocador` para o som.
+#[derive(Debug)]
+pub struct Tocador {
+    parar: Option<std::sync::mpsc::Sender<()>>,
+    linha: Option<std::thread::JoinHandle<()>>,
+    saida: Option<PlaybackDevice>,
+}
+
+impl Tocador {
+    /// Começa a tocar o toque em laço, na saída de id `saida`, ou na padrão.
+    ///
+    /// # Errors
+    ///
+    /// As mesmas falhas de abrir a saída em [`open`]: o aparelho sumiu, não
+    /// se descreve, não abre ou não começa. A entrada nunca é tocada.
+    pub fn tocar(saida: Option<String>, volume: f32) -> Result<Self, DeviceError> {
+        let (parar, quando_parar) = std::sync::mpsc::channel::<()>();
+        let (pronto, quando_pronto) =
+            std::sync::mpsc::channel::<Result<Option<PlaybackDevice>, DeviceError>>();
+        let linha = std::thread::Builder::new()
+            .name("seele-toque".into())
+            .spawn(move || {
+                let aberto = abrir_saida_do_toque(saida.as_deref(), volume);
+                match aberto {
+                    Ok((fluxo, descrito)) => {
+                        let _ = pronto.send(Ok(descrito));
+                        // Até alguém mandar parar, ou o `Tocador` cair.
+                        let _ = quando_parar.recv();
+                        drop(fluxo);
+                    }
+                    Err(erro) => {
+                        let _ = pronto.send(Err(erro));
+                    }
+                }
+            })
+            .map_err(|erro| DeviceError::LinhaDoToque(erro.to_string()))?;
+        match quando_pronto.recv() {
+            Ok(Ok(descrito)) => Ok(Self {
+                parar: Some(parar),
+                linha: Some(linha),
+                saida: descrito,
+            }),
+            Ok(Err(erro)) => {
+                let _ = linha.join();
+                Err(erro)
+            }
+            // A linha caiu sem responder: um pânico dentro do `cpal`.
+            Err(_) => {
+                let _ = linha.join();
+                Err(DeviceError::LinhaDoToque(
+                    "a linha do toque terminou sem dizer se abriu".to_owned(),
+                ))
+            }
+        }
+    }
+
+    /// A saída que de fato abriu.
+    #[must_use]
+    pub fn saida(&self) -> Option<&PlaybackDevice> {
+        self.saida.as_ref()
+    }
+}
+
+impl Drop for Tocador {
+    fn drop(&mut self) {
+        if let Some(parar) = self.parar.take() {
+            let _ = parar.send(());
+        }
+        if let Some(linha) = self.linha.take() {
+            let _ = linha.join();
+        }
+    }
+}
+
+/// Abre só a saída, com o toque tocando nela. **Nunca** a entrada.
+fn abrir_saida_do_toque(
+    saida: Option<&str>,
+    volume: f32,
+) -> Result<(cpal::Stream, Option<PlaybackDevice>), DeviceError> {
+    let host = cpal::default_host();
+    let aparelho = resolve(&host, saida, Side::Output)?;
+    let config = negociar(&aparelho, Side::Output)?;
+    let descrito = describe(&aparelho).map(|(id, name)| PlaybackDevice {
+        default: host
+            .default_output_device()
+            .and_then(|device| device.id().ok())
+            .is_some_and(|default| default.to_string() == id),
+        id,
+        name,
+    });
+    let toque = crate::toque::Toque::novo(config.sample_rate()).com_volume(volume);
+    let canais = usize::from(config.channels());
+    let erros = StreamCounters::shared();
+    let fluxo = match config.sample_format() {
+        cpal::SampleFormat::F32 => {
+            fluxo_do_toque::<f32>(&aparelho, config.into(), toque, canais, erros)
+        }
+        cpal::SampleFormat::I16 => {
+            fluxo_do_toque::<i16>(&aparelho, config.into(), toque, canais, erros)
+        }
+        cpal::SampleFormat::U16 => {
+            fluxo_do_toque::<u16>(&aparelho, config.into(), toque, canais, erros)
+        }
+        cpal::SampleFormat::I32 => {
+            fluxo_do_toque::<i32>(&aparelho, config.into(), toque, canais, erros)
+        }
+        format => {
+            return Err(DeviceError::UnsupportedSampleFormat {
+                side: Side::Output,
+                format,
+            })
+        }
+    }
+    .map_err(|source| DeviceError::Device {
+        side: Side::Output,
+        stage: Stage::Build,
+        source,
+    })?;
+    fluxo.play().map_err(|source| DeviceError::Device {
+        side: Side::Output,
+        stage: Stage::Start,
+        source,
+    })?;
+    Ok((fluxo, descrito))
+}
+
+fn fluxo_do_toque<T: RawSample + cpal::SizedSample>(
+    aparelho: &cpal::Device,
+    config: cpal::StreamConfig,
+    mut toque: crate::toque::Toque,
+    canais: usize,
+    erros: Arc<StreamCounters>,
+) -> Result<cpal::Stream, cpal::Error> {
+    aparelho.build_output_stream(
+        config,
+        move |dados: &mut [T], _info: &cpal::OutputCallbackInfo| toque.preencher(dados, canais),
+        retorno_de_erro(erros),
+        None,
+    )
 }
 
 #[cfg(test)]

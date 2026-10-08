@@ -183,10 +183,10 @@ pub const LIMITE_DA_MARCA: usize = 32;
 /// Para o anfitrião saber quem bateu. Ele conhece a marca que ele mesmo mandou,
 /// e conhece a que quem teve o convite vai usar — os primeiros dígitos da
 /// impressão digital dele. Quem entra os tira do `seele://`, ou da lista de
-/// conhecidos, que guardou a impressão de um link; e quem opera o ponto de
-/// encontro os lê no começo das marcas que o anfitrião registra no quarto. Uma
-/// marca que não é nenhuma das duas é ruído da internet, e não vira furo de NAT
-/// nenhum.
+/// conhecidos, que guardou a impressão que a conexão aceitou; e quem opera o
+/// ponto de encontro os lê no começo das marcas que o anfitrião registra no
+/// quarto. Uma marca que não é nenhuma das duas é ruído da internet, e não vira
+/// furo de NAT nenhum.
 ///
 /// Não é autenticação e não tenta ser: quem teve o link, tem. É o que impede um
 /// varredor de portas de fazer um servidor mandar pacotes para onde ele quiser.
@@ -344,6 +344,34 @@ impl Marcas {
             escuta: Marca::nova(&format!("{prefixo}e"))?,
             servidor: Marca::nova(&format!("{prefixo}s"))?,
         })
+    }
+
+    /// As marcas da sala pessoal de quem tem este código (spec de 23/09/2026,
+    /// «O código»).
+    ///
+    /// O aviso é `p` e os 15 símbolos de dado do código; a escuta, eles e um
+    /// `e`; o servidor, eles e um `s`. **O `p` separa este espaço do das
+    /// marcas de servidor**, que saem de uma impressão em hexadecimal: `p` não
+    /// é hexadecimal, então uma sala e um servidor guardado nunca dividem
+    /// marca.
+    ///
+    /// **Formato congelado, com a caixa das letras.** [`Marca::nova`] não
+    /// normaliza e o ponto compara byte a byte: os símbolos vão maiúsculos,
+    /// como [`crate::codigo::Codigo::dado`] os dá, e o `p`, o `e` e o `s`
+    /// minúsculos. Mudar qualquer um deixa todo código já distribuído falando
+    /// sozinho no quarto.
+    ///
+    /// Não falha: 15 símbolos alfanuméricos e uma letra cabem com folga em
+    /// [`LIMITE_DA_MARCA`], e `toda_marca_da_sala_e_uma_marca_valida` confere
+    /// que [`Marca::nova`] aceitaria cada uma.
+    #[must_use]
+    pub fn da_sala(codigo: &crate::codigo::Codigo) -> Self {
+        let aviso = format!("p{}", codigo.dado());
+        Self {
+            escuta: Marca(format!("{aviso}e")),
+            servidor: Marca(format!("{aviso}s")),
+            aviso: Marca(aviso),
+        }
     }
 }
 
@@ -979,5 +1007,80 @@ mod testes {
             "um texto com algo que não é letra nem número depois do 16º caractere deu marcas: \
              o doc de `do_servidor` promete recusá-lo, e uma impressão torta passa por boa"
         );
+    }
+}
+
+#[cfg(test)]
+mod as_marcas_da_sala {
+    //! As marcas da sala pessoal no quarto (spec de 23/09/2026, «O código»):
+    //! `p` e os 15 símbolos de dado do código; a escuta com `e` no fim, o
+    //! servidor com `s`. Formato congelado: um código já distribuído responde
+    //! nestas marcas para sempre.
+    use super::*;
+    use crate::codigo::Codigo;
+
+    /// Calculadas pela implementação de referência independente, em Python,
+    /// que também confere os códigos (`codigo.rs`).
+    #[test]
+    fn as_marcas_de_cada_codigo_sao_as_da_referencia() {
+        for (chave, aviso) in [
+            ([0_u8; 32], "pCSM7NBFRCAYQEV4"),
+            ([0xFF; 32], "pNYB16XGFE9HNZFD"),
+        ] {
+            let marcas = Marcas::da_sala(&Codigo::da_chave(&chave));
+            assert_eq!(marcas.aviso().texto(), aviso);
+            assert_eq!(marcas.escuta().texto(), format!("{aviso}e"));
+            assert_eq!(marcas.servidor().texto(), format!("{aviso}s"));
+        }
+    }
+
+    /// **A caixa das letras é formato.** `Marca::nova` não normaliza, e o
+    /// ponto compara byte a byte: o `p`, o `e` e o `s` minúsculos, e os
+    /// símbolos do código maiúsculos, como `Codigo::dado` os dá.
+    #[test]
+    fn a_caixa_das_letras_e_a_do_codigo_com_o_p_minusculo() {
+        let marcas = Marcas::da_sala(&Codigo::da_chave(&[0; 32]));
+        assert!(marcas.aviso().texto().starts_with('p'));
+        assert_eq!(
+            &marcas.aviso().texto()[1..],
+            Codigo::da_chave(&[0; 32]).dado()
+        );
+    }
+
+    /// Toda marca da sala é uma marca que o quarto aceita.
+    #[test]
+    fn toda_marca_da_sala_e_uma_marca_valida() {
+        let marcas = Marcas::da_sala(&Codigo::da_chave(&[7; 32]));
+        for marca in [marcas.aviso(), marcas.escuta(), marcas.servidor()] {
+            assert_eq!(Marca::nova(marca.texto()).as_ref(), Some(marca));
+        }
+    }
+
+    /// **Uma marca da sala nunca colide com a de um servidor guardado.**
+    ///
+    /// As de servidor saem dos 16 primeiros caracteres de uma impressão, que o
+    /// link só aceita em hexadecimal (`uri.rs`); as da sala começam todas por
+    /// `p`, que não é hexadecimal. É a primeira letra que separa os dois
+    /// espaços, e é ela que este teste prende.
+    ///
+    /// Escrito assim, e não como uma propriedade sobre chaves e impressões
+    /// sorteadas: sortear não acha a colisão nem quando o `p` some, porque a
+    /// chance de um código cair inteiro em hexadecimal é ínfima. Um guarda que
+    /// não reprova na reversão não guarda nada.
+    #[test]
+    fn o_p_separa_a_sala_dos_servidores() {
+        assert!(!'p'.is_ascii_hexdigit());
+        for chave in [[0_u8; 32], [0xFF; 32], [7; 32]] {
+            let sala = Marcas::da_sala(&Codigo::da_chave(&chave));
+            for marca in [sala.aviso(), sala.escuta(), sala.servidor()] {
+                assert!(marca.texto().starts_with('p'), "{}", marca.texto());
+            }
+        }
+        for impressao in ["0".repeat(64), "f".repeat(64), "3c".repeat(32)] {
+            let servidor = Marcas::do_servidor(&impressao).unwrap();
+            for marca in [servidor.aviso(), servidor.escuta(), servidor.servidor()] {
+                assert!(!marca.texto().starts_with('p'), "{}", marca.texto());
+            }
+        }
     }
 }

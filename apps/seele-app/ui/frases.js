@@ -616,6 +616,35 @@ function fraseDeErro(erro, apelido, deOnde) {
         conserto
       );
     }
+    // **Instalar um MOD de uma pasta**, as recusas que trazem detalhe — a
+    // pendência 53. A do atalho é a que mais se encontra: a pasta de quem
+    // desenvolve o MOD tem `node_modules/.bin/`, cheia de atalhos, e a recusa
+    // está certa (um atalho publicaria como do MOD um arquivo de outro lugar do
+    // disco). Ela chegava aqui como `NaoCopiei`, junto das falhas do disco, e
+    // caía em «ALGO FALHOU» com o JSON cru. Agora diz qual é o atalho e o que
+    // fazer. O caminho também fica no `seele.log`.
+    //
+    // O remédio é tirar o atalho, onde quer que ele esteja: mandar instalar
+    // «sem node_modules» apontava o conserto errado para um `assets/x → ../y`.
+    // `node_modules` fica como o lugar mais provável, e não como a regra.
+    if (erro.TemAtalho) {
+      return (
+        `ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: ${erro.TemAtalho}.\n` +
+        "Tire o atalho e instale de novo. Num MOD em desenvolvimento, os atalhos costumam estar em «node_modules»."
+      );
+    }
+    if (erro.ManifestoRecusado) {
+      return (
+        `ESTE SEELE RECUSOU O «mod.json» DESTA PASTA: ${erro.ManifestoRecusado}.\n` +
+        "Nada foi instalado."
+      );
+    }
+    if (erro.NaoCopiei) {
+      return (
+        `NÃO CONSEGUI COPIAR ESTE MOD PARA O SEELE: ${erro.NaoCopiei}.\n` +
+        "Nada foi instalado. Confira o espaço e as permissões do disco, e tente de novo."
+      );
+    }
     if (erro.NomeRecusado) {
       return NOMES_RECUSADOS[erro.NomeRecusado] ?? "ESTE NOME NÃO PODE VIRAR LINK";
     }
@@ -817,6 +846,13 @@ const FRASES = {
       "O CATÁLOGO NÃO É O NOSSO.\n" +
       "A assinatura não confere com a chave deste SEELE. Não tente de novo: " +
       "avise quem publica.",
+
+    // Instalar um MOD de uma pasta (`FalhaAoInstalarMod`, em `mods.rs`). A
+    // única recusa sem campo; as outras três, que trazem o motivo ou o caminho,
+    // são montadas em `fraseDeErro`. O engano mais provável de todos é apontar
+    // para a pasta que **contém** o MOD, e a frase diz isso.
+    SemManifesto:
+      "ESTA PASTA NÃO TEM «mod.json».\nEscolha a pasta do MOD, e não a pasta que a contém.",
 
     // A portaria — ADR 0030. As duas falam de uma porta que não existe daqui.
     //

@@ -467,15 +467,24 @@ pub(crate) const LINHAS_DE_CONSOLE_POR_SEGUNDO: u32 = 4;
 /// próximas.
 const FICHA: u64 = 1_000_000;
 
+// **A vazão divide a ficha.** É o que faz as fichas andarem em múltiplos dela,
+// e o prazo de [`BaldeDoConsole::ate_sobrar_uma_ficha`] cair exato no
+// microssegundo em que elas se completam: uma vazão que não dividisse a ficha
+// deixaria o prazo depender do arredondamento.
+const _: () = assert!(FICHA.is_multiple_of(LINHAS_DE_CONSOLE_POR_SEGUNDO as u64));
+
 /// **O balde de fichas do `console` de uma instância.**
 ///
 /// Cheio, ele deixa passar [`RAJADA_DO_CONSOLE`] linhas de uma vez; seco, uma a
 /// cada `1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo. O que ele segura **é
 /// contado**, e a primeira linha que passa depois leva a conta: o `seele.log`
 /// diz que houve mais do que ele mostra, em vez de mostrar pouco como se fosse
-/// tudo. Quando nenhuma passa, o produto diz a conta ele mesmo — ao fim da
-/// primeira volta do motor que tiver ficha, ou quando a instância para (ver
-/// [`dizer_as_seguradas`]).
+/// tudo. Quando nenhuma passa, o produto diz a conta ele mesmo, e só com uma
+/// ficha de sobra além da que fica com o MOD: ao fim de uma volta do motor
+/// ([`Self::pendentes_se_couber`]), ou quando a espera do laço de [`rodar`]
+/// acorda a thread para isso, se nenhuma volta vier antes
+/// ([`Self::ate_sobrar_uma_ficha`]). Ou, sem regra de ficha, quando a
+/// instância para (ver [`dizer_as_seguradas`]).
 ///
 /// Mora na thread do motor, dividido entre a função nativa, o rastreador de
 /// rejeições e o laço de [`rodar`], e o relógio é passado por quem chama — é
@@ -515,18 +524,36 @@ impl BaldeDoConsole {
         Some(std::mem::take(&mut self.suprimidas))
     }
 
-    /// **A conta que nenhuma linha levou, ao fim de uma volta do motor — se
-    /// houver ficha.**
+    /// **A conta que nenhuma linha levou, ao fim de uma volta do motor — só
+    /// com uma ficha de sobra além da que fica com o MOD.**
     ///
     /// A linha que diz a conta é uma linha no `seele.log` como qualquer outra,
     /// e por isso gasta ficha: sem ela, um MOD que escreve um pouco a cada
     /// volta ganharia uma linha do produto por volta, e o teto de vazão
-    /// deixaria de valer. Sem ficha, ou sem nada segurado, devolve `None` e
-    /// não mexe em nada — a conta espera a próxima volta ou [`Self::pendentes`].
+    /// deixaria de valer. Sem duas fichas, ou sem nada segurado, devolve
+    /// `None` e não gasta nada — a conta espera a próxima volta, que a espera
+    /// do laço garante ([`Self::ate_sobrar_uma_ficha`]), ou [`Self::pendentes`].
+    ///
+    /// **Duas fichas em toda volta, a regra da espera.** A conta gasta uma, e
+    /// a outra é da próxima linha do MOD. Com uma só, a conta tomava a vez
+    /// dele por dois caminhos, os dois medidos nas re-revisões do lote D:
+    /// - numa volta em que o MOD não escreve (um evento, uma resposta), ela
+    ///   dizia a conta com a ficha que achasse — eventos a cada 30 ms e o MOD
+    ///   escrevendo a cada 100 ms davam 1 linha dele e 14 da conta em quatro
+    ///   segundos, desde antes do lote;
+    /// - numa volta em que o MOD escreveu, foi segurado e seguiu trabalhando,
+    ///   a ficha que se completava durante o trabalho era tomada pela conta —
+    ///   um `setInterval` de 100 ms que escreve e trabalha 120 ms dava 0 linhas
+    ///   dele e 15 da conta.
     pub(crate) fn pendentes_se_couber(&mut self, agora: Instant) -> Option<u32> {
-        if self.suprimidas == 0 || !self.gastar_ficha(agora) {
+        if self.suprimidas == 0 {
             return None;
         }
+        self.recarregar(agora);
+        if self.fichas < 2 * FICHA {
+            return None;
+        }
+        self.fichas -= FICHA;
         Some(std::mem::take(&mut self.suprimidas))
     }
 
@@ -539,8 +566,59 @@ impl BaldeDoConsole {
         (self.suprimidas > 0).then(|| std::mem::take(&mut self.suprimidas))
     }
 
+    /// **Quanto falta para sobrar uma ficha — a da conta, além da que fica com
+    /// o MOD —, enquanto há linha segurada.**
+    ///
+    /// É um dos prazos da espera do laço de [`rodar`]: sem temporizador e sem
+    /// mensagem, a thread do motor dormia no canal, e a conta ficava no balde
+    /// até o MOD parar. `None` sem nada segurado: a thread não acorda à toa.
+    ///
+    /// **Duas fichas, e não uma.** Acordar quando a primeira se completava
+    /// fazia a linha da conta gastá-la, e a linha seguinte do MOD achava o
+    /// balde seco: segurada, ela pedia outra conta na ficha seguinte, e o ciclo
+    /// se repetia. Medido na revisão do lote D: depois de uma rajada, um
+    /// `setInterval` de 100 ms deixava em quatro segundos 1 linha do MOD e 14 da
+    /// conta. Com duas, a primeira ficha fica com o MOD por um período inteiro
+    /// (`1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo): quem escreve nesse ritmo
+    /// ou mais a gasta antes de juntar a segunda, e leva a conta na própria
+    /// linha — o produto não fala. Quem se calou tem a conta em até dois
+    /// períodos, meio segundo, e ainda acha uma ficha quando voltar a escrever.
+    ///
+    /// O fim de toda volta pede as mesmas duas, pela mesma razão
+    /// ([`Self::pendentes_se_couber`]). Por isso a regra é uma só, e diz a
+    /// verdade em qualquer caminho: quem tenta escrever ao menos uma linha a
+    /// cada período nunca deixa juntar duas fichas, e o produto não fala.
+    ///
+    /// Arredondado para cima, ao microssegundo, e exato: as fichas andam em
+    /// múltiplos da vazão, o que o `assert` junto de [`FICHA`] prende na
+    /// compilação. Quem acorda no prazo acha as duas fichas inteiras, e não uma
+    /// fração que o mandaria dormir de novo.
+    ///
+    /// Só lê: a recarga é contada por quem gasta a ficha ([`Self::recarregar`]).
+    fn ate_sobrar_uma_ficha(&self, agora: Instant) -> Option<Duration> {
+        if self.suprimidas == 0 {
+            return None;
+        }
+        let passou = agora.saturating_duration_since(self.contado_ate);
+        let micros = u64::try_from(passou.as_micros()).unwrap_or(u64::MAX);
+        let por_micro = u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO);
+        let fichas = self.fichas.saturating_add(micros.saturating_mul(por_micro));
+        let falta = (2 * FICHA).saturating_sub(fichas);
+        Some(Duration::from_micros(falta.div_ceil(por_micro)))
+    }
+
     /// Conta a recarga até `agora` e tira uma ficha, se houver.
     fn gastar_ficha(&mut self, agora: Instant) -> bool {
+        self.recarregar(agora);
+        if self.fichas < FICHA {
+            return false;
+        }
+        self.fichas -= FICHA;
+        true
+    }
+
+    /// Conta a recarga até `agora`, sem passar do balde cheio.
+    fn recarregar(&mut self, agora: Instant) {
         let passou = agora.saturating_duration_since(self.contado_ate);
         let micros = u64::try_from(passou.as_micros()).unwrap_or(u64::MAX);
         // O relógio anda só o que foi contado: o resto abaixo de um
@@ -553,11 +631,6 @@ impl BaldeDoConsole {
         let cheio = u64::from(RAJADA_DO_CONSOLE) * FICHA;
         let recarga = micros.saturating_mul(u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
         self.fichas = self.fichas.saturating_add(recarga).min(cheio);
-        if self.fichas < FICHA {
-            return false;
-        }
-        self.fichas -= FICHA;
-        true
     }
 }
 
@@ -579,7 +652,11 @@ const CONTA_DO_BALDE: &str =
 /// as linhas da rajada como se fossem tudo.
 ///
 /// Um MOD que não tem volta nenhuma depois da rajada — nem temporizador, nem
-/// resposta — tem a conta dita quando para.
+/// resposta — tem a conta dita quando sobra uma ficha além da que fica com
+/// ele, em até meio segundo, sem esperar parar: a espera do laço de [`rodar`]
+/// acorda para isso ([`BaldeDoConsole::ate_sobrar_uma_ficha`]). Ele tinha a
+/// conta dita só quando parava, e numa sessão longa isso era o `seele.log`
+/// mostrando a rajada como se fosse tudo por horas.
 fn dizer_as_seguradas(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
@@ -734,7 +811,11 @@ impl NivelDoConsole {
 ///
 /// O corte é o de [`ate_o_teto_do_registro`], a regra que as outras portas que
 /// escapam texto de terceiro também usam. O aviso do corte conta os caracteres
-/// que o MOD escreveu.
+/// do texto que chegou aqui: o que o MOD escreveu, quando ele passa texto, ou o
+/// que o `console` do [`PRELUDIO`] montou de um objeto. **Só até 1024
+/// objetos**: acima disso, o orçamento de cada passada de `emTexto` já pôs
+/// `[…]` no lugar do resto, e o número é o do texto montado, menor do que o
+/// objeto inteiro daria.
 pub(crate) fn cortar_linha_do_console(texto: String) -> LinhaCortada {
     let cabe = ate_o_teto_do_registro(&texto);
     if cabe.len() == texto.len() {
@@ -1120,13 +1201,16 @@ fn rodar(
     //
     // `is_handled` é a segunda chamada, quando alguém prende um `catch`
     // depois: essa não é falha, e avisar nela seria ensinar a ignorar o aviso.
-    // A janela já recebeu o `Falhou` da primeira; a linha do registro, não —
-    // ela espera o fim da volta, e é esta segunda chamada que a tira da espera
-    // (ver [`RejeicoesDaVolta`]).
+    // **Nem a janela nem o registro ficam sabendo na primeira**: o `Falhou` e a
+    // linha esperam juntos o fim da volta, e é esta segunda chamada que os
+    // tira da espera (ver [`RejeicoesDaVolta`]). O `Falhou` saía daqui, na
+    // hora, e a gestão dizia «falhou» sobre a rejeição que o MOD pegava logo
+    // depois (P51-01).
     //
-    // Passa pela mesma cota dos outros avisos, e por isso um MOD que rejeita
-    // num laço não enche o canal — a cota é o que separa «dito» de «gritado».
-    // A linha do registro passa pelo balde do `console`, pela mesma razão.
+    // O `Falhou` passa pela mesma cota dos outros avisos, e por isso um MOD
+    // que rejeita num laço não enche o canal — a cota é o que separa «dito» de
+    // «gritado». A linha do registro passa pelo balde do `console`, pela mesma
+    // razão; e os dois saem cortados no teto do registro.
     //
     // **Três donos do balde, uma thread.** A ponte gasta ficha a cada linha; o
     // rastreador, só na reentrada em que a espera das rejeições não pode ser
@@ -1176,23 +1260,27 @@ fn rodar(
             if !havia_excecao && ctx.has_exception() {
                 let _ = ctx.catch();
             }
-            avisar(
-                &manda_rejeicao,
-                &fila_de_rejeicao,
-                ParaOFora::Falhou(format!("{REJEITADA_SEM_TRATAMENTO}: {texto}")),
-            );
-            // A espera guarda a linha, ou só a conta quando está cheia. Só uma
-            // reentrada, que não existe (a espera fica emprestada em código
-            // nativo que não roda JavaScript), deixaria de achá-la: aí a linha
-            // sai na hora, pelo balde, em vez de sumir.
+            let falhou = format!("{REJEITADA_SEM_TRATAMENTO}: {texto}");
+            // A espera guarda a linha e o `Falhou`, ou só a conta quando está
+            // cheia. Só uma reentrada, que não existe (a espera fica emprestada
+            // em código nativo que não roda JavaScript), deixaria de achá-la:
+            // aí os dois saem na hora, a linha pelo balde e o `Falhou` pela
+            // cota, em vez de sumir — sem isso, a janela deixaria de saber.
             match rejeicoes_do_rastreador.try_borrow_mut() {
-                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha),
-                Err(_) => linha_de_console(
-                    &balde_da_rejeicao,
-                    &manda_rejeicao,
-                    NivelDoConsole::Erro,
-                    linha,
-                ),
+                Ok(mut rejeicoes) => rejeicoes.guardar(&ctx, promessa, linha, falhou),
+                Err(_) => {
+                    linha_de_console(
+                        &balde_da_rejeicao,
+                        &manda_rejeicao,
+                        NivelDoConsole::Erro,
+                        linha,
+                    );
+                    avisar(
+                        &manda_rejeicao,
+                        &fila_de_rejeicao,
+                        ParaOFora::Falhou(cortar_linha_do_console(falhou).0),
+                    );
+                }
             }
         },
     )));
@@ -1288,10 +1376,32 @@ fn rodar(
         std::collections::BTreeMap::new();
 
     loop {
-        // **Espera até o pedido seguinte ou até o temporizador mais próximo.**
-        // É isto que faz esta thread não gastar CPU parada: sem temporizador
-        // ela dorme no canal, e com um ela dorme até a hora dele.
-        let entrada = match proximo_vencimento(&relogios) {
+        // **Espera até o pedido seguinte, até o temporizador mais próximo ou
+        // até sobrar uma ficha no balde do `console`**, o que vier primeiro. É
+        // isto que faz esta thread não gastar CPU parada: sem temporizador e
+        // sem linha segurada ela dorme no canal, e com um dos dois ela dorme
+        // até a hora do mais próximo.
+        //
+        // **A ficha que sobra acorda a thread para dizer a conta** que nenhuma
+        // linha levou: um MOD que escreve uma rajada e se cala, sem
+        // temporizador nem resposta, tinha a conta dita só quando parava, e o
+        // `seele.log` mostrava a rajada como se fosse tudo enquanto ele estava
+        // de pé. «Sobrar» é a segunda ficha, e não a primeira, que fica com o
+        // MOD por um período inteiro: acordar na primeira fazia a conta tomar a
+        // vez de um MOD que continuava escrevendo ([`BaldeDoConsole::
+        // ate_sobrar_uma_ficha`]). O custo é acordar uma vez por conta, e só
+        // enquanto o balde segura alguma linha: a volta do ramo de baixo diz a
+        // conta e zera as seguradas, e a espera seguinte volta a dormir no
+        // canal.
+        let ficha = balde_do_console
+            .try_borrow()
+            .ok()
+            .and_then(|balde| balde.ate_sobrar_uma_ficha(Instant::now()));
+        let prazo = [proximo_vencimento(&relogios), ficha]
+            .into_iter()
+            .flatten()
+            .min();
+        let entrada = match prazo {
             Some(quando) => match recebe.recv_timeout(quando) {
                 Ok(entrada) => Some(entrada),
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
@@ -1306,8 +1416,12 @@ fn rodar(
             break;
         }
         let Some(entrada) = entrada else {
-            // Venceu algum: dispara os que estão na hora, dentro de uma volta
-            // com prazo, como qualquer outra execução.
+            // Venceu um prazo — de um temporizador, ou a ficha que sobrou no
+            // balde: dispara os temporizadores que estão na hora (quando quem
+            // acordou foi a ficha, pode não haver nenhum), dentro de uma volta
+            // com prazo, como qualquer outra execução. Os temporizadores vêm
+            // antes da conta: se os dois vencem juntos, a linha do MOD leva a
+            // conta, e o produto não precisa falar.
             interrupcao.comecar();
             let vencidos = recolher_vencidos(&mut relogios);
             for id in vencidos {
@@ -1336,7 +1450,8 @@ fn rodar(
             // batendo. O `continue` escondia os dois.
             recolher_pedidos_de_relogio(&contexto, &mut relogios);
             // E a conta do console, pela mesma razão: este fim de volta é o
-            // único que um MOD só de relógio tem.
+            // único que um MOD só de relógio tem — e é o da espera que a ficha
+            // que sobrou acordou, que existe só para dizer esta conta.
             dizer_as_seguradas(&balde_do_console, manda, |balde| {
                 balde.pendentes_se_couber(Instant::now())
             });
@@ -1404,7 +1519,8 @@ fn rodar(
         );
         // Os pedidos de temporizador que o MOD fez nesta volta.
         recolher_pedidos_de_relogio(&contexto, &mut relogios);
-        // A conta do console que nenhuma linha levou, se houver ficha.
+        // A conta do console que nenhuma linha levou, se sobrar uma ficha além
+        // da que fica com o MOD.
         dizer_as_seguradas(&balde_do_console, manda, |balde| {
             balde.pendentes_se_couber(Instant::now())
         });
@@ -1414,7 +1530,7 @@ fn rodar(
     // a instância parou, e ninguém mais vai pegá-las. E antes do descarte, de
     // qualquer jeito — cada uma segura a promessa dela, e um runtime não se
     // desfaz com valor dele vivo do lado de fora.
-    dizer_as_rejeitadas(&rejeicoes, &balde_do_console, manda);
+    dizer_as_rejeitadas(&rejeicoes, &balde_do_console, manda, fila);
 
     // **A conta do console antes da confirmação de parada**, com ficha ou sem:
     // depois do `Parou` a bomba não lê mais nada, e a conta cairia com o
@@ -1557,17 +1673,86 @@ const PRELUDIO: &str = r#"
   // aninhado. `NaN` é o valor típico de um defeito de conta: um registro que
   // o diz `null` manda o autor procurar o que não existe. Aninhado, o valor
   // sai como texto, entre aspas; `Map` e `Set` saem como a lista do que têm.
+  //
+  // E ele diz `{}` para um `Error` (o nome e a mensagem não são enumeráveis),
+  // e some com a função e o símbolo de um objeto: `console.log({ erro })`
+  // saía `{"erro":{}}`. Aninhados, saem como `nome: mensagem`, `[função
+  // nome]` e `Symbol(…)` — a pilha fica só para o `Error` passado inteiro ao
+  // `console`, que tem a linha para ele.
+  const funcaoEmTexto = (f) => '[função ' + (f.name || 'anônima') + ']';
   const semMentir = (_chave, v) => {
     if (typeof v === 'number' && !Number.isFinite(v)) return String(v);
-    if (typeof v === 'bigint' || v === undefined) return String(v);
+    if (typeof v === 'bigint' || typeof v === 'symbol' || v === undefined) return String(v);
+    if (typeof v === 'function') return funcaoEmTexto(v);
+    if (v instanceof Error) return String(v.name) + ': ' + String(v.message);
     if (v instanceof Map || v instanceof Set) return [...v];
     return v;
   };
+  // **O ciclo, dito onde ele está.** O JSON lança num ciclo, e o recuo era
+  // `String(valor)`: um objeto com uma referência para o pai saía
+  // `[object Object]`, sem um campo. Quando a primeira passada lança, uma
+  // segunda troca por «[cíclico]» **só o que é ancestral do valor de agora**.
+  //
+  // Os ancestrais saem do `this` do substituto, que é o objeto que contém o
+  // valor: a pilha desce até ele, e o que sobra nela é o caminho da raiz até
+  // aqui. Não é um `WeakSet` de tudo o que já foi visto — ele marcaria como
+  // cíclica a mesma referência em dois campos, que é repetição, e não ciclo.
+  // Cada degrau guarda o valor como o MOD o tem e como `semMentir` o
+  // devolveu: um `Map` vira uma lista nova, e é ela o `this` dos filhos dele.
+  //
+  // **E cada passada tem um orçamento de objetos.** Marcar só os ancestrais
+  // faz o JSON percorrer todos os caminhos simples do grafo, e eles crescem
+  // como (k−1)!: dez nós ligados todos a todos estouravam o prazo da volta, e
+  // o `console.log` derrubava o MOD que ele observava (medido na revisão do
+  // lote D). Um DAG pesa o mesmo na primeira passada, sem ciclo nenhum: antes
+  // do lote, um de vinte nós, cada um ligado a todos os de depois, segurava a
+  // thread do motor por 1,13 s e saía `[object Object]` — o MOD seguia, sem
+  // `Falhou`, mas a volta passava em mais do dobro do prazo (medido na
+  // re-revisão). Do objeto de número `OBJETOS_POR_PASSADA` em diante, a
+  // passada diz `[…]`.
+  //
+  // **Mil e vinte e quatro, o dobro do que aparece.** Cada objeto que a
+  // passada vê escreve ao menos um caractere antes de ela ver o seguinte (o
+  // `{` dele, o `[` ou o texto que o troca), e o JSON sai na ordem em que os
+  // vê: o de depois do teto começa além do milésimo caractere, e a linha é
+  // cortada em 512 do outro lado — escapada, em menos ainda. **Os 512
+  // caracteres que chegam ao `seele.log` não mudam; o número do aviso do
+  // corte, sim.** O aviso conta o texto inteiro que o `console` montou, e
+  // acima de 1024 objetos esse texto tem `[…]` no lugar do resto: o número
+  // sai menor do que o objeto inteiro daria. O que o orçamento corta é o
+  // trabalho de montar o que não chega: cada passada vê no máximo este tanto
+  // de objetos, e procura cada um entre no máximo este tanto de ancestrais.
+  // As duas passadas, juntas, o dobro.
+  const OBJETOS_POR_PASSADA = 1024;
+  const passada = (marcaCiclos) => {
+    const ancestrais = [];
+    let fundo = 0;
+    let vistos = 0;
+    return function (chave, v) {
+      const dito = semMentir(chave, v);
+      if (typeof dito !== 'object' || dito === null) return dito;
+      if (vistos >= OBJETOS_POR_PASSADA) return '[…]';
+      vistos += 1;
+      if (!marcaCiclos) return dito;
+      while (fundo > 0 && ancestrais[fundo - 1][1] !== this) fundo -= 1;
+      for (let i = 0; i < fundo; i += 1) {
+        if (ancestrais[i][0] === v) return '[cíclico]';
+      }
+      ancestrais[fundo] = [v, dito];
+      fundo += 1;
+      return dito;
+    };
+  };
+  const comoJson = (valor, substituto) => {
+    const json = JSON.stringify(valor, substituto);
+    return json === undefined ? String(valor) : json;
+  };
   // **Cada parte se protege sozinha.** Uma que não vira texto — um objeto
-  // cíclico sem protótipo não vira JSON nem `String`, um `name` com getter
-  // que lança — sai como um recuo que diz isso. Sem ele, o erro subia até o
-  // `catch` de `escrever` e levava a linha inteira, com o contexto que o autor
-  // escreveu antes da parte que falhou.
+  // sem protótipo com um getter que lança não vira JSON em nenhuma das duas
+  // passadas, nem `String`; um `name` com getter que lança — sai como um
+  // recuo que diz isso. Sem ele, o erro subia até o `catch` de `escrever` e
+  // levava a linha inteira, com o contexto que o autor escreveu antes da
+  // parte que falhou.
   const emTexto = (valor) => {
     try {
       if (typeof valor === 'string') return valor;
@@ -1576,15 +1761,12 @@ const PRELUDIO: &str = r#"
           + (valor.stack ? '\n' + String(valor.stack) : '');
       }
       if (valor === undefined) return 'undefined';
-      if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
+      if (typeof valor === 'function') return funcaoEmTexto(valor);
       if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
       if (typeof valor === 'number') return String(valor);
-      try {
-        const json = JSON.stringify(valor, semMentir);
-        return json === undefined ? String(valor) : json;
-      } catch {
-        return String(valor);
-      }
+      try { return comoJson(valor, passada(false)); } catch { /* um ciclo, ou um getter que lança */ }
+      try { return comoJson(valor, passada(true)); } catch { /* o getter lançou de novo */ }
+      return String(valor);
     } catch {
       return '[valor que não virou texto]';
     }
@@ -1934,8 +2116,8 @@ fn recolher_pedidos_de_relogio(
 ///
 /// **E é aqui que a volta termina para as rejeições.** Sem microtarefa
 /// pendente, a promessa rejeitada que ainda espera em `rejeicoes` não foi pega
-/// por ninguém, e vira a linha do registro, e as contadas além do teto da
-/// espera viram a conta ([`dizer_as_rejeitadas`]). Numa
+/// por ninguém, e vira a linha do registro e o `Falhou` da janela, e as
+/// contadas além do teto da espera viram a conta ([`dizer_as_rejeitadas`]). Numa
 /// volta que parou com microtarefas na fila — por um teto ou pela revogação —,
 /// elas ainda podem pegá-las: as rejeições esperam a próxima volta que
 /// termine, ou a parada da instância.
@@ -1966,7 +2148,7 @@ fn escoar_jobs(
         }
     }
     if !runtime.is_job_pending() {
-        dizer_as_rejeitadas(rejeicoes, balde, manda);
+        dizer_as_rejeitadas(rejeicoes, balde, manda, fila);
     }
 }
 
@@ -1991,24 +2173,15 @@ const REJEITADA_SEM_TRATAMENTO: &str = "promessa rejeitada sem tratamento";
 /// final do Plano 1).
 ///
 /// **A memória do lado de fora do motor**, onde o teto de memória do MOD não
-/// alcança: no máximo este tanto de linhas, cada uma já cortada no teto do
-/// registro quando entra na espera (até 512 caracteres no registro, mais o
-/// aviso do corte; [`cortar_linha_do_console`]), um número para as de fora, e
-/// uma referência a cada promessa guardada, que continua morando no motor. Na
-/// espera, o texto inteiro do que o MOD lançou não fica: ele existe só
-/// enquanto a linha é montada e cortada, uma rejeição de cada vez. Guardada sem
+/// alcança: no máximo este tanto de rejeições, cada uma com a linha dela e o
+/// `Falhou` dela, os dois já cortados no teto do registro quando entram na
+/// espera (até 512 caracteres no registro, mais o aviso do corte;
+/// [`cortar_linha_do_console`]); um número para as de fora; e uma referência a
+/// cada promessa guardada, que continua morando no motor. Na espera, o texto
+/// inteiro do que o MOD lançou não fica: ele existe só enquanto a linha e o
+/// `Falhou` são montados e cortados, uma rejeição de cada vez. Guardada sem
 /// corte, como antes, a espera segurava até uma rajada inteira de mensagens do
 /// tamanho que o MOD quisesse até o fim da volta (F-Mods-m2).
-///
-/// **O `Falhou` que vai à janela não passa por esta espera, nem por este
-/// corte.** O rastreador o manda na hora, para cada rejeição sem tratamento,
-/// com o texto inteiro do que o MOD lançou («promessa rejeitada sem
-/// tratamento: …»). O que o limita é a cota dos avisos ([`AVISOS_NA_FILA`]
-/// à espera, por instância), em número, e não em tamanho: um MOD que
-/// rejeita com uma mensagem enorme a põe inteira em cada `Falhou` que coube.
-/// Já era assim antes desta espera (a v0.15.0 manda o mesmo `Falhou`), e o
-/// conserto está na pendência 51 de `docs/pendencias.md`, junto com o
-/// `Falhou` que sai também para a rejeição que o MOD pega logo depois.
 pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 
 /// **As rejeições sem tratamento de uma volta, à espera do fim dela.**
@@ -2016,12 +2189,13 @@ pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 /// O QuickJS chama o rastreador na hora da rejeição, e nessa hora quem a vai
 /// pegar pode ainda não ter tido a vez: `try { await f(); } catch {}`, com `f`
 /// uma função `async` que lança antes do primeiro `await`, rejeita a promessa
-/// antes de o `await` prender o tratamento — medido: o `Falhou` sai, e o MOD
-/// pegou. Dita na hora, a linha do registro diria «sem tratamento» em ERROR
-/// sobre uma rejeição que o MOD tratou. O rastreador é chamado de novo quando
-/// o tratamento chega (`ja_tratada`), e é essa segunda chamada que a tira
-/// daqui ([`Self::tratada`]); o que sobra quando as microtarefas da volta
-/// acabam ([`escoar_jobs`]) é o que ninguém pegou. É a regra do
+/// antes de o `await` prender o tratamento — medido: o rastreador é chamado, e
+/// o MOD pegou. Dita na hora, a linha do registro diria «sem tratamento» em
+/// ERROR, e o `Falhou` faria a gestão dizer «falhou», sobre uma rejeição que o
+/// MOD tratou — o `Falhou` saía assim até a P51-01. O rastreador é chamado de
+/// novo quando o tratamento chega (`ja_tratada`), e é essa segunda chamada que
+/// a tira daqui ([`Self::tratada`]); o que sobra quando as microtarefas da
+/// volta acabam ([`escoar_jobs`]) é o que ninguém pegou. É a regra do
 /// `unhandledrejection` do navegador.
 ///
 /// Guarda a promessa, e não um número: segurá-la viva até o fim da volta é o
@@ -2030,31 +2204,44 @@ pub(crate) const REJEICOES_GUARDADAS: usize = RAJADA_DO_CONSOLE as usize - 1;
 /// o runtime ser desfeito (o fim de [`rodar`]).
 #[derive(Default)]
 struct RejeicoesDaVolta {
-    /// Cada promessa rejeitada sem tratamento, com a linha que ela vira, já
-    /// cortada no teto do registro.
-    guardadas: Vec<(rquickjs::Persistent<rquickjs::Value<'static>>, LinhaCortada)>,
+    /// Cada promessa rejeitada sem tratamento, com o que ela vira.
+    guardadas: Vec<Rejeitada>,
     /// Quantas rejeitaram sem tratamento com a espera cheia, e ainda não o
     /// ganharam: só contadas ([`REJEICOES_GUARDADAS`]).
     alem: u32,
 }
 
+/// Uma rejeição sem tratamento à espera do fim da volta, em
+/// [`RejeicoesDaVolta`].
+struct Rejeitada {
+    /// A promessa, viva até o fim da volta.
+    promessa: rquickjs::Persistent<rquickjs::Value<'static>>,
+    /// A linha do registro, já cortada no teto dele.
+    linha: LinhaCortada,
+    /// O texto do `Falhou` que vai à janela, cortado pela mesma regra.
+    falhou: LinhaCortada,
+}
+
 impl RejeicoesDaVolta {
-    /// Guarda uma rejeição até o fim da volta, com a `linha` cortada no teto do
-    /// registro; com a espera cheia ([`REJEICOES_GUARDADAS`]), só a conta.
+    /// Guarda uma rejeição até o fim da volta, com a `linha` do registro e o
+    /// texto do `Falhou` da janela, os dois cortados no teto do registro; com a
+    /// espera cheia ([`REJEICOES_GUARDADAS`]), só a conta.
     fn guardar<'js>(
         &mut self,
         ctx: &rquickjs::Ctx<'js>,
         promessa: rquickjs::Value<'js>,
         linha: String,
+        falhou: String,
     ) {
         if self.guardadas.len() >= REJEICOES_GUARDADAS {
             self.alem = self.alem.saturating_add(1);
             return;
         }
-        self.guardadas.push((
-            rquickjs::Persistent::save(ctx, promessa),
-            cortar_linha_do_console(linha),
-        ));
+        self.guardadas.push(Rejeitada {
+            promessa: rquickjs::Persistent::save(ctx, promessa),
+            linha: cortar_linha_do_console(linha),
+            falhou: cortar_linha_do_console(falhou),
+        });
     }
 
     /// A rejeição de `promessa` ganhou tratamento: ela sai da espera, sem linha.
@@ -2067,8 +2254,9 @@ impl RejeicoesDaVolta {
     /// maior, que é o erro que esta espera existe para não cometer.
     fn tratada<'js>(&mut self, ctx: &rquickjs::Ctx<'js>, promessa: &rquickjs::Value<'js>) {
         let antes = self.guardadas.len();
-        self.guardadas.retain(|(guardada, _)| {
+        self.guardadas.retain(|guardada| {
             guardada
+                .promessa
                 .clone()
                 .restore(ctx)
                 .map_or(true, |ela| ela != *promessa)
@@ -2078,19 +2266,21 @@ impl RejeicoesDaVolta {
         }
     }
 
-    /// As linhas das que ninguém pegou, na ordem em que rejeitaram, e a conta
-    /// das de fora; a espera fica vazia, e as promessas, soltas.
-    fn sem_tratamento(&mut self) -> (Vec<LinhaCortada>, u32) {
-        let linhas = std::mem::take(&mut self.guardadas)
+    /// A linha e o `Falhou` de cada uma que ninguém pegou, nesta ordem e na
+    /// ordem em que rejeitaram, e a conta das de fora; a espera fica vazia, e
+    /// as promessas, soltas.
+    fn sem_tratamento(&mut self) -> (Vec<(LinhaCortada, LinhaCortada)>, u32) {
+        let ditas = std::mem::take(&mut self.guardadas)
             .into_iter()
-            .map(|(_, linha)| linha)
+            .map(|Rejeitada { linha, falhou, .. }| (linha, falhou))
             .collect();
-        (linhas, std::mem::take(&mut self.alem))
+        (ditas, std::mem::take(&mut self.alem))
     }
 }
 
 /// A linha que diz quantas rejeições sem tratamento passaram do teto da
-/// espera, depois das linhas das guardadas.
+/// espera, depois das linhas das guardadas. O `Falhou` que diz o mesmo à
+/// janela é outro texto ([`falhou_alem_da_espera`]).
 fn alem_da_espera(quantas: u32) -> String {
     if quantas == 1 {
         "e mais 1 rejeição sem tratamento além da espera".to_owned()
@@ -2099,25 +2289,42 @@ fn alem_da_espera(quantas: u32) -> String {
     }
 }
 
+/// O `Falhou` da conta das rejeições além da espera: a frase das outras
+/// rejeições na frente, porque ele chega à gestão sem as linhas que o cercam
+/// no registro, e «e mais N além da espera» sozinho não diz de quê.
+fn falhou_alem_da_espera(quantas: u32) -> String {
+    format!("{REJEITADA_SEM_TRATAMENTO}: e mais {quantas} além da espera")
+}
+
 /// **Diz as rejeições que ninguém pegou**, cada uma como uma linha de
-/// `console` em erro, pelo balde, sem cortar de novo ([`linha_ja_cortada`]);
-/// e depois, se alguma passou do teto da espera, quantas.
+/// `console` em erro, pelo balde, sem cortar de novo ([`linha_ja_cortada`]),
+/// e depois como o `Falhou` dela, pela cota dos avisos ([`avisar`]); e por
+/// fim, se alguma passou do teto da espera, quantas — numa linha e num
+/// `Falhou` só.
+///
+/// **A linha antes do `Falhou`**: a bomba lê o canal em ordem, e quem vê a
+/// gestão dizer «falhou» e abre o `seele.log` já acha lá a linha, com a pilha.
+/// O `Falhou` vai mesmo quando o balde segura a linha: a cota dele é outra, e
+/// a janela não pode deixar de saber porque o registro estava cheio.
 fn dizer_as_rejeitadas(
     rejeicoes: &std::cell::RefCell<RejeicoesDaVolta>,
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
+    fila: &Arc<Fila>,
 ) {
     // Entre duas voltas nenhum JavaScript roda, e o rastreador não tem a
     // espera emprestada.
-    let (linhas, alem) = match rejeicoes.try_borrow_mut() {
+    let (ditas, alem) = match rejeicoes.try_borrow_mut() {
         Ok(mut rejeicoes) => rejeicoes.sem_tratamento(),
         Err(_) => return,
     };
-    for linha in linhas {
+    for (linha, falhou) in ditas {
         linha_ja_cortada(balde, manda, NivelDoConsole::Erro, linha);
+        avisar(manda, fila, ParaOFora::Falhou(falhou.0));
     }
     if alem > 0 {
         linha_de_console(balde, manda, NivelDoConsole::Erro, alem_da_espera(alem));
+        avisar(manda, fila, ParaOFora::Falhou(falhou_alem_da_espera(alem)));
     }
 }
 
@@ -2513,19 +2720,152 @@ mod testes {
         );
     }
 
+    /// **Um `Error`, uma função e um símbolo aninhados dizem o que são.**
+    ///
+    /// O `JSON.stringify` diz `{}` para um `Error` (o nome e a mensagem não são
+    /// enumeráveis) e some com a função e o símbolo de um objeto: a linha de
+    /// `console.log({ erro })` saía `{"erro":{}}`, e quem a lê não sabe nem que
+    /// houve um erro (T1).
+    #[test]
+    fn um_error_uma_funcao_e_um_simbolo_aninhados_dizem_o_que_sao() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "console.log({ e: new Error('x'), f() {}, s: Symbol('s') });\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(_, texto)] = linhas.as_slice() else {
+            panic!("esperava uma linha de console, vieram {linhas:?}");
+        };
+        for (o_que, esperado) in [
+            ("um `Error`", "Error: x"),
+            ("uma função", "[função f]"),
+            ("um símbolo", "Symbol(s)"),
+        ] {
+            assert!(
+                texto.contains(esperado),
+                "{o_que} aninhado sumiu da linha do console, ou saiu como `{{}}`: esperava \
+                 «{esperado}» em {texto}"
+            );
+        }
+    }
+
+    /// **Um objeto cíclico diz onde é cíclico**, e não `[object Object]`.
+    ///
+    /// O `JSON.stringify` lança num ciclo, e o recuo era `String(valor)`: um
+    /// objeto de estado com uma referência para o pai saía `[object Object]`,
+    /// sem nenhum dos campos que o autor queria ver. Uma segunda passada troca
+    /// por «[cíclico]» só o que é ancestral do valor de agora — e não o que já
+    /// apareceu antes noutro ramo: a mesma referência em dois campos é
+    /// repetição, e não ciclo (T1).
+    #[test]
+    fn um_objeto_ciclico_diz_onde_e_ciclico_e_nao_vira_object_object() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const o = { nome: 'raiz' }; o.o = o; console.log(o);\
+                 const r = { a: 1 }; const p = { x: r, y: r }; p.p = p; console.log(p);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(_, ciclico), (_, repetido)] = linhas.as_slice() else {
+            panic!("esperava duas linhas de console, vieram {linhas:?}");
+        };
+        assert!(
+            ciclico.contains("cíclico")
+                && ciclico.contains("raiz")
+                && !ciclico.contains("[object Object]"),
+            "um objeto cíclico saiu sem os campos dele, ou sem dizer onde é cíclico: {ciclico}"
+        );
+        assert_eq!(
+            repetido, "{\"x\":{\"a\":1},\"y\":{\"a\":1},\"p\":\"[cíclico]\"}",
+            "a segunda passada marcou como cíclica uma referência só repetida, ou não marcou o \
+             ciclo: o registro diz que há ciclo onde há só repetição"
+        );
+    }
+
+    /// **Um grafo denso no `console` não estoura a volta.**
+    ///
+    /// Marcar só os ancestrais faz o `JSON.stringify` percorrer todos os
+    /// caminhos simples do grafo, e eles crescem como (k−1)!. Medido na
+    /// revisão do lote D: com dez nós ligados todos a todos, a segunda passada
+    /// estourava o prazo da volta — o produto mandava `Falhou("o MOD
+    /// lançou")`, e o código do MOD depois do `console.log` não rodava. Um DAG
+    /// de vinte nós, cada um ligado a todos os de depois, pesa o mesmo na
+    /// primeira passada, sem ciclo nenhum: 2¹⁹ caminhos. Antes do lote, o
+    /// ciclo saía `[object Object]` na hora; o DAG segurava a thread do motor
+    /// por 1,13 s e também saía `[object Object]`, e o MOD seguia sem `Falhou`
+    /// (medido em `0f94be66` na re-revisão). Com as duas passadas deste lote e
+    /// sem o orçamento na primeira, ele derruba a volta como o grafo completo:
+    /// `Falhou("o MOD lançou")`, e o `fim` não chega (a reversão da rodada 1).
+    ///
+    /// Cada passada tem um orçamento de objetos ([`PRELUDIO`],
+    /// `OBJETOS_POR_PASSADA`), e o que passa dele sai `[…]`.
+    #[test]
+    fn um_grafo_denso_no_console_nao_estoura_a_volta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const completo = Array.from({ length: 10 }, (_, i) => ({ i }));\
+                 for (const a of completo) for (const b of completo) if (a !== b) a['n' + b.i] = b;\
+                 console.log(completo[0]);\
+                 const dag = Array.from({ length: 20 }, (_, i) => ({ i }));\
+                 for (let a = 0; a < 20; a++) for (let b = a + 1; b < 20; b++) dag[a]['n' + b] = dag[b];\
+                 console.log(dag[0]);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let mut linhas = Vec::new();
+        let inicio = Instant::now();
+        loop {
+            match executor.receber(Duration::from_secs(5)) {
+                Some(ParaOFora::Console { texto, .. }) => linhas.push(texto),
+                Some(ParaOFora::Mensagem(fim)) if fim == "fim" => break,
+                outra => panic!(
+                    "um `console.log` de um grafo denso não deixou o MOD chegar ao fim da volta \
+                     ({:?} depois de subir, com {} linhas): veio {outra:?}",
+                    inicio.elapsed(),
+                    linhas.len()
+                ),
+            }
+        }
+        let [completo, dag] = linhas.as_slice() else {
+            panic!("esperava duas linhas de console, vieram {linhas:?}");
+        };
+        assert!(
+            completo.starts_with("{\"i\":0,\"n1\":{\"i\":1,\"n0\":\"[cíclico]\""),
+            "o grafo completo saiu sem dizer o que tem no começo, ou sem o ciclo onde ele está: \
+             {}",
+            completo.chars().take(120).collect::<String>()
+        );
+        assert!(
+            dag.starts_with("{\"i\":0,\"n1\":{\"i\":1,\"n2\":{\"i\":2,"),
+            "o DAG saiu sem dizer o que tem no começo: {}",
+            dag.chars().take(120).collect::<String>()
+        );
+    }
+
     /// **Uma parte que não vira texto não derruba a linha inteira.**
     ///
-    /// Um objeto cíclico de protótipo nulo não vira JSON (é cíclico) nem texto
-    /// (não tem `toString`): o `JSON.stringify` lança, o `String` do recuo
-    /// também lança, e o `catch` de `escrever` engolia a linha toda — com o
-    /// contexto que o autor escreveu antes do objeto. A parte que não vira
-    /// texto sai como um recuo que diz isso, e o resto da linha chega.
+    /// Um objeto de protótipo nulo com um getter que lança não vira JSON (o
+    /// getter lança nas duas passadas) nem texto (não tem `toString`): o
+    /// `JSON.stringify` lança, o `String` do recuo também lança, e o `catch` de
+    /// `escrever` engolia a linha toda — com o contexto que o autor escreveu
+    /// antes do objeto. A parte que não vira texto sai como um recuo que diz
+    /// isso, e o resto da linha chega.
+    ///
+    /// O exemplo era um objeto cíclico de protótipo nulo, até o ciclo virar
+    /// «[cíclico]» (T1): esse agora vira texto.
     #[test]
     fn uma_parte_que_nao_vira_texto_nao_derruba_a_linha_do_console() {
         let executor = executor();
         executor
             .iniciar(
-                "const c = Object.create(null); c.eu = c;\
+                "const c = Object.create(null);\
+                 Object.defineProperty(c, 'x', { enumerable: true, get() { throw new Error('não'); } });\
                  console.warn('contexto importante:', c);\
                  seele.postar('fim');",
             )
@@ -2541,7 +2881,9 @@ mod testes {
         );
     }
 
-    /// **Cada método tem o seu nível**, e um `Error` chega com nome e mensagem.
+    /// **Cada método tem o seu nível**, e um `Error` chega com nome, mensagem
+    /// e pilha — a pilha numa linha abaixo, com a quebra de verdade, que a
+    /// bomba escapa ao escrever no `seele.log`.
     #[test]
     fn cada_metodo_do_console_escreve_no_seu_nivel() {
         let executor = executor();
@@ -2569,6 +2911,10 @@ mod testes {
         assert!(
             erro.starts_with("Error: quebrou"),
             "um `Error` passado ao console perdeu o nome e a mensagem: {erro}"
+        );
+        assert!(
+            erro.contains("\n    at "),
+            "um `Error` passado ao console perdeu a pilha, que diz onde no MOD ele nasceu: {erro:?}"
         );
     }
 
@@ -2818,10 +3164,12 @@ mod testes {
     }
 
     /// **A conta que nenhuma linha levou sai do balde por conta própria**: ao
-    /// fim de uma volta, só com ficha; no fim da instância, sempre.
+    /// fim de uma volta, só com duas fichas — a dela e a da próxima linha do
+    /// MOD —, tenha a volta escrito ou não; no fim da instância, sempre.
     #[test]
     fn o_balde_devolve_a_conta_que_nenhuma_linha_levou() {
         let inicio = Instant::now();
+        let uma_ficha = Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
         let mut balde = BaldeDoConsole::novo(inicio);
         assert_eq!(
             balde.pendentes_se_couber(inicio),
@@ -2845,16 +3193,52 @@ mod testes {
             None,
             "a conta saiu sem ficha: uma linha a mais por volta passaria do teto de vazão"
         );
-        let depois =
-            inicio + Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        // Uma volta sem linha nenhuma, com uma ficha: ela é da próxima linha
+        // do MOD.
         assert_eq!(
-            balde.pendentes_se_couber(depois),
+            balde.pendentes_se_couber(inicio + uma_ficha),
+            None,
+            "o fim de uma volta sem linha disse a conta com uma ficha só: a próxima linha do MOD \
+             acha o balde seco, e quem recebe mais do que escreve perde as linhas para a conta"
+        );
+        // Com duas, a conta sai e deixa uma.
+        let duas = inicio + uma_ficha * 2;
+        assert_eq!(
+            balde.pendentes_se_couber(duas),
             Some(3),
-            "com ficha ao fim da volta, a conta das seguradas não saiu, ou a volta sem ficha a \
-             perdeu"
+            "com duas fichas ao fim de uma volta sem linha, a conta das seguradas não saiu, ou a \
+             volta de antes a perdeu"
         );
         assert_eq!(
-            balde.admitir(depois),
+            balde.admitir(duas),
+            Some(0),
+            "a conta dita com duas fichas não deixou a do MOD"
+        );
+        // Uma volta em que a linha do MOD foi segurada: a ficha que se
+        // completa depois, ainda nela, é da próxima linha dele.
+        assert_eq!(balde.admitir(duas), None, "uma ficha virou duas");
+        assert_eq!(
+            balde.pendentes_se_couber(duas + uma_ficha),
+            None,
+            "numa volta em que a linha do MOD foi segurada, a conta tomou a ficha que se \
+             completou depois: a próxima linha do MOD acha o balde seco, e quem escreve e segue \
+             trabalhando perde as linhas para a conta"
+        );
+        // Com duas, sai — e deixa uma.
+        let quatro = duas + uma_ficha * 2;
+        assert_eq!(
+            balde.pendentes_se_couber(quatro),
+            Some(1),
+            "com duas fichas ao fim de uma volta em que a linha do MOD foi segurada, a conta não \
+             saiu"
+        );
+        assert_eq!(
+            balde.admitir(quatro),
+            Some(0),
+            "a conta dita com duas fichas não deixou a do MOD"
+        );
+        assert_eq!(
+            balde.admitir(quatro),
             None,
             "a conta dita ao fim da volta não gastou a ficha, e o teto de vazão deixa de valer"
         );
@@ -2867,6 +3251,87 @@ mod testes {
             balde.pendentes(),
             None,
             "a conta do fim não recomeçou depois de dita, e o registro a somaria duas vezes"
+        );
+    }
+
+    /// **O balde diz quanto falta para sobrar uma ficha — e só enquanto segura
+    /// alguma linha.**
+    ///
+    /// É o prazo que a espera do laço de [`rodar`] usa para acordar e dizer a
+    /// conta sem esperar o MOD parar. Sem linha segurada, `None`: a thread não
+    /// acorda por nada. Com uma, o prazo é o de **duas** fichas: a conta gasta
+    /// uma, e a outra fica com o MOD. E é exato, ao microssegundo: é o
+    /// instante em que o fim da volta que a espera acordou — uma volta sem
+    /// linha — acha as duas. Acordada no prazo, a conta sai e a linha seguinte
+    /// do MOD ainda passa; um microssegundo antes, a volta não diria a conta.
+    #[test]
+    fn o_balde_diz_quanto_falta_para_sobrar_uma_ficha() {
+        let inicio = Instant::now();
+        let uma_ficha = Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        // Um balde seco por uma rajada inteira, uma linha segurada depois, e a
+        // volta da rajada terminada.
+        let seco_com_uma_segurada = || {
+            let mut balde = BaldeDoConsole::novo(inicio);
+            assert_eq!(
+                balde.ate_sobrar_uma_ficha(inicio),
+                None,
+                "um balde cheio, sem nada segurado, pediu para acordar a thread do motor"
+            );
+            for _ in 0..RAJADA_DO_CONSOLE {
+                assert!(balde.admitir(inicio).is_some(), "a rajada não passou");
+            }
+            assert_eq!(
+                balde.ate_sobrar_uma_ficha(inicio),
+                None,
+                "um balde seco, sem nada segurado, pediu para acordar a thread do motor"
+            );
+            assert_eq!(balde.admitir(inicio), None, "o balde passou da rajada");
+            assert_eq!(
+                balde.pendentes_se_couber(inicio),
+                None,
+                "a conta saiu sem ficha no fim da volta da rajada"
+            );
+            balde
+        };
+        let balde = seco_com_uma_segurada();
+        assert_eq!(
+            balde.ate_sobrar_uma_ficha(inicio),
+            Some(uma_ficha * 2),
+            "com uma linha segurada e o balde seco, o prazo não é o de duas recargas: a conta \
+             gastaria a única ficha, e a linha seguinte do MOD acharia o balde seco"
+        );
+        let um_pouco_depois = inicio + Duration::from_millis(100);
+        assert_eq!(
+            balde.ate_sobrar_uma_ficha(um_pouco_depois),
+            Some(uma_ficha * 2 - Duration::from_millis(100)),
+            "o tempo que passou não descontou do que falta para sobrar uma ficha"
+        );
+        let prazo = inicio + uma_ficha * 2;
+
+        let mut cedo = seco_com_uma_segurada();
+        assert_eq!(
+            cedo.pendentes_se_couber(prazo - Duration::from_micros(1)),
+            None,
+            "um microssegundo antes do prazo, o fim de uma volta sem linha disse a conta: ou o \
+             prazo não é exato, e a thread acordaria tarde, ou a volta sem linha não pede as duas \
+             fichas"
+        );
+
+        let mut no_prazo = seco_com_uma_segurada();
+        assert_eq!(
+            no_prazo.pendentes_se_couber(prazo),
+            Some(1),
+            "a thread acordada no prazo que o balde deu não achou ficha para a conta"
+        );
+        assert_eq!(
+            no_prazo.admitir(prazo),
+            Some(0),
+            "acordada no prazo que o balde deu, a conta tomou a ficha que era do MOD"
+        );
+        assert_eq!(
+            no_prazo.ate_sobrar_uma_ficha(prazo),
+            None,
+            "a conta já foi dita, e o balde continua pedindo para acordar a thread"
         );
     }
 
@@ -2943,14 +3408,23 @@ mod testes {
         }
     }
 
-    /// **Uma rajada no `console` seguida de silêncio tem a conta dita quando
-    /// a instância para.**
+    /// **Uma rajada no `console` seguida de silêncio tem a conta dita até a
+    /// instância parar.**
     ///
     /// O teste de laço acima só fecha a soma porque uma linha passa depois e
     /// leva a conta. Sem ela, a conta ficava no balde e caía com o contexto: o
     /// `seele.log` mostrava 32 linhas, e quem lê concluía que eram 32 itens.
+    ///
+    /// **Quem a diz depende do relógio**, e por isso o nome deixou de ser «ao
+    /// parar»: o `Encerrar` sai logo depois do diagnóstico, e numa máquina
+    /// normal chega antes de sobrar uma ficha (meio segundo) — a conta sai na
+    /// parada. Numa máquina parada esse tempo, ela sai antes, pela espera do
+    /// laço ([`BaldeDoConsole::ate_sobrar_uma_ficha`]). O que este teste prova
+    /// sempre é que ela sai antes do `Parou`, e que a soma fecha; o caminho da
+    /// parada tem um guarda que não depende do relógio
+    /// (`a_conta_que_sobra_quando_a_instancia_para_sai_antes_do_parou`).
     #[test]
-    fn uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ao_parar() {
+    fn uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ate_parar() {
         let executor = executor();
         executor.iniciar(RAJADA_DE_MIL).expect("código");
         // O diagnóstico entra na fila atrás do código: quando ele volta, a volta
@@ -2971,55 +3445,385 @@ mod testes {
         soma.conferir("rajada e silêncio, até parar");
     }
 
-    /// **A conta não espera o fim: sai na primeira volta que tiver ficha**,
-    /// seja ela de um temporizador ou de uma resposta.
+    /// **A conta que sobra quando a instância para sai antes do `Parou`** —
+    /// com ficha ou sem.
     ///
-    /// São os dois fins de volta do laço do motor — o do temporizador termina
-    /// num `continue` —, e cada um tem de dizer a conta. Nenhuma das duas
-    /// voltas escreve nada: quem escreve a linha é o produto.
+    /// O MOD escreve duas linhas a cada 4 ms: a primeira leva cada ficha que
+    /// aparece, e a segunda é sempre segurada. Assim o balde nunca junta a
+    /// ficha que sobraria, a espera do laço nunca acorda para dizer a conta, e
+    /// o fim de cada volta acha o balde seco: o único caminho que diz as
+    /// seguradas depois da última linha que passou é o da parada
+    /// ([`BaldeDoConsole::pendentes`], no fim de [`rodar`]). E há sempre uma
+    /// segurada quando o `Encerrar` chega, entre duas voltas — sem depender do
+    /// relógio, como o teste de cima depende.
     #[test]
-    fn a_conta_das_seguradas_sai_na_primeira_volta_com_ficha() {
-        // A volta de um temporizador, 400 ms depois: uma ficha e meia.
-        let pelo_relogio = executor();
-        pelo_relogio
-            .iniciar(&format!("{RAJADA_DE_MIL} setTimeout(() => {{}}, 400);"))
+    fn a_conta_que_sobra_quando_a_instancia_para_sai_antes_do_parou() {
+        let executor = executor();
+        executor
+            .iniciar("setInterval(() => { console.log('a'); console.log('b'); }, 4);")
             .expect("código");
-        let mut soma = Soma::default();
-        soma.ate(
-            &pelo_relogio,
-            |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
-            "a conta das seguradas não saiu na volta do temporizador, que tinha ficha",
-        );
-        soma.conferir("na volta do temporizador");
-
-        // A volta de uma resposta, depois de a rajada acabar e o balde ter
-        // ficha de novo.
-        let pela_resposta = executor();
-        pela_resposta
-            .iniciar(&format!(
-                "globalThis.aoResponder = () => {{}}; {RAJADA_DE_MIL}"
-            ))
-            .expect("código");
-        pela_resposta.diagnostico().expect("o executor de pé");
-        let mut soma = Soma::default();
-        soma.ate(
-            &pela_resposta,
-            |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
-            "a volta do laço não acabou",
-        );
-        // Numa máquina parada por um quarto de segundo, a conta já pode ter
-        // saído no fim da volta do diagnóstico — que é o mesmo fim de volta que
-        // o de uma resposta.
-        if soma.conta.is_none() {
-            std::thread::sleep(Duration::from_millis(400));
-            pela_resposta.entregar("{}").expect("entregar");
-            soma.ate(
-                &pela_resposta,
-                |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
-                "a conta das seguradas não saiu na volta da resposta, que tinha ficha",
+        // A última linha de console antes do `Parou`, contando as que chegam
+        // antes do `Encerrar`.
+        let mut ultima_linha = None;
+        let mut pediu = false;
+        let inicio = Instant::now();
+        loop {
+            assert!(
+                inicio.elapsed() < Duration::from_secs(5),
+                "o executor não confirmou a parada em cinco segundos"
             );
+            if !pediu && inicio.elapsed() >= Duration::from_millis(600) {
+                executor.pedir_encerramento();
+                pediu = true;
+            }
+            match executor.receber(Duration::from_millis(20)) {
+                Some(ParaOFora::Parou) => break,
+                Some(ParaOFora::Console {
+                    texto, suprimidas, ..
+                }) => ultima_linha = Some((texto, suprimidas)),
+                Some(_) | None => {}
+            }
         }
-        soma.conferir("na volta da resposta");
+        let Some((texto, suprimidas)) = ultima_linha else {
+            panic!("nenhuma linha de console chegou, e o teste não mediu nada");
+        };
+        assert!(
+            texto == CONTA_DO_BALDE && suprimidas >= 1,
+            "a última linha antes do `Parou` não foi a conta do que o balde segurou depois da \
+             última linha que passou ({texto:?}, suprimidas={suprimidas}): a conta caiu com o \
+             contexto, e o `seele.log` mostra menos do que o MOD escreveu como se fosse tudo"
+        );
+    }
+
+    /// **A conta sai sem esperar o MOD parar**, e sem temporizador nem resposta
+    /// que acorde a thread do motor.
+    ///
+    /// Um MOD que escreve cem linhas ao subir e se cala tinha a conta dita só
+    /// quando parava: a thread dormia no canal, sem prazo, e a conta esperava
+    /// no balde uma volta que não vinha. Numa sessão longa, o `seele.log`
+    /// mostrava as linhas da rajada como se fossem tudo por horas (T2 N1).
+    /// Agora a espera do laço também acorda quando sobra uma ficha além da que
+    /// fica com o MOD — meio segundo depois da rajada —, e só enquanto há linha
+    /// segurada. O segundo de prazo é o dobro disso.
+    #[test]
+    fn a_conta_das_seguradas_sai_sem_esperar_o_mod_parar() {
+        let executor = executor();
+        executor
+            .iniciar("for (let i = 0; i < 100; i++) console.log(i);")
+            .expect("código");
+        let prazo = Instant::now() + Duration::from_secs(1);
+        let mut passaram = 0_usize;
+        let (nivel, suprimidas) = loop {
+            match executor.receber(prazo.saturating_duration_since(Instant::now())) {
+                Some(ParaOFora::Console {
+                    nivel,
+                    texto,
+                    suprimidas,
+                }) if texto == CONTA_DO_BALDE => break (nivel, suprimidas),
+                Some(ParaOFora::Console { .. }) => passaram += 1,
+                outro => panic!(
+                    "um MOD que escreveu cem linhas e se calou, sem temporizador nem Encerrar, \
+                     não teve a conta das seguradas dita em um segundo — ela espera a parada, e \
+                     o seele.log mostra {passaram} linhas como se fossem tudo; veio {outro:?}"
+                ),
+            }
+        };
+        assert_eq!(
+            nivel,
+            NivelDoConsole::Aviso,
+            "a conta das seguradas saiu noutro nível que o aviso"
+        );
+        assert!(
+            suprimidas >= 60,
+            "a conta que saiu sem esperar a parada diz {suprimidas} seguradas, e de cem linhas \
+             passaram {passaram}: ela não conta o que o balde segurou"
+        );
+    }
+
+    /// **Um MOD que continua escrevendo não perde a vez para a linha da
+    /// conta.**
+    ///
+    /// A espera do laço acordava no instante em que a ficha se completava, e a
+    /// linha da conta a gastava: a linha seguinte do MOD achava menos de uma
+    /// ficha e era segurada, o que fazia o produto acordar de novo na ficha
+    /// seguinte — e o ciclo se repetia. Medido na revisão do lote D: depois de
+    /// uma rajada, um `setInterval` de 100 ms deixava em quatro segundos 1 linha
+    /// do MOD e 14 da conta, e o `seele.log` dizia «quantas» no lugar de «o
+    /// quê». Sem a espera da ficha eram 15 e 0.
+    ///
+    /// Agora a espera deixa a ficha ao MOD por um período inteiro antes de o
+    /// produto falar ([`BaldeDoConsole::ate_sobrar_uma_ficha`]): quem escreve
+    /// quatro linhas por segundo ou mais a gasta antes de juntar duas.
+    #[test]
+    fn um_mod_que_continua_escrevendo_nao_perde_a_vez_para_a_conta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "for (let i = 0; i < 100; i++) console.log('rajada ' + i);\
+                 setInterval(() => console.log('do MOD'), 100);",
+            )
+            .expect("código");
+        let fim = Instant::now() + Duration::from_secs(2);
+        let (mut do_mod, mut conta) = (0_usize, 0_usize);
+        while Instant::now() < fim {
+            match executor.receber(fim.saturating_duration_since(Instant::now())) {
+                Some(ParaOFora::Console { texto, .. }) if texto == "do MOD" => do_mod += 1,
+                Some(ParaOFora::Console { texto, .. }) if texto == CONTA_DO_BALDE => conta += 1,
+                Some(ParaOFora::Console { .. }) | None => {}
+                Some(outra) => panic!("veio {outra:?} no meio das linhas de console"),
+            }
+        }
+        assert!(
+            conta <= 1 && do_mod > conta && do_mod >= 4,
+            "um MOD que escreve a cada 100 ms deixou, em dois segundos depois de uma rajada, \
+             {do_mod} linhas dele e {conta} da conta: a linha da conta toma a ficha que era do \
+             MOD, e o seele.log diz «quantas» no lugar de «o quê»"
+        );
+    }
+
+    /// **Um MOD que recebe mais do que escreve não perde a vez para a linha da
+    /// conta.**
+    ///
+    /// O mesmo defeito da espera, pelo fim de volta: cada evento é uma volta
+    /// em que o MOD não escreve, e ela dizia a conta com a primeira ficha que
+    /// achasse. A linha seguinte do MOD, do temporizador, achava o balde seco.
+    /// Medido na re-revisão do lote D, com eventos a cada 30 ms e o MOD
+    /// escrevendo a cada 100 ms: 1 linha do MOD e 14 da conta em quatro
+    /// segundos, igual antes do lote (`7953a3b0`). Agora o fim de toda volta
+    /// pede duas fichas, como a espera ([`BaldeDoConsole::pendentes_se_couber`]).
+    #[test]
+    fn um_mod_que_recebe_mais_do_que_escreve_nao_perde_a_vez_para_a_conta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "SeeleUI.aoEvento(() => {});\
+                 for (let i = 0; i < 100; i++) console.log('rajada ' + i);\
+                 setInterval(() => console.log('do MOD'), 100);",
+            )
+            .expect("código");
+        let inicio = Instant::now();
+        let fim = inicio + Duration::from_secs(2);
+        let mut proximo_evento = inicio;
+        let (mut do_mod, mut conta) = (0_usize, 0_usize);
+        while Instant::now() < fim {
+            if Instant::now() >= proximo_evento {
+                let _ = executor.entregar(r#"{"tipo":"evento","nome":"tecla"}"#);
+                proximo_evento += Duration::from_millis(30);
+            }
+            let ate = proximo_evento.min(fim);
+            match executor.receber(ate.saturating_duration_since(Instant::now())) {
+                Some(ParaOFora::Console { texto, .. }) if texto == "do MOD" => do_mod += 1,
+                Some(ParaOFora::Console { texto, .. }) if texto == CONTA_DO_BALDE => conta += 1,
+                Some(ParaOFora::Console { .. }) | None => {}
+                Some(outra) => panic!("veio {outra:?} no meio das linhas de console"),
+            }
+        }
+        assert!(
+            conta <= 1 && do_mod > conta && do_mod >= 4,
+            "um MOD que recebe um evento a cada 30 ms e escreve a cada 100 ms deixou, em dois \
+             segundos depois de uma rajada, {do_mod} linhas dele e {conta} da conta: o fim da \
+             volta de cada evento toma a ficha que era do MOD"
+        );
+    }
+
+    /// **Um MOD que escreve e depois trabalha, na mesma volta, não perde a vez
+    /// para a linha da conta.**
+    ///
+    /// O fim de uma volta em que o MOD escreveu dizia a conta com uma ficha
+    /// só: se a ficha se completava depois da linha segurada, ainda na volta,
+    /// a conta a tomava, e a próxima linha do MOD achava o balde seco. Medido
+    /// na re-revisão da rodada 2 do lote D, com um `setInterval` de 100 ms que
+    /// escreve e trabalha 60 ms: 6 linhas do MOD e 9 da conta em quatro
+    /// segundos; com 120 ms de trabalho, 0 e 15. Agora o fim de toda volta pede
+    /// duas fichas, como a espera ([`BaldeDoConsole::pendentes_se_couber`]).
+    #[test]
+    fn um_mod_que_escreve_e_trabalha_na_mesma_volta_nao_perde_a_vez_para_a_conta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "for (let i = 0; i < 100; i++) console.log('rajada ' + i);\
+                 setInterval(() => {\
+                   console.log('do MOD');\
+                   const desde = Date.now(); while (Date.now() - desde < 60) {}\
+                 }, 100);",
+            )
+            .expect("código");
+        let fim = Instant::now() + Duration::from_secs(3);
+        let (mut do_mod, mut conta) = (0_usize, 0_usize);
+        while Instant::now() < fim {
+            match executor.receber(fim.saturating_duration_since(Instant::now())) {
+                Some(ParaOFora::Console { texto, .. }) if texto == "do MOD" => do_mod += 1,
+                Some(ParaOFora::Console { texto, .. }) if texto == CONTA_DO_BALDE => conta += 1,
+                Some(ParaOFora::Console { .. }) | None => {}
+                Some(outra) => panic!("veio {outra:?} no meio das linhas de console"),
+            }
+        }
+        assert!(
+            conta <= 1 && do_mod > conta && do_mod >= 6,
+            "um MOD que escreve e trabalha 60 ms a cada 100 ms deixou, em três segundos depois \
+             de uma rajada, {do_mod} linhas dele e {conta} da conta: o fim da volta dele toma a \
+             ficha que se completou durante o trabalho, e que era da próxima linha"
+        );
+    }
+
+    /// **A conta não espera um temporizador mais tarde que a ficha que sobra.**
+    ///
+    /// Com um temporizador de pé, a espera do laço é a menor das duas: o
+    /// temporizador é de um minuto, e a conta só chega dentro dos cinco
+    /// segundos de [`Soma::ate`] porque a thread acorda quando sobra uma ficha
+    /// ([`BaldeDoConsole::ate_sobrar_uma_ficha`]), e não no vencimento.
+    ///
+    /// Era a metade do relógio de `a_conta_das_seguradas_sai_na_primeira_volta_com_ficha`.
+    /// A metade da resposta virou, na rodada 2,
+    /// `o_fim_de_uma_volta_em_que_o_mod_nao_escreveu_espera_sobrar_uma_ficha`,
+    /// que prova o contrário do que ela provava.
+    #[test]
+    fn a_conta_das_seguradas_nao_espera_um_temporizador_mais_tarde() {
+        let com_relogio = executor();
+        com_relogio
+            .iniciar(&format!("{RAJADA_DE_MIL} setTimeout(() => {{}}, 60000);"))
+            .expect("código");
+        let mut soma = Soma::default();
+        soma.ate(
+            &com_relogio,
+            |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
+            "a conta das seguradas esperou o temporizador de um minuto, e não a ficha: a espera \
+             do laço usou o vencimento, e não o menor dos dois prazos",
+        );
+        soma.conferir("com um temporizador de um minuto de pé");
+    }
+
+    /// **O fim de uma volta em que o MOD não escreveu espera sobrar uma
+    /// ficha.**
+    ///
+    /// Este teste se chamava
+    /// `a_conta_das_seguradas_sai_no_fim_da_volta_de_uma_resposta_com_ficha`, e
+    /// provava o contrário: que a resposta, sem escrever, dizia a conta com uma
+    /// ficha só. Era o defeito da espera de antes, por outro caminho — a conta
+    /// gastava a única ficha, e a linha seguinte do MOD achava o balde seco (ver
+    /// [`um_mod_que_recebe_mais_do_que_escreve_nao_perde_a_vez_para_a_conta`]).
+    ///
+    /// A resposta chega entre a primeira ficha (um quarto de segundo depois da
+    /// rajada) e a segunda (meio segundo), aos 260 ms, e o diagnóstico logo
+    /// atrás dela: quando ele volta, a conta **não** pode ter saído. Ela sai
+    /// depois, quando sobra a segunda ficha, pela espera do laço.
+    ///
+    /// **O relógio é conferido, e não suposto** ([`AINDA_SEM_A_SEGUNDA_FICHA`]):
+    /// a asserção só vale se o diagnóstico voltou antes de a segunda ficha
+    /// poder ter se completado. Numa máquina parada mais que isso, a tentativa
+    /// é refeita, e três lentas seguidas reprovam dizendo que nada foi medido.
+    #[test]
+    fn o_fim_de_uma_volta_em_que_o_mod_nao_escreveu_espera_sobrar_uma_ficha() {
+        for _ in 0..3 {
+            let inicio = Instant::now();
+            let com_resposta = executor();
+            com_resposta
+                .iniciar(&format!(
+                    "globalThis.aoResponder = () => {{}}; {RAJADA_DE_MIL}"
+                ))
+                .expect("código");
+            com_resposta.diagnostico().expect("o executor de pé");
+            let mut soma = Soma::default();
+            soma.ate(
+                &com_resposta,
+                |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+                "a volta do laço não acabou",
+            );
+            std::thread::sleep(Duration::from_millis(260));
+            // O diagnóstico entra na fila atrás da resposta: quando ele volta,
+            // a volta da resposta acabou, e o que ela disse já passou pelo
+            // canal.
+            com_resposta.entregar("{}").expect("entregar");
+            com_resposta.diagnostico().expect("o executor de pé");
+            soma.ate(
+                &com_resposta,
+                |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+                "a volta da resposta não acabou",
+            );
+            if inicio.elapsed() >= AINDA_SEM_A_SEGUNDA_FICHA {
+                continue;
+            }
+            assert_eq!(
+                soma.conta, None,
+                "a volta de uma resposta que não escreveu disse a conta com uma ficha só: a \
+                 linha seguinte do MOD acha o balde seco, e o seele.log diz «quantas» no lugar \
+                 de «o quê»"
+            );
+            soma.ate(
+                &com_resposta,
+                |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
+                "a conta não saiu quando sobrou a segunda ficha",
+            );
+            soma.conferir("quando sobrou a segunda ficha, depois de uma resposta que não escreveu");
+            return;
+        }
+        panic!(
+            "três tentativas seguidas passaram de {AINDA_SEM_A_SEGUNDA_FICHA:?} antes do \
+             diagnóstico, e o teste não mediu nada: a máquina está parada demais"
+        );
+    }
+
+    /// Até quando, desde antes de o código subir, a segunda ficha depois da
+    /// rajada ainda não pode ter se completado.
+    ///
+    /// A rajada seca o balde depois de o código subir, e a segunda ficha vem
+    /// meio segundo depois disso: medido desde antes de `iniciar`, o prazo de
+    /// meio segundo é o mais cedo que ela pode chegar. Vinte milissegundos de
+    /// folga para o canal.
+    const AINDA_SEM_A_SEGUNDA_FICHA: Duration = Duration::from_millis(480);
+
+    /// **O fim de uma volta em que o MOD escreveu também espera sobrar uma
+    /// ficha.**
+    ///
+    /// Este teste se chamava
+    /// `o_fim_de_uma_volta_em_que_o_mod_escreveu_diz_a_conta_com_uma_ficha`, e
+    /// provava o ramo de uma ficha que a rodada 3 apagou: a linha do MOD
+    /// segurada, e a ficha que se completava depois, ainda na volta, «não era
+    /// de ninguém». Era da próxima linha do MOD (ver
+    /// [`um_mod_que_escreve_e_trabalha_na_mesma_volta_nao_perde_a_vez_para_a_conta`]).
+    ///
+    /// A rajada e uma espera de 300 ms estão na mesma volta: no fim dela há uma
+    /// ficha e um quinto, e a conta **não** pode sair no diagnóstico que vem
+    /// atrás. Ela sai depois, quando sobra a segunda ficha. O relógio é
+    /// conferido como no teste de cima.
+    #[test]
+    fn o_fim_de_uma_volta_em_que_o_mod_escreveu_tambem_espera_sobrar_uma_ficha() {
+        for _ in 0..3 {
+            let inicio = Instant::now();
+            let executor = executor();
+            executor
+                .iniciar(&format!(
+                    "{RAJADA_DE_MIL} const t = Date.now(); while (Date.now() - t < 300) {{}}"
+                ))
+                .expect("código");
+            executor.diagnostico().expect("o executor de pé");
+            let mut soma = Soma::default();
+            soma.ate(
+                &executor,
+                |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+                "a volta do laço não acabou",
+            );
+            if inicio.elapsed() >= AINDA_SEM_A_SEGUNDA_FICHA {
+                continue;
+            }
+            assert_eq!(
+                soma.conta, None,
+                "o fim de uma volta em que o MOD escreveu e seguiu trabalhando disse a conta com \
+                 uma ficha só: a ficha que se completou durante o trabalho era da próxima linha \
+                 do MOD"
+            );
+            soma.ate(
+                &executor,
+                |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
+                "a conta não saiu quando sobrou a segunda ficha",
+            );
+            soma.conferir("quando sobrou a segunda ficha, depois de uma volta que escreveu");
+            return;
+        }
+        panic!(
+            "três tentativas seguidas passaram de {AINDA_SEM_A_SEGUNDA_FICHA:?} antes do \
+             diagnóstico, e o teste não mediu nada: a máquina está parada demais"
+        );
     }
 
     /// **A fronteira do QuickJS, medida** — etapa E1.
@@ -3952,6 +4756,55 @@ mod testes {
         );
     }
 
+    /// **O `Falhou` de uma rejeição sem tratamento tem o teto do registro.**
+    ///
+    /// Ele saía do rastreador com o texto inteiro do que o MOD lançou, e só a
+    /// cota dos avisos ([`AVISOS_NA_FILA`]) o limitava — em número, e não em
+    /// tamanho: um MOD que rejeitasse com cem mil caracteres punha os cem mil
+    /// em cada `Falhou` que coubesse, no canal e na fila da janela. Agora ele
+    /// é cortado como a linha do registro ([`cortar_linha_do_console`]), e
+    /// diz que foi.
+    #[test]
+    fn o_falhou_da_rejeicao_tem_o_teto_do_registro() {
+        let executor = executor();
+        executor
+            .iniciar("Promise.reject(new Error('x'.repeat(100000)));")
+            .expect("código");
+        let prazo = Instant::now() + Duration::from_secs(5);
+        let motivo = loop {
+            assert!(
+                Instant::now() < prazo,
+                "a rejeição sem tratamento não chegou à janela como `Falhou` em cinco segundos"
+            );
+            if let Some(ParaOFora::Falhou(motivo)) = executor.receber(Duration::from_millis(100)) {
+                break motivo;
+            }
+        };
+        assert!(
+            motivo.starts_with(&format!("{REJEITADA_SEM_TRATAMENTO}: ")),
+            "o `Falhou` da rejeição perdeu a frase que diz o que houve: {}",
+            motivo.chars().take(80).collect::<String>()
+        );
+        let (corpo, aviso) = motivo.split_once(" […cortado: ").unwrap_or_else(|| {
+            panic!(
+                "o `Falhou` de uma rejeição de cem mil caracteres saiu com {} caracteres, sem o \
+                 corte do registro: o canal e a fila da janela levam o texto inteiro a cada aviso",
+                motivo.chars().count()
+            )
+        });
+        assert!(
+            corpo.chars().count() <= crate::TETO_DA_FRASE_NO_REGISTRO,
+            "o `Falhou` da rejeição foi cortado acima do teto do registro: {} caracteres antes \
+             do aviso, e o teto é {}",
+            corpo.chars().count(),
+            crate::TETO_DA_FRASE_NO_REGISTRO
+        );
+        assert!(
+            aviso.ends_with(" caracteres]"),
+            "o aviso do corte do `Falhou` não diz quanto a rejeição tinha: {aviso}"
+        );
+    }
+
     /// **A espera das rejeições tem teto, e a que não coube é contada.**
     ///
     /// Ela guarda cada promessa e a linha dela do lado de fora do motor, onde
@@ -3972,11 +4825,21 @@ mod testes {
             };
             let mut rejeicoes = RejeicoesDaVolta::default();
             for n in 0..REJEICOES_GUARDADAS {
-                rejeicoes.guardar(&ctx, promessa(), format!("linha {n}"));
+                rejeicoes.guardar(
+                    &ctx,
+                    promessa(),
+                    format!("linha {n}"),
+                    format!("falhou {n}"),
+                );
             }
             let de_fora = [promessa(), promessa()];
             for ela in &de_fora {
-                rejeicoes.guardar(&ctx, ela.clone(), "a de fora".to_owned());
+                rejeicoes.guardar(
+                    &ctx,
+                    ela.clone(),
+                    "a de fora".to_owned(),
+                    "falhou de fora".to_owned(),
+                );
             }
             assert_eq!(
                 rejeicoes.guardadas.len(),
@@ -4015,6 +4878,9 @@ mod testes {
     /// delas do lado de fora do motor, e o corte só vinha na saída (F-Mods-m2
     /// da revisão final do Plano 1). Cortada de novo na saída, ela perderia o
     /// aviso do primeiro corte e ganharia outro, com o tamanho já cortado.
+    ///
+    /// **E o `Falhou` da janela sai logo depois dela, cortado do mesmo jeito**
+    /// (P51-01): ele espera o fim da volta com a linha, e não sai antes dela.
     #[test]
     fn a_linha_que_espera_o_fim_da_volta_ja_cabe_no_teto_e_sai_sem_novo_corte() {
         let runtime = Runtime::new().expect("o motor");
@@ -4023,11 +4889,17 @@ mod testes {
             let promessa = rquickjs::Object::new(ctx.clone())
                 .expect("um objeto")
                 .into_value();
+            let prefixo = format!("{REJEITADA_SEM_TRATAMENTO}: ");
             let mut rejeicoes = RejeicoesDaVolta::default();
-            rejeicoes.guardar(&ctx, promessa, "x".repeat(1_000_000));
+            rejeicoes.guardar(
+                &ctx,
+                promessa,
+                "x".repeat(1_000_000),
+                format!("{prefixo}{}", "y".repeat(1_000_000)),
+            );
             let aviso = " […cortado: 1000000 caracteres]";
             let guardada = match rejeicoes.guardadas.as_slice() {
-                [(_, linha)] => linha.0.clone(),
+                [Rejeitada { linha, .. }] => linha.0.clone(),
                 outras => panic!("esperava uma linha na espera, há {}", outras.len()),
             };
             assert_eq!(
@@ -4039,16 +4911,68 @@ mod testes {
 
             let (manda, recebe) = std::sync::mpsc::channel();
             let balde = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
-            dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda);
+            let fila = Arc::new(Fila::default());
+            dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda, &fila);
             let Ok(ParaOFora::Console { texto, .. }) = recebe.try_recv() else {
-                panic!("a linha guardada não saiu no fim da volta");
+                panic!("a linha guardada não saiu no fim da volta, ou saiu depois do `Falhou`");
             };
             assert_eq!(
                 texto, guardada,
                 "a linha guardada foi cortada de novo ao sair: o aviso do primeiro corte, que \
                  diz o tamanho do que o MOD lançou, foi trocado por outro"
             );
+            let Ok(ParaOFora::Falhou(falhou)) = recebe.try_recv() else {
+                panic!(
+                    "o `Falhou` da rejeição não saiu depois da linha, no fim da volta: a janela \
+                     não fica sabendo da promessa que ninguém pegou"
+                );
+            };
+            let cabe = crate::TETO_DA_FRASE_NO_REGISTRO - prefixo.chars().count();
+            assert_eq!(
+                falhou,
+                format!(
+                    "{prefixo}{} […cortado: {} caracteres]",
+                    "y".repeat(cabe),
+                    prefixo.chars().count() + 1_000_000
+                ),
+                "o `Falhou` da rejeição não saiu no teto do registro, cortado uma vez só: ou o \
+                 canal leva o texto inteiro que o MOD lançou, ou o aviso do corte mente o tamanho"
+            );
         });
+    }
+
+    /// **A conta das rejeições além da espera chega à janela com o sujeito.**
+    ///
+    /// Na linha do registro ela vem depois das guardadas, e «e mais N
+    /// rejeições…» se lê com elas. O `Falhou` vai para a gestão sem as linhas
+    /// que o cercam no registro: sem «promessa rejeitada sem tratamento» na
+    /// frente, «e mais 9 além da espera» não diz de quê.
+    #[test]
+    fn o_falhou_da_conta_alem_da_espera_diz_de_que_e_a_conta() {
+        let (manda, recebe) = std::sync::mpsc::channel();
+        let balde = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
+        let fila = Arc::new(Fila::default());
+        let rejeicoes = RejeicoesDaVolta {
+            guardadas: Vec::new(),
+            alem: 3,
+        };
+        dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda, &fila);
+        let Ok(ParaOFora::Console { texto, .. }) = recebe.try_recv() else {
+            panic!("a linha da conta além da espera não saiu, ou saiu depois do `Falhou`");
+        };
+        assert_eq!(
+            texto, "e mais 3 rejeições sem tratamento além da espera",
+            "a linha do registro da conta além da espera mudou"
+        );
+        let Ok(ParaOFora::Falhou(falhou)) = recebe.try_recv() else {
+            panic!("a conta além da espera não chegou à janela como `Falhou`");
+        };
+        assert_eq!(
+            falhou,
+            format!("{REJEITADA_SEM_TRATAMENTO}: e mais 3 além da espera"),
+            "o `Falhou` da conta além da espera não diz de que é a conta, e a gestão mostra «e \
+             mais 3» sem sujeito"
+        );
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.
