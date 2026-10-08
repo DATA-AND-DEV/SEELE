@@ -697,11 +697,9 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
     // pior que não perguntar.
     let ate = tokio::time::Instant::now() + prazo;
     let resposta = match tokio::time::timeout_at(ate, resolver_ponto(ponto)).await {
-        Ok(destinos) => match destinos.first() {
-            Some(destino) => consultar(*destino, marcas, ate).await,
-            // `resolver_ponto` já deixou no log por que não achou.
-            None => OndeMora::PontoNaoResolve,
-        },
+        // `resolver_ponto` já deixou no log por que não achou.
+        Ok(destinos) if destinos.is_empty() => OndeMora::PontoNaoResolve,
+        Ok(destinos) => consultar(&destinos, marcas, ate).await,
         Err(_) => {
             tracing::info!(
                 ponto,
@@ -715,7 +713,103 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
     resposta
 }
 
-/// As três perguntas, repetidas até alguém responder ou o prazo vencer.
+/// A consulta pelos endereços do ponto, um de cada vez, **dentro do mesmo
+/// `ate`**.
+///
+/// Pergunta ao primeiro, e passa ao seguinte só quando nenhuma pergunta saiu
+/// por ele: o socket da família dele não abriu, ou o sistema recusou as três
+/// perguntas da primeira volta. É o caso de um nome com A e AAAA numa máquina
+/// sem rota para a família do primeiro: até aqui a consulta parava ali, como
+/// [`OndeMora::PontoMudo`], com o outro endereço do mesmo ponto intocado. Um
+/// ponto que recebeu as perguntas e calou não é tentado de novo por outro
+/// endereço: ele está no ar ou fora do ar pelos dois. A escolha é
+/// [`escolher`].
+///
+/// Sem endereço que sirva, [`OndeMora::PontoMudo`], como antes: para fora,
+/// [`OndeMora`] não muda.
+async fn consultar(
+    destinos: &[SocketAddr],
+    marcas: &Marcas,
+    ate: tokio::time::Instant,
+) -> OndeMora {
+    for (indice, destino) in destinos.iter().enumerate() {
+        match escolher(perguntar_a(*destino, marcas, ate).await) {
+            Escolha::Devolver(resposta) => return resposta,
+            Escolha::TentarOSeguinte => {
+                // A causa deste endereço já está no log, numa linha de quem
+                // falhou. Esta diz que a consulta não parou nele.
+                if let Some(seguinte) = destinos.get(indice + 1) {
+                    tracing::info!(
+                        %destino,
+                        %seguinte,
+                        "quarto: nenhuma pergunta saiu por este endereço do ponto; a consulta \
+                         tenta o seguinte"
+                    );
+                }
+            }
+        }
+    }
+    OndeMora::PontoMudo
+}
+
+/// O que a consulta por um endereço do ponto deu, **por dentro**.
+///
+/// Para fora, os dois primeiros e um ponto que calou até o prazo são o mesmo
+/// [`OndeMora::PontoMudo`]. Por dentro eles se separam, porque só os dois
+/// primeiros dizem que vale tentar o endereço seguinte: neles nenhuma pergunta
+/// chegou a sair, e o ponto não teve chance de responder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PorUmEndereco {
+    /// O socket da família deste endereço não abriu.
+    SemSocket,
+    /// Nenhuma pergunta da primeira volta saiu: o sistema recusou as três.
+    NadaSaiu,
+    /// As perguntas saíram, e isto é o que o ponto disse, ou calou, até a
+    /// consulta acabar.
+    Perguntou(OndeMora),
+}
+
+/// O que [`consultar`] faz com o que um endereço deu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Escolha {
+    /// A consulta acaba com esta resposta.
+    Devolver(OndeMora),
+    /// Nenhuma pergunta saiu por este endereço: vale o seguinte.
+    TentarOSeguinte,
+}
+
+/// A escolha de [`consultar`] depois de um endereço do ponto.
+fn escolher(desfecho: PorUmEndereco) -> Escolha {
+    match desfecho {
+        PorUmEndereco::SemSocket | PorUmEndereco::NadaSaiu => Escolha::TentarOSeguinte,
+        PorUmEndereco::Perguntou(resposta) => Escolha::Devolver(resposta),
+    }
+}
+
+/// Abre um socket da família de `destino` e pergunta por ele
+/// ([`consultar_por`]).
+async fn perguntar_a(
+    destino: SocketAddr,
+    marcas: &Marcas,
+    ate: tokio::time::Instant,
+) -> PorUmEndereco {
+    let local = if destino.is_ipv4() {
+        SocketAddr::from(([0, 0, 0, 0], 0))
+    } else {
+        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))
+    };
+    let socket = match tokio::net::UdpSocket::bind(local).await {
+        Ok(socket) => socket,
+        Err(erro) => {
+            tracing::info!(%erro, %destino, "quarto: não abriu socket para perguntar");
+            return PorUmEndereco::SemSocket;
+        }
+    };
+    consultar_por(&socket, destino, marcas, ate).await
+}
+
+/// As três perguntas a um endereço do ponto, num socket já aberto, repetidas
+/// até alguém responder ou o prazo vencer.
 ///
 /// Um socket só para as três: as respostas se separam pela marca, e é o `ONDE`
 /// saindo pelo mesmo caminho que as `QUEM` que prova que aquele caminho
@@ -731,39 +825,22 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
 ///   (o `ONDE` se perdeu, ou a ida e volta é longa);
 /// - na hora, quando nenhuma pergunta da volta saiu ou a leitura falhou;
 /// - no prazo, quando nada respondeu.
-async fn consultar(destino: SocketAddr, marcas: &Marcas, ate: tokio::time::Instant) -> OndeMora {
-    let local = if destino.is_ipv4() {
-        SocketAddr::from(([0, 0, 0, 0], 0))
-    } else {
-        SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))
-    };
-    let socket = match tokio::net::UdpSocket::bind(local).await {
-        Ok(socket) => socket,
-        Err(erro) => {
-            tracing::info!(%erro, %destino, "quarto: não abriu socket para perguntar");
-            return OndeMora::PontoMudo;
-        }
-    };
-    consultar_por(&socket, destino, marcas, ate).await
-}
-
-/// O laço de [`consultar`], num socket já aberto.
 ///
-/// Separado só para o teste poder dar o socket. É assim que ele manda a esta
-/// consulta um `AQUI` de outro IP, e prova a chamada de [`aceita_origem`] aqui
-/// dentro: o predicado sozinho tem teste, e a chamada trocada por um no-op
-/// passava em todos (o m1 da revisão final do Plano 1). Ver
-/// `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`.
+/// Separado de [`perguntar_a`] só para o teste poder dar o socket. É assim que
+/// ele manda a esta consulta um `AQUI` de outro IP, e prova a chamada de
+/// [`aceita_origem`] aqui dentro: o predicado sozinho tem teste, e a chamada
+/// trocada por um no-op passava em todos (o m1 da revisão final do Plano 1).
+/// Ver `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`.
 async fn consultar_por(
     socket: &tokio::net::UdpSocket,
     destino: SocketAddr,
     marcas: &Marcas,
     ate: tokio::time::Instant,
-) -> OndeMora {
+) -> PorUmEndereco {
     let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
         // Inalcançável: a constante é uma marca válida, e
         // `a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador` o prova.
-        return OndeMora::PontoMudo;
+        return PorUmEndereco::NadaSaiu;
     };
     let pedidos = [
         encontro::quem(&marcas.servidor),
@@ -835,10 +912,14 @@ async fn consultar_por(
             // **Nenhuma pergunta saiu: não há o que esperar.** Sem rota
             // (`ENETUNREACH`, `EHOSTUNREACH`) o sistema recusa as três na hora, e
             // repetir a volta e dormir até o prazo só faria a conexão pagar
-            // 1,5 s por uma resposta que não tem como vir. Volta como `PontoMudo`
-            // (o `no_ar` é falso: nada foi perguntado), e o `info` acima diz a
-            // causa. A `perguntar` antiga também saía aqui, na hora.
+            // 1,5 s por uma resposta que não tem como vir. Na primeira volta,
+            // é `NadaSaiu`, e [`consultar`] tenta o endereço seguinte do ponto;
+            // o `info` acima diz a causa. A `perguntar` antiga também saía
+            // aqui, na hora.
             if saidas == 0 {
+                if enviados == 0 {
+                    return PorUmEndereco::NadaSaiu;
+                }
                 break;
             }
             enviados += 1;
@@ -893,11 +974,11 @@ async fn consultar_por(
             "quarto: o prazo da consulta venceu antes de as duas marcas responderem"
         );
     }
-    match (servidor, escuta) {
+    PorUmEndereco::Perguntou(match (servidor, escuta) {
         (None, None) if no_ar => OndeMora::NinguemMora,
         (None, None) => OndeMora::PontoMudo,
         (servidor, escuta) => OndeMora::Achado { servidor, escuta },
-    }
+    })
 }
 
 /// Se uma resposta à consulta veio do ponto a que se perguntou.
@@ -1156,7 +1237,7 @@ mod testes {
 
         assert_eq!(
             achado,
-            OndeMora::NinguemMora,
+            PorUmEndereco::Perguntou(OndeMora::NinguemMora),
             "a consulta aceitou um `AQUI` que veio de outro IP que o do ponto ({achado:?}): \
              qualquer um que acerte a porta efêmera escolhe para onde esta máquina conecta e, \
              com a marca da escuta, para onde vai o `LEVE`, antes do TLS"
@@ -1516,7 +1597,7 @@ mod testes {
         // O prazo de produção, e não um curto: é ele que a consulta pagaria.
         let comecou = std::time::Instant::now();
         let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
-        let achado = consultar(destino, &marcas, ate).await;
+        let achado = consultar(&[destino], &marcas, ate).await;
         let levou = comecou.elapsed();
 
         assert_eq!(
@@ -1537,6 +1618,132 @@ mod testes {
             "o envio recusado ao quarto deixou de dizer no rastro (`info`, o único nível que o \
              seele.log grava) por que a pergunta não saiu: a consulta espera o prazo inteiro e \
              ninguém fica sabendo o motivo. Rastro: {linhas:?}"
+        );
+    }
+
+    #[test]
+    fn a_consulta_passa_ao_endereco_seguinte_so_quando_nada_saiu_pelo_primeiro() {
+        // O M2 do item 19 da pendência 51. Um nome com A e AAAA dá dois
+        // endereços, e qual deles tem rota é propriedade desta máquina. Sem
+        // rota para a família do primeiro, o sistema recusa as três perguntas
+        // (ou o socket nem abre), e a consulta parava ali, como `PontoMudo`,
+        // com o outro endereço do mesmo ponto intocado.
+        for nada_saiu in [PorUmEndereco::SemSocket, PorUmEndereco::NadaSaiu] {
+            assert_eq!(
+                escolher(nada_saiu),
+                Escolha::TentarOSeguinte,
+                "{nada_saiu:?} acabou a consulta: nenhuma pergunta saiu por este endereço, e o \
+                 endereço seguinte do mesmo ponto, que pode ter rota, nunca é tentado"
+            );
+        }
+        // E um ponto que recebeu as perguntas não é perguntado de novo por outro
+        // endereço: ele está no ar ou fora do ar pelos dois, e cada endereço a
+        // mais custaria o prazo inteiro de novo.
+        for perguntou in [
+            OndeMora::PontoMudo,
+            OndeMora::NinguemMora,
+            OndeMora::Achado {
+                servidor: Some(SocketAddr::from(SERVIDOR)),
+                escuta: None,
+            },
+        ] {
+            assert_eq!(
+                escolher(PorUmEndereco::Perguntou(perguntou)),
+                Escolha::Devolver(perguntou),
+                "um endereço que recebeu as perguntas não acabou a consulta com o que deu \
+                 ({perguntou:?})"
+            );
+        }
+    }
+
+    /// O que o ponto falso anotou: cada pedido que chegou, na ordem.
+    type Anotados = Arc<std::sync::Mutex<Vec<encontro::Pedido>>>;
+
+    /// Um ponto de encontro falso, no laço local. A cada pedido que chega,
+    /// `responder` diz o que devolver a quem perguntou, cada datagrama com a
+    /// demora dele, e o pedido fica anotado.
+    async fn ponto_falso(
+        responder: impl Fn(&encontro::Pedido, SocketAddr) -> Vec<(Duration, Vec<u8>)> + Send + 'static,
+    ) -> (SocketAddr, Anotados) {
+        let socket = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let onde = socket.local_addr().unwrap();
+        let anotados: Anotados = Arc::default();
+        let anotador = Arc::clone(&anotados);
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(pedido) = balde.get(..lidos).and_then(encontro::analisar) else {
+                    continue;
+                };
+                for (demora, datagrama) in responder(&pedido, de) {
+                    let socket = Arc::clone(&socket);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(demora).await;
+                        let _ = socket.send_to(&datagrama, de).await;
+                    });
+                }
+                anotador.lock().unwrap().push(pedido);
+            }
+        });
+        (onde, anotados)
+    }
+
+    #[tokio::test]
+    async fn um_endereco_sem_rota_nao_esconde_o_seguinte_do_mesmo_ponto() {
+        // O par da escolha, com a consulta de verdade: a função pura correta
+        // que `consultar` não chamasse deixaria aquele teste verde e a
+        // consulta parada no primeiro endereço. O primeiro é um destino que
+        // esta máquina recusa (o de
+        // `uma_pergunta_que_nao_sai_volta_na_hora_e_diz_no_rastro_por_que_nao_saiu`);
+        // o segundo, um ponto falso que responde às duas marcas.
+        let recusado = SocketAddr::from(([0, 0, 0, 0], 0));
+        let sonda = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        assert!(
+            sonda.send_to(&[0_u8; encontro::TAMANHO], recusado).is_err(),
+            "esta máquina aceitou um envio a {recusado}: sem uma recusa, o primeiro endereço \
+             deste teste não é um sem rota, e o teste não mede nada"
+        );
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let (servidor, escuta) = (SocketAddr::from(SERVIDOR), SocketAddr::from(ESCUTA));
+        let quem = marcas.clone();
+        let (ponto, _) = ponto_falso(move |pedido, de| match pedido {
+            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+                vec![(Duration::ZERO, encontro::aqui(marca, servidor))]
+            }
+            encontro::Pedido::Quem { marca } if *marca == quem.escuta => {
+                vec![(Duration::ZERO, encontro::aqui(marca, escuta))]
+            }
+            encontro::Pedido::Onde { marca } => vec![(Duration::ZERO, encontro::aqui(marca, de))],
+            _ => Vec::new(),
+        })
+        .await;
+
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = consultar(&[recusado, ponto], &marcas, ate).await;
+
+        assert_eq!(
+            achado,
+            OndeMora::Achado {
+                servidor: Some(servidor),
+                escuta: Some(escuta),
+            },
+            "nenhuma pergunta saiu pelo primeiro endereço do ponto, e a consulta não chegou ao \
+             segundo, que responde: um nome com A e AAAA numa máquina sem rota para a família do \
+             primeiro perde o quarto inteiro"
+        );
+        let linhas = captura.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("tenta o seguinte")
+                && linha.contains(&recusado.to_string())
+                && linha.contains(&ponto.to_string())),
+            "a consulta passou ao endereço seguinte do ponto sem dizer no rastro (`info`, o \
+             único nível que o seele.log grava) de qual para qual: quem lê o «não saiu» do \
+             primeiro acha que a consulta parou ali. Rastro: {linhas:?}"
         );
     }
 
