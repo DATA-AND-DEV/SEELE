@@ -38,6 +38,7 @@ async function abrirNaVersaoDoServidor(versao, link) {
   try {
     await invoke("abrir_versao", {
       versao,
+      linha: null,
       hospedar: false,
       nomePublico: null,
       link,
@@ -95,6 +96,7 @@ async function desenharPainelDeVersoes() {
         botao.addEventListener("click", () => {
           invoke("abrir_versao", {
             versao: v.versao,
+            linha: null,
             hospedar: false,
             nomePublico: null,
             link: null,
@@ -116,7 +118,7 @@ async function baixarAMaisNova() {
   estado.textContent = "procurando no catálogo…";
   estado.classList.remove("mods-recusado");
   try {
-    const versao = await invoke("baixar_versao");
+    const versao = await invoke("baixar_versao", { linha: null });
     estado.textContent = `${versao} guardada ao lado desta. Ela não substituiu nada — a versão aberta continua sendo a mesma.`;
   } catch (falha) {
     // `JaInstalada` não é falha e não merece vermelho: é a resposta certa para

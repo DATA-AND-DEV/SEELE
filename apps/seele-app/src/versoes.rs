@@ -1,34 +1,38 @@
-//! O lado da casca do launcher: que versões há nesta máquina, e abrir uma.
+//! O lado da casca do launcher: que versões e linhas há, baixá-las e abrir uma.
 //!
-//! # O que este módulo é, e o que ele não é
+//! # O que este módulo é
 //!
-//! O [ADR 0046](../../../docs/adr/0046-toda-versao-continua-de-pe.md) decidiu
-//! que o app vira launcher: *«cliente e servidor são versionados juntos, e ao
-//! conectar o cliente roda a versão daquele servidor»*. O núcleo dessa decisão
-//! é o `seele-lancador`, que é biblioteca pura — ele não fala com a rede e não
-//! desempacota, de propósito.
+//! O [ADR 0046](../../../docs/adr/0046-toda-versao-continua-de-pe.md), com a
+//! emenda de 08/10/2026, decidiu que o app vira launcher **por linha de
+//! servidor**: ele guarda o app mais novo de cada linha, e ao entrar num
+//! servidor de outra linha abre o app dela. O núcleo dessa decisão é o
+//! `seele-lancador`, que é biblioteca pura — ele não fala com a rede e não
+//! desempacota, de propósito. Este módulo é o chamador: busca e guarda o
+//! catálogo, baixa, e abre o que o `Resolvedor` escolher.
 //!
-//! Este módulo é o **chamador** que faltava. Até aqui o `seele-lancador`
-//! existia, passava noventa testes, e **nenhum crate dependia dele**: ele não
-//! tinha binário e ninguém o chamava. É o caso do `CLAUDE.md` com todas as
-//! letras — «existir não é funcionar» —, e cinco mil linhas verdes e
-//! inalcançáveis são a forma mais cara dele.
+//! # Só pelo `Resolvedor`
 //!
-//! # O que fica de fora, e é dito em voz alta
+//! Até a 0.15, esta casca montava a `VersaoResolvida` à mão, a partir do
+//! depósito, e a lista de revogação nunca era conferida: o `Resolvedor` e o
+//! `Deposito::conciliar_revogacoes` existiam, passavam nos testes, e ninguém os
+//! chamava. Agora todo abrir passa por [`preparar`], que concilia a lista e
+//! resolve. O lado que **lê** a revogação vai ligado na 0.16, porque um build
+//! que não confere nunca vai aprender a conferir (spec 0.16, §2, F6).
 //!
-//! **Baixar uma versão que não está instalada.** Isso precisa do manifesto, que
-//! vem da rede, e é trabalho do atualizador do ADR 0026. O que está aqui
-//! funciona **offline** e cobre o caso que o dono pediu: *«o host quer usar mod
-//! x e mod y, só que esses mods foram feitos para uma versão anterior; quando
-//! for hospedar, pode escolher a versão do server que é compatível»* — e quem
-//! escolhe uma versão anterior por causa de um MOD já a tem no disco.
+//! # Rede: só nos atos
 //!
-//! Por isso a lista daqui é a do **depósito**, e não a do manifesto. Ela nunca
-//! diz «esta é a mais nova»: quem sabe isso é o manifesto, e ele não está aqui.
+//! O catálogo fica guardado em disco ([`CATALOGO_GUARDADO`]). Abrir uma versão
+//! instalada usa o guardado e não fala com a rede (ADR 0026). Hospedar e
+//! entrar são atos, e buscam o catálogo antes, para a lista de revogação ser a
+//! mais nova que se conseguir — com prazo curto, e com o guardado quando a rede
+//! não responde.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use seele_lancador::{Deposito, Lancamento, Versao};
+use seele_lancador::{
+    Ato, Chave, Deposito, Lancamento, Linha, Manifesto, Pedido, Recusa, Resolvedor, Versao,
+};
 
 /// Onde o depósito de versões fica, dentro da pasta que o app já usa.
 ///
@@ -114,127 +118,229 @@ pub(crate) fn instaladas(config: &str) -> Vec<VersaoInstalada> {
 /// Por que não deu para abrir a versão pedida.
 ///
 /// Nome estável e não frase, como as outras recusas que cruzam esta ponte: a
-/// frase mora no `FRASES` do JavaScript.
-#[derive(Debug, Clone, serde::Serialize)]
+/// frase mora no JavaScript. Uma variante por motivo, porque cada uma pede
+/// outra coisa de quem está na frente da tela.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) enum FalhaAoAbrirVersao {
-    /// O identificador não é uma versão.
+    /// O identificador não é uma versão, ou a linha não é uma linha, ou vieram
+    /// as duas.
     IdentificadorInvalido,
-    /// Não está instalada nesta máquina.
+    /// Não há catálogo guardado, e o de agora não respondeu.
     ///
-    /// Baixá-la é trabalho do atualizador e precisa da rede; este caminho é
-    /// offline de propósito.
-    NaoInstalada,
-    /// Está instalada e não sabe dizer o que rodar.
-    ///
-    /// O marcador dela é anterior à anotação do executável, ou o arquivo sumiu
-    /// depois de instalado. Separada de [`Self::NaoInstalada`] porque o conserto
-    /// é outro: aqui a versão está lá e o que falta é reinstalá-la.
-    SemProcedencia,
+    /// Só acontece numa máquina que nunca baixou nada: toda instalação guarda o
+    /// catálogo de onde veio.
+    SemCatalogo,
+    /// O catálogo não conhece esta versão.
+    NaoPublicada,
+    /// O catálogo não traz app nenhum desta linha.
+    LinhaNaoPublicada(String),
+    /// O catálogo não diz de que linha a versão é, e sem isso não há pasta de
+    /// dados certa.
+    LinhaNaoDeclarada,
+    /// Revogada, com o defeito e a versão que o corrige.
+    Revogada {
+        /// Qual é o defeito, como a lista assinada o escreve.
+        defeito: String,
+        /// Onde foi corrigido, quando a lista diz.
+        corrigida_em: Option<String>,
+    },
+    /// Publicada e não instalada nesta máquina. Não é erro: a tela oferece
+    /// baixar.
+    NaoInstalada {
+        /// Se o catálogo traz pacote para este sistema.
+        tem_pacote: bool,
+    },
+    /// A pasta existe e a instalação não terminou.
+    InstalacaoIncompleta,
+    /// Instalada e o executável sumiu.
+    ExecutavelAusente,
+    /// O catálogo não diz o executável deste sistema.
+    ExecutavelNaoDeclarado,
+    /// O catálogo diz um executável fora da instalação.
+    ExecutavelInvalido,
+    /// A lista de revogação que chegou não abriu, ou é mais velha que a
+    /// guardada. O ato é recusado junto: seguir calado com a guardada seria
+    /// acertar e não contar.
+    ListaDeRevogacaoRecusada,
     /// O sistema recusou iniciar o processo, e o que ele disse.
     NaoIniciou(String),
 }
 
-/// Abre uma versão instalada, com os dados dela.
-///
-/// # O que «com os dados dela» quer dizer
-///
-/// Cada versão tem o próprio diretório, e quem o entrega é o `SEELE_HOME` que o
-/// produto **já** obedece — nenhum mecanismo novo. O passo mais curto do
-/// launcher é também o mais fácil de errar calado: um processo iniciado com o
-/// executável certo e o diretório errado abre, funciona, e escreve as conversas
-/// no lugar de outra versão, sem sintoma nenhum até alguém procurar o que
-/// escreveu.
+impl From<Recusa> for FalhaAoAbrirVersao {
+    fn from(recusa: Recusa) -> Self {
+        match recusa {
+            Recusa::NaoPublicada { .. } => Self::NaoPublicada,
+            Recusa::LinhaNaoPublicada { linha } => Self::LinhaNaoPublicada(linha.como_texto()),
+            Recusa::LinhaNaoDeclarada { .. } => Self::LinhaNaoDeclarada,
+            Recusa::Revogada {
+                defeito,
+                corrigida_em,
+                ..
+            } => Self::Revogada {
+                defeito,
+                corrigida_em,
+            },
+            Recusa::NaoInstalada {
+                tem_pacote_para_este_sistema,
+                ..
+            } => Self::NaoInstalada {
+                tem_pacote: tem_pacote_para_este_sistema,
+            },
+            Recusa::InstalacaoIncompleta { .. } => Self::InstalacaoIncompleta,
+            Recusa::ExecutavelAusente { .. } => Self::ExecutavelAusente,
+            Recusa::ExecutavelNaoDeclarado { .. } => Self::ExecutavelNaoDeclarado,
+            Recusa::ExecutavelInvalido { .. } => Self::ExecutavelInvalido,
+            // A coerência é conferida ao entrar, contra o que o servidor
+            // anuncia, e não ao resolver o que abrir. Se ela chegar aqui, a
+            // versão é tratada como desconhecida: é o que ela é para este app.
+            Recusa::UnidadeIncoerente { .. } => Self::NaoPublicada,
+        }
+    }
+}
+
+/// Com que intenção a versão escolhida vai ser aberta.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Intencao {
+    /// Hospedar assim que a janela subir.
+    pub(crate) hospedar: bool,
+    /// O nome público, quando há um. Só vale junto de `hospedar`.
+    pub(crate) nome_publico: Option<String>,
+    /// O servidor em que entrar, como link inteiro.
+    pub(crate) link: Option<String>,
+}
+
+impl Intencao {
+    /// Os argumentos de linha de comando que levam esta intenção ao outro
+    /// processo.
+    ///
+    /// Os argumentos são repassados como vieram, e uma versão que não os
+    /// conhece os ignora — é o que faz este caminho valer também para as
+    /// publicadas antes de o launcher existir.
+    fn argumentos(&self) -> Vec<String> {
+        let mut argumentos = Vec::new();
+        if self.hospedar {
+            argumentos.push("--hospedar".to_owned());
+            if let Some(nome) = &self.nome_publico {
+                argumentos.push("--nome-publico".to_owned());
+                argumentos.push(nome.clone());
+            }
+        }
+        // O link vai inteiro: ele carrega a impressão digital, os endereços
+        // alternativos e o convite de uso único, e reconstruí-lo do outro lado
+        // a partir de pedaços seria um segundo analisador para discordar do
+        // primeiro.
+        if let Some(link) = &self.link {
+            argumentos.push("--entrar".to_owned());
+            argumentos.push(link.clone());
+        }
+        argumentos
+    }
+}
+
+/// O pedido que a tela fez: uma versão exata, a mais nova de uma linha, ou a
+/// mais nova de todas.
 ///
 /// # Errors
 ///
-/// [`FalhaAoAbrirVersao`], uma variante por motivo.
-pub(crate) fn abrir(
+/// [`FalhaAoAbrirVersao::IdentificadorInvalido`] quando o texto não é versão
+/// ou linha, ou quando vieram as duas — escolher entre elas aqui seria decidir
+/// pela tela.
+pub(crate) fn pedido_de(
+    versao: Option<&str>,
+    linha: Option<&str>,
+) -> Result<Pedido, FalhaAoAbrirVersao> {
+    match (versao, linha) {
+        (Some(_), Some(_)) => Err(FalhaAoAbrirVersao::IdentificadorInvalido),
+        (Some(v), None) => Versao::nova(v)
+            .map(Pedido::Exata)
+            .map_err(|_| FalhaAoAbrirVersao::IdentificadorInvalido),
+        (None, Some(l)) => Linha::nova(l)
+            .map(Pedido::MaisNovaDaLinha)
+            .map_err(|_| FalhaAoAbrirVersao::IdentificadorInvalido),
+        (None, None) => Ok(Pedido::MaisNova),
+    }
+}
+
+/// O lançamento montado, sem iniciar processo nenhum.
+///
+/// **A lista que vale é a conciliada**, e o `Resolvedor` não aceita outra
+/// (`docs/versoes-lado-a-lado.md`, §1). Era o buraco que esta casca deixava,
+/// montando a `VersaoResolvida` à mão.
+///
+/// Separado de [`iniciar`] pela mesma razão que o `seele-lancador` separa
+/// `Lancamento` de `Lancamento::iniciar`: é o que permite provar, sem abrir
+/// processo, que a versão escolhida vai receber o executável dela e a pasta de
+/// dados da linha dela. Um processo iniciado com o executável certo e os dados
+/// errados abre, funciona, e escreve as conversas no lugar de outra linha —
+/// sem sintoma até alguém procurar o que escreveu.
+///
+/// # Errors
+///
+/// [`FalhaAoAbrirVersao`], menos [`FalhaAoAbrirVersao::NaoIniciou`], que só
+/// existe depois de tentar — e o erro de criar a pasta de dados, que chega por
+/// ela.
+pub(crate) fn preparar(
     config: &str,
-    versao: &str,
-    hospedar: bool,
-    nome_publico: Option<&str>,
-    link: Option<&str>,
-) -> Result<(), FalhaAoAbrirVersao> {
-    preparar(config, versao, hospedar, nome_publico, link)?
+    manifesto: &Manifesto,
+    chave: &Chave,
+    pedido: &Pedido,
+    ato: Ato,
+    intencao: &Intencao,
+) -> Result<Lancamento, FalhaAoAbrirVersao> {
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    let vigente = deposito
+        .conciliar_revogacoes(manifesto.envelope_de_revogacoes(), chave)
+        .map_err(|_| FalhaAoAbrirVersao::ListaDeRevogacaoRecusada)?;
+    let resolvida = Resolvedor::novo(manifesto, &deposito, alvo_deste_sistema(), &vigente)
+        .resolver(pedido, ato)?;
+    // A pasta de dados precisa existir antes: o produto a cria sozinho, mas
+    // criá-la aqui é o que faz o erro — um disco cheio, uma permissão — chegar
+    // como recusa desta função em vez de como uma janela que abre vazia.
+    std::fs::create_dir_all(&resolvida.dados)
+        .map_err(|erro| FalhaAoAbrirVersao::NaoIniciou(erro.to_string()))?;
+    Ok(Lancamento::de(&resolvida, intencao.argumentos()))
+}
+
+/// Inicia o processo de um lançamento montado.
+///
+/// **Não espera por ele**, e **não fecha esta janela**: quem lançou não segura
+/// o processo filho (ADR 0039), e fechar daqui deixaria a pessoa sem nada na
+/// tela caso o outro não suba.
+///
+/// # Errors
+///
+/// [`FalhaAoAbrirVersao::NaoIniciou`], com o que o sistema disse.
+pub(crate) fn iniciar(lancamento: &Lancamento) -> Result<(), FalhaAoAbrirVersao> {
+    lancamento
         .iniciar()
         .map(|_| ())
         .map_err(|erro| FalhaAoAbrirVersao::NaoIniciou(erro.to_string()))
 }
 
-/// O lançamento montado, sem iniciar processo nenhum.
-///
-/// Separado de [`abrir`] pela mesma razão que o `seele-lancador` separa
-/// `Lancamento` de `Lancamento::iniciar`: **é o que permite provar, sem abrir
-/// processo, que a versão escolhida vai receber o diretório dela**. Um processo
-/// iniciado com o executável certo e os dados errados abre, funciona, e escreve
-/// as conversas no lugar de outra versão — sem sintoma até alguém procurar o
-/// que escreveu.
-///
-/// E provar o lançamento em vez do processo é o que faz o teste rodar nos três
-/// sistemas. Um teste que precisasse executar alguma coisa precisaria de um
-/// programa que existisse nos três, e acabaria atrás de um `cfg` — que é o
-/// «existir não é funcionar» de novo, uma camada abaixo.
+/// Resolve o pedido contra o catálogo deste ato e abre a versão escolhida.
 ///
 /// # Errors
 ///
-/// [`FalhaAoAbrirVersao`], menos [`FalhaAoAbrirVersao::NaoIniciou`], que só
-/// existe depois de tentar.
-fn preparar(
+/// [`FalhaAoAbrirVersao`], uma variante por motivo.
+pub(crate) async fn abrir(
     config: &str,
-    versao: &str,
-    hospedar: bool,
-    nome_publico: Option<&str>,
-    link: Option<&str>,
-) -> Result<Lancamento, FalhaAoAbrirVersao> {
-    let versao = Versao::nova(versao).map_err(|_| FalhaAoAbrirVersao::IdentificadorInvalido)?;
-    let deposito = Deposito::em(raiz_do_deposito(config));
-    if !deposito.esta_instalada(&versao) {
-        return Err(FalhaAoAbrirVersao::NaoInstalada);
-    }
-    let instalacao = deposito
-        .instalacao(&versao)
-        .ok_or(FalhaAoAbrirVersao::SemProcedencia)?;
-
-    // Os argumentos são repassados como vieram, e uma versão que não os conhece
-    // os ignora — é o que faz este caminho valer também para as publicadas
-    // antes de o launcher existir. Ela abre; quem aperta o botão é a pessoa.
-    let mut argumentos = Vec::new();
-    if hospedar {
-        argumentos.push("--hospedar".to_owned());
-        if let Some(nome) = nome_publico {
-            argumentos.push("--nome-publico".to_owned());
-            argumentos.push(nome.to_owned());
-        }
-    }
-    // O outro motivo de abrir outra versão, e o que o ADR 0046 quer de
-    // verdade: **entrar** num servidor que roda aquela versão. O link vai
-    // inteiro — ele carrega a impressão digital, os endereços alternativos e o
-    // convite de uso único, e reconstruí-lo do outro lado a partir de pedaços
-    // seria um segundo analisador para discordar do primeiro.
-    if let Some(link) = link {
-        argumentos.push("--entrar".to_owned());
-        argumentos.push(link.to_owned());
-    }
-
-    // A linha vem do marcador da instalação, que a anota ao instalar. Até esta
-    // montagem à mão ser trocada pelo `Resolvedor` (tarefa 9 do plano da F6),
-    // é a única fonte que existe sem manifesto.
-    let linha = instalacao.linha.clone();
-    let resolvida = seele_lancador::VersaoResolvida {
-        dados: deposito.pasta_de_dados_da_linha(&linha),
-        linha,
-        versao: instalacao.versao,
-        executavel: instalacao.executavel,
-        unidade: None,
+    atualizador: Option<&Atualizador>,
+    pedido: &Pedido,
+    ato: Ato,
+    intencao: &Intencao,
+) -> Result<(), FalhaAoAbrirVersao> {
+    let Some(atualizador) = atualizador else {
+        return Err(FalhaAoAbrirVersao::SemCatalogo);
     };
-    // A pasta de dados precisa existir antes: o produto a cria sozinho, mas
-    // criá-la aqui é o que faz o erro — um disco cheio, uma permissão — chegar
-    // como recusa desta função em vez de como uma janela que abre vazia.
-    if let Err(erro) = std::fs::create_dir_all(&resolvida.dados) {
-        return Err(FalhaAoAbrirVersao::NaoIniciou(erro.to_string()));
-    }
-
-    Ok(Lancamento::de(&resolvida, argumentos))
+    let manifesto = catalogo_para(ato, config, atualizador).await?;
+    iniciar(&preparar(
+        config,
+        &manifesto,
+        &atualizador.chave,
+        pedido,
+        ato,
+        intencao,
+    )?)
 }
 
 /// Por que não deu para baixar e instalar uma versão.
@@ -313,36 +419,92 @@ impl seele_lancador::Desempacotador for DesempacotarTarGz {
     }
 }
 
-/// Baixa do catálogo a versão mais nova e a instala ao lado das outras.
+/// A chave e os endereços do catálogo, do bloco do atualizador.
 ///
-/// # A ordem, e por que ela é esta
+/// Do `tauri.conf.json`, do mesmo bloco do atualizador — e não de constantes
+/// próprias. Duas listas de endereços para o mesmo catálogo divergiriam no dia
+/// em que uma delas mudasse, e a que ficasse velha apontaria para um lugar que
+/// não publica mais. A chave pública é a mesma pelo mesmo motivo: o ADR 0026 a
+/// tem como a única que autoriza instalar programa nesta máquina.
+#[derive(Debug, Clone)]
+pub(crate) struct Atualizador {
+    /// A chave que confere pacotes e a lista de revogação.
+    pub(crate) chave: Chave,
+    /// Os endereços do `latest.json`, em ordem.
+    pub(crate) enderecos: Vec<String>,
+}
+
+/// O atualizador que este bloco do `tauri.conf.json` declara.
 ///
-/// Catálogo, conferência do catálogo, pacote, conferência do pacote, e só então
-/// disco. **Nada é escrito antes de a assinatura passar** — é o contrato do
-/// `Deposito::instalar`, e o motivo é o mesmo de sempre: meia instalação é o
-/// estado que ninguém sabe desfazer.
+/// `None` para um build sem a chave ou sem endereços: ele não tem catálogo a
+/// consultar, e dizer isso é melhor que tentar e falhar na rede.
+pub(crate) fn do_atualizador(bloco: &serde_json::Value) -> Option<Atualizador> {
+    let pubkey = bloco.get("pubkey")?.as_str()?;
+    let chave = Chave::do_formato_do_atualizador(pubkey).ok()?;
+    let enderecos: Vec<String> = bloco
+        .get("endpoints")?
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    (!enderecos.is_empty()).then_some(Atualizador { chave, enderecos })
+}
+
+/// O atualizador deste app, lido da configuração dele.
+pub(crate) fn atualizador_do_app(app: &tauri::AppHandle) -> Option<Atualizador> {
+    let bloco = app.config().plugins.0.get("updater")?;
+    do_atualizador(bloco)
+}
+
+/// O nome do catálogo guardado, dentro do depósito.
+///
+/// Os bytes do último manifesto aceito. É o que deixa abrir uma versão já
+/// instalada sem rede (ADR 0026: nada de rede ao abrir) e o que segura a
+/// resolução quando o GitHub não responde num ato.
+pub(crate) const CATALOGO_GUARDADO: &str = "manifesto.json";
+
+/// Guarda os bytes de um catálogo que acabou de ser aceito.
 ///
 /// # Errors
 ///
-/// [`FalhaAoBaixarVersao`], uma variante por motivo.
-pub(crate) async fn baixar_a_mais_nova(
-    config: &str,
-    pubkey: &str,
-    enderecos: &[String],
-) -> Result<String, FalhaAoBaixarVersao> {
-    let chave = seele_lancador::Chave::do_formato_do_atualizador(pubkey)
-        .map_err(|erro| FalhaAoBaixarVersao::CatalogoNaoServe(format!("{erro:?}")))?;
+/// Falha de disco.
+pub(crate) fn guardar_catalogo(config: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let raiz = raiz_do_deposito(config);
+    std::fs::create_dir_all(&raiz)?;
+    // Escrito ao lado e trocado de uma vez: um catálogo pela metade seria lido
+    // como «nenhum», e a pessoa perderia o offline sem saber por quê.
+    let provisorio = raiz.join(format!("{CATALOGO_GUARDADO}.{}", std::process::id()));
+    std::fs::write(&provisorio, bytes)?;
+    std::fs::rename(&provisorio, raiz.join(CATALOGO_GUARDADO))
+}
 
+/// O último catálogo aceito nesta máquina, se há um que ainda abre.
+pub(crate) fn catalogo_guardado(config: &str, chave: &Chave) -> Option<Manifesto> {
+    let bytes = std::fs::read(raiz_do_deposito(config).join(CATALOGO_GUARDADO)).ok()?;
+    Manifesto::ler(&bytes, chave).ok()
+}
+
+/// Busca o catálogo nos endereços, em ordem, e o guarda quando ele é aceito.
+///
+/// # Errors
+///
+/// [`FalhaAoBaixarVersao::CatalogoNaoRespondeu`] ou
+/// [`FalhaAoBaixarVersao::CatalogoNaoServe`].
+pub(crate) async fn buscar_catalogo(
+    config: &str,
+    atualizador: &Atualizador,
+    prazo: Duration,
+) -> Result<Manifesto, FalhaAoBaixarVersao> {
     let cliente = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(prazo)
         .build()
         .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?;
 
     // Os endereços em ordem, como o atualizador os tenta: o primeiro que
-    // responde vale. Um espelho existe justamente para o dia em que o outro
-    // está fora.
+    // responde vale.
     let mut bytes_do_catalogo = None;
-    for endereco in enderecos {
+    for endereco in &atualizador.enderecos {
         if let Ok(resposta) = cliente.get(endereco).send().await {
             if resposta.status().is_success() {
                 if let Ok(bytes) = resposta.bytes().await {
@@ -352,13 +514,79 @@ pub(crate) async fn baixar_a_mais_nova(
             }
         }
     }
-    let Some(bytes_do_catalogo) = bytes_do_catalogo else {
+    let Some(bytes) = bytes_do_catalogo else {
         return Err(FalhaAoBaixarVersao::CatalogoNaoRespondeu);
     };
-
-    let manifesto = seele_lancador::Manifesto::ler(&bytes_do_catalogo, &chave)
+    let manifesto = Manifesto::ler(&bytes, &atualizador.chave)
         .map_err(|erro| FalhaAoBaixarVersao::CatalogoNaoServe(format!("{erro:?}")))?;
-    let publicacao = manifesto.mais_nova().clone();
+    // Uma falha ao guardar não impede nada: o que se perde é o offline da
+    // próxima abertura, e trocar o ato por isso seria a troca errada.
+    if let Err(erro) = guardar_catalogo(config, &bytes) {
+        tracing::warn!(%erro, "não guardei o catálogo; a próxima abertura sem rede não o terá");
+    }
+    Ok(manifesto)
+}
+
+/// O catálogo que vale para este ato.
+///
+/// Abrir não fala com a rede (ADR 0026 e 0046): usa o guardado. Hospedar e
+/// entrar são atos, e buscam o de agora para a lista de revogação ser a mais
+/// nova que se conseguir — com prazo curto, e com o guardado quando a rede não
+/// responde.
+///
+/// # Errors
+///
+/// [`FalhaAoAbrirVersao::SemCatalogo`] quando não há nenhum dos dois.
+pub(crate) async fn catalogo_para(
+    ato: Ato,
+    config: &str,
+    atualizador: &Atualizador,
+) -> Result<Manifesto, FalhaAoAbrirVersao> {
+    if ato.confere_revogacao() {
+        match buscar_catalogo(config, atualizador, Duration::from_secs(5)).await {
+            Ok(manifesto) => return Ok(manifesto),
+            Err(erro) => tracing::info!(?erro, "o catálogo não respondeu; vale o guardado"),
+        }
+    }
+    catalogo_guardado(config, &atualizador.chave).ok_or(FalhaAoAbrirVersao::SemCatalogo)
+}
+
+/// Baixa do catálogo a versão pedida e a instala ao lado das outras.
+///
+/// # A ordem, e por que ela é esta
+///
+/// Catálogo, conferência do catálogo, pacote, conferência do pacote, e só então
+/// disco. **Nada é escrito antes de a assinatura passar** — é o contrato do
+/// `Deposito::instalar`, e o motivo é o mesmo de sempre: meia instalação é o
+/// estado que ninguém sabe desfazer.
+///
+/// Depois de instalar, a poda: o launcher guarda o app mais novo de cada linha,
+/// e uma versão mais velha da mesma linha sai (spec 0.16, §1).
+///
+/// # Errors
+///
+/// [`FalhaAoBaixarVersao`], uma variante por motivo.
+pub(crate) async fn baixar(
+    config: &str,
+    atualizador: &Atualizador,
+    pedido: &Pedido,
+) -> Result<String, FalhaAoBaixarVersao> {
+    let manifesto = buscar_catalogo(config, atualizador, Duration::from_secs(30)).await?;
+    let publicacao =
+        match pedido {
+            Pedido::MaisNova => manifesto.mais_nova().clone(),
+            Pedido::Exata(versao) => manifesto.publicacao(versao).cloned().ok_or_else(|| {
+                FalhaAoBaixarVersao::CatalogoNaoServe(format!("{versao} não está publicada"))
+            })?,
+            Pedido::MaisNovaDaLinha(linha) => manifesto
+                .mais_nova_da_linha(linha)
+                .cloned()
+                .ok_or_else(|| {
+                    FalhaAoBaixarVersao::CatalogoNaoServe(format!(
+                        "o catálogo não traz app nenhum do Servidor {linha}"
+                    ))
+                })?,
+        };
     let versao_texto = publicacao.version.como_texto().to_owned();
 
     let deposito = Deposito::em(raiz_do_deposito(config));
@@ -367,13 +595,18 @@ pub(crate) async fn baixar_a_mais_nova(
     }
 
     let alvo = alvo_deste_sistema();
-    let Some(pacote) = publicacao.platforms.get(&alvo) else {
-        return Err(FalhaAoBaixarVersao::SemPacoteParaEsteSistema(alvo));
-    };
-    let Some(url) = pacote.url() else {
+    let Some(url) = publicacao
+        .platforms
+        .get(&alvo)
+        .and_then(seele_lancador::Pacote::url)
+    else {
         return Err(FalhaAoBaixarVersao::SemPacoteParaEsteSistema(alvo));
     };
 
+    let cliente = reqwest::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?;
     let bytes = cliente
         .get(url)
         .send()
@@ -386,14 +619,39 @@ pub(crate) async fn baixar_a_mais_nova(
     // O trabalho pesado sai da Tokio: conferir a assinatura e abrir o arquivo
     // são CPU e disco, e segurá-los aqui prenderia o executor da janela.
     let raiz = raiz_do_deposito(config);
+    let chave = atualizador.chave.clone();
+    let instalada = publicacao.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        Deposito::em(raiz).instalar(&publicacao, &alvo, &bytes, &chave, &DesempacotarTarGz)
+        Deposito::em(raiz).instalar(&instalada, &alvo, &bytes, &chave, &DesempacotarTarGz)
     })
     .await
     .map_err(|erro| FalhaAoBaixarVersao::NaoBaixei(erro.to_string()))?
     .map_err(|erro| FalhaAoBaixarVersao::PacoteRecusado(format!("{erro:?}")))?;
 
+    if let Some(linha) = publicacao.linha() {
+        podar(&deposito, &linha, &manifesto);
+    }
     Ok(versao_texto)
+}
+
+/// A poda da linha, com o que não saiu dito no rastro.
+///
+/// No Windows uma versão aberta não se apaga; ela fica, e a próxima poda tenta
+/// de novo. Calar seria disco ocupado sem ninguém saber por quê.
+fn podar(deposito: &Deposito, linha: &Linha, manifesto: &Manifesto) {
+    for podada in deposito.podar_linha(linha, manifesto) {
+        match podada.resultado {
+            Ok(()) => {
+                tracing::info!(versao = %podada.versao, %linha, "versão anterior da linha apagada");
+            }
+            Err(erro) => tracing::warn!(
+                versao = %podada.versao,
+                %linha,
+                %erro,
+                "não apaguei a versão anterior da linha; tento na próxima poda"
+            ),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -403,26 +661,409 @@ pub(crate) async fn baixar_a_mais_nova(
     reason = "num teste, o pânico é o relatório"
 )]
 mod o_launcher_ligado_ao_produto {
-    use super::{abrir, instaladas, preparar, FalhaAoAbrirVersao};
-    use seele_lancador::{Deposito, Versao};
+    use super::{instaladas, pedido_de, preparar, FalhaAoAbrirVersao, Intencao};
+    use seele_lancador::assinatura::fixtures::ChaveDeTeste;
+    use seele_lancador::{Ato, Chave, Deposito, Linha, Manifesto, Pedido, Versao};
 
-    /// Um depósito de mentira com uma versão instalada de verdade.
+    fn par() -> ChaveDeTeste {
+        ChaveDeTeste::com_semente(42)
+    }
+
+    fn chave() -> Chave {
+        Chave::do_formato_do_atualizador(&par().publica_no_formato_do_atualizador()).unwrap()
+    }
+
+    /// Um `.tar.gz` com um arquivo, como o `.app.tar.gz` do Mac e o portátil
+    /// do Windows.
+    fn pacote(executavel: &str, conteudo: &[u8]) -> Vec<u8> {
+        let mut bruto = Vec::new();
+        {
+            let gz = flate2::write::GzEncoder::new(&mut bruto, flate2::Compression::default());
+            let mut tar = tar::Builder::new(gz);
+            let mut cabecalho = tar::Header::new_gnu();
+            cabecalho.set_size(conteudo.len() as u64);
+            cabecalho.set_mode(0o755);
+            cabecalho.set_cksum();
+            tar.append_data(&mut cabecalho, executavel, conteudo)
+                .unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        bruto
+    }
+
+    fn soma(bytes: &[u8]) -> String {
+        use sha2::Digest as _;
+        sha2::Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// `versoes`: (versão, servidor). `revogada`: (alvo, defeito, conserto).
     ///
-    /// Escrito à mão, e não pelo `Deposito::instalar`: instalar exige pacote
-    /// assinado, manifesto e desempacotador, e o que se quer provar aqui é o
-    /// **consumo** do depósito pela casca, não a instalação. Escrever o que uma
-    /// instalação deixa em disco é o contrato entre os dois, e é ele que este
-    /// teste prende — se o formato do marcador mudar sem que este arquivo saiba,
-    /// é aqui que aparece.
+    /// O pacote de cada versão é `pacote("bin/seele", versão)`, então a soma e
+    /// a assinatura daqui são as do pacote que [`instalado`] instala.
+    pub(super) fn manifesto_json(
+        versoes: &[(&str, &str)],
+        revogada: Option<(&str, &str, &str)>,
+    ) -> String {
+        let alvo = super::alvo_deste_sistema();
+        let entradas: Vec<String> = versoes
+            .iter()
+            .map(|(v, servidor)| {
+                let bytes = pacote("bin/seele", v.as_bytes());
+                format!(
+                    r#"{{"version":"{v}","unit":{{"protocol":8,"mod_api":5,"server":"{servidor}","mod_apis":[5]}},
+                        "platforms":{{"{alvo}":{{"url":"https://exemplo.invalido/{v}","signature":"{}",
+                        "sha256":"{}","executable":"bin/seele"}}}}}}"#,
+                    par().assinar_no_formato_do_atualizador(&bytes),
+                    soma(&bytes),
+                )
+            })
+            .collect();
+        let revogacoes = revogada
+            .map(|(alvo_revogado, defeito, conserto)| {
+                use base64::Engine as _;
+                let documento = format!(
+                    r#"{{"schema":1,"issued_at":"2026-10-08T00:00:00Z","revoked":[{{"target":"{alvo_revogado}","defect":"{defeito}","fixed_in":"{conserto}"}}]}}"#
+                );
+                format!(
+                    r#","revocations":{{"document":"{}","signature":"{}"}}"#,
+                    base64::engine::general_purpose::STANDARD.encode(&documento),
+                    par().assinar_no_formato_do_atualizador(documento.as_bytes()),
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            r#"{{"schema":2,"versions":[{}]{revogacoes}}}"#,
+            entradas.join(",")
+        )
+    }
+
+    /// Instala uma versão do manifesto pelo `Deposito::instalar` de verdade, com
+    /// o desempacotador da casca. O marcador sai do jeito que sai em campo.
+    fn instalado(config: &str, json: &str, versao: &str) -> Manifesto {
+        let m = Manifesto::ler(json.as_bytes(), &chave()).unwrap();
+        let p = m
+            .publicacao(&Versao::nova(versao).unwrap())
+            .unwrap()
+            .clone();
+        Deposito::em(super::raiz_do_deposito(config))
+            .instalar(
+                &p,
+                &super::alvo_deste_sistema(),
+                &pacote("bin/seele", versao.as_bytes()),
+                &chave(),
+                &super::DesempacotarTarGz,
+            )
+            .unwrap();
+        m
+    }
+
+    fn linha(t: &str) -> Linha {
+        Linha::nova(t).unwrap()
+    }
+
+    /// **O guarda contra o defeito que não tem sintoma.** Um processo aberto
+    /// com o executável certo e o `SEELE_HOME` errado funciona, e escreve as
+    /// conversas no diretório de outra linha.
+    #[test]
+    fn a_versao_escolhida_recebe_o_executavel_dela_e_os_dados_da_linha() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        let m = instalado(&config, &json, "0.15.2");
+
+        let lancamento = preparar(
+            &config,
+            &m,
+            &chave(),
+            &Pedido::MaisNovaDaLinha(linha("0.15")),
+            Ato::Hospedar,
+            &Intencao {
+                hospedar: true,
+                nome_publico: Some("casa.exemplo.br".into()),
+                link: None,
+            },
+        )
+        .expect("a linha 0.15 está instalada e não revogada");
+
+        let deposito = Deposito::em(super::raiz_do_deposito(&config));
+        let dados = deposito.pasta_de_dados_da_linha(&linha("0.15"));
+        assert_eq!(
+            lancamento.programa,
+            deposito
+                .pasta_da_versao(&Versao::nova("0.15.2").unwrap())
+                .join("bin/seele"),
+            "o programa não é o executável que aquela instalação publicou"
+        );
+        assert!(
+            lancamento.ambiente.contains(&(
+                "SEELE_HOME".to_owned(),
+                dados.to_string_lossy().into_owned()
+            )),
+            "a versão foi aberta sem a pasta de dados da linha dela: {:?}",
+            lancamento.ambiente
+        );
+        assert!(
+            dados.is_dir(),
+            "a pasta de dados não foi criada antes de o processo subir"
+        );
+        assert_eq!(
+            lancamento.argumentos,
+            vec!["--hospedar", "--nome-publico", "casa.exemplo.br"],
+            "a intenção de hospedar, ou o nome público, não atravessou"
+        );
+    }
+
+    /// **O lado que lê a revogação**, ligado na casca: a lista guardada vale
+    /// mesmo quando o manifesto de hoje vem sem ela.
+    #[test]
+    fn hospedar_uma_linha_revogada_e_recusado_com_o_defeito_e_o_conserto() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let com_lista = manifesto_json(
+            &[("0.16.0", "1.0"), ("0.15.2", "0.15")],
+            Some(("0.15.2", "defeito de teste", "0.15.3")),
+        );
+        let m = instalado(&config, &com_lista, "0.15.2");
+        let pedido = Pedido::MaisNovaDaLinha(linha("0.15"));
+        let hospedar = Intencao {
+            hospedar: true,
+            ..Intencao::default()
+        };
+
+        assert_eq!(
+            preparar(&config, &m, &chave(), &pedido, Ato::Hospedar, &hospedar),
+            Err(FalhaAoAbrirVersao::Revogada {
+                defeito: "defeito de teste".to_owned(),
+                corrigida_em: Some("0.15.3".to_owned()),
+            })
+        );
+
+        // Amanhã o manifesto vem sem a lista; a guardada continua valendo.
+        let sem_lista = Manifesto::ler(
+            manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None).as_bytes(),
+            &chave(),
+        )
+        .unwrap();
+        assert!(matches!(
+            preparar(
+                &config,
+                &sem_lista,
+                &chave(),
+                &pedido,
+                Ato::Hospedar,
+                &hospedar
+            ),
+            Err(FalhaAoAbrirVersao::Revogada { .. })
+        ));
+        // E abrir para ler o que ficou lá continua permitido.
+        assert!(preparar(
+            &config,
+            &sem_lista,
+            &chave(),
+            &pedido,
+            Ato::Abrir,
+            &Intencao::default()
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn uma_linha_publicada_e_nao_baixada_diz_que_ha_pacote() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let m = Manifesto::ler(
+            manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None).as_bytes(),
+            &chave(),
+        )
+        .unwrap();
+        assert_eq!(
+            preparar(
+                &config,
+                &m,
+                &chave(),
+                &Pedido::MaisNovaDaLinha(linha("0.15")),
+                Ato::Entrar,
+                &Intencao::default()
+            ),
+            Err(FalhaAoAbrirVersao::NaoInstalada { tem_pacote: true })
+        );
+    }
+
+    #[test]
+    fn entrar_num_servidor_leva_o_link_inteiro_para_a_versao_aberta() {
+        // **O coração do ADR 0046**: quem clica num `seele://` de um servidor
+        // de outra linha tem o app daquela linha aberto, já indo para lá. O link
+        // vai inteiro, e não em pedaços: ele carrega a impressão digital, os
+        // endereços alternativos e o convite de uso único.
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let m = instalado(
+            &config,
+            &manifesto_json(&[("0.15.2", "0.15")], None),
+            "0.15.2",
+        );
+        let link = format!("seele://casa.exemplo:8383/?fp={}", "a".repeat(64));
+
+        let lancamento = preparar(
+            &config,
+            &m,
+            &chave(),
+            &Pedido::MaisNovaDaLinha(linha("0.15")),
+            Ato::Entrar,
+            &Intencao {
+                link: Some(link.clone()),
+                ..Intencao::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            lancamento.argumentos,
+            vec!["--entrar".to_owned(), link],
+            "o link não atravessou para a versão aberta, ou atravessou partido"
+        );
+    }
+
+    #[test]
+    fn sem_pedir_para_hospedar_nenhum_argumento_atravessa() {
+        // A outra metade: um lançamento que sempre mandasse `--hospedar`
+        // passaria no teste de cima e faria toda abertura virar hospedagem.
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let m = instalado(
+            &config,
+            &manifesto_json(&[("0.15.2", "0.15")], None),
+            "0.15.2",
+        );
+        let lancamento = preparar(
+            &config,
+            &m,
+            &chave(),
+            &Pedido::Exata(Versao::nova("0.15.2").unwrap()),
+            Ato::Abrir,
+            &Intencao {
+                nome_publico: Some("casa.exemplo.br".into()),
+                ..Intencao::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            lancamento.argumentos.is_empty(),
+            "abrir sem pedir para hospedar mandou argumento assim mesmo"
+        );
+    }
+
+    #[test]
+    fn um_pedido_vem_da_versao_ou_da_linha_e_nunca_das_duas() {
+        assert!(matches!(
+            pedido_de(Some("0.15.2"), None),
+            Ok(Pedido::Exata(_))
+        ));
+        assert!(matches!(
+            pedido_de(None, Some("0.15")),
+            Ok(Pedido::MaisNovaDaLinha(_))
+        ));
+        assert_eq!(
+            pedido_de(Some("0.15.2"), Some("0.15")),
+            Err(FalhaAoAbrirVersao::IdentificadorInvalido)
+        );
+        assert_eq!(
+            pedido_de(None, Some("../x")),
+            Err(FalhaAoAbrirVersao::IdentificadorInvalido)
+        );
+        assert_eq!(
+            pedido_de(Some("nao/e/uma/versao"), None),
+            Err(FalhaAoAbrirVersao::IdentificadorInvalido)
+        );
+        assert!(matches!(pedido_de(None, None), Ok(Pedido::MaisNova)));
+    }
+
+    #[test]
+    fn o_catalogo_guardado_e_o_ultimo_aceito_e_um_ilegivel_nao_vale() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        assert!(super::catalogo_guardado(&config, &chave()).is_none());
+
+        let json = manifesto_json(&[("0.16.0", "1.0")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        assert_eq!(
+            super::catalogo_guardado(&config, &chave())
+                .unwrap()
+                .mais_nova()
+                .version
+                .como_texto(),
+            "0.16.0"
+        );
+
+        std::fs::write(
+            super::raiz_do_deposito(&config).join(super::CATALOGO_GUARDADO),
+            b"{",
+        )
+        .unwrap();
+        assert!(
+            super::catalogo_guardado(&config, &chave()).is_none(),
+            "um catálogo ilegível não pode passar por um que abre"
+        );
+    }
+
+    #[test]
+    fn o_atualizador_sai_do_bloco_do_tauri_conf() {
+        let bloco = serde_json::json!({
+            "pubkey": par().publica_no_formato_do_atualizador(),
+            "endpoints": ["https://exemplo.invalido/latest.json"],
+        });
+        let atualizador = super::do_atualizador(&bloco).expect("chave e endereço declarados");
+        assert_eq!(
+            atualizador.enderecos,
+            vec!["https://exemplo.invalido/latest.json"]
+        );
+        // Sem endereço, ou sem chave, não há catálogo a consultar.
+        assert!(super::do_atualizador(
+            &serde_json::json!({"pubkey": par().publica_no_formato_do_atualizador(), "endpoints": []})
+        )
+        .is_none());
+        assert!(super::do_atualizador(&serde_json::json!({"endpoints": ["x"]})).is_none());
+    }
+
+    #[test]
+    fn iniciar_o_que_nao_e_executavel_falha_sem_panico() {
+        // O caminho do `spawn` tem de devolver recusa. Um arquivo que não é
+        // executável é o que mais perto se chega, nos três sistemas, de «o
+        // sistema recusou iniciar».
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let m = instalado(
+            &config,
+            &manifesto_json(&[("0.15.2", "0.15")], None),
+            "0.15.2",
+        );
+        let lancamento = preparar(
+            &config,
+            &m,
+            &chave(),
+            &Pedido::MaisNova,
+            Ato::Abrir,
+            &Intencao::default(),
+        )
+        .unwrap();
+        let resultado = super::iniciar(&lancamento);
+        assert!(
+            matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
+            "o caminho de abrir devolveu algo que não é nem sucesso nem `NaoIniciou`: {resultado:?}"
+        );
+    }
+
+    /// Um depósito escrito à mão, com o marcador de 4 linhas — para a lista,
+    /// que lê o depósito sem manifesto nenhum.
     fn deposito_com(config: &std::path::Path, versao: &str, executavel: &str) {
         let deposito = Deposito::em(super::raiz_do_deposito(&config.to_string_lossy()));
         let v = Versao::nova(versao).unwrap();
         let pasta = deposito.pasta_da_versao(&v);
         std::fs::create_dir_all(pasta.join("bin")).unwrap();
         std::fs::write(pasta.join(executavel), b"nao sou um executavel de verdade").unwrap();
-        // As quatro linhas do marcador: versão, executável, linha e soma. A soma
-        // é de mentira; nada aqui a confere.
-        let linha = seele_lancador::Linha::da_versao_legada_do_app(versao)
+        let linha = Linha::da_versao_legada_do_app(versao)
             .expect("as versões destes testes são de antes das duas numerações");
         std::fs::write(
             pasta.join("INSTALADA"),
@@ -431,150 +1072,15 @@ mod o_launcher_ligado_ao_produto {
         .unwrap();
     }
 
-    fn pasta(nome: &str) -> std::path::PathBuf {
-        let caminho = std::env::temp_dir().join(format!(
-            "seele-versoes-{}-{}-{nome}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&caminho).unwrap();
-        caminho
-    }
-
-    #[test]
-    fn a_versao_escolhida_recebe_o_executavel_dela_e_os_dados_dela() {
-        // **O guarda contra o defeito que não tem sintoma.** Um processo aberto
-        // com o executável certo e o `SEELE_HOME` errado funciona, e escreve as
-        // conversas no diretório de outra versão. Ninguém descobre até trocar de
-        // versão e não achar o que escreveu.
-        let raiz = pasta("caminho-completo");
-        let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-
-        let lancamento = preparar(&config, "0.10.5", true, Some("casa.exemplo.br"), None)
-            .expect("uma versão instalada e com procedência tem de preparar");
-
-        let deposito = Deposito::em(super::raiz_do_deposito(&config));
-        let v = Versao::nova("0.10.5").unwrap();
-        assert_eq!(
-            lancamento.programa,
-            deposito.pasta_da_versao(&v).join("bin/seele"),
-            "o programa não é o executável que aquela instalação publicou"
-        );
-        let dados = deposito.pasta_de_dados_da_linha(&seele_lancador::Linha::nova("0.10").unwrap());
-        assert_eq!(
-            lancamento.ambiente,
-            vec![(
-                "SEELE_HOME".to_owned(),
-                dados.to_string_lossy().into_owned()
-            )],
-            "a versão foi aberta sem o diretório de dados da linha dela, ou com o de outra"
-        );
-        assert!(
-            dados.is_dir(),
-            "a pasta de dados não foi criada antes de o processo subir"
-        );
-        assert_eq!(
-            lancamento.argumentos,
-            vec![
-                "--hospedar".to_owned(),
-                "--nome-publico".to_owned(),
-                "casa.exemplo.br".to_owned()
-            ],
-            "a intenção de hospedar, ou o nome público, não atravessou para a \
-             versão aberta — e a tela prometeu que atravessaria"
-        );
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
-    #[test]
-    fn entrar_num_servidor_leva_o_link_inteiro_para_a_versao_aberta() {
-        // **O coração do ADR 0046**: quem clica num `seele://` de um servidor
-        // que roda outra versão tem aquela versão aberta, já indo para lá.
-        //
-        // O link vai **inteiro**, e não em pedaços: ele carrega a impressão
-        // digital, os endereços alternativos e o convite de uso único.
-        // Remontá-lo do outro lado a partir de campos seria um segundo
-        // analisador de URI para discordar do primeiro — e o que se perderia
-        // primeiro é justamente a impressão digital, que é a única coisa que
-        // prova que o servidor do outro lado é o do link.
-        let raiz = pasta("entrar");
-        let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-        let link = format!("seele://casa.exemplo:8383/?fp={}", "a".repeat(64));
-
-        let lancamento = preparar(&config, "0.10.5", false, None, Some(&link)).expect("preparar");
-        assert_eq!(
-            lancamento.argumentos,
-            vec!["--entrar".to_owned(), link.clone()],
-            "o link não atravessou para a versão aberta, ou atravessou partido"
-        );
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
-    #[test]
-    fn sem_pedir_para_hospedar_nenhum_argumento_atravessa() {
-        // A outra metade: um lançamento que sempre mandasse `--hospedar`
-        // passaria no teste de cima e faria toda abertura virar hospedagem.
-        let raiz = pasta("so-abrir");
-        let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-
-        let lancamento =
-            preparar(&config, "0.10.5", false, Some("casa.exemplo.br"), None).expect("preparar");
-        assert!(
-            lancamento.argumentos.is_empty(),
-            "abrir sem pedir para hospedar mandou argumento assim mesmo"
-        );
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
-    #[test]
-    fn cada_recusa_diz_qual_foi() {
-        let raiz = pasta("recusas");
-        let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-
-        assert!(matches!(
-            preparar(&config, "nao/e/uma/versao", true, None, None),
-            Err(FalhaAoAbrirVersao::IdentificadorInvalido)
-        ));
-        assert!(
-            matches!(
-                preparar(&config, "9.9.9", true, None, None),
-                Err(FalhaAoAbrirVersao::NaoInstalada)
-            ),
-            "uma versão que não está no disco tem de dizer isso, e não «não \
-             iniciei»: o conserto é baixá-la, e a frase é outra"
-        );
-
-        // O marcador de antes da anotação do executável: a instalação está boa,
-        // e o que falta é a procedência.
-        let deposito = Deposito::em(super::raiz_do_deposito(&config));
-        let v = Versao::nova("0.10.5").unwrap();
-        std::fs::write(deposito.pasta_da_versao(&v).join("INSTALADA"), b"0.10.5\n").unwrap();
-        assert!(
-            matches!(
-                preparar(&config, "0.10.5", true, None, None),
-                Err(FalhaAoAbrirVersao::SemProcedencia)
-            ),
-            "uma instalação sem procedência tem de ser separada de uma ausente: \
-             aqui a versão está lá e o conserto é reinstalá-la"
-        );
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
     #[test]
     fn a_lista_marca_o_que_esta_em_uso_e_o_que_nao_da_para_abrir() {
-        let raiz = pasta("lista");
+        let dir = tempfile::tempdir().unwrap();
+        let raiz = dir.path();
         let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-        deposito_com(&raiz, "0.11.0", "bin/seele");
+        deposito_com(raiz, "0.10.5", "bin/seele");
+        deposito_com(raiz, "0.11.0", "bin/seele");
         // E uma terceira, com marcador antigo.
-        deposito_com(&raiz, "0.9.0", "bin/seele");
+        deposito_com(raiz, "0.9.0", "bin/seele");
         let deposito = Deposito::em(super::raiz_do_deposito(&config));
         std::fs::write(
             deposito
@@ -585,35 +1091,24 @@ mod o_launcher_ligado_ao_produto {
         .unwrap();
 
         let lista = instaladas(&config);
-        assert_eq!(lista.len(), 3, "o depósito tem três e a lista não as viu");
+        let do_deposito: Vec<_> = lista
+            .iter()
+            .filter(|v| ["0.10.5", "0.11.0", "0.9.0"].contains(&v.versao.as_str()))
+            .collect();
+        assert_eq!(
+            do_deposito.len(),
+            3,
+            "o depósito tem três e a lista não as viu"
+        );
         let antiga = lista.iter().find(|v| v.versao == "0.9.0").unwrap();
         assert!(
             !antiga.abrivel,
-            "a tela vai oferecer um botão que não funciona: uma instalação sem \
-             procedência tem de aparecer dita, e não oferecida"
+            "uma instalação sem procedência tem de aparecer dita, e não oferecida"
         );
         assert!(
             lista.iter().filter(|v| v.em_uso).count() <= 1,
             "duas versões marcadas como em uso ao mesmo tempo"
         );
-        let _ = std::fs::remove_dir_all(&raiz);
-    }
-
-    #[test]
-    fn abrir_o_que_nao_existe_falha_sem_panico() {
-        // `abrir` de verdade, e não só `preparar`: o caminho do `spawn` tem de
-        // devolver recusa. Um arquivo que não é executável é o que mais perto se
-        // chega, nos três sistemas, de «o sistema recusou iniciar».
-        let raiz = pasta("nao-inicia");
-        let config = raiz.to_string_lossy().into_owned();
-        deposito_com(&raiz, "0.10.5", "bin/seele");
-        let resultado = abrir(&config, "0.10.5", false, None, None);
-        assert!(
-            matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
-            "o caminho de abrir devolveu algo que não é nem sucesso nem \
-             `NaoIniciou`: {resultado:?}"
-        );
-        let _ = std::fs::remove_dir_all(&raiz);
     }
 
     /// **O portátil do Windows se abre pelo mesmo desempacotador do Mac.** A
@@ -651,11 +1146,8 @@ mod o_launcher_ligado_ao_produto {
     }
 
     /// **Relatado do uso real:** «não mostra as versões disponíveis para o
-    /// server».
-    ///
-    /// A lista vinha só do depósito, e quem instalou pelo `.dmg` — que é como
-    /// toda primeira instalação acontece — não tem depósito nenhum. Numa
-    /// máquina que tem, obviamente, uma versão rodando, a tela mostrava nada.
+    /// server». A lista vinha só do depósito, e quem instalou pelo `.dmg` não
+    /// tem depósito nenhum.
     #[test]
     fn a_versao_que_esta_rodando_aparece_mesmo_sem_deposito() {
         let dir = tempfile::tempdir().unwrap();
@@ -664,8 +1156,6 @@ mod o_launcher_ligado_ao_produto {
         let lista = instaladas(&config);
 
         match super::em_uso() {
-            // O caso de quem usa: este binário foi carimbado, e a versão dele
-            // aparece ainda que o depósito esteja vazio.
             Some(versao) => {
                 let achada = lista
                     .iter()
@@ -677,8 +1167,6 @@ mod o_launcher_ligado_ao_produto {
                     "o launcher não sabe abri-la: ela não está no depósito — e não precisa"
                 );
             }
-            // Um build feito à mão não carimba a versão, e aí não há o que
-            // acrescentar. Dito em vez de silenciosamente pulado.
             None => assert!(
                 lista.is_empty(),
                 "sem carimbo de versão e sem depósito, não há o que listar"

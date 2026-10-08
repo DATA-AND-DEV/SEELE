@@ -1635,9 +1635,14 @@ fn versoes_instaladas(app: AppHandle) -> Vec<versoes::VersaoInstalada> {
 ///
 /// [`versoes::FalhaAoAbrirVersao`], uma variante por motivo.
 #[tauri::command]
-fn abrir_versao(
+async fn abrir_versao(
     app: AppHandle,
-    versao: String,
+    // Uma versão exata ou a mais nova de uma linha de servidor — uma das
+    // duas ou nenhuma: ver `versoes::pedido_de`. Sem vírgula e sem parêntese
+    // nestes comentários: o guarda de argumentos de `tests/frontend.rs` parte
+    // a lista de parâmetros nos dois antes de tirar os comentários.
+    versao: Option<String>,
+    linha: Option<String>,
     hospedar: bool,
     nome_publico: Option<String>,
     link: Option<String>,
@@ -1669,13 +1674,29 @@ fn abrir_versao(
         },
         None => None,
     };
+    // Hospedar e entrar são os atos do ADR 0046, e conferem a revogação;
+    // abrir para ler não confere, e não fala com a rede.
+    let pedido = versoes::pedido_de(versao.as_deref(), linha.as_deref())?;
+    let ato = if hospedar {
+        seele_lancador::Ato::Hospedar
+    } else if link.is_some() {
+        seele_lancador::Ato::Entrar
+    } else {
+        seele_lancador::Ato::Abrir
+    };
+    let intencao = versoes::Intencao {
+        hospedar,
+        nome_publico: nome,
+        link,
+    };
     versoes::abrir(
         &config_dir(&app),
-        &versao,
-        hospedar,
-        nome.as_deref(),
-        link.as_deref(),
+        versoes::atualizador_do_app(&app).as_ref(),
+        &pedido,
+        ato,
+        &intencao,
     )
+    .await
 }
 
 /// Sobe um servidor dentro do app e devolve o link do convite.
@@ -6273,54 +6294,37 @@ async fn instalar_mod(app: AppHandle) -> Result<Option<String>, mods::FalhaAoIns
     mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta).map(|p| Some(p.id))
 }
 
-/// Baixa do catálogo a versão mais nova e a instala ao lado das outras.
+/// Baixa do catálogo o app mais novo de uma linha de servidor (ou o mais novo
+/// de todos) e o instala ao lado dos outros.
 ///
-/// # De onde saem a chave e os endereços
-///
-/// Do `tauri.conf.json`, do mesmo bloco do atualizador — e não de constantes
-/// próprias. Duas listas de endereços para o mesmo catálogo divergiriam no dia
-/// em que uma delas mudasse, e a que ficasse velha apontaria para um lugar que
-/// não publica mais. A chave pública é a mesma pelo mesmo motivo: o ADR 0026 a
-/// tem como a única que autoriza instalar programa nesta máquina.
+/// A chave e os endereços saem do bloco do atualizador do `tauri.conf.json`:
+/// ver `versoes::atualizador_do_app`.
 ///
 /// # Errors
 ///
 /// [`versoes::FalhaAoBaixarVersao`], uma variante por motivo.
 #[tauri::command]
-async fn baixar_versao(app: AppHandle) -> Result<String, versoes::FalhaAoBaixarVersao> {
-    let atualizador = app
-        .config()
-        .plugins
-        .0
-        .get("updater")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let pubkey = atualizador
-        .get("pubkey")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let enderecos: Vec<String> = atualizador
-        .get("endpoints")
-        .and_then(serde_json::Value::as_array)
-        .map(|lista| {
-            lista
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if pubkey.is_empty() || enderecos.is_empty() {
+async fn baixar_versao(
+    app: AppHandle,
+    // A linha de servidor cujo app mais novo baixar; sem ela o mais novo de
+    // todos.
+    linha: Option<String>,
+) -> Result<String, versoes::FalhaAoBaixarVersao> {
+    let Some(atualizador) = versoes::atualizador_do_app(&app) else {
         // Um build sem o bloco do atualizador não tem catálogo a consultar, e
         // dizer isso é melhor que tentar e falhar na rede: o motivo é outro e
         // o conserto é outro.
         return Err(versoes::FalhaAoBaixarVersao::CatalogoNaoServe(
             "este build não declara catálogo nem chave".to_owned(),
         ));
-    }
-    versoes::baixar_a_mais_nova(&config_dir(&app), &pubkey, &enderecos).await
+    };
+    let pedido = versoes::pedido_de(None, linha.as_deref()).map_err(|_| {
+        versoes::FalhaAoBaixarVersao::CatalogoNaoServe(format!(
+            "«{}» não é uma linha de servidor",
+            linha.as_deref().unwrap_or_default()
+        ))
+    })?;
+    versoes::baixar(&config_dir(&app), &atualizador, &pedido).await
 }
 
 /// Se **esta janela** está hospedando um servidor agora.
