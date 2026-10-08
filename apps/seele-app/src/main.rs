@@ -426,6 +426,20 @@ impl Session {
         Err(ConnectionError::NotConnected)
     }
 
+    /// **Recusa um comando de MOD que vem de uma sessão que já acabou, e
+    /// conta**, com a recusa que a janela lê: `sessao-encerrada`.
+    ///
+    /// É [`Self::confere_geracao`] com o erro dos comandos de MOD: a mesma
+    /// conta em `comandos_de_geracao_morta` e a mesma linha DEBUG. Antes dela,
+    /// cada comando conferia com um `if` seu, e metade não contava — um zero no
+    /// contador não queria dizer que nada da sessão anterior tinha falado.
+    fn recusar_se_morta(&self, geracao: u64) -> Result<(), FalhaNoMod> {
+        self.confere_geracao(geracao)
+            .map_err(|_| FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            })
+    }
+
     /// The live handle, or the reason there is none.
     fn connection(&self) -> Result<Arc<Connection>, ConnectionError> {
         self.connection
@@ -4478,6 +4492,7 @@ fn mod_nativo_ativar(
     liberar_reserva(
         &session.mods_nativos,
         &|| session.geracao_vale(geracao),
+        &session.comandos_de_geracao_morta,
         geracao,
         instancia,
     )?;
@@ -4531,9 +4546,7 @@ fn revogar_em(geracao: &std::sync::atomic::AtomicU64, mods: &std::sync::Mutex<Mo
 ///
 /// A recusa por geração morta é contada em `mortos` — o
 /// `comandos_de_geracao_morta` da sessão —, como a do começo de
-/// [`reservar_no_executor`]. A de [`liberar_reserva`], logo abaixo, não é
-/// contada: nem todo comando de geração morta passa por esse contador, e um
-/// zero nele não quer dizer que nada da sessão anterior falou.
+/// [`reservar_no_executor`] e a de [`liberar_reserva`], logo abaixo.
 fn registrar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
@@ -4556,14 +4569,18 @@ fn registrar_reserva(
 /// Extraída pela mesma razão que [`registrar_reserva`]: a ativação também é uma
 /// corrida contra a saída da sessão, e uma prova dela não pode precisar de um
 /// `AppHandle`.
+///
+/// A recusa por geração morta é contada em `mortos`, como a da reserva.
 fn liberar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
+    mortos: &std::sync::atomic::AtomicU64,
     geracao: u64,
     instancia: u64,
 ) -> Result<(), FalhaNoMod> {
     let mut vivos = mods.lock().map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
     if !geracao_vale() {
+        mortos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         vivos.encerrar(instancia);
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
@@ -4823,11 +4840,7 @@ fn mod_nativo_colher(
     instancia: u64,
     limite: usize,
 ) -> Result<Vec<FalaPendente>, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let mut vivos = session
         .mods_nativos
         .lock()
@@ -4872,11 +4885,7 @@ fn mod_nativo_entregar(
     instancia: u64,
     json: String,
 ) -> Result<(), FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let vivos = session
         .mods_nativos
         .lock()
@@ -5778,14 +5787,7 @@ fn ler_codigo_do_mod(
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
     // de «montagem atrasada».
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let pacote = seele_ffi::mods::ler_por_hash(&config_dir(app), hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse o
@@ -6072,14 +6074,7 @@ fn midia_do_mod(
     hash: String,
     caminho: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let midia = midia_declarada_do_mod(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6186,14 +6181,7 @@ fn som_do_mod(
     hash: String,
     caminho: String,
 ) -> Result<tauri::ipc::Response, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let bytes = som_declarado_do_mod(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6302,14 +6290,7 @@ fn midia_em_bytes(
     id: String,
     base64: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let midia = midia_do_servidor_dita(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6436,9 +6417,7 @@ async fn enviar_imagem_mod(
     let recusa = |motivo: &str| FalhaNoMod::Recusado {
         motivo: motivo.to_owned(),
     };
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     let bytes = {
         let mut guardados = session
             .arquivos_escolhidos
@@ -6464,9 +6443,7 @@ async fn enviar_imagem_mod(
         .enviar_imagem_mod(id, token, bytes)
         .await
         .map_err(|m| recusa(&m))?;
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     Ok(())
 }
 
@@ -6481,9 +6458,7 @@ async fn ler_imagem_mod(
     let recusa = |motivo: &str| FalhaNoMod::Recusado {
         motivo: motivo.to_owned(),
     };
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     let conexao = session
         .connection()
         .map_err(|_| recusa("sessao-encerrada"))?;
@@ -6502,9 +6477,7 @@ async fn ler_imagem_mod(
                 recusa(&m),
             )
         })?;
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
         recusa_de_midia_dita(
             &session.baldes_do_registro,
@@ -6565,14 +6538,7 @@ async fn escolher_para_o_mod(
 ) -> Result<Option<EscolhidoParaOMod>, FalhaNoMod> {
     use tauri_plugin_dialog::DialogExt as _;
 
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
 
     // **O título diz para quê.** Antes dizia «Escolha um arquivo para este
     // MOD», que não responde a pergunta de quem está olhando o Finder: *este
@@ -6671,11 +6637,7 @@ async fn escolher_para_o_mod(
 
     // Conferida **de novo** depois do `await` do seletor: a pessoa pode ter
     // demorado a escolher, e a sessão pode ter acabado no meio.
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let mut guardados = session
         .arquivos_escolhidos
         .lock()
@@ -6717,14 +6679,7 @@ fn pedaco_do_escolhido(
     arquivo: u64,
     inicio: usize,
 ) -> Result<String, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let guardados = session
         .arquivos_escolhidos
         .lock()
@@ -10273,7 +10228,9 @@ mod o_que_sai_desta_janela_por_um_link {
 /// tabela, os créditos e o que sobra depois.
 #[cfg(test)]
 mod a_supervisao_dos_mods_nativos {
-    use super::{registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos};
+    use super::{
+        liberar_reserva, registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos,
+    };
     use crate::executor::{ExecutorQuickJs, Limites};
 
     /// Uma instância com um executor de verdade, na geração dada.
@@ -10529,6 +10486,190 @@ mod a_supervisao_dos_mods_nativos {
             mortos.load(Ordering::Relaxed),
             1,
             "a reserva de uma geração viva foi contada como de geração morta"
+        );
+    }
+
+    /// **A ativação que chega numa geração morta também é contada**, como a
+    /// reserva logo acima.
+    ///
+    /// Ela era a ressalva do doc de `registrar_reserva`: recusada sem conta, e
+    /// um zero em `comandos_de_geracao_morta` não queria dizer que nada da
+    /// sessão anterior tinha falado. A que vale não é contada, nem quando é
+    /// recusada por outro motivo.
+    #[test]
+    fn a_ativacao_recusada_por_geracao_morta_e_contada() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let nenhum = AtomicU64::new(0);
+        let mut reservada = instancia(7);
+        reservada.estado = EstadoNativo::Reservada;
+        let numero = registrar_reserva(&mods, &|| true, &nenhum, reservada)
+            .expect("a reserva viva foi recusada");
+
+        let mortos = AtomicU64::new(0);
+        let recusa = liberar_reserva(&mods, &|| false, &mortos, 7, numero)
+            .expect_err("a ativação de uma geração morta foi aceita");
+        assert_eq!(
+            super::motivo_de(&recusa),
+            "sessao-encerrada",
+            "a ativação de uma geração morta foi recusada por outro motivo"
+        );
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a ativação recusada por geração morta não foi contada em \
+             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
+        );
+        assert!(
+            mods.lock()
+                .expect("cadeado")
+                .encerrando
+                .contains_key(&numero),
+            "a reserva de uma ativação recusada por geração morta não foi encerrada"
+        );
+
+        let recusa = liberar_reserva(&mods, &|| true, &mortos, 7, numero)
+            .expect_err("a ativação de uma reserva já encerrada foi aceita");
+        assert_eq!(
+            super::motivo_de(&recusa),
+            "instancia-nao-esta-reservada",
+            "a ativação viva de uma reserva encerrada foi recusada por outro motivo"
+        );
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a ativação de uma geração viva foi contada como de geração morta"
+        );
+    }
+
+    /// **Um comando de MOD de uma geração morta é recusado, contado e dito**,
+    /// pela mesma função em todos eles ([`super::Session::recusar_se_morta`]).
+    ///
+    /// Eram treze conferências com um `if` cada uma, em dez funções, e sete não
+    /// contavam: `comandos_de_geracao_morta` dizia zero com a sessão anterior
+    /// ainda falando. Nenhum teste daqui monta um `State`, e por isso a prova é
+    /// da função; o guarda de fonte logo abaixo prende que os comandos a usam.
+    #[test]
+    fn o_comando_de_uma_geracao_morta_e_recusado_contado_e_dito() {
+        use std::sync::atomic::Ordering;
+
+        let sessao = super::Session::default();
+        sessao.geracao.store(3, Ordering::Release);
+        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| sessao.recusar_se_morta(2));
+        let falha = resultado.expect_err("um comando de uma geração morta foi admitido");
+        assert_eq!(
+            super::motivo_de(&falha),
+            "sessao-encerrada",
+            "um comando de uma geração morta foi recusado por outro motivo, e a janela não o \
+             lê como a sessão que acabou"
+        );
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            1,
+            "um comando recusado por geração morta não foi contado em \
+             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
+        );
+        assert!(
+            rastro.contains("DEBUG")
+                && rastro.contains("comando recusado: a sessão dele já acabou"),
+            "um comando recusado por geração morta não deixou a linha DEBUG de \
+             `confere_geracao`: {rastro}"
+        );
+
+        sessao
+            .recusar_se_morta(0)
+            .expect_err("o zero, que é «a casca não sabe», foi admitido");
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            2,
+            "o comando com geração zero foi recusado sem ser contado"
+        );
+
+        sessao
+            .recusar_se_morta(3)
+            .expect("um comando da geração de pé foi recusado");
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            2,
+            "um comando da geração de pé foi contado como de geração morta"
+        );
+    }
+
+    /// **Nenhuma conferência de geração recusa por fora de
+    /// [`super::Session::recusar_se_morta`].**
+    ///
+    /// O arquivo inteiro, menos `impl Session`, e não só os corpos de
+    /// `#[tauri::command]`: a conferência de `ler_codigo_do_mod` mora num
+    /// auxiliar, e um guarda que olhasse só os comandos acharia doze das treze.
+    /// Os fechos `&|| session.geracao_vale(geracao)` não são negação, e ficam:
+    /// quem os recebe (`registrar_reserva`, `liberar_reserva`) conta em
+    /// `mortos`.
+    ///
+    /// E cada comando que conferia continua conferindo: tirar a conferência,
+    /// em vez de trocá-la, também deixaria este guarda sem negação nenhuma.
+    #[test]
+    fn nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta() {
+        let fonte = super::fonte_sem_comentarios();
+        let (antes, resto) = fonte
+            .split_once("\nimpl Session {\n")
+            .expect("`impl Session` não está mais neste arquivo");
+        let depois = resto.split_once("\n}\n").map_or("", |(_, depois)| depois);
+        let fora: String = [antes, depois]
+            .concat()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        // Montado, e não escrito: escrito, o padrão acharia este teste.
+        let chamada = format!(".{}(", "geracao_vale");
+        let cruas: Vec<String> = fora
+            .match_indices(&chamada)
+            .filter_map(|(posicao, _)| {
+                let receptor = fora
+                    .get(..posicao)?
+                    .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
+                receptor.ends_with('!').then(|| {
+                    let inicio = receptor.len().saturating_sub(48);
+                    fora.get(inicio..posicao + chamada.len())
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+            })
+            .collect();
+        assert!(
+            cruas.is_empty(),
+            "{} conferência(s) de geração recusam com um `if` próprio, e não por \
+             `recusar_se_morta`: o comando de uma geração morta volta à janela sem ser contado \
+             em `comandos_de_geracao_morta`, e o zero dele mente — {cruas:#?}",
+            cruas.len()
+        );
+
+        let mut total = 0;
+        for (funcao, minimas) in [
+            ("fn mod_nativo_colher(", 1),
+            ("fn mod_nativo_entregar(", 1),
+            ("fn ler_codigo_do_mod(", 1),
+            ("fn midia_do_mod(", 1),
+            ("fn som_do_mod(", 1),
+            ("fn midia_em_bytes(", 1),
+            ("async fn enviar_imagem_mod(", 2),
+            ("async fn ler_imagem_mod(", 2),
+            ("async fn escolher_para_o_mod(", 2),
+            ("fn pedaco_do_escolhido(", 1),
+        ] {
+            let feitas = super::corpo_de(&fonte, funcao)
+                .matches(".recusar_se_morta(geracao)")
+                .count();
+            total += feitas;
+            assert!(
+                feitas >= minimas,
+                "`{funcao}` confere a geração {feitas} vez(es) por `recusar_se_morta`, e \
+                 conferia {minimas}: um comando de uma geração morta passa a ser admitido"
+            );
+        }
+        assert!(
+            total >= 13,
+            "as conferências de geração por `recusar_se_morta` são {total}, e eram treze"
         );
     }
 
