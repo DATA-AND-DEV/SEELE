@@ -326,9 +326,10 @@ pub enum EndReason {
     /// Quem atendeu na volta da bateria não é o servidor desta sessão.
     ///
     /// A volta foi recusada dentro do TLS, antes do `Hello`: a impressão
-    /// esperada nomeava outra chave (`InviteMismatch`). Era
-    /// [`Self::CredentialRejected`], e a frase mandava conferir uma credencial
-    /// que nem chegou a sair desta máquina.
+    /// esperada nomeava outra chave (`InviteMismatch`), ou quem atendeu mostrou
+    /// o certificado do servidor sem provar ter a chave dele
+    /// (`ChaveNaoProvada`). Era [`Self::CredentialRejected`], e a frase mandava
+    /// conferir uma credencial que nem chegou a sair desta máquina.
     ///
     /// Sem as impressões de propósito: este enum é `Copy` e chega ao retrato
     /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada.
@@ -2033,6 +2034,19 @@ pub enum ConnectionError {
         /// What the server offered.
         offered: String,
     },
+    /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
+    /// que o assina.
+    ///
+    /// O verificador aceitou o certificado (o pin conferia, ou era o primeiro
+    /// contato), e o TLS caiu logo depois, na assinatura de quem atendeu: o
+    /// certificado é público e se repete inteiro, e a chave privada não.
+    /// Recusada dentro do TLS, antes do `Hello`, como [`Self::InviteMismatch`]:
+    /// o convite, a senha e o apelido não chegaram a ele.
+    ///
+    /// Era `Refused { Incompatible }`, e a tela mandava atualizar o SEELE nas
+    /// duas máquinas. Unitária: não há impressão a comparar, porque a que quem
+    /// atendeu mostrou é a do servidor verdadeiro.
+    ChaveNaoProvada,
     /// The server refused the session, and said why.
     Refused {
         /// The enumerated reason.

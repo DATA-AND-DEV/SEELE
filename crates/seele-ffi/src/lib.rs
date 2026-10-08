@@ -5118,7 +5118,8 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         seele_core::ConnectError::Refused { reason } => (*reason).into(),
         // Sem as impressões: `EndReason` é `Copy` e chega ao retrato. Elas
         // ficam no `seele.log`, na linha da volta recusada.
-        seele_core::ConnectError::InviteMismatch { .. } => EndReason::ServidorTrocouNaVolta,
+        seele_core::ConnectError::InviteMismatch { .. }
+        | seele_core::ConnectError::ChaveNaoProvada => EndReason::ServidorTrocouNaVolta,
         seele_core::ConnectError::PinChanged { .. } => EndReason::ChaveMudouNaVolta,
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
@@ -5157,6 +5158,10 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 offered: offered.clone(),
             }
         }
+        // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
+        // certificado sem ter a chave aparecia como versão incompatível, e a
+        // tela mandava atualizar o SEELE nas duas máquinas.
+        seele_core::ConnectError::ChaveNaoProvada => ConnectionError::ChaveNaoProvada,
         // Não é uma falha traduzida: é a pergunta do ADR 0045 atravessando
         // inteira, com o que a tela precisa para fazê-la.
         seele_core::ConnectError::ModsNaoAceitos { mods, conjunto } => {
@@ -5179,9 +5184,23 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
 
 #[cfg(test)]
 mod a_volta_recusada_diz_o_motivo {
-    use super::{fim_da_sessao, EndReason};
+    use super::{classify_connect_failure, fim_da_sessao, ConnectionError, EndReason};
     use seele_core::enlace::Motivo;
     use seele_core::{ConnectError, DisconnectReason};
+
+    #[test]
+    fn quem_nao_prova_a_chave_nao_chega_como_versao_incompativel() {
+        // Era `TlsRefused`, que esta tradução manda para
+        // `Refused { Incompatible }`: o impostor que repete o certificado do
+        // servidor aparecia como versão incompatível, e a tela mandava
+        // atualizar o SEELE nas duas máquinas.
+        assert_eq!(
+            classify_connect_failure(&ConnectError::ChaveNaoProvada),
+            ConnectionError::ChaveNaoProvada,
+            "quem não provou a chave do servidor chega à tela com outro nome, e a frase \
+             manda atualizar o SEELE por causa de um impostor"
+        );
+    }
 
     #[test]
     fn fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada() {
@@ -5221,6 +5240,11 @@ mod a_volta_recusada_diz_o_motivo {
                     conjunto: "conjunto".into(),
                 },
                 EndReason::ModsMudaram,
+            ),
+            (
+                "ChaveNaoProvada",
+                ConnectError::ChaveNaoProvada,
+                EndReason::ServidorTrocouNaVolta,
             ),
         ];
         let erradas: Vec<String> = casos

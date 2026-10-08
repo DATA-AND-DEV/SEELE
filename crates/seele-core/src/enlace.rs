@@ -4966,16 +4966,17 @@ impl PinStore for PinsDesteAperto {
 ///
 /// A frase diz só o que vale em toda saída: o aperto falhou depois de o
 /// verificador aceitar a chave, no resto do TLS ou depois dele. Em qual dos
-/// dois, quem diz é `falha`, e quase todo erro aponta um só: `TlsRefused` e
-/// `SemResposta` saem do próprio TLS (`client::classify_connection_error`);
-/// `HandshakeTimeout`, `Refused`, `ProtocolViolation` e `ModsNaoAceitos`, do
-/// aperto do protocolo, depois dele. `Unreachable` pode ser dos dois: a
-/// conexão que caiu no meio do TLS, ou o fluxo de controle e um quadro do
-/// aperto do protocolo que não passaram depois dele; ali, o `warn!` de
-/// `crate::client` que vem antes desta linha no `seele.log` diz qual. Com
-/// `TlsRefused`, foi o próprio TLS que caiu, como no impostor de cima, e ali
-/// dizer que o TLS terminou faria quem investiga achar que quem atendeu provou
-/// ter a chave.
+/// dois, quem diz é `falha`, e quase todo erro aponta um só: `ChaveNaoProvada`,
+/// `TlsRefused` e `SemResposta` saem do próprio TLS
+/// (`client::classify_connection_error`); `HandshakeTimeout`, `Refused`,
+/// `ProtocolViolation` e `ModsNaoAceitos`, do aperto do protocolo, depois dele.
+/// `Unreachable` pode ser dos dois: a conexão que caiu no meio do TLS, ou o
+/// fluxo de controle e um quadro do aperto do protocolo que não passaram depois
+/// dele; ali, o `warn!` de `crate::client` que vem antes desta linha no
+/// `seele.log` diz qual. Com `ChaveNaoProvada`, foi o próprio TLS que caiu, na
+/// assinatura de quem atendeu, como no impostor de cima, e ali dizer que o TLS
+/// terminou faria quem investiga achar que quem atendeu provou ter a chave. Com
+/// `TlsRefused`, o TLS também caiu, por outro alerta.
 fn desfazer_o_pin_deste_aperto(
     pins: &dyn PinStore,
     chave_do_pin: &str,
@@ -5454,6 +5455,7 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
     match erro {
         ConnectError::PinChanged { .. }
         | ConnectError::InviteMismatch { .. }
+        | ConnectError::ChaveNaoProvada
         | ConnectError::Refused { .. }
         | ConnectError::TlsRefused
         | ConnectError::ProtocolViolation => true,
@@ -5482,6 +5484,10 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         ConnectError::PinChanged { .. }
         | ConnectError::Refused { .. }
         | ConnectError::InviteMismatch { .. } => false,
+        // Quem atendeu não provou ter a chave do servidor que mostrou. Insistir
+        // é perguntar de novo a quem já não provou, e é o comportamento que um
+        // impostor espera.
+        ConnectError::ChaveNaoProvada => false,
         // **Só uma pessoa desfaz isto**, e é a metade simétrica do que
         // `a_sessao_acabou_aqui` já dizia para `DisconnectReason::ModsMudaram`:
         // a reconexão encontra o mesmo anúncio e o mesmo não. Insistir manda
@@ -5679,6 +5685,25 @@ mod tests {
         }));
         assert!(vale_insistir(&ConnectError::Unreachable));
         assert!(vale_insistir(&ConnectError::HandshakeTimeout));
+    }
+
+    #[test]
+    fn quem_nao_prova_a_chave_respondeu_e_insistir_nao_muda_a_resposta() {
+        // Era `TlsRefused`, que a bateria repete: insistir mandaria um aperto
+        // de mão a quem já não provou ter a chave, a cada batida, por cinco
+        // minutos. E é resposta de alguém, como a impressão que não confere:
+        // perder a corrida para o «não alcancei» de um endereço morto
+        // esconderia o impostor atrás de uma falha de rede.
+        assert!(
+            alguem_respondeu(&ConnectError::ChaveNaoProvada),
+            "quem mostrou o certificado sem a chave perde a corrida para um endereço \
+             morto, e a tela diz «não alcancei» sobre um impostor"
+        );
+        assert!(
+            !vale_insistir(&ConnectError::ChaveNaoProvada),
+            "a bateria insiste contra quem não provou a chave do servidor, e a volta \
+             martela o impostor em vez de acabar"
+        );
     }
 
     /// Um conjunto de MODs a aceitar não é uma queda de rede.
@@ -6104,11 +6129,17 @@ mod tests {
         .await
         .expect("o aperto de mão com o impostor não terminou");
 
+        // **Com o nome de quem não provou a chave**, e não `TlsRefused`: este
+        // a FFI traduz por versão incompatível, e a tela mandava atualizar o
+        // SEELE nas duas máquinas por causa de um impostor. O nome sai do
+        // alerta que o `rustls` daqui manda (`decrypt_error`, 51); se uma
+        // versão nova mudar o número, é aqui que reprova.
         assert_eq!(
             resultado.err(),
-            Some(ConnectError::TlsRefused),
-            "o impostor sem a chave não caiu no TLS como `TlsRefused`, e o teste mediu \
-             outra coisa"
+            Some(ConnectError::ChaveNaoProvada),
+            "o impostor que mostrou o certificado sem a chave não saiu como \
+             `ChaveNaoProvada`: a tela o chamaria de versão incompatível, ou o teste \
+             mediu outra coisa"
         );
         assert_eq!(
             loja.pinned(chave),
@@ -6127,9 +6158,9 @@ mod tests {
             );
         };
         assert!(
-            desfeito.contains("TlsRefused"),
-            "a linha do pin desfeito não traz o erro que o aperto deu (`TlsRefused`), e sim \
-             outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
+            desfeito.contains("ChaveNaoProvada"),
+            "a linha do pin desfeito não traz o erro que o aperto deu (`ChaveNaoProvada`), e \
+             sim outro: a falha que `conectar_por` passa à limpeza não é a do aperto. Linha: \
              {desfeito}"
         );
         assert!(

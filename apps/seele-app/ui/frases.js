@@ -680,6 +680,16 @@ const FRASES = {
         "OS PACOTES SAÍRAM E NADA VOLTOU\n" +
         "Confira o endereço e a porta UDP de quem hospeda. No Mac, confira também " +
         "a permissão de rede local em Ajustes.",
+    // **O impostor que repete o certificado do servidor**, e que chegava aqui
+    // como versão incompatível: a frase mandava atualizar o SEELE nas duas
+    // máquinas. O certificado é público; a chave que o assina, não, e o TLS a
+    // cobrou antes do `Hello`. Por isso a segunda linha diz o que não saiu,
+    // com o escopo «a ele» da recusa pela impressão (ver `InviteMismatch`, em
+    // `fraseDeErro`).
+    ChaveNaoProvada:
+        "QUEM ATENDEU NÃO PROVOU SER ESTE SERVIDOR.\n" +
+        "Ele mostrou o certificado do servidor sem a chave que o assina. " +
+        "O convite, a senha e o apelido não chegaram a ele.",
     IdentityUnavailable: "NÃO CONSEGUI LER OU GRAVAR A IDENTIDADE EM DISCO",
     NoAudioDevice: "SEM DISPOSITIVO DE ÁUDIO",
     UnknownPerson: "NÃO CONHEÇO ESSA PESSOA",

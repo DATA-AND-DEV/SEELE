@@ -7698,6 +7698,39 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     }
 }
 
+#[test]
+fn quem_nao_prova_a_chave_tem_frase_propria_e_nao_a_de_versao_incompativel() {
+    // O impostor que repete o certificado do servidor sem ter a chave dele
+    // chegava como `Refused { Incompatible }`, e a tela mandava atualizar o
+    // SEELE nas duas máquinas. Agora chega como `ConnectionError::ChaveNaoProvada`,
+    // unitária, e `fraseDeErro` a lê em `FRASES` por esse nome: sem a entrada,
+    // devolve o nome cru da variante.
+    //
+    // `ConnectionError` não tem um guarda de todas as variantes contra
+    // `FRASES`, como `EndReason` tem contra `MOTIVOS`: várias têm a frase em
+    // outra tela (`tela-server.js`). Este guarda é desta variante.
+    //
+    // O nome vem do serde, e não de um texto aqui: renomear a variante reprova
+    // este guarda, em vez de deixar uma frase que ninguém lê.
+    let Ok(json) = serde_json::to_string(&seele_ffi::ConnectionError::ChaveNaoProvada) else {
+        panic!("ConnectionError does not serialise, so no shell can read it at all");
+    };
+    let nome = json.trim_matches('"');
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let frases = sentences_of(&arquivo, "FRASES");
+    let Some((_, frase)) = frases.iter().find(|(variante, _)| variante == nome) else {
+        panic!(
+            "`ConnectionError::{nome}` chega à tela sem frase em `FRASES`, e a tela escreve \
+             o nome de uma variante do Rust a quem acabou de bater num impostor"
+        );
+    };
+    assert!(
+        frase.contains("NÃO PROVOU"),
+        "a frase de `{nome}` não diz que quem atendeu não provou ser o servidor, e se lê \
+         como outra recusa: {frase}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // What the owner asked for after installing the app and using it. Four guards,
 // and three of them guard an **absence** — the hardest kind to keep, because

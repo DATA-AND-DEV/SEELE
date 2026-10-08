@@ -67,6 +67,11 @@ pub enum ConnectError {
     Unreachable,
     /// TLS refused the certificate for a reason other than the pin.
     ///
+    /// Nem a impressão esperada, nem a chave que o servidor não provou: essas
+    /// têm nome próprio ([`Self::InviteMismatch`] e [`Self::ChaveNaoProvada`]).
+    /// O que sobra aqui é o TLS que caiu por outro alerta, ou sem decisão do
+    /// verificador.
+    ///
     /// **E um segundo motivo, que não é recusa de ninguém:** o TLS terminou sem
     /// decisão do verificador de pin (`decisao_do_aperto`). O certificado não
     /// foi conferido contra pin nem impressão, e a conexão não segue; o
@@ -76,6 +81,26 @@ pub enum ConnectError {
     /// nas duas máquinas: imprecisa ali, e o caminho não é alcançável com o
     /// `rustls` de hoje, que chama o verificador em todo aperto de mão completo.
     TlsRefused,
+    /// Quem atendeu mostrou um certificado que o verificador aceitou, e não
+    /// provou ter a chave dele.
+    ///
+    /// O certificado é público: um impostor pode repeti-lo inteiro. O que ele
+    /// não tem é a chave privada, e o TLS a cobra **depois** de o verificador
+    /// aceitar o certificado, na assinatura de quem atende sobre o aperto de
+    /// mão (`CertificateVerify`). A assinatura não confere, e o `rustls` daqui
+    /// recusa com o alerta `decrypt_error` (51), que o `quinn` devolve como
+    /// `TransportError` local (`classify_connection_error`).
+    ///
+    /// **Recusada dentro do TLS, antes do `Hello`**, como
+    /// [`Self::InviteMismatch`]: o convite, a senha e o apelido não chegam a
+    /// quem atendeu. Era [`Self::TlsRefused`], e a FFI a traduzia por
+    /// `Refused { Incompatible }`: a tela mandava atualizar o SEELE nas duas
+    /// máquinas por causa de um servidor que não é quem diz ser.
+    ///
+    /// Só com a decisão do verificador (`Matches` ou `FirstContact`) na mão: o
+    /// TLS sem decisão continua [`Self::TlsRefused`], porque ali ninguém
+    /// conferiu certificado nenhum.
+    ChaveNaoProvada,
     /// The pinned key is not the key offered. ADR 0003.
     PinChanged {
         /// What was pinned before.
@@ -1721,6 +1746,34 @@ fn classify_connection_error(
         Some(PinDecision::InviteRefused { expected, offered }) => {
             ConnectError::InviteMismatch { expected, offered }
         }
+        // **O verificador aceitou o certificado, e quem atendeu não provou ter
+        // a chave dele.** O certificado é público e se repete inteiro; a chave
+        // privada, não. O TLS a cobra depois do verificador, na assinatura de
+        // quem atende (`CertificateVerify`), e quando ela não confere o
+        // `rustls` daqui recusa com `decrypt_error` (51). É o TLS **local** que
+        // falha, então o alerta vem em `TransportError(e).code`, e não no
+        // `ConnectionClosed` que `par::motivo_da_recusa` lê (o alerta que o
+        // outro lado mandou).
+        //
+        // Sem este braço, o impostor saía `TlsRefused`, que a FFI traduz por
+        // versão incompatível.
+        Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. })
+            if matches!(
+                error,
+                quinn::ConnectionError::TransportError(e)
+                    if e.code == quinn::TransportErrorCode::crypto(51)
+            ) =>
+        {
+            tracing::warn!(
+                %error,
+                "quem atendeu mostrou um certificado que o verificador aceitou, e não provou \
+                 ter a chave dele: o TLS recusou a assinatura (`decrypt_error`)"
+            );
+            ConnectError::ChaveNaoProvada
+        }
+        // `None` fica aqui mesmo com o alerta 51: sem decisão do verificador,
+        // ninguém conferiu certificado nenhum, e não há chave que quem atendeu
+        // tenha deixado de provar (`decisao_do_aperto`).
         Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. }) | None => {
             match error {
                 // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`:
@@ -1790,6 +1843,65 @@ mod a_recusa_do_tls_chega_com_nome {
             ),
             ConnectError::SemResposta,
             "um primeiro contato aceito deu nome a uma falha que veio depois dele"
+        );
+    }
+
+    /// O TLS desta ponta que caiu com o alerta `alerta`, como o `quinn` o
+    /// devolve: um `TransportError` local, e não um `ConnectionClosed` vindo
+    /// do outro lado.
+    fn tls_local_com_o_alerta(alerta: u8) -> quinn::ConnectionError {
+        quinn::ConnectionError::TransportError(quinn::TransportErrorCode::crypto(alerta).into())
+    }
+
+    #[test]
+    fn o_tls_que_cai_na_assinatura_depois_de_o_verificador_aceitar_e_chave_nao_provada() {
+        // O impostor que repete o certificado do servidor: o verificador o
+        // aceita (o pin confere, ou é o primeiro contato), e o TLS cai na
+        // assinatura de quem atende com `decrypt_error` (51). Como
+        // `TlsRefused`, a FFI o traduzia por versão incompatível.
+        for decisao in [
+            PinDecision::Matches {
+                fingerprint: "aaaa1111".into(),
+            },
+            PinDecision::FirstContact {
+                fingerprint: "aaaa1111".into(),
+            },
+        ] {
+            assert_eq!(
+                classify_connection_error(&tls_local_com_o_alerta(51), Some(decisao.clone())),
+                ConnectError::ChaveNaoProvada,
+                "com {decisao:?}, quem não provou a chave saiu com outro nome, e a tela o \
+                 chamaria de versão incompatível"
+            );
+        }
+    }
+
+    #[test]
+    fn outro_alerta_do_tls_continua_tls_refused() {
+        // Só o 51 diz que a assinatura não conferiu. `no_application_protocol`
+        // (120) é outra coisa, e não acusa ninguém de impostor.
+        assert_eq!(
+            classify_connection_error(
+                &tls_local_com_o_alerta(120),
+                Some(PinDecision::Matches {
+                    fingerprint: "aaaa1111".into()
+                })
+            ),
+            ConnectError::TlsRefused,
+            "um alerta do TLS que não é o da assinatura virou `ChaveNaoProvada`, e a tela \
+             acusaria de impostor um servidor que só recusou o aperto de mão"
+        );
+    }
+
+    #[test]
+    fn sem_decisao_do_verificador_o_alerta_da_assinatura_continua_tls_refused() {
+        // Sem decisão, ninguém conferiu certificado nenhum, e não há chave que
+        // quem atendeu deixou de provar: é o caso de `decisao_do_aperto`.
+        assert_eq!(
+            classify_connection_error(&tls_local_com_o_alerta(51), None),
+            ConnectError::TlsRefused,
+            "o TLS sem decisão do verificador virou `ChaveNaoProvada`, e a tela acusaria \
+             de impostor um certificado que ninguém conferiu"
         );
     }
 }
