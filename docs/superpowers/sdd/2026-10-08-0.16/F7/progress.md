@@ -43,8 +43,8 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | plano | escrito, mandado à orquestradora | `906e326b` |
 | 1 | 4e, a janela do Comandante | **feita** | `29d66937` |
 | 2 | 4a, o certificado Ed25519 | **feita** | `43d81c31` |
-| 3 | 4c, a campainha | a fazer | — |
-| 4 | 7g-núcleo, a agenda | a fazer | — |
+| 3 | 4c, a campainha | **feita** | `77207424` |
+| 4 | 7g-núcleo, a agenda | **feita** | `6f28dd41` |
 | 5 | 7c-áudio, o toque só de saída | a fazer | — |
 | 6 | os ADRs 0059, 0060 e 0061 | a fazer | — |
 
@@ -100,3 +100,29 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
   - `seele-server --lib tls` (5);
   - o clippy de `seele-server`, `seele-conformance` e `seele-app`, porque o
     `ServerConfig` mudou.
+
+## Tarefa 3 — a campainha (08/10)
+
+- `crates/seele-server/src/campainha.rs`, pura, com o tempo injetado. Tem 14
+  testes, e 13 deles começaram vermelhos (`not yet implemented`). O das razões
+  passa desde o esqueleto, porque o mapeamento para o fio nasce com os tipos.
+- **Sete reversões medidas**, cada uma reprovando só o teste dela:
+  - a deduplicação;
+  - o `>=` dos pendentes;
+  - o `1 +` do teto;
+  - os bloqueados;
+  - o desligar que não apaga;
+  - a espera que recusar não anota;
+  - a tolerância que saiu não abre.
+- **A leitura de «a sala esvazia»:** é quem recebe sair, que é o desligar. Vai
+  para o ADR 0059.
+
+## Tarefa 4 — a agenda (08/10)
+
+- `crates/seele-core/src/agenda.rs`. Tem 6 testes, e todos começaram vermelhos.
+- O `escrever_privado` de `conhecidos.rs` passou a `pub(crate)`, e os 16 testes
+  de `conhecidos` continuam verdes.
+- **Três reversões medidas:**
+  - limpar o apelido;
+  - o nome que não se troca;
+  - o modo 0600.
