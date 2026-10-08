@@ -2307,7 +2307,13 @@ function anotando(...anotadas) {
       // lote K2). A imagem decodificou e virou o avatar; se o redesenho lança
       // depois, o `catch` da recusa a dizia «recusada», zerava os bytes e
       // deixava o `uri` posto — o avatar visível, recusado e fora da conta. O
-      // tropeço é dito no `console`, e o estado fica o que a tela mostra.
+      // estado fica o que a tela mostra, e o tropeço é dito no `console` e no
+      // `seele.log` de quem opera.
+      //
+      // **O `anotarRecusa` aqui é o de verdade**, o de `base.js`, até um
+      // `invoke` de mentira, num contexto só dele (como «o elo», acima): é ele
+      // quem põe o `onde` das linhas de mídia e o id do MOD em campo próprio, e
+      // um anotador de mentira não mediria nenhum dos dois.
       {
         const uri = "data:image/png;base64,AB";
         const contribuicao = {
@@ -2319,10 +2325,30 @@ function anotando(...anotadas) {
         const avisarDeAntes = contexto.avisarQueAMidiaMudou;
         const consoleDeAntes = contexto.console;
         const faladas = [];
-        const ditas = [];
+        const linhas = [];
         const avisos = [];
         const soltas = [];
         const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+        const doRegistro = vm.createContext({
+          console,
+          geracaoDaSessao: 7,
+          modsCarregados: new Map(),
+          invoke: (cmd, args) => {
+            if (cmd === "registrar_da_janela") linhas.push(args);
+            return Promise.resolve();
+          },
+          avisarQueAMidiaMudou: () => {},
+        });
+        for (const de of ["function registrarNoAnfitriao(", "function donoDaRegiao("]) {
+          const inicio = base.indexOf(de);
+          const fim = base.indexOf("\n}\n", inicio);
+          confere("R4e · o recorte do registro", inicio >= 0 && fim > inicio,
+            `«${de}» mudou de forma, e o recorte até o primeiro «\\n}\\n» não a achou`);
+          if (inicio >= 0 && fim > inicio) vm.runInContext(base.slice(inicio, fim + 3), doRegistro);
+        }
+        const instanciaDoRegistro = { geracao: 7, admite: () => true };
+        doRegistro.modsCarregados.set("seele/perfis", instanciaDoRegistro);
+        const anotarRecusa = doRegistro.donoDaRegiao({ id: "seele/perfis", hash: "h" }, instanciaDoRegistro).anotarRecusa;
         contexto.contribuicoesDosMods = {
           escolherSubstituicao: () => ({ escolhida: contribuicao }),
           porHandle: new Map(),
@@ -2330,7 +2356,7 @@ function anotando(...anotadas) {
         contexto.donoDaRegiao = () => ({
           podeFalar: () => true,
           falar: (dados) => faladas.push(dados),
-          anotarRecusa: (texto) => ditas.push(String(texto)),
+          anotarRecusa,
           carregarMidiaDoServidor: () => Promise.resolve({ uri, papel: "imagem", bytes: 2 }),
         });
         contexto.avisarQueAMidiaMudou = () => {};
@@ -2352,13 +2378,24 @@ function anotando(...anotadas) {
           );
           confere(
             "R4e · o redesenho que lança",
-            faladas.length === 0 && ditas.length === 0,
-            `o tropeço do redesenho foi dito como recusa ao MOD ou ao registro: ${JSON.stringify(faladas)} ${JSON.stringify(ditas)}`,
+            faladas.length === 0,
+            `o tropeço do redesenho foi dito ao MOD como recusa: ${JSON.stringify(faladas)}`,
+          );
+          const linha = linhas[0];
+          confere(
+            "R4e · o redesenho que lança",
+            linhas.length === 1
+              && linha.nivel === "aviso" && linha.onde === "recusa-de-mod" && linha.modId === "seele/perfis"
+              && String(linha.oQue).startsWith("seele/perfis: avatar da pessoa 17")
+              && String(linha.oQue).includes("tropeçou") && String(linha.oQue).includes("o redesenho caiu")
+              && !String(linha.oQue).includes("não montou"),
+            "o tropeço do redesenho não chegou ao seele.log como uma linha só, no `onde` das linhas de mídia e com o id "
+              + `do MOD em campo próprio — ou chegou dito como recusa: ${JSON.stringify(linhas)}`,
           );
           confere(
             "R4e · o redesenho que lança",
             avisos.some((aviso) => aviso.includes("o redesenho caiu")) && soltas.length === 0,
-            `o tropeço do redesenho foi engolido calado, ou terminou numa promessa que ninguém pegou: ${JSON.stringify(avisos)} `
+            `o tropeço do redesenho não foi dito no console, ou terminou numa promessa que ninguém pegou: ${JSON.stringify(avisos)} `
               + `${soltas.join(" | ")}`,
           );
         } finally {

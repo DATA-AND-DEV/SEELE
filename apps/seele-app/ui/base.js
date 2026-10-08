@@ -1252,6 +1252,16 @@ function avatarContribuido(pessoaId) {
         `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
         falha,
       );
+      // **E ao `seele.log`**, pela porta das outras linhas do avatar
+      // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
+      // dono que lança aqui terminaria numa promessa que ninguém pega.
+      try {
+        dono.anotarRecusa(
+          `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+        );
+      } catch (tropeco) {
+        console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
+      }
     });
   return null;
 }

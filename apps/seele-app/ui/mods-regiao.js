@@ -1498,8 +1498,16 @@ class RegiaoDeMod {
    * `.then(aplicar, recusar)`, e é por isso que o tropeço de `aplicar` não cai
    * em `recusar`: lá ele diria «recusada» de uma imagem que está na tela,
    * devolveria os bytes dela e mandaria `falhou` ao MOD — a tela, a conta, a
-   * aba e o MOD em desacordo. O estado fica o que o passo deixou, e o tropeço
-   * vai para quem depura a janela, sem virar uma promessa que ninguém pega.
+   * aba e o MOD em desacordo. O estado fica o que o passo deixou, e nenhuma
+   * promessa fica sem quem a pegue.
+   *
+   * **Dito ao `seele.log`, e não só ao `console`.** O `console` da janela
+   * ninguém lê; quem opera lê o registro. A linha vai pela mesma porta das
+   * outras linhas de mídia (`dizerRecusaDeMidia`, que leva ao
+   * `dono.anotarRecusa`): o mesmo `onde`, o id do MOD em campo próprio e a
+   * chave cortada do mesmo jeito — e com a palavra «tropeçou», para não ser
+   * lida como a recusa que não é. O `console` fica com a pilha, para quem
+   * depura a janela.
    *
    * @param {string} onde Qual caminho: «o retrato», «o fundo», «o fundo da tela».
    * @param {string} chave A chave do nó, cortada como em `dizerRecusaDeMidia`.
@@ -1508,6 +1516,10 @@ class RegiaoDeMod {
   dizerTropecoDaMidia(onde, chave, falha) {
     const nome = [...String(chave ?? "")].slice(0, 120).join("");
     console.warn(`MOD ${this.id}: ${onde} «${nome}» tropeçou depois da busca, e o tropeço não foi dito como recusa`, falha);
+    this.dizerRecusaDeMidia(
+      chave ?? "",
+      `— ${onde} tropeçou depois da busca, e não foi uma recusa: ${motivoDaFalha(falha)}`,
+    );
   }
 
   /**

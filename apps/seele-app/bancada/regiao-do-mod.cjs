@@ -2614,6 +2614,47 @@ async function oFundoDeTelaDizOEstado() {
 }
 
 /**
+ * O `anotarRecusa` de verdade, o de `base.js`, até um `invoke` de mentira.
+ *
+ * O dono de mentira desta bancada anota a frase que a região manda, e só. Quem
+ * põe o `onde` (`recusa-de-mod`), o id do MOD na frente da frase e o id em
+ * campo próprio é o dono de `base.js` (`donoDaRegiao`), e quem leva a linha ao
+ * comando `registrar_da_janela` é `registrarNoAnfitriao`. As duas declarações
+ * de verdade rodam aqui num contexto próprio, como no bloco «o elo» de
+ * `contribuicoes-e-camadas.cjs`, com o que elas leem ao montar o dono.
+ */
+function registroDeVerdade() {
+  const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+  const invocados = [];
+  const ctx = vm.createContext({
+    console,
+    geracaoDaSessao: 7,
+    modsCarregados: new Map(),
+    invoke: (cmd, args) => {
+      invocados.push({ cmd, args });
+      return Promise.resolve();
+    },
+    avisarQueAMidiaMudou: () => {},
+  });
+  for (const de of ["function registrarNoAnfitriao(", "function donoDaRegiao("]) {
+    const inicio = base.indexOf(de);
+    const fim = base.indexOf("\n}\n", inicio);
+    if (inicio < 0 || fim < inicio) throw new Error(`«${de}» mudou de forma, e o recorte de base.js não a achou`);
+    vm.runInContext(base.slice(inicio, fim + 3), ctx);
+  }
+  return {
+    /** Os argumentos de cada `registrar_da_janela` que saiu. */
+    linhas: () => invocados.filter((i) => i.cmd === "registrar_da_janela").map((i) => i.args),
+    /** O `anotarRecusa` do dono de verdade de um MOD carregado, numa sessão de pé. */
+    anotarRecusaDe: (id) => {
+      const instancia = { geracao: 7, admite: () => true };
+      ctx.modsCarregados.set(id, instancia);
+      return ctx.donoDaRegiao({ id, hash: "h" }, instancia).anotarRecusa;
+    },
+  };
+}
+
+/**
  * **Um passo de aplicar que lança não é uma recusa** (rodada 1 de conserto do
  * lote K2). Com o `decode()` encadeado dentro do `then`, o `catch` da recusa
  * passou a pegar também o que lança **depois** de a imagem ter decodificado —
@@ -2621,9 +2662,12 @@ async function oFundoDeTelaDizOEstado() {
  * estava na tela, e o `catch` a dizia «recusada», devolvia os bytes dela e
  * mandava `falhou` ao MOD: a aba, a conta e o MOD diziam o contrário da tela.
  *
- * Só a busca e o `decode()` caem na recusa. O tropeço de aplicar é dito no
- * `console` da janela, e o estado fica o que a tela mostra: montado, contado e
- * «pronta». E nenhuma promessa fica sem quem a pegue.
+ * Só a busca e o `decode()` caem na recusa. O estado fica o que a tela mostra:
+ * montado, contado e «pronta». O tropeço é dito no `console` da janela e **no
+ * `seele.log` de quem opera**, pelo `anotarRecusa` de verdade
+ * (`registroDeVerdade`): uma linha só, no `onde` das outras linhas de mídia
+ * (`recusa-de-mod`), com o id do MOD na frente e em campo próprio — e não como
+ * a recusa que ela não é. E nenhuma promessa fica sem quem a pegue.
  */
 async function aplicarQueLancaNaoViraRecusa() {
   const soltas = [];
@@ -2633,6 +2677,21 @@ async function aplicarQueLancaNaoViraRecusa() {
     const avisos = [];
     const janela = { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) };
     return { avisos, b: bancada({ console: janela }) };
+  };
+  /** O tropeço chegou ao `seele.log` como uma linha só, do MOD «a/b», e não como recusa. */
+  const conferirORegistro = (nome, registro, chave, pedaco) => {
+    const linhas = registro.linhas();
+    const linha = linhas[0];
+    confere(
+      nome,
+      linhas.length === 1
+        && linha.nivel === "aviso" && linha.onde === "recusa-de-mod" && linha.modId === "a/b"
+        && String(linha.oQue).startsWith(`a/b: mídia «${chave}»`)
+        && String(linha.oQue).includes("tropeçou") && String(linha.oQue).includes(pedaco)
+        && !String(linha.oQue).includes("falhou no"),
+      "o tropeço de aplicar não chegou ao seele.log como uma linha só, no `onde` das linhas de mídia e com o id "
+        + `do MOD em campo próprio — ou chegou dito como recusa: ${JSON.stringify(linhas)}`,
+    );
   };
   try {
     // O retrato e o fundo de mídia: o `midiaMudou` do dono passa a lançar
@@ -2653,6 +2712,8 @@ async function aplicarQueLancaNaoViraRecusa() {
       const nome = `aplicar que lança · ${qual}`;
       const { avisos, b } = comAvisos();
       const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 40 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
       const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
       regiao.aplicar([no]);
       await assentar();
@@ -2671,13 +2732,14 @@ async function aplicarQueLancaNaoViraRecusa() {
       );
       confere(
         nome,
-        !d.ditos.some((dito) => dito.nome === "midia") && d.anotadas.length === 0,
-        `o tropeço de aplicar foi dito como recusa ao MOD ou ao registro: ${JSON.stringify(d.ditos)} ${JSON.stringify(d.anotadas)}`,
+        !d.ditos.some((dito) => dito.nome === "midia"),
+        `o tropeço de aplicar foi dito ao MOD como recusa: ${JSON.stringify(d.ditos)}`,
       );
+      conferirORegistro(nome, registro, no.chave, "o aviso da gestão caiu");
       confere(
         nome,
         avisos.some((aviso) => aviso.includes("o aviso da gestão caiu")),
-        `o tropeço de aplicar foi engolido calado: ${JSON.stringify(avisos)}`,
+        `o tropeço de aplicar não foi dito no console da janela: ${JSON.stringify(avisos)}`,
       );
       d.api.midiaMudou = () => {};
       regiao.soltar();
@@ -2688,6 +2750,8 @@ async function aplicarQueLancaNaoViraRecusa() {
       const nome = "aplicar que lança · o fundo de tela";
       const { avisos, b } = comAvisos();
       const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 8 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
       const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
       const tela = { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } };
       regiao.aplicar([tela]);
@@ -2709,13 +2773,14 @@ async function aplicarQueLancaNaoViraRecusa() {
       );
       confere(
         nome,
-        !d.ditos.some((dito) => dito.nome === "tela") && d.anotadas.length === 0,
-        `o tropeço da repintura saiu como «fundo-falhou» ao MOD ou ao registro: ${JSON.stringify(d.ditos)} ${JSON.stringify(d.anotadas)}`,
+        !d.ditos.some((dito) => dito.nome === "tela"),
+        `o tropeço da repintura saiu como «fundo-falhou» ao MOD: ${JSON.stringify(d.ditos)}`,
       );
+      conferirORegistro(nome, registro, "mapa", "o pincel caiu");
       confere(
         nome,
         avisos.some((aviso) => aviso.includes("o pincel caiu")),
-        `o tropeço da repintura foi engolido calado: ${JSON.stringify(avisos)}`,
+        `o tropeço da repintura não foi dito no console da janela: ${JSON.stringify(avisos)}`,
       );
       regiao.soltar();
     }
