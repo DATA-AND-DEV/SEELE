@@ -6,11 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-# Uma dependência, e ela é o formato do que passa pelo fio — o mesmo motivo pelo
-# qual `seele-proto` existe. Nada de tokio, nada de rede assíncrona: este
-# processo trata um datagrama de 96 bytes por vez, sem estado nenhum entre um e
-# outro, e um laço bloqueante por família de endereço faz isso em duas linhas.
-# `cargo xtask check-deps` guarda a aresta (ADR 0002).
+# O formato do que passa pelo fio é `seele-proto` — o mesmo motivo pelo qual
+# ele existe. Nada de tokio, nada de rede assíncrona: este processo trata um
+# datagrama por vez (96 bytes no ENC/1, 384 no ENC/2), e o que ele guarda entre
+# um e outro são os dois quartos e o limite por prefixo, em memória. Um laço
+# bloqueante por família de endereço faz isso em duas linhas. `cargo xtask
+# check-deps` guarda a aresta (ADR 0002).
 #
 # O objetivo é que subir o seu seja uma linha. Uma árvore de dependências grande
 # aqui tornaria «o ponto de encontro é trocável» uma ficção educada.
@@ -23,6 +24,11 @@ seele-proto = { path = "../seele-proto" }
 # Não cresce a árvore: `seele-server` já usa `socket2` pelo mesmo motivo, e pelo
 # mesmo defeito, um degrau abaixo.
 socket2 = { workspace = true }
+# A assinatura do `MORO2` (ENC/2, ADR 0062). O ponto é quem **confere** o
+# registro da sala: sem isto, quem quisesse tomar a marca de uma pessoa bastava
+# mandar o pedido antes dela. Já está na árvore pelo `seele-server`, pelo
+# `seele-core` e pelo `seele-conformance`, na mesma versão.
+ed25519-dalek = "3.0.0"
 
 [lints]
 workspace = true

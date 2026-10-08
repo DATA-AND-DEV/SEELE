@@ -44,6 +44,8 @@
 //! IPv4 e um IPv6, cada um numa linha de execução, é a versão que funciona
 //! igual no Linux, no BSD e no Windows sem dependência nenhuma.
 
+pub mod assinado;
+
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};

@@ -5073,6 +5073,7 @@ dependencies = [
 name = "seele-encontro"
 version = "0.0.0"
 dependencies = [
+ "ed25519-dalek",
  "seele-proto",
  "socket2",
 ]
