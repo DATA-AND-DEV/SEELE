@@ -124,3 +124,15 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
 - **A integração da onda 1.** A orquestradora juntou `0.16/lotes`, `0.16/protocolo`, `0.16/launcher` e `0.16/web` em `versao/0.16` (`2a37ffc5`). A bateria inteira passou com 2912 testes. O único conflito foi o `EndReason` (H contra F1), e as duas listas ficaram.
 - **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `0f94be6`, sem conflito.
 - **Onda 2 despachada:** D · K5 · M2 (com a montagem de certificado do 1B) · P53, em paralelo e sem dividir arquivo.
+- **P53 → integrado** (`0f94be6..2d2a914`, merge `8476815`), em 2 rodadas. A pendência 53 fecha em `c6ca70e` e `6038abb`.
+  - **O Importante da revisão:** a linha WARN nova registrava a pasta em `%` cru, e uma quebra de linha no nome forjava uma linha no `seele.log`, como o revisor mediu. A pasta passou a sair por `caminho_no_registro`, com um teste. O teste do Windows compara a forma escapada.
+  - **O guarda `variants_of`:**
+    - passou a ler `Nome(…),` e `Nome { … },`;
+    - prende a profundidade;
+    - enxerga as variantes com campo de `FalhaAoHospedar` (as da F6 inclusive) e de `FalhaAoInstalarMod`.
+  - **A frase do atalho** diz o remédio para todo atalho, e não só para o `node_modules`.
+  - **Ficam para o Z:**
+    - a frase de `ManifestoRecusado` mostra o código cru;
+    - `FalhaAoApagarPacote` não tem frase;
+    - duas recusas vizinhas não deixam linha no registro;
+    - nenhum guarda mede o tamanho da frase do atalho.
