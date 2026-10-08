@@ -1235,6 +1235,15 @@ Cada um fica vermelho quando se reverte a sua parte. `a_ajuda_so_promete_teclas_
 - a reversão é tirar o ambiente de um dos testes de `hospedagem.rs` e do `ejetar.rs`, e ver o vermelho;
 - todos os testes que sobem hospedagem passam sem rede para a VPS. Se der, meça com o DNS do ponto padrão inalcançável, sem mudar ajuste do sistema.
 
+**A decisão da orquestradora sobre o alcance do guarda (08/10, depois da revisão).**
+- **O problema.** O guarda, ligado por `cfg(test)` e por uma feature de teste, não alcança os testes de integração do próprio `seele-server` rodados sozinhos.
+- **A decisão é a forma estrutural**, e não remendar o `check_deps`:
+  - `Convocacao::do_ambiente` deixa de recuar para o `PONTO_PADRAO`: sem `$SEELE_ENCONTRO`, não há ponto;
+  - os pontos de entrada de produção, o `hospedar` do app e o `seeled`, passam o ponto padrão de forma explícita;
+  - os guardas provam por reversão as duas coisas, que `do_ambiente` sem a variável não dá ponto e que os pontos de entrada passam o padrão;
+  - o `recusar_a_producao` fica como segunda parede.
+- **A F2 (o ENC/2) vai construir em cima.** Ela move o `PONTO_PADRAO` para o `seele-proto` e dá um assinante à `Convocacao`.
+
 ### 1. Servidor
 - **O evento.** Uma variante interna de difusão em `pub enum Event` (`server.rs`), fora do fio, **com a razão**: `Event::ServidorEncerrando { reason: DisconnectReason }`. A razão é para que o Plano 2 mande `ChamadaEncerrada` pela mesma via (recomendação do levantamento F1).
   - Toda sessão a trata como o braço da expulsão: `Event::SessionEnded { person, reason } if *person == session.person =>` (`session.rs`). Esse braço escreve `ServerMessage::Disconnecting { reason }`, faz `send.finish()` e passa por `despedir(&connection, &mut send, …)`.
