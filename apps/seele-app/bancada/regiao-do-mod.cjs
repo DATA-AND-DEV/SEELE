@@ -2983,7 +2983,7 @@ async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
   confere(caso, figura.dataset.estado === "pronta", `o som decodificado não ficou pronto: ${figura.dataset.estado}`);
   // **De pé e sem ter tocado, ele está pronto.** É o caso comum — um botão à
   // espera, um som que o MOD dispara depois —, e quem diz «pronta» aqui é a
-  // anotação do fim de `montarSom`: os avisos do tocador só chegam quando ele
+  // anotação do fim de `carregarSom`: os avisos do tocador só chegam quando ele
   // toca. Sem ela, a aba DIAGNÓSTICO diria «carregando» até alguém apertar.
   const anotada = regiao.midiasAnotadas()[0]?.situacao;
   confere(caso, anotada === "pronta", `o som de pé que ainda não tocou ficou anotado como «${anotada}», e não «pronta»`);
@@ -3098,7 +3098,8 @@ async function oSomNumCartaoNaoTemBotao() {
   // o perfil do cartão — um `canal.item` sem alvo, dois canais, dois renderers
   // —, e dá a todos o mesmo `sonsDaContribuicao`. O primeiro destino que chega
   // a um som é o que pede os bytes, decodifica e toca **todos** os sons da
-  // contribuição; os outros mostram a figura, sem tocador (ver `montarSom`).
+  // contribuição, quando o MOD os manda tocar; os outros mostram a figura, sem
+  // tocador (ver `montarSom`).
   //
   // As duas metades já falharam:
   // - **um som por destino**: cada destino pedia os bytes e decodificava a
@@ -3184,8 +3185,9 @@ async function oSomNumCartaoNaoTemBotao() {
 
   // **E o som parado de uma contribuição está pronto**, no destino que o
   // tomou, uma vez. Um som de cartão não tem botão: ele só toca quando o MOD
-  // declara `tocando`, e até lá quem o diz «pronta» é a anotação do fim de
-  // `montarSom` — a aba diria «carregando» para um som que só espera a vez.
+  // declara `tocando`, e até lá quem o diz «pronta» é `esperarOPedidoDeTocar`,
+  // sem decodificar (P49-7c) — a aba diria «carregando» para um som que só
+  // espera a vez.
   {
     const parado = `${caso} · numa contribuição, um som parado`;
     const AudioP = audioDeMentira();

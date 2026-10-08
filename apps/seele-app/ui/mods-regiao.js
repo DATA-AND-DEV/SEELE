@@ -158,7 +158,9 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * por que segurar o som inteiro decodificado: até o pedido de tocar, a
    * figura assenta com o arquivo contado e nada neste bolso (ver `montarSom`).
    * O teto vale no pedido, com a mesma recusa da montagem. As 128 vezes de
-   * cima são de 128 contribuições tocando, e não de 128 montadas.
+   * cima são de 128 contribuições que já foram mandadas tocar — o som
+   * decodificado fica de pé depois de terminar ou de parar —, e não de 128
+   * montadas.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
