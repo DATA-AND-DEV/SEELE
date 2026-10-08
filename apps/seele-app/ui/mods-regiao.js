@@ -2611,14 +2611,19 @@ class RegiaoDeMod {
     // uma, ela morre com a carga. Do pacote, o caminho: os bytes vêm de
     // `som_do_mod` no pedido de tocar. Do servidor do MOD, o `data:` que
     // `midia_em_bytes` devolveu (`origem.uri`) fica **só no destino que tomou
-    // o som, e só enquanto o som espera o pedido de tocar**: ele sai quando a
-    // carga tem os bytes (`carregarSom`), quando a janela não tem WebAudio
-    // para carregá-lo (`esperarOPedidoDeTocar`) e quando o destino devolve a
-    // marca (`devolverOsSons`). Sobra um caminho, que o produto não percorre:
-    // a carga que volta antes de ler os bytes — a janela que perde o WebAudio
-    // entre a montagem e o pedido, ou um `data:` sem vírgula, que o Rust não
-    // devolve —, e aí o texto fica até o nó sair. Fora de uma contribuição, a
-    // montagem não é guardada, e nenhum caminho o segura. Antes, guardado em
+    // o som, e só enquanto o som espera o pedido de tocar**. Ele sai:
+    // - quando a carga tem os bytes (`carregarSom`);
+    // - quando a janela não tem WebAudio para carregá-lo
+    //   (`esperarOPedidoDeTocar`);
+    // - quando o destino devolve a marca (`devolverOsSons`), também de um som
+    //   recusado;
+    // - quando o som chega a um destino com a marca e herda uma recusa
+    //   (`herdarOSom`).
+    // Sobra um caminho, que o produto não percorre: a carga que volta antes de
+    // ler os bytes — a janela que perde o WebAudio entre a montagem e o pedido,
+    // ou um `data:` sem vírgula, que o Rust não devolve —, e aí o texto fica
+    // até o destino devolver a marca, ou o nó sair. Fora de uma contribuição,
+    // a montagem não é guardada, e nenhum caminho o segura. Antes, guardado em
     // cada destino e pela vida do nó, ele era 1,33 vez o arquivo vezes os
     // destinos — um som de 10 MiB num `pessoa.cartao` de 64 pessoas segurava
     // uns 850 MB de texto. Os outros destinos guardam o plano, que traz o
@@ -2636,7 +2641,10 @@ class RegiaoDeMod {
         // deste destino e só com o nó dele no documento
         // (`tomarOsSonsDevolvidos`). Tomada aqui, fora da tela, o som herdado
         // que tocava decodificava para ser recusado como fora da tela, e os
-        // outros sons da herança ficavam presos nela.
+        // outros sons da herança ficavam presos nela. Daqui não se pergunta
+        // `aContribuicaoPinta`, que é de `base.js`: a segurança depende de o
+        // destino que não desenha a contribuição sair do documento, como sai
+        // no desenho de hoje.
         if (!sons.tomados) this.tomarOsSonsDevolvidos();
         return;
       }
@@ -3112,6 +3120,10 @@ class RegiaoDeMod {
       // tocador nem carga, não há o que soltar.
       if (som.recusa) {
         herdados.recusados.set(lugares.get(elem), som.recusa);
+        // O recusado não carrega mais, aqui nem em quem herdar: o `data:` que
+        // ainda estivesse aqui — de uma carga que falhou antes de ler os
+        // bytes — não tem quem o leia.
+        delete montagem.origem.uri;
         this.esquecerMidia(elem);
         continue;
       }
@@ -3146,15 +3158,22 @@ class RegiaoDeMod {
 
   /**
    * Toma os sons de uma contribuição que o destino que os segurava devolveu
-   * (`devolverOsSons`) — **na mesma varredura**.
+   * (`devolverOsSons`) — **na mesma varredura**, ou quando uma mídia chega.
    *
    * Redesenhar não basta: a montagem de cada destino é guardada e
    * reaproveitada (`montarContribuicao`, em `base.js`), e a figura que assentou
-   * sem tocador volta como estava. Quem chama é a segunda volta de
-   * `calarOsSonsQueSairamDaTela`, em `base.js`, só nos destinos em que a
-   * contribuição desenha; este confere que o nó dele está no documento e que
-   * tem um som que chegou a ele — esperando a marca, ou recusado, que a toma
-   * para dizer a recusa onde ela está na tela.
+   * sem tocador volta como estava. **Quem chama são dois:**
+   * - a segunda volta de `calarOsSonsQueSairamDaTela`, em `base.js`, só nos
+   *   destinos em que a contribuição desenha (`aContribuicaoPinta`);
+   * - `montarSom`, quando a mídia de um som chega a este destino com a marca
+   *   devolvida — sem perguntar `aContribuicaoPinta`, que é de `base.js`.
+   *
+   * Este confere que o nó dele está no documento e que tem um som que chegou a
+   * ele — esperando a marca, ou recusado, que a toma para dizer a recusa onde
+   * ela está na tela. A chamada de `montarSom` é segura porque, no desenho de
+   * hoje, o destino que não desenha a contribuição — a substituição que perde a
+   * disputa, a pessoa que saiu — sai do documento; um destino que ficasse no
+   * documento sem desenhar tomaria a marca por ali.
    *
    * **O som que tocava recomeça aqui, e os outros não.** Quem decide, por som,
    * é `herdarOSom`: o que tocava quando o lugar dele saiu da tela recomeça, do
@@ -3231,9 +3250,11 @@ class RegiaoDeMod {
       if (herdados.lugares.size === 0) this.herdados = null;
       if (recusa) {
         // A recusa já foi dita ao MOD e ao registro por quem a viu: aqui ela
-        // só volta à figura e à anotação, e o som não carrega.
+        // só volta à figura e à anotação, e o som não carrega — nem o `data:`
+        // que a mídia dele trouxe ao chegar a um destino com a marca fica.
         som.adiado = null;
         som.recusa = recusa;
+        if (som.montagem) delete som.montagem.origem.uri;
         elem.dataset.estado = recusa.figura;
         this.anotarMidia(elem, "recusada", recusa.motivo, Boolean(som.montagem?.plano.cartao));
         return;

@@ -4656,6 +4656,57 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // **A mídia que chega a um destino na tela com a marca devolvida o faz
+  // tomá-la na hora** (fecho, M1). O segundo destino ainda esperava a mídia
+  // quando o primeiro saiu, e a varredura não achou nele som que tomasse a
+  // marca; quando a mídia chega, sem outra varredura, ele a toma pelo caminho
+  // de toda devolução, e a vinheta que tocava recomeça ali.
+  {
+    const naHora = `${caso} · a mídia que chega com a marca devolvida`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarAMidia = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      // A segunda é a vinheta do segundo destino: a mídia dela fica a caminho.
+      if (chamadas === 2) return new Promise((pronto) => { soltarAMidia = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    const antes = { tomou: segundo.tomouOsSons, devolvidos: sons.devolvidos };
+    soltarAMidia?.();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      naHora,
+      antes.tomou === false && antes.devolvidos === true && segundo.tomouOsSons === true && tocandoAgora === 1
+        && b.tocadoresDePe() === 1 && tocadores([segundo]) === 1 && ditos(d, "tocando").length === 2,
+      "a mídia chegou ao destino na tela com a marca devolvida, e ele não a tomou na hora — o som que tocava "
+        + `espera um desenho que talvez não venha: ${JSON.stringify(antes)} antes, tomou ${segundo.tomouOsSons}, `
+        + `${tocandoAgora} fonte(s), ${b.tocadoresDePe()} tocador(es), «tocando» dito ${ditos(d, "tocando").length} vez(es)`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   // **O mesmo destino que volta à tela** (rodada 2, decisão do controlador):
   // sem ninguém que tenha tomado a marca, ele a retoma, e o som que tocava
   // quando ele saiu recomeça, do começo — com o conteúdo de uma contribuição
@@ -5169,6 +5220,158 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
       "o destino que tomou a marca pediu o som de novo ao servidor e não contou o tamanho da resposta nova no teto "
         + `de bytes: ${pedidos} pedido(s), figura «${figura}», ${outro?.bytesDeCartao} bytes contados, recusas `
         + `${JSON.stringify(recusas)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **A resposta que chega depois de o destino devolver a marca não é dele**
+  // (fecho, M1b). O destino que tomou a marca pediu o som de novo ao
+  // servidor, e saiu da tela com o pedido em voo: o pedido é dito recusado por
+  // sair da tela, uma vez. A resposta que chega depois — e não cabe no teto —
+  // não marca o destino «cheia», não diz outra recusa ao MOD, nem deixa uma
+  // recusa para quem herdar a marca.
+  {
+    const depois = `${caso} · a resposta que chega depois da devolução`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    let soltarAResposta = null;
+    const d = dono(b, () => {
+      pedidos += 1;
+      const midia = { uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: pedidos > 2 ? 21 * 1024 * 1024 : 12 };
+      if (pedidos === 3) return new Promise((pronto) => { soltarAResposta = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    // O outro tomou a marca, e o pedido de novo ao servidor está em voo.
+    outro?.raiz.remove();
+    varrer();
+    soltarAResposta?.();
+    await assentar();
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    const figura = todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado;
+    confere(
+      depois,
+      pedidos === 3 && outro?.tomouOsSons === false && recusas.length === 1 && /tela/.test(recusas[0]?.porque ?? "")
+        && figura !== "cheia" && sons.herdados?.recusados.size === 0,
+      "a resposta do servidor chegou depois de o destino devolver a marca, e foi tratada como dele — a figura "
+        + `«${figura}», ${recusas.length} recusa(s) ao MOD (${JSON.stringify(recusas.map((e) => e.porque))}), `
+        + `${sons.herdados?.recusados.size} recusa(s) na herança`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O `data:` de um som recusado também sai** (fecho, M3). No primeiro
+  // destino, a vinheta cabe e o sino passa do teto do som decodificado
+  // («cheia»); no segundo, a mídia do sino ainda vinha quando a marca mudou, e
+  // chega a um destino que já a tomou: o sino herda a recusa, e não carrega —
+  // e o `data:` dele não tem mais quem o leia.
+  {
+    const recusadoTarde = `${caso} · o som recusado que chega depois da troca`;
+    const teto = bancada().CARTAO.bytesDeSomDecodificado;
+    const quadros = Math.floor((teto * 0.6) / 8);
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      pedidos += 1;
+      const midia = { uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: 12 };
+      // A quarta é o sino do segundo destino.
+      if (pedidos === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", doServidor, tocando: true },
+      { forma: "midia", chave: "sino", doServidor, tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const figuras = (r) => todasAsTags(r.raiz, "figure").map((f) => f.dataset.estado).join();
+    const noPrimeiro = figuras(primeiro);
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    soltarOSino?.();
+    await assentar();
+    const retido = dataRetido(destinos);
+    confere(
+      recusadoTarde,
+      noPrimeiro === "pronta,cheia" && segundo.tomouOsSons === true && figuras(segundo) === "pronta,cheia"
+        && retido.referencias === 0,
+      "o sino recusado chegou ao destino que tomou a marca, herdou a recusa, e o `data:` dele ficou retido: "
+        + `${JSON.stringify(retido)}, figuras ${noPrimeiro} no primeiro e ${figuras(segundo)} no segundo`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // E o som que falhou antes de ler os bytes — o caminho que o produto não
+  // percorre, um `data:` sem vírgula — deixa o texto no destino que o tomou
+  // até ele devolver a marca: aí ele sai (fecho, M3).
+  {
+    const semVirgula = `${caso} · o som que falhou, na devolução`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64", papel: "som", bytes: 12 }));
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    const antes = tomou ? dataRetido([tomou]).referencias : -1;
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    const retido = dataRetido(destinos);
+    confere(
+      semVirgula,
+      antes === 1 && todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "falhou"
+        && outro?.tomouOsSons === true && todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado === "falhou"
+        && retido.referencias === 0,
+      "o som que falhou antes de ler os bytes saiu com a devolução da marca segurando o `data:`: "
+        + `${antes} antes, ${JSON.stringify(retido)} depois`,
     );
     for (const r of destinos) r.soltar();
   }
