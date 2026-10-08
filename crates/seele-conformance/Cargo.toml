@@ -20,7 +20,10 @@ seele-proto = { path = "../seele-proto" }
 # The soak drives the real pipeline: codec, jitter buffer, network simulator.
 seele-audio = { path = "../seele-audio" }
 seele-core = { path = "../seele-core" }
-seele-server = { path = "../seele-server" }
+# Com o guarda que faz um teste reprovar quando ia falar com o ponto de
+# encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
+# dependência de teste: o binário do produto não a leva.
+seele-server = { path = "../seele-server", features = ["recusar-encontro-de-producao"] }
 seele-ffi = { path = "../seele-ffi" }
 # O ponto de encontro, para o teste do quarto: ele precisa das duas pontas — um
 # anfitrião registrando e um cliente perguntando — com o serviço de verdade no
