@@ -26,3 +26,7 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - **E / P51-11:** a F3 confirmou que a API 6 mantém a capacidade `volume` (ADR 0048). O P51-11 tem objeto, e a pergunta da onda 3 está respondida.
   - **`sementes_do_fuzz.rs`:** a F1 regenera as sementes quando o número do protocolo subir para 9. O M1 mexe só no trecho do `datagrama_do_encontro`, e a orquestradora resolve o encontro na integração.
 - **Passo 2, a onda 1:** C · H · K2 · M1 · ferramentas · P54, em paralelo, cada um num worktree isolado e num branch `0.16/lotes-<id>` a partir de `0.16/lotes`. O `target/` de cada worktree é semeado por clone APFS do `target/debug` do worktree `abertos-da-1.0`, que tem o mesmo `Cargo.lock` (cerca de 41 s por clone).
+- **P54 → integrado** (`fbeff8e..2598b06`, merge `90e1377`), em 1 rodada. A pendência 54 fecha em `0d68c95`.
+  - A bancada `qualidade-da-voz.cjs` ficou vermelha antes do conserto e verde depois.
+  - O revisor refez a reversão pelos dois lados, captura e saída, e aprovou sem crítico nem importante.
+  - Ficaram quatro menores: a linha do padrão repete o nome que a linha PADRÃO já diz, para o dono conferir em tela; duas cenas a mais; uma asserção redundante; dois comentários.
