@@ -3179,6 +3179,144 @@ fn alvos_do_fuzz() -> Vec<String> {
     alvos
 }
 
+/// Os passos de um job do `ci.yml`, cada um como as linhas dele — sem comentário
+/// e sem o recuo, com o `- ` do primeiro passo já tirado.
+///
+/// Existe ao lado de [`comandos_do_ci`] porque ela só lê o `run:` de uma linha, e
+/// um passo `uses:` com `if:` e `with:` — o do `upload-artifact` — não é um
+/// comando. O job vai da linha `  <job>:` até a próxima linha com o recuo de um
+/// job, e cada passo, da linha `      - ` que o abre até a próxima igual.
+fn passos_do_job_do_ci(job: &str) -> Vec<Vec<String>> {
+    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml"))
+        .expect("o ci.yml é legível");
+    let ci = sem_comentario(&ci);
+    let cabecalho = format!("  {job}:");
+    let mut passos: Vec<Vec<String>> = Vec::new();
+    let mut dentro = false;
+    for linha in ci.lines().map(str::trim_end) {
+        if linha.trim().is_empty() {
+            continue;
+        }
+        if linha == cabecalho {
+            dentro = true;
+            continue;
+        }
+        if !dentro {
+            continue;
+        }
+        // Dois espaços ou menos: o próximo job, ou outra seção de topo.
+        if !linha.starts_with("   ") {
+            break;
+        }
+        if let Some(abre) = linha.strip_prefix("      - ") {
+            passos.push(vec![abre.trim().to_owned()]);
+        } else if let Some(passo) = passos.last_mut() {
+            passo.push(linha.trim().to_owned());
+        }
+    }
+    passos
+}
+
+/// Os nomes que a seção `[dependencies]` de um `Cargo.toml` declara — não os de
+/// `[dev-dependencies]` nem os de `[build-dependencies]`, que o `Cargo.lock` de
+/// um pacote de fora do workspace não lista. Entende uma dependência por linha,
+/// como os manifestos deste repositório as escrevem: uma tabela de várias linhas
+/// faria `version` e `features` virarem nomes, e o guarda que usa isto diria
+/// que sobram no lock, o que denuncia o limite em vez de escondê-lo.
+fn dependencias_declaradas(manifesto: &str) -> std::collections::BTreeSet<String> {
+    let mut nomes = std::collections::BTreeSet::new();
+    let mut na_secao = false;
+    for linha in manifesto.lines().map(str::trim) {
+        if linha.starts_with('[') {
+            na_secao = linha == "[dependencies]";
+            continue;
+        }
+        if !na_secao || linha.starts_with('#') {
+            continue;
+        }
+        let nome: String = linha
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if !nome.is_empty() {
+            nomes.insert(nome);
+        }
+    }
+    nomes
+}
+
+/// Os nomes que o `Cargo.lock` lista como dependências de `pacote`, ou `None`
+/// quando o pacote nem está no lock. Um nome que o lock desambigua com a versão
+/// (`"sha2 0.11.0"`) entra só pelo nome.
+fn dependencias_no_lock(lock: &str, pacote: &str) -> Option<std::collections::BTreeSet<String>> {
+    let bloco = lock.split("[[package]]").find(|bloco| {
+        bloco
+            .lines()
+            .find_map(|linha| linha.trim().strip_prefix("name = "))
+            .is_some_and(|nome| nome.trim_matches('"') == pacote)
+    })?;
+    let mut nomes = std::collections::BTreeSet::new();
+    let mut dentro = false;
+    for linha in bloco.lines().map(str::trim) {
+        if linha.starts_with("dependencies = [") {
+            dentro = true;
+            continue;
+        }
+        if !dentro {
+            continue;
+        }
+        if linha == "]" {
+            break;
+        }
+        let item = linha.trim_matches(|c| c == '"' || c == ',');
+        if let Some(nome) = item.split_whitespace().next() {
+            nomes.insert(nome.to_owned());
+        }
+    }
+    Some(nomes)
+}
+
+#[test]
+fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
+    // **O lock do fuzz ficou atrás do `seele-proto` por um mês, e ninguém viu.**
+    //
+    // O `serde_json` entrou no `crates/seele-proto/Cargo.toml` em `f4e3183`
+    // (05/09), e o `fuzz/Cargo.lock`, que não é do workspace, ficou como estava
+    // desde `8df5da6` (09/08). Como o job `fuzz curto` rodava sem `--locked`, o
+    // cargo reescrevia o lock no runner, onde ninguém o comita, e o job passava:
+    // o defeito era invisível justamente por o guarda estar desligado. Agora o
+    // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e
+    // sem o nightly, na máquina de quem mexeu no manifesto.
+    let manifesto = std::fs::read_to_string(raiz().join("crates/seele-proto/Cargo.toml"))
+        .expect("o manifesto do seele-proto é legível");
+    let lock = std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))
+        .expect("o fuzz/Cargo.lock é legível");
+
+    let declaradas = dependencias_declaradas(&manifesto);
+    assert!(
+        declaradas.contains("serde"),
+        "o teste não leu as dependências do `seele-proto` — leu {declaradas:?} —, e sem elas a \
+         comparação abaixo passaria sem conferir nada"
+    );
+    let Some(no_lock) = dependencias_no_lock(&lock, "seele-proto") else {
+        panic!(
+            "o fuzz/Cargo.lock não tem o pacote `seele-proto`: o fuzz compila contra ele, e o \
+             lock não sabe disso"
+        );
+    };
+
+    let faltam: Vec<&String> = declaradas.difference(&no_lock).collect();
+    let sobram: Vec<&String> = no_lock.difference(&declaradas).collect();
+    assert!(
+        faltam.is_empty() && sobram.is_empty(),
+        "o fuzz/Cargo.lock está atrasado em relação ao `seele-proto`: faltam {faltam:?} e \
+         sobram {sobram:?}. O job `fuzz curto` roda `cargo metadata --locked` e reprovaria \
+         antes do primeiro alvo. Atualize sem rede, no próprio repositório: \
+         `cargo metadata --offline --manifest-path fuzz/Cargo.toml --format-version 1 > \
+         /dev/null`, e comite o lock"
+    );
+}
+
 #[test]
 fn o_ci_roda_deny_e_fuzz() {
     // **O deny e o fuzz tinham saído do `ci.yml`, e o fuzz nunca tinha
@@ -3254,6 +3392,77 @@ fn o_ci_roda_deny_e_fuzz() {
              conferida byte a byte pelo seele-proto: a pasta de corpus vem antes"
         );
     }
+
+    // **O lock do fuzz é conferido, e o `cargo fuzz run` não aceita `--locked`.**
+    // O passo é `cargo +nightly metadata --locked` sobre o manifesto do fuzz, e
+    // vem antes do primeiro alvo: sem ele, o cargo reescreve um lock atrasado no
+    // runner, onde ninguém o comita, e o job passa com o lock errado.
+    let posicao_do_lock = comandos.iter().position(|comando| {
+        let partes: Vec<&str> = comando.split_whitespace().collect();
+        partes.starts_with(&["cargo", "+nightly", "metadata"])
+            && partes.contains(&"--locked")
+            && partes
+                .windows(2)
+                .any(|dois| dois == ["--manifest-path", "fuzz/Cargo.toml"])
+    });
+    let Some(posicao_do_lock) = posicao_do_lock else {
+        panic!(
+            "o ci.yml não confere o `fuzz/Cargo.lock` com `cargo +nightly metadata --locked \
+             --manifest-path fuzz/Cargo.toml`: um lock atrasado em relação ao `seele-proto` \
+             seria reescrito no runner e o job passaria"
+        );
+    };
+    let primeiro_alvo = comandos
+        .iter()
+        .position(|comando| comando.contains("fuzz run"));
+    assert!(
+        primeiro_alvo.is_some_and(|primeiro| posicao_do_lock < primeiro),
+        "o ci.yml confere o lock do fuzz depois de rodar o primeiro alvo, e o `cargo fuzz run` \
+         já o teria reescrito: o passo do `--locked` vem antes"
+    );
+
+    // **O crash que o fuzz acha tem de sobreviver ao runner.** O libFuzzer grava
+    // o `crash-*` em `fuzz/artifacts/`, e o runner some no fim do job: sem o
+    // upload, quem vê o vermelho fica com o nome do alvo e sem a entrada que o
+    // derrubou. É `uses:` com `if:` e `with:`, e por isso não passa por
+    // `comandos_do_ci`.
+    let passos = passos_do_job_do_ci("fuzz-curto");
+    let achado = passos.iter().enumerate().find(|(_, passo)| {
+        passo
+            .iter()
+            .any(|linha| linha == "uses: actions/upload-artifact@v4")
+    });
+    let Some((posicao_do_upload, upload)) = achado else {
+        panic!(
+            "o job `fuzz-curto` do ci.yml não guarda o que o fuzz acha com \
+             `actions/upload-artifact@v4`: o `crash-*` ficaria no runner, que some no fim do job"
+        );
+    };
+    assert!(
+        upload.iter().any(|linha| linha
+            .strip_prefix("if:")
+            .is_some_and(|se| se.contains("failure()"))),
+        "o upload do fuzz não tem `if: failure()`: ou roda sempre, subindo uma pasta vazia a \
+         cada job verde, ou não roda no vermelho, que é o único caso em que há um crash a \
+         guardar. O passo: {upload:?}"
+    );
+    assert!(
+        upload.iter().any(|linha| linha
+            .strip_prefix("path:")
+            .is_some_and(|caminho| caminho.trim().trim_end_matches('/') == "fuzz/artifacts")),
+        "o upload do fuzz não guarda `fuzz/artifacts/`, que é onde o libFuzzer grava o \
+         `crash-*`. O passo: {upload:?}"
+    );
+    let ultimo_alvo = passos.iter().rposition(|passo| {
+        passo
+            .iter()
+            .any(|linha| linha.starts_with("run:") && linha.contains("fuzz run"))
+    });
+    assert!(
+        ultimo_alvo.is_some_and(|ultimo| posicao_do_upload > ultimo),
+        "o upload do fuzz vem antes do último alvo: um crash dele não seria guardado, porque \
+         `failure()` só vale para o que já rodou"
+    );
 }
 
 #[test]

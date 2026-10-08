@@ -420,9 +420,15 @@ jobs:
   # nightly pode quebrar sem aviso: um vermelho aqui pode ser do compilador, e
   # o log diz qual dos dois.
   #
-  # Sem `--locked`, e de propósito: o `fuzz/Cargo.lock` está atrás do
-  # `seele-proto` (falta o `serde_json`), e qualquer build do fuzz o reescreve
-  # — no runner, onde ninguém o comita.
+  # O `fuzz/Cargo.lock` é conferido antes do primeiro alvo. O `cargo fuzz run`
+  # não aceita `--locked`, e sem ele o cargo reescreve um lock atrasado no
+  # runner, onde ninguém o comita: foi assim que o lock ficou sem o
+  # `serde_json` do `seele-proto` por um mês, com o job verde. Quem aceita é o
+  # `cargo metadata`, e ele reprova se o lock precisa mudar. O conserto é local
+  # e sem rede: `cargo metadata --offline --manifest-path fuzz/Cargo.toml
+  # --format-version 1 > /dev/null`, e comitar o lock. O teste
+  # `o_lock_do_fuzz_lista_o_que_o_seele_proto_declara` diz o mesmo antes do
+  # push.
   #
   # Cada alvo por nome, e cada passo roda mesmo depois de um vermelho, como as
   # bancadas: um alvo que entra em pânico não esconde os outros. O teste
@@ -430,6 +436,11 @@ jobs:
   # para cada `[[bin]]` de `fuzz/Cargo.toml`, e o
   # `todo_alvo_do_fuzz_tem_sementes`, no `seele-proto`, que cada um tenha
   # sementes.
+  #
+  # O `crash-*` que o libFuzzer grava em `fuzz/artifacts/` sobe como artefato
+  # quando algum passo falha: o runner some no fim do job, e sem isso quem vê o
+  # vermelho fica com o nome do alvo e sem a entrada que o derrubou. O último
+  # passo, porque `failure()` só vale para o que já rodou.
   fuzz-curto:
     name: fuzz curto
     runs-on: ubuntu-24.04
@@ -437,6 +448,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup toolchain install nightly --profile minimal
       - run: cargo install cargo-fuzz --locked
+      - run: cargo +nightly metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
       - run: cargo +nightly fuzz run control_frame fuzz/corpus/control_frame fuzz/sementes/control_frame -- -max_total_time=60 -create_missing_dirs=1
         if: ${{ !cancelled() }}
         timeout-minutes: 15
@@ -452,3 +464,9 @@ jobs:
       - run: cargo +nightly fuzz run datagrama_do_encontro fuzz/corpus/datagrama_do_encontro fuzz/sementes/datagrama_do_encontro -- -max_total_time=60 -create_missing_dirs=1
         if: ${{ !cancelled() }}
         timeout-minutes: 15
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
