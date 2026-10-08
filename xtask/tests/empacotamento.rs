@@ -3642,15 +3642,17 @@ fn dependencias_no_lock(lock: &str, pacote: &str) -> Option<std::collections::BT
 
 #[test]
 fn o_lock_do_fuzz_lista_o_que_o_seele_proto_declara() {
-    // **O lock do fuzz ficou atrás do `seele-proto` por um mês, e ninguém viu.**
+    // **O lock do fuzz ficou atrás do `seele-proto`, e o job não tinha como dizer.**
     //
-    // O `serde_json` entrou no `crates/seele-proto/Cargo.toml` em `f4e3183`
-    // (05/09), e o `fuzz/Cargo.lock`, que não é do workspace, ficou como estava
-    // desde `8df5da6` (09/08). Como o job `fuzz curto` rodava sem `--locked`, o
-    // cargo reescrevia o lock no runner, onde ninguém o comita, e o job passava:
-    // o defeito era invisível justamente por o guarda estar desligado. Agora o
-    // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e
-    // sem o nightly, na máquina de quem mexeu no manifesto.
+    // O que o histórico mostra: o `serde_json` entrou no
+    // `crates/seele-proto/Cargo.toml` em `f4e3183` (05/09), e o
+    // `fuzz/Cargo.lock`, que não é do workspace, ficou como estava desde
+    // `8df5da6` (09/08) até o `1277d85` (08/10). O job `fuzz curto` nasceu em
+    // `62e3f7e` (05/10) sem `--locked` e já dizendo que o lock estava atrás: sem
+    // a flag, o cargo reescreve o lock no runner, onde ninguém o comita. Não se
+    // mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Agora o
+    // job confere o lock com `--locked`, e este teste diz o mesmo sem rede e sem
+    // o nightly, na máquina de quem mexeu no manifesto.
     let manifesto = std::fs::read_to_string(raiz().join("crates/seele-proto/Cargo.toml"))
         .expect("o manifesto do seele-proto é legível");
     let lock = std::fs::read_to_string(raiz().join("fuzz/Cargo.lock"))

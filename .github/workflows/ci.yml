@@ -422,13 +422,17 @@ jobs:
   #
   # O `fuzz/Cargo.lock` é conferido antes do primeiro alvo. O `cargo fuzz run`
   # não aceita `--locked`, e sem ele o cargo reescreve um lock atrasado no
-  # runner, onde ninguém o comita: foi assim que o lock ficou sem o
-  # `serde_json` do `seele-proto` por um mês, com o job verde. Quem aceita é o
-  # `cargo metadata`, e ele reprova se o lock precisa mudar. O conserto é local
-  # e sem rede: `cargo metadata --offline --manifest-path fuzz/Cargo.toml
-  # --format-version 1 > /dev/null`, e comitar o lock. O teste
-  # `o_lock_do_fuzz_lista_o_que_o_seele_proto_declara` diz o mesmo antes do
-  # push.
+  # runner, onde ninguém o comita. O que o histórico mostra: o `serde_json`
+  # entrou no `seele-proto` em `f4e3183` (05/09); o lock, que não é do
+  # workspace, ficou como estava desde `8df5da6` (09/08) até o `1277d85`
+  # (08/10), em que um `cargo fuzz build` o reescreveu; e este job nasceu em
+  # `62e3f7e` (05/10) já sem `--locked`, dizendo que o lock estava atrás. Não se
+  # mediu se o job rodou, nem com que resultado, entre 05/10 e 08/10. Quem
+  # aceita `--locked` é o `cargo metadata`, e ele reprova se o lock precisa
+  # mudar. O conserto é local e sem rede: `cargo metadata --offline
+  # --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null`, e comitar o
+  # lock. O teste `o_lock_do_fuzz_lista_o_que_o_seele_proto_declara` diz o mesmo
+  # antes do push.
   #
   # Cada alvo por nome, e cada passo roda mesmo depois de um vermelho, como as
   # bancadas: um alvo que entra em pânico não esconde os outros. O teste
