@@ -5174,6 +5174,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-web"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
+ "serde_json",
+]
+
+[[package]]
 name = "selectors"
 version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

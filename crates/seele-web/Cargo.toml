@@ -1,0 +1,20 @@
+[package]
+name = "seele-web"
+description = "O cliente do celular, a parte que roda em wasm: o codec do seele-proto atrás de uma fronteira de JSON (ADR 0057)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# ADR 0057: nenhuma linha do protocolo é escrita em JavaScript. Este crate é
+# onde o `postcard` mora no celular; a casca fala JSON com ele, e só move bytes
+# opacos. Ele depende do `seele-proto` e de nada mais do workspace (a linha dele
+# em `xtask/src/check_deps.rs`).
+[dependencies]
+seele-proto = { path = "../seele-proto" }
+# A fronteira com a casca. A mesma versão do `seele-proto`, que já o usa para
+# o manifesto de MOD.
+serde_json = "1.0.151"
+
+[lints]
+workspace = true

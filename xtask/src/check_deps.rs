@@ -68,6 +68,10 @@ const RULES: &[(&str, &[&str])] = &[
     // calcula. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-video", &["seele-proto"]),
     ("seele-core", &["seele-proto", "seele-audio", "seele-video"]),
+    // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
+    // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
+    // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
+    ("seele-web", &["seele-proto"]),
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
@@ -256,6 +260,17 @@ mod tests {
         assert!(evaluate("seele-audio", &[edge("seele-proto")]).is_empty());
         assert!(evaluate("seele-core", &[edge("seele-proto"), edge("seele-audio")]).is_empty());
         assert!(evaluate("seele-tui", &[edge("seele-core")]).is_empty());
+    }
+
+    /// O cliente do celular roda em `wasm` e só move bytes do protocolo
+    /// (ADR 0057). Uma aresta para `seele-core` traria `quinn` e `cpal` para um
+    /// alvo que não tem socket nem placa de som, e a lógica de sessão do
+    /// desktop junto.
+    #[test]
+    fn o_cliente_web_depende_so_do_protocolo() {
+        assert!(evaluate("seele-web", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-web", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
     }
 
     #[test]
