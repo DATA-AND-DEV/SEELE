@@ -68,6 +68,13 @@ const RULES: &[(&str, &[&str])] = &[
     // calcula. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-video", &["seele-proto"]),
     ("seele-core", &["seele-proto", "seele-audio", "seele-video"]),
+    // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
+    // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
+    // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
+    ("seele-web", &["seele-proto"]),
+    // O motor de MODs do celular (ADR 0057, D-web-1): o QuickJS do desktop em
+    // `wasm32-wasip1`, que roda num Worker separado do protocolo. Folha.
+    ("seele-motor-web", &[]),
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
@@ -256,6 +263,27 @@ mod tests {
         assert!(evaluate("seele-audio", &[edge("seele-proto")]).is_empty());
         assert!(evaluate("seele-core", &[edge("seele-proto"), edge("seele-audio")]).is_empty());
         assert!(evaluate("seele-tui", &[edge("seele-core")]).is_empty());
+    }
+
+    /// O cliente do celular roda em `wasm` e só move bytes do protocolo
+    /// (ADR 0057). Uma aresta para `seele-core` traria `quinn` e `cpal` para um
+    /// alvo que não tem socket nem placa de som, e a lógica de sessão do
+    /// desktop junto.
+    #[test]
+    fn o_cliente_web_depende_so_do_protocolo() {
+        assert!(evaluate("seele-web", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-web", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
+    }
+
+    /// O motor de MODs do celular é uma folha: o QuickJS e mais nada. Uma
+    /// aresta para o `seele-web` misturaria o código do MOD com o do protocolo
+    /// no mesmo `.wasm`, que é o que a forma AB separa.
+    #[test]
+    fn o_motor_do_celular_nao_depende_de_ninguem_do_workspace() {
+        assert!(evaluate("seele-motor-web", &[]).is_empty());
+        assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
+        assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
     }
 
     #[test]

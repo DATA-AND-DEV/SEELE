@@ -11791,18 +11791,20 @@ mod a_falha_do_mod_chega_ao_registro {
         );
     }
 
-    /// **A rejeição que o MOD pega logo depois não vira linha de erro.**
+    /// **A rejeição que o MOD pega logo depois não vira linha de erro, nem
+    /// `Falhou` na janela.**
     ///
     /// `try { await f(); } catch {}`, com `f` uma função `async` que lança
     /// antes do primeiro `await`: a promessa rejeita antes de o `await` prender
-    /// o tratamento, e o motor avisa a rejeição nessa hora — o `Falhou` da
-    /// janela sai (medido; é anterior a este teste). A linha do registro espera
-    /// o fim da volta e sai só se ninguém a pegou: dizer «sem tratamento» em
-    /// ERROR sobre uma rejeição tratada mandaria quem escreveu o MOD procurar
-    /// um defeito que não existe.
+    /// o tratamento, e o motor avisa a rejeição nessa hora. A linha do registro
+    /// e o `Falhou` da janela esperam o fim da volta, e saem só se ninguém a
+    /// pegou: dizer «sem tratamento» sobre uma rejeição tratada mandaria quem
+    /// escreveu o MOD procurar um defeito que não existe — no `seele.log`, em
+    /// ERROR, e na gestão, como «falhou». O `Falhou` saía na hora, de dentro
+    /// do rastreador (P51-01).
     ///
     /// O `fim` vem de um temporizador, numa volta seguinte: quando ele chega,
-    /// as linhas da primeira volta já passaram pelo canal.
+    /// as linhas e os avisos da primeira volta já passaram pelo canal.
     #[test]
     fn uma_rejeicao_pega_logo_depois_nao_vira_linha_de_erro() {
         let deixou = deixou(
@@ -11833,6 +11835,14 @@ mod a_falha_do_mod_chega_ao_registro {
             "uma rejeição que o MOD pegou com `try`/`await` saiu no seele.log como «sem \
              tratamento»: quem escreveu o MOD vai procurar um defeito que não existe: {}",
             deixou.rastro
+        );
+        assert!(
+            !deixou.falas.iter().any(
+                |fala| matches!(fala, ParaOFora::Falhou(texto) if texto.contains("pega logo depois"))
+            ),
+            "uma rejeição que o MOD pegou com `try`/`await` chegou à janela como `Falhou`, e a \
+             gestão diz que o MOD falhou por uma promessa que ele tratou: {:?}",
+            deixou.falas
         );
     }
 
@@ -12080,6 +12090,10 @@ mod a_falha_do_mod_chega_ao_registro {
     /// **Um temporizador que lança deixa linhas com o texto, no teto do
     /// balde.** O mesmo laço de 4 ms mandava 174 mensagens por segundo à
     /// janela, que as descartava.
+    ///
+    /// **E com a pilha**, que diz onde no MOD: o `emTexto` do prelúdio a põe
+    /// numa linha abaixo de `nome: mensagem`, e no `seele.log` a quebra sai
+    /// escapada (`\n    at …`).
     #[test]
     fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
         let deixou = deixou(
@@ -12088,10 +12102,17 @@ mod a_falha_do_mod_chega_ao_registro {
             |_, _| false,
             Duration::from_secs(1),
         );
+        let linha = linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"])
+            .unwrap_or_else(|| {
+                panic!(
+                    "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
+                    deixou.rastro
+                )
+            });
         assert!(
-            linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"]).is_some(),
-            "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
-            deixou.rastro
+            linha.contains(r"\n    at "),
+            "a linha do erro de um temporizador perdeu a pilha, e quem escreveu o MOD não sabe \
+             em que ponto dele o temporizador lançou: {linha}"
         );
         assert!(
             tem_mensagem(&deixou.falas, "erro-no-relogio"),
@@ -12113,6 +12134,8 @@ mod a_falha_do_mod_chega_ao_registro {
         );
     }
 
+    /// **Um ouvinte de evento que lança deixa a linha, com a pilha** — como o
+    /// temporizador, e pelo mesmo `emTexto`.
     #[test]
     fn um_ouvinte_de_evento_que_lanca_deixa_a_linha() {
         let deixou = deixou(
@@ -12125,11 +12148,18 @@ mod a_falha_do_mod_chega_ao_registro {
             |falas, linhas| tem_mensagem(falas, "erro-no-evento") && linhas > 0,
             Duration::from_secs(5),
         );
+        let linha = linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"])
+            .unwrap_or_else(|| {
+                panic!(
+                    "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o \
+                     id e o texto: {}",
+                    deixou.rastro
+                )
+            });
         assert!(
-            linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"]).is_some(),
-            "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o id e o \
-             texto: {}",
-            deixou.rastro
+            linha.contains(r"\n    at "),
+            "a linha do erro de um ouvinte de evento perdeu a pilha, e quem escreveu o MOD não \
+             sabe em que ponto dele o ouvinte lançou: {linha}"
         );
         assert!(
             tem_mensagem(&deixou.falas, "erro-no-evento"),
@@ -12569,6 +12599,75 @@ mod o_registro_da_janela {
         assert!(
             rastro.contains(r#"frase="x onde=forjado mod_id=vitima/mod""#),
             "a frase forjada não saiu entre aspas no campo `frase`: {rastro}"
+        );
+    }
+
+    /// A linha da janela no `nivel` dado, com o id `a/b`, e o rastro dela.
+    fn da_janela_no_nivel(nivel: &str) -> String {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela_em(
+                &super::BaldesDoRegistro::default(),
+                origem(),
+                nivel.to_owned(),
+                "atender-mod".to_owned(),
+                "uma frase da janela".to_owned(),
+                Some("a/b".to_owned()),
+            );
+        });
+        rastro
+    }
+
+    /// Os pedaços da linha, separados por espaço: um campo é um pedaço inteiro,
+    /// e `mod_id=a/b` não casa com `mod_id=a/bc`.
+    fn tem_o_campo(linha: &str, campo: &str) -> bool {
+        linha.split_whitespace().any(|pedaco| pedaco == campo)
+    }
+
+    /// **Os três braços levam o id, e não só o do aviso.** O teste de cima
+    /// prova o WARN; o ERROR e o DEBUG escrevem por chamadas próprias, e um
+    /// braço que esquecesse o `mod_id` deixava a linha fora da busca por
+    /// `mod_id=` sem que nenhum teste reclamasse (T3 M2). Pelos campos, e não
+    /// pela forma inteira da linha.
+    #[test]
+    fn o_erro_da_janela_sai_como_error_com_o_id_do_mod() {
+        let rastro = da_janela_no_nivel("erro");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("uma frase da janela"))
+            .unwrap_or_else(|| panic!("o erro da janela não chegou ao registro: {rastro}"));
+        assert!(
+            tem_o_campo(linha, "ERROR"),
+            "o erro da janela não saiu em ERROR, e o filtro do seele.log o trata como outra \
+             coisa: {linha}"
+        );
+        assert!(
+            tem_o_campo(linha, "mod_id=a/b"),
+            "o erro da janela saiu sem `mod_id=`, e uma busca pelo MOD não junta o que a janela \
+             disse dele com o que o Rust disse: {linha}"
+        );
+    }
+
+    /// O mesmo para um nível que a janela não conhece, que sai em DEBUG.
+    #[test]
+    fn um_nivel_desconhecido_da_janela_sai_como_debug_com_o_id_do_mod() {
+        let rastro = da_janela_no_nivel("outro");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("uma frase da janela"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "a linha da janela num nível desconhecido não chegou ao registro, que captura \
+                     do TRACE para cima: {rastro}"
+                )
+            });
+        assert!(
+            tem_o_campo(linha, "DEBUG"),
+            "a linha da janela num nível desconhecido não saiu em DEBUG: {linha}"
+        );
+        assert!(
+            tem_o_campo(linha, "mod_id=a/b"),
+            "a linha DEBUG da janela saiu sem `mod_id=`, e com `RUST_LOG=debug` uma busca pelo \
+             MOD não a acha: {linha}"
         );
     }
 
