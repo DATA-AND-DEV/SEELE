@@ -262,10 +262,14 @@ Nada fora da lista do lote foi commitado. `ui/base.js` foi mudado e restaurado s
   A frase do K1-m1 sobre a `diagnostico-de-mods.cjs` é a de antes, e não foi medida de novo.
 - **Código de plataforma.** Nenhum foi escrito: tudo o que o lote muda compila e roda neste Mac.
 - **`drive` com uma sessão de verdade.** Nada abre uma sessão real que a volta da bateria recuse e confere o `Ended`
-  na casca. A fiação de `drive` até `fim_da_sessao` é uma linha, e nenhum teste a prende. O teste da FFI prende
+  na casca. A fiação de `drive` até `fim_da_sessao` é uma linha, e nenhum teste a prendia. O teste da FFI prende
   `fim_da_sessao` e `fim_da_recusa`, e o `bateria_interna` prende o núcleo até o `Aviso::Encerrado(Recusado(…))`.
+  *Rodada 1:* um guarda de fonte passou a prender a fiação (`47d2f987`). Uma sessão real continua sem ser aberta.
 
 ## Preocupações
+
+As preocupações 1, 2 e 5 foram resolvidas na rodada 1 de conserto (ver a seção dela, no fim). O texto abaixo é o
+da entrega, e fica como registro.
 
 1. **«A sessão acabou sem mandar nada a ele»** (a frase de `ServidorTrocouNaVolta`, texto exato do brief) usa
    «nada».
@@ -302,3 +306,213 @@ Nada fora da lista do lote foi commitado. `ui/base.js` foi mudado e restaurado s
   intocado). Se a API 6 projetar o `ended` do retrato, é a F3 que decide se os dois valores entram na promessa
   escrita.
 - Nada mais do lote toca a superfície de MOD.
+
+## Rodada 1 de conserto
+
+A revisão deu «precisa de conserto» por um Importante: a frase de `ServidorTrocouNaVolta` (a preocupação 1 da
+entrega, mais forte do que eu a escrevi). O controlador decidiu o texto novo. Foram cinco menores na mesma rodada.
+Tudo no mesmo worktree e no mesmo branch, `0.16/lotes-h`, sobre `0a95c20e`.
+
+| Commit | Conserto |
+|---|---|
+| `4205d299` | Importante 1 e menor 1: a frase nova, o guarda novo, o comentário de `MOTIVOS` e o doc de `EndReason::ServidorTrocouNaVolta` |
+| `1c199b9b` | Menor 2: o `ChaveNaoProvada` da corrida vai em `warn!` |
+| — | Menor 3: as três reversões que faltavam. Nenhum arquivo mudou |
+| `47d2f987` | Menores 4 e 5: a mensagem que diz o que obteve, e o guarda de fonte de `drive` |
+
+Todos os comandos abaixo são `CARGO_BUILD_JOBS=8 perl -e 'alarm 600; exec @ARGV' cargo test …`.
+
+Toda reversão foi feita sobre uma cópia guardada no scratchpad. Depois dela, o arquivo voltou da cópia e o `shasum`
+foi conferido igual ao de antes.
+
+### Importante 1: a frase de `ServidorTrocouNaVolta` (`4205d299`)
+
+**O que mudou.** A frase é a decidida, exatamente:
+«QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\nO convite, a senha e o apelido não chegaram a ele. Confirme
+com quem hospeda, por outro canal, antes de entrar de novo.» Ela tem 172 caracteres e duas linhas, e passa nos
+guardas de tamanho e de linhas.
+
+**O guarda novo.** `a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo`, em `frontend.rs`, lê as
+frases por `sentences_of(…, "MOTIVOS")` sem comentários.
+
+- Em `ServidorTrocouNaVolta`:
+  - proíbe «nada», «nenhum», «desta máquina», «do convite» e «link», comparando em minúsculas e com borda de palavra
+    (`names`);
+  - exige «não chegaram a ele»;
+  - junta todos os erros numa lista, para o vermelho mostrar todos.
+- Em `ChaveMudouNaVolta`, exige «CHAVE».
+- O doc dele diz por quê: a tela de fim só recebe o `EndReason`, sem a origem (link ou lista), sem as impressões e
+  sem saber se foi `InviteMismatch` ou `ChaveNaoProvada`.
+
+**O vermelho da reversão: a frase antiga.** O guarda foi escrito antes de a frase mudar, então este é também o
+vermelho de TDD.
+
+Comando: `-p seele-app --test frontend a_volta_recusada_so_diz`
+
+```
+a frase de `ServidorTrocouNaVolta` promete o que o fim da sessão não sabe: a tela só recebe o `EndReason`, sem dizer se a impressão veio do link ou da lista, nem se foi a impressão ou a chave não provada. [
+    "diz «nada», que não vale para toda origem nem para todo motivo da volta",
+    "diz «do convite», que não vale para toda origem nem para todo motivo da volta",
+    "diz «link», que não vale para toda origem nem para todo motivo da volta",
+    "não diz que o convite, a senha e o apelido «não chegaram a ele», que é o que a recusa antes do `Hello` garante",
+]
+QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DO CONVITE.
+A sessão acabou sem mandar nada a ele. Confirme o link com quem o mandou.
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 260 filtered out
+```
+
+**Reversão do «CHAVE».** «A CHAVE DO SERVIDOR MUDOU…» virou «O SERVIDOR MUDOU…» na frase de `ChaveMudouNaVolta`:
+
+```
+a frase de `ChaveMudouNaVolta` não fala da chave, e o alarme de chave trocada do ADR 0003 se lê como outra recusa: O SERVIDOR MUDOU DURANTE A SESSÃO.
+test result: FAILED. 0 passed; 1 failed
+```
+
+`frases.js` foi restaurado (`817c28be…` antes e depois).
+
+**GREEN.**
+
+- `-p seele-app --test frontend`: 261 passed.
+- `cargo xtask check-runtime`: as sete bancadas de node passaram.
+- Clippy de `seele-ffi` e `seele-app`: limpo.
+
+### Menor 1: os docs que repetiam o defeito (`4205d299`)
+
+- **O comentário de `MOTIVOS`**, em `frases.js`. Ele dizia «convite e senha que nem chegaram a sair». Agora diz:
+  - que eles não chegaram a quem atendeu, e que do aperto de mão sai só o `ClientHello`;
+  - que a primeira frase cobre `InviteMismatch` e `ChaveNaoProvada`, e a impressão do link e a da lista;
+  - por que a frase não fala de convite como dono da impressão nem de link.
+- **O doc de `EndReason::ServidorTrocouNaVolta`**, em `types.rs`. Ele dizia «uma credencial que nem chegou a sair
+  desta máquina». Agora diz:
+  - que os dois motivos caem nela;
+  - que convite e senha não chegaram a quem atendeu, porque saiu só o `ClientHello`;
+  - que o enum não leva a origem da impressão, e por isso a frase só diz o que vale para as duas origens e os dois
+    motivos.
+- É só doc e comentário, e quem prende o resultado é o guarda do Importante 1.
+
+### Menor 2: a corrida registra `ChaveNaoProvada` em `warn!` (`1c199b9b`)
+
+**O que mudou.** `registrar_a_falha_do_candidato` ganhou o braço
+`ConnectError::ChaveNaoProvada => tracing::warn!(?onde, ?entrou, "este candidato mostrou um certificado sem provar ter
+a chave dele: recusado dentro do TLS, antes do `Hello`")`.
+
+- Ele não leva impressões: a que o impostor mostrou é a do certificado repetido, e a linha do pin desfeito já a traz.
+- O doc da função ganhou o item dele.
+
+**O teste de rastro.** `o_candidato_perdedor_que_nao_prova_a_chave_vai_ao_log_como_aviso`, em `enlace.rs`, de thread
+única e com `Rastro` em `INFO`.
+
+- O impostor de verdade (`impostor_que_repete_o_certificado`, sem impressão esperada) entra como primeiro candidato,
+  e o servidor verdadeiro como segundo.
+- O teste exige que o verdadeiro vença.
+- Exige também que a linha que traz o endereço do impostor e o do vencedor (a linha da corrida) seja `WARN`.
+- Rodou cinco vezes seguidas, verde em todas.
+
+**O vermelho, antes do braço.** Comando: `-p seele-core --lib o_candidato_perdedor_que_nao_prova`
+
+```
+o candidato perdedor que mostrou o certificado sem provar a chave foi ao log como falha comum, e não como aviso: quem lê o `seele.log` não separa o impostor de um endereço que não respondeu. Linha: INFO: este endereço do convite não deu onde=Some(127.0.0.1:51780) erro=ChaveNaoProvada entrou=Some(127.0.0.1:50991)
+test result: FAILED. 0 passed; 1 failed
+```
+
+**A reversão.** Tirado o braço, o vermelho é o mesmo, com a linha em `INFO` e `erro=ChaveNaoProvada`. `enlace.rs`
+foi restaurado (`d2a81330…`, antes do `cargo fmt` final da rodada).
+
+**GREEN.**
+
+- `-p seele-core enlace`: 63 passed.
+- `-p seele-conformance --test bateria_interna`: 6 passed.
+- Clippy de `seele-core`: limpo.
+
+### Menor 3: as três reversões que faltavam (sem commit)
+
+Cada guarda foi revertido pelo braço trocado ou alargado e mostrou o vermelho. Depois o arquivo foi restaurado:
+`enlace.rs` `0c1517ac…`, `client.rs` `a955cf77…`, iguais antes e depois.
+
+| Guarda | Reversão | Vermelho |
+|---|---|---|
+| `quem_nao_prova_a_chave_respondeu_e_insistir_nao_muda_a_resposta` | Em `alguem_respondeu`, `ChaveNaoProvada` passa ao lado `false` | «quem mostrou o certificado sem a chave perde a corrida para um endereço morto, e a tela diz «não alcancei» sobre um impostor» |
+| (o mesmo) | Em `vale_insistir`, `ChaveNaoProvada => true` | «a bateria insiste contra quem não provou a chave do servidor, e a volta martela o impostor em vez de acabar» |
+| `outro_alerta_do_tls_continua_tls_refused` | Braço alargado: `if matches!(error, TransportError(_))`, sem conferir o 51 | «um alerta do TLS que não é o da assinatura virou `ChaveNaoProvada`…», `left: ChaveNaoProvada`, `right: TlsRefused` |
+| `sem_decisao_do_verificador_o_alerta_da_assinatura_continua_tls_refused` | Braço alargado: `Some(FirstContact \| Matches) \| None if …` | «o TLS sem decisão do verificador virou `ChaveNaoProvada`…», `left: ChaveNaoProvada`, `right: TlsRefused` |
+
+Comandos: `-p seele-core --lib quem_nao_prova_a_chave_respondeu` e `-p seele-core --lib a_recusa_do_tls_chega_com_nome`.
+Em cada reversão de `client.rs`, os outros quatro testes do módulo continuaram verdes, e só o guarda dela reprovou.
+
+### Menor 4: a mensagem que supunha o modo de falha (`47d2f987`)
+
+`fim_da_recusa_do_que_nao_e_recusa_e_enlace_perdido` guarda o valor em `obtido`. A mensagem passou a ser «a volta que
+acabou em {erro:?} chega à tela como {obtido:?}, e não como enlace perdido: a frase manda procurar outra causa para
+uma falha de rede».
+
+Para ver a mensagem nova, `fim_da_recusa(TlsRefused)` foi mandado para `Incompatible` (comando
+`-p seele-ffi --lib fim_da_recusa_do_que_nao`):
+
+```
+assertion `left == right` failed: a volta que acabou em TlsRefused chega à tela como Incompatible, e não como enlace perdido: a frase manda procurar outra causa para uma falha de rede
+  left: Incompatible
+ right: LinkLost
+```
+
+`lib.rs` foi restaurado (`cefa0c06…`).
+
+### Menor 5: o guarda de fonte de `drive → fim_da_sessao` (`47d2f987`)
+
+**Ele vale, e por isso entrou.**
+
+- `drive` só traduz o fim com uma sessão viva cuja volta o servidor recuse, e nenhum teste do crate abre uma.
+- Um `match` reescrito à mão dentro de `drive` deixaria verdes todos os testes de comportamento de `fim_da_recusa`.
+  É exatamente o que a reversão abaixo mostra.
+- O guarda segue o molde dos que `lib.rs` e `client.rs` já têm: `include_str!("lib.rs")`, linhas de comentário fora
+  e agulhas montadas por `format!`.
+
+`drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao` faz quatro coisas:
+
+1. recorta `drive` de `async fn drive(` até o primeiro `\n}\n`;
+2. dentro dele, recorta o braço `enlace::Aviso::Encerrado(motivo) =>` até o `break;`;
+3. exige `fim_da_sessao(&motivo)`;
+4. se o braço sumir, reprova com «`drive` não trata mais o fim que o enlace avisa…», e não em silêncio.
+
+**A reversão.** O `match` de antes do lote H voltou para dentro de `drive`
+(`Motivo::Recusado(_) => EndReason::CredentialRejected`). Comando: `-p seele-ffi --lib a_volta_recusada_diz_o_motivo`
+
+```
+test a_volta_recusada_diz_o_motivo::quem_nao_prova_a_chave_nao_chega_como_versao_incompativel ... ok
+test a_volta_recusada_diz_o_motivo::fim_da_recusa_do_que_nao_e_recusa_e_enlace_perdido ... ok
+test a_volta_recusada_diz_o_motivo::fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada ... ok
+`drive` traduz o fim da sessão sem passar por `fim_da_sessao`: os testes de `fim_da_recusa` ficam verdes e a tela pode voltar a dizer «credencial recusada» para toda volta recusada:
+                            seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected,
+test a_volta_recusada_diz_o_motivo::drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao ... FAILED
+test result: FAILED. 3 passed; 1 failed
+```
+
+Os três testes de comportamento ficaram verdes com a regressão, e só o guarda de fonte a viu. `lib.rs` foi restaurado
+(`cefa0c06…`).
+
+**O limite dele.** O guarda é de texto: ele confere que a chamada está lá, e não que `drive` é chamada nem que o
+`Event::Ended` sai com esse valor. Um teste com sessão viva seria mais forte, e custaria um servidor e uma volta
+recusada dentro de `seele-ffi`.
+
+### O GREEN da rodada, na árvore de `47d2f987`
+
+| Comando | Resultado |
+|---|---|
+| `-p seele-app --test frontend` | 261 passed |
+| `-p seele-core enlace` | 63 passed |
+| `-p seele-core client` | 20 passed |
+| `-p seele-ffi --lib` | 124 passed, 1 ignored (o ignorado é anterior ao lote) |
+| `-p seele-conformance --test bateria_interna` | 6 passed |
+
+`cargo fmt --all -- --check` saiu limpo. O clippy de `seele-core`, `seele-ffi`, `seele-conformance` e `seele-app`
+(`--all-targets --all-features -- -D warnings`) também, com só o aviso ambiental `ld: duplicate -rpath`.
+`check-runtime` rodou depois do `4205d299`, o único da rodada que mexe em `ui/`.
+
+**G1:** os três assuntos da rodada e o deste relatório foram conferidos com `grep -F -f` contra as catorze cadeias.
+Nenhum casou.
+
+### O que ainda preocupa
+
+- O guarda de `drive` é de fonte, com o limite dito acima.
+- A preocupação 4 (o número do alerta é do `rustls`) e a 6 (nenhum guarda de todas as variantes de
+  `ConnectionError`) continuam como estavam.
+- A 3 (`fim_da_sessao` fora de `drive`) agora tem o guarda de fonte prendendo a ligação.
