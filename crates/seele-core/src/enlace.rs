@@ -6480,6 +6480,28 @@ mod tests {
         Some((onde, quantos))
     }
 
+    /// A escuta QUIC das pontas de teste deste módulo, sobre o TLS que quem
+    /// chama montou: em `127.0.0.1`, numa porta qualquer, com o ALPN do SEELE.
+    ///
+    /// A montagem que as pontas dividem. O que muda de uma para outra é só o
+    /// certificado que ela mostra e a chave que assina o aperto de mão:
+    /// [`ponta_com_certificado_proprio`] monta os dois de um certificado só, e
+    /// [`impostor_que_repete_o_certificado`] assina com outra chave. Por isso o
+    /// `rustls::ServerConfig` vem de fora, já com o certificado, e o ALPN, a
+    /// configuração do `quinn` e a escuta saem daqui.
+    fn escuta_de_teste(mut tls_servidor: rustls::ServerConfig) -> (quinn::Endpoint, SocketAddr) {
+        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
+            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
+        ));
+
+        let escuta =
+            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
+                .expect("escutar");
+        let endereco = escuta.local_addr().expect("endereço");
+        (escuta, endereco)
+    }
+
     /// Uma ponta QUIC de teste com certificado próprio, e a impressão dele.
     ///
     /// Só faz o aperto de mão do TLS: o que acontece com a conexão depois é
@@ -6496,19 +6518,13 @@ mod tests {
         let chave =
             rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
 
-        let mut tls_servidor = rustls::ServerConfig::builder()
+        // `with_single_cert` confere que a chave é a do certificado: uma ponta
+        // honesta montada errado reprova aqui, e não no meio do teste.
+        let tls_servidor = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(cadeia, chave.into())
             .expect("config do servidor");
-        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-
-        let escuta =
-            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
-                .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
+        let (escuta, endereco) = escuta_de_teste(tls_servidor);
         (escuta, endereco, impressao)
     }
 
@@ -6802,29 +6818,9 @@ mod tests {
     /// como bom. `Client::connect_por` sai com sucesso; a escrita seguinte,
     /// na mesma conexão, é a que encontra a queda.
     async fn servidor_que_aperta_a_mao_e_cai() -> SocketAddr {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-
-        let certificado =
-            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificado");
-        let cadeia = vec![rustls::pki_types::CertificateDer::from(
-            certificado.cert.der().to_vec(),
-        )];
-        let chave =
-            rustls::pki_types::PrivatePkcs8KeyDer::from(certificado.signing_key.serialize_der());
-
-        let mut tls_servidor = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(cadeia, chave.into())
-            .expect("config do servidor");
-        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-
-        let escuta =
-            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
-                .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
+        // O TLS é o de qualquer ponta de teste. O que este servidor tem de seu
+        // é o que faz depois dele, e a impressão não interessa a quem o chama.
+        let (escuta, endereco, _) = ponta_com_certificado_proprio();
 
         tokio::spawn(async move {
             let Some(entrada) = escuta.accept().await else {
@@ -7185,19 +7181,12 @@ mod tests {
             chave_do_impostor,
         );
 
-        let mut tls_servidor = rustls::ServerConfig::builder()
+        let tls_servidor = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(
                 certificado_e_chave,
             )));
-        tls_servidor.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
-        let servidor_config = quinn::ServerConfig::with_crypto(Arc::new(
-            quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
-        ));
-        let escuta =
-            quinn::Endpoint::server(servidor_config, SocketAddr::from(([127, 0, 0, 1], 0)))
-                .expect("escutar");
-        let endereco = escuta.local_addr().expect("endereço");
+        let (escuta, endereco) = escuta_de_teste(tls_servidor);
         tokio::spawn(async move {
             while let Some(entrada) = escuta.accept().await {
                 let _ = entrada.await;
