@@ -863,6 +863,33 @@ esac
         }
     }
 
+    /// Um comando de `git` no repositório da bancada, com a identidade que o
+    /// `commit` pede e sem assinatura. Devolve a saída padrão sem a quebra do fim.
+    fn git(&self, argumentos: &[&str]) -> String {
+        let saida = Command::new("git")
+            .arg("-C")
+            .arg(&self.repo)
+            .args([
+                "-c",
+                "user.email=bancada@seele",
+                "-c",
+                "user.name=bancada",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+            ])
+            .args(argumentos)
+            .output()
+            .expect("o git tem que executar");
+        assert!(
+            saida.status.success(),
+            "git {argumentos:?} falhou:\n{}",
+            String::from_utf8_lossy(&saida.stderr)
+        );
+        String::from_utf8_lossy(&saida.stdout).trim().to_owned()
+    }
+
     fn rodar(&self, argumentos: &[&str], ambiente: &[(&str, &str)]) -> Saida {
         let caminho_antigo = std::env::var("PATH").unwrap_or_default();
         let mut comando = Command::new(interpretador());
@@ -941,6 +968,73 @@ fn com_tudo_no_lugar_as_conferencias_passam_sem_compilar_nada() {
     assert!(saida.diario.contains("docker"), "não perguntou ao Docker");
     assert!(saida.diario.contains("ssh"), "não perguntou ao Windows");
     assert!(saida.diario.contains("curl"), "não perguntou ao GitHub");
+}
+
+/// O aviso dos assuntos que o resumo não classifica sai nas conferências.
+///
+/// Ele morava só dentro de `notas_das_mudancas`, chamada depois da bateria, dos
+/// três builds e do «--- publicando ---»: quem publica lia o aviso horas depois
+/// de começar, e o `--conferir`, que existe para dizer em segundos se vale a
+/// pena, saía sem nunca classificar. E o conselho do aviso («conte em
+/// `empacotar/notas/<versão>.md`») não se segue depois de começar sem abortar,
+/// porque `conferir_arvore` exige `empacotar/` limpo.
+///
+/// A ordem não se prova pela posição no texto, porque `Saida.texto` é a saída
+/// padrão seguida do erro. A prova é o aviso aparecer num `--conferir`, que
+/// nunca chega à bateria — e o diário sem nenhum `cargo test` diz que não chegou.
+#[test]
+fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    // A bancada faz um commit só, sem tag: a faixa seria vazia. Uma tag na
+    // versão de antes e dois commits depois dela fazem a faixa de `1.2.3`.
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "uma mudança que não diz pelo prefixo o que é",
+    ]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "feat(telepatia): o servidor adivinha",
+    ]);
+    // O Windows de mentira responde com a cabeça que lhe mandarem; ela mudou.
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "com tudo no lugar as conferências têm que passar, avisos à parte:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("tudo conferido"),
+        "faltou o veredito das conferências:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("cargo test"),
+        "o --conferir chegou à bateria, e a prova abaixo não prova mais nada:\n{}",
+        saida.diario
+    );
+    assert!(
+        saida.texto.contains("não diz pelo prefixo"),
+        "o --conferir não avisou do assunto sem prefixo da faixa: quem publica só ficaria \
+         sabendo depois da bateria e dos builds, quando o conselho do aviso (contar em \
+         `empacotar/notas/`) já não se segue sem abortar:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("«telepatia» é um escopo que a tabela"),
+        "o --conferir não avisou do escopo que a tabela não conhece:\n{}",
+        saida.texto
+    );
 }
 
 #[test]

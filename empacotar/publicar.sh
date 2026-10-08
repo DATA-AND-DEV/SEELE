@@ -1740,6 +1740,44 @@ sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/
     done
 }
 
+# A faixa desta versão: da tag publicada antes dela até o HEAD.
+#
+# Define `ANTERIOR` e `FAIXA`. É só `git tag` e uma comparação de versões, sem
+# rede e sem compilar, e por isso as conferências podem pedi-la — e o corpo do
+# release, no fim, a pede de novo em vez de depender de elas terem rodado.
+faixa_da_versao() {
+    ANTERIOR=$(git -C "$RAIZ" tag --list 'v*' | tag_anterior "$VERSAO")
+    if [ -n "$ANTERIOR" ]; then
+        FAIXA="$ANTERIOR..HEAD"
+    else
+        # A primeira publicação. Dizer isso é melhor que listar o histórico
+        # inteiro como se tudo fosse novidade desta versão.
+        FAIXA=""
+    fi
+}
+
+# Os assuntos da faixa que o resumo não sabe classificar, ditos **agora**.
+#
+# O aviso mora em `notas_das_mudancas`, e ela só era chamada ao montar o corpo
+# do release, depois da bateria, dos três builds e do «--- publicando ---»: quem
+# publica lia que um assunto não dizia pelo prefixo se muda o produto horas
+# depois de começar, e o `--conferir` saía sem nunca classificar. O conselho do
+# aviso — contar em `empacotar/notas/<versão>.md` — também não se segue depois
+# de começar sem abortar, porque `conferir_arvore` exige `empacotar/` limpo.
+#
+# Aqui a classificação roda **só pelos avisos**: a saída padrão, que é o corpo,
+# vai para o ralo, e o corpo de verdade continua montado no fim, como sempre. O
+# custo é um `git log` entre duas tags.
+conferir_notas() {
+    faixa_da_versao
+    if [ -z "$FAIXA" ]; then
+        passo "v$VERSAO é a primeira versão publicada: não há mudanças a classificar"
+        return 0
+    fi
+    git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas >/dev/null
+    passo "mudanças desde $ANTERIOR classificadas (o que o resumo não classifica está dito acima, se houve)"
+}
+
 # =========================================================================
 
 printf -- '--- conferindo antes de compilar ---\n'
@@ -1752,6 +1790,9 @@ conferir_chave
 conferir_docker
 conferir_windows
 conferir_github
+# Por último, para que o aviso seja a última coisa que quem publica lê antes do
+# veredito, e não uma linha perdida entre as perguntas ao Docker e ao Windows.
+conferir_notas
 # Depois das conferências e **antes** de empacotar: descobrir que a bateria
 # reprovou vale minutos aqui e uma hora e meia depois do Linux.
 printf -- '--- tudo conferido ---\n'
@@ -1976,14 +2017,7 @@ NOTAS="$TEMPORARIO/corpo.md"
 # não achava em lugar nenhum, e o histórico do repositório, que é onde a
 # resposta sempre esteve, não é o lugar onde alguém procura depois de clicar num
 # link de download.
-ANTERIOR=$(git -C "$RAIZ" tag --list 'v*' | tag_anterior "$VERSAO")
-if [ -n "$ANTERIOR" ]; then
-    FAIXA="$ANTERIOR..HEAD"
-else
-    # A primeira publicação. Dizer isso é melhor que listar o histórico inteiro
-    # como se tudo fosse novidade desta versão.
-    FAIXA=""
-fi
+faixa_da_versao
 
 {
     # **O aviso desta versão, e só dela.**
