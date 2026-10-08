@@ -444,3 +444,114 @@ O `cargo fmt` reflowou uma linha de `frontend.rs` depois das reversões, e t2 e 
 
 - **O Importante 1 da rodada 1** (`4daaa4c3`) foi substituído por este caminho único. Os `.then` que ele pôs saíram, e as reversões r1a e r1b daquela rodada passaram a valer como t3 e b2 desta.
 - **A bancada do scratchpad** (`olhar.cjs`) continua fora do commit. As provas dos Importantes 1, 2 e 3 da rodada 1 e da troca de modo estão agora na `ajustes-v013.cjs`. As cenas das notas do campo, do CONECTAR apagado e da faixa de fone entre sessões continuam só no scratchpad, com os guardas de texto de `frontend.rs` como a parte versionada.
+
+## Rodada 3
+
+A rodada segue o brief `lote-j-rodada3.md` (FIX_BASE `da16d3a`): quatro itens, e nada além deles. Tudo está num commit só, `2e64af2c`, porque os quatro dividem o `frontend.rs` e a `ajustes-v013.cjs`. Ficaram de fora, como o brief manda, a observação sobre o caso do modo e a faixa regravada a cada 500 ms sem mudança.
+
+| Item | Commit |
+|---|---|
+| 1. A faixa velha por uma ida à ponte ao abrir (regressão da rodada 2) | `2e64af2c` |
+| 2. Duas asserções sem frase na `ajustes-v013.cjs` | `2e64af2c` |
+| 3. A brecha do guarda (a) | `2e64af2c` |
+| 4. A quebra do título dependia da largura da fonte | `2e64af2c` |
+
+O que rodou depois do conserto:
+- `cargo test -p seele-app --test frontend`: 268 verdes;
+- a `ajustes-v013.cjs`, com `PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright`: saiu 0;
+- `cargo xtask check-runtime`: saiu 0, com as 7 bancadas;
+- `cargo fmt --all -- --check` e `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpos.
+
+### 1. A faixa certa no primeiro quadro
+
+**O vermelho medido.** Caso novo na `ajustes-v013.cjs`. A ponte da página principal ganhou atraso por comando (`testAtraso`). A cena:
+1. fecha a configuração, põe o microfone mudo no retrato e o desenha;
+2. atrasa `microfones` em 400 ms e `snapshot` em 150 ms;
+3. reabre e lê `#server-contexto` no `requestAnimationFrame` seguinte, que é o primeiro quadro.
+
+No head da rodada 2:
+
+```
+AssertionError [ERR_ASSERTION]: reaberta com o microfone já mudo, a configuração mostrou no primeiro quadro a faixa da abertura anterior: «Na sala Sala principal · microfone abre enquanto segura ESPAÇO»
+```
+
+**O conserto, e por que este.** A faixa não depende do que `atualizarServer` busca: ela lê o quadro da sessão (`desenhado`) e a tecla. Então:
+- `atualizarServer` escreve a faixa **antes do primeiro `await` dele**, e continua sendo o único lugar que a escreve;
+- `abrirServer` chama `atualizarServer()` **sem `await`, antes do primeiro `await` seu**. A faixa é escrita na mesma tarefa do `hidden = false` que mostra a tela;
+- o `await atualizarServer()` de depois da lista de aparelhos continua.
+
+As duas alternativas do brief ficaram de fora:
+- **Rodar `atualizarServer` antes da lista e esperá-lo** deixaria o primeiro quadro certo só com uma ponte instantânea, porque a escrita ainda vinha depois da ida ao `snapshot`. E ele apagaria o EM USO da lista por até 500 ms: a lista nasce marcada sem retrato (`marcarLinhas(null)`), e só o `atualizarServer` de depois dela põe o EM USO.
+- **Esconder a faixa no `fecharServerMesmo`** seria um segundo escritor, e a tela abriria sem faixa em vez de com a certa.
+
+O caso de bancada atrasa o `snapshot` para separar as duas coisas. Com a escrita depois da ponte (reversão q2), ele reprova mesmo com o `atualizarServer` chamado cedo.
+
+**O guarda (a)** ganhou a metade de texto: em `atualizarServer`, `desenharContextoDaSessao()` vem antes do primeiro `await`; em `abrirServer`, `atualizarServer()` vem antes do primeiro `await`. Antes do conserto ele reprovava assim:
+
+```
+`atualizarServer` escreve a faixa de contexto depois de esperar a ponte, e a configuração aparece com a faixa da abertura anterior até a resposta chegar:
+```
+
+| Reversão | Reprovou com |
+|---|---|
+| q1. Sem a chamada antecipada em `abrirServer` (bancada) | «reaberta com o microfone já mudo, a configuração mostrou no primeiro quadro a faixa da abertura anterior: «… segura ESPAÇO»» |
+| q1g. A mesma, no guarda | «`abrirServer` mostra a configuração e espera alguma coisa antes de `atualizarServer` escrever a faixa de contexto…» |
+| q2. A escrita de volta para depois da ponte, em `atualizarServer`, com a chamada antecipada de pé (bancada) | a mesma frase de q1 |
+| q2g. A mesma, no guarda | «`atualizarServer` escreve a faixa de contexto depois de esperar a ponte…» |
+
+### 2. As duas asserções com frase
+
+**O vermelho medido** é o que a re-revisão apontou: o título «COMO OS OUTROS VÃO TE CHAMAR?» e `assert.deepEqual(errosDoLink, [])` estavam sem mensagem. **O conserto** deu a cada uma a frase do que quebra. Para mostrar a diferença, cada uma foi feita reprovar duas vezes: uma com a frase e outra com a frase revertida.
+- e1/e2: o produto abre a pergunta com outro título («QUAL É O SEU NOME?»).
+- e3/e4: o produto lança um erro na página da entrada por link.
+
+| Reversão | Reprovou com |
+|---|---|
+| e1. Título errado, com a frase | «a caixa que abriu pela entrada por link não é a pergunta do nome: quem chega sem nome lê outro título…» |
+| e2. Título errado, frase revertida | «Expected values to be strictly equal» (a frase do Node, que não diz o que quebra) |
+| e3. Erro na página, com a frase | «a entrada por link lançou erro na página: o que está nesta lista quebrou sem ninguém ver…» |
+| e4. Erro na página, frase revertida | «Expected values to be strictly deep-equal» |
+
+### 3. O guarda (a) conta toda referência, em todo `.js` de `ui/`
+
+**O vermelho medido** é a brecha. Antes do conserto, as duas mudanças do brief passaram verdes pelo guarda:
+
+| Mudança | Guarda de antes |
+|---|---|
+| m3a. `.then(desenharTeclaDeFalar).then(desenharContextoDaSessao)` em `abrirServer` | `test result: ok. 1 passed` |
+| m3b. Uma chamada em `desenhar` (`tela-sessao.js`) | `test result: ok. 1 passed` |
+
+**O conserto.** O guarda percorre `ui_files(".js")` sem comentários. Ele conta `desenharContextoDaSessao` como palavra inteira, chamado ou passado, e desconta a declaração. A lista dos arquivos que sobram tem de ser exatamente `["tela-server.js"]`.
+
+| Reversão | O guarda novo reprovou com |
+|---|---|
+| m3a | «a faixa de contexto é alcançada em 2 lugares de `ui/` (["tela-server.js", "tela-server.js"]); ela tem um caminho só…» |
+| m3b | «… em 3 lugares de `ui/` (["tela-server.js", "tela-sessao.js", "tela-sessao.js"])…». São duas referências: o `typeof` e a chamada. |
+
+### 4. A quebra do título em qualquer plataforma
+
+**O risco**, medido em vez de suposto. Com o título mais estreito, o que se espera dos avanços de glifo do Linux, a cena de antes não quebra. A emulação foi `letter-spacing: 0` no título, cerca de 55px a menos numa linha de 364px. Sem a quebra forçada (f2):
+
+```
+AssertionError [ERR_ASSERTION]: o título da pergunta deixou de quebrar em duas linhas, e esta medida não mede mais nada: {"tintas":[{"texto":"COMO OS OUTROS VÃO TE CHAMAR?", …}],"folga":null,"lineHeight":"27.6px"}
+```
+
+**O conserto.** Só nesta cena, o título ganha largura máxima de 70% da própria largura numa linha, medida ali mesmo com `white-space: nowrap` e um `Range`. A conta não depende da fonte:
+- 70% é menos que a linha inteira, então o título quebra;
+- a primeira linha ocupa mais de 30% da largura, então o resto cabe em 70% e ele quebra uma vez só.
+
+A asserção de duas linhas ficou, e a folha não mudou.
+
+| Reversão | Saída |
+|---|---|
+| f1. Título estreitado, com a quebra forçada | verde: duas linhas, folga de 10,7px |
+| f2. Título estreitado, sem a quebra forçada | o vermelho acima, «deixou de quebrar em duas linhas» |
+| f3. `line-height: 1.15` tirado da folha, com a quebra forçada | «as duas linhas do título da pergunta se sobrepõem: folga de -0.9px entre as tintas, com line-height 16px» |
+
+A f3 mostra que a reversão do `line-height` continua vermelha com a quebra forçada.
+
+### As reversões, no conjunto
+
+- **15 corridas**: 13 reversões (q1, q1g, q2, q2g, m3a, m3b, e1 a e4, f1 a f3) e as duas mudanças da brecha, medidas com o guarda de antes. As de bancada rodaram com um roteiro de scratchpad que muda um ou dois arquivos, roda a `ajustes-v013.cjs` e volta cada um da cópia guardada, com `cmp`.
+- **Antes e depois da bateria**, o `shasum` dos `.js` e `.css` de `ui/`, do `index.html`, do `frontend.rs` e da `ajustes-v013.cjs` saiu igual.
+- **Depois do `cargo fmt`**, que reflowou um fechamento em `frontend.rs`, q1g, q2g, m3a e m3b rodaram de novo sobre o arquivo formatado, com as mesmas frases.
