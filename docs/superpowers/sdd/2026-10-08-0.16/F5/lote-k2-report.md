@@ -2,7 +2,7 @@
 
 Base `fbeff8e` (`0.16/lotes`). Branch `0.16/lotes-k2`, no worktree
 `/Users/dev-alexandre/SEELE/.claude/worktrees/agent-a94d4f36c07c8f8ea`. Três
-commits de código e este relatório; depois, três commits da rodada 1 de
+commits de código e este relatório; depois, quatro commits da rodada 1 de
 conserto (seção 7) e este relatório de novo. Todos locais: sem push, tag,
 release ou Actions.
 
@@ -14,8 +14,9 @@ release ou Actions.
 | `73866cc` | rodada 1, item 1 | as provas do guarda de `podeFalar()` depois do `decode()` |
 | `86d0a2d` | rodada 1, item 2 | `.then(aplicar, recusar)` nos quatro caminhos, e `dizerTropecoDaMidia` |
 | `af7d6ef` | rodada 1, item 3 | o comentário da bancada sem «API 3» |
+| `6ca4fdf` | rodada 1, ajuste do controlador | o tropeço de aplicar chega ao `seele.log`, com o id do MOD |
 
-Arquivos mudados (`fbeff8e..af7d6ef`), só os cinco da lista do lote:
+Arquivos mudados (`fbeff8e..6ca4fdf`), só os cinco da lista do lote:
 - `apps/seele-app/ui/mods-regiao.js`
 - `apps/seele-app/ui/base.js`
 - `apps/seele-app/ui/camada-mods.js`
@@ -406,6 +407,9 @@ as mesmas frases e voltaram byte a byte.
   - na região, por `RegiaoDeMod#dizerTropecoDaMidia(onde, chave, falha)`, que
     corta a chave como `dizerRecusaDeMidia`;
   - no avatar, por um `console.warn` com o id do MOD e a pessoa.
+
+  Neste commit o tropeço ia só ao `console`. O ajuste do controlador, mais
+  abaixo (`6ca4fdf`), o leva também ao `seele.log`.
 - Nenhuma promessa fica sem quem a pegue.
 - Fiz nos quatro caminhos, e não só nos dois que a revisão citou (avatar e
   fundo de tela). O retrato e o fundo de mídia tinham o mesmo defeito, por
@@ -481,13 +485,69 @@ A prova é de texto. `git diff fbeff8e -- apps/ | grep -c '^+.*API 3'` dá 0.
 O `check-runtime` continua verde. Não há reversão a fazer: o item não tem
 comportamento.
 
+### Ajuste do controlador: o tropeço chega ao `seele.log` (`6ca4fdf`)
+
+A primeira preocupação desta rodada era que o tropeço de aplicar ia só ao
+`console` da janela. O controlador decidiu: o `console` ninguém lê, e o
+tropeço tem de chegar ao `seele.log` de quem opera, com o mesmo `onde` e a
+mesma forma de id das outras linhas de mídia.
+
+**O que mudou.**
+- `RegiaoDeMod#dizerTropecoDaMidia` continua escrevendo no `console`, com a
+  pilha, e passa a dizer também pelo `dizerRecusaDeMidia`. É a porta das outras
+  linhas de mídia: ela leva ao `dono.anotarRecusa`, que em `base.js` é
+  `registrarNoAnfitriao("recusa-de-mod", "<id>: …", "aviso", <id>)`, e corta a
+  chave e engole o dono que lança como sempre.
+- No avatar, o último `.catch` chama `dono.anotarRecusa` dentro de um `try`. O
+  avatar não tem `dizerRecusaDeMidia`, e as linhas dele já saíam por essa
+  porta.
+- O texto leva a palavra «tropeçou» e diz «não foi uma recusa», para a linha
+  não ser lida como a recusa que não é.
+
+As linhas, como chegaram ao `registrar_da_janela` nas bancadas:
+- região: `{"nivel":"aviso","onde":"recusa-de-mod","oQue":"a/b: mídia «rosto» — o retrato tropeçou depois da busca, e não foi uma recusa: o aviso da gestão caiu","modId":"a/b"}`.
+  O fundo e o fundo de tela saem na mesma forma, com «cx» e «mapa»;
+- avatar: `{"nivel":"aviso","onde":"recusa-de-mod","oQue":"seele/perfis: avatar da pessoa 17 tropeçou depois da busca, e não foi uma recusa — o redesenho caiu","modId":"seele/perfis"}`.
+
+**Prova.** Um anotador de mentira não mede nem o `onde` nem o id, porque quem
+os põe é o dono de `base.js`. Por isso os casos de «aplicar que lança» rodam
+com o `anotarRecusa` e o `registrarNoAnfitriao` **de verdade**, recortados de
+`base.js` num contexto próprio com um `invoke` que anota, como faz o bloco «o
+elo»:
+- em `regiao-do-mod.cjs`, por `registroDeVerdade()`, nos três casos;
+- em `contribuicoes-e-camadas.cjs`, no R4e, no avatar.
+
+Cada caso exige uma linha só, com:
+- `nivel: "aviso"`, `onde: "recusa-de-mod"` e `modId` igual ao id do MOD;
+- `oQue` começando com o id e a chave;
+- «tropeçou» e o motivo no texto;
+- nada de «falhou no» ou «não montou», que são as frases da recusa.
+
+**RED** (contra `af7d6ef`), quatro casos, todos com a lista de linhas vazia:
+- `aplicar que lança · o retrato: o tropeço de aplicar não chegou ao seele.log como uma linha só, no \`onde\` das linhas de mídia e com o id do MOD em campo próprio — ou chegou dito como recusa: []`;
+- o mesmo para o fundo de mídia e para o fundo de tela;
+- `R4e · o redesenho que lança: o tropeço do redesenho não chegou ao seele.log como uma linha só, … : []`.
+
+**GREEN:**
+- `regiao-do-mod` (40 provas) e `contribuicoes-e-camadas`;
+- `cargo xtask check-runtime`, as sete;
+- `cargo test -p seele-app --test frontend` (259 passed);
+- `diagnostico-de-mods.cjs` no Chromium;
+- `cargo fmt --check`.
+
+**Reversões** (restauradas byte a byte):
+
+| reversão | vermelho |
+|---|---|
+| C4a `dizerTropecoDaMidia` sem a chamada a `dizerRecusaDeMidia` (só o `console`) | os três casos da região: `… não chegou ao seele.log como uma linha só … : []` |
+| C4b o avatar sem o `try { dono.anotarRecusa(…) }` | `R4e · o redesenho que lança: o tropeço do redesenho não chegou ao seele.log … : []` |
+
 ### Preocupações da rodada
 
-- **O tropeço de aplicar vai só ao `console` da janela, e não ao `seele.log`.**
-  É a mesma escolha que `dizerRecusaDeMidia` já fazia para o dono cuja
-  `anotarRecusa` lança. Um tropeço desses é defeito do produto ou do dono, e
-  não da mídia do MOD. Se a revisão quiser vê-lo no registro, o lugar é
-  `dizerTropecoDaMidia`, numa linha.
+- **O tropeço vai ao registro no `onde` das recusas (`recusa-de-mod`)**, como
+  foi pedido, para ficar junto das outras linhas de mídia do MOD. O que separa
+  uma linha da outra é o texto: «tropeçou … e não foi uma recusa». Um filtro
+  que conte as linhas por esse `onde` passa a contar também os tropeços.
 - **Um `aplicar` que lança no meio deixa o que já tinha aplicado.** A ordem
   dentro dele põe o estado primeiro e o aviso ao dono por último, e por isso o
   estado que fica é o da tela. A repintura do mapa que lança deixa o mapa em
