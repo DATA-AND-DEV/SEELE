@@ -150,7 +150,8 @@ fn main() -> std::process::ExitCode {
         std::process::ExitCode::SUCCESS
     } else if alguem_respondeu {
         println!(
-            "o ponto de encontro está no ar, e NÃO fala o ENC/2 em toda família que respondeu."
+            "o ponto de encontro está no ar, e NÃO fala o ENC/2 em toda família que respondeu, \
+             ou o relógio dele está a mais de {RELOGIO_DO_PORTAO} s do daqui."
         );
         println!("uma versão que depende do ENC/2 não sai com este ponto: reimplante a VPS antes");
         println!("(docs/ponto-de-encontro.md, «Subir o seu»).");
@@ -198,21 +199,31 @@ fn ler_argumentos(argumentos: &[String]) -> Option<(String, bool)> {
     alvo.map(|alvo| (alvo, exige_enc2))
 }
 
+/// Quanto o relógio do ponto pode se afastar do daqui para o portão passar.
+///
+/// A tolerância do carimbo é de 300 s, e o relógio de quem registra erra
+/// também: um ponto 240 s adiantado recusa uma sala 61 s atrasada. Um minuto
+/// deixa o resto da tolerância para as máquinas de quem usa.
+const RELOGIO_DO_PORTAO: i64 = 60;
+
 /// Se a sondagem passa.
 ///
 /// Sem `--exige-enc2`, como sempre foi: alguma família respondeu ao `ONDE`.
 /// Com ela, alguma família fala o ENC/2, e **nenhuma** que respondeu ao `ONDE`
-/// deixa de falar. Uma família que não respondeu a nada não reprova: a máquina
-/// que sonda pode não ter rota IPv6, e isso não diz nada do ponto.
+/// deixa de falar, ou tem o relógio a mais de [`RELOGIO_DO_PORTAO`] segundos do
+/// daqui. Uma família que não respondeu a nada não reprova: a máquina que sonda
+/// pode não ter rota IPv6, e isso não diz nada do ponto.
 fn passou_no_portao(resultados: &[Result<Sondagem, String>], exige_enc2: bool) -> bool {
     let responderam: Vec<&Sondagem> = resultados.iter().filter_map(|r| r.as_ref().ok()).collect();
     if !exige_enc2 {
         return !responderam.is_empty();
     }
-    !responderam.is_empty()
-        && responderam
-            .iter()
-            .all(|sondagem| matches!(sondagem.enc2, EstadoDoEnc2::Fala { .. }))
+    !responderam.is_empty() && responderam.iter().all(|sondagem| {
+        matches!(
+            sondagem.enc2,
+            EstadoDoEnc2::Fala { relogio_do_ponto } if relogio_do_ponto.abs() <= RELOGIO_DO_PORTAO
+        )
+    })
 }
 
 /// O que uma sondagem completa aprendeu: o degrau 3 (`ONDE`), o quarto, e o
@@ -355,11 +366,8 @@ fn sondar_enc2(socket: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc2 {
     let chave = chave_de_sondagem(0x5E);
     let uma_hora_atras = agora_unix().saturating_sub(3600);
     let torto = moro2_de(&chave, uma_hora_atras, Vec::new());
-    if socket.send_to(&moro2(&torto), destino).is_err() {
-        return EstadoDoEnc2::Mudo;
-    }
     let relogio_do_ponto =
-        match resposta2_desta_marca(socket, &torto.marca) {
+        match pedir2(socket, destino, &moro2(&torto), &torto.marca) {
             None => return EstadoDoEnc2::Mudo,
             Some(Resposta2::Recusa {
                 motivo: Motivo::Relogio,
@@ -378,10 +386,7 @@ fn sondar_enc2(socket: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc2 {
 
     let dica: SocketAddr = SocketAddr::from(([10, 255, 255, 254], 8385));
     let certo = moro2_de(&chave, agora_unix(), vec![dica]);
-    if socket.send_to(&moro2(&certo), destino).is_err() {
-        return EstadoDoEnc2::Torto("o MORO2 de agora não saiu daqui".to_owned());
-    }
-    let registrado = match resposta2_desta_marca(socket, &certo.marca) {
+    let registrado = match pedir2(socket, destino, &moro2(&certo), &certo.marca) {
         Some(Resposta2::Morou { endereco, .. }) => endereco,
         Some(Resposta2::Recusa {
             motivo: Motivo::Relogio,
@@ -395,13 +400,14 @@ fn sondar_enc2(socket: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc2 {
         Some(outra) => {
             return EstadoDoEnc2::Torto(format!("ao MORO2 de agora, respondeu {outra:?}"))
         }
-        None => return EstadoDoEnc2::Torto("o MORO2 de agora ficou sem resposta".to_owned()),
+        None => {
+            return EstadoDoEnc2::Torto(
+                "o MORO2 de agora ficou sem resposta em três tentativas".to_owned(),
+            )
+        }
     };
 
-    if socket.send_to(&quem2(&certo.marca), destino).is_err() {
-        return EstadoDoEnc2::Torto("o QUEM2 não saiu daqui".to_owned());
-    }
-    match resposta2_desta_marca(socket, &certo.marca) {
+    match pedir2(socket, destino, &quem2(&certo.marca), &certo.marca) {
         Some(Resposta2::Aqui2 {
             endereco, dicas, ..
         }) if endereco == registrado && dicas == [dica] => {}
@@ -414,15 +420,48 @@ fn sondar_enc2(socket: &UdpSocket, destino: SocketAddr) -> EstadoDoEnc2 {
     }
 
     let ninguem = moro2_de(&chave_de_sondagem(0xA1), agora_unix(), Vec::new()).marca;
-    if socket.send_to(&quem2(&ninguem), destino).is_err() {
-        return EstadoDoEnc2::Torto("o QUEM2 da marca vazia não saiu daqui".to_owned());
-    }
-    match resposta2_desta_marca(socket, &ninguem) {
+    match pedir2(socket, destino, &quem2(&ninguem), &ninguem) {
         Some(Resposta2::Ninguem { .. }) => EstadoDoEnc2::Fala { relogio_do_ponto },
         outra => EstadoDoEnc2::Torto(format!(
             "o QUEM2 de uma marca que ninguém registrou não disse NINGUEM: {outra:?}"
         )),
     }
+}
+
+/// Quantas vezes um pedido do ENC/2 sai antes de a sondagem dar o silêncio
+/// por resposta.
+const TENTATIVAS: u32 = 3;
+
+/// Quanto se espera pela resposta de cada tentativa.
+const ESPERA_POR_TENTATIVA: Duration = Duration::from_millis(700);
+
+/// Manda um pedido do ENC/2 e espera a resposta desta marca, até
+/// [`TENTATIVAS`] vezes. `None` quando nenhuma veio, ou quando nada saiu daqui.
+///
+/// Repetido porque um pacote perdido virava «mudo», com a frase «é um ponto
+/// anterior ao ENC/2»: o portão fechava, e o texto enganava. Os pedidos se
+/// repetem sem estrago: o mesmo `MORO2` do mesmo socket é uma retransmissão
+/// para o ponto (ADR 0062), e o `QUEM2` não guarda nada.
+fn pedir2(
+    socket: &UdpSocket,
+    destino: SocketAddr,
+    datagrama: &[u8],
+    marca: &Marca,
+) -> Option<Resposta2> {
+    let antes = socket.read_timeout().ok().flatten();
+    let _ = socket.set_read_timeout(Some(ESPERA_POR_TENTATIVA));
+    let mut veio = None;
+    for _ in 0..TENTATIVAS {
+        if socket.send_to(datagrama, destino).is_err() {
+            break;
+        }
+        veio = resposta2_desta_marca(socket, marca);
+        if veio.is_some() {
+            break;
+        }
+    }
+    let _ = socket.set_read_timeout(antes);
+    veio
 }
 
 /// Lê respostas do ENC/2 até a desta marca, ou `None` com o prazo vencido.
@@ -631,6 +670,78 @@ mod testes {
         assert!(
             !passou_no_portao(&[Err("não respondeu".to_owned())], false),
             "sem a bandeira, ninguém respondeu e passou"
+        );
+    }
+
+    /// Um ponto de hoje atrás de um intermediário que perde o primeiro
+    /// datagrama do ENC/2 que passa por ele. O resto vai e volta.
+    fn ponto_que_perde_o_primeiro_do_enc2() -> SocketAddr {
+        let ponto = ponto_de_hoje();
+        let meio = UdpSocket::bind("127.0.0.1:0").expect("o loopback não abriu");
+        let endereco = meio.local_addr().expect("sem endereço");
+        std::thread::spawn(move || {
+            let mut balde = [0_u8; TAMANHO2 + 1];
+            let mut quem_pediu: Option<SocketAddr> = None;
+            let mut perdeu = false;
+            loop {
+                let Ok((lidos, de)) = meio.recv_from(&mut balde) else {
+                    return;
+                };
+                let dados = balde.get(..lidos).unwrap_or_default();
+                if de == ponto {
+                    if let Some(volta) = quem_pediu {
+                        let _ = meio.send_to(dados, volta);
+                    }
+                    continue;
+                }
+                quem_pediu = Some(de);
+                if lidos == TAMANHO2 && !perdeu {
+                    perdeu = true;
+                    continue;
+                }
+                let _ = meio.send_to(dados, ponto);
+            }
+        });
+        endereco
+    }
+
+    #[test]
+    fn um_pacote_perdido_nao_vira_ponto_anterior_ao_enc2() {
+        // Sem repetição, a perda de um pacote virava «mudo», com a frase «é um
+        // ponto anterior ao ENC/2»: o portão fechava, e o texto enganava.
+        let sondagem =
+            perguntar(ponto_que_perde_o_primeiro_do_enc2()).expect("o ONDE tinha que responder");
+        assert!(
+            matches!(sondagem.enc2, EstadoDoEnc2::Fala { .. }),
+            "um pacote perdido virou {:?}",
+            sondagem.enc2
+        );
+    }
+
+    #[test]
+    fn o_portao_reprova_um_relogio_de_ponto_fora_de_um_minuto() {
+        // A tolerância do carimbo é de 300 s, e o relógio de quem registra
+        // erra também: um ponto 240 s adiantado recusa uma sala 61 s atrasada.
+        let com_relogio = |segundos| Sondagem {
+            visto: "127.0.0.1:1".parse().unwrap(),
+            quarto: EstadoDoQuarto::Velho,
+            enc2: EstadoDoEnc2::Fala {
+                relogio_do_ponto: segundos,
+            },
+        };
+        assert!(passou_no_portao(&[Ok(com_relogio(60))], true));
+        assert!(passou_no_portao(&[Ok(com_relogio(-60))], true));
+        assert!(
+            !passou_no_portao(&[Ok(com_relogio(61))], true),
+            "um relógio de ponto 61 s adiantado passou no portão"
+        );
+        assert!(
+            !passou_no_portao(&[Ok(com_relogio(-61))], true),
+            "um relógio de ponto 61 s atrasado passou no portão"
+        );
+        assert!(
+            passou_no_portao(&[Ok(com_relogio(600))], false),
+            "sem a bandeira, o relógio passou a reprovar"
         );
     }
 
