@@ -194,3 +194,17 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - o guarda não vê `if … else` nem `match`;
     - a linha DEBUG de `confere_geracao` não diz o comando;
     - a segunda conferência de `enviar_imagem_mod` vem depois do upload.
+- **G-servidor → integrado** (`3b0b6a7..697df16`). Os commits por item:
+  - o passo 0, os testes sem o ponto de produção: `2807cff`;
+  - o cliente, que trata `ServerShuttingDown` como fim: `586c23d`;
+  - o servidor que avisa (`ServidorEncerrando`, `encerrar_avisando`, o SAIR e o `despedir`): `271360d`.
+  - **A decisão da orquestradora (d), em `8a4bd61`.** Sem `$SEELE_ENCONTRO`, não há ponto de encontro. A produção pede o padrão por `iniciar_com_o_ponto_padrao`, e o `hospedar` do app é o único chamador. O `seeled` não sobe a escada.
+  - **Os guardas:**
+    - `recusar_a_producao` é a segunda parede;
+    - um `compile_error!` impede que a feature de teste entre no release;
+    - o guarda do app olha o `main.rs` inteiro, para pegar os pontos de entrada novos da sala pessoal e do G-casca.
+  - **Medido:** o release do app e do `seeled` sai com `features=[]`.
+  - **Notas para depois:**
+    - a janela do aviso aceita conexão nova (o Plano 3);
+    - o custo da trava sem UPnP precisa ser medido na CI;
+    - o guarda só olha o texto.
