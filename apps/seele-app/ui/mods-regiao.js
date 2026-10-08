@@ -609,7 +609,8 @@ class RegiaoDeMod {
      * `montagem` é o que `montarSom` recebeu (`{ plano, estado, origem }`, e a
      * recusa amarrada, `recusou`), guardado para o som ser carregado depois, ou
      * de novo — sem o `data:` do servidor, salvo no destino que tomou o som e
-     * até a carga ter os bytes (ver `montarSom`); `adiado` é essa mesma montagem
+     * enquanto o som espera o pedido de tocar (ver `montarSom`); `adiado` é
+     * essa mesma montagem
      * enquanto o som de uma contribuição assentou sem tocador e espera o
      * pedido de tocar, ou a marca dos sons (ver `pedirParaTocar` e
      * `tomarOsSonsDevolvidos`); `carregando` diz que os bytes ou a
@@ -2610,11 +2611,19 @@ class RegiaoDeMod {
     // uma, ela morre com a carga. Do pacote, o caminho: os bytes vêm de
     // `som_do_mod` no pedido de tocar. Do servidor do MOD, o `data:` que
     // `midia_em_bytes` devolveu (`origem.uri`) fica **só no destino que tomou
-    // o som, e só até a carga ter os bytes** (`carregarSom`): em cada destino,
-    // e pela vida do nó, ele era 1,33 vez o arquivo vezes os destinos — um som
-    // de 10 MiB num `pessoa.cartao` de 64 pessoas segurava uns 850 MB de texto.
-    // Os outros destinos guardam o plano, que traz o `doServidor`, e o que
-    // tomar a marca pede o som de novo ao servidor no pedido de tocar.
+    // o som, e só enquanto o som espera o pedido de tocar**: ele sai quando a
+    // carga tem os bytes (`carregarSom`), quando a janela não tem WebAudio
+    // para carregá-lo (`esperarOPedidoDeTocar`) e quando o destino devolve a
+    // marca (`devolverOsSons`). Sobra um caminho, que o produto não percorre:
+    // a carga que volta antes de ler os bytes — a janela que perde o WebAudio
+    // entre a montagem e o pedido, ou um `data:` sem vírgula, que o Rust não
+    // devolve —, e aí o texto fica até o nó sair. Fora de uma contribuição, a
+    // montagem não é guardada, e nenhum caminho o segura. Antes, guardado em
+    // cada destino e pela vida do nó, ele era 1,33 vez o arquivo vezes os
+    // destinos — um som de 10 MiB num `pessoa.cartao` de 64 pessoas segurava
+    // uns 850 MB de texto. Os outros destinos guardam o plano, que traz o
+    // `doServidor`, e o que tomar a marca pede o som de novo ao servidor no
+    // pedido de tocar.
     if (this.sonsDaContribuicao) {
       const sons = this.sonsDaContribuicao;
       if (!this.tomouOsSons && (sons.tomados || sons.devolvidos)) {
@@ -2660,7 +2669,10 @@ class RegiaoDeMod {
     if (!montagem) return;
     const { plano, estado } = montagem;
     if (!janelaTocaSomDeMod()) {
+      // O som não vai carregar nunca: o `data:` do servidor que a montagem
+      // guardava para o pedido de tocar não tem mais quem o leia.
       som.adiado = null;
+      delete montagem.origem.uri;
       this.falharOSom(elem, plano, "esta janela não oferece WebAudio");
       return;
     }
@@ -3084,6 +3096,10 @@ class RegiaoDeMod {
         continue;
       }
       if (tocavam.has(elem)) herdados.tocavam.add(lugares.get(elem));
+      // O `data:` do servidor que este destino ainda guardava, de um som que
+      // esperava o pedido de tocar, sai com a marca: quem a tomar — este
+      // destino de volta, ou outro — pede o som de novo ao servidor.
+      delete montagem.origem.uri;
       if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
       estado.carga += 1;
       som.carregando = false;

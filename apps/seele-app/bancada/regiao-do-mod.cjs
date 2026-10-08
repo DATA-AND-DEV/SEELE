@@ -5007,6 +5007,50 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
     regiao.soltar();
   }
 
+  // Na região, numa janela sem WebAudio: a carga volta antes de ler os bytes,
+  // e o `data:` não chega ao `delete` de `carregarSom`. Quem o solta é a
+  // montagem não ficar guardada fora de uma contribuição (rodada 2, menor 2).
+  {
+    const { b, d } = montar();
+    b.semAudioDeTempoReal();
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar(som(false));
+    await assentar();
+    const retido = dataRetido([regiao]);
+    confere(
+      `${caso} · na região, sem WebAudio`,
+      regiao.raiz.children[0]?.dataset.estado === "falhou" && retido.referencias === 0,
+      "o som do servidor falhou por falta de WebAudio, antes de ler os bytes, e a entrada dele segura o `data:` "
+        + `pela vida do nó: ${regiao.raiz.children[0]?.dataset.estado}, ${JSON.stringify(retido)}`,
+    );
+    regiao.soltar();
+  }
+
+  // Numa contribuição, numa janela sem WebAudio: o destino que tomou o som
+  // falha na montagem (`esperarOPedidoDeTocar`), e não guarda o `data:` de um
+  // som que não vai carregar (rodada 2, menor 4).
+  {
+    const { b, d } = montar();
+    b.semAudioDeTempoReal();
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const retido = dataRetido(destinos);
+    confere(
+      `${caso} · numa contribuição, sem WebAudio`,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "falhou" && retido.referencias === 0,
+      "o som do servidor de uma contribuição falhou por falta de WebAudio, e o destino que o tomou segura o "
+        + `\`data:\` de um som que não vai carregar: ${JSON.stringify(retido)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   const contribuicao = (opcoes, tocando) => {
     const montado = montar(opcoes);
     const sons = { tomados: false };
@@ -5052,6 +5096,32 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
       `${caso} · esperando o pedido de tocar`,
       (Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0) === 1 && dataRetido(destinos).referencias === 0,
       `o pedido de tocar decodificou o som do servidor, e o \`data:\` ficou: ${JSON.stringify(dataRetido(destinos))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // A marca muda com o som ainda esperando o pedido de tocar: o destino que a
+  // devolve larga o `data:` que segurava, e o que a toma o pede de novo ao
+  // servidor quando o pedido chegar (rodada 2, menor 4).
+  {
+    const montado = contribuicao({}, false);
+    const { b, destinos } = montado;
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons: montado.sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    confere(
+      `${caso} · a marca muda com o som esperando`,
+      Boolean(tomou) && tomou.tomouOsSons === false && dataRetido(destinos).referencias === 0,
+      "o destino que devolveu a marca do som que esperava o pedido de tocar segura o `data:` dele: "
+        + `${JSON.stringify(tomou && dataRetido([tomou]))}`,
     );
     for (const r of destinos) r.soltar();
   }
