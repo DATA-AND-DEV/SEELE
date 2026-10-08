@@ -91,3 +91,27 @@ fn o_unsafe_dos_crates_do_celular_mora_so_na_fronteira() {
     }
 }
 
+/// O que só o `.wasm` prova (os bytes-ouro pela fronteira, o teto de memória
+/// do motor, as importações fixas) só é guarda se alguém o roda. O
+/// `cargo xtask web` roda no job de MOD do CI, com os dois alvos instalados.
+#[test]
+fn o_ci_roda_os_crates_do_celular_dentro_do_wasm() {
+    let ci = std::fs::read_to_string(raiz().join(".github/workflows/ci.yml")).expect("o ci.yml");
+    let comandos: Vec<&str> = ci
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix("- run:").or_else(|| l.strip_prefix("run:")))
+        .map(str::trim)
+        .collect();
+    assert!(
+        comandos.iter().any(|c| *c == "cargo xtask web"),
+        "o ci.yml não roda `cargo xtask web`: o teto de memória do motor do celular e os \
+         bytes-ouro no .wasm viram guardas que ninguém roda"
+    );
+    assert!(
+        comandos.iter().any(|c| c.starts_with("rustup target add")
+            && c.contains("wasm32-unknown-unknown")
+            && c.contains("wasm32-wasip1")),
+        "o ci.yml roda `cargo xtask web` sem instalar os dois alvos wasm"
+    );
+}

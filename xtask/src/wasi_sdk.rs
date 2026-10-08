@@ -58,7 +58,26 @@ fn sufixo_desta_maquina() -> Option<&'static str> {
 /// WASI_SDK="$(cargo xtask wasi-sdk)" cargo build --release --target wasm32-wasip1 …
 /// ```
 pub(crate) fn run() -> ExitCode {
-    let resultado = sufixo_desta_maquina()
+    match caminho() {
+        Ok(pasta) => {
+            println!("{}", pasta.display());
+            ExitCode::SUCCESS
+        }
+        Err(erro) => {
+            eprintln!("wasi-sdk: {erro}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// A pasta do wasi-sdk conferido desta máquina, baixando se preciso.
+///
+/// # Errors
+///
+/// A plataforma sem pacote ou sem hash fixado, a descarga, a conferência ou a
+/// descompactação.
+pub(crate) fn caminho() -> Result<PathBuf, String> {
+    sufixo_desta_maquina()
         .ok_or_else(|| "o wasi-sdk não tem pacote para esta plataforma".to_owned())
         .and_then(|sufixo| {
             let esperado = FIXADOS
@@ -72,17 +91,7 @@ pub(crate) fn run() -> ExitCode {
                     )
                 })?;
             preparar_com(&destino(), sufixo, esperado, &|para| baixar(sufixo, para))
-        });
-    match resultado {
-        Ok(pasta) => {
-            println!("{}", pasta.display());
-            ExitCode::SUCCESS
-        }
-        Err(erro) => {
-            eprintln!("wasi-sdk: {erro}");
-            ExitCode::FAILURE
-        }
-    }
+        })
 }
 
 /// `target/wasi-sdk`, ou o mesmo sob `CARGO_TARGET_DIR`.
