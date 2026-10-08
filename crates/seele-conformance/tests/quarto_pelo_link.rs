@@ -206,7 +206,7 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
 
     // O ponto sem porta, como `PONTO_PADRAO` é escrito.
     ambiente.pedir(&ponto.ip().to_string());
-    let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+    let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
         .await
         .expect("a primeira hospedagem sobe");
     // Daqui em diante nenhum `iniciar` fala com ponto de encontro nenhum: o
@@ -255,7 +255,8 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
     let mut tentativas = 0_u32;
     let segunda = loop {
         tentativas += 1;
-        match Hospedagem::iniciar(endereco.port(), Location::Memory, "Casa", None).await {
+        match Hospedagem::iniciar(endereco.port(), Location::Memory, "Casa", None, |_| Ok(())).await
+        {
             // A mesma escuta de antes, inteira. Um socket que caiu para IPv4
             // porque o IPv6 da porta continuava preso não é a porta devolvida.
             Ok(segunda) if segunda.endereco() == endereco => break Some(segunda),

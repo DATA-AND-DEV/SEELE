@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::persistence::Location;
+use crate::persistence::{Location, Persistence};
 use crate::{Daemon, ServerConfig};
 
 /// O PERSISTENCE de um servidor hospedado, compartilhado com quem o hospeda.
@@ -70,14 +70,32 @@ impl Hospedagem {
     /// ponto todo é receber gente. `[::]` e não `0.0.0.0` porque o segundo
     /// atende só IPv4 — degrau 2 do ADR 0022, ver [`crate::alcance`].
     ///
+    /// # `antes_de_aceitar`, e por que ele é obrigatório
+    ///
+    /// Roda com o banco já aberto e migrado, e **antes** de o laço de aceitação
+    /// existir. É onde quem hospeda semeia a portaria e se admite (ADR 0030).
+    ///
+    /// Era feito por quem chamava, depois de esta função voltar — com o laço já
+    /// no ar. Num banco novo a portaria nasce desligada, e a primeira conta
+    /// criada num servidor vira a Comandante (`permissions::seat_the_arrival`):
+    /// quem chegasse nesse intervalo entrava sem bater e ficava com o
+    /// servidor. É a D-seg-1 do spec da 0.16, e a prova é
+    /// `tests/janela_do_comandante.rs`.
+    ///
+    /// Obrigatório, e não um `Option`: um `iniciar` sem gancho deixaria de pé
+    /// exatamente o caminho que abria a janela. Quem não tem nada a fazer antes
+    /// passa `|_| Ok(())`, e escreve isso.
+    ///
     /// # Errors
     ///
-    /// Falha se a porta já estiver em uso ou se o banco não abrir.
+    /// Falha se a porta já estiver em uso, se o banco não abrir, ou se
+    /// `antes_de_aceitar` falhar — e nesse caso nenhuma conexão foi aceita.
     pub async fn iniciar(
         porta: u16,
         banco: Location,
         nome: &str,
         pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
     ) -> Result<Self> {
         let config = ServerConfig {
             name: nome.to_owned(),
@@ -91,6 +109,14 @@ impl Hospedagem {
 
         let server = Arc::new(Daemon::bind(config).await?);
         let endereco = server.local_addr()?;
+
+        // **Antes de aceitar a primeira conexão.** O laço só nasce lá embaixo,
+        // depois disto; até lá, quem bater espera. Ver o cabeçalho.
+        {
+            let banco = Arc::clone(&server.server().persistence);
+            let mut persistence = banco.lock().await;
+            antes_de_aceitar(&mut persistence)?;
+        }
 
         // A escada do ADR 0022, aqui e não no `Daemon`: quem hospeda de dentro
         // do cliente é justamente quem está atrás de um roteador doméstico. Um
@@ -384,7 +410,7 @@ mod tests {
 
     #[tokio::test]
     async fn um_server_hospedado_aceita_conexao() {
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
 
@@ -403,7 +429,7 @@ mod tests {
     /// palavra «nome» neste arquivo ficaria verde com o nome sendo ignorado.
     #[tokio::test]
     async fn o_nome_publico_vira_o_alvo_do_link_e_o_numero_desce_para_alternativo() {
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
 
@@ -440,7 +466,7 @@ mod tests {
     /// launcher de quem recebe procurar no catálogo algo que ninguém publicou.
     #[tokio::test]
     async fn o_link_so_anuncia_a_versao_quando_esta_build_tem_carimbo() {
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
         let link = hospedagem.convite();
@@ -464,7 +490,7 @@ mod tests {
     async fn escuta_em_todas_as_interfaces_e_nao_so_em_localhost() {
         // Um servidor hospedado que só aceitasse localhost serviria para falar
         // sozinho, que é o oposto do motivo de existir.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
         assert!(hospedagem.endereco().ip().is_unspecified());
@@ -473,7 +499,7 @@ mod tests {
     #[tokio::test]
     async fn o_endereco_para_os_amigos_nao_e_o_de_escuta() {
         // `0.0.0.0` é onde se escuta, não um lugar aonde alguém possa ir.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
 
@@ -490,7 +516,7 @@ mod tests {
     async fn o_convite_carrega_a_impressao_digital_desta_instancia() {
         // Sem ela o primeiro contato volta a ser cego, e o convite deixa de ser
         // a coisa que torna o TOFU verificável.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
 
@@ -512,7 +538,7 @@ mod tests {
         // levava só o endereço do degrau mais alto, e quem estava na mesma casa
         // deixou de conseguir entrar. Agora o endereço da rede local está
         // sempre lá — e é o primeiro, porque é o caso comum.
-        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
         let convite = hospedagem.convite();
@@ -551,7 +577,7 @@ mod tests {
         // Sem degrau 4 nenhum: é o servidor de antes desta mudança, e é a régua.
         std::env::set_var(crate::alcance::encontro::VARIAVEL, "nao");
         let relogio = std::time::Instant::now();
-        let sem = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let sem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir sem ponto de encontro");
         let sem_encontro = relogio.elapsed();
@@ -562,7 +588,7 @@ mod tests {
         // Com um ponto de encontro que não responde nunca.
         std::env::set_var(crate::alcance::encontro::VARIAVEL, BURACO_NEGRO);
         let relogio = std::time::Instant::now();
-        let com = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let com = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("hospedar falhou porque o ponto de encontro está fora do ar");
         let com_encontro = relogio.elapsed();
@@ -611,13 +637,13 @@ mod tests {
     async fn encerrar_libera_a_porta_para_hospedar_de_novo() {
         // Fechar uma conversa e abrir outra é o caso normal, e sem esperar o
         // endpoint terminar isso falha com "endereço já em uso".
-        let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None)
+        let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
         let porta = primeira.endereco().port();
         primeira.encerrar().await;
 
-        let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa", None).await;
+        let segunda = Hospedagem::iniciar(porta, Location::Memory, "Casa", None, |_| Ok(())).await;
         assert!(
             segunda.is_ok(),
             "a porta continuou presa: {:?}",
