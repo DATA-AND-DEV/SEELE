@@ -81,7 +81,7 @@ A ordem é fixada pelos arquivos que vários lotes editam:
 |---|---|---|
 | 1 | C · H (+K1-m1) · K2 (+K1-m2) · M1, sem `enlace.rs` · ferramentas (P51-15, P51-21, L1-m2, L1-m3, L1-m4) · P54 | — |
 | 2 | D · K5 · M2 (+ a montagem de certificado do 1B) · P53 | D depois do C · K5 depois do K2 · M2 depois do M1 e do H · P53 depois do H |
-| 3 | E · J · G-servidor | E depois do D · J depois do K5, do P53 e do P54 · G-servidor depois do M2 |
+| 3 | E · J · G-servidor (com os testes que deixam de falar com o ponto de produção) | E depois do D · J depois do K5, do P53 e do P54 · G-servidor depois do M2 |
 | 4 | F · K3 (sem o P49-10) | F depois do E e do G-servidor · K3 depois do J |
 | 5 | I, com o áudio que só abre na sala | I depois do F e do J |
 | 6 | K4 | K4 depois do I e do K3 |
@@ -1179,7 +1179,7 @@ Cada um fica vermelho quando se reverte a sua parte. `a_ajuda_so_promete_teclas_
 
 ## Lote G-servidor — quem hospeda fecha avisando: o servidor difunde `ServerShuttingDown` terminal antes de cair
 
-**Onda 3, depois do M2.** Itens: a metade servidor do P50-4 e do F1-fechar.
+**Onda 3, depois do M2.** Itens: a metade servidor do P50-4 e do F1-fechar, e **os testes que falam com o ponto de encontro de produção** (achado da revisão do M2, decidido pela orquestradora em 08/10).
 
 **Na 0.16.** O G antigo se divide:
 - **G-servidor (este lote):** o servidor avisa cada sessão antes de cair, e o cliente trata `ServerShuttingDown` como fim. Ele já serve ao SAIR de quem hospeda, pelo comando `disconnect` da casca, que chama `server.encerrar().await` depois de `desmontar_o_cliente`.
@@ -1193,10 +1193,38 @@ Cada um fica vermelho quando se reverte a sua parte. `a_ajuda_so_promete_teclas_
 - `crates/seele-core/src/enlace.rs`;
 - `crates/seele-conformance/tests/bateria_interna.rs`;
 - `crates/seele-conformance/tests/quem_hospeda_fecha.rs` (novo).
+- para o passo 0: `crates/seele-server/src/alcance/encontro.rs`, `crates/seele-conformance/tests/ejetar.rs` e o `Cargo.toml` de `seele-server` e de `seele-conformance`, se o guarda vier por uma feature.
 
 **Não toca `frases.js`.** `ServerShuttingDown` também é a recusa do aperto de mão quando o banco não pode ser lido (`Refusal { reason: DisconnectReason::ServerShuttingDown, detail: "could not read the server…" }`, `session.rs`). Uma frase nova como «QUEM HOSPEDA FECHOU O SERVIDOR» seria falsa ali. A frase de hoje, «O SERVIDOR ESTÁ ENCERRANDO» (`frases.js`, `MOTIVOS`), vale para os dois casos, e fica.
 
 **Estado em `d4eb6f1`:** nada feito.
+
+### 0. Os testes não falam com o ponto de encontro de produção (primeiro)
+**O defeito, medido na revisão do M2.**
+- Sem `$SEELE_ENCONTRO`, `Convocacao::do_ambiente` (`alcance/encontro.rs`) cai em `PONTO_PADRAO = "encontro.seele.app.br"`. Se o DNS falhar, cai nos IPs de `REDE_DO_PADRAO`.
+- `Escada::subir` chama `encontro::abrir` sempre que a máquina não tem IPv4 global.
+- Quem sai assim para a rede:
+  - os testes de `hospedagem.rs` que sobem sem trocar a variável (9 chamadas de `Hospedagem::iniciar`);
+  - as 2 chamadas de `crates/seele-conformance/tests/ejetar.rs`;
+  - o `quem_hospeda_fecha.rs` novo deste lote.
+- Cada rodada registra a marca de um servidor de teste no quarto da VPS de produção e deixa lá o IP público da máquina. Nenhum teste afirma esse degrau. Um teste que depende da rede de fora é flaky, e ainda mexe no quarto de produção.
+
+**O que a orquestradora pede:**
+- todo teste aponta um ponto local, ou nenhum (`nao`);
+- **um guarda reprova se um teste resolver o endereço do ponto padrão de produção**;
+- a prova por reversão: com o guarda no lugar e o endereço de produção de volta num teste, esse teste reprova.
+
+**O caminho, para o implementador medir e escolher:**
+- Os testes de `hospedagem.rs` usam o `AmbienteDoEncontro` que o M2 criou em `seele-server/src/lib.rs` (`mod ambiente_de_teste`, com a trava), pedindo `nao` ou um ponto local. Outra saída é uma costura de teste que passe `convocacao = None` à `Hospedagem::iniciar` sem ler o ambiente. Diga qual, e por quê.
+- O `ejetar.rs` já serializa pela `vaga`. Ele usa um ambiente com `nao`, como o `quarto_pelo_link`.
+- O guarda tem de alcançar também os testes de integração do `seele-conformance`, que não veem o `cfg(test)` do `seele-server`. Uma saída é uma feature de teste do `seele-server`, ligada pela `dev-dependency` do `seele-conformance` e pelo próprio `cfg(test)`, em que resolver o `PONTO_PADRAO` (ou os IPs de `REDE_DO_PADRAO`) entra em pânico com uma frase que diz o que quebra. **Meça que um build de release do app não leva a feature**: com o resolvedor 2, a feature de uma `dev-dependency` não se une ao build normal, mas confira com `cargo tree -e features` e diga o resultado. Se a feature não servir, proponha outra forma e pare com NEEDS_CONTEXT.
+- Não use o `[env]` do `.cargo/config.toml`: ele vale também para o `cargo run` de quem desenvolve.
+- O `main.rs` do app (a hospedagem de verdade) não muda.
+
+**A prova:**
+- o guarda reprova um teste que sobe a hospedagem sem ambiente, com a frase dele;
+- a reversão é tirar o ambiente de um dos testes de `hospedagem.rs` e do `ejetar.rs`, e ver o vermelho;
+- todos os testes que sobem hospedagem passam sem rede para a VPS. Se der, meça com o DNS do ponto padrão inalcançável, sem mudar ajuste do sistema.
 
 ### 1. Servidor
 - **O evento.** Uma variante interna de difusão em `pub enum Event` (`server.rs`), fora do fio, **com a razão**: `Event::ServidorEncerrando { reason: DisconnectReason }`. A razão é para que o Plano 2 mande `ChamadaEncerrada` pela mesma via (recomendação do levantamento F1).
