@@ -2527,6 +2527,12 @@ impl Instalador {
             let caminho = std::env::var("PATH").unwrap_or_default();
             comando.env("PATH", format!("{}:{caminho}", ferramentas.display()));
         }
+        Self::executar(comando)
+    }
+
+    /// Roda o comando e devolve o código de saída e as duas saídas, a padrão
+    /// seguida do erro.
+    fn executar(mut comando: Command) -> (i32, String) {
         let saida = comando.output().expect("o sh tem que executar");
         (
             saida.status.code().unwrap_or(-1),
@@ -2536,6 +2542,31 @@ impl Instalador {
                 String::from_utf8_lossy(&saida.stderr)
             ),
         )
+    }
+
+    /// Roda o `install.sh` como num Mac Apple Silicon cujo `PATH` não tem o
+    /// `sysctl`: só o dublê do `uname` (Darwin, arm64) e os dois diretórios
+    /// onde o macOS guarda o que o script usa. O `sysctl` de verdade mora em
+    /// `/usr/sbin`, que não está aqui, e é o script que tem de achá-lo.
+    ///
+    /// Sem dublê de `sysctl` de propósito: quem responde é o da máquina, e é
+    /// isso que o teste que usa isto quer provar.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    fn rodar_num_mac_sem_o_sysctl_no_caminho(&self) -> (i32, String) {
+        let ferramentas = self.base.join("ferramentas");
+        escrever(
+            &ferramentas.join("uname"),
+            "#!/bin/sh\ncase \"${1:-}\" in\n    -m) echo 'arm64' ;;\n    *) echo 'Darwin' ;;\nesac\n",
+            true,
+        );
+        let mut comando = Command::new("sh");
+        comando
+            .arg(raiz().join("install.sh"))
+            .env("SEELE_VERSION", "v9.9.9")
+            .env("SEELE_BASE", format!("file://{}", self.versao().display()))
+            .env("SEELE_BIN", self.base.join("bin"))
+            .env("PATH", format!("{}:/usr/bin:/bin", ferramentas.display()));
+        Self::executar(comando)
     }
 }
 
@@ -2683,6 +2714,103 @@ fn uma_maquina_sem_pacote_da_arquitetura_dela_recebe_a_frase_de_compilar() {
         assert!(
             !instalador.instalado().exists(),
             "{sistema} {arquitetura}: a recusa deixou um seeled instalado:\n{texto}"
+        );
+    }
+}
+
+/// **O `sysctl` mora em `/usr/sbin`, e um `curl | sh` nem sempre o tem no `PATH`.**
+///
+/// Com um `PATH` sem ele — o de um `sh -c` mínimo, o de um contêiner, o de um
+/// `env -i` —, o comando não era achado, o `2>/dev/null || true` engolia o erro
+/// e devolvia vazio, e o vazio é a resposta de um Mac Intel: um Mac Apple
+/// Silicon recebia «este Mac é Intel» e a frase de compilar, sem que nada dissesse
+/// que o `sysctl` nem tinha rodado.
+///
+/// Este roda o script de verdade: o `uname` é dublê (Darwin arm64) e o `PATH`
+/// não tem o `sysctl`, que é o da máquina. **Só roda num Mac Apple Silicon**,
+/// porque é lá que o `sysctl` de `/usr/sbin` responde `1`; nas outras máquinas
+/// quem guarda é o teste de texto logo abaixo.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn um_mac_apple_silicon_sem_o_sysctl_no_caminho_ainda_e_apple_silicon() {
+    for onde in ["/usr/bin/sysctl", "/bin/sysctl"] {
+        assert!(
+            !std::path::Path::new(onde).exists(),
+            "o `sysctl` apareceu em {onde}, dentro do `PATH` que este teste monta sem ele: \
+             o teste não prova mais nada"
+        );
+    }
+    assert!(
+        std::path::Path::new("/usr/sbin/sysctl").exists(),
+        "esta máquina não tem o `sysctl` em /usr/sbin, e o script não tem onde achá-lo"
+    );
+    let instalador = Instalador::novo();
+    let seeled = instalador.publicar_pacote("macos");
+    let soma = instalador.soma("seele-cli-9.9.9-macos.tar.gz");
+    instalador.somas(&format!("{soma}  seele-cli-9.9.9-macos.tar.gz\n"));
+
+    let (estado, texto) = instalador.rodar_num_mac_sem_o_sysctl_no_caminho();
+
+    assert!(
+        !texto.contains("este Mac é Intel"),
+        "o install.sh chamou de Intel um Mac Apple Silicon cujo PATH não tem o `sysctl`: o \
+         comando não foi achado, o erro foi engolido e o vazio virou a resposta de um Intel:\n{texto}"
+    );
+    assert_eq!(
+        estado, 0,
+        "num Mac Apple Silicon sem o `sysctl` no PATH, com o pacote publicado e a soma certa, o \
+         install.sh não instalou:\n{texto}"
+    );
+    assert_eq!(
+        std::fs::read(instalador.instalado()).ok(),
+        Some(seeled),
+        "o seeled instalado não é o que estava no pacote:\n{texto}"
+    );
+}
+
+/// O mesmo defeito, para toda máquina: a chamada do `sysctl` no `install.sh`
+/// acrescenta `/usr/sbin` ao `PATH` **depois** do que a pessoa já tem, e não
+/// chama `/usr/sbin/sysctl` por caminho absoluto.
+///
+/// O fim do `PATH`, e não o começo nem o caminho absoluto, porque o dublê que
+/// `Instalador::rodar_contra` põe na frente tem de continuar interceptando: um
+/// `sysctl` chamado por caminho absoluto responderia a máquina de quem roda o
+/// teste, e os testes de Rosetta e de Intel deixariam de provar o que dizem.
+#[test]
+fn a_chamada_do_sysctl_no_instalador_alcanca_o_usr_sbin_depois_do_path_da_pessoa() {
+    let texto = std::fs::read_to_string(raiz().join("install.sh"))
+        .expect("o install.sh tem que ser legível");
+    let codigo = sem_comentario(&texto);
+    let chamadas: Vec<&str> = codigo
+        .lines()
+        .filter(|linha| linha.contains("sysctl"))
+        .collect();
+    assert!(
+        !chamadas.is_empty(),
+        "o install.sh deixou de chamar o `sysctl`, e este guarda não tem o que conferir: a \
+         arquitetura do Mac passou a ser decidida de outro jeito"
+    );
+    for linha in chamadas {
+        let linha = linha.trim();
+        assert!(
+            linha.contains("/usr/sbin"),
+            "a chamada do `sysctl` não alcança /usr/sbin, onde ele mora no macOS: com um PATH \
+             que não o tem, o comando não é achado, o `|| true` engole o erro e um Mac Apple \
+             Silicon recebe «este Mac é Intel»:\n  {linha}"
+        );
+        assert!(
+            !linha.contains("/usr/sbin/sysctl"),
+            "a chamada do `sysctl` usa o caminho absoluto, e o dublê dos testes deixa de \
+             interceptá-la:\n  {linha}"
+        );
+        let path = linha.find("$PATH");
+        let usr_sbin = linha.find("/usr/sbin");
+        assert!(
+            path.zip(usr_sbin)
+                .is_some_and(|(path, usr_sbin)| path < usr_sbin),
+            "o /usr/sbin vem antes do `$PATH` da pessoa, e não depois dele: o `sysctl` de lá \
+             passaria na frente do dublê dos testes, e de qualquer outro que ela tenha posto \
+             de propósito:\n  {linha}"
         );
     }
 }
