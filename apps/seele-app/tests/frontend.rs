@@ -13647,20 +13647,44 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         "`codigo_do_mod` deixou de passar por `ler_codigo_do_mod`, e o que este guarda confere \
          já não é o comando: {codigo}"
     );
+    // Desde o P51-09, um comando de MOD confere por `recusar_se_morta`, que é
+    // `confere_geracao` com a recusa que a janela lê. As marcas são lidas sem
+    // as linhas de comentário: uma frase em prosa não confere geração nenhuma.
+    let sem_comentarios = |corpo: &str| -> String {
+        corpo
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     for (comando, marca) in [
         ("fn mod_request(", "session.confere_geracao(geracao)?"),
-        ("fn ler_codigo_do_mod(", "session.geracao_vale(geracao)"),
+        (
+            "fn ler_codigo_do_mod(",
+            "session.recusar_se_morta(geracao)?",
+        ),
     ] {
         let corpo = rust.split_once(comando).expect(comando).1;
-        let corpo = corpo.split_once("\n}\n").map_or(corpo, |(a, _)| a);
+        let corpo = sem_comentarios(corpo.split_once("\n}\n").map_or(corpo, |(a, _)| a));
         assert!(
             corpo.contains(marca),
             "`{comando}` deixou de conferir a geração de quem chamou"
         );
     }
+    // E `recusar_se_morta` conta: é `confere_geracao`, e não um `if` seu.
+    let recusar = rust
+        .split_once("fn recusar_se_morta(")
+        .expect("`recusar_se_morta`")
+        .1;
+    let recusar = sem_comentarios(recusar.split_once("\n    }\n").map_or(recusar, |(a, _)| a));
+    assert!(
+        recusar.contains("self.confere_geracao(geracao)"),
+        "`recusar_se_morta` deixou de passar por `confere_geracao`, e a recusa de um comando de \
+         MOD deixou de subir `comandos_de_geracao_morta`: {recusar}"
+    );
 
     // **E a reserva conta as duas recusas dela**: a do começo, por
-    // `confere_geracao`, que conta, e a de `registrar_reserva`, sob o cadeado,
+    // `recusar_se_morta`, que conta, e a de `registrar_reserva`, sob o cadeado,
     // pelo contador da sessão. `registrar_reserva` não tem sessão para contar
     // sozinha — é o contador que a reserva lhe passa que sobe — e o teste dela
     // (`a_reserva_recusada_por_geracao_morta_e_contada`) prova a conta, não
@@ -13669,14 +13693,9 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
         .split_once("fn reservar_no_executor(")
         .expect("`reservar_no_executor`")
         .1;
-    let reservar = reservar.split_once("\n}\n").map_or(reservar, |(a, _)| a);
-    let reservar: String = reservar
-        .lines()
-        .filter(|linha| !linha.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let reservar = sem_comentarios(reservar.split_once("\n}\n").map_or(reservar, |(a, _)| a));
     assert!(
-        reservar.contains("session.confere_geracao(geracao)"),
+        reservar.contains("session.recusar_se_morta(geracao)?"),
         "a reserva voltou a recusar a geração morta do começo sem contá-la em \
          `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou: \
          {reservar}"
