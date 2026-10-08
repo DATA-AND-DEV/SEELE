@@ -13103,7 +13103,9 @@ mod a_midia_recusada_e_dita_no_registro {
     fn o_id_que_a_janela_manda_nao_forja_linha() {
         let (_, rastro) = capturar(|| {
             recusa_de_midia_dita(
-&BaldesDoRegistro::default(), origem(),                 "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
+                &BaldesDoRegistro::default(),
+                origem(),
+                "prova/midia\n2026-09-30T00:00:00.000000Z  WARN seele_app: linha forjada pela janela",
                 "servidor",
                 FalhaNoMod::Recusado {
                     motivo: "nao-e-base64".to_owned(),
