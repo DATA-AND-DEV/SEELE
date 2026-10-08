@@ -12738,6 +12738,56 @@ mod o_teto_de_vazao_do_registro {
         );
     }
 
+    /// **Os comandos passam às portas os baldes da sessão.**
+    ///
+    /// Os testes acima medem as portas com baldes que eles mesmos criam; os
+    /// comandos precisam de `AppHandle`, de conexão ou de sessão e não sobem
+    /// num teste. Um `&BaldesDoRegistro::default()` dentro de um comando
+    /// compila, deixa os testes acima verdes e tira o teto: cada chamada
+    /// ganharia um balde cheio. Aqui, toda chamada de porta nos cinco comandos
+    /// tem de levar `&session.baldes_do_registro` no primeiro argumento.
+    #[test]
+    fn os_comandos_passam_os_baldes_da_sessao() {
+        const PORTAS: [&str; 7] = [
+            "registrar_da_janela_em(",
+            "midia_declarada_do_mod(",
+            "midia_servida_dita(",
+            "som_declarado_do_mod(",
+            "som_servido_dito(",
+            "midia_do_servidor_dita(",
+            "recusa_de_midia_dita(",
+        ];
+        let fonte = super::fonte_sem_comentarios();
+        for (comando, chamadas_minimas) in [
+            ("fn registrar_da_janela(", 1),
+            ("fn midia_do_mod(", 2),
+            ("fn som_do_mod(", 2),
+            ("fn midia_em_bytes(", 1),
+            ("async fn ler_imagem_mod(", 2),
+        ] {
+            let codigo: String = super::corpo_de(&fonte, comando)
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            let mut chamadas = 0;
+            for porta in PORTAS {
+                for depois in codigo.split(porta).skip(1) {
+                    chamadas += 1;
+                    assert!(
+                        depois.starts_with("&session.baldes_do_registro,"),
+                        "`{comando}` chama `{porta}` sem `&session.baldes_do_registro`: com \
+                         outros baldes, a porta perde o teto de vazão da sessão"
+                    );
+                }
+            }
+            assert!(
+                chamadas >= chamadas_minimas,
+                "`{comando}` chama {chamadas} das portas medidas, e chamava \
+                 {chamadas_minimas}: a linha dele saiu por fora delas, e do teto"
+            );
+        }
+    }
+
     /// **A linha que passa pelo transbordo diz que passou.** A conta que ela
     /// leva é do balde dividido — de todos os ids que caíram nele —, e sem o
     /// campo ela se lia como sendo só do id da linha.
