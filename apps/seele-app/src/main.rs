@@ -2335,12 +2335,14 @@ const TETO_DO_ID_NO_REGISTRO: usize = 128;
 /// [`TETO_DO_ID_NO_REGISTRO`] e sem caractere que quebre ou inverta a linha
 /// ([`quebra_ou_inverte_a_linha`]).
 ///
-/// Uma função só para as três portas que escrevem `mod_id=` com um id que
-/// chega da janela — a própria janela ([`registrar_da_janela`]) e as recusas
-/// de mídia ([`recusa_de_midia_dita`]) e de carga ([`recusa_de_carga_dita`])
-/// do Rust. É por esse campo que uma busca só junta o que elas disseram do
-/// mesmo MOD, e um tratamento repetido à mão em cada uma podia divergir sem
-/// que nada reclamasse.
+/// Uma função só para as portas que escrevem `mod_id=` com um id que chega da
+/// janela — a própria janela ([`registrar_da_janela`]), as recusas de mídia
+/// ([`recusa_de_midia_dita`]) e de carga ([`recusa_de_carga_dita`]) do Rust, o
+/// pedido de MOD ([`mod_request`], pelos três braços de [`IdDoPedido`]), a
+/// mídia vinda do servidor ([`midia_em_bytes`]) e o arquivo escolhido para um
+/// MOD ([`escolher_para_o_mod`]). É por esse campo que uma busca só junta o
+/// que elas disseram do mesmo MOD, e um tratamento repetido à mão em cada uma
+/// podia divergir sem que nada reclamasse.
 ///
 /// Sem aspas, porque `mod_id=autor/nome` é a grafia que se procura: é o filtro
 /// que impede uma quebra de linha no id de escrever uma segunda linha com a
@@ -2923,14 +2925,96 @@ fn mod_request(
     // pediu — e foi exatamente essa ambiguidade que me custou três execuções
     // na medição de 19/09. Com estas duas linhas a pergunta «ele chegou?» tem
     // resposta sem ninguém instrumentar nada.
-    tracing::debug!(mod_id = %id, geracao, request, channel, "pedido de MOD a caminho do servidor");
+    pedido_a_caminho_dito(&id, geracao, request, channel);
     let saiu = session
         .connection()?
         .mod_request(request, id.clone(), channel, payload);
     if let Err(erro) = &saiu {
-        tracing::warn!(mod_id = %id, request, %erro, "pedido de MOD recusado na saída");
+        pedido_recusado_na_saida_dito(&id, request, erro);
     }
     saiu
+}
+
+/// **O id de um pedido de MOD como as linhas de [`mod_request`] o levam**:
+/// os três braços da metade servidor (`executar`, em
+/// `crates/seele-server/src/mods/pedidos.rs`), para que as duas metades
+/// escrevam o mesmo pedido do mesmo jeito.
+///
+/// O id chega da janela, e em `%` sai cru: o formatador escapa só a mensagem.
+/// Por isso ele passa por [`id_no_registro`], e o que o filtro deixa decide o
+/// braço.
+enum IdDoPedido {
+    /// O id vazio: o pedido do catálogo do servidor (`carregarMods`), que não
+    /// é de MOD nenhum. Sai como `catalogo=true`, sem `mod_id=` em branco —
+    /// que casaria com qualquer busca por `mod_id=`.
+    Catalogo,
+    /// Um id que não é vazio, mas é feito só do que o filtro tira (e de
+    /// espaço): escrito, ele seria o mesmo `mod_id=` em branco. Sai como
+    /// `mod_id_ilegivel=true`.
+    Ilegivel,
+    /// O id como a linha o leva, já filtrado.
+    Legivel(String),
+}
+
+impl IdDoPedido {
+    /// Qual dos três braços é `id`.
+    fn de(id: &str) -> Self {
+        let legivel = id_no_registro(id);
+        if id.is_empty() {
+            Self::Catalogo
+        } else if legivel.trim().is_empty() {
+            Self::Ilegivel
+        } else {
+            Self::Legivel(legivel)
+        }
+    }
+}
+
+/// **Diz no registro que um pedido de MOD saiu para o servidor**, com o id
+/// por um dos três braços de [`IdDoPedido`].
+fn pedido_a_caminho_dito(id: &str, geracao: u64, request: u32, channel: u32) {
+    match IdDoPedido::de(id) {
+        IdDoPedido::Catalogo => tracing::debug!(
+            catalogo = true,
+            geracao,
+            request,
+            channel,
+            "pedido de MOD a caminho do servidor"
+        ),
+        IdDoPedido::Ilegivel => tracing::debug!(
+            mod_id_ilegivel = true,
+            geracao,
+            request,
+            channel,
+            "pedido de MOD a caminho do servidor"
+        ),
+        IdDoPedido::Legivel(legivel) => tracing::debug!(
+            mod_id = %legivel,
+            geracao,
+            request,
+            channel,
+            "pedido de MOD a caminho do servidor"
+        ),
+    }
+}
+
+/// **Diz no registro que um pedido de MOD foi recusado antes de sair**, com o
+/// id pelos mesmos três braços ([`IdDoPedido`]).
+fn pedido_recusado_na_saida_dito(id: &str, request: u32, erro: &ConnectionError) {
+    match IdDoPedido::de(id) {
+        IdDoPedido::Catalogo => {
+            tracing::warn!(catalogo = true, request, %erro, "pedido de MOD recusado na saída");
+        }
+        IdDoPedido::Ilegivel => tracing::warn!(
+            mod_id_ilegivel = true,
+            request,
+            %erro,
+            "pedido de MOD recusado na saída"
+        ),
+        IdDoPedido::Legivel(legivel) => {
+            tracing::warn!(mod_id = %legivel, request, %erro, "pedido de MOD recusado na saída");
+        }
+    }
 }
 
 // ---------------------------------------------------------------- anexos
@@ -5570,9 +5654,10 @@ fn recusa_de_midia_dita(
 /// corte contado antes do escape deixava quinhentos e doze deles virarem 5122
 /// caracteres na linha, com as aspas.
 ///
-/// O escape é o que importa: o formatador do registro escapa ANSI em `%`, mas
-/// não quebra de linha, e um `\n` no meio do motivo escreveria no `seele.log`
-/// uma segunda linha com a cara do produto. As aspas fazem o resto:
+/// O escape é o que importa: o formatador escapa só a mensagem, e só ANSI; um
+/// campo em `%` sai cru, e quem protege a linha são as aspas e o escape desta
+/// função. Cru, um `\n` no meio do motivo escreveria no `seele.log` uma
+/// segunda linha com a cara do produto; e sem aspas
 /// `motivo=Prazo da transferência esgotado.` não se lê como chave=valor.
 fn motivo_no_registro(motivo: &str) -> String {
     let cortado = executor::ate_o_teto_do_registro(motivo);
@@ -5931,7 +6016,7 @@ fn midia_em_bytes(
         &base64,
     )?;
     tracing::debug!(
-        mod_id = %id,
+        mod_id = %id_no_registro(&id),
         geracao,
         papel = midia.papel,
         bytes = midia.bytes,
@@ -6265,7 +6350,7 @@ async fn escolher_para_o_mod(
         .ok_or(FalhaNoMod::Recusado {
             motivo: "arquivos-demais-de-pe".to_owned(),
         })?;
-    tracing::info!(mod_id = %id, geracao, arquivo = numero, tipo = lida.media_type, bytes = tamanho, "arquivo escolhido para um MOD");
+    tracing::info!(mod_id = %id_no_registro(&id), geracao, arquivo = numero, tipo = lida.media_type, bytes = tamanho, "arquivo escolhido para um MOD");
     Ok(Some(EscolhidoParaOMod {
         id: numero,
         tipo: lida.media_type,
@@ -12476,6 +12561,146 @@ mod o_teto_de_vazao_do_registro {
             "as quatro portas do mesmo MOD não dividem o balde dele: cada uma tem uma rajada, e \
              o teto de um MOD é quatro vezes o escrito: {rastro}"
         );
+    }
+}
+
+/// **O id de um MOD que chega da janela sai escapado em toda linha do
+/// registro**, e não só nas recusas.
+///
+/// Um campo em `%` sai cru no `seele.log`: o formatador escapa só a mensagem,
+/// e só ANSI. As duas linhas de `mod_request` e as de `midia_em_bytes` e de
+/// `escolher_para_o_mod` escreviam o id que o comando recebe da janela como
+/// veio — e um `\n` nele escrevia uma segunda linha com a cara do produto.
+#[cfg(test)]
+mod o_id_do_pedido_de_mod_no_registro {
+    use super::{pedido_a_caminho_dito, pedido_recusado_na_saida_dito, ConnectionError};
+    use crate::rastro_de_teste::capturar;
+
+    /// As duas linhas de `mod_request`, cada uma com o rastro dela.
+    fn as_duas_linhas(id: &str) -> [(&'static str, String); 2] {
+        let ((), a_caminho) = capturar(|| pedido_a_caminho_dito(id, 7, 3, 1));
+        let ((), recusado) = capturar(|| {
+            pedido_recusado_na_saida_dito(id, 3, &ConnectionError::NotConnected);
+        });
+        [
+            ("pedido_a_caminho_dito", a_caminho),
+            ("pedido_recusado_na_saida_dito", recusado),
+        ]
+    }
+
+    #[test]
+    fn uma_quebra_de_linha_no_id_nao_forja_outra_linha() {
+        for (linha, rastro) in as_duas_linhas("a/b\nWARN seele_app: forjada") {
+            assert_eq!(
+                rastro.lines().count(),
+                1,
+                "o id que a janela manda escreveu, por `{linha}`, uma segunda linha no seele.log \
+                 com a cara do produto: {rastro}"
+            );
+            assert!(
+                rastro.contains("mod_id=a/bWARN seele_app: forjada"),
+                "`{linha}` perdeu o id, ou o escreveu de outro jeito que as recusas \
+                 (`id_no_registro`): {rastro}"
+            );
+        }
+    }
+
+    /// **O id vazio é o catálogo**, como na metade servidor (`executar`, em
+    /// `seele-server/src/mods/pedidos.rs`): `catalogo=true`, e nenhum
+    /// `mod_id=` em branco que uma busca por `mod_id=` ache.
+    #[test]
+    fn o_id_vazio_e_o_catalogo_e_nao_um_mod_id_em_branco() {
+        for (linha, rastro) in as_duas_linhas("") {
+            assert!(
+                rastro.contains("catalogo=true") && !rastro.contains("mod_id"),
+                "`{linha}` escreveu o pedido do catálogo, que não é de MOD nenhum, sem \
+                 `catalogo=true` ou com um `mod_id=` em branco: {rastro}"
+            );
+        }
+    }
+
+    /// **Um id que o filtro esvazia é ilegível**, e não um `mod_id=` em
+    /// branco: o terceiro braço da metade servidor.
+    #[test]
+    fn um_id_que_o_filtro_esvazia_e_ilegivel() {
+        for (linha, rastro) in as_duas_linhas("\n\u{202E} ") {
+            assert!(
+                rastro.contains("mod_id_ilegivel=true") && !rastro.contains("mod_id="),
+                "`{linha}` escreveu um id que o filtro esvazia como um `mod_id=` em branco, e \
+                 não como ilegível: {rastro}"
+            );
+        }
+    }
+
+    #[test]
+    fn um_id_de_verdade_sai_como_mod_id() {
+        for (linha, rastro) in as_duas_linhas("seele/perfis") {
+            assert!(
+                rastro
+                    .split_whitespace()
+                    .any(|pedaco| pedaco == "mod_id=seele/perfis"),
+                "`{linha}` deixou de escrever `mod_id=seele/perfis`, que é o que o guia manda \
+                 procurar: {rastro}"
+            );
+        }
+    }
+
+    /// O corpo de `funcao` em `main.rs`, sem as linhas de comentário e sem
+    /// espaço nenhum.
+    fn corpo_sem_espaco(fonte: &str, funcao: &str) -> String {
+        fonte
+            .split(funcao)
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .unwrap_or_else(|| panic!("`{funcao}` sumiu de main.rs"))
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .flat_map(str::chars)
+            .filter(|c| !c.is_whitespace())
+            .collect()
+    }
+
+    /// **Nenhum `mod_id = %id` usa o id cru do comando**, nas três portas que
+    /// o escreviam assim e nas duas funções de `mod_request`. Os comandos não
+    /// sobem num teste — precisam de conexão, de `AppHandle` ou do seletor do
+    /// sistema —, e uma linha escrita à mão dentro de um deles deixaria os
+    /// testes acima verdes com o id cru no registro de novo.
+    #[test]
+    fn nenhum_mod_id_em_display_usa_o_id_cru_do_comando() {
+        let fonte = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+        )
+        .expect("main.rs legível")
+        .replace("\r\n", "\n");
+        for funcao in [
+            "fn mod_request(",
+            "fn pedido_a_caminho_dito(",
+            "fn pedido_recusado_na_saida_dito(",
+            "fn midia_em_bytes(",
+            "async fn escolher_para_o_mod(",
+        ] {
+            let codigo = corpo_sem_espaco(&fonte, funcao);
+            for depois in codigo.split("mod_id=%").skip(1) {
+                let valor: String = depois
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                assert_ne!(
+                    valor, "id",
+                    "`{funcao}` escreve `mod_id = %id` com o id cru que a janela manda: em `%` \
+                     ele sai sem escape, e uma quebra de linha nele escreve uma segunda linha \
+                     no seele.log com a cara do produto"
+                );
+            }
+        }
+        let pedido = corpo_sem_espaco(&fonte, "fn mod_request(");
+        for funcao in ["pedido_a_caminho_dito(", "pedido_recusado_na_saida_dito("] {
+            assert!(
+                pedido.contains(funcao),
+                "`fn mod_request(` deixou de passar por `{funcao}`, e a linha escrita à mão no \
+                 comando escapa dos testes acima"
+            );
+        }
     }
 }
 
