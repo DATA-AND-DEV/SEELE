@@ -72,6 +72,35 @@ não toca no `seele-core/src/encontro.rs`, então a Task 9 não espera.
 | 12 | o ADR 0062 e as frases públicas | feita | `3c12e223` |
 | 13 | o portão da VPS | feita | `e9b31450` (o `publicar.sh`, à parte; a F6 simulou o merge com o `36274663` e ele entra limpo), `8f006d8c` (a receita) |
 
+## A revisão independente (08/10) e os consertos
+
+Um revisor sem o histórico desta sessão leu `6e3d8a23..3c12e223`, com três
+medidas suas, e deu «com consertos». Os cinco itens importantes eram reais
+(conferidos no código antes de mexer):
+
+| item | conserto | commit |
+|---|---|---|
+| a conta do D-enc-1 errada em 5–10×: um registro só lembrado (carimbo até +300 s) segurava vaga por ~600 s | o teto conta os vivos; os só lembrados saem antes do «cheio»; Mutex envenenado por `into_inner` | `e5b58616` |
+| a taxa como alavanca: `QUEM2` de um vizinho, ou forjado com o IP da vítima, calava os `MORO2` da rede | um balde por classe (registro e pergunta); a fiação da taxa ganha teste pelo socket | `8b30365a` |
+| quem é limitado pela taxa ouvia «ponto anterior ao ENC/2» | o cliente pergunta de novo enquanto só a sonda respondeu; o caso calado vira `Enc2Calado`; teste com o limite de verdade | `2e808964` |
+| frases públicas prometendo mais que o código | reescritas, com «o que sobra na sala» | `cf1d6964` |
+| o corpo do release dizia «produção» com outro ponto conferido | a linha diz qual ponto; fora do padrão, em negrito | `d1e78879` |
+
+Os menores também: o rastro deixa de gravar o código de quem se procura
+(`2e808964`); o `sondar` repete os pedidos e o portão reprova relógio de ponto a
+mais de 60 s (`87479823`); um erro de um datagrama só (`WSAEMSGSIZE`, reset por
+ICMP) não mata o `servir` (`07b6b702`, o classificador provado aqui; o `servir`
+num Windows de verdade não foi medido); a folga do datagrama não promete mais
+campo novo sem versão nova (`cf1d6964`).
+
+**Pendentes com o dono (pela orquestradora):**
+- **D-enc-3**, um teto de marcas vivas por prefixo no quarto (proposto: 128);
+- **D-enc-4**, um cookie de ida e volta no `MORO2`, a única defesa contra origem
+  forjada. Muda o fio: tem de entrar antes da Task 8 e da VPS.
+
+**Os docs falam no presente do que a Task 8 faz** (o anfitrião dizendo o
+relógio torto e a recusa no `seele.log`). A Task 8 tem de entrar na mesma 0.16.
+
 ## A Task 3 depois do G-servidor
 
 O G-servidor (`8a4bd619`, no `0.16/lotes-g-servidor`) dá dois sentidos à
