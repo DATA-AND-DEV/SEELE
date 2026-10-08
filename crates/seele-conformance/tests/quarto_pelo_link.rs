@@ -72,7 +72,8 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use seele_core::encontro::{onde_mora_hoje, EscutaDoQuarto, Marcas, OndeMora, PRAZO_DO_QUARTO};
-use seele_proto::encontro::{moro, Vizinhanca, PORTA_PADRAO, TAMANHO};
+use seele_proto::encontro::{ler_aqui, moro, quem, Marca, Vizinhanca, PORTA_PADRAO, TAMANHO};
+use seele_proto::uri::{analisar, Convite};
 use seele_server::alcance::encontro::Convocacao;
 use seele_server::hospedagem::Hospedagem;
 use seele_server::persistence::Location;
@@ -253,6 +254,10 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
     let comecou = std::time::Instant::now();
     let ate = tokio::time::Instant::now() + Duration::from_secs(5);
     let mut tentativas = 0_u32;
+    // O que a última tentativa deu, para o pânico dizer o que viu em vez de
+    // supor: «endereço já em uso» é a porta presa, e qualquer outra coisa é
+    // outro defeito, que este teste não pode pôr na conta do degrau 4.
+    let mut ultima = String::from("nenhuma tentativa chegou a ser feita");
     let segunda = loop {
         tentativas += 1;
         match Hospedagem::iniciar(endereco.port(), Location::Memory, "Casa", None).await {
@@ -260,24 +265,32 @@ async fn largar_uma_hospedagem_sem_encerrar_devolve_a_porta() {
             // porque o IPv6 da porta continuava preso não é a porta devolvida.
             Ok(segunda) if segunda.endereco() == endereco => break Some(segunda),
             Ok(outra) => {
+                ultima = format!(
+                    "subiu em {}, e não em {endereco}: a escuta não é a mesma de antes",
+                    outra.endereco()
+                );
                 outra.encerrar().await;
                 if tokio::time::Instant::now() >= ate {
                     break None;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(_) if tokio::time::Instant::now() < ate => {
+            Err(erro) => {
+                ultima = format!("{erro:#}");
+                if tokio::time::Instant::now() >= ate {
+                    break None;
+                }
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            Err(_) => break None,
         }
     };
 
     let Some(segunda) = segunda else {
         panic!(
-            "a porta {endereco} continuou presa cinco segundos depois de a hospedagem ser \
-             largada ({tentativas} tentativas): a tarefa do degrau 4 seguiu viva segurando o \
-             socket do servidor"
+            "a porta {endereco} não voltou cinco segundos depois de a hospedagem ser largada \
+             ({tentativas} tentativas). A última tentativa deu: {ultima}. Se é «endereço já em \
+             uso», a tarefa do degrau 4 seguiu viva segurando o socket do servidor; se é outra \
+             coisa, o defeito é outro, e está nessa frase"
         );
     };
     // A medida que o Step 4 pede, e que atravessa a captura do `libtest`.
@@ -330,6 +343,26 @@ async fn um_ponto_escrito_sem_porta_e_procurado_na_porta_padrao() {
     );
 }
 
+/// Onde o quarto diz que `marca` mora, perguntado com um `QUEM` cru: sem a
+/// consulta do `seele-core` e sem a FFI no meio.
+async fn quem_mora(ponto: SocketAddr, marca: &Marca) -> Option<SocketAddr> {
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    socket.send_to(&quem(marca), ponto).await.unwrap();
+    let mut balde = [0_u8; TAMANHO];
+    let ate = tokio::time::Instant::now() + Duration::from_millis(500);
+    loop {
+        let Ok(Ok((lidos, _))) = tokio::time::timeout_at(ate, socket.recv_from(&mut balde)).await
+        else {
+            return None;
+        };
+        if let Some((de_quem, onde)) = balde.get(..lidos).and_then(ler_aqui) {
+            if de_quem == *marca {
+                return Some(onde);
+            }
+        }
+    }
+}
+
 /// A impressão digital do anfitrião de ponta a ponta.
 ///
 /// As marcas saem dela dos dois lados: `Convocacao::para_servidor` no
@@ -368,8 +401,26 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
     let aberto = seele_server::alcance::encontro::abrir(&convocacao)
         .await
         .expect("o degrau 4 abre contra o ponto deste teste");
-    let bilhete = aberto.bilhete();
-    let aviso = bilhete.aviso().expect("o aviso do bilhete é um endereço");
+
+    // **O bilhete como quem chega o lê: o `enc=` do link, lido de volta.** O
+    // T8d da pendência 51, item 17: o teste usava `bilhete.ponto` direto, e um
+    // defeito na ida e volta do texto `ponto/aviso` pelo link passava sem ser
+    // visto.
+    let link = Convite::novo("203.0.113.5:8383")
+        .com_impressao_digital(IMPRESSAO_DO_ANFITRIAO)
+        .com_bilhete(aberto.bilhete())
+        .to_string();
+    let Some(bilhete) = analisar(&link)
+        .unwrap_or_else(|erro| {
+            panic!("o link deste anfitrião não se lê de volta ({erro:?}): {link}")
+        })
+        .bilhete
+    else {
+        panic!("o link deste anfitrião saiu sem o `enc=`: {link}");
+    };
+    let aviso = bilhete
+        .aviso()
+        .expect("o aviso do bilhete lido do link é um endereço");
 
     // O anfitrião registra as duas marcas na subida. A consulta que vem logo
     // depois não pode chegar ao ponto antes delas, ou este teste mede a ordem
@@ -380,25 +431,53 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    // Duas formas do mesmo ponto teriam de chegar:
-    // - a que o bilhete deste anfitrião escreve no link;
+    // **O que o anfitrião deixou no quarto, perguntado sem a FFI.** O T8b: uma
+    // escuta que falta na resposta da FFI tem duas causas, e o conserto de cada
+    // uma mora num crate diferente. O anfitrião pode tê-la registrado com outra
+    // marca (o `registrar` do `seele-server`), ou a FFI pode ter perguntado por
+    // outra (`seele_ffi::onde_mora_hoje`, e a consulta do `seele-core` por
+    // baixo dela). Um `QUEM` cru, com as marcas que este teste forma, separa
+    // as duas.
+    let marcas =
+        Marcas::do_servidor(IMPRESSAO_DO_ANFITRIAO).expect("uma impressão digital dá marcas");
+    assert_eq!(
+        quem_mora(ponto, marcas.escuta()).await,
+        Some(aviso),
+        "o anfitrião não deixou a escuta no quarto sob a marca dela ({}), no aviso que o link \
+         leva: quem chega pergunta por ela e não a acha. O conserto é no anfitrião (o \
+         `registrar` do `seele-server`), e não na FFI",
+        marcas.escuta()
+    );
+    assert_eq!(
+        quem_mora(ponto, marcas.servidor()).await,
+        Some(aberto.publico()),
+        "o anfitrião não deixou o servidor no quarto sob a marca dele ({}): quem volta pela \
+         trilha não acha para onde conectar. O conserto é no anfitrião, e não na FFI",
+        marcas.servidor()
+    );
+
+    // Duas formas do mesmo ponto têm de chegar:
+    // - a que o bilhete deste anfitrião escreve no link, **com a porta**
+    //   (`127.0.0.1:8384`), desde `a6c2cc0` (`Encontro::bilhete`);
     // - a que todo link emitido até a v0.15.0 carrega, e que a lista de
-    //   conhecidos guardou: o nome cru, sem porta.
+    //   conhecidos guardou: o nome cru, sem porta (`127.0.0.1`).
     //
-    // Hoje as duas são a mesma: o `Bilhete` escreve o ponto como ele entrou na
-    // convocação, sem porta. A segunda forma só é percorrida quando o bilhete
-    // deixar de coincidir com ela, e não roda duas vezes o mesmo caso.
-    let mut formas = vec![bilhete.ponto.clone()];
-    if bilhete.ponto != sem_porta {
-        formas.push(sem_porta.clone());
-    }
-    for ponto_do_link in formas {
+    // Este comentário dizia que as duas eram a mesma, e deixou de ser verdade
+    // em `a6c2cc0`. As duas são percorridas, e a asserção abaixo diz se um dia
+    // voltarem a coincidir: aí a forma sem porta deixa de ser medida aqui.
+    assert_ne!(
+        bilhete.ponto, sem_porta,
+        "o `enc=` do link deste anfitrião, lido de volta, voltou a levar o ponto sem porta, como \
+         o link 0.15.0: a forma com a porta deixou de ser medida, e o cliente 0.15.0 volta a \
+         mandar o ponto cru a `lookup_host`"
+    );
+    for ponto_do_link in [bilhete.ponto.clone(), sem_porta.clone()] {
         let achado = seele_ffi::onde_mora_hoje(&ponto_do_link, IMPRESSAO_DO_ANFITRIAO).await;
-        // **Primeiro, que o quarto deu os dois endereços.** Sem um deles a
-        // regra de baixo não tem o que julgar, e a frase dela apontaria o
-        // culpado errado: uma escuta que nunca chegou ao quarto não é uma
-        // escuta que a regra deixou de lado. Cada forma da falta tem a sua
-        // causa, e é esta asserção que a diz.
+        // **Primeiro, que a FFI deu os dois endereços.** Sem um deles a regra
+        // de baixo não tem o que julgar, e a frase dela apontaria o culpado
+        // errado: uma escuta que nunca chegou à resposta não é uma escuta que
+        // a regra deixou de lado. O quarto tem as duas (conferido acima, sem a
+        // FFI), e cada forma da falta tem a sua causa.
         assert!(
             matches!(
                 achado,
@@ -407,11 +486,12 @@ async fn o_link_leva_ate_o_servidor_e_a_escuta_de_hoje() {
                     escuta: Some(_),
                 }
             ),
-            "o link com o ponto «{ponto_do_link}» não levou aos dois endereços de hoje: o \
-             quarto respondeu {achado:?}. Um `PontoNaoResolve` é o ponto sem porta indo cru ao \
-             DNS; `escuta: None` é a escuta registrada com outra marca; `servidor: None` é o \
-             registro do servidor que não chegou ao quarto; `NinguemMora` é o registro que não \
-             saiu na subida"
+            "o link com o ponto «{ponto_do_link}» não levou aos dois endereços de hoje: a FFI \
+             respondeu {achado:?}, e o quarto tem os dois (perguntado acima sem ela). Um \
+             `PontoNaoResolve` é o ponto sem porta indo cru ao DNS; `escuta: None` ou \
+             `servidor: None` é a FFI, ou a consulta do `seele-core` por baixo dela, perguntando \
+             por outra marca; `NinguemMora` é a pergunta que não achou ninguém sob as marcas que \
+             o anfitrião registrou"
         );
         // **A regra da escuta não cala o anfitrião de verdade.** O `connect`
         // só usa a escuta que o quarto deu quando o servidor da mesma resposta
