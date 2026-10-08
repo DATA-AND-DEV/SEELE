@@ -208,3 +208,33 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - a janela do aviso aceita conexão nova (o Plano 3);
     - o custo da trava sem UPnP precisa ser medido na CI;
     - o guarda só olha o texto.
+- **J → integrado** (`3b0b6a7..d6fde8d`, merge `3ac4eee`), em 4 rodadas. O item F1-tecla-fone-nome fecha nas três partes:
+  - **a tecla de falar dita pelo nome:** `307b18e`;
+  - **o aviso de fone dito uma vez por execução:** `092e6a5`, e `08ddec6` impede que ele atravesse sessões;
+  - **o nome pedido antes do primeiro `connect`:** `acbc1c2`, e `80255f6` faz a entrada por link esperar a página inteira.
+  - **As rodadas de conserto:**
+    - a 1ª tratou a faixa de contexto que dizia a tecla antiga, o título que se sobrepunha e a abertura por link, que dependia da ordem de carga;
+    - a 2ª pôs a faixa num caminho só, deu guarda ao `line-height` do título e fez a `ajustes-v013.cjs` medir os três;
+    - a 3ª acertou a faixa no primeiro quadro, deu frase às duas asserções, fechou as duas brechas do guarda e forçou a quebra do título em qualquer plataforma, porque o CI roda em ubuntu.
+  - **Ficam para o Z:**
+    - a frase do guarda de ordem para um `await atualizarServer()` antecipado culpa a faixa, quando o motivo real é o EM USO apagado;
+    - o `without_comments` conta um `// nome` depois de uma string na mesma linha. É falso positivo, do lado seguro;
+    - a bancada cobre só a cena de reabrir com o microfone mudo.
+- **Um guarda que o lote E deixou vermelho, consertado na integração** (`9daa0c0`).
+  - **O que aconteceu:** o E trocou o `if` de `ler_codigo_do_mod` e o `confere_geracao` da reserva por `recusar_se_morta`. Mas `o_rust_recusa_comando_de_geracao_morta_e_conta`, em `tests/frontend.rs`, ainda pedia as marcas antigas, e o lote não rodou `--test frontend`. O comportamento não mudou.
+  - **O conserto:** o guarda pede `recusar_se_morta` e exige que ela passe por `confere_geracao`, que conta. As marcas são lidas sem comentário.
+  - **A prova:** quatro reversões, todas vermelhas.
+  - **A regra nova:** quem mexe no `main.rs` do app roda `--test frontend` (`c86775a`).
+- **Onda 3 fechada.** Os três lotes estão em `0.16/lotes`, no `3ac4eee`.
+  - **O que o branch combinado mostrou**, com o `target/` deste worktree:
+    - fmt e `clippy --workspace --all-targets --all-features -D warnings` limpos;
+    - `seele-app`: todos os binários verdes (267, 268 e os menores);
+    - `seele-core --lib` 438;
+    - `seele-ffi --lib` 124, mais 1 ignorado;
+    - `seele-proto` 337 com os doctests;
+    - `xtask` verde;
+    - `seele-server` **inteiro**, 582 na lib e os 11 alvos de `tests/`. Agora que eles não falam mais com o ponto de produção, entram todos;
+    - `check-runtime` verde;
+    - a bancada `ajustes-v013.cjs` verde.
+  - **A conformidade** ficou verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar` e `quem_hospeda_fecha`. O `quarto_pelo_link` ficou de fora, por causa da porta 8384.
+  - **A ordem das verificações:** a conformidade e o servidor rodaram sobre `a495fe2`, antes do J. Depois do merge do J, rodaram de novo o app, o fmt, o clippy, o `check-runtime` e a bancada. O J mexe só em `ui/`, `bancada/` e `tests/frontend.rs`.
