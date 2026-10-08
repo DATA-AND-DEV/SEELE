@@ -989,13 +989,17 @@ fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
     };
     // A bancada faz um commit só, sem tag: a faixa seria vazia. Uma tag na
     // versão de antes e dois commits depois dela fazem a faixa de `1.2.3`.
+    //
+    // O assunto do commit **não** repete a frase que a asserção procura: um
+    // assunto que dissesse «não diz pelo prefixo» a faria casar com o próprio
+    // dado de entrada, se o script o ecoasse, e o teste passaria sem o aviso.
     bancada.git(&["tag", "v1.2.2"]);
     bancada.git(&[
         "commit",
         "-q",
         "--allow-empty",
         "-m",
-        "uma mudança que não diz pelo prefixo o que é",
+        "arruma a fila do servidor",
     ]);
     bancada.git(&[
         "commit",
@@ -1024,7 +1028,9 @@ fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
         saida.diario
     );
     assert!(
-        saida.texto.contains("não diz pelo prefixo"),
+        saida
+            .texto
+            .contains("1 assunto desta faixa não diz pelo prefixo se muda o produto"),
         "o --conferir não avisou do assunto sem prefixo da faixa: quem publica só ficaria \
          sabendo depois da bateria e dos builds, quando o conselho do aviso (contar em \
          `empacotar/notas/`) já não se segue sem abortar:\n{}",
