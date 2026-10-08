@@ -2215,9 +2215,17 @@ fn the_screen_says_which_microphone_is_open_and_not_only_which_was_chosen() {
 /// um guarda feito com ele não via a variante com campo, e uma variante assim
 /// sem frase passava como se não existisse (pendência 53).
 ///
-/// A profundidade de parênteses e chaves é o que separa uma variante dos
-/// campos de uma variante `struct`: só a linha que abre na profundidade zero
-/// declara variante.
+/// Uma linha declara variante quando começa com um nome seguido de `,`, `(` ou
+/// `{`. Os campos de uma variante `struct` ficam de fora por isso: depois do
+/// nome deles vem `:`.
+///
+/// **A profundidade é para a tupla de várias linhas.** Em `Longa(\n String,\n),`
+/// o `String,` de dentro tem a cara de uma unitária, e é a contagem de
+/// parênteses, chaves e colchetes que o tira: só a linha que abre na
+/// profundidade zero declara variante. Vale também para o tipo de um campo que
+/// quebra de linha. No fim do bloco a contagem tem de ter voltado a zero: se
+/// não voltou, um parêntese sem par num texto ou num atributo desalinhou a
+/// leitura, e a lista não é de confiança.
 fn variants_of(source: &str, name: &str) -> Vec<String> {
     let Some(after) = source.split(&format!("enum {name} {{")).nth(1) else {
         panic!("a fonte lida não declara mais `enum {name}`");
@@ -2226,9 +2234,9 @@ fn variants_of(source: &str, name: &str) -> Vec<String> {
         panic!("unterminated `enum {name}`");
     };
     let mut found: Vec<String> = Vec::new();
-    let mut depth = 0usize;
+    let mut profundidade = 0usize;
     for channel in without_comments(block).lines().map(str::trim) {
-        if depth == 0 {
+        if profundidade == 0 {
             let variant: String = channel
                 .chars()
                 .take_while(|character| character.is_alphanumeric() || *character == '_')
@@ -2243,12 +2251,17 @@ fn variants_of(source: &str, name: &str) -> Vec<String> {
         }
         for character in channel.chars() {
             match character {
-                '(' | '{' | '[' => depth += 1,
-                ')' | '}' | ']' => depth = depth.saturating_sub(1),
+                '(' | '{' | '[' => profundidade += 1,
+                ')' | '}' | ']' => profundidade = profundidade.saturating_sub(1),
                 _ => {}
             }
         }
     }
+    assert_eq!(
+        profundidade, 0,
+        "`enum {name}` terminou com a profundidade em {profundidade}: um parêntese ou uma \
+         chave sem par desalinhou a leitura, e as variantes lidas não são de confiança"
+    );
     assert!(!found.is_empty(), "`enum {name}` came out with no variants");
     found
 }
@@ -2313,11 +2326,19 @@ fn variants_of_le_toda_forma_de_variante_e_nao_cala_a_que_tem_campo() {
     // O serde escreve a variante com campo como um objeto cuja chave é o nome
     // dela (`{"TemAtalho": "…"}`), e é por esse nome que `fraseDeErro` a acha.
     // O nome é o que conta, com campo ou sem.
+    //
+    // **`Longa` é o caso que prende a profundidade.** Os campos de uma `struct`
+    // caem pelo `:` mesmo sem ela, e sem `Longa` esta lista saía igual com a
+    // contagem apagada: o `String,` de dentro da tupla de várias linhas é o
+    // único que só a profundidade tira.
     let fonte = "enum Exemplo {\n\
                  \x20   /// Um comentário com `Falsa,` dentro não declara nada.\n\
                  \x20   Unitaria,\n\
                  \x20   ComCampo(String),\n\
                  \x20   ComDois(String, Option<u8>),\n\
+                 \x20   Longa(\n\
+                 \x20       String,\n\
+                 \x20   ),\n\
                  \x20   #[serde(rename = \"x\")]\n\
                  \x20   Struct {\n\
                  \x20       /// O defeito.\n\
@@ -2333,6 +2354,7 @@ fn variants_of_le_toda_forma_de_variante_e_nao_cala_a_que_tem_campo() {
             "Unitaria",
             "ComCampo",
             "ComDois",
+            "Longa",
             "Struct",
             "NaMesmaLinha",
             "Ultima"
