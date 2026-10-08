@@ -103,6 +103,7 @@ testes).
 | `xctrace_tabela.py` | lê uma tabela exportada pelo `xctrace`, resolvendo `id`/`ref` |
 | `m3-servidor.rs` | o servidor da medição: N pacotes, instalados por hash, na porta pedida |
 | `m3-falante.rs` | o falante sintético |
+| `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |
 | `medidas.json` | os relatos da campanha de base de 08/10 |
 
 ## O que este roteiro não mede

@@ -29,6 +29,19 @@ de PERFIS, MESA e ESTILO), e a seção «Para a F3» do `lotes.md` da F5 (branch
 Marcas, como nos levantamentos: **[c]** lido no código; **[d]** o que um
 documento afirma; **[inf]** inferência; **[medido]** rodado.
 
+### Decisões do dono (08/10/2026) sobre este rascunho
+
+Tomadas depois da primeira versão, todas como o rascunho recomendava. Elas
+mudam o texto abaixo, e cada seção já as segue.
+
+| pergunta | resposta |
+|---|---|
+| `pagina` e `painel` contra `folha` (§5) | **a `folha` substitui o `painel`**. Ficam `pagina`, `dialogo`, `aviso` e `folha` |
+| as capacidades `regiao`, `cartoes` e `tema` (§2) | **`regiao` e `cartoes` saem. O `tema` fica**, ampliado, com `servidor.aparencia` como porta |
+| o m-4 da pendência 49 (§18) | **`repetir: true` por contrato** (`AudioBufferSourceNode.loop`). A exceção do som que terminou fica como está até lá |
+| os membros fora do ar no retrato (§6) | **ficam de fora** |
+| os três candidatos ao fio (§14) | **o aviso do servidor e o tema como dado vão para o contrato da 1.0**, pela F1; os pedidos de escopo de servidor **não mudam o fio**, porque já existem (§8) |
+
 ---
 
 ## 0. O que muda, numa página
@@ -93,16 +106,16 @@ o espelho `CAPACIDADES_POR_API` em `base.js:1982-1989` [c]):
 
 | capacidade | na 6 | por quê |
 |---|---|---|
-| `superficies` | sim | `pagina`, `painel`, `dialogo`, `aviso`, `folha` (§5) |
+| `superficies` | sim | `pagina`, `dialogo`, `aviso` e `folha`; o `painel` sai (decisão de 08/10, §5) |
 | `contribuicoes` | sim | as regiões e os pontos (§3) |
 | `estilos`, `classes` | sim | sem mudança de contrato |
 | `volume` | **sim** | ADR 0048. O PERFIS (R1, R3), a MESA (M11, item 16) e o ESTILO (§1, fundo por mídia) dependem dela. Confirmado à F5 em 08/10: o lote E (P51-11) tem objeto |
 | `arquivo` | sim | o seletor mediado e `pedaco`/`soltar` |
-| `tema` | sim, ampliado | §9. **Em aberto para o dono e as sessões de MOD**, com recomendação |
-| `regiao` | **recomendo que saia** | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19). **Em aberto** |
-| `cartoes` | **recomendo que saia**, trocada por `pessoa.cartao` com `alvo` | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2). **Em aberto** |
+| `tema` | **sim, ampliado** (decisão de 08/10) | §9, com `servidor.aparencia` como porta |
+| `regiao` | **sai** (decisão de 08/10) | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19) |
+| `cartoes` | **sai** (decisão de 08/10), trocada por `pessoa.cartao` com `alvo` | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2) |
 | `eventos-da-tela` | sim, nova | §7 |
-| `aviso-do-servidor` | sim, nova (metade de servidor) | §7.3. Depende do fio (§14) |
+| `aviso-do-servidor` | sim, nova (metade de servidor) | §7.3. No contrato de fio da 1.0, pela F1 (§14) |
 
 **Capacidade por plataforma, e não só por versão.** Hoje a ausência é por
 versão: um pacote de API 3 recebe um `SeeleUI` sem `superficies`
@@ -254,7 +267,7 @@ contrato, **com os números em aberto para a M3** (§12):
 | `dialogo` | modal; a saída é do produto (`mods-superficies.js:190` [c]) | superfície | **tela cheia**, com as ações fixas embaixo, acima da barra de gestos |
 | `folha` (nova) | coluna lateral que empilha, para edição e detalhes; parente do `painel` (`#palco-de-paineis`, `index.html:1702` [c]) | superfície | **folha de baixo**: sobe da borda até onde o polegar alcança e se expande à tela inteira |
 | `aviso` | fila de quatro, como hoje (`mods-superficies.js:206` [c]) | superfície | canto de baixo, com a área segura |
-| `pagina`, `painel` | como na API 4 | superfície | ver «Em aberto», abaixo |
+| `pagina` | como na API 4 | superfície | célula inteira (§11) |
 
 ### `chamada.palco`
 
@@ -317,23 +330,14 @@ campo. A API 6 acrescenta:
 
 O `aviso` (fila de quatro, 3,5 s e 10 s) e as garantias de saída do ADR 0052.
 
-### Em aberto: `pagina` e `painel` contra `folha`
+### `pagina` e `painel` contra `folha`: decidido
 
-**Para o dono e as sessões de MOD.** Os três oficiais usam `pagina` e `painel`
-hoje (PERFIS diretório e editor, MESA a mesa, ESTILO o diálogo). Três
-caminhos:
-
-1. **ficam as cinco** (`pagina`, `painel`, `dialogo`, `aviso`, `folha`). O
-   `painel` e a `folha` são parentes e quase redundantes;
-2. **`folha` substitui `painel`**: um tipo a menos, e a coluna que empilha cobre
-   o que o painel fazia;
-3. **`folha` substitui `painel` e `pagina` vira só imersiva.**
-
-**Recomendo o 2.** A spec de 23/09 já desenha a `folha` como «parente do
-painel», o porte é obrigatório de qualquer jeito (API-6-só), e um tipo a menos
-é uma superfície a menos para revisar e para descrever no celular. A `pagina`
-fica, porque a MESA imersiva e o diretório do PERFIS precisam da célula da
-conversa.
+**A `folha` substitui o `painel`** (decisão do dono de 08/10, como o rascunho
+recomendava). A spec de 23/09 já desenhava a `folha` como «parente do painel»,
+o porte é obrigatório de qualquer jeito (API-6-só), e um tipo a menos é uma
+superfície a menos para revisar e para descrever no celular. A `pagina` fica,
+porque a MESA imersiva e o diretório do PERFIS precisam da célula da conversa.
+O que os oficiais montam hoje num `painel` vai para a `folha` no porte.
 
 ## 6. O retrato projetado por lista branca
 
@@ -382,7 +386,7 @@ campos e só estes:
 | `tela`, `minha_transmissao`, `transmissoes` | nenhum oficial pede; entra numa API somada, se alguém pedir |
 | `may_*` | a permissão vale na metade de servidor (`contexto.admin`, `contexto.write`), e não na janela |
 | `messages_revision`, `icon_revision`, `person_icons_revision`, `ended` | estado interno da casca |
-| `membros` (o FORA DO AR: `Membros`, `MembroNovo`, `MembroBanido`) | **recomendo que fique de fora na 6** (abaixo). Decisão do dono |
+| `membros` (o FORA DO AR: `Membros`, `MembroNovo`, `MembroBanido`) | **fica de fora na 6** (abaixo; decidido em 08/10) |
 | **toque, chamada, código, agenda** | nunca (Parte II, «Onde as duas partes se tocam»). O guarda 12 prova |
 
 **`reads` lista cada campo**, e o `check-api` passa a cobrar que cada um tenha
@@ -392,7 +396,8 @@ quem o projete. Um retrato que cresce é uma API somada.
 
 A F1 pôs no protocolo o FORA DO AR (`Membros`, `MembroNovo` e `MembroBanido`,
 ordinais 42 a 44, com `id` e `nickname`, sem papéis e sem horário; D-fio-4).
-**Recomendo que o retrato da 6 não os leve: ele leva só quem está presente.**
+**Decidido em 08/10, com a recomendação desta frente: o retrato da 6 não os
+leva, e leva só quem está presente.** Os motivos:
 
 - **A assimetria do congelamento.** Acrescentar `membros` depois é uma API
   somada (a 7), que não quebra nada. Tirar depois é impossível: o nome congela
@@ -412,7 +417,7 @@ ordinais 42 a 44, com `id` e `nickname`, sem papéis e sem horário; D-fio-4).
   poderia mandá-lo para fora. O `specs/00-visao-geral.md` chama a presença
   publicada de defeito do formato que o SEELE recusa.
 
-**Se o dono quiser os membros na 6**, a forma é `membros[]` com `id` e
+**Se um dia eles entrarem (numa API somada)**, a forma é `membros[]` com `id` e
 `apelido` e nada mais: sem horário, sem estado («fora do ar desde»), sem ordem
 por última vez visto, e o `pessoas[]` continua sendo a presença. E o evento
 `pessoas` (§7.2) não ganha `membroNovo` nem `banido`.
@@ -475,8 +480,8 @@ SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
 - **Só para quem pode ler aquele canal**, e só para as janelas do mesmo MOD.
 - **Teto de tamanho e de taxa** [em aberto para a M3]: proposta, 1 KiB por
   aviso e 4 por segundo por MOD; o excedente é contado e dito no `seele.log`.
-- **Precisa de uma mensagem nova no fio** (servidor → cliente). Ver §14: é um
-  item a acrescentar ao contrato de fio da 0.16, ou isto vira API 7.
+- **Precisa de uma mensagem nova no fio** (servidor → cliente). Encaminhada
+  em 08/10 ao contrato da 1.0, pela F1 (§14).
 
 ### 7.4 Os momentos (metade de servidor, por `aoAcontecer`)
 
@@ -510,10 +515,56 @@ MOD escreve como `dados[chave]`, `arquivos.ler` e `arquivos.escrever`. O
 `check-api` passava porque confere o símbolo da direita (`SendMessage`,
 `recolher_quintal`), que existe.
 
-**Pedido do PERFIS (R5), em aberto:** pedidos endereçados ao servidor, e não
-ao canal, com uma permissão de servidor. Hoje todo pedido precisa de um canal
-de texto (`ModRequest` leva o canal), e num servidor só de voz o PERFIS não
-mostra nada. **Muda o fio** (§14).
+### O escopo de um pedido, e a permissão de escrita de cada escopo
+
+**O escopo de servidor já existe no fio, desde 18/09, e não muda nada nele**
+(correção da F1 ao §14 desta página): `ModRequest` com `channel =
+ChannelId(0)` quer dizer «nenhum canal», porque a chave primária de um canal
+começa em 1 (`crates/seele-server/src/mods/pedidos.rs:174-186` [c]); o
+contexto chega ao MOD com `channel: null` (`:217-221` [c]); o
+`PedidoDeImagem::Ler` usa a mesma convenção (`volume.rs:191` [c]); a janela
+repassa o canal que o MOD escolhe (`pedirAoServidor`, `base.js:545` [c]). E o
+guia já documenta: «`canal` é um identificador de canal, e `0` quer dizer
+"nenhum"» (`docs/como-se-faz-um-mod.md:100-101`, `:119`).
+
+**Por que o PERFIS não mostra nada num servidor só de voz (R5), medido.** Um
+cliente sem janela mandou à metade de servidor do PERFIS 3.3.0 publicado um
+`view` e um `save` com o canal 0, e os mesmos com o canal 1
+(`docs/evidencias/m3-custo-dos-mods/m3-pedido.rs`). **Os quatro voltaram
+`ok: true`**, e o `save` sem canal subiu a revisão do perfil para 1. O servidor
+e o PERFIS servem o pedido de escopo de servidor. **A causa é a casca comum dos
+MODs oficiais**: ela escolhe o canal por `snapshot.open_channel ??
+snapshot.channels?.[0]?.id` (PERFIS 3.3.0, `cliente/main.js:84` [c]) — um
+campo que nunca existiu (MESA A1) e, sem ele, o primeiro canal de texto — e,
+sem canal nenhum, para com «Entre em um servidor com um canal de texto»
+(`:281` [c]), sem nunca tentar o 0. O conserto é do porte (o perfil e o tema
+são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
+
+**As regras da v6:**
+
+1. **O escopo é dito no contrato.** `reads` lista `contexto.canal` como
+   `ChannelId | null`, e a v6 escreve: `SeeleMods.request(id, 0, valor)` é um
+   pedido de escopo de servidor, e o `aoPedir` o recebe com `channel: null`.
+   Um dado que é do servidor (o perfil, o tema) é pedido com 0; um dado que é
+   de um canal (a campanha da MESA), com o canal.
+2. **A permissão de escrita é definida por escopo** (hoje o `write` do
+   contexto é `may(person, WriteChannel)` global, qualquer que seja o canal,
+   `pedidos.rs:203-205` [c]):
+   - **escopo de servidor:** `contexto.write` é a permissão global de escrever
+     (`WriteChannel`), e `contexto.admin` é a de administrar o servidor
+     (`AdministerServer`). É o que vale hoje, e passa a estar escrito. Uma
+     permissão nova («editar o próprio perfil») exigiria migração e tela de
+     papéis, e nenhum MOD a pediu;
+   - **escopo de canal:** `contexto.write` passa a ser a mesma pergunta que o
+     produto faz para publicar naquele canal, `pode_no_canal(pessoa, canal,
+     Escrita)` (`crates/seele-server/src/autorizacao.rs:104` [c]): a permissão
+     global **e** o papel mínimo do canal;
+   - **e o pedido num canal que a pessoa não lê é recusado**, com
+     `pode_no_canal(…, Leitura)`, como o histórico. Hoje só se confere que o
+     canal existe (`pedidos.rs:191-195` [c]).
+   Os dois últimos não mordem hoje — nada grava papel mínimo em canal nenhum
+   (`autorizacao.rs:40-44` [c]) —, mas mordem no dia em que um canal privado
+   existir, e a v6 congela antes disso.
 
 **Pedido da MESA (item 9):** o orçamento do quintal legível pela metade de
 servidor (`dados.uso()`, `dados.teto`), e a recusa por quintal cheio com código
@@ -549,12 +600,16 @@ O tema da API 4 tem dez nomes escritos em `#tela-sessao` (`base.js:1876-1888`
   citar um token (`cor: { tema: 'acento' }`), resolvido pelo produto (ESTILO
   A16).
 
-**Em aberto, com recomendação, para o dono e o ESTILO:**
+**O tema como dado do servidor entra**, aplicado pelo produto antes do
+primeiro quadro e tirado na saída: tira a ida e volta e põe a saída do tema na
+mão do produto por construção (o A3 da v0.15.0). **Muda o fio** (o tema vai
+junto com a entrada na sessão), e foi encaminhado em 08/10 ao contrato da 1.0,
+pela F1 (§14).
 
-- **o tema como dado do servidor**, aplicado pelo produto antes do primeiro
-  quadro e tirado na saída. Recomendo que entre: tira a ida e volta e põe a
-  saída do tema na mão do produto por construção (o A3 da v0.15.0). **Muda o
-  fio** (o tema iria junto com a entrada na sessão, §14);
+**O resto da ampliação, com recomendação, a detalhar com o ESTILO no porte**
+(o dono decidiu que o tema fica e é ampliado; estes são os itens da
+ampliação):
+
 - **tokens por região** (`regioes: { 'status.barra': { painel } }`): recomendo
   que entre, com a mesma conferência por região;
 - **`modo: 'claro' | 'escuro'`**, tipo dos títulos separado do dos dados,
@@ -664,7 +719,7 @@ de hoje, lidos no código:
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
 | bytes de mídia por superfície | 24 MiB declarados, **10 MiB na forma `midia`** | `mods-regiao.js:194`, `:2159-2161`, `:2226` | §13: a 6 diz o que é entregue |
-| região | 512 nós, 8 de fundura, 10 MiB | `mods-regiao.js:33-65` | sai com `regiao` (§2), se sair |
+| região | 512 nós, 8 de fundura, 10 MiB | `mods-regiao.js:33-65` | sai com `regiao` (§2) |
 | cartões | 64 pessoas, 64 nós, 6 de fundura, 64 mídias, 20 MiB somados | `mods-regiao.js:104-131` | troca por `pessoa.cartao` com `alvo` (R2) |
 | som decodificado | 64 MiB por bolso | `mods-regiao.js:88`, `:148` | M3 e K5 |
 | arquivos escolhidos | 4 de pé, 10 MiB cada | `main.rs:2438`, `:2444` | fica |
@@ -691,21 +746,45 @@ bolsos contam bytes decodificados, e o MOD lê o teto para dizê-lo no seletor.
 | um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome |
 | o retrato era o `Snapshot` inteiro, com `link_state` e os aparelhos | `base.js:2126-2133` | lista branca (§6) |
 | o guarda de capacidades citado em `base.js:1963-1965` nunca existiu | `git log -S` | criado |
-| **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). Conserto fora desta frente: é do guia de quem escreve MOD |
+| **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). **Defeito**: conserto do exemplo e do guia na fase de código (tarefa 15 do plano), com o teste que instala pelo caminho do exemplo |
+
+### As regras da v6 que vêm destes achados
+
+Os achados da tabela acima viram regras, e cada regra tem guarda no
+`check-api` (tarefa 2 do plano), cobrada a partir da v6:
+
+1. **Todo nome da metade de servidor que a v6 lista é um nome que o runtime
+   expõe.** Os blocos `own` e `world` (e qualquer outro que a metade de
+   servidor leia) são conferidos contra as globais e os membros que
+   `crates/seele-server/src/mods/mod.rs` registra (`ctx.globals().set("…")` e
+   `<objeto>_js.set("…")`), e não contra um símbolo qualquer do repositório. É
+   a regra que teria pego os 13 verbos e as 19 leituras da v1: o símbolo da
+   direita existia, e o nome da esquerda nunca chegou ao MOD.
+2. **Todo teto que a v6 declara é o teto que o produto aplica.** Os números de
+   `superficies.limites`, `contribuicoes.teto` e os bolsos de mídia são
+   conferidos contra as constantes do renderer (`LIMITES_DA_REGIAO`,
+   `PERFIS_DE_RENDER`, `LIMITES_DO_CARTAO` em `mods-regiao.js`;
+   `TETO_DE_CONTRIBUICOES` em `mods-contribuicoes.js`). E, porque um número
+   certo numa constante que ninguém consulta é o caso da forma `midia`, uma
+   bancada prova o comportamento: a mídia que cabe no teto declarado da
+   superfície monta, e a que passa dele é recusada com os números (tarefa 7).
 
 ## 14. O que a API 6 pede ao contrato de fio
 
 O spec-mestre lista dois itens da F3 no contrato (§3): o 14
 (`APIS_ACEITAS = [6]`) e o 15 (`ModAnunciado.api` e as APIs no `Hello`). O
-rascunho acrescenta três candidatos, **a decidir com a F1 e a orquestradora**
-antes de o contrato fechar. Pela D-fio-6, mensagem nova pode chegar numa 1.1
+rascunho acrescentou três candidatos. **Encaminhados em 08/10:** o aviso da
+metade de servidor (`ModAviso`) e o tema como dado do servidor (`TemaMudou`,
+um JSON opaco com teto de 12 KiB no fio) vão para o contrato da 1.0, pela F1;
+o segundo, os pedidos de escopo de servidor, **não muda o fio**, porque o
+escopo já existe (§8). A tabela abaixo fica como o registro do porquê. Pela D-fio-6, mensagem nova pode chegar numa 1.1
 sem quebrar nada; o que está em jogo é se ela é **Servidor 1.0** ou **1.1 com
 API 7**.
 
 | candidato | quem pede | o que muda no fio | se ficar de fora da 1.0 |
 |---|---|---|---|
 | **o aviso da metade de servidor às janelas** (§7.3) | MESA 2, PERFIS R4, ESTILO §3 | uma mensagem servidor → cliente, `ModAviso { mod, canal?, carga }`, com teto | os três continuam em laço até a API 7; no celular, a MESA custa ~20 MB/h |
-| **pedidos endereçados ao servidor** (§8) | PERFIS R5 | `ModRequest` com o canal opcional | o PERFIS não roda num servidor só de voz |
+| ~~**pedidos endereçados ao servidor**~~ (§8) | PERFIS R5 | **nada**: o escopo de servidor já existe (`ChannelId(0)`), correção da F1 | — (a causa do R5 é a casca dos MODs oficiais, medido, §8) |
 | **o tema como dado do servidor** (§9) | ESTILO §3 | o tema vai junto com a entrada na sessão | o tema continua chegando depois de um `snapshot` e de uma ida e volta |
 
 **Recomendo que o primeiro entre na 1.0**: é o que mais custa a quem usa, e é
@@ -775,10 +854,10 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 | # | pedido | situação | por quê |
 |---|---|---|---|
 | R1 | `pessoa.capa` com legibilidade, halo, estados, movimento reduzido e custo | **entrou** (§4) | é a decisão do dono; os números de redução, quadros e capas animadas ficam para a M3 |
-| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou** a citação (`daPessoa`); **em aberto** o cartão por pessoa e o teto por ponto e alvo | o destino de `cartoes` é decisão do dono com as sessões (§2) |
+| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou**: `cartoes` sai e o cartão é `pessoa.cartao` com `alvo`, por pessoa; e a citação (`daPessoa`). **Em aberto** só o teto por ponto e alvo (§12, M3) | decisão do dono de 08/10 |
 | R3 | bolsos por bytes decodificados, redução no Rust | **entrou** (§12) | o custo é o quadro decodificado, e não o arquivo |
-| R4 | eventos da tela, retrato projetado, aviso do servidor | **entrou** (§6, §7); o aviso **depende do fio** (§14) | — |
-| R5 | pedidos endereçados ao servidor | **em aberto** (§14) | muda campo de `ModRequest` |
+| R4 | eventos da tela, retrato projetado, aviso do servidor | **entrou** (§6, §7); o aviso vai no fio da 1.0 (§14) | — |
+| R5 | pedidos endereçados ao servidor | **entrou como regra da v6, sem mudar o fio** (§8): o escopo de servidor (`ChannelId(0)`) já existe e passa a estar no contrato, e a permissão de escrita de cada escopo fica definida | medido: o servidor e o PERFIS servem o pedido sem canal; quem não manda o 0 é a casca comum dos MODs oficiais, e o conserto é do porte |
 | R6 | formulários no diálogo | **entrou** (§5) | — |
 | R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** | só fachada; evita o redesenho nativo entre revogar e registrar |
 | R8 | montagem parcial nas superfícies | **em aberto** com o teto de 12 KiB (§12) | a MESA pede o mesmo (item 1); a forma (atualizar por chave ou montar em partes) é a primeira decisão de desenho da tarefa 7 |
@@ -793,9 +872,9 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 | # | pedido | situação | por quê |
 |---|---|---|---|
 | 1 | montar sem esbarrar em 12 KiB | **em aberto** (§12), com o R8 do PERFIS | — |
-| 2 | o servidor avisar as janelas | **entrou**, dependendo do fio (§7.3, §14) | — |
+| 2 | o servidor avisar as janelas | **entrou**, no fio da 1.0 (§7.3, §14) | — |
 | 3 | eventos da tela com o retrato escrito no contrato | **entrou** (§6, §7.2) | — |
-| 4 | `repetir`, som que não morre com a página, início pela posição do servidor | **em aberto** (§18) | é o m-4 da pendência 49, do dono com as sessões |
+| 4 | `repetir`, som que não morre com a página, início pela posição do servidor | **entrou** `repetir: true` (decisão do dono de 08/10); **em aberto** o som que segue com a página fechada e o início pela posição | a vida do som fora da página é a mesma pergunta do som com a tela bloqueada (item 14), e espera a medida |
 | 5 | `chamada.palco`: contexto, gramática, de quem, teto | **entrou** (§5): contexto pela sala, gramática inteira, por pessoa; o teto com o item 1 | — |
 | 6 | `folha` ao lado da mesa | **entrou** (§5) | — |
 | 7 | formulários com validação e erro por campo | **entrou** (§5) | — |
@@ -818,7 +897,7 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 |---|---|---|---|
 | 1 | tema que cobre o que o produto pinta | **entrou** o contraste em todos os pares e os tons derivados; **em aberto** `modo`, tipo, escala, densidade completa e fundo por mídia (§9) | o fundo por mídia espera a medida no iPhone |
 | 2 | tokens por região; `folha` e `dialogo` herdam o tema; referência a token | **entrou** a herança e a referência; **em aberto** os tokens por região | recomendo que entrem |
-| 3 | tema como dado do servidor; aviso do servidor; `servidor.aparencia` como porta; prévia do produto | **entrou** a porta e a prévia; **em aberto** o tema como dado (fio, §14); o aviso depende do fio | — |
+| 3 | tema como dado do servidor; aviso do servidor; `servidor.aparencia` como porta; prévia do produto | **entrou** tudo; o tema como dado e o aviso vão no fio da 1.0 (§14) | — |
 | 4 | `erro` em `cor` e `escolha`; confirmação destrutiva; `emProgresso`; sujo derivado | **entrou** (§5) | — |
 | 5 | o que fica fora; o contraste do núcleo com guarda | **entrou** (§9, §10) | é o achado do spec-mestre §8 |
 | 6 | o que falta na spec | **entrou** como emendas à spec de 23/09 (tarefa 13 do plano) | — |
@@ -832,10 +911,10 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 |---|---|
 | K1-m3: o MOD recebe o motivo, e não a frase de tela, no erro do `atenderOMod` | **entrou**: na 6 o `erro` que o MOD recebe é um nome de recusa, de lista fechada, e a frase fica na tela |
 | P51-28: o guarda do vetor de referência | **entrou** na tarefa 13: reescrito contra o prelúdio da 6 |
-| P49-10: a frase dos cartões da API 3 | sai com a capacidade `cartoes`, se ela sair |
+| P49-10: a frase dos cartões da API 3 | sai com a capacidade `cartoes` (decisão de 08/10) |
 | K2: `midia`/`falhou` quando o retrato não decodifica | **entrou** (§7.1) |
 | K4 e K5: o som grande demais e o som de contribuição recusado no tocar | **entrou** o texto público, quando os lotes chegarem |
-| o contrato de `tocando` (P49-6, `563bc37`) | **entrou** no texto da 6, como está no `api/README.md`; `repetir` está em aberto (§18) |
+| o contrato de `tocando` (P49-6, `563bc37`) | **entrou** no texto da 6, como está no `api/README.md`, com `repetir: true` (decisão de 08/10) |
 | `capture`/`playback` no `Snapshot` | **entrou**: ficam fora da lista branca (§6) |
 
 ## 18. Em aberto
@@ -843,21 +922,22 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 **Para a M3:** os limites do §12, os novos (capas animadas, quadros, aviso do
 servidor) e os do celular.
 
-**Para o dono e as sessões de MOD:**
+**Para o dono e as sessões de MOD:** decididos em 08/10 (tabela no alto):
 
-1. `pagina` e `painel` contra `folha` (§5). Recomendo que a `folha` substitua o
-   `painel`.
-2. `regiao`, `cartoes` e `tema` (§2). Recomendo que `regiao` e `cartoes` saiam
-   e que `tema` fique, ampliado e com `servidor.aparencia` como porta.
-3. **O m-4 da pendência 49: `repetir`, ou o contrato de `tocando`.** Hoje um
-   som que terminou toca de novo quando um redesenho o declara `tocando: true`
-   (`mods-regiao.js:2503-2510` [c]), e é isso que repete a trilha da MESA. Se o
-   contrato for «`tocando` vale na mudança» sem `repetir`, a trilha de 30 s
-   cala no primeiro conserto do laço de 2 s (MESA M7). **Recomendo `repetir:
-   true` por contrato** (`AudioBufferSourceNode.loop`), e manter a exceção do
-   som que terminou como está até lá.
-4. Os três candidatos ao fio (§14), com a F1.
-5. **Os membros fora do ar no retrato** (§6). Recomendo que fiquem de fora na 6.
+1. ~~`pagina` e `painel` contra `folha`~~: a `folha` substitui o `painel`.
+2. ~~`regiao`, `cartoes` e `tema`~~: `regiao` e `cartoes` saem; `tema` fica,
+   ampliado, com `servidor.aparencia` como porta.
+3. ~~O m-4 da pendência 49~~: `repetir: true` por contrato
+   (`AudioBufferSourceNode.loop`), e a exceção do som que terminou fica como
+   está até lá. O que muda com ele: um som com `repetir: true` volta ao começo
+   no fim sem redesenho, e o MOD recebe `terminou` só de um som sem `repetir`.
+4. ~~Os três candidatos ao fio (§14)~~: o aviso e o tema vão ao contrato da
+   1.0, pela F1; o escopo de servidor já existia (§8).
+5. ~~Os membros fora do ar no retrato (§6)~~: ficam de fora.
+
+**Ainda em aberto, e de quem:** os itens da ampliação do tema (§9), com o
+ESTILO no porte; a montagem parcial e o teto de 12 KiB (§12), com a M3; o som
+fora da página e com a tela bloqueada (§11), com a medida da F4.
 
 **Para a orquestradora:** o WebView2 (Windows) e o iPhone na M3; a forma de
 rodar o MOD no navegador (F4), contra o §16.
