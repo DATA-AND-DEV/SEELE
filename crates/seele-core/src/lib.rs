@@ -32,6 +32,7 @@ pub mod bomba;
 pub mod caminho;
 pub mod chegada;
 pub mod client;
+pub mod confere_codigo;
 pub mod conhecidos;
 pub mod encontro;
 pub mod enlace;
