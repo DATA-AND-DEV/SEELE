@@ -1,0 +1,283 @@
+[
+ {
+  "cenario": "1-mod",
+  "mods": [
+   "perfis"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.02,
+  "carga_media_no_comeco": "{ 6.85 6.42 6.78 }",
+  "interrompido": false,
+  "rustc_durante": 14,
+  "memoria_mib": {
+   "seele-app": 42.8,
+   "GPU": 95.0,
+   "WebContent": 66.5,
+   "Networking": 5.8,
+   "total": 210.1
+  },
+  "cpu_pct": 5.4,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 138,
+   "commits_por_s": 4.6,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.23,
+    "p99": 0.29,
+    "max": 0.38
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.29,
+  "carga_media_no_fim": "{ 8.86 7.07 6.98 }",
+  "rustc_no_fim": 0,
+  "rodada": "1-mod-131946"
+ },
+ {
+  "cenario": "1-mod",
+  "mods": [
+   "perfis"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.33,
+  "carga_media_no_comeco": "{ 8.12 7.17 7.02 }",
+  "interrompido": false,
+  "rustc_durante": 15,
+  "memoria_mib": {
+   "seele-app": 43.3,
+   "GPU": 95.2,
+   "WebContent": 61.9,
+   "Networking": 5.8,
+   "total": 206.2
+  },
+  "cpu_pct": 5.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 139,
+   "commits_por_s": 4.6,
+   "commit_ms": {
+    "p50": 0.17,
+    "p95": 0.28,
+    "p99": 0.36,
+    "max": 0.38
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 2.86,
+  "carga_media_no_fim": "{ 4.59 6.29 6.69 }",
+  "rustc_no_fim": 0,
+  "rodada": "1-mod-132215"
+ },
+ {
+  "cenario": "3-mods",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.39,
+  "carga_media_no_comeco": "{ 3.14 3.64 4.47 }",
+  "entradas_dos_mods": [
+   "Aparência do servidor — de seele/estilo",
+   "Mesa — de seele/mesa",
+   "Perfis — de seele/perfis"
+  ],
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 40.6,
+   "GPU": 100.1,
+   "WebContent": 106.2,
+   "Networking": 4.8,
+   "total": 251.7
+  },
+  "cpu_pct": 8.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 165,
+   "commits_por_s": 5.5,
+   "commit_ms": {
+    "p50": 0.18,
+    "p95": 0.33,
+    "p99": 0.42,
+    "max": 0.42
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.04,
+  "carga_media_no_fim": "{ 2.83 3.40 4.29 }",
+  "rustc_no_fim": 0,
+  "rodada": "3-mods-134716"
+ },
+ {
+  "cenario": "3-mods-editor",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 0.88,
+  "carga_media_no_comeco": "{ 2.72 3.31 4.23 }",
+  "acao": "o editor não abriu",
+  "entradas_dos_mods": [
+   "Aparência do servidor — de seele/estilo",
+   "Mesa — de seele/mesa",
+   "Perfis — de seele/perfis"
+  ],
+  "interrompido": true,
+  "rustc_durante": 9,
+  "memoria_mib": {
+   "seele-app": 37.9,
+   "GPU": 101.9,
+   "WebContent": 109.4,
+   "Networking": 5.3,
+   "total": 254.5
+  },
+  "cpu_pct": 6.1,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 112,
+   "commits_por_s": 3.7,
+   "commit_ms": {
+    "p50": 0.2,
+    "p95": 0.29,
+    "p99": 0.37,
+    "max": 0.4
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.68,
+  "carga_media_no_fim": "{ 4.32 3.51 4.18 }",
+  "rustc_no_fim": 1,
+  "rodada": "3-mods-editor-134915"
+ },
+ {
+  "cenario": "3-mods-editor",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.05,
+  "carga_media_no_comeco": "{ 3.11 3.24 3.65 }",
+  "acao": "EDITAR MEU PERFIL aberto",
+  "entradas_dos_mods": [],
+  "interrompido": true,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 44.4,
+   "GPU": 101.1,
+   "WebContent": 140.2,
+   "Networking": 4.9,
+   "total": 290.6
+  },
+  "cpu_pct": 11.7,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 393,
+   "commits_por_s": 13.1,
+   "commit_ms": {
+    "p50": 0.14,
+    "p95": 0.22,
+    "p99": 0.25,
+    "max": 0.31
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.0,
+  "carga_media_no_fim": "{ 3.72 3.42 3.67 }",
+  "rustc_no_fim": 0,
+  "rodada": "3-mods-editor-140331"
+ },
+ {
+  "cenario": "sem-mod",
+  "mods": [],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.53,
+  "carga_media_no_comeco": "{ 5.04 6.02 6.83 }",
+  "interrompido": false,
+  "rustc_durante": 14,
+  "memoria_mib": {
+   "seele-app": 38.3,
+   "GPU": 94.7,
+   "WebContent": 56.2,
+   "Networking": 5.8,
+   "total": 195.0
+  },
+  "cpu_pct": 4.7,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 126,
+   "commits_por_s": 4.2,
+   "commit_ms": {
+    "p50": 0.17,
+    "p95": 0.26,
+    "p99": 0.27,
+    "max": 0.28
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 4.32,
+  "carga_media_no_fim": "{ 6.38 6.11 6.78 }",
+  "rustc_no_fim": 3,
+  "rodada": "sem-mod-131519"
+ },
+ {
+  "cenario": "sem-mod",
+  "mods": [],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 0.87,
+  "carga_media_no_comeco": "{ 6.80 6.35 6.82 }",
+  "interrompido": false,
+  "rustc_durante": 10,
+  "memoria_mib": {
+   "seele-app": 37.3,
+   "GPU": 94.8,
+   "WebContent": 55.0,
+   "Networking": 5.7,
+   "total": 192.8
+  },
+  "cpu_pct": 5.3,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 126,
+   "commits_por_s": 4.2,
+   "commit_ms": {
+    "p50": 0.18,
+    "p95": 0.24,
+    "p99": 0.31,
+    "max": 0.32
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 4.3,
+  "carga_media_no_fim": "{ 8.07 6.59 6.85 }",
+  "rustc_no_fim": 2,
+  "rodada": "sem-mod-131748"
+ }
+]

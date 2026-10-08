@@ -1921,6 +1921,12 @@ async fn hospedar(
     if let Ok(mut qual) = session.servidor_hospedado.lock() {
         *qual = id_do_servidor.map(str::to_owned);
     }
+    // Quem hospeda, pela chave desta máquina: é a impressão que a portaria vai
+    // admitir antes de a porta abrir. Falhar aqui é grave o bastante para não
+    // hospedar — um servidor no ar em que o dono não entra é uma janela travada
+    // com uma frase pedindo que alguém decida.
+    let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
+        .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
     let server = seele_server::hospedagem::Hospedagem::iniciar(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
@@ -1929,47 +1935,36 @@ async fn hospedar(
         // arquivos: o código é compartilhado porque é imutável e conferido por
         // hash; o que o MOD escreve é **desta instância**, e não da máquina.
         Some(servidores::raizes_dos_mods(&config, id_do_servidor)),
+        // **Antes de o servidor aceitar a primeira conexão** — D-seg-1, a
+        // janela do Comandante. Isto rodava depois de `iniciar` voltar, com o
+        // laço já no ar: num banco novo a portaria nasce desligada, e quem
+        // chegasse nesse intervalo virava a primeira conta, e a primeira conta
+        // vira a Comandante. Ver `crates/seele-server/tests/janela_do_comandante.rs`.
+        move |persistence| {
+            // A porta se fecha no mesmo gesto de hospedar, antes do primeiro
+            // pacote — ADR 0030. O `seeled` continua subindo aberto, porque
+            // quem digita `seeled` aceitou cerimônia; quem apertou um botão
+            // não, e para ele o padrão é perguntar.
+            //
+            // Semear, e não ligar: isto roda toda vez que a janela sobe um
+            // servidor, e um interruptor que se rearma sozinho é um
+            // interruptor quebrado.
+            if let Err(erro) = seele_server::portaria::semear_ligada(persistence) {
+                // Não impede de hospedar. Um servidor no ar com a portaria
+                // desligada é o comportamento de antes deste ADR, e a tela diz
+                // em que estado a porta está.
+                tracing::warn!(%erro, "não consegui semear a portaria");
+            }
+            // E quem hospeda entra na própria casa. Sem isto a portaria tranca
+            // o dono para fora: o app conecta no servidor que acabou de subir,
+            // o porteiro trata quem hospeda como desconhecido, e o pedido fica
+            // esperando a decisão de alguém que não consegue entrar para
+            // decidir — foi o que aconteceu numa máquina de verdade.
+            seele_server::portaria::admitir_o_dono(persistence, &minha)
+        },
     )
     .await
     .map_err(|erro| classificar(&erro))?;
-
-    // A porta se fecha no mesmo gesto de hospedar, antes do primeiro pacote —
-    // ADR 0030. O `seeled` continua subindo aberto, porque quem digita `seeled`
-    // aceitou cerimônia; quem apertou um botão não, e para ele o padrão é
-    // perguntar.
-    //
-    // Semear, e não ligar: isto roda toda vez que a janela sobe um servidor, e um
-    // interruptor que se rearma sozinho é um interruptor quebrado.
-    {
-        let banco = server.persistence();
-        let mut persistence = banco.lock().await;
-        if let Err(erro) = seele_server::portaria::semear_ligada(&mut persistence) {
-            // Não impede de hospedar. Um servidor no ar com a portaria desligada é
-            // o comportamento de antes deste ADR, e a tela diz em que estado a
-            // porta está — que é a metade que faltava de verdade.
-            tracing::warn!(%erro, "não consegui semear a portaria");
-        }
-
-        // E quem hospeda entra na própria casa.
-        //
-        // Sem isto a portaria tranca o dono para fora: o app conecta no servidor
-        // que acabou de subir, o porteiro trata quem hospeda como desconhecido,
-        // e o pedido fica esperando a decisão de alguém que não consegue entrar
-        // para decidir. Foi o que aconteceu numa máquina de verdade, e é
-        // deadlock no caminho principal do produto.
-        //
-        // Aqui e não na primeira conexão: se dependesse dela seria a mesma
-        // corrida, porque a decisão precisa existir **antes** de haver alguém a
-        // decidir.
-        //
-        // Falhar aqui é grave o bastante para não hospedar. Um servidor no ar em
-        // que o dono não entra não é meio funcional — é uma janela travada com
-        // uma frase pedindo que alguém decida.
-        let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
-            .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-        seele_server::portaria::admitir_o_dono(&mut persistence, &minha)
-            .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-    }
 
     let alcance = server.alcance();
     let anfitriao = Anfitriao {

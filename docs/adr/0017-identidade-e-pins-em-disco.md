@@ -9,6 +9,12 @@ Status: aceito
 > foi escrito: o 0035 preserva de propósito o registro de ontem, e o
 > `docs/glossario.md` é a autoridade sobre a palavra de hoje.
 
+> **Emenda proposta em 08/10/2026 ([ADR 0061](0061-a-identidade-e-uma-por-maquina.md),
+> proposto).** A identidade passa a ter uma pasta própria, `$SEELE_IDENTIDADE`,
+> que o launcher aponta para a pasta principal da máquina, e os pins continuam
+> com os dados. Sem o launcher, a ordem deste ADR continua valendo, e o
+> `$SEELE_HOME` continua dando duas pessoas numa máquina.
+
 Contexto: o ADR 0004 escolhe Ed25519 como identidade mas não diz onde a chave mora. Até M2 não importava: sem contas, uma chave nova a cada execução era simplesmente um piloto novo a cada execução. **M3 mudou isso.** O CASPER passou a vincular o apelido à identidade que o reivindicou primeiro, e o MELCHIOR passa a recusar qualquer outra:
 
 ```

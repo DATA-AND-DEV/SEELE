@@ -5113,6 +5113,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-motor-web"
+version = "0.0.0"
+dependencies = [
+ "rquickjs",
+ "serde_json",
+]
+
+[[package]]
 name = "seele-proto"
 version = "0.0.0"
 dependencies = [
@@ -5171,6 +5179,14 @@ dependencies = [
  "tracing",
  "windows 0.62.2",
  "windows-capture",
+]
+
+[[package]]
+name = "seele-web"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
+ "serde_json",
 ]
 
 [[package]]
@@ -7842,6 +7858,7 @@ version = "0.0.0"
 dependencies = [
  "cargo_metadata 0.23.1",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]

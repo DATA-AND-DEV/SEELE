@@ -295,6 +295,39 @@ pub const NONCE_LEN: usize = 32;
 /// prova. Adendo de 08/10/2026, §10.
 pub const MAX_MATERIAL_E2EE_LEN: usize = 256;
 
+/// O teto do identificador de um MOD nos pedidos, nos avisos e no tema.
+///
+/// 128, como o `ModRequest` sempre conferiu e o volume do ADR 0048 também
+/// (`volume::MAX_MOD_ID_LEN`). O anúncio usa um teto menor
+/// ([`MAX_MOD_ID_LEN`], 96), porque ele soma doze MODs num quadro.
+pub const MAX_ID_DO_MOD_NOS_PEDIDOS: usize = 128;
+
+/// O teto, no fio, de uma carga de MOD: o pedido, o aviso da metade de
+/// servidor e os valores do tema.
+///
+/// **Largo de propósito, e o mesmo para os três** (rascunho da API 6, §14,
+/// decidido em 08/10/2026). Um teto de fio não sobe numa 1.x: uma build 1.0
+/// recusaria com `FieldTooLong` o quadro maior de uma 1.1, e a sessão cairia. O
+/// limite que a API dá a um MOD (por exemplo, 1 KiB e 4 por segundo para o
+/// aviso) é do runtime, e pode mudar sem tocar no fio.
+pub const MAX_CARGA_DE_MOD: usize = 12 * 1024;
+
+/// O tema que um servidor aplica, como dado do servidor (rascunho da API 6,
+/// §9 e §14).
+///
+/// **Os valores viajam como o JSON do tema, opaco no fio.** A forma do tema
+/// ainda cresce (os tokens por região, o modo, a densidade, e o `decorar` da
+/// API 7), e uma estrutura no postcard congelaria hoje campos que nem estão
+/// decididos. Quem confere os valores é o produto, que mede o contraste: o MOD
+/// declara, o produto mede (ADR 0029).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TemaDoServidor {
+    /// O MOD que pediu o tema, que é quem tem o ponto `servidor.aparencia`.
+    pub mod_id: String,
+    /// O JSON do tema, como o `v6.json` o define. Até [`MAX_CARGA_DE_MOD`].
+    pub valores: String,
+}
+
 /// Quantas APIs de MOD um `Hello` pode dizer que roda.
 ///
 /// Uma build roda poucas: a 0.15 roda três (3, 4 e 5), e a 0.16 roda uma. Oito
@@ -2501,6 +2534,32 @@ pub enum ServerMessage {
         /// As janelas, da mais antiga para a mais nova.
         janelas: Vec<JanelaDoNavegador>,
     },
+
+    // ---- a API 6 de MODs, desde o Servidor 1.0 (rascunho da F3, §14) ----
+    /// Um aviso da metade de servidor de um MOD às janelas do mesmo MOD
+    /// (`mundo.avisar`), no lugar de as janelas consultarem em laço.
+    ///
+    /// Sai só para quem pode ler `canal`, ou para todo mundo com `None`. Quem
+    /// filtra, e quem aplica o limite da API (1 KiB e 4 por segundo, a medir na
+    /// M3), é o servidor; o teto do fio é [`MAX_CARGA_DE_MOD`].
+    ModAviso {
+        /// O MOD que avisa, e cujas janelas recebem.
+        mod_id: String,
+        /// O canal do aviso; `None` é o servidor inteiro.
+        canal: Option<ChannelId>,
+        /// O que o MOD mandou, como texto.
+        carga: String,
+    },
+    /// O tema do servidor mudou, ou é este desde o começo.
+    ///
+    /// **Sai sempre, logo depois do `Session`**, inclusive com `None` quando
+    /// não há tema, e de novo a cada troca. Assim quem recebe sabe quando o
+    /// estado do tema é conhecido, e a casca o aplica antes de desenhar a
+    /// sessão. `None` tira o tema.
+    TemaMudou {
+        /// O tema de agora, ou nenhum.
+        tema: Option<TemaDoServidor>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2617,7 +2676,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 46;
+    const CONHECIDAS: u32 = 48;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -2726,6 +2785,16 @@ pub trait Validate {
 
 fn check(field: &'static str, len: usize, limit: usize) -> Result<(), ControlError> {
     check_bounds(field, len, limit)
+}
+
+/// O identificador de um MOD num aviso ou num tema: não vazio, e até
+/// [`MAX_ID_DO_MOD_NOS_PEDIDOS`]. Um aviso de ninguém não tem janela para
+/// receber.
+fn check_id_do_mod(mod_id: &str) -> Result<(), ControlError> {
+    if mod_id.is_empty() {
+        return Err(ControlError::FieldOutOfRange { field: "mod_id" });
+    }
+    check("mod_id", mod_id.len(), MAX_ID_DO_MOD_NOS_PEDIDOS)
 }
 
 /// Recusa uma impressão digital que não é um SHA-256 em hexadecimal.
@@ -3093,8 +3162,8 @@ impl Validate for ClientMessage {
             }
             Self::RecusarMods => Ok(()),
             Self::ModRequest { id, payload, .. } => {
-                check("mod_id", id.len(), 128)?;
-                check("mod_payload", payload.len(), 12 * 1024)
+                check("mod_id", id.len(), MAX_ID_DO_MOD_NOS_PEDIDOS)?;
+                check("mod_payload", payload.len(), MAX_CARGA_DE_MOD)
             }
             // O motivo é um enumerado de tamanho fixo, e a `ScreenId` segue a
             // mesma regra do braço acima: quem sabe se ela existe é o servidor.
@@ -3282,6 +3351,17 @@ impl Validate for ServerMessage {
                     Err(ControlError::FieldOutOfRange { field: "janelas" })
                 }
             }
+            Self::ModAviso { mod_id, carga, .. } => {
+                check_id_do_mod(mod_id)?;
+                check("mod_carga", carga.len(), MAX_CARGA_DE_MOD)
+            }
+            Self::TemaMudou { tema } => match tema {
+                None => Ok(()),
+                Some(tema) => {
+                    check_id_do_mod(&tema.mod_id)?;
+                    check("tema_valores", tema.valores.len(), MAX_CARGA_DE_MOD)
+                }
+            },
         }
     }
 }
@@ -4954,7 +5034,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            45,
+            47,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4983,6 +5063,9 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **46 e 47 pelo `ModAviso` e pelo `TemaMudou`**, da API 6 de MODs
+        // (rascunho da F3, §14), no mesmo 9.
         //
         // **45 pela `HashesDoNavegador`**, os certificados curtos do celular
         // (ADR 0057), no mesmo 9.
@@ -5594,6 +5677,96 @@ mod os_hashes_do_navegador {
         );
         const { assert!(JANELAS_ANUNCIADAS <= MAX_JANELAS_DO_NAVEGADOR) };
         assert_eq!(crate::transport::ALPN_DO_NAVEGADOR, b"h3");
+    }
+}
+
+#[cfg(test)]
+mod o_mod_e_o_tema_no_fio {
+    //! O rascunho da API 6, §14 (decidido em 08/10/2026): o aviso da metade de
+    //! servidor às janelas, e o tema como dado do servidor. Os tetos do fio são
+    //! largos de propósito: um teto de fio não sobe numa 1.x, e o limite da API
+    //! (1 KiB, 4 por segundo) fica no runtime.
+    use super::*;
+
+    fn aviso(mod_id: &str, carga: &str) -> ServerMessage {
+        ServerMessage::ModAviso {
+            mod_id: mod_id.into(),
+            canal: Some(ChannelId(3)),
+            carga: carga.into(),
+        }
+    }
+
+    fn tema(mod_id: &str, valores: &str) -> ServerMessage {
+        ServerMessage::TemaMudou {
+            tema: Some(TemaDoServidor {
+                mod_id: mod_id.into(),
+                valores: valores.into(),
+            }),
+        }
+    }
+
+    #[test]
+    fn as_duas_vao_e_voltam() {
+        for mensagem in [
+            aviso("seele/mesa", r#"{"rodada":2}"#),
+            ServerMessage::ModAviso {
+                mod_id: "seele/mesa".into(),
+                canal: None,
+                carga: "{}".into(),
+            },
+            tema("seele/estilo", r##"{"acento":"#c86b1f"}"##),
+            ServerMessage::TemaMudou { tema: None },
+        ] {
+            assert_eq!(
+                decode::<ServerMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+    }
+
+    /// No teto, as duas ainda cabem num quadro: o teto é largo, e não maior
+    /// que o quadro.
+    #[test]
+    fn no_teto_as_duas_cabem_num_quadro() {
+        let id = "a".repeat(MAX_ID_DO_MOD_NOS_PEDIDOS);
+        let cheia = "x".repeat(MAX_CARGA_DE_MOD);
+        assert!(encode(&aviso(&id, &cheia)).unwrap().len() <= MAX_FRAME_LEN);
+        assert!(encode(&tema(&id, &cheia)).unwrap().len() <= MAX_FRAME_LEN);
+    }
+
+    #[test]
+    fn acima_do_teto_e_sem_mod_sao_recusadas_nos_dois_sentidos() {
+        let demais = "x".repeat(MAX_CARGA_DE_MOD + 1);
+        assert!(matches!(
+            encode(&aviso("seele/mesa", &demais)),
+            Err(ControlError::FieldTooLong {
+                field: "mod_carga",
+                ..
+            })
+        ));
+        assert!(matches!(
+            encode(&tema("seele/estilo", &demais)),
+            Err(ControlError::FieldTooLong {
+                field: "tema_valores",
+                ..
+            })
+        ));
+        let id_longo = "a".repeat(MAX_ID_DO_MOD_NOS_PEDIDOS + 1);
+        assert!(matches!(
+            encode(&aviso(&id_longo, "{}")),
+            Err(ControlError::FieldTooLong {
+                field: "mod_id",
+                ..
+            })
+        ));
+        assert_eq!(
+            encode(&aviso("", "{}")),
+            Err(ControlError::FieldOutOfRange { field: "mod_id" })
+        );
+        assert_eq!(
+            encode(&tema("", "{}")),
+            Err(ControlError::FieldOutOfRange { field: "mod_id" })
+        );
     }
 }
 

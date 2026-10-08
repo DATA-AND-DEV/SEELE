@@ -58,6 +58,10 @@ use seele_proto::{
     oldest_supported_version, MediaHeader, MAX_PAYLOAD_LEN, MEDIA_HEADER_VERSION, PROTOCOL_VERSION,
 };
 
+/// A origem do navegador nos testes e no fuzz, até o D-web-2 escolher a de
+/// verdade. A mesma de `fuzz/fuzz_targets/uri.rs`.
+const ORIGEM_DOS_TESTES: &str = "origem.invalid";
+
 /// Uma impressão digital qualquer, no formato de verdade: 64 hexadecimais.
 const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
 
@@ -213,6 +217,27 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             .com_versao("0.15.0")
             .to_string()
             .into_bytes(),
+    );
+    // As duas formas novas da 0.16: o link do navegador, na origem dos testes,
+    // e o link da sala pessoal.
+    convites.insert(
+        "navegador".to_owned(),
+        Convite::novo("198.51.100.7:8383")
+            .com_impressao_digital(IMPRESSAO)
+            .com_token("7K4MNPQRSTVWXYZ23456")
+            .com_versao("1.0")
+            .no_navegador(
+                ORIGEM_DOS_TESTES,
+                "/e",
+                &["ab".repeat(32)],
+                Some(1_792_540_800),
+            )
+            .expect("o convite tem fp e hash")
+            .into_bytes(),
+    );
+    convites.insert(
+        "sala".to_owned(),
+        uri::link_da_sala(&seele_proto::codigo::Codigo::da_chave(&[0; 32])).into_bytes(),
     );
     todas.insert("uri", convites);
 
@@ -384,8 +409,11 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
     for (nome, bytes) in do_alvo(&todas, "uri") {
         let texto = std::str::from_utf8(bytes).expect("um convite é texto");
         assert!(
-            uri::analisar(texto).is_ok(),
-            "a semente uri/{nome} não é um convite que o `analisar` aceite: {texto}"
+            uri::analisar(texto).is_ok()
+                || uri::analisar_no_navegador(texto, ORIGEM_DOS_TESTES).is_ok()
+                || matches!(uri::codigo_do_link(texto), Some(Ok(_))),
+            "a semente uri/{nome} não é um convite, um link do navegador nem um link \
+             da sala que se leia: {texto}"
         );
     }
     for (nome, bytes) in do_alvo(&todas, "datagrama_do_encontro") {
