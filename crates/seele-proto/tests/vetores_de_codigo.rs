@@ -1,4 +1,5 @@
-//! Os vetores do código da sala pessoal, para quem reimplementar a derivação
+//! Os vetores do código da sala pessoal, e das marcas dela no quarto, para
+//! quem reimplementar a derivação
 //! fora daqui — o web app, um indexador, um teste de campo — provar que não
 //! divergiu (spec de 23/09/2026, «O código»: «os vetores de teste ficam
 //! congelados no molde de `vetores-de-hash.json`»).
@@ -19,6 +20,7 @@
 use std::path::PathBuf;
 
 use seele_proto::codigo::Codigo;
+use seele_proto::encontro::Marcas;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -47,12 +49,16 @@ fn montar_json() -> String {
     let todos = casos();
     for (indice, (nome, chave)) in todos.iter().enumerate() {
         let codigo = Codigo::da_chave(chave);
+        let marcas = Marcas::da_sala(&codigo);
         let virgula = if indice + 1 == todos.len() { "" } else { "," };
         let _ = writeln!(
             texto,
-            "    {{ \"nome\": {nome:?}, \"chave\": \"{}\", \"codigo\": \"{codigo}\", \"dado\": \"{}\" }}{virgula}",
+            "    {{ \"nome\": {nome:?}, \"chave\": \"{}\", \"codigo\": \"{codigo}\", \"dado\": \"{}\", \"aviso\": \"{}\", \"escuta\": \"{}\", \"servidor\": \"{}\" }}{virgula}",
             hex(chave),
-            codigo.dado()
+            codigo.dado(),
+            marcas.aviso().texto(),
+            marcas.escuta().texto(),
+            marcas.servidor().texto()
         );
     }
     texto.push_str("  ]\n}\n");
