@@ -3822,6 +3822,18 @@ fn o_ci_roda_deny_e_fuzz() {
         "o upload do fuzz não guarda `fuzz/artifacts/`, que é onde o libFuzzer grava o \
          `crash-*`. O passo: {upload:?}"
     );
+    // `warn`, e não `ignore`: um caminho errado no `path:` (ou um libFuzzer que
+    // passou a gravar noutra pasta) faria o upload não achar nada, e `ignore`
+    // calaria justamente esse sinal. Com `warn`, um vermelho que não é crash
+    // ganha uma anotação de «nenhum arquivo achado», que é verdade e não custa nada.
+    assert!(
+        upload
+            .iter()
+            .any(|linha| linha == "if-no-files-found: warn"),
+        "o upload do fuzz não tem `if-no-files-found: warn`: com `ignore` (ou `error`) um \
+         `path:` errado não deixaria sinal nenhum, ou reprovaria o job por causa do upload. \
+         O passo: {upload:?}"
+    );
     let ultimo_alvo = passos.iter().rposition(|passo| {
         passo
             .iter()
