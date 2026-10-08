@@ -221,6 +221,15 @@ pub(crate) enum FalhaAoInstalarMod {
     SemManifesto,
     /// O `mod.json` existe e não vale, com o nome da recusa do `seele-core`.
     ManifestoRecusado(String),
+    /// Há um atalho (link simbólico) dentro da pasta, com o caminho dele.
+    ///
+    /// **A recusa está certa, e a variante própria é para dizê-la.** Ver
+    /// [`copiar_arvore`] para o porquê de atalho não passar. O caso que a
+    /// separou de [`FalhaAoInstalarMod::NaoCopiei`] é a pasta de quem
+    /// desenvolve o MOD, com `node_modules/.bin/` cheia de atalhos: misturada
+    /// às falhas do disco, a tela não tinha como dizer qual era o atalho nem o
+    /// que fazer (pendência 53).
+    TemAtalho(String),
     /// O disco recusou, e o que ele disse.
     ///
     /// **Aqui havia um `JaInstalado`**, e ele saiu com o endereçamento por
@@ -394,14 +403,35 @@ pub(crate) struct Publicado {
 /// cópia que falha no meio não pode deixar uma pasta com parte do MOD onde a
 /// leitura seguinte a encontre.
 ///
+/// # Toda recusa fica no `seele.log`
+///
+/// Com a pasta de onde se tentou instalar e a recusa inteira, o caminho do
+/// atalho incluído. A tela diz a quem está na frente dela; o registro é o que
+/// chega a quem conserta, e antes da pendência 53 ele não ganhava linha
+/// nenhuma — a recusa era certa, e o produto sabia o motivo e não contava.
+///
 /// # Errors
 ///
-/// [`FalhaAoInstalarMod`] quando falta manifesto, quando ele é recusado, ou
-/// quando a cópia não termina.
+/// [`FalhaAoInstalarMod`] quando falta manifesto, quando ele é recusado,
+/// quando há atalho dentro da pasta, ou quando a cópia não termina.
 pub(crate) fn instalar_de(
     config_dir: &Path,
     origem: &Path,
 ) -> Result<Publicado, FalhaAoInstalarMod> {
+    let publicado = publicar_de(config_dir, origem);
+    if let Err(recusa) = &publicado {
+        tracing::warn!(
+            origem = %origem.display(),
+            ?recusa,
+            "não instalei o MOD desta pasta"
+        );
+    }
+    publicado
+}
+
+/// O trabalho de [`instalar_de`], sem o registro: cada `return` daqui é uma
+/// recusa, e é lá, num lugar só, que toda ela vira linha no `seele.log`.
+fn publicar_de(config_dir: &Path, origem: &Path) -> Result<Publicado, FalhaAoInstalarMod> {
     if !origem.join("mod.json").is_file() {
         return Err(FalhaAoInstalarMod::SemManifesto);
     }
@@ -414,9 +444,14 @@ pub(crate) fn instalar_de(
     // apareceria como um pacote recusado enquanto a cópia acontece.
     let estufa = config_dir.join(".mods-em-obras").join(&id);
     let _ = std::fs::remove_dir_all(&estufa);
-    if let Err(erro) = copiar_arvore(origem, &estufa) {
+    if let Err(falha) = copiar_arvore(origem, &estufa) {
         let _ = std::fs::remove_dir_all(&estufa);
-        return Err(FalhaAoInstalarMod::NaoCopiei(erro.to_string()));
+        return Err(match falha {
+            FalhaNaCopia::Atalho(caminho) => {
+                FalhaAoInstalarMod::TemAtalho(caminho.display().to_string())
+            }
+            FalhaNaCopia::Disco(erro) => FalhaAoInstalarMod::NaoCopiei(erro.to_string()),
+        });
     }
 
     // **O hash sai do que foi copiado, e não do que foi lido.** São a mesma
@@ -456,16 +491,18 @@ pub(crate) fn instalar_de(
 /// a instalação publicar como «arquivo deste MOD» algo que está noutro lugar do
 /// disco — e o `mod://` serviria aquele conteúdo à janela. É a mesma recusa que
 /// o `seele-lancador` faz ao ler um pacote de versão.
-fn copiar_arvore(de: &Path, para: &Path) -> std::io::Result<()> {
+///
+/// # Errors
+///
+/// [`FalhaNaCopia::Atalho`] com o caminho do atalho, e [`FalhaNaCopia::Disco`]
+/// com o que o disco disse para o resto.
+fn copiar_arvore(de: &Path, para: &Path) -> Result<(), FalhaNaCopia> {
     std::fs::create_dir_all(para)?;
     for entrada in std::fs::read_dir(de)? {
         let entrada = entrada?;
         let tipo = entrada.file_type()?;
         if tipo.is_symlink() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("atalho dentro do pacote: {}", entrada.path().display()),
-            ));
+            return Err(FalhaNaCopia::Atalho(entrada.path()));
         }
         let alvo = para.join(entrada.file_name());
         if tipo.is_dir() {
@@ -475,6 +512,27 @@ fn copiar_arvore(de: &Path, para: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Por que [`copiar_arvore`] parou.
+///
+/// **Dois motivos, e não um `std::io::Error`.** O atalho era um erro de disco
+/// inventado, com o caminho dentro do texto, e por isso chegava à tela como
+/// [`FalhaAoInstalarMod::NaoCopiei`], junto das falhas que o disco dá de
+/// verdade. Separado aqui, ele vira [`FalhaAoInstalarMod::TemAtalho`] com o
+/// caminho como dado, e a tela diz qual é ele (pendência 53).
+#[derive(Debug)]
+enum FalhaNaCopia {
+    /// Um atalho dentro da árvore, com o caminho dele.
+    Atalho(std::path::PathBuf),
+    /// O disco recusou, e o que ele disse.
+    Disco(std::io::Error),
+}
+
+impl From<std::io::Error> for FalhaNaCopia {
+    fn from(erro: std::io::Error) -> Self {
+        Self::Disco(erro)
+    }
 }
 
 #[cfg(test)]
@@ -606,45 +664,143 @@ mod instalar {
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
+    /// **O atalho é recusado com o nome dele**, e não como uma falha do disco.
+    ///
+    /// Um link simbólico faria o `mod://` servir à janela um arquivo de outro
+    /// lugar do disco, como se fosse do MOD — a recusa está certa. O que a
+    /// pendência 53 consertou é ela chegar à tela como `NaoCopiei`, junto das
+    /// falhas do disco, e a tela não ter como dizer qual era o atalho.
+    // **Só onde há atalho.** O Windows não tem `std::os::unix::fs::symlink`.
+    #[cfg(unix)]
     #[test]
     fn um_atalho_dentro_do_pacote_nao_e_instalado() {
-        // Um link simbólico faria o `mod://` servir à janela um arquivo de
-        // outro lugar do disco, como se fosse do MOD.
-        #[cfg(unix)]
-        {
-            let raiz = pasta("atalho");
-            let origem = pacote(&raiz, "autor/exemplo", None);
-            let segredo = raiz.join("segredo.txt");
-            std::fs::write(&segredo, b"nao sou deste mod").unwrap();
-            std::os::unix::fs::symlink(&segredo, origem.join("atalho.txt")).unwrap();
-            let config = raiz.join("config");
+        let raiz = pasta("atalho");
+        let origem = pacote(&raiz, "autor/exemplo", None);
+        let segredo = raiz.join("segredo.txt");
+        std::fs::write(&segredo, b"nao sou deste mod").unwrap();
+        let atalho = origem.join("atalho.txt");
+        std::os::unix::fs::symlink(&segredo, &atalho).unwrap();
+        let config = raiz.join("config");
 
-            assert!(matches!(
-                instalar_de(&config, &origem),
-                Err(FalhaAoInstalarMod::NaoCopiei(_))
-            ));
-            let _ = std::fs::remove_dir_all(&raiz);
+        match instalar_de(&config, &origem) {
+            Err(FalhaAoInstalarMod::TemAtalho(caminho)) => assert_eq!(
+                caminho,
+                atalho.display().to_string(),
+                "a recusa do atalho não diz qual é ele, e quem lê a tela não sabe o que tirar"
+            ),
+            outra => panic!(
+                "um atalho dentro do pacote não foi recusado como atalho, e a tela não tem \
+                 como dizer qual é ele: {outra:?}"
+            ),
         }
+        assert!(
+            !config.join(seele_ffi::mods::PACOTES).exists()
+                || std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
+                    .unwrap()
+                    .count()
+                    == 0,
+            "o pacote com atalho foi publicado assim mesmo"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **A recusa do atalho deixa linha no `seele.log`, com o caminho dele.**
+    ///
+    /// Sem ela, quem relata «não instala» chega sem dado nenhum: a tela diz o
+    /// atalho a quem está na frente dela, e o registro é o que chega a quem
+    /// conserta.
+    #[cfg(unix)]
+    #[test]
+    fn a_recusa_do_atalho_fica_no_registro_com_o_caminho() {
+        let raiz = pasta("atalho-no-registro");
+        let origem = pacote(&raiz, "autor/exemplo", None);
+        std::fs::create_dir_all(origem.join("node_modules/.bin")).unwrap();
+        let atalho = origem.join("node_modules/.bin/playwright-core");
+        std::os::unix::fs::symlink("/etc/hosts", &atalho).unwrap();
+        let config = raiz.join("config");
+
+        let (resultado, rastro) =
+            crate::rastro_de_teste::capturar(|| instalar_de(&config, &origem));
+
+        assert!(
+            matches!(resultado, Err(FalhaAoInstalarMod::TemAtalho(_))),
+            "o atalho não foi recusado como atalho: {resultado:?}"
+        );
+        let caminho = atalho.display().to_string();
+        assert!(
+            rastro
+                .lines()
+                .any(|linha| linha.contains("WARN") && linha.contains(&caminho)),
+            "a recusa do atalho não deixou linha WARN com o caminho dele no `seele.log`, e \
+             quem relata «não instala» chega sem dado nenhum:\n{rastro}"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **E toda recusa deixa a linha, com a pasta de onde se tentou instalar.**
+    ///
+    /// As que não dependem de atalho, para rodar em todo sistema.
+    #[test]
+    fn toda_recusa_de_instalar_fica_no_registro_com_a_pasta() {
+        let raiz = pasta("recusas-no-registro");
+        let config = raiz.join("config");
+
+        let vazia = raiz.join("vazia");
+        std::fs::create_dir_all(&vazia).unwrap();
+        let torto = raiz.join("torto");
+        std::fs::create_dir_all(&torto).unwrap();
+        std::fs::write(torto.join("mod.json"), b"{isto nao e json}").unwrap();
+
+        for origem in [vazia, torto] {
+            let (resultado, rastro) =
+                crate::rastro_de_teste::capturar(|| instalar_de(&config, &origem));
+            assert!(resultado.is_err(), "{} instalou", origem.display());
+            let caminho = origem.display().to_string();
+            assert!(
+                rastro
+                    .lines()
+                    .any(|linha| linha.contains("WARN") && linha.contains(&caminho)),
+                "uma recusa de instalar não deixou linha WARN com a pasta no `seele.log`: \
+                 {resultado:?}\n{rastro}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&raiz);
     }
 
     /// **A10 da auditoria: uma cópia que falha não deixa nada pela metade.**
     ///
-    /// A falha é injetada com um atalho dentro do pacote, que `copiar_arvore`
-    /// recusa **depois** de já ter criado diretório e copiado arquivo.
-    // **Só onde há atalho.** O Windows não tem `std::os::unix::fs::symlink`.
+    /// A falha é injetada com um arquivo que ninguém pode ler, dentro de uma
+    /// subpasta: `copiar_arvore` tropeça nele **depois** de já ter criado
+    /// diretório. A leitura do manifesto não tropeça, porque o hash pula o que
+    /// não abre.
+    ///
+    /// **Era um atalho, e deixou de ser** com a pendência 53: o atalho ganhou
+    /// recusa própria, `TemAtalho`, e este teste é sobre as outras falhas da
+    /// cópia, que continuam `NaoCopiei`.
+    // **Só onde há permissão de Unix.** O Windows não tem `PermissionsExt`.
     #[cfg(unix)]
     #[test]
     fn uma_copia_que_falha_no_meio_nao_deixa_pacote_pela_metade() {
+        use std::os::unix::fs::PermissionsExt as _;
+
         let raiz = pasta("meia-copia");
         let origem = pacote(&raiz, "autor/exemplo", None);
         std::fs::create_dir_all(origem.join("extra")).unwrap();
-        std::os::unix::fs::symlink("/etc/hosts", origem.join("extra/atalho")).unwrap();
+        let trancado = origem.join("extra/trancado.txt");
+        std::fs::write(&trancado, b"ninguem le").unwrap();
+        std::fs::set_permissions(&trancado, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(
+            std::fs::read(&trancado).is_err(),
+            "o arquivo trancado ainda se lê (este teste roda como root?), e sem a falha \
+             injetada a cópia termina e o teste não prova nada"
+        );
         let config = raiz.join("config");
 
-        assert!(matches!(
-            instalar_de(&config, &origem),
-            Err(FalhaAoInstalarMod::NaoCopiei(_))
-        ));
+        let resultado = instalar_de(&config, &origem);
+        assert!(
+            matches!(resultado, Err(FalhaAoInstalarMod::NaoCopiei(_))),
+            "uma falha da cópia que não é atalho não chegou como `NaoCopiei`: {resultado:?}"
+        );
         assert!(
             !config.join(seele_ffi::mods::PACOTES).exists()
                 || std::fs::read_dir(config.join(seele_ffi::mods::PACOTES))
