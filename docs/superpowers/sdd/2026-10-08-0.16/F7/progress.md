@@ -46,7 +46,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 3 | 4c, a campainha | **feita** | `77207424` |
 | 4 | 7g-núcleo, a agenda | **feita** | `6f28dd41` |
 | 5 | 7c-áudio, o toque só de saída | **feita**, com duas medidas pendentes do dono | `d1f8a947` |
-| 6 | os ADRs 0059, 0060 e 0061 | a fazer | — |
+| 6 | os ADRs 0059, 0060 e 0061 | **feita**, com o 0061 proposto | `d763e9e9` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -150,3 +150,26 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
   integrações, verdes. O `laco_por_processo` (`cfg(windows)`) não compila neste
   Mac. Os dependentes (`seele-core`, `seele-ffi` e `seele-app`) passam no
   `cargo check`, e nenhum faz `match` sobre `DeviceError`.
+
+## Tarefa 6 — os ADRs (08/10)
+
+- **0059**, aceito: a sala segura a conexão. **0060**, aceito: o código.
+  **0061**, proposto: a identidade por máquina.
+- O 0017 e o 0046 ganharam só notas de cabeçalho, e o índice ganhou as três
+  linhas.
+- **O guarda `xtask/tests/adr_index.rs` reprovou a primeira versão do índice.**
+  As linhas do 0017 e do 0046 diziam «0061 (proposto)», e o guarda lê a palavra
+  em qualquer lugar da linha. Elas agora citam o 0061 sem o status. O
+  `textos_publicos` também passa.
+- **O 0061 espera o dono** em duas coisas: a opção (a) ou (b) da linha legada,
+  e a regra dos 32 bytes na 0.15.2, que é condição para aceitá-lo.
+
+## Onde a frente está
+
+As seis tarefas [AGORA] estão feitas. Pendências:
+- **as duas medidas do toque que abrem o microfone**, com o dono presente;
+- **a decisão do dono** sobre a A1 e o 0061;
+- **a liberação da orquestradora** para as tarefas 7 (UPnP por papel) e 8
+  (`ConfereCodigo`), que o plano marca como [AGORA, se liberada].
+
+O resto espera o G-servidor, a F2, a casca ou a F1.
