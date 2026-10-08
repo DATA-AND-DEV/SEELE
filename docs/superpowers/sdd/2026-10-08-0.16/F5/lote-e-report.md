@@ -2,14 +2,21 @@
 
 Base `3b0b6a7a` (branch `0.16/lotes`). Branch `0.16/lotes-e`, no worktree
 `/Users/dev-alexandre/SEELE/.claude/worktrees/agent-a69f343be8082b408`. Dois
-commits de código e este relatório, todos locais: sem push, tag nem release.
+commits de código, três de fecho depois da revisão e este relatório, todos
+locais: sem push, tag nem release.
 
 | commit | item | o que muda |
 |---|---|---|
 | `bece2bd9` | P51-09 | `Session::recusar_se_morta`; as treze conferências `if !session.geracao_vale(` passam por ela; `liberar_reserva` recebe `mortos` e conta; a ressalva do doc de `registrar_reserva` sai |
 | `9abe0678` | P51-11 | `imagem_lida_dita` leva as duas recusas de depois do `await` de `ler_imagem_mod`; a conexão ausente vai a `recusa_de_midia_dita` em DEBUG; os dois guardas de fonte da mídia acompanham; o doc de `recusa_de_midia_dita` perde o parágrafo da geração morta |
+| `a2d86649` | fecho 1–4 | `recusa_do_servidor` passa por `imagem_lida_dita`; a conta de `recusar_se_morta` fora dos testes tem de ser igual à da lista do guarda (b); a conexão ausente de `ler_imagem_mod` não pode contar; o fim de `impl Session` que falta reprova |
+| `0b6b9193` | fecho 5 | `reservar_no_executor` confere por `recusar_se_morta`, e entra na lista do guarda |
+| `06256c27` | fecho 6 | `liberar_reserva` diz a recusa por geração morta com a linha DEBUG de `confere_geracao` |
 
-Arquivos mudados (`3b0b6a7a..9abe0678`): só `apps/seele-app/src/main.rs`.
+A seção «Fecho», no fim, conta o que mudou depois da revisão. Ela reescreve
+as preocupações 2, 4 e 5.
+
+Arquivos mudados (`3b0b6a7a..06256c27`): só `apps/seele-app/src/main.rs`.
 Nada no fio (`seele-proto`), no SEELE-ENC/1, nos arquivos da F6, em `api/`, na
 CSP, em `ui/` ou nas bancadas. Nenhuma dependência nova, nada baixado. A frase
 da tela (`camada-mods.js`, o contador do modo de desenvolvedor) não mudou.
@@ -285,17 +292,21 @@ continua com 6.
    revisão quiser teto, é passar o id e os baldes, o que muda as treze
    chamadas. E `codigo_do_mod` com a geração morta passa a deixar duas linhas
    DEBUG: a de `confere_geracao` e a de `recusa_de_carga_dita`, que já existia.
+   *(Fecho: a ativação também escreve a linha agora; ela continua sem dizer o
+   comando e sem teto, e fica como nota.)*
 3. **O contador sobe mais** (o risco que o brief já nomeia): sete caminhos e a
    ativação passam a contar. Ele só aparece no modo de desenvolvedor.
-4. **`reservar_no_executor` ficou como estava.** Ele usa
-   `session.confere_geracao(geracao).is_err()` e monta o `sessao-encerrada` à
-   mão, o que hoje é exatamente `recusar_se_morta`. Não está nas treze, conta e
-   diz, e o guarda (b) não o vê (não é `!….geracao_vale(`). Trocá-lo é estético.
+4. ~~**`reservar_no_executor` ficou como estava.** … Trocá-lo é estético.~~
+   *(Fecho, `0b6b9193`: ele passa por `recusar_se_morta`, com o mesmo
+   comportamento, e entrou na lista do guarda.)*
 5. **O guarda (b) pega a negação, e não toda forma de conferir.** Um
    `if session.geracao_vale(g) { … } else { return Err(…) }` ou um `match`
    escapam dele. A contagem positiva por função cobre o caso de a conferência
    sumir dos dez lugares conhecidos; uma conferência nova, num comando novo,
-   escrita sem negação, não é vista.
+   escrita sem negação, não é vista. *(Fecho: uma conferência nova **por
+   `recusar_se_morta`** fora da lista agora reprova, pela igualdade. A
+   conferência nova escrita sem negação e sem `recusar_se_morta` continua fora
+   do alcance, e fica como nota.)*
 6. **Os dois primeiros vermelhos de função nova foram de compilação**
    (`recusar_se_morta` e `imagem_lida_dita`). Para que o motivo certo
    aparecesse em tempo de execução, cada um teve um segundo vermelho com a
@@ -307,3 +318,155 @@ continua com 6.
 Nada. O lote não cria evento, campo do retrato nem frase no `api/README.md`; o
 que mudou é a contagem de um contador de diagnóstico e linhas do `seele.log`,
 que não são promessa da API. A capacidade `volume` segue como estava.
+
+## Fecho
+
+A revisão aprovou sem crítico nem importante, e pediu seis itens antes do
+merge. Os três primeiros são o «existir não é funcionar» do `CLAUDE.md`: um
+teste que mede uma cópia, uma soma que nunca falha sozinha e uma regra sem
+guarda. Cada reversão abaixo foi feita como as de cima (cópia no scratchpad,
+troca única, testes, cópia de volta e `cmp`), e todas voltaram idênticas.
+
+### Item 1: `recusa_do_servidor` passa por `imagem_lida_dita` (`a2d86649`)
+
+O ajudante chamava `recusa_de_midia_dita` direto, e o doc dele dizia «É o
+caminho de `ler_imagem_mod`». Os quatro testes que passam por ele (linha
+forjada, prazo, teto e pior caso) mediam uma cópia do caminho. Agora o corpo é
+`imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID,
+Err(motivo.to_owned()))`, com a recusa tirada por `expect`, e o doc diz por
+quê.
+
+**Antes e depois, com a mesma reversão R5** (a chamada da recusa do servidor
+tirada de `imagem_lida_dita`), no módulo `a_midia_recusada_e_dita_no_registro`
+inteiro:
+- antes: `FAILED. 17 passed; 1 failed` — só
+  `a_imagem_recusada_pelo_servidor_sai_como_warn_com_o_id_e_o_motivo`;
+- depois: `FAILED. 13 passed; 5 failed` —
+  `a_imagem_recusada_pelo_servidor…` («não chegou ao registro»),
+  `o_texto_do_servidor_no_motivo_nao_forja_linha` (`left: 0, right: 1`
+  linhas), `o_motivo_em_texto_livre_sai_entre_aspas` e
+  `o_motivo_do_servidor_tem_teto` («a recusa não chegou ao registro»), e
+  `o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas` («a linha não traz
+  `motivo="…"`»).
+
+### Item 2: a conta de `recusar_se_morta` é a da lista (`a2d86649`)
+
+O `total >= 13` nunca falhava sozinho: os mínimos por função já somavam 13.
+Agora o guarda conta `.recusar_se_morta(` no arquivo inteiro, fora de
+`impl Session` **e fora dos itens `#[cfg(test)]`**, e exige igualdade com a
+soma da lista. Os testes saem da conta porque três deles chamam
+`recusar_se_morta` (com 2, 0 e 3): contados, a igualdade seria 16 contra 13. O
+corte (`sem_itens_de_teste`) vai, a partir de cada `#[cfg(test)]` na coluna
+zero, até a `}` na coluna zero ou até a linha na coluna zero que termina em
+`;` (a `const` do fonte). Errar o fim só deixa teste na conta, e a igualdade
+reprova: ele falha fechado. A igualdade verde é a prova de que o corte tira as
+três chamadas dos testes. A contagem por função passou a ser sem espaço e com
+o mesmo padrão montado (`format!(".{}(", "recusar_se_morta")`), para o teste
+não se achar.
+
+- **Antes**, com uma 14ª chamada fora da lista
+  (`session.recusar_se_morta(geracao)?;` no começo de `mod_nativo_ativar`): o
+  guarda **verde**, `1 passed`.
+- **Depois**, a mesma reversão:
+  ```
+  assertion `left == right` failed: há 14 chamada(s) de `recusar_se_morta` fora
+  de `impl Session` e dos testes, e as funções da lista deste guarda somam 13:
+  uma conferência ficou fora da lista, e apagá-la não reprovaria nada
+    left: 14
+   right: 13
+  ```
+
+### Item 3: a conexão ausente não pode contar (`a2d86649`)
+
+`os_quatro_comandos_de_midia_passam_pela_recusa_dita` ganhou, depois do laço,
+uma exigência sobre `ler_imagem_mod`, no corpo sem comentários e sem espaço:
+- o trecho de `session.connection()` até o primeiro `)?;` não tem
+  `comandos_de_geracao_morta`, `confere_geracao(` nem `recusar_se_morta(`, e
+  tem `recusa_de_midia_dita(`;
+- o corpo inteiro não tem `comandos_de_geracao_morta`: a conta só por
+  `recusar_se_morta`.
+
+A forma mais precisa era necessária: com só «não tem
+`comandos_de_geracao_morta`», um `recusar_se_morta` a mais na conexão passava,
+porque sobe a conta da função e a do arquivo juntas no guarda (b).
+
+- **Antes**, com `let _ = session.recusar_se_morta(0);` dentro do `map_err` da
+  conexão: os três guardas de fonte **verdes** (`59 passed` em `os_`, e o (b)
+  verde).
+- **R11a**, a mesma reversão, depois: «a conexão ausente de `ler_imagem_mod`
+  passou por `recusar_se_morta(`: com a geração de pé, ela não é comando de
+  uma sessão encerrada, e o contador diria que a sessão anterior falou sem ela
+  ter falado».
+- **R11b**, `session.comandos_de_geracao_morta.fetch_add(1, …)` no mesmo
+  lugar: a mesma frase, com `comandos_de_geracao_morta`.
+
+### Item 4: o fim de `impl Session` que falta reprova (`a2d86649`)
+
+O `map_or("", …)` virou `expect("`impl Session` não fecha mais na coluna
+zero: sem o fim dela, o guarda leria só o que vem antes, e uma conferência
+crua depois dela passaria calada")`. **Sem reversão**: o `expect` só dispara
+se não houver nenhuma `}` na coluna zero depois de `impl Session` no arquivo
+inteiro, e produzir isso é apagar o arquivo. Fechar a `impl` com a chave
+recuada não serve: o corte acha a `}` do item seguinte, e o guarda lê um item
+a mais como se fosse da sessão, em vez de ler um vazio.
+
+### Item 5: `reservar_no_executor` por `recusar_se_morta` (`0b6b9193`)
+
+O comportamento é idêntico: `recusar_se_morta` é
+`confere_geracao(geracao).map_err(|_| Recusado { "sessao-encerrada" })`, e o
+código antigo era `if confere_geracao(geracao).is_err() { return
+Err(Recusado { "sessao-encerrada" }) }`. A mesma conta, a mesma linha DEBUG e
+o mesmo erro, que `mod_nativo_reservar` diz por `recusa_de_carga_dita` como
+antes.
+
+- **RED**, trocada a conferência e a lista ainda sem ela — o guarda do item 2
+  a pediu sozinho: `há 14 chamada(s)… somam 13`, `left: 14, right: 13`.
+- **GREEN** com `("fn reservar_no_executor(", 1)` na lista: `geracao`, 6
+  passaram.
+- **R12**, a conferência de volta ao `confere_geracao` à mão: «`fn
+  reservar_no_executor(` confere a geração 0 vez(es) por `recusar_se_morta`, e
+  conferia 1: um comando de uma geração morta passa a ser admitido».
+
+### Item 6: a ativação recusada é dita (`06256c27`)
+
+`liberar_reserva`, ao recusar por geração morta, conta, encerra a reserva,
+**solta o cadeado** e escreve `tracing::debug!(geracao, instancia, "comando
+recusado: a sessão dele já acabou")` — a frase de `confere_geracao`, com a
+instância no lugar de `atual`, que a função não conhece (ela recebe só o fecho
+`geracao_vale`). O cadeado sai antes da linha pela regra de
+`dizer_as_contas_do_registro`: com ele na mão, uma escrita lenta seguraria a
+supervisão de todos os MODs.
+
+O teste virou `a_ativacao_recusada_por_geracao_morta_e_contada_e_dita`: as
+duas chamadas a `liberar_reserva` sob `capturar`. A da geração morta exige a
+linha com `DEBUG`, `geracao=7` e `instancia=<n>`; a viva, recusada por
+`instancia-nao-esta-reservada`, exige o rastro sem ela.
+
+- **RED**: «a ativação recusada por geração morta foi contada e não foi dita:
+  os outros comandos de MOD deixam a linha DEBUG de `confere_geracao`, e esta
+  some do registro —» (rastro vazio).
+- **GREEN**: `geracao`, 6 passaram.
+- **R13**, a linha tirada: a mesma frase do RED.
+
+### O que rodou no fecho
+
+- `cargo test -p seele-app --bin seele-app` inteiro, sobre o código de
+  `06256c27`: **265 passaram, 0 falharam** (12,2 s). A contagem não muda: o
+  fecho reescreveu e renomeou testes, e não criou nenhum.
+- `cargo fmt --all -- --check` limpo, e `cargo clippy -p seele-app
+  --all-targets --all-features -- -D warnings` limpo com `touch` no `main.rs`,
+  antes de cada um dos três commits.
+
+### Fica de fora, como nota
+
+- **O guarda (b) não vê `if … else`, `match` nem receptor com caminho.** Ele
+  procura `!<identificador>.geracao_vale(`: `if session.geracao_vale(g) {} else
+  { return … }`, um `match` e `!self.inner.geracao_vale(` escapam. A igualdade
+  do item 2 pega a conferência nova **por `recusar_se_morta`**, e não a escrita
+  por fora dela sem negação.
+- **A linha DEBUG de `confere_geracao` não diz o comando nem passa pelo teto
+  de vazão.** `recusar_se_morta` não recebe o nome do comando nem o id do MOD.
+  A linha da ativação também não passa pelo teto.
+- **A segunda conferência de `enviar_imagem_mod` vem depois do upload.** Com a
+  geração morta durante o `await`, os bytes já foram ao servidor quando ela
+  recusa. A recusa conta e é dita, mas o efeito no servidor já aconteceu.
