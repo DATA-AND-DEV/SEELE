@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>medição 3 · iPhone</title>
+<style>
+  body { font: 16px/1.4 -apple-system, system-ui, sans-serif; margin: 12px; }
+  button { display: block; width: 100%; font-size: 18px; padding: 12px; margin: 8px 0; }
+  label, input { font-size: 16px; }
+  #o { white-space: pre-wrap; font: 12px/1.35 ui-monospace, monospace; background: #f3f3f3; padding: 8px; }
+  .ok { color: #070; } .nao { color: #a00; }
+</style>
+<h3>Medição 3 · o ALPN no iPhone</h3>
+<p id="modo"></p>
+<label><input type="checkbox" id="unreliable" checked> requireUnreliable (como o produto)</label><br>
+<label>IP sem ninguém na rede: <input id="ninguem" placeholder="ex.: 192.168.0.250" inputmode="decimal"></label>
+<button id="b1">1 · os casos (mesma chave, controles)</button>
+<button id="b2">2 · a lista longa (1 a 500 hashes)</button>
+<button id="b3">3 · fora do ar contra a recusa (até ~2 min)</button>
+<button id="b4">4 · ficar aberto, sem áudio</button>
+<button id="b5">5 · ficar aberto, com o áudio do produto</button>
+<button id="parar">parar o «ficar aberto»</button>
+<div id="o"></div>
+<script src="/casos.js"></script>
+<script>
+"use strict";
+// A página da medição 3 no iPhone. Cada resultado aparece aqui e vai ao Mac
+// por POST, que o grava em resultados/iphone.jsonl. Descartável.
+const $ = (id) => document.getElementById(id);
+const instalado = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+$("modo").textContent = instalado ? "modo: web app da Tela de Início" : "modo: aba do navegador";
+let cfg = null;
+let parar = null;
+const linha = (t, classe) => { const d = document.createElement("div"); d.textContent = t; if (classe) d.className = classe; $("o").prepend(d); };
+const mandar = (caminho, corpo) => fetch(caminho, { method: "POST", body: JSON.stringify({ ua: navigator.userAgent, instalado, ...corpo }) }).catch(() => {});
+const opcoes = () => ({ naoConfiavel: $("unreliable").checked });
+const mostrar = (lista) => {
+  for (const c of lista.slice().reverse()) {
+    const resultado = c.abriu ? `ABRIU em ${c.ms} ms, eco ${c.datagrama_eco && c.quadro_eco ? "ok" : "FALHOU"}` : `não abriu: ${c.ms} ms, ${c.erro}`;
+    linha(`${c.rotulo} → ${resultado}`, c.abriu ? "ok" : "nao");
+  }
+};
+async function rodar(nome, fazer) {
+  linha(`— ${nome}: rodando…`);
+  try {
+    const r = await fazer();
+    mostrar(r);
+    mandar("/r", { caso: nome, requireUnreliable: opcoes().naoConfiavel, resultados: r });
+  } catch (e) {
+    linha(`${nome}: ERRO ${e.name}: ${e.message}`, "nao");
+    mandar("/r", { caso: nome, erro: `${e.name}: ${e.message}` });
+  }
+}
+const aoEvento = (e) => { linha(JSON.stringify(e)); mandar("/evento", e); };
+$("b1").onclick = () => rodar("básicos", () => Casos.basicos(cfg, opcoes()));
+$("b2").onclick = () => rodar("lista", () => Casos.lista(cfg, opcoes()));
+$("b3").onclick = () => rodar("fora do ar", () => Casos.foraDoAr(cfg, opcoes(), $("ninguem").value.trim() || null));
+$("b4").onclick = () => { if (parar) parar(); parar = Casos.ficarAberto(cfg, opcoes(), aoEvento); };
+$("b5").onclick = async () => {
+  try { await Casos.ligarAudioDoProduto(aoEvento); } catch (e) { aoEvento({ ev: "áudio falhou", erro: `${e.name}: ${e.message}` }); }
+  if (parar) parar();
+  parar = Casos.ficarAberto(cfg, opcoes(), aoEvento);
+};
+$("parar").onclick = () => { if (parar) { parar(); parar = null; linha("— parado"); } };
+fetch("/cfg").then((r) => r.json()).then((c) => {
+  cfg = c;
+  linha(`servidor ${c.host}: A ${c.porta_a}, A2 ${c.porta_a2}, B ${c.porta_b}, mudo ${c.porta_mudo}, fechada ${c.porta_fechada}; mesma chave = ${c.mesma_chave}`);
+  mandar("/evento", { ev: "página aberta" });
+});
+</script>

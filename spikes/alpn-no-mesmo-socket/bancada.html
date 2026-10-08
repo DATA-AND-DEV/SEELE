@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>medição 3 · bancada</title>
+<pre id="o">rodando…</pre>
+<script src="/casos.js"></script>
+<script>
+"use strict";
+// A bancada da medição 3: o Chromium e o Safari do Simulador, em localhost.
+// `?modo=bancada` roda os casos 1 a 3 e manda tudo de uma vez; `?modo=ficar`
+// abre uma sessão e a mantém, mandando cada evento.
+const q = new URLSearchParams(location.search);
+const NAV = q.get("nav") || "desconhecido";
+const o = document.getElementById("o");
+const mandar = (caminho, corpo) => fetch(caminho, { method: "POST", body: JSON.stringify(corpo) });
+
+(async () => {
+  const cfg = await (await fetch("/cfg")).json();
+  if (q.get("modo") === "ficar") {
+    Casos.ficarAberto(cfg, {}, (e) => { o.textContent += "\n" + JSON.stringify(e); mandar("/evento", { nav: NAV, ...e }); });
+    return;
+  }
+  const r = { nav: NAV, ua: navigator.userAgent };
+  r.basicos = await Casos.basicos(cfg, {});
+  o.textContent = "básicos feitos";
+  r.lista = await Casos.lista(cfg, {});
+  o.textContent += "\nlista feita";
+  r.fora = await Casos.foraDoAr(cfg, {}, cfg.ninguem);
+  o.textContent += "\nfora do ar feito";
+  await mandar("/r", r);
+  o.textContent += "\npronto";
+})().catch((e) => mandar("/r", { nav: NAV, erro: `${e.name}: ${e.message}` }));
+</script>
