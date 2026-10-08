@@ -65,3 +65,18 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - a conferência dos alvos do fuzz lê o `ci.yml` inteiro;
     - o guarda não olha o `continue-on-error` do passo `--locked`.
   - **Nota para o plano:** a forma opcional do fuzz que o brief sugeria (`fuzz run uri fuzz/sementes/uri`) grava nas sementes versionadas. A forma certa é a do CI, com `fuzz/corpus/<alvo>` na frente.
+- **K2 → integrado** (`fbeff8e..f565a0b`, merge na `0.16/lotes`), em 2 rodadas.
+  - **Commits:**
+    - P51-07: `75fb60f`;
+    - P49-5: `75fb60f` e `82fd154`;
+    - K1-m2: `677f973`;
+    - consertos da revisão: `73866cc`, `86d0a2d`, `af7d6ef`, `6ca4fdf` e `f565a0b`.
+  - **Primeira revisão:** aprovou, com quatro menores, e três deles foram consertados antes do merge:
+    - o guarda de `podeFalar()` depois do `decode()` ganhou prova;
+    - o passo de aplicar saiu do caminho de recusa, com `.then(aplicar, recusar)` nos quatro caminhos;
+    - o «API 3» saiu do texto novo.
+  - **Decisão do controlador:** o tropeço do passo de aplicar vai também ao `seele.log`, com o id do MOD, e não só ao `console` da janela.
+  - **A prova do desenho do bloco** («a região e as páginas de cada MOD») vai para o K3, que é o lote que edita o `diagnostico-de-mods.cjs`.
+  - **Para a v6:**
+    - o `fundo-falhou` não diz qual fonte falhou;
+    - o retrato que fala com o MOD, e o papel errado do fundo que diz `falhou`, ficam anotados.
