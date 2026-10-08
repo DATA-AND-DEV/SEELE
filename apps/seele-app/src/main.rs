@@ -2447,28 +2447,51 @@ const BALDES_NO_REGISTRO: usize = 64;
 /// cai neste balde.
 const BALDE_DO_CATALOGO: &str = "\u{0}catalogo";
 
+/// A chave do balde de um id que não é vazio, mas que o filtro de
+/// [`id_no_registro`] esvazia (ou deixa só espaço): o terceiro braço de
+/// [`IdDoPedido`]. Não é o catálogo — que é o pedido sem MOD —, e não é de MOD
+/// nenhum que se leia. Pela razão de [`BALDE_DO_CATALOGO`], nenhum id a
+/// escreve.
+const BALDE_ILEGIVEL: &str = "\u{0}ilegivel";
+
 /// A chave do balde dividido pelos ids que chegam com o mapa cheio
 /// ([`BALDES_NO_REGISTRO`]). Pela razão de [`BALDE_DO_CATALOGO`], nenhum id a
 /// escreve.
 const BALDE_DE_TRANSBORDO: &str = "\u{0}transbordo";
 
-/// A chave do balde de `mod_id`: [`id_no_registro`] dele, ou
-/// [`BALDE_DO_CATALOGO`] quando não sobra nada.
+/// A chave do balde de `mod_id`, pelos três braços de [`IdDoPedido`]: o id
+/// vazio é o catálogo ([`BALDE_DO_CATALOGO`]), o que o filtro esvazia é
+/// ilegível ([`BALDE_ILEGIVEL`]), e o resto é [`id_no_registro`] dele.
 fn chave_do_balde(mod_id: &str) -> String {
-    let id = id_no_registro(mod_id);
-    if id.is_empty() {
-        BALDE_DO_CATALOGO.to_owned()
-    } else {
-        id
+    match IdDoPedido::de(mod_id) {
+        IdDoPedido::Catalogo => BALDE_DO_CATALOGO.to_owned(),
+        IdDoPedido::Ilegivel => BALDE_ILEGIVEL.to_owned(),
+        IdDoPedido::Legivel(id) => id,
     }
+}
+
+/// **Uma linha que o balde do registro deixou passar**, com os dois campos que
+/// ela leva por isso.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Admitida {
+    /// Quantas foram seguradas antes dela, no molde de
+    /// [`registrar_console_do_mod`]. `None` quando nenhuma: o campo só sai
+    /// quando diz alguma coisa.
+    suprimidas: Option<u32>,
+    /// `Some(true)` quando ela passou pelo balde de transbordo.
+    ///
+    /// A conta de lá é do balde dividido — de todos os ids que caíram nele
+    /// depois de o mapa encher —, e sem o campo a linha a atribuía só ao id
+    /// dela: `mod_id=x suprimidas=40` se lia como quarenta linhas de `x`, que
+    /// podiam ser de outros quarenta MODs.
+    transbordo: Option<bool>,
 }
 
 /// **Uma linha do registro em nome de `mod_id`, da `classe` dela, quer
 /// passar.**
 ///
-/// `Some(n)` é «passa», com quantas foram seguradas antes dela — o campo
-/// `suprimidas` da linha, no molde de [`registrar_console_do_mod`]; `None` é
-/// «segurada»: a linha não é escrita, e entra na conta da próxima.
+/// `Some` é «passa», com os campos que ela leva por isso ([`Admitida`]);
+/// `None` é «segurada»: a linha não é escrita, e entra na conta da próxima.
 ///
 /// **A conta só sai numa linha.** A de um MOD que se cala no meio da sessão
 /// espera a próxima linha dele, da mesma classe, ou o fim da sessão
@@ -2491,7 +2514,8 @@ fn chave_do_balde(mod_id: &str) -> String {
 /// de servidas; a depuração, do dela. Um MOD não segura as linhas de outro, e
 /// uma classe não segura as de outra ([`Classe`]). Com o mapa cheio
 /// ([`BALDES_NO_REGISTRO`]), um id novo gasta do balde de transbordo da
-/// classe — e a conta que uma linha de lá leva pode ser de mais de um id.
+/// classe — e a conta que uma linha de lá leva pode ser de mais de um id, que
+/// é por que ela sai com `transbordo=true` ([`Admitida::transbordo`]).
 ///
 /// O relógio vem de quem chama, como no balde do `console`: é o que deixa o
 /// teste medir o teto sem dormir. Um cadeado envenenado não tira o teto: o
@@ -2501,7 +2525,7 @@ fn linha_admitida(
     agora: std::time::Instant,
     classe: Classe,
     mod_id: &str,
-) -> Option<u32> {
+) -> Option<Admitida> {
     let mut baldes = baldes
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2509,15 +2533,20 @@ fn linha_admitida(
     // Um lugar fica guardado para o transbordo de cada classe: o mapa nunca
     // passa de `BALDES_NO_REGISTRO`.
     let proprios = BALDES_NO_REGISTRO - Classe::TODAS.len();
-    let chave = if baldes.contains_key(&chave) || baldes.len() < proprios {
+    let proprio = baldes.contains_key(&chave) || baldes.len() < proprios;
+    let chave = if proprio {
         chave
     } else {
         (classe, BALDE_DE_TRANSBORDO.to_owned())
     };
-    baldes
+    let suprimidas = baldes
         .entry(chave)
         .or_insert_with(|| executor::BaldeDoConsole::novo(agora))
-        .admitir(agora)
+        .admitir(agora)?;
+    Some(Admitida {
+        suprimidas: (suprimidas > 0).then_some(suprimidas),
+        transbordo: (!proprio).then_some(true),
+    })
 }
 
 /// A frase da linha em que o produto diz a conta de um balde do registro.
@@ -2534,19 +2563,22 @@ const CONTA_DO_BALDE_DO_REGISTRO: &str =
 /// No nível da classe que ela conta — WARN para os avisos, INFO para as
 /// servidas, DEBUG para a depuração —, e com os campos da linha que ela
 /// contaria: `mod_id=`, ou `catalogo=true` para a linha sem id, ou
-/// `transbordo=true` para o balde dividido.
+/// `mod_id_ilegivel=true` para o id que o filtro esvazia, ou `transbordo=true`
+/// para o balde dividido.
 fn conta_do_balde_dita(classe: Classe, chave: &str, suprimidas: u32) {
     let catalogo = (chave == BALDE_DO_CATALOGO).then_some(true);
+    let mod_id_ilegivel = (chave == BALDE_ILEGIVEL).then_some(true);
     let transbordo = (chave == BALDE_DE_TRANSBORDO).then_some(true);
     // A chave de um MOD já é `id_no_registro` do id: em `%` ela não quebra a
     // linha.
-    let mod_id =
-        (catalogo.is_none() && transbordo.is_none()).then(|| tracing::field::display(chave));
+    let mod_id = (catalogo.is_none() && mod_id_ilegivel.is_none() && transbordo.is_none())
+        .then(|| tracing::field::display(chave));
     match classe {
         Classe::Aviso => {
             tracing::warn!(
                 mod_id,
                 catalogo,
+                mod_id_ilegivel,
                 transbordo,
                 suprimidas,
                 "{CONTA_DO_BALDE_DO_REGISTRO}"
@@ -2556,6 +2588,7 @@ fn conta_do_balde_dita(classe: Classe, chave: &str, suprimidas: u32) {
             tracing::info!(
                 mod_id,
                 catalogo,
+                mod_id_ilegivel,
                 transbordo,
                 suprimidas,
                 "{CONTA_DO_BALDE_DO_REGISTRO}"
@@ -2565,6 +2598,7 @@ fn conta_do_balde_dita(classe: Classe, chave: &str, suprimidas: u32) {
             tracing::debug!(
                 mod_id,
                 catalogo,
+                mod_id_ilegivel,
                 transbordo,
                 suprimidas,
                 "{CONTA_DO_BALDE_DO_REGISTRO}"
@@ -2637,14 +2671,16 @@ fn registrar_da_janela_em(
         "aviso" | "erro" => Classe::Aviso,
         _ => Classe::Depuracao,
     };
-    let Some(suprimidas) =
-        linha_admitida(baldes, agora, classe, mod_id.as_deref().unwrap_or_default())
+    // `suprimidas` só aparece quando não é zero, como no `console` do MOD: é
+    // o registro dizendo que houve mais do que ele mostra. `transbordo`, só
+    // quando a conta é do balde dividido ([`Admitida`]).
+    let Some(Admitida {
+        suprimidas,
+        transbordo,
+    }) = linha_admitida(baldes, agora, classe, mod_id.as_deref().unwrap_or_default())
     else {
         return;
     };
-    // Só aparece quando não é zero, como no `console` do MOD: é o registro
-    // dizendo que houve mais do que ele mostra.
-    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
     // janela é uma linha de registro sem teto no disco de quem hospeda.
     //
@@ -2686,12 +2722,14 @@ fn registrar_da_janela_em(
     let mod_id = mod_id.as_deref().map(tracing::field::display);
     match nivel.as_str() {
         "aviso" => {
-            tracing::warn!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse");
+            tracing::warn!(onde = %onde, mod_id, frase = ?frase, suprimidas, transbordo, "a janela disse");
         }
         "erro" => {
-            tracing::error!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse");
+            tracing::error!(onde = %onde, mod_id, frase = ?frase, suprimidas, transbordo, "a janela disse");
         }
-        _ => tracing::debug!(onde = %onde, mod_id, frase = ?frase, suprimidas, "a janela disse"),
+        _ => {
+            tracing::debug!(onde = %onde, mod_id, frase = ?frase, suprimidas, transbordo, "a janela disse")
+        }
     }
 }
 
@@ -3029,6 +3067,9 @@ fn mod_request(
 /// O id chega da janela, e em `%` sai cru: o formatador escapa só a mensagem.
 /// Por isso ele passa por [`id_no_registro`], e o que o filtro deixa decide o
 /// braço.
+///
+/// Os mesmos três braços escolhem o balde de vazão de uma linha
+/// ([`chave_do_balde`]): o catálogo, o ilegível e cada MOD têm o seu.
 enum IdDoPedido {
     /// O id vazio: o pedido do catálogo do servidor (`carregarMods`), que não
     /// é de MOD nenhum. Sai como `catalogo=true`, sem `mod_id=` em branco —
@@ -5710,10 +5751,13 @@ fn recusa_de_midia_dita(
     } else {
         Classe::Aviso
     };
-    let Some(suprimidas) = linha_admitida(baldes, agora, classe, mod_id) else {
+    let Some(Admitida {
+        suprimidas,
+        transbordo,
+    }) = linha_admitida(baldes, agora, classe, mod_id)
+    else {
         return falha;
     };
-    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     let mod_id = id_no_registro(mod_id);
     let origem = caminho_no_registro(origem);
     let no_registro = motivo_no_registro(motivo);
@@ -5723,6 +5767,7 @@ fn recusa_de_midia_dita(
             origem = %origem,
             motivo = %no_registro,
             suprimidas,
+            transbordo,
             "mídia de MOD não servida: a sessão acabou"
         );
     } else {
@@ -5731,6 +5776,7 @@ fn recusa_de_midia_dita(
             origem = %origem,
             motivo = %no_registro,
             suprimidas,
+            transbordo,
             "mídia de MOD recusada"
         );
     }
@@ -5933,10 +5979,13 @@ fn midia_servida_dita(
     papel: &str,
     bytes: usize,
 ) {
-    let Some(suprimidas) = linha_admitida(baldes, agora, Classe::Servida, mod_id) else {
+    let Some(Admitida {
+        suprimidas,
+        transbordo,
+    }) = linha_admitida(baldes, agora, Classe::Servida, mod_id)
+    else {
         return;
     };
-    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     tracing::info!(
         mod_id = %mod_id,
         geracao,
@@ -5944,6 +5993,7 @@ fn midia_servida_dita(
         papel,
         bytes,
         suprimidas,
+        transbordo,
         "mídia de MOD servida"
     );
 }
@@ -6037,16 +6087,20 @@ fn som_servido_dito(
     caminho: &str,
     bytes: usize,
 ) {
-    let Some(suprimidas) = linha_admitida(baldes, agora, Classe::Servida, mod_id) else {
+    let Some(Admitida {
+        suprimidas,
+        transbordo,
+    }) = linha_admitida(baldes, agora, Classe::Servida, mod_id)
+    else {
         return;
     };
-    let suprimidas = (suprimidas > 0).then_some(suprimidas);
     tracing::info!(
         mod_id = %mod_id,
         geracao,
         caminho = %caminho_no_registro(caminho),
         bytes,
         suprimidas,
+        transbordo,
         "som de MOD servido em bytes"
     );
 }
@@ -12681,6 +12735,78 @@ mod o_teto_de_vazao_do_registro {
                 .expect("os baldes")
                 .is_empty(),
             "os baldes atravessaram a sessão: a seguinte começa com o teto gasto pela anterior"
+        );
+    }
+
+    /// **A linha que passa pelo transbordo diz que passou.** A conta que ela
+    /// leva é do balde dividido — de todos os ids que caíram nele —, e sem o
+    /// campo ela se lia como sendo só do id da linha.
+    #[test]
+    fn a_linha_que_passa_pelo_transbordo_diz_que_passou() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for n in 0..BALDES_NO_REGISTRO - Classe::TODAS.len() {
+                da_janela(&baldes, agora, &format!("cheio/{n}"));
+            }
+            da_janela(&baldes, agora, "novo/x");
+            da_janela(&baldes, agora, "cheio/0");
+        });
+        assert!(
+            de(&rastro, "novo/x")
+                .iter()
+                .all(|linha| linha.contains("transbordo=true"))
+                && !de(&rastro, "novo/x").is_empty(),
+            "a linha que passou pelo balde dividido não diz `transbordo=true`, e a conta dela se \
+             lê como sendo só do id dela: {rastro}"
+        );
+        assert!(
+            de(&rastro, "cheio/0")
+                .iter()
+                .all(|linha| !linha.contains("transbordo")),
+            "uma linha do balde próprio do MOD saiu como transbordo: {rastro}"
+        );
+    }
+
+    /// **Um id que o filtro esvazia é ilegível, e não o catálogo**: o balde e
+    /// o rótulo dele são os de `mod_id_ilegivel`, como o terceiro braço do
+    /// pedido de MOD. No balde do catálogo, ele gastava as fichas do catálogo
+    /// e a conta dele saía como `catalogo=true`.
+    #[test]
+    fn um_id_que_o_filtro_esvazia_conta_como_ilegivel_e_nao_como_catalogo() {
+        let sessao = Session::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..RAJADA_DO_CONSOLE as usize + 2 {
+                da_janela(&sessao.baldes_do_registro, agora, "\u{202E}\n");
+            }
+            registrar_da_janela_em(
+                &sessao.baldes_do_registro,
+                agora,
+                "aviso".to_owned(),
+                "pedido-de-mod".to_owned(),
+                "o catálogo".to_owned(),
+                None,
+            );
+            sessao.revogar();
+        });
+        assert!(
+            rastro.contains("o catálogo"),
+            "a linha do catálogo foi segurada pelas linhas de um id ilegível: {rastro}"
+        );
+        let contas: Vec<&str> = rastro
+            .lines()
+            .filter(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO))
+            .collect();
+        assert!(
+            contas.len() == 1
+                && contas
+                    .iter()
+                    .all(|conta| conta.contains("mod_id_ilegivel=true")
+                        && conta.contains("suprimidas=2")
+                        && !conta.contains("catalogo")),
+            "a conta de um id que o filtro esvazia não saiu como `mod_id_ilegivel=true`: o \
+             rótulo `catalogo=true` é de um pedido que não é de MOD nenhum: {rastro}"
         );
     }
 
