@@ -44,4 +44,6 @@ pub use ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
 pub use signal::{Signal, SignalBand, SyncInputs};
 pub use stream::{StreamType, StreamTypeError, RESERVED_TYPE, STREAM_TYPE_LEN};
-pub use version::{oldest_supported_version, Incompatible, COMPATIBILITY_WINDOW, PROTOCOL_VERSION};
+pub use version::{
+    oldest_supported_version, Faixa, Incompatible, FAIXA, PROTOCOL_VERSION, VERSAO_MINIMA,
+};

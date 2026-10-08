@@ -6,10 +6,17 @@
 //! > refuses a version higher than its own with `Incompatible`. A lower version
 //! > is accepted while it falls inside the declared compatibility window (N−1).
 //!
+//! **Desde o Servidor 1.0 (protocolo 9), a regra é outra:** o `Hello` leva a
+//! [`Faixa`] que cada lado fala, os dois conversam pelo menor dos máximos
+//! ([`negociar`]), e toda 1.x fala o 9 (ADR 0058, «1.x nunca quebra o fio»). A
+//! janela N−1 acima é a história de antes da 1.0. O desenho inteiro está no
+//! adendo `docs/superpowers/specs/2026-10-08-0.16-adendo-negociacao-de-versao.md`.
+//!
 //! This is the first thing that touches a byte off the wire, before any
 //! authentication, so it is written to be total: every possible input byte
 //! produces an answer and none of them panics.
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Version of the wire protocol implemented by this build.
@@ -121,13 +128,33 @@ use thiserror::Error;
 /// resposta a nenhum quadro que o servidor já mande. O envio é assíncrono por
 /// desenho — enfileira, agrupa, grava, difunde —, então a recusa chega depois,
 /// sozinha, e precisa dizer de qual mensagem fala.
-pub const PROTOCOL_VERSION: u8 = 8;
+///
+/// **9 desde 08/10/2026: o Servidor 1.0, e a última quebra.**
+///
+/// O `Hello` deixou de levar um número só e passou a levar a [`Faixa`] que o
+/// cliente fala, e a 0.15 — que fala 8 — fica de fora. Isso é o decidido
+/// (spec-mestre da 0.16, §1): a subida junta numa vez só tudo o que a linha 1
+/// vai precisar em mensagens que já existem, porque o postcard lê campo por
+/// posição e um campo novo não pode chegar numa 1.x.
+///
+/// Daqui em diante este número é **o maior que a build fala**, e não o único.
+/// Uma 1.1 sobe para 10 e continua falando o 9 ([`VERSAO_MINIMA`]); um conserto
+/// não sobe nada. A regra é o ADR 0058, e a linha de cada número é a tabela de
+/// [`linha_de`].
+pub const PROTOCOL_VERSION: u8 = 9;
 
-/// How many past versions a peer accepts, beyond the current one.
+/// O primeiro número da linha 1. **Congelado**: toda 1.x o fala (ADR 0058).
+pub const PRIMEIRO_DA_LINHA_UM: u8 = 9;
+
+/// O menor número que esta build fala. Na linha 1, sempre
+/// [`PRIMEIRO_DA_LINHA_UM`].
 ///
-/// `specs/10-convencoes.md`: "protocol compatibility: a window of N−1".
+/// # A janela N−1, que esta constante substitui
 ///
-/// # Continua 1, e a medida que fez o 2 voltar atrás
+/// Até a 0.15 havia `COMPATIBILITY_WINDOW = 1` aqui, e esta é a história
+/// dela, guardada porque é o argumento da troca.
+///
+/// ## Ficou em 1, e a medida que fez o 2 voltar atrás
 ///
 /// Esta janela esteve em 2 por um dia, junto com a subida para a v5, e a
 /// justificativa era esta: a v4 nunca foi publicada, a última release —
@@ -161,12 +188,49 @@ pub const PROTOCOL_VERSION: u8 = 8;
 /// pendência #42.
 ///
 /// Preso em `a_versao_anterior_continua_dentro_da_janela`.
-pub const COMPATIBILITY_WINDOW: u8 = 1;
+/// **O que a faixa troca nessa história.** O carimbo deixa de ser o número
+/// global: depois do `Hello`, cada lado carimba com o número negociado
+/// (`control::encode_em`), e o par mais velho lê. E o piso deixa de deslizar:
+/// toda 1.x fala o 9, então uma 1.0 conversa com qualquer 1.x, nos dois
+/// sentidos.
+pub const VERSAO_MINIMA: u8 = PRIMEIRO_DA_LINHA_UM;
 
-/// Lowest protocol version this build can still talk to.
+/// Os números que um lado fala, do menor ao maior. Viaja no `Hello`.
+///
+/// O quadro do `Hello` sai carimbado com a [`Faixa::minima`] de quem liga, para
+/// que qualquer servidor da mesma linha o leia; o resto da sessão sai com o
+/// número que [`negociar`] escolheu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Faixa {
+    /// O menor número.
+    pub minima: u8,
+    /// O maior número.
+    pub maxima: u8,
+}
+
+impl Faixa {
+    /// Uma faixa que começa em 1 ou mais e não termina antes de começar.
+    ///
+    /// O 0 nunca foi escrito por build nenhuma, e uma faixa ao contrário não
+    /// tem número nenhum dentro: as duas são bytes de quem não está falando
+    /// SEELE.
+    #[must_use]
+    pub const fn valida(self) -> bool {
+        self.minima >= 1 && self.minima <= self.maxima
+    }
+}
+
+/// A faixa desta build.
+pub const FAIXA: Faixa = Faixa {
+    minima: VERSAO_MINIMA,
+    maxima: PROTOCOL_VERSION,
+};
+
+/// Lowest protocol version this build can still talk to: [`VERSAO_MINIMA`],
+/// pelo nome de antes.
 #[must_use]
 pub const fn oldest_supported_version() -> u8 {
-    PROTOCOL_VERSION.saturating_sub(COMPATIBILITY_WINDOW)
+    VERSAO_MINIMA
 }
 
 /// A versão de servidor que esta build fala, como as pessoas a leem.
@@ -226,38 +290,103 @@ pub enum Incompatible {
     },
 }
 
-/// Decides which protocol version to speak with a peer that announced `peer`.
+/// Se esta build lê um quadro carimbado com `carimbo`.
 ///
-/// On success, returns the version both sides will use: the peer's, since it is
-/// the lower of the two and inside the window.
+/// É a conferência do byte 0 de todo quadro, antes de qualquer outra leitura,
+/// e por isso é total: todo byte tem resposta, e nenhum entra em pânico.
 ///
 /// # Errors
 ///
-/// Returns [`Incompatible`] when the peer is newer than this build, or older
-/// than the compatibility window reaches.
+/// [`Incompatible`], com os números de cada lado, para um carimbo fora de
+/// [`FAIXA`].
 ///
 /// # Examples
 ///
 /// ```
-/// use seele_proto::version::{negotiate, PROTOCOL_VERSION};
+/// use seele_proto::version::{confere_o_carimbo, PROTOCOL_VERSION};
 ///
-/// assert_eq!(negotiate(PROTOCOL_VERSION), Ok(PROTOCOL_VERSION));
-/// assert!(negotiate(PROTOCOL_VERSION.saturating_add(1)).is_err());
+/// assert_eq!(confere_o_carimbo(PROTOCOL_VERSION), Ok(PROTOCOL_VERSION));
+/// assert!(confere_o_carimbo(PROTOCOL_VERSION.saturating_add(1)).is_err());
 /// ```
-pub fn negotiate(peer: u8) -> Result<u8, Incompatible> {
-    if peer > PROTOCOL_VERSION {
+pub fn confere_o_carimbo(carimbo: u8) -> Result<u8, Incompatible> {
+    if carimbo > PROTOCOL_VERSION {
         return Err(Incompatible::PeerTooNew {
-            peer,
+            peer: carimbo,
             ours: PROTOCOL_VERSION,
         });
     }
-    if peer < oldest_supported_version() {
+    if carimbo < VERSAO_MINIMA {
         return Err(Incompatible::PeerTooOld {
-            peer,
-            oldest_supported: oldest_supported_version(),
+            peer: carimbo,
+            oldest_supported: VERSAO_MINIMA,
         });
     }
-    Ok(peer)
+    Ok(carimbo)
+}
+
+/// O número que os dois lados vão falar: o menor dos máximos, quando ele cabe
+/// nas duas faixas.
+///
+/// **Quem decide é o servidor**, com esta função sobre a faixa do `Hello`; o
+/// cliente adota o carimbo do primeiro quadro que recebe. Não há segunda
+/// tentativa com outra faixa: a faixa já diz tudo o que o cliente fala.
+///
+/// # Errors
+///
+/// [`Incompatible::PeerTooNew`] se o par só fala acima desta build, e
+/// [`Incompatible::PeerTooOld`] se só fala abaixo. Uma faixa inválida nunca
+/// chega aqui: o `Hello` que a traz não passa da validação.
+pub fn negociar(do_par: Faixa) -> Result<u8, Incompatible> {
+    if do_par.minima > PROTOCOL_VERSION {
+        return Err(Incompatible::PeerTooNew {
+            peer: do_par.minima,
+            ours: PROTOCOL_VERSION,
+        });
+    }
+    if do_par.maxima < VERSAO_MINIMA {
+        return Err(Incompatible::PeerTooOld {
+            peer: do_par.maxima,
+            oldest_supported: VERSAO_MINIMA,
+        });
+    }
+    Ok(do_par.maxima.min(PROTOCOL_VERSION))
+}
+
+/// A linha de servidor de um número do fio.
+///
+/// **A tabela é congelada**: uma entrada nunca muda, e uma linha nova só se
+/// acrescenta (ADR 0058). É ela que deixa «Servidor 1.0» ser o nome para
+/// pessoas e «9» o que a máquina confere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Linha {
+    /// Antes do Servidor 1.0: do 1 ao 8. Cada subida quebrava, e o launcher só
+    /// oferece a do 8, o Servidor 0.15.
+    AntesDaUm {
+        /// O número.
+        numero: u8,
+    },
+    /// O Servidor 1.x: do 9 até o máximo desta build.
+    Um,
+    /// Acima do que esta build fala.
+    ///
+    /// Como toda 1.x fala o 9, um par que **recusa** o 9 é de uma linha
+    /// posterior à 1. O nome dela quem sabe é o manifesto do launcher, e não
+    /// esta build.
+    Posterior {
+        /// O número.
+        numero: u8,
+    },
+}
+
+/// A linha de `numero`, ou `None` para o 0, que nenhuma build escreveu.
+#[must_use]
+pub const fn linha_de(numero: u8) -> Option<Linha> {
+    match numero {
+        0 => None,
+        n if n < PRIMEIRO_DA_LINHA_UM => Some(Linha::AntesDaUm { numero: n }),
+        n if n <= PROTOCOL_VERSION => Some(Linha::Um),
+        n => Some(Linha::Posterior { numero: n }),
+    }
 }
 
 #[cfg(test)]
@@ -265,77 +394,139 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    #[test]
-    fn compatibility_window_never_underflows() {
-        assert!(oldest_supported_version() <= PROTOCOL_VERSION);
-    }
-
-    /// Um cliente da versão anterior continua entrando.
+    /// **O Servidor 1.0 fala só o 9, e a 0.15 fica de fora.**
     ///
-    /// O ADR 0036 sobe a versão para carregar `ServerMessage::UplinkLoss`, e a
-    /// promessa que acompanha a subida é esta: ninguém que já instalou perde o
-    /// servidor. Um cliente v1 conecta, não recebe o quadro novo, e roda no
-    /// bitrate fixo — que é exatamente o comportamento que ele já tinha.
+    /// É a quebra decidida em 08/10/2026 (spec-mestre da 0.16, §1): a última,
+    /// porque daqui em diante a linha 1 não quebra mais (ADR 0058). A 0.15
+    /// fala 8, e o 8 é de antes da 1.0.
     ///
-    /// Escrito como teste e não como comentário porque a janela é a única coisa
-    /// entre «subimos a versão» e «quebramos todo mundo que não atualizou no
-    /// mesmo minuto» — **do lado de quem ouve**. Do lado de quem fala ela não
-    /// alcança nada, e essa metade está medida no corpo do teste.
+    /// Este teste substituiu `a_versao_anterior_continua_dentro_da_janela`,
+    /// que prendia a janela N−1. A janela valia só para quem ouvia — o carimbo
+    /// global derrubava quem falava —, e a faixa no `Hello` é o que a troca.
     #[test]
-    fn a_versao_anterior_continua_dentro_da_janela() {
-        // **Os números mudaram de novo em 14/09/2026, com a integração conjunta
-        // da malha e do anúncio de MODs — e a janela continuou em 1.**
-        //
-        // Ela esteve em 2 por um dia, para alcançar a v3 da release publicada
-        // `v0.10.5-1` (commit `12a6401a6`), já que a v4 nunca saiu. Não
-        // alcançava: todo quadro sai carimbado com `PROTOCOL_VERSION`, e o build
-        // v3 recusa o carimbo 5 antes de ler o corpo. Ver
-        // `control.rs::a_release_publicada_recusa_o_carimbo_desta_build`.
-        //
-        // O que fica preso aqui, então, é o que a janela de fato faz — a versão
-        // anterior deste vocabulário continua sendo ouvida — e não uma promessa
-        // sobre quem está em campo, que ela não tem como cumprir sozinha.
-        // **A janela continua honesta na subida para 7**, e isso foi escolha
-        // de desenho e não sorte. A identidade do servidor entrou como
-        // **variante nova** e não como campo da `Session`: um campo teria feito
-        // um par v6 desalinhar o quadro, e aí prometer N−1 seria mentira — a
-        // janela teria de cair para zero e toda máquina precisaria atualizar no
-        // mesmo dia. Variante nova, um par v6 não a recebe e continua entrando.
-        //
-        // **E continua honesta na subida para 8, pelo mesmo motivo.** A recusa
-        // identificada de uma mensagem — `MessageRejected` — é variante nova, e
-        // `session::entende_a_mensagem` a cala para um par v7. Um par v7
-        // continua entrando, conversando e escrevendo; o que ele não recebe é a
-        // notícia de que uma mensagem dele foi recusada, que é exatamente o que
-        // ele não recebia antes desta versão.
-        assert_eq!(PROTOCOL_VERSION, 8);
-        assert_eq!(oldest_supported_version(), 7);
-        assert!(negotiate(6).is_err(), "a v6 saiu da janela N−1");
-        assert!(negotiate(7).is_ok());
+    fn o_servidor_1_0_fala_so_o_9_e_a_0_15_fica_de_fora() {
+        assert_eq!(PROTOCOL_VERSION, 9);
+        assert_eq!(VERSAO_MINIMA, 9);
         assert!(
-            negotiate(5).is_err(),
-            "a v5 foi aceita: a janela voltou a prometer o que o carimbo não \
-             entrega"
+            confere_o_carimbo(8).is_err(),
+            "a 0.15 foi aceita, e o decidido é que ela fique de fora"
         );
-        assert!(negotiate(8).is_ok());
-        assert!(negotiate(9).is_err(), "um cliente do futuro foi aceito");
+        assert!(confere_o_carimbo(9).is_ok());
+        assert!(
+            confere_o_carimbo(10).is_err(),
+            "um par do futuro foi aceito pelo carimbo"
+        );
+        assert_eq!(oldest_supported_version(), VERSAO_MINIMA);
     }
 
-    /// A prova de que a subida é **uma só** para as duas entregas.
-    ///
-    /// A malha e o anúncio de MODs acrescentaram variantes às mesmas duas
-    /// listas. Duas subidas independentes para «5» dariam dois vocabulários com
-    /// o mesmo número — o defeito que o guarda dos ordinais em `control.rs`
-    /// existe para pegar. Esta linha diz que a subida aconteceu uma vez e que o
-    /// anúncio, que esperava por ela, passou a alcançar.
+    /// **Toda 1.x fala o primeiro número da linha.** É a frase do ADR 0058 em
+    /// uma linha de código: uma 1.x que largue o 9 deixa de conversar com a
+    /// 1.0 publicada, e isso é quebrar o fio.
+    #[test]
+    fn toda_1x_fala_o_primeiro_numero_da_linha() {
+        assert_eq!(
+            VERSAO_MINIMA, PRIMEIRO_DA_LINHA_UM,
+            "ADR 0058: uma 1.x que larga o 9 quebra o fio"
+        );
+        assert_eq!(linha_de(VERSAO_MINIMA), Some(Linha::Um));
+        assert_eq!(linha_de(PROTOCOL_VERSION), Some(Linha::Um));
+        assert_eq!(
+            FAIXA,
+            Faixa {
+                minima: VERSAO_MINIMA,
+                maxima: PROTOCOL_VERSION
+            }
+        );
+        assert!(FAIXA.valida());
+    }
+
+    /// A tabela congelada: cada número tem uma linha, e a de um número acima
+    /// do que esta build fala é «posterior», sem nome.
+    #[test]
+    fn a_linha_de_cada_numero() {
+        assert_eq!(linha_de(0), None, "nenhuma build escreveu 0");
+        assert_eq!(linha_de(1), Some(Linha::AntesDaUm { numero: 1 }));
+        assert_eq!(
+            linha_de(8),
+            Some(Linha::AntesDaUm { numero: 8 }),
+            "o 8 é o Servidor 0.15, a linha legada"
+        );
+        assert_eq!(linha_de(9), Some(Linha::Um));
+        assert_eq!(
+            linha_de(PROTOCOL_VERSION + 1),
+            Some(Linha::Posterior {
+                numero: PROTOCOL_VERSION + 1
+            })
+        );
+        assert_eq!(
+            linha_de(u8::MAX),
+            Some(Linha::Posterior { numero: u8::MAX })
+        );
+    }
+
+    /// Quem fala mais desce ao máximo do outro; faixas sem número em comum não
+    /// conversam, e a recusa diz para que lado.
+    #[test]
+    fn quem_fala_mais_desce_ao_maximo_do_outro() {
+        assert_eq!(negociar(FAIXA), Ok(PROTOCOL_VERSION));
+        assert_eq!(
+            negociar(Faixa {
+                minima: 9,
+                maxima: 12
+            }),
+            Ok(PROTOCOL_VERSION),
+            "uma 1.3 que encontra esta build desce até ela"
+        );
+        assert_eq!(
+            negociar(Faixa {
+                minima: 7,
+                maxima: 8
+            }),
+            Err(Incompatible::PeerTooOld {
+                peer: 8,
+                oldest_supported: VERSAO_MINIMA
+            })
+        );
+        assert_eq!(
+            negociar(Faixa {
+                minima: PROTOCOL_VERSION + 1,
+                maxima: PROTOCOL_VERSION + 3
+            }),
+            Err(Incompatible::PeerTooNew {
+                peer: PROTOCOL_VERSION + 1,
+                ours: PROTOCOL_VERSION
+            })
+        );
+    }
+
+    #[test]
+    fn uma_faixa_ao_contrario_ou_que_comeca_no_zero_nao_e_faixa() {
+        assert!(!Faixa {
+            minima: 10,
+            maxima: 9
+        }
+        .valida());
+        assert!(!Faixa {
+            minima: 0,
+            maxima: 9
+        }
+        .valida());
+        assert!(Faixa {
+            minima: 9,
+            maxima: 9
+        }
+        .valida());
+    }
+
+    /// A prova de que a subida é **uma só** para as duas entregas — a malha e o
+    /// anúncio de MODs —, e de que o anúncio continua alcançado pela global.
     #[test]
     fn a_api_de_pedidos_preserva_o_limiar_do_anuncio_original() {
-        assert_eq!(PROTOCOL_VERSION, 8);
-        assert_eq!(oldest_supported_version(), 7);
+        assert_eq!(PROTOCOL_VERSION, 9);
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,
             5,
-            "o anúncio de MODs deixou de coincidir com a versão global: ou ele \
+            "o anúncio de MODs deixou de pedir o limiar de sempre: ou ele \
              voltou a ficar dormente, ou passou a pedir mais do que a versão \
              global entrega"
         );
@@ -367,52 +558,27 @@ mod tests {
         assert_eq!(linha_do_protocolo(u8::MAX), Some("1"));
     }
 
-    #[test]
-    fn own_version_is_always_accepted() {
-        assert_eq!(negotiate(PROTOCOL_VERSION), Ok(PROTOCOL_VERSION));
-    }
-
-    #[test]
-    fn newer_peer_is_refused_with_a_specific_reason() {
-        assert_eq!(
-            negotiate(PROTOCOL_VERSION.saturating_add(1)),
-            Err(Incompatible::PeerTooNew {
-                peer: PROTOCOL_VERSION + 1,
-                ours: PROTOCOL_VERSION,
-            })
-        );
-    }
-
     proptest! {
-        /// The very first byte off an untrusted socket. Totality is the point.
+        /// O primeiro byte de um socket não confiável. Ser total é o ponto.
         #[test]
         fn never_panics_for_any_byte(peer: u8) {
-            let _ = negotiate(peer);
+            let _ = confere_o_carimbo(peer);
+            let _ = linha_de(peer);
         }
 
-        /// Acceptance is exactly the closed window, no wider and no narrower.
+        /// O carimbo aceito é exatamente a faixa desta build.
         #[test]
-        fn accepts_exactly_the_window(peer: u8) {
-            let inside = peer >= oldest_supported_version() && peer <= PROTOCOL_VERSION;
-            prop_assert_eq!(negotiate(peer).is_ok(), inside);
+        fn accepts_exactly_the_range(peer: u8) {
+            let dentro = peer >= VERSAO_MINIMA && peer <= PROTOCOL_VERSION;
+            prop_assert_eq!(confere_o_carimbo(peer).is_ok(), dentro);
         }
 
-        /// A negotiated version is never one this build cannot speak.
-        #[test]
-        fn negotiated_version_is_always_speakable(peer: u8) {
-            if let Ok(agreed) = negotiate(peer) {
-                prop_assert!(agreed <= PROTOCOL_VERSION);
-                prop_assert!(agreed >= oldest_supported_version());
-                prop_assert_eq!(agreed, peer);
-            }
-        }
-
-        /// The refusal always carries the numbers a shell needs to explain
-        /// itself, so no layer below the shell has to format a message.
+        /// A recusa sempre carrega os números de que uma casca precisa para se
+        /// explicar, para que nada abaixo da casca formate frase.
         #[test]
         fn refusal_carries_actionable_numbers(peer: u8) {
-            match negotiate(peer) {
-                Ok(_) => {}
+            match confere_o_carimbo(peer) {
+                Ok(aceito) => prop_assert_eq!(aceito, peer),
                 Err(Incompatible::PeerTooNew { peer: got, ours }) => {
                     prop_assert_eq!(got, peer);
                     prop_assert_eq!(ours, PROTOCOL_VERSION);
@@ -420,9 +586,28 @@ mod tests {
                 }
                 Err(Incompatible::PeerTooOld { peer: got, oldest_supported }) => {
                     prop_assert_eq!(got, peer);
-                    prop_assert_eq!(oldest_supported, oldest_supported_version());
+                    prop_assert_eq!(oldest_supported, VERSAO_MINIMA);
                     prop_assert!(got < oldest_supported);
                 }
+            }
+        }
+
+        /// O acordo é o maior número que as duas faixas têm em comum, ou
+        /// nenhum.
+        #[test]
+        fn o_acordo_e_o_maior_numero_comum(minima in 1_u8.., largura in 0_u8..8) {
+            let do_par = Faixa { minima, maxima: minima.saturating_add(largura) };
+            let comum = (do_par.minima.max(VERSAO_MINIMA)..=do_par.maxima.min(PROTOCOL_VERSION)).last();
+            prop_assert_eq!(negociar(do_par).ok(), comum);
+        }
+
+        /// Um número negociado é sempre um que esta build fala e lê no carimbo.
+        #[test]
+        fn o_numero_negociado_e_sempre_falado(minima in 1_u8.., largura in 0_u8..8) {
+            let do_par = Faixa { minima, maxima: minima.saturating_add(largura) };
+            if let Ok(acordo) = negociar(do_par) {
+                prop_assert!(confere_o_carimbo(acordo).is_ok());
+                prop_assert!(acordo >= do_par.minima && acordo <= do_par.maxima);
             }
         }
     }

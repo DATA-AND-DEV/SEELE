@@ -332,7 +332,10 @@ pub enum ControlError {
         len: usize,
     },
 
-    /// A version outside the compatibility window.
+    /// A version outside this build's [`crate::version::FAIXA`].
+    ///
+    /// `found` é o número de quem mandou, e é por ele que se sabe a linha do
+    /// outro lado: ver [`crate::version::linha_de`].
     #[error("frame announces protocol {found}, this build implements {expected}")]
     UnsupportedVersion {
         /// Version in the frame.
@@ -1037,8 +1040,14 @@ pub enum ClientMessage {
         ///
         /// `None` num servidor aberto é o caso normal.
         join_secret: Option<String>,
-        /// Protocol version the client speaks.
-        version: u8,
+        /// A faixa de números que este cliente fala (ADR 0058).
+        ///
+        /// Até a 0.15 era `version: u8`, um número só, e o servidor recusava
+        /// tudo que não fosse ele ou o anterior. Agora o servidor escolhe o
+        /// menor dos máximos ([`crate::version::negociar`]), e o quadro deste
+        /// `Hello` sai carimbado com a mínima, para que todo servidor da mesma
+        /// linha o leia.
+        faixa: crate::version::Faixa,
         /// Client software name, for logs.
         client: String,
         /// Nickname the client would like.
@@ -2327,7 +2336,7 @@ pub fn decode<T: for<'de> Deserialize<'de> + Validate>(frame: &[u8]) -> Result<T
     };
     // Version before anything else, so a future layout is refused rather than
     // misparsed into something plausible.
-    crate::version::negotiate(*version).map_err(|_| ControlError::UnsupportedVersion {
+    crate::version::confere_o_carimbo(*version).map_err(|_| ControlError::UnsupportedVersion {
         found: *version,
         expected: PROTOCOL_VERSION,
     })?;
@@ -2600,6 +2609,7 @@ impl Validate for ClientMessage {
     fn validate(&self) -> Result<(), ControlError> {
         match self {
             Self::Hello {
+                faixa,
                 client,
                 nickname,
                 public_key,
@@ -2613,6 +2623,11 @@ impl Validate for ClientMessage {
                     return Err(ControlError::FieldOutOfRange {
                         field: "public_key",
                     });
+                }
+                // Uma faixa ao contrário, ou que começa no 0, não tem número
+                // nenhum que alguém fale: não é um `Hello` de SEELE.
+                if !faixa.valida() {
+                    return Err(ControlError::FieldOutOfRange { field: "faixa" });
                 }
                 Ok(())
             }
@@ -2867,7 +2882,7 @@ mod tests {
     fn hello() -> ClientMessage {
         ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection/0.0.0".into(),
             nickname: "marcela".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
@@ -3130,7 +3145,7 @@ mod tests {
     fn an_oversized_nickname_is_refused() {
         let long = ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection".into(),
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
             public_key: vec![7; PUBLIC_KEY_LEN],
@@ -3808,7 +3823,7 @@ mod key_tests {
         for len in [0, 16, 31, 33, 64] {
             let hello = ClientMessage::Hello {
                 join_secret: None,
-                version: PROTOCOL_VERSION,
+                faixa: crate::version::FAIXA,
                 client: "connection".into(),
                 nickname: "marcela".into(),
                 public_key: vec![0; len],
@@ -3829,7 +3844,7 @@ mod key_tests {
     fn a_thirty_two_byte_key_is_accepted() {
         let hello = ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: crate::version::FAIXA,
             client: "connection".into(),
             nickname: "marcela".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
@@ -4558,12 +4573,19 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **9 em 08/10/2026, o Servidor 1.0, e as listas não mudaram.** A
+        // subida é pelo `Hello`, que trocou o número único pela faixa — um
+        // campo, e não uma variante, e por isso nenhum ordinal acima se mexeu.
+        // A 0.15 fica de fora por decisão, e daqui em diante a regra é a do
+        // ADR 0058: variante nova no fim, com o portão de quem manda, e nunca
+        // campo novo numa mensagem que já existe.
         assert_eq!(
             crate::version::PROTOCOL_VERSION,
-            8,
-            "a versão do protocolo mudou; confira se os ordinais acima, a janela \
-             de compatibilidade e `mods::VERSAO_DO_ANUNCIO` continuam contando a \
-             mesma história"
+            9,
+            "a versão do protocolo mudou; confira se os ordinais acima, a faixa \
+             de `version::FAIXA` e `mods::VERSAO_DO_ANUNCIO` continuam contando \
+             a mesma história"
         );
         assert_eq!(
             crate::mods::VERSAO_DO_ANUNCIO,

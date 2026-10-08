@@ -183,7 +183,7 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
     frame::write(
         &mut envio,
         &ClientMessage::Hello {
-            version: seele_proto::PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "par-cru".into(),
             nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),

@@ -84,7 +84,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
         "cliente-hello".to_owned(),
         quadro(&ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "seele 0.15.0".to_owned(),
             nickname: "ritsuko".to_owned(),
             public_key: vec![0x11; 32],
@@ -94,7 +94,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
         "cliente-hello-com-convite".to_owned(),
         quadro(&ClientMessage::Hello {
             join_secret: Some("7K4MNPQRSTVWXYZ23456".to_owned()),
-            version: PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "seele 0.15.0".to_owned(),
             nickname: "maya".to_owned(),
             public_key: vec![0x12; 32],
@@ -173,6 +173,12 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
     versao.insert(
         "versao-mais-antiga".to_owned(),
         vec![oldest_supported_version()],
+    );
+    // Dois bytes: o alvo lê o primeiro como carimbo e os dois como a faixa de
+    // um `Hello`, e esta é a faixa desta build.
+    versao.insert(
+        "faixa-desta-build".to_owned(),
+        vec![seele_proto::FAIXA.minima, seele_proto::FAIXA.maxima],
     );
     todas.insert("version_negotiation", versao);
 
@@ -361,7 +367,7 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
     for (nome, bytes) in do_alvo(&todas, "version_negotiation") {
         let versao = bytes.first().copied().expect("a semente tem um byte");
         assert!(
-            seele_proto::version::negotiate(versao).is_ok(),
+            seele_proto::version::confere_o_carimbo(versao).is_ok(),
             "a semente version_negotiation/{nome} é uma versão que a negociação recusa"
         );
     }

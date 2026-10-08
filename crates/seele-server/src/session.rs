@@ -472,7 +472,7 @@ async fn handshake(
         })?;
 
     let ClientMessage::Hello {
-        version,
+        faixa,
         client,
         join_secret,
         nickname,
@@ -485,9 +485,12 @@ async fn handshake(
         });
     };
 
-    seele_proto::version::negotiate(version).map_err(|_| Refusal {
+    // O servidor decide: o menor dos máximos, se couber nas duas faixas
+    // (ADR 0058). É este número que a sessão guarda e que os portões de
+    // vocabulário consultam.
+    let version = seele_proto::version::negociar(faixa).map_err(|_| Refusal {
         reason: DisconnectReason::Incompatible,
-        detail: format!("client speaks protocol {version}"),
+        detail: format!("client speaks protocol {}..={}", faixa.minima, faixa.maxima),
     })?;
 
     // O porteiro, antes do desafio criptográfico. Quem não tem direito de estar
@@ -5189,10 +5192,15 @@ mod versao_no_fio {
         // — passou a ser o quinto vácuo. Ele fica pelo mesmo motivo dos outros
         // quatro.
         //
-        // O portão que **morde hoje** é o da v8: a recusa identificada de uma
-        // mensagem de texto não sai para o par da janela anterior. É a razão de
-        // o nome deste teste ter mudado junto com a versão, pela terceira vez.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 7);
+        // O portão que **mordia** era o da v8: a recusa identificada de uma
+        // mensagem de texto não saía para o par da janela anterior.
+        //
+        // Com o **Servidor 1.0 o piso é 9** (ADR 0058), e todos os portões
+        // desta tabela viraram vácuo, inclusive o da v8: nenhuma sessão viva
+        // negocia abaixo do 9. Eles ficam pelo mesmo motivo de sempre, e a
+        // tabela muda de casa na sessão do Plano 3, quando a primeira 1.x
+        // trouxer uma variante nova e o portão voltar a morder.
+        assert_eq!(seele_proto::version::oldest_supported_version(), 9);
 
         for (mensagem, nome) in [
             (ServerMessage::UplinkLoss { fraction: 0.0 }, "UplinkLoss"),

@@ -1938,7 +1938,7 @@ async fn handshake(
     frame::write(
         send,
         &ClientMessage::Hello {
-            version: seele_proto::PROTOCOL_VERSION,
+            faixa: seele_proto::version::FAIXA,
             client: quem_sou_eu().into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
