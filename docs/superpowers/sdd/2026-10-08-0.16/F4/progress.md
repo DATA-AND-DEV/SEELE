@@ -96,3 +96,22 @@ publicado.
   - o link `https` é o corpo do `seele://` no fragmento, mais `wh=` e `ate=`;
   - o item 20 já está feito pela F1 (`quadro.rs`);
   - fica um pedido ao Plano 3: conferir o apelido antes de gastar o convite.
+
+### 08/10, depois da primeira integração
+
+- `0.16/web` trazido a `versao/0.16` em `4fc31e9` (fast-forward), com o
+  protocolo 9 da F1.
+- **Tarefa 2.1, o núcleo seguro do `seele-web`** (`c19758e`):
+  `codificar_do_cliente` e `decodificar_do_servidor` atrás de uma fronteira de
+  JSON. Seis testes contra o `tests/fio_1_0.txt` da F1, com as provas por
+  reversão. O crate entra em `RULES` só com o `seele-proto`, e o `check-deps`
+  vale para 13 crates. Compila para `wasm32-unknown-unknown`.
+- **Tarefa 3.2b, a conferência do wasi-sdk**: `cargo xtask wasi-sdk` baixa,
+  confere o SHA-256 antes de descompactar e imprime o caminho para
+  `WASI_SDK`. O wasi-sdk não publica checksum, então os hashes foram fixados na
+  primeira descarga. Feito de ponta a ponta com o motor do spike.
+- **Espera decisão:** a fronteira com o JavaScript (do `seele-web`) e o motor
+  de MODs precisam de `unsafe`, e o workspace o proíbe. O precedente é o do
+  `seele-video` e do `seele-instalador` (`deny` em vez de `forbid`, a folha de
+  lints copiada e o guarda `folha_de_lints`). O guarda do `RustAllocator` espera
+  o crate do motor, e portanto essa decisão.
