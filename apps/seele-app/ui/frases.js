@@ -117,14 +117,28 @@ const MOTIVOS = {
   // ---- a volta da bateria, recusada dentro do TLS ----
   //
   // As duas vestiam CREDENCIAL RECUSADA, e a frase mandava conferir convite e
-  // senha que nem chegaram a sair: a recusa é antes do `Hello`. A primeira é a
-  // recusa pela impressão do convite, como a de `fraseDeErro`, só que no meio
-  // de uma sessão; a segunda é o alarme de chave trocada do ADR 0003. As
-  // impressões não atravessam a ponte aqui (o motivo do fim é um nome só), e
-  // ficam no `seele.log`, na linha da volta recusada.
+  // senha que não chegaram a quem atendeu: a recusa é antes do `Hello`. Do
+  // aperto de mão sai só o `ClientHello` do TLS, como na recusa pela impressão
+  // de `fraseDeErro`, e por isso nenhuma das duas diz que nada saiu.
+  //
+  // A primeira cobre duas recusas da volta: a impressão esperada que não
+  // confere (`InviteMismatch`) e quem mostrou o certificado do servidor sem
+  // provar a chave dele (`ChaveNaoProvada`). E a impressão esperada pode ter
+  // vindo do link colado ou da lista de servidores. Esta tela só recebe o
+  // `EndReason`, sem a origem, sem as impressões e sem saber qual das duas foi,
+  // então a frase diz o que vale nos quatro casos: quem atendeu não é o
+  // servidor desta sessão, o convite, a senha e o apelido não chegaram a ele,
+  // e o remédio é falar com quem hospeda por outro canal. Nada de «convite»
+  // como dono da impressão, nem de «link»: é o que `fraseDeErro` separa por
+  // `deOnde`, e aqui não dá.
+  //
+  // A segunda é o alarme de chave trocada do ADR 0003. As impressões não
+  // atravessam a ponte aqui (o motivo do fim é um nome só), e ficam no
+  // `seele.log`, na linha da volta recusada.
   ServidorTrocouNaVolta:
-    "QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DO CONVITE.\n" +
-    "A sessão acabou sem mandar nada a ele. Confirme o link com quem o mandou.",
+    "QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\n" +
+    "O convite, a senha e o apelido não chegaram a ele. " +
+    "Confirme com quem hospeda, por outro canal, antes de entrar de novo.",
   ChaveMudouNaVolta:
     "A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\n" +
     "Confirme por outro canal antes de entrar de novo.",

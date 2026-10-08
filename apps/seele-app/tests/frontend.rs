@@ -7699,6 +7699,69 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
 }
 
 #[test]
+fn a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo() {
+    // `ServidorTrocouNaVolta` é o fim de duas recusas da volta da bateria: a
+    // impressão que não confere (`InviteMismatch`) e quem mostrou o certificado
+    // sem provar a chave (`ChaveNaoProvada`). E a impressão esperada da volta
+    // pode ter vindo do link colado ou da lista de servidores. A tela de fim só
+    // recebe o `EndReason`, sem a origem e sem as impressões, então a frase só
+    // pode dizer o que vale nos quatro casos.
+    //
+    // - Nada de «convite» como dono da impressão («DO CONVITE») nem de «link»:
+    //   quem voltou pela lista não colou link nenhum, e é o que
+    //   `fraseDeErro` separa por `deOnde`, e esta frase não pode.
+    // - Nada de «nada», «nenhum» nem «desta máquina»: o `ClientHello` do TLS
+    //   sai antes de haver o que conferir, e é a regra do guarda irmão,
+    //   `a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_ele`.
+    // - O que vale sempre é «a ele»: o convite, a senha e o apelido não
+    //   chegaram a quem atendeu, porque a recusa é antes do `Hello`.
+    //
+    // A frase que o brief do lote H trazia dizia «SERVIDOR DO CONVITE», «sem
+    // mandar nada a ele» e «Confirme o link», e é ela o vermelho da reversão.
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let motivos = sentences_of(&arquivo, "MOTIVOS");
+    let frase_de = |variante: &str| -> String {
+        let Some((_, frase)) = motivos.iter().find(|(nome, _)| nome == variante) else {
+            panic!(
+                "`EndReason::{variante}` não tem frase em `MOTIVOS`, e a tela de fim escreve \
+                 o nome de uma variante do Rust"
+            );
+        };
+        frase.clone()
+    };
+
+    let trocado = frase_de("ServidorTrocouNaVolta");
+    let minusculas = trocado.to_lowercase();
+    let mut erros: Vec<String> = ["nada", "nenhum", "desta máquina", "do convite", "link"]
+        .into_iter()
+        .filter(|termo| names(&minusculas, termo))
+        .map(|termo| {
+            format!("diz «{termo}», que não vale para toda origem nem para todo motivo da volta")
+        })
+        .collect();
+    if !trocado.contains("não chegaram a ele") {
+        erros.push(
+            "não diz que o convite, a senha e o apelido «não chegaram a ele», que é o que \
+             a recusa antes do `Hello` garante"
+                .to_owned(),
+        );
+    }
+    assert!(
+        erros.is_empty(),
+        "a frase de `ServidorTrocouNaVolta` promete o que o fim da sessão não sabe: a tela \
+         só recebe o `EndReason`, sem dizer se a impressão veio do link ou da lista, nem se \
+         foi a impressão ou a chave não provada. {erros:#?}\n{trocado}"
+    );
+
+    let chave = frase_de("ChaveMudouNaVolta");
+    assert!(
+        chave.contains("CHAVE"),
+        "a frase de `ChaveMudouNaVolta` não fala da chave, e o alarme de chave trocada do \
+         ADR 0003 se lê como outra recusa: {chave}"
+    );
+}
+
+#[test]
 fn quem_nao_prova_a_chave_tem_frase_propria_e_nao_a_de_versao_incompativel() {
     // O impostor que repete o certificado do servidor sem ter a chave dele
     // chegava como `Refused { Incompatible }`, e a tela mandava atualizar o

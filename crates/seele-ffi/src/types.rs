@@ -325,14 +325,19 @@ pub enum EndReason {
     ModsIndisponiveis,
     /// Quem atendeu na volta da bateria não é o servidor desta sessão.
     ///
-    /// A volta foi recusada dentro do TLS, antes do `Hello`: a impressão
-    /// esperada nomeava outra chave (`InviteMismatch`), ou quem atendeu mostrou
-    /// o certificado do servidor sem provar ter a chave dele
-    /// (`ChaveNaoProvada`). Era [`Self::CredentialRejected`], e a frase mandava
-    /// conferir uma credencial que nem chegou a sair desta máquina.
+    /// A volta foi recusada dentro do TLS, antes do `Hello`, por um de dois
+    /// motivos, e os dois caem aqui: a impressão esperada nomeava outra chave
+    /// (`InviteMismatch`), ou quem atendeu mostrou o certificado do servidor sem
+    /// provar ter a chave dele (`ChaveNaoProvada`). Era
+    /// [`Self::CredentialRejected`], e a frase mandava conferir convite e senha.
+    /// Eles não chegaram a quem atendeu: do aperto de mão saiu só o
+    /// `ClientHello` do TLS, que vai antes de haver o que conferir.
     ///
     /// Sem as impressões de propósito: este enum é `Copy` e chega ao retrato
-    /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada.
+    /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada. Sem a
+    /// origem da impressão também (o link colado ou a lista de servidores), e
+    /// por isso a frase da casca só diz o que vale para as duas origens e os
+    /// dois motivos.
     ServidorTrocouNaVolta,
     /// A chave fixada do servidor mudou entre a queda e a volta. ADR 0003.
     ///
