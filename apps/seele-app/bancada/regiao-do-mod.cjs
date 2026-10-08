@@ -526,7 +526,8 @@ function bancada(opcoes = {}) {
   vm.runInContext(
     `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER,
       SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
-      encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined };`,
+      encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined,
+      tocadoresDePe: typeof tocadoresDeSomDeMod === "object" ? () => tocadoresDeSomDeMod.size : undefined };`,
     contexto,
     { filename: "mods-regiao.js" },
   );
@@ -544,6 +545,13 @@ function bancada(opcoes = {}) {
     SILENCIO: contexto.api.SILENCIO,
     /** O que a saída da sessão chama para calar e soltar o som dos MODs. */
     encerrarOSomDosMods: contexto.api.encerrarOSomDosMods,
+    /**
+     * Quantos tocadores de som de MOD estão de pé nesta janela, somando as
+     * regiões — o conjunto que segura cada `AudioBuffer` e que, vazio, fecha o
+     * áudio da janela (`tocadoresDeSomDeMod`). Um tocador que um destino largou
+     * sem soltar fica contado aqui para sempre.
+     */
+    tocadoresDePe: () => contexto.api.tocadoresDePe?.() ?? -1,
     /** Uma raiz no documento, como a da faixa ou a de uma página aberta. */
     raiz: () => {
       const raiz = doc.createElement("section");
@@ -4364,6 +4372,7 @@ async function oSomDaContribuicaoMudaDeDestino() {
 
     // Quem estava no canal do destino que tomou os sons sai: o nó sai da tela,
     // e a varredura do fim do desenho roda.
+    const audioDoPrimeiro = Audio.ultimo;
     tomou.raiz.remove();
     varrer();
     await assentar();
@@ -4371,6 +4380,16 @@ async function oSomDaContribuicaoMudaDeDestino() {
       caso,
       ditos(d, "pausada").length === 1 && tocando() === 0,
       `o lugar do som saiu da tela e o som não parou: ${tocando()} fonte(s), «pausada» dita ${ditos(d, "pausada").length} vez(es)`,
+    );
+    // **Soltar, e não só esquecer o campo.** Zerar `som.tocador` sem soltar o
+    // tocador o deixa em `tocadoresDeSomDeMod` para sempre, com o
+    // `AudioBuffer` dentro — a memória que a devolução existe para liberar —,
+    // e o áudio da janela, que fecha quando o último tocador sai, nunca fecha.
+    confere(
+      caso,
+      b.tocadoresDePe() === 0 && audioDoPrimeiro?.state === "closed",
+      "o destino que saiu da tela esqueceu o tocador sem soltá-lo: o som decodificado segue de pé na janela e o "
+        + `áudio dela não fechou — ${b.tocadoresDePe()} tocador(es) de pé, áudio «${audioDoPrimeiro?.state}»`,
     );
     confere(
       caso,
