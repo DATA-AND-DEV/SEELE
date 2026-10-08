@@ -1943,6 +1943,7 @@ async fn handshake(
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
             join_secret: join_secret.map(str::to_owned),
+            material_e2ee: None,
         },
     )
     .await

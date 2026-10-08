@@ -1709,6 +1709,7 @@ mod tests {
                 id: PersonId(id),
                 nickname: nickname.into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
         }

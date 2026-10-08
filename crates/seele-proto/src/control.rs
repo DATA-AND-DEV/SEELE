@@ -276,6 +276,17 @@ pub const SIGNATURE_LEN: usize = 64;
 /// password fallback needs.
 pub const MAX_PROOF_LEN: usize = 256;
 
+/// O teto do assento do E2EE, nos dois sentidos.
+///
+/// **O assento vai sempre `None` no Servidor 1.0.** Ele existe porque um campo
+/// novo numa mensagem que já existe não pode chegar numa 1.x — o postcard lê
+/// campo por posição (ADR 0058) —, e o E2EE de mídia por sala
+/// (`specs/08-seguranca.md`) vai precisar que cada pessoa publique, uma vez
+/// por sessão, um material de acordo de chave assinado pela identidade. 256
+/// bytes cabem uma chave X25519, a assinatura dela e folga; é o mesmo teto da
+/// prova. Adendo de 08/10/2026, §10.
+pub const MAX_MATERIAL_E2EE_LEN: usize = 256;
+
 /// Tamanho de uma impressão digital em hex.
 ///
 /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
@@ -464,6 +475,13 @@ pub struct PersonProfile {
     pub nickname: String,
     /// Roles held.
     pub roles: Vec<RoleId>,
+    /// O assento do E2EE: o material que esta pessoa publicou no `Hello`.
+    ///
+    /// **Sempre `None` no Servidor 1.0**, que não guarda nem repassa. É no
+    /// perfil porque é ele que apresenta uma pessoa aos outros — em
+    /// `PersonJoined` e em `PersonPresent` —, inclusive a quem é movido de sala
+    /// sem pedir. Ver [`MAX_MATERIAL_E2EE_LEN`].
+    pub material_e2ee: Option<Vec<u8>>,
 }
 
 /// A voice channel.
@@ -1060,6 +1078,13 @@ pub enum ClientMessage {
         /// up against known accounts; in M2 there is no persistence, so proving
         /// possession of the key is all the handshake can establish.
         public_key: Vec<u8>,
+        /// O assento do E2EE: um material de acordo de chave que esta pessoa
+        /// publica uma vez por sessão.
+        ///
+        /// **Sempre `None` no Servidor 1.0.** Último campo de propósito: é o
+        /// lugar que uma 1.x vai ocupar sem quebrar o fio. Ver
+        /// [`MAX_MATERIAL_E2EE_LEN`].
+        material_e2ee: Option<Vec<u8>>,
     },
     /// Answers the server's challenge.
     Response {
@@ -2772,10 +2797,16 @@ impl Validate for ClientMessage {
                 client,
                 nickname,
                 public_key,
+                material_e2ee,
                 ..
             } => {
                 check("client", client.len(), MAX_CLIENT_NAME_LEN)?;
                 check("nickname", nickname.len(), MAX_NICKNAME_LEN)?;
+                check(
+                    "material_e2ee",
+                    material_e2ee.as_ref().map_or(0, Vec::len),
+                    MAX_MATERIAL_E2EE_LEN,
+                )?;
                 // An Ed25519 public key is exactly 32 bytes. Anything else is
                 // not a key, and length is the cheapest place to say so.
                 if public_key.len() != PUBLIC_KEY_LEN {
@@ -2920,7 +2951,12 @@ impl Validate for ServerMessage {
                 check_name("name", name)
             }
             Self::PersonJoined { profile, .. } | Self::PersonPresent { profile, .. } => {
-                check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)
+                check("nickname", profile.nickname.len(), MAX_NICKNAME_LEN)?;
+                check(
+                    "material_e2ee",
+                    profile.material_e2ee.as_ref().map_or(0, Vec::len),
+                    MAX_MATERIAL_E2EE_LEN,
+                )
             }
             Self::MessageReceived {
                 body, attachment, ..
@@ -3045,6 +3081,7 @@ mod tests {
             client: "connection/0.0.0".into(),
             nickname: "marcela".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: None,
         }
     }
 
@@ -3308,6 +3345,7 @@ mod tests {
             client: "connection".into(),
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
             public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: None,
         };
         assert!(matches!(
             encode(&long),
@@ -3339,6 +3377,7 @@ mod tests {
                 id: PersonId(2),
                 nickname: "rafael".into(),
                 roles: vec![RoleId(1)],
+                material_e2ee: None,
             },
             ssrc: Ssrc(99),
         };
@@ -3382,7 +3421,13 @@ mod tests {
     fn a_control_frame_stays_small() {
         // The control stream shares a connection with voice datagrams. A
         // handshake that needed several kilobytes would be a design smell.
-        assert!(encode(&hello()).unwrap().len() < 64);
+        //
+        // O teto era 64 e o `Hello` deste teste tinha 62 bytes. O Servidor 1.0
+        // somou dois: a faixa ocupa um byte a mais que o `version` de antes, e
+        // o assento do E2EE vazio é um `None`, outro byte. Medido em 64, e o
+        // teto foi para 128 — a pergunta deste teste é «quilobytes?», e não
+        // «um byte a mais?».
+        assert!(encode(&hello()).unwrap().len() < 128);
         assert!(encode(&session()).unwrap().len() < 256);
     }
 
@@ -3986,6 +4031,7 @@ mod key_tests {
                 client: "connection".into(),
                 nickname: "marcela".into(),
                 public_key: vec![0; len],
+                material_e2ee: None,
             };
             assert!(
                 matches!(
@@ -4007,6 +4053,7 @@ mod key_tests {
             client: "connection".into(),
             nickname: "marcela".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
+            material_e2ee: None,
         };
         let frame = encode(&hello).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), hello);
@@ -5124,5 +5171,98 @@ mod a_mensagem_desconhecida {
             let _ = decode_da_lista::<ClientMessage>(&bytes);
             let _ = decode_da_lista::<ServerMessage>(&bytes);
         }
+    }
+}
+
+#[cfg(test)]
+mod o_assento_do_e2ee {
+    //! Um campo novo numa mensagem que já existe não pode chegar numa 1.x,
+    //! porque o postcard lê por posição. O assento do E2EE entra no 9, e vai
+    //! sempre `None` no Servidor 1.0. Adendo de 08/10/2026, §10.
+    use super::*;
+
+    fn perfil(material: Option<Vec<u8>>) -> ServerMessage {
+        ServerMessage::PersonJoined {
+            voice_room: VoiceRoomId(1),
+            profile: PersonProfile {
+                id: PersonId(1),
+                nickname: "maya".into(),
+                roles: vec![],
+                material_e2ee: material,
+            },
+            ssrc: Ssrc(1),
+        }
+    }
+
+    fn hello(material: Option<Vec<u8>>) -> ClientMessage {
+        ClientMessage::Hello {
+            join_secret: None,
+            faixa: crate::version::FAIXA,
+            client: "seele".into(),
+            nickname: "maya".into(),
+            public_key: vec![7; PUBLIC_KEY_LEN],
+            material_e2ee: material,
+        }
+    }
+
+    #[test]
+    fn o_material_vai_e_volta_e_tem_teto_nos_dois_sentidos() {
+        let cabe = perfil(Some(vec![7; MAX_MATERIAL_E2EE_LEN]));
+        assert_eq!(
+            decode::<ServerMessage>(&encode(&cabe).unwrap()).unwrap(),
+            cabe
+        );
+        assert!(matches!(
+            encode(&perfil(Some(vec![7; MAX_MATERIAL_E2EE_LEN + 1]))),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+
+        let cabe = hello(Some(vec![7; MAX_MATERIAL_E2EE_LEN]));
+        assert_eq!(
+            decode::<ClientMessage>(&encode(&cabe).unwrap()).unwrap(),
+            cabe
+        );
+        assert!(matches!(
+            encode(&hello(Some(vec![7; MAX_MATERIAL_E2EE_LEN + 1]))),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+    }
+
+    /// Quem monta um quadro à mão também não passa do teto: a conferência vale
+    /// na entrada, e não só na saída.
+    #[test]
+    fn um_material_grande_demais_feito_a_mao_e_recusado_na_entrada() {
+        let mut quadro = encode(&hello(None)).unwrap();
+        // O `None` do último campo é o último byte; troca-se por um `Some` de
+        // 257 bytes escrito à mão: 1, depois o varint de 257 (0x81 0x02).
+        assert_eq!(quadro.pop(), Some(0));
+        quadro.extend([1, 0x81, 0x02]);
+        quadro.extend(std::iter::repeat_n(7_u8, MAX_MATERIAL_E2EE_LEN + 1));
+        assert!(matches!(
+            decode::<ClientMessage>(&quadro),
+            Err(ControlError::FieldTooLong {
+                field: "material_e2ee",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn o_material_e_o_ultimo_campo_do_hello_e_none_e_um_byte() {
+        assert_eq!(
+            encode(&hello(None)).unwrap().last(),
+            Some(&0),
+            "None é o último byte do Hello"
+        );
+        assert_eq!(
+            decode::<ServerMessage>(&encode(&perfil(None)).unwrap()).unwrap(),
+            perfil(None)
+        );
     }
 }

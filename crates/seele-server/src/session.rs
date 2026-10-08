@@ -471,12 +471,15 @@ async fn handshake(
             detail: format!("could not read Hello: {error}"),
         })?;
 
+    // O assento do E2EE fica de fora: o Servidor 1.0 não guarda nem repassa
+    // material nenhum (adendo de 08/10/2026, §10).
     let ClientMessage::Hello {
         faixa,
         client,
         join_secret,
         nickname,
         public_key,
+        ..
     } = hello
     else {
         return Err(Refusal {
@@ -1757,6 +1760,7 @@ async fn run_session(
                         id: quem.person,
                         nickname: quem.nickname.clone(),
                         roles: Vec::new(),
+                        material_e2ee: None,
                     },
                     ssrc: quem.ssrc,
                 },
@@ -1821,6 +1825,7 @@ async fn run_session(
                     id: occupant.person,
                     nickname: occupant.nickname.clone(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: occupant.ssrc,
             },
@@ -4045,6 +4050,7 @@ async fn assentar(
             id: session.person,
             nickname: session.nickname.clone(),
             roles: Vec::new(),
+            material_e2ee: None,
         },
         ssrc: session.ssrc,
     });
@@ -4866,6 +4872,7 @@ fn translate(
                     id: quem.person,
                     nickname: quem.nickname.clone(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: quem.ssrc,
             })

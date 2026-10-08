@@ -94,6 +94,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             client: "seele 0.15.0".to_owned(),
             nickname: "ritsuko".to_owned(),
             public_key: vec![0x11; 32],
+            material_e2ee: None,
         }),
     );
     controle.insert(
@@ -104,6 +105,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             client: "seele 0.15.0".to_owned(),
             nickname: "maya".to_owned(),
             public_key: vec![0x12; 32],
+            material_e2ee: None,
         }),
     );
     controle.insert(

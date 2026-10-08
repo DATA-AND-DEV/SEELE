@@ -152,6 +152,7 @@ async fn abrir(endereco: SocketAddr, semente: u8) -> Result<Par> {
             nickname: format!("pessoa{semente:03}"),
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
+            material_e2ee: None,
         },
     )
     .await?;
