@@ -10,6 +10,7 @@
     "windows": [
       {
         "title": "SEELE",
+        "create": false,
         "width": 1280,
         "height": 800,
         "minWidth": 720,

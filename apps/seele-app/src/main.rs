@@ -1774,6 +1774,15 @@ async fn conferir_esta_versao(app: AppHandle) -> Result<(), versoes::RecusaDesta
     .await
 }
 
+/// O que a primeira abertura desta versão fez com os dados da 0.15 e com a
+/// linha legada, para a tela dizer uma vez. Ver `versoes::primeira_abertura`.
+#[tauri::command]
+fn estado_da_primeira_abertura(
+    estado: State<'_, versoes::EstadoDaPrimeiraAbertura>,
+) -> Option<versoes::PrimeiraAbertura> {
+    estado.0.lock().ok().and_then(|slot| slot.clone())
+}
+
 /// Sobe um servidor dentro do app e devolve o link do convite.
 ///
 /// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
@@ -8764,6 +8773,27 @@ fn main() {
             ..Session::default()
         })
         .setup(move |app| {
+            // **Spec 0.16, §1: os dados da 0.15 antes de qualquer outra coisa.**
+            //
+            // A cópia para a linha legada vem antes da migração dos MODs logo
+            // abaixo (a 0.15.2 conhece o layout antigo) e antes de a janela
+            // existir. A janela é `create: false` no tauri.conf.json porque o
+            // Tauri 2.11.6 cria as janelas do arquivo **antes** deste `setup`
+            // (`app.rs:2521-2531`): sem isso, a página e o IPC subiriam com a
+            // cópia em andamento. Ver `versoes::primeira_abertura` e o guarda
+            // `a_janela_so_nasce_depois_da_primeira_abertura`.
+            let primeira = versoes::primeira_abertura(&config_dir(app.handle()));
+            let houve_0_15 = primeira.houve_0_15();
+            app.manage(versoes::EstadoDaPrimeiraAbertura(std::sync::Mutex::new(
+                Some(versoes::PrimeiraAbertura {
+                    dados: primeira,
+                    linha_legada: None,
+                }),
+            )));
+            for janela in app.config().app.windows.clone() {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &janela)?.build()?;
+            }
+
             // **Os pacotes do layout antigo, levados uma vez.**
             //
             // Quem já tem MODs instalados os tem em `mods/<autor>/<nome>/`, e a
@@ -8843,10 +8873,30 @@ fn main() {
             // palavra final de quem quer testar outro módulo.
             if std::env::var_os("SEELE_OPENH264").is_none() {
                 let pasta = config_dir(app.handle());
-                // SAFETY-ish: estamos antes de qualquer thread do app tocar o
-                // ambiente — o `setup` roda uma vez, antes da primeira janela.
+                // SAFETY-ish: estamos antes de qualquer tarefa do app tocar o
+                // ambiente — o `setup` roda uma vez, na thread principal, e a
+                // busca da linha legada logo abaixo só começa depois desta
+                // linha. (A janela já existe: ela é criada no começo do
+                // `setup`, depois da cópia dos dados da 0.15.)
                 std::env::set_var("SEELE_OPENH264", &pasta);
                 tracing::info!(%pasta, "onde o módulo de vídeo é procurado");
+            }
+            // Passo 2 da primeira abertura: a linha legada para o depósito, em
+            // segundo plano e uma vez só, e só onde houve 0.15. **Depois** do
+            // `set_var` de cima: a busca fala com a rede, e o `reqwest` lê o
+            // ambiente (as variáveis de proxy).
+            if houve_0_15 {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let resultado = versoes::baixar_linha_legada_se_preciso(&handle).await;
+                    if let Some(estado) = handle.try_state::<versoes::EstadoDaPrimeiraAbertura>() {
+                        if let Ok(mut slot) = estado.0.lock() {
+                            if let Some(primeira) = slot.as_mut() {
+                                primeira.linha_legada = resultado;
+                            }
+                        }
+                    }
+                });
             }
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
@@ -8892,6 +8942,7 @@ fn main() {
             servidor_hospedado,
             baixar_versao,
             conferir_esta_versao,
+            estado_da_primeira_abertura,
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,

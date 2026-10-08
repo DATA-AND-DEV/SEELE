@@ -4987,6 +4987,7 @@ dependencies = [
  "image",
  "reqwest",
  "rquickjs",
+ "rusqlite",
  "rustls",
  "seele-ffi",
  "seele-lancador",

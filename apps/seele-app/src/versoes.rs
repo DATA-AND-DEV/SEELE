@@ -756,11 +756,204 @@ pub(crate) async fn conferir_esta_versao(
     }
 }
 
+/// O maior esquema de banco que a 0.15.1 conhece.
+///
+/// Lido com `git show 54f542f:crates/seele-server/src/persistence/schema.rs`.
+/// Um banco acima disto já foi migrado por uma versão mais nova, e não é dado
+/// da 0.15: copiá-lo daria à 0.15.2 um banco do futuro, e o `migrate()` dela
+/// não recusa (`persistence/mod.rs`, o levantamento de 08/10).
+pub(crate) const ESQUEMA_DA_0_15: i64 = 13;
+
+/// A linha legada, a única que o launcher oferece além da 1 (spec 0.16, §1).
+fn linha_legada() -> Linha {
+    // O texto é constante e canônico; o `expect` não tem como falhar, e um
+    // teste prova (`a_primeira_abertura_guarda_os_dados_da_0_15_para_a_linha_dela`).
+    #[allow(clippy::expect_used, reason = "texto constante, provado por teste")]
+    Linha::nova("0.15").expect("«0.15» é uma linha")
+}
+
+/// Os bancos que a 0.15 escreve na pasta do app: o de sempre, o da identidade
+/// do servidor, e um por servidor guardado.
+fn bancos_da_pasta(config: &std::path::Path) -> Vec<PathBuf> {
+    let mut bancos: Vec<PathBuf> = ["seele.db", "identidade-servidor.db"]
+        .iter()
+        .map(|nome| config.join(nome))
+        .filter(|caminho| caminho.is_file())
+        .collect();
+    if let Ok(entradas) = std::fs::read_dir(config.join("servidores")) {
+        bancos.extend(
+            entradas
+                .flatten()
+                .map(|entrada| entrada.path().join("seele.db"))
+                .filter(|caminho| caminho.is_file()),
+        );
+    }
+    bancos
+}
+
+/// O esquema de um banco, aberto **só para leitura**.
+///
+/// Nada de `Persistence::open`, que migra: perguntar a idade de um banco não
+/// pode mudar a idade dele.
+fn esquema_do_banco(caminho: &std::path::Path) -> Option<i64> {
+    let banco =
+        rusqlite::Connection::open_with_flags(caminho, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
+    banco
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |linha| linha.get(0),
+        )
+        .ok()
+}
+
+/// O que a primeira abertura fez com os dados da 0.15.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum DadosDaLinhaLegada {
+    /// A linha 0.15 já tinha os dados dela: uma abertura anterior copiou.
+    JaGuardados,
+    /// Copiados agora, com o tamanho e quanto custou.
+    Guardados {
+        /// Quantos arquivos.
+        arquivos: u64,
+        /// Quantos bytes.
+        bytes: u64,
+        /// Quanto tempo, em milissegundos.
+        ms: u128,
+    },
+    /// A pasta do app não tem banco nenhum: não houve 0.15 nesta máquina.
+    SemDados,
+    /// A pasta tem um banco mais novo que a 0.15, e não é mais dado dela.
+    BancoJaMigrado {
+        /// O maior esquema achado.
+        esquema: i64,
+    },
+    /// A cópia falhou, com o que o sistema disse.
+    NaoGuardei(String),
+}
+
+impl DadosDaLinhaLegada {
+    /// Houve 0.15 nesta máquina, e os dados dela estão na linha legada.
+    ///
+    /// É quem decide se a primeira abertura busca a linha legada: quem nunca
+    /// teve 0.15 a baixa quando precisar dela, e não fala com a rede no
+    /// arranque por isso.
+    #[must_use]
+    pub(crate) fn houve_0_15(&self) -> bool {
+        matches!(self, Self::JaGuardados | Self::Guardados { .. })
+    }
+}
+
+/// Spec 0.16, §1, «O que a atualização para a 0.16 precisa fazer na primeira
+/// abertura», passo 1: copiar os dados da 0.15 para a linha dela **antes de
+/// qualquer outra coisa** — sem `lancador/` e com o marcador de pronta.
+///
+/// Roda no `setup`, antes de a janela existir (ver
+/// `a_janela_so_nasce_depois_da_primeira_abertura`) e antes da migração dos
+/// MODs. Nunca falha para fora: o resultado é estado, e a tela o diz — o
+/// «o produto sabe e não conta» do `CLAUDE.md` pelo outro lado.
+pub(crate) fn primeira_abertura(config: &str) -> DadosDaLinhaLegada {
+    let pasta = std::path::Path::new(config);
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    let legada = linha_legada();
+    if deposito.tem_dados_da_linha(&legada) {
+        return DadosDaLinhaLegada::JaGuardados;
+    }
+    let bancos = bancos_da_pasta(pasta);
+    if bancos.is_empty() {
+        return DadosDaLinhaLegada::SemDados;
+    }
+    if let Some(esquema) = bancos.iter().filter_map(|b| esquema_do_banco(b)).max() {
+        if esquema > ESQUEMA_DA_0_15 {
+            tracing::warn!(
+                esquema,
+                "a pasta do app já tem banco mais novo que a 0.15; a linha legada abre vazia"
+            );
+            return DadosDaLinhaLegada::BancoJaMigrado { esquema };
+        }
+    }
+    let inicio = std::time::Instant::now();
+    match deposito.semear_linha(&legada, pasta, &["lancador"]) {
+        Ok(seele_lancador::Semeadura::Semeada { arquivos, bytes }) => {
+            let ms = inicio.elapsed().as_millis();
+            tracing::info!(
+                arquivos,
+                bytes,
+                ms,
+                "dados da 0.15 guardados para a linha 0.15"
+            );
+            DadosDaLinhaLegada::Guardados {
+                arquivos,
+                bytes,
+                ms,
+            }
+        }
+        Ok(seele_lancador::Semeadura::JaTinha) => DadosDaLinhaLegada::JaGuardados,
+        Err(erro) => {
+            tracing::warn!(%erro, "não guardei os dados da 0.15 para a linha 0.15");
+            DadosDaLinhaLegada::NaoGuardei(erro.to_string())
+        }
+    }
+}
+
+/// O que a primeira abertura fez, para a tela dizer uma vez.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct PrimeiraAbertura {
+    /// A cópia dos dados da 0.15.
+    pub(crate) dados: DadosDaLinhaLegada,
+    /// A busca da linha legada: `None` enquanto não terminou (ou não houve),
+    /// e o que aconteceu quando terminou.
+    pub(crate) linha_legada: Option<String>,
+}
+
+/// O estado da primeira abertura, guardado no app pelo `setup`.
+#[derive(Debug, Default)]
+pub(crate) struct EstadoDaPrimeiraAbertura(pub(crate) std::sync::Mutex<Option<PrimeiraAbertura>>);
+
+/// O nome do arquivo que diz que a linha legada já foi buscada uma vez.
+const LINHA_LEGADA_BUSCADA: &str = "linha-legada-buscada";
+
+/// Passo 2 da primeira abertura: a linha legada para o depósito, **uma vez**.
+///
+/// Só onde houve 0.15 (ver [`DadosDaLinhaLegada::houve_0_15`]). O arquivo-marca
+/// é escrito com o resultado, dando certo ou não: sem ele, uma máquina sem
+/// rede falaria com o GitHub a cada arranque, que é o que o ADR 0026 recusa.
+/// Sem rede agora, a linha é baixada quando alguém precisar dela — ao entrar
+/// num servidor 0.15 ou ao hospedar nele.
+pub(crate) async fn baixar_linha_legada_se_preciso(app: &tauri::AppHandle) -> Option<String> {
+    let config = crate::config_dir(app);
+    let marca = raiz_do_deposito(&config).join(LINHA_LEGADA_BUSCADA);
+    if marca.exists() {
+        return None;
+    }
+    let atualizador = atualizador_do_app(app)?;
+    let resultado = match baixar(
+        &config,
+        &atualizador,
+        &Pedido::MaisNovaDaLinha(linha_legada()),
+    )
+    .await
+    {
+        Ok(versao) => format!("guardada: {versao}"),
+        Err(FalhaAoBaixarVersao::JaInstalada(versao)) => format!("guardada: {versao}"),
+        Err(falha) => format!("não baixei: {falha:?}"),
+    };
+    tracing::info!(%resultado, "a linha legada na primeira abertura");
+    if let Err(erro) = std::fs::create_dir_all(raiz_do_deposito(&config))
+        .and_then(|()| std::fs::write(&marca, format!("{resultado}\n")))
+    {
+        tracing::warn!(%erro, "não marquei a busca da linha legada; o próximo arranque busca de novo");
+    }
+    Some(resultado)
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
     clippy::expect_used,
-    reason = "num teste, o pânico é o relatório"
+    clippy::indexing_slicing,
+    reason = "num teste, o pânico é o relatório; e indexar um serde_json::Value devolve Null em vez de entrar em pânico"
 )]
 mod o_launcher_ligado_ao_produto {
     use super::{instaladas, pedido_de, preparar, FalhaAoAbrirVersao, Intencao};
@@ -1155,6 +1348,137 @@ mod o_launcher_ligado_ao_produto {
             matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
             "o caminho de abrir devolveu algo que não é nem sucesso nem `NaoIniciou`: {resultado:?}"
         );
+    }
+
+    /// Uma pasta de app da 0.15: um banco com o esquema pedido e a identidade.
+    fn config_da_0_15(dir: &std::path::Path, esquema: i64) {
+        let banco = rusqlite::Connection::open(dir.join("seele.db")).unwrap();
+        banco
+            .execute_batch(
+                "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);",
+            )
+            .unwrap();
+        for v in 1..=esquema {
+            banco
+                .execute("INSERT INTO schema_version VALUES (?1, 0)", [v])
+                .unwrap();
+        }
+        std::fs::write(dir.join("identity.key"), b"a chave da pessoa").unwrap();
+    }
+
+    /// **A ordem do spec 0.16, §1:** os dados da 0.15 viram os da linha 0.15
+    /// antes de a 0.16 migrar a pasta dela, e a identidade vai junto.
+    #[test]
+    fn a_primeira_abertura_guarda_os_dados_da_0_15_para_a_linha_dela() {
+        let dir = tempfile::tempdir().unwrap();
+        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15);
+        let config = dir.path().to_string_lossy().into_owned();
+
+        let feito = super::primeira_abertura(&config);
+
+        assert!(
+            matches!(feito, super::DadosDaLinhaLegada::Guardados { .. }),
+            "veio {feito:?}"
+        );
+        let deposito = Deposito::em(super::raiz_do_deposito(&config));
+        assert!(deposito.tem_dados_da_linha(&linha("0.15")));
+        let destino = deposito.pasta_de_dados_da_linha(&linha("0.15"));
+        assert_eq!(
+            std::fs::read(destino.join("identity.key")).unwrap(),
+            b"a chave da pessoa",
+            "a identidade não foi junto: a pessoa seria outra nos servidores da 0.15"
+        );
+        assert!(destino.join("seele.db").is_file());
+        assert!(!destino.join("lancador").exists());
+        // A segunda abertura não copia de novo.
+        assert_eq!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::JaGuardados
+        );
+    }
+
+    /// Um banco que a 0.16 já migrou não é dado da 0.15: copiá-lo daria à
+    /// 0.15.2 um banco do futuro, e o `migrate()` dela não recusa.
+    #[test]
+    fn um_banco_ja_migrado_nao_vira_dado_da_linha_legada() {
+        let dir = tempfile::tempdir().unwrap();
+        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15 + 1);
+        let config = dir.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::BancoJaMigrado {
+                esquema: super::ESQUEMA_DA_0_15 + 1
+            }
+        );
+        assert!(!Deposito::em(super::raiz_do_deposito(&config)).tem_dados_da_linha(&linha("0.15")));
+    }
+
+    /// O banco de um servidor guardado também conta: um só migrado já basta
+    /// para a pasta não ser mais da 0.15.
+    #[test]
+    fn um_banco_de_servidor_guardado_ja_migrado_tambem_conta() {
+        let dir = tempfile::tempdir().unwrap();
+        config_da_0_15(dir.path(), super::ESQUEMA_DA_0_15);
+        let outro = dir.path().join("servidores/abc");
+        std::fs::create_dir_all(&outro).unwrap();
+        config_da_0_15(&outro, super::ESQUEMA_DA_0_15 + 2);
+        let config = dir.path().to_string_lossy().into_owned();
+        assert!(matches!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::BancoJaMigrado { .. }
+        ));
+    }
+
+    #[test]
+    fn uma_maquina_sem_0_15_nao_copia_nada() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::primeira_abertura(&config),
+            super::DadosDaLinhaLegada::SemDados
+        );
+        assert!(!super::raiz_do_deposito(&config).join("dados").exists());
+    }
+
+    /// **O guarda estrutural.** No Tauri 2.11.6 as janelas do `tauri.conf.json`
+    /// nascem antes do `setup` do app (`app.rs:2521-2531`). A janela é
+    /// `create: false`, e o `setup` copia os dados da 0.15 antes de criá-la.
+    #[test]
+    fn a_janela_so_nasce_depois_da_primeira_abertura() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(
+            conf["app"]["windows"][0]["create"], false,
+            "a janela nasce sozinha, antes do setup e da cópia dos dados da 0.15"
+        );
+        let main = include_str!("main.rs");
+        let setup = main.find(".setup(move |app|").expect("o setup do app");
+        let copia = main[setup..]
+            .find("versoes::primeira_abertura(")
+            .expect("o setup chama a primeira abertura");
+        let janela = main[setup..]
+            .find("WebviewWindowBuilder::from_config(")
+            .expect("o setup cria a janela");
+        let mods = main[setup..]
+            .find("mods::levar_pacotes_antigos_para_o_cache(")
+            .expect("o setup migra os MODs");
+        assert!(
+            copia < janela,
+            "a janela é criada antes da cópia dos dados da 0.15"
+        );
+        assert!(
+            copia < mods,
+            "os MODs da pasta são migrados antes da cópia: a linha 0.15 ficaria com o layout novo"
+        );
+    }
+
+    /// 13 é o maior esquema que a 0.15.1 conhece, lido com
+    /// `git show 54f542f:crates/seele-server/src/persistence/schema.rs`. Este
+    /// teste não prova isso (o histórico não está aqui); ele prende o número,
+    /// para uma mudança nele ser uma decisão escrita.
+    #[test]
+    fn o_esquema_da_0_15_e_o_da_0_15_1() {
+        assert_eq!(super::ESQUEMA_DA_0_15, 13);
     }
 
     /// **A guarda da linha legada, na casca.** O atualizador de uma versão

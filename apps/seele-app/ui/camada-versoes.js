@@ -136,6 +136,42 @@ async function baixarAMaisNova() {
   desenharVersoes().catch((falha) => console.warn("versões da entrada:", falha));
 }
 
+/**
+ * O que a primeira abertura desta versão fez com as conversas da 0.15.
+ *
+ * Spec 0.16, §1: as conversas da 0.15 são copiadas para o Servidor 0.15 antes
+ * de esta versão mexer na pasta dela, e as conversas de um não aparecem no
+ * outro. Dito uma vez — só a abertura que copiou responde `Guardados` —, e dito
+ * também quando não deu, porque aí o Servidor 0.15 vai abrir vazio.
+ *
+ * Sem «linha» na frase: o ADR 0033 tirou a palavra da tela.
+ */
+async function dizerOQueAPrimeiraAberturaFez() {
+  let estado = null;
+  try {
+    estado = await invoke("estado_da_primeira_abertura");
+  } catch (falha) {
+    console.warn("primeira abertura:", falha);
+    return;
+  }
+  const dados = estado?.dados;
+  if (!dados || typeof dados !== "object") return;
+  const nota = $("boot-linha-legada");
+  if ("Guardados" in dados) {
+    nota.textContent =
+      "As conversas da 0.15 ficaram guardadas para o Servidor 0.15. O que você " +
+      "escrever nesta versão não aparece lá, e o que estiver lá não aparece aqui.";
+    nota.hidden = false;
+  } else if ("BancoJaMigrado" in dados || "NaoGuardei" in dados) {
+    nota.textContent =
+      "Não deu para guardar as conversas da 0.15 para o Servidor 0.15: ele vai " +
+      "abrir vazio. As conversas continuam aqui, nesta versão.";
+    nota.hidden = false;
+  }
+}
+
+dizerOQueAPrimeiraAberturaFez();
+
 $("versoes-baixar").addEventListener("click", () => {
   baixarAMaisNova().catch((falha) => console.warn("baixar versão:", falha));
 });
