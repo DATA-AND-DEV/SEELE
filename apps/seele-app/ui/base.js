@@ -1200,8 +1200,9 @@ function avatarContribuido(pessoaId) {
   // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca e
   // o `decode()` caem em `recusar`. Um redesenho que lança depois de o avatar
   // ter virado a imagem da pessoa não o diz «recusado» nem o tira da conta com
-  // o `uri` ainda posto: o tropeço vai ao `console`, e o estado fica o que a
-  // tela mostra (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
+  // o `uri` ainda posto: o `.catch` do fim leva o tropeço ao `console` e ao
+  // `seele.log`, pelo `dono.anotarRecusa`, e o estado fica o que a tela mostra
+  // (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
   const aplicar = (midia) => {
     if (!midia || estado.cancelado) return;
     if (!dono.podeFalar()) {

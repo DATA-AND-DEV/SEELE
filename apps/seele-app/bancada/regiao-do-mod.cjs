@@ -2372,10 +2372,12 @@ async function oFundoEORetratoTambemDizemOEstado() {
  * ficavam calados: um quadrado vazio na tela, e nenhuma linha no registro, no
  * evento do MOD ou na aba DIAGNÓSTICO.
  *
- * Agora a imagem só vale depois do `decode()`, e a recusa cai no `catch` que
- * cada caminho já tinha: anotada «recusada», dita ao registro, dita ao MOD
- * onde o caminho já falava com ele — o fundo por `midia`/`falhou`, o fundo de
- * tela por `tela`/`fundo-falhou` — e os bytes que ela reservou voltam à conta.
+ * Agora a imagem só vale depois do `decode()`, e a recusa dele cai no
+ * `recusar` de `.then(aplicar, recusar)`, o mesmo da busca: anotada
+ * «recusada», dita ao registro, dita ao MOD onde o caminho já falava com ele —
+ * o fundo por `midia`/`falhou`, o fundo de tela por `tela`/`fundo-falhou` — e
+ * os bytes que ela reservou voltam à conta. O tropeço de aplicar cai no
+ * `.catch` do fim, e não aqui (ver `aplicarQueLancaNaoViraRecusa`).
  * **O retrato não fala com o MOD**, e continua sem falar: um evento novo seria
  * promessa nova da API.
  *

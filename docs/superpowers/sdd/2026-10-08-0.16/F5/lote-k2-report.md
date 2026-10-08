@@ -415,9 +415,13 @@ as mesmas frases e voltaram byte a byte.
   fundo de tela). O retrato e o fundo de mídia tinham o mesmo defeito, por
   outra porta: um `midiaMudou` de dono que lança dentro do `anotarMidia`.
   O vermelho abaixo mostra o fundo de mídia na tela, «recusada» e com 0 bytes.
-- Dentro de `aplicar`, o aviso ao dono (`anotarMidia`, que chama `midiaMudou`)
-  vem por último. No retrato, um dono que lança encontra o `<img>` já montado,
-  com o ouvinte de `error`, e os bytes contados.
+- No retrato e no fundo de mídia, o aviso ao dono (`anotarMidia`, que chama
+  `midiaMudou`) vem por último dentro de `aplicar`. No retrato, um dono que
+  lança encontra o `<img>` já montado, com o ouvinte de `error`, e os bytes
+  contados. **No fundo de tela, não:** `anotarMidia("pronta")` vem antes de
+  `pintarTela`, na ordem que já existia antes do lote. Um dono que lança ali
+  encontra o mapa em `fundo.imagem` e anotado, e a repintura fica para o
+  próximo desenho.
 
 **Prova.**
 - `regiao-do-mod.cjs` ganha `aplicarQueLancaNaoViraRecusa`:
@@ -548,7 +552,9 @@ Cada caso exige uma linha só, com:
   foi pedido, para ficar junto das outras linhas de mídia do MOD. O que separa
   uma linha da outra é o texto: «tropeçou … e não foi uma recusa». Um filtro
   que conte as linhas por esse `onde` passa a contar também os tropeços.
-- **Um `aplicar` que lança no meio deixa o que já tinha aplicado.** A ordem
-  dentro dele põe o estado primeiro e o aviso ao dono por último, e por isso o
-  estado que fica é o da tela. A repintura do mapa que lança deixa o mapa em
-  `fundo.imagem` e anotado «pronta», e o próximo desenho o pinta.
+- **Um `aplicar` que lança no meio deixa o que já tinha aplicado.** No retrato
+  e no fundo de mídia, a ordem dentro dele põe o estado primeiro e o aviso ao
+  dono por último, e por isso o estado que fica é o da tela. No fundo de tela, a
+  anotação «pronta» vem antes da repintura, como já vinha: a repintura que lança
+  deixa o mapa em `fundo.imagem` e anotado «pronta», e o próximo desenho o
+  pinta.

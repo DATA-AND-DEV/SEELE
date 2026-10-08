@@ -437,10 +437,12 @@ function motivoDaFalha(falha) {
  * avisar — a imagem ficava «pronta» num quadrado vazio, sem uma linha no
  * registro, no evento do MOD ou na aba.
  *
- * Quem chama encadeia esta promessa **dentro** do `then` que já tinha, e a
- * recusa cai no `catch` de sempre, com um motivo em palavra: o do navegador
- * (`EncodingError`) é dele, e diz pouco a quem escreve o MOD. Mesmo `uri`,
- * mesmo `img-src`: nada na política da janela muda.
+ * Quem chama devolve esta promessa de dentro do `then` da busca e encadeia
+ * `.then(aplicar, recusar)`: a recusa do `decode()` cai em `recusar`, junto com
+ * a da busca, com um motivo em palavra — o do navegador (`EncodingError`) é
+ * dele, e diz pouco a quem escreve o MOD. O que lança em `aplicar` não é
+ * recusa, e cai no `.catch` do fim (`RegiaoDeMod#dizerTropecoDaMidia`). Mesmo
+ * `uri`, mesmo `img-src`: nada na política da janela muda.
  *
  * @param {string} uri O `uri` que a ponte de mídia devolveu.
  * @returns {Promise<HTMLImageElement>} A imagem decodificada — a do fundo de
