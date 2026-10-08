@@ -6,7 +6,9 @@
 # registrada e a campanha segue para o próximo.
 cd "$(dirname "$0")/.." || exit 1
 mkdir -p medidas
-for c in sem-mod 1-mod 3-mods 3-mods-editor 3-mods-mesa sem-mod+voz 1-mod+voz 3-mods+voz 3-mods-editor+voz 3-mods-mesa+voz; do
+# Sem argumentos, os dez; com argumentos, só os cenários pedidos.
+CENARIOS=${*:-sem-mod 1-mod 3-mods 3-mods-editor 3-mods-mesa sem-mod+voz 1-mod+voz 3-mods+voz 3-mods-editor+voz 3-mods-mesa+voz}
+for c in $CENARIOS; do
   for tentativa in 1 2; do
     while :; do
       python3 -I roteiro/m3.py "$c" --segundos 60 --ocioso 300 > "medidas/ultimo-$c.json" 2> "medidas/ultimo-$c.err"
