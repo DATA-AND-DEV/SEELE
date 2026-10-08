@@ -890,6 +890,53 @@ esac
         String::from_utf8_lossy(&saida.stdout).trim().to_owned()
     }
 
+    /// Põe na frente do `PATH` do script um `git` que repassa tudo ao de
+    /// verdade, menos as chamadas que levam o argumento `falha`: a partir da
+    /// `(deixa_passar + 1)`-ésima, elas saem com 128 e uma frase no erro, como
+    /// um repositório que o git não consegue ler.
+    ///
+    /// A configuração mora em arquivos ao lado do dublê, e não no ambiente, para
+    /// que `rodar` continue com a mesma assinatura. O argumento é casado inteiro:
+    /// `--list` só pega o `git tag --list`, e `--format=%s` só pega o `git log`
+    /// que classifica os assuntos, e não o que lista os commits.
+    fn git_que_falha(&self, falha: &str, deixa_passar: usize) {
+        let caminho = std::env::var_os("PATH").unwrap_or_default();
+        let de_verdade = std::env::split_paths(&caminho)
+            .map(|pasta| pasta.join("git"))
+            .find(|git| git.is_file())
+            .expect("o git de verdade tem que estar no PATH");
+        let ferramentas = self.base.join("ferramentas");
+        escrever(&ferramentas.join("git.falha"), falha, false);
+        escrever(
+            &ferramentas.join("git.deixa"),
+            &deixa_passar.to_string(),
+            false,
+        );
+        escrever(&ferramentas.join("git.contador"), "", false);
+        escrever(
+            &ferramentas.join("git"),
+            &format!(
+                r#"#!/bin/sh
+aqui=$(dirname "$0")
+falha=$(cat "$aqui/git.falha")
+case " $* " in
+    *" $falha "*)
+        echo x >> "$aqui/git.contador"
+        vezes=$(wc -l < "$aqui/git.contador" | tr -d ' ')
+        if [ "$vezes" -gt "$(cat "$aqui/git.deixa")" ]; then
+            echo "fatal: o git de mentira falhou em $falha" >&2
+            exit 128
+        fi
+        ;;
+esac
+exec "{}" "$@"
+"#,
+                de_verdade.display()
+            ),
+            true,
+        );
+    }
+
     fn rodar(&self, argumentos: &[&str], ambiente: &[(&str, &str)]) -> Saida {
         let caminho_antigo = std::env::var("PATH").unwrap_or_default();
         let mut comando = Command::new(interpretador());
@@ -1040,6 +1087,154 @@ fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
         saida.texto.contains("«telepatia» é um escopo que a tabela"),
         "o --conferir não avisou do escopo que a tabela não conhece:\n{}",
         saida.texto
+    );
+}
+
+/// O git que falha não vira «primeira versão publicada».
+///
+/// `faixa_da_versao` lia as tags numa substituição de comando dentro de um
+/// pipe, e o status do `git tag` se perdia: sem tags, o `--conferir` dizia que
+/// esta é a primeira versão e que não havia o que classificar. Uma falha que o
+/// script não conta volta como pergunta de quem publica, dias depois.
+#[test]
+fn o_conferir_para_dizendo_quando_o_git_nao_lista_as_tags() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git_que_falha("--list", 0);
+
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "o git não listou as tags e o --conferir passou: quem publica ficaria sem saber que a \
+         faixa da versão não foi lida:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não consegui listar as tags"),
+        "o --conferir parou sem dizer que o git não listou as tags:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("primeira versão publicada")
+            && !saida.texto.contains("tudo conferido"),
+        "o git não listou as tags e o --conferir disse que esta é a primeira versão, ou que \
+         está tudo conferido:\n{}",
+        saida.texto
+    );
+}
+
+/// O mesmo, para o `git log` da faixa: o status do `git` se perdia no pipe, o
+/// status do pipe era o do `notas_das_mudancas`, e o passo dizia
+/// «classificadas» sem ter lido um commit.
+#[test]
+fn o_conferir_para_dizendo_quando_o_git_nao_le_os_commits_da_faixa() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "arruma a fila do servidor",
+    ]);
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    bancada.git_que_falha("--format=%s", 0);
+
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "o git não leu os commits da faixa e o --conferir passou:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("não consegui ler os commits de v1.2.2..HEAD"),
+        "o --conferir parou sem dizer que o git não leu os commits da faixa:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("classificadas") && !saida.texto.contains("tudo conferido"),
+        "o git não leu os commits e o --conferir disse que os classificou, ou que está tudo \
+         conferido:\n{}",
+        saida.texto
+    );
+}
+
+/// No fim, onde o corpo do release é montado, a falha do git é dita, e a
+/// publicação segue: as conferências já leram as tags e os commits uma vez, e
+/// um segundo erro no mesmo script é raro demais para abortar horas de build.
+/// O que não pode é o corpo sair afirmando uma coisa que o script não leu.
+#[test]
+fn o_corpo_do_release_avisa_quando_o_git_nao_lista_as_tags_na_hora_de_montar() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    // A primeira chamada, a das conferências, passa; a do corpo falha.
+    bancada.git_que_falha("--list", 1);
+
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+
+    assert!(
+        saida
+            .texto
+            .contains("não consegui listar as tags de novo ao montar o corpo do release"),
+        "o git não listou as tags ao montar o corpo do release, e o script não disse: o corpo \
+         sairia afirmando que esta é a primeira versão sem que nada avisasse quem publica:\n{}",
+        saida.texto
+    );
+}
+
+#[test]
+fn o_corpo_do_release_avisa_quando_o_git_nao_le_os_commits_na_hora_de_montar() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    bancada.git(&["tag", "v1.2.2"]);
+    bancada.git(&[
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "arruma a fila do servidor",
+    ]);
+    let cabeca = bancada.git(&["rev-parse", "HEAD"]);
+    // A primeira chamada, a das conferências, passa; a do corpo falha.
+    bancada.git_que_falha("--format=%s", 1);
+
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert!(
+        saida
+            .texto
+            .contains("não consegui ler os commits de v1.2.2..HEAD ao montar o corpo do release"),
+        "o git não leu os commits ao montar o corpo do release, e o script não disse: a seção \
+         de mudanças sairia dizendo que não há nenhuma:\n{}",
+        saida.texto
+    );
+    // O corpo vai ao GitHub em JSON, e `json.dump` escapa o que não é ASCII:
+    // por isso os pedaços abaixo são os ASCII das frases («As mudan…», «nenhuma
+    // mudan…»). O primeiro prova que o corpo chegou até aqui e está sendo lido;
+    // o segundo, que ele não afirma o que o script não leu.
+    assert!(
+        saida.corpos.contains("As mudan"),
+        "o corpo do release não chegou ao dublê do GitHub, e a asserção abaixo não prova \
+         nada:\n{}\n{}",
+        saida.corpos,
+        saida.texto
+    );
+    assert!(
+        !saida.corpos.contains("nenhuma mudan"),
+        "o git não leu os commits e o corpo do release afirmou que a versão não traz nenhuma \
+         mudança de produto:\n{}",
+        saida.corpos
     );
 }
 
@@ -3074,13 +3269,26 @@ fn o_corpo_do_release_lista_os_commits_da_mesma_faixa_que_resume() {
         texto.contains("changelog_dos_commits \"$FAIXA\""),
         "o corpo do release tem que listar os commits da faixa que ele resume"
     );
-    assert!(
-        texto.contains(
-            "git -C \"$RAIZ\" log --no-merges --format='%s' \"$FAIXA\" \
-                        | notas_das_mudancas"
-        ),
-        "e o resumo tem que sair da mesma faixa"
+    // O resumo lê os assuntos da faixa em dois lugares — a conferência, que só
+    // avisa, e o corpo, que monta — e lê num `$(…)`, e não num pipe, para que o
+    // status do git possa ser testado. As duas leituras são da mesma faixa, e
+    // cada uma entrega o que leu ao `resumir_assuntos`.
+    let codigo = sem_comentario(&texto);
+    let leitura = "log --no-merges --format='%s' \"$FAIXA\")";
+    assert_eq!(
+        codigo.matches(leitura).count(),
+        2,
+        "o resumo tem que sair da mesma faixa nas duas leituras (conferência e corpo), cada uma \
+         lida num `$(…)` com o status testado"
     );
+    for variavel in ["cn_assuntos", "assuntos"] {
+        assert!(
+            codigo.contains(&format!("{variavel}=$(git -C \"$RAIZ\" {leitura}"))
+                && codigo.contains(&format!("resumir_assuntos \"${variavel}\"")),
+            "o resumo lê os assuntos da faixa em `{variavel}` e não os entrega ao \
+             `resumir_assuntos`: a página resumiria outra coisa que não a faixa que lista"
+        );
+    }
 }
 
 #[test]

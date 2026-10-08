@@ -1740,13 +1740,39 @@ sys.exit(0 if dados.get("permissions", {}).get("push") else 1)' "$CORPO_API" 2>/
     done
 }
 
+# Passa os assuntos que o `git log` já devolveu a `notas_das_mudancas`.
+#
+# Lidos antes, e não num pipe, para que o status do git possa ser testado. O
+# `$(…)` tira a quebra do fim, e o `read` da outra ponta descarta uma última
+# linha que não a tenha: por isso o `printf` com `\n`, e só quando há o que ler.
+# Uma faixa sem commits é entrada vazia, e não uma linha vazia, que contaria
+# como um assunto sem classe.
+resumir_assuntos() {
+    {
+        if [ -n "$1" ]; then
+            printf '%s\n' "$1"
+        fi
+    } | notas_das_mudancas
+}
+
 # A faixa desta versão: da tag publicada antes dela até o HEAD.
 #
 # Define `ANTERIOR` e `FAIXA`. É só `git tag` e uma comparação de versões, sem
 # rede e sem compilar, e por isso as conferências podem pedi-la — e o corpo do
 # release, no fim, a pede de novo em vez de depender de elas terem rodado.
+#
+# **Volta 1, com `ANTERIOR` e `FAIXA` vazias, quando o `git tag` falha.** A lista
+# de tags era lida numa substituição de comando e passada a `tag_anterior` por um
+# pipe: o status do git se perdia, e um git que não leu as tags era contado como
+# «não há versão anterior», que é a primeira publicação. Quem chama decide o que
+# fazer com a falha.
 faixa_da_versao() {
-    ANTERIOR=$(git -C "$RAIZ" tag --list 'v*' | tag_anterior "$VERSAO")
+    ANTERIOR=""
+    FAIXA=""
+    if ! fv_tags=$(git -C "$RAIZ" tag --list 'v*'); then
+        return 1
+    fi
+    ANTERIOR=$(printf '%s\n' "$fv_tags" | tag_anterior "$VERSAO")
     if [ -n "$ANTERIOR" ]; then
         FAIXA="$ANTERIOR..HEAD"
     else
@@ -1768,13 +1794,29 @@ faixa_da_versao() {
 # Aqui a classificação roda **só pelos avisos**: a saída padrão, que é o corpo,
 # vai para o ralo, e o corpo de verdade continua montado no fim, como sempre. O
 # custo é um `git log` entre duas tags.
+#
+# **Aqui o git que falha para o script.** O `git tag` e o `git log` são lidos
+# fora de um pipe, e o status de cada um é testado: um git que não leu as tags
+# dizia «é a primeira versão publicada», e um que não leu os commits dizia
+# «classificadas», sem ter lido nenhum. Nas conferências a falha é barata de
+# dizer e cara de calar.
 conferir_notas() {
-    faixa_da_versao
+    if ! faixa_da_versao; then
+        morrer "não consegui listar as tags do repositório (o git tag --list falhou)." \
+            "Sem elas não sei qual é a faixa de v$VERSAO, e não tenho como dizer o que o" \
+            "resumo das mudanças não classifica." \
+            "Confira o repositório:  git -C '$RAIZ' tag --list 'v*'"
+    fi
     if [ -z "$FAIXA" ]; then
         passo "v$VERSAO é a primeira versão publicada: não há mudanças a classificar"
         return 0
     fi
-    git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas >/dev/null
+    if ! cn_assuntos=$(git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA"); then
+        morrer "não consegui ler os commits de $FAIXA (o git log falhou)." \
+            "Sem eles não sei se algum assunto escapa da classificação do resumo." \
+            "Confira o repositório:  git -C '$RAIZ' log $FAIXA"
+    fi
+    resumir_assuntos "$cn_assuntos" >/dev/null
     passo "mudanças desde $ANTERIOR classificadas (o que o resumo não classifica está dito acima, se houve)"
 }
 
@@ -2017,7 +2059,16 @@ NOTAS="$TEMPORARIO/corpo.md"
 # não achava em lugar nenhum, e o histórico do repositório, que é onde a
 # resposta sempre esteve, não é o lugar onde alguém procura depois de clicar num
 # link de download.
-faixa_da_versao
+#
+# **Aqui a falha do git só é dita, e a publicação segue.** As conferências já
+# leram as tags e os commits uma vez; um segundo erro do git no mesmo script é
+# raro demais para abortar o que horas de build acabaram de montar. O que não
+# pode é o corpo afirmar o que o script não leu sem que quem publica saiba.
+if ! faixa_da_versao; then
+    aviso "não consegui listar as tags de novo ao montar o corpo do release (o git tag --list falhou)." \
+        "O corpo vai dizer que esta é a primeira versão publicada, e pode não ser." \
+        "Confira o rascunho antes de publicar."
+fi
 
 {
     # **O aviso desta versão, e só dela.**
@@ -2043,7 +2094,15 @@ faixa_da_versao
         # e quem pulou uma versão fica sem saber se o que está lendo cobre a
         # distância que ele andou.
         printf '%s\n\n' "_As mudanças de \`$ANTERIOR\` até \`v$VERSAO\`._"
-        git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA" | notas_das_mudancas
+        if assuntos=$(git -C "$RAIZ" log --no-merges --format='%s' "$FAIXA"); then
+            resumir_assuntos "$assuntos"
+        else
+            # Sem o resumo, e sem a frase «nenhuma mudança de produto» que o
+            # `notas_das_mudancas` diria a uma entrada vazia.
+            aviso "não consegui ler os commits de $FAIXA ao montar o corpo do release (o git log falhou)." \
+                "A seção de mudanças do corpo sai sem o resumo." \
+                "Confira o rascunho antes de publicar."
+        fi
         printf '\n'
         changelog_dos_commits "$FAIXA"
     else
