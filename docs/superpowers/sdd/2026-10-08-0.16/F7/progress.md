@@ -45,7 +45,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 2 | 4a, o certificado Ed25519 | **feita** | `43d81c31` |
 | 3 | 4c, a campainha | **feita** | `77207424` |
 | 4 | 7g-núcleo, a agenda | **feita** | `6f28dd41` |
-| 5 | 7c-áudio, o toque só de saída | a fazer | — |
+| 5 | 7c-áudio, o toque só de saída | **feita**, com duas medidas pendentes do dono | `d1f8a947` |
 | 6 | os ADRs 0059, 0060 e 0061 | a fazer | — |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
@@ -126,3 +126,27 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
   - limpar o apelido;
   - o nome que não se troca;
   - o modo 0600.
+
+## Tarefa 5 — o toque só de saída (08/10)
+
+- `crates/seele-audio/src/toque.rs` tem 6 testes, e todos começaram vermelhos.
+  `o_toque_nao_aloca` está em `realtime_safety.rs`.
+- **As reversões medidas:**
+  - sem o envelope: um degrau de 0,163 contra o teto de 0,029, e
+    `nao_ha_degrau_na_forma_de_onda` reprova;
+  - uma alocação no `preencher`: o processo aborta, «memory allocation …
+    failed», SIGABRT. É como o guarda de tempo real reprova, e o controle
+    negativo do próprio arquivo documenta isso.
+- **Medido neste Mac:** `o_toque_toca_sem_abrir_nenhum_fluxo_de_entrada` passa.
+  A saída padrão abriu, muda, e o contador de fluxos de entrada não subiu.
+- **PENDENTE, com o dono presente:** os dois passos abaixo abrem o microfone,
+  e o macOS pode mostrar um pedido de permissão. Não disparei isso sem aviso.
+  - o controle negativo, `abrir_o_par_inteiro_conta_um_fluxo_de_entrada`;
+  - a reversão da medida, o toque aberto pelo `open` inteiro.
+
+  **Sem eles, a medida ainda não prova que o contador não é inerte.** O comando:
+  `cargo test -p seele-audio --test toque_so_de_saida -- --ignored --test-threads=1`.
+- **Rodado:** `cargo test -p seele-audio`, com 253 testes de unidade e as
+  integrações, verdes. O `laco_por_processo` (`cfg(windows)`) não compila neste
+  Mac. Os dependentes (`seele-core`, `seele-ffi` e `seele-app`) passam no
+  `cargo check`, e nenhum faz `match` sobre `DeviceError`.
