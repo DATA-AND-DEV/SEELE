@@ -51,6 +51,7 @@ Cada âncora abaixo foi conferida em `d4eb6f1` por leitura do código, em 08/10.
 - Só os do crate, do binário ou da bancada que o lote mexe:
   - `perl -e 'alarm 600; exec @ARGV' cargo test -p <crate> …`, porque o macOS não tem `timeout`;
   - `cargo xtask check-runtime` quando mexer em `apps/seele-app/ui/` ou em `apps/seele-app/bancada/`;
+  - `cargo test -p seele-app --test frontend` quando mexer em `apps/seele-app/src/main.rs`, e não só o `--bin`: os guardas de `tests/frontend.rs` leem o `main.rs` como texto. Foi assim que o lote E deixou vermelho um guarda que nenhum teste do lote rodava (achado na conferência da onda 3, consertado em `9daa0c0`);
   - bancada de navegador sem baixar nada: `PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright perl -e 'alarm 240; exec @ARGV' node apps/seele-app/bancada/<bancada>.cjs`.
 - **Nunca** `cargo test --workspace`, nem a bateria inteira. Duas baterias em paralelo disputam a porta UDP 8384, e a `vaga` só serializa dentro de um binário (`crates/seele-conformance/tests/vaga/mod.rs`, `fn minha`).
 - Teste de conformidade toma `let _vaga = vaga::minha();` na primeira linha.
