@@ -4,7 +4,8 @@
 //!
 //! 1. o `seele-web` compila para `wasm32-unknown-unknown`, e os bytes-ouro da
 //!    F1 cruzam a fronteira de verdade com os mesmos bytes, com o JSON passando
-//!    pelo JavaScript (`xtask/web/ouro.mjs`);
+//!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
+//!    da F1 passam pela fronteira (`xtask/web/links.mjs`);
 //! 2. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
 //!    `.cargo/config.toml` aponta a variável para uma pasta que não existe;
 //! 3. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
@@ -201,6 +202,16 @@ pub(crate) fn run() -> ExitCode {
                 .arg("xtask/web/ouro.mjs")
                 .arg(&web)
                 .arg("crates/seele-proto/tests/fio_1_0.txt"),
+        )),
+    ));
+
+    passos.push((
+        "os links da F1 dentro do .wasm (xtask/web/links.mjs)",
+        deu_certo(rodar(
+            Command::new("node")
+                .arg("xtask/web/links.mjs")
+                .arg(&web)
+                .arg("crates/seele-web/tests/links-da-f1.json"),
         )),
     ));
 

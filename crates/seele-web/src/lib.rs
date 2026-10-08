@@ -79,3 +79,33 @@ pub fn decodificar_do_servidor(quadro: &[u8]) -> Result<DoServidor, ErroDaPonte>
         Lido::Desconhecida { ordinal } => Ok(DoServidor::Desconhecida { ordinal }),
     }
 }
+
+/// Um link do navegador, lido com as regras da página (`analisar_no_navegador`
+/// da F1), para a casca: `{"link": …}` ou `{"erro": "<variante>"}`.
+///
+/// O erro sai pelo nome da variante de `ErroDoNavegador`, que é o vocabulário
+/// da página. `"SemHashesDoNavegador"` é o link de um Servidor 0.15, ou de um
+/// desktop, e é por ele que a página diz isso sem discar. Um corpo de convite
+/// torto sai como `"Convite"`, com o `ErroDeUri` em `detalhe`.
+#[must_use]
+pub fn link_do_navegador(texto: &str, origem: &str) -> serde_json::Value {
+    use seele_proto::uri::{analisar_no_navegador, ErroDoNavegador};
+    match analisar_no_navegador(texto, origem) {
+        Ok(lido) => serde_json::json!({
+            "link": {
+                "alvo": lido.convite.alvo,
+                "alternativos": lido.convite.alternativos,
+                "impressao": lido.convite.impressao_digital,
+                "convite": lido.convite.token,
+                "sala": lido.convite.voice_room,
+                "versao": lido.convite.versao,
+                "hashes": lido.hashes,
+                "ate": lido.ate,
+            }
+        }),
+        Err(ErroDoNavegador::Convite(detalhe)) => {
+            serde_json::json!({ "erro": "Convite", "detalhe": format!("{detalhe:?}") })
+        }
+        Err(outro) => serde_json::json!({ "erro": format!("{outro:?}") }),
+    }
+}

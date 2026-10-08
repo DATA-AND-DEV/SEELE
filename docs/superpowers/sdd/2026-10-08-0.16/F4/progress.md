@@ -186,3 +186,21 @@ Também feito:
     empacotar, com a queixa e o porquê, e o `--sem-bateria` o pula;
   - o guarda de `fronteira_do_celular.rs` passa a exigir o passo nos dois
     workflows.
+
+### 08/10, os casos do link no `.wasm` (Tarefa 2.3)
+
+Liberado pela orquestradora depois do `642a4d4`.
+- O `seele-web` ganha:
+  - `link_do_navegador`, sobre o `analisar_no_navegador` da F1;
+  - na fronteira, `analisar_link`, **sempre com a `ORIGEM_DO_NAVEGADOR` do
+    produto**: a página não escolhe a origem;
+  - `analisar_link_em`, a versão com origem, só para teste.
+- Os 16 casos da F1, um por asserção, numa tabela em JSON, passam no nativo e
+  dentro do `.wasm`. O `cargo xtask web` passa a ter oito passos.
+- Provado por reversão, nas duas pontas. Na do `.wasm`, a primeira tentativa de
+  reversão não se aplicou: o `rustfmt` tinha quebrado a linha e a substituição
+  não casou, e o «verde» dela não provava nada. Refeita contra o texto real,
+  reprovou como devia.
+- Clippy com `RUSTFLAGS="-D warnings"` e `--all-targets` depois da última
+  edição. Ele pegou a indexação em `serde_json::Value` no teste novo, já
+  consertada.
