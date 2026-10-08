@@ -1199,6 +1199,15 @@ Cada um fica vermelho quando se reverte a sua parte. `a_ajuda_so_promete_teclas_
 
 **Estado em `d4eb6f1`:** nada feito.
 
+**Depois das ondas 1 e 2 (o que a F7 e a F1 deixaram).**
+- **A F7 fechou a janela do Comandante** (`29d66937`). `Hospedagem::iniciar` ganhou um quinto argumento obrigatório, `antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>`, que roda antes do laço de aceitação. Quem não tem nada a fazer passa `|_| Ok(())`.
+  - O teste dela, `crates/seele-server/tests/janela_do_comandante.rs`, também sobe hospedagem. O passo 0 o alcança.
+  - Ele é teste de integração do próprio `seele-server`, e por isso não vê o `cfg(test)` da biblioteca.
+  - Hoje há 17 chamadas de `Hospedagem::iniciar` no workspace: 11 em `hospedagem.rs`, 2 em `ejetar.rs`, 2 em `quarto_pelo_link.rs` (que já usa ambiente), 1 em `janela_do_comandante.rs` e 1 no `main.rs` do app, que é a de produção.
+- **A F1 pôs no fio as razões da sala** (`ChamadaEncerrada`, `NinguemAtendeu` e `ChamadaRecusada`), e `a_sessao_acabou_aqui` já as inclui. Este lote só acrescenta `ServerShuttingDown`.
+- **A F1 também pôs no fio o `ModAviso` e o `TemaMudou`.** Se algum `match` sobre `ServerMessage` ou `Event` que este lote toque for exaustivo, eles aparecem nele.
+- **O M2 deixou em `seele-server/src/lib.rs`** o `mod ambiente_de_teste`, com o `AmbienteDoEncontro` e a `TRAVA`, para o passo 0 usar.
+
 ### 0. Os testes não falam com o ponto de encontro de produção (primeiro)
 **O defeito, medido na revisão do M2.**
 - Sem `$SEELE_ENCONTRO`, `Convocacao::do_ambiente` (`alcance/encontro.rs`) cai em `PONTO_PADRAO = "encontro.seele.app.br"`. Se o DNS falhar, cai nos IPs de `REDE_DO_PADRAO`.
