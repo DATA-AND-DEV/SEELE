@@ -9714,15 +9714,67 @@ fn a_linha_de_estado_nomeia_a_tecla_de_falar() {
          configuração aberta — a tecla de falar, o modo do microfone — fica dito \
          como era ao abrir:\n{atualizar}"
     );
-    let chamadas = server.matches("desenharContextoDaSessao()").count()
-        - server
-            .matches("function desenharContextoDaSessao()")
+    // **Toda referência, em todo `.js` de `ui/`.** A contagem via só a forma com
+    // parênteses e só `tela-server.js`, e a re-revisão da rodada 2 achou as duas
+    // brechas: um `.then(desenharContextoDaSessao)` — o estilo que o arquivo usa
+    // para `desenharTeclaDeFalar` — e uma chamada noutra tela passavam sem ser
+    // vistos. Conta-se o nome como palavra inteira, fora da declaração.
+    let palavra = "desenharContextoDaSessao";
+    let borda = |letra: Option<char>| {
+        letra.is_none_or(|letra| !letra.is_alphanumeric() && letra != '_' && letra != '$')
+    };
+    let mut fora_da_declaracao: Vec<String> = Vec::new();
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        let referencias = texto
+            .match_indices(palavra)
+            .filter(|&(onde, _)| {
+                borda(texto[..onde].chars().next_back())
+                    && borda(texto[onde + palavra.len()..].chars().next())
+            })
             .count();
+        let declaracoes = texto.matches("function desenharContextoDaSessao(").count();
+        for _ in declaracoes..referencias {
+            fora_da_declaracao.push(nome.clone());
+        }
+    }
     assert_eq!(
-        chamadas, 1,
-        "a faixa de contexto é redesenhada em {chamadas} lugares de \
-         `tela-server.js`; ela tem um caminho só, `atualizarServer`, e um segundo \
-         é o que fez a troca de modo ficar de fora na rodada 1"
+        fora_da_declaracao,
+        vec!["tela-server.js".to_owned()],
+        "a faixa de contexto é alcançada em {} lugares de `ui/` ({:?}); ela tem um \
+         caminho só, `atualizarServer`, e um segundo — chamado, ou passado a um \
+         `.then` — é o que fez a troca de modo ficar de fora na rodada 1",
+        fora_da_declaracao.len(),
+        fora_da_declaracao
+    );
+
+    // **E certa no primeiro quadro.** A configuração aparece no `hidden = false`
+    // de `abrirServer`, e a rodada 2 deixou a primeira escrita da faixa para
+    // depois da lista de aparelhos e de uma ida à ponte: com o microfone já mudo
+    // ao reabrir, ela disse «… segura ESPAÇO» nos primeiros quadros, e aberta da
+    // entrada depois de a sessão acabar, a sala que não existia mais. A faixa
+    // não depende do que `atualizarServer` vai buscar — ela lê o quadro da
+    // sessão e a tecla —, então ele a escreve antes do primeiro `await` dele, e
+    // `abrirServer` o chama antes do primeiro `await` seu. Tudo na mesma tarefa
+    // que mostra a tela, e nenhum quadro sai com a faixa da abertura anterior.
+    let antes_de_esperar =
+        |corpo: &str, procurado: &str| match (corpo.find(procurado), corpo.find("await ")) {
+            (Some(achado), Some(espera)) => achado < espera,
+            (Some(_), None) => true,
+            (None, _) => false,
+        };
+    assert!(
+        antes_de_esperar(&atualizar, "desenharContextoDaSessao()"),
+        "`atualizarServer` escreve a faixa de contexto depois de esperar a ponte, e \
+         a configuração aparece com a faixa da abertura anterior até a resposta \
+         chegar:\n{atualizar}"
+    );
+    let abrir = js_function(&server, "async function abrirServer(");
+    assert!(
+        antes_de_esperar(&abrir, "atualizarServer()"),
+        "`abrirServer` mostra a configuração e espera alguma coisa antes de \
+         `atualizarServer` escrever a faixa de contexto: os primeiros quadros \
+         saem com a faixa da abertura anterior:\n{abrir}"
     );
 
     // **Em `base.js`, porque as duas telas a usam.** Ela morava em

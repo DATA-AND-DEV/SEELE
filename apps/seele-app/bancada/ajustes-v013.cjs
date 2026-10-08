@@ -68,9 +68,15 @@ function tintasDoTitulo() {
     const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(table => {
-      window.testTable = table; window.testCalls = [];
+      window.testTable = table; window.testCalls = []; window.testAtraso = {};
       window.__TAURI__ = {
-        core: { invoke: async (cmd, args) => { window.testCalls.push({cmd,args}); return window.testTable[cmd] ?? null; } },
+        core: { invoke: async (cmd, args) => {
+          window.testCalls.push({cmd,args});
+          // Uma ponte lenta, por comando, para as cenas que medem o que aparece
+          // antes de a resposta chegar.
+          if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
+          return window.testTable[cmd] ?? null;
+        } },
         event: { listen: async () => () => {} },
         window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
       };
@@ -96,6 +102,28 @@ function tintasDoTitulo() {
     await esperarQueDiga(page, 'server-contexto', 'microfone abre por voz',
       'trocado o modo do microfone para VOZ, a faixa de contexto continuou dizendo o modo de antes');
     await page.evaluate(() => { window.testTable.snapshot.voice_mode = 'PushToTalk'; window.testTable.tecla_de_falar = null; pararDeOuvirTecla(); });
+    await esperarQueDiga(page, 'server-contexto', 'microfone abre enquanto segura ESPAÇO',
+      'de volta ao modo tecla com ESPAÇO, a faixa de contexto não voltou a dizê-lo');
+    // **E certa no primeiro quadro** (rodada 3 do lote J). A configuração
+    // aparece no `hidden = false` de `abrirServer`; se a faixa só é escrita
+    // depois da lista de aparelhos e de uma ida à ponte, os primeiros quadros
+    // mostram a faixa da abertura anterior. Com a ponte lenta — lista de
+    // microfones em 400 ms, retrato em 150 ms —, reabrir com o microfone já mudo
+    // tem de dizer «microfone mudo» no primeiro quadro, e não «segura ESPAÇO».
+    await page.evaluate(() => fecharServer());
+    await page.evaluate(() => {
+      window.testTable.snapshot.muted = true;
+      desenhar(window.testTable.snapshot);
+      window.testAtraso = { microfones: 400, snapshot: 150 };
+    });
+    const noPrimeiroQuadro = await page.evaluate(() => new Promise(ok => {
+      window.testAbertura = abrirServer('tela-sessao');
+      requestAnimationFrame(() => ok(document.getElementById('server-contexto').textContent));
+    }));
+    assert.ok(noPrimeiroQuadro.includes('microfone mudo'),
+      `reaberta com o microfone já mudo, a configuração mostrou no primeiro quadro a faixa da abertura anterior: «${noPrimeiroQuadro}»`);
+    await page.evaluate(() => window.testAbertura);
+    await page.evaluate(() => { window.testAtraso = {}; window.testTable.snapshot.muted = false; desenhar(window.testTable.snapshot); });
     await page.evaluate(() => abrirSecao('secao-mods'));
     await page.screenshot({ path: '/tmp/seele-mods-v013.png' });
     await page.evaluate(() => { fecharServer(); window.testTable.snapshot = null; return abrirServer('tela-boot'); });
@@ -196,7 +224,8 @@ function tintasDoTitulo() {
       const naEntrada = await link.evaluate(() => document.getElementById('boot-erro').textContent);
       assert.fail(`aberta por um link sem nome nesta máquina, a janela não perguntou o nome — a entrada diz «${naEntrada}»`);
     }
-    assert.equal(await link.evaluate(() => $('perfil-titulo').textContent), 'COMO OS OUTROS VÃO TE CHAMAR?');
+    assert.equal(await link.evaluate(() => $('perfil-titulo').textContent), 'COMO OS OUTROS VÃO TE CHAMAR?',
+      'a caixa que abriu pela entrada por link não é a pergunta do nome: quem chega sem nome lê outro título, e não sabe que o que se pede é como os outros vão chamá-lo');
     assert.equal(await link.evaluate(() => testCalls.filter(c => c.cmd === 'connect').length), 0,
       'a entrada por link conectou antes de a pergunta do nome ser respondida');
 
@@ -204,6 +233,22 @@ function tintasDoTitulo() {
     // altura de linha herdada de `base.css` (16px para letra de 24px), a tinta
     // da segunda encostava na da primeira (folga de −0,9px).
     await link.evaluate(() => document.fonts.ready);
+    // **A quebra forçada, em qualquer plataforma.** Na caixa de 480px o título
+    // quebra por 15px (364px numa linha, 349px de espaço, medido no macOS), e o
+    // job `bancadas` roda em Linux, onde os avanços dos glifos podem diferir. Só
+    // nesta cena, o título ganha largura máxima de 70% da própria largura numa
+    // linha, medida aqui mesmo: menos que a linha inteira, então quebra; e o que
+    // sobra depois da primeira linha cabe em 70%, então quebra uma vez só. A
+    // conta vale para qualquer fonte, porque as duas larguras saem da mesma.
+    await link.evaluate(() => {
+      const h2 = document.getElementById('perfil-titulo');
+      h2.style.whiteSpace = 'nowrap';
+      const faixa = document.createRange();
+      faixa.selectNodeContents(h2);
+      const numaLinha = faixa.getBoundingClientRect().width;
+      h2.style.whiteSpace = '';
+      h2.style.maxWidth = `${Math.floor(numaLinha * 0.7)}px`;
+    });
     const titulo = await link.evaluate(tintasDoTitulo);
     assert.equal(titulo.tintas.length, 2, `o título da pergunta deixou de quebrar em duas linhas, e esta medida não mede mais nada: ${JSON.stringify(titulo)}`);
     assert.ok(titulo.folga > 0,
@@ -217,7 +262,8 @@ function tintasDoTitulo() {
     assert.deepEqual(ordem, ['escolher_apelido_local', 'connect'], 'o nome não foi gravado antes do connect');
     assert.equal(await link.evaluate(() => testCalls.find(c => c.cmd === 'connect').args.nickname), 'Bia',
       'a entrada por link não levou o nome que acabou de ser respondido');
-    assert.deepEqual(errosDoLink, []);
+    assert.deepEqual(errosDoLink, [],
+      'a entrada por link lançou erro na página: o que está nesta lista quebrou sem ninguém ver, e a janela de verdade não diz nada a quem a usa');
     await link.close();
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');

@@ -748,8 +748,21 @@ async function abrirServer(origem) {
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
   $("server-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
-  // A faixa de contexto não é escrita aqui: é `atualizarServer`, logo abaixo e
-  // a cada 500 ms, que a desenha.
+  // **A faixa de contexto certa no primeiro quadro.** A tela já está visível
+  // (`hidden = false` acima), e o primeiro `await` desta função entrega o
+  // quadro ao navegador. `atualizarServer` escreve a faixa antes do primeiro
+  // `await` dele; chamado aqui, antes de qualquer espera, ele a escreve na mesma
+  // tarefa que mostra a tela. A rodada 2 só o chamava depois da lista de
+  // aparelhos, e os primeiros quadros diziam a faixa da abertura anterior —
+  // «segura ESPAÇO» com o microfone já mudo, ou a sala de uma sessão que acabou.
+  //
+  // Sem `await`, e o `atualizarServer` de depois da lista continua: a lista
+  // nasce marcada sem retrato (`marcarLinhas(null)`), e é a segunda leitura que
+  // põe EM USO nela. Esperar esta primeira antes da lista deixaria o EM USO
+  // apagado até o próximo ciclo de 500 ms. Esconder a faixa ao fechar também
+  // tiraria o texto velho, mas seria um segundo escritor, e a tela abriria sem
+  // faixa em vez de com a certa.
+  atualizarServer().catch((falha) => console.warn("configuração:", falha));
   await desenharDispositivos();
   await atualizarServer();
   // A seção lembrada precisa reler a sessão: ela pode ter aberto antes de hospedar.
@@ -944,6 +957,17 @@ function abandonarServer() {
  * entrada — não é aviso de nada.
  */
 async function atualizarServer() {
+  // **A faixa de contexto, por aqui e só por aqui.** Ela era escrita ao abrir a
+  // tela e mais nunca: trocada a tecla de falar ou o modo do microfone com a
+  // configuração aberta, ela continuava dizendo o de antes (revisões do lote J).
+  // Daqui ela anda junto com o resto desta tela, a cada 500 ms.
+  //
+  // **Antes do primeiro `await`**, e é isso que a deixa certa no primeiro
+  // quadro: ela lê o quadro da sessão e a tecla, e não o retrato que esta
+  // função vai buscar, então não tem por que esperar a ponte. Escrita depois
+  // dela, a configuração aparecia com a faixa da abertura anterior até a
+  // resposta chegar (rodada 3 do lote J).
+  desenharContextoDaSessao();
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
@@ -971,11 +995,6 @@ async function atualizarServer() {
   desenharNivel(snapshot);
   marcarLinhas(snapshot);
   desenharModos(snapshot, gravado);
-  // **A faixa de contexto, por aqui e só por aqui.** Ela era escrita ao abrir a
-  // tela e mais nunca: trocada a tecla de falar ou o modo do microfone com a
-  // configuração aberta, ela continuava dizendo o de antes (revisões do lote J).
-  // Daqui ela anda junto com o resto desta tela, a cada 500 ms.
-  desenharContextoDaSessao();
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
   const grupoServidor = document.querySelector('[aria-labelledby="server-grupo-servidor"]');
