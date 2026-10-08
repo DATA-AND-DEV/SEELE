@@ -386,9 +386,8 @@ da migração dos MODs da pasta —, a 0.16 copia a pasta dela para
 `dados/servidor-0.15`, **deixando o depósito (`lancador/`) e a chave
 (`identity.key`) de fora** e com o marcador `PRONTA` escrito por último.
 
-**A identidade é uma por máquina** (o ADR 0061, «A identidade é uma por
-máquina», da frente da sala; a decisão D-id-1), e por isso a chave não vai na
-cópia. O launcher passa a toda versão que
+**A identidade é uma por máquina** ([ADR 0061](adr/0061-a-identidade-e-uma-por-maquina.md),
+a decisão D-id-1), e por isso a chave não vai na cópia. O launcher passa a toda versão que
 abre a variável `SEELE_IDENTIDADE` com a pasta da identidade **do próprio
 processo**: a `SEELE_IDENTIDADE` que ele recebeu, ou a pasta de configuração
 dele (no Mac, `~/.config/seele`; no Windows, `%APPDATA%\tech.datadev.seele`). A
