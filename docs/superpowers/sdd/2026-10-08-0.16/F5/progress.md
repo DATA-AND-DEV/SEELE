@@ -80,3 +80,12 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - **Para a v6:**
     - o `fundo-falhou` não diz qual fonte falhou;
     - o retrato que fala com o MOD, e o papel errado do fundo que diz `falhou`, ficam anotados.
+- **M1 → integrado** (`fbeff8e..e48b1b4`, merge `64abdbf`), em 3 rodadas. Os 17 commits de entrega e os subitens estão em `lote-m1-report.md`. O T1b fechou sem teste novo: a reversão `..15`/`..17` já deixava vermelho o teste que existia.
+  - **O que a primeira revisão pediu.** Um Importante: um teste de tempo com ~50 ms de margem, que podia reprovar à toa na bateria dos três sistemas. A escuta passou para os 15 ms, e a margem para ~85 ms. Medido em 30 de 30 rodadas sob carga, e a reversão fica vermelha 5 de 5.
+  - **Os menores, consertados:**
+    - o `compile_fail` ganhou um gêmeo que compila, porque o código de erro só é conferido no nightly;
+    - o doc de `resolver_ponto` foi acertado;
+    - a fiação do C4 ganhou um guarda de fonte.
+  - **A re-revisão achou um defeito nesse guarda:** ele casava com o próprio texto num renome, o que foi medido. A assinatura passou a ser ancorada no começo da linha, e o guarda grita quando o alvo some.
+  - **Para a integração.** O `sementes_do_fuzz.rs` só mudou no trecho do `datagrama_do_encontro`: os campos de `Marcas` viraram os leitores. O `seele-app` e os testes do `seele-ffi` não rodaram no lote, e o risco é baixo, porque nenhum leitor de campo de `Marcas` está fora do diff.
+  - **Para o M2:** o doc de `onde_mora_hoje` ficou atrás do código, como manda o brief.
