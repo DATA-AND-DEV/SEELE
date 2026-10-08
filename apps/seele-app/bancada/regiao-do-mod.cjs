@@ -569,11 +569,14 @@ function dono(b, midia) {
   const anotadas = [];
   let mudancas = 0;
   const pedidosDeSom = [];
+  const pedidosDeArquivo = [];
   return {
     ditos,
     registrados,
     anotadas,
     pedidosDeSom,
+    /** O que a região mandou ao seletor do sistema, um pedido por clique. */
+    pedidosDeArquivo,
     /** Quantas vezes a região avisou que o estado de uma mídia mudou. */
     mudancas: () => mudancas,
     api: {
@@ -602,6 +605,12 @@ function dono(b, midia) {
       },
       midiaMudou: () => {
         mudancas += 1;
+      },
+      // O seletor do sistema, que aqui só anota o pedido e responde como
+      // quem fechou sem escolher.
+      escolherArquivo: (pedido) => {
+        pedidosDeArquivo.push(pedido);
+        return Promise.resolve(null);
       },
     },
   };
@@ -1548,6 +1557,32 @@ function aChaveDoCampoNaoPartePar() {
     typeof guardada === "string" && guardada.isWellFormed() && guardada.endsWith("😀"),
     "a chave de 120 pontos de código, terminada num par substituto, foi cortada pelo meio do par, e "
       + `o MOD recebe de volta outra chave: ${JSON.stringify(guardada?.slice(-3))}`,
+  );
+  r.soltar();
+}
+
+/**
+ * **A finalidade de um pedido de arquivo é cortada por ponto de código** (K1-m2,
+ * o mesmo defeito da chave do campo, em `pedidoDeArquivo`). Ela vai pelo
+ * `invoke("escolher_para_o_mod")` até um `Option<String>` do Rust, e metade de
+ * um par substituto na posição 200 é uma cadeia que o `serde_json` recusa: o
+ * corpo inteiro volta recusado, e o seletor nem abre.
+ */
+async function aFinalidadeDoArquivoNaoPartePar() {
+  const caso = "a finalidade do arquivo";
+  const b = bancada();
+  const d = dono(b);
+  const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const finalidade = `${"a".repeat(199)}😀`;
+  r.aplicar([{ forma: "arquivo", chave: "retrato", dentro: "ENVIAR", finalidade }]);
+  acharTag(r.raiz, "button")?.disparar("click");
+  await volta();
+  const pedida = d.pedidosDeArquivo[0]?.finalidade;
+  confere(
+    caso,
+    typeof pedida === "string" && pedida.isWellFormed() && pedida === finalidade,
+    "a finalidade de 200 pontos de código, terminada num par substituto, foi cortada pelo meio do par: o "
+      + `\`serde_json\` recusa o pedido inteiro, e o seletor não abre: ${JSON.stringify(pedida?.slice(-3))}`,
   );
   r.soltar();
 }
@@ -3869,6 +3904,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     oRodapeEReconciliadoSemMoverOBotao,
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     aChaveDoCampoNaoPartePar,
+    aFinalidadeDoArquivoNaoPartePar,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,

@@ -395,11 +395,17 @@ function textoDoRotulo(no) {
  * o MOD vai fazer com ele), **de que tipo** (o filtro de extensões, que é
  * orientação — a prova continua sendo os bytes) e **até quanto** (recusar antes
  * de ler, e não depois de a memória já ter pago).
+ *
+ * **A finalidade é cortada em 200 pontos de código**, e não por índice, como a
+ * chave do campo (`ef707c7`): ela atravessa a ponte até um `Option<String>` do
+ * Rust, e metade de um par substituto na posição 200 é uma cadeia que o
+ * `serde_json` recusa — o pedido inteiro voltava recusado, e o seletor nem
+ * abria.
  */
 function pedidoDeArquivo(no) {
   const papeis = papeisDeArquivo(no);
   return {
-    finalidade: typeof no?.finalidade === "string" ? no.finalidade.slice(0, 200) : "",
+    finalidade: typeof no?.finalidade === "string" ? [...no.finalidade].slice(0, 200).join("") : "",
     papeis,
     extensoes: papeis.flatMap((p) => [...PAPEIS_DE_ARQUIVO[p]]),
     limiteDeBytes: tetoDeArquivo(no),
