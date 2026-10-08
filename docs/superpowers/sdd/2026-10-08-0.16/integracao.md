@@ -37,3 +37,11 @@ nada dependa da memória de uma conversa.
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
 - **A parte 2 da tarefa 17 da F6**, com tela, no Mac e no Windows, com o dono.
+
+## As integrações feitas
+
+| quando | o que entrou | commit | bateria |
+|---|---|---|---|
+| 08/10/2026 | F5 onda 1 (C, H, K2, M1, ferramentas, P54), F1 até `f9fdac74` (protocolo 9, S2, vocabulário, API guardada), F6 até `4e66dbf3` (o launcher, tarefas 1 a 16), F4 até `f937ff1` (etapa 0), e o guarda do esquema (`2a37ffc5`) | `2a37ffc5` | **verde**: fmt, check-runtime, check-api, check-versao, check-vetores, clippy, `cargo test --workspace -- --test-threads=1` (2912 passaram, 0 falharam, 5 ignorados, com `SEELE_EXIGE_CODEC=1`), check-deps, deny licenses e advisories |
+
+Um conflito de texto, resolvido à mão: o `EndReason` de `crates/seele-ffi/src/types.rs`, onde o lote H e a F1 acrescentaram razões no mesmo lugar. Ficaram as duas listas.
