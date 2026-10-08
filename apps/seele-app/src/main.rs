@@ -4394,14 +4394,11 @@ fn reservar_no_executor(
     id: &str,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
-    // Recusada **e contada** em `comandos_de_geracao_morta`, como a de
-    // `codigo_do_mod`: as duas são a carga atrasada, e o doc de
-    // `recusa_de_carga_dita` diz que é esse contador que a conta.
-    if session.confere_geracao(geracao).is_err() {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    // Recusada **e contada** em `comandos_de_geracao_morta`, pela mesma regra
+    // de todo comando de MOD, como a de `codigo_do_mod`: as duas são a carga
+    // atrasada, e o doc de `recusa_de_carga_dita` diz que é esse contador que
+    // a conta.
+    session.recusar_se_morta(geracao)?;
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
@@ -10700,6 +10697,7 @@ mod a_supervisao_dos_mods_nativos {
             ("fn mod_nativo_colher(", 1),
             ("fn mod_nativo_entregar(", 1),
             ("fn ler_codigo_do_mod(", 1),
+            ("fn reservar_no_executor(", 1),
             ("fn midia_do_mod(", 1),
             ("fn som_do_mod(", 1),
             ("fn midia_em_bytes(", 1),
