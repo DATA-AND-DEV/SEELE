@@ -199,3 +199,70 @@ E também:
 ## Para a v6
 
 Nada. Nenhum lugar deste lote cria evento, campo ou frase de API.
+
+## Achado fora do lote
+
+Não foi mexido: fica com a orquestradora, para virar pendência.
+
+- **O que é:** os testes do `seele-server` que chamam `Hospedagem::iniciar`
+  sem pôr `$SEELE_ENCONTRO`, e o `ejetar.rs` (`seele-conformance`, :321 e
+  :326), falam com o ponto de encontro de produção. Sem a variável,
+  `Convocacao::do_ambiente` usa o `PONTO_PADRAO`, `encontro.seele.app.br`.
+  O `ejetar.rs` foi apontado pela revisão; ali só conferi que ele chama
+  `iniciar` sem pôr a variável.
+- **O que eu medi:** na reversão da trava solta, os dois testes que trocam a
+  variável rodaram juntos e reprovaram em 13 de 20 rodadas. Nas 13,
+  `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada` deu `left:
+  Some(SoRedeLocal) right: Some(FuroDeNat)`. A subida que devia rodar com
+  `nao` leu outro valor e chegou ao degrau 4, o `FuroDeNat`. Só um ponto de
+  encontro que responde dá esse degrau. Os valores que o outro teste põe não
+  respondem: `""` desliga, e `meu.ponto:9000` não resolve. O que sobra é o
+  padrão, lido depois de o teste de `alcance` tirar a variável. É uma
+  inferência, sem captura de pacotes: um teste de unidade alcançou o ponto de
+  encontro de produção a partir desta máquina.
+- **O que a trava não resolve:** ela serializa só quem troca a variável. Quem
+  só a lê sem tê-la posta, e são os outros 9 `iniciar` de `hospedagem.rs` e o
+  `ejetar.rs`, continua indo ao ponto de produção.
+
+## Rodada 1 de conserto
+
+A revisão deu «precisa de conserto» por um Importante. Ela confirmou contra o
+código os textos do 1B, o `levou=`, o doc de `onde_mora_hoje` (com o T6f) e a
+montagem do impostor.
+
+| achado | commit | o que mudou |
+|---|---|---|
+| Importante 1 | `9a46b77` | `o_ambiente_do_encontro_segura_a_trava_enquanto_vive` começa com `let _ninguem_mais_troca = TRAVA.lock().unwrap_or_else(PoisonError::into_inner);`, como o de pânico, e o `try_lock` continua em `SO_DESTE_TESTE`. O comentário diz por quê: o guarda lê a variável ao nascer e a escreve ao cair. |
+| Menor 1 | `9de50a7` | O doc de `consultar_por` diz «na hora, quando nenhuma pergunta da **primeira** volta saiu ou a leitura falhou». |
+| Menor 2 | `9de50a7` | No C-M3, as duas frases viraram uma: «Ou a promessa está errada, ou ela está certa e quem atendeu é outro servidor: num alvo de LAN, outro servidor no mesmo endereço, porque o endereço da rede de casa se repete de uma casa para outra.» Não se perdeu nada. A frase «O que falhou é a promessa» continua fora. |
+
+**O defeito do Importante 1, medido antes do conserto.** Rodei o binário de
+teste só com os dois testes do módulo (`--test-threads=2 ambiente_de_teste`),
+em laço:
+- deu 1 falha em 2000 rodadas, e depois 3 em 6000;
+- em todas, foi o teste de pânico que reprovou, com a frase falsa: «…deixou a
+  troca para trás…», `left:
+  Some("valor-que-o-panico-nao-pode-deixar-para-tras") right: None`;
+- foi o terceiro escritor, e não o `Drop`: o guarda do teste da trava leu o
+  valor do pânico e o escreveu de volta depois de o outro teste devolver a
+  variável.
+
+Depois do conserto, o mesmo laço deu **0 falhas em 6000**.
+
+**A reversão da trava solta continua vermelha.** Com o campo virando `()` e o
+`let _t = trava.lock()…` solto em `guardar_sob`, `cargo test -p seele-server --lib`
+deu 561 verdes e 1 vermelho: `o_ambiente_do_encontro_segura_a_trava_enquanto_vive`,
+com «a trava estava livre com um `AmbienteDoEncontro` vivo…». O arquivo
+voltou idêntico, conferido com `cmp`.
+
+**A corrida:** `cargo test -p seele-server --lib -- --test-threads=8`, 20
+rodadas seguidas pelo `cargo`. Passaram as 20, com 562 verdes em cada.
+
+**O que rodou, no HEAD desta rodada:**
+- `cargo test -p seele-server --lib`: 562;
+- `cargo test -p seele-core --lib encontro`: 29;
+- `cargo fmt --all -- --check`: limpo;
+- `cargo clippy -p seele-server -p seele-core -p seele-ffi --all-targets --all-features -- -D warnings`:
+  limpo;
+- `cargo doc --no-deps` de `seele-core` e `seele-ffi`: nenhum aviso em
+  `encontro.rs` nem no doc de `InviteMismatch`.
