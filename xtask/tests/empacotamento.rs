@@ -2752,31 +2752,34 @@ fn sem_a_opcao_o_rascunho_e_o_de_sempre() {
 }
 
 #[test]
-fn o_endereco_antigo_continua_na_lista_enquanto_a_migracao_dura() {
-    // **Um guarda com prazo, e ele diz isso de si mesmo.**
+fn o_atualizador_procura_so_na_casa_que_publica() {
+    // **O guarda com prazo foi apagado por decisão, como ele mesmo pedia.**
+    // Ele exigia `DATA-AND-DEV/SEELE` na lista do atualizador «enquanto a
+    // migração durar», e dizia de si: «este teste deve ser apagado, e por
+    // decisão e não por esquecimento». A decisão é a do spec da 0.16, §1, «O
+    // que muda no papel»: aquele repositório parou na 0.10.0, e a 0.10.0 — a
+    // ponte de quem estava na 0.9.x — continua publicada lá, com a lista de
+    // dois endereços dentro dela. Quem ainda está antes disso atravessa pela
+    // 0.10.0; a 0.16 não precisa mais procurar lá.
     //
-    // O endereço de atualização é gravado dentro do app instalado. Quem tem o
-    // SEELE hoje só conhece `DATA-AND-DEV/SEELE`, e a única forma de mudar esse
-    // endereço é uma atualização — que vem por ele. Se aquele repositório
-    // deixar de responder antes de todo mundo ter atualizado, quem ficou para
-    // trás fica preso para sempre: sem caminho de volta que não seja baixar e
-    // instalar à mão.
-    //
-    // Daí a lista com dois, e nesta ordem: o novo primeiro, porque é para lá
-    // que as versões vão; o antigo depois, porque o atualizador tenta em ordem
-    // até um responder, e é ele que carrega quem ainda não migrou.
-    //
-    // **Este teste deve ser apagado**, e por decisão e não por esquecimento:
-    // quando o `DATA-AND-DEV/SEELE` parar de receber versões e for razoável
-    // considerar que quem ia atualizar já atualizou. Enquanto ele existir,
-    // remover o endereço antigo é abandonar gente.
-    let config = std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
-        .expect("tauri.conf.json é legível");
-    assert!(
-        config.contains("github.com/DATA-AND-DEV/SEELE/releases/"),
-        "o endereço antigo saiu da lista do atualizador antes da migração acabar.\n\
-         Quem instalou o SEELE antes da mudança só conhece esse endereço, e a \
-         atualização que mudaria o endereço dele vem por ele."
+    // E procurar lá tinha custo: um atualizador que acha a 0.10.0 numa casa e
+    // a versão nova na outra depende da ordem da lista para não oferecer a
+    // velha.
+    let config: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(raiz().join("apps/seele-app/tauri.conf.json"))
+            .expect("tauri.conf.json é legível"),
+    )
+    .expect("tauri.conf.json é JSON");
+    let enderecos: Vec<&str> = config["plugins"]["updater"]["endpoints"]
+        .as_array()
+        .expect("o atualizador declara endereços")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert_eq!(
+        enderecos,
+        vec!["https://github.com/DATA-AND-DEV/SEELE-RELEASES/releases/latest/download/latest.json"],
+        "o atualizador procura numa casa que não publica mais, ou não procura na que publica"
     );
 }
 

@@ -147,10 +147,12 @@ VERSAO=""
 # não distingue «não há versão nova» de «olhei no lugar errado». Enquanto ela
 # estiver lá, publicar só na casa nova não deixa ninguém para trás.
 #
-# O guarda do `xtask` que segura o endereço antigo na lista do `tauri.conf.json`
-# **fica**: ele fala do que o app procura, não de onde este script publica, e o
-# app tem que continuar procurando nos dois enquanto houver gente chegando pela
-# ponte.
+# **Desde a 0.16 o app procura só na casa nova** (spec da 0.16, §1, «O que muda
+# no papel»). O guarda do `xtask` que segurava o endereço antigo na lista do
+# `tauri.conf.json` foi apagado por decisão, como ele mesmo pedia, e no lugar
+# dele está `o_atualizador_procura_so_na_casa_que_publica`. A ponte continua de
+# pé pelo outro lado: quem está na 0.9.x acha a 0.10.0 na casa antiga, e ela
+# carrega a lista com os dois endereços.
 REPOS="${SEELE_REPO:-DATA-AND-DEV/SEELE-RELEASES}"
 # E o do código, que é outro desde que ele foi fechado.
 #

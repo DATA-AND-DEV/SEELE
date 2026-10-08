@@ -155,7 +155,7 @@ pub struct Pacote {
     /// escreveu — **privado de propósito**.
     ///
     /// Declarado e não adivinhado: o nome muda com o sistema
-    /// (`SEELE.app/Contents/MacOS/SEELE`, `SEELE.exe`, `bin/seele`), e um
+    /// (`SEELE.app/Contents/MacOS/seele-app`, `SEELE.exe`, `bin/seele`), e um
     /// launcher que o adivinha erra calado num sistema só — que é o defeito
     /// mais caro possível aqui, porque ele aparece na máquina de outra pessoa.
     ///
