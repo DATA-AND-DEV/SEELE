@@ -93,7 +93,7 @@ mouse; e um falante sintético (Opus de 440 Hz, a cada 20 ms) na sala de voz.
 |---|---|
 | memória | `phys_footprint` do `seele-app` e dos processos do WebKit que nasceram com ele (WebContent, GPU, Networking), por `footprint`; mediana de 5 amostras em 60 s |
 | CPU | o tempo de CPU somado dos quatro processos no intervalo, por `ps` |
-| tempo de quadro | `xctrace` com os instrumentos «Hitches» e «Frame Lifetimes», preso ao app: os commits de Core Animation do `seele-app` (é o processo do app que faz o commit do quadro da página, no WebKit) e os engasgos dele |
+| tempo de quadro | `xctrace` com o instrumento «Core Animation Commits», preso ao app, nos primeiros 30 s: os commits do `seele-app` (no WebKit, é o processo do app que faz o commit do quadro da página), por segundo e por duração, e os que passam de um quadro a 60 Hz |
 | jitter da voz | o número da barra de telemetria (JITTER), lido a cada 2 s |
 | a máquina | o cenário só começa sem compilação de outra sessão (carga < 4) e com a máquina ociosa há 5 min; qualquer entrada durante ele o marca interrompido |
 
@@ -104,7 +104,54 @@ tela embutida (Liquid Retina XDR). **App:** SEELE 0.15.1 publicado
 (`/Applications/SEELE.app`, assinado ad hoc, `54f542f`). **MODs:** PERFIS 3.3.0
 (API 5), MESA 3.1.0 (API 4), ESTILO 3.1.0 (API 4).
 
-<!-- M3-BASE: a tabela é preenchida pela campanha de 08/10; ver o LEIA.md -->
+**Parcial: 4 dos 10 cenários.** A campanha de 08/10 foi parada às 14:05 a
+pedido da orquestradora, porque a integração das frentes de código ia rodar a
+bateria e as duas disputariam CPU. Faltam `3-mods-mesa` e os cinco cenários
+com voz. Os relatos inteiros estão em
+`docs/evidencias/m3-custo-dos-mods/medidas.json`.
+
+Memória em MiB (`phys_footprint`, mediana na janela de 60 s); CPU em % de um
+núcleo, somada dos quatro processos; commits de Core Animation do `seele-app`
+nos primeiros 30 s, e a duração deles em ms.
+
+| cenário | rodada | entrada | `rustc` na janela | app | GPU | WebContent | Networking | **total** | CPU | commits/s | p50 | p95 | máx | acima de 1 quadro |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| sem MOD | 13:15 | não | 14 | 38,3 | 94,7 | 56,2 | 5,8 | **195,0** | 4,7 | 4,2 | 0,17 | 0,26 | 0,28 | 0 |
+| sem MOD | 13:17 | não | 10 | 37,3 | 94,8 | 55,0 | 5,7 | **192,8** | 5,3 | 4,2 | 0,18 | 0,24 | 0,32 | 0 |
+| 1 MOD (PERFIS) | 13:19 | não | 14 | 42,8 | 95,0 | 66,5 | 5,8 | **210,1** | 5,4 | 4,6 | 0,15 | 0,23 | 0,38 | 0 |
+| 1 MOD (PERFIS) | 13:22 | não | 15 | 43,3 | 95,2 | 61,9 | 5,8 | **206,2** | 5,9 | 4,6 | 0,17 | 0,28 | 0,38 | 0 |
+| 3 MODs, UI fechada | 13:47 | não | **0** | 40,6 | 100,1 | 106,2 | 4,8 | **251,7** | 8,9 | 5,5 | 0,18 | 0,33 | 0,42 | 0 |
+| 3 MODs, editor do PERFIS aberto | 14:03 | **sim** | 0 | 44,4 | 101,1 | 140,2 | 4,9 | **290,6** | 11,7 | 13,1 | 0,14 | 0,22 | 0,31 | 0 |
+
+Uma rodada do editor, às 13:49, está nos relatos e fora da tabela: o roteiro
+tocou o cartão antes de o PERFIS registrá-lo, e o editor não abriu (conserto no
+`m3.py`: a ação espera o cartão).
+
+**Como ler, e o que ainda não se pode dizer:**
+
+- **O custo dos MODs mora no WebContent.** De nenhum para três MODs com a UI
+  fechada, o total sobe de ~194 MiB para ~252 MiB (+58), e o WebContent sozinho
+  de ~56 para ~106 (+50). O app, onde rodam os três QuickJS, sobe ~3 MiB. Abrir o editor do
+  PERFIS soma mais ~34 MiB no WebContent.
+- **A CPU de repouso quase dobra** (de ~5 % para ~9 % de um núcleo com três
+  MODs), e o editor aberto leva a ~12 %, com mais que o dobro dos commits por segundo
+  do `3-mods` (13,1 contra 5,5).
+  [inf] O laço de consulta de cada MOD (4 s no PERFIS e no ESTILO, 2 s na MESA,
+  e a remontagem do editor a cada volta, PERFIS B6) é a explicação mais
+  provável; os eventos e o aviso do servidor (rascunho §7) são o que a tira.
+- **Nenhum commit passou de um quadro** em nenhum cenário medido. Isso diz pouco:
+  com a UI parada, a página quase não desenha. O cenário que exercita o quadro
+  é o da MESA em arraste, que falta.
+- **As rodadas com `rustc` de outra sessão na janela** (sem MOD e 1 MOD) não têm
+  par limpo. As duas de cada cenário concordam entre si em 4 MiB e 0,6 ponto de
+  CPU; a comparação com o `3-mods`, limpo, é de memória com segurança, e de CPU
+  com essa ressalva.
+- **A rodada do editor teve entrada de uma pessoa durante a janela**, e por isso
+  é indicativa, e não base.
+
+**O que retomar, com o mesmo roteiro, quando a orquestradora liberar:**
+`3-mods-editor` limpo, `3-mods-mesa`, e os cinco `+voz`; e, se a máquina
+ficar quieta, um `sem-mod` e um `1-mod` sem `rustc` na janela.
 
 ### O que falta medir, e quem mede
 
