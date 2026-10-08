@@ -21,7 +21,7 @@ O F1-tecla-fone-nome fecha com os três commits.
 ### 1. A tecla (`307b18e0`)
 
 - **`nomeDaTecla`** saiu de `tela-server.js` e foi para `base.js`, logo depois de `digitando()`. O comentário «Este é o único lugar do produto que nomeia teclas» foi junto, com um parágrafo novo que diz por que ela mora ali: as duas telas e a ajuda a usam, e `base.js` carrega antes de todas. Em `tela-server.js` ficou uma nota de três linhas no lugar da função, como as outras notas de «saiu» do repositório.
-- **As duas linhas de estado.** Em `desenharOperador(snapshot)` (`tela-sessao.js`) e em `desenharContextoDaSessao()` (`tela-server.js`), a entrada `PushToTalk` virou `` `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}` ``. `teclaDeFalar` é a mesma variável que o `keydown` compara, então a frase e o ouvinte não têm como discordar. As linhas são redesenhadas a cada quadro, e uma troca de tecla em ATALHOS aparece em meio segundo.
+- **As duas linhas de estado.** Em `desenharOperador(snapshot)` (`tela-sessao.js`) e em `desenharContextoDaSessao()` (`tela-server.js`), a entrada `PushToTalk` virou `` `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}` ``. `teclaDeFalar` é a mesma variável que o `keydown` compara. A linha do operador é redesenhada a cada quadro, e uma troca de tecla em ATALHOS aparece nela em meio segundo. **A faixa de contexto não** era: ela só era escrita ao abrir a configuração, antes de a leitura da tecla voltar, e continuava dizendo a tecla de antes depois de uma troca. A primeira versão deste relatório dizia o contrário, e estava errada. O conserto é da rodada 1 (`4daaa4c3`, abaixo).
 - **A ajuda.** O span ficou `<span id="ajuda-tecla-falar" class="ajuda-tecla">ESPAÇO</span>`, com o `id` antes da classe e o texto padrão ESPAÇO. `abrirAjuda()` (`camada-ajuda.js`) escreve `nomeDaTecla(teclaDeFalar)` nele a cada abertura. A linha de baixo passou a «Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem.».
 
 ### 2. O fone (`092e6a5b`)
@@ -163,9 +163,10 @@ A janela de verdade não rodou: nem WKWebView, nem WebView2. O que rodou foi o C
 - `apps/seele-app/ui/frases.js`
 - `apps/seele-app/ui/index.html`
 - `apps/seele-app/tests/frontend.rs`
+- `apps/seele-app/ui/camada-nomear.css` (só na rodada 1, por decisão do controlador)
 - `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-j-report.md` (este)
 
-Não mudaram: as folhas, o Rust do apelido, `main.rs`, o fio, `api/v*.json`, `api/README.md` e os arquivos da F6. Nenhuma dependência nova.
+Não mudaram: as outras folhas, o Rust do apelido, `main.rs`, `tela-fim.js`, o fio, `api/v*.json`, `api/README.md` e os arquivos da F6. Nenhuma dependência nova.
 
 ## Para a v6
 
@@ -180,7 +181,7 @@ Nada. `AVISO_DE_FONE`, `ENTRAR_SEM_NOME`, `perguntarONome` e o parâmetro de `ab
 ## Preocupações
 
 1. **Onde a frase de quem fecha sem nome é dita.** O brief diz «fechar sem nome segue como hoje, mas dizendo». A tela de entrada some logo depois do fechamento: o `connect` leva à `#tela-auth` ou à sessão, e a `#boot-etapa` é reescrita pelas etapas da chegada. Uma frase escrita depois do fechamento quase não seria lida. Por isso ela aparece na caixa enquanto a pergunta está aberta, que é quando ainda dá para responder, e é anunciada ao leitor de tela ao fechar. Se o dono quiser a frase visível **depois** do fechamento, o lugar natural é a `#tela-auth`, que não é deste lote.
-2. **O título da pergunta quebra em duas linhas apertadas.** Na caixa de 480px, «COMO OS OUTROS VÃO TE CHAMAR?» ocupa duas linhas, e a altura de linha de `.nomear-titulo` foi feita para títulos de uma linha. No Chromium as duas linhas quase se tocam. O conserto é de folha (`camada-nomear.css`), que não está na lista do lote. Fica para a F4, ou para o lote Z registrar.
+2. **O título da pergunta quebra em duas linhas apertadas.** Na caixa de 480px, «COMO OS OUTROS VÃO TE CHAMAR?» ocupa duas linhas, e a altura de linha de `.nomear-titulo` foi feita para títulos de uma linha. No Chromium as duas linhas quase se tocam. O conserto é de folha (`camada-nomear.css`), que não está na lista do lote. Fica para a F4, ou para o lote Z registrar. **Consertado na rodada 1** (`9ae26fb1`): o controlador pôs a folha no lote.
 3. **A linha do operador agora quebra.** Na coluna de 268px, a 1280px de largura, «microfone abre enquanto segura ESPAÇO · ouvindo» vai para duas linhas. Antes, «microfone abre na tecla · ouvindo» cabia numa. Não corta nada. Com teclas de nome longo («SHIFT ESQ», «CTRL DIR»), ela continua em duas.
 4. **A faixa de fone veste `.veredito`.** Sem folha na lista do lote, ela reusa a geometria e a cor do veredito. Uma mudança futura em `.veredito` muda as duas. O comentário no `index.html` diz isso. Se a F4 quiser classes próprias, é uma troca de nome nas duas pontas.
 5. **Dois acréscimos que o brief não pedia por escrito:**
@@ -192,3 +193,158 @@ Nada. `AVISO_DE_FONE`, `ENTRAR_SEM_NOME`, `perguntarONome` e o parâmetro de `ab
 7. **Um defeito antigo, não tocado.** Cada reabertura interna do perfil sobrescreve `focoAntesDoPerfil` com um botão de dentro da caixa. Depois de trocar a imagem, fechar não devolve o foco a quem abriu. Isso já acontecia antes, e não muda com este lote.
 8. **UX, como o brief avisa.** Quem entra por link sem nome ganha um passo, uma vez por execução. Quem fecha sem responder não é perguntado de novo até reabrir o app.
 9. **A F4 mexe depois em sete destes arquivos**, e o lote I divide `frases.js`, `tela-sessao.js` e `frontend.rs` com este. Os guardas novos leem por função (`js_function`) e por id. Uma mudança de forma (renomear `desenharAvisoDeFone`, `perguntarONome` ou `jaPergunteiONome`) os reprova com frase, e não em silêncio.
+
+## Rodada 1 de conserto
+
+A revisão deu «precisa de conserto» por três Importantes medidos e cinco menores. Por decisão do controlador, `apps/seele-app/ui/camada-nomear.css` entrou no lote. Mesmo worktree e mesmo branch.
+
+| Conserto | Commit |
+|---|---|
+| Importante 1: a faixa de contexto da configuração dizia a tecla antiga | `4daaa4c3` |
+| Importante 2: as duas linhas do título da pergunta se sobrepunham | `9ae26fb1` |
+| Importante 3: a abertura por link dependia da ordem de carga dos scripts | `80255f64` |
+| Menores 4 e 6: a marca do fone sem guarda, e a faixa atravessando sessões | `08ddec61` |
+| Menores 5, 7 e 8: as notas do campo, CONECTAR ativo durante a pergunta, e o guarda (d) estourando sem frase | `39861b14` |
+
+Depois de cada commit: `cargo test -p seele-app --test frontend` deu 267 verdes, `cargo xtask check-runtime` saiu 0 com as 7 bancadas, e `cargo fmt --all -- --check` e `cargo clippy -p seele-app --all-targets --all-features -- -D warnings` ficaram limpos. O único aviso foi o `ld: duplicate -rpath`, que é do ambiente.
+
+**A bancada de navegador** é o roteiro do scratchpad descrito acima (`olhar.cjs`), com cenas novas. Ele roda com `PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright`, reaproveita `servir`, `respostas` e `retrato` de `bancada/telas.cjs`, e a ponte dele resolve em microtarefa, como a de `telas.cjs`. Ele **não foi commitado**: um `.cjs` novo em `bancada/` tem de entrar no `run:` do job `bancadas` do `ci.yml`, ou o teste `toda_bancada_da_pasta_roda_em_algum_lugar` reprova, e o `ci.yml` não é deste lote. As medidas estão abaixo, com os números.
+
+### Importante 1: a faixa de contexto acompanha a troca da tecla (`4daaa4c3`)
+
+**Medido na bancada, antes do conserto.** Com a tecla ESPAÇO e a configuração aberta, a cena troca a tecla gravada para `KeyF`, chama `pararDeOuvirTecla()` e espera 1,5 s:
+
+```
+"contexto": "Na sala Sala principal · microfone abre enquanto segura ESPAÇO",
+"botao": "F",
+"operador": "microfone abre enquanto segura F · ouvindo"
+```
+
+**O conserto.** Em `pararDeOuvirTecla` e em `abrirServer`, `recarregarTeclaDeFalar().then((tecla) => { desenharTeclaDeFalar(tecla); desenharContextoDaSessao(); })`. O comentário de `desenharContextoDaSessao` dizia que a frase e o ouvinte «não têm como discordar». Agora diz o que as mantém juntas: as duas releituras redesenham a faixa quando a leitura volta. Depois do conserto, a mesma cena dá `"contexto": "… microfone abre enquanto segura F"`.
+
+**O guarda (a)** cobra que, nas duas funções, o argumento do `.then` de `recarregarTeclaDeFalar()` chame `desenharContextoDaSessao()`. O recorte é por parênteses casados. `abrirServer` também chama a faixa de forma síncrona logo depois, e essa chamada, que lê a tecla de antes, não pode contar.
+
+RED, antes do conserto:
+
+```
+`function pararDeOuvirTecla(` relê a tecla de falar e não redesenha a faixa de contexto quando a leitura volta: a faixa continua dizendo a tecla de antes ao lado do botão que já diz a nova:
+```
+
+| Reversão | O guarda reprovou com |
+|---|---|
+| r1a. `pararDeOuvirTecla` de volta a `.then(desenharTeclaDeFalar)` | «`function pararDeOuvirTecla(` relê a tecla de falar e não redesenha a faixa de contexto…» |
+| r1b. `abrirServer` de volta a `.then(desenharTeclaDeFalar)`, com a chamada síncrona de pé | «`async function abrirServer(` relê a tecla de falar e não redesenha a faixa de contexto…» |
+
+A r1b é a prova de que a chamada síncrona não satisfaz o guarda. Na primeira tentativa, a expressão da r1a casou com `abrirServer`, que tem a mesma linha depois. Ela foi refeita ancorada no `}` que fecha `pararDeOuvirTecla`, e as duas rodaram de novo.
+
+### Importante 2: o título da pergunta (`9ae26fb1`)
+
+**O conserto**, no seletor que já existia: `.perfil-cabeca .nomear-titulo { flex: 1; line-height: 1.15; }`, com um comentário dizendo por quê.
+
+**A medida.** Para cada linha do título, a cena junta as letras pelo topo do retângulo de cada uma. A área de conteúdo sai de `Range.getClientRects()`. A tinta sai da linha de base (topo da área mais `fontBoundingBoxAscent`) e de `measureText` do texto daquela linha (`actualBoundingBoxAscent` e `actualBoundingBoxDescent`), com a fonte de verdade (`900 24px "Saira Condensed"`). O vermelho é a tinta de uma linha começar antes de a da linha de cima acabar.
+
+| Folha | `line-height` | Áreas de conteúdo (linha 1 · linha 2) | Tinta (linha 1 · linha 2) | Folga entre as tintas | Cabeçalho de SEU PERFIL |
+|---|---|---|---|---|---|
+| a de hoje (reversão) | 16px, de `base.css` | 240,3–278,3 · 256,3–294,3 (22px sobrepostos) | 246,1–267,5 · 266,6–283,5 | **−0,9px**: vermelho, «AS LINHAS DO TÍTULO SE SOBREPÕEM» | 65px |
+| a nova | 27,6px | 233,7–271,7 · 261,3–299,3 | 239,6–260,9 · 271,6–288,5 | **10,7px**: verde | 65px |
+
+- **A primeira medida que tentei** comparava as áreas de conteúdo, e ficou vermelha também com a folha nova. Esta face tem 38px de área para 24px de letra, então as áreas se sobrepõem com qualquer altura de linha abaixo de 1,58. O defeito visível é a tinta se tocar, e a tabela registra as duas medidas.
+- O cabeçalho da pergunta passa de 65 para 88px, porque ela ocupa duas linhas. O de SEU PERFIL fica em 65px.
+- A reversão voltou a folha guardada, e o `cmp` saiu igual.
+- `toda_classe_que_o_script_aplica_tem_regra_de_css` e os demais guardas de folha seguiram verdes.
+
+### Importante 3: a abertura espera a página inteira (`80255f64`)
+
+**Medido na bancada, antes do conserto.** A cena `link` tem `abertura: { entrar: "seele://192.0.2.1:8384" }`, `analisar_convite` respondendo o alvo, `apelido_local: ""`, e a ponte resolvendo em microtarefa:
+
+```
+"perguntaAberta": false,
+"bootErro": "ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ.\nSe for relatar, copie o texto abaixo:\nReferenceError: perguntarONome is not defined",
+"connect": 0
+```
+
+**O conserto.** `cumprirAAbertura()` passou a ser chamada dentro de `document.addEventListener("DOMContentLoaded", …)`, que só dispara depois de todos os scripts da página. `desenharVersoes()` continua no topo, e as versões continuam saindo primeiro, como o comentário pedia.
+
+Conferi o que dependia de a abertura rodar antes:
+- nenhum script lê o que ela produz;
+- nenhuma bancada simula um pedido de abertura: `telas.cjs` responde `abertura: null`;
+- `contribuicoes-e-camadas.cjs`, que monta o `index.html` de verdade, passou no `check-runtime`.
+
+Depois do conserto, a cena dá `"perguntaAberta": true`, `"titulo": "COMO OS OUTROS VÃO TE CHAMAR?"`, sem erro na entrada e sem `connect` antes da resposta.
+
+**O guarda (d)** ganhou duas asserções: `cumprirAAbertura` é chamada uma vez só, e essa chamada está no corpo do ouvinte de `DOMContentLoaded`. O primeiro RED vinha do pânico do `js_function`, em inglês e sem a frase do guarda. O guarda passou a conferir a presença antes, e o RED ficou com a frase dele:
+
+```
+o que o launcher pede à janela roda antes de os outros scripts carregarem: aberta por um link sem nome nesta máquina, a entrada chega à pergunta antes de `camada-nomear.js` existir, e a pergunta nunca abre
+```
+
+**Reversão r3**, com a chamada de volta ao topo:
+- o guarda reprova com a frase acima, já na forma final que o clippy pediu (um `if` no lugar de `.then().unwrap_or_default()`);
+- a bancada dá de novo `ReferenceError: perguntarONome is not defined` e `"perguntaAberta": false`.
+
+O arquivo voltou da cópia guardada, e o `cmp` saiu igual.
+
+### Menor 4: as duas linhas da marca do fone (`08ddec61`)
+
+O guarda (c) passou a exigir `if (foneJaAvisado) return;` e `foneJaAvisado = true;` no corpo de `desenharAvisoDeFone`. As linhas já existiam, então a prova é a reversão:
+
+| Reversão | O guarda reprovou com |
+|---|---|
+| m4a. Sem `if (foneJaAvisado) return;` | «o aviso de fone não confere se já avisou: a faixa volta a acender a cada quadro dentro da sala…» |
+| m4b. Sem `foneJaAvisado = true;` | «o aviso de fone não marca que avisou: a faixa volta a acender a cada quadro dentro da sala…» |
+
+### Menor 6: a faixa não atravessa sessões (`08ddec61`)
+
+- **`ejetar`** apaga a faixa logo depois de `mostrarVeredito(null)`, como o veredito.
+- **A outra saída**, a do fim de sessão, mora em `tela-fim.js`, que não é deste lote. Para ela, a faixa guarda a geração da sessão em que acendeu (`geracaoDoAvisoDeFone`), e `desenharAvisoDeFone` a apaga no primeiro quadro de uma geração nova (`geracaoDaSessao`, de `base.js`). A marca por execução não muda: a faixa não volta a acender na sala seguinte.
+- **RED do guarda**, antes do conserto: «sair do servidor não apaga a faixa de fone, e ela reaparece sobre a sessão seguinte».
+- **Na bancada** (cena `sessoes`): acesa na geração 7, apagada no primeiro quadro da geração 8, fora da sala. Na mesma geração, fora da sala, continua acesa até «dispensar». Depois de `ejetar()`, apagada.
+
+| Reversão | O guarda reprovou com |
+|---|---|
+| m6a. `ejetar` sem apagar a faixa | «sair do servidor não apaga a faixa de fone, e ela reaparece sobre a sessão seguinte» |
+| m6b. Sem a comparação de geração | «a faixa de fone não sabe de que sessão é: uma sessão encerrada pelo servidor a deixa acesa para a próxima» |
+
+### Menor 5: as notas do campo do apelido (`39861b14`)
+
+- **O campo** ganhou `aria-describedby="perfil-sem-nome"`. O leitor de tela diz a nota quando o foco chega ao campo, e não só ao fechar.
+- **`desenharNotasDoApelido()`**, nova, desenha as duas notas:
+  - a de quem fecha sem nome só aparece na pergunta e com o campo vazio;
+  - escondida, ela fica **vazia**, porque a descrição lê até o texto de um nó escondido;
+  - a nota de sempre («O que você já disse continua com o nome de então.», agora `#perfil-nota-do-apelido`) sai durante a pergunta.
+- **Quem chama a função**: o `input` do campo, `abrirPerfil` (antes de a caixa aparecer e de o foco chegar) e `fecharPerfil`. A marca `perguntandoONome` é posta por `perguntarONome` e tirada por `fecharPerfil` e pela abertura do SEU PERFIL.
+- **Na bancada**, antes do conserto: a nota continuava embaixo de «Bi» digitado, e o campo não tinha descrição. Depois:
+  - aberta, a nota é visível, a nota de sempre está escondida, e `aria-describedby` vale `perfil-sem-nome`;
+  - com «Bi» digitado, a nota some, e volta com o campo apagado;
+  - no SEU PERFIL depois da pergunta, a nota está escondida e vazia, e a nota de sempre está visível.
+
+### Menor 7: CONECTAR apagado durante a pergunta (`39861b14`)
+
+- **Em `conectar`**: `$("botao-conectar").disabled = true` antes de `await perguntarONome()`, e `disabled = false` num `finally`. Logo abaixo, sem `await` no meio, a entrada o apaga de novo até o `connect` responder.
+- **RED do guarda**, antes do conserto: «CONECTAR fica ativo enquanto a pergunta do nome está aberta, e uma segunda entrada por baixo dela entra com o nome vazio».
+- **Na bancada**, antes: `"conectarApagado": false`. Depois: `true` com a pergunta aberta, e `false` quando a entrada termina, nas duas saídas (fechar e salvar).
+
+### Menor 8: o guarda (d) diz a frase dele
+
+`assert!(local < pergunta, …)` antes de `conectar[local..pergunta]`. A reversão n8 renomeia a leitura de `apelido_local` em `conectar` e põe outra depois da pergunta. Antes, a fatia estourava com o pânico de índice do Rust. Agora o guarda reprova com «a entrada pergunta o nome antes de ler o desta máquina, e para na porta quem já tem um».
+
+| Reversão | O guarda reprovou com |
+|---|---|
+| n7a. Sem apagar CONECTAR | «CONECTAR fica ativo enquanto a pergunta do nome está aberta…» |
+| n7b. Sem o `finally` que o reacende | «CONECTAR não volta a valer depois da pergunta, inclusive quando ela falha» |
+| n5a. O campo sem `aria-describedby` | «o campo do apelido não é descrito pela nota de quem fecha sem nome…» |
+| n5b. Sem o ouvinte de `input` | «a nota de quem fecha sem nome não acompanha o campo…» |
+| n5c. A nota sem a condição do campo vazio | «as notas do campo do apelido erram: a de quem fecha sem nome aparece fora da pergunta, ou embaixo de um nome já digitado» |
+| n5d. A nota com o texto mesmo escondida | «as notas do campo do apelido erram: a de quem fecha sem nome guarda o texto quando escondida…» |
+| n5e. A nota de sempre visível na pergunta | «as notas do campo do apelido erram: a de quem troca de nome aparece na pergunta, para quem nunca disse nada» |
+| n8. A leitura de `apelido_local` depois da pergunta | «a entrada pergunta o nome antes de ler o desta máquina…» |
+
+As mensagens de n5c a n5e foram reescritas depois da primeira rodada de reversões, porque «não só aparece» se lia como «não apenas aparece». As três rodaram de novo com o texto final.
+
+Antes e depois de cada bateria de reversões, o `shasum` de todos os `.js` e `.css` de `ui/`, do `index.html` e do `frontend.rs` foi conferido com `cmp`. Saiu igual em todas. Foram 16 reversões nesta rodada.
+
+### Notas, como o controlador pediu
+
+- **A pergunta abre por cima do diálogo da porta, ao hospedar**, como a revisão anotou. É o caminho de HOSPEDAR AQUI: `hospedar()` chama `conectar()`, e a pergunta abre sem que o diálogo de baixo feche. Não mexi nisso nem medi nesta rodada.
+- **A linha do operador ocupa duas linhas** na coluna de 268px: «microfone abre enquanto segura ESPAÇO · ouvindo» (preocupação 3).
+- **A faixa de fone usa as classes do veredito** (preocupação 4). Só `camada-nomear.css` entrou no lote.
