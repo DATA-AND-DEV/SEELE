@@ -946,6 +946,149 @@ fn com_tudo_no_lugar_as_conferencias_passam_sem_compilar_nada() {
     assert!(saida.diario.contains("curl"), "não perguntou ao GitHub");
 }
 
+/// Põe `empacotar/notas/<versão>.md` na bancada, com commit, e devolve a cabeça
+/// nova, que o Windows de mentira precisa conhecer.
+fn com_notas(bancada: &Bancada, versao: &str, texto: &str) -> String {
+    escrever(
+        &bancada.repo.join(format!("empacotar/notas/{versao}.md")),
+        texto,
+        false,
+    );
+    let git = |argumentos: &[&str]| {
+        let saida = Command::new("git")
+            .arg("-C")
+            .arg(&bancada.repo)
+            .args([
+                "-c",
+                "user.email=bancada@seele",
+                "-c",
+                "user.name=bancada",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(argumentos)
+            .output()
+            .expect("o git tem que executar");
+        assert!(
+            saida.status.success(),
+            "git {argumentos:?} falhou:\n{}",
+            String::from_utf8_lossy(&saida.stderr)
+        );
+        String::from_utf8_lossy(&saida.stdout).trim().to_owned()
+    };
+    git(&["add", "empacotar/notas"]);
+    git(&["commit", "-q", "-m", "docs: as notas da versão"]);
+    git(&["rev-parse", "HEAD"])
+}
+
+/// Uma nota que espera uma condição não sai antes dela.
+///
+/// O comentário HTML some na página do GitHub, e quem publica sem abrir o
+/// arquivo não o vê: um aviso que não impede é o «existir não é funcionar». Foi
+/// o caso das notas da 0.15.2, que afirmam uma impressão digital que só o passo
+/// 4 da medida de ponta a ponta prova.
+///
+/// A recusa vem antes de qualquer pergunta com efeito: o `limpar_entrega`
+/// apaga, e o `conferir_windows` leva o Windows a outro commit. O diário sem
+/// `ssh`, `docker` nem `curl` é a prova.
+#[test]
+fn uma_nota_com_condicao_pendente_para_a_publicacao_antes_de_qualquer_pergunta() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "> ### O que muda\n>\n<!-- CONDIÇÃO: o passo 4 da medida passa -->\n\
+         > A impressão digital é a mesma.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "as notas esperam uma condição e as conferências passaram:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("tudo conferido"),
+        "com uma condição pendente, as conferências deram o veredito:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("empacotar/notas/1.2.3.md")
+            && saida.texto.contains("linha 3: o passo 4 da medida passa"),
+        "a recusa não diz qual condição falta e onde ela está no arquivo:\n{}",
+        saida.texto
+    );
+    for pergunta in ["ssh", "docker", "curl"] {
+        assert!(
+            !saida.diario.contains(pergunta),
+            "a recusa veio depois de perguntar ao «{pergunta}», que é uma conferência \
+             com efeito ou cara:\n{}",
+            saida.diario
+        );
+    }
+}
+
+/// O marcador vale também partido em linhas, e em minúsculas.
+///
+/// Foi como o primeiro comentário de condição deste repositório nasceu: o `<!--`
+/// sozinho numa linha e a palavra na seguinte. Um marcador que só valesse na
+/// forma exata deixaria passar calado justamente esse.
+#[test]
+fn a_condicao_partida_em_linhas_tambem_para_a_publicacao() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "> ### O que muda\n\n<!--\n  condição: a medida no Windows\n  termina\n-->\n\
+         > Texto.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "a condição partida em linhas passou pelas conferências:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("linha 4: a medida no Windows termina"),
+        "a recusa não diz a condição partida em linhas, nem a linha onde ela está:\n{}",
+        saida.texto
+    );
+}
+
+/// Um comentário qualquer, e a palavra no texto, não param nada.
+///
+/// O marcador é o comentário que **começa** pela condição, e não a palavra: «A
+/// CONDIÇÃO: DO SERVIDOR» num título, ou um lembrete em comentário, são texto.
+#[test]
+fn um_comentario_qualquer_e_a_palavra_no_texto_nao_param_a_publicacao() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "<!-- um lembrete para quem edita -->\n> ### A CONDIÇÃO: DO SERVIDOR\n>\n\
+         > A condição: a sala abre.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "notas sem condição pendente foram recusadas:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("tudo conferido"),
+        "faltou o veredito das conferências:\n{}",
+        saida.texto
+    );
+}
+
 #[test]
 fn a_versao_invalida_morre_antes_de_qualquer_pergunta_cara() {
     // A conferência mais barata é a primeira. `0.1.2-rc1` compila duas horas e
