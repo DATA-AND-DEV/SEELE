@@ -118,13 +118,20 @@ path = "src/main.rs"
 # de teste não se une ao build normal. É o mesmo desenho da `fixtures` do
 # `seele-lancador`.
 #
-# **O que ela não alcança sozinha:** os testes de `tests/` deste crate. Eles
-# não veem o `cfg(test)`, e a única forma de ligá-la para eles pelo Cargo seria
-# o crate depender de si mesmo em `[dev-dependencies]`, aresta que o
-# `cargo xtask check-deps` recusa. Num `cargo test --workspace` (a CI, a
+# É a **segunda parede**. A primeira é o padrão: sem `$SEELE_ENCONTRO`,
+# `Hospedagem::iniciar` não convoca ponto de encontro nenhum, e só a produção
+# pede o do projeto (`iniciar_com_o_ponto_padrao`). Esquecer o ambiente custa
+# «sem degrau 4», e não um servidor de teste no quarto de produção. O guarda
+# pega o que sobra: um teste que aponta a VPS de propósito, ou que chama a
+# função da produção.
+#
+# **O que ela não alcança sozinha:** os testes de `tests/` deste crate rodados
+# com `cargo test -p seele-server`. Eles não veem o `cfg(test)`, e ligá-la para
+# eles exigiria o crate depender de si mesmo, aresta que o `cargo xtask
+# check-deps` recusa. Com o padrão seguro, isso perdeu o perigo: um teste dali
+# que esqueça o ambiente fica sem ponto. Num `cargo test --workspace` (a CI, a
 # bateria da integração) a feature se une pela dependência do
-# `seele-conformance` e os alcança; num `cargo test -p seele-server` sozinho,
-# não.
+# `seele-conformance` e os alcança também.
 recusar-encontro-de-producao = []
 
 [dev-dependencies]

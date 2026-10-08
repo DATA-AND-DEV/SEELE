@@ -1927,7 +1927,12 @@ async fn hospedar(
     // com uma frase pedindo que alguém decida.
     let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-    let server = seele_server::hospedagem::Hospedagem::iniciar(
+    // **Com o ponto de encontro do projeto**, pedido aqui e só aqui: sem
+    // `$SEELE_ENCONTRO`, o `iniciar` curto não convoca ponto nenhum, que é o
+    // padrão seguro dos testes. Quem hospeda pelo app é quem está atrás do
+    // roteador de casa, e é para essa pessoa que o degrau 4 existe. O guarda é
+    // `o_ponto_de_encontro_de_quem_hospeda`, logo abaixo desta função.
+    let server = seele_server::hospedagem::Hospedagem::iniciar_com_o_ponto_padrao(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
         "Casa",
@@ -1991,6 +1996,32 @@ async fn hospedar(
     }
 
     Ok(anfitriao)
+}
+
+/// O botão HOSPEDAR sobe com o ponto de encontro do projeto.
+///
+/// Desde a decisão (d) do lote G-servidor da F5, `Hospedagem::iniciar` sem
+/// `$SEELE_ENCONTRO` não convoca ponto nenhum, que é o padrão seguro para os
+/// testes. A produção pede o ponto padrão de forma explícita, e este é o guarda
+/// de que ela pede: sem ele, quem hospeda atrás de CGNAT perderia o degrau 4 em
+/// silêncio, e o link sairia sem o bilhete que faz «manda o link e funciona»
+/// virar verdade.
+#[cfg(test)]
+mod o_ponto_de_encontro_de_quem_hospeda {
+    #[test]
+    fn hospedar_sobe_com_o_ponto_de_encontro_padrao() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn hospedar(");
+        // Partidas, para não casarem com este texto.
+        let com_o_padrao = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
+        let sem_o_padrao = concat!("Hospedagem::", "iniciar(");
+        assert!(
+            corpo.contains(com_o_padrao) && !corpo.contains(sem_o_padrao),
+            "o `hospedar` não sobe o servidor com `{com_o_padrao}`: sem ele, e sem \
+             `$SEELE_ENCONTRO`, a hospedagem não convoca ponto de encontro nenhum, e quem hospeda \
+             atrás de CGNAT perde o degrau 4 em silêncio"
+        );
+    }
 }
 
 /// Desfaz `%XX` num caminho de URL. O resto passa inteiro.

@@ -210,10 +210,12 @@ async fn so_conectar(endereco: SocketAddr) -> Result<()> {
 /// Desliga o degrau 4 para o binário inteiro: nenhum teste daqui fala com o
 /// ponto de encontro de produção.
 ///
-/// Sem `$SEELE_ENCONTRO`, `Hospedagem::iniciar` cai no ponto padrão, e numa
+/// Sem `$SEELE_ENCONTRO`, `Hospedagem::iniciar` caía no ponto padrão, e numa
 /// máquina sem IPv4 global cada rodada registrava um servidor de teste no
-/// quarto da VPS de produção. O que este arquivo mede é a janela do
-/// Comandante, e nenhum pacote precisa sair desta máquina para isso.
+/// quarto da VPS de produção. Desde a decisão (d) do lote G-servidor ele não
+/// convoca ponto nenhum sem a variável, e o `nao` daqui é a intenção escrita:
+/// o que este arquivo mede é a janela do Comandante, e nenhum pacote precisa
+/// sair desta máquina para isso.
 ///
 /// **Uma vez, e sem devolver.** Os dois testes daqui correm ao mesmo tempo, e
 /// os dois querem o mesmo valor. Um guarda que devolvesse a variável ao cair
@@ -225,7 +227,7 @@ async fn so_conectar(endereco: SocketAddr) -> Result<()> {
 /// O guarda da biblioteca (`alcance::encontro::recusar_a_producao`) alcança
 /// este arquivo só quando ele roda junto com o `seele-conformance`
 /// (`cargo test --workspace`): ver a feature `recusar-encontro-de-producao` no
-/// `Cargo.toml` deste crate.
+/// `Cargo.toml` deste crate. Rodado sozinho, quem o protege é o padrão.
 fn sem_degrau_4() {
     static UMA_VEZ: std::sync::Once = std::sync::Once::new();
     UMA_VEZ.call_once(|| std::env::set_var(seele_server::alcance::encontro::VARIAVEL, "nao"));

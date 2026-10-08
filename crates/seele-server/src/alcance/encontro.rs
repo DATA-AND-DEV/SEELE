@@ -344,10 +344,19 @@ impl Convocacao {
         })
     }
 
-    /// O que o ambiente pediu, ou `None` se pediu para não haver degrau 4.
+    /// O que o ambiente pediu, e **nada** sem ele.
     ///
     /// Lê `$SEELE_ENCONTRO`: um endereço troca o ponto de encontro, e `nao` ou
-    /// vazio desligam o degrau.
+    /// vazio desligam o degrau. **Sem a variável, `None`.**
+    ///
+    /// # Por que sem a variável não há ponto
+    ///
+    /// Era o [`PONTO_PADRAO`], e todo teste que subia hospedagem sem trocar a
+    /// variável registrava um servidor de teste no quarto da VPS de produção.
+    /// Decisão (d) do lote G-servidor da F5: o padrão passa a ser o seguro, e
+    /// esquecer o ambiente custa «sem degrau 4», e não um servidor de teste no
+    /// quarto de quem usa o produto. A produção pede o ponto do projeto de
+    /// forma explícita, por [`Self::com_o_ponto_padrao`].
     ///
     /// Também é `None` quando a impressão digital não forma marca, pelo mesmo
     /// motivo de [`Self::para_servidor`]: sem marca não há como separar aviso de
@@ -355,7 +364,36 @@ impl Convocacao {
     /// de fora.
     #[must_use]
     pub fn do_ambiente(socket: Arc<std::net::UdpSocket>, impressao_digital: &str) -> Option<Self> {
-        let escolhido = std::env::var(VARIAVEL).unwrap_or_else(|_| PONTO_PADRAO.to_owned());
+        Self::do_ambiente_ou(socket, impressao_digital, None)
+    }
+
+    /// O que o ambiente pediu, e o [`PONTO_PADRAO`] quando a variável não
+    /// existe.
+    ///
+    /// **Só a produção chama isto**: o botão HOSPEDAR do app, por
+    /// `Hospedagem::iniciar_com_o_ponto_padrao`. A variável continua mandando
+    /// — `nao` ou vazio desligam, um endereço troca —, e só a ausência dela
+    /// muda de sentido: aqui é o ponto do projeto, em [`Self::do_ambiente`] é
+    /// nenhum.
+    #[must_use]
+    pub fn com_o_ponto_padrao(
+        socket: Arc<std::net::UdpSocket>,
+        impressao_digital: &str,
+    ) -> Option<Self> {
+        Self::do_ambiente_ou(socket, impressao_digital, Some(PONTO_PADRAO))
+    }
+
+    /// `$SEELE_ENCONTRO`, ou `sem_a_variavel` quando ela não existe (ou não é
+    /// texto).
+    fn do_ambiente_ou(
+        socket: Arc<std::net::UdpSocket>,
+        impressao_digital: &str,
+        sem_a_variavel: Option<&str>,
+    ) -> Option<Self> {
+        let escolhido = match std::env::var(VARIAVEL) {
+            Ok(valor) => valor,
+            Err(_) => sem_a_variavel?.to_owned(),
+        };
         let escolhido = escolhido.trim();
         if escolhido.is_empty() || escolhido.eq_ignore_ascii_case("nao") {
             return None;
@@ -677,13 +715,20 @@ compile_error!(
 ///
 /// # O defeito que ele segura
 ///
-/// Sem `$SEELE_ENCONTRO`, [`Convocacao::do_ambiente`] cai no [`PONTO_PADRAO`],
-/// e numa máquina sem IPv4 global a escada tenta o degrau 4. Um teste que
-/// subia uma hospedagem sem trocar a variável registrava a marca de um
-/// servidor de teste no quarto da VPS de produção e deixava lá o IP público da
-/// máquina que rodava a bateria. Nenhum teste afirmava esse degrau: ele era só
-/// um teste dependendo da rede de fora, e mexendo no quarto de quem usa o
-/// produto. Medido na revisão do M2, em 08/10/2026.
+/// Sem `$SEELE_ENCONTRO`, [`Convocacao::do_ambiente`] caía no
+/// [`PONTO_PADRAO`], e numa máquina sem IPv4 global a escada tentava o degrau
+/// 4. Um teste que subia uma hospedagem sem trocar a variável registrava a
+/// marca de um servidor de teste no quarto da VPS de produção e deixava lá o IP
+/// público da máquina que rodava a bateria. Nenhum teste afirmava esse degrau:
+/// ele era só um teste dependendo da rede de fora, e mexendo no quarto de quem
+/// usa o produto. Medido na revisão do M2, em 08/10/2026.
+///
+/// # A segunda parede
+///
+/// Desde a decisão (d) do lote G-servidor da F5, a primeira é o padrão: sem a
+/// variável, `do_ambiente` não convoca ponto nenhum, e só a produção pede o do
+/// projeto ([`Convocacao::com_o_ponto_padrao`]). Este guarda pega o que sobra:
+/// um teste que aponta a VPS de propósito, ou que chama o caminho da produção.
 ///
 /// # Onde ele age
 ///
@@ -708,7 +753,8 @@ compile_error!(
 /// padrão, que é para isso que ele existe.
 ///
 /// Os testes de `tests/` deste crate só a têm quando rodam junto com o
-/// `seele-conformance` (`cargo test --workspace`): ver o `Cargo.toml`.
+/// `seele-conformance` (`cargo test --workspace`): ver o `Cargo.toml`. Rodados
+/// sozinhos, quem os protege é o padrão: sem ambiente, nenhum ponto.
 ///
 /// `onde` vai na frase do pânico, e é ele que diz qual dos dois lugares pegou o
 /// teste: um teste que prova um dos guardas casa com ele, e o outro guarda
@@ -1526,9 +1572,29 @@ mod testes {
             "o ponto de encontro não é trocável"
         );
 
+        // A variável manda também na produção: `nao` desliga, um endereço
+        // troca.
+        ambiente.pedir("nao");
+        assert!(
+            Convocacao::com_o_ponto_padrao(Arc::clone(&socket), fp).is_none(),
+            "`{VARIAVEL}=nao` não desligou o degrau 4 de quem hospeda pelo app"
+        );
+        ambiente.pedir("meu.ponto:9000");
+        assert_eq!(
+            Convocacao::com_o_ponto_padrao(Arc::clone(&socket), fp)
+                .map(|convocacao| convocacao.ponto),
+            Some("meu.ponto:9000".to_owned()),
+            "o ponto de encontro de quem hospeda pelo app deixou de ser trocável"
+        );
+
+        // Sem a variável, o padrão da produção é o ponto do projeto. O de
+        // `do_ambiente`, nenhum: ver `sem_a_variavel_o_ambiente_nao_convoca_ponto_nenhum`.
         ambiente.tirar();
-        let padrao = Convocacao::do_ambiente(socket, fp).expect("padrão");
-        assert_eq!(padrao.ponto, PONTO_PADRAO);
+        assert_eq!(
+            Convocacao::com_o_ponto_padrao(socket, fp).map(|convocacao| convocacao.ponto),
+            Some(PONTO_PADRAO.to_owned()),
+            "sem `{VARIAVEL}`, quem hospeda pelo app ficou sem o ponto de encontro do projeto"
+        );
     }
 
     #[tokio::test]
@@ -2670,6 +2736,26 @@ mod testes {
             com(PONTO_PADRAO).bilhete().aviso,
             aviso.to_string(),
             "o aviso mudou junto com o ponto"
+        );
+    }
+
+    // --------------------------------------------- o padrão seguro
+
+    #[test]
+    fn sem_a_variavel_o_ambiente_nao_convoca_ponto_nenhum() {
+        // A decisão (d) do lote G-servidor da F5: sem `$SEELE_ENCONTRO`, nenhum
+        // ponto. Era o `PONTO_PADRAO`, e quem esquecia o ambiente — todo teste
+        // que subia hospedagem — registrava um servidor de teste no quarto da
+        // VPS de produção. Com o padrão seguro, esquecer custa «sem degrau 4».
+        let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let ponto = Convocacao::do_ambiente(socket, IMPRESSAO).map(|convocacao| convocacao.ponto);
+        drop(ambiente);
+        assert_eq!(
+            ponto, None,
+            "sem `$SEELE_ENCONTRO`, `do_ambiente` convocou um ponto de encontro: quem esquece o \
+             ambiente volta a falar com ele, e o padrão volta a ser o de produção"
         );
     }
 

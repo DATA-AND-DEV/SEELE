@@ -87,6 +87,13 @@ impl Hospedagem {
     /// exatamente o caminho que abria a janela. Quem não tem nada a fazer antes
     /// passa `|_| Ok(())`, e escreve isso.
     ///
+    /// # O ponto de encontro: só o que o ambiente pedir
+    ///
+    /// O degrau 4 só sobe com `$SEELE_ENCONTRO` apontando um ponto. **Sem a
+    /// variável, nenhum** ([`crate::alcance::encontro::Convocacao::do_ambiente`]):
+    /// é o padrão seguro, e é o de todo teste. A produção pede o ponto do
+    /// projeto por [`Self::iniciar_com_o_ponto_padrao`].
+    ///
     /// # Errors
     ///
     /// Falha se a porta já estiver em uso, se o banco não abrir, ou se
@@ -97,6 +104,63 @@ impl Hospedagem {
         nome: &str,
         pasta_dos_mods: Option<crate::RaizesDosMods>,
         antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+    ) -> Result<Self> {
+        Self::subir(
+            porta,
+            banco,
+            nome,
+            pasta_dos_mods,
+            antes_de_aceitar,
+            crate::alcance::encontro::Convocacao::do_ambiente,
+        )
+        .await
+    }
+
+    /// [`Self::iniciar`], com o ponto de encontro do projeto quando
+    /// `$SEELE_ENCONTRO` não existe.
+    ///
+    /// **Só a produção chama isto**: o botão HOSPEDAR do app. Quem hospeda
+    /// pelo app é justamente quem está atrás de um roteador doméstico, e é para
+    /// essa pessoa que o degrau 4 existe. A variável continua mandando: `nao`
+    /// ou vazio desligam, um endereço troca.
+    ///
+    /// Duas funções, e não um argumento a mais em `iniciar`: o padrão seguro
+    /// fica com o nome curto, e o ponto de produção só é pedido por quem
+    /// escreve este nome. O `seeled` não chama nenhuma das duas — ele é o
+    /// degrau 1 e não sobe a escada.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::iniciar`].
+    pub async fn iniciar_com_o_ponto_padrao(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+    ) -> Result<Self> {
+        Self::subir(
+            porta,
+            banco,
+            nome,
+            pasta_dos_mods,
+            antes_de_aceitar,
+            crate::alcance::encontro::Convocacao::com_o_ponto_padrao,
+        )
+        .await
+    }
+
+    /// O corpo das duas: `convocar` é quem decide o ponto de encontro.
+    async fn subir(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+        convocar: fn(
+            Arc<std::net::UdpSocket>,
+            &str,
+        ) -> Option<crate::alcance::encontro::Convocacao>,
     ) -> Result<Self> {
         let config = ServerConfig {
             name: nome.to_owned(),
@@ -132,18 +196,21 @@ impl Hospedagem {
         // um degrau que este socket não serve. Ver `alcance::Escuta`.
         //
         // O degrau 4 vai junto, e ele é opcional em três sentidos: só é tentado
-        // se os degraus de cima não resolveram, só existe se o ambiente pedir
-        // (`$SEELE_ENCONTRO`), e só funciona com o socket do próprio servidor — sem
-        // ele não há furo possível, e o degrau simplesmente não acontece.
+        // se os degraus de cima não resolveram, só existe se houver ponto (o do
+        // ambiente, ou o do projeto em `iniciar_com_o_ponto_padrao`), e só
+        // funciona com o socket do próprio servidor — sem ele não há furo
+        // possível, e o degrau simplesmente não acontece.
         //
         // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
         // termina em "só funciona na sua rede".
-        let convocacao = server.espelho().and_then(|socket| {
-            crate::alcance::encontro::Convocacao::do_ambiente(socket, server.fingerprint())
-        });
-        // Nos testes, um teste que sobe a hospedagem sem ambiente reprova aqui,
-        // e não só numa máquina sem IPv4 global, que é onde o degrau 4 é
-        // tentado. Fora deles, nada. Ver
+        let convocacao = server
+            .espelho()
+            .and_then(|socket| convocar(socket, server.fingerprint()));
+        // A segunda parede, só nos testes: um teste que chega aqui com o ponto
+        // de produção — o ambiente apontando a VPS, ou
+        // `iniciar_com_o_ponto_padrao` sem ambiente — reprova antes da escada,
+        // em qualquer máquina, e não só numa sem IPv4 global, que é onde o
+        // degrau 4 é tentado. Fora deles, nada. Ver
         // `crate::alcance::encontro::recusar_a_producao`.
         if let Some(convocacao) = &convocacao {
             crate::alcance::encontro::recusar_a_producao(
@@ -768,6 +835,49 @@ mod tests {
             "a porta continuou presa: {:?}",
             segunda.err()
         );
+    }
+
+    /// Sem `$SEELE_ENCONTRO`, `iniciar` não convoca ponto de encontro nenhum.
+    ///
+    /// A decisão (d) do lote G-servidor da F5, pelo lado da hospedagem: o
+    /// padrão seguro. Antes, este teste reprovava no guarda de `iniciar`, porque
+    /// sem a variável a convocação era a do ponto de produção.
+    #[tokio::test]
+    async fn iniciar_sem_ambiente_nao_convoca_ponto_nenhum() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("subir sem ambiente");
+        let recusa = hospedagem
+            .alcance()
+            .and_then(crate::alcance::Alcance::encontro_recusado)
+            .map(str::to_owned);
+        let convite = hospedagem.convite();
+        hospedagem.encerrar().await;
+        drop(ambiente);
+        assert!(
+            recusa.is_none() && !convite.contains("enc="),
+            "sem `$SEELE_ENCONTRO`, a hospedagem tentou um ponto de encontro (recusa: {recusa:?}; \
+             convite: {convite}): o padrão deixou de ser «nenhum ponto»"
+        );
+    }
+
+    /// `iniciar_com_o_ponto_padrao`, sem `$SEELE_ENCONTRO`, leva o ponto do
+    /// projeto à escada.
+    ///
+    /// Pelo comportamento, e sem rede: o ponto de produção chega ao guarda de
+    /// `iniciar`, que reprova antes da escada. Se a função deixasse de pedir o
+    /// ponto padrão, a convocação seria nenhuma, não haveria pânico, e o teste
+    /// reprovaria — quem hospeda pelo app perderia o degrau 4 em silêncio.
+    #[tokio::test]
+    #[should_panic(expected = "(«encontro.seele.app.br», pego em Hospedagem::iniciar")]
+    async fn iniciar_com_o_ponto_padrao_leva_o_ponto_do_projeto_a_escada() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let _ =
+            Hospedagem::iniciar_com_o_ponto_padrao(0, Location::Memory, "Casa", None, |_| Ok(()))
+                .await;
     }
 
     /// O guarda de `iniciar` dispara, e é **ele** que dispara.

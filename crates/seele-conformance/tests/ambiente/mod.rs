@@ -2,14 +2,16 @@
 //!
 //! # Por que existe
 //!
-//! Sem a variável, `Hospedagem::iniciar` cai no ponto de encontro de produção
+//! Sem a variável, `Hospedagem::iniciar` caía no ponto de encontro de produção
 //! (`seele_server::alcance::encontro::PONTO_PADRAO`), e numa máquina sem IPv4
-//! global a escada tenta o degrau 4: cada rodada registrava um servidor de
+//! global a escada tentava o degrau 4: cada rodada registrava um servidor de
 //! teste no quarto da VPS de produção e deixava lá o IP público da máquina que
-//! rodava a bateria. Nenhum teste daqui mede o degrau 4 contra a produção, e
-//! o guarda da biblioteca (`recusar_a_producao`, pela feature
-//! `recusar-encontro-de-producao` que o `Cargo.toml` deste crate liga) faz
-//! reprovar quem esquecer.
+//! rodava a bateria. Desde a decisão (d) do lote G-servidor, sem a variável não
+//! há ponto nenhum; o `nao` daqui é a intenção escrita, e vale também contra um
+//! valor que outro teste deste binário tenha deixado. Nenhum teste daqui mede o
+//! degrau 4 contra a produção, e o guarda da biblioteca (`recusar_a_producao`,
+//! pela feature `recusar-encontro-de-producao` que o `Cargo.toml` deste crate
+//! liga) é a segunda parede.
 //!
 //! # Como se usa
 //!

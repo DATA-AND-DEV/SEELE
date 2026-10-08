@@ -1022,8 +1022,8 @@ impl Daemon {
 ///
 /// Todo teste deste crate que chama `Hospedagem::iniciar` toma o guarda com o
 /// degrau 4 desligado ([`AmbienteDoEncontro::sem_degrau_4`]). Antes eles só
-/// liam a variável, sem trava, e sem ela `Convocacao::do_ambiente` cai no ponto
-/// de encontro de produção: numa máquina sem IPv4 global, cada rodada
+/// liam a variável, sem trava, e sem ela `Convocacao::do_ambiente` caía no
+/// ponto de encontro de produção: numa máquina sem IPv4 global, cada rodada
 /// registrava um servidor de teste no quarto da VPS. Medido no lote
 /// G-servidor da F5: rodados junto com
 /// `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`, os oito passavam, e
@@ -1034,6 +1034,14 @@ impl Daemon {
 ///
 /// A trava serializa os que sobem hospedagem. Medido na mesma máquina: os oito
 /// em 1,08 s em fila, contra 0,52 s em paralelo.
+///
+/// # Depois do padrão seguro, por que o `nao` continua
+///
+/// Desde a decisão (d), `Hospedagem::iniciar` sem a variável já não convoca
+/// ponto nenhum. O `nao` explícito e a trava ficam pelo que o padrão não cobre:
+/// outros testes deste binário **trocam** a variável — para o buraco negro, e
+/// para um IP da VPS no teste do guarda de `iniciar` —, e um teste de
+/// hospedagem que subisse sem a trava nesse meio-tempo leria o valor do outro.
 #[cfg(test)]
 pub(crate) mod ambiente_de_teste {
     use std::sync::{Mutex, MutexGuard, PoisonError};
