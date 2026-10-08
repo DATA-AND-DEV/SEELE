@@ -46,7 +46,7 @@ pub mod revogacao;
 pub mod versao;
 
 pub use assinatura::{Chave, FalhaDeAssinatura};
-pub use dados::{EstadoDosDados, OrigemDosDados, PlanoDeDados};
+pub use dados::{EstadoDosDados, OrigemDosDados, PlanoDeDados, Semeadura};
 pub use deposito::{Deposito, Desempacotador, FalhaAoInstalar, Instalacao, Podada};
 pub use executavel::{CaminhoDoExecutavel, ExecutavelInvalido};
 pub use inicializacao::{Lancamento, VARIAVEL_DE_DADOS};

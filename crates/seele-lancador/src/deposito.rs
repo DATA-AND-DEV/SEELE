@@ -28,7 +28,7 @@
 //! <raiz>/
 //! ├── versoes/0.10.5-1/        a instalação
 //! ├── versoes/0.10.5-1/INSTALADA   o marcador, escrito por último
-//! ├── dados/0.10.5-1/          os dados daquela versão (ver `crate::dados`)
+//! ├── dados/servidor-0.15/     os dados daquela linha (ver `crate::dados`)
 //! ├── preparo/<algo>/          área de preparo, apagada ao fim
 //! └── revogacoes-vistas        a memória do `crate::revogacao`
 //! ```
@@ -190,12 +190,6 @@ impl Deposito {
     #[must_use]
     pub fn pasta_da_versao(&self, versao: &Versao) -> PathBuf {
         self.raiz.join("versoes").join(versao.como_texto())
-    }
-
-    /// Onde ficam os dados desta versão.
-    #[must_use]
-    pub fn pasta_de_dados(&self, versao: &Versao) -> PathBuf {
-        self.raiz.join("dados").join(versao.como_texto())
     }
 
     /// Onde ficam os dados desta **linha**: `dados/servidor-<linha>`.
