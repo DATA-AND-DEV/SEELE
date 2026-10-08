@@ -7698,6 +7698,102 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     }
 }
 
+#[test]
+fn a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo() {
+    // `ServidorTrocouNaVolta` é o fim de duas recusas da volta da bateria: a
+    // impressão que não confere (`InviteMismatch`) e quem mostrou o certificado
+    // sem provar a chave (`ChaveNaoProvada`). E a impressão esperada da volta
+    // pode ter vindo do link colado ou da lista de servidores. A tela de fim só
+    // recebe o `EndReason`, sem a origem e sem as impressões, então a frase só
+    // pode dizer o que vale nos quatro casos.
+    //
+    // - Nada de «convite» como dono da impressão («DO CONVITE») nem de «link»:
+    //   quem voltou pela lista não colou link nenhum, e é o que
+    //   `fraseDeErro` separa por `deOnde`, e esta frase não pode.
+    // - Nada de «nada», «nenhum» nem «desta máquina»: o `ClientHello` do TLS
+    //   sai antes de haver o que conferir, e é a regra do guarda irmão,
+    //   `a_recusa_pela_impressao_diz_que_o_convite_a_senha_e_o_apelido_nao_chegaram_a_ele`.
+    // - O que vale sempre é «a ele»: o convite, a senha e o apelido não
+    //   chegaram a quem atendeu, porque a recusa é antes do `Hello`.
+    //
+    // A frase que o brief do lote H trazia dizia «SERVIDOR DO CONVITE», «sem
+    // mandar nada a ele» e «Confirme o link», e é ela o vermelho da reversão.
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let motivos = sentences_of(&arquivo, "MOTIVOS");
+    let frase_de = |variante: &str| -> String {
+        let Some((_, frase)) = motivos.iter().find(|(nome, _)| nome == variante) else {
+            panic!(
+                "`EndReason::{variante}` não tem frase em `MOTIVOS`, e a tela de fim escreve \
+                 o nome de uma variante do Rust"
+            );
+        };
+        frase.clone()
+    };
+
+    let trocado = frase_de("ServidorTrocouNaVolta");
+    let minusculas = trocado.to_lowercase();
+    let mut erros: Vec<String> = ["nada", "nenhum", "desta máquina", "do convite", "link"]
+        .into_iter()
+        .filter(|termo| names(&minusculas, termo))
+        .map(|termo| {
+            format!("diz «{termo}», que não vale para toda origem nem para todo motivo da volta")
+        })
+        .collect();
+    if !trocado.contains("não chegaram a ele") {
+        erros.push(
+            "não diz que o convite, a senha e o apelido «não chegaram a ele», que é o que \
+             a recusa antes do `Hello` garante"
+                .to_owned(),
+        );
+    }
+    assert!(
+        erros.is_empty(),
+        "a frase de `ServidorTrocouNaVolta` promete o que o fim da sessão não sabe: a tela \
+         só recebe o `EndReason`, sem dizer se a impressão veio do link ou da lista, nem se \
+         foi a impressão ou a chave não provada. {erros:#?}\n{trocado}"
+    );
+
+    let chave = frase_de("ChaveMudouNaVolta");
+    assert!(
+        chave.contains("CHAVE"),
+        "a frase de `ChaveMudouNaVolta` não fala da chave, e o alarme de chave trocada do \
+         ADR 0003 se lê como outra recusa: {chave}"
+    );
+}
+
+#[test]
+fn quem_nao_prova_a_chave_tem_frase_propria_e_nao_a_de_versao_incompativel() {
+    // O impostor que repete o certificado do servidor sem ter a chave dele
+    // chegava como `Refused { Incompatible }`, e a tela mandava atualizar o
+    // SEELE nas duas máquinas. Agora chega como `ConnectionError::ChaveNaoProvada`,
+    // unitária, e `fraseDeErro` a lê em `FRASES` por esse nome: sem a entrada,
+    // devolve o nome cru da variante.
+    //
+    // `ConnectionError` não tem um guarda de todas as variantes contra
+    // `FRASES`, como `EndReason` tem contra `MOTIVOS`: várias têm a frase em
+    // outra tela (`tela-server.js`). Este guarda é desta variante.
+    //
+    // O nome vem do serde, e não de um texto aqui: renomear a variante reprova
+    // este guarda, em vez de deixar uma frase que ninguém lê.
+    let Ok(json) = serde_json::to_string(&seele_ffi::ConnectionError::ChaveNaoProvada) else {
+        panic!("ConnectionError does not serialise, so no shell can read it at all");
+    };
+    let nome = json.trim_matches('"');
+    let arquivo = without_comments(&read("ui/frases.js"));
+    let frases = sentences_of(&arquivo, "FRASES");
+    let Some((_, frase)) = frases.iter().find(|(variante, _)| variante == nome) else {
+        panic!(
+            "`ConnectionError::{nome}` chega à tela sem frase em `FRASES`, e a tela escreve \
+             o nome de uma variante do Rust a quem acabou de bater num impostor"
+        );
+    };
+    assert!(
+        frase.contains("NÃO PROVOU"),
+        "a frase de `{nome}` não diz que quem atendeu não provou ser o servidor, e se lê \
+         como outra recusa: {frase}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // What the owner asked for after installing the app and using it. Four guards,
 // and three of them guard an **absence** — the hardest kind to keep, because
@@ -8159,12 +8255,16 @@ fn o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob() {
 /// MODs publicados não a têm), e a região a chama com `?.` dentro de um `try`:
 /// um dono de `base.js` sem ela deixaria a recusa de mídia da região e das
 /// páginas chegar ao MOD e nenhuma linha chegar ao `seele.log`, sem erro
-/// nenhum que avisasse. Fora daqui, só a bancada de navegador
-/// `diagnostico-de-mods.cjs` segura o caso, pela recusa do som de uma página
+/// nenhum que avisasse. Fora daqui, até `4599e14`, só a bancada de navegador
+/// `diagnostico-de-mods.cjs` segurava o caso, pela recusa do som de uma página
 /// fechada («a recusa do som da página fechada não chegou ao registro»), e ela
 /// só roda no job `bancadas` do `ci.yml`, que sai por disparo manual. As seis
 /// bancadas de node do `cargo xtask check-runtime` e a `avatares-do-mod.cjs`
-/// ficam verdes com o dono sem `anotarRecusa` (medido em 01/10/2026).
+/// ficavam verdes com o dono sem `anotarRecusa` (medido em 01/10/2026). Desde
+/// `4599e14`, o bloco «o elo» da `contribuicoes-e-camadas.cjs`, que o
+/// `check-runtime` roda, também reprova (`confere("o elo · anotarRecusa", …)`),
+/// com o dono sem `anotarRecusa` e com o `meu()` invertido (medido de novo em
+/// 08/10/2026, com as duas mutações).
 #[test]
 fn o_dono_da_regiao_leva_cada_recusa_de_midia_ao_registro() {
     let dono = js_function(&read("ui/base.js"), "function donoDaRegiao(");

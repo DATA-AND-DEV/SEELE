@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace, Motivo};
-use seele_core::{Link, MemoryPinStore, PinStore, Verdict};
+use seele_core::{ConnectError, Link, MemoryPinStore, PinStore, Verdict};
 use seele_proto::control::{DisconnectReason, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::Location;
@@ -549,16 +549,26 @@ async fn a_volta_da_bateria_recusa_no_tls_o_impostor_que_a_impressao_desmente() 
         matches!(aviso, Aviso::Encerrado(_) | Aviso::Reconectado { .. })
     })
     .await;
-    let motivo = match fim {
-        Some(Aviso::Encerrado(Motivo::Recusado(motivo))) => motivo,
+    let (expected, offered) = match fim {
+        Some(Aviso::Encerrado(Motivo::Recusado(ConnectError::InviteMismatch {
+            expected,
+            offered,
+        }))) => (expected, offered),
         outro => panic!(
-            "a bateria não recusou o servidor que a impressão desmente: a volta \
-             entrou nele às cegas, ou nem terminou — {outro:?}"
+            "a bateria não recusou o servidor que a impressão desmente pela impressão: a \
+             volta entrou nele às cegas, nem terminou, ou acabou recusada por outro \
+             motivo — {outro:?}"
         ),
     };
-    assert!(
-        motivo.contains("InviteMismatch") && motivo.contains(&real) && motivo.contains(&ofertada),
-        "a volta acabou recusada por outro motivo: {motivo}"
+    assert_eq!(
+        expected, real,
+        "a recusa da volta não promete a impressão do servidor verdadeiro, e a tela \
+         compararia o impostor com outra coisa"
+    );
+    assert_eq!(
+        offered, ofertada,
+        "a recusa da volta não traz a impressão de quem atendeu, e a tela acusaria \
+         uma chave que ninguém ofereceu"
     );
     assert_eq!(
         loja.pinned(&chave_do_pin),
