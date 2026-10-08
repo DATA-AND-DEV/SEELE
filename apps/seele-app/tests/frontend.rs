@@ -9694,6 +9694,46 @@ fn a_linha_de_estado_nomeia_a_tecla_de_falar() {
         );
     }
 
+    // **E a faixa de contexto acompanha a troca.** A linha do operador é
+    // redesenhada a cada quadro; a faixa da configuração, não — ela era escrita
+    // ao abrir a tela, antes de a leitura da tecla voltar, e mais nunca. Medido
+    // na revisão do lote J: trocada a tecla para F, o botão e o operador diziam
+    // F, e a faixa ao lado continuava em «segura ESPAÇO». Por isso as duas
+    // releituras da tecla da configuração redesenham a faixa quando a leitura
+    // volta — dentro do `.then`, e não antes dele.
+    //
+    // O recorte é o argumento do `.then`, por parênteses casados: `abrirServer`
+    // também chama a faixa de forma síncrona logo depois, e essa chamada — a que
+    // lê a tecla de antes — não pode contar como a que espera a leitura.
+    let server = read("ui/tela-server.js");
+    for funcao in ["function pararDeOuvirTecla(", "async function abrirServer("] {
+        let corpo = js_function(&server, funcao);
+        let depois_da_leitura = corpo
+            .split_once("recarregarTeclaDeFalar().then(")
+            .map(|(_, resto)| {
+                let mut fundura = 1_i32;
+                let fim = resto
+                    .char_indices()
+                    .find(|&(_, letra)| {
+                        match letra {
+                            '(' => fundura += 1,
+                            ')' => fundura -= 1,
+                            _ => {}
+                        }
+                        fundura == 0
+                    })
+                    .map_or(resto.len(), |(onde, _)| onde);
+                &resto[..fim]
+            })
+            .unwrap_or_default();
+        assert!(
+            depois_da_leitura.contains("desenharContextoDaSessao()"),
+            "`{funcao}` relê a tecla de falar e não redesenha a faixa de contexto \
+             quando a leitura volta: a faixa continua dizendo a tecla de antes ao \
+             lado do botão que já diz a nova:\n{corpo}"
+        );
+    }
+
     // **Em `base.js`, porque as duas telas a usam.** Ela morava em
     // `tela-server.js`, que carrega depois de `tela-sessao.js`: chamada de lá,
     // a linha do operador só funcionaria porque o primeiro quadro chega depois

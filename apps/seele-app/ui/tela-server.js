@@ -742,7 +742,12 @@ async function abrirServer(origem) {
   $("server-erro").hidden = true;
   // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
   // janela, e a lista de atalhos que mente é o defeito que esta linha impede.
-  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
+  // A faixa de contexto é redesenhada de novo quando a leitura volta: a chamada
+  // síncrona logo abaixo ainda lê a tecla de antes.
+  recarregarTeclaDeFalar().then((tecla) => {
+    desenharTeclaDeFalar(tecla);
+    desenharContextoDaSessao();
+  });
   conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
   // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
@@ -850,8 +855,13 @@ function desenharContextoDaSessao() {
   //
   // **E a tecla pelo nome.** «abre na tecla» dizia que há uma e não qual, e a
   // tecla de falar se troca logo ao lado, em ATALHOS. `teclaDeFalar` é a que o
-  // `keydown` compara (`tela-sessao.js`), então a frase e o ouvinte não têm
-  // como discordar.
+  // `keydown` compara (`tela-sessao.js`).
+  //
+  // Ler a mesma variável não basta para concordar: esta faixa não é redesenhada
+  // a cada quadro, como a do operador. Ela fica certa porque as duas releituras
+  // da tecla — `abrirServer` e `pararDeOuvirTecla` — a redesenham quando a
+  // leitura volta. Escrita só ao abrir, ela dizia ESPAÇO ao lado do botão que já
+  // dizia F (revisão do lote J).
   const comoAbre = {
     PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
@@ -1576,7 +1586,13 @@ function pararDeOuvirTecla() {
   ouvindoTecla = false;
   const botao = $("server-tecla-falar");
   if (botao) delete botao.dataset.ouvindo;
-  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
+  // O botão e a faixa de contexto do cabeçalho, os dois com a tecla que voltou
+  // do disco: a faixa diz «segura ESPAÇO», e sem isto ela continuava dizendo a
+  // tecla de antes ao lado do botão que já dizia a nova.
+  recarregarTeclaDeFalar().then((tecla) => {
+    desenharTeclaDeFalar(tecla);
+    desenharContextoDaSessao();
+  });
   conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
 }
 
