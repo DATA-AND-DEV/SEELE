@@ -136,3 +136,9 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - `FalhaAoApagarPacote` não tem frase;
     - duas recusas vizinhas não deixam linha no registro;
     - nenhum guarda mede o tamanho da frase do atalho.
+- **M2 → integrado** (`0f94be6..80755ef`), em 2 rodadas. P51-16 em `8669d99`, P51-18 em `aa106bc`, P51-20 em `70a0f12`, e a escuta de teste compartilhada em `092dbfc`.
+  - **O Importante da revisão:** um teste novo escrevia `$SEELE_ENCONTRO` fora da trava, e era o terceiro escritor fora dela. O defeito foi reproduzido antes do conserto (3 em 6000 rodadas) e sumiu depois (0 em 6000).
+  - **Achado anterior à F5, medido neste Mac:** os testes do `seele-server` (`hospedagem.rs`) e o `ejetar.rs` falam com o ponto de encontro de produção, `encontro.seele.app.br`, sempre que `$SEELE_ENCONTRO` não está posta. Cada rodada registra a marca de um servidor de teste no quarto e deixa lá o IP público da máquina.
+    - Nenhum teste afirma esse degrau.
+    - A orquestradora foi avisada.
+    - O conserto sugerido é uma costura que passe `convocacao = None` à `Hospedagem::iniciar` em teste.
