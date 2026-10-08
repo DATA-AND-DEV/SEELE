@@ -345,7 +345,8 @@ que mudou é texto do `seele.log`, que não é promessa da API.
 
 ## Rodada 1 de conserto
 
-A revisão deu «precisa de conserto», por um Importante e oito menores. Mesmo
+A revisão deu «precisa de conserto», com nove achados: um Importante, sete
+menores e uma nota para o guia que não é defeito do lote. Mesmo
 worktree, mesmo branch (`0.16/lotes-c`), a partir de `c7431ae7`. Seis commits
 de código e este relatório.
 
@@ -546,7 +547,7 @@ depois da troca:
   `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
   limpos antes de cada commit. O único aviso é o `ld: duplicate -rpath`.
 
-### Nota para o guia (o nono menor, que não é defeito do lote)
+### Nota para o guia (o nono achado, que não é defeito do lote)
 
 Desde o P51-05, um `mod_id=` que um MOD escreva na frase da janela sai entre
 aspas, dentro de `frase="…"`, e depois do `mod_id=` verdadeiro. Mas o grep que
@@ -569,3 +570,92 @@ texto. O lote não mexe no guia.
    thread que já tem a guarda volta `WouldBlock`, e não trava. É o que a
    documentação de `Mutex::try_lock` promete; se um dia o mapa trocar de
    cadeado, o teste tem de ser revisto junto.
+
+## Rodada 2
+
+A re-revisão resolveu os nove achados e pediu uma passada curta. Mesmo
+branch, a partir de `6c6f8a1a`. Dois commits de código e este relatório; só
+`apps/seele-app/src/main.rs` mudou.
+
+| commit | item | o que muda |
+|---|---|---|
+| `6e71e894` | 2 e 3 | a «mídia de MOD vinda do servidor» passa pelo teto, na classe `Depuracao`; o doc de `conta_do_balde_dita` diz quem a chama |
+| `bc2043a1` | 1 | o teste do cadeado conta só a linha da conta, e chama `segundo_despachante` |
+| (este) | 4 | a contagem dos achados no relatório |
+
+### Item 2: a última porta sem teto (`6e71e894`)
+
+O DEBUG «mídia de MOD vinda do servidor» de `midia_em_bytes` sai por
+`midia_vinda_do_servidor_dita(&baldes, agora, mod_id, geracao, papel, bytes)`,
+que passa por `linha_admitida` e escreve `suprimidas` e `transbordo` como as
+outras portas. **Na classe `Depuracao`, e não `Servida`:** a linha sai em
+DEBUG, que o filtro padrão do `seele.log` não escreve, e na classe das
+servidas ela gastaria a ficha de uma INFO que o arquivo mostra.
+
+Testes:
+- novo `a_midia_vinda_do_servidor_tem_teto_na_classe_da_depuracao`: 200
+  chamadas deixam 32 linhas, todas DEBUG, e a «mídia de MOD servida» do mesmo
+  MOD, logo depois, ainda sai;
+- novo `a_midia_vinda_do_servidor_nao_forja_linha`: com
+  `"a/b\nWARN seele_app: forjada"`, uma linha só, com o id filtrado;
+- `os_comandos_passam_os_baldes_da_sessao` conta a porta nova, e
+  `midia_em_bytes` passa a ter duas chamadas;
+- `nenhum_mod_id_em_display_usa_o_id_cru_do_comando` confere a função nova,
+  pelo nome que o id cru tem nela (`mod_id`, e não `id`).
+
+**RED**, com a linha extraída primeiro sem balde: `duzentas mídias vindas do
+servidor no mesmo instante passaram de outro jeito que a rajada`, `left: 200`,
+`right: 32`.
+
+**Reversões:**
+
+| mutação | vermelho |
+|---|---|
+| (a) sem `linha_admitida` | `left: 200`, `right: 32` |
+| (b) `Classe::Servida` em vez de `Depuracao` | `as mídias vindas do servidor gastaram a ficha das servidas do mesmo MOD` |
+| (c) `midia_em_bytes` passa `&BaldesDoRegistro::default()` | `` `fn midia_em_bytes(` chama `midia_vinda_do_servidor_dita(` sem `&session.baldes_do_registro` `` |
+| (d) `mod_id = %mod_id` cru | `a_midia_vinda_do_servidor_nao_forja_linha` e o guarda: `` escreve `mod_id = %mod_id` com o id cru `` |
+
+**Um tropeço do script de reversão, e o que fiz.** Na primeira tentativa da
+(b), o texto trocado (`Classe::Servida, mod_id)`) aparecia em três lugares
+depois da troca, e o script parou antes de desfazê-la. As reversões (c) e (d)
+rodaram em cima desse arquivo mudado. Achei pela saída («esperava 1 ocorrência,
+achei 3»), restaurei a linha à mão, conferi o `git diff` inteiro contra o
+commit, guardei uma cópia do arquivo pronto e refiz a (b), a (c) e a (d) com
+trechos únicos nos dois sentidos. As três deram o vermelho da tabela, e o
+arquivo voltou igual à cópia (`cmp`).
+
+### Item 3: o doc da conta (`6e71e894`)
+
+O doc de `conta_do_balde_dita` deixa de dizer «quando a sessão fecha
+(`Session::revogar`)»: quem a chama é `Session::dizer_as_contas_do_registro`,
+ao fechar a sessão e na saída do app, que não passa por `revogar`.
+
+### Item 1: a asserção que podia ficar vazia (`bc2043a1`)
+
+A camada de `a_conta_e_dita_com_o_cadeado_dos_baldes_solto` passa a olhar só
+os eventos cuja mensagem é `CONTA_DO_BALDE_DO_REGISTRO` (um `Visit` no campo
+`message`), e a asserção pede exatamente uma conta, em vez de `>= 1` de
+qualquer evento. O teste chama `rastro_de_teste::segundo_despachante()`, como
+`capturar` faz, e a função passou a `pub(crate)` para isso.
+
+**Reversões:**
+
+| mutação | vermelho |
+|---|---|
+| (a) a conta dita com a guarda na mão | `a conta dos baldes foi escrita com o cadeado deles na mão` |
+| (b) `revogar` sem `dizer_as_contas_do_registro` | `a sessão fechou com um balde de linhas seguradas e não disse a conta dele uma vez`, `left: 0`, `right: 1` |
+| (c) o mesmo, com outra linha (`tracing::info!`) no lugar da conta | o mesmo vermelho: é o caso que o `>= 1` antigo deixava passar |
+
+### Item 4: a contagem
+
+A rodada 1 tinha «um Importante e oito menores» e «o nono menor». Os achados
+eram nove: um Importante, sete menores e a nota para o guia, que não é defeito
+do lote. As duas frases foram acertadas.
+
+### O que rodou
+
+- A suíte `--bin seele-app` inteira: **211 passaram, 0 falharam** (11,6 s).
+- `cargo fmt --all -- --check` e
+  `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
+  limpos antes de cada commit; só o aviso ambiental `ld: duplicate -rpath`.
