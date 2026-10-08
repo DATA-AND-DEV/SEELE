@@ -348,21 +348,34 @@ impl Session {
         if let Ok(mut ditas) = self.recusas_de_carga.lock() {
             ditas.clear();
         }
-        // **E os baldes do registro, com a conta dita antes.** Uma linha por
-        // MOD que tinha linhas seguradas sem outra depois que as contasse: sem
-        // ela, a conta caía com o balde, e o `seele.log` mostrava a rajada como
-        // se fosse tudo.
-        let mut baldes = self
-            .baldes_do_registro
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for ((classe, chave), balde) in baldes.iter_mut() {
+        // **E os baldes do registro, com a conta dita.**
+        self.dizer_as_contas_do_registro();
+        nova
+    }
+
+    /// **Diz a conta de cada balde do registro e os esvazia.**
+    ///
+    /// Uma linha por balde que tinha linhas seguradas sem outra depois que as
+    /// contasse ([`conta_do_balde_dita`]): sem ela, a conta caía com o balde,
+    /// e o `seele.log` mostrava a rajada como se fosse tudo. [`Self::revogar`]
+    /// a chama ao fechar a sessão; a saída do app, que não passa por ele, é a
+    /// outra porta que a deve chamar.
+    ///
+    /// **O mapa sai do cadeado antes de a primeira linha ser escrita.** Com a
+    /// guarda na mão, uma linha lenta no disco seguraria toda porta do
+    /// registro, de todo MOD, até terminar.
+    fn dizer_as_contas_do_registro(&self) {
+        let baldes = std::mem::take(
+            &mut *self
+                .baldes_do_registro
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for ((classe, chave), mut balde) in baldes {
             if let Some(suprimidas) = balde.pendentes() {
-                conta_do_balde_dita(*classe, chave, suprimidas);
+                conta_do_balde_dita(classe, &chave, suprimidas);
             }
         }
-        baldes.clear();
-        nova
     }
 
     /// Esta geração ainda é a de pé?
@@ -2456,6 +2469,11 @@ fn chave_do_balde(mod_id: &str) -> String {
 /// `Some(n)` é «passa», com quantas foram seguradas antes dela — o campo
 /// `suprimidas` da linha, no molde de [`registrar_console_do_mod`]; `None` é
 /// «segurada»: a linha não é escrita, e entra na conta da próxima.
+///
+/// **A conta só sai numa linha.** A de um MOD que se cala no meio da sessão
+/// espera a próxima linha dele, da mesma classe, ou o fim da sessão
+/// ([`Session::dizer_as_contas_do_registro`]): não há volta de motor aqui que
+/// a diga no meio do caminho, como o executor faz com o `console`.
 ///
 /// # Por que um teto por MOD
 ///
@@ -12663,6 +12681,110 @@ mod o_teto_de_vazao_do_registro {
                 .expect("os baldes")
                 .is_empty(),
             "os baldes atravessaram a sessão: a seguinte começa com o teto gasto pela anterior"
+        );
+    }
+
+    /// **A conta também é dita sem fechar a sessão**, por
+    /// `dizer_as_contas_do_registro` — que é o que a saída do app vai chamar.
+    /// Ela diz uma vez e esvazia os baldes: chamada de novo, não diz nada, e a
+    /// geração não anda.
+    #[test]
+    fn dizer_as_contas_do_registro_diz_uma_vez_e_esvazia() {
+        let sessao = Session::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..RAJADA_DO_CONSOLE as usize + 3 {
+                da_janela(&sessao.baldes_do_registro, agora, "a/b");
+            }
+            sessao.dizer_as_contas_do_registro();
+            sessao.dizer_as_contas_do_registro();
+        });
+        let contas: Vec<&str> = rastro
+            .lines()
+            .filter(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO))
+            .collect();
+        assert!(
+            contas.len() == 1 && contas.iter().all(|conta| conta.contains("suprimidas=3")),
+            "as contas não foram ditas uma vez, com as três linhas seguradas: a saída do app \
+             perde a conta, ou a diz duas vezes e o registro as soma: {rastro}"
+        );
+        assert!(
+            sessao
+                .baldes_do_registro
+                .lock()
+                .expect("os baldes")
+                .is_empty(),
+            "dizer as contas não esvaziou os baldes"
+        );
+        assert_eq!(
+            sessao.geracao(),
+            0,
+            "dizer as contas do registro fechou a sessão: ela é para a saída do app, e não \
+             revoga nada"
+        );
+    }
+
+    /// **A conta é dita com o cadeado dos baldes solto.**
+    ///
+    /// Escrita com ele na mão, uma linha que demora no disco segura toda porta
+    /// do registro de todo MOD, em toda thread, até terminar — e um assinante
+    /// que escrevesse pelo registro dentro do evento travaria no mesmo
+    /// cadeado. A camada abaixo tenta o cadeado a cada evento, na thread que
+    /// escreve: com a guarda na mão, o `try_lock` volta `WouldBlock`.
+    #[test]
+    fn a_conta_e_dita_com_o_cadeado_dos_baldes_solto() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use tracing_subscriber::layer::SubscriberExt as _;
+
+        /// Conta os eventos que acharam o cadeado livre e os que o acharam
+        /// preso.
+        struct TentaOCadeado {
+            baldes: &'static BaldesDoRegistro,
+            livre: Arc<AtomicUsize>,
+            preso: Arc<AtomicUsize>,
+        }
+
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for TentaOCadeado {
+            fn on_event(
+                &self,
+                _evento: &tracing::Event<'_>,
+                _contexto: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                let contador = if self.baldes.try_lock().is_ok() {
+                    &self.livre
+                } else {
+                    &self.preso
+                };
+                contador.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        // `'static`, porque o assinante é: a sessão de um teste só.
+        let sessao: &'static Session = Box::leak(Box::default());
+        let agora = origem();
+        for _ in 0..RAJADA_DO_CONSOLE as usize + 1 {
+            da_janela(&sessao.baldes_do_registro, agora, "a/b");
+        }
+        let livre = Arc::new(AtomicUsize::new(0));
+        let preso = Arc::new(AtomicUsize::new(0));
+        let assinante = tracing_subscriber::registry().with(TentaOCadeado {
+            baldes: &sessao.baldes_do_registro,
+            livre: Arc::clone(&livre),
+            preso: Arc::clone(&preso),
+        });
+        tracing::subscriber::with_default(assinante, || {
+            sessao.revogar();
+        });
+        assert_eq!(
+            preso.load(Ordering::Relaxed),
+            0,
+            "a conta dos baldes foi escrita com o cadeado deles na mão: uma linha lenta no disco \
+             segura o registro de todo MOD até terminar"
+        );
+        assert!(
+            livre.load(Ordering::Relaxed) >= 1,
+            "a sessão fechou com uma linha segurada e não disse a conta dela"
         );
     }
 
