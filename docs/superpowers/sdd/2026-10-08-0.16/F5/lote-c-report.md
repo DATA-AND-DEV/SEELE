@@ -307,17 +307,26 @@ já estava verde nesse passo, porque as chamadas já tinham a geração.
    pelo balde dividido leva em `suprimidas` as linhas seguradas de todos os ids
    que caíram nele. Está escrito no doc de `linha_admitida`. Só acontece com
    mais de 63 ids diferentes numa sessão, o que só uma janela que inventa ids
-   faz.
+   faz. *(Rodada 1: a linha que passa pelo transbordo agora diz
+   `transbordo=true`.)*
 4. **A conta pendente só é dita quando a sessão fecha** (`revogar`, que roda
    ao conectar e ao desmontar). Fechar o app com a sessão de pé
    (`ExitRequested` → `despedir_se`) não passa por `revogar`, e a última conta
    pendente, se houver, cai com o processo. É a mesma regra da memória das
    recusas de carga, e mexer no caminho de saída estava fora do lote.
-5. **A mídia servida (INFO) gasta do mesmo balde que os avisos do MOD.** É a
-   decisão do brief (o som servido entra no teto junto com as recusas). A
-   consequência: um MOD que monta mais de 32 mídias de uma vez gasta a rajada
-   em linhas INFO, e um aviso logo depois espera a próxima ficha (250 ms) e sai
-   com a conta. Nada some; o aviso só chega um pouco depois, contado.
+   *(Rodada 1: a conta saiu para `Session::dizer_as_contas_do_registro`, que o
+   lote F, dono de `despedir_se`, vai chamar. Até lá, a saída do app ainda
+   perde a última conta.)*
+5. ~~**A mídia servida (INFO) gasta do mesmo balde que os avisos do MOD.** …
+   um aviso logo depois espera a próxima ficha (250 ms) e sai com a conta. Nada
+   some; o aviso só chega um pouco depois, contado.~~ **Isto estava errado, e
+   a revisão achou.** Uma linha segurada não espera ficha nenhuma: quando
+   `linha_admitida` devolve `None`, a porta dá `return`, a linha não é
+   escrita, e só a conta segue, na próxima linha do mesmo MOD — que podia ser
+   outra INFO de «mídia de MOD servida» — ou no `revogar`. Com um balde só por
+   MOD, um MOD que montasse mais de 32 mídias de uma vez fazia a recusa da
+   35ª sumir: o defeito de 23/09. Consertado na rodada 1 (Importante 1), com
+   um balde por MOD e por classe.
 6. **A forma da linha da janela mudou no `seele.log`.** A frase agora vai entre
    aspas e escapada: um `grep` por uma frase que tenha `"` ou `\` precisa do
    escape. Os greps do guia (`mod_id=…`) e do Plano 1D (`recusa-de-mod`, as
@@ -333,3 +342,230 @@ já estava verde nesse passo, porque as chamadas já tinham a geração.
 
 Nada. O lote não cria evento, campo do retrato nem frase no `api/README.md`; o
 que mudou é texto do `seele.log`, que não é promessa da API.
+
+## Rodada 1 de conserto
+
+A revisão deu «precisa de conserto», por um Importante e oito menores. Mesmo
+worktree, mesmo branch (`0.16/lotes-c`), a partir de `c7431ae7`. Seis commits
+de código e este relatório.
+
+| commit | item | o que muda |
+|---|---|---|
+| `b9d0aea9` | menor 5 | a chamada do teste do id forjado volta ao formato do arquivo (o resto do script estava na coluna zero) |
+| `6979c2b7` | Importante 1 (e a `const` do menor 6) | um balde por MOD e por classe de linha; o transbordo é por classe; a conta sai no nível da classe |
+| `8e55ccbb` | menores 1 e 2 | a conta sai com o cadeado solto, por `Session::dizer_as_contas_do_registro`, que `revogar` chama |
+| `33401b5e` | menores 3 e 7 | a linha do transbordo diz `transbordo=true`; o id que o filtro esvazia ganha o balde e o rótulo de ilegível |
+| `8f342d73` | menor 4 | guarda de fonte: os cinco comandos passam `&session.baldes_do_registro` às portas |
+| `8419adbd` | menor 6 | o guarda do id cru usa `fonte_sem_comentarios` e `corpo_de` |
+
+Arquivo mudado nos seis: só `apps/seele-app/src/main.rs`.
+
+Todos os testes desta seção rodaram com
+`perl -e 'alarm 600; exec @ARGV' cargo test -p seele-app --bin seele-app …`,
+com `CARGO_BUILD_JOBS=8`. As reversões, como na primeira rodada, pelo script
+que troca o trecho, roda, desfaz e compara o `main.rs` byte a byte: todas
+voltaram «restaurado byte a byte».
+
+### Importante 1: um aviso segurado não atrasava, sumia (`6979c2b7`)
+
+**Produto.**
+- `enum Classe { Aviso, Servida, Depuracao }`, com `Classe::TODAS`. A chave do
+  mapa vira `(Classe, String)`:
+  - `Aviso`: a janela em `aviso` e `erro`, e a mídia recusada;
+  - `Servida`: a mídia e o som servidos;
+  - `Depuracao`: o braço `_` da janela (DEBUG) e o DEBUG de `sessao-encerrada`
+    em `recusa_de_midia_dita`.
+- `linha_admitida(&baldes, agora, classe, mod_id)`. `registrar_da_janela_em`
+  escolhe a classe pelo `nivel`; `recusa_de_midia_dita` lê o motivo antes do
+  balde, para escolher a classe.
+- O limite de 64 entradas fica, e o transbordo é por classe: um lugar é
+  guardado para o transbordo de cada uma (61 baldes próprios e 3 de
+  transbordo). As servidas que transbordam não gastam a ficha de um aviso que
+  transborda.
+- A conta do fim da sessão (`conta_do_balde_dita`) sai no nível da classe que
+  conta: WARN, INFO ou DEBUG. A frase dela virou
+  `const CONTA_DO_BALDE_DO_REGISTRO` (é o menor 6, feito aqui porque a função
+  foi reescrita).
+
+**Testes** (em `o_teto_de_vazao_do_registro`):
+- novo `uma_recusa_depois_de_quarenta_servidas_do_mesmo_mod_sai`: 40
+  `midia_servida_dita` e uma recusa, do mesmo MOD e no mesmo instante; a
+  recusa sai, e sem `suprimidas`;
+- novo `a_depuracao_nao_gasta_a_ficha_nem_infla_a_conta_de_um_aviso`: 40
+  linhas DEBUG da janela e um aviso; o aviso sai, sem `suprimidas`;
+- `as_portas_do_mesmo_mod_dividem_o_balde` passa a afirmar a divisão dentro
+  de cada classe: 17 rodadas das seis portas (janela em aviso, recusa, mídia
+  servida, som servido, janela em DEBUG, sessão encerrada) deixam 32 WARN, 32
+  INFO e 32 DEBUG;
+- `com_o_mapa_cheio_um_id_novo_passa_pelo_transbordo` passa a encher os 61
+  baldes próprios, mandar 200 servidas e depois 200 avisos de ids novos: os
+  dois deixam entre 1 e 32 linhas (as servidas não secam o transbordo dos
+  avisos); os ids novos seguintes não deixam nenhuma; e o mapa fecha em 64,
+  com as três classes transbordando.
+
+**RED** (`… -- o_teto_de_vazao_do_registro`, contra `b9d0aea9`): 3 falhas, 6
+verdes. O do transbordo, reescrito para as classes, foi provado pela reversão
+(b), abaixo.
+- `uma_recusa_depois_de_quarenta_servidas…`: `quarenta mídias servidas do mesmo MOD gastaram a ficha da recusa, e ela sumiu do seele.log`;
+- `a_depuracao_nao_gasta…`: `quarenta linhas DEBUG da janela seguraram o aviso do mesmo MOD`;
+- `as_portas…`: `as duas portas da classe aviso do mesmo MOD não deixaram uma rajada só`, `left: 12`, `right: 32`.
+
+**GREEN:** os quatro módulos do registro, 38 passaram, 0 falharam.
+
+**Reversões.**
+
+| mutação | vermelho |
+|---|---|
+| (a) uma classe só na chave e no transbordo (`Classe::Aviso` fixo) | as quatro: a recusa atrás das servidas, a depuração, `as_portas…` (`left: 12`) e o transbordo (`left: 62`, `right: 64`) |
+| (b) um transbordo só, dividido pelas classes | `com_o_mapa_cheio…`: `` `novo/x` deixou 0 linhas em duzentas: … ou outra classe secou o transbordo desta `` |
+| (c) o braço `_` da janela na classe dos avisos | `a_depuracao_nao_gasta…`, `as_portas…` e o transbordo |
+
+Na reversão (b), a primeira versão do teste do transbordo caía na asserção do
+tamanho do mapa (62 em vez de 64), antes da que mede a classe. Inverti a ordem
+das asserções antes do commit, para o vermelho dizer o motivo de verdade.
+
+### Menores 1 e 2: a conta com o cadeado solto, e uma porta para a saída do app (`8e55ccbb`)
+
+**Produto.** `Session::revogar` passa a chamar
+`Session::dizer_as_contas_do_registro()`, que tira o mapa com
+`std::mem::take(&mut *guarda)` — a guarda é um temporário da instrução e cai
+nela — e só então diz as contas. `revogar` faz o que fazia. O doc de
+`linha_admitida` diz que a conta de um MOD que se cala no meio da sessão só
+sai na próxima linha dele, da mesma classe, ou no fim da sessão.
+`despedir_se` não foi tocado: o lote F vai chamar a função nova.
+
+**Testes:**
+- `a_conta_e_dita_com_o_cadeado_dos_baldes_solto`: uma camada do
+  `tracing_subscriber` tenta `try_lock` nos baldes a cada evento, na thread
+  que escreve. Com a guarda na mão, o `try_lock` volta `WouldBlock`. A sessão
+  é `Box::leak`, porque o assinante é `'static`;
+- `dizer_as_contas_do_registro_diz_uma_vez_e_esvazia`: 35 avisos de `a/b`,
+  e duas chamadas: uma conta só, com `suprimidas=3`, o mapa vazio e a geração
+  em 0 (não revoga nada).
+
+**RED.**
+- `a_conta_e_dita_com_o_cadeado…`: `a conta dos baldes foi escrita com o cadeado deles na mão`, `left: 1`, `right: 0`;
+- `dizer_as_contas…`: não compila, `error[E0599]: no method named dizer_as_contas_do_registro found for struct Session`. É o vermelho de uma extração: o teste chama uma função que ainda não existe.
+
+**GREEN:** `o_teto_de_vazao_do_registro` e `a_carga_recusada…`, 19 passaram,
+0 falharam.
+
+**Reversões.**
+
+| mutação | vermelho |
+|---|---|
+| (a) a conta volta a ser dita com a guarda na mão (`iter_mut` e `clear`) | `a_conta_e_dita_com_o_cadeado…`: `a conta dos baldes foi escrita com o cadeado deles na mão` |
+| (b) `revogar` sem chamar `dizer_as_contas_do_registro` | `revogar_diz_a_conta…` (`não disse uma conta por balde`) e `a_conta_e_dita_com_o_cadeado…` (`a sessão fechou com uma linha segurada e não disse a conta dela`) |
+
+### Menores 3 e 7: `transbordo=true`, e o id ilegível fora do catálogo (`33401b5e`)
+
+**Produto.**
+- `linha_admitida` devolve `Option<Admitida>`, com `suprimidas: Option<u32>`
+  (só quando não é zero) e `transbordo: Option<bool>` (`Some(true)` quando a
+  linha passou pelo balde dividido). As quatro portas escrevem os dois
+  campos. O doc de `Admitida::transbordo` diz o porquê: a conta de lá é de
+  todos os ids que caíram nele.
+- `chave_do_balde` sai dos três braços de `IdDoPedido`: vazio é
+  `BALDE_DO_CATALOGO`, o que o filtro esvazia é `BALDE_ILEGIVEL`
+  (`"\u{0}ilegivel"`), e o resto é o id filtrado. A conta desse balde sai
+  como `mod_id_ilegivel=true`.
+
+**Testes:**
+- `a_linha_que_passa_pelo_transbordo_diz_que_passou`: com os 61 baldes
+  próprios cheios, a linha de `novo/x` traz `transbordo=true`, e a de
+  `cheio/0` não traz `transbordo`;
+- `um_id_que_o_filtro_esvazia_conta_como_ilegivel_e_nao_como_catalogo`: 34
+  avisos com o id `"\u{202E}\n"` não seguram a linha do catálogo, e a conta
+  sai uma vez, com `mod_id_ilegivel=true`, `suprimidas=2` e sem `catalogo`.
+
+**RED:** 2 falhas.
+- transbordo: `a linha que passou pelo balde dividido não diz transbordo=true`;
+- ilegível: `a linha do catálogo foi segurada pelas linhas de um id ilegível`.
+
+**GREEN:** os quatro módulos do registro, 42 passaram, 0 falharam.
+
+**Reversões.**
+
+| mutação | vermelho |
+|---|---|
+| (a) `transbordo` sempre `None` | `a_linha_que_passa_pelo_transbordo…`: `não diz transbordo=true` |
+| (b) o braço ilegível de `chave_do_balde` volta ao `BALDE_DO_CATALOGO` | `um_id_que_o_filtro_esvazia…`: `a linha do catálogo foi segurada pelas linhas de um id ilegível` |
+
+### Menor 4: os comandos passam os baldes da sessão (`8f342d73`)
+
+**Teste:** `os_comandos_passam_os_baldes_da_sessao`. Em `registrar_da_janela`,
+`midia_do_mod`, `som_do_mod`, `midia_em_bytes` e `ler_imagem_mod`, lidos por
+`fonte_sem_comentarios` e `corpo_de` e sem espaço, toda chamada de uma das
+sete portas (`registrar_da_janela_em`, `midia_declarada_do_mod`,
+`midia_servida_dita`, `som_declarado_do_mod`, `som_servido_dito`,
+`midia_do_servidor_dita`, `recusa_de_midia_dita`) tem de começar com
+`&session.baldes_do_registro,`. E cada comando ainda chama tantas portas quanto
+chamava (1, 2, 2, 1 e 2).
+
+Ele nasceu verde, porque o código estava certo. A prova é a reversão:
+
+| mutação | vermelho |
+|---|---|
+| (a) `registrar_da_janela` passa `&BaldesDoRegistro::default()` | `` `fn registrar_da_janela(` chama `registrar_da_janela_em(` sem `&session.baldes_do_registro` `` |
+| (b) o mesmo na `midia_servida_dita` de `midia_do_mod` | `` `fn midia_do_mod(` chama `midia_servida_dita(` sem … `` |
+| (c) o mesmo na segunda `recusa_de_midia_dita` de `ler_imagem_mod` | `` `async fn ler_imagem_mod(` chama `recusa_de_midia_dita(` sem … `` |
+| (d) `midia_em_bytes` chama `ler_midia_do_servidor` direto, por fora da porta | `` `fn midia_em_bytes(` chama 0 das portas medidas, e chamava 1 `` |
+
+### Menor 5: a linha sem formato (`b9d0aea9`)
+
+A chamada de `recusa_de_midia_dita` em `o_id_que_a_janela_manda_nao_forja_linha`
+tinha `&BaldesDoRegistro::default(), origem(),` na coluna zero, na mesma linha
+do id. O id é longo demais para o `rustfmt`, que não reformata a chamada; foi
+consertada à mão. `cargo fmt --all -- --check` limpo, e o teste verde (1
+passou).
+
+### Menor 6: os ajudantes duplicados (`8419adbd`, e a `const` em `6979c2b7`)
+
+`nenhum_mod_id_em_display_usa_o_id_cru_do_comando` deixou de ler o `main.rs`
+por conta própria: a fonte vem de `fonte_sem_comentarios()`, e o corpo de
+`corpo_de`, sem espaço. O que ele confere não muda. Os outros dois ajudantes
+parecidos (`corpo_sem_espaco` de `a_carga_recusada…`, que corta pela
+assinatura e tira o `,)` do `rustfmt`, e o laço de
+`os_quatro_comandos_de_midia…`) não foram tocados: eles provam outra forma, e
+não são deste conserto.
+
+**Prova de que o guarda ainda morde:** as três reversões do P51-10, de novo,
+depois da troca:
+
+| mutação | vermelho |
+|---|---|
+| os braços legíveis de `mod_request` voltam a `%id` | `` `fn pedido_a_caminho_dito(` escreve `mod_id = %id` `` (e a forja) |
+| `midia_em_bytes` volta a `%id` | `` `fn midia_em_bytes(` escreve `mod_id = %id` `` |
+| `escolher_para_o_mod` volta a `%id` | `` `async fn escolher_para_o_mod(` escreve `mod_id = %id` `` |
+
+### O que rodou na rodada
+
+- A suíte `--bin seele-app` inteira, antes do último commit de código: **209
+  passaram, 0 falharam** (12,2 s).
+- `cargo fmt --all -- --check` e
+  `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
+  limpos antes de cada commit. O único aviso é o `ld: duplicate -rpath`.
+
+### Nota para o guia (o nono menor, que não é defeito do lote)
+
+Desde o P51-05, um `mod_id=` que um MOD escreva na frase da janela sai entre
+aspas, dentro de `frase="…"`, e depois do `mod_id=` verdadeiro. Mas o grep que
+`docs/como-se-faz-um-mod.md` ensina (`grep "mod_id=fulano/meu-mod"`) casa com
+qualquer pedaço da linha, e acha também a linha de outro MOD cuja frase cite
+`mod_id=fulano/meu-mod`. Quem atualizar o guia pode dizer que o campo
+verdadeiro é o que vem antes de `frase=`, ou ensinar a procurar o campo e não o
+texto. O lote não mexe no guia.
+
+### Preocupações da rodada
+
+1. **A memória por MOD triplica.** Um MOD que escreve nas três classes ocupa
+   três entradas do mapa, e o limite de 64 continua: cabem 61 pares (MOD,
+   classe) com balde próprio, cerca de vinte MODs que usam as três classes.
+   Os que chegam depois dividem o transbordo da classe. Com os MODs de uma
+   sessão de verdade, é folga; com uma janela que inventa ids, é o teto.
+2. **A conta na saída do app continua perdida até o lote F** chamar
+   `dizer_as_contas_do_registro` em `despedir_se`.
+3. **O teste do cadeado depende de uma propriedade do `std`**: `try_lock` na
+   thread que já tem a guarda volta `WouldBlock`, e não trava. É o que a
+   documentação de `Mutex::try_lock` promete; se um dia o mapa trocar de
+   cadeado, o teste tem de ser revisto junto.
