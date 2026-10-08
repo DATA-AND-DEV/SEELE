@@ -417,8 +417,10 @@ fn conferir_api(
 ///
 /// Um resumo que não consegue ser escrito sai com falha, como o `println!` de
 /// antes, que entrava em pânico: o CI não fica verde sem o log dizer o que foi
-/// conferido. As falhas que não se escrevem não mudam o código, que já é de
-/// falha.
+/// conferido. E diz isso, e o porquê, em `erros`, para que o vermelho não
+/// chegue sem nenhuma linha que o explique. Se o próprio `erros` não se
+/// escreve, não há mais por onde dizer, e o código de falha é o que sobra; o
+/// mesmo vale para as falhas de `api/`, cujo código já é de falha.
 fn relatar(
     resultado: Result<Resumo, Vec<String>>,
     n_momentos: usize,
@@ -435,10 +437,14 @@ fn relatar(
                  {n_eventos} evento(s), cobrados em {cobradas} versão(ões) a partir da \
                  {PRIMEIRA_API_COBRADA}."
             );
-            if escrito.is_ok() {
-                ExitCode::SUCCESS
-            } else {
-                ExitCode::FAILURE
+            match escrito {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(erro) => {
+                    // Se nem o erro se escreve, não há mais por onde dizer; o
+                    // código de falha é o que sobra.
+                    let _ = writeln!(erros, "check-api: não deu para escrever o resumo ({erro})");
+                    ExitCode::FAILURE
+                }
             }
         }
         Err(falhas) => {
@@ -1215,7 +1221,9 @@ fn vizinha(x: u8) -> (&'static str, u8) {
 
     /// Um resumo que não consegue ser escrito não é um `check-api` que passou:
     /// quem lê o log ficaria sem saber o que foi conferido. `println!` entrava
-    /// em pânico nesse caso, e o código de saída nunca era 0.
+    /// em pânico nesse caso, e o código de saída nunca era 0. E a falha não sai
+    /// calada: o erro diz que não deu para escrever o resumo e por quê, para que
+    /// o vermelho do CI não chegue sem nenhuma linha que o explique.
     #[test]
     fn o_check_api_que_nao_consegue_dizer_o_resumo_nao_sai_com_sucesso() {
         /// Uma saída que recusa tudo, como um cano quebrado.
@@ -1244,6 +1252,14 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             ExitCode::FAILURE,
             "o `check-api` não conseguiu escrever o resumo e saiu com 0: o CI ficaria verde sem \
              o log dizer o que foi conferido"
+        );
+        let erros = String::from_utf8_lossy(&erros);
+        assert!(
+            erros.starts_with("check-api: não deu para escrever o resumo")
+                && erros.contains("cano quebrado provocado pelo teste"),
+            "o `check-api` saiu com falha por não conseguir escrever o resumo e não disse isso \
+             nem o porquê no erro: o vermelho do CI chegaria sem nenhuma linha que o explique. \
+             Saiu {erros:?}"
         );
     }
 
