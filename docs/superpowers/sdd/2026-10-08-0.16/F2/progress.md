@@ -18,30 +18,60 @@ depois do `dc001a0a`: só `integracao.md`).
   `ed25519-dalek` 3.0.0 tem `verify_strict`.
 - **O nightly e o `cargo-fuzz` 0.13.2 estão instalados.**
 
-## Decisões para o dono (pela orquestradora)
+## Decisões do dono (08/10, pela orquestradora)
 
-- **D-enc-1** — o limite e o teto. Proposta no plano, com a conta: balde de 64
-  que enche a 8/s por `/32` e `/64`, só no ENC/2 (60 SEELE abertos atrás de um
-  IP passam para sempre); teto de 16 384 marcas no quarto assinado, separado das
-  4096 do ENC/1; quem passa ouve `RECUSA taxa` uma vez por segundo, e o produto
-  diz.
-- **D-enc-2** — o `publicar.sh` rodar `sondar --exige-enc2` antes de publicar.
-  A receita sai de qualquer jeito (Task 13).
+- **D-enc-1, decidida como proposta:** um balde de 64 que enche a 8/s, por `/32`
+  e `/64`, só no ENC/2; o teto do quarto assinado é de 16 384 marcas, separado
+  das 4096 do ENC/1. Quem passa ouve `RECUSA taxa` no máximo uma vez por segundo
+  por prefixo, e o log diz que o limite é por endereço público. O limite por
+  `/48` fica como segundo degrau.
+- **D-enc-2, sim:** o `conferir_ponto_de_encontro` entra no `publicar.sh` num
+  commit à parte, perto do `conferir_condicoes_das_notas` da F6 (avisar a F6). Uma
+  opção de pular, se existir, deixa dito no corpo do release que o ponto não foi
+  conferido, como o `--sem-bateria`.
+- As duas vão para o ADR 0062.
+
+## A ordem mudou (aviso da orquestradora)
+
+A F5, no lote G-servidor, muda a `Convocacao::do_ambiente`: sem
+`$SEELE_ENCONTRO`, nenhum ponto. **A Task 3 (o `PONTO_PADRAO` no `seele-proto`)
+e a Task 8 (o assinante na `Convocacao`) esperam o G-servidor em
+`versao/0.16`**, e são feitas em cima dele. Conferido: o `0.16/lotes-g-servidor`
+não toca no `seele-core/src/encontro.rs`, então a Task 9 não espera.
+
+## Medidas e achados da execução
+
+- **O macOS também trunca sem erro.** Com o balde do ponto do tamanho exato, um
+  `ONDE` com um byte a mais (97) era respondido: o `recv_from` devolve 96 e o
+  pedaço forma um pedido. O balde de `TAMANHO2 + 1` fecha isso nas duas versões
+  (Task 6), e `um_datagrama_maior_que_o_do_protocolo_e_calado` prende.
+- **O `verify_strict` ganhou teste.** O plano dizia que nenhum teste o separava
+  do `verify`. A chave identidade (ordem pequena) com `R = identidade, s = 0`
+  confere com qualquer mensagem no `verify`, e
+  `uma_chave_fraca_nao_registra_com_a_assinatura_que_vale_para_tudo` reprova na
+  troca (Task 4).
+- **Um defeito no balde do plano.** Contar o enchimento a partir de agora, em
+  milissegundos inteiros, nunca enchia com pedidos mais próximos que 1 ms. O balde
+  avança só o que contou (Task 5), e um teste prende.
 
 ## Tarefas
 
 | # | tarefa | estado | commit |
 |---|---|---|---|
-| 1 | o fio do ENC/2 no `seele-proto` | a fazer | |
-| 2 | a mensagem que a chave assina no `MORO2` | a fazer | |
-| 3 | o `PONTO_PADRAO` no `seele-proto` | a fazer | |
-| 4 | o quarto assinado | a fazer | |
-| 5 | o limite por prefixo | a fazer | |
-| 6 | o ponto fala as duas versões | a fazer | |
-| 7 | o `sondar` aprende o `/2` | a fazer | |
-| 8 | o anfitrião assina e diz | a fazer | |
+| 1 | o fio do ENC/2 no `seele-proto` | feita | `d7d8a92b` |
+| 2 | a mensagem que a chave assina no `MORO2` | feita | `c7b2048e` |
+| 3 | o `PONTO_PADRAO` no `seele-proto` | **espera o G-servidor** | |
+| 4 | o quarto assinado | feita | `830dd365` |
+| 5 | o limite por prefixo | feita | `0d273738` |
+| 6 | o ponto fala as duas versões | feita | `50488d25` |
+| 7 | o `sondar` aprende o `/2` | feita | `f3e1bff8` |
+| 8 | o anfitrião assina e diz | **espera o G-servidor** | |
 | 9 | quem liga pergunta pelo `QUEM2` | a fazer | |
-| 10 | de ponta a ponta | a fazer | |
+| 10 | de ponta a ponta | espera a 8 | |
 | 11 | o ENC/2 no fuzz | a fazer | |
 | 12 | o ADR 0062 e as frases públicas | a fazer | |
 | 13 | o portão da VPS | a fazer | |
+
+**Marco: o lado do ponto está pronto** (Tasks 1, 2, 4, 5, 6 e 7). Depois do merge,
+o binário do `seele-encontro` deste branch é o que vai para a VPS, e o
+`sondar --exige-enc2` confere de fora.
