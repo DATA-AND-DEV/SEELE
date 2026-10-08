@@ -121,11 +121,13 @@ const MARCAS_NO_QUARTO: usize = 4096;
 
 /// Onde cada marca disse que mora, e desde quando.
 ///
-/// **A única memória deste processo, e o ADR 0022 a recusava.** A revisão de
+/// **A memória deste processo, e o ADR 0022 a recusava.** A revisão de
 /// 03/09/2026 está escrita no cabeçalho de `seele_proto::encontro`, com o que
 /// ela custa. O resumo do que vive aqui: um mapa dos 16 primeiros caracteres da
 /// impressão digital (e uma letra) para um endereço, em RAM, com prazo. Nunca em
-/// disco. Nunca no `--barulhento`.
+/// disco. Nunca no `--barulhento`. Ao lado dele moram o quarto assinado do
+/// ENC/2 ([`assinado`], ADR 0062) e o limite por prefixo ([`taxa`]), com as
+/// mesmas regras: em memória, e nunca escritos.
 ///
 /// `Mutex` e não `RwLock`: as duas famílias são duas linhas de execução e cada
 /// datagrama toca o mapa uma vez, então não há leitura concorrente longa a
@@ -453,17 +455,41 @@ impl Ponto {
 
     /// Atende para sempre.
     ///
-    /// Só volta se a **leitura** falhar, que é a única falha que não é de quem
-    /// mandou o datagrama.
+    /// Só volta se a **leitura** falhar por um motivo que não é de um
+    /// datagrama só ([`erro_de_um_datagrama`]): esses são calados, e o serviço
+    /// segue.
     ///
     /// # Errors
     ///
     /// O erro de leitura que o fez parar.
     pub fn servir(&self) -> io::Result<std::convert::Infallible> {
         loop {
-            self.atender()?;
+            match self.atender() {
+                Ok(_) => {}
+                Err(erro) if erro_de_um_datagrama(&erro) => {
+                    if self.barulhento {
+                        eprintln!("um datagrama não se leu, e foi calado: {erro}");
+                    }
+                }
+                Err(erro) => return Err(erro),
+            }
         }
     }
+}
+
+/// Se este erro de leitura é de um datagrama só, e não do socket.
+///
+/// No Windows, um datagrama maior que o balde dá erro na leitura
+/// (`WSAEMSGSIZE`, 10040), e o «porta fechada» de um envio anterior também
+/// (`WSAECONNRESET`, que a `std` lê como `ConnectionReset`). Com o `servir`
+/// parando no primeiro, um ponto no Windows morria com o primeiro datagrama
+/// grande ou com um ICMP qualquer (a revisão de 08/10/2026; não medido no
+/// Windows). O 10040 é conferido em todo sistema: nos outros, os números de
+/// erro são pequenos, e ele não colide com nenhum.
+fn erro_de_um_datagrama(erro: &io::Error) -> bool {
+    /// `WSAEMSGSIZE`: o datagrama não coube no balde.
+    const WSAEMSGSIZE: i32 = 10040;
+    erro.kind() == io::ErrorKind::ConnectionReset || erro.raw_os_error() == Some(WSAEMSGSIZE)
 }
 
 #[cfg(test)]
@@ -518,6 +544,33 @@ mod tests {
             ligar(format!("0.0.0.0:{porta}").parse().unwrap()).is_ok(),
             "o IPv4 não subiu na mesma porta do IPv6, então o IPv6 tomou as duas"
         );
+    }
+}
+
+#[cfg(test)]
+mod um_datagrama_so {
+    use super::*;
+
+    #[test]
+    fn o_erro_de_um_datagrama_nao_para_o_servico() {
+        // No Windows, um datagrama maior que o balde dá erro na leitura
+        // (`WSAEMSGSIZE`, 10040), e o «porta fechada» de um envio anterior
+        // também (`WSAECONNRESET`, que vira `ConnectionReset`). Os dois são de
+        // um datagrama só. Com o `servir` parando na primeira leitura que
+        // falhava, um ponto no Windows morria com o primeiro `QUEM2` de 384
+        // bytes que chegasse a um balde menor, ou com um ICMP qualquer.
+        assert!(erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::ConnectionReset
+        )));
+        assert!(erro_de_um_datagrama(&io::Error::from_raw_os_error(10040)));
+        // E o resto continua parando: um socket que deixou de existir não
+        // volta, e girar em volta dele seria um laço quente.
+        assert!(!erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::NotConnected
+        )));
+        assert!(!erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
     }
 }
 
