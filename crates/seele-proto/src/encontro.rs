@@ -674,6 +674,389 @@ fn global_v6(endereco: Ipv6Addr) -> bool {
         && !(primeiro == 0x2001 && endereco.segments().get(1) == Some(&0x0db8))
 }
 
+// ---------------------------------------------------------------------------
+// SEELE-ENC/2: o registro assinado (ADR 0062)
+// ---------------------------------------------------------------------------
+
+/// O que todo datagrama da versão 2 começa dizendo.
+///
+/// É a magia que separa as duas versões no mesmo ponto (ADR 0062). Um ponto de
+/// antes do ENC/2 cala para ela, e é isso que deixa quem liga distinguir «o
+/// ponto não fala a versão 2» de «ninguém mora lá»: o `ONDE` da versão 1 corre
+/// junto, e só ele responde.
+pub const MAGIA2: &str = "SEELE-ENC/2";
+
+/// O tamanho de todo datagrama do ENC/2, pedido ou resposta: quatro vezes o
+/// da versão 1.
+///
+/// Fixo, pelo motivo de [`TAMANHO`]: toda resposta tem o tamanho do pedido que
+/// a causou, e o ponto nunca amplifica. O maior `MORO2` possível tem 299 bytes
+/// com a quebra de linha (o teste `o_maior_moro2_cabe_no_datagrama`), e a folga
+/// é para um campo futuro caber sem mudar de versão.
+pub const TAMANHO2: usize = 4 * TAMANHO;
+
+/// Quantas dicas de rede local um registro leva, no máximo.
+pub const LIMITE_DE_DICAS: usize = 2;
+
+/// Quanto o carimbo de um `MORO2` pode se afastar do relógio do ponto, para
+/// mais ou para menos, em segundos.
+///
+/// Cinco minutos, da spec de 23/09/2026. É também por quanto tempo um `MORO2`
+/// copiado no caminho poderia ser repetido, e é por isso que o ponto lembra o
+/// carimbo de cada marca durante esse tempo (ADR 0062).
+pub const TOLERANCIA_DO_CARIMBO: u64 = 300;
+
+/// O motor de base64 do fio: base64url, sem `=`, e sem bits sobrando no fim.
+/// Uma chave tem uma escrita só.
+const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+/// Um registro assinado: «esta marca mora de onde este pacote veio, e quem diz
+/// é a chave dela».
+///
+/// A assinatura cobre a marca, a chave, o carimbo e as dicas
+/// ([`crate::assinatura::moro2`]). O endereço público não vai assinado: quem o
+/// diz é o ponto, que o vê.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Moro2 {
+    /// A marca da escuta ou do servidor da sala desta chave ([`Marcas::da_sala`]).
+    pub marca: Marca,
+    /// A chave pública Ed25519 da pessoa.
+    pub chave: [u8; 32],
+    /// Segundos Unix no relógio de quem assinou.
+    pub carimbo: u64,
+    /// Até [`LIMITE_DE_DICAS`] endereços de rede local ([`serve_de_dica`]).
+    pub dicas: Vec<SocketAddr>,
+    /// A assinatura Ed25519 de [`crate::assinatura::moro2`].
+    pub assinatura: [u8; 64],
+}
+
+/// O que se pede a um ponto de encontro na versão 2.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pedido2 {
+    /// O registro assinado.
+    Moro2(Moro2),
+    /// «Onde mora esta marca, e que dicas ela deixou?» Responde sempre: com
+    /// [`Resposta2::Aqui2`] ou com [`Resposta2::Ninguem`].
+    Quem2 {
+        /// De quem se quer o endereço.
+        marca: Marca,
+    },
+}
+
+/// Por que o ponto recusou um pedido da versão 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Motivo {
+    /// O carimbo se afasta do relógio do ponto mais que
+    /// [`TOLERANCIA_DO_CARIMBO`].
+    Relogio,
+    /// O ponto já guarda um carimbo igual ou mais novo desta chave, vindo de
+    /// outro endereço.
+    Velho,
+    /// O quarto assinado chegou ao teto.
+    Cheio,
+    /// Este prefixo passou do limite de pedidos.
+    Taxa,
+}
+
+impl Motivo {
+    /// Todos, na ordem em que o fio os conhece.
+    const TODOS: [Self; 4] = [Self::Relogio, Self::Velho, Self::Cheio, Self::Taxa];
+
+    /// Como o motivo vai escrito no fio.
+    #[must_use]
+    pub fn texto(self) -> &'static str {
+        match self {
+            Self::Relogio => "relogio",
+            Self::Velho => "velho",
+            Self::Cheio => "cheio",
+            Self::Taxa => "taxa",
+        }
+    }
+
+    fn ler(texto: &str) -> Option<Self> {
+        Self::TODOS
+            .into_iter()
+            .find(|motivo| motivo.texto() == texto)
+    }
+}
+
+/// O que o ponto responde na versão 2. Sempre para quem pediu, e sempre com
+/// [`TAMANHO2`] bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resposta2 {
+    /// O `MORO2` foi guardado. Leva o endereço que o ponto viu, como o `AQUI`
+    /// que responde a um `MORO`.
+    Morou {
+        /// A marca registrada.
+        marca: Marca,
+        /// O endereço público de quem registrou, visto pelo ponto.
+        endereco: SocketAddr,
+    },
+    /// Onde a marca mora, e as dicas que ela deixou.
+    Aqui2 {
+        /// A marca perguntada.
+        marca: Marca,
+        /// O endereço público que o `MORO2` dela registrou.
+        endereco: SocketAddr,
+        /// As dicas de rede local do registro.
+        dicas: Vec<SocketAddr>,
+    },
+    /// Ninguém mora nesta marca agora. Dito, e não calado: ver
+    /// [`Pedido2::Quem2`].
+    Ninguem {
+        /// A marca perguntada.
+        marca: Marca,
+    },
+    /// O ponto recusou o pedido, e diz por quê e que horas ele acha que são.
+    Recusa {
+        /// A marca do pedido.
+        marca: Marca,
+        /// Por quê.
+        motivo: Motivo,
+        /// Segundos Unix no relógio do ponto.
+        agora: u64,
+    },
+}
+
+impl Resposta2 {
+    /// A marca de que esta resposta fala.
+    #[must_use]
+    pub fn marca(&self) -> &Marca {
+        match self {
+            Self::Morou { marca, .. }
+            | Self::Aqui2 { marca, .. }
+            | Self::Ninguem { marca }
+            | Self::Recusa { marca, .. } => marca,
+        }
+    }
+}
+
+/// Se este endereço pode ir como dica de rede local num `MORO2`.
+///
+/// Só a rede de casa: IPv4 privado (RFC 1918) ou IPv6 ULA (`fc00::/7`), sem
+/// escopo, e porta de 1024 para cima. O ponto recusa um registro com dica fora
+/// disso, e quem liga recusa uma resposta com dica fora disso: uma dica
+/// inventada por um ponto hostil faria quem liga bater dentro da própria rede,
+/// ou num serviço da internet.
+#[must_use]
+pub fn serve_de_dica(endereco: SocketAddr) -> bool {
+    if endereco.port() < 1024 {
+        return false;
+    }
+    match endereco {
+        SocketAddr::V4(quatro) => quatro.ip().is_private(),
+        SocketAddr::V6(seis) => {
+            let primeiro = seis.ip().segments().first().copied().unwrap_or_default();
+            seis.scope_id() == 0 && primeiro & 0xfe00 == 0xfc00
+        }
+    }
+}
+
+/// Monta um `MORO2`.
+///
+/// Escreve o que recebe: quem monta já assinou estas dicas, e filtrá-las aqui
+/// faria a assinatura deixar de conferir. As dicas saem de quem registra já
+/// passadas por [`serve_de_dica`].
+#[must_use]
+pub fn moro2(pedido: &Moro2) -> Vec<u8> {
+    use base64::Engine as _;
+    encher2(format!(
+        "{MAGIA2} MORO2 {} {} {} {} {}",
+        pedido.marca,
+        BASE64.encode(pedido.chave),
+        pedido.carimbo,
+        escrever_dicas(&pedido.dicas),
+        BASE64.encode(pedido.assinatura),
+    ))
+}
+
+/// Monta um `QUEM2`.
+#[must_use]
+pub fn quem2(marca: &Marca) -> Vec<u8> {
+    encher2(format!("{MAGIA2} QUEM2 {marca}"))
+}
+
+/// Monta uma resposta da versão 2.
+#[must_use]
+pub fn resposta2(resposta: &Resposta2) -> Vec<u8> {
+    encher2(match resposta {
+        Resposta2::Morou { marca, endereco } => format!("{MAGIA2} MOROU {marca} {endereco}"),
+        Resposta2::Aqui2 {
+            marca,
+            endereco,
+            dicas,
+        } => format!(
+            "{MAGIA2} AQUI2 {marca} {endereco} {}",
+            escrever_dicas(dicas)
+        ),
+        Resposta2::Ninguem { marca } => format!("{MAGIA2} NINGUEM {marca}"),
+        Resposta2::Recusa {
+            marca,
+            motivo,
+            agora,
+        } => format!("{MAGIA2} RECUSA {marca} {} {agora}", motivo.texto()),
+    })
+}
+
+/// Lê um pedido da versão 2, sem conferir assinatura nem relógio.
+///
+/// Como [`analisar`], nada aqui tenta adivinhar: tamanho diferente de
+/// [`TAMANHO2`], outra magia, verbo desconhecido, campo a mais ou a menos, ou
+/// um campo fora da forma canônica (um número com sinal ou zero à esquerda,
+/// base64 com `=` ou com bits sobrando, um endereço que não volta igual depois
+/// de lido e escrito, uma dica que não é de rede local) dão `None`.
+#[must_use]
+pub fn analisar2(datagrama: &[u8]) -> Option<Pedido2> {
+    let (verbo, resto) = verbo2(datagrama)?;
+    match verbo {
+        "MORO2" => {
+            let [marca, chave, carimbo, dicas, assinatura] = campos(resto)?;
+            Some(Pedido2::Moro2(Moro2 {
+                marca: Marca::nova(marca)?,
+                chave: ler_base64(chave)?,
+                carimbo: ler_numero(carimbo)?,
+                dicas: ler_dicas(dicas)?,
+                assinatura: ler_base64(assinatura)?,
+            }))
+        }
+        "QUEM2" => {
+            let [marca] = campos(resto)?;
+            Some(Pedido2::Quem2 {
+                marca: Marca::nova(marca)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Lê uma resposta da versão 2, com as regras de [`analisar2`].
+///
+/// Devolve `None` para os pedidos: quem espera resposta não trata pedido.
+#[must_use]
+pub fn ler_resposta2(datagrama: &[u8]) -> Option<Resposta2> {
+    let (verbo, resto) = verbo2(datagrama)?;
+    match verbo {
+        "MOROU" => {
+            let [marca, endereco] = campos(resto)?;
+            Some(Resposta2::Morou {
+                marca: Marca::nova(marca)?,
+                endereco: ler_endereco(endereco)?,
+            })
+        }
+        "AQUI2" => {
+            let [marca, endereco, dicas] = campos(resto)?;
+            Some(Resposta2::Aqui2 {
+                marca: Marca::nova(marca)?,
+                endereco: ler_endereco(endereco)?,
+                dicas: ler_dicas(dicas)?,
+            })
+        }
+        "NINGUEM" => {
+            let [marca] = campos(resto)?;
+            Some(Resposta2::Ninguem {
+                marca: Marca::nova(marca)?,
+            })
+        }
+        "RECUSA" => {
+            let [marca, motivo, agora] = campos(resto)?;
+            Some(Resposta2::Recusa {
+                marca: Marca::nova(marca)?,
+                motivo: Motivo::ler(motivo)?,
+                agora: ler_numero(agora)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Completa a linha até [`TAMANHO2`]. Ver [`encher`].
+fn encher2(mut linha: String) -> Vec<u8> {
+    linha.push('\n');
+    let mut bytes = linha.into_bytes();
+    bytes.resize(TAMANHO2, ENCHIMENTO);
+    bytes
+}
+
+/// O verbo e o resto da linha de um datagrama da versão 2 do tamanho certo.
+fn verbo2(datagrama: &[u8]) -> Option<(&str, &str)> {
+    if datagrama.len() != TAMANHO2 {
+        return None;
+    }
+    let linha = std::str::from_utf8(datagrama).ok()?.split('\n').next()?;
+    linha
+        .strip_prefix(MAGIA2)?
+        .strip_prefix(' ')?
+        .split_once(' ')
+}
+
+/// Exatamente `N` campos, separados por um espaço cada.
+fn campos<const N: usize>(resto: &str) -> Option<[&str; N]> {
+    let mut partes = resto.split(' ');
+    let mut saida = [""; N];
+    for campo in &mut saida {
+        *campo = partes.next()?;
+    }
+    partes.next().is_none().then_some(saida)
+}
+
+/// `N` bytes em base64url, só na escrita canônica: o comprimento exato, sem
+/// `=` e sem bits sobrando no fim.
+fn ler_base64<const N: usize>(texto: &str) -> Option<[u8; N]> {
+    use base64::Engine as _;
+    if texto.len() != (N * 4).div_ceil(3) {
+        return None;
+    }
+    BASE64.decode(texto).ok()?.try_into().ok()
+}
+
+/// Um número decimal sem sinal e sem zero à esquerda.
+///
+/// Escrito à mão porque `u64::from_str` aceita `+1` e `007`, e cada número
+/// deste fio tem uma escrita só.
+fn ler_numero(texto: &str) -> Option<u64> {
+    let canonico = !texto.is_empty()
+        && texto.bytes().all(|byte| byte.is_ascii_digit())
+        && (texto == "0" || !texto.starts_with('0'));
+    if !canonico {
+        return None;
+    }
+    texto.parse().ok()
+}
+
+/// Um endereço, só se o texto for exatamente como o `Display` o escreve.
+///
+/// `SocketAddr::from_str` aceita porta com zero à esquerda (`:08385`), que o
+/// `Display` não escreve.
+fn ler_endereco(texto: &str) -> Option<SocketAddr> {
+    let endereco: SocketAddr = texto.parse().ok()?;
+    (endereco.to_string() == texto).then_some(endereco)
+}
+
+/// As dicas no fio: `-` para nenhuma, ou separadas por vírgula.
+fn escrever_dicas(dicas: &[SocketAddr]) -> String {
+    if dicas.is_empty() {
+        return "-".to_owned();
+    }
+    dicas
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Lê as dicas: `-`, ou até [`LIMITE_DE_DICAS`] endereços canônicos que
+/// [`serve_de_dica`] aceita. Uma só que não sirva recusa todas.
+fn ler_dicas(texto: &str) -> Option<Vec<SocketAddr>> {
+    if texto == "-" {
+        return Some(Vec::new());
+    }
+    let dicas = texto
+        .split(',')
+        .map(|uma| ler_endereco(uma).filter(|dica| serve_de_dica(*dica)))
+        .collect::<Option<Vec<_>>>()?;
+    (dicas.len() <= LIMITE_DE_DICAS).then_some(dicas)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -1082,5 +1465,302 @@ mod as_marcas_da_sala {
                 assert!(!marca.texto().starts_with('p'), "{}", marca.texto());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod enc2 {
+    //! O fio do SEELE-ENC/2 (ADR 0062): tamanho fixo, forma canônica, e as
+    //! duas versões que não se leem uma à outra.
+    use super::*;
+
+    fn marca(texto: &str) -> Marca {
+        Marca::nova(texto).expect("marca de teste inválida")
+    }
+
+    fn de(texto: &str) -> SocketAddr {
+        texto.parse().expect("endereço de teste inválido")
+    }
+
+    fn um_moro2() -> Moro2 {
+        Moro2 {
+            marca: marca("pCSM7NBFRCAYQEV4s"),
+            chave: [7; 32],
+            carimbo: 1_791_000_000,
+            dicas: vec![de("192.168.0.10:8385"), de("[fd12:3456::1]:8385")],
+            assinatura: [9; 64],
+        }
+    }
+
+    /// A linha útil de um datagrama, sem a quebra e sem o enchimento.
+    fn linha(datagrama: &[u8]) -> String {
+        let texto = String::from_utf8(datagrama.to_vec()).expect("é texto");
+        texto.split('\n').next().expect("tem linha").to_owned()
+    }
+
+    #[test]
+    fn o_maior_moro2_cabe_no_datagrama() {
+        // A conta de `TAMANHO2`: marca de 32, carimbo `u64::MAX`, duas dicas
+        // IPv6 do maior tamanho que uma dica pode ter. Se ela deixar de caber,
+        // `encher2` corta a linha, e o pedido deixa de voltar igual.
+        let pedido = Moro2 {
+            marca: marca(&"z".repeat(LIMITE_DA_MARCA)),
+            chave: [0xFF; 32],
+            carimbo: u64::MAX,
+            dicas: vec![de("[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"); 2],
+            assinatura: [0xFF; 64],
+        };
+        let datagrama = moro2(&pedido);
+        assert_eq!(datagrama.len(), TAMANHO2);
+        assert_eq!(analisar2(&datagrama), Some(Pedido2::Moro2(pedido)));
+    }
+
+    #[test]
+    fn todo_datagrama_do_enc2_volta_igual_e_tem_o_tamanho_fixo() {
+        let pedidos = [
+            Pedido2::Moro2(um_moro2()),
+            Pedido2::Moro2(Moro2 {
+                dicas: Vec::new(),
+                ..um_moro2()
+            }),
+            Pedido2::Quem2 {
+                marca: marca("pCSM7NBFRCAYQEV4s"),
+            },
+        ];
+        for pedido in pedidos {
+            let datagrama = match &pedido {
+                Pedido2::Moro2(moro) => moro2(moro),
+                Pedido2::Quem2 { marca } => quem2(marca),
+            };
+            assert_eq!(datagrama.len(), TAMANHO2, "{pedido:?}");
+            assert_eq!(analisar2(&datagrama), Some(pedido));
+        }
+        let respostas = [
+            Resposta2::Morou {
+                marca: marca("pAs"),
+                endereco: de("203.0.113.7:41234"),
+            },
+            Resposta2::Aqui2 {
+                marca: marca("pAs"),
+                endereco: de("[2001:4860::1]:41234"),
+                dicas: vec![de("10.0.0.2:8385")],
+            },
+            Resposta2::Aqui2 {
+                marca: marca("pAe"),
+                endereco: de("203.0.113.7:1"),
+                dicas: Vec::new(),
+            },
+            Resposta2::Ninguem {
+                marca: marca("pAs"),
+            },
+            Resposta2::Recusa {
+                marca: marca("pAs"),
+                motivo: Motivo::Relogio,
+                agora: 1_791_000_000,
+            },
+            Resposta2::Recusa {
+                marca: marca("pAs"),
+                motivo: Motivo::Velho,
+                agora: 0,
+            },
+            Resposta2::Recusa {
+                marca: marca("pAs"),
+                motivo: Motivo::Cheio,
+                agora: 1,
+            },
+            Resposta2::Recusa {
+                marca: marca("pAs"),
+                motivo: Motivo::Taxa,
+                agora: u64::MAX,
+            },
+        ];
+        for resposta in respostas {
+            let datagrama = resposta2(&resposta);
+            assert_eq!(datagrama.len(), TAMANHO2, "{resposta:?}");
+            assert_eq!(ler_resposta2(&datagrama), Some(resposta));
+        }
+    }
+
+    #[test]
+    fn nenhuma_resposta_do_enc2_e_maior_que_o_pedido_que_a_causou() {
+        // A maior resposta possível ao menor pedido, um `QUEM2`: uma marca de
+        // 32, um endereço IPv6 do maior tamanho, e duas dicas IPv6.
+        let pedido = quem2(&marca(&"z".repeat(LIMITE_DA_MARCA)));
+        let maior = resposta2(&Resposta2::Aqui2 {
+            marca: marca(&"z".repeat(LIMITE_DA_MARCA)),
+            endereco: de("[2001:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"),
+            dicas: vec![de("[fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff]:65535"); 2],
+        });
+        assert!(
+            maior.len() <= pedido.len(),
+            "amplificou: {} bytes de resposta para {} de pedido",
+            maior.len(),
+            pedido.len()
+        );
+        assert!(
+            ler_resposta2(&maior).is_some(),
+            "a maior resposta não coube no datagrama e foi cortada"
+        );
+    }
+
+    #[test]
+    fn as_duas_versoes_nao_se_leem() {
+        let v1 = [
+            onde(&marca("abc")),
+            moro(&marca("abc")),
+            quem(&marca("abc")),
+            aqui(&marca("abc"), de("203.0.113.7:4000")),
+        ];
+        for datagrama in &v1 {
+            assert_eq!(analisar2(datagrama), None);
+            assert_eq!(ler_resposta2(datagrama), None);
+        }
+        let v2 = [
+            moro2(&um_moro2()),
+            quem2(&marca("abc")),
+            resposta2(&Resposta2::Ninguem {
+                marca: marca("abc"),
+            }),
+        ];
+        for datagrama in &v2 {
+            assert_eq!(analisar(datagrama), None);
+            assert_eq!(ler_aqui(datagrama), None);
+            assert_eq!(responder(datagrama, de("45.33.32.156:41234")), None);
+        }
+    }
+
+    #[test]
+    fn uma_resposta_do_enc2_nao_e_um_pedido() {
+        // Dois pontos apontados um para o outro não viram um laço.
+        let resposta = resposta2(&Resposta2::Morou {
+            marca: marca("abc"),
+            endereco: de("203.0.113.7:4000"),
+        });
+        assert_eq!(analisar2(&resposta), None);
+        assert_eq!(ler_resposta2(&moro2(&um_moro2())), None);
+        assert_eq!(ler_resposta2(&quem2(&marca("abc"))), None);
+    }
+
+    /// O `MORO2` de `um_moro2`, com o campo `indice` trocado por `texto`:
+    /// 0 a magia, 1 o verbo, 2 a marca, 3 a chave, 4 o carimbo, 5 as dicas e
+    /// 6 a assinatura.
+    fn com_campo(indice: usize, texto: &str) -> Vec<u8> {
+        let linha = linha(&moro2(&um_moro2()));
+        let mut campos: Vec<&str> = linha.split(' ').collect();
+        campos[indice] = texto;
+        encher2(campos.join(" "))
+    }
+
+    #[test]
+    fn um_campo_fora_da_forma_canonica_e_lixo() {
+        let chave = "A".repeat(43);
+        assert!(
+            analisar2(&com_campo(3, &chave)).is_some(),
+            "o caso de controle, com a chave canônica, tem de ser aceito"
+        );
+        let inteira = linha(&moro2(&um_moro2()));
+        let faltando: Vec<&str> = inteira.split(' ').take(6).collect();
+        let casos = [
+            com_campo(4, "+1791000000"),
+            com_campo(4, "01791000000"),
+            com_campo(4, "18446744073709551616"),
+            com_campo(4, ""),
+            com_campo(3, &format!("{chave}=")),
+            com_campo(3, &"A".repeat(42)),
+            com_campo(3, &format!("{}B", "A".repeat(42))),
+            com_campo(3, &format!("{}+", "A".repeat(42))),
+            com_campo(5, "192.168.0.10:08385"),
+            com_campo(5, ""),
+            com_campo(5, "192.168.0.10:8385,192.168.0.11:8385,192.168.0.12:8385"),
+            com_campo(6, &"A".repeat(85)),
+            encher2(format!("{inteira} extra")),
+            encher2(faltando.join(" ")),
+        ];
+        for caso in casos {
+            assert_eq!(
+                analisar2(&caso),
+                None,
+                "aceitou {:?}",
+                String::from_utf8_lossy(&caso)
+            );
+        }
+    }
+
+    #[test]
+    fn uma_dica_e_um_endereco_da_rede_de_casa() {
+        for sim in [
+            "192.168.0.10:8385",
+            "10.0.0.2:8385",
+            "172.16.0.1:8385",
+            "[fd12::1]:8385",
+            "192.168.0.1:1024",
+        ] {
+            assert!(serve_de_dica(de(sim)), "recusou {sim}");
+        }
+        for nao in [
+            "8.8.8.8:8385",
+            "100.64.0.1:8385",
+            "127.0.0.1:8385",
+            "169.254.0.1:8385",
+            "[fe80::1]:8385",
+            "[fd00::1%3]:8385",
+            "[::ffff:192.168.0.1]:8385",
+            "[2001:db8::1]:8385",
+            "[2001:4860::1]:8385",
+            "192.168.0.1:53",
+        ] {
+            assert!(!serve_de_dica(de(nao)), "aceitou {nao}");
+        }
+    }
+
+    #[test]
+    fn um_aqui2_com_dica_que_nao_e_da_rede_de_casa_e_lixo() {
+        // Um ponto hostil não manda quem liga bater dentro da própria rede, nem
+        // num serviço da internet, por uma dica inventada.
+        let linha = format!("{MAGIA2} AQUI2 pAs 203.0.113.7:41234 8.8.8.8:8385");
+        assert_eq!(ler_resposta2(&encher2(linha)), None);
+    }
+
+    #[test]
+    fn lixo_do_enc2_nao_vira_pedido_nem_resposta() {
+        let mut casos = vec![
+            vec![0_u8; TAMANHO2],
+            vec![b'A'; TAMANHO2],
+            encher2(format!("{MAGIA2} VAI abc")),
+            encher2(format!("{MAGIA2} QUEM2")),
+            encher2(format!("{MAGIA2} QUEM2 tem espaço")),
+            encher2(format!("{MAGIA2} RECUSA abc talvez 1")),
+            encher2(format!("{MAGIA2} NINGUEM")),
+            encher2(format!("{MAGIA2}  QUEM2 abc")),
+        ];
+        let mut curto = quem2(&marca("abc"));
+        curto.pop();
+        casos.push(curto);
+        let mut longo = quem2(&marca("abc"));
+        longo.push(b'.');
+        casos.push(longo);
+        for caso in casos {
+            assert_eq!(
+                analisar2(&caso),
+                None,
+                "{:?}",
+                String::from_utf8_lossy(&caso)
+            );
+            assert_eq!(
+                ler_resposta2(&caso),
+                None,
+                "{:?}",
+                String::from_utf8_lossy(&caso)
+            );
+        }
+    }
+
+    #[test]
+    fn os_numeros_do_enc2_sao_os_do_adr() {
+        assert_eq!(TOLERANCIA_DO_CARIMBO, 300);
+        assert_eq!(LIMITE_DE_DICAS, 2);
+        assert_eq!(TAMANHO2, 384);
+        assert_eq!(TAMANHO2, 4 * TAMANHO);
+        assert_eq!(MAGIA2, "SEELE-ENC/2");
     }
 }

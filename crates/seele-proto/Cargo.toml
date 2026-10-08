@@ -16,6 +16,11 @@ serde = { version = "1.0.229", features = ["derive"] }
 # árvore em `seele-app`, `seele-ffi` e `seele-server`, na mesma versão, então
 # não há exceção nova no `deny.toml`.
 serde_json = "1.0.151"
+# A chave e a assinatura do `MORO2` (ENC/2, ADR 0062) viajam em base64url
+# dentro do texto do datagrama. Já está na árvore pelo `seele-lancador` e pelo
+# `seele-app`, na mesma versão; o motor `URL_SAFE_NO_PAD` recusa `=` e bits
+# sobrando no fim, então cada chave tem uma escrita só.
+base64 = "0.22"
 sha2 = "0.11.0"
 thiserror = "2.0.19"
 
