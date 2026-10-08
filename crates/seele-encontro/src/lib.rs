@@ -401,11 +401,11 @@ impl Ponto {
     /// da versão 1: o registro é metadado guardado.
     fn atender2(&self, datagrama: &[u8], de: SocketAddr) -> Option<Resposta> {
         let pedido = analisar2(datagrama)?;
-        let marca = match &pedido {
-            Pedido2::Moro2(moro) => moro.marca.clone(),
-            Pedido2::Quem2 { marca } => marca.clone(),
+        let (marca, classe) = match &pedido {
+            Pedido2::Moro2(moro) => (moro.marca.clone(), taxa::Classe::Registro),
+            Pedido2::Quem2 { marca } => (marca.clone(), taxa::Classe::Pergunta),
         };
-        let resposta = match self.quarto.taxa.pedir(de.ip(), Instant::now()) {
+        let resposta = match self.quarto.taxa.pedir(de.ip(), classe, Instant::now()) {
             taxa::Decisao::Recusa { dizer: false } => return None,
             taxa::Decisao::Recusa { dizer: true } => Resposta2::Recusa {
                 marca,

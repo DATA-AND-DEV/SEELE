@@ -5,6 +5,18 @@
 //! pedidos por segundo até [`RAJADA`]. Vale **só para a versão 2**: o ENC/1 não
 //! muda, e a 0.15 não muda.
 //!
+//! **Dois baldes por prefixo, um para cada [`Classe`]**: o registro (`MORO2`)
+//! e a pergunta (`QUEM2`). Com um balde só, nove `QUEM2` por segundo de um
+//! vizinho de CGNAT, ou de quem forja o IP de alguém (o IP que o próprio `QUEM2`
+//! entrega a quem tem o código dela), calavam os `MORO2` daquela rede, e a sala
+//! sumia do quarto em 60 s (a revisão de 08/10/2026). A pergunta é o pedido
+//! mais barato de mandar, e ela não esvazia mais o balde do registro.
+//!
+//! O que sobra: quem forja a origem ainda consegue esvaziar o balde do registro
+//! de uma rede com `MORO2` de chaves dele, porque o limite vem antes da
+//! assinatura (é ela que custa). Só uma prova de ida e volta (um cookie)
+//! fecha isso, e ela muda o fio (ADR 0062).
+//!
 //! # Por que estes números
 //!
 //! Um app aberto da 0.16 registra a sala sempre: dois `MORO2` a cada quinze
@@ -28,7 +40,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 /// Quantos pedidos por segundo cada prefixo ganha.
@@ -50,6 +62,15 @@ const INTERVALO_DAS_RECUSAS: Duration = Duration::from_secs(1);
 /// Um pedido, em milésimos de pedido: o balde conta assim para não usar ponto
 /// flutuante.
 const MIL: u64 = 1000;
+
+/// De que pedido se trata: cada classe tem o seu balde em cada prefixo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Classe {
+    /// Um `MORO2`: o registro de uma sala.
+    Registro,
+    /// Um `QUEM2`: a pergunta por uma sala.
+    Pergunta,
+}
 
 /// O que fazer com um pedido.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +134,7 @@ impl Balde {
 /// O limite por prefixo. Ver o cabeçalho do módulo.
 #[derive(Debug)]
 pub struct Taxa {
-    baldes: Mutex<HashMap<Prefixo, Balde>>,
+    baldes: Mutex<HashMap<(Prefixo, Classe), Balde>>,
     por_segundo: u64,
     rajada: u64,
     prefixos: usize,
@@ -143,15 +164,14 @@ impl Taxa {
         }
     }
 
-    /// Conta um pedido deste endereço, e diz o que fazer com ele.
-    pub fn pedir(&self, de: IpAddr, agora: Instant) -> Decisao {
+    /// Conta um pedido desta classe, deste endereço, e diz o que fazer com ele.
+    pub fn pedir(&self, de: IpAddr, classe: Classe, agora: Instant) -> Decisao {
         // Um `Mutex` envenenado é um pânico noutra linha com a tabela na mão.
-        // Recusar dizendo é o que menos esconde.
-        let Ok(mut baldes) = self.baldes.lock() else {
-            return Decisao::Recusa { dizer: true };
-        };
+        // A tabela não fica inconsistente (cada conta é inteira), e recusar
+        // dali em diante, dizendo a cada pedido, seria um refletor sem limite.
+        let mut baldes = self.baldes.lock().unwrap_or_else(PoisonError::into_inner);
         let cheio = self.rajada.saturating_mul(MIL);
-        let chave = prefixo(de);
+        let chave = (prefixo(de), classe);
         if !baldes.contains_key(&chave) && baldes.len() >= self.prefixos {
             baldes.retain(|_, balde| {
                 balde.encher(agora, self.por_segundo, cheio);
@@ -216,7 +236,7 @@ mod testes {
         pedidos.sort();
         for quando in pedidos {
             assert_eq!(
-                taxa.pedir(ip("100.64.0.1"), comeco + quando),
+                taxa.pedir(ip("100.64.0.1"), Classe::Pergunta, comeco + quando),
                 Decisao::Passa,
                 "um dos 60 apps atrás do mesmo IP foi recusado em {quando:?}"
             );
@@ -229,7 +249,11 @@ mod testes {
         let comeco = Instant::now();
         let (mut passou, mut ditas, mut caladas) = (0_u64, 0, 0);
         for i in 0..1000_u64 {
-            match taxa.pedir(ip("203.0.113.7"), comeco + Duration::from_micros(i * 999)) {
+            match taxa.pedir(
+                ip("203.0.113.7"),
+                Classe::Pergunta,
+                comeco + Duration::from_micros(i * 999),
+            ) {
                 Decisao::Passa => passou += 1,
                 Decisao::Recusa { dizer: true } => ditas += 1,
                 Decisao::Recusa { dizer: false } => caladas += 1,
@@ -250,11 +274,17 @@ mod testes {
         // inteiros entre um pedido e o seguinte não enchia nada.
         let taxa = Taxa::com(8, 1, 16);
         let comeco = Instant::now();
-        assert_eq!(taxa.pedir(ip("192.0.2.1"), comeco), Decisao::Passa);
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, comeco),
+            Decisao::Passa
+        );
         let passou = (1..=20_000_u64)
             .filter(|i| {
-                taxa.pedir(ip("192.0.2.1"), comeco + Duration::from_micros(i * 100))
-                    == Decisao::Passa
+                taxa.pedir(
+                    ip("192.0.2.1"),
+                    Classe::Pergunta,
+                    comeco + Duration::from_micros(i * 100),
+                ) == Decisao::Passa
             })
             .count();
         assert!(
@@ -267,28 +297,34 @@ mod testes {
     fn o_ipv6_conta_por_64_e_o_ipv4_por_endereco() {
         let taxa = Taxa::com(1, 1, 16);
         let agora = Instant::now();
-        assert_eq!(taxa.pedir(ip("2001:db8:1:2::1"), agora), Decisao::Passa);
+        assert_eq!(
+            taxa.pedir(ip("2001:db8:1:2::1"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
         assert!(
             matches!(
-                taxa.pedir(ip("2001:db8:1:2::ffff"), agora),
+                taxa.pedir(ip("2001:db8:1:2::ffff"), Classe::Pergunta, agora),
                 Decisao::Recusa { .. }
             ),
             "o mesmo /64 não dividiu o balde"
         );
         assert_eq!(
-            taxa.pedir(ip("2001:db8:1:3::1"), agora),
+            taxa.pedir(ip("2001:db8:1:3::1"), Classe::Pergunta, agora),
             Decisao::Passa,
             "outro /64 dividiu o balde"
         );
-        assert_eq!(taxa.pedir(ip("192.0.2.1"), agora), Decisao::Passa);
         assert_eq!(
-            taxa.pedir(ip("192.0.2.2"), agora),
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.2"), Classe::Pergunta, agora),
             Decisao::Passa,
             "outro IPv4 dividiu o balde"
         );
         assert!(
             matches!(
-                taxa.pedir(ip("::ffff:192.0.2.1"), agora),
+                taxa.pedir(ip("::ffff:192.0.2.1"), Classe::Pergunta, agora),
                 Decisao::Recusa { .. }
             ),
             "o IPv4 mapeado não contou como o IPv4 dele"
@@ -299,17 +335,80 @@ mod testes {
     fn a_tabela_tem_teto_e_varre_os_ociosos() {
         let taxa = Taxa::com(1, 1, 2);
         let agora = Instant::now();
-        assert_eq!(taxa.pedir(ip("192.0.2.1"), agora), Decisao::Passa);
-        assert_eq!(taxa.pedir(ip("192.0.2.2"), agora), Decisao::Passa);
         assert_eq!(
-            taxa.pedir(ip("192.0.2.3"), agora),
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.2"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.3"), Classe::Pergunta, agora),
             Decisao::Recusa { dizer: true },
             "um prefixo novo, com a tabela cheia de prefixos ativos, não ouviu a recusa"
         );
         // Um segundo depois os dois baldes encheram de novo: estão ociosos, e
         // saem da tabela para o novo entrar.
         let depois = agora + Duration::from_secs(1);
-        assert_eq!(taxa.pedir(ip("192.0.2.3"), depois), Decisao::Passa);
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.3"), Classe::Pergunta, depois),
+            Decisao::Passa
+        );
+    }
+
+    #[test]
+    fn uma_enxurrada_de_perguntas_nao_cala_o_registro() {
+        // O achado da revisão de 08/10: com um balde só, nove QUEM2 por
+        // segundo de um vizinho de CGNAT, ou de quem forja o IP de alguém (o
+        // IP que o próprio QUEM2 entrega a quem tem o código), calavam os MORO2
+        // daquela rede, e a sala sumia em 60 s. A pergunta e o registro têm
+        // baldes separados.
+        let taxa = Taxa::com(1, 1, 16);
+        let agora = Instant::now();
+        assert_eq!(
+            taxa.pedir(ip("203.0.113.7"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
+        assert!(matches!(
+            taxa.pedir(ip("203.0.113.7"), Classe::Pergunta, agora),
+            Decisao::Recusa { .. }
+        ));
+        assert_eq!(
+            taxa.pedir(ip("203.0.113.7"), Classe::Registro, agora),
+            Decisao::Passa,
+            "as perguntas esvaziaram o balde do registro"
+        );
+        assert!(matches!(
+            taxa.pedir(ip("203.0.113.7"), Classe::Registro, agora),
+            Decisao::Recusa { .. }
+        ));
+    }
+
+    #[test]
+    fn um_mutex_envenenado_nao_vira_recusa_sem_limite() {
+        let taxa = std::sync::Arc::new(Taxa::com(1, 1, 16));
+        let outra = std::sync::Arc::clone(&taxa);
+        let _ = std::thread::spawn(move || {
+            let _guarda = outra.baldes.lock().unwrap();
+            panic!("pânico de propósito, com a tabela na mão");
+        })
+        .join();
+        assert!(taxa.baldes.is_poisoned(), "o teste não envenenou o Mutex");
+        let agora = Instant::now();
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, agora),
+            Decisao::Passa
+        );
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, agora),
+            Decisao::Recusa { dizer: true }
+        );
+        assert_eq!(
+            taxa.pedir(ip("192.0.2.1"), Classe::Pergunta, agora),
+            Decisao::Recusa { dizer: false },
+            "com o Mutex envenenado, toda recusa passou a ser dita"
+        );
     }
 
     #[test]

@@ -244,3 +244,79 @@ fn um_datagrama_maior_que_o_do_protocolo_e_calado() {
         "um ONDE com um byte a mais foi respondido"
     );
 }
+
+/// Lê tudo o que chegar até o socket calar por 300 ms.
+fn tudo_que_chega(socket: &UdpSocket) -> Vec<Vec<u8>> {
+    socket
+        .set_read_timeout(Some(Duration::from_millis(300)))
+        .unwrap();
+    let mut chegou = Vec::new();
+    while let Some(datagrama) = receber(socket) {
+        chegou.push(datagrama);
+    }
+    socket.set_read_timeout(Some(PRAZO)).unwrap();
+    chegou
+}
+
+#[test]
+fn uma_enxurrada_de_quem2_e_calada_e_a_recusa_e_dita_uma_vez() {
+    // A fiação da taxa no ponto: o balde de 64 passa, a primeira recusa é
+    // dita, e o resto da enxurrada é calado.
+    let ponto = ponto_no_ar();
+    let alguem = socket();
+    let marca = marcas_de(&SigningKey::from_bytes(&[6; 32]))
+        .servidor()
+        .clone();
+    for _ in 0..100 {
+        alguem.send_to(&quem2(&marca), ponto).unwrap();
+    }
+    let chegou = tudo_que_chega(&alguem);
+    let ninguem = chegou
+        .iter()
+        .filter(|d| matches!(ler_resposta2(d), Some(Resposta2::Ninguem { .. })))
+        .count();
+    let recusas = chegou
+        .iter()
+        .filter(|d| {
+            matches!(
+                ler_resposta2(d),
+                Some(Resposta2::Recusa {
+                    motivo: Motivo::Taxa,
+                    ..
+                })
+            )
+        })
+        .count();
+    assert!(
+        (64..=80).contains(&ninguem),
+        "{ninguem} QUEM2 passaram pelo limite de uma enxurrada de 100"
+    );
+    assert_eq!(recusas, 1, "a recusa por taxa foi dita {recusas} vezes");
+}
+
+#[test]
+fn uma_enxurrada_de_quem2_nao_cala_o_registro_da_mesma_rede() {
+    let ponto = ponto_no_ar();
+    let alguem = socket();
+    let chave = SigningKey::from_bytes(&[7; 32]);
+    let marca = marcas_de(&chave).servidor().clone();
+    // Logo em seguida, com o balde das perguntas vazio: esperar o fim das
+    // respostas daria tempo de ele encher de novo.
+    for _ in 0..100 {
+        alguem.send_to(&quem2(&marca), ponto).unwrap();
+    }
+    alguem
+        .send_to(
+            &moro2(&assinado(&chave, marca.clone(), agora(), Vec::new())),
+            ponto,
+        )
+        .unwrap();
+    let chegou = tudo_que_chega(&alguem);
+    assert!(
+        chegou
+            .iter()
+            .any(|d| matches!(ler_resposta2(d), Some(Resposta2::Morou { .. }))),
+        "a enxurrada de QUEM2 esvaziou o balde do registro da mesma rede, e o MORO2 \
+         logo depois dela foi calado"
+    );
+}
