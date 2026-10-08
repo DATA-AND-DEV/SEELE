@@ -2770,8 +2770,9 @@ fn o_atualizador_procura_so_na_casa_que_publica() {
             .expect("tauri.conf.json é legível"),
     )
     .expect("tauri.conf.json é JSON");
-    let enderecos: Vec<&str> = config["plugins"]["updater"]["endpoints"]
-        .as_array()
+    let enderecos: Vec<&str> = config
+        .pointer("/plugins/updater/endpoints")
+        .and_then(serde_json::Value::as_array)
         .expect("o atualizador declara endereços")
         .iter()
         .filter_map(serde_json::Value::as_str)
