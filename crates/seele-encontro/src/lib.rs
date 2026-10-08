@@ -45,6 +45,7 @@
 //! igual no Linux, no BSD e no Windows sem dependência nenhuma.
 
 pub mod assinado;
+pub mod taxa;
 
 use std::collections::HashMap;
 use std::io;
