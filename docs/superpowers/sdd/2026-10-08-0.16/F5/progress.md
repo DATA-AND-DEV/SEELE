@@ -30,3 +30,20 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - A bancada `qualidade-da-voz.cjs` ficou vermelha antes do conserto e verde depois.
   - O revisor refez a reversão pelos dois lados, captura e saída, e aprovou sem crítico nem importante.
   - Ficaram quatro menores: a linha do padrão repete o nome que a linha PADRÃO já diz, para o dono conferir em tela; duas cenas a mais; uma asserção redundante; dois comentários.
+- **H → integrado** (`fbeff8e..7c9366c`, merge `8d28d5d`), em 2 rodadas.
+  - **Commits que fecham os itens:**
+    - P51-03: `4807207`;
+    - P51-02: `663363d`;
+    - K1-m1: `b570f86`;
+    - conserto da revisão: `4205d29`, `1c199b9` e `47d2f98`.
+  - **A revisão achou um Importante mandado pelo plano.** A frase de `ServidorTrocouNaVolta` que o plano ditou era falsa por três motivos:
+    - o «nada» não vale, porque o ClientHello sai;
+    - o «convite» e o «link» não valem para quem volta pela lista;
+    - o remédio está errado para o `ChaveNaoProvada` da volta.
+  - **Decisão:** a frase passou a ser «QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\nO convite, a senha e o apelido não chegaram a ele. Confirme com quem hospeda, por outro canal, antes de entrar de novo.». Um guarda em `frontend.rs` a prende. O `lotes.md` foi corrigido.
+  - **Menores da mesma rodada:**
+    - o `ChaveNaoProvada` da corrida sai como WARN;
+    - três reversões que faltavam;
+    - a mensagem de um teste;
+    - um guarda de fonte que prende `drive` a `fim_da_sessao`.
+  - **A re-revisão** resolveu os seis achados, sem quebra nova. Nenhum assunto casa com as cadeias do G1.

@@ -276,7 +276,7 @@ Os testes de `o_registro_da_janela` passam a chamar a versão `_em`.
   - As variantes novas não levam impressões, porque `EndReason` deriva `Copy, Hash` (`types.rs`, :260-261).
   - O braço `seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected` (`lib.rs`, :4184), dentro do `Aviso::Encerrado(motivo)` de `drive`, passa a chamar `fim_da_recusa`.
 - **(4) As frases.** Em `const MOTIVOS` (`frases.js`, :20) entram:
-  - «QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DO CONVITE.\nA sessão acabou sem mandar nada a ele. Confirme o link com quem o mandou.»;
+  - «QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DESTA SESSÃO.\nO convite, a senha e o apelido não chegaram a ele. Confirme com quem hospeda, por outro canal, antes de entrar de novo.» (trocada na revisão: a frase de 08/10, «…SERVIDOR DO CONVITE… sem mandar nada a ele. Confirme o link…», era falsa para quem volta pela lista e pelo «nada», porque o ClientHello sai);
   - «A CHAVE DO SERVIDOR MUDOU DURANTE A SESSÃO.\nConfirme por outro canal antes de entrar de novo.».
 - **(5) Os dois testes que liam o texto passam a ler o tipo.**
   - Em `a_volta_da_bateria_onde_o_pino_nao_prova_o_servidor_e_recusada_antes_do_hello` (`enlace.rs`, :6925), o `if let Aviso::Encerrado(Motivo::Recusado(texto))` com `texto.contains("InviteMismatch")` passa a `matches!(aviso, Aviso::Encerrado(Motivo::Recusado(ConnectError::InviteMismatch { .. })))`.
