@@ -16,10 +16,12 @@ commits de código e este relatório, todos locais: sem push, tag nem release.
 | `8719c9ee` | T1, rodada 1 | orçamento de 1024 objetos por passada em `emTexto` |
 | `20404362` | P51-01, rodada 1 | o `Falhou` da conta além da espera ganha o sujeito |
 | `047c40ea` | T2 N1, rodada 2 | o fim de uma volta em que nenhuma linha tentou passar pede duas fichas; guardas de eventos e dos dois fins de volta; docs com a regra de verdade |
+| `b7ac8fc7` | T2 N1, rodada 3 | o fim de toda volta pede duas fichas, e o ramo de uma ficha sai; guarda do MOD que escreve e trabalha; docs conferidos um a um |
 
-As rodadas 1 e 2 de conserto estão no fim deste relatório. Elas reescrevem o
-que as seções 5 e 6 e as «Preocupações» 1, 2, 5, 6 e 7 dizem, e a rodada 2
-reescreve a preocupação 1 da rodada 1.
+As rodadas 1, 2 e 3 de conserto estão no fim deste relatório. Elas reescrevem
+o que as seções 5 e 6 e as «Preocupações» 1, 2, 5, 6 e 7 dizem; a rodada 2
+reescreve a preocupação 1 da rodada 1, e a rodada 3 apaga o ramo de uma ficha
+que a rodada 2 manteve.
 
 Arquivos mudados (`0f94be66..74a5c427`), só os da lista do lote:
 - `apps/seele-app/src/executor.rs`;
@@ -797,3 +799,145 @@ re-revisão a mediu (1/14 ×3).
    rajadas dele (10/5 em 4 s). É a regra das duas fichas, e não um roubo de
    vez, mas o `seele.log` desse MOD tem uma linha de conta a cada duas dele.
 4. Continuam valendo as preocupações 4 a 6 da rodada 1.
+
+## Rodada 3
+
+A re-revisão da rodada 2 deu a regra dos eventos como resolvida (refez a
+medida: 15/0) e concluiu que a linha dita em nome do MOD não reabre o defeito
+(a minha preocupação 1 da rodada 2). Mas ela mediu uma brecha no ramo de uma
+ficha que a rodada 2 manteve, e essa brecha deixava os docs falsos. A decisão
+do controlador foi apagar o ramo. Mesmo branch, a partir de `9b4b36c9`. Um
+commit de código (`b7ac8fc7`) e este relatório.
+
+### A brecha, e o conserto (`b7ac8fc7`)
+
+**A brecha.** Na volta em que o MOD escreveu, a conta continuava com uma
+ficha. Se ela se completava depois da linha segurada, ainda na mesma volta —
+o MOD escreve e segue trabalhando —, a conta a tomava, e a próxima linha do
+MOD achava o balde seco. A justificativa da rodada 2 («a ficha que se
+completou depois chegou tarde para ela e não é de ninguém») estava errada: ela
+era da próxima linha do MOD.
+
+**O conserto.**
+- O fim de toda volta exige duas fichas para dizer a conta, a regra da
+  espera. `pendentes_se_couber` recarrega, confere duas e gasta uma.
+- A marca `escreveu_nesta_volta` sai, com o ramo.
+- Com a regra única, toda conta que o produto diz com o MOD de pé deixa uma
+  ficha para ele. Quem tenta escrever ao menos uma linha a cada quarto de
+  segundo nunca deixa juntar duas, e o produto não fala.
+
+**A medida** (3 rodadas de 4 s, depois de uma rajada de 100, linhas do MOD /
+linhas da conta; `setInterval` de 100 ms com `console.log` seguido de X ms de
+trabalho no mesmo callback; mesma sonda antes e depois, removida):
+
+| X | antes (`9b4b36c9`) | depois (`b7ac8fc7`) |
+|---|---|---|
+| 5 ms | 15/0, 14/1, 12/3 | 15/0, 15/0, 15/0 |
+| 20 ms | 15/0, 12/4, 10/5 | 15/0, 15/0, 15/0 |
+| 60 ms | 9/6, 6/9, 10/5 | 15/0, 15/0, 15/0 |
+| 120 ms | 0/15, 0/15, 0/15 | 15/0, 15/0, 15/0 |
+
+Na mesma sonda, depois do conserto, os eventos continuam em 15/0 (a cada 30
+ms e a cada 70 ms, ×3), e um MOD calado tem a conta em 514 ms.
+
+**Testes.**
+- Novo `um_mod_que_escreve_e_trabalha_na_mesma_volta_nao_perde_a_vez_para_a_conta`:
+  o caso de X = 60 ms, com `console.log` e trabalho no mesmo callback, por 3 s.
+  Exige no máximo uma linha de conta, mais linhas do MOD que da conta, e pelo
+  menos seis do MOD.
+- `o_fim_de_uma_volta_em_que_o_mod_escreveu_diz_a_conta_com_uma_ficha` virou
+  `o_fim_de_uma_volta_em_que_o_mod_escreveu_tambem_espera_sobrar_uma_ficha`:
+  a rajada e 300 ms de trabalho na mesma volta. No fim dela há uma ficha e um
+  quinto, e a conta **não** sai no diagnóstico de trás; ela sai depois, quando
+  sobra a segunda.
+- `o_balde_devolve_a_conta_que_nenhuma_linha_levou`: as asserções do ramo de
+  uma ficha foram reescritas. Numa volta com a linha do MOD segurada, a ficha
+  que se completa depois não diz a conta. Com duas, diz, e deixa a do MOD.
+- **O relógio conferido** (o opcional), nos dois testes de fim de volta. Em vez
+  de supor a folga, eles medem o tempo desde antes de `iniciar` — o mais cedo
+  que a rajada pode ter secado o balde — e só afirmam `conta == None` se o
+  diagnóstico voltou antes de 480 ms (`AINDA_SEM_A_SEGUNDA_FICHA`). Antes de
+  meio segundo, a segunda ficha não pode ter se completado. Uma tentativa lenta
+  é refeita, e três lentas seguidas reprovam dizendo que nada foi medido: o
+  teste não passa calado nem reprova à toa.
+
+**RED** (o código de `9b4b36c9`, com o guarda novo):
+```
+um MOD que escreve e trabalha 60 ms a cada 100 ms deixou, em três segundos depois de uma rajada, 4 linhas dele e 7 da conta: o fim da volta dele toma a ficha que se completou durante o trabalho, e que era da próxima linha
+test result: FAILED. 0 passed; 1 failed
+```
+
+**GREEN.**
+- `-- executor`: `55 passed`.
+- O binário inteiro: `256 passed`.
+- `mod_de_referencia`: `4 passed`.
+- Os 14 testes do balde, da conta e da espera, dez vezes seguidas: `14 passed`
+  nas dez.
+
+**Reversões.**
+1. **O ramo de uma ficha de volta** — a marca `escreveu_nesta_volta` em
+   `admitir`, e `if escreveu { FICHA } else { 2 * FICHA }` no fim de volta,
+   como na rodada 2. Reprovam três:
+   - o guarda novo («7 linhas dele e 5 da conta…»);
+   - `o_fim_de_uma_volta_em_que_o_mod_escreveu_tambem_espera_sobrar_uma_ficha`
+     («…disse a conta com uma ficha só: a ficha que se completou durante o
+     trabalho era da próxima linha do MOD»);
+   - `o_balde_devolve…` («numa volta em que a linha do MOD foi segurada, a
+     conta tomou a ficha que se completou depois…»).
+
+   Resultado: `52 passed; 3 failed`.
+2. **Uma ficha sempre** (a regra de antes do lote) reprova seis:
+   - os três de cima;
+   - o guarda dos eventos;
+   - `o_fim_de_uma_volta_em_que_o_mod_nao_escreveu_espera_sobrar_uma_ficha`;
+   - `o_balde_diz_quanto_falta_para_sobrar_uma_ficha`.
+
+   Resultado: `49 passed; 6 failed`.
+
+### Os docs, conferidos um a um
+
+- `docs/como-se-faz-um-mod.md` (a frase das seguradas).
+  - «Ele só a escreve com uma vaga de sobra no teto» e «o produto não fala»
+    agora são verdade em todo caminho.
+  - Pus «enquanto o MOD está de pé», porque na parada a conta sai de qualquer
+    jeito, e acrescentei essa frase.
+- `executor.rs`:
+  - o doc do balde: só com uma ficha de sobra, ao fim da volta ou pela
+    espera; na parada, sem regra de ficha;
+  - o título de `pendentes_se_couber`: «só com uma ficha de sobra além da que
+    fica com o MOD»;
+  - o «não é de ninguém» saiu. O doc agora conta os dois caminhos por onde a
+    ficha única tomava a vez do MOD, os dois medidos;
+  - o doc de `ate_sobrar_uma_ficha`: «o fim de toda volta pede as mesmas
+    duas»;
+  - o comentário do fim do laço (era «se houver ficha»);
+  - o doc de `a_conta_das_seguradas_nao_espera_um_temporizador_mais_tarde`:
+    «a da resposta é o teste de baixo» deixou de valer, e agora diz no que a
+    metade da resposta virou;
+  - `cortar_linha_do_console`: «o aviso do corte conta os caracteres que o MOD
+    escreveu» agora diz que conta o texto que chegou ali (o do MOD, ou o que o
+    `console` montou de um objeto), e que isso só vale até 1024 objetos —
+    acima, o texto montado tem `[…]` no lugar do resto.
+
+### O que rodou nesta rodada, e o que não rodou
+
+Rodou:
+- `cargo test -p seele-app --bin seele-app` inteiro (`256 passed`);
+- `cargo test -p seele-conformance --test mod_de_referencia` (`4 passed`);
+- `cargo fmt --all -- --check`;
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`
+  (limpo; só o `ld: duplicate -rpath`).
+
+Não rodou o mesmo de antes: `--workspace`, `check-api`, `check-runtime`, as
+bancadas e o app nativo.
+
+### Preocupações desta rodada
+
+1. **Uma tentativa lenta é refeita em silêncio.** Os dois testes de fim de
+   volta refazem a tentativa que passou de 480 ms e não dizem quantas vezes
+   refizeram. Numa máquina sempre lenta, eles reprovam («três tentativas
+   seguidas…»); numa máquina às vezes lenta, passam pela segunda, sem rastro.
+2. **A conta de quem escreve espaçado** (três linhas a cada 400 ms) continua
+   como na rodada 2: o produto usa as vagas que sobram entre as rajadas dele.
+   Os docs dizem isso.
+3. Continuam valendo as preocupações 4 a 6 da rodada 1.
