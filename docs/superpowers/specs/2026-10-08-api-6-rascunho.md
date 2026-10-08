@@ -382,10 +382,44 @@ campos e só estes:
 | `tela`, `minha_transmissao`, `transmissoes` | nenhum oficial pede; entra numa API somada, se alguém pedir |
 | `may_*` | a permissão vale na metade de servidor (`contexto.admin`, `contexto.write`), e não na janela |
 | `messages_revision`, `icon_revision`, `person_icons_revision`, `ended` | estado interno da casca |
+| `membros` (o FORA DO AR: `Membros`, `MembroNovo`, `MembroBanido`) | **recomendo que fique de fora na 6** (abaixo). Decisão do dono |
 | **toque, chamada, código, agenda** | nunca (Parte II, «Onde as duas partes se tocam»). O guarda 12 prova |
 
 **`reads` lista cada campo**, e o `check-api` passa a cobrar que cada um tenha
 quem o projete. Um retrato que cresce é uma API somada.
+
+### Os membros fora do ar
+
+A F1 pôs no protocolo o FORA DO AR (`Membros`, `MembroNovo` e `MembroBanido`,
+ordinais 42 a 44, com `id` e `nickname`, sem papéis e sem horário; D-fio-4).
+**Recomendo que o retrato da 6 não os leve: ele leva só quem está presente.**
+
+- **A assimetria do congelamento.** Acrescentar `membros` depois é uma API
+  somada (a 7), que não quebra nada. Tirar depois é impossível: o nome congela
+  com o `v6.json`. Na dúvida, a porta que se pode abrir depois fica fechada.
+- **Nenhuma sessão de MOD pediu os ausentes.** O PERFIS pede `me` e «as pessoas
+  do servidor, com `id` e apelido» (R4) e a MESA pede «quem está no servidor»
+  (item 3), os dois lendo `presentes` hoje.
+- **Os casos que pediriam têm o dado do próprio MOD.** O diretório do PERFIS
+  lista os perfis que a metade de servidor dele guarda, por `id`, estejam as
+  pessoas presentes ou não. A MESA, para dar uma ficha a quem joga e não está,
+  tem a lista de quem já entrou na campanha (a metade de servidor recebe
+  `PersonJoined` com o apelido, §7.4).
+- **O MOD não é «todos».** A D-fio-4 diz que todos os presentes veem a lista,
+  na tela do produto. Um MOD é código de terceiro, com rede de saída na metade
+  de servidor (`mundo.buscar`). O que ele ganharia é **o rol de membros do
+  servidor**, inclusive de quem não entra desde que o MOD foi ligado, e ele
+  poderia mandá-lo para fora. O `specs/00-visao-geral.md` chama a presença
+  publicada de defeito do formato que o SEELE recusa.
+
+**Se o dono quiser os membros na 6**, a forma é `membros[]` com `id` e
+`apelido` e nada mais: sem horário, sem estado («fora do ar desde»), sem ordem
+por última vez visto, e o `pessoas[]` continua sendo a presença. E o evento
+`pessoas` (§7.2) não ganha `membroNovo` nem `banido`.
+
+**Isto não segura a tarefa P6 da F1** (o FORA DO AR na casca): o retrato é uma
+projeção por lista branca (tarefa 4 do plano), e um campo que a lista não copia
+não chega ao MOD, qualquer que seja a forma do `Snapshot`.
 
 ## 7. Eventos e momentos
 
@@ -823,6 +857,7 @@ servidor) e os do celular.
    true` por contrato** (`AudioBufferSourceNode.loop`), e manter a exceção do
    som que terminou como está até lá.
 4. Os três candidatos ao fio (§14), com a F1.
+5. **Os membros fora do ar no retrato** (§6). Recomendo que fiquem de fora na 6.
 
 **Para a orquestradora:** o WebView2 (Windows) e o iPhone na M3; a forma de
 rodar o MOD no navegador (F4), contra o §16.
