@@ -67,8 +67,16 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * Bytes de som **decodificado** somados nesta região: o que o WebAudio
    * segura enquanto o som está de pé, toque ele ou não.
    *
+   * **Cada superfície tem o seu bolso.** Uma página, um painel ou um diálogo
+   * monta a sua própria região (`SuperficieDeMod`, com o perfil da
+   * superfície), e este teto vale para cada uma: um MOD com as doze
+   * superfícies que pode manter de pé (`TETO_DE_SUPERFICIES`) tem doze bolsos
+   * destes, além do da faixa. Os cartões e as contribuições têm o deles — ver
+   * `LIMITES_DO_CARTAO.bytesDeSomDecodificado`.
+   *
    * `decodeAudioData` devolve o som inteiro em float32, por canal, já na taxa
-   * do contexto que decodifica — e isso na montagem, e não na hora de tocar. O
+   * do contexto que decodifica — de uma vez, antes de o som tocar: na
+   * montagem, ou, numa contribuição, no pedido de tocar. O
    * teto de `bytesDeMidia` conta os bytes comprimidos, e não segurava isto: dez
    * MiB de MP3 a 128 kbps viram uns 250 MB decodificados a 48 kHz, e a 32 kbps
    * passam de 1 GB. O `<audio>` decodificava aos poucos; o WebAudio não.
@@ -83,7 +91,7 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * **O teto vale para o que fica de pé.** A decodificação em si já aloca o som
    * inteiro uma vez, antes de a conta poder ser feita — não há como saber a
    * duração sem decodificar —, e o som acima do teto é largado logo em seguida,
-   * para o coletor levar. Ver `montarSom`.
+   * para o coletor levar. Ver `carregarSom`.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -144,6 +152,13 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * este número. O teto **não** soma as contribuições de um MOD entre si: cada
    * uma tem o seu, e um MOD mantém até `TETO_DE_CONTRIBUICOES` (128, em
    * `mods-contribuicoes.js`) de pé — em tese, 128 vezes este número por MOD.
+   *
+   * **Numa contribuição, o som só é decodificado quando o MOD o manda tocar**
+   * (`tocando: true`). Ela não tem botão, e um som declarado parado não tinha
+   * por que segurar o som inteiro decodificado: até o pedido de tocar, a
+   * figura assenta com o arquivo contado e nada neste bolso (ver `montarSom`).
+   * O teto vale no pedido, com a mesma recusa da montagem. As 128 vezes de
+   * cima são de 128 contribuições tocando, e não de 128 montadas.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -557,13 +572,18 @@ class RegiaoDeMod {
     /**
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
-     * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao }>`.
+     * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao,
+     * adiado }>`.
      * À parte do nó porque o som chega depois dele — bytes e decodificação são
      * duas voltas —, e o MOD pode ter mudado de ideia nesse meio tempo.
      * `tocar` é o do tocador com a recusa já amarrada, e `recusar` é essa
      * recusa (ver `montarSom`); `terminou` diz se o último aviso dele foi o fim
      * natural do som; `cartao`, se ele mora num cartão ou num destino de
      * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
+     *
+     * `adiado` é o que `montarSom` recebeu (`{ plano, estado, origem }`)
+     * enquanto o som de uma contribuição assentou sem tocador e espera o
+     * pedido de tocar (ver `pedirParaTocar`).
      */
     this.somDaMidia = new Map();
     /**
@@ -2300,7 +2320,7 @@ class RegiaoDeMod {
    * - **a conta é por região**, em número e em bytes, e é ela que impede um MOD
    *   de montar mídia até a memória acabar. O som conta duas vezes: o arquivo,
    *   aqui, e o som decodificado, que o WebAudio segura inteiro, em
-   *   `montarSom` — os bytes comprimidos sozinhos deixariam dez MiB de MP3
+   *   `carregarSom` — os bytes comprimidos sozinhos deixariam dez MiB de MP3
    *   virarem centenas de MB;
    * - **o carregamento tem dono**. Sair durante o carregamento é o caso que a
    *   diretriz manda exercitar, e a resposta que chega depois da saída não
@@ -2324,7 +2344,7 @@ class RegiaoDeMod {
     };
     this.somDaMidia.set(elem, {
       tocador: null, tocar: null, recusar: null, declarado: undefined, quer: false, terminou: false,
-      cartao: Boolean(plano.cartao),
+      cartao: Boolean(plano.cartao), adiado: null,
     });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
@@ -2384,7 +2404,7 @@ class RegiaoDeMod {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         // O porquê vai ao MOD com os números, como no teto do som
-        // decodificado (`montarSom`): sem ele, «recusada» por teto e
+        // decodificado (`carregarSom`): sem ele, «recusada» por teto e
         // «recusada» por falta de um gesto chegavam iguais.
         const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         elem.dataset.estado = "cheia";
@@ -2396,7 +2416,7 @@ class RegiaoDeMod {
       // Contados **agora**, e não quando o som terminar de decodificar: os
       // bytes do som ainda levam mais duas voltas, e outra mídia que chegasse
       // nesse meio tempo caberia num teto que esta já está ocupando. O que o
-      // som ocupa decodificado é contado à parte, em `montarSom`, quando se
+      // som ocupa decodificado é contado à parte, em `carregarSom`, quando se
       // sabe.
       estado.bytes = midia.bytes;
       this[bolso.conta] += midia.bytes;
@@ -2447,7 +2467,7 @@ class RegiaoDeMod {
    * `dono.bytesDoSom` (o comando `som_do_mod`, que entrega os bytes crus de um
    * arquivo que o manifesto declara); ou do servidor do MOD, pelo `data:` que
    * `midia_em_bytes` já devolveu — lido como texto, nunca entregue a um
-   * elemento de mídia.
+   * elemento de mídia. Quem os pede e decodifica é `carregarSom`.
    *
    * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
    * `midia_do_mod` para o papel `som`: em base64 pelo `midia_do_mod` (que
@@ -2456,8 +2476,8 @@ class RegiaoDeMod {
    *
    * **O som decodificado tem teto**, somado por bolso
    * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
-   * guarda o som inteiro em float32 desde a montagem, e o teto de bytes de
-   * `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
+   * guarda o som inteiro em float32 desde que o decodifica, e o teto de bytes
+   * de `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
    * com as palavras daquele teto — figura «cheia», `recusada` ao MOD com os
    * números —, e não vira tocador.
    *
@@ -2477,6 +2497,16 @@ class RegiaoDeMod {
    * diagnóstico o conta uma vez, onde ele está de pé. Por destino, um
    * `pessoa.cartao` sem alvo numa sala de 64 pessoas pedia, decodificava e
    * segurava 64 cópias do mesmo som, e todas tocavam juntas.
+   *
+   * **E só decodificam quando o MOD manda tocar** (P49-7c). Sem botão, um som
+   * de contribuição declarado parado só toca quando o MOD o declara
+   * `tocando: true`, e decodificá-lo antes era segurar o som inteiro por nada —
+   * em cada uma das até 128 contribuições de pé de um MOD. No destino que
+   * toma os sons, a figura assenta «pronta», com o tamanho do arquivo na
+   * anotação: o Rust já conferiu o papel e o teto de arquivo, e o arquivo já
+   * está contado (`esperarOPedidoDeTocar`). O pedido de tocar é o que pede os
+   * bytes e decodifica (`pedirParaTocar`), e o teto do bolso vale ali, com a
+   * mesma recusa. O primeiro toque espera a decodificação.
    *
    * A marca é por contribuição, e não por som: uma por som precisaria dizer
    * qual nó é qual em todos os destinos, e a chave do plano não diz — a
@@ -2507,13 +2537,64 @@ class RegiaoDeMod {
       this.sonsDaContribuicao.tomados = true;
       this.tomouOsSons = true;
     }
+    const montagem = { plano, estado, origem };
+    // E o som dela espera o pedido de tocar para pedir os bytes.
+    if (this.sonsDaContribuicao) {
+      const entrada = this.somDaMidia.get(elem);
+      if (entrada) entrada.adiado = montagem;
+      this.esperarOPedidoDeTocar(elem);
+      return;
+    }
+    await this.carregarSom(elem, montagem);
+  }
+
+  /**
+   * Assenta o som de uma contribuição no destino que segura os sons dela,
+   * **sem pedir os bytes** (P49-7c): a figura diz «pronta», e a anotação diz
+   * o tamanho do arquivo, que o Rust já conferiu — o papel e o teto de
+   * arquivo — e que `montarMidia` já contou. Quem pede os bytes e decodifica
+   * é o pedido de tocar (`pedirParaTocar`), que `aplicarTocando` faz daqui
+   * mesmo quando o MOD já declarou `tocando: true`.
+   *
+   * Uma janela sem WebAudio é dita aqui, e não no pedido de tocar: ela não
+   * vai tocar o som nunca, e uma figura «pronta» até lá esconderia isso.
+   */
+  esperarOPedidoDeTocar(elem) {
+    const som = this.somDaMidia.get(elem);
+    const montagem = som?.adiado;
+    if (!montagem) return;
+    const { plano, estado } = montagem;
+    if (!janelaTocaSomDeMod()) {
+      som.adiado = null;
+      this.falharOSom(elem, plano, "esta janela não oferece WebAudio");
+      return;
+    }
+    elem.dataset.estado = "pronta";
+    this.anotarMidia(
+      elem,
+      "pronta",
+      `${estado.bytes} bytes de arquivo, já conferidos; o som decodifica quando o MOD mandar tocar`,
+      Boolean(plano.cartao),
+    );
+    this.aplicarTocando(elem);
+  }
+
+  /**
+   * Pede os bytes de um som, decodifica, confere o teto do som decodificado e
+   * monta o tocador — e aplica o `tocando` que o MOD declarou.
+   *
+   * Na montagem, para o som de uma região, de uma superfície ou de um cartão
+   * (`montarSom`); no pedido de tocar, para o de uma contribuição
+   * (`pedirParaTocar`).
+   *
+   * @param {{ plano: object, estado: object, origem: object }} montagem
+   */
+  async carregarSom(elem, montagem) {
+    const { plano, estado, origem } = montagem;
     const chave = plano.no.chave ?? "";
     const falhou = (motivo) => {
       if (estado.cancelado || this.solta) return;
-      elem.dataset.estado = "falhou";
-      this.anotarMidia(elem, "recusada", motivo);
-      this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
-      this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
+      this.falharOSom(elem, plano, motivo);
     };
     // **Nada de áudio da janela aqui.** O som é decodificado num contexto
     // fora do tempo, e o de tempo real — o que segura a saída do sistema — só
@@ -2549,7 +2630,8 @@ class RegiaoDeMod {
     // A recusa é a do teto de bytes de `montarMidia`, com as mesmas palavras —
     // figura «cheia», `recusada` ao MOD com o porquê e os números, e
     // «recusada» no registro —: os dois são o mesmo tipo de não, e um MOD não
-    // tem de tratar um deles como falha de carga.
+    // tem de tratar um deles como falha de carga. Numa contribuição, ela
+    // chega no pedido de tocar, que é quando o som decodifica.
     const { contaDoSom, tetoDoSom } = estado.bolso;
     const ocupa = som.length * som.numberOfChannels * 4;
     if (this[contaDoSom] + ocupa > tetoDoSom) {
@@ -2649,6 +2731,20 @@ class RegiaoDeMod {
   }
 
   /**
+   * O som que não chegou a tocador, dito: figura «falhou», a anotação, o
+   * `falhou` ao MOD com o motivo, e a linha no registro — as palavras do
+   * `.catch` de `montarMidia`. Quem chama confere antes se o som ainda é de
+   * alguém.
+   */
+  falharOSom(elem, plano, motivo) {
+    const chave = plano.no.chave ?? "";
+    elem.dataset.estado = "falhou";
+    this.anotarMidia(elem, "recusada", motivo);
+    this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
+    this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
+  }
+
+  /**
    * Aplica o `tocando` que o MOD declarou, **se ele mudou** desde a última vez
    * — ou se o som terminou e o MOD continua o declarando.
    *
@@ -2677,13 +2773,18 @@ class RegiaoDeMod {
    * do mestre começava a tocar numa página que ninguém via. Reaberta, quem
    * liga é o botão do produto, ou o MOD mudando o `tocando`.
    *
-   * **Numa contribuição, uma vez, e não uma por destino**, sem nada aqui:
-   * só o destino que tomou os sons dela tem tocador (ver `montarSom`), e nos
-   * outros a conferência do tocador, logo abaixo, já sai.
+   * **Numa contribuição, uma vez, e não uma por destino**: só o destino que
+   * segura os sons dela tem tocador (ver `montarSom`). E o som dela só ganha
+   * tocador no pedido de tocar: sem tocador, a declaração vai a
+   * `pedirParaTocar`, que carrega o som quando ela pede para tocar.
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
-    if (!som?.tocador) return;
+    if (!som) return;
+    if (!som.tocador) {
+      this.pedirParaTocar(elem, som);
+      return;
+    }
     const deNovo = som.quer && som.terminou;
     if (som.declarado === som.quer && !deNovo) return;
     som.declarado = som.quer;
@@ -2697,6 +2798,35 @@ class RegiaoDeMod {
       return;
     }
     som.tocar(false);
+  }
+
+  /**
+   * **O pedido de tocar de um som de contribuição que ainda não tem tocador**
+   * (P49-7c): é ele, e não a montagem, que pede os bytes e decodifica.
+   *
+   * Só no destino que segura os sons da contribuição, e só para um som que
+   * assentou esperando (`adiado`). A declaração vale na mudança, como com
+   * tocador: um `tocando: false` é guardado como aplicado, e o `true` seguinte
+   * é o pedido. O som carrega uma vez; quando o tocador existe, `carregarSom`
+   * chama `aplicarTocando` de novo, e a declaração daquele momento é a que vale
+   * — o MOD pode ter desligado o `tocando` enquanto o som decodificava.
+   *
+   * O que lança fora dos caminhos de recusa de `carregarSom` é dito como o
+   * `.catch` de `montarMidia` diz: o som falhou ao carregar.
+   */
+  pedirParaTocar(elem, som) {
+    if (!som.adiado || !this.tomouOsSons) return;
+    if (som.declarado === som.quer) return;
+    if (!som.quer) {
+      som.declarado = false;
+      return;
+    }
+    const montagem = som.adiado;
+    som.adiado = null;
+    this.carregarSom(elem, montagem).catch((falha) => {
+      if (montagem.estado.cancelado || this.solta) return;
+      this.falharOSom(elem, montagem.plano, motivoDaFalha(falha));
+    });
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
@@ -2781,7 +2911,9 @@ class RegiaoDeMod {
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
-   * @param {string} [motivo] Por que foi recusada, em texto. Cortado em 200
+   * @param {string} [motivo] Por que foi recusada, em texto — ou, num som de
+   *   contribuição que espera o pedido de tocar, o tamanho do arquivo que já
+   *   chegou (`esperarOPedidoDeTocar`). Cortado em 200
    *   pontos de código, e não por índice, como a chave em `dizerRecusaDeMidia`:
    *   um corte que parta um par substituto deixa meio caractere no motivo.
    * @param {boolean} [cartao] Se ela mora num cartão. Dito na primeira
@@ -3358,7 +3490,7 @@ class TocadorDeSomDeMod {
   async tocar(comGesto = false) {
     if (this.solto || this.fonte) return this.fonte !== null;
     const pedido = (this.pedido += 1);
-    // Sem WebAudio, `montarSom` já recusou o som antes de existir tocador; o
+    // Sem WebAudio, `carregarSom` já recusou o som antes de existir tocador; o
     // `throw` é a mesma recusa, pelo `catch` de quem pediu, e não a frase do
     // gesto que faltou.
     const contexto = contextoDeSomDeMod();

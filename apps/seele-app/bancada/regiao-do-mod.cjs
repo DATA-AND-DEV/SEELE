@@ -4128,6 +4128,134 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 17. O som de uma contribuição só decodifica quando o MOD manda tocar.
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-7c. O teto do som decodificado vale por bolso, e uma contribuição tem o
+ * dela: um MOD mantém até 128 de pé, e cada uma segurava, desde a montagem, o
+ * som inteiro em float32 — tocasse ele ou não. Numa contribuição não há botão:
+ * um som declarado com `tocando: false` só toca quando o MOD o declara
+ * `tocando: true`, e até lá não há o que decodificar.
+ *
+ * - **Na montagem**, a marca é tomada como antes, e a figura assenta «pronta»
+ *   com o tamanho do arquivo na anotação: o Rust já conferiu o papel e o teto
+ *   de arquivo. Nem `bytesDoSom` nem `decodeAudioData` são chamados — pelos
+ *   dois caminhos, o do pacote e o do servidor do MOD.
+ * - **No pedido de tocar**, o som é pedido, decodificado e tocado, uma vez.
+ * - **O teto do bolso vale ali**, com a mesma recusa de sempre: figura «cheia»,
+ *   `recusada` ao MOD com os números, a linha no registro. Na montagem, nada.
+ */
+async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
+  const caso = "o som da contribuição só decodifica quando o MOD manda tocar";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const origens = {
+    "do pacote": { fonte: "som/sino.wav" },
+    "do servidor do MOD": { doServidor: { canal: 1, pedido: {}, campo: "bytes" } },
+  };
+  for (const [nome, origem] of Object.entries(origens)) {
+    const daOrigem = `${caso} · ${nome}`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const sino = (tocando) => [{ forma: "midia", chave: "sino", ...origem, tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(sino(false));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    confere(
+      daOrigem,
+      d.pedidosDeSom.length === 0 && Audio.decodificados.length === 0,
+      "uma contribuição declarada com `tocando: false` pediu os bytes do som ou o decodificou na montagem — "
+        + "cada contribuição segura o som inteiro decodificado sem que ninguém o mande tocar: "
+        + `${JSON.stringify({ pedidos: d.pedidosDeSom, decodificados: Audio.decodificados })}`,
+    );
+    const figuras = destinos.map((r) => todasAsTags(r.raiz, "figure").map((f) => f.dataset.estado).join());
+    confere(
+      daOrigem,
+      Boolean(tomou) && figuras.join("|") === "pronta|pronta",
+      `o som que espera o pedido de tocar não assentou «pronta» nos dois destinos: ${JSON.stringify(figuras)}`,
+    );
+    const anotadas = destinos.flatMap((r) => r.midiasAnotadas());
+    confere(
+      daOrigem,
+      anotadas.length === 1 && anotadas[0].situacao === "pronta" && anotadas[0].cartao === true
+        && /\b12 bytes\b/.test(anotadas[0].motivo),
+      "o som que espera o pedido de tocar não ficou anotado «pronta», uma vez, com o tamanho do arquivo — "
+        + `o diagnóstico não diria que ele chegou e coube: ${JSON.stringify(anotadas)}`,
+    );
+
+    // O pedido de tocar: o som é pedido, decodificado e tocado, uma vez.
+    for (const r of destinos) r.aplicar(sino(true));
+    await assentar();
+    const tocando = Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    const ouviu = d.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
+    confere(
+      daOrigem,
+      JSON.stringify(d.pedidosDeSom) === JSON.stringify(origem.fonte ? [origem.fonte] : [])
+        && Audio.decodificados.length === 1 && tocando === 1 && ouviu === 1,
+      "o pedido de tocar não pediu, decodificou e tocou o som da contribuição uma vez: "
+        + `${JSON.stringify({ pedidos: d.pedidosDeSom, decodificados: Audio.decodificados.length, tocando, ouviu })}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // O teto do bolso vale no pedido de tocar, e não na montagem.
+  {
+    const naRecusa = `${caso} · o teto, no pedido de tocar`;
+    const teto = bancada().CARTAO.bytesDeSomDecodificado;
+    const quadros = Math.floor(teto / 8) + 1;
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const grande = (tocando) => [{ forma: "midia", chave: "grande", fonte: "som/grande.ogg", tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(grande(false));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const recusas = () => d.ditos.filter((e) => e.nome === "midia" && e.chave === "grande" && e.estado === "recusada");
+    confere(
+      naRecusa,
+      recusas().length === 0 && todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "pronta",
+      "o som acima do teto foi recusado na montagem, sem ninguém o mandar tocar — o teto valeu antes da "
+        + `decodificação que ele mede: ${JSON.stringify(recusas())}`,
+    );
+    for (const r of destinos) r.aplicar(grande(true));
+    await assentar();
+    const recusa = recusas()[0];
+    confere(
+      naRecusa,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "cheia"
+        && recusas().length === 1 && /teto/.test(recusa?.porque ?? "") && String(recusa?.porque ?? "").includes(String(teto)),
+      "o pedido de tocar um som acima do teto não foi recusado com a palavra do teto e os números — figura "
+        + `«${todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado}», ao MOD ${JSON.stringify(recusas())}`,
+    );
+    confere(
+      naRecusa,
+      d.anotadas.some((t) => t.includes("«grande» recusada:") && t.includes("decodificado")),
+      `a recusa pelo teto no pedido de tocar não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      naRecusa,
+      (Audio.ultimo?.fontes.length ?? 0) === 0 && destinos.every((r) => r.bytesDeSomDeCartao === 0),
+      `o som acima do teto virou tocador, ou ficou na conta: ${Audio.ultimo?.fontes.length} fonte(s), `
+        + `${JSON.stringify(destinos.map((r) => r.bytesDeSomDeCartao))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -4170,6 +4298,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
     oSomQueSaiDaTelaParaComoOAudioParava,
+    oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
   ];
   for (const prova of provas) {
     try {
