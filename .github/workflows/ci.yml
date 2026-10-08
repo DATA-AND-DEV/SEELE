@@ -365,6 +365,16 @@ jobs:
       - name: as bancadas
         timeout-minutes: 5
         run: cargo xtask check-runtime
+      # Os crates do celular dentro do `.wasm` (ADR 0057, e a emenda de
+      # 08/10/2026): os bytes-ouro da linha 1 pela fronteira do `seele-web`, e o
+      # motor de MODs do `seele-motor-web` com as importações fixas, o laço
+      # cortado e o teto de memória, que só se prova no `wasm32-wasip1`. O
+      # wasi-sdk vem conferido pelo `cargo xtask wasi-sdk`, com o hash fixado de
+      # `x86_64-linux`; sem ele, o build do motor para em vez de baixar.
+      - run: rustup target add wasm32-unknown-unknown wasm32-wasip1
+      - name: os crates do celular no wasm
+        timeout-minutes: 15
+        run: cargo xtask web
 
   # O `cargo deny` sobre o `deny.toml`, que nenhum job daqui rodava.
   #

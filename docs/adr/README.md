@@ -48,7 +48,7 @@ o ganho é de estética.
 | [0014](0014-palheta-v2-canonica.md) | Palheta v2 como canônica | aceito por default | `07` — tokens de cor |
 | [0015](0015-vad-sem-webrtc.md) | VAD por energia, sem `webrtc-vad` | aceito por default | `03` — ativação por voz |
 | [0016](0016-ptt-trava-quando-o-terminal-nao-reporta-soltura.md) | Push-to-talk vira trava onde o terminal não reporta soltura | aceito | `03` — push-to-talk |
-| [0017](0017-identidade-e-pins-em-disco.md) | Identidade e pins gravados em disco, sem senha | aceito · emendado no navegador pelo `0057` | `08` — guarda da identidade |
+| [0017](0017-identidade-e-pins-em-disco.md) | Identidade e pins gravados em disco, sem senha | aceito · emendado no navegador pelo `0057` · a identidade por máquina, pelo `0061` | `08` — guarda da identidade |
 | [0018](0018-seele-ffi-sem-uniffi-por-enquanto.md) | `seele-ffi` com a forma que o `uniffi` exige, sem a dependência | aceito · emendado pelo `0057`: o `uniffi` não entra em M6 | `01` — ponte para o app |
 | [0019](0019-frontend-sem-framework-e-sem-npm.md) | Frontend do desktop sem framework e sem npm | aceito · emendado no navegador pelo `0057` | `05` — frontend desktop |
 | [0020](0020-o-que-o-tauri-traz-junto.md) | O que o Tauri traz junto, e por que aceitamos | aceito | `01` — dependências do app |
@@ -77,7 +77,7 @@ o ganho é de estética.
 | [0043](0043-o-instalador-do-windows-e-nosso.md) | O instalador do Windows é nosso | **aceito** | — (o NSIS não desenha a moldura, os botões nem a fonte) |
 | [0044](0044-o-portao-divide-a-subida-medida.md) | O portão divide a subida medida, e a medida sobrevive ao reinício | **aceito** | — (revisa a perna do hospedeiro do `0038`) |
 | [0045](0045-mods-o-produto-base-tem-regras-e-um-mod-nao.md) | MODs: o produto base tem regras, e um MOD não | **proposto** | — (pedido do dono; substitui o `0029`) |
-| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | aceito em 08/10/2026 · emenda das duas numerações: toda **linha** de servidor para sempre · exceção no navegador pelo `0057` | — (pedido do dono; substitui o botão do `0026`) |
+| [0046](0046-toda-versao-continua-de-pe.md) | Toda versão continua de pé: o app vira launcher | aceito em 08/10/2026 · emenda das duas numerações: toda **linha** de servidor para sempre · exceção no navegador pelo `0057` · a identidade não é por linha, pelo `0061` | — (pedido do dono; substitui o botão do `0026`) |
 | [0047](0047-o-link-que-volta-a-funcionar-amanha.md) | O link que volta a funcionar amanhã: permanência, multiconexão e chamada privada | **rascunho** | — (pedido do dono; confere o `0022` e o `0031` contra o código) |
 | [0048](0048-mods-ganham-o-caminho-de-volume-que-os-anexos-ja-tem.md) | MODs ganham o caminho de volume que os anexos já têm | **aceito** | — (relato de campo: imagem de 1 MB levando 28 s; estende o `0027` aos MODs do `0045`) |
 | [0049](0049-um-mod-deixa-de-rodar-na-janela-do-produto.md) | Um MOD deixa de rodar na janela do produto | **aceito** | — (revisa o `0045`; etapa 5 do plano de isolamento, e depende de protótipo em macOS e Windows) |
@@ -85,8 +85,12 @@ o ganho é de estética.
 | [0053](0053-uma-previa-nao-e-um-clique.md) | Uma prévia não é um clique | **aceito** | — (revisão da v15, R06: separa a política de prévia automática da de abrir link, e põe o consentimento por domínio nas mãos de quem lê) |
 | [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
 | [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
-| [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** | `06` — plataforma mobile (M6) |
+| [0056](0056-mods-na-tela-inteira.md) | MODs na tela inteira | **proposto** · esqueleto; fecha com o `api/v6.json` | — (spec de 23/09, Parte II, e o spec-mestre da 0.16: a API 6 e a medição de custo do `0052`) |
+| [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** · emendado em 08/10/2026: os MODs rodam no celular, e o `unsafe` da fronteira dos dois crates do celular | `06` — plataforma mobile (M6) |
 | [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** | `02` e `10` — versionamento (substitui a janela N−1) |
+| [0059](0059-a-sala-pessoal-segura-a-conexao-enquanto-toca.md) | A sala pessoal segura a conexão enquanto toca | **aceito** | — (decisão do dono de 23/09: o toque instantâneo; restringe o `0030` aos servidores guardados) |
+| [0060](0060-o-codigo-de-uma-pessoa.md) | O código de uma pessoa | **aceito** | — (decisão do dono de 23/09: o código de usuário; forma, marcas e o DER da sala congelados) |
+| [0061](0061-a-identidade-e-uma-por-maquina.md) | A identidade é uma por máquina, e não por linha nem por versão | **proposto** | — (decisão do dono de 08/10; emenda o `0017` e o `0046`; espera as opções da linha legada e a regra dos 32 bytes na 0.15.2) |
 
 ## O que ainda não tem ADR
 

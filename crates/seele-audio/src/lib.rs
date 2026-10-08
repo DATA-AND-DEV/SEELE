@@ -43,6 +43,7 @@ pub mod rt;
 pub mod supervisor;
 pub mod supressao;
 pub mod telemetry;
+pub mod toque;
 
 /// Sample rate used everywhere inside the pipeline, in hertz.
 ///
