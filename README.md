@@ -58,6 +58,11 @@ enxergar o protocolo direto.
 Tauri sobre o mesmo núcleo, e é a única casca do produto — o cliente de terminal
 saiu no [ADR 0039](docs/adr/0039-o-produto-passa-a-ter-uma-casca-so.md).
 
+**No celular, o SEELE ainda não roda.** O caminho decidido é o navegador: uma
+página instalável na Tela de Início, sem app nativo e sem loja, que só entra em
+servidores e nunca hospeda
+([ADR 0057](docs/adr/0057-o-celular-entra-pelo-navegador.md)).
+
 **HOSPEDAR AQUI** sobe um servidor dentro do próprio app e entra nele: quem só
 quer clicar nunca precisa abrir um terminal. Ele vive enquanto a janela estiver
 aberta, e o link de convite aparece no topo, pronto para copiar. Quem prefere um
@@ -265,9 +270,6 @@ para sempre, convite gasto não vale nada.
 
 ---
 
-
----
-
 ## Compartilhar a tela
 
 Numa sala de voz, **COMPARTILHAR** — no rodapé, ou ao lado do palco vazio — abre
@@ -354,7 +356,8 @@ do sistema (ADR 0041) e o som da tela.
 
 ## Em que pé está
 
-**2.621 testes automáticos passando.** O que eles cobrem:
+**2.703 testes automáticos passando** (`cargo test --workspace`, medidos em
+07/10/2026). O que eles cobrem:
 
 - dois clientes conversando por texto e voz sintética através do servidor
 - pipeline de áudio sob 5% de perda induzida, e soak de dez minutos em tempo
@@ -364,8 +367,8 @@ do sistema (ADR 0041) e o som da tela.
 - limitação de taxa nas duas pontas: quem bate à porta em laço é recusado com
   motivo, e quem inunda de mensagens é avisado antes de ser derrubado
 - a interface: que a ajuda não prometa uma tecla que não existe, que o
-  vocabulário aposentado não volte à tela, que a marca não use o vermelho de
-  alerta, e que os retratos acima saiam do código que desenha
+  vocabulário aposentado não volte à tela, e que a marca não use o vermelho de
+  alerta
 
 Verificado **entre duas máquinas de verdade**, em redes diferentes: o furo de
 NAT abrindo caminho de uma casa atrás de CGNAT para uma rede móvel, com o ponto
@@ -384,21 +387,31 @@ O que está frouxo está em `docs/pendencias.md`, com nome e motivo.
 | onde | o quê |
 |---|---|
 | `specs/` | a fonte de verdade, escrita antes do código |
+| `api/` | as versões congeladas da API de MODs, e o que muda em cada uma |
 | `crates/seele-proto` | tipos do protocolo, serialização, versionamento |
 | `crates/seele-audio` | codec, jitter buffer, mixer, deriva de clock, simulador de rede |
+| `crates/seele-video` | o compartilhamento de tela: captura e codec H.264 |
 | `crates/seele-core` | o núcleo: sessão, estado, voz. Tudo que pensa |
 | `crates/seele-server` | `seeled`, o servidor |
 | `crates/seele-encontro` | o ponto de encontro do furo de NAT |
 | `crates/seele-ffi` | a superfície que as cascas gráficas falam |
+| `crates/seele-lancador` | as versões lado a lado: resolver, instalar e iniciar outra versão (ADR 0046) |
+| `crates/seele-conformance` | os testes que sobem cliente e servidor de verdade, os únicos que veem os dois lados |
 | `apps/seele-app` | o cliente desktop, Tauri |
+| `apps/seele-instalador` | o instalador do Windows (ADR 0043) |
+| `xtask` | os guardas do repositório, como `cargo xtask check-deps` e `check-api` |
+| `empacotar/` | o que monta e publica uma versão, e as notas de cada uma |
+| `fuzz/` | os alvos de fuzz do protocolo, com as sementes |
+| `tools/` | a casca carregada num navegador, e os roteiros que a exercitam |
 | `design/marca/` | a marca, e o gerador de todos os tamanhos dela |
 | `docs/adr/` | por que cada decisão difícil foi tomada assim |
 | `docs/pendencias.md` | o que está quebrado e ainda não foi consertado |
+| `docs/superpowers/` | os planos e as especificações em andamento, a caminho da 1.0 |
 | `spikes/` | provas de conceito, com a pergunta e o número que a respondeu |
 
 As ADRs são o melhor lugar para entender o projeto de verdade: cada uma diz o
 que foi decidido, o que foi descartado, e o que custa voltar atrás. O código as
-cita quase seiscentas vezes, e não por formalidade — quando um comentário
+cita mais de mil vezes, e não por formalidade — quando um comentário
 explica por que uma linha é daquele jeito, a razão inteira está numa delas.
 
 ---

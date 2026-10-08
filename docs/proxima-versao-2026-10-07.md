@@ -58,6 +58,11 @@ nas duas. A 0.16 fica reservada para a quebra de protocolo do Plano 3.
   - o README com o rótulo certo do macOS, «Abrir Mesmo Assim».
 - **Documentos**: o ADR 0057 com os spikes e as pesquisas que ele cita, o plano
   dos lotes dos abertos e as notas em `empacotar/notas/0.15.1.md`.
+- **A limpeza do repositório** (`16f1df2`): saem 214 arquivos de relatórios,
+  notas, planos e evidências das versões anteriores que nenhum código, teste ou
+  documento vivo cita. O git os guarda. O README foi conferido contra o código:
+  a contagem de testes medida, a tabela do repositório completa e o celular
+  pelo navegador.
 
 Cada guarda novo foi provado por reversão. O do jitter, com o conserto desfeito,
 reproduz o relato de 05/10: 20 → 920 → 1820 → 2720 ms. As duas receitas do G1
