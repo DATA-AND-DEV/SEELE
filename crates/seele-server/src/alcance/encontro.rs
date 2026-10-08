@@ -2448,6 +2448,49 @@ mod testes {
         );
     }
 
+    /// O corpo de uma função deste módulo, sem as linhas de comentário: do
+    /// texto `assinatura` até a primeira chave que fecha na coluna zero.
+    fn corpo_de(assinatura: &str) -> String {
+        include_str!("encontro.rs")
+            .split(assinatura)
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .unwrap_or_default()
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn os_envios_do_tique_passam_pela_classificacao_e_pela_escolha() {
+        // A fiação do C4, guardada pelo texto-fonte. `NaoSaiu::do_envio` e
+        // `a_falha_que_conta` têm testes próprios logo acima, e um par correto
+        // que os envios não chamassem deixaria esses testes verdes e a fila
+        // cheia voltando a virar duas linhas `info`. Um `WouldBlock` de verdade
+        // num socket UDP não tem receita conhecida que valha nos três sistemas,
+        // então a prova é a forma: sem os comentários, porque um guarda que
+        // casasse com a prosa que explica o conserto passaria sem ele.
+        let mandar = corpo_de("fn mandar_pelo_server(");
+        assert!(
+            mandar.contains("NaoSaiu::do_envio("),
+            "`mandar_pelo_server` deixou de montar a falha do `send_to` por \
+             `NaoSaiu::do_envio`: um `WouldBlock` no socket do servidor deixa de ser passageiro, e \
+             a fila cheia num tique volta a virar «deixou de sair» no seele.log:\n{mandar}"
+        );
+        let registrar = corpo_de("async fn registrar(");
+        assert!(
+            registrar.contains("NaoSaiu::do_envio("),
+            "`registrar` deixou de montar a falha do MORO da escuta por `NaoSaiu::do_envio`: um \
+             `WouldBlock` na escuta deixa de ser passageiro:\n{registrar}"
+        );
+        assert!(
+            registrar.contains("a_falha_que_conta(["),
+            "`registrar` deixou de escolher a falha do tique por `a_falha_que_conta`: uma fila \
+             cheia num socket volta a esconder a recusa do outro:\n{registrar}"
+        );
+    }
+
     #[tokio::test]
     async fn atender_diz_no_log_quando_o_registro_da_subida_nao_sai() {
         // O teste de cima prova `registrar` e `RegistroNoQuarto` isolados, e um
