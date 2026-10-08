@@ -13177,17 +13177,11 @@ mod o_id_do_pedido_de_mod_no_registro {
         }
     }
 
-    /// O corpo de `funcao` em `main.rs`, sem as linhas de comentário e sem
-    /// espaço nenhum.
+    /// O corpo de `funcao` neste arquivo, sem as linhas de comentário
+    /// ([`super::fonte_sem_comentarios`]) e sem espaço nenhum.
     fn corpo_sem_espaco(fonte: &str, funcao: &str) -> String {
-        fonte
-            .split(funcao)
-            .nth(1)
-            .and_then(|resto| resto.split("\n}\n").next())
-            .unwrap_or_else(|| panic!("`{funcao}` sumiu de main.rs"))
-            .lines()
-            .filter(|linha| !linha.trim_start().starts_with("//"))
-            .flat_map(str::chars)
+        super::corpo_de(fonte, funcao)
+            .chars()
             .filter(|c| !c.is_whitespace())
             .collect()
     }
@@ -13199,11 +13193,7 @@ mod o_id_do_pedido_de_mod_no_registro {
     /// testes acima verdes com o id cru no registro de novo.
     #[test]
     fn nenhum_mod_id_em_display_usa_o_id_cru_do_comando() {
-        let fonte = std::fs::read_to_string(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
-        )
-        .expect("main.rs legível")
-        .replace("\r\n", "\n");
+        let fonte = super::fonte_sem_comentarios();
         for funcao in [
             "fn mod_request(",
             "fn pedido_a_caminho_dito(",
