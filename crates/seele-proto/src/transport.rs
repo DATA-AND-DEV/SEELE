@@ -15,6 +15,30 @@ use std::time::Duration;
 /// exchanged, which is cheaper and safer than discovering it afterwards.
 pub const ALPN: &[u8] = b"seele/1";
 
+/// O ALPN do navegador: o `h3` da WebTransport (ADR 0057).
+///
+/// O `seeled` anuncia os dois no mesmo socket e escolhe o certificado por ele:
+/// o de longa duração para [`ALPN`], um curto para este. O [`ALPN`] `seele/1`
+/// continua congelado (ADR 0058).
+pub const ALPN_DO_NAVEGADOR: &[u8] = b"h3";
+
+/// Uma janela de certificado curto nova a cada tanto (pedido da F4, item 17).
+pub const PASSO_DA_JANELA: Duration = Duration::from_secs(6 * 24 * 60 * 60);
+
+/// Quanto o `not_before` de um curto recua, pelo relógio torto do celular.
+pub const ANTES_DA_JANELA: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Do `not_before` ao `not_after` de um certificado curto.
+///
+/// Os navegadores recusam acima de 14 dias para `serverCertificateHashes`
+/// (`docs/ios-sem-assinatura-2026-10-07.md:206`). Com o passo de 6 dias, duas
+/// janelas valem ao mesmo tempo, com 7 dias de sobreposição.
+pub const VALIDADE_DO_CURTO: Duration = Duration::from_secs(13 * 24 * 60 * 60);
+
+/// Quantas janelas o servidor anuncia: cerca de um ano à frente, para quem
+/// entrou uma vez voltar por um ano sem link novo.
+pub const JANELAS_ANUNCIADAS: usize = 60;
+
 /// Default listening port, UDP.
 ///
 /// `specs/01-arquitetura.md` proposes 8383 and marks it open; the design

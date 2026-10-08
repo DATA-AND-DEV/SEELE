@@ -628,6 +628,16 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 person: PersonId(43),
             },
         ),
+        (
+            "HashesDoNavegador",
+            ServerMessage::HashesDoNavegador {
+                janelas: vec![seele_proto::control::JanelaDoNavegador {
+                    hash: [0xC3; 32],
+                    nao_antes: 1_790_000_000,
+                    nao_depois: 1_791_123_200,
+                }],
+            },
+        ),
     ]
 }
 

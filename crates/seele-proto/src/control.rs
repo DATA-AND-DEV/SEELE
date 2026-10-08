@@ -522,6 +522,29 @@ pub struct Membro {
 /// partes.
 pub const MAX_MEMBROS_POR_PARTE: usize = 256;
 
+/// Uma janela de certificado curto do `h3`: o hash dele e quando ele vale.
+///
+/// O navegador só aceita, em `serverCertificateHashes`, um certificado válido
+/// **agora** e de no máximo 14 dias; por isso o servidor pré-gera uma janela a
+/// cada [`crate::transport::PASSO_DA_JANELA`] e anuncia os hashes à frente
+/// (ADR 0057; pedido da F4, item 17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JanelaDoNavegador {
+    /// O SHA-256 do DER do certificado curto.
+    pub hash: [u8; 32],
+    /// Desde quando ele vale, em segundos Unix UTC.
+    pub nao_antes: u64,
+    /// Até quando ele vale, em segundos Unix UTC.
+    pub nao_depois: u64,
+}
+
+/// O teto de janelas em [`ServerMessage::HashesDoNavegador`]: as
+/// [`crate::transport::JANELAS_ANUNCIADAS`] e folga.
+pub const MAX_JANELAS_DO_NAVEGADOR: usize = 64;
+
+/// A validade máxima de uma janela que um navegador aceita: 14 dias.
+const VALIDADE_MAXIMA_NO_NAVEGADOR: u64 = 14 * 24 * 60 * 60;
+
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoiceRoomInfo {
@@ -2465,6 +2488,19 @@ pub enum ServerMessage {
         /// Quem.
         person: PersonId,
     },
+
+    // ---- o celular, desde o Servidor 1.0 (ADR 0057) ----
+    /// Os certificados curtos do `h3`, para o navegador guardar por `fp`.
+    ///
+    /// Uma vez, logo depois do `Session`, **nos dois transportes**: um membro
+    /// do desktop que monta links para o celular também precisa dos hashes, e
+    /// o nativo que não os usa os ignora. Em ordem crescente de `nao_antes`.
+    /// Os DERs não viajam aqui: o navegador só precisa dos da janela vigente,
+    /// e eles chegam por outra mensagem (pedido da F4, item 17).
+    HashesDoNavegador {
+        /// As janelas, da mais antiga para a mais nova.
+        janelas: Vec<JanelaDoNavegador>,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2581,7 +2617,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 45;
+    const CONHECIDAS: u32 = 46;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3231,6 +3267,21 @@ impl Validate for ServerMessage {
                 check("nickname", membro.nickname.len(), MAX_NICKNAME_LEN)
             }
             Self::MembroBanido { .. } => Ok(()),
+            Self::HashesDoNavegador { janelas } => {
+                check("janelas", janelas.len(), MAX_JANELAS_DO_NAVEGADOR)?;
+                let cada_uma_vale = janelas.iter().all(|janela| {
+                    janela.nao_depois > janela.nao_antes
+                        && janela.nao_depois - janela.nao_antes <= VALIDADE_MAXIMA_NO_NAVEGADOR
+                });
+                let em_ordem = janelas.windows(2).all(
+                    |par| matches!(par, [antes, depois] if antes.nao_antes < depois.nao_antes),
+                );
+                if cada_uma_vale && em_ordem {
+                    Ok(())
+                } else {
+                    Err(ControlError::FieldOutOfRange { field: "janelas" })
+                }
+            }
         }
     }
 }
@@ -4903,7 +4954,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            44,
+            45,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4932,6 +4983,9 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **45 pela `HashesDoNavegador`**, os certificados curtos do celular
+        // (ADR 0057), no mesmo 9.
         //
         // **42 a 44 pelo FORA DO AR** — `Membros`, `MembroNovo` e
         // `MembroBanido` (D-fio-4) —, no mesmo 9 e pelo mesmo motivo.
@@ -5442,6 +5496,104 @@ mod as_razoes_da_linha_1 {
             vec![3, 4, 5, 6]
         );
         assert_eq!(apis_da_mascara(u64::MAX).len(), 64);
+    }
+}
+
+#[cfg(test)]
+mod os_hashes_do_navegador {
+    //! Os certificados curtos do `h3`, anunciados depois do `Session` para o
+    //! navegador guardar por `fp` (pedido da F4, item 17; ADR 0057).
+    use super::*;
+    use crate::transport::{
+        ANTES_DA_JANELA, JANELAS_ANUNCIADAS, PASSO_DA_JANELA, VALIDADE_DO_CURTO,
+    };
+
+    const DIA: u64 = 24 * 60 * 60;
+
+    /// As janelas como o `seeled` as gera: uma a cada passo, cada uma valendo
+    /// a validade do curto a partir de um dia antes.
+    fn janelas(quantas: usize) -> Vec<JanelaDoNavegador> {
+        let inicio = 1_790_000_000_u64;
+        (0..quantas)
+            .map(|indice| {
+                let nao_antes = inicio + u64::try_from(indice).unwrap() * PASSO_DA_JANELA.as_secs()
+                    - ANTES_DA_JANELA.as_secs();
+                JanelaDoNavegador {
+                    hash: [u8::try_from(indice % 256).unwrap(); 32],
+                    nao_antes,
+                    nao_depois: nao_antes + VALIDADE_DO_CURTO.as_secs(),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn as_janelas_anunciadas_vao_e_voltam_e_cabem_folgadas() {
+        let mensagem = ServerMessage::HashesDoNavegador {
+            janelas: janelas(JANELAS_ANUNCIADAS),
+        };
+        let quadro = encode(&mensagem).unwrap();
+        assert!(
+            quadro.len() < 4 * 1024,
+            "{} bytes para 60 janelas",
+            quadro.len()
+        );
+        assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), mensagem);
+    }
+
+    #[test]
+    fn as_janelas_tortas_sao_recusadas_nos_dois_sentidos() {
+        let recusa =
+            |janelas: Vec<JanelaDoNavegador>| encode(&ServerMessage::HashesDoNavegador { janelas });
+        assert!(matches!(
+            recusa(janelas(MAX_JANELAS_DO_NAVEGADOR + 1)),
+            Err(ControlError::FieldTooLong {
+                field: "janelas",
+                ..
+            })
+        ));
+        let mut ao_contrario = janelas(1);
+        ao_contrario[0].nao_depois = ao_contrario[0].nao_antes;
+        assert_eq!(
+            recusa(ao_contrario),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        let mut longa = janelas(1);
+        longa[0].nao_depois = longa[0].nao_antes + 14 * DIA + 1;
+        assert_eq!(
+            recusa(longa),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        let mut fora_de_ordem = janelas(2);
+        fora_de_ordem.swap(0, 1);
+        assert_eq!(
+            recusa(fora_de_ordem),
+            Err(ControlError::FieldOutOfRange { field: "janelas" })
+        );
+        assert!(
+            recusa(vec![]).is_ok(),
+            "sem janela nenhuma é um servidor sem h3"
+        );
+    }
+
+    /// As contas das janelas: duas valem ao mesmo tempo, com sobreposição, e
+    /// nenhuma passa do que os navegadores aceitam.
+    #[test]
+    fn as_contas_das_janelas_fecham() {
+        assert!(
+            VALIDADE_DO_CURTO.as_secs() <= 14 * DIA,
+            "os navegadores recusam acima de 14 dias"
+        );
+        assert!(
+            VALIDADE_DO_CURTO > PASSO_DA_JANELA,
+            "sem sobreposição, há um instante sem janela"
+        );
+        assert_eq!(
+            VALIDADE_DO_CURTO.as_secs() - PASSO_DA_JANELA.as_secs(),
+            7 * DIA
+        );
+        const { assert!(JANELAS_ANUNCIADAS <= MAX_JANELAS_DO_NAVEGADOR) };
+        assert_eq!(crate::transport::ALPN_DO_NAVEGADOR, b"h3");
     }
 }
 

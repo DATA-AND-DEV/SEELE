@@ -1634,6 +1634,11 @@ impl Room {
             | ServerMessage::MembroNovo { .. }
             | ServerMessage::MembroBanido { .. } => {}
 
+            // Os certificados curtos do celular (ADR 0057). O desktop não abre
+            // `h3`; quem guarda estes hashes é quem monta link para o celular,
+            // e isso é da F4.
+            ServerMessage::HashesDoNavegador { .. } => {}
+
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
             // Quem age nestas duas mensagens é o `enlace::Motor` —
