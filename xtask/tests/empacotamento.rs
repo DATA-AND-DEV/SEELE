@@ -761,7 +761,9 @@ case "$comando" in
 memoria = io.BytesIO()
 with zipfile.ZipFile(memoria, "w") as pacote:
     pacote.writestr("SEELE_%s_x64-instalador.exe" % sys.argv[1], "instalador de mentira")
-sys.stdout.write(base64.b64encode(memoria.getvalue()).decode())' "${FALSO_VERSAO:-1.2.3}"
+    if sys.argv[2] != "1":
+        pacote.writestr("SEELE_%s_x64-portatil.tar.gz" % sys.argv[1], "portatil de mentira")
+sys.stdout.write(base64.b64encode(memoria.getvalue()).decode())' "${FALSO_VERSAO:-1.2.3}" "${FALSO_SEM_PORTATIL:-0}"
         exit 0
         ;;
 esac
@@ -3655,6 +3657,99 @@ fn o_instalador_do_windows_sai_assinado() {
          arquivo assinado: sem ele a página sai sem Windows no `latest.json`, e \
          quem usa Windows deixa de receber atualização sem ser avisado.\n{}",
         saida.texto
+    );
+}
+
+/// O portátil sai assinado como o instalador. Sem o `.sig`, o `manifesto.py`
+/// o deixa fora do `versions[]`, e a linha deixa de existir no Windows para o
+/// launcher (spec 0.16, §1).
+#[test]
+fn o_portatil_do_windows_sai_assinado() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[]);
+    assert_eq!(
+        saida.estado, 0,
+        "a rodada inteira tinha que passar:\n{}",
+        saida.texto
+    );
+    assert!(
+        bancada
+            .repo
+            .join("entrega/SEELE_1.2.3_x64-portatil.tar.gz.sig")
+            .is_file(),
+        "o portátil subiu sem `.sig`, e o launcher não o veria no Windows:\n{}",
+        saida.texto
+    );
+}
+
+/// Um Windows que devolve o instalador e não o portátil não entrou inteiro: a
+/// versão sairia sem linha no launcher do Windows, sem ninguém saber.
+#[test]
+fn sem_o_portatil_o_windows_nao_entrou() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(&["1.2.3", "--sem-bateria"], &[("FALSO_SEM_PORTATIL", "1")]);
+    assert_ne!(
+        saida.estado, 0,
+        "sem o portátil, a publicação seguiu como se o Windows estivesse inteiro:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("portátil"),
+        "a recusa tem de dizer o que faltou:\n{}",
+        saida.texto
+    );
+}
+
+/// **O nome do portátil está escrito em dois arquivos**, como o do instalador
+/// (ver `o_nome_que_o_windows_escreve_e_o_que_o_orquestrador_procura`), e o
+/// guarda é o mesmo: ler os dois e perguntar se casam.
+///
+/// É um guarda de texto, e por isso limitado: ele prende o nome, o formato e a
+/// assinatura, e não prova que o PowerShell monta o arquivo. Quem prova é a
+/// medida de ponta a ponta no Windows (tarefa 17 do plano da F6).
+#[test]
+fn o_portatil_que_o_windows_escreve_e_o_que_o_orquestrador_procura_e_assina() {
+    let ps = std::fs::read_to_string(raiz().join("empacotar/windows.ps1"))
+        .expect("o empacotador do Windows");
+    let sh = std::fs::read_to_string(raiz().join("empacotar/publicar.sh")).expect("o orquestrador");
+
+    let nome = ps
+        .lines()
+        .map(str::trim)
+        .find_map(|linha| linha.strip_prefix("$NomePortatil = \""))
+        .and_then(|resto| resto.split('"').next())
+        .expect("o `windows.ps1` tem de declarar `$NomePortatil`")
+        .replace("${Versao}", "9.9.9")
+        .replace("$Versao", "9.9.9");
+    assert!(
+        nome.ends_with("-portatil.tar.gz"),
+        "o portátil tem de ser um tar.gz, que o `DesempacotarTarGz` do launcher abre: `{nome}`"
+    );
+    assert!(
+        sem_comentario(&ps).contains("tar -czf"),
+        "o `windows.ps1` não comprime o portátil com `tar -czf`"
+    );
+
+    let padrao = sh
+        .lines()
+        .filter(|linha| linha.contains("/entrega\" -type f -name \""))
+        .filter_map(|linha| linha.split("-name \"").nth(1))
+        .filter_map(|resto| resto.split('"').next())
+        .find(|padrao| padrao.contains("portatil"))
+        .expect("o `publicar.sh` tem de conferir a chegada do portátil")
+        .replace("${VERSAO}", "9.9.9")
+        .replace("$VERSAO", "9.9.9");
+    assert!(
+        casa_com_glob(&padrao, &nome),
+        "o `publicar.sh` procura `{padrao}` e o `windows.ps1` escreve `{nome}`"
+    );
+    assert!(
+        sh.contains("\"$RAIZ\"/entrega/*-portatil.tar.gz"),
+        "o laço de assinatura do `publicar.sh` não cobre o portátil"
     );
 }
 

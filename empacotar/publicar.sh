@@ -1886,7 +1886,17 @@ open(sys.argv[2], "wb").write(base64.b64decode(open(sys.argv[1], encoding="ascii
         aviso "veio arquivo do Windows, mas nenhum instalador de $VERSAO."
         return 1
     fi
-    passo "Windows: instalador em entrega/"
+    # **E o portátil, que é o que o launcher guarda ao lado de outra versão**
+    # (spec 0.16, §1). Sem ele a versão sai sem linha no launcher do Windows,
+    # e ninguém saberia: o instalador chega, a página sai inteira, e o defeito
+    # só aparece no dia em que alguém tenta abrir esta linha por outra.
+    if [ -z "$(find "$RAIZ/entrega" -type f -name "*_${VERSAO}_*-portatil.tar.gz" 2>/dev/null)" ]; then
+        aviso "veio o instalador do Windows, mas nenhum pacote portátil de $VERSAO." \
+            "O windows.ps1 de lá é de antes do portátil? O launcher precisa dele para" \
+            "guardar esta versão ao lado de outra."
+        return 1
+    fi
+    passo "Windows: instalador e portátil em entrega/"
 }
 
 for sistema in $SISTEMAS; do
@@ -2082,8 +2092,12 @@ PEDIDO="$TEMPORARIO/pedido.json"
 # Aqui e não no `windows.ps1` porque a chave do projeto mora **nesta** máquina,
 # e mandá-la para a máquina do Windows por SSH seria pôr a chave onde ela não
 # precisa estar.
+#
+# **O portátil passa pelo mesmo laço, e pelo mesmo motivo** (spec 0.16, §1): o
+# `manifesto.py` só o põe no `versions[]` com o `.sig` ao lado, e sem ele a
+# linha não existe no launcher do Windows.
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-    for ai_um in "$RAIZ"/entrega/*-instalador.exe; do
+    for ai_um in "$RAIZ"/entrega/*-instalador.exe "$RAIZ"/entrega/*-portatil.tar.gz; do
         [ -f "$ai_um" ] || continue
         if [ -f "$ai_um.sig" ]; then
             continue

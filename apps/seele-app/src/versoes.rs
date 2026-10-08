@@ -249,10 +249,10 @@ pub(crate) enum FalhaAoBaixarVersao {
     CatalogoNaoServe(String),
     /// O catálogo não traz pacote para este sistema.
     ///
-    /// No Windows isto é o estado normal e não um defeito: o que o catálogo
-    /// publica ali é um **instalador**, que instala por cima da instalação
-    /// única — não um pacote que se abra ao lado de outro. Ver a nota em
-    /// [`desempacotar_alvo`].
+    /// No Mac e no Windows, desde a 0.16, isto é um defeito do manifesto: o Mac
+    /// publica o `.app.tar.gz`, e o Windows o `-portatil.tar.gz`. No Mac Intel
+    /// e no Linux é o estado normal, porque a linha 0.15 nunca teve pacote para
+    /// eles (spec 0.16, §1), e a tela diz isso.
     SemPacoteParaEsteSistema(String),
     /// Já está instalada. Não é falha, e a tela diz isso em vez de um erro.
     JaInstalada(String),
@@ -288,17 +288,19 @@ pub(crate) fn alvo_deste_sistema() -> String {
 
 /// Abre um `.tar.gz` dentro da pasta de destino.
 ///
-/// # O que este formato cobre, e o que ele não cobre
+/// # O que este formato cobre
 ///
-/// O `.app.tar.gz` do macOS e o pacote do Linux — que são o que o catálogo
-/// publica para o atualizador, e são arquivos que se abrem ao lado de outro.
+/// Os dois pacotes que o `versions[]` do manifesto declara para o launcher:
 ///
-/// **O Windows não passa por aqui, e é honesto dizer por quê.** O que o
-/// catálogo publica ali é um `.exe` de instalação: ele instala por cima da
-/// instalação única da máquina, mexe no registro e no menu iniciar. Abrir isso
-/// «ao lado» não é uma questão de formato — é uma coisa que aquele artefato não
-/// sabe ser. Versões lado a lado no Windows precisam de um pacote próprio no
-/// catálogo, e ele não existe ainda.
+/// - o `.app.tar.gz` do macOS, que é também o que o atualizador baixa;
+/// - o `-portatil.tar.gz` do Windows, que é a carga do instalador (`SEELE.exe`
+///   e `seeled.exe`) num tar.gz, montado pelo `empacotar/windows.ps1` desde a
+///   0.16.
+///
+/// O `-instalador.exe` do Windows **não** passa por aqui, e não é questão de
+/// formato: ele instala por cima da instalação única da máquina, mexe no
+/// registro e no menu iniciar. O manifesto o deixa só no topo, para o
+/// atualizador. O `.deb` do Linux também fica de fora: ele instala no sistema.
 struct DesempacotarTarGz;
 
 impl seele_lancador::Desempacotador for DesempacotarTarGz {
@@ -612,6 +614,40 @@ mod o_launcher_ligado_ao_produto {
              `NaoIniciou`: {resultado:?}"
         );
         let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **O portátil do Windows se abre pelo mesmo desempacotador do Mac.** A
+    /// forma é a que o `windows.ps1` monta: a carga do instalador, `SEELE.exe`
+    /// e `seeled.exe` na raiz, num tar.gz. Roda nos três sistemas, e é o que
+    /// prova, longe do Windows, que o executável `SEELE.exe` que o manifesto
+    /// declara é o que a instalação publica.
+    #[test]
+    fn o_portatil_do_windows_se_abre_pelo_mesmo_desempacotador() {
+        let mut bruto = Vec::new();
+        {
+            let gz = flate2::write::GzEncoder::new(&mut bruto, flate2::Compression::default());
+            let mut tar = tar::Builder::new(gz);
+            for (nome, conteudo) in [("SEELE.exe", b"app" as &[u8]), ("seeled.exe", b"servidor")] {
+                let mut cabecalho = tar::Header::new_gnu();
+                cabecalho.set_size(conteudo.len() as u64);
+                cabecalho.set_mode(0o755);
+                cabecalho.set_cksum();
+                tar.append_data(&mut cabecalho, nome, conteudo).unwrap();
+            }
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let destino = tempfile::tempdir().unwrap();
+        seele_lancador::Desempacotador::desempacotar(
+            &super::DesempacotarTarGz,
+            &bruto,
+            destino.path(),
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(destino.path().join("SEELE.exe")).unwrap(),
+            b"app"
+        );
+        assert!(destino.path().join("seeled.exe").is_file());
     }
 
     /// **Relatado do uso real:** «não mostra as versões disponíveis para o
