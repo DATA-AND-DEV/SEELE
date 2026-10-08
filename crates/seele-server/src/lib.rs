@@ -33,6 +33,7 @@ use seele_proto::ids::VoiceRoomId;
 pub mod admissao;
 pub mod alcance;
 pub mod autorizacao;
+pub mod campainha;
 pub mod frame;
 pub mod hospedagem;
 pub mod mods;
