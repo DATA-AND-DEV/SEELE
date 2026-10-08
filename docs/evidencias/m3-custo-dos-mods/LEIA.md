@@ -56,7 +56,12 @@ cenário só começa:
 - **sem compilação de outra sessão** (nenhum `rustc`) e com menos de 2 núcleos
   ocupados no total: a média de carga não serve de critério, porque decai
   devagar depois de uma compilação;
-- **com a máquina ociosa há 5 minutos** (`HIDIdleTime`).
+- **com a máquina ociosa há 5 minutos** (`HIDIdleTime`);
+- **com a sessão gráfica desbloqueada**: com ela bloqueada a janela não vai ao
+  palco e a árvore de acessibilidade não responde, e o critério de máquina
+  ociosa se cumpre justamente quando ela bloqueia (medido em 08/10: um cenário
+  com voz falhou às 18:15 com a sessão bloqueada, sem achar o botão de aceite).
+  Se ela bloquear durante o cenário, ele sai marcado como interrompido.
 
 Uma entrada de uma pessoa durante o cenário o marca `"interrompido": true`,
 e um `rustc` visto durante a janela conta em `"rustc_durante"`; a campanha
@@ -104,6 +109,7 @@ testes).
 | `m3.py` | um cenário: servidor, app, ações, medidas, relato |
 | `ax.swift` | conduz a janela pela acessibilidade, só pelas janelas do app (nunca pela barra de menus do sistema), acha a peça da MESA numa captura da janela, e arrasta |
 | `xctrace_tabela.py` | lê uma tabela exportada pelo `xctrace`, resolvendo `id`/`ref` |
+| `sessao.swift` | diz se a sessão gráfica está bloqueada |
 | `m3-servidor.rs` | o servidor da medição: N pacotes, instalados por hash, na porta pedida |
 | `m3-falante.rs` | o falante sintético |
 | `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |

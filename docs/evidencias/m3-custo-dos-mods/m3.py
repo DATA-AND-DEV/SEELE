@@ -75,6 +75,13 @@ def ocioso_s() -> float:
     return int(m.group(1)) / 1e9 if m else 0.0
 
 
+def bloqueada() -> bool:
+    """A sessão gráfica bloqueada: a janela não vai ao palco e a árvore de
+    acessibilidade não responde, então nada se mede. O critério de máquina
+    ociosa se cumpre justamente quando ela bloqueia (medido em 08/10)."""
+    return "bloqueada=true" in sh(RAIZ / "sessao").stdout
+
+
 def esperar(condicao, prazo, passo=0.5):
     fim = time.time() + prazo
     while time.time() < fim:
@@ -217,6 +224,9 @@ def main():
     if ocioso_s() < a.ocioso:
         print(f"{a.cenario}: a máquina não está ociosa há {a.ocioso} s; não começo")
         sys.exit(3)
+    if bloqueada():
+        print(f"{a.cenario}: a sessão está bloqueada; não começo")
+        sys.exit(3)
     pasta = pathlib.Path(a.saida) / f"{a.cenario}-{time.strftime('%H%M%S')}"
     pasta.mkdir(parents=True)
 
@@ -313,7 +323,8 @@ def main():
             raise
         # qualquer entrada desde o começo do cenário o invalida: a janela pode
         # ter perdido o palco, e o foco pode ter ido para outra coisa
-        relato["interrompido"] = mexeu or pessoa_mexeu()
+        relato["bloqueou"] = bloqueada()
+        relato["interrompido"] = mexeu or pessoa_mexeu() or relato["bloqueou"]
         relato["rustc_durante"] = rustc_durante
         relato["memoria_mib"] = {
             nome: round(statistics.median(m[nome] for m in amostras_mem) / 2**20, 1) for nome in pids}
