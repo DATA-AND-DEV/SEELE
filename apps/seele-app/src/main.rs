@@ -2291,16 +2291,16 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
 /// mesmo arquivo: as portas põem lá texto que um terceiro escolheu, e o teto
 /// de uma não pode divergir do da outra por esquecimento.
 ///
-/// **O mesmo em todas as portas, e é o tamanho escrito.** A janela
-/// ([`registrar_da_janela`]) escreve a frase sem escape, com o caractere que
-/// quebra ou inverte a linha ([`quebra_ou_inverte_a_linha`]) trocado por
-/// espaço: um caractere da frase é um na linha. As três
-/// que escrevem o texto escapado pelo `Debug` de um `str` — o `console` do
-/// executor, o motivo ([`motivo_no_registro`]) e o caminho
-/// ([`caminho_no_registro`]) — cortam pelo tamanho já escapado, numa regra só
+/// **O mesmo em todas as portas, e é o tamanho escrito.** As quatro que
+/// escrevem o texto escapado pelo `Debug` de um `str` — a frase da janela
+/// ([`registrar_da_janela`]), o `console` do executor, o motivo
+/// ([`motivo_no_registro`]) e o caminho ([`caminho_no_registro`]) — cortam
+/// pelo tamanho já escapado, numa regra só
 /// ([`executor::ate_o_teto_do_registro`]): o escape pode fazer um caractere
 /// ocupar até dez (`\u{100000}`), e um corte contado antes dele deixava
-/// quinhentos e doze desses virarem 5122 caracteres na linha, com as aspas.
+/// quinhentos e doze desses virarem 5122 caracteres na linha, com as aspas. A
+/// frase da janela e o `console` levam também o aviso do corte
+/// ([`executor::cortar_linha_do_console`]).
 const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
 
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
@@ -2344,9 +2344,10 @@ fn id_no_registro(id: &str) -> String {
 /// dela na mesma linha.
 ///
 /// As portas que escrevem pelo `Debug` de um `str` escapam todos eles
-/// (`\u{2028}`, `\u{202e}`); os campos que vão crus à linha — a frase, o
-/// `onde` e o id da janela, e o `mod_id=` das recusas de mídia e de carga —
-/// passam por aqui.
+/// (`\u{2028}`, `\u{202e}`); os campos que vão crus à linha — o `onde` e o id
+/// da janela, e o `mod_id=` das recusas de mídia e de carga — passam por aqui.
+/// A frase da janela, que vai escapada, também passa, com o caractere trocado
+/// por espaço antes do escape: é a segunda defesa.
 fn quebra_ou_inverte_a_linha(c: char) -> bool {
     c.is_control()
         || matches!(
@@ -2380,6 +2381,9 @@ fn quebra_ou_inverte_a_linha(c: char) -> bool {
 /// próprio, e não só no meio da frase: é ele que faz `mod_id=autor/nome` achar
 /// no registro, numa busca só, o que a janela e o Rust disseram sobre o mesmo
 /// MOD.
+///
+/// A linha é `a janela disse onde=… mod_id=… frase="…"`: a frase num campo, em
+/// `?`, depois do id — ver o comentário do corte, abaixo.
 #[tauri::command]
 fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Option<String>) {
     // Cortado aqui, e não confiando em quem chama: uma frase sem teto vinda da
@@ -2395,12 +2399,22 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Optio
         .filter(|&c| !quebra_ou_inverte_a_linha(c))
         .collect();
     // A frase carrega texto que um MOD escolheu — o nome de um ponto, a
-    // mensagem de um erro —, e por isso é a que mais precisa do filtro.
+    // mensagem de um erro —, e por isso vai num campo em `?`, como o `texto`
+    // do `console`: escapada, entre aspas, e **depois** do `onde` e do id. Na
+    // mensagem da linha, ela vinha antes dos campos, e um `mod_id=` escrito
+    // nela era o primeiro da linha.
+    //
+    // O caractere que quebra ou inverte a linha é trocado por espaço antes do
+    // escape, como segunda defesa. E o corte é o do `console`
+    // ([`executor::cortar_linha_do_console`]), pelo tamanho já escapado e com
+    // o aviso: em `?`, um caractere chega a ocupar dez, e um `take` de 512
+    // caracteres contado antes do escape deixava a frase com dez vezes o teto.
     let o_que: String = o_que
         .chars()
-        .take(TETO_DA_FRASE_NO_REGISTRO)
         .map(|c| if quebra_ou_inverte_a_linha(c) { ' ' } else { c })
         .collect();
+    let frase = executor::cortar_linha_do_console(o_que);
+    let frase = frase.texto();
     // Vazio é ninguém: o id vazio é o do catálogo do próprio servidor
     // (`carregarMods`), e um `mod_id=` sem nome seria achado por uma busca e não
     // seria de MOD nenhum.
@@ -2412,9 +2426,9 @@ fn registrar_da_janela(nivel: String, onde: String, o_que: String, mod_id: Optio
     // não sai.
     let mod_id = mod_id.as_deref().map(tracing::field::display);
     match nivel.as_str() {
-        "aviso" => tracing::warn!(onde = %onde, mod_id, "{o_que}"),
-        "erro" => tracing::error!(onde = %onde, mod_id, "{o_que}"),
-        _ => tracing::debug!(onde = %onde, mod_id, "{o_que}"),
+        "aviso" => tracing::warn!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
+        "erro" => tracing::error!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
+        _ => tracing::debug!(onde = %onde, mod_id, frase = ?frase, "a janela disse"),
     }
 }
 
@@ -11668,6 +11682,58 @@ mod o_registro_da_janela {
                  o que a janela e o Rust disseram do mesmo MOD: {linha}"
             );
         }
+        assert!(
+            linha.contains(
+                "frase=\"seele/perfis: «contribuir» falhou — a API de MODs não conhece o ponto \
+                 «x»\""
+            ),
+            "a frase da janela não saiu inteira no campo `frase=\"…\"`: solta na mensagem, um \
+             `mod_id=` escrito por um MOD dentro dela vem antes do verdadeiro na linha: {linha}"
+        );
+    }
+
+    /// **O id do MOD vem antes da frase, e um `mod_id=` escrito nela não se
+    /// passa pelo verdadeiro.**
+    ///
+    /// A frase carrega texto que um MOD escolheu. Escrita como a mensagem da
+    /// linha, ela vinha antes dos campos, e um MOD que pusesse
+    /// `mod_id=vitima/mod` nela tinha o primeiro `mod_id=` da linha: quem lê da
+    /// esquerda para a direita atribui a frase ao MOD errado. Num campo em `?`,
+    /// ela sai depois do id, entre aspas e escapada.
+    #[test]
+    fn um_mod_id_forjado_na_frase_nao_vem_antes_do_verdadeiro() {
+        let ((), rastro) = capturar(|| {
+            super::registrar_da_janela(
+                "aviso".to_owned(),
+                "atender-mod".to_owned(),
+                "x onde=forjado mod_id=vitima/mod".to_owned(),
+                Some("a/b".to_owned()),
+            );
+        });
+        let primeiro = |nome: &str| -> String {
+            rastro
+                .split(&format!("{nome}="))
+                .nth(1)
+                .and_then(|resto| resto.split_whitespace().next())
+                .unwrap_or_else(|| panic!("a linha da janela não traz `{nome}=`: {rastro}"))
+                .to_owned()
+        };
+        assert_eq!(
+            primeiro("mod_id"),
+            "a/b",
+            "o primeiro `mod_id=` da linha da janela é o que um MOD escreveu na frase, e não o \
+             do campo: a linha se lê como sendo de outro MOD: {rastro}"
+        );
+        assert_eq!(
+            primeiro("onde"),
+            "atender-mod",
+            "o primeiro `onde=` da linha da janela é o que um MOD escreveu na frase, e não o do \
+             campo: {rastro}"
+        );
+        assert!(
+            rastro.contains(r#"frase="x onde=forjado mod_id=vitima/mod""#),
+            "a frase forjada não saiu entre aspas no campo `frase`: {rastro}"
+        );
     }
 
     #[test]
@@ -11764,7 +11830,7 @@ mod o_registro_da_janela {
     /// só o caractere de controle.
     ///
     /// As portas do Rust escrevem pelo `Debug` de um `str` e saem com
-    /// `\u{2028}` e `\u{202e}`; a da janela escreve a frase sem escape, e
+    /// `\u{2028}` e `\u{202e}`; a da janela escrevia a frase sem escape, e
     /// deixava passar crus os separadores de linha e de parágrafo — que um
     /// editor quebra como um `\n` — e os controles bidirecionais: um U+202E na
     /// frase de um MOD inverte, num editor que segue o bidi, o `onde=` e o
@@ -12236,6 +12302,10 @@ mod a_midia_recusada_e_dita_no_registro {
     ///
     /// O `console` vai pelo caminho real: o executor corta, e a mesma
     /// `assentar_fala` da bomba escreve.
+    ///
+    /// **E a frase da janela**, desde que ela vai em `?`: cortada antes do
+    /// escape, como era, quinhentos e doze `\u{100000}` eram 5120 caracteres
+    /// na linha. Ela é cortada pela mesma regra do `console`, com o mesmo aviso.
     #[test]
     fn o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas() {
         use crate::executor::{ExecutorQuickJs, Fila, Limites, ParaOFora};
@@ -12281,10 +12351,31 @@ mod a_midia_recusada_e_dita_no_registro {
             )
         });
         let ((), do_caminho) = capturar(|| midia_servida_dita(ID, 7, &pior, "imagem", 8));
+        // A frase da janela é cortada pela mesma regra do `console`, com o
+        // mesmo aviso: os dois são texto de terceiro que chega inteiro, e o
+        // aviso diz o tamanho do que foi escrito.
+        let ((), da_janela) = capturar(|| {
+            registrar_da_janela(
+                "aviso".to_owned(),
+                "recusa-de-mod".to_owned(),
+                pior.clone(),
+                Some(ID.to_owned()),
+            );
+        });
+        let da_janela = campo(&da_janela, "frase");
+        let da_janela = da_janela
+            .strip_suffix(" […cortado: 2048 caracteres]")
+            .unwrap_or_else(|| {
+                panic!(
+                    "a frase da janela não diz que foi cortada, e quem lê o registro toma o \
+                     pedaço pelo todo: {da_janela}"
+                )
+            });
 
         let um_a_mais = r"\u{100000}".chars().count();
         for (porta, escrito) in [
             ("console", do_console.to_owned()),
+            ("janela", da_janela.to_owned()),
             ("motivo", campo(&do_motivo, "motivo")),
             ("origem", campo(&da_origem, "origem")),
             ("caminho", campo(&do_caminho, "caminho")),
