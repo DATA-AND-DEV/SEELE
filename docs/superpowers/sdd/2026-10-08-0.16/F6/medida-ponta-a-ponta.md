@@ -1,6 +1,8 @@
 # F6 — a medida de ponta a ponta (tarefa 17)
 
-**Estado em 08/10/2026:** o roteiro está escrito, e nada foi medido ainda.
+**Estado em 08/10/2026:**
+- a parte 1 (sem tela) está **medida**, com os resultados abaixo;
+- a parte 2 (com tela, no Mac e no Windows) espera o dono, pela orquestradora.
 
 A medida tem duas partes:
 - **A parte sem tela**: o pacote **publicado** da 0.15.1 passando pelo código
@@ -52,6 +54,42 @@ Não há portátil do Windows na 0.15.1, e por isso existe a 0.15.2.
      apontando para `dados/servidor-0.15`.
 5. Medir o custo da conferência da soma do executável a cada abertura (tarefa
    11): o tempo de ler o executável real e tirar o SHA-256.
+
+### Resultado da parte 1 (medido em 08/10/2026, Mac aarch64)
+
+**O download** saiu do release v0.15.1 do `DATA-AND-DEV/SEELE-RELEASES`, com a
+autorização do usuário, para uma pasta nova no scratchpad desta sessão. O
+arnês é um projeto Cargo à parte, também no scratchpad: ele usa o
+`seele-lancador` deste branch por caminho e o mesmo desempacotamento da casca, e
+**não executa o app**.
+
+| o que | resultado |
+|---|---|
+| soma contra o `SHA256SUMS` publicado | confere: `2af30dd94685cb0eca4adf548fe29d204936324aabbcf5da659d81342bdc9e2b` (a mesma do levantamento) |
+| assinatura com a chave do `tauri.conf.json`, pelo `Chave::conferir` | `Ok`, em 18 ms |
+| `Deposito::instalar` com o `.app.tar.gz` publicado | instalado em 152 ms |
+| o marcador `INSTALADA` | 4 linhas: `0.15.1`, `SEELE.app/Contents/MacOS/seele-app`, `0.15`, e a soma do executável |
+| o executável declarado | existe; o `Info.plist` diz `CFBundleExecutable = seele-app`, e a correção do spec está medida |
+| tamanho da instalação | 51.095.676 bytes |
+| `Resolvedor`, `MaisNovaDaLinha(0.15)`, nos três atos | `0.15.1`, dados em `dados/servidor-0.15`; o lançamento leva `SEELE_HOME` para lá e `SEELE_LANCADOR=1` |
+| o custo da guarda (a soma do executável, 36.872.816 bytes, a cada resolução) | cerca de 12,3 ms em cinco rodadas; uma resolução inteira, 12,3 ms |
+
+**O que isto prova.** O «GUARDAR A MAIS NOVA» da 0.15 nunca tinha instalado
+nada em máquina nenhuma (o manifesto não declarava o executável). O caminho de
+instalação da 0.16 instala o pacote **publicado** da linha legada, conferido pela
+mesma biblioteca do atualizador, e o executável fica onde o manifesto diz.
+
+**O que isto não prova.**
+- Abrir o app instalado: o arnês não executa nada.
+- O Gatekeeper com um `.app` baixado pelo `reqwest`: o download não leva o
+  atributo de quarentena.
+- Nada do Windows.
+
+Tudo isso é a parte 2.
+
+**Uma ressalva do custo.** As cinco rodadas leram o executável com ele no cache
+do sistema, porque ele acabara de ser escrito pela instalação. A frio, depois
+de um reinício, deve custar mais; a parte 2 mede na abertura de verdade.
 
 ## Parte 2 — com tela (o dono, no Mac e no Windows)
 
