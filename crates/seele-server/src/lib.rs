@@ -518,6 +518,7 @@ impl Daemon {
             vec!["localhost".into(), config.listen.ip().to_string()],
         )?;
         let fingerprint = identity.fingerprint();
+        let impressao = identity.digest();
         let server_config = tls::server_config(identity)?;
 
         // Não é `Endpoint::server`: aquele faz um `UdpSocket::bind` cru e herda
@@ -633,6 +634,7 @@ impl Daemon {
             esperas: Arc::new(std::sync::Mutex::new(mods::volume::Esperas::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            impressao,
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.

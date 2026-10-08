@@ -1431,6 +1431,13 @@ pub struct Server {
     /// alcançada — a chave não pode ficar velha, porque ela é o conteúdo.
     pub pacotes_conferidos:
         Arc<std::sync::Mutex<std::collections::HashMap<String, PacoteConferido>>>,
+    /// A impressão do certificado deste servidor, em bytes: o SHA-256 do DER
+    /// que o TLS apresenta, o mesmo cujo hex vai no `fp=` do link.
+    ///
+    /// **É contra ela que a prova de identidade é conferida** (o S2,
+    /// `seele_proto::assinatura::prova_de_cliente`): uma prova feita para
+    /// outro servidor carrega a impressão dele, e não confere aqui.
+    pub impressao: [u8; 32],
 }
 
 /// Um pacote de MOD cujo hash já foi conferido.

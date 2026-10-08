@@ -643,7 +643,10 @@ async fn abrir_falando(endereco: SocketAddr, semente: u8, faixa: Faixa) -> Resul
     frame::write(
         &mut envio,
         &ClientMessage::Response {
-            proof: chave.sign(&nonce).to_bytes().to_vec(),
+            proof: chave
+                .sign(&prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
         },
     )
     .await?;
@@ -1025,4 +1028,26 @@ async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()
 
     daemon.shutdown();
     Ok(())
+}
+
+/// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
+/// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
+/// Desde o Servidor 1.0, o nonce cru não entra mais.
+fn prova_amarrada(conexao: &quinn::Connection, nonce: &[u8]) -> Vec<u8> {
+    let cadeia = conexao
+        .peer_identity()
+        .and_then(|identidade| {
+            identidade
+                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+                .ok()
+        })
+        .expect("o TLS sempre entrega a cadeia do servidor");
+    let impressao = seele_proto::transport::certificate_digest(
+        cadeia
+            .first()
+            .expect("a cadeia tem um certificado")
+            .as_ref(),
+    );
+    let nonce: [u8; 32] = nonce.try_into().expect("o desafio tem 32 bytes");
+    seele_proto::assinatura::prova_de_cliente(&impressao, &nonce)
 }

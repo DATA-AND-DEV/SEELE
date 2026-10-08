@@ -101,6 +101,18 @@ impl Identity {
             seele_proto::transport::certificate_fingerprint(certificate.as_ref())
         })
     }
+
+    /// A mesma impressão de [`Self::fingerprint`], em bytes: é o que a prova
+    /// de identidade do cliente amarra (o S2).
+    ///
+    /// Sem certificado nenhum, zeros — e então nenhuma prova confere, que é a
+    /// falha do lado seguro. Uma `Identity` sempre nasce com um.
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        self.chain.first().map_or([0; 32], |certificate| {
+            seele_proto::transport::certificate_digest(certificate.as_ref())
+        })
+    }
 }
 
 /// Builds the QUIC server configuration.

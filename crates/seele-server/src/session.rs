@@ -597,8 +597,14 @@ async fn handshake(
 
     // specs/08-seguranca.md wants a uniform failure: nothing here says whether
     // the key is known, only whether the signature holds.
+    //
+    // **O S2:** a prova é sobre o rótulo, a impressão **deste** servidor e o
+    // nonce (adendo de 08/10/2026, §9). Uma prova feita para outro servidor
+    // carrega a impressão dele e não confere aqui, com a mesma recusa uniforme
+    // de qualquer assinatura que não confere.
+    let assinada = seele_proto::assinatura::prova_de_cliente(&server.impressao, &nonce);
     verifying
-        .verify(&nonce, &Signature::from_bytes(&signature))
+        .verify(&assinada, &Signature::from_bytes(&signature))
         .map_err(|_| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: "signature did not verify".into(),
@@ -5870,6 +5876,7 @@ mod fim_de_tela_por_sessao {
             esperas: Arc::new(std::sync::Mutex::new(Default::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            impressao: [0; 32],
             persistence,
             events,
             writes,

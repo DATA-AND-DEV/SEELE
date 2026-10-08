@@ -611,6 +611,12 @@ impl Client {
         // PATTERN: ORANGE — connected, not verified.
         let pin = decisao_do_aperto(verifier.last_decision())?;
 
+        // **A impressão que a prova de identidade amarra** (o S2): a do
+        // certificado que o TLS desta conexão acabou de aceitar, lida da
+        // própria conexão — nunca de algo que o servidor diga pelo protocolo,
+        // nem do link. É o que faz a prova valer só para quem foi conferido.
+        let impressao = impressao_do_servidor(&connection)?;
+
         let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
             tracing::warn!(%error, "could not open the control stream");
             ConnectError::Unreachable
@@ -626,6 +632,7 @@ impl Client {
                 &mut recv,
                 nickname,
                 signing_key,
+                &impressao,
                 join_secret,
                 aceito,
             ),
@@ -1927,11 +1934,39 @@ mod como_este_build_se_apresenta {
     }
 }
 
+/// A impressão do certificado que o TLS desta conexão aceitou, em bytes: o
+/// SHA-256 do DER, o mesmo cujo hex vai no `fp=` do link.
+///
+/// Uma conexão TLS sem certificado do servidor não existe — o `rustls` não
+/// fecha o aperto sem ele —, e se existisse, não haveria o que assinar: é
+/// violação de protocolo, e o cliente não prova nada a ninguém.
+fn impressao_do_servidor(connection: &quinn::Connection) -> Result<[u8; 32], ConnectError> {
+    let cadeia = connection
+        .peer_identity()
+        .and_then(|identidade| {
+            identidade
+                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+                .ok()
+        })
+        .ok_or_else(|| {
+            tracing::warn!("a conexão não entregou o certificado do servidor");
+            ConnectError::ProtocolViolation
+        })?;
+    let certificado = cadeia.first().ok_or_else(|| {
+        tracing::warn!("a cadeia do servidor veio vazia");
+        ConnectError::ProtocolViolation
+    })?;
+    Ok(seele_proto::transport::certificate_digest(
+        certificado.as_ref(),
+    ))
+}
+
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
     nickname: &str,
     signing_key: &SigningKey,
+    impressao: &[u8; 32],
     join_secret: Option<&str>,
     aceito: Option<&str>,
 ) -> Result<SessionInfo, ConnectError> {
@@ -1969,10 +2004,22 @@ async fn handshake(
         }
     };
 
+    // **O cliente nunca assina bytes vindos do fio** (o S2, adendo de
+    // 08/10/2026, §9). O nonce tem de ter exatamente 32 bytes, e o que se
+    // assina é a mensagem que o `seele-proto` monta: o rótulo, a impressão do
+    // servidor que esta conexão conferiu e o nonce.
+    let Ok(nonce) = <[u8; seele_proto::control::NONCE_LEN]>::try_from(nonce.as_slice()) else {
+        tracing::warn!(
+            tamanho = nonce.len(),
+            "o desafio não tem 32 bytes; o cliente não assina"
+        );
+        return Err(ConnectError::ProtocolViolation);
+    };
+    let assinada = seele_proto::assinatura::prova_de_cliente(impressao, &nonce);
     frame::write(
         send,
         &ClientMessage::Response {
-            proof: signing_key.sign(&nonce).to_bytes().to_vec(),
+            proof: signing_key.sign(&assinada).to_bytes().to_vec(),
         },
     )
     .await
