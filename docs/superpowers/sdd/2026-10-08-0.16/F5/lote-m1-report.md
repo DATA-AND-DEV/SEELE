@@ -116,3 +116,55 @@ Cada uma foi desfeita copiando o arquivo de volta e conferindo com `cmp` (e
 5. **Testes de tempo novos no `seele-core`** (T6f e C1): margens de 50 a 100 ms, verdes em cinco rodadas seguidas com outros lotes compilando nesta máquina. Um executor de CI muito mais lento pode apertá-las.
 6. **O T1c muda um item público do `seele-proto`** (campos de `Marcas` viram métodos). Todo leitor do workspace foi trocado; o app não lê os campos.
 7. Nenhuma promessa nova de API, então não há seção «Para a v6». Nenhum lote ganha cadeia (G1).
+
+## Rodada 1 de conserto
+
+A revisão aprovou o traço `Canal`, o `saiu_em`, o `a_falha_que_conta`, a linha
+`info` do M2 e o T5d, e pediu um conserto Importante e quatro menores. Mesmo
+worktree, mesmo branch. O `quarto_pelo_link` não rodou nesta rodada: nada nele
+mudou.
+
+| conserto | commit | o que mudou |
+|---|---|---|
+| Importante 1: a margem de ~50 ms | `70e1876` | Em `a_segunda_marca_que_chega_dentro_do_teto_entra_na_resposta`, a escuta responde aos 15 ms, e não aos 50: a margem até o teto de 100 ms sobe para ~85 ms. A frase da asserção diz «15 ms», e o comentário diz por que a margem importa num `#[tokio::test]` de thread única. |
+| Menor 3 (opcional): a ida e volta | `70e1876` | Em `a_ida_e_volta_se_mede_da_ultima_volta_que_saiu`, o `ONDE` e o servidor respondem aos 550 ms e a escuta aos 825 ms. As duas margens, até o teto errado (650 ms) e até a volta seguinte (1000 ms), são de ~175 ms. |
+| Menor 2: o doc de `resolver_ponto` | `70e1876` | «A consulta pergunta ao primeiro, e ao seguinte só quando nada saiu ([`consultar`]).» O doc de `onde_mora_hoje` continua intocado. |
+| Menor 1: o `compile_fail,E0451` | `f6fefa6` | Um doctest gêmeo que compila, com os mesmos imports e a mesma `Marca::nova`, lendo por `Marcas::do_servidor(..).aviso()`, e uma linha no doc dizendo que o código de erro só é conferido no nightly. |
+| Menor 4: a fiação do C4 | `04a0ce3` | O guarda de fonte `os_envios_do_tique_passam_pela_classificacao_e_pela_escolha` (com `corpo_de`, que lê o próprio módulo por `include_str!` e tira as linhas de comentário): `mandar_pelo_server` e `registrar` montam a falha por `NaoSaiu::do_envio`, e `registrar` a escolhe por `a_falha_que_conta([`. |
+
+**O que continua sem teste de comportamento:** a fiação do C4 com um
+`WouldBlock` de verdade. Não há receita conhecida que provoque um `WouldBlock`
+num socket UDP do mesmo jeito nos três sistemas, e por isso a fiação ficou presa
+pela forma (o guarda de fonte), enquanto a classificação (`do_envio`) e a
+escolha (`a_falha_que_conta`) têm testes de comportamento próprios.
+
+### Os testes, com o comando e a saída
+
+- O teste de tempo do Importante 1, dez vezes seguidas:
+  `perl -e 'alarm 600; exec @ARGV' cargo test -p seele-core --lib encontro::testes::a_segunda_marca`
+  → **10 de 10** `test result: ok. 1 passed` (0,02 s cada).
+- O teste de tempo do Menor 3, dez vezes seguidas:
+  `… cargo test -p seele-core --lib encontro::testes::a_ida_e_volta`
+  → **10 de 10** `test result: ok. 1 passed` (0,83 s cada).
+- `cargo test -p seele-core --lib encontro`: 29 ok.
+- `cargo test -p seele-proto`: 259 + 5 + 1 ok, e `--doc` 3 ok (o `compile_fail`, o gêmeo e o de `version.rs`).
+- `cargo test -p seele-server --lib alcance`: 112 ok (o guarda de fonte é o 112º).
+- `cargo fmt --all -- --check` limpo, e o clippy de `seele-proto`, `seele-core`, `seele-server`, `seele-ffi`, `seele-conformance` e `seele-encontro` com `--all-targets --all-features -- -D warnings` limpo.
+
+### Cada reversão, e o vermelho
+
+Cada uma desfeita copiando o arquivo de volta e conferindo com `cmp`.
+
+- **Importante 1** (sem `.max(FOLGA_MINIMA)`), três rodadas, as três vermelhas:
+  «a escuta respondeu 15 ms depois do servidor, dentro do teto de 100 ms, e ficou de fora…»
+  `left: Perguntou(Achado { servidor: Some(203.0.113.7:9621), escuta: None })`.
+- **Menor 3** (`saiu_em` andando em toda volta, também na recusada), três rodadas, as três vermelhas, em ~0,65 s (o teto errado):
+  «a escuta respondeu antes da hora da volta seguinte e se perdeu: a ida e volta foi medida da volta recusada…»
+  `left: Perguntou(Achado { servidor: Some(203.0.113.7:9621), escuta: None })`.
+- **Menor 1, o buraco medido primeiro** (campos públicos e `Marca::nova` trocada por um nome que não existe, só no exemplo `compile_fail`): `error[E0599]: no associated function or constant named 'nova_que_nao_existe'…` e mesmo assim `encontro::Marcas (line 262) - compile fail ... ok`. Confirma a medida da revisão no 1.97.1.
+- **Menor 1, o gêmeo** (`Marca::nova` trocada nos dois exemplos, o caso que esvaziava o guarda): o `compile_fail` passa com o `E0599`, e o gêmeo reprova: `encontro::Marcas (line 281) ... FAILED`, `test result: FAILED. 2 passed; 1 failed`.
+- **Menor 1, a reversão de antes ainda vale** (campos públicos, com o gêmeo no lugar): «Test compiled successfully, but it's marked `compile_fail`» `encontro::Marcas (line 262) - compile fail ... FAILED`, e o gêmeo verde.
+- **Menor 4** (`mandar_pelo_server` montando a falha por uma função que não classifica): «`mandar_pelo_server` deixou de montar a falha do `send_to` por `NaoSaiu::do_envio`…» `FAILED`. (`registrar` de volta ao `escuta.and(leve).and(servidor)`): «`registrar` deixou de escolher a falha do tique por `a_falha_que_conta`…» `FAILED`.
+
+A preocupação 5 de cima, a das margens, fica assim: a menor margem dos testes
+de tempo novos do `seele-core` passou de ~50 ms para ~85 ms.
