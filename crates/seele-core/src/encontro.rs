@@ -326,16 +326,15 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
 /// para `lookup_host`, que recusa nome sem porta, e como o link sai sem porta
 /// (`enc=encontro.seele.app.br/…`) a pergunta ao quarto nunca saiu.
 ///
-/// **IPv4 primeiro**, e a ordem do DNS não decide isto: a pergunta sai para um
-/// endereço só, e numa máquina sem rota IPv6 o AAAA na frente engole o pacote
-/// em silêncio. O anfitrião aprendeu isso em campo (`resolver`, no
-/// `seele-server`).
+/// **Todos os endereços, IPv4 primeiro** ([`ordenar_os_achados`]). A consulta
+/// pergunta ao primeiro.
 ///
 /// **Diz por que não achou.** O defeito passou sem ser visto porque o `.ok()?`
 /// engolia o erro: o produto sabia por que a pergunta não saía e não contava.
-/// Cada `None` daqui deixa a causa no `seele.log` (que só grava `info`), e quem
-/// lê o log distingue um texto que não é endereço de um nome que não resolve.
-async fn resolver_ponto(ponto: &str) -> Option<SocketAddr> {
+/// Cada lista vazia daqui deixa a causa no `seele.log` (que só grava `info`), e
+/// quem lê o log distingue um texto que não é endereço de um nome que não
+/// resolve.
+async fn resolver_ponto(ponto: &str) -> Vec<SocketAddr> {
     let alvo = match seele_proto::uri::separar_ponto(ponto) {
         Ok(alvo) => alvo,
         Err(erro) => {
@@ -344,31 +343,42 @@ async fn resolver_ponto(ponto: &str) -> Option<SocketAddr> {
                 %erro,
                 "o ponto de encontro do link não é um endereço: a pergunta ao quarto não saiu"
             );
-            return None;
+            return Vec::new();
         }
     };
-    let mut achados: Vec<SocketAddr> =
-        match tokio::net::lookup_host((alvo.maquina, alvo.porta)).await {
-            Ok(achados) => achados.collect(),
-            Err(erro) => {
-                tracing::info!(
-                    ponto,
-                    %erro,
-                    "o ponto de encontro do link não resolveu: a pergunta ao quarto não saiu"
-                );
-                return None;
-            }
-        };
+    match tokio::net::lookup_host((alvo.maquina, alvo.porta)).await {
+        Ok(achados) => ordenar_os_achados(ponto, achados.collect()),
+        Err(erro) => {
+            tracing::info!(
+                ponto,
+                %erro,
+                "o ponto de encontro do link não resolveu: a pergunta ao quarto não saiu"
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Os endereços que o nome do ponto deu, na ordem em que a consulta os tenta.
+///
+/// **IPv4 primeiro**, e a ordem do DNS não decide isto: numa máquina sem rota
+/// IPv6, o AAAA na frente engole a pergunta em silêncio quando o envio dá certo
+/// e o pacote some. O anfitrião aprendeu isso em campo (`resolver`, no
+/// `seele-server`).
+///
+/// **Diz quando não sobrou nenhum.** Um nome que resolve para lista vazia não é
+/// erro do DNS, e sem esta linha a pergunta ao quarto deixava de sair sem nada
+/// no `seele.log`.
+fn ordenar_os_achados(ponto: &str, mut achados: Vec<SocketAddr>) -> Vec<SocketAddr> {
     achados.sort_by_key(|achado| u8::from(achado.is_ipv6()));
-    let primeiro = achados.first().copied();
-    if primeiro.is_none() {
+    if achados.is_empty() {
         tracing::info!(
             ponto,
             "o nome do ponto de encontro resolveu para nenhum endereço: a pergunta ao quarto \
              não saiu"
         );
     }
-    primeiro
+    achados
 }
 
 /// Quanto se espera o quarto dizer onde um anfitrião mora.
@@ -687,9 +697,11 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
     // pior que não perguntar.
     let ate = tokio::time::Instant::now() + prazo;
     let resposta = match tokio::time::timeout_at(ate, resolver_ponto(ponto)).await {
-        Ok(Some(destino)) => consultar(destino, marcas, ate).await,
-        // `resolver_ponto` já deixou no log por que não achou.
-        Ok(None) => OndeMora::PontoNaoResolve,
+        Ok(destinos) => match destinos.first() {
+            Some(destino) => consultar(*destino, marcas, ate).await,
+            // `resolver_ponto` já deixou no log por que não achou.
+            None => OndeMora::PontoNaoResolve,
+        },
         Err(_) => {
             tracing::info!(
                 ponto,
@@ -953,26 +965,64 @@ mod testes {
         // porta. A pergunta ao quarto nunca saiu, e nada dizia isso.
         assert_eq!(
             resolver_ponto("127.0.0.1").await,
-            Some(SocketAddr::from(([127, 0, 0, 1], encontro::PORTA_PADRAO))),
+            [SocketAddr::from(([127, 0, 0, 1], encontro::PORTA_PADRAO))],
             "um ponto sem porta não foi procurado na porta do ponto de encontro"
         );
         assert_eq!(
             resolver_ponto("[::1]").await,
-            Some(SocketAddr::from((
+            [SocketAddr::from((
                 std::net::Ipv6Addr::LOCALHOST,
                 encontro::PORTA_PADRAO
-            ))),
+            ))],
             "um IPv6 entre colchetes sem porta não foi procurado na porta do ponto de encontro"
         );
         assert_eq!(
             resolver_ponto("127.0.0.1:9000").await,
-            Some(SocketAddr::from(([127, 0, 0, 1], 9000))),
+            [SocketAddr::from(([127, 0, 0, 1], 9000))],
             "a porta escrita deixou de mandar"
         );
-        assert_eq!(
-            resolver_ponto("tem espaço").await,
-            None,
+        assert!(
+            resolver_ponto("tem espaço").await.is_empty(),
             "um texto que não é endereço virou pergunta"
+        );
+    }
+
+    #[test]
+    fn os_achados_vao_com_o_ipv4_na_frente_e_a_lista_vazia_diz_no_rastro() {
+        // T5a e T5c da pendência 51, item 17. O DNS devolve o AAAA primeiro
+        // numa máquina com IPv6, e a consulta pergunta ao primeiro da lista:
+        // sem rota IPv6, o envio dá certo, o pacote some, e a consulta paga o
+        // prazo inteiro calada. E um nome que resolve para nada não é erro do
+        // DNS: sem a linha, a pergunta não saía e o `seele.log` não dizia.
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let seis = SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, encontro::PORTA_PADRAO));
+        let quatro = SocketAddr::from(([127, 0, 0, 1], encontro::PORTA_PADRAO));
+
+        assert_eq!(
+            ordenar_os_achados("encontro.exemplo", vec![seis, quatro]),
+            [quatro, seis],
+            "o AAAA que o DNS deu primeiro ficou na frente: numa máquina sem rota IPv6, a \
+             pergunta ao quarto some em silêncio e a consulta paga o prazo inteiro"
+        );
+        assert!(
+            captura.linhas().is_empty(),
+            "uma lista com endereços deixou linha no rastro: {:?}",
+            captura.linhas()
+        );
+
+        assert!(
+            ordenar_os_achados("encontro.exemplo", Vec::new()).is_empty(),
+            "a lista vazia ganhou um endereço"
+        );
+        let linhas = captura.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("INFO")
+                && linha.contains("resolveu para nenhum endereço")
+                && linha.contains("encontro.exemplo")),
+            "o nome que resolveu para nenhum endereço não disse no rastro (`info`, o único nível \
+             que o seele.log grava) qual era: a pergunta ao quarto não sai e ninguém fica sabendo \
+             por quê. Rastro: {linhas:?}"
         );
     }
 
@@ -985,14 +1035,12 @@ mod testes {
         let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
         let _guarda = tracing::subscriber::set_default(captura.clone());
 
-        assert_eq!(
-            resolver_ponto("tem espaço").await,
-            None,
+        assert!(
+            resolver_ponto("tem espaço").await.is_empty(),
             "um texto que não é endereço virou pergunta: este teste não mede nada"
         );
-        assert_eq!(
-            resolver_ponto("nao-existe-mesmo.invalid").await,
-            None,
+        assert!(
+            resolver_ponto("nao-existe-mesmo.invalid").await.is_empty(),
             "um nome que não existe resolveu: este teste não mede nada"
         );
 
