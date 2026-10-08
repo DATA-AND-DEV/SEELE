@@ -654,6 +654,101 @@ fn podar(deposito: &Deposito, linha: &Linha, manifesto: &Manifesto) {
     }
 }
 
+/// Por que esta versão, a deste processo, não pode hospedar nem entrar.
+///
+/// Os nomes são os mesmos das variantes de `FalhaAoHospedar` que a carregam no
+/// `main.rs`, para uma frase só no `frases.js` servir aos dois comandos.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum RecusaDestaVersao {
+    /// Esta versão foi revogada, com o defeito e a versão que o corrige.
+    EstaVersaoRevogada {
+        /// Qual é o defeito, como a lista assinada o escreve.
+        defeito: String,
+        /// Onde foi corrigido, quando a lista diz.
+        corrigida_em: Option<String>,
+    },
+    /// A lista que chegou não abriu, ou é mais velha que a guardada. O ato é
+    /// recusado junto: seguir calado com a guardada seria acertar e não contar.
+    ListaDeRevogacaoRecusada,
+}
+
+/// A revogação desta versão, se a lista vigente a revoga.
+///
+/// Um build sem versão carimbada (`em_uso() == None`) não é revogável: a lista
+/// fala de identificadores publicados, e ele não é um.
+pub(crate) fn esta_versao_revogada(
+    vigente: &seele_lancador::Vigente,
+    em_uso: Option<&str>,
+) -> Option<RecusaDestaVersao> {
+    let revogacao = vigente.revogacao_de(em_uso?)?;
+    Some(RecusaDestaVersao::EstaVersaoRevogada {
+        defeito: revogacao.defect.clone(),
+        corrigida_em: revogacao.fixed_in.clone(),
+    })
+}
+
+/// Quanto tempo a lista conciliada vale em memória.
+///
+/// Um `connect` atrás do outro — reconectar, trocar de servidor — não precisa
+/// perguntar ao GitHub a cada vez. Dez minutos é curto para uma revogação
+/// publicada agora demorar a valer, e longo para não virar uma consulta por
+/// clique.
+const VALIDADE_DA_LISTA_EM_MEMORIA: Duration = Duration::from_secs(600);
+
+/// A última lista conciliada neste processo, e quando.
+static LISTA_EM_MEMORIA: std::sync::Mutex<Option<(std::time::Instant, seele_lancador::Vigente)>> =
+    std::sync::Mutex::new(None);
+
+/// Confere a lista de revogação para a versão **deste** processo, num ato.
+///
+/// O levantamento de 08/10 achou que hospedar no próprio processo não conferia
+/// nada, e o spec quer o lado que lê ligado na 0.16: um build que não confere
+/// nunca vai aprender a conferir. Hospedar e entrar são os atos do ADR 0046;
+/// abrir não é, e não passa por aqui.
+///
+/// A rede tem o prazo do [`catalogo_para`]; sem rede, vale a lista guardada; e
+/// sem catálogo nenhum e sem lista guardada, passa — não há o que conferir, e
+/// trancar quem nunca viu lista seria trocar uma proteção por uma porta fechada.
+///
+/// # Errors
+///
+/// [`RecusaDestaVersao`].
+pub(crate) async fn conferir_esta_versao(
+    config: &str,
+    atualizador: Option<&Atualizador>,
+    ato: Ato,
+) -> Result<(), RecusaDestaVersao> {
+    let Some(atualizador) = atualizador else {
+        return Ok(());
+    };
+    let guardada = LISTA_EM_MEMORIA
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .filter(|(quando, _)| quando.elapsed() < VALIDADE_DA_LISTA_EM_MEMORIA)
+        .map(|(_, vigente)| vigente);
+    let vigente = match guardada {
+        Some(vigente) => vigente,
+        None => {
+            let envelope = catalogo_para(ato, config, atualizador)
+                .await
+                .ok()
+                .and_then(|m| m.envelope_de_revogacoes().cloned());
+            let vigente = Deposito::em(raiz_do_deposito(config))
+                .conciliar_revogacoes(envelope.as_ref(), &atualizador.chave)
+                .map_err(|_| RecusaDestaVersao::ListaDeRevogacaoRecusada)?;
+            if let Ok(mut slot) = LISTA_EM_MEMORIA.lock() {
+                *slot = Some((std::time::Instant::now(), vigente.clone()));
+            }
+            vigente
+        }
+    };
+    match esta_versao_revogada(&vigente, em_uso()) {
+        Some(recusa) => Err(recusa),
+        None => Ok(()),
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1052,6 +1147,66 @@ mod o_launcher_ligado_ao_produto {
         assert!(
             matches!(resultado, Err(FalhaAoAbrirVersao::NaoIniciou(_))) || resultado.is_ok(),
             "o caminho de abrir devolveu algo que não é nem sucesso nem `NaoIniciou`: {resultado:?}"
+        );
+    }
+
+    /// **O lado que lê a revogação, para a versão deste processo** (spec 0.16,
+    /// §2, F6). Hospedar e entrar são atos, e esta versão também é uma versão.
+    #[test]
+    fn esta_versao_revogada_e_dita_com_o_defeito_e_o_conserto() {
+        let dir = tempfile::tempdir().unwrap();
+        let deposito = Deposito::em(dir.path());
+        let m = Manifesto::ler(
+            manifesto_json(
+                &[("0.16.1", "1.0"), ("0.16.0", "1.0")],
+                Some(("0.16.0", "defeito de teste", "0.16.1")),
+            )
+            .as_bytes(),
+            &chave(),
+        )
+        .unwrap();
+        let vigente = deposito
+            .conciliar_revogacoes(m.envelope_de_revogacoes(), &chave())
+            .unwrap();
+
+        assert_eq!(
+            super::esta_versao_revogada(&vigente, Some("0.16.0")),
+            Some(super::RecusaDestaVersao::EstaVersaoRevogada {
+                defeito: "defeito de teste".to_owned(),
+                corrigida_em: Some("0.16.1".to_owned()),
+            })
+        );
+        assert_eq!(super::esta_versao_revogada(&vigente, Some("0.16.1")), None);
+        // Um build sem versão carimbada não é revogável: não há o que conferir.
+        assert_eq!(super::esta_versao_revogada(&vigente, None), None);
+    }
+
+    /// **A conferência ao entrar vem antes do único `connect` da tela.** O erro
+    /// do `connect` é o da FFI, e por isso a conferência dele é um comando à
+    /// parte, chamado logo antes. Este guarda prende a ordem: se alguém
+    /// acrescentar outro `connect`, ou tirar a chamada, reprova aqui.
+    #[test]
+    fn entrar_confere_esta_versao_antes_de_conectar() {
+        let tela = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/tela-boot.js"),
+        )
+        .unwrap();
+        let todos: Vec<usize> = tela
+            .match_indices("invoke(\"connect\"")
+            .map(|(i, _)| i)
+            .collect();
+        let [unico] = todos.as_slice() else {
+            panic!(
+                "a tela tem {} chamadas a `connect`; a conferência da revogação cobre uma só",
+                todos.len()
+            );
+        };
+        let conferencia = tela
+            .find("invoke(\"conferir_esta_versao\"")
+            .expect("a tela não confere esta versão antes de entrar");
+        assert!(
+            conferencia < *unico,
+            "a conferência de revogação vem depois do `connect`, e aí já é tarde"
         );
     }
 

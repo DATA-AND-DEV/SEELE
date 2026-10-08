@@ -1571,6 +1571,37 @@ enum FalhaAoHospedar {
     /// O nome da variante e não uma frase, como as três acima: a frase mora no
     /// `FRASES` do JavaScript, e é lá que ela é traduzida.
     NomeRecusado(seele_ffi::uri::NomeRecusado),
+    /// Esta versão foi revogada, e a lista assinada diz o defeito e o conserto.
+    ///
+    /// ADR 0046: uma versão revogada não é hospedável. Conferido antes de
+    /// subir, como o nome, e pela mesma razão: recusar depois deixaria um
+    /// servidor no ar que não devia estar. Ver `versoes::conferir_esta_versao`.
+    EstaVersaoRevogada {
+        /// O defeito, como a lista o escreve.
+        defeito: String,
+        /// A versão que o corrige, quando a lista diz.
+        corrigida_em: Option<String>,
+    },
+    /// A lista de revogação que chegou não abriu, ou é mais velha que a
+    /// guardada: o ato é recusado junto, em vez de seguir calado.
+    ListaDeRevogacaoRecusada,
+}
+
+impl From<versoes::RecusaDestaVersao> for FalhaAoHospedar {
+    fn from(recusa: versoes::RecusaDestaVersao) -> Self {
+        match recusa {
+            versoes::RecusaDestaVersao::EstaVersaoRevogada {
+                defeito,
+                corrigida_em,
+            } => Self::EstaVersaoRevogada {
+                defeito,
+                corrigida_em,
+            },
+            versoes::RecusaDestaVersao::ListaDeRevogacaoRecusada => {
+                Self::ListaDeRevogacaoRecusada
+            }
+        }
+    }
 }
 
 /// Os servidores que esta máquina guarda, do mais recente ao mais antigo.
@@ -1699,6 +1730,27 @@ async fn abrir_versao(
     .await
 }
 
+/// Confere se **esta** versão pode entrar num servidor: a lista de revogação,
+/// num ato. A tela chama logo antes do `connect`.
+///
+/// À parte, e não dentro do `connect`, porque o erro dele é o da FFI
+/// (`ConnectFailure`) e não tem onde dizer «esta versão foi revogada». Há uma
+/// chamada a `connect` só, em `tela-boot.js`, e o guarda
+/// `entrar_confere_esta_versao_antes_de_conectar` prende a ordem.
+///
+/// # Errors
+///
+/// [`versoes::RecusaDestaVersao`].
+#[tauri::command]
+async fn conferir_esta_versao(app: AppHandle) -> Result<(), versoes::RecusaDestaVersao> {
+    versoes::conferir_esta_versao(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app).as_ref(),
+        seele_lancador::Ato::Entrar,
+    )
+    .await
+}
+
 /// Sobe um servidor dentro do app e devolve o link do convite.
 ///
 /// Este comando é o item de UX que faltava: sem ele, hospedar exige abrir um
@@ -1744,6 +1796,15 @@ async fn hospedar(
             return Err(FalhaAoHospedar::JaHospedando);
         }
     }
+
+    // ADR 0046: a lista de revogação é conferida nos atos, e esta versão
+    // também é uma versão. Sem rede vale a guardada; sem nenhuma, passa.
+    versoes::conferir_esta_versao(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app).as_ref(),
+        seele_lancador::Ato::Hospedar,
+    )
+    .await?;
 
     // **Qual banco, e por que isso passa pelo registro.** Até aqui era sempre
     // `<config>/seele.db`, um por máquina. `servidores::banco` devolve esse
@@ -8785,6 +8846,7 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             baixar_versao,
+            conferir_esta_versao,
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,

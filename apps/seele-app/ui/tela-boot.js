@@ -204,6 +204,10 @@ async function conectar(alvo, apelido, token) {
   mostrarEtapa(null);
 
   try {
+    // ADR 0046: entrar é um ato, e a lista de revogação vale para esta versão
+    // também. À parte porque o erro do `connect` é o da FFI; a recusa cai no
+    // mesmo `catch` de baixo, com a frase dela.
+    await invoke("conferir_esta_versao");
     // A entrada traz duas coisas: a tela, e o que a chave deste servidor acabou
     // de ser. A segunda vem do mesmo `connect` porque é lá que ela é decidida —
     // um ouvinte inscrito depois chegaria sempre tarde.
