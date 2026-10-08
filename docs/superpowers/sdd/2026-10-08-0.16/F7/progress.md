@@ -40,10 +40,34 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 
 | # | tarefa | estado | commit |
 |---|---|---|---|
-| — | plano | escrito, mandado à orquestradora | — |
-| 1 | 4e, a janela do Comandante | a fazer | — |
+| — | plano | escrito, mandado à orquestradora | `906e326b` |
+| 1 | 4e, a janela do Comandante | **feita** | `29d66937` |
 | 2 | 4a, o certificado Ed25519 | a fazer | — |
 | 3 | 4c, a campainha | a fazer | — |
 | 4 | 7g-núcleo, a agenda | a fazer | — |
 | 5 | 7c-áudio, o toque só de saída | a fazer | — |
 | 6 | os ADRs 0059, 0060 e 0061 | a fazer | — |
+
+## Tarefa 1 — a janela do Comandante (08/10)
+
+- **A prova**, `crates/seele-server/tests/janela_do_comandante.rs`, roda em
+  `Location::File` (o guardado) e em `Location::Memory` (a forma da sala). Os
+  dois casos passam.
+- **A reversão foi medida.** Com o bloco do gancho posto depois do
+  `tokio::spawn` do laço, os dois casos reprovaram com «uma conexão foi aceita
+  enquanto quem hospeda ainda semeava a portaria». Restaurado e conferido com
+  `cmp`.
+- **Rodados:**
+  - `seele-server --test janela_do_comandante` (2);
+  - `seele-server --lib hospedagem` (9);
+  - `seele-conformance --test ejetar` (3);
+  - `cargo check -p seele-app`;
+  - fmt e o clippy de `seele-server`, `seele-app` e `seele-conformance`.
+- **Não rodado:** o `quarto_pelo_link` só compilou (`--no-run`). Ele usa a
+  8384, e a F5 estava ocupada. A mudança nele é mecânica: o quinto argumento
+  `|_| Ok(())`.
+- **Fronteira:** o `main.rs` foi tocado só no `async fn hospedar`, porque a
+  assinatura nova não compila sem isso.
+- **Um deslize corrigido:** a cópia de segurança da reversão foi gravada por um
+  instante em `$TMPDIR`, fora do worktree. Apagada logo em seguida. Daqui em
+  diante, só o scratchpad.
