@@ -1,0 +1,307 @@
+{
+  "version": 6,
+  "estado": "RASCUNHO de 2026-10-08 — não é api/v6.json, não está congelado, e nenhum nome daqui é publicado. Fora de api/ de propósito: o guarda a_api_publicada_nao_se_edita reprova uma vN.json em api/ fora de api/congeladas.sha256. O texto que explica cada bloco é docs/superpowers/specs/2026-10-08-api-6-rascunho.md. Os símbolos do lado direito marcados «novo:» ainda não existem no código e reprovariam no check-api hoje; os outros existem em 54f542f.",
+  "extends": null,
+  "notes": "A v6 é escrita por inteiro: não estende a v5, porque só a API 6 roda no app 0.16 (APIS_ACEITAS = [6]) e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram (rascunho §13). Servidor 1.0 = protocolo 1.0 + API 6.",
+  "compatibilidade": {
+    "aceitas": [6],
+    "servidor": "1.0",
+    "porque": "Só a API 6 roda no app 0.16. Um pacote das APIs 3, 4 ou 5 é recusado com ApiTooOld, e a tela aponta o Servidor 0.15 no launcher. O ModAnunciado leva a api e o Hello leva as APIs que o cliente roda (D-fio-7).",
+    "capacidades-por-versao": {
+      "6": ["superficies", "contribuicoes", "estilos", "classes", "volume", "arquivo", "tema", "eventos-da-tela", "aviso-do-servidor"]
+    },
+    "em-aberto": {
+      "regiao": "recomendo que saia (U01–U03; nenhum oficial a pinta)",
+      "cartoes": "recomendo que saia, trocada por pessoa.cartao com alvo (PERFIS A1, R2)",
+      "tema": "recomendo que fique, ampliado, com servidor.aparencia como porta"
+    },
+    "por-plataforma": "o executor omite, como já omite por versão, o que a plataforma não tem: no celular, enviar e arquivo somem se a ponte web não tiver enviar_imagem_mod, ler_imagem_mod ou o seletor (PERFIS R13)",
+    "nao-volta": "as APIs 2 a 5. A 2 executava na janela (ADR 0049); a 3, a 4 e a 5 rodam na linha legada, o Servidor 0.15"
+  },
+  "handlers": ["aoPedir", "aoAcontecer", "aoEvento"],
+  "reads": {
+    "resposta": "ModReply",
+    "contexto.pessoa": "PersonId",
+    "contexto.canal": "ChannelId",
+    "contexto.sala": "novo: VoiceRoomId no pedido feito de chamada.palco",
+    "retrato.eu": "novo: Retrato::eu (de Snapshot::me)",
+    "retrato.servidor.nome": "novo: Retrato::servidor (de Snapshot::server)",
+    "retrato.pessoas": "novo: Retrato::pessoas — id, apelido, falando, mudo (de Snapshot::presentes)",
+    "retrato.salas": "novo: Retrato::salas — id, nome, limite, pessoas, minha (de Snapshot::voice_rooms)",
+    "retrato.canais": "novo: Retrato::canais — id, nome, aberto (de Snapshot::channels)",
+    "retrato.onde": "novo: computador | celular",
+    "retrato.regioes": "novo: as regiões e camadas que existem nesta casca agora",
+    "capacidades": "capacidades_da_api",
+    "servidor.contexto": "aoPedir(contexto) = { person, channel, admin, write }",
+    "servidor.dados.uso": "novo: o uso do quintal de 256 KiB (MESA item 9)"
+  },
+  "retrato-fica-de-fora": [
+    "link_state e link: o veredito de conexão segura é do núcleo",
+    "caminho: a topologia da rede de quem usa",
+    "capture, playback, aparelho, trocas_de_aparelho, voice_mode, audio_available, total_isolation: a máquina de quem usa",
+    "telemetry: atraso, jitter e codec continuam do produto",
+    "notice: aviso do produto",
+    "tela, minha_transmissao, transmissoes: nenhum oficial pede",
+    "may_*: a permissão vale na metade de servidor",
+    "messages_revision, icon_revision, person_icons_revision, ended: estado interno da casca",
+    "toque, chamada, código e agenda: nunca (guarda 12)"
+  ],
+  "actions": {
+    "pedir": "ModRequest",
+    "retrato": "novo: SeeleUI.retrato, no lugar de SeeleMods.snapshot",
+    "tema": "aplicarOTemaDoMod",
+    "escolher-arquivo": "escolher_para_o_mod",
+    "pedaco": "pedaco_do_escolhido",
+    "soltar-arquivo": "soltar_escolhido",
+    "midia-do-pacote": "midia_do_mod",
+    "midia-do-servidor": "midia_em_bytes",
+    "superficie-criar": "SuperficiesDoMod::criar",
+    "superficie-montar": "SuperficieDeMod::montar",
+    "superficie-classes": "SuperficieDeMod::declararClasses",
+    "superficie-mostrar": "SuperficieDeMod::mostrar",
+    "superficie-ocultar": "SuperficieDeMod::ocultar",
+    "superficie-suja": "SuperficieDeMod::marcarSuja",
+    "superficie-titulo": "SuperficiesDoMod::de",
+    "superficie-fechar": "SuperficiesDoMod::fechar",
+    "superficie-descartar": "SuperficiesDoMod::descartar",
+    "formulario-erros": "novo: a recusa do servidor de volta ao campo",
+    "contribuir": "RegistroDeContribuicoes::registrar",
+    "atualizar-contribuicao": "novo: RegistroDeContribuicoes::atualizar (PERFIS R7)",
+    "revogar-contribuicao": "RegistroDeContribuicoes::revogar",
+    "abrir-endereco": "abrir_no_navegador",
+    "enviar-imagem": "enviar_imagem_mod",
+    "ler-imagem": "ler_imagem_mod"
+  },
+  "own": {
+    "dados": "recolher_quintal",
+    "arquivos.ler": "arquivos::ler",
+    "arquivos.escrever": "arquivos::escrever",
+    "arquivos.listar": "arquivos::listar",
+    "arquivos.apagar": "arquivos::apagar",
+    "volume.esperar": "volume::esperar",
+    "volume.tamanho": "volume::tamanho",
+    "volume.servir": "volume::servir",
+    "volume.apagar": "volume::apagar"
+  },
+  "world": {
+    "mundo.buscar": "mundo::buscar",
+    "mundo.agora": "mundo::agora",
+    "mundo.registrar": "mundo::registrar",
+    "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (rascunho §7.3); depende de uma mensagem nova no fio"
+  },
+  "moments": [
+    "PersonJoined",
+    "PersonLeft",
+    "MessageReceived",
+    "MessageEdited",
+    "MessageRemoved"
+  ],
+  "eventos": [
+    "campo",
+    "escolha",
+    "botao",
+    "arquivo",
+    "traco",
+    "midia",
+    "numero",
+    "marca",
+    "cor",
+    "aba",
+    "submeter",
+    "acao",
+    "link",
+    "tela",
+    "fechar",
+    "fechar-pedido",
+    "contribuicao",
+    "canal",
+    "sala",
+    "pessoas",
+    "fala",
+    "lugar",
+    "servidor"
+  ],
+  "eventos-mudam": {
+    "midia": "passa a levar ponto e alvo (PERFIS R9); e o retrato que não decodifica manda midia/falhou (K2)",
+    "traco": "ganha a fase cancelou (MESA M14)",
+    "contribuicao": "ganha o motivo regiao-ausente (celular)"
+  },
+  "eventos-da-tela": {
+    "canal": "{ canal } — o canal aberto mudou",
+    "sala": "{ sala | null } — quem usa entrou numa sala de voz ou saiu",
+    "pessoas": "{ entrou?, saiu? } — alguém entrou no servidor ou saiu",
+    "fala": "{ falando: [id] } — no máximo 4 por segundo",
+    "lugar": "{ onde, regioes, largura, altura } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma",
+    "servidor": "{ carga } — o aviso da metade de servidor (mundo.avisar)",
+    "nunca": "nenhum evento carrega toque, chamada, código ou agenda"
+  },
+  "formas": [
+    "titulo", "texto", "linha", "lista", "item", "campo", "escolha", "botao", "arquivo", "tela",
+    "midia", "caixa", "pilha", "grade", "rolagem", "separador", "espaco", "formulario", "acoes",
+    "abas", "aba", "textoLongo", "numero", "deslizante", "marca", "interruptor", "cor", "retrato",
+    "distintivo", "link"
+  ],
+  "figuras": ["retangulo", "circulo", "texto", "linha"],
+  "regioes": {
+    "redes":              { "modos": ["adicionar"], "produto": ["o servidor atual", "conectar a outro"], "celular": { "existe": true, "forma": "faixa deitada no alto, itens de 56 × 44 px" } },
+    "servidor.navegacao": { "modos": ["substituir", "adicionar"], "pontos": ["canal.item", "sala.acoes"], "produto": ["ENTRAR NA SALA", "moderação de salas e canais"], "celular": { "existe": true, "forma": "gaveta SALAS, célula inteira, controles de 44 × 44" } },
+    "operador.barra":     { "modos": ["adicionar"], "pontos": ["pessoa.capa"], "produto": ["SAIR", "microfone", "no ar"], "celular": { "existe": false, "contribuicao": "recusada com regiao-ausente; a faixa de voz é do núcleo e não recebe capa" } },
+    "canal.cabecalho":    { "modos": ["substituir", "adicionar"], "produto": ["nome do canal", "busca"], "celular": { "existe": true, "forma": "compacta, botões de 44 px" } },
+    "conversa.mensagem":  { "modos": ["substituir", "adicionar"], "porMensagem": true, "pontos": ["pessoa.avatar"], "produto": ["o autor é a chave", "o apelido verificado à vista"], "celular": { "existe": true } },
+    "compositor":         { "modos": ["adicionar"], "pontos": ["compositor.ferramentas"], "produto": ["ENVIAR", "anexo"], "celular": { "existe": true, "forma": "campos de 16 px, botões de 44 × 44" } },
+    "pessoas.lista":      { "modos": ["substituir", "adicionar"], "pontos": ["pessoa.identidade", "pessoa.cartao", "pessoa.detalhes", "pessoa.acoes", "pessoa.avatar", "pessoa.capa"], "produto": ["o menu de moderação", "o apelido verificado"], "celular": { "existe": true, "forma": "gaveta PESSOAS, célula inteira; a capa da linha fica parada" } },
+    "status.barra":       { "modos": ["adicionar"], "produto": ["atraso", "jitter", "distúrbio", "codec"], "celular": { "existe": "só na chamada", "forma": "mínimo de 40 px" } }
+  },
+  "contribuicoes": {
+    "o-que-e": "um registro de regiões e pontos semânticos da interface do SEELE, por nome e por modo — nunca um seletor de CSS, um nó do documento ou HTML de texto",
+    "pontos": {
+      "pessoa.identidade": ["adicionar"],
+      "pessoa.cartao": ["substituir", "adicionar"],
+      "pessoa.detalhes": ["adicionar"],
+      "pessoa.acoes": ["adicionar"],
+      "pessoa.avatar": ["substituir"],
+      "pessoa.capa": ["substituir"],
+      "canal.item": ["adicionar"],
+      "canal.cabecalho": ["substituir", "adicionar"],
+      "compositor.ferramentas": ["adicionar"],
+      "sala.acoes": ["adicionar"],
+      "servidor.navegacao": ["substituir", "adicionar"],
+      "servidor.aparencia": ["substituir"]
+    },
+    "modos": ["adicionar", "substituir"],
+    "fora": [
+      "«decorar»: é a API 7, somada depois da 0.16 (decisão de 29/09). Registrar «decorar» é recusado pelo nome, com a razão junto",
+      "um ponto ou uma região desconhecida: recusada pelo nome, com a lista do que existe, e com a linha no seele.log"
+    ],
+    "garantias-do-produto": [
+      "trocar o que se desenha não troca a identidade: o comando continua ligado ao ID real",
+      "quando um MOD troca o nome que aparece de uma pessoa, o apelido verificado fica à vista, num lugar que o MOD não cobre (D-nucleo-1)",
+      "uma região substituída continua carregando os itens do núcleo que moram nela",
+      "duas substituições do mesmo ponto se resolvem por prioridade declarada e escolha visível",
+      "ao revogar, a apresentação nativa é recalculada do estado atual",
+      "«usar apresentação padrão» existe no controle nativo de MODs",
+      "uma contribuição para uma região que a casca não tem é recusada com motivo nomeado, e a aba DIAGNÓSTICO conta"
+    ],
+    "teto": "EM ABERTO (M3): 128 por MOD hoje; proposta por ponto e por alvo (PERFIS B10, R2)",
+    "descarte": "sai com a instância do MOD"
+  },
+  "capa": {
+    "ponto": "pessoa.capa",
+    "forma": "substituir, por alvo, com conteudo.doServidor — a mesma do pessoa.avatar",
+    "marcacao": "data-pessoa-da-capa (nunca data-faixa)",
+    "onde": {
+      "chamada": "o cartão da pessoa (pintarCartao), animada até o teto, no desktop e no celular (D-capa-1)",
+      "operador": "o fundo de .operador com a capa de quem usa; não no celular",
+      "perfil": "os dois cabeçalhos: a página do PERFIS (por citação) e o «SEU PERFIL» nativo (por aplicador do produto)",
+      "lista": "parada, se o MOD a citar no cartão"
+    },
+    "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2)",
+    "preferencia": "herda a de pessoa.cartao: «o SEELE desenha» não recebe capa",
+    "legibilidade": "o texto do produto fica em placas opacas; todo texto do produto sobre a capa mantém o contraste que tem sem capa, contra um quadro branco e um preto; MUDO, fone e SAIR nunca ficam sobre a capa",
+    "quem-fala": "o halo e a pastilha FALANDO ficam acima da capa; o véu passa a --seele-laranja-carga",
+    "estados": "sem capa, carregando e recusada: fundo liso, como hoje; a recusada vai ao seele.log e ao MOD com ponto e alvo",
+    "movimento-reduzido": "um quadro estático por capa, usado com prefers-reduced-motion, com o movimento reduzido do SEELE, com a janela oculta, fora da vista e acima do teto",
+    "custo": {
+      "reducao": "o Rust reduz ao maior tamanho em que ela aparece; EM ABERTO (M3): proposta de 60 quadros e 10 s",
+      "bolso": "bytes decodificados, e não bytes de arquivo",
+      "animadas": "EM ABERTO (M3): proposta de 6 ao mesmo tempo, contando a do operador, escolhidas pela vista"
+    }
+  },
+  "superficies": {
+    "o-que-e": "uma janela do produto que o MOD declara e o produto monta",
+    "tipos": ["pagina", "painel", "dialogo", "aviso", "folha"],
+    "tipos-em-aberto": "pagina e painel contra folha: recomendo que a folha substitua o painel (rascunho §5)",
+    "desconhecido": "recusado pelo nome (hoje vira dialogo em silêncio, mods-superficies.js:225)",
+    "garantias-do-produto": [
+      "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
+      "o cabeçalho diz de qual MOD é a superfície",
+      "um modal torna o resto da aplicação inerte, e não só escuro",
+      "o foco entra na abertura, fica contido, e volta ao acionador ao fechar",
+      "o tamanho pedido é contido na área útil",
+      "alterações não gravadas produzem a decisão de descartar, e o MOD recebe descartou",
+      "nenhuma superfície desenha embaixo das áreas seguras do aparelho"
+    ],
+    "folha": { "empilha": "EM ABERTO: proposta de 3", "convive": ["chamada.palco", "pagina não imersiva"], "celular": "folha de baixo, expansível à tela inteira" },
+    "dialogo": {
+      "formularios": {
+        "validacao": ["obrigatorio", "minimo", "maximo", "tamanhoMaximo", "inteiro"],
+        "erro": "em toda forma de entrada, inclusive cor e escolha",
+        "botoes": "primário (envia todos os valores juntos) e secundário (sai), montados pelo produto",
+        "recusa-do-servidor": "formulario.erros({ chave: motivo })",
+        "sujo": "derivado pelo produto contra o valor inicial",
+        "confirmacao": "declarada para ação destrutiva, com as palavras do produto",
+        "emProgresso": "o primário ignora o segundo clique"
+      },
+      "celular": "tela cheia, com as ações fixas embaixo e as abas cabendo em 390 px (D-estilo-1)"
+    },
+    "limites": "EM ABERTO (M3). Hoje: 12 superfícies, 4 avisos, 4096 nós, fundura 16, 128 campos, 24 mídias; 24 MiB declarados e 10 MiB entregues na forma midia (rascunho §13)",
+    "avisos-duracao-ms": { "normal": 3500, "erro": 10000 },
+    "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar"
+  },
+  "camadas": {
+    "chamada.palco": {
+      "o-que-e": "camada sobre a chamada, com a grade de vídeo do produto por baixo",
+      "perfil": "superficie",
+      "modos": ["substituir", "adicionar"],
+      "contexto": "o pedido feito do palco leva contexto.sala",
+      "de-quem": "por pessoa: cada janela monta o que o MOD dela declarar",
+      "toque": "recebe toque e clique",
+      "tamanho": "o MOD recebe largura e altura, e o evento lugar quando mudam",
+      "celular": "vista alternativa à grade (MESA · CHAMADA), com quem fala numa tira no alto"
+    }
+  },
+  "estilos": {
+    "o-que-e": "propriedades declaradas por categoria, validadas uma a uma e montadas de partes conferidas — nunca texto de CSS",
+    "categorias": ["cor e transparência", "preenchimento e gradiente", "borda e raio", "sombra", "tipografia", "layout", "transformação", "recorte", "transição e animação"],
+    "estados": ["base", "sobre", "foco", "ativo", "desligado", "invalido", "escolhido"],
+    "token-do-tema": "cor: { tema: 'acento' } — resolvido pelo produto (ESTILO A16)",
+    "movimento-reduzido": "vale em toda região e camada onde contribuição de MOD aparece, e não só em .superficie-de-mod e .pessoa-cartao (PERFIS R11)",
+    "celular": "nenhum estilo desce um controle abaixo de 44 px nem um campo abaixo de 16 px de letra",
+    "animacoes": ["nenhuma", "pulso", "aurora", "brilho", "flutuar"],
+    "fora": ["url(...)", "@import", "HTML ativo", "seletor que alcance fora da superfície", "keyframes declarados pelo MOD", "família de tipo livre"]
+  },
+  "tema": {
+    "nomes": ["arredondamento", "brilho", "fundo", "painel", "texto", "apagado", "acento", "borda", "densidade", "fonte"],
+    "derivados-pelo-produto": ["acentoFraco", "bordaForte", "apagadoSecundario"],
+    "porta": "servidor.aparencia: registrar o ponto é a condição para pedir tema, e «o SEELE desenha» tira o tema já aplicado",
+    "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão",
+    "conferencia": "contraste em todos os pares que o produto desenha, e não só texto sobre fundo; a recusa diz o par e a razão",
+    "previa": "tema(valores, { previa: true }): só nesta máquina, com o selo «prévia não publicada», sai quando a superfície que a pediu fecha",
+    "nucleo": "nenhum item do núcleo é alcançado pelo tema; um guarda prova que acento #331704, #050403 e #0a0806 não mudam o #veredito, o #botao-mudo apertado, o #voz-mudo e o #voz-sair",
+    "em-aberto": ["tema como dado do servidor (muda o fio)", "tokens por região", "modo claro ou escuro", "tipo dos títulos e dos dados", "escala por escolha", "densidade que cobre a escala --seele-e*", "fundo da sessão por mídia (depois da M3 no celular)"],
+    "fora": ["--seele-vermelho-alerta", "família livre", "url(...)", "CSS em texto", "z-index, opacidade ou deslocamento sobre controle nativo", "esconder uma região"]
+  },
+  "nucleo-de-confianca": {
+    "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
+    "itens": ["sair", "microfone e no ar", "moderação por identidade", "o apelido verificado à vista", "atribuição", "aceite", "a ligação", "conexão segura"],
+    "celular": ["a faixa de voz", "as abas do pé", "a pergunta DE ONDE? e o seletor do sistema", "as áreas seguras", "44 px e 16 px", "o zoom e os gestos"],
+    "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal"
+  },
+  "som": {
+    "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",
+    "repetir": "EM ABERTO (m-4 da pendência 49): recomendo repetir: true por contrato",
+    "celular": "som de MOD só com a tela acesa, até a medida da F4"
+  },
+  "volume": {
+    "cliente": "SeeleUI.enviar(arquivo, token): Promise<void>; arquivo escolhido pelo usuário, até 10 MiB; resolve depois da gravação",
+    "servidor": ["volume.esperar(token, caminho, tipos, prazo)", "volume.tamanho(caminho): number | null", "volume.servir(caminho): string | null", "volume.apagar(caminho): boolean"],
+    "leitura": "doServidor.pedido.transporte = volume",
+    "reducao": "a mídia de servidor de um MOD é reduzida ao tamanho de uso antes de chegar à janela, e os bolsos contam bytes decodificados (PERFIS R3)",
+    "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa'}"
+  },
+  "limites": {
+    "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone)",
+    "mensagem": "12 KiB hoje; em aberto montagem parcial ou teto por superfície maior (MESA item 1, PERFIS R8)",
+    "aviso-do-servidor": "proposta de 1 KiB por aviso e 4 por segundo por MOD",
+    "capas-animadas": "proposta de 6",
+    "quadros-por-capa": "proposta de 60 quadros, 10 s",
+    "folhas": "proposta de 3"
+  },
+  "celular": {
+    "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
+    "onde-o-mod-sabe": "retrato.onde, retrato.regioes e o evento lugar",
+    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta",
+    "executor": "o mesmo prelúdio do desktop, num executor isolado da origem da página (spike da F4); capacidades por plataforma",
+    "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida"
+  }
+}
