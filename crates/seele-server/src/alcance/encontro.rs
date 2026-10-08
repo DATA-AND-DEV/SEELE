@@ -1393,7 +1393,7 @@ mod testes {
         // «Opcional» cobrado: com `nao`, nenhum pacote sai desta máquina para
         // ponto de encontro nenhum, porque não há nem convocação para tentar.
         let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
-        let fp = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+        let fp = IMPRESSAO;
 
         // A variável é global ao processo, então este teste a devolve como
         // estava — outros testes deste crate leem o mesmo ambiente.
@@ -1630,6 +1630,18 @@ mod testes {
         assert!(aviso_e_do_ponto(mesma_maquina_outra_porta, ponto));
     }
 
+    /// O socket que receberia um `FURO`, no laço local, e o endereço dele: é o
+    /// que os testes de `atender` contam.
+    async fn alvo_do_furo() -> (tokio::net::UdpSocket, SocketAddr) {
+        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o alvo do furo de teste");
+        };
+        let Ok(alvo_endereco) = alvo.local_addr() else {
+            panic!("o alvo do furo de teste não tem endereço local");
+        };
+        (alvo, alvo_endereco)
+    }
+
     /// Sobe um `atender` de teste com sockets reais de loopback, para os dois
     /// casos abaixo. Devolve a tarefa (para poder abortá-la ao fim do teste), o
     /// endereço da escuta de avisos (para onde o `AQUI` é mandado), o socket que
@@ -1647,12 +1659,7 @@ mod testes {
         let anfitriao = AnfitriaoDeTeste::abrir().await;
         let avisos_endereco = anfitriao.avisos_endereco;
 
-        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir o alvo do furo de teste");
-        };
-        let Ok(alvo_endereco) = alvo.local_addr() else {
-            panic!("o alvo do furo de teste não tem endereço local");
-        };
+        let (alvo, alvo_endereco) = alvo_do_furo().await;
 
         // As marcas de um anfitrião, pelo caminho de produção: a do aviso é o
         // que um `AQUI` legítimo traz, e as outras duas são as do registro no
@@ -1997,12 +2004,7 @@ mod testes {
         // O ponto deste teste responde a tudo com um `AQUI` que aponta para
         // `alvo`, e não para quem perguntou. É o que deixa ver um furo que, com
         // um ponto de verdade, iria para a própria escuta sem deixar rastro.
-        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir o alvo do furo de teste");
-        };
-        let Ok(alvo_endereco) = alvo.local_addr() else {
-            panic!("o alvo do furo de teste não tem endereço local");
-        };
+        let (alvo, alvo_endereco) = alvo_do_furo().await;
         let (ponto, caderno) = ponto_que_anota(Some(alvo_endereco)).await;
         let anfitriao = AnfitriaoDeTeste::abrir().await;
         let avisos_endereco = anfitriao.avisos_endereco;
