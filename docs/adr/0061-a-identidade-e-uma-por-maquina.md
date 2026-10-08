@@ -1,9 +1,11 @@
 # 0061 — A identidade é uma por máquina, e não por linha nem por versão
 
-Status: **proposto**. A direção foi decidida por quem responde pelo projeto em
-2026-10-08: a identidade é uma por máquina, e os dados são por linha. Duas
-decisões abaixo ainda são do dono, e uma condição de segurança tem de entrar na
-0.15.2 antes de este ADR ser aceito.
+Status: **aceito**. Decidido por quem responde pelo projeto em 2026-10-08,
+em dois tempos:
+- a direção: a identidade é uma por máquina, e os dados são por linha;
+- a linha legada: a opção (a), e a regra dos 32 bytes.
+
+A regra é **condição**: a 0.15.2 não sai sem ela.
 Data: 2026-10-08
 Sobre o spec-mestre da 0.16 (`docs/superpowers/specs/2026-10-08-0.16-design.md`,
 §1, «O que a atualização para a 0.16 precisa fazer na primeira abertura»), e a
@@ -32,7 +34,7 @@ Isso não basta para a sala pessoal, por dois motivos:
   mudar com a versão aberta. Um número de telefone que muda quando se troca de
   versão não é um número de telefone.
 
-## Decisão (a recomendação)
+## Decisão
 
 1. **A identidade é lida de uma pasta da identidade.** A ordem é:
    `$SEELE_IDENTIDADE`, e então a do ADR 0017 (`$SEELE_HOME`,
@@ -45,23 +47,42 @@ Isso não basta para a sala pessoal, por dois motivos:
 4. **Só a chave é da máquina.** Os pins continuam com os dados de cada linha: um
    pino diz «este servidor é o mesmo de ontem», e os servidores de uma linha só
    aparecem nela. Os pinos `@CÓDIGO` só existem na linha 1.
+5. **A linha legada também lê `$SEELE_IDENTIDADE`, e as cópias acabam.** É a
+   opção (a) do dono: «uma por máquina» é literal, e há um arquivo só. A 0.15.2
+   aprende a variável, e a primeira abertura da 0.16 deixa de copiar a
+   `identity.key` para `dados/servidor-0.15`. O resto da cópia dos dados fica
+   como está.
 
-### A linha legada: duas decisões do dono
+### O contrato da variável
 
-A 0.15.2 ainda não foi publicada. Conferido em 2026-10-08: o último release de
-SEELE-RELEASES é a `v0.15.1 · 54f542f94`. Então o dono pode escolher:
+É o que a 0.15.2, a 0.16 e o launcher seguem, e ele não muda depois de
+publicado.
 
-- **(a) A 0.15.2 também lê `$SEELE_IDENTIDADE`, e as cópias acabam.** «Uma por
-  máquina» passa a ser literal: um arquivo só. **É a recomendação.**
-- **(b) A 0.15.2 fica como está.** O launcher planta a identidade da máquina em
-  `dados/servidor-0.15` quando a pasta não tem uma. Ele **nunca** sobrescreve uma
-  diferente: nesse caso a tela diz, porque sobrescrever trocaria a pessoa nos
-  servidores daquela linha.
+- **O nome:** `SEELE_IDENTIDADE`.
+- **O valor:** o caminho absoluto de uma **pasta**, e não do arquivo. A chave é
+  `<pasta>/identity.key`, no formato do ADR 0017: 32 bytes crus, em modo `0600`,
+  criada nesse modo, e reportada, nunca substituída, se estiver corrompida.
+- **Um valor vazio vale como ausente.** Sem a variável, a pasta é a de hoje:
+  `$SEELE_HOME`, `$XDG_CONFIG_HOME/seele`, `~/.config/seele` e, por último, a
+  pasta de configuração da plataforma.
+- **Só a chave sai daí.** O banco, os pins, os conhecidos, a agenda e as
+  preferências continuam em `$SEELE_HOME`.
+- **O que o launcher passa** é a pasta da identidade **do próprio processo**:
+  - a `$SEELE_IDENTIDADE` que ele recebeu, se recebeu uma;
+  - senão, a pasta que o `config_dir` dele resolve: no Mac, `~/.config/seele`;
+    no Windows, `%APPDATA%\tech.datadev.seele`.
 
-### A condição: a 0.15.2 só assina nonce de 32 bytes
+  Assim, uma versão aberta por outra versão continua apontando para o mesmo
+  arquivo.
+- **Onde se lê, hoje.** Na `linha/0.15` e na 0.16, a `identity.key` é lida em
+  produção em dois lugares, os dois em `crates/seele-ffi/src/lib.rs`:
+  `impressao_desta_maquina` e o `connect`. Os dois passam a pedir a pasta da
+  identidade.
 
-Em qualquer das duas opções, a linha legada assina com a mesma chave que a
-linha 1, e isso abre dois ataques:
+### A condição: a 0.15.2 só assina desafios de exatamente 32 bytes
+
+A linha legada assina com a mesma chave que a linha 1, e isso abria dois
+ataques:
 
 - **O que o cliente da 0.15 assina.** O nonce cru que o servidor mandar, de até
   256 bytes (`linha/0.15:crates/seele-core/src/client.rs`, `signing_key.sign(&nonce)`;
@@ -76,28 +97,34 @@ linha 1, e isso abre dois ataques:
   Com isso ele se apresenta como a sala da pessoa, e o `ConfereCodigo` aceita a
   chave e a assinatura.
 
-**A medida que resolve:** todo servidor 0.15 manda exatamente 32 bytes
-(`NONCE_LEN = 32`, `linha/0.15:crates/seele-server/src/session.rs`). Uma 0.15.2
-que **só assina nonce de 32 bytes** continua falando com todo servidor 0.15 de
-verdade. E nenhum domínio que a chave assina na linha 1 cabe em 32 bytes:
+**A medida, decidida:** todo servidor 0.15 manda exatamente 32 bytes
+(`NONCE_LEN = 32`, `linha/0.15:crates/seele-server/src/session.rs`). A 0.15.2
+**só assina desafios de exatamente 32 bytes**, e continua falando com todo
+servidor 0.15 de verdade. Nenhum domínio que a chave assina na linha 1 cabe em
+32 bytes:
 - a prova do S2 tem 89;
 - o CertificateVerify tem 130 ou 146;
 - um `TBSCertificate` tem centenas;
 - o `MORO2` leva o rótulo de 17 bytes e a chave de 32, e já passa de 32 antes dos outros campos.
 
-**Este ADR só é aceito com essa regra na 0.15.2**, com o teste e a prova por
-reversão.
+Quem escreve é a frente do launcher, dona da `linha/0.15`, com o teste e a
+prova por reversão. **A 0.15.2 não sai sem ela.**
 
 ## Alternativas
 
-1. **Uma chave por linha, sem cópia.** A pessoa seria outra em cada linha: o
+1. **A opção (b): a 0.15.2 fica como está, e o launcher planta a identidade da
+   máquina em `dados/servidor-0.15`, sem nunca sobrescrever uma diferente.**
+   Recusada pelo dono em favor da (a). Duas cópias da mesma chave são duas
+   coisas que podem divergir, e a tela teria de explicar uma divergência que um
+   arquivo só não tem como produzir.
+2. **Uma chave por linha, sem cópia.** A pessoa seria outra em cada linha: o
    apelido dela nos servidores 0.15 ficaria preso à chave antiga (ADR 0017), e o
    código da sala mudaria com a versão. Recusada pela decisão de 08/10.
-2. **A cópia como está (a F6, sem este ADR).** Funciona para quem tinha a 0.15
+3. **A cópia como está (a F6, sem este ADR).** Funciona para quem tinha a 0.15
    antes de atualizar, e erra em quem abre uma linha antes da cópia. Ela também
    não resolve a próxima linha: quando houver um Servidor 2.0, a linha 1 vai
    para o depósito com uma pasta própria, e o código da pessoa mudaria.
-3. **Mudar o `$SEELE_HOME` em vez de criar uma variável nova.** Recusada: o
+4. **Mudar o `$SEELE_HOME` em vez de criar uma variável nova.** Recusada: o
    `$SEELE_HOME` é o que separa as pastas de dados, e é o que os testes usam
    para ter duas pessoas.
 
@@ -109,8 +136,12 @@ reversão.
   reinstalando uma versão antiga por cima») **deixa de ser raro**: a linha
   legada é exatamente isso, e vive para sempre (ADR 0046). É por isso que a
   regra dos 32 bytes é condição, e não melhoria.
-- A F6 acrescenta `SEELE_IDENTIDADE` ao `Lancamento` de toda versão, e a casca
-  passa a FFI a pasta da identidade separada da pasta de dados.
+- **Quem faz o quê:**
+  - a frente do launcher (F6): o `Lancamento` de toda versão passa
+    `SEELE_IDENTIDADE`, a primeira abertura da 0.16 deixa de copiar a chave, e
+    a 0.15.2 lê a variável e só assina desafios de 32 bytes;
+  - a frente da sala (F7, tarefa 4b): a 0.16 lê a pasta da identidade, e a casca
+    passa à FFI a pasta da identidade separada da pasta de dados.
 
 ## Custo de reverter
 

@@ -46,7 +46,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 3 | 4c, a campainha | **feita** | `77207424` |
 | 4 | 7g-núcleo, a agenda | **feita** | `6f28dd41` |
 | 5 | 7c-áudio, o toque só de saída | **feita**, com duas medidas pendentes do dono | `d1f8a947` |
-| 6 | os ADRs 0059, 0060 e 0061 | **feita**, com o 0061 proposto | `d763e9e9` |
+| 6 | os ADRs 0059, 0060 e 0061 | **feita**; o 0061 aceito depois da decisão do dono | `d763e9e9` e o seguinte |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -173,3 +173,21 @@ As seis tarefas [AGORA] estão feitas. Pendências:
   (`ConfereCodigo`), que o plano marca como [AGORA, se liberada].
 
 O resto espera o G-servidor, a F2, a casca ou a F1.
+
+## As decisões do dono (08/10, pela orquestradora)
+
+- **A1:** a 0.15.2 só assina desafios de exatamente 32 bytes. Quem escreve é a
+  F6, no `linha/0.15`, com o teste e a reversão.
+- **O ADR 0061: a opção (a).** A 0.15.2 lê `$SEELE_IDENTIDADE`, e as cópias
+  acabam. O 0061 passou a **aceito**, com «O contrato da variável» escrito nele,
+  e as notas do 0017 e do 0046 e o índice foram atualizados. O `adr_index` e o
+  `textos_publicos` passam.
+- **A divisão:**
+  - o lado do launcher (o `Lancamento` e a primeira abertura sem copiar a
+    chave) e a 0.15.2 são da F6;
+  - a 4b, a 0.16 lendo a pasta da identidade, é desta frente (tarefa 22, que
+    espera a casca).
+- **A2 e A3** ficam como propostos, nas tarefas 4f e 4a. **A4** foi repassado à
+  F1. **Os ADRs** 0059 a 0061 são desta frente, e o 0062 fica reservado ao ENC/2.
+- **A orquestradora está integrando `0.16/sala` até `85879154`.** Nada de
+  conformidade nem de bateria até ela avisar.
