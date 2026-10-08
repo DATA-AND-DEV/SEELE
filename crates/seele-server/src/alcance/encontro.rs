@@ -733,20 +733,57 @@ async fn perguntar_pelo_server(
 /// O destino é escrito na família **deste** socket antes de sair. Ver
 /// [`na_familia_de`], que existe por causa de um degrau 4 que nunca aconteceu.
 ///
-/// Devolve por que não saiu, e o peso da falha fica com quem chama: o registro
-/// no quarto a diz no log quando ela começa e quando acaba
+/// Devolve por que não saiu ([`NaoSaiu`]), e o peso da falha fica com quem
+/// chama: o registro no quarto a diz no log quando ela começa e quando acaba
 /// ([`RegistroNoQuarto`]); o pedido da subida e o furo a deixam em `debug`.
 fn mandar_pelo_server(
     server: &std::net::UdpSocket,
     datagrama: &[u8],
     destino: SocketAddr,
-) -> Result<(), String> {
-    let destino = na_familia_de(server, destino)
-        .map_err(|motivo| format!("este socket não alcança esta família: {motivo}"))?;
+) -> Result<(), NaoSaiu> {
+    let destino = na_familia_de(server, destino).map_err(|motivo| NaoSaiu {
+        motivo: format!("este socket não alcança esta família: {motivo}"),
+        passageira: false,
+    })?;
     server
         .send_to(datagrama, destino)
         .map(|_| ())
-        .map_err(|erro| format!("não saiu pelo socket do servidor rumo a {destino}: {erro}"))
+        .map_err(|erro| {
+            NaoSaiu::do_envio(
+                &erro,
+                format!("não saiu pelo socket do servidor rumo a {destino}: {erro}"),
+            )
+        })
+}
+
+/// Por que um datagrama do degrau 4 não saiu.
+///
+/// Um tipo, e não o texto de antes, por causa de `passageira`. O socket do
+/// servidor é não-bloqueante, e um `WouldBlock` nele é a fila de saída cheia
+/// por um instante, que esvazia sozinha ([`mandar_pelo_server`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NaoSaiu {
+    /// Por que, como o log o escreve.
+    motivo: String,
+    /// A fila de saída estava cheia (`WouldBlock`): passa sozinha, e o tique
+    /// seguinte manda de novo.
+    passageira: bool,
+}
+
+impl NaoSaiu {
+    /// A falha de um envio, passageira quando o sistema disse `WouldBlock`.
+    fn do_envio(erro: &std::io::Error, motivo: String) -> Self {
+        Self {
+            motivo,
+            passageira: erro.kind() == std::io::ErrorKind::WouldBlock,
+        }
+    }
+}
+
+impl std::fmt::Display for NaoSaiu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.motivo)
+    }
 }
 
 /// O mesmo destino, escrito na família em que um socket sabe falar.
@@ -885,23 +922,45 @@ async fn atender(
 /// no quarto e o reavivamento dos dois caminhos.
 ///
 /// Os três saem sempre, mesmo que um falhe: são sockets diferentes, e um que não
-/// sai não diz nada sobre o outro. Devolve o primeiro motivo de falha, e quem
-/// decide se ele vai para o log é [`RegistroNoQuarto`].
+/// sai não diz nada sobre o outro. Devolve a falha que conta
+/// ([`a_falha_que_conta`]), e quem decide se ela vai para o log é
+/// [`RegistroNoQuarto`].
 async fn registrar(
     avisos: &tokio::net::UdpSocket,
     server: &std::net::UdpSocket,
     ponto: SocketAddr,
     aviso: SocketAddr,
     marcas: &Marcas,
-) -> Result<(), String> {
+) -> Result<(), NaoSaiu> {
     let escuta = avisos
         .send_to(&encontro::moro(marcas.escuta()), ponto)
         .await
         .map(|_| ())
-        .map_err(|erro| format!("o MORO da escuta de avisos não saiu: {erro}"));
+        .map_err(|erro| {
+            NaoSaiu::do_envio(
+                &erro,
+                format!("o MORO da escuta de avisos não saiu: {erro}"),
+            )
+        });
     let leve = mandar_pelo_server(server, &encontro::leve(aviso, marcas.escuta()), ponto);
     let servidor = mandar_pelo_server(server, &encontro::moro(marcas.servidor()), ponto);
-    escuta.and(leve).and(servidor)
+    a_falha_que_conta([escuta, leve, servidor])
+}
+
+/// Qual das falhas de um tique vai para [`RegistroNoQuarto`]: a primeira que
+/// não é passageira, e só na falta dela a primeira passageira.
+///
+/// Os três envios saem por dois sockets, e uma fila cheia num deles não diz
+/// nada sobre o outro. Com a primeira falha valendo, um `WouldBlock` no `LEVE`
+/// escondia, naquele tique, a recusa do `MORO` do servidor.
+fn a_falha_que_conta(saidas: [Result<(), NaoSaiu>; 3]) -> Result<(), NaoSaiu> {
+    // `min_by_key` devolve o primeiro dos empatados, e `false` vem antes de
+    // `true`: a primeira falha que não passa sozinha.
+    saidas
+        .into_iter()
+        .filter_map(Result::err)
+        .min_by_key(|falha| falha.passageira)
+        .map_or(Ok(()), Err)
 }
 
 /// Se o registro no quarto está saindo, para o log dizer só quando isso muda.
@@ -921,8 +980,22 @@ struct RegistroNoQuarto {
 
 impl RegistroNoQuarto {
     /// Anota o resultado de um tique, e diz no log se ele mudou o estado.
-    fn anotar(&mut self, ponto: SocketAddr, saiu: Result<(), String>) {
+    ///
+    /// **Uma falha passageira não muda o estado** ([`NaoSaiu::passageira`]): a
+    /// fila de saída cheia esvazia sozinha, e o tique seguinte manda de novo.
+    /// Ela virava um par de linhas `info`, «deixou de sair» e «voltou a sair»,
+    /// e quem lia o `seele.log` via o anfitrião sumir do quarto sem ele ter
+    /// sumido (o C4 da pendência 51, item 19). Fica em `debug`.
+    fn anotar(&mut self, ponto: SocketAddr, saiu: Result<(), NaoSaiu>) {
         match saiu {
+            Err(falha) if falha.passageira => {
+                tracing::debug!(
+                    %ponto,
+                    motivo = %falha,
+                    "encontro: o registro no quarto esbarrou na fila de saída cheia; o tique \
+                     seguinte manda de novo"
+                );
+            }
             Err(motivo) if !self.falhando => {
                 self.falhando = true;
                 tracing::info!(
@@ -2288,6 +2361,88 @@ mod testes {
             "o registro voltou a sair, e o log não disse isso exatamente uma vez: quem lê não \
              sabe quando o anfitrião voltou ao quarto. Rastro: {}",
             rastro.texto()
+        );
+    }
+
+    /// Uma falha de envio como o sistema a devolve, com o motivo que o log
+    /// escreveria.
+    fn falha(tipo: std::io::ErrorKind) -> NaoSaiu {
+        let erro = std::io::Error::from(tipo);
+        NaoSaiu::do_envio(&erro, format!("não saiu de teste: {erro}"))
+    }
+
+    #[test]
+    fn uma_fila_cheia_num_tique_nao_vira_linha_no_log() {
+        // O C4 do item 19 da pendência 51. O socket do servidor é
+        // não-bloqueante, e um `WouldBlock` nele é a fila de saída cheia por um
+        // instante: o tique seguinte manda de novo. Ele virava um par de linhas
+        // `info` no seele.log, «deixou de sair» e «voltou a sair», e quem lê o
+        // log via um anfitrião sumindo do quarto que nunca sumiu.
+        let (rastro, _guarda) = Rastro::de_info();
+        let ponto = SocketAddr::from(([203, 0, 113, 7], PORTA_PADRAO));
+        let mut registro = RegistroNoQuarto::default();
+        assert!(
+            falha(std::io::ErrorKind::WouldBlock).passageira,
+            "um `WouldBlock` não foi lido como passageiro: a fila de saída cheia volta a virar \
+             «deixou de sair» no seele.log"
+        );
+
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::WouldBlock)));
+        registro.anotar(ponto, Ok(()));
+        assert_eq!(
+            (
+                rastro.linhas_com("deixou de sair"),
+                rastro.linhas_com("voltou a sair")
+            ),
+            (0, 0),
+            "a fila de saída cheia num tique, seguida de um tique bom, deixou linhas no log \
+             (`info`, o nível que o seele.log grava): quem lê vê o anfitrião sumir do quarto e \
+             voltar, e ele nunca sumiu. Rastro: {}",
+            rastro.texto()
+        );
+
+        // E a falha de verdade continua dita, mesmo depois de uma passageira.
+        assert!(
+            !falha(std::io::ErrorKind::NetworkUnreachable).passageira,
+            "uma rede inalcançável foi lida como passageira: o anfitrião some do quarto calado"
+        );
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::WouldBlock)));
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::NetworkUnreachable)));
+        assert_eq!(
+            rastro.linhas_com("deixou de sair"),
+            1,
+            "o registro deixou de sair de verdade, depois de uma fila cheia, e o log não disse \
+             isso uma vez. Rastro: {}",
+            rastro.texto()
+        );
+    }
+
+    #[test]
+    fn uma_fila_cheia_num_socket_nao_esconde_a_recusa_do_outro() {
+        // Os três envios de um tique saem por dois sockets, e um que falha não
+        // diz nada sobre o outro. Com a primeira falha valendo, uma fila cheia
+        // no `LEVE` escondia a recusa do `MORO` do servidor naquele tique.
+        let recusa = falha(std::io::ErrorKind::NetworkUnreachable);
+        assert_eq!(
+            a_falha_que_conta([
+                Ok(()),
+                Err(falha(std::io::ErrorKind::WouldBlock)),
+                Err(recusa.clone()),
+            ]),
+            Err(recusa),
+            "a fila cheia de um envio escondeu a recusa de outro no mesmo tique: o registro \
+             deixou de sair e o log não diz"
+        );
+        assert_eq!(
+            a_falha_que_conta([Ok(()), Ok(()), Ok(())]),
+            Ok(()),
+            "um tique em que os três saíram virou falha"
+        );
+        let passageira = falha(std::io::ErrorKind::WouldBlock);
+        assert_eq!(
+            a_falha_que_conta([Err(passageira.clone()), Ok(()), Ok(())]),
+            Err(passageira),
+            "um tique só com a fila cheia deixou de voltar como falha passageira"
         );
     }
 
