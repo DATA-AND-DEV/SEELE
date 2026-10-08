@@ -164,6 +164,7 @@ A janela de verdade não rodou: nem WKWebView, nem WebView2. O que rodou foi o C
 - `apps/seele-app/ui/index.html`
 - `apps/seele-app/tests/frontend.rs`
 - `apps/seele-app/ui/camada-nomear.css` (só na rodada 1, por decisão do controlador)
+- `apps/seele-app/bancada/ajustes-v013.cjs` (só na rodada 2, por decisão do controlador; ela já roda no job `bancadas` do `ci.yml`)
 - `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-j-report.md` (este)
 
 Não mudaram: as outras folhas, o Rust do apelido, `main.rs`, `tela-fim.js`, o fio, `api/v*.json`, `api/README.md` e os arquivos da F6. Nenhuma dependência nova.
@@ -348,3 +349,98 @@ Antes e depois de cada bateria de reversões, o `shasum` de todos os `.js` e `.c
 - **A pergunta abre por cima do diálogo da porta, ao hospedar**, como a revisão anotou. É o caminho de HOSPEDAR AQUI: `hospedar()` chama `conectar()`, e a pergunta abre sem que o diálogo de baixo feche. Não mexi nisso nem medi nesta rodada.
 - **A linha do operador ocupa duas linhas** na coluna de 268px: «microfone abre enquanto segura ESPAÇO · ouvindo» (preocupação 3).
 - **A faixa de fone usa as classes do veredito** (preocupação 4). Só `camada-nomear.css` entrou no lote.
+
+## Rodada 2
+
+A re-revisão reproduziu no navegador os oito consertos da rodada 1. Sobraram um Importante e um Menor, os dois sobre prova versionada, e um defeito antigo da mesma classe, medido igual no base e no head. Por decisão do controlador, `apps/seele-app/bancada/ajustes-v013.cjs` entrou no lote. Ela já roda no job `bancadas` do `ci.yml`, e por isso o `ci.yml` não mudou.
+
+Tudo está num commit só, `72b8c7cb`. Os três itens mexem na mesma bancada e no mesmo `frontend.rs`, e separar os pedaços pediria `git add -p`, que é interativo.
+
+| Item | O que mudou | Commit |
+|---|---|---|
+| 1 (Importante). O `line-height` do título sem guarda | guarda novo `o_titulo_do_perfil_tem_altura_de_linha_propria`, e a medida das tintas na `ajustes-v013.cjs` | `72b8c7cb` |
+| 2 (Menor). As provas dos Importantes 1 e 3 só no scratchpad | a tecla e a entrada por link viraram casos da `ajustes-v013.cjs` | `72b8c7cb` |
+| 3. A troca de modo deixava a faixa de contexto no modo antigo | `atualizarServer` redesenha a faixa, e ele é o único caminho; os dois `.then` da rodada 1 saíram | `72b8c7cb` |
+
+### O caminho único da faixa de contexto (item 3)
+
+**O defeito**, medido pela re-revisão e reproduzido pela bancada antes do conserto:
+
+```
+AssertionError [ERR_ASSERTION]: trocado o modo do microfone para VOZ, a faixa de contexto continuou dizendo o modo de antes — #server-contexto diz «Na sala Sala principal · microfone abre enquanto segura F»
+```
+
+**O conserto.** `desenharContextoDaSessao()` passou para dentro de `atualizarServer`, que roda ao abrir a configuração e a cada 500 ms com a tela na frente. Ele cobre os três casos de uma vez:
+- a troca de tecla: `recarregarTeclaDeFalar` atualiza `teclaDeFalar`, e o próximo ciclo redesenha;
+- a troca de modo: a sessão redesenha o quadro, e o ciclo seguinte lê o modo novo;
+- mudo e sala, que antes também só eram ditos ao abrir.
+
+Com isso, os dois redesenhos que a rodada 1 pôs no `.then` de `pararDeOuvirTecla` e de `abrirServer` ficaram desnecessários e saíram. Saiu também a chamada síncrona de `abrirServer`, porque o `atualizarServer` que ele aguarda logo depois já desenha. Se a lista de aparelhos falhar antes dele, o ciclo de 500 ms desenha a faixa do mesmo jeito. Sobra um caminho só, e o comentário de `desenharContextoDaSessao` diz qual é.
+
+**O guarda (a)** foi ajustado a esse caminho:
+- `atualizarServer` chama `desenharContextoDaSessao()`;
+- em `tela-server.js` sem comentários, há exatamente uma chamada fora da declaração. Um segundo caminho é o que deixou a troca de modo de fora na rodada 1.
+
+RED, antes do conserto:
+
+```
+`atualizarServer` não redesenha a faixa de contexto: o que muda com a configuração aberta — a tecla de falar, o modo do microfone — fica dito como era ao abrir:
+```
+
+### O que a `ajustes-v013.cjs` passou a medir
+
+Os casos novos ficam na mesma corrida dos de antes. A bancada continua saindo 0 só se todos passam, e a mensagem final ganhou uma linha:
+
+```
+v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium
+lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de 10.7px entre as tintas)
+```
+
+- **A tecla e o modo**, na página de sempre, com a configuração aberta sobre a sessão. Antes de tudo, a faixa tem de dizer «segura ESPAÇO». A tabela da ponte troca `tecla_de_falar` para `KeyF`, e `pararDeOuvirTecla()` roda; a faixa tem de dizer «segura F». O retrato passa a `voice_mode: VoiceActivated`, e `escolherModo` roda; a faixa tem de dizer «microfone abre por voz». A espera é de até 3 s, e a falha diz o que a faixa diz.
+- **A entrada por link**, numa segunda página. A tabela tem `abertura: { entrar: "seele://192.0.2.1:8384" }`, `analisar_convite`, `apelido_local: ""`, e a ponte resolve em microtarefa. Ela também guarda o que `escolher_apelido_local` grava, porque a pergunta relê o nome depois de fechar. As asserções:
+  - a pergunta abre, e a falha diz o que está escrito na entrada;
+  - o título é «COMO OS OUTROS VÃO TE CHAMAR?»;
+  - nenhum `connect` sai antes da resposta;
+  - respondendo «Bia» pelo teclado (o foco está no campo, e Enter salva), a ordem é `escolher_apelido_local` e depois `connect`, e o `connect` leva «Bia».
+- **A folga entre as linhas do título**, na mesma pergunta, pela tinta, como no scratchpad. A função `tintasDoTitulo` está na bancada, com o comentário de por que a área de conteúdo não serve. O título tem de quebrar em duas linhas (senão a medida não mede nada), e a folga tem de ser positiva.
+
+### O guarda de texto do `line-height` (item 1)
+
+`o_titulo_do_perfil_tem_altura_de_linha_propria` lê a regra `.perfil-cabeca .nomear-titulo` de `camada-nomear.css`, sem comentários, e exige `line-height` nela. É a metade que roda em toda máquina; a medida de verdade é a da bancada. As duas são provadas pela mesma reversão, abaixo.
+
+### As reversões da rodada 2
+
+Os guardas de texto, com `cargo test -p seele-app --test frontend -- --exact`:
+
+| Reversão | O guarda reprovou com |
+|---|---|
+| t1. `line-height: 1.15` tirado da regra | «o título do perfil voltou a herdar a altura de linha de `base.css` (16px para letra de 24px)…» |
+| t2. `atualizarServer` sem a chamada | «`atualizarServer` não redesenha a faixa de contexto…» |
+| t3. Os dois `.then` da rodada 1 de volta, com a chamada de `atualizarServer` de pé | «a faixa de contexto é redesenhada em 3 lugares de `tela-server.js`; ela tem um caminho só…» |
+
+A bancada, com `ajustes-v013.cjs`. Todas saíram 1, e o arquivo voltou com `cmp` igual:
+
+| Reversão | A bancada reprovou com |
+|---|---|
+| b1. `line-height: 1.15` tirado da regra | «as duas linhas do título da pergunta se sobrepõem: folga de -0.9px entre as tintas, com line-height 16px» |
+| b2. O estado de antes da rodada 1: sem a chamada em `atualizarServer`, com a chamada síncrona de `abrirServer`, sem redesenho no `.then` | «trocada a tecla de falar para F, a faixa de contexto continuou dizendo a tecla de antes — #server-contexto diz «… segura ESPAÇO»» |
+| b3. O estado da rodada 1: o mesmo de b2, mais os dois `.then` com o redesenho | a tecla passa, e reprova o modo: «trocado o modo do microfone para VOZ, a faixa de contexto continuou dizendo o modo de antes — #server-contexto diz «… segura F»» |
+| b4. `cumprirAAbertura()` de volta ao topo de `tela-boot.js`, fora do `DOMContentLoaded` | «aberta por um link sem nome nesta máquina, a janela não perguntou o nome — a entrada diz «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ. … ReferenceError: perguntarONome is not defined»» |
+
+A b2 é a reversão que o controlador pediu para a tecla, «o `.then` sem o redesenho», no caminho que sobrou: sem `atualizarServer` desenhando, a tecla volta a ficar velha. A b3 mostra que o conserto da rodada 1 não bastava para o modo, que é o defeito antigo.
+
+A primeira corrida de b4 guardou só duas linhas da saída e cortou o `ReferenceError`. Ela foi rodada de novo guardando quatro linhas, e o texto acima é o dessa corrida.
+
+O `cargo fmt` reflowou uma linha de `frontend.rs` depois das reversões, e t2 e t3 rodaram de novo sobre o arquivo formatado, com as mesmas frases. Antes e depois da bateria, o `shasum` dos `.js` e `.css` de `ui/`, do `index.html`, do `frontend.rs` e da `ajustes-v013.cjs` foi conferido com `cmp`, e saiu igual. Foram 7 reversões nesta rodada.
+
+### O que rodou
+
+- `cargo test -p seele-app --test frontend`: 268 verdes. Os 267 de antes e o guarda novo do `line-height`.
+- `PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright node apps/seele-app/bancada/ajustes-v013.cjs`: saiu 0, com as duas linhas acima.
+- `cargo xtask check-runtime`: saiu 0, com as 7 bancadas.
+- `cargo fmt --all -- --check` e `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpos.
+
+### O que muda no que a rodada 1 disse
+
+- **O Importante 1 da rodada 1** (`4daaa4c3`) foi substituído por este caminho único. Os `.then` que ele pôs saíram, e as reversões r1a e r1b daquela rodada passaram a valer como t3 e b2 desta.
+- **A bancada do scratchpad** (`olhar.cjs`) continua fora do commit. As provas dos Importantes 1, 2 e 3 da rodada 1 e da troca de modo estão agora na `ajustes-v013.cjs`. As cenas das notas do campo, do CONECTAR apagado e da faixa de fone entre sessões continuam só no scratchpad, com os guardas de texto de `frontend.rs` como a parte versionada.
