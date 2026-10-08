@@ -216,6 +216,20 @@ precisam dele.
 Quando dá certo, ele imprime **o seu endereço visto de fora** — que é
 literalmente o serviço que este ponto de encontro presta.
 
+Depois ele confere as duas coisas que um ponto de pé pode não ter, e diz cada
+uma: **o quarto** (`MORO` e `QUEM`), que um binário anterior a 03/09/2026 não
+tem, e **o ENC/2** (`MORO2`, `QUEM2` e `NINGUEM`, com uma chave de sondagem
+nova a cada rodada), que um binário anterior à 0.16 não tem. Sem o ENC/2,
+ninguém acha ninguém pelo código. No ENC/2 ele também mede **o relógio do
+ponto**, e diz de quantos segundos ele difere do da máquina que sonda.
+
+Com `--exige-enc2`, ele sai com falha se alguma família que respondeu ao `ONDE`
+não falar o ENC/2:
+
+```sh
+cargo run -p seele-encontro --example sondar -- --exige-enc2 <endereço>
+```
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
