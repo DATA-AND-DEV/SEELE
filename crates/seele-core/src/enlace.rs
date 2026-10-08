@@ -5023,6 +5023,29 @@ fn desfazer_o_pin_deste_aperto(
 /// Só apaga o que **ninguém** tinha fixado antes: se já havia pin, ele fica.
 /// Quando apaga, diz no log (`info!`) a chave, a impressão apagada e a falha do
 /// candidato (`falha`), como [`desfazer_o_pin_deste_aperto`].
+///
+/// **O que ela não distingue:** qual candidato escreveu o pin, quando dois
+/// perdedores dividem a chave de pino. A chave é `host:porta` do nome do
+/// convite, e alternativos do mesmo nome a dividem; a limpeza só pula a chave
+/// do vencedor. Ela roda por perdedor, na ordem em que as falhas chegaram, e o
+/// primeiro daquela chave apaga o pin órfão com a falha **dele** na linha. Com
+/// `A`, que escreveu o pin e teve o prazo estourado, e `B`, na mesma chave,
+/// que falhou antes sem escrever nada (por exemplo, por ter achado o pin de
+/// `A` e só o confirmado), a limpeza de `B` vem primeiro, apaga o pin de `A` e
+/// põe na linha a falha de `B`: a linha do pin órfão leva a falha do vizinho.
+/// O pin que cai é o certo; só a atribuição erra. A falha de cada candidato,
+/// com o endereço, está na linha da corrida
+/// ([`registrar_a_falha_do_candidato`]).
+///
+/// **Os dois resíduos falham para o lado seguro**: este e o de
+/// [`desfazer_o_pin_deste_aperto`], o vencedor que fica sem o pin do servidor
+/// em que acabou de entrar. Nos dois, o que pode sair errado é um pin a menos
+/// ou uma linha que atribui mal, e nunca um pin que nenhuma conexão confirmou
+/// ficando na loja. Um pin a menos faz a visita seguinte àquela chave ser um
+/// primeiro contato, conferido pela impressão esperada quando houver uma; um
+/// pin órfão que ficasse faria dela um `Matches`, e num alvo de escopo público
+/// a recusa da impressão viraria aviso, que é o estrago que as duas limpezas
+/// existem para desfazer.
 fn desfazer_pin_orfao(
     pins: &dyn PinStore,
     chave_do_pin: &str,

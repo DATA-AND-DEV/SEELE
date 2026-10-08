@@ -27,9 +27,10 @@
 //! caracteres da impressão digital do servidor, e uma letra) para o endereço em
 //! que o anfitrião disse morar. Fica em memória, com teto de 4096 marcas. Uma
 //! entrada vale 60 segundos desde o último `MORO`: vencida, deixa de responder
-//! ao `QUEM`, e continua na memória até o quarto encher (a varredura), um
-//! `MORO` novo da mesma marca a substituir, ou o processo reiniciar. Nada vai a
-//! disco, e reiniciar o processo o esvazia.
+//! ao `QUEM`, e continua na memória até o quarto encher e chegar uma marca nova
+//! (`Quarto::morar`, que só então varre o que venceu), um `MORO` novo da mesma
+//! marca a substituir, ou o processo reiniciar. Nada vai a disco, e reiniciar o
+//! processo o esvazia.
 //!
 //! Por padrão nem imprime: o registro de quem falou com quem é justamente a
 //! coisa que este projeto não quer que exista, e um log ligado por padrão seria

@@ -183,10 +183,10 @@ pub const LIMITE_DA_MARCA: usize = 32;
 /// Para o anfitrião saber quem bateu. Ele conhece a marca que ele mesmo mandou,
 /// e conhece a que quem teve o convite vai usar — os primeiros dígitos da
 /// impressão digital dele. Quem entra os tira do `seele://`, ou da lista de
-/// conhecidos, que guardou a impressão de um link; e quem opera o ponto de
-/// encontro os lê no começo das marcas que o anfitrião registra no quarto. Uma
-/// marca que não é nenhuma das duas é ruído da internet, e não vira furo de NAT
-/// nenhum.
+/// conhecidos, que guardou a impressão que a conexão aceitou; e quem opera o
+/// ponto de encontro os lê no começo das marcas que o anfitrião registra no
+/// quarto. Uma marca que não é nenhuma das duas é ruído da internet, e não vira
+/// furo de NAT nenhum.
 ///
 /// Não é autenticação e não tenta ser: quem teve o link, tem. É o que impede um
 /// varredor de portas de fazer um servidor mandar pacotes para onde ele quiser.
