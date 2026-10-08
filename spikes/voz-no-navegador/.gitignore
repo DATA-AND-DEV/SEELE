@@ -1,3 +1,6 @@
 # O que um celular devolveu numa sessão de teste: dado de aparelho alheio, com
 # endereço e user agent. Fica na máquina de quem rodou; o que importa vai para o README.
 relatorios.jsonl
+origem/
+identidade/
+target/

@@ -20,6 +20,43 @@ const inicio = performance.now();
 const seg = () => Math.round(performance.now() - inicio) / 1000;
 const $ = (id) => document.getElementById(id);
 
+// ---- de onde vem o servidor ----------------------------------------------
+//
+// Servida pelo próprio servidor do spike, a página recebe `window.SPIKE`
+// injetado. Vinda de uma origem estática (as medições 4 a 6 do ADR 0057), ela
+// lê o servidor e o hash do FRAGMENTO, `#a=<host>:<porta>&h=<sha-256 em hex>`,
+// como o produto vai ler: guarda, e apaga o fragmento da barra antes de
+// qualquer outra coisa. `?manter=fragmento` não apaga, para medir que URL o
+// iOS grava no ícone da Tela de Início. O web app instalado aceita o link
+// colado, porque no iOS ele não divide o armazenamento com a aba.
+const URL_NA_ABERTURA = location.href;
+function lerLink(texto) {
+  const i = texto.indexOf("#");
+  if (i < 0) return null;
+  const p = new URLSearchParams(texto.slice(i + 1));
+  const a = p.get("a") || "";
+  const h = (p.get("h") || "").toLowerCase();
+  const m = a.match(/^(\[[0-9a-f:]+\]|[^:\[\]]+):(\d{1,5})$/i);
+  // O hash com o rigor do `fp`: truncado ou torto é recusado, nunca ignorado.
+  if (!m || !/^[0-9a-f]{64}$/.test(h)) return { erro: "link torto: precisa de a=<host>:<porta> e h=<64 hex>" };
+  return { host: m[1], porta: Number(m[2]), hash: h.match(/../g).map((x) => parseInt(x, 16)) };
+}
+const CONFIG = (() => {
+  if (window.SPIKE && window.SPIKE.hash) return { host: location.hostname, porta: window.SPIKE.porta, hash: window.SPIKE.hash, de: "servidor" };
+  window.SPIKE = {};
+  const doLink = lerLink(location.href);
+  if (doLink && !doLink.erro) {
+    try { localStorage.setItem("voz-config", JSON.stringify(doLink)); } catch (_) {}
+    if (new URLSearchParams(location.search).get("manter") !== "fragmento") history.replaceState(null, "", location.pathname + location.search);
+    return { ...doLink, de: "fragmento" };
+  }
+  try {
+    const guardado = JSON.parse(localStorage.getItem("voz-config") || "null");
+    if (guardado) return { ...guardado, de: "guardado" };
+  } catch (_) {}
+  return { erro: doLink ? doLink.erro : "sem servidor: cole o link" };
+})();
+
 const estado = {
   cap: null,
   conexao: { ok: false, ms: null, erro: null, maxDatagrama: null, escrita: null, fechou: null },
@@ -135,6 +172,8 @@ function relatorio(motivo) {
     resumo,
     motivo,
     t: seg(),
+    origem: { de: CONFIG.de || null, urlNaAbertura: URL_NA_ABERTURA.replace(/#.*$/, "#…"), fragmentoNaAbertura: URL_NA_ABERTURA.includes("#") },
+    identidade: estado.identidade,
     cap: estado.cap,
     conexao: estado.conexao,
     rtt: { n: r.amostras.length, p50: percentil(r.amostras, 0.5), p95: percentil(r.amostras, 0.95), enviados: r.enviados, voltaram: r.voltaram },
@@ -192,12 +231,13 @@ let escritor = null;
 
 async function conectar() {
   $("conectar").disabled = true;
-  const url = `https://${location.hostname}:${window.SPIKE.porta}/sala`;
+  if (CONFIG.erro) { evento("sem servidor", { erro: CONFIG.erro }); $("conectar").disabled = false; return; }
+  const url = `https://${CONFIG.host}:${CONFIG.porta}/sala`;
   evento("conectando", { url });
   const t0 = performance.now();
   try {
     wt = new WebTransport(url, {
-      serverCertificateHashes: [{ algorithm: "sha-256", value: new Uint8Array(window.SPIKE.hash) }],
+      serverCertificateHashes: [{ algorithm: "sha-256", value: new Uint8Array(CONFIG.hash) }],
     });
     await wt.ready;
   } catch (e) {
@@ -324,7 +364,7 @@ async function ligarAudio() {
       evento("audioSession declarada", { type: navigator.audioSession.type, state: navigator.audioSession.state });
     }
     ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
-    await ctx.audioWorklet.addModule("/processadores.js");
+    await ctx.audioWorklet.addModule("processadores.js");
     reproducao = new AudioWorkletNode(ctx, "reproducao", { numberOfInputs: 0, outputChannelCount: [2] });
     if (pedido.get("saida") === "elemento") {
       const destino = ctx.createMediaStreamDestination();
@@ -537,11 +577,94 @@ window.addEventListener("pagehide", () => mandarPorHttp(relatorio("pagehide")));
 window.addEventListener("online", () => evento("rede: online"));
 window.addEventListener("offline", () => evento("rede: offline"));
 
+// ---- a identidade (medição 4) --------------------------------------------
+//
+// Uma CryptoKey Ed25519 não extraível no IndexedDB, como a do produto. Ela só
+// nasce no toque de «criar identidade» (o produto: só ao entrar com convite).
+// A cada abertura a página conta e diz se ela ainda está lá: é assim que se
+// mede se ela sobrevive a fechar o web app e a reiniciar o iPhone.
+
+function bancoDaIdentidade(modo, fazer) {
+  return new Promise((ok, falha) => {
+    const r = indexedDB.open("voz-identidade", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("s");
+    r.onsuccess = () => {
+      const t = r.result.transaction("s", modo);
+      const pedido = fazer(t.objectStore("s"));
+      t.oncomplete = () => { r.result.close(); ok(pedido && pedido.result); };
+      t.onerror = () => { r.result.close(); falha(t.error); };
+    };
+    r.onerror = () => falha(r.error);
+  });
+}
+
+async function impressao(chave) {
+  const crua = await crypto.subtle.exportKey("raw", chave.publicKey);
+  const h = await crypto.subtle.digest("SHA-256", crua);
+  return Array.from(new Uint8Array(h).slice(0, 8), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function lerIdentidade(contarAbertura = false) {
+  const id = { presente: false, persistida: null };
+  try {
+    const guardada = await bancoDaIdentidade("readonly", (s) => s.get("identidade"));
+    // As aberturas contam toda vez, com ou sem chave: é o que diz se o
+    // armazenamento sobreviveu e a chave sumiu, ou se ele sumiu inteiro.
+    const aberturas = ((await bancoDaIdentidade("readonly", (s) => s.get("aberturas"))) || 0) + (contarAbertura ? 1 : 0);
+    if (contarAbertura) await bancoDaIdentidade("readwrite", (s) => s.put(aberturas, "aberturas"));
+    id.aberturas = aberturas;
+    if (guardada && guardada.chave) {
+      id.presente = true;
+      id.criadaEm = guardada.criadaEm;
+      id.impressao = await impressao(guardada.chave);
+      id.extraivel = guardada.chave.privateKey.extractable;
+      const sig = await crypto.subtle.sign({ name: "Ed25519" }, guardada.chave.privateKey, new Uint8Array(32));
+      id.assina = sig.byteLength === 64;
+    }
+  } catch (e) {
+    id.erro = `${e.name}: ${e.message}`;
+  }
+  try { id.persistida = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : "sem API"; } catch (_) {}
+  return id;
+}
+
+function pintarIdentidade() {
+  const id = estado.identidade || {};
+  $("identidade").textContent = id.erro ? `erro: ${id.erro}`
+    : id.presente ? `presente · ${id.impressao} · criada em ${id.criadaEm} · assina: ${id.assina} · extraível: ${id.extraivel} · abertura nº ${id.aberturas} · persistida: ${id.persistida}`
+    : `ausente · abertura nº ${id.aberturas} · persistida: ${id.persistida}`;
+}
+
+async function criarIdentidade() {
+  const chave = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+  await bancoDaIdentidade("readwrite", (s) => s.put({ chave, criadaEm: new Date().toISOString() }, "identidade"));
+  estado.identidade = await lerIdentidade();
+  pintarIdentidade();
+  evento("identidade criada", { impressao: estado.identidade.impressao });
+}
+
+async function pedirPersistencia() {
+  const r = navigator.storage && navigator.storage.persist ? await navigator.storage.persist() : "sem API";
+  evento("persistência pedida", { resposta: r });
+  estado.identidade = await lerIdentidade();
+  pintarIdentidade();
+}
+
+function usarLinkColado() {
+  const l = lerLink($("link").value.trim());
+  if (!l || l.erro) { evento("link colado recusado", { erro: l ? l.erro : "sem fragmento" }); return; }
+  localStorage.setItem("voz-config", JSON.stringify(l));
+  location.replace(location.pathname + location.search);
+}
+
 // ---- início --------------------------------------------------------------
 
 $("conectar").addEventListener("click", conectar);
 $("audio").addEventListener("click", ligarAudio);
 $("enviar").addEventListener("click", () => mandarRelatorio("pedido na tela"));
+$("criar-identidade").addEventListener("click", criarIdentidade);
+$("persistir").addEventListener("click", pedirPersistencia);
+$("usar-link").addEventListener("click", usarLinkColado);
 
 setInterval(() => {
   if (estado.conexao.ok) mandarRelatorio("periódico");
@@ -553,9 +676,13 @@ setInterval(() => {
   pintarCapacidades(estado.cap);
   $("modo").textContent = `${estado.cap.webApp ? "web app (Tela de Início)" : "aba do navegador"} · ${estado.cap.busca}`;
   for (const a of document.querySelectorAll("#testes a")) {
-    if (a.getAttribute("href") === location.pathname + location.search) a.setAttribute("aria-current", "page");
+    if (new URL(a.href).search === location.search) a.setAttribute("aria-current", "page");
   }
   evento("capacidades medidas");
+  estado.identidade = await lerIdentidade(true);
+  pintarIdentidade();
+  $("servidor").textContent = CONFIG.erro ? CONFIG.erro : `${CONFIG.host}:${CONFIG.porta} · hash ${CONFIG.hash.slice(0, 4).map((x) => x.toString(16).padStart(2, "0")).join("")}… · veio do ${CONFIG.de}`;
+  $("abertura").textContent = URL_NA_ABERTURA.replace(/#.*$/, "#… (com fragmento)");
   if (!estado.cap.webtransport) mandarPorHttp(relatorio("sem WebTransport"));
   window.SPIKE.estado = estado; // para a prova automática ler
 
@@ -565,7 +692,7 @@ setInterval(() => {
   // conexão que abre não prova nada sobre o pino.
   const pedido = new URLSearchParams(location.search);
   if (pedido.get("hash") === "errado") {
-    window.SPIKE.hash[0] ^= 1;
+    CONFIG.hash[0] ^= 1;
     evento("hash adulterado de propósito");
   }
   if (pedido.has("auto") && estado.cap.webtransport) {
