@@ -566,15 +566,12 @@ async fn resolver(
     texto: &str,
     ate: tokio::time::Instant,
 ) -> Result<Vec<SocketAddr>, FalhaNoEncontro> {
-    // O mesmo `Bilhete` que lê o endereço do link lê o do ambiente: a porta
-    // padrão de um ponto de encontro não é a de um servidor, e essa regra mora em
-    // um lugar só.
-    let alvo = Bilhete::novo(texto, "0.0.0.0:0").ok().and_then(|bilhete| {
-        bilhete
-            .ponto()
-            .ok()
-            .map(|alvo| (alvo.maquina.to_owned(), alvo.porta))
-    });
+    // A mesma regra que separa o ponto do link separa o do ambiente
+    // (`separar_ponto`): a porta padrão de um ponto de encontro não é a de um
+    // servidor, e essa regra mora em um lugar só.
+    let alvo = seele_proto::uri::separar_ponto(texto)
+        .ok()
+        .map(|alvo| (alvo.maquina.to_owned(), alvo.porta));
     let Some((maquina, porta)) = alvo else {
         return Err(FalhaNoEncontro::NaoResolve(texto.to_owned()));
     };
@@ -1180,6 +1177,29 @@ mod testes {
             ultimo_quatro < primeiro_seis,
             "um IPv6 foi ordenado antes de um IPv4: {achados:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn o_ponto_do_ambiente_segue_a_regra_do_ponto_do_link() {
+        // O T5e do item 19 da pendência 51: o ponto que `$SEELE_ENCONTRO`
+        // escreve é separado pela mesma regra do que o link leva
+        // (`separar_ponto`). Sem porta, a do ponto de encontro (8384), e não a
+        // do servidor (8383); um texto que não é endereço, ou vazio, não vira
+        // pergunta, e a falha diz qual era o texto.
+        let ate = tokio::time::Instant::now() + PRAZO;
+        assert_eq!(
+            super::resolver("127.0.0.1", ate).await,
+            Ok(vec![SocketAddr::from(([127, 0, 0, 1], PORTA_PADRAO))]),
+            "o ponto escrito sem porta não foi procurado na porta do ponto de encontro: o \
+             anfitrião pergunta ONDE a um serviço que não atende ali, e o degrau 4 não sobe"
+        );
+        for torto in ["tem espaço", ""] {
+            assert_eq!(
+                super::resolver(torto, ate).await,
+                Err(FalhaNoEncontro::NaoResolve(torto.to_owned())),
+                "o ponto {torto:?}, que não é endereço, virou outra coisa que «não resolve»"
+            );
+        }
     }
 
     #[test]
