@@ -623,10 +623,14 @@ function fraseDeErro(erro, apelido, deOnde) {
     // disco). Ela chegava aqui como `NaoCopiei`, junto das falhas do disco, e
     // caía em «ALGO FALHOU» com o JSON cru. Agora diz qual é o atalho e o que
     // fazer. O caminho também fica no `seele.log`.
+    //
+    // O remédio é tirar o atalho, onde quer que ele esteja: mandar instalar
+    // «sem node_modules» apontava o conserto errado para um `assets/x → ../y`.
+    // `node_modules` fica como o lugar mais provável, e não como a regra.
     if (erro.TemAtalho) {
       return (
         `ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: ${erro.TemAtalho}.\n` +
-        "Instale a pasta do pacote, sem «node_modules»."
+        "Tire o atalho da pasta e instale de novo. Num MOD em desenvolvimento, eles costumam estar em «node_modules»."
       );
     }
     if (erro.ManifestoRecusado) {
