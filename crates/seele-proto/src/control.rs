@@ -2309,14 +2309,60 @@ pub enum ServerMessage {
 /// Returns [`ControlError::FieldTooLong`] if a field exceeds its limit, or
 /// [`ControlError::TooLong`] if the whole frame does.
 pub fn encode<T: Serialize + Validate>(message: &T) -> Result<Vec<u8>, ControlError> {
+    encode_em(PROTOCOL_VERSION, message)
+}
+
+/// Como [`encode`], com o carimbo escolhido por quem manda.
+///
+/// Depois do `Hello`, os dois lados carimbam com o número negociado (adendo de
+/// 08/10/2026, §4): é isso que deixa uma 1.x mais nova legível para uma 1.0,
+/// que só lê o 9. Na 1.0, a faixa é `[9, 9]` e esta função dá o mesmo quadro
+/// que [`encode`].
+///
+/// # Errors
+///
+/// Os mesmos de [`encode`].
+pub fn encode_em<T: Serialize + Validate>(
+    versao: u8,
+    message: &T,
+) -> Result<Vec<u8>, ControlError> {
     message.validate()?;
     let mut frame = Vec::with_capacity(64);
-    frame.push(PROTOCOL_VERSION);
+    frame.push(versao);
     frame = postcard::to_extend(message, frame).map_err(|_| ControlError::Malformed)?;
     if frame.len() > MAX_FRAME_LEN {
         return Err(ControlError::TooLong { len: frame.len() });
     }
     Ok(frame)
+}
+
+/// O ordinal de [`ServerMessage::Disconnecting`]. **Congelado** pelo ADR 0058:
+/// é por ele que toda build, desde a 0.11, lê uma recusa.
+pub const ORDINAL_DISCONNECTING: u8 = 11;
+
+/// O ordinal de [`DisconnectReason::Incompatible`]. **Congelado** pelo ADR 0058.
+pub const ORDINAL_INCOMPATIBLE: u8 = 0;
+
+/// O quadro que recusa um par por versão: `Disconnecting { Incompatible }`,
+/// carimbado para que ele o leia.
+///
+/// - **Um par de antes da 1.0** (carimbo abaixo de 9) só lê o próprio número e
+///   o anterior, então recebe o carimbo dele. A 0.15.1 lê `[8, 11, 0]` como
+///   «versão incompatível», e não como «não foi possível alcançar».
+/// - **Um par da linha 1 em diante** recebe o número de quem recusa. A linha
+///   de quem recusa viaja no byte 0: o par a lê em
+///   [`ControlError::UnsupportedVersion`] e em [`crate::version::linha_de`].
+///
+/// O carimbo do par é o byte 0 do primeiro quadro dele, lido antes do
+/// `decode` — que o recusaria justamente por estar fora da faixa.
+#[must_use]
+pub const fn recusa_por_versao(carimbo_do_par: u8) -> [u8; 3] {
+    let carimbo = if carimbo_do_par < crate::version::PRIMEIRO_DA_LINHA_UM {
+        carimbo_do_par
+    } else {
+        PROTOCOL_VERSION
+    };
+    [carimbo, ORDINAL_DISCONNECTING, ORDINAL_INCOMPATIBLE]
 }
 
 /// Parses a frame back into a message.
@@ -4829,5 +4875,91 @@ mod os_mods_no_fio {
     fn o_conjunto_vazio_tem_identidade_e_atravessa() {
         let quadro = encode(&anuncio(vec![])).expect("o conjunto vazio serializa");
         let _: ServerMessage = decode(&quadro).expect("volta");
+    }
+}
+
+#[cfg(test)]
+mod a_recusa_legivel {
+    //! A recusa por versão que toda build lê: `Disconnecting { Incompatible }`,
+    //! com os bytes-ouro `[carimbo, 11, 0]`. Adendo de 08/10/2026, §5, e
+    //! ADR 0058.
+    use super::*;
+
+    /// O 11 e o 0 são congelados, e o carimbo é o que quem recusa escolher:
+    /// para todo byte, a recusa é estes três bytes e mais nada.
+    #[test]
+    fn os_bytes_ouro_da_recusa_sao_o_carimbo_onze_e_zero() {
+        let incompativel = ServerMessage::Disconnecting {
+            reason: DisconnectReason::Incompatible,
+        };
+        for carimbo in 0..=u8::MAX {
+            assert_eq!(
+                encode_em(carimbo, &incompativel).unwrap(),
+                vec![carimbo, 11, 0],
+                "a recusa carimbada com {carimbo} saiu diferente"
+            );
+        }
+        assert_eq!(ORDINAL_DISCONNECTING, 11);
+        assert_eq!(ORDINAL_INCOMPATIBLE, 0);
+    }
+
+    /// A 0.15.1 (protocolo 8, janela 1) só lê 7 e 8 no byte 0. Recebendo o
+    /// próprio carimbo, ela lê `Incompatible` e diz «VERSÃO INCOMPATÍVEL», em
+    /// vez de «não foi possível alcançar».
+    #[test]
+    fn um_par_de_antes_da_1_0_recebe_o_proprio_carimbo() {
+        assert_eq!(recusa_por_versao(8), [8, 11, 0]);
+        assert_eq!(recusa_por_versao(3), [3, 11, 0]);
+    }
+
+    /// Da linha 1 em diante, quem é recusado lê no byte 0 o número de quem
+    /// recusou — e com ele a linha, por `version::linha_de`.
+    #[test]
+    fn um_par_da_linha_1_em_diante_le_o_numero_de_quem_recusa() {
+        assert_eq!(recusa_por_versao(30), [PROTOCOL_VERSION, 11, 0]);
+        assert_eq!(recusa_por_versao(9), [PROTOCOL_VERSION, 11, 0]);
+        assert_eq!(recusa_por_versao(u8::MAX), [PROTOCOL_VERSION, 11, 0]);
+    }
+
+    #[test]
+    fn a_recusa_e_um_quadro_que_esta_build_decodifica_pelo_mesmo_caminho() {
+        let quadro = recusa_por_versao(PROTOCOL_VERSION);
+        assert_eq!(
+            decode::<ServerMessage>(&quadro).unwrap(),
+            ServerMessage::Disconnecting {
+                reason: DisconnectReason::Incompatible
+            }
+        );
+    }
+
+    /// E quem recebe uma recusa carimbada fora da própria faixa sabe quem
+    /// recusou pelo número que o `decode` devolve.
+    #[test]
+    fn quem_recebe_a_recusa_de_outra_linha_le_o_numero_dela() {
+        let de_uma_linha_posterior = [PROTOCOL_VERSION + 20, 11, 0];
+        assert_eq!(
+            decode::<ServerMessage>(&de_uma_linha_posterior),
+            Err(ControlError::UnsupportedVersion {
+                found: PROTOCOL_VERSION + 20,
+                expected: PROTOCOL_VERSION,
+            })
+        );
+        assert_eq!(
+            crate::version::linha_de(PROTOCOL_VERSION + 20),
+            Some(crate::version::Linha::Posterior {
+                numero: PROTOCOL_VERSION + 20
+            })
+        );
+    }
+
+    /// `encode` é `encode_em` com o número desta build: na 1.0, os dois são o
+    /// mesmo quadro.
+    #[test]
+    fn encode_e_o_carimbo_desta_build() {
+        let pong = ServerMessage::Pong { timestamp: 7 };
+        assert_eq!(
+            encode(&pong).unwrap(),
+            encode_em(PROTOCOL_VERSION, &pong).unwrap()
+        );
     }
 }
