@@ -135,6 +135,18 @@ pub enum FalhaAoInstalar {
     },
 }
 
+/// Por que uma versão não foi apagada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FalhaAoRemover {
+    /// Não está instalada.
+    NaoInstalada,
+    /// O sistema recusou. No Windows, quase sempre a versão está aberta.
+    NaoRemovi {
+        /// O que o sistema disse. Para o log.
+        detalhe: String,
+    },
+}
+
 /// Uma instalação que existe em disco.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Instalacao {
@@ -317,16 +329,53 @@ impl Deposito {
             .into_iter()
             .skip(1)
             .map(|(_, versao)| {
-                let pasta = self.pasta_da_versao(&versao);
-                // O marcador sai primeiro: uma remoção que pare no meio deixa
-                // uma instalação incompleta, que a próxima instalação varre, e
-                // não uma «instalada» sem metade dos arquivos.
-                let resultado = std::fs::remove_file(pasta.join(MARCADOR))
-                    .and_then(|()| std::fs::remove_dir_all(&pasta))
-                    .map_err(|erro| erro.to_string());
+                let resultado = self
+                    .remover(&versao)
+                    .map(|_| ())
+                    .map_err(|falha| match falha {
+                        FalhaAoRemover::NaoInstalada => "já não estava instalada".to_owned(),
+                        FalhaAoRemover::NaoRemovi { detalhe } => detalhe,
+                    });
                 Podada { versao, resultado }
             })
             .collect()
+    }
+
+    /// Quanto a instalação desta versão ocupa, em bytes. Zero se não existe.
+    #[must_use]
+    pub fn tamanho_da_versao(&self, versao: &Versao) -> u64 {
+        tamanho_da_arvore(&self.pasta_da_versao(versao))
+    }
+
+    /// Quanto os dados desta linha ocupam, em bytes.
+    #[must_use]
+    pub fn tamanho_dos_dados_da_linha(&self, linha: &Linha) -> u64 {
+        tamanho_da_arvore(&self.pasta_de_dados_da_linha(linha))
+    }
+
+    /// Apaga a instalação desta versão e devolve quantos bytes ela ocupava.
+    ///
+    /// **Nunca toca os dados**: as conversas são da linha, e o próximo app da
+    /// mesma linha as abre. A tela de disco diz isso ao lado do botão.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaAoRemover`].
+    pub fn remover(&self, versao: &Versao) -> Result<u64, FalhaAoRemover> {
+        if !self.esta_instalada(versao) {
+            return Err(FalhaAoRemover::NaoInstalada);
+        }
+        let pasta = self.pasta_da_versao(versao);
+        let tamanho = tamanho_da_arvore(&pasta);
+        // O marcador sai primeiro: uma remoção que pare no meio deixa uma
+        // instalação incompleta, que a próxima instalação varre, e não uma
+        // «instalada» sem metade dos arquivos.
+        std::fs::remove_file(pasta.join(MARCADOR))
+            .and_then(|()| std::fs::remove_dir_all(&pasta))
+            .map_err(|erro| FalhaAoRemover::NaoRemovi {
+                detalhe: erro.to_string(),
+            })?;
+        Ok(tamanho)
     }
 
     /// Instala uma versão a partir do pacote já baixado.
@@ -593,6 +642,26 @@ impl Deposito {
         let texto = serde_json::to_vec(envelope).map_err(std::io::Error::other)?;
         std::fs::write(self.raiz.join(REVOGACOES_VISTAS), texto)
     }
+}
+
+/// O tamanho de uma árvore, sem seguir ligação simbólica.
+///
+/// Sem seguir de propósito: uma ligação aponta para onde quem a criou quis, e
+/// somá-la contaria como desta versão um arquivo que não é dela — e que apagar
+/// a versão não libera.
+fn tamanho_da_arvore(caminho: &Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(caminho) else {
+        return 0;
+    };
+    if meta.is_file() {
+        return meta.len();
+    }
+    if !meta.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(caminho)
+        .map(|d| d.flatten().map(|e| tamanho_da_arvore(&e.path())).sum())
+        .unwrap_or(0)
 }
 
 /// O SHA-256 de uns bytes, em hexadecimal minúsculo.
@@ -1073,6 +1142,62 @@ mod testes {
             .podar_linha(&crate::Linha::nova("1").unwrap(), &novo)
             .is_empty());
         assert_eq!(deposito.instaladas().len(), 1);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn o_tamanho_de_uma_versao_e_o_que_ela_ocupa_em_disco() {
+        let raiz = pasta("tamanho");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("1.0.0-teste").unwrap();
+        instalar_uma(&deposito, "1.0.0-teste");
+        // O executável e o arquivo de conteúdo, que o desempacotador de teste
+        // escreve com o pacote dentro.
+        let esperado = 2 * pacote("1.0.0-teste").len() as u64;
+        let tamanho = deposito.tamanho_da_versao(&versao);
+        assert!(tamanho >= esperado, "{tamanho} < {esperado}");
+        assert_eq!(
+            deposito.tamanho_da_versao(&Versao::nova("9.9.9-teste").unwrap()),
+            0
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Apagar o app **não** apaga as conversas: os dados são da linha, e o
+    /// próximo app da mesma linha os abre.
+    #[test]
+    fn remover_uma_versao_apaga_a_instalacao_e_deixa_os_dados_da_linha() {
+        let raiz = pasta("remover");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("0.15.2-teste").unwrap();
+        instalar_uma(&deposito, "0.15.2-teste");
+        let legada = crate::Linha::nova("0.15").unwrap();
+        let dados = deposito.pasta_de_dados_da_linha(&legada);
+        std::fs::create_dir_all(&dados).unwrap();
+        std::fs::write(dados.join("conversas-de-teste.db"), vec![0_u8; 4096]).unwrap();
+
+        let liberado = deposito.remover(&versao).unwrap();
+
+        assert!(liberado > 0);
+        assert!(!deposito.pasta_da_versao(&versao).exists());
+        assert!(dados.join("conversas-de-teste.db").is_file());
+        assert_eq!(deposito.tamanho_dos_dados_da_linha(&legada), 4096);
+        assert_eq!(deposito.remover(&versao), Err(FalhaAoRemover::NaoInstalada));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn o_tamanho_nao_segue_ligacao_simbolica() {
+        let raiz = pasta("tamanho-ligacao");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("1.0.0-teste").unwrap();
+        instalar_uma(&deposito, "1.0.0-teste");
+        let grande = raiz.join("fora.bin");
+        std::fs::write(&grande, vec![0_u8; 1 << 20]).unwrap();
+        std::os::unix::fs::symlink(&grande, deposito.pasta_da_versao(&versao).join("atalho"))
+            .unwrap();
+        assert!(deposito.tamanho_da_versao(&versao) < 1 << 20);
         let _ = std::fs::remove_dir_all(&raiz);
     }
 

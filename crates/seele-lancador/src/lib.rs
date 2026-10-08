@@ -47,7 +47,7 @@ pub mod versao;
 
 pub use assinatura::{Chave, FalhaDeAssinatura};
 pub use dados::{EstadoDosDados, OrigemDosDados, PlanoDeDados, Semeadura};
-pub use deposito::{Deposito, Desempacotador, FalhaAoInstalar, Instalacao, Podada};
+pub use deposito::{Deposito, Desempacotador, FalhaAoInstalar, FalhaAoRemover, Instalacao, Podada};
 pub use executavel::{CaminhoDoExecutavel, ExecutavelInvalido};
 pub use inicializacao::{Lancamento, VARIAVEL_DE_DADOS};
 pub use linha::{Linha, LinhaInvalida};
