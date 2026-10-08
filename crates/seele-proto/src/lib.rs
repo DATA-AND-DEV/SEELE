@@ -24,6 +24,7 @@
 
 pub mod assinatura;
 pub mod attachment;
+pub mod codigo;
 pub mod control;
 pub mod encontro;
 pub mod ids;
