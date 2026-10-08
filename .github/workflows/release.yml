@@ -770,8 +770,22 @@ jobs:
       # Não há segunda cópia da regra: um release feito sem CI que saísse sem
       # manifesto deixaria todo mundo sem atualização até o seguinte, e quem o
       # montou não teria como saber.
+      #
+      # **Acumulado** (spec 0.16, §1): começa do manifesto publicado, e não do
+      # zero, para o launcher não esquecer as versões anteriores. Sem ele (a
+      # primeira publicação, ou o GitHub fora), sai só esta versão, e o aviso
+      # fica no log.
       - name: Manifesto de atualização
-        run: python3 empacotar/manifesto.py entrega "${{ needs.versao.outputs.tag }}" --repo "$GITHUB_REPOSITORY"
+        run: |
+          anteriores=""
+          if curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/latest/download/latest.json" \
+              -o anterior-latest.json && [ -s anterior-latest.json ]; then
+            anteriores="--anterior anterior-latest.json"
+          else
+            echo "::warning::não baixei o latest.json publicado; o manifesto sai só com esta versão"
+          fi
+          # shellcheck disable=SC2086
+          python3 empacotar/manifesto.py entrega "${{ needs.versao.outputs.tag }}" --repo "$GITHUB_REPOSITORY" $anteriores
 
       # As somas são o que torna o instalador por `curl` defensável: sem elas,
       # quem roda o script está confiando no canal, e não no conteúdo.

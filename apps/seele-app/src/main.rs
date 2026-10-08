@@ -277,6 +277,15 @@ struct Abertura {
     /// único — e um link remontado de pedaços é um segundo analisador para
     /// discordar do primeiro.
     entrar: Option<String>,
+    /// **Quem abriu esta janela foi o launcher de outra linha.**
+    ///
+    /// Lido de `SEELE_LANCADOR`, que o `Lancamento` do `seele-lancador` põe
+    /// com o valor `1`. Aberta assim, esta versão mora no depósito do
+    /// launcher, e o atualizador dela trocaria o app de lá pela versão do topo
+    /// do manifesto — outra linha. Então o botão some e o comando recusa (spec
+    /// 0.16, D-linha-1). Na 0.16 isto vale para quando uma linha mais nova
+    /// abrir a 1.x pelo mesmo caminho.
+    pelo_lancador: bool,
 }
 
 impl Abertura {
@@ -288,8 +297,24 @@ impl Abertura {
     /// está no mundo. Aqui, a mesma tolerância vale para o caminho oposto — uma
     /// versão futura passando um argumento que esta não conhece.
     fn da_linha_de_comando() -> Self {
-        let mut aberta = Self::default();
-        let mut argumentos = std::env::args().skip(1);
+        Self::de(
+            std::env::args().skip(1),
+            std::env::var(seele_lancador::VARIAVEL_DO_LANCADOR)
+                .ok()
+                .as_deref(),
+        )
+    }
+
+    /// O mesmo, a partir dos argumentos e do valor de `SEELE_LANCADOR`.
+    ///
+    /// Separado da leitura do processo para o teste poder dizer o que entra,
+    /// sem mexer no ambiente de quem roda a bateria.
+    fn de(argumentos: impl IntoIterator<Item = String>, lancador: Option<&str>) -> Self {
+        let mut aberta = Self {
+            pelo_lancador: lancador == Some("1"),
+            ..Self::default()
+        };
+        let mut argumentos = argumentos.into_iter();
         while let Some(argumento) = argumentos.next() {
             match argumento.as_str() {
                 "--hospedar" => aberta.hospedar = true,
@@ -1604,6 +1629,35 @@ enum FalhaAoHospedar {
     /// O nome da variante e não uma frase, como as três acima: a frase mora no
     /// `FRASES` do JavaScript, e é lá que ela é traduzida.
     NomeRecusado(seele_ffi::uri::NomeRecusado),
+    /// Esta versão foi revogada, e a lista assinada diz o defeito e o conserto.
+    ///
+    /// ADR 0046: uma versão revogada não é hospedável. Conferido antes de
+    /// subir, como o nome, e pela mesma razão: recusar depois deixaria um
+    /// servidor no ar que não devia estar. Ver `versoes::conferir_esta_versao`.
+    EstaVersaoRevogada {
+        /// O defeito, como a lista o escreve.
+        defeito: String,
+        /// A versão que o corrige, quando a lista diz.
+        corrigida_em: Option<String>,
+    },
+    /// A lista de revogação que chegou não abriu, ou é mais velha que a
+    /// guardada: o ato é recusado junto, em vez de seguir calado.
+    ListaDeRevogacaoRecusada,
+}
+
+impl From<versoes::RecusaDestaVersao> for FalhaAoHospedar {
+    fn from(recusa: versoes::RecusaDestaVersao) -> Self {
+        match recusa {
+            versoes::RecusaDestaVersao::EstaVersaoRevogada {
+                defeito,
+                corrigida_em,
+            } => Self::EstaVersaoRevogada {
+                defeito,
+                corrigida_em,
+            },
+            versoes::RecusaDestaVersao::ListaDeRevogacaoRecusada => Self::ListaDeRevogacaoRecusada,
+        }
+    }
 }
 
 /// Os servidores que esta máquina guarda, do mais recente ao mais antigo.
@@ -1668,9 +1722,14 @@ fn versoes_instaladas(app: AppHandle) -> Vec<versoes::VersaoInstalada> {
 ///
 /// [`versoes::FalhaAoAbrirVersao`], uma variante por motivo.
 #[tauri::command]
-fn abrir_versao(
+async fn abrir_versao(
     app: AppHandle,
-    versao: String,
+    // Uma versão exata ou a mais nova de uma linha de servidor — uma das
+    // duas ou nenhuma: ver `versoes::pedido_de`. Sem vírgula e sem parêntese
+    // nestes comentários: o guarda de argumentos de `tests/frontend.rs` parte
+    // a lista de parâmetros nos dois antes de tirar os comentários.
+    versao: Option<String>,
+    linha: Option<String>,
     hospedar: bool,
     nome_publico: Option<String>,
     link: Option<String>,
@@ -1702,13 +1761,89 @@ fn abrir_versao(
         },
         None => None,
     };
+    // Hospedar e entrar são os atos do ADR 0046, e conferem a revogação;
+    // abrir para ler não confere, e não fala com a rede.
+    let pedido = versoes::pedido_de(versao.as_deref(), linha.as_deref())?;
+    let ato = if hospedar {
+        seele_lancador::Ato::Hospedar
+    } else if link.is_some() {
+        seele_lancador::Ato::Entrar
+    } else {
+        seele_lancador::Ato::Abrir
+    };
+    let intencao = versoes::Intencao {
+        hospedar,
+        nome_publico: nome,
+        link,
+    };
     versoes::abrir(
         &config_dir(&app),
-        &versao,
-        hospedar,
-        nome.as_deref(),
-        link.as_deref(),
+        versoes::atualizador_do_app(&app).as_ref(),
+        &pedido,
+        ato,
+        &intencao,
     )
+    .await
+}
+
+/// Confere se **esta** versão pode entrar num servidor: a lista de revogação,
+/// num ato. A tela chama logo antes do `connect`.
+///
+/// À parte, e não dentro do `connect`, porque o erro dele é o da FFI
+/// (`ConnectFailure`) e não tem onde dizer «esta versão foi revogada». Há uma
+/// chamada a `connect` só, em `tela-boot.js`, e o guarda
+/// `entrar_confere_esta_versao_antes_de_conectar` prende a ordem.
+///
+/// # Errors
+///
+/// [`versoes::RecusaDestaVersao`].
+#[tauri::command]
+async fn conferir_esta_versao(app: AppHandle) -> Result<(), versoes::RecusaDestaVersao> {
+    versoes::conferir_esta_versao(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app).as_ref(),
+        seele_lancador::Ato::Entrar,
+    )
+    .await
+}
+
+/// Quanto o depósito de versões ocupa: cada app guardado e as conversas de
+/// cada linha. Ver `versoes::ocupacao`.
+#[tauri::command]
+fn ocupacao_do_deposito(app: AppHandle) -> versoes::Ocupacao {
+    versoes::ocupacao(&config_dir(&app))
+}
+
+/// Apaga um app guardado, sem tocar nas conversas da linha dele.
+///
+/// # Errors
+///
+/// [`versoes::FalhaAoRemoverVersao`].
+#[tauri::command]
+fn remover_versao(app: AppHandle, versao: String) -> Result<u64, versoes::FalhaAoRemoverVersao> {
+    versoes::remover_versao(&config_dir(&app), &versao)
+}
+
+/// As linhas de servidor em que se pode hospedar, a desta janela primeiro.
+///
+/// Sem rede: lê o catálogo guardado. Ver `versoes::linhas_para_hospedar`.
+#[tauri::command]
+fn linhas_para_hospedar(app: AppHandle) -> Vec<versoes::LinhaParaHospedar> {
+    versoes::linhas_para_hospedar(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+    )
+}
+
+/// O que a primeira abertura desta versão fez com os dados da 0.15 e com a
+/// linha legada, para a tela dizer uma vez. Ver `versoes::primeira_abertura`.
+#[tauri::command]
+fn estado_da_primeira_abertura(
+    estado: State<'_, versoes::EstadoDaPrimeiraAbertura>,
+) -> Option<versoes::PrimeiraAbertura> {
+    estado.0.lock().ok().and_then(|slot| slot.clone())
 }
 
 /// Sobe um servidor dentro do app e devolve o link do convite.
@@ -1756,6 +1891,15 @@ async fn hospedar(
             return Err(FalhaAoHospedar::JaHospedando);
         }
     }
+
+    // ADR 0046: a lista de revogação é conferida nos atos, e esta versão
+    // também é uma versão. Sem rede vale a guardada; sem nenhuma, passa.
+    versoes::conferir_esta_versao(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app).as_ref(),
+        seele_lancador::Ato::Hospedar,
+    )
+    .await?;
 
     // **Qual banco, e por que isso passa pelo registro.** Até aqui era sempre
     // `<config>/seele.db`, um por máquina. `servidores::banco` devolve esse
@@ -6862,54 +7006,37 @@ async fn instalar_mod(app: AppHandle) -> Result<Option<String>, mods::FalhaAoIns
     mods::instalar_de(std::path::Path::new(&config_dir(&app)), &pasta).map(|p| Some(p.id))
 }
 
-/// Baixa do catálogo a versão mais nova e a instala ao lado das outras.
+/// Baixa do catálogo o app mais novo de uma linha de servidor (ou o mais novo
+/// de todos) e o instala ao lado dos outros.
 ///
-/// # De onde saem a chave e os endereços
-///
-/// Do `tauri.conf.json`, do mesmo bloco do atualizador — e não de constantes
-/// próprias. Duas listas de endereços para o mesmo catálogo divergiriam no dia
-/// em que uma delas mudasse, e a que ficasse velha apontaria para um lugar que
-/// não publica mais. A chave pública é a mesma pelo mesmo motivo: o ADR 0026 a
-/// tem como a única que autoriza instalar programa nesta máquina.
+/// A chave e os endereços saem do bloco do atualizador do `tauri.conf.json`:
+/// ver `versoes::atualizador_do_app`.
 ///
 /// # Errors
 ///
 /// [`versoes::FalhaAoBaixarVersao`], uma variante por motivo.
 #[tauri::command]
-async fn baixar_versao(app: AppHandle) -> Result<String, versoes::FalhaAoBaixarVersao> {
-    let atualizador = app
-        .config()
-        .plugins
-        .0
-        .get("updater")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    let pubkey = atualizador
-        .get("pubkey")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_owned();
-    let enderecos: Vec<String> = atualizador
-        .get("endpoints")
-        .and_then(serde_json::Value::as_array)
-        .map(|lista| {
-            lista
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(str::to_owned)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if pubkey.is_empty() || enderecos.is_empty() {
+async fn baixar_versao(
+    app: AppHandle,
+    // A linha de servidor cujo app mais novo baixar; sem ela o mais novo de
+    // todos.
+    linha: Option<String>,
+) -> Result<String, versoes::FalhaAoBaixarVersao> {
+    let Some(atualizador) = versoes::atualizador_do_app(&app) else {
         // Um build sem o bloco do atualizador não tem catálogo a consultar, e
         // dizer isso é melhor que tentar e falhar na rede: o motivo é outro e
         // o conserto é outro.
         return Err(versoes::FalhaAoBaixarVersao::CatalogoNaoServe(
             "este build não declara catálogo nem chave".to_owned(),
         ));
-    }
-    versoes::baixar_a_mais_nova(&config_dir(&app), &pubkey, &enderecos).await
+    };
+    let pedido = versoes::pedido_de(None, linha.as_deref()).map_err(|_| {
+        versoes::FalhaAoBaixarVersao::CatalogoNaoServe(format!(
+            "«{}» não é uma linha de servidor",
+            linha.as_deref().unwrap_or_default()
+        ))
+    })?;
+    versoes::baixar(&config_dir(&app), &atualizador, &pedido).await
 }
 
 /// Se **esta janela** está hospedando um servidor agora.
@@ -8281,13 +8408,13 @@ struct ConviteLido {
     /// ADR 0046. `None` num link de antes deste campo, ou de um servidor que
     /// não sabe a própria versão.
     versao: Option<String>,
-    /// Se essa versão é diferente da que está rodando **e** está instalada aqui.
+    /// O que fazer com este link antes de discar: entrar aqui, abrir o app da
+    /// linha do servidor, baixá-lo antes, ou dizer que a linha saiu.
     ///
-    /// Respondido no Rust e não na casca: comparar duas cadeias seria fácil de
-    /// escrever ali e fácil de errar — a resposta depende de saber qual versão
-    /// é esta, o que só o `option_env!` do build sabe, e de olhar o depósito,
-    /// que é disco. A casca recebe o veredito.
-    pode_abrir_naquela_versao: bool,
+    /// Respondido no Rust e não na casca: a resposta depende da linha deste
+    /// app, do catálogo guardado e do depósito, que é disco. A casca recebe o
+    /// veredito. Ver `versoes::para_entrar`.
+    para_entrar: versoes::ParaEntrar,
 }
 
 /// Lê um `seele://` colado.
@@ -8308,18 +8435,19 @@ fn analisar_convite(
     // **antes** de conectar que esta pergunta serve, porque um servidor de uma
     // versão anterior pode falar um protocolo que este cliente já não alcança.
     let versao = convite.versao.clone();
-    let pode_abrir_naquela_versao = versao.as_deref().is_some_and(|pedida| {
-        versoes::em_uso() != Some(pedida)
-            && versoes::instaladas(&config_dir(&app))
-                .iter()
-                .any(|instalada| instalada.versao == pedida && instalada.abrivel)
-    });
+    let para_entrar = versoes::para_entrar(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+        versao.as_deref(),
+    );
 
     let lido = ConviteLido {
         alvo: convite.alvo.clone(),
         token: convite.token.clone(),
         versao,
-        pode_abrir_naquela_versao,
+        para_entrar,
     };
 
     // Guardado inteiro deste lado da ponte. Ver o campo em `Session`.
@@ -8810,6 +8938,26 @@ enum FalhaAoAtualizar {
     NaoInstalei,
     /// Pediram para instalar sem ter procurado antes.
     NadaEscolhido,
+    /// Esta versão foi aberta pelo launcher de outra linha, e quem a atualiza
+    /// é ele.
+    ///
+    /// Spec 0.16, D-linha-1. Aberta pelo launcher, esta versão mora no depósito
+    /// dele, e o atualizador do Tauri trocaria o app de lá pela versão do topo
+    /// do manifesto — outra linha. A tela esconde o botão; esta recusa é o que
+    /// vale quando alguém chega ao comando por outro caminho.
+    AbertaPeloLancador,
+}
+
+/// Se esta janela pode procurar e instalar atualização.
+///
+/// Uma função e não um `if` em cada comando, para os dois comandos não
+/// poderem discordar: procurar sem poder instalar seria oferecer o que vai ser
+/// recusado.
+fn atualizacao_permitida(abertura: &Abertura) -> Result<(), FalhaAoAtualizar> {
+    if abertura.pelo_lancador {
+        return Err(FalhaAoAtualizar::AbertaPeloLancador);
+    }
+    Ok(())
 }
 
 /// Traduz a falha do plugin para o que a tela tem que dizer.
@@ -8878,6 +9026,7 @@ async fn procurar_atualizacao(
 ) -> Result<Option<VersaoNova>, FalhaAoAtualizar> {
     use tauri_plugin_updater::UpdaterExt;
 
+    atualizacao_permitida(&session.abertura)?;
     if !tem_chave_de_atualizacao(&app) {
         return Err(FalhaAoAtualizar::NaoConfigurado);
     }
@@ -8947,6 +9096,7 @@ async fn instalar_atualizacao(
     app: AppHandle,
     session: State<'_, Session>,
 ) -> Result<(), FalhaAoAtualizar> {
+    atualizacao_permitida(&session.abertura)?;
     // Tirado do lugar, e não emprestado: instalar é uma vez. Se falhar, quem
     // quiser tentar de novo procura de novo — e a consulta nova é justamente o
     // que confirma que a versão ainda é aquela.
@@ -9243,6 +9393,27 @@ fn main() {
             ..Session::default()
         })
         .setup(move |app| {
+            // **Spec 0.16, §1: os dados da 0.15 antes de qualquer outra coisa.**
+            //
+            // A cópia para a linha legada vem antes da migração dos MODs logo
+            // abaixo (a 0.15.2 conhece o layout antigo) e antes de a janela
+            // existir. A janela é `create: false` no tauri.conf.json porque o
+            // Tauri 2.11.6 cria as janelas do arquivo **antes** deste `setup`
+            // (`app.rs:2521-2531`): sem isso, a página e o IPC subiriam com a
+            // cópia em andamento. Ver `versoes::primeira_abertura` e o guarda
+            // `a_janela_so_nasce_depois_da_primeira_abertura`.
+            let primeira = versoes::primeira_abertura(&config_dir(app.handle()));
+            let houve_0_15 = primeira.houve_0_15();
+            app.manage(versoes::EstadoDaPrimeiraAbertura(std::sync::Mutex::new(
+                Some(versoes::PrimeiraAbertura {
+                    dados: primeira,
+                    linha_legada: None,
+                }),
+            )));
+            for janela in app.config().app.windows.clone() {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &janela)?.build()?;
+            }
+
             // **Os pacotes do layout antigo, levados uma vez.**
             //
             // Quem já tem MODs instalados os tem em `mods/<autor>/<nome>/`, e a
@@ -9322,10 +9493,30 @@ fn main() {
             // palavra final de quem quer testar outro módulo.
             if std::env::var_os("SEELE_OPENH264").is_none() {
                 let pasta = config_dir(app.handle());
-                // SAFETY-ish: estamos antes de qualquer thread do app tocar o
-                // ambiente — o `setup` roda uma vez, antes da primeira janela.
+                // SAFETY-ish: estamos antes de qualquer tarefa do app tocar o
+                // ambiente — o `setup` roda uma vez, na thread principal, e a
+                // busca da linha legada logo abaixo só começa depois desta
+                // linha. (A janela já existe: ela é criada no começo do
+                // `setup`, depois da cópia dos dados da 0.15.)
                 std::env::set_var("SEELE_OPENH264", &pasta);
                 tracing::info!(%pasta, "onde o módulo de vídeo é procurado");
+            }
+            // Passo 2 da primeira abertura: a linha legada para o depósito, em
+            // segundo plano e uma vez só, e só onde houve 0.15. **Depois** do
+            // `set_var` de cima: a busca fala com a rede, e o `reqwest` lê o
+            // ambiente (as variáveis de proxy).
+            if houve_0_15 {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let resultado = versoes::baixar_linha_legada_se_preciso(&handle).await;
+                    if let Some(estado) = handle.try_state::<versoes::EstadoDaPrimeiraAbertura>() {
+                        if let Ok(mut slot) = estado.0.lock() {
+                            if let Some(primeira) = slot.as_mut() {
+                                primeira.linha_legada = resultado;
+                            }
+                        }
+                    }
+                });
             }
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
@@ -9370,6 +9561,11 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             baixar_versao,
+            conferir_esta_versao,
+            estado_da_primeira_abertura,
+            linhas_para_hospedar,
+            ocupacao_do_deposito,
+            remover_versao,
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
@@ -14222,5 +14418,48 @@ mod o_som_do_mod_sai_em_bytes {
                 && linha.contains("motivo=formato-desconhecido")),
             "a recusa do som de formato desconhecido não chegou ao registro: {rastro}"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod a_abertura_pelo_launcher {
+    use super::{atualizacao_permitida, Abertura, FalhaAoAtualizar};
+
+    #[test]
+    fn quem_foi_aberta_pelo_launcher_sabe_disso() {
+        assert!(Abertura::de(Vec::<String>::new(), Some("1")).pelo_lancador);
+        assert!(!Abertura::de(Vec::<String>::new(), None).pelo_lancador);
+        // Só o valor que o launcher põe. Uma variável esquecida no ambiente
+        // com outro valor não esconde o botão de ninguém.
+        assert!(!Abertura::de(Vec::<String>::new(), Some("0")).pelo_lancador);
+    }
+
+    /// Os argumentos continuam sendo lidos como antes, com a variável junto.
+    #[test]
+    fn os_argumentos_do_launcher_continuam_chegando() {
+        let aberta = Abertura::de(
+            ["--hospedar", "--nome-publico", "casa.exemplo.br"].map(str::to_owned),
+            Some("1"),
+        );
+        assert!(aberta.hospedar && aberta.pelo_lancador);
+        assert_eq!(aberta.nome_publico.as_deref(), Some("casa.exemplo.br"));
+    }
+
+    /// Spec 0.16, D-linha-1, valendo também para a 0.16: aberta pelo launcher
+    /// de uma linha mais nova (uma 2.0 abrindo a 1.x), o atualizador dela
+    /// trocaria o app do depósito pela versão do topo do manifesto — outra
+    /// linha. Esconder o botão não basta: o comando recusa.
+    #[test]
+    fn aberta_pelo_launcher_o_atualizador_recusa() {
+        assert!(matches!(
+            atualizacao_permitida(&Abertura::de(Vec::<String>::new(), Some("1"))),
+            Err(FalhaAoAtualizar::AbertaPeloLancador)
+        ));
+        assert!(atualizacao_permitida(&Abertura::de(Vec::<String>::new(), None)).is_ok());
     }
 }

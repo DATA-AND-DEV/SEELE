@@ -51,6 +51,11 @@ pub enum FalhaDeAssinatura {
 }
 
 /// A chave pública do projeto, pronta para conferir.
+///
+/// `Clone` porque a casca a leva para a thread que confere o pacote baixado,
+/// fora do executor da janela. É uma chave pública: copiá-la não espalha
+/// segredo nenhum.
+#[derive(Clone)]
 pub struct Chave(minisign_verify::PublicKey);
 
 impl std::fmt::Debug for Chave {
@@ -191,8 +196,13 @@ impl Chave {
 /// prontas provaria que elas continuam válidas, e o que precisa de prova é o
 /// contrário: que uma assinatura de outra chave, ou de outro conteúdo, é
 /// recusada. Para isso é preciso saber assinar.
-#[cfg(test)]
-pub(crate) mod fixtures {
+///
+/// **Também sai pela feature `fixtures`**, para a casca (`apps/seele-app`)
+/// provar com uma lista assinada de verdade que a revogação chega ao ato. Só a
+/// `[dev-dependencies]` dela liga a feature: o binário do produto nunca leva
+/// isto.
+#[cfg(any(test, feature = "fixtures"))]
+pub mod fixtures {
     use base64::Engine as _;
     use blake2::Digest as _;
     use ed25519_dalek::Signer as _;
@@ -200,7 +210,7 @@ pub(crate) mod fixtures {
     /// Um par de chaves de teste, identificado como tal no próprio comentário
     /// da chave — quem encontrar um destes num release sabe na primeira linha
     /// que ele não é de produção.
-    pub(crate) struct ChaveDeTeste {
+    pub struct ChaveDeTeste {
         assinante: ed25519_dalek::SigningKey,
         identificador: [u8; 8],
     }
@@ -212,7 +222,7 @@ pub(crate) mod fixtures {
         /// sempre, e uma chave sorteada faz uma falha aparecer numa execução
         /// em cada mil.
         #[must_use]
-        pub(crate) fn com_semente(semente: u8) -> Self {
+        pub fn com_semente(semente: u8) -> Self {
             Self {
                 assinante: ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
                 identificador: [semente; 8],
@@ -221,7 +231,7 @@ pub(crate) mod fixtures {
 
         /// A chave pública, no formato do `tauri.conf.json`.
         #[must_use]
-        pub(crate) fn publica_no_formato_do_atualizador(&self) -> String {
+        pub fn publica_no_formato_do_atualizador(&self) -> String {
             let mut bruto = Vec::with_capacity(42);
             bruto.extend_from_slice(b"Ed");
             bruto.extend_from_slice(&self.identificador);
@@ -238,7 +248,7 @@ pub(crate) mod fixtures {
         /// Modo moderno (prehashed, `ED`), que é o único que
         /// [`super::Chave::conferir`] aceita.
         #[must_use]
-        pub(crate) fn assinar_no_formato_do_atualizador(&self, dados: &[u8]) -> String {
+        pub fn assinar_no_formato_do_atualizador(&self, dados: &[u8]) -> String {
             let comentario = "timestamp:0\tfile:artefato-de-teste";
             let resumo = blake2::Blake2b512::digest(dados);
             let assinatura = self.assinante.sign(&resumo);
@@ -266,7 +276,7 @@ pub(crate) mod fixtures {
         ///
         /// Só existe para provar que ele é recusado.
         #[must_use]
-        pub(crate) fn assinar_no_modo_legado(&self, dados: &[u8]) -> String {
+        pub fn assinar_no_modo_legado(&self, dados: &[u8]) -> String {
             let comentario = "timestamp:0\tfile:artefato-de-teste";
             let assinatura = self.assinante.sign(dados);
 

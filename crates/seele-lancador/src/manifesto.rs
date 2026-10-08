@@ -40,6 +40,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use crate::executavel::{CaminhoDoExecutavel, ExecutavelInvalido};
+use crate::linha::Linha;
 use crate::revogacao::{Envelope, FalhaDaLista, ListaDeRevogacao};
 use crate::versao::Versao;
 use crate::Chave;
@@ -79,18 +80,42 @@ pub enum FalhaDoManifesto {
 
 /// O que uma versão promete ser, como unidade.
 ///
-/// ADR 0046: «cliente, servidor, protocolo e API de MOD sobem juntos e são
-/// identificados pelo mesmo número. **Não há matriz de compatibilidade**».
-/// Estes dois números não são uma matriz — são o que aquela versão fala,
-/// declarado para poder ser **conferido** contra o que um servidor anuncia. É
-/// a «conferência de coerência» em que o ADR transforma a negociação de
-/// protocolo.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+/// ADR 0046, com a emenda de 08/10/2026: a versão do **servidor** sobe junto
+/// com o protocolo e a API de MODs, e o app tem número próprio. **Não há
+/// matriz de compatibilidade**: estes campos não são uma matriz, são o que
+/// aquela versão fala, declarado para poder ser **conferido** contra o que um
+/// servidor anuncia. É a «conferência de coerência» em que o ADR transforma a
+/// negociação de protocolo.
+///
+/// `protocol` e `mod_api` continuam **obrigatórios** na leitura, e não por
+/// capricho: o `Unidade` da 0.15.1 os exige, e um manifesto sem eles seria
+/// recusado inteiro por quem ainda está nela. `server` e `mod_apis` são
+/// acréscimos e chegam opcionais, pela regra do `schema`: campo novo não sobe o
+/// número.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Unidade {
-    /// A versão do protocolo que este produto fala.
+    /// O número que viaja no primeiro byte de todo quadro.
     pub protocol: u8,
-    /// A versão da API de MOD que este produto oferece.
+    /// A API de MOD mais nova que este app roda.
     pub mod_api: u32,
+    /// A versão do servidor, para pessoas: `"1.0"`, `"0.15"`.
+    ///
+    /// É texto, e não [`Linha`], de propósito: um valor ilegível custa a linha
+    /// **desta** versão, e não o manifesto inteiro. Ver [`Self::linha`].
+    #[serde(default)]
+    pub server: Option<String>,
+    /// As APIs de MOD que este app roda. É o que deixa a tela de hospedar dizer
+    /// quais MODs cada linha aceita (a 0.15 roda 3, 4 e 5).
+    #[serde(default)]
+    pub mod_apis: Option<Vec<u32>>,
+}
+
+impl Unidade {
+    /// A linha de servidor desta versão, quando o manifesto a declara legível.
+    #[must_use]
+    pub fn linha(&self) -> Option<Linha> {
+        Linha::do_servidor(self.server.as_deref()?).ok()
+    }
 }
 
 /// Um pacote, para um sistema e uma arquitetura.
@@ -130,7 +155,7 @@ pub struct Pacote {
     /// escreveu — **privado de propósito**.
     ///
     /// Declarado e não adivinhado: o nome muda com o sistema
-    /// (`SEELE.app/Contents/MacOS/SEELE`, `SEELE.exe`, `bin/seele`), e um
+    /// (`SEELE.app/Contents/MacOS/seele-app`, `SEELE.exe`, `bin/seele`), e um
     /// launcher que o adivinha erra calado num sistema só — que é o defeito
     /// mais caro possível aqui, porque ele aparece na máquina de outra pessoa.
     ///
@@ -205,6 +230,15 @@ pub struct Publicacao {
     /// Um pacote por alvo, na nomenclatura do atualizador (`darwin-aarch64`).
     #[serde(default)]
     pub platforms: BTreeMap<String, Pacote>,
+}
+
+impl Publicacao {
+    /// A linha de servidor desta publicação. `None` quando o manifesto não a
+    /// declara, ou a declara ilegível.
+    #[must_use]
+    pub fn linha(&self) -> Option<Linha> {
+        self.unit.as_ref()?.linha()
+    }
 }
 
 /// O manifesto inteiro, já conferido.
@@ -334,6 +368,49 @@ impl Manifesto {
     #[must_use]
     pub fn publicacao(&self, versao: &Versao) -> Option<&Publicacao> {
         self.publicacoes().find(|p| &p.version == versao)
+    }
+
+    /// A mais nova publicação **desta linha**.
+    ///
+    /// É a primeira dela na ordem do manifesto, e dentro de uma linha essa
+    /// ordem é a de publicação. Ver `docs/versoes-lado-a-lado.md`, §2.
+    #[must_use]
+    pub fn mais_nova_da_linha(&self, linha: &Linha) -> Option<&Publicacao> {
+        self.publicacoes()
+            .find(|p| p.linha().as_ref() == Some(linha))
+    }
+
+    /// A mais nova de cada linha, da linha mais nova para a mais velha.
+    ///
+    /// É a lista que a tela de hospedar desenha. Uma publicação sem linha
+    /// legível fica de fora, porque não há onde pô-la.
+    #[must_use]
+    pub fn linhas(&self) -> Vec<(Linha, &Publicacao)> {
+        let mut vistas: Vec<(Linha, &Publicacao)> = Vec::new();
+        for publicacao in self.publicacoes() {
+            let Some(linha) = publicacao.linha() else {
+                continue;
+            };
+            if !vistas.iter().any(|(vista, _)| *vista == linha) {
+                vistas.push((linha, publicacao));
+            }
+        }
+        vistas.sort_by(|a, b| b.0.cmp(&a.0));
+        vistas
+    }
+
+    /// A linha de servidor de uma versão de **app**, como um link antigo a
+    /// carrega no `v=`.
+    ///
+    /// Vem do manifesto quando ele lista a versão; senão, da regra de antes das
+    /// duas numerações ([`Linha::da_versao_legada_do_app`]). Uma versão que
+    /// nenhum dos dois conhece devolve `None`, e a tela diz que não sabe.
+    #[must_use]
+    pub fn linha_da_versao_do_app(&self, versao: &str) -> Option<Linha> {
+        self.publicacoes()
+            .find(|p| p.version.como_texto() == versao)
+            .and_then(Publicacao::linha)
+            .or_else(|| Linha::da_versao_legada_do_app(versao))
     }
 
     /// A posição de uma versão na ordem de publicação. `0` é a mais nova.
@@ -504,9 +581,78 @@ mod testes {
             m.mais_nova().unit,
             Some(Unidade {
                 protocol: 3,
-                mod_api: 1
+                mod_api: 1,
+                server: None,
+                mod_apis: None,
             })
         );
+    }
+
+    #[test]
+    fn a_linha_e_as_apis_de_uma_versao_sao_lidas_do_manifesto() {
+        let json = r#"{"schema":2,"versions":[
+            {"version":"0.16.0","unit":{"protocol":9,"mod_api":6,"server":"1.0","mod_apis":[6]}},
+            {"version":"0.15.2","unit":{"protocol":8,"mod_api":5,"server":"0.15","mod_apis":[3,4,5]}}]}"#;
+        let m = Manifesto::ler(json.as_bytes(), &chave_qualquer()).unwrap();
+        let um = Linha::nova("1").unwrap();
+        let legada = Linha::nova("0.15").unwrap();
+        assert_eq!(m.mais_nova().linha(), Some(um));
+        assert_eq!(
+            m.mais_nova_da_linha(&legada)
+                .map(|p| p.version.como_texto()),
+            Some("0.15.2")
+        );
+        assert_eq!(
+            m.mais_nova_da_linha(&legada)
+                .and_then(|p| p.unit.clone())
+                .and_then(|u| u.mod_apis),
+            Some(vec![3, 4, 5])
+        );
+        let linhas: Vec<String> = m.linhas().iter().map(|(l, _)| l.como_texto()).collect();
+        assert_eq!(linhas, vec!["1", "0.15"]);
+    }
+
+    /// A ordem de [`Manifesto::linhas`] é a das linhas, e não a do arquivo: um
+    /// conserto da 0.15 publicado depois da 0.16 não passa à frente dela.
+    #[test]
+    fn as_linhas_saem_da_mais_nova_mesmo_com_o_manifesto_fora_de_ordem() {
+        let json = r#"{"schema":2,"versions":[
+            {"version":"0.15.3","unit":{"protocol":8,"mod_api":5,"server":"0.15"}},
+            {"version":"0.16.0","unit":{"protocol":9,"mod_api":6,"server":"1.0"}}]}"#;
+        let m = Manifesto::ler(json.as_bytes(), &chave_qualquer()).unwrap();
+        let linhas: Vec<String> = m.linhas().iter().map(|(l, _)| l.como_texto()).collect();
+        assert_eq!(linhas, vec!["1", "0.15"]);
+    }
+
+    /// Um `server` ilegível custa a linha **daquela** versão, e não o manifesto.
+    #[test]
+    fn uma_versao_do_servidor_ilegivel_nao_derruba_o_manifesto() {
+        let json = r#"{"schema":2,"versions":[
+            {"version":"0.16.0","unit":{"protocol":9,"mod_api":6,"server":"um ponto zero"}},
+            {"version":"0.15.2","unit":{"protocol":8,"mod_api":5,"server":"0.15"}}]}"#;
+        let m = Manifesto::ler(json.as_bytes(), &chave_qualquer())
+            .expect("um campo errado numa versão não tranca as outras");
+        assert_eq!(m.mais_nova().linha(), None);
+        assert_eq!(m.linhas().len(), 1);
+    }
+
+    #[test]
+    fn a_linha_de_um_link_antigo_sai_da_versao_do_app() {
+        let json = r#"{"schema":2,"versions":[
+            {"version":"0.16.0","unit":{"protocol":9,"mod_api":6,"server":"1.0"}}]}"#;
+        let m = Manifesto::ler(json.as_bytes(), &chave_qualquer()).unwrap();
+        // Do manifesto, quando ele lista a versão.
+        assert_eq!(
+            m.linha_da_versao_do_app("0.16.0"),
+            Some(Linha::nova("1").unwrap())
+        );
+        // Da regra de antes das duas numerações, quando não lista.
+        assert_eq!(
+            m.linha_da_versao_do_app("0.15.1"),
+            Some(Linha::nova("0.15").unwrap())
+        );
+        // E nada inventado para uma 0.17 que ninguém publicou.
+        assert_eq!(m.linha_da_versao_do_app("0.17.0"), None);
     }
 
     /// O manifesto publicado hoje não traz `executable`, e o launcher precisa
