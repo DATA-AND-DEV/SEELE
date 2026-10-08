@@ -37,6 +37,7 @@ pub mod stream;
 pub mod transport;
 pub mod uri;
 pub mod version;
+pub mod vocabulario;
 pub mod volume;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};

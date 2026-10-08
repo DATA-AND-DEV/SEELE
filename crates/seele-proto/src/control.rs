@@ -2392,6 +2392,119 @@ pub fn decode<T: for<'de> Deserialize<'de> + Validate>(frame: &[u8]) -> Result<T
     Ok(message)
 }
 
+/// Uma das duas listas de cima: as mensagens do fluxo de controle.
+///
+/// É nelas — e só nelas — que uma variante desconhecida é pulada em vez de
+/// encerrar a leitura (adendo de 08/10/2026, §6). Nos enums que viajam dentro
+/// de uma mensagem a regra continua a de sempre: quem manda não manda o que o
+/// par não entende, porque ignorar, por exemplo, um `Disconnecting` com razão
+/// desconhecida calaria o fim da sessão.
+pub trait ListaDeCima: for<'de> Deserialize<'de> + Validate {
+    /// Quantas variantes esta build conhece. Um ordinal igual ou acima disto
+    /// é de um vocabulário mais novo.
+    ///
+    /// Escrito como número, e não perguntado ao `serde` a cada quadro, e preso
+    /// ao que o `serde` conta em `as_conhecidas_sao_as_que_o_serde_conta`.
+    const CONHECIDAS: u32;
+}
+
+impl ListaDeCima for ClientMessage {
+    const CONHECIDAS: u32 = 37;
+}
+
+impl ListaDeCima for ServerMessage {
+    const CONHECIDAS: u32 = 41;
+}
+
+/// O que um quadro da lista de cima trouxe.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Lido<T> {
+    /// Uma mensagem que esta build conhece.
+    Mensagem(T),
+    /// Uma variante de um vocabulário mais novo.
+    ///
+    /// Quem lê pula, conta ([`Desconhecidas`]) e segue: o quadro tem
+    /// comprimento próprio ([`crate::quadro`]), então pular não desalinha a
+    /// leitura do próximo.
+    Desconhecida {
+        /// O ordinal que veio.
+        ordinal: u32,
+    },
+}
+
+/// Como [`decode`], mas uma variante que esta build não conhece vira
+/// [`Lido::Desconhecida`] em vez de [`ControlError::Malformed`].
+///
+/// É rede de segurança, e não licença: a regra continua sendo quem manda não
+/// mandar o que o par não entende (ADR 0058). Ela existe para que um portão
+/// esquecido custe uma linha no registro, e não a sessão — que foi o que a
+/// subida de 7 para 8 custou.
+///
+/// # Errors
+///
+/// Os mesmos de [`decode`] para tudo que não é um ordinal desconhecido: o
+/// carimbo e o teto são conferidos antes, e um ordinal conhecido com corpo
+/// errado continua [`ControlError::Malformed`].
+pub fn decode_da_lista<T: ListaDeCima>(frame: &[u8]) -> Result<Lido<T>, ControlError> {
+    if frame.len() > MAX_FRAME_LEN {
+        return Err(ControlError::TooLong { len: frame.len() });
+    }
+    let Some((version, body)) = frame.split_first() else {
+        return Err(ControlError::Empty);
+    };
+    crate::version::confere_o_carimbo(*version).map_err(|_| ControlError::UnsupportedVersion {
+        found: *version,
+        expected: PROTOCOL_VERSION,
+    })?;
+    let ordinal = ler_ordinal(body).ok_or(ControlError::Malformed)?;
+    if ordinal >= T::CONHECIDAS {
+        return Ok(Lido::Desconhecida { ordinal });
+    }
+    decode::<T>(frame).map(Lido::Mensagem)
+}
+
+/// O ordinal de variante que o postcard escreve: um varint sem sinal, sete
+/// bits por byte, o menos significativo primeiro, no máximo cinco bytes.
+///
+/// `None` para um varint que não termina dentro do corpo. Um ordinal enorme
+/// não é erro aqui: ele é só uma variante que esta build não conhece.
+fn ler_ordinal(corpo: &[u8]) -> Option<u32> {
+    let mut valor: u32 = 0;
+    for (posicao, byte) in corpo.iter().take(5).enumerate() {
+        let deslocamento = u32::try_from(posicao).ok()?.checked_mul(7)?;
+        valor |= u32::from(byte & 0x7f).checked_shl(deslocamento)?;
+        if byte & 0x80 == 0 {
+            return Some(valor);
+        }
+    }
+    None
+}
+
+/// Quantas mensagens desconhecidas um fluxo pulou.
+///
+/// **Existe para ser lida.** Quem a guarda registra a primeira — e só a
+/// primeira, para um par defeituoso não encher o registro — e põe o total no
+/// diagnóstico. Uma contagem que ninguém lê é o «existir não é funcionar» do
+/// `CLAUDE.md`. A ligação nos laços de leitura é da sessão do Plano 3.
+#[derive(Debug, Default)]
+pub struct Desconhecidas {
+    total: u64,
+}
+
+impl Desconhecidas {
+    /// Conta uma. `true` só na primeira, que é a que vai para o registro.
+    pub fn contar(&mut self) -> bool {
+        self.total = self.total.saturating_add(1);
+        self.total == 1
+    }
+
+    /// Quantas até agora.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.total
+    }
+}
+
 /// Bounds checking that serialisation cannot express.
 ///
 /// `postcard` will happily carry a four-thousand-character nickname; the limits
@@ -4397,76 +4510,15 @@ mod o_vocabulario_e_a_versao {
     }
 
     /// Quantas variantes tem o enum `T`, contadas pela lista que o `derive` do
-    /// `serde` entrega ao `Deserializer`.
-    ///
-    /// Não decodifica nada: o `Deserializer` abaixo atende só `deserialize_enum`
-    /// — onde a lista chega — e erra em todo o resto. O erro devolvido depois de
-    /// anotar é como ele desiste sem precisar construir um valor de `T`.
+    /// `serde` entrega ao `Deserializer`. O `Deserializer` mora em
+    /// [`crate::vocabulario`] desde 08/10/2026, porque a leitura de uma mensagem
+    /// desconhecida passou a precisar dele fora dos testes.
     fn quantas_variantes<T>() -> usize
     where
         T: for<'a> serde::Deserialize<'a>,
     {
-        use std::cell::Cell;
-        use std::fmt;
-
-        #[derive(Debug)]
-        struct Desistencia(String);
-
-        impl fmt::Display for Desistencia {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str(&self.0)
-            }
-        }
-
-        impl std::error::Error for Desistencia {}
-
-        impl serde::de::Error for Desistencia {
-            fn custom<M: fmt::Display>(msg: M) -> Self {
-                Desistencia(msg.to_string())
-            }
-        }
-
-        struct Perguntador<'a>(&'a Cell<Option<usize>>);
-
-        impl<'de> serde::Deserializer<'de> for Perguntador<'_> {
-            type Error = Desistencia;
-
-            fn deserialize_enum<V>(
-                self,
-                _nome: &'static str,
-                variantes: &'static [&'static str],
-                _visitor: V,
-            ) -> Result<V::Value, Self::Error>
-            where
-                V: serde::de::Visitor<'de>,
-            {
-                self.0.set(Some(variantes.len()));
-                Err(serde::de::Error::custom(
-                    "a pergunta era quantas variantes existem, e ela já foi \
-                     respondida",
-                ))
-            }
-
-            fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
-            where
-                V: serde::de::Visitor<'de>,
-            {
-                Err(serde::de::Error::custom(
-                    "este Deserializer só sabe responder por um enum",
-                ))
-            }
-
-            serde::forward_to_deserialize_any! {
-                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str
-                string bytes byte_buf option unit unit_struct newtype_struct seq
-                tuple tuple_struct map struct identifier ignored_any
-            }
-        }
-
-        let contagem = Cell::new(None);
-        let _ = T::deserialize(Perguntador(&contagem));
-        contagem
-            .get()
+        crate::vocabulario::variantes::<T>()
+            .map(<[_]>::len)
             .expect("esta lista é um enum, e `deserialize_enum` é por onde ela entra")
     }
 
@@ -4961,5 +5013,116 @@ mod a_recusa_legivel {
             encode(&pong).unwrap(),
             encode_em(PROTOCOL_VERSION, &pong).unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod a_mensagem_desconhecida {
+    //! Uma variante de um vocabulário mais novo, na lista de cima, é pulada e
+    //! contada, e não derruba o fluxo. Adendo de 08/10/2026, §6.
+    use super::*;
+
+    #[test]
+    fn um_ordinal_alem_da_lista_e_pulado_e_nao_e_malformado() {
+        let quadro = [PROTOCOL_VERSION, 41, 0xAA, 0xBB];
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&quadro).unwrap(),
+            Lido::Desconhecida { ordinal: 41 }
+        );
+        // O `decode` de sempre continua chamando isto de malformado: quem
+        // pula é só quem pede.
+        assert_eq!(
+            decode::<ServerMessage>(&quadro),
+            Err(ControlError::Malformed)
+        );
+        // E um ordinal conhecido com corpo errado continua malformado.
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&[PROTOCOL_VERSION, 1]),
+            Err(ControlError::Malformed)
+        );
+    }
+
+    #[test]
+    fn uma_mensagem_conhecida_sai_inteira() {
+        let pong = ServerMessage::Pong { timestamp: 7 };
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&encode(&pong).unwrap()).unwrap(),
+            Lido::Mensagem(pong)
+        );
+        let ping = ClientMessage::Ping { timestamp: 7 };
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&encode(&ping).unwrap()).unwrap(),
+            Lido::Mensagem(ping)
+        );
+    }
+
+    #[test]
+    fn um_ordinal_de_dois_bytes_tambem_e_desconhecido() {
+        // 200 em varint são dois bytes: 0xC8 com o bit de continuação, e 0x01.
+        let quadro = [PROTOCOL_VERSION, 0xC8, 0x01];
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&quadro).unwrap(),
+            Lido::Desconhecida { ordinal: 200 }
+        );
+    }
+
+    #[test]
+    fn um_varint_que_nao_termina_e_malformado() {
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&[PROTOCOL_VERSION, 0x80, 0x80]),
+            Err(ControlError::Malformed)
+        );
+        assert_eq!(
+            decode_da_lista::<ClientMessage>(&[PROTOCOL_VERSION]),
+            Err(ControlError::Malformed)
+        );
+    }
+
+    #[test]
+    fn o_carimbo_e_o_teto_continuam_sendo_conferidos_antes() {
+        assert!(matches!(
+            decode_da_lista::<ServerMessage>(&[8, 41]),
+            Err(ControlError::UnsupportedVersion { found: 8, .. })
+        ));
+        assert_eq!(
+            decode_da_lista::<ServerMessage>(&[]),
+            Err(ControlError::Empty)
+        );
+        assert!(matches!(
+            decode_da_lista::<ServerMessage>(&vec![PROTOCOL_VERSION; MAX_FRAME_LEN + 1]),
+            Err(ControlError::TooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn so_a_primeira_desconhecida_vai_para_o_registro() {
+        let mut contagem = Desconhecidas::default();
+        assert_eq!(contagem.total(), 0);
+        assert!(contagem.contar(), "a primeira é a que se registra");
+        assert!(!contagem.contar(), "a segunda só conta");
+        assert_eq!(contagem.total(), 2);
+    }
+
+    /// As conhecidas de cada lista são as que o `serde` conta. Uma variante
+    /// nova sem a constante acompanhar faria a build pular a própria mensagem.
+    #[test]
+    fn as_conhecidas_sao_as_que_o_serde_conta() {
+        assert_eq!(
+            crate::vocabulario::variantes::<ClientMessage>().map(<[_]>::len),
+            Some(usize::try_from(ClientMessage::CONHECIDAS).unwrap())
+        );
+        assert_eq!(
+            crate::vocabulario::variantes::<ServerMessage>().map(<[_]>::len),
+            Some(usize::try_from(ServerMessage::CONHECIDAS).unwrap())
+        );
+    }
+
+    proptest::proptest! {
+        /// A superfície de bytes não confiáveis: nada aqui entra em pânico.
+        #[test]
+        fn nunca_entra_em_panico(bytes: Vec<u8>) {
+            let _ = decode_da_lista::<ClientMessage>(&bytes);
+            let _ = decode_da_lista::<ServerMessage>(&bytes);
+        }
     }
 }
