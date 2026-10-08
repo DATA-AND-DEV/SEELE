@@ -1,8 +1,10 @@
 //! Length-prefixed framing over a QUIC stream.
 //!
-//! Deliberately duplicated from `seele-server`: ADR 0002 keeps the daemon and the
-//! client from sharing a transport crate, and forty channels of framing is a much
-//! smaller cost than a crate both would depend on and neither would own.
+//! **A regra mora em [`seele_proto::quadro`]** — quantos bytes, em que ordem,
+//! com que teto —, e aqui fica só a E/S do `quinn`. Essa metade continua
+//! duplicada do `seele-server` de propósito: o ADR 0002 não deixa o daemon e o
+//! cliente dividirem um crate de transporte, e quarenta linhas de E/S custam
+//! menos que um crate que os dois usariam e nenhum seria dono.
 //!
 //! `specs/02-protocolo.md` puts control on "bidirectional stream #0, long
 //! lived". A QUIC stream is a byte stream, so message boundaries have to be
@@ -14,7 +16,7 @@
 //! service there is.
 
 use anyhow::{bail, Result};
-use seele_proto::control::{Validate, MAX_FRAME_LEN};
+use seele_proto::control::{ControlError, Validate, MAX_FRAME_LEN};
 use serde::{Deserialize, Serialize};
 
 /// Reads one frame and decodes it.
@@ -26,17 +28,18 @@ pub async fn read<T>(stream: &mut quinn::RecvStream) -> Result<T>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
-    let mut length = [0_u8; 4];
-    stream.read_exact(&mut length).await?;
-    let length = u32::from_be_bytes(length) as usize;
+    let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
+    stream.read_exact(&mut prefixo).await?;
 
     // Before allocating. specs/08-seguranca.md.
-    if length > MAX_FRAME_LEN {
-        bail!("peer announced a {length}-byte control frame, over the {MAX_FRAME_LEN}-byte limit");
-    }
-    if length == 0 {
-        bail!("peer announced an empty control frame");
-    }
+    let length = match seele_proto::quadro::comprimento(prefixo) {
+        Ok(length) => length,
+        Err(ControlError::Empty) => bail!("peer announced an empty control frame"),
+        Err(_) => bail!(
+            "peer announced a {}-byte control frame, over the {MAX_FRAME_LEN}-byte limit",
+            u32::from_be_bytes(prefixo)
+        ),
+    };
 
     let mut frame = vec![0_u8; length];
     stream.read_exact(&mut frame).await?;
@@ -53,9 +56,9 @@ where
     T: Serialize + Validate,
 {
     let frame = seele_proto::control::encode(message)?;
-    let length = u32::try_from(frame.len())?;
-    stream.write_all(&length.to_be_bytes()).await?;
-    stream.write_all(&frame).await?;
+    stream
+        .write_all(&seele_proto::quadro::enquadrar(&frame)?)
+        .await?;
     Ok(())
 }
 

@@ -25,6 +25,8 @@ Recomendação: `postcard` para M0–M3, com os tipos isolados em `seele-proto` 
 
 Primeiro byte de todo frame de controle é a versão do protocolo. Servidor recusa versão maior que a sua com `Incompatível`. Versão menor: aceita se estiver dentro da janela de compatibilidade declarada (N−1).
 
+**Desde o Servidor 1.0 (protocolo 9)**, a faixa mínima–máxima vai no `Hello`, os dois lados falam o menor dos máximos, e a recusa por versão é `[carimbo, 11, 0]`: ver o ADR 0058 e `docs/superpowers/specs/2026-10-08-0.16-adendo-negociacao-de-versao.md`.
+
 ## Handshake
 
 ```
