@@ -2421,7 +2421,8 @@ enum Classe {
     /// ([`som_servido_dito`]) servidos.
     Servida,
     /// A depuração, que o filtro padrão do `seele.log` não escreve: a janela em
-    /// qualquer outro nível, e a mídia não servida porque a sessão acabou.
+    /// qualquer outro nível, a mídia não servida porque a sessão acabou, e a
+    /// mídia vinda do servidor ([`midia_vinda_do_servidor_dita`]).
     Depuracao,
 }
 
@@ -2553,12 +2554,15 @@ fn linha_admitida(
 const CONTA_DO_BALDE_DO_REGISTRO: &str =
     "linhas do registro seguradas pelo teto de vazão, sem outra linha depois que as contasse";
 
-/// **Diz a conta que um balde do registro guardou e nenhuma linha levou**,
-/// quando a sessão fecha ([`Session::revogar`]).
+/// **Diz a conta que um balde do registro guardou e nenhuma linha levou**.
+///
+/// Quem a chama é [`Session::dizer_as_contas_do_registro`], quando os baldes
+/// vão embora: ao fechar a sessão ([`Session::revogar`]) e na saída do app,
+/// que não passa por `revogar`.
 ///
 /// Com ficha ou sem, como a última linha de uma instância do `console`
-/// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora com a sessão,
-/// e guardar a conta para uma ficha que não vai chegar era perdê-la.
+/// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora, e guardar a
+/// conta para uma ficha que não vai chegar era perdê-la.
 ///
 /// No nível da classe que ela conta — WARN para os avisos, INFO para as
 /// servidas, DEBUG para a depuração —, e com os campos da linha que ela
@@ -6170,14 +6174,53 @@ fn midia_em_bytes(
         &id,
         &base64,
     )?;
-    tracing::debug!(
-        mod_id = %id_no_registro(&id),
+    midia_vinda_do_servidor_dita(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
         geracao,
-        papel = midia.papel,
-        bytes = midia.bytes,
-        "mídia de MOD vinda do servidor"
+        midia.papel,
+        midia.bytes,
     );
     Ok(midia)
+}
+
+/// **Diz no registro que a mídia que um MOD guardou no servidor chegou**, em
+/// DEBUG.
+///
+/// Fora do comando para que um teste leia a linha sem sessão. O id chega da
+/// janela, e passa por [`id_no_registro`].
+///
+/// **Com o teto de vazão do MOD** ([`linha_admitida`]), no balde da
+/// depuração ([`Classe::Depuracao`]). É o par bem-sucedido da recusa de
+/// [`midia_do_servidor_dita`]: com `RUST_LOG=debug`, um MOD que pede a mesma
+/// mídia num laço escrevia uma linha por pedido. Na depuração, e não nas
+/// servidas, porque sai em DEBUG: o filtro padrão do `seele.log` não a
+/// escreve, e ela não pode gastar a ficha de uma linha que ele escreve.
+fn midia_vinda_do_servidor_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    mod_id: &str,
+    geracao: u64,
+    papel: &str,
+    bytes: usize,
+) {
+    let Some(Admitida {
+        suprimidas,
+        transbordo,
+    }) = linha_admitida(baldes, agora, Classe::Depuracao, mod_id)
+    else {
+        return;
+    };
+    tracing::debug!(
+        mod_id = %id_no_registro(mod_id),
+        geracao,
+        papel,
+        bytes,
+        suprimidas,
+        transbordo,
+        "mídia de MOD vinda do servidor"
+    );
 }
 
 /// A mídia vinda do servidor de um MOD, **ou a recusa dita no registro** com o
@@ -12501,8 +12544,9 @@ mod o_teto_de_vazao_do_registro {
     use std::time::{Duration, Instant};
 
     use super::{
-        midia_servida_dita, recusa_de_midia_dita, registrar_da_janela_em, som_servido_dito,
-        BaldesDoRegistro, Classe, FalhaNoMod, Session, BALDES_NO_REGISTRO,
+        midia_servida_dita, midia_vinda_do_servidor_dita, recusa_de_midia_dita,
+        registrar_da_janela_em, som_servido_dito, BaldesDoRegistro, Classe, FalhaNoMod, Session,
+        BALDES_NO_REGISTRO,
     };
     use crate::executor::RAJADA_DO_CONSOLE;
     use crate::rastro_de_teste::capturar;
@@ -12738,6 +12782,43 @@ mod o_teto_de_vazao_do_registro {
         );
     }
 
+    /// **A mídia vinda do servidor tem teto, na classe da depuração.** É o par
+    /// bem-sucedido da mídia recusada de `midia_em_bytes`, em DEBUG: com
+    /// `RUST_LOG=debug`, um MOD que pede a mesma mídia num laço escrevia uma
+    /// linha por pedido. Na depuração, e não nas servidas: o filtro padrão não
+    /// a escreve, e ela não pode gastar a ficha de uma linha que ele escreve.
+    #[test]
+    fn a_midia_vinda_do_servidor_tem_teto_na_classe_da_depuracao() {
+        let baldes = BaldesDoRegistro::default();
+        let agora = origem();
+        let ((), rastro) = capturar(|| {
+            for _ in 0..200 {
+                midia_vinda_do_servidor_dita(&baldes, agora, "a/b", 7, "imagem", 8);
+            }
+            midia_servida_dita(&baldes, agora, "a/b", 7, "img/a.png", "imagem", 8);
+        });
+        let vindas: Vec<&str> = rastro
+            .lines()
+            .filter(|linha| linha.contains("mídia de MOD vinda do servidor"))
+            .collect();
+        assert_eq!(
+            vindas.len(),
+            RAJADA_DO_CONSOLE as usize,
+            "duzentas mídias vindas do servidor no mesmo instante passaram de outro jeito que a \
+             rajada: com RUST_LOG=debug, um MOD num laço escreve sem teto"
+        );
+        assert!(
+            vindas
+                .iter()
+                .all(|linha| linha.split_whitespace().next() == Some("DEBUG")),
+            "a mídia vinda do servidor deixou de sair em DEBUG: {rastro}"
+        );
+        assert!(
+            rastro.contains("mídia de MOD servida"),
+            "as mídias vindas do servidor gastaram a ficha das servidas do mesmo MOD: {rastro}"
+        );
+    }
+
     /// **Os comandos passam às portas os baldes da sessão.**
     ///
     /// Os testes acima medem as portas com baldes que eles mesmos criam; os
@@ -12748,13 +12829,14 @@ mod o_teto_de_vazao_do_registro {
     /// tem de levar `&session.baldes_do_registro` no primeiro argumento.
     #[test]
     fn os_comandos_passam_os_baldes_da_sessao() {
-        const PORTAS: [&str; 7] = [
+        const PORTAS: [&str; 8] = [
             "registrar_da_janela_em(",
             "midia_declarada_do_mod(",
             "midia_servida_dita(",
             "som_declarado_do_mod(",
             "som_servido_dito(",
             "midia_do_servidor_dita(",
+            "midia_vinda_do_servidor_dita(",
             "recusa_de_midia_dita(",
         ];
         let fonte = super::fonte_sem_comentarios();
@@ -12762,7 +12844,7 @@ mod o_teto_de_vazao_do_registro {
             ("fn registrar_da_janela(", 1),
             ("fn midia_do_mod(", 2),
             ("fn som_do_mod(", 2),
-            ("fn midia_em_bytes(", 1),
+            ("fn midia_em_bytes(", 2),
             ("async fn ler_imagem_mod(", 2),
         ] {
             let codigo: String = super::corpo_de(&fonte, comando)
@@ -13164,6 +13246,28 @@ mod o_id_do_pedido_de_mod_no_registro {
         }
     }
 
+    /// **A mídia vinda do servidor também**: a linha saiu de `midia_em_bytes`
+    /// para uma função medida, e o id que a janela manda continua passando por
+    /// `id_no_registro`.
+    #[test]
+    fn a_midia_vinda_do_servidor_nao_forja_linha() {
+        let ((), rastro) = capturar(|| {
+            super::midia_vinda_do_servidor_dita(
+                &super::BaldesDoRegistro::default(),
+                crate::relogio_de_teste::origem(),
+                "a/b\nWARN seele_app: forjada",
+                7,
+                "imagem",
+                8,
+            );
+        });
+        assert!(
+            rastro.lines().count() == 1 && rastro.contains("mod_id=a/bWARN seele_app: forjada"),
+            "o id que a janela manda escreveu, pela mídia vinda do servidor, uma segunda linha \
+             no seele.log, ou saiu de outro jeito que as recusas: {rastro}"
+        );
+    }
+
     #[test]
     fn um_id_de_verdade_sai_como_mod_id() {
         for (linha, rastro) in as_duas_linhas("seele/perfis") {
@@ -13194,12 +13298,14 @@ mod o_id_do_pedido_de_mod_no_registro {
     #[test]
     fn nenhum_mod_id_em_display_usa_o_id_cru_do_comando() {
         let fonte = super::fonte_sem_comentarios();
-        for funcao in [
-            "fn mod_request(",
-            "fn pedido_a_caminho_dito(",
-            "fn pedido_recusado_na_saida_dito(",
-            "fn midia_em_bytes(",
-            "async fn escolher_para_o_mod(",
+        // A função e o nome que o id cru tem nela.
+        for (funcao, cru) in [
+            ("fn mod_request(", "id"),
+            ("fn pedido_a_caminho_dito(", "id"),
+            ("fn pedido_recusado_na_saida_dito(", "id"),
+            ("fn midia_em_bytes(", "id"),
+            ("fn midia_vinda_do_servidor_dita(", "mod_id"),
+            ("async fn escolher_para_o_mod(", "id"),
         ] {
             let codigo = corpo_sem_espaco(&fonte, funcao);
             for depois in codigo.split("mod_id=%").skip(1) {
@@ -13208,10 +13314,10 @@ mod o_id_do_pedido_de_mod_no_registro {
                     .take_while(|c| c.is_alphanumeric() || *c == '_')
                     .collect();
                 assert_ne!(
-                    valor, "id",
-                    "`{funcao}` escreve `mod_id = %id` com o id cru que a janela manda: em `%` \
-                     ele sai sem escape, e uma quebra de linha nele escreve uma segunda linha \
-                     no seele.log com a cara do produto"
+                    valor, cru,
+                    "`{funcao}` escreve `mod_id = %{cru}` com o id cru que a janela manda: em \
+                     `%` ele sai sem escape, e uma quebra de linha nele escreve uma segunda \
+                     linha no seele.log com a cara do produto"
                 );
             }
         }
