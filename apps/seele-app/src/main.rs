@@ -1774,6 +1774,19 @@ async fn conferir_esta_versao(app: AppHandle) -> Result<(), versoes::RecusaDesta
     .await
 }
 
+/// As linhas de servidor em que se pode hospedar, a desta janela primeiro.
+///
+/// Sem rede: lê o catálogo guardado. Ver `versoes::linhas_para_hospedar`.
+#[tauri::command]
+fn linhas_para_hospedar(app: AppHandle) -> Vec<versoes::LinhaParaHospedar> {
+    versoes::linhas_para_hospedar(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+    )
+}
+
 /// O que a primeira abertura desta versão fez com os dados da 0.15 e com a
 /// linha legada, para a tela dizer uma vez. Ver `versoes::primeira_abertura`.
 #[tauri::command]
@@ -8944,6 +8957,7 @@ fn main() {
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
+            linhas_para_hospedar,
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,

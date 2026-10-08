@@ -1091,6 +1091,91 @@ pub(crate) fn para_entrar(
     para_entrar_com_linha_propria(config, chave, versao_do_link, linha_deste_app())
 }
 
+/// Uma linha de servidor em que se pode hospedar, como a tela a desenha.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct LinhaParaHospedar {
+    /// A linha, para pedir o app dela.
+    pub(crate) linha: String,
+    /// A versão do servidor, para a tela: «Servidor 0.15».
+    pub(crate) servidor: String,
+    /// As APIs de MOD que ela roda (a 0.15 roda 3, 4 e 5).
+    pub(crate) apis: Vec<u32>,
+    /// O app que hospeda nela, quando se sabe.
+    pub(crate) app: Option<String>,
+    /// É a linha desta janela: hospeda aqui mesmo, e é a padrão.
+    pub(crate) esta: bool,
+    /// O app dela está guardado (para a desta janela, sempre).
+    pub(crate) instalada: bool,
+    /// O catálogo traz pacote dela para este sistema.
+    pub(crate) tem_pacote: bool,
+    /// Começa sem as conversas que há em outro lugar.
+    pub(crate) perde_conversas: bool,
+}
+
+/// As linhas em que se pode hospedar, a desta janela primeiro e as outras da
+/// mais nova para a mais velha.
+///
+/// Sem rede: lê o catálogo guardado. A linha desta janela vem das constantes
+/// compiladas, e não do catálogo, porque é este processo que hospeda nela —
+/// mesmo que o catálogo já conheça um app mais novo dela.
+pub(crate) fn linhas_para_hospedar_com_linha_propria(
+    config: &str,
+    chave: Option<&Chave>,
+    propria: Option<Linha>,
+) -> Vec<LinhaParaHospedar> {
+    let mut linhas = Vec::new();
+    if let Some(propria) = &propria {
+        let mut apis: Vec<u32> = seele_ffi::mods::APIS_ACEITAS.to_vec();
+        apis.sort_unstable();
+        linhas.push(LinhaParaHospedar {
+            linha: propria.como_texto(),
+            servidor: seele_ffi::VERSAO_DO_SERVIDOR.to_owned(),
+            apis,
+            app: em_uso().map(str::to_owned),
+            esta: true,
+            instalada: true,
+            tem_pacote: true,
+            perde_conversas: false,
+        });
+    }
+    let Some(manifesto) = chave.and_then(|c| catalogo_guardado(config, c)) else {
+        return linhas;
+    };
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    let conversas_aqui = ha_conversa_na_pasta(config);
+    for (linha, publicacao) in manifesto.linhas() {
+        if propria.as_ref() == Some(&linha) {
+            continue;
+        }
+        let unidade = publicacao.unit.as_ref();
+        let mut apis = unidade
+            .and_then(|u| u.mod_apis.clone())
+            .or_else(|| unidade.map(|u| vec![u.mod_api]))
+            .unwrap_or_default();
+        apis.sort_unstable();
+        linhas.push(LinhaParaHospedar {
+            servidor: unidade
+                .and_then(|u| u.server.clone())
+                .unwrap_or_else(|| linha.como_texto()),
+            apis,
+            app: Some(publicacao.version.como_texto().to_owned()),
+            esta: false,
+            instalada: deposito.instalacao(&publicacao.version).is_some(),
+            tem_pacote: publicacao.platforms.contains_key(&alvo_deste_sistema()),
+            perde_conversas: deposito
+                .plano_da_linha(&linha, conversas_aqui)
+                .perde_conversas,
+            linha: linha.como_texto(),
+        });
+    }
+    linhas
+}
+
+/// As linhas em que se pode hospedar, com a linha deste app.
+pub(crate) fn linhas_para_hospedar(config: &str, chave: Option<&Chave>) -> Vec<LinhaParaHospedar> {
+    linhas_para_hospedar_com_linha_propria(config, chave, linha_deste_app())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1753,6 +1838,107 @@ mod o_launcher_ligado_ao_produto {
         assert_eq!(
             super::para_entrar_com_linha_propria(&config, None, Some("lixo"), Some(linha("1"))),
             super::ParaEntrar::NaoSabe
+        );
+    }
+
+    /// O manifesto de teste com as APIs de cada versão escolhidas.
+    fn manifesto_json_com_apis(versoes: &[(&str, &str, &[u32])]) -> String {
+        let alvo = super::alvo_deste_sistema();
+        let entradas: Vec<String> = versoes
+            .iter()
+            .map(|(v, servidor, apis)| {
+                let bytes = pacote("bin/seele", v.as_bytes());
+                let lista: Vec<String> = apis.iter().map(u32::to_string).collect();
+                format!(
+                    r#"{{"version":"{v}","unit":{{"protocol":8,"mod_api":{},"server":"{servidor}","mod_apis":[{}]}},
+                        "platforms":{{"{alvo}":{{"url":"https://exemplo.invalido/{v}","signature":"{}",
+                        "sha256":"{}","executable":"bin/seele"}}}}}}"#,
+                    apis.iter().max().copied().unwrap_or(0),
+                    lista.join(","),
+                    par().assinar_no_formato_do_atualizador(&bytes),
+                    soma(&bytes),
+                )
+            })
+            .collect();
+        format!(r#"{{"schema":2,"versions":[{}]}}"#, entradas.join(","))
+    }
+
+    /// **Spec 0.16, §1:** ao hospedar, escolhe-se a versão do servidor; a
+    /// padrão é a deste app, e a tela diz quais APIs de MOD cada uma roda.
+    #[test]
+    fn hospedar_lista_cada_linha_com_as_apis_e_a_desta_janela_primeiro() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json_com_apis(&[
+            ("0.16.1", "1.0", &[6]),
+            ("0.16.0", "1.0", &[6]),
+            ("0.15.2", "0.15", &[3, 4, 5]),
+        ]);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+
+        let linhas = super::linhas_para_hospedar_com_linha_propria(
+            &config,
+            Some(&chave()),
+            Some(linha("1")),
+        );
+
+        assert_eq!(linhas.len(), 2, "veio {linhas:?}");
+        assert_eq!(linhas[0].linha, "1");
+        assert!(
+            linhas[0].esta,
+            "a linha desta janela é a padrão, e vem primeiro"
+        );
+        assert!(linhas[0].instalada, "a desta janela hospeda aqui mesmo");
+        assert_eq!(linhas[1].linha, "0.15");
+        assert_eq!(linhas[1].servidor, "0.15");
+        assert_eq!(
+            linhas[1].apis,
+            vec![3, 4, 5],
+            "a tela diz quais MODs a 0.15 roda"
+        );
+        assert_eq!(linhas[1].app.as_deref(), Some("0.15.2"));
+        assert!(!linhas[1].esta);
+        assert!(!linhas[1].instalada && linhas[1].tem_pacote);
+    }
+
+    /// Sem catálogo guardado, só a linha desta janela: as outras aparecem
+    /// depois de o catálogo ser lido uma vez.
+    #[test]
+    fn sem_catalogo_hospedar_oferece_so_a_linha_desta_janela() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let linhas = super::linhas_para_hospedar_com_linha_propria(
+            &config,
+            Some(&chave()),
+            Some(linha("1")),
+        );
+        assert_eq!(linhas.len(), 1);
+        assert!(linhas[0].esta);
+        assert_eq!(linhas[0].servidor, seele_ffi::VERSAO_DO_SERVIDOR);
+    }
+
+    /// A tela de preparar a hospedagem lista por linha e abre por linha. Guarda
+    /// de texto: prende o comando que a lista lê e o pedido que o confirmar
+    /// manda.
+    #[test]
+    fn preparar_a_hospedagem_e_por_linha() {
+        let tela = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/tela-boot.js"),
+        )
+        .unwrap();
+        assert!(
+            tela.contains("invoke(\"linhas_para_hospedar\")"),
+            "a tela de preparar não lista as versões do servidor"
+        );
+        // Sem espaços, para o guarda não depender da formatação; e na chamada
+        // de `abrir_versao`, porque a de `baixar_versao` também leva a linha e
+        // esconderia um confirmar que abrisse pela versão.
+        let compacta: String = tela.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compacta.contains(
+                "invoke(\"abrir_versao\",{versao:null,linha:linhaEscolhida.linha,hospedar:true"
+            ),
+            "o confirmar não abre pela linha escolhida"
         );
     }
 
