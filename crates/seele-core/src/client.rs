@@ -1902,6 +1902,103 @@ fn quem_sou_eu() -> &'static str {
     }
 }
 
+/// O tamanho do desafio que este cliente assina: o `NONCE_LEN` do servidor
+/// (`seele-server/src/session.rs`), que todo servidor 0.15 legítimo manda.
+pub(crate) const TAMANHO_DO_DESAFIO: usize = 32;
+
+/// Assina o desafio do servidor, **só** se ele tiver exatamente
+/// [`TAMANHO_DO_DESAFIO`] bytes.
+///
+/// D-seg-2 do spec da 0.16, achado pela F7. O protocolo aceita um nonce de até
+/// `MAX_PROOF_LEN` (256) bytes, e este cliente assinava o que viesse — com a
+/// mesma chave que a 0.16 usa. A linha legada vive para sempre: um servidor
+/// 0.15 malicioso, visitado por ela, poderia mandar como «nonce» a mensagem do
+/// S2 da 0.16 (89 bytes) ou o conteúdo de um `CertificateVerify` da sala (130
+/// bytes), e levar uma assinatura que vale do outro lado. Nenhum servidor
+/// legítimo manda outro tamanho, então recusar não custa nada a quem é honesto.
+///
+/// # Errors
+///
+/// [`ConnectError::ProtocolViolation`] para um desafio de outro tamanho. A
+/// recusa vai para o rastro com o tamanho que veio: um servidor que manda isso
+/// está tentando outra coisa, e quem investigar precisa saber o quê.
+pub(crate) fn assinar_o_desafio(
+    signing_key: &SigningKey,
+    nonce: &[u8],
+) -> Result<Vec<u8>, ConnectError> {
+    if nonce.len() != TAMANHO_DO_DESAFIO {
+        tracing::warn!(
+            tamanho = nonce.len(),
+            esperado = TAMANHO_DO_DESAFIO,
+            "desafio de tamanho inesperado; não assino"
+        );
+        return Err(ConnectError::ProtocolViolation);
+    }
+    Ok(signing_key.sign(nonce).to_bytes().to_vec())
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod o_desafio_tem_32_bytes {
+    use ed25519_dalek::{SigningKey, Verifier as _};
+
+    use super::{assinar_o_desafio, ConnectError, TAMANHO_DO_DESAFIO};
+
+    fn chave() -> SigningKey {
+        SigningKey::from_bytes(&[7; 32])
+    }
+
+    /// Todo servidor 0.15 legítimo manda 32 bytes (`NONCE_LEN`, em
+    /// `seele-server/src/session.rs`), e é isso que se assina.
+    #[test]
+    fn o_desafio_de_32_bytes_e_assinado() {
+        let nonce = [9_u8; TAMANHO_DO_DESAFIO];
+        let prova = assinar_o_desafio(&chave(), &nonce).expect("32 bytes é o desafio de sempre");
+        let assinatura = ed25519_dalek::Signature::from_slice(&prova).unwrap();
+        assert!(chave().verifying_key().verify(&nonce, &assinatura).is_ok());
+    }
+
+    /// **O aperto de mão assina só pela função que confere.** O teste de
+    /// baixo prova a função; este prova que ela é o único caminho, porque uma
+    /// volta a assinar o nonce cru no meio do aperto de mão passaria em
+    /// todos os outros. As agulhas são montadas em tempo de execução para este
+    /// próprio teste não ser contado.
+    #[test]
+    fn o_aperto_de_mao_assina_so_pela_funcao_que_confere() {
+        let fonte = include_str!("client.rs");
+        let assinar = format!("{}.{}(", "signing_key", "sign");
+        assert_eq!(
+            fonte.matches(&assinar).count(),
+            1,
+            "o client.rs assina fora de `assinar_o_desafio`"
+        );
+        let usa = format!("{}(signing_key, &nonce)?", "assinar_o_desafio");
+        assert!(
+            fonte.contains(&usa),
+            "o aperto de mão não passa pela conferência do tamanho do desafio"
+        );
+    }
+
+    /// **D-seg-2.** A linha legada vive para sempre e usa a mesma chave da
+    /// 0.16. Um servidor 0.15 malicioso que mandasse como «nonce» a mensagem do
+    /// S2 da 0.16 (89 bytes) ou o conteúdo de um `CertificateVerify` da sala
+    /// (130 bytes) levaria uma assinatura que vale do outro lado.
+    #[test]
+    fn um_desafio_de_outro_tamanho_nao_e_assinado() {
+        for tamanho in [0_usize, 31, 33, 89, 130, 256] {
+            assert_eq!(
+                assinar_o_desafio(&chave(), &vec![9_u8; tamanho]),
+                Err(ConnectError::ProtocolViolation),
+                "um desafio de {tamanho} bytes foi assinado"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod como_este_build_se_apresenta {
     #[test]
@@ -1968,17 +2065,13 @@ async fn handshake(
         }
     };
 
-    frame::write(
-        send,
-        &ClientMessage::Response {
-            proof: signing_key.sign(&nonce).to_bytes().to_vec(),
-        },
-    )
-    .await
-    .map_err(|error| {
-        tracing::warn!(%error, "could not send the challenge response");
-        ConnectError::Unreachable
-    })?;
+    let proof = assinar_o_desafio(signing_key, &nonce)?;
+    frame::write(send, &ClientMessage::Response { proof })
+        .await
+        .map_err(|error| {
+            tracing::warn!(%error, "could not send the challenge response");
+            ConnectError::Unreachable
+        })?;
 
     let mut answer = frame::read::<ServerMessage>(recv).await.map_err(|error| {
         tracing::warn!(%error, "no Session came back");
