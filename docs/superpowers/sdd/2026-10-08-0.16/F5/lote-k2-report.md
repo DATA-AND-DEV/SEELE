@@ -2,16 +2,20 @@
 
 Base `fbeff8e` (`0.16/lotes`). Branch `0.16/lotes-k2`, no worktree
 `/Users/dev-alexandre/SEELE/.claude/worktrees/agent-a94d4f36c07c8f8ea`. Três
-commits de código e este relatório, todos locais: sem push, tag, release ou
-Actions.
+commits de código e este relatório; depois, três commits da rodada 1 de
+conserto (seção 7) e este relatório de novo. Todos locais: sem push, tag,
+release ou Actions.
 
 | commit | item | o que muda |
 |---|---|---|
 | `75fb60f` | **P51-07** (fecha) e a metade de P49-5 que mora no fundo de tela | `provarImagem` e o `decode()` nos quatro caminhos, com os bytes reservados antes e devolvidos na recusa; o `<img>` do retrato ganha ouvinte de `error`; o fundo de tela anota «carregando», «pronta» e «recusada» e esquece a anotação quando o fundo ou a tela saem |
 | `82fd154` | **P49-5** (fecha) | `contarAMidia` e `midiasDaRegiaoEDasPaginas` em `base.js`; o bloco «A região e as páginas de cada MOD» na aba; o doc de `anotarMidia` |
 | `677f973` | **K1-m2** (fecha) | `pedidoDeArquivo` corta a finalidade por ponto de código |
+| `73866cc` | rodada 1, item 1 | as provas do guarda de `podeFalar()` depois do `decode()` |
+| `86d0a2d` | rodada 1, item 2 | `.then(aplicar, recusar)` nos quatro caminhos, e `dizerTropecoDaMidia` |
+| `af7d6ef` | rodada 1, item 3 | o comentário da bancada sem «API 3» |
 
-Arquivos mudados (`fbeff8e..677f973`), só os cinco da lista do lote:
+Arquivos mudados (`fbeff8e..af7d6ef`), só os cinco da lista do lote:
 - `apps/seele-app/ui/mods-regiao.js`
 - `apps/seele-app/ui/base.js`
 - `apps/seele-app/ui/camada-mods.js`
@@ -301,6 +305,13 @@ Para o rascunho da v6:
 - **O papel errado e o teto no fundo de mídia, e o papel errado no fundo de
   tela, também não falam com o MOD.** Esse silêncio é anterior a este lote. Hoje
   só o `catch` desses dois caminhos fala com o MOD.
+- **O evento `fundo-falhou` não diz qual fonte falhou** (rodada 1 de conserto).
+  Ele leva `chave`, `estado` e `porque`, e nada da declaração do fundo. Um MOD
+  que troca de fundo rápido recebe o `fundo-falhou` do pedido anterior enquanto
+  o fundo atual já está «pronta» — a anotação da aba ignora a recusa velha
+  (`if (fundo.pedido === chave)`), mas o MOD não tem como fazer o mesmo. Dizer
+  a fonte no evento, ou calar a recusa de um pedido trocado, é mudança no
+  contrato do evento.
 
 ## 6. Preocupações e escolhas minhas
 
@@ -310,8 +321,9 @@ Para o rascunho da v6:
   junto.
 - **A devolução da reserva quando só `podeFalar()` falha depois do `decode()`**
   (fundo, retrato e avatar) não estava no brief. Ela evita bytes contados para
-  uma imagem que não vai à tela numa sessão que acabou. Nenhuma prova a mede
-  isoladamente.
+  uma imagem que não vai à tela numa sessão que acabou. Na primeira entrega
+  nenhuma prova a media isoladamente; a rodada 1 de conserto acrescentou a
+  prova (seção 7, item 1).
 - **O fundo de tela sem origem esquece a anotação, em vez de anotar «recusada»**,
   como `montarMidia` faz com a mídia sem `fonte` nem `doServidor`. Escolhi não
   criar um motivo novo que o brief não pedia. Se a revisão quiser os dois
@@ -319,10 +331,10 @@ Para o rascunho da v6:
 - **A recusa de um fundo de tela que o MOD já trocou ainda manda
   `tela`/`fundo-falhou`.** Esse comportamento é anterior ao lote, e hoje vale
   também para o `decode()`. Só a anotação passou a ignorá-la.
-- **Uma exceção dentro de `pintarTela`** cairia agora no `catch` do fundo e
-  sairia como `fundo-falhou`, com o motivo errado. Antes ela lançaria solta no
-  `onload`. Num navegador ela não deve acontecer, e o pincel de mentira ganhou
-  `drawImage` para a bancada não cair nela.
+- **Uma exceção dentro de `pintarTela`** cairia no `catch` do fundo e sairia
+  como `fundo-falhou`, com o motivo errado. A revisão achou o mesmo defeito no
+  avatar, e a rodada 1 de conserto o fechou nos quatro caminhos (seção 7, item
+  2).
 - **O retrato, o fundo de mídia e o avatar decodificam numa imagem à parte** e
   depois entregam o mesmo `uri` ao `<img>` ou ao CSS. O navegador costuma
   reaproveitar o que já decodificou, mas o custo não foi medido. A imagem passa
@@ -335,3 +347,148 @@ Para o rascunho da v6:
 - **Os motivos do bloco não dizem a chave do nó.** Duas imagens quebradas do
   mesmo MOD dão «2 recusadas — a imagem não decodificou», uma vez só. É a mesma
   forma de `midiasDoPonto`, e o registro continua dizendo a chave de cada uma.
+
+## 7. Rodada 1 de conserto
+
+A revisão aprovou o lote, sem crítico nem importante, e pediu três menores
+antes do merge. O quarto menor, a prova versionada do desenho do bloco
+(`desenharAMidiaDosMods`), fica para o lote K3: o lugar dela é o
+`diagnostico-de-mods.cjs`, que não é deste lote.
+
+O script de reversão é o mesmo das seções 1 a 3: troca o trecho, roda a
+bancada, restaura e compara o sha256. Todas as reversões desta seção voltaram
+byte a byte.
+
+### Item 1: o guarda de `podeFalar()` depois do `decode()` tem prova (`73866cc`)
+
+**O que mudou.** Só as bancadas. O guarda já estava certo no código, mas nenhuma
+reversão o derrubava. Cada caso segura a decodificação (`URI_QUE_DEMORA`), troca
+o `podeFalar` do dono para `() => false` e só então solta o `decode()`:
+- `osBytesSaoReservadosAntesDoDecode`, para o retrato e o fundo de mídia: nada
+  montado (nem `<img>`, nem `background-image`) e bytes em zero. Depois do
+  `soltar()`, os bytes continuam em zero: o descarte não devolve de novo a
+  reserva que já tinha voltado;
+- `oFundoDeTelaDizOEstado`, para o fundo de tela, que não tem bolso: o mapa
+  não vira `fundo.imagem` e o pincel não o pinta. O pedido falava em três
+  caminhos, «nos que couber». Este quarto coube, e o guarda dele era igualmente
+  sem prova;
+- `contribuicoes-e-camadas.cjs`, no R4e, para o avatar: o `Image` de mentira
+  ganha a decodificação presa. O avatar fica reservado enquanto decodifica
+  (`bytes: 2`) e, com `podeFalar()` falso, termina em `bytes: 0`, `uri: null`,
+  fora de «pronta» e sem redesenho.
+
+**Prova.** Os casos são verdes de saída, porque o guarda já existia. O dente
+deles está nas reversões. Comando:
+`python3 -I reverter.py <arquivo> <bancada> <nome> <trecho> <troca>`.
+
+| reversão | vermelho |
+|---|---|
+| C1a fundo sem `if (!this.dono.podeFalar()) { devolver(); return; }` | `a reserva · fundo · a sessão acaba no meio: a imagem decodificada depois de a sessão acabar montou, ou ficou contada: 40 bytes, img=false, fundo="linear-gradient(…), url(\"…DEMORA-sessao\")"` |
+| C1b fundo com o guarda e sem `devolver()` | o mesmo caso: `40 bytes, img=false, fundo=""` |
+| C1c retrato sem o guarda | `a reserva · retrato · a sessão acaba no meio: … 40 bytes, img=true` |
+| C1f retrato com o guarda e sem `tirarAImagem()` | o mesmo caso: `40 bytes, img=false` |
+| C1d fundo de tela sem o `!this.dono.podeFalar()` depois do `decode()` | `o fundo de tela anotado · a sessão acaba no meio: o mapa decodificado depois de a sessão acabar virou o fundo da tela: [["imagem","…DEMORA-sessao"]]` |
+| C1e avatar sem o guarda | `R4e · a sessão acaba no meio: … {"uri":"…DEMORA-sessao","bytes":2,…,"situacao":"pronta"}, 1 redesenho(s)` |
+| C1g avatar com o guarda e sem `estado.bytes = 0` | o mesmo caso: `{"uri":null,"bytes":2,…,"situacao":"carregando"}, 0 redesenho(s)` |
+
+Depois do item 2, o guarda mudou de lugar: foi para dentro de `aplicar`. Rodei
+de novo C1a, C1c, C1d e C1e contra o código final. Todas ficaram vermelhas com
+as mesmas frases e voltaram byte a byte.
+
+### Item 2: aplicar fica fora do caminho de recusa (`86d0a2d`)
+
+**O que mudou.** Os quatro caminhos agora têm a forma
+`busca → provarImagem → .then(aplicar, recusar) → .catch(tropeço)`.
+- Só a busca e o `decode()` caem em `recusar`.
+- O que lança dentro de `aplicar` — ou dentro do próprio `recusar` — cai no
+  último `.catch`. Esse `.catch` diz o tropeço no `console` da janela e não
+  mexe no estado:
+  - na região, por `RegiaoDeMod#dizerTropecoDaMidia(onde, chave, falha)`, que
+    corta a chave como `dizerRecusaDeMidia`;
+  - no avatar, por um `console.warn` com o id do MOD e a pessoa.
+- Nenhuma promessa fica sem quem a pegue.
+- Fiz nos quatro caminhos, e não só nos dois que a revisão citou (avatar e
+  fundo de tela). O retrato e o fundo de mídia tinham o mesmo defeito, por
+  outra porta: um `midiaMudou` de dono que lança dentro do `anotarMidia`.
+  O vermelho abaixo mostra o fundo de mídia na tela, «recusada» e com 0 bytes.
+- Dentro de `aplicar`, o aviso ao dono (`anotarMidia`, que chama `midiaMudou`)
+  vem por último. No retrato, um dono que lança encontra o `<img>` já montado,
+  com o ouvinte de `error`, e os bytes contados.
+
+**Prova.**
+- `regiao-do-mod.cjs` ganha `aplicarQueLancaNaoViraRecusa`:
+  - no retrato e no fundo de mídia, o `midiaMudou` passa a lançar depois do
+    «carregando»;
+  - no fundo de tela, o `drawImage` do pincel lança na repintura;
+  - cada caso confere a imagem montada, os bytes contados, a anotação
+    «pronta», nada dito como recusa ao MOD ou ao registro, o tropeço no
+    `console` e nenhuma `unhandledRejection`.
+- `contribuicoes-e-camadas.cjs` ganha «R4e · o redesenho que lança»: com
+  `redesenharAvatares` lançando, o avatar fica «pronta», com `bytes: 2` e o
+  `uri`, sem `falhou` ao MOD, sem linha no registro, com o tropeço no `console`
+  e sem promessa solta.
+
+**RED** (contra `73866cc`), com `node apps/seele-app/bancada/regiao-do-mod.cjs`:
+- `aplicar que lança · o retrato: … — montou=false, 0 bytes, [{"situacao":"recusada","motivo":"o aviso da gestão caiu",…}]`
+- `aplicar que lança · o fundo de mídia: … — montou=true, 0 bytes, [{"situacao":"recusada","motivo":"o aviso da gestão caiu",…}]`
+- `aplicar que lança · o fundo de tela: o mapa decodificou e a repintura lançou, e o fundo foi anotado como recusado com a imagem posta: imagem=true, [{"situacao":"recusada","motivo":"o pincel caiu",…}]`
+- `aplicar que lança · o fundo de tela: o tropeço da repintura saiu como «fundo-falhou» ao MOD ou ao registro: [{"nome":"tela","chave":"mapa","estado":"fundo-falhou","porque":"o pincel caiu"}] …`
+- `aplicar que lança: o tropeço de aplicar terminou numa promessa que ninguém pegou: Error: o aviso da gestão caiu …`
+
+Com `node apps/seele-app/bancada/contribuicoes-e-camadas.cjs`:
+- `R4e · o redesenho que lança: … {"uri":"data:image/png;base64,AB","bytes":0,…,"situacao":"recusada","motivo":"o redesenho caiu"}`
+- `R4e · o redesenho que lança: o tropeço do redesenho foi dito como recusa ao MOD ou ao registro: [{"nome":"midia","chave":"avatar","estado":"falhou",…}] ["avatar da pessoa 17 não montou — o redesenho caiu"]`
+
+É o defeito que a revisão descreveu, medido: o avatar visível, «recusado» e
+fora da conta; o mapa posto e anotado «recusada», com `fundo-falhou` ao MOD.
+
+**GREEN:**
+- `regiao-do-mod` (40 provas) e `contribuicoes-e-camadas`;
+- `cargo xtask check-runtime`, as sete;
+- `cargo test -p seele-app --test frontend` (259 passed);
+- `diagnostico-de-mods.cjs` no Chromium;
+- o script descartável da seção 2, que deu o mesmo resultado no Chromium:
+  retrato e mapa quebrados recusados pelo `decode()` de verdade, e o bloco
+  dizendo «1 pronta · 2 recusadas».
+
+**Reversões:**
+
+| reversão | vermelho |
+|---|---|
+| C2a fundo de mídia: `.then(aplicar).catch(recusar)` | `aplicar que lança · o fundo de mídia: … montou=true, 0 bytes, [{"situacao":"recusada",…}]` |
+| C2b retrato: `.then(aplicar).catch(…)` | `aplicar que lança · o retrato: … montou=false, 0 bytes, …` |
+| C2c fundo de tela: `.then(aplicar).catch(recusar)` | `aplicar que lança · o fundo de tela: … anotado como recusado com a imagem posta …`, o `fundo-falhou` ao MOD, e `… engolido calado: []` |
+| C2d avatar: `.then(aplicar).catch(recusar)` | `R4e · o redesenho que lança: … "bytes":0,…,"situacao":"recusada"`, o `falhou` ao MOD, e `… engolido calado …` |
+| C2e fundo de mídia sem o `.catch` do tropeço | `aplicar que lança · o fundo de mídia: o tropeço de aplicar foi engolido calado: []` e `… terminou numa promessa que ninguém pegou: Error: o aviso da gestão caiu … at aplicar` |
+| C2f avatar sem o `.catch` do tropeço | `R4e · o redesenho que lança: o tropeço do redesenho foi engolido calado, ou terminou numa promessa que ninguém pegou: [] Error: o redesenho caiu … at aplicar` |
+
+As reversões principais do P51-07 mudaram de forma junto com o código, e rodei
+de novo contra ele:
+- R1' a R3', o `decode()` tirado do fundo, do retrato e do fundo de tela:
+  `… a imagem não passou pelo \`decode()\`…`;
+- R4', o avatar sem `decode()`: `R4e · a gestão: … "situacao":"pronta"`;
+- R5a', o fundo sem `devolver()` em `recusar`:
+  `a reserva · fundo · a recusa devolve: … 40 bytes`.
+
+Todas ficaram vermelhas e voltaram byte a byte.
+
+### Item 3: «API 3» fora do texto novo (`af7d6ef`)
+
+O comentário do contexto da aba, em `contribuicoes-e-camadas.cjs`, passa a
+dizer «os cartões e o tema do caminho antigo (`modsDoCaminhoAntigo`)».
+
+A prova é de texto. `git diff fbeff8e -- apps/ | grep -c '^+.*API 3'` dá 0.
+O `check-runtime` continua verde. Não há reversão a fazer: o item não tem
+comportamento.
+
+### Preocupações da rodada
+
+- **O tropeço de aplicar vai só ao `console` da janela, e não ao `seele.log`.**
+  É a mesma escolha que `dizerRecusaDeMidia` já fazia para o dono cuja
+  `anotarRecusa` lança. Um tropeço desses é defeito do produto ou do dono, e
+  não da mídia do MOD. Se a revisão quiser vê-lo no registro, o lugar é
+  `dizerTropecoDaMidia`, numa linha.
+- **Um `aplicar` que lança no meio deixa o que já tinha aplicado.** A ordem
+  dentro dele põe o estado primeiro e o aviso ao dono por último, e por isso o
+  estado que fica é o da tela. A repintura do mapa que lança deixa o mapa em
+  `fundo.imagem` e anotado «pronta», e o próximo desenho o pinta.
