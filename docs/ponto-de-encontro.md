@@ -178,10 +178,21 @@ WantedBy=multi-user.target
 `DynamicUser=yes` porque ele não precisa de usuário, de casa, nem de permissão
 de escrita em lugar nenhum — não há o que persistir.
 
-Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama de 96
-bytes, e esvazia o quarto, que é o único estado dele. Cada anfitrião volta ao
-quarto no reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta
-por ele não o acha no quarto e tenta os endereços que já tinha.
+Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama (96
+bytes no ENC/1, 384 no ENC/2), e esvazia os dois quartos, que são, com o limite
+por prefixo, o único estado dele. Cada anfitrião e cada sala voltam ao quarto no
+reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta por eles
+não os acha e tenta os endereços que já tinha.
+
+**O relógio da máquina tem de estar certo.** A sala pessoal se registra pelo
+ENC/2 com um carimbo de hora, assinado, e o ponto o confere contra o próprio
+relógio, com tolerância de cinco minutos. Um ponto com o relógio torto recusa o
+registro de **toda** sala, e cada pessoa lê no `seele.log` que o relógio dela e
+o do ponto diferem. Numa VPS com systemd, confira que a hora vem da rede:
+
+```sh
+timedatectl          # «System clock synchronized: yes» e «NTP service: active»
+```
 
 ### Conferir que ele está mesmo no ar
 
@@ -222,8 +233,11 @@ tempo — é o que separa este produto do que ele existe para não ser.
 
 O protocolo — quatro verbos que chegam ao ponto (`ONDE`, `LEVE`, `MORO` e
 `QUEM`), a resposta `AQUI`, e uma função sem estado que decide o `ONDE` e o
-`LEVE` — está em `crates/seele-proto/src/encontro.rs`. O quarto, que guarda o
-`MORO` e responde ao `QUEM`, e o serviço estão em `crates/seele-encontro/`. O
+`LEVE` — está em `crates/seele-proto/src/encontro.rs`, e a versão 2 ao lado
+dele (`MORO2` e `QUEM2`, as respostas `MOROU`, `AQUI2`, `NINGUEM` e `RECUSA`,
+ADR 0062). O quarto, que guarda o `MORO` e responde ao `QUEM`, o quarto
+assinado do ENC/2, o limite por prefixo e o serviço estão em
+`crates/seele-encontro/`. O
 lado de quem hospeda, em `crates/seele-server/src/alcance/encontro.rs`; o de quem
 entra, em `crates/seele-core/src/encontro.rs`. O bilhete que viaja no link é o
 `enc=` de `crates/seele-proto/src/uri.rs`.
@@ -234,6 +248,8 @@ alguém mexer:
 - **O ponto de encontro nunca copia bytes de um pedido para uma resposta.** A
   resposta é montada campo a campo. O único pedaço do pedido que reaparece é a
   marca, que é alfanumérica e curta justamente por isso.
-- **Todo datagrama tem 96 bytes, pedido e resposta.** Um refletor que responde
-  mais do que recebe é uma arma apontada para quem nunca ouviu falar deste
-  projeto. O enchimento é o que mantém o ganho em 1:1.
+- **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 tem 384: pedido e
+  resposta, sempre do mesmo tamanho.** Um refletor que responde mais do que
+  recebe é uma arma apontada para quem nunca ouviu falar deste projeto. O
+  enchimento é o que mantém o ganho em 1:1, e um datagrama de qualquer outro
+  tamanho é calado.
