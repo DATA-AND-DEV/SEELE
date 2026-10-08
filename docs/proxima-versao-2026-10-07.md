@@ -70,12 +70,11 @@ conferem, e a bateria inteira roda no commit que vai para a `main`.
 
 ## O que falta antes de publicar, e é seu
 
-1. **A medida de campo do G1**, obrigatória. Está no plano 1B, em «A medida de
-   campo».
-   - Precisa de duas máquinas em redes diferentes, do ponto do bilhete mudo do
-     lado do cliente, do DNS num buraco negro e de uma captura.
-   - As quatro linhas de resultado vão no bloco «[PREENCHER ANTES DE
-     PUBLICAR…]» de `empacotar/notas/0.15.1.md`, num commit.
+1. ~~A medida de campo do G1~~: **feita em 08/10**, do PC (cliente) para o Mac
+   (anfitrião atrás de CGNAT). As quatro linhas estão em `docs/m1-medicoes.md`,
+   «G1», e o resumo nas notas da 0.15.1. A do DNS mudo custou 2,1 s, e não
+   1,5 s: o `LEVE` resolve o ponto de novo (pendência 55, explicada, não segura
+   a versão). Desvio do plano: as duas máquinas estavam na mesma rede de casa.
 2. ~~A medição do som de MOD~~, no WKWebView e no WebView2: **feita em 07 e
    08/10, e toca nas duas** (pendência 49 e
    `docs/evidencias/som-de-mod-wkwebview/registro.md`). Ela achou três coisas

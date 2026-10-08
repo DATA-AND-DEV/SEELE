@@ -532,3 +532,58 @@ Em vez de abrir um buraco na regra, criei **`seele-conformance`**: biblioteca
 vazia, todas as dependências são de desenvolvimento, e o guarda de dependência
 tem uma entrada explícita para ele com dois testes garantindo que a exceção **não
 vaza** para nenhum outro crate.
+
+## G1 — a consulta ao quarto, medida no campo (08/10/2026)
+
+O portão G1 do plano 1B pede esta medida antes de a 0.15.1 sair
+(`docs/superpowers/plans/2026-09-29-1.0-plano-1b-a-impressao-no-tls.md`, «A
+medida de campo»). Na volta pela lista, o cliente pergunta ao quarto do ponto de
+encontro onde o anfitrião mora hoje **antes de qualquer tentativa de conexão**,
+e o que isso custa depende de quem responde.
+
+**Como foi medido.**
+
+| | |
+|---|---|
+| commit | `9e6a28f` (o `main` publicado), builds de debug |
+| anfitrião | o Mac, macOS 27.0.1, atrás de CGNAT: o roteador «não tem endereço próprio», e a escada parou no degrau 4 (`FuroDeNat`); a 0.15.1 e, na linha 2, a 0.15.0 (`e2fac4d`) compilada do código |
+| cliente | o PC Windows 10.0.26300, 0.15.1, dirigido pelo DevTools Protocol do WebView2 |
+| ponto | `encontro.seele.app.br` (`216.128.168.216`), conferido antes com o `sondar`: «o quarto está vivo» |
+| tempo | o `pktmon` do Windows na placa de rede: do primeiro pacote da consulta (o DNS do nome do ponto, ou o primeiro datagrama a `216.128.168.216:8384`) ao primeiro datagrama a um endereço do servidor |
+| ponto mudo | uma regra de saída do firewall do Windows bloqueando UDP a `216.128.168.216:8384` (o PC não tem IPv6 global) |
+| DNS mudo | o DNS do PC em `192.0.2.53` (TEST-NET-1), com o cache limpo |
+
+**Desvio do plano: as duas máquinas estavam na mesma rede de casa.** O plano
+pede redes diferentes, e o PC só era alcançável daqui pela rede local. A
+consulta ao quarto roda antes de qualquer tentativa, inclusive na LAN, então os
+quatro casos medem o mesmo caminho; a primeira tentativa foi ao endereço de LAN
+do anfitrião. O que a mesma rede não exercita é o furo de NAT depois da
+consulta, que já tinha sido exercitado entre redes diferentes (README, «Alcançar
+de fora»).
+
+| linha | `resposta=` | esperado | tempo até a primeira tentativa | esperado |
+|---|---|---|---|---|
+| anfitrião novo | `Achado { servidor: Some(187.255.97.152:9503), escuta: Some(187.255.97.152:9501) }` | servidor e escuta | **21,9 ms** | uma ida e volta até o ponto |
+| anfitrião 0.15.0 | `Achado { servidor: Some(187.255.97.152:9675), escuta: None }` | escuta ausente | **123,2 ms** | a primeira resposta, mais o dobro da ida e volta, nunca menos de 100 ms |
+| anfitrião fora do ar (fechado há mais de 60 s) | `NinguemMora` | `NinguemMora` | **125,7 ms** | o mesmo da linha de cima |
+| ponto mudo | `PontoMudo` («o prazo da consulta venceu antes de as duas marcas responderem … enviados=3») | `PontoMudo` | **1.510,7 ms** | 1,5 s (`PRAZO_DO_QUARTO`) |
+| DNS mudo | `PontoNaoResolve` («o nome do ponto de encontro não resolveu dentro do prazo … prazo=1.5s») | `PontoNaoResolve` | **2.124,8 ms** | 1,5 s |
+
+**A linha fora do esperado, explicada.** Com o DNS mudo, a consulta ao quarto
+acaba no prazo (o veredito sai 1,5 s depois da pergunta de DNS, no `seele.log`),
+e a primeira tentativa sai 0,6 s depois disso. Os 0,6 s são o `LEVE`:
+`Encontro::preparar` (`crates/seele-core/src/encontro.rs`) resolve o nome do
+ponto **de novo**, com o prazo próprio de 600 ms (`PRAZO`), antes de a conexão
+começar. Com o ponto mudo e o DNS vivo, essa segunda resolução vem do cache e
+não aparece. É custo de uma rede sem DNS, e não defeito da consulta; o conserto
+barato — não resolver de novo um ponto que acabou de não resolver — está na
+pendência 55.
+
+**Os caminhos da lista não mudaram** depois das voltas: o endereço que o quarto
+deu não entrou na coluna. Ressalva: nesta rede ele é o mesmo alternativo que o
+link já trazia (a porta do NAT não mudou entre as aberturas), então a conferência
+passa sem discriminar.
+
+**O bilhete do link.** O anfitrião 0.15.1 escreveu a porta do ponto no link
+(`enc=encontro.seele.app.br:8384/…`, a Task 9 do 1A), e o 0.15.0 não
+(`enc=encontro.seele.app.br/…`); o cliente 0.15.1 consultou o quarto pelos dois.

@@ -8250,3 +8250,26 @@ a escolhida, ou escrever nela o padrão do sistema.
 ```sh
 grep -n "PADRÃO DA MÁQUINA · " apps/seele-app/ui/tela-server.js
 ```
+
+## 55 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
+
+**Aberta em 2026-10-08**, na medida de campo do G1 (`docs/m1-medicoes.md`,
+«G1»). Com o DNS do cliente mudo, a consulta ao quarto acaba no prazo dela
+(1,5 s, `PRAZO_DO_QUARTO`, com `resposta=PontoNaoResolve`), e logo depois
+`Encontro::preparar` resolve o nome do ponto **de novo** para o `LEVE`, com o
+prazo próprio de 600 ms (`PRAZO`, `crates/seele-core/src/encontro.rs`). A
+primeira tentativa de conexão sai 2,1 s depois do clique, e não 1,5 s — também
+na rede de casa, onde o servidor está a um passo.
+
+Não é defeito da consulta, e não segura a 0.15.1: é o custo de uma rede sem DNS,
+e ele tem teto. O conserto barato: quando a consulta ao quarto não resolveu o
+ponto (`PontoNaoResolve`), a mesma volta não tenta resolvê-lo de novo para o
+`LEVE`; ou a consulta entrega ao `LEVE` o endereço que já resolveu. Com isso o
+teto cai para 1,5 s. Fica com o plano que refizer a corrida (o Plano 5, que já
+põe a consulta em paralelo com os candidatos da rede local).
+
+```sh
+grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
+grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
+```
+
