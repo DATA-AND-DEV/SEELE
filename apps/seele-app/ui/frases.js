@@ -272,6 +272,16 @@ const PERMISSAO_DE_MICROFONE = {
 const AVISO_DE_FONE =
   "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.";
 
+/**
+ * Com que nome entra quem fecha a pergunta do nome sem responder.
+ *
+ * **Não diz o nome**, e não é descuido: ele é derivado em Rust, dentro do
+ * `connect`, da impressão da chave desta máquina, e nenhum comando de tela o
+ * expõe. Dizê-lo pediria um comando novo só para montar uma palavra que o
+ * `connect` monta de qualquer jeito. A lista de pessoas o mostra logo depois.
+ */
+const ENTRAR_SEM_NOME = "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.";
+
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
   Avisando: "AVISANDO O PONTO DE ENCONTRO",

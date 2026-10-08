@@ -167,8 +167,24 @@ async function desenharPrevia(apelido) {
   }
 }
 
-/** Abre o perfil de quem está usando esta janela. */
-async function abrirPerfil() {
+/**
+ * Abre o perfil de quem está usando esta janela.
+ *
+ * `titulo` é opcional, e só a pergunta do nome antes da primeira entrada o
+ * passa (`perguntarONome`). Sem ele, o diálogo é o SEU PERFIL de sempre.
+ *
+ * O diálogo se reabre de dentro — trocar a imagem, uma recusa ao gravar o
+ * apelido —, e essas reaberturas não trazem título. Então um título só volta a
+ * SEU PERFIL quando o diálogo está fechado: no meio da pergunta, reabrir para
+ * mostrar a imagem nova não pode trocá-la por outra.
+ */
+async function abrirPerfil(titulo) {
+  if (titulo !== undefined) {
+    $("perfil-titulo").textContent = titulo;
+  } else if ($("perfil").hidden) {
+    $("perfil-titulo").textContent = "SEU PERFIL";
+    $("perfil-sem-nome").hidden = true;
+  }
   focoAntesDoPerfil = document.activeElement;
   $("perfil-erro").hidden = true;
 
@@ -216,12 +232,71 @@ async function abrirPerfil() {
   await desenharPrevia(apelido);
   $("perfil").hidden = false;
   $("perfil-escolher").focus();
-  anunciar("Seu perfil. Escape fecha.");
+  // O título que está escrito, e não um fixo: na pergunta do nome, quem não vê
+  // a tela precisa ouvir a pergunta, e não «seu perfil».
+  const cabeca = $("perfil-titulo").textContent;
+  anunciar(cabeca === "SEU PERFIL" ? "Seu perfil. Escape fecha." : `${cabeca} Escape fecha.`);
+}
+
+/**
+ * Quem espera o perfil fechar, ou `null`.
+ *
+ * Só a pergunta do nome espera: a entrada não segue para o `connect` enquanto
+ * a caixa está aberta. `fecharPerfil` é a única porta de saída do diálogo —
+ * SALVAR, CANCELAR, FECHAR, Escape e o clique fora passam todos por ela —, e é
+ * ela que solta quem espera.
+ */
+let aoFecharOPerfil = null;
+
+/**
+ * Pergunta o nome antes da primeira entrada, e devolve o que ficou gravado.
+ *
+ * É o perfil, com outro título. SALVAR grava com `escolher_apelido_local`,
+ * como sempre fora de sessão (`guardarOApelido`), e o nome é relido depois de a
+ * caixa fechar: a resposta é o que está no disco, e não o que estava no campo —
+ * fechar com o campo preenchido e sem salvar não grava nada.
+ *
+ * Fechar sem nome segue como antes, para o nome tirado da chave, e diz isso: a
+ * nota aparece na caixa enquanto ela está aberta, que é quando ainda dá para
+ * mudar de ideia, e é anunciada ao fechar.
+ */
+async function perguntarONome() {
+  const fechou = new Promise((resolver) => {
+    aoFecharOPerfil = resolver;
+  });
+  const nota = $("perfil-sem-nome");
+  nota.textContent = ENTRAR_SEM_NOME;
+  nota.hidden = false;
+  try {
+    await abrirPerfil("COMO OS OUTROS VÃO TE CHAMAR?");
+    // O teclado no nome, e não na imagem, onde o perfil de sempre o põe: a
+    // pergunta é o nome, e escrever e apertar Enter é a resposta inteira.
+    $("perfil-apelido").focus();
+  } catch (falha) {
+    // Uma caixa que não abriu não pode prender a entrada atrás dela.
+    console.warn("abrir o perfil:", falha);
+    fecharPerfil();
+  }
+  await fechou;
+  let apelido = "";
+  try {
+    apelido = ((await invoke("apelido_local")) ?? "").trim();
+  } catch (falha) {
+    console.warn("apelido_local:", falha);
+  }
+  if (apelido === "") anunciar(ENTRAR_SEM_NOME);
+  return apelido;
 }
 
 /** Fecha, devolvendo o teclado. */
 function fecharPerfil() {
   $("perfil").hidden = true;
+  // A nota da pergunta do nome é da pergunta, e ela acabou.
+  $("perfil-sem-nome").hidden = true;
+  // Quem esperava a caixa fechar segue — ver `aoFecharOPerfil`.
+  const seguir = aoFecharOPerfil;
+  aoFecharOPerfil = null;
+  if (seguir) seguir();
   // O rodapé da entrada mostra o nome escolhido, e ele pode ter acabado de
   // mudar. Redesenhar aqui é o que faz a caixa e o rodapé nunca discordarem.
   if (typeof desenharPerfilDaEntrada === "function") {

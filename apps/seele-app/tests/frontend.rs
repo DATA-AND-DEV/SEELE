@@ -11632,6 +11632,103 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
 }
 
 #[test]
+fn sem_nome_o_primeiro_conectar_pergunta_antes() {
+    // Quem nunca se nomeou entrava calado com um nome tirado da chave — e só
+    // descobria o `pessoa-3f2a` na lista dos outros, depois de já ter falado.
+    // A entrada por link é o caso mais comum: o app abre e conecta sem passar
+    // pela tela inicial, onde fica o perfil.
+    //
+    // Então a primeira entrada desta execução pergunta, antes do `connect`. Só
+    // a quem não tem nome nenhum — nem o desta visita, nem o desta máquina —, e
+    // só uma vez: uma pergunta que voltasse a cada reconexão, ou a cada batida
+    // automática da espera, pararia a reconexão atrás de uma caixa.
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    let Some(pergunta) = conectar.find("await perguntarONome()") else {
+        panic!(
+            "a entrada não pergunta mais o nome a quem não tem nenhum, e a pessoa \
+             entra com um nome tirado da chave sem ter sido avisada:\n{conectar}"
+        );
+    };
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("a entrada não chama mais o `connect`:\n{conectar}");
+    };
+    assert!(
+        pergunta < connect,
+        "a entrada pergunta o nome depois de conectar, quando o servidor já \
+         recebeu o nome tirado da chave:\n{conectar}"
+    );
+    let Some(local) = conectar.find("invoke(\"apelido_local\")") else {
+        panic!("a entrada não lê mais o apelido desta máquina:\n{conectar}");
+    };
+    let condicao = conectar[local..pergunta]
+        .rfind("if (")
+        .map(|se| &conectar[local + se..pergunta])
+        .and_then(|resto| resto.lines().next())
+        .unwrap_or_default();
+    assert!(
+        condicao.contains("apelido === \"\""),
+        "a pergunta do nome não espera o apelido estar vazio, ou vem antes de ler \
+         o desta máquina — e quem já tem nome é parado na porta:\n{condicao}"
+    );
+    assert!(
+        condicao.contains("!jaPergunteiONome"),
+        "a pergunta do nome não é mais só da primeira entrada desta execução: ela \
+         volta a cada reconexão e a cada batida automática da espera:\n{condicao}"
+    );
+
+    // A pergunta é o perfil com outro título, e a entrada espera ele fechar.
+    let nomear = read("ui/camada-nomear.js");
+    let perguntar = js_function(&nomear, "async function perguntarONome(");
+    let abre = perguntar.find("abrirPerfil(\"COMO OS OUTROS VÃO TE CHAMAR?\")");
+    let espera = perguntar.find("await fechou");
+    let rele = perguntar.find("invoke(\"apelido_local\")");
+    assert!(
+        matches!((abre, espera, rele), (Some(a), Some(e), Some(r)) if a < e && e < r),
+        "a pergunta do nome não abre o perfil com «COMO OS OUTROS VÃO TE CHAMAR?», \
+         não espera ele fechar, ou não relê o nome gravado depois — e a entrada \
+         segue com o nome de antes da resposta:\n{perguntar}"
+    );
+    let fechar = js_function(&nomear, "function fecharPerfil(");
+    assert!(
+        fechar.contains("aoFecharOPerfil"),
+        "fechar o perfil não solta a entrada que espera por ele, e a conexão fica \
+         parada para sempre atrás de uma caixa que já fechou:\n{fechar}"
+    );
+
+    // Fechar sem nome segue, e diz com que nome se entra.
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const ENTRAR_SEM_NOME =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.",
+        "`frases.js` não diz mais com que nome entra quem fecha a pergunta sem \
+         responder"
+    );
+    assert!(
+        perguntar.contains("ENTRAR_SEM_NOME"),
+        "quem fecha a pergunta do nome sem responder entra sem saber com que \
+         nome:\n{perguntar}"
+    );
+
+    // E o perfil de sempre continua sendo o de sempre.
+    let abrir = js_function(&nomear, "async function abrirPerfil(");
+    assert!(
+        abrir.contains("$(\"perfil-titulo\").textContent = \"SEU PERFIL\""),
+        "o perfil aberto sem título deixou de se chamar SEU PERFIL, e o diálogo \
+         de todo dia herda a pergunta da primeira entrada:\n{abrir}"
+    );
+    let pagina = without_comments(&read("ui/index.html"));
+    assert!(
+        pagina.contains("<h2 id=\"perfil-titulo\" class=\"nomear-titulo\">SEU PERFIL</h2>"),
+        "o título do perfil no HTML deixou de ser SEU PERFIL"
+    );
+}
+
+#[test]
 fn o_glifo_de_um_botao_nao_e_alvo_de_clique() {
     // Relato de campo, no Windows: «quando clico no meio dos botões de microfone
     // e de fone não funciona; precisa clicar no cantinho do botão».

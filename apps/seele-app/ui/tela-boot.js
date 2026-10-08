@@ -57,6 +57,15 @@ let ultimoAlvo = null;
 let ultimoApelido = null;
 
 /**
+ * Se a entrada já perguntou o nome nesta execução.
+ *
+ * Por execução, e não por servidor: a pergunta é sobre esta máquina não ter
+ * nome, e quem a fechou sem responder já decidiu. Perguntar de novo a cada
+ * reconexão seria parar a reconexão atrás de uma caixa.
+ */
+let jaPergunteiONome = false;
+
+/**
  * **Este `connect` é para o servidor que esta janela acabou de subir.**
  *
  * A `#tela-auth` existe para o momento TOFU do ADR 0003: quem chega a um
@@ -150,6 +159,21 @@ async function conectar(alvo, apelido, token) {
     } catch (falha) {
       console.warn("apelido_local:", falha);
     }
+  }
+  // **Sem nome nenhum, a primeira entrada desta execução pergunta antes.**
+  //
+  // Quem nunca se nomeou entrava calado com o nome tirado da chave, e só o
+  // descobria na lista dos outros. Quem chega por link é o caso comum: o app
+  // abre e conecta sem passar pela tela inicial, onde mora o perfil.
+  //
+  // Só aqui, com os dois vazios — o desta visita e o desta máquina —, e só uma
+  // vez por execução: a reconexão depois de uma queda e a batida automática da
+  // espera também passam por aqui, e não podem parar atrás de uma caixa. Quem
+  // fecha sem responder entra com o nome tirado da chave, como antes — e a
+  // caixa diz isso enquanto ainda está aberta (`perguntarONome`).
+  if (apelido === "" && !jaPergunteiONome) {
+    jaPergunteiONome = true;
+    apelido = await perguntarONome();
   }
   // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
   // um defeito de campo que não tinha saída.
