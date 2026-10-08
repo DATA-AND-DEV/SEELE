@@ -2,8 +2,9 @@
 
 Base `0f94be66` (`0.16/lotes`). Branch `0.16/lotes-k5`, no worktree
 `/Users/dev-alexandre/SEELE/.claude/worktrees/agent-af94d92c0383ba2a2`. Quatro
-commits de código e este relatório. Todos locais: sem push, tag, release ou
-Actions.
+commits de código e este relatório; depois, nove commits da rodada 1 de
+conserto (seção 10) e este relatório de novo. Todos locais: sem push, tag,
+release ou Actions.
 
 | commit | item | o que muda |
 |---|---|---|
@@ -219,12 +220,18 @@ Frases novas que este lote não pôs no `api/README.md`:
   A recusa pelo teto do som decodificado — `recusada`, com os números no
   `porque` — chega quando o MOD pede para tocar, e não na montagem.»** O
   primeiro toque de uma contribuição espera a decodificação.
-- **O som de uma contribuição sem alvo muda de destino.** «Quando o destino em
-  que o som de uma contribuição toca sai da tela, o som para (`pausada`) e passa
-  a outro destino que a desenhe; ele não volta a tocar sozinho: o próximo
-  `tocando: true` o toca ali, do começo.» Hoje o conteúdo de uma contribuição
-  não muda depois de registrado (ver as preocupações, item 1), e o «próximo
-  `tocando`» só existe quando a v6 deixar o MOD atualizar uma contribuição.
+- **O som de uma contribuição sem alvo muda de destino** (com a decisão da
+  rodada 1): «Quando o destino em que o som de uma contribuição toca sai da
+  tela, o som para ali (`pausada`) e recomeça, do começo, noutro destino que a
+  desenhe (`tocando`). Um som que não tocava — terminado, parado pelo MOD, ou
+  recusado — não volta pela troca: o próximo `tocando: true` o toca no destino
+  novo.»
+- **O religar de uma contribuição só existe na v6.** Hoje o conteúdo de uma
+  contribuição não muda depois de registrado (ver as preocupações, item 1): o
+  «próximo `tocando: true`» de cima, e o 7c para um som declarado parado, só
+  valem quando a v6 deixar o MOD atualizar uma contribuição. **Hoje o P49-8
+  vale para o som que tocava**: a linha de quem tomou o som sai do documento
+  enquanto a contribuição desenha noutro destino, e o som recomeça ali.
 - O pedido de tocar que ainda decodificava quando o lugar saiu da tela chega ao
   MOD como `recusada`, com o motivo de `SOM_FORA_DA_TELA`, como o que esperava
   o áudio da janela.
@@ -259,7 +266,9 @@ Frases novas que este lote não pôs no `api/README.md`:
      no renderer e na bancada. O ganho visível hoje é o destino que saiu soltar
      o som decodificado, e a recusa enganosa sair; o caminho inteiro depende de
      a v6 (F3) deixar o MOD atualizar uma contribuição.
-2. **A mudança de destino não religa o som sozinha.** É uma escolha, e o brief
+2. *(Rodada 1: decidido pelo controlador, e feito em `108907f8` — o som que
+   tocava recomeça no destino novo, os outros ficam calados. O texto abaixo é
+   o da entrega.)* **A mudança de destino não religa o som sozinha.** É uma escolha, e o brief
    a deixa aberta («só pede os bytes quando houver `tocando`»). A outra seria
    tratar a remontagem como montagem: o som declarado `tocando: true`
    recomeçaria no destino novo na própria varredura — inclusive um som que já
@@ -272,7 +281,9 @@ Frases novas que este lote não pôs no `api/README.md`:
    `SOM_FORA_DA_TELA` pelo destino que saiu, mesmo com a contribuição na tela
    noutro destino. É a regra que já valia para o pedido que esperava o áudio da
    janela (S-m5); o MOD pode religar, e aí toca no destino novo.
-4. **O som do servidor fica guardado em cada destino.** O adiamento segura o
+4. *(Rodada 1: consertado em `8f67e167` — ver a seção 10. O texto abaixo é o
+   da entrega, e media menos que a revisão: a montagem ficava em toda entrada,
+   e não só nos destinos.)* **O som do servidor fica guardado em cada destino.** O adiamento segura o
    `data:` que `midia_em_bytes` devolveu (`origem.uri`), em cada destino da
    contribuição, até ele sair — é o que um destino que tome a marca decodifica
    sem pedir de novo ao servidor. Antes, só o destino que tomava a marca o lia,
@@ -302,3 +313,163 @@ Frases novas que este lote não pôs no `api/README.md`:
    tocar; a troca de tocador recomeça o som do começo (o ponto em que o outro
    parou vai embora com ele); e o pior caso, muitas contribuições tocando ao
    mesmo tempo, continua sem teto por MOD — isso fica com o dono.
+
+## 10. Rodada 1 de conserto
+
+A revisão pediu conserto por dois Importantes, confirmou as preocupações 1 e
+3, e o controlador decidiu a 2: o som que tocava recomeça no destino novo.
+Mais seis menores. Cada conserto tem o seu commit, o `check-runtime` antes
+dele, e a prova por reversão (o arquivo devolvido da cópia e conferido byte a
+byte e por `sha256`).
+
+| commit | item | o que muda |
+|---|---|---|
+| `8f67e167` | **Importante 1** | o `data:` do som do servidor deixa de ficar retido: a montagem só é guardada numa contribuição; o destino que tomou o som larga `origem.uri` quando a carga tem os bytes; os outros guardam o plano, e o que tomar a marca pede o som de novo ao servidor (`pedidoAoServidor`, um lugar só para os argumentos) |
+| `8ff12f12` | **Importante 2** | a prova da mudança de destino mede a soltura: `tocadoresDeSomDeMod` exposto à bancada (`tocadoresDePe`) e o áudio do primeiro destino fechado |
+| `108907f8` | **a continuidade** | `calarSonsForaDaTela` guarda quais tocavam antes de pausar; `devolverOsSons` passa os lugares deles adiante (`herdados`); `tomarAMarca` e `herdarOSom`: o que tocava recomeça, os outros ficam com `declarado = quer`; `lugaresDasMidias` diz qual som é qual entre os destinos |
+| `90557f49` | menor 6 | a mídia que chega ao destino novo depois de ele tomar a marca segue a mesma regra: a herança fica com o destino até o último som dela chegar |
+| `44be1a72` | menor 4 | o som «falhou» ou «cheia» passa recusado ao destino novo (`recusa` na entrada, `recusados` na herança): a figura e a anotação com o motivo, sem carregar e sem dizer a recusa outra vez |
+| `71a9f1aa` | menor 2 | o pedido de tocar põe o som em «carregando» até decodificar |
+| `f6023860` | menor 1 | `sons.devolvidos` abre a segunda volta de `calarOsSonsQueSairamDaTela`; as duas voltas percorrem `montadas` sem copiá-lo |
+| `dcf69ab9` | menores 3 e 5 | o doc de `LIMITES_DO_CARTAO` diz «que já foram mandadas tocar»; os comentários velhos da bancada apontam `carregarSom` e `esperarOPedidoDeTocar` |
+| `418ee56b` | menor 4, o resto | o destino que devolveu a marca com um som recusado a toma de volta quando volta à tela sem ninguém que a tenha tomado: a recusa volta à anotação, e a segunda volta para de abrir |
+
+Os mesmos três arquivos. A `regiao-do-mod.cjs` passa a 44 provas (a seção 20
+é nova; as outras provas da rodada entraram nas seções 17 e 18).
+
+### 10.1 Importante 1: o `data:` do som do servidor (`8f67e167`)
+
+**A medida da memória**, com uma sonda que monta a bancada de verdade e conta,
+nas entradas de `somDaMidia`, as cadeias `data:` retidas — e, num processo
+novo por cenário, o `heapUsed` mais a memória externa do node depois de um
+`gc()`. Cada resposta do servidor é uma cadeia nova, como no `ipc`. Arquivo de
+1 MiB (o `data:` tem 1,3 MiB):
+
+| cenário | antes (`d5d384fa`) | depois |
+|---|---|---|
+| região, um som do servidor pronto | 1 `data:` retido, 1,3 MiB; +3,8 MiB | 0; +2,5 MiB |
+| contribuição em 64 destinos, o som tocando | 64 retidos, 85,3 MiB; +89,9 MiB | 0; +6,1 MiB |
+| contribuição em 64 destinos, esperando o pedido de tocar | 64 retidos, 85,3 MiB; +91,3 MiB | 1 (o destino que tomou o som, até o pedido), 1,3 MiB; +7,4 MiB |
+
+Com o arquivo de 10 MiB da revisão, o «antes» das contribuições é dez vezes
+isso — uns 853 MiB de texto —, e o «depois», 0 ou 13 MiB.
+
+**RED** (seção 20, `oDataDoSomDoServidorNaoFicaRetido`, contra `d5d384fa`):
+
+```
+FALHOU — o data: do som do servidor não fica retido · na região: o som do servidor ficou pronto na região e a entrada dele segura o `data:` inteiro pela vida do nó: {"referencias":1,"caracteres":38}
+FALHOU — o data: do som do servidor não fica retido · numa contribuição, depois de decodificar: […] quem tomou o som, depois de decodificar, e quem não o tomou: {"referencias":2,"caracteres":76}
+FALHOU — o data: do som do servidor não fica retido · esperando o pedido de tocar: o som do servidor espera o pedido de tocar, e o `data:` não está só no destino que o tomou: {"tomou":{"referencias":1,"caracteres":38},"outro":{"referencias":1,"caracteres":38}}
+FALHOU — o data: do som do servidor não fica retido · esperando o pedido de tocar: o pedido de tocar decodificou o som do servidor, e o `data:` ficou: {"referencias":2,"caracteres":76}
+FALHOU — o data: do som do servidor não fica retido · na mudança de destino: o destino que tomou a marca não pediu o som de novo ao servidor e tocou, ou algum destino segura o `data:`: 1 fonte(s), 2 pedido(s) ao servidor (dois na montagem, um no pedido de tocar), {"referencias":2,"caracteres":76}
+```
+
+**Reversões:**
+- sem `delete origem.uri` em `carregarSom`: vermelho em «depois de
+  decodificar», «esperando o pedido de tocar» (depois do pedido) e «na mudança
+  de destino», uma referência em cada;
+- os outros destinos guardando o `data:` (`semOData = montagem`): vermelho nos
+  mesmos três, e «o `data:` não está só no destino que o tomou»;
+- o destino que toma a marca sem pedir de novo ao servidor: «0 fonte(s), 2
+  pedido(s) ao servidor»;
+- guardar a montagem em toda entrada, com o `delete` no lugar, **fica verde**:
+  o `delete` sozinho já solta o texto, e guardar a montagem só numa
+  contribuição é higiene. O vermelho da região no RED é dos dois juntos.
+
+### 10.2 Importante 2: soltar, e não só esquecer (`8ff12f12`)
+
+Só a prova mudou: depois da varredura, `b.tocadoresDePe()` (o tamanho de
+`tocadoresDeSomDeMod`, exposto pela bancada) e o estado do áudio da janela do
+primeiro destino. **Reversão** — sem `estado.som?.soltar()` em
+`devolverOsSons` — vermelha, como a revisão mediu:
+
+```
+FALHOU — o som da contribuição muda de destino: o destino que saiu da tela esqueceu o tocador sem soltá-lo: o som decodificado segue de pé na janela e o áudio dela não fechou — 1 tocador(es) de pé, áudio «running»
+```
+
+Com a continuidade (abaixo), o esperado passou a ser um tocador de pé — o
+novo, no outro destino — e o áudio do primeiro «closed»; sem o `soltar`, são
+dois, e o áudio do primeiro segue «running».
+
+### 10.3 A continuidade (`108907f8`)
+
+**A regra.** `calarSonsForaDaTela` guarda `tocador.tocando` de cada som antes
+de pausar, quando vai devolver a marca. `devolverOsSons` passa adiante, em
+`sons.herdados`, os lugares dos sons que tocavam (e, desde os menores 4 e 6,
+os de todos e os dos recusados). O destino que toma a marca (`tomarAMarca`)
+fica com a herança, e `herdarOSom` decide por som: o que tocava fica com a
+declaração por aplicar — o `tocando: true` é o pedido de tocar, e o som
+recomeça do começo; os outros ficam com `declarado = quer`, e um som que
+terminou não volta (`devolverOsSons` zera `terminou`, e por isso o
+`declarado = quer` não sai de todos).
+
+**Qual som é qual** entre os destinos é a ordem dele entre as mídias, no
+documento (`lugaresDasMidias`): a chave do plano não é única entre contêineres,
+e todo destino monta a mesma declaração com o mesmo perfil e os mesmos tetos.
+
+**RED** (seção 18, contra `8ff12f12`):
+
+```
+FALHOU — o som da contribuição muda de destino: o destino que saiu da tela esqueceu o tocador sem soltá-lo: […] — 0 tocador(es) de pé, áudio «closed»
+FALHOU — o som da contribuição muda de destino: o som que tocava quando o lugar dele saiu da tela não recomeçou, do começo, no destino que tomou a marca: 1 decodificação(ões), a fonte nova de undefined, 0 tocador(es) no outro, «tocando» dito 1 vez(es), recusas [], [{"situacao":"pronta",…}]
+```
+
+O primeiro diz «0», e não «1», porque sem a continuidade ninguém tocava no
+outro destino. **Reversões:** sem guardar o que tocava, o mesmo vermelho; com
+todo som tomado religando (`declarado = undefined` para todos), «a vinheta
+tinha terminado […] e a troca de destino a tocou de novo: 2 decodificação(ões),
+2 áudio(s) da janela, […] «tocando» dito 2 vez(es)».
+
+### 10.4 Os menores
+
+- **6, o som que chega depois da troca** (`90557f49`). No destino que saiu, a
+  vinheta tocava e o sino tinha terminado; no outro, a mídia do sino ainda vinha
+  quando a marca mudou. RED, contra `108907f8`: «o sino, que tinha terminado,
+  voltou a tocar […] «tocando» da vinheta 2 vez(es), do sino 2». Reversão — o
+  som que chega montado sem a herança — o mesmo vermelho. A herança acaba
+  quando o último som dela chega: um som num lugar que o destino que saiu não
+  segurava é montado como qualquer outro.
+- **4, o som recusado** (`44be1a72`, `418ee56b`). Para «falhou» (`bytesDoSom`
+  que rejeita) e para «cheia» (o teto do cartão), RED «o som «falhou» no
+  destino que saiu voltou a «pronta» no destino que tomou a marca» (e o mesmo
+  para «cheia»). A recusa passa com a figura e o motivo, sem nova linha ao MOD
+  nem ao registro (a prova confere os dois). Reversão — `devolverOsSons`
+  tratando o recusado como os outros — os dois vermelhos. E o destino que
+  devolveu a marca só com um som recusado, ao voltar sem ninguém que a tenha
+  tomado, a toma de volta (`tomarOsSonsDevolvidos` conta todo som que chegou,
+  e não só os adiados); reversão: «não tomou a marca de volta —
+  {"tomou":false,"devolvidos":true,"anotadas":[]}».
+- **2, «carregando» durante a decodificação** (`71a9f1aa`). Nos dois jeitos de
+  o pedido chegar — `tocando: true` desde a montagem, e religado depois —, RED
+  `{"figura":"pronta","anotada":"pronta"}` com a decodificação presa. Quem diz
+  «carregando» é `pedirParaTocar`, um lugar só; reversão: os dois vermelhos.
+- **1, a segunda volta** (`f6023860`). Uma contribuição sem som e outra com:
+  RED «a varredura perguntou 2 vez(es) a um destino se ele queria a marca, sem
+  marca devolvida nenhuma», e «6 pergunta(s) na devolução, 2 na varredura
+  seguinte». Reversão — a volta aberta pela marca vaga — os dois vermelhos.
+- **3 e 5, docs** (`dcf69ab9`): sem prova; é texto.
+
+### 10.5 GREEN da rodada
+
+Em `418ee56b`: `regiao-do-mod.cjs` com 44 provas; `cargo xtask check-runtime`
+verde antes de cada commit; `cargo test -p seele-app --test frontend` com 262;
+`cargo test -p xtask` com 161; `cargo xtask check-api` verde; `cargo test -p
+seele-conformance --test mod_de_referencia` com 4; `diagnostico-de-mods.cjs`
+no Chromium do Playwright, verde; `cargo fmt --all -- --check` limpo. As
+WebViews de verdade continuam sem rodar.
+
+### 10.6 Preocupações da rodada
+
+1. **O som do servidor pedido de novo** pelo destino que toma a marca é uma
+   resposta nova do servidor do MOD: o papel é conferido de novo (`som`, senão
+   `falhou`), mas o tamanho que fica no teto de bytes do destino é o da
+   montagem. O teto de arquivo do Rust (`midia_em_bytes`) vale nos dois
+   pedidos.
+2. **Qual som é qual** é a ordem das mídias na declaração. Hoje todo destino de
+   uma contribuição monta o mesmo conteúdo, que não muda (preocupação 1). Se a
+   v6 deixar um destino desenhar outro conteúdo, a ordem deixa de bastar.
+3. **O pedido de tocar a caminho continua recusado com `SOM_FORA_DA_TELA`**
+   pelo destino que saiu, e não recomeça no novo: ele ainda não tocava
+   (preocupação 3, que a revisão confirmou).
+4. O destino que sai e volta só tem a marca de volta se ninguém a tomou; um som
+   que já tinha terminado nele segue calado na volta, pela mesma regra.
