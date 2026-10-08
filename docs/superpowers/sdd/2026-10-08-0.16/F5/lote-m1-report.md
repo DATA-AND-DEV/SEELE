@@ -168,3 +168,36 @@ Cada uma desfeita copiando o arquivo de volta e conferindo com `cmp`.
 
 A preocupação 5 de cima, a das margens, fica assim: a menor margem dos testes
 de tempo novos do `seele-core` passou de ~50 ms para ~85 ms.
+
+## Rodada 2 de conserto
+
+A re-revisão achou o guarda de fonte do C4 (`04a0ce3`) casando com o próprio
+texto: `corpo_de` procurava a assinatura em qualquer lugar do arquivo, e ela
+também está no literal do teste. Com a função renomeada, o «corpo» era o resto
+do arquivo depois do literal, e o guarda passava pelo texto dele mesmo. Commit
+`fba4015`:
+
+- `corpo_de` procura a assinatura com a quebra de linha real na frente (que
+  nenhum literal do arquivo tem), reprova dizendo «não achei … no começo de uma
+  linha» quando ela some, reprova quando o corpo não fecha na coluna zero, e
+  exige um corpo não vazio que não tenha engolido o módulo de testes.
+- O parágrafo do gêmeo do `compile_fail` diz só o que ele prova: que os imports
+  e a `Marca::nova` estão certos. Um campo renomeado ou a mais, com os campos
+  públicos (`E0560`, `E0063`), não é coberto.
+
+**O vermelho, e antes dele a medida do defeito.** Com o guarda antigo,
+`mandar_pelo_server` renomeada para `mandar_ao_server` e o `NaoSaiu` montado à
+mão: `cargo test -p seele-server --lib alcance::encontro::testes::os_envios_do_tique`
+→ `test result: ok. 1 passed` (verde com o defeito, como a re-revisão mediu). Com
+o guarda novo e o mesmo defeito: «não achei «fn mandar_pelo_server(» no começo de
+uma linha deste módulo: a função mudou de nome ou de forma, e o guarda não tem o
+que conferir…» `FAILED`. O mesmo para `registrar` renomeada para
+`registrar_no_quarto` sem o `a_falha_que_conta`: «não achei «async fn
+registrar(» no começo de uma linha…» `FAILED`. As duas reversões de antes
+continuam vermelhas: «`mandar_pelo_server` deixou de montar a falha do `send_to`
+por `NaoSaiu::do_envio`…» e «`registrar` deixou de escolher a falha do tique por
+`a_falha_que_conta`…». Cada uma restaurada com `cmp`.
+
+**Os testes:** o guarda verde; `cargo test -p seele-proto --doc` 3 ok (o
+`compile_fail`, o gêmeo e o de `version.rs`); `cargo test -p seele-server --lib
+alcance` 112 ok; fmt e o clippy dos seis crates limpos.
