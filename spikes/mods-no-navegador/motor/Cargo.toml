@@ -1,0 +1,28 @@
+[package]
+name = "motor-de-mods-wasm"
+description = "Candidata A do spike mods-no-navegador: o QuickJS do desktop (rquickjs 0.12.2) em wasm32-wasip1, com o mesmo prelúdio. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Fora do workspace. O `rquickjs` é o mesmo do `apps/seele-app/Cargo.toml:42`,
+# com as mesmas features (as padrão). O `build.rs` do `rquickjs-sys` baixa o
+# wasi-sdk do repositório oficial (`WebAssembly/wasi-sdk`) para dentro do
+# `target/`, porque o QuickJS é C e o `wasm32-unknown-unknown` não tem libc.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# A feature `allocator` não está no desktop. Ela é o conserto de um achado
+# deste spike: no `wasm32-wasip1`, o `js__malloc_usable_size` do quickjs-ng
+# devolve 0 (`quickjs/cutils.h:601-612`), e o teto de memória nunca é atingido.
+# O `RustAllocator` guarda o tamanho de cada bloco e devolve o teto ao motor.
+rquickjs = { version = "=0.12.2", features = ["allocator"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
