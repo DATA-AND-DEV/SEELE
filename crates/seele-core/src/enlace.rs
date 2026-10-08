@@ -5042,6 +5042,9 @@ fn desfazer_pin_orfao(
 /// - A impressão que não confere (`InviteMismatch`) e a chave fixada que mudou
 ///   (`PinChanged`) vão em `warn!`, com o endereço e as duas impressões:
 ///   impressão não é segredo, e sem as duas ninguém confere nada.
+/// - Quem mostrou o certificado sem provar a chave (`ChaveNaoProvada`) também
+///   vai em `warn!`, com o endereço: é o mesmo evento por outro caminho, e em
+///   `info!` ele se lia como um endereço que só não respondeu.
 /// - As outras falhas vão em `info!`, que é o nível que o `seele.log` grava.
 ///
 /// `entrou` é o endereço que venceu, quando algum venceu: a linha diz que a
@@ -5071,6 +5074,15 @@ fn registrar_a_falha_do_candidato(
             ?entrou,
             "a chave fixada deste candidato mudou: recusado dentro do TLS, antes do `Hello` \
              (ADR 0003)"
+        ),
+        // Sem impressões: a que ele mostrou é a do certificado que repetiu, e
+        // a linha do pin desfeito (`desfazer_o_pin_deste_aperto`) já a traz
+        // quando o verificador chegou a fixá-la.
+        ConnectError::ChaveNaoProvada => tracing::warn!(
+            ?onde,
+            ?entrou,
+            "este candidato mostrou um certificado sem provar ter a chave dele: recusado \
+             dentro do TLS, antes do `Hello`"
         ),
         outra => tracing::info!(?onde, erro = %outra, ?entrou, "este endereço do convite não deu"),
     }
@@ -7241,6 +7253,74 @@ mod tests {
                 && linha.contains("Unreachable")),
             "a falha comum de um candidato perdedor sumiu do log quando outro entrou, ou deixou \
              de ir em `info`, como no caminho sem vencedor. Rastro: {linhas:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_candidato_perdedor_que_nao_prova_a_chave_vai_ao_log_como_aviso() {
+        // O impostor que repete o certificado de um servidor sem ter a chave
+        // dele é o mesmo evento que a recusa pela impressão, por outro caminho:
+        // alguém com a identidade errada num endereço da corrida. A linha da
+        // corrida (com o endereço e quem entrou) ia em `info`, como uma falha
+        // comum, porque `registrar_a_falha_do_candidato` só subia para `warn` a
+        // impressão que não confere e a chave trocada.
+        //
+        // O impostor primeiro, para ele perder antes de o verdadeiro vencer (a
+        // corrida dispara um candidato a cada 250 ms, e o impostor falha em
+        // milissegundos). Sem impressão esperada: o verificador o aceita como
+        // primeiro contato, e o TLS cai na assinatura.
+        //
+        // `#[tokio::test]` de thread única: `set_default` fixa o rastro nesta
+        // thread, e a corrida inteira roda nela.
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+
+        let (onde_do_impostor, _) = impostor_que_repete_o_certificado();
+        let (onde_do_verdadeiro, impressao_do_verdadeiro, _) = servidor_que_conta_os_hellos();
+        let loja = Arc::new(crate::tofu::MemoryPinStore::new());
+        let destinos = vec![
+            destino_na_chave(onde_do_impostor, "chave-do-impostor", None),
+            destino_na_chave(
+                onde_do_verdadeiro,
+                "chave-do-verdadeiro",
+                Some(&impressao_do_verdadeiro),
+            ),
+        ];
+
+        let entrou = tokio::time::timeout(
+            Duration::from_secs(20),
+            Enlace::conectar_entre_com_bilhete(
+                destinos,
+                None,
+                SigningKey::from_bytes(&[11; 32]),
+                Arc::clone(&loja) as Arc<dyn PinStore>,
+            ),
+        )
+        .await
+        .expect("a corrida não terminou");
+        assert!(
+            entrou.is_ok(),
+            "o candidato verdadeiro não venceu a corrida ({:?}), e o teste mediu outra coisa",
+            entrou.err()
+        );
+
+        let linhas = rastro.linhas();
+        let do_impostor = format!("{onde_do_impostor:?}");
+        let do_verdadeiro = format!("{onde_do_verdadeiro:?}");
+        let Some(da_corrida) = linhas
+            .iter()
+            .find(|linha| linha.contains(&do_impostor) && linha.contains(&do_verdadeiro))
+        else {
+            panic!(
+                "a falha do impostor que perdeu a corrida não deixou a linha da corrida, com o \
+                 endereço dele e o de quem entrou. Rastro: {linhas:?}"
+            );
+        };
+        assert!(
+            da_corrida.starts_with("WARN"),
+            "o candidato perdedor que mostrou o certificado sem provar a chave foi ao log como \
+             falha comum, e não como aviso: quem lê o `seele.log` não separa o impostor de um \
+             endereço que não respondeu. Linha: {da_corrida}"
         );
     }
 
