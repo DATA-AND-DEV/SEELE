@@ -108,6 +108,10 @@ tauri = { version = "2", features = ["test"] }
 # O registro de servidores escreve em disco, e o teste dele precisa de uma pasta
 # de configuração que não seja a de quem está rodando o teste.
 tempfile = "3.27.0"
+# A soma que o `manifesto.py` escreve por pacote, conferida em
+# `tests/manifesto_hibrido.rs`. A mesma versão do `seele-lancador`: não
+# acrescenta crate ao grafo.
+sha2 = "0.11.0"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

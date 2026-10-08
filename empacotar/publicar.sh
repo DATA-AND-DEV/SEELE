@@ -242,7 +242,9 @@ uso() {
 "  TAURI_SIGNING_PRIVATE_KEY             a chave do projeto (fica só aqui)" \
 "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD    a senha dela" \
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
-"  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)"
+"  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)" \
+"  SEELE_MANIFESTO_ANTERIOR              manifestos a acumular além do publicado" \
+"                                        (a 0.16.0 recebe o da 0.15.2 por aqui)"
 }
 
 # ------------------------------------------------------------- a decisão
@@ -2116,7 +2118,35 @@ for pub_repo in $REPOS; do
     printf '\n'
     passo "publicando em $pub_repo"
 
-    if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$pub_repo"; then
+    # **Acumulado** (spec 0.16, §1): o manifesto novo começa do que está
+    # publicado, e não do zero. Sem isso, cada release apagaria a lista das
+    # anteriores, e o launcher esqueceria o que existe.
+    #
+    # `SEELE_MANIFESTO_ANTERIOR` acrescenta outros, separados por espaço. É por
+    # onde a 0.16.0 recebe o da 0.15.2, que nunca foi `latest` e por isso não
+    # está no endereço de cima. Ver `docs/versoes-lado-a-lado.md`, §3.
+    ma_anteriores=""
+    ma_baixado="$TEMPORARIO/anterior-$pub_repo-latest.json"
+    mkdir -p "$(dirname "$ma_baixado")"
+    rm -f "$ma_baixado"
+    curl -fsSL "https://github.com/$pub_repo/releases/latest/download/latest.json" \
+        -o "$ma_baixado" > /dev/null 2>&1 || true
+    if [ -s "$ma_baixado" ]; then
+        ma_anteriores="--anterior $ma_baixado"
+    else
+        aviso "não baixei o latest.json publicado em $pub_repo." \
+            "O manifesto sai só com esta versão e o que SEELE_MANIFESTO_ANTERIOR trouxer," \
+            "e o launcher de quem atualizar esquece as outras."
+    fi
+    for ma_extra in ${SEELE_MANIFESTO_ANTERIOR:-}; do
+        if [ ! -s "$ma_extra" ]; then
+            morrer "SEELE_MANIFESTO_ANTERIOR aponta para «$ma_extra», que não existe ou está vazio."
+        fi
+        ma_anteriores="$ma_anteriores --anterior $ma_extra"
+    done
+
+    # shellcheck disable=SC2086 # as opções do anterior são palavras separadas de propósito
+    if ! python3 "$RAIZ/empacotar/manifesto.py" "$RAIZ/entrega" "v$VERSAO" --repo "$pub_repo" $ma_anteriores; then
         morrer "o manifesto de $pub_repo não saiu." \
             "Sem ele o botão de atualizar do app não acha este release."
     fi

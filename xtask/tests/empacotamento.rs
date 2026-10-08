@@ -616,6 +616,7 @@ entrega, tag = sys.argv[1], sys.argv[2]
 repo = sys.argv[sys.argv.index("--repo") + 1]
 with open(os.environ["SEELE_TESTE_DIARIO"], "a", encoding="utf-8") as diario:
     diario.write("manifesto " + repo + "\n")
+    diario.write("manifesto-argumentos " + " ".join(sys.argv[3:]) + "\n")
 pathlib.Path(entrega, "latest.json").write_text(
     '{"url": "https://github.com/' + repo + '/releases/download/' + tag + '/SEELE.dmg"}',
     encoding="utf-8",
@@ -2652,6 +2653,56 @@ fn cada_casa_recebe_o_manifesto_que_aponta_para_ela_mesma() {
              onde o arquivo não está."
         );
     }
+}
+
+#[test]
+fn o_manifesto_anterior_pedido_chega_ao_manifesto_py() {
+    // **Acumulado** (spec 0.16, §1). A 0.16.0 recebe o manifesto da 0.15.2,
+    // que nunca foi `latest`, por `SEELE_MANIFESTO_ANTERIOR`. Um script que
+    // baixasse e aceitasse a variável sem repassá-la ao `manifesto.py`
+    // publicaria um manifesto sem a linha legada, e nada avisaria.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let anterior = bancada.base.join("anterior-da-0.15.2.json");
+    escrever(&anterior, "{}", false);
+    let anterior_texto = anterior.display().to_string();
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_MANIFESTO_ANTERIOR", anterior_texto.as_str())],
+    );
+    assert!(
+        saida
+            .diario
+            .contains(&format!("--anterior {anterior_texto}")),
+        "o manifesto anterior pedido não chegou ao manifesto.py:\n{}\n{}",
+        saida.diario,
+        saida.texto
+    );
+}
+
+#[test]
+fn um_manifesto_anterior_que_nao_existe_para_o_release() {
+    // Um nome errado em `SEELE_MANIFESTO_ANTERIOR` sairia como um manifesto
+    // sem a linha legada. Melhor parar dizendo qual arquivo faltou.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("SEELE_MANIFESTO_ANTERIOR", "/caminho/que/nao/existe.json")],
+    );
+    assert_ne!(saida.estado, 0, "seguiu com um anterior que não existe");
+    assert!(
+        saida.texto.contains("/caminho/que/nao/existe.json"),
+        "a recusa não diz qual arquivo faltou:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.diario.contains("manifesto-argumentos"),
+        "o manifesto.py rodou assim mesmo:\n{}",
+        saida.diario
+    );
 }
 
 #[test]
