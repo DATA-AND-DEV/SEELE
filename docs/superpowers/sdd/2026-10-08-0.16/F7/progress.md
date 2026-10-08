@@ -42,7 +42,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 |---|---|---|---|
 | — | plano | escrito, mandado à orquestradora | `906e326b` |
 | 1 | 4e, a janela do Comandante | **feita** | `29d66937` |
-| 2 | 4a, o certificado Ed25519 | a fazer | — |
+| 2 | 4a, o certificado Ed25519 | **feita** | `43d81c31` |
 | 3 | 4c, a campainha | a fazer | — |
 | 4 | 7g-núcleo, a agenda | a fazer | — |
 | 5 | 7c-áudio, o toque só de saída | a fazer | — |
@@ -71,3 +71,32 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 - **Um deslize corrigido:** a cópia de segurança da reversão foi gravada por um
   instante em `$TMPDIR`, fora do worktree. Apagada logo em seguida. Daqui em
   diante, só o scratchpad.
+
+## Tarefa 2 — o certificado Ed25519 da sala (08/10)
+
+- **A medida que vinha primeiro:** o Ed25519 aperta a mão no QUIC deste
+  repositório, com `rustls` 0.23.45, `ring` 0.17.14 e `quinn` 0.11.11. O teste é
+  `o_ed25519_aperta_a_mao_no_quic_deste_repositorio`.
+- **O vetor congelado:** o SHA-256 do DER da semente de zeros é
+  `82547b3cfe6c9b6f4a2eb295889c4b079b4d5550fbf48f9149cfa6afdc491d02`.
+  - **Conferido fora do Rust:** o `openssl` do sistema (LibreSSL 3.3) mostra
+    `Serial Number: 1`, `CN=seele-sala`, validade de 23/09/2026 a 31/12/9999,
+    Ed25519 e `DNS:seele-sala`.
+  - Ele não extrai chave Ed25519, então a chave foi conferida com a
+    `cryptography` 49 do Python: é a da semente de zeros
+    (`3b6a27bc…8b59da29`), e a autoassinatura confere.
+- **As reversões:**
+  - um par sorteado no lugar do par da semente: 5 testes reprovam;
+  - ignorar a identidade injetada: reprova com «não apresentou a identidade»;
+  - gravá-la no banco: reprova com «a chave da pessoa foi gravada no banco»;
+  - o número de série `None`: **o rcgen 0.14 não sorteia, deriva da chave**.
+    Só o vetor reprovou. O plano esperava outra coisa, e foi corrigido;
+  - um `Debug` que vaza a chave: **a primeira versão do teste passou**. Ela
+    procurava a semente entre colchetes, e no vazamento a semente vem no meio
+    da lista do PKCS#8. O teste agora procura a sequência sem colchetes e em
+    hex, e reprova.
+- **Rodados:**
+  - `seele-server --test identidade_da_sala` (7);
+  - `seele-server --lib tls` (5);
+  - o clippy de `seele-server`, `seele-conformance` e `seele-app`, porque o
+    `ServerConfig` mudou.
