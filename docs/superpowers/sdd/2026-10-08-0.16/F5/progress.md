@@ -165,3 +165,12 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - Cada passada do `emTexto` tem um orçamento de 1024 objetos.
     - O teste que tinha sido ajustado voltou byte a byte ao original.
   - **A conta de fim de volta com uma ficha só vinha de antes do lote** (`7953a3b`). Um MOD com ouvinte de eventos, ou com trabalho depois da linha, perdia quase tudo para ela. Medido: 0/15 com 120 ms de trabalho; agora dá 15/0 em todos os casos.
+- **Onda 2 fechada.** Os quatro lotes estão em `0.16/lotes`, no `59a4221`.
+  - **O que o branch combinado mostrou**, com o `target/` deste worktree:
+    - fmt e `clippy --workspace --all-targets --all-features -D warnings` limpos;
+    - `seele-app`: todos os binários verdes (259, 263 e os menores);
+    - `seele-core --lib` 432, `seele-ffi --lib` 124 (mais 1 ignorado), `seele-proto` 316 com os doctests, `seele-server --lib` 562, `xtask` 161;
+    - `check-runtime` verde;
+    - conformidade verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos` e `mod_de_referencia`;
+    - o `quarto_pelo_link` ficou de fora, por causa da porta 8384.
+  - **Ficam para a orquestradora decidir:** onde mora o conserto dos testes que falam com o ponto de encontro de produção, no G-servidor da onda 3 ou numa pendência nova.
