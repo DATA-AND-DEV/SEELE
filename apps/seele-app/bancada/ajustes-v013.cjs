@@ -3,6 +3,63 @@ const assert = require('node:assert/strict');
 const { servir, respostas, retrato } = require('./telas.cjs');
 const { chromium: abrirChromium } = require('./playwright.cjs');
 const chromium = abrirChromium();
+
+/**
+ * Espera um elemento dizer `trecho`, e reprova com o que ele diz se não disser.
+ *
+ * Três segundos: a faixa de contexto da configuração é redesenhada por
+ * `atualizarServer`, que roda a cada 500 ms, e lê o quadro da sessão, que
+ * também anda a cada 500 ms. Um segundo cobre os dois; o resto é folga de
+ * máquina lenta.
+ */
+async function esperarQueDiga(page, id, trecho, defeito) {
+  try {
+    await page.waitForFunction(
+      ([id, trecho]) => (document.getElementById(id)?.textContent ?? '').includes(trecho),
+      [id, trecho],
+      { timeout: 3000 },
+    );
+  } catch {
+    const agora = await page.evaluate(id => document.getElementById(id)?.textContent, id);
+    assert.fail(`${defeito} — #${id} diz «${agora}»`);
+  }
+}
+
+/**
+ * A tinta de cada linha do título do perfil, pela fonte de verdade.
+ *
+ * A área de conteúdo do `Range` não serve: esta face tem 38px de área para 24px
+ * de letra, e as áreas se sobrepõem com qualquer altura de linha abaixo de 1,58.
+ * O defeito que se vê é a tinta de uma linha encostar na da outra. A linha de
+ * base sai do topo da área mais o ascendente da fonte; a altura da tinta, de
+ * `measureText` do texto daquela linha.
+ */
+function tintasDoTitulo() {
+  const h2 = document.getElementById('perfil-titulo');
+  const no = h2.firstChild;
+  const linhas = [];
+  for (let i = 0; i < no.textContent.length; i++) {
+    const faixa = document.createRange();
+    faixa.setStart(no, i);
+    faixa.setEnd(no, i + 1);
+    const caixa = faixa.getClientRects()[0];
+    if (!caixa) continue;
+    let linha = linhas.find(l => Math.abs(l.topo - caixa.top) < 1);
+    if (!linha) linhas.push(linha = { topo: caixa.top, texto: '' });
+    linha.texto += no.textContent[i];
+  }
+  const estilo = getComputedStyle(h2);
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = `${estilo.fontWeight} ${estilo.fontSize} ${estilo.fontFamily}`;
+  const tintas = linhas.map(l => {
+    const m = ctx.measureText(l.texto.trim());
+    const base = l.topo + m.fontBoundingBoxAscent;
+    return { texto: l.texto.trim(), topo: base - m.actualBoundingBoxAscent, fim: base + m.actualBoundingBoxDescent };
+  });
+  const folga = tintas.length > 1 ? Math.round((tintas[1].topo - tintas[0].fim) * 10) / 10 : null;
+  return { tintas, folga, lineHeight: estilo.lineHeight };
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -24,6 +81,21 @@ const chromium = abrirChromium();
     await page.evaluate(r => { window.testTable.snapshot = r; fecharServer(); $('tela-boot').hidden = true; $('tela-sessao').hidden = false; desenhar(r); }, retrato());
     await page.evaluate(() => abrirServer('tela-sessao'));
     assert.equal(await page.locator('#secao-mods').isVisible(), true);
+    // **A faixa de contexto acompanha o que muda com a configuração aberta**
+    // (lote J da F5). Ela diz a sala, o modo do microfone e, no modo tecla, a
+    // tecla — e era escrita só ao abrir: trocada a tecla para F, o botão dizia
+    // F e a faixa ao lado continuava em ESPAÇO; trocado o modo, a faixa dizia o
+    // de antes.
+    await esperarQueDiga(page, 'server-contexto', 'microfone abre enquanto segura ESPAÇO',
+      'a faixa de contexto não diz a tecla de falar padrão no modo tecla');
+    await page.evaluate(() => { window.testTable.tecla_de_falar = 'KeyF'; pararDeOuvirTecla(); });
+    await esperarQueDiga(page, 'server-contexto', 'microfone abre enquanto segura F',
+      'trocada a tecla de falar para F, a faixa de contexto continuou dizendo a tecla de antes');
+    // O modo: a ponte aplica e o retrato da sessão passa a dizer o novo.
+    await page.evaluate(() => { window.testTable.snapshot.voice_mode = 'VoiceActivated'; return escolherModo('VoiceActivated'); });
+    await esperarQueDiga(page, 'server-contexto', 'microfone abre por voz',
+      'trocado o modo do microfone para VOZ, a faixa de contexto continuou dizendo o modo de antes');
+    await page.evaluate(() => { window.testTable.snapshot.voice_mode = 'PushToTalk'; window.testTable.tecla_de_falar = null; pararDeOuvirTecla(); });
     await page.evaluate(() => abrirSecao('secao-mods'));
     await page.screenshot({ path: '/tmp/seele-mods-v013.png' });
     await page.evaluate(() => { fecharServer(); window.testTable.snapshot = null; return abrirServer('tela-boot'); });
@@ -91,6 +163,64 @@ const chromium = abrirChromium();
     assert.equal(await page.locator('.aviso-de-mod').count(), 0);
     assert.equal(await page.evaluate(() => testSurfaces.porChave.size), 1, 'avisos expirados retidos');
     assert.deepEqual(errors, []);
+
+    // **A entrada por link, sem nome nesta máquina** (lote J da F5). O launcher
+    // pede `entrar`, e a primeira entrada sem nome pergunta antes do `connect`.
+    // A ponte daqui resolve em microtarefa, que é o que expunha a ordem de
+    // carga: com a abertura chamada no topo de `tela-boot.js`, a entrada
+    // chegava à pergunta antes de `camada-nomear.js` existir — `perguntarONome
+    // is not defined`, e a pergunta nunca abria.
+    const link = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+    const errosDoLink = []; link.on('pageerror', e => errosDoLink.push(e.message));
+    await link.addInitScript(table => {
+      window.testTable = table; window.testCalls = [];
+      window.__TAURI__ = {
+        core: { invoke: async (cmd, args) => {
+          window.testCalls.push({ cmd, args });
+          // O que se grava fica gravado: a pergunta relê o nome depois de fechar.
+          if (cmd === 'escolher_apelido_local') window.testTable.apelido_local = args.apelido;
+          return window.testTable[cmd] ?? null;
+        } },
+        event: { listen: async () => () => {} },
+        window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+      };
+    }, respostas({
+      apelido_local: '', snapshot: null, microfones: [], saidas: [],
+      abertura: { entrar: 'seele://192.0.2.1:8384', hospedar: false, nome_publico: null },
+      analisar_convite: { alvo: '192.0.2.1:8384', token: null },
+    }));
+    await link.goto(`http://127.0.0.1:${server.address().port}`);
+    try {
+      await link.waitForFunction(() => !document.getElementById('perfil').hidden, null, { timeout: 3000 });
+    } catch {
+      const naEntrada = await link.evaluate(() => document.getElementById('boot-erro').textContent);
+      assert.fail(`aberta por um link sem nome nesta máquina, a janela não perguntou o nome — a entrada diz «${naEntrada}»`);
+    }
+    assert.equal(await link.evaluate(() => $('perfil-titulo').textContent), 'COMO OS OUTROS VÃO TE CHAMAR?');
+    assert.equal(await link.evaluate(() => testCalls.filter(c => c.cmd === 'connect').length), 0,
+      'a entrada por link conectou antes de a pergunta do nome ser respondida');
+
+    // O título da pergunta quebra em duas linhas na caixa de 480px. Com a
+    // altura de linha herdada de `base.css` (16px para letra de 24px), a tinta
+    // da segunda encostava na da primeira (folga de −0,9px).
+    await link.evaluate(() => document.fonts.ready);
+    const titulo = await link.evaluate(tintasDoTitulo);
+    assert.equal(titulo.tintas.length, 2, `o título da pergunta deixou de quebrar em duas linhas, e esta medida não mede mais nada: ${JSON.stringify(titulo)}`);
+    assert.ok(titulo.folga > 0,
+      `as duas linhas do título da pergunta se sobrepõem: folga de ${titulo.folga}px entre as tintas, com line-height ${titulo.lineHeight}`);
+
+    // Responder pelo teclado: o foco está no campo, e Enter salva.
+    await link.keyboard.type('Bia');
+    await link.keyboard.press('Enter');
+    await link.waitForFunction(() => testCalls.some(c => c.cmd === 'connect'), null, { timeout: 3000 });
+    const ordem = await link.evaluate(() => testCalls.map(c => c.cmd).filter(c => c === 'escolher_apelido_local' || c === 'connect'));
+    assert.deepEqual(ordem, ['escolher_apelido_local', 'connect'], 'o nome não foi gravado antes do connect');
+    assert.equal(await link.evaluate(() => testCalls.find(c => c.cmd === 'connect').args.nickname), 'Bia',
+      'a entrada por link não levou o nome que acabou de ser respondido');
+    assert.deepEqual(errosDoLink, []);
+    await link.close();
+
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
+    console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

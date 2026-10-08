@@ -9694,45 +9694,36 @@ fn a_linha_de_estado_nomeia_a_tecla_de_falar() {
         );
     }
 
-    // **E a faixa de contexto acompanha a troca.** A linha do operador é
-    // redesenhada a cada quadro; a faixa da configuração, não — ela era escrita
-    // ao abrir a tela, antes de a leitura da tecla voltar, e mais nunca. Medido
-    // na revisão do lote J: trocada a tecla para F, o botão e o operador diziam
-    // F, e a faixa ao lado continuava em «segura ESPAÇO». Por isso as duas
-    // releituras da tecla da configuração redesenham a faixa quando a leitura
-    // volta — dentro do `.then`, e não antes dele.
+    // **E a faixa de contexto acompanha o que muda com ela aberta.** A linha do
+    // operador é redesenhada a cada quadro; a faixa da configuração era escrita
+    // ao abrir a tela, e mais nunca. Medido nas revisões do lote J: trocada a
+    // tecla para F, o botão e o operador diziam F e a faixa continuava em
+    // «segura ESPAÇO»; trocado o modo do microfone, a faixa dizia o modo de
+    // antes. A rodada 1 consertou a tecla com um redesenho no `.then` de cada
+    // releitura, e o modo ficou de fora — dois caminhos, e o terceiro esquecido.
     //
-    // O recorte é o argumento do `.then`, por parênteses casados: `abrirServer`
-    // também chama a faixa de forma síncrona logo depois, e essa chamada — a que
-    // lê a tecla de antes — não pode contar como a que espera a leitura.
-    let server = read("ui/tela-server.js");
-    for funcao in ["function pararDeOuvirTecla(", "async function abrirServer("] {
-        let corpo = js_function(&server, funcao);
-        let depois_da_leitura = corpo
-            .split_once("recarregarTeclaDeFalar().then(")
-            .map(|(_, resto)| {
-                let mut fundura = 1_i32;
-                let fim = resto
-                    .char_indices()
-                    .find(|&(_, letra)| {
-                        match letra {
-                            '(' => fundura += 1,
-                            ')' => fundura -= 1,
-                            _ => {}
-                        }
-                        fundura == 0
-                    })
-                    .map_or(resto.len(), |(onde, _)| onde);
-                &resto[..fim]
-            })
-            .unwrap_or_default();
-        assert!(
-            depois_da_leitura.contains("desenharContextoDaSessao()"),
-            "`{funcao}` relê a tecla de falar e não redesenha a faixa de contexto \
-             quando a leitura volta: a faixa continua dizendo a tecla de antes ao \
-             lado do botão que já diz a nova:\n{corpo}"
-        );
-    }
+    // **Um caminho só**: `atualizarServer`, que roda ao abrir e a cada 500 ms
+    // com a tela na frente, redesenha a faixa do quadro da sessão e da tecla de
+    // agora. Tecla, modo, mudo e sala chegam todos por ele. Uma segunda chamada
+    // em outro lugar é o começo de um caminho que alguém esquece de estender.
+    let server = without_comments(&read("ui/tela-server.js"));
+    let atualizar = js_function(&server, "async function atualizarServer(");
+    assert!(
+        atualizar.contains("desenharContextoDaSessao()"),
+        "`atualizarServer` não redesenha a faixa de contexto: o que muda com a \
+         configuração aberta — a tecla de falar, o modo do microfone — fica dito \
+         como era ao abrir:\n{atualizar}"
+    );
+    let chamadas = server.matches("desenharContextoDaSessao()").count()
+        - server
+            .matches("function desenharContextoDaSessao()")
+            .count();
+    assert_eq!(
+        chamadas, 1,
+        "a faixa de contexto é redesenhada em {chamadas} lugares de \
+         `tela-server.js`; ela tem um caminho só, `atualizarServer`, e um segundo \
+         é o que fez a troca de modo ficar de fora na rodada 1"
+    );
 
     // **Em `base.js`, porque as duas telas a usam.** Ela morava em
     // `tela-server.js`, que carrega depois de `tela-sessao.js`: chamada de lá,
@@ -11891,6 +11882,32 @@ fn sem_nome_o_primeiro_conectar_pergunta_antes() {
         "o que o launcher pede à janela roda antes de os outros scripts \
          carregarem: aberta por um link sem nome nesta máquina, a entrada chega à \
          pergunta antes de `camada-nomear.js` existir, e a pergunta nunca abre"
+    );
+}
+
+#[test]
+fn o_titulo_do_perfil_tem_altura_de_linha_propria() {
+    // A pergunta do nome antes da primeira entrada («COMO OS OUTROS VÃO TE
+    // CHAMAR?») não cabe numa linha da caixa de 480px. O título herdava os 16px
+    // de altura de linha de `base.css`, com letra de 24px, e a tinta da segunda
+    // linha encostava na da primeira — medido no Chromium, folga de −0,9px.
+    //
+    // A medida de verdade é a de `bancada/ajustes-v013.cjs`, que abre a pergunta
+    // e mede a tinta das duas linhas. Este guarda é a metade que roda em toda
+    // máquina: sem `line-height` na regra do título do perfil, a herança volta.
+    let folha = without_comments(&read("ui/camada-nomear.css"));
+    let Some(regra) = folha
+        .split(".perfil-cabeca .nomear-titulo {")
+        .nth(1)
+        .and_then(|resto| resto.split('}').next())
+    else {
+        panic!("a regra `.perfil-cabeca .nomear-titulo` sumiu de `camada-nomear.css`");
+    };
+    assert!(
+        regra.contains("line-height"),
+        "o título do perfil voltou a herdar a altura de linha de `base.css` (16px \
+         para letra de 24px): a pergunta do nome quebra em duas linhas, e a segunda \
+         encosta na primeira:\n{regra}"
     );
 }
 

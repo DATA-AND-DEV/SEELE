@@ -742,18 +742,14 @@ async function abrirServer(origem) {
   $("server-erro").hidden = true;
   // A tecla gravada, relida a cada abertura: ela pode ter sido trocada noutra
   // janela, e a lista de atalhos que mente é o defeito que esta linha impede.
-  // A faixa de contexto é redesenhada de novo quando a leitura volta: a chamada
-  // síncrona logo abaixo ainda lê a tecla de antes.
-  recarregarTeclaDeFalar().then((tecla) => {
-    desenharTeclaDeFalar(tecla);
-    desenharContextoDaSessao();
-  });
+  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
   conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
   // A recusa da seção do servidor some junto: ela é sobre o arquivo que alguém
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
   $("server-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
-  desenharContextoDaSessao();
+  // A faixa de contexto não é escrita aqui: é `atualizarServer`, logo abaixo e
+  // a cada 500 ms, que a desenha.
   await desenharDispositivos();
   await atualizarServer();
   // A seção lembrada precisa reler a sessão: ela pode ter aberto antes de hospedar.
@@ -858,10 +854,10 @@ function desenharContextoDaSessao() {
   // `keydown` compara (`tela-sessao.js`).
   //
   // Ler a mesma variável não basta para concordar: esta faixa não é redesenhada
-  // a cada quadro, como a do operador. Ela fica certa porque as duas releituras
-  // da tecla — `abrirServer` e `pararDeOuvirTecla` — a redesenham quando a
-  // leitura volta. Escrita só ao abrir, ela dizia ESPAÇO ao lado do botão que já
-  // dizia F (revisão do lote J).
+  // a cada quadro da sessão, como a do operador. Ela fica certa porque
+  // `atualizarServer` a redesenha ao abrir e a cada 500 ms, e é o único que a
+  // desenha. Escrita só ao abrir, ela dizia ESPAÇO ao lado do botão que já dizia
+  // F, e o modo de antes depois de uma troca de modo (revisões do lote J).
   const comoAbre = {
     PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
@@ -975,6 +971,11 @@ async function atualizarServer() {
   desenharNivel(snapshot);
   marcarLinhas(snapshot);
   desenharModos(snapshot, gravado);
+  // **A faixa de contexto, por aqui e só por aqui.** Ela era escrita ao abrir a
+  // tela e mais nunca: trocada a tecla de falar ou o modo do microfone com a
+  // configuração aberta, ela continuava dizendo o de antes (revisões do lote J).
+  // Daqui ela anda junto com o resto desta tela, a cada 500 ms.
+  desenharContextoDaSessao();
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
   const grupoServidor = document.querySelector('[aria-labelledby="server-grupo-servidor"]');
@@ -1586,13 +1587,10 @@ function pararDeOuvirTecla() {
   ouvindoTecla = false;
   const botao = $("server-tecla-falar");
   if (botao) delete botao.dataset.ouvindo;
-  // O botão e a faixa de contexto do cabeçalho, os dois com a tecla que voltou
-  // do disco: a faixa diz «segura ESPAÇO», e sem isto ela continuava dizendo a
-  // tecla de antes ao lado do botão que já dizia a nova.
-  recarregarTeclaDeFalar().then((tecla) => {
-    desenharTeclaDeFalar(tecla);
-    desenharContextoDaSessao();
-  });
+  // A faixa de contexto do cabeçalho também diz a tecla («segura ESPAÇO»), e
+  // quem a redesenha com a tecla nova é `atualizarServer`, no próximo meio
+  // segundo — o mesmo caminho do modo do microfone.
+  recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
   conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
 }
 
