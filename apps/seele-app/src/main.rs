@@ -2557,8 +2557,8 @@ const CONTA_DO_BALDE_DO_REGISTRO: &str =
 /// **Diz a conta que um balde do registro guardou e nenhuma linha levou**.
 ///
 /// Quem a chama é [`Session::dizer_as_contas_do_registro`], quando os baldes
-/// vão embora: ao fechar a sessão ([`Session::revogar`]) e na saída do app,
-/// que não passa por `revogar`.
+/// vão embora: ao fechar a sessão ([`Session::revogar`]); a saída do app, que
+/// não passa por `revogar`, é a outra porta que a deve chamar (lote F).
 ///
 /// Com ficha ou sem, como a última linha de uma instância do `console`
 /// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora, e guardar a
@@ -12795,7 +12795,9 @@ mod o_teto_de_vazao_do_registro {
             for _ in 0..200 {
                 midia_vinda_do_servidor_dita(&baldes, agora, "a/b", 7, "imagem", 8);
             }
+            recusa(&baldes, agora, "a/b");
             midia_servida_dita(&baldes, agora, "a/b", 7, "img/a.png", "imagem", 8);
+            midia_vinda_do_servidor_dita(&baldes, agora + UMA_FICHA, "a/b", 7, "imagem", 8);
         });
         let vindas: Vec<&str> = rastro
             .lines()
@@ -12803,9 +12805,10 @@ mod o_teto_de_vazao_do_registro {
             .collect();
         assert_eq!(
             vindas.len(),
-            RAJADA_DO_CONSOLE as usize,
+            RAJADA_DO_CONSOLE as usize + 1,
             "duzentas mídias vindas do servidor no mesmo instante passaram de outro jeito que a \
-             rajada: com RUST_LOG=debug, um MOD num laço escreve sem teto"
+             rajada, e a seguinte um quarto de segundo depois: com RUST_LOG=debug, um MOD num \
+             laço escreve sem teto"
         );
         assert!(
             vindas
@@ -12813,9 +12816,26 @@ mod o_teto_de_vazao_do_registro {
                 .all(|linha| linha.split_whitespace().next() == Some("DEBUG")),
             "a mídia vinda do servidor deixou de sair em DEBUG: {rastro}"
         );
+        let recusada = rastro
+            .lines()
+            .find(|linha| linha.contains("mídia de MOD recusada"));
+        assert!(
+            recusada
+                .is_some_and(|linha| linha.contains("mod_id=a/b") && !linha.contains("suprimidas")),
+            "as mídias vindas do servidor gastaram a ficha dos avisos do mesmo MOD, e a recusa \
+             sumiu — o defeito de 23/09 na direção oposta: {rastro}"
+        );
         assert!(
             rastro.contains("mídia de MOD servida"),
             "as mídias vindas do servidor gastaram a ficha das servidas do mesmo MOD: {rastro}"
+        );
+        let seguradas = 200 - RAJADA_DO_CONSOLE as usize;
+        assert!(
+            vindas
+                .last()
+                .is_some_and(|linha| linha.contains(&format!("suprimidas={seguradas}"))),
+            "a mídia vinda do servidor que passou depois do aperto não diz as {seguradas} que o \
+             balde segurou: {rastro}"
         );
     }
 
