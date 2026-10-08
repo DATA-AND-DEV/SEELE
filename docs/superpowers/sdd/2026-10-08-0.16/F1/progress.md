@@ -34,6 +34,12 @@ Plano: `docs/superpowers/plans/2026-10-08-0.16-F1-protocolo.md`. Branch `0.16/pr
 | V5 razões 18–21 | feito | `206f269c` | `ChamadaEncerrada`, `NinguemAtendeu`, `ChamadaRecusada` (terminais no `enlace.rs`) e `ModsDeOutraApi { apis: u64 }`, em máscara para a razão continuar `Copy`. Tocou a FFI (`EndReason`) e o `frases.js` (frases provisórias), que o guarda da casca exige. Três reversões |
 | F4: hashes do navegador | feito | `64792dee` | `HashesDoNavegador` (45), as constantes das janelas, o `ALPN_DO_NAVEGADOR` e o doc do `Server::impressao`. Bytes conferidos por uma conta independente. Reversão: sem a ordem, reprova |
 
+## As pontas (plano `docs/superpowers/plans/2026-10-08-0.16-F1b-pontas.md`, `f55ae8c4`)
+
+| tarefa | estado | commit | nota |
+|---|---|---|---|
+| P7a a API guardada e anunciada | feito | `4112f96b` | **esquema 14** (a migração nova). O `EnabledMod.api` obrigou os dois construtores do `main.rs` a mudar para compilar, e eles passaram a gravar `instalado.api`: isso é a P7b, que ficou feita junto, sem o teste próprio da tela. Achado pelo teste: o `definir_conjunto`, o outro caminho de escrita, descartava a API. A subida lê a API com `como_ele_se_chama`, porque `read_manifest` recusaria um MOD da API 5 antes de dizer o número. Três reversões reprovam |
+
 ## Verificação final (08/10)
 
 - `cargo fmt --all -- --check` limpo; `cargo clippy --workspace --all-targets` sem aviso.
