@@ -302,7 +302,7 @@ impl<'a> Resolvedor<'a> {
 
         Ok(VersaoResolvida {
             dados: self.deposito.pasta_de_dados(&versao),
-            unidade: publicacao.unit,
+            unidade: publicacao.unit.clone(),
             versao,
             executavel,
         })
@@ -326,7 +326,7 @@ impl<'a> Resolvedor<'a> {
                 versao: versao.clone(),
             });
         };
-        let Some(unidade) = publicacao.unit else {
+        let Some(unidade) = &publicacao.unit else {
             return Ok(());
         };
         if unidade.protocol != protocolo_anunciado {
