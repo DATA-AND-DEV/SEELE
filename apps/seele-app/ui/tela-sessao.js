@@ -313,6 +313,17 @@ function fraseDoVeredito(veredito, deOnde = null) {
 let foneJaAvisado = false;
 
 /**
+ * A geração da sessão em que a faixa de fone acendeu.
+ *
+ * A marca é da execução, e a faixa é da sessão. Não dispensada, ela ficava
+ * acesa dentro da tela de sessão escondida e reaparecia sobre o servidor
+ * seguinte. `ejetar` a apaga ao sair pelo SAIR DO SERVIDOR; a saída pelo fim de
+ * sessão mora em `tela-fim.js`, e para ela é o primeiro quadro de uma geração
+ * nova (`geracaoDaSessao`, em `base.js`) que apaga.
+ */
+let geracaoDoAvisoDeFone = 0;
+
+/**
  * A faixa de fone, na primeira entrada numa sala de voz desta execução.
  *
  * Do retrato, e não do clique que entra: o que importa é a voz ter começado, e
@@ -324,9 +335,13 @@ let foneJaAvisado = false;
  * no instante em que o texto muda não é anunciado.
  */
 function desenharAvisoDeFone(snapshot) {
+  if (!$("aviso-fone").hidden && geracaoDoAvisoDeFone !== geracaoDaSessao) {
+    $("aviso-fone").hidden = true;
+  }
   if (foneJaAvisado) return;
   if (!snapshot.voice_rooms.some((sala) => sala.occupied_by_us)) return;
   foneJaAvisado = true;
+  geracaoDoAvisoDeFone = geracaoDaSessao;
   $("aviso-fone").hidden = false;
   $("aviso-fone-texto").textContent = AVISO_DE_FONE;
 }
@@ -3753,6 +3768,10 @@ async function ejetar() {
   // O veredito era sobre a chave daquela sessão. Deixá-lo aceso sobre a
   // próxima seria dizer de um servidor o que se apurou de outro.
   mostrarVeredito(null);
+  // A faixa de fone pela mesma razão: não dispensada, ela reaparecia sobre o
+  // servidor seguinte. A marca fica — o aviso é desta execução —, então ela não
+  // volta a acender na próxima sala.
+  $("aviso-fone").hidden = true;
   document.body.classList.remove("na-bateria");
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.

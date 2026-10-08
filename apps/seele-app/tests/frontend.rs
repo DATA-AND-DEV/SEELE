@@ -9850,6 +9850,38 @@ fn ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le() {
          é da primeira entrada numa sala de voz desta execução, e não de cada \
          sessão"
     );
+    // E as duas linhas que fazem a marca valer. Sem a que lê, a faixa acende a
+    // cada quadro dentro de uma sala — fechar não adianta, ela volta meio
+    // segundo depois; sem a que escreve, a mesma coisa por outro caminho.
+    // Apagar qualquer uma deixava o resto deste guarda verde (revisão do lote J).
+    for (linha, o_que) in [
+        ("if (foneJaAvisado) return;", "não confere se já avisou"),
+        ("foneJaAvisado = true;", "não marca que avisou"),
+    ] {
+        assert!(
+            aviso.contains(linha),
+            "o aviso de fone {o_que}: a faixa volta a acender a cada quadro dentro \
+             da sala, e «dispensar» não a fecha por mais de meio segundo:\n{aviso}"
+        );
+    }
+
+    // **E ela não atravessa sessões.** Não dispensada, a faixa ficava acesa
+    // dentro da tela de sessão escondida e reaparecia sobre o servidor seguinte
+    // — um aviso sobre a sala de outra conversa. Ao sair pelo SAIR DO SERVIDOR,
+    // `ejetar` a apaga junto do veredito. A outra saída, a do fim de sessão, mora
+    // em `tela-fim.js`; para ela, a faixa guarda a geração da sessão em que
+    // acendeu e se apaga no primeiro quadro de uma geração nova.
+    let ejetar = js_function(&sessao, "async function ejetar(");
+    assert!(
+        ejetar.contains("$(\"aviso-fone\").hidden = true"),
+        "sair do servidor não apaga a faixa de fone, e ela reaparece sobre a \
+         sessão seguinte:\n{ejetar}"
+    );
+    assert!(
+        aviso.contains("geracaoDoAvisoDeFone !== geracaoDaSessao"),
+        "a faixa de fone não sabe de que sessão é: uma sessão encerrada pelo \
+         servidor a deixa acesa para a próxima:\n{aviso}"
+    );
     assert!(
         sem_comentario.contains("$(\"aviso-fone-fechar\").addEventListener(\"click\""),
         "a faixa de fone não se fecha: ela fica sobre a sessão inteira de quem já \
