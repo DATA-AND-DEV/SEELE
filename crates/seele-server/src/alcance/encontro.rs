@@ -49,11 +49,18 @@ use std::time::Duration;
 use seele_proto::encontro::{self, Marca, Marcas};
 use seele_proto::uri::Bilhete;
 
-/// O ponto de encontro do projeto, quando ninguém disser outro.
+/// O ponto de encontro do projeto, para quem hospeda pelo app e não disse
+/// outro.
 ///
 /// O ADR 0022 decidiu construir **com um ponto de encontro nosso por padrão**, e
 /// é isto. Ele é trocável por `$SEELE_ENCONTRO`, e o endereço de quem hospeda
 /// viaja dentro do próprio convite — ver [`Bilhete`].
+///
+/// **Padrão só do caminho de produção.** Desde a decisão (d) do lote
+/// G-servidor da F5, quem o pede é [`Convocacao::com_o_ponto_padrao`], pelo
+/// `Hospedagem::iniciar_com_o_ponto_padrao` do botão HOSPEDAR. Sem a variável,
+/// [`Convocacao::do_ambiente`] e o `Hospedagem::iniciar` curto não convocam
+/// ponto nenhum, e é com eles que os testes sobem.
 ///
 /// Um **nome** e não um endereço, porque isto está compilado dentro de cada
 /// executável do mundo: com um nome, trocar de VPS é um registro de DNS; com um

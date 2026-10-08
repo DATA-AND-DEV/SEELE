@@ -1998,26 +1998,53 @@ async fn hospedar(
     Ok(anfitriao)
 }
 
-/// O botão HOSPEDAR sobe com o ponto de encontro do projeto.
+/// Toda hospedagem deste app sobe com o ponto de encontro do projeto.
 ///
 /// Desde a decisão (d) do lote G-servidor da F5, `Hospedagem::iniciar` sem
 /// `$SEELE_ENCONTRO` não convoca ponto nenhum, que é o padrão seguro para os
-/// testes. A produção pede o ponto padrão de forma explícita, e este é o guarda
-/// de que ela pede: sem ele, quem hospeda atrás de CGNAT perderia o degrau 4 em
-/// silêncio, e o link sairia sem o bilhete que faz «manda o link e funciona»
-/// virar verdade.
+/// testes. A produção pede o ponto padrão de forma explícita, e estes são os
+/// guardas de que ela pede: sem ele, quem hospeda atrás de CGNAT perderia o
+/// degrau 4 em silêncio, e o link sairia sem o bilhete que faz «manda o link e
+/// funciona» virar verdade.
+///
+/// O arquivo inteiro, e não só o `hospedar`: a sala pessoal (tarefa 4f da F7)
+/// e o G-casca do Plano 2 vão abrir pontos de entrada novos aqui, e o que
+/// esquecer o padrão reprova sem que alguém precise lembrar de pôr um guarda
+/// nele.
 #[cfg(test)]
 mod o_ponto_de_encontro_de_quem_hospeda {
+    /// As duas formas, partidas para não casarem com este texto.
+    const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
+    const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
+
+    #[test]
+    fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
+        let fonte = super::fonte_sem_comentarios();
+        let sem: Vec<&str> = fonte
+            .lines()
+            .filter(|linha| linha.contains(SEM_O_PADRAO))
+            .map(str::trim)
+            .collect();
+        assert!(
+            sem.is_empty(),
+            "este arquivo sobe hospedagem com `{SEM_O_PADRAO}`, que sem `$SEELE_ENCONTRO` não \
+             convoca ponto de encontro nenhum: quem hospeda por esse caminho perde o degrau 4 em \
+             silêncio. Use `{COM_O_PADRAO}`. Linhas: {sem:?}"
+        );
+        assert!(
+            fonte.contains(COM_O_PADRAO),
+            "nenhuma hospedagem deste arquivo usa `{COM_O_PADRAO}`: o app hospeda sem o ponto de \
+             encontro do projeto"
+        );
+    }
+
     #[test]
     fn hospedar_sobe_com_o_ponto_de_encontro_padrao() {
         let fonte = super::fonte_sem_comentarios();
         let corpo = super::corpo_de(&fonte, "async fn hospedar(");
-        // Partidas, para não casarem com este texto.
-        let com_o_padrao = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
-        let sem_o_padrao = concat!("Hospedagem::", "iniciar(");
         assert!(
-            corpo.contains(com_o_padrao) && !corpo.contains(sem_o_padrao),
-            "o `hospedar` não sobe o servidor com `{com_o_padrao}`: sem ele, e sem \
+            corpo.contains(COM_O_PADRAO) && !corpo.contains(SEM_O_PADRAO),
+            "o `hospedar` não sobe o servidor com `{COM_O_PADRAO}`: sem ele, e sem \
              `$SEELE_ENCONTRO`, a hospedagem não convoca ponto de encontro nenhum, e quem hospeda \
              atrás de CGNAT perde o degrau 4 em silêncio"
         );

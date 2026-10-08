@@ -219,8 +219,10 @@ async fn so_conectar(endereco: SocketAddr) -> Result<()> {
 ///
 /// **Uma vez, e sem devolver.** Os dois testes daqui correm ao mesmo tempo, e
 /// os dois querem o mesmo valor. Um guarda que devolvesse a variável ao cair
-/// a devolveria no meio do `iniciar` do outro, que então leria o ponto padrão
-/// — o defeito que este passo conserta. Todo teste deste binário sobe
+/// a devolveria no meio do `iniciar` do outro, que então leria o valor de antes
+/// da troca: hoje, sem a variável, «nenhum ponto», e o teste nem perceberia;
+/// mas um `$SEELE_ENCONTRO` que viesse do terminal de quem roda a bateria
+/// voltaria a valer no meio do teste. Todo teste deste binário sobe
 /// hospedagem; quem um dia acrescentar um que precise de outro valor troca
 /// isto por um guarda com trava, como o `ambiente_de_teste` da biblioteca.
 ///
