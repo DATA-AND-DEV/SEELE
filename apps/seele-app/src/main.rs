@@ -10646,25 +10646,29 @@ mod a_supervisao_dos_mods_nativos {
     ///
     /// O arquivo inteiro, menos `impl Session`, e não só os corpos de
     /// `#[tauri::command]`: a conferência de `ler_codigo_do_mod` mora num
-    /// auxiliar, e um guarda que olhasse só os comandos acharia doze das treze.
-    /// Os fechos `&|| session.geracao_vale(geracao)` não são negação, e ficam:
-    /// quem os recebe (`registrar_reserva`, `liberar_reserva`) conta em
-    /// `mortos`.
+    /// auxiliar, e um guarda que olhasse só os comandos não a veria. Os fechos
+    /// `&|| session.geracao_vale(geracao)` não são negação, e ficam: quem os
+    /// recebe (`registrar_reserva`, `liberar_reserva`) conta em `mortos`.
     ///
-    /// E cada comando que conferia continua conferindo: tirar a conferência,
-    /// em vez de trocá-la, também deixaria este guarda sem negação nenhuma.
+    /// E cada função que conferia continua conferindo: tirar a conferência, em
+    /// vez de trocá-la, também deixaria este guarda sem negação nenhuma. A
+    /// lista é a conta inteira — as chamadas de `recusar_se_morta` fora de
+    /// `impl Session` e dos testes têm de ser as dela, uma por uma —, e uma
+    /// conferência nova só passa depois de entrar nela.
     #[test]
     fn nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta() {
         let fonte = super::fonte_sem_comentarios();
         let (antes, resto) = fonte
             .split_once("\nimpl Session {\n")
             .expect("`impl Session` não está mais neste arquivo");
-        let depois = resto.split_once("\n}\n").map_or("", |(_, depois)| depois);
-        let fora: String = [antes, depois]
-            .concat()
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
+        let (_, depois) = resto.split_once("\n}\n").expect(
+            "`impl Session` não fecha mais na coluna zero: sem o fim dela, o guarda leria só o \
+             que vem antes, e uma conferência crua depois dela passaria calada",
+        );
+        let fora_da_sessao = [antes, depois].concat();
+        let sem_espaco =
+            |texto: &str| -> String { texto.chars().filter(|c| !c.is_whitespace()).collect() };
+        let fora = sem_espaco(&fora_da_sessao);
         // Montado, e não escrito: escrito, o padrão acharia este teste.
         let chamada = format!(".{}(", "geracao_vale");
         let cruas: Vec<String> = fora
@@ -10689,7 +10693,9 @@ mod a_supervisao_dos_mods_nativos {
             cruas.len()
         );
 
-        let mut total = 0;
+        // Montado também.
+        let regra = format!(".{}(", "recusar_se_morta");
+        let mut na_lista = 0;
         for (funcao, minimas) in [
             ("fn mod_nativo_colher(", 1),
             ("fn mod_nativo_entregar(", 1),
@@ -10702,20 +10708,52 @@ mod a_supervisao_dos_mods_nativos {
             ("async fn escolher_para_o_mod(", 2),
             ("fn pedaco_do_escolhido(", 1),
         ] {
-            let feitas = super::corpo_de(&fonte, funcao)
-                .matches(".recusar_se_morta(geracao)")
+            let feitas = sem_espaco(super::corpo_de(&fonte, funcao))
+                .matches(&regra)
                 .count();
-            total += feitas;
+            na_lista += feitas;
             assert!(
                 feitas >= minimas,
                 "`{funcao}` confere a geração {feitas} vez(es) por `recusar_se_morta`, e \
                  conferia {minimas}: um comando de uma geração morta passa a ser admitido"
             );
         }
-        assert!(
-            total >= 13,
-            "as conferências de geração por `recusar_se_morta` são {total}, e eram treze"
+        let na_producao = sem_espaco(&sem_itens_de_teste(&fora_da_sessao))
+            .matches(&regra)
+            .count();
+        assert_eq!(
+            na_producao, na_lista,
+            "há {na_producao} chamada(s) de `recusar_se_morta` fora de `impl Session` e dos \
+             testes, e as funções da lista deste guarda somam {na_lista}: uma conferência ficou \
+             fora da lista, e apagá-la não reprovaria nada"
         );
+    }
+
+    /// O fonte sem os itens `#[cfg(test)]` do topo do arquivo, para que a
+    /// conta de [`nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta`]
+    /// seja a do produto, e não a dos testes que chamam `recusar_se_morta`.
+    ///
+    /// Um item vai até a chave que fecha na coluna zero, ou até a linha na
+    /// coluna zero que termina em `;` (a `const` do fonte). Errar o fim só
+    /// pode deixar teste na conta, e a igualdade reprova: o corte falha
+    /// fechado.
+    fn sem_itens_de_teste(fonte: &str) -> String {
+        let mut producao = Vec::new();
+        let mut linhas = fonte.lines();
+        while let Some(linha) = linhas.next() {
+            if linha != "#[cfg(test)]" {
+                producao.push(linha);
+                continue;
+            }
+            for linha in linhas.by_ref() {
+                let de_uma_linha =
+                    linha.ends_with(';') && !linha.starts_with(' ') && !linha.starts_with('#');
+                if de_uma_linha || linha == "}" {
+                    break;
+                }
+            }
+        }
+        producao.join("\n")
     }
 
     /// **A corrida entre registrar uma reserva e revogar a geração.**
@@ -14164,21 +14202,26 @@ mod a_midia_recusada_e_dita_no_registro {
 
     /// Uma recusa de imagem por volume, com o motivo que o servidor mandou.
     ///
-    /// É o caminho de `ler_imagem_mod`: o `Err` da conexão é o texto do par
-    /// remoto (o `erro` da `RespostaDeImagem`, a razão com que a conexão
-    /// fechou, o prazo esgotado), e vai à recusa como veio.
+    /// É o caminho de `ler_imagem_mod`, pela mesma função que o comando chama
+    /// ([`imagem_lida_dita`]): o `Err` da conexão é o texto do par remoto (o
+    /// `erro` da `RespostaDeImagem`, a razão com que a conexão fechou, o prazo
+    /// esgotado), e vai à recusa como veio. Chamar `recusa_de_midia_dita`
+    /// direto aqui mediria uma cópia do caminho, e os testes que passam por
+    /// este ajudante ficariam verdes com o comando calado.
     fn recusa_do_servidor(motivo: &str) -> (FalhaNoMod, String) {
-        capturar(|| {
-            recusa_de_midia_dita(
+        let (lida, rastro) = capturar(|| {
+            imagem_lida_dita(
                 &BaldesDoRegistro::default(),
                 origem(),
                 ID,
-                "volume",
-                FalhaNoMod::Recusado {
-                    motivo: motivo.to_owned(),
-                },
+                Err(motivo.to_owned()),
             )
-        })
+        });
+        (
+            lida.err()
+                .expect("a recusa do servidor virou imagem, e não há recusa a medir"),
+            rastro,
+        )
     }
 
     #[test]
@@ -14556,7 +14599,8 @@ mod a_midia_recusada_e_dita_no_registro {
     ///
     /// Em `ler_imagem_mod` a chamada é `imagem_lida_dita`, que leva as duas
     /// recusas de depois do `await`. Procurar `recusa_de_midia_dita` ali
-    /// passava com uma só delas: a outra saía calada, e o guarda verde.
+    /// passava com uma só delas: a outra saía calada, e o guarda verde. E a
+    /// conexão ausente de `ler_imagem_mod` vai ao registro sem ser contada.
     ///
     /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
     /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
@@ -14589,6 +14633,52 @@ mod a_midia_recusada_e_dita_no_registro {
                  chega ao registro"
             );
         }
+
+        // **A conexão ausente de `ler_imagem_mod` é dita, e não contada.** A
+        // geração já foi conferida na entrada: com ela de pé, a conexão que
+        // falta não é comando de uma sessão encerrada. Os outros guardas não
+        // veem a diferença — um `recusar_se_morta` a mais ali sobe a conta da
+        // função e a do arquivo juntas.
+        let ler: String = fonte
+            .split("async fn ler_imagem_mod(")
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .expect("`async fn ler_imagem_mod(` sumiu de main.rs")
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .flat_map(str::chars)
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let conexao = ler
+            .split_once("session.connection()")
+            .and_then(|(_, depois)| depois.split_once(")?;"))
+            .map(|(conexao, _)| conexao)
+            .expect(
+                "a conexão de `ler_imagem_mod` não sai mais por `session.connection()…?;`, e \
+                 este guarda já não acha a recusa dela",
+            );
+        for contar in [
+            "comandos_de_geracao_morta",
+            "confere_geracao(",
+            "recusar_se_morta(",
+        ] {
+            assert!(
+                !conexao.contains(contar),
+                "a conexão ausente de `ler_imagem_mod` passou por `{contar}`: com a geração de \
+                 pé, ela não é comando de uma sessão encerrada, e o contador diria que a sessão \
+                 anterior falou sem ela ter falado"
+            );
+        }
+        assert!(
+            conexao.contains("recusa_de_midia_dita("),
+            "a conexão ausente de `ler_imagem_mod` voltou à janela sem passar por \
+             `recusa_de_midia_dita`, e não chega ao registro"
+        );
+        assert!(
+            !ler.contains("comandos_de_geracao_morta"),
+            "`ler_imagem_mod` mexe em `comandos_de_geracao_morta` por fora de \
+             `recusar_se_morta`: uma conta à mão volta a conviver com a regra"
+        );
     }
 }
 
