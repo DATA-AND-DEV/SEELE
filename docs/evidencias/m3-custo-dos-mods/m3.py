@@ -223,6 +223,11 @@ def main():
     servidor = falante = None
     pid = None
     comeco = time.time()
+    _sintetico["ultimo"] = comeco
+    mexeu = False
+
+    def pessoa_mexeu():
+        return ocioso_s() < (time.time() - _sintetico["ultimo"]) - 1.0
     try:
         mundo = pasta / "mundo"
         servidor = subprocess.Popen([str(SERVIDOR), str(PORTA), str(mundo), *[str(PACOTES[m]) for m in mods]],
@@ -290,6 +295,7 @@ def main():
             if sh("pgrep", "-x", "rustc").stdout.strip():
                 rustc_durante += 1
             if acao_continua := CONTINUAS.get(base):
+                mexeu = mexeu or pessoa_mexeu()  # antes do próximo evento do roteiro
                 acao_continua(pid)
             if voz:
                 j = jitter_ms(pid)
@@ -307,7 +313,7 @@ def main():
             raise
         # qualquer entrada desde o começo do cenário o invalida: a janela pode
         # ter perdido o palco, e o foco pode ter ido para outra coisa
-        relato["interrompido"] = ocioso_s() < (time.time() - comeco)
+        relato["interrompido"] = mexeu or pessoa_mexeu()
         relato["rustc_durante"] = rustc_durante
         relato["memoria_mib"] = {
             nome: round(statistics.median(m[nome] for m in amostras_mem) / 2**20, 1) for nome in pids}
@@ -384,6 +390,10 @@ def preparar_mesa(pid, pasta):
 
 
 _peca = {}
+# O arraste é um evento sintético, e ele zera o `HIDIdleTime` mesmo pelo tap de
+# sessão (medido em 08/10). Por isso «uma pessoa mexeu» é o tempo ocioso menor
+# que o tempo desde o último evento do próprio roteiro, e não desde o começo.
+_sintetico = {"ultimo": None}
 
 
 def arrastar_na_mesa(pid):
@@ -417,6 +427,7 @@ def arrastar_na_mesa(pid):
         return
     x, y = _peca["xy"]
     sh(AX, "arrastar", x, y, x + 240, y + 120, 1500)
+    _sintetico["ultimo"] = time.time()
 
 
 ACOES = {"3-mods-editor": abrir_editor_do_perfis, "3-mods-mesa": preparar_mesa}

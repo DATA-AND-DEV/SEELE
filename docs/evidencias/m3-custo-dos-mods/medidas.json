@@ -209,6 +209,198 @@
   "rodada": "3-mods-editor-140331"
  },
  {
+  "cenario": "3-mods-editor",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.64,
+  "carga_media_no_comeco": "{ 3.58 3.83 4.12 }",
+  "acao": "EDITAR MEU PERFIL aberto",
+  "entradas_dos_mods": [],
+  "interrompido": false,
+  "rustc_durante": 4,
+  "memoria_mib": {
+   "seele-app": 44.0,
+   "GPU": 104.3,
+   "WebContent": 145.3,
+   "Networking": 6.0,
+   "total": 299.6
+  },
+  "cpu_pct": 10.3,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 391,
+   "commits_por_s": 13.0,
+   "commit_ms": {
+    "p50": 0.13,
+    "p95": 0.23,
+    "p99": 0.3,
+    "max": 0.4
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.25,
+  "carga_media_no_fim": "{ 3.64 3.88 4.11 }",
+  "rustc_no_fim": 0,
+  "rodada": "3-mods-editor-153059"
+ },
+ {
+  "cenario": "3-mods-editor",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.02,
+  "carga_media_no_comeco": "{ 3.20 3.74 4.05 }",
+  "acao": "EDITAR MEU PERFIL aberto",
+  "entradas_dos_mods": [],
+  "interrompido": false,
+  "rustc_durante": 27,
+  "memoria_mib": {
+   "seele-app": 43.6,
+   "GPU": 103.9,
+   "WebContent": 144.4,
+   "Networking": 5.7,
+   "total": 297.6
+  },
+  "cpu_pct": 9.2,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 391,
+   "commits_por_s": 13.0,
+   "commit_ms": {
+    "p50": 0.12,
+    "p95": 0.23,
+    "p99": 0.28,
+    "max": 0.33
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.16,
+  "carga_media_no_fim": "{ 5.85 4.29 4.22 }",
+  "rustc_no_fim": 0,
+  "rodada": "3-mods-editor-153259"
+ },
+ {
+  "cenario": "3-mods-mesa",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 1.48,
+  "carga_media_no_comeco": "{ 4.50 4.10 4.15 }",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   270,
+   301
+  ],
+  "entradas_dos_mods": [],
+  "interrompido": true,
+  "rustc_durante": 7,
+  "memoria_mib": {
+   "seele-app": 46.6,
+   "GPU": 123.8,
+   "WebContent": 219.7,
+   "Networking": 5.7,
+   "total": 395.8
+  },
+  "cpu_pct": 16.8,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 1708,
+   "commits_por_s": 56.9,
+   "commit_ms": {
+    "p50": 0.04,
+    "p95": 0.15,
+    "p99": 0.2,
+    "max": 0.32
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 4.31,
+  "carga_media_no_fim": "{ 9.28 6.29 5.04 }",
+  "rustc_no_fim": 3,
+  "rodada": "3-mods-mesa-153457"
+ },
+ {
+  "cenario": "3-mods-mesa",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.15.1",
+  "nucleos_ocupados_no_comeco": 0.72,
+  "carga_media_no_comeco": "{ 3.42 4.33 4.52 }",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   270,
+   301
+  ],
+  "entradas_dos_mods": [],
+  "interrompido": false,
+  "rustc_durante": 3,
+  "memoria_mib": {
+   "seele-app": 46.2,
+   "GPU": 120.0,
+   "WebContent": 222.1,
+   "Networking": 5.8,
+   "total": 394.1
+  },
+  "cpu_pct": 15.2,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 1592,
+   "commits_por_s": 53.1,
+   "commit_ms": {
+    "p50": 0.04,
+    "p95": 0.15,
+    "p99": 0.18,
+    "max": 0.36
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.24,
+  "carga_media_no_fim": "{ 6.38 4.98 4.74 }",
+  "rustc_no_fim": 0,
+  "rodada": "3-mods-mesa-154258"
+ },
+ {
   "cenario": "sem-mod",
   "mods": [],
   "voz": false,

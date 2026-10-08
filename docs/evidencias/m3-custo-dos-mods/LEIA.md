@@ -58,11 +58,14 @@ cenário só começa:
   devagar depois de uma compilação;
 - **com a máquina ociosa há 5 minutos** (`HIDIdleTime`).
 
-Qualquer entrada durante o cenário o marca `"interrompido": true`, e um `rustc`
-visto durante a janela conta em `"rustc_durante"`; a campanha repete uma vez o
-cenário interrompido ou sujo. Os cliques são pela acessibilidade (`AXPress`), que
-não move o mouse; o arraste da MESA usa o tap de sessão, que não conta como
-entrada no `HIDIdleTime`.
+Uma entrada de uma pessoa durante o cenário o marca `"interrompido": true`,
+e um `rustc` visto durante a janela conta em `"rustc_durante"`; a campanha
+repete uma vez o cenário interrompido ou sujo. Os cliques são pela
+acessibilidade (`AXPress`), que não move o mouse nem conta como entrada. **O
+arraste da MESA conta**: o evento sintético zera o `HIDIdleTime` mesmo pelo
+tap de sessão (medido em 08/10). Por isso «uma pessoa mexeu» é o tempo ocioso
+menor que o tempo desde o último evento do próprio roteiro, conferido antes de
+cada arraste e no fim.
 
 ## Preparar
 

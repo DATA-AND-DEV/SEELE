@@ -104,10 +104,10 @@ tela embutida (Liquid Retina XDR). **App:** SEELE 0.15.1 publicado
 (`/Applications/SEELE.app`, assinado ad hoc, `54f542f`). **MODs:** PERFIS 3.3.0
 (API 5), MESA 3.1.0 (API 4), ESTILO 3.1.0 (API 4).
 
-**Parcial: 4 dos 10 cenários.** A campanha de 08/10 foi parada às 14:05 a
-pedido da orquestradora, porque a integração das frentes de código ia rodar a
-bateria e as duas disputariam CPU. Faltam `3-mods-mesa` e os cinco cenários
-com voz. Os relatos inteiros estão em
+**Parcial: 5 dos 10 cenários.** A campanha de 08/10 parou duas vezes a pedido
+da orquestradora, porque as baterias da integração disputariam CPU com ela.
+Faltam os cinco cenários com voz (um começou às 15:51 e foi cortado antes do
+relato; o falante entrou na sala e manteve a cadência, p50 de 19,9 ms). Os relatos inteiros estão em
 `docs/evidencias/m3-custo-dos-mods/medidas.json`.
 
 Memória em MiB (`phys_footprint`, mediana na janela de 60 s); CPU em % de um
@@ -122,36 +122,53 @@ nos primeiros 30 s, e a duração deles em ms.
 | 1 MOD (PERFIS) | 13:22 | não | 15 | 43,3 | 95,2 | 61,9 | 5,8 | **206,2** | 5,9 | 4,6 | 0,17 | 0,28 | 0,38 | 0 |
 | 3 MODs, UI fechada | 13:47 | não | **0** | 40,6 | 100,1 | 106,2 | 4,8 | **251,7** | 8,9 | 5,5 | 0,18 | 0,33 | 0,42 | 0 |
 | 3 MODs, editor do PERFIS aberto | 14:03 | **sim** | 0 | 44,4 | 101,1 | 140,2 | 4,9 | **290,6** | 11,7 | 13,1 | 0,14 | 0,22 | 0,31 | 0 |
+| 3 MODs, editor do PERFIS aberto | 15:30 | não | 4 | 44,0 | 104,3 | 145,3 | 6,0 | **299,6** | 10,3 | 13,0 | 0,13 | 0,23 | 0,40 | 0 |
+| 3 MODs, editor do PERFIS aberto | 15:32 | não | 27 | 43,6 | 103,9 | 144,4 | 5,7 | **297,6** | 9,2 | 13,0 | 0,12 | 0,23 | 0,33 | 0 |
+| 3 MODs, MESA em arraste | 15:34 | (o arraste) | 7 | 46,6 | 123,8 | 219,7 | 5,7 | **395,8** | 16,8 | 56,9 | 0,04 | 0,15 | 0,32 | 0 |
+| 3 MODs, MESA em arraste | 15:42 | não | 3 | 46,2 | 120,0 | 222,1 | 5,8 | **394,1** | 15,2 | 53,1 | 0,04 | 0,15 | 0,36 | 0 |
 
 Uma rodada do editor, às 13:49, está nos relatos e fora da tabela: o roteiro
 tocou o cartão antes de o PERFIS registrá-lo, e o editor não abriu (conserto no
-`m3.py`: a ação espera o cartão).
+`m3.py`: a ação espera o cartão). A MESA das 15:34 saiu marcada como
+interrompida pelo próprio arraste: o evento sintético zera o `HIDIdleTime`
+mesmo pelo tap de sessão, e o critério passou a ser «o tempo ocioso é menor que
+o tempo desde o último evento do roteiro» (a das 15:42 já usa esse critério).
+
+**O arraste da MESA:** a mesa com uma cena 20 × 14 e quatro peças; uma peça
+arrastada por 1,5 s, ida e volta, a cada volta de ~2 s do laço. O tabuleiro
+aparece esticado na largura da página, com casas de ~57 pontos.
 
 **Como ler, e o que ainda não se pode dizer:**
 
 - **O custo dos MODs mora no WebContent.** De nenhum para três MODs com a UI
   fechada, o total sobe de ~194 MiB para ~252 MiB (+58), e o WebContent sozinho
   de ~56 para ~106 (+50). O app, onde rodam os três QuickJS, sobe ~3 MiB. Abrir o editor do
-  PERFIS soma mais ~34 MiB no WebContent.
+  PERFIS soma mais ~38 MiB no WebContent, e a MESA aberta com o tabuleiro em
+  arraste soma ~115 MiB (o total vai a ~395 MiB).
 - **A CPU de repouso quase dobra** (de ~5 % para ~9 % de um núcleo com três
   MODs), e o editor aberto leva a ~12 %, com mais que o dobro dos commits por segundo
   do `3-mods` (13,1 contra 5,5).
   [inf] O laço de consulta de cada MOD (4 s no PERFIS e no ESTILO, 2 s na MESA,
   e a remontagem do editor a cada volta, PERFIS B6) é a explicação mais
   provável; os eventos e o aviso do servidor (rascunho §7) são o que a tira.
-- **Nenhum commit passou de um quadro** em nenhum cenário medido. Isso diz pouco:
-  com a UI parada, a página quase não desenha. O cenário que exercita o quadro
-  é o da MESA em arraste, que falta.
+- **Nenhum commit passou de um quadro** em nenhum cenário medido, nem no
+  arraste da MESA (máximo de 0,36 ms, com ~55 commits por segundo). **Isso mede o
+  commit de Core Animation do processo do app, e não o trabalho da página**: o
+  JavaScript, o estilo e o layout rodam no WebContent, e um quadro perdido lá
+  apareceria como menos commits por segundo, e não como um commit longo. Como
+  o arraste ocupa 1,5 s de cada ~2 s do laço, ~55 commits por segundo não
+  separa quadros perdidos do intervalo entre arrastes. **Para o congelamento,
+  a M3 com a API 6 precisa de um arraste contínuo** (tarefa 11).
 - **As rodadas com `rustc` de outra sessão na janela** (sem MOD e 1 MOD) não têm
   par limpo. As duas de cada cenário concordam entre si em 4 MiB e 0,6 ponto de
   CPU; a comparação com o `3-mods`, limpo, é de memória com segurança, e de CPU
   com essa ressalva.
-- **A rodada do editor teve entrada de uma pessoa durante a janela**, e por isso
-  é indicativa, e não base.
+- **A rodada do editor das 14:03 teve entrada de uma pessoa durante a janela.**
+  As das 15:30 e 15:32, sem entrada, confirmam os números (~298 MiB, ~10 %).
 
-**O que retomar, com o mesmo roteiro, quando a orquestradora liberar:**
-`3-mods-editor` limpo, `3-mods-mesa`, e os cinco `+voz`; e, se a máquina
-ficar quieta, um `sem-mod` e um `1-mod` sem `rustc` na janela.
+**O que retomar, com o mesmo roteiro, quando a orquestradora liberar:** os
+cinco `+voz`; e, se a máquina ficar quieta, um `sem-mod` e um `1-mod` sem
+`rustc` na janela.
 
 ### O que falta medir, e quem mede
 
