@@ -630,7 +630,7 @@ function fraseDeErro(erro, apelido, deOnde) {
     if (erro.TemAtalho) {
       return (
         `ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: ${erro.TemAtalho}.\n` +
-        "Tire o atalho da pasta e instale de novo. Num MOD em desenvolvimento, eles costumam estar em «node_modules»."
+        "Tire o atalho e instale de novo. Num MOD em desenvolvimento, os atalhos costumam estar em «node_modules»."
       );
     }
     if (erro.ManifestoRecusado) {

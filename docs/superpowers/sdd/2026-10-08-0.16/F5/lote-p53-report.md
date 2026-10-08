@@ -39,13 +39,13 @@ O que a tela mostra agora, medido rodando o `fraseDeErro` do arquivo no node:
 
 | Erro | Antes | Agora |
 |---|---|---|
-| `{"TemAtalho": "…/node_modules/.bin/playwright-core"}` | «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o JSON cru | `ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: …/node_modules/.bin/playwright-core.`<br>`Tire o atalho da pasta e instale de novo. Num MOD em desenvolvimento, eles costumam estar em «node_modules».` (segunda linha da rodada 1; antes era `Instale a pasta do pacote, sem «node_modules».`) |
+| `{"TemAtalho": "…/node_modules/.bin/playwright-core"}` | «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ», com o JSON cru | `ESTA PASTA TEM UM ATALHO, E O SEELE NÃO INSTALA MOD COM ATALHO: …/node_modules/.bin/playwright-core.`<br>`Tire o atalho e instale de novo. Num MOD em desenvolvimento, os atalhos costumam estar em «node_modules».` (segunda linha das rodadas 1 e 2; antes era `Instale a pasta do pacote, sem «node_modules».`) |
 | `{"ManifestoRecusado": "api-too-old"}` | «ALGO FALHOU…», com o JSON cru | `ESTE SEELE RECUSOU O «mod.json» DESTA PASTA: api-too-old.`<br>`Nada foi instalado.` |
 | `{"NaoCopiei": "Permission denied (os error 13)"}` | «ALGO FALHOU…», com o JSON cru | `NÃO CONSEGUI COPIAR ESTE MOD PARA O SEELE: Permission denied (os error 13).`<br>`Nada foi instalado. Confira o espaço e as permissões do disco, e tente de novo.` |
 | `"SemManifesto"` | `SemManifesto`, o nome cru da variante | `ESTA PASTA NÃO TEM «mod.json».`<br>`Escolha a pasta do MOD, e não a pasta que a contém.` |
 
 - As três com campo são braços de `fraseDeErro`, como o `erro.NomeRecusado`, logo antes dele. `SemManifesto` não tem campo: o serde a manda como texto, e o texto vai direto a `FRASES`. Por isso ela está em `FRASES`, depois do bloco do catálogo de MODs.
-- Todas têm duas linhas. Sem o detalhe interpolado, têm 174 (eram 112 antes da rodada 1), 66, 124 e 82 caracteres. O `LIMITE_DE_FRASE` é 180. A de `SemManifesto`, por estar em dicionário, é medida pelos guardas de tamanho e de terceira linha, e passou.
+- Todas têm duas linhas. Sem o detalhe interpolado, têm 171 (eram 112 antes da rodada 1, e 174 na rodada 1), 66, 124 e 82 caracteres. O `LIMITE_DE_FRASE` é 180. A de `SemManifesto`, por estar em dicionário, é medida pelos guardas de tamanho e de terceira linha, e passou.
 
 ### `apps/seele-app/tests/frontend.rs` (`6038abbe`)
 
@@ -250,3 +250,7 @@ Ele dizia «cada `return` daqui é uma recusa», e existe o `return Ok(Publicado
 - `cargo test -p seele-app --test frontend`: 263 verdes.
 - `cargo xtask check-runtime`: saiu 0, com as 7 bancadas.
 - `cargo fmt --all -- --check` e `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpos.
+
+## Rodada 2: o texto da frase do atalho
+
+Na segunda linha de `TemAtalho`, «eles» não tinha antecedente plural, porque «o atalho» é singular. Ela passou a ser, como o controlador escreveu: «Tire o atalho e instale de novo. Num MOD em desenvolvimento, os atalhos costumam estar em «node_modules».». Medida no node, sem o caminho, a frase tem 171 caracteres e duas linhas. `cargo test -p seele-app --test frontend` deu 263 verdes, e `cargo xtask check-runtime` saiu 0, com as 7 bancadas.
