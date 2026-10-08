@@ -585,6 +585,28 @@ pub const MIGRATIONS: &[Migration] = &[
             );
         "#,
     },
+    Migration {
+        version: 14,
+        description: "a API de MOD que cada MOD habilitado pede, para o anúncio dizer e o aperto de mão conferir",
+        sql: r#"
+            -- D-fio-7 (spec-mestre da 0.16): o anúncio diz a API de cada MOD, e
+            -- um servidor recusa antes do convite quem não roda uma delas.
+            --
+            -- Coluna, e não leitura do disco no aperto de mão, pelas mesmas
+            -- razões da migração 12: ela é gravada no mesmo ato que grava o
+            -- `hash`, e o aperto de mão é o pior lugar para ir ao disco.
+            --
+            -- O zero é «não preenchida», e é o que uma linha gravada antes desta
+            -- coluna de fato é. Quem a preenche é a subida do servidor, lendo o
+            -- `mod.json` da pasta do hash — os bytes que a exigência cobre —, e
+            -- quem a regrava é re-habilitar o MOD. Esta migração não inventa um
+            -- número que o produto não sabe.
+            --
+            -- É o esquema 14, e é por ele que o launcher da 0.16 distingue um
+            -- banco da 0.15 (13 ou menos, que ele copia) de um da 0.16.
+            ALTER TABLE mods ADD COLUMN api INTEGER NOT NULL DEFAULT 0;
+        "#,
+    },
 ];
 
 #[cfg(test)]

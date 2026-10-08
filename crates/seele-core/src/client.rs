@@ -67,6 +67,11 @@ pub enum ConnectError {
     Unreachable,
     /// TLS refused the certificate for a reason other than the pin.
     ///
+    /// Nem a impressão esperada, nem a chave que o servidor não provou: essas
+    /// têm nome próprio ([`Self::InviteMismatch`] e [`Self::ChaveNaoProvada`]).
+    /// O que sobra aqui é o TLS que caiu por outro alerta, ou sem decisão do
+    /// verificador.
+    ///
     /// **E um segundo motivo, que não é recusa de ninguém:** o TLS terminou sem
     /// decisão do verificador de pin (`decisao_do_aperto`). O certificado não
     /// foi conferido contra pin nem impressão, e a conexão não segue; o
@@ -76,6 +81,26 @@ pub enum ConnectError {
     /// nas duas máquinas: imprecisa ali, e o caminho não é alcançável com o
     /// `rustls` de hoje, que chama o verificador em todo aperto de mão completo.
     TlsRefused,
+    /// Quem atendeu mostrou um certificado que o verificador aceitou, e não
+    /// provou ter a chave dele.
+    ///
+    /// O certificado é público: um impostor pode repeti-lo inteiro. O que ele
+    /// não tem é a chave privada, e o TLS a cobra **depois** de o verificador
+    /// aceitar o certificado, na assinatura de quem atende sobre o aperto de
+    /// mão (`CertificateVerify`). A assinatura não confere, e o `rustls` daqui
+    /// recusa com o alerta `decrypt_error` (51), que o `quinn` devolve como
+    /// `TransportError` local (`classify_connection_error`).
+    ///
+    /// **Recusada dentro do TLS, antes do `Hello`**, como
+    /// [`Self::InviteMismatch`]: o convite, a senha e o apelido não chegam a
+    /// quem atendeu. Era [`Self::TlsRefused`], e a FFI a traduzia por
+    /// `Refused { Incompatible }`: a tela mandava atualizar o SEELE nas duas
+    /// máquinas por causa de um servidor que não é quem diz ser.
+    ///
+    /// Só com a decisão do verificador (`Matches` ou `FirstContact`) na mão: o
+    /// TLS sem decisão continua [`Self::TlsRefused`], porque ali ninguém
+    /// conferiu certificado nenhum.
+    ChaveNaoProvada,
     /// The pinned key is not the key offered. ADR 0003.
     PinChanged {
         /// What was pinned before.
@@ -611,6 +636,12 @@ impl Client {
         // PATTERN: ORANGE — connected, not verified.
         let pin = decisao_do_aperto(verifier.last_decision())?;
 
+        // **A impressão que a prova de identidade amarra** (o S2): a do
+        // certificado que o TLS desta conexão acabou de aceitar, lida da
+        // própria conexão — nunca de algo que o servidor diga pelo protocolo,
+        // nem do link. É o que faz a prova valer só para quem foi conferido.
+        let impressao = impressao_do_servidor(&connection)?;
+
         let (mut send, mut recv) = connection.open_bi().await.map_err(|error| {
             tracing::warn!(%error, "could not open the control stream");
             ConnectError::Unreachable
@@ -626,6 +657,7 @@ impl Client {
                 &mut recv,
                 nickname,
                 signing_key,
+                &impressao,
                 join_secret,
                 aceito,
             ),
@@ -1721,6 +1753,34 @@ fn classify_connection_error(
         Some(PinDecision::InviteRefused { expected, offered }) => {
             ConnectError::InviteMismatch { expected, offered }
         }
+        // **O verificador aceitou o certificado, e quem atendeu não provou ter
+        // a chave dele.** O certificado é público e se repete inteiro; a chave
+        // privada, não. O TLS a cobra depois do verificador, na assinatura de
+        // quem atende (`CertificateVerify`), e quando ela não confere o
+        // `rustls` daqui recusa com `decrypt_error` (51). É o TLS **local** que
+        // falha, então o alerta vem em `TransportError(e).code`, e não no
+        // `ConnectionClosed` que `par::motivo_da_recusa` lê (o alerta que o
+        // outro lado mandou).
+        //
+        // Sem este braço, o impostor saía `TlsRefused`, que a FFI traduz por
+        // versão incompatível.
+        Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. })
+            if matches!(
+                error,
+                quinn::ConnectionError::TransportError(e)
+                    if e.code == quinn::TransportErrorCode::crypto(51)
+            ) =>
+        {
+            tracing::warn!(
+                %error,
+                "quem atendeu mostrou um certificado que o verificador aceitou, e não provou \
+                 ter a chave dele: o TLS recusou a assinatura (`decrypt_error`)"
+            );
+            ConnectError::ChaveNaoProvada
+        }
+        // `None` fica aqui mesmo com o alerta 51: sem decisão do verificador,
+        // ninguém conferiu certificado nenhum, e não há chave que quem atendeu
+        // tenha deixado de provar (`decisao_do_aperto`).
         Some(PinDecision::FirstContact { .. } | PinDecision::Matches { .. }) | None => {
             match error {
                 // **A conexão expirou, e não o aperto de mão.** Ver `SemResposta`:
@@ -1790,6 +1850,65 @@ mod a_recusa_do_tls_chega_com_nome {
             ),
             ConnectError::SemResposta,
             "um primeiro contato aceito deu nome a uma falha que veio depois dele"
+        );
+    }
+
+    /// O TLS desta ponta que caiu com o alerta `alerta`, como o `quinn` o
+    /// devolve: um `TransportError` local, e não um `ConnectionClosed` vindo
+    /// do outro lado.
+    fn tls_local_com_o_alerta(alerta: u8) -> quinn::ConnectionError {
+        quinn::ConnectionError::TransportError(quinn::TransportErrorCode::crypto(alerta).into())
+    }
+
+    #[test]
+    fn o_tls_que_cai_na_assinatura_depois_de_o_verificador_aceitar_e_chave_nao_provada() {
+        // O impostor que repete o certificado do servidor: o verificador o
+        // aceita (o pin confere, ou é o primeiro contato), e o TLS cai na
+        // assinatura de quem atende com `decrypt_error` (51). Como
+        // `TlsRefused`, a FFI o traduzia por versão incompatível.
+        for decisao in [
+            PinDecision::Matches {
+                fingerprint: "aaaa1111".into(),
+            },
+            PinDecision::FirstContact {
+                fingerprint: "aaaa1111".into(),
+            },
+        ] {
+            assert_eq!(
+                classify_connection_error(&tls_local_com_o_alerta(51), Some(decisao.clone())),
+                ConnectError::ChaveNaoProvada,
+                "com {decisao:?}, quem não provou a chave saiu com outro nome, e a tela o \
+                 chamaria de versão incompatível"
+            );
+        }
+    }
+
+    #[test]
+    fn outro_alerta_do_tls_continua_tls_refused() {
+        // Só o 51 diz que a assinatura não conferiu. `no_application_protocol`
+        // (120) é outra coisa, e não acusa ninguém de impostor.
+        assert_eq!(
+            classify_connection_error(
+                &tls_local_com_o_alerta(120),
+                Some(PinDecision::Matches {
+                    fingerprint: "aaaa1111".into()
+                })
+            ),
+            ConnectError::TlsRefused,
+            "um alerta do TLS que não é o da assinatura virou `ChaveNaoProvada`, e a tela \
+             acusaria de impostor um servidor que só recusou o aperto de mão"
+        );
+    }
+
+    #[test]
+    fn sem_decisao_do_verificador_o_alerta_da_assinatura_continua_tls_refused() {
+        // Sem decisão, ninguém conferiu certificado nenhum, e não há chave que
+        // quem atendeu deixou de provar: é o caso de `decisao_do_aperto`.
+        assert_eq!(
+            classify_connection_error(&tls_local_com_o_alerta(51), None),
+            ConnectError::TlsRefused,
+            "o TLS sem decisão do verificador virou `ChaveNaoProvada`, e a tela acusaria \
+             de impostor um certificado que ninguém conferiu"
         );
     }
 }
@@ -1927,22 +2046,54 @@ mod como_este_build_se_apresenta {
     }
 }
 
+/// A impressão do certificado que o TLS desta conexão aceitou, em bytes: o
+/// SHA-256 do DER, o mesmo cujo hex vai no `fp=` do link.
+///
+/// Uma conexão TLS sem certificado do servidor não existe — o `rustls` não
+/// fecha o aperto sem ele —, e se existisse, não haveria o que assinar: é
+/// violação de protocolo, e o cliente não prova nada a ninguém.
+fn impressao_do_servidor(connection: &quinn::Connection) -> Result<[u8; 32], ConnectError> {
+    let cadeia = connection
+        .peer_identity()
+        .and_then(|identidade| {
+            identidade
+                .downcast::<Vec<rustls::pki_types::CertificateDer<'static>>>()
+                .ok()
+        })
+        .ok_or_else(|| {
+            tracing::warn!("a conexão não entregou o certificado do servidor");
+            ConnectError::ProtocolViolation
+        })?;
+    let certificado = cadeia.first().ok_or_else(|| {
+        tracing::warn!("a cadeia do servidor veio vazia");
+        ConnectError::ProtocolViolation
+    })?;
+    Ok(seele_proto::transport::certificate_digest(
+        certificado.as_ref(),
+    ))
+}
+
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
     nickname: &str,
     signing_key: &SigningKey,
+    impressao: &[u8; 32],
     join_secret: Option<&str>,
     aceito: Option<&str>,
 ) -> Result<SessionInfo, ConnectError> {
     frame::write(
         send,
         &ClientMessage::Hello {
-            version: seele_proto::PROTOCOL_VERSION,
+            faixa: seele_proto::version::FAIXA,
+            // As APIs de MOD que esta build roda (D-fio-7). O servidor ainda
+            // não as lê; quem lê é a sessão do Plano 3.
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
             client: quem_sou_eu().into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),
             join_secret: join_secret.map(str::to_owned),
+            material_e2ee: None,
         },
     )
     .await
@@ -1968,10 +2119,22 @@ async fn handshake(
         }
     };
 
+    // **O cliente nunca assina bytes vindos do fio** (o S2, adendo de
+    // 08/10/2026, §9). O nonce tem de ter exatamente 32 bytes, e o que se
+    // assina é a mensagem que o `seele-proto` monta: o rótulo, a impressão do
+    // servidor que esta conexão conferiu e o nonce.
+    let Ok(nonce) = <[u8; seele_proto::control::NONCE_LEN]>::try_from(nonce.as_slice()) else {
+        tracing::warn!(
+            tamanho = nonce.len(),
+            "o desafio não tem 32 bytes; o cliente não assina"
+        );
+        return Err(ConnectError::ProtocolViolation);
+    };
+    let assinada = seele_proto::assinatura::prova_de_cliente(impressao, &nonce);
     frame::write(
         send,
         &ClientMessage::Response {
-            proof: signing_key.sign(&nonce).to_bytes().to_vec(),
+            proof: signing_key.sign(&assinada).to_bytes().to_vec(),
         },
     )
     .await

@@ -28,7 +28,7 @@
 //! <raiz>/
 //! ├── versoes/0.10.5-1/        a instalação
 //! ├── versoes/0.10.5-1/INSTALADA   o marcador, escrito por último
-//! ├── dados/0.10.5-1/          os dados daquela versão (ver `crate::dados`)
+//! ├── dados/servidor-0.15/     os dados daquela linha (ver `crate::dados`)
 //! ├── preparo/<algo>/          área de preparo, apagada ao fim
 //! └── revogacoes-vistas        a memória do `crate::revogacao`
 //! ```
@@ -41,7 +41,8 @@ use sha2::{Digest as _, Sha256};
 
 use crate::assinatura::{Chave, FalhaDeAssinatura};
 use crate::executavel::{CaminhoDoExecutavel, ExecutavelInvalido};
-use crate::manifesto::Publicacao;
+use crate::linha::Linha;
+use crate::manifesto::{Manifesto, Publicacao};
 use crate::revogacao::{Envelope, FalhaDaLista, ListaDeRevogacao, Memoria, Vigente};
 use crate::versao::Versao;
 
@@ -109,6 +110,11 @@ pub enum FalhaAoInstalar {
     /// projeto. Instalar assim seria conferir contra uma assinatura vazia, que
     /// é não conferir.
     AssinaturaNaoDeclarada,
+    /// O manifesto não diz de que linha esta versão é.
+    ///
+    /// Recusado antes de tocar o disco, como o executável: uma instalação sem
+    /// linha não saberia onde ficam os dados dela, e só falharia ao abrir.
+    LinhaNaoDeclarada,
     /// O manifesto não diz qual é o executável desta instalação.
     ///
     /// É o estado do manifesto publicado hoje — ver a lacuna 3 de
@@ -129,6 +135,18 @@ pub enum FalhaAoInstalar {
     },
 }
 
+/// Por que uma versão não foi apagada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FalhaAoRemover {
+    /// Não está instalada.
+    NaoInstalada,
+    /// O sistema recusou. No Windows, quase sempre a versão está aberta.
+    NaoRemovi {
+        /// O que o sistema disse. Para o log.
+        detalhe: String,
+    },
+}
+
 /// Uma instalação que existe em disco.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Instalacao {
@@ -138,6 +156,27 @@ pub struct Instalacao {
     pub raiz: PathBuf,
     /// O executável, caminho completo.
     pub executavel: PathBuf,
+    /// A linha de servidor, anotada no marcador ao instalar.
+    ///
+    /// É o que deixa abrir uma versão instalada **sem rede** e com a pasta de
+    /// dados certa.
+    pub linha: Linha,
+    /// O SHA-256 do executável, tirado ao instalar.
+    ///
+    /// A guarda da linha legada compara isto com o disco a cada abertura. O
+    /// atualizador de uma versão aberta pelo launcher trocaria o `.app` por
+    /// outro, e o marcador, que fica fora do `.app`, continuaria dizendo
+    /// «instalada».
+    pub resumo_do_executavel: String,
+}
+
+/// Uma instalação que a poda tentou apagar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Podada {
+    /// Qual.
+    pub versao: Versao,
+    /// Se saiu, ou o que o sistema disse.
+    pub resultado: Result<(), String>,
 }
 
 /// O depósito de versões de uma máquina.
@@ -165,10 +204,13 @@ impl Deposito {
         self.raiz.join("versoes").join(versao.como_texto())
     }
 
-    /// Onde ficam os dados desta versão.
+    /// Onde ficam os dados desta **linha**: `dados/servidor-<linha>`.
+    ///
+    /// Spec 0.16, §1: um conserto da linha herda os dados dela, e as conversas
+    /// de uma linha não aparecem na outra. A tela diz isso **antes** de abrir.
     #[must_use]
-    pub fn pasta_de_dados(&self, versao: &Versao) -> PathBuf {
-        self.raiz.join("dados").join(versao.como_texto())
+    pub fn pasta_de_dados_da_linha(&self, linha: &crate::linha::Linha) -> PathBuf {
+        self.raiz.join("dados").join(linha.pasta_de_dados())
     }
 
     /// Esta versão está instalada e completa?
@@ -229,8 +271,16 @@ impl Deposito {
         }
         let raiz = self.pasta_da_versao(versao);
         let marcador = std::fs::read_to_string(raiz.join(MARCADOR)).ok()?;
-        let relativo = marcador.lines().nth(1)?.trim();
-        let relativo = crate::executavel::CaminhoDoExecutavel::novo(relativo).ok()?;
+        let mut linhas = marcador.lines().skip(1);
+        let relativo = crate::executavel::CaminhoDoExecutavel::novo(linhas.next()?.trim()).ok()?;
+        // A linha e a soma são da 0.16. Um marcador sem elas é «não sei», pelo
+        // mesmo motivo do executável: sem a linha não há pasta de dados certa,
+        // e sem a soma não há a guarda da linha legada.
+        let linha = Linha::nova(linhas.next()?.trim()).ok()?;
+        let resumo = linhas.next()?.trim().to_owned();
+        if resumo.len() != 64 || !resumo.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let executavel = raiz.join(relativo.como_caminho());
         // Conferido agora, e não quando foi escrito: entre a instalação e este
         // instante alguém pode ter apagado o arquivo. Prometer um caminho que
@@ -243,7 +293,89 @@ impl Deposito {
             versao: versao.clone(),
             raiz,
             executavel,
+            linha,
+            resumo_do_executavel: resumo,
         })
+    }
+
+    /// As instalações desta linha, em ordem de nome.
+    #[must_use]
+    pub fn instaladas_da_linha(&self, linha: &Linha) -> Vec<Instalacao> {
+        self.instaladas()
+            .iter()
+            .filter_map(|v| self.instalacao(v))
+            .filter(|i| &i.linha == linha)
+            .collect()
+    }
+
+    /// Deixa só a mais nova desta linha, pela ordem do manifesto, e apaga as
+    /// outras instalações dela. **Nunca toca `dados/`.**
+    ///
+    /// Spec 0.16, §1: o launcher guarda o app mais novo de cada linha, e não
+    /// toda versão. Devolve o que tentou apagar, com o resultado de cada uma:
+    /// no Windows uma versão aberta não se apaga, e quem chama registra e tenta
+    /// de novo na próxima poda em vez de calar. Uma instalação que o manifesto
+    /// não lista não é podada, porque sem ordem não há como saber se ela é a
+    /// mais nova.
+    #[must_use]
+    pub fn podar_linha(&self, linha: &Linha, manifesto: &Manifesto) -> Vec<Podada> {
+        let mut daqui: Vec<(usize, Versao)> = self
+            .instaladas_da_linha(linha)
+            .into_iter()
+            .filter_map(|i| manifesto.posicao(&i.versao).map(|p| (p, i.versao)))
+            .collect();
+        daqui.sort_by_key(|(posicao, _)| *posicao);
+        daqui
+            .into_iter()
+            .skip(1)
+            .map(|(_, versao)| {
+                let resultado = self
+                    .remover(&versao)
+                    .map(|_| ())
+                    .map_err(|falha| match falha {
+                        FalhaAoRemover::NaoInstalada => "já não estava instalada".to_owned(),
+                        FalhaAoRemover::NaoRemovi { detalhe } => detalhe,
+                    });
+                Podada { versao, resultado }
+            })
+            .collect()
+    }
+
+    /// Quanto a instalação desta versão ocupa, em bytes. Zero se não existe.
+    #[must_use]
+    pub fn tamanho_da_versao(&self, versao: &Versao) -> u64 {
+        tamanho_da_arvore(&self.pasta_da_versao(versao))
+    }
+
+    /// Quanto os dados desta linha ocupam, em bytes.
+    #[must_use]
+    pub fn tamanho_dos_dados_da_linha(&self, linha: &Linha) -> u64 {
+        tamanho_da_arvore(&self.pasta_de_dados_da_linha(linha))
+    }
+
+    /// Apaga a instalação desta versão e devolve quantos bytes ela ocupava.
+    ///
+    /// **Nunca toca os dados**: as conversas são da linha, e o próximo app da
+    /// mesma linha as abre. A tela de disco diz isso ao lado do botão.
+    ///
+    /// # Errors
+    ///
+    /// [`FalhaAoRemover`].
+    pub fn remover(&self, versao: &Versao) -> Result<u64, FalhaAoRemover> {
+        if !self.esta_instalada(versao) {
+            return Err(FalhaAoRemover::NaoInstalada);
+        }
+        let pasta = self.pasta_da_versao(versao);
+        let tamanho = tamanho_da_arvore(&pasta);
+        // O marcador sai primeiro: uma remoção que pare no meio deixa uma
+        // instalação incompleta, que a próxima instalação varre, e não uma
+        // «instalada» sem metade dos arquivos.
+        std::fs::remove_file(pasta.join(MARCADOR))
+            .and_then(|()| std::fs::remove_dir_all(&pasta))
+            .map_err(|erro| FalhaAoRemover::NaoRemovi {
+                detalhe: erro.to_string(),
+            })?;
+        Ok(tamanho)
     }
 
     /// Instala uma versão a partir do pacote já baixado.
@@ -277,6 +409,9 @@ impl Deposito {
             ExecutavelInvalido::NaoDeclarado => FalhaAoInstalar::ExecutavelNaoDeclarado,
             outro => FalhaAoInstalar::ExecutavelInvalido(outro),
         })?;
+        let linha = publicacao
+            .linha()
+            .ok_or(FalhaAoInstalar::LinhaNaoDeclarada)?;
 
         // ------- 1. conferir, com o pacote em memória e nada em disco.
         if let Some(esperado) = &entrada.sha256 {
@@ -295,22 +430,17 @@ impl Deposito {
             .conferir(pacote, assinatura)
             .map_err(FalhaAoInstalar::AssinaturaRecusada)?;
 
-        let definitiva = self.pasta_da_versao(&publicacao.version);
         if self.esta_instalada(&publicacao.version) {
-            return Ok(Instalacao {
-                versao: publicacao.version.clone(),
-                executavel: definitiva.join(executavel_relativo.como_caminho()),
-                raiz: definitiva,
-            });
+            return self.instalacao_publicada(&publicacao.version);
         }
 
         // ------- 2. preparar de lado.
         let preparo = self.abrir_preparo(&publicacao.version)?;
         let resultado = self.preparar_e_publicar(
             &preparo,
-            &definitiva,
             publicacao,
             &executavel_relativo,
+            &linha,
             pacote,
             desempacotador,
         );
@@ -319,23 +449,34 @@ impl Deposito {
         let _ = std::fs::remove_dir_all(&preparo);
         resultado?;
 
-        Ok(Instalacao {
-            versao: publicacao.version.clone(),
-            executavel: definitiva.join(executavel_relativo.como_caminho()),
-            raiz: definitiva,
-        })
+        self.instalacao_publicada(&publicacao.version)
+    }
+
+    /// A instalação recém-publicada, lida de volta do disco.
+    ///
+    /// Uma fonte só para o que uma [`Instalacao`] diz: o marcador. Montá-la à
+    /// mão aqui seria uma segunda resposta para a mesma pergunta.
+    fn instalacao_publicada(&self, versao: &Versao) -> Result<Instalacao, FalhaAoInstalar> {
+        self.instalacao(versao)
+            .ok_or_else(|| FalhaAoInstalar::NaoInstalei {
+                detalhe: format!(
+                    "a instalação de {versao} foi publicada e não se descreve: o marcador \
+                     não traz executável, linha e soma"
+                ),
+            })
     }
 
     /// Os passos 2 a 4, separados só para o preparo poder ser apagado sempre.
     fn preparar_e_publicar(
         &self,
         preparo: &Path,
-        definitiva: &Path,
         publicacao: &Publicacao,
         executavel_relativo: &CaminhoDoExecutavel,
+        linha: &Linha,
         pacote: &[u8],
         desempacotador: &dyn Desempacotador,
     ) -> Result<(), FalhaAoInstalar> {
+        let definitiva = &self.pasta_da_versao(&publicacao.version);
         desempacotador
             .desempacotar(pacote, preparo)
             .map_err(em_falha)?;
@@ -353,8 +494,13 @@ impl Deposito {
 
         // ------- 3. o marcador, por último.
         //
-        // **Duas linhas, e a segunda é o que torna o depósito utilizável sem o
-        // manifesto.** Ele guardava só a versão, e com isso a pergunta «qual
+        // **Quatro linhas.** A segunda é o que torna o depósito utilizável sem
+        // o manifesto; a terceira (a linha de servidor) e a quarta (a soma do
+        // executável) são da 0.16. A linha é o que deixa abrir sem rede com a
+        // pasta de dados certa, e a soma é o que deixa conferir, a cada
+        // abertura, que o executável continua sendo o que se instalou.
+        //
+        // **A segunda linha** foi a primeira a entrar depois da versão. Ele guardava só a versão, e com isso a pergunta «qual
         // executável é o desta instalação?» só tinha resposta com o manifesto na
         // mão — que vem da rede. Um launcher que precisa da rede para abrir uma
         // versão **já instalada** não é um launcher: é um atualizador.
@@ -362,12 +508,17 @@ impl Deposito {
         // A ordem importa e é a de sempre: versão primeiro, porque é o que já
         // estava lá e é o que um marcador antigo tem sozinho. Quem lê trata a
         // ausência da segunda linha como «não sei», e não como erro.
+        let resumo = resumo_em_hexadecimal(
+            &std::fs::read(preparo.join(executavel_relativo.como_caminho())).map_err(em_falha)?,
+        );
         std::fs::write(
             preparo.join(MARCADOR),
             format!(
-                "{}\n{}\n",
+                "{}\n{}\n{}\n{}\n",
                 publicacao.version.como_texto(),
-                executavel_relativo.como_texto()
+                executavel_relativo.como_texto(),
+                linha.como_texto(),
+                resumo,
             ),
         )
         .map_err(em_falha)?;
@@ -493,6 +644,26 @@ impl Deposito {
     }
 }
 
+/// O tamanho de uma árvore, sem seguir ligação simbólica.
+///
+/// Sem seguir de propósito: uma ligação aponta para onde quem a criou quis, e
+/// somá-la contaria como desta versão um arquivo que não é dela — e que apagar
+/// a versão não libera.
+fn tamanho_da_arvore(caminho: &Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(caminho) else {
+        return 0;
+    };
+    if meta.is_file() {
+        return meta.len();
+    }
+    if !meta.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(caminho)
+        .map(|d| d.flatten().map(|e| tamanho_da_arvore(&e.path())).sum())
+        .unwrap_or(0)
+}
+
 /// O SHA-256 de uns bytes, em hexadecimal minúsculo.
 pub(crate) fn resumo_em_hexadecimal(bytes: &[u8]) -> String {
     let resumo = Sha256::digest(bytes);
@@ -598,7 +769,8 @@ mod testes {
         let raiz = pasta("sem-assinatura");
         let deposito = Deposito::em(&raiz);
         let json = format!(
-            r#"{{"schema":2,"versions":[{{"version":"1.0.0-teste","platforms":{{
+            r#"{{"schema":2,"versions":[{{"version":"1.0.0-teste",
+                "unit":{{"protocol":3,"mod_api":1,"server":"1.0"}},"platforms":{{
                 "{ALVO}":{{"url":"https://exemplo.invalido/a",
                           "sha256":"{}","executable":"{EXECUTAVEL}"}}}}}}]}}"#,
             resumo_em_hexadecimal(&pacote("1.0.0-teste")),
@@ -860,6 +1032,175 @@ mod testes {
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
+    #[test]
+    fn o_marcador_guarda_a_linha_e_a_soma_do_executavel() {
+        let raiz = pasta("marcador-quatro-linhas");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("0.15.2-teste").unwrap();
+        instalar_uma(&deposito, "0.15.2-teste");
+
+        let instalacao = deposito
+            .instalacao(&versao)
+            .expect("instalada e com procedência");
+        assert_eq!(instalacao.linha, crate::Linha::nova("0.15").unwrap());
+        assert_eq!(
+            instalacao.resumo_do_executavel,
+            resumo_em_hexadecimal(&pacote("0.15.2-teste")),
+            "o desempacotador de teste escreve o pacote como executável"
+        );
+        let marcador =
+            std::fs::read_to_string(deposito.pasta_da_versao(&versao).join(MARCADOR)).unwrap();
+        assert_eq!(marcador.lines().count(), 4, "marcador: {marcador:?}");
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Sem linha a instalação não saberia onde ficam os dados, e só falharia
+    /// na hora de abrir. Recusada antes de tocar o disco, como o executável.
+    #[test]
+    fn uma_publicacao_sem_linha_nao_chega_a_tocar_o_disco() {
+        let raiz = pasta("instalar-sem-linha");
+        let deposito = Deposito::em(&raiz);
+        let json = format!(
+            r#"{{"schema":2,"versions":[{{"version":"1.0.0-teste","unit":{{"protocol":3,"mod_api":1}},
+              "platforms":{{"{ALVO}":{{"url":"https://exemplo.invalido/a","signature":"{}",
+              "sha256":"{}","executable":"{EXECUTAVEL}"}}}}}}]}}"#,
+            crate::cenario::par().assinar_no_formato_do_atualizador(&pacote("1.0.0-teste")),
+            resumo_em_hexadecimal(&pacote("1.0.0-teste")),
+        );
+        let m = crate::Manifesto::ler(json.as_bytes(), &chave()).unwrap();
+        let falha = deposito
+            .instalar(
+                m.mais_nova(),
+                ALVO,
+                &pacote("1.0.0-teste"),
+                &chave(),
+                &DesempacotadorDeTeste,
+            )
+            .expect_err("sem linha, a instalação não saberia onde ficam os dados");
+        assert_eq!(falha, FalhaAoInstalar::LinhaNaoDeclarada);
+        assert!(!raiz.join("versoes").exists() && !raiz.join("preparo").exists());
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Spec 0.16, §1: o launcher guarda o app **mais novo de cada linha**, e
+    /// não toda versão. A 0.16.1 substitui a 0.16.
+    #[test]
+    fn podar_a_linha_deixa_so_a_mais_nova_dela_e_nao_toca_outra_linha() {
+        let raiz = pasta("podar");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.1.0-teste", "1.0.0-teste", "0.15.2-teste"], &[]);
+        for v in ["1.0.0-teste", "1.1.0-teste", "0.15.2-teste"] {
+            let p = m.publicacao(&Versao::nova(v).unwrap()).unwrap().clone();
+            deposito
+                .instalar(&p, ALVO, &pacote(v), &chave(), &DesempacotadorDeTeste)
+                .unwrap();
+        }
+        // Os dados da linha 1, que a poda não pode tocar.
+        let dados = deposito.pasta_de_dados_da_linha(&crate::Linha::nova("1").unwrap());
+        std::fs::create_dir_all(&dados).unwrap();
+        std::fs::write(dados.join("conversas-de-teste.db"), b"x").unwrap();
+
+        let podadas = deposito.podar_linha(&crate::Linha::nova("1").unwrap(), &m);
+
+        let [podada] = podadas.as_slice() else {
+            panic!("a poda devia apagar uma versão só, e veio {podadas:?}");
+        };
+        assert_eq!(podada.versao.como_texto(), "1.0.0-teste");
+        assert!(podada.resultado.is_ok());
+        let restam: Vec<String> = deposito
+            .instaladas()
+            .iter()
+            .map(|v| v.como_texto().to_owned())
+            .collect();
+        assert_eq!(restam, vec!["0.15.2-teste", "1.1.0-teste"]);
+        assert!(
+            dados.join("conversas-de-teste.db").is_file(),
+            "a poda apagou dados"
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Uma instalação que o manifesto não lista não é podada: sem ordem, não
+    /// há como saber se ela é a mais nova.
+    #[test]
+    fn podar_nao_apaga_o_que_o_manifesto_nao_ordena() {
+        let raiz = pasta("podar-fora");
+        let deposito = Deposito::em(&raiz);
+        let antigo = manifesto(&["1.0.0-teste"], &[]);
+        let p = antigo.mais_nova().clone();
+        deposito
+            .instalar(
+                &p,
+                ALVO,
+                &pacote("1.0.0-teste"),
+                &chave(),
+                &DesempacotadorDeTeste,
+            )
+            .unwrap();
+        let novo = manifesto(&["1.1.0-teste"], &[]);
+        assert!(deposito
+            .podar_linha(&crate::Linha::nova("1").unwrap(), &novo)
+            .is_empty());
+        assert_eq!(deposito.instaladas().len(), 1);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn o_tamanho_de_uma_versao_e_o_que_ela_ocupa_em_disco() {
+        let raiz = pasta("tamanho");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("1.0.0-teste").unwrap();
+        instalar_uma(&deposito, "1.0.0-teste");
+        // O executável e o arquivo de conteúdo, que o desempacotador de teste
+        // escreve com o pacote dentro.
+        let esperado = 2 * pacote("1.0.0-teste").len() as u64;
+        let tamanho = deposito.tamanho_da_versao(&versao);
+        assert!(tamanho >= esperado, "{tamanho} < {esperado}");
+        assert_eq!(
+            deposito.tamanho_da_versao(&Versao::nova("9.9.9-teste").unwrap()),
+            0
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// Apagar o app **não** apaga as conversas: os dados são da linha, e o
+    /// próximo app da mesma linha os abre.
+    #[test]
+    fn remover_uma_versao_apaga_a_instalacao_e_deixa_os_dados_da_linha() {
+        let raiz = pasta("remover");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("0.15.2-teste").unwrap();
+        instalar_uma(&deposito, "0.15.2-teste");
+        let legada = crate::Linha::nova("0.15").unwrap();
+        let dados = deposito.pasta_de_dados_da_linha(&legada);
+        std::fs::create_dir_all(&dados).unwrap();
+        std::fs::write(dados.join("conversas-de-teste.db"), vec![0_u8; 4096]).unwrap();
+
+        let liberado = deposito.remover(&versao).unwrap();
+
+        assert!(liberado > 0);
+        assert!(!deposito.pasta_da_versao(&versao).exists());
+        assert!(dados.join("conversas-de-teste.db").is_file());
+        assert_eq!(deposito.tamanho_dos_dados_da_linha(&legada), 4096);
+        assert_eq!(deposito.remover(&versao), Err(FalhaAoRemover::NaoInstalada));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn o_tamanho_nao_segue_ligacao_simbolica() {
+        let raiz = pasta("tamanho-ligacao");
+        let deposito = Deposito::em(&raiz);
+        let versao = Versao::nova("1.0.0-teste").unwrap();
+        instalar_uma(&deposito, "1.0.0-teste");
+        let grande = raiz.join("fora.bin");
+        std::fs::write(&grande, vec![0_u8; 1 << 20]).unwrap();
+        std::os::unix::fs::symlink(&grande, deposito.pasta_da_versao(&versao).join("atalho"))
+            .unwrap();
+        assert!(deposito.tamanho_da_versao(&versao) < 1 << 20);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
     /// Um marcador de antes desta segunda linha é «não sei», e não um erro.
     #[test]
     fn um_marcador_sem_a_linha_do_executavel_responde_que_nao_sabe() {
@@ -884,6 +1225,17 @@ mod testes {
             None,
             "um marcador antigo tem de responder «não sei», para quem chama \
              voltar a pedir o manifesto — e não passar por instalação quebrada"
+        );
+        // E o marcador de antes da linha e da soma também.
+        std::fs::write(
+            deposito.pasta_da_versao(&versao).join(MARCADOR),
+            format!("1.0.0-teste\n{EXECUTAVEL}\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            deposito.instalacao(&versao),
+            None,
+            "sem a linha não há pasta de dados certa, e sem a soma não há guarda"
         );
         let _ = std::fs::remove_dir_all(&raiz);
     }
@@ -987,7 +1339,14 @@ mod testes {
                 self.definitiva.join(EXECUTAVEL),
                 b"a instalacao do outro processo",
             )?;
-            std::fs::write(self.definitiva.join(MARCADOR), b"1.0.0-teste\n")?;
+            // O marcador inteiro: o outro processo roda este mesmo código.
+            std::fs::write(
+                self.definitiva.join(MARCADOR),
+                format!(
+                    "1.0.0-teste\n{EXECUTAVEL}\n1\n{}\n",
+                    resumo_em_hexadecimal(b"a instalacao do outro processo")
+                ),
+            )?;
             // E só então este aqui acaba o preparo dele.
             DesempacotadorDeTeste.desempacotar(pacote, destino)
         }

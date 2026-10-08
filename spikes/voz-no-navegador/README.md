@@ -54,6 +54,51 @@ caso que mais importa saber; e no `pagehide`. O terminal também imprime, a
 cada 5 s, quantos datagramas cada sessão mandou. Assim, o que a tela apagada
 fez aparece do lado do servidor mesmo que o relatório do celular nunca chegue.
 
+## Para as medições 4 a 6 — a página vinda de outra origem (08/10/2026)
+
+As medições 4 a 6 do ADR 0057 pedem a página vinda de uma origem pública, e
+não do próprio servidor. A página aprendeu isso sem perder o modo de antes:
+
+- **o servidor e o hash vêm do fragmento do link**:
+  `https://<origem>/#a=<host>:<porta>&h=<sha-256 em 64 hex>`. É a forma que o
+  produto vai ter. A página lê o fragmento, guarda, e **o apaga da barra** antes
+  de qualquer outra coisa. Com `?manter=fragmento`, ela não apaga, para medir
+  que URL o iOS grava no ícone. Um hash torto ou truncado é recusado;
+- **o web app instalado aceita o link colado**. No iOS ele não divide o
+  armazenamento com a aba (bug 181849 do WebKit), e o `start_url` do manifest
+  não tem fragmento;
+- **o painel «Identidade (medição 4)»** cria, só no toque, uma `CryptoKey`
+  Ed25519 não extraível no IndexedDB. A cada abertura ele conta e diz se ela
+  ainda está lá e se ainda assina. Tem também o botão de
+  `navigator.storage.persist()`. Tudo vai no relatório;
+- **o relatório diz de onde a página veio** e a URL da abertura, **sem o
+  fragmento**;
+- **o servidor** ganhou três opções:
+  - `--origem <url>`: imprime os links de LAN e, com `--publico <ip>`, o de
+    internet;
+  - `--identidade <pasta>`: guarda o certificado por até 12 dias, e assim o
+    link instalado no celular sobrevive a reiniciar o servidor.
+- **`empacotar_origem.py`** monta em `origem/` o que sobe para a origem: a
+  página, o manifest e os ícones.
+
+```sh
+cargo build --release && python3 empacotar_origem.py
+# subir a pasta origem/ para a origem provisória (é do dono)
+./target/release/spike-voz-no-navegador --origem https://<origem> --identidade identidade --publico <ip-publico>
+```
+
+**Conferido na bancada, 08/10:** a pasta `origem/` foi servida em
+`localhost:8099` e o servidor rodou em outra porta.
+- **Chromium 151:** o fragmento sumiu da barra; o WebTransport abriu em 12 ms;
+  a identidade nasceu no toque, sobreviveu a recarregar (a configuração veio
+  então do armazenamento) e assinou; um link torto colado foi recusado.
+- **Safari do Simulador:** a página leu o fragmento, abriu em 92 ms e mandou
+  250 quadros de voz sintética com eco.
+- **O servidor** reiniciado com `--identidade` voltou com o mesmo hash.
+
+Nada disso é a medida do aparelho: a bancada só diz que a página e o servidor
+funcionam antes de alguém levar o iPhone para a rua.
+
 ## O formato
 
 | tipo | do navegador                | do servidor                                        |

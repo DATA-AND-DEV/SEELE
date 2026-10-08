@@ -93,6 +93,30 @@ fn agora_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Lê o certificado guardado em `pasta`, se tiver menos de 12 dias; senão gera
+/// um de 13 dias e o guarda. Assim o hash, e com ele o link instalado no
+/// celular, sobrevive a reiniciar o servidor durante a validade.
+async fn identidade_guardada(pasta: &std::path::Path, nomes: &[String]) -> Result<Identity> {
+    let cert = pasta.join("cert.pem");
+    let chave = pasta.join("chave.pem");
+    let idade = std::fs::metadata(&cert).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok());
+    if let Some(idade) = idade {
+        if idade < Duration::from_secs(12 * 24 * 3600) {
+            return Identity::load_pemfiles(&cert, &chave).await.context("ler o certificado guardado");
+        }
+    }
+    std::fs::create_dir_all(pasta)?;
+    let nova = Identity::self_signed_builder()
+        .subject_alt_names(nomes)
+        .from_now_utc()
+        .validity_days(13)
+        .build()
+        .context("gerar o certificado")?;
+    nova.certificate_chain().store_pemfile(&cert).await?;
+    nova.private_key().store_secret_pemfile(&chave).await?;
+    Ok(nova)
+}
+
 /// O endereço desta máquina na LAN. É o mesmo truque do ADR 0022: um socket
 /// UDP com `connect` num endereço de documentação não manda nada, mas faz o
 /// sistema escolher a interface de saída.
@@ -107,6 +131,14 @@ struct Opcoes {
     porta: u16,
     http: u16,
     relatorios: std::path::PathBuf,
+    /// As medições 4 a 6 do ADR 0057: a origem estática de onde a página vem.
+    /// Com ela, o servidor imprime o link `<origem>/#a=<ip>:<porta>&h=<hash>`.
+    origem: Option<String>,
+    /// O IP público, para o link de 4G (medição 4).
+    publico: Option<String>,
+    /// Onde guardar o certificado entre reinícios. Sem isto, cada reinício
+    /// muda o hash e invalida o link já instalado no celular.
+    identidade: Option<std::path::PathBuf>,
 }
 
 fn ler_opcoes() -> Result<Opcoes> {
@@ -114,6 +146,9 @@ fn ler_opcoes() -> Result<Opcoes> {
         porta: 4433,
         http: 8080,
         relatorios: "relatorios.jsonl".into(),
+        origem: None,
+        publico: None,
+        identidade: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -122,7 +157,10 @@ fn ler_opcoes() -> Result<Opcoes> {
             "--porta" => opcoes.porta = valor()?.parse()?,
             "--http" => opcoes.http = valor()?.parse()?,
             "--relatorios" => opcoes.relatorios = valor()?.into(),
-            outro => bail!("não conheço {outro}; aceito --porta, --http e --relatorios"),
+            "--origem" => opcoes.origem = Some(valor()?.trim_end_matches('/').to_string()),
+            "--publico" => opcoes.publico = Some(valor()?),
+            "--identidade" => opcoes.identidade = Some(valor()?.into()),
+            outro => bail!("não conheço {outro}; aceito --porta, --http, --relatorios, --origem, --publico e --identidade"),
         }
     }
     Ok(opcoes)
@@ -137,12 +175,15 @@ async fn main() -> Result<()> {
     if let Some(ip) = lan {
         nomes.push(ip.to_string());
     }
-    let identidade = Identity::self_signed_builder()
-        .subject_alt_names(&nomes)
-        .from_now_utc()
-        .validity_days(13)
-        .build()
-        .context("gerar o certificado")?;
+    let identidade = match &opcoes.identidade {
+        Some(pasta) => identidade_guardada(pasta, &nomes).await?,
+        None => Identity::self_signed_builder()
+            .subject_alt_names(&nomes)
+            .from_now_utc()
+            .validity_days(13)
+            .build()
+            .context("gerar o certificado")?,
+    };
     let certificado = &identidade.certificate_chain().as_slice()[0];
     let hash = certificado.hash();
 
@@ -199,6 +240,16 @@ async fn main() -> Result<()> {
         println!("  no celular:  https://{ip}:{}/   (aceite o aviso de certificado uma vez)", opcoes.porta);
     }
     println!("  nesta máquina: http://localhost:{}/", opcoes.http);
+    if let Some(origem) = &opcoes.origem {
+        // O hash em hex corrido, que é o que a página lê do fragmento.
+        let h = hash.fmt(Sha256DigestFmt::DottedHex).to_string().replace(':', "");
+        if let Some(ip) = lan {
+            println!("  link de LAN (medições 5 e 6):  {origem}/#a={ip}:{}&h={h}", opcoes.porta);
+        }
+        if let Some(ip) = &opcoes.publico {
+            println!("  link público (medição 4):      {origem}/#a={ip}:{}&h={h}", opcoes.porta);
+        }
+    }
     println!("  relatórios em {}", opcoes.relatorios.display());
 
     {

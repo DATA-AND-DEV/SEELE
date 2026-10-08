@@ -81,6 +81,11 @@ pub use types::{
 /// em que uma mudasse.
 pub use seele_core::{conhecidos, preferences, preview, search, uri};
 
+/// O número do fio, a versão de servidor e a linha de cada número, para quem
+/// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não
+/// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
+pub use seele_core::{linha_do_protocolo, PROTOCOL_VERSION, VERSAO_DO_SERVIDOR};
+
 /// Every microphone this machine is offering, right now.
 ///
 /// A free function and not a method on [`Connection`]: picking a microphone is a thing
@@ -4179,19 +4184,9 @@ async fn drive(
                         shared.notify(&Event::TelemetryChanged);
                     }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
-                        let reason = match motivo {
-                            seele_core::enlace::Motivo::Descarregou => EndReason::LinkLost,
-                            seele_core::enlace::Motivo::Recusado(_) => EndReason::CredentialRejected,
-                            seele_core::enlace::Motivo::Pedido => EndReason::LinkLost,
-                            // O motivo enumerado que o servidor mandou, e não
-                            // uma tradução dele: quem foi expulso tem de ler
-                            // «expulso». Cair aqui em `CredentialRejected`
-                            // mandaria a pessoa conferir uma senha que está
-                            // certa — a mesma armadilha que o doc de
-                            // `DisconnectReason::NicknameTaken` registra.
-                            seele_core::enlace::Motivo::Moderado(porque) => porque.into(),
-                        };
-                        shared.notify(&Event::Ended { reason });
+                        shared.notify(&Event::Ended {
+                            reason: fim_da_sessao(&motivo),
+                        });
                         break;
                     }
                 }
@@ -5089,6 +5084,60 @@ fn next_client_message_id() -> u64 {
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
+/// Por que a sessão acabou, como a casca o lê, a partir do que o enlace disse.
+///
+/// Fora de `drive` para ter teste: é a única tradução entre o fim que o núcleo
+/// enumera e o `EndReason` que chega à tela e ao retrato.
+fn fim_da_sessao(motivo: &seele_core::enlace::Motivo) -> EndReason {
+    match motivo {
+        seele_core::enlace::Motivo::Descarregou | seele_core::enlace::Motivo::Pedido => {
+            EndReason::LinkLost
+        }
+        seele_core::enlace::Motivo::Recusado(erro) => fim_da_recusa(erro),
+        // O motivo enumerado que o servidor mandou, e não uma tradução dele:
+        // quem foi expulso tem de ler «expulso». Cair aqui em
+        // `CredentialRejected` mandaria a pessoa conferir uma senha que está
+        // certa — a mesma armadilha que o doc de
+        // `DisconnectReason::NicknameTaken` registra.
+        seele_core::enlace::Motivo::Moderado(porque) => (*porque).into(),
+    }
+}
+
+/// O fim de uma sessão cuja volta pela bateria foi recusada.
+///
+/// Era `CredentialRejected` para toda recusa, e a tela mandava conferir convite
+/// e senha a quem voltou para um servidor que não é o do convite, cuja chave
+/// mudou, que lotou ou cujos MODs mudaram. A recusa já vinha tipada do núcleo
+/// ([`seele_core::enlace::Motivo::Recusado`]); só esta tradução a jogava fora.
+///
+/// # `match` exaustivo, e sem braço `_`
+///
+/// Pela regra que `enlace::alguem_respondeu` escreve: uma variante nova de
+/// `ConnectError` não compila até alguém dizer o que ela vira na tela.
+///
+/// As de rede não chegam aqui hoje — `enlace::vale_insistir` as devolve à
+/// bateria —, e cada uma está nomeada para que uma mudança lá não as faça
+/// chegar como credencial.
+fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
+    match erro {
+        seele_core::ConnectError::Refused { reason } => (*reason).into(),
+        // Sem as impressões: `EndReason` é `Copy` e chega ao retrato. Elas
+        // ficam no `seele.log`, na linha da volta recusada.
+        seele_core::ConnectError::InviteMismatch { .. }
+        | seele_core::ConnectError::ChaveNaoProvada => EndReason::ServidorTrocouNaVolta,
+        seele_core::ConnectError::PinChanged { .. } => EndReason::ChaveMudouNaVolta,
+        // Na volta, o anúncio que esta máquina não aceitou é o servidor que
+        // passou a exigir outro conjunto no meio da sessão.
+        seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
+        seele_core::ConnectError::LocalEndpoint
+        | seele_core::ConnectError::Unreachable
+        | seele_core::ConnectError::TlsRefused
+        | seele_core::ConnectError::HandshakeTimeout
+        | seele_core::ConnectError::SemResposta
+        | seele_core::ConnectError::ProtocolViolation => EndReason::LinkLost,
+    }
+}
+
 /// Relabels a core connection failure for the shell.
 ///
 /// A relabel and nothing more: the core already decided *what* went wrong, and
@@ -5114,6 +5163,10 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 offered: offered.clone(),
             }
         }
+        // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
+        // certificado sem ter a chave aparecia como versão incompatível, e a
+        // tela mandava atualizar o SEELE nas duas máquinas.
+        seele_core::ConnectError::ChaveNaoProvada => ConnectionError::ChaveNaoProvada,
         // Não é uma falha traduzida: é a pergunta do ADR 0045 atravessando
         // inteira, com o que a tela precisa para fazê-la.
         seele_core::ConnectError::ModsNaoAceitos { mods, conjunto } => {
@@ -5131,6 +5184,156 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
         seele_core::ConnectError::Refused { reason } => ConnectionError::Refused {
             reason: (*reason).into(),
         },
+    }
+}
+
+#[cfg(test)]
+mod a_volta_recusada_diz_o_motivo {
+    use super::{classify_connect_failure, fim_da_sessao, ConnectionError, EndReason};
+    use seele_core::enlace::Motivo;
+    use seele_core::{ConnectError, DisconnectReason};
+
+    #[test]
+    fn quem_nao_prova_a_chave_nao_chega_como_versao_incompativel() {
+        // Era `TlsRefused`, que esta tradução manda para
+        // `Refused { Incompatible }`: o impostor que repete o certificado do
+        // servidor aparecia como versão incompatível, e a tela mandava
+        // atualizar o SEELE nas duas máquinas.
+        assert_eq!(
+            classify_connect_failure(&ConnectError::ChaveNaoProvada),
+            ConnectionError::ChaveNaoProvada,
+            "quem não provou a chave do servidor chega à tela com outro nome, e a frase \
+             manda atualizar o SEELE por causa de um impostor"
+        );
+    }
+
+    #[test]
+    fn fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada() {
+        // A volta da bateria recusada acabava em `CredentialRejected` qualquer
+        // que fosse o motivo, e a tela mandava conferir convite e senha: sobre
+        // um servidor que não é o do convite, sobre a chave que mudou, sobre o
+        // servidor lotado e sobre os MODs que mudaram. Passa pelo mesmo
+        // `fim_da_sessao` que `drive` chama, para que a fiação conte junto.
+        let casos = [
+            (
+                "InviteMismatch",
+                ConnectError::InviteMismatch {
+                    expected: "bbbb2222".into(),
+                    offered: "aaaa1111".into(),
+                },
+                EndReason::ServidorTrocouNaVolta,
+            ),
+            (
+                "Refused { ServerFull }",
+                ConnectError::Refused {
+                    reason: DisconnectReason::ServerFull,
+                },
+                EndReason::ServerFull,
+            ),
+            (
+                "PinChanged",
+                ConnectError::PinChanged {
+                    pinned: "aaaa1111".into(),
+                    offered: "cccc3333".into(),
+                },
+                EndReason::ChaveMudouNaVolta,
+            ),
+            (
+                "ModsNaoAceitos",
+                ConnectError::ModsNaoAceitos {
+                    mods: Vec::new(),
+                    conjunto: "conjunto".into(),
+                },
+                EndReason::ModsMudaram,
+            ),
+            (
+                "ChaveNaoProvada",
+                ConnectError::ChaveNaoProvada,
+                EndReason::ServidorTrocouNaVolta,
+            ),
+        ];
+        let erradas: Vec<String> = casos
+            .into_iter()
+            .filter_map(|(nome, erro, esperado)| {
+                let obtido = fim_da_sessao(&Motivo::Recusado(erro));
+                (obtido != esperado).then(|| format!("{nome} deu {obtido:?}, e não {esperado:?}"))
+            })
+            .collect();
+        assert!(
+            erradas.is_empty(),
+            "a volta recusada chega à tela com um motivo que não é o dela, e a frase manda \
+             a pessoa conferir o que não está errado: {erradas:#?}"
+        );
+    }
+
+    #[test]
+    fn fim_da_recusa_do_que_nao_e_recusa_e_enlace_perdido() {
+        // Estas não chegam a `Recusado` hoje (`vale_insistir` as manda de volta
+        // à bateria). Se uma chegar, ela é rede, e não credencial.
+        for erro in [
+            ConnectError::LocalEndpoint,
+            ConnectError::Unreachable,
+            ConnectError::TlsRefused,
+            ConnectError::HandshakeTimeout,
+            ConnectError::SemResposta,
+            ConnectError::ProtocolViolation,
+        ] {
+            let obtido = fim_da_sessao(&Motivo::Recusado(erro.clone()));
+            assert_eq!(
+                obtido,
+                EndReason::LinkLost,
+                "a volta que acabou em {erro:?} chega à tela como {obtido:?}, e não como \
+                 enlace perdido: a frase manda procurar outra causa para uma falha de rede"
+            );
+        }
+    }
+
+    /// A ligação de `drive` a [`fim_da_sessao`], que nenhum teste de
+    /// comportamento alcança.
+    ///
+    /// Os testes de cima provam `fim_da_sessao`. `drive` só a usa com uma
+    /// sessão viva cuja volta pela bateria o servidor recuse, e nenhum teste
+    /// deste crate abre uma. Sem este guarda, um `match` reescrito à mão dentro
+    /// de `drive` (o `Recusado(_) => CredentialRejected` de antes do lote H)
+    /// deixaria todos verdes, e a tela voltaria a dizer «credencial recusada»
+    /// para toda volta recusada.
+    ///
+    /// Comentários fora, para que um parágrafo que cite a chamada não conte
+    /// como a chamada. As agulhas são montadas, e não escritas: este é o
+    /// arquivo que o teste lê.
+    #[test]
+    fn drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao() {
+        let fonte = include_str!("lib.rs");
+        let sem_comentario: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let inicio = sem_comentario
+            .find(&format!("{} fn drive(", "async"))
+            .expect("`drive` sumiu de `lib.rs`");
+        let depois = sem_comentario.get(inicio..).expect("o começo de `drive`");
+        let fim = depois.find("\n}\n").expect("`drive` nunca fecha");
+        let corpo = depois.get(..fim).expect("o corpo de `drive`");
+        let Some(braco) = corpo
+            .split(&format!("enlace::Aviso::{}(motivo) =>", "Encerrado"))
+            .nth(1)
+        else {
+            panic!(
+                "`drive` não trata mais o fim que o enlace avisa pelo nome de sempre, e este \
+                 guarda deixou de achar o braço que ele prende"
+            );
+        };
+        let braco = braco
+            .split(&format!("{};", "break"))
+            .next()
+            .unwrap_or(braco);
+        assert!(
+            braco.contains(&format!("{}(&motivo)", "fim_da_sessao")),
+            "`drive` traduz o fim da sessão sem passar por `fim_da_sessao`: os testes de \
+             `fim_da_recusa` ficam verdes e a tela pode voltar a dizer «credencial recusada» \
+             para toda volta recusada:\n{braco}"
+        );
     }
 }
 
@@ -5688,6 +5891,7 @@ mod tests {
                 id: PersonId(3),
                 nickname: "marcela".into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(30),
         });
@@ -5727,6 +5931,7 @@ mod tests {
                 id: PersonId(3),
                 nickname: "marcela".into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(30),
         });
@@ -5773,6 +5978,7 @@ mod tests {
                     id: PersonId(id),
                     nickname: format!("pessoa {id}"),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
             });
@@ -7079,6 +7285,7 @@ mod tests {
                 id: PersonId(pessoa),
                 nickname: format!("pessoa-{pessoa}"),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(pessoa.wrapping_mul(10).try_into().unwrap_or(1)),
         });
@@ -7304,6 +7511,7 @@ mod tests {
                     id: PersonId(4),
                     nickname: "pessoa-4".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(40),
             },
@@ -7432,6 +7640,7 @@ mod tests {
                     id: PersonId(3),
                     nickname: "marcela".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(30),
             },
@@ -7475,6 +7684,7 @@ mod tests {
                     id: PersonId(4),
                     nickname: "pires".into(),
                     roles: Vec::new(),
+                    material_e2ee: None,
                 },
                 ssrc: Ssrc(40),
             },

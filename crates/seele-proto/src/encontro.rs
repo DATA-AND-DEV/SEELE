@@ -183,10 +183,10 @@ pub const LIMITE_DA_MARCA: usize = 32;
 /// Para o anfitrião saber quem bateu. Ele conhece a marca que ele mesmo mandou,
 /// e conhece a que quem teve o convite vai usar — os primeiros dígitos da
 /// impressão digital dele. Quem entra os tira do `seele://`, ou da lista de
-/// conhecidos, que guardou a impressão de um link; e quem opera o ponto de
-/// encontro os lê no começo das marcas que o anfitrião registra no quarto. Uma
-/// marca que não é nenhuma das duas é ruído da internet, e não vira furo de NAT
-/// nenhum.
+/// conhecidos, que guardou a impressão que a conexão aceitou; e quem opera o
+/// ponto de encontro os lê no começo das marcas que o anfitrião registra no
+/// quarto. Uma marca que não é nenhuma das duas é ruído da internet, e não vira
+/// furo de NAT nenhum.
 ///
 /// Não é autenticação e não tenta ser: quem teve o link, tem. É o que impede um
 /// varredor de portas de fazer um servidor mandar pacotes para onde ele quiser.
@@ -246,18 +246,77 @@ impl std::fmt::Display for Marca {
 /// conta própria, os dois divergiram: o anfitrião registrava a escuta como
 /// `anfitriao`, o cliente perguntava pela impressão digital, e a resposta
 /// nunca veio (análise de 22/09/2026, §2.1).
+///
+/// # Por que os campos são privados
+///
+/// Com os campos públicos, quem estivesse fora deste módulo montava
+/// `Marcas { escuta: aviso.clone(), … }` sem passar por [`Marcas::do_servidor`],
+/// e a escuta com a marca do aviso é exatamente o eco que vira furo contra si
+/// mesmo. O único jeito de ter `Marcas` é [`Marcas::do_servidor`], e o que se
+/// lê delas sai por [`Marcas::aviso`], [`Marcas::escuta`] e
+/// [`Marcas::servidor`].
+///
+/// O exemplo abaixo é o guarda disto: ele **não pode compilar**, e o teste de
+/// documentação reprova no dia em que um campo voltar a ser público.
+///
+/// ```compile_fail,E0451
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let _eco = Marcas {
+///     aviso: aviso.clone(),
+///     escuta: aviso.clone(),
+///     servidor: aviso,
+/// };
+/// ```
+///
+/// **O código de erro (`E0451`) só é conferido no nightly.** No stable, um
+/// `compile_fail` passa com qualquer erro: com um nome trocado ou um import
+/// que sumiu, o exemplo de cima deixaria de compilar por outro motivo e o
+/// guarda ficaria vazio (medido no 1.97.1, com os campos públicos e um
+/// `E0599`). O gêmeo abaixo, com os mesmos imports e a mesma `Marca::nova`,
+/// **tem** de compilar: ele prova que os imports e a `Marca::nova` de cima
+/// estão certos, e só isso. Um campo renomeado ou a mais em `Marcas`, com os
+/// campos públicos, daria outro erro (`E0560`, `E0063`) que o stable também
+/// aceita, e esse caso o gêmeo não cobre.
+///
+/// ```
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let marcas = Marcas::do_servidor(
+///     "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9",
+/// )
+/// .expect("uma impressão digital dá marcas");
+/// assert_eq!(marcas.aviso(), &aviso);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marcas {
-    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
-    /// furar.
-    pub aviso: Marca,
-    /// Sob a qual a escuta de avisos se registra no quarto.
-    pub escuta: Marca,
-    /// Sob a qual o socket do servidor se registra no quarto.
-    pub servidor: Marca,
+    aviso: Marca,
+    escuta: Marca,
+    servidor: Marca,
 }
 
 impl Marcas {
+    /// A que o `LEVE` de quem chega traz, e a que o anfitrião confere antes de
+    /// furar.
+    #[must_use]
+    pub fn aviso(&self) -> &Marca {
+        &self.aviso
+    }
+
+    /// Sob a qual a escuta de avisos se registra no quarto.
+    #[must_use]
+    pub fn escuta(&self) -> &Marca {
+        &self.escuta
+    }
+
+    /// Sob a qual o socket do servidor se registra no quarto.
+    #[must_use]
+    pub fn servidor(&self) -> &Marca {
+        &self.servidor
+    }
+
     /// As marcas de um servidor guardado, tiradas da impressão digital.
     ///
     /// Partem dos dezesseis primeiros caracteres, que o `seele://` carrega em
@@ -269,15 +328,50 @@ impl Marcas {
     /// `QUEM <fp16>s`, e trocar qualquer um dos dois o deixaria falando sozinho.
     ///
     /// Devolve `None` para um texto que não forma marca: curto demais, ou com
-    /// algo que não é letra nem número.
+    /// algo que não é letra nem número **em qualquer posição**, e não só nos
+    /// dezesseis primeiros.
     #[must_use]
     pub fn do_servidor(impressao_digital: &str) -> Option<Self> {
+        if !impressao_digital
+            .chars()
+            .all(|caractere| caractere.is_ascii_alphanumeric())
+        {
+            return None;
+        }
         let prefixo = impressao_digital.get(..16)?;
         Some(Self {
             aviso: Marca::nova(prefixo)?,
             escuta: Marca::nova(&format!("{prefixo}e"))?,
             servidor: Marca::nova(&format!("{prefixo}s"))?,
         })
+    }
+
+    /// As marcas da sala pessoal de quem tem este código (spec de 23/09/2026,
+    /// «O código»).
+    ///
+    /// O aviso é `p` e os 15 símbolos de dado do código; a escuta, eles e um
+    /// `e`; o servidor, eles e um `s`. **O `p` separa este espaço do das
+    /// marcas de servidor**, que saem de uma impressão em hexadecimal: `p` não
+    /// é hexadecimal, então uma sala e um servidor guardado nunca dividem
+    /// marca.
+    ///
+    /// **Formato congelado, com a caixa das letras.** [`Marca::nova`] não
+    /// normaliza e o ponto compara byte a byte: os símbolos vão maiúsculos,
+    /// como [`crate::codigo::Codigo::dado`] os dá, e o `p`, o `e` e o `s`
+    /// minúsculos. Mudar qualquer um deixa todo código já distribuído falando
+    /// sozinho no quarto.
+    ///
+    /// Não falha: 15 símbolos alfanuméricos e uma letra cabem com folga em
+    /// [`LIMITE_DA_MARCA`], e `toda_marca_da_sala_e_uma_marca_valida` confere
+    /// que [`Marca::nova`] aceitaria cada uma.
+    #[must_use]
+    pub fn da_sala(codigo: &crate::codigo::Codigo) -> Self {
+        let aviso = format!("p{}", codigo.dado());
+        Self {
+            escuta: Marca(format!("{aviso}e")),
+            servidor: Marca(format!("{aviso}s")),
+            aviso: Marca(aviso),
+        }
     }
 }
 
@@ -839,17 +933,17 @@ mod testes {
         let marcas =
             Marcas::do_servidor(IMPRESSAO).expect("uma impressão digital sempre dá marcas");
         assert_eq!(
-            marcas.aviso.texto(),
+            marcas.aviso().texto(),
             "3cbcfb0212da738f",
             "a marca do aviso mudou: todo cliente 0.15.0 passa a bater com uma marca que o anfitrião ignora"
         );
         assert_eq!(
-            marcas.servidor.texto(),
+            marcas.servidor().texto(),
             "3cbcfb0212da738fs",
             "a marca do servidor mudou: todo cliente 0.15.0 pergunta por uma marca que ninguém registra"
         );
         assert_eq!(
-            marcas.escuta.texto(),
+            marcas.escuta().texto(),
             "3cbcfb0212da738fe",
             "a marca da escuta mudou: quem procura o anfitrião pergunta por uma marca que a escuta não registra"
         );
@@ -868,18 +962,21 @@ mod testes {
             let marcas =
                 Marcas::do_servidor(impressao).expect("uma impressão digital sempre dá marcas");
             assert_ne!(
-                marcas.escuta, marcas.aviso,
-                "a escuta se registra com a marca do aviso: o AQUI que responde ao próprio MORO \
-                 passa no filtro e vira um furo contra si mesmo"
+                marcas.escuta(),
+                marcas.aviso(),
+                "com a impressão {impressao}, a escuta se registra com a marca do aviso: o AQUI \
+                 que responde ao próprio MORO passa no filtro e vira um furo contra si mesmo"
             );
             assert_ne!(
-                marcas.servidor, marcas.aviso,
-                "o servidor se registra com a marca do aviso"
+                marcas.servidor(),
+                marcas.aviso(),
+                "com a impressão {impressao}, o servidor se registra com a marca do aviso"
             );
             assert_ne!(
-                marcas.servidor, marcas.escuta,
-                "servidor e escuta com a mesma marca: o quarto guarda um endereço por marca, e um \
-                 apaga o outro"
+                marcas.servidor(),
+                marcas.escuta(),
+                "com a impressão {impressao}, servidor e escuta têm a mesma marca: o quarto guarda \
+                 um endereço por marca, e um apaga o outro"
             );
         }
     }
@@ -901,5 +998,89 @@ mod testes {
             None,
             "um espaço virou marca: a marca é o único campo que volta na resposta do ponto"
         );
+        // O T1a da pendência 51, item 17: o texto inteiro, e não só os 16
+        // primeiros. O doc promete `None` para «algo que não é letra nem
+        // número», e o que vinha depois do 16º caractere não era olhado.
+        assert_eq!(
+            Marcas::do_servidor("0123456789abcdef!!!"),
+            None,
+            "um texto com algo que não é letra nem número depois do 16º caractere deu marcas: \
+             o doc de `do_servidor` promete recusá-lo, e uma impressão torta passa por boa"
+        );
+    }
+}
+
+#[cfg(test)]
+mod as_marcas_da_sala {
+    //! As marcas da sala pessoal no quarto (spec de 23/09/2026, «O código»):
+    //! `p` e os 15 símbolos de dado do código; a escuta com `e` no fim, o
+    //! servidor com `s`. Formato congelado: um código já distribuído responde
+    //! nestas marcas para sempre.
+    use super::*;
+    use crate::codigo::Codigo;
+
+    /// Calculadas pela implementação de referência independente, em Python,
+    /// que também confere os códigos (`codigo.rs`).
+    #[test]
+    fn as_marcas_de_cada_codigo_sao_as_da_referencia() {
+        for (chave, aviso) in [
+            ([0_u8; 32], "pCSM7NBFRCAYQEV4"),
+            ([0xFF; 32], "pNYB16XGFE9HNZFD"),
+        ] {
+            let marcas = Marcas::da_sala(&Codigo::da_chave(&chave));
+            assert_eq!(marcas.aviso().texto(), aviso);
+            assert_eq!(marcas.escuta().texto(), format!("{aviso}e"));
+            assert_eq!(marcas.servidor().texto(), format!("{aviso}s"));
+        }
+    }
+
+    /// **A caixa das letras é formato.** `Marca::nova` não normaliza, e o
+    /// ponto compara byte a byte: o `p`, o `e` e o `s` minúsculos, e os
+    /// símbolos do código maiúsculos, como `Codigo::dado` os dá.
+    #[test]
+    fn a_caixa_das_letras_e_a_do_codigo_com_o_p_minusculo() {
+        let marcas = Marcas::da_sala(&Codigo::da_chave(&[0; 32]));
+        assert!(marcas.aviso().texto().starts_with('p'));
+        assert_eq!(
+            &marcas.aviso().texto()[1..],
+            Codigo::da_chave(&[0; 32]).dado()
+        );
+    }
+
+    /// Toda marca da sala é uma marca que o quarto aceita.
+    #[test]
+    fn toda_marca_da_sala_e_uma_marca_valida() {
+        let marcas = Marcas::da_sala(&Codigo::da_chave(&[7; 32]));
+        for marca in [marcas.aviso(), marcas.escuta(), marcas.servidor()] {
+            assert_eq!(Marca::nova(marca.texto()).as_ref(), Some(marca));
+        }
+    }
+
+    /// **Uma marca da sala nunca colide com a de um servidor guardado.**
+    ///
+    /// As de servidor saem dos 16 primeiros caracteres de uma impressão, que o
+    /// link só aceita em hexadecimal (`uri.rs`); as da sala começam todas por
+    /// `p`, que não é hexadecimal. É a primeira letra que separa os dois
+    /// espaços, e é ela que este teste prende.
+    ///
+    /// Escrito assim, e não como uma propriedade sobre chaves e impressões
+    /// sorteadas: sortear não acha a colisão nem quando o `p` some, porque a
+    /// chance de um código cair inteiro em hexadecimal é ínfima. Um guarda que
+    /// não reprova na reversão não guarda nada.
+    #[test]
+    fn o_p_separa_a_sala_dos_servidores() {
+        assert!(!'p'.is_ascii_hexdigit());
+        for chave in [[0_u8; 32], [0xFF; 32], [7; 32]] {
+            let sala = Marcas::da_sala(&Codigo::da_chave(&chave));
+            for marca in [sala.aviso(), sala.escuta(), sala.servidor()] {
+                assert!(marca.texto().starts_with('p'), "{}", marca.texto());
+            }
+        }
+        for impressao in ["0".repeat(64), "f".repeat(64), "3c".repeat(32)] {
+            let servidor = Marcas::do_servidor(&impressao).unwrap();
+            for marca in [servidor.aviso(), servidor.escuta(), servidor.servidor()] {
+                assert!(!marca.texto().starts_with('p'), "{}", marca.texto());
+            }
+        }
     }
 }

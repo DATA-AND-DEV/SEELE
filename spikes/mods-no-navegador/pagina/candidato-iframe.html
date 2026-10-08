@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>executor de MOD · iframe</title>
+<script>
+// Candidata B: um iframe com `sandbox="allow-scripts"` (origem opaca), servido
+// com a CSP `default-src 'none'; script-src 'sha256-<este script>' 'unsafe-eval'`
+// por cabeçalho. O código do MOD roda no motor do próprio navegador, no mesmo
+// reino deste script. Descartável.
+(() => {
+  "use strict";
+  // Ligados ao globalThis: guardados soltos num objeto, o Chromium lança
+  // «Illegal invocation» ao chamá-los.
+  const nativo = {
+    setTimeout: setTimeout.bind(globalThis), setInterval: setInterval.bind(globalThis),
+    clearTimeout: clearTimeout.bind(globalThis), clearInterval: clearInterval.bind(globalThis),
+  };
+  const enc = new TextEncoder();
+  const TETO = 12 * 1024;
+  const pai = parent;
+  const falar = (o) => pai.postMessage(o, "*");
+  const relogios = new Map();
+  // A mesma volta do anfitrião do motor: recolhe os pedidos de relógio que o
+  // prelúdio enfileirou e os agenda nos relógios nativos, guardados antes de o
+  // prelúdio os trocar.
+  const depois = () => {
+    let pedidos = [];
+    try { pedidos = JSON.parse(globalThis.__seelePedidosDeRelogio()); } catch (_) {}
+    for (const r of pedidos) {
+      if (r.cancelar) { const h = relogios.get(r.id); nativo.clearTimeout(h); nativo.clearInterval(h); relogios.delete(r.id); continue; }
+      const ms = Math.max(r.repete ? 4 : 0, r.ms);
+      const disparar = () => {
+        if (!r.repete) relogios.delete(r.id);
+        try { globalThis.__seeleRelogio(r.id); } catch (err) { falar({ tipo: "erro-na-volta", erro: String(err) }); }
+        nativo.setTimeout(depois, 0);
+      };
+      relogios.set(r.id, r.repete ? nativo.setInterval(disparar, ms) : nativo.setTimeout(disparar, ms));
+    }
+  };
+  addEventListener("message", (e) => {
+    if (e.source !== pai) return;
+    const m = e.data;
+    if (m.tipo === "iniciar") {
+      const t0 = performance.now();
+      globalThis.seele = {
+        postar: (json) => { if (enc.encode(json).length > TETO) return false; falar({ tipo: "fala", json }); return true; },
+        console: (metodo, texto) => falar({ tipo: "console", metodo, texto }),
+      };
+      globalThis.__seeleCapacidades = m.capacidades;
+      globalThis.__seeleTetoDaMensagem = TETO;
+      try {
+        (0, eval)(m.preludio);
+        (0, eval)(m.fonte);
+        falar({ tipo: "subiu", ms: performance.now() - t0 });
+      } catch (err) {
+        falar({ tipo: "falhou", erro: String(err) });
+      }
+      nativo.setTimeout(depois, 0);
+      // **A diferença de semântica do B.** O prelúdio do desktop supõe que todo
+      // código do MOD roda dentro de uma volta do anfitrião, que recolhe os
+      // pedidos de relógio no fim. Aqui o MOD também roda em callbacks nativos
+      // (IndexedDB, fetch, eventos), fora de qualquer volta: sem esta sondagem,
+      // um `setTimeout` pedido ali nunca dispara.
+      nativo.setInterval(depois, 10);
+    } else if (m.tipo === "entregar") {
+      try { globalThis.aoResponder(m.json); } catch (err) { falar({ tipo: "erro-na-volta", erro: String(err) }); }
+      nativo.setTimeout(depois, 0);
+    }
+  });
+  falar({ tipo: "carregou" });
+})();
+</script>

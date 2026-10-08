@@ -49,7 +49,7 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
     let ontem = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let porta_de_ontem = ontem.local_addr().unwrap();
     ontem
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     ontem.recv_from(&mut balde).await.unwrap();
@@ -62,7 +62,7 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
         porta_de_ontem, porta_de_hoje,
         "o teste precisa de duas portas diferentes para dizer alguma coisa"
     );
-    hoje.send_to(&moro(&marcas.servidor), onde_fica)
+    hoje.send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     hoje.recv_from(&mut balde).await.unwrap();
@@ -100,38 +100,69 @@ async fn um_servidor_que_trocou_de_porta_ainda_e_achado_pela_impressao() {
     );
 }
 
+/// Um ponto que responde a todo datagrama com lixo: dois `AQUI` tortos, do
+/// tamanho certo e não, e um pedido em vez de resposta. Nada disso é a
+/// resposta de um ponto de encontro.
+async fn ponto_que_responde_lixo() -> SocketAddr {
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let onde = socket.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut balde = [0_u8; TAMANHO];
+        while let Ok((_, de)) = socket.recv_from(&mut balde).await {
+            let mut torto = b"SEELE-ENC/1 AQUI marca nao-e-endereco\n".to_vec();
+            torto.resize(TAMANHO, b'.');
+            for lixo in [
+                vec![b'x'; TAMANHO],
+                b"SEELE-ENC/1 AQUI curto 203.0.113.9:50000\n".to_vec(),
+                torto,
+                moro(marcas_de_teste().servidor()),
+            ] {
+                let _ = socket.send_to(&lixo, de).await;
+            }
+        }
+    });
+    onde
+}
+
 #[tokio::test]
-async fn um_ponto_que_nao_conhece_a_pergunta_apenas_cala() {
+async fn um_ponto_mudo_ou_que_responde_lixo_volta_mudo_dentro_do_prazo() {
     let _vaga = vaga::minha();
-    // Um ponto que não responde a nada: fora do ar, ou um firewall no meio. O
-    // que tem de acontecer é a espera vencer e a conexão seguir com os
-    // endereços guardados, nunca uma falha que derrube a tentativa.
+    // O T7a da pendência 51, item 17: o nome antigo deste teste
+    // (`um_ponto_que_nao_conhece_a_pergunta_apenas_cala`) dizia outra coisa do
+    // que ele mede. Ele mede o ponto que não responde nada que seja resposta:
+    // fora do ar, um firewall no meio, ou algo nesse endereço que fala outra
+    // língua. Nos dois casos a espera vence, a conexão segue com os endereços
+    // guardados, e a resposta é `PontoMudo`: só um `AQUI` legível prova que o
+    // ponto está no ar.
     //
     // O ponto anterior ao quarto, que responde `ONDE` e cala `QUEM`, é outro
     // caso, e a consulta sabe dizer que é outro: ver
     // `um_ponto_no_ar_sem_morador_diz_que_ninguem_mora_ali`.
     let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let onde_fica = mudo.local_addr().unwrap();
+    let mudo = mudo.local_addr().unwrap();
+    let do_lixo = ponto_que_responde_lixo().await;
 
-    let comecou = std::time::Instant::now();
-    let achado = onde_mora_hoje(
-        &onde_fica.to_string(),
-        &marcas_de_teste(),
-        std::time::Duration::from_millis(200),
-    )
-    .await;
+    for (ponto, qual) in [(mudo, "mudo"), (do_lixo, "que responde lixo")] {
+        let comecou = std::time::Instant::now();
+        let achado = onde_mora_hoje(
+            &ponto.to_string(),
+            &marcas_de_teste(),
+            std::time::Duration::from_millis(200),
+        )
+        .await;
 
-    assert_eq!(
-        achado,
-        OndeMora::PontoMudo,
-        "um ponto que não respondeu nem ao ONDE não é um quarto vazio, e não havia resposta a \
-         inventar"
-    );
-    assert!(
-        comecou.elapsed() < std::time::Duration::from_secs(2),
-        "a espera não pode passar do prazo pedido: quem paga é toda conexão, \
-         inclusive a de quem está na mesma casa"
-    );
+        assert_eq!(
+            achado,
+            OndeMora::PontoMudo,
+            "um ponto {qual} virou {achado:?}: nada que ele mandou é a resposta de um ponto de \
+             encontro, e quem lê o log vê um quarto onde não há"
+        );
+        assert!(
+            comecou.elapsed() < std::time::Duration::from_secs(2),
+            "com um ponto {qual}, a espera passou do prazo pedido: quem paga é toda conexão, \
+             inclusive a de quem está na mesma casa"
+        );
+    }
 }
 
 #[tokio::test]
@@ -151,7 +182,7 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
 
     let dono = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let do_dono = dono.local_addr().unwrap();
-    dono.send_to(&moro(&marcas.servidor), onde_fica)
+    dono.send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     dono.recv_from(&mut balde).await.unwrap();
@@ -163,7 +194,7 @@ async fn quem_esta_no_ar_nao_perde_o_lugar_para_quem_chega_dizendo_o_nome_dele()
     let mudou = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let novo = mudou.local_addr().unwrap();
     mudou
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     mudou.recv_from(&mut balde).await.unwrap();
@@ -280,13 +311,13 @@ async fn o_quarto_devolve_o_servidor_e_a_escuta_e_nao_espera_o_prazo() {
 
     let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     servidor
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     servidor.recv_from(&mut balde).await.unwrap();
     let escuta = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     escuta
-        .send_to(&moro(&marcas.escuta), onde_fica)
+        .send_to(&moro(marcas.escuta()), onde_fica)
         .await
         .unwrap();
     escuta.recv_from(&mut balde).await.unwrap();
@@ -337,7 +368,7 @@ async fn sem_resposta_a_pergunta_sai_tres_vezes() {
     let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let onde_fica = mudo.local_addr().unwrap().to_string();
     let marcas = marcas_de_teste();
-    let do_servidor = marcas.servidor.clone();
+    let do_servidor = marcas.servidor().clone();
 
     let consulta =
         tokio::spawn(async move { onde_mora_hoje(&onde_fica, &marcas, PRAZO_DO_QUARTO).await });
@@ -381,7 +412,7 @@ async fn um_anfitriao_que_so_registrou_o_servidor_volta_sem_a_escuta_e_sem_esper
 
     let servidor = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
     servidor
-        .send_to(&moro(&marcas.servidor), onde_fica)
+        .send_to(&moro(marcas.servidor()), onde_fica)
         .await
         .unwrap();
     servidor.recv_from(&mut balde).await.unwrap();

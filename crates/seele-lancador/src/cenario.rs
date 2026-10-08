@@ -70,6 +70,18 @@ pub(crate) fn pacote(versao: &str) -> Vec<u8> {
 /// O caminho do executável que os cenários declaram.
 pub(crate) const EXECUTAVEL: &str = "bin/seele-de-teste";
 
+/// A versão de servidor de uma versão de teste: as duas primeiras partes.
+///
+/// `2.0.0-teste` fala o Servidor 2.0 (linha `2`), e `0.15.2-teste` fala o 0.15.
+/// É o que deixa os cenários antigos (uma versão por linha) e os novos (duas
+/// versões na mesma linha) usarem o mesmo construtor.
+pub(crate) fn servidor_de_teste(versao: &str) -> String {
+    let mut partes = versao.split(['.', '-']);
+    let maior = partes.next().unwrap_or("0");
+    let menor = partes.next().unwrap_or("0");
+    format!("{maior}.{menor}")
+}
+
 /// Monta o JSON de um manifesto de versões de teste.
 ///
 /// `versoes` vem da mais nova para a mais velha, que é a ordem do contrato.
@@ -101,11 +113,12 @@ pub(crate) fn manifesto_json_com_executavel(
         .map(|v| {
             format!(
                 r#"{{"version":"{v}","pub_date":"2026-01-01T00:00:00Z",
-                    "unit":{{"protocol":3,"mod_api":1}},
+                    "unit":{{"protocol":3,"mod_api":1,"server":"{}","mod_apis":[1]}},
                     "platforms":{{"{ALVO}":{{
                         "url":"https://exemplo.invalido/{v}",
                         "signature":"{}",
                         "sha256":"{}"{campo_do_executavel}}}}}}}"#,
+                servidor_de_teste(v),
                 par().assinar_no_formato_do_atualizador(&pacote(v)),
                 crate::deposito::resumo_em_hexadecimal(&pacote(v)),
             )

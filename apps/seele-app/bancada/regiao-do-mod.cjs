@@ -230,6 +230,7 @@ class Elemento {
       fillRect(...a) { pintado.push(["retangulo", ...a]); },
       strokeRect(...a) { pintado.push(["retangulo-vazado", ...a]); },
       fillText(texto) { pintado.push(["texto", texto]); },
+      drawImage(imagem) { pintado.push(["imagem", imagem?.src]); },
       measureText: (texto) => ({ width: String(texto).length * 7 }),
       font: "", textBaseline: "", fillStyle: "", strokeStyle: "",
       lineWidth: 0, lineCap: "", lineJoin: "",
@@ -412,8 +413,64 @@ function relogioDeMentira() {
   };
 }
 
+// ------------------------------------------------------ o `Image` de mentira
+
+/**
+ * O `uri` de uma imagem cujo cabeçalho diz PNG e cujo corpo não abre.
+ *
+ * O sniff do Rust só lê o cabeçalho: bytes assim passam por ele com o papel
+ * `imagem`, cabem no teto, e só o decodificador do navegador os recusa
+ * (pendência 51, item 7).
+ */
+const URI_QUE_NAO_DECODIFICA = "data:image/png;base64,iVBORw0KGgoCORPOQUEBRADO";
+
+/**
+ * O começo do `uri` de uma imagem cuja decodificação só termina quando a prova
+ * manda — é como se sai, ou se pede outra, **no meio** do `decode()`.
+ */
+const URI_QUE_DEMORA = "data:image/png;base64,iVBORw0KGgoDEMORA";
+
+/**
+ * Um `Image` de mentira, com o `decode()` que a região espera.
+ *
+ * Por padrão a imagem decodifica, que é o caso de toda mídia que chega certa.
+ * Duas exceções, pelo `uri`:
+ * - `URI_QUE_NAO_DECODIFICA`: o `decode()` recusa, como o navegador recusa um
+ *   corpo corrompido (`EncodingError`);
+ * - um que começa com `URI_QUE_DEMORA`: o `decode()` fica em `Imagem.presas`
+ *   (`{ src, pronto, falhou }`) até a prova soltar.
+ *
+ * `Imagem.decodificadas` anota, em ordem, cada `uri` que alguém mandou
+ * decodificar: é por ela que uma prova sabe que o caminho passou pelo
+ * `decode()`, e não só pelo `src`.
+ */
+function imagemDeMentira() {
+  class Imagem {
+    constructor() {
+      this.src = "";
+    }
+    decode() {
+      Imagem.decodificadas.push(this.src);
+      if (this.src === URI_QUE_NAO_DECODIFICA) {
+        return Promise.reject(new Error("EncodingError: The source image cannot be decoded."));
+      }
+      if (this.src.startsWith(URI_QUE_DEMORA)) {
+        return new Promise((pronto, falhou) => Imagem.presas.push({ src: this.src, pronto, falhou }));
+      }
+      return Promise.resolve();
+    }
+  }
+  Imagem.decodificadas = [];
+  Imagem.presas = [];
+  return Imagem;
+}
+
 /**
  * Um contexto com o DOM mínimo e `mods-regiao.js` dentro.
+ *
+ * O `Image` é sempre o de mentira (`imagemDeMentira`), e sai em `Imagem`: a
+ * região só dá uma imagem por pronta depois do `decode()`, e sem um `Image` no
+ * contexto o `new Image()` lançaria.
  *
  * @param {object} opcoes `{ audio, relogio, console }`: o WebAudio de mentira
  *   desta prova (`audioDeMentira`), um relógio que só anda quando ela manda
@@ -431,6 +488,7 @@ function bancada(opcoes = {}) {
   doc.body = doc.createElement("body");
   // O WebAudio desta prova, ou o padrão — um que decodifica e toca.
   const Audio = opcoes.audio ?? audioDeMentira();
+  const Imagem = imagemDeMentira();
 
   const contexto = vm.createContext({
     console: opcoes.console ?? console,
@@ -444,6 +502,7 @@ function bancada(opcoes = {}) {
     atob,
     AudioContext: Audio,
     OfflineAudioContext: Audio.ForaDoTempo,
+    Image: Imagem,
     requestAnimationFrame: (fn) => {
       quadros.push(fn);
       return quadros.length;
@@ -467,13 +526,16 @@ function bancada(opcoes = {}) {
   vm.runInContext(
     `${fonte}\nglobalThis.api = { RegiaoDeMod, LIMITES_DA_REGIAO, LIMITES_DO_CARTAO, FORMAS_DO_CARTAO, PERFIS_DE_RENDER,
       SILENCIO: typeof SILENCIO_ANTES_DE_SUSPENDER_MS === "number" ? SILENCIO_ANTES_DE_SUSPENDER_MS : undefined,
-      encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined };`,
+      encerrarOSomDosMods: typeof encerrarOSomDosMods === "function" ? encerrarOSomDosMods : undefined,
+      tocadoresDePe: typeof tocadoresDeSomDeMod === "object" ? () => tocadoresDeSomDeMod.size : undefined };`,
     contexto,
     { filename: "mods-regiao.js" },
   );
   return {
     doc,
     quadros,
+    /** O `Image` desta janela: o que foi decodificado, e o que está preso. */
+    Imagem,
     RegiaoDeMod: contexto.api.RegiaoDeMod,
     LIMITES: contexto.api.LIMITES_DA_REGIAO,
     CARTAO: contexto.api.LIMITES_DO_CARTAO,
@@ -483,6 +545,13 @@ function bancada(opcoes = {}) {
     SILENCIO: contexto.api.SILENCIO,
     /** O que a saída da sessão chama para calar e soltar o som dos MODs. */
     encerrarOSomDosMods: contexto.api.encerrarOSomDosMods,
+    /**
+     * Quantos tocadores de som de MOD estão de pé nesta janela, somando as
+     * regiões — o conjunto que segura cada `AudioBuffer` e que, vazio, fecha o
+     * áudio da janela (`tocadoresDeSomDeMod`). Um tocador que um destino largou
+     * sem soltar fica contado aqui para sempre.
+     */
+    tocadoresDePe: () => contexto.api.tocadoresDePe?.() ?? -1,
     /** Uma raiz no documento, como a da faixa ou a de uma página aberta. */
     raiz: () => {
       const raiz = doc.createElement("section");
@@ -495,7 +564,54 @@ function bancada(opcoes = {}) {
     semAudioDeTempoReal: () => {
       contexto.AudioContext = undefined;
     },
+    /** O global desta janela, para uma prova pôr nele o que um recorte de `base.js` lê. */
+    janela: contexto,
+    /** Roda um recorte de outro arquivo da janela neste mesmo contexto, depois da região. */
+    rodar: (codigo, arquivo) => vm.runInContext(codigo, contexto, { filename: arquivo }),
   };
+}
+
+/**
+ * A varredura de `base.js` que cala o som de quem saiu da tela —
+ * `calarOsSonsQueSairamDaTela`, com `aContribuicaoPinta`, a regra de quem
+ * desenha —, recortada do arquivo de verdade e rodada no contexto de `b`.
+ *
+ * **A de verdade, e não uma cópia nesta bancada.** É ela que muda o som de uma
+ * contribuição de destino (P49-8): uma volta que cala, e devolve a marca de
+ * quem saiu, e outra que a oferece a quem desenha. Uma cópia aqui ficaria
+ * verde com a segunda volta tirada de `base.js`.
+ *
+ * As tabelas que ela lê são desta prova: nenhuma região de MOD, nenhum MOD com
+ * cartão que valha, e as contribuições que a prova passa, cada uma com o seu
+ * `montadas` e o seu `sons`, como `montarContribuicao` os deixa.
+ *
+ * @param {object} b A bancada.
+ * @param {object[]} contribuicoes `{ modo, ponto, sons, montadas }`.
+ * @returns {() => void} A varredura, para a prova rodar quando um nó sai.
+ */
+function varreduraDeBase(b, contribuicoes) {
+  const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+  const recorte = (assinatura) => {
+    const inicio = base.indexOf(assinatura);
+    const fim = base.indexOf("\n}\n", inicio);
+    return inicio >= 0 && fim > inicio ? base.slice(inicio, fim + 3) : "";
+  };
+  const pinta = recorte("function aContribuicaoPinta(");
+  const varre = recorte("function calarOsSonsQueSairamDaTela(");
+  confere(
+    "a varredura de base.js",
+    Boolean(pinta && varre),
+    "`aContribuicaoPinta` ou `calarOsSonsQueSairamDaTela` mudou de forma em `base.js`, e o recorte não a achou: "
+      + "as provas do som que muda de destino mediriam outra varredura",
+  );
+  if (!pinta || !varre) return () => {};
+  b.janela.modsDeCartaoQueValem = () => [];
+  b.janela.regioesDosMods = new Map();
+  b.janela.contribuicoesDosMods = {
+    porHandle: new Map(contribuicoes.map((contribuicao, i) => [`c${i + 1}`, contribuicao])),
+  };
+  b.rodar(`${pinta}\n${varre}`, "base.js");
+  return () => b.janela.calarOsSonsQueSairamDaTela();
 }
 
 /** Os doze bytes que o dono de mentira entrega como som: o começo de um WAV. */
@@ -508,11 +624,14 @@ function dono(b, midia) {
   const anotadas = [];
   let mudancas = 0;
   const pedidosDeSom = [];
+  const pedidosDeArquivo = [];
   return {
     ditos,
     registrados,
     anotadas,
     pedidosDeSom,
+    /** O que a região mandou ao seletor do sistema, um pedido por clique. */
+    pedidosDeArquivo,
     /** Quantas vezes a região avisou que o estado de uma mídia mudou. */
     mudancas: () => mudancas,
     api: {
@@ -541,6 +660,12 @@ function dono(b, midia) {
       },
       midiaMudou: () => {
         mudancas += 1;
+      },
+      // O seletor do sistema, que aqui só anota o pedido e responde como
+      // quem fechou sem escolher.
+      escolherArquivo: (pedido) => {
+        pedidosDeArquivo.push(pedido);
+        return Promise.resolve(null);
       },
     },
   };
@@ -1491,6 +1616,32 @@ function aChaveDoCampoNaoPartePar() {
   r.soltar();
 }
 
+/**
+ * **A finalidade de um pedido de arquivo é cortada por ponto de código** (K1-m2,
+ * o mesmo defeito da chave do campo, em `pedidoDeArquivo`). Ela vai pelo
+ * `invoke("escolher_para_o_mod")` até um `Option<String>` do Rust, e metade de
+ * um par substituto na posição 200 é uma cadeia que o `serde_json` recusa: o
+ * corpo inteiro volta recusado, e o seletor nem abre.
+ */
+async function aFinalidadeDoArquivoNaoPartePar() {
+  const caso = "a finalidade do arquivo";
+  const b = bancada();
+  const d = dono(b);
+  const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const finalidade = `${"a".repeat(199)}😀`;
+  r.aplicar([{ forma: "arquivo", chave: "retrato", dentro: "ENVIAR", finalidade }]);
+  acharTag(r.raiz, "button")?.disparar("click");
+  await volta();
+  const pedida = d.pedidosDeArquivo[0]?.finalidade;
+  confere(
+    caso,
+    typeof pedida === "string" && pedida.isWellFormed() && pedida === finalidade,
+    "a finalidade de 200 pontos de código, terminada num par substituto, foi cortada pelo meio do par: o "
+      + `\`serde_json\` recusa o pedido inteiro, e o seletor não abre: ${JSON.stringify(pedida?.slice(-3))}`,
+  );
+  r.soltar();
+}
+
 function oRodapeEReconciliadoSemMoverOBotao() {
   const b = bancada();
   const d = dono(b);
@@ -1727,6 +1878,15 @@ async function cadaMidiaRecusadaEDitaAoAnfitriao() {
       `recusa dita · ${nome}`,
       !d.anotadas.some((texto) => texto.includes("[object Object]")),
       `a recusa do Rust virou «[object Object]»: ${JSON.stringify(d.anotadas)}`,
+    );
+    // **E anotada**, para a aba DIAGNÓSTICO (pendência 49, item 5): o fundo de
+    // uma tela não chamava `anotarMidia`, e a recusa dele só existia no
+    // `seele.log` e no evento do MOD.
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      `recusa anotada · ${nome}`,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && anotadas[0].motivo.includes(pedaco),
+      `o fundo recusado da tela não ficou anotado «recusada» com o motivo, e a aba não o conta: ${JSON.stringify(anotadas)}`,
     );
     regiao.soltar();
   }
@@ -2255,6 +2415,553 @@ async function oFundoEORetratoTambemDizemOEstado() {
 }
 
 // ---------------------------------------------------------------------------
+// 10b. Uma imagem só vale depois do `decode()` (pendência 51, item 7).
+// ---------------------------------------------------------------------------
+
+/**
+ * **O cabeçalho diz imagem, e o corpo não abre.** O sniff do Rust só lê o
+ * cabeçalho: bytes com o começo de um PNG e o corpo corrompido chegam com o
+ * papel `imagem` e cabem no teto. Até a 0.16, os três caminhos da região que
+ * pintam imagem sem um `<img>` que avise — o retrato, o fundo de mídia (por
+ * CSS) e o fundo de tela (só `onload`) — davam essa imagem por «pronta» e
+ * ficavam calados: um quadrado vazio na tela, e nenhuma linha no registro, no
+ * evento do MOD ou na aba DIAGNÓSTICO.
+ *
+ * Agora a imagem só vale depois do `decode()`, e a recusa dele cai no
+ * `recusar` de `.then(aplicar, recusar)`, o mesmo da busca: anotada
+ * «recusada», dita ao registro, dita ao MOD onde o caminho já falava com ele —
+ * o fundo por `midia`/`falhou`, o fundo de tela por `tela`/`fundo-falhou` — e
+ * os bytes que ela reservou voltam à conta. O tropeço de aplicar cai no
+ * `.catch` do fim, e não aqui (ver `aplicarQueLancaNaoViraRecusa`).
+ * **O retrato não fala com o MOD**, e continua sem falar: um evento novo seria
+ * promessa nova da API.
+ *
+ * E o `<img>` do retrato ganha o ouvinte de `error` que o da mídia já tinha
+ * (`naoAbriu`, em `montarMidia`): a imagem que decodificou e depois não abriu
+ * vai pelo mesmo caminho de recusa.
+ */
+async function umaImagemQueNaoDecodificaERecusadaEDita() {
+  const casos = [
+    {
+      nome: "o retrato",
+      no: { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
+      evento: null,
+      nadaPintado: (elem) => !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial",
+    },
+    {
+      nome: "o fundo de mídia",
+      no: { forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+      evento: { nome: "midia", estado: "falhou" },
+      nadaPintado: (elem) => !elem.style.backgroundImage,
+    },
+    {
+      nome: "o fundo de tela",
+      no: { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } },
+      evento: { nome: "tela", estado: "fundo-falhou" },
+      nadaPintado: (elem) => !elem.__fundoDaTela?.imagem,
+    },
+  ];
+  for (const caso of casos) {
+    const nome = `${caso.nome} que não decodifica`;
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 40 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([caso.no]);
+    // O fundo de uma tela só é buscado quando ela tem onde pintar, e a
+    // primeira montagem ainda não tem pincel.
+    if (caso.no.forma === "tela") {
+      regiao.raiz.children[0].darPincel();
+      regiao.aplicar([caso.no]);
+    }
+    await assentar();
+    const elem = regiao.raiz.children[0];
+    confere(
+      nome,
+      b.Imagem.decodificadas.includes(URI_QUE_NAO_DECODIFICA),
+      "a imagem não passou pelo `decode()`: o caminho a deu por pronta sem saber se ela abre",
+    );
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      nome,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && /não decodificou/.test(anotadas[0].motivo),
+      "a imagem que o navegador não decodifica não ficou anotada «recusada» com o motivo, e a aba "
+        + `DIAGNÓSTICO a conta de pé: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      nome,
+      d.anotadas.some((texto) => texto.includes(`«${caso.no.chave}»`) && texto.includes("não decodificou")),
+      `a recusa não chegou ao registro com a chave e o motivo, e o seele.log fica calado: ${JSON.stringify(d.anotadas)}`,
+    );
+    const aoMod = d.ditos.filter((dito) => dito.nome === "midia" || dito.nome === "tela");
+    if (caso.evento) {
+      confere(
+        nome,
+        aoMod.length === 1
+          && aoMod[0].nome === caso.evento.nome
+          && aoMod[0].chave === caso.no.chave
+          && aoMod[0].estado === caso.evento.estado
+          && /não decodificou/.test(String(aoMod[0].porque ?? "")),
+        `o MOD não recebeu «${caso.evento.nome}»/«${caso.evento.estado}» com o motivo, e acha que a imagem `
+          + `está na tela: ${JSON.stringify(aoMod)}`,
+      );
+    } else {
+      confere(
+        nome,
+        aoMod.length === 0,
+        `o retrato passou a falar com o MOD, e um evento novo é promessa nova da API: ${JSON.stringify(aoMod)}`,
+      );
+    }
+    confere(
+      nome,
+      regiao.bytesDeMidia === 0,
+      `a imagem recusada continua ocupando ${regiao.bytesDeMidia} bytes do teto da região`,
+    );
+    confere(nome, caso.nadaPintado(elem), "a imagem que não decodificou foi pintada assim mesmo");
+    regiao.soltar();
+  }
+
+  // **O `<img>` do retrato que decodificou e depois não abriu.** O mesmo
+  // caminho de recusa: a inicial volta, os bytes voltam, a aba e o registro
+  // dizem — e o MOD continua sem evento.
+  {
+    const nome = "o retrato cujo <img> não abriu";
+    const b = bancada();
+    const d = dono(b, () => Promise.resolve({ uri: "data:image/png;base64,AA", papel: "imagem", bytes: 40 }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([{ forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" }]);
+    await assentar();
+    const elem = regiao.raiz.children[0];
+    const img = acharTag(elem, "img");
+    confere(
+      nome,
+      Boolean(img) && regiao.midiasAnotadas()[0]?.situacao === "pronta" && regiao.bytesDeMidia === 40,
+      `o retrato que decodifica não montou: ${JSON.stringify(regiao.midiasAnotadas())}, ${regiao.bytesDeMidia} bytes`,
+    );
+    img?.disparar("error");
+    const anotadas = regiao.midiasAnotadas();
+    confere(
+      nome,
+      anotadas.length === 1 && anotadas[0].situacao === "recusada" && /não decodificou/.test(anotadas[0].motivo),
+      `o <img> do retrato que não abriu continuou anotado «pronta»: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      nome,
+      !acharTag(elem, "img") && elem.dataset.estadoDoRetrato === "inicial" && regiao.bytesDeMidia === 0,
+      "o <img> quebrado continuou cobrindo a inicial, ou os bytes dele continuam no teto: "
+        + `img=${Boolean(acharTag(elem, "img"))}, estado=${elem.dataset.estadoDoRetrato}, ${regiao.bytesDeMidia} bytes`,
+    );
+    confere(
+      nome,
+      d.anotadas.some((texto) => texto.includes("«rosto»")),
+      `o <img> do retrato que não abriu não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      nome,
+      !d.ditos.some((dito) => dito.nome === "midia"),
+      `o retrato passou a falar com o MOD: ${JSON.stringify(d.ditos)}`,
+    );
+    confere(nome, img?.ouvintesDePe() === 0, "o ouvinte de `error` ficou preso ao <img> que saiu");
+    regiao.soltar();
+  }
+}
+
+/**
+ * **O fundo de uma tela diz em que pé está, como as outras mídias** (pendência
+ * 49, item 5; T2 m4 do Plano 1D). `buscarFundoDaTela` carregava a imagem sem
+ * chamar `anotarMidia`: um mapa carregando, pronto ou recusado não era contado
+ * por bloco nenhum da aba DIAGNÓSTICO.
+ *
+ * «carregando» ao pedir, «pronta» depois do `decode()`, e a anotação some
+ * quando a declaração tira o fundo e quando a tela sai — contar o mapa de uma
+ * tela que não existe mais é a aba mentindo. E a recusa de um pedido que o MOD
+ * já trocou não pisa a anotação do pedido de agora.
+ */
+async function oFundoDeTelaDizOEstado() {
+  const caso = "o fundo de tela anotado";
+  const b = bancada();
+  const d = dono(b, (caminho) => Promise.resolve({ uri: `${URI_QUE_DEMORA}-${caminho}`, papel: "imagem", bytes: 8 }));
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  const tela = (fundo) => ({
+    forma: "tela", chave: "mapa", largura: 10, altura: 10, ...(fundo ? { fundo: { fonte: fundo } } : {}),
+  });
+  regiao.aplicar([tela("img/a.png")]);
+  const elem = regiao.raiz.children[0];
+  const pincel = elem.darPincel();
+  regiao.aplicar([tela("img/a.png")]);
+  await assentar();
+  const situacoes = () => regiao.midiasAnotadas().map((m) => m.situacao).join(",");
+  confere(caso, situacoes() === "carregando", `o fundo pedido não disse que está carregando: «${situacoes()}»`);
+
+  b.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(
+    caso,
+    situacoes() === "pronta" && pincel.pintado.some((p) => p[0] === "imagem"),
+    `o fundo decodificado não virou «pronta», ou não foi pintado: «${situacoes()}», ${JSON.stringify(pincel.pintado)}`,
+  );
+
+  // A declaração tira o fundo: a tela fica, e a anotação sai.
+  regiao.aplicar([tela(null)]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `a declaração tirou o fundo e a aba continua contando o mapa: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+
+  // **A recusa de um pedido trocado.** O MOD pede «b» e, enquanto ela
+  // decodifica, troca para «c»: a recusa de «b» chega depois, e a anotação
+  // que vale é a de «c».
+  regiao.aplicar([tela("img/b.png")]);
+  await assentar();
+  regiao.aplicar([tela("img/c.png")]);
+  await assentar();
+  const [deB, deC] = [b.Imagem.presas.shift(), b.Imagem.presas.shift()];
+  deC?.pronto();
+  await assentar();
+  deB?.falhou(new Error("EncodingError: The source image cannot be decoded."));
+  await assentar();
+  confere(
+    caso,
+    situacoes() === "pronta",
+    `a recusa de um fundo que o MOD já trocou pisou a anotação do fundo de agora: «${situacoes()}»`,
+  );
+
+  // Um fundo declarado sem origem não é mídia nenhuma: o «pronta» do anterior
+  // não fica valendo por ele.
+  regiao.aplicar([{ ...tela(null), fundo: {} }]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `um fundo sem origem herdou a anotação do fundo anterior: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+
+  // A tela sai da declaração: a anotação sai com ela.
+  regiao.aplicar([tela("img/d.png")]);
+  await assentar();
+  b.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(caso, situacoes() === "pronta", `o fundo «d» não ficou pronto: «${situacoes()}»`);
+  regiao.aplicar([]);
+  confere(
+    caso,
+    regiao.midiasAnotadas().length === 0,
+    `a tela saiu e o fundo dela continua anotado: ${JSON.stringify(regiao.midiasAnotadas())}`,
+  );
+  regiao.soltar();
+
+  // **A sessão acaba no meio do `decode()`**: o mapa que termina de
+  // decodificar não vira o fundo de uma tela que já não fala com ninguém.
+  const b2 = bancada();
+  const d2 = dono(b2, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 8 }));
+  const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+  regiao2.aplicar([tela("img/e.png")]);
+  const elem2 = regiao2.raiz.children[0];
+  const pincel2 = elem2.darPincel();
+  regiao2.aplicar([tela("img/e.png")]);
+  await assentar();
+  d2.api.podeFalar = () => false;
+  b2.Imagem.presas.shift()?.pronto();
+  await assentar();
+  confere(
+    `${caso} · a sessão acaba no meio`,
+    !elem2.__fundoDaTela?.imagem && !pincel2.pintado.some((p) => p[0] === "imagem"),
+    `o mapa decodificado depois de a sessão acabar virou o fundo da tela: ${JSON.stringify(pincel2.pintado)}`,
+  );
+  regiao2.soltar();
+}
+
+/**
+ * O `anotarRecusa` de verdade, o de `base.js`, até um `invoke` de mentira.
+ *
+ * O dono de mentira desta bancada anota a frase que a região manda, e só. Quem
+ * põe o `onde` (`recusa-de-mod`), o id do MOD na frente da frase e o id em
+ * campo próprio é o dono de `base.js` (`donoDaRegiao`), e quem leva a linha ao
+ * comando `registrar_da_janela` é `registrarNoAnfitriao`. As duas declarações
+ * de verdade rodam aqui num contexto próprio, como no bloco «o elo» de
+ * `contribuicoes-e-camadas.cjs`, com o que elas leem ao montar o dono.
+ */
+function registroDeVerdade() {
+  const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+  const invocados = [];
+  const ctx = vm.createContext({
+    console,
+    geracaoDaSessao: 7,
+    modsCarregados: new Map(),
+    invoke: (cmd, args) => {
+      invocados.push({ cmd, args });
+      return Promise.resolve();
+    },
+    avisarQueAMidiaMudou: () => {},
+  });
+  for (const de of ["function registrarNoAnfitriao(", "function donoDaRegiao("]) {
+    const inicio = base.indexOf(de);
+    const fim = base.indexOf("\n}\n", inicio);
+    if (inicio < 0 || fim < inicio) throw new Error(`«${de}» mudou de forma, e o recorte de base.js não a achou`);
+    vm.runInContext(base.slice(inicio, fim + 3), ctx);
+  }
+  return {
+    /** Os argumentos de cada `registrar_da_janela` que saiu. */
+    linhas: () => invocados.filter((i) => i.cmd === "registrar_da_janela").map((i) => i.args),
+    /** O `anotarRecusa` do dono de verdade de um MOD carregado, numa sessão de pé. */
+    anotarRecusaDe: (id) => {
+      const instancia = { geracao: 7, admite: () => true };
+      ctx.modsCarregados.set(id, instancia);
+      return ctx.donoDaRegiao({ id, hash: "h" }, instancia).anotarRecusa;
+    },
+  };
+}
+
+/**
+ * **Um passo de aplicar que lança não é uma recusa** (rodada 1 de conserto do
+ * lote K2). Com o `decode()` encadeado dentro do `then`, o `catch` da recusa
+ * passou a pegar também o que lança **depois** de a imagem ter decodificado —
+ * um `midiaMudou` de dono que lança, um `drawImage` que lança. A imagem já
+ * estava na tela, e o `catch` a dizia «recusada», devolvia os bytes dela e
+ * mandava `falhou` ao MOD: a aba, a conta e o MOD diziam o contrário da tela.
+ *
+ * Só a busca e o `decode()` caem na recusa. O estado fica o que a tela mostra:
+ * montado, contado e «pronta». O tropeço é dito no `console` da janela e **no
+ * `seele.log` de quem opera**, pelo `anotarRecusa` de verdade
+ * (`registroDeVerdade`): uma linha só, no `onde` das outras linhas de mídia
+ * (`recusa-de-mod`), com o id do MOD na frente e em campo próprio — e não como
+ * a recusa que ela não é. E nenhuma promessa fica sem quem a pegue.
+ */
+async function aplicarQueLancaNaoViraRecusa() {
+  const soltas = [];
+  const pegar = (motivo) => soltas.push(String(motivo?.stack ?? motivo));
+  process.on("unhandledRejection", pegar);
+  const comAvisos = () => {
+    const avisos = [];
+    const janela = { ...console, warn: (...partes) => avisos.push(partes.map((p) => String(p?.message ?? p)).join(" ")) };
+    return { avisos, b: bancada({ console: janela }) };
+  };
+  /** O tropeço chegou ao `seele.log` como uma linha só, do MOD «a/b», e não como recusa. */
+  const conferirORegistro = (nome, registro, chave, pedaco) => {
+    const linhas = registro.linhas();
+    const linha = linhas[0];
+    confere(
+      nome,
+      linhas.length === 1
+        && linha.nivel === "aviso" && linha.onde === "recusa-de-mod" && linha.modId === "a/b"
+        && String(linha.oQue).startsWith(`a/b: mídia «${chave}»`)
+        && String(linha.oQue).includes("tropeçou") && String(linha.oQue).includes(pedaco)
+        && !String(linha.oQue).includes("falhou no"),
+      "o tropeço de aplicar não chegou ao seele.log como uma linha só, no `onde` das linhas de mídia e com o id "
+        + `do MOD em campo próprio — ou chegou dito como recusa: ${JSON.stringify(linhas)}`,
+    );
+  };
+  try {
+    // O retrato e o fundo de mídia: o `midiaMudou` do dono passa a lançar
+    // depois do «carregando», e o «pronta» o chama.
+    const casos = [
+      [
+        "o retrato",
+        { forma: "retrato", chave: "rosto", fonte: "img/r.png", inicial: "A" },
+        (elem) => Boolean(acharTag(elem, "img")) && elem.dataset.estadoDoRetrato === "imagem",
+      ],
+      [
+        "o fundo de mídia",
+        { forma: "caixa", chave: "cx", fundoDeMidia: { fonte: "img/f.png" }, dentro: "Lia" },
+        (elem) => Boolean(elem.style.backgroundImage),
+      ],
+    ];
+    for (const [qual, no, montou] of casos) {
+      const nome = `aplicar que lança · ${qual}`;
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 40 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      regiao.aplicar([no]);
+      await assentar();
+      d.api.midiaMudou = () => {
+        throw new Error("o aviso da gestão caiu");
+      };
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const elem = regiao.raiz.children[0];
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        montou(elem) && regiao.bytesDeMidia === 40 && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "a imagem decodificou e o passo de aplicar lançou, e o caminho a tratou como recusa: a tela, a conta e a "
+          + `aba ficaram em desacordo — montou=${montou(elem)}, ${regiao.bytesDeMidia} bytes, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "midia"),
+        `o tropeço de aplicar foi dito ao MOD como recusa: ${JSON.stringify(d.ditos)}`,
+      );
+      conferirORegistro(nome, registro, no.chave, "o aviso da gestão caiu");
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o aviso da gestão caiu")),
+        `o tropeço de aplicar não foi dito no console da janela: ${JSON.stringify(avisos)}`,
+      );
+      d.api.midiaMudou = () => {};
+      regiao.soltar();
+    }
+
+    // O fundo de tela: o `drawImage` do pincel lança ao repintar com o mapa.
+    {
+      const nome = "aplicar que lança · o fundo de tela";
+      const { avisos, b } = comAvisos();
+      const d = dono(b, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-aplicar`, papel: "imagem", bytes: 8 }));
+      const registro = registroDeVerdade();
+      d.api.anotarRecusa = registro.anotarRecusaDe("a/b");
+      const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+      const tela = { forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { fonte: "img/m.png" } };
+      regiao.aplicar([tela]);
+      const elem = regiao.raiz.children[0];
+      const pincel = elem.darPincel();
+      pincel.drawImage = () => {
+        throw new Error("o pincel caiu");
+      };
+      regiao.aplicar([tela]);
+      await assentar();
+      b.Imagem.presas.shift()?.pronto();
+      await assentar();
+      const anotadas = regiao.midiasAnotadas();
+      confere(
+        nome,
+        Boolean(elem.__fundoDaTela?.imagem) && anotadas.length === 1 && anotadas[0].situacao === "pronta",
+        "o mapa decodificou e a repintura lançou, e o fundo foi anotado como recusado com a imagem posta: "
+          + `imagem=${Boolean(elem.__fundoDaTela?.imagem)}, ${JSON.stringify(anotadas)}`,
+      );
+      confere(
+        nome,
+        !d.ditos.some((dito) => dito.nome === "tela"),
+        `o tropeço da repintura saiu como «fundo-falhou» ao MOD: ${JSON.stringify(d.ditos)}`,
+      );
+      conferirORegistro(nome, registro, "mapa", "o pincel caiu");
+      confere(
+        nome,
+        avisos.some((aviso) => aviso.includes("o pincel caiu")),
+        `o tropeço da repintura não foi dito no console da janela: ${JSON.stringify(avisos)}`,
+      );
+      regiao.soltar();
+    }
+    await assentar();
+  } finally {
+    process.off("unhandledRejection", pegar);
+  }
+  confere(
+    "aplicar que lança",
+    soltas.length === 0,
+    `o tropeço de aplicar terminou numa promessa que ninguém pegou: ${soltas.join(" | ")}`,
+  );
+}
+
+/**
+ * **Os bytes são reservados antes do `decode()`, e devolvidos quando ele
+ * recusa.** Somar só depois abriria uma corrida: duas imagens decodificando
+ * juntas passariam as duas pela conferência do teto, cada uma vendo a conta
+ * sem a outra. É a mesma regra do «Contados **agora**» do som, em
+ * `montarMidia`.
+ *
+ * E as três perguntas de sempre depois do `await` do `decode()`: quem sai no
+ * meio dele não vê a imagem montada, nem os bytes contados.
+ */
+async function osBytesSaoReservadosAntesDoDecode() {
+  const nos = {
+    retrato: (chave, fonte) => ({ forma: "retrato", chave, fonte, inicial: "A" }),
+    fundo: (chave, fonte) => ({ forma: "caixa", chave, fundoDeMidia: { fonte }, dentro: "Lia" }),
+  };
+  for (const [forma, no] of Object.entries(nos)) {
+    const nome = `a reserva · ${forma}`;
+    const b = bancada();
+    const metade = Math.floor(b.PERFIS.regiao.bytesDeMidia / 2) + 1;
+    const d = dono(b, (caminho) => Promise.resolve({ uri: `${URI_QUE_DEMORA}-${caminho}`, papel: "imagem", bytes: metade }));
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar([no("a", "img/a.png"), no("b", "img/b.png")]);
+    await assentar();
+    confere(
+      nome,
+      b.Imagem.presas.length === 1 && regiao.bytesDeMidia === metade,
+      "duas imagens que juntas passam do teto foram as duas decodificar: a conta só soma depois do "
+        + `\`decode()\`, e as duas cabem cada uma sem a outra (${b.Imagem.presas.length} decodificando, `
+        + `${regiao.bytesDeMidia} bytes contados)`,
+    );
+    const situacoes = () => regiao.midiasAnotadas().map((m) => m.situacao).sort().join(",");
+    confere(nome, situacoes() === "carregando,recusada", `a segunda não foi recusada pelo teto: ${situacoes()}`);
+    b.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      nome,
+      situacoes() === "pronta,recusada" && regiao.bytesDeMidia === metade,
+      `a que decodificou não ficou pronta, ou a conta mudou: ${situacoes()}, ${regiao.bytesDeMidia} bytes`,
+    );
+    regiao.soltar();
+
+    // **Sair no meio do `decode()`.** A decodificação termina depois, e nada
+    // monta nem fica contado.
+    const b2 = bancada();
+    const d2 = dono(b2, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-saida`, papel: "imagem", bytes: 40 }));
+    const regiao2 = new b2.RegiaoDeMod("a/b", d2.api, b2.raiz());
+    regiao2.aplicar([no("c", "img/c.png")]);
+    await assentar();
+    const elem = regiao2.raiz.children[0];
+    confere(
+      `${nome} · sair no meio`,
+      b2.Imagem.presas.length === 1 && regiao2.bytesDeMidia === 40,
+      `a imagem não ficou reservada enquanto decodificava: ${regiao2.bytesDeMidia} bytes`,
+    );
+    regiao2.soltar();
+    b2.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      `${nome} · sair no meio`,
+      regiao2.bytesDeMidia === 0 && !acharTag(elem, "img") && !elem.style.backgroundImage,
+      `a imagem montou depois de a região sair, ou os bytes ficaram contados: ${regiao2.bytesDeMidia} bytes`,
+    );
+
+    // **O `decode()` que recusa devolve a reserva.**
+    const b3 = bancada();
+    const d3 = dono(b3, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-recusa`, papel: "imagem", bytes: 40 }));
+    const regiao3 = new b3.RegiaoDeMod("a/b", d3.api, b3.raiz());
+    regiao3.aplicar([no("d", "img/d.png")]);
+    await assentar();
+    b3.Imagem.presas[0]?.falhou(new Error("EncodingError: The source image cannot be decoded."));
+    await assentar();
+    confere(
+      `${nome} · a recusa devolve`,
+      regiao3.bytesDeMidia === 0 && regiao3.midiasAnotadas()[0]?.situacao === "recusada",
+      `a imagem que o \`decode()\` recusou continua ocupando ${regiao3.bytesDeMidia} bytes do teto: `
+        + `${JSON.stringify(regiao3.midiasAnotadas())}`,
+    );
+    regiao3.soltar();
+
+    // **A sessão acaba no meio do `decode()`.** A região continua de pé, mas
+    // `podeFalar()` já diz que esta instância não é a de agora: a imagem que
+    // termina de decodificar não monta, e a reserva volta — uma vez só, e o
+    // descarte que vem depois não a devolve de novo.
+    const b4 = bancada();
+    const d4 = dono(b4, () => Promise.resolve({ uri: `${URI_QUE_DEMORA}-sessao`, papel: "imagem", bytes: 40 }));
+    const regiao4 = new b4.RegiaoDeMod("a/b", d4.api, b4.raiz());
+    regiao4.aplicar([no("e", "img/e.png")]);
+    await assentar();
+    const elem4 = regiao4.raiz.children[0];
+    d4.api.podeFalar = () => false;
+    b4.Imagem.presas[0]?.pronto();
+    await assentar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      b4.Imagem.presas.length === 1 && regiao4.bytesDeMidia === 0
+        && !acharTag(elem4, "img") && !elem4.style.backgroundImage,
+      "a imagem decodificada depois de a sessão acabar montou, ou ficou contada: "
+        + `${regiao4.bytesDeMidia} bytes, img=${Boolean(acharTag(elem4, "img"))}, `
+        + `fundo=${JSON.stringify(elem4.style.backgroundImage ?? "")}`,
+    );
+    regiao4.soltar();
+    confere(
+      `${nome} · a sessão acaba no meio`,
+      regiao4.bytesDeMidia === 0,
+      `o descarte devolveu de novo a reserva que já tinha voltado: ${regiao4.bytesDeMidia} bytes`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 11. O som toca por WebAudio, com botão do produto, e a declaração vale na mudança.
 // ---------------------------------------------------------------------------
 
@@ -2276,7 +2983,7 @@ async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
   confere(caso, figura.dataset.estado === "pronta", `o som decodificado não ficou pronto: ${figura.dataset.estado}`);
   // **De pé e sem ter tocado, ele está pronto.** É o caso comum — um botão à
   // espera, um som que o MOD dispara depois —, e quem diz «pronta» aqui é a
-  // anotação do fim de `montarSom`: os avisos do tocador só chegam quando ele
+  // anotação do fim de `carregarSom`: os avisos do tocador só chegam quando ele
   // toca. Sem ela, a aba DIAGNÓSTICO diria «carregando» até alguém apertar.
   const anotada = regiao.midiasAnotadas()[0]?.situacao;
   confere(caso, anotada === "pronta", `o som de pé que ainda não tocou ficou anotado como «${anotada}», e não «pronta»`);
@@ -2391,7 +3098,8 @@ async function oSomNumCartaoNaoTemBotao() {
   // o perfil do cartão — um `canal.item` sem alvo, dois canais, dois renderers
   // —, e dá a todos o mesmo `sonsDaContribuicao`. O primeiro destino que chega
   // a um som é o que pede os bytes, decodifica e toca **todos** os sons da
-  // contribuição; os outros mostram a figura, sem tocador (ver `montarSom`).
+  // contribuição, quando o MOD os manda tocar; os outros mostram a figura, sem
+  // tocador (ver `montarSom`).
   //
   // As duas metades já falharam:
   // - **um som por destino**: cada destino pedia os bytes e decodificava a
@@ -2477,8 +3185,9 @@ async function oSomNumCartaoNaoTemBotao() {
 
   // **E o som parado de uma contribuição está pronto**, no destino que o
   // tomou, uma vez. Um som de cartão não tem botão: ele só toca quando o MOD
-  // declara `tocando`, e até lá quem o diz «pronta» é a anotação do fim de
-  // `montarSom` — a aba diria «carregando» para um som que só espera a vez.
+  // declara `tocando`, e até lá quem o diz «pronta» é `esperarOPedidoDeTocar`,
+  // sem decodificar (P49-7c) — a aba diria «carregando» para um som que só
+  // espera a vez.
   {
     const parado = `${caso} · numa contribuição, um som parado`;
     const AudioP = audioDeMentira();
@@ -3476,6 +4185,1232 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 17. O som de uma contribuição só decodifica quando o MOD manda tocar.
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-7c. O teto do som decodificado vale por bolso, e uma contribuição tem o
+ * dela: um MOD mantém até 128 de pé, e cada uma segurava, desde a montagem, o
+ * som inteiro em float32 — tocasse ele ou não. Numa contribuição não há botão:
+ * um som declarado com `tocando: false` só toca quando o MOD o declara
+ * `tocando: true`, e até lá não há o que decodificar.
+ *
+ * - **Na montagem**, a marca é tomada como antes, e a figura assenta «pronta»
+ *   com o tamanho do arquivo na anotação: o Rust já conferiu o papel e o teto
+ *   de arquivo. Nem `bytesDoSom` nem `decodeAudioData` são chamados — pelos
+ *   dois caminhos, o do pacote e o do servidor do MOD.
+ * - **No pedido de tocar**, o som é pedido, decodificado e tocado, uma vez.
+ * - **O teto do bolso vale ali**, com a mesma recusa de sempre: figura «cheia»,
+ *   `recusada` ao MOD com os números, a linha no registro. Na montagem, nada.
+ */
+async function oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar() {
+  const caso = "o som da contribuição só decodifica quando o MOD manda tocar";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const origens = {
+    "do pacote": { fonte: "som/sino.wav" },
+    "do servidor do MOD": { doServidor: { canal: 1, pedido: {}, campo: "bytes" } },
+  };
+  for (const [nome, origem] of Object.entries(origens)) {
+    const daOrigem = `${caso} · ${nome}`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const sino = (tocando) => [{ forma: "midia", chave: "sino", ...origem, tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(sino(false));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    confere(
+      daOrigem,
+      d.pedidosDeSom.length === 0 && Audio.decodificados.length === 0,
+      "uma contribuição declarada com `tocando: false` pediu os bytes do som ou o decodificou na montagem — "
+        + "cada contribuição segura o som inteiro decodificado sem que ninguém o mande tocar: "
+        + `${JSON.stringify({ pedidos: d.pedidosDeSom, decodificados: Audio.decodificados })}`,
+    );
+    const figuras = destinos.map((r) => todasAsTags(r.raiz, "figure").map((f) => f.dataset.estado).join());
+    confere(
+      daOrigem,
+      Boolean(tomou) && figuras.join("|") === "pronta|pronta",
+      `o som que espera o pedido de tocar não assentou «pronta» nos dois destinos: ${JSON.stringify(figuras)}`,
+    );
+    const anotadas = destinos.flatMap((r) => r.midiasAnotadas());
+    confere(
+      daOrigem,
+      anotadas.length === 1 && anotadas[0].situacao === "pronta" && anotadas[0].cartao === true
+        && /\b12 bytes\b/.test(anotadas[0].motivo),
+      "o som que espera o pedido de tocar não ficou anotado «pronta», uma vez, com o tamanho do arquivo — "
+        + `o diagnóstico não diria que ele chegou e coube: ${JSON.stringify(anotadas)}`,
+    );
+
+    // O pedido de tocar: o som é pedido, decodificado e tocado, uma vez.
+    for (const r of destinos) r.aplicar(sino(true));
+    await assentar();
+    const tocando = Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    const ouviu = d.ditos.filter((e) => e.nome === "midia" && e.estado === "tocando").length;
+    confere(
+      daOrigem,
+      JSON.stringify(d.pedidosDeSom) === JSON.stringify(origem.fonte ? [origem.fonte] : [])
+        && Audio.decodificados.length === 1 && tocando === 1 && ouviu === 1,
+      "o pedido de tocar não pediu, decodificou e tocou o som da contribuição uma vez: "
+        + `${JSON.stringify({ pedidos: d.pedidosDeSom, decodificados: Audio.decodificados.length, tocando, ouviu })}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **Enquanto o pedido de tocar decodifica, o som está «carregando»**, como
+  // estava antes do adiamento (rodada 1, menor 2): «pronta» é do som que
+  // espera o pedido, e não do que já o recebeu. Nos dois jeitos de o pedido
+  // chegar — declarado `tocando: true` desde a montagem, e religado depois.
+  for (const desde of ["a montagem", "um tocando religado"]) {
+    const decodificando = `${caso} · decodificando, desde ${desde}`;
+    const Audio = audioDeMentira({ segurarADecodificacao: true });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const sino = (tocando) => [{ forma: "midia", chave: "sino", fonte: "som/sino.wav", tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(sino(desde === "a montagem"));
+      return r;
+    });
+    await assentar();
+    if (desde !== "a montagem") {
+      for (const r of destinos) r.aplicar(sino(true));
+      await assentar();
+    }
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const estado = () => ({
+      figura: todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado,
+      anotada: tomou?.midiasAnotadas().map((m) => m.situacao).join(),
+    });
+    confere(
+      decodificando,
+      Audio.decodificacoesPresas.length === 1 && JSON.stringify(estado()) === JSON.stringify({ figura: "carregando", anotada: "carregando" }),
+      "o som de uma contribuição que o MOD mandou tocar ficou «pronta» enquanto decodificava — o diagnóstico diria "
+        + `que ele está de pé antes de ele existir: ${JSON.stringify(estado())}`,
+    );
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      decodificando,
+      JSON.stringify(estado()) === JSON.stringify({ figura: "pronta", anotada: "pronta" }),
+      `o som decodificado não ficou «pronta»: ${JSON.stringify(estado())}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // O teto do bolso vale no pedido de tocar, e não na montagem.
+  {
+    const naRecusa = `${caso} · o teto, no pedido de tocar`;
+    const teto = bancada().CARTAO.bytesDeSomDecodificado;
+    const quadros = Math.floor(teto / 8) + 1;
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sonsDaContribuicao = { tomados: false };
+    const grande = (tocando) => [{ forma: "midia", chave: "grande", fonte: "som/grande.ogg", tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(grande(false));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const recusas = () => d.ditos.filter((e) => e.nome === "midia" && e.chave === "grande" && e.estado === "recusada");
+    confere(
+      naRecusa,
+      recusas().length === 0 && todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "pronta",
+      "o som acima do teto foi recusado na montagem, sem ninguém o mandar tocar — o teto valeu antes da "
+        + `decodificação que ele mede: ${JSON.stringify(recusas())}`,
+    );
+    for (const r of destinos) r.aplicar(grande(true));
+    await assentar();
+    const recusa = recusas()[0];
+    confere(
+      naRecusa,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "cheia"
+        && recusas().length === 1 && /teto/.test(recusa?.porque ?? "") && String(recusa?.porque ?? "").includes(String(teto)),
+      "o pedido de tocar um som acima do teto não foi recusado com a palavra do teto e os números — figura "
+        + `«${todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado}», ao MOD ${JSON.stringify(recusas())}`,
+    );
+    confere(
+      naRecusa,
+      d.anotadas.some((t) => t.includes("«grande» recusada:") && t.includes("decodificado")),
+      `a recusa pelo teto no pedido de tocar não chegou ao registro: ${JSON.stringify(d.anotadas)}`,
+    );
+    confere(
+      naRecusa,
+      (Audio.ultimo?.fontes.length ?? 0) === 0 && destinos.every((r) => r.bytesDeSomDeCartao === 0),
+      `o som acima do teto virou tocador, ou ficou na conta: ${Audio.ultimo?.fontes.length} fonte(s), `
+        + `${JSON.stringify(destinos.map((r) => r.bytesDeSomDeCartao))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 18. O som de uma contribuição muda de destino quando quem o tomou sai da tela.
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-8 (S-m7). Os sons de uma contribuição sem alvo moram no destino que os
+ * tomou. Quando quem estava ali sai da sala, o nó desse destino sai da tela e o
+ * som para — e ele ficava preso ali: um `tocando` religado era recusado com
+ * «o lugar deste som saiu da tela», com a mesma contribuição desenhada nos
+ * outros destinos, sem tocador.
+ *
+ * O destino que saiu solta o tocador — e a janela fica sem ele —, devolve ao
+ * bolso o som decodificado, esquece a anotação e devolve a marca; um destino
+ * que desenha a toma na mesma varredura — a de `base.js`, recortada
+ * (`varreduraDeBase`). **O som que tocava recomeça ali, do começo**, sem um
+ * `tocando` novo (a continuidade, decidida na rodada 1); um som que já tinha
+ * terminado não volta. O `tocando` religado toca ali, sem recusa, e só existe
+ * um tocador — e continua um só quando o nó do primeiro volta.
+ *
+ * E o pedido de tocar que ainda decodificava quando o lugar saiu: ele não
+ * vira tocador num destino que já não segura o som, e é dito ao MOD como a
+ * recusa de quem saiu da tela — como o pedido que esperava o áudio da janela.
+ */
+async function oSomDaContribuicaoMudaDeDestino() {
+  const caso = "o som da contribuição muda de destino";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const vinheta = (tocando) => [{ forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando }];
+  const ditos = (d, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === "vinheta" && e.estado === estado);
+  // Quantos tocadores de pé, somando os destinos: o que «só existe um» conta.
+  const tocadores = (destinos) => destinos.flatMap((r) => [...r.somDaMidia.values()]).filter((s) => s.tocador).length;
+  const montar = (opcoes) => {
+    const Audio = audioDeMentira(opcoes);
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    const tocando = () => (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    return { Audio, b, d, sons, destinos, varrer, tocando };
+  };
+
+  {
+    const { Audio, b, d, sons, destinos, varrer, tocando } = montar();
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(caso, Boolean(tomou) && tocando() === 1, "a vinheta da contribuição não tocou no destino que a tomou");
+    if (!tomou) return;
+
+    // Quem estava no canal do destino que tomou os sons sai: o nó sai da tela,
+    // e a varredura do fim do desenho roda.
+    const audioDoPrimeiro = Audio.ultimo;
+    const fonteDoPrimeiro = audioDoPrimeiro?.fontes[0];
+    tomou.raiz.remove();
+    varrer();
+    await assentar();
+    confere(
+      caso,
+      ditos(d, "pausada").length === 1 && fonteDoPrimeiro?.parou === true,
+      `o lugar do som saiu da tela e o som não parou ali: parou=${fonteDoPrimeiro?.parou}, «pausada» dita `
+        + `${ditos(d, "pausada").length} vez(es)`,
+    );
+    // **Soltar, e não só esquecer o campo.** Zerar `som.tocador` sem soltar o
+    // tocador o deixa em `tocadoresDeSomDeMod` para sempre, com o
+    // `AudioBuffer` dentro — a memória que a devolução existe para liberar —,
+    // e o áudio da janela, que fecha quando o último tocador sai, nunca fecha.
+    //
+    // Um de pé na janela, e não zero: o som recomeçou no outro destino.
+    confere(
+      caso,
+      b.tocadoresDePe() === 1 && audioDoPrimeiro?.state === "closed",
+      "o destino que saiu da tela esqueceu o tocador sem soltá-lo: o som decodificado segue de pé na janela e o "
+        + `áudio dela não fechou — ${b.tocadoresDePe()} tocador(es) de pé, áudio «${audioDoPrimeiro?.state}»`,
+    );
+    confere(
+      caso,
+      !tomou.tomouOsSons && outro.tomouOsSons === true && sons.tomados === true,
+      "a marca dos sons não mudou de destino na varredura: o som fica preso no destino que saiu da tela — "
+        + `${JSON.stringify({ saiu: tomou.tomouOsSons, outro: outro.tomouOsSons, tomados: sons.tomados })}`,
+    );
+    confere(
+      caso,
+      tocadores([tomou]) === 0 && tomou.bytesDeSomDeCartao === 0 && tomou.midiasAnotadas().length === 0,
+      "o destino que saiu da tela segurou o tocador, o som decodificado no bolso, ou a anotação: "
+        + `${tocadores([tomou])} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, ${JSON.stringify(tomou.midiasAnotadas())}`,
+    );
+    // **A continuidade** (decisão da rodada 1): o som que tocava quando o
+    // lugar dele saiu recomeça, do começo, no destino que tomou a marca — sem
+    // um `tocando` novo do MOD, e sem recusa.
+    const fonteDoOutro = Audio.ultimo?.fontes.find((f) => f.tocando);
+    confere(
+      caso,
+      Audio.decodificados.length === 2 && fonteDoOutro?.de === 0 && tocadores([outro]) === 1
+        && ditos(d, "tocando").length === 2 && ditos(d, "recusada").length === 0
+        && JSON.stringify(outro.midiasAnotadas().map((m) => m.situacao)) === JSON.stringify(["pronta"]),
+      "o som que tocava quando o lugar dele saiu da tela não recomeçou, do começo, no destino que tomou a marca: "
+        + `${Audio.decodificados.length} decodificação(ões), a fonte nova de ${fonteDoOutro?.de}, `
+        + `${tocadores([outro])} tocador(es) no outro, «tocando» dito ${ditos(d, "tocando").length} vez(es), `
+        + `recusas ${JSON.stringify(ditos(d, "recusada"))}, ${JSON.stringify(outro.midiasAnotadas())}`,
+    );
+
+    // O MOD religa o `tocando`: o som toca no destino que desenha, sem recusa.
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    await assentar();
+    confere(
+      caso,
+      ditos(d, "recusada").length === 0,
+      "o `tocando` religado foi recusado como fora da tela, com a contribuição desenhada noutro destino: "
+        + `${JSON.stringify(ditos(d, "recusada"))}`,
+    );
+    confere(
+      caso,
+      tocando() === 1 && tocadores(destinos) === 1 && tocadores([outro]) === 1,
+      `o \`tocando\` religado não tocou no destino que desenha, ou tocou em dois: ${tocando()} fonte(s), `
+        + `${tocadores(destinos)} tocador(es), ${tocadores([outro])} no destino que desenha`,
+    );
+
+    // Num segundo passo, quem saiu volta: o nó reaparece sem tocador.
+    b.doc.body.append(tomou.raiz);
+    varrer();
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    await assentar();
+    confere(
+      caso,
+      tocadores(destinos) === 1 && tocadores([outro]) === 1 && tocando() === 1 && ditos(d, "recusada").length === 0
+        && todasAsTags(tomou.raiz, "figure")[0]?.dataset.estado === "pronta",
+      `o nó de quem saiu voltou, e o som não ficou com um tocador só, no destino que o tem: ${tocadores(destinos)} `
+        + `tocador(es), ${tocando()} fonte(s), recusas ${JSON.stringify(ditos(d, "recusada"))}`,
+    );
+    for (const r of destinos) r.soltar();
+    confere(caso, tocando() === 0, "o som da contribuição continuou depois de os destinos saírem");
+  }
+
+  // O som que já tinha terminado não volta: a troca de destino não é um
+  // `tocando` novo, e ele não tocava quando o lugar saiu.
+  {
+    const terminou = `${caso} · o som que já terminou`;
+    const { Audio, b, d, destinos, varrer } = montar();
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    Audio.ultimo?.fontes[0]?.onended?.();
+    if (tomou) {
+      tomou.raiz.remove();
+      varrer();
+    }
+    await assentar();
+    // Uma fonte só, a do começo, num áudio da janela só: a troca não criou outra.
+    const fontes = Audio.criados === 1 ? (Audio.ultimo?.fontes.length ?? 0) : -1;
+    confere(
+      terminou,
+      outro?.tomouOsSons === true && Audio.decodificados.length === 1 && fontes === 1
+        && ditos(d, "tocando").length === 1 && b.tocadoresDePe() === 0,
+      "a vinheta tinha terminado, o lugar dela saiu da tela, e a troca de destino a tocou de novo, ou a marca não "
+        + `mudou: ${Audio.decodificados.length} decodificação(ões), ${Audio.criados} áudio(s) da janela, `
+        + `${fontes} fonte(s), «tocando» dito ${ditos(d, "tocando").length} vez(es), ${b.tocadoresDePe()} tocador(es) de pé`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O som que chega ao destino novo depois de ele tomar a marca** segue a
+  // mesma regra (rodada 1, menor 6): no destino que saiu, a vinheta tocava e
+  // o sino já tinha terminado; no outro, o sino ainda vinha quando a marca
+  // mudou. A vinheta recomeça; o sino, quando chega, não volta.
+  {
+    const tarde = `${caso} · o som que chega depois da troca`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      // A quarta é o sino do segundo destino: a mídia dele fica a caminho.
+      if (chamadas === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true },
+      { forma: "midia", chave: "sino", fonte: "som/s.wav", tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const daChave = (chave, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === chave && e.estado === estado);
+    // O sino é a segunda fonte do primeiro destino, e termina.
+    Audio.ultimo?.fontes[1]?.onended?.();
+    confere(
+      tarde,
+      primeiro.tomouOsSons === true && daChave("sino", "terminou").length === 1 && typeof soltarOSino === "function",
+      "o primeiro destino não tomou os dois sons, o sino não terminou, ou a mídia do sino do segundo não ficou a "
+        + `caminho: ${JSON.stringify({ tomou: primeiro.tomouOsSons, terminou: daChave("sino", "terminou").length })}`,
+    );
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    soltarOSino?.();
+    await assentar();
+    confere(
+      tarde,
+      segundo.tomouOsSons === true && daChave("vinheta", "tocando").length === 2 && daChave("sino", "tocando").length === 1,
+      "o som que chegou ao destino novo depois da troca não seguiu a regra dos outros — o sino, que tinha "
+        + "terminado, voltou a tocar, ou a vinheta, que tocava, não recomeçou: «tocando» da vinheta "
+        + `${daChave("vinheta", "tocando").length} vez(es), do sino ${daChave("sino", "tocando").length}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **A marca devolvida não é tomada fora da tela** (rodada 2, menor 1). Os
+  // dois destinos saem juntos, com a vinheta e o sino tocando no primeiro, e
+  // a varredura não acha quem tome a marca; a mídia do sino chega ao segundo
+  // ainda fora da tela. Tomá-la ali decodificava o sino herdado para recusá-lo
+  // como fora da tela, e deixava a vinheta presa na herança: quando o segundo
+  // voltava, nada tocava. A marca espera o destino voltar, e aí os dois sons
+  // que tocavam recomeçam.
+  {
+    const foraDaTela = `${caso} · a marca devolvida fora da tela`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      if (chamadas === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", fonte: "som/v.wav", tocando: true },
+      { forma: "midia", chave: "sino", fonte: "som/s.wav", tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const daChave = (chave, estado) => d.ditos.filter((e) => e.nome === "midia" && e.chave === chave && e.estado === estado);
+    primeiro.raiz.remove();
+    segundo.raiz.remove();
+    varrer();
+    soltarOSino?.();
+    await assentar();
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    confere(
+      foraDaTela,
+      recusas.length === 0 && segundo.tomouOsSons === false,
+      "a mídia do sino chegou ao destino fora da tela e ele tomou a marca devolvida ali — o sino herdado foi "
+        + `decodificado para ser recusado como fora da tela: ${JSON.stringify(recusas)}, tomou: ${segundo.tomouOsSons}`,
+    );
+    b.doc.body.append(segundo.raiz);
+    varrer();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      foraDaTela,
+      segundo.tomouOsSons === true && daChave("vinheta", "tocando").length === 2 && daChave("sino", "tocando").length === 2
+        && tocandoAgora === 2 && d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada").length === 0,
+      "o destino voltou à tela e os sons que tocavam quando a marca foi devolvida não recomeçaram ali: «tocando» da "
+        + `vinheta ${daChave("vinheta", "tocando").length} vez(es), do sino ${daChave("sino", "tocando").length}, `
+        + `${tocandoAgora} fonte(s) tocando, tomou: ${segundo.tomouOsSons}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **A mídia que chega a um destino na tela com a marca devolvida o faz
+  // tomá-la na hora** (fecho, M1). O segundo destino ainda esperava a mídia
+  // quando o primeiro saiu, e a varredura não achou nele som que tomasse a
+  // marca; quando a mídia chega, sem outra varredura, ele a toma pelo caminho
+  // de toda devolução, e a vinheta que tocava recomeça ali.
+  {
+    const naHora = `${caso} · a mídia que chega com a marca devolvida`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let chamadas = 0;
+    let soltarAMidia = null;
+    const d = dono(b, () => {
+      chamadas += 1;
+      const midia = { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 };
+      // A segunda é a vinheta do segundo destino: a mídia dela fica a caminho.
+      if (chamadas === 2) return new Promise((pronto) => { soltarAMidia = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    const antes = { tomou: segundo.tomouOsSons, devolvidos: sons.devolvidos };
+    soltarAMidia?.();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      naHora,
+      antes.tomou === false && antes.devolvidos === true && segundo.tomouOsSons === true && tocandoAgora === 1
+        && b.tocadoresDePe() === 1 && tocadores([segundo]) === 1 && ditos(d, "tocando").length === 2,
+      "a mídia chegou ao destino na tela com a marca devolvida, e ele não a tomou na hora — o som que tocava "
+        + `espera um desenho que talvez não venha: ${JSON.stringify(antes)} antes, tomou ${segundo.tomouOsSons}, `
+        + `${tocandoAgora} fonte(s), ${b.tocadoresDePe()} tocador(es), «tocando» dito ${ditos(d, "tocando").length} vez(es)`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O mesmo destino que volta à tela** (rodada 2, decisão do controlador):
+  // sem ninguém que tenha tomado a marca, ele a retoma, e o som que tocava
+  // quando ele saiu recomeça, do começo — com o conteúdo de uma contribuição
+  // fixo, é o único jeito de o som voltar, e é a regra do destino novo.
+  {
+    const deVolta = `${caso} · o mesmo destino que volta`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    const sons = { tomados: false };
+    const so = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+    so.sonsDaContribuicao = sons;
+    so.aplicar(vinheta(true));
+    const varrer = varreduraDeBase(b, [{ modo: "adicionar", ponto: "canal.item", sons, montadas: new Map([["1", { renderer: so }]]) }]);
+    await assentar();
+    so.raiz.remove();
+    varrer();
+    await assentar();
+    b.doc.body.append(so.raiz);
+    varrer();
+    await assentar();
+    const tocandoAgora = (Audio.ultimo?.fontes ?? []).filter((f) => f.tocando).length;
+    confere(
+      deVolta,
+      ditos(d, "tocando").length === 2 && tocandoAgora === 1 && b.tocadoresDePe() === 1 && tocadores([so]) === 1
+        && ditos(d, "recusada").length === 0,
+      "o destino que tocava a vinheta saiu e voltou à tela sem ninguém ter tomado a marca, e ela não recomeçou ali, "
+        + `ou recomeçou em dobro: «tocando» dito ${ditos(d, "tocando").length} vez(es), ${tocandoAgora} fonte(s) `
+        + `tocando, ${b.tocadoresDePe()} tocador(es) na janela`,
+    );
+    so.soltar();
+  }
+
+  // **O som recusado não volta a «pronta» no destino novo** (rodada 1,
+  // menor 4). Um som que falhou ou passou do teto no destino que saiu fica
+  // assim no que toma a marca — a figura, e a anotação com o motivo —, sem
+  // dizer a recusa outra vez ao MOD nem ao registro, que já a ouviram.
+  for (const [figura, opcoes, preparar] of [
+    ["falhou", {}, (d) => { d.api.bytesDoSom = () => Promise.reject(new Error("o arquivo sumiu do pacote")); }],
+    ["cheia", { decodificado: { duration: 1, length: (64 * 1024 * 1024) / 8 + 1, numberOfChannels: 2 } }, () => {}],
+  ]) {
+    const recusado = `${caso} · o som «${figura}»`;
+    const Audio = audioDeMentira(opcoes);
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    preparar(d);
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    const ditoAntes = d.ditos.length;
+    const registradoAntes = d.anotadas.length;
+    const motivo = tomou?.midiasAnotadas()[0]?.motivo;
+    confere(
+      recusado,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === figura && Boolean(motivo),
+      `a vinheta não ficou «${figura}» no destino que a tomou: ${todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado}`,
+    );
+    if (!tomou) continue;
+    tomou.raiz.remove();
+    varrer();
+    await assentar();
+    const noOutro = todasAsTags(outro.raiz, "figure")[0]?.dataset.estado;
+    const anotadas = outro.midiasAnotadas();
+    confere(
+      recusado,
+      outro.tomouOsSons === true && noOutro === figura && anotadas.length === 1
+        && anotadas[0]?.situacao === "recusada" && anotadas[0]?.motivo === motivo
+        && tomou.midiasAnotadas().length === 0,
+      `o som «${figura}» no destino que saiu voltou a «${noOutro}» no destino que tomou a marca, ou a anotação dele `
+        + `não diz a recusa: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      recusado,
+      d.ditos.slice(ditoAntes).every((e) => e.estado === "pausada") && d.anotadas.length === registradoAntes,
+      "a troca de destino disse a recusa do som outra vez, ao MOD ou ao registro: "
+        + `${JSON.stringify(d.ditos.slice(ditoAntes))}, ${JSON.stringify(d.anotadas.slice(registradoAntes))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // E o destino que devolveu a marca com um som recusado, quando volta à tela
+  // sem outro destino que a tenha tomado, a toma de novo e diz a recusa onde
+  // ela está — e a segunda volta da varredura para de abrir.
+  {
+    const deVolta = `${caso} · o som recusado no destino que volta`;
+    const b = bancada({ audio: audioDeMentira() });
+    const d = dono(b, midiaDeSom);
+    d.api.bytesDoSom = () => Promise.reject(new Error("o arquivo sumiu do pacote"));
+    const sons = { tomados: false };
+    const so = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+    so.sonsDaContribuicao = sons;
+    so.aplicar(vinheta(true));
+    const varrer = varreduraDeBase(b, [{ modo: "adicionar", ponto: "canal.item", sons, montadas: new Map([["1", { renderer: so }]]) }]);
+    await assentar();
+    so.raiz.remove();
+    varrer();
+    b.doc.body.append(so.raiz);
+    varrer();
+    const anotadas = so.midiasAnotadas();
+    confere(
+      deVolta,
+      so.tomouOsSons === true && sons.devolvidos === false && anotadas.length === 1 && anotadas[0]?.situacao === "recusada"
+        && todasAsTags(so.raiz, "figure")[0]?.dataset.estado === "falhou",
+      "o destino voltou à tela com o som recusado e não tomou a marca de volta — a recusa some do diagnóstico, e a "
+        + `segunda volta segue abrindo a cada desenho: ${JSON.stringify({ tomou: so.tomouOsSons, devolvidos: sons.devolvidos, anotadas })}`,
+    );
+    so.soltar();
+  }
+
+  // **A segunda volta da varredura só abre com a marca devolvida** (rodada 1,
+  // menor 1). Ela roda no fim de todo desenho que pode tirar um nó de MOD da
+  // tela, para cada contribuição e cada destino: perguntar a cada destino se
+  // quer a marca quando ninguém a devolveu é trabalho à toa — numa
+  // contribuição sem som, a marca nunca é tomada, e a pergunta se repetia em
+  // todo desenho.
+  {
+    const segunda = `${caso} · a segunda volta`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    let perguntas = 0;
+    const contar = (r) => {
+      const tomar = r.tomarOsSonsDevolvidos.bind(r);
+      r.tomarOsSonsDevolvidos = () => {
+        perguntas += 1;
+        return tomar();
+      };
+      return r;
+    };
+    const montarContribuicao = (conteudo) => {
+      const sons = { tomados: false };
+      const destinos = ["1", "2"].map(() => {
+        const r = contar(new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao));
+        r.sonsDaContribuicao = sons;
+        r.aplicar(conteudo);
+        return r;
+      });
+      return {
+        destinos,
+        contribuicao: {
+          modo: "adicionar",
+          ponto: "canal.item",
+          sons,
+          montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+        },
+      };
+    };
+    const semSom = montarContribuicao([{ forma: "texto", chave: "t", dentro: "oi" }]);
+    const comSom = montarContribuicao(vinheta(true));
+    const varrer = varreduraDeBase(b, [semSom.contribuicao, comSom.contribuicao]);
+    await assentar();
+    varrer();
+    confere(
+      segunda,
+      perguntas === 0,
+      `a varredura perguntou ${perguntas} vez(es) a um destino se ele queria a marca, sem marca devolvida nenhuma`,
+    );
+    const tomou = comSom.destinos.find((r) => r.tomouOsSons);
+    tomou?.raiz.remove();
+    varrer();
+    const naDevolucao = perguntas;
+    varrer();
+    confere(
+      segunda,
+      naDevolucao >= 1 && perguntas === naDevolucao && comSom.contribuicao.sons.tomados === true,
+      "a segunda volta não abriu quando a marca foi devolvida, ou seguiu abrindo depois de alguém a tomar: "
+        + `${naDevolucao} pergunta(s) na devolução, ${perguntas - naDevolucao} na varredura seguinte`,
+    );
+    await assentar();
+    for (const r of [...semSom.destinos, ...comSom.destinos]) r.soltar();
+  }
+
+  // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.
+  {
+    const noMeio = `${caso} · no meio da decodificação`;
+    const { Audio, d, destinos, varrer, tocando } = montar({ segurarADecodificacao: true });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(noMeio, Boolean(tomou) && Audio.decodificacoesPresas.length === 1, "a vinheta não começou a decodificar");
+    if (!tomou) return;
+    tomou.raiz.remove();
+    varrer();
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      noMeio,
+      tocadores(destinos) === 0 && tomou.bytesDeSomDeCartao === 0 && outro.tomouOsSons === true,
+      "a decodificação terminou depois de o lugar sair da tela e virou tocador no destino que já não segura o "
+        + `som: ${tocadores(destinos)} tocador(es), ${tomou.bytesDeSomDeCartao} bytes, a marca com o outro: ${outro.tomouOsSons}`,
+    );
+    const recusa = ditos(d, "recusada");
+    confere(
+      noMeio,
+      recusa.length === 1 && /tela/.test(recusa[0]?.porque ?? "")
+        && d.anotadas.some((t) => t.includes("«vinheta»") && /tela/.test(t)),
+      "o pedido de tocar que decodificava quando o lugar saiu da tela foi desfeito em silêncio: ao MOD "
+        + `${JSON.stringify(recusa)}, ao registro ${JSON.stringify(d.anotadas)}`,
+    );
+    for (const r of destinos) r.aplicar(vinheta(false));
+    for (const r of destinos) r.aplicar(vinheta(true));
+    // Os bytes chegam antes de a decodificação começar: ela só fica presa depois.
+    await assentar();
+    for (const presa of Audio.decodificacoesPresas.splice(0)) {
+      presa.pronto({ duration: 1, length: 48000, numberOfChannels: 2, sampleRate: 48000 });
+    }
+    await assentar();
+    confere(
+      noMeio,
+      tocando() === 1 && tocadores([outro]) === 1 && tocadores(destinos) === 1,
+      `o \`tocando\` religado não tocou no destino que tomou a marca: ${tocando()} fonte(s), ${tocadores(destinos)} tocador(es)`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 19. O dono sem `bytesDoSom` diz por quê.
+// ---------------------------------------------------------------------------
+
+/**
+ * P51-25, a parte desta janela. `bytesDoSom` é obrigatório no contrato do dono
+ * (ver o construtor de `RegiaoDeMod`), e os laboratórios dos MODs publicados
+ * carregam a região com um dono deles. Um dono escrito antes do som chegava ao
+ * MOD como `falhou` com o `TypeError` do motor — «this.dono.bytesDoSom is not a
+ * function» —, que diz a quem escreve o laboratório onde a janela tropeçou, e
+ * não o que falta no dono dele.
+ */
+async function oDonoSemBytesDoSomDizPorQue() {
+  const caso = "o dono sem bytesDoSom";
+  const b = bancada();
+  const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }));
+  delete d.api.bytesDoSom;
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
+  await assentar();
+  const dito = d.ditos.find((e) => e.nome === "midia" && e.chave === "m" && e.estado === "falhou");
+  confere(
+    caso,
+    dito?.porque === "o dono desta região não oferece bytesDoSom",
+    `um dono sem \`bytesDoSom\` fez o som chegar ao MOD com o tropeço do motor, e não com o que falta: ${JSON.stringify(dito)}`,
+  );
+  confere(
+    caso,
+    d.anotadas.some((t) => t.includes("«m»") && t.includes("não oferece bytesDoSom")),
+    `o som sem \`bytesDoSom\` não chegou ao registro com o que falta: ${JSON.stringify(d.anotadas)}`,
+  );
+  regiao.soltar();
+}
+
+// ---------------------------------------------------------------------------
+// 20. O `data:` do som do servidor não fica retido.
+// ---------------------------------------------------------------------------
+
+/**
+ * Quantos `data:` as entradas de som destes renderers seguram, e quantos
+ * caracteres eles somam.
+ *
+ * Anda pelos objetos de `somDaMidia` — objetos, listas, mapas e conjuntos —,
+ * sem entrar em nós do documento nem em funções: o que uma closure segura não
+ * se lê daqui. É o que a rodada 1 do K5 mediu: a montagem guardada na entrada
+ * levava o `origem.uri` pela vida do nó.
+ */
+function dataRetido(renderers) {
+  const vistos = new Set();
+  let referencias = 0;
+  let caracteres = 0;
+  const andar = (valor) => {
+    if (typeof valor === "string") {
+      if (valor.startsWith("data:")) {
+        referencias += 1;
+        caracteres += valor.length;
+      }
+      return;
+    }
+    if (!valor || typeof valor !== "object" || vistos.has(valor) || valor.nodeType !== undefined) return;
+    vistos.add(valor);
+    // Mapas e conjuntos do reino da janela não passam no `instanceof` deste.
+    if (typeof valor.forEach === "function" && typeof valor.has === "function") {
+      valor.forEach((item, chave) => {
+        andar(chave);
+        andar(item);
+      });
+      return;
+    }
+    for (const item of Object.values(valor)) andar(item);
+  };
+  for (const r of renderers) for (const som of r.somDaMidia.values()) andar(som);
+  return { referencias, caracteres };
+}
+
+/**
+ * **O `data:` do som do servidor não fica retido** (rodada 1 do K5,
+ * Importante 1). O som do servidor do MOD chega como o texto base64 que
+ * `midia_em_bytes` devolveu — 1,33 vez o arquivo. A montagem guardada na
+ * entrada de cada som o segurava pela vida do nó: na região, na superfície,
+ * no cartão e, numa contribuição, em cada destino — um som de 10 MiB num
+ * `pessoa.cartao` com 64 pessoas segurava uns 850 MB de texto.
+ *
+ * - Na região, com o tocador pronto, nada.
+ * - Numa contribuição, o destino que tomou o som segura o `data:` só até o
+ *   pedido de tocar ter os bytes, e os outros destinos nunca o seguram.
+ * - O destino que toma a marca depois pede o som de novo ao servidor, no
+ *   pedido de tocar, e toca.
+ */
+async function oDataDoSomDoServidorNaoFicaRetido() {
+  const caso = "o data: do som do servidor não fica retido";
+  const doServidor = { canal: 1, pedido: { trilha: 1 }, campo: "bytes" };
+  const montar = (opcoes = {}) => {
+    const Audio = audioDeMentira(opcoes);
+    const b = bancada({ audio: Audio });
+    let pedidosAoServidor = 0;
+    const d = dono(b, () => {
+      pedidosAoServidor += 1;
+      return Promise.resolve({ uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: 12 });
+    });
+    return { Audio, b, d, servidor: () => pedidosAoServidor };
+  };
+  const som = (tocando) => [{ forma: "midia", chave: "trilha", doServidor, tocando }];
+
+  // Na região, com o tocador pronto.
+  {
+    const { b, d } = montar();
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar(som(false));
+    await assentar();
+    const retido = dataRetido([regiao]);
+    confere(
+      `${caso} · na região`,
+      Boolean(acharTag(regiao.raiz.children[0], "button")) && retido.referencias === 0,
+      "o som do servidor ficou pronto na região e a entrada dele segura o `data:` inteiro pela vida do nó: "
+        + `${JSON.stringify(retido)}`,
+    );
+    regiao.soltar();
+  }
+
+  // Na região, numa janela sem WebAudio: a carga volta antes de ler os bytes,
+  // e o `data:` não chega ao `delete` de `carregarSom`. Quem o solta é a
+  // montagem não ficar guardada fora de uma contribuição (rodada 2, menor 2).
+  {
+    const { b, d } = montar();
+    b.semAudioDeTempoReal();
+    const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    regiao.aplicar(som(false));
+    await assentar();
+    const retido = dataRetido([regiao]);
+    confere(
+      `${caso} · na região, sem WebAudio`,
+      regiao.raiz.children[0]?.dataset.estado === "falhou" && retido.referencias === 0,
+      "o som do servidor falhou por falta de WebAudio, antes de ler os bytes, e a entrada dele segura o `data:` "
+        + `pela vida do nó: ${regiao.raiz.children[0]?.dataset.estado}, ${JSON.stringify(retido)}`,
+    );
+    regiao.soltar();
+  }
+
+  // Numa contribuição, numa janela sem WebAudio: o destino que tomou o som
+  // falha na montagem (`esperarOPedidoDeTocar`), e não guarda o `data:` de um
+  // som que não vai carregar (rodada 2, menor 4).
+  {
+    const { b, d } = montar();
+    b.semAudioDeTempoReal();
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const retido = dataRetido(destinos);
+    confere(
+      `${caso} · numa contribuição, sem WebAudio`,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "falhou" && retido.referencias === 0,
+      "o som do servidor de uma contribuição falhou por falta de WebAudio, e o destino que o tomou segura o "
+        + `\`data:\` de um som que não vai carregar: ${JSON.stringify(retido)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  const contribuicao = (opcoes, tocando) => {
+    const montado = montar(opcoes);
+    const sons = { tomados: false };
+    montado.sons = sons;
+    montado.destinos = ["1", "2"].map(() => {
+      const r = new montado.b.RegiaoDeMod("a/b", montado.d.api, montado.b.raiz(), montado.b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(tocando));
+      return r;
+    });
+    return montado;
+  };
+
+  // Numa contribuição, depois de decodificar.
+  {
+    const { Audio, destinos } = contribuicao({}, true);
+    await assentar();
+    const retido = dataRetido(destinos);
+    confere(
+      `${caso} · numa contribuição, depois de decodificar`,
+      (Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0) === 1 && retido.referencias === 0,
+      "o som do servidor de uma contribuição tocou, e os destinos seguram o `data:` — quem tomou o som, depois "
+        + `de decodificar, e quem não o tomou: ${JSON.stringify(retido)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // Numa contribuição, esperando o pedido de tocar: só quem tomou o som.
+  {
+    const { Audio, destinos } = contribuicao({}, false);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    confere(
+      `${caso} · esperando o pedido de tocar`,
+      Boolean(tomou) && dataRetido([tomou]).referencias === 1 && dataRetido([outro]).referencias === 0,
+      "o som do servidor espera o pedido de tocar, e o `data:` não está só no destino que o tomou: "
+        + `${JSON.stringify({ tomou: tomou && dataRetido([tomou]), outro: outro && dataRetido([outro]) })}`,
+    );
+    for (const r of destinos) r.aplicar(som(true));
+    await assentar();
+    confere(
+      `${caso} · esperando o pedido de tocar`,
+      (Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0) === 1 && dataRetido(destinos).referencias === 0,
+      `o pedido de tocar decodificou o som do servidor, e o \`data:\` ficou: ${JSON.stringify(dataRetido(destinos))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // A marca muda com o som ainda esperando o pedido de tocar: o destino que a
+  // devolve larga o `data:` que segurava, e o que a toma o pede de novo ao
+  // servidor quando o pedido chegar (rodada 2, menor 4).
+  {
+    const montado = contribuicao({}, false);
+    const { b, destinos } = montado;
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons: montado.sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    confere(
+      `${caso} · a marca muda com o som esperando`,
+      Boolean(tomou) && tomou.tomouOsSons === false && dataRetido(destinos).referencias === 0,
+      "o destino que devolveu a marca do som que esperava o pedido de tocar segura o `data:` dele: "
+        + `${JSON.stringify(tomou && dataRetido([tomou]))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O pedido de novo ao servidor conta o tamanho da resposta nova** (rodada
+  // 2, o opcional): o teto de bytes do destino que toma a marca usa o que
+  // chegou agora, e não o que chegou na montagem — e recusa como a montagem
+  // recusa, quando a resposta nova não cabe.
+  for (const [nome, novos] of [["maior", 20], ["acima do teto", 21 * 1024 * 1024]]) {
+    const resposta = `${caso} · a resposta nova do servidor, ${nome}`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    const d = dono(b, () => {
+      pedidos += 1;
+      return Promise.resolve({ uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: pedidos > 2 ? novos : 12 });
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    const figura = todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado;
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    const esperado = novos === 20
+      ? figura === "pronta" && outro?.bytesDeCartao === 20 && recusas.length === 0
+      : figura === "cheia" && outro?.bytesDeCartao === 12 && recusas.length === 1 && /teto/.test(recusas[0]?.porque ?? "");
+    confere(
+      resposta,
+      pedidos === 3 && esperado,
+      "o destino que tomou a marca pediu o som de novo ao servidor e não contou o tamanho da resposta nova no teto "
+        + `de bytes: ${pedidos} pedido(s), figura «${figura}», ${outro?.bytesDeCartao} bytes contados, recusas `
+        + `${JSON.stringify(recusas)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **A resposta que chega depois de o destino devolver a marca não é dele**
+  // (fecho, M1b). O destino que tomou a marca pediu o som de novo ao
+  // servidor, e saiu da tela com o pedido em voo: o pedido é dito recusado por
+  // sair da tela, uma vez. A resposta que chega depois — e não cabe no teto —
+  // não marca o destino «cheia», não diz outra recusa ao MOD, nem deixa uma
+  // recusa para quem herdar a marca.
+  {
+    const depois = `${caso} · a resposta que chega depois da devolução`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    let soltarAResposta = null;
+    const d = dono(b, () => {
+      pedidos += 1;
+      const midia = { uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: pedidos > 2 ? 21 * 1024 * 1024 : 12 };
+      if (pedidos === 3) return new Promise((pronto) => { soltarAResposta = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    // O outro tomou a marca, e o pedido de novo ao servidor está em voo.
+    outro?.raiz.remove();
+    varrer();
+    soltarAResposta?.();
+    await assentar();
+    const recusas = d.ditos.filter((e) => e.nome === "midia" && e.estado === "recusada");
+    const figura = todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado;
+    confere(
+      depois,
+      pedidos === 3 && outro?.tomouOsSons === false && recusas.length === 1 && /tela/.test(recusas[0]?.porque ?? "")
+        && figura !== "cheia" && sons.herdados?.recusados.size === 0,
+      "a resposta do servidor chegou depois de o destino devolver a marca, e foi tratada como dele — a figura "
+        + `«${figura}», ${recusas.length} recusa(s) ao MOD (${JSON.stringify(recusas.map((e) => e.porque))}), `
+        + `${sons.herdados?.recusados.size} recusa(s) na herança`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // **O `data:` de um som recusado também sai** (fecho, M3). No primeiro
+  // destino, a vinheta cabe e o sino passa do teto do som decodificado
+  // («cheia»); no segundo, a mídia do sino ainda vinha quando a marca mudou, e
+  // chega a um destino que já a tomou: o sino herda a recusa, e não carrega —
+  // e o `data:` dele não tem mais quem o leia.
+  {
+    const recusadoTarde = `${caso} · o som recusado que chega depois da troca`;
+    const teto = bancada().CARTAO.bytesDeSomDecodificado;
+    const quadros = Math.floor((teto * 0.6) / 8);
+    const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
+    const b = bancada({ audio: Audio });
+    let pedidos = 0;
+    let soltarOSino = null;
+    const d = dono(b, () => {
+      pedidos += 1;
+      const midia = { uri: "data:audio/wav;base64,UklGRgAAAABXQVZF", papel: "som", bytes: 12 };
+      // A quarta é o sino do segundo destino.
+      if (pedidos === 4) return new Promise((pronto) => { soltarOSino = () => pronto(midia); });
+      return Promise.resolve(midia);
+    });
+    const dois = [
+      { forma: "midia", chave: "vinheta", doServidor, tocando: true },
+      { forma: "midia", chave: "sino", doServidor, tocando: true },
+    ];
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(dois);
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const [primeiro, segundo] = destinos;
+    const figuras = (r) => todasAsTags(r.raiz, "figure").map((f) => f.dataset.estado).join();
+    const noPrimeiro = figuras(primeiro);
+    primeiro.raiz.remove();
+    varrer();
+    await assentar();
+    soltarOSino?.();
+    await assentar();
+    const retido = dataRetido(destinos);
+    confere(
+      recusadoTarde,
+      noPrimeiro === "pronta,cheia" && segundo.tomouOsSons === true && figuras(segundo) === "pronta,cheia"
+        && retido.referencias === 0,
+      "o sino recusado chegou ao destino que tomou a marca, herdou a recusa, e o `data:` dele ficou retido: "
+        + `${JSON.stringify(retido)}, figuras ${noPrimeiro} no primeiro e ${figuras(segundo)} no segundo`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // E o som que falhou antes de ler os bytes — o caminho que o produto não
+  // percorre, um `data:` sem vírgula — deixa o texto no destino que o tomou
+  // até ele devolver a marca: aí ele sai (fecho, M3).
+  {
+    const semVirgula = `${caso} · o som que falhou, na devolução`;
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, () => Promise.resolve({ uri: "data:audio/wav;base64", papel: "som", bytes: 12 }));
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(som(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    const antes = tomou ? dataRetido([tomou]).referencias : -1;
+    tomou?.raiz.remove();
+    varrer();
+    await assentar();
+    const retido = dataRetido(destinos);
+    confere(
+      semVirgula,
+      antes === 1 && todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "falhou"
+        && outro?.tomouOsSons === true && todasAsTags(outro?.raiz, "figure")[0]?.dataset.estado === "falhou"
+        && retido.referencias === 0,
+      "o som que falhou antes de ler os bytes saiu com a devolução da marca segurando o `data:`: "
+        + `${antes} antes, ${JSON.stringify(retido)} depois`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // O destino que toma a marca pede o som de novo ao servidor.
+  {
+    const montado = contribuicao({}, true);
+    const { Audio, b, destinos, servidor } = montado;
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons: montado.sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    if (!tomou) {
+      confere(`${caso} · na mudança de destino`, false, "o som do servidor não foi tomado por destino nenhum");
+      return;
+    }
+    tomou.raiz.remove();
+    varrer();
+    await assentar();
+    for (const r of destinos) r.aplicar(som(false));
+    for (const r of destinos) r.aplicar(som(true));
+    await assentar();
+    const tocando = Audio.ultimo?.fontes.filter((f) => f.tocando).length ?? 0;
+    confere(
+      `${caso} · na mudança de destino`,
+      tocando === 1 && outro.tomouOsSons === true && servidor() === 3 && dataRetido(destinos).referencias === 0,
+      "o destino que tomou a marca não pediu o som de novo ao servidor e tocou, ou algum destino segura o "
+        + `\`data:\`: ${tocando} fonte(s), ${servidor()} pedido(s) ao servidor (dois na montagem, um no pedido de `
+        + `tocar), ${JSON.stringify(dataRetido(destinos))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -3484,6 +5419,7 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     oRodapeEReconciliadoSemMoverOBotao,
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     aChaveDoCampoNaoPartePar,
+    aFinalidadeDoArquivoNaoPartePar,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,
@@ -3502,6 +5438,10 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     umDonoSemAnotarRecusaNaoTrocaARecusaDoMod,
     aMidiaAnotadaDizOsTresEstados,
     oFundoEORetratoTambemDizemOEstado,
+    umaImagemQueNaoDecodificaERecusadaEDita,
+    oFundoDeTelaDizOEstado,
+    osBytesSaoReservadosAntesDoDecode,
+    aplicarQueLancaNaoViraRecusa,
     oSomTocaPorWebAudioENuncaPorUmElementoDeMidia,
     oSomDoServidorVemDosBytesDoDataENaoDeUmElemento,
     oSomQueNaoDecodificaEDito,
@@ -3513,6 +5453,10 @@ async function oSomQueSaiDaTelaParaComoOAudioParava() {
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
     oSomQueSaiDaTelaParaComoOAudioParava,
+    oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
+    oSomDaContribuicaoMudaDeDestino,
+    oDonoSemBytesDoSomDizPorQue,
+    oDataDoSomDoServidorNaoFicaRetido,
   ];
   for (const prova of provas) {
     try {

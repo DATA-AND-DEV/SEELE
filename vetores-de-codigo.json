@@ -1,0 +1,9 @@
+{
+  "gerado_por": "seele-proto Codigo::da_chave",
+  "vetores": [
+    { "nome": "zeros", "chave": "0000000000000000000000000000000000000000000000000000000000000000", "codigo": "CSM7-NBFR-CAYQ-EV4Y", "dado": "CSM7NBFRCAYQEV4", "aviso": "pCSM7NBFRCAYQEV4", "escuta": "pCSM7NBFRCAYQEV4e", "servidor": "pCSM7NBFRCAYQEV4s" },
+    { "nome": "ff", "chave": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "codigo": "NYB1-6XGF-E9HN-ZFD2", "dado": "NYB16XGFE9HNZFD", "aviso": "pNYB16XGFE9HNZFD", "escuta": "pNYB16XGFE9HNZFDe", "servidor": "pNYB16XGFE9HNZFDs" },
+    { "nome": "uns", "chave": "0101010101010101010101010101010101010101010101010101010101010101", "codigo": "EB6P-X112-RG3Z-PV8S", "dado": "EB6PX112RG3ZPV8", "aviso": "pEB6PX112RG3ZPV8", "escuta": "pEB6PX112RG3ZPV8e", "servidor": "pEB6PX112RG3ZPV8s" },
+    { "nome": "contagem", "chave": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", "codigo": "CC6W-TAB6-RGSP-D481", "dado": "CC6WTAB6RGSPD48", "aviso": "pCC6WTAB6RGSPD48", "escuta": "pCC6WTAB6RGSPD48e", "servidor": "pCC6WTAB6RGSPD48s" }
+  ]
+}

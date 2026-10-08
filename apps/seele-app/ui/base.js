@@ -1197,6 +1197,37 @@ function avatarContribuido(pessoaId) {
     avisarQueAMidiaMudou();
   };
   avisarQueAMidiaMudou();
+  // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca e
+  // o `decode()` caem em `recusar`. Um redesenho que lança depois de o avatar
+  // ter virado a imagem da pessoa não o diz «recusado» nem o tira da conta com
+  // o `uri` ainda posto: o `.catch` do fim leva o tropeço ao `console` e ao
+  // `seele.log`, pelo `dono.anotarRecusa`, e o estado fica o que a tela mostra
+  // (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
+  const aplicar = (midia) => {
+    if (!midia || estado.cancelado) return;
+    if (!dono.podeFalar()) {
+      estado.bytes = 0;
+      return;
+    }
+    estado.uri = midia.uri;
+    estado.situacao = "pronta";
+    avisarQueAMidiaMudou();
+    redesenharAvatares();
+  };
+  const recusar = (falha) => {
+    // A reserva volta antes de qualquer pergunta: um avatar recusado não
+    // ocupa o teto de quem vier depois, nem numa sessão que acabou.
+    estado.bytes = 0;
+    if (estado.cancelado || !dono.podeFalar()) return;
+    const porque = motivoDaFalha(falha);
+    estado.situacao = "recusada";
+    estado.motivo = porque;
+    avisarQueAMidiaMudou();
+    dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
+    // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+    // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+    dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+  };
   const fonte = contribuicao.conteudo.doServidor;
   dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
     .then((midia) => {
@@ -1209,22 +1240,29 @@ function avatarContribuido(pessoaId) {
         || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
         throw new Error("o avatar não é imagem ou excede o limite de mídia");
       }
-      estado.uri = midia.uri;
+      // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
+      // cima soma os `bytes` dos outros retratos desta instância, e dois
+      // avatares decodificando juntos passariam os dois por ela se a reserva
+      // esperasse. A imagem que não abre os devolve, em `recusar`.
       estado.bytes = midia.bytes;
-      estado.situacao = "pronta";
-      avisarQueAMidiaMudou();
-      redesenharAvatares();
+      return provarImagem(midia.uri).then(() => midia);
     })
+    .then(aplicar, recusar)
     .catch((falha) => {
-      if (estado.cancelado || !dono.podeFalar()) return;
-      const porque = motivoDaFalha(falha);
-      estado.situacao = "recusada";
-      estado.motivo = porque;
-      avisarQueAMidiaMudou();
-      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
-      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
-      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-      dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+      console.warn(
+        `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+        falha,
+      );
+      // **E ao `seele.log`**, pela porta das outras linhas do avatar
+      // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
+      // dono que lança aqui terminaria numa promessa que ninguém pega.
+      try {
+        dono.anotarRecusa(
+          `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+        );
+      } catch (tropeco) {
+        console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
+      }
     });
   return null;
 }
@@ -1259,7 +1297,10 @@ function avatarContribuido(pessoaId) {
  *
  * O nó é guardado e reaproveitado entre desenhos: refazê-lo a cada retrato
  * recriaria a mídia e tiraria o foco, que é o defeito que a reconciliação do
- * renderer existe para não ter.
+ * renderer existe para não ter. Por isso redesenhar não muda o som de lugar: a
+ * figura de um som que assentou sem tocador, num destino que não segura os
+ * sons da contribuição, volta como estava. Quem o remonta, quando o destino
+ * que os segurava sai da tela, é a varredura (`calarOsSonsQueSairamDaTela`).
  *
  * @param {object} contribuicao Do registro.
  * @param {string|number} destino Para quem, ou `""` num ponto sem alvo.
@@ -1297,8 +1338,10 @@ function montarContribuicao(contribuicao, destino = "") {
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
   // é uma só para todos os destinos, e o primeiro que chega a um som é o que
-  // os segura — ver `montarSom`, em `mods-regiao.js`.
-  const sons = contribuicao.sons ?? { tomados: false };
+  // os segura — ver `montarSom`, em `mods-regiao.js` — até sair da tela: aí
+  // ele a devolve, e um destino que desenha a toma na varredura
+  // (`calarOsSonsQueSairamDaTela`).
+  const sons = contribuicao.sons ?? { tomados: false, devolvidos: false };
   contribuicao.sons = sons;
   renderer.sonsDaContribuicao = sons;
   // **Registrada como recurso, e esquecida ao revogar.** O descartador volta
@@ -1402,22 +1445,7 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  */
 function midiasDoPonto(ponto) {
   const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
-  const contar = (mod, anotada) => {
-    if (anotada.situacao === "carregando") {
-      soma.carregando += 1;
-    } else if (anotada.situacao === "pronta") {
-      soma.pronta += 1;
-    } else if (anotada.situacao === "recusada") {
-      soma.recusada += 1;
-      // **Cortado aqui, num lugar só**, e por ponto de código, como
-      // `anotarMidia` corta as da região: o motivo do retrato vem do Rust ou
-      // de uma exceção, sem teto, e um corte por índice partiria um par
-      // substituto.
-      const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
-      const texto = `${mod}: ${motivo || "sem motivo dito"}`;
-      if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
-    }
-  };
+  const contar = (mod, anotada) => contarAMidia(soma, anotada, mod);
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     if (contribuicao.ponto !== ponto) continue;
     if (contribuicao.retrato && aContribuicaoPinta(contribuicao, contribuicao.alvo)) {
@@ -1464,6 +1492,76 @@ function aContribuicaoPinta(contribuicao, destino) {
 }
 
 /**
+ * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
+ *
+ * `midiasDoPonto` e `midiasDaRegiaoEDasPaginas` contam pela mesma: as três
+ * situações, e até três motivos, sem repetir. **O motivo é cortado aqui, num
+ * lugar só**, e por ponto de código, como `anotarMidia` corta os da região: o
+ * do retrato de avatar vem do Rust ou de uma exceção, sem teto, e um corte por
+ * índice partiria um par substituto. Duas cópias desta regra seriam duas
+ * respostas no dia em que uma mudasse.
+ *
+ * @param {{ carregando: number, pronta: number, recusada: number, motivos: string[] }} soma
+ * @param {{ situacao: string, motivo?: string }} anotada
+ * @param {string} [mod] O MOD, na frente do motivo, quando a soma junta MODs.
+ */
+function contarAMidia(soma, anotada, mod = "") {
+  if (anotada.situacao === "carregando") {
+    soma.carregando += 1;
+  } else if (anotada.situacao === "pronta") {
+    soma.pronta += 1;
+  } else if (anotada.situacao === "recusada") {
+    soma.recusada += 1;
+    const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
+    const texto = `${mod ? `${mod}: ` : ""}${motivo || "sem motivo dito"}`;
+    if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+  }
+}
+
+/**
+ * Em que pé está a mídia da região e das páginas de cada MOD — só leitura.
+ *
+ * A pendência 49, item 5 (m-2 da revisão ampla do Plano 1D). A aba DIAGNÓSTICO
+ * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e a
+ * faixa de cada MOD e as superfícies dele — páginas, painéis e diálogos —
+ * anotavam e ninguém lia. É ali que o som costuma morar: o do MOD de
+ * referência está na faixa, e a trilha da MESA numa página. Uma trilha
+ * recusada chegava ao `seele.log` e ao evento do MOD, e não à aba.
+ *
+ * **Sem filtro de cartão.** A região de um MOD também monta os cartões que ele
+ * dá à lista de pessoas, e a mídia deles já aparece em `pessoa.cartao`: são
+ * duas vistas da mesma mídia, e a aba não soma os dois blocos. Um filtro aqui
+ * só valeria enquanto os cartões morassem na região.
+ *
+ * Pura: recebe os dois mapas em vez de lê-los, e a bancada a mede sem página.
+ *
+ * @param {Map<object, RegiaoDeMod>} regioes `regioesDosMods`: por instância, com
+ *   o id do MOD em `regiao.id`.
+ * @param {Map<object, SuperficiesDoMod>} superficies `superficiesDosMods`: por
+ *   instância, cada superfície em `porChave` com o seu `renderer`.
+ * @returns {Map<string, { carregando: number, pronta: number, recusada: number, motivos: string[] }>}
+ *   Por id de MOD, na ordem em que aparecem; `motivos` traz até três, sem repetir.
+ */
+function midiasDaRegiaoEDasPaginas(regioes, superficies) {
+  const porMod = new Map();
+  const somaDe = (id) => {
+    if (!porMod.has(id)) porMod.set(id, { carregando: 0, pronta: 0, recusada: 0, motivos: [] });
+    return porMod.get(id);
+  };
+  for (const regiao of regioes.values()) {
+    const soma = somaDe(regiao.id);
+    for (const anotada of regiao.midiasAnotadas()) contarAMidia(soma, anotada);
+  }
+  for (const conjunto of superficies.values()) {
+    const soma = somaDe(conjunto.id);
+    for (const superficie of conjunto.porChave.values()) {
+      for (const anotada of superficie.renderer.midiasAnotadas()) contarAMidia(soma, anotada);
+    }
+  }
+  return porMod;
+}
+
+/**
  * Cala o som de MOD que um desenho tirou da tela.
  *
  * Um `<audio>` pausava sozinho ao sair do documento; uma fonte de WebAudio não
@@ -1490,6 +1588,20 @@ function aContribuicaoPinta(contribuicao, destino) {
  *   `montadas`, fora do documento — também. Assim o som de uma contribuição
  *   sem alvo, que mora só no destino que o tomou (`montarSom`), não fica
  *   soando quando esse destino deixa de desenhar (o N1 da Task 8).
+ *
+ * **E o som de uma contribuição muda de destino, na mesma varredura** (P49-8).
+ * O destino que segurava os sons dela e saiu do documento os devolve, na
+ * primeira volta (`RegiaoDeMod#devolverOsSons`, pelo `calarSonsForaDaTela`
+ * dele). A segunda volta — só quando há marca devolvida (`sons.devolvidos`) —
+ * oferece a marca aos destinos em que a contribuição desenha, na ordem de
+ * `montadas`, e o primeiro que está no documento com um som esperando a toma
+ * (`RegiaoDeMod#tomarOsSonsDevolvidos`) — outro destino, ou o mesmo, de volta à
+ * tela; o som que tocava recomeça ali. Duas voltas, e
+ * não uma: numa só, um destino visitado antes do que saiu acharia a marca
+ * ainda tomada, e o som ficaria sem lugar até o desenho seguinte. Redesenhar
+ * não faria isso: a montagem de cada destino é reaproveitada
+ * (`montarContribuicao`), e a figura que assentou sem tocador volta como
+ * estava.
  */
 function calarOsSonsQueSairamDaTela() {
   const valem = new Set(modsDeCartaoQueValem());
@@ -1499,6 +1611,15 @@ function calarOsSonsQueSairamDaTela() {
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     for (const [destino, montagem] of contribuicao.montadas ?? []) {
       montagem.renderer.calarSonsForaDaTela(aContribuicaoPinta(contribuicao, destino));
+    }
+    // **Só a marca devolvida abre a segunda volta** — nesta varredura, ou numa
+    // anterior, sem destino na tela para tomá-la. A marca vaga de uma
+    // contribuição cujo som ainda não chegou, ou que não tem som, não tem quem
+    // a tome aqui, e a pergunta se repetiria a cada desenho, em cada destino.
+    // `sons` só existe numa contribuição montada (`montarContribuicao`).
+    if (!contribuicao.sons?.devolvidos) continue;
+    for (const [destino, montagem] of contribuicao.montadas ?? []) {
+      if (aContribuicaoPinta(contribuicao, destino) && montagem.renderer.tomarOsSonsDevolvidos()) break;
     }
   }
 }

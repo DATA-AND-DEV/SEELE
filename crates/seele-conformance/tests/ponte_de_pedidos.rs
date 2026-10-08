@@ -191,6 +191,7 @@ async fn a_ponte_entrega_a_identidade_da_sessao_e_ignora_a_que_o_pedido_afirma()
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -279,6 +280,7 @@ async fn a_resposta_volta_so_para_quem_pediu_e_sobrevive_a_reconexao() -> Result
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -397,6 +399,7 @@ async fn a_resposta_grande_chega_inteira_em_partes_numeradas() -> Result<()> {
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -495,6 +498,7 @@ async fn um_mod_de_escopo_de_servidor_le_sem_canal_aberto() -> Result<()> {
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -592,6 +596,7 @@ async fn o_catalogo_diz_qual_conjunto_ele_descreve() -> Result<()> {
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -688,6 +693,7 @@ async fn uma_espera_de_volume_sobrevive_ao_pedido_que_a_emitiu() -> Result<()> {
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade
@@ -799,6 +805,7 @@ async fn servidor_com_o_mod(
                 repo: "https://example.invalid/prova-da-ponte".into(),
                 reach: vec!["estado no servidor".into()],
                 server_half: true,
+                api: 6,
             },
         )?;
         seele_server::mods::anuncio::conjunto_exigido(&db)?.identidade

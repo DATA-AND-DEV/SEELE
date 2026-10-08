@@ -56,3 +56,20 @@ rustflags = [
 # no lugar.
 [env]
 RUST_TEST_NOCAPTURE = "1"
+
+# ---- o wasi-sdk do motor de MODs do celular ----
+#
+# O `build.rs` do `rquickjs-sys` 0.12.2, para o `wasm32-wasip1`, baixa o wasi-sdk
+# com `curl` e o descompacta **sem conferir nada** quando `WASI_SDK` não está
+# definida (`rquickjs-sys-0.12.2/build.rs:13-91`). Medido em 08/10/2026: 464 MB
+# baixados assim, num build de `seele-motor-web` sem a variável.
+#
+# Esta linha aponta `WASI_SDK` para uma pasta que não existe. Sem a variável no
+# ambiente, o `build.rs` para com «wasi-sdk not installed in specified path of
+# …/FALTA-rode-cargo-xtask-wasi-sdk», e o nome da pasta é o conserto. Com ela no
+# ambiente, que é o que `cargo xtask web` faz com o SDK conferido por
+# `cargo xtask wasi-sdk`, ela vale (`force` é falso). Só o `rquickjs-sys` lê esta
+# variável, e só para o alvo `wasi`: o desktop não a vê.
+#
+# O passo «sem WASI_SDK» do `cargo xtask web` reprova se esta linha sair.
+WASI_SDK = { value = "target/wasi-sdk/FALTA-rode-cargo-xtask-wasi-sdk", relative = true }

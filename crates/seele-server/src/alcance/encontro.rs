@@ -509,8 +509,8 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
             perguntar(
                 &escuta,
                 alvo,
-                &encontro::onde(&marcas.escuta),
-                &marcas.escuta,
+                &encontro::onde(marcas.escuta()),
+                marcas.escuta(),
             ),
         )
         .await;
@@ -537,7 +537,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
     // deste socket não dá para ler — quem lê é o quinn.
     let publico = tokio::time::timeout_at(
         ate,
-        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, &marcas.escuta),
+        perguntar_pelo_server(&convocacao.socket, &avisos, ponto, aviso, marcas.escuta()),
     )
     .await
     .map_err(|_| FalhaNoEncontro::SemRespostaAoLeve)?
@@ -566,15 +566,12 @@ async fn resolver(
     texto: &str,
     ate: tokio::time::Instant,
 ) -> Result<Vec<SocketAddr>, FalhaNoEncontro> {
-    // O mesmo `Bilhete` que lê o endereço do link lê o do ambiente: a porta
-    // padrão de um ponto de encontro não é a de um servidor, e essa regra mora em
-    // um lugar só.
-    let alvo = Bilhete::novo(texto, "0.0.0.0:0").ok().and_then(|bilhete| {
-        bilhete
-            .ponto()
-            .ok()
-            .map(|alvo| (alvo.maquina.to_owned(), alvo.porta))
-    });
+    // A mesma regra que separa o ponto do link separa o do ambiente
+    // (`separar_ponto`): a porta padrão de um ponto de encontro não é a de um
+    // servidor, e essa regra mora em um lugar só.
+    let alvo = seele_proto::uri::separar_ponto(texto)
+        .ok()
+        .map(|alvo| (alvo.maquina.to_owned(), alvo.porta));
     let Some((maquina, porta)) = alvo else {
         return Err(FalhaNoEncontro::NaoResolve(texto.to_owned()));
     };
@@ -736,20 +733,57 @@ async fn perguntar_pelo_server(
 /// O destino é escrito na família **deste** socket antes de sair. Ver
 /// [`na_familia_de`], que existe por causa de um degrau 4 que nunca aconteceu.
 ///
-/// Devolve por que não saiu, e o peso da falha fica com quem chama: o registro
-/// no quarto a diz no log quando ela começa e quando acaba
+/// Devolve por que não saiu ([`NaoSaiu`]), e o peso da falha fica com quem
+/// chama: o registro no quarto a diz no log quando ela começa e quando acaba
 /// ([`RegistroNoQuarto`]); o pedido da subida e o furo a deixam em `debug`.
 fn mandar_pelo_server(
     server: &std::net::UdpSocket,
     datagrama: &[u8],
     destino: SocketAddr,
-) -> Result<(), String> {
-    let destino = na_familia_de(server, destino)
-        .map_err(|motivo| format!("este socket não alcança esta família: {motivo}"))?;
+) -> Result<(), NaoSaiu> {
+    let destino = na_familia_de(server, destino).map_err(|motivo| NaoSaiu {
+        motivo: format!("este socket não alcança esta família: {motivo}"),
+        passageira: false,
+    })?;
     server
         .send_to(datagrama, destino)
         .map(|_| ())
-        .map_err(|erro| format!("não saiu pelo socket do servidor rumo a {destino}: {erro}"))
+        .map_err(|erro| {
+            NaoSaiu::do_envio(
+                &erro,
+                format!("não saiu pelo socket do servidor rumo a {destino}: {erro}"),
+            )
+        })
+}
+
+/// Por que um datagrama do degrau 4 não saiu.
+///
+/// Um tipo, e não o texto de antes, por causa de `passageira`. O socket do
+/// servidor é não-bloqueante, e um `WouldBlock` nele é a fila de saída cheia
+/// por um instante, que esvazia sozinha ([`mandar_pelo_server`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NaoSaiu {
+    /// Por que, como o log o escreve.
+    motivo: String,
+    /// A fila de saída estava cheia (`WouldBlock`): passa sozinha, e o tique
+    /// seguinte manda de novo.
+    passageira: bool,
+}
+
+impl NaoSaiu {
+    /// A falha de um envio, passageira quando o sistema disse `WouldBlock`.
+    fn do_envio(erro: &std::io::Error, motivo: String) -> Self {
+        Self {
+            motivo,
+            passageira: erro.kind() == std::io::ErrorKind::WouldBlock,
+        }
+    }
+}
+
+impl std::fmt::Display for NaoSaiu {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.motivo)
+    }
 }
 
 /// O mesmo destino, escrito na família em que um socket sabe falar.
@@ -867,7 +901,7 @@ async fn atender(
                 else {
                     continue;
                 };
-                if marca != marcas.aviso {
+                if marca != *marcas.aviso() {
                     // Ou é a resposta do nosso próprio registro, que vem com a
                     // marca da escuta ou do servidor e nunca com a do aviso, ou
                     // é ruído da internet. Nenhum dos dois vira furo.
@@ -878,7 +912,7 @@ async fn atender(
                     continue;
                 }
                 tracing::info!(%endereco, "degrau 4: alguém com o link está chegando; furando");
-                furar(&server, endereco, &marcas.aviso).await;
+                furar(&server, endereco, marcas.aviso()).await;
             }
         }
     }
@@ -888,23 +922,45 @@ async fn atender(
 /// no quarto e o reavivamento dos dois caminhos.
 ///
 /// Os três saem sempre, mesmo que um falhe: são sockets diferentes, e um que não
-/// sai não diz nada sobre o outro. Devolve o primeiro motivo de falha, e quem
-/// decide se ele vai para o log é [`RegistroNoQuarto`].
+/// sai não diz nada sobre o outro. Devolve a falha que conta
+/// ([`a_falha_que_conta`]), e quem decide se ela vai para o log é
+/// [`RegistroNoQuarto`].
 async fn registrar(
     avisos: &tokio::net::UdpSocket,
     server: &std::net::UdpSocket,
     ponto: SocketAddr,
     aviso: SocketAddr,
     marcas: &Marcas,
-) -> Result<(), String> {
+) -> Result<(), NaoSaiu> {
     let escuta = avisos
-        .send_to(&encontro::moro(&marcas.escuta), ponto)
+        .send_to(&encontro::moro(marcas.escuta()), ponto)
         .await
         .map(|_| ())
-        .map_err(|erro| format!("o MORO da escuta de avisos não saiu: {erro}"));
-    let leve = mandar_pelo_server(server, &encontro::leve(aviso, &marcas.escuta), ponto);
-    let servidor = mandar_pelo_server(server, &encontro::moro(&marcas.servidor), ponto);
-    escuta.and(leve).and(servidor)
+        .map_err(|erro| {
+            NaoSaiu::do_envio(
+                &erro,
+                format!("o MORO da escuta de avisos não saiu: {erro}"),
+            )
+        });
+    let leve = mandar_pelo_server(server, &encontro::leve(aviso, marcas.escuta()), ponto);
+    let servidor = mandar_pelo_server(server, &encontro::moro(marcas.servidor()), ponto);
+    a_falha_que_conta([escuta, leve, servidor])
+}
+
+/// Qual das falhas de um tique vai para [`RegistroNoQuarto`]: a primeira que
+/// não é passageira, e só na falta dela a primeira passageira.
+///
+/// Os três envios saem por dois sockets, e uma fila cheia num deles não diz
+/// nada sobre o outro. Com a primeira falha valendo, um `WouldBlock` no `LEVE`
+/// escondia, naquele tique, a recusa do `MORO` do servidor.
+fn a_falha_que_conta(saidas: [Result<(), NaoSaiu>; 3]) -> Result<(), NaoSaiu> {
+    // `min_by_key` devolve o primeiro dos empatados, e `false` vem antes de
+    // `true`: a primeira falha que não passa sozinha.
+    saidas
+        .into_iter()
+        .filter_map(Result::err)
+        .min_by_key(|falha| falha.passageira)
+        .map_or(Ok(()), Err)
 }
 
 /// Se o registro no quarto está saindo, para o log dizer só quando isso muda.
@@ -924,8 +980,22 @@ struct RegistroNoQuarto {
 
 impl RegistroNoQuarto {
     /// Anota o resultado de um tique, e diz no log se ele mudou o estado.
-    fn anotar(&mut self, ponto: SocketAddr, saiu: Result<(), String>) {
+    ///
+    /// **Uma falha passageira não muda o estado** ([`NaoSaiu::passageira`]): a
+    /// fila de saída cheia esvazia sozinha, e o tique seguinte manda de novo.
+    /// Ela virava um par de linhas `info`, «deixou de sair» e «voltou a sair»,
+    /// e quem lia o `seele.log` via o anfitrião sumir do quarto sem ele ter
+    /// sumido (o C4 da pendência 51, item 19). Fica em `debug`.
+    fn anotar(&mut self, ponto: SocketAddr, saiu: Result<(), NaoSaiu>) {
         match saiu {
+            Err(falha) if falha.passageira => {
+                tracing::debug!(
+                    %ponto,
+                    motivo = %falha,
+                    "encontro: o registro no quarto esbarrou na fila de saída cheia; o tique \
+                     seguinte manda de novo"
+                );
+            }
             Err(motivo) if !self.falhando => {
                 self.falhando = true;
                 tracing::info!(
@@ -1182,6 +1252,29 @@ mod testes {
         );
     }
 
+    #[tokio::test]
+    async fn o_ponto_do_ambiente_segue_a_regra_do_ponto_do_link() {
+        // O T5e do item 19 da pendência 51: o ponto que `$SEELE_ENCONTRO`
+        // escreve é separado pela mesma regra do que o link leva
+        // (`separar_ponto`). Sem porta, a do ponto de encontro (8384), e não a
+        // do servidor (8383); um texto que não é endereço, ou vazio, não vira
+        // pergunta, e a falha diz qual era o texto.
+        let ate = tokio::time::Instant::now() + PRAZO;
+        assert_eq!(
+            super::resolver("127.0.0.1", ate).await,
+            Ok(vec![SocketAddr::from(([127, 0, 0, 1], PORTA_PADRAO))]),
+            "o ponto escrito sem porta não foi procurado na porta do ponto de encontro: o \
+             anfitrião pergunta ONDE a um serviço que não atende ali, e o degrau 4 não sobe"
+        );
+        for torto in ["tem espaço", ""] {
+            assert_eq!(
+                super::resolver(torto, ate).await,
+                Err(FalhaNoEncontro::NaoResolve(torto.to_owned())),
+                "o ponto {torto:?}, que não é endereço, virou outra coisa que «não resolve»"
+            );
+        }
+    }
+
     #[test]
     fn a_rede_do_padrao_existe_e_serve_esta_maquina() {
         // Se as duas linhas não forem endereços válidos, o recuo é decoração —
@@ -1282,7 +1375,7 @@ mod testes {
         let convocacao = Convocacao::para_servidor(Arc::clone(&socket), IMPRESSAO, PONTO_PADRAO)
             .expect("uma impressão digital sempre dá uma convocação");
         assert_eq!(
-            convocacao.marcas.aviso.texto(),
+            convocacao.marcas.aviso().texto(),
             "3cbcfb0212da738f",
             "a marca do aviso não é o começo da impressão digital: o LEVE de quem tem o link \
              deixa de passar no filtro do anfitrião, e ninguém fura para ninguém"
@@ -1300,20 +1393,21 @@ mod testes {
         // «Opcional» cobrado: com `nao`, nenhum pacote sai desta máquina para
         // ponto de encontro nenhum, porque não há nem convocação para tentar.
         let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
-        let fp = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+        let fp = IMPRESSAO;
 
-        // A variável é global ao processo, então este teste a devolve como
-        // estava — outros testes deste crate leem o mesmo ambiente.
-        let antes = std::env::var(VARIAVEL).ok();
-        // SAFETY-de-teste: os testes deste módulo que mexem no ambiente estão
-        // todos aqui e são serializados por rodarem em sequência neste teste.
-        std::env::set_var(VARIAVEL, "nao");
+        // A variável é global ao processo, e outros testes deste crate leem o
+        // mesmo ambiente. Quem a troca é o guarda: o `Drop` a devolve como
+        // estava, inclusive se uma asserção abaixo entrar em pânico, e a trava
+        // dele impede o outro teste que a troca (o de `hospedagem.rs`) de
+        // correr junto. Os que só a leem não tomam a trava.
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.pedir("nao");
         assert!(Convocacao::do_ambiente(Arc::clone(&socket), fp).is_none());
 
-        std::env::set_var(VARIAVEL, "");
+        ambiente.pedir("");
         assert!(Convocacao::do_ambiente(Arc::clone(&socket), fp).is_none());
 
-        std::env::set_var(VARIAVEL, "meu.ponto:9000");
+        ambiente.pedir("meu.ponto:9000");
         assert!(
             Convocacao::do_ambiente(Arc::clone(&socket), "curto").is_none(),
             "uma impressão digital que não forma marca deu convocação pelo ambiente: o degrau 4 \
@@ -1325,14 +1419,9 @@ mod testes {
             "o ponto de encontro não é trocável"
         );
 
-        std::env::remove_var(VARIAVEL);
+        ambiente.tirar();
         let padrao = Convocacao::do_ambiente(socket, fp).expect("padrão");
         assert_eq!(padrao.ponto, PONTO_PADRAO);
-
-        match antes {
-            Some(valor) => std::env::set_var(VARIAVEL, valor),
-            None => std::env::remove_var(VARIAVEL),
-        }
     }
 
     #[tokio::test]
@@ -1537,6 +1626,18 @@ mod testes {
         assert!(aviso_e_do_ponto(mesma_maquina_outra_porta, ponto));
     }
 
+    /// O socket que receberia um `FURO`, no laço local, e o endereço dele: é o
+    /// que os testes de `atender` contam.
+    async fn alvo_do_furo() -> (tokio::net::UdpSocket, SocketAddr) {
+        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o alvo do furo de teste");
+        };
+        let Ok(alvo_endereco) = alvo.local_addr() else {
+            panic!("o alvo do furo de teste não tem endereço local");
+        };
+        (alvo, alvo_endereco)
+    }
+
     /// Sobe um `atender` de teste com sockets reais de loopback, para os dois
     /// casos abaixo. Devolve a tarefa (para poder abortá-la ao fim do teste), o
     /// endereço da escuta de avisos (para onde o `AQUI` é mandado), o socket que
@@ -1554,33 +1655,23 @@ mod testes {
         let anfitriao = AnfitriaoDeTeste::abrir().await;
         let avisos_endereco = anfitriao.avisos_endereco;
 
-        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir o alvo do furo de teste");
-        };
-        let Ok(alvo_endereco) = alvo.local_addr() else {
-            panic!("o alvo do furo de teste não tem endereço local");
-        };
+        let (alvo, alvo_endereco) = alvo_do_furo().await;
 
-        // As marcas de um anfitrião qualquer: `visitante` é o que um `AQUI`
-        // legítimo traz, e as outras duas são as do registro no quarto. O
-        // registro da subida vai para `ponto`, que nestes testes não responde
-        // e não é o `alvo` que eles contam.
-        let (Some(aviso), Some(escuta), Some(servidor)) = (
-            Marca::nova("visitante"),
-            Marca::nova("visitantee"),
-            Marca::nova("visitantes"),
-        ) else {
-            panic!("marca de teste inválida");
-        };
-        let marcas = Marcas {
-            aviso,
-            escuta,
-            servidor,
-        };
+        // As marcas de um anfitrião, pelo caminho de produção: a do aviso é o
+        // que um `AQUI` legítimo traz, e as outras duas são as do registro no
+        // quarto. O registro da subida vai para `ponto`, que nestes testes não
+        // responde e não é o `alvo` que eles contam.
+        let marcas = marcas_da_impressao();
 
         let tarefa = anfitriao.subir(ponto, marcas.clone());
 
-        (tarefa, avisos_endereco, alvo, alvo_endereco, marcas.aviso)
+        (
+            tarefa,
+            avisos_endereco,
+            alvo,
+            alvo_endereco,
+            marcas.aviso().clone(),
+        )
     }
 
     #[tokio::test]
@@ -1873,12 +1964,12 @@ mod testes {
 
         let tarefa = anfitriao.subir(ponto, marcas.clone());
         let da_escuta = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.escuta)
+            matches!(pedido, encontro::Pedido::Moro { marca } if marca == marcas.escuta())
                 && de == avisos_endereco
         })
         .await;
         let do_servidor = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
-            matches!(pedido, encontro::Pedido::Moro { marca } if *marca == marcas.servidor)
+            matches!(pedido, encontro::Pedido::Moro { marca } if marca == marcas.servidor())
                 && de == server_endereco
         })
         .await;
@@ -1888,13 +1979,13 @@ mod testes {
             da_escuta,
             "a escuta de avisos não se registrou no quarto com a marca dela ({}) no primeiro \
              segundo: quem perguntar pela escuta não a acha, e o LEVE cai num endereço de ontem",
-            marcas.escuta
+            marcas.escuta()
         );
         assert!(
             do_servidor,
             "o socket do servidor não se registrou no quarto com a marca dele ({}) no primeiro \
              segundo: quem voltar pela trilha não acha para onde conectar",
-            marcas.servidor
+            marcas.servidor()
         );
     }
 
@@ -1909,12 +2000,7 @@ mod testes {
         // O ponto deste teste responde a tudo com um `AQUI` que aponta para
         // `alvo`, e não para quem perguntou. É o que deixa ver um furo que, com
         // um ponto de verdade, iria para a própria escuta sem deixar rastro.
-        let Ok(alvo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
-            panic!("não deu para abrir o alvo do furo de teste");
-        };
-        let Ok(alvo_endereco) = alvo.local_addr() else {
-            panic!("o alvo do furo de teste não tem endereço local");
-        };
+        let (alvo, alvo_endereco) = alvo_do_furo().await;
         let (ponto, caderno) = ponto_que_anota(Some(alvo_endereco)).await;
         let anfitriao = AnfitriaoDeTeste::abrir().await;
         let avisos_endereco = anfitriao.avisos_endereco;
@@ -1947,23 +2033,157 @@ mod testes {
     /// Um ponto de encontro de teste que responde como o de verdade, no laço
     /// local.
     async fn ponto_que_responde() -> SocketAddr {
+        ponto_que_responde_e_anota().await.0
+    }
+
+    /// O mesmo, anotando cada pedido e a origem dele no caderno.
+    ///
+    /// A diferença para [`ponto_que_anota`] é a resposta: esta é a de um ponto
+    /// de verdade (`responder_em`), e por isso `abrir` sobe contra ele. É o que
+    /// deixa ver os pedidos da subida, e não só os do tique.
+    async fn ponto_que_responde_e_anota() -> (SocketAddr, Caderno) {
         let Ok(servico) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
             panic!("o ponto de encontro de teste tem de abrir");
         };
         let Ok(onde) = servico.local_addr() else {
             panic!("o ponto de encontro de teste não tem endereço local");
         };
+        let caderno: Caderno = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotador = Arc::clone(&caderno);
         tokio::spawn(async move {
             let mut balde = [0_u8; encontro::TAMANHO];
             while let Ok((lidos, de)) = servico.recv_from(&mut balde).await {
-                if let Some(resposta) = balde.get(..lidos).and_then(|bytes| {
+                let Some(bytes) = balde.get(..lidos) else {
+                    continue;
+                };
+                if let Some(pedido) = encontro::analisar(bytes) {
+                    if let Ok(mut lista) = anotador.lock() {
+                        lista.push((pedido, de));
+                    }
+                }
+                if let Some(resposta) =
                     encontro::responder_em(bytes, de, encontro::Vizinhanca::TambemAqui)
-                }) {
+                {
                     let _ = servico.send_to(&resposta.datagrama, resposta.destino).await;
                 }
             }
         });
-        onde
+        (onde, caderno)
+    }
+
+    #[tokio::test]
+    async fn cada_pedido_da_subida_e_do_registro_sai_com_a_marca_dele() {
+        // O T2c, o T3c e o M3 da pendência 51, item 17. A marca de cada pedido
+        // é o que decide quem acha o quê no quarto, e o que vira furo:
+        //
+        // - o `ONDE` da subida sai da escuta de avisos, e o `LEVE` da subida e
+        //   o do tique saem do socket do servidor apontando para ela. As
+        //   respostas dos três voltam à escuta, com a marca deles, e só não
+        //   viram furo contra si mesmo porque a marca é a da escuta, e nunca a
+        //   do aviso (`atender` só fura com a do aviso);
+        // - o `MORO` da escuta registra a marca que quem chega pergunta pela
+        //   escuta, e o `MORO` do servidor, a que pergunta pelo servidor.
+        //
+        // O teste sobe `abrir` de verdade contra um ponto que responde e anota,
+        // espera o primeiro tique, e confere a marca de cada pedido pela
+        // origem e pelo verbo.
+        let (ponto, caderno) = ponto_que_responde_e_anota().await;
+        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do servidor de teste");
+        };
+        let Ok(server_endereco) = server.local_addr() else {
+            panic!("o socket do servidor de teste não tem endereço local");
+        };
+        let Some(convocacao) =
+            Convocacao::para_servidor(Arc::new(server), IMPRESSAO, ponto.to_string())
+        else {
+            panic!("a impressão digital de teste não forma convocação");
+        };
+        let marcas = marcas_da_impressao();
+        let aberto = match abrir(&convocacao).await {
+            Ok(aberto) => aberto,
+            Err(falha) => panic!("o ponto de teste responde, e o degrau 4 tinha de abrir: {falha}"),
+        };
+        // O ponto viu a escuta neste endereço, e é ele que foi para o bilhete.
+        let escuta = aberto.aviso;
+        let tique = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+            matches!(pedido, encontro::Pedido::Moro { .. }) && de == server_endereco
+        })
+        .await
+            && esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+                matches!(pedido, encontro::Pedido::Moro { .. }) && de == escuta
+            })
+            .await;
+        aberto.fechar();
+        assert!(
+            tique,
+            "o primeiro tique não registrou os dois sockets no quarto em um segundo, e este teste \
+             não tem o registro para conferir"
+        );
+
+        let Ok(pedidos) = caderno.lock().map(|lista| lista.clone()) else {
+            panic!("o caderno do ponto de teste trancou");
+        };
+        let mut vistos = [false; 4];
+        for (pedido, de) in &pedidos {
+            let (indice, o_que, marca, esperada, o_que_quebra) = match pedido {
+                encontro::Pedido::Onde { marca } if *de == escuta => (
+                    0,
+                    "o ONDE da subida (o da escuta)",
+                    marca,
+                    marcas.escuta(),
+                    "a resposta a ele volta à escuta, e uma repetida que chegue depois de \
+                     `atender` começar vira furo contra si mesmo se a marca for a do aviso",
+                ),
+                encontro::Pedido::Leve { destino, marca } if *de == server_endereco => {
+                    assert_eq!(
+                        *destino, escuta,
+                        "o LEVE do socket do servidor aponta para outro lugar que a escuta: o \
+                         ponto não tem como dizer a este anfitrião o endereço público do servidor"
+                    );
+                    (
+                        1,
+                        "o LEVE do socket do servidor (na subida e no tique)",
+                        marca,
+                        marcas.escuta(),
+                        "a resposta a ele chega à escuta com esta marca, e com a do aviso passa \
+                         no filtro de `atender` e vira furo do anfitrião contra o próprio servidor",
+                    )
+                }
+                encontro::Pedido::Moro { marca } if *de == escuta => (
+                    2,
+                    "o MORO da escuta",
+                    marca,
+                    marcas.escuta(),
+                    "quem procura a escuta pergunta pela marca dela, e não a acha no quarto",
+                ),
+                encontro::Pedido::Moro { marca } if *de == server_endereco => (
+                    3,
+                    "o MORO do socket do servidor",
+                    marca,
+                    marcas.servidor(),
+                    "quem volta pela trilha pergunta pela marca do servidor, e não acha para onde \
+                     conectar",
+                ),
+                outro => panic!(
+                    "um pedido que a subida e o registro não mandam chegou ao ponto: {outro:?}, de \
+                     {de}. Pedidos: {pedidos:?}"
+                ),
+            };
+            if let Some(visto) = vistos.get_mut(indice) {
+                *visto = true;
+            }
+            assert_eq!(
+                marca, esperada,
+                "{o_que} saiu com a marca {marca}, e não com {esperada}: {o_que_quebra}"
+            );
+        }
+        assert_eq!(
+            vistos, [true; 4],
+            "faltou ao ponto um dos pedidos da subida e do registro (o ONDE da escuta, o LEVE do \
+             servidor, o MORO da escuta, o MORO do servidor, nesta ordem), e a marca dele não foi \
+             conferida. Pedidos: {pedidos:?}"
+        );
     }
 
     #[tokio::test]
@@ -2139,6 +2359,155 @@ mod testes {
             "o registro voltou a sair, e o log não disse isso exatamente uma vez: quem lê não \
              sabe quando o anfitrião voltou ao quarto. Rastro: {}",
             rastro.texto()
+        );
+    }
+
+    /// Uma falha de envio como o sistema a devolve, com o motivo que o log
+    /// escreveria.
+    fn falha(tipo: std::io::ErrorKind) -> NaoSaiu {
+        let erro = std::io::Error::from(tipo);
+        NaoSaiu::do_envio(&erro, format!("não saiu de teste: {erro}"))
+    }
+
+    #[test]
+    fn uma_fila_cheia_num_tique_nao_vira_linha_no_log() {
+        // O C4 do item 19 da pendência 51. O socket do servidor é
+        // não-bloqueante, e um `WouldBlock` nele é a fila de saída cheia por um
+        // instante: o tique seguinte manda de novo. Ele virava um par de linhas
+        // `info` no seele.log, «deixou de sair» e «voltou a sair», e quem lê o
+        // log via um anfitrião sumindo do quarto que nunca sumiu.
+        let (rastro, _guarda) = Rastro::de_info();
+        let ponto = SocketAddr::from(([203, 0, 113, 7], PORTA_PADRAO));
+        let mut registro = RegistroNoQuarto::default();
+        assert!(
+            falha(std::io::ErrorKind::WouldBlock).passageira,
+            "um `WouldBlock` não foi lido como passageiro: a fila de saída cheia volta a virar \
+             «deixou de sair» no seele.log"
+        );
+
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::WouldBlock)));
+        registro.anotar(ponto, Ok(()));
+        assert_eq!(
+            (
+                rastro.linhas_com("deixou de sair"),
+                rastro.linhas_com("voltou a sair")
+            ),
+            (0, 0),
+            "a fila de saída cheia num tique, seguida de um tique bom, deixou linhas no log \
+             (`info`, o nível que o seele.log grava): quem lê vê o anfitrião sumir do quarto e \
+             voltar, e ele nunca sumiu. Rastro: {}",
+            rastro.texto()
+        );
+
+        // E a falha de verdade continua dita, mesmo depois de uma passageira.
+        assert!(
+            !falha(std::io::ErrorKind::NetworkUnreachable).passageira,
+            "uma rede inalcançável foi lida como passageira: o anfitrião some do quarto calado"
+        );
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::WouldBlock)));
+        registro.anotar(ponto, Err(falha(std::io::ErrorKind::NetworkUnreachable)));
+        assert_eq!(
+            rastro.linhas_com("deixou de sair"),
+            1,
+            "o registro deixou de sair de verdade, depois de uma fila cheia, e o log não disse \
+             isso uma vez. Rastro: {}",
+            rastro.texto()
+        );
+    }
+
+    #[test]
+    fn uma_fila_cheia_num_socket_nao_esconde_a_recusa_do_outro() {
+        // Os três envios de um tique saem por dois sockets, e um que falha não
+        // diz nada sobre o outro. Com a primeira falha valendo, uma fila cheia
+        // no `LEVE` escondia a recusa do `MORO` do servidor naquele tique.
+        let recusa = falha(std::io::ErrorKind::NetworkUnreachable);
+        assert_eq!(
+            a_falha_que_conta([
+                Ok(()),
+                Err(falha(std::io::ErrorKind::WouldBlock)),
+                Err(recusa.clone()),
+            ]),
+            Err(recusa),
+            "a fila cheia de um envio escondeu a recusa de outro no mesmo tique: o registro \
+             deixou de sair e o log não diz"
+        );
+        assert_eq!(
+            a_falha_que_conta([Ok(()), Ok(()), Ok(())]),
+            Ok(()),
+            "um tique em que os três saíram virou falha"
+        );
+        let passageira = falha(std::io::ErrorKind::WouldBlock);
+        assert_eq!(
+            a_falha_que_conta([Err(passageira.clone()), Ok(()), Ok(())]),
+            Err(passageira),
+            "um tique só com a fila cheia deixou de voltar como falha passageira"
+        );
+    }
+
+    /// O corpo de uma função deste módulo, sem as linhas de comentário: da
+    /// `assinatura`, escrita no começo de uma linha, até a primeira chave que
+    /// fecha na coluna zero.
+    ///
+    /// **Ancorada no começo da linha, e gritando quando não acha.** A primeira
+    /// versão procurava a assinatura em qualquer lugar do arquivo, e ela também
+    /// está no texto deste módulo de testes: com a função renomeada, o resto
+    /// do arquivo depois do literal do teste virava o «corpo», e o guarda
+    /// passava pelo próprio texto (medido na re-revisão do lote M1, com
+    /// `mandar_pelo_server` renomeada e o `NaoSaiu` montado à mão). Aqui a
+    /// assinatura vem com a quebra de linha real na frente, que nenhum literal
+    /// deste arquivo tem, e um alvo que sumiu reprova dizendo isso.
+    fn corpo_de(assinatura: &str) -> String {
+        let ancorada = format!("\n{assinatura}");
+        let fonte = include_str!("encontro.rs");
+        let Some((_, resto)) = fonte.split_once(&ancorada) else {
+            panic!(
+                "não achei «{assinatura}» no começo de uma linha deste módulo: a função mudou de \
+                 nome ou de forma, e o guarda não tem o que conferir. Mude o guarda junto com ela"
+            );
+        };
+        let Some((corpo, _)) = resto.split_once("\n}\n") else {
+            panic!("«{assinatura}» não fecha na coluna zero: o guarda não acha o fim do corpo");
+        };
+        let corpo: String = corpo
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !corpo.trim().is_empty() && !corpo.contains("fn corpo_de("),
+            "o corpo de «{assinatura}» veio vazio, ou engoliu este módulo de testes: o guarda \
+             passaria sem conferir nada. Ele precisa não ser vazio, e parar no fim da função:\n\
+             {corpo}"
+        );
+        corpo
+    }
+
+    #[test]
+    fn os_envios_do_tique_passam_pela_classificacao_e_pela_escolha() {
+        // A fiação do C4, guardada pelo texto-fonte. `NaoSaiu::do_envio` e
+        // `a_falha_que_conta` têm testes próprios logo acima, e um par correto
+        // que os envios não chamassem deixaria esses testes verdes e a fila
+        // cheia voltando a virar duas linhas `info`. Um `WouldBlock` de verdade
+        // num socket UDP não tem receita conhecida que valha nos três sistemas,
+        // então a prova é a forma: sem os comentários, porque um guarda que
+        // casasse com a prosa que explica o conserto passaria sem ele.
+        let mandar = corpo_de("fn mandar_pelo_server(");
+        assert!(
+            mandar.contains("NaoSaiu::do_envio("),
+            "`mandar_pelo_server` deixou de montar a falha do `send_to` por \
+             `NaoSaiu::do_envio`: um `WouldBlock` no socket do servidor deixa de ser passageiro, e \
+             a fila cheia num tique volta a virar «deixou de sair» no seele.log:\n{mandar}"
+        );
+        let registrar = corpo_de("async fn registrar(");
+        assert!(
+            registrar.contains("NaoSaiu::do_envio("),
+            "`registrar` deixou de montar a falha do MORO da escuta por `NaoSaiu::do_envio`: um \
+             `WouldBlock` na escuta deixa de ser passageiro:\n{registrar}"
+        );
+        assert!(
+            registrar.contains("a_falha_que_conta(["),
+            "`registrar` deixou de escolher a falha do tique por `a_falha_que_conta`: uma fila \
+             cheia num socket volta a esconder a recusa do outro:\n{registrar}"
         );
     }
 

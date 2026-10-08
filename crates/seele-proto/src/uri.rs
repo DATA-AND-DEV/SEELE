@@ -60,6 +60,20 @@
 //! ocupar esse lugar. Quem usa senha digita a senha.
 //!
 //! **O apelido.** É de quem recebe, não de quem convida.
+//!
+//! # As duas formas da 0.16
+//!
+//! **O link da sala pessoal**, `seele://@XXXX-XXXX-XXXX-XXXX`: o código de
+//! quem se liga, e nada mais ([`link_da_sala`], [`codigo_do_link`]). Não é um
+//! convite, e [`analisar`] o recusa.
+//!
+//! **O link do navegador**, `https://<origem>/<caminho>#<corpo do seele://>`,
+//! com `wh=` (os hashes dos certificados curtos) e `ate=` (até quando eles
+//! valem) — ADR 0057, emenda ao 0006. O fragmento é o corpo do `seele://` sem o
+//! esquema, para haver um analisador só. A página o lê com
+//! [`analisar_no_navegador`], com as regras dela; o desktop o lê com
+//! [`analisar`], ignorando o `wh=` e o `ate=`. A origem é
+//! [`ORIGEM_DO_NAVEGADOR`], vazia até o D-web-2.
 
 use std::fmt;
 
@@ -77,6 +91,24 @@ pub const PORTA_PADRAO: u16 = crate::transport::DEFAULT_PORT;
 /// mesma razão que um parâmetro desconhecido é: recusar link novo é o que faz
 /// cliente velho virar parede.
 pub const LIMITE_DE_ALVOS: usize = 4;
+
+/// O começo do link da sala pessoal: `seele://@CÓDIGO` (spec de 23/09/2026,
+/// «Como um texto colado é classificado»). Ver [`link_da_sala`] e
+/// [`codigo_do_link`].
+pub const ESQUEMA_DA_SALA: &str = "seele://@";
+
+/// A origem do web app, para a forma `https://<origem>/<caminho>#<corpo>` do
+/// link (ADR 0057, emenda ao 0006).
+///
+/// **Vazia até o D-web-2**, que é do dono: a origem não tem volta, porque as
+/// identidades do celular moram nela. Vazia, nenhum texto `https` é convite, e
+/// o desktop lê só o `seele://`, como antes.
+pub const ORIGEM_DO_NAVEGADOR: &str = "";
+
+/// Quantos hashes de certificado curto um link do navegador leva: as janelas
+/// vigentes e a próxima, no momento em que o convite foi feito. Os além disso
+/// são ignorados, como os endereços além de [`LIMITE_DE_ALVOS`].
+pub const LIMITE_DE_HASHES_DO_NAVEGADOR: usize = 4;
 
 /// Um convite para entrar num servidor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -268,10 +300,13 @@ impl Bilhete {
     /// # Errors
     ///
     /// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`
-    /// como qualquer outro endereço do convite.
+    /// como qualquer outro endereço do convite. O ponto passa pela regra de
+    /// [`separar_ponto`], a mesma de [`Bilhete::ponto`], e por isso o ponto
+    /// vazio é recusado aqui, como [`Bilhete::ler`] já o recusava: um bilhete
+    /// que este construtor aceita sempre separa o ponto.
     pub fn novo(ponto: impl Into<String>, aviso: impl Into<String>) -> Result<Self, ErroDeUri> {
         let (ponto, aviso) = (ponto.into(), aviso.into());
-        validar_alvo(&ponto)?;
+        separar_ponto(&ponto)?;
         validar_alvo(&aviso)?;
         Ok(Self { ponto, aviso })
     }
@@ -440,7 +475,33 @@ impl fmt::Display for Convite {
 /// [`ErroDeUri`] dizendo o que está errado. Aqui a mensagem específica ajuda e
 /// não vaza nada: quem colou o link é quem vai corrigi-lo.
 pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
+    analisar_com_origem(texto, ORIGEM_DO_NAVEGADOR)
+}
+
+/// [`analisar`], com a origem do navegador dada: é o que deixa os testes
+/// exercitarem a forma `https` antes de o D-web-2 escolher a origem.
+///
+/// **O desktop lê o link do navegador** com o `fp`, ignorando o `wh=` e o
+/// `ate=` (pedido da F4, item 19): eles servem à página, e o nativo confere o
+/// certificado pelo TLS. Na forma `https` o `fp` é obrigatório também aqui, e o
+/// bilhete do encontro não vale, porque ele não é escrito nessa forma.
+fn analisar_com_origem(texto: &str, origem: &str) -> Result<Convite, ErroDeUri> {
     let texto = texto.trim();
+    if texto.starts_with("https://") {
+        let fragmento =
+            fragmento_do_navegador(texto, origem).map_err(|_| ErroDeUri::EsquemaDesconhecido)?;
+        let mut convite = analisar_seele(&format!("{ESQUEMA}{fragmento}"))?;
+        convite.bilhete = None;
+        if convite.impressao_digital.is_none() {
+            return Err(ErroDeUri::ImpressaoDigitalInvalida);
+        }
+        return Ok(convite);
+    }
+    analisar_seele(texto)
+}
+
+/// A leitura do `seele://`, que as duas formas dividem.
+fn analisar_seele(texto: &str) -> Result<Convite, ErroDeUri> {
     let resto = texto
         .strip_prefix(ESQUEMA)
         .ok_or(ErroDeUri::EsquemaDesconhecido)?;
@@ -501,16 +562,15 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
             // dele — e um valor que não passa é **ignorado**, e não recusado:
             // recusar o link inteiro por causa de um campo novo malformado
             // trancaria a pessoa fora de um servidor que ela alcança.
-            "v" => {
-                let serve = !valor.is_empty()
-                    && valor.len() <= 64
-                    && valor
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+');
-                if serve {
-                    convite.versao = Some(valor.to_owned());
-                }
-            }
+            //
+            // **Desde a 0.16, é a versão do servidor** («1.0»), e não a do app
+            // (spec-mestre, §3, item 22). Um link antigo, com a versão do app
+            // («0.15.1»), continua lido: quem decide o que ela quer dizer é o
+            // launcher. E a forma ficou mais estreita: só números separados por
+            // ponto, dois ou três, para que nada aqui vire caminho — o filtro
+            // de antes deixava passar `..` (pedido da F4, regra 5).
+            // Um valor que não serve cai no braço de baixo, e é ignorado.
+            "v" if versao_serve(valor) => convite.versao = Some(valor.to_owned()),
             // Parâmetro desconhecido é ignorado, e de propósito: é o que
             // permite acrescentar um campo depois sem que clientes velhos
             // recusem links novos.
@@ -519,6 +579,218 @@ pub fn analisar(texto: &str) -> Result<Convite, ErroDeUri> {
     }
 
     Ok(convite)
+}
+
+/// Se `valor` serve de versão num link: dois ou três números separados por
+/// ponto, cada um com até quatro dígitos.
+fn versao_serve(valor: &str) -> bool {
+    let partes: Vec<&str> = valor.split('.').collect();
+    (2..=3).contains(&partes.len())
+        && partes.iter().all(|parte| {
+            !parte.is_empty() && parte.len() <= 4 && parte.chars().all(|c| c.is_ascii_digit())
+        })
+}
+
+/// O link da sala pessoal de quem tem `codigo`: `seele://@XXXX-XXXX-XXXX-XXXX`.
+#[must_use]
+pub fn link_da_sala(codigo: &crate::codigo::Codigo) -> String {
+    format!("{ESQUEMA_DA_SALA}{codigo}")
+}
+
+/// O código de um link da sala, se `texto` é um.
+///
+/// `None` quando o texto não começa com [`ESQUEMA_DA_SALA`]: aí ele é outra
+/// coisa (um convite, um endereço), e quem classifica é quem chamou. `Some`
+/// com o erro do código quando ele começa como link da sala e o código não
+/// fecha — inclusive o «erro de digitação» do verificador, que é dito sem
+/// consultar a rede.
+#[must_use]
+pub fn codigo_do_link(
+    texto: &str,
+) -> Option<Result<crate::codigo::Codigo, crate::codigo::CodigoInvalido>> {
+    let resto = texto.trim().strip_prefix(ESQUEMA_DA_SALA)?;
+    let codigo = resto.split(['/', '?']).next().unwrap_or_default();
+    Some(crate::codigo::Codigo::ler(codigo))
+}
+
+/// Um convite lido da forma do navegador, com o que só a página usa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConviteDoNavegador {
+    /// O convite, como o `seele://` o daria. Sem bilhete do encontro: ele não
+    /// serve ao navegador.
+    pub convite: Convite,
+    /// Os hashes dos certificados curtos (`wh=`), em hexadecimal minúsculo,
+    /// até [`LIMITE_DE_HASHES_DO_NAVEGADOR`].
+    pub hashes: Vec<String>,
+    /// Até quando o mais tardio dos hashes vale (`ate=`), em segundos Unix
+    /// UTC. É o que deixa a página dizer «este link venceu» em vez de uma
+    /// recusa muda.
+    pub ate: Option<u64>,
+}
+
+/// Por que um texto não é um link do navegador.
+///
+/// Só a página o lê: é o vocabulário dela, e o desktop continua com
+/// [`ErroDeUri`]. [`Self::SemHashesDoNavegador`] é o link de um Servidor 0.15,
+/// ou de um desktop, e tem erro próprio para a página dizer isso sem discar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ErroDoNavegador {
+    /// Não é `https://` da origem configurada, ou não há origem configurada.
+    OutraOrigem,
+    /// Há uma consulta (`?`) antes do `#`. O convite nunca vai na consulta,
+    /// que viaja até o servidor da página.
+    ConsultaForaDoFragmento,
+    /// Não há fragmento: o link não leva servidor nenhum.
+    SemFragmento,
+    /// O fragmento não é o corpo de um convite.
+    Convite(ErroDeUri),
+    /// Falta o `fp=`, que na forma do navegador é obrigatório.
+    SemImpressaoDigital,
+    /// Falta o `wh=`.
+    SemHashesDoNavegador,
+    /// Um hash do `wh=` não é hexadecimal de 64 caracteres. Recusado, e não
+    /// ignorado: um hash truncado é um link adulterado ou cortado.
+    HashDoNavegadorInvalido,
+    /// O `ate=` não é um número.
+    ValidadeInvalida,
+}
+
+impl fmt::Display for ErroDoNavegador {
+    fn fmt(&self, formatador: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatador, "{self:?}")
+    }
+}
+
+impl std::error::Error for ErroDoNavegador {}
+
+/// O fragmento de um link `https://<origem>/<caminho>#<fragmento>`.
+fn fragmento_do_navegador<'a>(texto: &'a str, origem: &str) -> Result<&'a str, ErroDoNavegador> {
+    if origem.is_empty() {
+        return Err(ErroDoNavegador::OutraOrigem);
+    }
+    let resto = texto
+        .trim()
+        .strip_prefix("https://")
+        .and_then(|resto| resto.strip_prefix(origem))
+        .ok_or(ErroDoNavegador::OutraOrigem)?;
+    let (caminho, fragmento) = resto.split_once('#').ok_or(ErroDoNavegador::SemFragmento)?;
+    // Depois da origem vem o caminho, ou nada. Sem esta conferência,
+    // `https://origem.invalid.outra.exemplo/` passaria pela origem.
+    if !(caminho.is_empty() || caminho.starts_with('/')) {
+        return Err(ErroDoNavegador::OutraOrigem);
+    }
+    if caminho.contains('?') {
+        return Err(ErroDoNavegador::ConsultaForaDoFragmento);
+    }
+    if fragmento.is_empty() {
+        return Err(ErroDoNavegador::SemFragmento);
+    }
+    Ok(fragmento)
+}
+
+/// Lê um link da forma do navegador, com as regras dela (ADR 0057, emenda ao
+/// 0006; pedido da F4, item 19).
+///
+/// # Errors
+///
+/// [`ErroDoNavegador`], que diz qual regra o texto quebrou.
+pub fn analisar_no_navegador(
+    texto: &str,
+    origem: &str,
+) -> Result<ConviteDoNavegador, ErroDoNavegador> {
+    let fragmento = fragmento_do_navegador(texto, origem)?;
+    let mut convite =
+        analisar_seele(&format!("{ESQUEMA}{fragmento}")).map_err(ErroDoNavegador::Convite)?;
+    convite.bilhete = None;
+    if convite.impressao_digital.is_none() {
+        return Err(ErroDoNavegador::SemImpressaoDigital);
+    }
+
+    let consulta = fragmento
+        .split_once('?')
+        .map_or("", |(_, consulta)| consulta);
+    let mut hashes = Vec::new();
+    let mut ate = None;
+    for parte in consulta.split('&').filter(|parte| !parte.is_empty()) {
+        let (chave, valor) = parte.split_once('=').unwrap_or((parte, ""));
+        match chave {
+            "wh" => {
+                for hash in valor.split(',').filter(|hash| !hash.is_empty()) {
+                    validar_impressao_digital(hash)
+                        .map_err(|_| ErroDoNavegador::HashDoNavegadorInvalido)?;
+                    let hash = hash.to_ascii_lowercase();
+                    if hashes.len() < LIMITE_DE_HASHES_DO_NAVEGADOR && !hashes.contains(&hash) {
+                        hashes.push(hash);
+                    }
+                }
+            }
+            "ate" => {
+                ate = Some(
+                    valor
+                        .parse()
+                        .map_err(|_| ErroDoNavegador::ValidadeInvalida)?,
+                );
+            }
+            _ => {}
+        }
+    }
+    if hashes.is_empty() {
+        return Err(ErroDoNavegador::SemHashesDoNavegador);
+    }
+    Ok(ConviteDoNavegador {
+        convite,
+        hashes,
+        ate,
+    })
+}
+
+impl Convite {
+    /// Este convite na forma do navegador:
+    /// `https://<origem><caminho>#<corpo do seele://>&wh=…&ate=…`.
+    ///
+    /// Sem o bilhete do encontro, que não serve ao navegador. O `wh=` vai no
+    /// fim, depois do `fp=`: um link cortado na colagem perde o fim, e perder
+    /// o `wh=` é recusado em voz alta ([`ErroDoNavegador::SemHashesDoNavegador`]).
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDoNavegador::SemImpressaoDigital`] sem `fp`,
+    /// [`ErroDoNavegador::SemHashesDoNavegador`] sem hash, e
+    /// [`ErroDoNavegador::HashDoNavegadorInvalido`] com um hash torto.
+    pub fn no_navegador(
+        &self,
+        origem: &str,
+        caminho: &str,
+        hashes: &[String],
+        ate: Option<u64>,
+    ) -> Result<String, ErroDoNavegador> {
+        if self.impressao_digital.is_none() {
+            return Err(ErroDoNavegador::SemImpressaoDigital);
+        }
+        if hashes.is_empty() {
+            return Err(ErroDoNavegador::SemHashesDoNavegador);
+        }
+        for hash in hashes {
+            validar_impressao_digital(hash)
+                .map_err(|_| ErroDoNavegador::HashDoNavegadorInvalido)?;
+        }
+        let sem_bilhete = Self {
+            bilhete: None,
+            ..self.clone()
+        };
+        let corpo = sem_bilhete.to_string();
+        let corpo = corpo.strip_prefix(ESQUEMA).unwrap_or(&corpo);
+        let caminho = if caminho.is_empty() || caminho.starts_with('/') {
+            caminho.to_owned()
+        } else {
+            format!("/{caminho}")
+        };
+        let mut texto = format!("https://{origem}{caminho}#{corpo}&wh={}", hashes.join(","));
+        if let Some(ate) = ate {
+            texto.push_str(&format!("&ate={ate}"));
+        }
+        Ok(texto)
+    }
 }
 
 /// Um alvo já separado em máquina e porta.
@@ -565,8 +837,14 @@ pub fn separar(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
 ///
 /// # Errors
 ///
-/// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`.
+/// O mesmo [`ErroDeUri`] de um alvo torto: este texto acaba num `send_to`. E
+/// [`ErroDeUri::EnderecoInvalido`] para o texto vazio, que `validar_alvo` deixa
+/// passar: sem isto ele ia ao DNS como um nome, e a consulta ao quarto dizia
+/// que o ponto «não resolveu», culpando o DNS por um link sem ponto.
 pub fn separar_ponto(alvo: &str) -> Result<Alvo<'_>, ErroDeUri> {
+    if alvo.is_empty() {
+        return Err(ErroDeUri::EnderecoInvalido);
+    }
     validar_alvo(alvo)?;
     separar_com(alvo, crate::encontro::PORTA_PADRAO)
 }
@@ -952,6 +1230,37 @@ mod tests {
             bilhete.ponto(),
             separar_ponto("encontro.seele.app.br"),
             "o bilhete e o texto solto separam o mesmo ponto de maneiras diferentes"
+        );
+    }
+
+    #[test]
+    fn um_ponto_vazio_nao_e_um_ponto_de_encontro() {
+        // O T5d da pendência 51, item 17. O texto vazio passava por
+        // `validar_alvo` e virava `Alvo { maquina: "", porta: 8384 }`, que ia
+        // ao DNS. Medido neste Mac em 08/10/2026, o `getaddrinfo` do Rust
+        // recusa o nome vazio («nodename nor servname provided»), e a consulta
+        // ao quarto dizia no log que o ponto «não resolveu»: um link sem ponto
+        // aparecia como DNS com defeito. Recusado aqui, ele é dito como o que
+        // é, um texto que não é endereço.
+        assert_eq!(
+            separar_ponto(""),
+            Err(ErroDeUri::EnderecoInvalido),
+            "um ponto vazio virou ponto de encontro: ele vai ao DNS, e o log culpa o DNS por um \
+             link sem ponto"
+        );
+        // E o bilhete recusa junto, como `Bilhete::ler` já recusava. Sem isto,
+        // `Bilhete::novo("", …)` dava `Ok`, e o doc de `Bilhete::ponto` («não
+        // falha para um bilhete que veio de `Bilhete::novo`») passava a mentir.
+        assert_eq!(
+            Bilhete::novo("", "198.51.100.7:41234"),
+            Err(ErroDeUri::EnderecoInvalido),
+            "um bilhete de ponto vazio foi montado: `Bilhete::ponto` falha para um bilhete que \
+             veio de `Bilhete::novo`, contra o doc dele"
+        );
+        assert_eq!(
+            Bilhete::ler("/198.51.100.7:41234"),
+            Err(ErroDeUri::BilheteInvalido),
+            "o bilhete do link de ponto vazio deixou de ser recusado"
         );
     }
 
@@ -1484,6 +1793,278 @@ mod a_versao_no_link {
                 "«{veneno}» passou como versão e vira nome de pasta"
             );
             assert_eq!(lido.alvo, "casa.exemplo:8383", "o alvo se perdeu junto");
+        }
+    }
+}
+
+#[cfg(test)]
+mod a_forma_do_navegador {
+    //! O link `https://<origem>/<caminho>#<corpo do seele://>` do web app
+    //! (ADR 0057, emenda ao 0006; pedido da F4, item 19). Os casos vêm da
+    //! Tarefa 2.3 da F4, com a forma do fragmento que a F1 escolheu: o corpo
+    //! do `seele://`, sem o esquema.
+    use super::*;
+
+    const ORIGEM: &str = "origem.invalid";
+
+    fn fp() -> String {
+        "3cbcfb02".repeat(8)
+    }
+
+    fn wh() -> String {
+        "ab".repeat(32)
+    }
+
+    fn link(fragmento: &str) -> String {
+        format!("https://{ORIGEM}/e#{fragmento}")
+    }
+
+    #[test]
+    fn na_forma_https_o_fp_e_os_hashes_sao_obrigatorios() {
+        let lido = analisar_no_navegador(
+            &link(&format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh())),
+            ORIGEM,
+        )
+        .unwrap();
+        assert_eq!(lido.convite.alvo, "198.51.100.7:8383");
+        assert_eq!(lido.convite.impressao_digital, Some(fp()));
+        assert_eq!(lido.hashes, vec![wh()]);
+
+        assert_eq!(
+            analisar_no_navegador(&link(&format!("198.51.100.7:8383/?wh={}", wh())), ORIGEM),
+            Err(ErroDoNavegador::SemImpressaoDigital)
+        );
+        assert_eq!(
+            analisar_no_navegador(&link(&format!("198.51.100.7:8383/?fp={}", fp())), ORIGEM),
+            Err(ErroDoNavegador::SemHashesDoNavegador),
+            "um link sem wh= é de Servidor 0.15, ou de um desktop, e tem erro próprio"
+        );
+    }
+
+    #[test]
+    fn um_hash_truncado_ou_torto_e_recusado_e_nao_ignorado() {
+        for ruim in [
+            "ab".repeat(31),
+            "zz".repeat(32),
+            format!("{},{}", wh(), "ab".repeat(31)),
+        ] {
+            assert_eq!(
+                analisar_no_navegador(
+                    &link(&format!("198.51.100.7:8383/?fp={}&wh={ruim}", fp())),
+                    ORIGEM
+                ),
+                Err(ErroDoNavegador::HashDoNavegadorInvalido),
+                "{ruim}"
+            );
+        }
+    }
+
+    #[test]
+    fn o_convite_em_query_string_e_recusado() {
+        let texto = format!(
+            "https://{ORIGEM}/e?convite=7K4M#198.51.100.7:8383/?fp={}&wh={}",
+            fp(),
+            wh()
+        );
+        assert_eq!(
+            analisar_no_navegador(&texto, ORIGEM),
+            Err(ErroDoNavegador::ConsultaForaDoFragmento)
+        );
+    }
+
+    #[test]
+    fn so_a_origem_configurada_e_do_navegador() {
+        let texto = format!(
+            "https://outra.invalid/e#198.51.100.7:8383/?fp={}&wh={}",
+            fp(),
+            wh()
+        );
+        assert_eq!(
+            analisar_no_navegador(&texto, ORIGEM),
+            Err(ErroDoNavegador::OutraOrigem)
+        );
+        assert_eq!(
+            analisar_no_navegador(
+                &link(&format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh())),
+                ""
+            ),
+            Err(ErroDoNavegador::OutraOrigem),
+            "sem origem configurada (até o D-web-2), nenhum link é do navegador"
+        );
+        assert_eq!(
+            analisar_no_navegador(&format!("https://{ORIGEM}/e"), ORIGEM),
+            Err(ErroDoNavegador::SemFragmento)
+        );
+        let parecida = format!(
+            "https://{ORIGEM}.outra.exemplo/e#198.51.100.7:8383/?fp={}&wh={}",
+            fp(),
+            wh()
+        );
+        assert_eq!(
+            analisar_no_navegador(&parecida, ORIGEM),
+            Err(ErroDoNavegador::OutraOrigem),
+            "uma origem que só começa com o nome da configurada não é ela"
+        );
+    }
+
+    #[test]
+    fn o_bilhete_do_encontro_nao_serve_ao_navegador() {
+        let texto = link(&format!(
+            "198.51.100.7:8383/?enc=encontro.exemplo:8384/198.51.100.7:41234&fp={}&wh={}",
+            fp(),
+            wh()
+        ));
+        assert_eq!(
+            analisar_no_navegador(&texto, ORIGEM)
+                .unwrap()
+                .convite
+                .bilhete,
+            None
+        );
+    }
+
+    #[test]
+    fn a_validade_e_lida_e_uma_torta_e_recusada() {
+        let base = format!("198.51.100.7:8383/?fp={}&wh={}", fp(), wh());
+        assert_eq!(
+            analisar_no_navegador(&link(&format!("{base}&ate=1792540800")), ORIGEM)
+                .unwrap()
+                .ate,
+            Some(1_792_540_800)
+        );
+        assert_eq!(
+            analisar_no_navegador(&link(&format!("{base}&ate=amanha")), ORIGEM),
+            Err(ErroDoNavegador::ValidadeInvalida)
+        );
+    }
+
+    #[test]
+    fn os_hashes_alem_do_limite_sao_ignorados() {
+        let cinco: Vec<String> = (0..5_u8).map(|n| format!("{n:02x}").repeat(32)).collect();
+        let lido = analisar_no_navegador(
+            &link(&format!(
+                "198.51.100.7:8383/?fp={}&wh={}",
+                fp(),
+                cinco.join(",")
+            )),
+            ORIGEM,
+        )
+        .unwrap();
+        assert_eq!(lido.hashes, cinco[..LIMITE_DE_HASHES_DO_NAVEGADOR].to_vec());
+    }
+
+    #[test]
+    fn o_link_do_navegador_vai_e_volta() {
+        let convite = Convite::novo("198.51.100.7:8383")
+            .com_impressao_digital(fp())
+            .com_token("7K4MNPQRSTVWXYZ23456")
+            .com_versao("1.0");
+        let texto = convite
+            .no_navegador(ORIGEM, "/e", &[wh()], Some(1_792_540_800))
+            .unwrap();
+        assert!(
+            texto.starts_with("https://origem.invalid/e#198.51.100.7:8383"),
+            "{texto}"
+        );
+        assert!(
+            !texto.contains('?') || texto.find('?') > texto.find('#'),
+            "{texto}"
+        );
+        let lido = analisar_no_navegador(&texto, ORIGEM).unwrap();
+        assert_eq!(lido.convite, convite);
+        assert_eq!(lido.hashes, vec![wh()]);
+        assert_eq!(lido.ate, Some(1_792_540_800));
+    }
+
+    #[test]
+    fn um_link_do_navegador_sem_fp_ou_sem_hash_nao_e_montado() {
+        let sem_fp = Convite::novo("198.51.100.7:8383");
+        assert_eq!(
+            sem_fp.no_navegador(ORIGEM, "/e", &[wh()], None),
+            Err(ErroDoNavegador::SemImpressaoDigital)
+        );
+        let com_fp = sem_fp.com_impressao_digital(fp());
+        assert_eq!(
+            com_fp.no_navegador(ORIGEM, "/e", &[], None),
+            Err(ErroDoNavegador::SemHashesDoNavegador)
+        );
+    }
+
+    /// **O desktop também abre o link do navegador**, com o `fp`, ignorando o
+    /// `wh=` e o `ate=` (pedido da F4). Pela origem configurada; com ela vazia,
+    /// um link `https` continua não sendo um convite.
+    #[test]
+    fn o_desktop_le_o_link_do_navegador_ignorando_os_hashes() {
+        let texto = link(&format!("198.51.100.7:8383/?fp={}&wh={}&ate=1", fp(), wh()));
+        let lido = analisar_com_origem(&texto, ORIGEM).unwrap();
+        assert_eq!(lido.alvo, "198.51.100.7:8383");
+        assert_eq!(lido.impressao_digital, Some(fp()));
+        assert_eq!(
+            analisar_com_origem(&link("198.51.100.7:8383/"), ORIGEM),
+            Err(ErroDeUri::ImpressaoDigitalInvalida),
+            "na forma https o fp é obrigatório também para o desktop"
+        );
+        assert_eq!(analisar(&texto), Err(ErroDeUri::EsquemaDesconhecido));
+    }
+}
+
+#[cfg(test)]
+mod o_link_da_sala {
+    //! `seele://@CÓDIGO`: o link de quem liga pelo código (spec de 23/09,
+    //! «Como um texto colado é classificado»).
+    use super::*;
+    use crate::codigo::{Codigo, CodigoInvalido};
+
+    #[test]
+    fn o_link_da_sala_vai_e_volta() {
+        let codigo = Codigo::da_chave(&[0; 32]);
+        let texto = link_da_sala(&codigo);
+        assert_eq!(texto, "seele://@CSM7-NBFR-CAYQ-EV4Y");
+        assert_eq!(codigo_do_link(&texto), Some(Ok(codigo)));
+        assert_eq!(
+            codigo_do_link("seele://@csm7nbfrcayqev4y/"),
+            Some(Ok(codigo))
+        );
+    }
+
+    #[test]
+    fn um_codigo_digitado_errado_e_dito_e_um_endereco_nao_e_codigo() {
+        assert_eq!(
+            codigo_do_link("seele://@CSM7-NBFR-CAYQ-EV4Z"),
+            Some(Err(CodigoInvalido::Verificador))
+        );
+        assert_eq!(codigo_do_link("seele://casa.exemplo:8383/"), None);
+        assert_eq!(codigo_do_link("CSM7-NBFR-CAYQ-EV4Y"), None);
+    }
+
+    #[test]
+    fn o_link_da_sala_nao_e_um_convite() {
+        assert!(analisar("seele://@CSM7-NBFR-CAYQ-EV4Y").is_err());
+    }
+}
+
+#[cfg(test)]
+mod a_versao_do_servidor_no_link {
+    //! O `v=` passa a ser a versão do **servidor** (spec-mestre §3, item 22),
+    //! e nunca vira caminho: só números separados por ponto (pedido da F4,
+    //! regra 5). Um valor que não serve é ignorado, como antes.
+    use super::*;
+
+    fn versao_de(valor: &str) -> Option<String> {
+        analisar(&format!(
+            "seele://casa.exemplo:8383/?fp={}&v={valor}",
+            "a".repeat(64)
+        ))
+        .unwrap()
+        .versao
+    }
+
+    #[test]
+    fn so_numeros_separados_por_ponto_passam() {
+        assert_eq!(versao_de("1.0"), Some("1.0".to_owned()));
+        assert_eq!(versao_de("0.15.1"), Some("0.15.1".to_owned()));
+        for veneno in ["..", "1..0", ".1", "1.", "1.0-rc", "a.b", "1.2.3.4", "1"] {
+            assert_eq!(versao_de(veneno), None, "«{veneno}» passou");
         }
     }
 }

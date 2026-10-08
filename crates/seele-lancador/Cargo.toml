@@ -32,6 +32,15 @@ sha2 = "0.11.0"
 # As assinaturas e o documento de revogação viajam em base64 dentro do JSON,
 # pelo mesmo motivo que o `latest.json` já carrega a assinatura assim.
 base64 = "0.22"
+# As duas de baixo só entram com a feature `fixtures`: ver `[features]`.
+ed25519-dalek = { version = "3.0.0", optional = true }
+blake2 = { version = "0.10", optional = true }
+
+[features]
+# Expõe a chave de teste e o assinador (`assinatura::fixtures`), para a casca
+# provar a revogação com uma lista assinada de verdade. **Nunca ligada no
+# binário do produto**: só a `[dev-dependencies]` do `seele-app` a pede.
+fixtures = ["dep:ed25519-dalek", "dep:blake2"]
 
 [dev-dependencies]
 # **Para assinar dentro do teste, e não para conferir.** Um teste que só

@@ -22,10 +22,10 @@
 //! usa. Este teste os chama e compara o resultado com o que está no disco,
 //! byte a byte. Uma semente editada à mão, ou deixada para trás por uma mudança
 //! do fio, reprova aqui. A **próxima subida de `PROTOCOL_VERSION`** é o caso
-//! certo: todo quadro de controle e todo datagrama de mídia começam com ela. Um
-//! datagrama de mídia velho é recusado no primeiro byte, e um quadro de
-//! controle velho passa, porque a janela de compatibilidade é 1 — e o fuzz
-//! passaria a mutar quadros da versão de antes, e não os do fio.
+//! certo: todo quadro de controle começa com ela, e o fuzz passaria a mutar
+//! quadros que o analisador recusa no primeiro byte. O datagrama de mídia
+//! começa com o número da voz, `MEDIA_HEADER_VERSION`, que desde o Servidor 1.0
+//! não sobe junto com o protocolo — e é conferido pelo número dele.
 //!
 //! Para reescrevê-las depois de uma mudança do fio:
 //!
@@ -54,7 +54,13 @@ use seele_proto::control::{decode, encode, ClientMessage, DisconnectReason, Serv
 use seele_proto::encontro::{self, Marcas};
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_proto::uri::{self, Bilhete, Convite};
-use seele_proto::{oldest_supported_version, MediaHeader, MAX_PAYLOAD_LEN, PROTOCOL_VERSION};
+use seele_proto::{
+    oldest_supported_version, MediaHeader, MAX_PAYLOAD_LEN, MEDIA_HEADER_VERSION, PROTOCOL_VERSION,
+};
+
+/// A origem do navegador nos testes e no fuzz, até o D-web-2 escolher a de
+/// verdade. A mesma de `fuzz/fuzz_targets/uri.rs`.
+const ORIGEM_DOS_TESTES: &str = "origem.invalid";
 
 /// Uma impressão digital qualquer, no formato de verdade: 64 hexadecimais.
 const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
@@ -62,8 +68,12 @@ const IMPRESSAO: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedc
 /// As sementes de um alvo: o nome do arquivo e os bytes dele.
 type DoAlvo = BTreeMap<String, Vec<u8>>;
 
-/// Os alvos cujo primeiro byte é a versão do fio.
-const ALVOS_COM_VERSAO: [&str; 2] = ["control_frame", "media_header"];
+/// Os alvos cujo primeiro byte é um número de versão, e qual: o do protocolo
+/// no controle, e o da voz na mídia (adendo de 08/10/2026, §7).
+const ALVOS_COM_VERSAO: [(&str, u8); 2] = [
+    ("control_frame", PROTOCOL_VERSION),
+    ("media_header", MEDIA_HEADER_VERSION),
+];
 
 fn quadro<T>(mensagem: &T) -> Vec<u8>
 where
@@ -84,20 +94,24 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
         "cliente-hello".to_owned(),
         quadro(&ClientMessage::Hello {
             join_secret: None,
-            version: PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "seele 0.15.0".to_owned(),
             nickname: "ritsuko".to_owned(),
             public_key: vec![0x11; 32],
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }),
     );
     controle.insert(
         "cliente-hello-com-convite".to_owned(),
         quadro(&ClientMessage::Hello {
             join_secret: Some("7K4MNPQRSTVWXYZ23456".to_owned()),
-            version: PROTOCOL_VERSION,
+            faixa: seele_proto::FAIXA,
             client: "seele 0.15.0".to_owned(),
             nickname: "maya".to_owned(),
             public_key: vec![0x12; 32],
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }),
     );
     controle.insert(
@@ -150,7 +164,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
 
     let mut midia = DoAlvo::new();
     let cabecalho = MediaHeader {
-        version: PROTOCOL_VERSION,
+        version: MEDIA_HEADER_VERSION,
         ssrc: 0x0102_0304,
         seq: 1,
         timestamp: 960,
@@ -173,6 +187,12 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
     versao.insert(
         "versao-mais-antiga".to_owned(),
         vec![oldest_supported_version()],
+    );
+    // Dois bytes: o alvo lê o primeiro como carimbo e os dois como a faixa de
+    // um `Hello`, e esta é a faixa desta build.
+    versao.insert(
+        "faixa-desta-build".to_owned(),
+        vec![seele_proto::FAIXA.minima, seele_proto::FAIXA.maxima],
     );
     todas.insert("version_negotiation", versao);
 
@@ -198,24 +218,45 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             .to_string()
             .into_bytes(),
     );
+    // As duas formas novas da 0.16: o link do navegador, na origem dos testes,
+    // e o link da sala pessoal.
+    convites.insert(
+        "navegador".to_owned(),
+        Convite::novo("198.51.100.7:8383")
+            .com_impressao_digital(IMPRESSAO)
+            .com_token("7K4MNPQRSTVWXYZ23456")
+            .com_versao("1.0")
+            .no_navegador(
+                ORIGEM_DOS_TESTES,
+                "/e",
+                &["ab".repeat(32)],
+                Some(1_792_540_800),
+            )
+            .expect("o convite tem fp e hash")
+            .into_bytes(),
+    );
+    convites.insert(
+        "sala".to_owned(),
+        uri::link_da_sala(&seele_proto::codigo::Codigo::da_chave(&[0; 32])).into_bytes(),
+    );
     todas.insert("uri", convites);
 
     let marcas = Marcas::do_servidor(IMPRESSAO).expect("a impressão forma marcas");
     let mut do_encontro = DoAlvo::new();
-    do_encontro.insert("onde".to_owned(), encontro::onde(&marcas.escuta));
+    do_encontro.insert("onde".to_owned(), encontro::onde(marcas.escuta()));
     do_encontro.insert(
         "leve".to_owned(),
         encontro::leve(
             "198.51.100.7:41234".parse().expect("endereço"),
-            &marcas.aviso,
+            marcas.aviso(),
         ),
     );
-    do_encontro.insert("moro".to_owned(), encontro::moro(&marcas.servidor));
-    do_encontro.insert("quem".to_owned(), encontro::quem(&marcas.servidor));
+    do_encontro.insert("moro".to_owned(), encontro::moro(marcas.servidor()));
+    do_encontro.insert("quem".to_owned(), encontro::quem(marcas.servidor()));
     do_encontro.insert(
         "aqui".to_owned(),
         encontro::aqui(
-            &marcas.aviso,
+            marcas.aviso(),
             "203.0.113.9:50000".parse().expect("endereço"),
         ),
     );
@@ -277,7 +318,7 @@ fn regerar_se_pedido() {
 #[test]
 fn as_sementes_do_fuzz_estao_na_versao_do_fio() {
     regerar_se_pedido();
-    for alvo in ALVOS_COM_VERSAO {
+    for (alvo, versao) in ALVOS_COM_VERSAO {
         let achadas = no_disco(alvo);
         assert!(
             !achadas.is_empty(),
@@ -288,8 +329,8 @@ fn as_sementes_do_fuzz_estao_na_versao_do_fio() {
         for (nome, bytes) in &achadas {
             assert_eq!(
                 bytes.first().copied(),
-                Some(PROTOCOL_VERSION),
-                "fuzz/sementes/{alvo}/{nome} não começa com a versão do fio ({PROTOCOL_VERSION}), \
+                Some(versao),
+                "fuzz/sementes/{alvo}/{nome} não começa com a versão do fio ({versao}), \
                  e o primeiro byte é a primeira coisa que o analisador confere: o fuzz \
                  gastaria o tempo dele numa recusa só. Regere com SEELE_REGERAR_SEMENTES=1 \
                  cargo test -p seele-proto --test sementes_do_fuzz"
@@ -361,15 +402,18 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
     for (nome, bytes) in do_alvo(&todas, "version_negotiation") {
         let versao = bytes.first().copied().expect("a semente tem um byte");
         assert!(
-            seele_proto::version::negotiate(versao).is_ok(),
+            seele_proto::version::confere_o_carimbo(versao).is_ok(),
             "a semente version_negotiation/{nome} é uma versão que a negociação recusa"
         );
     }
     for (nome, bytes) in do_alvo(&todas, "uri") {
         let texto = std::str::from_utf8(bytes).expect("um convite é texto");
         assert!(
-            uri::analisar(texto).is_ok(),
-            "a semente uri/{nome} não é um convite que o `analisar` aceite: {texto}"
+            uri::analisar(texto).is_ok()
+                || uri::analisar_no_navegador(texto, ORIGEM_DOS_TESTES).is_ok()
+                || matches!(uri::codigo_do_link(texto), Some(Ok(_))),
+            "a semente uri/{nome} não é um convite, um link do navegador nem um link \
+             da sala que se leia: {texto}"
         );
     }
     for (nome, bytes) in do_alvo(&todas, "datagrama_do_encontro") {

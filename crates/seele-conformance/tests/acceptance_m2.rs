@@ -69,7 +69,7 @@ async fn connect(address: SocketAddr, nickname: &str) -> Result<Client> {
 /// Builds one media datagram for a source.
 fn media(ssrc: Ssrc, seq: u16, payload: &[u8]) -> Vec<u8> {
     let header = MediaHeader {
-        version: seele_proto::PROTOCOL_VERSION,
+        version: seele_proto::MEDIA_HEADER_VERSION,
         ssrc: ssrc.get(),
         seq,
         timestamp: u32::from(seq) * 960,

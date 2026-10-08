@@ -413,6 +413,11 @@
       caso que este bloco cobre é o do pedido do dono — hospedar numa versão
       anterior porque um MOD foi feito para ela —, e quem faz isso já a tem.
     -->
+    <!-- A primeira abertura da 0.16 guarda as conversas da 0.15 para o
+         Servidor 0.15 (spec 0.16, §1), e a tela diz isso uma vez.
+         Preenchido por camada-versoes.js. -->
+    <p id="boot-linha-legada" class="nota" role="status" hidden></p>
+
     <details id="boot-versoes" class="boot-nome-publico" hidden>
       <summary>Hospedar com outra versão do SEELE</summary>
       <div class="server-campo">
@@ -541,13 +546,12 @@
            «sumiu» e «não existe» são a mesma coisa para quem olha: a pergunta
            que chegou foi «não mostra as versões disponíveis». -->
       <p id="preparar-versao-unica" class="nota" hidden>
-        É a única versão guardada nesta máquina. Em CONFIGURAÇÕES dá para
-        baixar outra e guardá-la ao lado desta, sem substituir nada.
+        Só esta versão do servidor está disponível. As outras aparecem aqui
+        depois que a lista de versões for lida uma vez.
       </p>
-      <p id="preparar-versao-aviso" class="nota" hidden>
-        Quem hospeda é a outra janela, então o nome e a imagem escolhidos aqui
-        não vão junto — você os define lá.
-      </p>
+      <!-- O texto é escrito por tela-boot.js, com a versão do servidor
+           escolhida e as conversas que não atravessam. -->
+      <p id="preparar-versao-aviso" class="nota" hidden></p>
     </div>
 
     <div class="boot-saidas">
@@ -3435,7 +3439,7 @@
           <div class="server-bloco">
             <div class="server-bloco-topo">
               <h3 class="server-bloco-nome">GUARDADAS NESTA MÁQUINA</h3>
-              <p class="nota">Cada versão tem os dados dela, em separado</p>
+              <p class="nota">Cada versão do servidor tem as conversas dela, em separado</p>
             </div>
             <div class="server-bloco-corpo">
               <div class="server-campo">
@@ -3443,10 +3447,11 @@
                 <button id="versoes-baixar" class="botao" type="button">GUARDAR A MAIS NOVA DO CATÁLOGO</button>
                 <p id="versoes-estado" class="nota" role="status"></p>
                 <p class="nota">Guardar uma versão <b>não substitui</b> a que
-                  está aberta. Entrar num servidor que roda outra versão abre
-                  aquela versão sozinho, quando ela está aqui.</p>
-                <p class="nota">Descer de versão não leva as conversas junto:
-                  cada uma escreve no diretório dela.</p>
+                  está aberta. Entrar num servidor que roda outra versão do
+                  servidor abre o SEELE dela, e baixa antes se for preciso.</p>
+                <p class="nota">Cada versão do servidor guarda as conversas dela,
+                  em separado. Apagar o app de uma não apaga as conversas: o
+                  próximo app da mesma versão do servidor as abre.</p>
               </div>
             </div>
           </div>
@@ -3809,6 +3814,17 @@
         <button type="submit" class="nomear-confirmar">ENTRAR</button>
       </form>
       <p id="servidores-erro" class="nomear-erro" role="alert" hidden></p>
+      <!-- Entrar num servidor de outra versão do servidor: a frase das
+           conversas vem ANTES de abrir (spec 0.16, §1). Desenhado e conduzido
+           por camada-versoes.js. -->
+      <div id="versoes-confirmar" class="server-campo" hidden>
+        <p id="versoes-confirmar-frase" class="nota"></p>
+        <p id="versoes-confirmar-estado" class="nota" role="status"></p>
+        <div class="boot-saidas">
+          <button id="versoes-confirmar-sim" class="nomear-confirmar" type="button">ABRIR</button>
+          <button id="versoes-confirmar-nao" class="botao-fantasma" type="button">VOLTAR</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

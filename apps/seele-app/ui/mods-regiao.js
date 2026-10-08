@@ -67,8 +67,16 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * Bytes de som **decodificado** somados nesta região: o que o WebAudio
    * segura enquanto o som está de pé, toque ele ou não.
    *
+   * **Cada superfície tem o seu bolso.** Uma página, um painel ou um diálogo
+   * monta a sua própria região (`SuperficieDeMod`, com o perfil da
+   * superfície), e este teto vale para cada uma: um MOD com as doze
+   * superfícies que pode manter de pé (`TETO_DE_SUPERFICIES`) tem doze bolsos
+   * destes, além do da faixa. Os cartões e as contribuições têm o deles — ver
+   * `LIMITES_DO_CARTAO.bytesDeSomDecodificado`.
+   *
    * `decodeAudioData` devolve o som inteiro em float32, por canal, já na taxa
-   * do contexto que decodifica — e isso na montagem, e não na hora de tocar. O
+   * do contexto que decodifica — de uma vez, antes de o som tocar: na
+   * montagem, ou, numa contribuição, no pedido de tocar. O
    * teto de `bytesDeMidia` conta os bytes comprimidos, e não segurava isto: dez
    * MiB de MP3 a 128 kbps viram uns 250 MB decodificados a 48 kHz, e a 32 kbps
    * passam de 1 GB. O `<audio>` decodificava aos poucos; o WebAudio não.
@@ -83,7 +91,7 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * **O teto vale para o que fica de pé.** A decodificação em si já aloca o som
    * inteiro uma vez, antes de a conta poder ser feita — não há como saber a
    * duração sem decodificar —, e o som acima do teto é largado logo em seguida,
-   * para o coletor levar. Ver `montarSom`.
+   * para o coletor levar. Ver `carregarSom`.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -144,6 +152,15 @@ const LIMITES_DO_CARTAO = Object.freeze({
    * este número. O teto **não** soma as contribuições de um MOD entre si: cada
    * uma tem o seu, e um MOD mantém até `TETO_DE_CONTRIBUICOES` (128, em
    * `mods-contribuicoes.js`) de pé — em tese, 128 vezes este número por MOD.
+   *
+   * **Numa contribuição, o som só é decodificado quando o MOD o manda tocar**
+   * (`tocando: true`). Ela não tem botão, e um som declarado parado não tinha
+   * por que segurar o som inteiro decodificado: até o pedido de tocar, a
+   * figura assenta com o arquivo contado e nada neste bolso (ver `montarSom`).
+   * O teto vale no pedido, com a mesma recusa da montagem. As 128 vezes de
+   * cima são de 128 contribuições que já foram mandadas tocar — o som
+   * decodificado fica de pé depois de terminar ou de parar —, e não de 128
+   * montadas.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -395,11 +412,17 @@ function textoDoRotulo(no) {
  * o MOD vai fazer com ele), **de que tipo** (o filtro de extensões, que é
  * orientação — a prova continua sendo os bytes) e **até quanto** (recusar antes
  * de ler, e não depois de a memória já ter pago).
+ *
+ * **A finalidade é cortada em 200 pontos de código**, e não por índice, como a
+ * chave do campo (`ef707c7`): ela atravessa a ponte até um `Option<String>` do
+ * Rust, e metade de um par substituto na posição 200 é uma cadeia que o
+ * `serde_json` recusa — o pedido inteiro voltava recusado, e o seletor nem
+ * abria.
  */
 function pedidoDeArquivo(no) {
   const papeis = papeisDeArquivo(no);
   return {
-    finalidade: typeof no?.finalidade === "string" ? no.finalidade.slice(0, 200) : "",
+    finalidade: typeof no?.finalidade === "string" ? [...no.finalidade].slice(0, 200).join("") : "",
     papeis,
     extensoes: papeis.flatMap((p) => [...PAPEIS_DE_ARQUIVO[p]]),
     limiteDeBytes: tetoDeArquivo(no),
@@ -418,6 +441,60 @@ function motivoDaFalha(falha) {
   if (typeof falha?.Recusado?.motivo === "string") return falha.Recusado.motivo;
   if (typeof falha?.message === "string") return falha.message;
   return String(falha);
+}
+
+/**
+ * Os argumentos de `dono.carregarMidiaDoServidor` para uma mídia declarada com
+ * `doServidor`: o canal, o pedido, e o campo da resposta que traz o base64.
+ *
+ * Um lugar só, porque são dois que pedem: a montagem de toda mídia
+ * (`montarMidia`), e o pedido de tocar do som de uma contribuição que um
+ * destino tomou sem ter guardado o `data:` (`RegiaoDeMod#carregarSom`).
+ *
+ * @param {{ canal?: *, pedido?: object, campo?: string }} doServidor
+ * @returns {[number, object, string]}
+ */
+function pedidoAoServidor(doServidor) {
+  return [
+    Number(doServidor.canal) || 0,
+    doServidor.pedido ?? {},
+    // Qual campo da resposta traz o base64. O nome é do MOD, não do
+    // produto: ditar um faria todo servidor existente renomear o dele.
+    typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
+  ];
+}
+
+/**
+ * Prova que uma imagem abre, antes de alguém a dar por pronta.
+ *
+ * **O sniff do Rust só lê o cabeçalho** (pendência 51, item 7). Bytes com o
+ * começo de um PNG e o corpo corrompido chegam aqui com o papel `imagem`, cabem
+ * no teto, e só o decodificador do navegador os recusa. O `<img>` da mídia
+ * avisa por `error`; o do retrato não tinha o ouvinte, e um fundo pintado por
+ * CSS, um `drawImage` e um avatar de `background-image` não têm por onde
+ * avisar — a imagem ficava «pronta» num quadrado vazio, sem uma linha no
+ * registro, no evento do MOD ou na aba.
+ *
+ * Quem chama devolve esta promessa de dentro do `then` da busca e encadeia
+ * `.then(aplicar, recusar)`: a recusa do `decode()` cai em `recusar`, junto com
+ * a da busca, com um motivo em palavra — o do navegador (`EncodingError`) é
+ * dele, e diz pouco a quem escreve o MOD. O que lança em `aplicar` não é
+ * recusa, e cai no `.catch` do fim (`RegiaoDeMod#dizerTropecoDaMidia`). Mesmo
+ * `uri`, mesmo `img-src`: nada na política da janela muda.
+ *
+ * @param {string} uri O `uri` que a ponte de mídia devolveu.
+ * @returns {Promise<HTMLImageElement>} A imagem decodificada — a do fundo de
+ *   tela é pintada com ela mesma.
+ */
+function provarImagem(uri) {
+  const imagem = new Image();
+  imagem.src = uri;
+  return imagem.decode().then(
+    () => imagem,
+    () => {
+      throw new Error("a imagem não decodificou");
+    },
+  );
 }
 
 /**
@@ -443,7 +520,8 @@ class RegiaoDeMod {
    * - `carregarMidia(caminho)` e `carregarMidiaDoServidor(canal, pedido,
    *   campo)`: a mídia do pacote e a do servidor do MOD, com o papel e os bytes.
    * - `bytesDoSom(caminho)`: os bytes crus de um som do pacote, para o WebAudio.
-   *   Sem ele, todo som do pacote chega ao MOD como `falhou`.
+   *   Sem ele, todo som do pacote chega ao MOD como `falhou`, com o motivo
+   *   «o dono desta região não oferece bytesDoSom» (ver `carregarSom`).
    * - `escolherArquivo(pedido)`: o seletor da forma `arquivo`.
    * - `abrirEndereco(url, chave)`: o endereço de um `link`, fora da janela.
    *
@@ -518,24 +596,53 @@ class RegiaoDeMod {
     /**
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
-     * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao }>`.
+     * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao,
+     * montagem, adiado, carregando, recusa }>`.
      * À parte do nó porque o som chega depois dele — bytes e decodificação são
      * duas voltas —, e o MOD pode ter mudado de ideia nesse meio tempo.
      * `tocar` é o do tocador com a recusa já amarrada, e `recusar` é essa
      * recusa (ver `montarSom`); `terminou` diz se o último aviso dele foi o fim
      * natural do som; `cartao`, se ele mora num cartão ou num destino de
      * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
+     *
+     * Os três seguintes são do som de uma contribuição, que espera para carregar:
+     * `montagem` é o que `montarSom` recebeu (`{ plano, estado, origem }`, e a
+     * recusa amarrada, `recusou`), guardado para o som ser carregado depois, ou
+     * de novo — sem o `data:` do servidor, salvo no destino que tomou o som e
+     * enquanto o som espera o pedido de tocar (ver `montarSom`); `adiado` é
+     * essa mesma montagem
+     * enquanto o som de uma contribuição assentou sem tocador e espera o
+     * pedido de tocar, ou a marca dos sons (ver `pedirParaTocar` e
+     * `tomarOsSonsDevolvidos`); `carregando` diz que os bytes ou a
+     * decodificação desse pedido estão a caminho (`pedirParaTocar`).
+     *
+     * `recusa` é a de um som que não chegou a tocador — `{ figura, motivo }`,
+     * com a figura «falhou» ou «cheia» (`falharOSom`, e o teto em
+     * `carregarSom`) —: numa contribuição, ela passa ao destino que tomar a
+     * marca, e o som não volta a «pronta» ali (`herdarOSom`).
      */
     this.somDaMidia = new Map();
     /**
      * Quando este renderer é **um dos destinos de uma contribuição**: se algum
-     * deles já tomou os sons dela — `{ tomados }`, o mesmo objeto para todos
-     * (`montarContribuicao`, em `base.js`); `null` fora de uma. Ver
-     * `montarSom`.
+     * deles segura os sons dela agora — `{ tomados }`, o mesmo objeto para
+     * todos (`montarContribuicao`, em `base.js`); `null` fora de uma. Quando
+     * um destino a devolve, o objeto ganha `devolvidos` — a bandeira que abre a
+     * segunda volta da varredura de `base.js` — e `herdados`, o que o destino
+     * que saiu diz dos sons dela. Ver `montarSom`, `devolverOsSons` e
+     * `tomarOsSonsDevolvidos`.
      */
     this.sonsDaContribuicao = null;
     /** Se foi este destino que tomou os sons da contribuição. */
     this.tomouOsSons = false;
+    /**
+     * O que este destino herdou do destino que devolveu a marca, até cada som
+     * chegar aqui: `{ lugares, tocavam, recusados }`, os lugares dos sons que
+     * aquele destino segurava e, deles, os que tocavam quando o lugar saiu da
+     * tela e os que tinham sido recusados, com a figura e o motivo (ver
+     * `devolverOsSons` e `herdarOSom`); `null` quando a marca não veio de uma
+     * devolução, ou quando todos os sons dela já chegaram.
+     */
+    this.herdados = null;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
     this.solta = false;
   }
@@ -1452,6 +1559,40 @@ class RegiaoDeMod {
   }
 
   /**
+   * Diz no `console` da janela que um passo de uma imagem lançou **depois da
+   * busca e do `decode()`**.
+   *
+   * **Não é uma recusa.** A imagem chegou e abriu; o que lançou foi aplicá-la —
+   * um `midiaMudou` de dono que lança, uma repintura que lança — ou o próprio
+   * caminho de recusa. Cada caminho de imagem encadeia
+   * `.then(aplicar, recusar)`, e é por isso que o tropeço de `aplicar` não cai
+   * em `recusar`: lá ele diria «recusada» de uma imagem que está na tela,
+   * devolveria os bytes dela e mandaria `falhou` ao MOD — a tela, a conta, a
+   * aba e o MOD em desacordo. O estado fica o que o passo deixou, e nenhuma
+   * promessa fica sem quem a pegue.
+   *
+   * **Dito ao `seele.log`, e não só ao `console`.** O `console` da janela
+   * ninguém lê; quem opera lê o registro. A linha vai pela mesma porta das
+   * outras linhas de mídia (`dizerRecusaDeMidia`, que leva ao
+   * `dono.anotarRecusa`): o mesmo `onde`, o id do MOD em campo próprio e a
+   * chave cortada do mesmo jeito — e com a palavra «tropeçou», para não ser
+   * lida como a recusa que não é. O `console` fica com a pilha, para quem
+   * depura a janela.
+   *
+   * @param {string} onde Qual caminho: «o retrato», «o fundo», «o fundo da tela».
+   * @param {string} chave A chave do nó, cortada como em `dizerRecusaDeMidia`.
+   * @param {unknown} falha O que lançou.
+   */
+  dizerTropecoDaMidia(onde, chave, falha) {
+    const nome = [...String(chave ?? "")].slice(0, 120).join("");
+    console.warn(`MOD ${this.id}: ${onde} «${nome}» tropeçou depois da busca, e o tropeço não foi dito como recusa`, falha);
+    this.dizerRecusaDeMidia(
+      chave ?? "",
+      `— ${onde} tropeçou depois da busca, e não foi uma recusa: ${motivoDaFalha(falha)}`,
+    );
+  }
+
+  /**
    * O retrato de uma pessoa: imagem quando há, inicial quando não há.
    *
    * Forma própria e não `midia` porque a composição é diferente: um avatar tem
@@ -1476,6 +1617,27 @@ class RegiaoDeMod {
     const vindo = fonte.doServidor
       ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
       : this.dono.carregarMidia(fonte.fonte);
+    // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
+    // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
+    const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
+    // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca
+    // e o `decode()` caem em `recusar`. Ver `dizerTropecoDaMidia`.
+    const aplicar = (midia) => {
+      if (!midia || cancelado || this.solta) return;
+      if (!this.dono.podeFalar()) { devolver(); return; }
+      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
+      elem.style.backgroundSize = "cover";
+      elem.style.backgroundPosition = "center";
+      this.anotarMidia(elem, "pronta");
+    };
+    const recusar = (falha) => {
+      if (cancelado || this.solta) return;
+      devolver();
+      const porque = motivoDaFalha(falha);
+      this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
+    };
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
       // **As duas recusas são anotadas, além de ditas ao registro.** A linha
@@ -1492,33 +1654,75 @@ class RegiaoDeMod {
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
+      // **Reservados antes do `decode()`**, como o som em `montarMidia`: duas
+      // imagens decodificando juntas passariam as duas pela conferência de
+      // cima, cada uma vendo a conta sem a outra. A recusa do `decode()` cai
+      // em `recusar`, que devolve.
       bytes = midia.bytes; this[bolso.conta] += bytes;
-      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
-      elem.style.backgroundSize = "cover";
-      elem.style.backgroundPosition = "center";
-      this.anotarMidia(elem, "pronta");
-    }).catch(falha => {
-      if (cancelado || this.solta) return;
-      const porque = motivoDaFalha(falha);
-      this.anotarMidia(elem, "recusada", porque);
-      this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
-      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo: ${porque}`);
-    });
+      return provarImagem(midia.uri).then(() => midia);
+    }).then(aplicar, recusar)
+      .catch((falha) => this.dizerTropecoDaMidia("o fundo", plano.no.chave, falha));
   }
 
   montarRetrato(elem, plano) {
     const marca = elemento("span", "regiao-de-mod-retrato-inicial");
     elem.append(marca);
-    const estado = { elemento: null, cancelado: false, bytes: 0 };
+    const estado = { elemento: null, cancelado: false, bytes: 0, naoAbriu: null };
+    const conta = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
+    // Tira a imagem e devolve os bytes dela: o descarte, e também a recusa —
+    // a inicial volta a ser o que o retrato mostra, e o teto deixa de contar
+    // uma imagem que não está na tela.
+    const tirarAImagem = () => {
+      const img = estado.elemento;
+      if (img) {
+        if (estado.naoAbriu) img.removeEventListener("error", estado.naoAbriu);
+        img.removeAttribute("src");
+        img.remove();
+      }
+      estado.elemento = null;
+      estado.naoAbriu = null;
+      this[conta] -= estado.bytes;
+      estado.bytes = 0;
+    };
     this.guardar(elem, `retrato ${plano.chave}`, () => {
       estado.cancelado = true;
-      const img = estado.elemento;
-      if (img) { img.removeAttribute("src"); img.remove(); }
-      const bolso = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
-      this[bolso] -= estado.bytes;
+      tirarAImagem();
       this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
       this.esquecerMidia(elem);
     });
+    // Falhar num retrato **não** é um erro que a pessoa precise ler: a inicial
+    // continua lá e responde a mesma pergunta. Quem escreveu o MOD precisa — e
+    // é para ele que a linha vai ao registro e o diagnóstico anota. **Sem
+    // evento ao MOD**: o retrato nunca falou com ele, e passar a falar seria
+    // promessa nova da API.
+    const recusar = (porque, oQue) => {
+      tirarAImagem();
+      elem.dataset.estadoDoRetrato = "inicial";
+      this.anotarMidia(elem, "recusada", porque);
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${oQue}`);
+    };
+    // **Aplicar fica fora da recusa** (`.then(aplicar, …)`): só a busca e o
+    // `decode()` caem em `recusar`. Ver `dizerTropecoDaMidia`. O aviso à
+    // gestão (`anotarMidia`) vem por último: ele chama o dono, e um dono que
+    // lança encontra o `<img>` já montado, com o ouvinte, e os bytes contados.
+    const aplicar = (midia) => {
+      if (!midia || estado.cancelado || this.solta) return;
+      if (!this.dono.podeFalar()) { tirarAImagem(); return; }
+      const img = elemento("img", "regiao-de-mod-retrato-imagem");
+      img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+      img.src = midia.uri;
+      estado.elemento = img;
+      // A imagem que decodificou e depois não abriu vai pelo mesmo caminho de
+      // recusa — o molde é `naoAbriu`, em `montarMidia`.
+      estado.naoAbriu = () => {
+        if (estado.cancelado || this.solta) return;
+        recusar("o navegador não decodificou a imagem", "o elemento de imagem não abriu (evento error)");
+      };
+      img.addEventListener("error", estado.naoAbriu);
+      elem.append(img);
+      elem.dataset.estadoDoRetrato = "imagem";
+      this.anotarMidia(elem, "pronta");
+    };
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
@@ -1541,35 +1745,24 @@ class RegiaoDeMod {
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
         return;
       }
-      const bolso = plano.cartao
-        ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia }
-        : { conta: "bytesDeMidia", teto: this.perfil.bytesDeMidia };
-      if (this[bolso.conta] + midia.bytes > bolso.teto) {
+      const teto = plano.cartao ? LIMITES_DO_CARTAO.bytesDeMidia : this.perfil.bytesDeMidia;
+      if (this[conta] + midia.bytes > teto) {
         elem.dataset.estadoDoRetrato = "cheia";
-        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
+        this.anotarMidia(elem, "recusada", `passou do teto de ${teto} bytes de mídia deste lugar`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`);
         return;
       }
-      const img = elemento("img", "regiao-de-mod-retrato-imagem");
-      img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
-      img.src = midia.uri;
-      estado.elemento = img;
+      // **Reservados antes do `decode()`**, como o som em `montarMidia`: dois
+      // retratos decodificando juntos passariam os dois pela conferência de
+      // cima. A recusa do `decode()` cai em `recusar`, que os devolve.
       estado.bytes = midia.bytes;
-      this[bolso.conta] += midia.bytes;
-      elem.append(img);
-      elem.dataset.estadoDoRetrato = "imagem";
-      this.anotarMidia(elem, "pronta");
-    }).catch((falha) => {
+      this[conta] += midia.bytes;
+      return provarImagem(midia.uri).then(() => midia);
+    }).then(aplicar, (falha) => {
       if (estado.cancelado || this.solta) return;
-      // Falhar num retrato **não** é um erro que a pessoa precise ler: a
-      // inicial continua lá e responde a mesma pergunta. Quem escreveu o MOD
-      // precisa — e é para ele que a linha vai ao registro e o diagnóstico
-      // anota.
-      elem.dataset.estadoDoRetrato = "inicial";
       const porque = motivoDaFalha(falha);
-      this.anotarMidia(elem, "recusada", porque);
-      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${porque}`);
-    });
+      recusar(porque, porque);
+    }).catch((falha) => this.dizerTropecoDaMidia("o retrato", plano.no.chave, falha));
   }
 
   atualizarRetrato(elem, plano) {
@@ -1917,6 +2110,9 @@ class RegiaoDeMod {
       fundo.cancelado = true;
       fundo.imagem = null;
       delete elem.__fundoDaTela;
+      // E a anotação dele: a aba que contasse o mapa de uma tela que saiu
+      // estaria mentindo.
+      this.esquecerMidia(elem);
       this.contagem.telas -= 1;
     });
   }
@@ -1927,6 +2123,12 @@ class RegiaoDeMod {
    * A chave é a declaração inteira: um MOD que redesenhe a cada quadro pede o
    * mesmo mapa a cada quadro, e sem esta comparação seriam sessenta idas ao
    * servidor por segundo. Trocar de cena troca a chave, e aí sim há busca.
+   *
+   * **O fundo diz em que pé está**, como as outras mídias (`anotarMidia`):
+   * «carregando» ao pedir, «pronta» depois do `decode()`, «recusada» nas três
+   * saídas — o papel errado, a carga que falhou e a imagem que não
+   * decodificou. Sem nada pedido, a anotação sai. Era a lacuna T2 m4 do Plano
+   * 1D: um mapa recusado não era contado por bloco nenhum da aba DIAGNÓSTICO.
    */
   buscarFundoDaTela(elem, plano) {
     const fundo = elem.__fundoDaTela;
@@ -1936,7 +2138,10 @@ class RegiaoDeMod {
     if (chave === fundo.pedido) return;
     fundo.pedido = chave;
     fundo.imagem = null;
-    if (!declarado) return;
+    if (!declarado) {
+      this.esquecerMidia(elem);
+      return;
+    }
 
     const vindo = declarado.doServidor
       ? this.dono.carregarMidiaDoServidor(
@@ -1949,29 +2154,34 @@ class RegiaoDeMod {
       : typeof declarado.fonte === "string" && declarado.fonte
         ? this.dono.carregarMidia(declarado.fonte)
         : null;
-    if (!vindo) return;
+    // Um fundo sem origem não é mídia nenhuma: a anotação do pedido anterior
+    // não pode ficar valendo por ele.
+    if (!vindo) {
+      this.esquecerMidia(elem);
+      return;
+    }
+    this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
 
-    vindo.then((midia) => {
-      // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
-      // a região pode estar solta, e a sessão pode ter acabado.
-      if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+    // **Aplicar fica fora da recusa** (`.then(aplicar, recusar)`): só a busca
+    // e o `decode()` caem em `recusar`. Uma repintura que lança encontra o
+    // mapa posto e anotado «pronta», e não vira «fundo-falhou» — ver
+    // `dizerTropecoDaMidia`.
+    const aplicar = (img) => {
+      if (!img || fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (fundo.pedido !== chave) return;
-      if (midia.papel !== "imagem") {
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
-        return;
-      }
-      const img = new Image();
-      img.onload = () => {
-        if (fundo.cancelado || fundo.pedido !== chave) return;
-        fundo.imagem = img;
-        // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
-        // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
-        this.pintarTela(elem, plano);
-      };
-      img.src = midia.uri;
-    }).catch((falha) => {
+      fundo.imagem = img;
+      this.anotarMidia(elem, "pronta");
+      // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
+      // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
+      this.pintarTela(elem, plano);
+    };
+    const recusar = (falha) => {
       if (fundo.cancelado || this.solta) return;
       const porque = motivoDaFalha(falha);
+      // A anotação é a do pedido **de agora**: a recusa de um fundo que o MOD
+      // já trocou continua dita a ele e ao registro, como sempre foi, mas não
+      // pisa o «carregando» ou o «pronta» do fundo que veio depois.
+      if (fundo.pedido === chave) this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({
         nome: "tela",
         chave: plano.no.chave ?? "",
@@ -1979,7 +2189,24 @@ class RegiaoDeMod {
         porque,
       });
       this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no fundo da tela: ${porque}`);
-    });
+    };
+    vindo.then((midia) => {
+      // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
+      // a região pode estar solta, e a sessão pode ter acabado.
+      if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+      if (fundo.pedido !== chave) return;
+      if (midia.papel !== "imagem") {
+        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
+        return;
+      }
+      // O `onload` virou o `decode()` da própria imagem que se pinta. Ele não
+      // tinha par: a imagem que o navegador não abria não chegava a lugar
+      // nenhum, e a tela ficava sem o mapa e sem uma palavra. A recusa do
+      // `decode()` cai em `recusar`, que a diz ao MOD e ao registro.
+      return provarImagem(midia.uri);
+    }).then(aplicar, recusar)
+      .catch((falha) => this.dizerTropecoDaMidia("o fundo da tela", plano.no.chave, falha));
   }
 
   /** Pinta os traços que o MOD declarou, e só eles. */
@@ -2141,7 +2368,7 @@ class RegiaoDeMod {
    * - **a conta é por região**, em número e em bytes, e é ela que impede um MOD
    *   de montar mídia até a memória acabar. O som conta duas vezes: o arquivo,
    *   aqui, e o som decodificado, que o WebAudio segura inteiro, em
-   *   `montarSom` — os bytes comprimidos sozinhos deixariam dez MiB de MP3
+   *   `carregarSom` — os bytes comprimidos sozinhos deixariam dez MiB de MP3
    *   virarem centenas de MB;
    * - **o carregamento tem dono**. Sair durante o carregamento é o caso que a
    *   diretriz manda exercitar, e a resposta que chega depois da saída não
@@ -2160,12 +2387,15 @@ class RegiaoDeMod {
           conta: "bytesDeMidia", teto: LIMITES_DA_REGIAO.bytesDeMidia, quantas: "midias",
           contaDoSom: "bytesDeSomDecodificado", tetoDoSom: LIMITES_DA_REGIAO.bytesDeSomDecodificado,
         };
+    // `carga` conta as cargas do som (`carregarSom`): a que um destino
+    // devolveu no meio do caminho não vira tocador (`devolverOsSons`).
     const estado = {
       elemento: null, som: null, cancelado: false, bytes: 0, bytesDoSom: 0, bolso, ouvintes: [], recusaDita: null,
+      carga: 0,
     };
     this.somDaMidia.set(elem, {
       tocador: null, tocar: null, recusar: null, declarado: undefined, quer: false, terminou: false,
-      cartao: Boolean(plano.cartao),
+      cartao: Boolean(plano.cartao), montagem: null, adiado: null, carregando: false,
     });
     this.guardar(elem, `midia ${plano.chave}`, () => {
       estado.cancelado = true;
@@ -2198,15 +2428,7 @@ class RegiaoDeMod {
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
     const vindo = doServidor
-      ? this.dono.carregarMidiaDoServidor(
-          Number(doServidor.canal) || 0,
-          doServidor.pedido ?? {},
-          // Qual campo da resposta traz o base64. O nome é do MOD, não do
-          // produto: ditar um faria todo servidor existente renomear o dele.
-          typeof doServidor.campo === "string" && doServidor.campo
-            ? doServidor.campo
-            : "bytes",
-        )
+      ? this.dono.carregarMidiaDoServidor(...pedidoAoServidor(doServidor))
       : caminho
         ? this.dono.carregarMidia(caminho)
         : null;
@@ -2225,7 +2447,7 @@ class RegiaoDeMod {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         // O porquê vai ao MOD com os números, como no teto do som
-        // decodificado (`montarSom`): sem ele, «recusada» por teto e
+        // decodificado (`carregarSom`): sem ele, «recusada» por teto e
         // «recusada» por falta de um gesto chegavam iguais.
         const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         elem.dataset.estado = "cheia";
@@ -2237,7 +2459,7 @@ class RegiaoDeMod {
       // Contados **agora**, e não quando o som terminar de decodificar: os
       // bytes do som ainda levam mais duas voltas, e outra mídia que chegasse
       // nesse meio tempo caberia num teto que esta já está ocupando. O que o
-      // som ocupa decodificado é contado à parte, em `montarSom`, quando se
+      // som ocupa decodificado é contado à parte, em `carregarSom`, quando se
       // sabe.
       estado.bytes = midia.bytes;
       this[bolso.conta] += midia.bytes;
@@ -2288,7 +2510,7 @@ class RegiaoDeMod {
    * `dono.bytesDoSom` (o comando `som_do_mod`, que entrega os bytes crus de um
    * arquivo que o manifesto declara); ou do servidor do MOD, pelo `data:` que
    * `midia_em_bytes` já devolveu — lido como texto, nunca entregue a um
-   * elemento de mídia.
+   * elemento de mídia. Quem os pede e decodifica é `carregarSom`.
    *
    * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
    * `midia_do_mod` para o papel `som`: em base64 pelo `midia_do_mod` (que
@@ -2297,8 +2519,8 @@ class RegiaoDeMod {
    *
    * **O som decodificado tem teto**, somado por bolso
    * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
-   * guarda o som inteiro em float32 desde a montagem, e o teto de bytes de
-   * `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
+   * guarda o som inteiro em float32 desde que o decodifica, e o teto de bytes
+   * de `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
    * com as palavras daquele teto — figura «cheia», `recusada` ao MOD com os
    * números —, e não vira tocador.
    *
@@ -2319,12 +2541,30 @@ class RegiaoDeMod {
    * `pessoa.cartao` sem alvo numa sala de 64 pessoas pedia, decodificava e
    * segurava 64 cópias do mesmo som, e todas tocavam juntas.
    *
+   * **E só decodificam quando o MOD manda tocar** (P49-7c). Sem botão, um som
+   * de contribuição declarado parado só toca quando o MOD o declara
+   * `tocando: true`, e decodificá-lo antes era segurar o som inteiro por nada —
+   * em cada uma das até 128 contribuições de pé de um MOD. No destino que
+   * toma os sons, a figura assenta «pronta», com o tamanho do arquivo na
+   * anotação: o Rust já conferiu o papel e o teto de arquivo, e o arquivo já
+   * está contado (`esperarOPedidoDeTocar`). O pedido de tocar é o que pede os
+   * bytes e decodifica (`pedirParaTocar`), e o teto do bolso vale ali, com a
+   * mesma recusa. O primeiro toque espera a decodificação.
+   *
    * A marca é por contribuição, e não por som: uma por som precisaria dizer
    * qual nó é qual em todos os destinos, e a chave do plano não diz — a
    * posição recomeça dentro de cada contêiner, e dois sons diferentes saíam
-   * com a mesma, o segundo calado sem aviso. Ela não é devolvida: os destinos
-   * saem juntos (`soltarMontagem`, ou a saída da instância), e um destino que
-   * não montou é solto antes de um som chegar aqui.
+   * com a mesma, o segundo calado sem aviso. **Ela volta quando o destino que
+   * a tomou sai da tela** (P49-8): o nó dele saiu do documento, e a
+   * contribuição continua desenhada noutro. Ele solta os tocadores e devolve a
+   * marca (`devolverOsSons`), e um destino que desenha a toma na mesma
+   * varredura (`tomarOsSonsDevolvidos`) — sem isso, o som ficava preso no lugar
+   * que ninguém via, e o `tocando` religado era recusado como fora da tela. O
+   * som que tocava recomeça, do começo, no destino que tomou a marca — outro,
+   * ou o mesmo que volta à tela sem ninguém a ter tomado —, e os outros ficam
+   * calados (`herdarOSom`). Na
+   * saída, os destinos saem juntos (`soltarMontagem`, ou a saída da instância),
+   * e um destino que não montou é solto antes de um som chegar aqui.
    *
    * **Toda recusa é dita a quem hospeda**, como o `.catch` de `montarMidia` e o
    * `play()` recusado do `<audio>` já eram (`dizerRecusaDeMidia`): o som que
@@ -2336,74 +2576,8 @@ class RegiaoDeMod {
    * @param {{ uri: string } | { caminho: string }} origem
    */
   async montarSom(elem, plano, estado, origem) {
-    // Numa contribuição, só o destino que tomou os sons dela segue daqui.
-    // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
-    // dois achar a marca vaga.
-    if (this.sonsDaContribuicao && !this.tomouOsSons) {
-      if (this.sonsDaContribuicao.tomados) {
-        elem.dataset.estado = "pronta";
-        this.esquecerMidia(elem);
-        return;
-      }
-      this.sonsDaContribuicao.tomados = true;
-      this.tomouOsSons = true;
-    }
     const chave = plano.no.chave ?? "";
-    const falhou = (motivo) => {
-      if (estado.cancelado || this.solta) return;
-      elem.dataset.estado = "falhou";
-      this.anotarMidia(elem, "recusada", motivo);
-      this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
-      this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
-    };
-    // **Nada de áudio da janela aqui.** O som é decodificado num contexto
-    // fora do tempo, e o de tempo real — o que segura a saída do sistema — só
-    // nasce quando alguém toca: ver `contextoDeSomDeMod`.
-    if (!janelaTocaSomDeMod()) {
-      falhou("esta janela não oferece WebAudio");
-      return;
-    }
-    let bytes;
-    try {
-      bytes = origem.uri
-        ? bufferDaUri(origem.uri)
-        : bufferDoSom(await this.dono.bytesDoSom(origem.caminho));
-    } catch (falha) {
-      falhou(motivoDaFalha(falha));
-      return;
-    }
-    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
-    let som;
-    try {
-      som = await decodificarSomDeMod(bytes);
-    } catch (falha) {
-      falhou(`o som não decodificou: ${motivoDaFalha(falha)}`);
-      return;
-    }
-    if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
-    // **O que o som ocupa decodificado**, somado ao que já está de pé neste
-    // bolso. Float32, quatro bytes por amostra, por canal, na taxa da
-    // decodificação (`TAXA_DA_DECODIFICACAO`) — é o que o `AudioBuffer` segura
-    // enquanto o tocador existir.
-    // Acima do teto, o som é largado aqui mesmo: sem tocador, ninguém o segura.
-    //
-    // A recusa é a do teto de bytes de `montarMidia`, com as mesmas palavras —
-    // figura «cheia», `recusada` ao MOD com o porquê e os números, e
-    // «recusada» no registro —: os dois são o mesmo tipo de não, e um MOD não
-    // tem de tratar um deles como falha de carga.
-    const { contaDoSom, tetoDoSom } = estado.bolso;
-    const ocupa = som.length * som.numberOfChannels * 4;
-    if (this[contaDoSom] + ocupa > tetoDoSom) {
-      const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
-      elem.dataset.estado = "cheia";
-      this.anotarMidia(elem, "recusada", porque);
-      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
-      this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
-      return;
-    }
-    estado.bytesDoSom = ocupa;
-    this[contaDoSom] += ocupa;
-
+    const entrada = this.somDaMidia.get(elem) ?? {};
     // **O som que não começou, por um caminho só.** O evento ao MOD — com o
     // motivo, em `porque` — e a anotação saem a cada vez: são deles, e o MOD
     // pode dizer à pessoa que aperte alguma coisa, ou que abra a página. O
@@ -2415,6 +2589,9 @@ class RegiaoDeMod {
     // Quem chama confere antes se o som ainda é de alguém (`estado.cancelado`,
     // `this.solta`): uma recusa que chega depois de a região sair, ou de o MOD
     // tirar o nó, não vai ao registro, nem ao MOD, nem recria a anotação.
+    //
+    // Amarrada aqui, e não com o tocador: o pedido de tocar que um destino
+    // devolve no meio da carga também é dito por ela (`devolverOsSons`).
     const recusou = (motivo) => {
       this.anotarMidia(elem, "recusada", motivo);
       this.dono.falar({ nome: "midia", chave, estado: "recusada", porque: motivo });
@@ -2422,6 +2599,223 @@ class RegiaoDeMod {
       estado.recusaDita = motivo;
       this.dizerRecusaDeMidia(chave, `não tocou: ${motivo}`);
     };
+    const montagem = { plano, estado, origem, recusou };
+    entrada.recusar = recusou;
+    // Numa contribuição, só o destino que tomou os sons dela segue daqui.
+    // Antes de qualquer `await`: dois destinos que chegam juntos não podem os
+    // dois achar a marca vaga. Os outros guardam o adiamento: a marca pode
+    // voltar, e um deles tomá-la (`tomarOsSonsDevolvidos`).
+    //
+    // **O que a montagem guardada segura** — e só numa contribuição, onde
+    // alguém a lê de novo (o pedido de tocar, e `devolverOsSons`); fora de
+    // uma, ela morre com a carga. Do pacote, o caminho: os bytes vêm de
+    // `som_do_mod` no pedido de tocar. Do servidor do MOD, o `data:` que
+    // `midia_em_bytes` devolveu (`origem.uri`) fica **só no destino que tomou
+    // o som, e só enquanto o som espera o pedido de tocar**. Ele sai:
+    // - quando a carga tem os bytes (`carregarSom`);
+    // - quando a janela não tem WebAudio para carregá-lo
+    //   (`esperarOPedidoDeTocar`);
+    // - quando o destino devolve a marca (`devolverOsSons`), também de um som
+    //   recusado;
+    // - quando o som chega a um destino com a marca e herda uma recusa
+    //   (`herdarOSom`).
+    // Sobra um caminho, que o produto não percorre: a carga que volta antes de
+    // ler os bytes — a janela que perde o WebAudio entre a montagem e o pedido,
+    // ou um `data:` sem vírgula, que o Rust não devolve —, e aí o texto fica
+    // até o destino devolver a marca, ou o nó sair. Fora de uma contribuição,
+    // a montagem não é guardada, e nenhum caminho o segura. Antes, guardado em
+    // cada destino e pela vida do nó, ele era 1,33 vez o arquivo vezes os
+    // destinos — um som de 10 MiB num `pessoa.cartao` de 64 pessoas segurava
+    // uns 850 MB de texto. Os outros destinos guardam o plano, que traz o
+    // `doServidor`, e o que tomar a marca pede o som de novo ao servidor no
+    // pedido de tocar.
+    if (this.sonsDaContribuicao) {
+      const sons = this.sonsDaContribuicao;
+      if (!this.tomouOsSons && (sons.tomados || sons.devolvidos)) {
+        const semOData = { ...montagem, origem: origem.caminho === undefined ? {} : origem };
+        entrada.montagem = semOData;
+        entrada.adiado = semOData;
+        elem.dataset.estado = "pronta";
+        this.esquecerMidia(elem);
+        // **A marca devolvida é tomada por um caminho só**, com todos os sons
+        // deste destino e só com o nó dele no documento
+        // (`tomarOsSonsDevolvidos`). Tomada aqui, fora da tela, o som herdado
+        // que tocava decodificava para ser recusado como fora da tela, e os
+        // outros sons da herança ficavam presos nela. Daqui não se pergunta
+        // `aContribuicaoPinta`, que é de `base.js`: a segurança depende de o
+        // destino que não desenha a contribuição sair do documento, como sai
+        // no desenho de hoje.
+        if (!sons.tomados) this.tomarOsSonsDevolvidos();
+        return;
+      }
+      if (!this.tomouOsSons) this.tomarAMarca();
+      entrada.montagem = montagem;
+      entrada.adiado = montagem;
+      // Um som que chega depois de este destino tomar uma marca devolvida
+      // segue a mesma regra dos que já estavam aqui (`herdarOSom`).
+      this.herdarOSom(elem, entrada, this.herdados ? this.lugaresDasMidias() : new Map());
+      return;
+    }
+    await this.carregarSom(elem, montagem);
+  }
+
+  /**
+   * Assenta o som de uma contribuição no destino que segura os sons dela,
+   * **sem pedir os bytes** (P49-7c): a figura diz «pronta», e a anotação diz
+   * o tamanho do arquivo, que o Rust já conferiu — o papel e o teto de
+   * arquivo — e que `montarMidia` já contou. Quem pede os bytes e decodifica
+   * é o pedido de tocar (`pedirParaTocar`), que `aplicarTocando` faz daqui
+   * mesmo quando o MOD já declarou `tocando: true` — e aí o som segue
+   * «carregando» até decodificar.
+   *
+   * Uma janela sem WebAudio é dita aqui, e não no pedido de tocar: ela não
+   * vai tocar o som nunca, e uma figura «pronta» até lá esconderia isso.
+   */
+  esperarOPedidoDeTocar(elem) {
+    const som = this.somDaMidia.get(elem);
+    const montagem = som?.adiado;
+    if (!montagem) return;
+    const { plano, estado } = montagem;
+    if (!janelaTocaSomDeMod()) {
+      // O som não vai carregar nunca: o `data:` do servidor que a montagem
+      // guardava para o pedido de tocar não tem mais quem o leia.
+      som.adiado = null;
+      delete montagem.origem.uri;
+      this.falharOSom(elem, plano, "esta janela não oferece WebAudio");
+      return;
+    }
+    elem.dataset.estado = "pronta";
+    this.anotarMidia(
+      elem,
+      "pronta",
+      `${estado.bytes} bytes de arquivo, já conferidos; o som decodifica quando o MOD mandar tocar`,
+      Boolean(plano.cartao),
+    );
+    // O som que o MOD já declarou `tocando` recebe o pedido agora, e volta a
+    // «carregando» até decodificar (`pedirParaTocar`).
+    this.aplicarTocando(elem);
+  }
+
+  /**
+   * Pede os bytes de um som, decodifica, confere o teto do som decodificado e
+   * monta o tocador — e aplica o `tocando` que o MOD declarou.
+   *
+   * Na montagem, para o som de uma região, de uma superfície ou de um cartão
+   * (`montarSom`); no pedido de tocar, para o de uma contribuição
+   * (`pedirParaTocar`).
+   *
+   * **Uma carga é desta montagem enquanto `estado.carga` for a dela.** O
+   * destino que devolve os sons de uma contribuição no meio do caminho conta
+   * mais uma (`devolverOsSons`): os bytes e a decodificação que chegam depois
+   * não viram tocador num destino que já não os segura, nem contam no bolso
+   * dele.
+   *
+   * @param {{ plano: object, estado: object, origem: object, recusou: (motivo: string) => void }} montagem
+   */
+  async carregarSom(elem, montagem) {
+    const { plano, estado, origem, recusou } = montagem;
+    const chave = plano.no.chave ?? "";
+    estado.carga += 1;
+    const carga = estado.carga;
+    const deAlguem = () => !estado.cancelado && !this.solta && estado.carga === carga;
+    const falhou = (motivo) => {
+      if (!deAlguem()) return;
+      this.falharOSom(elem, plano, motivo);
+    };
+    // **Nada de áudio da janela aqui.** O som é decodificado num contexto
+    // fora do tempo, e o de tempo real — o que segura a saída do sistema — só
+    // nasce quando alguém toca: ver `contextoDeSomDeMod`.
+    if (!janelaTocaSomDeMod()) {
+      falhou("esta janela não oferece WebAudio");
+      return;
+    }
+    // **O dono que não oferece `bytesDoSom` é dito pelo nome** (P51-25): o
+    // som de um laboratório com um dono escrito antes do som chegava ao MOD
+    // com o `TypeError` do motor, que diz onde a janela tropeçou, e não o
+    // que falta no dono.
+    if (origem.caminho !== undefined && typeof this.dono.bytesDoSom !== "function") {
+      falhou("o dono desta região não oferece bytesDoSom");
+      return;
+    }
+    // **Três origens dos bytes.** Do pacote, por `som_do_mod`; do servidor, o
+    // `data:` que a montagem trouxe; ou, num destino de contribuição que tomou
+    // o som sem ter guardado o `data:` (ver `montarSom`), o servidor de novo,
+    // pelo mesmo pedido da montagem.
+    let bytes;
+    try {
+      if (origem.caminho !== undefined) {
+        bytes = bufferDoSom(await this.dono.bytesDoSom(origem.caminho));
+      } else if (origem.uri !== undefined) {
+        bytes = bufferDaUri(origem.uri);
+      } else {
+        const midia = await this.dono.carregarMidiaDoServidor(...pedidoAoServidor(plano.no.doServidor ?? {}));
+        if (midia?.papel !== "som") throw new Error("o servidor do MOD não devolveu um som no pedido de tocar");
+        if (!deAlguem() || !this.dono.podeFalar()) return;
+        // **A conta do teto de bytes é a da resposta nova**, e não a da
+        // montagem: o servidor do MOD pode ter mudado o arquivo nesse meio
+        // tempo. A recusa, quando não cabe, é a de `montarMidia`.
+        const { conta, teto } = estado.bolso;
+        const novos = Number.isFinite(midia.bytes) && midia.bytes >= 0 ? midia.bytes : estado.bytes;
+        const dosOutros = this[conta] - estado.bytes;
+        if (dosOutros + novos > teto) {
+          const porque = `${novos} bytes somados aos ${dosOutros} já montados passam do teto de ${teto}`;
+          const motivo = `passou do teto de ${teto} bytes de mídia deste lugar`;
+          const recusado = this.somDaMidia.get(elem);
+          if (recusado) recusado.recusa = { figura: "cheia", motivo };
+          elem.dataset.estado = "cheia";
+          this.anotarMidia(elem, "recusada", motivo);
+          this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
+          this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
+          return;
+        }
+        this[conta] = dosOutros + novos;
+        estado.bytes = novos;
+        bytes = bufferDaUri(midia.uri);
+      }
+    } catch (falha) {
+      falhou(motivoDaFalha(falha));
+      return;
+    }
+    // **O `data:` não fica.** Os bytes já estão aqui, e o texto é 1,33 vez o
+    // arquivo: guardado na montagem, ele ficava de pé pela vida do nó. Uma
+    // carga seguinte do mesmo som — num destino que devolveu a marca e a toma
+    // de novo — o pede de novo ao servidor.
+    delete origem.uri;
+    if (!deAlguem() || !this.dono.podeFalar()) return;
+    let som;
+    try {
+      som = await decodificarSomDeMod(bytes);
+    } catch (falha) {
+      falhou(`o som não decodificou: ${motivoDaFalha(falha)}`);
+      return;
+    }
+    if (!deAlguem() || !this.dono.podeFalar()) return;
+    // **O que o som ocupa decodificado**, somado ao que já está de pé neste
+    // bolso. Float32, quatro bytes por amostra, por canal, na taxa da
+    // decodificação (`TAXA_DA_DECODIFICACAO`) — é o que o `AudioBuffer` segura
+    // enquanto o tocador existir.
+    // Acima do teto, o som é largado aqui mesmo: sem tocador, ninguém o segura.
+    //
+    // A recusa é a do teto de bytes de `montarMidia`, com as mesmas palavras —
+    // figura «cheia», `recusada` ao MOD com o porquê e os números, e
+    // «recusada» no registro —: os dois são o mesmo tipo de não, e um MOD não
+    // tem de tratar um deles como falha de carga. Numa contribuição, ela
+    // chega no pedido de tocar, que é quando o som decodifica.
+    const { contaDoSom, tetoDoSom } = estado.bolso;
+    const ocupa = som.length * som.numberOfChannels * 4;
+    if (this[contaDoSom] + ocupa > tetoDoSom) {
+      const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
+      const recusado = this.somDaMidia.get(elem);
+      if (recusado) recusado.recusa = { figura: "cheia", motivo: porque };
+      elem.dataset.estado = "cheia";
+      this.anotarMidia(elem, "recusada", porque);
+      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
+      this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
+      return;
+    }
+    estado.bytesDoSom = ocupa;
+    this[contaDoSom] += ocupa;
+
     let pintar = () => {};
     const entrada = this.somDaMidia.get(elem) ?? {};
     const tocador = new TocadorDeSomDeMod(som, (aviso, comGesto, naoLigou, suspensoPeloProduto) => {
@@ -2455,7 +2849,6 @@ class RegiaoDeMod {
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
     entrada.tocador = tocador;
-    entrada.recusar = recusou;
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       recusou(motivoDaFalha(falha));
@@ -2490,6 +2883,22 @@ class RegiaoDeMod {
   }
 
   /**
+   * O som que não chegou a tocador, dito: figura «falhou», a anotação, o
+   * `falhou` ao MOD com o motivo, e a linha no registro — as palavras do
+   * `.catch` de `montarMidia`. Quem chama confere antes se o som ainda é de
+   * alguém.
+   */
+  falharOSom(elem, plano, motivo) {
+    const chave = plano.no.chave ?? "";
+    const som = this.somDaMidia.get(elem);
+    if (som) som.recusa = { figura: "falhou", motivo };
+    elem.dataset.estado = "falhou";
+    this.anotarMidia(elem, "recusada", motivo);
+    this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
+    this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
+  }
+
+  /**
    * Aplica o `tocando` que o MOD declarou, **se ele mudou** desde a última vez
    * — ou se o som terminou e o MOD continua o declarando.
    *
@@ -2518,13 +2927,20 @@ class RegiaoDeMod {
    * do mestre começava a tocar numa página que ninguém via. Reaberta, quem
    * liga é o botão do produto, ou o MOD mudando o `tocando`.
    *
-   * **Numa contribuição, uma vez, e não uma por destino**, sem nada aqui:
-   * só o destino que tomou os sons dela tem tocador (ver `montarSom`), e nos
-   * outros a conferência do tocador, logo abaixo, já sai.
+   * **Numa contribuição, uma vez, e não uma por destino**: só o destino que
+   * segura os sons dela tem tocador (ver `montarSom`). E o som dela só ganha
+   * tocador no pedido de tocar: sem tocador, a declaração vai a
+   * `pedirParaTocar`, que carrega o som quando ela pede para tocar. O destino
+   * que saiu da tela devolve os sons (`devolverOsSons`), e o `tocando` religado
+   * toca no que os tomou — e não é recusado como fora da tela no que saiu.
    */
   aplicarTocando(elem) {
     const som = this.somDaMidia.get(elem);
-    if (!som?.tocador) return;
+    if (!som) return;
+    if (!som.tocador) {
+      this.pedirParaTocar(elem, som);
+      return;
+    }
     const deNovo = som.quer && som.terminou;
     if (som.declarado === som.quer && !deNovo) return;
     som.declarado = som.quer;
@@ -2538,6 +2954,53 @@ class RegiaoDeMod {
       return;
     }
     som.tocar(false);
+  }
+
+  /**
+   * **O pedido de tocar de um som de contribuição que ainda não tem tocador**
+   * (P49-7c): é ele, e não a montagem, que pede os bytes e decodifica.
+   *
+   * Só no destino que segura os sons da contribuição, e só para um som que
+   * assentou esperando (`adiado`). A declaração vale na mudança, como com
+   * tocador: um `tocando: false` é guardado como aplicado, e o `true` seguinte
+   * é o pedido. O som carrega uma vez; quando o tocador existe, `carregarSom`
+   * chama `aplicarTocando` de novo, e a declaração daquele momento é a que vale
+   * — o MOD pode ter desligado o `tocando` enquanto o som decodificava.
+   *
+   * O que lança fora dos caminhos de recusa de `carregarSom` é dito como o
+   * `.catch` de `montarMidia` diz: o som falhou ao carregar.
+   *
+   * `carregando` fica de pé enquanto a carga do pedido estiver a caminho: o
+   * destino que devolve os sons nesse meio tempo diz o pedido como recusado
+   * (`devolverOsSons`), em vez de desfazê-lo em silêncio.
+   */
+  pedirParaTocar(elem, som) {
+    if (!som.adiado || !this.tomouOsSons) return;
+    if (som.declarado === som.quer) return;
+    if (!som.quer) {
+      som.declarado = false;
+      return;
+    }
+    const montagem = som.adiado;
+    const { estado } = montagem;
+    som.adiado = null;
+    som.carregando = true;
+    // Até decodificar, o som que o MOD mandou tocar está «carregando», e não
+    // «pronta»: quem lê a aba não pode ver de pé um som que ainda não existe.
+    elem.dataset.estado = "carregando";
+    this.anotarMidia(elem, "carregando", "", Boolean(montagem.plano.cartao));
+    const vindo = this.carregarSom(elem, montagem);
+    // A carga que `carregarSom` acabou de tomar, antes do primeiro `await`
+    // dele: uma devolvida no meio do caminho já não é esta.
+    const carga = estado.carga;
+    vindo
+      .catch((falha) => {
+        if (estado.cancelado || this.solta || estado.carga !== carga) return;
+        this.falharOSom(elem, montagem.plano, motivoDaFalha(falha));
+      })
+      .finally(() => {
+        if (estado.carga === carga) som.carregando = false;
+      });
   }
 
   /** O MOD declara «tocando»; o produto guarda, e aplica quando o som existir. */
@@ -2572,6 +3035,11 @@ class RegiaoDeMod {
    * `tocando: true` não o religar — nem o religar por ter terminado
    * (`aplicarTocando`).
    *
+   * **E o destino de contribuição que segura os sons dela e saiu do documento
+   * os devolve** (`devolverOsSons`), depois de calá-los: a contribuição pode
+   * continuar desenhada noutro destino, e é a segunda volta da varredura de
+   * `base.js` que a oferece a ele (`tomarOsSonsDevolvidos`).
+   *
    * Quem chama: `SuperficieDeMod#fechar`, e `calarOsSonsQueSairamDaTela`, em
    * `base.js`, no fim de cada desenho que pode tirar um nó de MOD da tela.
    *
@@ -2582,9 +3050,15 @@ class RegiaoDeMod {
    */
   calarSonsForaDaTela(cartoesPintam = true) {
     if (this.solta) return;
+    // O destino de contribuição que segura os sons e saiu do documento os
+    // devolve, e diz quais **tocavam** antes de esta pausa os calar: é esse som
+    // que recomeça no destino que tomar a marca (`devolverOsSons`).
+    const devolve = this.tomouOsSons && !this.raiz?.isConnected;
+    const tocavam = new Set();
     for (const [elem, som] of this.somDaMidia) {
       if (!som.tocador) continue;
       if (elem.isConnected && (cartoesPintam || !som.cartao)) continue;
+      if (devolve && som.tocador.tocando) tocavam.add(elem);
       const esperava = som.tocador.esperando;
       som.declarado = som.quer;
       som.terminou = false;
@@ -2594,6 +3068,222 @@ class RegiaoDeMod {
       // desfeito em silêncio.
       if (esperava) som.recusar(SOM_FORA_DA_TELA);
     }
+    if (devolve) this.devolverOsSons(tocavam);
+  }
+
+  /**
+   * **O destino que segurava os sons de uma contribuição e saiu da tela os
+   * devolve** (P49-8, o S-m7 da revisão do Lote Som).
+   *
+   * Uma contribuição sem alvo desenha em vários destinos, e os sons dela moram
+   * no que os tomou (`montarSom`). Quando a pessoa daquele destino sai da sala,
+   * o nó dele sai do documento — e a contribuição continua desenhada nos
+   * outros. O som ficava preso ali: um `tocando` religado era recusado com
+   * «o lugar deste som saiu da tela», ao lado da contribuição na tela.
+   *
+   * Calado o som por `calarSonsForaDaTela`, este destino:
+   * - solta os tocadores — e cancela a carga que estiver a caminho
+   *   (`estado.carga`): os bytes e a decodificação que chegarem depois não
+   *   viram tocador aqui. O pedido de tocar que a esperava é dito como a
+   *   recusa de quem saiu da tela, como o que esperava o áudio da janela;
+   * - devolve ao bolso o que o som decodificado ocupava;
+   * - esquece as anotações desses sons: o diagnóstico os conta onde estão;
+   * - guarda o adiamento de cada um, como um destino que nunca os tomou, e
+   *   devolve a marca, com o lugar dos sons que **tocavam** antes de a pausa os
+   *   calar (`tocavam`, que `calarSonsForaDaTela` guarda): esses recomeçam no
+   *   destino que a tomar (`herdarOSom`), e os outros continuam calados.
+   *
+   * Quando a pessoa volta, o nó reaparece com a figura «pronta». Se outro
+   * destino tomou a marca, ele fica sem tocador, e só a toma de novo se ela for
+   * devolvida outra vez com ele na tela. Se ninguém a tomou, ele a retoma na
+   * varredura (`tomarOsSonsDevolvidos`) pela mesma regra de um destino novo: o
+   * som que tocava quando ele saiu recomeça, do começo — com o conteúdo de uma
+   * contribuição fixo, é o único jeito de o som voltar —, e os outros ficam
+   * calados.
+   */
+  devolverOsSons(tocavam = new Set()) {
+    if (!this.sonsDaContribuicao || !this.tomouOsSons) return;
+    const lugares = this.lugaresDasMidias();
+    // O que este destino herdou e ainda não chegou a ele passa adiante.
+    const herdados = {
+      lugares: new Set(this.herdados?.lugares ?? []),
+      tocavam: new Set(this.herdados?.tocavam ?? []),
+      recusados: new Map(this.herdados?.recusados ?? []),
+    };
+    for (const [elem, som] of this.somDaMidia) {
+      const montagem = som.montagem;
+      if (!montagem) continue;
+      const { estado } = montagem;
+      herdados.lugares.add(lugares.get(elem));
+      // **O som recusado continua recusado**, aqui e no destino que tomar a
+      // marca: a figura fica, e a recusa passa adiante com o motivo. Sem
+      // tocador nem carga, não há o que soltar.
+      if (som.recusa) {
+        herdados.recusados.set(lugares.get(elem), som.recusa);
+        // O recusado não carrega mais, aqui nem em quem herdar: o `data:` que
+        // ainda estivesse aqui — de uma carga que falhou antes de ler os
+        // bytes — não tem quem o leia.
+        delete montagem.origem.uri;
+        this.esquecerMidia(elem);
+        continue;
+      }
+      if (tocavam.has(elem)) herdados.tocavam.add(lugares.get(elem));
+      // O `data:` do servidor que este destino ainda guardava, de um som que
+      // esperava o pedido de tocar, sai com a marca: quem a tomar — este
+      // destino de volta, ou outro — pede o som de novo ao servidor.
+      delete montagem.origem.uri;
+      if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
+      estado.carga += 1;
+      som.carregando = false;
+      estado.som?.soltar();
+      estado.som = null;
+      this[estado.bolso.contaDoSom] -= estado.bytesDoSom;
+      estado.bytesDoSom = 0;
+      estado.recusaDita = null;
+      som.tocador = null;
+      som.tocar = null;
+      som.terminou = false;
+      som.adiado = montagem;
+      elem.dataset.estado = "pronta";
+      this.esquecerMidia(elem);
+    }
+    this.herdados = null;
+    this.sonsDaContribuicao.herdados = herdados;
+    this.sonsDaContribuicao.tomados = false;
+    // A bandeira que abre a segunda volta da varredura (`base.js`): só uma
+    // marca devolvida tem quem a tome ali.
+    this.sonsDaContribuicao.devolvidos = true;
+    this.tomouOsSons = false;
+  }
+
+  /**
+   * Toma os sons de uma contribuição que o destino que os segurava devolveu
+   * (`devolverOsSons`) — **na mesma varredura**, ou quando uma mídia chega.
+   *
+   * Redesenhar não basta: a montagem de cada destino é guardada e
+   * reaproveitada (`montarContribuicao`, em `base.js`), e a figura que assentou
+   * sem tocador volta como estava. **Quem chama são dois:**
+   * - a segunda volta de `calarOsSonsQueSairamDaTela`, em `base.js`, só nos
+   *   destinos em que a contribuição desenha (`aContribuicaoPinta`);
+   * - `montarSom`, quando a mídia de um som chega a este destino com a marca
+   *   devolvida — sem perguntar `aContribuicaoPinta`, que é de `base.js`.
+   *
+   * Este confere que o nó dele está no documento e que tem um som que chegou a
+   * ele — esperando a marca, ou recusado, que a toma para dizer a recusa onde
+   * ela está na tela. A chamada de `montarSom` é segura porque, no desenho de
+   * hoje, o destino que não desenha a contribuição — a substituição que perde a
+   * disputa, a pessoa que saiu — sai do documento; um destino que ficasse no
+   * documento sem desenhar tomaria a marca por ali.
+   *
+   * **O som que tocava recomeça aqui, e os outros não.** Quem decide, por som,
+   * é `herdarOSom`: o que tocava quando o lugar dele saiu da tela recomeça, do
+   * começo — o ponto em que o outro parou foi embora com o tocador dele —, sem
+   * um `tocando` novo do MOD; o que não tocava (terminado, parado pelo MOD, ou
+   * recusado) fica calado, e o `tocando` religado é o pedido de tocar — que
+   * agora toca aqui, sem recusa.
+   *
+   * @returns {boolean} Se tomou a marca.
+   */
+  tomarOsSonsDevolvidos() {
+    if (this.solta || !this.sonsDaContribuicao || this.sonsDaContribuicao.tomados) return false;
+    if (!this.raiz?.isConnected) return false;
+    const chegados = [...this.somDaMidia].filter(([, som]) => som.montagem);
+    if (chegados.length === 0) return false;
+    const lugares = this.lugaresDasMidias();
+    this.tomarAMarca();
+    for (const [elem, som] of chegados) this.herdarOSom(elem, som, lugares);
+    return true;
+  }
+
+  /**
+   * Toma a marca dos sons desta contribuição — e, quando ela foi devolvida,
+   * herda o que o destino que saiu disse deles (`devolverOsSons`): quais
+   * tocavam. A herança fica com este destino até cada som dela chegar aqui.
+   */
+  tomarAMarca() {
+    const sons = this.sonsDaContribuicao;
+    sons.tomados = true;
+    sons.devolvidos = false;
+    this.tomouOsSons = true;
+    this.herdados = sons.herdados ?? null;
+    sons.herdados = null;
+  }
+
+  /**
+   * Assenta um som que este destino tomou de um que saiu da tela, pela regra
+   * da troca de destino.
+   *
+   * **O som que tocava quando o lugar dele saiu recomeça aqui, do começo** —
+   * «uma troca de tocador no meio de um som o faz recomeçar», nos riscos do
+   * K5: a declaração dele fica por aplicar, e o `tocando: true` que valia é o
+   * pedido de tocar. **Os outros continuam calados**: a declaração deles vale
+   * como aplicada, como em `calarSonsForaDaTela`, e um som que já tinha
+   * terminado, ou que o MOD tinha parado, não volta pela troca. **E o
+   * recusado continua recusado**: «falhou» ou «cheia», com o motivo na
+   * anotação, sem carregar e sem dizer a recusa outra vez.
+   *
+   * Qual som é qual nos dois destinos é o lugar dele na declaração
+   * (`lugaresDasMidias`): a chave do plano não diz, e os destinos desenham a
+   * mesma declaração.
+   *
+   * **Vale também para o som que chega depois** de este destino tomar a marca
+   * — a mídia dele ainda vinha quando a marca mudou (`montarSom`): a herança
+   * fica com o destino até o último som dela chegar. Um som num lugar que o
+   * destino que saiu não segurava é montado como qualquer outro. E o som que
+   * chega a um destino com a marca devolvida o faz tomá-la pelo caminho de
+   * toda devolução, `tomarOsSonsDevolvidos`: só com o nó na tela, e com todos
+   * os sons dele.
+   *
+   * **E vale para o mesmo destino que volta à tela** e retoma a marca que ele
+   * mesmo devolveu: o que é «o destino que saiu» e o que é «o que toma» são o
+   * mesmo renderer, e a regra não os distingue.
+   */
+  herdarOSom(elem, som, lugares) {
+    const herdados = this.herdados;
+    const lugar = lugares.get(elem);
+    if (herdados?.lugares.delete(lugar)) {
+      const recusa = herdados.recusados.get(lugar);
+      herdados.recusados.delete(lugar);
+      som.declarado = herdados.tocavam.delete(lugar) ? undefined : som.quer;
+      // A herança acaba quando o último som dela chega: um som num lugar que o
+      // destino que saiu não segurava é montado como qualquer outro.
+      if (herdados.lugares.size === 0) this.herdados = null;
+      if (recusa) {
+        // A recusa já foi dita ao MOD e ao registro por quem a viu: aqui ela
+        // só volta à figura e à anotação, e o som não carrega — nem o `data:`
+        // que a mídia dele trouxe ao chegar a um destino com a marca fica.
+        som.adiado = null;
+        som.recusa = recusa;
+        if (som.montagem) delete som.montagem.origem.uri;
+        elem.dataset.estado = recusa.figura;
+        this.anotarMidia(elem, "recusada", recusa.motivo, Boolean(som.montagem?.plano.cartao));
+        return;
+      }
+    }
+    this.esperarOPedidoDeTocar(elem);
+  }
+
+  /**
+   * O lugar de cada mídia deste renderer na declaração: a ordem dela entre as
+   * mídias, no documento.
+   *
+   * É o que diz qual som é qual entre os destinos de uma contribuição. A chave
+   * do plano não diz — a posição recomeça dentro de cada contêiner, e dois sons
+   * de contêineres diferentes saem com a mesma —, e a ordem diz: todo destino
+   * monta a mesma declaração, com o mesmo perfil e os mesmos tetos.
+   *
+   * @returns {Map<Element, number>}
+   */
+  lugaresDasMidias() {
+    const lugares = new Map();
+    const andar = (no) => {
+      for (const filho of Array.from(no?.children ?? [])) {
+        if (this.somDaMidia.has(filho)) lugares.set(filho, lugares.size);
+        andar(filho);
+      }
+    };
+    andar(this.raiz);
+    return lugares;
   }
 
   // ------------------------------------------------ o estado das mídias
@@ -2606,23 +3296,25 @@ class RegiaoDeMod {
    * estado na tela, o MOD já recebe o evento, e a recusa já vai ao registro
    * (`dizerRecusaDeMidia`). O que faltava era alguém de fora poder perguntar
    * — «quem pinta cada lugar», na gestão de MODs, soma estas anotações por
-   * ponto de contribuição, e `dono.midiaMudou` é o aviso de que a soma mudou.
+   * ponto de contribuição e por MOD, e `dono.midiaMudou` é o aviso de que a
+   * soma mudou.
    *
-   * **Quais anotações alguém lê.** Só `midiasDoPonto`, em `base.js`, e só as
-   * de dois lugares:
-   * - as dos renderers de contribuição (`montarContribuicao`), no destino em
-   *   que a contribuição desenha (`aContribuicaoPinta`);
-   * - as de cartão (`cartao: true`) da região de um MOD cujos cartões da API 3
-   *   valem (`modsDeCartaoQueValem`), em `pessoa.cartao`.
-   *
-   * As da faixa do MOD — a região sem cartão — e as das superfícies (páginas,
-   * painéis e diálogos) são anotadas e ninguém as lê: a aba DIAGNÓSTICO não
-   * mostra a mídia da região nem das páginas, que é onde o som costuma morar.
-   * É uma pendência da revisão ampla do Plano 1D (m-2), e não um esquecimento.
+   * **Quem lê as anotações.** As duas somas da aba, em `base.js`:
+   * - `midiasDoPonto`, por ponto de contribuição: as dos renderers de
+   *   contribuição (`montarContribuicao`), no destino em que a contribuição
+   *   desenha (`aContribuicaoPinta`), e as de cartão (`cartao: true`) da região
+   *   de um MOD cujos cartões valem (`modsDeCartaoQueValem`), em
+   *   `pessoa.cartao`;
+   * - `midiasDaRegiaoEDasPaginas`, por MOD: todas as da região dele e as das
+   *   superfícies (páginas, painéis e diálogos), sem filtro — é onde o som
+   *   costuma morar. A mídia de um cartão entra nas duas: são duas vistas da
+   *   mesma mídia, e a aba não soma os dois blocos.
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
-   * @param {string} [motivo] Por que foi recusada, em texto. Cortado em 200
+   * @param {string} [motivo] Por que foi recusada, em texto — ou, num som de
+   *   contribuição que espera o pedido de tocar, o tamanho do arquivo que já
+   *   chegou (`esperarOPedidoDeTocar`). Cortado em 200
    *   pontos de código, e não por índice, como a chave em `dizerRecusaDeMidia`:
    *   um corte que parta um par substituto deixa meio caractere no motivo.
    * @param {boolean} [cartao] Se ela mora num cartão. Dito na primeira
@@ -3199,7 +3891,7 @@ class TocadorDeSomDeMod {
   async tocar(comGesto = false) {
     if (this.solto || this.fonte) return this.fonte !== null;
     const pedido = (this.pedido += 1);
-    // Sem WebAudio, `montarSom` já recusou o som antes de existir tocador; o
+    // Sem WebAudio, `carregarSom` já recusou o som antes de existir tocador; o
     // `throw` é a mesma recusa, pelo `catch` de quem pediu, e não a frase do
     // gesto que faltou.
     const contexto = contextoDeSomDeMod();

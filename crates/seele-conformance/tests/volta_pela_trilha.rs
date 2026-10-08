@@ -45,6 +45,8 @@
 //! por loopback na forma escrita, então a forma mapeada conta como pública e o
 //! `LEVE` sai por ela, mas o pacote ainda chega a um socket desta máquina.
 
+#![allow(clippy::expect_used)]
+
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -55,6 +57,7 @@ use seele_core::{FilePinStore, PinStore};
 use seele_ffi::conhecidos::Conhecidos;
 use seele_ffi::uri::Bilhete;
 use seele_ffi::{ConnectConfig, Connection, ConnectionError, Trust};
+use seele_proto::encontro::{analisar, Marca, Marcas, Pedido, TAMANHO};
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{admissao, Daemon, ServerConfig};
 
@@ -64,39 +67,57 @@ mod vaga;
 ///
 /// Banco em memória: cada um nasce com uma identidade nova, e é disso que o
 /// segundo teste precisa para ter um impostor.
-async fn server_de_teste() -> Option<(SocketAddr, Arc<Daemon>)> {
+async fn server_de_teste() -> (SocketAddr, Arc<Daemon>) {
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::Memory,
         ..ServerConfig::default()
     };
-    let servidor = Arc::new(Daemon::bind(config).await.ok()?);
-    let endereco = servidor.local_addr().ok()?;
+    let servidor = Arc::new(
+        Daemon::bind(config)
+            .await
+            .expect("o servidor de teste não subiu em 127.0.0.1"),
+    );
+    let endereco = servidor
+        .local_addr()
+        .expect("o servidor de teste subiu sem endereço local");
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
         let _ = aceitando.run().await;
     });
-    Some((endereco, servidor))
+    (endereco, servidor)
 }
 
-/// Um ponto de encontro que só conta quantos avisos chegaram.
+/// Um ponto de encontro que só conta os `LEVE` com a marca do aviso esperado.
 ///
-/// A mesma forma do de `estados.rs`. A batida não lê resposta do ponto de
-/// encontro (o cabeçalho de `seele_core::encontro` diz o que este lado lê e o
-/// que não lê), então um contador basta para provar que o `LEVE` saiu.
-async fn ponto_que_conta() -> Option<(SocketAddr, Arc<AtomicUsize>)> {
-    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.ok()?;
-    let onde = socket.local_addr().ok()?;
+/// A batida não lê resposta do ponto de encontro (o cabeçalho de
+/// `seele_core::encontro` diz o que este lado lê e o que não lê), então um
+/// contador basta para provar que o `LEVE` saiu. **Com a marca**, e não
+/// qualquer datagrama: um `LEVE` com outra marca chega ao anfitrião e é
+/// ignorado, e quem está atrás de NAT não é alcançado. O contador que contava
+/// tudo deixava verde a marca trocada em `Batida::preparar` (a metade do 1B
+/// que ficou no lote M1 da F5).
+async fn ponto_que_conta(aviso: Marca) -> (SocketAddr, Arc<AtomicUsize>) {
+    let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+        .await
+        .expect("o ponto de encontro de teste não abriu em 127.0.0.1");
+    let onde = socket
+        .local_addr()
+        .expect("o ponto de encontro de teste abriu sem endereço local");
     let quantos = Arc::new(AtomicUsize::new(0));
     let contador = Arc::clone(&quantos);
     tokio::spawn(async move {
-        let mut balde = [0_u8; 96];
-        while socket.recv_from(&mut balde).await.is_ok() {
-            contador.fetch_add(1, Ordering::Relaxed);
+        let mut balde = [0_u8; TAMANHO];
+        while let Ok((lidos, _)) = socket.recv_from(&mut balde).await {
+            if let Some(Pedido::Leve { marca, .. }) = balde.get(..lidos).and_then(analisar) {
+                if marca == aviso {
+                    contador.fetch_add(1, Ordering::Relaxed);
+                }
+            }
         }
     });
-    Some((onde, quantos))
+    (onde, quantos)
 }
 
 /// A porta de ontem: aberta, lida e devolvida, para ninguém atender nela.
@@ -129,16 +150,24 @@ fn lembrar_de_ontem(
     caminhos: &[String],
     bilhete: Option<&Bilhete>,
     impressao: &str,
-) -> Option<String> {
+) -> String {
     let caminho = casa.join("conhecidos");
-    let mut lista = Conhecidos::abrir(caminho.clone()).ok()?;
-    lista.registrar(ontem, "pessoa", None).ok()?;
+    let mut lista =
+        Conhecidos::abrir(caminho.clone()).expect("a lista de conhecidos não abriu para escrever");
+    lista
+        .registrar(ontem, "pessoa", None)
+        .expect("a lista de conhecidos não registrou a primeira visita");
     let bilhete = bilhete.map(ToString::to_string);
     lista
         .anotar_caminhos(ontem, caminhos, bilhete.as_deref(), Some(impressao))
-        .ok()?;
-    let relida = Conhecidos::abrir(caminho).ok()?;
-    relida.buscar(ontem)?.impressao.clone()
+        .expect("a lista de conhecidos não anotou os caminhos e a impressão da primeira visita");
+    let relida = Conhecidos::abrir(caminho).expect("a lista de conhecidos não abriu para reler");
+    relida
+        .buscar(ontem)
+        .expect("a lista de conhecidos, relida do disco, perdeu a entrada da primeira visita")
+        .impressao
+        .clone()
+        .expect("a lista de conhecidos, relida do disco, perdeu a impressão da primeira visita")
 }
 
 /// A configuração de uma entrada, com o que o teste decide e o resto fixo.
@@ -180,26 +209,26 @@ async fn conectar(config: ConnectConfig) -> Result<(Arc<Connection>, Trust), Con
 #[tokio::test(flavor = "multi_thread")]
 async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa() {
     let _vaga = vaga::minha();
-    let Some((hoje, servidor)) = server_de_teste().await else {
-        panic!("o servidor de teste não subiu");
-    };
-    let Some((ponto, avisos)) = ponto_que_conta().await else {
-        panic!("o ponto de encontro de teste não subiu");
-    };
+    let (hoje, servidor) = server_de_teste().await;
+    let real = servidor.fingerprint().to_owned();
+    // A marca que o `LEVE` tem de trazer: a do aviso deste servidor, pela
+    // mesma regra com que o anfitrião a confere antes de furar.
+    let aviso = Marcas::do_servidor(&real)
+        .expect("a impressão do servidor de teste forma marcas")
+        .aviso()
+        .clone();
+    let (ponto, avisos) = ponto_que_conta(aviso.clone()).await;
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há lista nem identidade");
     };
     let Ok(bilhete) = Bilhete::novo(ponto.to_string(), "45.33.32.156:41234") else {
         panic!("o bilhete de teste não se monta");
     };
-    let real = servidor.fingerprint().to_owned();
 
     // Ontem ele morava numa porta onde hoje não há ninguém: é o servidor que
     // fechou e abriu de novo atrás de um NAT que lhe deu outra porta.
     let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[], Some(&bilhete), &real) else {
-        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
-    };
+    let guardada = lembrar_de_ontem(casa.path(), &ontem, &[], Some(&bilhete), &real);
 
     // O alvo é o de ontem, que é o que a pessoa clicou. O de hoje vai entre os
     // alternativos, que é onde o `connect` do app põe a resposta do quarto. Sem
@@ -225,9 +254,10 @@ async fn quem_volta_pela_lista_a_um_servidor_que_mudou_de_porta_confere_e_avisa(
     );
     assert!(
         avisos.load(Ordering::Relaxed) >= 1,
-        "nenhum `LEVE` chegou ao ponto de encontro: sem impressão esperada, \
-         `Batida::preparar` não tem de onde tirar a marca, e quem está atrás de \
-         NAT não é alcançado na volta"
+        "nenhum `LEVE` com a marca do aviso ({aviso}) chegou ao ponto de encontro: ou, sem \
+         impressão esperada, `Batida::preparar` não teve de onde tirar a marca, ou o `LEVE` \
+         saiu com outra, que o anfitrião ignora. Nos dois casos quem está atrás de NAT não é \
+         alcançado na volta"
     );
 
     connection.disconnect();
@@ -240,20 +270,14 @@ async fn o_impostor_no_endereco_novo_e_recusado_pela_impressao_guardada() {
     // O S3 numa máquina só. O servidor de verdade é o da lista, e quem atende
     // no endereço que o quarto devolveu é outro, com outra chave. Bastava o
     // anfitrião ficar fora do quarto por mais de 60 s para a marca ser dele.
-    let Some((_, verdadeiro)) = server_de_teste().await else {
-        panic!("o servidor de verdade não subiu");
-    };
-    let Some((impostor_em, impostor)) = server_de_teste().await else {
-        panic!("o impostor não subiu");
-    };
+    let (_, verdadeiro) = server_de_teste().await;
+    let (impostor_em, impostor) = server_de_teste().await;
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há lista nem identidade");
     };
     let real = verdadeiro.fingerprint().to_owned();
     let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[], None, &real) else {
-        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
-    };
+    let guardada = lembrar_de_ontem(casa.path(), &ontem, &[], None, &real);
 
     // Só o impostor na corrida. O endereço de ontem não responde e somaria os
     // quatro segundos do prazo dele sem mudar o que se mede, que é o que
@@ -293,20 +317,26 @@ const DE_OUTRO_SERVIDOR: &str = "00000000000000000000000000000000000000000000000
 /// Em arquivo, e não em memória: o servidor que sobe de novo com o mesmo banco
 /// é o **mesmo** servidor, com a mesma chave, noutra porta. É o anfitrião que
 /// fechou e abriu atrás de um NAT que lhe deu outro mapeamento.
-async fn server_com_banco(banco: &Path) -> Option<(SocketAddr, Arc<Daemon>)> {
+async fn server_com_banco(banco: &Path) -> (SocketAddr, Arc<Daemon>) {
     let config = ServerConfig {
         name: "Casa".into(),
         listen: SocketAddr::from(([127, 0, 0, 1], 0)),
         database: Location::File(banco.to_path_buf()),
         ..ServerConfig::default()
     };
-    let servidor = Arc::new(Daemon::bind(config).await.ok()?);
-    let endereco = servidor.local_addr().ok()?;
+    let servidor = Arc::new(
+        Daemon::bind(config)
+            .await
+            .expect("o servidor de teste com banco em arquivo não subiu em 127.0.0.1"),
+    );
+    let endereco = servidor
+        .local_addr()
+        .expect("o servidor de teste com banco em arquivo subiu sem endereço local");
     let aceitando = Arc::clone(&servidor);
     tokio::spawn(async move {
         let _ = aceitando.run().await;
     });
-    Some((endereco, servidor))
+    (endereco, servidor)
 }
 
 /// A configuração de uma visita por um link colado nesta sessão.
@@ -349,8 +379,8 @@ fn anotar_como_o_app(
 /// **Só depois de `shutdown`.** `wait_idle` volta quando o endpoint não tem
 /// conexão nenhuma, e `Connection::disconnect` não a faz voltar logo: medido,
 /// 20,0 s (o `IDLE_TIMEOUT`) depois de cada visita, duas vezes seguidas. O
-/// `shutdown` fecha o que estiver de pé e o `wait_idle` volta em dezenas de
-/// milissegundos, como em `bateria_interna.rs`.
+/// `shutdown` fecha o que estiver de pé e o `wait_idle` volta em microssegundos
+/// (medido: 4 µs), como em `bateria_interna.rs`.
 async fn esperar_o_servidor_fechar(servidor: &Daemon) {
     if tokio::time::timeout(Duration::from_secs(10), servidor.wait_idle())
         .await
@@ -373,9 +403,7 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
         panic!("sem diretório temporário não há banco");
     };
     let banco = pasta.path().join("seele.db");
-    let Some((ontem, servidor)) = server_com_banco(&banco).await else {
-        panic!("o servidor de teste não subiu");
-    };
+    let (ontem, servidor) = server_com_banco(&banco).await;
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há lista nem identidade");
     };
@@ -425,9 +453,7 @@ async fn um_link_de_outro_servidor_nao_envenena_a_volta_pela_lista() {
     servidor.shutdown();
     esperar_o_servidor_fechar(&servidor).await;
     drop(servidor);
-    let Some((hoje, de_novo)) = server_com_banco(&banco).await else {
-        panic!("o servidor não subiu de novo com o mesmo banco");
-    };
+    let (hoje, de_novo) = server_com_banco(&banco).await;
     assert_eq!(
         de_novo.fingerprint(),
         real,
@@ -493,9 +519,7 @@ async fn a_primeira_volta_pelo_alvo_cura_a_lista_envenenada() {
     // alvo ele não passa por cima da impressão guardada (os dois últimos
     // testes deste arquivo), e num alvo de LAN também não. O alvo daqui,
     // `127.0.0.1`, é esta máquina em qualquer rede, e conta como público.
-    let Some((de_x, x)) = server_de_teste().await else {
-        panic!("o servidor X não subiu");
-    };
+    let (de_x, x) = server_de_teste().await;
     let Ok(casa) = tempfile::tempdir() else {
         panic!("sem diretório temporário não há lista nem identidade");
     };
@@ -518,9 +542,7 @@ async fn a_primeira_volta_pelo_alvo_cura_a_lista_envenenada() {
     visita.disconnect();
 
     // E a lista com a impressão de outro servidor na entrada de X.
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &alvo, &[], None, DE_OUTRO_SERVIDOR) else {
-        panic!("a lista de conhecidos não devolveu a impressão envenenada");
-    };
+    let guardada = lembrar_de_ontem(casa.path(), &alvo, &[], None, DE_OUTRO_SERVIDOR);
 
     // A volta pela lista, sem link: só a guardada, contra o pino do alvo.
     let configuracao = config(
@@ -590,9 +612,7 @@ async fn y_com_convite(banco: &Path, portaria: bool) -> (SocketAddr, Arc<Daemon>
         };
         convite
     };
-    let Some((onde, y)) = server_com_banco(banco).await else {
-        panic!("o servidor Y não subiu");
-    };
+    let (onde, y) = server_com_banco(banco).await;
     (onde, y, convite)
 }
 
@@ -636,10 +656,7 @@ async fn voltar_pela_lista_com_y_fixado(
     // A entrada de X: o endereço de ontem morreu, e o de Y está entre os
     // caminhos que a lista guardou.
     let ontem = mapeado(endereco_morto().port());
-    let Some(guardada) = lembrar_de_ontem(casa.path(), &ontem, &[no_y.to_owned()], None, do_x)
-    else {
-        panic!("a lista de conhecidos não devolveu a impressão da primeira visita");
-    };
+    let guardada = lembrar_de_ontem(casa.path(), &ontem, &[no_y.to_owned()], None, do_x);
 
     // Sem link: só a guardada, com o endereço de Y na corrida como o `connect`
     // do app o põe (os caminhos da lista), e o convite que a pessoa tem.

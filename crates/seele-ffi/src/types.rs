@@ -323,6 +323,42 @@ pub enum EndReason {
     /// Não é sobre a credencial de quem tentou entrar: é configuração do
     /// servidor, e quem hospeda tem o motivo no log dele.
     ModsIndisponiveis,
+    /// Quem atendeu na volta da bateria não é o servidor desta sessão.
+    ///
+    /// A volta foi recusada dentro do TLS, antes do `Hello`, por um de dois
+    /// motivos, e os dois caem aqui: a impressão esperada nomeava outra chave
+    /// (`InviteMismatch`), ou quem atendeu mostrou o certificado do servidor sem
+    /// provar ter a chave dele (`ChaveNaoProvada`). Era
+    /// [`Self::CredentialRejected`], e a frase mandava conferir convite e senha.
+    /// Eles não chegaram a quem atendeu: do aperto de mão saiu só o
+    /// `ClientHello` do TLS, que vai antes de haver o que conferir.
+    ///
+    /// Sem as impressões de propósito: este enum é `Copy` e chega ao retrato
+    /// (`ended`). Elas ficam no `seele.log`, na linha da volta recusada. Sem a
+    /// origem da impressão também (o link colado ou a lista de servidores), e
+    /// por isso a frase da casca só diz o que vale para as duas origens e os
+    /// dois motivos.
+    ServidorTrocouNaVolta,
+    /// A chave fixada do servidor mudou entre a queda e a volta. ADR 0003.
+    ///
+    /// O alarme de chave trocada, no meio de uma sessão: a volta da bateria foi
+    /// recusada dentro do TLS (`PinChanged`). Era
+    /// [`Self::CredentialRejected`]. As duas impressões ficam no `seele.log`,
+    /// pelo mesmo motivo de [`Self::ServidorTrocouNaVolta`].
+    ChaveMudouNaVolta,
+    /// Quem recebia encerrou a ligação da sala pessoal. Spec de 23/09/2026.
+    ChamadaEncerrada,
+    /// O toque da sala pessoal venceu sem ninguém atender.
+    NinguemAtendeu,
+    /// Quem recebia recusou a ligação.
+    ChamadaRecusada,
+    /// O servidor exige MODs de uma API que este app não roda (D-fio-7).
+    ///
+    /// As APIs exigidas chegam no fio como máscara, e não atravessam aqui: este
+    /// enum é unitário porque a casca o lê como texto. A frase diz «atualize o
+    /// app», que é o que a pessoa faz com qualquer API que falte; quem precisa
+    /// dos números é o launcher, na sessão do Plano 3.
+    ModsDeOutraApi,
     /// The link died without the server saying why.
     LinkLost,
 }
@@ -348,6 +384,10 @@ impl From<seele_core::DisconnectReason> for EndReason {
             seele_core::DisconnectReason::ModsRecusados => Self::ModsRecusados,
             seele_core::DisconnectReason::ModsMudaram => Self::ModsMudaram,
             seele_core::DisconnectReason::ModsIndisponiveis => Self::ModsIndisponiveis,
+            seele_core::DisconnectReason::ChamadaEncerrada => Self::ChamadaEncerrada,
+            seele_core::DisconnectReason::NinguemAtendeu => Self::NinguemAtendeu,
+            seele_core::DisconnectReason::ChamadaRecusada => Self::ChamadaRecusada,
+            seele_core::DisconnectReason::ModsDeOutraApi { .. } => Self::ModsDeOutraApi,
         }
     }
 }
@@ -1993,10 +2033,13 @@ pub enum ConnectionError {
     /// a pessoa não escolheu (um candidato do convite, da lista ou do quarto do
     /// ponto de encontro), ou de um alvo de escopo local (um endereço de LAN, o
     /// mesmo de uma casa para outra) —, e o alarme de chave trocada da casca
-    /// acusaria o culpado errado. O que falhou é a promessa, do link ou da
-    /// lista, e não a continuidade do servidor. A casca diz de quem era a
-    /// promessa: o `connect` do app sabe se a impressão veio do link ou da
-    /// lista.
+    /// acusaria o culpado errado. A continuidade do servidor não está em
+    /// questão: o que não confere é a promessa, do link ou da lista, com quem
+    /// atendeu. Ou a promessa está errada, ou ela está certa e quem atendeu é
+    /// outro servidor: num alvo de LAN, outro servidor no mesmo endereço,
+    /// porque o endereço da rede de casa se repete de uma casa para outra. A
+    /// casca diz de quem era a promessa: o `connect` do app sabe se a impressão
+    /// veio do link ou da lista.
     ///
     /// **Recusada dentro do TLS, antes do `Hello`**: o convite, a senha e o
     /// apelido (e, com eles, a chave e a assinatura da identidade) não chegaram
@@ -2016,6 +2059,19 @@ pub enum ConnectionError {
         /// What the server offered.
         offered: String,
     },
+    /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
+    /// que o assina.
+    ///
+    /// O verificador aceitou o certificado (o pin conferia, ou era o primeiro
+    /// contato), e o TLS caiu logo depois, na assinatura de quem atendeu: o
+    /// certificado é público e se repete inteiro, e a chave privada não.
+    /// Recusada dentro do TLS, antes do `Hello`, como [`Self::InviteMismatch`]:
+    /// o convite, a senha e o apelido não chegaram a ele.
+    ///
+    /// Era `Refused { Incompatible }`, e a tela mandava atualizar o SEELE nas
+    /// duas máquinas. Unitária: não há impressão a comparar, porque a que quem
+    /// atendeu mostrou é a do servidor verdadeiro.
+    ChaveNaoProvada,
     /// The server refused the session, and said why.
     Refused {
         /// The enumerated reason.

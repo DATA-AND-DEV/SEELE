@@ -713,8 +713,12 @@ mod entre_versoes {
         // todos com `v <= 2` — e os publicados são a v1 (até a 0.9.9) e a v2
         // (da 0.10.0 em diante). É a conta inteira, e ela é aritmética e não
         // suposição.
+        // A janela daqueles builds era 1 — `COMPATIBILITY_WINDOW`, que saiu
+        // com o Servidor 1.0 —, e a conta é sobre eles, então ela fica escrita
+        // aqui como número deles.
+        const JANELA_DAQUELES_BUILDS: u8 = 1;
         for publicado in 1_u8..=2 {
-            let mais_velho = publicado.saturating_sub(crate::version::COMPATIBILITY_WINDOW);
+            let mais_velho = publicado.saturating_sub(JANELA_DAQUELES_BUILDS);
             assert!(
                 (mais_velho..=publicado).contains(&SCREEN_HEADER_VERSION),
                 "um build de protocolo v{publicado} recusaria o cabeçalho que \
@@ -735,7 +739,7 @@ mod entre_versoes {
             "este build não lê o cabeçalho que ele mesmo escreve"
         );
         assert!(
-            crate::version::negotiate(SCREEN_HEADER_VERSION).is_err(),
+            crate::version::confere_o_carimbo(SCREEN_HEADER_VERSION).is_err(),
             "a janela do protocolo passou a aceitar o 1 de novo; se isso for \
              verdade, este teste perdeu o que ele estava guardando"
         );

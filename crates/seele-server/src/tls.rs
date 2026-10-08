@@ -16,6 +16,25 @@ use anyhow::{Context, Result};
 use quinn::crypto::rustls::QuicServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
+/// O nome que o certificado da sala pessoal leva, e o SNI de quem liga.
+///
+/// Uma constante, e **nunca o código**: o SNI viaja legível no Initial do
+/// QUIC, e contaria para quem se está ligando (spec de 23/09, «Quem liga
+/// confere o código dentro do TLS»). Ele entra no DER da sala, então o valor
+/// está congelado pelo vetor de `tests/identidade_da_sala.rs`. Quando o
+/// `seele-proto` ganhar a constante (pedido à F1, item 12 do contrato de fio),
+/// esta passa a reexportá-la.
+pub const NOME_DA_SALA: &str = "seele-sala";
+
+/// O PKCS#8 v1 de uma chave Ed25519, sem a chave pública: estes 16 bytes e a
+/// semente (RFC 8410, §7).
+///
+/// À mão porque não há crate `pkcs8` na árvore, e o formato da `identity.key`
+/// (32 bytes crus) não muda: o ADR 0017 marca como alto o custo de mudá-lo.
+const PREFIXO_PKCS8_ED25519: [u8; 16] = [
+    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
+];
+
 /// A certificate and the key that signs for it.
 pub struct Identity {
     /// DER-encoded certificate chain.
@@ -43,6 +62,50 @@ impl Identity {
         Ok(Self {
             chain: vec![generated.cert.der().clone()],
             key,
+        })
+    }
+
+    /// A identidade da sala pessoal, feita da semente da `identity.key`.
+    ///
+    /// **Determinística, byte a byte**, e é por isso que ela existe em vez de
+    /// [`Self::self_signed`]. O nome, o número de série e a validade são fixos,
+    /// e a assinatura Ed25519 é determinística. Então o DER sai igual a cada
+    /// abertura, e o dono nunca lê «A CHAVE MUDOU» ao entrar na própria sala.
+    /// O DER é formato congelado: ver o vetor de `tests/identidade_da_sala.rs`.
+    ///
+    /// A validade vai até 31/12/9999, a convenção do RFC 5280 (§4.1.2.5) para
+    /// «sem data de expiração»: quem confere a sala é o código, e não a data.
+    ///
+    /// A semente fica só aqui, dentro do processo. Ela nunca passa pela webview
+    /// e nunca vai para o banco: ver [`crate::ServerConfig::identidade`].
+    ///
+    /// # Errors
+    ///
+    /// Falha se o `rcgen` recusar a chave ou o certificado. Com 32 bytes
+    /// quaisquer, isso não acontece.
+    pub fn da_semente(semente: &[u8; 32]) -> Result<Self> {
+        let mut pkcs8 = Vec::with_capacity(PREFIXO_PKCS8_ED25519.len() + semente.len());
+        pkcs8.extend_from_slice(&PREFIXO_PKCS8_ED25519);
+        pkcs8.extend_from_slice(semente);
+        let der = rustls::pki_types::PrivatePkcs8KeyDer::from(pkcs8);
+
+        let par = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&der, &rcgen::PKCS_ED25519)
+            .context("o rcgen recusou a chave da sala")?;
+        let mut params = rcgen::CertificateParams::new(vec![NOME_DA_SALA.to_owned()])
+            .context("o nome da sala não serve de nome de certificado")?;
+        params.serial_number = Some(rcgen::SerialNumber::from_slice(&[1]));
+        params.not_before = rcgen::date_time_ymd(2026, 9, 23);
+        params.not_after = rcgen::date_time_ymd(9999, 12, 31);
+        let mut nome = rcgen::DistinguishedName::new();
+        nome.push(rcgen::DnType::CommonName, NOME_DA_SALA);
+        params.distinguished_name = nome;
+        let certificado = params
+            .self_signed(&par)
+            .context("o rcgen não assinou o certificado da sala")?;
+
+        Ok(Self {
+            chain: vec![certificado.der().clone()],
+            key: PrivateKeyDer::Pkcs8(der),
         })
     }
 
@@ -100,6 +163,39 @@ impl Identity {
         self.chain.first().map_or_else(String::new, |certificate| {
             seele_proto::transport::certificate_fingerprint(certificate.as_ref())
         })
+    }
+
+    /// A mesma impressão de [`Self::fingerprint`], em bytes: é o que a prova
+    /// de identidade do cliente amarra (o S2).
+    ///
+    /// Sem certificado nenhum, zeros — e então nenhuma prova confere, que é a
+    /// falha do lado seguro. Uma `Identity` sempre nasce com um.
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        self.chain.first().map_or([0; 32], |certificate| {
+            seele_proto::transport::certificate_digest(certificate.as_ref())
+        })
+    }
+}
+
+impl Clone for Identity {
+    fn clone(&self) -> Self {
+        Self {
+            chain: self.chain.clone(),
+            key: self.key.clone_key(),
+        }
+    }
+}
+
+/// A impressão, e nunca a chave: uma identidade aparece em toda
+/// [`crate::ServerConfig`] que alguém imprime para depurar.
+impl std::fmt::Debug for Identity {
+    fn fmt(&self, formatador: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatador
+            .debug_struct("Identity")
+            .field("impressao", &self.fingerprint())
+            .field("key", &"<escondida>")
+            .finish()
     }
 }
 

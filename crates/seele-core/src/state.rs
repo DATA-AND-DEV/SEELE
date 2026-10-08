@@ -1618,7 +1618,33 @@ impl Room {
 
             // Consumed by the handshake and by the round-trip measurement, both
             // of which are over before any shell is watching.
-            ServerMessage::Challenge { .. } | ServerMessage::Pong { .. } => {}
+            //
+            // O `Tocando` também é do aperto de mão, o da sala pessoal: chega
+            // antes do `Session`, e quem o lê é quem liga, na fase de chamar
+            // (a F7 da 0.16). Uma sessão não tem o que fazer com ele.
+            ServerMessage::Challenge { .. }
+            | ServerMessage::Pong { .. }
+            | ServerMessage::Tocando { .. } => {}
+
+            // O FORA DO AR (D-fio-4): o tipo e o fio existem desde o Servidor
+            // 1.0, e nenhum servidor os manda ainda. Guardar a lista de
+            // membros e mostrá-la é da sessão do Plano 3 e da casca; até lá,
+            // não há o que perder aqui.
+            ServerMessage::Membros { .. }
+            | ServerMessage::MembroNovo { .. }
+            | ServerMessage::MembroBanido { .. } => {}
+
+            // Os certificados curtos do celular (ADR 0057). O desktop não abre
+            // `h3`; quem guarda estes hashes é quem monta link para o celular,
+            // e isso é da F4.
+            ServerMessage::HashesDoNavegador { .. } => {}
+
+            // A API 6 de MODs (rascunho da F3, §14): o aviso da metade de
+            // servidor às janelas e o tema como dado do servidor. O tipo e o
+            // fio existem desde o Servidor 1.0, e nenhum servidor os manda
+            // ainda; entregá-los às janelas e aplicar o tema antes de desenhar
+            // a sessão é da casca da API 6.
+            ServerMessage::ModAviso { .. } | ServerMessage::TemaMudou { .. } => {}
 
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
@@ -1709,6 +1735,7 @@ mod tests {
                 id: PersonId(id),
                 nickname: nickname.into(),
                 roles: Vec::new(),
+                material_e2ee: None,
             },
             ssrc: Ssrc(u32::try_from(id * 10).expect("ssrc")),
         }
