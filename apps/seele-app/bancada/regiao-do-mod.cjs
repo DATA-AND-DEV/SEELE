@@ -4543,6 +4543,66 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // **O som recusado não volta a «pronta» no destino novo** (rodada 1,
+  // menor 4). Um som que falhou ou passou do teto no destino que saiu fica
+  // assim no que toma a marca — a figura, e a anotação com o motivo —, sem
+  // dizer a recusa outra vez ao MOD nem ao registro, que já a ouviram.
+  for (const [figura, opcoes, preparar] of [
+    ["falhou", {}, (d) => { d.api.bytesDoSom = () => Promise.reject(new Error("o arquivo sumiu do pacote")); }],
+    ["cheia", { decodificado: { duration: 1, length: (64 * 1024 * 1024) / 8 + 1, numberOfChannels: 2 } }, () => {}],
+  ]) {
+    const recusado = `${caso} · o som «${figura}»`;
+    const Audio = audioDeMentira(opcoes);
+    const b = bancada({ audio: Audio });
+    const d = dono(b, midiaDeSom);
+    preparar(d);
+    const sons = { tomados: false };
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sons;
+      r.aplicar(vinheta(true));
+      return r;
+    });
+    const varrer = varreduraDeBase(b, [{
+      modo: "adicionar",
+      ponto: "canal.item",
+      sons,
+      montadas: new Map(destinos.map((r, i) => [String(i + 1), { renderer: r }])),
+    }]);
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    const outro = destinos.find((r) => r !== tomou);
+    const ditoAntes = d.ditos.length;
+    const registradoAntes = d.anotadas.length;
+    const motivo = tomou?.midiasAnotadas()[0]?.motivo;
+    confere(
+      recusado,
+      todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === figura && Boolean(motivo),
+      `a vinheta não ficou «${figura}» no destino que a tomou: ${todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado}`,
+    );
+    if (!tomou) continue;
+    tomou.raiz.remove();
+    varrer();
+    await assentar();
+    const noOutro = todasAsTags(outro.raiz, "figure")[0]?.dataset.estado;
+    const anotadas = outro.midiasAnotadas();
+    confere(
+      recusado,
+      outro.tomouOsSons === true && noOutro === figura && anotadas.length === 1
+        && anotadas[0]?.situacao === "recusada" && anotadas[0]?.motivo === motivo
+        && tomou.midiasAnotadas().length === 0,
+      `o som «${figura}» no destino que saiu voltou a «${noOutro}» no destino que tomou a marca, ou a anotação dele `
+        + `não diz a recusa: ${JSON.stringify(anotadas)}`,
+    );
+    confere(
+      recusado,
+      d.ditos.slice(ditoAntes).every((e) => e.estado === "pausada") && d.anotadas.length === registradoAntes,
+      "a troca de destino disse a recusa do som outra vez, ao MOD ou ao registro: "
+        + `${JSON.stringify(d.ditos.slice(ditoAntes))}, ${JSON.stringify(d.anotadas.slice(registradoAntes))}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
   // O pedido de tocar que ainda decodificava quando o lugar saiu da tela.
   {
     const noMeio = `${caso} · no meio da decodificação`;

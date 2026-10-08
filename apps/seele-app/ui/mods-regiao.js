@@ -595,7 +595,7 @@ class RegiaoDeMod {
      * O som de cada mídia, e o `tocando` que o MOD declarou por último.
      *
      * `Map<Element, { tocador, tocar, recusar, declarado, quer, terminou, cartao,
-     * montagem, adiado, carregando }>`.
+     * montagem, adiado, carregando, recusa }>`.
      * À parte do nó porque o som chega depois dele — bytes e decodificação são
      * duas voltas —, e o MOD pode ter mudado de ideia nesse meio tempo.
      * `tocar` é o do tocador com a recusa já amarrada, e `recusar` é essa
@@ -603,7 +603,7 @@ class RegiaoDeMod {
      * natural do som; `cartao`, se ele mora num cartão ou num destino de
      * contribuição. Ver `aplicarTocando` e `calarSonsForaDaTela`.
      *
-     * Os três do fim são do som de uma contribuição, que espera para carregar:
+     * Os três seguintes são do som de uma contribuição, que espera para carregar:
      * `montagem` é o que `montarSom` recebeu (`{ plano, estado, origem }`, e a
      * recusa amarrada, `recusou`), guardado para o som ser carregado depois, ou
      * de novo — sem o `data:` do servidor, salvo no destino que tomou o som e
@@ -612,6 +612,11 @@ class RegiaoDeMod {
      * pedido de tocar, ou a marca dos sons (ver `pedirParaTocar` e
      * `tomarOsSonsDevolvidos`); `carregando` diz que os bytes ou a
      * decodificação desse pedido estão a caminho (`pedirParaTocar`).
+     *
+     * `recusa` é a de um som que não chegou a tocador — `{ figura, motivo }`,
+     * com a figura «falhou» ou «cheia» (`falharOSom`, e o teto em
+     * `carregarSom`) —: numa contribuição, ela passa ao destino que tomar a
+     * marca, e o som não volta a «pronta» ali (`herdarOSom`).
      */
     this.somDaMidia = new Map();
     /**
@@ -625,10 +630,11 @@ class RegiaoDeMod {
     this.tomouOsSons = false;
     /**
      * O que este destino herdou do destino que devolveu a marca, até cada som
-     * chegar aqui: `{ lugares, tocavam }`, os lugares dos sons que aquele
-     * destino segurava e, deles, os que tocavam quando o lugar saiu da tela
-     * (ver `devolverOsSons` e `herdarOSom`); `null` quando a marca não veio de
-     * uma devolução, ou quando todos os sons dela já chegaram.
+     * chegar aqui: `{ lugares, tocavam, recusados }`, os lugares dos sons que
+     * aquele destino segurava e, deles, os que tocavam quando o lugar saiu da
+     * tela e os que tinham sido recusados, com a figura e o motivo (ver
+     * `devolverOsSons` e `herdarOSom`); `null` quando a marca não veio de uma
+     * devolução, ou quando todos os sons dela já chegaram.
      */
     this.herdados = null;
     /** Já está solta? Soltar duas vezes não pode soltar o que não é dela. */
@@ -2743,6 +2749,8 @@ class RegiaoDeMod {
     const ocupa = som.length * som.numberOfChannels * 4;
     if (this[contaDoSom] + ocupa > tetoDoSom) {
       const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
+      const recusado = this.somDaMidia.get(elem);
+      if (recusado) recusado.recusa = { figura: "cheia", motivo: porque };
       elem.dataset.estado = "cheia";
       this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
@@ -2826,6 +2834,8 @@ class RegiaoDeMod {
    */
   falharOSom(elem, plano, motivo) {
     const chave = plano.no.chave ?? "";
+    const som = this.somDaMidia.get(elem);
+    if (som) som.recusa = { figura: "falhou", motivo };
     elem.dataset.estado = "falhou";
     this.anotarMidia(elem, "recusada", motivo);
     this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
@@ -3034,12 +3044,21 @@ class RegiaoDeMod {
     const herdados = {
       lugares: new Set(this.herdados?.lugares ?? []),
       tocavam: new Set(this.herdados?.tocavam ?? []),
+      recusados: new Map(this.herdados?.recusados ?? []),
     };
     for (const [elem, som] of this.somDaMidia) {
       const montagem = som.montagem;
       if (!montagem) continue;
       const { estado } = montagem;
       herdados.lugares.add(lugares.get(elem));
+      // **O som recusado continua recusado**, aqui e no destino que tomar a
+      // marca: a figura fica, e a recusa passa adiante com o motivo. Sem
+      // tocador nem carga, não há o que soltar.
+      if (som.recusa) {
+        herdados.recusados.set(lugares.get(elem), som.recusa);
+        this.esquecerMidia(elem);
+        continue;
+      }
       if (tocavam.has(elem)) herdados.tocavam.add(lugares.get(elem));
       if (som.carregando && som.quer) som.recusar(SOM_FORA_DA_TELA);
       estado.carga += 1;
@@ -3115,7 +3134,9 @@ class RegiaoDeMod {
    * K5: a declaração dele fica por aplicar, e o `tocando: true` que valia é o
    * pedido de tocar. **Os outros continuam calados**: a declaração deles vale
    * como aplicada, como em `calarSonsForaDaTela`, e um som que já tinha
-   * terminado, ou que o MOD tinha parado, não volta pela troca.
+   * terminado, ou que o MOD tinha parado, não volta pela troca. **E o
+   * recusado continua recusado**: «falhou» ou «cheia», com o motivo na
+   * anotação, sem carregar e sem dizer a recusa outra vez.
    *
    * Qual som é qual nos dois destinos é o lugar dele na declaração
    * (`lugaresDasMidias`): a chave do plano não diz, e os destinos desenham a
@@ -3130,10 +3151,21 @@ class RegiaoDeMod {
     const herdados = this.herdados;
     const lugar = lugares.get(elem);
     if (herdados?.lugares.delete(lugar)) {
+      const recusa = herdados.recusados.get(lugar);
+      herdados.recusados.delete(lugar);
       som.declarado = herdados.tocavam.delete(lugar) ? undefined : som.quer;
       // A herança acaba quando o último som dela chega: um som num lugar que o
       // destino que saiu não segurava é montado como qualquer outro.
       if (herdados.lugares.size === 0) this.herdados = null;
+      if (recusa) {
+        // A recusa já foi dita ao MOD e ao registro por quem a viu: aqui ela
+        // só volta à figura e à anotação, e o som não carrega.
+        som.adiado = null;
+        som.recusa = recusa;
+        elem.dataset.estado = recusa.figura;
+        this.anotarMidia(elem, "recusada", recusa.motivo, Boolean(som.montagem?.plano.cartao));
+        return;
+      }
     }
     this.esperarOPedidoDeTocar(elem);
   }
