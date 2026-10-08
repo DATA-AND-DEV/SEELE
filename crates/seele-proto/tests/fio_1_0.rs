@@ -38,8 +38,8 @@ use std::path::PathBuf;
 use seele_proto::control::{
     encode, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
     AttachmentState, ChannelInfo, ClientMessage, ConsentimentoDePar, DisconnectReason, ListaDeCima,
-    MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
-    ServerMessage, Subsystem, SubsystemHealth, Telemetry, VoiceRoomInfo,
+    Membro, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence,
+    Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, VoiceRoomInfo,
 };
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
@@ -601,6 +601,31 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
             },
         ),
         ("Tocando", ServerMessage::Tocando { prazo_s: 45 }),
+        (
+            "Membros",
+            ServerMessage::Membros {
+                membros: vec![Membro {
+                    id: PersonId(42),
+                    nickname: "maya".into(),
+                }],
+                fim: true,
+            },
+        ),
+        (
+            "MembroNovo",
+            ServerMessage::MembroNovo {
+                membro: Membro {
+                    id: PersonId(43),
+                    nickname: "shinji".into(),
+                },
+            },
+        ),
+        (
+            "MembroBanido",
+            ServerMessage::MembroBanido {
+                person: PersonId(43),
+            },
+        ),
     ]
 }
 

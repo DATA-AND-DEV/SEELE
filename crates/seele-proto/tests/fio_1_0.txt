@@ -78,6 +78,9 @@ servidor:Instancia	0926203031323334353637383961626364656630313233343536373839616
 servidor:VolumeRecusado	092703746f6b00
 servidor:MessageRejected	0928010401
 servidor:Tocando	09292d
+servidor:Membros	092a012a046d61796101
+servidor:MembroNovo	092b2b067368696e6a69
+servidor:MembroBanido	092c2b
 quadro:enquadramento	00000003090b00
 recusa:8	080b00
 recusa:9	090b00

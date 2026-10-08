@@ -42,9 +42,8 @@ fn casos() -> Vec<(&'static str, [u8; 32])> {
 
 fn montar_json() -> String {
     use std::fmt::Write as _;
-    let mut texto = String::from(
-        "{\n  \"gerado_por\": \"seele-proto Codigo::da_chave\",\n  \"vetores\": [\n",
-    );
+    let mut texto =
+        String::from("{\n  \"gerado_por\": \"seele-proto Codigo::da_chave\",\n  \"vetores\": [\n");
     let todos = casos();
     for (indice, (nome, chave)) in todos.iter().enumerate() {
         let codigo = Codigo::da_chave(chave);

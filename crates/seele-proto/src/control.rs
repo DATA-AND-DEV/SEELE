@@ -492,6 +492,29 @@ pub struct PersonProfile {
     pub material_e2ee: Option<Vec<u8>>,
 }
 
+/// Uma pessoa que é membro deste servidor, esteja ou não conectada.
+///
+/// É o grupo **FORA DO AR** da lista de pessoas (decisão D-fio-4 de
+/// 08/10/2026): quem tem conta aqui e não está na sala aparece apagado. **Sem
+/// papéis e sem horário**, de propósito: o grupo diz quem pertence ao
+/// servidor, e não quando cada um esteve nele — isso seria presença
+/// publicada, que `specs/00-visao-geral.md` nomeia como o que não se quer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Membro {
+    /// A conta.
+    pub id: PersonId,
+    /// O apelido.
+    pub nickname: String,
+}
+
+/// O teto de membros numa parte de [`ServerMessage::Membros`].
+///
+/// **É teto de quadro, e não de gosto:** com o maior identificador e o maior
+/// apelido, 256 membros ainda cabem em [`MAX_FRAME_LEN`] — preso em
+/// `uma_parte_cheia_cabe_num_quadro`. Um servidor com mais membros manda mais
+/// partes.
+pub const MAX_MEMBROS_POR_PARTE: usize = 256;
+
 /// A voice channel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoiceRoomInfo {
@@ -2346,6 +2369,33 @@ pub enum ServerMessage {
         /// Quantos segundos o toque dura. 45 na 1.0.
         prazo_s: u16,
     },
+
+    // ---- o FORA DO AR, desde o Servidor 1.0 (D-fio-4) ----
+    /// Uma parte da lista de membros deste servidor, no começo da sessão.
+    ///
+    /// A lista vai em partes de até [`MAX_MEMBROS_POR_PARTE`], e `fim` diz que
+    /// esta é a última: só então quem recebe sabe que a lista está inteira, e
+    /// que um membro que não veio não é membro. Todo mundo recebe; a sala
+    /// pessoal não manda (ela não tem membros, só quem ligou).
+    Membros {
+        /// Os membros desta parte.
+        membros: Vec<Membro>,
+        /// Se esta é a última parte.
+        fim: bool,
+    },
+    /// Alguém passou a ser membro: a primeira vez que uma conta nova entrou.
+    MembroNovo {
+        /// Quem.
+        membro: Membro,
+    },
+    /// Alguém deixou de ser membro, por banimento.
+    ///
+    /// O renomear não tem mensagem própria: é o [`ServerMessage::PersonRenamed`]
+    /// de sempre, e quem recebe o aplica também à lista de membros.
+    MembroBanido {
+        /// Quem.
+        person: PersonId,
+    },
 }
 
 /// Serialises a message into a frame, version byte first.
@@ -2462,7 +2512,7 @@ impl ListaDeCima for ClientMessage {
 }
 
 impl ListaDeCima for ServerMessage {
-    const CONHECIDAS: u32 = 42;
+    const CONHECIDAS: u32 = 45;
 }
 
 /// O que um quadro da lista de cima trouxe.
@@ -3099,6 +3149,17 @@ impl Validate for ServerMessage {
             // Um `u16` só. Um prazo de zero é um toque que já acabou, e quem
             // liga desiste na folga; não é byte que derrube nada.
             Self::Tocando { .. } => Ok(()),
+            Self::Membros { membros, .. } => {
+                check("membros", membros.len(), MAX_MEMBROS_POR_PARTE)?;
+                for membro in membros {
+                    check("nickname", membro.nickname.len(), MAX_NICKNAME_LEN)?;
+                }
+                Ok(())
+            }
+            Self::MembroNovo { membro } => {
+                check("nickname", membro.nickname.len(), MAX_NICKNAME_LEN)
+            }
+            Self::MembroBanido { .. } => Ok(()),
         }
     }
 }
@@ -4767,7 +4828,7 @@ mod o_vocabulario_e_a_versao {
         );
         assert_eq!(
             ultima_variante::<ServerMessage>(),
-            41,
+            44,
             "a lista do servidor mudou de tamanho. Leia o doc deste teste antes \
              de mexer no número"
         );
@@ -4796,6 +4857,9 @@ mod o_vocabulario_e_a_versao {
         // desalinharia o quadro de um par v7 para sempre, e a janela N−1
         // deixaria de ser honesta. A lista do cliente não mudou — a recusa é
         // resposta, e quem responde é o servidor.
+        //
+        // **42 a 44 pelo FORA DO AR** — `Membros`, `MembroNovo` e
+        // `MembroBanido` (D-fio-4) —, no mesmo 9 e pelo mesmo motivo.
         //
         // **41 pela `Tocando`**, da sala pessoal, dentro do mesmo 9: o 9 ainda
         // não saiu para ninguém, e é nele que entra o vocabulário inteiro da
@@ -5100,6 +5164,99 @@ mod o_toque {
         let quadro = encode(&tocando).unwrap();
         assert_eq!(quadro, vec![PROTOCOL_VERSION, 41, 45]);
         assert_eq!(decode::<ServerMessage>(&quadro).unwrap(), tocando);
+    }
+}
+
+#[cfg(test)]
+mod fora_do_ar {
+    //! Os membros do servidor, conectados ou não: o grupo FORA DO AR da lista
+    //! de pessoas (decisão D-fio-4 de 08/10/2026). Sem papéis e sem horário.
+    use super::*;
+
+    fn membro(id: u64, nickname: &str) -> Membro {
+        Membro {
+            id: PersonId(id),
+            nickname: nickname.into(),
+        }
+    }
+
+    #[test]
+    fn as_tres_mensagens_vao_e_voltam() {
+        for mensagem in [
+            ServerMessage::Membros {
+                membros: vec![membro(1, "maya"), membro(2, "shinji")],
+                fim: false,
+            },
+            ServerMessage::Membros {
+                membros: vec![],
+                fim: true,
+            },
+            ServerMessage::MembroNovo {
+                membro: membro(3, "asuka"),
+            },
+            ServerMessage::MembroBanido {
+                person: PersonId(3),
+            },
+        ] {
+            assert_eq!(
+                decode::<ServerMessage>(&encode(&mensagem).unwrap()).unwrap(),
+                mensagem
+            );
+        }
+    }
+
+    /// Uma parte cheia, com o maior identificador e o maior apelido, cabe num
+    /// quadro: o teto de membros por parte é de quadro, e não de gosto.
+    #[test]
+    fn uma_parte_cheia_cabe_num_quadro() {
+        let cheia = ServerMessage::Membros {
+            membros: (0..MAX_MEMBROS_POR_PARTE)
+                .map(|_| Membro {
+                    id: PersonId(u64::MAX),
+                    nickname: "n".repeat(MAX_NICKNAME_LEN),
+                })
+                .collect(),
+            fim: false,
+        };
+        let quadro = encode(&cheia).unwrap();
+        assert!(quadro.len() <= MAX_FRAME_LEN, "{} bytes", quadro.len());
+    }
+
+    #[test]
+    fn os_tetos_valem_nos_dois_sentidos() {
+        let demais = ServerMessage::Membros {
+            membros: (0..=MAX_MEMBROS_POR_PARTE)
+                .map(|i| membro(u64::try_from(i).unwrap(), "m"))
+                .collect(),
+            fim: true,
+        };
+        assert!(matches!(
+            encode(&demais),
+            Err(ControlError::FieldTooLong {
+                field: "membros",
+                ..
+            })
+        ));
+        let longo = "n".repeat(MAX_NICKNAME_LEN + 1);
+        assert!(matches!(
+            encode(&ServerMessage::Membros {
+                membros: vec![membro(1, &longo)],
+                fim: true,
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
+        assert!(matches!(
+            encode(&ServerMessage::MembroNovo {
+                membro: membro(1, &longo),
+            }),
+            Err(ControlError::FieldTooLong {
+                field: "nickname",
+                ..
+            })
+        ));
     }
 }
 

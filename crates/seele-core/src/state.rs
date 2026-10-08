@@ -1626,6 +1626,14 @@ impl Room {
             | ServerMessage::Pong { .. }
             | ServerMessage::Tocando { .. } => {}
 
+            // O FORA DO AR (D-fio-4): o tipo e o fio existem desde o Servidor
+            // 1.0, e nenhum servidor os manda ainda. Guardar a lista de
+            // membros e mostrá-la é da sessão do Plano 3 e da casca; até lá,
+            // não há o que perder aqui.
+            ServerMessage::Membros { .. }
+            | ServerMessage::MembroNovo { .. }
+            | ServerMessage::MembroBanido { .. } => {}
+
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
             // Quem age nestas duas mensagens é o `enlace::Motor` —
