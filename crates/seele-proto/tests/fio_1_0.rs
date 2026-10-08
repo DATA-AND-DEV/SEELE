@@ -833,3 +833,193 @@ fn o_fio_bate_com_os_bytes_ouro() {
          estado é congelado, a mudança quebra a linha 1 (ADR 0058)."
     );
 }
+
+/// **Os enums que viajam dentro das mensagens não mudam de ordem.**
+///
+/// Até a 0.15 nenhum deles tinha guarda (análise de 22/09, §3.2): o guarda dos
+/// ordinais de `control.rs` só conta as duas listas de cima. Uma razão de
+/// `Disconnecting` reordenada faria um par ler «banido» onde o servidor disse
+/// «expulso», sem erro nenhum.
+///
+/// Acrescentar no fim é permitido numa 1.x, mas só com o portão de quem manda
+/// (`session::entende_a_mensagem`): a variante nova só sai para quem a
+/// entende. Por isso o acréscimo também reprova aqui — ele tem de ser decidido,
+/// e não escorregar.
+#[test]
+fn os_enums_aninhados_nao_mudam_de_ordem() {
+    use seele_proto::vocabulario::variantes;
+
+    /// O nome do enum, a lista que o `serde` dá e a lista presa aqui.
+    type Caso = (
+        &'static str,
+        Option<&'static [&'static str]>,
+        &'static [&'static str],
+    );
+
+    let casos: [Caso; 12] = [
+        (
+            "DisconnectReason",
+            variantes::<DisconnectReason>(),
+            &[
+                "Incompatible",
+                "CredentialRejected",
+                "HandshakeTimeout",
+                "Kicked",
+                "Banned",
+                "ServerFull",
+                "ScheduledMaintenance",
+                "ServerShuttingDown",
+                "Timeout",
+                "ProtocolViolation",
+                "RateLimited",
+                "FellBehind",
+                "AdmissionPending",
+                "AdmissionDenied",
+                "NicknameTaken",
+                "ModsRecusados",
+                "ModsMudaram",
+                "ModsIndisponiveis",
+            ],
+        ),
+        (
+            "AlertReason",
+            variantes::<AlertReason>(),
+            &[
+                "Mentioned",
+                "SubsystemChanged",
+                "SyncDegraded",
+                "VoiceRoomEntryRefused",
+                "PermissionDenied",
+                "VoiceRoomFull",
+                "OperatorNotice",
+                "RateLimited",
+                "MovedByOperator",
+                "VoiceRoomDeleted",
+                "ChannelDeleted",
+                "LastVoiceRoom",
+                "ScreenShareTaken",
+                "ScreenShareOverHostUplink",
+                "VoiceRoomOverHostUplink",
+                "RetencaoApagouHistorico",
+            ],
+        ),
+        (
+            "AlertSeverity",
+            variantes::<AlertSeverity>(),
+            &["Info", "Warning", "Critical"],
+        ),
+        (
+            "MessageRefusal",
+            variantes::<MessageRefusal>(),
+            &[
+                "PermissionDenied",
+                "NoSuchChannel",
+                "TooLong",
+                "StorageFailed",
+            ],
+        ),
+        (
+            "AttachmentRefusal",
+            variantes::<AttachmentRefusal>(),
+            &[
+                "NotAllowed",
+                "TooLarge",
+                "NoRoom",
+                "SizeMismatch",
+                "HashDidNotMatch",
+                "RateLimited",
+                "Unavailable",
+                "NotFound",
+                "Expired",
+                "Malformed",
+            ],
+        ),
+        (
+            "AttachmentState",
+            variantes::<AttachmentState>(),
+            &["Available", "Expired"],
+        ),
+        (
+            "MotivoDeFalhaDePar",
+            variantes::<MotivoDeFalhaDePar>(),
+            &[
+                "NaoAlcancou",
+                "ImpressaoNaoBate",
+                "CaiuNoMeio",
+                "ParouDeMandar",
+                "NaoFuiAceito",
+            ],
+        ),
+        (
+            "Permission",
+            variantes::<Permission>(),
+            &[
+                "ViewVoiceRoom",
+                "EnterVoiceRoom",
+                "Speak",
+                "ReadChannel",
+                "WriteChannel",
+                "RemoveMessage",
+                "MovePerson",
+                "Kick",
+                "Ban",
+                "ManageVoiceRooms",
+                "ManageRoles",
+                "AdministerServer",
+                "AttachFile",
+            ],
+        ),
+        (
+            "Presence",
+            variantes::<Presence>(),
+            &["Available", "Away", "DoNotDisturb"],
+        ),
+        (
+            "Subsystem",
+            variantes::<Subsystem>(),
+            &["Permissions", "Media", "Persistence"],
+        ),
+        (
+            "SubsystemHealth",
+            variantes::<SubsystemHealth>(),
+            &["Nominal", "Degraded", "Failed"],
+        ),
+        (
+            "VolumeRefusal",
+            variantes::<VolumeRefusal>(),
+            &["SemEspera", "TipoRecusado", "NaoGravei", "Incompleto"],
+        ),
+    ];
+    let mut errados = Vec::new();
+    for (nome, do_serde, preso) in casos {
+        let do_serde = do_serde.unwrap_or_else(|| panic!("{nome} deixou de ser enum"));
+        if do_serde != preso {
+            errados.push(format!("{nome}: {do_serde:?}"));
+        }
+    }
+    assert!(
+        errados.is_empty(),
+        "estes enums mudaram — leia o ADR 0058 antes de mexer:\n{}",
+        errados.join("\n")
+    );
+
+    // O `Incompatible` no ordinal 0 é congelado para sempre (ADR 0058): é por
+    // ele que toda build, desde a 0.11, lê a recusa de outra linha.
+    assert_eq!(
+        variantes::<DisconnectReason>().unwrap()[0],
+        "Incompatible",
+        "o Incompatible saiu do ordinal 0, congelado pelo ADR 0058"
+    );
+}
+
+/// Os códigos de um byte da abertura de tela e do tipo de fluxo, que não
+/// passam pelo `serde` e por isso não estão no teste acima.
+#[test]
+fn os_codigos_de_um_byte_nao_mudam() {
+    assert_eq!(ScreenSource::Monitor.code(), 0);
+    assert_eq!(ScreenSource::Window.code(), 1);
+    assert_eq!(ScreenCodec::H264Baseline.code(), 0);
+    assert_eq!(StreamType::Attachment.byte(), 1);
+    assert_eq!(StreamType::Screen.byte(), 2);
+    assert_eq!(StreamType::ModVolume.byte(), 3);
+}
