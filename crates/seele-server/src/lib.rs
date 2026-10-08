@@ -911,12 +911,86 @@ impl Daemon {
         persistence::messages::Messages::new(&mut guard).history(channel, None, limite)
     }
 
-    /// Stops accepting and closes the endpoint.
+    /// Para de aceitar e fecha o endpoint, **na hora e sem avisar ninguém**.
+    ///
+    /// Síncrono de propósito: é o que o `Drop` de quem hospeda pode chamar, e
+    /// um `drop` não espera nada. Quem estava dentro lê a conexão caindo, e não
+    /// um motivo. Quem pode esperar chama [`Self::encerrar_avisando`], que avisa
+    /// cada sessão antes e só então chega aqui.
     pub fn shutdown(&self) {
-        // specs/04-servidor-seele.md wants clients told `ManutencaoProgramada`
-        // and given 3 s. That needs the per-connection registry M3 brings; for
-        // now the close is abrupt and honest about it.
         self.endpoint.close(0_u32.into(), b"shutting down");
+    }
+
+    /// Avisa cada sessão de que o servidor vai cair, espera elas se
+    /// despedirem até `prazo`, e só então fecha o endpoint.
+    ///
+    /// # O defeito que isto conserta
+    ///
+    /// Quem hospeda saía por [`Self::shutdown`], e quem estava dentro lia uma
+    /// queda de transporte: a casca dizia «não foi possível alcançar o
+    /// servidor», e a bateria batia cinco minutos numa porta que ninguém ia
+    /// atender. O protocolo tinha a frase certa, `ServerShuttingDown`, e ninguém
+    /// a mandava. O `specs/04-servidor-seele.md` pede o aviso; o que faltava era
+    /// como alcançar cada sessão sem um registro delas, e a resposta é o
+    /// barramento, que toda sessão já escuta.
+    ///
+    /// # Como
+    ///
+    /// Difunde [`server::Event::ServidorEncerrando`] com `reason`. Cada sessão o
+    /// atende no braço da expulsão: escreve `Disconnecting { reason }`, espera
+    /// até 1 s pela entrega (`session::despedir`) e fecha a conexão.
+    ///
+    /// A espera é pelo **endpoint**, com `wait_idle` sob `prazo`: ele volta
+    /// quando não sobra conexão nenhuma, o que quer dizer que cada sessão se
+    /// despediu e que o fechamento dela já saiu para o outro lado. Não há
+    /// registro de sessões vivas para esperar por ele (`session::Registry` só
+    /// conta), e o endpoint já é quem sabe quantas conexões há.
+    ///
+    /// O prazo é o teto, e não a espera de sempre: sem ninguém conectado o
+    /// endpoint já está ocioso, e isto volta na hora. Ele vence em dois casos,
+    /// e o endpoint não distingue um do outro:
+    ///
+    /// - **uma conexão que não se despede** — uma ainda no aperto de mão, que
+    ///   não assinou o barramento, ou um par que não confirma a entrega. Essa
+    ///   é fechada sem aviso pelo [`Self::shutdown`] do fim;
+    /// - **uma sessão que já se despediu e ainda conta.** Uma conexão fechada
+    ///   fica no endpoint pelo dreno do QUIC, três PTO, e um PTO é o RTT
+    ///   suavizado, mais quatro vezes a variação, mais os 25 ms de atraso de
+    ///   confirmação. No laço local isso são milissegundos; numa internet com
+    ///   RTT de umas poucas dezenas de milissegundos (perto de 50 a 70 ms,
+    ///   conforme a variação), passa de meio segundo. Essa sessão já leu o
+    ///   aviso, o fechamento dela já saiu, e o `shutdown` não muda nada para
+    ///   ela.
+    ///
+    /// # O que isto não faz
+    ///
+    /// Não espera o fechamento terminar depois do [`Self::shutdown`]: quem vai
+    /// reabrir a porta, ou derrubar o runtime em seguida, chama
+    /// [`Self::wait_idle`] depois.
+    pub async fn encerrar_avisando(
+        &self,
+        reason: seele_proto::control::DisconnectReason,
+        prazo: std::time::Duration,
+    ) {
+        // Sem sessão nenhuma escutando, o `send` falha, e não há a quem avisar.
+        let _ = self
+            .server
+            .events
+            .send(server::Event::ServidorEncerrando { reason });
+        if tokio::time::timeout(prazo, self.endpoint.wait_idle())
+            .await
+            .is_err()
+        {
+            // O que se sabe, e só isso: o endpoint conta as conexões ainda
+            // drenando junto com as que não se despediram. Ver o doc acima.
+            tracing::info!(
+                conexoes = self.endpoint.open_connections(),
+                ?prazo,
+                "o prazo da despedida acabou com conexões ainda no endpoint: fechando depois do \
+                 aviso, ou sem ter se despedido (estas fecham agora, sem aviso)"
+            );
+        }
+        self.shutdown();
     }
 
     /// Espera o endpoint terminar de fechar.
@@ -944,10 +1018,30 @@ impl Daemon {
 /// diferença: lá a `vaga` já serializa o binário inteiro, e aqui quem
 /// serializa é a trava que o guarda segura.
 ///
-/// **O que a trava não cobre:** os outros testes deste crate que chamam
-/// `Hospedagem::iniciar` só leem a variável (`Convocacao::do_ambiente`), e não
-/// tomam a trava. Um deles que suba enquanto um destes dois a tem trocada lê o
-/// valor trocado, e pode pagar o prazo do degrau 4.
+/// # Quem sobe hospedagem também a toma
+///
+/// Todo teste deste crate que chama `Hospedagem::iniciar` toma o guarda com o
+/// degrau 4 desligado ([`AmbienteDoEncontro::sem_degrau_4`]). Antes eles só
+/// liam a variável, sem trava, e sem ela `Convocacao::do_ambiente` caía no
+/// ponto de encontro de produção: numa máquina sem IPv4 global, cada rodada
+/// registrava um servidor de teste no quarto da VPS. Medido no lote
+/// G-servidor da F5: rodados junto com
+/// `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`, os oito passavam, e
+/// passavam porque liam o `nao` ou o buraco negro que **aquele** teste tinha
+/// posto; rodados sem ele, os oito reprovavam no guarda
+/// (`alcance::encontro::recusar_a_producao`). Qual ponto cada um usava
+/// dependia de quem subia primeiro.
+///
+/// A trava serializa os que sobem hospedagem. Medido na mesma máquina: os oito
+/// em 1,08 s em fila, contra 0,52 s em paralelo.
+///
+/// # Depois do padrão seguro, por que o `nao` continua
+///
+/// Desde a decisão (d), `Hospedagem::iniciar` sem a variável já não convoca
+/// ponto nenhum. O `nao` explícito e a trava ficam pelo que o padrão não cobre:
+/// outros testes deste binário **trocam** a variável — para o buraco negro, e
+/// para um IP da VPS no teste do guarda de `iniciar` —, e um teste de
+/// hospedagem que subisse sem a trava nesse meio-tempo leria o valor do outro.
 #[cfg(test)]
 pub(crate) mod ambiente_de_teste {
     use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -992,6 +1086,17 @@ pub(crate) mod ambiente_de_teste {
         /// em pânico com ela já devolveu a variável, pelo `Drop`.
         pub(crate) fn guardar() -> Self {
             Self::guardar_sob(&TRAVA)
+        }
+
+        /// [`Self::guardar`] com o degrau 4 desligado (`nao`) até o guarda
+        /// cair.
+        ///
+        /// É o de quem sobe hospedagem e não mede o degrau 4: nenhum pacote
+        /// sai para ponto de encontro nenhum, e o de produção nem é lido.
+        pub(crate) fn sem_degrau_4() -> Self {
+            let ambiente = Self::guardar();
+            ambiente.pedir("nao");
+            ambiente
         }
 
         /// [`Self::guardar`], sob a trava que quem chama escolhe.

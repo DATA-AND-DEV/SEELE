@@ -115,7 +115,13 @@
   gap: 12px;
 }
 
-.perfil-cabeca .nomear-titulo { flex: 1; }
+/* `line-height` próprio porque o título do perfil quebra linha. A pergunta do
+   nome antes da primeira entrada («COMO OS OUTROS VÃO TE CHAMAR?») não cabe
+   numa linha de 480px, e o título herdava os 16px de `base.css` com letra de
+   24px: a segunda linha começava 22px antes de a primeira acabar. 1,15 dá 27,6px
+   por linha, abaixo da altura do FECHAR ao lado — o cabeçalho de SEU PERFIL,
+   numa linha só, fica com a altura de antes. */
+.perfil-cabeca .nomear-titulo { flex: 1; line-height: 1.15; }
 
 .perfil-imagem {
   display: flex;

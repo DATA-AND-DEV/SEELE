@@ -257,6 +257,31 @@ const PERMISSAO_DE_MICROFONE = {
   },
 };
 
+/**
+ * O aviso de fone, dito ao entrar numa sala de voz.
+ *
+ * O SEELE não cancela eco — o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone
+ * um requisito. Sem ele, o alto-falante volta para o microfone, e quem paga é o
+ * outro lado: ouve a própria voz de volta e não tem como saber de onde vem.
+ *
+ * Uma frase só, e não um dicionário: não há enum por trás, e ela é a mesma na
+ * faixa da sessão, na ajuda e em CONFIGURAÇÕES · MICROFONE E SOM — as duas
+ * últimas escritas no `index.html`, e conferidas contra esta pelo
+ * `ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le`.
+ */
+const AVISO_DE_FONE =
+  "USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.";
+
+/**
+ * Com que nome entra quem fecha a pergunta do nome sem responder.
+ *
+ * **Não diz o nome**, e não é descuido: ele é derivado em Rust, dentro do
+ * `connect`, da impressão da chave desta máquina, e nenhum comando de tela o
+ * expõe. Dizê-lo pediria um comando novo só para montar uma palavra que o
+ * `connect` monta de qualquer jeito. A lista de pessoas o mostra logo depois.
+ */
+const ENTRAR_SEM_NOME = "Você vai entrar com um nome tirado da sua chave. Dá para trocar no perfil.";
+
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
   Avisando: "AVISANDO O PONTO DE ENCONTRO",

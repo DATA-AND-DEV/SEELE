@@ -87,6 +87,13 @@ impl Hospedagem {
     /// exatamente o caminho que abria a janela. Quem não tem nada a fazer antes
     /// passa `|_| Ok(())`, e escreve isso.
     ///
+    /// # O ponto de encontro: só o que o ambiente pedir
+    ///
+    /// O degrau 4 só sobe com `$SEELE_ENCONTRO` apontando um ponto. **Sem a
+    /// variável, nenhum** ([`crate::alcance::encontro::Convocacao::do_ambiente`]):
+    /// é o padrão seguro, e é o de todo teste. A produção pede o ponto do
+    /// projeto por [`Self::iniciar_com_o_ponto_padrao`].
+    ///
     /// # Errors
     ///
     /// Falha se a porta já estiver em uso, se o banco não abrir, ou se
@@ -97,6 +104,63 @@ impl Hospedagem {
         nome: &str,
         pasta_dos_mods: Option<crate::RaizesDosMods>,
         antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+    ) -> Result<Self> {
+        Self::subir(
+            porta,
+            banco,
+            nome,
+            pasta_dos_mods,
+            antes_de_aceitar,
+            crate::alcance::encontro::Convocacao::do_ambiente,
+        )
+        .await
+    }
+
+    /// [`Self::iniciar`], com o ponto de encontro do projeto quando
+    /// `$SEELE_ENCONTRO` não existe.
+    ///
+    /// **Só a produção chama isto**: o botão HOSPEDAR do app. Quem hospeda
+    /// pelo app é justamente quem está atrás de um roteador doméstico, e é para
+    /// essa pessoa que o degrau 4 existe. A variável continua mandando: `nao`
+    /// ou vazio desligam, um endereço troca.
+    ///
+    /// Duas funções, e não um argumento a mais em `iniciar`: o padrão seguro
+    /// fica com o nome curto, e o ponto de produção só é pedido por quem
+    /// escreve este nome. O `seeled` não chama nenhuma das duas — ele é o
+    /// degrau 1 e não sobe a escada.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::iniciar`].
+    pub async fn iniciar_com_o_ponto_padrao(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+    ) -> Result<Self> {
+        Self::subir(
+            porta,
+            banco,
+            nome,
+            pasta_dos_mods,
+            antes_de_aceitar,
+            crate::alcance::encontro::Convocacao::com_o_ponto_padrao,
+        )
+        .await
+    }
+
+    /// O corpo das duas: `convocar` é quem decide o ponto de encontro.
+    async fn subir(
+        porta: u16,
+        banco: Location,
+        nome: &str,
+        pasta_dos_mods: Option<crate::RaizesDosMods>,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+        convocar: fn(
+            Arc<std::net::UdpSocket>,
+            &str,
+        ) -> Option<crate::alcance::encontro::Convocacao>,
     ) -> Result<Self> {
         let config = ServerConfig {
             name: nome.to_owned(),
@@ -132,15 +196,28 @@ impl Hospedagem {
         // um degrau que este socket não serve. Ver `alcance::Escuta`.
         //
         // O degrau 4 vai junto, e ele é opcional em três sentidos: só é tentado
-        // se os degraus de cima não resolveram, só existe se o ambiente pedir
-        // (`$SEELE_ENCONTRO`), e só funciona com o socket do próprio servidor — sem
-        // ele não há furo possível, e o degrau simplesmente não acontece.
+        // se os degraus de cima não resolveram, só existe se houver ponto (o do
+        // ambiente, ou o do projeto em `iniciar_com_o_ponto_padrao`), e só
+        // funciona com o socket do próprio servidor — sem ele não há furo
+        // possível, e o degrau simplesmente não acontece.
         //
         // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
         // termina em "só funciona na sua rede".
-        let convocacao = server.espelho().and_then(|socket| {
-            crate::alcance::encontro::Convocacao::do_ambiente(socket, server.fingerprint())
-        });
+        let convocacao = server
+            .espelho()
+            .and_then(|socket| convocar(socket, server.fingerprint()));
+        // A segunda parede, só nos testes: um teste que chega aqui com o ponto
+        // de produção — o ambiente apontando a VPS, ou
+        // `iniciar_com_o_ponto_padrao` sem ambiente — reprova antes da escada,
+        // em qualquer máquina, e não só numa sem IPv4 global, que é onde o
+        // degrau 4 é tentado. Fora deles, nada. Ver
+        // `crate::alcance::encontro::recusar_a_producao`.
+        if let Some(convocacao) = &convocacao {
+            crate::alcance::encontro::recusar_a_producao(
+                &convocacao.ponto,
+                "Hospedagem::iniciar, antes da escada",
+            );
+        }
         let escada = crate::alcance::Escada::subir(
             crate::alcance::Escuta::nova(endereco.port(), server.pilha()),
             convocacao,
@@ -355,7 +432,10 @@ impl Hospedagem {
         }
     }
 
-    /// Encerra o servidor e devolve a porta.
+    /// Encerra o servidor **avisando quem está dentro**, e devolve a porta.
+    ///
+    /// É o SAIR de quem hospeda: a casca chama isto pelo comando `disconnect`,
+    /// depois de desmontar o próprio cliente.
     ///
     /// Consome, e a espera está aqui de propósito. Fechar uma conversa e abrir
     /// outra é o caso normal, e sem esperar isso falha com "endereço já em
@@ -363,16 +443,34 @@ impl Hospedagem {
     /// novo. O custo cai onde a pessoa já espera uma pausa, ao fechar, e não
     /// onde ela espera rapidez, ao abrir.
     ///
-    /// São três esperas e cada uma tem um motivo: as conexões terminarem, a
-    /// tarefa de aceitação soltar a referência dela, e o driver do QUIC
-    /// devolver o socket depois que a última referência some.
+    /// São quatro esperas e cada uma tem um motivo: cada sessão ler que o
+    /// servidor está encerrando (até `PRAZO_DO_AVISO`, meio segundo), as conexões
+    /// terminarem, a tarefa de aceitação soltar a referência dela, e o driver
+    /// do QUIC devolver o socket depois que a última referência some.
+    ///
+    /// # O aviso
+    ///
+    /// Era `shutdown()` cru, e quem estava dentro lia uma queda de transporte:
+    /// a tela dizia «não foi possível alcançar o servidor», e a bateria batia
+    /// cinco minutos numa porta fechada. Agora cada sessão lê
+    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO») e acaba. Ver
+    /// [`Daemon::encerrar_avisando`].
+    ///
+    /// O roteador vem **antes** do aviso aqui, e depois em [`Self::despedir`]:
+    /// no SAIR o processo continua vivo, e as duas esperas cabem; na saída do
+    /// app só cabe o que vier antes de o runtime cair, e o aviso vale mais.
     pub async fn encerrar(mut self) {
         // Primeiro a porta do roteador. Uma regra deixada para trás aponta para
         // uma máquina que não vai mais atender, e só some quando o prazo vence.
         if let Some(escada) = self.escada.take() {
             escada.descer().await;
         }
-        self.server.shutdown();
+        self.server
+            .encerrar_avisando(
+                seele_proto::control::DisconnectReason::ServerShuttingDown,
+                PRAZO_DO_AVISO,
+            )
+            .await;
         self.server.wait_idle().await;
         if let Some(aceitando) = self.aceitando.take() {
             let _ = aceitando.await;
@@ -383,13 +481,82 @@ impl Hospedagem {
         // não dá para observar de fora.
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
+
+    /// A despedida da **saída do app**: avisa quem está dentro e devolve a
+    /// porta do roteador, tudo dentro de `teto`.
+    ///
+    /// Para o Plano 2 chamar da casca, no `ExitRequested` segurado: depois
+    /// disto o runtime cai, e o que não tiver saído até ali não sai mais. Por
+    /// isso cada passo tem a sua fatia do teto, e nenhum espera sem prazo:
+    ///
+    /// 1. **o aviso**, metade do teto: cada sessão lê `ServerShuttingDown` e
+    ///    fecha ([`Daemon::encerrar_avisando`]), e o endpoint fecha depois;
+    /// 2. **o fechamento sair**, um quarto: `wait_idle` espera o endpoint
+    ///    terminar de mandar o fechamento das conexões que o prazo do aviso
+    ///    deixou para trás. Sem ele, o runtime cai com esse fechamento na fila,
+    ///    e quem estava conectado só descobre pelos 20 s do tempo ocioso do
+    ///    transporte. Ele pode voltar pelo próprio prazo, numa rede longe, com
+    ///    conexões ainda drenando: o fechamento delas já saiu, e o dreno só
+    ///    responde a pacotes atrasados;
+    /// 3. **o roteador**, o último quarto: devolver a porta pedida pelo degrau
+    ///    3. Uma regra que sobra só some quando o prazo dela vence.
+    ///
+    /// É a ordem inversa da de [`Self::encerrar`], e de propósito: aqui o aviso
+    /// vale mais que o roteador. A regra esquecida no roteador expira sozinha; a
+    /// pessoa que lê «não foi possível alcançar o servidor» procura defeito na
+    /// casa dela.
+    ///
+    /// Não espera a porta UDP voltar ao sistema, ao contrário de
+    /// [`Self::encerrar`]: o processo está saindo, e ninguém vai reabri-la.
+    pub async fn despedir(mut self, teto: std::time::Duration) {
+        self.server
+            .encerrar_avisando(
+                seele_proto::control::DisconnectReason::ServerShuttingDown,
+                teto / 2,
+            )
+            .await;
+        let _ = tokio::time::timeout(teto / 4, self.server.wait_idle()).await;
+        if let Some(escada) = self.escada.take() {
+            if tokio::time::timeout(teto / 4, escada.descer())
+                .await
+                .is_err()
+            {
+                tracing::info!(
+                    "a porta do roteador não foi devolvida dentro do teto da despedida; ela \
+                     some quando o prazo dela vencer"
+                );
+            }
+        }
+    }
 }
+
+/// Quanto o SAIR de quem hospeda espera, no máximo, cada sessão ler que o
+/// servidor está encerrando.
+///
+/// Meio segundo. A despedida de uma sessão é o `Disconnecting` e a
+/// confirmação de entrega: uma ida e volta. O endpoint, porém, só fica ocioso
+/// depois que cada conexão fechada cumpre o dreno do QUIC, três PTO — no laço
+/// local, milissegundos; numa internet com RTT de umas poucas dezenas de
+/// milissegundos, mais que este prazo. Ver [`Daemon::encerrar_avisando`]. Então
+/// o teto é pago inteiro em dois casos: por quem não se despede (alguém no
+/// meio do aperto de mão, um par que não confirma a entrega), e pelo dreno de
+/// quem já se despediu numa rede longe. No segundo caso o aviso já chegou, e o
+/// `shutdown` do fim não muda nada para aquela sessão.
+///
+/// O `session::despedir` espera até 1 s pela entrega de cada sessão; com o
+/// prazo menor que isso, uma sessão lenta não segura o SAIR, e é fechada pelo
+/// `shutdown` do fim.
+const PRAZO_DO_AVISO: std::time::Duration = std::time::Duration::from_millis(500);
 
 impl Drop for Hospedagem {
     /// Sinaliza o fechamento, sem esperar — `drop` não pode aguardar.
     ///
     /// Quem vai reabrir a porta em seguida deve chamar [`Hospedagem::encerrar`]
     /// antes de descartar.
+    ///
+    /// **E sem avisar ninguém**: quem estava dentro lê a conexão caindo. Quem
+    /// pode esperar chama [`Hospedagem::encerrar`] (o SAIR) ou
+    /// [`Hospedagem::despedir`] (a saída do app), que avisam antes.
     fn drop(&mut self) {
         self.server.shutdown();
     }
@@ -411,6 +578,8 @@ mod tests {
 
     #[tokio::test]
     async fn um_server_hospedado_aceita_conexao() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -430,6 +599,8 @@ mod tests {
     /// palavra «nome» neste arquivo ficaria verde com o nome sendo ignorado.
     #[tokio::test]
     async fn o_nome_publico_vira_o_alvo_do_link_e_o_numero_desce_para_alternativo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -467,6 +638,8 @@ mod tests {
     /// launcher de quem recebe procurar no catálogo algo que ninguém publicou.
     #[tokio::test]
     async fn o_link_so_anuncia_a_versao_quando_esta_build_tem_carimbo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
             .expect("subir");
@@ -489,6 +662,8 @@ mod tests {
 
     #[tokio::test]
     async fn escuta_em_todas_as_interfaces_e_nao_so_em_localhost() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Um servidor hospedado que só aceitasse localhost serviria para falar
         // sozinho, que é o oposto do motivo de existir.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -499,6 +674,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_endereco_para_os_amigos_nao_e_o_de_escuta() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // `0.0.0.0` é onde se escuta, não um lugar aonde alguém possa ir.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
             .await
@@ -515,6 +692,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_convite_carrega_a_impressao_digital_desta_instancia() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Sem ela o primeiro contato volta a ser cego, e o convite deixa de ser
         // a coisa que torna o TOFU verificável.
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -535,6 +714,8 @@ mod tests {
 
     #[tokio::test]
     async fn o_convite_leva_o_endereco_da_rede_local_quando_ele_existe() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // O defeito de campo, do lado de quem gera o link: em 0.5.0 o convite
         // levava só o endereço do degrau mais alto, e quem estava na mesma casa
         // deixou de conseguir entrar. Agora o endereço da rede local está
@@ -638,6 +819,8 @@ mod tests {
 
     #[tokio::test]
     async fn encerrar_libera_a_porta_para_hospedar_de_novo() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         // Fechar uma conversa e abrir outra é o caso normal, e sem esperar o
         // endpoint terminar isso falha com "endereço já em uso".
         let primeira = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -652,5 +835,64 @@ mod tests {
             "a porta continuou presa: {:?}",
             segunda.err()
         );
+    }
+
+    /// Sem `$SEELE_ENCONTRO`, `iniciar` não convoca ponto de encontro nenhum.
+    ///
+    /// A decisão (d) do lote G-servidor da F5, pelo lado da hospedagem: o
+    /// padrão seguro. Antes, este teste reprovava no guarda de `iniciar`, porque
+    /// sem a variável a convocação era a do ponto de produção.
+    #[tokio::test]
+    async fn iniciar_sem_ambiente_nao_convoca_ponto_nenhum() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("subir sem ambiente");
+        let recusa = hospedagem
+            .alcance()
+            .and_then(crate::alcance::Alcance::encontro_recusado)
+            .map(str::to_owned);
+        let convite = hospedagem.convite();
+        hospedagem.encerrar().await;
+        drop(ambiente);
+        assert!(
+            recusa.is_none() && !convite.contains("enc="),
+            "sem `$SEELE_ENCONTRO`, a hospedagem tentou um ponto de encontro (recusa: {recusa:?}; \
+             convite: {convite}): o padrão deixou de ser «nenhum ponto»"
+        );
+    }
+
+    /// `iniciar_com_o_ponto_padrao`, sem `$SEELE_ENCONTRO`, leva o ponto do
+    /// projeto à escada.
+    ///
+    /// Pelo comportamento, e sem rede: o ponto de produção chega ao guarda de
+    /// `iniciar`, que reprova antes da escada. Se a função deixasse de pedir o
+    /// ponto padrão, a convocação seria nenhuma, não haveria pânico, e o teste
+    /// reprovaria — quem hospeda pelo app perderia o degrau 4 em silêncio.
+    #[tokio::test]
+    #[should_panic(expected = "(«encontro.seele.app.br», pego em Hospedagem::iniciar")]
+    async fn iniciar_com_o_ponto_padrao_leva_o_ponto_do_projeto_a_escada() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let _ =
+            Hospedagem::iniciar_com_o_ponto_padrao(0, Location::Memory, "Casa", None, |_| Ok(()))
+                .await;
+    }
+
+    /// O guarda de `iniciar` dispara, e é **ele** que dispara.
+    ///
+    /// `$SEELE_ENCONTRO` aponta um IP da VPS de produção, e não o nome: nem
+    /// com este guarda desfeito há consulta de DNS. Desfeito, o que pega é o
+    /// guarda de `resolver`, antes do primeiro pacote, e a frase dele diz
+    /// outro lugar — o `expected` não casa, e o teste reprova. Numa máquina
+    /// com IPv4 global o degrau 4 nem é tentado, e o teste reprova por não
+    /// haver pânico. Nos dois casos nenhum pacote sai para a VPS.
+    #[tokio::test]
+    #[should_panic(expected = "pego em Hospedagem::iniciar, antes da escada")]
+    async fn o_guarda_de_iniciar_pega_o_ponto_de_producao_antes_da_escada() {
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.pedir(crate::alcance::encontro::REDE_DO_PADRAO[1]);
+        let _ = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(())).await;
     }
 }
