@@ -174,3 +174,9 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - conformidade verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos` e `mod_de_referencia`;
     - o `quarto_pelo_link` ficou de fora, por causa da porta 8384.
   - **Ficam para a orquestradora decidir:** onde mora o conserto dos testes que falam com o ponto de encontro de produção, no G-servidor da onda 3 ou numa pendência nova.
+- **A orquestradora recebeu a onda 2 e decidiu o achado do ponto de encontro:** os testes não podem falar com a VPS. O conserto entra na onda 3 como passo 0 do G-servidor (`2046cd8`), por três motivos:
+  - os dois mexem em `hospedagem.rs`;
+  - lotes da mesma onda não dividem arquivo;
+  - o teste novo do G-servidor também sobe uma hospedagem.
+  
+  O passo leva um guarda que reprova o teste que resolver o ponto padrão de produção, com prova por reversão.
