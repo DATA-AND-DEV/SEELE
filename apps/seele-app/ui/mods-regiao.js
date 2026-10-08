@@ -3105,7 +3105,8 @@ class RegiaoDeMod {
    * sem tocador volta como estava. Quem chama é a segunda volta de
    * `calarOsSonsQueSairamDaTela`, em `base.js`, só nos destinos em que a
    * contribuição desenha; este confere que o nó dele está no documento e que
-   * tem um som que assentou esperando.
+   * tem um som que chegou a ele — esperando a marca, ou recusado, que a toma
+   * para dizer a recusa onde ela está na tela.
    *
    * **O som que tocava recomeça aqui, e os outros não.** Quem decide, por som,
    * é `herdarOSom`: o que tocava quando o lugar dele saiu da tela recomeça, do
@@ -3119,11 +3120,11 @@ class RegiaoDeMod {
   tomarOsSonsDevolvidos() {
     if (this.solta || !this.sonsDaContribuicao || this.sonsDaContribuicao.tomados) return false;
     if (!this.raiz?.isConnected) return false;
-    const adiados = [...this.somDaMidia].filter(([, som]) => som.adiado);
-    if (adiados.length === 0) return false;
+    const chegados = [...this.somDaMidia].filter(([, som]) => som.montagem);
+    if (chegados.length === 0) return false;
     const lugares = this.lugaresDasMidias();
     this.tomarAMarca();
-    for (const [elem, som] of adiados) this.herdarOSom(elem, som, lugares);
+    for (const [elem, som] of chegados) this.herdarOSom(elem, som, lugares);
     return true;
   }
 

@@ -4650,6 +4650,35 @@ async function oSomDaContribuicaoMudaDeDestino() {
     for (const r of destinos) r.soltar();
   }
 
+  // E o destino que devolveu a marca com um som recusado, quando volta à tela
+  // sem outro destino que a tenha tomado, a toma de novo e diz a recusa onde
+  // ela está — e a segunda volta da varredura para de abrir.
+  {
+    const deVolta = `${caso} · o som recusado no destino que volta`;
+    const b = bancada({ audio: audioDeMentira() });
+    const d = dono(b, midiaDeSom);
+    d.api.bytesDoSom = () => Promise.reject(new Error("o arquivo sumiu do pacote"));
+    const sons = { tomados: false };
+    const so = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+    so.sonsDaContribuicao = sons;
+    so.aplicar(vinheta(true));
+    const varrer = varreduraDeBase(b, [{ modo: "adicionar", ponto: "canal.item", sons, montadas: new Map([["1", { renderer: so }]]) }]);
+    await assentar();
+    so.raiz.remove();
+    varrer();
+    b.doc.body.append(so.raiz);
+    varrer();
+    const anotadas = so.midiasAnotadas();
+    confere(
+      deVolta,
+      so.tomouOsSons === true && sons.devolvidos === false && anotadas.length === 1 && anotadas[0]?.situacao === "recusada"
+        && todasAsTags(so.raiz, "figure")[0]?.dataset.estado === "falhou",
+      "o destino voltou à tela com o som recusado e não tomou a marca de volta — a recusa some do diagnóstico, e a "
+        + `segunda volta segue abrindo a cada desenho: ${JSON.stringify({ tomou: so.tomouOsSons, devolvidos: sons.devolvidos, anotadas })}`,
+    );
+    so.soltar();
+  }
+
   // **A segunda volta da varredura só abre com a marca devolvida** (rodada 1,
   // menor 1). Ela roda no fim de todo desenho que pode tirar um nó de MOD da
   // tela, para cada contribuição e cada destino: perguntar a cada destino se
