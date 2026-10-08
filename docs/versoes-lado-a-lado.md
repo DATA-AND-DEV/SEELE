@@ -383,9 +383,17 @@ fica dentro dela, em `lancador/`.
 
 Spec 0.16, §1. Antes de qualquer outra coisa — antes de a janela existir e antes
 da migração dos MODs da pasta —, a 0.16 copia a pasta dela para
-`dados/servidor-0.15`, **deixando o depósito (`lancador/`) de fora** e com o
-marcador `PRONTA` escrito por último. A cópia leva a identidade junto, então a
-pessoa é a mesma nas duas linhas.
+`dados/servidor-0.15`, **deixando o depósito (`lancador/`) e a chave
+(`identity.key`) de fora** e com o marcador `PRONTA` escrito por último.
+
+**A identidade é uma por máquina** ([ADR 0061](adr/0061-a-identidade-e-uma-por-maquina.md),
+a decisão D-id-1), e por isso a chave não vai na cópia. O launcher passa a toda versão que
+abre a variável `SEELE_IDENTIDADE` com a pasta da identidade **do próprio
+processo**: a `SEELE_IDENTIDADE` que ele recebeu, ou a pasta de configuração
+dele (no Mac, `~/.config/seele`; no Windows, `%APPDATA%\tech.datadev.seele`). A
+0.15.2 lê a chave de `<pasta>/identity.key` quando a variável não está vazia;
+o resto (o banco, os pins, as preferências) continua em `SEELE_HOME`. A pessoa
+é a mesma em toda linha, e não há duas cópias da chave que possam divergir.
 
 - **Não copia um banco do futuro.** Um banco com esquema acima do 13 (o da
   0.15.1, lido em `54f542f`) já foi migrado por uma versão mais nova, e

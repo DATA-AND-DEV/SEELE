@@ -37,6 +37,16 @@ pub const VARIAVEL_DE_DADOS: &str = "SEELE_HOME";
 /// linha legada sai numa 0.15.2, e não na 0.15.1.
 pub const VARIAVEL_DO_LANCADOR: &str = "SEELE_LANCADOR";
 
+/// A variável que diz à versão aberta onde mora a identidade da máquina.
+///
+/// ADR 0061, «O contrato da variável»: o valor é o caminho absoluto de uma
+/// **pasta**, e a chave é `<pasta>/identity.key`. A identidade é uma por
+/// máquina: sem isto, a versão aberta criaria uma chave nova na pasta de dados
+/// da linha, e a pessoa seria outra em cada linha — com outro apelido nos
+/// servidores dela e outro código da sala. Só a chave sai daí; o resto continua
+/// na pasta de dados, a de [`VARIAVEL_DE_DADOS`].
+pub const VARIAVEL_DA_IDENTIDADE: &str = "SEELE_IDENTIDADE";
+
 /// O que iniciar, e com o quê. Montado, não executado.
 ///
 /// Separado da execução de propósito: é o que permite provar, em teste e sem
@@ -56,8 +66,17 @@ impl Lancamento {
     ///
     /// Os `argumentos` são repassados como vieram — é por onde um `--hospedar`
     /// ou uma URI `seele://` chega à versão escolhida.
+    ///
+    /// `pasta_da_identidade` é a da identidade **do processo que lança** (ADR
+    /// 0061): a `SEELE_IDENTIDADE` que ele recebeu, ou a pasta de configuração
+    /// dele. É obrigatória, e não um `Option`: um lançamento sem ela é uma
+    /// versão que cria uma chave nova, e a pessoa vira outra sem ninguém ver.
     #[must_use]
-    pub fn de(resolvida: &VersaoResolvida, argumentos: Vec<String>) -> Self {
+    pub fn de(
+        resolvida: &VersaoResolvida,
+        argumentos: Vec<String>,
+        pasta_da_identidade: &std::path::Path,
+    ) -> Self {
         Self {
             programa: resolvida.executavel.clone(),
             argumentos,
@@ -67,6 +86,10 @@ impl Lancamento {
                     resolvida.dados.to_string_lossy().into_owned(),
                 ),
                 (VARIAVEL_DO_LANCADOR.to_owned(), "1".to_owned()),
+                (
+                    VARIAVEL_DA_IDENTIDADE.to_owned(),
+                    pasta_da_identidade.to_string_lossy().into_owned(),
+                ),
             ],
         }
     }
@@ -121,7 +144,11 @@ mod testes {
         let sem_revogacao = vigente(&m, &deposito);
         let r = Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao);
 
-        let nova = Lancamento::de(&r.resolver(&Pedido::MaisNova, Ato::Abrir).unwrap(), vec![]);
+        let nova = Lancamento::de(
+            &r.resolver(&Pedido::MaisNova, Ato::Abrir).unwrap(),
+            vec![],
+            &raiz.join("identidade"),
+        );
         let velha = Lancamento::de(
             &r.resolver(
                 &Pedido::Exata(Versao::nova("1.0.0-teste").unwrap()),
@@ -129,6 +156,7 @@ mod testes {
             )
             .unwrap(),
             vec![],
+            &raiz.join("identidade"),
         );
 
         let dados_novos = nova
@@ -205,6 +233,7 @@ mod testes {
                 "--hospedar".to_owned(),
                 "seele://exemplo.invalido".to_owned(),
             ],
+            &raiz.join("identidade"),
         );
 
         assert_eq!(
@@ -238,7 +267,7 @@ mod testes {
             .resolver(&Pedido::MaisNova, Ato::Abrir)
             .unwrap();
 
-        let lancamento = Lancamento::de(&resolvida, vec![]);
+        let lancamento = Lancamento::de(&resolvida, vec![], &raiz.join("identidade"));
 
         assert!(
             lancamento
@@ -247,6 +276,46 @@ mod testes {
             "sem a variável, a versão aberta mostra o próprio botão de atualizar e \
              troca o app do depósito: {:?}",
             lancamento.ambiente
+        );
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    /// **A identidade é uma por máquina** (ADR 0061). Toda versão aberta pelo
+    /// launcher recebe a pasta da identidade dele, e não cria uma chave nova na
+    /// pasta de dados da linha — senão a pessoa seria outra em cada linha.
+    #[test]
+    fn a_versao_aberta_le_a_identidade_da_maquina() {
+        let raiz = pasta("identidade-da-maquina");
+        let deposito = Deposito::em(&raiz);
+        let m = manifesto(&["1.0.0-teste"], &[]);
+        let p = m.mais_nova().clone();
+        deposito
+            .instalar(
+                &p,
+                ALVO,
+                &pacote("1.0.0-teste"),
+                &crate::cenario::chave(),
+                &DesempacotadorDeTeste,
+            )
+            .unwrap();
+        let sem_revogacao = vigente(&m, &deposito);
+        let resolvida = Resolvedor::novo(&m, &deposito, ALVO, &sem_revogacao)
+            .resolver(&Pedido::MaisNova, Ato::Abrir)
+            .unwrap();
+        let maquina = raiz.join("a-pasta-da-maquina");
+
+        let lancamento = Lancamento::de(&resolvida, vec![], &maquina);
+
+        let identidade = lancamento
+            .ambiente
+            .iter()
+            .find(|(nome, _)| nome == VARIAVEL_DA_IDENTIDADE)
+            .map(|(_, valor)| PathBuf::from(valor))
+            .expect("o lançamento tem de dizer onde mora a identidade da máquina");
+        assert_eq!(identidade, maquina);
+        assert_ne!(
+            identidade, resolvida.dados,
+            "a identidade apontou para a pasta de dados da linha: uma chave por linha"
         );
         let _ = std::fs::remove_dir_all(&raiz);
     }
