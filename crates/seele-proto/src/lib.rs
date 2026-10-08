@@ -42,7 +42,9 @@ pub mod volume;
 
 pub use control::{ClientMessage, ControlError, ServerMessage};
 pub use ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
-pub use media::{MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN};
+pub use media::{
+    MediaError, MediaHeader, HEADER_LEN, MAX_DATAGRAM_LEN, MAX_PAYLOAD_LEN, MEDIA_HEADER_VERSION,
+};
 pub use signal::{Signal, SignalBand, SyncInputs};
 pub use stream::{StreamType, StreamTypeError, RESERVED_TYPE, STREAM_TYPE_LEN};
 pub use version::{
