@@ -216,12 +216,10 @@ fn preparar(
         argumentos.push(link.to_owned());
     }
 
-    // Até esta montagem à mão ser trocada pelo `Resolvedor` (tarefa 9 do plano
-    // da F6), a linha vem da regra de antes das duas numerações, que é a única
-    // que existe sem manifesto. Sem ela, recusa: abrir com a pasta de dados de
-    // outra linha é o defeito sem sintoma do cabeçalho deste módulo.
-    let linha = seele_lancador::Linha::da_versao_legada_do_app(versao.como_texto())
-        .ok_or(FalhaAoAbrirVersao::SemProcedencia)?;
+    // A linha vem do marcador da instalação, que a anota ao instalar. Até esta
+    // montagem à mão ser trocada pelo `Resolvedor` (tarefa 9 do plano da F6),
+    // é a única fonte que existe sem manifesto.
+    let linha = instalacao.linha.clone();
     let resolvida = seele_lancador::VersaoResolvida {
         dados: deposito.pasta_de_dados_da_linha(&linha),
         linha,
@@ -420,7 +418,15 @@ mod o_launcher_ligado_ao_produto {
         let pasta = deposito.pasta_da_versao(&v);
         std::fs::create_dir_all(pasta.join("bin")).unwrap();
         std::fs::write(pasta.join(executavel), b"nao sou um executavel de verdade").unwrap();
-        std::fs::write(pasta.join("INSTALADA"), format!("{versao}\n{executavel}\n")).unwrap();
+        // As quatro linhas do marcador: versão, executável, linha e soma. A soma
+        // é de mentira; nada aqui a confere.
+        let linha = seele_lancador::Linha::da_versao_legada_do_app(versao)
+            .expect("as versões destes testes são de antes das duas numerações");
+        std::fs::write(
+            pasta.join("INSTALADA"),
+            format!("{versao}\n{executavel}\n{linha}\n{}\n", "0".repeat(64)),
+        )
+        .unwrap();
     }
 
     fn pasta(nome: &str) -> std::path::PathBuf {
