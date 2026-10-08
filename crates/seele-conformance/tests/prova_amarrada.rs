@@ -235,6 +235,118 @@ async fn a_prova_da_0_15_sobre_o_nonce_cru_e_recusada() -> Result<()> {
     Ok(())
 }
 
+/// **O lado do cliente:** o `Client::connect` de verdade assina a impressão do
+/// certificado que o TLS daquela conexão conferiu, e nenhuma outra.
+///
+/// Quem confere é um servidor de teste, com um certificado próprio: ele lê o
+/// `Hello`, manda um desafio conhecido e confere a assinatura que volta, com a
+/// chave do `Hello`, contra a mensagem montada com a impressão **do certificado
+/// que ele mesmo apresentou**. O conteúdo assinado não precisa de gancho no
+/// cliente: ele sai inteiro na assinatura, e quem tem a chave pública o
+/// confere. Pedido pela orquestradora em 08/10/2026 (a Tarefa 13b do plano).
+#[tokio::test(flavor = "multi_thread")]
+async fn o_cliente_assina_a_impressao_do_certificado_que_o_tls_conferiu() -> Result<()> {
+    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+
+    let _vaga = vaga::minha();
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let identidade = seele_server::tls::Identity::self_signed(vec!["localhost".into()])?;
+    let apresentada = seele_proto::transport::certificate_digest(
+        identidade
+            .chain
+            .first()
+            .expect("a identidade tem certificado")
+            .as_ref(),
+    );
+    let escuta = quinn::Endpoint::server(
+        seele_server::tls::server_config(identidade)?,
+        SocketAddr::from(([127, 0, 0, 1], 0)),
+    )?;
+    let endereco = escuta.local_addr()?;
+
+    let nonce = [0x5C_u8; 32];
+    let conferindo = tokio::spawn(async move {
+        let conexao = escuta
+            .accept()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("a escuta fechou antes de o cliente chegar"))?
+            .await?;
+        let (mut envio, mut recebe) = conexao.accept_bi().await?;
+        let ClientMessage::Hello { public_key, .. } =
+            frame::read::<ClientMessage>(&mut recebe).await?
+        else {
+            anyhow::bail!("o primeiro quadro não foi Hello");
+        };
+        frame::write(
+            &mut envio,
+            &ServerMessage::Challenge {
+                nonce: nonce.to_vec(),
+            },
+        )
+        .await?;
+        let ClientMessage::Response { proof } = frame::read::<ClientMessage>(&mut recebe).await?
+        else {
+            anyhow::bail!("o segundo quadro não foi Response");
+        };
+        // Recusa, para o cliente sair do aperto de mão; o que importa já
+        // chegou.
+        let _ = frame::write(
+            &mut envio,
+            &ServerMessage::Disconnecting {
+                reason: DisconnectReason::CredentialRejected,
+            },
+        )
+        .await;
+        let _ = envio.finish();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), envio.stopped()).await;
+
+        let chave = VerifyingKey::from_bytes(&public_key.as_slice().try_into()?)?;
+        let assinatura = Signature::from_slice(&proof)?;
+        let com_a_apresentada = chave
+            .verify(&prova_de_cliente(&apresentada, &nonce), &assinatura)
+            .is_ok();
+        let com_outra = chave
+            .verify(&prova_de_cliente(&[0; 32], &nonce), &assinatura)
+            .is_ok();
+        let com_o_nonce_cru = chave.verify(&nonce, &assinatura).is_ok();
+        drop(escuta);
+        Ok((com_a_apresentada, com_outra, com_o_nonce_cru))
+    });
+
+    let resultado = seele_core::Client::connect(
+        endereco,
+        "localhost",
+        &endereco.to_string(),
+        "marcela",
+        &SigningKey::from_bytes(&[64; 32]),
+        Arc::new(seele_core::MemoryPinStore::new()),
+        None,
+        None,
+    )
+    .await;
+    assert!(
+        resultado.is_err(),
+        "o servidor de teste recusa sempre, e o cliente entrou"
+    );
+
+    let (com_a_apresentada, com_outra, com_o_nonce_cru) = conferindo.await??;
+    assert!(
+        com_a_apresentada,
+        "a assinatura do cliente não confere com a impressão do certificado que o TLS \
+         apresentou: ele assinou outra impressão"
+    );
+    assert!(
+        !com_outra,
+        "a assinatura confere com uma impressão que ninguém apresentou"
+    );
+    assert!(
+        !com_o_nonce_cru,
+        "o cliente voltou a assinar o nonce cru, como a 0.15"
+    );
+    Ok(())
+}
+
 // ------------------------------------------------------------- o par cru
 
 #[derive(Debug)]
