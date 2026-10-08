@@ -86,14 +86,14 @@ pub enum Decisao {
 
 /// O pedaço do endereço que divide um balde.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Prefixo {
+pub(crate) enum Prefixo {
     V4(u32),
     V6(u64),
 }
 
 /// O `/32` de um IPv4, ou o `/64` de um IPv6. Um IPv4 escrito como IPv6
 /// mapeado é o IPv4 dele.
-fn prefixo(ip: IpAddr) -> Prefixo {
+pub(crate) fn prefixo(ip: IpAddr) -> Prefixo {
     match ip.to_canonical() {
         IpAddr::V4(quatro) => Prefixo::V4(u32::from(quatro)),
         IpAddr::V6(seis) => Prefixo::V6(u64::try_from(u128::from(seis) >> 64).unwrap_or(u64::MAX)),

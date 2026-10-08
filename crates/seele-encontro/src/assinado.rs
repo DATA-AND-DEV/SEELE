@@ -19,6 +19,17 @@ use std::time::{Duration, Instant};
 use seele_proto::codigo::Codigo;
 use seele_proto::encontro::{Marca, Marcas, Moro2, Motivo, TOLERANCIA_DO_CARIMBO};
 
+use crate::taxa::{prefixo, Prefixo};
+
+/// Quantas marcas vivas um prefixo (`/32` no IPv4, `/64` no IPv6) ocupa no
+/// quarto assinado (D-enc-3, decidido pelo dono em 08/10/2026).
+///
+/// Sessenta SEELE abertos atrás de um CGNAT, duas marcas cada, com folga. Sem
+/// ele, um IP com chaves à vontade enchia o quarto sozinho, a 8 registros por
+/// segundo; com ele, encher as [`MARCAS_ASSINADAS`] pede 128 prefixos, e o
+/// cookie do `MORO2` (D-enc-4) faz cada um deles ter de ser de verdade.
+pub const MARCAS_POR_PREFIXO: usize = 128;
+
 /// Por quanto tempo um registro responde ao `QUEM2` depois do último `MORO2`
 /// aceito. O mesmo do ENC/1: quatro reavivamentos de quinze segundos.
 pub const PRAZO_DO_REGISTRO: Duration = Duration::from_secs(60);
@@ -69,6 +80,8 @@ pub fn conferir(pedido: &Moro2) -> bool {
 #[derive(Debug)]
 struct Registro {
     endereco: SocketAddr,
+    /// O prefixo de `endereco`, para o teto por prefixo.
+    prefixo: Prefixo,
     desde: Instant,
     chave: [u8; 32],
     /// O maior carimbo aceito desta marca.
@@ -95,6 +108,7 @@ impl Registro {
 pub struct QuartoAssinado {
     registros: Mutex<HashMap<String, Registro>>,
     teto: usize,
+    por_prefixo: usize,
 }
 
 impl Default for QuartoAssinado {
@@ -114,9 +128,16 @@ impl QuartoAssinado {
     /// chaves.
     #[must_use]
     pub fn com_teto(teto: usize) -> Self {
+        Self::com_tetos(teto, MARCAS_POR_PREFIXO)
+    }
+
+    /// Um quarto vazio com outros tetos, o do quarto e o de cada prefixo.
+    #[must_use]
+    pub fn com_tetos(teto: usize, por_prefixo: usize) -> Self {
         Self {
             registros: Mutex::new(HashMap::new()),
             teto,
+            por_prefixo,
         }
     }
 
@@ -134,7 +155,11 @@ impl QuartoAssinado {
     ///   repetido de outro lugar;
     /// - outra chave com a mesma marca não entra enquanto o registro vale;
     /// - marca nova com o quarto no teto: varre o que já não é lembrado, e se
-    ///   continuar cheio, [`Motivo::Cheio`]. Quem já mora continua reavivando.
+    ///   continuar cheio, [`Motivo::Cheio`]. Quem já mora continua reavivando;
+    /// - uma marca que passaria a viver num prefixo que já tem
+    ///   [`MARCAS_POR_PREFIXO`] vivas: [`Motivo::Cheio`]. Contar os vivos do
+    ///   prefixo varre o quarto, e por isso só se conta quando a marca não está
+    ///   viva ali: o reavivamento de sempre não paga a varredura.
     ///
     /// # Errors
     ///
@@ -150,8 +175,19 @@ impl QuartoAssinado {
             return Err(Motivo::Relogio);
         }
         let mut registros = self.trancar();
+        let aqui = prefixo(de.ip());
+        let ja_vive_aqui = registros
+            .get(pedido.marca.texto())
+            .is_some_and(|atual| atual.vale(agora) && atual.prefixo == aqui);
+        let prefixo_cheio = !ja_vive_aqui
+            && registros
+                .values()
+                .filter(|registro| registro.prefixo == aqui && registro.vale(agora))
+                .count()
+                >= self.por_prefixo;
         let novo = || Registro {
             endereco: de,
+            prefixo: aqui,
             desde: agora,
             chave: pedido.chave,
             carimbo: pedido.carimbo,
@@ -166,15 +202,29 @@ impl QuartoAssinado {
                 if atual.vale(agora) {
                     return Err(Motivo::Velho);
                 }
+                if prefixo_cheio {
+                    return Err(Motivo::Cheio);
+                }
                 *atual = novo();
             }
-            Some(atual) if pedido.carimbo > atual.carimbo => *atual = novo(),
+            Some(atual) if pedido.carimbo > atual.carimbo => {
+                if prefixo_cheio {
+                    return Err(Motivo::Cheio);
+                }
+                *atual = novo();
+            }
             Some(atual) if atual.endereco == de => {
+                if prefixo_cheio {
+                    return Err(Motivo::Cheio);
+                }
                 atual.desde = agora;
                 atual.dicas.clone_from(&pedido.dicas);
             }
             Some(_) => return Err(Motivo::Velho),
             None => {
+                if prefixo_cheio {
+                    return Err(Motivo::Cheio);
+                }
                 if !registros.contains_key(marca) && registros.len() >= self.teto {
                     // Primeiro o que nem é mais lembrado; depois, se ainda não
                     // couber, o que só é lembrado. Os vivos ficam.
@@ -690,9 +740,88 @@ mod testes {
     }
 
     #[test]
+    fn um_prefixo_nao_ocupa_mais_marcas_vivas_que_o_teto_dele() {
+        // D-enc-3: sem forjar nada, um IP com chaves à vontade enchia o quarto
+        // sozinho, a 8 registros por segundo. Com o teto por prefixo, encher
+        // pede tantos prefixos quanto o quarto dividido pelo teto.
+        let quarto = QuartoAssinado::com_tetos(1000, 2);
+        let agora = Instant::now();
+        quarto
+            .morar(
+                &do_servidor(&chave(1), AGORA, Vec::new()),
+                em(A, 1),
+                agora,
+                AGORA,
+            )
+            .unwrap();
+        quarto
+            .morar(
+                &do_servidor(&chave(2), AGORA, Vec::new()),
+                em(A, 2),
+                agora,
+                AGORA,
+            )
+            .unwrap();
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(3), AGORA, Vec::new()),
+                em(A, 3),
+                agora,
+                AGORA
+            ),
+            Err(Motivo::Cheio),
+            "um prefixo passou do teto de marcas vivas"
+        );
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(3), AGORA, Vec::new()),
+                em(B, 3),
+                agora,
+                AGORA
+            ),
+            Ok(()),
+            "o teto de um prefixo segurou outro"
+        );
+        // Quem já mora no prefixo continua reavivando com ele no teto.
+        let depois = agora + Duration::from_secs(15);
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(1), AGORA + 15, Vec::new()),
+                em(A, 1),
+                depois,
+                AGORA + 15
+            ),
+            Ok(())
+        );
+        // Mudar para um prefixo no teto conta como entrar nele.
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(3), AGORA + 15, Vec::new()),
+                em(A, 9),
+                depois,
+                AGORA + 15
+            ),
+            Err(Motivo::Cheio),
+            "uma marca mudou para um prefixo no teto"
+        );
+        // Vencidas as do prefixo, o lugar se libera.
+        let muito_depois = agora + PRAZO_DO_REGISTRO + Duration::from_secs(16);
+        assert_eq!(
+            quarto.morar(
+                &do_servidor(&chave(4), AGORA + 80, Vec::new()),
+                em(A, 4),
+                muito_depois,
+                AGORA + 80
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn os_numeros_sao_os_da_decisao_do_dono() {
         // D-enc-1, decidido pelo dono em 08/10/2026 (ADR 0062).
         assert_eq!(MARCAS_ASSINADAS, 16_384);
+        assert_eq!(MARCAS_POR_PREFIXO, 128);
         assert_eq!(PRAZO_DO_REGISTRO, Duration::from_secs(60));
     }
 }
