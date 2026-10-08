@@ -578,3 +578,91 @@ de verdade continuam sem rodar.
    e ficou na lista — tomaria a marca. Pelo desenho de hoje, quem perde sai do
    documento (a preocupação 5 da entrega).
 2. O caminho que sobra do `data:` (11.3) fica dito, e não consertado.
+
+## 12. Fecho
+
+A re-revisão da rodada 2 deu os cinco pontos por resolvidos e respondeu às
+quatro perguntas: `montarSom` sem `aContribuicaoPinta` é seguro hoje, e dois
+tocadores não surgem. Ficaram quatro menores, dois deles código que passava
+pela reversão sem prova. Um commit de código, `9236d06a`, e este relatório.
+Os mesmos dois arquivos de código (`mods-regiao.js` e a `regiao-do-mod.cjs`);
+a bancada segue com 44 provas, com os casos novos nas seções 18 e 20.
+
+### 12.1 M1: a mídia que chega com a marca devolvida
+
+O caso novo (seção 18, «a mídia que chega com a marca devolvida»): a mídia da
+vinheta do segundo destino fica presa; o primeiro destino, que a tocava, sai, e
+a varredura não acha no segundo som que tome a marca; a mídia é solta, sem
+outra varredura. Com a linha de `montarSom`, o segundo toma a marca na hora, e
+a vinheta recomeça: 1 fonte, 1 tocador, «tocando» dito 2 vezes. O caso passou
+de primeira, porque guarda código que já existia. **Reversão** — sem
+`if (!sons.tomados) this.tomarOsSonsDevolvidos();`:
+
+```
+FALHOU — o som da contribuição muda de destino · a mídia que chega com a marca devolvida: a mídia chegou ao destino na tela com a marca devolvida, e ele não a tomou na hora — o som que tocava espera um desenho que talvez não venha: {"tomou":false,"devolvidos":true} antes, tomou false, 0 fonte(s), 0 tocador(es), «tocando» dito 1 vez(es)
+```
+
+### 12.2 M1b: a resposta que chega depois da devolução
+
+O caso novo (seção 20, «a resposta que chega depois da devolução»): o destino
+que tomou a marca pede o som de novo ao servidor; com o pedido em voo, ele sai
+da tela, e a varredura o faz devolver a marca; a resposta chega com 21 MiB.
+Com o guarda depois do `await`, uma recusa só, a de `SOM_FORA_DA_TELA`, a
+figura não vira «cheia», e nada vai para a herança. Passou de primeira.
+**Reversão** — sem `if (!deAlguem() || !this.dono.podeFalar()) return;` depois
+do pedido de novo:
+
+```
+FALHOU — o data: do som do servidor não fica retido · a resposta que chega depois da devolução: a resposta do servidor chegou depois de o destino devolver a marca, e foi tratada como dele — a figura «cheia», 2 recusa(s) ao MOD (["o lugar deste som saiu da tela — […]","22020096 bytes somados aos 0 já montados passam do teto de 20971520"]), 0 recusa(s) na herança
+```
+
+A recusa do destino que saiu não chega a `sons.herdados` nessa varredura — ela
+nasce depois da devolução —; ela fica na entrada dele e passaria adiante na
+próxima. O vermelho é a figura «cheia» e a segunda recusa ao MOD.
+
+### 12.3 M3: o `data:` de um som recusado
+
+Dois casos novos na seção 20, e os dois **vermelhos contra `d35d652b`**:
+
+- «o som recusado que chega depois da troca», o caso que a re-revisão mediu: no
+  primeiro destino, a vinheta cabe e o sino passa do teto do som decodificado
+  («cheia»); no segundo, a mídia do sino ainda vinha quando a marca mudou, e
+  chega a um destino que já a tomou e herda a recusa.
+
+  ```
+  FALHOU — o data: do som do servidor não fica retido · o som recusado que chega depois da troca: o sino recusado chegou ao destino que tomou a marca, herdou a recusa, e o `data:` dele ficou retido: {"referencias":1,"caracteres":38}, figuras pronta,cheia no primeiro e pronta,cheia no segundo
+  ```
+
+- «o som que falhou, na devolução»: o servidor devolve um `data:` sem vírgula —
+  o caminho que o produto não percorre —, a carga falha antes de ler os bytes,
+  e o texto fica no destino que tomou o som (o caso confere esse 1, que é o
+  caminho que sobra); quando ele devolve a marca, o recusado pulava o `delete`.
+
+  ```
+  FALHOU — o data: do som do servidor não fica retido · o som que falhou, na devolução: o som que falhou antes de ler os bytes saiu com a devolução da marca segurando o `data:`: 1 antes, {"referencias":1,"caracteres":21} depois
+  ```
+
+O conserto solta o `data:` no ramo `recusa` de `herdarOSom` e no ramo do
+recusado de `devolverOsSons`. **Reversões**, cada uma vermelha só no seu caso:
+sem o `delete` de `herdarOSom`, o primeiro vermelho acima; sem o de
+`devolverOsSons`, o segundo. O comentário de `montarSom` lista agora as quatro
+saídas — os bytes lidos, a janela sem WebAudio, a devolução (também do
+recusado) e a recusa herdada — e diz que o caminho que sobra segura o texto até
+o destino devolver a marca, ou o nó sair.
+
+### 12.4 M2: os docs
+
+O doc de `tomarOsSonsDevolvidos` diz os dois que o chamam — a segunda volta da
+varredura, só nos destinos que desenham, e `montarSom`, sem
+`aContribuicaoPinta` —, e por que o segundo é seguro hoje. A mesma frase está
+junto da chamada, em `montarSom`: a segurança depende de o destino que não
+desenha a contribuição sair do documento.
+
+### 12.5 GREEN do fecho
+
+Em `9236d06a`: `regiao-do-mod.cjs` com 44 provas; `cargo xtask check-runtime`
+verde antes do commit; `cargo test -p seele-app --test frontend` com 262;
+`cargo test -p xtask` com 161; `cargo xtask check-api` verde;
+`diagnostico-de-mods.cjs` no Chromium do Playwright, verde; `cargo fmt --all
+-- --check` limpo. Cada reversão devolveu o arquivo conferido byte a byte e por
+`sha256`. As WebViews de verdade continuam sem rodar.
