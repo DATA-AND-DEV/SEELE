@@ -1942,23 +1942,157 @@ mod testes {
     /// Um ponto de encontro de teste que responde como o de verdade, no laço
     /// local.
     async fn ponto_que_responde() -> SocketAddr {
+        ponto_que_responde_e_anota().await.0
+    }
+
+    /// O mesmo, anotando cada pedido e a origem dele no caderno.
+    ///
+    /// A diferença para [`ponto_que_anota`] é a resposta: esta é a de um ponto
+    /// de verdade (`responder_em`), e por isso `abrir` sobe contra ele. É o que
+    /// deixa ver os pedidos da subida, e não só os do tique.
+    async fn ponto_que_responde_e_anota() -> (SocketAddr, Caderno) {
         let Ok(servico) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
             panic!("o ponto de encontro de teste tem de abrir");
         };
         let Ok(onde) = servico.local_addr() else {
             panic!("o ponto de encontro de teste não tem endereço local");
         };
+        let caderno: Caderno = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotador = Arc::clone(&caderno);
         tokio::spawn(async move {
             let mut balde = [0_u8; encontro::TAMANHO];
             while let Ok((lidos, de)) = servico.recv_from(&mut balde).await {
-                if let Some(resposta) = balde.get(..lidos).and_then(|bytes| {
+                let Some(bytes) = balde.get(..lidos) else {
+                    continue;
+                };
+                if let Some(pedido) = encontro::analisar(bytes) {
+                    if let Ok(mut lista) = anotador.lock() {
+                        lista.push((pedido, de));
+                    }
+                }
+                if let Some(resposta) =
                     encontro::responder_em(bytes, de, encontro::Vizinhanca::TambemAqui)
-                }) {
+                {
                     let _ = servico.send_to(&resposta.datagrama, resposta.destino).await;
                 }
             }
         });
-        onde
+        (onde, caderno)
+    }
+
+    #[tokio::test]
+    async fn cada_pedido_da_subida_e_do_registro_sai_com_a_marca_dele() {
+        // O T2c, o T3c e o M3 da pendência 51, item 17. A marca de cada pedido
+        // é o que decide quem acha o quê no quarto, e o que vira furo:
+        //
+        // - o `ONDE` da subida sai da escuta de avisos, e o `LEVE` da subida e
+        //   o do tique saem do socket do servidor apontando para ela. As
+        //   respostas dos três voltam à escuta, com a marca deles, e só não
+        //   viram furo contra si mesmo porque a marca é a da escuta, e nunca a
+        //   do aviso (`atender` só fura com a do aviso);
+        // - o `MORO` da escuta registra a marca que quem chega pergunta pela
+        //   escuta, e o `MORO` do servidor, a que pergunta pelo servidor.
+        //
+        // O teste sobe `abrir` de verdade contra um ponto que responde e anota,
+        // espera o primeiro tique, e confere a marca de cada pedido pela
+        // origem e pelo verbo.
+        let (ponto, caderno) = ponto_que_responde_e_anota().await;
+        let Ok(server) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("não deu para abrir o socket do servidor de teste");
+        };
+        let Ok(server_endereco) = server.local_addr() else {
+            panic!("o socket do servidor de teste não tem endereço local");
+        };
+        let Some(convocacao) =
+            Convocacao::para_servidor(Arc::new(server), IMPRESSAO, ponto.to_string())
+        else {
+            panic!("a impressão digital de teste não forma convocação");
+        };
+        let marcas = marcas_da_impressao();
+        let aberto = match abrir(&convocacao).await {
+            Ok(aberto) => aberto,
+            Err(falha) => panic!("o ponto de teste responde, e o degrau 4 tinha de abrir: {falha}"),
+        };
+        // O ponto viu a escuta neste endereço, e é ele que foi para o bilhete.
+        let escuta = aberto.aviso;
+        let tique = esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+            matches!(pedido, encontro::Pedido::Moro { .. }) && de == server_endereco
+        })
+        .await
+            && esperar_no_caderno(&caderno, Duration::from_secs(1), |pedido, de| {
+                matches!(pedido, encontro::Pedido::Moro { .. }) && de == escuta
+            })
+            .await;
+        aberto.fechar();
+        assert!(
+            tique,
+            "o primeiro tique não registrou os dois sockets no quarto em um segundo, e este teste \
+             não tem o registro para conferir"
+        );
+
+        let Ok(pedidos) = caderno.lock().map(|lista| lista.clone()) else {
+            panic!("o caderno do ponto de teste trancou");
+        };
+        let mut vistos = [false; 4];
+        for (pedido, de) in &pedidos {
+            let (indice, o_que, marca, esperada, o_que_quebra) = match pedido {
+                encontro::Pedido::Onde { marca } if *de == escuta => (
+                    0,
+                    "o ONDE da subida (o da escuta)",
+                    marca,
+                    marcas.escuta(),
+                    "a resposta a ele volta à escuta, e uma repetida que chegue depois de \
+                     `atender` começar vira furo contra si mesmo se a marca for a do aviso",
+                ),
+                encontro::Pedido::Leve { destino, marca } if *de == server_endereco => {
+                    assert_eq!(
+                        *destino, escuta,
+                        "o LEVE do socket do servidor aponta para outro lugar que a escuta: o \
+                         ponto não tem como dizer a este anfitrião o endereço público do servidor"
+                    );
+                    (
+                        1,
+                        "o LEVE do socket do servidor (na subida e no tique)",
+                        marca,
+                        marcas.escuta(),
+                        "a resposta a ele chega à escuta com esta marca, e com a do aviso passa \
+                         no filtro de `atender` e vira furo do anfitrião contra o próprio servidor",
+                    )
+                }
+                encontro::Pedido::Moro { marca } if *de == escuta => (
+                    2,
+                    "o MORO da escuta",
+                    marca,
+                    marcas.escuta(),
+                    "quem procura a escuta pergunta pela marca dela, e não a acha no quarto",
+                ),
+                encontro::Pedido::Moro { marca } if *de == server_endereco => (
+                    3,
+                    "o MORO do socket do servidor",
+                    marca,
+                    marcas.servidor(),
+                    "quem volta pela trilha pergunta pela marca do servidor, e não acha para onde \
+                     conectar",
+                ),
+                outro => panic!(
+                    "um pedido que a subida e o registro não mandam chegou ao ponto: {outro:?}, de \
+                     {de}. Pedidos: {pedidos:?}"
+                ),
+            };
+            if let Some(visto) = vistos.get_mut(indice) {
+                *visto = true;
+            }
+            assert_eq!(
+                marca, esperada,
+                "{o_que} saiu com a marca {marca}, e não com {esperada}: {o_que_quebra}"
+            );
+        }
+        assert_eq!(
+            vistos, [true; 4],
+            "faltou ao ponto um dos pedidos da subida e do registro (o ONDE da escuta, o LEVE do \
+             servidor, o MORO da escuta, o MORO do servidor, nesta ordem), e a marca dele não foi \
+             conferida. Pedidos: {pedidos:?}"
+        );
     }
 
     #[tokio::test]
