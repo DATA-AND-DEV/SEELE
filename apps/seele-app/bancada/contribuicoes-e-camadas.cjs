@@ -1202,11 +1202,14 @@ function abaDoDiagnostico() {
     if (inicio >= 0 && fim > inicio) vm.runInContext(fonte.slice(inicio, fim), aba);
   }
   // O que a aba lê da página e dos MODs de pé: a preferência desta máquina,
-  // os cartões da API 3 e o tema da API 3. O registro é de verdade.
+  // os cartões da API 3, o tema da API 3, e a região e as superfícies de cada
+  // instância. O registro é de verdade.
   aba.preferencias = new Map();
   aba.modPreferidoPara = (ponto) => aba.preferencias.get(ponto) ?? "";
   aba.cartoesDosMods = new Map();
   aba.temaDosMods = new Map();
+  aba.regioesDosMods = new Map();
+  aba.superficiesDosMods = new Map();
   aba.contribuicoesDosMods = vm.runInContext("new RegistroDeContribuicoes()", aba);
   return aba;
 }
@@ -1325,6 +1328,72 @@ function anotando(...anotadas) {
     `com mod/b escolhido, a pessoa que só mod/a declarou é desenhada pelo SEELE, e a linha não disse: ${frases("pessoa.avatar")}`,
   );
   aba.preferencias.clear();
+}
+
+// **A região e as páginas de cada MOD** (pendência 49, item 5; m-2 da revisão
+// ampla do Plano 1D). A aba contava só a mídia dos onze lugares, e a faixa de
+// cada MOD e as superfícies dele anotavam e ninguém lia: uma trilha recusada
+// numa página chegava ao `seele.log` e ao MOD, e não à aba. A soma não filtra
+// cartão: a mídia de um cartão aparece aqui e em `pessoa.cartao`, duas vistas
+// da mesma mídia.
+{
+  const caso = "M1 · a aba · a região e as páginas";
+  const aba = abaDoDiagnostico();
+  const somar = typeof aba.midiasDaRegiaoEDasPaginas === "function" ? aba.midiasDaRegiaoEDasPaginas : null;
+  confere(
+    caso,
+    somar !== null && typeof aba.frasesDaMidiaDosMods === "function",
+    "`midiasDaRegiaoEDasPaginas` (`base.js`) ou `frasesDaMidiaDosMods` (`camada-mods.js`) não estão nos recortes "
+      + "da aba: ela continua sem ler a mídia da região e das páginas",
+  );
+  if (somar) {
+    confere(
+      caso,
+      JSON.stringify(aba.frasesDaMidiaDosMods()) === JSON.stringify(["nenhum MOD tem região nem página de pé agora"]),
+      `sem MOD de pé, o bloco não disse que não há nada: ${JSON.stringify(aba.frasesDaMidiaDosMods())}`,
+    );
+    // Uma região com um som recusado e um retrato de cartão recusado, e uma
+    // página com um fundo recusado — de duas instâncias, como no produto: a
+    // região e as superfícies são guardadas por instância, e a soma é por id.
+    aba.regioesDosMods.set({}, {
+      id: "mod/x",
+      ...anotando(
+        { situacao: "recusada", motivo: "o som não decodificou" },
+        { situacao: "recusada", motivo: "o retrato passou do teto do cartão", cartao: true },
+      ),
+    });
+    aba.superficiesDosMods.set({}, {
+      id: "mod/x",
+      porChave: new Map([["mesa", { renderer: anotando({ situacao: "recusada", motivo: "o fundo não é imagem" }) }]]),
+    });
+    aba.regioesDosMods.set({}, { id: "mod/y", ...anotando() });
+    const porMod = somar(aba.regioesDosMods, aba.superficiesDosMods);
+    const deX = porMod.get("mod/x");
+    confere(
+      caso,
+      deX?.recusada === 3 && deX.carregando === 0 && deX.pronta === 0
+        && JSON.stringify(deX.motivos) === JSON.stringify([
+          "o som não decodificou", "o retrato passou do teto do cartão", "o fundo não é imagem",
+        ]),
+      "a região e a página de mod/x não somaram as três recusas com os três motivos — a da página, a do cartão "
+        + `ou a da região ficou de fora: ${JSON.stringify(deX)}`,
+    );
+    confere(
+      caso,
+      JSON.stringify(porMod.get("mod/y")) === JSON.stringify({ carregando: 0, pronta: 0, recusada: 0, motivos: [] }),
+      `a mídia de mod/x foi contada para mod/y, ou mod/y sumiu: ${JSON.stringify(porMod.get("mod/y"))}`,
+    );
+    const frases = aba.frasesDaMidiaDosMods();
+    confere(
+      caso,
+      JSON.stringify(frases) === JSON.stringify([
+        "a região e as páginas de mod/x: 3 recusadas — o som não decodificou; o retrato passou do teto do cartão; "
+          + "o fundo não é imagem",
+        "a região e as páginas de mod/y: nenhuma mídia montada",
+      ]),
+      `o bloco não disse a mídia de cada MOD com os motivos: ${JSON.stringify(frases)}`,
+    );
+  }
 }
 
 // **«Não está de pé» só de quem não está de pé** (I-3 da revisão ampla do

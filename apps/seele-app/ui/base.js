@@ -1416,22 +1416,7 @@ function conteudoDasContribuicoes(ponto, alvo = "") {
  */
 function midiasDoPonto(ponto) {
   const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
-  const contar = (mod, anotada) => {
-    if (anotada.situacao === "carregando") {
-      soma.carregando += 1;
-    } else if (anotada.situacao === "pronta") {
-      soma.pronta += 1;
-    } else if (anotada.situacao === "recusada") {
-      soma.recusada += 1;
-      // **Cortado aqui, num lugar só**, e por ponto de código, como
-      // `anotarMidia` corta as da região: o motivo do retrato vem do Rust ou
-      // de uma exceção, sem teto, e um corte por índice partiria um par
-      // substituto.
-      const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
-      const texto = `${mod}: ${motivo || "sem motivo dito"}`;
-      if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
-    }
-  };
+  const contar = (mod, anotada) => contarAMidia(soma, anotada, mod);
   for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
     if (contribuicao.ponto !== ponto) continue;
     if (contribuicao.retrato && aContribuicaoPinta(contribuicao, contribuicao.alvo)) {
@@ -1475,6 +1460,76 @@ function aContribuicaoPinta(contribuicao, destino) {
   return contribuicoesDosMods
     .escolherSubstituicao(contribuicao.ponto, destino, preferido)
     .escolhida === contribuicao;
+}
+
+/**
+ * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
+ *
+ * `midiasDoPonto` e `midiasDaRegiaoEDasPaginas` contam pela mesma: as três
+ * situações, e até três motivos, sem repetir. **O motivo é cortado aqui, num
+ * lugar só**, e por ponto de código, como `anotarMidia` corta os da região: o
+ * do retrato de avatar vem do Rust ou de uma exceção, sem teto, e um corte por
+ * índice partiria um par substituto. Duas cópias desta regra seriam duas
+ * respostas no dia em que uma mudasse.
+ *
+ * @param {{ carregando: number, pronta: number, recusada: number, motivos: string[] }} soma
+ * @param {{ situacao: string, motivo?: string }} anotada
+ * @param {string} [mod] O MOD, na frente do motivo, quando a soma junta MODs.
+ */
+function contarAMidia(soma, anotada, mod = "") {
+  if (anotada.situacao === "carregando") {
+    soma.carregando += 1;
+  } else if (anotada.situacao === "pronta") {
+    soma.pronta += 1;
+  } else if (anotada.situacao === "recusada") {
+    soma.recusada += 1;
+    const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
+    const texto = `${mod ? `${mod}: ` : ""}${motivo || "sem motivo dito"}`;
+    if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+  }
+}
+
+/**
+ * Em que pé está a mídia da região e das páginas de cada MOD — só leitura.
+ *
+ * A pendência 49, item 5 (m-2 da revisão ampla do Plano 1D). A aba DIAGNÓSTICO
+ * contava só a mídia dos onze pontos de contribuição (`midiasDoPonto`), e a
+ * faixa de cada MOD e as superfícies dele — páginas, painéis e diálogos —
+ * anotavam e ninguém lia. É ali que o som costuma morar: o do MOD de
+ * referência está na faixa, e a trilha da MESA numa página. Uma trilha
+ * recusada chegava ao `seele.log` e ao evento do MOD, e não à aba.
+ *
+ * **Sem filtro de cartão.** A região de um MOD também monta os cartões que ele
+ * dá à lista de pessoas, e a mídia deles já aparece em `pessoa.cartao`: são
+ * duas vistas da mesma mídia, e a aba não soma os dois blocos. Um filtro aqui
+ * só valeria enquanto os cartões morassem na região.
+ *
+ * Pura: recebe os dois mapas em vez de lê-los, e a bancada a mede sem página.
+ *
+ * @param {Map<object, RegiaoDeMod>} regioes `regioesDosMods`: por instância, com
+ *   o id do MOD em `regiao.id`.
+ * @param {Map<object, SuperficiesDoMod>} superficies `superficiesDosMods`: por
+ *   instância, cada superfície em `porChave` com o seu `renderer`.
+ * @returns {Map<string, { carregando: number, pronta: number, recusada: number, motivos: string[] }>}
+ *   Por id de MOD, na ordem em que aparecem; `motivos` traz até três, sem repetir.
+ */
+function midiasDaRegiaoEDasPaginas(regioes, superficies) {
+  const porMod = new Map();
+  const somaDe = (id) => {
+    if (!porMod.has(id)) porMod.set(id, { carregando: 0, pronta: 0, recusada: 0, motivos: [] });
+    return porMod.get(id);
+  };
+  for (const regiao of regioes.values()) {
+    const soma = somaDe(regiao.id);
+    for (const anotada of regiao.midiasAnotadas()) contarAMidia(soma, anotada);
+  }
+  for (const conjunto of superficies.values()) {
+    const soma = somaDe(conjunto.id);
+    for (const superficie of conjunto.porChave.values()) {
+      for (const anotada of superficie.renderer.midiasAnotadas()) contarAMidia(soma, anotada);
+    }
+  }
+  return porMod;
 }
 
 /**

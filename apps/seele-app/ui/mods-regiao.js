@@ -2706,19 +2706,19 @@ class RegiaoDeMod {
    * estado na tela, o MOD já recebe o evento, e a recusa já vai ao registro
    * (`dizerRecusaDeMidia`). O que faltava era alguém de fora poder perguntar
    * — «quem pinta cada lugar», na gestão de MODs, soma estas anotações por
-   * ponto de contribuição, e `dono.midiaMudou` é o aviso de que a soma mudou.
+   * ponto de contribuição e por MOD, e `dono.midiaMudou` é o aviso de que a
+   * soma mudou.
    *
-   * **Quais anotações alguém lê.** Só `midiasDoPonto`, em `base.js`, e só as
-   * de dois lugares:
-   * - as dos renderers de contribuição (`montarContribuicao`), no destino em
-   *   que a contribuição desenha (`aContribuicaoPinta`);
-   * - as de cartão (`cartao: true`) da região de um MOD cujos cartões da API 3
-   *   valem (`modsDeCartaoQueValem`), em `pessoa.cartao`.
-   *
-   * As da faixa do MOD — a região sem cartão — e as das superfícies (páginas,
-   * painéis e diálogos) são anotadas e ninguém as lê: a aba DIAGNÓSTICO não
-   * mostra a mídia da região nem das páginas, que é onde o som costuma morar.
-   * É uma pendência da revisão ampla do Plano 1D (m-2), e não um esquecimento.
+   * **Quem lê as anotações.** As duas somas da aba, em `base.js`:
+   * - `midiasDoPonto`, por ponto de contribuição: as dos renderers de
+   *   contribuição (`montarContribuicao`), no destino em que a contribuição
+   *   desenha (`aContribuicaoPinta`), e as de cartão (`cartao: true`) da região
+   *   de um MOD cujos cartões valem (`modsDeCartaoQueValem`), em
+   *   `pessoa.cartao`;
+   * - `midiasDaRegiaoEDasPaginas`, por MOD: todas as da região dele e as das
+   *   superfícies (páginas, painéis e diálogos), sem filtro — é onde o som
+   *   costuma morar. A mídia de um cartão entra nas duas: são duas vistas da
+   *   mesma mídia, e a aba não soma os dois blocos.
    *
    * @param {Element} elem O nó da mídia.
    * @param {"carregando"|"pronta"|"recusada"} situacao
