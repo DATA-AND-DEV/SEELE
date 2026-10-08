@@ -102,9 +102,12 @@ recusa o servidor errado.
 
 **A sala pessoal, no `SEELE-ENC/2`** (ADR 0062), não tem essa sobra. Ela se
 registra num segundo quarto, separado do primeiro, com um `MORO2` assinado pela
-chave da pessoa, e o ponto confere que a marca sai daquela chave, que a
-assinatura vale e que o carimbo de hora está a menos de cinco minutos do relógio
-dele. Ninguém sem a chave ocupa as marcas de uma sala; um `MORO2` copiado no
+chave da pessoa, e o ponto confere, nesta ordem, que o pedido traz o cookie que
+ele deu àquele IP (sem ele, o ponto responde um `DESAFIO` com o cookie e não
+guarda nada), que a marca sai daquela chave, que a assinatura vale e que o
+carimbo de hora está a menos de cinco minutos do relógio dele. Ninguém sem a
+chave ocupa as marcas de uma sala; um IP ocupa no máximo 128 marcas vivas; um
+`MORO2` copiado no
 caminho e repetido depois do original é recusado quando vem de outro endereço;
 e uma troca de rede de quem recebe vale no reavivamento seguinte, sem esperar os
 60 segundos. Dentro do limite de pedidos, quem pergunta pela sala com `QUEM2`
@@ -115,10 +118,14 @@ ponto recusa, e diz a recusa uma vez por segundo.
 entregar a cópia de um `MORO2` antes do original, aponta a marca para si até o
 reavivamento seguinte, quinze segundos depois; com a marca da escuta, recebe
 pelo `LEVE` o IP e a porta de quem liga nesse meio tempo. A mensagem assinada
-não diz para qual ponto ela é, então ela vale em qualquer um. E quem forja a
-origem dos pacotes consegue esvaziar o limite de pedidos de registro de uma
-rede, e a sala daquela rede some do quarto enquanto isso durar. Em nenhum dos
-casos o servidor errado atende: quem liga confere o código dentro do TLS.
+não diz para qual ponto ela é, então ela vale em qualquer um. Quem forja a
+origem dos pacotes **não** registra nada em nome de outro IP, nem esvazia o
+limite de registro dele: ele não recebe o cookie do IP que forja. O que ele
+ainda faz é esvaziar o limite de **perguntas** de um IP, com `QUEM2` forjados, e
+quem está naquele IP não consegue procurar ninguém pelo código enquanto isso
+durar (continua achável); e fazer o ponto mandar um `DESAFIO` a um IP que não
+pediu nada, do tamanho do pedido, como o `ONDE` de sempre. Em nenhum dos casos o
+servidor errado atende: quem liga confere o código dentro do TLS.
 
 **O que a sala conta.** Quem tem o seu código consegue saber, sem ligar, se o seu
 SEELE está aberto, qual é o seu IP público, e as dicas de rede local da sua sala
@@ -210,6 +217,16 @@ bytes no ENC/1, 384 no ENC/2), e esvazia os dois quartos, que são, com o limite
 por prefixo, o único estado dele. Cada anfitrião e cada sala voltam ao quarto no
 reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta por eles
 não os acha e tenta os endereços que já tinha.
+
+**O segredo dos cookies.** O ponto sorteia 32 bytes do sistema quando sobe
+(`getrandom`), e é com eles que ele faz e confere o cookie de cada IP. Eles
+moram só na memória do processo: nunca em disco, nunca num arquivo de
+configuração, nunca no `--barulhento`, e quem opera o ponto não configura nada.
+Reiniciar o ponto sorteia outros, e os cookies de antes param de valer: cada
+sala ouve um `DESAFIO` no reavivamento seguinte, manda de novo com o cookie
+novo, e volta ao quarto, que o reinício também esvaziou. Dois processos do ponto
+atrás do mesmo nome teriam segredos diferentes, e a sala que alternasse entre
+eles ouviria `DESAFIO` a cada troca; um ponto é um processo.
 
 **O relógio da máquina tem de estar certo.** A sala pessoal se registra pelo
 ENC/2 com um carimbo de hora, assinado, e o ponto o confere contra o próprio
@@ -305,8 +322,8 @@ tempo — é o que separa este produto do que ele existe para não ser.
 O protocolo — quatro verbos que chegam ao ponto (`ONDE`, `LEVE`, `MORO` e
 `QUEM`), a resposta `AQUI`, e uma função sem estado que decide o `ONDE` e o
 `LEVE` — está em `crates/seele-proto/src/encontro.rs`, e a versão 2 ao lado
-dele (`MORO2` e `QUEM2`, as respostas `MOROU`, `AQUI2`, `NINGUEM` e `RECUSA`,
-ADR 0062). O quarto, que guarda o `MORO` e responde ao `QUEM`, o quarto
+dele (`MORO2` e `QUEM2`, as respostas `MOROU`, `DESAFIO`, `AQUI2`, `NINGUEM` e
+`RECUSA`, ADR 0062). O quarto, que guarda o `MORO` e responde ao `QUEM`, o quarto
 assinado do ENC/2, o limite por prefixo e o serviço estão em
 `crates/seele-encontro/`. O
 lado de quem hospeda, em `crates/seele-server/src/alcance/encontro.rs`; o de quem

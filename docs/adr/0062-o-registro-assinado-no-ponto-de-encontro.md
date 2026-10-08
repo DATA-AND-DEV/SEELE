@@ -1,9 +1,10 @@
 # 0062 — SEELE-ENC/2: o registro assinado no ponto de encontro
 
 Status: **aceito**. A direção é a da spec de 23/09/2026 («SEELE-ENC/2: o
-registro assinado»). Os valores do limite e do teto (D-enc-1) e o portão no
-`publicar.sh` (D-enc-2) foram decididos por quem responde pelo projeto em
-2026-10-08, como estão abaixo.
+registro assinado»). Os valores do limite e do teto (D-enc-1), o portão no
+`publicar.sh` (D-enc-2), o teto por prefixo (D-enc-3) e o cookie de ida e volta
+(D-enc-4) foram decididos por quem responde pelo projeto em 2026-10-08, como
+estão abaixo; os dois últimos depois de uma revisão independente.
 Data: 2026-10-08
 Sobre `docs/superpowers/specs/2026-09-23-sala-pessoal-por-codigo-design.md`
 («Achar a pessoa») e o spec-mestre da 0.16
@@ -51,16 +52,17 @@ nada) e se **registra** pelo `/2`.
 
 Todo datagrama do `/2` tem **384 bytes**, pedido e resposta, completados com
 `.`: a resposta nunca é maior que o pedido, e o ponto nunca amplifica. O maior
-`MORO2` possível tem 299 bytes. A spec falava em «até 512 bytes»; o tamanho fixo
+`MORO2` possível tem 322 bytes, com o cookie. A spec falava em «até 512 bytes»; o tamanho fixo
 é a regra mais simples de provar. **A folga não compra um campo novo sem versão
 nova**: cada linha tem um número exato de campos, e cada motivo é um de quatro,
 então um campo ou um motivo a mais faz o leitor de hoje ver lixo e calar.
 
 | quem | linha |
 |---|---|
-| anfitrião → ponto | `SEELE-ENC/2 MORO2 <marca> <chave> <carimbo> <dicas> <assinatura>` |
+| anfitrião → ponto | `SEELE-ENC/2 MORO2 <marca> <chave> <carimbo> <dicas> <assinatura> <cookie>` (`-` sem cookie) |
 | quem liga → ponto | `SEELE-ENC/2 QUEM2 <marca>` |
-| ponto → anfitrião | `SEELE-ENC/2 MOROU <marca> <endereço visto>` |
+| ponto → anfitrião | `SEELE-ENC/2 DESAFIO <marca> <cookie>` |
+| ponto → anfitrião | `SEELE-ENC/2 MOROU <marca> <endereço visto> <cookie>` |
 | ponto → quem liga | `SEELE-ENC/2 AQUI2 <marca> <endereço> <dicas>` |
 | ponto → quem liga | `SEELE-ENC/2 NINGUEM <marca>` |
 | ponto → quem pediu | `SEELE-ENC/2 RECUSA <marca> <motivo> <agora>` |
@@ -81,20 +83,51 @@ então um campo ou um motivo a mais faz o leitor de hoje ver lixo e calar.
   e da sala. A menor mensagem tem 60 bytes, então nenhuma cabe nos 32 de um
   nonce. O endereço público não vai assinado: quem o diz é o ponto, que o vê.
 
+### O cookie de ida e volta (D-enc-4)
+
+Um `MORO2` sem cookie, ou com um que não confere para o IP de onde ele veio,
+ouve um `DESAFIO` com o cookie. O ponto não guarda nada para isso, e o pedido
+**não gasta o balde**. Só um `MORO2` com o cookie válido segue.
+
+- O cookie são os 16 primeiros bytes do HMAC-SHA256 do segredo do ponto sobre
+  `"SEELE-ENC/2 cookie\0" ‖ família ‖ IP ‖ janela`, com a janela de 120 s; vale
+  a corrente e a anterior (de dois a quatro minutos). O HMAC é escrito sobre o
+  `sha2`, conferido com os vetores da RFC 4231, e a comparação não depende do
+  tempo.
+- **Preso ao IP, e não à porta.** A sala recebe o cookie pela escuta de avisos,
+  e o socket do servidor, que sai pelo mesmo IP público, usa o mesmo. O `MOROU`
+  leva o cookie da janela corrente, para a sala renová-lo antes de ele vencer:
+  ela só ouve `DESAFIO` na subida, depois de o ponto reiniciar, e depois de
+  trocar de IP.
+- **Não vai assinado**: ele prova o caminho de volta, e não a chave. A sala o
+  junta ao `MORO2` sem assinar de novo.
+- **O segredo** são 32 bytes sorteados do sistema na subida do ponto
+  (`getrandom`), só em memória: nunca em disco, nunca no `--barulhento`, e
+  ninguém configura nada. Reiniciar o ponto sorteia outro, os cookies de antes
+  param de valer, e cada sala ouve um `DESAFIO` e volta no reavivamento
+  seguinte.
+
+**O que ele fecha**: quem forja a origem não recebe o cookie do IP que forja.
+Ele não registra nada em nome desse IP, e não esvazia o balde de registro dele
+(o achado da revisão: com o IP que o `QUEM2` entrega a quem tem o código de
+alguém, uns poucos pacotes por segundo calavam a sala dessa pessoa).
+
 ### O que o ponto confere, nesta ordem
 
-A ordem é a do custo: o limite por prefixo vem antes da assinatura, que é o que
-custa, e a assinatura vem antes do relógio, para que um carimbo torto só seja
-dito a quem assinou com uma chave que confere. A hora do ponto em si não é
-segredo: a `RECUSA taxa` a leva a qualquer um.
+A ordem é a do custo: o cookie, um HMAC, vem antes do limite, para que pedido
+forjado não gaste o balde de ninguém; o limite por prefixo vem antes da
+assinatura, que é o que custa; e a assinatura vem antes do relógio, para que um
+carimbo torto só seja dito a quem assinou com uma chave que confere. A hora do
+ponto em si não é segredo: a `RECUSA taxa` a leva a qualquer um.
 
-1. o limite por prefixo (abaixo);
-2. que a marca é a escuta ou o servidor de `Marcas::da_sala(Codigo::da_chave(chave))`
+1. o cookie (acima);
+2. o limite por prefixo (abaixo);
+3. que a marca é a escuta ou o servidor de `Marcas::da_sala(Codigo::da_chave(chave))`
    (o aviso não mora no quarto, e não se registra);
-3. a assinatura, com `verify_strict`. Com o `verify`, a chave identidade e a
+4. a assinatura, com `verify_strict`. Com o `verify`, a chave identidade e a
    assinatura `R = identidade, s = 0` conferem com qualquer mensagem, e qualquer
    um registraria a sala do código dela; o teste prende isso;
-4. `|carimbo − agora| ≤ 300 s`.
+5. `|carimbo − agora| ≤ 300 s`.
 
 Uma assinatura que não confere é calada. O resto ouve a resposta.
 
@@ -123,6 +156,11 @@ salas.
   repetição.
 - Outra chave com a mesma marca (uma colisão de 75 bits) não toma o lugar
   enquanto ele vale.
+- **No máximo 128 marcas vivas por prefixo** (D-enc-3): sessenta SEELE atrás de
+  um CGNAT, duas marcas cada, com folga. A marca que passaria a viver num
+  prefixo no teto, inclusive a que muda para ele, ouve `RECUSA cheio`; quem já
+  mora ali continua reavivando. Contar os vivos do prefixo varre o quarto, e
+  só se conta quando a marca não está viva ali.
 - **O `QUEM2` responde sempre, dentro do limite**: `AQUI2` quando acha, `NINGUEM`
   quando não acha. O `/1` cala para a marca vazia. Calar aqui repetiria o
   próprio ADR 0047: com o ponto de produção sem o `/2`, quem liga leria «ninguém
@@ -157,9 +195,9 @@ limite é por endereço público, e que a rede pode dividi-lo com outras pessoas
 quem liga recebe `PontoRecusou`. Com a tabela de prefixos cheia de prefixos
 ativos, o prefixo novo também ouve a recusa.
 
-**O abuso que o limite segura**: um prefixo sozinho renova no máximo 480 marcas
-vivas no prazo do quarto, e o teto conta só as vivas, então encher as 16 384
-pede pelo menos 34 prefixos. Um `/48` IPv6 tem 65 536 `/64`, e o limite por
+**O abuso que o limite segura**: um prefixo sozinho ocupa no máximo 128 marcas
+vivas (D-enc-3), e o teto conta só as vivas, então encher as 16 384 pede 128
+prefixos, e com o cookie cada um deles tem de ser de verdade. Um `/48` IPv6 tem 65 536 `/64`, e o limite por
 `/64` não o segura: **um limite por `/48` é o segundo degrau**, se um dia for
 preciso.
 
@@ -214,10 +252,11 @@ produção.
     `MORO2` copiado.
   - A mensagem assinada não diz para qual ponto ela é, então um `MORO2` vale em
     qualquer ponto.
-  - Quem forja a origem esvazia o balde de registro de uma rede com `MORO2` de
-    chaves dele, porque o limite vem antes da assinatura; a sala daquela rede
-    some do quarto enquanto isso durar. Só uma prova de ida e volta (um cookie
-    no `MORO2`) fecha isso, e ela é uma decisão pendente do dono.
+  - Quem forja a origem não registra nem esvazia o balde de registro de
+    ninguém (o cookie). Ele ainda esvazia o balde de **perguntas** de um IP com
+    `QUEM2` forjados: quem está nele não procura ninguém pelo código enquanto
+    isso durar, e continua achável. E ele faz o ponto mandar um `DESAFIO` a um
+    IP que não pediu nada, do tamanho do pedido, como o `ONDE` de sempre.
   - Quem é o ponto continua escolhendo o endereço público que devolve.
   - Em todos os casos, o TLS, com o código, recusa o servidor errado
     (`ConfereCodigo`).
@@ -237,6 +276,13 @@ produção.
 - **Calar o `QUEM2` de marca vazia**, como o `/1`: o ADR 0047 de novo.
 - **O anfitrião ajustar o carimbo pela hora do ponto**: ver acima.
 - **O limite também no `/1`**: a 0.15 não muda nada.
+- **Assinar o endereço público visto**, em vez do cookie: a sala só sabe o
+  endereço do socket do servidor depois de perguntar, e um NAT que troca a
+  porta deixaria a assinatura errada até o tique seguinte. O cookie prova a
+  mesma coisa (o caminho de volta) sem a sala precisar saber.
+- **Um limite por chave, em vez do cookie**: a chave de uma sala é de quem já
+  ligou para ela (vem no certificado), e um `MORO2` forjado com ela gastaria o
+  balde antes da assinatura.
 - **O `verify` no lugar do `verify_strict`**: ver acima.
 
 ## Como reverter

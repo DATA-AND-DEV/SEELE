@@ -44,9 +44,10 @@
 //!
 //! Guarda também **o quarto assinado** do ENC/2: a marca de cada sala, o
 //! endereço, a chave, o maior carimbo e até duas dicas de rede local, com teto
-//! de 16 384 marcas; e **o limite por prefixo**, um balde por `/32` ou `/64`
-//! que fez um pedido do ENC/2 nos últimos segundos. Nada vai a disco, e
-//! reiniciar o processo esvazia os três.
+//! de 16 384 marcas e 128 vivas por prefixo; **o limite por prefixo**, dois
+//! baldes por `/32` ou `/64` que fez um pedido do ENC/2 nos últimos segundos; e
+//! **o segredo dos cookies** do `MORO2` ([`cookie`]), sorteado na subida. Nada
+//! vai a disco, e reiniciar o processo esvazia os três e sorteia outro segredo.
 //!
 //! **O relógio de parede passa a importar.** O carimbo do `MORO2` é conferido
 //! contra ele, com tolerância de 300 s: uma máquina com o relógio torto recusa

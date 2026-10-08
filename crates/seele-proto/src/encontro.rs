@@ -104,7 +104,9 @@
 //!
 //! A sala pessoal só é achável pelo quarto, porque um código não carrega
 //! endereço nenhum. Ela se registra com um `MORO2` assinado pela chave da pessoa
-//! ([`Moro2`], [`crate::assinatura::moro2`]), e quem liga pergunta com um `QUEM2`,
+//! ([`Moro2`], [`crate::assinatura::moro2`]) e com o cookie que o ponto deu ao
+//! IP dela (um `MORO2` sem ele ouve [`Resposta2::Desafio`]), e quem liga
+//! pergunta com um `QUEM2`,
 //! que sempre responde: o endereço e as dicas de rede local
 //! ([`Resposta2::Aqui2`]), ou [`Resposta2::Ninguem`]. As duas versões convivem
 //! no mesmo ponto, separadas por [`MAGIA2`] e por [`TAMANHO2`], e um ponto de
