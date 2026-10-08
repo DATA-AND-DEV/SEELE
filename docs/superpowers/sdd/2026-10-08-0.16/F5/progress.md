@@ -142,3 +142,14 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - Nenhum teste afirma esse degrau.
     - A orquestradora foi avisada.
     - O conserto sugerido é uma costura que passe `convocacao = None` à `Hospedagem::iniciar` em teste.
+- **K5 → integrado** (`0f94be6..7a54ba8`), em 3 rodadas e um fecho. Os commits que fecham os itens: P49-7c em `6be3d24`, P49-8 em `d9f481e` e P51-25 em `8cadbc2`.
+  - **A primeira revisão achou dois Importantes:**
+    - o `data:` de todo som do servidor ficava retido em toda montagem. Medido: um som de 1 MiB em 64 destinos ocupava +90 MiB, e passou a +6 MiB depois do conserto;
+    - a soltura do tocador não tinha guarda.
+  - **A decisão do controlador** se apoia nos riscos do plano: o som que tocava quando o destino saiu recomeça do começo onde a marca vai, inclusive no mesmo destino que volta. Com isso, o P49-8 tem efeito audível hoje.
+  - **As rodadas seguintes:**
+    - a marca devolvida não é tomada fora da tela;
+    - o som pedido de novo ao servidor conta no teto o tamanho da resposta nova;
+    - os guardas novos ganharam prova por reversão;
+    - o `data:` de um som recusado sai.
+  - **Para a v6:** o religar de uma contribuição só existe lá; hoje o P49-8 vale para o som que tocava.
