@@ -16,5 +16,31 @@ seele-proto = { path = "../seele-proto" }
 # o manifesto de MOD.
 serde_json = "1.0.151"
 
-[lints]
-workspace = true
+# Um `.wasm` para a página (`cdylib`) e o crate para os testes nativos (`rlib`).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Duas funções só de teste na fronteira (`fronteira::prova`), para conferir os
+# bytes-ouro dentro do `.wasm` pelo `cargo xtask web`. O `.wasm` da página sai
+# sem elas.
+prova = []
+
+# **A folha de lints é copiada, e não herdada**, pela mesma razão do
+# `seele-video` (ADR 0041) e do `seele-instalador` (ADR 0043): exportar uma
+# função de um `.wasm` pede `unsafe`, e o `forbid` do workspace não se afrouxa
+# nem dentro de um módulo. Aqui é `deny`, e o `allow` mora só em
+# `src/fronteira.rs` (emenda de 08/10/2026 ao ADR 0057). O
+# `xtask/tests/folha_de_lints.rs` confere que esta é a única diferença, e o
+# `xtask/tests/fronteira_do_celular.rs`, que o `allow` não saiu da fronteira.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"

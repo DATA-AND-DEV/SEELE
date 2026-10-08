@@ -1,0 +1,46 @@
+[package]
+name = "seele-motor-web"
+description = "O motor de MODs do celular: o QuickJS do desktop em wasm32-wasip1, com o mesmo prelúdio e os mesmos limites (ADR 0057, D-web-1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# O executor AB do spike `mods-no-navegador`: este `.wasm` roda num Worker que a
+# página cria de dentro de um `iframe` opaco. O código do MOD só alcança as três
+# funções do módulo `seele` e a WASI mínima que o Worker lhe dá.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# O mesmo `rquickjs` do desktop (`apps/seele-app/Cargo.toml`), com a feature
+# `allocator`: no `wasm32-wasip1`, o `js__malloc_usable_size` do quickjs-ng
+# devolve 0 (`rquickjs-sys-0.12.2/quickjs/cutils.h:601-612`), e o teto de
+# memória só vale com o `RustAllocator`, que guarda o tamanho de cada bloco.
+# Medido no spike: sem ele, um MOD alocou 128 MiB com o teto de 8 MiB.
+#
+# Para compilar para `wasm32-wasip1`, o `build.rs` do `rquickjs-sys` precisa de
+# `WASI_SDK` apontando para o SDK que `cargo xtask wasi-sdk` conferiu. Sem ela,
+# o `.cargo/config.toml` aponta para uma pasta que não existe, e o build para em
+# vez de baixar sem conferir.
+rquickjs = { version = "0.12.2", features = ["allocator"] }
+
+[dev-dependencies]
+# O anfitrião dos testes lê e escreve o JSON que o prelúdio fala.
+serde_json = "1.0.151"
+
+# **A folha de lints é copiada, e não herdada**: as funções que o Worker importa
+# e exporta pedem `unsafe`, e o `forbid` do workspace não se afrouxa nem dentro
+# de um módulo. Aqui é `deny`, e o `allow` mora só em `src/fronteira.rs` (emenda
+# de 08/10/2026 ao ADR 0057, no molde do `seele-video` e do `seele-instalador`).
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+indexing_slicing = "warn"

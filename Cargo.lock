@@ -5113,6 +5113,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-motor-web"
+version = "0.0.0"
+dependencies = [
+ "rquickjs",
+ "serde_json",
+]
+
+[[package]]
 name = "seele-proto"
 version = "0.0.0"
 dependencies = [

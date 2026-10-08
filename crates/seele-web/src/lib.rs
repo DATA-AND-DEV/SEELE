@@ -7,13 +7,16 @@
 //! desktop compilado para `wasm32` (a medição 2 do ADR, em
 //! `spikes/proto-em-wasm/`).
 //!
-//! # O que ainda não está aqui
+//! # Onde mora o `unsafe`
 //!
-//! **A fronteira com o JavaScript.** Exportar uma função de um `.wasm`, seja à
-//! mão (`#[no_mangle]` e ponteiros) ou pelo `wasm-bindgen`, pede `unsafe`, e o
-//! workspace o proíbe (`unsafe_code = "forbid"`). Até essa decisão, este crate
-//! é o núcleo seguro: as funções que a fronteira vai chamar, provadas contra os
-//! bytes-ouro da F1 (`tests/pelo_fio_1_0.rs`).
+//! Exportar uma função de um `.wasm` pede `unsafe`, e o workspace o proíbe.
+//! Este crate tem a exceção do `seele-video` e do `seele-instalador` (emenda de
+//! 08/10/2026 ao ADR 0057): `unsafe_code = "deny"` na folha, e o `allow` só em
+//! [`fronteira`]. O resto do crate é o núcleo seguro, provado contra os
+//! bytes-ouro da F1 (`tests/pelo_fio_1_0.rs`), e a fronteira é provada dentro do
+//! `.wasm` pelo `cargo xtask web`.
+
+pub mod fronteira;
 
 use seele_proto::control::{
     decode_da_lista, encode_em, ClientMessage, ControlError, Lido, ServerMessage,

@@ -72,6 +72,9 @@ const RULES: &[(&str, &[&str])] = &[
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
     ("seele-web", &["seele-proto"]),
+    // O motor de MODs do celular (ADR 0057, D-web-1): o QuickJS do desktop em
+    // `wasm32-wasip1`, que roda num Worker separado do protocolo. Folha.
+    ("seele-motor-web", &[]),
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
@@ -271,6 +274,16 @@ mod tests {
         assert!(evaluate("seele-web", &[edge("seele-proto")]).is_empty());
         assert_eq!(evaluate("seele-web", &[edge("seele-core")]).len(), 1);
         assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
+    }
+
+    /// O motor de MODs do celular é uma folha: o QuickJS e mais nada. Uma
+    /// aresta para o `seele-web` misturaria o código do MOD com o do protocolo
+    /// no mesmo `.wasm`, que é o que a forma AB separa.
+    #[test]
+    fn o_motor_do_celular_nao_depende_de_ninguem_do_workspace() {
+        assert!(evaluate("seele-motor-web", &[]).is_empty());
+        assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
+        assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
     }
 
     #[test]
