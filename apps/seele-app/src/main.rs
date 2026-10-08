@@ -7789,13 +7789,13 @@ struct ConviteLido {
     /// ADR 0046. `None` num link de antes deste campo, ou de um servidor que
     /// não sabe a própria versão.
     versao: Option<String>,
-    /// Se essa versão é diferente da que está rodando **e** está instalada aqui.
+    /// O que fazer com este link antes de discar: entrar aqui, abrir o app da
+    /// linha do servidor, baixá-lo antes, ou dizer que a linha saiu.
     ///
-    /// Respondido no Rust e não na casca: comparar duas cadeias seria fácil de
-    /// escrever ali e fácil de errar — a resposta depende de saber qual versão
-    /// é esta, o que só o `option_env!` do build sabe, e de olhar o depósito,
-    /// que é disco. A casca recebe o veredito.
-    pode_abrir_naquela_versao: bool,
+    /// Respondido no Rust e não na casca: a resposta depende da linha deste
+    /// app, do catálogo guardado e do depósito, que é disco. A casca recebe o
+    /// veredito. Ver `versoes::para_entrar`.
+    para_entrar: versoes::ParaEntrar,
 }
 
 /// Lê um `seele://` colado.
@@ -7816,18 +7816,19 @@ fn analisar_convite(
     // **antes** de conectar que esta pergunta serve, porque um servidor de uma
     // versão anterior pode falar um protocolo que este cliente já não alcança.
     let versao = convite.versao.clone();
-    let pode_abrir_naquela_versao = versao.as_deref().is_some_and(|pedida| {
-        versoes::em_uso() != Some(pedida)
-            && versoes::instaladas(&config_dir(&app))
-                .iter()
-                .any(|instalada| instalada.versao == pedida && instalada.abrivel)
-    });
+    let para_entrar = versoes::para_entrar(
+        &config_dir(&app),
+        versoes::atualizador_do_app(&app)
+            .as_ref()
+            .map(|atualizador| &atualizador.chave),
+        versao.as_deref(),
+    );
 
     let lido = ConviteLido {
         alvo: convite.alvo.clone(),
         token: convite.token.clone(),
         versao,
-        pode_abrir_naquela_versao,
+        para_entrar,
     };
 
     // Guardado inteiro deste lado da ponte. Ver o campo em `Session`.

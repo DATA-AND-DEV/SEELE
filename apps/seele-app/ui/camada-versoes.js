@@ -26,27 +26,160 @@
 "use strict";
 
 /**
- * Abre a versão que hospeda aquele servidor, já indo para lá.
+ * As frases das recusas do launcher, uma por variante de
+ * `versoes::FalhaAoAbrirVersao` e `versoes::FalhaAoBaixarVersao`.
  *
- * **Esta janela não fecha**, e é a mesma razão de sempre: quem lançou não
- * segura o processo filho, e fechar daqui deixaria a pessoa sem nada na tela se
- * o outro não subisse.
+ * Aqui, e não no `FRASES` de `frases.js`, porque aquele arquivo é editado em
+ * série por outra frente; estas recusas só aparecem nas telas deste arquivo.
+ * Sem «linha» nas frases: o ADR 0033 tirou a palavra da tela.
  */
-async function abrirNaVersaoDoServidor(versao, link) {
-  const erro = $("boot-erro");
-  erro.hidden = true;
+const FRASES_DA_VERSAO = {
+  IdentificadorInvalido: "ESTE PEDIDO NÃO DIZ UMA VERSÃO QUE SE POSSA ABRIR.",
+  SemCatalogo:
+    "AINDA NÃO HÁ A LISTA DE VERSÕES NESTA MÁQUINA.\nConecte-se à internet uma vez para buscá-la.",
+  NaoPublicada: "ESTA VERSÃO NÃO ESTÁ NA LISTA DE VERSÕES PUBLICADAS.",
+  LinhaNaoDeclarada: "A LISTA DE VERSÕES NÃO DIZ QUE SERVIDOR ESTA VERSÃO FALA.",
+  InstalacaoIncompleta:
+    "A CÓPIA GUARDADA DESTA VERSÃO NÃO TERMINOU DE INSTALAR.\nBaixe de novo.",
+  ExecutavelAusente: "O PROGRAMA DESTA VERSÃO SUMIU DA MÁQUINA.\nBaixe de novo.",
+  ExecutavelNaoDeclarado:
+    "A LISTA DE VERSÕES NÃO DIZ QUAL PROGRAMA ABRIR NESTE SISTEMA.",
+  ExecutavelInvalido:
+    "A LISTA DE VERSÕES APONTA UM PROGRAMA FORA DA PASTA DA VERSÃO, E ELE NÃO FOI ABERTO.",
+  InstalacaoAlterada:
+    "O PROGRAMA GUARDADO DESTA VERSÃO NÃO É MAIS O QUE FOI INSTALADO.\nApague-o em CONFIGURAÇÕES · VERSÕES e baixe de novo.",
+  ListaDeRevogacaoRecusada:
+    "A LISTA DE VERSÕES REVOGADAS QUE CHEGOU NÃO CONFERE.\nTente de novo mais tarde.",
+  CatalogoNaoRespondeu:
+    "A LISTA DE VERSÕES NÃO RESPONDEU.\nConfira a conexão e tente de novo daqui a pouco.",
+};
+
+/** A frase de uma recusa do launcher, ou a de sempre quando não é dele. */
+function fraseDaVersao(falha) {
+  if (typeof falha === "string" && falha in FRASES_DA_VERSAO) {
+    return FRASES_DA_VERSAO[falha];
+  }
+  if (falha && typeof falha === "object") {
+    if (falha.LinhaNaoPublicada) {
+      return `NÃO HÁ VERSÃO PUBLICADA DO SERVIDOR ${falha.LinhaNaoPublicada}.`;
+    }
+    if (falha.Revogada) {
+      const { defeito, corrigida_em: corrigida } = falha.Revogada;
+      return (
+        "ESTA VERSÃO FOI REVOGADA.\n" +
+        `O defeito: ${defeito}` +
+        (corrigida ? `\nA ${corrigida} corrige.` : "")
+      );
+    }
+    if (falha.NaoInstalada) {
+      return falha.NaoInstalada.tem_pacote
+        ? "ESTA VERSÃO AINDA NÃO ESTÁ NESTA MÁQUINA."
+        : "NÃO HÁ PACOTE DESTA VERSÃO PARA ESTE SISTEMA.";
+    }
+    if (falha.SemPacoteParaEsteSistema) {
+      return "NÃO HÁ PACOTE DESTA VERSÃO PARA ESTE SISTEMA.\nNo Mac Intel e no Linux, o Servidor 0.15 nunca teve pacote.";
+    }
+    if (falha.NaoBaixei) return "O DOWNLOAD NÃO TERMINOU.\nTente de novo.";
+    if (falha.PacoteRecusado) {
+      return "O PACOTE BAIXADO NÃO PASSOU NA CONFERÊNCIA, E NADA FOI INSTALADO.";
+    }
+    if (falha.CatalogoNaoServe) return "A LISTA DE VERSÕES NÃO PÔDE SER LIDA.";
+    if (falha.NaoIniciou) return "O SISTEMA NÃO DEIXOU ABRIR A OUTRA JANELA.";
+  }
+  return fraseDeErro(falha);
+}
+
+/**
+ * Pergunta, no painel de servidores, se abre o SEELE do outro servidor.
+ *
+ * Devolve uma promessa que resolve `true` para ABRIR e `false` para VOLTAR. A
+ * frase das conversas vem **antes** (spec 0.16, §1): elas não atravessam de um
+ * servidor para o outro.
+ */
+function confirmarOutraVersao(servidor, perdeConversas, vaiBaixar) {
+  const caixa = $("versoes-confirmar");
+  const sim = $("versoes-confirmar-sim");
+  const nao = $("versoes-confirmar-nao");
+  $("versoes-confirmar-frase").textContent =
+    `Este servidor roda o Servidor ${servidor}. Ele abre noutra janela do SEELE, ` +
+    `com as conversas dele: o que você escreveu aqui não aparece lá, e o que ` +
+    `estiver lá não aparece aqui.` +
+    (perdeConversas ? " Nesta máquina ele ainda não tem conversa nenhuma." : "");
+  $("versoes-confirmar-estado").textContent = "";
+  sim.textContent = vaiBaixar ? "BAIXAR E ABRIR" : "ABRIR";
+  sim.hidden = false;
+  sim.disabled = false;
+  caixa.hidden = false;
+  return new Promise((resolver) => {
+    const responder = (resposta) => {
+      sim.removeEventListener("click", aoSim);
+      nao.removeEventListener("click", aoNao);
+      resolver(resposta);
+    };
+    const aoSim = () => responder(true);
+    const aoNao = () => {
+      caixa.hidden = true;
+      responder(false);
+    };
+    sim.addEventListener("click", aoSim);
+    nao.addEventListener("click", aoNao);
+  });
+}
+
+/**
+ * Entra num servidor de outra linha: abre o SEELE dela, baixando antes se for
+ * preciso, já indo para lá.
+ *
+ * `decisao` é o `versoes::ParaEntrar` que o `analisar_convite` devolveu.
+ * **Esta janela não fecha**: quem lançou não segura o processo filho, e fechar
+ * daqui deixaria a pessoa sem nada na tela se o outro não subisse.
+ */
+async function entrarPelaLinha(decisao, link) {
+  $("servidores-erro").hidden = true;
+  if (decisao.LinhaNaoOferecida) {
+    recusarServidor(
+      `Este servidor roda o Servidor ${decisao.LinhaNaoOferecida.linha}, que ` +
+        "deixou de ser oferecido. Peça a quem hospeda para passar a uma versão mais nova.",
+    );
+    return;
+  }
+  const dados = decisao.Abrir ?? decisao.Baixar;
+  if (!dados) return;
+  const vaiBaixar = Boolean(decisao.Baixar);
+  if (!(await confirmarOutraVersao(dados.servidor, dados.perde_conversas, vaiBaixar))) {
+    return;
+  }
+
+  const sim = $("versoes-confirmar-sim");
+  const estado = $("versoes-confirmar-estado");
+  sim.disabled = true;
   try {
+    if (vaiBaixar) {
+      estado.textContent = `baixando o SEELE do Servidor ${dados.servidor}…`;
+      try {
+        await invoke("baixar_versao", { linha: dados.linha });
+      } catch (falha) {
+        // Já estar guardada não é falha: é a resposta certa para quem apertou
+        // duas vezes, e o que se quer depois é abrir.
+        if (!(falha && typeof falha === "object" && "JaInstalada" in falha)) throw falha;
+      }
+    }
+    estado.textContent = `abrindo o SEELE do Servidor ${dados.servidor}…`;
     await invoke("abrir_versao", {
-      versao,
-      linha: null,
+      versao: null,
+      linha: dados.linha,
       hospedar: false,
       nomePublico: null,
       link,
     });
-    mostrarEtapa(`abrindo a versão ${versao}, que é a deste servidor`);
+    estado.textContent =
+      `O SEELE do Servidor ${dados.servidor} abriu noutra janela, já indo para lá. ` +
+      "Esta continua aberta.";
+    sim.hidden = true;
   } catch (falha) {
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
+    estado.textContent = "";
+    sim.disabled = false;
+    recusarServidor(fraseDaVersao(falha));
   }
 }
 
@@ -126,7 +259,7 @@ async function baixarAMaisNova() {
     const jaTem = falha && typeof falha === "object" && "JaInstalada" in falha;
     estado.textContent = jaTem
       ? `${falha.JaInstalada} já está guardada aqui.`
-      : fraseDeErro(falha);
+      : fraseDaVersao(falha);
     if (!jaTem) estado.classList.add("mods-recusado");
   } finally {
     botao.disabled = false;

@@ -948,6 +948,149 @@ pub(crate) async fn baixar_linha_legada_se_preciso(app: &tauri::AppHandle) -> Op
     Some(resultado)
 }
 
+/// A linha de servidor deste app: a do `VERSAO_DO_SERVIDOR` que o
+/// `seele-proto` congelou (o app 0.16 fala o Servidor 1.0, da linha `1`).
+#[must_use]
+pub(crate) fn linha_deste_app() -> Option<Linha> {
+    Linha::do_servidor(seele_ffi::VERSAO_DO_SERVIDOR).ok()
+}
+
+/// A pasta do app tem conversa? Há algum banco nela.
+///
+/// É a «conversa fora do depósito» do plano de dados: a linha que está aberta
+/// guarda as conversas dela na pasta do app, e não no depósito.
+#[must_use]
+pub(crate) fn ha_conversa_na_pasta(config: &str) -> bool {
+    !bancos_da_pasta(std::path::Path::new(config)).is_empty()
+}
+
+/// O que fazer com um link, antes de discar.
+///
+/// Spec 0.16, §1: ao entrar num servidor de outra linha, o launcher abre o app
+/// mais novo daquela linha, e baixa antes se for preciso. A tela diz, antes,
+/// que as conversas de uma linha não aparecem na outra.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum ParaEntrar {
+    /// O servidor fala a linha deste app: entra aqui mesmo.
+    Aqui,
+    /// O link não diz a linha (sem `v=`, ou com um que não se lê). Tenta aqui;
+    /// se for de outra linha, a recusa dirá.
+    NaoSabe,
+    /// Outra linha, e o app dela está guardado nesta máquina.
+    Abrir {
+        /// A linha, para pedir o app dela.
+        linha: String,
+        /// A versão do servidor, para a tela: «Servidor 0.15».
+        servidor: String,
+        /// O app que vai abrir.
+        versao: String,
+        /// A linha começa sem as conversas que há em outro lugar.
+        perde_conversas: bool,
+    },
+    /// Outra linha, e o app dela precisa ser baixado antes.
+    Baixar {
+        /// A linha, para pedir o app dela.
+        linha: String,
+        /// A versão do servidor, para a tela.
+        servidor: String,
+        /// O catálogo guardado traz pacote para este sistema.
+        tem_pacote: bool,
+        /// A linha começa sem as conversas que há em outro lugar.
+        perde_conversas: bool,
+    },
+    /// A linha do link deixou de ser oferecida (as 0.11 a 0.14, decisão de
+    /// 08/10/2026), ou o catálogo não traz app nenhum dela.
+    LinhaNaoOferecida {
+        /// A linha que faltou.
+        linha: String,
+    },
+}
+
+/// O que fazer com o `v=` deste link, sabendo a linha deste app.
+///
+/// `M.N` é versão de servidor (o item 22 do contrato de fio); `M.N.P` é versão
+/// de app, como os links da 0.15 trazem hoje, e vira linha pelo catálogo ou
+/// pela regra de antes das duas numerações.
+pub(crate) fn para_entrar_com_linha_propria(
+    config: &str,
+    chave: Option<&Chave>,
+    versao_do_link: Option<&str>,
+    propria: Option<Linha>,
+) -> ParaEntrar {
+    let Some(v) = versao_do_link else {
+        return ParaEntrar::NaoSabe;
+    };
+    let manifesto = chave.and_then(|c| catalogo_guardado(config, c));
+    let linha = Linha::do_servidor(v).ok().or_else(|| match &manifesto {
+        Some(m) => m.linha_da_versao_do_app(v),
+        None => Linha::da_versao_legada_do_app(v),
+    });
+    let (Some(linha), Some(propria)) = (linha, propria) else {
+        return ParaEntrar::NaoSabe;
+    };
+    if linha == propria {
+        return ParaEntrar::Aqui;
+    }
+    if linha_que_saiu(&linha) {
+        return ParaEntrar::LinhaNaoOferecida {
+            linha: linha.como_texto(),
+        };
+    }
+    let perde_conversas = Deposito::em(raiz_do_deposito(config))
+        .plano_da_linha(&linha, ha_conversa_na_pasta(config))
+        .perde_conversas;
+    let Some(manifesto) = manifesto else {
+        return ParaEntrar::Baixar {
+            servidor: linha.como_texto(),
+            linha: linha.como_texto(),
+            tem_pacote: false,
+            perde_conversas,
+        };
+    };
+    let Some(publicacao) = manifesto.mais_nova_da_linha(&linha) else {
+        return ParaEntrar::LinhaNaoOferecida {
+            linha: linha.como_texto(),
+        };
+    };
+    let servidor = publicacao
+        .unit
+        .as_ref()
+        .and_then(|u| u.server.clone())
+        .unwrap_or_else(|| linha.como_texto());
+    if Deposito::em(raiz_do_deposito(config))
+        .instalacao(&publicacao.version)
+        .is_some()
+    {
+        ParaEntrar::Abrir {
+            linha: linha.como_texto(),
+            servidor,
+            versao: publicacao.version.como_texto().to_owned(),
+            perde_conversas,
+        }
+    } else {
+        ParaEntrar::Baixar {
+            linha: linha.como_texto(),
+            servidor,
+            tem_pacote: publicacao.platforms.contains_key(&alvo_deste_sistema()),
+            perde_conversas,
+        }
+    }
+}
+
+/// As linhas 0.11 a 0.14, que deixaram de ser oferecidas em 08/10/2026.
+fn linha_que_saiu(linha: &Linha) -> bool {
+    ["0.11", "0.12", "0.13", "0.14"].contains(&linha.como_texto().as_str())
+}
+
+/// O que fazer com o `v=` deste link, com a linha deste app.
+pub(crate) fn para_entrar(
+    config: &str,
+    chave: Option<&Chave>,
+    versao_do_link: Option<&str>,
+) -> ParaEntrar {
+    para_entrar_com_linha_propria(config, chave, versao_do_link, linha_deste_app())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1479,6 +1622,168 @@ mod o_launcher_ligado_ao_produto {
     #[test]
     fn o_esquema_da_0_15_e_o_da_0_15_1() {
         assert_eq!(super::ESQUEMA_DA_0_15, 13);
+    }
+
+    /// **O critério da F6:** um link de um servidor 0.15 (o `v=0.15.1` que a
+    /// 0.15 emite hoje) abre o app da linha 0.15 quando ele está guardado.
+    #[test]
+    fn um_link_da_0_15_abre_a_linha_legada_quando_ela_esta_guardada() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        instalado(&config, &json, "0.15.2");
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+
+        let decisao = super::para_entrar_com_linha_propria(
+            &config,
+            Some(&chave()),
+            Some("0.15.1"),
+            Some(linha("1")),
+        );
+        assert_eq!(
+            decisao,
+            super::ParaEntrar::Abrir {
+                linha: "0.15".to_owned(),
+                servidor: "0.15".to_owned(),
+                versao: "0.15.2".to_owned(),
+                perde_conversas: false,
+            }
+        );
+    }
+
+    #[test]
+    fn um_link_de_outra_linha_que_nao_esta_aqui_pede_para_baixar() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        // A pasta do app tem conversa: abrir a 0.15 começa sem ela.
+        std::fs::write(dir.path().join("seele.db"), b"x").unwrap();
+        assert_eq!(
+            super::para_entrar_com_linha_propria(
+                &config,
+                Some(&chave()),
+                Some("0.15.1"),
+                Some(linha("1"))
+            ),
+            super::ParaEntrar::Baixar {
+                linha: "0.15".to_owned(),
+                servidor: "0.15".to_owned(),
+                tem_pacote: true,
+                perde_conversas: true,
+            }
+        );
+    }
+
+    #[test]
+    fn um_link_da_mesma_linha_entra_aqui_mesmo() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.1", "1.0"), ("0.16.0", "1.0")], None);
+        super::guardar_catalogo(&config, json.as_bytes()).unwrap();
+        // `v=1.0` (a versão do servidor, depois do item 22 do contrato) e
+        // `v=0.16.0` (a versão do app, como os links da 0.16 antes dele).
+        for v in ["1.0", "1.3", "0.16.0"] {
+            assert_eq!(
+                super::para_entrar_com_linha_propria(
+                    &config,
+                    Some(&chave()),
+                    Some(v),
+                    Some(linha("1"))
+                ),
+                super::ParaEntrar::Aqui,
+                "com v={v}"
+            );
+        }
+    }
+
+    #[test]
+    fn um_link_de_uma_linha_que_saiu_diz_isso() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        super::guardar_catalogo(
+            &config,
+            manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None).as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            super::para_entrar_com_linha_propria(
+                &config,
+                Some(&chave()),
+                Some("0.14.2"),
+                Some(linha("1"))
+            ),
+            super::ParaEntrar::LinhaNaoOferecida {
+                linha: "0.14".to_owned()
+            }
+        );
+    }
+
+    /// Sem o catálogo guardado, a linha do link ainda é sabida pela regra
+    /// legada, e a resposta é baixar — sem dizer que há pacote, que só o
+    /// catálogo sabe.
+    #[test]
+    fn sem_catalogo_a_linha_do_link_ainda_e_sabida() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::para_entrar_com_linha_propria(
+                &config,
+                Some(&chave()),
+                Some("0.15.1"),
+                Some(linha("1"))
+            ),
+            super::ParaEntrar::Baixar {
+                linha: "0.15".to_owned(),
+                servidor: "0.15".to_owned(),
+                tem_pacote: false,
+                perde_conversas: false,
+            }
+        );
+    }
+
+    #[test]
+    fn sem_v_no_link_ninguem_adivinha() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        assert_eq!(
+            super::para_entrar_com_linha_propria(&config, None, None, Some(linha("1"))),
+            super::ParaEntrar::NaoSabe
+        );
+        assert_eq!(
+            super::para_entrar_com_linha_propria(&config, None, Some("lixo"), Some(linha("1"))),
+            super::ParaEntrar::NaoSabe
+        );
+    }
+
+    /// **O painel de servidores segue a decisão do Rust.** Um guarda de texto,
+    /// e por isso limitado: ele prende que o campo é lido e que a decisão vai
+    /// para `entrarPelaLinha`. O campo antigo, que só abria a versão exata já
+    /// instalada, não pode voltar.
+    #[test]
+    fn o_painel_de_servidores_segue_a_decisao_de_entrar() {
+        let ui = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let servidores = std::fs::read_to_string(ui.join("camada-servidores.js")).unwrap();
+        assert!(
+            servidores.contains("convite.para_entrar") && servidores.contains("entrarPelaLinha("),
+            "o painel de servidores não segue a decisão de entrar por linha"
+        );
+        assert!(
+            !servidores.contains("pode_abrir_naquela_versao"),
+            "o campo antigo voltou ao painel de servidores"
+        );
+        let versoes = std::fs::read_to_string(ui.join("camada-versoes.js")).unwrap();
+        assert!(
+            versoes.contains("async function entrarPelaLinha("),
+            "`entrarPelaLinha` sumiu de camada-versoes.js"
+        );
+    }
+
+    /// A linha deste app sai da constante que a F1 congelou: o app 0.16 fala o
+    /// Servidor 1.0, da linha `1`.
+    #[test]
+    fn a_linha_deste_app_e_a_do_servidor_que_ele_fala() {
+        assert_eq!(super::linha_deste_app(), Some(linha("1")));
     }
 
     /// **A guarda da linha legada, na casca.** O atualizador de uma versão

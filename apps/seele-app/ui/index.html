@@ -3814,6 +3814,17 @@
         <button type="submit" class="nomear-confirmar">ENTRAR</button>
       </form>
       <p id="servidores-erro" class="nomear-erro" role="alert" hidden></p>
+      <!-- Entrar num servidor de outra versão do servidor: a frase das
+           conversas vem ANTES de abrir (spec 0.16, §1). Desenhado e conduzido
+           por camada-versoes.js. -->
+      <div id="versoes-confirmar" class="server-campo" hidden>
+        <p id="versoes-confirmar-frase" class="nota"></p>
+        <p id="versoes-confirmar-estado" class="nota" role="status"></p>
+        <div class="boot-saidas">
+          <button id="versoes-confirmar-sim" class="nomear-confirmar" type="button">ABRIR</button>
+          <button id="versoes-confirmar-nao" class="botao-fantasma" type="button">VOLTAR</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

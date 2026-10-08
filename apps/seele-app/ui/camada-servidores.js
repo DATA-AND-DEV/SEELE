@@ -174,19 +174,17 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
       // `seele://` com convite de uso único é uma credencial; ler só o
       // endereço dele é chegar sem ela, e o servidor recusa na porta.
       token = convite.token ?? null;
-      // **O servidor roda outra versão, e ela está aqui** — ADR 0046.
+      // **O servidor é de outra linha de servidor** — ADR 0046, com a emenda
+      // de 08/10/2026.
       //
-      // Perguntado antes de conectar de propósito: um servidor de uma versão
-      // anterior pode falar um protocolo que este cliente já não alcança, e
-      // seria recusado com «versão incompatível» sem chegar a dizer uma palavra
-      // sobre si. O link chega antes disso.
-      //
-      // Só quando a versão **está instalada**: oferecer abrir o que não está
-      // no disco seria um botão que falha. Baixá-la é o outro caminho, e o
-      // botão dele fica em CONFIGURAÇÕES · VERSÕES.
-      if (convite.pode_abrir_naquela_versao) {
-        fecharServidores();
-        abrirNaVersaoDoServidor(convite.versao, escrito);
+      // Perguntado antes de conectar de propósito: um servidor de outra linha
+      // fala um protocolo que este cliente não alcança, e seria recusado sem
+      // dizer uma palavra sobre si. O link chega antes disso. O Rust decide
+      // (`versoes::para_entrar`); `camada-versoes.js` conduz o resto, aqui
+      // mesmo, com a frase das conversas antes de abrir.
+      const ir = convite.para_entrar;
+      if (ir && typeof ir === "object") {
+        entrarPelaLinha(ir, escrito);
         return;
       }
     } catch (falha) {
