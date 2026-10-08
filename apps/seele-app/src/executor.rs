@@ -1564,17 +1564,57 @@ const PRELUDIO: &str = r#"
   // aninhado. `NaN` é o valor típico de um defeito de conta: um registro que
   // o diz `null` manda o autor procurar o que não existe. Aninhado, o valor
   // sai como texto, entre aspas; `Map` e `Set` saem como a lista do que têm.
+  //
+  // E ele diz `{}` para um `Error` (o nome e a mensagem não são enumeráveis),
+  // e some com a função e o símbolo de um objeto: `console.log({ erro })`
+  // saía `{"erro":{}}`. Aninhados, saem como `nome: mensagem`, `[função
+  // nome]` e `Symbol(…)` — a pilha fica só para o `Error` passado inteiro ao
+  // `console`, que tem a linha para ele.
+  const funcaoEmTexto = (f) => '[função ' + (f.name || 'anônima') + ']';
   const semMentir = (_chave, v) => {
     if (typeof v === 'number' && !Number.isFinite(v)) return String(v);
-    if (typeof v === 'bigint' || v === undefined) return String(v);
+    if (typeof v === 'bigint' || typeof v === 'symbol' || v === undefined) return String(v);
+    if (typeof v === 'function') return funcaoEmTexto(v);
+    if (v instanceof Error) return String(v.name) + ': ' + String(v.message);
     if (v instanceof Map || v instanceof Set) return [...v];
     return v;
   };
+  // **O ciclo, dito onde ele está.** O JSON lança num ciclo, e o recuo era
+  // `String(valor)`: um objeto com uma referência para o pai saía
+  // `[object Object]`, sem um campo. Quando a primeira passada lança, esta
+  // segunda troca por «[cíclico]» **só o que é ancestral do valor de agora**.
+  //
+  // Os ancestrais saem do `this` do substituto, que é o objeto que contém o
+  // valor: a pilha desce até ele, e o que sobra nela é o caminho da raiz até
+  // aqui. Não é um `WeakSet` de tudo o que já foi visto — ele marcaria como
+  // cíclica a mesma referência em dois campos, que é repetição, e não ciclo.
+  // Cada degrau guarda o valor como o MOD o tem e como `semMentir` o
+  // devolveu: um `Map` vira uma lista nova, e é ela o `this` dos filhos dele.
+  const semCiclo = () => {
+    const ancestrais = [];
+    let fundo = 0;
+    return function (chave, v) {
+      const dito = semMentir(chave, v);
+      if (typeof dito !== 'object' || dito === null) return dito;
+      while (fundo > 0 && ancestrais[fundo - 1][1] !== this) fundo -= 1;
+      for (let i = 0; i < fundo; i += 1) {
+        if (ancestrais[i][0] === v) return '[cíclico]';
+      }
+      ancestrais[fundo] = [v, dito];
+      fundo += 1;
+      return dito;
+    };
+  };
+  const comoJson = (valor, substituto) => {
+    const json = JSON.stringify(valor, substituto);
+    return json === undefined ? String(valor) : json;
+  };
   // **Cada parte se protege sozinha.** Uma que não vira texto — um objeto
-  // cíclico sem protótipo não vira JSON nem `String`, um `name` com getter
-  // que lança — sai como um recuo que diz isso. Sem ele, o erro subia até o
-  // `catch` de `escrever` e levava a linha inteira, com o contexto que o autor
-  // escreveu antes da parte que falhou.
+  // sem protótipo com um getter que lança não vira JSON em nenhuma das duas
+  // passadas, nem `String`; um `name` com getter que lança — sai como um
+  // recuo que diz isso. Sem ele, o erro subia até o `catch` de `escrever` e
+  // levava a linha inteira, com o contexto que o autor escreveu antes da
+  // parte que falhou.
   const emTexto = (valor) => {
     try {
       if (typeof valor === 'string') return valor;
@@ -1583,15 +1623,12 @@ const PRELUDIO: &str = r#"
           + (valor.stack ? '\n' + String(valor.stack) : '');
       }
       if (valor === undefined) return 'undefined';
-      if (typeof valor === 'function') return '[função ' + (valor.name || 'anônima') + ']';
+      if (typeof valor === 'function') return funcaoEmTexto(valor);
       if (typeof valor === 'bigint' || typeof valor === 'symbol') return String(valor);
       if (typeof valor === 'number') return String(valor);
-      try {
-        const json = JSON.stringify(valor, semMentir);
-        return json === undefined ? String(valor) : json;
-      } catch {
-        return String(valor);
-      }
+      try { return comoJson(valor, semMentir); } catch { /* um ciclo, ou um getter que lança */ }
+      try { return comoJson(valor, semCiclo()); } catch { /* o getter lançou de novo */ }
+      return String(valor);
     } catch {
       return '[valor que não virou texto]';
     }
@@ -2539,19 +2576,91 @@ mod testes {
         );
     }
 
+    /// **Um `Error`, uma função e um símbolo aninhados dizem o que são.**
+    ///
+    /// O `JSON.stringify` diz `{}` para um `Error` (o nome e a mensagem não são
+    /// enumeráveis) e some com a função e o símbolo de um objeto: a linha de
+    /// `console.log({ erro })` saía `{"erro":{}}`, e quem a lê não sabe nem que
+    /// houve um erro (T1).
+    #[test]
+    fn um_error_uma_funcao_e_um_simbolo_aninhados_dizem_o_que_sao() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "console.log({ e: new Error('x'), f() {}, s: Symbol('s') });\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(_, texto)] = linhas.as_slice() else {
+            panic!("esperava uma linha de console, vieram {linhas:?}");
+        };
+        for (o_que, esperado) in [
+            ("um `Error`", "Error: x"),
+            ("uma função", "[função f]"),
+            ("um símbolo", "Symbol(s)"),
+        ] {
+            assert!(
+                texto.contains(esperado),
+                "{o_que} aninhado sumiu da linha do console, ou saiu como `{{}}`: esperava \
+                 «{esperado}» em {texto}"
+            );
+        }
+    }
+
+    /// **Um objeto cíclico diz onde é cíclico**, e não `[object Object]`.
+    ///
+    /// O `JSON.stringify` lança num ciclo, e o recuo era `String(valor)`: um
+    /// objeto de estado com uma referência para o pai saía `[object Object]`,
+    /// sem nenhum dos campos que o autor queria ver. Uma segunda passada troca
+    /// por «[cíclico]» só o que é ancestral do valor de agora — e não o que já
+    /// apareceu antes noutro ramo: a mesma referência em dois campos é
+    /// repetição, e não ciclo (T1).
+    #[test]
+    fn um_objeto_ciclico_diz_onde_e_ciclico_e_nao_vira_object_object() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "const o = { nome: 'raiz' }; o.o = o; console.log(o);\
+                 const r = { a: 1 }; const p = { x: r, y: r }; p.p = p; console.log(p);\
+                 seele.postar('fim');",
+            )
+            .expect("código");
+        let linhas = linhas_de_console_ate(&executor, "fim");
+        let [(_, ciclico), (_, repetido)] = linhas.as_slice() else {
+            panic!("esperava duas linhas de console, vieram {linhas:?}");
+        };
+        assert!(
+            ciclico.contains("cíclico")
+                && ciclico.contains("raiz")
+                && !ciclico.contains("[object Object]"),
+            "um objeto cíclico saiu sem os campos dele, ou sem dizer onde é cíclico: {ciclico}"
+        );
+        assert_eq!(
+            repetido, "{\"x\":{\"a\":1},\"y\":{\"a\":1},\"p\":\"[cíclico]\"}",
+            "a segunda passada marcou como cíclica uma referência só repetida, ou não marcou o \
+             ciclo: o registro diz que há ciclo onde há só repetição"
+        );
+    }
+
     /// **Uma parte que não vira texto não derruba a linha inteira.**
     ///
-    /// Um objeto cíclico de protótipo nulo não vira JSON (é cíclico) nem texto
-    /// (não tem `toString`): o `JSON.stringify` lança, o `String` do recuo
-    /// também lança, e o `catch` de `escrever` engolia a linha toda — com o
-    /// contexto que o autor escreveu antes do objeto. A parte que não vira
-    /// texto sai como um recuo que diz isso, e o resto da linha chega.
+    /// Um objeto de protótipo nulo com um getter que lança não vira JSON (o
+    /// getter lança nas duas passadas) nem texto (não tem `toString`): o
+    /// `JSON.stringify` lança, o `String` do recuo também lança, e o `catch` de
+    /// `escrever` engolia a linha toda — com o contexto que o autor escreveu
+    /// antes do objeto. A parte que não vira texto sai como um recuo que diz
+    /// isso, e o resto da linha chega.
+    ///
+    /// O exemplo era um objeto cíclico de protótipo nulo, até o ciclo virar
+    /// «[cíclico]» (T1): esse agora vira texto.
     #[test]
     fn uma_parte_que_nao_vira_texto_nao_derruba_a_linha_do_console() {
         let executor = executor();
         executor
             .iniciar(
-                "const c = Object.create(null); c.eu = c;\
+                "const c = Object.create(null);\
+                 Object.defineProperty(c, 'x', { enumerable: true, get() { throw new Error('não'); } });\
                  console.warn('contexto importante:', c);\
                  seele.postar('fim');",
             )
