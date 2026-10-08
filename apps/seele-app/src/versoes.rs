@@ -1744,6 +1744,27 @@ mod o_launcher_ligado_ao_produto {
     /// também é o que pega uma regressão que passasse a comparar com o esquema
     /// do próprio build — que agora é 14, e 14 > 14 é falso. O 9999 cobre o
     /// futuro distante, e sozinho não pegaria aquela regressão.
+    /// A primeira abertura só reconhece a pasta que esta versão já migrou porque
+    /// o esquema deste build passa do da 0.15 (`ESQUEMA_DA_0_15`). Uma versão que
+    /// saísse sem migração acima de 13 gravaria um banco que parece da 0.15, e a
+    /// pasta que ela migrou seria copiada para a linha legada como se fosse dado
+    /// dela. Hoje é a migração 14, que põe `api` em `mods`, que garante isso; o
+    /// teste prende a garantia em vez de deixá-la por conta de uma coincidência.
+    #[test]
+    fn o_esquema_deste_build_passa_do_da_0_15() {
+        let deste_build = seele_server::persistence::schema::MIGRATIONS
+            .iter()
+            .map(|migracao| migracao.version)
+            .max()
+            .expect("o servidor tem migrações");
+        assert!(
+            deste_build > super::ESQUEMA_DA_0_15,
+            "o esquema deste build é {deste_build}, e não passa do da 0.15 \
+             ({}): uma pasta migrada por ele pareceria dado da linha legada",
+            super::ESQUEMA_DA_0_15,
+        );
+    }
+
     #[test]
     fn um_banco_ja_migrado_nao_vira_dado_da_linha_legada() {
         for esquema in [super::ESQUEMA_DA_0_15 + 1, 9999] {
