@@ -703,8 +703,11 @@ pub const MAGIA2: &str = "SEELE-ENC/2";
 ///
 /// Fixo, pelo motivo de [`TAMANHO`]: toda resposta tem o tamanho do pedido que
 /// a causou, e o ponto nunca amplifica. O maior `MORO2` possível tem 299 bytes
-/// com a quebra de linha (o teste `o_maior_moro2_cabe_no_datagrama`), e a folga
-/// é para um campo futuro caber sem mudar de versão.
+/// com a quebra de linha (o teste `o_maior_moro2_cabe_no_datagrama`).
+///
+/// **A folga não compra campo novo sem versão nova.** Cada linha tem um número
+/// exato de campos, e cada motivo da recusa é um de quatro: um campo ou um
+/// motivo a mais faz todo leitor de hoje ver lixo, e calar. Isso é um ENC/3.
 pub const TAMANHO2: usize = 4 * TAMANHO;
 
 /// Quantas dicas de rede local um registro leva, no máximo.

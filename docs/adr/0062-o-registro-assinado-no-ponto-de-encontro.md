@@ -52,8 +52,9 @@ nada) e se **registra** pelo `/2`.
 Todo datagrama do `/2` tem **384 bytes**, pedido e resposta, completados com
 `.`: a resposta nunca é maior que o pedido, e o ponto nunca amplifica. O maior
 `MORO2` possível tem 299 bytes. A spec falava em «até 512 bytes»; o tamanho fixo
-é a regra mais simples de provar, e a folga deixa um campo futuro caber sem
-mudar de versão.
+é a regra mais simples de provar. **A folga não compra um campo novo sem versão
+nova**: cada linha tem um número exato de campos, e cada motivo é um de quatro,
+então um campo ou um motivo a mais faz o leitor de hoje ver lixo e calar.
 
 | quem | linha |
 |---|---|
@@ -83,8 +84,9 @@ mudar de versão.
 ### O que o ponto confere, nesta ordem
 
 A ordem é a do custo: o limite por prefixo vem antes da assinatura, que é o que
-custa, e a assinatura vem antes do relógio, para que só quem tem a chave ouça a
-hora do ponto.
+custa, e a assinatura vem antes do relógio, para que um carimbo torto só seja
+dito a quem assinou com uma chave que confere. A hora do ponto em si não é
+segredo: a `RECUSA taxa` a leva a qualquer um.
 
 1. o limite por prefixo (abaixo);
 2. que a marca é a escuta ou o servidor de `Marcas::da_sala(Codigo::da_chave(chave))`
@@ -113,21 +115,30 @@ salas.
 - O registro responde ao `QUEM2` por 60 s depois do último aceito, como no `/1`,
   e **é lembrado enquanto o carimbo dele passaria na tolerância**: a repetição
   depois do prazo continua recusada.
+- **O teto conta os registros vivos.** Um registro só lembrado não segura vaga:
+  com o quarto no teto, ele sai antes de um registro novo ouvir `cheio`. Contado
+  no teto, um `MORO2` com o carimbo 300 s no futuro seguraria a vaga por ~600 s,
+  e quatro IPv4 encheriam o quarto para sempre (medido na revisão de
+  08/10/2026). O preço é perder, sob pressão, a lembrança que recusa a
+  repetição.
 - Outra chave com a mesma marca (uma colisão de 75 bits) não toma o lugar
   enquanto ele vale.
-- **O `QUEM2` responde sempre**: `AQUI2` quando acha, `NINGUEM` quando não acha.
-  O `/1` cala para a marca vazia. Calar aqui repetiria o próprio ADR 0047: com o
-  ponto de produção sem o `/2`, quem liga leria «ninguém mora» quando a verdade
-  é «o ponto não fala a versão 2». Com o `NINGUEM` explícito e o `ONDE` correndo
-  junto, quem liga separa os quatro casos: achou; o ponto fala e ninguém mora; o
-  ponto responde ao `ONDE` e cala o `QUEM2` (é anterior ao `/2`); o ponto está
-  mudo.
+- **O `QUEM2` responde sempre, dentro do limite**: `AQUI2` quando acha, `NINGUEM`
+  quando não acha. O `/1` cala para a marca vazia. Calar aqui repetiria o
+  próprio ADR 0047: com o ponto de produção sem o `/2`, quem liga leria «ninguém
+  mora» quando a verdade é «o ponto não fala a versão 2». Com o `NINGUEM`
+  explícito e o `ONDE` correndo junto, quem liga separa os casos: achou; o ponto
+  fala e ninguém mora; o ponto recusou por excesso; o ponto responde ao `ONDE` e
+  cala o `QUEM2` (`Enc2Calado`: é anterior ao `/2`, ou a recusa, dita uma vez
+  por segundo, foi para outro pedido); o ponto está mudo. Enquanto só o `ONDE`
+  respondeu, quem liga pergunta de novo dentro do prazo, e a volta depois da
+  janela de um segundo ouve a recusa.
 
 ### Os valores (D-enc-1)
 
 | | valor | o que ele aguenta |
 |---|---|---|
-| limite por prefixo (`/32` no IPv4, `/64` no IPv6), **só no `/2`** | balde de 64 pedidos, que enche a 8 por segundo | 60 SEELE abertos atrás de um mesmo IP, para sempre |
+| limite por prefixo (`/32` no IPv4, `/64` no IPv6), **só no `/2`**, um balde para o registro e outro para a pergunta | balde de 64 pedidos, que enche a 8 por segundo | 60 SEELE abertos atrás de um mesmo IP, para sempre |
 | teto do quarto assinado | 16 384 marcas, separado das 4096 do `/1` | ~8 000 apps abertos; ~4,6 MB cheio |
 | teto da tabela de prefixos | 65 536; um balde cheio está ocioso e sai na varredura | ~4,6 MB cheia |
 
@@ -147,9 +158,17 @@ quem liga recebe `PontoRecusou`. Com a tabela de prefixos cheia de prefixos
 ativos, o prefixo novo também ouve a recusa.
 
 **O abuso que o limite segura**: um prefixo sozinho renova no máximo 480 marcas
-no prazo do quarto, então encher as 16 384 pede dezenas de prefixos. Um `/48`
-IPv6 tem 65 536 `/64`, e o limite por `/64` não o segura: **um limite por `/48`
-é o segundo degrau**, se um dia for preciso.
+vivas no prazo do quarto, e o teto conta só as vivas, então encher as 16 384
+pede pelo menos 34 prefixos. Um `/48` IPv6 tem 65 536 `/64`, e o limite por
+`/64` não o segura: **um limite por `/48` é o segundo degrau**, se um dia for
+preciso.
+
+**Um balde para o registro e outro para a pergunta.** Com um balde só, nove
+`QUEM2` por segundo de um vizinho de CGNAT, ou de quem forja o IP de alguém (o
+IP que o próprio `QUEM2` entrega a quem tem o código dessa pessoa), calavam os
+`MORO2` daquela rede, e a sala sumia do quarto em 60 s (a revisão de
+08/10/2026). A pergunta é o pedido mais barato de mandar, e ela não esvazia
+mais o balde do registro.
 
 ### O anfitrião diz o que aconteceu
 
@@ -169,8 +188,10 @@ caminho guardaria para repetir depois. O pedido é dizer, e é o que se faz.
 O ponto novo é compatível com a 0.15, e o app novo sem o ponto novo não acha
 ninguém pelo código. O `sondar` fala o `/2` e mede o relógio do ponto; com
 `--exige-enc2`, ele reprova quando alguma família que respondeu ao `ONDE` não fala
-o `/2`. **O `empacotar/publicar.sh` roda essa conferência** antes de qualquer
-passo com efeito, e para a publicação se o ponto em produção não falar o `/2`.
+o `/2`, ou quando o relógio do ponto está a mais de um minuto do da máquina que
+sonda. **O `empacotar/publicar.sh` roda essa conferência** antes de qualquer
+passo com efeito, e para a publicação se o ponto em produção não falar o `/2`;
+o corpo do release diz qual ponto foi conferido.
 `--sem-ponto` pula, para a emergência que não depende do ponto, e o corpo do
 release diz. A linha legada não é conferida. Nenhum teste fala com o ponto de
 produção.
@@ -184,10 +205,22 @@ produção.
 - **O relógio do ponto passa a importar.** Um ponto com o relógio torto recusa o
   registro de toda sala. O `docs/ponto-de-encontro.md` pede o NTP, e o `sondar`
   mede.
-- **O que sobra.** Quem copia um `MORO2` no caminho só o repete do mesmo IP
-  **e** da mesma porta de quem registrou, onde ele não muda nada. Quem é o ponto
-  continua escolhendo o endereço público que devolve: o TLS, com o código, recusa
-  o servidor errado (`ConfereCodigo`).
+- **O que sobra.**
+  - Quem está no caminho entre a sala e o ponto, e entrega a cópia de um
+    `MORO2` antes do original, aponta a marca para si até o reavivamento
+    seguinte; com a da escuta, recebe pelo `LEVE` o IP e a porta de quem liga
+    nesse tempo. A cópia repetida **depois** do original é recusada de outro
+    endereço; do mesmo socket, ela só renova o registro e volta as dicas às do
+    `MORO2` copiado.
+  - A mensagem assinada não diz para qual ponto ela é, então um `MORO2` vale em
+    qualquer ponto.
+  - Quem forja a origem esvazia o balde de registro de uma rede com `MORO2` de
+    chaves dele, porque o limite vem antes da assinatura; a sala daquela rede
+    some do quarto enquanto isso durar. Só uma prova de ida e volta (um cookie
+    no `MORO2`) fecha isso, e ela é uma decisão pendente do dono.
+  - Quem é o ponto continua escolhendo o endereço público que devolve.
+  - Em todos os casos, o TLS, com o código, recusa o servidor errado
+    (`ConfereCodigo`).
 - **Um servidor guardado continua com o que o ADR 0047 descreve**, no `/1`.
 - O ponto ganha uma dependência, `ed25519-dalek`, que já estava na árvore.
 
@@ -209,4 +242,4 @@ produção.
 ## Como reverter
 
 Desligar o `/2` no ponto: ele passa a calar para a magia nova, e quem liga lê
-`PontoSemEnc2`. O `/1` não muda.
+`Enc2Calado`. O `/1` não muda.

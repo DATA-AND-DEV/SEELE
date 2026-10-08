@@ -105,10 +105,20 @@ registra num segundo quarto, separado do primeiro, com um `MORO2` assinado pela
 chave da pessoa, e o ponto confere que a marca sai daquela chave, que a
 assinatura vale e que o carimbo de hora está a menos de cinco minutos do relógio
 dele. Ninguém sem a chave ocupa as marcas de uma sala; um `MORO2` copiado no
-caminho só é aceito de volta do mesmo IP e da mesma porta de quem o mandou, onde
-ele não muda nada; e uma troca de rede de quem recebe vale no reavivamento
-seguinte, sem esperar os 60 segundos. Quem pergunta pela sala com `QUEM2` sempre
-ouve uma resposta: o endereço e as dicas, ou `NINGUEM`.
+caminho e repetido depois do original é recusado quando vem de outro endereço;
+e uma troca de rede de quem recebe vale no reavivamento seguinte, sem esperar os
+60 segundos. Dentro do limite de pedidos, quem pergunta pela sala com `QUEM2`
+ouve sempre uma resposta: o endereço e as dicas, ou `NINGUEM`. Acima dele, o
+ponto recusa, e diz a recusa uma vez por segundo.
+
+**O que sobra na sala.** Quem está no caminho entre a sala e o ponto, e consegue
+entregar a cópia de um `MORO2` antes do original, aponta a marca para si até o
+reavivamento seguinte, quinze segundos depois; com a marca da escuta, recebe
+pelo `LEVE` o IP e a porta de quem liga nesse meio tempo. A mensagem assinada
+não diz para qual ponto ela é, então ela vale em qualquer um. E quem forja a
+origem dos pacotes consegue esvaziar o limite de pedidos de registro de uma
+rede, e a sala daquela rede some do quarto enquanto isso durar. Em nenhum dos
+casos o servidor errado atende: quem liga confere o código dentro do TLS.
 
 **O que a sala conta.** Quem tem o seu código consegue saber, sem ligar, se o seu
 SEELE está aberto, qual é o seu IP público, e as dicas de rede local da sua sala
@@ -267,8 +277,8 @@ Na ordem:
    ```
 
    Ele sai com sucesso só se toda família que responde ao `ONDE` também falar o
-   ENC/2, e diz de quantos segundos o relógio do ponto difere do da máquina que
-   sonda;
+   ENC/2, com o relógio do ponto a menos de um minuto do da máquina que sonda,
+   e diz de quantos segundos é a diferença;
 3. publicar. O `empacotar/publicar.sh` roda a mesma conferência antes de
    qualquer passo com efeito, e para se o ponto não falar o ENC/2. O
    `--sem-ponto` pula a conferência, para a emergência que não depende do ponto,
