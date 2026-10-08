@@ -2567,7 +2567,9 @@ mod testes {
         );
     }
 
-    /// **Cada método tem o seu nível**, e um `Error` chega com nome e mensagem.
+    /// **Cada método tem o seu nível**, e um `Error` chega com nome, mensagem
+    /// e pilha — a pilha numa linha abaixo, com a quebra de verdade, que a
+    /// bomba escapa ao escrever no `seele.log`.
     #[test]
     fn cada_metodo_do_console_escreve_no_seu_nivel() {
         let executor = executor();
@@ -2595,6 +2597,10 @@ mod testes {
         assert!(
             erro.starts_with("Error: quebrou"),
             "um `Error` passado ao console perdeu o nome e a mensagem: {erro}"
+        );
+        assert!(
+            erro.contains("\n    at "),
+            "um `Error` passado ao console perdeu a pilha, que diz onde no MOD ele nasceu: {erro:?}"
         );
     }
 

@@ -12095,6 +12095,10 @@ mod a_falha_do_mod_chega_ao_registro {
     /// **Um temporizador que lança deixa linhas com o texto, no teto do
     /// balde.** O mesmo laço de 4 ms mandava 174 mensagens por segundo à
     /// janela, que as descartava.
+    ///
+    /// **E com a pilha**, que diz onde no MOD: o `emTexto` do prelúdio a põe
+    /// numa linha abaixo de `nome: mensagem`, e no `seele.log` a quebra sai
+    /// escapada (`\n    at …`).
     #[test]
     fn um_temporizador_que_lanca_deixa_linhas_limitadas_pelo_balde() {
         let deixou = deixou(
@@ -12103,10 +12107,17 @@ mod a_falha_do_mod_chega_ao_registro {
             |_, _| false,
             Duration::from_secs(1),
         );
+        let linha = linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"])
+            .unwrap_or_else(|| {
+                panic!(
+                    "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
+                    deixou.rastro
+                )
+            });
         assert!(
-            linha_de_erro(&deixou.rastro, &["erro num temporizador", "TypeError"]).is_some(),
-            "a exceção de um temporizador não chegou ao seele.log com o id e o texto: {}",
-            deixou.rastro
+            linha.contains(r"\n    at "),
+            "a linha do erro de um temporizador perdeu a pilha, e quem escreveu o MOD não sabe \
+             em que ponto dele o temporizador lançou: {linha}"
         );
         assert!(
             tem_mensagem(&deixou.falas, "erro-no-relogio"),
@@ -12128,6 +12139,8 @@ mod a_falha_do_mod_chega_ao_registro {
         );
     }
 
+    /// **Um ouvinte de evento que lança deixa a linha, com a pilha** — como o
+    /// temporizador, e pelo mesmo `emTexto`.
     #[test]
     fn um_ouvinte_de_evento_que_lanca_deixa_a_linha() {
         let deixou = deixou(
@@ -12140,11 +12153,18 @@ mod a_falha_do_mod_chega_ao_registro {
             |falas, linhas| tem_mensagem(falas, "erro-no-evento") && linhas > 0,
             Duration::from_secs(5),
         );
+        let linha = linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"])
+            .unwrap_or_else(|| {
+                panic!(
+                    "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o \
+                     id e o texto: {}",
+                    deixou.rastro
+                )
+            });
         assert!(
-            linha_de_erro(&deixou.rastro, &["erro num ouvinte de evento", "TypeError"]).is_some(),
-            "a exceção de um ouvinte de `SeeleUI.aoEvento` não chegou ao seele.log com o id e o \
-             texto: {}",
-            deixou.rastro
+            linha.contains(r"\n    at "),
+            "a linha do erro de um ouvinte de evento perdeu a pilha, e quem escreveu o MOD não \
+             sabe em que ponto dele o ouvinte lançou: {linha}"
         );
         assert!(
             tem_mensagem(&deixou.falas, "erro-no-evento"),
