@@ -180,3 +180,7 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - o teste novo do G-servidor também sobe uma hospedagem.
   
   O passo leva um guarda que reprova o teste que resolver o ponto padrão de produção, com prova por reversão.
+- **A integração da onda 2.** A orquestradora a integrou na `versao/0.16` (`dc001a0a`), junto com a F1, a F3, a F4, a F6 e a F7, e a bateria passou com 3005 testes.
+- **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `628c7fd`.
+- **O ajuste do plano.** O plano ganhou, no G-servidor, o que a F7 deixou (`3b0b6a7`): o `antes_de_aceitar` obrigatório e as 17 chamadas de `Hospedagem::iniciar`.
+- **A onda 3 foi despachada:** E · J · G-servidor, este com o passo 0 do ponto de produção.
