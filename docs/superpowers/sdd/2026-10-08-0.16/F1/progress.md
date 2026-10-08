@@ -38,6 +38,7 @@ Plano: `docs/superpowers/plans/2026-10-08-0.16-F1-protocolo.md`. Branch `0.16/pr
 
 | tarefa | estado | commit | nota |
 |---|---|---|---|
+| §14 da API 6 no fio | feito | `6d07ac9e` | `ModAviso` (46) e `TemaMudou` (47), com o JSON do tema opaco e o teto de 12 KiB (`MAX_CARGA_DE_MOD`, agora também do `ModRequest`). O item «pedidos ao servidor» saiu: o `ChannelId(0)` já é o escopo de servidor. Bytes conferidos por uma conta independente. Reversão: sem o teto da carga, reprova |
 | P7a a API guardada e anunciada | feito | `4112f96b` | **esquema 14** (a migração nova). O `EnabledMod.api` obrigou os dois construtores do `main.rs` a mudar para compilar, e eles passaram a gravar `instalado.api`: isso é a P7b, que ficou feita junto, sem o teste próprio da tela. Achado pelo teste: o `definir_conjunto`, o outro caminho de escrita, descartava a API. A subida lê a API com `como_ele_se_chama`, porque `read_manifest` recusaria um MOD da API 5 antes de dizer o número. Três reversões reprovam |
 
 ## Verificação final (08/10)
