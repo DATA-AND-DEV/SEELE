@@ -1953,6 +1953,133 @@ mod testes {
         );
     }
 
+    #[test]
+    fn o_teto_e_o_dobro_da_ida_e_volta_e_nunca_menos_que_a_folga() {
+        // O C1 da pendência 51, item 17: os dois ramos do teto. Num caminho
+        // curto, o dobro da ida e volta são microssegundos, e o piso dá ao
+        // ponto tempo de responder à segunda pergunta da rajada. Num caminho
+        // longo, o dobro manda.
+        let primeira = tokio::time::Instant::now();
+        assert_eq!(
+            teto_depois_da_resposta(primeira, Duration::from_millis(1)),
+            primeira + Duration::from_millis(100),
+            "com 1 ms de ida e volta o teto não ficou no piso de 100 ms: num caminho curto a \
+             consulta para antes de o ponto responder à segunda marca da rajada"
+        );
+        assert_eq!(
+            teto_depois_da_resposta(primeira, Duration::from_millis(200)),
+            primeira + Duration::from_millis(400),
+            "com 200 ms de ida e volta o teto não ficou no dobro: num caminho longo a consulta \
+             para antes de a segunda marca voltar, ou espera mais que duas idas e voltas por uma \
+             pergunta que o ponto calou"
+        );
+    }
+
+    /// O ponto falso que responde ao `ONDE` na hora, ao `QUEM` do servidor na
+    /// hora e ao `QUEM` da escuta depois de `escuta_em`, se vier. Com
+    /// `onde_volta` falso, o `ONDE` se perde.
+    async fn ponto_que_demora_a_escuta(
+        marcas: &Marcas,
+        onde_volta: bool,
+        escuta_em: Option<Duration>,
+    ) -> (SocketAddr, Anotados) {
+        let (servidor, escuta) = (SocketAddr::from(SERVIDOR), SocketAddr::from(ESCUTA));
+        let quem = marcas.clone();
+        ponto_falso(move |pedido, de| match pedido {
+            encontro::Pedido::Onde { marca } if onde_volta => {
+                vec![(Duration::ZERO, encontro::aqui(marca, de))]
+            }
+            encontro::Pedido::Quem { marca } if *marca == quem.servidor => {
+                vec![(Duration::ZERO, encontro::aqui(marca, servidor))]
+            }
+            encontro::Pedido::Quem { marca } if *marca == quem.escuta => escuta_em
+                .map(|demora| (demora, encontro::aqui(marca, escuta)))
+                .into_iter()
+                .collect(),
+            _ => Vec::new(),
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn a_segunda_marca_que_chega_dentro_do_teto_entra_na_resposta() {
+        // O C1: o ponto responde ao servidor e ao `ONDE` na hora, e à escuta 50
+        // ms depois. No laço local a ida e volta são microssegundos, e o teto é
+        // o piso de 100 ms: a escuta chega dentro dele.
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let (ponto, _) =
+            ponto_que_demora_a_escuta(&marcas, true, Some(Duration::from_millis(50))).await;
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = consultar_por(&socket, ponto, &marcas, ate).await;
+
+        assert_eq!(
+            achado,
+            PorUmEndereco::Perguntou(OndeMora::Achado {
+                servidor: Some(SocketAddr::from(SERVIDOR)),
+                escuta: Some(SocketAddr::from(ESCUTA)),
+            }),
+            "a escuta respondeu 50 ms depois do servidor, dentro do teto de 100 ms, e ficou de \
+             fora: a consulta parou na primeira marca, e quem chega manda o `LEVE` ao aviso \
+             guardado em vez da escuta de hoje"
+        );
+    }
+
+    #[tokio::test]
+    async fn com_o_onde_perdido_a_espera_vai_ate_a_volta_seguinte_e_nao_repete() {
+        // O C1, o ramo do `ONDE` perdido: sem ida e volta medida não há teto, e
+        // a espera pela marca que falta vai até a hora da volta seguinte (meio
+        // segundo depois do envio). A escuta que chega aos 300 ms entra; uma
+        // que nunca chega custa essa meia volta, e a pergunta não se repete a
+        // um ponto que está no ar.
+        let Some(marcas) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+        let (ponto, _) =
+            ponto_que_demora_a_escuta(&marcas, false, Some(Duration::from_millis(300))).await;
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        assert_eq!(
+            consultar_por(&socket, ponto, &marcas, ate).await,
+            PorUmEndereco::Perguntou(OndeMora::Achado {
+                servidor: Some(SocketAddr::from(SERVIDOR)),
+                escuta: Some(SocketAddr::from(ESCUTA)),
+            }),
+            "o `ONDE` se perdeu, e a escuta que respondeu aos 300 ms, antes da hora da volta \
+             seguinte, ficou de fora: sem ida e volta medida, a consulta inventou um teto"
+        );
+
+        let (ponto, anotados) = ponto_que_demora_a_escuta(&marcas, false, None).await;
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let comecou = std::time::Instant::now();
+        let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
+        let achado = consultar_por(&socket, ponto, &marcas, ate).await;
+        let levou = comecou.elapsed();
+        assert_eq!(
+            achado,
+            PorUmEndereco::Perguntou(OndeMora::Achado {
+                servidor: Some(SocketAddr::from(SERVIDOR)),
+                escuta: None,
+            }),
+            "o ponto deu o servidor e calou a escuta, e a consulta não voltou com o que achou"
+        );
+        assert!(
+            levou >= INTERVALO_DOS_ENVIOS - Duration::from_millis(50)
+                && levou < INTERVALO_DOS_ENVIOS * 2,
+            "sem o `ONDE`, a espera pela escuta devia ir até a hora da volta seguinte \
+             ({INTERVALO_DOS_ENVIOS:?}) e parar ali, e levou {levou:?}"
+        );
+        assert_eq!(
+            anotados.lock().unwrap().len(),
+            3,
+            "a pergunta se repetiu a um ponto que já tinha respondido: quem não respondeu teve um \
+             intervalo inteiro, e a volta a mais só atrasa a conexão"
+        );
+    }
+
     fn bilhete(ponto: &str) -> Bilhete {
         Bilhete::novo(ponto, "45.33.32.156:41234").expect("bilhete de teste")
     }
