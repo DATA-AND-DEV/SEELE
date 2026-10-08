@@ -68,6 +68,17 @@ Para a orquestradora conferir:
 - (e) Se não existir: `pub use seele_proto::version::PROTOCOL_VERSION;` em
   `seele-ffi`, para o guarda da unidade do manifesto.
 
+## Achados durante a execução
+
+- **«Linha» não pode aparecer no texto de tela.** O ADR 0033 a aposentou, e o
+  guarda `nenhum_termo_aposentado_volta_para_o_texto_da_interface` pegou a
+  frase da 0.15.2.
+  - A tela passa a dizer «Servidor 0.15», «versão do servidor» ou «outro
+    SEELE».
+  - Registrado nas restrições globais do plano.
+- **A unidade lida do código do `linha/0.15`** é protocolo 8, `mod_api` 5,
+  Servidor 0.15 e APIs 3, 4 e 5. Medido com `manifesto.py --so-unidade`.
+
 ## Arquivos de outras frentes que a F6 toca (ganchos mínimos)
 
 | arquivo | gancho | tarefa |
@@ -103,9 +114,9 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 3 | marcador com linha e soma; poda | feito, com reversão (`skip(1)` e a recusa sem linha) | `5e8933c` |
 | 4 | dados por linha; `semear_linha` | feito, com reversão (a recusa do destino dentro da origem e o «deixar de fora» da cópia) | `3ac83dc` |
 | 5 | tamanho e remoção | feito, com reversão (`symlink_metadata`) | `62b7c5b` |
-| 6 | `manifesto.py` híbrido e acumulado | — | |
-| 7 | pacote portátil do Windows | — | |
-| 8 | a 0.15.2 (`linha/0.15`) | — | |
+| 6 | `manifesto.py` híbrido e acumulado | feito, com reversão. A reversão do «portátil fora do topo» não reprovou de início: o instalador vencia pela ordem e escondia o defeito. Entrou o caso sem instalador, e aí reprovou | `314d9ba` |
+| 7 | pacote portátil do Windows | feito, com reversão. O guarda é de texto; a prova de que o PowerShell monta o arquivo é a medida no Windows (17) | `0639e4e` |
+| 8 | a 0.15.2 (`linha/0.15`) | feito, com reversão. No `linha/0.15`: `dd932de` (o app) e `ff70f21` (o empacotamento); o `--linha-legada` também está aqui, em `70fea89`. **Pronto para o dono empacotar** com `publicar.sh 0.15.2 --linha-legada` | `dd932de`, `ff70f21`, `70fea89` |
 | 9 | a casca pelo `Resolvedor` | — | |
 | 10 | revogação nos atos do próprio processo | — | |
 | 11 | a guarda da linha legada | — | |
