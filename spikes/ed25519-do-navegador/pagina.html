@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>medição 1 · Ed25519 do navegador</title>
+<pre id="o">rodando…</pre>
+<script>
+"use strict";
+// A medição 1 do ADR 0057. A página assina; quem verifica é o `prova.py`, com
+// as linhas do `seeled`. Descartável.
+//
+// Fase 1: gera a chave não extraível (como a identidade do celular), assina
+// três famílias de mensagem e guarda a chave em IndexedDB.
+// Fase 2: a página recarrega, lê a chave de volta e assina de novo. É o que o
+// web app faz a cada abertura.
+
+const q = new URLSearchParams(location.search);
+const NAV = q.get("nav") || "desconhecido";
+const FASE = q.get("fase") || "1";
+const BANCO = "medicao-1-ed25519";
+// O rótulo de verdade é da F1. Este é provisório e só prova que bytes
+// arbitrários na frente do fp e do nonce assinam e verificam.
+const ROTULO = new TextEncoder().encode("SEELE S2 provisorio\u0000");
+
+const o = document.getElementById("o");
+const dizer = (t) => { o.textContent += "\n" + t; };
+const hex = (b) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, "0")).join("");
+const aleatorio = (n) => crypto.getRandomValues(new Uint8Array(n));
+const juntar = (...partes) => {
+  const tudo = new Uint8Array(partes.reduce((n, p) => n + p.length, 0));
+  let i = 0;
+  for (const p of partes) { tudo.set(p, i); i += p.length; }
+  return tudo;
+};
+
+function abrirBanco() {
+  return new Promise((ok, falha) => {
+    const r = indexedDB.open(BANCO, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("chaves");
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => falha(r.error);
+  });
+}
+function noBanco(modo, fazer) {
+  return abrirBanco().then((db) => new Promise((ok, falha) => {
+    const t = db.transaction("chaves", modo);
+    const r = fazer(t.objectStore("chaves"));
+    t.oncomplete = () => { db.close(); ok(r && r.result); };
+    t.onerror = () => { db.close(); falha(t.error); };
+  }));
+}
+
+async function assinar(chave, familia, mensagem, entradas, tempos) {
+  const t0 = performance.now();
+  const s = await crypto.subtle.sign({ name: "Ed25519" }, chave.privateKey, mensagem);
+  tempos.push(performance.now() - t0);
+  const propria = await crypto.subtle.verify({ name: "Ed25519" }, chave.publicKey, s, mensagem);
+  entradas.push({ familia, m: hex(mensagem), s: hex(s), propria });
+  return hex(s);
+}
+
+async function mandar(corpo) {
+  await fetch("/r", { method: "POST", body: JSON.stringify(corpo) });
+}
+
+async function fase1() {
+  const r = { nav: NAV, fase: 1, ua: navigator.userAgent, seguro: isSecureContext, entradas: [] };
+  const tempos = [];
+  const t0 = performance.now();
+  const chave = await crypto.subtle.generateKey({ name: "Ed25519" }, false, ["sign", "verify"]);
+  r.gerar_ms = performance.now() - t0;
+  r.privada_extraivel = chave.privateKey.extractable;
+  r.publica = hex(await crypto.subtle.exportKey("raw", chave.publicKey));
+  // A privada não pode sair: é o que a identidade do celular promete.
+  try {
+    await crypto.subtle.exportKey("pkcs8", chave.privateKey);
+    r.exportou_a_privada = true;
+  } catch (e) {
+    r.exportou_a_privada = false;
+    r.erro_ao_exportar = `${e.name}`;
+  }
+
+  for (let i = 0; i < 100; i++) await assinar(chave, "nonce", aleatorio(32), r.entradas, tempos);
+  for (let i = 0; i < 50; i++) await assinar(chave, "s2", juntar(ROTULO, aleatorio(32), aleatorio(32)), r.entradas, tempos);
+  const fixa = aleatorio(32);
+  const vistas = new Set();
+  for (let i = 0; i < 10; i++) vistas.add(await assinar(chave, "repetida", fixa, r.entradas, tempos));
+  r.assinaturas_distintas_da_mesma_mensagem = vistas.size;
+  for (const n of [0, 1, 1000, 4096]) await assinar(chave, "borda", aleatorio(n), r.entradas, tempos);
+
+  tempos.sort((a, b) => a - b);
+  r.assinar_ms_p50 = tempos[Math.floor(tempos.length / 2)];
+  r.assinar_ms_p95 = tempos[Math.floor(tempos.length * 0.95)];
+
+  await noBanco("readwrite", (s) => s.put(chave, "identidade"));
+  await mandar(r);
+  dizer(`fase 1: ${r.entradas.length} assinaturas, ${vistas.size} distintas para a mesma mensagem`);
+  location.replace(`?nav=${encodeURIComponent(NAV)}&fase=2`);
+}
+
+async function fase2() {
+  const r = { nav: NAV, fase: 2, ua: navigator.userAgent, entradas: [] };
+  const tempos = [];
+  const chave = await noBanco("readonly", (s) => s.get("identidade"));
+  r.leu_a_chave = Boolean(chave && chave.privateKey);
+  if (r.leu_a_chave) {
+    r.privada_extraivel = chave.privateKey.extractable;
+    r.publica = hex(await crypto.subtle.exportKey("raw", chave.publicKey));
+    for (let i = 0; i < 20; i++) await assinar(chave, "recarregada", aleatorio(32), r.entradas, tempos);
+  }
+  await new Promise((ok) => { const d = indexedDB.deleteDatabase(BANCO); d.onsuccess = d.onerror = d.onblocked = ok; });
+  await mandar(r);
+  dizer(`fase 2: leu a chave = ${r.leu_a_chave}, ${r.entradas.length} assinaturas. pronto.`);
+}
+
+(FASE === "2" ? fase2() : fase1()).catch(async (e) => {
+  dizer(`ERRO ${e && e.name}: ${e && e.message}`);
+  await mandar({ nav: NAV, fase: Number(FASE), ua: navigator.userAgent, erro: `${e && e.name}: ${e && e.message}` });
+});
+</script>
