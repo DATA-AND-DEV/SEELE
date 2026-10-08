@@ -168,6 +168,13 @@ Decisão do dono para a 0.16 (spec `docs/superpowers/specs/2026-10-08-0.16-desig
   ninguém os chamava. Na 0.16 hospedar e entrar conferem a lista, inclusive
   para a versão do próprio processo; abrir continua não conferindo.
 
+> **Nota, 08/10/2026 ([ADR 0061](0061-a-identidade-e-uma-por-maquina.md),
+> proposto).** Os dados são por linha, e **a identidade não**: ela passa a ser
+> uma por máquina, lida de `$SEELE_IDENTIDADE`, para que a pessoa e o código da
+> sala pessoal sejam os mesmos em toda linha. A cópia da identidade na primeira
+> abertura continua até o dono escolher entre as duas opções do 0061. Em
+> qualquer delas, a 0.15.2 só pode assinar nonce de 32 bytes.
+
 O que não muda: as duas assinaturas, o manifesto no release (agora híbrido: o
 topo no formato que o atualizador da 0.15.1 lê, e `schema: 2` com `versions[]`
 ao lado), a conferência antes de tocar arquivo, nenhuma consulta ao abrir, e

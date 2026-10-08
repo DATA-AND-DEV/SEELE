@@ -193,3 +193,15 @@ fn the_guard_actually_catches_allocation() {
          the real-time gate is inert and the other tests in this file prove nothing"
     );
 }
+
+#[test]
+fn o_toque_nao_aloca() {
+    let mut toque = seele_audio::toque::Toque::novo(48_000);
+    let mut bloco = vec![0.0_f32; DEVICE_FRAMES * 2];
+    assert_no_alloc(|| {
+        for _ in 0..8 {
+            toque.preencher(&mut bloco, 2);
+        }
+    });
+    assert!(bloco.iter().any(|a| *a != 0.0), "o toque não escreveu nada");
+}

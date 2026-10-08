@@ -33,6 +33,7 @@ use seele_proto::ids::VoiceRoomId;
 pub mod admissao;
 pub mod alcance;
 pub mod autorizacao;
+pub mod campainha;
 pub mod frame;
 pub mod hospedagem;
 pub mod mods;
@@ -258,6 +259,18 @@ pub struct ServerConfig {
     /// produto é guardar. Ligá-la é uma escolha com consequência, e a
     /// consequência é irreversível.
     pub retencao_em_dias: Option<u32>,
+    /// A identidade TLS, quando quem sobe o servidor já tem uma.
+    ///
+    /// `None` é o caso de sempre: lida do banco, ou gerada e guardada nele
+    /// ([`tls::Identity::load_or_create`]). A sala pessoal passa a dela, feita
+    /// da chave da pessoa por [`tls::Identity::da_semente`]. Essa **nunca vai
+    /// para o banco**: é a chave da pessoa, e não a do servidor, e um banco que a
+    /// guardasse seria uma segunda cópia da `identity.key` fora do lugar que o
+    /// ADR 0017 protege.
+    ///
+    /// [`Daemon::bind`] a tira daqui antes de a configuração ir para as
+    /// sessões, então nenhuma sessão segura a chave.
+    pub identidade: Option<tls::Identity>,
 }
 
 impl Default for ServerConfig {
@@ -289,6 +302,8 @@ impl Default for ServerConfig {
             durabilidade: crate::persistence::Durabilidade::default(),
             // Ilimitado, que é o padrão da spec. Ver o campo.
             retencao_em_dias: None,
+            // A de sempre: a do banco.
+            identidade: None,
         }
     }
 }
@@ -487,7 +502,7 @@ impl Daemon {
     /// # Errors
     ///
     /// Fails if the certificate cannot be generated or the socket cannot bind.
-    pub async fn bind(config: ServerConfig) -> Result<Self> {
+    pub async fn bind(mut config: ServerConfig) -> Result<Self> {
         // rustls 0.23 requires a crypto provider to be chosen explicitly. Doing
         // it here rather than in `main` means the integration tests get it too.
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -513,10 +528,16 @@ impl Daemon {
         // MUDOU` — o alerta bloqueante do ADR 0003 — e era recusado. O aviso
         // reservado para ataque disparando num reinício de rotina é como se
         // ensina a ignorá-lo.
-        let identity = tls::Identity::load_or_create(
-            &persistence,
-            vec!["localhost".into(), config.listen.ip().to_string()],
-        )?;
+        //
+        // A sala pessoal traz a dela, e ela sai da configuração aqui: as
+        // sessões recebem a configuração, e não precisam da chave.
+        let identity = match config.identidade.take() {
+            Some(identidade) => identidade,
+            None => tls::Identity::load_or_create(
+                &persistence,
+                vec!["localhost".into(), config.listen.ip().to_string()],
+            )?,
+        };
         let fingerprint = identity.fingerprint();
         let impressao = identity.digest();
         let server_config = tls::server_config(identity)?;

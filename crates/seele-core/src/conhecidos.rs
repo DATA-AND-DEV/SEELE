@@ -518,8 +518,10 @@ fn higienizar(valor: &str) -> String {
 }
 
 /// Mesmo modo restrito da identidade: a lista diz com quem você conversa.
+///
+/// A agenda da sala pessoal grava pelo mesmo caminho ([`crate::agenda`]).
 #[cfg(unix)]
-fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
 
@@ -533,7 +535,7 @@ fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn escrever_privado(caminho: &Path, bytes: &[u8]) -> std::io::Result<()> {
     std::fs::write(caminho, bytes)
 }
 
