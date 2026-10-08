@@ -421,6 +421,37 @@ function motivoDaFalha(falha) {
 }
 
 /**
+ * Prova que uma imagem abre, antes de alguém a dar por pronta.
+ *
+ * **O sniff do Rust só lê o cabeçalho** (pendência 51, item 7). Bytes com o
+ * começo de um PNG e o corpo corrompido chegam aqui com o papel `imagem`, cabem
+ * no teto, e só o decodificador do navegador os recusa. O `<img>` da mídia
+ * avisa por `error`; o do retrato não tinha o ouvinte, e um fundo pintado por
+ * CSS, um `drawImage` e um avatar de `background-image` não têm por onde
+ * avisar — a imagem ficava «pronta» num quadrado vazio, sem uma linha no
+ * registro, no evento do MOD ou na aba.
+ *
+ * Quem chama encadeia esta promessa **dentro** do `then` que já tinha, e a
+ * recusa cai no `catch` de sempre, com um motivo em palavra: o do navegador
+ * (`EncodingError`) é dele, e diz pouco a quem escreve o MOD. Mesmo `uri`,
+ * mesmo `img-src`: nada na política da janela muda.
+ *
+ * @param {string} uri O `uri` que a ponte de mídia devolveu.
+ * @returns {Promise<HTMLImageElement>} A imagem decodificada — a do fundo de
+ *   tela é pintada com ela mesma.
+ */
+function provarImagem(uri) {
+  const imagem = new Image();
+  imagem.src = uri;
+  return imagem.decode().then(
+    () => imagem,
+    () => {
+      throw new Error("a imagem não decodificou");
+    },
+  );
+}
+
+/**
  * Uma região montada, com os recursos dela.
  *
  * O dono é o par `(instancia, geracao)`, e não o `id` do MOD: um MOD pode ser
@@ -1476,6 +1507,9 @@ class RegiaoDeMod {
     const vindo = fonte.doServidor
       ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
       : this.dono.carregarMidia(fonte.fonte);
+    // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
+    // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
+    const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
       // **As duas recusas são anotadas, além de ditas ao registro.** A linha
@@ -1492,13 +1526,22 @@ class RegiaoDeMod {
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
         return;
       }
+      // **Reservados antes do `decode()`**, como o som em `montarMidia`: duas
+      // imagens decodificando juntas passariam as duas pela conferência de
+      // cima, cada uma vendo a conta sem a outra. A recusa do `decode()` cai
+      // no `catch`, que devolve.
       bytes = midia.bytes; this[bolso.conta] += bytes;
-      elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
-      elem.style.backgroundSize = "cover";
-      elem.style.backgroundPosition = "center";
-      this.anotarMidia(elem, "pronta");
+      return provarImagem(midia.uri).then(() => {
+        if (cancelado || this.solta) return;
+        if (!this.dono.podeFalar()) { devolver(); return; }
+        elem.style.backgroundImage = `linear-gradient(90deg, rgba(5,4,3,.88), rgba(5,4,3,.4)), url("${midia.uri}")`;
+        elem.style.backgroundSize = "cover";
+        elem.style.backgroundPosition = "center";
+        this.anotarMidia(elem, "pronta");
+      });
     }).catch(falha => {
       if (cancelado || this.solta) return;
+      devolver();
       const porque = motivoDaFalha(falha);
       this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "falhou", porque });
@@ -1509,16 +1552,40 @@ class RegiaoDeMod {
   montarRetrato(elem, plano) {
     const marca = elemento("span", "regiao-de-mod-retrato-inicial");
     elem.append(marca);
-    const estado = { elemento: null, cancelado: false, bytes: 0 };
+    const estado = { elemento: null, cancelado: false, bytes: 0, naoAbriu: null };
+    const conta = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
+    // Tira a imagem e devolve os bytes dela: o descarte, e também a recusa —
+    // a inicial volta a ser o que o retrato mostra, e o teto deixa de contar
+    // uma imagem que não está na tela.
+    const tirarAImagem = () => {
+      const img = estado.elemento;
+      if (img) {
+        if (estado.naoAbriu) img.removeEventListener("error", estado.naoAbriu);
+        img.removeAttribute("src");
+        img.remove();
+      }
+      estado.elemento = null;
+      estado.naoAbriu = null;
+      this[conta] -= estado.bytes;
+      estado.bytes = 0;
+    };
     this.guardar(elem, `retrato ${plano.chave}`, () => {
       estado.cancelado = true;
-      const img = estado.elemento;
-      if (img) { img.removeAttribute("src"); img.remove(); }
-      const bolso = plano.cartao ? "bytesDeCartao" : "bytesDeMidia";
-      this[bolso] -= estado.bytes;
+      tirarAImagem();
       this.contagem[plano.cartao ? "midiasDeCartao" : "midias"] -= 1;
       this.esquecerMidia(elem);
     });
+    // Falhar num retrato **não** é um erro que a pessoa precise ler: a inicial
+    // continua lá e responde a mesma pergunta. Quem escreveu o MOD precisa — e
+    // é para ele que a linha vai ao registro e o diagnóstico anota. **Sem
+    // evento ao MOD**: o retrato nunca falou com ele, e passar a falar seria
+    // promessa nova da API.
+    const recusar = (porque, oQue) => {
+      tirarAImagem();
+      elem.dataset.estadoDoRetrato = "inicial";
+      this.anotarMidia(elem, "recusada", porque);
+      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${oQue}`);
+    };
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
@@ -1541,34 +1608,40 @@ class RegiaoDeMod {
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
         return;
       }
-      const bolso = plano.cartao
-        ? { conta: "bytesDeCartao", teto: LIMITES_DO_CARTAO.bytesDeMidia }
-        : { conta: "bytesDeMidia", teto: this.perfil.bytesDeMidia };
-      if (this[bolso.conta] + midia.bytes > bolso.teto) {
+      const teto = plano.cartao ? LIMITES_DO_CARTAO.bytesDeMidia : this.perfil.bytesDeMidia;
+      if (this[conta] + midia.bytes > teto) {
         elem.dataset.estadoDoRetrato = "cheia";
-        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
+        this.anotarMidia(elem, "recusada", `passou do teto de ${teto} bytes de mídia deste lugar`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`);
         return;
       }
-      const img = elemento("img", "regiao-de-mod-retrato-imagem");
-      img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
-      img.src = midia.uri;
-      estado.elemento = img;
+      // **Reservados antes do `decode()`**, como o som em `montarMidia`: dois
+      // retratos decodificando juntos passariam os dois pela conferência de
+      // cima. A recusa do `decode()` cai no `catch`, que os devolve.
       estado.bytes = midia.bytes;
-      this[bolso.conta] += midia.bytes;
-      elem.append(img);
-      elem.dataset.estadoDoRetrato = "imagem";
-      this.anotarMidia(elem, "pronta");
+      this[conta] += midia.bytes;
+      return provarImagem(midia.uri).then(() => {
+        if (estado.cancelado || this.solta) return;
+        if (!this.dono.podeFalar()) { tirarAImagem(); return; }
+        const img = elemento("img", "regiao-de-mod-retrato-imagem");
+        img.alt = typeof plano.no.descricao === "string" ? plano.no.descricao : "";
+        img.src = midia.uri;
+        estado.elemento = img;
+        elem.append(img);
+        elem.dataset.estadoDoRetrato = "imagem";
+        this.anotarMidia(elem, "pronta");
+        // A imagem que decodificou e depois não abriu vai pelo mesmo caminho
+        // de recusa — o molde é `naoAbriu`, em `montarMidia`.
+        estado.naoAbriu = () => {
+          if (estado.cancelado || this.solta) return;
+          recusar("o navegador não decodificou a imagem", "o elemento de imagem não abriu (evento error)");
+        };
+        img.addEventListener("error", estado.naoAbriu);
+      });
     }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
-      // Falhar num retrato **não** é um erro que a pessoa precise ler: a
-      // inicial continua lá e responde a mesma pergunta. Quem escreveu o MOD
-      // precisa — e é para ele que a linha vai ao registro e o diagnóstico
-      // anota.
-      elem.dataset.estadoDoRetrato = "inicial";
       const porque = motivoDaFalha(falha);
-      this.anotarMidia(elem, "recusada", porque);
-      this.dizerRecusaDeMidia(plano.no.chave ?? "", `falhou no retrato: ${porque}`);
+      recusar(porque, porque);
     });
   }
 
@@ -1917,6 +1990,9 @@ class RegiaoDeMod {
       fundo.cancelado = true;
       fundo.imagem = null;
       delete elem.__fundoDaTela;
+      // E a anotação dele: a aba que contasse o mapa de uma tela que saiu
+      // estaria mentindo.
+      this.esquecerMidia(elem);
       this.contagem.telas -= 1;
     });
   }
@@ -1927,6 +2003,12 @@ class RegiaoDeMod {
    * A chave é a declaração inteira: um MOD que redesenhe a cada quadro pede o
    * mesmo mapa a cada quadro, e sem esta comparação seriam sessenta idas ao
    * servidor por segundo. Trocar de cena troca a chave, e aí sim há busca.
+   *
+   * **O fundo diz em que pé está**, como as outras mídias (`anotarMidia`):
+   * «carregando» ao pedir, «pronta» depois do `decode()`, «recusada» nas três
+   * saídas — o papel errado, a carga que falhou e a imagem que não
+   * decodificou. Sem nada pedido, a anotação sai. Era a lacuna T2 m4 do Plano
+   * 1D: um mapa recusado não era contado por bloco nenhum da aba DIAGNÓSTICO.
    */
   buscarFundoDaTela(elem, plano) {
     const fundo = elem.__fundoDaTela;
@@ -1936,7 +2018,10 @@ class RegiaoDeMod {
     if (chave === fundo.pedido) return;
     fundo.pedido = chave;
     fundo.imagem = null;
-    if (!declarado) return;
+    if (!declarado) {
+      this.esquecerMidia(elem);
+      return;
+    }
 
     const vindo = declarado.doServidor
       ? this.dono.carregarMidiaDoServidor(
@@ -1949,7 +2034,13 @@ class RegiaoDeMod {
       : typeof declarado.fonte === "string" && declarado.fonte
         ? this.dono.carregarMidia(declarado.fonte)
         : null;
-    if (!vindo) return;
+    // Um fundo sem origem não é mídia nenhuma: a anotação do pedido anterior
+    // não pode ficar valendo por ele.
+    if (!vindo) {
+      this.esquecerMidia(elem);
+      return;
+    }
+    this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
 
     vindo.then((midia) => {
       // As três perguntas de sempre, depois do `await`: a tela pode ter saído,
@@ -1957,21 +2048,30 @@ class RegiaoDeMod {
       if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
       if (fundo.pedido !== chave) return;
       if (midia.papel !== "imagem") {
+        this.anotarMidia(elem, "recusada", `o fundo precisa ser imagem, e os bytes são ${midia.papel}`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo da tela: o arquivo é ${midia.papel}, e fundo só mostra imagem`);
         return;
       }
-      const img = new Image();
-      img.onload = () => {
-        if (fundo.cancelado || fundo.pedido !== chave) return;
+      // O `onload` virou o `decode()` da própria imagem que se pinta. Ele não
+      // tinha par: a imagem que o navegador não abria não chegava a lugar
+      // nenhum, e a tela ficava sem o mapa e sem uma palavra. A recusa do
+      // `decode()` cai no `catch`, que a diz ao MOD e ao registro.
+      return provarImagem(midia.uri).then((img) => {
+        if (fundo.cancelado || this.solta || !this.dono.podeFalar()) return;
+        if (fundo.pedido !== chave) return;
         fundo.imagem = img;
+        this.anotarMidia(elem, "pronta");
         // Repinta **agora**: a imagem chegou depois do desenho que a pediu, e
         // esperar o próximo deixaria o mapa aparecendo quatro segundos tarde.
         this.pintarTela(elem, plano);
-      };
-      img.src = midia.uri;
+      });
     }).catch((falha) => {
       if (fundo.cancelado || this.solta) return;
       const porque = motivoDaFalha(falha);
+      // A anotação é a do pedido **de agora**: a recusa de um fundo que o MOD
+      // já trocou continua dita a ele e ao registro, como sempre foi, mas não
+      // pisa o «carregando» ou o «pronta» do fundo que veio depois.
+      if (fundo.pedido === chave) this.anotarMidia(elem, "recusada", porque);
       this.dono.falar({
         nome: "tela",
         chave: plano.no.chave ?? "",

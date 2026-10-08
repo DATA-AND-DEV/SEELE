@@ -2063,23 +2063,52 @@ function anotando(...anotadas) {
     // em R4d: a recusa chega numa promessa, e este é o trecho da bancada que
     // espera antes de `terminar`. É o caso de 23/09 — o avatar do PERFIS.
     //
-    // Duas chamadas: a que a janela recusa (lança um `Error`) e a que o Rust
-    // recusa, que chega como `{ Recusado: { motivo } }` e não como `Error`. Só
-    // a segunda separa `motivoDaFalha` de `String(falha?.message ?? falha)` —
-    // com esta, o registro voltaria a dizer «[object Object]».
+    // Três chamadas: a que a janela recusa (lança um `Error`), a que o Rust
+    // recusa, que chega como `{ Recusado: { motivo } }` e não como `Error`, e a
+    // imagem que o navegador não decodifica. Só a segunda separa
+    // `motivoDaFalha` de `String(falha?.message ?? falha)` — com esta, o
+    // registro voltaria a dizer «[object Object]». A terceira é a pendência
+    // 51, item 7: o cabeçalho diz imagem, o corpo não abre, e o avatar só vale
+    // depois do `decode()`.
     {
       // `motivoDaFalha` já está no contexto: ela entra com o roteador, no
-      // começo do R2.
+      // começo do R2. `provarImagem` e o teto do cartão moram no mesmo
+      // `mods-regiao.js`, e entram aqui: o avatar chama as duas antes de dar a
+      // imagem por pronta.
       const inicioDoAvatar = base.indexOf("function avatarContribuido(");
       const fimDoAvatar = base.indexOf("\n}\n", inicioDoAvatar) + 3;
       confere("R4e · o recorte", inicioDoAvatar >= 0,
         "`avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);
+      for (const [de, ate, quem] of [
+        ["function provarImagem(", "\n}\n", "`provarImagem`"],
+        ["const LIMITES_DO_CARTAO = Object.freeze({", "\n});\n", "`LIMITES_DO_CARTAO`"],
+      ]) {
+        const inicio = regiaoFonte.indexOf(de);
+        confere("R4e · o recorte da imagem", inicio >= 0,
+          `${quem} não está em \`mods-regiao.js\`, e o avatar não tem como provar a imagem antes de mostrá-la`);
+        if (inicio >= 0) vm.runInContext(regiaoFonte.slice(inicio, regiaoFonte.indexOf(ate, inicio) + ate.length), contexto);
+      }
+      // O `Image` da janela, de mentira: decodifica tudo, menos o corpo
+      // corrompido.
+      const URI_QUE_NAO_DECODIFICA = "data:image/png;base64,iVBORw0KGgoCORPOQUEBRADO";
+      contexto.Image = class {
+        constructor() {
+          this.src = "";
+        }
+        decode() {
+          return this.src === URI_QUE_NAO_DECODIFICA
+            ? Promise.reject(new Error("EncodingError: The source image cannot be decoded."))
+            : Promise.resolve();
+        }
+      };
       for (const [pessoa, carregar, motivo] of [
         [12, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }), "não é imagem"],
         [13, () => Promise.reject({ Recusado: { motivo: "fora do teto" } }), "fora do teto"],
+        [14, () => Promise.resolve({ uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 2 }), "não decodificou"],
       ]) {
         const ditas = [];
+        const faladas = [];
         const contribuicao = {
           mod: "seele/perfis", instancia: {},
           conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
@@ -2092,7 +2121,7 @@ function anotando(...anotadas) {
         };
         contexto.donoDaRegiao = () => ({
           podeFalar: () => true,
-          falar() {},
+          falar: (dados) => faladas.push(dados),
           anotarRecusa: (texto) => ditas.push(String(texto)),
           carregarMidiaDoServidor: carregar,
         });
@@ -2104,6 +2133,9 @@ function anotando(...anotadas) {
         contexto.avisarQueAMidiaMudou = () => {
           avisosDeMidia += 1;
         };
+        // O redesenho também mora em `base.js`: uma imagem dada por pronta o
+        // chama, e aqui ele só existe para não lançar no lugar da recusa.
+        contexto.redesenharAvatares = () => {};
         try {
           confere("R4e · avatar", contexto.avatarContribuido(pessoa) === null,
             "o avatar devolveu uma imagem antes de ela chegar");
@@ -2112,6 +2144,7 @@ function anotando(...anotadas) {
           contexto.contribuicoesDosMods = registroDeAntes;
           contexto.donoDaRegiao = donoDeAntes;
           contexto.avisarQueAMidiaMudou = avisarDeAntes;
+          delete contexto.redesenharAvatares;
         }
         // Com o motivo **do caso**, e não com um só: a recusa da janela diz «não
         // é imagem», e a do Rust diz o motivo que ele deu.
@@ -2133,6 +2166,66 @@ function anotando(...anotadas) {
           !ditas.some((texto) => texto.includes("[object Object]")),
           `a recusa do Rust no avatar virou «[object Object]» no registro: ${JSON.stringify(ditas)}`,
         );
+        confere(
+          "R4e · avatar",
+          faladas.some((dito) => dito.nome === "midia" && dito.chave === "avatar" && dito.estado === "falhou"
+            && String(dito.porque).includes(motivo)),
+          `o MOD não recebeu «midia»/«falhou» do avatar que não montou (${motivo}): ${JSON.stringify(faladas)}`,
+        );
+        // **A reserva volta.** Os bytes do avatar contam no teto do cartão
+        // **antes** do `decode()`, para duas imagens decodificando juntas não
+        // passarem as duas por ele; a imagem que não abre os devolve.
+        confere(
+          "R4e · avatar",
+          contribuicao.retrato?.bytes === 0 && contribuicao.retrato?.uri === null,
+          `o avatar recusado (${motivo}) continua ocupando o teto do cartão, ou ficou com uma imagem: `
+            + `${JSON.stringify(contribuicao.retrato)}`,
+        );
+      }
+
+      // **E a imagem que abre**: pronta, contada e redesenhada — depois do
+      // `decode()`, e não antes.
+      {
+        const uri = "data:image/png;base64,AA";
+        const contribuicao = {
+          mod: "seele/perfis", instancia: {},
+          conteudo: { doServidor: { canal: 1, pedido: {}, campo: "image" } },
+        };
+        const registroDeAntes = contexto.contribuicoesDosMods;
+        const donoDeAntes = contexto.donoDaRegiao;
+        const avisarDeAntes = contexto.avisarQueAMidiaMudou;
+        let redesenhos = 0;
+        contexto.contribuicoesDosMods = {
+          escolherSubstituicao: () => ({ escolhida: contribuicao }),
+          porHandle: new Map(),
+        };
+        contexto.donoDaRegiao = () => ({
+          podeFalar: () => true,
+          falar() {},
+          anotarRecusa() {},
+          carregarMidiaDoServidor: () => Promise.resolve({ uri, papel: "imagem", bytes: 2 }),
+        });
+        contexto.avisarQueAMidiaMudou = () => {};
+        contexto.redesenharAvatares = () => {
+          redesenhos += 1;
+        };
+        try {
+          confere("R4e · o avatar que abre", contexto.avatarContribuido(15) === null,
+            "o avatar devolveu a imagem antes de ela chegar");
+          await new Promise((resolve) => setImmediate(resolve));
+          confere(
+            "R4e · o avatar que abre",
+            contribuicao.retrato?.situacao === "pronta" && contribuicao.retrato?.bytes === 2 && redesenhos === 1
+              && contexto.avatarContribuido(15) === uri,
+            `a imagem que decodifica não virou o avatar: ${JSON.stringify(contribuicao.retrato)}, `
+              + `${redesenhos} redesenho(s)`,
+          );
+        } finally {
+          contexto.contribuicoesDosMods = registroDeAntes;
+          contexto.donoDaRegiao = donoDeAntes;
+          contexto.avisarQueAMidiaMudou = avisarDeAntes;
+          delete contexto.redesenharAvatares;
+        }
       }
     }
 

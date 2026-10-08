@@ -1209,13 +1209,27 @@ function avatarContribuido(pessoaId) {
         || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
         throw new Error("o avatar não é imagem ou excede o limite de mídia");
       }
-      estado.uri = midia.uri;
+      // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
+      // cima soma os `bytes` dos outros retratos desta instância, e dois
+      // avatares decodificando juntos passariam os dois por ela se a reserva
+      // esperasse. A imagem que não abre os devolve, no `catch`.
       estado.bytes = midia.bytes;
-      estado.situacao = "pronta";
-      avisarQueAMidiaMudou();
-      redesenharAvatares();
+      return provarImagem(midia.uri).then(() => {
+        if (estado.cancelado) return;
+        if (!dono.podeFalar()) {
+          estado.bytes = 0;
+          return;
+        }
+        estado.uri = midia.uri;
+        estado.situacao = "pronta";
+        avisarQueAMidiaMudou();
+        redesenharAvatares();
+      });
     })
     .catch((falha) => {
+      // A reserva volta antes de qualquer pergunta: um avatar recusado não
+      // ocupa o teto de quem vier depois, nem numa sessão que acabou.
+      estado.bytes = 0;
       if (estado.cancelado || !dono.podeFalar()) return;
       const porque = motivoDaFalha(falha);
       estado.situacao = "recusada";
