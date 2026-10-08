@@ -230,6 +230,36 @@ não falar o ENC/2:
 cargo run -p seele-encontro --example sondar -- --exige-enc2 <endereço>
 ```
 
+### Antes de publicar uma versão que depende do ENC/2
+
+A partir da 0.16, a sala pessoal se registra pelo ENC/2, e quem liga pelo código
+pergunta por ele. **O ponto de produção vai antes do app**: o binário novo fala
+as duas versões, então a 0.15 não muda nada com ele, e o app novo sem ele não
+acha ninguém pelo código. Foi assim com o quarto: o ADR 0047 registra dez dias
+de recurso morto por um binário velho na VPS, com o app certo do lado de cá.
+
+Na ordem:
+
+1. reimplantar a VPS com o `seele-encontro` da versão que vai sair (`cargo build
+   --release -p seele-encontro` e o `systemctl restart`, como em «Subir o seu»), e
+   conferir que o relógio dela está sincronizado (`timedatectl`);
+2. de **outra** máquina, conferir:
+
+   ```sh
+   cargo run -p seele-encontro --example sondar -- --exige-enc2 encontro.seele.app.br
+   ```
+
+   Ele sai com sucesso só se toda família que responde ao `ONDE` também falar o
+   ENC/2, e diz de quantos segundos o relógio do ponto difere do da máquina que
+   sonda;
+3. publicar. O `empacotar/publicar.sh` roda a mesma conferência antes de
+   qualquer passo com efeito, e para se o ponto não falar o ENC/2. O
+   `--sem-ponto` pula a conferência, para a emergência que não depende do ponto,
+   e o corpo do release diz que ela foi pulada.
+
+Reiniciar o ponto esvazia os dois quartos por uns quinze segundos: cada
+anfitrião e cada sala voltam no reavivamento seguinte.
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
