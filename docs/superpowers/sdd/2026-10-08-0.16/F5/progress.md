@@ -153,3 +153,15 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - os guardas novos ganharam prova por reversão;
     - o `data:` de um som recusado sai.
   - **Para a v6:** o religar de uma contribuição só existe lá; hoje o P49-8 vale para o som que tocava.
+- **D → integrado** (`0f94be6..a840ed0`, merge `59a4221`), em 4 rodadas. Os commits que fecham os itens:
+  - P51-01: `3f1d2e9`;
+  - P51-14: m8 `59d66aa`, T3 M2 `6bf9ddd`, T1 `bead90c`, T2 N1 `74a5c42`;
+  - o m9 já vinha do C.
+  - **A primeira revisão mediu dois Importantes:**
+    - A conta do console, dita sem esperar o MOD parar, tomava a ficha das linhas dele. Num MOD que escreve sem parar, 15 linhas dele e 0 de conta viravam 1 e 14, e o teste que pegava isso tinha sido ajustado ao código.
+    - A segunda passada do `emTexto` não tinha orçamento: um grafo de 10 nós derrubava a volta.
+  - **As rodadas seguintes:**
+    - A conta só sai com uma ficha de sobra. Primeiro só na espera; depois, no fim de toda volta.
+    - Cada passada do `emTexto` tem um orçamento de 1024 objetos.
+    - O teste que tinha sido ajustado voltou byte a byte ao original.
+  - **A conta de fim de volta com uma ficha só vinha de antes do lote** (`7953a3b`). Um MOD com ouvinte de eventos, ou com trabalho depois da linha, perdia quase tudo para ela. Medido: 0/15 com 120 ms de trabalho; agora dá 15/0 em todos os casos.
