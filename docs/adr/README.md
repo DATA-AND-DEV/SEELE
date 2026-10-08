@@ -85,6 +85,7 @@ o ganho é de estética.
 | [0053](0053-uma-previa-nao-e-um-clique.md) | Uma prévia não é um clique | **aceito** | — (revisão da v15, R06: separa a política de prévia automática da de abrir link, e põe o consentimento por domínio nas mãos de quem lê) |
 | [0054](0054-uma-transmissao-tem-identidade.md) | Uma transmissão tem identidade | **aceito** | — (revisão da v15, R16–R21: tudo de compartilhamento passa a ser por `ScreenId`) |
 | [0055](0055-o-filtro-e-o-que-torna-o-limiar-baixo-defensavel.md) | O filtro é o que torna o limiar baixo defensável | **aceito** | — (`features-v15.md` F01 e F02: supressão de ruído em Rust puro, e o limiar que passou a medir a sala em vez de supor o ruído dela — revisado pela auditoria de 22/09/2026) |
+| [0056](0056-mods-na-tela-inteira.md) | MODs na tela inteira | **proposto** · esqueleto; fecha com o `api/v6.json` | — (spec de 23/09, Parte II, e o spec-mestre da 0.16: a API 6 e a medição de custo do `0052`) |
 | [0057](0057-o-celular-entra-pelo-navegador.md) | No celular, o SEELE é uma página: web app instalável, sem app nativo | **aceito** · emendado em 08/10/2026: os MODs rodam no celular, e o `unsafe` da fronteira dos dois crates do celular | `06` — plataforma mobile (M6) |
 | [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** | `02` e `10` — versionamento (substitui a janela N−1) |
 
