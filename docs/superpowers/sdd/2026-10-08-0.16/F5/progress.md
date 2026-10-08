@@ -121,3 +121,6 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - o K3 prova o desenho do bloco «a região e as páginas de cada MOD» em `diagnostico-de-mods.cjs`;
     - o M2 reescreve o doc de `onde_mora_hoje`.
   - **Os menores adiados** estão no ledger da frente, para a revisão final e para o Z.
+- **A integração da onda 1.** A orquestradora juntou `0.16/lotes`, `0.16/protocolo`, `0.16/launcher` e `0.16/web` em `versao/0.16` (`2a37ffc5`). A bateria inteira passou com 2912 testes. O único conflito foi o `EndReason` (H contra F1), e as duas listas ficaram.
+- **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `0f94be6`, sem conflito.
+- **Onda 2 despachada:** D · K5 · M2 (com a montagem de certificado do 1B) · P53, em paralelo e sem dividir arquivo.
