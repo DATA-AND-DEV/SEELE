@@ -129,9 +129,9 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 8 | a 0.15.2 (`linha/0.15`) | feito, com reversão. No `linha/0.15`: `dd932de` (o app) e `ff70f21` (o empacotamento); o `--linha-legada` também está aqui, em `70fea89`. **Pronto para o dono empacotar** com `publicar.sh 0.15.2 --linha-legada` | `dd932de`, `ff70f21`, `70fea89` |
 | 8b | a janela do Comandante na 0.15.2 (D-seg-1), só no `linha/0.15` | feito, com reversão. A primeira versão do teste passou revertida (o gancho segura o banco, e o estranho esperava por ele). O teste foi refeito para medir a conexão aceita durante o gancho, e aí reprovou revertido | `ba99007` (`linha/0.15`) |
 | 9 | a casca pelo `Resolvedor` | feito, com reversão (a lista do manifesto fora da conciliação) | `4505b19` |
-| 10 | revogação nos atos do próprio processo | — | |
-| 11 | a guarda da linha legada | — | |
-| 12 | a primeira abertura | — | |
+| 10 | revogação nos atos do próprio processo | feito, com reversão. O hospedar confere em Rust; o entrar confere por um comando à parte antes do único `connect` (o erro dele é o da FFI), com um guarda que prende a ordem | `f88f2e0`, frases em `0c01558` |
+| 11 | a guarda da linha legada | feito, com reversão (três peças). O botão de baixar de novo para a `InstalacaoAlterada` vem com a tela de disco (15) | `8312d67`, frase em `0ba303f` |
+| 12 | a primeira abertura | feito, com reversão (três peças). A busca da linha legada foi para depois do `set_var` do módulo de vídeo, porque o `reqwest` lê o ambiente | `82fd3f5` |
 | 13 | entrar por linha | — | (a recusa espera a F1) |
 | 14 | hospedar por linha | — | |
 | 15 | tela de disco mínima | — | |
