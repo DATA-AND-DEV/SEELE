@@ -260,6 +260,56 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             "203.0.113.9:50000".parse().expect("endereço"),
         ),
     );
+    // O ENC/2 (ADR 0062): cada pedido e cada resposta, pelos montadores do
+    // produto. A marca é a do servidor da sala da chave de zeros, e a
+    // assinatura é de mentira: o alvo confere o fio, e não a chave.
+    let sala = Marcas::da_sala(&seele_proto::codigo::Codigo::da_chave(&[0; 32]));
+    let dica: std::net::SocketAddr = "192.168.0.10:8385".parse().expect("endereço");
+    let publico: std::net::SocketAddr = "203.0.113.9:50000".parse().expect("endereço");
+    do_encontro.insert(
+        "moro2".to_owned(),
+        encontro::moro2(&encontro::Moro2 {
+            marca: sala.servidor().clone(),
+            chave: [0; 32],
+            carimbo: 1_791_000_000,
+            dicas: vec![dica],
+            assinatura: [0xAB; 64],
+        }),
+    );
+    do_encontro.insert("quem2".to_owned(), encontro::quem2(sala.servidor()));
+    for (nome, resposta) in [
+        (
+            "morou",
+            encontro::Resposta2::Morou {
+                marca: sala.servidor().clone(),
+                endereco: publico,
+            },
+        ),
+        (
+            "aqui2",
+            encontro::Resposta2::Aqui2 {
+                marca: sala.servidor().clone(),
+                endereco: publico,
+                dicas: vec![dica],
+            },
+        ),
+        (
+            "ninguem",
+            encontro::Resposta2::Ninguem {
+                marca: sala.servidor().clone(),
+            },
+        ),
+        (
+            "recusa",
+            encontro::Resposta2::Recusa {
+                marca: sala.servidor().clone(),
+                motivo: encontro::Motivo::Relogio,
+                agora: 1_791_000_000,
+            },
+        ),
+    ] {
+        do_encontro.insert(nome.to_owned(), encontro::resposta2(&resposta));
+    }
     todas.insert("datagrama_do_encontro", do_encontro);
 
     todas
@@ -417,10 +467,14 @@ fn toda_semente_e_uma_entrada_que_o_alvo_aceita() {
         );
     }
     for (nome, bytes) in do_alvo(&todas, "datagrama_do_encontro") {
-        let aceita = encontro::analisar(bytes).is_some() || encontro::ler_aqui(bytes).is_some();
+        let aceita = encontro::analisar(bytes).is_some()
+            || encontro::ler_aqui(bytes).is_some()
+            || encontro::analisar2(bytes).is_some()
+            || encontro::ler_resposta2(bytes).is_some();
         assert!(
             aceita,
-            "a semente datagrama_do_encontro/{nome} não é um pedido nem um AQUI que se leia"
+            "a semente datagrama_do_encontro/{nome} não é um pedido nem uma resposta, de \
+             nenhuma das duas versões, que se leia"
         );
     }
 }
