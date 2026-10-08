@@ -2,7 +2,7 @@
 
 Base `3b0b6a7a` (branch `0.16/lotes`). Branch `0.16/lotes-g-servidor`, no
 worktree `/Users/dev-alexandre/SEELE/.claude/worktrees/agent-af3886e3e332f2e9a`.
-Cinco commits de código e o relatório (escrito em `75f850fb` e completado no
+Seis commits de código e o relatório (escrito em `75f850fb` e completado no
 último commit), todos locais: sem push, tag nem release.
 
 | commit | item | o que muda |
@@ -12,6 +12,7 @@ Cinco commits de código e o relatório (escrito em `75f850fb` e completado no
 | `271360dd` | passo 1, e `quem_hospeda_fecha.rs` do passo 3 | `Event::ServidorEncerrando`, `Daemon::encerrar_avisando`, o SAIR avisando e `Hospedagem::despedir` |
 | `46ae3d56` | rodada 1 de conserto | a linha e os docs do prazo da despedida, o `compile_error!` da feature em build otimizado, o lugar na frase do guarda e a prova do guarda de `iniciar`, `despedir` medido contra o teto |
 | `8a4bd619` | a decisão (d) | sem `$SEELE_ENCONTRO`, nenhum ponto; a produção pede o padrão por `iniciar_com_o_ponto_padrao` |
+| `f5a78c52` | fecho | o guarda do app olha o `main.rs` inteiro; a frase da `janela_do_comandante` e o doc do `PONTO_PADRAO` acertados |
 
 Nada no fio (`seele-proto` intocado: o `ServerShuttingDown` já existia), nada
 no SEELE-ENC/1, nos arquivos da F6, em `api/`, na CSP, em `ui/` ou em
@@ -509,6 +510,58 @@ Os de `271360dd`, listados acima, e mais:
 - `apps/seele-app/src/main.rs` (a chamada do `hospedar` e o módulo de teste
   `o_ponto_de_encontro_de_quem_hospeda`);
 - `crates/seele-server/src/main.rs` (o guarda do `seeled`).
+
+## Fecho (`f5a78c52`)
+
+A re-revisão resolveu os achados da rodada 1 e os pontos da (d). Ela também
+conferiu por grep, no workspace e nos branches em andamento, que nenhum caminho
+de produção perde o ponto padrão. Antes do merge, pediu três coisas:
+
+1. **O guarda do app passa a olhar o `main.rs` inteiro.** Ele ganhou um teste,
+   `nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao`, que exige duas
+   coisas, as duas sobre o arquivo sem as linhas de comentário:
+   - **nenhuma** linha com `Hospedagem::iniciar(`;
+   - pelo menos uma com `Hospedagem::iniciar_com_o_ponto_padrao(`.
+
+   As agulhas são constantes do módulo, partidas com `concat!`, e servem aos
+   dois testes. O guarda do corpo do `hospedar` fica ao lado. O motivo é de
+   futuro: a sala pessoal (tarefa 4f da F7) e o G-casca do Plano 2 vão abrir
+   pontos de entrada novos nesse arquivo.
+   - **Reversão F1:** uma função nova,
+     `async fn hospedar_a_sala_pessoal() { … Hospedagem::iniciar(…) … }`,
+     posta longe do `hospedar`, junto do `FONTE_DESTE_ARQUIVO`. O guarda do
+     arquivo reprovou: «este arquivo sobe hospedagem com
+     `Hospedagem::iniciar(` … Linhas: ["let _ =
+     seele_server::hospedagem::Hospedagem::iniciar("]». O guarda do corpo do
+     `hospedar` continuou verde, e é por isso que o novo existe. O arquivo
+     voltou idêntico.
+2. **A frase velha da `janela_do_comandante.rs`.** O doc do `sem_degrau_4`
+   dizia que um guarda devolvido no meio leria «o ponto padrão». Agora diz o
+   que vale: leria o valor de antes da troca, e sem a variável isso é «nenhum
+   ponto». O risco que sobra é um `$SEELE_ENCONTRO` vindo do terminal de quem
+   roda a bateria voltar a valer no meio do teste.
+3. **O doc do `PONTO_PADRAO`** não diz mais «quando ninguém disser outro». Diz
+   «para quem hospeda pelo app e não disse outro», e conta que só o caminho de
+   produção o pede (`Convocacao::com_o_ponto_padrao`, por
+   `iniciar_com_o_ponto_padrao`), e que os testes sobem pelo `iniciar` curto,
+   sem ponto.
+
+**Nota da re-revisão.** O D2
+(`iniciar_com_o_ponto_padrao_leva_o_ponto_do_projeto_a_escada`) e o C3
+(`o_guarda_de_iniciar_pega_o_ponto_de_producao_antes_da_escada`) passam o
+endereço de produção ao `iniciar` de verdade, e dependem do próprio guarda para
+não sair à rede. Isso só falha se `aponta_para_a_producao` regredir. Nesse caso
+o teste dela, `o_guarda_reconhece_o_ponto_de_producao_escrito_de_qualquer_jeito`,
+fica vermelho na mesma rodada.
+
+**Os comandos:**
+- `cargo test -p seele-app --bin seele-app`: 261 passados;
+- `-p seele-server --lib`: 582;
+- `-p seele-server --test janela_do_comandante`: 2;
+- `cargo fmt --all -- --check`: limpo;
+- `cargo clippy -p seele-server -p seele-app --all-targets --all-features -- -D warnings`
+  e `cargo clippy -p seele-server -- -D warnings`: limpos (só o aviso ambiental
+  do `ld`).
 
 ## Preocupações
 
