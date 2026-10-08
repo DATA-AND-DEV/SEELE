@@ -269,6 +269,25 @@ impl std::fmt::Display for Marca {
 ///     servidor: aviso,
 /// };
 /// ```
+///
+/// **O código de erro (`E0451`) só é conferido no nightly.** No stable, um
+/// `compile_fail` passa com qualquer erro: com um nome trocado ou um import
+/// que sumiu, o exemplo de cima deixaria de compilar por outro motivo e o
+/// guarda ficaria vazio (medido no 1.97.1, com os campos públicos e um
+/// `E0599`). O gêmeo abaixo, com os mesmos imports e a mesma `Marca::nova`,
+/// **tem** de compilar, e é ele que prova que o único erro de cima é o do campo
+/// privado.
+///
+/// ```
+/// use seele_proto::encontro::{Marca, Marcas};
+///
+/// let aviso = Marca::nova("3cbcfb0212da738f").expect("é uma marca");
+/// let marcas = Marcas::do_servidor(
+///     "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9",
+/// )
+/// .expect("uma impressão digital dá marcas");
+/// assert_eq!(marcas.aviso(), &aviso);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marcas {
     aviso: Marca,
