@@ -1974,6 +1974,9 @@ async fn handshake(
         send,
         &ClientMessage::Hello {
             faixa: seele_proto::version::FAIXA,
+            // As APIs de MOD que esta build roda (D-fio-7). O servidor ainda
+            // não as lê; quem lê é a sessão do Plano 3.
+            apis_de_mod: seele_proto::mods::APIS_ACEITAS.to_vec(),
             client: quem_sou_eu().into(),
             nickname: nickname.to_owned(),
             public_key: signing_key.verifying_key().to_bytes().to_vec(),

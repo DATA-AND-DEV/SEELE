@@ -80,6 +80,7 @@ fn mods_exigidos() -> ServerMessage {
         repo: "https://github.com/autor/nome".into(),
         reach: vec![],
         no_servidor: false,
+        api: 6,
     }];
     let conjunto = seele_proto::mods::hex(&seele_proto::mods::identidade_do_conjunto(&mut mods));
     ServerMessage::ModsExigidos { mods, conjunto }
@@ -98,6 +99,7 @@ fn clientes() -> Vec<(&'static str, ClientMessage)> {
                 nickname: "ritsuko".into(),
                 public_key: vec![0x11; 32],
                 material_e2ee: None,
+                apis_de_mod: vec![6],
             },
         ),
         (

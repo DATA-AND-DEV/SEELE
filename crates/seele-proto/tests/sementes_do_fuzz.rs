@@ -95,6 +95,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             nickname: "ritsuko".to_owned(),
             public_key: vec![0x11; 32],
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }),
     );
     controle.insert(
@@ -106,6 +107,7 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
             nickname: "maya".to_owned(),
             public_key: vec![0x12; 32],
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }),
     );
     controle.insert(

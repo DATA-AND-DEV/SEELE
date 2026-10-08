@@ -295,6 +295,13 @@ pub const NONCE_LEN: usize = 32;
 /// prova. Adendo de 08/10/2026, §10.
 pub const MAX_MATERIAL_E2EE_LEN: usize = 256;
 
+/// Quantas APIs de MOD um `Hello` pode dizer que roda.
+///
+/// Uma build roda poucas: a 0.15 roda três (3, 4 e 5), e a 0.16 roda uma. Oito
+/// é folga para uma linha inteira, e um teto pequeno é o que cabe a um campo
+/// que chega antes de qualquer autenticação.
+pub const MAX_APIS_DE_MOD: usize = 8;
+
 /// Tamanho de uma impressão digital em hex.
 ///
 /// Um SHA-256 em hexadecimal são exatamente 64 caracteres — nem mais, nem
@@ -1109,6 +1116,13 @@ pub enum ClientMessage {
         /// up against known accounts; in M2 there is no persistence, so proving
         /// possession of the key is all the handshake can establish.
         public_key: Vec<u8>,
+        /// As APIs de MOD que este cliente roda (D-fio-7).
+        ///
+        /// É o que deixa um servidor com um MOD de API que este cliente não
+        /// roda recusá-lo **antes** do convite ser gasto, dizendo «atualize o
+        /// app», em vez de anunciar um MOD que nunca vai carregar. Até
+        /// [`MAX_APIS_DE_MOD`].
+        apis_de_mod: Vec<u32>,
         /// O assento do E2EE: um material de acordo de chave que esta pessoa
         /// publica uma vez por sessão.
         ///
@@ -2871,11 +2885,13 @@ impl Validate for ClientMessage {
                 client,
                 nickname,
                 public_key,
+                apis_de_mod,
                 material_e2ee,
                 ..
             } => {
                 check("client", client.len(), MAX_CLIENT_NAME_LEN)?;
                 check("nickname", nickname.len(), MAX_NICKNAME_LEN)?;
+                check("apis_de_mod", apis_de_mod.len(), MAX_APIS_DE_MOD)?;
                 check(
                     "material_e2ee",
                     material_e2ee.as_ref().map_or(0, Vec::len),
@@ -3177,6 +3193,7 @@ mod tests {
             nickname: "marcela".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         }
     }
 
@@ -3485,6 +3502,7 @@ mod tests {
             nickname: "n".repeat(MAX_NICKNAME_LEN + 1),
             public_key: vec![7; PUBLIC_KEY_LEN],
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         };
         assert!(matches!(
             encode(&long),
@@ -4171,6 +4189,7 @@ mod key_tests {
                 nickname: "marcela".into(),
                 public_key: vec![0; len],
                 material_e2ee: None,
+                apis_de_mod: Vec::new(),
             };
             assert!(
                 matches!(
@@ -4193,6 +4212,7 @@ mod key_tests {
             nickname: "marcela".into(),
             public_key: vec![9; PUBLIC_KEY_LEN],
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         };
         let frame = encode(&hello).unwrap();
         assert_eq!(decode::<ClientMessage>(&frame).unwrap(), hello);
@@ -4980,6 +5000,7 @@ mod os_mods_no_fio {
             repo: "https://github.com/seele/exemplo".to_owned(),
             reach: vec!["dom".to_owned()],
             no_servidor: false,
+            api: 0,
         }
     }
 
@@ -5105,6 +5126,7 @@ mod os_mods_no_fio {
                 repo: "r".repeat(MAX_MOD_REPO_LEN),
                 reach: vec!["a".repeat(MAX_REACH_LEN); MAX_REACH_ITENS],
                 no_servidor: true,
+                api: 0,
             })
             .collect();
         let quadro = encode(&anuncio(cheio)).expect("um anúncio no teto serializa");
@@ -5257,6 +5279,63 @@ mod fora_do_ar {
                 ..
             })
         ));
+    }
+}
+
+#[cfg(test)]
+mod a_api_de_mod_no_fio {
+    //! D-fio-7: o anúncio diz a API de cada MOD, e o `Hello` diz as APIs que o
+    //! cliente roda. É o que deixa um servidor recusar, antes do convite, quem
+    //! não roda um MOD dele — e dizer «atualize o app».
+    use super::*;
+
+    fn hello(apis: Vec<u32>) -> ClientMessage {
+        ClientMessage::Hello {
+            join_secret: None,
+            faixa: crate::version::FAIXA,
+            client: "seele".into(),
+            nickname: "maya".into(),
+            public_key: vec![7; PUBLIC_KEY_LEN],
+            apis_de_mod: apis,
+            material_e2ee: None,
+        }
+    }
+
+    #[test]
+    fn o_hello_leva_as_apis_que_o_cliente_roda_e_tem_teto() {
+        let com = hello(vec![6, 5]);
+        assert_eq!(
+            decode::<ClientMessage>(&encode(&com).unwrap()).unwrap(),
+            com
+        );
+        assert!(encode(&hello(vec![6; MAX_APIS_DE_MOD])).is_ok());
+        assert!(matches!(
+            encode(&hello(vec![6; MAX_APIS_DE_MOD + 1])),
+            Err(ControlError::FieldTooLong {
+                field: "apis_de_mod",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn o_anuncio_diz_a_api_de_cada_mod() {
+        let mut mods = vec![crate::mods::ModAnunciado {
+            id: "autor/nome".into(),
+            version: "1.0.0".into(),
+            hash: "ab".repeat(32),
+            repo: "https://github.com/autor/nome".into(),
+            reach: vec![],
+            no_servidor: false,
+            api: 6,
+        }];
+        let conjunto = crate::mods::hex(&crate::mods::identidade_do_conjunto(&mut mods));
+        let anuncio = ServerMessage::ModsExigidos { mods, conjunto };
+        let de_volta = decode::<ServerMessage>(&encode(&anuncio).unwrap()).unwrap();
+        let ServerMessage::ModsExigidos { mods, .. } = de_volta else {
+            panic!("o anúncio voltou como outra coisa");
+        };
+        assert_eq!(mods[0].api, 6);
     }
 }
 
@@ -5491,6 +5570,7 @@ mod o_assento_do_e2ee {
             nickname: "maya".into(),
             public_key: vec![7; PUBLIC_KEY_LEN],
             material_e2ee: material,
+            apis_de_mod: Vec::new(),
         }
     }
 

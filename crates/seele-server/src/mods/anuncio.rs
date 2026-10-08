@@ -126,6 +126,10 @@ pub fn conjunto_exigido(persistence: &Persistence) -> Result<Conjunto, NaoDaPara
             repo: ligado.repo,
             reach: ligado.reach,
             no_servidor: ligado.server_half,
+            // **Zero é «não preenchida»** (D-fio-7): a tabela de MODs
+            // habilitados ainda não guarda a API de cada um, e lê-la do pacote
+            // em disco é do lado do servidor, depois. O campo já está no fio.
+            api: 0,
         });
     }
 

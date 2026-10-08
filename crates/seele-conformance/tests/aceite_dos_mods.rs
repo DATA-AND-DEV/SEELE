@@ -630,6 +630,7 @@ async fn abrir_falando(endereco: SocketAddr, semente: u8, faixa: Faixa) -> Resul
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         },
     )
     .await?;
@@ -795,6 +796,7 @@ fn anunciado(id: &str, hash_de: u8) -> seele_proto::mods::ModAnunciado {
         repo: "https://github.com/seele/exemplo".to_owned(),
         reach: vec!["ler".to_owned()],
         no_servidor: true,
+        api: 0,
     }
 }
 

@@ -107,6 +107,7 @@ async fn bater_com(
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         },
     )
     .await?;
@@ -207,6 +208,7 @@ async fn a_prova_da_0_15_sobre_o_nonce_cru_e_recusada() -> Result<()> {
             public_key: chave.verifying_key().to_bytes().to_vec(),
             join_secret: None,
             material_e2ee: None,
+            apis_de_mod: Vec::new(),
         },
     )
     .await?;
