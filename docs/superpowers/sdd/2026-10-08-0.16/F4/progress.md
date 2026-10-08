@@ -20,7 +20,7 @@ publicado.
 | 0.3 · preparar a medição 3 (ALPN no iPhone) | **feita**; a bancada (Chromium e Simulador) mediu, e o iPhone fica com o dono | `spikes/alpn-no-mesmo-socket/README.md` |
 | 0.4 · spike do executor de MODs | **feito**: recomenda **AB**. O custo no iPhone fica com o dono (`prova.py iphone`) | `spikes/mods-no-navegador/README.md` |
 | 0.5 · passos do dono, medições 3 a 6 | **feita**, com a página da voz preparada para vir de uma origem estática | `F4/medicoes-do-dono.md` |
-| 0.6 · pedidos ao contrato de fio | depois da 0.2 e da medição 3 | `F4/pedidos-ao-fio.md` |
+| 0.6 · pedidos ao contrato de fio | **feita** (a `Certidao` só entra depois da medição 3 do dono) | `F4/pedidos-ao-fio.md` |
 
 ## Registro
 
@@ -84,3 +84,15 @@ publicado.
 - **Achado de passagem:** um `spike-voz-no-navegador` de 07/10 ainda escuta a
   4433 no checkout principal (PID 70937). Não é desta sessão e ficou como
   estava.
+- **Os pedidos ao contrato de fio** (`F4/pedidos-ao-fio.md`), escritos contra
+  o `0.16/protocolo` em `99caa92`:
+  - **o S2 cabe no navegador**: medido de novo com o rótulo de verdade da F1,
+    50 de 50 nos três navegadores. Fica um pedido de doc em `Server::impressao`,
+    porque no `h3` o TLS apresenta o curto;
+  - **os hashes futuros viajam sozinhos**, em `HashesDoNavegador`: 60 janelas
+    ocupam 2,5 KB;
+  - **os DERs vão só os da janela vigente**, numa `Certidao` antes do `Hello`
+    (1,4 KB), e não 60 DERs (21,6 KB, acima do teto);
+  - o link `https` é o corpo do `seele://` no fragmento, mais `wh=` e `ate=`;
+  - o item 20 já está feito pela F1 (`quadro.rs`);
+  - fica um pedido ao Plano 3: conferir o apelido antes de gastar o convite.

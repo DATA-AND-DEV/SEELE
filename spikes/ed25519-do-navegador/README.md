@@ -81,6 +81,12 @@ O Safari arredonda o `performance.now()` a 1 ms, e por isso os números dele sã
 
 O Simulador foi rodado quatro vezes, com o mesmo resultado nas quatro.
 
+**Repetida com o rótulo de verdade da F1**, `SEELE/1 prova-de-cliente\0`
+(`seele_proto::assinatura::ROTULO_PROVA_DE_CLIENTE`, branch `0.16/protocolo`,
+`a5af6ec`). A página monta a mensagem de `prova_de_cliente`: rótulo (25 B),
+impressão (32 B) e nonce (32 B). Nos três navegadores, as 50 do S2 passaram no
+`verify` e no `verify_strict`, e as 80 adulteradas foram recusadas.
+
 **Conclusão:**
 - **A assinatura aleatória do Safari passa no `verify` do `seeled`**, e também
   no `verify_strict`. A autenticação do celular funciona com o código de hoje.
