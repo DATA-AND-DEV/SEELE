@@ -1774,6 +1774,23 @@ async fn conferir_esta_versao(app: AppHandle) -> Result<(), versoes::RecusaDesta
     .await
 }
 
+/// Quanto o depósito de versões ocupa: cada app guardado e as conversas de
+/// cada linha. Ver `versoes::ocupacao`.
+#[tauri::command]
+fn ocupacao_do_deposito(app: AppHandle) -> versoes::Ocupacao {
+    versoes::ocupacao(&config_dir(&app))
+}
+
+/// Apaga um app guardado, sem tocar nas conversas da linha dele.
+///
+/// # Errors
+///
+/// [`versoes::FalhaAoRemoverVersao`].
+#[tauri::command]
+fn remover_versao(app: AppHandle, versao: String) -> Result<u64, versoes::FalhaAoRemoverVersao> {
+    versoes::remover_versao(&config_dir(&app), &versao)
+}
+
 /// As linhas de servidor em que se pode hospedar, a desta janela primeiro.
 ///
 /// Sem rede: lê o catálogo guardado. Ver `versoes::linhas_para_hospedar`.
@@ -8958,6 +8975,8 @@ fn main() {
             conferir_esta_versao,
             estado_da_primeira_abertura,
             linhas_para_hospedar,
+            ocupacao_do_deposito,
+            remover_versao,
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,

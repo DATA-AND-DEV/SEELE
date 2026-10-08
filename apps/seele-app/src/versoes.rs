@@ -1176,6 +1176,114 @@ pub(crate) fn linhas_para_hospedar(config: &str, chave: Option<&Chave>) -> Vec<L
     linhas_para_hospedar_com_linha_propria(config, chave, linha_deste_app())
 }
 
+/// Um app guardado, com o que ele ocupa.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct VersaoOcupada {
+    /// Qual.
+    pub(crate) versao: String,
+    /// A linha dele, quando o marcador diz.
+    pub(crate) linha: Option<String>,
+    /// Quantos bytes.
+    pub(crate) bytes: u64,
+}
+
+/// As conversas de uma linha, com o que elas ocupam.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct DadosOcupados {
+    /// A linha.
+    pub(crate) linha: String,
+    /// Quantos bytes.
+    pub(crate) bytes: u64,
+}
+
+/// Quanto o depósito ocupa, para a tela de disco.
+///
+/// ADR 0046: «passa a existir disco ocupado por versões guardadas, e uma tela
+/// que diz quanto e permite apagar». As conversas aparecem separadas dos apps
+/// de propósito: apagar um app não as leva.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Ocupacao {
+    /// Tudo o que o depósito ocupa.
+    pub(crate) total: u64,
+    /// Os apps guardados, em ordem de nome.
+    pub(crate) versoes: Vec<VersaoOcupada>,
+    /// As conversas de cada linha, da linha mais nova para a mais velha.
+    pub(crate) dados: Vec<DadosOcupados>,
+}
+
+/// O que o depósito ocupa agora.
+pub(crate) fn ocupacao(config: &str) -> Ocupacao {
+    let deposito = Deposito::em(raiz_do_deposito(config));
+    let versoes: Vec<VersaoOcupada> = deposito
+        .instaladas()
+        .into_iter()
+        .map(|versao| VersaoOcupada {
+            linha: deposito.instalacao(&versao).map(|i| i.linha.como_texto()),
+            bytes: deposito.tamanho_da_versao(&versao),
+            versao: versao.como_texto().to_owned(),
+        })
+        .collect();
+    // Toda pasta de dados que existe, com marcador ou sem: o que ocupa disco é
+    // a pasta, e uma cópia que parou no meio também ocupa.
+    let mut linhas: Vec<Linha> = std::fs::read_dir(raiz_do_deposito(config).join("dados"))
+        .map(|entradas| {
+            entradas
+                .flatten()
+                .filter_map(|e| {
+                    e.file_name()
+                        .to_str()
+                        .and_then(|nome| nome.strip_prefix("servidor-"))
+                        .and_then(|texto| Linha::nova(texto).ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    linhas.sort_by(|esta, aquela| aquela.cmp(esta));
+    let dados: Vec<DadosOcupados> = linhas
+        .iter()
+        .map(|linha| DadosOcupados {
+            linha: linha.como_texto(),
+            bytes: deposito.tamanho_dos_dados_da_linha(linha),
+        })
+        .collect();
+    let total =
+        versoes.iter().map(|v| v.bytes).sum::<u64>() + dados.iter().map(|d| d.bytes).sum::<u64>();
+    Ocupacao {
+        total,
+        versoes,
+        dados,
+    }
+}
+
+/// Por que um app guardado não foi apagado.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum FalhaAoRemoverVersao {
+    /// O identificador não é uma versão.
+    IdentificadorInvalido,
+    /// Não está guardada.
+    NaoInstalada,
+    /// O sistema recusou; no Windows, quase sempre a versão está aberta.
+    NaoRemovi(String),
+}
+
+/// Apaga um app guardado e devolve quantos bytes ele ocupava. **Nunca toca as
+/// conversas**: elas são da linha, e o próximo app da mesma linha as abre.
+///
+/// # Errors
+///
+/// [`FalhaAoRemoverVersao`].
+pub(crate) fn remover_versao(config: &str, versao: &str) -> Result<u64, FalhaAoRemoverVersao> {
+    let versao = Versao::nova(versao).map_err(|_| FalhaAoRemoverVersao::IdentificadorInvalido)?;
+    Deposito::em(raiz_do_deposito(config))
+        .remover(&versao)
+        .map_err(|falha| match falha {
+            seele_lancador::FalhaAoRemover::NaoInstalada => FalhaAoRemoverVersao::NaoInstalada,
+            seele_lancador::FalhaAoRemover::NaoRemovi { detalhe } => {
+                FalhaAoRemoverVersao::NaoRemovi(detalhe)
+            }
+        })
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1939,6 +2047,50 @@ mod o_launcher_ligado_ao_produto {
                 "invoke(\"abrir_versao\",{versao:null,linha:linhaEscolhida.linha,hospedar:true"
             ),
             "o confirmar não abre pela linha escolhida"
+        );
+    }
+
+    /// **A tela de disco mínima** (spec 0.16, §2, F6): quanto cada app e as
+    /// conversas de cada linha ocupam, e apagar um app sem levar as conversas.
+    #[test]
+    fn a_ocupacao_soma_versoes_e_dados_e_remover_nao_leva_as_conversas() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+        let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
+        instalado(&config, &json, "0.15.2");
+        let deposito = Deposito::em(super::raiz_do_deposito(&config));
+        let dados = deposito.pasta_de_dados_da_linha(&linha("0.15"));
+        std::fs::create_dir_all(&dados).unwrap();
+        std::fs::write(dados.join("seele.db"), vec![0_u8; 4096]).unwrap();
+
+        let antes = super::ocupacao(&config);
+        assert_eq!(antes.versoes.len(), 1);
+        assert_eq!(antes.versoes[0].versao, "0.15.2");
+        assert_eq!(antes.versoes[0].linha.as_deref(), Some("0.15"));
+        assert!(antes.versoes[0].bytes > 0);
+        assert_eq!(
+            antes.dados,
+            vec![super::DadosOcupados {
+                linha: "0.15".to_owned(),
+                bytes: 4096
+            }]
+        );
+        assert!(antes.total >= 4096 + antes.versoes[0].bytes);
+
+        assert!(super::remover_versao(&config, "0.15.2").unwrap() > 0);
+        let depois = super::ocupacao(&config);
+        assert!(depois.versoes.is_empty());
+        assert_eq!(
+            depois.dados, antes.dados,
+            "remover o app levou as conversas"
+        );
+        assert_eq!(
+            super::remover_versao(&config, "0.15.2"),
+            Err(super::FalhaAoRemoverVersao::NaoInstalada)
+        );
+        assert_eq!(
+            super::remover_versao(&config, "../fuga"),
+            Err(super::FalhaAoRemoverVersao::IdentificadorInvalido)
         );
     }
 

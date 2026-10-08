@@ -47,7 +47,7 @@ const FRASES_DA_VERSAO = {
   ExecutavelInvalido:
     "A LISTA DE VERSÕES APONTA UM PROGRAMA FORA DA PASTA DA VERSÃO, E ELE NÃO FOI ABERTO.",
   InstalacaoAlterada:
-    "O PROGRAMA GUARDADO DESTA VERSÃO NÃO É MAIS O QUE FOI INSTALADO.\nApague-o em CONFIGURAÇÕES · VERSÕES e baixe de novo.",
+    "O PROGRAMA GUARDADO DESTA VERSÃO NÃO É MAIS O QUE FOI INSTALADO.\nApague-o em CONFIGURAÇÕES · VERSÕES: ele é baixado de novo na próxima vez que for preciso.",
   ListaDeRevogacaoRecusada:
     "A LISTA DE VERSÕES REVOGADAS QUE CHEGOU NÃO CONFERE.\nTente de novo mais tarde.",
   CatalogoNaoRespondeu:
@@ -183,64 +183,116 @@ async function entrarPelaLinha(decisao, link) {
   }
 }
 
-/** Desenha a lista de versões em CONFIGURAÇÕES. */
+/** Um tamanho em bytes, para gente: «12 MB», «840 KB». */
+function tamanhoLegivel(bytes) {
+  if (bytes >= 1048576) return `${Math.round(bytes / 1048576)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+/**
+ * Desenha a lista de versões em CONFIGURAÇÕES, com o que cada uma ocupa.
+ *
+ * A tela de disco mínima (spec 0.16, §2, F6; ADR 0046: «uma tela que diz quanto
+ * e permite apagar»). Cada app guardado tem o tamanho e um REMOVER; as
+ * conversas de cada versão do servidor aparecem à parte, **sem** botão, e
+ * dizendo que ficam: apagar o app não as leva, e o próximo app da mesma versão
+ * do servidor as abre.
+ */
 async function desenharPainelDeVersoes() {
   let versoes = [];
+  let ocupacao = { total: 0, versoes: [], dados: [] };
   try {
     versoes = await invoke("versoes_instaladas");
+    ocupacao = await invoke("ocupacao_do_deposito");
   } catch (falha) {
     console.warn("versoes:", falha);
   }
+  const tamanhoDe = new Map(ocupacao.versoes.map((o) => [o.versao, o.bytes]));
 
   const lista = $("lista-versoes-instaladas");
-  if (versoes.length === 0) {
+  if (versoes.length === 0 && ocupacao.dados.length === 0) {
     // **Vazia não é defeito**, e a frase precisa dizer isso: é o estado de toda
-    // instalação que nunca baixou uma segunda versão, que é quase todas.
+    // instalação que nunca guardou uma segunda versão, que é quase todas.
     repovoar(lista, [
-      elemento(
-        "li",
-        "server-dispositivos-vazio",
-        "NENHUMA VERSÃO GUARDADA AO LADO DESTA",
-      ),
+      elemento("li", "server-dispositivos-vazio", "NENHUMA VERSÃO GUARDADA AO LADO DESTA"),
     ]);
     return;
   }
-  repovoar(
-    lista,
-    versoes.map((v) => {
-      const linha = elemento("li");
-      const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
-      const texto = elemento("span", "server-dispositivo-nome");
-      texto.append(elemento("span", "mods-id", v.versao));
-      if (v.em_uso) {
-        texto.append(elemento("span", "mods-versao", "é a que está aberta agora"));
-      } else if (!v.abrivel) {
-        // Dita, e não oferecida: a instalação está lá e não sabe dizer o que
-        // rodar — marcador antigo, ou executável apagado depois.
-        texto.append(
-          elemento("span", "mods-recusado", "sem procedência: reinstale para usar"),
-        );
-      }
-      caixa.append(texto);
-      if (!v.em_uso && v.abrivel) {
-        const botao = elemento("button", "botao-fantasma");
-        botao.type = "button";
-        botao.textContent = "ABRIR";
-        botao.addEventListener("click", () => {
-          invoke("abrir_versao", {
-            versao: v.versao,
-            linha: null,
-            hospedar: false,
-            nomePublico: null,
-            link: null,
-          }).catch((falha) => console.warn("abrir versão:", falha));
-        });
-        caixa.append(botao);
-      }
-      linha.append(caixa);
-      return linha;
-    }),
-  );
+  const itens = versoes.map((v) => {
+    const linha = elemento("li");
+    const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+    const texto = elemento("span", "server-dispositivo-nome");
+    texto.append(elemento("span", "mods-id", v.versao));
+    if (v.em_uso) {
+      texto.append(elemento("span", "mods-versao", "é a que está aberta agora"));
+    } else if (!v.abrivel) {
+      // Dita, e não oferecida: a instalação está lá e não sabe dizer o que
+      // rodar — marcador antigo, ou executável apagado depois.
+      texto.append(elemento("span", "mods-recusado", "sem procedência: apague para baixar de novo"));
+    }
+    if (tamanhoDe.has(v.versao)) {
+      texto.append(elemento("span", "mods-versao", tamanhoLegivel(tamanhoDe.get(v.versao))));
+    }
+    caixa.append(texto);
+    if (!v.em_uso && v.abrivel) {
+      const abrir = elemento("button", "botao-fantasma");
+      abrir.type = "button";
+      abrir.textContent = "ABRIR";
+      abrir.addEventListener("click", () => {
+        invoke("abrir_versao", {
+          versao: v.versao,
+          linha: null,
+          hospedar: false,
+          nomePublico: null,
+          link: null,
+        }).catch((falha) => console.warn("abrir versão:", falha));
+      });
+      caixa.append(abrir);
+    }
+    if (!v.em_uso && tamanhoDe.has(v.versao)) {
+      const remover = elemento("button", "botao-fantasma");
+      remover.type = "button";
+      remover.textContent = "REMOVER";
+      remover.addEventListener("click", () => {
+        removerVersao(v.versao).catch((falha) => console.warn("remover versão:", falha));
+      });
+      caixa.append(remover);
+    }
+    linha.append(caixa);
+    return linha;
+  });
+  for (const d of ocupacao.dados) {
+    const linha = elemento("li");
+    const caixa = elemento("div", "server-dispositivo mods-linha-gestao");
+    const texto = elemento("span", "server-dispositivo-nome");
+    texto.append(elemento("span", "mods-id", `conversas do Servidor ${d.linha}`));
+    texto.append(
+      elemento("span", "mods-versao", `${tamanhoLegivel(d.bytes)} — ficam mesmo apagando o app`),
+    );
+    caixa.append(texto);
+    linha.append(caixa);
+    itens.push(linha);
+  }
+  repovoar(lista, itens);
+}
+
+/** Apaga um app guardado, sem tocar nas conversas, e diz o que houve. */
+async function removerVersao(versao) {
+  const estado = $("versoes-estado");
+  estado.classList.remove("mods-recusado");
+  try {
+    const liberado = await invoke("remover_versao", { versao });
+    estado.textContent =
+      `${versao} apagada: ${tamanhoLegivel(liberado)} liberados. As conversas ficaram, ` +
+      "e são abertas pelo próximo app da mesma versão do servidor.";
+  } catch (falha) {
+    estado.textContent =
+      falha && typeof falha === "object" && "NaoRemovi" in falha
+        ? "Não deu para apagar: ela está aberta? Feche a janela dela e tente de novo."
+        : fraseDaVersao(falha);
+    estado.classList.add("mods-recusado");
+  }
+  await desenharPainelDeVersoes();
 }
 
 /** Baixa do catálogo a versão mais nova e a guarda ao lado desta. */
