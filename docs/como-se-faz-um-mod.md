@@ -367,9 +367,9 @@ a pilha inteira, até o teto da linha. A pilha só vem quando o lançado é um
 **Tem teto.** Trinta e duas linhas de uma vez, e depois quatro por segundo;
 cada linha é cortada em 512 caracteres. O que o teto segurou não some calado:
 a linha seguinte diz quantas foram seguradas (`suprimidas=`). Se o seu código
-se calar depois da rajada, o próprio produto escreve essa linha, em WARN, assim
-que o teto deixa passar mais uma — em até um quarto de segundo, sem esperar o
-MOD parar.
+se calar depois da rajada, o próprio produto escreve essa linha, em WARN, em até
+meio segundo, sem esperar o MOD parar — e deixa ao seu código a vez seguinte:
+quem continua escrevendo leva a conta na própria linha, e o produto não fala.
 
 **Na 0.15.0 o `console` não existe**, e `console.warn(…)` lá é um
 `ReferenceError`. Um MOD que precisa rodar nas duas versões pergunta antes:

@@ -467,6 +467,12 @@ pub(crate) const LINHAS_DE_CONSOLE_POR_SEGUNDO: u32 = 4;
 /// próximas.
 const FICHA: u64 = 1_000_000;
 
+// **A vazão divide a ficha.** É o que faz as fichas andarem em múltiplos dela,
+// e o prazo de [`BaldeDoConsole::ate_sobrar_uma_ficha`] cair exato no
+// microssegundo em que elas se completam: uma vazão que não dividisse a ficha
+// deixaria o prazo depender do arredondamento.
+const _: () = assert!(FICHA.is_multiple_of(LINHAS_DE_CONSOLE_POR_SEGUNDO as u64));
+
 /// **O balde de fichas do `console` de uma instância.**
 ///
 /// Cheio, ele deixa passar [`RAJADA_DO_CONSOLE`] linhas de uma vez; seco, uma a
@@ -474,10 +480,10 @@ const FICHA: u64 = 1_000_000;
 /// contado**, e a primeira linha que passa depois leva a conta: o `seele.log`
 /// diz que houve mais do que ele mostra, em vez de mostrar pouco como se fosse
 /// tudo. Quando nenhuma passa, o produto diz a conta ele mesmo — ao fim da
-/// primeira volta do motor que tiver ficha, e a espera do laço de [`rodar`]
-/// acorda a thread nessa ficha se nenhuma volta vier antes
-/// ([`Self::ate_a_proxima_ficha`]); ou quando a instância para (ver
-/// [`dizer_as_seguradas`]).
+/// primeira volta do motor que tiver ficha; ou quando sobrar uma ficha além da
+/// que fica com o MOD, e a espera do laço de [`rodar`] acorda a thread para
+/// isso se nenhuma volta vier antes ([`Self::ate_sobrar_uma_ficha`]); ou quando
+/// a instância para (ver [`dizer_as_seguradas`]).
 ///
 /// Mora na thread do motor, dividido entre a função nativa, o rastreador de
 /// rejeições e o laço de [`rodar`], e o relógio é passado por quem chama — é
@@ -524,8 +530,11 @@ impl BaldeDoConsole {
     /// e por isso gasta ficha: sem ela, um MOD que escreve um pouco a cada
     /// volta ganharia uma linha do produto por volta, e o teto de vazão
     /// deixaria de valer. Sem ficha, ou sem nada segurado, devolve `None` e
-    /// não mexe em nada — a conta espera a próxima volta, que a espera da
-    /// ficha garante ([`Self::ate_a_proxima_ficha`]), ou [`Self::pendentes`].
+    /// não mexe em nada — a conta espera a próxima volta, que a espera do
+    /// laço garante ([`Self::ate_sobrar_uma_ficha`]), ou [`Self::pendentes`].
+    ///
+    /// Uma ficha basta aqui, e não as duas da espera: no fim de uma volta o
+    /// MOD acabou de ter a vez, e a ficha que ficou é uma que ele não usou.
     pub(crate) fn pendentes_se_couber(&mut self, agora: Instant) -> Option<u32> {
         if self.suprimidas == 0 || !self.gastar_ficha(agora) {
             return None;
@@ -542,20 +551,34 @@ impl BaldeDoConsole {
         (self.suprimidas > 0).then(|| std::mem::take(&mut self.suprimidas))
     }
 
-    /// **Quanto falta para a próxima ficha, enquanto há linha segurada à
-    /// espera dela.**
+    /// **Quanto falta para sobrar uma ficha — a da conta, além da que fica com
+    /// o MOD —, enquanto há linha segurada.**
     ///
     /// É um dos prazos da espera do laço de [`rodar`]: sem temporizador e sem
     /// mensagem, a thread do motor dormia no canal, e a conta ficava no balde
-    /// até o MOD parar. `None` sem nada segurado — a thread não acorda à toa;
-    /// `Some(Duration::ZERO)` com a ficha já no balde. Arredondado para cima,
-    /// ao microssegundo: quem acorda no prazo acha a ficha inteira, e não uma
-    /// fração dela que o mandaria dormir de novo. Com a vazão de hoje a divisão
-    /// é exata — as fichas são contadas em múltiplos dela —, e o arredondamento
-    /// só pesa se [`LINHAS_DE_CONSOLE_POR_SEGUNDO`] deixar de dividir [`FICHA`].
+    /// até o MOD parar. `None` sem nada segurado: a thread não acorda à toa.
+    ///
+    /// **Duas fichas, e não uma.** Acordar quando a primeira se completava
+    /// fazia a linha da conta gastá-la, e a linha seguinte do MOD achava o
+    /// balde seco: segurada, ela pedia outra conta na ficha seguinte, e o ciclo
+    /// se repetia. Medido na revisão do lote D: depois de uma rajada, um
+    /// `setInterval` de 100 ms deixava em quatro segundos 1 linha do MOD e 14 da
+    /// conta. Com duas, a primeira ficha fica com o MOD por um período inteiro
+    /// (`1 / LINHAS_DE_CONSOLE_POR_SEGUNDO` segundo): quem escreve nesse ritmo
+    /// ou mais a gasta antes de juntar a segunda, e leva a conta na própria
+    /// linha — o produto não fala. Quem se calou tem a conta em até dois
+    /// períodos, meio segundo, e ainda acha uma ficha quando voltar a escrever.
+    ///
+    /// O fim de uma volta pede uma só ([`Self::pendentes_se_couber`]): ali o MOD
+    /// acabou de ter a vez, e a ficha que ficou no balde é uma que ele não usou.
+    ///
+    /// Arredondado para cima, ao microssegundo, e exato: as fichas andam em
+    /// múltiplos da vazão, o que o `assert` junto de [`FICHA`] prende na
+    /// compilação. Quem acorda no prazo acha as duas fichas inteiras, e não uma
+    /// fração que o mandaria dormir de novo.
     ///
     /// Só lê: a recarga é contada por quem gasta a ficha ([`Self::gastar_ficha`]).
-    fn ate_a_proxima_ficha(&self, agora: Instant) -> Option<Duration> {
+    fn ate_sobrar_uma_ficha(&self, agora: Instant) -> Option<Duration> {
         if self.suprimidas == 0 {
             return None;
         }
@@ -563,7 +586,7 @@ impl BaldeDoConsole {
         let micros = u64::try_from(passou.as_micros()).unwrap_or(u64::MAX);
         let por_micro = u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO);
         let fichas = self.fichas.saturating_add(micros.saturating_mul(por_micro));
-        let falta = FICHA.saturating_sub(fichas);
+        let falta = (2 * FICHA).saturating_sub(fichas);
         Some(Duration::from_micros(falta.div_ceil(por_micro)))
     }
 
@@ -607,10 +630,11 @@ const CONTA_DO_BALDE: &str =
 /// as linhas da rajada como se fossem tudo.
 ///
 /// Um MOD que não tem volta nenhuma depois da rajada — nem temporizador, nem
-/// resposta — tem a conta dita na primeira ficha, sem esperar parar: a espera
-/// do laço de [`rodar`] acorda por ela ([`BaldeDoConsole::ate_a_proxima_ficha`]).
-/// Ele tinha a conta dita só quando parava, e numa sessão longa isso era o
-/// `seele.log` mostrando a rajada como se fosse tudo por horas.
+/// resposta — tem a conta dita quando sobra uma ficha além da que fica com
+/// ele, em até meio segundo, sem esperar parar: a espera do laço de [`rodar`]
+/// acorda para isso ([`BaldeDoConsole::ate_sobrar_uma_ficha`]). Ele tinha a
+/// conta dita só quando parava, e numa sessão longa isso era o `seele.log`
+/// mostrando a rajada como se fosse tudo por horas.
 fn dizer_as_seguradas(
     balde: &std::cell::RefCell<BaldeDoConsole>,
     manda: &Sender<ParaOFora>,
@@ -1327,22 +1351,26 @@ fn rodar(
 
     loop {
         // **Espera até o pedido seguinte, até o temporizador mais próximo ou
-        // até a próxima ficha do balde do `console`**, o que vier primeiro. É
+        // até sobrar uma ficha no balde do `console`**, o que vier primeiro. É
         // isto que faz esta thread não gastar CPU parada: sem temporizador e
         // sem linha segurada ela dorme no canal, e com um dos dois ela dorme
         // até a hora do mais próximo.
         //
-        // **A ficha acorda a thread para dizer a conta** que nenhuma linha
-        // levou: um MOD que escreve uma rajada e se cala, sem temporizador nem
-        // resposta, tinha a conta dita só quando parava, e o `seele.log`
-        // mostrava a rajada como se fosse tudo enquanto ele estava de pé. O
-        // custo é acordar no máximo uma vez por ficha (250 ms), e só enquanto
-        // o balde segura alguma linha: a volta do ramo de baixo diz a conta e
-        // zera as seguradas, e a espera seguinte volta a dormir no canal.
+        // **A ficha que sobra acorda a thread para dizer a conta** que nenhuma
+        // linha levou: um MOD que escreve uma rajada e se cala, sem
+        // temporizador nem resposta, tinha a conta dita só quando parava, e o
+        // `seele.log` mostrava a rajada como se fosse tudo enquanto ele estava
+        // de pé. «Sobrar» é a segunda ficha, e não a primeira, que fica com o
+        // MOD por um período inteiro: acordar na primeira fazia a conta tomar a
+        // vez de um MOD que continuava escrevendo ([`BaldeDoConsole::
+        // ate_sobrar_uma_ficha`]). O custo é acordar uma vez por conta, e só
+        // enquanto o balde segura alguma linha: a volta do ramo de baixo diz a
+        // conta e zera as seguradas, e a espera seguinte volta a dormir no
+        // canal.
         let ficha = balde_do_console
             .try_borrow()
             .ok()
-            .and_then(|balde| balde.ate_a_proxima_ficha(Instant::now()));
+            .and_then(|balde| balde.ate_sobrar_uma_ficha(Instant::now()));
         let prazo = [proximo_vencimento(&relogios), ficha]
             .into_iter()
             .flatten()
@@ -1362,10 +1390,12 @@ fn rodar(
             break;
         }
         let Some(entrada) = entrada else {
-            // Venceu um prazo — de um temporizador, ou a ficha do balde: dispara
-            // os temporizadores que estão na hora (quando quem acordou foi a
-            // ficha, pode não haver nenhum), dentro de uma volta com prazo,
-            // como qualquer outra execução.
+            // Venceu um prazo — de um temporizador, ou a ficha que sobrou no
+            // balde: dispara os temporizadores que estão na hora (quando quem
+            // acordou foi a ficha, pode não haver nenhum), dentro de uma volta
+            // com prazo, como qualquer outra execução. Os temporizadores vêm
+            // antes da conta: se os dois vencem juntos, a linha do MOD leva a
+            // conta, e o produto não precisa falar.
             interrupcao.comecar();
             let vencidos = recolher_vencidos(&mut relogios);
             for id in vencidos {
@@ -1395,7 +1425,7 @@ fn rodar(
             recolher_pedidos_de_relogio(&contexto, &mut relogios);
             // E a conta do console, pela mesma razão: este fim de volta é o
             // único que um MOD só de relógio tem — e é o da espera que a ficha
-            // do balde acordou, que existe só para dizer esta conta.
+            // que sobrou acordou, que existe só para dizer esta conta.
             dizer_as_seguradas(&balde_do_console, manda, |balde| {
                 balde.pendentes_se_couber(Instant::now())
             });
@@ -2968,22 +2998,13 @@ mod testes {
     /// Mil linhas de uma vez: passam as da rajada, e a primeira linha que passa
     /// depois diz quantas ficaram para trás. A soma das duas coisas é mil — é
     /// essa conta que prova que o balde segura **e** conta.
-    ///
-    /// **Quem leva a conta não importa à soma.** Era a linha de depois, do
-    /// MOD, 400 ms depois do laço. Desde que a espera do laço acorda na
-    /// primeira ficha ([`BaldeDoConsole::ate_a_proxima_ficha`], T2 N1), quem a
-    /// leva é a linha do produto ([`CONTA_DO_BALDE`]), aos 250 ms — e ela gasta
-    /// a ficha, como qualquer linha: a de depois, aos 400 ms, achava o balde
-    /// com 0,6 ficha e era segurada. Por isso ela vem um segundo depois, com
-    /// fichas de sobra, e a linha da conta entra na soma sem contar como do
-    /// laço.
     #[test]
     fn um_mod_em_laco_no_console_nao_passa_da_rajada_e_conta_o_resto() {
         let executor = executor();
         executor
             .iniciar(
                 "for (let i = 0; i < 1000; i++) console.log('linha ' + i);\
-                 setTimeout(() => console.warn('depois'), 1000);",
+                 setTimeout(() => console.warn('depois'), 400);",
             )
             .expect("código");
         let mut passaram_do_laco = 0_usize;
@@ -3002,9 +3023,7 @@ mod testes {
                     if texto == "depois" {
                         break;
                     }
-                    if texto != CONTA_DO_BALDE {
-                        passaram_do_laco += 1;
-                    }
+                    passaram_do_laco += 1;
                 }
                 outro => panic!("veio {outro:?} no meio das linhas de console"),
             }
@@ -3074,61 +3093,76 @@ mod testes {
         );
     }
 
-    /// **O balde diz quanto falta para a próxima ficha — e só enquanto segura
+    /// **O balde diz quanto falta para sobrar uma ficha — e só enquanto segura
     /// alguma linha.**
     ///
     /// É o prazo que a espera do laço de [`rodar`] usa para acordar e dizer a
     /// conta sem esperar o MOD parar. Sem linha segurada, `None`: a thread não
-    /// acorda por nada. E o prazo é exato, ao microssegundo: no prazo há ficha,
-    /// e um microssegundo antes não há — curto, ele acordaria a thread para
-    /// dormir de novo; longo, atrasaria a conta.
+    /// acorda por nada. Com uma, o prazo é o de **duas** fichas: a conta gasta
+    /// uma, e a outra fica com o MOD. E é exato, ao microssegundo: acordada no
+    /// prazo, a conta sai e a linha seguinte do MOD ainda passa; um
+    /// microssegundo antes, a conta tomaria a ficha que era dele.
     #[test]
-    fn o_balde_diz_quanto_falta_para_a_proxima_ficha() {
+    fn o_balde_diz_quanto_falta_para_sobrar_uma_ficha() {
         let inicio = Instant::now();
-        let mut balde = BaldeDoConsole::novo(inicio);
-        assert_eq!(
-            balde.ate_a_proxima_ficha(inicio),
-            None,
-            "um balde cheio, sem nada segurado, pediu para acordar a thread do motor"
-        );
-        for _ in 0..RAJADA_DO_CONSOLE {
-            assert!(balde.admitir(inicio).is_some(), "a rajada não passou");
-        }
-        assert_eq!(
-            balde.ate_a_proxima_ficha(inicio),
-            None,
-            "um balde seco, sem nada segurado, pediu para acordar a thread do motor"
-        );
-        assert_eq!(balde.admitir(inicio), None, "o balde passou da rajada");
         let uma_ficha = Duration::from_millis(1000 / u64::from(LINHAS_DE_CONSOLE_POR_SEGUNDO));
+        // Um balde seco por uma rajada inteira, e uma linha segurada depois.
+        let seco_com_uma_segurada = || {
+            let mut balde = BaldeDoConsole::novo(inicio);
+            assert_eq!(
+                balde.ate_sobrar_uma_ficha(inicio),
+                None,
+                "um balde cheio, sem nada segurado, pediu para acordar a thread do motor"
+            );
+            for _ in 0..RAJADA_DO_CONSOLE {
+                assert!(balde.admitir(inicio).is_some(), "a rajada não passou");
+            }
+            assert_eq!(
+                balde.ate_sobrar_uma_ficha(inicio),
+                None,
+                "um balde seco, sem nada segurado, pediu para acordar a thread do motor"
+            );
+            assert_eq!(balde.admitir(inicio), None, "o balde passou da rajada");
+            balde
+        };
+        let balde = seco_com_uma_segurada();
         assert_eq!(
-            balde.ate_a_proxima_ficha(inicio),
-            Some(uma_ficha),
-            "com uma linha segurada e o balde seco, a próxima ficha não está a uma recarga"
+            balde.ate_sobrar_uma_ficha(inicio),
+            Some(uma_ficha * 2),
+            "com uma linha segurada e o balde seco, o prazo não é o de duas recargas: a conta \
+             gastaria a única ficha, e a linha seguinte do MOD acharia o balde seco"
         );
         let um_pouco_depois = inicio + Duration::from_millis(100);
-        let falta = balde
-            .ate_a_proxima_ficha(um_pouco_depois)
-            .expect("a linha segurada continua pedindo a ficha");
         assert_eq!(
-            falta,
-            uma_ficha - Duration::from_millis(100),
-            "o tempo que passou não descontou do que falta para a ficha"
+            balde.ate_sobrar_uma_ficha(um_pouco_depois),
+            Some(uma_ficha * 2 - Duration::from_millis(100)),
+            "o tempo que passou não descontou do que falta para sobrar uma ficha"
         );
-        // Um microssegundo antes, ainda não há ficha; no prazo, há.
+        let prazo = inicio + uma_ficha * 2;
+
+        let mut cedo = seco_com_uma_segurada();
+        let antes = prazo - Duration::from_micros(1);
+        assert_eq!(cedo.pendentes_se_couber(antes), Some(1), "a conta não saiu");
         assert_eq!(
-            balde.pendentes_se_couber(um_pouco_depois + falta - Duration::from_micros(1)),
+            cedo.admitir(antes),
             None,
-            "a conta saiu antes do prazo que o balde deu, sem ficha"
+            "um microssegundo antes do prazo, a conta deixou ficha ao MOD: o prazo não é exato, \
+             e a thread acordaria tarde"
         );
+
+        let mut no_prazo = seco_com_uma_segurada();
         assert_eq!(
-            balde.pendentes_se_couber(um_pouco_depois + falta),
+            no_prazo.pendentes_se_couber(prazo),
             Some(1),
-            "a thread acordada no prazo que o balde deu não achou a ficha, e a conta espera de \
-             novo"
+            "a thread acordada no prazo que o balde deu não achou ficha para a conta"
         );
         assert_eq!(
-            balde.ate_a_proxima_ficha(um_pouco_depois + falta),
+            no_prazo.admitir(prazo),
+            Some(0),
+            "acordada no prazo que o balde deu, a conta tomou a ficha que era do MOD"
+        );
+        assert_eq!(
+            no_prazo.ate_sobrar_uma_ficha(prazo),
             None,
             "a conta já foi dita, e o balde continua pedindo para acordar a thread"
         );
@@ -3207,14 +3241,23 @@ mod testes {
         }
     }
 
-    /// **Uma rajada no `console` seguida de silêncio tem a conta dita quando
-    /// a instância para.**
+    /// **Uma rajada no `console` seguida de silêncio tem a conta dita até a
+    /// instância parar.**
     ///
     /// O teste de laço acima só fecha a soma porque uma linha passa depois e
     /// leva a conta. Sem ela, a conta ficava no balde e caía com o contexto: o
     /// `seele.log` mostrava 32 linhas, e quem lê concluía que eram 32 itens.
+    ///
+    /// **Quem a diz depende do relógio**, e por isso o nome deixou de ser «ao
+    /// parar»: o `Encerrar` sai logo depois do diagnóstico, e numa máquina
+    /// normal chega antes de sobrar uma ficha (meio segundo) — a conta sai na
+    /// parada. Numa máquina parada esse tempo, ela sai antes, pela espera do
+    /// laço ([`BaldeDoConsole::ate_sobrar_uma_ficha`]). O que este teste prova
+    /// sempre é que ela sai antes do `Parou`, e que a soma fecha; o caminho da
+    /// parada tem um guarda que não depende do relógio
+    /// (`a_conta_que_sobra_quando_a_instancia_para_sai_antes_do_parou`).
     #[test]
-    fn uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ao_parar() {
+    fn uma_rajada_no_console_seguida_de_silencio_tem_a_conta_dita_ate_parar() {
         let executor = executor();
         executor.iniciar(RAJADA_DE_MIL).expect("código");
         // O diagnóstico entra na fila atrás do código: quando ele volta, a volta
@@ -3235,6 +3278,56 @@ mod testes {
         soma.conferir("rajada e silêncio, até parar");
     }
 
+    /// **A conta que sobra quando a instância para sai antes do `Parou`** —
+    /// com ficha ou sem.
+    ///
+    /// O MOD escreve duas linhas a cada 4 ms: a primeira leva cada ficha que
+    /// aparece, e a segunda é sempre segurada. Assim o balde nunca junta a
+    /// ficha que sobraria, a espera do laço nunca acorda para dizer a conta, e
+    /// o fim de cada volta acha o balde seco: o único caminho que diz as
+    /// seguradas depois da última linha que passou é o da parada
+    /// ([`BaldeDoConsole::pendentes`], no fim de [`rodar`]). E há sempre uma
+    /// segurada quando o `Encerrar` chega, entre duas voltas — sem depender do
+    /// relógio, como o teste de cima depende.
+    #[test]
+    fn a_conta_que_sobra_quando_a_instancia_para_sai_antes_do_parou() {
+        let executor = executor();
+        executor
+            .iniciar("setInterval(() => { console.log('a'); console.log('b'); }, 4);")
+            .expect("código");
+        // A última linha de console antes do `Parou`, contando as que chegam
+        // antes do `Encerrar`.
+        let mut ultima_linha = None;
+        let mut pediu = false;
+        let inicio = Instant::now();
+        loop {
+            assert!(
+                inicio.elapsed() < Duration::from_secs(5),
+                "o executor não confirmou a parada em cinco segundos"
+            );
+            if !pediu && inicio.elapsed() >= Duration::from_millis(600) {
+                executor.pedir_encerramento();
+                pediu = true;
+            }
+            match executor.receber(Duration::from_millis(20)) {
+                Some(ParaOFora::Parou) => break,
+                Some(ParaOFora::Console {
+                    texto, suprimidas, ..
+                }) => ultima_linha = Some((texto, suprimidas)),
+                Some(_) | None => {}
+            }
+        }
+        let Some((texto, suprimidas)) = ultima_linha else {
+            panic!("nenhuma linha de console chegou, e o teste não mediu nada");
+        };
+        assert!(
+            texto == CONTA_DO_BALDE && suprimidas >= 1,
+            "a última linha antes do `Parou` não foi a conta do que o balde segurou depois da \
+             última linha que passou ({texto:?}, suprimidas={suprimidas}): a conta caiu com o \
+             contexto, e o `seele.log` mostra menos do que o MOD escreveu como se fosse tudo"
+        );
+    }
+
     /// **A conta sai sem esperar o MOD parar**, e sem temporizador nem resposta
     /// que acorde a thread do motor.
     ///
@@ -3242,8 +3335,9 @@ mod testes {
     /// quando parava: a thread dormia no canal, sem prazo, e a conta esperava
     /// no balde uma volta que não vinha. Numa sessão longa, o `seele.log`
     /// mostrava as linhas da rajada como se fossem tudo por horas (T2 N1).
-    /// Agora a espera do laço também acorda na próxima ficha do balde, e só
-    /// enquanto há linha segurada.
+    /// Agora a espera do laço também acorda quando sobra uma ficha além da que
+    /// fica com o MOD — meio segundo depois da rajada —, e só enquanto há linha
+    /// segurada. O segundo de prazo é o dobro disso.
     #[test]
     fn a_conta_das_seguradas_sai_sem_esperar_o_mod_parar() {
         let executor = executor();
@@ -3279,24 +3373,58 @@ mod testes {
         );
     }
 
-    /// **A conta não espera um temporizador mais tarde que a ficha, e a
-    /// resposta que chega depois dela não a diz de novo.**
+    /// **Um MOD que continua escrevendo não perde a vez para a linha da
+    /// conta.**
     ///
-    /// Este teste se chamava `a_conta_das_seguradas_sai_na_primeira_volta_com_ficha`,
-    /// e provava os dois fins de volta do laço do motor — o de um temporizador
-    /// de 400 ms, que termina num `continue`, e o de uma resposta —, cada um
-    /// dizendo a conta quando tinha ficha. Desde que a espera do laço acorda na
-    /// próxima ficha ([`BaldeDoConsole::ate_a_proxima_ficha`], T2 N1), a conta
-    /// sai por ela antes das duas voltas, e o nome deixou de dizer o que ele
-    /// prova. O que ele mede agora:
-    /// - **com um temporizador de pé, a espera é a menor das duas.** O
-    ///   temporizador é de um minuto: a conta só chega dentro dos cinco
-    ///   segundos de [`Soma::ate`] porque a thread acorda na ficha, e não no
-    ///   vencimento;
-    /// - **com uma resposta depois da ficha**, a conta já saiu, e a volta da
-    ///   resposta não a diz de novo nem a perde: a soma fecha em mil.
+    /// A espera do laço acordava no instante em que a ficha se completava, e a
+    /// linha da conta a gastava: a linha seguinte do MOD achava menos de uma
+    /// ficha e era segurada, o que fazia o produto acordar de novo na ficha
+    /// seguinte — e o ciclo se repetia. Medido na revisão do lote D: depois de
+    /// uma rajada, um `setInterval` de 100 ms deixava em quatro segundos 1 linha
+    /// do MOD e 14 da conta, e o `seele.log` dizia «quantas» no lugar de «o
+    /// quê». Sem a espera da ficha eram 15 e 0.
+    ///
+    /// Agora a espera deixa a ficha ao MOD por um período inteiro antes de o
+    /// produto falar ([`BaldeDoConsole::ate_sobrar_uma_ficha`]): quem escreve
+    /// quatro linhas por segundo ou mais a gasta antes de juntar duas.
     #[test]
-    fn a_conta_das_seguradas_nao_espera_um_temporizador_mais_tarde_nem_uma_resposta() {
+    fn um_mod_que_continua_escrevendo_nao_perde_a_vez_para_a_conta() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "for (let i = 0; i < 100; i++) console.log('rajada ' + i);\
+                 setInterval(() => console.log('do MOD'), 100);",
+            )
+            .expect("código");
+        let fim = Instant::now() + Duration::from_secs(2);
+        let (mut do_mod, mut conta) = (0_usize, 0_usize);
+        while Instant::now() < fim {
+            match executor.receber(fim.saturating_duration_since(Instant::now())) {
+                Some(ParaOFora::Console { texto, .. }) if texto == "do MOD" => do_mod += 1,
+                Some(ParaOFora::Console { texto, .. }) if texto == CONTA_DO_BALDE => conta += 1,
+                Some(ParaOFora::Console { .. }) | None => {}
+                Some(outra) => panic!("veio {outra:?} no meio das linhas de console"),
+            }
+        }
+        assert!(
+            conta <= 1 && do_mod > conta && do_mod >= 4,
+            "um MOD que escreve a cada 100 ms deixou, em dois segundos depois de uma rajada, \
+             {do_mod} linhas dele e {conta} da conta: a linha da conta toma a ficha que era do \
+             MOD, e o seele.log diz «quantas» no lugar de «o quê»"
+        );
+    }
+
+    /// **A conta não espera um temporizador mais tarde que a ficha que sobra.**
+    ///
+    /// Com um temporizador de pé, a espera do laço é a menor das duas: o
+    /// temporizador é de um minuto, e a conta só chega dentro dos cinco
+    /// segundos de [`Soma::ate`] porque a thread acorda quando sobra uma ficha
+    /// ([`BaldeDoConsole::ate_sobrar_uma_ficha`]), e não no vencimento.
+    ///
+    /// Era a metade do relógio de `a_conta_das_seguradas_sai_na_primeira_volta_com_ficha`;
+    /// a da resposta é o teste de baixo.
+    #[test]
+    fn a_conta_das_seguradas_nao_espera_um_temporizador_mais_tarde() {
         let com_relogio = executor();
         com_relogio
             .iniciar(&format!("{RAJADA_DE_MIL} setTimeout(() => {{}}, 60000);"))
@@ -3309,19 +3437,38 @@ mod testes {
              do laço usou o vencimento, e não o menor dos dois prazos",
         );
         soma.conferir("com um temporizador de um minuto de pé");
+    }
 
+    /// **O fim de uma volta que não é de temporizador diz a conta, se houver
+    /// ficha** — sem esperar a que sobraria.
+    ///
+    /// Entre a primeira ficha (um quarto de segundo depois da rajada) e a
+    /// segunda (meio segundo), só o fim de uma volta diz a conta: a espera do
+    /// laço ainda não acordou para ela. A resposta chega nesse meio, aos 350
+    /// ms, e o diagnóstico logo atrás dela: quando ele volta, a conta tem de
+    /// ter saído, pelo fim da volta da resposta (ou do próprio diagnóstico,
+    /// que é o mesmo fim de volta). Sem esse caminho, ela esperaria a ficha que
+    /// sobra, e chegaria depois do diagnóstico.
+    ///
+    /// Um atraso da máquina não faz este teste reprovar: com mais de meio
+    /// segundo, a conta sai pela espera, também antes do diagnóstico. Ele só
+    /// deixa de distinguir os dois caminhos.
+    #[test]
+    fn a_conta_das_seguradas_sai_no_fim_da_volta_de_uma_resposta_com_ficha() {
         let com_resposta = executor();
         com_resposta
             .iniciar(&format!(
                 "globalThis.aoResponder = () => {{}}; {RAJADA_DE_MIL}"
             ))
             .expect("código");
+        com_resposta.diagnostico().expect("o executor de pé");
         let mut soma = Soma::default();
         soma.ate(
             &com_resposta,
-            |fala| matches!(fala, ParaOFora::Console { texto, .. } if texto == CONTA_DO_BALDE),
-            "a conta das seguradas não saiu na primeira ficha, com o MOD de pé",
+            |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
+            "a volta do laço não acabou",
         );
+        std::thread::sleep(Duration::from_millis(350));
         // O diagnóstico entra na fila atrás da resposta: quando ele volta, a
         // volta da resposta acabou, e o que ela disse já passou pelo canal.
         com_resposta.entregar("{}").expect("entregar");
@@ -3331,7 +3478,7 @@ mod testes {
             |fala| matches!(fala, ParaOFora::Diagnostico { .. }),
             "a volta da resposta não acabou",
         );
-        soma.conferir("com uma resposta depois da ficha");
+        soma.conferir("no fim da volta de uma resposta, com uma ficha e sem a que sobra");
     }
 
     /// **A fronteira do QuickJS, medida** — etapa E1.
