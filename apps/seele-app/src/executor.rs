@@ -2244,14 +2244,21 @@ impl RejeicoesDaVolta {
 }
 
 /// A linha que diz quantas rejeições sem tratamento passaram do teto da
-/// espera, depois das linhas das guardadas — e o `Falhou` que diz o mesmo à
-/// janela.
+/// espera, depois das linhas das guardadas. O `Falhou` que diz o mesmo à
+/// janela é outro texto ([`falhou_alem_da_espera`]).
 fn alem_da_espera(quantas: u32) -> String {
     if quantas == 1 {
         "e mais 1 rejeição sem tratamento além da espera".to_owned()
     } else {
         format!("e mais {quantas} rejeições sem tratamento além da espera")
     }
+}
+
+/// O `Falhou` da conta das rejeições além da espera: a frase das outras
+/// rejeições na frente, porque ele chega à gestão sem as linhas que o cercam
+/// no registro, e «e mais N além da espera» sozinho não diz de quê.
+fn falhou_alem_da_espera(quantas: u32) -> String {
+    format!("{REJEITADA_SEM_TRATAMENTO}: e mais {quantas} além da espera")
 }
 
 /// **Diz as rejeições que ninguém pegou**, cada uma como uma linha de
@@ -2281,9 +2288,8 @@ fn dizer_as_rejeitadas(
         avisar(manda, fila, ParaOFora::Falhou(falhou.0));
     }
     if alem > 0 {
-        let conta = alem_da_espera(alem);
-        linha_de_console(balde, manda, NivelDoConsole::Erro, conta.clone());
-        avisar(manda, fila, ParaOFora::Falhou(conta));
+        linha_de_console(balde, manda, NivelDoConsole::Erro, alem_da_espera(alem));
+        avisar(manda, fila, ParaOFora::Falhou(falhou_alem_da_espera(alem)));
     }
 }
 
@@ -4672,6 +4678,40 @@ mod testes {
                  canal leva o texto inteiro que o MOD lançou, ou o aviso do corte mente o tamanho"
             );
         });
+    }
+
+    /// **A conta das rejeições além da espera chega à janela com o sujeito.**
+    ///
+    /// Na linha do registro ela vem depois das guardadas, e «e mais N
+    /// rejeições…» se lê com elas. O `Falhou` vai para a gestão sem as linhas
+    /// que o cercam no registro: sem «promessa rejeitada sem tratamento» na
+    /// frente, «e mais 9 além da espera» não diz de quê.
+    #[test]
+    fn o_falhou_da_conta_alem_da_espera_diz_de_que_e_a_conta() {
+        let (manda, recebe) = std::sync::mpsc::channel();
+        let balde = std::cell::RefCell::new(BaldeDoConsole::novo(Instant::now()));
+        let fila = Arc::new(Fila::default());
+        let rejeicoes = RejeicoesDaVolta {
+            guardadas: Vec::new(),
+            alem: 3,
+        };
+        dizer_as_rejeitadas(&std::cell::RefCell::new(rejeicoes), &balde, &manda, &fila);
+        let Ok(ParaOFora::Console { texto, .. }) = recebe.try_recv() else {
+            panic!("a linha da conta além da espera não saiu, ou saiu depois do `Falhou`");
+        };
+        assert_eq!(
+            texto, "e mais 3 rejeições sem tratamento além da espera",
+            "a linha do registro da conta além da espera mudou"
+        );
+        let Ok(ParaOFora::Falhou(falhou)) = recebe.try_recv() else {
+            panic!("a conta além da espera não chegou à janela como `Falhou`");
+        };
+        assert_eq!(
+            falhou,
+            format!("{REJEITADA_SEM_TRATAMENTO}: e mais 3 além da espera"),
+            "o `Falhou` da conta além da espera não diz de que é a conta, e a gestão mostra «e \
+             mais 3» sem sujeito"
+        );
     }
 
     /// E o descarte acontece na dona do runtime, sem matar thread à força.
