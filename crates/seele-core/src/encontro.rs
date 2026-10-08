@@ -330,7 +330,7 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
 /// (`enc=encontro.seele.app.br/…`) a pergunta ao quarto nunca saiu.
 ///
 /// **Todos os endereços, IPv4 primeiro** ([`ordenar_os_achados`]). A consulta
-/// pergunta ao primeiro.
+/// pergunta ao primeiro, e ao seguinte só quando nada saiu ([`consultar`]).
 ///
 /// **Diz por que não achou.** O defeito passou sem ser visto porque o `.ok()?`
 /// engolia o erro: o produto sabia por que a pergunta não saía e não contava.
@@ -1916,9 +1916,11 @@ mod testes {
     async fn a_ida_e_volta_se_mede_da_ultima_volta_que_saiu() {
         // O outro lado de contar a volta recusada: as perguntas no ar são as
         // da volta 1, e a ida e volta do `ONDE` se mede dela. Medida da volta
-        // 2, que não saiu, a resposta aos 600 ms viraria uma ida e volta de
-        // 100 ms, o teto cairia aos 800 ms, e a escuta que chega aos 900 ms se
-        // perderia antes da hora da volta seguinte.
+        // 2, que não saiu, a resposta aos 550 ms viraria uma ida e volta de
+        // 50 ms, o teto cairia no piso, aos 650 ms, e a escuta que chega aos
+        // 825 ms se perderia antes da hora da volta seguinte (1000 ms). As
+        // duas margens são de ~175 ms: até o teto errado, e até a volta
+        // seguinte.
         let Some(marcas) = Marcas::do_servidor(FP) else {
             panic!("a impressão digital de teste tem de formar marcas");
         };
@@ -1926,13 +1928,13 @@ mod testes {
         let quem = marcas.clone();
         let (ponto, _) = ponto_falso(move |pedido, de| match pedido {
             encontro::Pedido::Onde { marca } => {
-                vec![(Duration::from_millis(600), encontro::aqui(marca, de))]
+                vec![(Duration::from_millis(550), encontro::aqui(marca, de))]
             }
             encontro::Pedido::Quem { marca } if marca == quem.servidor() => {
-                vec![(Duration::from_millis(600), encontro::aqui(marca, servidor))]
+                vec![(Duration::from_millis(550), encontro::aqui(marca, servidor))]
             }
             encontro::Pedido::Quem { marca } if marca == quem.escuta() => {
-                vec![(Duration::from_millis(900), encontro::aqui(marca, escuta))]
+                vec![(Duration::from_millis(825), encontro::aqui(marca, escuta))]
             }
             _ => Vec::new(),
         })
@@ -2006,14 +2008,20 @@ mod testes {
 
     #[tokio::test]
     async fn a_segunda_marca_que_chega_dentro_do_teto_entra_na_resposta() {
-        // O C1: o ponto responde ao servidor e ao `ONDE` na hora, e à escuta 50
+        // O C1: o ponto responde ao servidor e ao `ONDE` na hora, e à escuta 15
         // ms depois. No laço local a ida e volta são microssegundos, e o teto é
         // o piso de 100 ms: a escuta chega dentro dele.
+        //
+        // 15 ms, e não perto do piso: o teste roda numa thread só, e uma pausa
+        // dela que atravessasse o instante da escuta e o do teto faria os dois
+        // timers vencerem no mesmo tique, com a consulta saindo sem a escuta.
+        // Sobram ~85 ms para isso, e sem o piso o teto cai em microssegundos,
+        // antes dos 15 ms.
         let Some(marcas) = Marcas::do_servidor(FP) else {
             panic!("a impressão digital de teste tem de formar marcas");
         };
         let (ponto, _) =
-            ponto_que_demora_a_escuta(&marcas, true, Some(Duration::from_millis(50))).await;
+            ponto_que_demora_a_escuta(&marcas, true, Some(Duration::from_millis(15))).await;
         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
 
         let ate = tokio::time::Instant::now() + PRAZO_DO_QUARTO;
@@ -2025,7 +2033,7 @@ mod testes {
                 servidor: Some(SocketAddr::from(SERVIDOR)),
                 escuta: Some(SocketAddr::from(ESCUTA)),
             }),
-            "a escuta respondeu 50 ms depois do servidor, dentro do teto de 100 ms, e ficou de \
+            "a escuta respondeu 15 ms depois do servidor, dentro do teto de 100 ms, e ficou de \
              fora: a consulta parou na primeira marca, e quem chega manda o `LEVE` ao aviso \
              guardado em vez da escuta de hoje"
         );
