@@ -3981,6 +3981,16 @@ async fn run_session(
                         continue;
                     }
                 }
+                // **O aviso de um MOD pede a permissão, e não a assinatura.** A
+                // janela da MESA precisa saber que a mesa do canal 7 mudou mesmo
+                // com a conversa de outro canal aberta: a assinatura é de quem
+                // lê mensagens, e o aviso é de quem pode ler o canal (rascunho da
+                // API 6, §7.3).
+                if let Event::ModAviso { canal: Some(canal), .. } = &event {
+                    if !pode_ler_canal(server, session.person, *canal).await {
+                        continue;
+                    }
+                }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         frame::write_em(&mut send, session.protocol_version, &message).await?;
@@ -5425,6 +5435,18 @@ fn translate(
         // a sessão, e é por este quadro que a casca sabe que o tema publicado é
         // outro (rascunho da API 6, §9).
         Event::TemaMudou { tema } => Some(ServerMessage::TemaMudou { tema: tema.clone() }),
+        // A todos os que chegaram até aqui: quem não pode ler o canal já ficou
+        // de fora, no laço, antes de `translate`. A janela de quem fez o pedido
+        // também recebe (pergunta do PERFIS, 09/10).
+        Event::ModAviso {
+            mod_id,
+            canal,
+            carga,
+        } => Some(ServerMessage::ModAviso {
+            mod_id: mod_id.clone(),
+            canal: *canal,
+            carga: carga.clone(),
+        }),
 
         // Acted on by the connection they name, in the loop, and carrying
         // nothing for anybody else. A move is visible to everybody as the
@@ -6356,6 +6378,7 @@ mod fim_de_tela_por_sessao {
             esperas: Arc::new(std::sync::Mutex::new(Default::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,
@@ -6671,5 +6694,41 @@ mod a_causa_da_recusa {
             causa_da_falha(&anyhow::anyhow!("o disco encheu")),
             CausaDaRecusa::FalhaDoServidor
         );
+    }
+}
+
+/// O aviso da metade de servidor de um MOD, do barramento ao fio (rascunho da
+/// API 6, §7.3; tarefa 8 do plano da F3).
+#[cfg(test)]
+mod o_aviso_do_mod {
+    use super::translate;
+    use crate::server::Event;
+    use seele_proto::{
+        control::ServerMessage,
+        ids::{ChannelId, PersonId},
+    };
+
+    /// **Para todos, inclusive a janela de quem pediu** (pergunta do PERFIS,
+    /// 09/10): uma regra só, e a janela que gravou confere a revisão. O filtro
+    /// de quem pode ler o canal vem antes de `translate`, no laço da sessão; aqui
+    /// é a tradução, que não filtra por pessoa nem pela assinatura do canal.
+    #[test]
+    fn o_aviso_vira_o_mod_aviso_do_fio_para_todos() {
+        for canal in [Some(ChannelId(7)), None] {
+            let evento = Event::ModAviso {
+                mod_id: "seele/mesa".to_owned(),
+                canal,
+                carga: r#"{"revisao":3}"#.to_owned(),
+            };
+            assert_eq!(
+                translate(&evento, &[], PersonId(1)),
+                Some(ServerMessage::ModAviso {
+                    mod_id: "seele/mesa".to_owned(),
+                    canal,
+                    carga: r#"{"revisao":3}"#.to_owned(),
+                }),
+                "o aviso do canal {canal:?} não virou ModAviso para quem não assinou o canal"
+            );
+        }
     }
 }

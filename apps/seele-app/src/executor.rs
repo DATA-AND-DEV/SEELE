@@ -424,6 +424,11 @@ mod testes {
         }
     }
 
+    /// Um campo de um JSON, ou `null` quando ele falta.
+    fn campo<'a>(valor: &'a serde_json::Value, nome: &str) -> &'a serde_json::Value {
+        valor.get(nome).unwrap_or(&serde_json::Value::Null)
+    }
+
     /// O que um pacote vê de `SeeleUI` e `SeeleMods`, numa API escolhida.
     fn o_que_a_api_entrega(api: u32) -> serde_json::Value {
         let executor = executor();
@@ -435,6 +440,7 @@ mod testes {
                    enviar: typeof SeeleUI.enviar,\
                    tema: typeof SeeleUI.tema,\
                    snapshot: typeof SeeleMods.snapshot,\
+                   retrato: typeof SeeleUI.retrato,\
                    regiao: typeof SeeleUI.regiao,\
                    cartoes: typeof SeeleUI.cartoes,\
                    capacidades: SeeleUI.capacidades(),\
@@ -455,8 +461,9 @@ mod testes {
     /// 6 descobriria a ausência num `catch`, em produção. A API 5 continua com
     /// os dois, e é a outra metade da prova.
     ///
-    /// `SeeleMods.snapshot` ainda existe na 6: ele sai na tarefa 4, junto com a
-    /// entrada de `SeeleUI.retrato`.
+    /// **E o retrato no lugar do `snapshot`** (tarefa 4): a 6 lê
+    /// `SeeleUI.retrato()`, projetado por lista branca, e não tem
+    /// `SeeleMods.snapshot`; a 5 tem o `snapshot` e não tem o retrato.
     #[test]
     fn um_pacote_da_api_6_recebe_as_capacidades_dela_e_nao_as_que_sairam() {
         let seis = o_que_a_api_entrega(6);
@@ -465,29 +472,73 @@ mod testes {
             ("superficies", "object"),
             ("enviar", "function"),
             ("tema", "function"),
-            ("snapshot", "function"),
+            ("retrato", "function"),
         ] {
-            assert_eq!(seis[nome], tipo, "a API 6 sem «{nome}»: {seis}");
+            assert_eq!(campo(&seis, nome), tipo, "a API 6 sem «{nome}»: {seis}");
         }
-        for saiu in ["regiao", "cartoes"] {
+        for saiu in ["regiao", "cartoes", "snapshot"] {
             assert_eq!(
-                seis[saiu], "undefined",
-                "«{saiu}» saiu da API 6 e ainda é montado no `SeeleUI`: {seis}"
+                campo(&seis, saiu),
+                "undefined",
+                "«{saiu}» saiu da API 6 e ainda é montado (no `SeeleUI` ou no `SeeleMods`): {seis}"
             );
         }
         assert_eq!(
-            seis["capacidades"],
-            serde_json::json!(seele_ffi::mods::capacidades_da_api(6)),
+            campo(&seis, "capacidades"),
+            &serde_json::json!(seele_ffi::mods::capacidades_da_api(6)),
             "o MOD da API 6 lê outras capacidades que as do núcleo"
         );
 
         let cinco = o_que_a_api_entrega(5);
-        for continua in ["regiao", "cartoes"] {
+        for continua in ["regiao", "cartoes", "snapshot"] {
             assert_eq!(
-                cinco[continua], "function",
+                campo(&cinco, continua),
+                "function",
                 "a API 5 perdeu «{continua}», que ela tem: {cinco}"
             );
         }
+        assert_eq!(
+            campo(&cinco, "retrato"),
+            "undefined",
+            "a API 5 ganhou o retrato da 6: {cinco}"
+        );
+    }
+
+    /// **A recusa chega ao MOD com os campos dela** (o I do PERFIS; rascunho da
+    /// API 6, §7.1). O prelúdio rejeitava com `new Error(m.erro)`, e o
+    /// `detectado: 'heic'` de um `tipo-recusado` não atravessava: o MOD não tinha
+    /// como dizer «HEIC não é aceito». Agora o `Error` leva o nome em `message` e
+    /// em `erro`, e os outros campos da resposta como propriedades — sem o `ok`,
+    /// o número do pedido e o tipo da mensagem, que são da ponte.
+    #[test]
+    fn a_recusa_chega_ao_mod_com_os_campos_dela() {
+        let executor = executor();
+        executor
+            .iniciar(
+                "SeeleMods.request('a/b', 0, {}).catch((e) => seele.postar(JSON.stringify({\
+                   message: e.message, erro: e.erro, detectado: e.detectado,\
+                   ok: 'ok' in e, n: 'n' in e, tipo: 'tipo' in e,\
+                 })));",
+            )
+            .expect("código");
+        let pedido: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        let n = campo(&pedido, "n").as_u64().expect("o pedido tem número");
+        executor
+            .entregar(&format!(
+                r#"{{"tipo":"resposta","n":{n},"ok":false,"erro":"tipo-recusado","detectado":"heic"}}"#
+            ))
+            .expect("entregar");
+        let visto: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o MOD posta JSON");
+        assert_eq!(
+            visto,
+            serde_json::json!({
+                "message": "tipo-recusado", "erro": "tipo-recusado", "detectado": "heic",
+                "ok": false, "n": false, "tipo": false,
+            }),
+            "a recusa não chegou ao MOD com os campos dela"
+        );
     }
 
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**

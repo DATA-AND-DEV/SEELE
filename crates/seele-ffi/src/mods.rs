@@ -26,7 +26,9 @@ pub use seele_core::mods::{capacidades_da_api, APIS_ACEITAS, MOD_API_MINIMA, MOD
 ///
 /// Reexportado e não reescrito: a casca não alcança `seele-core` (ADR 0002), e
 /// o `data:` precisa ser composto onde o tipo é decidido pelos bytes.
-pub use seele_core::mods::{ler_midia, ler_tipo, MidiaDeMod, TipoLido, TETO_DE_MIDIA};
+pub use seele_core::mods::{
+    ler_midia, ler_tipo, reconhecido_e_nao_aceito, MidiaDeMod, TipoLido, TETO_DE_MIDIA,
+};
 
 /// Um MOD em disco, como a janela o desenha.
 ///

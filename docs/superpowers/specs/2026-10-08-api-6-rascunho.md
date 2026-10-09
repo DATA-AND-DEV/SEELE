@@ -125,8 +125,9 @@ o espelho `CAPACIDADES_POR_API` em `base.js:1982-1989` [c]):
 | `volume` | **sim** | ADR 0048. O PERFIS (R1, R3), a MESA (M11, item 16) e o ESTILO (§1, fundo por mídia) dependem dela. Confirmado à F5 em 08/10: o lote E (P51-11) tem objeto |
 | `arquivo` | sim | o seletor mediado e `pedaco`/`soltar` |
 | `tema` | **sim, ampliado** (decisão de 08/10) | §9, com `servidor.aparencia` como porta |
-| `regiao` | **sai** (decisão de 08/10) | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19) |
-| `cartoes` | **sai** (decisão de 08/10), trocada por `pessoa.cartao` com `alvo` | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2) |
+| `regiao` | **sai** (decisão de 08/10); **ausente** do `SeeleUI` da 6, como `superficies` do da 3, e não montado para a janela recusar depois [c, tarefa 3] | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19) |
+| `cartoes` | **sai** (decisão de 08/10), trocada por `pessoa.cartao` com `alvo`; ausente do `SeeleUI` da 6 [c, tarefa 3] | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2) |
+| `retrato` | **sim, nova** (09/10, na tarefa 4) | `SeeleUI.retrato()`, projetado por lista branca (§6), **no lugar** de `SeeleMods.snapshot`: quem tem `retrato` não tem o `snapshot` inteiro, nem no prelúdio nem no roteador (`SUBSTITUIDA_PELA_CAPACIDADE`). Uma capacidade, e não um teste de versão, porque é pelas capacidades que o prelúdio monta o `SeeleUI` [c] |
 | `eventos-da-tela` | sim, nova | §7 |
 | `aviso-do-servidor` | sim, nova (metade de servidor) | §7.3. No contrato de fio da 1.0, pela F1 (§14) |
 
@@ -532,6 +533,24 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 | `nao-gravei` | o disco de quem hospeda recusou a escrita |
 | `incompleto` | o fluxo terminou antes do que dizia carregar |
 | `sessao-encerrada` | a sessão acabou no meio |
+| `arquivo-ilegivel` | o arquivo escolhido não abriu |
+| `papel-nao-serve` | o arquivo escolhido é de outro papel que o pedido (um som onde o MOD pediu retrato); leva `papel` |
+| `arquivos-demais-de-pe` | o MOD já guarda o máximo de arquivos escolhidos ao mesmo tempo |
+| `arquivo-nao-esta-de-pe`, `arquivo-de-outro-mod` | o identificador não é de um arquivo guardado, ou é de outro MOD ou de outra sessão |
+| `banco-indisponivel` | a tabela dos arquivos escolhidos não respondeu |
+| `falhou` | uma falha sem nome; o motivo vai ao `seele.log`, com o `mod_id=` |
+
+**Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
+(`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
+`tipo-recusado:heic` chega como `erro: 'tipo-recusado'` e `detectado: 'heic'`,
+`papel-nao-serve:imagem` como `papel: 'imagem'` (`recusaParaOMod`, `base.js`).
+Ele chega pelos dois caminhos: a resposta de um pedido (o `Error` do prelúdio,
+com os campos) e o evento `arquivo` de um seletor que recusou (`resultado:
+'falhou'`, com `erro` e `detectado`). Um `Error` da casca pode trazer o nome em
+`recusa`; as recusas das contribuições e das superfícies ganham nome nas tarefas
+5 e 7, e até lá chegam como `falhou`, com o motivo no registro. **Até a API 5,
+nada muda**: o MOD recebe a frase de tela, como os publicados recebem (o K1-m3
+da F5).
 
 **Como a recusa chega ao MOD, com os campos dela** (o I do PERFIS, 09/10). Hoje
 o prelúdio rejeita a promessa com `new Error(m.erro)`, e nada além do nome
@@ -543,8 +562,12 @@ chega à janela pelo mesmo caminho, e não só para o volume: um campo que o
 produto acrescentar a uma recusa chega ao MOD sem outra mudança no prelúdio.
 O `ok` e o número do pedido não vão. [tarefa 4, passo 5b]
 
-Hoje o farejador de imagem (`seele_proto::imagem::sniff`) não reconhece HEIC, e
-um HEIC cai em `tipo-recusado` sem `detectado`. Reconhecer o HEIC só para
+**O HEIC é reconhecido para ser nomeado** [c, tarefa 4 passo 5b]:
+`seele_proto::imagem::reconhecido_e_nao_aceito` lê a caixa `ftyp` (`heic`,
+`heix`, `mif1`) e o seletor recusa o HEIC das Fotos com `tipo-recusado:heic`, e
+não mais com `formato-desconhecido`. O `sniff` não muda: o HEIC continua
+recusado, com o nome dele. A prova é um HEIC de verdade, de 8 × 8, feito pelo
+`sips` do macOS (`crates/seele-proto/tests/vetores/heic-8x8.heic`). Reconhecer o HEIC só para
 nomeá-lo é a tarefa 4 do plano; a conversão no celular, se houver, é da ponte
 da F4.
 
@@ -564,6 +587,15 @@ contrato (MESA, item 3).
 
 **Nunca carregam a ligação.** O MOD do servidor em que a pessoa está não fica
 sabendo que ela recebe uma ligação, de quem, nem qual é o código de ninguém.
+
+**Como nascem** [c, tarefa 8]: a cada `Snapshot` que a janela desenha, o retrato
+de agora é comparado com o de antes (`mudancasDaTela`), e só o que mudou vira
+evento — nada num temporizador que repita o mesmo estado. O primeiro retrato de
+uma sessão não é mudança: o MOD lê o retrato quando sobe. Só os MODs cuja API
+tem `eventos-da-tela` os recebem. A fala sai no máximo a cada 250 ms, e o
+conjunto mais novo sempre chega (`criarRitmoDaFala`). O `lugar` sai quando
+`onde` ou as `regioes` mudam, com a largura e a altura da sessão; o tamanho de
+cada região, e o `lugar` quando ele muda, são da tarefa 5.
 
 ### 7.3 O aviso da metade de servidor às janelas (novo)
 
@@ -589,7 +621,14 @@ SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
   texto serializado, e o fio leva texto, `ModAviso.carga: String`), e a janela
   o recebe já lido em `e.carga`.
 - **Teto de tamanho e de taxa** [os números esperam a M3]: proposta, 1 KiB
-  por aviso e 4 por segundo por MOD.
+  por aviso e 4 por segundo por MOD, em qualquer janela de um segundo, e até
+  16 canais por chamada. Dentro de uma chamada, os avisos já se juntam por
+  canal: o mais novo de cada um.
+- **`mundo.avisar` responde** `{ ok: true }` ou `{ ok: false, erro }`, com
+  `aviso-invalido` (não é `{ canal?, carga }`, o canal não é inteiro positivo,
+  ou a carga falta ou o JSON não a escreve), `aviso-grande-demais` e
+  `avisos-demais`. A janela recebe o evento `servidor`, com `canal` e a `carga`
+  já lida. [c, tarefa 8]
 - **O excedente é coalescido por canal, e não descartado** (pedido da MESA,
   09/10). O servidor guarda, por MOD e por canal, só o aviso mais novo que
   ainda não saiu, e o entrega assim que a taxa deixa; os do meio são
@@ -602,8 +641,10 @@ SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
   se o quintal recusar a escrita (cheio), eles são descartados com ela. É a
   mesma regra do quintal, que só grava depois de uma execução bem-sucedida
   (`api/v2.json`, `notes`): um aviso nunca fala de uma revisão que não existe.
-- **Precisa de uma mensagem nova no fio** (servidor → cliente). Encaminhada
-  em 08/10 ao contrato da 1.0, pela F1 (§14).
+- **A mensagem no fio é o `ModAviso`** (ordinal 46, da 1.0, pela F1). O
+  servidor o manda a quem **pode ler** o canal, sem exigir que a conexão tenha
+  aberto aquele canal: a janela da MESA precisa saber que a mesa do canal 7
+  mudou com a conversa de outro canal aberta. [c, tarefa 8]
 
 ### 7.4 Os momentos (metade de servidor, por `aoAcontecer`)
 

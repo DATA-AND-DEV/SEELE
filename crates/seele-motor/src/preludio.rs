@@ -54,8 +54,22 @@ pub const PRELUDIO: &str = r#"
     const espera = pendentes.get(m.n);
     if (!espera) return;
     pendentes.delete(m.n);
-    if (m.ok) espera.resolve(m.valor);
-    else espera.reject(new Error(m.erro || 'recusado'));
+    if (m.ok) {
+      espera.resolve(m.valor);
+      return;
+    }
+    // **A recusa leva os campos dela** (rascunho da API 6, §7.1). O nome vai
+    // em `message` e em `erro`, e o resto da resposta — o `detectado: 'heic'`
+    // de um `tipo-recusado` — vai como propriedade do `Error`, que é como o
+    // MOD o lê num `catch`. O `ok`, o número do pedido e o tipo da mensagem são
+    // da ponte, e ficam de fora.
+    const recusa = new Error(m.erro || 'recusado');
+    for (const [campo, valor] of Object.entries(m)) {
+      if (campo === 'ok' || campo === 'n' || campo === 'tipo' || campo === '__proto__') continue;
+      recusa[campo] = valor;
+    }
+    recusa.erro = m.erro || 'recusado';
+    espera.reject(recusa);
   };
 
   // Quanto cabe numa mensagem, dito pelo anfitrião. Lido e apagado como as
@@ -280,11 +294,6 @@ pub const PRELUDIO: &str = r#"
     clear: () => {},
   };
 
-  globalThis.SeeleMods = Object.freeze({
-    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
-    snapshot: () => pedir('snapshot', {}),
-  });
-
   // ---- as capacidades desta execução ----
   //
   // **O que o pacote declarou, e não o que este build oferece.** O anfitrião
@@ -299,6 +308,15 @@ pub const PRELUDIO: &str = r#"
     ? globalThis.__seeleCapacidades
     : []);
   delete globalThis.__seeleCapacidades;
+
+  // **O `snapshot` inteiro é da API 5 para baixo.** A 6 lê
+  // `SeeleUI.retrato()`, projetado por lista branca (rascunho da API 6, §6), e
+  // o `snapshot` falta do `SeeleMods` dela como qualquer coisa que a API não
+  // tem. Montado aqui, depois das capacidades, porque é delas que depende.
+  globalThis.SeeleMods = Object.freeze({
+    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
+    ...(capacidades.has('retrato') ? {} : { snapshot: () => pedir('snapshot', {}) }),
+  });
 
   /**
    * Monta um objeto só com o que esta API tem.
@@ -348,6 +366,7 @@ pub const PRELUDIO: &str = r#"
     // janela recusar depois. As APIs 3 a 5 têm os dois.
     ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
     tema: (valores) => pedir('tema', { valores }),
+    ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
     // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez

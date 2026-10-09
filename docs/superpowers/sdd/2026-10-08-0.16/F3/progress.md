@@ -309,3 +309,51 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     e nenhum MOD instalado o recebe, porque o app 0.16 só sai com
     `APIS_ACEITAS = [6]`. A linha 0.15 só o receberia se o I-b fosse levado
     a ela.
+- **Tarefas 3 e 4 feitas** (liberadas pela orquestradora depois da sétima
+  integração; ramo em cima de `c8b3cd47`):
+  - `4da1e4b`: as capacidades da 6 (sem `regiao` e `cartoes`), e o prelúdio
+    montando `regiao` e `cartoes` pela capacidade.
+  - `b06f289`: o `Atomics` sai do contexto do MOD nos dois alvos (o nativo e o
+    `cargo xtask web`).
+  - `6a5ee25`: o retrato projetado por lista branca, a capacidade nova
+    `retrato` no lugar do `snapshot` (prelúdio e roteador), `onde` pela marca
+    `data-casca`, `regioes` pelo que a casca monta, e o guarda 12.
+  - `f8120c0`: a recusa pelo nome na 6 (`recusaParaOMod`), o `Error` do
+    prelúdio com os campos, e o HEIC recusado pelo nome no seletor.
+  - Reversões: 3 + 2 + 2 na tarefa 3; 11 no retrato; 7 no 5b — todas
+    reprovando.
+  - Ruling: `retrato` é uma capacidade, e não um teste de versão — custo se
+    errado: uma linha a mais na lista da 6, e o prelúdio continua montando o
+    `SeeleUI` só pelas capacidades.
+  - Ruling: a recusa sem nome chega ao MOD da 6 como `falhou` até as tarefas 5
+    e 7 nomearem as das contribuições e das superfícies — custo se errado: até
+    lá o MOD da 6 lê `falhou` onde lia uma frase, e o motivo está no
+    `seele.log`.
+  - Ruling: o `detectado` do HEIC vem do cliente, que reconhece o arquivo antes
+    de enviar, e não do servidor — custo se errado: nenhum no fio, que não
+    muda; o servidor continua recusando o tipo pelo `sniff`.
+  - **Um erro meu, pego antes de avisar**: os testes do executor das tarefas 3
+    e 4 indexavam JSON (`seis[nome]`), que o `clippy` recusa, e eu fiz os dois
+    primeiros commits sem rodá-lo. Consertado no `f8120c0`. E um script meu
+    esvaziou o plano (abria o arquivo para escrita antes de lê-lo); restaurado
+    do git, sem perda.
+  - Pendente: o `mod_de_referencia` da conformidade, depois da bateria da
+    oitava integração.
+- **Tarefa 8 feita no código** (`733c1a5`): `mundo.avisar`, o `Avisador` (4 por
+  segundo em qualquer janela, o excedente junto por canal), `Event::ModAviso` a
+  quem pode ler o canal, `contexto.sala`, o evento `servidor` na janela da 6, e
+  os eventos da tela pela comparação de retratos. Quinze reversões reprovando;
+  duas que passaram mudaram o código (a conferência redundante saiu) ou o teste
+  (o aviso aos 600 ms).
+  - Ruling: o `ModAviso` pede a permissão de ler o canal, e não a assinatura —
+    custo se errado: quem não abriu a conversa daquele canal recebe o aviso do
+    MOD dele, que é o que a MESA precisa.
+  - Ruling: janela deslizante, e não balde de fichas — custo se errado: o
+    primeiro segundo deixa passar 4, e não 8.
+  - Ruling: o `lugar` sai com o tamanho da sessão até a tarefa 5 dar o de cada
+    região — custo se errado: um MOD lê a forma da casca, e não a da região
+    dele, até lá.
+  - Pendente: a conformidade `aviso_do_servidor.rs` (escrita), depois da bateria.
+  - Visto no caminho: `alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
+    reprovou uma vez na rodada paralela do `seele-server` e passou 3 de 3
+    sozinho (7,8 s cada). Não é desta frente; dito à orquestradora.

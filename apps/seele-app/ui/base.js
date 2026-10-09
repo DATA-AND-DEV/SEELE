@@ -536,6 +536,12 @@ function daGeracaoDePe(numero) {
   return numero !== 0 && numero === geracaoDaSessao;
 }
 
+// O aviso da metade de servidor de um MOD, pelo mesmo canal de eventos da
+// resposta de um pedido (rascunho da API 6, §7.3).
+const ouvirAvisoDeMod = listen("seele://event", ({ payload }) => {
+  if (payload?.ModAviso) entregarOAvisoDoMod(payload.ModAviso);
+});
+
 const ouvirMod = listen("seele://event", ({ payload }) => {
   const reply = payload?.ModReply;
   if (!reply) return;
@@ -675,6 +681,9 @@ async function montarOMod(mod) {
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
   // ela é, e não de quem tem o identificador agora.
   const instancia = new InstanciaDeMod(mod.id, mod.hash, geracao, executor);
+  // A API do pacote, para quem fala com o MOD fora de um pedido dele — os
+  // eventos da tela e o aviso do servidor — saber o que ela tem.
+  instancia.api = Number(mod.api) || 0;
 
   // **Guardada e ativa antes de o executor subir**, e a ordem custou uma
   // medição para ser descoberta.
@@ -830,6 +839,8 @@ function donoDaRegiao(mod, instancia) {
     instancia,
     geracao: instancia.geracao,
     podeFalar: meu,
+    /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
+    recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
     /**
      * Um evento da janela para o MOD.
      *
@@ -2192,7 +2203,7 @@ const CAPACIDADES_POR_API = Object.freeze({
   // ordem de `capacidades_da_api(6)`: o teste espelho confere as duas.
   6: Object.freeze([
     "superficies", "contribuicoes", "estilos", "classes", "volume",
-    "arquivo", "tema", "eventos-da-tela", "aviso-do-servidor",
+    "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor",
   ]),
   5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
   4: Object.freeze([
@@ -2221,6 +2232,19 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-descartar": "superficies",
   contribuir: "contribuicoes",
   "revogar-contribuicao": "contribuicoes",
+  retrato: "retrato",
+});
+
+/**
+ * As mensagens que uma capacidade **substituiu**: quem a tem não as alcança.
+ *
+ * O `snapshot` inteiro é da API 5 para baixo; a 6 lê o retrato projetado
+ * (rascunho da API 6, §6). O prelúdio da 6 não monta `SeeleMods.snapshot`, e
+ * isto é a fronteira, pela razão de sempre: `seele.postar` continua lá, e um
+ * pacote da 6 que emitisse `snapshot` direto leria o `Snapshot` inteiro.
+ */
+const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
+  snapshot: "retrato",
 });
 
 /**
@@ -2231,10 +2255,263 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
  * nenhuma — é o caso de um manifesto que não pôde ser lido.
  */
 function podePedir(mod, tipo) {
+  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
+  // Antes da exigida: o `snapshot` não exige capacidade nenhuma, e é por isso
+  // mesmo que a substituição tem de ser perguntada primeiro.
+  const substituta = SUBSTITUIDA_PELA_CAPACIDADE[tipo];
+  if (substituta && tem.includes(substituta)) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
   return tem.includes(exigida);
+}
+
+/**
+ * O retrato que um MOD da API 6 lê (`SeeleUI.retrato()`), projetado do
+ * `Snapshot` por lista branca (rascunho da API 6, §6; tarefa 4 do plano da F3).
+ *
+ * **Campo a campo, sem `...spread`, em todos os níveis.** A lista branca é a
+ * lista do que se copia, e nunca a do que se apaga: um campo novo do `Snapshot`
+ * nasce fora do retrato até alguém o escrever aqui. É o que deixa de fora o
+ * veredito de conexão segura (`link_state`), a topologia da rede (`caminho`), os
+ * aparelhos da máquina, as permissões (`may_*`) e a telemetria inteira — com o
+ * `microfone_entrega_silencio_digital` do I-b, o estado de uma permissão de
+ * privacidade do sistema. Toque, chamada, código e agenda da sala pessoal nunca
+ * entram (o guarda 12).
+ *
+ * `casca` diz o que não está no `Snapshot`: `onde` (`computador` ou `celular`) e
+ * as `regioes` que existem nesta casca agora.
+ */
+function projetarORetrato(snapshot, casca) {
+  const s = snapshot ?? {};
+  const lista = (valor) => (Array.isArray(valor) ? valor : []);
+  return {
+    eu: typeof s.me === "number" ? s.me : null,
+    servidor: { nome: String(s.server ?? "") },
+    pessoas: lista(s.presentes).map((p) => ({
+      id: p.id,
+      apelido: String(p.nickname ?? ""),
+      falando: p.speaking === true,
+      mudo: p.muted === true,
+    })),
+    salas: lista(s.voice_rooms).map((sala) => ({
+      id: sala.id,
+      nome: String(sala.name ?? ""),
+      limite: Number(sala.limit) || 0,
+      pessoas: lista(sala.people).map((p) => p.id),
+      minha: sala.occupied_by_us === true,
+    })),
+    canais: lista(s.channels).map((canal) => ({
+      id: canal.id,
+      nome: String(canal.name ?? ""),
+      aberto: canal.open === true,
+    })),
+    onde: casca?.onde === "celular" ? "celular" : "computador",
+    regioes: lista(casca?.regioes).map(String),
+  };
+}
+
+/**
+ * As regiões e camadas da API 6, na ordem do contrato (rascunho §3 e §5).
+ *
+ * `regioes`, no retrato, é a parte desta lista que **existe nesta casca agora**:
+ * uma região entra quando o produto a monta (o ponto dela existe), e uma camada
+ * quando o tipo de superfície existe. Dizer uma região que a casca ainda não
+ * monta seria o retrato prometendo um lugar que recusa a contribuição.
+ */
+const REGIOES_E_CAMADAS_DA_API = Object.freeze([
+  "redes", "servidor.navegacao", "operador.barra", "canal.cabecalho",
+  "conversa.mensagem", "compositor", "pessoas.lista", "status.barra",
+  "chamada.palco", "pagina", "dialogo", "folha", "aviso",
+]);
+
+/**
+ * O que o retrato diz da casca: onde ela está e que regiões ela tem agora.
+ *
+ * **`onde` lê uma marca só**, que a casca põe na raiz: `data-casca="celular"`
+ * na casca de uma mão (a da F8), e nada no computador — o web app no PC usa a
+ * casca de desktop (D-web-3), e é `computador`.
+ */
+function cascaDoRetrato() {
+  const pontos = typeof PONTOS_DE_CONTRIBUICAO === "object" ? PONTOS_DE_CONTRIBUICAO : {};
+  const tipos = typeof TIPOS_DE_SUPERFICIE === "object" ? TIPOS_DE_SUPERFICIE : {};
+  return {
+    onde: document.documentElement?.dataset?.casca === "celular" ? "celular" : "computador",
+    regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
+      Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
+  };
+}
+
+/**
+ * **O que mudou na tela entre dois retratos** (rascunho da API 6, §7.2; tarefa 8
+ * do plano da F3). Só o que mudou vem: `canal` e `sala` aparecem quando mudam,
+ * `falando` quando o conjunto de quem fala muda, e `lugar` quando a casca muda
+ * de forma (`onde` ou as `regioes`). O tamanho de cada região é da tarefa 5.
+ */
+function mudancasDaTela(antes, agora) {
+  const aberto = (r) => r.canais.find((canal) => canal.aberto)?.id ?? null;
+  const minha = (r) => r.salas.find((sala) => sala.minha)?.id ?? null;
+  const falando = (r) => r.pessoas.filter((p) => p.falando).map((p) => p.id).sort((a, b) => a - b);
+  const ids = (r) => new Set(r.pessoas.map((p) => p.id));
+  const mudancas = { entraram: [], sairam: [], lugar: false };
+  if (aberto(antes) !== aberto(agora)) mudancas.canal = aberto(agora);
+  if (minha(antes) !== minha(agora)) mudancas.sala = minha(agora);
+  const de = ids(antes);
+  const para = ids(agora);
+  mudancas.entraram = [...para].filter((id) => !de.has(id));
+  mudancas.sairam = [...de].filter((id) => !para.has(id));
+  if (JSON.stringify(falando(antes)) !== JSON.stringify(falando(agora))) mudancas.falando = falando(agora);
+  mudancas.lugar = antes.onde !== agora.onde
+    || JSON.stringify(antes.regioes) !== JSON.stringify(agora.regioes);
+  return mudancas;
+}
+
+/**
+ * **O ritmo da fala: no máximo 4 por segundo, e o conjunto mais novo sempre
+ * chega** (rascunho da API 6, §7.2). Uma mudança que chega antes de 250 ms da
+ * última saída espera, e a que chegar depois dela, na mesma espera, toma o
+ * lugar — a sala com cinco pessoas trocando de vez não vira uma rajada, e
+ * ninguém fica com o estado velho.
+ *
+ * O relógio, o agendador e a saída vêm de fora, para a bancada medir sem
+ * esperar.
+ */
+function criarRitmoDaFala({ agora, agendar, soltar }) {
+  const INTERVALO = 250;
+  let ultima = -Infinity;
+  let pendente = null;
+  let esperando = false;
+  const sair = () => {
+    esperando = false;
+    if (pendente === null) return;
+    const falando = pendente;
+    pendente = null;
+    ultima = agora();
+    soltar(falando);
+  };
+  return {
+    mudou(falando) {
+      pendente = falando;
+      const falta = ultima + INTERVALO - agora();
+      if (falta <= 0 && !esperando) {
+        sair();
+        return;
+      }
+      if (!esperando) {
+        esperando = true;
+        agendar(sair, Math.max(0, falta));
+      }
+    },
+  };
+}
+
+/**
+ * O aviso da metade de servidor de um MOD (`Event::ModAviso`), entregue às
+ * janelas dele como o evento `servidor`, com a carga já lida (rascunho da API
+ * 6, §7.3). Só à instância daquele MOD, e só se a API dela tem o aviso; uma
+ * carga que não é JSON é dita no registro, e não entregue.
+ */
+function entregarOAvisoDoMod(aviso) {
+  const instancia = modsCarregados.get(aviso?.mod_id);
+  if (!instancia) return;
+  const mod = { id: aviso.mod_id, api: instancia.api };
+  if (!(CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("aviso-do-servidor")) return;
+  let carga;
+  try {
+    carga = JSON.parse(aviso.carga);
+  } catch {
+    registrarNoAnfitriao("aviso-do-mod", `${mod.id}: um aviso com carga que não é JSON`, "aviso", mod.id);
+    return;
+  }
+  donoDaRegiao(mod, instancia).falar({ nome: "servidor", canal: aviso.canal ?? null, carga });
+}
+
+/** O retrato da última vez que os MODs souberam da tela, e de que sessão. */
+let retratoDosEventos = null;
+let geracaoDosEventos = 0;
+let ritmoDaFala = null;
+
+/** Cada MOD de pé cuja API tem os eventos da tela, com o dono dele. */
+function modsQueOuvemATela() {
+  const ouvem = [];
+  for (const [id, instancia] of modsCarregados) {
+    const mod = { id, api: instancia.api };
+    if ((CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("eventos-da-tela")) {
+      ouvem.push(donoDaRegiao(mod, instancia));
+    }
+  }
+  return ouvem;
+}
+
+/**
+ * **Os eventos da tela, a cada retrato novo** (rascunho da API 6, §7.2). Chamada
+ * de onde a janela desenha um `Snapshot`; compara com o retrato de antes e fala
+ * só o que mudou. O primeiro retrato de uma sessão não é mudança: o MOD lê o
+ * retrato quando sobe.
+ */
+function avisarOsModsDaTela(snapshot) {
+  const agora = projetarORetrato(snapshot, cascaDoRetrato());
+  const antes = geracaoDosEventos === geracaoDaSessao ? retratoDosEventos : null;
+  retratoDosEventos = agora;
+  if (geracaoDosEventos !== geracaoDaSessao) {
+    geracaoDosEventos = geracaoDaSessao;
+    ritmoDaFala = criarRitmoDaFala({
+      agora: () => Date.now(),
+      agendar: (fn, ms) => setTimeout(fn, ms),
+      soltar: (falando) => {
+        for (const dono of modsQueOuvemATela()) dono.falar({ nome: "fala", falando });
+      },
+    });
+  }
+  if (!antes) return;
+  const m = mudancasDaTela(antes, agora);
+  const donos = modsQueOuvemATela();
+  for (const dono of donos) {
+    if (m.canal !== undefined) dono.falar({ nome: "canal", canal: m.canal });
+    if (m.sala !== undefined) dono.falar({ nome: "sala", sala: m.sala });
+    for (const id of m.entraram) dono.falar({ nome: "pessoas", entrou: id });
+    for (const id of m.sairam) dono.falar({ nome: "pessoas", saiu: id });
+    if (m.lugar) {
+      const sessao = typeof $ === "function" ? $("tela-sessao") : null;
+      dono.falar({
+        nome: "lugar",
+        onde: agora.onde,
+        regioes: agora.regioes,
+        largura: sessao?.clientWidth ?? 0,
+        altura: sessao?.clientHeight ?? 0,
+      });
+    }
+  }
+  if (m.falando !== undefined && donos.length) ritmoDaFala?.mudou(m.falando);
+}
+
+/**
+ * **A recusa como o MOD a recebe**, ou `null` até a API 5.
+ *
+ * Na API 6, um nome de lista fechada, com os campos da recusa (rascunho da API
+ * 6, §7.1; o K1-m3 da F5): a frase de tela é da tela, e um MOD não tem como ler
+ * uma frase para decidir o que dizer. Até a 5 continua a frase, que é o que os
+ * MODs publicados recebem — e por isso `null`, para quem chama manter o de
+ * antes.
+ *
+ * - a recusa nomeada do Rust (`{ Recusado: { motivo } }`) chega como veio; um
+ *   sufixo depois de `:` vira campo — `tipo-recusado:heic` é `erro:
+ *   'tipo-recusado'` e `detectado: 'heic'`, `papel-nao-serve:imagem` é `papel:
+ *   'imagem'`;
+ * - um `Error` da casca que traga o nome em `recusa` chega com ele;
+ * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
+ */
+function recusaParaOMod(mod, falha) {
+  if (Number(mod?.api) < 6) return null;
+  const SUFIXOS = { "tipo-recusado": "detectado", "papel-nao-serve": "papel" };
+  const nome = typeof falha?.Recusado?.motivo === "string"
+    ? falha.Recusado.motivo
+    : typeof falha?.recusa === "string" ? falha.recusa : null;
+  if (!nome) return { erro: "falhou" };
+  const corte = nome.indexOf(":");
+  const base = corte < 0 ? nome : nome.slice(0, corte);
+  const campo = SUFIXOS[base];
+  if (corte < 0 || !campo) return { erro: nome };
+  return { erro: base, [campo]: nome.slice(corte + 1) };
 }
 
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
@@ -2337,6 +2614,13 @@ async function atenderOMod(mod, instancia, m) {
       case "pedido":
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
+      case "retrato": {
+        // O mesmo cuidado do `snapshot`, logo abaixo: depois do `await`, quem
+        // responde é `responder`, que recusa se a sessão já acabou.
+        const valor = projetarORetrato(await invoke("snapshot"), cascaDoRetrato());
+        responder(true, { valor });
+        break;
+      }
       case "snapshot": {
         const valor = await invoke("snapshot");
         // Depois do `await`: a sessão pode ter acabado enquanto o retrato
@@ -2482,7 +2766,7 @@ async function atenderOMod(mod, instancia, m) {
       }
     }
     registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`, "aviso", mod.id);
-    responder(false, {
+    responder(false, recusaParaOMod(mod, falha) ?? {
       erro: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
     });
   }

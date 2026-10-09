@@ -88,8 +88,9 @@ pub const MOD_API_MINIMA: u32 = 3;
 pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
     match api {
         // **Uma ruptura, e não um alargamento** (rascunho da API 6, §2):
-        // `regiao` e `cartoes` saem (decisão do dono de 08/10), e entram os
-        // eventos da tela e o aviso da metade de servidor. Construída com
+        // `regiao` e `cartoes` saem (decisão do dono de 08/10), e entram o
+        // retrato projetado (no lugar do `snapshot` inteiro), os eventos da tela
+        // e o aviso da metade de servidor. Construída com
         // `MOD_API_VERSION` ainda em 5: só um teste carrega um pacote da 6, até
         // o corte (tarefa 13 do plano da F3).
         6 => &[
@@ -100,6 +101,7 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
             "volume",
             "arquivo",
             "tema",
+            "retrato",
             "eventos-da-tela",
             "aviso-do-servidor",
         ],
@@ -893,6 +895,7 @@ mod tests {
             "volume",
             "arquivo",
             "tema",
+            "retrato",
             "eventos-da-tela",
             "aviso-do-servidor",
         ] {
@@ -906,7 +909,7 @@ mod tests {
         }
         assert_eq!(
             seis.len(),
-            9,
+            10,
             "a API 6 tem uma capacidade que o rascunho não lista"
         );
     }
