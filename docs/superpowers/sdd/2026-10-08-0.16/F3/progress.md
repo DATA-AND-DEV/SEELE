@@ -357,3 +357,20 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Visto no caminho: `alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
     reprovou uma vez na rodada paralela do `seele-server` e passou 3 de 3
     sozinho (7,8 s cada). Não é desta frente; dito à orquestradora.
+- **O tema claro no desktop** (achado da F8, decisão D-linha-3): medido nas
+  três versões com a interface real no Chromium, e o defeito estava na v0.15.1
+  publicada também — o corpo das mensagens a 1,09:1, o SAIR DA SALA a 1,04:1.
+  A causa: o `body` resolve a cor com o token da raiz, e o tema o redefine em
+  `#tela-sessao`, abaixo dele. Conserto: `#tela-sessao { color:
+  var(--seele-osso) }`.
+  - 0.16: `6ae45d1`, com a bancada `tema-claro-legivel.cjs` (reprova sem a
+    regra, passa com ela) e a evidência em
+    `docs/evidencias/tema-claro-2026-10-09/`. Sem tema, as capturas são iguais
+    byte a byte em 1280 e 900 px.
+  - 0.15.2: o ramo `conserto/tema-claro-0.15` (`43b5899`, `b46032e`), com o
+    mesmo conserto, a mesma bancada e a nota; o merge é da orquestradora.
+  - O que sobra abaixo de 3:1 é da 17e: as cores de estado e os tons
+    derivados.
+  - Ruling: a varredura mede todo texto visível da sessão, e não três
+    seletores — custo se errado: nenhum, a bancada que fica no CI confere os
+    três lugares que a orquestradora pediu.
