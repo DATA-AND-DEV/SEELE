@@ -7820,12 +7820,27 @@ presentes de quem ficou, no laço local deste Mac:
 - quem sai pela FFI, `disconnect` e `drop`, sumiu dos presentes em 554 µs na
   primeira rodada;
 - o `Enlace` que sai num runtime que cai na linha seguinte, em 1,1 ms;
-- no fim do lote, seis rodadas seguidas deram entre 340 e 700 µs;
-- o filho que sai por `encerrar_e_esperar` e morre na linha seguinte, em
-  611 µs, e entre 445 e 720 µs em seis rodadas.
+- os dois deram entre 340 e 700 µs em seis rodadas seguidas no fim do P50-1, e
+  0,5 a 0,6 ms no fim da rodada 1 de conserto;
+- o filho que sai por `encerrar_e_esperar` e morre na linha seguinte some em
+  cerca de 157 ms: 153,6, 155,8 e 161,0 ms em três rodadas. Desses, 150 ms são
+  de propósito. Desde `8a38df53`, o teste estaciona a thread da conexão do
+  filho por 150 ms antes da saída, para que o vermelho não dependa de corrida.
+  Os 611 µs da primeira versão do teste são de antes disso.
 
-Antes eram 19,98 s e 20,98 s. Com cada espera revertida, os três voltam aos
-20,0 s do prazo de ociosidade (lote F, «Reversões»).
+Antes eram 19,98 s e 20,98 s.
+
+**O que cada espera prova.** É a reversão decomposta pelo lote F (rodada 1 de
+conserto, I2 e M1):
+- sem a espera do `sair` pelo motor, os três voltam aos 20,0 s do prazo de
+  ociosidade;
+- sem a espera de `encerrar_e_esperar` pelo sinal da thread, o filho volta aos
+  20,0 s;
+- sem o cancelamento das tarefas de par antes do aviso, o teste (c) de
+  `tela_por_um_par.rs` reprova, com um quadro do par na fila depois do
+  `Encerrado`;
+- **sem só o `wait_idle`, os três ficam verdes**, e também com os braços do
+  motor de volta ao `encerrar` de antes, com o `sair` esperando.
 
 **O que fica sem prova, e o doc diz** (lote F, rodada 1 de conserto,
 `b9adf2f8`): o `wait_idle` como reenvio de um `CONNECTION_CLOSE` perdido, que
@@ -8316,23 +8331,22 @@ Vieram depois, da revisão do Lote F-Fecho:
     cargo test -p xtask check_api   # verde com qualquer um dos dois `push` apagado
     ```
 
-    **Fechado em 2026-10-08**, em três partes, as duas primeiras de antes do
-    plano da F5, conferidas por ele em `d4eb6f1`:
-    - o «panicked» no stderr saiu em `4887565` (2026-09-30): `conferir_api`
-      devolve `Err` com a linha do que não se lê, e o `run` só imprime. O
-      commit é anterior ao texto deste item, escrito em `c1cc3ae9` (01/10) a
-      partir das revisões do 1E, e a atribuição é a da conferência do plano.
-      Medido em 09/10/2026: `cargo test -p xtask --bin xtask check_api` passa
-      45 testes sem nenhuma linha «panicked», com o `RUST_TEST_NOCAPTURE` do
-      `.cargo/config.toml`;
+    **Fechado em 2026-10-08**, `1345e0e` (lote ferramentas da F5 da 0.16),
+    com `5f4e1bb` da revisão. Os dois fixtures existem: um `v7.json` que não é
+    json e um `v8.json` que não se abre reprovam dizendo qual. O braço `Err`
+    tem teste: `relatar` decide a saída, com três testes, e diz a falha de
+    escrita do resumo (`5f4e1bb`). As outras duas partes do item:
     - a etapa do `check-api` no `publicar.sh` existe desde `8b766e5`
       (2026-10-01): a bateria de quem publica roda o `check-api`, e um vermelho
       para a publicação antes de empacotar;
-    - os dois fixtures e o braço `Err` com teste fecharam em `1345e0e` (lote
-      ferramentas da F5 da 0.16): um `v7.json` que não é json e um `v8.json`
-      que não se abre reprovam dizendo qual, e `relatar` decide a saída, com
-      três testes. Na revisão, `relatar` passou a dizer a falha de escrita do
-      resumo (`5f4e1bb`).
+    - o «panicked» no stderr hoje não sai. Medido em 09/10/2026:
+      `cargo test --offline -p xtask --bin xtask check_api` passa 45 testes sem
+      nenhuma linha «panicked», com o `RUST_TEST_NOCAPTURE` do
+      `.cargo/config.toml`. **O commit que o tirou não foi identificado.** A
+      revisão do lote Z2 rodou o mesmo teste em onze versões do `check_api.rs`,
+      entre elas `4887565^` e `4887565`, e nenhuma imprime «panicked». Um
+      `#[should_panic]` posto numa cópia imprime a linha, então a medida a
+      enxergaria.
 
 16. **Higiene dos testes do quarto, do 1A (T4d, M4 e M5).**
     `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`
