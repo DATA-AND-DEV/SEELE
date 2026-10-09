@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{Anfitriao, Falha, MetadeDeServidor, TemaDeclarado};
+use super::{aviso, Anfitriao, Falha, MetadeDeServidor, TemaDeclarado};
 
 /// One MOD's yard, as it crosses to the thread and back.
 pub type Quintal = BTreeMap<String, String>;
@@ -84,6 +84,10 @@ pub struct Resposta {
     /// (rascunho da API 6, §9). Quem grava e manda a todos é o
     /// [`acompanhar`], depois dos quintais.
     pub temas: BTreeMap<String, TemaDeclarado>,
+    /// Os avisos que cada MOD declarou neste momento (rascunho da API 6,
+    /// §7.3), de quem terminou a chamada. Quem os entrega ao avisador é o
+    /// [`acompanhar`], depois dos quintais.
+    pub avisos: BTreeMap<String, Vec<aviso::AvisoDeclarado>>,
 }
 
 /// O que um MOD mudou no quintal dele, por chave.
@@ -239,6 +243,7 @@ impl Despachante {
                             let mut quintais = BTreeMap::new();
                             let mut falharam = Vec::new();
                             let mut temas = BTreeMap::new();
+                            let mut avisos = BTreeMap::new();
                             anfitriao.saber_quem_pinta(pintor);
 
                             for (id, mut quintal) in entrada {
@@ -247,6 +252,10 @@ impl Despachante {
                                     Ok(()) => {
                                         if let Some(tema) = anfitriao.tomar_tema_declarado() {
                                             temas.insert(id.clone(), tema);
+                                        }
+                                        let declarados = anfitriao.tomar_avisos();
+                                        if !declarados.is_empty() {
+                                            avisos.insert(id.clone(), declarados);
                                         }
                                         let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
                                         if !mudanca.vazia() {
@@ -261,6 +270,7 @@ impl Despachante {
                                 quintais,
                                 falharam,
                                 temas,
+                                avisos,
                             });
                         }
                     }
@@ -366,6 +376,7 @@ pub async fn acompanhar(
     persistence: std::sync::Arc<tokio::sync::Mutex<crate::persistence::Persistence>>,
     despachante: Despachante,
     raizes: crate::RaizesDosMods,
+    avisador: std::sync::Arc<aviso::Avisador>,
 ) {
     // **O mesmo sinal que o anúncio observa.** Quem muda o conjunto — o SALVAR
     // da tela de gestão — o bumpa uma vez, na transação. Sem observá-lo, este
@@ -467,6 +478,20 @@ pub async fn acompanhar(
         }
         // O tema depois dos quintais, como no pedido: o `TemaMudou` só sai com o
         // estado do MOD gravado.
+        // Os avisos depois dos quintais gravados, e pela taxa do avisador: um
+        // aviso nunca fala de uma revisão que não existe.
+        for (id, avisos) in resposta.avisos {
+            let barramento = barramento.clone();
+            avisador.avisar(&id, avisos, move |saindo| {
+                if let Some(barramento) = barramento.upgrade() {
+                    let _ = barramento.send(crate::server::Event::ModAviso {
+                        mod_id: saindo.mod_id,
+                        canal: saindo.canal,
+                        carga: saindo.carga,
+                    });
+                }
+            });
+        }
         // Sem barramento, o servidor está descendo, e não há a quem mandar.
         if let Some(barramento) = barramento.upgrade() {
             for (id, tema) in resposta.temas {
@@ -656,6 +681,7 @@ mod tests {
                 pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -730,6 +756,7 @@ mod tests {
                 pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -756,6 +783,83 @@ mod tests {
             crate::persistence::tema::em_vigor(&*persistence.lock().await).expect("ler"),
             esperado,
             "o tema chegou ao barramento sem ter sido gravado"
+        );
+
+        drop((bus, quem_ouve));
+        let _ = acompanhando.await;
+    }
+
+    /// **O aviso declarado num momento sai pelo barramento** (rascunho da API
+    /// 6, §7.3), depois do quintal e pela taxa do avisador.
+    #[tokio::test]
+    async fn um_aviso_declarado_num_momento_vai_ao_barramento() {
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::ids::{ChannelId, PersonId, VoiceRoomId};
+
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        crate::persistence::mods::enable(
+            &banco,
+            &crate::persistence::mods::EnabledMod {
+                id: "seele/mesa".to_owned(),
+                version: "4.0.0".to_owned(),
+                hash: "h".to_owned(),
+                repo: String::new(),
+                reach: Vec::new(),
+                server_half: true,
+                api: 6,
+            },
+        )
+        .expect("ligar");
+        let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
+
+        let (despachante, _) = Despachante::iniciar(vec![(
+            "seele/mesa".to_owned(),
+            "globalThis.aoAcontecer = () => { mundo.avisar({ canal: 7, carga: { revisao: 2 } }); };"
+                .to_owned(),
+            pasta("aviso-no-momento"),
+        )]);
+
+        let (bus, receptor) = tokio::sync::broadcast::channel(16);
+        let mut quem_ouve = bus.subscribe();
+        let acompanhando = tokio::spawn(acompanhar(
+            receptor,
+            bus.downgrade(),
+            std::sync::Arc::clone(&persistence),
+            despachante,
+            crate::RaizesDosMods {
+                pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
+                dados: std::path::PathBuf::from("sem-dados-neste-teste"),
+            },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
+        ));
+
+        bus.send(crate::server::Event::PersonLeft {
+            voice_room: VoiceRoomId(3),
+            person: PersonId(7),
+        })
+        .expect("mandar");
+
+        let ouvido = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(crate::server::Event::ModAviso {
+                    mod_id,
+                    canal,
+                    carga,
+                }) = quem_ouve.recv().await
+                {
+                    return (mod_id, canal, carga);
+                }
+            }
+        })
+        .await
+        .expect("o aviso declarado no momento não chegou ao barramento");
+        assert_eq!(
+            ouvido,
+            (
+                "seele/mesa".to_owned(),
+                Some(ChannelId(7)),
+                r#"{"revisao":2}"#.to_owned()
+            )
         );
 
         drop((bus, quem_ouve));
@@ -806,6 +910,7 @@ mod tests {
                 pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
                 dados: std::path::PathBuf::from("sem-dados-neste-teste"),
             },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
         ));
 
         bus.send(crate::server::Event::PersonLeft {
@@ -1225,6 +1330,7 @@ mod tests {
                 pacotes: raiz.clone(),
                 dados: raiz.join("mod-data"),
             },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
         ));
 
         // E o MOD é ligado depois, como o SALVAR da tela faz.
@@ -1334,6 +1440,7 @@ mod tests {
                 pacotes: raiz.clone(),
                 dados: raiz.join("mod-data"),
             },
+            std::sync::Arc::new(super::super::aviso::Avisador::default()),
         ));
 
         for _ in 0..5 {

@@ -87,6 +87,24 @@ pub const MOD_API_MINIMA: u32 = 3;
 #[must_use]
 pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
     match api {
+        // **Uma ruptura, e não um alargamento** (rascunho da API 6, §2):
+        // `regiao` e `cartoes` saem (decisão do dono de 08/10), e entram o
+        // retrato projetado (no lugar do `snapshot` inteiro), os eventos da tela
+        // e o aviso da metade de servidor. Construída com
+        // `MOD_API_VERSION` ainda em 5: só um teste carrega um pacote da 6, até
+        // o corte (tarefa 13 do plano da F3).
+        6 => &[
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
+            "volume",
+            "arquivo",
+            "tema",
+            "retrato",
+            "eventos-da-tela",
+            "aviso-do-servidor",
+        ],
         5 => &[
             "regiao",
             "tema",
@@ -856,6 +874,44 @@ mod tests {
             );
         }
         assert!(capacidades_da_api(2).is_empty());
+    }
+
+    /// **A API 6 existe antes de ser oferecida** (tarefa 3 do plano da F3).
+    ///
+    /// Ela é construída com `MOD_API_VERSION` ainda em 5: um pacote da 6 só
+    /// carrega em teste, e a constante sobe no corte (tarefa 13). E é uma
+    /// ruptura, e não um alargamento: `regiao` e `cartoes` saem (decisão do
+    /// dono de 08/10), e o MOD que os usava reescreve para as regiões e os
+    /// pontos de contribuição.
+    #[test]
+    fn a_api_6_existe_antes_de_ser_oferecida() {
+        assert_eq!(MOD_API_VERSION, 5, "a constante subiu antes do corte");
+        let seis = capacidades_da_api(6);
+        for nome in [
+            "superficies",
+            "contribuicoes",
+            "estilos",
+            "classes",
+            "volume",
+            "arquivo",
+            "tema",
+            "retrato",
+            "eventos-da-tela",
+            "aviso-do-servidor",
+        ] {
+            assert!(seis.contains(&nome), "a API 6 sem «{nome}»");
+        }
+        for nome in ["regiao", "cartoes"] {
+            assert!(
+                !seis.contains(&nome),
+                "«{nome}» saiu da API 6 (decisão do dono de 08/10)"
+            );
+        }
+        assert_eq!(
+            seis.len(),
+            10,
+            "a API 6 tem uma capacidade que o rascunho não lista"
+        );
     }
 
     #[test]

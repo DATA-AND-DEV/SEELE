@@ -1331,14 +1331,20 @@ async fn connect(
 
     connection.subscribe(ponte);
 
-    // O modo de microfone gravado, aplicado assim que há o que aplicar.
+    // O modo de microfone, a supressão de ruído e a sensibilidade gravados,
+    // aplicados assim que há o que aplicar.
     //
     // Aqui e não num campo de `connect`: a sessão nasce no padrão da spec —
     // push-to-talk, microfone fechado — e só então abre para o que a pessoa
     // escolheu. A ordem é a segura; a inversa teria um instante em que um
     // microfone poderia estar aberto antes de alguém ter dito que podia.
-    if let Some(modo) = preferencias(&app).and_then(|p| p.voice_mode()) {
-        connection.set_voice_mode(VoiceMode::from(modo));
+    //
+    // **Os três, e não só o modo** (acréscimo A do lote I-b). A supressão e a
+    // sensibilidade gravadas ficavam de fora, e a sessão começava nos padrões
+    // até a pessoa mexer. Desde a pendência 52 os três moram na conexão e valem
+    // ao abrir o áudio, então aplicá-los aqui é gravá-los lá.
+    if let Some(ajustes) = preferencias(&app) {
+        connection.vestir_as_escolhas_gravadas(&ajustes);
     }
 
     // **O retrato desta máquina sobe junto com a conexão.**
@@ -6600,6 +6606,23 @@ fn imagem_lida_dita(
     })
 }
 
+/// **O tipo de um arquivo que uma pessoa escolheu para um MOD**, ou a recusa
+/// com nome.
+///
+/// Do que os bytes são, e nunca da extensão. Um formato que o produto
+/// reconhece e não aceita — o HEIC das Fotos — é recusado pelo nome dele,
+/// `tipo-recusado:heic` (rascunho da API 6, §7.1), no molde do
+/// `papel-nao-serve:<papel>`; o resto que não é um dos formatos é
+/// `formato-desconhecido`.
+fn tipo_do_escolhido(bytes: &[u8]) -> Result<seele_ffi::mods::TipoLido, FalhaNoMod> {
+    seele_ffi::mods::ler_tipo(bytes).ok_or_else(|| FalhaNoMod::Recusado {
+        motivo: seele_ffi::mods::reconhecido_e_nao_aceito(bytes).map_or_else(
+            || "formato-desconhecido".to_owned(),
+            |formato| format!("tipo-recusado:{formato}"),
+        ),
+    })
+}
+
 /// O que a janela recebe quando uma pessoa escolhe um arquivo para um MOD.
 #[derive(serde::Serialize)]
 struct EscolhidoParaOMod {
@@ -6726,9 +6749,7 @@ async fn escolher_para_o_mod(
 
     // **O tipo sai dos bytes**, como o da mídia do pacote. A extensão que a
     // pessoa tem no disco é texto, e texto não escolhe decodificador.
-    let lida = seele_ffi::mods::ler_tipo(&bytes).ok_or(FalhaNoMod::Recusado {
-        motivo: "formato-desconhecido".to_owned(),
-    })?;
+    let lida = tipo_do_escolhido(&bytes)?;
 
     // **E o papel provado é conferido contra o que o MOD pediu.** Sem isto, um
     // MOD que precisa de retrato recebia um som e só descobria ao tentar usá-lo
@@ -7861,6 +7882,22 @@ fn set_volume(
     percent: u16,
 ) -> Result<(), ConnectionError> {
     session.connection()?.set_volume(nickname, percent)
+}
+
+/// O volume que esta sessão guardou para cada pessoa, por apelido. F1-vazamento.
+///
+/// Um comando próprio, e não um campo do `snapshot`: o retrato vai inteiro aos
+/// MODs, e quanto esta máquina quer ouvir cada um não é deles. A janela relê
+/// isto a cada quadro em vez de lembrar o que mandou — a lembrança dela
+/// sobrevivia à sessão e passava o volume de uma Rafa para a de outro servidor.
+///
+/// Sem sessão, nenhum: não há de quem.
+#[tauri::command]
+fn volumes_locais(session: State<'_, Session>) -> std::collections::HashMap<String, u16> {
+    session
+        .connection()
+        .map(|conexao| conexao.volumes_locais())
+        .unwrap_or_default()
 }
 
 // ------------------------------------------------------- compartilhar a tela
@@ -9724,6 +9761,7 @@ fn main() {
             set_talking,
             set_voice_mode,
             set_volume,
+            volumes_locais,
             fontes_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,
@@ -15409,5 +15447,44 @@ mod a_abertura_pelo_launcher {
             Err(FalhaAoAtualizar::AbertaPeloLancador)
         ));
         assert!(atualizacao_permitida(&Abertura::de(Vec::<String>::new(), None)).is_ok());
+    }
+}
+
+/// O tipo de um arquivo escolhido para um MOD, ou a recusa com nome.
+#[cfg(test)]
+mod o_tipo_do_arquivo_escolhido {
+    use super::{tipo_do_escolhido, FalhaNoMod};
+
+    const HEIC: &[u8] = include_bytes!("../../../crates/seele-proto/tests/vetores/heic-8x8.heic");
+
+    fn motivo(falha: FalhaNoMod) -> String {
+        match falha {
+            FalhaNoMod::Recusado { motivo } => motivo,
+            outra => panic!("esperava uma recusa com nome, e veio {outra:?}"),
+        }
+    }
+
+    /// **O HEIC das Fotos é recusado pelo nome** (rascunho da API 6, §7.1; o
+    /// bloqueio G do PERFIS): `tipo-recusado:heic`, que o MOD da 6 recebe como
+    /// `tipo-recusado` com `detectado: 'heic'`. Antes ele caía em
+    /// `formato-desconhecido`, que manda procurar defeito num arquivo que não
+    /// tem defeito nenhum.
+    #[test]
+    fn um_heic_e_recusado_com_o_nome_dele() {
+        let falha = tipo_do_escolhido(HEIC).expect_err("o HEIC passou como imagem");
+        assert_eq!(motivo(falha), "tipo-recusado:heic");
+    }
+
+    #[test]
+    fn o_que_o_produto_nao_reconhece_continua_formato_desconhecido() {
+        let falha = tipo_do_escolhido(b"isto nao e imagem").expect_err("texto passou como imagem");
+        assert_eq!(motivo(falha), "formato-desconhecido");
+    }
+
+    #[test]
+    fn uma_imagem_aceita_passa() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
+        let lido = tipo_do_escolhido(&png).expect("o PNG foi recusado");
+        assert_eq!(lido.media_type, "image/png");
     }
 }

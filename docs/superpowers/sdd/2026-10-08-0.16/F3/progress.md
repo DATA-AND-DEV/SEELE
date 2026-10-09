@@ -249,3 +249,111 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   entrar antes; o plano diz isso na tabela de estado. As outras seguem com o K4,
   sem confirmação a cada passo, com aviso nos marcos (pedido do dono, pela
   orquestradora).
+- **As perguntas da F8** (a tela do celular, D-celular-1), pela orquestradora:
+  - O `operador.barra` no celular: aceita a proposta da F8 — no alto da aba
+    AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões e altura
+    limitada (a gestão de MODs de AJUSTES continua à vista, guarda 11). Com isso
+    nenhuma das oito regiões fica sem casa no celular; o `regiao-ausente` fica
+    no contrato para a casca que não tiver uma região, e a bancada do passo 8
+    da tarefa 5 tira uma região do mapa para prová-lo. Passo 8b novo.
+  - As chaves do tema: lista fechada de nomes do contrato, traduzidos por
+    tabela fechada para `--seele-*` (é o que a casca já faz, `TEMA_DA_API`).
+    **Achado: o `mundo.tema` que fiz na 17a aceita qualquer chave**, e um MOD
+    leria `ok` para um tema que a casca recusa. Vira a tarefa 17j, antes do
+    congelamento, com um teste espelho entre o servidor e a casca. O guarda do
+    `--nucleo-*` é da F8.
+  - Ruling: a altura do `operador.barra` no celular é limitada, com rolagem por
+    dentro — custo se errado: uma barra de MOD alta rola em vez de crescer, e o
+    número sai da M3 no iPhone.
+- **A extração do executor entrou** (`d6d1a115`; merge no meu ramo em
+  `4734141`). O prelúdio está em `crates/seele-motor/src/preludio.rs`. As
+  tarefas 3 (passos 5 e 5b), 4 e 8 esperam só a orquestradora liberar, depois
+  da bateria da sétima integração.
+- **O `Atomics` sai do desktop na API 6** (decisão minha, com a recomendação da
+  F4): é a única global que difere entre o nativo e o `.wasm`, sem threads não
+  serve em nenhum dos dois, e nenhum dos três MODs oficiais o usa (lido nos três
+  repositórios; os três arquivos achados na MESA são cabeçalhos do QuickJS numa
+  pasta de build). Tarefa 3, passo 5b.
+  - Ruling: o `SharedArrayBuffer` fica — custo se errado: nenhum, porque ele
+    existe nos dois alvos e, sem threads, é só um buffer.
+- **Dois achados medidos no protótipo da F8**, pela orquestradora:
+  - **Uma superfície de MOD cobria a faixa de voz e as abas** (o diálogo do
+    ESTILO em tela cheia cobria o MUDO e o caminho para AJUSTES). Regra do
+    núcleo: no celular, «tela cheia» é a tela acima da faixa e das abas, para
+    `pagina`, `dialogo`, `folha` e `aviso`, e elas nunca ficam inertes — a
+    garantia do ADR 0052 de que um modal torna o resto inerte ganha essa
+    exceção, com o foco do teclado ainda contido no diálogo. Tarefa 7, passo
+    5d; tarefa 9, passo 4b. No desktop, o guarda mede antes de concluir se um
+    `dialogo` aberto deixa o MUDO e o SAIR à vista e clicáveis.
+  - **As cores de estado fora dos pares** (o «juli fala» some num `painel`
+    claro). Decidido: derivadas das superfícies do tema, com o matiz do produto
+    e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as
+    escreve; o núcleo lê `--nucleo-*`. Tarefa 17e.
+  - Ruling: derivar, e não pôr as três nos pares — custo se errado: um tema
+    muda o tom do fósforo, do azul e do vermelho dentro da sessão; com pares,
+    temas claros inteiros seriam recusados por cores que o MOD nem escolhe.
+  - Ruling: no desktop não decido sem medir — custo se errado: até a medida, o
+    contrato não promete o MUDO clicável sob um diálogo de MOD no desktop.
+  - Corrigido junto: o §4 dizia que a capa do operador não aparece no celular;
+    com o `operador.barra` em AJUSTES, ela pinta o cabeçalho SEU PERFIL.
+- **A telemetria e o campo de privacidade do I-b** (achado da revisão do I-b da
+  F5): o retrato da 6 já deixa a `telemetry` inteira de fora (a lista permitida
+  dela é vazia). O que faltava era a garantia de que todo campo novo nasce
+  fora: o plano da tarefa 4 conferia uma lista de nomes proibidos, e não a
+  forma. Passo 4b novo: as chaves de cada nível são exatamente as da lista, e
+  um `Snapshot` com um campo desconhecido em cada nível sai sem nenhum deles.
+  - Onde o campo chega hoje [c]: em nenhum lugar — só existe no
+    `0.16/lotes-i-b`. Na v0.15.1 publicada (`54f542f`, conferido pela API de
+    releases) ele não existe. Quando o I-b entrar, chega aos MODs da API 5 na
+    build da 0.16 antes do corte (o `snapshot` sem filtro, `base.js:2335`),
+    e nenhum MOD instalado o recebe, porque o app 0.16 só sai com
+    `APIS_ACEITAS = [6]`. A linha 0.15 só o receberia se o I-b fosse levado
+    a ela.
+- **Tarefas 3 e 4 feitas** (liberadas pela orquestradora depois da sétima
+  integração; ramo em cima de `c8b3cd47`):
+  - `4da1e4b`: as capacidades da 6 (sem `regiao` e `cartoes`), e o prelúdio
+    montando `regiao` e `cartoes` pela capacidade.
+  - `b06f289`: o `Atomics` sai do contexto do MOD nos dois alvos (o nativo e o
+    `cargo xtask web`).
+  - `6a5ee25`: o retrato projetado por lista branca, a capacidade nova
+    `retrato` no lugar do `snapshot` (prelúdio e roteador), `onde` pela marca
+    `data-casca`, `regioes` pelo que a casca monta, e o guarda 12.
+  - `f8120c0`: a recusa pelo nome na 6 (`recusaParaOMod`), o `Error` do
+    prelúdio com os campos, e o HEIC recusado pelo nome no seletor.
+  - Reversões: 3 + 2 + 2 na tarefa 3; 11 no retrato; 7 no 5b — todas
+    reprovando.
+  - Ruling: `retrato` é uma capacidade, e não um teste de versão — custo se
+    errado: uma linha a mais na lista da 6, e o prelúdio continua montando o
+    `SeeleUI` só pelas capacidades.
+  - Ruling: a recusa sem nome chega ao MOD da 6 como `falhou` até as tarefas 5
+    e 7 nomearem as das contribuições e das superfícies — custo se errado: até
+    lá o MOD da 6 lê `falhou` onde lia uma frase, e o motivo está no
+    `seele.log`.
+  - Ruling: o `detectado` do HEIC vem do cliente, que reconhece o arquivo antes
+    de enviar, e não do servidor — custo se errado: nenhum no fio, que não
+    muda; o servidor continua recusando o tipo pelo `sniff`.
+  - **Um erro meu, pego antes de avisar**: os testes do executor das tarefas 3
+    e 4 indexavam JSON (`seis[nome]`), que o `clippy` recusa, e eu fiz os dois
+    primeiros commits sem rodá-lo. Consertado no `f8120c0`. E um script meu
+    esvaziou o plano (abria o arquivo para escrita antes de lê-lo); restaurado
+    do git, sem perda.
+  - Pendente: o `mod_de_referencia` da conformidade, depois da bateria da
+    oitava integração.
+- **Tarefa 8 feita no código** (`733c1a5`): `mundo.avisar`, o `Avisador` (4 por
+  segundo em qualquer janela, o excedente junto por canal), `Event::ModAviso` a
+  quem pode ler o canal, `contexto.sala`, o evento `servidor` na janela da 6, e
+  os eventos da tela pela comparação de retratos. Quinze reversões reprovando;
+  duas que passaram mudaram o código (a conferência redundante saiu) ou o teste
+  (o aviso aos 600 ms).
+  - Ruling: o `ModAviso` pede a permissão de ler o canal, e não a assinatura —
+    custo se errado: quem não abriu a conversa daquele canal recebe o aviso do
+    MOD dele, que é o que a MESA precisa.
+  - Ruling: janela deslizante, e não balde de fichas — custo se errado: o
+    primeiro segundo deixa passar 4, e não 8.
+  - Ruling: o `lugar` sai com o tamanho da sessão até a tarefa 5 dar o de cada
+    região — custo se errado: um MOD lê a forma da casca, e não a da região
+    dele, até lá.
+  - Pendente: a conformidade `aviso_do_servidor.rs` (escrita), depois da bateria.
+  - Visto no caminho: `alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
+    reprovou uma vez na rodada paralela do `seele-server` e passou 3 de 3
+    sozinho (7,8 s cada). Não é desta frente; dito à orquestradora.

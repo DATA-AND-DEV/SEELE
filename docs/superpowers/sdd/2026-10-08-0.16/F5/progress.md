@@ -313,3 +313,33 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - os volumes voltando ao reabrir a voz;
   - as frases dos dois avisos;
   - o `PedidoRecusado` na regra do assento.
+- **I-b → integrado** (`22059e5..6eb7e8c`, merge `2112c38`), em 2 rodadas.
+  - **O microfone em silêncio digital** (`dc46a37`). O laço de voz conta 3 s de zero exato no quadro cru e leva isso à telemetria. No macOS, a faixa diz que o sistema pode estar bloqueando o microfone.
+  - **O volume** (`f0a2a74`, `eb784b8`, `451bb50`). Ele mora na conexão, por apelido:
+    - fora de sala, só fica gravado;
+    - volta ao reabrir a voz;
+    - muda de chave quando o servidor anuncia uma troca de nome;
+    - chega à janela por `volumes_locais` e nunca pelo retrato.
+  - **Nada passa de um servidor ao seguinte** (`3722e85`, `e95214b`, `85805fa`): nem o anexo escolhido, nem o texto do campo, nem os rascunhos, as prévias, a conversa, o relógio da sessão, os lugares de uma sala nova ou o anúncio de aparelho.
+    - `esquecerOEstadoDaSessao` é o único lugar que esquece.
+    - O guarda conta todo `let` de topo de `tela-sessao.js` e proíbe as duas saídas de zerar algo por conta própria.
+    - A bancada segue B pelo fluxo de verdade.
+  - **Os acréscimos:**
+    - a supressão e a sensibilidade gravadas em disco valem no connect (`eaba0ea`);
+    - as frases de `MovedByOperator` e de `VoiceRoomOverHostUplink`, com os números em kbps (`f161221`), deixam vazia a lista `AINDA_SEM_FRASE` da F1;
+    - o `PedidoRecusado` entra na regra do assento (`2296ee5`).
+  - **A revisão achou dois vazamentos anteriores ao lote, ambos medidos:**
+    - o anexo de A ia para B no primeiro Enter;
+    - o texto do campo de A também.
+  - **Para a v6, recomendação levada à orquestradora:** a telemetria `microfone_entrega_silencio_digital` chega aos MODs, e a F3 deve deixá-la fora da projeção.
+- **A conferência do merge da `versao/0.16`** (`c8b3cd4`, com o `seele-motor` da F4) foi feita no `7f7ddb7`. O `--bin` do app caiu de 274 para 268. São os seis testes que a extração levou para o `seele-motor`: seis saíram, e o `seele-motor` tem seis.
+- **Onda 5 fechada.** O I-a e o I-b estão em `0.16/lotes`, no `2112c38`.
+  - **O branch combinado** passou nos 42 passos, todos com saída 0:
+    - fmt e o clippy do workspace, limpos;
+    - os crates: app 603, core 511, ffi 159, audio 254, motor 7 e server 672, mais proto e xtask;
+    - `check-runtime`;
+    - as oito bancadas: `conversa-com-estado`, `telas`, `tema-sai-com-a-sessao`, `qualidade-da-voz`, `diagnostico-de-mods`, `contribuicoes-e-camadas`, `regiao-do-mod` e `ajustes-v013`.
+  - **A conformidade**, um arquivo por vez, deu 135 testes verdes em 23 arquivos, incluídos `a_recusa_nao_tira_da_sala`, `voz_na_reconexao`, `moderacao`, `senha_da_sala` e `limite_de_taxa`. O `quarto_pelo_link` ficou de fora, pela 8384.
+- **A onda 6 foi despachada sobre `2112c38`.** Os dois lotes rodam em paralelo:
+  - o K4;
+  - o R, a credencial da tentativa, com o conserto do convite da F1 (`24e7e249`) na base.
