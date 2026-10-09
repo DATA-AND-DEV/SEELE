@@ -552,17 +552,23 @@ def segurar(pg: Page) -> list[str]:
         "a página sumir": """() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true });
             document.dispatchEvent(new Event('visibilitychange'));
             Object.defineProperty(document, 'hidden', { value: false, configurable: true }); }""",
-        "o enlace cair": "() => { SEELE_QUADRO.link = 'Down'; }",
+        "o enlace cair": "() => { SEELE_QUADRO.link = { InternalBattery: { remaining_seconds: 300, attempts: 1 } }; }",
     }
     for jeito, soltar in jeitos.items():
         pg.evaluate("window.__SEELE_HISTORICO.length = 0")
         pg.evaluate(apertar)
-        pg.wait_for_timeout(100)
+        # Segura por um quadro inteiro antes de soltar: a fala tem de continuar
+        # aberta enquanto o dedo está lá. Soltar antes do quadro escondia um
+        # celular que soltava sozinho no primeiro redesenho.
+        esperar_quadro(pg)
         no_ar = pg.evaluate("document.getElementById('voz-mudo').textContent")
+        segurando = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_talking').map(([, a]) => a.talking)")
+        if segurando != [True]:
+            falhas.append(f"{jeito}: com o dedo ainda no SEGURE, a fala foi {segurando}")
         pg.evaluate(soltar)
         if jeito == "o enlace cair":
             esperar_quadro(pg)
-            pg.evaluate("SEELE_QUADRO.link = 'Up'")
+            pg.evaluate("SEELE_QUADRO.link = 'Online'")
             esperar_quadro(pg)
         else:
             pg.wait_for_timeout(150)
