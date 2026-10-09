@@ -2527,25 +2527,13 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     }
 }
 
-/// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`**,
-/// contado em caracteres **como a linha os leva**.
-///
-/// Quinhentos e doze caracteres, o número que `registrar_da_janela` já usava
-/// escrito à mão. Nomeado quando o `console` dos MODs passou a escrever no
-/// mesmo arquivo: as portas põem lá texto que um terceiro escolheu, e o teto
-/// de uma não pode divergir do da outra por esquecimento.
-///
-/// **O mesmo em todas as portas, e é o tamanho escrito.** As quatro que
-/// escrevem o texto escapado pelo `Debug` de um `str` — a frase da janela
-/// ([`registrar_da_janela`]), o `console` do executor, o motivo
-/// ([`motivo_no_registro`]) e o caminho ([`caminho_no_registro`]) — cortam
-/// pelo tamanho já escapado, numa regra só
-/// ([`executor::ate_o_teto_do_registro`]): o escape pode fazer um caractere
-/// ocupar até dez (`\u{100000}`), e um corte contado antes dele deixava
-/// quinhentos e doze desses virarem 5122 caracteres na linha, com as aspas. A
-/// frase da janela e o `console` levam também o aviso do corte
-/// ([`executor::cortar_linha_do_console`]).
-const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
+// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`** mora
+// em `seele_motor::TETO_DA_FRASE_NO_REGISTRO` desde 09/10/2026, com a regra das
+// quatro portas: o corte do `console` é da volta do motor, e as portas daqui
+// cortam pela mesma regra ([`executor::ate_o_teto_do_registro`]). Os testes do
+// executor o leem por `crate::`, como liam quando ele morava aqui.
+#[cfg(test)]
+use seele_motor::TETO_DA_FRASE_NO_REGISTRO;
 
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
 ///
@@ -9359,6 +9347,45 @@ const TETO_DO_LOG: u64 = 8 * 1024 * 1024;
 /// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
 /// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
 /// era o que uma interrogação aqui causaria.
+/// Um pânico, em qualquer thread, deixa uma linha no `seele.log`. F1-audio-panico.
+///
+/// # Por que existe
+///
+/// O gancho padrão escreve o pânico na saída de erro, e só. No Windows, o build
+/// de release não tem console, e a saída de erro não vai a lugar nenhum; no
+/// Mac, o app aberto pelo Finder também não tem quem a leia. Um pânico na thread
+/// que abre o áudio, ou na da voz, matava a thread e deixava a sala muda — e o
+/// `seele.log`, que é o que a pessoa manda quando relata, sem uma linha sobre
+/// isso. «O produto sabe e não conta», no lugar onde mais custa.
+///
+/// # O que ele faz
+///
+/// Guarda o gancho anterior, escreve a linha pelo `tracing` — com o nome da
+/// thread, o lugar e a mensagem — e chama o anterior, que continua escrevendo
+/// na saída de erro como sempre. Uma vez só (`Once`): instalar duas vezes
+/// encadearia o gancho nele mesmo, e cada pânico sairia duas vezes no log.
+fn instalar_gancho_de_panico() {
+    static UMA_VEZ: std::sync::Once = std::sync::Once::new();
+    UMA_VEZ.call_once(|| {
+        let anterior = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let thread = std::thread::current();
+            let nome = thread.name().unwrap_or("sem nome");
+            let local = info
+                .location()
+                .map_or_else(|| "lugar desconhecido".to_owned(), ToString::to_string);
+            let mensagem = info.payload_as_str().unwrap_or("sem mensagem");
+            tracing::error!(
+                target: "seele_app",
+                thread = nome,
+                local = %local,
+                "pânico: {mensagem}"
+            );
+            anterior(info);
+        }));
+    });
+}
+
 fn girar_o_log(arquivo: &std::path::Path) {
     let Ok(dados) = std::fs::metadata(arquivo) else {
         // Não existe ainda, que é o caso da primeira abertura.
@@ -9409,7 +9436,7 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info,seele_lancador=info"
+         seele_encontro=info,seele_lancador=info,seele_motor=info"
             .into()
     });
     match arquivo_de_log() {
@@ -9422,6 +9449,9 @@ fn main() {
             .init(),
         None => tracing_subscriber::fmt().with_env_filter(filtro).init(),
     }
+    // Logo depois do assinante, e não antes: o gancho escreve pelo `tracing`,
+    // e um pânico antes disto não teria onde cair além da saída de erro.
+    instalar_gancho_de_panico();
 
     // A window that cannot open is not a case with a graceful path: there is
     // nowhere left to show the reason. It goes to the log and to the exit code.
@@ -11990,6 +12020,83 @@ mod rastro_de_teste {
             1,
             "a linha da outra thread entrou no rastro desta captura, e um teste passaria a \
              ler o que outro teste escreveu: {rastro}"
+        );
+    }
+}
+
+/// O gancho de pânico, pelo que ele deixa no log. F1-audio-panico.
+#[cfg(test)]
+mod gancho_de_panico {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    /// Onde o formatador escreve, dividido com quem lê depois.
+    #[derive(Clone, Default)]
+    struct Captura(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Captura {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("o rastro capturado")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// (e) Um pânico numa thread com nome deixa a linha, com o nome e a
+    /// mensagem.
+    ///
+    /// O assinante é por thread (`with_default`), e por isso ele é posto
+    /// **dentro** da thread que entra em pânico: o gancho roda nela, antes de a
+    /// pilha desenrolar, e escreve no assinante dela. É o caso da thread que
+    /// abre o áudio e da thread da voz — threads soltas, cujo pânico antes não
+    /// deixava rastro nenhum no `seele.log`.
+    ///
+    /// O segundo despachante vem antes, como em `rastro_de_teste::capturar`:
+    /// sem ele, a linha pode sumir quando a bateria roda em paralelo
+    /// (pendência 56).
+    #[test]
+    fn um_panico_numa_thread_deixa_linha_no_log() {
+        crate::rastro_de_teste::segundo_despachante();
+        super::instalar_gancho_de_panico();
+
+        let captura = Captura::default();
+        let escreve = captura.clone();
+        let caiu = std::thread::Builder::new()
+            .name("seele-teste-do-panico".into())
+            .spawn(move || {
+                let assinante = tracing_subscriber::fmt()
+                    .with_writer(move || escreve.clone())
+                    .with_max_level(tracing::Level::TRACE)
+                    .without_time()
+                    .with_ansi(false)
+                    .finish();
+                tracing::subscriber::with_default(assinante, || {
+                    panic!("o driver caiu no meio da abertura");
+                });
+            })
+            .expect("a thread do pânico proposital subiu")
+            .join();
+        assert!(caiu.is_err(), "o pânico proposital não aconteceu");
+
+        let rastro = String::from_utf8(captura.0.lock().expect("o rastro").clone()).expect("UTF-8");
+        assert!(
+            rastro.contains("pânico:"),
+            "um pânico numa thread não deixou linha no log: quem relata «o áudio \
+             não abre» não tem o que mostrar. Rastro: {rastro:?}"
+        );
+        assert!(
+            rastro.contains("o driver caiu no meio da abertura"),
+            "a linha do pânico não diz a mensagem dele: {rastro:?}"
+        );
+        assert!(
+            rastro.contains("seele-teste-do-panico"),
+            "a linha do pânico não diz em que thread foi: {rastro:?}"
         );
     }
 }

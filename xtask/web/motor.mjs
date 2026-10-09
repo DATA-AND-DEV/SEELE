@@ -1,45 +1,51 @@
 // O motor de MODs do celular, DENTRO do `.wasm` do `wasm32-wasip1`, com um
-// anfitrião que faz o papel do Worker: a WASI mínima e as três funções do
-// módulo `seele`.
+// anfitrião que faz o papel do Worker: a WASI mínima e as chamadas da
+// fronteira (`crates/seele-motor-web/src/fronteira.rs`).
 //
-//     node xtask/web/motor.mjs <seele_motor_web.wasm> <crates/seele-motor-web/tests/mod-comum.js>
+//     node xtask/web/motor.mjs <seele_motor_web.wasm> <mod-comum.js> \
+//       <crates/seele-motor/tests/casos.json> <crates/seele-motor/src/lib.rs>
 //
 // Três cobranças:
-// - o MOD comum chega ao `pronto` com a API do desktop;
-// - um laço sem fim é cortado (`interrupted`);
-// - **um MOD que aloca sem parar é parado pelo teto de 8 MiB** antes do quarto
-//   bloco de 2 MiB. É o guarda do `RustAllocator`: no `wasm32-wasip1`, com o
-//   alocador padrão do quickjs-ng, o teto não existe (`cutils.h:601-612`), e
-//   este caso aloca os 64 blocos. Só se prova aqui: no nativo o alocador padrão
-//   já responde o tamanho dos blocos.
+// - **as importações são as da lista**, e nenhuma outra;
+// - **a tabela da volta passa aqui como passa no nativo**
+//   (`crates/seele-motor/tests/casos.rs`): a mesma tabela, o mesmo `Motor`,
+//   embrulhado como o celular o embrulha. É a prova de que o desktop e o
+//   celular rodam a mesma volta. Ela inclui o teto de memória, que só vale com
+//   o `RustAllocator` no `wasm32-wasip1` (`cutils.h:601-612`), e a sonda das
+//   globais, que tem de dar a mesma lista nos dois alvos;
+// - o MOD comum chega ao `pronto` com a API do desktop, respondido como a
+//   janela responde.
 import { readFileSync } from "node:fs";
 
-const [caminhoDoWasm, caminhoDoMod] = process.argv.slice(2);
+const [caminhoDoWasm, caminhoDoMod, caminhoDaTabela, caminhoDoMotor] = process.argv.slice(2);
 const modulo = await WebAssembly.compile(readFileSync(caminhoDoWasm));
 
 // **Tudo o que o código de um MOD alcança fora do motor**, mesmo com um defeito
 // de memória no QuickJS: um `.wasm` só chama o que importa. A lista é fixa, e
-// uma importação nova reprova aqui até alguém a revisar. Os dois `fd_prestat_*`
-// são do `std` procurando diretórios pré-abertos: o Worker responde que não há
-// nenhum, e sem eles nenhum `path_*` teria onde abrir (e nenhum é importado).
+// uma importação nova reprova aqui até alguém a revisar.
+// - Os dois `fd_prestat_*` são do `std` procurando diretórios pré-abertos: o
+//   Worker responde que não há nenhum, e sem eles nenhum `path_*` teria onde
+//   abrir (e nenhum é importado).
+// - O `sched_yield` é do `mpsc` do `std`, por onde o motor fala desde 09/10:
+//   no Worker ele não faz nada, porque não há outra thread a quem ceder.
+// - Não há mais o módulo `seele`: a saída do motor é o canal, lido pela
+//   fronteira.
 const PERMITIDAS = [
-  "seele.postar", "seele.console", "seele.agora_ms",
   "wasi_snapshot_preview1.random_get", "wasi_snapshot_preview1.environ_get",
   "wasi_snapshot_preview1.environ_sizes_get", "wasi_snapshot_preview1.clock_time_get",
   "wasi_snapshot_preview1.fd_close", "wasi_snapshot_preview1.fd_fdstat_get",
   "wasi_snapshot_preview1.fd_prestat_get", "wasi_snapshot_preview1.fd_prestat_dir_name",
   "wasi_snapshot_preview1.fd_seek", "wasi_snapshot_preview1.fd_write",
-  "wasi_snapshot_preview1.proc_exit",
+  "wasi_snapshot_preview1.proc_exit", "wasi_snapshot_preview1.sched_yield",
 ];
 const importadas = WebAssembly.Module.imports(modulo).map((i) => `${i.module}.${i.name}`);
 const novas = importadas.filter((i) => !PERMITIDAS.includes(i));
-const CAPS = ["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"];
 
-// Um Worker de mentira: instancia, responde como a página, e dispara relógios.
-async function rodar(fonte, eventos) {
-  const falas = [];
-  const linhas = [];
-  const erros = [];
+const dormir = (ms) => new Promise((ok) => setTimeout(ok, Math.max(0, ms)));
+const bytesDoTexto = (texto) => new TextEncoder().encode(texto).length;
+
+/** Um Worker de mentira: a WASI mínima e as chamadas da fronteira. */
+async function instancia() {
   let inst = null;
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -53,7 +59,7 @@ async function rodar(fonte, eventos) {
     mem().set(b, p);
     try { return f(p, b.length); } finally { inst.exports.liberar(p, b.length); }
   };
-  // A WASI que o QuickJS pede: relógio, aleatório, ambiente vazio, registro.
+  const registro = [];
   const wasi = {
     random_get(p, n) { crypto.getRandomValues(mem().subarray(p, p + n)); return 0; },
     environ_sizes_get(pc, ps) { dv().setUint32(pc, 0, true); dv().setUint32(ps, 0, true); return 0; },
@@ -70,73 +76,172 @@ async function rodar(fonte, eventos) {
     fd_seek() { return 8; },
     fd_write(_fd, iovs, n, escritos) {
       let total = 0;
-      for (let i = 0; i < n; i++) total += dv().getUint32(iovs + i * 8 + 4, true);
+      for (let i = 0; i < n; i++) {
+        const p = dv().getUint32(iovs + i * 8, true);
+        const l = dv().getUint32(iovs + i * 8 + 4, true);
+        registro.push(ler(p, l));
+        total += l;
+      }
       dv().setUint32(escritos, total, true);
       return 0;
     },
-    proc_exit(c) { throw new Error(`proc_exit(${c})`); },
+    proc_exit(c) { throw new Error(`proc_exit(${c}): ${registro.join("")}`); },
+    sched_yield() { return 0; },
   };
-  const pendentes = [];
-  const seele = {
-    postar(p, n) { const m = JSON.parse(ler(p, n)); falas.push(m); if (m.n != null) pendentes.push(m); return 1; },
-    console(mp, ml, tp, tl) { linhas.push(`${ler(mp, ml)}: ${ler(tp, tl)}`); },
-    agora_ms() { return performance.now(); },
+  inst = await WebAssembly.instantiate(modulo, { wasi_snapshot_preview1: wasi });
+  const falas = () => JSON.parse(saida());
+  return {
+    iniciar: (caps, fonte) => {
+      comTexto(caps.join(","), (cp, cl) => comTexto(fonte, (fp, fl) => inst.exports.iniciar(cp, cl, fp, fl)));
+      return falas();
+    },
+    entregar: (json) => { comTexto(json, (p, n) => inst.exports.entregar(p, n)); return falas(); },
+    vencer: () => { inst.exports.vencer(); return falas(); },
+    diagnostico: () => { inst.exports.diagnostico(); return falas(); },
+    parar: () => { inst.exports.parar(); return falas(); },
+    prazo: () => inst.exports.proximo_prazo_ms(),
+    lido: (bytes) => inst.exports.lido(bytes),
+    avisoLido: () => inst.exports.aviso_lido(),
   };
-  inst = await WebAssembly.instantiate(modulo, { seele, wasi_snapshot_preview1: wasi });
-  if (comTexto(CAPS.join(","), (cp, cl) => comTexto(fonte, (fp, fl) => inst.exports.iniciar(cp, cl, fp, fl))) !== 0) {
-    return { erros: [`não subiu: ${saida()}`], falas, linhas };
-  }
-  const volta = (codigo) => { if (codigo !== 0) erros.push(saida()); };
-  const intervalos = new Set();
-  const aDisparar = [];
-  for (let passo = 0; passo < 300; passo++) {
-    while (pendentes.length) {
-      const m = pendentes.shift();
-      const r = m.tipo === "snapshot" ? { n: m.n, ok: true, valor: { servidor: "bancada" } }
-        : m.tipo === "pedido" && m.id === "eco" ? { n: m.n, ok: true, valor: m.valor }
-        : m.tipo === "regiao" ? { n: m.n, ok: true, valor: null }
-        : { n: m.n, ok: false, erro: "desconhecido" };
-      volta(comTexto(JSON.stringify(r), (p, n) => inst.exports.entregar(p, n)));
-    }
-    inst.exports.pedidos_de_relogio();
-    for (const r of JSON.parse(saida())) {
-      if (r.cancelar) intervalos.delete(r.id);
-      else if (r.repete) intervalos.add(r.id);
-      else aDisparar.push(r.id);
-    }
-    const agora = [...aDisparar.splice(0), ...intervalos];
-    for (const id of agora) volta(inst.exports.relogio(id));
-    if (passo === 5) for (const ev of eventos) volta(comTexto(JSON.stringify({ tipo: "evento", ...ev }), (p, n) => inst.exports.entregar(p, n)));
-    if (!pendentes.length && !agora.length && passo > 5) break;
-  }
-  return { falas, linhas, erros };
 }
+
+// ---------------------------------------------------------------- a tabela
+
+/** Lê as falas, devolvendo o crédito como a janela devolve (e como `casos.rs`). */
+function colher(motor, novas, semLer, falas) {
+  for (const fala of novas) {
+    if (!semLer) {
+      if (fala.tipo === "mensagem") motor.lido(bytesDoTexto(fala.corpo));
+      else if (fala.tipo === "falhou" || fala.tipo === "interrompido") motor.avisoLido();
+    }
+    falas.push(fala);
+  }
+}
+
+/** Espera `ms` atendendo os prazos do motor, como o Worker com `setTimeout`. */
+async function esperar(motor, semLer, falas, ms) {
+  const fim = performance.now() + ms;
+  for (;;) {
+    const resta = fim - performance.now();
+    const prazo = motor.prazo();
+    if (prazo >= 0 && prazo <= resta) {
+      await dormir(prazo);
+      colher(motor, motor.vencer(), semLer, falas);
+    } else {
+      await dormir(resta);
+      return;
+    }
+  }
+}
+
+const SONDA = (() => {
+  const achado = readFileSync(caminhoDoMotor, "utf8").match(/pub const SONDA: &str = r#"([\s\S]*?)"#;/);
+  if (!achado) throw new Error(`a sonda não está em ${caminhoDoMotor}`);
+  return achado[1];
+})();
+
+async function rodar(tabela, caso) {
+  const motor = await instancia();
+  const semLer = caso.sem_ler === true;
+  const falas = [];
+  const fonte = caso.sonda === true ? SONDA : caso.fonte;
+  colher(motor, motor.iniciar(caso.capacidades ?? tabela.capacidades_padrao, fonte), semLer, falas);
+  for (const passo of caso.passos ?? []) {
+    if (typeof passo.responder === "string") colher(motor, motor.entregar(passo.responder), semLer, falas);
+    else if (typeof passo.esperar_ms === "number") await esperar(motor, semLer, falas, passo.esperar_ms);
+    else if (passo.diagnostico === true) colher(motor, motor.diagnostico(), semLer, falas);
+    else throw new Error(`passo desconhecido: ${JSON.stringify(passo)}`);
+  }
+  colher(motor, motor.parar(), semLer, falas);
+  // A diferença declarada da sonda: no `.wasm`, nenhuma delas pode existir
+  // (o nativo cobra que existam, em `casos.rs`).
+  for (const soDoNativo of caso.globais_so_do_nativo ?? []) {
+    if (String(falas[0]?.corpo).includes(`,${soDoNativo},`)) {
+      throw new Error(`o .wasm passou a ter ${soDoNativo}: a diferença declarada da sonda mudou`);
+    }
+  }
+  return falas;
+}
+
+/** O que difere entre o esperado e o que veio, como `diferenca` em `casos.rs`. */
+function diferenca(esperado, veio) {
+  const lista = esperado.flatMap((item) => Array(item.vezes ?? 1).fill(item));
+  if (lista.length !== veio.length) return `${lista.length} falas esperadas, vieram ${veio.length}`;
+  for (let n = 0; n < lista.length; n++) {
+    const e = lista[n];
+    const v = veio[n];
+    const ok = e.tipo === v.tipo
+      && (e.corpo === undefined || e.corpo === v.corpo)
+      && (e.corpo_comeca === undefined || String(v.corpo ?? "").startsWith(e.corpo_comeca))
+      && (e.texto === undefined || e.texto === v.texto)
+      && (e.texto_contem === undefined || String(v.texto ?? "").includes(e.texto_contem))
+      && (e.nivel === undefined || e.nivel === v.nivel)
+      && (e.suprimidas === undefined || e.suprimidas === v.suprimidas)
+      && (e.relogios === undefined || e.relogios === v.relogios);
+    if (!ok) return `a fala ${n}: esperava ${JSON.stringify(e)}, veio ${JSON.stringify(v)}`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------- o MOD comum
+
+/** O MOD comum, respondido como a janela responde, até o `pronto`. */
+async function oModComum(tabela) {
+  const motor = await instancia();
+  const falas = [];
+  const respostas = [];
+  const atender = (novas) => {
+    colher(motor, novas, false, falas);
+    for (const fala of novas) {
+      if (fala.tipo !== "mensagem") continue;
+      const m = JSON.parse(fala.corpo);
+      if (typeof m.n !== "number") continue;
+      respostas.push(JSON.stringify(
+        m.tipo === "snapshot" ? { tipo: "resposta", n: m.n, ok: true, valor: { servidor: "bancada" } }
+          : m.tipo === "pedido" && m.id === "eco" ? { tipo: "resposta", n: m.n, ok: true, valor: m.valor }
+          : m.tipo === "regiao" ? { tipo: "resposta", n: m.n, ok: true, valor: null }
+          : { tipo: "resposta", n: m.n, ok: false, erro: "desconhecido" },
+      ));
+    }
+  };
+  atender(motor.iniciar(tabela.capacidades_padrao, readFileSync(caminhoDoMod, "utf8")));
+  const fim = performance.now() + 5000;
+  while (performance.now() < fim) {
+    while (respostas.length) atender(motor.entregar(respostas.shift()));
+    const pronto = falas.find((f) => f.tipo === "mensagem" && JSON.parse(f.corpo).canal === "pronto");
+    if (pronto) return { valor: JSON.parse(pronto.corpo).valor, falas };
+    const prazo = motor.prazo();
+    await dormir(prazo >= 0 ? Math.min(prazo, 50) : 10);
+    if (prazo >= 0) atender(motor.vencer());
+  }
+  return { valor: null, falas };
+}
+
+// ---------------------------------------------------------------- as cobranças
 
 const falhas = [];
 if (novas.length) falhas.push(`o .wasm importa o que a lista não permite: ${novas.join(", ")}`);
 
-const comum = await rodar(readFileSync(caminhoDoMod, "utf8"), []);
-const pronto = comum.falas.find((m) => m.canal === "pronto");
-const v = pronto ? pronto.valor : {};
-if (!pronto) falhas.push(`MOD comum: não chegou ao pronto (${JSON.stringify(comum.falas).slice(0, 300)}; erros ${comum.erros})`);
-else if (v.snap?.servidor !== "bancada" || JSON.stringify(v.capacidades) !== JSON.stringify(CAPS) || v.intervalos !== 3
-  || v.erro !== "rejeitou: desconhecido" || !String(v.grande).startsWith("mensagem-grande: pedido tem 14062 bytes")
-  || v.superficies !== "object" || v.console !== "function" || !comum.linhas.includes("log: mod comum de pé")) {
-  falhas.push(`MOD comum: a API diverge do desktop: ${JSON.stringify(v)}`);
+const tabela = JSON.parse(readFileSync(caminhoDaTabela, "utf8"));
+if (!(tabela.casos?.length >= 13)) falhas.push(`a tabela encolheu para ${tabela.casos?.length} casos`);
+for (const caso of tabela.casos ?? []) {
+  const veio = await rodar(tabela, caso);
+  const d = diferenca(caso.esperado, veio);
+  if (d) falhas.push(`${caso.de}: ${d}\n    veio: ${JSON.stringify(veio).slice(0, 1500)}`);
 }
 
-const laco = await rodar("SeeleUI.aoEvento(() => { while (true) {} });", [{ nome: "x" }]);
-if (!laco.erros.some((e) => e.includes("interrupted"))) falhas.push(`laço sem fim: não foi cortado (${laco.erros})`);
-
-const bomba = await rodar(
-  "SeeleUI.aoEvento(() => { const a = []; let n = 0; try { for (; n < 64; n++) a.push(new Array(262144).fill(n)); a.length = 0; SeeleMods.request('eco', 'mem', n); } catch (e) { a.length = 0; SeeleMods.request('eco', 'mem', n); } });",
-  [{ nome: "x" }],
-);
-const blocos = bomba.falas.find((m) => m.canal === "mem")?.valor;
-if (!(blocos < 4)) falhas.push(`memória: o MOD alocou ${blocos} blocos de 2 MiB com o teto de 8 MiB; o RustAllocator saiu?`);
+const comum = await oModComum(tabela);
+const v = comum.valor ?? {};
+if (!comum.valor) falhas.push(`MOD comum: não chegou ao pronto (${JSON.stringify(comum.falas).slice(0, 400)})`);
+else if (v.snap?.servidor !== "bancada" || JSON.stringify(v.capacidades) !== JSON.stringify(tabela.capacidades_padrao)
+  || v.intervalos !== 3 || v.erro !== "rejeitou: desconhecido" || !String(v.grande).startsWith("mensagem-grande: pedido tem 14062 bytes")
+  || v.superficies !== "object" || v.console !== "function"
+  || !comum.falas.some((f) => f.tipo === "console" && f.texto === "mod comum de pé")) {
+  falhas.push(`MOD comum: a API diverge do desktop: ${JSON.stringify(v)}`);
+}
 
 if (falhas.length) {
   console.error(`motor do celular no .wasm: ${falhas.length} falha(s)\n  ${falhas.join("\n  ")}`);
   process.exit(1);
 }
-console.log(`motor do celular no .wasm: ${importadas.length} importações, todas da lista; o MOD comum fala a API do desktop, o laço sem fim é cortado, e a memória para no teto (${blocos} blocos de 2 MiB).`);
+console.log(`motor do celular no .wasm: ${importadas.length} importações, todas da lista; os ${tabela.casos.length} casos da volta passam como no nativo, e o MOD comum fala a API do desktop.`);
