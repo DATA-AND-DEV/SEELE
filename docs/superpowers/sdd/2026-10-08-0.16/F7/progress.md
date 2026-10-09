@@ -62,6 +62,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da `versao/0.16` (`bd58a080`): o F da F5 e a P9 da F1 | feito; a rodada da 4f, 46 de 46 | `d3c1c596` |
 | 14a + 15 | 6c e 6d, discar pelo código | **feitas** | `1f1a1b35` |
 | — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
+| 17 | 6f, a bateria da ligação | **feita**, menos a volta do convidado sem tocar, que espera a 16 | `0d320448` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -360,4 +361,24 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
   47 de 47, arquivo por arquivo, com o arquivo novo. A `Batida` mudou para toda
   conexão que traz `enc=`, e por isso a rodada foi inteira. `seele-core`,
   `seele-ffi` e o `seele-app` inteiro passaram antes do commit.
+
+## Tarefa 17 — a bateria da ligação (09/10)
+
+- `Battery::da_ligacao` dura um minuto (`CARGA_DA_LIGACAO`). O motor a escolhe
+  quando o destino espera um código (`bateria_de`). A carga virou campo da
+  bateria.
+- **A volta já era ao `IP:porta` que atendeu**: o motor nasce por candidato,
+  com o destino de quem venceu. A prova é de ponta a ponta. A ligação entra
+  pela segunda dica, porque a primeira e o público estão mortos. A sala cai
+  sem despedida e volta na mesma porta, e a ligação volta sozinha, com a
+  bateria começando em no máximo um minuto.
+- Um guarda novo prende a carga dentro da `TOLERANCIA_DE_RECONEXAO` da
+  campainha. Uma bateria mais longa voltaria tocando.
+- Reversões: o motor com cinco minutos, e a carga em 61 s. A volta ao
+  `IP:porta` não tem reversão direta: o motor não guarda lista a que voltar.
+  A disposição do teste é conferida nele.
+- `porta.rs` da conformidade passou a dizer três binários de porta fixa.
+- **Espera a 16**: a volta de um convidado sem tocar de novo. Ela precisa do
+  cliente que lê o `Tocando` para a primeira entrada. A frase «A LIGAÇÃO CAIU»
+  é da 7f.
 
