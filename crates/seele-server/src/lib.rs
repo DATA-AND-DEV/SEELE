@@ -42,6 +42,8 @@ pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;
+#[cfg(test)]
+pub(crate) mod rastro_de_teste;
 pub mod recepcao;
 pub mod server;
 pub mod session;

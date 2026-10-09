@@ -4073,7 +4073,9 @@ enum FalhaNoMod {
     /// O MOD existe e não passou na validação. O nome é da variante de
     /// recusa que o `seele-ffi` devolve, e quem escreve a frase é o `frases.js`.
     Recusado {
-        /// O nome da recusa, de uma lista fechada.
+        /// O nome da recusa, de uma lista fechada. A recusa que leva números
+        /// os traz depois do nome, no mesmo texto
+        /// (`som-grande-demais-decodificado: …`, [`som_cabe_decodificado`]).
         motivo: String,
     },
     /// **O conjunto mudou desde que a tela abriu.**
@@ -5896,7 +5898,15 @@ struct MidiaDoMod {
     /// mesma razão: uma página que junta um tipo a bytes é uma página que pode
     /// juntar a **alegação de quem mandou** a eles, e a alegação é texto que um
     /// terceiro escolheu. O manifesto do MOD é exatamente esse texto.
-    uri: String,
+    ///
+    /// **Nenhum só no som do pacote** (P49-7b), e então fora da resposta. A
+    /// janela lê os bytes dele crus, por `som_do_mod`, e um `data:` aqui seria
+    /// o mesmo arquivo atravessando a ponte uma segunda vez, em base64, sem
+    /// ninguém que o lesse. A imagem do pacote e toda mídia do servidor o
+    /// trazem: o `<img>` mostra o `data:`, e o som do servidor não tem outro
+    /// caminho até a janela (`bufferDaUri`, em `mods-regiao.js`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uri: Option<String>,
     /// `som` ou `imagem`, de uma lista fechada.
     ///
     /// A janela precisa saber qual elemento montar, e recebe a palavra em vez
@@ -6086,6 +6096,12 @@ fn bytes_declarados_do_mod(
 
 /// A mídia de um MOD pronta para a janela, **ou a recusa dita no registro**,
 /// com o teto de vazão de `baldes` ([`recusa_de_midia_dita`]).
+///
+/// **O tipo sai dos bytes antes do `data:`** (`ler_tipo`, a pergunta de oito
+/// bytes): o som do pacote volta só com o papel e o tamanho, sem `uri`, e
+/// só a imagem passa por `ler_midia`, que codifica o arquivo inteiro. As
+/// conferências de pacote, de arquivo declarado e de teto são as mesmas para
+/// os dois, em [`bytes_declarados_do_mod`].
 fn midia_declarada_do_mod(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -6094,18 +6110,27 @@ fn midia_declarada_do_mod(
     hash: &str,
     caminho: &str,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    let lida = bytes_declarados_do_mod(pasta, id, hash, caminho)
+    bytes_declarados_do_mod(pasta, id, hash, caminho)
         .and_then(|bytes| {
-            seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
+            let desconhecido = || FalhaNoMod::Recusado {
                 motivo: "formato-desconhecido".to_owned(),
+            };
+            let tipo = seele_ffi::mods::ler_tipo(&bytes).ok_or_else(desconhecido)?;
+            if tipo.papel == "som" {
+                return Ok(MidiaDoMod {
+                    uri: None,
+                    papel: tipo.papel,
+                    bytes: bytes.len(),
+                });
+            }
+            let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(desconhecido)?;
+            Ok(MidiaDoMod {
+                uri: Some(lida.uri),
+                papel: lida.papel,
+                bytes: lida.bytes,
             })
         })
-        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))?;
-    Ok(MidiaDoMod {
-        uri: lida.uri,
-        papel: lida.papel,
-        bytes: lida.bytes,
-    })
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
 }
 
 /// **Um arquivo que o MOD declarou, para a janela tocar ou mostrar.**
@@ -6119,8 +6144,13 @@ fn midia_declarada_do_mod(
 /// - os bytes não são de um formato que este produto decodifica, ou passam do
 ///   teto.
 ///
-/// O teto é por arquivo. O total por instância é da janela, que é quem sabe
-/// quantos já montou — ver `recursosDoMod` em `base.js`.
+/// O teto é por arquivo. O total é da janela, que é quem sabe quantos já
+/// montou — por lugar, em `LIMITES_DA_REGIAO.bytesDeMidia` e no bolso dos
+/// cartões (`mods-regiao.js`).
+///
+/// **O som sai sem `uri`**, só com o papel e o tamanho: a janela o pede cru a
+/// [`som_do_mod`], e o `data:` dele seria o arquivo atravessando a ponte duas
+/// vezes ([`MidiaDoMod`]).
 ///
 /// Toda recusa, exceto a de geração morta (contada em
 /// `comandos_de_geracao_morta`), vai ao `seele.log` por
@@ -6231,7 +6261,8 @@ fn midia_servida_dita(
 ///
 /// [`FalhaNoMod::Recusado`] quando a geração já acabou, quando o pacote é de
 /// outro MOD, quando o arquivo não está declarado, quando passa do teto, quando
-/// os bytes não são de um formato conhecido, ou quando são de imagem.
+/// os bytes não são de um formato conhecido, quando são de imagem, ou quando o
+/// som, decodificado, passaria do teto do som ([`som_cabe_decodificado`]).
 #[tauri::command]
 fn som_do_mod(
     app: AppHandle,
@@ -6301,6 +6332,9 @@ fn som_servido_dito(
 
 /// Os bytes de um som declarado, **ou a recusa dita no registro**, com o teto
 /// de vazão de `baldes` ([`recusa_de_midia_dita`]).
+///
+/// O som que, decodificado, passa do teto do som é recusado aqui, antes de
+/// sair ([`som_cabe_decodificado`]).
 fn som_declarado_do_mod(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -6311,7 +6345,7 @@ fn som_declarado_do_mod(
 ) -> Result<Vec<u8>, FalhaNoMod> {
     bytes_declarados_do_mod(pasta, id, hash, caminho)
         .and_then(|bytes| match seele_ffi::mods::ler_tipo(&bytes) {
-            Some(tipo) if tipo.papel == "som" => Ok(bytes),
+            Some(tipo) if tipo.papel == "som" => som_cabe_decodificado(&bytes).map(|()| bytes),
             Some(_) => Err(FalhaNoMod::Recusado {
                 motivo: "nao-e-som".to_owned(),
             }),
@@ -6320,6 +6354,477 @@ fn som_declarado_do_mod(
             }),
         })
         .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
+}
+
+/// **O teto do som decodificado, em bytes** — o mesmo da janela.
+///
+/// A janela soma, por lugar, o que o WebAudio segura, e recusa o som que passa
+/// dele (`LIMITES_DA_REGIAO.bytesDeSomDecodificado` e o do cartão, em
+/// `mods-regiao.js`). Aqui ele vale para um som sozinho: um som cujo piso
+/// decodificado passa deste número não cabe em lugar nenhum, e a janela o
+/// decodificaria inteiro para largá-lo em seguida. O guarda
+/// `os_numeros_do_som_decodificado_sao_os_da_janela` confere que os dois
+/// lados dizem o mesmo número.
+const TETO_DO_SOM_DECODIFICADO: u64 = 64 * 1024 * 1024;
+
+/// **A taxa em que a janela decodifica o som de MOD**, em quadros por
+/// segundo — `TAXA_DA_DECODIFICACAO`, em `mods-regiao.js`, conferida pelo
+/// mesmo guarda do teto.
+const TAXA_DA_DECODIFICACAO: u64 = 48_000;
+
+/// O nome da recusa do som que, decodificado, passa do teto.
+///
+/// É o começo do `motivo`, e os números vêm depois dele: a janela reconhece a
+/// recusa por este nome e a diz como o teto do som, e não como falha de carga
+/// (`recusaDoSomGrandeDemais`, em `mods-regiao.js`).
+const SOM_GRANDE_DEMAIS_DECODIFICADO: &str = "som-grande-demais-decodificado";
+
+/// **O som que, decodificado, não cabe no teto do som, recusado antes de a
+/// janela o decodificar** (P49-7a).
+///
+/// `decodeAudioData` devolve o som inteiro em float32, de uma vez: a janela só
+/// pode contá-lo depois de ele existir, e o pico — dez MiB de MP3 a 128 kbps
+/// viram uns 250 MB — já aconteceu. Quando o cabeçalho permite, o piso
+/// ([`bytes_decodificados_minimos`]) sai antes de os bytes saírem daqui, e o
+/// som acima do teto é recusado com o nome
+/// [`SOM_GRANDE_DEMAIS_DECODIFICADO`] e os números.
+///
+/// **Só o piso recusa.** Um som cujo cabeçalho não diz o bastante segue como
+/// antes: a janela decodifica e confere o teto dela.
+fn som_cabe_decodificado(bytes: &[u8]) -> Result<(), FalhaNoMod> {
+    match bytes_decodificados_minimos(bytes) {
+        Some(piso) if piso > TETO_DO_SOM_DECODIFICADO => Err(FalhaNoMod::Recusado {
+            motivo: format!(
+                "{SOM_GRANDE_DEMAIS_DECODIFICADO}: decodificado a {TAXA_DA_DECODIFICACAO} Hz, o \
+                 som ocupa ao menos {piso} bytes, acima do teto de {TETO_DO_SOM_DECODIFICADO} \
+                 bytes de som"
+            ),
+        }),
+        _ => Ok(()),
+    }
+}
+
+/// **Um piso do que um som ocupa decodificado pela janela**, em bytes: os
+/// quadros a [`TAXA_DA_DECODIFICACAO`], vezes os canais, vezes quatro — o
+/// float32 que o `AudioBuffer` segura.
+///
+/// **Um piso, e nunca uma estimativa que possa passar do real** num arquivo
+/// bem formado: só ele recusa ([`som_cabe_decodificado`]). Um MP3 com mais
+/// quadros corrompidos do que o corte absorve é o caso em que ele passa — ver
+/// [`cabecalho_de_som::mp3`]. O cabeçalho é lido à mão, sem crate de áudio
+/// ([`cabecalho_de_som`]):
+///
+/// - **WAV**, exato, pelo `fmt ` e pelo `data`, com o `data` limitado aos
+///   bytes que estão no arquivo e ao tamanho que o RIFF declara;
+/// - **Ogg**, pelas páginas do fluxo Vorbis ou Opus: a granule da última,
+///   menos a da primeira de dados — e, no Opus, que já conta a 48 kHz, menos o
+///   pre-skip;
+/// - **MP3**, pelos quadros que estão no arquivo, encadeados desde o primeiro,
+///   e não mais do que o quadro Xing/Info conta quando há um.
+///
+/// Um quadro sai da conta por arredondamento: a conversão de taxa do
+/// navegador conta em ponto flutuante, e pode ficar um quadro abaixo do
+/// quociente exato.
+///
+/// `None` quando o cabeçalho não diz o bastante: um WAV comprimido, um Ogg de
+/// outro codec, um MP3 de formato livre, um arquivo cortado antes do que a
+/// leitura precisa, uma taxa ou um número de canais fora do que o WebAudio
+/// decodifica. O som segue como antes, para a janela decodificar e conferir.
+fn bytes_decodificados_minimos(bytes: &[u8]) -> Option<u64> {
+    let piso = match seele_ffi::mods::ler_tipo(bytes)?.media_type {
+        "audio/wav" => cabecalho_de_som::wav(bytes)?,
+        "audio/ogg" => cabecalho_de_som::ogg(bytes)?,
+        "audio/mpeg" => cabecalho_de_som::mp3(bytes)?,
+        _ => return None,
+    };
+    // A faixa que o WebAudio aceita num `AudioBuffer`: fora dela, a janela
+    // não decodifica, e o piso não teria do que ser piso.
+    if !(3_000..=768_000).contains(&piso.taxa) || !(1..=32).contains(&piso.canais) {
+        return None;
+    }
+    let quadros =
+        u128::from(piso.amostras) * u128::from(TAXA_DA_DECODIFICACAO) / u128::from(piso.taxa);
+    let bytes = quadros.saturating_sub(1) * u128::from(piso.canais) * 4;
+    Some(u64::try_from(bytes).unwrap_or(u64::MAX))
+}
+
+/// **A leitura à mão dos cabeçalhos de som**, para
+/// [`bytes_decodificados_minimos`].
+///
+/// Sem crate de áudio, e sem índice que entre em pânico: cada leitura passa
+/// por `get`, e o que não está nos bytes é `None`. Cada leitura devolve um
+/// piso dos quadros que o decodificador entrega: o que ela não sabe ao certo
+/// conta para menos.
+mod cabecalho_de_som {
+    /// Um som como o cabeçalho o diz.
+    pub(super) struct Piso {
+        /// Um piso dos quadros, na taxa do arquivo.
+        pub(super) amostras: u64,
+        /// Quadros por segundo, no arquivo.
+        pub(super) taxa: u32,
+        /// Canais que o decodificador entrega.
+        pub(super) canais: u32,
+    }
+
+    fn u16_le(bytes: &[u8], em: usize) -> Option<u16> {
+        Some(u16::from_le_bytes(
+            bytes.get(em..em.checked_add(2)?)?.try_into().ok()?,
+        ))
+    }
+
+    fn u32_le(bytes: &[u8], em: usize) -> Option<u32> {
+        Some(u32::from_le_bytes(
+            bytes.get(em..em.checked_add(4)?)?.try_into().ok()?,
+        ))
+    }
+
+    fn u32_be(bytes: &[u8], em: usize) -> Option<u32> {
+        Some(u32::from_be_bytes(
+            bytes.get(em..em.checked_add(4)?)?.try_into().ok()?,
+        ))
+    }
+
+    fn u64_le(bytes: &[u8], em: usize) -> Option<u64> {
+        Some(u64::from_le_bytes(
+            bytes.get(em..em.checked_add(8)?)?.try_into().ok()?,
+        ))
+    }
+
+    /// **WAV, exato**: os pedaços do RIFF em ordem, o `fmt ` antes do `data`.
+    ///
+    /// O tamanho que o `data` declara é limitado aos bytes que estão no
+    /// arquivo: um WAV gravado aos poucos leva ali `0xFFFFFFFF`, e um cortado,
+    /// mais do que tem. **E ao tamanho que o RIFF declara**, salvo quando o
+    /// RIFF também foi gravado aos poucos (`0xFFFFFFFF`): o WebKit para onde o
+    /// RIFF diz que o arquivo acaba, e o que vem depois não é som para ele.
+    ///
+    /// **Um segundo `fmt ` dá `None`.** O Chromium decodifica pelo primeiro, e
+    /// qual deles vale é pergunta de motor: um piso não escolhe.
+    pub(super) fn wav(bytes: &[u8]) -> Option<Piso> {
+        let riff = u32_le(bytes, 4)?;
+        let bytes = if riff == u32::MAX {
+            bytes
+        } else {
+            let fim = usize::try_from(riff).ok()?.checked_add(8)?;
+            bytes.get(..fim.min(bytes.len()))?
+        };
+        let mut resto = bytes.get(12..)?;
+        let mut formato = None;
+        loop {
+            let id = resto.get(..4)?;
+            let tamanho = usize::try_from(u32_le(resto, 4)?).ok()?;
+            let corpo = resto.get(8..)?;
+            if id == b"data" {
+                let (canais, taxa, por_quadro) = formato?;
+                let quadros = tamanho.min(corpo.len()) / por_quadro;
+                return Some(Piso {
+                    amostras: u64::try_from(quadros).ok()?,
+                    taxa,
+                    canais,
+                });
+            }
+            if id == b"fmt " {
+                if formato.is_some() {
+                    return None;
+                }
+                formato = Some(fmt(corpo.get(..tamanho)?)?);
+            }
+            // Um pedaço de tamanho ímpar leva um byte de alinhamento.
+            resto = corpo.get(tamanho.checked_add(tamanho % 2)?..)?;
+        }
+    }
+
+    /// Canais, taxa e bytes por quadro de um `fmt `, só dos formatos em que
+    /// um quadro é um bloco: PCM, float, A-law e µ-law, direto ou dentro do
+    /// `WAVE_FORMAT_EXTENSIBLE`. Os comprimidos ficam de fora.
+    ///
+    /// O quadro conta pelo maior dos dois tamanhos que o cabeçalho permite
+    /// ler — o bloco declarado e os canais vezes os bytes da amostra —, para
+    /// que um cabeçalho que discorde de si mesmo dê menos quadros, e não mais.
+    fn fmt(fmt: &[u8]) -> Option<(u32, u32, usize)> {
+        let codigo = match u16_le(fmt, 0)? {
+            0xFFFE => u16_le(fmt, 24)?,
+            codigo => codigo,
+        };
+        if !matches!(codigo, 1 | 3 | 6 | 7) {
+            return None;
+        }
+        let canais = u16_le(fmt, 2)?;
+        let taxa = u32_le(fmt, 4)?;
+        let bloco = usize::from(u16_le(fmt, 12)?);
+        let amostra = usize::from(u16_le(fmt, 14)?).div_ceil(8);
+        let por_quadro = bloco.max(usize::from(canais).checked_mul(amostra)?);
+        (canais > 0 && por_quadro > 0).then_some((u32::from(canais), taxa, por_quadro))
+    }
+
+    /// Uma página Ogg, lida pelo cabeçalho de 27 bytes e pela tabela de
+    /// segmentos.
+    struct PaginaOgg<'a> {
+        primeira: bool,
+        ultima: bool,
+        /// A posição ao fim da página, ou nada quando nenhum pacote termina
+        /// nela (`-1`).
+        granule: Option<u64>,
+        serial: u32,
+        corpo: &'a [u8],
+        depois: &'a [u8],
+    }
+
+    fn pagina_ogg(bytes: &[u8]) -> Option<PaginaOgg<'_>> {
+        if bytes.get(..4)? != b"OggS" || *bytes.get(4)? != 0 {
+            return None;
+        }
+        let tipo = *bytes.get(5)?;
+        let granule = u64_le(bytes, 6)?;
+        let serial = u32_le(bytes, 14)?;
+        let segmentos = usize::from(*bytes.get(26)?);
+        let inicio = 27 + segmentos;
+        let tamanho: usize = bytes.get(27..inicio)?.iter().map(|&s| usize::from(s)).sum();
+        let fim = inicio + tamanho;
+        Some(PaginaOgg {
+            primeira: tipo & 0x02 != 0,
+            ultima: tipo & 0x04 != 0,
+            granule: (granule != u64::MAX).then_some(granule),
+            serial,
+            corpo: bytes.get(inicio..fim)?,
+            depois: bytes.get(fim..)?,
+        })
+    }
+
+    /// **Ogg, pelas páginas**, seguidas pelo tamanho de cada uma desde a
+    /// primeira — e não por uma busca de `OggS`, que acharia a marca dentro dos
+    /// dados.
+    ///
+    /// A primeira página é a da identificação, Vorbis ou Opus. O piso é a
+    /// granule da última página do fluxo menos a da primeira de dados: um
+    /// fluxo que não começa do zero — um pedaço de transmissão — decodifica
+    /// menos do que a última granule diz. No Opus sai também o pre-skip, e a
+    /// taxa é sempre 48 kHz: a do cabeçalho é a da entrada, e só informa.
+    pub(super) fn ogg(bytes: &[u8]) -> Option<Piso> {
+        let identificacao = pagina_ogg(bytes)?;
+        if !identificacao.primeira {
+            return None;
+        }
+        let pacote = identificacao.corpo;
+        let (taxa, canais, pre_skip) = if pacote.starts_with(b"\x01vorbis") {
+            if u32_le(pacote, 7)? != 0 {
+                return None;
+            }
+            (u32_le(pacote, 12)?, u32::from(*pacote.get(11)?), 0)
+        } else if pacote.starts_with(b"OpusHead") {
+            // A versão de cima diferente de zero é um Opus incompatível.
+            if *pacote.get(8)? >= 16 {
+                return None;
+            }
+            (
+                48_000,
+                u32::from(*pacote.get(9)?),
+                u64::from(u16_le(pacote, 10)?),
+            )
+        } else {
+            return None;
+        };
+        let (mut primeira, mut ultima) = (None, None);
+        let mut resto = identificacao.depois;
+        while let Some(pagina) = pagina_ogg(resto) {
+            resto = pagina.depois;
+            if pagina.serial != identificacao.serial {
+                continue;
+            }
+            if let Some(granule) = pagina.granule.filter(|&granule| granule > 0) {
+                primeira.get_or_insert(granule);
+                ultima = Some(granule);
+            }
+            if pagina.ultima {
+                break;
+            }
+        }
+        let comeco = primeira?.max(pre_skip);
+        Some(Piso {
+            amostras: ultima?.saturating_sub(comeco),
+            taxa,
+            canais,
+        })
+    }
+
+    /// O que o cabeçalho de quatro bytes de um quadro MPEG áudio diz.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    struct QuadroMpeg {
+        mpeg1: bool,
+        camada: u8,
+        taxa: u32,
+        canais: u32,
+        amostras: u64,
+        tamanho: usize,
+    }
+
+    /// As taxas de bits, em kbps, pelo índice do cabeçalho. O zero é o
+    /// formato livre, que não diz o tamanho do quadro.
+    #[rustfmt::skip]
+    const KBPS: [[u16; 15]; 5] = [
+        // MPEG-1, camadas I, II e III.
+        [0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448],
+        [0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384],
+        [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+        // MPEG-2 e 2.5, camada I; e camadas II e III.
+        [0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256],
+        [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+    ];
+
+    fn quadro_mpeg(bytes: &[u8]) -> Option<QuadroMpeg> {
+        let [b0, b1, b2, b3]: [u8; 4] = bytes.get(..4)?.try_into().ok()?;
+        if b0 != 0xFF || b1 & 0xE0 != 0xE0 {
+            return None;
+        }
+        // Versão: `11` é MPEG-1, `10` MPEG-2, `00` MPEG-2.5, `01` reservada.
+        let versao = (b1 >> 3) & 0b11;
+        let camada = match (b1 >> 1) & 0b11 {
+            0b01 => 3,
+            0b10 => 2,
+            0b11 => 1,
+            _ => return None,
+        };
+        let mpeg1 = versao == 0b11;
+        let tabela = match (mpeg1, camada) {
+            (true, camada) => usize::from(camada - 1),
+            (false, 1) => 3,
+            (false, _) => 4,
+        };
+        let kbps = *KBPS.get(tabela)?.get(usize::from(b2 >> 4))?;
+        if kbps == 0 {
+            return None;
+        }
+        let taxa = match (versao, (b2 >> 2) & 0b11) {
+            (0b11, 0) => 44_100,
+            (0b11, 1) => 48_000,
+            (0b11, 2) => 32_000,
+            (0b10, 0) => 22_050,
+            (0b10, 1) => 24_000,
+            (0b10, 2) => 16_000,
+            (0b00, 0) => 11_025,
+            (0b00, 1) => 12_000,
+            (0b00, 2) => 8_000,
+            _ => return None,
+        };
+        let enchimento = u64::from((b2 >> 1) & 1);
+        let amostras: u64 = match (camada, mpeg1) {
+            (1, _) => 384,
+            (2, _) | (3, true) => 1152,
+            _ => 576,
+        };
+        let bits = u64::from(kbps) * 1000;
+        let tamanho = if camada == 1 {
+            (12 * bits / u64::from(taxa) + enchimento) * 4
+        } else {
+            amostras / 8 * bits / u64::from(taxa) + enchimento
+        };
+        Some(QuadroMpeg {
+            mpeg1,
+            camada,
+            taxa,
+            canais: if b3 >> 6 == 0b11 { 1 } else { 2 },
+            amostras,
+            tamanho: usize::try_from(tamanho)
+                .ok()
+                .filter(|&tamanho| tamanho > 4)?,
+        })
+    }
+
+    /// Quantos quadros o quadro Xing/Info diz que o arquivo tem, quando o
+    /// primeiro quadro é um e traz a contagem.
+    fn quadros_do_xing(quadro: &[u8], cabecalho: QuadroMpeg) -> Option<u64> {
+        if cabecalho.camada != 3 {
+            return None;
+        }
+        // A marca vem depois da informação lateral, que depende da versão e
+        // dos canais.
+        let em = 4 + match (cabecalho.mpeg1, cabecalho.canais) {
+            (true, 1) | (false, 2) => 17,
+            (true, _) => 32,
+            (false, _) => 9,
+        };
+        let marca = quadro.get(em..em + 4)?;
+        if marca != b"Xing" && marca != b"Info" {
+            return None;
+        }
+        if u32_be(quadro, em + 4)? & 1 == 0 {
+            return None;
+        }
+        Some(u64::from(u32_be(quadro, em + 8)?))
+    }
+
+    /// **MP3, pelos quadros que estão no arquivo.**
+    ///
+    /// Depois das etiquetas ID3v2 do começo, o primeiro quadro tem de estar
+    /// ali; dele em diante, cada quadro inteiro com a mesma versão, camada,
+    /// taxa e canais conta, e a cadeia para no primeiro que não for um — uma
+    /// etiqueta no fim, um arquivo cortado. Contar quadros, e não bytes pela
+    /// taxa de bits mais alta, deixa de fora o que não é som: uma etiqueta
+    /// APE com a capa no fim do arquivo não vira minutos de som.
+    ///
+    /// **O quadro Xing/Info limita a conta**: é o que o codificador escreveu,
+    /// e o piso fica no menor dos dois. Um download interrompido tem um Xing
+    /// maior que o arquivo, e a cadeia o segura; uma cadeia que seguisse além
+    /// do que o codificador contou, o Xing a segura.
+    ///
+    /// **E o que o decodificador pode cortar sai**: o próprio quadro
+    /// Xing/Info, o atraso e o enchimento que a etiqueta do LAME declara (até
+    /// 4095 amostras cada), e o atraso do decodificador (529).
+    ///
+    /// **O «nunca passa do real» vale para um fluxo bem formado.** Um quadro
+    /// com o cabeçalho certo e o conteúdo corrompido entra na cadeia, e o
+    /// decodificador não o entrega. O Chromium o descarta. O WebKit, conforme
+    /// o defeito, recusa o arquivo inteiro — medido com dez quadros
+    /// corrompidos seguidos — ou descarta os quadros como o Chromium — com
+    /// dez espalhados. O corte acima absorve uns oito quadros de 1152 amostras
+    /// (9871 amostras): com um corrompido, o piso fica abaixo do real nos dois
+    /// motores. Com mais que isso, e o arquivo decodificado, o piso pode
+    /// passar do real **nos dois** — a revisão mediu, com dez espalhados no
+    /// `City_Night_Crowd`, 18 952 bytes a mais no WebKit e 14 352 no
+    /// Chromium —, e o som pode ser recusado pelo teto que, decodificado, ele
+    /// talvez não passasse.
+    pub(super) fn mp3(bytes: &[u8]) -> Option<Piso> {
+        let mut inicio = 0usize;
+        while bytes.get(inicio..)?.starts_with(b"ID3") {
+            let etiqueta = bytes.get(inicio..inicio.checked_add(10)?)?;
+            // O tamanho em quatro bytes de sete bits, sem o cabeçalho, e o
+            // rodapé quando a bandeira o diz.
+            let tamanho = etiqueta.get(6..10)?.iter().try_fold(0usize, |soma, &b| {
+                (b < 0x80).then_some((soma << 7) | usize::from(b))
+            })?;
+            let rodape = if etiqueta.get(5)? & 0x10 != 0 { 10 } else { 0 };
+            inicio = inicio.checked_add(10 + tamanho + rodape)?;
+        }
+        let primeiro = quadro_mpeg(bytes.get(inicio..)?)?;
+        let mut quadros = 0u64;
+        let mut em = inicio;
+        while let Some(quadro) = bytes.get(em..).and_then(quadro_mpeg) {
+            let mesmo = (quadro.mpeg1, quadro.camada, quadro.taxa, quadro.canais)
+                == (
+                    primeiro.mpeg1,
+                    primeiro.camada,
+                    primeiro.taxa,
+                    primeiro.canais,
+                );
+            let fim = em.checked_add(quadro.tamanho)?;
+            if !mesmo || fim > bytes.len() {
+                break;
+            }
+            quadros += 1;
+            em = fim;
+        }
+        if let Some(contados) = quadros_do_xing(bytes.get(inicio..)?, primeiro) {
+            quadros = quadros.min(contados);
+        }
+        let corte = primeiro.amostras + 2 * 4095 + 529;
+        Some(Piso {
+            amostras: quadros
+                .saturating_mul(primeiro.amostras)
+                .saturating_sub(corte),
+            taxa: primeiro.taxa,
+            canais: primeiro.canais,
+        })
+    }
 }
 
 /// **Mídia que veio da metade de servidor de um MOD.**
@@ -6455,11 +6960,17 @@ fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
             motivo: "arquivo-grande-demais".to_owned(),
         });
     }
+    // **O som do servidor tem o mesmo pico do som do pacote**: a janela o lê
+    // do `data:` (`bufferDaUri`) e o decodifica inteiro. Recusado antes do
+    // `data:`, que seria o arquivo em base64 para ninguém.
+    if seele_ffi::mods::ler_tipo(&bytes).is_some_and(|tipo| tipo.papel == "som") {
+        som_cabe_decodificado(&bytes)?;
+    }
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
     Ok(MidiaDoMod {
-        uri: lida.uri,
+        uri: Some(lida.uri),
         papel: lida.papel,
         bytes: lida.bytes,
     })
@@ -6567,12 +7078,16 @@ async fn ler_imagem_mod(
 /// **A imagem lida por volume, ou a recusa dita no registro** com o id do MOD:
 /// a parte de [`ler_imagem_mod`] depois do `await`.
 ///
-/// Duas recusas, as duas por [`recusa_de_midia_dita`] com a origem `volume`:
+/// Três recusas, todas por [`recusa_de_midia_dita`] com a origem `volume`:
 ///
 /// - a do servidor, com o texto que ele mandou — o `erro` da resposta, a razão
 ///   com que a conexão fechou, o prazo esgotado;
 /// - a dos bytes que chegaram e não são de um formato que este produto
-///   decodifica, `formato-desconhecido`.
+///   decodifica, `formato-desconhecido`;
+/// - a do som que, decodificado, passa do teto do som
+///   ([`som_cabe_decodificado`]): a leitura por volume também chega à janela
+///   pelo caminho do som do servidor, o `data:` lido por `bufferDaUri`, e tem o
+///   mesmo pico.
 ///
 /// Extraída porque o comando fala com a rede e não sobe num teste: o guarda de
 /// texto que procurava `recusa_de_midia_dita` no comando passava com uma só das
@@ -6588,6 +7103,10 @@ fn imagem_lida_dita(
     let bytes = lida.map_err(|motivo| {
         recusa_de_midia_dita(baldes, agora, id, "volume", FalhaNoMod::Recusado { motivo })
     })?;
+    if seele_ffi::mods::ler_tipo(&bytes).is_some_and(|tipo| tipo.papel == "som") {
+        som_cabe_decodificado(&bytes)
+            .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, "volume", falha))?;
+    }
     let midia = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
         recusa_de_midia_dita(
             baldes,
@@ -6600,7 +7119,7 @@ fn imagem_lida_dita(
         )
     })?;
     Ok(MidiaDoMod {
-        uri: midia.uri,
+        uri: Some(midia.uri),
         papel: midia.papel,
         bytes: midia.bytes,
     })
@@ -11573,7 +12092,12 @@ mod a_supervisao_dos_mods_nativos {
             for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
                 let midia = super::ler_midia_do_servidor(&entrada).expect("imagem aceita");
                 assert_eq!(midia.bytes, bytes.len());
-                assert_eq!(midia.uri, format!("data:{mime};base64,{base64}"));
+                assert_eq!(
+                    midia.uri,
+                    Some(format!("data:{mime};base64,{base64}")),
+                    "a mídia do servidor saiu sem o `data:` que os bytes provaram, e a janela \
+                     fica sem o que mostrar"
+                );
             }
         }
     }
@@ -11582,10 +12106,14 @@ mod a_supervisao_dos_mods_nativos {
     fn midia_do_servidor_confere_bytes_e_limite_mesmo_com_cabecalho() {
         let png = b"\x89PNG\r\n\x1a\n";
         let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
-        assert!(super::ler_midia_do_servidor(&alegada)
-            .unwrap()
-            .uri
-            .starts_with("data:image/png;"));
+        assert!(
+            super::ler_midia_do_servidor(&alegada)
+                .unwrap()
+                .uri
+                .is_some_and(|uri| uri.starts_with("data:image/png;")),
+            "o tipo da mídia do servidor saiu do cabeçalho que o terceiro escreveu, e não dos \
+             bytes"
+        );
         for invalida in [
             "data:image/png,abc",
             "data:image/png;base64",
@@ -15197,8 +15725,8 @@ mod a_midia_recusada_e_dita_no_registro {
 #[cfg(test)]
 mod o_som_do_mod_sai_em_bytes {
     use super::{
-        motivo_de, som_declarado_do_mod, som_servido_dito, BaldesDoRegistro,
-        TETO_DA_FRASE_NO_REGISTRO,
+        midia_declarada_do_mod, motivo_de, som_declarado_do_mod, som_servido_dito,
+        BaldesDoRegistro, TETO_DA_FRASE_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO, WAV};
     use crate::rastro_de_teste::capturar;
@@ -15318,6 +15846,62 @@ mod o_som_do_mod_sai_em_bytes {
         );
     }
 
+    /// **O som do pacote atravessa a ponte uma vez só** (P49-7b).
+    ///
+    /// `montarMidia` pede `midia_do_mod` para saber o papel e os bytes a
+    /// contar, e o som em si vem cru por `som_do_mod`. O `data:` que
+    /// `midia_do_mod` montava para um som não tinha quem o lesse: o arquivo
+    /// era lido duas vezes, e uma delas atravessava a ponte em base64, um terço
+    /// maior, em JSON. A imagem continua com o `data:`, que é o que o `<img>`
+    /// mostra. O que se mede é o que atravessa a ponte: a resposta serializada.
+    #[test]
+    fn o_som_do_pacote_sai_sem_uri_e_a_imagem_com() {
+        let (raiz, hash) = publicar(&[("som/toque.wav", WAV), ("img/rosto.png", PNG)]);
+        let pela_ponte = |caminho: &str| {
+            let (resultado, _) = capturar(|| {
+                midia_declarada_do_mod(
+                    &BaldesDoRegistro::default(),
+                    origem(),
+                    &pasta(&raiz),
+                    ID,
+                    &hash,
+                    caminho,
+                )
+            });
+            let midia = resultado
+                .unwrap_or_else(|falha| panic!("`{caminho}` foi recusado: {}", motivo_de(&falha)));
+            match serde_json::to_value(&midia) {
+                Ok(serde_json::Value::Object(mapa)) => mapa,
+                outro => panic!("a mídia não atravessa a ponte como objeto: {outro:?}"),
+            }
+        };
+        let som = pela_ponte("som/toque.wav");
+        assert!(
+            !som.contains_key("uri"),
+            "o som do pacote voltou a atravessar a ponte em base64, no `uri` de `midia_do_mod`, \
+             além de cru por `som_do_mod`: o arquivo é lido duas vezes, e ninguém lê esse \
+             `data:` — {som:?}"
+        );
+        assert_eq!(
+            (som.get("papel"), som.get("bytes")),
+            (
+                Some(&serde_json::json!("som")),
+                Some(&serde_json::json!(WAV.len()))
+            ),
+            "o som do pacote saiu sem o papel ou sem os bytes, e `montarMidia` não sabe que \
+             elemento montar nem quanto contar no teto: {som:?}"
+        );
+        let imagem = pela_ponte("img/rosto.png");
+        assert!(
+            imagem
+                .get("uri")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|uri| uri.starts_with("data:image/png;base64,")),
+            "a imagem do pacote saiu sem o `data:` que os bytes provaram, e o `<img>` da \
+             região fica sem o que mostrar: {imagem:?}"
+        );
+    }
+
     #[test]
     fn uma_imagem_pedida_como_som_e_recusada_pelo_nome_e_dita() {
         let (raiz, hash) = publicar(&[("img/rosto.png", PNG)]);
@@ -15404,6 +15988,473 @@ mod o_som_do_mod_sai_em_bytes {
                 && linha.contains("motivo=formato-desconhecido")),
             "a recusa do som de formato desconhecido não chegou ao registro: {rastro}"
         );
+    }
+}
+
+/// **O som grande demais decodificado é recusado antes de a janela o
+/// decodificar** (P49-7a).
+///
+/// `decodeAudioData` devolve o som inteiro em float32, de uma vez: a janela só
+/// o conta depois de ele existir, e o pico já aconteceu. O Rust lê um piso do
+/// cabeçalho e recusa antes de servir. Um teste por braço — WAV, Ogg, MP3 —,
+/// cada um com o caso grande que só ele recusa, com bytes montados aqui; e as
+/// duas portas do servidor, que entregam o som pelo mesmo `data:`.
+#[cfg(test)]
+mod o_som_grande_demais_decodificado_e_recusado_antes {
+    use super::{
+        bytes_decodificados_minimos, imagem_lida_dita, ler_midia_do_servidor, motivo_de,
+        som_declarado_do_mod, BaldesDoRegistro, FalhaNoMod, TAXA_DA_DECODIFICACAO,
+        TETO_DO_SOM_DECODIFICADO,
+    };
+    use crate::pacote_de_teste::{pasta, publicar, ID, WAV};
+    use crate::rastro_de_teste::capturar;
+    use crate::relogio_de_teste::origem;
+    use seele_ffi::mods::TETO_DE_MIDIA;
+
+    /// Um WAV PCM com `dados` bytes de silêncio.
+    fn wav(canais: u16, taxa: u32, bits: u16, dados: usize) -> Vec<u8> {
+        let por_quadro = canais * bits.div_ceil(8);
+        let tamanho = u32::try_from(dados).expect("o WAV de teste cabe em 32 bits");
+        let mut wav = b"RIFF".to_vec();
+        wav.extend_from_slice(&(36 + tamanho).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&canais.to_le_bytes());
+        wav.extend_from_slice(&taxa.to_le_bytes());
+        wav.extend_from_slice(&(taxa * u32::from(por_quadro)).to_le_bytes());
+        wav.extend_from_slice(&por_quadro.to_le_bytes());
+        wav.extend_from_slice(&bits.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&tamanho.to_le_bytes());
+        wav.resize(44 + dados, 0);
+        wav
+    }
+
+    /// Uma página Ogg com um pacote só, de menos de 255 bytes. O CRC fica em
+    /// zero: a leitura segue as páginas pelo tamanho, e não o confere.
+    fn pagina_ogg(tipo: u8, granule: u64, sequencia: u32, pacote: &[u8]) -> Vec<u8> {
+        let mut pagina = b"OggS\0".to_vec();
+        pagina.push(tipo);
+        pagina.extend_from_slice(&granule.to_le_bytes());
+        pagina.extend_from_slice(&0x5EE1_E000_u32.to_le_bytes());
+        pagina.extend_from_slice(&sequencia.to_le_bytes());
+        pagina.extend_from_slice(&[0; 4]);
+        pagina.push(1);
+        pagina.push(u8::try_from(pacote.len()).expect("o pacote de teste cabe num segmento"));
+        pagina.extend_from_slice(pacote);
+        pagina
+    }
+
+    /// Um Ogg de três páginas: a da identificação, uma de dados logo no
+    /// começo, e a última, que diz até onde o som vai.
+    fn ogg(identificacao: &[u8], granule_final: u64) -> Vec<u8> {
+        [
+            pagina_ogg(0x02, 0, 0, identificacao),
+            pagina_ogg(0x00, 1024, 1, &[0; 16]),
+            pagina_ogg(0x04, granule_final, 2, &[0; 16]),
+        ]
+        .concat()
+    }
+
+    /// O cabeçalho de identificação do Vorbis.
+    fn vorbis(canais: u8, taxa: u32) -> Vec<u8> {
+        let mut id = b"\x01vorbis".to_vec();
+        id.extend_from_slice(&0u32.to_le_bytes());
+        id.push(canais);
+        id.extend_from_slice(&taxa.to_le_bytes());
+        id.extend_from_slice(&[0; 12]);
+        id.extend_from_slice(&[0xB8, 1]);
+        id
+    }
+
+    /// O cabeçalho de identificação do Opus.
+    fn opus(canais: u8, pre_skip: u16) -> Vec<u8> {
+        let mut id = b"OpusHead\x01".to_vec();
+        id.push(canais);
+        id.extend_from_slice(&pre_skip.to_le_bytes());
+        id.extend_from_slice(&44_100u32.to_le_bytes());
+        id.extend_from_slice(&[0; 3]);
+        id
+    }
+
+    /// Um quadro MPEG-1 camada III a 48 kHz e 320 kbps — 960 bytes e 1152
+    /// amostras —, com o quadro Xing quando `xing` diz quantos são.
+    fn quadro_mp3(canais: u8, xing: Option<u32>) -> Vec<u8> {
+        let modo = if canais == 1 { 0xC0 } else { 0x00 };
+        let mut quadro = vec![0xFF, 0xFB, 0xE4, modo];
+        if let Some(quadros) = xing {
+            quadro.resize(if canais == 1 { 4 + 17 } else { 4 + 32 }, 0);
+            quadro.extend_from_slice(b"Xing");
+            quadro.extend_from_slice(&1u32.to_be_bytes());
+            quadro.extend_from_slice(&quadros.to_be_bytes());
+        }
+        quadro.resize(960, 0);
+        quadro
+    }
+
+    /// Um MP3 de `tamanho` bytes, quadro depois de quadro; o último fica
+    /// cortado onde o tamanho acaba.
+    fn mp3(canais: u8, xing: Option<u32>, tamanho: usize) -> Vec<u8> {
+        let mut mp3 = quadro_mp3(canais, xing);
+        let quadro = quadro_mp3(canais, None);
+        while mp3.len() < tamanho {
+            mp3.extend_from_slice(&quadro);
+        }
+        mp3.truncate(tamanho);
+        mp3
+    }
+
+    /// Publica `bytes` em `caminho` e confere que o som é recusado pelo nome,
+    /// com os números, e dito no registro.
+    fn recusado(caminho: &str, bytes: &[u8]) {
+        let (raiz, hash) = publicar(&[(caminho, bytes)]);
+        let (resultado, rastro) = capturar(|| {
+            som_declarado_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                caminho,
+            )
+        });
+        let falha = resultado.err().unwrap_or_else(|| {
+            panic!(
+                "`{caminho}`, que decodificado passa do teto do som, foi servido: a janela o \
+                 decodifica inteiro antes de poder recusá-lo, e o pico que o teto existe para \
+                 evitar acontece — o piso foi {:?}",
+                bytes_decodificados_minimos(bytes)
+            )
+        });
+        recusado_pelo_teto(caminho, &falha);
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("mod_id=prova/midia")
+                && linha.contains("som-grande-demais-decodificado")),
+            "a recusa de `{caminho}` não chegou ao registro, e quem hospeda não sabe por que o \
+             som não tocou: {rastro}"
+        );
+    }
+
+    /// A recusa é a do som grande demais decodificado, com os números.
+    fn recusado_pelo_teto(caminho: &str, falha: &FalhaNoMod) {
+        let motivo = motivo_de(falha);
+        assert!(
+            motivo.starts_with("som-grande-demais-decodificado")
+                && motivo.contains(&TETO_DO_SOM_DECODIFICADO.to_string()),
+            "`{caminho}` foi recusado por outro motivo, ou sem o teto: a janela não o diz como o \
+             teto do som, e o MOD fica sem os números — {motivo}"
+        );
+    }
+
+    /// Publica `bytes` em `caminho` e confere que o som sai, intacto.
+    fn servido(caminho: &str, bytes: &[u8]) {
+        let (raiz, hash) = publicar(&[(caminho, bytes)]);
+        let (resultado, _) = capturar(|| {
+            som_declarado_do_mod(
+                &BaldesDoRegistro::default(),
+                origem(),
+                &pasta(&raiz),
+                ID,
+                &hash,
+                caminho,
+            )
+        });
+        let servido = resultado.unwrap_or_else(|falha| {
+            panic!(
+                "`{caminho}`, que cabe decodificado, foi recusado — {}",
+                motivo_de(&falha)
+            )
+        });
+        assert!(
+            servido == bytes,
+            "os bytes de `{caminho}` mudaram no caminho"
+        );
+    }
+
+    /// O piso em bytes de `segundos` de som a 48 kHz, com `canais`: o que a
+    /// janela segura, menos o quadro que a conversão de taxa pode arredondar.
+    fn segundos(segundos: u64, canais: u64) -> u64 {
+        (segundos * TAXA_DA_DECODIFICACAO - 1) * canais * 4
+    }
+
+    /// **WAV: exato, pelo `fmt ` e pelo `data`.** Oito bits, mono, 8 kHz, do
+    /// tamanho do teto de arquivo: cada byte vira seis quadros de quatro bytes,
+    /// e o arquivo de dez MiB, uns 250 MB decodificado.
+    #[test]
+    fn um_wav_que_passa_do_teto_decodificado_e_recusado_antes() {
+        let grande = wav(1, 8_000, 8, TETO_DE_MIDIA - 44);
+        assert_eq!(
+            grande.len(),
+            TETO_DE_MIDIA,
+            "o WAV grande não é do tamanho do teto"
+        );
+        recusado("som/grande.wav", &grande);
+        assert_eq!(
+            bytes_decodificados_minimos(&grande),
+            Some(((TETO_DE_MIDIA as u64 - 44) * 6 - 1) * 4),
+            "o piso do WAV não é o exato que o `fmt ` e o `data` dizem"
+        );
+
+        // Um segundo passa, com os bytes exatos.
+        let curto = wav(1, 8_000, 8, 8_000);
+        assert_eq!(
+            bytes_decodificados_minimos(&curto),
+            Some(segundos(1, 1)),
+            "o piso de um segundo de WAV não é um segundo a 48 kHz"
+        );
+        servido("som/curto.wav", &curto);
+
+        // **O `data` diz mais do que o arquivo tem**, como num WAV gravado
+        // aos poucos: o piso conta os bytes que estão lá.
+        let mut aos_poucos = wav(1, 8_000, 8, 8_000);
+        if let Some(tamanho) = aos_poucos.get_mut(40..44) {
+            tamanho.copy_from_slice(&u32::MAX.to_le_bytes());
+        }
+        assert_eq!(
+            bytes_decodificados_minimos(&aos_poucos),
+            Some(segundos(1, 1)),
+            "o piso do WAV contou o tamanho que o `data` alega, e não os bytes que estão no \
+             arquivo: um WAV gravado aos poucos seria recusado pelo que não tem"
+        );
+
+        // O WAV mínimo do pacote de teste não tem `fmt ` nem `data`
+        // completos: o piso não existe, e o som segue para a janela.
+        assert_eq!(
+            bytes_decodificados_minimos(WAV),
+            None,
+            "um WAV sem `fmt ` nem `data` ganhou um piso, que só pode ter sido inventado"
+        );
+    }
+
+    /// **Ogg: pela granule da última página.** Três minutos de Vorbis estéreo a
+    /// 44,1 kHz são uns 69 MB a 48 kHz; no Opus, a granule já está a 48 kHz,
+    /// menos o pre-skip.
+    #[test]
+    fn um_ogg_que_passa_do_teto_decodificado_e_recusado_antes() {
+        recusado("som/vorbis.ogg", &ogg(&vorbis(2, 44_100), 180 * 44_100));
+        recusado("som/opus.ogg", &ogg(&opus(2, 312), 180 * 48_000 + 312));
+
+        // Um minuto passa: pouco menos que um minuto a 48 kHz, estéreo.
+        let piso = bytes_decodificados_minimos(&ogg(&vorbis(2, 44_100), 60 * 44_100));
+        assert!(
+            piso.is_some_and(|piso| piso <= segundos(60, 2) && piso > segundos(59, 2)),
+            "o piso de um minuto de Vorbis não é um minuto: {piso:?}"
+        );
+        // O Opus mono conta um canal, e o pre-skip sai.
+        let piso = bytes_decodificados_minimos(&ogg(&opus(1, 312), 60 * 48_000 + 312));
+        assert!(
+            piso.is_some_and(|piso| piso <= segundos(60, 1) && piso > segundos(59, 1)),
+            "o piso de um minuto de Opus mono não é um minuto: {piso:?}"
+        );
+    }
+
+    /// **MP3: pelos quadros.** Um Xing de 7600 quadros estéreo são uns 70 MB
+    /// decodificado; sem Xing, a cadeia de quadros diz o mesmo. Um mono sem
+    /// Xing do tamanho do teto — a 320 kbps, a taxa mais alta do MPEG-1 camada
+    /// III, o mais curto que dez MiB podem ser — fica em uns 50 MB, e passa.
+    #[test]
+    fn um_mp3_que_passa_do_teto_decodificado_e_recusado_antes() {
+        recusado("som/xing.mp3", &mp3(2, Some(7_600), 7_600 * 960));
+        recusado("som/estereo.mp3", &mp3(2, None, TETO_DE_MIDIA));
+
+        let mono = bytes_decodificados_minimos(&mp3(1, None, TETO_DE_MIDIA));
+        assert!(
+            mono.is_some_and(|piso| piso > 45_000_000 && piso <= TETO_DO_SOM_DECODIFICADO),
+            "o MP3 mono do tamanho do teto não ficou abaixo do teto do som, e seria recusado \
+             por um piso que passa do real: {mono:?}"
+        );
+
+        // **O Xing de um arquivo cortado conta o que não está nele.** O piso
+        // fica nos quadros que estão: cem, e não 7600.
+        let cortado = bytes_decodificados_minimos(&mp3(2, Some(7_600), 100 * 960));
+        assert!(
+            cortado.is_some_and(|piso| piso < segundos(3, 2)),
+            "o piso do MP3 cortado contou os quadros que o Xing alega, e não os que estão no \
+             arquivo: um download interrompido seria recusado pelo que não tem — {cortado:?}"
+        );
+    }
+
+    /// **As margens que fazem do valor um piso**, uma por teste. Sem elas os
+    /// casos acima continuam verdes, e o piso passa do real: medido pela
+    /// revisão contra o `decodeAudioData` do Chromium e do WebKit — o motor do
+    /// produto no Mac —, um WAV com o bloco declarado menor dava quatro vezes
+    /// o real, um Opus com pre-skip de 3840 passava 23 032 bytes, e um MP3
+    /// comum, de 16 a 25 mil.
+    ///
+    /// O WAV: o bloco declarado (1) é menor que os canais vezes os bytes da
+    /// amostra (2 × 2). O quadro conta pelo maior: um segundo estéreo de
+    /// 16 bits a 8 kHz, e não quatro.
+    #[test]
+    fn o_bloco_menor_que_a_amostra_nao_multiplica_o_piso_do_wav() {
+        let mut wav = wav(2, 8_000, 16, 8_000 * 4);
+        if let Some(bloco) = wav.get_mut(32..34) {
+            bloco.copy_from_slice(&1u16.to_le_bytes());
+        }
+        assert_eq!(
+            bytes_decodificados_minimos(&wav),
+            Some(segundos(1, 2)),
+            "o piso do WAV contou os quadros pelo bloco que o cabeçalho declara, menor que a \
+             amostra: quatro vezes o real, e um som que cabe seria recusado"
+        );
+    }
+
+    /// **Um segundo `fmt ` deixa o WAV sem piso.** O Chromium decodifica pelo
+    /// primeiro, e o piso que lesse o último recusaria pelo formato que o
+    /// motor não usa: a revisão mediu 127 MB de piso contra 11,5 MB reais. Qual
+    /// dos dois vale é pergunta de motor, e um piso não escolhe.
+    #[test]
+    fn um_segundo_fmt_deixa_o_wav_sem_piso() {
+        let primeiro = wav(2, 48_000, 16, 48_000 * 4);
+        let segundo = wav(1, 8_000, 8, 0);
+        let mut dois = [
+            primeiro.get(..36).expect("o cabeçalho e o primeiro `fmt `"),
+            segundo.get(12..36).expect("o segundo `fmt `"),
+            primeiro.get(36..).expect("o `data`"),
+        ]
+        .concat();
+        let riff = u32::try_from(dois.len() - 8).expect("o WAV de teste cabe em 32 bits");
+        if let Some(tamanho) = dois.get_mut(4..8) {
+            tamanho.copy_from_slice(&riff.to_le_bytes());
+        }
+        assert_eq!(
+            bytes_decodificados_minimos(&dois),
+            None,
+            "um WAV com dois `fmt ` ganhou um piso por um deles, e o motor pode decodificar pelo \
+             outro: a revisão mediu a recusa de um som que cabia"
+        );
+    }
+
+    /// **O `data` não passa do tamanho do RIFF.** Um `data` gravado aos poucos
+    /// (`0xFFFFFFFF`) seguido de outro pedaço: o WebKit para onde o RIFF diz
+    /// que o arquivo acaba, e o piso que contasse até o fim do arquivo passaria
+    /// do real — a revisão mediu 2,28 MB a mais.
+    #[test]
+    fn o_data_do_wav_nao_passa_do_tamanho_do_riff() {
+        let mut wav = wav(1, 8_000, 8, 8_000);
+        if let Some(tamanho) = wav.get_mut(40..44) {
+            tamanho.copy_from_slice(&u32::MAX.to_le_bytes());
+        }
+        wav.extend_from_slice(b"LIST");
+        wav.extend_from_slice(&4_000u32.to_le_bytes());
+        wav.resize(wav.len() + 4_000, 0);
+        assert_eq!(
+            bytes_decodificados_minimos(&wav),
+            Some(segundos(1, 1)),
+            "o piso do WAV contou como som o pedaço que vem depois do fim que o RIFF declara, e \
+             o WebKit para ali: o piso passa do real"
+        );
+    }
+
+    /// O Opus: o pre-skip (3840) é maior que a granule da primeira página de
+    /// dados (1024, um pacote só). O que sai do começo é o maior dos dois: um
+    /// segundo depois do pre-skip, e não 2816 amostras a mais.
+    #[test]
+    fn o_pre_skip_maior_que_a_primeira_pagina_sai_do_piso_do_opus() {
+        let opus = ogg(&opus(2, 3_840), 48_000 + 3_840);
+        assert_eq!(
+            bytes_decodificados_minimos(&opus),
+            Some(segundos(1, 2)),
+            "o piso do Opus tirou do começo só a granule da primeira página, menor que o \
+             pre-skip: o decodificador corta o pre-skip inteiro, e o piso passa do real"
+        );
+    }
+
+    /// O MP3: cem quadros estéreo de 1152 amostras são 115 200; o corte do
+    /// decodificador — o quadro Xing/Info, o atraso e o enchimento do LAME, e o
+    /// atraso do decodificador — tira 1152 + 2 × 4095 + 529 = 9871, a
+    /// conversão de taxa tira um quadro, e o resto, vezes dois canais e quatro
+    /// bytes, é 842 624.
+    #[test]
+    fn o_corte_do_decodificador_sai_do_piso_do_mp3() {
+        assert_eq!(
+            bytes_decodificados_minimos(&mp3(2, None, 100 * 960)),
+            Some(842_624),
+            "o piso do MP3 contou as amostras que o decodificador corta — o quadro do Xing, o \
+             atraso e o enchimento —, e passa do real em todo MP3 comum"
+        );
+    }
+
+    /// **As duas portas do servidor recusam o mesmo som**: a resposta de
+    /// `midia_em_bytes` e a leitura por volume chegam à janela pelo `data:`, e
+    /// a janela o decodifica inteiro, como o do pacote.
+    #[test]
+    fn o_som_do_servidor_que_passa_do_teto_decodificado_e_recusado_antes_de_servir() {
+        let grande = wav(1, 8_000, 8, TETO_DE_MIDIA - 44);
+        let falha = ler_midia_do_servidor(&seele_ffi::base64_de(&grande))
+            .err()
+            .expect("o som do servidor que passa do teto decodificado foi servido no `data:`");
+        recusado_pelo_teto("o som do servidor", &falha);
+
+        let (resultado, rastro) =
+            capturar(|| imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(grande)));
+        let falha = resultado
+            .err()
+            .expect("o som lido por volume que passa do teto decodificado foi servido");
+        recusado_pelo_teto("o som lido por volume", &falha);
+        assert!(
+            rastro.lines().any(|linha| linha.contains("WARN")
+                && linha.contains("origem=\"volume\"")
+                && linha.contains("som-grande-demais-decodificado")),
+            "a recusa do som lido por volume não chegou ao registro: {rastro}"
+        );
+
+        let curto = ler_midia_do_servidor(&seele_ffi::base64_de(&wav(1, 8_000, 8, 8_000)));
+        assert!(
+            curto.is_ok_and(|midia| midia.papel == "som" && midia.uri.is_some()),
+            "o som curto do servidor deixou de sair com o `data:`, que é o único caminho dele \
+             até a janela"
+        );
+    }
+
+    /// **Os números do som decodificado são os da janela.** O Rust repete o
+    /// teto e a taxa de `mods-regiao.js`: com um maior que o da janela, o Rust
+    /// serviria o som que a janela vai recusar depois do pico; com um menor,
+    /// recusaria o que cabe.
+    #[test]
+    fn os_numeros_do_som_decodificado_sao_os_da_janela() {
+        let regiao = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/mods-regiao.js"),
+        )
+        .expect("mods-regiao.js legível")
+        .replace("\r\n", "\n");
+        let taxa = regiao
+            .lines()
+            .find_map(|linha| linha.strip_prefix("const TAXA_DA_DECODIFICACAO = "))
+            .and_then(|valor| numero_em_js(valor.trim_end_matches(';')));
+        assert_eq!(
+            taxa,
+            Some(TAXA_DA_DECODIFICACAO),
+            "`TAXA_DA_DECODIFICACAO` de `mods-regiao.js` não é a do Rust: o piso conta os \
+             quadros numa taxa e a janela decodifica noutra"
+        );
+        for tabela in ["LIMITES_DA_REGIAO", "LIMITES_DO_CARTAO"] {
+            let teto = regiao
+                .split(&format!("const {tabela} = Object.freeze({{"))
+                .nth(1)
+                .and_then(|resto| resto.split("\n});").next())
+                .and_then(|corpo| {
+                    corpo
+                        .lines()
+                        .find_map(|linha| linha.trim().strip_prefix("bytesDeSomDecodificado:"))
+                })
+                .and_then(|valor| numero_em_js(valor.trim().trim_end_matches(',')));
+            assert_eq!(
+                teto,
+                Some(TETO_DO_SOM_DECODIFICADO),
+                "`{tabela}.bytesDeSomDecodificado` não é o teto do Rust: o Rust serve o som que a \
+                 janela recusa depois do pico, ou recusa o que cabe"
+            );
+        }
+    }
+
+    /// Um número de JavaScript escrito como produto de inteiros — `48000`,
+    /// `64 * 1024 * 1024` —, ou nada.
+    fn numero_em_js(texto: &str) -> Option<u64> {
+        texto.split('*').try_fold(1u64, |produto, fator| {
+            produto.checked_mul(fator.trim().replace('_', "").parse().ok()?)
+        })
     }
 }
 

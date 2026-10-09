@@ -1031,9 +1031,14 @@ function donoDaRegiao(mod, instancia) {
      * hash é o do pacote: na região, o do MOD carregado; numa contribuição,
      * o da instância que a registrou (`montarContribuicao`).
      *
-     * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
-     * `midia_do_mod` para o papel `som`: em base64 por `carregarMidia`, que a
-     * região chama para saber o papel e os bytes a contar, e cru por aqui.
+     * **O som do pacote atravessa a ponte uma vez só, e por aqui.** Para um
+     * som, `carregarMidia` devolve o papel e os bytes a contar, sem `uri`
+     * (P49-7b).
+     *
+     * **O som que, decodificado, passa do teto do som é recusado antes**, no
+     * Rust, por um piso tirado do cabeçalho (P49-7a): a rejeição chega como
+     * `{ Recusado: { motivo: "som-grande-demais-decodificado: …" } }`, com os
+     * números, e a região a diz como o teto, e não como falha de carga.
      */
     bytesDoSom: async (caminho) => {
       const geracao = geracaoDaSessao;
@@ -1295,7 +1300,9 @@ function avatarContribuido(pessoaId) {
     dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
   };
   const fonte = contribuicao.conteudo.doServidor;
-  dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
+  // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
+  // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
+  soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
     .then((midia) => {
       if (estado.cancelado || !dono.podeFalar()) return;
       let ocupados = 0;

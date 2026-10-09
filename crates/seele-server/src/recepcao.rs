@@ -480,12 +480,12 @@ mod tests {
             .with_ansi(false)
             .finish();
         let (recepcao, _) = recepcao();
-        // Um segundo assinante vivo: com um só registrado, o `tracing-core`
+        // Um segundo despachante vivo: com um só registrado, o `tracing-core`
         // 0.1.36 deixa a thread que passa primeiro por uma linha decidir por
-        // todas, e os testes vizinhos sem captura apagavam esta. O mesmo
-        // conserto do `segundo_despachante` do app (`1405210b`). Medido aqui:
-        // 3/3 rodadas vermelhas sem ele, 20/20 verdes com ele.
-        let _segundo = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
+        // todas, e os testes vizinhos sem captura apagavam esta. É o auxiliar
+        // do crate, o mesmo `segundo_despachante` do app (`1405210b`). Medido
+        // aqui: 3/3 rodadas vermelhas sem ele, 20/20 verdes com ele.
+        crate::rastro_de_teste::segundo_despachante();
         tracing::subscriber::with_default(assinante, || {
             let (toque, _decisao) = toca(recepcao.chegou(chave(2), "rafa"));
             recepcao.recusar(toque);

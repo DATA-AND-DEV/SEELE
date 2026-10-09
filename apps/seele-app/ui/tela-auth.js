@@ -729,11 +729,18 @@ function alguemOlhando() {
 /**
  * Bate de novo, uma vez.
  *
- * Reaproveita o `conectar` da tela de entrada inteiro — mesmo endereço, mesmo
- * apelido, mesmo convite —, e é ele quem decide para onde isto vai: admitido,
+ * Reaproveita o `conectar` da tela de entrada inteiro — mesmo endereço e mesmo
+ * apelido —, e é ele quem decide para onde isto vai: admitido,
  * `entrarNaAutenticacao` reescreve esta tela como aperto de mão e segue direto
  * para a sessão; ainda não, `levarParaAEspera` a reescreve como espera e
  * recomeça a contagem.
+ *
+ * **Sem credencial nenhuma.** Este comentário dizia «mesmo convite», e a batida
+ * nunca o levou: `conectar()` sem argumento não lembra segredo, e a credencial
+ * da tentativa só é guardada pela pergunta dos MODs (lote R da F5). Quem está
+ * na fila não precisa dela: o servidor perdoa o segredo ausente de uma chave
+ * que já espera decisão (`portaria::pedido_pendente`) ou que já foi admitida
+ * (`portaria::ja_admitido`).
  *
  * Uma batida por vez: quem a chama já parou o relógio, e só as duas saídas
  * acima o religam.
