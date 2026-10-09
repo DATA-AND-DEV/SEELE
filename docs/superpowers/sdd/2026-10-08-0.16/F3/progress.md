@@ -339,3 +339,21 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     do git, sem perda.
   - Pendente: o `mod_de_referencia` da conformidade, depois da bateria da
     oitava integração.
+- **Tarefa 8 feita no código** (`733c1a5`): `mundo.avisar`, o `Avisador` (4 por
+  segundo em qualquer janela, o excedente junto por canal), `Event::ModAviso` a
+  quem pode ler o canal, `contexto.sala`, o evento `servidor` na janela da 6, e
+  os eventos da tela pela comparação de retratos. Quinze reversões reprovando;
+  duas que passaram mudaram o código (a conferência redundante saiu) ou o teste
+  (o aviso aos 600 ms).
+  - Ruling: o `ModAviso` pede a permissão de ler o canal, e não a assinatura —
+    custo se errado: quem não abriu a conversa daquele canal recebe o aviso do
+    MOD dele, que é o que a MESA precisa.
+  - Ruling: janela deslizante, e não balde de fichas — custo se errado: o
+    primeiro segundo deixa passar 4, e não 8.
+  - Ruling: o `lugar` sai com o tamanho da sessão até a tarefa 5 dar o de cada
+    região — custo se errado: um MOD lê a forma da casca, e não a da região
+    dele, até lá.
+  - Pendente: a conformidade `aviso_do_servidor.rs` (escrita), depois da bateria.
+  - Visto no caminho: `alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
+    reprovou uma vez na rodada paralela do `seele-server` e passou 3 de 3
+    sozinho (7,8 s cada). Não é desta frente; dito à orquestradora.
