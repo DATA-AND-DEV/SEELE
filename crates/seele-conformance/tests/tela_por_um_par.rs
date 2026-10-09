@@ -2333,6 +2333,22 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     Ok(())
 }
 
+/// O próximo aviso **que já está na fila**, sem esperar: `None` é a fila vazia.
+///
+/// Prazo zero, e sem o orçamento cooperativo do `tokio`
+/// (`tokio::task::unconstrained`): o `None` tem de querer dizer fila vazia, e
+/// nada mais. Medido no `tokio` 1.53.1 sem o embrulho: 500 avisos de 500 lidos
+/// em prazo zero numa volta só, no corpo do teste e numa tarefa — com o
+/// orçamento gasto, o `Timeout` devolve `Pending`, a tarefa cede e a leitura
+/// continua, em vez de devolver `Elapsed`. O embrulho tira do teste a
+/// dependência desse detalhe do `Timeout`: se ele mudar, uma fila cheia não
+/// vira «a fila esvaziou».
+async fn ja_na_fila(enlace: &mut Enlace) -> Option<Aviso> {
+    tokio::task::unconstrained(tokio::time::timeout(Duration::ZERO, enlace.proximo()))
+        .await
+        .ok()
+}
+
 /// Põe o par a servir esta tela de verdade, e devolve o maior `seq` provado.
 ///
 /// As três pernas que os irmãos deste arquivo já usam, numa função só: o piso
@@ -2744,10 +2760,10 @@ async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result
     // provada.
     let mut antes_do_fim = 0_usize;
     loop {
-        match tokio::time::timeout(Duration::ZERO, assiste.proximo()).await {
-            Ok(Aviso::Encerrado(_)) => break,
-            Ok(_) => antes_do_fim += 1,
-            Err(_) => panic!(
+        match ja_na_fila(&mut assiste).await {
+            Some(Aviso::Encerrado(_)) => break,
+            Some(_) => antes_do_fim += 1,
+            None => panic!(
                 "a fila de quem saiu esvaziou antes do `Encerrado`, depois de {antes_do_fim} \
                  avisos: `sair` voltou antes de o motor dizer que a sessão acabou"
             ),
@@ -2758,16 +2774,16 @@ async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result
     // o canal fechado — ninguém mais escreve nele, e não há o que ler — e a
     // fila vazia deixa o resto para o silêncio logo abaixo.
     loop {
-        match tokio::time::timeout(Duration::ZERO, assiste.proximo()).await {
-            Ok(Aviso::TelaQuadro { tela, bytes, .. }) => assert!(
+        match ja_na_fila(&mut assiste).await {
+            Some(Aviso::TelaQuadro { tela, bytes, .. }) => assert!(
                 tela != screen,
                 "o quadro {:?} estava na fila de quem saiu **depois** do `Encerrado`: a \
                  despedida avisou o fim com o caminho do par de pé, e a casca recebe imagem de \
                  uma sessão que ela mesma fechou",
                 seq_de(&bytes)
             ),
-            Ok(Aviso::Encerrado(_)) | Err(_) => break,
-            Ok(_) => {}
+            Some(Aviso::Encerrado(_)) | None => break,
+            Some(_) => {}
         }
     }
 
