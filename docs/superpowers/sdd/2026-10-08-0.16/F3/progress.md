@@ -124,3 +124,25 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     telemetria fica inerte sob o diálogo e coberta pela página imersiva. Vai
     para a M3 com a API 6 (tarefa 11).
   - Falta, e é do dono: o Windows (WebView2) e o iPhone.
+
+## 09/10
+
+- **A tarefa 2 do plano, liberada pela orquestradora antes do K4** (só toca o
+  `xtask/src/check_api.rs` e uma função nova no fim do `frontend.rs`):
+  - `2cb0c3b`: o `check-api` ganha as regras da v6 — os pontos e os tipos de
+    superfície nos dois sentidos (o sentido casca → API é o que pega o
+    `pessoa.avatar`), os nomes da metade de servidor contra o que o runtime
+    registra, e os tetos declarados contra os do produto (um teto que o guarda
+    não sabe conferir reprova). Só cobram a partir da v6; a saída do
+    `cargo xtask check-api` não muda. 45 testes do `check_api`, 72 do binário do
+    `xtask`, clippy e fmt limpos.
+  - `0b012c1`: `a_casca_confere_as_mesmas_capacidades_que_o_nucleo`, o guarda que
+    o `base.js` citava e nunca existiu. Compara os dois mapas inteiros.
+  - **Prova por reversão de cada um**: o sentido casca → API dos pontos, os
+    nomes de servidor, a comparação dos tetos e a volta das regras na lista de
+    `conferir_arquivo` ficam vermelhos no teste deles; o espelho reprova com a
+    casca sem `volume` na API 5, com o núcleo com uma capacidade a mais na API 3,
+    e com uma API 6 só na casca.
+  - Ruling: um bloco ausente na v6 conta como vazio, e não como violação
+    própria — custo se errado: nenhum, porque o sentido contrário reprova cada
+    ponto e tipo que falta, nomeado.
