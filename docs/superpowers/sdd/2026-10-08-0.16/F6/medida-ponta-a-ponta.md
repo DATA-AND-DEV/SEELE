@@ -105,7 +105,7 @@ Artefatos de teste, sem publicar nada:
 | 1 | a 0.15.1-teste, com servidor hospedado e conversa escrita, atualiza pelo botão | a 0.16.0-teste abre |
 | 2 | a primeira abertura da 0.16 | `dados/servidor-0.15` com `PRONTA`, o `seele.db` igual ao de antes (pela soma), e a nota de uma vez na tela |
 | 3 | a linha legada é baixada sozinha | `lancador/versoes/0.15.2-teste/INSTALADA` com 4 linhas |
-| 4 | hospedar no Servidor 0.15 | a 0.15.2 abre hospedando, **com a mesma impressão digital de antes da atualização**. As notas da 0.15.2 (`empacotar/notas/0.15.2.md`, no `linha/0.15`) afirmam isso e esperam por este passo para sair |
+| 4 | hospedar no Servidor 0.15 | a 0.15.2 abre hospedando, **com a mesma impressão digital de antes da atualização**. As notas da 0.15.2 esperavam por este passo até a D-linha-2: pela atualização normal, a pasta é a mesma, e a frase passou a ser a do caminho normal, medida sem ele (`60788523`, no `linha/0.15`). Este passo continua valendo para o caminho do launcher |
 | 5 | na 0.15.2 aberta pelo launcher | a seção de atualização não aparece, e o comando recusa |
 | 6 | entrar, pela 0.16, num link `v=0.15.1` do servidor do passo 4 | o diálogo com a frase das conversas, e depois a 0.15.2 entrando |
 | 7 | as duas abertas | o que acontece com a porta 8383, o microfone e o armazenamento do WebView (as 2 preferências de MOD de `camada-mods.js`) |

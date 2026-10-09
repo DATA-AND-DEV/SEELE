@@ -309,20 +309,23 @@ A número 5 continua aberta: emitir uma revogação «pode vir depois» (spec 0.
 
 ### Publicar a linha legada, e um conserto dela depois
 
-**A 0.15.2** sai do branch `linha/0.15`, antes do app 0.16 (spec 0.16, §4):
+**A 0.15.2** sai do branch `linha/0.15`, antes do app 0.16, como **atualização
+normal para todos** (D-linha-2, que revê a D-linha-1: o conserto da sala cheia
+não podia ficar só para o launcher):
 
-1. `./empacotar/publicar.sh 0.15.2 --linha-legada`. O rascunho é criado com
-   `make_latest: false`.
-2. Ao publicar o rascunho, **desmarcar «Set as the latest release»**: a tela do
-   GitHub pode marcar a caixa de novo. Como `latest`, quem está na 0.15.1
-   receberia a 0.15.2 pelo atualizador, e o launcher leria o manifesto do release
-   errado.
-3. O `latest.json` da 0.15.2 já sai híbrido, com `versions` = [0.15.2].
+1. `./empacotar/publicar.sh 0.15.2`, sem o `--linha-legada`. Ela vira o
+   `latest`, e quem está na 0.15.1 a recebe pelo atualizador.
+2. O `latest.json` dela já sai híbrido: o topo aponta para a 0.15.2 (o
+   instalador do Windows e o `.app.tar.gz` do Mac), e `versions` = [0.15.2], na
+   linha 0.15. O atualizador da 0.15.1 (`tauri-plugin-updater` 2.10.1) lê esse
+   arquivo: medido em 09/10/2026 com o `latest.json` que o `manifesto.py` do
+   `linha/0.15` escreve, e é o que `apps/seele-app/tests/manifesto_hibrido.rs`
+   prende.
 
-**A 0.16.0** recebe o manifesto da 0.15.2, que nunca foi `latest`:
-`SEELE_MANIFESTO_ANTERIOR=<o latest.json da v0.15.2> ./empacotar/publicar.sh 0.16.0`.
-O `latest.json` publicado naquele dia é o da 0.15.1, sem `schema`, e o
-`manifesto.py` diz que nada dele entra.
+**A 0.16.0** sai pelo `publicar.sh 0.16.0` de sempre. O `latest.json` publicado
+naquele dia é o da 0.15.2, com `schema` 2, e o `manifesto.py` o acumula: a 0.16
+sai com a linha 1 no topo e a 0.15.2 em `versions`. O `SEELE_MANIFESTO_ANTERIOR`
+não é preciso.
 
 **Um conserto da linha legada depois da 0.16** (uma 0.15.3) só chega ao launcher
 se o `latest.json` do release `latest` for refeito com ele. O `manifesto.py` já
