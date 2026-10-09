@@ -12,7 +12,7 @@
 //! # O que este arquivo segura
 //!
 //! **A impressão chega.** Se a chamada passasse `None` no lugar de
-//! `destino.impressao_esperada`, todo primeiro contato voltaria a ser cego e a
+//! `destino.esperada`, todo primeiro contato voltaria a ser cego e a
 //! conferência inteira viraria enfeite. O primeiro teste conecta com a
 //! impressão real do servidor e exige `FirstContactVerified` — que é o único
 //! veredito que não existe sem a fiação.
@@ -107,7 +107,8 @@ fn destino(endereco: SocketAddr, apelido: &str, impressao_esperada: Option<&str>
         chave_do_pin: endereco.to_string(),
         apelido: apelido.to_owned(),
         segredo: None,
-        impressao_esperada: impressao_esperada.map(str::to_owned),
+        esperada: impressao_esperada
+            .map(|fp| seele_core::enlace::Esperada::Certificado(fp.to_owned())),
         o_pino_prova_o_servidor: true,
         aceito: None,
     }

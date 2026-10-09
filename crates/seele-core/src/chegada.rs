@@ -534,7 +534,7 @@ impl Chegada {
         let com_bilhete_e_impressao = bilhete.is_some()
             && destinos
                 .first()
-                .is_some_and(|destino| destino.impressao_esperada.is_some());
+                .is_some_and(|destino| destino.impressao_esperada().is_some());
         let parada = Etapa::Parada {
             candidatos,
             com_bilhete_e_impressao,
@@ -673,7 +673,7 @@ impl Chegada {
     fn ponto_a_avisar(&self) -> Option<String> {
         let bilhete = self.bilhete.as_ref()?;
         let primeiro = self.destinos.first()?;
-        primeiro.impressao_esperada.as_ref()?;
+        primeiro.impressao_esperada()?;
         Some(bilhete.ponto.clone())
     }
 
@@ -798,7 +798,9 @@ mod tests {
             chave_do_pin: format!("127.0.0.1:{porta}"),
             apelido: "pessoa".into(),
             segredo: None,
-            impressao_esperada: Some("0123456789abcdef0123".into()),
+            esperada: Some(crate::enlace::Esperada::Certificado(
+                "0123456789abcdef0123".into(),
+            )),
             o_pino_prova_o_servidor: true,
             aceito: None,
         }
@@ -838,7 +840,7 @@ mod tests {
         // que não vai acontecer, que é o mesmo defeito do log que dizia
         // «avisamos o ponto de encontro» com o envio recusado.
         let mut cego = destino(1);
-        cego.impressao_esperada = None;
+        cego.esperada = None;
         let chegada = Chegada::nova(vec![cego], Some(bilhete()));
 
         assert!(chegada.ponto_a_avisar().is_none());
