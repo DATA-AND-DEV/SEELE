@@ -16735,6 +16735,68 @@ fn o_microfone_em_silencio_digital_e_dito_so_no_macos() {
     );
 }
 
+/// **O volume de cada pessoa chega à janela por `volumes_locais`, e a janela
+/// não guarda o dela.** F1-vazamento, passo 3 (2).
+///
+/// O volume morava num mapa `volumes` de `tela-sessao.js`, dividido com a
+/// chamada, que lembrava o que a janela tinha mandado. A lembrança sobrevivia à
+/// sessão — o 150 da Rafa de um servidor aparecia na Rafa de outro, que tocava
+/// a 100 — e, com a voz da pendência 52 abrindo a cada entrada numa sala, ela
+/// mostrava um volume que a voz nova não tinha. Agora o volume mora na conexão
+/// (`Connection::volumes_locais`, provado na FFI), e as duas telas desenham o que
+/// o Rust responde.
+#[test]
+fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
+    let scripts = without_comments(&scripts());
+    for declaracao in ["const volumes =", "let volumes =", "var volumes ="] {
+        assert!(
+            !scripts.contains(declaracao),
+            "a janela voltou a guardar o volume de cada pessoa num mapa dela \
+             (`{declaracao}`): a lembrança sobrevive à sessão e passa o volume de um \
+             servidor para outro"
+        );
+    }
+    assert!(
+        invoked_commands(&scripts).contains("volumes_locais"),
+        "nenhuma tela lê `volumes_locais`: o deslizante desenha um volume que ninguém \
+         perguntou ao Rust"
+    );
+
+    let ler = body_of(&scripts, "async function lerVolumes()");
+    assert!(
+        ler.contains("invoke(\"volumes_locais\")") && ler.contains("volumesLidos.clear()"),
+        "`lerVolumes` não substitui a leitura inteira pela resposta do Rust: um volume \
+         que sumiu de lá fica desenhado aqui:\n{ler}"
+    );
+    assert!(
+        names(
+            &body_of(&scripts, "function desenhar(snapshot)"),
+            "lerVolumes"
+        ),
+        "a tela de operação não relê os volumes a cada quadro"
+    );
+    assert!(
+        names(
+            &body_of(&scripts, "async function atualizarChamada()"),
+            "lerVolumes"
+        ),
+        "a chamada não relê os volumes a cada quadro"
+    );
+    let cartao = body_of(
+        &scripts,
+        "function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false)",
+    );
+    assert!(
+        cartao.contains("volumesLidos.get(pessoa.volume)"),
+        "o deslizante do roster não nasce da leitura do Rust:\n{cartao}"
+    );
+    assert!(
+        body_of(&scripts, "function pintarVolume(cartao, apelido)")
+            .contains("volumesLidos.get(apelido)"),
+        "o controle de volume da chamada não desenha a leitura do Rust"
+    );
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um

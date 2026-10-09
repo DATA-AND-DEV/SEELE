@@ -139,8 +139,46 @@ let falando = false;
  * seguro: este relógio não tem nada a ver com busca e mesmo assim o reprovava.
  */
 let comecoDaSessao = null;
-/** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
-const volumes = new Map();
+/**
+ * O volume de cada pessoa, por apelido, **como o Rust respondeu** da última vez.
+ * F1-vazamento.
+ *
+ * O volume mora na conexão, e chega por `volumes_locais`. Até a 0.16 ele morava
+ * num mapa desta janela, `volumes`, que lembrava o que ela tinha mandado — e a
+ * lembrança sobrevivia à sessão: o 150 dado à Rafa de um servidor aparecia no
+ * deslizante da Rafa de outro, que tocava a 100. Com a voz que abre a cada
+ * entrada numa sala, ela ainda mostrava um volume que a voz nova não tinha.
+ *
+ * Este mapa é só a última leitura: `lerVolumes` o troca inteiro pela resposta
+ * a cada quadro, e a sessão que acaba o esvazia (`esquecerOEstadoDaSessao`). O
+ * gesto escreve aqui a posição que acabou de mandar, para o redesenho seguinte
+ * não pular de volta antes de a leitura confirmar — e a leitura seguinte manda.
+ */
+const volumesLidos = new Map();
+
+/**
+ * Relê os volumes do Rust, e diz se algum mudou.
+ *
+ * Uma falha deixa a leitura anterior de pé: sem sessão, `volumes_locais`
+ * responde vazio, e não com erro.
+ */
+async function lerVolumes() {
+  let lidos;
+  try {
+    lidos = (await invoke("volumes_locais")) ?? {};
+  } catch (falha) {
+    console.warn("volumes_locais:", falha);
+    return false;
+  }
+  const entradas = Object.entries(lidos);
+  const mudou =
+    entradas.length !== volumesLidos.size ||
+    entradas.some(([apelido, percent]) => volumesLidos.get(apelido) !== percent);
+  if (!mudou) return false;
+  volumesLidos.clear();
+  for (const [apelido, percent] of entradas) volumesLidos.set(apelido, percent);
+  return true;
+}
 /**
  * Se esta sessão pode tirar a mensagem **de outra pessoa** da Linha.
  *
@@ -443,6 +481,13 @@ function desenhar(snapshot) {
     })
     .catch((falha) => console.warn("retratos:", falha));
   desenharPessoas(snapshot);
+  // Os volumes, do Rust: o deslizante nasce com a última leitura, e uma leitura
+  // que mudou repinta os que não estão sob o dedo. Ver `volumesLidos`.
+  lerVolumes()
+    .then((mudou) => {
+      if (mudou) pintarVolumesDoRoster();
+    })
+    .catch((falha) => console.warn("volumes:", falha));
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
@@ -2010,6 +2055,20 @@ function desenharPessoas(snapshot) {
   );
 }
 
+/**
+ * Põe nos deslizantes do roster o que a última leitura de `volumes_locais`
+ * disse.
+ *
+ * O que está sob o dedo fica: escrever nele no meio do arrasto tiraria o
+ * polegar de quem o move, que é o mesmo cuidado de `desenharSomDoPalco`.
+ */
+function pintarVolumesDoRoster() {
+  for (const deslizante of $("lista-roster").querySelectorAll("input.volume")) {
+    if (deslizante === document.activeElement) continue;
+    deslizante.value = String(volumesLidos.get(deslizante.dataset.pessoa) ?? 100);
+  }
+}
+
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
 function grupoDeSala(nome, ocupacao, nossa, cartoes, sala = null) {
   const grupo = elemento("li", "roster-grupo");
@@ -2437,7 +2496,7 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     volume.min = "0";
     volume.max = "200";
     volume.step = "10";
-    volume.value = String(volumes.get(pessoa.volume) ?? 100);
+    volume.value = String(volumesLidos.get(pessoa.volume) ?? 100);
     volume.title = `volume de ${pessoa.volume}`;
     volume.dataset.pessoa = pessoa.volume;
     item.append(volume);
@@ -4384,7 +4443,9 @@ $("lista-roster").addEventListener("input", (evento) => {
   const alvo = evento.target;
   if (!alvo.classList.contains("volume")) return;
   const percent = Number(alvo.value);
-  volumes.set(alvo.dataset.pessoa, percent);
+  // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
+  // confirmá-la. Ver `volumesLidos`.
+  volumesLidos.set(alvo.dataset.pessoa, percent);
   invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
     console.warn("set_volume:", falha);
   });

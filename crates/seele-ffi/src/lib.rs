@@ -36,6 +36,7 @@
 pub mod mods;
 pub mod types;
 
+use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -2596,27 +2597,48 @@ impl Connection {
 
     /// Sets one talker's volume, as a percentage. 100 is unchanged.
     ///
+    /// **Grava e aplica** (F1-vazamento, passo 3 (2)). O volume é guardado por
+    /// apelido nesta conexão, e vale pelo `ssrc` que o apelido tiver: agora,
+    /// na voz viva; e depois, na voz que abrir e no número novo de quem voltar —
+    /// ver [`VozDaSala::seguir_os_volumes`]. Antes ele ia direto para o ganho do
+    /// número de agora e não ficava em lugar nenhum, então fora de sala era
+    /// recusado e a voz seguinte abria com todo mundo a 100.
+    ///
+    /// Fora de sala, só grava, como o mudo e os aparelhos (pendência 52).
+    ///
     /// # Errors
     ///
     /// [`ConnectionError::UnknownPerson`] if nobody here is called that,
     /// [`ConnectionError::NoAudioDevice`] if this session has no audio.
     pub fn set_volume(&self, nickname: String, percent: u16) -> Result<(), ConnectionError> {
-        let ssrc = self
+        if !self.shared.voice.quer_audio {
+            return Err(ConnectionError::NoAudioDevice);
+        }
+        let conhecida = self
             .shared
             .room
             .lock()
-            .ok()
-            .and_then(|room| room.ssrc_of(&nickname))
-            .ok_or(ConnectionError::UnknownPerson)?;
-
-        let voice = self
-            .shared
-            .voice
-            .lock()
-            .map_err(|_| ConnectionError::NoAudioDevice)?;
-        let voice = voice.as_ref().ok_or(ConnectionError::NoAudioDevice)?;
-        voice.set_gain(ssrc.get(), f32::from(percent.min(400)) / 100.0);
+            .is_ok_and(|room| room.ssrc_of(&nickname).is_some());
+        if !conhecida {
+            return Err(ConnectionError::UnknownPerson);
+        }
+        // Gravado antes de olhar a voz: ver a ordem dos cadeados em
+        // `seguir_os_volumes`.
+        self.shared.voice.guardar_volume(&nickname, percent);
+        self.shared.voice.seguir_os_volumes(&self.shared.room);
         Ok(())
+    }
+
+    /// O volume que esta sessão guardou para cada pessoa, por apelido, em por
+    /// cento. F1-vazamento.
+    ///
+    /// É por aqui, e **nunca** pelo [`Snapshot`], que o volume chega à janela:
+    /// o retrato vai inteiro aos MODs, e quanto esta máquina quer ouvir cada um
+    /// não é deles. Vazio numa conexão nova — os volumes não passam de um
+    /// servidor para outro —, e vazio numa sessão sem áudio.
+    #[must_use]
+    pub fn volumes_locais(&self) -> HashMap<String, u16> {
+        self.shared.voice.volumes()
     }
 
     // ---- compartilhamento de tela ----
@@ -4366,6 +4388,13 @@ async fn drive(
         if shared.voice.abertura() != antes {
             shared.notify(&Event::TelemetryChanged);
         }
+
+        // **Os volumes de cada pessoa, pelo `ssrc` de agora**, também no fim de
+        // cada volta e pela mesma razão: a voz que abriu chega por um braço do
+        // `select!` e o número novo de quem voltou chega por outro, e os dois
+        // terminam aqui. Ver `VozDaSala::seguir_os_volumes` (F1-vazamento e
+        // acréscimo B do lote I-b).
+        shared.voice.seguir_os_volumes(&shared.room);
     }
 
     shared.running.store(false, Ordering::Relaxed);
@@ -4516,7 +4545,8 @@ fn reabrir_voz_na_reconexao<V, F>(slot: &mut Option<V>, reabrir: impl FnOnce(V) 
 /// no lugar ([`VozDaSala::instalar`]). Com a voz de pé, cada escolha é gravada
 /// aqui e aplicada nela, e as duas cópias andam juntas.
 ///
-/// O volume de cada pessoa não está aqui: ele é por apelido, e é do lote I-b.
+/// O volume de cada pessoa não está aqui: ele é por apelido, e mora em
+/// [`VozDaSala::volumes`] (F1-vazamento).
 #[derive(Debug, Clone, PartialEq)]
 struct ControlesGuardados {
     mudo: bool,
@@ -4556,6 +4586,12 @@ impl ControlesGuardados {
 trait VozViva {
     /// Aplica tudo o que a pessoa escolheu.
     fn vestir(&self, escolhida: &ControlesGuardados);
+
+    /// Põe o ganho de quem fala por este `ssrc`. `1.0` é o de origem.
+    ///
+    /// Os volumes são por apelido (F1-vazamento), e a voz só conhece números:
+    /// quem traduz um no outro é [`ganhos_a_aplicar`].
+    fn ganhar(&self, ssrc: Ssrc, ganho: f32);
 }
 
 impl VozViva for Voice {
@@ -4566,6 +4602,39 @@ impl VozViva for Voice {
         self.set_supressao(escolhida.supressao);
         self.set_abertura_dbfs(escolhida.abertura_dbfs);
     }
+
+    fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
+        self.set_gain(ssrc.get(), ganho);
+    }
+}
+
+/// O teto de [`Connection::set_volume`], em por cento: quatro vezes o de origem.
+const VOLUME_MAXIMO: u16 = 400;
+
+/// O ganho de cada volume guardado, pelo `ssrc` que o apelido tem agora.
+/// F1-vazamento, passo 3 (2).
+///
+/// # Por que a tradução é refeita
+///
+/// O volume é escolhido para uma **pessoa**, e a voz só conhece **números**: o
+/// `ssrc` que o servidor deu a ela nesta conexão dela. O número muda quando ela
+/// cai e volta sem resgate, quando troca de rede, e quando é esta máquina que
+/// volta. Gravado só no número, como `set_volume` fazia, o volume ficava para
+/// trás, e a janela continuava mostrando 150 para quem tocava a 100.
+///
+/// Quem não está no `Room` não ganha número, e fica guardado para quando
+/// estiver. O apelido não depende de maiúscula, como em `Room::ssrc_of`.
+/// Ordenado pelo número, para duas respostas iguais serem iguais.
+fn ganhos_a_aplicar(volumes: &HashMap<String, u16>, room: &Room) -> Vec<(Ssrc, f32)> {
+    let mut ganhos: Vec<(Ssrc, f32)> = volumes
+        .iter()
+        .filter_map(|(apelido, percent)| {
+            room.ssrc_of(apelido)
+                .map(|ssrc| (ssrc, f32::from((*percent).min(VOLUME_MAXIMO)) / 100.0))
+        })
+        .collect();
+    ganhos.sort_by_key(|(ssrc, _)| ssrc.get());
+    ganhos
 }
 
 /// A voz desta sessão, o que a pessoa escolheu para ela, e em que pé a abertura
@@ -4593,6 +4662,27 @@ struct VozDaSala<V> {
     /// [`esperar_o_audio`] toma esta vez antes de abrir, e a de uma abertura
     /// de que ninguém espera mais desiste sem abrir nada quando a vez chega.
     vez_do_driver: Arc<Mutex<()>>,
+    /// O volume que a pessoa escolheu para cada um, por apelido, em por cento.
+    /// F1-vazamento, passo 3 (2).
+    ///
+    /// **Aqui, na conexão, e não na janela.** Ele morava num mapa de
+    /// `tela-sessao.js`, e o mapa sobrevivia à sessão: entrar noutro servidor
+    /// desenhava o 150 que se deu à Rafa de lá para a Rafa de cá, que tocava a
+    /// 100. Esta conexão nasce sem volume nenhum. E a voz da pendência 52 nasce
+    /// a cada entrada numa sala, com todo mundo a 100: guardado só nela, o volume
+    /// morria ao sair da sala (acréscimo B do lote I-b).
+    ///
+    /// Por apelido, porque é a pessoa que se escolhe; a voz recebe o número
+    /// dela por [`ganhos_a_aplicar`]. Chega à casca por
+    /// [`Connection::volumes_locais`], e **nunca** pelo `Snapshot`, que os MODs
+    /// leem: quanto alguém quer ouvir cada um é desta máquina.
+    ///
+    /// Na ordem dos cadeados, depois da voz: ver [`Self::seguir_os_volumes`].
+    volumes: Mutex<HashMap<String, u16>>,
+    /// Os ganhos que já estão na voz viva, do jeito que [`ganhos_a_aplicar`] os
+    /// deu. `None` com uma voz que ainda não recebeu nenhum — é o que
+    /// [`Self::instalar`] põe, e o que faz a voz nova recebê-los.
+    aplicados: Mutex<Option<Vec<(Ssrc, f32)>>>,
 }
 
 impl<V> VozDaSala<V> {
@@ -4603,7 +4693,31 @@ impl<V> VozDaSala<V> {
             abertura: Mutex::new(AberturaDoAudio::ForaDeSala),
             quer_audio,
             vez_do_driver: Arc::new(Mutex::new(())),
+            volumes: Mutex::new(HashMap::new()),
+            aplicados: Mutex::new(None),
         }
+    }
+
+    /// Grava o volume de uma pessoa, por apelido.
+    ///
+    /// Sem distinguir maiúscula, como `Room::ssrc_of` a acha: «Rafa» e «rafa»
+    /// são a mesma pessoa, e duas linhas para ela seriam dois volumes brigando
+    /// pelo mesmo número.
+    fn guardar_volume(&self, apelido: &str, percent: u16) {
+        let mut volumes = self
+            .volumes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        volumes.retain(|guardado, _| !guardado.eq_ignore_ascii_case(apelido));
+        volumes.insert(apelido.to_owned(), percent.min(VOLUME_MAXIMO));
+    }
+
+    /// Os volumes guardados, como a casca os lê.
+    fn volumes(&self) -> HashMap<String, u16> {
+        self.volumes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// O cadeado da voz viva.
@@ -4692,6 +4806,13 @@ impl<V: VozViva> VozDaSala<V> {
                 }
                 nova.vestir(&escolhida);
                 *viva = Some(nova);
+                // Uma voz nova nasce com todo mundo a 1.0, e os volumes ainda
+                // não estão nela: zerar os aplicados é o que faz o fim desta
+                // volta do laço os pôr (`seguir_os_volumes`, acréscimo B).
+                *self
+                    .aplicados
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
                 self.marcar(AberturaDoAudio::Aberto);
             }
             Err(_) => self.marcar(AberturaDoAudio::SemAparelho),
@@ -4708,6 +4829,66 @@ impl<V: VozViva> VozDaSala<V> {
 
     fn tem_voz(&self) -> bool {
         self.viva.lock().is_ok_and(|viva| viva.is_some())
+    }
+
+    /// Põe na voz viva os volumes guardados, pelo `ssrc` de agora. Devolve se
+    /// mexeu em algum ganho. F1-vazamento e acréscimo B.
+    ///
+    /// `drive` chama isto no fim de cada volta do laço, e é o que cobre os dois
+    /// momentos em que o ganho tem de ser refeito: **a voz que acabou de abrir**
+    /// ([`Self::instalar`] zera os aplicados, e a voz nova os recebe todos) e
+    /// **o número que mudou** (uma mensagem dobrada no `Room` muda a resposta de
+    /// [`ganhos_a_aplicar`]). É a mesma forma do gatilho da pendência 52: o
+    /// antes contra o agora, e não a lista das mensagens que mudam um `ssrc`,
+    /// que seria mais um lugar para esquecer uma. Sem mudança, não toca na voz.
+    ///
+    /// O número que deixou de ser de alguém com volume volta a 1.0: o volume é
+    /// da pessoa, e um servidor que reinicia recomeça a contar os números.
+    ///
+    /// # A ordem dos cadeados
+    ///
+    /// A voz, depois os volumes, depois o `Room`. Os volumes são lidos **com** a
+    /// voz presa, e [`Connection::set_volume`] grava antes de chamar isto: um
+    /// volume escolhido enquanto a voz abre é visto por uma das duas chamadas,
+    /// em qualquer ordem que as threads andem — o mesmo acordo de
+    /// [`Self::escolher`] e [`Self::instalar`]. Ninguém segura o `Room` enquanto
+    /// pede a voz.
+    fn seguir_os_volumes(&self, room: &Mutex<Room>) -> bool {
+        let Ok(viva) = self.viva.lock() else {
+            return false;
+        };
+        let Some(viva) = viva.as_ref() else {
+            return false;
+        };
+        let ganhos = {
+            let volumes = self
+                .volumes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Ok(room) = room.lock() else {
+                return false;
+            };
+            ganhos_a_aplicar(&volumes, &room)
+        };
+        let mut aplicados = self
+            .aplicados
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if aplicados.as_ref() == Some(&ganhos) {
+            return false;
+        }
+        if let Some(antes) = aplicados.as_ref() {
+            for (ssrc, _) in antes {
+                if !ganhos.iter().any(|(agora, _)| agora == ssrc) {
+                    viva.ganhar(*ssrc, 1.0);
+                }
+            }
+        }
+        for (ssrc, ganho) in &ganhos {
+            viva.ganhar(*ssrc, *ganho);
+        }
+        *aplicados = Some(ganhos);
+        true
     }
 }
 
@@ -9862,28 +10043,38 @@ mod o_audio_segue_a_sala {
     //! [`Voice`]: seele_core::Voice
 
     use super::{
-        readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta, AberturaDoAudio,
-        ControlesGuardados, Futuro, PortaDaVoz, VozDaSala, VozViva,
+        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta,
+        AberturaDoAudio, ControlesGuardados, Futuro, PortaDaVoz, VozDaSala, VozViva,
     };
     use seele_core::{
         AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
         SessionId, SessionInfo, Ssrc, VoiceMode, VoiceRoomId, VoiceRoomInfo,
     };
+    use std::collections::HashMap;
     use std::sync::Mutex;
     use std::time::Duration;
 
     const SALA: VoiceRoomId = VoiceRoomId(1);
 
-    /// Uma voz de mentira, que lembra o que vestiu ao abrir.
+    /// Uma voz de mentira, que lembra o que vestiu ao abrir e o ganho que cada
+    /// número recebeu.
     #[derive(Debug, Default)]
     struct Voz {
         ssrc: u32,
         vestida: Mutex<Option<ControlesGuardados>>,
+        ganhos: Mutex<HashMap<u32, f32>>,
     }
 
     impl VozViva for Voz {
         fn vestir(&self, escolhida: &ControlesGuardados) {
             *self.vestida.lock().expect("o que a voz vestiu") = Some(escolhida.clone());
+        }
+
+        fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
+            self.ganhos
+                .lock()
+                .expect("os ganhos da voz")
+                .insert(ssrc.get(), ganho);
         }
     }
 
@@ -9891,6 +10082,7 @@ mod o_audio_segue_a_sala {
         Voz {
             ssrc,
             vestida: Mutex::new(None),
+            ganhos: Mutex::new(HashMap::new()),
         }
     }
 
@@ -10516,6 +10708,276 @@ mod o_audio_segue_a_sala {
         );
     }
 
+    // ---- o volume de cada pessoa (F1-vazamento, passo 3 (2), e acréscimo B) ----
+
+    /// A Rafa sentada na sala, com o `ssrc` que o servidor deu a ela nesta
+    /// conexão dela.
+    fn rafa_na_sala(ssrc: u32) -> ServerMessage {
+        ServerMessage::PersonJoined {
+            voice_room: SALA,
+            profile: PersonProfile {
+                id: PersonId(11),
+                nickname: "rafa".into(),
+                roles: Vec::new(),
+                material_e2ee: None,
+            },
+            ssrc: Ssrc(ssrc),
+        }
+    }
+
+    /// O ganho que a voz viva tem para este número, se ela existe e tem um.
+    fn ganho_de(voz: &VozDaSala<Voz>, ssrc: u32) -> Option<f32> {
+        voz.lock().expect("a voz").as_ref().and_then(|viva| {
+            viva.ganhos
+                .lock()
+                .expect("os ganhos da voz")
+                .get(&ssrc)
+                .copied()
+        })
+    }
+
+    /// Uma volta do laço de `drive`, na ordem dele: o olhar do fim da volta, a
+    /// chegada de uma abertura quando ela começou — o braço do `select!` da
+    /// volta seguinte —, e os volumes, no fim de cada volta.
+    async fn volta_do_laco(porta: &mut PortaDaVoz<Voz>, voz: &VozDaSala<Voz>, room: &Mutex<Room>) {
+        let sala = sala_do_audio(&room.lock().expect("a sala"));
+        porta.olhar(voz, sala, |_| entregue(Ok(Ok(voz_de(700)))));
+        if voz.abertura() == AberturaDoAudio::Abrindo {
+            let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+                .await
+                .expect("a abertura começou e não chegou");
+            porta.chegou(voz, aberta, nada_abre);
+        }
+        voz.seguir_os_volumes(room);
+    }
+
+    /// A sala da Marcela, com a Rafa sentada nela pelo número `ssrc`.
+    fn sala_com_a_rafa(ssrc: u32) -> Mutex<Room> {
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        room.apply(&rafa_na_sala(ssrc));
+        Mutex::new(room)
+    }
+
+    /// (b) do passo 3: o volume é por apelido, e vale pelo `ssrc` de agora.
+    ///
+    /// A Rafa caiu e voltou, ou trocou de rede: o servidor a reapresenta com um
+    /// número novo. A voz só conhece números, e o volume de 150 que a Marcela
+    /// escolheu para ela tem de ir para o número novo.
+    #[test]
+    fn o_volume_volta_quando_o_ssrc_muda() {
+        let room = sala_com_a_rafa(900);
+        let volumes = HashMap::from([("rafa".to_owned(), 150_u16)]);
+        assert_eq!(
+            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
+            vec![(Ssrc(900), 1.5)],
+            "o volume de 150 da Rafa não virou o ganho 1.5 no número dela"
+        );
+
+        room.lock().expect("a sala").apply(&rafa_na_sala(901));
+        assert_eq!(
+            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
+            vec![(Ssrc(901), 1.5)],
+            "a Rafa voltou com outro `ssrc` e o volume dela ficou no número velho: a \
+             janela mostra 150 e ela toca a 100"
+        );
+
+        // Quem não está aqui não ganha número nenhum, e o nome não depende de
+        // maiúscula, como em `Room::ssrc_of`.
+        let volumes = HashMap::from([("RAFA".to_owned(), 50_u16), ("lia".to_owned(), 200)]);
+        assert_eq!(
+            ganhos_a_aplicar(&volumes, &room.lock().expect("a sala")),
+            vec![(Ssrc(901), 0.5)],
+            "o volume de quem não está aqui virou ganho de alguém, ou o apelido passou a \
+             depender de maiúscula"
+        );
+    }
+
+    /// O segundo teste do (b): o laço aplica os volumes **na abertura** da voz
+    /// e **na troca** de `ssrc`, e só quando algo mudou.
+    ///
+    /// `volta_do_laco` é a volta de `drive`; o guarda
+    /// `os_volumes_sao_seguidos_no_fim_de_cada_volta_de_drive` prende que
+    /// `drive` faz o mesmo.
+    #[tokio::test]
+    async fn o_laco_aplica_os_volumes_na_abertura_e_na_troca_de_ssrc() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let room = sala_com_a_rafa(900);
+        volta_do_laco(&mut porta, &voz, &room).await;
+
+        // Fora de sala: só grava.
+        voz.guardar_volume("rafa", 150);
+        assert!(
+            !voz.seguir_os_volumes(&room),
+            "fora de sala não há voz, e mesmo assim algum ganho foi posto"
+        );
+
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "a voz abriu e o volume escolhido fora de sala não foi posto nela: a janela \
+             diz 150 e a Rafa toca a 100"
+        );
+        assert!(
+            !voz.seguir_os_volumes(&room),
+            "nada mudou e os ganhos foram postos de novo: o laço reescreve a voz a cada \
+             volta"
+        );
+
+        room.lock().expect("a sala").apply(&rafa_na_sala(901));
+        volta_do_laco(&mut porta, &voz, &room).await;
+        assert_eq!(
+            ganho_de(&voz, 901),
+            Some(1.5),
+            "a Rafa voltou com outro `ssrc` e o laço não levou o volume dela para o \
+             número novo"
+        );
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.0),
+            "o número velho da Rafa ficou com o ganho dela: o volume é da pessoa, e um \
+             servidor que reusa o número o daria a outra"
+        );
+    }
+
+    /// Acréscimo B do lote I-b (o M-a da revisão do I-a): os volumes voltam ao
+    /// reabrir a voz.
+    ///
+    /// Com a pendência 52, quem sai da sala e entra de novo recebe uma voz nova,
+    /// com ganho 1.0, e a janela continuava mostrando o valor de antes.
+    #[tokio::test]
+    async fn o_volume_volta_quando_se_sai_da_sala_e_entra_de_novo() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let room = sala_com_a_rafa(900);
+        volta_do_laco(&mut porta, &voz, &room).await;
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+
+        // Dentro da sala, como `Connection::set_volume` faz: grava e aplica.
+        voz.guardar_volume("rafa", 150);
+        voz.seguir_os_volumes(&room);
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "dentro da sala, o volume escolhido não chegou à voz viva"
+        );
+
+        room.lock().expect("a sala").leave_voice_room();
+        volta_do_laco(&mut porta, &voz, &room).await;
+        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
+
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "saiu da sala e entrou de novo, e a voz nova abriu com a Rafa a 100 enquanto \
+             a janela mostra 150"
+        );
+    }
+
+    /// F1-vazamento, passo 3 (2): o volume mora na conexão, e `volumes_locais`
+    /// o devolve.
+    ///
+    /// Na conexão, e não na janela: uma conexão nova nasce sem volume nenhum, e
+    /// o 150 que alguém deu à Rafa de um servidor não passa à Rafa de outro.
+    /// Fora de sala o volume só grava, como o mudo e os aparelhos.
+    #[test]
+    fn o_volume_mora_na_conexao_e_volumes_locais_o_devolve() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+        {
+            let mut room = connection.shared.room.lock().expect("a sala");
+            room.adopt(&sessao(700), "marcela");
+            room.apply(&rafa_na_sala(900));
+        }
+        assert!(
+            connection.volumes_locais().is_empty(),
+            "uma conexão nova já nasce com volumes: eles vieram de outra sessão"
+        );
+
+        assert_eq!(
+            connection.set_volume("rafa".into(), 150),
+            Ok(()),
+            "o volume pedido fora de sala foi recusado: a pessoa escolhe antes de entrar \
+             e a escolha some"
+        );
+        assert_eq!(
+            connection.volumes_locais(),
+            HashMap::from([("rafa".to_owned(), 150)]),
+            "o volume escolhido não chega à janela por `volumes_locais`"
+        );
+        assert_eq!(
+            connection.set_volume("ninguém".into(), 50),
+            Err(crate::ConnectionError::UnknownPerson),
+            "um apelido que não está aqui foi guardado"
+        );
+
+        // E nunca pelo retrato: ele vai inteiro aos MODs.
+        fn chaves(valor: &serde_json::Value, todas: &mut Vec<String>) {
+            match valor {
+                serde_json::Value::Object(campos) => {
+                    for (chave, dentro) in campos {
+                        todas.push(chave.clone());
+                        chaves(dentro, todas);
+                    }
+                }
+                serde_json::Value::Array(itens) => {
+                    for item in itens {
+                        chaves(item, todas);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
+        let mut todas = Vec::new();
+        chaves(&retrato, &mut todas);
+        assert!(
+            !todas.iter().any(|chave| chave.contains("volume")),
+            "o volume de cada pessoa foi parar no retrato, que os MODs leem: quanto esta \
+             máquina quer ouvir cada um não é deles ({todas:?})"
+        );
+
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let sem_audio = super::Connection {
+            commands,
+            shared: compartilhado(false),
+            encerrada: Mutex::new(None),
+        };
+        sem_audio
+            .shared
+            .room
+            .lock()
+            .expect("a sala")
+            .apply(&rafa_na_sala(900));
+        assert_eq!(
+            sem_audio.set_volume("rafa".into(), 150),
+            Err(crate::ConnectionError::NoAudioDevice),
+            "numa sessão sem áudio o volume foi aceito, e nenhuma voz vai tocá-lo"
+        );
+    }
+
     /// O corpo de `drive`, sem as linhas de comentário, e os três pedaços que a
     /// ligação da porta da voz atravessa: antes do laço, o `select!`, e o resto
     /// da volta do laço depois dele.
@@ -10609,6 +11071,24 @@ mod o_audio_segue_a_sala {
                  sem a porta decidir"
             );
         }
+    }
+
+    /// Os volumes são seguidos no fim de cada volta do laço de `drive`.
+    /// F1-vazamento e acréscimo B.
+    ///
+    /// É dali que eles chegam à voz que acabou de abrir — a chegada da
+    /// abertura é um braço do `select!`, e a volta termina logo depois — e ao
+    /// `ssrc` novo de quem voltou, que entra no `Room` por uma mensagem dobrada
+    /// num braço do mesmo `select!`. Os testes acima provam a decisão com a
+    /// volta de `volta_do_laco`; este prende que `drive` dá a mesma volta.
+    #[test]
+    fn os_volumes_sao_seguidos_no_fim_de_cada_volta_de_drive() {
+        let (_, _, _, resto_da_volta) = pedacos_de_drive();
+        assert!(
+            resto_da_volta.contains("shared.voice.seguir_os_volumes(&shared.room)"),
+            "o fim da volta de `drive` não segue mais os volumes: a voz que abre fica \
+             com todo mundo a 100, e quem volta com outro `ssrc` perde o volume dele"
+        );
     }
 
     /// Nenhum caminho abre a voz por fora da porta da sala.
@@ -10785,6 +11265,7 @@ mod a_voz_quando_o_enlace_volta {
 
     impl VozViva for Voz {
         fn vestir(&self, _: &ControlesGuardados) {}
+        fn ganhar(&self, _: seele_core::Ssrc, _: f32) {}
     }
 
     fn entregue(aberta: Aberta<Voz>) -> Futuro<Voz> {

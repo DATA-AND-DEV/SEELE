@@ -41,15 +41,18 @@
 //
 // ---- o que vem de fora ----
 //
-// `naoMedido`, `medido`, `duracao`, `comecoDaSessao`, `blocos` e `volumes` são
-// declarados em `tela-sessao.js`, e este arquivo os usa em vez de escrever os
-// seus. Os scripts dividem um escopo global (ADR 0019, e o bloco de abertura de
-// `base.js`), e `tela-fim.js` já faz o mesmo com `desenhado` e `linhaAberta`.
+// `naoMedido`, `medido`, `duracao`, `comecoDaSessao`, `blocos`, `volumesLidos`
+// e `lerVolumes` são declarados em `tela-sessao.js`, e este arquivo os usa em
+// vez de escrever os seus. Os scripts dividem um escopo global (ADR 0019, e o
+// bloco de abertura de `base.js`), e `tela-fim.js` já faz o mesmo com
+// `desenhado` e `linhaAberta`.
 //
-// `volumes` em particular **precisa** ser o mesmo mapa das duas telas: é a
-// lembrança de quanto esta janela mandou para cada pessoa, e duas cópias dela
-// são duas telas discordando sobre o mesmo controle. `comecoDaSessao` pela
-// mesma razão — o relógio daqui e o `UPTIME` de lá contam a mesma coisa.
+// `volumesLidos` em particular **precisa** ser o mesmo mapa das duas telas: é a
+// última resposta de `volumes_locais`, e duas cópias dela são duas telas
+// discordando sobre o mesmo controle. O volume em si mora no Rust, na conexão
+// (F1-vazamento): a janela não guarda o dela, e um servidor novo começa sem
+// volume nenhum. `comecoDaSessao` pela mesma razão do mapa — o relógio daqui e
+// o `UPTIME` de lá contam a mesma coisa.
 
 "use strict";
 
@@ -63,7 +66,7 @@ const CELULAS_DE_VOLUME = 10;
  * Até onde o volume por pessoa vai, e de quanto em quanto ele anda.
  *
  * `set_volume` aceita até 400 e o deslizante do roster sempre andou de 0 a 200
- * de dez em dez; estes são os mesmos números, para que o mesmo mapa `volumes`
+ * de dez em dez; estes são os mesmos números, para que o mesmo volume
  * signifique a mesma coisa nas duas telas. Dez células de vinte pontos põem o
  * normal exatamente na quinta.
  */
@@ -516,13 +519,14 @@ function pintarCartao(cartao, pessoa, temAudio) {
 /**
  * As células, o número e os nomes acessíveis do controle de volume.
  *
- * O valor é o que **esta janela mandou** — `set_volume` escreve e nada lê de
- * volta —, e é por isso que ele é a posição de um controle e não uma medida:
- * ninguém está dizendo aqui quanto o outro lado está tocando, e sim onde este
- * botão está. A lembrança mora em `volumes`, que a tela de operação divide.
+ * O valor é o que **o Rust guardou** para esta pessoa (`volumes_locais`, lido
+ * por `lerVolumes`), e é por isso que ele é a posição de um controle e não uma
+ * medida: ninguém está dizendo aqui quanto o outro lado está tocando, e sim
+ * onde este botão está. A leitura mora em `volumesLidos`, que a tela de
+ * operação divide.
  */
 function pintarVolume(cartao, apelido) {
-  const valor = volumes.get(apelido) ?? VOLUME_NORMAL;
+  const valor = volumesLidos.get(apelido) ?? VOLUME_NORMAL;
   const cheias = Math.round((valor / VOLUME_MAXIMO) * CELULAS_DE_VOLUME);
 
   const celas = cartao.querySelectorAll(".chamada-vol-cela");
@@ -676,6 +680,9 @@ async function atualizarChamada() {
   } catch (falha) {
     if (falha !== "NotConnected") console.warn("snapshot:", falha);
   }
+  // Os volumes do Rust antes de pintar os cartões: o controle desenha o que a
+  // conexão guardou, e não o que esta janela lembra. Ver `volumesLidos`.
+  await lerVolumes();
   desenharChamada(snapshot);
 }
 
@@ -813,7 +820,7 @@ $("chamada-grade").addEventListener("click", (evento) => {
 
   const cartao = alvo.closest(".chamada-cartao");
   const apelido = cartao.dataset.pessoa;
-  const atual = volumes.get(apelido) ?? VOLUME_NORMAL;
+  const atual = volumesLidos.get(apelido) ?? VOLUME_NORMAL;
 
   const pedido =
     alvo.dataset.volAcao === "menos"
@@ -823,7 +830,9 @@ $("chamada-grade").addEventListener("click", (evento) => {
         : Number(alvo.dataset.volAlvo);
   const valor = Math.max(0, Math.min(VOLUME_MAXIMO, pedido));
 
-  volumes.set(apelido, valor);
+  // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
+  // confirmá-la. Ver `volumesLidos`, em `tela-sessao.js`.
+  volumesLidos.set(apelido, valor);
   pintarVolume(cartao, apelido);
   invoke("set_volume", { nickname: apelido, percent: valor }).catch((falha) => {
     console.warn("set_volume:", falha);
