@@ -197,16 +197,18 @@ async fn pingar(par: &mut Par, timestamp: u64) -> Result<bool> {
 /// um par defeituoso não enche o `seele.log`. A linha que vai diz o ordinal e
 /// a pessoa.
 ///
-/// **Um caso só, de propósito, e o [`segundo_despachante`] antes da
-/// captura.** O registro é capturado por um assinante deste fio
-/// (`set_default`), e o `tracing` guarda por ponto de registro se alguém se
-/// interessa por ele. Com um segundo teste rodando em paralelo, noutro fio e
-/// sem assinante, a linha deixava de chegar aqui: medido em 08/10, seis de
-/// seis reprovações em paralelo, e três de três aprovações em série. O
-/// segundo despachante tira essa dependência (pendência 56), e o único outro
-/// teste deste arquivo é a prova dele. `current_thread` pelo mesmo motivo do
-/// assinante: o servidor e a sessão rodam neste fio, e é nele que o assinante
-/// vale.
+/// **O [`segundo_despachante`] vem antes da captura, e é ele que deixa este
+/// teste rodar ao lado de outros.** O registro é capturado por um assinante
+/// deste fio (`set_default`), e o `tracing` guarda por ponto de registro se
+/// alguém se interessa por ele. Antes do auxiliar, um segundo teste rodando em
+/// paralelo, noutro fio e sem assinante, fazia a linha deixar de chegar aqui
+/// (medido em 08/10: seis de seis reprovações em paralelo, três de três
+/// aprovações em série), e por isso este arquivo tinha um teste só. Essa razão
+/// morreu pelo auxiliar, e não por haver menos testes: com um vizinho sem
+/// captura, a revisão de 09/10 mediu este teste vermelho 10 em 20 rodadas sem
+/// o auxiliar, e 0 em 30 com ele (pendência 56). `current_thread` pelo mesmo
+/// motivo do assinante: o servidor e a sessão rodam neste fio, e é nele que o
+/// assinante vale.
 #[tokio::test]
 async fn a_mensagem_desconhecida_e_pulada_contada_e_registrada_uma_vez() -> Result<()> {
     segundo_despachante();

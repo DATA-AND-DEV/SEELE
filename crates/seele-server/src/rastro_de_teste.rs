@@ -7,10 +7,11 @@
 //! sem ele, a linha que o teste procura pode sumir quando a bateria roda em
 //! paralelo.
 //!
-//! Quem chama hoje: `admissao.rs`, `mods/pedidos.rs` (`o_registro_da_recusa`),
-//! `alcance/encontro.rs` (`Rastro::de_info`) e `recepcao.rs`. O teste de
-//! integração `tests/desconhecida.rs` é outro binário, que este módulo não
-//! alcança, e leva a própria cópia.
+//! Quem confere que toda captura do crate chama o auxiliar, inclusive as que
+//! ainda não existem, é o guarda `xtask/tests/log_com_segundo_despachante.rs`.
+//! O teste de integração `tests/desconhecida.rs` é outro binário, que este
+//! módulo não alcança, e leva a própria cópia; o mesmo guarda confere que ela
+//! tem o corpo desta.
 
 /// **Um segundo despachante, vivo o processo inteiro, que não escreve nada.**
 /// É ele que tira da captura a dependência da ordem das threads. O mesmo
