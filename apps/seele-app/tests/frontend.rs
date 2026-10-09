@@ -16853,102 +16853,218 @@ fn a_conversa_pedida_numa_sessao_nao_e_escrita_noutra() {
     );
 }
 
-/// **Todo mapa de topo da tela de sessão é esquecido quando a sessão acaba.**
-/// F1-vazamento, passo 3 (1).
+/// **Todo estado de topo da tela de sessão é esquecido quando a sessão acaba.**
+/// F1-vazamento, passo 3 (1), e a rodada 1 do lote I-b (I-1, M-1 e M-2).
 ///
-/// Os mapas de `tela-sessao.js` são por sessão — rascunhos por canal, prévias
-/// por anexo, retratos por pessoa —, e as chaves deles são números que o
-/// servidor dá: o canal 1 de um servidor não é o canal 1 de outro. Nada os
-/// esvaziava ao sair, e o rascunho escrito no canal 1 de um servidor aparecia
-/// no campo do canal 1 do seguinte. `esquecerOEstadoDaSessao` esvazia todos, e
-/// as duas saídas a chamam: SAIR DO SERVIDOR (`ejetar`) e as duas do fim de
-/// sessão (`limparSessaoEncerrada`, que o RECONECTAR também atravessa).
+/// O estado de `tela-sessao.js` é da sessão — o rascunho por canal, a prévia por
+/// anexo, o retrato por pessoa, o arquivo escolhido, a conversa e a revisão
+/// dela, o relógio do UPTIME, o endereço da porta —, e as chaves dele são
+/// números que o servidor dá: o canal 1 de um servidor não é o de outro. A
+/// primeira versão deste guarda só olhava `Map` e `Set`, e a revisão da rodada 1
+/// achou o que passava por baixo: o arquivo escolhido no servidor A ia junto da
+/// primeira mensagem do B (`anexoPendente`, um `let`), a conversa de A aparecia
+/// em B pela saída do fim de sessão, e o UPTIME de B contava desde A.
 ///
-/// O guarda lê **todo** `const|let X = new Map()/new Set()` de topo do arquivo,
-/// e não uma lista daqui: o mapa que alguém acrescentar amanhã reprova na rodada
-/// em que entrar, até ser esquecido também ou ganhar uma exceção com o motivo
-/// escrito — como a marca do aviso de fone do lote J, que é desta execução e não
-/// da sessão.
+/// O guarda lê **todo** `let` de topo do arquivo, qualquer que seja o
+/// inicializador, e todo `const` de topo que guarda coisas (`new Map(`,
+/// `new Set(`, `new WeakMap(`, `[` ou `{`). De cada um ele exige, dentro de
+/// `esquecerOEstadoDaSessao`, uma de três: uma atribuição, um `.clear()` ou um
+/// `.length = 0`; uma chamada com nome desta tabela; ou uma exceção com o motivo
+/// escrito aqui. Um `let` novo sem nenhuma das três reprova na rodada em que
+/// entrar.
+///
+/// E as duas saídas — SAIR DO SERVIDOR (`ejetar`) e o fim de sessão
+/// (`limparSessaoEncerrada`, que o RECONECTAR atravessa) — chamam a função e não
+/// esquecem nada por conta própria: um estado zerado solto numa saída e não na
+/// outra foi exatamente o M-1 e o M-2.
 #[test]
-fn todo_mapa_de_topo_da_sessao_e_esquecido_ao_sair() {
-    // Os mapas que se esquecem por uma chamada com nome, e não pelo `.clear()`
-    // deles: a chamada esvazia o mapa e mais o que anda com ele.
-    const CHAMADAS: &[(&str, &[&str])] = &[
-        // O cache e a revisão dele, juntos.
-        ("retratos", &["esquecerRetratos()"]),
-        // Reatribuído inteiro a cada busca; o cursor e o contador vão junto.
+fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
+    // Os que se esquecem por uma chamada com nome, que esvazia também o que anda
+    // junto (a tela do anexo, o contador da busca).
+    const CHAMADAS: &[(&str, &str)] = &[
+        ("retratos", "esquecerRetratos()"),
+        ("revisaoDosRetratos", "esquecerRetratos()"),
+        ("casamentosPorMensagem", "limparBusca()"),
+        ("ocorrenciaAtual", "limparBusca()"),
+        ("anexoPendente", "tirarAnexo()"),
+        ("subindo", "tirarAnexo()"),
+    ];
+    // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
+    // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.
+    const EXCECOES: &[(&str, &str)] = &[
         (
-            "casamentosPorMensagem",
-            &["limparBusca()", "encerrarBusca()"],
+            "falando",
+            "do teclado: é a tecla de falar segura agora, e não um fato da sessão; a \
+             soltura dela a fecha e manda o `set_talking(false)` (R03)",
+        ),
+        (
+            "teclaQueAbriuAFala",
+            "do teclado: a tecla que abriu a fala, para a soltura dela fechar (R03)",
+        ),
+        (
+            "teclaDeFalar",
+            "da preferência desta máquina, lida do disco, e não de um servidor",
+        ),
+        (
+            "foneJaAvisado",
+            "da execução: o aviso de fone é uma vez por abertura do app, e o guarda do \
+             lote J exige que só a declaração o zere",
+        ),
+        (
+            "geracaoDoAvisoDeFone",
+            "da execução: a geração em que a faixa de fone acendeu, comparada com \
+             `geracaoDaSessao`, que já muda a cada sessão",
+        ),
+        (
+            "limiteDaMensagem",
+            "do app: o teto do corpo em bytes é do protocolo, lido uma vez no \
+             carregamento",
+        ),
+        (
+            "regrasDePrevia",
+            "do app: o limite e os tipos de prévia, lidos uma vez no carregamento",
+        ),
+        (
+            "dominiosDeGif",
+            "do app: os domínios de GIF desta máquina, lidos uma vez no carregamento",
+        ),
+        (
+            "pastaDeDestino",
+            "do app: a pasta de downloads desta máquina, lida uma vez no carregamento",
+        ),
+        (
+            "conhecidosDaTrilha",
+            "desta máquina: a lista de servidores conhecidos, e não de um servidor; o \
+             primeiro quadro de cada sessão a relê (`recarregarTrilha`, pelo \
+             `comecoDaSessao` que esta função zera)",
+        ),
+        (
+            "buscandoMensagens",
+            "pedido em voo: o `finally` o apaga, e a resposta de outra sessão é \
+             descartada (`sincronizarMensagens` confere a geração)",
+        ),
+        (
+            "abrindoLinha",
+            "pedido em voo: o `finally` o apaga, e a resposta não escreve estado \
+             nenhum desta tela",
+        ),
+        (
+            "RECUSAS_DE_MENSAGEM",
+            "tabela fixa de frases, nunca escrita",
         ),
     ];
-    // Os mapas de topo que **atravessam** sessões de propósito, cada um com o
-    // motivo por escrito. Nenhum hoje.
-    const EXCECOES: &[(&str, &str)] = &[];
 
     let sessao = without_comments(&read("ui/tela-sessao.js"));
-    let mapas: Vec<String> = sessao
-        .lines()
-        .filter_map(|linha| {
-            let resto = linha
-                .strip_prefix("const ")
-                .or_else(|| linha.strip_prefix("let "))?;
-            let (nome, valor) = resto.split_once(" = ")?;
-            (valor.starts_with("new Map(") || valor.starts_with("new Set("))
-                .then(|| nome.trim().to_owned())
-        })
-        .collect();
+    let estado = estado_de_topo(&sessao);
     assert!(
-        mapas.len() >= 7,
-        "só {} mapas de topo achados em `tela-sessao.js` ({mapas:?}): o guarda mede quase \
-         nada, ou a forma das declarações mudou",
-        mapas.len()
+        estado.len() >= 30,
+        "só {} declarações de estado achadas no topo de `tela-sessao.js` ({estado:?}): o \
+         guarda mede quase nada, ou a forma das declarações mudou",
+        estado.len()
     );
 
     let esquecer = body_of(&sessao, "function esquecerOEstadoDaSessao()");
-    for mapa in &mapas {
-        if let Some((_, motivo)) = EXCECOES.iter().find(|(nome, _)| nome == mapa) {
+    for nome in &estado {
+        if let Some((_, motivo)) = EXCECOES.iter().find(|(excecao, _)| excecao == nome) {
             assert!(
                 !motivo.trim().is_empty(),
-                "`{mapa}` atravessa sessões sem motivo escrito"
+                "`{nome}` atravessa sessões sem motivo escrito"
             );
             continue;
         }
-        let esquecido = match CHAMADAS.iter().find(|(nome, _)| nome == mapa) {
-            Some((_, chamadas)) => chamadas.iter().any(|chamada| names(&esquecer, chamada)),
-            None => esquecer.contains(&format!("{mapa}.clear()")),
+        let esquecido = match CHAMADAS.iter().find(|(dono, _)| dono == nome) {
+            Some((_, chamada)) => names(&esquecer, chamada),
+            None => esquece(&esquecer, nome),
         };
         assert!(
             esquecido,
-            "`{mapa}` não é esquecido em `esquecerOEstadoDaSessao`: o que ele guardou de \
-             um servidor aparece no seguinte, sob o mesmo número:\n{esquecer}"
+            "`{nome}` não é esquecido em `esquecerOEstadoDaSessao`: o que ele guardou de \
+             um servidor aparece no seguinte:\n{esquecer}"
         );
     }
-    for (nome, _) in EXCECOES {
+    for (nome, _) in EXCECOES.iter().chain(CHAMADAS.iter()) {
         assert!(
-            mapas.iter().any(|mapa| mapa == nome),
-            "`{nome}` tem exceção e já não é um mapa de topo; tire-o de `EXCECOES`"
+            estado.iter().any(|declarado| declarado == nome),
+            "`{nome}` está no guarda e já não é estado de topo de `tela-sessao.js`; tire-o \
+             da tabela"
         );
     }
+    assert!(
+        esquecer.contains("$(\"lista-mensagens\").replaceChildren()"),
+        "`esquecerOEstadoDaSessao` não esvazia `#lista-mensagens`: a conversa desenhada \
+         do servidor que acabou está à vista quando o seguinte aparece"
+    );
 
-    // As duas saídas o chamam.
-    assert!(
-        names(
-            &body_of(&sessao, "async function ejetar()"),
-            "esquecerOEstadoDaSessao()"
-        ),
-        "SAIR DO SERVIDOR não esquece o estado da sessão: o rascunho e as prévias de \
-         um servidor aparecem no seguinte"
-    );
+    // As duas saídas o chamam, e não esquecem nada por conta própria.
     let fim = without_comments(&read("ui/tela-fim.js"));
-    assert!(
-        names(
-            &body_of(&fim, "async function limparSessaoEncerrada("),
-            "esquecerOEstadoDaSessao()"
+    for (saida, corpo) in [
+        (
+            "SAIR DO SERVIDOR (`ejetar`)",
+            body_of(&sessao, "async function ejetar()"),
         ),
-        "o fim de sessão não esquece o estado dela: o RECONECTAR e a volta à entrada \
-         levam o rascunho e as prévias para a sessão seguinte"
-    );
+        (
+            "o fim de sessão (`limparSessaoEncerrada`)",
+            body_of(&fim, "async function limparSessaoEncerrada("),
+        ),
+    ] {
+        assert!(
+            names(&corpo, "esquecerOEstadoDaSessao()"),
+            "{saida} não esquece o estado da sessão: o rascunho, o arquivo escolhido e as \
+             prévias de um servidor aparecem no seguinte"
+        );
+        for nome in &estado {
+            assert!(
+                !esquece(&corpo, nome),
+                "{saida} esquece `{nome}` por conta própria, fora de \
+                 `esquecerOEstadoDaSessao`: a outra saída fica sem ele"
+            );
+        }
+    }
+}
+
+/// Os nomes de estado declarados no topo de um script: todo `let`, e todo
+/// `const` que guarda coisas.
+fn estado_de_topo(script: &str) -> Vec<String> {
+    script
+        .lines()
+        .filter_map(|linha| {
+            if let Some(resto) = linha.strip_prefix("let ") {
+                let nome = resto.split([' ', '=', ';']).next()?;
+                return Some(nome.to_owned());
+            }
+            let (nome, valor) = linha.strip_prefix("const ")?.split_once(" = ")?;
+            ["new Map(", "new Set(", "new WeakMap(", "[", "{"]
+                .iter()
+                .any(|inicio| valor.starts_with(inicio))
+                .then(|| nome.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Se o texto esquece `nome`: atribui a ele (`=`, `+=`, `-=`), o esvazia com
+/// `.clear()` ou zera o comprimento dele. O nome inteiro, e não uma propriedade
+/// de outro objeto com o mesmo nome.
+fn esquece(texto: &str, nome: &str) -> bool {
+    texto.match_indices(nome).any(|(onde, _)| {
+        let antes = texto[..onde].chars().next_back();
+        if antes.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$') {
+            return false;
+        }
+        let depois = &texto[onde + nome.len()..];
+        if depois
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        {
+            return false;
+        }
+        let depois = depois.trim_start();
+        (depois.starts_with('=') && !depois.starts_with("=="))
+            || depois.starts_with("+=")
+            || depois.starts_with("-=")
+            || depois.starts_with(".clear()")
+            || depois.starts_with(".length = 0")
+    })
 }
 
 /// **A sala além da subida de quem hospeda diz os dois números, em kbps.**

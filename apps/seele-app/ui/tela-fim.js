@@ -183,11 +183,12 @@ async function limparSessaoEncerrada({ pararDeHospedar }) {
     nossoServidorEm = null;
   }
   mostrarVeredito(null);
-  desenhado = null;
-  linhaAberta = null;
-  // Os rascunhos, as prévias, os retratos e os volumes lidos daquela sessão:
-  // as chaves deles são números que o servidor dá, e a sessão seguinte —
-  // inclusive a do RECONECTAR — os reusa. Ver `esquecerOEstadoDaSessao`.
+  // Tudo o que a tela de sessão guardou daquela sessão — o snapshot desenhado,
+  // a Linha aberta, a conversa e a revisão dela, os rascunhos, o arquivo
+  // escolhido, as prévias, os retratos, os volumes lidos, o relógio e o
+  // endereço: as chaves são números que o servidor dá, e a sessão seguinte —
+  // inclusive a do RECONECTAR — os reusa. Nada é zerado aqui por fora: ver
+  // `esquecerOEstadoDaSessao` e o guarda dela.
   esquecerOEstadoDaSessao();
   await encerrarBusca();
   // **Nada a apagar.** Os três blocos do boot eram do formulário da entrada

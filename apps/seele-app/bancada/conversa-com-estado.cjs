@@ -329,8 +329,13 @@ const chromium = require("./playwright.cjs").chromium();
         guardarRascunho();
         previasDeLink.set("https://exemplo.invalid/a.png", false);
         volumesLidos.set("Lia", 150);
+        // M-2 da rodada 1: o relógio do UPTIME e o endereço da porta são de A.
+        comecoDaSessao = Date.now() - 600_000;
+        alvoDoServer = "servidor-a.invalid:8383";
         if (qual === "ejetar") await ejetar();
         else await limparSessaoEncerrada({ pararDeHospedar: false });
+        const comeco = comecoDaSessao;
+        const alvo = alvoDoServer;
         // A sessão seguinte abre o canal 1 dela.
         linhaAberta = 1;
         restaurarRascunho();
@@ -338,11 +343,13 @@ const chromium = require("./playwright.cjs").chromium();
           campo: $("campo-mensagem").value,
           previas: previasDeLink.size,
           volumes: volumesLidos.size,
+          comeco,
+          alvo,
         };
       }, saida);
       assert.deepEqual(
         depois,
-        { campo: "", previas: 0, volumes: 0 },
+        { campo: "", previas: 0, volumes: 0, comeco: null, alvo: null },
         `depois de ${saida}, o que a sessão guardou passou para a seguinte: ` +
           JSON.stringify(depois),
       );
@@ -385,6 +392,104 @@ const chromium = require("./playwright.cjs").chromium();
       `a conversa pedida na sessão que acabou foi escrita na seguinte: ${JSON.stringify(emVoo)}`,
     );
     console.log("M-1 OK: a conversa de uma sessão que acabou não chega à seguinte em voo");
+
+    // ---- I-1 da rodada 1: o anexo escolhido em A não vai a B ----
+    //
+    // A cena que a revisão mediu: o arquivo escolhido para um servidor ficava
+    // na caixa depois de qualquer saída, e o primeiro Enter no servidor seguinte
+    // o mandava, junto com o que se escrevesse ali.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const anexo = await page.evaluate(async (qual) => {
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        guardarAnexo({
+          nome: "contrato-do-servidor-A.pdf",
+          caminho: "/tmp/contrato-A.pdf",
+          tamanho: 2048,
+          tipo: "application/pdf",
+        });
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        // Em B: a Linha 1 dela, e o primeiro Enter.
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        window.testCalls.length = 0;
+        $("campo-mensagem").value = "oi, servidor B";
+        await enviar({ preventDefault() {} });
+        return {
+          caixa: $("anexo-pendente").hidden ? null : $("anexo-nome").textContent,
+          arquivos: window.testCalls
+            .filter((c) => c.cmd === "enviar_anexo")
+            .map((c) => c.args.caminho),
+          textos: window.testCalls
+            .filter((c) => c.cmd === "send_message")
+            .map((c) => c.args.body),
+        };
+      }, saida);
+      assert.deepEqual(
+        anexo,
+        { caixa: null, arquivos: [], textos: ["oi, servidor B"] },
+        `depois de ${saida}, o arquivo escolhido para o servidor A foi junto com a ` +
+          `primeira mensagem do B: ${JSON.stringify(anexo)}`,
+      );
+    }
+    console.log("I-1 OK: o arquivo escolhido para um servidor não vai para o seguinte");
+
+    // ---- M-1 da rodada 1: a conversa de A não aparece em B ----
+    //
+    // Nem de passagem — a lista desenhada de A, à vista quando B aparece —, nem
+    // para ficar, quando a primeira revisão de B coincide com a última de A e a
+    // sincronização conclui que não há o que buscar.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const conversa = await page.evaluate(async (qual) => {
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        const deA = {
+          id: 70,
+          channel: 1,
+          author: 2,
+          author_nickname: "Lia",
+          at_seconds: 1_726_900_000,
+          body: "segredo do servidor A",
+          own: false,
+          edited: false,
+          estado: "Confirmada",
+          client_message_id: null,
+        };
+        mensagens = [deA];
+        revisaoDesenhada = 5;
+        desenharMensagens();
+        const desenhadaEmA = $("lista-mensagens").textContent.includes("segredo do servidor A");
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        // B aparece, e a primeira revisão dela é a mesma 5, com outra conversa.
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        const deAAoAparecer = $("lista-mensagens").textContent.includes("segredo do servidor A");
+        const conversaDeA = window.testTable.messages;
+        window.testTable.messages = [{ ...deA, id: 1, body: "oi do servidor B" }];
+        linhaAberta = 1;
+        await sincronizarMensagens(5);
+        const texto = $("lista-mensagens").textContent;
+        window.testTable.messages = conversaDeA;
+        return {
+          desenhadaEmA,
+          deAAoAparecer,
+          deADepois: texto.includes("segredo do servidor A"),
+          deB: texto.includes("oi do servidor B"),
+        };
+      }, saida);
+      assert.deepEqual(
+        conversa,
+        { desenhadaEmA: true, deAAoAparecer: false, deADepois: false, deB: true },
+        `depois de ${saida}, a conversa do servidor A apareceu no B, ou a do B não foi ` +
+          `buscada porque a revisão coincidia: ${JSON.stringify(conversa)}`,
+      );
+    }
+    console.log("M-1 OK: a conversa de A não aparece em B, nem com a revisão coincidente");
   } finally {
     await browser.close();
     server.close();

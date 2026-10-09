@@ -3876,20 +3876,25 @@ async function sairDoServidorParaAEntrada() {
 /**
  * Esquece o que a sessão que acabou deixou nesta janela. F1-vazamento.
  *
- * Os mapas de topo deste arquivo são por sessão, e as chaves deles são números
- * que o servidor dá: o canal 1 de um servidor não é o canal 1 de outro, nem o
- * anexo 11. Nada os esvaziava ao sair, e o rascunho escrito no canal 1 de um
- * servidor aparecia no campo do canal 1 do seguinte — com uma prévia de imagem
- * de lá junto.
+ * O estado de topo deste arquivo é da sessão, e as chaves dele são números que
+ * o servidor dá: o canal 1 de um servidor não é o canal 1 de outro, nem o anexo
+ * 11. Nada o esvaziava ao sair, e o rascunho escrito no canal 1 de um servidor
+ * aparecia no campo do canal 1 do seguinte — com uma prévia de imagem de lá
+ * junto. A revisão da rodada 1 achou mais: o arquivo escolhido em A ia junto da
+ * primeira mensagem de B, a conversa de A aparecia em B, e o UPTIME de B
+ * contava desde A.
  *
- * Chamada pelas duas saídas: `ejetar` (SAIR DO SERVIDOR) e
- * `limparSessaoEncerrada`, em `tela-fim.js`, que o RECONECTAR e a volta à
- * entrada atravessam. A reconexão automática da bateria interna não passa por
- * aqui: ela é a mesma sessão, e não perde nada.
+ * **É o único lugar que esquece.** Chamada pelas duas saídas — `ejetar` (SAIR
+ * DO SERVIDOR) e `limparSessaoEncerrada`, em `tela-fim.js`, que o RECONECTAR e a
+ * volta à entrada atravessam —, e nenhuma delas zera nada por conta própria:
+ * um estado zerado solto numa saída e não na outra foi o M-1 e o M-2. A
+ * reconexão automática da bateria interna não passa por aqui: ela é a mesma
+ * sessão, e não perde nada.
  *
- * O guarda `todo_mapa_de_topo_da_sessao_e_esquecido_ao_sair` lê todo mapa de
- * topo deste arquivo e cobra cada um aqui. Um mapa novo entra nesta lista, ou
- * entra no guarda como exceção com o motivo escrito.
+ * O guarda `todo_estado_de_topo_da_sessao_e_esquecido_ao_sair` lê todo `let` e
+ * todo `const` que guarda coisas no topo deste arquivo, e cobra cada um aqui. Um
+ * novo entra nesta função, ou entra no guarda como exceção com o motivo
+ * escrito.
  */
 function esquecerOEstadoDaSessao() {
   rascunhos.clear();
@@ -3897,10 +3902,44 @@ function esquecerOEstadoDaSessao() {
   previasFechadas.clear();
   previasDeLink.clear();
   volumesLidos.clear();
+  // O que se desenhou e a Linha em que se estava.
+  desenhado = null;
+  linhaAberta = null;
+  // A conversa e a revisão dela (M-1 da rodada 1). A revisão do próximo
+  // servidor começa do zero, e guardar a do anterior fazia a primeira
+  // sincronização concluir que nada mudou quando as duas coincidiam: a tela
+  // abria com a conversa de outro servidor. Antes de `limparBusca`, que redesenha.
+  mensagens = [];
+  revisaoDesenhada = null;
+  // O que cada retrato recalcula, e que até o primeiro dele seria do anterior:
+  // a permissão de tirar mensagem, os lugares de uma sala nova (copiados de uma
+  // sala daquele servidor), a trilha desenhada e o anúncio de troca de
+  // aparelho, cuja conta é da voz que acabou.
+  podeRemoverMensagem = false;
+  lugaresDeUmaSalaNova = 250;
+  trilhaDesenhada = null;
+  trocasDeAparelhoVistas = null;
+  ateQuandoAnunciarOAparelho = 0;
   // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
   // e os casamentos da busca com o cursor e o contador.
   esquecerRetratos();
   limparBusca();
+  // O arquivo escolhido e a subida dele (I-1 da rodada 1). Sem isto, o arquivo
+  // escolhido para um servidor ficava na caixa, e o primeiro Enter no seguinte
+  // o mandava junto com o que se escrevesse lá.
+  tirarAnexo();
+  // O relógio e o endereço (M-2 da rodada 1): um uptime que sobrevive à sessão
+  // conta o tempo passado noutro servidor — e, sem o zero, o primeiro quadro da
+  // seguinte não relê a trilha —, e um endereço que sobrevive põe no cabeçalho
+  // do próximo a porta do anterior. O RECONECTAR não perde o dele: `mostrarFim`
+  // o copiou para `alvoDoFim` antes.
+  comecoDaSessao = null;
+  alvoDoServer = null;
+  // E a conversa desenhada, por último (M-1 da rodada 1): com a tela escondida,
+  // `limparBusca` acima não redesenha, e a lista de A ficava à vista no
+  // instante em que B aparecia. Sem lista, também não há desenho pendente.
+  $("lista-mensagens").replaceChildren();
+  mensagensPorDesenhar = false;
 }
 
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
@@ -3949,18 +3988,10 @@ async function ejetar() {
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.
   alternarCanais(false);
-  desenhado = null;
-  linhaAberta = null;
-  // O mesmo argumento do veredito, para o relógio e para o endereço: um uptime
-  // que sobrevive à sessão conta o tempo passado noutro servidor, e um endereço
-  // que sobrevive põe no cabeçalho do próximo a porta do anterior.
-  comecoDaSessao = null;
-  alvoDoServer = null;
-  // A conversa e a revisão pela mesma razão. A revisão do próximo servidor começa
-  // em zero, e guardar a do anterior faria a primeira sincronização concluir
-  // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
-  mensagens = [];
-  revisaoDesenhada = null;
+  // O snapshot desenhado, a Linha aberta, a conversa, o relógio e o endereço
+  // saíram daqui para `esquecerOEstadoDaSessao`, que as duas saídas chamam:
+  // zerados só aqui, eles passavam pela outra (M-1 e M-2 da rodada 1).
+  //
   // Fecha a barra, e não só zera o termo: aberta, ela abriria a próxima sessão
   // já com o cursor num campo de busca sobre uma conversa que não existe.
   await alternarBusca(false);
