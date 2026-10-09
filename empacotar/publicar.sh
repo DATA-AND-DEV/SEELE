@@ -2403,9 +2403,10 @@ for pub_repo in $REPOS; do
     # publicado, e não do zero. Sem isso, cada release apagaria a lista das
     # anteriores, e o launcher esqueceria o que existe.
     #
-    # `SEELE_MANIFESTO_ANTERIOR` acrescenta outros, separados por espaço. É por
-    # onde a 0.16.0 recebe o da 0.15.2, que nunca foi `latest` e por isso não
-    # está no endereço de cima. Ver `docs/versoes-lado-a-lado.md`, §3.
+    # `SEELE_MANIFESTO_ANTERIOR` acrescenta outros, separados por espaço: o de
+    # um release que não é o `latest` e por isso não está no endereço de cima.
+    # A 0.16.0 não precisa dele, porque a 0.15.2 saiu como `latest` (D-linha-2).
+    # Ver `docs/versoes-lado-a-lado.md`, §3.
     ma_anteriores=""
     ma_baixado="$TEMPORARIO/anterior-$pub_repo-latest.json"
     mkdir -p "$(dirname "$ma_baixado")"
