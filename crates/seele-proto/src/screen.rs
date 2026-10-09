@@ -24,11 +24,26 @@
 //! before it knows what it is being sent, which is the posture
 //! `specs/08-seguranca.md` asks of every network input.
 //!
-//! # There is no frame framing here, and that is not an oversight
+//! # Os quadros que seguem a abertura
 //!
-//! §3.6 is deliberately short, and it stops at the opening header. What
-//! separates one encoded picture from the next on this stream is not decided
-//! yet and is not decided here — see the report of this task.
+//! Depois dos onze bytes, o fluxo é uma sequência de quadros, cada um com um
+//! cabeçalho de [`CABECALHO_DE_QUADRO_LEN`] bytes: um de tipo
+//! ([`TipoDeQuadro`]: imagem comum, imagem-chave ou som) e quatro de tamanho.
+//!
+//! **Até 09/10/2026 esta camada vivia duas vezes**, no `seele-core` e no
+//! `seele-server`, com um comentário dizendo que a cópia era deliberada,
+//! porque um crate de transporte não teria dono. O dono é este crate, que já
+//! tinha a abertura do mesmo fluxo. O celular (D-celular-2) precisava de uma
+//! terceira leitura, e ela é esta. As duas cópias passam a usar este módulo
+//! num passo da F1.
+//!
+//! Há duas leituras, e as duas leem o cabeçalho de um quadro pela mesma função
+//! privada, que é onde a regra «recusa antes de alocar» mora:
+//! - o [`Enquadramento`] **conta bytes** e acha a porta de entrada de quem
+//!   chega no meio. Ele não remonta quadro, de propósito: o servidor repassa o
+//!   pedaço como chegou (§3.3);
+//! - o [`LeitorDeTela`] **remonta**: a abertura primeiro, os quadros inteiros
+//!   depois, para quem decodifica.
 //!
 //! # `ssrc` is not used here
 //!
@@ -418,6 +433,465 @@ fn read_u16(bytes: &[u8], offset: usize) -> u16 {
         .map_or(0, u16::from_be_bytes)
 }
 
+// ---------------------------------------------------------------------------
+// Os quadros
+// ---------------------------------------------------------------------------
+
+/// Bytes de cabeçalho na frente de cada quadro.
+///
+/// Um byte de tipo e quatro de tamanho. Ao contrário do [`SCREEN_HEADER_LEN`],
+/// que sai uma vez por transmissão, este sai trinta vezes por segundo: cinco
+/// bytes são 150 B/s, que somem ao lado do teto, e valem o que compram — um
+/// receptor que sabe onde o quadro acaba sem parsear NAL nenhuma.
+pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
+
+/// O maior quadro que a linha 1 carrega, em bytes: **4 MiB** (D-fio-9,
+/// 09/10/2026).
+///
+/// **Congelado com a linha 1** (ADR 0058): uma 1.x não pode mandar quadro maior
+/// para uma 1.0, que o recusaria. Por isso o número cobre o maior quadro
+/// legítimo possível, e não o maior que alguém mediu:
+/// - a abertura aceita no máximo [`MAX_SCREEN_SIDE`] de lado e
+///   [`MAX_SCREEN_PIXELS`] de área, e o codificador tem teto em 1080p;
+/// - um quadro I420 cru de 1080p tem 3037,5 KiB, e o H.264 nunca precisa de
+///   mais (o macrobloco PCM carrega o pixel cru), fora alguns bytes de
+///   cabeçalho;
+/// - os 512 KiB de antes cortavam quadros legítimos: com conteúdo realista e
+///   tetos que o produto permite na rede local, um quadro passou de 512 KiB a
+///   partir de 12,4 Mbps, e chegou a 973 KiB
+///   (`docs/superpowers/sdd/2026-10-08-0.16/F4/medidas/idr-no-teto.md`).
+///
+/// Dois guardas o prendem: `o_teto_cabe_o_quadro_cru_da_maior_forma_que_a_abertura_aceita`,
+/// aqui, e `seele-core/tests/teto_do_quadro_de_tela.rs`, contra as resoluções
+/// do codificador.
+///
+/// O custo é a memória de um quadro em andamento por transmissão assistida, no
+/// leitor que remonta ([`LeitorDeTela::bytes_reservados`]). O [`Enquadramento`]
+/// conta bytes e não guarda quadro.
+pub const MAX_QUADRO_LEN: usize = 4 * 1024 * 1024;
+
+/// Quanto um leitor reserva de uma vez para o corpo de um quadro: **64 KiB**.
+///
+/// Regra da orquestradora em 09/10/2026, sobre a revisão deste módulo: quem lê
+/// reserva `min(tamanho, RESERVA_INICIAL_DE_QUADRO)` e cresce com o que chega,
+/// e não o tamanho anunciado de uma vez. Com o teto em 4 MiB, reservar pelo
+/// anúncio faria um cabeçalho de cinco bytes custar 4 MiB antes de o corpo
+/// existir; assim, a memória acompanha os bytes recebidos.
+pub const RESERVA_INICIAL_DE_QUADRO: usize = 64 * 1024;
+
+/// O que vem dentro de um quadro do fluxo de tela.
+///
+/// O byte de tipo era zero ou um, imagem comum ou imagem-chave, e ganhou um
+/// terceiro valor quando o som passou a viajar junto. Os códigos só crescem no
+/// fim, como os de [`ScreenSource`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TipoDeQuadro {
+    /// Imagem que depende do quadro anterior.
+    Comum = 0,
+    /// Imagem que basta a si mesma. É por onde quem chega no meio entra.
+    Chave = 1,
+    /// Som do que está sendo mostrado, em Opus.
+    ///
+    /// **Dentro do mesmo fluxo da imagem, e não ao lado dele.** Dois fluxos
+    /// chegariam em ordens diferentes e precisariam de carimbo e de fila de
+    /// alinhamento; no mesmo fluxo, a ordem de chegada é a ordem de saída. E o
+    /// orçamento de banda da tela já mede o fluxo inteiro.
+    Som = 2,
+}
+
+impl TipoDeQuadro {
+    /// O byte que vai no fio.
+    #[must_use]
+    pub const fn byte(self) -> u8 {
+        self as u8
+    }
+
+    /// O tipo que um byte nomeia, ou nada.
+    ///
+    /// `None` é um fluxo que não é o nosso, e quem lê o trata como fim — nunca
+    /// como um quadro de tipo desconhecido a pular. Pular exigiria confiar no
+    /// tamanho que veio junto, e o tamanho é a única coisa que um fluxo de lixo
+    /// pode usar para pedir uma alocação absurda.
+    #[must_use]
+    pub const fn de_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Comum),
+            1 => Some(Self::Chave),
+            2 => Some(Self::Som),
+            _ => None,
+        }
+    }
+
+    /// É imagem que basta a si mesma?
+    #[must_use]
+    pub const fn e_chave(self) -> bool {
+        matches!(self, Self::Chave)
+    }
+}
+
+/// Por que um quadro não pôde ser lido.
+///
+/// O nome não é `ErroDeTela` porque esse é o do `seele-core`, que também tem as
+/// falhas de rede. Lá ele embrulha este; o `FimDaTela` do servidor o traduz.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum ErroDeQuadro {
+    /// A abertura do fluxo não serve.
+    #[error("screen header refused: {0}")]
+    Cabecalho(#[from] ScreenError),
+    /// Um byte de tipo que este build não conhece.
+    #[error("frame type byte {byte} is not one this build knows")]
+    TipoDesconhecido {
+        /// O byte que veio.
+        byte: u8,
+    },
+    /// Um quadro anunciado com zero bytes.
+    #[error("a frame announced zero bytes")]
+    QuadroVazio,
+    /// Um quadro anunciado acima de [`MAX_QUADRO_LEN`].
+    #[error("a frame announced {len} bytes, over the {MAX_QUADRO_LEN}-byte limit")]
+    QuadroGrandeDemais {
+        /// O tamanho anunciado.
+        len: usize,
+    },
+}
+
+/// O cabeçalho de um quadro: o tipo e o tamanho, em big-endian.
+#[must_use]
+pub const fn cabecalho_de_quadro(
+    tipo: TipoDeQuadro,
+    tamanho: u32,
+) -> [u8; CABECALHO_DE_QUADRO_LEN] {
+    let [a, b, c, d] = tamanho.to_be_bytes();
+    [tipo.byte(), a, b, c, d]
+}
+
+/// Lê o cabeçalho de um quadro. **A única porta por onde o tamanho de um quadro
+/// entra**: nas duas leituras deste módulo e no receptor do `seele-core`, que lê
+/// do fluxo e não passa pelo [`LeitorDeTela`]. Tipo desconhecido, quadro vazio e
+/// tamanho acima do teto saem daqui, antes de qualquer reserva.
+///
+/// # Errors
+///
+/// [`ErroDeQuadro::TipoDesconhecido`], [`ErroDeQuadro::QuadroVazio`] e
+/// [`ErroDeQuadro::QuadroGrandeDemais`].
+pub fn ler_cabecalho_de_quadro(
+    cabecalho: &[u8; CABECALHO_DE_QUADRO_LEN],
+) -> Result<(TipoDeQuadro, usize), ErroDeQuadro> {
+    let [byte, a, b, c, d] = *cabecalho;
+    let Some(tipo) = TipoDeQuadro::de_byte(byte) else {
+        return Err(ErroDeQuadro::TipoDesconhecido { byte });
+    };
+    let tamanho = u32::from_be_bytes([a, b, c, d]) as usize;
+    if tamanho == 0 {
+        return Err(ErroDeQuadro::QuadroVazio);
+    }
+    if tamanho > MAX_QUADRO_LEN {
+        return Err(ErroDeQuadro::QuadroGrandeDemais { len: tamanho });
+    }
+    Ok((tipo, tamanho))
+}
+
+/// Junta o cabeçalho de um quadro que pode chegar partido entre pedaços.
+#[derive(Debug, Default)]
+struct CabecalhoParcial {
+    bytes: [u8; CABECALHO_DE_QUADRO_LEN],
+    tem: usize,
+}
+
+impl CabecalhoParcial {
+    /// Toma do começo de `pedaco` o que falta ao cabeçalho. Devolve quantos
+    /// bytes tomou e, se ele ficou inteiro, os cinco bytes (e se recomeça).
+    fn tomar(&mut self, pedaco: &[u8]) -> (usize, Option<[u8; CABECALHO_DE_QUADRO_LEN]>) {
+        let anda = (CABECALHO_DE_QUADRO_LEN - self.tem).min(pedaco.len());
+        if let (Some(destino), Some(origem)) = (
+            self.bytes.get_mut(self.tem..self.tem + anda),
+            pedaco.get(..anda),
+        ) {
+            destino.copy_from_slice(origem);
+        }
+        self.tem += anda;
+        if self.tem < CABECALHO_DE_QUADRO_LEN {
+            return (anda, None);
+        }
+        self.tem = 0;
+        (anda, Some(self.bytes))
+    }
+
+    fn vazio(&self) -> bool {
+        self.tem == 0
+    }
+}
+
+/// Onde o enquadramento de um fluxo de tela está, quadro a quadro.
+///
+/// **Conta bytes e acha a porta de entrada**, e não remonta quadro: o servidor
+/// repassa o pedaço como chegou (§3.3), e quem chega no meio de uma
+/// transmissão entra no começo de um quadro-chave.
+///
+/// # Por que contar bytes, e não olhar o primeiro byte do pedaço
+///
+/// Um pedaço não é um quadro: é o que uma leitura devolveu, e ela corta onde o
+/// I/O corta. Um pedaço pode carregar dois quadros inteiros, ou só a metade de
+/// um. Ler o primeiro byte de cada pedaço como se fosse sempre um byte de tipo
+/// lê lixo nos dois casos — o meio de um quadro H.264 Annex-B está cheio de
+/// `0x00` e `0x01`. Contar bytes é a única forma de saber onde um cabeçalho de
+/// verdade começa.
+#[derive(Debug, Default)]
+pub struct Enquadramento {
+    /// Quantos bytes faltam do quadro que está passando.
+    restam: usize,
+    /// O cabeçalho do próximo quadro, enquanto ele chega partido.
+    cabecalho: CabecalhoParcial,
+}
+
+impl Enquadramento {
+    /// Um enquadramento no começo dos quadros, esperando o primeiro cabeçalho.
+    #[must_use]
+    pub fn novo() -> Self {
+        Self::default()
+    }
+
+    /// Passa um pedaço pelo enquadramento e diz onde alguém pode entrar.
+    ///
+    /// Devolve o deslocamento, dentro deste pedaço, do primeiro cabeçalho de
+    /// **quadro-chave que começa e termina neste mesmo pedaço**. Um cabeçalho
+    /// partido entre dois pedaços não vira porta: a primeira metade já pode ter
+    /// saído para quem estava do outro lado, e quem entrasse agora leria a
+    /// segunda metade como se fosse a primeira.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeQuadro`] para um tipo desconhecido, um quadro vazio ou um
+    /// tamanho acima de [`MAX_QUADRO_LEN`].
+    pub fn entrada(&mut self, bytes: &[u8]) -> Result<Option<usize>, ErroDeQuadro> {
+        let mut entrada = None;
+        let mut i = 0;
+        while let Some(resto) = bytes.get(i..).filter(|r| !r.is_empty()) {
+            if self.restam > 0 {
+                let anda = self.restam.min(resto.len());
+                self.restam -= anda;
+                i += anda;
+                continue;
+            }
+            let comeca_aqui = self.cabecalho.vazio();
+            let inicio = i;
+            let (anda, inteiro) = self.cabecalho.tomar(resto);
+            i += anda;
+            let Some(cabecalho) = inteiro else {
+                break;
+            };
+            let (tipo, tamanho) = ler_cabecalho_de_quadro(&cabecalho)?;
+            self.restam = tamanho;
+            // **A porta de entrada é um quadro-chave de imagem, e só ele.** Um
+            // quadro de som não começa nada.
+            if tipo.e_chave() && comeca_aqui && entrada.is_none() {
+                entrada = Some(inicio);
+            }
+        }
+        Ok(entrada)
+    }
+}
+
+/// O que o [`LeitorDeTela`] leu.
+///
+/// O nome não é `Lido` porque esse é o de [`crate::control::Lido`], que o
+/// celular importa junto.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LidoDaTela {
+    /// A abertura do fluxo, uma vez, antes de tudo.
+    Abertura(ScreenHeader),
+    /// Um quadro inteiro.
+    Quadro {
+        /// Imagem comum, imagem-chave ou som.
+        tipo: TipoDeQuadro,
+        /// O corpo, sem o cabeçalho.
+        bytes: Vec<u8>,
+    },
+}
+
+/// Onde o leitor está.
+#[derive(Debug)]
+enum Estado {
+    /// Juntando os onze bytes da abertura.
+    Abertura {
+        bytes: [u8; SCREEN_HEADER_LEN],
+        tem: usize,
+    },
+    /// Entre quadros, ou no meio de um.
+    Quadros {
+        cabecalho: CabecalhoParcial,
+        /// O quadro em andamento: o tipo, os bytes até aqui e o tamanho
+        /// anunciado.
+        quadro: Option<(TipoDeQuadro, Vec<u8>, usize)>,
+    },
+    /// Um erro fechou o leitor.
+    Fechado(ErroDeQuadro),
+}
+
+/// Lê um fluxo de tela, a partir do byte depois do tipo do fluxo.
+///
+/// Quem aceita o fluxo despacha pelo tipo (`fluxo:tipo:tela`); daqui em
+/// diante vêm a abertura e os quadros. É o caminho de
+/// `Recepcao::do_fluxo_ja_tipado`, no `seele-core`.
+///
+/// # Por que ele confere no `empurrar`, e não no `proximo`
+///
+/// Ao contrário do [`crate::quadro::Desenquadrador`], que confere quando o
+/// quadro é pedido, este confere o cabeçalho de cada quadro **assim que ele
+/// chega**, e só então reserva o corpo. É o que limita a memória a um quadro em
+/// andamento: um tamanho absurdo é recusado antes de qualquer reserva, e nunca
+/// fica um corpo inteiro guardado à espera de alguém pedi-lo para descobrir que
+/// ele não podia existir.
+///
+/// O que fica pronto espera em ordem até o [`LeitorDeTela::proximo`]. Um pedaço
+/// de N bytes produz no máximo N ÷ 6 quadros (o menor quadro tem um byte de
+/// corpo), então a fila cresce com o pedaço, e não com o que um par anuncia.
+///
+/// **Um erro fecha o leitor.** Um fluxo de lixo não pede uma segunda leitura, e
+/// todo `empurrar` depois dele devolve o mesmo erro.
+#[derive(Debug)]
+pub struct LeitorDeTela {
+    estado: Estado,
+    prontos: std::collections::VecDeque<LidoDaTela>,
+    /// A maior reserva que o leitor já fez para um quadro. Ver [`reservar`].
+    maior_reserva: usize,
+}
+
+/// **A única reserva de corpo do leitor**, e ela anota o maior pedido.
+///
+/// O guarda da ordem «conferir, e só então reservar» olha este pico: uma
+/// reserva feita antes da conferência é soltada quando o erro fecha o leitor, e
+/// um guarda que olhasse só a reserva de agora não a veria. (Um alocador
+/// contador veria, mas o workspace proíbe `unsafe`, e um `forbid` não se
+/// afrouxa nem num teste.)
+fn reservar(maior_reserva: &mut usize, tamanho: usize) -> Vec<u8> {
+    *maior_reserva = (*maior_reserva).max(tamanho);
+    Vec::with_capacity(tamanho)
+}
+
+impl Default for LeitorDeTela {
+    fn default() -> Self {
+        Self::novo()
+    }
+}
+
+impl LeitorDeTela {
+    /// Um leitor no começo do fluxo, esperando a abertura.
+    #[must_use]
+    pub fn novo() -> Self {
+        Self {
+            estado: Estado::Abertura {
+                bytes: [0; SCREEN_HEADER_LEN],
+                tem: 0,
+            },
+            prontos: std::collections::VecDeque::new(),
+            maior_reserva: 0,
+        }
+    }
+
+    /// Passa um pedaço do fluxo pelo leitor.
+    ///
+    /// # Errors
+    ///
+    /// [`ErroDeQuadro`] para uma abertura que não serve, um tipo desconhecido,
+    /// um quadro vazio ou um tamanho acima de [`MAX_QUADRO_LEN`]. O leitor fica
+    /// fechado, e o que já estava pronto continua saindo pelo `proximo`.
+    pub fn empurrar(&mut self, pedaco: &[u8]) -> Result<(), ErroDeQuadro> {
+        let mut i = 0;
+        while let Some(resto) = pedaco.get(i..).filter(|r| !r.is_empty()) {
+            match &mut self.estado {
+                Estado::Fechado(erro) => return Err(*erro),
+                Estado::Abertura { bytes, tem } => {
+                    let anda = (SCREEN_HEADER_LEN - *tem).min(resto.len());
+                    if let (Some(destino), Some(origem)) =
+                        (bytes.get_mut(*tem..*tem + anda), resto.get(..anda))
+                    {
+                        destino.copy_from_slice(origem);
+                    }
+                    *tem += anda;
+                    i += anda;
+                    if *tem == SCREEN_HEADER_LEN {
+                        match ScreenHeader::decode(bytes.as_slice()) {
+                            Ok((abertura, _)) => {
+                                self.prontos.push_back(LidoDaTela::Abertura(abertura));
+                                self.estado = Estado::Quadros {
+                                    cabecalho: CabecalhoParcial::default(),
+                                    quadro: None,
+                                };
+                            }
+                            Err(erro) => return Err(self.fechar(erro.into())),
+                        }
+                    }
+                }
+                Estado::Quadros { cabecalho, quadro } => {
+                    if let Some((tipo, bytes, tamanho)) = quadro {
+                        let anda = (*tamanho - bytes.len()).min(resto.len());
+                        bytes.extend_from_slice(resto.get(..anda).unwrap_or_default());
+                        i += anda;
+                        if bytes.len() == *tamanho {
+                            let tipo = *tipo;
+                            let bytes = std::mem::take(bytes);
+                            *quadro = None;
+                            self.prontos.push_back(LidoDaTela::Quadro { tipo, bytes });
+                        }
+                        continue;
+                    }
+                    let (anda, inteiro) = cabecalho.tomar(resto);
+                    i += anda;
+                    let Some(inteiro) = inteiro else {
+                        continue;
+                    };
+                    match ler_cabecalho_de_quadro(&inteiro) {
+                        // **Só agora**, com o tamanho conferido, o corpo é
+                        // reservado.
+                        Ok((tipo, tamanho)) => {
+                            *quadro =
+                                Some((tipo, reservar(&mut self.maior_reserva, tamanho), tamanho));
+                        }
+                        Err(erro) => return Err(self.fechar(erro)),
+                    }
+                }
+            }
+        }
+        match &self.estado {
+            Estado::Fechado(erro) => Err(*erro),
+            _ => Ok(()),
+        }
+    }
+
+    /// O próximo que ficou pronto, em ordem: a abertura primeiro, os quadros
+    /// depois.
+    pub fn proximo(&mut self) -> Option<LidoDaTela> {
+        self.prontos.pop_front()
+    }
+
+    /// Quantos bytes o leitor segura para o quadro em andamento: a memória que
+    /// uma transmissão assistida custa aqui, para o diagnóstico.
+    #[must_use]
+    pub fn bytes_reservados(&self) -> usize {
+        match &self.estado {
+            Estado::Quadros {
+                quadro: Some((_, bytes, _)),
+                ..
+            } => bytes.capacity(),
+            _ => 0,
+        }
+    }
+
+    /// O maior quadro que este fluxo pediu até agora, em bytes: para o
+    /// diagnóstico do custo de uma transmissão, e para o guarda da ordem.
+    #[must_use]
+    pub fn maior_reserva(&self) -> usize {
+        self.maior_reserva
+    }
+
+    fn fechar(&mut self, erro: ErroDeQuadro) -> ErroDeQuadro {
+        self.estado = Estado::Fechado(erro);
+        erro
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,6 +1216,343 @@ mod entre_versoes {
             crate::version::confere_o_carimbo(SCREEN_HEADER_VERSION).is_err(),
             "a janela do protocolo passou a aceitar o 1 de novo; se isso for \
              verdade, este teste perdeu o que ele estava guardando"
+        );
+    }
+}
+
+#[cfg(test)]
+mod os_quadros {
+    //! Os quadros que seguem a abertura: o [`Enquadramento`], que conta bytes,
+    //! e o [`LeitorDeTela`], que remonta. Os oito testes do `Enquadramento`
+    //! vêm do gêmeo em `seele-core/src/tela.rs` (módulo `o_enquadramento`),
+    //! com o [`ErroDeQuadro`] no lugar do `ErroDeTela` de lá.
+
+    use super::*;
+
+    /// Um quadro como o fio o leva: tipo, tamanho, corpo.
+    fn quadro(tipo: TipoDeQuadro, tamanho: usize) -> Vec<u8> {
+        let mut bytes = cabecalho_de_quadro(tipo, u32::try_from(tamanho).unwrap()).to_vec();
+        bytes.extend(std::iter::repeat_n(0xAB, tamanho));
+        bytes
+    }
+
+    fn abertura() -> Vec<u8> {
+        let mut bytes = [0_u8; SCREEN_HEADER_LEN];
+        ScreenHeader {
+            version: SCREEN_HEADER_VERSION,
+            screen: crate::ids::ScreenId(5),
+            source: ScreenSource::Monitor,
+            codec: ScreenCodec::H264Baseline,
+            width: 1920,
+            height: 1080,
+        }
+        .encode(&mut bytes)
+        .unwrap();
+        bytes.to_vec()
+    }
+
+    /// Tudo o que o leitor devolveu até agora.
+    fn lidos(leitor: &mut LeitorDeTela) -> Vec<LidoDaTela> {
+        std::iter::from_fn(|| leitor.proximo()).collect()
+    }
+
+    // ---- o cabeçalho de um quadro ----
+
+    #[test]
+    fn o_cabecalho_de_um_quadro_e_o_tipo_e_o_tamanho_em_big_endian() {
+        assert_eq!(
+            cabecalho_de_quadro(TipoDeQuadro::Comum, 0x0102_0304),
+            [0, 1, 2, 3, 4]
+        );
+        assert_eq!(cabecalho_de_quadro(TipoDeQuadro::Chave, 9), [1, 0, 0, 0, 9]);
+        assert_eq!(cabecalho_de_quadro(TipoDeQuadro::Som, 2), [2, 0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn os_bytes_de_tipo_nao_mudam() {
+        assert_eq!(TipoDeQuadro::Comum.byte(), 0);
+        assert_eq!(TipoDeQuadro::Chave.byte(), 1);
+        assert_eq!(TipoDeQuadro::Som.byte(), 2);
+        for byte in 0..=u8::MAX {
+            assert_eq!(
+                TipoDeQuadro::de_byte(byte).map(TipoDeQuadro::byte),
+                (byte <= 2).then_some(byte)
+            );
+        }
+    }
+
+    /// **O teto cabe o maior quadro que o fio admite** (D-fio-9, 09/10/2026).
+    ///
+    /// O pior caso é o quadro I420 cru da maior forma que a abertura aceita
+    /// ([`MAX_SCREEN_SIDE`] e [`MAX_SCREEN_PIXELS`]), com o croma arredondado
+    /// para cima numa forma ímpar, mais o cabeçalho. O H.264 nunca precisa de
+    /// mais: o macrobloco PCM carrega o pixel cru. O guarda contra as
+    /// resoluções do codificador mora em
+    /// `seele-core/tests/teto_do_quadro_de_tela.rs`, onde o `seele-video` é
+    /// alcançável.
+    #[test]
+    fn o_teto_cabe_o_quadro_cru_da_maior_forma_que_a_abertura_aceita() {
+        let lado = usize::from(MAX_SCREEN_SIDE);
+        let area = MAX_SCREEN_PIXELS as usize;
+        let pior = (1..=lado)
+            .map(|largura| {
+                let altura = (area / largura).min(lado);
+                largura * altura + 2 * largura.div_ceil(2) * altura.div_ceil(2)
+            })
+            .max()
+            .unwrap();
+        assert!(
+            MAX_QUADRO_LEN >= pior + CABECALHO_DE_QUADRO_LEN,
+            "o teto do quadro ({MAX_QUADRO_LEN}) corta o quadro cru de {pior} bytes que a \
+             abertura admite"
+        );
+    }
+
+    // ---- o Enquadramento, portado do seele-core ----
+
+    #[test]
+    fn a_porta_de_entrada_e_o_comeco_de_um_quadro_chave() {
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 10);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 20));
+        fluxo.extend(quadro(TipoDeQuadro::Comum, 5));
+        assert_eq!(enq.entrada(&fluxo), Ok(Some(onde)));
+    }
+
+    #[test]
+    fn sem_quadro_chave_nao_ha_porta() {
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 10);
+        fluxo.extend(quadro(TipoDeQuadro::Comum, 20));
+        assert_eq!(enq.entrada(&fluxo), Ok(None));
+    }
+
+    #[test]
+    fn um_cabecalho_partido_ao_meio_nao_vira_porta() {
+        let mut enq = Enquadramento::novo();
+        let chave = quadro(TipoDeQuadro::Chave, 20);
+        assert_eq!(enq.entrada(chave.get(..3).unwrap_or_default()), Ok(None));
+        assert_eq!(enq.entrada(chave.get(3..).unwrap_or_default()), Ok(None));
+        assert_eq!(enq.entrada(&quadro(TipoDeQuadro::Chave, 8)), Ok(Some(0)));
+    }
+
+    #[test]
+    fn o_enquadramento_atravessa_pedacos_de_qualquer_tamanho() {
+        let mut fluxo = quadro(TipoDeQuadro::Comum, 300);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 100));
+        let mut inteiro = Enquadramento::novo();
+        assert_eq!(inteiro.entrada(&fluxo), Ok(Some(onde)));
+
+        let mut picado = Enquadramento::novo();
+        let mut achado = None;
+        for (i, byte) in fluxo.iter().enumerate() {
+            if let Ok(Some(_)) = picado.entrada(&[*byte]) {
+                achado = Some(i);
+            }
+        }
+        assert_eq!(achado, None);
+    }
+
+    #[test]
+    fn um_tamanho_impossivel_encerra_o_fluxo() {
+        let mut enq = Enquadramento::novo();
+        let tamanho = u32::try_from(MAX_QUADRO_LEN).unwrap() + 1;
+        assert_eq!(
+            enq.entrada(&cabecalho_de_quadro(TipoDeQuadro::Comum, tamanho)),
+            Err(ErroDeQuadro::QuadroGrandeDemais {
+                len: tamanho as usize
+            })
+        );
+    }
+
+    #[test]
+    fn um_quadro_vazio_encerra_o_fluxo() {
+        let mut enq = Enquadramento::novo();
+        assert_eq!(
+            enq.entrada(&[TipoDeQuadro::Comum.byte(), 0, 0, 0, 0]),
+            Err(ErroDeQuadro::QuadroVazio)
+        );
+    }
+
+    #[test]
+    fn um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra() {
+        let byte = 3_u8;
+        let mut enq = Enquadramento::novo();
+        assert_eq!(
+            enq.entrada(&[byte, 0, 0, 0, 8]),
+            Err(ErroDeQuadro::TipoDesconhecido { byte })
+        );
+    }
+
+    #[test]
+    fn um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada() {
+        let mut enq = Enquadramento::novo();
+        assert_eq!(enq.entrada(&quadro(TipoDeQuadro::Som, 4)), Ok(None));
+
+        let mut enq = Enquadramento::novo();
+        let mut fluxo = quadro(TipoDeQuadro::Som, 4);
+        let onde = fluxo.len();
+        fluxo.extend(quadro(TipoDeQuadro::Chave, 20));
+        assert_eq!(enq.entrada(&fluxo), Ok(Some(onde)));
+    }
+
+    // ---- o LeitorDeTela ----
+
+    /// A abertura e três quadros, um de cada tipo, com corpos diferentes.
+    fn um_fluxo() -> (Vec<u8>, Vec<LidoDaTela>) {
+        let (cabecalho, _) = ScreenHeader::decode(&abertura()).unwrap();
+        let corpos = [
+            (TipoDeQuadro::Chave, vec![0, 0, 0, 1, 0x65, 7, 7]),
+            (TipoDeQuadro::Som, vec![0xFC, 0xFF]),
+            (TipoDeQuadro::Comum, vec![0, 0, 0, 1, 0x41]),
+        ];
+        let mut bytes = abertura();
+        let mut esperado = vec![LidoDaTela::Abertura(cabecalho)];
+        for (tipo, corpo) in corpos {
+            bytes.extend_from_slice(&cabecalho_de_quadro(
+                tipo,
+                u32::try_from(corpo.len()).unwrap(),
+            ));
+            bytes.extend_from_slice(&corpo);
+            esperado.push(LidoDaTela::Quadro { tipo, bytes: corpo });
+        }
+        (bytes, esperado)
+    }
+
+    #[test]
+    fn o_leitor_devolve_a_abertura_e_os_quadros_em_ordem() {
+        let (bytes, esperado) = um_fluxo();
+        let mut leitor = LeitorDeTela::novo();
+        leitor.empurrar(&bytes).unwrap();
+        assert_eq!(lidos(&mut leitor), esperado);
+        assert_eq!(leitor.proximo(), None);
+    }
+
+    #[test]
+    fn o_leitor_da_o_mesmo_resultado_em_todo_corte() {
+        let (bytes, esperado) = um_fluxo();
+        // Dois pedaços, cortados em cada posição possível.
+        for corte in 0..=bytes.len() {
+            let mut leitor = LeitorDeTela::novo();
+            let (a, b) = bytes.split_at(corte);
+            leitor.empurrar(a).unwrap();
+            let mut tudo = lidos(&mut leitor);
+            leitor.empurrar(b).unwrap();
+            tudo.extend(lidos(&mut leitor));
+            assert_eq!(tudo, esperado, "cortado no byte {corte}");
+        }
+        // E byte a byte.
+        let mut leitor = LeitorDeTela::novo();
+        let mut tudo = Vec::new();
+        for byte in &bytes {
+            leitor.empurrar(std::slice::from_ref(byte)).unwrap();
+            tudo.extend(lidos(&mut leitor));
+        }
+        assert_eq!(tudo, esperado);
+    }
+
+    #[test]
+    fn o_leitor_recusa_e_fecha() {
+        for (cabecalho, erro) in [
+            ([7, 0, 0, 0, 1], ErroDeQuadro::TipoDesconhecido { byte: 7 }),
+            ([0, 0, 0, 0, 0], ErroDeQuadro::QuadroVazio),
+            (
+                cabecalho_de_quadro(TipoDeQuadro::Chave, u32::MAX),
+                ErroDeQuadro::QuadroGrandeDemais {
+                    len: u32::MAX as usize,
+                },
+            ),
+        ] {
+            let mut leitor = LeitorDeTela::novo();
+            let mut bytes = abertura();
+            bytes.extend_from_slice(&cabecalho);
+            assert_eq!(leitor.empurrar(&bytes), Err(erro), "{cabecalho:?}");
+            // **Um erro fecha o leitor**: um fluxo de lixo não pede uma
+            // segunda leitura, e o que vier depois é recusado com o mesmo erro.
+            assert_eq!(leitor.empurrar(&quadro(TipoDeQuadro::Chave, 3)), Err(erro));
+            assert_eq!(
+                lidos(&mut leitor).len(),
+                1,
+                "só a abertura sai: {cabecalho:?}"
+            );
+        }
+    }
+
+    /// **O tamanho é recusado antes de qualquer reserva.** O tamanho é o
+    /// único número que um fluxo de lixo controla, e ele chega antes do corpo:
+    /// um leitor que reservasse pelo anunciado e só depois conferisse daria a
+    /// quem manda a alocação que ele quisesse (`specs/08-seguranca.md`).
+    ///
+    /// Um tamanho logo acima do teto, e não `u32::MAX`: com a ordem trocada, a
+    /// reserva de 4 MiB + 1 acontece de verdade e este teste reprova limpo, em
+    /// vez de o processo abortar por falta de memória. (Um `#[global_allocator]`
+    /// contador não cabe aqui: o workspace proíbe `unsafe`, e um `forbid` não
+    /// se afrouxa nem num teste.)
+    #[test]
+    fn o_tamanho_e_recusado_antes_de_reservar() {
+        let tamanho = u32::try_from(MAX_QUADRO_LEN).unwrap() + 1;
+        let mut bytes = abertura();
+        bytes.extend_from_slice(&cabecalho_de_quadro(TipoDeQuadro::Chave, tamanho));
+        let mut leitor = LeitorDeTela::novo();
+        assert_eq!(
+            leitor.empurrar(&bytes),
+            Err(ErroDeQuadro::QuadroGrandeDemais {
+                len: tamanho as usize
+            })
+        );
+        assert_eq!(
+            leitor.maior_reserva(),
+            0,
+            "o leitor reservou memória para um quadro que ele recusou"
+        );
+        assert_eq!(leitor.bytes_reservados(), 0);
+    }
+
+    #[test]
+    fn um_quadro_aceito_reserva_o_que_anunciou_e_solta_ao_sair() {
+        let mut bytes = abertura();
+        let corpo = quadro(TipoDeQuadro::Chave, 1000);
+        bytes.extend_from_slice(corpo.get(..CABECALHO_DE_QUADRO_LEN + 10).unwrap());
+        let mut leitor = LeitorDeTela::novo();
+        leitor.empurrar(&bytes).unwrap();
+        assert_eq!(leitor.bytes_reservados(), 1000, "o quadro em andamento");
+        assert_eq!(leitor.maior_reserva(), 1000);
+        leitor
+            .empurrar(corpo.get(CABECALHO_DE_QUADRO_LEN + 10..).unwrap())
+            .unwrap();
+        assert_eq!(
+            leitor.bytes_reservados(),
+            0,
+            "o quadro pronto saiu do andamento"
+        );
+    }
+
+    #[test]
+    fn uma_abertura_ilegivel_fecha_o_leitor() {
+        let mut bytes = abertura();
+        bytes[0] = 0;
+        let mut leitor = LeitorDeTela::novo();
+        assert_eq!(
+            leitor.empurrar(&bytes),
+            Err(ErroDeQuadro::Cabecalho(ScreenError::UnsupportedVersion {
+                found: 0,
+                expected: SCREEN_HEADER_VERSION
+            }))
+        );
+        assert_eq!(leitor.proximo(), None);
+    }
+
+    #[test]
+    fn um_quadro_do_tamanho_do_teto_passa() {
+        let mut bytes = abertura();
+        bytes.extend(quadro(TipoDeQuadro::Chave, MAX_QUADRO_LEN));
+        let mut leitor = LeitorDeTela::novo();
+        leitor.empurrar(&bytes).unwrap();
+        let tudo = lidos(&mut leitor);
+        assert!(
+            matches!(tudo.get(1), Some(LidoDaTela::Quadro { bytes, .. }) if bytes.len() == MAX_QUADRO_LEN)
         );
     }
 }

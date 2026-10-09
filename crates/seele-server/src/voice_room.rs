@@ -28,7 +28,8 @@ use seele_proto::transport::MAX_FRAMES_PER_SECOND;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::server::Event;
-use crate::tela::{AberturaDeTela, Enquadramento, FimDaTela, Pedaco};
+use crate::tela::{AberturaDeTela, FimDaTela, Pedaco};
+use seele_proto::screen::Enquadramento;
 
 /// How many datagrams a voice room task will hold before it starts shedding.
 ///
@@ -942,8 +943,16 @@ impl VoiceRoom {
         };
         let porta = match curso.enquadramento.entrada(bytes) {
             Ok(porta) => porta.filter(|_| !curso.esperando.is_empty()),
-            Err(motivo) => {
-                self.encerrar_tela(from, Some(motivo));
+            Err(erro) => {
+                // O motivo exato vai ao registro; para quem assiste, o fluxo
+                // deixou de ser de tela, que é o que `FluxoMalformado` diz.
+                tracing::warn!(
+                    sala = %self.id.get(),
+                    de = %from.get(),
+                    %erro,
+                    "o fluxo de tela trouxe um cabeçalho de quadro recusado; a transmissão acaba"
+                );
+                self.encerrar_tela(from, Some(FimDaTela::FluxoMalformado));
                 return;
             }
         };
