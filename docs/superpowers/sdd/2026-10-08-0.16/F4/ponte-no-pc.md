@@ -45,6 +45,7 @@ continua valendo para o celular.
 | `descrever_arquivo`, `escolher_arquivo`, `guardar_colado`, `enviar_anexo` | o arquivo, pelas três entradas (arraste, seletor e colar) | **por alça** (combinado com a F8 em 09/10). Ver «O arquivo sem caminho», abaixo |
 | `compartilhar_tela`, `parar_de_compartilhar`, `fontes_de_tela`, `permissao_de_tela`, `pedir_permissao_de_tela`, `ajustar_limites_da_tela`, `exclusao_do_som_da_captura` | compartilhar a tela pelo PC | **tarefa nova (3.10), depende de medida.** O `getDisplayMedia` escolhe a fonte e pede a permissão ele mesmo |
 | `modulo_de_video_a_baixar` | — | responde «nenhum»: quem codifica é o navegador |
+| `abrir_teste_de_microfone`, `estado_do_teste_de_microfone`, `monitorar_o_microfone` | o teste do microfone fora da sala | **decidido pela orquestradora em 09/10:** no PC ele existe, pelo `getUserMedia`; no celular continua recusa com frase (D-52). Ver «O teste do microfone», abaixo |
 
 ## Mexem na hospedagem e não são recusadas
 
@@ -109,17 +110,22 @@ mapa com o `File` ou o `Blob`:
 
 A F5 só entra se a forma do que o `descrever_arquivo` devolve tiver de mudar.
 
-## A decidir com a F8
+## O teste do microfone (decidido em 09/10)
 
-- `abrir_teste_de_microfone`, `estado_do_teste_de_microfone`,
-  `monitorar_o_microfone`: a matriz os põe fora por causa da D-52 (o áudio abre
-  na sala), e a D-web-3 diz «no PC, tudo menos hospedar». As duas se cruzam
-  aqui, e **a decisão é da orquestradora** (a F8 levou a pergunta em 09/10). Se
-  ela abrir, o PC os atende pelo `getUserMedia`, sem código da F8 além de tirar
-  a frase.
+**No PC, o teste do microfone fora da sala existe na 0.16; no celular continua
+fora** (a orquestradora, avisada pela F8). A ponte atende as três chamadas pelo
+`getUserMedia` na casca larga, e na casca do celular elas continuam no
+`RECUSAS_NOMEADAS`, com frase. **As listas da ponte passam a depender da
+casca**, e o guarda «todo `invoke` está na ponte ou numa recusa nomeada» confere
+as duas.
+
 - **o `fechar_teste_de_microfone` é atendido sempre**, nas duas cascas e com ou
   sem o teste aberto. O `pararOTesteDeMicrofone` o chama a cada saída de ÁUDIO
   (`tela-server.js:150`, `:684`), e uma recusa sujaria o console a cada troca.
+- **fechar solta o aparelho de verdade:** as faixas do `getUserMedia` param
+  (`track.stop()`), e o navegador apaga o indicador do microfone. **O teste:**
+  abrir e fechar o teste na bancada não deixa faixa viva (`readyState` de cada
+  faixa aberta passa a `ended`). Reversão: fechar sem parar as faixas reprova.
 
 ## Como se prova
 
