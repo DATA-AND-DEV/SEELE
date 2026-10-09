@@ -5,7 +5,8 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const base = fs.readFileSync(path.join(__dirname, '../ui/base.js'), 'utf8');
 const ponte = base.slice(base.indexOf('const CAPACIDADES_POR_API'), base.indexOf('const modsCarregados ='));
-const rust = fs.readFileSync(path.join(__dirname, '../src/executor.rs'), 'utf8');
+// O prelúdio mora no motor de MODs (`crates/seele-motor`), o mesmo do desktop e do celular.
+const rust = fs.readFileSync(path.join(__dirname, '../../../crates/seele-motor/src/preludio.rs'), 'utf8');
 const preludio = rust.split('const PRELUDIO: &str = r#"')[1].split('"#;')[0];
 // O fim é dito, e não suposto: uma promessa pendurada esvazia o laço de eventos e o node sai com 0,
 // sem uma linha (medido com `await new Promise(() => {})` em `atenderOMod`). Só quando o código

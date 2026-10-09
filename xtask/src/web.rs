@@ -12,8 +12,11 @@
 //! 4. o clippy passa no `wasm32-wasip1`, que é o único alvo onde a
 //!    `fronteira.rs` do motor existe, e com ela o `// SAFETY:` cobrado;
 //! 5. o motor, dentro do `.wasm`, só importa as funções da lista, fala a API do
-//!    desktop, corta o laço sem fim e **para no teto de memória**, que só vale
-//!    com o `RustAllocator` (`xtask/web/motor.mjs`).
+//!    desktop e **passa a tabela da volta do `seele-motor`**
+//!    (`crates/seele-motor/tests/casos.json`), a mesma que o nativo passa: o
+//!    laço cortado, as rejeições, o balde do `console`, os temporizadores, a
+//!    sonda das globais e o teto de memória, que só vale com o
+//!    `RustAllocator` (`xtask/web/motor.mjs`).
 //!
 //! Precisa de `node`, `curl`, `tar` e dos alvos `wasm32-unknown-unknown` e
 //! `wasm32-wasip1`. Roda todos os passos e diz cada um, como o `check-runtime`.
@@ -259,7 +262,9 @@ pub(crate) fn run() -> ExitCode {
                     Command::new("node")
                         .arg("xtask/web/motor.mjs")
                         .arg(raiz.join("target/wasm32-wasip1/release/seele_motor_web.wasm"))
-                        .arg("crates/seele-motor-web/tests/mod-comum.js"),
+                        .arg("crates/seele-motor-web/tests/mod-comum.js")
+                        .arg("crates/seele-motor/tests/casos.json")
+                        .arg("crates/seele-motor/src/lib.rs"),
                 )),
             ));
         }
