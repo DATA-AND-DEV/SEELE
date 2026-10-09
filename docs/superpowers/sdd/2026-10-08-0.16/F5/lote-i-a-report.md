@@ -425,7 +425,8 @@ que partia de um recusado passa a partir do que havia antes dele.
   confirmaria. Com o `Pong` marcado, `Room::apply` resolve sozinho.
 
 **A volta.** Um `ssrc` igual na sessão nova prova que o servidor resgatou o
-assento (`assento_resgatado`). `Room::adopt` (e `apply(Session)`, que passa pelo
+assento (`assento_resgatado`) — *na rodada 2, só com um `SessionId` maior que
+o de antes (o N1, abaixo)*. `Room::adopt` (e `apply(Session)`, que passa pelo
 mesmo `reabrir`) guarda então o assento confirmado de antes; o motor guarda o
 `ssrc` e o confirmado ao soltar a conexão (`Queda`), e `restabelecer` refaz a
 entrada sobre o resgatado — no ar, com o `Ping` marcado — ou manda a saída, se
@@ -436,7 +437,10 @@ A FFI espelha: `readotar_na_volta` adota e refaz a entrada, ou a saída.
 `sala_do_audio`): o microfone não abre numa sala que ainda pode recusar. Custa
 uma volta de rede na entrada; o rodapé mostra o travessão nesse intervalo. Numa
 volta sem assento resgatado (`ssrc` novo), o áudio fecha e reabre uma volta de
-rede depois.
+rede depois. *(Corrigido na rodada 2.)* Isso não é raro: acontece em toda queda
+de rede entre ~15 s e ~20 s, em toda troca de rede e em toda volta depois de
+5 min. O efeito é pequeno — uma volta de rede sem áudio, e os volumes por pessoa
+voltando ao padrão até o I-b (M-a) —, mas é de toda volta dessas.
 
 **Onde o `PedidoRecusado` da F1 vai encaixar:** no braço de `Alert` de
 `EntradasPendentes::ouvir`, a única porta das recusas para o `Room` e para o
@@ -549,16 +553,185 @@ formatados.
   — não contam mensagens nem dependem de uma recusa sem pedido; os demais
   (`bateria_interna`, `ocupacao`, `moderacao`, `desassentar`, …) rodam na
   integração.
-- **Uma recusa que não é de entrada, chegando com uma entrada no ar,** é tomada
-  pela entrada (o apelido tomado no mesmo instante em que se pede uma sala).
-  É o encaixe do `PedidoRecusado` da F1, acima.
+*Corrigida na rodada 2: só os três primeiros abaixo são raros, porque só eles
+pedem que duas coisas caiam dentro da mesma volta de rede de um pedido.*
+
+- **Raro — uma recusa que não é de entrada, chegando com uma entrada no ar,** é
+  tomada pela entrada (o apelido tomado no mesmo instante em que se pede uma
+  sala). É o encaixe do `PedidoRecusado` da F1, acima.
+- **Raro — o operador que move a pessoa no instante em que ela pede outra
+  sala**: a mudança do operador vale, e a resposta ao pedido é descartada. Se o
+  servidor leu o pedido depois da mudança e o aceitou, a tela fica na sala do
+  operador e o servidor, na pedida.
+- **Raro — a sala de antes apagada com um pedido no ar** *(achado na rodada 2,
+  lido no código, não medido)*: em A, pedir B; o servidor apaga A antes de ler o
+  pedido (`session.rs`, braço de `Event::VoiceRoomDeleted`, tira a pessoa de A)
+  e recusa B. O `VoiceRoomDeleted { A }` chega com o assento especulativo em B e
+  não mexe nele; a recusa de B devolve a pessoa a A, que já não existe. O
+  conserto caberia no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`
+  (o `antes` dos pedidos no ar que aponte para a sala apagada passa a `None`);
+  não o fiz, porque está fora do brief.
 - **A volta depois de sair e entrar noutra sala durante a queda**, com a
   reentrada recusada: o `Room` cai fora de sala e o motor volta ao assento
   resgatado. O `Room` confere o resgate com o confirmado dele na hora da volta,
   e uma saída durante a queda o zera; o motor confere com o da hora da queda.
+  Não depende de uma volta de rede: a janela é a queda inteira, e basta a
+  pessoa trocar de sala enquanto o enlace tenta voltar e a sala nova recusar.
 - **Um servidor reiniciado** recomeça a contar os `ssrc` em 1, e uma sessão nova
-  pode ganhar o mesmo número da antiga: seria tomada por resgatada. Raro, e só
-  pesa se a reentrada for recusada.
-- **O operador que move a pessoa no instante em que ela pede outra sala**: a
-  mudança do operador vale, e a resposta ao pedido é descartada.
+  pode ganhar o mesmo número da antiga: seria tomada por resgatada. *Não era
+  raro: é o N1 da rodada 2, consertado lá.*
 
+
+## Rodada 2
+
+FIX_BASE `8c62d559`. Brief: `.superpowers/sdd/lotes/lote-i-a-rodada2.md`. Os dois
+achados que a rodada 1 abriu — N1 (Importante) e N2 (Menor) — e a palavra
+«raro». Nada no fio nem no servidor: o carimbo do `Ping` marcado continua um
+`u64` que o servidor devolve sem ler, e o `SessionId` já vinha na sessão.
+
+| commit | item | o que muda |
+|---|---|---|
+| `d02743ea` | N1 | `assento_resgatado(antes: Option<Conexao>, agora: Conexao, confirmada)`, com `Conexao = (Ssrc, SessionId)`: resgate é o mesmo `ssrc` **e** um `SessionId` maior; o `Room` guarda o `SessionId` ao lado do `ssrc` e `reabrir` recebe a conexão inteira; o motor guarda o `SessionId` na `Queda`; o M6 em `a_recusa_nao_tira_da_sala.rs`, com `servidor_em(porta, banco)` |
+| `893632ab` | N2 | `carimbo_da_entrada(n)` (bit alto mais `n`) e `numero_do_carimbo`; `EntradasPendentes::pedir` numera os pedidos da conexão e devolve o número, e `esquecer` recomeça do 1; `Client::send_ping_de_entrada(numero)`; o `Pong` de número `n` tira da fila o pedido `n` e todos os mais velhos |
+
+### N1: o resgate pede também uma sessão maior
+
+**A regra**, em `assento_resgatado`: conta como resgatado só o mesmo `ssrc` numa
+sessão de número **maior** que a de antes. O comentário junto dela aponta as
+linhas do servidor em `8c62d559` (`seele-server/src/session.rs`):
+- `Registry::new` (202–208) começa os dois contadores em 1, e `Registry::issue`
+  (221–226) avança os dois juntos, uma vez por sessão;
+- o resgate (1188–1200) põe o `ssrc` guardado no lugar do recém-emitido e fica
+  com o `SessionId` recém-emitido.
+
+Daí os dois lados. Num resgate, o servidor é o mesmo processo, e o contador de
+sessões nunca volta: a sessão nova é sempre maior. Depois de um reinício, a
+sessão nova sai do mesmo `issue` que o `ssrc`, então um `ssrc` repetido `s` vem
+com a sessão `s`; antes da queda a pessoa tinha a sessão `k ≥ s` (`k = s` sem
+resgate nenhum, `k > s` depois de um). A sessão nova nunca é maior, com uma
+pessoa ou com muitas. O comentário diz que isto se apoia em como o servidor
+numera, e não no que o fio promete, e que dizer o resgate no fio seria da F1.
+
+**As provas.**
+- **Vermelho em `8c62d559`:**
+  `state::tests::um_ssrc_repetido_depois_de_um_reinicio_do_servidor_nao_e_resgate`.
+  Ele aplica uma `Session` nova com o mesmo `ssrc` e o mesmo número de sessão e
+  reprovou com «um `ssrc` repetido depois de um reinício do servidor foi tomado
+  por assento resgatado: a pessoa se vê na sala e o servidor não a tem em sala
+  nenhuma» (`left: Some(VoiceRoomId(1)), right: None`). Os outros dois testes
+  da regra não compilam em `8c62d559`, porque a assinatura mudou, e o vermelho
+  deles é o da reversão:
+  - `assento::testes::o_ssrc_igual_com_sessao_igual_ou_menor_e_um_servidor_que_subiu_de_novo`;
+  - o caso `(Ssrc(1), SessionId(1))` de
+    `enlace::tests::a_volta_com_o_assento_resgatado_nao_o_perde_para_a_reentrada_recusada`.
+- **Os testes de resgate de antes** passam a dar uma sessão maior, como o
+  servidor dá: `sessao_resgatada()` no `state.rs`, `sessao_numero(700, 701)` no
+  (c) da FFI, e a `Queda` com a sessão 0 no motor.
+- **A conformidade M6:**
+  `depois_de_um_reinicio_do_servidor_a_reentrada_recusada_deixa_fora_de_sala`.
+  Ela usa um banco em arquivo temporário e uma sala com senha. P entra com a
+  senha. Então o `Daemon` é derrubado (`shutdown`, `wait_idle`, `drop`) e outro
+  sobe na mesma porta com o mesmo banco. O teste espera a recusa da reentrada e
+  confere três coisas: o servidor sem a pessoa em sala, a tela fora de sala e a
+  abertura `ForaDeSala`. **Compilado (`--no-run`) e não rodado:** a
+  conformidade está pausada. Falta o vermelho em `8c62d559`, o verde e a
+  reversão. Se ela não couber estável, a regra fica coberta pelos três testes
+  de crate, e direi aqui por que não coube. Uma dúvida que só a corrida
+  responde: se o `shutdown` do `Daemon` se despede dos clientes, a FFI pode não
+  tentar voltar. Nesse caso a primeira asserção reprova com «… e o teste mediu
+  outra coisa», e não com a frase do N1.
+
+### N2: o `Ping` marcado leva o número do pedido
+
+**O número.** `EntradasPendentes` numera os pedidos de entrada da conexão a
+partir de 1, e `pedir` devolve o número. O motor manda o `Ping` marcado com
+`carimbo_da_entrada(n)`, que é o bit alto mais `n`. O bit alto continua o que
+separa o carimbo dos `Ping` de rotina (o contador deles recomeça em 1 a cada
+`Pong`).
+
+**Por que «e todos os mais velhos».** O servidor lê o fluxo de controle em
+ordem. Ao devolver `n`, ele já decidiu tudo o que veio antes, e um pedido cujo
+`Ping` o limitador descartou não terá resposta nenhuma.
+
+**O `Room` e o motor contam cada um os seus pedidos,** um a um e na mesma ordem.
+A FFI só chama `Room::enter_voice_room` depois de mandar o comando ao motor. Na
+volta os dois recomeçam do 1: `reabrir` no `Room`, a fila nova de `tentar` no
+motor. Se um dia contassem diferente, um pedido ficaria no ar no `Room` e o
+áudio não abriria. É o que o M1 e o M5 da conformidade pegam, porque a
+asserção deles é a abertura `SemAparelho` na sala confirmada.
+
+**As provas.**
+- **Vermelho em `8c62d559`:**
+  `assento::testes::um_ping_marcado_perdido_no_limitador_nao_desalinha_a_fila`,
+  com a sequência da re-revisão:
+  1. o `Ping` de A se perde;
+  2. a pessoa sai e pede B;
+  3. chega o `Pong` de B;
+  4. vem uma recusa sem pedido.
+
+  Reprovou com «o `Pong` de B tirou da fila o pedido velho de A, e B ficou no ar
+  para sempre: o áudio nunca abre em B» (`left: None, right:
+  Some(VoiceRoomId(2))`). Em `8c62d559` o carimbo era um só, e o `pong_do_pedido`
+  do teste devolvia a marca sozinha; o verde é com o número.
+- **Os auxiliares que confirmam «tudo o que está no ar»** (`entrada_decidida`
+  no `state.rs` e no motor, `decidida` na FFI) passam a mandar o maior número
+  que um teste usa: `carimbo_da_entrada(u64::from(u32::MAX))`.
+
+**O que sobra.** Depois de um `Ping` marcado descartado, uma recusa que chegue
+antes do próximo `Pong` marcado é tomada pelo pedido velho da frente. Ele foi
+atropelado, então a recusa não move ninguém, e o pedido recusado fica na tela
+até o `Pong` dele o fechar como aceito. Só acontece com o limitador cortando:
+mais de 60 quadros de controle de uma vez e depois mais de 20 por segundo. O
+limitador avisa uma vez quando começa a cortar, e esse aviso não chega à regra.
+
+### As reversões
+
+| reversão | o que se desfez | reprovou |
+|---|---|---|
+| N1 | `sessao_agora > sessao_antes` → `(sessao_agora > sessao_antes \|\| true)` | 3 em `seele-core`: `o_ssrc_igual_com_sessao_igual_ou_menor_…` («um `ssrc` repetido numa sessão SessionId(2) — o servidor subiu de novo — foi tomado por resgate»), o caso `(Ssrc(1), SessionId(1))` do motor («… a recusa da entrada refeita deixou a volta em Some(VoiceRoomId(5))») e `um_ssrc_repetido_depois_de_um_reinicio_…` |
+| N2 | o laço do `Pong` → um `pop_front` por `Pong`, como em `8c62d559` | `um_ping_marcado_perdido_no_limitador_nao_desalinha_a_fila`, com a frase do vermelho |
+
+Nas duas: arquivo devolvido da cópia, `cmp` idêntico. A reversão do N1 na
+conformidade (o M6) fica para quando ela voltar.
+
+### O relatório: a palavra «raro»
+
+Corrigi a rodada 1 no lugar:
+- **O M-d** passa a dizer que a volta sem assento resgatado, que fecha e reabre
+  o áudio, é de toda queda entre ~15 s e ~20 s, de toda troca de rede e de toda
+  volta depois de 5 min. O efeito é uma volta de rede sem áudio e os volumes
+  por pessoa no padrão até o I-b.
+- **O servidor reiniciado** deixa de ser «raro»: era o N1.
+- **Ficam como raros só os três que pedem duas coisas na mesma volta de rede de
+  um pedido:**
+  - a recusa que não é de entrada;
+  - o operador que move;
+  - a sala de antes apagada com um pedido no ar.
+
+  O terceiro é novo. Achei-o lendo a regra para esta correção e não o medi: com
+  um pedido de B no ar, o `VoiceRoomDeleted` de A não mexe no `antes` do pedido,
+  e a recusa de B devolve a pessoa a uma sala que não existe. O conserto seria
+  de três linhas, no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`.
+  Não o fiz, porque está fora do brief.
+- **A volta com troca de sala durante a queda** ganhou a frase do tamanho da
+  janela: é a queda inteira, e não uma volta de rede.
+
+### O que rodou
+
+- `seele-core --lib` 480, `seele-ffi --lib` 146 (1 ignorado, anterior),
+  `seele-app --bin seele-app` 274, `--test frontend` 270.
+- `cargo fmt --all -- --check` e o clippy de `seele-core`, `seele-ffi`,
+  `seele-conformance` e `seele-app` com `-D warnings`: limpos.
+- `cargo test -p seele-conformance --test a_recusa_nao_tira_da_sala --no-run`:
+  compila.
+
+### O que falta rodar: a conformidade, pausada
+
+Um arquivo por vez, com `-- --test-threads=1`:
+1. `a_recusa_nao_tira_da_sala`, os cinco. O M6 deve dar vermelho com
+   `crates/seele-core` e `crates/seele-ffi` de `8c62d559` e o arquivo de teste
+   novo, verde no topo, e vermelho de novo com a condição do `SessionId`
+   revertida;
+2. `voz_na_reconexao`;
+3. `reconexao_fantasma`;
+4. `limite_de_taxa`.
