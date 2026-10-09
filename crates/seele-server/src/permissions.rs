@@ -224,6 +224,29 @@ impl<'a> Permissions<'a> {
         self.person(PersonId(id as u64))
     }
 
+    /// Se `nickname` já é de outra chave: a mesma regra de [`Self::register_or_find`]
+    /// e de [`Self::rename`], **só lendo**.
+    ///
+    /// Existe para o aperto de mão perguntar antes de gastar o convite de uso
+    /// único: a recusa por apelido tomado vinha só ao criar a conta, com o
+    /// convite já gasto, e a pessoa que trocava de nome ficava com um link
+    /// morto. A conferência de dentro de `register_or_find` continua como rede.
+    ///
+    /// # Errors
+    ///
+    /// Se o banco não responder.
+    pub fn apelido_de_outra_chave(&self, public_key: &[u8], nickname: &str) -> Result<bool> {
+        let dono: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "SELECT public_key FROM people WHERE nickname = ?1",
+                [nickname],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(dono.is_some_and(|dono| dono != public_key))
+    }
+
     /// Gives a freshly created account its opening role.
     ///
     /// # The first account created on a server becomes the Comandante
@@ -688,6 +711,29 @@ mod tests {
                 membro(maya.id, "maya"),
                 membro(rei.id, "rei"),
             ]
+        );
+    }
+
+    /// A consulta do aperto de mão segue a regra de `register_or_find`: o nome
+    /// de outra chave está tomado, o próprio não, e um nome de ninguém está livre.
+    #[test]
+    fn o_apelido_de_outra_chave_e_conferido_sem_escrever() {
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        permissions.register_or_find(&[1; 32], "maya").unwrap();
+
+        assert!(permissions
+            .apelido_de_outra_chave(&[2; 32], "maya")
+            .unwrap());
+        assert!(!permissions
+            .apelido_de_outra_chave(&[1; 32], "maya")
+            .unwrap());
+        assert!(!permissions
+            .apelido_de_outra_chave(&[2; 32], "shinji")
+            .unwrap());
+        assert!(
+            permissions.register_or_find(&[2; 32], "shinji").is_ok(),
+            "a consulta reservou o nome"
         );
     }
 

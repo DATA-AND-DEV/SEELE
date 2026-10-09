@@ -954,6 +954,31 @@ async fn admitir(
 
         match crate::portaria::bater(&mut guard, &impressao, &nickname, segredo, &observacao) {
             Ok(crate::portaria::Resposta::Entra) => {
+                // **O apelido, antes de gastar o convite.** A recusa por nome
+                // de outra chave vinha só lá embaixo, em `register_or_find`,
+                // com o convite de uso único já gasto: a pessoa trocava de
+                // nome e o mesmo link não entrava mais. Pedido da F4 (a P4 do
+                // plano F1b). Aqui, e não antes da portaria: depois dela, a
+                // recusa distinta não conta a quem não foi admitido que nomes
+                // existem — a mesma razão do `NicknameTaken` de baixo, que
+                // continua como rede.
+                match Permissions::new(&guard).apelido_de_outra_chave(&public_key, &nickname) {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        return Err(Refusal {
+                            reason: DisconnectReason::NicknameTaken,
+                            detail: format!(
+                                "o apelido {nickname} é de outra chave; o convite ficou intacto"
+                            ),
+                        });
+                    }
+                    Err(error) => {
+                        return Err(Refusal {
+                            reason: DisconnectReason::CredentialRejected,
+                            detail: format!("could not check the nickname: {error}"),
+                        });
+                    }
+                }
                 // Entrou de verdade: agora o convite é gasto — quando houve um.
                 // Sem passe não há o que gastar: é quem entrou pela porta que a
                 // portaria já tinha aberto, e ela não consome nada.

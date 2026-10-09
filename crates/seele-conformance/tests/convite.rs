@@ -54,7 +54,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{ConnectError, MemoryPinStore, PinStore, Verdict};
-use seele_proto::control::ServerMessage;
+use seele_proto::control::{DisconnectReason, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_server::persistence::{Location, Persistence};
 use seele_server::{admissao, portaria, Daemon, ServerConfig};
@@ -524,6 +524,55 @@ async fn a_impressao_que_nao_confere_nao_deixa_pedido_na_portaria() -> Result<()
         "a portaria recebeu uma batida de quem o cliente recusou: {fila:?}"
     );
 
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **O apelido de outra chave é recusado antes de o convite ser gasto.**
+///
+/// A P4 do plano F1b, pedido da F4: no celular, a identidade presa à origem se
+/// perde mais fácil, e quem volta por um convite novo pode pedir um nome que
+/// já é de outra chave. O servidor gastava o convite de uso único na portaria
+/// e só depois, ao criar a conta, descobria o apelido tomado: a pessoa recebia
+/// `NicknameTaken`, trocava o nome, e o mesmo convite já não entrava
+/// (`CredentialRejected`). Um link morto por causa de um nome.
+///
+/// A conferência do apelido agora vem antes do `gastar`, e o convite fica
+/// intacto para a segunda tentativa.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_apelido_de_outra_chave_nao_gasta_o_convite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = server().await?;
+    let real = servidor.fingerprint().to_owned();
+    let loja = Arc::new(MemoryPinStore::new());
+
+    // A entra com o servidor ainda aberto e fica com «maya».
+    let maya = conectar(endereco, 51, "maya", Some(&real), &loja)
+        .await
+        .expect("o servidor está aberto; não havia o que recusar");
+
+    // E o servidor passa a pedir convite.
+    let convite = {
+        let mut persistence = servidor.server().persistence.lock().await;
+        admissao::criar_convite(&mut persistence, "para o shinji")?
+    };
+
+    let erro = conectar_com_convite(endereco, 52, "maya", &convite, &real, &loja)
+        .await
+        .expect_err("«maya» é de outra chave; não havia o que aceitar");
+    assert_eq!(
+        erro,
+        ConnectError::Refused {
+            reason: DisconnectReason::NicknameTaken
+        }
+    );
+
+    let shinji = conectar_com_convite(endereco, 52, "shinji", &convite, &real, &loja)
+        .await
+        .expect("o convite foi gasto pela tentativa com o apelido de outra chave");
+
+    drop(shinji);
+    drop(maya);
     servidor.shutdown();
     Ok(())
 }
