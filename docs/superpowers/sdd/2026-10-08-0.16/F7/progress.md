@@ -59,6 +59,9 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da `versao/0.16` (`bbb0ed9c`): o servidor da F1 e o ENC/2 | feito | `8f19ddd2` |
 | 11 | 4f, a hospedagem da sala | **feita**; a rodada inteira da conformidade espera o fim da 5ª integração | `c3483884` |
 | 13 | 6a, `ler_entrada` | **feita** | `86edd3e4` |
+| — | merge da `versao/0.16` (`bd58a080`): o F da F5 e a P9 da F1 | feito; a rodada da 4f, 46 de 46 | `d3c1c596` |
+| 14a + 15 | 6c e 6d, discar pelo código | **feitas** | `1f1a1b35` |
+| — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -324,3 +327,37 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
     verdade.
 - **A 14, a 15 e a 17 esperam a 5ª integração (o F)**: as três mexem no
   `enlace.rs` e na `chegada.rs`.
+
+## A quinta integração, a 14a e a 15 (09/10)
+
+- **O merge** de `bd58a080` entrou limpo (`d3c1c596`). A rodada inteira da 4f,
+  que tinha ficado parada, passou nele: `seele-server`, `seele-core`,
+  `seele-ffi` e `seele-audio` verdes, e a conformidade 46 de 46, arquivo por
+  arquivo.
+- **14a + 15, discar pelo código** (`1f1a1b35`):
+  - `Chegada::para_o_codigo(codigo, ponto, apelido)` nasce parada com zero
+    candidatos. `Etapa::Localizando{ponto}` pergunta ao quarto
+    (`encontro::localizar`, da F2). A resposta vira os candidatos e o bilhete:
+    as dicas primeiro, o servidor depois, sem repetir, todos com
+    `Esperada::Codigo`.
+  - As arestas são `Parada{0} → Localizando` e `Localizando → Avisando |
+    Tentando | Desistiu`. Localizar pode reprovar, ao contrário do aviso.
+  - `ConnectError::NaoLocalizou(FalhaAoLocalizar)`, com sete motivos. Na FFI,
+    `ConnectionError::NaoLocalizou{motivo}` e `ConnectStage::Localizando`.
+  - `Destino::marca_do_aviso`: a `Batida` recebe a marca, e não a impressão.
+    **O achado**: um destino de código não preparava batida nenhuma, nem na
+    entrada nem na volta da bateria. A ligação não avisava a escuta, e o furo
+    do lado de quem recebe nunca abria.
+  - A prova de ponta a ponta é `seele-conformance/tests/discar_pelo_codigo.rs`,
+    com 4 testes. Um deles é o «sem *hairpin*»: o ponto só conhece um endereço
+    público morto, e a ligação entra pela dica.
+  - Nove reversões medidas, listadas no commit.
+- **A linha provisória de `ETAPAS`** (`e3e32bfe`): «LOCALIZANDO PELO PONTO DE
+  ENCONTRO», num commit isolado e marcada para a 7f trocar. Sem ela, o guarda
+  `every_stage_of_an_arrival_has_a_sentence_in_the_page` fica vermelho, e foi
+  visto vermelho antes da linha.
+- **A rodada depois dos dois commits**: `seele-server` verde, e a conformidade
+  47 de 47, arquivo por arquivo, com o arquivo novo. A `Batida` mudou para toda
+  conexão que traz `enc=`, e por isso a rodada foi inteira. `seele-core`,
+  `seele-ffi` e o `seele-app` inteiro passaram antes do commit.
+
