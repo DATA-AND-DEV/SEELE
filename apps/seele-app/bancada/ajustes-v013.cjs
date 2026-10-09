@@ -160,7 +160,9 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
         if (cmd === 'connect') {
           const servidor = window.testServidor;
           const recusa = (error) => { throw { error, trail: [] }; };
-          if (args.joinSecret !== convite || servidor.gasto) recusa('CredentialRejected');
+          // A forma é a de `ConnectionError::Refused` da FFI, que a tela lê
+          // como CREDENCIAL RECUSADA (`fraseDeErro`).
+          if (args.joinSecret !== convite || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
           if (!servidor.aceitou) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-r' } });
           servidor.gasto = true;
           return {
