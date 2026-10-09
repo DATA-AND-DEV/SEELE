@@ -726,6 +726,25 @@
   </div>
 
   <!--
+    O aviso de fone, na primeira entrada numa sala de voz desta execução.
+
+    O SEELE não cancela eco, e quem paga a falta do fone é o outro lado: ouve a
+    própria voz de volta. A frase é `AVISO_DE_FONE`, de `frases.js`, e
+    `desenharAvisoDeFone` a escreve; a ajuda e MICROFONE E SOM a repetem.
+
+    As classes do veredito, e é a mesma coisa que ele: uma ressalva, e não uma
+    queda — laranja e `role="status"`, nunca o vermelho do banner. Uma folha
+    própria seria uma segunda faixa idêntica esperando para divergir desta.
+
+    Aqui, e não dentro de `<main>`: a faixa fica de pé na conversa e na
+    chamada, que é para onde a entrada na sala leva.
+  -->
+  <div id="aviso-fone" class="veredito" role="status" hidden>
+    <span id="aviso-fone-texto" class="veredito-texto"></span>
+    <button id="aviso-fone-fechar" class="botao-fantasma" type="button">dispensar</button>
+  </div>
+
+  <!--
     A queda, e o período de graça que ela abre. `specs/07-estetica.md` é
     explícito: o cliente não fecha nem mostra um spinner. A interface esmaece,
     conta cinco minutos, e o histórico continua ali para leitura. Por isso isto é
@@ -2767,6 +2786,17 @@
 
             </div>
             <div class="server-bloco-corpo">
+              <!--
+                O aviso de fone, com as palavras da faixa que acende ao entrar
+                numa sala de voz (`AVISO_DE_FONE`, em `frases.js`). Na saída
+                porque o eco nasce nela: é o alto-falante voltando para o
+                microfone. E primeiro no bloco, antes da lista de aparelhos,
+                porque nenhum aparelho daquela lista cancela eco.
+              -->
+              <div class="server-campo">
+                <h4 class="rotulo">FONE</h4>
+                <p id="server-aviso-fone" class="server-frase">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</p>
+              </div>
               <div class="server-campo">
                 <h4 class="rotulo">DISPOSITIVO DE SAÍDA</h4>
                 <!--
@@ -3866,11 +3896,27 @@
       -->
       <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
-        <input id="perfil-apelido" name="apelido" maxlength="32"
+        <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
+               name="apelido" maxlength="32"
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
-        <span class="nota">O que você já disse continua com o nome de então.</span>
+        <!--
+          Escondida na pergunta do nome: ela fala com quem troca de nome, e
+          quem é perguntado ainda não disse nada com nome nenhum.
+        -->
+        <span id="perfil-nota-do-apelido" class="nota">O que você já disse continua com o nome de então.</span>
       </label>
+      <!--
+        Só na pergunta do nome, antes da primeira entrada desta execução
+        (`perguntarONome`), e só com o campo vazio: diz o que acontece a quem
+        fecha sem responder, antes de fechar. A frase é `ENTRAR_SEM_NOME`, de
+        `frases.js`, escrita aqui por `desenharNotasDoApelido`.
+
+        O campo a tem em `aria-describedby`, para o leitor de tela dizê-la quando
+        o foco chega ao campo, e não só ao fechar. Escondida, ela fica vazia: a
+        descrição lê até o texto de um nó escondido.
+      -->
+      <p id="perfil-sem-nome" class="nota" hidden></p>
       <!--
         **`SALVAR` e `CANCELAR`, como a comp os desenha** — e a versão sem eles
         perdeu um nome em campo.
@@ -3947,6 +3993,13 @@
           <dd class="ajuda-diz">Quanto da sua voz está chegando inteira do outro lado.</dd>
           <dt class="ajuda-termo">CONEXÃO SEGURA</dt>
           <dd class="ajuda-diz">O aperto de mão foi até o fim: o caminho é cifrado e a chave do servidor confere.</dd>
+          <!--
+            A frase da faixa que acende ao entrar numa sala de voz, igual a
+            `AVISO_DE_FONE` de `frases.js`. A faixa se fecha e não volta nesta
+            execução; aqui ela continua escrita para quem a fechou.
+          -->
+          <dt class="ajuda-termo">FONE</dt>
+          <dd id="ajuda-aviso-fone" class="ajuda-diz">USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.</dd>
         </dl>
       </section>
 
@@ -3954,12 +4007,17 @@
         Só as teclas que existem de verdade. Uma ajuda que lista um atalho que
         o programa não tem é pior que ajuda nenhuma: ela ensina errado e não
         falha em lugar nenhum.
+
+        A de falar se troca em CONFIGURAÇÕES · ATALHOS, e `abrirAjuda` escreve
+        no `#ajuda-tecla-falar` a que está gravada. ESPAÇO fica escrito aqui
+        porque é o padrão, e é o que se lê se o script não chegar a escrever.
+        O `id` antes da classe: o guarda das teclas lê a partir da classe.
       -->
       <section>
         <h3 class="ajuda-secao-nome">AS TECLAS</h3>
         <dl class="ajuda-lista">
-          <dt class="ajuda-termo"><span class="ajuda-tecla">ESPAÇO</span></dt>
-          <dd class="ajuda-diz">Segure para falar, no modo tecla.</dd>
+          <dt class="ajuda-termo"><span id="ajuda-tecla-falar" class="ajuda-tecla">ESPAÇO</span></dt>
+          <dd class="ajuda-diz">Segure para falar, no modo tecla. Vale com a janela do SEELE na frente e fora da caixa de mensagem.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">/</span></dt>
           <dd class="ajuda-diz">Procurar no que já foi dito neste canal.</dd>
           <dt class="ajuda-termo"><span class="ajuda-tecla">ENTER</span></dt>

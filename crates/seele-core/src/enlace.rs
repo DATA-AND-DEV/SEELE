@@ -306,7 +306,10 @@ pub enum Motivo {
     Recusado(ConnectError),
     /// Alguém pediu para sair.
     Pedido,
-    /// Um operador acabou com esta sessão, e o motivo veio no fio.
+    /// Alguém do outro lado acabou com esta sessão, e o motivo veio no fio: um
+    /// operador que expulsou ou baniu, ou **quem hospeda fechando o servidor**
+    /// ([`DisconnectReason::ServerShuttingDown`]). Ver
+    /// `a_sessao_acabou_aqui` para a lista inteira.
     ///
     /// Separado de [`Self::Recusado`] porque a casca precisa dizer **qual** foi:
     /// «você foi expulso» e «você foi banido» são frases diferentes. `Recusado`
@@ -353,6 +356,18 @@ pub enum Motivo {
 /// sala de quem acabou de desligar, ou tocaria de novo para quem não atendeu.
 /// Nenhum servidor as manda ainda; elas entram aqui com o fio, para a sala não
 /// nascer com uma bateria tocando de novo.
+///
+/// [`DisconnectReason::ServerShuttingDown`] é **quem hospeda fechando o
+/// servidor**, e o servidor o manda a cada sessão antes de cair
+/// (`Daemon::encerrar_avisando`, lote G-servidor da F5). Reconectar bate por
+/// cinco minutos numa porta que ninguém vai atender, com a casca dizendo
+/// «reconectando» a quem precisa ler «o servidor está encerrando». A mesma
+/// razão também é a recusa do aperto de mão de um servidor que não lê o próprio
+/// banco, e essa nunca chega aqui: a portaria a devolve como
+/// [`ConnectError::Refused`].
+///
+/// [`DisconnectReason::ScheduledMaintenance`] fica de fora de propósito: é o
+/// «volto já», e a bateria existe para esperar o servidor voltar.
 fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
     matches!(
         motivo,
@@ -362,6 +377,7 @@ fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
             | DisconnectReason::ChamadaEncerrada
             | DisconnectReason::NinguemAtendeu
             | DisconnectReason::ChamadaRecusada
+            | DisconnectReason::ServerShuttingDown
     )
 }
 
@@ -5625,11 +5641,17 @@ mod tests {
                 DisconnectReason::ChamadaEncerrada
                 | DisconnectReason::NinguemAtendeu
                 | DisconnectReason::ChamadaRecusada => true,
+                // Quem hospeda fechou o servidor, e avisou. Reconectar bate
+                // numa porta que ninguém atende por cinco minutos, com a casca
+                // dizendo «reconectando» a quem precisa ler «o servidor está
+                // encerrando» (lote G-servidor da F5).
+                DisconnectReason::ServerShuttingDown => true,
                 // A bateria é o conserto: o servidor volta, ou o cliente
                 // reconecta e busca o histórico que faltou. O doc de
-                // `FellBehind` diz isso com todas as letras.
+                // `FellBehind` diz isso com todas as letras. A manutenção
+                // programada é o «volto já»: o servidor volta, e a bateria
+                // existe para esperá-lo.
                 DisconnectReason::ScheduledMaintenance
-                | DisconnectReason::ServerShuttingDown
                 | DisconnectReason::Timeout
                 | DisconnectReason::FellBehind
                 | DisconnectReason::RateLimited

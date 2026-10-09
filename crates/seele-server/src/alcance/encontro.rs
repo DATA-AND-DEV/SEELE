@@ -49,11 +49,18 @@ use std::time::Duration;
 use seele_proto::encontro::{self, Marca, Marcas};
 use seele_proto::uri::Bilhete;
 
-/// O ponto de encontro do projeto, quando ninguém disser outro.
+/// O ponto de encontro do projeto, para quem hospeda pelo app e não disse
+/// outro.
 ///
 /// O ADR 0022 decidiu construir **com um ponto de encontro nosso por padrão**, e
 /// é isto. Ele é trocável por `$SEELE_ENCONTRO`, e o endereço de quem hospeda
 /// viaja dentro do próprio convite — ver [`Bilhete`].
+///
+/// **Padrão só do caminho de produção.** Desde a decisão (d) do lote
+/// G-servidor da F5, quem o pede é [`Convocacao::com_o_ponto_padrao`], pelo
+/// `Hospedagem::iniciar_com_o_ponto_padrao` do botão HOSPEDAR. Sem a variável,
+/// [`Convocacao::do_ambiente`] e o `Hospedagem::iniciar` curto não convocam
+/// ponto nenhum, e é com eles que os testes sobem.
 ///
 /// Um **nome** e não um endereço, porque isto está compilado dentro de cada
 /// executável do mundo: com um nome, trocar de VPS é um registro de DNS; com um
@@ -102,7 +109,7 @@ pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
 /// máquina de um desconhecido sempre que o DNS falhasse — e ela aprenderia que
 /// endereço falou com que endereço, que é exatamente o metadado que este ADR
 /// pesa em voz alta.
-const REDE_DO_PADRAO: [&str; 2] = [
+pub(crate) const REDE_DO_PADRAO: [&str; 2] = [
     "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
     "216.128.168.216:8384",
 ];
@@ -344,10 +351,19 @@ impl Convocacao {
         })
     }
 
-    /// O que o ambiente pediu, ou `None` se pediu para não haver degrau 4.
+    /// O que o ambiente pediu, e **nada** sem ele.
     ///
     /// Lê `$SEELE_ENCONTRO`: um endereço troca o ponto de encontro, e `nao` ou
-    /// vazio desligam o degrau.
+    /// vazio desligam o degrau. **Sem a variável, `None`.**
+    ///
+    /// # Por que sem a variável não há ponto
+    ///
+    /// Era o [`PONTO_PADRAO`], e todo teste que subia hospedagem sem trocar a
+    /// variável registrava um servidor de teste no quarto da VPS de produção.
+    /// Decisão (d) do lote G-servidor da F5: o padrão passa a ser o seguro, e
+    /// esquecer o ambiente custa «sem degrau 4», e não um servidor de teste no
+    /// quarto de quem usa o produto. A produção pede o ponto do projeto de
+    /// forma explícita, por [`Self::com_o_ponto_padrao`].
     ///
     /// Também é `None` quando a impressão digital não forma marca, pelo mesmo
     /// motivo de [`Self::para_servidor`]: sem marca não há como separar aviso de
@@ -355,7 +371,36 @@ impl Convocacao {
     /// de fora.
     #[must_use]
     pub fn do_ambiente(socket: Arc<std::net::UdpSocket>, impressao_digital: &str) -> Option<Self> {
-        let escolhido = std::env::var(VARIAVEL).unwrap_or_else(|_| PONTO_PADRAO.to_owned());
+        Self::do_ambiente_ou(socket, impressao_digital, None)
+    }
+
+    /// O que o ambiente pediu, e o [`PONTO_PADRAO`] quando a variável não
+    /// existe.
+    ///
+    /// **Só a produção chama isto**: o botão HOSPEDAR do app, por
+    /// `Hospedagem::iniciar_com_o_ponto_padrao`. A variável continua mandando
+    /// — `nao` ou vazio desligam, um endereço troca —, e só a ausência dela
+    /// muda de sentido: aqui é o ponto do projeto, em [`Self::do_ambiente`] é
+    /// nenhum.
+    #[must_use]
+    pub fn com_o_ponto_padrao(
+        socket: Arc<std::net::UdpSocket>,
+        impressao_digital: &str,
+    ) -> Option<Self> {
+        Self::do_ambiente_ou(socket, impressao_digital, Some(PONTO_PADRAO))
+    }
+
+    /// `$SEELE_ENCONTRO`, ou `sem_a_variavel` quando ela não existe (ou não é
+    /// texto).
+    fn do_ambiente_ou(
+        socket: Arc<std::net::UdpSocket>,
+        impressao_digital: &str,
+        sem_a_variavel: Option<&str>,
+    ) -> Option<Self> {
+        let escolhido = match std::env::var(VARIAVEL) {
+            Ok(valor) => valor,
+            Err(_) => sem_a_variavel?.to_owned(),
+        };
         let escolhido = escolhido.trim();
         if escolhido.is_empty() || escolhido.eq_ignore_ascii_case("nao") {
             return None;
@@ -576,6 +621,9 @@ async fn resolver(
         return Err(FalhaNoEncontro::NaoResolve(texto.to_owned()));
     };
 
+    // Nos testes, antes do DNS: ver [`recusar_a_producao`].
+    recusar_a_producao(texto, "alcance::encontro::resolver, antes do DNS");
+
     // Com prazo: um DNS que não responde é a outra forma de o degrau 4 segurar
     // quem apertou HOSPEDAR, e ele não pode segurar ninguém.
     let procura = tokio::time::timeout_at(ate, tokio::net::lookup_host((maquina, porta)))
@@ -649,6 +697,118 @@ fn rede_do_padrao() -> Option<SocketAddr> {
         .collect();
     candidatos.sort_by_key(|alvo| u8::from(alvo.is_ipv6()));
     candidatos.first().copied()
+}
+
+// A feature do guarda nunca entra num build otimizado.
+//
+// O resolvedor 2 já a deixa fora do binário do produto, e isto foi medido
+// (`cargo check --release`, `features=[]`). Medido não é impedido: um
+// `--features` a mais num script de empacotamento, ou uma dependência normal
+// que a peça por engano, poria no produto um servidor que entra em pânico ao
+// hospedar com o ponto padrão — que é o caso comum de quem hospeda. Este erro
+// faz esse build não compilar.
+//
+// O preço é que os testes do `seele-conformance` não rodam em `--release`.
+// Nenhum roda assim hoje.
+#[cfg(all(feature = "recusar-encontro-de-producao", not(debug_assertions)))]
+compile_error!(
+    "a feature `recusar-encontro-de-producao` é só de teste e não pode ir num build otimizado: \
+     com ela, hospedar com o ponto de encontro padrão entra em pânico. Ela vem da \
+     `[dev-dependencies]` do `seele-conformance`; quem a ligou num build de release está \
+     empacotando o guarda dos testes junto com o produto"
+);
+
+/// O guarda dos testes: nenhum deles fala com o ponto de encontro de produção.
+///
+/// # O defeito que ele segura
+///
+/// Sem `$SEELE_ENCONTRO`, [`Convocacao::do_ambiente`] caía no
+/// [`PONTO_PADRAO`], e numa máquina sem IPv4 global a escada tentava o degrau
+/// 4. Um teste que subia uma hospedagem sem trocar a variável registrava a
+/// marca de um servidor de teste no quarto da VPS de produção e deixava lá o IP
+/// público da máquina que rodava a bateria. Nenhum teste afirmava esse degrau:
+/// ele era só um teste dependendo da rede de fora, e mexendo no quarto de quem
+/// usa o produto. Medido na revisão do M2, em 08/10/2026.
+///
+/// # A segunda parede
+///
+/// Desde a decisão (d) do lote G-servidor da F5, a primeira é o padrão: sem a
+/// variável, `do_ambiente` não convoca ponto nenhum, e só a produção pede o do
+/// projeto ([`Convocacao::com_o_ponto_padrao`]). Este guarda pega o que sobra:
+/// um teste que aponta a VPS de propósito, ou que chama o caminho da produção.
+///
+/// # Onde ele age
+///
+/// Em dois lugares, e os dois chamam isto:
+///
+/// - em [`resolver`], antes da consulta ao DNS: um teste que chama [`abrir`]
+///   direto, ou que aponta `$SEELE_ENCONTRO` para um IP de [`REDE_DO_PADRAO`],
+///   reprova antes de o primeiro pacote sair;
+/// - em `Hospedagem::iniciar`, sobre a convocação que a escada vai receber.
+///   É o que torna o guarda igual em toda máquina: o degrau 4 só é tentado sem
+///   IPv4 global (`alcance::tem_ipv4_global`), e com o guarda só em
+///   [`resolver`] um teste sem ambiente passaria calado numa VPS e reprovaria
+///   numa casa atrás de CGNAT.
+///
+/// # Quando ele está ligado
+///
+/// Nos testes deste crate (`cfg(test)`) e com a feature
+/// `recusar-encontro-de-producao`, que só a `[dev-dependencies]` do
+/// `seele-conformance` pede. Com o resolvedor 2 do Cargo, a feature de uma
+/// dependência de teste não se une ao build normal, e o binário do produto não
+/// a leva. Fora disso esta função não faz nada: o produto fala com o ponto
+/// padrão, que é para isso que ele existe.
+///
+/// Os testes de `tests/` deste crate só a têm quando rodam junto com o
+/// `seele-conformance` (`cargo test --workspace`): ver o `Cargo.toml`. Rodados
+/// sozinhos, quem os protege é o padrão: sem ambiente, nenhum ponto.
+///
+/// `onde` vai na frase do pânico, e é ele que diz qual dos dois lugares pegou o
+/// teste: um teste que prova um dos guardas casa com ele, e o outro guarda
+/// pegando no lugar não passa por este. `#[track_caller]` aponta a linha de
+/// quem chamou, para quem lê o pânico.
+#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
+#[track_caller]
+pub(crate) fn recusar_a_producao(ponto: &str, onde: &str) {
+    assert!(
+        !aponta_para_a_producao(ponto),
+        "um teste ia falar com o ponto de encontro de produção («{ponto}», pego em {onde}): cada \
+         rodada registraria um servidor de teste no quarto da VPS de produção e deixaria lá o IP \
+         desta máquina, e o teste passaria a depender da rede de fora. Aponte um ponto local, ou \
+         desligue o degrau 4 com `{VARIAVEL}=nao`, pelo `AmbienteDoEncontro` do teste"
+    );
+}
+
+/// Fora dos testes, nada: ver a versão ligada logo acima.
+#[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
+pub(crate) fn recusar_a_producao(_ponto: &str, _onde: &str) {}
+
+/// Se este texto de ponto é o de produção: o [`PONTO_PADRAO`], escrito como
+/// for, ou um dos IPs de [`REDE_DO_PADRAO`], em qualquer porta.
+///
+/// Pela mesma regra que [`resolver`] usa para separar o texto
+/// (`separar_ponto`): um texto que ela recusa não vira consulta nenhuma, e não
+/// há o que barrar.
+#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
+fn aponta_para_a_producao(ponto: &str) -> bool {
+    let Ok(alvo) = seele_proto::uri::separar_ponto(ponto.trim()) else {
+        return false;
+    };
+    let maquina = alvo.maquina.trim_end_matches('.');
+    maquina.eq_ignore_ascii_case(PONTO_PADRAO)
+        || maquina
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(e_da_rede_do_padrao)
+}
+
+/// Se este IP é um dos de [`REDE_DO_PADRAO`], também escrito como IPv4 dentro
+/// de IPv6 (`::ffff:a.b.c.d`).
+#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
+fn e_da_rede_do_padrao(ip: std::net::IpAddr) -> bool {
+    REDE_DO_PADRAO
+        .iter()
+        .filter_map(|texto| texto.parse::<SocketAddr>().ok())
+        .any(|producao| producao.ip() == ip.to_canonical())
 }
 
 /// A escuta de avisos, na mesma família do ponto de encontro.
@@ -1419,9 +1579,29 @@ mod testes {
             "o ponto de encontro não é trocável"
         );
 
+        // A variável manda também na produção: `nao` desliga, um endereço
+        // troca.
+        ambiente.pedir("nao");
+        assert!(
+            Convocacao::com_o_ponto_padrao(Arc::clone(&socket), fp).is_none(),
+            "`{VARIAVEL}=nao` não desligou o degrau 4 de quem hospeda pelo app"
+        );
+        ambiente.pedir("meu.ponto:9000");
+        assert_eq!(
+            Convocacao::com_o_ponto_padrao(Arc::clone(&socket), fp)
+                .map(|convocacao| convocacao.ponto),
+            Some("meu.ponto:9000".to_owned()),
+            "o ponto de encontro de quem hospeda pelo app deixou de ser trocável"
+        );
+
+        // Sem a variável, o padrão da produção é o ponto do projeto. O de
+        // `do_ambiente`, nenhum: ver `sem_a_variavel_o_ambiente_nao_convoca_ponto_nenhum`.
         ambiente.tirar();
-        let padrao = Convocacao::do_ambiente(socket, fp).expect("padrão");
-        assert_eq!(padrao.ponto, PONTO_PADRAO);
+        assert_eq!(
+            Convocacao::com_o_ponto_padrao(socket, fp).map(|convocacao| convocacao.ponto),
+            Some(PONTO_PADRAO.to_owned()),
+            "sem `{VARIAVEL}`, quem hospeda pelo app ficou sem o ponto de encontro do projeto"
+        );
     }
 
     #[tokio::test]
@@ -2564,5 +2744,81 @@ mod testes {
             aviso.to_string(),
             "o aviso mudou junto com o ponto"
         );
+    }
+
+    // --------------------------------------------- o padrão seguro
+
+    #[test]
+    fn sem_a_variavel_o_ambiente_nao_convoca_ponto_nenhum() {
+        // A decisão (d) do lote G-servidor da F5: sem `$SEELE_ENCONTRO`, nenhum
+        // ponto. Era o `PONTO_PADRAO`, e quem esquecia o ambiente — todo teste
+        // que subia hospedagem — registrava um servidor de teste no quarto da
+        // VPS de produção. Com o padrão seguro, esquecer custa «sem degrau 4».
+        let socket = Arc::new(std::net::UdpSocket::bind("127.0.0.1:0").expect("socket"));
+        let ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::guardar();
+        ambiente.tirar();
+        let ponto = Convocacao::do_ambiente(socket, IMPRESSAO).map(|convocacao| convocacao.ponto);
+        drop(ambiente);
+        assert_eq!(
+            ponto, None,
+            "sem `$SEELE_ENCONTRO`, `do_ambiente` convocou um ponto de encontro: quem esquece o \
+             ambiente volta a falar com ele, e o padrão volta a ser o de produção"
+        );
+    }
+
+    // --------------------------------------------- o guarda dos testes
+
+    #[test]
+    fn o_guarda_reconhece_o_ponto_de_producao_escrito_de_qualquer_jeito() {
+        // Um guarda que só casasse com o texto exato do `PONTO_PADRAO` deixaria
+        // passar o mesmo lugar escrito de outro jeito — com porta, em
+        // maiúsculas, com o ponto final do DNS, ou pelo IP da VPS.
+        for producao in [
+            PONTO_PADRAO,
+            "encontro.seele.app.br:8384",
+            "ENCONTRO.Seele.App.BR",
+            "encontro.seele.app.br.",
+            " encontro.seele.app.br ",
+            "216.128.168.216",
+            "216.128.168.216:8384",
+            "216.128.168.216:9999",
+            "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
+            "[::ffff:216.128.168.216]:8384",
+        ] {
+            assert!(
+                aponta_para_a_producao(producao),
+                "«{producao}» é o ponto de encontro de produção e o guarda não o reconheceu: \
+                 um teste que o escreva assim volta a registrar servidor de teste no quarto da VPS"
+            );
+        }
+        // E o que não é produção passa: um guarda que barrasse o ponto local
+        // derrubaria justamente os testes que fazem a coisa certa.
+        for local in [
+            "127.0.0.1",
+            "127.0.0.1:8384",
+            "[::1]:8384",
+            "192.0.2.1:8384",
+            "meu.ponto:9000",
+            "encontro.seele.app.br.exemplo",
+            "nao",
+            "",
+        ] {
+            assert!(
+                !aponta_para_a_producao(local),
+                "«{local}» não é o ponto de produção e o guarda o recusou: os testes que apontam \
+                 um ponto local reprovariam por fazerem o certo"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "pego em alcance::encontro::resolver, antes do DNS")]
+    async fn resolver_o_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
+        // Um IP escrito à mão, e não o nome: assim este teste não consulta DNS
+        // nem com o guarda desfeito. `resolver` com um IP volta na hora, sem
+        // rede, e nenhum pacote sai daqui para a VPS em caso nenhum — o que
+        // reprova, desfeito o guarda, é a falta do pânico.
+        let ate = tokio::time::Instant::now() + PRAZO;
+        let _ = super::resolver("216.128.168.216:8384", ate).await;
     }
 }

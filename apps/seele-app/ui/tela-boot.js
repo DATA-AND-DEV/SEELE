@@ -57,6 +57,15 @@ let ultimoAlvo = null;
 let ultimoApelido = null;
 
 /**
+ * Se a entrada já perguntou o nome nesta execução.
+ *
+ * Por execução, e não por servidor: a pergunta é sobre esta máquina não ter
+ * nome, e quem a fechou sem responder já decidiu. Perguntar de novo a cada
+ * reconexão seria parar a reconexão atrás de uma caixa.
+ */
+let jaPergunteiONome = false;
+
+/**
  * **Este `connect` é para o servidor que esta janela acabou de subir.**
  *
  * A `#tela-auth` existe para o momento TOFU do ADR 0003: quem chega a um
@@ -149,6 +158,32 @@ async function conectar(alvo, apelido, token) {
       apelido = ((await invoke("apelido_local")) ?? "").trim();
     } catch (falha) {
       console.warn("apelido_local:", falha);
+    }
+  }
+  // **Sem nome nenhum, a primeira entrada desta execução pergunta antes.**
+  //
+  // Quem nunca se nomeou entrava calado com o nome tirado da chave, e só o
+  // descobria na lista dos outros. Quem chega por link é o caso comum: o app
+  // abre e conecta sem passar pela tela inicial, onde mora o perfil.
+  //
+  // Só aqui, com os dois vazios — o desta visita e o desta máquina —, e só uma
+  // vez por execução: a reconexão depois de uma queda e a batida automática da
+  // espera também passam por aqui, e não podem parar atrás de uma caixa. Quem
+  // fecha sem responder entra com o nome tirado da chave, como antes — e a
+  // caixa diz isso enquanto ainda está aberta (`perguntarONome`).
+  //
+  // **CONECTAR apagado enquanto ela está aberta.** Com Tab e Enter ele abria uma
+  // segunda entrada por baixo da caixa — que já não perguntava, porque a marca
+  // estava posta, e entrava com o nome vazio. Volta a valer no `finally`, e logo
+  // abaixo, sem `await` no meio, a entrada o apaga de novo até o `connect`
+  // responder.
+  if (apelido === "" && !jaPergunteiONome) {
+    jaPergunteiONome = true;
+    $("botao-conectar").disabled = true;
+    try {
+      apelido = await perguntarONome();
+    } finally {
+      $("botao-conectar").disabled = false;
     }
   }
   // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
@@ -746,8 +781,19 @@ $("servidores-novo").addEventListener("click", () => {
 // lista pronta caso o `hospedar` automático falhe e a pessoa queira escolher
 // outra. Nenhuma das duas pode derrubar a tela de entrada, e por isso as duas
 // engolem a própria falha — ver os `catch` de cada uma.
+//
+// **A abertura espera a página inteira.** Ela chega a `conectar`, e dali à
+// pergunta do nome, que mora em `camada-nomear.js` — carregado depois deste
+// arquivo. Chamada aqui no topo, com a ponte respondendo rápido (em
+// microtarefa), a entrada por link chegava à pergunta antes de ela existir:
+// `perguntarONome is not defined`, nenhuma pergunta, e a marca de já ter
+// perguntado posta (revisão do lote J). `DOMContentLoaded` só dispara depois de
+// todos os scripts da página; nada daqui depende de a abertura correr antes
+// dele, e as versões continuam saindo primeiro.
 desenharVersoes();
-cumprirAAbertura();
+document.addEventListener("DOMContentLoaded", () => {
+  cumprirAAbertura();
+});
 
 // **Aqui havia um `desenharVisitados()` de um `desenharVisitados` que não
 // existe mais**, e ele foi o defeito mais caro desta leva: uma chamada solta no

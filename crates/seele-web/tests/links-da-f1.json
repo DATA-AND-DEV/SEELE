@@ -1,0 +1,165 @@
+{
+ "_sobre": "Os casos do link do navegador da F1 (crates/seele-proto/src/uri.rs, módulo a_forma_do_navegador), um por asserção, com o esperado escrito à mão a partir deles. Lidos pelo teste nativo (crates/seele-web/tests/links_da_f1.rs) e, dentro do .wasm, por xtask/web/links.mjs. No esperado de um link, só os campos escritos são conferidos.",
+ "casos": [
+  {
+   "de": "na_forma_https_o_fp_e_os_hashes_sao_obrigatorios",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "link": {
+     "alvo": "198.51.100.7:8383",
+     "impressao": "3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02",
+     "hashes": [
+      "abababababababababababababababababababababababababababababababab"
+     ],
+     "ate": null
+    }
+   }
+  },
+  {
+   "de": "na_forma_https_o_fp_e_os_hashes_sao_obrigatorios",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "SemImpressaoDigital"
+   }
+  },
+  {
+   "de": "na_forma_https_o_fp_e_os_hashes_sao_obrigatorios: um link sem wh= é de Servidor 0.15, ou de um desktop",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "SemHashesDoNavegador"
+   }
+  },
+  {
+   "de": "um_hash_truncado_ou_torto_e_recusado_e_nao_ignorado (truncado)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=ababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "HashDoNavegadorInvalido"
+   }
+  },
+  {
+   "de": "um_hash_truncado_ou_torto_e_recusado_e_nao_ignorado (torto)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "HashDoNavegadorInvalido"
+   }
+  },
+  {
+   "de": "um_hash_truncado_ou_torto_e_recusado_e_nao_ignorado (um bom e um truncado)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab,ababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "HashDoNavegadorInvalido"
+   }
+  },
+  {
+   "de": "o_convite_em_query_string_e_recusado",
+   "texto": "https://origem.invalid/e?convite=7K4M#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "ConsultaForaDoFragmento"
+   }
+  },
+  {
+   "de": "so_a_origem_configurada_e_do_navegador (outra origem)",
+   "texto": "https://outra.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "OutraOrigem"
+   }
+  },
+  {
+   "de": "so_a_origem_configurada_e_do_navegador (sem origem configurada, até o D-web-2)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "",
+   "esperado": {
+    "erro": "OutraOrigem"
+   }
+  },
+  {
+   "de": "so_a_origem_configurada_e_do_navegador (sem fragmento)",
+   "texto": "https://origem.invalid/e",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "SemFragmento"
+   }
+  },
+  {
+   "de": "so_a_origem_configurada_e_do_navegador (uma origem que só começa com o nome da configurada)",
+   "texto": "https://origem.invalid.outra.exemplo/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "OutraOrigem"
+   }
+  },
+  {
+   "de": "o_bilhete_do_encontro_nao_serve_ao_navegador",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?enc=encontro.exemplo:8384/198.51.100.7:41234&fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab",
+   "origem": "origem.invalid",
+   "esperado": {
+    "link": {
+     "alvo": "198.51.100.7:8383",
+     "hashes": [
+      "abababababababababababababababababababababababababababababababab"
+     ]
+    }
+   }
+  },
+  {
+   "de": "a_validade_e_lida_e_uma_torta_e_recusada (lida)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab&ate=1792540800",
+   "origem": "origem.invalid",
+   "esperado": {
+    "link": {
+     "ate": 1792540800
+    }
+   }
+  },
+  {
+   "de": "a_validade_e_lida_e_uma_torta_e_recusada (torta)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=abababababababababababababababababababababababababababababababab&ate=amanha",
+   "origem": "origem.invalid",
+   "esperado": {
+    "erro": "ValidadeInvalida"
+   }
+  },
+  {
+   "de": "os_hashes_alem_do_limite_sao_ignorados",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383/?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&wh=0000000000000000000000000000000000000000000000000000000000000000,0101010101010101010101010101010101010101010101010101010101010101,0202020202020202020202020202020202020202020202020202020202020202,0303030303030303030303030303030303030303030303030303030303030303,0404040404040404040404040404040404040404040404040404040404040404",
+   "origem": "origem.invalid",
+   "esperado": {
+    "link": {
+     "hashes": [
+      "0000000000000000000000000000000000000000000000000000000000000000",
+      "0101010101010101010101010101010101010101010101010101010101010101",
+      "0202020202020202020202020202020202020202020202020202020202020202",
+      "0303030303030303030303030303030303030303030303030303030303030303"
+     ]
+    }
+   }
+  },
+  {
+   "de": "o_link_do_navegador_vai_e_volta (o texto que Convite::no_navegador da F1 escreve)",
+   "texto": "https://origem.invalid/e#198.51.100.7:8383?fp=3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02&convite=7K4MNPQRSTVWXYZ23456&v=1.0&wh=abababababababababababababababababababababababababababababababab&ate=1792540800",
+   "origem": "origem.invalid",
+   "esperado": {
+    "link": {
+     "alvo": "198.51.100.7:8383",
+     "alternativos": [],
+     "impressao": "3cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb023cbcfb02",
+     "convite": "7K4MNPQRSTVWXYZ23456",
+     "versao": "1.0",
+     "sala": null,
+     "hashes": [
+      "abababababababababababababababababababababababababababababababab"
+     ],
+     "ate": 1792540800
+    }
+   }
+  }
+ ]
+}

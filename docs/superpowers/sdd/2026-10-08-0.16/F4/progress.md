@@ -158,3 +158,49 @@ Também feito:
 - os tamanhos batem com os que a API do GitHub informa para o release;
 - o release não publica checksum, e uma busca pelos hashes não achou segunda
   fonte.
+
+### 08/10, depois da segunda integração (`dc001a0`)
+
+- `0.16/web` trazido a `versao/0.16` em `dc001a0` (fast-forward).
+- **As duas falhas que a bateria achou no meu branch**, consertadas pela
+  orquestradora em `5122f39`:
+  - **o clippy em `fronteira_do_celular.rs`.** Rodei o clippy com
+    `--all-targets`, mas **antes** de acrescentar o último teste àquele arquivo,
+    e não rodei de novo depois;
+  - **o `todo_crate_do_produto_pode_falar_no_log`.** Ele percorre os crates do
+    workspace, e eu não o rodei ao criar dois crates.
+
+  Daqui em diante: `env RUSTFLAGS="-D warnings" cargo clippy -p <crate>
+  --all-targets` depois da última edição, e os guardas que percorrem os membros
+  do workspace sempre que um crate entra.
+- **`cargo xtask web` na bateria do `publicar.sh` e no `validar` do
+  `release.yml`**, a pedido da orquestradora:
+  - a etapa fica ao lado do `check-runtime`, com a queixa e o conserto no
+    molde das outras. O resto do script, que é da F6, ficou intocado;
+  - **antes de qualquer build**, o `xtask web` diz o que falta na máquina: os
+    alvos wasm (com o `rustup` a rodar), o Node, ou o hash fixado do wasi-sdk.
+    Uma máquina sem hash fixado (Windows, Mac Intel) é recusada dizendo por quê.
+    Seis testes, e um provado por reversão;
+  - dois testes em `xtask/tests/empacotamento.rs`, no molde do
+    `check-runtime`: um `xtask web` vermelho para a publicação antes de
+    empacotar, com a queixa e o porquê, e o `--sem-bateria` o pula;
+  - o guarda de `fronteira_do_celular.rs` passa a exigir o passo nos dois
+    workflows.
+
+### 08/10, os casos do link no `.wasm` (Tarefa 2.3)
+
+Liberado pela orquestradora depois do `642a4d4`.
+- O `seele-web` ganha:
+  - `link_do_navegador`, sobre o `analisar_no_navegador` da F1;
+  - na fronteira, `analisar_link`, **sempre com a `ORIGEM_DO_NAVEGADOR` do
+    produto**: a página não escolhe a origem;
+  - `analisar_link_em`, a versão com origem, só para teste.
+- Os 16 casos da F1, um por asserção, numa tabela em JSON, passam no nativo e
+  dentro do `.wasm`. O `cargo xtask web` passa a ter oito passos.
+- Provado por reversão, nas duas pontas. Na do `.wasm`, a primeira tentativa de
+  reversão não se aplicou: o `rustfmt` tinha quebrado a linha e a substituição
+  não casou, e o «verde» dela não provava nada. Refeita contra o texto real,
+  reprovou como devia.
+- Clippy com `RUSTFLAGS="-D warnings"` e `--all-targets` depois da última
+  edição. Ele pegou a indexação em `serde_json::Value` no teste novo, já
+  consertada.

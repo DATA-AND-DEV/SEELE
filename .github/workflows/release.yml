@@ -232,6 +232,25 @@ jobs:
         timeout-minutes: 5
         run: cargo xtask check-runtime
 
+      # **Os crates do celular dentro do `.wasm`** (ADR 0057, emenda de
+      # 08/10/2026): os bytes-ouro da linha 1 pela fronteira do `seele-web`, e o
+      # motor de MODs do `seele-motor-web` com as importações fixas, o laço
+      # cortado e o teto de memória, que só se prova no `wasm32-wasip1`. Os sete
+      # passos moram em `xtask/src/web.rs`, e são os mesmos da bateria do
+      # `empacotar/publicar.sh` e do job de MOD do `ci.yml`.
+      #
+      # Uma vez só, no Linux, como as bancadas: o `.wasm` não depende de
+      # sistema, e o wasi-sdk tem hash fixado para `x86_64-linux`. Com
+      # `!cancelled()`, pela mesma razão das bancadas, e com o Node que o passo
+      # delas instala.
+      - name: Alvos wasm (Linux)
+        if: ${{ !cancelled() && matrix.nome == 'linux' }}
+        run: rustup target add wasm32-unknown-unknown wasm32-wasip1
+      - name: Os crates do celular no wasm
+        if: ${{ !cancelled() && matrix.nome == 'linux' }}
+        timeout-minutes: 15
+        run: cargo xtask web
+
   empacotar:
     name: ${{ matrix.nome }}
     needs: [versao, validar]

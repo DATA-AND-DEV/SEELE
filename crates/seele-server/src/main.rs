@@ -397,6 +397,37 @@ mod testes {
     use super::*;
 
     #[test]
+    fn o_seeled_nao_sobe_a_escada_sem_o_ponto_padrao() {
+        // O `seeled` não sobe a escada do ADR 0022: ele é o servidor de VPS, o
+        // degrau 1, e não convoca ponto de encontro nenhum. Se um dia passar a
+        // subir, é com o ponto padrão — sem ele, desde a decisão (d) do lote
+        // G-servidor da F5, a convocação sem `$SEELE_ENCONTRO` é «nenhum
+        // ponto», e quem roda o servidor de terminal perderia o degrau 4 em
+        // silêncio. As agulhas vêm partidas para não casarem com este texto.
+        let fonte: String = include_str!("main.rs")
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let corpo = fonte
+            .split_once("async fn main(")
+            .and_then(|(_, depois)| depois.split_once("\n}\n"))
+            .map(|(corpo, _)| corpo)
+            .expect("o `main` do `seeled` está neste arquivo");
+        for sem_o_padrao in [
+            concat!("Hospedagem::", "iniciar("),
+            concat!("Convocacao::", "do_ambiente("),
+        ] {
+            assert!(
+                !corpo.contains(sem_o_padrao),
+                "o `main` do `seeled` chama `{sem_o_padrao}`, que sem `$SEELE_ENCONTRO` não convoca \
+                 ponto nenhum: quem roda o servidor de terminal perde o degrau 4 em silêncio. Use \
+                 `Hospedagem::iniciar_com_o_ponto_padrao` ou `Convocacao::com_o_ponto_padrao`"
+            );
+        }
+    }
+
+    #[test]
     fn o_tamanho_e_lido_em_binario_e_nao_em_decimal() {
         // Um produto que dissesse «1G» querendo dizer 10^9 estaria mentindo
         // sobre o número que a pessoa escolheu, e esse número é a única coisa

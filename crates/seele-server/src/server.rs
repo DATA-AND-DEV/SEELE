@@ -239,6 +239,24 @@ pub enum Event {
         /// Where to.
         voice_room: VoiceRoomId,
     },
+    /// O servidor vai cair, e **toda** sessão se despede com este motivo.
+    ///
+    /// O par de [`Self::SessionEnded`] para todo mundo de uma vez: cada sessão
+    /// o atende no mesmo braço da expulsão — escreve `Disconnecting { reason }`,
+    /// espera a entrega e fecha a conexão. Quem o difunde é
+    /// [`crate::Daemon::encerrar_avisando`], que só fecha o endpoint depois.
+    ///
+    /// **Interno, e fora do fio.** Nenhum quadro novo nasce dele: o que viaja é
+    /// o `Disconnecting` que já existia.
+    ///
+    /// **Com a razão**, e não fixo em `ServerShuttingDown`: é o que quem
+    /// hospeda manda ao fechar hoje (lote G-servidor da F5), e é por esta mesma
+    /// via que a sala pessoal vai mandar `ChamadaEncerrada` ao desligar
+    /// (Plano 2), sem um segundo caminho de despedida.
+    ServidorEncerrando {
+        /// O que cada sessão vai ler.
+        reason: seele_proto::control::DisconnectReason,
+    },
 
     // ---- unmaking a room ----
     //

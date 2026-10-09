@@ -43,6 +43,7 @@ use seele_server::persistence::Location;
 use seele_server::server::Occupant;
 use seele_server::{Daemon, ServerConfig};
 
+mod ambiente;
 mod vaga;
 
 const VOICE_ROOM: u32 = 1;
@@ -311,6 +312,9 @@ async fn a_mesma_pessoa_volta_pela_tela_de_selecao() -> Result<()> {
 #[tokio::test]
 async fn hospedar_ejetar_e_hospedar_de_novo_libera_a_porta() -> Result<()> {
     let _vaga = vaga::minha();
+    // Sem degrau 4: o que se mede é a porta, e nenhum pacote precisa sair
+    // desta máquina para ponto de encontro nenhum. Ver `ambiente`.
+    let _ambiente = ambiente::sem_degrau_4();
     // `Hospedagem::encerrar` espera a porta voltar. Sem essa espera, a segunda
     // volta do laço falharia com porta ocupada — e é esse o caminho que a tela
     // de seleção oferece quando diz «hospedar aqui».

@@ -15,6 +15,19 @@ use std::time::Duration;
 /// exchanged, which is cheaper and safer than discovering it afterwards.
 pub const ALPN: &[u8] = b"seele/1";
 
+/// O nome do servidor da sala pessoal: o SNI de quem liga e o SAN do
+/// certificado da sala (spec de 23/09/2026, «Quem liga confere o código dentro
+/// do TLS»; spec-mestre da 0.16, §3, item 12).
+///
+/// **Uma constante, e nunca o código.** O SNI viaja legível no Initial do QUIC,
+/// e o código contaria a quem olha a rede para quem se está ligando. Quem
+/// confere a identidade é o `ConfereCodigo`, dentro do TLS, pela chave.
+///
+/// **Formato congelado:** o certificado da sala o leva no SAN, e um vetor do
+/// DER desse certificado o prende. Mora aqui porque as duas pontas o usam, e o
+/// `seele-core` não pode importar do `seele-server` (ADR 0002).
+pub const NOME_DA_SALA: &str = "seele-sala";
+
 /// O ALPN do navegador: o `h3` da WebTransport (ADR 0057).
 ///
 /// O `seeled` anuncia os dois no mesmo socket e escolhe o certificado por ele:
@@ -470,5 +483,27 @@ mod a_impressao_em_bytes {
         let digest = certificate_digest(b"um certificado");
         let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, certificate_fingerprint(b"um certificado"));
+    }
+}
+
+#[cfg(test)]
+mod o_nome_da_sala {
+    use super::*;
+
+    /// **O SNI e o SAN da sala pessoal são uma constante, e nunca o código**
+    /// (spec de 23/09/2026, «Quem liga confere o código dentro do TLS»): o SNI
+    /// viaja legível no Initial do QUIC, e o código contaria a quem olha a rede
+    /// para quem se está ligando. O valor é formato: o certificado da sala o
+    /// leva no SAN, e um vetor do DER dele o prende (F7, `tls.rs` da sala).
+    #[test]
+    fn o_nome_da_sala_e_fixo_e_nao_diz_codigo_nenhum() {
+        assert_eq!(NOME_DA_SALA, "seele-sala");
+        assert!(
+            crate::codigo::Codigo::ler(NOME_DA_SALA).is_err(),
+            "o nome da sala não pode ser lido como um código"
+        );
+        assert!(NOME_DA_SALA
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '-'));
     }
 }

@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
     MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
@@ -431,6 +431,20 @@ pub async fn serve(
     result
 }
 
+/// Se este evento manda **esta** sessão embora.
+///
+/// A expulsão ([`Event::SessionEnded`]) é endereçada a uma pessoa e entregue a
+/// todas, e só a dela age. O fechamento do servidor
+/// ([`Event::ServidorEncerrando`]) é de todo mundo. O braço que atende os dois
+/// no laço é um só, e esta é a pergunta que o separa dos outros eventos.
+fn manda_esta_sessao_embora(event: &Event, person: PersonId) -> bool {
+    match event {
+        Event::SessionEnded { person: alvo, .. } => *alvo == person,
+        Event::ServidorEncerrando { .. } => true,
+        _ => false,
+    }
+}
+
 /// Espera o motivo da recusa sair do fio antes de a conexão morrer.
 ///
 /// `specs/02-protocolo.md` exige que a razão de uma recusa seja específica,
@@ -561,6 +575,16 @@ async fn handshake(
         reason: DisconnectReason::CredentialRejected,
         detail: "public key is not a valid Ed25519 point".into(),
     })?;
+    // Uma chave de ordem pequena não prova posse de nada: a conferência comum
+    // aceita com ela assinaturas que não pedem chave privada. Recusada aqui,
+    // antes do desafio, e a prova lá embaixo é conferida com `verify_strict`.
+    // Achado da F2, 08/10/2026.
+    if verifying.is_weak() {
+        return Err(Refusal {
+            reason: DisconnectReason::CredentialRejected,
+            detail: "public key has small order".into(),
+        });
+    }
 
     // A fresh nonce per handshake, or a recorded Response could be replayed.
     let nonce: [u8; NONCE_LEN] = rand::random();
@@ -604,7 +628,7 @@ async fn handshake(
     // de qualquer assinatura que não confere.
     let assinada = seele_proto::assinatura::prova_de_cliente(&server.impressao, &nonce);
     verifying
-        .verify(&assinada, &Signature::from_bytes(&signature))
+        .verify_strict(&assinada, &Signature::from_bytes(&signature))
         .map_err(|_| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: "signature did not verify".into(),
@@ -3351,8 +3375,24 @@ async fn run_session(
                         }
                         continue;
                     }
-                    Event::SessionEnded { person, reason } if *person == session.person => {
-                        tracing::info!(person = %session.person, ?reason, "session ended by an operator");
+                    // A expulsão, endereçada a esta pessoa, e o fechamento do
+                    // servidor, endereçado a todas, são o mesmo gesto: o
+                    // motivo vem no evento, e o resto deste braço vale para os
+                    // dois. Um segundo braço com o mesmo corpo seria uma cópia
+                    // esperando ficar para trás.
+                    Event::SessionEnded { reason, .. } | Event::ServidorEncerrando { reason }
+                        if manda_esta_sessao_embora(&event, session.person) =>
+                    {
+                        let fechando = matches!(event, Event::ServidorEncerrando { .. });
+                        if fechando {
+                            tracing::info!(
+                                person = %session.person,
+                                ?reason,
+                                "o servidor está encerrando; esta sessão se despede com o motivo"
+                            );
+                        } else {
+                            tracing::info!(person = %session.person, ?reason, "session ended by an operator");
+                        }
                         // Told, and then closed. `specs/02-protocolo.md` wants
                         // a specific reason and `despedir` is what makes sure
                         // it reaches the other end before the connection dies
@@ -3395,7 +3435,8 @@ async fn run_session(
                             reason: *reason,
                         }).await;
                         let _ = send.finish();
-                        despedir(&connection, &mut send, b"moderated").await;
+                        let motivo: &[u8] = if fechando { b"shutting down" } else { b"moderated" };
+                        despedir(&connection, &mut send, motivo).await;
                         break;
                     }
                     Event::PersonMoved { person, voice_room: destino } if *person == session.person => {
@@ -4939,7 +4980,12 @@ fn translate(
         // connection is gone — so there is nothing to translate here, and
         // inventing something would be a second way to say what those already
         // say.
-        Event::SessionEnded { .. } | Event::PersonMoved { .. } => None,
+        //
+        // `ServidorEncerrando` também: cada conexão o atende no laço, no braço
+        // da expulsão, e o que o cliente lê é o `Disconnecting` que de lá sai.
+        Event::SessionEnded { .. }
+        | Event::PersonMoved { .. }
+        | Event::ServidorEncerrando { .. } => None,
 
         // Unfiltered, like the four announcements above and for the same
         // reason: a room that goes on being drawn until the next handshake is a

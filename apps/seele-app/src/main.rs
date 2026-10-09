@@ -426,6 +426,20 @@ impl Session {
         Err(ConnectionError::NotConnected)
     }
 
+    /// **Recusa um comando de MOD que vem de uma sessão que já acabou, e
+    /// conta**, com a recusa que a janela lê: `sessao-encerrada`.
+    ///
+    /// É [`Self::confere_geracao`] com o erro dos comandos de MOD: a mesma
+    /// conta em `comandos_de_geracao_morta` e a mesma linha DEBUG. Antes dela,
+    /// cada comando conferia com um `if` seu, e metade não contava — um zero no
+    /// contador não queria dizer que nada da sessão anterior tinha falado.
+    fn recusar_se_morta(&self, geracao: u64) -> Result<(), FalhaNoMod> {
+        self.confere_geracao(geracao)
+            .map_err(|_| FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            })
+    }
+
     /// The live handle, or the reason there is none.
     fn connection(&self) -> Result<Arc<Connection>, ConnectionError> {
         self.connection
@@ -1927,7 +1941,12 @@ async fn hospedar(
     // com uma frase pedindo que alguém decida.
     let minha = seele_ffi::impressao_desta_maquina(&config_dir(&app))
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-    let server = seele_server::hospedagem::Hospedagem::iniciar(
+    // **Com o ponto de encontro do projeto**, pedido aqui e só aqui: sem
+    // `$SEELE_ENCONTRO`, o `iniciar` curto não convoca ponto nenhum, que é o
+    // padrão seguro dos testes. Quem hospeda pelo app é quem está atrás do
+    // roteador de casa, e é para essa pessoa que o degrau 4 existe. O guarda é
+    // `o_ponto_de_encontro_de_quem_hospeda`, logo abaixo desta função.
+    let server = seele_server::hospedagem::Hospedagem::iniciar_com_o_ponto_padrao(
         PORTA_PADRAO,
         seele_server::persistence::Location::File(banco),
         "Casa",
@@ -1991,6 +2010,59 @@ async fn hospedar(
     }
 
     Ok(anfitriao)
+}
+
+/// Toda hospedagem deste app sobe com o ponto de encontro do projeto.
+///
+/// Desde a decisão (d) do lote G-servidor da F5, `Hospedagem::iniciar` sem
+/// `$SEELE_ENCONTRO` não convoca ponto nenhum, que é o padrão seguro para os
+/// testes. A produção pede o ponto padrão de forma explícita, e estes são os
+/// guardas de que ela pede: sem ele, quem hospeda atrás de CGNAT perderia o
+/// degrau 4 em silêncio, e o link sairia sem o bilhete que faz «manda o link e
+/// funciona» virar verdade.
+///
+/// O arquivo inteiro, e não só o `hospedar`: a sala pessoal (tarefa 4f da F7)
+/// e o G-casca do Plano 2 vão abrir pontos de entrada novos aqui, e o que
+/// esquecer o padrão reprova sem que alguém precise lembrar de pôr um guarda
+/// nele.
+#[cfg(test)]
+mod o_ponto_de_encontro_de_quem_hospeda {
+    /// As duas formas, partidas para não casarem com este texto.
+    const COM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar_com_o_ponto_padrao(");
+    const SEM_O_PADRAO: &str = concat!("Hospedagem::", "iniciar(");
+
+    #[test]
+    fn nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao() {
+        let fonte = super::fonte_sem_comentarios();
+        let sem: Vec<&str> = fonte
+            .lines()
+            .filter(|linha| linha.contains(SEM_O_PADRAO))
+            .map(str::trim)
+            .collect();
+        assert!(
+            sem.is_empty(),
+            "este arquivo sobe hospedagem com `{SEM_O_PADRAO}`, que sem `$SEELE_ENCONTRO` não \
+             convoca ponto de encontro nenhum: quem hospeda por esse caminho perde o degrau 4 em \
+             silêncio. Use `{COM_O_PADRAO}`. Linhas: {sem:?}"
+        );
+        assert!(
+            fonte.contains(COM_O_PADRAO),
+            "nenhuma hospedagem deste arquivo usa `{COM_O_PADRAO}`: o app hospeda sem o ponto de \
+             encontro do projeto"
+        );
+    }
+
+    #[test]
+    fn hospedar_sobe_com_o_ponto_de_encontro_padrao() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn hospedar(");
+        assert!(
+            corpo.contains(COM_O_PADRAO) && !corpo.contains(SEM_O_PADRAO),
+            "o `hospedar` não sobe o servidor com `{COM_O_PADRAO}`: sem ele, e sem \
+             `$SEELE_ENCONTRO`, a hospedagem não convoca ponto de encontro nenhum, e quem hospeda \
+             atrás de CGNAT perde o degrau 4 em silêncio"
+        );
+    }
 }
 
 /// Desfaz `%XX` num caminho de URL. O resto passa inteiro.
@@ -4380,14 +4452,11 @@ fn reservar_no_executor(
     id: &str,
     hash: String,
 ) -> Result<u64, FalhaNoMod> {
-    // Recusada **e contada** em `comandos_de_geracao_morta`, como a de
-    // `codigo_do_mod`: as duas são a carga atrasada, e o doc de
-    // `recusa_de_carga_dita` diz que é esse contador que a conta.
-    if session.confere_geracao(geracao).is_err() {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    // Recusada **e contada** em `comandos_de_geracao_morta`, pela mesma regra
+    // de todo comando de MOD, como a de `codigo_do_mod`: as duas são a carga
+    // atrasada, e o doc de `recusa_de_carga_dita` diz que é esse contador que
+    // a conta.
+    session.recusar_se_morta(geracao)?;
     // O mesmo caminho de sempre para chegar ao código: a conferência de hash e
     // de identidade mora lá, e um segundo caminho seria uma segunda regra. Lido
     // agora para que a ativação não possa falhar por causa do disco.
@@ -4478,6 +4547,7 @@ fn mod_nativo_ativar(
     liberar_reserva(
         &session.mods_nativos,
         &|| session.geracao_vale(geracao),
+        &session.comandos_de_geracao_morta,
         geracao,
         instancia,
     )?;
@@ -4531,9 +4601,7 @@ fn revogar_em(geracao: &std::sync::atomic::AtomicU64, mods: &std::sync::Mutex<Mo
 ///
 /// A recusa por geração morta é contada em `mortos` — o
 /// `comandos_de_geracao_morta` da sessão —, como a do começo de
-/// [`reservar_no_executor`]. A de [`liberar_reserva`], logo abaixo, não é
-/// contada: nem todo comando de geração morta passa por esse contador, e um
-/// zero nele não quer dizer que nada da sessão anterior falou.
+/// [`reservar_no_executor`] e a de [`liberar_reserva`], logo abaixo.
 fn registrar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
@@ -4556,15 +4624,30 @@ fn registrar_reserva(
 /// Extraída pela mesma razão que [`registrar_reserva`]: a ativação também é uma
 /// corrida contra a saída da sessão, e uma prova dela não pode precisar de um
 /// `AppHandle`.
+///
+/// A recusa por geração morta é contada em `mortos`, como a da reserva, e
+/// dita com a linha DEBUG de [`Session::confere_geracao`], como a dos outros
+/// comandos de MOD — com a instância no lugar da geração de pé, que esta
+/// função não conhece.
 fn liberar_reserva(
     mods: &std::sync::Mutex<ModsNativos>,
     geracao_vale: &dyn Fn() -> bool,
+    mortos: &std::sync::atomic::AtomicU64,
     geracao: u64,
     instancia: u64,
 ) -> Result<(), FalhaNoMod> {
     let mut vivos = mods.lock().map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
     if !geracao_vale() {
+        mortos.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         vivos.encerrar(instancia);
+        // A linha sai com o cadeado solto: com ele na mão, uma escrita lenta
+        // no disco seguraria toda a supervisão dos MODs.
+        drop(vivos);
+        tracing::debug!(
+            geracao,
+            instancia,
+            "comando recusado: a sessão dele já acabou"
+        );
         return Err(FalhaNoMod::Recusado {
             motivo: "sessao-encerrada".to_owned(),
         });
@@ -4823,11 +4906,7 @@ fn mod_nativo_colher(
     instancia: u64,
     limite: usize,
 ) -> Result<Vec<FalaPendente>, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let mut vivos = session
         .mods_nativos
         .lock()
@@ -4872,11 +4951,7 @@ fn mod_nativo_entregar(
     instancia: u64,
     json: String,
 ) -> Result<(), FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let vivos = session
         .mods_nativos
         .lock()
@@ -5778,14 +5853,7 @@ fn ler_codigo_do_mod(
     // uma sessão. Entregá-lo para uma geração morta seria pôr um worker de pé
     // depois de a sessão dele ter acabado — a corrida que o roteiro da E2 chama
     // de «montagem atrasada».
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let pacote = seele_ffi::mods::ler_por_hash(&config_dir(app), hash)
         .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     // **O hash tem de ser deste MOD.** Sem isto, uma janela que pedisse o
@@ -5861,13 +5929,6 @@ fn motivo_de(falha: &FalhaNoMod) -> &str {
 /// WARN com o id do MOD, a origem e o motivo — menos `sessao-encerrada`, que
 /// vai em DEBUG: uma mídia que não montou porque a pessoa saiu é o desfecho
 /// certo, e avisá-la ensinaria a ignorar os avisos.
-///
-/// **A geração morta que os comandos conferem na entrada não passa por aqui.**
-/// [`midia_do_mod`], [`midia_em_bytes`] e [`som_do_mod`] devolvem
-/// `sessao-encerrada` antes de chegar a esta função, e o que fica dela é o
-/// contador `comandos_de_geracao_morta`. O `sessao-encerrada` que chega aqui é
-/// o que a conexão devolve quando cai no meio de uma leitura por volume
-/// ([`ler_imagem_mod`]).
 ///
 /// **Texto de terceiro não entra solto numa linha do registro**, e são três
 /// campos com ele. `origem` é o caminho que a janela pede em `midia_do_mod` e
@@ -6072,14 +6133,7 @@ fn midia_do_mod(
     hash: String,
     caminho: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let midia = midia_declarada_do_mod(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6186,14 +6240,7 @@ fn som_do_mod(
     hash: String,
     caminho: String,
 ) -> Result<tauri::ipc::Response, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let bytes = som_declarado_do_mod(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6302,14 +6349,7 @@ fn midia_em_bytes(
     id: String,
     base64: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let midia = midia_do_servidor_dita(
         &session.baldes_do_registro,
         std::time::Instant::now(),
@@ -6436,9 +6476,7 @@ async fn enviar_imagem_mod(
     let recusa = |motivo: &str| FalhaNoMod::Recusado {
         motivo: motivo.to_owned(),
     };
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     let bytes = {
         let mut guardados = session
             .arquivos_escolhidos
@@ -6464,12 +6502,23 @@ async fn enviar_imagem_mod(
         .enviar_imagem_mod(id, token, bytes)
         .await
         .map_err(|m| recusa(&m))?;
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
+    session.recusar_se_morta(geracao)?;
     Ok(())
 }
 
+/// **Lê por volume a imagem que um MOD guardou no servidor.**
+///
+/// Toda recusa é dita no `seele.log`: a geração morta, na entrada e — quando
+/// os bytes chegaram — depois do `await`, por [`Session::recusar_se_morta`],
+/// que a conta; a conexão que não está de pé, por [`recusa_de_midia_dita`], em
+/// DEBUG; e as duas de depois do `await` — a do servidor e
+/// `formato-desconhecido` — por [`imagem_lida_dita`], com o id do MOD.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::Recusado`] quando a geração já acabou, quando não há conexão,
+/// com o texto que o servidor mandou, ou quando os bytes não são de um formato
+/// conhecido.
 #[tauri::command]
 async fn ler_imagem_mod(
     session: State<'_, Session>,
@@ -6478,46 +6527,81 @@ async fn ler_imagem_mod(
     channel: u32,
     payload: String,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    let recusa = |motivo: &str| FalhaNoMod::Recusado {
-        motivo: motivo.to_owned(),
-    };
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
-    let conexao = session
-        .connection()
-        .map_err(|_| recusa("sessao-encerrada"))?;
-    // O relógio é lido quando a linha é escrita, e não antes do `await`: a
-    // leitura por volume pode levar segundos, e o balde contaria a recarga
-    // desde um instante que já passou.
-    let bytes = conexao
-        .ler_imagem_mod(id.clone(), channel, payload)
-        .await
-        .map_err(|m| {
-            recusa_de_midia_dita(
-                &session.baldes_do_registro,
-                std::time::Instant::now(),
-                &id,
-                "volume",
-                recusa(&m),
-            )
-        })?;
-    if !session.geracao_vale(geracao) {
-        return Err(recusa("sessao-encerrada"));
-    }
-    let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
+    session.recusar_se_morta(geracao)?;
+    // **Dita, e não contada.** A geração foi conferida logo acima: uma conexão
+    // ausente com a geração de pé não é comando de uma sessão encerrada, e
+    // contá-la faria o contador dizer que a sessão anterior falou sem ela ter
+    // falado.
+    let conexao = session.connection().map_err(|_| {
         recusa_de_midia_dita(
             &session.baldes_do_registro,
             std::time::Instant::now(),
             &id,
             "volume",
-            recusa("formato-desconhecido"),
+            FalhaNoMod::Recusado {
+                motivo: "sessao-encerrada".to_owned(),
+            },
+        )
+    })?;
+    let lida = conexao.ler_imagem_mod(id.clone(), channel, payload).await;
+    // **A ordem de sempre.** O `Err` do servidor é dito como veio, mesmo que a
+    // geração tenha morrido durante o `await`: ele é o dado da recusa, e a
+    // janela continua recebendo o que o servidor disse. Só os bytes que
+    // chegaram esperam a conferência, porque decodificá-los já seria trabalho
+    // para uma sessão que acabou.
+    if lida.is_ok() {
+        session.recusar_se_morta(geracao)?;
+    }
+    // O relógio é lido quando a linha é escrita, e não antes do `await`: a
+    // leitura por volume pode levar segundos, e o balde contaria a recarga
+    // desde um instante que já passou.
+    imagem_lida_dita(
+        &session.baldes_do_registro,
+        std::time::Instant::now(),
+        &id,
+        lida,
+    )
+}
+
+/// **A imagem lida por volume, ou a recusa dita no registro** com o id do MOD:
+/// a parte de [`ler_imagem_mod`] depois do `await`.
+///
+/// Duas recusas, as duas por [`recusa_de_midia_dita`] com a origem `volume`:
+///
+/// - a do servidor, com o texto que ele mandou — o `erro` da resposta, a razão
+///   com que a conexão fechou, o prazo esgotado;
+/// - a dos bytes que chegaram e não são de um formato que este produto
+///   decodifica, `formato-desconhecido`.
+///
+/// Extraída porque o comando fala com a rede e não sobe num teste: o guarda de
+/// texto que procurava `recusa_de_midia_dita` no comando passava com uma só das
+/// duas, e a outra saía calada. Aqui cada uma tem o seu caso.
+///
+/// Com o teto de vazão de `baldes`.
+fn imagem_lida_dita(
+    baldes: &BaldesDoRegistro,
+    agora: std::time::Instant,
+    id: &str,
+    lida: Result<Vec<u8>, String>,
+) -> Result<MidiaDoMod, FalhaNoMod> {
+    let bytes = lida.map_err(|motivo| {
+        recusa_de_midia_dita(baldes, agora, id, "volume", FalhaNoMod::Recusado { motivo })
+    })?;
+    let midia = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
+        recusa_de_midia_dita(
+            baldes,
+            agora,
+            id,
+            "volume",
+            FalhaNoMod::Recusado {
+                motivo: "formato-desconhecido".to_owned(),
+            },
         )
     })?;
     Ok(MidiaDoMod {
-        uri: lida.uri,
-        papel: lida.papel,
-        bytes: lida.bytes,
+        uri: midia.uri,
+        papel: midia.papel,
+        bytes: midia.bytes,
     })
 }
 
@@ -6565,14 +6649,7 @@ async fn escolher_para_o_mod(
 ) -> Result<Option<EscolhidoParaOMod>, FalhaNoMod> {
     use tauri_plugin_dialog::DialogExt as _;
 
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
 
     // **O título diz para quê.** Antes dizia «Escolha um arquivo para este
     // MOD», que não responde a pergunta de quem está olhando o Finder: *este
@@ -6671,11 +6748,7 @@ async fn escolher_para_o_mod(
 
     // Conferida **de novo** depois do `await` do seletor: a pessoa pode ter
     // demorado a escolher, e a sessão pode ter acabado no meio.
-    if !session.geracao_vale(geracao) {
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let mut guardados = session
         .arquivos_escolhidos
         .lock()
@@ -6717,14 +6790,7 @@ fn pedaco_do_escolhido(
     arquivo: u64,
     inicio: usize,
 ) -> Result<String, FalhaNoMod> {
-    if !session.geracao_vale(geracao) {
-        session
-            .comandos_de_geracao_morta
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        return Err(FalhaNoMod::Recusado {
-            motivo: "sessao-encerrada".to_owned(),
-        });
-    }
+    session.recusar_se_morta(geracao)?;
     let guardados = session
         .arquivos_escolhidos
         .lock()
@@ -10273,7 +10339,9 @@ mod o_que_sai_desta_janela_por_um_link {
 /// tabela, os créditos e o que sobra depois.
 #[cfg(test)]
 mod a_supervisao_dos_mods_nativos {
-    use super::{registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos};
+    use super::{
+        liberar_reserva, registrar_reserva, revogar_em, EstadoNativo, InstanciaNativa, ModsNativos,
+    };
     use crate::executor::{ExecutorQuickJs, Limites};
 
     /// Uma instância com um executor de verdade, na geração dada.
@@ -10530,6 +10598,257 @@ mod a_supervisao_dos_mods_nativos {
             1,
             "a reserva de uma geração viva foi contada como de geração morta"
         );
+    }
+
+    /// **A ativação que chega numa geração morta também é contada e dita**,
+    /// como a reserva logo acima e como os comandos que passam por
+    /// [`super::Session::recusar_se_morta`].
+    ///
+    /// Ela era a ressalva do doc de `registrar_reserva`: recusada sem conta, e
+    /// um zero em `comandos_de_geracao_morta` não queria dizer que nada da
+    /// sessão anterior tinha falado. Depois de contada, ainda não dizia: os
+    /// outros comandos de MOD escreviam a linha DEBUG de `confere_geracao`, e
+    /// a ativação, não. A que vale não é contada nem dita, nem quando é
+    /// recusada por outro motivo.
+    #[test]
+    fn a_ativacao_recusada_por_geracao_morta_e_contada_e_dita() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let nenhum = AtomicU64::new(0);
+        let mut reservada = instancia(7);
+        reservada.estado = EstadoNativo::Reservada;
+        let numero = registrar_reserva(&mods, &|| true, &nenhum, reservada)
+            .expect("a reserva viva foi recusada");
+
+        let mortos = AtomicU64::new(0);
+        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
+            liberar_reserva(&mods, &|| false, &mortos, 7, numero)
+        });
+        let recusa = recusa.expect_err("a ativação de uma geração morta foi aceita");
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("comando recusado: a sessão dele já acabou"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "a ativação recusada por geração morta foi contada e não foi dita: os \
+                     outros comandos de MOD deixam a linha DEBUG de `confere_geracao`, e esta \
+                     some do registro — {rastro}"
+                )
+            });
+        for pedaco in ["DEBUG", "geracao=7", &format!("instancia={numero}")] {
+            assert!(
+                linha.contains(pedaco),
+                "a linha da ativação recusada por geração morta não traz `{pedaco}`, e quem lê \
+                 o registro não acha de que sessão e de que instância ela era: {linha}"
+            );
+        }
+        assert_eq!(
+            super::motivo_de(&recusa),
+            "sessao-encerrada",
+            "a ativação de uma geração morta foi recusada por outro motivo"
+        );
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a ativação recusada por geração morta não foi contada em \
+             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
+        );
+        assert!(
+            mods.lock()
+                .expect("cadeado")
+                .encerrando
+                .contains_key(&numero),
+            "a reserva de uma ativação recusada por geração morta não foi encerrada"
+        );
+
+        let (recusa, rastro) = crate::rastro_de_teste::capturar(|| {
+            liberar_reserva(&mods, &|| true, &mortos, 7, numero)
+        });
+        let recusa = recusa.expect_err("a ativação de uma reserva já encerrada foi aceita");
+        assert_eq!(
+            super::motivo_de(&recusa),
+            "instancia-nao-esta-reservada",
+            "a ativação viva de uma reserva encerrada foi recusada por outro motivo"
+        );
+        assert_eq!(
+            mortos.load(Ordering::Relaxed),
+            1,
+            "a ativação de uma geração viva foi contada como de geração morta"
+        );
+        assert!(
+            !rastro.contains("comando recusado: a sessão dele já acabou"),
+            "a ativação de uma geração viva foi dita como de uma sessão que acabou: {rastro}"
+        );
+    }
+
+    /// **Um comando de MOD de uma geração morta é recusado, contado e dito**,
+    /// pela mesma função em todos eles ([`super::Session::recusar_se_morta`]).
+    ///
+    /// Eram treze conferências com um `if` cada uma, em dez funções, e sete não
+    /// contavam: `comandos_de_geracao_morta` dizia zero com a sessão anterior
+    /// ainda falando. Nenhum teste daqui monta um `State`, e por isso a prova é
+    /// da função; o guarda de fonte logo abaixo prende que os comandos a usam.
+    #[test]
+    fn o_comando_de_uma_geracao_morta_e_recusado_contado_e_dito() {
+        use std::sync::atomic::Ordering;
+
+        let sessao = super::Session::default();
+        sessao.geracao.store(3, Ordering::Release);
+        let (resultado, rastro) = crate::rastro_de_teste::capturar(|| sessao.recusar_se_morta(2));
+        let falha = resultado.expect_err("um comando de uma geração morta foi admitido");
+        assert_eq!(
+            super::motivo_de(&falha),
+            "sessao-encerrada",
+            "um comando de uma geração morta foi recusado por outro motivo, e a janela não o \
+             lê como a sessão que acabou"
+        );
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            1,
+            "um comando recusado por geração morta não foi contado em \
+             `comandos_de_geracao_morta`, e o contador diz que nada da sessão anterior falou"
+        );
+        assert!(
+            rastro.contains("DEBUG")
+                && rastro.contains("comando recusado: a sessão dele já acabou"),
+            "um comando recusado por geração morta não deixou a linha DEBUG de \
+             `confere_geracao`: {rastro}"
+        );
+
+        sessao
+            .recusar_se_morta(0)
+            .expect_err("o zero, que é «a casca não sabe», foi admitido");
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            2,
+            "o comando com geração zero foi recusado sem ser contado"
+        );
+
+        sessao
+            .recusar_se_morta(3)
+            .expect("um comando da geração de pé foi recusado");
+        assert_eq!(
+            sessao.comandos_de_geracao_morta.load(Ordering::Relaxed),
+            2,
+            "um comando da geração de pé foi contado como de geração morta"
+        );
+    }
+
+    /// **Nenhuma conferência de geração recusa por fora de
+    /// [`super::Session::recusar_se_morta`].**
+    ///
+    /// O arquivo inteiro, menos `impl Session`, e não só os corpos de
+    /// `#[tauri::command]`: a conferência de `ler_codigo_do_mod` mora num
+    /// auxiliar, e um guarda que olhasse só os comandos não a veria. Os fechos
+    /// `&|| session.geracao_vale(geracao)` não são negação, e ficam: quem os
+    /// recebe (`registrar_reserva`, `liberar_reserva`) conta em `mortos`.
+    ///
+    /// E cada função que conferia continua conferindo: tirar a conferência, em
+    /// vez de trocá-la, também deixaria este guarda sem negação nenhuma. A
+    /// lista é a conta inteira — as chamadas de `recusar_se_morta` fora de
+    /// `impl Session` e dos testes têm de ser as dela, uma por uma —, e uma
+    /// conferência nova só passa depois de entrar nela.
+    #[test]
+    fn nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta() {
+        let fonte = super::fonte_sem_comentarios();
+        let (antes, resto) = fonte
+            .split_once("\nimpl Session {\n")
+            .expect("`impl Session` não está mais neste arquivo");
+        let (_, depois) = resto.split_once("\n}\n").expect(
+            "`impl Session` não fecha mais na coluna zero: sem o fim dela, o guarda leria só o \
+             que vem antes, e uma conferência crua depois dela passaria calada",
+        );
+        let fora_da_sessao = [antes, depois].concat();
+        let sem_espaco =
+            |texto: &str| -> String { texto.chars().filter(|c| !c.is_whitespace()).collect() };
+        let fora = sem_espaco(&fora_da_sessao);
+        // Montado, e não escrito: escrito, o padrão acharia este teste.
+        let chamada = format!(".{}(", "geracao_vale");
+        let cruas: Vec<String> = fora
+            .match_indices(&chamada)
+            .filter_map(|(posicao, _)| {
+                let receptor = fora
+                    .get(..posicao)?
+                    .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
+                receptor.ends_with('!').then(|| {
+                    let inicio = receptor.len().saturating_sub(48);
+                    fora.get(inicio..posicao + chamada.len())
+                        .unwrap_or_default()
+                        .to_owned()
+                })
+            })
+            .collect();
+        assert!(
+            cruas.is_empty(),
+            "{} conferência(s) de geração recusam com um `if` próprio, e não por \
+             `recusar_se_morta`: o comando de uma geração morta volta à janela sem ser contado \
+             em `comandos_de_geracao_morta`, e o zero dele mente — {cruas:#?}",
+            cruas.len()
+        );
+
+        // Montado também.
+        let regra = format!(".{}(", "recusar_se_morta");
+        let mut na_lista = 0;
+        for (funcao, minimas) in [
+            ("fn mod_nativo_colher(", 1),
+            ("fn mod_nativo_entregar(", 1),
+            ("fn ler_codigo_do_mod(", 1),
+            ("fn reservar_no_executor(", 1),
+            ("fn midia_do_mod(", 1),
+            ("fn som_do_mod(", 1),
+            ("fn midia_em_bytes(", 1),
+            ("async fn enviar_imagem_mod(", 2),
+            ("async fn ler_imagem_mod(", 2),
+            ("async fn escolher_para_o_mod(", 2),
+            ("fn pedaco_do_escolhido(", 1),
+        ] {
+            let feitas = sem_espaco(super::corpo_de(&fonte, funcao))
+                .matches(&regra)
+                .count();
+            na_lista += feitas;
+            assert!(
+                feitas >= minimas,
+                "`{funcao}` confere a geração {feitas} vez(es) por `recusar_se_morta`, e \
+                 conferia {minimas}: um comando de uma geração morta passa a ser admitido"
+            );
+        }
+        let na_producao = sem_espaco(&sem_itens_de_teste(&fora_da_sessao))
+            .matches(&regra)
+            .count();
+        assert_eq!(
+            na_producao, na_lista,
+            "há {na_producao} chamada(s) de `recusar_se_morta` fora de `impl Session` e dos \
+             testes, e as funções da lista deste guarda somam {na_lista}: uma conferência ficou \
+             fora da lista, e apagá-la não reprovaria nada"
+        );
+    }
+
+    /// O fonte sem os itens `#[cfg(test)]` do topo do arquivo, para que a
+    /// conta de [`nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta`]
+    /// seja a do produto, e não a dos testes que chamam `recusar_se_morta`.
+    ///
+    /// Um item vai até a chave que fecha na coluna zero, ou até a linha na
+    /// coluna zero que termina em `;` (a `const` do fonte). Errar o fim só
+    /// pode deixar teste na conta, e a igualdade reprova: o corte falha
+    /// fechado.
+    fn sem_itens_de_teste(fonte: &str) -> String {
+        let mut producao = Vec::new();
+        let mut linhas = fonte.lines();
+        while let Some(linha) = linhas.next() {
+            if linha != "#[cfg(test)]" {
+                producao.push(linha);
+                continue;
+            }
+            for linha in linhas.by_ref() {
+                let de_uma_linha =
+                    linha.ends_with(';') && !linha.starts_with(' ') && !linha.starts_with('#');
+                if de_uma_linha || linha == "}" {
+                    break;
+                }
+            }
+        }
+        producao.join("\n")
     }
 
     /// **A corrida entre registrar uma reserva e revogar a geração.**
@@ -13141,9 +13460,13 @@ mod o_teto_de_vazao_do_registro {
     /// compila, deixa os testes acima verdes e tira o teto: cada chamada
     /// ganharia um balde cheio. Aqui, toda chamada de porta nos cinco comandos
     /// tem de levar `&session.baldes_do_registro` no primeiro argumento.
+    ///
+    /// Em `ler_imagem_mod` as duas são a conexão ausente
+    /// (`recusa_de_midia_dita`) e `imagem_lida_dita`, que leva as duas recusas
+    /// de depois do `await`.
     #[test]
     fn os_comandos_passam_os_baldes_da_sessao() {
-        const PORTAS: [&str; 8] = [
+        const PORTAS: [&str; 9] = [
             "registrar_da_janela_em(",
             "midia_declarada_do_mod(",
             "midia_servida_dita(",
@@ -13152,6 +13475,7 @@ mod o_teto_de_vazao_do_registro {
             "midia_do_servidor_dita(",
             "midia_vinda_do_servidor_dita(",
             "recusa_de_midia_dita(",
+            "imagem_lida_dita(",
         ];
         let fonte = super::fonte_sem_comentarios();
         for (comando, chamadas_minimas) in [
@@ -13739,8 +14063,8 @@ mod pacote_de_teste {
 #[cfg(test)]
 mod a_midia_recusada_e_dita_no_registro {
     use super::{
-        midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita, motivo_de,
-        recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
+        imagem_lida_dita, midia_declarada_do_mod, midia_do_servidor_dita, midia_servida_dita,
+        motivo_de, recusa_de_midia_dita, registrar_da_janela_em, BaldesDoRegistro, FalhaNoMod,
         TETO_DA_FRASE_NO_REGISTRO, TETO_DO_ID_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO};
@@ -13973,21 +14297,26 @@ mod a_midia_recusada_e_dita_no_registro {
 
     /// Uma recusa de imagem por volume, com o motivo que o servidor mandou.
     ///
-    /// É o caminho de `ler_imagem_mod`: o `Err` da conexão é o texto do par
-    /// remoto (o `erro` da `RespostaDeImagem`, a razão com que a conexão
-    /// fechou, o prazo esgotado), e vai à recusa como veio.
+    /// É o caminho de `ler_imagem_mod`, pela mesma função que o comando chama
+    /// ([`imagem_lida_dita`]): o `Err` da conexão é o texto do par remoto (o
+    /// `erro` da `RespostaDeImagem`, a razão com que a conexão fechou, o prazo
+    /// esgotado), e vai à recusa como veio. Chamar `recusa_de_midia_dita`
+    /// direto aqui mediria uma cópia do caminho, e os testes que passam por
+    /// este ajudante ficariam verdes com o comando calado.
     fn recusa_do_servidor(motivo: &str) -> (FalhaNoMod, String) {
-        capturar(|| {
-            recusa_de_midia_dita(
+        let (lida, rastro) = capturar(|| {
+            imagem_lida_dita(
                 &BaldesDoRegistro::default(),
                 origem(),
                 ID,
-                "volume",
-                FalhaNoMod::Recusado {
-                    motivo: motivo.to_owned(),
-                },
+                Err(motivo.to_owned()),
             )
-        })
+        });
+        (
+            lida.err()
+                .expect("a recusa do servidor virou imagem, e não há recusa a medir"),
+            rastro,
+        )
     }
 
     #[test]
@@ -14042,6 +14371,102 @@ mod a_midia_recusada_e_dita_no_registro {
         traz(
             linha,
             &["WARN", "mod_id=prova/midia", &format!("motivo=\"{prazo}\"")],
+        );
+    }
+
+    /// **A imagem que o servidor recusou é dita**, com o id e o texto dele.
+    ///
+    /// É a primeira das duas recusas de `ler_imagem_mod` depois do `await`, e
+    /// a que vem com o que o servidor mandou — o prazo esgotado, o `erro` da
+    /// resposta, a razão com que a conexão fechou.
+    #[test]
+    fn a_imagem_recusada_pelo_servidor_sai_como_warn_com_o_id_e_o_motivo() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                Err("Prazo esgotado".to_owned()),
+            )
+        });
+        let falha = resultado.err().expect("a recusa do servidor virou imagem");
+        assert_eq!(
+            motivo_de(&falha),
+            "Prazo esgotado",
+            "a recusa do servidor voltou à janela mexida, e a janela deixa de dizer o que ele \
+             disse"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!(
+                "a imagem que o servidor recusou não chegou ao registro: o MOD fica sem imagem \
+                 e o seele.log sem uma palavra — {rastro}"
+            )
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "motivo=\"Prazo esgotado\"",
+                "origem=\"volume\"",
+            ],
+        );
+    }
+
+    /// **A imagem lida que não é mídia é dita**, pelo nome da recusa.
+    ///
+    /// A segunda recusa de `ler_imagem_mod` depois do `await`: o servidor
+    /// entregou, e os bytes não são de um formato que este produto decodifica.
+    #[test]
+    fn a_imagem_lida_que_nao_e_midia_sai_como_warn_com_o_motivo() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                Ok(TEXTO.to_vec()),
+            )
+        });
+        let falha = resultado.err().expect("texto lido por volume virou imagem");
+        assert_eq!(
+            motivo_de(&falha),
+            "formato-desconhecido",
+            "texto lido por volume foi recusado por outro motivo, e o autor procuraria no lugar \
+             errado"
+        );
+        let linha = recusa(&rastro).unwrap_or_else(|| {
+            panic!(
+                "a imagem lida que não é mídia não chegou ao registro: o MOD fica sem imagem e \
+                 o seele.log sem uma palavra — {rastro}"
+            )
+        });
+        traz(
+            linha,
+            &[
+                "WARN",
+                "mod_id=prova/midia",
+                "motivo=formato-desconhecido",
+                "origem=\"volume\"",
+            ],
+        );
+    }
+
+    /// **A imagem lida que é mídia passa sem linha**: uma recusa só é dita
+    /// quando há recusa.
+    #[test]
+    fn a_imagem_lida_aceita_nao_escreve_linha() {
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(PNG.to_vec()))
+        });
+        let midia = resultado.expect("um PNG lido por volume foi recusado");
+        assert_eq!(
+            midia.papel, "imagem",
+            "um PNG lido por volume saiu com outro papel"
+        );
+        assert!(
+            rastro.is_empty(),
+            "uma imagem lida e aceita escreveu no registro, e ele ensinaria a ignorar as \
+             recusas: {rastro}"
         );
     }
 
@@ -14267,6 +14692,11 @@ mod a_midia_recusada_e_dita_no_registro {
     /// teste sem servidor — e um comando que devolvesse a recusa por fora seria
     /// a mídia recusada em silêncio de novo, com os testes verdes.
     ///
+    /// Em `ler_imagem_mod` a chamada é `imagem_lida_dita`, que leva as duas
+    /// recusas de depois do `await`. Procurar `recusa_de_midia_dita` ali
+    /// passava com uma só delas: a outra saía calada, e o guarda verde. E a
+    /// conexão ausente de `ler_imagem_mod` vai ao registro sem ser contada.
+    ///
     /// O fonte é normalizado para `\n`: num checkout com CRLF o corte em
     /// `"\n}\n"` não acharia o fim da função, e o guarda passaria a ler o
     /// arquivo inteiro — inclusive este teste, que cita as quatro chamadas.
@@ -14280,7 +14710,7 @@ mod a_midia_recusada_e_dita_no_registro {
         for (comando, chamada) in [
             ("fn midia_do_mod(", "midia_declarada_do_mod("),
             ("fn midia_em_bytes(", "midia_do_servidor_dita("),
-            ("async fn ler_imagem_mod(", "recusa_de_midia_dita("),
+            ("async fn ler_imagem_mod(", "imagem_lida_dita("),
             ("fn som_do_mod(", "som_declarado_do_mod("),
         ] {
             let corpo = fonte
@@ -14298,6 +14728,52 @@ mod a_midia_recusada_e_dita_no_registro {
                  chega ao registro"
             );
         }
+
+        // **A conexão ausente de `ler_imagem_mod` é dita, e não contada.** A
+        // geração já foi conferida na entrada: com ela de pé, a conexão que
+        // falta não é comando de uma sessão encerrada. Os outros guardas não
+        // veem a diferença — um `recusar_se_morta` a mais ali sobe a conta da
+        // função e a do arquivo juntas.
+        let ler: String = fonte
+            .split("async fn ler_imagem_mod(")
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .expect("`async fn ler_imagem_mod(` sumiu de main.rs")
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .flat_map(str::chars)
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        let conexao = ler
+            .split_once("session.connection()")
+            .and_then(|(_, depois)| depois.split_once(")?;"))
+            .map(|(conexao, _)| conexao)
+            .expect(
+                "a conexão de `ler_imagem_mod` não sai mais por `session.connection()…?;`, e \
+                 este guarda já não acha a recusa dela",
+            );
+        for contar in [
+            "comandos_de_geracao_morta",
+            "confere_geracao(",
+            "recusar_se_morta(",
+        ] {
+            assert!(
+                !conexao.contains(contar),
+                "a conexão ausente de `ler_imagem_mod` passou por `{contar}`: com a geração de \
+                 pé, ela não é comando de uma sessão encerrada, e o contador diria que a sessão \
+                 anterior falou sem ela ter falado"
+            );
+        }
+        assert!(
+            conexao.contains("recusa_de_midia_dita("),
+            "a conexão ausente de `ler_imagem_mod` voltou à janela sem passar por \
+             `recusa_de_midia_dita`, e não chega ao registro"
+        );
+        assert!(
+            !ler.contains("comandos_de_geracao_morta"),
+            "`ler_imagem_mod` mexe em `comandos_de_geracao_morta` por fora de \
+             `recusar_se_morta`: uma conta à mão volta a conviver com a regra"
+        );
     }
 }
 

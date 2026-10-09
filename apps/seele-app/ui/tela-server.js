@@ -748,7 +748,21 @@ async function abrirServer(origem) {
   // escolheu da última vez, e reabrir a tela não é tentar de novo.
   $("server-servidor-erro").hidden = true;
   $("server-voltar-texto").textContent = VOLTA[origem] ?? "VOLTAR";
-  desenharContextoDaSessao();
+  // **A faixa de contexto certa no primeiro quadro.** A tela já está visível
+  // (`hidden = false` acima), e o primeiro `await` desta função entrega o
+  // quadro ao navegador. `atualizarServer` escreve a faixa antes do primeiro
+  // `await` dele; chamado aqui, antes de qualquer espera, ele a escreve na mesma
+  // tarefa que mostra a tela. A rodada 2 só o chamava depois da lista de
+  // aparelhos, e os primeiros quadros diziam a faixa da abertura anterior —
+  // «segura ESPAÇO» com o microfone já mudo, ou a sala de uma sessão que acabou.
+  //
+  // Sem `await`, e o `atualizarServer` de depois da lista continua: a lista
+  // nasce marcada sem retrato (`marcarLinhas(null)`), e é a segunda leitura que
+  // põe EM USO nela. Esperar esta primeira antes da lista deixaria o EM USO
+  // apagado até o próximo ciclo de 500 ms. Esconder a faixa ao fechar também
+  // tiraria o texto velho, mas seria um segundo escritor, e a tela abriria sem
+  // faixa em vez de com a certa.
+  atualizarServer().catch((falha) => console.warn("configuração:", falha));
   await desenharDispositivos();
   await atualizarServer();
   // A seção lembrada precisa reler a sessão: ela pode ter aberto antes de hospedar.
@@ -847,8 +861,18 @@ function desenharContextoDaSessao() {
   // ainda dizia «microfone aberto» com o modo em TECLA, porque esta linha só
   // olhava `muted`. São três coisas — o aparelho, como ele abre, e se está
   // indo ao ar —, e «aberto» sem ressalva só é verdade no terceiro modo.
+  //
+  // **E a tecla pelo nome.** «abre na tecla» dizia que há uma e não qual, e a
+  // tecla de falar se troca logo ao lado, em ATALHOS. `teclaDeFalar` é a que o
+  // `keydown` compara (`tela-sessao.js`).
+  //
+  // Ler a mesma variável não basta para concordar: esta faixa não é redesenhada
+  // a cada quadro da sessão, como a do operador. Ela fica certa porque
+  // `atualizarServer` a redesenha ao abrir e a cada 500 ms, e é o único que a
+  // desenha. Escrita só ao abrir, ela dizia ESPAÇO ao lado do botão que já dizia
+  // F, e o modo de antes depois de uma troca de modo (revisões do lote J).
   const comoAbre = {
-    PushToTalk: "microfone abre na tecla",
+    PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
     Open: "microfone aberto",
   }[retrato.voice_mode] ?? "microfone aberto";
@@ -933,6 +957,17 @@ function abandonarServer() {
  * entrada — não é aviso de nada.
  */
 async function atualizarServer() {
+  // **A faixa de contexto, por aqui e só por aqui.** Ela era escrita ao abrir a
+  // tela e mais nunca: trocada a tecla de falar ou o modo do microfone com a
+  // configuração aberta, ela continuava dizendo o de antes (revisões do lote J).
+  // Daqui ela anda junto com o resto desta tela, a cada 500 ms.
+  //
+  // **Antes do primeiro `await`**, e é isso que a deixa certa no primeiro
+  // quadro: ela lê o quadro da sessão e a tecla, e não o retrato que esta
+  // função vai buscar, então não tem por que esperar a ponte. Escrita depois
+  // dela, a configuração aparecia com a faixa da abertura anterior até a
+  // resposta chegar (rodada 3 do lote J).
+  desenharContextoDaSessao();
   let snapshot = null;
   try {
     snapshot = await invoke("snapshot");
@@ -1542,39 +1577,11 @@ setInterval(() => {
   if (!$("tela-server").hidden) atualizarServer();
 }, 500);
 
-/**
- * O nome que uma pessoa lê para o código que o navegador dá.
+/* `nomeDaTecla` desceu para `base.js`.
  *
- * **Este é o único lugar do produto que nomeia teclas**, e é de propósito: o
- * `preferences.rs` diz, por escrito, que o valor atravessa opaco por lá porque
- * «quem lê teclado é a casca, e é o único lugar que pode nomeá-las».
- *
- * O que não estiver na tabela sai como o próprio código. Um nome feio é melhor
- * que um nome errado, e melhor ainda que uma tecla que a lista não sabe
- * mostrar.
- */
-function nomeDaTecla(codigo) {
-  const nomes = {
-    Space: "ESPAÇO",
-    Enter: "ENTER",
-    Tab: "TAB",
-    Backquote: "`",
-    ShiftLeft: "SHIFT ESQ",
-    ShiftRight: "SHIFT DIR",
-    ControlLeft: "CTRL ESQ",
-    ControlRight: "CTRL DIR",
-    AltLeft: "ALT ESQ",
-    AltRight: "ALT DIR",
-    CapsLock: "CAPS",
-  };
-  if (nomes[codigo]) return nomes[codigo];
-  // `KeyF` vira `F`, `Digit4` vira `4`, `F9` fica `F9`.
-  const letra = /^Key([A-Z])$/.exec(codigo);
-  if (letra) return letra[1];
-  const numero = /^Digit([0-9])$/.exec(codigo);
-  if (numero) return numero[1];
-  return codigo;
-}
+ * Esta lista era a única a nomear teclas, e deixou de ser: a linha de estado do
+ * operador e a ajuda dizem a tecla de falar pelo nome. `base.js` carrega antes
+ * das duas telas, e esta carrega depois de `tela-sessao.js`. */
 
 /** Se o botão está esperando a próxima tecla. */
 let ouvindoTecla = false;
@@ -1599,6 +1606,9 @@ function pararDeOuvirTecla() {
   ouvindoTecla = false;
   const botao = $("server-tecla-falar");
   if (botao) delete botao.dataset.ouvindo;
+  // A faixa de contexto do cabeçalho também diz a tecla («segura ESPAÇO»), e
+  // quem a redesenha com a tecla nova é `atualizarServer`, no próximo meio
+  // segundo — o mesmo caminho do modo do microfone.
   recarregarTeclaDeFalar().then(desenharTeclaDeFalar);
   conferirMicrofone().catch((falha) => console.warn("microfone:", falha));
 }

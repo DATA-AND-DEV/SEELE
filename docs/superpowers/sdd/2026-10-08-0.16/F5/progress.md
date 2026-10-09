@@ -174,3 +174,67 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - conformidade verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos` e `mod_de_referencia`;
     - o `quarto_pelo_link` ficou de fora, por causa da porta 8384.
   - **Ficam para a orquestradora decidir:** onde mora o conserto dos testes que falam com o ponto de encontro de produção, no G-servidor da onda 3 ou numa pendência nova.
+- **A orquestradora recebeu a onda 2 e decidiu o achado do ponto de encontro:** os testes não podem falar com a VPS. O conserto entra na onda 3 como passo 0 do G-servidor (`2046cd8`), por três motivos:
+  - os dois mexem em `hospedagem.rs`;
+  - lotes da mesma onda não dividem arquivo;
+  - o teste novo do G-servidor também sobe uma hospedagem.
+  
+  O passo leva um guarda que reprova o teste que resolver o ponto padrão de produção, com prova por reversão.
+- **A integração da onda 2.** A orquestradora a integrou na `versao/0.16` (`dc001a0a`), junto com a F1, a F3, a F4, a F6 e a F7, e a bateria passou com 3005 testes.
+- **O merge de volta.** O `git merge versao/0.16` no `0.16/lotes` deu `628c7fd`.
+- **O ajuste do plano.** O plano ganhou, no G-servidor, o que a F7 deixou (`3b0b6a7`): o `antes_de_aceitar` obrigatório e as 17 chamadas de `Hospedagem::iniciar`.
+- **A onda 3 foi despachada:** E · J · G-servidor, este com o passo 0 do ponto de produção.
+- **E → integrado** (`3b0b6a7..3fd6c94`), aprovado na primeira revisão, com um fecho curto. P51-09 em `bece2bd` e P51-11 em `9abe067`.
+  - **O fecho cuidou de três pontos:**
+    - os guardas passaram a medir o caminho real de `ler_imagem_mod`;
+    - a conta de `recusar_se_morta` fora dos testes tem de bater com a lista do guarda;
+    - a conexão ausente não pode contar.
+  - **Além disso,** a ativação recusada por geração morta passou a ser dita, além de contada.
+  - **Ficam como nota:**
+    - o guarda não vê `if … else` nem `match`;
+    - a linha DEBUG de `confere_geracao` não diz o comando;
+    - a segunda conferência de `enviar_imagem_mod` vem depois do upload.
+- **G-servidor → integrado** (`3b0b6a7..697df16`). Os commits por item:
+  - o passo 0, os testes sem o ponto de produção: `2807cff`;
+  - o cliente, que trata `ServerShuttingDown` como fim: `586c23d`;
+  - o servidor que avisa (`ServidorEncerrando`, `encerrar_avisando`, o SAIR e o `despedir`): `271360d`.
+  - **A decisão da orquestradora (d), em `8a4bd61`.** Sem `$SEELE_ENCONTRO`, não há ponto de encontro. A produção pede o padrão por `iniciar_com_o_ponto_padrao`, e o `hospedar` do app é o único chamador. O `seeled` não sobe a escada.
+  - **Os guardas:**
+    - `recusar_a_producao` é a segunda parede;
+    - um `compile_error!` impede que a feature de teste entre no release;
+    - o guarda do app olha o `main.rs` inteiro, para pegar os pontos de entrada novos da sala pessoal e do G-casca.
+  - **Medido:** o release do app e do `seeled` sai com `features=[]`.
+  - **Notas para depois:**
+    - a janela do aviso aceita conexão nova (o Plano 3);
+    - o custo da trava sem UPnP precisa ser medido na CI;
+    - o guarda só olha o texto.
+- **J → integrado** (`3b0b6a7..d6fde8d`, merge `3ac4eee`), em 4 rodadas. O item F1-tecla-fone-nome fecha nas três partes:
+  - **a tecla de falar dita pelo nome:** `307b18e`;
+  - **o aviso de fone dito uma vez por execução:** `092e6a5`, e `08ddec6` impede que ele atravesse sessões;
+  - **o nome pedido antes do primeiro `connect`:** `acbc1c2`, e `80255f6` faz a entrada por link esperar a página inteira.
+  - **As rodadas de conserto:**
+    - a 1ª tratou a faixa de contexto que dizia a tecla antiga, o título que se sobrepunha e a abertura por link, que dependia da ordem de carga;
+    - a 2ª pôs a faixa num caminho só, deu guarda ao `line-height` do título e fez a `ajustes-v013.cjs` medir os três;
+    - a 3ª acertou a faixa no primeiro quadro, deu frase às duas asserções, fechou as duas brechas do guarda e forçou a quebra do título em qualquer plataforma, porque o CI roda em ubuntu.
+  - **Ficam para o Z:**
+    - a frase do guarda de ordem para um `await atualizarServer()` antecipado culpa a faixa, quando o motivo real é o EM USO apagado;
+    - o `without_comments` conta um `// nome` depois de uma string na mesma linha. É falso positivo, do lado seguro;
+    - a bancada cobre só a cena de reabrir com o microfone mudo.
+- **Um guarda que o lote E deixou vermelho, consertado na integração** (`9daa0c0`).
+  - **O que aconteceu:** o E trocou o `if` de `ler_codigo_do_mod` e o `confere_geracao` da reserva por `recusar_se_morta`. Mas `o_rust_recusa_comando_de_geracao_morta_e_conta`, em `tests/frontend.rs`, ainda pedia as marcas antigas, e o lote não rodou `--test frontend`. O comportamento não mudou.
+  - **O conserto:** o guarda pede `recusar_se_morta` e exige que ela passe por `confere_geracao`, que conta. As marcas são lidas sem comentário.
+  - **A prova:** quatro reversões, todas vermelhas.
+  - **A regra nova:** quem mexe no `main.rs` do app roda `--test frontend` (`c86775a`).
+- **Onda 3 fechada.** Os três lotes estão em `0.16/lotes`, no `3ac4eee`.
+  - **O que o branch combinado mostrou**, com o `target/` deste worktree:
+    - fmt e `clippy --workspace --all-targets --all-features -D warnings` limpos;
+    - `seele-app`: todos os binários verdes (267, 268 e os menores);
+    - `seele-core --lib` 438;
+    - `seele-ffi --lib` 124, mais 1 ignorado;
+    - `seele-proto` 337 com os doctests;
+    - `xtask` verde;
+    - `seele-server` **inteiro**, 582 na lib e os 11 alvos de `tests/`. Agora que eles não falam mais com o ponto de produção, entram todos;
+    - `check-runtime` verde;
+    - a bancada `ajustes-v013.cjs` verde.
+  - **A conformidade** ficou verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar` e `quem_hospeda_fecha`. O `quarto_pelo_link` ficou de fora, por causa da porta 8384.
+  - **A ordem das verificações:** a conformidade e o servidor rodaram sobre `a495fe2`, antes do J. Depois do merge do J, rodaram de novo o app, o fmt, o clippy, o `check-runtime` e a bancada. O J mexe só em `ui/`, `bancada/` e `tests/frontend.rs`.
