@@ -7716,7 +7716,7 @@ teto por MOD; o 10 perdeu o objeto. **Continuam abertos:** o item 4, que vale
 para toda publicação enquanto o `ci.yml` só rodar por `workflow_dispatch`; o
 teto por MOD do 7c; e o macOS 11.0 a 11.2, não medido.
 
-## 50 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
+## 50 · Consertada em 2026-10-08 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
 
 **Aberta em 2026-10-01**, na revisão final do Plano 1 da 1.0 (o I6). **Não é
 regressão:** a v0.15.0 publicada sai pelo mesmo caminho (`git show
@@ -7778,6 +7778,63 @@ até a pessoa sumir da lista. Perto de 20 s.
 
 **Quando fecha.** Com o conserto e o teste de 2 s, ou com a medida da sessão
 separada achando outra causa, escrita aqui.
+
+### O conserto, na F5 da 0.16
+
+O plano da F5 dividiu a pendência em quatro itens
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lotes F e G-servidor).
+Os três primeiros são do lote F, integrado em `198b03d9`.
+
+- **P50-1 · O `Enlace::sair` espera a despedida. Fechado em 2026-10-08,
+  `dde763b5`.** `sair` manda o `Sair` e espera a tarefa do motor, com teto de
+  1 s. O motor larga as tarefas de par, encerra e espera o `wait_idle()` até
+  300 ms (`ESPERA_DA_DESPEDIDA`). É o conserto proposto acima.
+- **P50-2 · A casca espera a thread da conexão. Fechado em 2026-10-08,
+  `fd10af6b`.** A thread da conexão avisa antes de o runtime cair, e
+  `Connection::encerrar_e_esperar(teto)` (`seele-ffi`) espera esse aviso no
+  lugar do `sleep` cego de 150 ms. Na revisão, a prova deixou de depender de
+  corrida (`8a38df53`), e o guarda de `apps/seele-app/tests/encerramento.rs`
+  deixou de casar com comentário (`72b57732`, `aa9e7f4c` e `c429302c`).
+- **P50-3 · A saída para os MODs e diz isso no `seele.log`. Fechado em
+  2026-10-08, `b7aeb749`.** É «o vizinho, do Plano 1C», acima. `despedir_se`
+  passa por `despedir_da_sessao`: revoga a sessão, e com isso diz a conta dos
+  baldes do registro; manda parar os MODs nativos da geração que fechou; espera
+  até 200 ms por eles sem segurar o cadeado; e encerra a conexão em até
+  500 ms. A parada de um MOD nativo sobe para INFO. O doc de `despedir_se`
+  passou a dizer o que acontece de verdade, com os cerca de 700 ms de teto na
+  thread principal. Na revisão, a conta e a espera ficaram só com a geração
+  revogada (`6a0d5bed`).
+- **P50-4 · Fechar o app hospedando.** A **metade servidor** fechou em
+  2026-10-08, no lote G-servidor (integrado em `0cad324b`). `271360dd` dá o
+  `Event::ServidorEncerrando`, o `Daemon::encerrar_avisando`, o SAIR de quem
+  hospeda avisando cada sessão e a `Hospedagem::despedir`. `586c23de` faz o
+  cliente tratar `ServerShuttingDown` como fim. **A metade casca vai com o
+  Plano 2** (o G-casca): a saída do app chamar a `Hospedagem::despedir`. Até
+  lá, fechar o app hospedando continua sem aviso, porque o `Drop` de
+  `Hospedagem` só faz o `shutdown()` cru.
+
+**A medida.** A sonda `medida_do_disconnect.rs`, que o plano antigo citava,
+nunca foi commitada e não está em lugar nenhum. A medida é o teste novo,
+`crates/seele-conformance/tests/saida_com_despedida.rs`, que lê a lista de
+presentes de quem ficou, no laço local deste Mac:
+- quem sai pela FFI, `disconnect` e `drop`, sumiu dos presentes em 554 µs na
+  primeira rodada;
+- o `Enlace` que sai num runtime que cai na linha seguinte, em 1,1 ms;
+- no fim do lote, seis rodadas seguidas deram entre 340 e 700 µs;
+- o filho que sai por `encerrar_e_esperar` e morre na linha seguinte, em
+  611 µs, e entre 445 e 720 µs em seis rodadas.
+
+Antes eram 19,98 s e 20,98 s. Com cada espera revertida, os três voltam aos
+20,0 s do prazo de ociosidade (lote F, «Reversões»).
+
+**O que fica sem prova, e o doc diz** (lote F, rodada 1 de conserto,
+`b9adf2f8`): o `wait_idle` como reenvio de um `CONNECTION_CLOSE` perdido, que
+um laço local que não perde pacote não exercita; e a espera pelas alças
+abortadas de `largar_tudo_e_esperar`.
+
+**Em 09/10/2026.** Fechada pelo P50-1, o P50-2 e o P50-3, com o teste que
+mede. A metade casca do P50-4 é dívida do Plano 2, e a conferência à mão do
+fechar hospedando, no Mac e no Windows, vai com ela.
 
 ## 51 · O que o Plano 1 da 1.0 deixou para depois, fora das pendências 49 e 50
 
