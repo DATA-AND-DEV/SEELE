@@ -6493,6 +6493,9 @@ mod cabecalho_de_som {
     /// O tamanho que o `data` declara é limitado aos bytes que estão no
     /// arquivo: um WAV gravado aos poucos leva ali `0xFFFFFFFF`, e um cortado,
     /// mais do que tem.
+    ///
+    /// **Um segundo `fmt ` dá `None`.** O Chromium decodifica pelo primeiro, e
+    /// qual deles vale é pergunta de motor: um piso não escolhe.
     pub(super) fn wav(bytes: &[u8]) -> Option<Piso> {
         let mut resto = bytes.get(12..)?;
         let mut formato = None;
@@ -6510,6 +6513,9 @@ mod cabecalho_de_som {
                 });
             }
             if id == b"fmt " {
+                if formato.is_some() {
+                    return None;
+                }
                 formato = Some(fmt(corpo.get(..tamanho)?)?);
             }
             // Um pedaço de tamanho ímpar leva um byte de alinhamento.
@@ -16252,6 +16258,32 @@ mod o_som_grande_demais_decodificado_e_recusado_antes {
             Some(segundos(1, 2)),
             "o piso do WAV contou os quadros pelo bloco que o cabeçalho declara, menor que a \
              amostra: quatro vezes o real, e um som que cabe seria recusado"
+        );
+    }
+
+    /// **Um segundo `fmt ` deixa o WAV sem piso.** O Chromium decodifica pelo
+    /// primeiro, e o piso que lesse o último recusaria pelo formato que o
+    /// motor não usa: a revisão mediu 127 MB de piso contra 11,5 MB reais. Qual
+    /// dos dois vale é pergunta de motor, e um piso não escolhe.
+    #[test]
+    fn um_segundo_fmt_deixa_o_wav_sem_piso() {
+        let primeiro = wav(2, 48_000, 16, 48_000 * 4);
+        let segundo = wav(1, 8_000, 8, 0);
+        let mut dois = [
+            primeiro.get(..36).expect("o cabeçalho e o primeiro `fmt `"),
+            segundo.get(12..36).expect("o segundo `fmt `"),
+            primeiro.get(36..).expect("o `data`"),
+        ]
+        .concat();
+        let riff = u32::try_from(dois.len() - 8).expect("o WAV de teste cabe em 32 bits");
+        if let Some(tamanho) = dois.get_mut(4..8) {
+            tamanho.copy_from_slice(&riff.to_le_bytes());
+        }
+        assert_eq!(
+            bytes_decodificados_minimos(&dois),
+            None,
+            "um WAV com dois `fmt ` ganhou um piso por um deles, e o motor pode decodificar pelo \
+             outro: a revisão mediu a recusa de um som que cabia"
         );
     }
 
