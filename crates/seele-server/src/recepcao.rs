@@ -445,15 +445,11 @@ mod tests {
             .with_ansi(false)
             .finish();
         let (recepcao, _) = recepcao();
-        // **Um segundo assinante vivo, e por quê.** No `tracing-core` 0.1.36,
-        // com um assinante só registrado (`has_just_one`), quem decide se uma
-        // linha de log interessa é o assinante da linha de execução que a
-        // registra primeiro. Os outros testes deste módulo passam pelas mesmas
-        // linhas ao mesmo tempo, sem assinante, e a linha ficava «ninguém quer»
-        // para todos, inclusive para este teste. Medido: 3 em 3 rodadas do
-        // módulo perderam uma linha ou as duas, e com o `rebuild_interest_cache`
-        // foram 10 em 10. Com dois registrados, o `tracing` pergunta a todos e
-        // decide evento a evento, pelo assinante de cada linha de execução.
+        // Um segundo assinante vivo: com um só registrado, o `tracing-core`
+        // 0.1.36 deixa a thread que passa primeiro por uma linha decidir por
+        // todas, e os testes vizinhos sem captura apagavam esta. O mesmo
+        // conserto do `segundo_despachante` do app (`1405210b`). Medido aqui:
+        // 3/3 rodadas vermelhas sem ele, 20/20 verdes com ele.
         let _segundo = tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
         tracing::subscriber::with_default(assinante, || {
             let (toque, _decisao) = toca(recepcao.chegou(chave(2), "rafa"));
