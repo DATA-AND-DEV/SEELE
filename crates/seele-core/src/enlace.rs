@@ -2486,6 +2486,13 @@ impl TarefasDePar {
     /// A alça de uma tarefa abortada volta quando a tarefa foi solta de fato. O
     /// teto é para a que não volta, e ela fica como ficava antes: abortada e
     /// largada, agora com uma linha no registro.
+    ///
+    /// **A espera é plausível, e não provada.** Medido no lote F: com
+    /// [`Self::largar_tudo`] no lugar desta — o `abort` sem esperar —,
+    /// `a_despedida_cala_as_tarefas_de_par_antes_do_encerrado` passou 5 de 5 e
+    /// `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para` 3 de 3. A
+    /// corrida que ela cobre é de microssegundos, e nenhum teste a provoca. O
+    /// que os dois testes provam é o cancelamento antes do aviso.
     async fn largar_tudo_e_esperar(&mut self, teto: Duration) {
         let alcas: Vec<tokio::task::JoinHandle<()>> = self
             .caminhos
@@ -2580,16 +2587,27 @@ const FAIXA_INICIAL: SignalBand = SignalBand::Nominal;
 /// nem o ping nem uma tentativa de reconexão fiquem esperando a tica seguinte.
 const TICA: Duration = Duration::from_millis(200);
 
-/// Quanto a despedida espera a conexão fechada escoar, depois de fechá-la.
+/// Quanto a despedida mantém o runtime e a ponta vivos depois de fechar a
+/// conexão (o `wait_idle` de [`Motor::despedir`]).
 ///
-/// O `CONNECTION_CLOSE` sai na **primeira volta do driver** da conexão depois
-/// de `Client::disconnect`: é isso que a espera compra, e no laço local ou numa
-/// LAN o escoamento inteiro cabe nela. Ela só limita o escoamento (3×PTO), em
-/// que a conexão fechada responde a pacote atrasado; numa rede longe ele passa
-/// disto, e o teto o corta com o fechamento já do lado de fora.
+/// **O que ela não compra: a saída do `CONNECTION_CLOSE`.** Ele sai na
+/// primeira volta do driver da conexão depois de `Client::disconnect`, e essa
+/// volta acontece antes de [`Enlace::sair`] voltar, com ou sem esta espera.
+/// Medido no lote F: sem o `wait_idle`, os três testes de
+/// `saida_com_despedida.rs` continuam verdes, com quem saiu sumindo dos
+/// presentes em menos de um milissegundo.
 ///
-/// Trezentos milissegundos, e o custo é de quem sai: a thread da conexão fica
-/// presa até aqui antes de cair.
+/// **O que ela compra: o período de fechamento do QUIC.** O
+/// `CONNECTION_CLOSE` não é retransmitido como dado; quem fecha fica nesse
+/// período e o manda de novo quando chega pacote do outro lado. Sem a espera,
+/// o runtime e a ponta podem cair logo depois do primeiro envio, e um
+/// fechamento perdido deixa o outro lado esperando o prazo de ociosidade, 20 s.
+/// **Nenhum teste prova isto**: o laço local não perde pacote, e a bateria não
+/// tem um caminho com perda.
+///
+/// O teto corta o período (3×PTO) numa rede longe. O custo é de quem sai: até
+/// 300 ms na thread da conexão — e, pela `encerrar_e_esperar` da casca, na
+/// thread principal do `ExitRequested` —, medido em ~86 ms no laço local.
 const ESPERA_DA_DESPEDIDA: Duration = Duration::from_millis(300);
 
 /// Quanto a despedida espera as tarefas do caminho entre pares devolverem,
@@ -4875,31 +4893,38 @@ impl Motor {
         }
     }
 
-    /// A saída pedida: cala o caminho entre pares, fecha a conexão **e espera o
-    /// fechamento sair**, antes de o motor voltar.
+    /// A saída pedida: cala o caminho entre pares, fecha a conexão e fica de
+    /// pé no período de fechamento, antes de o motor voltar.
     ///
-    /// # Por que esperar
+    /// # O que consertou a pendência 50, e o que é daqui
     ///
     /// `Client::disconnect` só põe o `CONNECTION_CLOSE` na fila do `quinn`: quem
     /// o escreve no soquete é o driver da conexão, uma tarefa deste mesmo
-    /// runtime. O motor voltava logo depois de [`Self::encerrar`], e quem o
-    /// esperava derrubava o runtime — a thread da conexão da FFI faz isso na
-    /// linha seguinte — com o fechamento ainda na fila. O servidor só via a
-    /// saída pelo prazo de ociosidade, 20 s, e até lá a pessoa continuava entre
-    /// os presentes de todo mundo. É a pendência 50.
+    /// runtime. [`Enlace::sair`] voltava sem esperar o motor, e quem o chamava
+    /// derrubava o runtime — a thread da conexão da FFI faz isso na linha
+    /// seguinte — com o fechamento ainda na fila: o servidor só via a saída
+    /// pelo prazo de ociosidade, 20 s. **O conserto é `sair` esperar o motor.**
+    /// Com isso, o fechamento sai na primeira volta do driver, mesmo que este
+    /// motor voltasse logo depois de [`Self::encerrar`] (medido no lote F: os
+    /// dois braços de volta a `encerrar`, e os três testes de
+    /// `saida_com_despedida.rs` seguem verdes).
     ///
-    /// # A ordem
+    /// # A ordem, e a prova de cada passo
     ///
     /// 1. A ponta é guardada antes de `encerrar` largar o cliente: é nela que
     ///    se espera.
     /// 2. O caminho entre pares cai, e as tarefas dele devolvem
     ///    ([`TarefasDePar::largar_tudo_e_esperar`]). O `Encerrado` é o último
-    ///    aviso que a casca ouve desta sessão, e o motor fica de pé depois dele
-    ///    esperando o fechamento: um par vivo nesse intervalo escreveria quadro
-    ///    atrás do fim. E a conexão dele, aberta na mesma ponta, seguraria o
-    ///    `wait_idle` até o teto.
-    /// 3. `encerrar` fecha a conexão e diz o fim à casca.
-    /// 4. O `wait_idle`, até [`ESPERA_DA_DESPEDIDA`].
+    ///    aviso que a casca ouve desta sessão, e o motor fica de pé depois dele,
+    ///    no passo 4: um par vivo nesse intervalo escreveria quadro atrás do
+    ///    fim. **O cancelamento é provado**: sem ele,
+    ///    `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para` recebe
+    ///    quadro depois do `Encerrado` — é a janela do passo 4 que deixa o
+    ///    quadro a caminho. A espera pelas alças não é (ver a função).
+    /// 3. `encerrar` fecha a conexão e diz o fim à casca, como antes.
+    /// 4. O `wait_idle`, até [`ESPERA_DA_DESPEDIDA`]: o período de fechamento
+    ///    do QUIC, para reenviar o `CONNECTION_CLOSE` se o primeiro se perder.
+    ///    **Sem prova**: o laço local não perde pacote — ver a constante.
     async fn despedir(&mut self) {
         let ponta = self.cliente.as_ref().map(Client::endpoint);
         self.tarefas_de_par
