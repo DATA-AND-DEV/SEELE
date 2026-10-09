@@ -139,3 +139,37 @@ nenhum. Foram refeitas com `perl -e 'alarm …'` e aí provaram.
 | 15 | tela de disco mínima | feito, com reversão. Fecha também o conserto da `InstalacaoAlterada` (apagar, e o app é baixado de novo no próximo uso) | `0258aea` |
 | 16 | documentos; sai o segundo endereço | feito, com reversão (o guarda do endereço). O exemplo de `docs/assinatura-e-atualizacao.md` já mostrava só o endereço novo, e não precisou mudar | `de11305` |
 | 17 | medida de ponta a ponta (o Windows via orquestradora) | **parte 1 medida**: o pacote publicado da 0.15.1 confere, instala pelo código novo em 152 ms, o executável é `seele-app`, a resolução aponta para `dados/servidor-0.15`, e a guarda custa cerca de 12 ms por abertura (com cache). **A parte 2, com tela, espera o dono**, no Mac e no Windows | |
+
+## Depois das 17 tarefas
+
+**As notas da 0.15.2** (`empacotar/notas/0.15.2.md`, no `linha/0.15`:
+`3f121430`, `4720fe15` e `fe1cd866`).
+- Elas dizem o que a versão é, os dois consertos de segurança, a identidade da
+  máquina e o portátil.
+- Não usam «linha», que no glossário é o nome antigo de canal de texto.
+- A frase da impressão digital depende do passo 4 da parte 2 da tarefa 17, e
+  as notas a marcam com dois `<!-- CONDIÇÃO: … -->`.
+
+**Notas com condição pendente não saem** (`36274663` no `0.16/launcher`,
+`7e444fe8` no `linha/0.15`).
+- O `publicar.sh` recusa o marcador logo depois de `conferir_ferramentas`,
+  antes de qualquer conferência com efeito, e diz cada condição e a linha.
+- Provado com três testes na bancada e seis reversões em cada branch.
+- Rodado numa cópia com as notas reais, ele achou um defeito meu: o comentário
+  do topo não tinha os dois-pontos do marcador e passava calado. Foi corrigido
+  em `fe1cd866`.
+
+**A bateria inteira do `linha/0.15` passou em `fe1cd866`**, rodada pela
+orquestradora: 2725 testes, 0 falhas, com o codec exigido, mais clippy, deny e
+check-deps. Está registrada no `integracao.md` (`4ef902ed`). Se o `linha/0.15`
+mudar, ela roda de novo antes de publicar.
+
+**A terceira integração** levou o `0.16/launcher` até `36274663` para a
+`versao/0.16` (`a2b9f9d0`, verde), e o merge de volta foi um avanço rápido.
+
+**O que falta:**
+- a parte 2 da tarefa 17, com o dono, no Mac e no Windows; ela também libera
+  as notas da 0.15.2;
+- o caminho pela recusa na tarefa 13, que espera o `OutraLinha { numero }` da
+  F1;
+- a publicação da 0.15.2, que espera a sequência de publicação.
