@@ -966,6 +966,10 @@ def chamada(pg: Page) -> list[str]:
     })()""")
     if len(palco["escolha"]) != 3 or "NÃO VER" not in palco["escolha"][-1][0]:
         falhas.append(f"com duas transmissões, a escolha mostra {palco['escolha']}")
+    # Cada botão diz de quem é a tela, pelo nome dos presentes.
+    rotulos = " ".join(texto for texto, _ in palco["escolha"])
+    if "juli" not in rotulos or "vitor" not in rotulos or "—" in rotulos:
+        falhas.append(f"a escolha não diz de quem é cada tela: {rotulos!r}")
     for texto, alto in palco["escolha"]:
         if alto is not None and alto < 44:
             falhas.append(f"«{texto}» na escolha tem {alto} de altura")
