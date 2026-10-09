@@ -15318,11 +15318,16 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
     let obtem = corpo
         .find("obterOConjunto")
         .expect("aceitar tem de obter o conjunto que acabou de autorizar");
-    // `conectar(` e não `conectar()`: desde o lote R da F5 a volta leva a
-    // credencial da tentativa, e a chamada tem argumentos.
-    let entra = corpo
-        .find("conectar(")
-        .expect("aceitar continua entrando no servidor");
+    // `await conectar(`: desde o lote R da F5 a volta leva a credencial da
+    // tentativa, e a chamada tem argumentos. Com o `await` na frente, e não só
+    // `conectar(`, que também casa com `reconectar(` e `desconectar(` (rodada
+    // 1, M5): um aceite que chamasse um dos dois passava por entrar.
+    let Some(entra) = corpo.find("await conectar(") else {
+        panic!(
+            "`aceitarOsMods` não chama mais `await conectar(`: a pessoa aceita os MODs e \
+             fica parada na entrada, sem a volta que entra no servidor:\n{corpo}"
+        );
+    };
     assert!(
         obtem < entra,
         "o aceite entra antes de obter os pacotes: o convidado chega à sessão \
