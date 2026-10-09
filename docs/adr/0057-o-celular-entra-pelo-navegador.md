@@ -765,6 +765,16 @@ dizendo o que se sabia em 07/10.
   - Com ele, no Chromium 151 e no Safari do Mac e do Simulador, nenhuma porta
     abriu e nenhuma canária tocou. Há uma prova por reversão para cada guarda.
 
+- **A volta dos MODs é uma só.** O motor do celular rodava o mesmo prelúdio do
+  desktop, mas não as regras que o `executor.rs` aplica fora dele: o
+  rastreador de rejeições, o balde do `console`, os tetos de temporizador e a
+  frase do teto. A volta saiu do `executor.rs` para o `crates/seele-motor`,
+  sem thread e sem E/S. O desktop a embrulha numa thread, e o celular num
+  Worker. Uma tabela de 13 casos passa igual no nativo e no `.wasm`
+  (`crates/seele-motor/tests/casos.json`). A única diferença medida é o
+  `Atomics`, que o QuickJS do `wasm32-wasip1` não expõe e que a tabela
+  declara.
+
 ### O celular não liga pelo código na 0.16
 
 Spec-mestre da 0.16, §2 F4. A sala pessoal por código (F7) não tem entrada
