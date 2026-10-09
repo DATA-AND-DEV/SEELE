@@ -107,6 +107,7 @@ do Simulador, nunca no aparelho. Vale como indício, não como prova:
   sai com 32 B e a assinatura com 64 B, que é o que o aperto de mão espera
   (`crates/seele-server/src/session.rs:550-554`, `:587-590`). Se a assinatura
   randomizada do Safari passa no `verify` (`:594-599`) não foi medido.
+  **Medido em 08/10: passa** (emenda de 09/10/2026).
 
 ## O que não foi medido
 
@@ -154,8 +155,9 @@ do Simulador, nunca no aparelho. Vale como indício, não como prova:
   spike servia a página do próprio servidor. Segundo o Chrome Platform Status,
   lido em 07/10, o Chrome 147 estende ao WebTransport o pedido de permissão de
   rede local.
-- **O `seele-proto` compilado para `wasm32-unknown-unknown`**: o alvo não está
-  instalado em nenhuma toolchain desta máquina.
+- ~~**O `seele-proto` compilado para `wasm32-unknown-unknown`**: o alvo não está
+  instalado em nenhuma toolchain desta máquina.~~ Medido em 08/10: compila e
+  roda com os bytes do nativo (emenda de 09/10/2026).
 - **O que `spikes/alpn-no-mesmo-socket/` viu, repetido num iPhone**: o despacho por
   ALPN com o `wtransport` adotado, o ocioso de 20 s do `seeled` com a página
   oculta, um certificado curto com a mesma chave do longo e uma lista longa de
@@ -715,6 +717,70 @@ estava EM ABERTO em «O cliente web».
   passando pelo JavaScript (`xtask/web/ouro.mjs`).
 - «Sem npm, sem bundler, sem `package.json`» continua valendo.
 
+## Emenda de 09/10/2026
+
+O que foi medido e decidido depois deste ADR, registrado pela sessão da F4.
+Nada aqui muda a decisão. Vai como emenda para «O que foi medido» continuar
+dizendo o que se sabia em 07/10.
+
+### O que foi medido depois
+
+- **A assinatura randomizada do Safari passa no `verify`** (pendência 1;
+  `spikes/ed25519-do-navegador/`, `250aa83`).
+  - O verificador tem as linhas de `session.rs:550-599`, com o
+    `ed25519-dalek` 3.0.0 do `Cargo.lock`.
+  - O Safari assina de forma aleatória (10 assinaturas distintas em 10), e o
+    Chromium não.
+  - No Chromium 151, no Safari 27.0.1 do Mac e no Safari do Simulador iOS 27.0,
+    as 184 assinaturas passam no `verify` e no `verify_strict`, e as 80
+    adulteradas são recusadas.
+  - A `CryptoKey` não extraível, relida do IndexedDB depois de recarregar,
+    assina.
+  - **Falta o iPhone** (`prova.py iphone`, nos passos do dono).
+- **O contexto da assinatura cabe no navegador.** A F1 decidiu a prova do
+  cliente como rótulo, impressão do servidor e nonce de 32 B
+  (`seele_proto::assinatura::prova_de_cliente`, `a5af6ec6`), e o `seeled` a
+  confere com `verify_strict` (`session.rs:838-848`). Com o rótulo de verdade,
+  50 de 50 nos três navegadores.
+- **O `seele-proto` compila para `wasm32-unknown-unknown` e roda** (pendência 2;
+  `spikes/proto-em-wasm/`).
+  - O `cargo check` sai com 0.
+  - O codec, num `.wasm` sem cola, produz no Node os mesmos bytes do nativo.
+  - Hoje os bytes-ouro da F1 cruzam a fronteira do `seele-web` dentro do
+    `.wasm` a cada `cargo xtask web`, no CI e na bateria da publicação.
+- **Os hashes futuros viajam sozinhos.** Também é decisão da F1: a
+  `ServerMessage::HashesDoNavegador` (`64792dee`) sai depois do `Session`, nos
+  dois transportes. Ela leva 60 janelas (`transport::JANELAS_ANUNCIADAS`): uma
+  nova a cada 6 dias, cada uma valendo 13 dias, e com o começo recuado 1 dia
+  pelo relógio torto do celular. Os DERs não viajam nela.
+- **A segunda parede da AB tinha um furo no WebKit**, e ele foi fechado
+  (`spikes/mods-no-navegador/README.md`, adendo de 09/10).
+  - No Safari do Simulador iOS 27.0, um Worker criado pelo `iframe` opaco abre
+    o `caches`, e o que ele grava reaparece na abertura seguinte da página.
+  - Um Worker aninhado o abre de novo, e a CSP não alcança armazenamento.
+  - Só um MOD que saísse do QuickJS e do `wasm` chegaria lá. Mesmo assim, era
+    armazenamento que sobrevivia à sessão.
+  - Um preâmbulo no `blob:` do Worker tira `caches`, `indexedDB`, `Worker`,
+    `SharedWorker` e `navigator.storage`, confere e falha fechado.
+  - Com ele, no Chromium 151 e no Safari do Mac e do Simulador, nenhuma porta
+    abriu e nenhuma canária tocou. Há uma prova por reversão para cada guarda.
+
+### O celular não liga pelo código na 0.16
+
+Spec-mestre da 0.16, §2 F4. A sala pessoal por código (F7) não tem entrada
+pelo navegador nesta versão, por duas razões:
+- **O navegador não abre UDP** (ver «O que isto custa»). Ele perde o quarto
+  (`MORO`/`QUEM`) e o degrau 4, que são o caminho da sala por código.
+- **O certificado da sala não serve para `serverCertificateHashes`.** Ele é
+  Ed25519 e tem validade fixa. Pelo hash, o navegador só aceita um certificado
+  de no máximo 14 dias (`transport::VALIDADE_DO_CURTO` e a fonte que ele cita).
+  Os dois navegadores recusaram, mesmo com o hash certo, o certificado longo do
+  `seeled` (ver «O que foi medido»). As janelas curtas deste ADR são do
+  `seeled`, e não da sala.
+
+A tela do celular não oferece «ligar pelo código», e as notas da 0.16 dizem
+isso.
+
 ## O que acontece com os ADRs que já existem
 
 **Nenhum é substituído.**
@@ -918,9 +984,11 @@ o código do `8632668`.
 ## O que fica pendente
 
 **Medir antes do código, nesta ordem:**
-1. se a assinatura Ed25519 randomizada do Safari passa no `verify` do `seeled`
-   (`session.rs:594-599`). Decide se a autenticação funciona;
-2. `cargo check -p seele-proto --target wasm32-unknown-unknown`;
+1. ~~se a assinatura Ed25519 randomizada do Safari passa no `verify` do `seeled`
+   (`session.rs:594-599`). Decide se a autenticação funciona~~ — passa no Mac e
+   no Simulador; falta o iPhone (emenda de 09/10/2026);
+2. ~~`cargo check -p seele-proto --target wasm32-unknown-unknown`~~ — passa, e o
+   codec roda no `.wasm` (emenda de 09/10/2026);
 3. repetir `spikes/alpn-no-mesmo-socket/` num iPhone: o despacho por ALPN
    com o `wtransport` adotado, os temporizadores do `seeled` com a página
    oculta, um certificado curto com a mesma chave do longo, uma lista longa de
@@ -980,9 +1048,12 @@ branch `conserto/l2-textos-publicos`, reprova «nunca vê áudio em claro» em
 - a primeira visita sem `v=`;
 - se o `seeled` confere o `Origin`;
 - o canal de diagnóstico;
-- quantos hashes futuros a sessão entrega, e por qual mensagem;
+- ~~quantos hashes futuros a sessão entrega, e por qual mensagem~~ (decidido
+  pela F1 em 08/10: `ServerMessage::HashesDoNavegador`, 60 janelas; ver a
+  emenda de 09/10/2026);
 - quanto do núcleo vai para `wasm`;
-- o contexto da assinatura do aperto de mão;
+- ~~o contexto da assinatura do aperto de mão~~ (decidido pela F1 em 08/10:
+  rótulo, impressão do servidor e nonce; ver a emenda de 09/10/2026);
 - notificações (Web Push);
 - ~~MODs no celular além da recusa nomeada~~ (decidido pela emenda de
   08/10/2026: eles rodam, na forma AB);
