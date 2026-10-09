@@ -404,7 +404,8 @@ class Caso:
     # O texto do sistema (1 é o padrão; 1,5 é o tamanho grande de acessibilidade).
     escala: float = 1.0
     aparelhos: tuple[str, ...] = ("390", "360")
-    # A casca do navegador: "celular", ou "larga" para o computador.
+    # A casca do navegador: "celular", ou "larga" para o computador; vazia é o
+    # desktop, com os arquivos das cascas carregados e inertes.
     marca: str = "celular"
     # Entrar na sessão antes do caso; um caso da entrada entra ele mesmo.
     entrar: bool = True
@@ -1262,6 +1263,37 @@ def texto_maior(pg: Page) -> list[str]:
     return falhas
 
 
+def retrato_da_casca(onde: str) -> Callable[[Page], list[str]]:
+    """O retrato que um MOD recebe diz onde a casca está (API 6, `lugar.onde`):
+    `celular` com a casca do celular de pé, e `computador` na casca larga e no
+    desktop. O `cascaDoRetrato` do base.js pergunta se o `CELULAR` existe, que só
+    o celular-casca.js cria, e só com a marca dele; este caso prova que ele
+    chega lá, chamando a função da página.
+
+    A pedido da orquestradora, depois da oitava integração: o retrato lia a
+    marca dentro de um arquivo do desktop, e nada provava a troca."""
+
+    def levar(pg: Page) -> list[str]:
+        visto = pg.evaluate("""(() => {
+            if (typeof cascaDoRetrato !== 'function') return { erro: 'a página não tem o cascaDoRetrato' };
+            const retrato = cascaDoRetrato();
+            return { onde: retrato.onde, regioes: Array.isArray(retrato.regioes),
+                     celular: typeof CELULAR === 'object' && CELULAR !== null,
+                     marca: document.documentElement.getAttribute('data-casca') };
+        })()""")
+        if "erro" in visto:
+            return [visto["erro"]]
+        falhas = []
+        if visto["onde"] != onde:
+            falhas.append(f"com a marca {visto['marca']!r}, o retrato diz onde={visto['onde']!r}, e não {onde!r}"
+                          f" (CELULAR {'existe' if visto['celular'] else 'não existe'})")
+        if not visto["regioes"]:
+            falhas.append("o retrato não traz a lista de regiões")
+        return falhas
+
+    return levar
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1556,6 +1588,12 @@ CASOS: dict[str, Caso] = {
     "aba-pessoas-150": Caso(levar=aba_pessoas, escala=1.5, raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
     "chamada-150": Caso(levar=chamada, escala=1.5, raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-150": Caso(levar=ajustes_medida, escala=1.5, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
+    # O retrato dos MODs diz onde a casca está: celular só com a marca do
+    # celular; na larga e no desktop (os arquivos das cascas carregados, sem
+    # marca), computador.
+    "retrato-no-celular": Caso(levar=retrato_da_casca("celular"), aparelhos=("390",), medir=False),
+    "retrato-na-larga": Caso(levar=retrato_da_casca("computador"), marca="larga", aparelhos=("1440",), medir=False),
+    "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
