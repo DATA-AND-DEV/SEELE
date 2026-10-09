@@ -372,48 +372,46 @@ fn toda_classe_que_o_script_aplica_tem_regra_de_css() {
         }
     }
 
+    // **As classes que o script aplica são as de `classes_que_os_scripts_aplicam`**,
+    // o leitor único deste arquivo (M4 da revisão do K3). Este guarda tinha o
+    // dele, que lia `elemento(` e só `.className = "…"`: uma classe posta por
+    // `classList.add(` sem regra passava aqui e era aplicada na tela do mesmo
+    // jeito, e o mapa de contêineres, que usa o leitor único, a contava. Duas
+    // respostas para a mesma pergunta.
+    //
+    // O que este guarda aprendeu continua no leitor: `className = "..."`
+    // também conta — o guarda lia só `elemento(`, e um arquivo novo que
+    // montasse por `createElement` punha classe sem regra na tela sem ninguém
+    // notar, como aconteceu com `mods-regiao.js` no dia em que ele nasceu —, e
+    // os argumentos são separados por `argumentos_da_chamada`, fatiado por
+    // **byte**, que é o que `match_indices` devolve: indexar um vetor de
+    // `char` com esse número trata acento como dois passos, e o separador sai
+    // devorando o arquivo — foi o primeiro estado deste guarda, e ele acusou
+    // texto de outra função inteiramente.
     let script = without_comments(&scripts());
-    let mut sem_regra: Vec<String> = Vec::new();
-    let mut chamadas = 0_usize;
-
-    // **`className = "..."` também conta.** O guarda lia só `elemento(`, e um
-    // arquivo novo que montasse por `createElement` punha classe sem regra na
-    // tela sem ninguém notar — que é exatamente o defeito de campo descrito
-    // acima, de volta por uma porta que o guarda não olhava. Aconteceu com
-    // `mods-regiao.js` no dia em que ele nasceu.
-    for (posicao, _) in script.match_indices(".className = \"") {
-        let resto = &script[posicao + ".className = \"".len()..];
-        let Some(fim) = resto.find('"') else { continue };
-        chamadas += 1;
-        for token in resto[..fim].split_whitespace() {
-            if !regras.contains(token) {
-                sem_regra.push(token.to_owned());
-            }
-        }
-    }
-
-    for (posicao, _) in script.match_indices("elemento(") {
-        // Fatiado por **byte**, que é o que `match_indices` devolve. Indexar
-        // um vetor de `char` com esse número trata acento como dois passos, e
-        // o separador sai devorando o arquivo — foi o primeiro estado deste
-        // guarda, e ele acusou texto de outra função inteiramente.
-        let args = argumentos_da_chamada(&script[posicao + "elemento".len()..]);
-        let Some(classe) = args.get(1) else { continue };
-        chamadas += 1;
-        for literal in classe.split('"').skip(1).step_by(2) {
-            for token in literal.split_whitespace() {
-                if !regras.contains(token) {
-                    sem_regra.push(format!("`{token}` (de \"{literal}\")"));
-                }
-            }
-        }
-    }
+    let aplicacoes = classes_que_os_scripts_aplicam(&script);
+    let chamadas = aplicacoes
+        .iter()
+        .filter(|(_, classes)| !classes.is_empty())
+        .count();
+    let sem_regra: Vec<String> = aplicacoes
+        .iter()
+        .flat_map(|(etiquetas, classes)| {
+            classes
+                .iter()
+                .filter(|classe| !regras.contains(*classe))
+                .map(move |classe| match etiquetas.iter().next() {
+                    Some(etiqueta) => format!("`{classe}` (num `<{etiqueta}>`)"),
+                    None => format!("`{classe}`"),
+                })
+        })
+        .collect();
 
     assert!(
         chamadas > 20,
-        "só {chamadas} chamadas a `elemento(` com classe foram lidas, o que é \
-         pouco demais — o separador de argumentos provavelmente parou de casar e \
-         este teste está passando por não olhar nada"
+        "só {chamadas} aplicações de classe foram lidas, o que é pouco demais — o \
+         separador de argumentos provavelmente parou de casar e este teste está \
+         passando por não olhar nada"
     );
     assert!(
         sem_regra.is_empty(),
@@ -16124,8 +16122,9 @@ fn a_escuta_do_quarto_so_vira_aviso_pela_regra_da_ffi() {
 /// e a política desta janela não declara `media-src`: a mídia cai em
 /// `default-src 'self'`, que recusa `data:`. O MOD declarava o som, o produto
 /// montava o tocador, e nada tocava — medido no Chromium com a política exata,
-/// o motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
-/// (depois) do Plano 1D.
+/// o motor do WebView2; a medida no app de verdade, no WKWebView
+/// antes e depois do WebAudio e no WebView2, está em
+/// `docs/evidencias/som-de-mod-wkwebview/registro.md`.
 ///
 /// O conserto não afrouxa a política (ver
 /// `o_som_de_mod_nao_abre_a_csp_para_midia_de_data_nem_de_blob`, neste
@@ -16212,8 +16211,10 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
 /// As classes que os scripts **aplicam**, cada aplicação com as etiquetas da
 /// mesma chamada.
 ///
-/// **Aplicar uma classe é pô-la num elemento**, e esta é a definição que o mapa
-/// de contêineres usa (`todo_ponto_de_contribuicao_tem_onde_ser_contornado`).
+/// **Aplicar uma classe é pô-la num elemento**, e esta é a definição única do
+/// arquivo: a dos dois guardas que perguntam pelas classes que os scripts
+/// aplicam, `toda_classe_que_o_script_aplica_tem_regra_de_css` e
+/// `todo_ponto_de_contribuicao_tem_onde_ser_contornado`.
 /// Três formas contam, e as três põem a classe num elemento: o segundo
 /// argumento de `elemento(` (com as etiquetas do primeiro), os argumentos de
 /// `classList.add(` e o lado direito de `.className =`. Nas duas últimas a
