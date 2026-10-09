@@ -5129,6 +5129,17 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         seele_core::ConnectError::InviteMismatch { .. }
         | seele_core::ConnectError::ChaveNaoProvada => EndReason::ServidorTrocouNaVolta,
         seele_core::ConnectError::PinChanged { .. } => EndReason::ChaveMudouNaVolta,
+        // Na volta de uma ligação, quem atendeu não é mais a sala do código: o
+        // mesmo que o servidor que trocou, ou, com o pino, a chave que mudou.
+        seele_core::ConnectError::CodigoNaoConfere(falha) => match falha {
+            seele_core::confere_codigo::FalhaDoCodigo::SePassouPor { .. } => {
+                EndReason::ChaveMudouNaVolta
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::NaoEhChaveDePessoa { .. }
+            | seele_core::confere_codigo::FalhaDoCodigo::CodigoNaoBate { .. } => {
+                EndReason::ServidorTrocouNaVolta
+            }
+        },
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
         seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
@@ -5166,6 +5177,25 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 offered: offered.clone(),
             }
         }
+        seele_core::ConnectError::CodigoNaoConfere(falha) => match falha {
+            seele_core::confere_codigo::FalhaDoCodigo::NaoEhChaveDePessoa { esperado } => {
+                ConnectionError::CodigoNaoBate {
+                    esperado: esperado.to_string(),
+                    veio: None,
+                }
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::CodigoNaoBate { esperado, veio } => {
+                ConnectionError::CodigoNaoBate {
+                    esperado: esperado.to_string(),
+                    veio: Some(veio.to_string()),
+                }
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::SePassouPor { codigo } => {
+                ConnectionError::SePassouPorCodigo {
+                    codigo: codigo.to_string(),
+                }
+            }
+        },
         // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
         // certificado sem ter a chave aparecia como versão incompatível, e a
         // tela mandava atualizar o SEELE nas duas máquinas.

@@ -50,6 +50,12 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da `versao/0.16` (`dc001a0a`) | limpo, e as provas da F7 verdes em cima dele | `fd372ca0` |
 | 7 | 4f-porta, o UPnP por papel | **feita** | `efaada91` |
 | 8 | 6b-verificador, o `ConfereCodigo` | **feita** | `3197550a` |
+| — | merge da `versao/0.16` (`a2b9f9d0`) e a reexportação do `NOME_DA_SALA` | feitos | `273a7df0`, `023bf2f8` |
+| 9 | 4g, a recepção (a campainha viva) | **feita** | `9890e4eb`, `3fc72adb` |
+| 12a | 6b, o `Destino` com `Esperada` | **feita** | `a892f14a` |
+| — | merge da P1 e da P2 da F1 (`bf559478`) | feito | `28003af4` |
+| 10 | 4d, o aperto de mão em três fases | **feita** | `312ec92e` |
+| 12b | 6b, o ramo do código no `connect_por` | **feita** | `1fb62a9a` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -221,3 +227,70 @@ O resto espera o G-servidor, a F2, a casca ou a F1.
 - **Quando o `NOME_DA_SALA` da F1 (`7e123ee5`) chegar à `versao/0.16`:** o
   `tls.rs` passa a reexportá-lo, e os testes que escrevem `"seele-sala"` passam
   a usá-lo.
+
+## As tarefas 9, 12a e 4d (08/10)
+
+- **Tarefa 9, a recepção** (`crates/seele-server/src/recepcao.rs`): a campainha
+  viva. A sessão que toca recebe um canal de decisão, o app assina os avisos, e
+  o desligar vai pelo `Event::ServidorEncerrando` do G-servidor. O log leva 4
+  símbolos do código.
+  - Seis reversões medidas.
+  - **O achado do `tracing`:** o teste do log reprovava junto com o módulo e
+    passava sozinho. Medido no `tracing-core` 0.1.36 (`has_just_one`): 3/3
+    vermelhos sem conserto, 10/10 com o `rebuild_interest_cache`, 20/20 verdes
+    com um segundo despachante vivo. É o mesmo conserto do
+    `segundo_despachante` do app (`1405210b`). Virou a pendência 56, com o
+    texto desta frente, e o conserto dos outros testes ficou no lote Z da F5.
+- **Tarefa 12a, o `Esperada`** (`a892f14a`): `Destino.esperada:
+  Option<Esperada>` com `Certificado(String)` e `Codigo(Codigo)`.
+  - Um método `impressao_esperada()` mantém os usos de produção numa linha
+    cada, para o encontro com o lote F no `enlace.rs` ser só de texto.
+  - Os 16 arquivos de conformidade tocados e o `quarto_pelo_link` rodaram,
+    verdes.
+- **Tarefa 10, a 4d** (`312ec92e`): o `handshake` foi partido em três fases.
+  - A fase 1 vai até a assinatura, em 10 s.
+  - O `tocar`, só na sala, tem o prazo dele e não segura a trava do banco.
+  - O `admitir` leva a conta e a sessão, em 10 s.
+  - A sala é dita por `ServerConfig.sala`, e a recepção mora em
+    `Server::recepcao`. O prazo do toque saiu de constante para a
+    configuração.
+  - Os 10 testes de `tests/sala_toca.rs` passam, e as 4 reversões reprovam o
+    teste de cada uma.
+  - O aperto de todo servidor mudou de forma, então rodei o `seele-server`
+    inteiro e os 42 arquivos de conformidade, um por vez: 42 de 42 verdes.
+- **Anotado para a 4f** (a hospedagem da sala):
+  - a sala não manda `Membros`, `MembroNovo` nem `MembroBanido` (a P5 da F1,
+    `7a9591f0`), com um teste;
+  - a API do ENC/2 da F2 (`0.16/enc2`, `a2181ad6`): `Convocacao::para_sala`,
+    `Hospedagem::registro_no_quarto` e, para quem liga, `localizar`.
+
+## Tarefa 12b — ligar pelo código (08/10)
+
+- **No `connect_por`, quando se espera um código:**
+  - o `ConfereCodigo` entra no lugar do `TofuVerifier`;
+  - o SNI é sempre o `NOME_DA_SALA`;
+  - o pino `@CÓDIGO` é lido antes de discar e gravado depois do `Session`;
+  - a recusa vem tipada (`ConnectError::CodigoNaoConfere`), lida do relato.
+- **Na FFI:** `CodigoNaoBate { esperado, veio }` e `SePassouPorCodigo`. **As
+  frases são da casca (tarefa 7f)**: nada no app disca um código ainda, então
+  essas recusas não chegam à tela antes dela.
+- **No `enlace.rs`:** as duas chamadas do `connect_por` e um braço em
+  `alguem_respondeu` e outro em `vale_insistir`. Na mensagem da 4d eu tinha dito
+  à orquestradora que a 12b não tocaria o `enlace.rs`. Estava errado, e foi
+  corrigido na mensagem seguinte.
+- **A prova** é `seele-conformance/tests/ligar_pelo_codigo.rs`, com 4 testes, e
+  as 4 reversões medidas reprovam.
+- **Rodados:** `seele-core --lib` (445), `seele-ffi --lib` (124) e os 43
+  arquivos de conformidade, um por vez, todos verdes.
+
+## Onde a frente está (08/10, fim da tarde)
+
+Feitas: 1–10 e 12, menos a 11. Esperando:
+- **17** (a reconexão de 60 s): o lote F da F5, que mexe no `enlace.rs`. A
+  orquestradora avisa;
+- **16** (o `Tocando` no cliente): a P8 da F1, no `client.rs`;
+- **11** (a hospedagem da sala): a P10 da F1 e o ENC/2 da F2 na `versao/0.16`;
+- **13** (`ler_entrada`): a P9 da F1;
+- **14 e 15**: a F2;
+- **18 a 31**: a casca;
+- **as duas medidas do toque que abrem o microfone**, com o dono.

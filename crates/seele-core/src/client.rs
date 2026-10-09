@@ -189,6 +189,15 @@ pub enum ConnectError {
         /// A identidade do conjunto, que é o que se guarda ao aceitar.
         conjunto: String,
     },
+
+    /// Quem atendeu não é a sala do código para o qual se ligou (ADR 0060).
+    ///
+    /// **Recusada dentro do TLS, antes do `Hello`**, pelo
+    /// [`crate::confere_codigo::ConfereCodigo`]: nada do que quem liga diria
+    /// chega a quem atendeu. O motivo diz qual dos três casos foi: não é uma
+    /// sala, a chave é de outro código, ou a chave não é a que ficou pinada na
+    /// primeira ligação.
+    CodigoNaoConfere(crate::confere_codigo::FalhaDoCodigo),
 }
 
 impl std::fmt::Display for ConnectError {
@@ -552,13 +561,17 @@ impl Client {
     /// encontro — uma por candidato, porque um `Endpoint` fecha o socket que
     /// adotou e a porta furada tem de sobreviver ao laço inteiro.
     ///
-    /// `impressao_esperada` é conferida **dentro do TLS**: um primeiro contato
-    /// que não confere falha o aperto de mão antes do `Hello`, e volta como
-    /// [`ConnectError::InviteMismatch`]. Ver [`crate::tofu::TofuVerifier::decide`]
-    /// para o que ela decide com pin e sem pin. Fica logo depois de `pin_key`
-    /// porque os vizinhos são `&str`: trocá-la de lugar com eles não compila,
-    /// e trocá-la com `join_secret` ou `aceito`, que também são `Option<&str>`,
-    /// compilaria calado.
+    /// `esperada` é conferida **dentro do TLS**, antes do `Hello`:
+    ///
+    /// - um certificado ([`crate::enlace::Esperada::Certificado`]): um primeiro
+    ///   contato que não confere falha o aperto de mão e volta como
+    ///   [`ConnectError::InviteMismatch`]. Ver [`crate::tofu::TofuVerifier::decide`]
+    ///   para o que ela decide com pin e sem pin;
+    /// - um código ([`crate::enlace::Esperada::Codigo`]): o
+    ///   [`crate::confere_codigo::ConfereCodigo`] no lugar do TOFU por endereço,
+    ///   o SNI é sempre [`seele_proto::transport::NOME_DA_SALA`], e o pino é o
+    ///   da chave sob `@CÓDIGO`, gravado depois da primeira ligação completa.
+    ///   A recusa volta como [`ConnectError::CodigoNaoConfere`].
     ///
     /// `o_pino_prova_o_servidor` diz se o pin de `pin_key` prova o servidor
     /// (`crate::enlace::Destino::o_pino_prova_o_servidor`), e vai ao
@@ -581,7 +594,7 @@ impl Client {
         server: SocketAddr,
         server_name: &str,
         pin_key: &str,
-        impressao_esperada: Option<&str>,
+        esperada: Option<&crate::enlace::Esperada>,
         o_pino_prova_o_servidor: bool,
         nickname: &str,
         signing_key: &SigningKey,
@@ -591,15 +604,47 @@ impl Client {
     ) -> Result<Self, ConnectError> {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
-        let verifier = Arc::new(TofuVerifier::new(
-            pins,
-            pin_key.to_owned(),
-            impressao_esperada.map(str::to_owned),
-            o_pino_prova_o_servidor,
-        ));
+        // **Uma pessoa, e não um endereço**, quando o que se espera é um código:
+        // a chave tem de ser a do código, e o pino é o dela, e não o do
+        // endereço que respondeu (ADR 0060).
+        let verificacao = match esperada {
+            Some(crate::enlace::Esperada::Codigo(codigo)) => {
+                let pino = pins.pinned(&crate::confere_codigo::chave_do_pino(codigo));
+                Verificacao::Codigo {
+                    confere: Arc::new(crate::confere_codigo::ConfereCodigo::novo(
+                        *codigo,
+                        pino.clone(),
+                    )),
+                    codigo: *codigo,
+                    pino,
+                }
+            }
+            Some(crate::enlace::Esperada::Certificado(_)) | None => {
+                Verificacao::Tofu(Arc::new(TofuVerifier::new(
+                    Arc::clone(&pins),
+                    pin_key.to_owned(),
+                    esperada.and_then(|esperada| match esperada {
+                        crate::enlace::Esperada::Certificado(impressao) => Some(impressao.clone()),
+                        crate::enlace::Esperada::Codigo(_) => None,
+                    }),
+                    o_pino_prova_o_servidor,
+                )))
+            }
+        };
+        let verificador: Arc<dyn rustls::client::danger::ServerCertVerifier> = match &verificacao {
+            Verificacao::Tofu(verifier) => Arc::clone(verifier) as Arc<_>,
+            Verificacao::Codigo { confere, .. } => Arc::clone(confere) as Arc<_>,
+        };
+        // O SNI viaja legível no Initial do QUIC: numa ligação pelo código ele é
+        // o nome da sala, qualquer que seja o que o destino diga, para não
+        // contar a quem olha a rede para quem se está ligando.
+        let server_name = match &verificacao {
+            Verificacao::Codigo { .. } => seele_proto::transport::NOME_DA_SALA,
+            Verificacao::Tofu(_) => server_name,
+        };
         let mut tls = rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::clone(&verifier) as Arc<_>)
+            .with_custom_certificate_verifier(verificador)
             .with_no_client_auth();
         tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
 
@@ -631,10 +676,38 @@ impl Client {
                 ConnectError::Unreachable
             })?
             .await
-            .map_err(|error| classify_connection_error(&error, verifier.last_decision()))?;
+            .map_err(|error| match &verificacao {
+                Verificacao::Tofu(verifier) => {
+                    classify_connection_error(&error, verifier.last_decision())
+                }
+                // O motivo tipado, que o verificador deixou antes de o `rustls`
+                // o achatar em texto.
+                Verificacao::Codigo { confere, .. } => confere
+                    .relato()
+                    .lock()
+                    .ok()
+                    .and_then(|vaga| vaga.clone())
+                    .map_or_else(
+                        || classify_connection_error(&error, None),
+                        ConnectError::CodigoNaoConfere,
+                    ),
+            })?;
 
         // PATTERN: ORANGE — connected, not verified.
-        let pin = decisao_do_aperto(verifier.last_decision())?;
+        let pin = match &verificacao {
+            Verificacao::Tofu(verifier) => decisao_do_aperto(verifier.last_decision())?,
+            // O código conferiu dentro do TLS. Com pino, a chave inteira também.
+            Verificacao::Codigo { pino, .. } => {
+                let fingerprint = seele_proto::transport::certificate_fingerprint(
+                    certificado_do_servidor(&connection)?.as_ref(),
+                );
+                if pino.is_some() {
+                    PinDecision::Matches { fingerprint }
+                } else {
+                    PinDecision::FirstContact { fingerprint }
+                }
+            }
+        };
 
         // **A impressão que a prova de identidade amarra** (o S2): a do
         // certificado que o TLS desta conexão acabou de aceitar, lida da
@@ -664,6 +737,24 @@ impl Client {
         )
         .await
         .map_err(|_| ConnectError::HandshakeTimeout)??;
+
+        // **A chave inteira fica pinada depois da primeira ligação completa**
+        // (ADR 0060, «Força»): daqui em diante, a conferência daquele código usa
+        // os 256 bits, e não só os 75. Depois do `Session`, e não dentro do
+        // TLS: uma ligação recusada não deixa pino.
+        if let Verificacao::Codigo {
+            codigo, pino: None, ..
+        } = &verificacao
+        {
+            if let Some(chave) =
+                crate::confere_codigo::chave_do_certificado(&certificado_do_servidor(&connection)?)
+            {
+                pins.pin(
+                    &crate::confere_codigo::chave_do_pino(codigo),
+                    seele_proto::transport::key_fingerprint(&chave),
+                );
+            }
+        }
 
         // Uma tarefa é dona do fluxo de leitura e entrega quadros inteiros por
         // um canal. Nada mais lê deste fluxo, então não há corrida por quadro;
@@ -2052,7 +2143,27 @@ mod como_este_build_se_apresenta {
 /// Uma conexão TLS sem certificado do servidor não existe — o `rustls` não
 /// fecha o aperto sem ele —, e se existisse, não haveria o que assinar: é
 /// violação de protocolo, e o cliente não prova nada a ninguém.
+/// Como a conexão confere quem atendeu: pelo TOFU por endereço, ou pelo código.
+enum Verificacao {
+    Tofu(Arc<TofuVerifier>),
+    Codigo {
+        confere: Arc<crate::confere_codigo::ConfereCodigo>,
+        codigo: seele_proto::codigo::Codigo,
+        /// A impressão da chave pinada sob `@CÓDIGO`, lida antes de discar.
+        pino: Option<String>,
+    },
+}
+
 fn impressao_do_servidor(connection: &quinn::Connection) -> Result<[u8; 32], ConnectError> {
+    Ok(seele_proto::transport::certificate_digest(
+        certificado_do_servidor(connection)?.as_ref(),
+    ))
+}
+
+/// O certificado que o TLS desta conexão aceitou.
+fn certificado_do_servidor(
+    connection: &quinn::Connection,
+) -> Result<rustls::pki_types::CertificateDer<'static>, ConnectError> {
     let cadeia = connection
         .peer_identity()
         .and_then(|identidade| {
@@ -2068,9 +2179,7 @@ fn impressao_do_servidor(connection: &quinn::Connection) -> Result<[u8; 32], Con
         tracing::warn!("a cadeia do servidor veio vazia");
         ConnectError::ProtocolViolation
     })?;
-    Ok(seele_proto::transport::certificate_digest(
-        certificado.as_ref(),
-    ))
+    Ok(certificado.clone())
 }
 
 async fn handshake(
