@@ -588,6 +588,40 @@ async function quemPintaCadaLugar(navegador, servidor) {
 }
 
 /**
+ * **A região e as páginas de cada MOD aparecem na aba** (pendência 49, item 5).
+ * `desenharQuemPinta` desenha, logo abaixo dos onze lugares, o bloco que soma a
+ * mídia da faixa e das páginas de cada MOD (`desenharAMidiaDosMods`). A bancada
+ * de node mede a soma e as frases; esta mede que a aba as desenha, com uma
+ * recusa da região e uma da página do mesmo MOD.
+ */
+async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    testTable.midia_do_mod = (args) => Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } });
+    const x = instancia("mod/x");
+    const mod = { id: "mod/x", hash: "mod-x" };
+    desenharARegiaoDoMod(mod, x, [{ forma: "midia", chave: "na-regiao", fonte: "img/regiao.png" }]);
+    const conjunto = superficiesDoMod(mod, x);
+    conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa de X" });
+    conjunto.de("mesa").montar([{ forma: "midia", chave: "na-pagina", fonte: "img/pagina.png" }]);
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+  const bloco = () => document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? "(sem bloco)";
+  await esperarQue(
+    pagina,
+    () => /a região e as páginas de mod\/x: 2 recusadas — img\/regiao\.png não está no pacote; img\/pagina\.png não está no pacote/
+      .test(document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? ""),
+    "a aba DIAGNÓSTICO não desenhou, abaixo dos onze lugares, o bloco da região e das páginas de mod/x com as duas "
+      + "recusas e os motivos: a mídia recusada da faixa e da página de um MOD chega ao seele.log e ao MOD, e não à aba",
+    bloco,
+  );
+  assert.deepEqual(erros, [], `a página lançou erro durante o bloco da região e das páginas: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
+/**
  * **«Não está de pé» só de quem não está carregado** (I-3 da revisão ampla do
  * Plano 1D). A disputa diz `ausente` quando o escolhido não tem candidata no
  * lugar, e a aba traduzia isso sempre por «não está de pé» — de um MOD de pé,
@@ -1566,6 +1600,7 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
+  aRegiaoEAsPaginasDeCadaModAparecemNaAba,
   oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe,
   quemDesenhaOQueDizAEscolhaDestaMaquina,
   oModoDeDesenvolvedorContornaSemTomarNada,
