@@ -532,3 +532,68 @@ Isto substitui a preocupação 1 da rodada 0.
 Não vi nenhum. Todos os vermelhos de ~20 s desta rodada e da anterior foram
 reversões de propósito, e se repetiram em toda rodada em que foram medidos.
 Nenhum verde ficou perto do `IDLE_TIMEOUT`.
+
+## Rodada 2 de conserto (FIX_BASE `6688241f`)
+
+A re-revisão deu os oito itens da rodada 1 como resolvidos e achou dois pontos
+no mesmo arquivo, `apps/seele-app/tests/encerramento.rs`. Os dois estão em
+`aa9e7f4c`. Sem conformidade (pausada): rodaram `--test encerramento`,
+`--bin seele-app despedir`, `--test frontend`, o fmt e o clippy do app.
+
+Antes de cada reversão, o `main.rs` estava em `f337eac1…` e o guarda em
+`53b37f92…`; depois de cada uma, o `main.rs` voltou conferido com `cmp`, e o
+guarda continuou idêntico à cópia.
+
+### 1. (Importante) `fechar_a_janela_avisa_o_servidor` casava com comentário
+
+- **O vermelho medido, com o guarda de `6688241f`:** as três trocas do braço
+  do `ExitRequested` deixaram os dois guardas verdes (2 de 2 cada):
+  - **R1**, a da re-revisão: `// despedir_se(handle);`;
+  - **R2**: a chamada só num comentário de fim de linha
+    (`let _ = handle; // despedir_se(handle);`);
+  - **R3**: a chamada fora do braço, com o `if` vazio e `despedir_se(handle);`
+    depois dele.
+- **O conserto:** `fecho_do_app_run` recorta o `main.rs` do `app.run(|` até a
+  chave que fecha `main` na coluna zero, passa só esse trecho pelo leitor de
+  comentários e tira dele o corpo do fecho, contando chaves.
+  - O guarda acha o `RunEvent::ExitRequested` ali, pula o padrão `{ .. }` do
+    `matches!` até o `)` dele, e exige `despedir_se(handle)` dentro do bloco do
+    `if`.
+  - O `main.rs` inteiro não passa pelo leitor: ele tem `'"'` e strings cruas.
+- **A prova:** R1, R2 e R3 vermelhas, com «o braço do `ExitRequested` não chama
+  mais `despedir_se(handle)` fora de um comentário: a última janela fecha e o
+  processo morre sem avisar o servidor, ou avisa a cada evento em vez de no
+  fim.»
+
+### 2. (Menor) O doc de `sem_comentarios` prometia o que ela não fazia
+
+- **O vermelho medido, com o guarda de `6688241f`:** `let _aspa = '"';` antes
+  de `// despedir_da_sessao(...)` e de um `disconnect()`, no corpo de
+  `despedir_se`, deixou os dois guardas verdes.
+- **A primeira tentativa, descartada pela medida:** procurar `'"'`, `r"` e
+  `r#"` como texto no trecho recortado. O guarda reprovou o próprio `main.rs`
+  certo, porque a frase «saída do app: MODs nativos mandados parar» termina em
+  `r"`.
+- **O conserto:** a detecção mora no leitor.
+  - `sem_comentarios` passou a devolver `Result`. Fora de aspas e de
+    comentário, ela recusa o caractere `'"'` (e `'\"'`) e a string crua que
+    começa palavra: `r"`, `r#…#"`, `br"` e `br#…#"`, pela função
+    `string_crua`. O `r#tipo`, identificador cru, passa.
+  - `sem_comentarios_lido` faz o guarda reprovar com frase própria, e os dois
+    recortes (`corpo` e `fecho_do_app_run`) passam por ela. O doc diz isso.
+- **A prova:** a reversão da re-revisão ficou vermelha nos dois guardas, com
+  «o corpo de `despedir_se` tem `'"'`, e o leitor de comentários deste guarda
+  não lê esse trecho com segurança: um comentário pode passar por código. …».
+  Também vermelhas, com a mesma frase para o perigo de cada uma:
+  `let _crua = r"x";` e `let _crua = r#"x"#;`.
+- **Conferido:** nenhum dos três recortes lidos tem algum desses perigos no
+  código: os corpos de `despedir_se` e de `despedir_da_sessao`, e o fim de
+  `main` desde `app.run`. Os dois guardas passam no `main.rs` de `f337eac1…`.
+
+### O que rodou
+
+- `--test encerramento`: 2 de 2.
+- `--bin seele-app despedir`: 4 de 4.
+- `--test frontend`: 268.
+- `cargo fmt --all -- --check` limpo; `cargo clippy -p seele-app --all-targets
+  --all-features -- -D warnings` limpo (o aviso do linker é ambiental).
