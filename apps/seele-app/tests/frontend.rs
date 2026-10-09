@@ -16482,3 +16482,39 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
          abertos"
     );
 }
+
+/// **O gancho de pânico é instalado, e logo depois do assinante do log.**
+/// F1-audio-panico.
+///
+/// O teste `um_panico_numa_thread_deixa_linha_no_log`, no binário, prova o que o
+/// gancho escreve, e chama ele mesmo a instalação: um `main` que deixasse de
+/// chamá-la passaria por ele, e o `seele.log` voltaria a não ter linha nenhuma
+/// sobre a thread que morreu. «Existir não é funcionar.»
+///
+/// A ordem também importa: o gancho escreve pelo `tracing`, e instalado antes
+/// do assinante um pânico ainda no arranque iria para lugar nenhum.
+#[test]
+fn o_gancho_de_panico_e_instalado_logo_depois_do_assinante_do_log() {
+    let corpo = body_of(&read("src/main.rs"), "fn main() {");
+    let Some(instala) = corpo.find("instalar_gancho_de_panico();") else {
+        panic!(
+            "`main` não instala o gancho de pânico: um pânico numa thread solta — a \
+             que abre o áudio, a da voz — volta a sumir sem linha no `seele.log`"
+        );
+    };
+    let Some(assinante) = corpo.find(".init()") else {
+        panic!("`main` não arma mais o assinante do log, e este guarda mediu outra coisa");
+    };
+    assert!(
+        assinante < instala,
+        "o gancho de pânico é instalado antes do assinante do log: um pânico nesse \
+         intervalo não tem onde ser escrito"
+    );
+    let Some(janela) = corpo.find("tauri::Builder::default()") else {
+        panic!("`main` não monta mais a janela, e este guarda mediu outra coisa");
+    };
+    assert!(
+        instala < janela,
+        "o gancho de pânico é instalado depois de a janela começar a subir"
+    );
+}
