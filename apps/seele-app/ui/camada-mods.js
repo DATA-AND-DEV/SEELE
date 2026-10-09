@@ -196,8 +196,11 @@ function fecharAceiteDeMods() {
  * isso o laço periódico continua sem baixar nada por conta própria.
  */
 async function aceitarOsMods() {
-  if (!aceitePendente) return;
-  const { alvo, conjunto, mods } = aceitePendente;
+  // A pergunta que este sim responde, guardada para ser conferida de novo
+  // antes da volta: ver o fim desta função.
+  const pergunta = aceitePendente;
+  if (!pergunta) return;
+  const { alvo, conjunto, mods } = pergunta;
   const botao = $("mods-aceitar");
   const erro = $("mods-erro");
   botao.disabled = true;
@@ -224,17 +227,30 @@ async function aceitarOsMods() {
     return;
   }
 
+  // **Quem fechou a pergunta enquanto o conjunto chegava desistiu, e a volta
+  // não sai** — lote R da F5.
+  //
+  // A obtenção leva tempo, e a pergunta continua aberta durante ela: RECUSAR,
+  // Escape e clicar fora seguem à mão, e as três dizem a mesma coisa — sair da
+  // pergunta não entra em lugar nenhum. Esta função seguia em frente mesmo
+  // assim, e a janela entrava sozinha quando o pacote terminava de chegar, por
+  // cima de uma tela que a pessoa tinha largado.
+  //
+  // Pela identidade, e não por «há uma pergunta aberta»: uma pergunta nova,
+  // de outra batida, não é a que este sim respondeu.
+  if (aceitePendente !== pergunta) return;
+
   // **A credencial da tentativa vai junto, para o mesmo alvo** — lote R da F5.
   //
   // Esta volta não é uma reconexão: é a mesma tentativa, que o servidor recusou
   // antes de gastar o convite. Ia sem ele, e num servidor fechado por convite e
   // sem portaria recebia CREDENCIAL RECUSADA — a pessoa aceitava e não entrava.
   //
-  // Lida da pergunta **agora**, e não no começo desta função: a obtenção acima
-  // leva tempo, e quem fechou a pergunta nesse meio desistiu — a credencial já
-  // foi esquecida, e não é daqui que ela volta. Depois de lida, fechar a
-  // pergunta a esquece; daqui em diante ela existe só como argumento desta
-  // volta, e some com ela, entre a pessoa ou não.
+  // Lida da pergunta aberta **agora**, e não no começo desta função: quem
+  // desistiu durante a obtenção já teve a credencial esquecida, e ela não volta
+  // de uma cópia tirada antes. Depois de lida, fechar a pergunta a esquece;
+  // daqui em diante ela existe só como argumento desta volta, e some com ela,
+  // entre a pessoa ou não.
   const credencial = aceitePendente?.credencial ?? null;
   fecharAceiteDeMods();
   // A mesma porta de sempre. O aceite já está em disco, então esta tentativa

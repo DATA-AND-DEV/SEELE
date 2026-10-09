@@ -93,6 +93,29 @@ function conectsFeitos(page) {
   return page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').map(c => c.args));
 }
 
+/**
+ * A credencial que a pergunta dos MODs guarda agora, ou `null`.
+ *
+ * `aceitePendente` é o único lugar onde ela mora entre a batida e a volta
+ * (`camada-mods.js`). Lida pelo nome porque «esquecida» quer dizer isto: o
+ * lugar que a guardava não a guarda mais.
+ */
+function credencialGuardada(page) {
+  return page.evaluate(() => aceitePendente?.credencial ?? null);
+}
+
+/** Um ponto do véu da pergunta que não é a caixa: onde clicar fora. */
+function pontoDoVeu(page) {
+  return page.evaluate(() => {
+    const veu = document.getElementById('mods-aceite');
+    const caixa = veu.getBoundingClientRect();
+    for (const [x, y] of [[caixa.left + 4, caixa.bottom - 4], [caixa.right - 4, caixa.bottom - 4], [caixa.left + 4, caixa.top + 40]]) {
+      if (document.elementFromPoint(x, y) === veu) return { x, y };
+    }
+    return null;
+  });
+}
+
 /** Uma batida nova, a partir da tela de entrada, com o convite colado. */
 async function baterComOConvite(page) {
   await page.evaluate(([alvo, convite]) => {
@@ -175,6 +198,56 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   const reconexao = (await conectsFeitos(page))[2];
   assert.equal(reconexao.joinSecret ?? null, null,
     'o RECONECTAR de uma sessão que entrou levou o convite: reenviá-lo é gastar de novo o que já foi gasto');
+
+  // ---- 4. Desistir esquece, por qualquer das três portas da pergunta.
+  const desistencias = [
+    ['RECUSAR E VOLTAR', () => page.click('#mods-recusar')],
+    ['Escape', () => page.keyboard.press('Escape')],
+    ['clicar fora', async () => {
+      const ponto = await pontoDoVeu(page);
+      assert.ok(ponto, 'não achei um ponto do véu da pergunta fora da caixa, e clicar fora não foi medido');
+      await page.mouse.click(ponto.x, ponto.y);
+    }],
+  ];
+  for (const [porta, desistir] of desistencias) {
+    await baterComOConvite(page);
+    assert.equal(await credencialGuardada(page), CONVITE_R,
+      `com a pergunta aberta, a credencial não está guardada nela, e desistir por ${porta} não mede nada`);
+    await desistir();
+    await page.waitForFunction(() => document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+      .catch(() => assert.fail(`desistir por ${porta} não fechou a pergunta dos MODs`));
+    assert.equal(await credencialGuardada(page), null,
+      `desistir por ${porta} fechou a pergunta e deixou a credencial da tentativa na memória da janela`);
+  }
+
+  // ---- 5. Desistir enquanto o MOD chega também esquece, e não entra.
+  //
+  // A obtenção leva tempo, e a pergunta continua aberta durante ela: RECUSAR,
+  // Escape e clicar fora seguem à mão. Quem desiste nesse meio não pode ver a
+  // janela entrar sozinha quando o pacote termina de chegar — «sair da
+  // pergunta não entra em lugar nenhum» — e muito menos com a credencial que
+  // desistir esqueceu.
+  await page.evaluate(() => { testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 600; });
+  await baterComOConvite(page);
+  const antesDoAceite = (await conectsFeitos(page)).length;
+  const conferenciasAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'mods_instalados').length);
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(() => testCalls.some(c => c.cmd === 'instalar_mod_do_catalogo'), null, { timeout: 3000 });
+  await page.click('#mods-recusar');
+  // A obtenção termina e confere o que chegou (a segunda leitura da lista); o
+  // que viria depois dela é a volta.
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'mods_instalados').length >= antes + 2,
+    conferenciasAntes, { timeout: 3000 },
+  );
+  await page.waitForTimeout(400);
+  const depoisDoAceite = await conectsFeitos(page);
+  assert.equal(depoisDoAceite.length, antesDoAceite,
+    'a pessoa fechou a pergunta enquanto o MOD chegava, e a janela entrou mesmo assim' +
+    (depoisDoAceite.at(-1)?.joinSecret === CONVITE_R ? ', com a credencial que desistir devia ter esquecido' : ''));
+  assert.equal(await credencialGuardada(page), null,
+    'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
+  await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
 
   assert.deepEqual(erros, [], 'a cena do lote R lançou erro na página');
   await page.close();
@@ -391,5 +464,7 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
-    console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');  } finally { await browser.close(); server.close(); }
+    console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');
+    console.log('lote R: desistir da pergunta (RECUSAR, Escape, clicar fora, ou no meio da obtenção) esquece a credencial e não entra');
+  } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
