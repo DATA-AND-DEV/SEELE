@@ -779,3 +779,61 @@ Continua **pausada**. Falta rodar sobre o topo, um arquivo por vez, com
   cada desenho, poderia trocar o que se está escrevendo.
 - **Os campos da portaria** ficam como estão: são da hospedagem desta máquina,
   e não da sessão.
+
+## O merge do `0.16/lotes` e a conformidade
+
+*Esta seção fecha as três seções «A conformidade» de cima, que diziam
+«pendente».*
+
+**O merge.** Liberada a conformidade, a coordenação pediu o `0.16/lotes` de
+`7f7ddb71` antes, para a conformidade rodar uma vez só sobre o estado final.
+Ele traz a `versao/0.16` de `c8b3cd47`:
+- a extração do executor da F4 para `crates/seele-motor`, em que `executor.rs`
+  fica com o embrulho da thread e os testes;
+- o duble da carga da casca da F8;
+- o guarda do `publicar.sh`.
+
+O merge foi `2a94feb0`, sem conflito. O único arquivo que os dois lados mexeram
+é `apps/seele-app/src/main.rs`, e o Git o juntou sozinho. Conferi que o que
+este lote pôs nele continua lá:
+- `connection.vestir_as_escolhas_gravadas(&ajustes)` no `connect`;
+- o comando `volumes_locais`;
+- o registro do comando no `generate_handler!`.
+
+Este lote não tinha tocado em `executor.rs`.
+
+**Os crates, sobre o estado mesclado:**
+- `seele-ffi --lib`: 159 verdes, 1 ignorado de antes;
+- `seele-core --lib`: 511;
+- `seele-app --bin seele-app`: 268. Eram 274 antes do merge. A diferença é
+  exatamente os seis testes que o merge tirou de `executor.rs` e `main.rs` (o
+  `git diff` de `5bf05b97` a `2a94feb0` nesses dois arquivos tira seis `#[test]`
+  e não acrescenta nenhum), que foram com a extração para `seele-motor`;
+- `--test frontend`: 279;
+- `cargo xtask check-runtime`: verde;
+- `cargo fmt --all -- --check` e o clippy de `seele-audio`, `seele-core`,
+  `seele-ffi`, `seele-app` e `seele-conformance` com `-D warnings`: limpos.
+
+**A bancada** `conversa-com-estado.cjs`, sobre o estado mesclado: as nove cenas
+verdes — R03, R05, R06, C, M-3, F1-vazamento, M-1 em voo, I-1, e M-1 com a
+revisão coincidente.
+
+**A conformidade**, sobre `2a94feb0`, um arquivo por vez, com
+`-- --test-threads=1`, nesta ordem, 30 testes, todos verdes:
+
+| arquivo | testes | verdes |
+|---|---|---|
+| `voz_na_reconexao` | 1 | 1 |
+| `a_recusa_nao_tira_da_sala` | 5 | 5 |
+| `acceptance_m5` | 15 | 15 |
+| `saida_com_despedida` | 3 | 3 |
+| `moderacao` | 6 | 6 |
+
+O que cada um confirma deste lote:
+- **`acceptance_m5`** inclui `the_volume_of_a_stranger_is_refused_by_name`,
+  que pegou a ordem das recusas de `set_volume` só pela leitura, no `790dbf3d`.
+- **`a_recusa_nao_tira_da_sala`** traz o M5 (o apelido tomado com o
+  `PedidoRecusado`) e o M6 (o servidor que sobe de novo), com o acréscimo D na
+  regra do assento.
+- **`moderacao`** traz `mover_leva_a_pessoa_e_a_conta_na_sala_nova`, o caminho
+  do `MovedByOperator` cuja frase mudou na rodada 1 (M-5).
