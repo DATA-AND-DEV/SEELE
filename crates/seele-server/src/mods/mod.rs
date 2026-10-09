@@ -386,6 +386,50 @@ fn tamanho_no_registro(c: char) -> usize {
 }
 
 /// One MOD's runtime, and the step counter its interrupt handler reads.
+/// O que o manifesto de um MOD abre para a metade de servidor dele.
+///
+/// Uma estrutura, e não um `bool` solto, porque é aqui que as portas seguintes
+/// entram sem mudar quem chama: cada uma é uma linha do manifesto que quem
+/// revisa o pacote lê, e que a tela de aceite mostra.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Portas {
+    /// `"tema": true`: pode chamar `mundo.tema` (rascunho da API 6, §9).
+    pub tema: bool,
+}
+
+/// A metade de servidor de um MOD, como o disco a entrega ao anfitrião.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadeDeServidor {
+    /// `autor/nome`.
+    pub id: String,
+    /// O código da metade de servidor.
+    pub fonte: String,
+    /// A pasta mutável da instância (`RaizesDosMods::dados_de`).
+    pub pasta: std::path::PathBuf,
+    /// O que o manifesto dos mesmos bytes abre.
+    pub portas: Portas,
+}
+
+/// Uma metade sem porta nenhuma: a forma que os testes do despachante já
+/// escrevem, e que continua valendo para quem não precisa de porta.
+impl From<(String, String, std::path::PathBuf)> for MetadeDeServidor {
+    fn from((id, fonte, pasta): (String, String, std::path::PathBuf)) -> Self {
+        Self {
+            id,
+            fonte,
+            pasta,
+            portas: Portas::default(),
+        }
+    }
+}
+
+/// O tema que um MOD declarou numa chamada que terminou.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemaDeclarado {
+    /// O JSON do tema, até `MAX_CARGA_DE_MOD`; `None` quando o MOD o tirou.
+    pub valores: Option<String>,
+}
+
 struct Hospede {
     contexto: Context,
     passos: Arc<AtomicUsize>,
@@ -414,6 +458,16 @@ pub struct Anfitriao {
     /// Um valor só, e não um por MOD, porque `pedir` toma `&mut self`: há um
     /// pedido em curso por vez, e este campo vale exatamente enquanto ele dura.
     atendendo: Arc<std::sync::Mutex<Option<seele_proto::ids::PersonId>>>,
+    /// O MOD que pinta este servidor agora, posto pelo servidor antes da
+    /// chamada (ver [`Self::saber_quem_pinta`]).
+    ///
+    /// **Um tema por servidor**: com outro MOD aqui, `mundo.tema` recusa pelo
+    /// nome na própria chamada, que é onde o MOD consegue ler a recusa. A
+    /// conferência que vale é a do banco, na gravação
+    /// (`persistence::tema::declarar`); esta é a que responde ao MOD.
+    pintor: Arc<std::sync::Mutex<Option<String>>>,
+    /// O tema declarado na chamada em curso, que só sai daqui se ela terminar.
+    declarado: Arc<std::sync::Mutex<Option<TemaDeclarado>>>,
 }
 
 impl Anfitriao {
@@ -448,6 +502,8 @@ impl Anfitriao {
             teto_de_consultas: consultas,
             esperas: Arc::new(std::sync::Mutex::new(volume::Esperas::default())),
             atendendo: Arc::new(std::sync::Mutex::new(None)),
+            pintor: Arc::new(std::sync::Mutex::new(None)),
+            declarado: Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -469,6 +525,25 @@ impl Anfitriao {
         fonte: &str,
         pasta_de_dados: &std::path::Path,
     ) -> Result<(), Falha> {
+        self.carregar_com_portas(id, fonte, pasta_de_dados, Portas::default())
+    }
+
+    /// [`Self::carregar`], com as portas que o manifesto do MOD abre.
+    ///
+    /// As portas entram **ao carregar**, e não a cada chamada: as ligações do
+    /// QuickJS são montadas aqui, e o manifesto é o dos bytes do hash, que não
+    /// muda enquanto o código carregado for o mesmo.
+    ///
+    /// # Errors
+    ///
+    /// As de [`Self::carregar`].
+    pub fn carregar_com_portas(
+        &mut self,
+        id: &str,
+        fonte: &str,
+        pasta_de_dados: &std::path::Path,
+        portas: Portas,
+    ) -> Result<(), Falha> {
         let runtime = Runtime::new().map_err(|erro| Lancado::do_motor(&erro).ao_carregar())?;
         runtime.set_memory_limit(self.teto_de_memoria);
 
@@ -485,7 +560,7 @@ impl Anfitriao {
         // A falha é lida **dentro** do `with`: a exceção pendente é do MOD, e
         // fora dele ela já não tem de onde ser lida. Ver `falha_da_volta`.
         contexto.with(|ctx| {
-            self.montar(&ctx, id, pasta_de_dados, fonte)
+            self.montar(&ctx, id, pasta_de_dados, fonte, portas)
                 .map_err(|erro| falha_da_volta(&ctx, &passos, teto, &erro, Lancado::ao_carregar))
         })?;
 
@@ -505,12 +580,13 @@ impl Anfitriao {
     ///
     /// Separado de [`Self::carregar`] para a falha ser lida ainda dentro do
     /// `contexto.with`, onde a exceção pendente existe.
-    fn montar(
+    fn montar<'js>(
         &self,
-        ctx: &rquickjs::Ctx<'_>,
+        ctx: &rquickjs::Ctx<'js>,
         id: &str,
         pasta: &std::path::Path,
         fonte: &str,
+        portas: Portas,
     ) -> rquickjs::Result<()> {
         // A pasta do MOD, e nada além dela. Ver `arquivos` para por que o disco
         // é a única exceção à liberdade total do ADR 0045.
@@ -634,6 +710,46 @@ impl Anfitriao {
                 mundo::registrar(&quem, &linha);
             })?,
         )?;
+        // O tema do servidor (rascunho da API 6, §9). A chamada **declara**, e
+        // não publica: o que ela guarda só sai daqui se a chamada terminar,
+        // como o quintal, e quem grava e manda a todos é o servidor.
+        let porta = portas.tema;
+        let pintor = Arc::clone(&self.pintor);
+        let declarado = Arc::clone(&self.declarado);
+        let quem = id.to_owned();
+        mundo_js.set(
+            "tema",
+            Function::new(
+                ctx.clone(),
+                move |ctx: rquickjs::Ctx<'js>,
+                      valores: rquickjs::Value<'js>|
+                      -> rquickjs::Result<rquickjs::Object<'js>> {
+                    let resposta = rquickjs::Object::new(ctx.clone())?;
+                    let recusa = mundo::recusa_do_tema(
+                        porta,
+                        pintor.lock().ok().and_then(|p| p.clone()).as_deref(),
+                        &quem,
+                    );
+                    let declaracao = match recusa {
+                        Some(nome) => Err(nome),
+                        None => mundo::valores_do_tema(&ctx, valores)?,
+                    };
+                    match declaracao {
+                        Err(nome) => {
+                            resposta.set("ok", false)?;
+                            resposta.set("erro", nome)?;
+                        }
+                        Ok(tema) => {
+                            if let Ok(mut guardado) = declarado.lock() {
+                                *guardado = Some(tema);
+                            }
+                            resposta.set("ok", true)?;
+                        }
+                    }
+                    Ok(resposta)
+                },
+            )?,
+        )?;
         ctx.globals().set("mundo", mundo_js)?;
 
         ctx.eval::<(), _>(fonte)
@@ -670,6 +786,7 @@ impl Anfitriao {
         // Each call gets the whole budget: a MOD that was slow once is not a
         // MOD that is broken forever.
         hospede.passos.store(0, Ordering::Relaxed);
+        self.esquecer_o_tema();
 
         let resultado = hospede.contexto.with(|ctx| {
             // The yard goes in as a plain object and comes back as one.
@@ -709,6 +826,9 @@ impl Anfitriao {
         // none, and the MOD has no way to know which half landed.
         if resultado.is_ok() {
             self.recolher_quintal(id, quintal)?;
+            self.assumir_a_porta_se_declarou(id);
+        } else {
+            self.esquecer_o_tema();
         }
         resultado
     }
@@ -725,6 +845,7 @@ impl Anfitriao {
     ) -> Result<String, Falha> {
         let hospede = self.hospedes.get(id).ok_or(Falha::NaoCarregadoAqui)?;
         hospede.passos.store(0, Ordering::Relaxed);
+        self.esquecer_o_tema();
 
         // **Quem está sendo atendido, dito pelo servidor.** É contra isto que
         // `volume.esperar` prende a autorização; ver o campo `atendendo`.
@@ -760,12 +881,56 @@ impl Anfitriao {
         if let Ok(mut atendendo) = self.atendendo.lock() {
             *atendendo = None;
         }
-        let resposta = resposta?;
+        let resposta = resposta.inspect_err(|_| self.esquecer_o_tema())?;
         if resposta.len() > 1024 * 1024 {
+            self.esquecer_o_tema();
             return Err(Falha::QuintalCheio);
         }
-        self.recolher_quintal(id, quintal)?;
+        self.recolher_quintal(id, quintal)
+            .inspect_err(|_| self.esquecer_o_tema())?;
+        self.assumir_a_porta_se_declarou(id);
         Ok(resposta)
+    }
+
+    /// Diz quem pinta este servidor agora: o MOD escolhido, se estiver ligado
+    /// (`persistence::tema::escolhido_ligado`).
+    ///
+    /// Posto pelo servidor **antes** da chamada, como a pessoa atendida: o MOD
+    /// não alcança o banco, e é com isto que `mundo.tema` responde
+    /// `tema-de-outro-mod` na hora.
+    pub fn saber_quem_pinta(&mut self, escolhido: Option<String>) {
+        if let Ok(mut pintor) = self.pintor.lock() {
+            *pintor = escolhido;
+        }
+    }
+
+    /// O tema que a última chamada declarou, se ela terminou — tirado daqui.
+    ///
+    /// Quem chama grava (`persistence::tema::declarar`) e manda a todos. Uma
+    /// chamada que falhou não deixa nada para tomar.
+    pub fn tomar_tema_declarado(&mut self) -> Option<TemaDeclarado> {
+        self.declarado.lock().ok().and_then(|mut d| d.take())
+    }
+
+    fn esquecer_o_tema(&self) {
+        if let Ok(mut declarado) = self.declarado.lock() {
+            *declarado = None;
+        }
+    }
+
+    /// **Dentro de um mesmo momento, o primeiro que declara passa a pintar.**
+    ///
+    /// O despachante entrega um momento a todo MOD ligado, um depois do outro,
+    /// com o escolhido lido do banco antes. Sem isto, dois MODs com a porta
+    /// num servidor ainda sem tema ouviriam os dois `ok` no mesmo momento, e o
+    /// segundo só descobriria na gravação — onde a recusa já não volta a ele.
+    fn assumir_a_porta_se_declarou(&self, id: &str) {
+        let declarou = self.declarado.lock().is_ok_and(|d| d.is_some());
+        if declarou {
+            if let Ok(mut pintor) = self.pintor.lock() {
+                pintor.get_or_insert_with(|| id.to_owned());
+            }
+        }
     }
 
     /// As autorizações de escrita por fluxo — ADR 0048.
@@ -840,7 +1005,7 @@ impl Anfitriao {
 
 /// Reads the server halves of the MODs this server has on.
 ///
-/// Returns `(id, source, data folder)` per MOD, skipping the ones with no
+/// Returns one [`MetadeDeServidor`] per MOD, skipping the ones with no
 /// server half — a MOD that is only appearance has nothing to run here, and
 /// that is not a failure.
 ///
@@ -851,7 +1016,7 @@ impl Anfitriao {
 pub fn carregar_do_disco(
     raizes: &crate::RaizesDosMods,
     exigidos: &[(String, String)],
-) -> (Vec<(String, String, std::path::PathBuf)>, Vec<String>) {
+) -> (Vec<MetadeDeServidor>, Vec<String>) {
     let mut prontos = Vec::new();
     let mut queixas = Vec::new();
 
@@ -874,6 +1039,9 @@ pub fn carregar_do_disco(
                 continue;
             }
         };
+        let portas = Portas {
+            tema: manifesto.tema,
+        };
         let Some(metade) = manifesto.server else {
             continue;
         };
@@ -884,7 +1052,12 @@ pub fn carregar_do_disco(
             continue;
         };
         // A pasta mutável é da **instância**, e não sai de dentro do pacote.
-        prontos.push((id.clone(), fonte, raizes.dados_de(id)));
+        prontos.push(MetadeDeServidor {
+            id: id.clone(),
+            fonte,
+            pasta: raizes.dados_de(id),
+            portas,
+        });
     }
     (prontos, queixas)
 }
@@ -1905,5 +2078,206 @@ mod tests {
         anfitriao
             .chamar("seele/mudo", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("um MOD calado virou falha");
+    }
+
+    /// Um MOD cujo `aoPedir` chama `mundo.tema` com o que o pedido trouxe e
+    /// devolve, como texto, o que a chamada respondeu.
+    const DECLARA_O_QUE_PEDIREM: &str = "globalThis.aoPedir = (contexto, pedido) => \
+         JSON.stringify(mundo.tema(JSON.parse(pedido).tema));";
+
+    fn pedir_tema(anfitriao: &mut Anfitriao, id: &str, tema: &str) -> String {
+        anfitriao
+            .pedir(
+                id,
+                seele_proto::ids::PersonId(7),
+                "{}",
+                &format!(r#"{{"tema":{tema}}}"#),
+                &mut BTreeMap::new(),
+            )
+            .expect("o pedido falhou")
+    }
+
+    fn com_a_porta(id: &str, fonte: &str) -> Anfitriao {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar_com_portas(id, fonte, &pasta_de_teste("tema"), Portas { tema: true })
+            .expect("carregar");
+        anfitriao
+    }
+
+    /// **A porta é o manifesto** (rascunho da API 6, §9). Um MOD sem
+    /// `"tema": true` recebe a recusa pelo nome, como resposta, e nada fica
+    /// declarado — em vez de uma exceção que o MOD não sabe ler, ou de um tema
+    /// que ninguém autorizou.
+    #[test]
+    fn um_mod_sem_a_porta_recebe_a_recusa_pelo_nome_e_nao_declara() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar(
+                "seele/perfis",
+                DECLARA_O_QUE_PEDIREM,
+                &pasta_de_teste("tema"),
+            )
+            .expect("carregar");
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "seele/perfis", r##"{"acento":"#c86b1f"}"##),
+            r#"{"ok":false,"erro":"sem-porta-de-tema"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    #[test]
+    fn um_mod_com_a_porta_declara_o_tema_e_o_tira_com_null() {
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "seele/estilo", r##"{"acento":"#c86b1f"}"##),
+            r#"{"ok":true}"#
+        );
+        assert_eq!(
+            anfitriao.tomar_tema_declarado(),
+            Some(TemaDeclarado {
+                valores: Some(r##"{"acento":"#c86b1f"}"##.to_owned())
+            })
+        );
+        // Tomado uma vez: o pedido seguinte que não declara não repete o tema.
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "seele/estilo", "null"),
+            r#"{"ok":true}"#
+        );
+        assert_eq!(
+            anfitriao.tomar_tema_declarado(),
+            Some(TemaDeclarado { valores: None })
+        );
+    }
+
+    /// **Um tema por servidor.** Com outro MOD pintando, a recusa volta pelo
+    /// nome na própria chamada, e o MOD pode dizê-lo na tela.
+    #[test]
+    fn com_outro_mod_pintando_a_recusa_e_tema_de_outro_mod() {
+        let mut anfitriao = com_a_porta("outro/tema", DECLARA_O_QUE_PEDIREM);
+        anfitriao.saber_quem_pinta(Some("seele/estilo".to_owned()));
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "outro/tema", r##"{"acento":"#331704"}"##),
+            r#"{"ok":false,"erro":"tema-de-outro-mod"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+
+        // O próprio escolhido continua podendo.
+        let mut escolhido = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        escolhido.saber_quem_pinta(Some("seele/estilo".to_owned()));
+        assert_eq!(
+            pedir_tema(&mut escolhido, "seele/estilo", r##"{"acento":"#331704"}"##),
+            r#"{"ok":true}"#
+        );
+    }
+
+    /// O tema não é texto, número nem lista: é o objeto do tema, ou `null`. E
+    /// cabe no fio: maior que `MAX_CARGA_DE_MOD`, o `TemaMudou` nem sairia.
+    #[test]
+    fn o_que_nao_e_objeto_ou_nao_cabe_no_fio_e_recusado_pelo_nome() {
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        for invalido in [r##""#c86b1f""##, "3", r#"["acento"]"#, "true"] {
+            assert_eq!(
+                pedir_tema(&mut anfitriao, "seele/estilo", invalido),
+                r#"{"ok":false,"erro":"tema-invalido"}"#,
+                "aceitou {invalido}"
+            );
+            assert_eq!(anfitriao.tomar_tema_declarado(), None);
+        }
+        let grande = format!(
+            r#"{{"acento":"{}"}}"#,
+            "a".repeat(seele_proto::control::MAX_CARGA_DE_MOD)
+        );
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "seele/estilo", &grande),
+            r#"{"ok":false,"erro":"tema-grande-demais"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// **Como o quintal: só o que terminou vale.** Um MOD que declara e lança
+    /// depois não publica meio pedido — ele não tem como saber que o tema
+    /// saiu, e a pessoa leria uma aparência que o MOD acha que não mandou.
+    #[test]
+    fn um_mod_que_declara_e_lanca_depois_nao_publica_o_tema() {
+        let mut anfitriao = com_a_porta(
+            "seele/estilo",
+            "globalThis.aoPedir = () => { mundo.tema({ acento: '#c86b1f' }); \
+             throw new Error('depois'); };",
+        );
+        assert!(anfitriao
+            .pedir(
+                "seele/estilo",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .is_err());
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// O mesmo pelo caminho dos eventos: `aoAcontecer` também declara, e o
+    /// tema de um momento que terminou fica para quem chamou tomar.
+    #[test]
+    fn um_momento_tambem_declara_o_tema() {
+        let mut anfitriao = com_a_porta(
+            "seele/estilo",
+            "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };",
+        );
+        anfitriao
+            .chamar("seele/estilo", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect("o momento falhou");
+        assert_eq!(
+            anfitriao.tomar_tema_declarado(),
+            Some(TemaDeclarado {
+                valores: Some(r##"{"acento":"#c86b1f"}"##.to_owned())
+            })
+        );
+    }
+
+    /// **O tema é da chamada que o declarou, e de nenhuma outra.** O
+    /// despachante entrega um momento a todo MOD ligado no mesmo anfitrião; um
+    /// tema que ficasse aqui sem ser tomado seria lido depois da chamada do
+    /// vizinho como se fosse dele — e gravado em nome de um MOD sem a porta.
+    #[test]
+    fn um_tema_nao_tomado_nao_passa_para_a_chamada_do_vizinho() {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar_com_portas(
+                "seele/estilo",
+                "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };",
+                &pasta_de_teste("tema"),
+                Portas { tema: true },
+            )
+            .expect("carregar");
+        anfitriao
+            .carregar(
+                "seele/perfis",
+                "globalThis.aoAcontecer = () => {};",
+                &pasta_de_teste("tema"),
+            )
+            .expect("carregar");
+        for id in ["seele/estilo", "seele/perfis"] {
+            anfitriao
+                .chamar(id, "PersonJoined", "{}", &mut BTreeMap::new())
+                .expect("o momento falhou");
+        }
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+
+        // E pelo caminho dos pedidos, que também pode ver dois MODs.
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        anfitriao
+            .carregar(
+                "seele/perfis",
+                "globalThis.aoPedir = () => '{}';",
+                &pasta_de_teste("tema"),
+            )
+            .expect("carregar");
+        pedir_tema(&mut anfitriao, "seele/estilo", r##"{"acento":"#c86b1f"}"##);
+        pedir_tema(&mut anfitriao, "seele/perfis", "null");
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
     }
 }

@@ -322,7 +322,8 @@ pub const MAX_CARGA_DE_MOD: usize = 12 * 1024;
 /// declara, o produto mede (ADR 0029).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemaDoServidor {
-    /// O MOD que pediu o tema, que é quem tem o ponto `servidor.aparencia`.
+    /// O MOD que declarou o tema: o que o manifesto autoriza (`"tema": true`)
+    /// e quem administra escolheu, um por servidor (rascunho da API 6, §9).
     pub mod_id: String,
     /// O JSON do tema, como o `v6.json` o define. Até [`MAX_CARGA_DE_MOD`].
     pub valores: String,
@@ -1053,6 +1054,50 @@ pub enum AlertReason {
         /// escreve a sentença, para poder traduzi-la (ADR 0012).
         apagadas: u64,
     },
+    /// O servidor não conseguiu fazer um pedido que a pessoa podia fazer.
+    ///
+    /// Até a 0.15 estes casos saíam como [`Self::VoiceRoomEntryRefused`] — renomear
+    /// uma sala, trocar de apelido, apagar uma mensagem que já sumiu —, e quem
+    /// recebia lia «entrada na sala recusada», sobre um pedido que nada tinha a
+    /// ver com sala (revisão do lote I-a da F5, 08/10/2026). A falta de
+    /// permissão continua sendo [`Self::PermissionDenied`], e a última sala,
+    /// [`Self::LastVoiceRoom`].
+    ///
+    /// # Qual pedido
+    ///
+    /// `pedido` é o **ordinal**, em [`ClientMessage`], do pedido recusado, e não
+    /// um enum de verbos: os ordinais da lista de cima são congelados na linha 1
+    /// (`tests/fio_1_0.rs`), e quem recebe sabe o que mandou. Um verbo novo de
+    /// uma 1.x não precisa de portão aqui, porque o cliente só recebe recusa do
+    /// que ele mesmo pediu.
+    ///
+    /// **Com dois pedidos do mesmo tipo em voo, a recusa é do mais antigo.** O
+    /// servidor atende o fluxo de controle de uma conexão em ordem, um quadro
+    /// por vez, e responde na mesma ordem: quem recebe desfaz o mais antigo dos
+    /// pedidos daquele ordinal que ainda não teve resposta.
+    PedidoRecusado {
+        /// O ordinal do pedido em [`ClientMessage`].
+        pedido: u32,
+        /// Por que não deu.
+        causa: CausaDaRecusa,
+    },
+}
+
+/// Por que o servidor não conseguiu fazer um pedido. Ver
+/// [`AlertReason::PedidoRecusado`].
+///
+/// Três causas, e são as que a pessoa consegue resolver: escolher outro nome,
+/// atualizar o que está vendo, ou tentar mais tarde. O detalhe fica no registro
+/// do servidor. **Congelado** com a linha 1: uma causa nova é ordinal novo no
+/// fim, e só vai a quem a entende (`vocabulario::desde_o_alerta`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CausaDaRecusa {
+    /// O alvo do pedido não existe mais: a sala, o canal ou a mensagem.
+    NaoExiste,
+    /// O nome pedido é de outro: um apelido de outra chave.
+    NomeTomado,
+    /// O servidor falhou ao fazer o que podia ser feito: o banco, quase sempre.
+    FalhaDoServidor,
 }
 
 /// O que uma pessoa consentiu no caminho entre pares — as duas metades do §5,
@@ -2755,6 +2800,29 @@ fn ler_ordinal(corpo: &[u8]) -> Option<u32> {
         }
     }
     None
+}
+
+/// O ordinal da variante de um quadro de controle, sem decodificá-lo.
+///
+/// É o que o servidor guarda de cada pedido para dizer **qual** foi recusado
+/// ([`AlertReason::PedidoRecusado`]). `None` para um quadro vazio ou com um
+/// varint que não termina.
+#[must_use]
+pub fn ordinal_do_quadro(quadro: &[u8]) -> Option<u32> {
+    quadro
+        .split_first()
+        .and_then(|(_, corpo)| ler_ordinal(corpo))
+}
+
+/// O nome, em [`ClientMessage`], do pedido de ordinal `pedido`.
+///
+/// É por nome que a casca escreve a frase de um [`AlertReason::PedidoRecusado`]
+/// e acha o pedido a desfazer. `None` para um ordinal que esta build não
+/// conhece.
+#[must_use]
+pub fn nome_do_pedido(pedido: u32) -> Option<&'static str> {
+    crate::vocabulario::variantes::<ClientMessage>()
+        .and_then(|nomes| nomes.get(usize::try_from(pedido).ok()?).copied())
 }
 
 /// Quantas mensagens desconhecidas um fluxo pulou.
@@ -6095,5 +6163,36 @@ mod o_assento_do_e2ee {
             decode::<ServerMessage>(&encode(&perfil(None)).unwrap()).unwrap(),
             perfil(None)
         );
+    }
+}
+
+#[cfg(test)]
+mod o_ordinal_do_quadro {
+    //! O ordinal que o servidor guarda de cada pedido, para dizer qual foi
+    //! recusado (`AlertReason::PedidoRecusado`).
+    use super::*;
+
+    #[test]
+    fn e_o_ordinal_que_o_serde_conta() {
+        let quadro = encode(&ClientMessage::SetNickname {
+            name: "maya".into(),
+        })
+        .unwrap();
+        let nomes = crate::vocabulario::variantes::<ClientMessage>().unwrap();
+        let posicao = nomes
+            .iter()
+            .position(|nome| *nome == "SetNickname")
+            .unwrap();
+        assert_eq!(ordinal_do_quadro(&quadro), u32::try_from(posicao).ok());
+        assert_eq!(ordinal_do_quadro(&quadro), Some(29));
+        assert_eq!(nome_do_pedido(29), Some("SetNickname"));
+        assert_eq!(nome_do_pedido(ClientMessage::CONHECIDAS), None);
+    }
+
+    #[test]
+    fn um_quadro_vazio_ou_cortado_nao_tem_ordinal() {
+        assert_eq!(ordinal_do_quadro(&[]), None);
+        assert_eq!(ordinal_do_quadro(&[PROTOCOL_VERSION]), None);
+        assert_eq!(ordinal_do_quadro(&[PROTOCOL_VERSION, 0x80]), None);
     }
 }

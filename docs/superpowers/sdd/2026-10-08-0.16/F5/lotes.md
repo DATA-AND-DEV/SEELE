@@ -1511,6 +1511,36 @@ Talvez também:
 
 **O lote é grande.** A divisão natural, se não fechar numa sessão: o passo 1 (a abertura na sala, com o prazo e o pânico) numa sessão, e os passos 2 e 3 numa segunda, antes do K4.
 
+**Depois da onda 4 (09/10).**
+- **A divisão foi adotada.** O **I-a** é o passo 1. O **I-b** são os passos 2 e 3, sobre o I-a já integrado. Os dois mexem no mesmo `Shared`, no `lib.rs` da FFI, no `voice.rs` e no `tela-sessao.js`, e por isso não rodam em paralelo. O Snapshot muda só no I-a.
+- **As âncoras que mudaram de lugar:**
+  - `MovedToVoiceRoom`, `VoiceRoomDeleted` e os `Alert` de recusa são aplicados no `seele-core`: em `Room::apply`, no `state.rs`, e no motor do `enlace.rs`, para o `MovedToVoiceRoom`. A FFI não os casa. Ela vê o efeito em `room.current_voice_room`.
+  - `consentimento_do_microfone` mora na FFI, no `seele-core`, no `seele-audio` e em `tela-boot.js`, e não no `main.rs`.
+  - «SEM ÁUDIO» só aparece escrito em `tela-sessao.js`. `tela-server.js` (`if (!snapshot || !snapshot.audio_available)`) e `tela-chamada.js` (`pintarCartao(…, snapshot.audio_available)`) leem o campo sem a frase.
+- **O que a onda 4 deixou e o I mantém:**
+  - na FFI, o aviso da thread da conexão antes do `drop(runtime)`, e `encerrar_e_esperar`, do F;
+  - no `main.rs`, `despedir_da_sessao`, do F;
+  - no `enlace.rs`, a `Esperada` da F7;
+  - em `tela-sessao.js`, a faixa de fone do J, que se fecha na primeira entrada numa sala de voz.
+- **O teste (e) do pânico** usa `with_default` numa thread. Com a pendência 56, ele chama o `segundo_despachante()` do app.
+
+**Da revisão do I-a (09/10).**
+- O servidor manda `VoiceRoomEntryRefused` também quando mantém a pessoa sentada:
+  - numa troca de sala recusada;
+  - a cada volta numa sala com senha;
+  - pelo `nao_deu`, como no apelido tomado.
+- Com a D-52, isso fechava o áudio de quem continuava na sala. A regra do cliente, em `seele-core` (no `Room` e no motor), é esta: uma recusa desfaz só o pedido de entrada **pendente** e devolve o assento de antes. Sem pedido pendente, ela não move ninguém. A orquestradora confirmou que a regra fica.
+- O `nao_deu` passa a `AlertReason::PedidoRecusado { pedido, causa }`, que é fio e é da F1. O `pedido` é o ordinal do pedido recusado em `ClientMessage`.
+  - O I-a não programa contra essa variante, porque ela ainda não está na árvore. Ele só deixa a regra num lugar só.
+  - Quando o `PedidoRecusado` entrar na `versao/0.16`, o primeiro lote da F5 que vier depois o consome. Com isso, uma recusa que nomeia outro pedido não desfaz a entrada.
+- **Para a F1, fora da F5:** recusada por sala cheia, a pessoa passava a ouvir a sala que a recusou. A conformidade que o prova foi entregue à orquestradora: três testes, que hoje dão 1 verde e 2 vermelhos.
+- **No I-b:** a supressão e a sensibilidade salvas em disco passam a valer no connect, e o `ganhos_a_aplicar` cobre os volumes ao reabrir a voz.
+- **No I-b, por pedido da orquestradora (09/10): dois avisos que chegam à tela como «AVISO» seco.** Isso acontece desde antes da 0.16. Quem os achou foi o guarda da F1 `todo_motivo_de_aviso_tem_frase_na_pagina`, no fim do `frontend.rs`, em `29c15a9b`, no `0.16/protocolo`. Os dois estão na lista `AINDA_SEM_FRASE` desse guarda, que só encolhe:
+  - **`MovedByOperator`:** alguém com `MovePerson` mudou a pessoa de sala. Ele precisa de uma frase em `frases.js`;
+  - **`VoiceRoomOverHostUplink { precisa_bps, medido_bps }`:** a sala passou da subida medida de quem hospeda (ADR 0038). Ele leva números, e por isso precisa de um braço em `fraseDoAviso` (`tela-sessao.js`), como o da retenção.
+  - **Se o guarda já estiver na base do I-b** (ele entra na `versao/0.16` na próxima integração, e eu faço o merge antes de despachar o I-b), o I-b tira os dois nomes de `AINDA_SEM_FRASE`. O guarda reprova até a lista encolher.
+  - **Se o guarda ainda não estiver,** o I-b escreve as frases e o braço, e o Z tira os nomes depois que o guarda chegar.
+
 ### 1. D-52 e F1-audio-panico — o áudio abre na sala, numa thread própria, com prazo
 - **O gatilho.**
   - Na FFI, `Connection::enter_voice_room` e `leave_voice_room` mandam `Command::EnterVoiceRoom` e `LeaveVoiceRoom`, e `run_command` os trata (`client.entrar_na_voice_room` + `room.enter_voice_room`, e `room.leave_voice_room`).

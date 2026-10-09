@@ -40,11 +40,25 @@ fn ouro(prefixo: &str) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
+/// Quantas mensagens diferentes os exemplares cobrem.
+///
+/// O arquivo da F1 pode trazer, além de um exemplar por variante, exemplares a
+/// mais de uma mesma variante, com o nome dela seguido de ponto (como
+/// `servidor:Alert.PedidoRecusado`): o guarda dos exemplares da F1 confere a
+/// parte antes do ponto. Todos cruzam a ponte; a conta é de variantes.
+fn variantes(quadros: &[(String, Vec<u8>)]) -> usize {
+    quadros
+        .iter()
+        .map(|(nome, _)| nome.split('.').next().unwrap_or(nome))
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+}
+
 #[test]
 fn cada_mensagem_do_cliente_sai_pela_ponte_com_os_bytes_do_fio() {
     let quadros = ouro("cliente:");
     assert_eq!(
-        quadros.len(),
+        variantes(&quadros),
         ClientMessage::CONHECIDAS as usize,
         "o arquivo devia trazer um exemplar de cada mensagem do cliente"
     );
@@ -63,7 +77,7 @@ fn cada_mensagem_do_cliente_sai_pela_ponte_com_os_bytes_do_fio() {
 fn cada_mensagem_do_servidor_chega_pela_ponte_sem_perder_nada() {
     let quadros = ouro("servidor:");
     assert_eq!(
-        quadros.len(),
+        variantes(&quadros),
         ServerMessage::CONHECIDAS as usize,
         "o arquivo devia trazer um exemplar de cada mensagem do servidor"
     );

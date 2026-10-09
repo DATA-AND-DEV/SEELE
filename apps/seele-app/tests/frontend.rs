@@ -16482,3 +16482,129 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
          abertos"
     );
 }
+
+#[test]
+fn todo_motivo_de_aviso_tem_frase_na_pagina() {
+    // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
+    // `NoticeReason` sem frase em `AVISOS` chega à faixa da sessão como a
+    // palavra AVISO e mais nada: o produto sabe o que houve e não conta. Foi o
+    // que o `PedidoRecusado` faria ao entrar, e nenhum guarda cobrava: os que
+    // existiam olhavam motivos escolhidos à mão, um por um.
+    //
+    // Lido da fonte da ponte, e não de uma lista daqui, para a próxima
+    // variante reprovar na rodada em que entrar.
+    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
+        .expect("the bridge's types must be readable")
+        .replace("\r\n", "\n");
+
+    let script = without_comments(&scripts());
+    let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
+        panic!("frases.js no longer declares AVISOS");
+    };
+    let Some(avisos) = avisos.split("\n};").next() else {
+        panic!("AVISOS is never closed");
+    };
+
+    let variantes = variants_of(&ponte, "NoticeReason");
+    assert!(
+        variantes.len() >= 17,
+        "`NoticeReason` came out with {} variants, so this guard is asserting \
+         against almost nothing",
+        variantes.len()
+    );
+
+    // Os que já chegavam sem frase quando este guarda nasceu (09/10/2026), e
+    // que a orquestradora distribui. **A lista só encolhe**: um deles ganhando
+    // frase também reprova, pedindo para sair daqui.
+    const AINDA_SEM_FRASE: &[&str] = &["MovedByOperator", "VoiceRoomOverHostUplink"];
+
+    let mudas: Vec<&String> = variantes
+        .iter()
+        .filter(|variante| !avisos.contains(&format!("{variante}:")))
+        .filter(|variante| !AINDA_SEM_FRASE.contains(&variante.as_str()))
+        .collect();
+    assert!(
+        mudas.is_empty(),
+        "estes motivos de aviso chegam à faixa sem frase escrita, e ela diz só \
+         AVISO: {mudas:?}"
+    );
+    for pendente in AINDA_SEM_FRASE {
+        assert!(
+            variantes.iter().any(|variante| variante == pendente),
+            "`{pendente}` saiu da ponte; tire-o de `AINDA_SEM_FRASE`"
+        );
+        assert!(
+            !avisos.contains(&format!("{pendente}:")),
+            "`{pendente}` ganhou frase em `AVISOS`; tire-o de `AINDA_SEM_FRASE`"
+        );
+    }
+}
+
+/// As capacidades de cada API, as mesmas na casca e no núcleo.
+///
+/// O comentário de `CAPACIDADES_POR_API`, em `base.js`, citava este teste
+/// desde 26ad0c2, e ele não existia: o `git log -S` só achava o comentário
+/// (rascunho da API 6, §2 e §13). A casca confere cada mensagem de um MOD contra
+/// `CAPACIDADES_POR_API`, e o prelúdio monta o `SeeleUI` a partir de
+/// `capacidades_da_api`. Uma capacidade a mais de um lado é o anfitrião
+/// recusando o que o prelúdio ofereceu, ou aceitando o que ele escondeu — e a
+/// API 6 muda as duas listas no corte.
+///
+/// Os dois mapas inteiros são comparados, API por API: uma API ou uma
+/// capacidade que só um dos lados tem reprova.
+#[test]
+fn a_casca_confere_as_mesmas_capacidades_que_o_nucleo() {
+    use std::collections::BTreeMap;
+
+    fn nomes(lista: &str) -> Vec<String> {
+        lista
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect()
+    }
+
+    let rust = read("../../crates/seele-proto/src/mods.rs");
+    let corpo = rust
+        .split_once("pub fn capacidades_da_api(api: u32)")
+        .and_then(|(_, resto)| resto.split_once("_ => &[]"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`capacidades_da_api` mudou de forma em seele-proto");
+    // `5 => &[ "regiao", … ],`: o número de cada braço é o último termo antes
+    // de `=> &[`, e os nomes vão até o `]`.
+    let pedacos: Vec<&str> = corpo.split("=> &[").collect();
+    let mut do_nucleo: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for par in pedacos.windows(2) {
+        let api = par[0]
+            .split_whitespace()
+            .last()
+            .expect("um braço de `capacidades_da_api` sem número");
+        let lista = par[1].split(']').next().unwrap_or("");
+        do_nucleo.insert(api.to_owned(), nomes(lista));
+    }
+    assert!(
+        !do_nucleo.is_empty(),
+        "nenhum braço lido de `capacidades_da_api`: o guarda não conferiria nada"
+    );
+
+    let casca = without_comments(&read("ui/base.js"));
+    let espelho = casca
+        .split_once("const CAPACIDADES_POR_API = Object.freeze({")
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`CAPACIDADES_POR_API` sumiu de base.js");
+    // `5: Object.freeze([ "regiao", … ]),`, numa linha ou em várias.
+    let mut da_casca: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for entrada in espelho.split("]),") {
+        if let Some((api, lista)) = entrada.split_once(": Object.freeze([") {
+            da_casca.insert(api.trim().to_owned(), nomes(lista));
+        }
+    }
+
+    assert_eq!(
+        do_nucleo, da_casca,
+        "as capacidades de cada API divergem entre `capacidades_da_api` (seele-proto) e \
+         `CAPACIDADES_POR_API` (base.js): o anfitrião recusaria o que o prelúdio ofereceu, \
+         ou aceitaria o que ele escondeu"
+    );
+}

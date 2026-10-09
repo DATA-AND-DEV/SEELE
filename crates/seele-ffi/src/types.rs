@@ -199,6 +199,43 @@ pub enum NoticeReason {
         /// Quantas linhas saíram.
         apagadas: u64,
     },
+
+    /// O servidor não conseguiu fazer um pedido que a pessoa podia fazer.
+    ///
+    /// No fio, o pedido vem pelo ordinal em `ClientMessage`; aqui ele chega
+    /// pelo **nome** da variante (`"SetNickname"`, `"RenameVoiceRoom"`), porque
+    /// é por nome que a casca escreve a frase e acha o pedido a desfazer. Com
+    /// dois do mesmo tipo em voo, a recusa é do mais antigo (ver
+    /// `AlertReason::PedidoRecusado`).
+    PedidoRecusado {
+        /// O nome do pedido em `ClientMessage`, ou `"?"` para um ordinal que
+        /// esta build não conhece.
+        pedido: &'static str,
+        /// Por que não deu.
+        causa: CausaDaRecusa,
+    },
+}
+
+/// Por que o servidor não conseguiu fazer um pedido. O espelho de
+/// `seele_proto::control::CausaDaRecusa`, para a casca.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+pub enum CausaDaRecusa {
+    /// O alvo do pedido não existe mais.
+    NaoExiste,
+    /// O nome pedido é de outro.
+    NomeTomado,
+    /// O servidor falhou ao fazer o que podia ser feito.
+    FalhaDoServidor,
+}
+
+impl From<seele_core::CausaDaRecusa> for CausaDaRecusa {
+    fn from(causa: seele_core::CausaDaRecusa) -> Self {
+        match causa {
+            seele_core::CausaDaRecusa::NaoExiste => Self::NaoExiste,
+            seele_core::CausaDaRecusa::NomeTomado => Self::NomeTomado,
+            seele_core::CausaDaRecusa::FalhaDoServidor => Self::FalhaDoServidor,
+        }
+    }
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -221,6 +258,10 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::RetencaoApagouHistorico { apagadas } => {
                 Self::RetencaoApagouHistorico { apagadas }
             }
+            seele_core::AlertReason::PedidoRecusado { pedido, causa } => Self::PedidoRecusado {
+                pedido: seele_core::nome_do_pedido(pedido).unwrap_or("?"),
+                causa: causa.into(),
+            },
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
@@ -2331,10 +2372,40 @@ mod tests {
             seele_core::AlertReason::VoiceRoomDeleted,
             seele_core::AlertReason::ChannelDeleted,
             seele_core::AlertReason::LastVoiceRoom,
+            seele_core::AlertReason::PedidoRecusado {
+                pedido: 29,
+                causa: seele_core::CausaDaRecusa::NomeTomado,
+            },
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();
         assert_eq!(mapped.len(), all.len());
+    }
+
+    /// O pedido atravessa pelo nome que a casca lê, e um ordinal que esta build
+    /// não conhece não vira o nome de outro pedido.
+    #[test]
+    fn o_pedido_recusado_chega_pelo_nome() {
+        assert_eq!(
+            NoticeReason::from(seele_core::AlertReason::PedidoRecusado {
+                pedido: 29,
+                causa: seele_core::CausaDaRecusa::NomeTomado,
+            }),
+            NoticeReason::PedidoRecusado {
+                pedido: "SetNickname",
+                causa: CausaDaRecusa::NomeTomado,
+            }
+        );
+        assert_eq!(
+            NoticeReason::from(seele_core::AlertReason::PedidoRecusado {
+                pedido: 9_999,
+                causa: seele_core::CausaDaRecusa::FalhaDoServidor,
+            }),
+            NoticeReason::PedidoRecusado {
+                pedido: "?",
+                causa: CausaDaRecusa::FalhaDoServidor,
+            }
+        );
     }
 
     #[test]
