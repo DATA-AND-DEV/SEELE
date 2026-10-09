@@ -61,6 +61,26 @@
    aparece aqui escrito, e não inventado como token novo — nomear um token de
    tipografia é decisão da folha de tokens, não desta. */
 
+/* ---------- a cor do texto se resolve aqui, onde o tema chega ----------
+
+   O `body` resolve `color: var(--seele-osso)` com o valor da raiz (`base.css`),
+   e o tema de um MOD redefine o token em `#tela-sessao`, abaixo dele. Quem não
+   declara cor herda a cor **já resolvida**, e não o token: medido em
+   09/10/2026, com um tema claro que a validação aceita, o corpo das mensagens
+   saía a 1,09:1 e o SAIR DA SALA a 1,04:1 — na 0.15.1 publicada também
+   (`bancada/tema-claro-legivel.cjs`). Declarada aqui, a cor se resolve com o
+   token do tema. Sem tema, o token é o mesmo da raiz, e o desenho não muda. */
+
+#tela-sessao {
+  color: var(--seele-osso);
+  /* Os apelidos de `tokens.css` também se resolvem na raiz: a sincronia ficava
+     com o fósforo, o laranja e o vermelho do produto sob qualquer tema. Aqui
+     eles seguem as cores que o tema e a derivação escrevem em `#tela-sessao`. */
+  --seele-sync-nominal: var(--seele-fosforo);
+  --seele-sync-degradado: var(--seele-laranja-nerv);
+  --seele-sync-critico: var(--seele-vermelho-alerta);
+}
+
 /* ---------- topo ----------
 
    56px e blocos divididos por borda, como o comp: cada bloco tem a altura toda

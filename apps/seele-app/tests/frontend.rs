@@ -13755,6 +13755,21 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
              quando a sessão sai"
         );
     }
+    // **A raiz só é lida, e por um caminho só** (tarefa 17e): os tons que o
+    // produto deriva partem da cor do produto, que só a raiz guarda com um tema
+    // de pé. O caminho até ela é `corDaRaiz`, e ele não escreve.
+    let raiz = js_function(&base, "function corDaRaiz(");
+    assert!(
+        escrever.contains("corDaRaiz")
+            && raiz.contains("getComputedStyle(document.documentElement)"),
+        "a cor do produto deixou de ser lida da raiz pelo caminho nomeado: {escrever}"
+    );
+    for escrita in [".style", "setProperty", "setAttribute", "classList"] {
+        assert!(
+            !raiz.contains(escrita),
+            "o caminho que lê a raiz passou a escrever nela (`{escrita}`): {raiz}"
+        );
+    }
 
     // Só cor, e só `#rrggbb`: um valor livre numa propriedade de cor é a porta
     // por onde um MOD escreveria o que quisesse.
@@ -13809,7 +13824,7 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
 fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
     let base = without_comments(&read("ui/base.js"));
     let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
-    let mede = js_function(&base, "function oTextoAlcancaOFundo(");
+    let mede = js_function(&base, "function oTemaAlcancaOsPisos(");
 
     assert!(
         aplicar.contains("já é do MOD"),
@@ -13820,16 +13835,206 @@ fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
         aplicar.contains("throw new Error(legivel)"),
         "um tema ilegível deixou de ser recusado: {aplicar}"
     );
+    // Os pisos moram na tabela dos pares (rascunho da API 6, §9), e a medida
+    // passa por ela: o texto sobre o fundo continua em 4,5:1.
+    let pares = base
+        .split("const PARES_DO_TEMA")
+        .nth(1)
+        .and_then(|resto| resto.split("]);").next())
+        .unwrap_or_default();
     assert!(
-        mede.contains("4.5"),
-        "a medida de contraste saiu, ou deixou de ser 4,5:1 — que é o que \
-         `tokens.css` afirma linha a linha: {mede}"
+        pares.contains(r#"["texto", "fundo", 4.5]"#) && mede.contains("tonsDoTema("),
+        "a medida de contraste saiu, ou o texto sobre o fundo deixou de ser \
+         4,5:1 — que é o que `tokens.css` afirma linha a linha: {mede}"
     );
     // Lido da raiz: é o único lugar onde a cor do produto continua sendo a do
     // produto com um tema de pé. Medir na sessão mediria o próprio tema.
     assert!(
-        mede.contains("getComputedStyle(document.documentElement)"),
+        mede.contains("corDaRaiz")
+            && js_function(&base, "function corDaRaiz(")
+                .contains("getComputedStyle(document.documentElement)"),
         "a cor do produto passou a ser lida de onde o tema já escreveu: {mede}"
+    );
+}
+
+/// **As chaves do tema são as mesmas na casca e no servidor** (rascunho da API
+/// 6, §9; tarefa 17j), com a mesma forma de valor, nos dois sentidos.
+///
+/// O `mundo.tema` aceitava qualquer chave, e o MOD lia `ok` para um tema que a
+/// casca ia recusar. Agora o servidor confere por `CHAVES_DO_TEMA`
+/// (seele-proto), e a casca pelas quatro tabelas de `base.js`; uma chave
+/// somada a um lado só volta o defeito pela metade — o servidor recusando o que
+/// a casca aplicaria, ou o contrário. O vetor `chaves-do-tema.json` confere
+/// caso a caso; este confere que nenhuma chave ficou fora dele.
+#[test]
+fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
+    use std::collections::BTreeMap;
+
+    /// O texto dentro do primeiro `{ … }` depois de `inicio`, com as chaves e
+    /// os colchetes contados fora das strings.
+    fn objeto_js<'a>(fonte: &'a str, inicio: &str) -> &'a str {
+        let (_, resto) = fonte
+            .split_once(inicio)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de base.js"));
+        let abre = resto.find('{').expect("o objeto");
+        let mut fundo = 0_i32;
+        let mut aspa: Option<char> = None;
+        let mut escapado = false;
+        for (i, c) in resto[abre..].char_indices() {
+            if let Some(q) = aspa {
+                if escapado {
+                    escapado = false;
+                } else if c == '\\' {
+                    escapado = true;
+                } else if c == q {
+                    aspa = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' | '`' => aspa = Some(c),
+                '{' | '[' | '(' => fundo += 1,
+                '}' | ']' | ')' => {
+                    fundo -= 1;
+                    if fundo == 0 {
+                        return &resto[abre + 1..abre + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("`{inicio}` sem o fim do objeto");
+    }
+    /// As entradas `nome: valor` do primeiro nível de um objeto literal.
+    fn entradas_js(corpo: &str) -> Vec<(String, String)> {
+        let mut entradas = Vec::new();
+        let mut fundo = 0_i32;
+        let mut aspa: Option<char> = None;
+        let mut escapado = false;
+        let mut atual = String::new();
+        for c in corpo.chars().chain(std::iter::once(',')) {
+            if let Some(q) = aspa {
+                atual.push(c);
+                if escapado {
+                    escapado = false;
+                } else if c == '\\' {
+                    escapado = true;
+                } else if c == q {
+                    aspa = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' | '`' => aspa = Some(c),
+                '{' | '[' | '(' => fundo += 1,
+                '}' | ']' | ')' => fundo -= 1,
+                ',' if fundo == 0 => {
+                    if let Some((nome, valor)) = atual.split_once(':') {
+                        let nome = nome.trim().trim_matches(|q| q == '"' || q == '\'');
+                        entradas.push((nome.to_owned(), valor.trim().to_owned()));
+                    }
+                    atual.clear();
+                    continue;
+                }
+                _ => {}
+            }
+            atual.push(c);
+        }
+        entradas
+    }
+    fn numero(entradas: &[(String, String)], nome: &str) -> String {
+        entradas
+            .iter()
+            .find(|(chave, _)| chave == nome)
+            .map(|(_, valor)| valor.clone())
+            .unwrap_or_else(|| panic!("o número do tema sem `{nome}`"))
+    }
+
+    let casca = without_comments(&read("ui/base.js"));
+    let mut da_casca: BTreeMap<String, String> = BTreeMap::new();
+    let mut juntar = |nome: String, forma: String| {
+        assert!(
+            da_casca.insert(nome.clone(), forma).is_none(),
+            "«{nome}» está em duas tabelas do tema na casca"
+        );
+    };
+    for (nome, _) in entradas_js(objeto_js(&casca, "const TEMA_DA_API = Object.freeze(")) {
+        juntar(nome, "cor".to_owned());
+    }
+    for (nome, regra) in entradas_js(objeto_js(&casca, "const NUMEROS_DA_API = Object.freeze(")) {
+        let regra = entradas_js(objeto_js(&regra, ""));
+        let forma = format!(
+            "inteiro {}..{}",
+            numero(&regra, "minimo"),
+            numero(&regra, "maximo")
+        );
+        juntar(nome, forma);
+    }
+    for (nome, _) in entradas_js(objeto_js(&casca, "const BANDEIRAS_DA_API = Object.freeze(")) {
+        juntar(nome, "bandeira".to_owned());
+    }
+    for (nome, escolhas) in entradas_js(objeto_js(&casca, "const MEDIDAS_DA_API = Object.freeze("))
+    {
+        let mut nomes: Vec<String> = entradas_js(objeto_js(&escolhas, ""))
+            .into_iter()
+            .map(|(escolha, _)| escolha)
+            .collect();
+        nomes.sort();
+        juntar(nome, format!("escolha {}", nomes.join("|")));
+    }
+
+    let rust = read("../../crates/seele-proto/src/mods.rs");
+    let tabela: String = rust
+        .split_once("pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[")
+        .and_then(|(_, resto)| resto.split_once("\n];"))
+        .map(|(corpo, _)| corpo.chars().filter(|c| !c.is_whitespace()).collect())
+        .expect("`CHAVES_DO_TEMA` mudou de forma em seele-proto");
+    // `("nome",FormaDoValorDoTema::Forma…),`, sem espaço nenhum.
+    let mut do_servidor: BTreeMap<String, String> = BTreeMap::new();
+    for entrada in tabela.split("(\"").skip(1) {
+        let (nome, forma) = entrada
+            .split_once("\",FormaDoValorDoTema::")
+            .unwrap_or_else(|| panic!("uma entrada de `CHAVES_DO_TEMA` sem forma: {entrada}"));
+        let forma = if forma.starts_with("Cor") {
+            "cor".to_owned()
+        } else if forma.starts_with("Bandeira") {
+            "bandeira".to_owned()
+        } else if let Some(campos) = forma.strip_prefix("Inteiro{") {
+            let campo = |qual: &str| {
+                campos
+                    .split(',')
+                    .find_map(|par| par.strip_prefix(&format!("{qual}:")))
+                    .unwrap_or_else(|| panic!("`{qual}` sumiu do inteiro de «{nome}»"))
+                    .to_owned()
+            };
+            format!("inteiro {}..{}", campo("minimo"), campo("maximo"))
+        } else if let Some(lista) = forma.strip_prefix("Escolha(&[") {
+            let mut nomes: Vec<String> = lista
+                .split(']')
+                .next()
+                .unwrap_or_default()
+                .split(',')
+                .map(|escolha| escolha.trim_matches('"').to_owned())
+                .filter(|escolha| !escolha.is_empty())
+                .collect();
+            nomes.sort();
+            format!("escolha {}", nomes.join("|"))
+        } else {
+            panic!("uma forma de `CHAVES_DO_TEMA` que este guarda não conhece: {forma}");
+        };
+        do_servidor.insert(nome.to_owned(), forma);
+    }
+
+    assert!(
+        do_servidor.len() >= 10,
+        "só {} chaves lidas de `CHAVES_DO_TEMA`: o guarda não conferiria nada",
+        do_servidor.len()
+    );
+    assert_eq!(
+        do_servidor, da_casca,
+        "as chaves do tema divergem entre `CHAVES_DO_TEMA` (seele-proto, à esquerda) e as \
+         tabelas da casca (base.js, à direita): uma chave somada a um lado só é um tema \
+         que um lado recusa e o outro aplica"
     );
 }
 
