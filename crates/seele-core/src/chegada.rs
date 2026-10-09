@@ -35,6 +35,10 @@
 //!   entra na frente (`crate::encontro::onde_mora_hoje`). A descoberta é do
 //!   outro lado e aconteceu antes deste processo existir; ler uma resposta
 //!   pronta não é descobrir.
+//!
+//!   Uma ligação pelo código lê a mesma resposta pronta, só que **dentro** da
+//!   chegada: um código não carrega endereço nenhum, e a pergunta ao quarto é
+//!   o primeiro passo dela, [`Etapa::Localizando`] ([`Chegada::para_o_codigo`]).
 //! - `NAT_TRAVERSAL_FAILED` e `DISCOVERY_FAILED` — o que se observa é «todos os
 //!   candidatos falharam». Atribuir isso ao furo é chute, e quem responde por
 //!   quê é o diagnóstico do `connection --rede`, que mede em vez de supor.
@@ -58,11 +62,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ed25519_dalek::SigningKey;
+use seele_proto::codigo::Codigo;
 use seele_proto::uri::Bilhete;
 use tokio::sync::watch;
 
 use crate::client::ConnectError;
-use crate::enlace::{Destino, Enlace};
+use crate::encontro::{FalhaAoLocalizar, Localizacao};
+use crate::enlace::{Destino, Enlace, Esperada};
 use crate::tofu::PinStore;
 
 /// O endereço de enfeite dos exemplares de [`Etapa::TODAS`].
@@ -105,6 +111,20 @@ pub enum Etapa {
         /// etapa, o que é trabalho do passo seguinte da migração — quando o
         /// laço mudar de casa e esta camada passar a ver o envio.
         com_bilhete_e_impressao: bool,
+    },
+    /// Perguntando ao ponto de encontro onde a sala de um código mora.
+    ///
+    /// Só numa ligação ([`Chegada::para_o_codigo`]), que nasce parada com zero
+    /// candidatos: um código não carrega endereço nenhum, e é o quarto quem dá
+    /// os candidatos — as dicas de rede local e o servidor visto de fora.
+    ///
+    /// Por isso, ao contrário do aviso, esta etapa **pode** reprovar a chegada:
+    /// `Localizando → Desistiu` existe, com o motivo em
+    /// [`ConnectError::NaoLocalizou`]. Sem ponto, código não funciona; link com
+    /// endereço continua funcionando.
+    Localizando {
+        /// O ponto de encontro a quem se pergunta: `host[:porta]`.
+        ponto: String,
     },
     /// Avisando o ponto de encontro de que estamos chegando.
     Avisando {
@@ -181,10 +201,13 @@ impl Etapa {
     ///
     /// Os valores são de exemplo e não significam nada — o que se lê deles é a
     /// variante.
-    pub const TODAS: [Self; 6] = [
+    pub const TODAS: [Self; 7] = [
         Self::Parada {
             candidatos: 0,
             com_bilhete_e_impressao: false,
+        },
+        Self::Localizando {
+            ponto: String::new(),
         },
         Self::Avisando {
             ponto: String::new(),
@@ -205,6 +228,7 @@ impl Etapa {
     pub fn nome(&self) -> &'static str {
         match self {
             Self::Parada { .. } => "Parada",
+            Self::Localizando { .. } => "Localizando",
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
@@ -258,6 +282,15 @@ impl Etapa {
     /// regra de cima já cobra.
     ///
     /// Nenhuma das duas afrouxa a ausência que é requisito, que é a de cima.
+    ///
+    /// # As arestas de uma ligação
+    ///
+    /// `Parada → Localizando` só com zero candidatos: é a forma com que
+    /// [`Chegada::para_o_codigo`] nasce, e um convite com endereços não
+    /// pergunta ao quarto antes da corrida. De `Localizando` sai-se para
+    /// `Avisando`, para `Tentando` ou para `Desistiu`, e esta última é honesta
+    /// pela razão oposta à do aviso: numa ligação, os candidatos **dependem**
+    /// do quarto.
     #[must_use]
     pub fn transicao_legal(atual: &Self, para: &str) -> bool {
         match (atual, para) {
@@ -275,7 +308,8 @@ impl Etapa {
             // que não passa por uma tentativa, e ela é honesta: um convite sem
             // endereço não tem aonde chegar.
             (Self::Parada { candidatos, .. }, "Tentando") => *candidatos > 0,
-            (Self::Parada { candidatos: 0, .. }, "Desistiu") => true,
+            (Self::Parada { candidatos: 0, .. }, "Desistiu" | "Localizando") => true,
+            (Self::Localizando { .. }, "Avisando" | "Tentando" | "Desistiu") => true,
             (Self::Avisando { .. }, "Tentando") => true,
             // Só do último candidato. Uma desistência com endereços ainda por
             // tentar é a forma que um passo perdido toma quando chega aqui —
@@ -472,6 +506,7 @@ pub fn caminho(trilha: &[Passo]) -> Option<Caminho> {
         .find_map(|passo| match &passo.etapa {
             Etapa::Tentando { onde, avisou, .. } => Some(Caminho::de(*onde, *avisou)),
             Etapa::Parada { .. }
+            | Etapa::Localizando { .. }
             | Etapa::Avisando { .. }
             | Etapa::CaminhoAberto { .. }
             | Etapa::Dentro
@@ -507,15 +542,30 @@ pub struct Chegada {
     trilha: Vec<Passo>,
     /// Para quem acompanha ao vivo.
     estado: watch::Sender<Etapa>,
+    /// Numa ligação, o que se pergunta ao quarto antes da corrida. Consumido
+    /// por [`Chegada::chegar`].
+    pelo_codigo: Option<PeloCodigo>,
+}
+
+/// O que uma ligação sabe antes de localizar a sala: o código, a quem
+/// perguntar, e com que nome aparecer.
+struct PeloCodigo {
+    codigo: Codigo,
+    /// O ponto de encontro; `None` quando `$SEELE_ENCONTRO` o desligou.
+    ponto: Option<String>,
+    apelido: String,
 }
 
 impl std::fmt::Debug for Chegada {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Sem o código: ele é de quem se procura, e o log do quarto também
+        // não o escreve.
         formatter
             .debug_struct("Chegada")
             .field("candidatos", &self.destinos.len())
             .field("bilhete", &self.bilhete.is_some())
             .field("passos", &self.trilha.len())
+            .field("pelo_codigo", &self.pelo_codigo.is_some())
             .finish()
     }
 }
@@ -549,7 +599,30 @@ impl Chegada {
                 em: Duration::ZERO,
             }],
             estado,
+            pelo_codigo: None,
         }
+    }
+
+    /// Uma ligação parada: o código de uma pessoa, ainda sem endereço nenhum.
+    ///
+    /// Nasce em [`Etapa::Parada`] com zero candidatos. Os candidatos vêm do
+    /// quarto, em [`Chegada::chegar`]: [`Etapa::Localizando`] pergunta onde a
+    /// sala mora, e a resposta vira a lista — as dicas de rede local primeiro,
+    /// o servidor visto de fora depois, todos conferidos pelo código dentro do
+    /// TLS (ADR 0060) —, e o bilhete do `LEVE`, com a escuta que o quarto deu.
+    ///
+    /// `ponto` é o de [`crate::encontro::ponto_de_quem_liga`] na produção, e o
+    /// do teste nos testes. `None` desiste com
+    /// [`FalhaAoLocalizar::SemPonto`], sem perguntar a ninguém.
+    #[must_use]
+    pub fn para_o_codigo(codigo: Codigo, ponto: Option<String>, apelido: String) -> Self {
+        let mut chegada = Self::nova(Vec::new(), None);
+        chegada.pelo_codigo = Some(PeloCodigo {
+            codigo,
+            ponto,
+            apelido,
+        });
+        chegada
     }
 
     /// Onde esta chegada está, agora e a cada mudança.
@@ -604,6 +677,15 @@ impl Chegada {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Chegado, Frustrada> {
+        // Numa ligação, o quarto vem antes da corrida: é ele quem dá os
+        // candidatos. A consulta em paralelo com a rede local é dos servidores
+        // guardados (a pendência 55), e não daqui.
+        if let Some(pelo_codigo) = self.pelo_codigo.take() {
+            if let Err(falha) = self.localizar(pelo_codigo).await {
+                return Err(self.desistir(ConnectError::NaoLocalizou(falha)));
+            }
+        }
+
         let de = u8::try_from(self.destinos.len()).unwrap_or(u8::MAX);
         if self.destinos.is_empty() {
             // Um convite sem endereço nenhum. Ninguém chama assim, e desistir
@@ -669,11 +751,39 @@ impl Chegada {
         });
     }
 
+    /// Pergunta ao quarto onde a sala do código mora, e faz da resposta os
+    /// candidatos e o bilhete desta chegada.
+    async fn localizar(&mut self, pelo_codigo: PeloCodigo) -> Result<(), FalhaAoLocalizar> {
+        let PeloCodigo {
+            codigo,
+            ponto,
+            apelido,
+        } = pelo_codigo;
+        let Some(ponto) = ponto else {
+            return Err(FalhaAoLocalizar::SemPonto);
+        };
+        self.marcar(Etapa::Localizando {
+            ponto: ponto.clone(),
+        });
+        let localizacao = crate::encontro::localizar(
+            &ponto,
+            &crate::encontro::Marcas::da_sala(&codigo),
+            crate::encontro::PRAZO_DO_QUARTO,
+        )
+        .await;
+        let (destinos, bilhete) = candidatos_da_sala(localizacao, codigo, &ponto, &apelido)?;
+        self.destinos = destinos;
+        self.bilhete = bilhete;
+        Ok(())
+    }
+
     /// O ponto de encontro que vai ser avisado, se algum vai.
+    ///
+    /// Pela marca do primeiro destino, que é o que a batida usa: a de um
+    /// servidor sai da impressão, e a de uma sala, do código.
     fn ponto_a_avisar(&self) -> Option<String> {
         let bilhete = self.bilhete.as_ref()?;
-        let primeiro = self.destinos.first()?;
-        primeiro.impressao_esperada()?;
+        self.destinos.first()?.marca_do_aviso()?;
         Some(bilhete.ponto.clone())
     }
 
@@ -712,6 +822,86 @@ impl Chegada {
         // trilha é o registro, e o `watch` é a comodidade de quem desenha.
         let _ = self.estado.send(etapa);
     }
+}
+
+/// Os candidatos de uma ligação, e o bilhete do `LEVE`, a partir do que o
+/// quarto disse: ou o motivo de não haver onde conectar.
+///
+/// # A ordem: as dicas primeiro, o servidor depois
+///
+/// As dicas são os endereços de rede local da sala, e quem está na mesma casa
+/// entra por elas sem precisar que o roteador faça *hairpin* — a volta de um
+/// pacote para o endereço público da própria rede, que muito roteador
+/// doméstico não faz. Para quem está em outra casa, uma dica não responde, e
+/// a corrida passa ao servidor em 250 ms (RFC 8305): o custo de tentá-las
+/// primeiro é esse, e só ele.
+///
+/// O servidor que repete uma dica não entra duas vezes.
+///
+/// # O que cada candidato leva
+///
+/// O código, como [`Esperada::Codigo`]: quem atender tem de ser a sala dele,
+/// conferida dentro do TLS antes do `Hello` (ADR 0060). O nome TLS é o da
+/// sala, e o pino é o `@CÓDIGO`. A sala não tem MOD, e nada a aceitar.
+fn candidatos_da_sala(
+    localizacao: Localizacao,
+    codigo: Codigo,
+    ponto: &str,
+    apelido: &str,
+) -> Result<(Vec<Destino>, Option<Bilhete>), FalhaAoLocalizar> {
+    let (servidor, escuta, dicas) = match localizacao {
+        Localizacao::Achada {
+            servidor,
+            escuta,
+            dicas,
+        } => (servidor, escuta, dicas),
+        Localizacao::NinguemMora => return Err(FalhaAoLocalizar::NinguemMora),
+        Localizacao::Enc2Calado => return Err(FalhaAoLocalizar::Enc2Calado),
+        Localizacao::PontoRecusou => return Err(FalhaAoLocalizar::PontoRecusou),
+        Localizacao::PontoMudo => return Err(FalhaAoLocalizar::PontoMudo),
+        Localizacao::PontoNaoResolve => return Err(FalhaAoLocalizar::PontoNaoResolve),
+    };
+
+    let mut enderecos = dicas;
+    if let Some(servidor) = servidor.filter(|servidor| !enderecos.contains(servidor)) {
+        enderecos.push(servidor);
+    }
+    if enderecos.is_empty() {
+        return Err(FalhaAoLocalizar::SoAEscuta);
+    }
+
+    let destinos = enderecos
+        .into_iter()
+        .map(|servidor| Destino {
+            servidor,
+            nome_tls: seele_proto::transport::NOME_DA_SALA.to_owned(),
+            chave_do_pin: crate::confere_codigo::chave_do_pino(&codigo),
+            apelido: apelido.to_owned(),
+            segredo: None,
+            esperada: Some(Esperada::Codigo(codigo)),
+            // A bandeira é do TOFU por endereço, que uma ligação não usa: o
+            // pino dela é o `@CÓDIGO`, e quem o confere é o `ConfereCodigo`.
+            o_pino_prova_o_servidor: false,
+            aceito: None,
+        })
+        .collect();
+
+    // Sem escuta, sem `LEVE`: a corrida segue, e só o furo do lado de quem
+    // recebe se perde. Um `SocketAddr` escrito é sempre um endereço que o
+    // bilhete aceita; se um dia não for, o log diz.
+    let bilhete = escuta.and_then(|escuta| {
+        Bilhete::novo(ponto.to_owned(), escuta.to_string())
+            .inspect_err(|erro| {
+                tracing::info!(
+                    ?erro,
+                    %escuta,
+                    %ponto,
+                    "ligação: a escuta que o quarto deu não coube no bilhete; nenhum LEVE sai"
+                );
+            })
+            .ok()
+    });
+    Ok((destinos, bilhete))
 }
 
 /// Uma chegada que chegou: a sessão, e por onde ela passou.
@@ -1090,6 +1280,181 @@ mod tests {
             "o candidato foi tentado e não consta da trilha: {:?}",
             frustrada.trilha()
         );
+    }
+
+    #[test]
+    fn so_uma_ligacao_localiza_e_localizar_pode_reprovar() {
+        // As arestas da ligação. `Parada → Localizando` só com zero candidatos:
+        // um convite com endereços não pergunta ao quarto antes da corrida. E
+        // `Localizando → Desistiu` existe pela razão oposta à do aviso: numa
+        // ligação, os candidatos dependem do quarto.
+        let parada = |candidatos: u8| Etapa::Parada {
+            candidatos,
+            com_bilhete_e_impressao: false,
+        };
+        assert!(Etapa::transicao_legal(&parada(0), "Localizando"));
+        assert!(
+            !Etapa::transicao_legal(&parada(2), "Localizando"),
+            "um convite com dois endereços passou a localizar antes da corrida"
+        );
+
+        let localizando = Etapa::Localizando {
+            ponto: "encontro.exemplo:8384".into(),
+        };
+        for saida in ["Avisando", "Tentando", "Desistiu"] {
+            assert!(
+                Etapa::transicao_legal(&localizando, saida),
+                "`Localizando → {saida}` deixou de valer"
+            );
+        }
+        for saida in ["Parada", "Localizando", "CaminhoAberto", "Dentro"] {
+            assert!(
+                !Etapa::transicao_legal(&localizando, saida),
+                "`Localizando → {saida}` não existe, e foi aceita"
+            );
+        }
+    }
+
+    /// O código das ligações de teste.
+    fn codigo() -> Codigo {
+        Codigo::da_chave(&[3; 32])
+    }
+
+    fn endereco(texto: &str) -> SocketAddr {
+        let Ok(endereco) = texto.parse() else {
+            panic!("o endereço de teste `{texto}` não é um endereço");
+        };
+        endereco
+    }
+
+    #[test]
+    fn os_candidatos_de_uma_ligacao_sao_as_dicas_e_depois_o_servidor() {
+        // Quem está na mesma casa entra pela dica, sem depender do *hairpin*
+        // do roteador. Com o servidor na frente, a mesma casa esperaria o
+        // endereço público falhar antes de tentar a rede local.
+        let achada = Localizacao::Achada {
+            servidor: Some(endereco("203.0.113.7:8385")),
+            escuta: Some(endereco("203.0.113.7:41000")),
+            dicas: vec![endereco("192.168.1.5:8385"), endereco("10.0.0.5:8385")],
+        };
+        let Ok((destinos, bilhete)) =
+            candidatos_da_sala(achada, codigo(), "encontro.exemplo:8384", "pessoa")
+        else {
+            panic!("uma sala achada não deu candidato nenhum");
+        };
+
+        let onde: Vec<SocketAddr> = destinos.iter().map(|destino| destino.servidor).collect();
+        assert_eq!(
+            onde,
+            vec![
+                endereco("192.168.1.5:8385"),
+                endereco("10.0.0.5:8385"),
+                endereco("203.0.113.7:8385"),
+            ],
+            "as dicas não vêm antes do servidor"
+        );
+        for destino in &destinos {
+            assert_eq!(destino.esperada, Some(Esperada::Codigo(codigo())));
+            assert_eq!(destino.nome_tls, seele_proto::transport::NOME_DA_SALA);
+            assert_eq!(
+                destino.chave_do_pin,
+                crate::confere_codigo::chave_do_pino(&codigo())
+            );
+            assert_eq!(destino.apelido, "pessoa");
+            assert_eq!(destino.segredo, None);
+        }
+
+        let Some(bilhete) = bilhete else {
+            panic!("a escuta que o quarto deu não virou bilhete");
+        };
+        assert_eq!(bilhete.ponto, "encontro.exemplo:8384");
+        assert_eq!(bilhete.aviso().ok(), Some(endereco("203.0.113.7:41000")));
+    }
+
+    #[test]
+    fn o_servidor_que_repete_uma_dica_nao_entra_duas_vezes() {
+        let achada = Localizacao::Achada {
+            servidor: Some(endereco("192.168.1.5:8385")),
+            escuta: None,
+            dicas: vec![endereco("192.168.1.5:8385")],
+        };
+        let Ok((destinos, bilhete)) = candidatos_da_sala(achada, codigo(), "p:8384", "pessoa")
+        else {
+            panic!("uma sala achada não deu candidato nenhum");
+        };
+        assert_eq!(destinos.len(), 1, "{destinos:?}");
+        assert!(bilhete.is_none(), "sem escuta, não há a quem mandar o LEVE");
+    }
+
+    #[test]
+    fn cada_resposta_sem_onde_conectar_e_um_motivo() {
+        // Cada uma é uma frase diferente na tela (spec de 23/09, «Erros e
+        // frases»): achatá-las num «não alcancei» mandaria quem liga procurar
+        // defeito de rede quando a pessoa só está com o SEELE fechado.
+        for (localizacao, motivo) in [
+            (Localizacao::NinguemMora, FalhaAoLocalizar::NinguemMora),
+            (Localizacao::Enc2Calado, FalhaAoLocalizar::Enc2Calado),
+            (Localizacao::PontoRecusou, FalhaAoLocalizar::PontoRecusou),
+            (Localizacao::PontoMudo, FalhaAoLocalizar::PontoMudo),
+            (
+                Localizacao::PontoNaoResolve,
+                FalhaAoLocalizar::PontoNaoResolve,
+            ),
+            (
+                Localizacao::Achada {
+                    servidor: None,
+                    escuta: Some(endereco("203.0.113.7:41000")),
+                    dicas: Vec::new(),
+                },
+                FalhaAoLocalizar::SoAEscuta,
+            ),
+        ] {
+            assert_eq!(
+                candidatos_da_sala(localizacao.clone(), codigo(), "p:8384", "pessoa")
+                    .map(|(destinos, _)| destinos.len()),
+                Err(motivo),
+                "{localizacao:?}"
+            );
+        }
+
+        // Só as dicas, sem o servidor, ainda dá onde conectar.
+        let so_dicas = Localizacao::Achada {
+            servidor: None,
+            escuta: None,
+            dicas: vec![endereco("192.168.1.5:8385")],
+        };
+        assert_eq!(
+            candidatos_da_sala(so_dicas, codigo(), "p:8384", "pessoa")
+                .map(|(destinos, _)| destinos.len()),
+            Ok(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn sem_ponto_uma_ligacao_desiste_sem_perguntar_a_ninguem() {
+        // `$SEELE_ENCONTRO` desligado: código não funciona, e a chegada diz
+        // isso em vez de cair num «não alcancei» de um endereço que não existe.
+        let chegada = Chegada::para_o_codigo(codigo(), None, "pessoa".into());
+        let Err(frustrada) = chegada
+            .chegar(
+                SigningKey::from_bytes(&[7; 32]),
+                Arc::new(crate::tofu::MemoryPinStore::new()),
+            )
+            .await
+        else {
+            panic!("uma ligação sem ponto de encontro entrou em algum lugar");
+        };
+
+        assert_eq!(
+            frustrada.motivo(),
+            &ConnectError::NaoLocalizou(FalhaAoLocalizar::SemPonto)
+        );
+        let etapas: Vec<&str> = frustrada
+            .trilha()
+            .iter()
+            .map(|passo| passo.etapa.nome())
+            .collect();
+        assert_eq!(etapas, ["Parada", "Desistiu"]);
     }
 
     #[tokio::test]

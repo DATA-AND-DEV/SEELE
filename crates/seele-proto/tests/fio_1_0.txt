@@ -46,6 +46,7 @@ servidor:MessageEdited	090601030c6f6cc3a1206465206e6f766f
 servidor:MessageRemoved	09070103
 servidor:Telemetry	0908000048410000a03f00000000010100
 servidor:Alert	0909000000
+servidor:Alert.PedidoRecusado	090901101d0100
 servidor:Pong	090ad209
 servidor:Disconnecting	090b00
 servidor:VoiceRoomCreated	090c020753414c412d3032080100

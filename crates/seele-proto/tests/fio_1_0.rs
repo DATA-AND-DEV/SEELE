@@ -37,9 +37,10 @@ use std::path::PathBuf;
 
 use seele_proto::control::{
     encode, recusa_por_versao, AlertReason, AlertSeverity, AttachmentInfo, AttachmentRefusal,
-    AttachmentState, ChannelInfo, ClientMessage, ConsentimentoDePar, DisconnectReason, ListaDeCima,
-    Membro, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence,
-    Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, VoiceRoomInfo,
+    AttachmentState, CausaDaRecusa, ChannelInfo, ClientMessage, ConsentimentoDePar,
+    DisconnectReason, ListaDeCima, Membro, MessageRefusal, MotivoDeFalhaDePar, Permission,
+    PersonProfile, PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth,
+    Telemetry, VoiceRoomInfo,
 };
 use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
@@ -401,6 +402,20 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
             ServerMessage::Alert {
                 severity: AlertSeverity::Info,
                 reason: AlertReason::Mentioned,
+                operator_text: None,
+            },
+        ),
+        // O motivo da 1.0 dentro de um quadro de sempre: o ordinal do pedido
+        // (29, o `SetNickname`: `cliente:SetNickname` começa por `09 1d`) e a
+        // causa.
+        (
+            "Alert.PedidoRecusado",
+            ServerMessage::Alert {
+                severity: AlertSeverity::Warning,
+                reason: AlertReason::PedidoRecusado {
+                    pedido: 29,
+                    causa: CausaDaRecusa::NomeTomado,
+                },
                 operator_text: None,
             },
         ),
@@ -797,6 +812,10 @@ fn ordinais(quadros: &[(String, Vec<u8>)], prefixo: &str) -> BTreeSet<u32> {
 
 /// **Toda variante das duas listas tem um exemplar**, e o nome dele é o da
 /// variante. Uma variante nova sem exemplar reprova aqui, dizendo qual.
+///
+/// Um exemplar a mais para a mesma variante, que prende a forma de um motivo
+/// aninhado, leva o nome da variante, um ponto e o nome do motivo
+/// (`Alert.PedidoRecusado`): é a parte antes do ponto que tem de bater.
 #[test]
 fn toda_variante_das_listas_de_cima_tem_um_exemplar() {
     let todos = exemplares();
@@ -826,7 +845,7 @@ fn toda_variante_das_listas_de_cima_tem_um_exemplar() {
         for (nome, bytes) in todos.iter().filter(|(n, _)| n.starts_with(prefixo)) {
             let variante = nomes[usize::from(bytes[1])];
             assert_eq!(
-                &nome[prefixo.len()..],
+                nome[prefixo.len()..].split('.').next().unwrap_or_default(),
                 variante,
                 "o exemplar {nome} está no ordinal de {variante}"
             );
@@ -930,7 +949,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
         &'static [&'static str],
     );
 
-    let casos: [Caso; 12] = [
+    let casos: [Caso; 13] = [
         (
             "DisconnectReason",
             variantes::<DisconnectReason>(),
@@ -979,7 +998,13 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "ScreenShareOverHostUplink",
                 "VoiceRoomOverHostUplink",
                 "RetencaoApagouHistorico",
+                "PedidoRecusado",
             ],
+        ),
+        (
+            "CausaDaRecusa",
+            variantes::<CausaDaRecusa>(),
+            &["NaoExiste", "NomeTomado", "FalhaDoServidor"],
         ),
         (
             "AlertSeverity",

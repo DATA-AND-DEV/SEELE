@@ -166,6 +166,19 @@ pub struct Manifest {
     /// ver `midia_de_mod::sniff`.
     #[serde(default)]
     pub arquivos: Vec<String>,
+    /// **A porta do tema** (rascunho da API 6, §9): só a metade de servidor de
+    /// um MOD que declara `"tema": true` pode chamar `mundo.tema` e pintar a
+    /// aparência do servidor inteiro.
+    ///
+    /// Falsa sem a chave, e é de propósito: um MOD de perfil ou de mesa não
+    /// alcança a aparência de ninguém sem que o autor o diga aqui, onde quem
+    /// revisa o pacote lê, e a tela de aceite mostra numa linha própria.
+    ///
+    /// Uma build da linha 0.15 recusa a chave (`deny_unknown_fields`), e é o
+    /// certo: lá o tema não é dado do servidor, e um MOD que conta com isso
+    /// não tem onde rodar.
+    #[serde(default)]
+    pub tema: bool,
 }
 
 /// Why a manifest was refused.
@@ -888,6 +901,26 @@ mod tests {
         let lido = read_manifest(&texto).expect("manifesto sem os opcionais recusado");
         assert!(lido.reach.is_empty());
         assert_eq!(lido.state, None);
+    }
+
+    /// **A porta do tema é o manifesto** (rascunho da API 6, §9): só um MOD que
+    /// declara `"tema": true` pode chamar `mundo.tema`. Sem a chave, a porta
+    /// fica fechada, e é isso que mantém um MOD de perfil longe da aparência
+    /// do servidor sem que ninguém precise lembrar de fechá-la.
+    #[test]
+    fn a_porta_do_tema_e_lida_do_manifesto_e_fechada_sem_a_chave() {
+        let com_a_porta = manifesto_minimo().replace(
+            "\"client\": \"cliente/main.js\"",
+            "\"client\": \"cliente/main.js\", \"server\": \"servidor/main.js\", \"tema\": true",
+        );
+        let lido = read_manifest(&com_a_porta).expect("manifesto com a porta do tema recusado");
+        assert!(lido.tema, "o manifesto declara a porta e ela não foi lida");
+
+        let sem = read_manifest(&manifesto_minimo()).expect("manifesto válido recusado");
+        assert!(
+            !sem.tema,
+            "sem a chave, a porta do tema tem de ficar fechada"
+        );
     }
 
     fn arquivos() -> Vec<(String, Vec<u8>)> {

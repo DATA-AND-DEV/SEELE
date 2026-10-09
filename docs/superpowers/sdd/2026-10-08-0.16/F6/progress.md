@@ -173,3 +173,25 @@ mudar, ela roda de novo antes de publicar.
 - o caminho pela recusa na tarefa 13, que espera o `OutraLinha { numero }` da
   F1;
 - a publicação da 0.15.2, que espera a sequência de publicação.
+
+## D-linha-2: a 0.15.2 sai como atualização normal (09/10)
+
+O dono reviu a D-linha-1 por causa do conserto da sala cheia, que foi levado ao
+`linha/0.15` em `250cde9c`.
+- **Ela sai pelo `publicar.sh 0.15.2` normal e vira o `latest`.** O manifesto
+  que sai hoje foi medido numa entrega de mentira: o topo aponta para a 0.15.2,
+  e `versions` = [0.15.2], na linha 0.15. O `RemoteRelease` 2.10.1, o mesmo do
+  atualizador da 0.15.1, leu esse arquivo, num teste temporário que não ficou
+  no branch.
+- **A 0.16.0 acumula a 0.15.2 pelo `latest` de sempre.** O
+  `SEELE_MANIFESTO_ANTERIOR` deixa de ser preciso. Corrigidos o §3 de
+  `versoes-lado-a-lado.md` e o comentário do `publicar.sh`. No `linha/0.15` o
+  comentário ficou antigo de propósito: mudar o script de lá pediria a bateria
+  de novo.
+- **As notas foram reescritas para quem recebe pelo atualizador**
+  (`60788523`). A frase da impressão digital do caminho do launcher saiu, e com
+  ela os marcadores de condição. No lugar entrou a frase do caminho normal,
+  medida: sem `SEELE_IDENTIDADE` a chave é `home/identity.key`, como na 0.15.1,
+  e a persistência não mudou desde `54f542f`.
+- **Esconder o atualizador quando o launcher a abre continua**, e não afeta
+  quem a abre direto. Os três testes de `a_abertura_pelo_launcher` passam.

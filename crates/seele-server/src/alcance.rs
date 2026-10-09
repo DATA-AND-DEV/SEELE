@@ -992,6 +992,12 @@ impl Escada {
     /// Nenhum degrau é declarado sem que ela o sirva; ver [`Escuta`].
     pub async fn subir(escuta: Escuta, convocacao: Option<encontro::Convocacao>) -> Self {
         let achados = descobrir_enderecos();
+        // **A sala pessoal** sobe pela mesma escada, e três decisões mudam para
+        // ela, todas pela mesma pergunta: o registro sai assinado? Ver
+        // [`o_degrau_4_e_tentado`], [`papel_da_porta`] e [`guardar_o_furo`].
+        let sala = convocacao
+            .as_ref()
+            .is_some_and(encontro::Convocacao::assinada);
 
         // Os degraus 2 e 3 são pedidos independentes, em protocolos diferentes,
         // sobre famílias diferentes: o UPnP fala SOAP por HTTP com o roteador
@@ -1001,7 +1007,7 @@ impl Escada {
         // relógio anda uma vez só. Não há ordem entre eles a preservar: nenhum
         // lê o resultado do outro.
         let (degrau_3, degrau_2) = tokio::join!(
-            abrir_porta(&achados, escuta),
+            abrir_porta(&achados, escuta, papel_da_porta(sala)),
             abrir_firewall(&achados, escuta)
         );
         let (mapeada, recusa) = degrau_3;
@@ -1018,7 +1024,7 @@ impl Escada {
         // **descartar** — que é o mesmo erro que a 0.5.0 cometeu com os
         // endereços, e que o ADR 0022 registra: ela escolhe a frase, nunca o
         // que sai do convite.
-        let precisa = !tem_ipv4_global(&achados);
+        let precisa = o_degrau_4_e_tentado(sala, &achados);
         let (encontro, recusa_do_encontro) = match (precisa, convocacao) {
             (true, Some(convocacao)) => match encontro::abrir(&convocacao).await {
                 Ok(aberto) => (Some(aberto), None),
@@ -1085,7 +1091,9 @@ impl Escada {
         // que a porta do roteador tenha ganhado o nome do degrau. Ver
         // [`o_furo_vale_a_pena`].
         let encontro = match encontro {
-            Some(aberto) if o_furo_vale_a_pena(&alcance, escuta, aberto.publico()) => Some(aberto),
+            Some(aberto) if guardar_o_furo(sala, &alcance, escuta, aberto.publico()) => {
+                Some(aberto)
+            }
             Some(aberto) => {
                 tracing::warn!("o furo de NAT não virou candidato desta escuta; largando");
                 aberto.fechar();
@@ -1164,6 +1172,7 @@ impl Escada {
 async fn abrir_porta(
     achados: &[interfaces::Achado],
     escuta: Escuta,
+    papel: porta::Papel,
 ) -> (Option<porta::PortaAberta>, Option<String>) {
     if !escuta.pilha().alcanca_ipv4() {
         return (
@@ -1171,9 +1180,7 @@ async fn abrir_porta(
             Some("esta escuta não atende em IPv4, então não há porta IPv4 a pedir".to_owned()),
         );
     }
-    // O papel ainda é sempre o do servidor guardado: a sala pessoal (tarefa
-    // 4f do Plano 5) passa o dela quando subir pela escada.
-    match porta::abrir(achados, escuta.porta(), porta::Papel::Servidor).await {
+    match porta::abrir(achados, escuta.porta(), papel).await {
         Ok(aberta) => (Some(aberta), None),
         Err(falha) => {
             tracing::info!(%falha, "o degrau 3 não deu");
@@ -1239,6 +1246,35 @@ fn o_furo_vale_a_pena(alcance: &Alcance, escuta: Escuta, publico: SocketAddr) ->
     escuta
         .anunciar_com_porta(publico)
         .is_some_and(|alvo| alcance.alvos().contains(&alvo))
+}
+
+/// Se o degrau 4 é tentado.
+///
+/// A sala pessoal, sempre: ela só é achável pelo quarto, pelo código, e um IPv4
+/// global não muda isso (spec de 23/09, «A sala sempre se registra»). Um
+/// servidor guardado, só sem IPv4 global, pelo motivo de
+/// [`tem_ipv4_global`].
+fn o_degrau_4_e_tentado(sala: bool, achados: &[interfaces::Achado]) -> bool {
+    sala || !tem_ipv4_global(achados)
+}
+
+/// Como a porta é pedida ao roteador: a sala não recua para a 8383 do servidor
+/// guardado, e a regra dela tem nome próprio. Ver [`porta::Papel`].
+fn papel_da_porta(sala: bool) -> porta::Papel {
+    if sala {
+        porta::Papel::Sala
+    } else {
+        porta::Papel::Servidor
+    }
+}
+
+/// Se o furo de NAT fica de pé depois da escada.
+///
+/// O da sala, sempre: o registro assinado mora nele, e sem ele quem liga não a
+/// acha. O de um servidor guardado, só se ele virou candidato do convite
+/// ([`o_furo_vale_a_pena`]).
+fn guardar_o_furo(sala: bool, alcance: &Alcance, escuta: Escuta, publico: SocketAddr) -> bool {
+    sala || o_furo_vale_a_pena(alcance, escuta, publico)
 }
 
 /// Se esta máquina já tem um endereço IPv4 que a internet alcança.
@@ -1446,6 +1482,43 @@ mod testes {
         // ponto: `global_v6` não distingue este de um IPv6 de verdade, e não
         // tem como. Quem decide se ele serve é a escuta.
         "2001:db8::1".parse().unwrap_or(Ipv6Addr::UNSPECIFIED)
+    }
+
+    #[test]
+    fn a_sala_tenta_o_degrau_4_mesmo_com_ipv4_global() {
+        let vps = [na_placa("8.8.8.8")];
+        assert!(
+            !o_degrau_4_e_tentado(false, &vps),
+            "o controle: um servidor guardado com IPv4 global não paga o ponto"
+        );
+        assert!(
+            o_degrau_4_e_tentado(true, &vps),
+            "a sala com IPv4 global deixou de se registrar, e ninguém a acharia pelo código"
+        );
+        assert!(o_degrau_4_e_tentado(false, &[na_placa("192.168.0.30")]));
+    }
+
+    #[test]
+    fn o_furo_da_sala_fica_de_pe_mesmo_fora_do_convite() {
+        // O registro assinado da sala mora no furo: largá-lo é ela sumir do
+        // quarto quando o prazo do registro vencer, sem que nada diga.
+        let escuta = Escuta::nova(8385, Pilha::Dupla);
+        let alcance = Alcance::decidir_sem_pcp(escuta, None, None, &[], None);
+        let furado = SocketAddr::from(([200, 100, 30, 40], 61234));
+        assert!(
+            !guardar_o_furo(false, &alcance, escuta, furado),
+            "o controle: o furo de um servidor fora do convite é largado"
+        );
+        assert!(
+            guardar_o_furo(true, &alcance, escuta, furado),
+            "o furo da sala foi largado, e o registro dela no ponto deixaria de ser reavivado"
+        );
+    }
+
+    #[test]
+    fn a_sala_pede_a_porta_como_sala() {
+        assert_eq!(papel_da_porta(true), porta::Papel::Sala);
+        assert_eq!(papel_da_porta(false), porta::Papel::Servidor);
     }
 
     /// Um endereço achado numa placa de rede de verdade.

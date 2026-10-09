@@ -199,6 +199,43 @@ pub enum NoticeReason {
         /// Quantas linhas saíram.
         apagadas: u64,
     },
+
+    /// O servidor não conseguiu fazer um pedido que a pessoa podia fazer.
+    ///
+    /// No fio, o pedido vem pelo ordinal em `ClientMessage`; aqui ele chega
+    /// pelo **nome** da variante (`"SetNickname"`, `"RenameVoiceRoom"`), porque
+    /// é por nome que a casca escreve a frase e acha o pedido a desfazer. Com
+    /// dois do mesmo tipo em voo, a recusa é do mais antigo (ver
+    /// `AlertReason::PedidoRecusado`).
+    PedidoRecusado {
+        /// O nome do pedido em `ClientMessage`, ou `"?"` para um ordinal que
+        /// esta build não conhece.
+        pedido: &'static str,
+        /// Por que não deu.
+        causa: CausaDaRecusa,
+    },
+}
+
+/// Por que o servidor não conseguiu fazer um pedido. O espelho de
+/// `seele_proto::control::CausaDaRecusa`, para a casca.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+pub enum CausaDaRecusa {
+    /// O alvo do pedido não existe mais.
+    NaoExiste,
+    /// O nome pedido é de outro.
+    NomeTomado,
+    /// O servidor falhou ao fazer o que podia ser feito.
+    FalhaDoServidor,
+}
+
+impl From<seele_core::CausaDaRecusa> for CausaDaRecusa {
+    fn from(causa: seele_core::CausaDaRecusa) -> Self {
+        match causa {
+            seele_core::CausaDaRecusa::NaoExiste => Self::NaoExiste,
+            seele_core::CausaDaRecusa::NomeTomado => Self::NomeTomado,
+            seele_core::CausaDaRecusa::FalhaDoServidor => Self::FalhaDoServidor,
+        }
+    }
 }
 
 impl From<seele_core::AlertReason> for NoticeReason {
@@ -221,6 +258,10 @@ impl From<seele_core::AlertReason> for NoticeReason {
             seele_core::AlertReason::RetencaoApagouHistorico { apagadas } => {
                 Self::RetencaoApagouHistorico { apagadas }
             }
+            seele_core::AlertReason::PedidoRecusado { pedido, causa } => Self::PedidoRecusado {
+                pedido: seele_core::nome_do_pedido(pedido).unwrap_or("?"),
+                causa: causa.into(),
+            },
             seele_core::AlertReason::RateLimited => Self::RateLimited,
             seele_core::AlertReason::MovedByOperator => Self::MovedByOperator,
             seele_core::AlertReason::VoiceRoomDeleted => Self::VoiceRoomDeleted,
@@ -254,6 +295,47 @@ pub struct ChannelWeight {
     /// date somebody reads is a shell's job, like every other timestamp that
     /// crosses here.
     pub oldest_at_seconds: Option<i64>,
+}
+
+/// Por que a sala de um código não foi achada.
+///
+/// Espelho de `seele_core::encontro::FalhaAoLocalizar`, com os mesmos nomes: a
+/// casca escreve uma frase por variante, e cada uma é uma frase diferente da
+/// spec — o ponto calado não é a pessoa indisponível.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum FalhaAoLocalizar {
+    /// `$SEELE_ENCONTRO` desligou o ponto: sem ele, código não funciona, e
+    /// link com endereço continua funcionando.
+    SemPonto,
+    /// O ponto fala o ENC/2 e a sala não está registrada: o SEELE do outro
+    /// lado está fechado, ou não está recebendo ligações.
+    NinguemMora,
+    /// O ponto respondeu à sonda e calou a pergunta pela sala: é anterior ao
+    /// ENC/2, ou recusou por excesso e a recusa foi para outro pedido.
+    Enc2Calado,
+    /// O ponto recusou por excesso de pedidos desta rede.
+    PontoRecusou,
+    /// O ponto não respondeu a nada no prazo.
+    PontoMudo,
+    /// O nome do ponto não resolveu no prazo, ou não é um endereço.
+    PontoNaoResolve,
+    /// O ponto deu só a escuta da sala, e nenhum endereço a que conectar.
+    SoAEscuta,
+}
+
+impl From<seele_core::encontro::FalhaAoLocalizar> for FalhaAoLocalizar {
+    fn from(falha: seele_core::encontro::FalhaAoLocalizar) -> Self {
+        use seele_core::encontro::FalhaAoLocalizar as Nucleo;
+        match falha {
+            Nucleo::SemPonto => Self::SemPonto,
+            Nucleo::NinguemMora => Self::NinguemMora,
+            Nucleo::Enc2Calado => Self::Enc2Calado,
+            Nucleo::PontoRecusou => Self::PontoRecusou,
+            Nucleo::PontoMudo => Self::PontoMudo,
+            Nucleo::PontoNaoResolve => Self::PontoNaoResolve,
+            Nucleo::SoAEscuta => Self::SoAEscuta,
+        }
+    }
 }
 
 /// Why a session ended.
@@ -2082,6 +2164,17 @@ pub enum ConnectionError {
         /// O código de quem se passou.
         codigo: String,
     },
+    /// Quem liga pelo código não achou onde a sala mora (spec de 23/09, «Erros
+    /// e frases»): o motivo é o que o ponto de encontro disse, ou a falta dele.
+    ///
+    /// Sai antes da corrida, sem endereço tentado: a trilha acaba em
+    /// `Localizando`. As frases («O PONTO DE ENCONTRO NÃO RESPONDEU», «ALICE NÃO
+    /// ESTÁ DISPONÍVEL») são da casca, com a tarefa 7f; até lá nada no app
+    /// disca um código, e esta variante não chega à tela.
+    NaoLocalizou {
+        /// O que faltou para achar a sala.
+        motivo: FalhaAoLocalizar,
+    },
     /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
     /// que o assina.
     ///
@@ -2279,10 +2372,40 @@ mod tests {
             seele_core::AlertReason::VoiceRoomDeleted,
             seele_core::AlertReason::ChannelDeleted,
             seele_core::AlertReason::LastVoiceRoom,
+            seele_core::AlertReason::PedidoRecusado {
+                pedido: 29,
+                causa: seele_core::CausaDaRecusa::NomeTomado,
+            },
         ];
         let mapped: std::collections::HashSet<NoticeReason> =
             all.into_iter().map(NoticeReason::from).collect();
         assert_eq!(mapped.len(), all.len());
+    }
+
+    /// O pedido atravessa pelo nome que a casca lê, e um ordinal que esta build
+    /// não conhece não vira o nome de outro pedido.
+    #[test]
+    fn o_pedido_recusado_chega_pelo_nome() {
+        assert_eq!(
+            NoticeReason::from(seele_core::AlertReason::PedidoRecusado {
+                pedido: 29,
+                causa: seele_core::CausaDaRecusa::NomeTomado,
+            }),
+            NoticeReason::PedidoRecusado {
+                pedido: "SetNickname",
+                causa: CausaDaRecusa::NomeTomado,
+            }
+        );
+        assert_eq!(
+            NoticeReason::from(seele_core::AlertReason::PedidoRecusado {
+                pedido: 9_999,
+                causa: seele_core::CausaDaRecusa::FalhaDoServidor,
+            }),
+            NoticeReason::PedidoRecusado {
+                pedido: "?",
+                causa: CausaDaRecusa::FalhaDoServidor,
+            }
+        );
     }
 
     #[test]

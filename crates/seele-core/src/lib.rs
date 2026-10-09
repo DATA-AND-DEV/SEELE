@@ -36,6 +36,7 @@ pub mod confere_codigo;
 pub mod conhecidos;
 pub mod encontro;
 pub mod enlace;
+pub mod entrada;
 pub mod frame;
 pub mod identity;
 pub mod mods;
@@ -136,11 +137,16 @@ pub use voice::{
 /// and that belongs in the core.
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
 pub use seele_proto::control::{
+    // Reexportados porque a casca escreve a frase de um
+    // `AlertReason::PedidoRecusado` pelo nome do pedido e pela causa, e o ADR
+    // 0002 não a deixa ver `seele-proto`.
+    nome_do_pedido,
     AlertReason,
     AlertSeverity,
     AttachmentInfo,
     AttachmentRefusal,
     AttachmentState,
+    CausaDaRecusa,
     ChannelInfo,
     // Reexportado porque a casca declara o consentimento do caminho entre pares
     // e o ADR 0002 não a deixa ver `seele-proto`. Mesmo motivo do

@@ -302,6 +302,388 @@ fn promessas_cobradas<'a>(
     [promessa_de_momentos(momentos), promessa_de_eventos(eventos)]
 }
 
+/// O que o produto oferece a um MOD, lido do código, para as regras da v6.
+///
+/// As regras vêm de achados do rascunho da API 6 (§13): a v1 listou 13 verbos e
+/// 19 leituras que nunca chegaram à metade de servidor, a v5 não listou o
+/// `pessoa.avatar` que a casca aceita, e a forma `midia` numa superfície conta
+/// contra um teto que a v5 não diz. O `evaluate` não pegou nenhum dos três,
+/// porque ele confere só que o símbolo da direita existe em algum lugar.
+///
+/// Lida do código toda vez, como os momentos e os eventos: uma regra que
+/// conferisse contra uma lista escrita aqui envelheceria na primeira mudança.
+#[derive(Debug, Default)]
+struct Casca {
+    /// Os pontos de `PONTOS_DE_CONTRIBUICAO` (`mods-contribuicoes.js`), com os
+    /// modos de cada um.
+    pontos: std::collections::BTreeMap<String, Vec<String>>,
+    /// Os tipos de `TIPOS_DE_SUPERFICIE` (`mods-superficies.js`).
+    tipos: BTreeSet<String>,
+    /// Os tetos que o produto aplica, pelo nome com que a API os declara.
+    tetos: std::collections::BTreeMap<String, u64>,
+    /// O que o runtime do servidor expõe a uma metade de servidor
+    /// (`crates/seele-server/src/mods/mod.rs`), como o MOD o escreve:
+    /// `arquivos.ler`, `mundo.buscar`, `dados`.
+    expostos: BTreeSet<String>,
+}
+
+/// O corpo de uma tabela `const NOME = Object.freeze({ … });` da casca, ou
+/// vazio se ela não está lá na forma de hoje.
+fn tabela_da_casca<'a>(fonte: &'a str, nome: &str) -> &'a str {
+    fonte
+        .split_once(&format!("const {nome} = Object.freeze({{"))
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map_or("", |(corpo, _)| corpo)
+}
+
+/// Os pontos de `PONTOS_DE_CONTRIBUICAO`, com os modos de cada um: uma linha
+/// por ponto, `"nome": { modos: ["…", "…"], … }`.
+fn pontos_da_casca(contribuicoes: &str) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut pontos = std::collections::BTreeMap::new();
+    for linha in tabela_da_casca(contribuicoes, "PONTOS_DE_CONTRIBUICAO").lines() {
+        let linha = linha.trim();
+        let Some(resto) = linha.strip_prefix('"') else {
+            continue;
+        };
+        let Some((nome, resto)) = resto.split_once('"') else {
+            continue;
+        };
+        let modos = resto
+            .split_once("modos: [")
+            .and_then(|(_, lista)| lista.split_once(']'))
+            .map(|(lista, _)| {
+                lista
+                    .split(',')
+                    .map(|modo| modo.trim().trim_matches('"').to_owned())
+                    .filter(|modo| !modo.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        pontos.insert(nome.to_owned(), modos);
+    }
+    pontos
+}
+
+/// Os tipos de `TIPOS_DE_SUPERFICIE`: uma linha por tipo, `nome: { host: … }`.
+fn tipos_da_casca(superficies: &str) -> BTreeSet<String> {
+    tabela_da_casca(superficies, "TIPOS_DE_SUPERFICIE")
+        .lines()
+        .filter_map(|linha| linha.trim().split_once(": {"))
+        .map(|(nome, _)| nome.trim().to_owned())
+        .filter(|nome| !nome.is_empty() && nome.chars().all(|c| c.is_ascii_alphanumeric()))
+        .collect()
+}
+
+/// O que o runtime do servidor expõe, como o MOD o escreve.
+///
+/// Lê os `ctx.globals().set("<global>", <objeto>)` e os `<objeto>.set("<membro>",
+/// …)`, com o `.set(` quebrado em linhas ou não, como o `rustfmt` deixar. Um
+/// membro vira `<global>.<membro>` (`arquivos.ler`); uma global cujo valor não
+/// é um objeto com membros (`dados`) fica pelo nome.
+fn nomes_do_runtime(runtime: &str) -> BTreeSet<String> {
+    let mut globais: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut membros: Vec<(String, String)> = Vec::new();
+    let mut expostos = BTreeSet::new();
+    let mut resto = runtime;
+    while let Some(posicao) = resto.find(".set(") {
+        let antes = resto.get(..posicao).unwrap_or("");
+        let depois = resto.get(posicao + ".set(".len()..).unwrap_or("");
+        resto = depois;
+        let dono: String = antes
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '(' | ')' | '.'))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let argumentos = depois.trim_start();
+        let Some(nome) = argumentos
+            .strip_prefix('"')
+            .and_then(|a| a.split_once('"'))
+            .map(|(nome, _)| nome.to_owned())
+        else {
+            continue;
+        };
+        if dono.ends_with("globals()") {
+            let valor: String = argumentos
+                .split_once(',')
+                .map(|(_, v)| v.trim_start())
+                .unwrap_or("")
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            expostos.insert(nome.clone());
+            globais.insert(valor, nome);
+        } else if !dono.is_empty() {
+            membros.push((dono.rsplit('.').next().unwrap_or(&dono).to_owned(), nome));
+        }
+    }
+    for (objeto, membro) in membros {
+        if let Some(global) = globais.get(&objeto) {
+            expostos.insert(format!("{global}.{membro}"));
+        }
+    }
+    expostos
+}
+
+/// O valor inteiro de `const NOME = <número>;`, se ele está lá.
+fn constante_da_casca(fonte: &str, nome: &str) -> Option<u64> {
+    fonte
+        .split_once(&format!("const {nome} = "))
+        .and_then(|(_, resto)| resto.split_once(';'))
+        .and_then(|(valor, _)| conta(valor))
+}
+
+/// Um número escrito como produto, `24 * 1024 * 1024`, como o renderer escreve
+/// os tetos de bytes.
+fn conta(texto: &str) -> Option<u64> {
+    texto
+        .split('*')
+        .map(|fator| fator.trim().replace('_', "").parse::<u64>().ok())
+        .try_fold(1_u64, |produto, fator| {
+            fator.and_then(|f| produto.checked_mul(f))
+        })
+}
+
+/// Os tetos que o produto aplica, com o nome com que a API os declara:
+/// `contribuicoes.teto` (`TETO_DE_CONTRIBUICOES`), `superficies.limites.superficies`
+/// e `.avisos` (`TETO_DE_SUPERFICIES`, `TETO_DE_AVISOS`), e cada número do perfil
+/// `superficie` de `PERFIS_DE_RENDER` (`superficies.limites.nos`, `.bytesDeMidia`…).
+fn tetos_da_casca(
+    contribuicoes: &str,
+    superficies: &str,
+    regiao: &str,
+) -> std::collections::BTreeMap<String, u64> {
+    let mut tetos = std::collections::BTreeMap::new();
+    for (nome, fonte, constante) in [
+        ("contribuicoes.teto", contribuicoes, "TETO_DE_CONTRIBUICOES"),
+        (
+            "superficies.limites.superficies",
+            superficies,
+            "TETO_DE_SUPERFICIES",
+        ),
+        ("superficies.limites.avisos", superficies, "TETO_DE_AVISOS"),
+    ] {
+        if let Some(valor) = constante_da_casca(fonte, constante) {
+            tetos.insert(nome.to_owned(), valor);
+        }
+    }
+    let perfil = regiao
+        .split_once("superficie: Object.freeze({")
+        .and_then(|(_, resto)| resto.split_once("}),"))
+        .map_or("", |(corpo, _)| corpo);
+    for par in perfil.split(',') {
+        if let Some((chave, valor)) = par.split_once(':') {
+            if let Some(numero) = conta(valor) {
+                tetos.insert(format!("superficies.limites.{}", chave.trim()), numero);
+            }
+        }
+    }
+    tetos
+}
+
+/// Os pontos que a versão publica, com os modos: os de `contribuicoes.pontos`
+/// e as regiões de `regioes`, que também são linhas de `PONTOS_DE_CONTRIBUICAO`.
+/// Um bloco ausente conta como vazio; o que falta aparece no sentido contrário.
+fn pontos_publicados(
+    descritor: &serde_json::Value,
+    violacoes: &mut Vec<Violation>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let lista = |valor: &serde_json::Value| -> Vec<String> {
+        valor
+            .as_array()
+            .map(|modos| {
+                modos
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut publicados = std::collections::BTreeMap::new();
+    if let Some(pontos) = descritor
+        .pointer("/contribuicoes/pontos")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (nome, modos) in pontos {
+            publicados.insert(nome.clone(), lista(modos));
+        }
+    }
+    if let Some(regioes) = descritor
+        .get("regioes")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (nome, regiao) in regioes {
+            let modos = lista(regiao.get("modos").unwrap_or(&serde_json::Value::Null));
+            match publicados.get(nome) {
+                Some(outros) if *outros != modos => violacoes.push(format!(
+                    "`{nome}` aparece em `contribuicoes.pontos` com os modos {outros:?} e em \
+                     `regioes` com {modos:?}: uma versão diz uma coisa só"
+                )),
+                _ => {
+                    publicados.insert(nome.clone(), modos);
+                }
+            }
+        }
+    }
+    publicados
+}
+
+/// A regra dos pontos e dos tipos, nos dois sentidos, a partir da v6.
+///
+/// Do arquivo para a casca, como o resto deste guarda: um ponto ou um tipo que
+/// a versão promete e a casca não aplica é uma promessa vazia. **E da casca
+/// para o arquivo**, ao contrário do resto: um ponto que a casca aceita e a
+/// versão não publica é uma superfície sem versão, que um MOD usa sem contrato
+/// — foi assim com o `pessoa.avatar`, aceito desde a 0.15.0 e ausente da v5.
+/// Aqui a direção contrária não arrasta a API atrás do protocolo: os pontos são
+/// a própria fachada, e não um interior que ela mapeia.
+fn pontos_e_tipos(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Vec<Violation> {
+    if versao < PRIMEIRA_API_COBRADA {
+        return Vec::new();
+    }
+    let mut violacoes = Vec::new();
+    let publicados = pontos_publicados(descritor, &mut violacoes);
+    for (nome, modos) in &publicados {
+        match casca.pontos.get(nome) {
+            None => violacoes.push(format!(
+                "a API {versao} publica o ponto `{nome}`, e a casca não o aplica \
+                 (`PONTOS_DE_CONTRIBUICAO`): um MOD que o registrasse seria recusado"
+            )),
+            Some(da_casca) if da_casca != modos => violacoes.push(format!(
+                "o ponto `{nome}` tem os modos {modos:?} na API {versao} e {da_casca:?} na casca"
+            )),
+            Some(_) => {}
+        }
+    }
+    for nome in casca
+        .pontos
+        .keys()
+        .filter(|nome| !publicados.contains_key(*nome))
+    {
+        violacoes.push(format!(
+            "a casca aceita o ponto `{nome}`, e a API {versao} não o publica: um MOD o usaria \
+             sem contrato, como o `pessoa.avatar` foi usado sem estar na v5"
+        ));
+    }
+    let tipos: BTreeSet<String> = descritor
+        .pointer("/superficies/tipos")
+        .and_then(serde_json::Value::as_array)
+        .map(|tipos| {
+            tipos
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    for tipo in tipos.difference(&casca.tipos) {
+        violacoes.push(format!(
+            "a API {versao} publica o tipo de superfície `{tipo}`, e a casca não o monta \
+             (`TIPOS_DE_SUPERFICIE`)"
+        ));
+    }
+    for tipo in casca.tipos.difference(&tipos) {
+        violacoes.push(format!(
+            "a casca monta o tipo de superfície `{tipo}`, e a API {versao} não o publica"
+        ));
+    }
+    violacoes
+}
+
+/// A regra 1 da v6: todo nome da metade de servidor (`own`, `world`) é um nome
+/// que o runtime expõe ao MOD.
+///
+/// O `evaluate` confere que o símbolo da direita existe em algum lugar, e por
+/// isso os 13 verbos e as 19 leituras da v1 passaram: `SendMessage` existe, e
+/// `mandarMensagem` nunca chegou ao MOD. Aqui o que se confere é o nome da
+/// esquerda, contra o que `crates/seele-server/src/mods/mod.rs` registra.
+fn nomes_de_servidor(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Vec<Violation> {
+    if versao < PRIMEIRA_API_COBRADA {
+        return Vec::new();
+    }
+    let mut violacoes = Vec::new();
+    for bloco in ["own", "world"] {
+        let Some(nomes) = descritor.get(bloco).and_then(serde_json::Value::as_object) else {
+            continue;
+        };
+        for nome in nomes.keys().filter(|nome| !casca.expostos.contains(*nome)) {
+            violacoes.push(format!(
+                "a API {versao} lista `{nome}` em `{bloco}`, e o runtime do servidor não expõe \
+                 esse nome ao MOD (crates/seele-server/src/mods/mod.rs): o símbolo da direita \
+                 pode existir, e o MOD ainda assim não consegue escrevê-lo"
+            ));
+        }
+    }
+    violacoes
+}
+
+/// A regra 2 da v6: todo teto que a versão declara é o teto que o produto
+/// aplica, e um teto que este guarda não sabe conferir reprova.
+///
+/// Um número certo numa constante que ninguém consulta passa aqui — é o caso da
+/// forma `midia` numa superfície, que conta contra o teto da região. Por isso a
+/// regra tem a outra metade numa bancada de comportamento (tarefa 7 do plano da
+/// F3), e não só esta.
+fn tetos_declarados(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Vec<Violation> {
+    if versao < PRIMEIRA_API_COBRADA {
+        return Vec::new();
+    }
+    let mut declarados: Vec<(String, &serde_json::Value)> = Vec::new();
+    if let Some(teto) = descritor.pointer("/contribuicoes/teto") {
+        declarados.push(("contribuicoes.teto".to_owned(), teto));
+    }
+    if let Some(limites) = descritor
+        .pointer("/superficies/limites")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (chave, valor) in limites {
+            declarados.push((format!("superficies.limites.{chave}"), valor));
+        }
+    }
+    let mut violacoes = Vec::new();
+    for (nome, valor) in declarados {
+        let Some(declarado) = valor.as_u64() else {
+            violacoes.push(format!(
+                "a API {versao} declara o teto `{nome}` como `{valor}`, que não é um número"
+            ));
+            continue;
+        };
+        match casca.tetos.get(&nome) {
+            None => violacoes.push(format!(
+                "a API {versao} declara o teto `{nome}`, e o check-api não sabe com que constante \
+                 do produto conferi-lo: ensine `tetos_da_casca`, ou o teto passa sem ninguém olhar"
+            )),
+            Some(aplicado) if *aplicado != declarado => violacoes.push(format!(
+                "a API {versao} declara o teto `{nome}` = {declarado}, e o produto aplica \
+                 {aplicado}: o MOD contaria com um número que não vale"
+            )),
+            Some(_) => {}
+        }
+    }
+    violacoes
+}
+
+/// As regras da v6, juntas, para [`conferir_arquivo`].
+fn regras_da_v6(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Vec<Violation> {
+    let mut violacoes = pontos_e_tipos(versao, descritor, casca);
+    violacoes.extend(nomes_de_servidor(versao, descritor, casca));
+    violacoes.extend(tetos_declarados(versao, descritor, casca));
+    violacoes
+}
+
+/// Onde as regras da v6 leem o que o produto oferece: os pontos e o teto de
+/// contribuições, os tipos e os tetos de superfície, o perfil de render da
+/// superfície, e o runtime da metade de servidor.
+const CASCA_E_RUNTIME: [&str; 4] = [
+    "apps/seele-app/ui/mods-contribuicoes.js",
+    "apps/seele-app/ui/mods-superficies.js",
+    "apps/seele-app/ui/mods-regiao.js",
+    "crates/seele-server/src/mods/mod.rs",
+];
+
 /// Tudo o que o `check-api` confere num arquivo de `api/`: os nomes que
 /// apontam para o interior ([`evaluate`], contra a `fonte`) e, se a versão é
 /// cobrada, as `promessas` ([`cobrar`]). Devolve as violações das duas
@@ -318,6 +700,7 @@ fn conferir_arquivo(
     json: &serde_json::Value,
     fonte: &str,
     promessas: &[Promessa<'_>; 2],
+    casca: &Casca,
 ) -> (Vec<Violation>, bool) {
     let mut mapa: Vec<(&str, &str)> = Vec::new();
     for bloco in ["reads", "actions", "own", "world"] {
@@ -333,6 +716,9 @@ fn conferir_arquivo(
     let cobranca = cobrar(caminho, json, promessas);
     let cobrada = cobranca.is_some();
     violacoes.extend(cobranca.unwrap_or_default());
+    if let (true, Some(versao)) = (cobrada, versao_do_arquivo(caminho)) {
+        violacoes.extend(regras_da_v6(versao, json, casca));
+    }
     (violacoes, cobrada)
 }
 
@@ -364,6 +750,7 @@ fn conferir_api(
     entradas: impl IntoIterator<Item = std::io::Result<std::path::PathBuf>>,
     fonte: &str,
     promessas: &[Promessa<'_>; 2],
+    casca: &Casca,
 ) -> Result<Resumo, Vec<String>> {
     let mut resumo = Resumo {
         versoes: 0,
@@ -393,7 +780,7 @@ fn conferir_api(
             falhas.push(format!("{} não é json", caminho.display()));
             continue;
         };
-        let (violacoes, cobrada) = conferir_arquivo(&caminho, &json, fonte, promessas);
+        let (violacoes, cobrada) = conferir_arquivo(&caminho, &json, fonte, promessas, casca);
         resumo.cobradas += usize::from(cobrada);
         for violacao in violacoes {
             falhas.push(format!("{} — {violacao}", caminho.display()));
@@ -509,6 +896,47 @@ pub(crate) fn run() -> ExitCode {
     }
     let promessas = promessas_cobradas(&momentos, &eventos);
 
+    // O que a casca e o runtime oferecem, para as regras da v6. Lido mesmo sem
+    // API 6 para cobrar, pelo mesmo motivo dos momentos: um extrator que deixou
+    // de achar a tabela tem de ficar vermelho hoje.
+    let mut lidos = std::collections::BTreeMap::new();
+    for arquivo in CASCA_E_RUNTIME {
+        let Ok(texto) = std::fs::read_to_string(raiz.join(arquivo)) else {
+            eprintln!("check-api: não deu para ler {arquivo}");
+            return ExitCode::FAILURE;
+        };
+        lidos.insert(arquivo, texto);
+    }
+    let ler = |arquivo: &str| lidos.get(arquivo).map_or("", String::as_str);
+    let [contribuicoes, superficies, regiao, runtime] = CASCA_E_RUNTIME;
+    let casca = Casca {
+        pontos: pontos_da_casca(ler(contribuicoes)),
+        tipos: tipos_da_casca(ler(superficies)),
+        tetos: tetos_da_casca(ler(contribuicoes), ler(superficies), ler(regiao)),
+        expostos: nomes_do_runtime(ler(runtime)),
+    };
+    for (vazio, o_que) in [
+        (
+            casca.pontos.is_empty(),
+            "os pontos de `PONTOS_DE_CONTRIBUICAO`",
+        ),
+        (casca.tipos.is_empty(), "os tipos de `TIPOS_DE_SUPERFICIE`"),
+        (casca.tetos.is_empty(), "os tetos da casca"),
+        (
+            casca.expostos.is_empty(),
+            "os nomes que o runtime do servidor expõe",
+        ),
+    ] {
+        if vazio {
+            eprintln!(
+                "check-api: não achei {o_que}. Se a tabela mudou de nome, de lugar ou de forma, \
+                 conserte o extrator aqui: sem ela as regras da API 6 não têm contra o que ser \
+                 conferidas."
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
     let Ok(entradas) = std::fs::read_dir(raiz.join("api")) else {
         eprintln!("check-api: não achei `api/`");
         return ExitCode::FAILURE;
@@ -516,7 +944,7 @@ pub(crate) fn run() -> ExitCode {
     let entradas = entradas.map(|entrada| entrada.map(|entrada| entrada.path()));
 
     relatar(
-        conferir_api(entradas, &fonte, &promessas),
+        conferir_api(entradas, &fonte, &promessas, &casca),
         momentos.len(),
         eventos.len(),
         &mut std::io::stdout(),
@@ -894,6 +1322,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             &v6,
             "",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         assert!(
             cobrada,
@@ -922,6 +1351,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             &v5,
             "pub struct Person { pub apelido: String }",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         assert!(
             !cobrada,
@@ -983,6 +1413,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             [Ok(dir.join("v6.json"))],
             "",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         let _ = std::fs::remove_dir_all(&dir);
         let Err(linhas) = resultado else {
@@ -1014,6 +1445,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             [Ok(caminho.clone())],
             "",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         let _ = std::fs::remove_dir_all(&dir);
         let Err(linhas) = resultado else {
@@ -1046,6 +1478,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             [Ok(caminho.clone())],
             "",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         let _ = std::fs::remove_dir_all(&dir);
         let Err(linhas) = resultado else {
@@ -1077,6 +1510,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             [Err(std::io::Error::other("erro provocado pelo teste"))],
             "",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         let Err(linhas) = resultado else {
             panic!(
@@ -1119,6 +1553,7 @@ fn vizinha(x: u8) -> (&'static str, u8) {
             ["v5.json", "v6.json", "README.md"].map(|nome| Ok(dir.join(nome))),
             "pub struct Person { pub nick: String }",
             &promessas_cobradas(&momentos, &eventos),
+            &Casca::default(),
         );
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(
@@ -1525,6 +1960,324 @@ const PERFIS = { regiao: { nome: "regiao" } };
                 "um item de `{}` que não é nome passou calado, ou a violação não diz o que \
                  achou: {violacoes:?}",
                 promessa.bloco
+            );
+        }
+    }
+
+    // ---- as regras da v6 (rascunho da API 6, §13) ----
+
+    /// `PONTOS_DE_CONTRIBUICAO` com a forma do de verdade: uma linha por ponto,
+    /// o nome entre aspas e os modos numa lista.
+    const CONTRIBUICOES_DE_FIXTURE: &str = r#"
+const PONTOS_DE_CONTRIBUICAO = Object.freeze({
+  "pessoa.avatar": { modos: ["substituir"], perfil: null, porAlvo: true },
+  "pessoa.cartao": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
+});
+
+/** Quantas contribuições um MOD registra ao mesmo tempo. */
+const TETO_DE_CONTRIBUICOES = 128;
+"#;
+
+    /// `TIPOS_DE_SUPERFICIE` e os dois tetos de `mods-superficies.js`.
+    const SUPERFICIES_DE_FIXTURE: &str = r#"
+const TIPOS_DE_SUPERFICIE = Object.freeze({
+  pagina: { host: "palco-de-paginas", foco: false, camada: false },
+  dialogo: { host: "palco-de-camadas", foco: true, camada: true },
+});
+const TETO_DE_SUPERFICIES = 12;
+const TETO_DE_AVISOS = 4;
+"#;
+
+    /// O perfil `superficie` de `PERFIS_DE_RENDER`, com o produto escrito como
+    /// conta, como em `mods-regiao.js`.
+    const REGIAO_DE_FIXTURE: &str = r#"
+const PERFIS_DE_RENDER = Object.freeze({
+  regiao: Object.freeze({
+    nome: "regiao",
+    nos: 512, fundura: 8, campos: 32, telas: 4, midias: 4,
+    bytesDeMidia: 10 * 1024 * 1024,
+  }),
+  superficie: Object.freeze({
+    nome: "superficie",
+    nos: 4096, fundura: 16, campos: 128, telas: 4, midias: 24,
+    bytesDeMidia: 24 * 1024 * 1024,
+    formas: null,
+  }),
+});
+"#;
+
+    /// O runtime do servidor com a forma que o `rustfmt` dá: o `.set(` de um
+    /// membro quebrado em linhas, outro numa linha só, e a global que não é
+    /// objeto (`dados`).
+    const RUNTIME_DE_FIXTURE: &str = r#"
+        let arquivos_js = rquickjs::Object::new(ctx.clone())?;
+        arquivos_js.set(
+            "ler",
+            Function::new(ctx.clone(), move |caminho: String| arquivos::ler(&p, &caminho))?,
+        )?;
+        ctx.globals().set("arquivos", arquivos_js)?;
+        mundo_js.set("agora", Function::new(ctx.clone(), mundo::agora)?)?;
+        ctx.globals().set("mundo", mundo_js)?;
+        ctx.globals().set("dados", dados).map_err(falhou)?;
+"#;
+
+    fn casca_de_fixture() -> Casca {
+        Casca {
+            pontos: pontos_da_casca(CONTRIBUICOES_DE_FIXTURE),
+            tipos: tipos_da_casca(SUPERFICIES_DE_FIXTURE),
+            tetos: tetos_da_casca(
+                CONTRIBUICOES_DE_FIXTURE,
+                SUPERFICIES_DE_FIXTURE,
+                REGIAO_DE_FIXTURE,
+            ),
+            expostos: nomes_do_runtime(RUNTIME_DE_FIXTURE),
+        }
+    }
+
+    #[test]
+    fn os_extratores_leem_a_casca_e_o_runtime_na_forma_do_codigo() {
+        let casca = casca_de_fixture();
+        assert_eq!(
+            casca.pontos.get("pessoa.cartao").map(Vec::as_slice),
+            Some(["substituir".to_owned(), "adicionar".to_owned()].as_slice()),
+            "os modos de `pessoa.cartao` não foram lidos: {:?}",
+            casca.pontos
+        );
+        assert!(
+            casca.pontos.contains_key("pessoa.avatar"),
+            "{:?}",
+            casca.pontos
+        );
+        assert_eq!(
+            casca.tipos,
+            BTreeSet::from(["pagina".to_owned(), "dialogo".to_owned()]),
+            "os tipos de superfície não foram lidos"
+        );
+        for nome in ["arquivos.ler", "mundo.agora", "dados", "arquivos", "mundo"] {
+            assert!(
+                casca.expostos.contains(nome),
+                "`{nome}` não foi lido do runtime: {:?}",
+                casca.expostos
+            );
+        }
+        for (nome, valor) in [
+            ("contribuicoes.teto", 128),
+            ("superficies.limites.superficies", 12),
+            ("superficies.limites.avisos", 4),
+            ("superficies.limites.nos", 4096),
+            ("superficies.limites.fundura", 16),
+            ("superficies.limites.campos", 128),
+            ("superficies.limites.midias", 24),
+            ("superficies.limites.bytesDeMidia", 24 * 1024 * 1024),
+        ] {
+            assert_eq!(
+                casca.tetos.get(nome),
+                Some(&valor),
+                "o teto `{nome}` não foi lido como {valor}: {:?}",
+                casca.tetos
+            );
+        }
+    }
+
+    /// Os extratores contra os arquivos de verdade. Se isto reprova, ou o
+    /// produto mudou a forma de uma tabela e o extrator precisa acompanhar, ou
+    /// algo que um MOD usa hoje sumiu.
+    #[test]
+    fn os_extratores_acham_a_casca_e_o_runtime_de_verdade() {
+        let contribuicoes = include_str!("../../apps/seele-app/ui/mods-contribuicoes.js");
+        let superficies = include_str!("../../apps/seele-app/ui/mods-superficies.js");
+        let regiao = include_str!("../../apps/seele-app/ui/mods-regiao.js");
+        let runtime = include_str!("../../crates/seele-server/src/mods/mod.rs");
+        let pontos = pontos_da_casca(contribuicoes);
+        for ponto in ["pessoa.avatar", "pessoa.cartao", "servidor.aparencia"] {
+            assert!(
+                pontos.contains_key(ponto),
+                "o ponto `{ponto}` não foi achado: {pontos:?}"
+            );
+        }
+        assert!(tipos_da_casca(superficies).contains("dialogo"));
+        let expostos = nomes_do_runtime(runtime);
+        for nome in ["arquivos.ler", "volume.esperar", "mundo.buscar", "dados"] {
+            assert!(
+                expostos.contains(nome),
+                "`{nome}` não foi achado no runtime: {expostos:?}"
+            );
+        }
+        let tetos = tetos_da_casca(contribuicoes, superficies, regiao);
+        for nome in [
+            "contribuicoes.teto",
+            "superficies.limites.nos",
+            "superficies.limites.bytesDeMidia",
+        ] {
+            assert!(
+                tetos.contains_key(nome),
+                "o teto `{nome}` não foi achado: {tetos:?}"
+            );
+        }
+    }
+
+    /// O sentido que pega o `pessoa.avatar`: um ponto que a casca aceita e a
+    /// API não publica é uma superfície sem versão.
+    #[test]
+    fn um_ponto_que_a_casca_tem_e_a_v6_nao_lista_reprova() {
+        let v6 = serde_json::json!({
+            "contribuicoes": { "pontos": { "pessoa.cartao": ["substituir", "adicionar"] } },
+            "superficies": { "tipos": ["pagina", "dialogo"] },
+        });
+        let violacoes = pontos_e_tipos(6, &v6, &casca_de_fixture());
+        assert_eq!(violacoes.len(), 1, "{violacoes:?}");
+        assert!(
+            violacoes
+                .first()
+                .is_some_and(|v| v.contains("pessoa.avatar")),
+            "o ponto que a casca aceita e a API não publica passou: {violacoes:?}"
+        );
+    }
+
+    #[test]
+    fn um_ponto_ou_um_tipo_que_a_v6_promete_e_a_casca_nao_tem_reprova() {
+        let v6 = serde_json::json!({
+            "contribuicoes": { "pontos": {
+                "pessoa.avatar": ["substituir"],
+                "pessoa.cartao": ["substituir", "adicionar"],
+                "pessoa.capa": ["substituir"],
+            } },
+            "superficies": { "tipos": ["pagina", "dialogo", "folha"] },
+        });
+        let violacoes = pontos_e_tipos(6, &v6, &casca_de_fixture());
+        assert!(
+            violacoes.iter().any(|v| v.contains("pessoa.capa")),
+            "um ponto que ninguém aplica passou: {violacoes:?}"
+        );
+        assert!(
+            violacoes.iter().any(|v| v.contains("folha")),
+            "um tipo de superfície que ninguém monta passou: {violacoes:?}"
+        );
+    }
+
+    #[test]
+    fn um_ponto_com_outros_modos_na_v6_reprova() {
+        let v6 = serde_json::json!({
+            "contribuicoes": { "pontos": {
+                "pessoa.avatar": ["substituir", "adicionar"],
+                "pessoa.cartao": ["substituir", "adicionar"],
+            } },
+            "superficies": { "tipos": ["pagina", "dialogo"] },
+        });
+        let violacoes = pontos_e_tipos(6, &v6, &casca_de_fixture());
+        assert!(
+            violacoes.len() == 1
+                && violacoes
+                    .first()
+                    .is_some_and(|v| v.contains("pessoa.avatar") && v.contains("adicionar")),
+            "um modo que a casca não aplica passou: {violacoes:?}"
+        );
+    }
+
+    /// As regiões da v6 também são linhas de `PONTOS_DE_CONTRIBUICAO`, então
+    /// um ponto declarado no bloco `regioes` conta como publicado.
+    #[test]
+    fn uma_regiao_declarada_conta_como_ponto_publicado() {
+        let v6 = serde_json::json!({
+            "regioes": { "pessoa.avatar": { "modos": ["substituir"] } },
+            "contribuicoes": { "pontos": { "pessoa.cartao": ["substituir", "adicionar"] } },
+            "superficies": { "tipos": ["pagina", "dialogo"] },
+        });
+        assert!(pontos_e_tipos(6, &v6, &casca_de_fixture()).is_empty());
+    }
+
+    #[test]
+    fn as_versoes_abaixo_da_6_nao_sao_cobradas_pelas_regras_da_v6() {
+        let v5 = serde_json::json!({
+            "contribuicoes": { "pontos": {}, "teto": 7 },
+            "superficies": { "tipos": [], "limites": { "nos": 1 } },
+            "own": { "lerArquivo": "arquivos::ler" },
+        });
+        let casca = casca_de_fixture();
+        assert!(pontos_e_tipos(5, &v5, &casca).is_empty());
+        assert!(nomes_de_servidor(5, &v5, &casca).is_empty());
+        assert!(tetos_declarados(5, &v5, &casca).is_empty());
+    }
+
+    /// A regra que teria pego a v1: `lerArquivo` aponta para `arquivos::ler`,
+    /// que existe, e o MOD escreve `arquivos.ler`. O símbolo da direita
+    /// existir não basta; o nome da esquerda tem de ser o que o runtime expõe.
+    #[test]
+    fn um_nome_de_servidor_que_o_runtime_nao_expoe_reprova_na_v6() {
+        let v6 = serde_json::json!({
+            "own": { "lerArquivo": "arquivos::ler", "arquivos.ler": "arquivos::ler", "dados": "recolher_quintal" },
+            "world": { "mundo.agora": "mundo::agora", "mandarMensagem": "SendMessage" },
+        });
+        let violacoes = nomes_de_servidor(6, &v6, &casca_de_fixture());
+        assert_eq!(violacoes.len(), 2, "{violacoes:?}");
+        assert!(
+            violacoes.iter().any(|v| v.contains("lerArquivo")),
+            "{violacoes:?}"
+        );
+        assert!(
+            violacoes.iter().any(|v| v.contains("mandarMensagem")),
+            "{violacoes:?}"
+        );
+    }
+
+    #[test]
+    fn um_teto_declarado_que_nao_e_o_que_o_produto_aplica_reprova() {
+        let v6 = serde_json::json!({
+            "contribuicoes": { "teto": 128 },
+            "superficies": { "limites": { "nos": 4097, "bytesDeMidia": 25_165_824 } },
+        });
+        let violacoes = tetos_declarados(6, &v6, &casca_de_fixture());
+        assert_eq!(violacoes.len(), 1, "{violacoes:?}");
+        assert!(
+            violacoes
+                .first()
+                .is_some_and(|v| v.contains("nos") && v.contains("4097") && v.contains("4096")),
+            "a violação não diz o teto e os dois números: {violacoes:?}"
+        );
+    }
+
+    /// Um teto que o `check-api` não sabe conferir reprova, em vez de passar:
+    /// um guarda que não sabe olhar e aprova é o que deixou a forma `midia`
+    /// prometer 24 MiB e entregar 10.
+    #[test]
+    fn um_teto_que_o_check_api_nao_sabe_conferir_reprova() {
+        let v6 = serde_json::json!({ "superficies": { "limites": { "empilhadas": 3, "folhas": "três" } } });
+        let violacoes = tetos_declarados(6, &v6, &casca_de_fixture());
+        assert!(
+            violacoes.iter().any(|v| v.contains("empilhadas")),
+            "{violacoes:?}"
+        );
+        assert!(
+            violacoes.iter().any(|v| v.contains("folhas")),
+            "{violacoes:?}"
+        );
+    }
+
+    /// As três regras voltam na lista de [`conferir_arquivo`], junto com as
+    /// promessas: uma violação delas que ficasse fora da lista seria uma regra
+    /// que imprime e não reprova.
+    #[test]
+    fn as_regras_da_v6_voltam_na_lista_de_conferir_arquivo() {
+        let momentos = momentos_de_fixture();
+        let eventos = eventos_despachados(JANELA_DE_FIXTURE);
+        let v6 = serde_json::json!({
+            "version": 6, "moments": [], "eventos": [],
+            "contribuicoes": { "pontos": { "pessoa.cartao": ["substituir", "adicionar"] }, "teto": 99 },
+            "superficies": { "tipos": ["pagina", "dialogo"] },
+            "own": { "lerArquivo": "arquivos::ler" },
+        });
+        let (violacoes, cobrada) = conferir_arquivo(
+            std::path::Path::new("api/v6.json"),
+            &v6,
+            "arquivos::ler",
+            &promessas_cobradas(&momentos, &eventos),
+            &casca_de_fixture(),
+        );
+        assert!(cobrada);
+        for esperado in ["pessoa.avatar", "lerArquivo", "99"] {
+            assert!(
+                violacoes.iter().any(|v| v.contains(esperado)),
+                "a violação de `{esperado}` não voltou de `conferir_arquivo`: {violacoes:?}"
             );
         }
     }

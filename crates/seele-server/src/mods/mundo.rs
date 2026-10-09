@@ -114,6 +114,61 @@ pub fn registrar(id: &str, linha: &str) {
     tracing::info!(mod_id = %id, "{recortada}");
 }
 
+/// Por que `mundo.tema` recusa este MOD antes de olhar o tema, se recusa.
+///
+/// Os nomes são de lista fechada (rascunho da API 6, §7.1 e §9): o MOD recebe o
+/// nome, e a frase é de quem o mostra.
+///
+/// - `sem-porta-de-tema`: o manifesto não declara `"tema": true`;
+/// - `tema-de-outro-mod`: outro MOD é o escolhido e está ligado — um tema por
+///   servidor.
+#[must_use]
+pub fn recusa_do_tema(porta: bool, pintor: Option<&str>, quem: &str) -> Option<&'static str> {
+    if !porta {
+        return Some("sem-porta-de-tema");
+    }
+    if pintor.is_some_and(|pintor| pintor != quem) {
+        return Some("tema-de-outro-mod");
+    }
+    None
+}
+
+/// O tema que o MOD passou a `mundo.tema`, como o fio o leva, ou o nome da
+/// recusa.
+///
+/// `null` e `undefined` tiram o tema. Um objeto vira o JSON dele, que é o que
+/// o `TemaMudou` carrega. O resto — texto, número, lista, função — não é tema
+/// (`tema-invalido`), e um JSON maior que o teto do fio não sairia
+/// (`tema-grande-demais`): recusado aqui, onde o MOD lê a recusa, e não no
+/// envio, onde ninguém leria.
+///
+/// # Errors
+///
+/// Só o que o próprio MOD lançar ao ser serializado (um `toJSON` que lança, um
+/// objeto com ciclo): é a exceção dele, e ela volta a ele.
+pub fn valores_do_tema<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    valores: rquickjs::Value<'js>,
+) -> rquickjs::Result<Result<crate::mods::TemaDeclarado, &'static str>> {
+    if valores.is_null() || valores.is_undefined() {
+        return Ok(Ok(crate::mods::TemaDeclarado { valores: None }));
+    }
+    if valores.type_of() != rquickjs::Type::Object {
+        return Ok(Err("tema-invalido"));
+    }
+    let Some(texto) = ctx.json_stringify(valores)? else {
+        // Um `toJSON` que devolve `undefined`: não há tema para mandar.
+        return Ok(Err("tema-invalido"));
+    };
+    let texto = texto.to_string()?;
+    if texto.len() > seele_proto::control::MAX_CARGA_DE_MOD {
+        return Ok(Err("tema-grande-demais"));
+    }
+    Ok(Ok(crate::mods::TemaDeclarado {
+        valores: Some(texto),
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
