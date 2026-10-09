@@ -430,6 +430,113 @@ async fn uma_despedida_recuperavel_reconecta_em_vez_de_acabar_com_a_sessao() -> 
     Ok(())
 }
 
+/// O par terminal do teste acima: **quem hospeda fechou o servidor**, e a
+/// sessão acaba em vez de reconectar.
+///
+/// A mesma injeção — `Event::SessionEnded` no barramento, pelo braço que a
+/// expulsão usa — e só o motivo muda: [`DisconnectReason::ServerShuttingDown`],
+/// que o servidor manda a cada sessão ao fechar avisando
+/// (`Daemon::encerrar_avisando`, lote G-servidor da F5). Os dois testes juntos
+/// medem a fronteira de `a_sessao_acabou_aqui` pelos dois lados, com o
+/// servidor de verdade escrevendo a despedida no fio.
+///
+/// Reconectar aqui é o defeito: a bateria bate por cinco minutos numa porta
+/// que ninguém vai atender, e a casca diz «reconectando» a quem precisa ler
+/// «o servidor está encerrando». A manutenção programada continua do outro
+/// lado — ela é o «volto já», e a bateria existe para esperá-la.
+#[tokio::test(flavor = "multi_thread")]
+async fn quem_hospeda_fechou_acaba_com_a_sessao_em_vez_de_reconectar() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = server(0, Location::Memory).await?;
+
+    let mut enlace = Enlace::conectar(
+        destino(endereco),
+        ed25519_dalek::SigningKey::from_bytes(&[46; 32]),
+        Arc::new(MemoryPinStore::new()),
+    )
+    .await?;
+    enlace
+        .entrar_na_voice_room(VoiceRoomId(VOICE_ROOM), None)
+        .await?;
+    enlace.abrir_linha(ChannelId(LINE)).await?;
+
+    // A mesma barreira do par: a sessão de pé **do lado de lá**, e não só
+    // aqui. Sem ela, o evento iria para um barramento que esta sessão ainda
+    // não assinou, e o teste mediria o preparo em vez da fronteira.
+    enlace
+        .dizer(ChannelId(LINE), "estou aqui".to_owned(), ClientMessageId(0))
+        .await?;
+    let pronta = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Mensagem(mensagem)
+                if matches!(
+                    &**mensagem,
+                    ServerMessage::MessageReceived { body, .. } if body == "estou aqui"
+                )
+        )
+    })
+    .await;
+    assert!(
+        pronta.is_some(),
+        "a sessão não ficou de pé do lado do servidor: a Linha não devolveu o que foi dito nela, \
+         e uma despedida injetada agora mediria o preparo em vez da fronteira"
+    );
+
+    let quem = enlace.sessao().person;
+    servidor
+        .server()
+        .events
+        .send(Event::SessionEnded {
+            person: quem,
+            reason: DisconnectReason::ServerShuttingDown,
+        })
+        .expect("o barramento do servidor está de pé");
+
+    // Um: a despedida **chegou pelo protocolo**, e não como queda de
+    // transporte. Sem ela, a tela diria «não foi possível alcançar o
+    // servidor» a quem precisa ler que ele fechou.
+    let recebida = esperar(&mut enlace, Duration::from_secs(10), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Mensagem(mensagem)
+                if matches!(
+                    &**mensagem,
+                    ServerMessage::Disconnecting {
+                        reason: DisconnectReason::ServerShuttingDown
+                    }
+                )
+        )
+    })
+    .await;
+    assert!(
+        recebida.is_some(),
+        "a despedida de quem hospeda não chegou ao Enlace em 10 s: não há fronteira a medir"
+    );
+
+    // Dois: a sessão **acaba**, com o motivo que veio no fio. `Reconectado`
+    // aqui é a regressão inteira: a bateria batendo numa porta fechada.
+    let desfecho = esperar(&mut enlace, Duration::from_secs(30), |aviso| {
+        matches!(aviso, Aviso::Reconectado { .. } | Aviso::Encerrado(_))
+    })
+    .await;
+    match desfecho {
+        Some(Aviso::Encerrado(Motivo::Moderado(DisconnectReason::ServerShuttingDown))) => {}
+        Some(Aviso::Reconectado { .. }) => panic!(
+            "quem hospeda fechou o servidor e a sessão reconectou: a bateria vai bater numa porta \
+             que ninguém atende, dizendo «reconectando» a quem precisa ler que o servidor fechou"
+        ),
+        Some(Aviso::Encerrado(motivo)) => panic!(
+            "a sessão acabou, mas sem o motivo que veio no fio ({motivo:?}): a tela de fim não \
+             sabe dizer que o servidor está encerrando"
+        ),
+        outro => panic!("a sessão não acabou nem reconectou em 30 s: {outro:?}"),
+    }
+
+    servidor.shutdown();
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn sair_encerra_sem_esperar_a_bateria() -> Result<()> {
     let _vaga = vaga::minha();

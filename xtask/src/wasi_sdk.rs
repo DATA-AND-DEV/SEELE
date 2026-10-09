@@ -27,7 +27,7 @@ const ETIQUETA: &str = "wasi-sdk-24";
 /// que a primeira descarga era a boa; provam que, daqui em diante, um arquivo
 /// trocado é recusado. Uma plataforma sem linha aqui falha, em vez de baixar
 /// sem conferir.
-const FIXADOS: &[(&str, &str)] = &[
+pub(crate) const FIXADOS: &[(&str, &str)] = &[
     (
         "arm64-macos",
         "aeae999396d5f5caa5ce419f52e83c35869d5fd21d40af80acba2c80f51b0b3a",
@@ -40,7 +40,7 @@ const FIXADOS: &[(&str, &str)] = &[
 
 /// O sufixo do arquivo desta máquina, com o mapa do `build.rs` do
 /// `rquickjs-sys` (`:28-36`).
-fn sufixo_desta_maquina() -> Option<&'static str> {
+pub(crate) fn sufixo_desta_maquina() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Some("x86_64-linux"),
         ("linux", "aarch64") => Some("arm64-linux"),

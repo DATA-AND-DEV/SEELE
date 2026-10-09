@@ -30,6 +30,10 @@ let focoAntesDaAjuda = null;
  */
 function abrirAjuda() {
   focoAntesDaAjuda = document.activeElement;
+  // A tecla de falar que está gravada, e não o ESPAÇO escrito no HTML: quem a
+  // trocou em ATALHOS aprenderia aqui a tecla de antes. A cada abertura, porque
+  // ela pode ter mudado desde a última.
+  $("ajuda-tecla-falar").textContent = nomeDaTecla(teclaDeFalar);
   $("ajuda").hidden = false;
   $("ajuda").focus();
   anunciar("Ajuda. O vocabulário do SEELE e as teclas. Escape fecha.");

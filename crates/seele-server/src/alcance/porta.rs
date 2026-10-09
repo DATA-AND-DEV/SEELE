@@ -100,10 +100,48 @@ const RENOVACAO: Duration = Duration::from_secs(1200);
 /// toa no pior caso.
 const PROCURA: Duration = Duration::from_secs(3);
 
-/// O nome que aparece na lista de encaminhamentos do roteador.
+/// Para que esta porta é aberta.
 ///
-/// Quem for olhar aquela tela merece ver de onde a regra veio.
-const DESCRICAO: &str = "SEELE server";
+/// Uma máquina pode ter duas regras no roteador ao mesmo tempo: a do servidor
+/// guardado e a da sala pessoal (spec de 23/09, «A sala sempre se registra»).
+/// As duas diferem em duas coisas: a âncora e o nome que aparece na lista do
+/// roteador.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Papel {
+    /// Um servidor guardado. A âncora é a [`PORTA_CANONICA`], de que depende
+    /// um link guardado numa lista (ADR 0022, «O quarto»).
+    Servidor,
+    /// A sala pessoal. **Sem âncora:** ela é achada pelo quarto, pelo código
+    /// (ADR 0060), e não por uma porta guardada num link. Recuar para a
+    /// [`PORTA_CANONICA`] roubaria a regra do servidor guardado desta casa.
+    Sala,
+}
+
+impl Papel {
+    /// O nome que aparece na lista de encaminhamentos do roteador.
+    ///
+    /// Quem for olhar aquela tela merece ver de onde a regra veio, e distinguir
+    /// as duas regras desta máquina.
+    fn descricao(self) -> &'static str {
+        match self {
+            Self::Servidor => "SEELE servidor",
+            Self::Sala => "SEELE sala",
+        }
+    }
+
+    /// A porta externa que este papel tenta antes de aceitar qualquer uma.
+    fn ancora(self) -> Option<u16> {
+        match self {
+            Self::Servidor => Some(PORTA_CANONICA),
+            Self::Sala => None,
+        }
+    }
+}
+
+/// Quantas regras do roteador [`devolver`] olha, no máximo, procurando a sua.
+///
+/// Uma casa tem poucas. O teto existe para um roteador que nunca diz «acabou».
+const REGRAS_CONFERIDAS: u32 = 128;
 
 /// A porta externa que o ADR 0022 promete como âncora estável — "O quarto",
 /// que documenta o que uma lista de servidores salva e o que sobrevive a
@@ -215,7 +253,11 @@ impl std::error::Error for FalhaAoAbrir {}
 pub struct PortaAberta {
     roteador: Gateway<Tokio>,
     externo: SocketAddr,
+    /// O endereço desta máquina para onde a regra aponta. É ele que
+    /// [`PortaAberta::fechar`] confere antes de apagar.
+    interno: SocketAddr,
     renovacao: tokio::task::JoinHandle<()>,
+    papel: Papel,
     /// Se a porta externa é a [`PORTA_CANONICA`], ou o recuo de "qualquer
     /// porta" — ver [`PortaAberta::aviso`].
     canonica: bool,
@@ -249,34 +291,43 @@ impl PortaAberta {
     /// tentativa original nem a segunda, explícita pela 8383, bateram. O link
     /// gerado agora funciona, mas a próxima porta que o roteador der pode ser
     /// outra, e é isso que a frase diz.
+    ///
+    /// A sala pessoal nunca avisa: ela não tem âncora. Ver [`Papel::Sala`].
     #[must_use]
     pub fn aviso(&self) -> Option<String> {
-        (!self.canonica).then(|| {
-            format!(
-                "o roteador não abriu a porta {PORTA_CANONICA} de sempre — abriu a {} no \
-                 lugar. o link funciona agora, mas pode não servir mais depois de reiniciar \
-                 o servidor",
-                self.externo.port()
-            )
-        })
+        aviso_de_porta(self.papel, self.canonica, self.externo.port())
     }
 
-    /// Devolve a porta ao roteador.
+    /// Devolve a porta ao roteador, **se a regra ainda for desta máquina**.
     ///
     /// Consome, e espera. Deixar a regra para trás no roteador é sujeira que
     /// sobrevive ao programa: aponta para uma máquina que não atende mais e só
     /// some quando o prazo vence.
+    ///
+    /// Apagava pelo número da porta externa. Se a regra desta máquina tinha
+    /// caducado e outra máquina da casa ganhou a mesma porta, fechar levava o
+    /// servidor dela junto. Ver [`devolver`].
     pub async fn fechar(self) {
         self.renovacao.abort();
-        if let Err(erro) = self
-            .roteador
-            .remove_port(PortMappingProtocol::UDP, self.externo.port())
-            .await
-        {
+        let porta = self.externo.port();
+        match devolver(&self.roteador, porta, self.interno).await {
+            Devolucao::Devolvida => tracing::info!(porta, "porta devolvida ao roteador"),
+            Devolucao::JaNaoEstava => {
+                tracing::info!(porta, "a regra desta porta já não estava no roteador");
+            }
+            Devolucao::DeOutraMaquina(dono) => tracing::warn!(
+                porta,
+                %dono,
+                "a regra desta porta já é de outra máquina da casa; ficou onde estava"
+            ),
             // Não é fatal: o prazo da VALIDADE fecha sozinho depois.
-            tracing::warn!(%erro, porta = self.externo.port(), "o roteador não devolveu a porta");
-        } else {
-            tracing::info!(porta = self.externo.port(), "porta devolvida ao roteador");
+            Devolucao::NaoConferida => tracing::warn!(
+                porta,
+                "o roteador não mostrou de quem é a regra; ela fecha sozinha quando o prazo vencer"
+            ),
+            Devolucao::Recusada(erro) => {
+                tracing::warn!(%erro, porta, "o roteador não devolveu a porta");
+            }
         }
     }
 }
@@ -308,6 +359,7 @@ impl Drop for PortaAberta {
 pub async fn abrir(
     candidatos: &[super::interfaces::Achado],
     porta: u16,
+    papel: Papel,
 ) -> Result<PortaAberta, FalhaAoAbrir> {
     let opcoes = SearchOptions {
         timeout: Some(PROCURA),
@@ -340,21 +392,24 @@ pub async fn abrir(
     })?;
     let interno = SocketAddr::new(interno, porta);
 
-    let mapeamento = mapear(&roteador, interno).await?;
+    let mapeamento = mapear(&roteador, interno, papel).await?;
     let externo = SocketAddr::new(externo, mapeamento.porta);
     tracing::info!(
         %externo,
         %interno,
         canonica = mapeamento.canonica,
+        ?papel,
         "o roteador abriu a porta"
     );
 
-    let renovacao = tokio::spawn(renovar(roteador.clone(), interno, mapeamento.porta));
+    let renovacao = tokio::spawn(renovar(roteador.clone(), interno, mapeamento.porta, papel));
 
     Ok(PortaAberta {
         roteador,
         externo,
+        interno,
         renovacao,
+        papel,
         canonica: mapeamento.canonica,
     })
 }
@@ -366,23 +421,34 @@ struct Mapeamento {
     canonica: bool,
 }
 
-/// O que [`mapear`] precisa do roteador, e nada mais — só para que a
-/// retentativa da [`PORTA_CANONICA`] possa ser exercida sem uma rede de
-/// verdade. [`Gateway<Tokio>`] implementa isto abaixo; o `#[cfg(test)]` ganha
-/// uma versão que devolve respostas combinadas.
+/// O que [`mapear`] e [`devolver`] precisam do roteador, e nada mais — só
+/// para que a retentativa da [`PORTA_CANONICA`] e a conferência do dono da
+/// regra possam ser exercidas sem uma rede de verdade. [`Gateway<Tokio>`]
+/// implementa isto abaixo; o `#[cfg(test)]` ganha uma versão que devolve
+/// respostas combinadas.
 trait Roteador {
     async fn add_port(
         &self,
         externa: u16,
         interno: SocketAddr,
         validade: u32,
+        descricao: &str,
     ) -> Result<(), igd_next::AddPortError>;
 
     async fn add_any_port(
         &self,
         interno: SocketAddr,
         validade: u32,
+        descricao: &str,
     ) -> Result<u16, igd_next::AddAnyPortError>;
+
+    /// A regra de número `indice` na lista do roteador.
+    async fn entrada(
+        &self,
+        indice: u32,
+    ) -> Result<igd_next::PortMappingEntry, igd_next::GetGenericPortMappingEntryError>;
+
+    async fn remover(&self, externa: u16) -> Result<(), igd_next::RemovePortError>;
 }
 
 impl Roteador for Gateway<Tokio> {
@@ -391,6 +457,7 @@ impl Roteador for Gateway<Tokio> {
         externa: u16,
         interno: SocketAddr,
         validade: u32,
+        descricao: &str,
     ) -> Result<(), igd_next::AddPortError> {
         Gateway::add_port(
             self,
@@ -398,7 +465,7 @@ impl Roteador for Gateway<Tokio> {
             externa,
             interno,
             validade,
-            DESCRICAO,
+            descricao,
         )
         .await
     }
@@ -407,8 +474,85 @@ impl Roteador for Gateway<Tokio> {
         &self,
         interno: SocketAddr,
         validade: u32,
+        descricao: &str,
     ) -> Result<u16, igd_next::AddAnyPortError> {
-        Gateway::add_any_port(self, PortMappingProtocol::UDP, interno, validade, DESCRICAO).await
+        Gateway::add_any_port(self, PortMappingProtocol::UDP, interno, validade, descricao).await
+    }
+
+    async fn entrada(
+        &self,
+        indice: u32,
+    ) -> Result<igd_next::PortMappingEntry, igd_next::GetGenericPortMappingEntryError> {
+        Gateway::get_generic_port_mapping_entry(self, indice).await
+    }
+
+    async fn remover(&self, externa: u16) -> Result<(), igd_next::RemovePortError> {
+        Gateway::remove_port(self, PortMappingProtocol::UDP, externa).await
+    }
+}
+
+/// A frase para quem hospeda, quando a porta externa saiu da âncora.
+///
+/// Só o servidor guardado tem âncora, e só ele avisa. A spec de 23/09 achou o
+/// aviso falso para a sala: a porta dela nunca foi a
+/// [`PORTA_CANONICA`].
+fn aviso_de_porta(papel: Papel, canonica: bool, externa: u16) -> Option<String> {
+    let ancora = papel.ancora()?;
+    (!canonica).then(|| {
+        format!(
+            "o roteador não abriu a porta {ancora} de sempre — abriu a {externa} no \
+             lugar. o link funciona agora, mas pode não servir mais depois de reiniciar \
+             o servidor"
+        )
+    })
+}
+
+/// O que aconteceu ao devolver uma porta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Devolucao {
+    /// A regra era desta máquina, e foi apagada.
+    Devolvida,
+    /// A regra já não estava no roteador.
+    JaNaoEstava,
+    /// A regra desta porta aponta para outra máquina, e ficou.
+    DeOutraMaquina(String),
+    /// O roteador não mostrou a lista, e a regra ficou para o prazo.
+    NaoConferida,
+    /// O roteador recusou apagar.
+    Recusada(String),
+}
+
+/// Apaga a regra da porta `externa`, **só se ela apontar para `interno`**.
+///
+/// O `igd-next` 0.17 não pergunta por uma porta: só pela lista, regra a regra.
+/// Então a lista é percorrida até a porta aparecer. Sem ver de quem a regra é,
+/// apagar é apostar, e o lado seguro é deixá-la para o prazo da [`VALIDADE`].
+async fn devolver<R: Roteador>(roteador: &R, externa: u16, interno: SocketAddr) -> Devolucao {
+    let mut indice = 0;
+    let dono = loop {
+        if indice >= REGRAS_CONFERIDAS {
+            return Devolucao::NaoConferida;
+        }
+        match roteador.entrada(indice).await {
+            Ok(regra)
+                if regra.external_port == externa && regra.protocol == PortMappingProtocol::UDP =>
+            {
+                break regra.internal_client;
+            }
+            Ok(_) => indice += 1,
+            Err(igd_next::GetGenericPortMappingEntryError::SpecifiedArrayIndexInvalid) => {
+                return Devolucao::JaNaoEstava;
+            }
+            Err(_) => return Devolucao::NaoConferida,
+        }
+    };
+    if dono != interno.ip().to_string() {
+        return Devolucao::DeOutraMaquina(dono);
+    }
+    match roteador.remover(externa).await {
+        Ok(()) => Devolucao::Devolvida,
+        Err(igd_next::RemovePortError::NoSuchPortMapping) => Devolucao::JaNaoEstava,
+        Err(erro) => Devolucao::Recusada(erro.to_string()),
     }
 }
 
@@ -432,14 +576,19 @@ impl Roteador for Gateway<Tokio> {
 async fn mapear<R: Roteador>(
     roteador: &R,
     interno: SocketAddr,
+    papel: Papel,
 ) -> Result<Mapeamento, FalhaAoAbrir> {
     let desejada = interno.port();
     let validade = u32::try_from(VALIDADE.as_secs()).unwrap_or(u32::MAX);
+    let descricao = papel.descricao();
 
-    match roteador.add_port(desejada, interno, validade).await {
+    match roteador
+        .add_port(desejada, interno, validade, descricao)
+        .await
+    {
         Ok(()) => Ok(Mapeamento {
             porta: desejada,
-            canonica: desejada == PORTA_CANONICA,
+            canonica: papel.ancora() == Some(desejada),
         }),
 
         // Roteador que só faz mapeamento permanente. Aceitamos, e o preço é a
@@ -447,11 +596,11 @@ async fn mapear<R: Roteador>(
         Err(igd_next::AddPortError::OnlyPermanentLeasesSupported) => {
             tracing::info!("o roteador só faz mapeamento permanente; pedindo sem prazo");
             roteador
-                .add_port(desejada, interno, 0)
+                .add_port(desejada, interno, 0, descricao)
                 .await
                 .map(|()| Mapeamento {
                     porta: desejada,
-                    canonica: desejada == PORTA_CANONICA,
+                    canonica: papel.ancora() == Some(desejada),
                 })
                 .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
         }
@@ -463,28 +612,38 @@ async fn mapear<R: Roteador>(
             erro @ (igd_next::AddPortError::PortInUse
             | igd_next::AddPortError::SamePortValuesRequired),
         ) => {
-            tracing::info!(
-                %erro,
-                porta = PORTA_CANONICA,
-                "a porta pedida não deu; tentando a canônica de novo antes de qualquer uma"
-            );
-            match roteador.add_port(PORTA_CANONICA, interno, validade).await {
-                Ok(()) => Ok(Mapeamento {
-                    porta: PORTA_CANONICA,
-                    canonica: true,
-                }),
-                Err(erro) => {
-                    tracing::info!(%erro, "a canônica continua ocupada; pedindo qualquer uma");
-                    roteador
-                        .add_any_port(interno, validade)
-                        .await
-                        .map(|porta| Mapeamento {
-                            porta,
-                            canonica: false,
+            // A sala não tem âncora: vai direto a qualquer porta. Ver `Papel::Sala`.
+            if let Some(ancora) = papel.ancora() {
+                tracing::info!(
+                    %erro,
+                    porta = ancora,
+                    "a porta pedida não deu; tentando a canônica de novo antes de qualquer uma"
+                );
+                match roteador
+                    .add_port(ancora, interno, validade, descricao)
+                    .await
+                {
+                    Ok(()) => {
+                        return Ok(Mapeamento {
+                            porta: ancora,
+                            canonica: true,
                         })
-                        .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
+                    }
+                    Err(erro) => {
+                        tracing::info!(%erro, "a canônica continua ocupada; pedindo qualquer uma");
+                    }
                 }
+            } else {
+                tracing::info!(%erro, "a porta pedida não deu; a sala pede qualquer uma");
             }
+            roteador
+                .add_any_port(interno, validade, descricao)
+                .await
+                .map(|porta| Mapeamento {
+                    porta,
+                    canonica: false,
+                })
+                .map_err(|erro| FalhaAoAbrir::RoteadorRecusou(erro.to_string()))
         }
 
         Err(erro) => Err(FalhaAoAbrir::RoteadorRecusou(erro.to_string())),
@@ -499,7 +658,7 @@ async fn mapear<R: Roteador>(
 ///
 /// Uma renovação perdida não é fatal e não interrompe o laço — a [`RENOVACAO`]
 /// deixa margem para várias antes de a [`VALIDADE`] acabar.
-async fn renovar(roteador: Gateway<Tokio>, interno: SocketAddr, porta: u16) {
+async fn renovar(roteador: Gateway<Tokio>, interno: SocketAddr, porta: u16, papel: Papel) {
     let validade = u32::try_from(VALIDADE.as_secs()).unwrap_or(u32::MAX);
     let mut relogio = tokio::time::interval(RENOVACAO);
     // O primeiro tique sai na hora; este é o que renova, não o que abriu.
@@ -512,7 +671,7 @@ async fn renovar(roteador: Gateway<Tokio>, interno: SocketAddr, porta: u16) {
                 porta,
                 interno,
                 validade,
-                DESCRICAO,
+                papel.descricao(),
             )
             .await
         {
@@ -685,11 +844,18 @@ mod testes {
     /// lista de ocupadas. `add_any_port` sempre dá certo, e devolve a porta
     /// combinada — é o recuo de último recurso, e não há o que testar nele
     /// além de "foi chamado".
+    ///
+    /// Para a devolução, ele guarda as regras do roteador como pares `(porta
+    /// externa, cliente interno)` — `None` é um roteador que não lista — e anota
+    /// as portas apagadas.
     #[derive(Default)]
     struct RoteadorFalso {
         ocupadas: Vec<u16>,
         externas_pedidas: std::sync::Mutex<Vec<u16>>,
+        descricoes: std::sync::Mutex<Vec<String>>,
         qualquer_porta_pedida: std::sync::atomic::AtomicUsize,
+        regras: Option<Vec<(u16, &'static str)>>,
+        apagadas: std::sync::Mutex<Vec<u16>>,
     }
 
     impl Roteador for RoteadorFalso {
@@ -698,8 +864,10 @@ mod testes {
             externa: u16,
             _interno: SocketAddr,
             _validade: u32,
+            descricao: &str,
         ) -> Result<(), igd_next::AddPortError> {
             self.externas_pedidas.lock().unwrap().push(externa);
+            self.descricoes.lock().unwrap().push(descricao.to_owned());
             if self.ocupadas.contains(&externa) {
                 Err(igd_next::AddPortError::PortInUse)
             } else {
@@ -711,10 +879,40 @@ mod testes {
             &self,
             _interno: SocketAddr,
             _validade: u32,
+            descricao: &str,
         ) -> Result<u16, igd_next::AddAnyPortError> {
+            self.descricoes.lock().unwrap().push(descricao.to_owned());
             self.qualquer_porta_pedida
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(51234)
+        }
+
+        async fn entrada(
+            &self,
+            indice: u32,
+        ) -> Result<igd_next::PortMappingEntry, igd_next::GetGenericPortMappingEntryError> {
+            let Some(regras) = &self.regras else {
+                return Err(igd_next::GetGenericPortMappingEntryError::ActionNotAuthorized);
+            };
+            let (externa, cliente) = regras
+                .get(usize::try_from(indice).unwrap())
+                .copied()
+                .ok_or(igd_next::GetGenericPortMappingEntryError::SpecifiedArrayIndexInvalid)?;
+            Ok(igd_next::PortMappingEntry {
+                remote_host: String::new(),
+                external_port: externa,
+                protocol: PortMappingProtocol::UDP,
+                internal_port: externa,
+                internal_client: cliente.to_owned(),
+                enabled: true,
+                port_mapping_description: "SEELE sala".to_owned(),
+                lease_duration: 3600,
+            })
+        }
+
+        async fn remover(&self, externa: u16) -> Result<(), igd_next::RemovePortError> {
+            self.apagadas.lock().unwrap().push(externa);
+            Ok(())
         }
     }
 
@@ -732,7 +930,7 @@ mod testes {
         };
         let interno = SocketAddr::from(([192, 168, 0, 30], interna));
 
-        let mapeamento = mapear(&roteador, interno)
+        let mapeamento = mapear(&roteador, interno, Papel::Servidor)
             .await
             .expect("o recuo para qualquer porta não pode falhar aqui");
 
@@ -771,6 +969,7 @@ mod testes {
                 externa: u16,
                 _interno: SocketAddr,
                 _validade: u32,
+                _descricao: &str,
             ) -> Result<(), igd_next::AddPortError> {
                 let numero = self
                     .chamadas
@@ -790,8 +989,21 @@ mod testes {
                 &self,
                 _interno: SocketAddr,
                 _validade: u32,
+                _descricao: &str,
             ) -> Result<u16, igd_next::AddAnyPortError> {
                 panic!("não devia recuar: a canônica respondeu na segunda tentativa")
+            }
+
+            async fn entrada(
+                &self,
+                _indice: u32,
+            ) -> Result<igd_next::PortMappingEntry, igd_next::GetGenericPortMappingEntryError>
+            {
+                Err(igd_next::GetGenericPortMappingEntryError::ActionNotAuthorized)
+            }
+
+            async fn remover(&self, _externa: u16) -> Result<(), igd_next::RemovePortError> {
+                Ok(())
             }
         }
 
@@ -799,7 +1011,7 @@ mod testes {
             chamadas: std::sync::atomic::AtomicUsize::new(0),
         };
         let interno = SocketAddr::from(([192, 168, 0, 30], 9999));
-        let mapeamento = mapear(&roteador, interno)
+        let mapeamento = mapear(&roteador, interno, Papel::Servidor)
             .await
             .expect("a segunda tentativa deveria ter dado certo");
 
@@ -807,6 +1019,142 @@ mod testes {
         assert!(
             mapeamento.canonica,
             "quando a segunda tentativa bate, a porta é a canônica"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sala_nao_recua_para_a_porta_do_servidor_guardado() {
+        // Spec de 23/09, «A sala sempre se registra». A sala é achada pelo
+        // quarto, e não por uma porta guardada num link: ela não tem âncora.
+        // Recuar para a 8383 roubaria a regra do servidor guardado desta casa.
+        let roteador = RoteadorFalso {
+            ocupadas: vec![8385],
+            ..Default::default()
+        };
+        let interno = SocketAddr::from(([192, 168, 0, 30], 8385));
+
+        let mapeamento = mapear(&roteador, interno, Papel::Sala)
+            .await
+            .expect("o recuo para qualquer porta não pode falhar aqui");
+
+        assert_eq!(
+            *roteador.externas_pedidas.lock().unwrap(),
+            vec![8385],
+            "a sala pediu a porta do servidor guardado, e roubaria a regra dele no roteador"
+        );
+        assert_eq!(
+            roteador
+                .qualquer_porta_pedida
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a sala com a porta ocupada não foi direto a qualquer porta"
+        );
+        assert_eq!(mapeamento.porta, 51234);
+    }
+
+    #[test]
+    fn so_o_servidor_guardado_avisa_que_saiu_da_ancora() {
+        assert_eq!(
+            aviso_de_porta(Papel::Sala, false, 51234),
+            None,
+            "a sala não tem âncora: um aviso sobre a {PORTA_CANONICA} seria falso para ela"
+        );
+        let do_servidor = aviso_de_porta(Papel::Servidor, false, 51234)
+            .expect("o servidor guardado fora da âncora tem de avisar");
+        assert!(
+            do_servidor.contains(&PORTA_CANONICA.to_string()) && do_servidor.contains("51234"),
+            "o aviso não diz as duas portas: {do_servidor}"
+        );
+        assert_eq!(aviso_de_porta(Papel::Servidor, true, PORTA_CANONICA), None);
+    }
+
+    #[tokio::test]
+    async fn cada_papel_tem_o_seu_nome_na_lista_do_roteador() {
+        // Quem for olhar a lista de encaminhamentos do roteador precisa
+        // distinguir as duas regras desta máquina.
+        for (papel, nome) in [
+            (Papel::Servidor, "SEELE servidor"),
+            (Papel::Sala, "SEELE sala"),
+        ] {
+            let roteador = RoteadorFalso {
+                ocupadas: vec![9999, PORTA_CANONICA],
+                ..Default::default()
+            };
+            mapear(
+                &roteador,
+                SocketAddr::from(([192, 168, 0, 30], 9999)),
+                papel,
+            )
+            .await
+            .expect("o recuo não pode falhar aqui");
+            let descricoes = roteador.descricoes.lock().unwrap().clone();
+            assert!(
+                !descricoes.is_empty() && descricoes.iter().all(|d| d == nome),
+                "o papel {papel:?} pediu a porta com os nomes {descricoes:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn devolver_apaga_a_propria_regra() {
+        let interno = SocketAddr::from(([192, 168, 0, 30], 8385));
+        let roteador = RoteadorFalso {
+            regras: Some(vec![(8383, "192.168.0.30"), (8385, "192.168.0.30")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            devolver(&roteador, 8385, interno).await,
+            Devolucao::Devolvida
+        );
+        assert_eq!(*roteador.apagadas.lock().unwrap(), vec![8385]);
+    }
+
+    #[tokio::test]
+    async fn devolver_nao_apaga_a_regra_de_outra_maquina() {
+        // A regra desta máquina caducou, e outra máquina da casa ganhou a mesma
+        // porta externa. Apagar pelo número levaria o servidor dela junto.
+        let interno = SocketAddr::from(([192, 168, 0, 30], 8385));
+        let roteador = RoteadorFalso {
+            regras: Some(vec![(8385, "192.168.0.31")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            devolver(&roteador, 8385, interno).await,
+            Devolucao::DeOutraMaquina("192.168.0.31".to_owned())
+        );
+        assert!(
+            roteador.apagadas.lock().unwrap().is_empty(),
+            "fechar apagou a regra de outra máquina da casa"
+        );
+    }
+
+    #[tokio::test]
+    async fn uma_regra_que_ja_sumiu_nao_e_apagada() {
+        let interno = SocketAddr::from(([192, 168, 0, 30], 8385));
+        let roteador = RoteadorFalso {
+            regras: Some(vec![(8383, "192.168.0.30")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            devolver(&roteador, 8385, interno).await,
+            Devolucao::JaNaoEstava
+        );
+        assert!(roteador.apagadas.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn sem_lista_no_roteador_a_regra_fica_para_o_prazo() {
+        // Sem ver de quem é a regra, apagar é apostar. O prazo da VALIDADE
+        // fecha sozinho, e é o lado seguro.
+        let interno = SocketAddr::from(([192, 168, 0, 30], 8385));
+        let roteador = RoteadorFalso::default();
+        assert_eq!(
+            devolver(&roteador, 8385, interno).await,
+            Devolucao::NaoConferida
+        );
+        assert!(
+            roteador.apagadas.lock().unwrap().is_empty(),
+            "fechar apagou uma regra sem saber de quem ela era"
         );
     }
 
@@ -889,7 +1237,9 @@ mod testes {
         }];
         let prazo = PROCURA + Duration::from_secs(5);
 
-        let Ok(resultado) = tokio::time::timeout(prazo, abrir(&candidatos, 8383)).await else {
+        let Ok(resultado) =
+            tokio::time::timeout(prazo, abrir(&candidatos, 8383, Papel::Servidor)).await
+        else {
             panic!("o pedido de porta não voltou em {prazo:?}, e travaria quem apertou HOSPEDAR");
         };
 

@@ -1177,6 +1177,23 @@ bateria() {
     etapa_da_bateria "uma bancada de MOD reprovou, ou não há Node nesta máquina." \
         "Rode «cargo xtask check-runtime» e leia: ele diz qual bancada caiu." \
         cargo xtask check-runtime
+    # **Os crates do celular dentro do `.wasm`** (ADR 0057, emenda de
+    # 08/10/2026), que esta bateria não rodava. O `cargo test` prova o núcleo no
+    # nativo, e não o que só existe no `wasm`: os bytes-ouro da linha 1 pela
+    # fronteira do `seele-web`, e o motor de MODs do `seele-motor-web` com as
+    # importações fixas e o teto de memória, que no `wasm32-wasip1` só vale com
+    # o `RustAllocator`. Os sete passos moram em `xtask/src/web.rs`, e são os
+    # mesmos que o `validar` do `release.yml` e o job de MOD do `ci.yml` rodam.
+    #
+    # Precisa dos alvos `wasm32-unknown-unknown` e `wasm32-wasip1`, do Node, de
+    # `curl` e de `tar`, e baixa o wasi-sdk uma vez por máquina, conferido pelo
+    # SHA-256 fixado. Só há hash fixado para o Mac arm64 e o Linux x86_64: numa
+    # máquina sem ele, a etapa reprova antes de começar e diz por quê, em vez de
+    # compilar com um SDK que ninguém conferiu. Depois da primeira vez, leva uns
+    # quinze segundos.
+    etapa_da_bateria "os crates do celular reprovaram dentro do .wasm, ou falta nesta máquina um alvo wasm, o Node ou o hash fixado do wasi-sdk." \
+        "Rode «cargo xtask web» e leia: ele diz o passo que caiu, ou o que falta e como resolver." \
+        cargo xtask web
     # **As conferências de regra que o `validar` do `release.yml` roda, e esta
     # bateria não rodava** (m3 da revisão final do Plano 1). O `check-api` é o
     # único guarda de que todo nome, momento e evento que uma `api/vN.json`
@@ -1931,11 +1948,56 @@ conferir_notas() {
     passo "mudanças desde $ANTERIOR classificadas (o que o resumo não classifica está dito acima, se houve)"
 }
 
+# As condições que as notas desta versão ainda esperam.
+#
+# Uma nota pode afirmar o que ainda não foi medido, desde que diga isso: a frase
+# leva, antes dela, um `<!-- CONDIÇÃO: o que falta -->`. O comentário some na
+# página do GitHub, e por isso avisar não basta: quem publica sem abrir o
+# arquivo não o lê. **O script não publica enquanto houver um.** Cumprida a
+# condição, apaga-se o comentário; se ela não vai ser cumprida, sai a frase.
+#
+# O marcador é o comentário que **começa** pela condição, e não a palavra, que
+# aparece em texto comum. Mas ele vale partido em linhas e em minúsculas: o
+# primeiro comentário de condição deste repositório nasceu com o `<!--` sozinho
+# numa linha, e um marcador que só valesse na forma exata o deixaria passar.
+#
+# **Antes de qualquer conferência com efeito.** O `limpar_entrega` apaga, e o
+# `conferir_windows` leva o Windows a outro commit: uma publicação que não vai
+# sair não tem por que mexer em nada. E depois de `conferir_ferramentas`, que é
+# quem prova que o `python3` roda.
+conferir_condicoes_das_notas() {
+    ccn_arquivo="$RAIZ/empacotar/notas/$VERSAO.md"
+    if [ ! -f "$ccn_arquivo" ]; then
+        passo "v$VERSAO não tem notas próprias: nenhuma condição a esperar"
+        return 0
+    fi
+    if ! ccn_pendentes=$(python3 -c 'import re, sys, unicodedata
+with open(sys.argv[1], encoding="utf-8") as arquivo:
+    texto = unicodedata.normalize("NFC", arquivo.read())
+marcador = re.compile(r"<!--\s*condição:(.*?)(?:-->|\Z)", re.I | re.S)
+for achado in marcador.finditer(texto):
+    linha = texto.count("\n", 0, achado.start(1)) + 1
+    print("  linha %d: %s" % (linha, " ".join(achado.group(1).split())))' "$ccn_arquivo"); then
+        morrer "não consegui ler empacotar/notas/$VERSAO.md atrás de condições pendentes." \
+            "Sem isso não sei se as notas afirmam algo que ainda não pode sair."
+    fi
+    if [ -n "$ccn_pendentes" ]; then
+        morrer "as notas de v$VERSAO esperam uma condição, e não saem antes dela." \
+            "Em empacotar/notas/$VERSAO.md:" \
+            "$ccn_pendentes" \
+            "" \
+            "Cumprida a condição, apague o comentário «<!-- CONDIÇÃO: … -->» e faça o" \
+            "commit. Se ela não vai ser cumprida, tire das notas o que depende dela."
+    fi
+    passo "notas de v$VERSAO: nenhuma condição pendente"
+}
+
 # =========================================================================
 
 printf -- '--- conferindo antes de compilar ---\n'
 conferir_versao
 conferir_ferramentas
+conferir_condicoes_das_notas
 conferir_arvore
 conferir_config_tauri
 conferir_ponto_de_encontro

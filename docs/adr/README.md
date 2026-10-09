@@ -90,8 +90,8 @@ o ganho é de estética.
 | [0058](0058-1x-nunca-quebra-o-fio.md) | 1.x nunca quebra o fio: a definição da versão de servidor | **aceito** | `02` e `10` — versionamento (substitui a janela N−1) |
 | [0059](0059-a-sala-pessoal-segura-a-conexao-enquanto-toca.md) | A sala pessoal segura a conexão enquanto toca | **aceito** | — (decisão do dono de 23/09: o toque instantâneo; restringe o `0030` aos servidores guardados) |
 | [0060](0060-o-codigo-de-uma-pessoa.md) | O código de uma pessoa | **aceito** | — (decisão do dono de 23/09: o código de usuário; forma, marcas e o DER da sala congelados) |
-| [0061](0061-a-identidade-e-uma-por-maquina.md) | A identidade é uma por máquina, e não por linha nem por versão | **proposto** | — (decisão do dono de 08/10; emenda o `0017` e o `0046`; espera as opções da linha legada e a regra dos 32 bytes na 0.15.2) |
-| [0062](0062-o-registro-assinado-no-ponto-de-encontro.md) | SEELE-ENC/2: o registro assinado no ponto de encontro | **aceito** | — (spec de 23/09 e decisões do dono de 08/10: o limite e o teto, e o portão no `publicar.sh`; revê o §2.4 do `0047`) |
+| [0061](0061-a-identidade-e-uma-por-maquina.md) | A identidade é uma por máquina, e não por linha nem por versão | **aceito** | — (decisões do dono de 08/10; emenda o `0017` e o `0046`; a 0.15.2 lê `$SEELE_IDENTIDADE` e só assina desafios de 32 bytes) |
+| [0062](0062-o-registro-assinado-no-ponto-de-encontro.md) | SEELE-ENC/2: o registro assinado no ponto de encontro | **aceito** | — (spec de 23/09 e decisões do dono de 08/10: o limite e o teto, o portão no `publicar.sh`, o teto por prefixo e o cookie de ida e volta; revê o §2.4 do `0047`) |
 
 ## O que ainda não tem ADR
 

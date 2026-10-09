@@ -46,7 +46,10 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 3 | 4c, a campainha | **feita** | `77207424` |
 | 4 | 7g-núcleo, a agenda | **feita** | `6f28dd41` |
 | 5 | 7c-áudio, o toque só de saída | **feita**, com duas medidas pendentes do dono | `d1f8a947` |
-| 6 | os ADRs 0059, 0060 e 0061 | **feita**, com o 0061 proposto | `d763e9e9` |
+| 6 | os ADRs 0059, 0060 e 0061 | **feita**; o 0061 aceito depois da decisão do dono | `d763e9e9` e o seguinte |
+| — | merge da `versao/0.16` (`dc001a0a`) | limpo, e as provas da F7 verdes em cima dele | `fd372ca0` |
+| 7 | 4f-porta, o UPnP por papel | **feita** | `efaada91` |
+| 8 | 6b-verificador, o `ConfereCodigo` | **feita** | `3197550a` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -173,3 +176,48 @@ As seis tarefas [AGORA] estão feitas. Pendências:
   (`ConfereCodigo`), que o plano marca como [AGORA, se liberada].
 
 O resto espera o G-servidor, a F2, a casca ou a F1.
+
+## As decisões do dono (08/10, pela orquestradora)
+
+- **A1:** a 0.15.2 só assina desafios de exatamente 32 bytes. Quem escreve é a
+  F6, no `linha/0.15`, com o teste e a reversão.
+- **O ADR 0061: a opção (a).** A 0.15.2 lê `$SEELE_IDENTIDADE`, e as cópias
+  acabam. O 0061 passou a **aceito**, com «O contrato da variável» escrito nele,
+  e as notas do 0017 e do 0046 e o índice foram atualizados. O `adr_index` e o
+  `textos_publicos` passam.
+- **A divisão:**
+  - o lado do launcher (o `Lancamento` e a primeira abertura sem copiar a
+    chave) e a 0.15.2 são da F6;
+  - a 4b, a 0.16 lendo a pasta da identidade, é desta frente (tarefa 22, que
+    espera a casca).
+- **A2 e A3** ficam como propostos, nas tarefas 4f e 4a. **A4** foi repassado à
+  F1. **Os ADRs** 0059 a 0061 são desta frente, e o 0062 fica reservado ao ENC/2.
+- **A orquestradora está integrando `0.16/sala` até `85879154`.** Nada de
+  conformidade nem de bateria até ela avisar.
+
+## A segunda integração e as tarefas 7 e 8 (08/10)
+
+- **Merge de `versao/0.16` em `dc001a0a`** (`fd372ca0`), limpo. Rodados em cima
+  dele, todos verdes:
+  - `janela_do_comandante` e `identidade_da_sala`;
+  - `seele-server --lib` (576);
+  - a agenda e o toque.
+- **Tarefa 7, o UPnP por papel** (`efaada91`), em `alcance/porta.rs`:
+  - `Papel::Servidor` tem a âncora 8383; `Papel::Sala` não tem âncora, não
+    recua para a 8383 e não avisa de porta;
+  - as regras se chamam «SEELE servidor» e «SEELE sala»;
+  - o `fechar` só apaga a regra que aponta para este endereço. O `igd-next` 0.17
+    só lista por índice, então a lista é percorrida até achar a porta, com
+    teto de 128. Sem lista, a regra fica para o prazo.
+  - A escada ainda passa sempre `Papel::Servidor` (`alcance.rs`); a 4f passa o
+    da sala.
+  - 7 testes novos e 4 reversões medidas. `seele-server --lib`: 583.
+- **Tarefa 8, o `ConfereCodigo`** (`3197550a`), em
+  `crates/seele-core/src/confere_codigo.rs`:
+  - a chave Ed25519, o código, o pino `@CÓDIGO` e a prova de posse com o `ring`;
+  - o motivo tipado sai por um `RelatoDoCodigo`.
+  - Os testes fazem um QUIC real com o certificado da sala. 3 reversões
+    medidas. `seele-core --lib`: 444.
+- **Quando o `NOME_DA_SALA` da F1 (`7e123ee5`) chegar à `versao/0.16`:** o
+  `tls.rs` passa a reexportá-lo, e os testes que escrevem `"seele-sala"` passam
+  a usá-lo.

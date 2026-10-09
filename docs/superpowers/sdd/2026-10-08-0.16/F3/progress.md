@@ -110,3 +110,17 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
 - **Tarefas novas no plano:** 15 (o `servidor-com-mod.rs` instala por hash,
   fora da 8384, e o guia o documenta; defeito, pela orquestradora) e 16 (o
   escopo de um pedido).
+- **A M3 de base fechada no Mac: os 10 cenários, duas rodadas cada** (ADR
+  0056). De nenhum para três MODs, a memória sobe ~58 MiB, quase toda no
+  WebContent, e a CPU de repouso vai de ~5 % para ~9 %. A voz soma ~60 MiB sem
+  MOD (a tela da chamada) e de 3 a 5 pontos de CPU. O jitter fica em 1 ms de
+  mediana com 0, 1 ou 3 MODs. A MESA em arraste vai a ~395 MiB e ~16 %. Nenhum
+  commit passou de um quadro, o que mede o commit do app, e não o quadro da
+  página.
+  - Falhas do roteiro achadas e consertadas no caminho: o editor tocado antes
+    de o PERFIS registrar o cartão; o arraste sintético contado como entrada
+    de uma pessoa; e a sessão bloqueada, em que a janela não responde.
+  - O jitter não foi lido com o editor aberto nem com a MESA: a barra de
+    telemetria fica inerte sob o diálogo e coberta pela página imersiva. Vai
+    para a M3 com a API 6 (tarefa 11).
+  - Falta, e é do dono: o Windows (WebView2) e o iPhone.

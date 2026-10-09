@@ -38,6 +38,11 @@ nada dependa da memória de uma conversa.
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
 - **A parte 2 da tarefa 17 da F6**, com tela, no Mac e no Windows, com o dono.
+- **O ponto em produção fala o ENC/2**: `sondar --exige-enc2 encontro.seele.app.br`, de
+  outra máquina, depois de o dono reimplantar a VPS (`docs/ponto-de-encontro.md`).
+  A VPS vai antes do app (spec-mestre, §4).
+- **As notas não têm condição pendente**: o `publicar.sh` recusa notas com o marcador
+  `<!-- CONDIÇÃO:` (F6, `36274663` e `7e444fe8`).
 
 ## As integrações feitas
 
@@ -45,5 +50,6 @@ nada dependa da memória de uma conversa.
 |---|---|---|---|
 | 08/10/2026 | F5 onda 1 (C, H, K2, M1, ferramentas, P54), F1 até `f9fdac74` (protocolo 9, S2, vocabulário, API guardada), F6 até `4e66dbf3` (o launcher, tarefas 1 a 16), F4 até `f937ff1` (etapa 0), e o guarda do esquema (`2a37ffc5`) | `2a37ffc5` | **verde**: fmt, check-runtime, check-api, check-versao, check-vetores, clippy, `cargo test --workspace -- --test-threads=1` (2912 passaram, 0 falharam, 5 ignorados, com `SEELE_EXIGE_CODEC=1`), check-deps, deny licenses e advisories |
 | 08/10/2026 | F5 onda 2 (M2, P53, K5, D), F1 até `ac1fae91` (`ModAviso`, `TemaMudou`, P9, P10), F4 até `737a627` (o `seele-web`, o motor em `wasm`, a exceção de `unsafe`, o `cargo xtask web`), F3 até `493aa594` (o rascunho da API 6, o esqueleto do ADR 0056, a M3 de base) e F7 até `85879154` (a janela do Comandante na 0.16, o certificado da sala, a campainha, a agenda, o toque, os ADRs 0059 a 0061) | `4bc764d3`, consertado em `5122f39d` | **verde depois de um conserto**: a primeira rodada reprovou o clippy (um `iter().any()` no `fronteira_do_celular.rs`) e um teste (`todo_crate_do_produto_pode_falar_no_log` cobrava os crates do celular no filtro de log do desktop); o resto verde, com 3005 testes passando. Depois do `5122f39d`: o clippy do workspace inteiro, o `empacotamento` (22/22) e o `xtask` (168/0) rodados de novo, e o `cargo xtask web` à parte (os sete passos) |
+| 08/10/2026 | F5 onda 3 (E, G-servidor, J; o conserto do guarda do `frontend` em `9daa0c0`, revisado na integração), F1 até `33bca7a9` (`NOME_DA_SALA`, `verify_strict` e a chave de ordem pequena recusada), F6 até `36274663` (`SEELE_IDENTIDADE`, notas com condição recusadas), F4 até `ec78faa` (o `xtask web` na bateria, os links no `.wasm`), F3 até `c1fda14` (a M3 de base) e F7 até `ed1057f1` (o UPnP por papel, o `ConfereCodigo`, o ADR 0061 aceito) | `0e30ea36` | **verde**: a bateria inteira, agora com o `cargo xtask web` como 11ª etapa (3059 passaram, 0 falharam, 7 ignorados). Sem conflito de texto |
 
 Conflitos de texto, resolvidos à mão: na primeira, o `EndReason` de `crates/seele-ffi/src/types.rs`, onde o lote H e a F1 acrescentaram razões no mesmo lugar. Ficaram as duas listas. Na segunda, o índice dos ADRs (`docs/adr/README.md`), com as linhas do 0056, do 0057 emendado e do 0058.

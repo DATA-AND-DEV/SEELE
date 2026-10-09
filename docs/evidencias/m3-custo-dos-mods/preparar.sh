@@ -33,6 +33,7 @@ cp "$AQUI/m3-falante.rs" "$PASTA/fonte/crates/seele-conformance/examples/"
   && CARGO_TARGET_DIR="$PASTA/alvo" cargo build --release -p seele-conformance --example m3-falante )
 
 swiftc -O "$AQUI/ax.swift" -o "$PASTA/ax"
+swiftc -O "$AQUI/sessao.swift" -o "$PASTA/sessao"
 cp "$AQUI/m3.py" "$AQUI/xctrace_tabela.py" "$AQUI/campanha.sh" "$PASTA/roteiro/"
 
 curl -sSf -o "$PASTA/pacotes/catalogo.json" https://mods.seele.app.br/catalogo.json

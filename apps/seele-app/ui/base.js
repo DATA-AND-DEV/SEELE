@@ -109,6 +109,46 @@ function digitando() {
   return ativo && (ativo.tagName === "INPUT" || ativo.tagName === "TEXTAREA");
 }
 
+/**
+ * O nome que uma pessoa lê para o código que o navegador dá.
+ *
+ * **Este é o único lugar do produto que nomeia teclas**, e é de propósito: o
+ * `preferences.rs` diz, por escrito, que o valor atravessa opaco por lá porque
+ * «quem lê teclado é a casca, e é o único lugar que pode nomeá-las».
+ *
+ * Aqui e não em `tela-server.js`, onde morava: a lista de atalhos da
+ * configuração deixou de ser a única a nomear a tecla de falar. A linha de
+ * estado do operador, a faixa de contexto da configuração e a ajuda dizem
+ * «enquanto segura ESPAÇO» com a tecla gravada, e `base.js` é o que carrega
+ * antes de todas elas.
+ *
+ * O que não estiver na tabela sai como o próprio código. Um nome feio é melhor
+ * que um nome errado, e melhor ainda que uma tecla que a lista não sabe
+ * mostrar.
+ */
+function nomeDaTecla(codigo) {
+  const nomes = {
+    Space: "ESPAÇO",
+    Enter: "ENTER",
+    Tab: "TAB",
+    Backquote: "`",
+    ShiftLeft: "SHIFT ESQ",
+    ShiftRight: "SHIFT DIR",
+    ControlLeft: "CTRL ESQ",
+    ControlRight: "CTRL DIR",
+    AltLeft: "ALT ESQ",
+    AltRight: "ALT DIR",
+    CapsLock: "CAPS",
+  };
+  if (nomes[codigo]) return nomes[codigo];
+  // `KeyF` vira `F`, `Digit4` vira `4`, `F9` fica `F9`.
+  const letra = /^Key([A-Z])$/.exec(codigo);
+  if (letra) return letra[1];
+  const numero = /^Digit([0-9])$/.exec(codigo);
+  if (numero) return numero[1];
+  return codigo;
+}
+
 // ------------------------------------------------------------ trocar de tela
 //
 // Toda transição desta janela é um `hidden` que sobe numa `<section class="tela">`

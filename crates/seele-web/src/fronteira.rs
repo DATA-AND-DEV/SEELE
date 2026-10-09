@@ -139,13 +139,39 @@ pub unsafe extern "C" fn decodificar(ptr: *const u8, len: usize) -> u32 {
     }
 }
 
+fn dizer_o_link(lido: &serde_json::Value) -> u32 {
+    let codigo = u32::from(lido.get("link").is_none());
+    dizer(lido.to_string().into_bytes(), codigo)
+}
+
+/// Um link do navegador, lido contra a origem do produto
+/// (`seele_proto::uri::ORIGEM_DO_NAVEGADOR`, vazia até o D-web-2). Devolve 0
+/// com `{"link": …}` na saída, ou 1 com `{"erro": …}`.
+///
+/// **Sem parâmetro de origem, de propósito**: a página não escolhe contra que
+/// origem um link é conferido.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let texto = std::str::from_utf8(bytes).unwrap_or("");
+    dizer_o_link(&crate::link_do_navegador(
+        texto,
+        seele_proto::uri::ORIGEM_DO_NAVEGADOR,
+    ))
+}
+
 /// As duas funções só de teste: o `cargo xtask web` confere com elas os
 /// bytes-ouro dentro do `.wasm`. O `.wasm` da página sai sem a feature.
 #[cfg(feature = "prova")]
 pub mod prova {
     use seele_proto::control::{decode, encode_em, ClientMessage, ServerMessage};
 
-    use super::{dizer, entrada, erro};
+    use super::{dizer, dizer_o_link, entrada, erro};
     use crate::ErroDaPonte;
 
     /// O JSON de uma mensagem do cliente, a partir do quadro.
@@ -188,5 +214,27 @@ pub mod prova {
             },
             Err(e) => erro(&e),
         }
+    }
+
+    /// [`analisar_link`](super::analisar_link) com a origem dada: os casos da
+    /// F1 usam `origem.invalid`, e a do produto é vazia até o D-web-2.
+    ///
+    /// # Safety
+    ///
+    /// Os dois pares `ptr`/`len` como em [`entrada`].
+    #[no_mangle]
+    pub unsafe extern "C" fn analisar_link_em(
+        texto_ptr: *const u8,
+        texto_len: usize,
+        origem_ptr: *const u8,
+        origem_len: usize,
+    ) -> u32 {
+        // SAFETY: repassa o contrato desta função ao de `entrada`.
+        let texto = unsafe { entrada(texto_ptr, texto_len) };
+        // SAFETY: idem.
+        let origem = unsafe { entrada(origem_ptr, origem_len) };
+        let texto = std::str::from_utf8(texto).unwrap_or("");
+        let origem = std::str::from_utf8(origem).unwrap_or("");
+        dizer_o_link(&crate::link_do_navegador(texto, origem))
     }
 }

@@ -293,6 +293,7 @@ pub(crate) fn preparar(
     pedido: &Pedido,
     ato: Ato,
     intencao: &Intencao,
+    identidade: &std::path::Path,
 ) -> Result<Lancamento, FalhaAoAbrirVersao> {
     let deposito = Deposito::em(raiz_do_deposito(config));
     let vigente = deposito
@@ -305,7 +306,11 @@ pub(crate) fn preparar(
     // como recusa desta função em vez de como uma janela que abre vazia.
     std::fs::create_dir_all(&resolvida.dados)
         .map_err(|erro| FalhaAoAbrirVersao::NaoIniciou(erro.to_string()))?;
-    Ok(Lancamento::de(&resolvida, intencao.argumentos()))
+    Ok(Lancamento::de(
+        &resolvida,
+        intencao.argumentos(),
+        identidade,
+    ))
 }
 
 /// Inicia o processo de um lançamento montado.
@@ -340,6 +345,12 @@ pub(crate) async fn abrir(
         return Err(FalhaAoAbrirVersao::SemCatalogo);
     };
     let manifesto = catalogo_para(ato, config, atualizador).await?;
+    let identidade = pasta_da_identidade_deste_processo(
+        config,
+        std::env::var(seele_lancador::VARIAVEL_DA_IDENTIDADE)
+            .ok()
+            .as_deref(),
+    );
     iniciar(&preparar(
         config,
         &manifesto,
@@ -347,7 +358,26 @@ pub(crate) async fn abrir(
         pedido,
         ato,
         intencao,
+        &identidade,
     )?)
+}
+
+/// A pasta da identidade **deste processo**, a que o launcher passa para a
+/// versão que abre. ADR 0061, «O contrato da variável»:
+///
+/// - a `SEELE_IDENTIDADE` que este processo recebeu, se recebeu uma não vazia;
+/// - senão, a pasta de configuração dele (`config`, que é o `config_dir`): no
+///   Mac, `~/.config/seele`; no Windows, `%APPDATA%\tech.datadev.seele`.
+///
+/// Assim, uma versão aberta por outra continua apontando para o mesmo arquivo.
+/// Sempre absoluta, porque o contrato pede e porque o processo filho pode ter
+/// outro diretório corrente.
+pub(crate) fn pasta_da_identidade_deste_processo(config: &str, variavel: Option<&str>) -> PathBuf {
+    let pasta = match variavel {
+        Some(pasta) if !pasta.is_empty() => PathBuf::from(pasta),
+        _ => PathBuf::from(config),
+    };
+    std::path::absolute(&pasta).unwrap_or(pasta)
 }
 
 /// Por que não deu para baixar e instalar uma versão.
@@ -845,9 +875,19 @@ impl DadosDaLinhaLegada {
     }
 }
 
+/// O que fica de fora da cópia da primeira abertura, no primeiro nível da pasta.
+///
+/// - `lancador`: o próprio depósito, que mora dentro da pasta do app — sem
+///   isto, seria uma cópia que entra em si mesma;
+/// - `identity.key`: a chave da pessoa. **A identidade é uma por máquina**
+///   (ADR 0061): a linha 0.15 a lê de `SEELE_IDENTIDADE`, que o launcher passa,
+///   e uma cópia seria uma segunda chave que pode divergir da primeira.
+const DEIXADOS_DE_FORA_DA_COPIA: &[&str] = &["lancador", "identity.key"];
+
 /// Spec 0.16, §1, «O que a atualização para a 0.16 precisa fazer na primeira
 /// abertura», passo 1: copiar os dados da 0.15 para a linha dela **antes de
-/// qualquer outra coisa** — sem `lancador/` e com o marcador de pronta.
+/// qualquer outra coisa** — sem `lancador/`, sem a chave (ADR 0061) e com o
+/// marcador de pronta.
 ///
 /// Roda no `setup`, antes de a janela existir (ver
 /// `a_janela_so_nasce_depois_da_primeira_abertura`) e antes da migração dos
@@ -874,7 +914,7 @@ pub(crate) fn primeira_abertura(config: &str) -> DadosDaLinhaLegada {
         }
     }
     let inicio = std::time::Instant::now();
-    match deposito.semear_linha(&legada, pasta, &["lancador"]) {
+    match deposito.semear_linha(&legada, pasta, DEIXADOS_DE_FORA_DA_COPIA) {
         Ok(seele_lancador::Semeadura::Semeada { arquivos, bytes }) => {
             let ms = inicio.elapsed().as_millis();
             tracing::info!(
@@ -1395,6 +1435,11 @@ mod o_launcher_ligado_ao_produto {
         Linha::nova(t).unwrap()
     }
 
+    /// A pasta da identidade da máquina, nos testes que não falam dela.
+    fn identidade_de_teste() -> std::path::PathBuf {
+        std::path::PathBuf::from("/a/pasta/da/maquina")
+    }
+
     /// **O guarda contra o defeito que não tem sintoma.** Um processo aberto
     /// com o executável certo e o `SEELE_HOME` errado funciona, e escreve as
     /// conversas no diretório de outra linha.
@@ -1404,6 +1449,7 @@ mod o_launcher_ligado_ao_produto {
         let config = dir.path().to_string_lossy().into_owned();
         let json = manifesto_json(&[("0.16.0", "1.0"), ("0.15.2", "0.15")], None);
         let m = instalado(&config, &json, "0.15.2");
+        let identidade = dir.path().join("a-pasta-da-maquina");
 
         let lancamento = preparar(
             &config,
@@ -1416,6 +1462,7 @@ mod o_launcher_ligado_ao_produto {
                 nome_publico: Some("casa.exemplo.br".into()),
                 link: None,
             },
+            &identidade,
         )
         .expect("a linha 0.15 está instalada e não revogada");
 
@@ -1440,10 +1487,42 @@ mod o_launcher_ligado_ao_produto {
             dados.is_dir(),
             "a pasta de dados não foi criada antes de o processo subir"
         );
+        assert!(
+            lancamento.ambiente.contains(&(
+                "SEELE_IDENTIDADE".to_owned(),
+                identidade.to_string_lossy().into_owned()
+            )),
+            "a versão aberta não recebeu a pasta da identidade da máquina: {:?}",
+            lancamento.ambiente
+        );
         assert_eq!(
             lancamento.argumentos,
             vec!["--hospedar", "--nome-publico", "casa.exemplo.br"],
             "a intenção de hospedar, ou o nome público, não atravessou"
+        );
+    }
+
+    /// ADR 0061: a pasta da identidade que o launcher passa é a do próprio
+    /// processo — a `SEELE_IDENTIDADE` que ele recebeu, ou a pasta de
+    /// configuração dele —, sempre absoluta.
+    #[test]
+    fn a_identidade_deste_processo_e_a_variavel_ou_a_pasta_do_app() {
+        assert_eq!(
+            super::pasta_da_identidade_deste_processo("/a/config", Some("/a/maquina")),
+            std::path::PathBuf::from("/a/maquina")
+        );
+        assert_eq!(
+            super::pasta_da_identidade_deste_processo("/a/config", Some("")),
+            std::path::PathBuf::from("/a/config"),
+            "vazia vale como ausente"
+        );
+        assert_eq!(
+            super::pasta_da_identidade_deste_processo("/a/config", None),
+            std::path::PathBuf::from("/a/config")
+        );
+        assert!(
+            super::pasta_da_identidade_deste_processo("relativa", None).is_absolute(),
+            "o contrato pede caminho absoluto"
         );
     }
 
@@ -1465,7 +1544,15 @@ mod o_launcher_ligado_ao_produto {
         };
 
         assert_eq!(
-            preparar(&config, &m, &chave(), &pedido, Ato::Hospedar, &hospedar),
+            preparar(
+                &config,
+                &m,
+                &chave(),
+                &pedido,
+                Ato::Hospedar,
+                &hospedar,
+                &identidade_de_teste()
+            ),
             Err(FalhaAoAbrirVersao::Revogada {
                 defeito: "defeito de teste".to_owned(),
                 corrigida_em: Some("0.15.3".to_owned()),
@@ -1485,7 +1572,8 @@ mod o_launcher_ligado_ao_produto {
                 &chave(),
                 &pedido,
                 Ato::Hospedar,
-                &hospedar
+                &hospedar,
+                &identidade_de_teste()
             ),
             Err(FalhaAoAbrirVersao::Revogada { .. })
         ));
@@ -1496,7 +1584,8 @@ mod o_launcher_ligado_ao_produto {
             &chave(),
             &pedido,
             Ato::Abrir,
-            &Intencao::default()
+            &Intencao::default(),
+            &identidade_de_teste()
         )
         .is_ok());
     }
@@ -1517,7 +1606,8 @@ mod o_launcher_ligado_ao_produto {
                 &chave(),
                 &Pedido::MaisNovaDaLinha(linha("0.15")),
                 Ato::Entrar,
-                &Intencao::default()
+                &Intencao::default(),
+                &identidade_de_teste()
             ),
             Err(FalhaAoAbrirVersao::NaoInstalada { tem_pacote: true })
         );
@@ -1548,6 +1638,7 @@ mod o_launcher_ligado_ao_produto {
                 link: Some(link.clone()),
                 ..Intencao::default()
             },
+            &identidade_de_teste(),
         )
         .unwrap();
         assert_eq!(
@@ -1578,6 +1669,7 @@ mod o_launcher_ligado_ao_produto {
                 nome_publico: Some("casa.exemplo.br".into()),
                 ..Intencao::default()
             },
+            &identidade_de_teste(),
         )
         .unwrap();
         assert!(
@@ -1677,6 +1769,7 @@ mod o_launcher_ligado_ao_produto {
             &Pedido::MaisNova,
             Ato::Abrir,
             &Intencao::default(),
+            &identidade_de_teste(),
         )
         .unwrap();
         let resultado = super::iniciar(&lancamento);
@@ -1706,7 +1799,9 @@ mod o_launcher_ligado_ao_produto {
     }
 
     /// **A ordem do spec 0.16, §1:** os dados da 0.15 viram os da linha 0.15
-    /// antes de a 0.16 migrar a pasta dela, e a identidade vai junto.
+    /// antes de a 0.16 migrar a pasta dela — **sem a chave**. A identidade é
+    /// uma por máquina (ADR 0061): a linha 0.15 a lê de `SEELE_IDENTIDADE`, e uma
+    /// cópia seria uma segunda chave que pode divergir da primeira.
     #[test]
     fn a_primeira_abertura_guarda_os_dados_da_0_15_para_a_linha_dela() {
         let dir = tempfile::tempdir().unwrap();
@@ -1722,10 +1817,15 @@ mod o_launcher_ligado_ao_produto {
         let deposito = Deposito::em(super::raiz_do_deposito(&config));
         assert!(deposito.tem_dados_da_linha(&linha("0.15")));
         let destino = deposito.pasta_de_dados_da_linha(&linha("0.15"));
+        assert!(
+            !destino.join("identity.key").exists(),
+            "a chave foi copiada para a linha 0.15: duas cópias da mesma identidade, \
+             que podem divergir (ADR 0061)"
+        );
         assert_eq!(
-            std::fs::read(destino.join("identity.key")).unwrap(),
+            std::fs::read(dir.path().join("identity.key")).unwrap(),
             b"a chave da pessoa",
-            "a identidade não foi junto: a pessoa seria outra nos servidores da 0.15"
+            "a chave da máquina saiu do lugar"
         );
         assert!(destino.join("seele.db").is_file());
         assert!(!destino.join("lancador").exists());
@@ -2182,7 +2282,8 @@ mod o_launcher_ligado_ao_produto {
                 &chave(),
                 &Pedido::MaisNovaDaLinha(linha("0.15")),
                 Ato::Abrir,
-                &Intencao::default()
+                &Intencao::default(),
+                &identidade_de_teste()
             ),
             Err(FalhaAoAbrirVersao::InstalacaoAlterada)
         );
