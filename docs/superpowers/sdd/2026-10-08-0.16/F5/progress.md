@@ -255,3 +255,19 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - **Ficam para o Z:**
     - a chave do teto do som não tem prova. Perdê-la só devolve aquele caminho ao comportamento de antes, e nenhum número sai errado;
     - com um MOD escolhido, a gestão não cita os outros que perderam. Isso é anterior ao lote.
+- **F → integrado** (`411778e..3a60172`, merge `198b03d`), em 4 rodadas. A pendência 50 fecha em três itens:
+  - **P50-1**, em `dde763b`. O `Enlace::sair` espera o motor e a despedida. Quem sai some dos presentes dos outros em menos de 1 ms no laço local, e não nos ~20 s do prazo de ociosidade.
+  - **P50-2**, em `fd10af6`. A thread da conexão avisa antes de o runtime cair. A casca espera esse aviso por `encerrar_e_esperar(teto)`.
+  - **P50-3**, em `b7aeb74`. A saída do app revoga a sessão, e com isso diz a conta dos baldes. Ela manda parar os MODs da geração que fechou, espera até 200 ms sem segurar o cadeado e encerra a conexão em até 500 ms. A parada de um MOD nativo sobe para INFO.
+  - **A medida:** `saida_com_despedida.rs` é o teste novo, e é ele que mede.
+  - **As rodadas de conserto:**
+    - **1ª:**
+      - o guarda de `encerramento.rs` deixa de casar com comentário;
+      - o doc do `wait_idle` diz o que ele compra: o período de fechamento do QUIC, sem prova num laço que não perde pacote, com custo medido de ~86 ms;
+      - a reversão 1 foi decomposta, e a prova do P50-2 deixou de depender de corrida;
+      - a conta e a espera dos MODs ficaram só com a geração revogada.
+    - **2ª:** o gancho do `ExitRequested` também deixa de casar com comentário.
+    - **3ª:** o leitor de comentários passou a aninhar `/* */` e a conhecer `cr"`.
+  - **O que fica sem prova, e o doc diz:**
+    - o `wait_idle` como reenvio de um CLOSE perdido;
+    - a espera pelas alças abortadas de `largar_tudo_e_esperar`.
