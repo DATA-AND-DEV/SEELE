@@ -320,3 +320,42 @@ começar.
 - **A 3.5 passou para a F8** (aviso de 09/10). A marca `data-casca`, que a F8
   quer antes da primeira pintura, fica a combinar com ela, e a orquestradora
   recomenda que saia da `ponte-web.js`.
+
+### 09/10, a tela no celular (D-celular-2) e o enquadramento no proto
+
+- **D-celular-2:** o celular assiste à tela compartilhada, com som. Ficou como
+  Tarefa 3.9 do plano (`a66005a3`), com o caminho testado de quando o aparelho
+  não decodifica: o cartão diz «esta tela não abre neste aparelho», e a página
+  deixa de receber a transmissão.
+- **O lugar do enquadramento:** um módulo no `seele_proto::screen`, e não um
+  crate novo. Aprovado pela orquestradora e pela F1, que pediu três correções:
+  - o `Enquadramento` vai junto;
+  - os dois leitores leem o cabeçalho por uma função só;
+  - os nomes são `LidoDaTela` e `ErroDeQuadro`.
+- **O teto, medido** (`94d4dfd8`, `medidas/idr-no-teto.md`): com conteúdo
+  realista a 1080p, um quadro passa de 512 KiB a partir de 12,4 Mbps, e chega
+  a 973 KiB a 100 Mbps. A orquestradora decidiu congelar em 4 MiB (D-fio-9),
+  acima do I420 cru de 1080p.
+- **`354cf7c8`, o módulo:**
+  - o `Enquadramento` (portado do `seele-core` com os oito testes), o
+    `LeitorDeTela` e a `ler_cabecalho_de_quadro`;
+  - o guarda da ordem pelo `maior_reserva()`. O alocador contador não coube: o
+    `forbid(unsafe_code)` do workspace não se afrouxa nem num teste;
+  - os dois guardas do teto: no proto e em
+    `seele-core/tests/teto_do_quadro_de_tela.rs`;
+  - os bytes-ouro `fluxo:quadro-de-tela:*` e o teste que os lê de volta;
+  - **as reversões:** sem a conferência do teto, as duas leituras reprovam;
+    reservando antes de conferir, o guarda da ordem reprova; sem a regra do
+    cabeçalho partido, os dois testes dela reprovam; com o teto em 512 KiB, os
+    dois guardas reprovam.
+- **Pendente de envio** (as mensagens entre sessões pararam até o usuário
+  escrever de novo nesta sessão):
+  - **à F1, o pedido de revisão do `354cf7c8`.** Ele explica a troca do
+    alocador contador pelo `maior_reserva`. Ele também leva os dois pontos da
+    orquestradora para a troca das cópias, sobre o descarte `GrandeDemais` do
+    lado que envia (`seele-core/src/tela.rs:1347`, `:1447`): o descarte é dito
+    no log e no diagnóstico, e depois dele o próximo quadro é um quadro-chave.
+    Primeiro o teste que mostra como é hoje. As constantes do core e do
+    servidor sobem para 4 MiB na troca;
+  - **à orquestradora, o aviso de que o módulo está pronto** para a revisão da
+    F1.
