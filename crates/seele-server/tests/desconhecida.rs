@@ -319,7 +319,9 @@ const PROVA_NO_FILHO: &str = "PROVA56_FILHO";
 /// **Por que num processo filho.** A ordem forçada só decide quando a captura
 /// dela é o único despachante vivo: é aí que o `tracing` pergunta só à thread
 /// que passou. Com o teste de cima de pé ao mesmo tempo, ela passava mesmo sem
-/// o auxiliar (3 em 10 rodadas do binário, em 09/10). O filho roda só ela
+/// o auxiliar (em parte das rodadas do binário: 3 em 10 numa amostra de
+/// 09/10, 5 em 10 noutra — a fração varia, e por isso a prova não pode depender
+/// dela). O filho roda só ela
 /// (`--exact`, `--test-threads=1`), e ali a captura é a única. O pai exige
 /// `1 passed`, porque um `--exact` que não acha o teste sai com sucesso e
 /// `0 passed`, e a prova passaria sem ter rodado.

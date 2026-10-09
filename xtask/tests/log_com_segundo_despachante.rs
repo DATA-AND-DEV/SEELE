@@ -361,7 +361,7 @@ fn uma_fn_aninhada_nao_e_a_funcao_da_captura() {
     assert_eq!(
         capturas_sem_o_auxiliar(dentro_da_aninhada, false),
         vec![5],
-        "o auxiliar dentro de uma fn aninhada valeu para a captura da função de fora, e ele só          roda se alguém chamar a aninhada"
+        "o auxiliar dentro de uma fn aninhada valeu para a captura da função de fora, e ele só roda se alguém chamar a aninhada"
     );
 }
 
