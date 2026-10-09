@@ -1020,9 +1020,9 @@ function donoDaRegiao(mod, instancia) {
      * hash é o do pacote: na região, o do MOD carregado; numa contribuição,
      * o da instância que a registrou (`montarContribuicao`).
      *
-     * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
-     * `midia_do_mod` para o papel `som`: em base64 por `carregarMidia`, que a
-     * região chama para saber o papel e os bytes a contar, e cru por aqui.
+     * **O som do pacote atravessa a ponte uma vez só, e por aqui.** Para um
+     * som, `carregarMidia` devolve o papel e os bytes a contar, sem `uri`
+     * (P49-7b).
      */
     bytesDoSom: async (caminho) => {
       const geracao = geracaoDaSessao;

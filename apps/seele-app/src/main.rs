@@ -5896,7 +5896,15 @@ struct MidiaDoMod {
     /// mesma razão: uma página que junta um tipo a bytes é uma página que pode
     /// juntar a **alegação de quem mandou** a eles, e a alegação é texto que um
     /// terceiro escolheu. O manifesto do MOD é exatamente esse texto.
-    uri: String,
+    ///
+    /// **Nenhum só no som do pacote** (P49-7b), e então fora da resposta. A
+    /// janela lê os bytes dele crus, por `som_do_mod`, e um `data:` aqui seria
+    /// o mesmo arquivo atravessando a ponte uma segunda vez, em base64, sem
+    /// ninguém que o lesse. A imagem do pacote e toda mídia do servidor o
+    /// trazem: o `<img>` mostra o `data:`, e o som do servidor não tem outro
+    /// caminho até a janela (`bufferDaUri`, em `mods-regiao.js`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uri: Option<String>,
     /// `som` ou `imagem`, de uma lista fechada.
     ///
     /// A janela precisa saber qual elemento montar, e recebe a palavra em vez
@@ -6086,6 +6094,12 @@ fn bytes_declarados_do_mod(
 
 /// A mídia de um MOD pronta para a janela, **ou a recusa dita no registro**,
 /// com o teto de vazão de `baldes` ([`recusa_de_midia_dita`]).
+///
+/// **O tipo sai dos bytes antes do `data:`** (`ler_tipo`, a pergunta de oito
+/// bytes): o som do pacote volta só com o papel e o tamanho, sem `uri`, e
+/// só a imagem passa por `ler_midia`, que codifica o arquivo inteiro. As
+/// conferências de pacote, de arquivo declarado e de teto são as mesmas para
+/// os dois, em [`bytes_declarados_do_mod`].
 fn midia_declarada_do_mod(
     baldes: &BaldesDoRegistro,
     agora: std::time::Instant,
@@ -6094,18 +6108,27 @@ fn midia_declarada_do_mod(
     hash: &str,
     caminho: &str,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    let lida = bytes_declarados_do_mod(pasta, id, hash, caminho)
+    bytes_declarados_do_mod(pasta, id, hash, caminho)
         .and_then(|bytes| {
-            seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
+            let desconhecido = || FalhaNoMod::Recusado {
                 motivo: "formato-desconhecido".to_owned(),
+            };
+            let tipo = seele_ffi::mods::ler_tipo(&bytes).ok_or_else(desconhecido)?;
+            if tipo.papel == "som" {
+                return Ok(MidiaDoMod {
+                    uri: None,
+                    papel: tipo.papel,
+                    bytes: bytes.len(),
+                });
+            }
+            let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(desconhecido)?;
+            Ok(MidiaDoMod {
+                uri: Some(lida.uri),
+                papel: lida.papel,
+                bytes: lida.bytes,
             })
         })
-        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))?;
-    Ok(MidiaDoMod {
-        uri: lida.uri,
-        papel: lida.papel,
-        bytes: lida.bytes,
-    })
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
 }
 
 /// **Um arquivo que o MOD declarou, para a janela tocar ou mostrar.**
@@ -6119,8 +6142,13 @@ fn midia_declarada_do_mod(
 /// - os bytes não são de um formato que este produto decodifica, ou passam do
 ///   teto.
 ///
-/// O teto é por arquivo. O total por instância é da janela, que é quem sabe
-/// quantos já montou — ver `recursosDoMod` em `base.js`.
+/// O teto é por arquivo. O total é da janela, que é quem sabe quantos já
+/// montou — por lugar, em `LIMITES_DA_REGIAO.bytesDeMidia` e no bolso dos
+/// cartões (`mods-regiao.js`).
+///
+/// **O som sai sem `uri`**, só com o papel e o tamanho: a janela o pede cru a
+/// [`som_do_mod`], e o `data:` dele seria o arquivo atravessando a ponte duas
+/// vezes ([`MidiaDoMod`]).
 ///
 /// Toda recusa, exceto a de geração morta (contada em
 /// `comandos_de_geracao_morta`), vai ao `seele.log` por
@@ -6459,7 +6487,7 @@ fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
         motivo: "formato-desconhecido".to_owned(),
     })?;
     Ok(MidiaDoMod {
-        uri: lida.uri,
+        uri: Some(lida.uri),
         papel: lida.papel,
         bytes: lida.bytes,
     })
@@ -6600,7 +6628,7 @@ fn imagem_lida_dita(
         )
     })?;
     Ok(MidiaDoMod {
-        uri: midia.uri,
+        uri: Some(midia.uri),
         papel: midia.papel,
         bytes: midia.bytes,
     })
@@ -11558,7 +11586,12 @@ mod a_supervisao_dos_mods_nativos {
             for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
                 let midia = super::ler_midia_do_servidor(&entrada).expect("imagem aceita");
                 assert_eq!(midia.bytes, bytes.len());
-                assert_eq!(midia.uri, format!("data:{mime};base64,{base64}"));
+                assert_eq!(
+                    midia.uri,
+                    Some(format!("data:{mime};base64,{base64}")),
+                    "a mídia do servidor saiu sem o `data:` que os bytes provaram, e a janela \
+                     fica sem o que mostrar"
+                );
             }
         }
     }
@@ -11567,10 +11600,14 @@ mod a_supervisao_dos_mods_nativos {
     fn midia_do_servidor_confere_bytes_e_limite_mesmo_com_cabecalho() {
         let png = b"\x89PNG\r\n\x1a\n";
         let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
-        assert!(super::ler_midia_do_servidor(&alegada)
-            .unwrap()
-            .uri
-            .starts_with("data:image/png;"));
+        assert!(
+            super::ler_midia_do_servidor(&alegada)
+                .unwrap()
+                .uri
+                .is_some_and(|uri| uri.starts_with("data:image/png;")),
+            "o tipo da mídia do servidor saiu do cabeçalho que o terceiro escreveu, e não dos \
+             bytes"
+        );
         for invalida in [
             "data:image/png,abc",
             "data:image/png;base64",
@@ -15182,8 +15219,8 @@ mod a_midia_recusada_e_dita_no_registro {
 #[cfg(test)]
 mod o_som_do_mod_sai_em_bytes {
     use super::{
-        motivo_de, som_declarado_do_mod, som_servido_dito, BaldesDoRegistro,
-        TETO_DA_FRASE_NO_REGISTRO,
+        midia_declarada_do_mod, motivo_de, som_declarado_do_mod, som_servido_dito,
+        BaldesDoRegistro, TETO_DA_FRASE_NO_REGISTRO,
     };
     use crate::pacote_de_teste::{pasta, publicar, ID, PNG, TEXTO, WAV};
     use crate::rastro_de_teste::capturar;
@@ -15300,6 +15337,62 @@ mod o_som_do_mod_sai_em_bytes {
         assert_eq!(
             bytes, WAV,
             "os bytes do som mudaram no caminho, e a casca decodificaria outra coisa"
+        );
+    }
+
+    /// **O som do pacote atravessa a ponte uma vez só** (P49-7b).
+    ///
+    /// `montarMidia` pede `midia_do_mod` para saber o papel e os bytes a
+    /// contar, e o som em si vem cru por `som_do_mod`. O `data:` que
+    /// `midia_do_mod` montava para um som não tinha quem o lesse: o arquivo
+    /// era lido duas vezes, e uma delas atravessava a ponte em base64, um terço
+    /// maior, em JSON. A imagem continua com o `data:`, que é o que o `<img>`
+    /// mostra. O que se mede é o que atravessa a ponte: a resposta serializada.
+    #[test]
+    fn o_som_do_pacote_sai_sem_uri_e_a_imagem_com() {
+        let (raiz, hash) = publicar(&[("som/toque.wav", WAV), ("img/rosto.png", PNG)]);
+        let pela_ponte = |caminho: &str| {
+            let (resultado, _) = capturar(|| {
+                midia_declarada_do_mod(
+                    &BaldesDoRegistro::default(),
+                    origem(),
+                    &pasta(&raiz),
+                    ID,
+                    &hash,
+                    caminho,
+                )
+            });
+            let midia = resultado
+                .unwrap_or_else(|falha| panic!("`{caminho}` foi recusado: {}", motivo_de(&falha)));
+            match serde_json::to_value(&midia) {
+                Ok(serde_json::Value::Object(mapa)) => mapa,
+                outro => panic!("a mídia não atravessa a ponte como objeto: {outro:?}"),
+            }
+        };
+        let som = pela_ponte("som/toque.wav");
+        assert!(
+            !som.contains_key("uri"),
+            "o som do pacote voltou a atravessar a ponte em base64, no `uri` de `midia_do_mod`, \
+             além de cru por `som_do_mod`: o arquivo é lido duas vezes, e ninguém lê esse \
+             `data:` — {som:?}"
+        );
+        assert_eq!(
+            (som.get("papel"), som.get("bytes")),
+            (
+                Some(&serde_json::json!("som")),
+                Some(&serde_json::json!(WAV.len()))
+            ),
+            "o som do pacote saiu sem o papel ou sem os bytes, e `montarMidia` não sabe que \
+             elemento montar nem quanto contar no teto: {som:?}"
+        );
+        let imagem = pela_ponte("img/rosto.png");
+        assert!(
+            imagem
+                .get("uri")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|uri| uri.starts_with("data:image/png;base64,")),
+            "a imagem do pacote saiu sem o `data:` que os bytes provaram, e o `<img>` da \
+             região fica sem o que mostrar: {imagem:?}"
         );
     }
 

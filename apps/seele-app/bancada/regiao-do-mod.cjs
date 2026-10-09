@@ -2969,9 +2969,11 @@ async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
   const caso = "o som toca por WebAudio";
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
-  const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
-  );
+  // **Como `midia_do_mod` responde a um som do pacote** desde o P49-7b: o
+  // papel e os bytes a contar, sem `uri`. O som atravessa a ponte uma vez só,
+  // cru, por `bytesDoSom`; uma região que voltasse a ler o `uri` do som do
+  // pacote ficaria aqui sem o que decodificar.
+  const d = dono(b, () => Promise.resolve({ papel: "som", bytes: 12 }));
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   const declaracao = [{ forma: "midia", chave: "m", fonte: "som/a.wav", descricao: "Sino" }];
   regiao.aplicar(declaracao);

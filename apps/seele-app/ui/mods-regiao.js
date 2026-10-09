@@ -2533,10 +2533,10 @@ class RegiaoDeMod {
    * `midia_em_bytes` já devolveu — lido como texto, nunca entregue a um
    * elemento de mídia. Quem os pede e decodifica é `carregarSom`.
    *
-   * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
-   * `midia_do_mod` para o papel `som`: em base64 pelo `midia_do_mod` (que
-   * `montarMidia` chama para saber o papel e os bytes a contar) e cru pelo
-   * `som_do_mod`. Nada se perde; só se lê o arquivo duas vezes.
+   * **O som do pacote atravessa a ponte uma vez só**, cru, pelo `som_do_mod`
+   * (P49-7b). O `midia_do_mod`, que `montarMidia` chama para saber o papel e
+   * os bytes a contar, devolve para um som só esses dois, sem `uri`: a
+   * origem do pacote é o caminho, e nunca o `data:`.
    *
    * **O som decodificado tem teto**, somado por bolso
    * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
