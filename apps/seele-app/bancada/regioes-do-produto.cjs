@@ -44,6 +44,13 @@ const REGIOES = [
     // na janela.
     teto: { aVista: ["#botao-mudo", "#operador-sair"] },
   },
+  {
+    ponto: "compositor",
+    conteiner: "#compositor-mods",
+    // A caixa de escrever, o anexo e o ENVIAR: quem envia é a pessoa.
+    doProduto: ["#campo-mensagem", "#botao-anexar", "#botao-enviar"],
+    teto: { aVista: ["#campo-mensagem", "#botao-enviar"] },
+  },
 ];
 
 (async () => {

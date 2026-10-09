@@ -660,10 +660,13 @@ async function recarregarTrilha() {
  *
  * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
  * preserva o que eles seguram — como em `canal.cabecalho`.
+ *
+ * `contexto` `null` é a região sem onde valer agora — o compositor sem canal
+ * aberto —, e ela fica vazia.
  */
 function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
   if (!conteiner) return;
-  const nos = [
+  const nos = contexto === null ? [] : [
     ...conteudoDasContribuicoes(ponto, alvo),
     ...acoesDasContribuicoes(ponto, alvo, contexto),
   ];
@@ -1190,6 +1193,10 @@ function desenharLinha(snapshot) {
     );
     ligarAcoesDeApresentacao(noCabecalho);
   }
+
+  // A região `compositor`, acima da fileira de escrever (rascunho §3). Sem canal
+  // aberto não há onde escrever, e ela fica vazia como as ferramentas.
+  aplicarARegiao("compositor", $("compositor-mods"), "", aberta ? { canal: aberta.id } : null);
 
   // **`compositor.ferramentas`** — botões que entregam conteúdo a quem escreve.
   //

@@ -87,6 +87,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "servidor.aparencia": { modos: ["substituir"], perfil: null, porAlvo: false },
   "redes": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
   "operador.barra": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
+  "compositor": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
 });
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */

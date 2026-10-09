@@ -1230,6 +1230,18 @@ button.linha-nome:hover { text-decoration: underline; }
 
 /* O compositor do v3: o campo numa moldura própria, e `ENVIAR` com rótulo ao
    lado dela. 44px de altura nos dois, que é o que o comp escreve. */
+/* A região `compositor` (rascunho da API 6, §3): acima da fileira de escrever,
+   fechada como as outras, e com teto de altura — a caixa de escrever não sai da
+   vista por causa dela. */
+.compositor-mods {
+  flex: 0 0 auto;
+  max-height: 96px;
+  padding: 0 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
 .compor {
   display: flex;
   align-items: center;
