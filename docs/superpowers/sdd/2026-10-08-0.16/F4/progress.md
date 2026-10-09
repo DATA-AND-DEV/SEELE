@@ -406,3 +406,8 @@ começar.
   orquestradora pediu**: esse item sai da lista do que falta mandar. Na `ui/`
   que entrou, a ponte só põe a marca (o `CELULAR` é da F8), e atende o
   `volumes_locais` novo do I-b da F5. As duas coisas estão no plano (3.1).
+- **As mensagens pendentes foram mandadas** quando o envio entre sessões
+  voltou: à orquestradora, o resumo da D-web-3, a confirmação pedida sobre a
+  administração, o achado do Safari e o servidor dos roteiros; à F8, a marca,
+  o PC e os três pontos a combinar (o teste do microfone, o
+  `descrever_arquivo` e o servidor da Tarefa 19 dela).
