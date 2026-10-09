@@ -453,6 +453,103 @@ const REGIOES = [
       if (!lista.voltou) falhas.push("pessoas.lista: revogada, e a lista não voltou ao que era");
     }
 
+    // ------------------------------------- a mensagem, substituída
+    //
+    // `conversa.mensagem` (rascunho §3, aprovado em 09/10): substituída, o MOD
+    // desenha **o corpo**; a cabeça (o apelido verificado, a hora, o REMOVER),
+    // os acréscimos, o anexo e o selo do envio são do produto. A busca vence:
+    // marcada, a mensagem volta ao corpo nativo, com o realce. E o agrupamento
+    // é pela **chave** do autor: duas pessoas com o mesmo apelido, em seguida,
+    // têm cada uma a sua cabeça.
+    const mensagem = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const agora = Math.floor(Date.now() / 1000);
+      const deAntes = mensagens;
+      mensagens = [
+        { id: 11, channel: 1, author: 2, author_nickname: "Lia", at_seconds: agora - 60, body: "primeira da Lia", own: false, edited: false, attachment: null },
+        { id: 12, channel: 1, author: 3, author_nickname: "Lia", at_seconds: agora - 50, body: "de outra Lia", own: false, edited: false, attachment: null },
+      ];
+      const item = (i) => document.querySelector(`#lista-mensagens [data-mensagem="${i}"]`);
+      desenharMensagens();
+      const cabecas = [0, 1].map((i) => item(i)?.querySelector(".mensagem-autor")?.textContent ?? null);
+      const instancia = new InstanciaDeMod("mod/mensagem", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/mensagem", instancia);
+      const dono = { id: "mod/mensagem", instancia };
+      const substituida = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "conversa.mensagem", modo: "substituir", alvo: "11",
+        conteudo: [{ forma: "texto", chave: "c", dentro: "corpo do MOD" }],
+      }).handle;
+      const acrescida = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "conversa.mensagem", modo: "adicionar", alvo: "11",
+        conteudo: [{ forma: "texto", chave: "a", dentro: "acréscimo" }],
+      }).handle;
+      desenharMensagens();
+      const comOMod = {
+        miolo: item(0)?.querySelector(".mensagem-miolo")?.textContent ?? null,
+        corpoNativo: Boolean(item(0)?.querySelector(".corpo")),
+        autor: item(0)?.querySelector(".mensagem-autor")?.textContent ?? null,
+        remover: Boolean(item(0)?.querySelector(".moderar-remover")),
+        acrescimo: item(0)?.textContent.includes("acréscimo") ?? false,
+        vizinha: item(1)?.querySelector(".mensagem-miolo") === null && Boolean(item(1)?.querySelector(".corpo")),
+      };
+      guardarCasamentos({ casamentos: [{ message: 0, start: 0, end: 8 }], atual: null });
+      desenharMensagens();
+      const naBusca = {
+        miolo: Boolean(item(0)?.querySelector(".mensagem-miolo")),
+        realce: Boolean(item(0)?.querySelector(".corpo mark")),
+      };
+      guardarCasamentos({ casamentos: [], atual: null });
+      contribuicoesDosMods.revogar(substituida, dono);
+      contribuicoesDosMods.revogar(acrescida, dono);
+
+      // **Uma pendente não recebe o desenho de um MOD.** Ela tem `id` zero — o
+      // servidor ainda não a gravou —, e uma substituição sem alvo vale para
+      // todas as mensagens. O texto dela e o «enviando…» são do produto.
+      mensagens = [
+        ...mensagens,
+        { id: 0, client_message_id: 77, estado: "Enviando", channel: 1, author: 1, author_nickname: "Alex", at_seconds: agora - 5, body: "ainda indo", own: true, edited: false, attachment: null },
+      ];
+      const todas = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "conversa.mensagem", modo: "substituir",
+        conteudo: [{ forma: "texto", chave: "c", dentro: "corpo do MOD" }],
+      }).handle;
+      desenharMensagens();
+      const pendente = {
+        gravadaComOMod: Boolean(item(0)?.querySelector(".mensagem-miolo")),
+        miolo: Boolean(item(2)?.querySelector(".mensagem-miolo")),
+        corpo: item(2)?.querySelector(".corpo")?.textContent ?? null,
+        selo: Boolean(item(2)?.querySelector(".envio")),
+      };
+      contribuicoesDosMods.revogar(todas, dono);
+      modsCarregados.delete("mod/mensagem");
+      mensagens = deAntes;
+      desenharMensagens();
+      return { cabecas, comOMod, naBusca, pendente };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (mensagem.erro) falhas.push(`conversa.mensagem: ${mensagem.erro}`);
+    else {
+      if (mensagem.cabecas[1] !== "Lia") {
+        falhas.push("conversa.mensagem: duas pessoas com o mesmo apelido, em seguida, e a segunda saiu sem "
+          + `cabeça — o agrupamento é pelo apelido, e não pela chave (${JSON.stringify(mensagem.cabecas)})`);
+      }
+      const m = mensagem.comOMod;
+      if (m.miolo !== "corpo do MOD" || m.corpoNativo) falhas.push(`conversa.mensagem: o corpo não é o do MOD (${JSON.stringify(m)})`);
+      if (m.autor !== "Lia") falhas.push(`conversa.mensagem: a cabeça diz «${m.autor}», e o autor é «Lia»`);
+      if (!m.remover) falhas.push("conversa.mensagem: o REMOVER saiu com o corpo do MOD");
+      if (!m.acrescimo) falhas.push("conversa.mensagem: o acréscimo do MOD não aparece");
+      if (!m.vizinha) falhas.push("conversa.mensagem: a substituição de uma mensagem alcançou a vizinha");
+      const p = mensagem.pendente;
+      if (!p.gravadaComOMod || p.miolo || p.corpo !== "ainda indo" || !p.selo) {
+        falhas.push(`conversa.mensagem: uma substituição sem alvo alcançou a pendente, ou a tirou do lugar (${JSON.stringify(p)})`);
+      }
+      if (mensagem.naBusca.miolo || !mensagem.naBusca.realce) {
+        falhas.push(`conversa.mensagem: com a busca marcando, o corpo nativo e o realce não voltaram (${JSON.stringify(mensagem.naBusca)})`);
+      }
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):

@@ -1752,6 +1752,16 @@ button.linha-nome:hover { text-decoration: underline; }
   contain: paint;
 }
 
+/* O corpo de uma mensagem desenhado por um MOD (`conversa.mensagem`, rascunho da
+   API 6, §3): fechado como as regiões — a cabeça acima, com o apelido
+   verificado, e o anexo e o selo abaixo são do produto. */
+.mensagem-miolo {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  contain: paint;
+}
+
 /* O subtítulo de um grupo do MOD **dentro** de uma sala: o texto é do MOD, e a
    forma é do produto — recuado e com um filete à esquerda, que o cabeçalho de
    uma sala não tem. Sem isso, um MOD que intitulasse um grupo «Sala principal

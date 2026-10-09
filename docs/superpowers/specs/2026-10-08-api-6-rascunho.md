@@ -297,6 +297,11 @@ fechada da lista.
 - **A busca vence.** Enquanto a busca marca uma mensagem substituída, ela volta
   ao corpo nativo: o realce é o que a pessoa procura, e o produto não marca
   dentro do desenho de um MOD. Saindo da busca, o miolo volta.
+- **Uma mensagem pendente não recebe o desenho de um MOD** [c, tarefa 5]: ela
+  tem `id` zero (o servidor ainda não a gravou), todas as pendentes dividiriam
+  esse alvo, e uma substituição sem alvo vale para todas as mensagens. O texto
+  dela e o selo do envio são do produto até ela ser gravada. [c, toda esta
+  seção de `conversa.mensagem`: `regioes-do-produto.cjs`]
 
 **Os guardas** (Steps 2 a 5, e o guarda 11):
 

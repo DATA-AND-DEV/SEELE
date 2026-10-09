@@ -93,6 +93,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "compositor": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "pessoas.lista": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: false },
+  "conversa.mensagem": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
 });
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */

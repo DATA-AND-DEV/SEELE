@@ -1568,10 +1568,34 @@ function itemDeMensagem(mensagem, indice, segue) {
   // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
   // de uma linha; colapsar dos dois lados alinharia o realce achatando a
   // conversa, que é o preço errado a pagar por um índice.
-  const corpo = elemento("span", "corpo");
-  const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
-  corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
-  conteudo.append(corpo);
+  // **`conversa.mensagem` substituída** (rascunho §3, tarefa 5): o MOD desenha o
+  // corpo, num miolo fechado; a cabeça acima, os acréscimos, o anexo e o selo
+  // abaixo continuam do produto. Só numa mensagem que o servidor gravou: uma
+  // pendente tem `id` zero, e todas as pendentes dividiriam o mesmo alvo.
+  //
+  // **A busca vence**: marcada, a mensagem volta ao corpo nativo — o realce é o
+  // que a pessoa procura, e o produto não marca dentro do desenho de um MOD.
+  const alvoDaMensagem = mensagem.id ? String(mensagem.id) : "";
+  const marcada = (casamentosPorMensagem.get(indice)?.length ?? 0) > 0;
+  const substituta = alvoDaMensagem && !marcada
+    ? contribuicoesDosMods.escolherSubstituicao(
+      "conversa.mensagem",
+      alvoDaMensagem,
+      typeof modPreferidoPara === "function" ? modPreferidoPara("conversa.mensagem") : "",
+    ).escolhida
+    : null;
+  const desenhoDoMod = substituta ? montarContribuicao(substituta, alvoDaMensagem) : null;
+  if (desenhoDoMod) {
+    const miolo = elemento("span", "mensagem-miolo");
+    miolo.append(desenhoDoMod);
+    conteudo.append(miolo);
+  } else {
+    const corpo = elemento("span", "corpo");
+    const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
+    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
+    conteudo.append(corpo);
+  }
+  if (alvoDaMensagem) conteudo.append(...conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem));
   // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
@@ -1719,10 +1743,14 @@ function desenharMensagens() {
     // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
     // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
     // o nome de quem falou custa a autoria.
+    // **Pela chave do autor, e não pelo apelido** (rascunho §3, tarefa 5): com
+    // dois apelidos iguais, a mensagem da segunda pessoa saía sem cabeça,
+    // debaixo da primeira — e com o corpo desenhado por um MOD, a cabeça é a
+    // única autoria à vista.
     const segue =
       anterior !== null &&
       !trocouDeDia &&
-      anterior.author_nickname === mensagem.author_nickname &&
+      anterior.author === mensagem.author &&
       Boolean(anterior.at_seconds) &&
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;

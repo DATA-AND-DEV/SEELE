@@ -975,6 +975,11 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
             "the script never names `{field}`, which is what a Match serialises to"
         );
     }
+    // **O nome de um ponto não é a leitura de um campo.** A região
+    // `conversa.mensagem` da API 6 (tarefa 5) tem `.mensagem` no nome, e o
+    // guarda de «quem aplica» exige o nome como argumento de uma chamada aqui.
+    // Só o literal exato sai da busca: `casamento.mensagem` continua reprovando.
+    let script = script.replace("\"conversa.mensagem\"", "\"ponto-da-api\"");
     for wrong in [".mensagem", ".inicio", ".fim"] {
         assert!(
             !script.contains(wrong),
