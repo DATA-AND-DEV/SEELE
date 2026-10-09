@@ -7322,7 +7322,7 @@ pilha gtk-rs inteira, que é decisão dele.
 não voltar a ser um alerta vermelho sem contexto a cada push — que é o modo
 mais rápido de ensinar uma equipe a ignorar alerta.
 
-## 49 · Consertada em 2026-10-01, sem confirmação de campo · O som de MOD por WebAudio nunca foi medido no app de verdade
+## 49 · Consertada em 2026-10-01, medida em 07 e 08/10/2026, e toca no WKWebView e no WebView2 · O som de MOD por WebAudio nunca foi medido no app de verdade
 
 **Aberta em 2026-10-01**, no fim do Plano 1D da 1.0
 (`docs/superpowers/plans/2026-09-29-1.0-plano-1d-mods-na-casca.md`), pela
@@ -7494,6 +7494,16 @@ som a sessão inteira (pendência 52).
    grep -n "buscarFundoDaTela(elem, plano) {" -A 52 apps/seele-app/ui/mods-regiao.js | grep -c anotarMidia   # 0: a função inteira
    ```
 
+   **Fechado em 2026-10-08**, `82fd154` (lote K2 da F5 da 0.16), com a metade
+   do fundo de tela em `75fb60f`. A aba DIAGNÓSTICO ganhou o bloco «a região e
+   as páginas de cada MOD» (`midiasDaRegiaoEDasPaginas`, em `base.js`), que
+   soma as anotações da faixa e das superfícies de cada MOD **sem o filtro de
+   cartão**. O fundo de tela anota «carregando», «pronta» e «recusada». Como o
+   plano da F5 decidiu, a mesma mídia de cartão aparece em dois blocos da aba
+   enquanto a capacidade `cartoes` existir. O bloco é provado na página pela
+   `diagnostico-de-mods.cjs`, em `4e4bc93d` (lote K3). Medido em 09/10/2026: o
+   segundo comando de cima dá 2.
+
 6. **m-4, para a API 6 · `repetir`, ou o contrato de `tocando`.** Hoje um
    `tocando: true` declarado sobre um som que terminou o toca de novo, do
    começo, no próximo `aplicar` — como o `<audio>` fazia até a 0.15.0, e a
@@ -7506,6 +7516,18 @@ som a sessão inteira (pendência 52).
 
    ```sh
    grep -n "A repetição explícita" apps/seele-app/ui/mods-regiao.js
+   ```
+
+   **Cumprido em `563bc37`** (2026-10-01): o contrato de `tocando` está em
+   `api/README.md`, e o comportamento é guardado pela `regiao-do-mod.cjs`
+   (`oSomQueTerminouVoltaComOTocandoDeclarado`). `repetir` fica como opção, e
+   não como condição para congelar a v6: a D-api-2 da 0.16 (spec
+   `docs/superpowers/specs/2026-10-08-0.16-design.md`, §6) o põe no contrato
+   da API 6 como `repetir: true`. O contrato de `tocando` entra no texto da v6.
+
+   ```sh
+   grep -n "o contrato de \`tocando\` ficou escrito" api/README.md
+   grep -n "oSomQueTerminouVoltaComOTocandoDeclarado" apps/seele-app/bancada/regiao-do-mod.cjs
    ```
 
 7. **O pico da decodificação e a leitura dobrada, para um plano Rust.**
@@ -7541,6 +7563,28 @@ som a sessão inteira (pendência 52).
    grep -n "Bytes de som \*\*decodificado\*\* somados nesta região" apps/seele-app/ui/mods-regiao.js
    ```
 
+   **Em 09/10/2026, item por item (F5 da 0.16):**
+   - **7a, o pico: fechado em 2026-10-09**, `9b43de1d` (lote K4). O Rust lê do
+     cabeçalho do WAV, do Ogg ou do MP3 um piso do som decodificado
+     (`bytes_decodificados_minimos`) e, acima de 64 MiB, recusa antes de
+     servir, com `som-grande-demais-decodificado` e os números. A janela diz a
+     recusa como o teto do som. Na rodada de conserto, as três margens que
+     fazem do valor um piso ganharam teste (`f9ef3d23`), e dois WAV malformados
+     deixaram de enganar o piso: o de dois `fmt ` (`a9a47a8b`) e o de `data`
+     maior que o RIFF (`0b9029ec`).
+   - **7b, a leitura dobrada: fechada em 2026-10-09**, `e8a485cc` (lote K4).
+     `midia_do_mod` devolve ao som do pacote o papel e o tamanho, sem `uri`, e
+     os bytes atravessam a ponte só por `som_do_mod`. Medido em 09/10/2026: o
+     segundo comando de cima não acha mais nada.
+   - **7c, o teto por bolso: o conserto barato fechou em 2026-10-08**,
+     `6be3d244` (lote K5). O som de uma contribuição assenta «pronta» com o
+     tamanho do arquivo, e só pede os bytes, decodifica e confere o teto quando
+     o MOD manda tocar. Os docs de `LIMITES_DA_REGIAO` e de `LIMITES_DO_CARTAO`
+     mudaram no mesmo commit. **Fica com o dono o teto por MOD**: quanto som
+     decodificado um MOD segura somando os bolsos, que muda a frase pública
+     (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que fica com o
+     dono»). Um resto do K5 está na pendência 58.
+
 8. **S-m7 · O som de uma contribuição sem alvo pertence ao destino que o
    tomou, e não à contribuição.** Uma contribuição sem alvo é montada uma vez
    por destino, e o primeiro destino que chega a um som toma todos os sons
@@ -7558,6 +7602,19 @@ som a sessão inteira (pendência 52).
    ```sh
    grep -n "Numa contribuição, os sons moram num destino só" apps/seele-app/ui/mods-regiao.js
    ```
+
+   **Fechado em 2026-10-08**, `d9f481ee` (lote K5 da F5 da 0.16). O destino
+   que tomou os sons e saiu da tela solta o tocador, devolve o bolso e a marca
+   (`devolverOsSons`), e outro destino que desenha a contribuição a toma
+   (`tomarOsSonsDevolvidos`). A carga a caminho é cancelada e dita. Pela
+   decisão do controlador na revisão, o som que tocava recomeça, do começo,
+   onde a marca vai, também no mesmo destino quando ele volta à tela
+   (`108907f8`). As outras rodadas tiraram o `data:` retido do som do servidor
+   (`8f67e167`, `1d5c039f`), provaram a soltura do tocador (`8ff12f12`), não
+   deixam a marca devolvida ser tomada fora da tela (`fe1bff3a`) e contam no
+   teto a resposta nova do servidor (`946a4c77`). **Hoje o conserto vale para o
+   som que tocava:** o conteúdo de uma contribuição não muda depois de
+   registrado, e religar um som parado só existe na v6.
 
 9. **Docs-m2 do 1D · No automático misto, QUEM DESENHA O QUE nomeia um MOD
    só.** Dois MODs substituem `pessoa.cartao`: mod/a no cartão de todos (sem
@@ -7612,6 +7669,21 @@ som a sessão inteira (pendência 52).
    EOF
    ```
 
+   **Fechado em 2026-10-08**, `66133eca` (lote K3 da F5 da 0.16). No
+   automático misto, `resumo` soma os que desenham para quem declarou, e a
+   gestão diz «automática: mod/a para todos, mod/b para quem declarou». Na
+   revisão, `e569ae93` tirou quem desenha da nota de quem não recebeu. Medido
+   em 09/10/2026, o comando de cima imprime:
+
+   ```
+   9 · a gestão: automática: mod/a para todos, mod/b para quem declarou
+   9 · a pessoa 2: mod/b
+   10 · a gestão: você escolheu mod/d, que está de pé e não substitui este lugar — o SEELE desenha
+   ```
+
+   Fica de fora, porque é anterior ao K3: com um MOD **escolhido**, a gestão
+   não cita os outros que pediram o lugar e perderam (pendência 58).
+
 10. **Docs-m3 do 1D · Com um MOD da API 3 escolhido, a gestão diz que o
     SEELE desenha e cala os cartões dele.** mod/d, da API 3, desenha pelos
     cartões dele (`SeeleUI.cartoes`) e só acrescenta em `pessoa.cartao`.
@@ -7624,11 +7696,25 @@ som a sessão inteira (pendência 52).
     do caso «escolhido de pé sem substituição» dizer os cartões da API 3
     quando o escolhido os tem, com a mesma prova no portão de node.
 
+    **Perdeu o objeto com a API 6** (decisão de 08/10, spec da 0.16, §2 F5).
+    A API 6 não tem a capacidade `cartoes` (`4da1e4bd`, da F3), e a frase dos
+    cartões da API 3 sai junto com ela, quando a F3 tirar o código das APIs 3
+    a 5. Não há conserto a fazer aqui. Até lá, a linha «10 ·» do comando do
+    item 9 continua como está (medido em 09/10/2026).
+
 **Quando fecha.** A medição fecha quando
 `docs/evidencias/som-de-mod-wkwebview/registro.md` tiver o «Antes», o
 «Depois» com os casos novos e a linha do WebView2 respondida. Os itens 5 a 10
 ficam aqui até um plano os tomar, e o disparo do item 4 vale para toda
 publicação enquanto as bancadas de navegador só rodarem por ele.
+
+**Em 09/10/2026, no fecho da F5 da 0.16** (lote Z2,
+`docs/superpowers/sdd/2026-10-08-0.16/F5/`). A medição está feita (itens 1 a
+3). Fecharam o 5, o 7a, o 7b, o 8 e o 9, cada um com o commit escrito no item;
+o 6 foi cumprido em `563bc37`; o 7c fechou o som adiado e deixa com o dono o
+teto por MOD; o 10 perdeu o objeto. **Continuam abertos:** o item 4, que vale
+para toda publicação enquanto o `ci.yml` só rodar por `workflow_dispatch`; o
+teto por MOD do 7c; e o macOS 11.0 a 11.2, não medido.
 
 ## 50 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
 
