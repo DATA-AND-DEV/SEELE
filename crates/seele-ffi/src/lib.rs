@@ -4992,6 +4992,22 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         });
         return;
     }
+    // O aviso da metade de servidor de um MOD, pelo mesmo caminho da resposta
+    // de um pedido: a casca o entrega às janelas daquele MOD (rascunho da API
+    // 6, §7.3). O `Room` não o guarda — ele não é estado da sala.
+    if let seele_core::ServerMessage::ModAviso {
+        mod_id,
+        canal,
+        carga,
+    } = message
+    {
+        shared.notify(&Event::ModAviso {
+            mod_id: mod_id.clone(),
+            canal: canal.map(|canal| canal.0),
+            carga: carga.clone(),
+        });
+        return;
+    }
     let changed = match shared.room.lock() {
         Ok(mut room) => room.apply(message),
         Err(_) => return,
@@ -6775,6 +6791,53 @@ mod tests {
         };
         assert_eq!(notice.severity, Severity::Critical);
         assert_eq!(notice.reason, NoticeReason::PermissionDenied);
+    }
+
+    /// **O aviso da metade de servidor de um MOD chega à casca como evento**
+    /// (rascunho da API 6, §7.3; tarefa 8 do plano da F3), como a resposta de
+    /// um pedido: a casca o entrega às janelas daquele MOD. O núcleo não o
+    /// interpreta — a carga é JSON do MOD, e passa como veio.
+    #[test]
+    fn o_aviso_de_um_mod_chega_a_casca_como_evento() {
+        use seele_core::ServerMessage;
+
+        #[derive(Default)]
+        struct Recorder(Mutex<Vec<Event>>);
+        impl EventListener for Recorder {
+            fn on_event(&self, event: Event) {
+                if let Ok(mut seen) = self.0.lock() {
+                    seen.push(event);
+                }
+            }
+        }
+
+        let shared = bare_shared();
+        let recorder = Arc::new(Recorder::default());
+        shared
+            .listeners
+            .lock()
+            .unwrap()
+            .push(Arc::clone(&recorder) as Arc<dyn EventListener>);
+
+        fold(
+            &shared,
+            &ServerMessage::ModAviso {
+                mod_id: "seele/mesa".into(),
+                canal: Some(ChannelId(7)),
+                carga: r#"{"revisao":3}"#.into(),
+            },
+        );
+
+        let seen = recorder.0.lock().unwrap();
+        assert_eq!(
+            seen.as_slice(),
+            &[Event::ModAviso {
+                mod_id: "seele/mesa".into(),
+                canal: Some(7),
+                carga: r#"{"revisao":3}"#.into(),
+            }],
+            "o aviso do MOD não chegou à casca como evento"
+        );
     }
 
     /// Uma `Connection` montada à mão, com o fim da thread da conexão em

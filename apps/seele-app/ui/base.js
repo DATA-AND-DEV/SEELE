@@ -536,6 +536,12 @@ function daGeracaoDePe(numero) {
   return numero !== 0 && numero === geracaoDaSessao;
 }
 
+// O aviso da metade de servidor de um MOD, pelo mesmo canal de eventos da
+// resposta de um pedido (rascunho da API 6, §7.3).
+const ouvirAvisoDeMod = listen("seele://event", ({ payload }) => {
+  if (payload?.ModAviso) entregarOAvisoDoMod(payload.ModAviso);
+});
+
 const ouvirMod = listen("seele://event", ({ payload }) => {
   const reply = payload?.ModReply;
   if (!reply) return;
@@ -675,6 +681,9 @@ async function montarOMod(mod) {
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
   // ela é, e não de quem tem o identificador agora.
   const instancia = new InstanciaDeMod(mod.id, mod.hash, geracao, executor);
+  // A API do pacote, para quem fala com o MOD fora de um pedido dele — os
+  // eventos da tela e o aviso do servidor — saber o que ela tem.
+  instancia.api = Number(mod.api) || 0;
 
   // **Guardada e ativa antes de o executor subir**, e a ordem custou uma
   // medição para ser descoberta.
@@ -2330,6 +2339,149 @@ function cascaDoRetrato() {
     regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
       Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
   };
+}
+
+/**
+ * **O que mudou na tela entre dois retratos** (rascunho da API 6, §7.2; tarefa 8
+ * do plano da F3). Só o que mudou vem: `canal` e `sala` aparecem quando mudam,
+ * `falando` quando o conjunto de quem fala muda, e `lugar` quando a casca muda
+ * de forma (`onde` ou as `regioes`). O tamanho de cada região é da tarefa 5.
+ */
+function mudancasDaTela(antes, agora) {
+  const aberto = (r) => r.canais.find((canal) => canal.aberto)?.id ?? null;
+  const minha = (r) => r.salas.find((sala) => sala.minha)?.id ?? null;
+  const falando = (r) => r.pessoas.filter((p) => p.falando).map((p) => p.id).sort((a, b) => a - b);
+  const ids = (r) => new Set(r.pessoas.map((p) => p.id));
+  const mudancas = { entraram: [], sairam: [], lugar: false };
+  if (aberto(antes) !== aberto(agora)) mudancas.canal = aberto(agora);
+  if (minha(antes) !== minha(agora)) mudancas.sala = minha(agora);
+  const de = ids(antes);
+  const para = ids(agora);
+  mudancas.entraram = [...para].filter((id) => !de.has(id));
+  mudancas.sairam = [...de].filter((id) => !para.has(id));
+  if (JSON.stringify(falando(antes)) !== JSON.stringify(falando(agora))) mudancas.falando = falando(agora);
+  mudancas.lugar = antes.onde !== agora.onde
+    || JSON.stringify(antes.regioes) !== JSON.stringify(agora.regioes);
+  return mudancas;
+}
+
+/**
+ * **O ritmo da fala: no máximo 4 por segundo, e o conjunto mais novo sempre
+ * chega** (rascunho da API 6, §7.2). Uma mudança que chega antes de 250 ms da
+ * última saída espera, e a que chegar depois dela, na mesma espera, toma o
+ * lugar — a sala com cinco pessoas trocando de vez não vira uma rajada, e
+ * ninguém fica com o estado velho.
+ *
+ * O relógio, o agendador e a saída vêm de fora, para a bancada medir sem
+ * esperar.
+ */
+function criarRitmoDaFala({ agora, agendar, soltar }) {
+  const INTERVALO = 250;
+  let ultima = -Infinity;
+  let pendente = null;
+  let esperando = false;
+  const sair = () => {
+    esperando = false;
+    if (pendente === null) return;
+    const falando = pendente;
+    pendente = null;
+    ultima = agora();
+    soltar(falando);
+  };
+  return {
+    mudou(falando) {
+      pendente = falando;
+      const falta = ultima + INTERVALO - agora();
+      if (falta <= 0 && !esperando) {
+        sair();
+        return;
+      }
+      if (!esperando) {
+        esperando = true;
+        agendar(sair, Math.max(0, falta));
+      }
+    },
+  };
+}
+
+/**
+ * O aviso da metade de servidor de um MOD (`Event::ModAviso`), entregue às
+ * janelas dele como o evento `servidor`, com a carga já lida (rascunho da API
+ * 6, §7.3). Só à instância daquele MOD, e só se a API dela tem o aviso; uma
+ * carga que não é JSON é dita no registro, e não entregue.
+ */
+function entregarOAvisoDoMod(aviso) {
+  const instancia = modsCarregados.get(aviso?.mod_id);
+  if (!instancia) return;
+  const mod = { id: aviso.mod_id, api: instancia.api };
+  if (!(CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("aviso-do-servidor")) return;
+  let carga;
+  try {
+    carga = JSON.parse(aviso.carga);
+  } catch {
+    registrarNoAnfitriao("aviso-do-mod", `${mod.id}: um aviso com carga que não é JSON`, "aviso", mod.id);
+    return;
+  }
+  donoDaRegiao(mod, instancia).falar({ nome: "servidor", canal: aviso.canal ?? null, carga });
+}
+
+/** O retrato da última vez que os MODs souberam da tela, e de que sessão. */
+let retratoDosEventos = null;
+let geracaoDosEventos = 0;
+let ritmoDaFala = null;
+
+/** Cada MOD de pé cuja API tem os eventos da tela, com o dono dele. */
+function modsQueOuvemATela() {
+  const ouvem = [];
+  for (const [id, instancia] of modsCarregados) {
+    const mod = { id, api: instancia.api };
+    if ((CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("eventos-da-tela")) {
+      ouvem.push(donoDaRegiao(mod, instancia));
+    }
+  }
+  return ouvem;
+}
+
+/**
+ * **Os eventos da tela, a cada retrato novo** (rascunho da API 6, §7.2). Chamada
+ * de onde a janela desenha um `Snapshot`; compara com o retrato de antes e fala
+ * só o que mudou. O primeiro retrato de uma sessão não é mudança: o MOD lê o
+ * retrato quando sobe.
+ */
+function avisarOsModsDaTela(snapshot) {
+  const agora = projetarORetrato(snapshot, cascaDoRetrato());
+  const antes = geracaoDosEventos === geracaoDaSessao ? retratoDosEventos : null;
+  retratoDosEventos = agora;
+  if (geracaoDosEventos !== geracaoDaSessao) {
+    geracaoDosEventos = geracaoDaSessao;
+    ritmoDaFala = criarRitmoDaFala({
+      agora: () => Date.now(),
+      agendar: (fn, ms) => setTimeout(fn, ms),
+      soltar: (falando) => {
+        for (const dono of modsQueOuvemATela()) dono.falar({ nome: "fala", falando });
+      },
+    });
+  }
+  if (!antes) return;
+  const m = mudancasDaTela(antes, agora);
+  const donos = modsQueOuvemATela();
+  for (const dono of donos) {
+    if (m.canal !== undefined) dono.falar({ nome: "canal", canal: m.canal });
+    if (m.sala !== undefined) dono.falar({ nome: "sala", sala: m.sala });
+    for (const id of m.entraram) dono.falar({ nome: "pessoas", entrou: id });
+    for (const id of m.sairam) dono.falar({ nome: "pessoas", saiu: id });
+    if (m.lugar) {
+      const sessao = typeof $ === "function" ? $("tela-sessao") : null;
+      dono.falar({
+        nome: "lugar",
+        onde: agora.onde,
+        regioes: agora.regioes,
+        largura: sessao?.clientWidth ?? 0,
+        altura: sessao?.clientHeight ?? 0,
+      });
+    }
+  }
+  if (m.falando !== undefined && donos.length) ritmoDaFala?.mudou(m.falando);
 }
 
 /**

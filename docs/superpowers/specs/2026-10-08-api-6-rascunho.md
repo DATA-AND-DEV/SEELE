@@ -588,6 +588,15 @@ contrato (MESA, item 3).
 **Nunca carregam a ligação.** O MOD do servidor em que a pessoa está não fica
 sabendo que ela recebe uma ligação, de quem, nem qual é o código de ninguém.
 
+**Como nascem** [c, tarefa 8]: a cada `Snapshot` que a janela desenha, o retrato
+de agora é comparado com o de antes (`mudancasDaTela`), e só o que mudou vira
+evento — nada num temporizador que repita o mesmo estado. O primeiro retrato de
+uma sessão não é mudança: o MOD lê o retrato quando sobe. Só os MODs cuja API
+tem `eventos-da-tela` os recebem. A fala sai no máximo a cada 250 ms, e o
+conjunto mais novo sempre chega (`criarRitmoDaFala`). O `lugar` sai quando
+`onde` ou as `regioes` mudam, com a largura e a altura da sessão; o tamanho de
+cada região, e o `lugar` quando ele muda, são da tarefa 5.
+
 ### 7.3 O aviso da metade de servidor às janelas (novo)
 
 Os três oficiais consultam em laço porque não há outro jeito: a MESA a cada
@@ -612,7 +621,14 @@ SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
   texto serializado, e o fio leva texto, `ModAviso.carga: String`), e a janela
   o recebe já lido em `e.carga`.
 - **Teto de tamanho e de taxa** [os números esperam a M3]: proposta, 1 KiB
-  por aviso e 4 por segundo por MOD.
+  por aviso e 4 por segundo por MOD, em qualquer janela de um segundo, e até
+  16 canais por chamada. Dentro de uma chamada, os avisos já se juntam por
+  canal: o mais novo de cada um.
+- **`mundo.avisar` responde** `{ ok: true }` ou `{ ok: false, erro }`, com
+  `aviso-invalido` (não é `{ canal?, carga }`, o canal não é inteiro positivo,
+  ou a carga falta ou o JSON não a escreve), `aviso-grande-demais` e
+  `avisos-demais`. A janela recebe o evento `servidor`, com `canal` e a `carga`
+  já lida. [c, tarefa 8]
 - **O excedente é coalescido por canal, e não descartado** (pedido da MESA,
   09/10). O servidor guarda, por MOD e por canal, só o aviso mais novo que
   ainda não saiu, e o entrega assim que a taxa deixa; os do meio são
@@ -625,8 +641,10 @@ SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
   se o quintal recusar a escrita (cheio), eles são descartados com ela. É a
   mesma regra do quintal, que só grava depois de uma execução bem-sucedida
   (`api/v2.json`, `notes`): um aviso nunca fala de uma revisão que não existe.
-- **Precisa de uma mensagem nova no fio** (servidor → cliente). Encaminhada
-  em 08/10 ao contrato da 1.0, pela F1 (§14).
+- **A mensagem no fio é o `ModAviso`** (ordinal 46, da 1.0, pela F1). O
+  servidor o manda a quem **pode ler** o canal, sem exigir que a conexão tenha
+  aberto aquele canal: a janela da MESA precisa saber que a mesa do canal 7
+  mudou com a conversa de outro canal aberta. [c, tarefa 8]
 
 ### 7.4 Os momentos (metade de servidor, por `aoAcontecer`)
 

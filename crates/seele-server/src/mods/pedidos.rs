@@ -222,7 +222,17 @@ async fn executar_inner(
     } else {
         serde_json::Value::Null
     };
-    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"admin":admin,"write":write}).to_string();
+    // **A sala de quem pede, dita pelo servidor** (rascunho da API 6, §5; a
+    // pergunta da MESA): a da presença, ou `null` fora de sala. Escrita aqui, e
+    // nunca lida do pedido — como `person`, ela é do servidor, e um pedido que
+    // mandasse outra sala não muda nada.
+    let sala = server
+        .occupancy
+        .lock()
+        .await
+        .onde_esta(person)
+        .map(|sala| sala.0);
+    let context = serde_json::json!({"person":person.0.to_string(),"channel":contexto_do_canal,"sala":sala,"admin":admin,"write":write}).to_string();
     let id = id.to_owned();
     let payload = payload.to_owned();
     // A lista de esperas é do servidor, e não deste pedido: ela tem de
@@ -323,19 +333,27 @@ async fn executar_inner(
     let id_do_pedido = id.clone();
     // O JavaScript nunca roda no Tokio, e agora também não roda com o banco na
     // mão.
-    let (response, data, tema) = tokio::task::spawn_blocking(
-        move || -> anyhow::Result<(String, BTreeMap<String, String>, Option<super::TemaDeclarado>)> {
-            let mut host = super::Anfitriao::novo()?;
-            // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
-            // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
-            // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
-            host.compartilhar_esperas(esperas);
-            host.carregar_com_portas(&id_do_pedido, &fonte, &dados, portas)?;
-            host.saber_quem_pinta(pintor);
-            let response = host.pedir(&id_do_pedido, person, &context, &payload, &mut data)?;
-            Ok((response, data, host.tomar_tema_declarado()))
-        },
-    )
+    let DoPedido {
+        resposta: response,
+        quintal: data,
+        tema,
+        avisos,
+    } = tokio::task::spawn_blocking(move || -> anyhow::Result<DoPedido> {
+        let mut host = super::Anfitriao::novo()?;
+        // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
+        // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
+        // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
+        host.compartilhar_esperas(esperas);
+        host.carregar_com_portas(&id_do_pedido, &fonte, &dados, portas)?;
+        host.saber_quem_pinta(pintor);
+        let response = host.pedir(&id_do_pedido, person, &context, &payload, &mut data)?;
+        Ok(DoPedido {
+            resposta: response,
+            quintal: data,
+            tema: host.tomar_tema_declarado(),
+            avisos: host.tomar_avisos(),
+        })
+    })
     .await??;
 
     // E gravado noutra tomada curta. O cadeado deste MOD ainda está na mão, e é
@@ -355,6 +373,19 @@ async fn executar_inner(
         if let Some(tema) = tema {
             publicar_o_tema(server, &db, &id, tema)?;
         }
+    }
+    // **O aviso depois do quintal gravado** (pedido da MESA, 09/10; rascunho
+    // da API 6, §7.3): se a gravação acima falhou, o `?` já saiu, e o aviso cai
+    // com ela. E pela taxa do avisador, que é do servidor, e não deste pedido.
+    if !avisos.is_empty() {
+        let barramento = server.events.clone();
+        server.avisador.avisar(&id, avisos, move |saindo| {
+            let _ = barramento.send(crate::server::Event::ModAviso {
+                mod_id: saindo.mod_id,
+                canal: saindo.canal,
+                carga: saindo.carga,
+            });
+        });
     }
     Ok(response)
 }
@@ -413,6 +444,16 @@ pub fn publicar_no_barramento(
         }
     }
     Ok(())
+}
+
+/// O que um pedido traz de volta do QuickJS: a resposta, o quintal como ficou, e
+/// o que a metade de servidor declarou — o tema e os avisos —, que só valem
+/// depois de o quintal gravar.
+struct DoPedido {
+    resposta: String,
+    quintal: BTreeMap<String, String>,
+    tema: Option<super::TemaDeclarado>,
+    avisos: Vec<super::aviso::AvisoDeclarado>,
 }
 
 /// Splits only at character boundaries, keeping each wire frame under its ceiling.
@@ -482,6 +523,7 @@ mod tests {
             esperas: Arc::new(std::sync::Mutex::new(Default::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,
