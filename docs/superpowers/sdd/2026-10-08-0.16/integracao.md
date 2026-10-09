@@ -20,6 +20,7 @@ nada dependa da memória de uma conversa.
 | `apps/seele-app/ui/frases.js` | F6 (`0c01558`, `0ba303f`, commits isolados) e F5 (H) | juntar |
 | `apps/seele-app/src/main.rs` | F1 (P7b: `api: instalado.api` em `habilitar_mod` e `aplicar_conjunto_de_mods`), F6 (comandos finos, `setup`, `Abertura.pelo_lancador`) e F5 (C, D, E, F, K4 e I, em série nas ondas) | conflitos de texto esperados no `generate_handler!`, no `struct Session` e no fim do módulo de testes |
 | `NOME_DA_SALA` | F1 (`seele_proto::transport`, `7e123ee5`) e F7 (`pub const` própria em `seele-server/src/tls.rs:27`) | quando os dois estiverem em `versao/0.16`, a F7 troca a sua por `pub use seele_proto::transport::NOME_DA_SALA;`. Conferir que não sobram duas cópias |
+| `docs/superpowers/sdd/2026-10-08-0.16/F2/progress.md` | F2 (`a2181ad6`) | na integração do `0.16/enc2`, trocar «subir o binário do seele-encontro deste branch» por «da `versao/0.16` depois da integração verde» |
 
 ## Guardas a acrescentar na integração
 
