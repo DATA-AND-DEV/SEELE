@@ -128,7 +128,7 @@ cliente, quando o `PONTO_PADRAO` chegar ao `seele-proto`; hoje um teste que
 chamasse `localizar(ponto_de_quem_liga()…)` sem ambiente perguntaria à VPS.
 
 **Marco: o lado do ponto está pronto** (Tasks 1, 2, 4, 5, 6 e 7). Depois do merge,
-o binário do `seele-encontro` deste branch é o que vai para a VPS, e o
+o binário do `seele-encontro` da `versao/0.16`, depois da integração verde, é o que vai para a VPS, e o
 `sondar --exige-enc2` confere de fora.
 
 ## As Tasks 3, 8 e 10 (08/10, depois do merge do G-servidor)
@@ -176,5 +176,5 @@ bateria inteira, que é da integração.
 
 **Marco: a F2 está completa** para a próxima integração. O `0.16/enc2` entra
 limpo no `versao/0.16` de hoje (`4ef902ed`, conferido pelo `git merge-tree`).
-**O que fica com o dono:** subir o binário do `seele-encontro` deste branch na
-VPS. Até isso, o `publicar.sh` reprova a 0.16 no portão, como deve.
+**O que fica com o dono:** subir o binário do `seele-encontro` da `versao/0.16`,
+depois da integração verde, na VPS. Até isso, o `publicar.sh` reprova a 0.16 no portão, como deve.
