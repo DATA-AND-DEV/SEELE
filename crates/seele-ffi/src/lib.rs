@@ -4752,6 +4752,30 @@ impl<V> VozDaSala<V> {
         volumes.insert(apelido.to_owned(), percent.min(VOLUME_MAXIMO));
     }
 
+    /// Leva o volume de quem trocou de nome para o nome novo. M-4 da rodada 1.
+    ///
+    /// O nome de antes deixa de guardar qualquer coisa — senão o volume valeria
+    /// para quem pegasse aquele apelido depois. Um volume que já estava no nome
+    /// novo é trocado pelo da pessoa: é dela que o servidor está falando.
+    fn renomear_volume(&self, antes: &str, agora: &str) {
+        let mut volumes = self
+            .volumes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(chave) = volumes
+            .keys()
+            .find(|guardado| guardado.eq_ignore_ascii_case(antes))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(percent) = volumes.remove(&chave) else {
+            return;
+        };
+        volumes.retain(|guardado, _| !guardado.eq_ignore_ascii_case(agora));
+        volumes.insert(agora.to_owned(), percent);
+    }
+
     /// Os volumes guardados, como a casca os lê.
     fn volumes(&self) -> HashMap<String, u16> {
         self.volumes
@@ -5202,6 +5226,46 @@ fn remember_media(shared: &Arc<Shared>, media: MediaChannel, ssrc: Ssrc) {
     }
 }
 
+/// Dobra uma mensagem do servidor no `Room`, e leva junto o volume de quem
+/// trocou de nome. `None` com o cadeado do `Room` envenenado.
+///
+/// **A troca de nome muda a chave do volume** (M-4 da rodada 1 do lote I-b). O
+/// volume é por apelido, e é isso que o faz sobreviver à volta, quando a pessoa
+/// ganha outra sessão e outro `ssrc`. `PersonRenamed` traz o `PersonId` e o nome
+/// novo, e o nome de antes é o que o `Room` tem para o mesmo `PersonId` —
+/// lido antes de o `Room` aprender o novo.
+///
+/// O volume muda de chave **depois** de soltar o `Room`: a ordem dos cadeados
+/// é voz, volumes, `Room` (`VozDaSala::seguir_os_volumes`), e segurar o `Room`
+/// enquanto se pega os volumes a inverteria.
+fn dobrar_no_room<V>(
+    room: &Mutex<Room>,
+    voz: &VozDaSala<V>,
+    message: &seele_core::ServerMessage,
+) -> Option<seele_core::Changed> {
+    let (mudou, renomeada) = {
+        let mut room = room.lock().ok()?;
+        let renomeada = renomeacao(&room, message);
+        (room.apply(message), renomeada)
+    };
+    if let Some((antes, agora)) = renomeada {
+        voz.renomear_volume(&antes, &agora);
+    }
+    Some(mudou)
+}
+
+/// O nome de antes e o de agora de quem o servidor anunciou que trocou de nome.
+///
+/// `None` para qualquer outra mensagem, para uma pessoa que o `Room` não
+/// conhece, e para um nome que não mudou.
+fn renomeacao(room: &Room, message: &seele_core::ServerMessage) -> Option<(String, String)> {
+    let seele_core::ServerMessage::PersonRenamed { person, nickname } = message else {
+        return None;
+    };
+    let antes = &room.people.get(person)?.nickname;
+    (antes != nickname).then(|| (antes.clone(), nickname.clone()))
+}
+
 /// Folds a server message into the room and tells the shell what moved.
 fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
     if let seele_core::ServerMessage::ModReply {
@@ -5219,9 +5283,8 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
         });
         return;
     }
-    let changed = match shared.room.lock() {
-        Ok(mut room) => room.apply(message),
-        Err(_) => return,
+    let Some(changed) = dobrar_no_room(&shared.room, &shared.voice, message) else {
+        return;
     };
 
     // A malha do ADR 0036, ligada aqui e não dentro do `Room`.
@@ -11003,6 +11066,100 @@ mod o_audio_segue_a_sala {
             Some(1.5),
             "saiu da sala e entrou de novo, e a voz nova abriu com a Rafa a 100 enquanto \
              a janela mostra 150"
+        );
+    }
+
+    /// M-4 da rodada 1 do lote I-b: quem troca de nome leva o volume junto.
+    ///
+    /// O volume é por apelido, e é isso que o faz sobreviver à volta, quando a
+    /// pessoa ganha outra sessão e outro `ssrc`. Mas o apelido muda: o servidor
+    /// avisa com `PersonRenamed { person, nickname }`, e o `Room` sabe o nome de
+    /// antes pelo mesmo `PersonId`. Antes, a Rafa que virava Rafael voltava a
+    /// 1,0, e a entrada «rafa» ficava guardada para quem pegasse o apelido
+    /// depois. A troca passa por `dobrar_no_room`, que é o que `fold` chama.
+    #[tokio::test]
+    async fn quem_troca_de_nome_leva_o_volume_junto() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let room = sala_com_a_rafa(900);
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+        voz.guardar_volume("rafa", 150);
+        voz.seguir_os_volumes(&room);
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "antes da troca de nome, o volume da Rafa não chegou à voz"
+        );
+
+        super::dobrar_no_room(
+            &room,
+            &voz,
+            &ServerMessage::PersonRenamed {
+                person: PersonId(11),
+                nickname: "rafael".into(),
+            },
+        );
+        volta_do_laco(&mut porta, &voz, &room).await;
+
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "a Rafa trocou de nome para Rafael e o volume dela voltou a 1,0, com a janela \
+             mostrando 150"
+        );
+        assert_eq!(
+            voz.volumes(),
+            HashMap::from([("rafael".to_owned(), 150)]),
+            "o volume não mudou de chave: «rafa» continua guardado, e vale para quem pegar \
+             o apelido depois"
+        );
+    }
+
+    /// E pelo caminho de verdade: `fold`, o que `drive` chama a cada mensagem.
+    #[test]
+    fn a_troca_de_nome_que_o_servidor_anuncia_move_o_volume_pela_conexao() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+        {
+            let mut room = connection.shared.room.lock().expect("a sala");
+            room.adopt(&sessao(700), "marcela");
+            room.apply(&rafa_na_sala(900));
+        }
+        connection
+            .set_volume("rafa".into(), 150)
+            .expect("o volume da Rafa");
+
+        super::fold(
+            &connection.shared,
+            &ServerMessage::PersonRenamed {
+                person: PersonId(11),
+                nickname: "rafael".into(),
+            },
+        );
+
+        assert_eq!(
+            connection.volumes_locais(),
+            HashMap::from([("rafael".to_owned(), 150)]),
+            "`fold` dobrou a troca de nome no `Room` e deixou o volume no nome velho: a \
+             janela desenha o Rafael a 100"
+        );
+        let ganhos = ganhos_a_aplicar(
+            &connection.volumes_locais(),
+            &connection.shared.room.lock().expect("a sala"),
+        );
+        assert_eq!(
+            ganhos,
+            vec![(Ssrc(900), 1.5)],
+            "depois da troca de nome, o volume não chega mais ao número da pessoa"
         );
     }
 
