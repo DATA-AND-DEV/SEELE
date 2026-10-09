@@ -1741,6 +1741,35 @@ button.linha-nome:hover { text-decoration: underline; }
   padding: 0;
 }
 
+/* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
+   com teto de altura, como as outras regiões. */
+.roster-mods {
+  flex: 0 0 auto;
+  max-height: 96px;
+  padding: 0 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
+/* O subtítulo de um grupo do MOD **dentro** de uma sala: o texto é do MOD, e a
+   forma é do produto — recuado e com um filete à esquerda, que o cabeçalho de
+   uma sala não tem. Sem isso, um MOD que intitulasse um grupo «Sala principal
+   2/8» imitaria uma seção, que é a verdade que as seções guardam: quem está na
+   sala de quem ouve você. */
+.roster-subgrupo {
+  list-style: none;
+  margin: 8px 14px 2px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--seele-linha-forte);
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  color: var(--seele-rotulo-painel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .roster .pessoa {
   border-bottom: 1px solid var(--seele-linha);
   border-left: 2px solid transparent;

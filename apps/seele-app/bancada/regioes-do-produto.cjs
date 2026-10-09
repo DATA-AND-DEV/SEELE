@@ -73,6 +73,17 @@ const REGIOES = [
     },
   },
   {
+    // O que um MOD acrescenta à lista de pessoas, acima dela; a contagem e as
+    // seções das salas são do produto.
+    ponto: "pessoas.lista",
+    conteiner: "#roster-mods",
+    doProduto: ["#pessoas-conta", "#lista-roster .roster-sala"],
+    teto: {
+      aVista: ["#pessoas-conta", "#lista-roster .roster-sala"],
+      descobertos: ["#pessoas-conta", "#lista-roster .roster-sala"],
+    },
+  },
+  {
     // **Substituir é desenhar o miolo** (rascunho §3): entre o nome do canal e
     // a lupa, que são do produto — o nome é também o botão de renomear.
     ponto: "canal.cabecalho",
@@ -383,6 +394,63 @@ const REGIOES = [
       if (!linha.descoberto) falhas.push("pessoa.cartao: o desenho do MOD ficou por cima do apelido verificado");
       if (!linha.moderar) falhas.push("pessoa.cartao: a moderação não está a um clique, fora do «⋯»");
       if (!linha.cartaoNoMiolo) falhas.push("pessoa.cartao: o cartão do MOD não está no miolo");
+    }
+
+    // ------------------------------------- a lista de pessoas, substituída
+    //
+    // `pessoas.lista` substituída (rascunho §3; decisão (a) da orquestradora,
+    // 09/10): **as seções das salas são do produto** — quem está na sala de
+    // quem ouve você é verdade de confiança —, e os grupos do MOD valem dentro
+    // de cada uma. Um grupo com Lia (na sala) e Rafa (fora das salas) deixa
+    // cada um na sua seção; quem o MOD não agrupou fica sob OUTRAS PESSOAS.
+    const lista = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const secoes = () => [...$("lista-roster").querySelectorAll(":scope > li.roster-grupo")].map((grupo) => ({
+        sala: grupo.querySelector(".roster-sala-nome")?.textContent ?? "",
+        linhas: [...grupo.querySelector(".roster-pessoas").children].map((li) =>
+          li.classList.contains("roster-subgrupo") ? `[${li.textContent}]` : (li.querySelector(".pessoa-nome")?.textContent ?? "?")),
+      }));
+      const antes = $("lista-roster").innerHTML;
+      const instancia = new InstanciaDeMod("mod/lista", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/lista", instancia);
+      let recusa = "";
+      try {
+        contribuicoesDosMods.registrar({ id: "mod/lista" }, instancia, {
+          ponto: "pessoas.lista", modo: "substituir", conteudo: [{ forma: "texto", dentro: "x" }],
+        });
+      } catch (erro) {
+        recusa = erro.message;
+      }
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/lista" }, instancia, {
+        ponto: "pessoas.lista", modo: "substituir",
+        conteudo: { grupos: [{ titulo: "MESA 1", ids: [2, 3, 99] }] },
+      });
+      desenhar(r);
+      await quadro();
+      const com = secoes();
+      contribuicoesDosMods.revogar(handle, { id: "mod/lista", instancia });
+      modsCarregados.delete("mod/lista");
+      desenhar(r);
+      await quadro();
+      return { recusa, com, voltou: $("lista-roster").innerHTML === antes };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (lista.erro) falhas.push(`pessoas.lista: ${lista.erro}`);
+    else {
+      if (!lista.recusa.includes("pessoas.lista")) {
+        falhas.push(`pessoas.lista: uma substituição com outra forma não foi recusada pelo nome (${lista.recusa || "aceita"})`);
+      }
+      const esperado = [
+        { sala: "Sala principal", linhas: ["[MESA 1]", "Lia", "[OUTRAS PESSOAS]", "Alex (você)"] },
+        { sala: "NO SERVIDOR, FORA DAS SALAS", linhas: ["[MESA 1]", "Rafa"] },
+      ];
+      if (JSON.stringify(lista.com) !== JSON.stringify(esperado)) {
+        falhas.push(`pessoas.lista: as seções saíram ${JSON.stringify(lista.com)}, e o esperado é ${JSON.stringify(esperado)}`);
+      }
+      if (!lista.voltou) falhas.push("pessoas.lista: revogada, e a lista não voltou ao que era");
     }
 
     // ------------------------------------- a navegação, substituída

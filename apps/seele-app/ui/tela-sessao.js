@@ -841,10 +841,15 @@ function iniciaisDoApelido(apelido) {
  * (rascunho §3, tarefa 5): `{ salas?, canais? }`, ou `null`.
  */
 function arranjoDaNavegacao() {
+  return arranjoDe("servidor.navegacao");
+}
+
+/** A ordem que o MOD escolhido dá a um ponto de lista, ou `null`. */
+function arranjoDe(ponto) {
   const escolhida = contribuicoesDosMods.escolherSubstituicao(
-    "servidor.navegacao",
+    ponto,
     "",
-    typeof modPreferidoPara === "function" ? modPreferidoPara("servidor.navegacao") : "",
+    typeof modPreferidoPara === "function" ? modPreferidoPara(ponto) : "",
   ).escolhida;
   return escolhida?.conteudo ?? null;
 }
@@ -864,13 +869,13 @@ const TETO_DO_TITULO_DE_GRUPO = 64;
  *
  * O título do grupo é texto do MOD, e por isso `textContent`, cortado.
  */
-function emGrupos(linhas, dados, arranjo, tituloDosOutros) {
+function emGrupos(linhas, dados, arranjo, tituloDosOutros, classe = "canais-grupo") {
   if (!arranjo || !Array.isArray(arranjo.grupos)) return linhas;
   const porId = new Map(dados.map((dado, i) => [String(dado.id), linhas[i]]));
   const usadas = new Set();
   const saida = [];
   const cabecalho = (titulo) => {
-    const item = elemento("li", "canais-grupo", titulo);
+    const item = elemento("li", classe, titulo);
     item.setAttribute("role", "presentation");
     return item;
   };
@@ -885,6 +890,9 @@ function emGrupos(linhas, dados, arranjo, tituloDosOutros) {
       saida.push(porId.get(id));
     }
   }
+  // Uma seção onde nenhum grupo do MOD tem ninguém fica como é: um subtítulo
+  // OUTRAS PESSOAS sobre a seção inteira não diria nada.
+  if (saida.length === 0) return linhas;
   const outras = dados.map((dado) => String(dado.id)).filter((id) => !usadas.has(id));
   if (outras.length > 0) {
     saida.push(cabecalho(tituloDosOutros));
@@ -2054,6 +2062,14 @@ function redesenharAsPessoas() {
 
 function desenharPessoas(snapshot) {
   const nossa = snapshot.voice_rooms.find((c) => c.occupied_by_us);
+  // **`pessoas.lista`** (rascunho §3, tarefa 5): o que os MODs acrescentam,
+  // acima da lista; e, substituída, a ordem e os grupos **dentro de cada
+  // seção**. As seções — as salas, FORA DE SALA, NO SERVIDOR — são do produto:
+  // quem está na sala de quem ouve você é verdade de confiança, e um MOD não a
+  // reorganiza (decisão da orquestradora, 09/10).
+  aplicarARegiao("pessoas.lista", $("roster-mods"));
+  const arranjo = arranjoDe("pessoas.lista");
+  const ordenar = (linhas, pessoas) => emGrupos(linhas, pessoas, arranjo, "OUTRAS PESSOAS", "roster-subgrupo");
 
   const grupos = snapshot.voice_rooms
     .filter((voice_room) => voice_room.people.length > 0)
@@ -2062,7 +2078,7 @@ function desenharPessoas(snapshot) {
         voice_room.name,
         `${voice_room.people.length}/${voice_room.limit}`,
         voice_room.occupied_by_us,
-        voice_room.people.map((pessoa) =>
+        ordenar(voice_room.people.map((pessoa) =>
           linhaDoRoster(
             {
               // **O `id` vem junto.** Ele é o que liga a linha à pessoa real —
@@ -2091,7 +2107,7 @@ function desenharPessoas(snapshot) {
             },
             snapshot.audio_available,
           ),
-        ),
+        ), voice_room.people),
         voice_room.id,
       ),
     );
@@ -2104,7 +2120,7 @@ function desenharPessoas(snapshot) {
   // um cartão solto no alto da lista pareceria pertencer à primeira sala.
   if (!nossa) {
     grupos.unshift(
-      grupoDeSala("FORA DE SALA", null, false, [
+      grupoDeSala("FORA DE SALA", null, false, ordenar([
         linhaDoRoster(
           {
             id: snapshot.me,
@@ -2131,7 +2147,7 @@ function desenharPessoas(snapshot) {
           },
           snapshot.audio_available,
         ),
-      ]),
+      ], [{ id: snapshot.me }])),
     );
   }
 
@@ -2160,7 +2176,7 @@ function desenharPessoas(snapshot) {
         "NO SERVIDOR, FORA DAS SALAS",
         `${noSaguao.length}`,
         false,
-        noSaguao.map((pessoa) =>
+        ordenar(noSaguao.map((pessoa) =>
           linhaDoRoster(
             {
               id: pessoa.id,
@@ -2183,7 +2199,7 @@ function desenharPessoas(snapshot) {
             },
             snapshot.audio_available,
           ),
-        ),
+        ), noSaguao),
       ),
     );
   }

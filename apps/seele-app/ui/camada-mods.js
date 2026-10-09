@@ -857,6 +857,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "operador.barra": "A barra de quem está conectado",
   "compositor": "A caixa de escrever",
   "status.barra": "A barra de baixo",
+  "pessoas.lista": "A lista de pessoas",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1132,6 +1133,7 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "operador.barra": "#operador-mods",
   "compositor": "#compositor-mods",
   "status.barra": "#telemetria-mods",
+  "pessoas.lista": "#roster-mods",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

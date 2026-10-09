@@ -92,6 +92,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "operador.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "compositor": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "pessoas.lista": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: false },
 });
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */
@@ -181,12 +182,19 @@ class RegistroDeContribuicoes {
     // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
     // A linha de cada sala e de cada canal continua do produto. Outra forma é
     // recusada pelo nome, e não desenhada como se fosse esta.
+    const comGrupos = (parte) => Boolean(
+      parte && typeof parte === "object" && Array.isArray(parte.grupos)
+      && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids)),
+    );
+    // E a lista de pessoas substituída, a mesma ideia: `{ grupos }`, que valem
+    // dentro de cada sala — as salas são do produto (decisão da orquestradora,
+    // 09/10).
+    if (ponto === "pessoas.lista" && modo === "substituir" && !comGrupos(pedido?.conteudo)) {
+      throw new Error("pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }");
+    }
     if (ponto === "servidor.navegacao" && modo === "substituir") {
       const conteudo = pedido?.conteudo;
-      const lista = (parte) => parte === undefined || (
-        parte && typeof parte === "object" && Array.isArray(parte.grupos)
-        && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids))
-      );
+      const lista = (parte) => parte === undefined || comGrupos(parte);
       if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
         || (conteudo.salas === undefined && conteudo.canais === undefined)
         || !lista(conteudo.salas) || !lista(conteudo.canais)) {

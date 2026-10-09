@@ -1851,6 +1851,7 @@ function anotando(...anotadas) {
           ...(ponto === "servidor.navegacao" && modo === "substituir"
             ? { conteudo: { canais: { grupos: [] } } }
             : {}),
+          ...(ponto === "pessoas.lista" && modo === "substituir" ? { conteudo: { grupos: [] } } : {}),
         });
       } catch (falha) {
         erro = falha;

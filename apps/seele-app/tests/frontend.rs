@@ -16055,16 +16055,26 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
+    // **Pelo intermediário das listas** (tarefa 5): a navegação e a lista de
+    // pessoas substituídas são uma ordem, e quem a pede é `arranjoDe("ponto")`.
+    // Ele só conta se o corpo dele de fato consulta `escolherSubstituicao` — sem
+    // isto, a navegação passava por proximidade, porque o nome dela ficava a
+    // menos de 400 caracteres da chamada dentro de `arranjoDe` (medido).
+    let intermediario =
+        js_function(&telas, "function arranjoDe(").contains("escolherSubstituicao(");
     for ponto in &substituiveis {
-        let citado = telas
-            .match_indices(&format!("\"{ponto}\""))
-            .any(|(onde, _)| {
-                // A chamada e o nome do ponto na mesma vizinhança: a consulta é
-                // escrita em várias linhas, com o alvo e o preferido entre elas.
-                let inicio = onde.saturating_sub(400);
-                let fim = (onde + 400).min(telas.len());
-                telas[inicio..fim].contains("escolherSubstituicao")
-            });
+        let pelo_intermediario =
+            intermediario && telas.contains(&format!("arranjoDe(\"{ponto}\")"));
+        let citado = pelo_intermediario
+            || telas
+                .match_indices(&format!("\"{ponto}\""))
+                .any(|(onde, _)| {
+                    // A chamada e o nome do ponto na mesma vizinhança: a consulta é
+                    // escrita em várias linhas, com o alvo e o preferido entre elas.
+                    let inicio = onde.saturating_sub(400);
+                    let fim = (onde + 400).min(telas.len());
+                    telas[inicio..fim].contains("escolherSubstituicao")
+                });
         assert!(
             citado,
             "«{ponto}» anuncia o modo `substituir` e nenhuma tela chama \
