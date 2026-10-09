@@ -223,7 +223,7 @@
       ],
       "celular": {
         "existe": true,
-        "forma": "gaveta SALAS, célula inteira, controles de 44 × 44"
+        "forma": "aba SERVIDOR (salas, canais, as entradas DOS MODS e a troca de servidor), célula inteira, controles de 44 × 44"
       }
     },
     "operador.barra": {
@@ -239,8 +239,9 @@
         "no ar"
       ],
       "celular": {
-        "existe": false,
-        "contribuicao": "recusada com regiao-ausente; a faixa de voz é do núcleo e não recebe capa"
+        "existe": true,
+        "forma": "no alto da aba AJUSTES, logo abaixo do cabeçalho SEU PERFIL (proposta da F8, aceita em 09/10); largura da tela, controles de 44 × 44; altura limitada com rolagem por dentro, para a gestão de MODs continuar à vista (o número sai da M3 no iPhone)",
+        "contribuicao": "aplicada; a pessoa.capa do operador vai no cabeçalho SEU PERFIL (D-capa-1); o MUDO, o SURDO e o SAIR continuam na faixa de voz, do núcleo"
       }
     },
     "canal.cabecalho": {
@@ -577,7 +578,8 @@
     "na-7": [
       "tipo dos títulos e dos dados",
       "escala por escolha"
-    ]
+    ],
+    "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas"
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
@@ -632,9 +634,10 @@
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
     "onde-o-mod-sabe": "retrato.onde, retrato.regioes e o evento lugar",
-    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta",
+    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta. Na 0.16, com o desenho da F8 (D-celular-1), nenhuma das oito regiões fica sem casa no celular; a regra fica para a casca que não tiver uma região (uma região da API 7 numa casca 1.0, ou o executor do navegador)",
     "executor": "o mesmo rquickjs 0.12.2 do desktop em wasm32-wasip1, num Worker criado de dentro de um iframe de origem opaca, com o prelúdio extraído do executor.rs (spike da F4, spec-mestre 00935dac): um contrato e um motor só; nada depende de o MOD rodar fora de uma volta do anfitrião; os limites valem igual nos dois, e o teto de memória no web exige o RustAllocator; capacidades por plataforma",
-    "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida"
+    "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida",
+    "desenho": "da F8 (D-celular-1, spec-mestre fd4d298f): o contrato fixa o nome de cada região e o que ela faz com uma contribuição; o lugar na casca é da F8. A primeira aba se chama SERVIDOR (rótulo de tela)"
   },
   "decisoes-do-dono-de-08-10": {
     "superficies": "a folha substitui o painel",
@@ -664,6 +667,8 @@
       "tema-de-outro-mod (outro MOD é o escolhido e está ligado)",
       "tema-invalido (não é objeto nem null)",
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
+      "chave-desconhecida (tarefa 17j; leva a chave)",
+      "valor-invalido (tarefa 17j; leva a chave)",
       "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão"

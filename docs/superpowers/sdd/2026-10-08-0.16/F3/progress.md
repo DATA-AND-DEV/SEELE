@@ -249,3 +249,19 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   entrar antes; o plano diz isso na tabela de estado. As outras seguem com o K4,
   sem confirmação a cada passo, com aviso nos marcos (pedido do dono, pela
   orquestradora).
+- **As perguntas da F8** (a tela do celular, D-celular-1), pela orquestradora:
+  - O `operador.barra` no celular: aceita a proposta da F8 — no alto da aba
+    AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões e altura
+    limitada (a gestão de MODs de AJUSTES continua à vista, guarda 11). Com isso
+    nenhuma das oito regiões fica sem casa no celular; o `regiao-ausente` fica
+    no contrato para a casca que não tiver uma região, e a bancada do passo 8
+    da tarefa 5 tira uma região do mapa para prová-lo. Passo 8b novo.
+  - As chaves do tema: lista fechada de nomes do contrato, traduzidos por
+    tabela fechada para `--seele-*` (é o que a casca já faz, `TEMA_DA_API`).
+    **Achado: o `mundo.tema` que fiz na 17a aceita qualquer chave**, e um MOD
+    leria `ok` para um tema que a casca recusa. Vira a tarefa 17j, antes do
+    congelamento, com um teste espelho entre o servidor e a casca. O guarda do
+    `--nucleo-*` é da F8.
+  - Ruling: a altura do `operador.barra` no celular é limitada, com rolagem por
+    dentro — custo se errado: uma barra de MOD alta rola em vez de crescer, e o
+    número sai da M3 no iPhone.

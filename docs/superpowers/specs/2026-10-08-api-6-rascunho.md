@@ -177,7 +177,7 @@ tema declarado pelo servidor (§9).
 registra em `servidor.navegacao` pode pedir `listarNaBarra: false`, e então
 ela não aparece na lista de quem não tem uso para ela, sem mudar permissão
 nenhuma (`api/v4.json`, `contribuicoes.listarNaBarra`). No celular a entrada
-mora na gaveta SALAS (§11), e o `false` vale lá do mesmo jeito. `pessoa.avatar` existe desde `14d9c30` (22/09) e
+mora na aba SERVIDOR (§11), e o `false` vale lá do mesmo jeito. `pessoa.avatar` existe desde `14d9c30` (22/09) e
 saiu na 0.15.0, mas **nunca entrou num `vN.json`** (§13). A v6 o lista.
 
 **Uma substituição de região inteira não leva os pontos de dentro.** Quem
@@ -750,6 +750,31 @@ grupo 17 do plano da F3.
   entregar a aparência do servidor a outro MOD sem ninguém decidir. [c, com
   teste]
 
+### As chaves do tema: uma lista fechada (pergunta da F8, 09/10)
+
+**O MOD escreve nomes do contrato, e nunca nomes de CSS.** O tema é um objeto
+cujas chaves são os nomes do §9 (`fundo`, `texto`, `acento`, `borda`, `painel`,
+`apagado`, os números e as bandeiras, e o que a ampliação somar: `modo`, a
+densidade, os tokens por região). O produto traduz cada nome por uma **tabela
+fechada** para o token `--seele-*` que ele redefine, como a casca já faz hoje
+(`TEMA_DA_API`, `base.js:1844` [c]): uma chave fora da tabela é recusada pelo
+nome (`base.js:2038` [c]), e um valor fora da forma (`#rrggbb`, o intervalo do
+número, o booleano) também.
+
+**Nenhum nome da tabela leva a `--nucleo-*`.** No celular, o MUDO, o SURDO e o
+SAIR leem variáveis `--nucleo-*`, declaradas na raiz a partir dos tokens do
+produto; é isso que garante o contraste deles sob qualquer tema, e a garantia
+só vale porque o MOD não escreve nomes livres. A F8 põe o guarda de que nenhum
+valor da tabela começa com `--nucleo-`.
+
+**O que falta: o `mundo.tema` ainda aceita qualquer objeto** [c, 17a a 17c]. Ele
+confere a forma (objeto ou `null`) e o tamanho, mas não as chaves, e um MOD lê
+`ok` para um tema que a casca vai recusar — o produto sabendo e não contando.
+**A tarefa 17j** fecha isso antes do congelamento: o `mundo.tema` confere chaves
+e valores pela mesma tabela da casca, com as recusas `chave-desconhecida` e
+`valor-invalido` (as duas com a `chave`), e um teste espelho prova que a lista
+do servidor e a da casca são a mesma.
+
 ### O que o produto faz com ele, dito ao MOD (B2)
 
 **Um evento `tema` volta à janela do MOD** cada vez que a casca aplica um
@@ -857,9 +882,12 @@ pelo tema.** Fora deles, a tela é do MOD.
 
 - **a faixa de voz** (`.voz-celular`: a sala, MUDO, SURDO, SAIR), que é a forma
   do microfone e do sair na casca de uma mão;
-- **as abas do pé** (SALAS · CONVERSA · PESSOAS · AJUSTES): AJUSTES é o único
-  caminho para desligar um MOD. Elas podem tomar as cores do tema, com os
-  pares conferidos, e não aceitam contribuição;
+- **as abas do pé** (SERVIDOR · CONVERSA · PESSOAS · AJUSTES): AJUSTES é o
+  único caminho para desligar um MOD. Os botões das abas podem tomar as cores
+  do tema, com os pares conferidos, e não aceitam contribuição. O conteúdo de
+  AJUSTES recebe o `operador.barra`, abaixo de SEU PERFIL; a gestão de MODs
+  continua do produto, fora da região, e o guarda 11 prova que nenhuma
+  contribuição a cobre nem a empurra para fora da vista;
 - **a pergunta «DE ONDE?»** (`#origem`) e o seletor do sistema;
 - **as áreas seguras**: nenhuma superfície de MOD desenha embaixo do entalhe,
   da ilha ou da barra de gestos;
@@ -884,8 +912,8 @@ estreita» (`celular.css:1-18`).
 | região ou camada | no celular | tamanho | contribuição |
 |---|---|---|---|
 | `redes` | existe: faixa deitada no alto (`celular.css:220-224`, `:355-387`) | itens de 56 × 44 px, rolando para o lado | aplicada |
-| `servidor.navegacao` | gaveta SALAS, que ocupa a célula inteira (`:397-407`) | largura da tela; controles de 44 × 44 | aplicada; as entradas «DOS MODS» vão na gaveta |
-| `operador.barra` | **fora da vista** (`:231-234`): mora no pé da gaveta SALAS, e a faixa de voz faz o papel dela | — | **recusada com `regiao-ausente`**, e `pessoa.capa` do operador não se aplica |
+| `servidor.navegacao` | aba SERVIDOR, que ocupa a célula inteira e leva as salas, os canais, as entradas «DOS MODS» e a troca de servidor | largura da tela; controles de 44 × 44 | aplicada; as entradas «DOS MODS» vão na aba |
+| `operador.barra` | **existe, no alto da aba AJUSTES**, logo abaixo do cabeçalho SEU PERFIL (proposta da F8, aceita em 09/10). O MUDO, o SURDO e o SAIR continuam na faixa de voz, que é do núcleo | largura da tela; controles de 44 × 44, como as outras regiões do celular; **altura limitada, com rolagem por dentro**, para a gestão de MODs de AJUSTES continuar à vista (o número sai da M3 no iPhone) | aplicada; a `pessoa.capa` do operador vai no cabeçalho SEU PERFIL (D-capa-1) |
 | `canal.cabecalho` | existe, compacto (`:558-561`) | botões de 44 px | aplicada |
 | `conversa.mensagem` | existe | — | aplicada |
 | `compositor` | existe; campos de 16 px | botões de 44 × 44 | aplicada |
@@ -897,9 +925,20 @@ estreita» (`celular.css:1-18`).
 | `dialogo` | tela cheia, ações fixas embaixo | — | — |
 | `aviso` | canto de baixo, com a área segura (`celular.css:79-84`) | `min(420px, 100vw-32px)` | — |
 
-**Uma contribuição para uma região que o celular não tem é recusada com motivo
+**O desenho do celular é da F8** (D-celular-1, spec-mestre `fd4d298f`): ela
+redesenha a casca de uma mão com paridade com o desktop, e as âncoras
+`celular.css:…` acima são do desenho de `arquivo/mobile-ios`, que ela
+substitui. O contrato fixa o nome de cada região e o que ela faz com uma
+contribuição; o lugar de cada uma na casca nova é da F8, e esta tabela
+acompanha. A primeira aba se chama SERVIDOR, e não SALAS: é rótulo de tela, e
+não muda o contrato.
+
+**Uma contribuição para uma região que a casca não tem é recusada com motivo
 nomeado** (`contribuicao` com `motivo: 'regiao-ausente'`), e não some calada.
-A aba DIAGNÓSTICO conta. O MOD sabe onde está pelo `onde` e pelas `regioes` do
+A aba DIAGNÓSTICO conta. **Na 0.16, com o desenho da F8, nenhuma das oito
+regiões fica sem casa no celular.** A regra continua no contrato para a casca
+que não tiver uma região: uma região da API 7 numa casca 1.0, ou o executor do
+navegador da F4 se ele não desenhar alguma. O MOD sabe onde está pelo `onde` e pelas `regioes` do
 retrato, e pelo evento `lugar` quando o aparelho deita.
 
 **Pontos ainda não medidos, que a F4 e a M3 no iPhone respondem:**
@@ -1200,7 +1239,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | B3 | os pares e a fórmula dos derivados | a lista com os pisos de partida; a fórmula reproduz os tokens do produto com ΔE ≤ 2 | §9 |
 | B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
 | B5 | a ampliação | na 6: `modo`, a densidade completa e os tokens por região; o fundo por mídia se medido a tempo; tipo e escala na API 7 | §9 |
-| B6 | `listarNaBarra` | continua; no celular, vale na gaveta SALAS | §3 |
+| B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |
 | B7 | o terceiro botão e o erro de dois campos | `confirmar` em qualquer `botao`; `formulario.erros` com as duas chaves | §5 |
 | B8 | as peças só no texto | cada uma com teste no produto, na tarefa 17 | §9; plano, 17 |
 | B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | mantido pela leitura (o `mod_data` é por identificador); a prova é a tarefa 18, com a F6 | §9 |
@@ -1237,6 +1276,14 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 |---|---|---|---|
 | I | como o `detectado` chega ao MOD | o prelúdio rejeita com um `Error` que leva o nome **e os outros campos da resposta** (`e.erro`, `e.detectado`), como a casca faz com os `erros` | §7.1; plano, 4 passo 5b |
 | J | os números (256, 128, 1 KiB, 4/s, as capas) | **com a M3**; o laboratório os tem como opções | §12 |
+
+### As perguntas da F8, a tela do celular (09/10)
+
+| pergunta | resposta | onde |
+|---|---|---|
+| o `operador.barra` no celular, que o rascunho recusava com `regiao-ausente` | **aceita a proposta da F8**: ele mora no alto da aba AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões do celular e altura limitada, para a gestão de MODs continuar à vista; a capa do operador vai no cabeçalho SEU PERFIL | §11; plano, 5 passos 8 e 8b |
+| a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` ainda aceita qualquer chave, e fechar isso é a tarefa 17j, antes do congelamento | §9; plano, 17j |
+| o rótulo da primeira aba | SERVIDOR, e não SALAS; rótulo de tela, sem mudar o contrato | §11 |
 
 ## 18. Em aberto
 
