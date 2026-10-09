@@ -2773,9 +2773,7 @@ impl Motor {
                         // um operador voltaria, depois de uma queda, para a
                         // sala de voz de onde foi tirado: o motor refaz a última sala de voz
                         // que este cliente pediu, e ele não pediu este.
-                        if let ServerMessage::MovedToVoiceRoom { voice_room } = mensagem {
-                            self.voice_room = Some(voice_room);
-                        }
+                        self.ouvir_o_assento(&mensagem);
                         if matches!(mensagem, ServerMessage::Pong { .. }) {
                             self.bateria.on_pong();
                             if let Some(medido) = self.cliente.as_ref().and_then(Client::rtt) {
@@ -4878,6 +4876,33 @@ impl Motor {
         matar(self.tela_viva.take());
     }
 
+    /// O que o servidor diz que muda a sala de voz que a reconexão refaz.
+    ///
+    /// Os mesmos caminhos que `Room::apply` aplica ao assento da casca: o
+    /// operador que move, a sala apagada e a entrada recusada — por permissão,
+    /// senha, sala que não existe ou teto. Antes, só o primeiro chegava aqui, e
+    /// a volta refazia a entrada numa sala apagada ou recusada. Com a pendência
+    /// 52 a casca senta a pessoa, na volta, onde `Aviso::Reconectado` diz que
+    /// este motor a sentou, e abre o áudio por esse assento: uma sala que não
+    /// existe abriria o microfone até a recusa chegar.
+    fn ouvir_o_assento(&mut self, mensagem: &ServerMessage) {
+        match mensagem {
+            ServerMessage::MovedToVoiceRoom { voice_room } => self.voice_room = Some(*voice_room),
+            ServerMessage::VoiceRoomDeleted { voice_room }
+                if self.voice_room == Some(*voice_room) =>
+            {
+                self.voice_room = None;
+            }
+            ServerMessage::Alert {
+                reason:
+                    seele_proto::control::AlertReason::VoiceRoomEntryRefused
+                    | seele_proto::control::AlertReason::VoiceRoomFull,
+                ..
+            } => self.voice_room = None,
+            _ => {}
+        }
+    }
+
     /// Guarda o que a reconexão vai ter que refazer.
     fn lembrar(&mut self, comando: &Comando) {
         match comando {
@@ -6624,6 +6649,59 @@ mod tests {
         // Ejetar não é uma queda: quem saiu da sala de voz não volta para ele.
         motor.lembrar(&Comando::SairDaVoiceRoom);
         assert_eq!(motor.voice_room, None);
+    }
+
+    /// A sala que a volta refaz segue o que o servidor disse, pelos mesmos
+    /// caminhos que o assento da casca segue em `Room::apply`.
+    ///
+    /// Desde a pendência 52 isto deixou de ser só o roster: a casca senta a
+    /// pessoa, na volta, na sala que `Aviso::Reconectado` diz que o motor refez,
+    /// e o áudio abre por esse assento. Um motor que guardasse a sala apagada,
+    /// ou a que recusou a entrada, a refaria na volta — e a casca abriria o
+    /// microfone numa sala que não existe, ou que acabou de dizer não, até a
+    /// recusa chegar.
+    #[test]
+    fn a_voice_room_que_a_volta_refaz_segue_o_que_o_servidor_disse() {
+        let alerta = |reason| ServerMessage::Alert {
+            severity: seele_proto::control::AlertSeverity::Warning,
+            reason,
+            operator_text: None,
+        };
+        let mut motor = motor_de_teste();
+
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(9),
+        });
+        assert_eq!(
+            motor.voice_room,
+            Some(VoiceRoomId(2)),
+            "apagar outra sala tirou esta pessoa da dela"
+        );
+        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(2),
+        });
+        assert_eq!(
+            motor.voice_room, None,
+            "a volta refaria a entrada numa sala que foi apagada"
+        );
+
+        for recusa in [
+            seele_proto::control::AlertReason::VoiceRoomEntryRefused,
+            seele_proto::control::AlertReason::VoiceRoomFull,
+        ] {
+            motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(3), None));
+            motor.ouvir_o_assento(&alerta(recusa));
+            assert_eq!(
+                motor.voice_room, None,
+                "a volta refaria a entrada que o servidor recusou ({recusa:?})"
+            );
+        }
+
+        motor.ouvir_o_assento(&ServerMessage::MovedToVoiceRoom {
+            voice_room: VoiceRoomId(5),
+        });
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(5)));
     }
 
     #[tokio::test]
