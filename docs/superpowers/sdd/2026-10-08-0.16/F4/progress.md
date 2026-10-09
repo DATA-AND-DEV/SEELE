@@ -411,3 +411,7 @@ começar.
   administração, o achado do Safari e o servidor dos roteiros; à F8, a marca,
   o PC e os três pontos a combinar (o teste do microfone, o
   `descrever_arquivo` e o servidor da Tarefa 19 dela).
+- **Aviso de fila da orquestradora:** o lote W da F5 (I-4) mexe no
+  `tela-boot.js` antes da 3.4, e prende a credencial ao alvo depois do
+  `NicknameTaken`. A F4 não mexe nesse arquivo até lá, e confere o contrato
+  quando o W entrar (no plano, 3.4).
