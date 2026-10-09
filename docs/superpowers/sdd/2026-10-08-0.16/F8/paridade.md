@@ -47,13 +47,13 @@ Cada linha tem um destes estados:
 | área | igual | adaptado | fora na 0.16 | novo | linhas |
 |---|---|---|---|---|---|
 | 1. A entrada e o fim | 16 | 38 | 17 | 14 | 85 |
-| 2. A moldura da sessão | 21 | 46 | 6 | 0 | 73 |
+| 2. A moldura da sessão | 22 | 47 | 6 | 0 | 75 |
 | 3. A conversa | 45 | 27 | 2 | 0 | 74 |
 | 4. A chamada e a tela | 30 | 30 | 9 | 0 | 69 |
 | 5. Configurações, perfil e ajuda | 9 | 37 | 9 | 0 | 55 |
 | 6. Moderação, confirmações, portaria e aceite de MODs | 15 | 18 | 29 | 0 | 62 |
 | 7. Os MODs | 17 | 12 | 20 | 0 | 49 |
-| **total** | **153** | **208** | **92** | **14** | **467** |
+| **total** | **154** | **209** | **92** | **14** | **469** |
 
 A ponte **atende** 91 e **recusa com nome** 51 dos 159; 17 voltam com frase.
 
@@ -361,6 +361,8 @@ Feita a partir de `B-moldura.md` (commit `f7bc902b3`) e de `00-desenho-e-regras.
 | B-F05 | ação | `MODERAR UMA PESSOA` (apagado, com title, para quem não tem permissão) | camada-moderar.js:240–247, 805–811 | fora na 0.16 | No lugar do botão, só para quem tem `may_kick`, `may_ban` ou `may_move_person`: «MODERAR: pelo SEELE no computador.» Sem permissão, nada. Também em NO COMPUTADOR. | igual |
 | B-F06 | camada | `#veredito` («PRIMEIRO CONTATO — CHAVE FIXADA…», «PRIMEIRO CONTATO VERIFICADO — O CONVITE / A LISTA CONFIRMOU A CHAVE», «O CONVITE NÃO CORRESPONDE A ESTE SERVIDOR…», esperada/ofertada) · `dispensar` | tela-sessao.js:237–299, 354–362, 4317; tela-auth.js:471 | igual | Faixa laranja no alto da aba SERVIDOR, com `dispensar` e a impressão em linhas próprias. As frases saem do JS para o `frases.js`. | igual |
 | B-F08 | camada | `#aviso-fone` (`AVISO_DE_FONE`) · `dispensar` | tela-sessao.js:313–347, 4320; frases.js:285 | igual | Faixa acima da faixa de voz, na primeira entrada numa sala desde que a página abriu, com `dispensar`. | igual |
+| B-F08b | camada | `#aviso-audio` (`ABERTURA_DO_AUDIO.nao_abriu_no_prazo.frase`), sem dispensar, acesa enquanto o estado valer | index.html, `#aviso-audio`; tela-sessao.js, `desenharAberturaDoAudio`; frases.js, `ABERTURA_DO_AUDIO` · `snapshot` | igual | A mesma faixa, acima da faixa de voz e junto do aviso de fone, sem dispensar: ela apaga sozinha quando a pessoa sai da sala. Entrou na `versao/0.16` depois do levantamento (`2b32795f`, pendência 52), e chegou à F8 em `c8b3cd47`. | igual |
+| B-F08c | estado | a abertura do áudio no rodapé (`ABRINDO`, `SEM ÁUDIO`) e no medidor (`— FORA DE SALA`, `— ABRINDO O ÁUDIO`, `— SEM ÁUDIO NESTA SALA`), lida de `snapshot.abertura_do_audio` | tela-sessao.js, o rodapé; tela-server.js, o medidor; frases.js, `ABERTURA_DO_AUDIO` · `snapshot` | adaptado | A faixa de voz diz ABRINDO enquanto o áudio abre e SEM ÁUDIO quando ele não abriu, no lugar do resumo de quem fala; o medidor de AJUSTES › ÁUDIO diz o mesmo que o do desktop. O que a ponte põe em `abertura_do_audio` quando o navegador recusa o microfone é da F4 (achado 3). | igual |
 | B-F10 | camada | `#bateria`: `CONEXÃO PERDIDA · RECONECTANDO` · `MM:SS` · `ATÉ A SESSÃO SER ENCERRADA` · «Sessão mantida em memória local. Áudio suspenso.» · `TENTATIVAS DE RECONEXÃO` · `reconectando…` / `N tentativas` · «O SEELE já está tentando sozinho…»; esgotada, tela de fim | tela-sessao.js:2654–2678; index.html:762–823; camada-bateria.css · `snapshot` | adaptado | Caixa de largura cheia, contagem em cima e frases embaixo; abas e faixa esmaecidas; rolar por baixo continua possível. Esgotada, tela de fim. | igual |
 | B-F12 | camada | `#portaria-batendo` («ALGUÉM ESTÁ BATENDO À PORTA DESTE SERVIDOR», `VER QUEM É`, `DEPOIS`) e `#portaria` (`ADMITIR`, `RECUSAR`, `REVOGAR`, `DEFINIR`, `TIRAR`, `GERAR`, `LIGAR`) | camada-portaria.js:160–631; index.html:192–197, 844–924 · `estado_da_porta`, `pedidos_da_portaria`, `decidir_pedido`, `revogar_admissao`, `definir_senha_do_server`, `criar_convite_do_server`, `ligar_portaria` | fora na 0.16 | Nada no lugar: ninguém hospeda no celular. Em SÓ NO APP DO SEELE: «HOSPEDAR E DECIDIR QUEM ENTRA: pelo app do SEELE.» | fora na 0.16: «Hospedar um servidor é pelo app do SEELE.» com o link para baixar o app; em SÓ NO APP DO SEELE |
 | B-F16 | camada | `#avisos-de-mod` (título do MOD; some em 3,5 s ou 10 s; no máximo 4) | mods-superficies.js:740–748; mods-superficies.css:366–389 | igual | Fila acima das abas e da faixa de voz, na largura toda menos 16px, com os mesmos tempos e o mesmo teto. | igual |

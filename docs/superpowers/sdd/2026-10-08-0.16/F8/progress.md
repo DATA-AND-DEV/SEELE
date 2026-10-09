@@ -8,7 +8,7 @@ Branch `0.16/celular`, saído de `versao/0.16` em `f7bc902b` (09/10). Spec-mestr
 | passo | estado | onde |
 |---|---|---|
 | o duble da casca volta a chegar à sessão (pedido da orquestradora) | **feito** em `5d2e6681`: os 28 roteiros de `tools/roteiros/` passam; a causa dos 17 que reprovavam era a pergunta do nome da `acbc1c29` | `tools/carga-da-casca.py` |
-| a matriz de paridade | **feita**: 467 linhas e os 159 `invoke`, com o que a casca chama sem gesto medido no Chromium | `F8/paridade.md` |
+| a matriz de paridade | **feita**: 469 linhas (as duas da abertura do áudio vieram com a `versao/0.16` de `c8b3cd47`) e os 159 `invoke`, com o que a casca chama sem gesto medido no Chromium | `F8/paridade.md` |
 | as perguntas de desenho | **respondidas** pela orquestradora em 09/10 (navegação, movimento, tema, o que fica fora, SEGURAR PARA FALAR, `operador.barra`, arquitetura híbrida) | mensagens de 09/10 |
 | o protótipo | **feito**: 96 casos (31 estados, 390 e 360, quatro temas, texto a 150 %, a casca do celular numa tela grande), com as medidas de toque, rolagem, áreas seguras, texto fora da caixa, contraste de todo texto e núcleo; os 96 passam | `spikes/casca-do-celular/` |
 | a prova sobre a casca | **feita**: o desktop igual pixel a pixel com os arquivos do celular, no Chromium e no WebKit; a aba PESSOAS da `#lista-roster` (980 px sem a meta de viewport, 390 com); o MUDO da faixa pelo `#botao-mudo`; a casca larga sem a barra da janela e com HOSPEDAR AQUI virando frase | `spikes/casca-do-celular/prova-sobre-a-casca/` |
