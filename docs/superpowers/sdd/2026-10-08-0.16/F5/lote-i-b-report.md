@@ -418,3 +418,240 @@ orquestradora.
 - **A ordem das recusas de `set_volume`** escapou dos meus testes no
   `f0a2a74d` e só apareceu lendo a conformidade. Está consertada e presa por
   teste de unidade, mas é o tipo de coisa que a conformidade pendente confirma.
+
+*As duas preocupações de cima sobre o arrasto e sobre `mensagens` viraram o M-3
+e o M-1 da rodada 1, abaixo, e estão consertadas.*
+
+## Rodada 1
+
+FIX_BASE `0a942648`. Brief: `.superpowers/sdd/lotes/lote-i-b-rodada1.md`. A
+revisão deu o lote como conforme e pediu conserto de qualidade: um Importante
+(I-1) e seis Menores. Seis commits de código, cada um feito assim que o item
+ficou provado. Nada no fio, no servidor ou em `executor.rs`.
+
+| commit | item | o que muda |
+|---|---|---|
+| `8b7f25b5` | M-1, em voo | `sincronizarMensagens` lê `geracaoDaSessao` antes do `messages` e descarta a resposta se a sessão mudou |
+| `e95214b3` | I-1, M-1 e M-2 | `esquecerOEstadoDaSessao` chama `tirarAnexo()`, zera a conversa e a revisão, esvazia `#lista-mensagens`, zera o relógio e o endereço e o que cada retrato recalcula, e é o único lugar que esquece: `ejetar` e `limparSessaoEncerrada` não zeram mais nada soltos. O guarda (a) passa a se chamar `todo_estado_de_topo_da_sessao_e_esquecido_ao_sair` e conta todo `let` de topo |
+| `96481243` | M-3 | `geracaoDosVolumes`, `marcarVolume` e `esquecerVolumes`; `lerVolumes` descarta a resposta que saiu antes do último gesto ou da sessão que acabou |
+| `eb784b88` | M-4 | `dobrar_no_room` (o que `fold` chama): um `PersonRenamed` muda a chave do volume do nome de antes para o novo (`renomeacao`, `VozDaSala::renomear_volume`) |
+| `25e2fc53` | M-5 | a frase de `MovedByOperator` não supõe sala de antes |
+| `782bd6fd` | M-6 | `doisEmKbps`; o título de `VoiceRoomOverHostUplink` diz «aguenta com folga» |
+
+### I-1, M-1 e M-2: o guarda (a) redesenhado
+
+**O que ele conta.** Todo `let` de topo de `tela-sessao.js`, qualquer que seja
+o inicializador, e todo `const` de topo que começa com `new Map(`, `new Set(`,
+`new WeakMap(`, `[` ou `{` — 37 nomes hoje (30 `let` e 7 `const`).
+
+**O que exige de cada um**, dentro de `esquecerOEstadoDaSessao`:
+- uma atribuição (`=`, `+=`, `-=`), um `.clear()` ou um `.length = 0`;
+- ou uma chamada desta tabela:
+  - `esquecerRetratos()` para `retratos` e `revisaoDosRetratos`;
+  - `limparBusca()` para `casamentosPorMensagem` e `ocorrenciaAtual`;
+  - `tirarAnexo()` para `anexoPendente` e `subindo`;
+  - `esquecerVolumes()` para `volumesLidos` e `geracaoDosVolumes` (M-3);
+- ou uma exceção com o motivo escrito no teste.
+
+Ele cobra também que a tabela e as exceções só nomeiem estado que existe, que
+`#lista-mensagens` seja esvaziada, e que as duas saídas chamem a função **e não
+esqueçam nenhum estado de topo por conta própria**.
+
+**As exceções, conferidas uma por uma** (13):
+- do teclado: `falando`, `teclaQueAbriuAFala`;
+- da preferência: `teclaDeFalar`;
+- da execução: `foneJaAvisado` (o guarda do lote J exige que só a declaração o
+  zere) e `geracaoDoAvisoDeFone`;
+- do app, lidos uma vez no carregamento: `limiteDaMensagem`, `regrasDePrevia`,
+  `dominiosDeGif` e `pastaDeDestino`;
+- desta máquina: `conhecidosDaTrilha`, a lista de servidores conhecidos, relida
+  no primeiro quadro de cada sessão pelo `comecoDaSessao` que a função zera;
+- pedidos em voo: `buscandoMensagens` e `abrindoLinha`, que o `finally` apaga;
+- a tabela fixa `RECUSAS_DE_MENSAGEM`.
+
+**Dos candidatos que a revisão listou, seis não viraram exceção: são zerados.**
+São eles `trocasDeAparelhoVistas`, `ateQuandoAnunciarOAparelho`,
+`podeRemoverMensagem`, `lugaresDeUmaSalaNova`, `mensagensPorDesenhar` e
+`trilhaDesenhada`. Zerar é seguro, e dois deles eram vazamento:
+- `lugaresDeUmaSalaNova` é copiado de uma sala daquele servidor;
+- `ateQuandoAnunciarOAparelho` fazia a sessão seguinte anunciar, por até 8 s,
+  uma troca de aparelho da anterior, com o nome do aparelho dela.
+
+**Ao conferir `buscandoMensagens`, achei um caminho em voo do M-1** (`8b7f25b5`).
+Um `messages` pedido em A e respondido depois da saída escrevia a conversa de A,
+com a revisão de A. Todas as saídas zeram `geracaoDaSessao`
+(`encerrarOAmbienteDosMods`). Com isso, a conferência da geração descarta essa
+resposta, e é ela que torna honesta a exceção do `buscandoMensagens`.
+
+**Para dentro da função** foram o que `ejetar` zerava solto (`desenhado`,
+`linhaAberta`, `comecoDaSessao`, `alvoDoServer`, `mensagens`,
+`revisaoDesenhada`) e o esvaziamento de `#lista-mensagens`.
+`limparSessaoEncerrada` deixou de zerar `desenhado` e `linhaAberta`. O
+RECONECTAR não perde o endereço: `mostrarFim` o copia para `alvoDoFim` antes.
+
+**Provas, na bancada `conversa-com-estado.cjs`.** Pela página de verdade e pelas
+duas saídas. Cada vermelho foi tirado aplicando o conserto em passos:
+- **M-2.** O relógio e o endereço voltam `null`. Vermelho pelo fim de sessão:
+  `{"comeco":1791564792653,"alvo":"servidor-a.invalid:8383"}`.
+- **I-1.** É a cena da revisão. Vermelho, igual ao medido por ela:
+  `{"caixa":"contrato-do-servidor-A.pdf","arquivos":["/tmp/contrato-A.pdf"],"textos":[]}`.
+  O primeiro Enter em B mandava o arquivo de A, e o texto ia junto com ele.
+- **M-1, revisão coincidente.** A conversa de A está desenhada; B aparece com a
+  mesma revisão 5 e outra conversa. Vermelho de passagem por `ejetar`:
+  `{"desenhadaEmA":true,"deAAoAparecer":true,…}`.
+- **M-1, em voo.** Vermelho: `{"mensagens":1,"revisao":9}`.
+
+E, no `cargo test`:
+- o guarda (a) redesenhado: vermelho antes do conserto, com «`desenhado` não é
+  esquecido em `esquecerOEstadoDaSessao`…»;
+- `a_conversa_pedida_numa_sessao_nao_e_escrita_noutra`: a geração é lida antes
+  do pedido e conferida antes de escrever.
+
+**Reversões**, todas com `cmp` idêntico:
+- **No guarda (a), 25 vermelhas:**
+  - cada uma das 21 linhas de código de `esquecerOEstadoDaSessao`, uma por vez,
+    cada qual com a frase do nome dela;
+  - um `let estadoNovoSemDono = null;` novo de topo;
+  - `desenhado = null;` acrescentado em `ejetar`: «… esquece `desenhado` por
+    conta própria…»;
+  - `ejetar` sem a chamada;
+  - `limparSessaoEncerrada` sem a chamada.
+- **Na bancada:**
+  - sem `tirarAnexo()`: o I-1;
+  - sem o esvaziamento da lista: o M-1 de passagem;
+  - sem o zero de `comecoDaSessao`: o M-2;
+  - sem o zero de `revisaoDesenhada`: a cena em voo e, isolada com a asserção
+    da cena em voo neutralizada, a da revisão coincidente
+    (`{"deB":false}`: a conversa de B nem é buscada);
+  - sem a conferência da geração: o M-1 em voo, na bancada e no guarda de texto.
+
+### M-3: a leitura de volume velha
+
+`geracaoDosVolumes` anda a cada gesto (`marcarVolume`, que o deslizante do
+roster e o controle da chamada usam) e a cada sessão que acaba
+(`esquecerVolumes`). `lerVolumes` guarda o número ao sair e descarta a resposta
+se ele andou.
+- **Prova:** na bancada, a ponte segura `volumes_locais`; a leitura sai, o
+  deslizante da Lia vai a 150, e a resposta chega com o estado de antes, `{}`.
+  - Vermelho: «uma leitura de volume que saiu antes do gesto desfez o gesto: a
+    Lia voltou a 100 na tela, com o Rust em 150».
+  - Verde.
+- **E a leitura em voo quando a sessão acaba**, respondida com `{Lia: 150}`, não
+  enche a sessão seguinte.
+- **No `cargo test`,** o guarda da janela ganhou três cobranças: a conferência
+  antes de substituir; as duas funções que fazem a leitura velha; e os dois
+  gestos passando por `marcarVolume`.
+- **Reversões:**
+  - sem o descarte: a bancada e o guarda reprovam;
+  - sem o passo do gesto: a bancada e o guarda reprovam;
+  - sem o passo da sessão: a bancada reprova («…encheu a seguinte…») e o guarda
+    também;
+  - o controle da chamada escrevendo direto em `volumesLidos`: o guarda reprova.
+
+### M-4: a troca de nome muda a chave
+
+**O fio dá o necessário.** `PersonRenamed { person, nickname }` traz o
+`PersonId` e o nome novo. O nome de antes é o que o `Room` tem para o mesmo
+`PersonId`, lido antes de ele aprender o novo (`renomeacao`).
+`VozDaSala::renomear_volume` muda a chave: o nome velho não guarda mais nada, e
+um volume que já estava no nome novo dá lugar ao da pessoa.
+
+A troca mora em `dobrar_no_room`, que `fold` passou a chamar. O volume muda de
+chave **depois** de soltar o `Room`: a ordem dos cadeados é voz, volumes,
+`Room`, e segurar o `Room` para pegar os volumes a inverteria.
+
+- **Provas:**
+  - `quem_troca_de_nome_leva_o_volume_junto`, com a voz de mentira: o caso da
+    revisão. Vermelho: `left: Some(1.0), right: Some(1.5)`;
+  - `a_troca_de_nome_que_o_servidor_anuncia_move_o_volume_pela_conexao`, pelo
+    `fold` de verdade. Vermelho: `left: {"rafa": 150}`.
+- **Reversões:**
+  - sem a troca de chave: os dois reprovam;
+  - o nome velho mantido: «o volume não mudou de chave: «rafa» continua
+    guardado…»;
+  - `fold` de volta ao `room.apply` direto: o teste da conexão reprova.
+
+### M-5: quem estava fora de sala
+
+O servidor move a pessoa sem conferir se ela estava numa sala (o braço de
+`Event::PersonMoved` em `session.rs`). A frase agora é: «ALGUÉM QUE MODERA ESTE
+SERVIDOR PÔS VOCÊ NUMA SALA DE VOZ. Você já está nela; se não quer ficar, saia
+da sala ou entre na que preferir.»
+- **Prova:** `frontend.rs::a_frase_de_quem_e_movido_vale_para_quem_estava_fora_de_sala`.
+  A frase não pode ter «de antes», «voltar» nem «outra sala».
+  - Vermelho com a frase de antes.
+  - Verde.
+  - Reversão vermelha.
+
+### M-6: dois números iguais
+
+`emKbps(bps, casas)` ganhou as casas decimais, com a vírgula. `doisEmKbps(a, b)`
+começa nos inteiros e põe uma casa por vez, até três (o bps exato), enquanto os
+dois saírem iguais sendo diferentes. Exemplos:
+- «4.000,4 kbps» contra «4.000,0 kbps»;
+- «4.000,04 kbps» contra «4.000,00 kbps»;
+- dois valores iguais de verdade saem «4.000 kbps» e «4.000 kbps».
+
+**E o título, que não estava no M-6.** O aviso dispara acima de 60% da subida
+medida (ADR 0038). Uma sala que pede 3.000 kbps de uma internet que envia 4.000
+dispara, e a frase dizia que ela «passou do que a internet consegue enviar»,
+com os números ao lado desmentindo. Agora diz «PASSOU DO QUE A INTERNET DESTE
+SERVIDOR AGUENTA COM FOLGA».
+
+- **Prova, na bancada:**
+  - com 400 bps de diferença, os dois números diferem. Vermelho: «pede 4.000
+    kbps, e a internet do servidor envia cerca de 4.000 kbps»;
+  - com a sala abaixo da subida, a frase não diz «CONSEGUE ENVIAR».
+- **No `cargo test`,** o guarda do braço passa a cobrar `doisEmKbps(`.
+- **Reversões:**
+  - sem casas decimais: a bancada reprova;
+  - o título antigo: a bancada reprova;
+  - o braço com `emKbps` em cada número: a bancada e o guarda reprovam.
+
+### O que rodou
+
+No topo (`782bd6fd`):
+- **Testes de crate:**
+  - `seele-ffi --lib`: 158 verdes, 1 ignorado de antes;
+  - `seele-core --lib`: 511;
+  - `seele-app --bin seele-app`: 274;
+  - `--test frontend`: 279.
+- **Ferramentas:**
+  - `cargo xtask check-runtime`: verde;
+  - `cargo fmt --all -- --check`: limpo;
+  - o clippy de `seele-ffi`, `seele-app` e `seele-conformance` com
+    `-D warnings`: limpo.
+- **Bancadas:**
+  - `conversa-com-estado.cjs`, com nove cenas: R03, R05, R06, C, M-3,
+    F1-vazamento, M-1 em voo, I-1, e M-1 com a revisão coincidente;
+  - `tema-sai-com-a-sessao.cjs` e `telas.cjs`.
+- **Conformidade, só compilada:** `cargo test -p seele-conformance --no-run`
+  com `voz_na_reconexao`, `a_recusa_nao_tira_da_sala`, `acceptance_m5`,
+  `saida_com_despedida` e `moderacao` compila.
+
+### A conformidade
+
+Continua **pausada** pela orquestradora, e nenhum teste de conformidade rodou
+neste lote. Falta rodar sobre o topo, um arquivo por vez, com
+`-- --test-threads=1`:
+- `voz_na_reconexao`;
+- `a_recusa_nao_tira_da_sala`;
+- `acceptance_m5`;
+- `saida_com_despedida`;
+- `moderacao`.
+
+### Preocupações da rodada 1
+
+- **Três decisões minhas, além do que o brief da rodada pedia:**
+  - a conferência da geração em `sincronizarMensagens`;
+  - zerar seis candidatos a exceção em vez de excetuá-los;
+  - o título do M-6.
+  Cada uma está justificada acima.
+- **`conhecidosDaTrilha` virou exceção sem estar na lista da revisão.** É a
+  lista de servidores desta máquina, e não de um servidor. Zerá-la deixaria a
+  trilha vazia no primeiro quadro da sessão seguinte, até ela ser relida.
+- **Volume por apelido, como decidido.** Quem sai, troca de nome fora da vista
+  desta sessão e volta com outro nome não leva o volume. Só a troca que o
+  servidor anuncia a esta sessão move a chave.
+- **Fora desta rodada:** a projeção da telemetria para os MODs, que fica com a
+  orquestradora.
