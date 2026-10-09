@@ -51,6 +51,18 @@ const REGIOES = [
     doProduto: ["#campo-mensagem", "#botao-anexar", "#botao-enviar"],
     teto: { aVista: ["#campo-mensagem", "#botao-enviar"] },
   },
+  {
+    ponto: "status.barra",
+    conteiner: "#telemetria-mods",
+    // Atraso, jitter, distúrbio e codec: o que a pessoa lê para saber se a voz
+    // está chegando.
+    doProduto: ["#tel-rtt", "#tel-jit", "#tel-loss", "#tel-codec"],
+    // E o aviso de falha local, que é do produto e fica depois da região:
+    // escondido no retrato da bancada, ele é mostrado para a medida. Sem o
+    // `overflow: hidden` da região, ele saía da janela (1 302–1 387 px numa
+    // janela de 1 280, medido).
+    teto: { aVista: ["#tel-rtt", "#tel-codec", "#tel-local"], mostrar: ["#tel-local"] },
+  },
 ];
 
 (async () => {
@@ -100,6 +112,13 @@ const REGIOES = [
         const r = window.testTable.snapshot;
         const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
         const doProdutoAgora = () => doProduto.map((seletor) => document.querySelector(seletor)?.outerHTML ?? null);
+        // O tamanho, e não só a marcação: um MOD largo espremeria as métricas
+        // da barra de status sem mudar um caractere delas.
+        const tamanhos = () => doProduto.map((seletor) => {
+          const caixa = document.querySelector(seletor)?.getBoundingClientRect();
+          return caixa ? `${Math.round(caixa.width)}×${Math.round(caixa.height)}` : null;
+        });
+        const tamanhosAntes = tamanhos();
         const caixa = document.querySelector(conteiner);
         const antes = { conteiner: caixa?.innerHTML ?? null, produto: doProdutoAgora() };
 
@@ -124,6 +143,7 @@ const REGIOES = [
           .some((no) => no.textContent === `marca de ${ponto}` && no.children.length === 0
             && !no.closest(conteiner));
         const comOMod = doProdutoAgora();
+        const tamanhosComOMod = tamanhos();
 
         contribuicoesDosMods.revogar(handle, { id: "mod/regiao", instancia });
         modsCarregados.delete("mod/regiao");
@@ -138,26 +158,39 @@ const REGIOES = [
         // serviam: 60 passavam do orçamento e não montavam nada, e 30 (480 px)
         // cabiam na janela, encolhendo a lista de canais acima.
         let foraDaVista = null;
+        let tamanhosNoTeto = null;
         if (teto) {
           const grande = contribuicoesDosMods.registrar({ id: "mod/regiao" }, instancia, {
             ponto,
             modo: "adicionar",
-            conteudo: Array.from({ length: 16 }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i} `.repeat(24) })),
+            conteudo: [
+              ...Array.from({ length: 16 }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i} `.repeat(24) })),
+              // E uma linha sem quebra, ~2 500 px: é ela que espremeria uma
+              // barra de altura fixa na horizontal.
+              { forma: "texto", chave: "largo", dentro: "LARGO".repeat(80) },
+            ],
           });
           modsCarregados.set("mod/regiao", instancia);
           desenhar(r);
           await quadro();
+          tamanhosNoTeto = tamanhos();
+          for (const seletor of teto.mostrar ?? []) document.querySelector(seletor).hidden = false;
           foraDaVista = teto.aVista.filter((seletor) => {
             const caixaDoNucleo = document.querySelector(seletor)?.getBoundingClientRect();
-            return !caixaDoNucleo || caixaDoNucleo.top < 0 || caixaDoNucleo.bottom > innerHeight
-              || caixaDoNucleo.height === 0;
+            return !caixaDoNucleo || caixaDoNucleo.height === 0
+              || caixaDoNucleo.top < 0 || caixaDoNucleo.bottom > innerHeight
+              || caixaDoNucleo.left < 0 || caixaDoNucleo.right > innerWidth;
           });
+          for (const seletor of teto.mostrar ?? []) document.querySelector(seletor).hidden = true;
           contribuicoesDosMods.revogar(grande.handle, { id: "mod/regiao", instancia });
           modsCarregados.delete("mod/regiao");
           desenhar(r);
           await quadro();
         }
-        return { existe: Boolean(caixa), antes, dentro, emOutroLugar, comOMod, depois, foraDaVista };
+        return {
+          existe: Boolean(caixa), antes, dentro, emOutroLugar, comOMod, depois, foraDaVista,
+          tamanhosAntes, tamanhosComOMod, tamanhosNoTeto,
+        };
       }, regiao).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
 
       const { ponto } = regiao;
@@ -175,6 +208,9 @@ const REGIOES = [
         if (medido.antes.produto[i] === null) falhas.push(`${ponto}: ${seletor}, do produto, não está na página`);
         else if (medido.comOMod[i] !== medido.antes.produto[i]) {
           falhas.push(`${ponto}: ${seletor}, do produto, mudou com o MOD de pé`);
+        } else if (medido.tamanhosComOMod[i] !== medido.tamanhosAntes[i]) {
+          falhas.push(`${ponto}: ${seletor}, do produto, mudou de tamanho com o MOD de pé `
+            + `(${medido.tamanhosAntes[i]} → ${medido.tamanhosComOMod[i]})`);
         }
       });
       if (medido.depois.conteiner !== medido.antes.conteiner) {
@@ -183,6 +219,12 @@ const REGIOES = [
       if (medido.depois.produto.some((html, i) => html !== medido.antes.produto[i])) {
         falhas.push(`${ponto}: revogado, e o que é do produto não voltou ao que era`);
       }
+      medido.tamanhosNoTeto?.forEach((tamanho, i) => {
+        if (tamanho !== medido.tamanhosAntes[i]) {
+          falhas.push(`${ponto}: com conteúdo grande, ${regiao.doProduto[i]}, do produto, mudou de tamanho `
+            + `(${medido.tamanhosAntes[i]} → ${tamanho})`);
+        }
+      });
       if (medido.foraDaVista?.length) {
         const quais = medido.foraDaVista;
         falhas.push(`${ponto}: com conteúdo maior que a região, ${quais.join(" e ")} `

@@ -1921,6 +1921,20 @@ button.linha-nome:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
+/* A região `status.barra` (rascunho da API 6, §3), na altura da barra, que é
+   fixa. **Ela encolhe primeiro**: num item flex, `overflow: hidden` zera a
+   largura mínima automática, e as métricas, em `nowrap`, não encolhem abaixo do
+   texto delas. Sem o `overflow`, um MOD largo empurrava o aviso de falha local
+   para fora da janela (medido em `regioes-do-produto.cjs`). */
+.telemetria-mods {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  padding: 0 12px;
+  overflow: hidden;
+  contain: paint;
+}
+
 .metrica {
   display: flex;
   align-items: center;

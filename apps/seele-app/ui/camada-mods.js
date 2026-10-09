@@ -856,6 +856,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "redes": "A coluna de servidores",
   "operador.barra": "A barra de quem está conectado",
   "compositor": "A caixa de escrever",
+  "status.barra": "A barra de baixo",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1130,6 +1131,7 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "redes": "#trilha-mods",
   "operador.barra": "#operador-mods",
   "compositor": "#compositor-mods",
+  "status.barra": "#telemetria-mods",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

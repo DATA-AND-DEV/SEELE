@@ -2642,6 +2642,7 @@ function redesenharAsEntradasDeMod() {
 // ---------------------------------------------------------------- telemetria
 
 function desenharTelemetria(snapshot) {
+  aplicarARegiao("status.barra", $("telemetria-mods"));
   const tel = snapshot.telemetry;
 
   medido($("tel-rtt"), `${Math.round(tel.rtt_ms)}ms`);
