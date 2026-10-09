@@ -765,7 +765,9 @@ pub struct Enlace {
     /// conhecidos, e transformar cada janela de medição num aviso encheria a
     /// fila de coisas que ninguém precisa ver acontecer.
     caminho_medido: Arc<std::sync::atomic::AtomicU32>,
-    tarefa: tokio::task::JoinHandle<()>,
+    /// A tarefa do motor. `None` depois de [`Enlace::sair`], que a espera
+    /// terminar — ou a aborta, vencido o teto.
+    tarefa: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for Enlace {
@@ -1525,7 +1527,7 @@ impl Enlace {
             veredito,
             rtt,
             caminho_medido,
-            tarefa,
+            tarefa: Some(tarefa),
         })
     }
 
@@ -2106,9 +2108,36 @@ impl Enlace {
         self.mandar(Comando::Assistir { tela, quero }).await
     }
 
-    /// Encerra por vontade própria.
-    pub async fn sair(&self) {
-        let _ = self.mandar(Comando::Sair).await;
+    /// Encerra por vontade própria, e volta **depois** de o motor se despedir.
+    ///
+    /// Voltava assim que o pedido entrava na fila. Quem derrubasse o runtime em
+    /// seguida — a thread da conexão da FFI faz isso na linha seguinte —
+    /// derrubava junto o motor que ainda ia fechar a conexão, e o fechamento
+    /// não saía: ver `Motor::despedir`. Agora ela espera a tarefa do motor
+    /// terminar, com teto de [`ESPERA_DO_MOTOR_NA_SAIDA`]; vencido o teto, a
+    /// tarefa é abortada e a linha sai no registro.
+    ///
+    /// Pelo caminho normal, quando ela volta o `Encerrado` e tudo o que veio
+    /// antes dele já estão na fila de [`Self::proximo`].
+    pub async fn sair(&mut self) {
+        let Some(mut motor) = self.tarefa.take() else {
+            return;
+        };
+        let despedida = async {
+            let _ = self.mandar(Comando::Sair).await;
+            let _ = (&mut motor).await;
+        };
+        if tokio::time::timeout(ESPERA_DO_MOTOR_NA_SAIDA, despedida)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                teto = ?ESPERA_DO_MOTOR_NA_SAIDA,
+                "o motor do enlace não se despediu dentro do teto da saída, e foi abortado: \
+                 quem ficou pode notar a saída só pelo prazo de ociosidade, 20 s"
+            );
+            motor.abort();
+        }
     }
 
     /// Declara ao servidor a identidade efêmera desta sessão para o caminho
@@ -2175,7 +2204,10 @@ impl Enlace {
 
 impl Drop for Enlace {
     fn drop(&mut self) {
-        self.tarefa.abort();
+        // Só falta a alça depois de `sair`, que já a esperou ou abortou.
+        if let Some(tarefa) = self.tarefa.take() {
+            tarefa.abort();
+        }
     }
 }
 
@@ -2441,6 +2473,44 @@ impl TarefasDePar {
         self.parar_de_assistir_a_tudo();
         self.parar_de_servir();
     }
+
+    /// Cancela tudo o que está de pé **e espera as tarefas devolverem**, até
+    /// `teto`.
+    ///
+    /// Chamado por [`Motor::despedir`], que diz o fim à casca logo depois. Um
+    /// `abort` é um pedido: ele não interrompe um `poll` que já corre noutra
+    /// thread, e as baterias rodam em `multi_thread`. Sem a espera, uma tarefa
+    /// abortada ainda escreveria um quadro entre o pedido e o `await` em que ela
+    /// morre — atrás do `Encerrado`, na mesma fila.
+    ///
+    /// A alça de uma tarefa abortada volta quando a tarefa foi solta de fato. O
+    /// teto é para a que não volta, e ela fica como ficava antes: abortada e
+    /// largada, agora com uma linha no registro.
+    async fn largar_tudo_e_esperar(&mut self, teto: Duration) {
+        let alcas: Vec<tokio::task::JoinHandle<()>> = self
+            .caminhos
+            .drain()
+            .map(|(_, alca)| alca)
+            .chain(self.servindo.take())
+            .collect();
+        if alcas.is_empty() {
+            return;
+        }
+        for alca in &alcas {
+            alca.abort();
+        }
+        let todas = async {
+            for alca in alcas {
+                let _ = alca.await;
+            }
+        };
+        if tokio::time::timeout(teto, todas).await.is_err() {
+            tracing::warn!(
+                ?teto,
+                "uma tarefa do caminho entre pares não devolveu dentro do teto da despedida"
+            );
+        }
+    }
 }
 
 impl Drop for TarefasDePar {
@@ -2509,6 +2579,33 @@ const FAIXA_INICIAL: SignalBand = SignalBand::Nominal;
 /// Menor que o intervalo de ping e muito menor que o menor backoff, para que
 /// nem o ping nem uma tentativa de reconexão fiquem esperando a tica seguinte.
 const TICA: Duration = Duration::from_millis(200);
+
+/// Quanto a despedida espera a conexão fechada escoar, depois de fechá-la.
+///
+/// O `CONNECTION_CLOSE` sai na **primeira volta do driver** da conexão depois
+/// de `Client::disconnect`: é isso que a espera compra, e no laço local ou numa
+/// LAN o escoamento inteiro cabe nela. Ela só limita o escoamento (3×PTO), em
+/// que a conexão fechada responde a pacote atrasado; numa rede longe ele passa
+/// disto, e o teto o corta com o fechamento já do lado de fora.
+///
+/// Trezentos milissegundos, e o custo é de quem sai: a thread da conexão fica
+/// presa até aqui antes de cair.
+const ESPERA_DA_DESPEDIDA: Duration = Duration::from_millis(300);
+
+/// Quanto a despedida espera as tarefas do caminho entre pares devolverem,
+/// depois de abortadas. Ver [`TarefasDePar::largar_tudo_e_esperar`].
+///
+/// Uma tarefa abortada devolve no próximo toque do runtime nela: microssegundos.
+/// O teto é para a que estiver no meio de um `poll` longo noutra thread.
+const ESPERA_DAS_TAREFAS_DE_PAR: Duration = Duration::from_millis(100);
+
+/// Quanto [`Enlace::sair`] espera o motor se despedir, antes de abortá-lo.
+///
+/// Um segundo: a despedida do motor gasta no máximo
+/// [`ESPERA_DAS_TAREFAS_DE_PAR`] e [`ESPERA_DA_DESPEDIDA`], quatrocentos
+/// milissegundos. O que passar disso é um motor preso, e esperá-lo mais seria
+/// prender junto quem está saindo.
+const ESPERA_DO_MOTOR_NA_SAIDA: Duration = Duration::from_secs(1);
 
 /// A faixa nova, quando este `PersonState` for sobre esta pessoa e mudar de faixa.
 ///
@@ -2593,7 +2690,7 @@ impl Motor {
                     }
                     comando = comandos.recv() => {
                         match comando {
-                            Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido),
+                            Some(Comando::Sair) | None => return self.despedir().await,
                             Some(comando) => { self.executar(comando).await; None }
                         }
                     }
@@ -2602,7 +2699,7 @@ impl Motor {
                 None => tokio::select! {
                     comando = comandos.recv() => {
                         match comando {
-                            Some(Comando::Sair) | None => return self.encerrar(Motivo::Pedido),
+                            Some(Comando::Sair) | None => return self.despedir().await,
                             // Guardado, não perdido: entrar numa sala de voz durante a
                             // queda é uma intenção que vale quando voltar.
                             Some(comando) => { self.lembrar(&comando); None }
@@ -4775,6 +4872,52 @@ impl Motor {
             // [`Self::cair`], e ressuscitá-la seria a única coisa neste enum que
             // liga uma câmera sozinha.
             _ => {}
+        }
+    }
+
+    /// A saída pedida: cala o caminho entre pares, fecha a conexão **e espera o
+    /// fechamento sair**, antes de o motor voltar.
+    ///
+    /// # Por que esperar
+    ///
+    /// `Client::disconnect` só põe o `CONNECTION_CLOSE` na fila do `quinn`: quem
+    /// o escreve no soquete é o driver da conexão, uma tarefa deste mesmo
+    /// runtime. O motor voltava logo depois de [`Self::encerrar`], e quem o
+    /// esperava derrubava o runtime — a thread da conexão da FFI faz isso na
+    /// linha seguinte — com o fechamento ainda na fila. O servidor só via a
+    /// saída pelo prazo de ociosidade, 20 s, e até lá a pessoa continuava entre
+    /// os presentes de todo mundo. É a pendência 50.
+    ///
+    /// # A ordem
+    ///
+    /// 1. A ponta é guardada antes de `encerrar` largar o cliente: é nela que
+    ///    se espera.
+    /// 2. O caminho entre pares cai, e as tarefas dele devolvem
+    ///    ([`TarefasDePar::largar_tudo_e_esperar`]). O `Encerrado` é o último
+    ///    aviso que a casca ouve desta sessão, e o motor fica de pé depois dele
+    ///    esperando o fechamento: um par vivo nesse intervalo escreveria quadro
+    ///    atrás do fim. E a conexão dele, aberta na mesma ponta, seguraria o
+    ///    `wait_idle` até o teto.
+    /// 3. `encerrar` fecha a conexão e diz o fim à casca.
+    /// 4. O `wait_idle`, até [`ESPERA_DA_DESPEDIDA`].
+    async fn despedir(&mut self) {
+        let ponta = self.cliente.as_ref().map(Client::endpoint);
+        self.tarefas_de_par
+            .largar_tudo_e_esperar(ESPERA_DAS_TAREFAS_DE_PAR)
+            .await;
+        self.encerrar(Motivo::Pedido);
+        if let Some(ponta) = ponta {
+            if tokio::time::timeout(ESPERA_DA_DESPEDIDA, ponta.wait_idle())
+                .await
+                .is_err()
+            {
+                // Não é falha: o fechamento saiu na primeira volta do driver, e
+                // o que o teto cortou foi o escoamento, que só responde a
+                // pacote atrasado.
+                tracing::debug!(
+                    "a despedida saiu e o escoamento da conexão passou do teto da espera"
+                );
+            }
         }
     }
 
@@ -8111,6 +8254,78 @@ mod tests {
              {parou_em} para {depois}): a alça foi largada em vez de abortada, e quem fechou a \
              sessão continua lendo do par com a conexão de pé"
         );
+    }
+
+    /// **A despedida cala o caminho do par antes de dizer que acabou.**
+    ///
+    /// O `Encerrado` é o último aviso que a casca ouve de uma sessão que ela
+    /// mesma fechou. `Motor::despedir` segura o motor de pé depois dele,
+    /// esperando o fechamento sair (`ESPERA_DA_DESPEDIDA`); se as tarefas de
+    /// par ainda estivessem vivas nesse intervalo, cada quadro que elas
+    /// lessem do par entraria na fila **depois** do fim — e a soltura do
+    /// `Motor` só as aborta quando a espera acaba.
+    ///
+    /// A tarefa daqui é a forma de [`Motor::assistir_por_par`] sem a rede: um
+    /// laço que escreve quadro na fila de avisos até alguém a parar. O motor
+    /// fica de pé depois da despedida, como fica durante a espera de verdade.
+    /// O que este teste prova em `seele-core` é a ordem; a prova pela rede, com
+    /// um par de verdade, é `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para`,
+    /// em `seele-conformance`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_despedida_cala_as_tarefas_de_par_antes_do_encerrado() {
+        let mut motor = motor_de_teste();
+        let (avisos, mut ouvidos) = mpsc::unbounded_channel();
+        motor.avisos = avisos;
+
+        let entregando = motor.avisos.clone();
+        let quadros = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let contando = Arc::clone(&quadros);
+        let tarefa = tokio::spawn(async move {
+            loop {
+                let quadro = Aviso::TelaQuadro {
+                    tela: ScreenId(1),
+                    chave: false,
+                    bytes: vec![0],
+                };
+                if entregando.send(quadro).is_err() {
+                    return;
+                }
+                contando.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+        motor.tarefas_de_par.assistir(ScreenId(1), tarefa);
+        ate_que(
+            "a tarefa de par entregar um quadro antes da despedida",
+            Duration::from_secs(5),
+            || quadros.load(std::sync::atomic::Ordering::Relaxed) > 0,
+        )
+        .await;
+
+        motor.despedir().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let mut viu_o_fim = false;
+        let mut depois_do_fim = 0_u32;
+        while let Ok(aviso) = ouvidos.try_recv() {
+            match aviso {
+                Aviso::Encerrado(Motivo::Pedido) => viu_o_fim = true,
+                Aviso::TelaQuadro { .. } if viu_o_fim => depois_do_fim += 1,
+                _ => {}
+            }
+        }
+        assert!(
+            viu_o_fim,
+            "a despedida não disse `Encerrado(Pedido)`, e a casca não fica sabendo que a sessão \
+             que ela fechou acabou"
+        );
+        assert_eq!(
+            depois_do_fim, 0,
+            "{depois_do_fim} quadros do par entraram na fila depois do `Encerrado`: a despedida \
+             avisou o fim com o caminho do par de pé, e a casca recebe imagem de uma sessão que \
+             ela já fechou"
+        );
+        drop(motor);
     }
 
     /// **Abortar quem servia um par devolve a vaga, em vez de prendê-la.**
