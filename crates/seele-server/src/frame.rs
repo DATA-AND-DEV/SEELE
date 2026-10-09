@@ -119,15 +119,21 @@ where
 /// continua `NaoEntendi`: aquilo não é um vocabulário mais novo, é um quadro
 /// estragado.
 ///
+/// Devolve também o **ordinal** do quadro, que é como uma recusa diz qual
+/// pedido não deu (`AlertReason::PedidoRecusado`).
+///
 /// # Errors
 ///
 /// [`FimDoQuadro`], que nomeia o caso.
 pub async fn ler_da_lista<T: ListaDeCima>(
     stream: &mut quinn::RecvStream,
-) -> Result<Lido<T>, FimDoQuadro> {
+) -> Result<(u32, Lido<T>), FimDoQuadro> {
     let frame = ler_bruto(stream).await?;
-    seele_proto::control::decode_da_lista::<T>(&frame)
-        .map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))
+    let lido = seele_proto::control::decode_da_lista::<T>(&frame)
+        .map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))?;
+    // Um quadro que decodificou tem ordinal: `decode_da_lista` acabou de lê-lo.
+    let ordinal = seele_proto::control::ordinal_do_quadro(&frame).unwrap_or_default();
+    Ok((ordinal, lido))
 }
 
 /// Um quadro inteiro, com o carimbo no byte 0, **sem decodificar**.

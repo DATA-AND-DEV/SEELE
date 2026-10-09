@@ -21,14 +21,15 @@
 //! teste de integração dos bytes-ouro precisa dos nomes.
 //!
 //! Mora aqui também a tabela de **em que número cada variante nasceu**
-//! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`]): o portão que decide o
+//! ([`desde`], [`desde_a_razao`], [`desde_o_alerta`], [`desde_a_causa`]): o
+//! portão que decide o
 //! que o servidor pode escrever para um par, e que até a 0.15 era um `match`
 //! com `_` dentro do `seele-server`.
 
 use std::cell::Cell;
 use std::fmt;
 
-use crate::control::{AlertReason, DisconnectReason, ServerMessage};
+use crate::control::{AlertReason, CausaDaRecusa, DisconnectReason, ServerMessage};
 use crate::version::PRIMEIRO_DA_LINHA_UM;
 
 /// Os nomes das variantes do enum `T`, na ordem dos ordinais.
@@ -188,6 +189,21 @@ pub const fn desde_o_alerta(motivo: &AlertReason) -> u8 {
         | AlertReason::ScreenShareOverHostUplink
         | AlertReason::VoiceRoomOverHostUplink { .. }
         | AlertReason::RetencaoApagouHistorico { .. } => PRIMEIRO_DA_LINHA_UM,
+        // Nasceu na 1.0, e puxa o número da causa que leva, como o `Alert`
+        // puxa o do motivo.
+        AlertReason::PedidoRecusado { causa, .. } => {
+            maior(PRIMEIRO_DA_LINHA_UM, desde_a_causa(causa))
+        }
+    }
+}
+
+/// Em que número uma causa de [`CausaDaRecusa`] passou a existir.
+#[must_use]
+pub const fn desde_a_causa(causa: &CausaDaRecusa) -> u8 {
+    match causa {
+        CausaDaRecusa::NaoExiste | CausaDaRecusa::NomeTomado | CausaDaRecusa::FalhaDoServidor => {
+            PRIMEIRO_DA_LINHA_UM
+        }
     }
 }
 
@@ -306,6 +322,11 @@ mod tests {
                 variantes::<DisconnectReason>(),
             ),
             ("desde_o_alerta", "AlertReason", variantes::<AlertReason>()),
+            (
+                "desde_a_causa",
+                "CausaDaRecusa",
+                variantes::<CausaDaRecusa>(),
+            ),
         ] {
             let corpo = corpo_da_tabela(tabela);
             assert!(
