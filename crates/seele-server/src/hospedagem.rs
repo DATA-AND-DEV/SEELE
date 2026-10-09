@@ -398,17 +398,17 @@ impl Hospedagem {
         let mut convite = seele_proto::uri::Convite::novo(primeiro)
             .com_alternativos(resto.to_vec())
             .com_impressao_digital(self.impressao_digital());
-        // **A versão que hospeda vai no link** — ADR 0046. É o único canal que
+        // **A versão do servidor vai no link** — ADR 0046, com as duas
+        // numerações da 0.16 (spec-mestre, §3, item 22). É o único canal que
         // chega a quem vai entrar **antes** de qualquer aperto de mão, e é
-        // nessa janela que o launcher precisa decidir: um servidor de uma
-        // versão anterior pode falar um protocolo que o cliente já não alcança,
-        // e aí ele é recusado sem chegar a dizer uma palavra sobre si.
+        // nessa janela que o launcher decide se entra aqui ou abre o app da
+        // linha do servidor (`versoes::para_entrar`, que lê `M.N` como versão
+        // de servidor).
         //
-        // Um build feito à mão não tem carimbo e não põe nada. Quem receber
-        // esse link segue como sempre seguiu — tenta com o que tem.
-        if let Some(versao) = Self::versao_desta_build() {
-            convite = convite.com_versao(versao);
-        }
+        // Até a 0.15 era o carimbo da build do app, e um build feito à mão não
+        // punha nada. A versão do servidor é fato do protocolo, e todo build
+        // a sabe.
+        convite = convite.com_versao(seele_proto::version::VERSAO_DO_SERVIDOR);
         // O bilhete de encontro só entra quando o degrau 4 deu — e ele só é
         // tentado quando os de cima não deram. Um servidor alcançável de fora não
         // põe ponto de encontro nenhum no link de ninguém.
@@ -420,18 +420,6 @@ impl Hospedagem {
             Some(bilhete) => convite.com_bilhete(bilhete).to_string(),
             None => convite.to_string(),
         }
-    }
-
-    /// A versão que carimbou esta build, quando o empacotamento a carimbou.
-    ///
-    /// A mesma fonte do `seeled --versao` e do `Hello` do cliente: a variável
-    /// que `empacotar/` e o workflow põem no ambiente ao compilar. `None` num
-    /// build feito à mão, e **dizer nada é melhor que inventar um número** —
-    /// um link anunciando uma versão que não existe manda o launcher procurar
-    /// no catálogo algo que ninguém publicou.
-    #[must_use]
-    pub fn versao_desta_build() -> Option<&'static str> {
-        option_env!("SEELE_VERSAO")
     }
 
     /// O mesmo convite, com um **nome público** no lugar do endereço numérico.
@@ -717,14 +705,15 @@ mod tests {
         );
     }
 
-    /// O link diz que versão hospeda — quando esta build sabe qual é.
+    /// **O link diz a versão do servidor**, e não a do app (spec-mestre da
+    /// 0.16, §3, item 22): `v=1.0`, de `VERSAO_DO_SERVIDOR`.
     ///
-    /// **Num build de teste ela não sabe**, e é isso que este teste fixa: sem
-    /// o carimbo do empacotamento, o link sai sem `v=` em vez de sair com um
-    /// número inventado. Um link anunciando uma versão que não existe manda o
-    /// launcher de quem recebe procurar no catálogo algo que ninguém publicou.
+    /// Até a 0.15 o `v=` era o carimbo da build do app, e um build sem carimbo
+    /// não punha nada. Com as duas numerações, quem recebe o link precisa saber
+    /// **que servidor** vai encontrar, e isso é fato do protocolo, que todo
+    /// build sabe: um build feito à mão também anuncia o Servidor 1.0.
     #[tokio::test]
-    async fn o_link_so_anuncia_a_versao_quando_esta_build_tem_carimbo() {
+    async fn o_link_anuncia_a_versao_do_servidor() {
         // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
         let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
         let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
@@ -735,14 +724,20 @@ mod tests {
 
         assert_eq!(
             lido.versao.as_deref(),
-            Hospedagem::versao_desta_build(),
-            "o que o link anuncia tem de ser exatamente o carimbo desta build, \
-             e nada quando não há carimbo"
+            Some(seele_proto::version::VERSAO_DO_SERVIDOR),
+            "o link não anuncia a versão do servidor: {link}"
         );
-        if Hospedagem::versao_desta_build().is_none() {
-            assert!(
-                !link.contains("&v="),
-                "sem carimbo, o link não pode trazer o parâmetro vazio: {link}"
+        assert!(link.contains("v=1.0"), "{link}");
+        // E os links derivados levam o mesmo.
+        for derivado in [
+            hospedagem.convite_com_nome(Some("casa.exemplo")),
+            hospedagem.convite_com_token("a".repeat(43).as_str()),
+        ] {
+            let lido = seele_proto::uri::analisar(&derivado).expect("o derivado analisa");
+            assert_eq!(
+                lido.versao.as_deref(),
+                Some(seele_proto::version::VERSAO_DO_SERVIDOR),
+                "{derivado}"
             );
         }
     }

@@ -2333,40 +2333,20 @@ async fn um_parfalhou_depois_do_unwatch_nao_faz_o_servidor_voltar_a_mandar_a_tel
     Ok(())
 }
 
-/// Quanto tempo se drena a fila de uma sessão que já acabou, antes de exigir
-/// silêncio dela.
+/// O próximo aviso **que já está na fila**, sem esperar: `None` é a fila vazia.
 ///
-/// Prazo fixo, e **não** «até o canal ficar quieto» como
-/// [`maior_seq_ja_enfileirado`] faz. Depois de `sair()` os dois desfechos do
-/// canal de avisos são opostos e os dois têm de caber neste laço: com o
-/// caminho do par derrubado não sobra remetente nenhum, e `Enlace::proximo`
-/// passa a devolver `Encerrado` **na hora, para sempre** — um laço que só
-/// desistisse por silêncio nunca desistiria. Com o caminho vivo, ao contrário,
-/// os quadros continuam vindo. Um prazo cobre os dois.
-const DRENAGEM_DEPOIS_DO_FIM: Duration = Duration::from_millis(300);
-
-/// Drena os avisos de uma sessão que já acabou, e devolve o maior `seq` desta
-/// tela que ainda estava na fila.
-///
-/// Irmão de [`maior_seq_ja_enfileirado`] para depois do fim — ver
-/// [`DRENAGEM_DEPOIS_DO_FIM`] para por que o critério de parada tem de ser
-/// outro. A pausa do braço `Ok` é o que impede este laço de virar espera
-/// ocupada quando o canal responde `Encerrado` sem custo nenhum.
-async fn drenar_depois_do_fim(enlace: &mut Enlace, screen: ScreenId) -> Option<u32> {
-    let mut maior = None;
-    let fim = Instant::now() + DRENAGEM_DEPOIS_DO_FIM;
-    while Instant::now() < fim {
-        match tokio::time::timeout(Duration::from_millis(20), enlace.proximo()).await {
-            Ok(Aviso::TelaQuadro { tela, bytes, .. }) if tela == screen => {
-                if let Some(seq) = seq_de(&bytes) {
-                    maior = Some(maior.map_or(seq, |atual: u32| atual.max(seq)));
-                }
-            }
-            Ok(_) => tokio::time::sleep(Duration::from_millis(5)).await,
-            Err(_) => {}
-        }
-    }
-    maior
+/// Prazo zero, e sem o orçamento cooperativo do `tokio`
+/// (`tokio::task::unconstrained`): o `None` tem de querer dizer fila vazia, e
+/// nada mais. Medido no `tokio` 1.53.1 sem o embrulho: 500 avisos de 500 lidos
+/// em prazo zero numa volta só, no corpo do teste e numa tarefa — com o
+/// orçamento gasto, o `Timeout` devolve `Pending`, a tarefa cede e a leitura
+/// continua, em vez de devolver `Elapsed`. O embrulho tira do teste a
+/// dependência desse detalhe do `Timeout`: se ele mudar, uma fila cheia não
+/// vira «a fila esvaziou».
+async fn ja_na_fila(enlace: &mut Enlace) -> Option<Aviso> {
+    tokio::task::unconstrained(tokio::time::timeout(Duration::ZERO, enlace.proximo()))
+        .await
+        .ok()
 }
 
 /// Põe o par a servir esta tela de verdade, e devolve o maior `seq` provado.
@@ -2746,6 +2726,14 @@ async fn quem_empresta_saindo_da_sala_nao_deixa_quem_estava_atras_dele_sem_image
 /// recebendo. É a mesma forma de
 /// [`um_unwatch_derruba_o_caminho_do_par_e_a_imagem_para`], aplicada ao fim da
 /// sessão inteira em vez de ao fim de uma tela.
+///
+/// # E a ordem, antes do silêncio
+///
+/// Desde a pendência 50, `sair` espera o motor se despedir, e a despedida
+/// segura o motor de pé enquanto o fechamento sai. Um caminho de par vivo
+/// nesse intervalo escreveria quadros **atrás** do `Encerrado`, na mesma fila.
+/// Por isso a fila é lida em ordem, logo depois de `sair`, sem drenar nada: o
+/// `Encerrado` tem de estar lá, e nenhum quadro desta tela depois dele.
 #[tokio::test(flavor = "multi_thread")]
 async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result<()> {
     let _vaga = vaga::minha();
@@ -2762,16 +2750,42 @@ async fn uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para() -> Result
     println!("o par está servindo até o quadro {piso:?}; agora quem assiste sai da sessão");
 
     assiste.sair().await;
-    esperar(&mut assiste, "o fim da sessão chegar à casca", |aviso| {
-        matches!(aviso, Aviso::Encerrado(_)).then_some(())
-    })
-    .await?;
 
-    // **Drenar antes de afirmar.** O canal de avisos é FIFO e o par entregou
-    // quadros até o instante do pedido; exigir silêncio sem esvaziar a fila
-    // seria falhar por causa de imagem que já tinha chegado.
-    let ultimo = drenar_depois_do_fim(&mut assiste, screen).await;
-    println!("a fila de quem saiu esvaziou no quadro {ultimo:?}");
+    // **Na ordem da fila, e sem drenar.** `sair` volta depois de o motor ter
+    // voltado, então tudo o que a sessão ia dizer já está na fila, lida em
+    // prazo zero: os quadros que o par entregou até o pedido e, por último, o
+    // `Encerrado`. A versão anterior drenava a fila por 300 ms depois do fim e
+    // só então exigia silêncio — um quadro que entrasse **depois** do
+    // `Encerrado` era drenado junto com os de antes, e a ordem nunca era
+    // provada.
+    let mut antes_do_fim = 0_usize;
+    loop {
+        match ja_na_fila(&mut assiste).await {
+            Some(Aviso::Encerrado(_)) => break,
+            Some(_) => antes_do_fim += 1,
+            None => panic!(
+                "a fila de quem saiu esvaziou antes do `Encerrado`, depois de {antes_do_fim} \
+                 avisos: `sair` voltou antes de o motor dizer que a sessão acabou"
+            ),
+        }
+    }
+    println!("{antes_do_fim} avisos vieram antes do `Encerrado` na fila de quem saiu");
+    // E o que estiver atrás dele, ainda em prazo zero. Um `Encerrado` de novo é
+    // o canal fechado — ninguém mais escreve nele, e não há o que ler — e a
+    // fila vazia deixa o resto para o silêncio logo abaixo.
+    loop {
+        match ja_na_fila(&mut assiste).await {
+            Some(Aviso::TelaQuadro { tela, bytes, .. }) => assert!(
+                tela != screen,
+                "o quadro {:?} estava na fila de quem saiu **depois** do `Encerrado`: a \
+                 despedida avisou o fim com o caminho do par de pé, e a casca recebe imagem de \
+                 uma sessão que ela mesma fechou",
+                seq_de(&bytes)
+            ),
+            Some(Aviso::Encerrado(_)) | None => break,
+            Some(_) => {}
+        }
+    }
 
     // E agora o silêncio, com a transmissão comprovadamente no ar.
     let fim = Instant::now() + SILENCIO_PARA_PROVAR;
@@ -3519,7 +3533,9 @@ const SILENCIO_DA_QUEDA: Duration = Duration::from_secs(2);
 /// O canal de avisos é FIFO e a bateria começa **quatorze segundos** depois do
 /// corte: o que estava em voo no instante do cancelamento ainda está na fila, e
 /// exigir silêncio sem esvaziá-la mediria a fila e não o caminho. Fixo, e não
-/// «até ficar quieto», pelo motivo que [`DRENAGEM_DEPOIS_DO_FIM`] documenta.
+/// «até ficar quieto»: com o caminho do par vivo — o defeito que o teste
+/// procura — os quadros continuam vindo, e um laço que só desistisse por
+/// silêncio nunca desistiria.
 const DRENAGEM_ANTES_DO_SILENCIO: Duration = Duration::from_millis(500);
 
 /// **A conexão de quem assiste morre sozinha, o par continua vivo, e o caminho

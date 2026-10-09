@@ -1689,9 +1689,9 @@ Talvez também:
 
 # Fecho
 
-## Lote Z — o fecho das pendências 49, 50 e 51, e o registro do que a frente fechou
+## Lote Z — o fecho das pendências 49, 50 e 51, o registro do que a frente fechou, e o conserto da pendência 56
 
-**Depois da onda 6.** Só documentos. Todos os commits com assunto «docs: …».
+**Depois da onda 6.** Documentos, mais o conserto da pendência 56 (o item 7), que é código só de teste. Os commits de documento têm assunto «docs: …»; os do item 7, não.
 
 **Na 0.16.** O Z antigo encolheu:
 - a regra «Quem ganha cadeia» e o placeholder do G1 foram feitos em `f54f4a7`;
@@ -1701,7 +1701,8 @@ Talvez também:
 
 **Arquivos:**
 - `docs/pendencias.md`;
-- `docs/superpowers/plans/2026-09-29-1.0-indice.md`.
+- `docs/superpowers/plans/2026-09-29-1.0-indice.md`;
+- os do item 7, listados lá.
 
 **A regra:** nunca escrever «fechado» sem o hash do commit que fecha. As linhas históricas das pendências não se reescrevem: acrescenta-se.
 
@@ -1738,11 +1739,12 @@ Talvez também:
 - **O 28:** absorvido pela API 6 (F3).
 - **24 e 25:** ficam, porque são de outros repositórios.
 
-### 4. As pendências 52, 53, 54 e 55
+### 4. As pendências 52, 53, 54, 55 e 56
 - **52:** decidida em 08/10 (D-52), e fechada com os hashes do I.
 - **53:** fechada com os hashes do P53.
 - **54:** fechada com o hash do P54.
 - **55:** vai com o Plano 5. Corrigir o nome: a função é `Batida::preparar`, e não `Encontro::preparar`.
+- **56:** fechada com os hashes do item 7.
 
 ### 5. O índice da 1.0
 - **:22, a linha do Plano 6:** troca «o m-4 da pendência 49 (`repetir`, ou o contrato de `tocando` escrito na API)» por «o contrato de `tocando` (`api/README.md`, `563bc37`) entra no texto da v6; `repetir` é opção, não condição».
@@ -1760,7 +1762,36 @@ Talvez também:
   - o guarda de `drive → fim_da_sessao` é de texto;
   - o tropeço de aplicar uma imagem divide o `onde` com as recusas.
 
+### 7. Pendência 56: os testes que leem o log perdem linhas quando rodam em paralelo
+Este item entrou por pedido da orquestradora, em 08/10. A pendência foi escrita em `26cda877`, na `versao/0.16`. O mecanismo medido e a lista dos testes expostos estão em `docs/pendencias.md`, na 56. Leia-a antes.
+
+**O mecanismo**, em uma linha: com um despachante só registrado, o interesse de uma linha de log é decidido pela thread que a toca primeiro. Um teste sem captura pode marcar como «nunca» uma linha que outro teste está capturando.
+
+**O conserto que já existe** está no app: `rastro_de_teste::segundo_despachante()`, em `apps/seele-app/src/main.rs` (`1405210b`). É um `OnceLock<tracing::Dispatch>` com `NoSubscriber`, chamado por `capturar`. A prova de ordem forçada dele é `uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada`.
+
+**Um auxiliar por crate**, e não um crate novo:
+- **`seele-core`:** `Rastro::a_partir_de` (`crates/seele-core/src/rastro_de_teste.rs`) passa a chamar um `segundo_despachante()`. Isso conserta num lugar só os cerca de 24 testes do `Rastro` (`enlace.rs`, `encontro.rs`, `anexo_no_disco.rs`, `par.rs`, `tofu.rs`, `client.rs`).
+- **`seele-server`:** um `#[cfg(test)] pub(crate) mod rastro_de_teste` com o mesmo auxiliar, usado por:
+  - `admissao.rs`;
+  - `mods/pedidos.rs`;
+  - `alcance/encontro.rs`, cujo `de_info` devolve um `DefaultGuard`;
+  - `recepcao.rs`, se o arquivo já estiver na `versao/0.16` quando o Z começar. Ele é da F7 e, em 08/10, só existia no `0.16/sala`. Hoje o conserto dele é um truque local (`3fc72adb`), que passa a usar o auxiliar.
+- **`seele-ffi`:** `o_log_da_trilha_diz_qual_candidato_deu_o_que` (`lib.rs`) chama uma cópia local.
+
+**A prova:** cada cópia leva a prova de ordem forçada do app, adaptada ao crate. Tirar o `segundo_despachante()` tem de reprová-la.
+- Rode a prova algumas vezes **sem** o conserto, para ver que ela não depende de sorte.
+- Confira com `grep -rn "subscriber::with_default\|subscriber::set_default" crates/` que nenhum teste que lê o log ficou sem o auxiliar. A lista da pendência não foi medida teste a teste.
+
+**Comandos:**
+- `perl -e 'alarm 600; exec @ARGV' cargo test -p seele-core --lib`;
+- o mesmo com `-p seele-server --lib` e com `-p seele-ffi --lib`;
+- fmt e o clippy dos três crates.
+
 **NÃO fazer:**
+- não trocar a forma de captura dos testes, só garantir o segundo despachante;
+- não mexer no auxiliar do app, que é a referência.
+
+**NÃO fazer, no lote todo:**
 - não acrescentar cadeia ao G1;
 - não escrever «fechado» sem hash;
 - não mexer no `release.yml`.

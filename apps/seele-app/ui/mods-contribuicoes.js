@@ -317,10 +317,11 @@ class RegistroDeContribuicoes {
       // **No registro de quem hospeda, e não no console da janela**: num app
       // empacotado o console não é lugar nenhum. `registrarNoAnfitriao` é de
       // `base.js`, que carrega depois deste arquivo; esta chamada só acontece
-      // ao revogar, quando tudo já está de pé, e ela nunca lança.
+      // ao revogar, quando tudo já está de pé, e ela nunca lança. O ponto vai
+      // entre «», como nas outras recusas de contribuição, em `base.js`.
       registrarNoAnfitriao(
         "recusa-de-mod",
-        `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto} não saiu — ${String(falha?.message ?? falha)}`,
+        `${contribuicao.mod}: o conteúdo de «${contribuicao.ponto}» não saiu — ${String(falha?.message ?? falha)}`,
         "aviso",
         contribuicao.mod,
       );
@@ -477,8 +478,16 @@ class RegistroDeContribuicoes {
    * pessoa não tem como ver. O §6 pede os dois juntos.
    *
    * A linha é a da disputa do **alvo vazio** — a do cartão de todo mundo —,
-   * salvo em dois casos:
+   * salvo em três casos:
    *
+   * - o **automático misto**: sem escolha, alguém vence o alvo vazio e outro
+   *   MOD vence algum alvo — mod/a no cartão de todos, mod/b com mais
+   *   prioridade no da pessoa 2. A disputa do alvo vazio diz só mod/a
+   *   (`escolhido`); a soma dos alvos é a de `quemPinta`, com a mesma escolha:
+   *   `tambemDesenham` diz quem vence algum outro alvo, fora o escolhido, e
+   *   `preteridos` junta à disputa do alvo vazio quem pediu algum alvo e não
+   *   vence em nenhum (`perderam`), sem ninguém que vença algum alvo. Fora
+   *   deste caso, `tambemDesenham` é vazio;
    * - **ninguém substitui o alvo vazio, e esta máquina escolheu.** A disputa
    *   dali não tem candidata, e `escolherSubstituicao` sai antes de olhar a
    *   escolha; a linha diz então a escolha gravada (`preferidos`): o SEELE
@@ -534,6 +543,15 @@ class RegistroDeContribuicoes {
       const escolhidoDePe = Boolean(semCandidata)
         && !desenhaQuemDeclarou
         && estaDePe?.(semCandidata) === true;
+      // **O automático misto** (pendência 49, item 9). Sem escolha, e com
+      // alguém no alvo vazio, a disputa dali diz só quem desenha o cartão de
+      // todos: um MOD com mais prioridade na pessoa 2 a desenha, e um que pediu
+      // só a pessoa 3 e perdeu lá não estava em disputa nenhuma do alvo vazio.
+      // A soma dos alvos é a de `quemPinta`, com a mesma escolha — a da aba
+      // DIAGNÓSTICO, na mesma tela.
+      const pelosAlvos = substituivel && escolha === "" && disputa.escolhida
+        ? this.quemPinta(ponto, "", estaDePe)
+        : null;
       linhas.push({
         ponto,
         mods,
@@ -545,7 +563,20 @@ class RegistroDeContribuicoes {
         substituem,
         quantas: todas.length,
         escolhido: disputa.escolhida?.mod ?? (desenhaQuemDeclarou ? semCandidata : ""),
-        preteridos: [...new Set(disputa.preteridas.map((c) => c.mod))],
+        // Quem desenha algum outro alvo, fora o escolhido: só no automático
+        // misto, e vazio em todo o resto.
+        tambemDesenham: pelosAlvos
+          ? pelosAlvos.substitui.filter((mod) => mod !== disputa.escolhida.mod)
+          : [],
+        // A disputa do alvo vazio e, no automático misto, quem pediu algum
+        // alvo e não vence em nenhum (`perderam`, de `quemPinta`). E, ali,
+        // ninguém que vença algum alvo: quem perde o lugar de todos e vence o
+        // de alguém desenha, e dizê-lo também entre quem não recebeu era a
+        // gestão se desmentindo na mesma linha (M1 da revisão do K3).
+        preteridos: [...new Set([
+          ...disputa.preteridas.map((c) => c.mod),
+          ...(pelosAlvos?.perderam ?? []),
+        ])].filter((mod) => !pelosAlvos?.substitui.includes(mod)),
         // **Os três estados, para a gestão poder desenhá-los** — R5.
         //
         // `escolhido` vazio significava duas coisas: «ninguém substitui» e
@@ -586,9 +617,11 @@ class RegistroDeContribuicoes {
    * Quem pinta um ponto **agora**, somando todos os alvos — só leitura.
    *
    * Para «quem pinta cada lugar», na gestão de MODs (fase M1 da
-   * especificação de 23/09). `resumo` responde pelo alvo vazio, e por isso não
-   * via a substituição que um MOD registra por pessoa: o avatar do PERFIS é
-   * sempre por pessoa, e a gestão dizia que ninguém o desenhava.
+   * especificação de 23/09). `resumo` respondia só pelo alvo vazio, e por isso
+   * não via a substituição que um MOD registra por pessoa: o avatar do PERFIS
+   * é sempre por pessoa, e a gestão dizia que ninguém o desenhava. Hoje ele
+   * pergunta a esta soma nos casos que não cabem no alvo vazio — o caso
+   * parcial e o automático misto.
    *
    * A decisão é a de `escolherSubstituicao`, chamada para cada alvo que tem
    * contribuição: nenhuma regra nova, e nada muda no registro.
