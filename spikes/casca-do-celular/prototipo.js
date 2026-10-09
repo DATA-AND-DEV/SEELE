@@ -1012,7 +1012,7 @@ function telaSessao() {
       onclick: () => mudar({ aba: a, sub: null, mod: estado.mod === "pagina" ? null : estado.mod, teclado: false }),
       // A aba AJUSTES é o caminho para desligar um MOD (núcleo): ela lê as
       // cores do produto, e o tema não a alcança.
-      id: `aba-${a}`, "data-nucleo": a === "ajustes" ? "" : null,
+      id: `cel-aba-${a}`, "data-nucleo": a === "ajustes" ? "" : null,
     }, f[a], a === "conversa" && h("span", { class: "cel-aba-conta", "aria-label": "15 novas em outros canais", text: "15" })))),
     estado.chamada && estado.sala && chamada(),
     estado.queda && faixaDaQueda(),

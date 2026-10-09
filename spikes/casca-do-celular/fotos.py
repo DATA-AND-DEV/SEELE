@@ -159,7 +159,7 @@ NUCLEO = r"""
     return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const razao = (a, b) => { const [x, y] = [luz(rgb(a)), luz(rgb(b))].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
   const out = {};
-  for (const id of ["voz-mudo", "voz-surdo", "voz-sair", "selo-seguro", "selo-seguro-chamada", "aba-ajustes", "linha-mods"]) {
+  for (const id of ["voz-mudo", "voz-surdo", "voz-sair", "selo-seguro", "selo-seguro-chamada", "cel-aba-ajustes", "linha-mods"]) {
     const el = document.getElementById(id);
     if (!el) continue;
     const s = getComputedStyle(el);
