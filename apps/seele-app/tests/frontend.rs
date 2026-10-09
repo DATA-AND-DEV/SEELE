@@ -16539,3 +16539,72 @@ fn todo_motivo_de_aviso_tem_frase_na_pagina() {
         );
     }
 }
+
+/// As capacidades de cada API, as mesmas na casca e no núcleo.
+///
+/// O comentário de `CAPACIDADES_POR_API`, em `base.js`, citava este teste
+/// desde 26ad0c2, e ele não existia: o `git log -S` só achava o comentário
+/// (rascunho da API 6, §2 e §13). A casca confere cada mensagem de um MOD contra
+/// `CAPACIDADES_POR_API`, e o prelúdio monta o `SeeleUI` a partir de
+/// `capacidades_da_api`. Uma capacidade a mais de um lado é o anfitrião
+/// recusando o que o prelúdio ofereceu, ou aceitando o que ele escondeu — e a
+/// API 6 muda as duas listas no corte.
+///
+/// Os dois mapas inteiros são comparados, API por API: uma API ou uma
+/// capacidade que só um dos lados tem reprova.
+#[test]
+fn a_casca_confere_as_mesmas_capacidades_que_o_nucleo() {
+    use std::collections::BTreeMap;
+
+    fn nomes(lista: &str) -> Vec<String> {
+        lista
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect()
+    }
+
+    let rust = read("../../crates/seele-proto/src/mods.rs");
+    let corpo = rust
+        .split_once("pub fn capacidades_da_api(api: u32)")
+        .and_then(|(_, resto)| resto.split_once("_ => &[]"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`capacidades_da_api` mudou de forma em seele-proto");
+    // `5 => &[ "regiao", … ],`: o número de cada braço é o último termo antes
+    // de `=> &[`, e os nomes vão até o `]`.
+    let pedacos: Vec<&str> = corpo.split("=> &[").collect();
+    let mut do_nucleo: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for par in pedacos.windows(2) {
+        let api = par[0]
+            .split_whitespace()
+            .last()
+            .expect("um braço de `capacidades_da_api` sem número");
+        let lista = par[1].split(']').next().unwrap_or("");
+        do_nucleo.insert(api.to_owned(), nomes(lista));
+    }
+    assert!(
+        !do_nucleo.is_empty(),
+        "nenhum braço lido de `capacidades_da_api`: o guarda não conferiria nada"
+    );
+
+    let casca = without_comments(&read("ui/base.js"));
+    let espelho = casca
+        .split_once("const CAPACIDADES_POR_API = Object.freeze({")
+        .and_then(|(_, resto)| resto.split_once("});"))
+        .map(|(corpo, _)| corpo.to_owned())
+        .expect("`CAPACIDADES_POR_API` sumiu de base.js");
+    // `5: Object.freeze([ "regiao", … ]),`, numa linha ou em várias.
+    let mut da_casca: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for entrada in espelho.split("]),") {
+        if let Some((api, lista)) = entrada.split_once(": Object.freeze([") {
+            da_casca.insert(api.trim().to_owned(), nomes(lista));
+        }
+    }
+
+    assert_eq!(
+        do_nucleo, da_casca,
+        "as capacidades de cada API divergem entre `capacidades_da_api` (seele-proto) e \
+         `CAPACIDADES_POR_API` (base.js): o anfitrião recusaria o que o prelúdio ofereceu, \
+         ou aceitaria o que ele escondeu"
+    );
+}

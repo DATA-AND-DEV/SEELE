@@ -1152,7 +1152,7 @@ async fn admitir(
     // Uma segunda tomada do mutex, e não um campo a mais na `Account`: são duas
     // perguntas sobre coisas diferentes — o que esta pessoa é, e o que este
     // servidor é — e o aperto de mão já toma este mutex mais de uma vez.
-    let (nome_do_server, icone_do_server, icones_das_pessoas, identidade_da_instancia) = {
+    let (nome_do_server, icone_do_server, icones_das_pessoas, identidade_da_instancia, tema) = {
         let guard = server.persistence.lock().await;
         // **Qual servidor é este**, e não por onde se chegou a ele. Lida no
         // mesmo mutex que o nome, pela mesma razão: são perguntas sobre o
@@ -1182,8 +1182,16 @@ async fn admitir(
             tracing::warn!(%erro, "não deu para ler as imagens de perfil");
             Vec::new()
         });
+        // O tema em vigor (rascunho da API 6, §9), na mesma tomada: é uma
+        // pergunta sobre o servidor, como o nome e o ícone. Um banco que não
+        // responde deixa quem entra sem tema, e não do lado de fora — uma
+        // aparência nunca custa a conexão.
+        let tema = crate::persistence::tema::em_vigor(&guard).unwrap_or_else(|erro| {
+            tracing::warn!(%erro, "não deu para ler o tema do servidor");
+            None
+        });
 
-        (nome, icone, imagens, identidade)
+        (nome, icone, imagens, identidade, tema)
     };
 
     let (fresh_ssrc, session_id) = registry.issue();
@@ -1241,6 +1249,32 @@ async fn admitir(
             // estado entre servidores, e uma sessão sem ela funciona — só não
             // distingue.
             tracing::warn!(%error, "não deu para anunciar a identidade deste servidor");
+        }
+    }
+
+    // **O tema do servidor, sempre, logo depois do `Instancia`** (rascunho da
+    // API 6, §9) — inclusive `None` quando não há tema. É este quadro que diz à
+    // casca que o estado do tema é conhecido, e ela o aplica antes de desenhar
+    // a sessão; calar quando não há tema deixaria «sem tema» e «ainda não sei»
+    // iguais, e a casca teria de esperar por um quadro que não vem.
+    //
+    // Depois do `Instancia`, e não antes: a escolha de quem vê («o SEELE
+    // desenha» para a aparência) é por servidor, e é a identidade que diz qual.
+    //
+    // Uma falha ao escrever é dita e não derruba a entrada, como a do
+    // `Instancia`: a sessão funciona sem tema.
+    //
+    // Um tema guardado que não passa na conferência do protocolo vira `None`,
+    // pela regra do ícone logo abaixo: quem tem o arquivo do banco tem um
+    // `sqlite3`. Mas o quadro **sai**, porque é ele que a casca espera.
+    let mut quadro_do_tema = ServerMessage::TemaMudou { tema };
+    if let Err(erro) = quadro_do_tema.validate() {
+        tracing::warn!(%erro, "o tema guardado não é um tema que o fio leva; seguindo sem ele");
+        quadro_do_tema = ServerMessage::TemaMudou { tema: None };
+    }
+    if entende_a_mensagem(&quadro_do_tema, version) {
+        if let Err(error) = frame::write_em(send, version, &quadro_do_tema).await {
+            tracing::warn!(%error, "não deu para mandar o tema do servidor a quem entra");
         }
     }
 
@@ -5361,6 +5395,10 @@ fn translate(
         Event::ServerIconChanged { icon } => {
             Some(ServerMessage::ServerIconChanged { icon: icon.clone() })
         }
+        // A todos, inclusive à janela de quem pediu a troca: ela também desenha
+        // a sessão, e é por este quadro que a casca sabe que o tema publicado é
+        // outro (rascunho da API 6, §9).
+        Event::TemaMudou { tema } => Some(ServerMessage::TemaMudou { tema: tema.clone() }),
 
         // Acted on by the connection they name, in the loop, and carrying
         // nothing for anybody else. A move is visible to everybody as the

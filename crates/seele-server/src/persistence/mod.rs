@@ -34,6 +34,7 @@ pub mod messages;
 pub mod mods;
 pub mod schema;
 pub mod subida;
+pub mod tema;
 
 /// O banco de um cliente que hospeda, na pasta dele, com o nome de hoje.
 ///
@@ -562,6 +563,10 @@ mod tests {
                      -- comentário acima escreve: ela cria duas tabelas, e o
                      -- replay refaz o `CREATE TABLE` de cada uma. `mod_data`
                      -- primeiro porque ela referencia `mods`.
+                     --
+                     -- A da migração 15 (o tema do servidor) antes das duas,
+                     -- porque ela também referencia `mods`.
+                     DROP TABLE temas_dos_mods;
                      DROP TABLE mod_data;
                      DROP TABLE mods;
 

@@ -322,7 +322,8 @@ pub const MAX_CARGA_DE_MOD: usize = 12 * 1024;
 /// declara, o produto mede (ADR 0029).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TemaDoServidor {
-    /// O MOD que pediu o tema, que é quem tem o ponto `servidor.aparencia`.
+    /// O MOD que declarou o tema: o que o manifesto autoriza (`"tema": true`)
+    /// e quem administra escolheu, um por servidor (rascunho da API 6, §9).
     pub mod_id: String,
     /// O JSON do tema, como o `v6.json` o define. Até [`MAX_CARGA_DE_MOD`].
     pub valores: String,
