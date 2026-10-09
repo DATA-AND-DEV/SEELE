@@ -60,6 +60,127 @@ function tintasDoTitulo() {
   return { tintas, folga, lineHeight: estilo.lineHeight };
 }
 
+// --------------------------------------------------------------------------
+// Lote R da F5: a volta que aceita os MODs leva a credencial da tentativa
+// --------------------------------------------------------------------------
+//
+// **O caso.** Um servidor fechado por convite, com a portaria desligada e um
+// MOD exigido. A primeira batida para na pergunta dos MODs; a pessoa aceita, e a
+// volta saía sem o convite — o servidor respondia CREDENCIAL RECUSADA. O lado do
+// servidor a F1 consertou em `d0b98b9c`: recusar os MODs deixa o convite
+// intacto. Esta cena prova o lado do app.
+//
+// **O servidor de mentira responde como o de verdade, na mesma ordem.** O
+// segredo é conferido antes de tudo (`Politica::avaliar`, sem memória com a
+// portaria desligada), depois vêm os MODs, e o convite é gasto só quando a
+// pessoa entra. A volta sem o convite recebe `CredentialRejected` aqui pelo
+// mesmo motivo que recebe lá.
+//
+// **A credencial é gerada aqui** e não é de servidor nenhum. Ela é procurada no
+// fim em todo lugar onde não pode estar: no armazenamento da página, no DOM, no
+// console e em qualquer comando que não seja o `connect`.
+
+/** O convite desta cena: um texto qualquer, que só esta bancada conhece. */
+const CONVITE_R = `convite-da-bancada-${process.pid}-${Date.now()}`;
+const ALVO_R = '192.0.2.7:8384';
+const MOD_R = {
+  id: 'fulano/exemplo', version: '1.0.0', hash: 'ab'.repeat(32),
+  repo: 'https://github.com/seele/exemplo', reach: ['ler'], no_servidor: false,
+};
+
+/** Os `connect` que a página mandou até agora, com os argumentos. */
+function conectsFeitos(page) {
+  return page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').map(c => c.args));
+}
+
+/** Uma batida nova, a partir da tela de entrada, com o convite colado. */
+async function baterComOConvite(page) {
+  await page.evaluate(([alvo, convite]) => {
+    window.testServidor = { aceitou: false, gasto: false };
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    // O caminho do diálogo de servidores depois de `analisar_convite`: o alvo e
+    // o token do link, na mesma chamada.
+    irParaOServidor(alvo, null, convite);
+  }, [ALVO_R, CONVITE_R]);
+  try {
+    await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 });
+  } catch {
+    const naEntrada = await page.evaluate(() => document.getElementById('boot-erro').textContent);
+    assert.fail(`a batida com o convite não chegou à pergunta dos MODs — a entrada diz «${naEntrada}»`);
+  }
+}
+
+async function aVoltaDoAceiteLevaACredencial(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  const consoles = []; page.on('console', m => consoles.push(m.text()));
+  await page.addInitScript(({ table, convite, mod, snapshot }) => {
+    window.testTable = table; window.testCalls = []; window.testAtraso = {};
+    window.testServidor = { aceitou: false, gasto: false };
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        window.testCalls.push({ cmd, args });
+        if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
+        if (cmd === 'aceitar_mods') window.testServidor.aceitou = true;
+        if (cmd === 'instalar_mod_do_catalogo') window.testTable.mods_instalados = [{ id: mod.id, hash: mod.hash }];
+        if (cmd === 'connect') {
+          const servidor = window.testServidor;
+          const recusa = (error) => { throw { error, trail: [] }; };
+          if (args.joinSecret !== convite || servidor.gasto) recusa('CredentialRejected');
+          if (!servidor.aceitou) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-r' } });
+          servidor.gasto = true;
+          return {
+            snapshot,
+            veredito: { FirstContactVerified: { fingerprint: 'cd'.repeat(32) } },
+            geracao: window.testCalls.length,
+          };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      mods_instalados: [{ id: MOD_R.id, hash: MOD_R.hash }],
+    }),
+    convite: CONVITE_R, mod: MOD_R, snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  // ---- 1. A volta que aceita os MODs leva a credencial, e entra.
+  await baterComOConvite(page);
+  assert.equal((await conectsFeitos(page))[0]?.joinSecret, CONVITE_R,
+    'a primeira batida não levou o convite do link, e esta cena não mede nada');
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= 2, null, { timeout: 3000 });
+  const volta = (await conectsFeitos(page))[1];
+  assert.equal(volta.joinSecret, CONVITE_R,
+    `a volta que aceita os MODs saiu sem a credencial da tentativa (joinSecret ${JSON.stringify(volta.joinSecret)}): ` +
+    'num servidor fechado por convite ela recebe CREDENCIAL RECUSADA, e o convite que o servidor guardou intacto não serve para nada');
+  await page.waitForFunction(() => !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
+    .catch(async () => assert.fail(`a volta com a credencial não entrou — a entrada diz «${await page.evaluate(() => $('boot-erro').textContent)}»`));
+
+  // ---- 2. Ela é esquecida ao entrar.
+  assert.equal(await page.evaluate(() => aceitePendente?.credencial ?? null), null,
+    'a credencial da tentativa continuou guardada depois de a pessoa entrar: um convite de uso único já gasto ficou na memória da janela');
+
+  // ---- 3. A reconexão depois de uma sessão que entrou vai sem ela.
+  await page.evaluate(() => mostrarFim('Kicked'));
+  await page.click('#botao-voltar');
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= 3, null, { timeout: 3000 });
+  const reconexao = (await conectsFeitos(page))[2];
+  assert.equal(reconexao.joinSecret ?? null, null,
+    'o RECONECTAR de uma sessão que entrou levou o convite: reenviá-lo é gastar de novo o que já foi gasto');
+
+  assert.deepEqual(erros, [], 'a cena do lote R lançou erro na página');
+  await page.close();
+  return { consoles };
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -266,7 +387,9 @@ function tintasDoTitulo() {
       'a entrada por link lançou erro na página: o que está nesta lista quebrou sem ninguém ver, e a janela de verdade não diz nada a quem a usa');
     await link.close();
 
+    await aVoltaDoAceiteLevaACredencial(browser, server.address().port);
+
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
-  } finally { await browser.close(); server.close(); }
+    console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');  } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

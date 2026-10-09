@@ -37,7 +37,25 @@
 /** Para onde o teclado volta quando o diálogo fecha. */
 let focoAntesDoAceite = null;
 
-/** O que este diálogo está perguntando agora. */
+/**
+ * O que este diálogo está perguntando agora — e a credencial da tentativa que
+ * parou nele.
+ *
+ * **A credencial mora aqui, e só aqui, enquanto a pergunta está aberta** (lote
+ * R da F5). É o token do convite, ou a senha do servidor, com que a batida
+ * chegou: o servidor recusou os MODs **antes** de gastá-lo (`d0b98b9c`, da
+ * F1), e a volta que aceita é a mesma tentativa, que precisa dele para passar
+ * pela porta outra vez. Sem ele, num servidor fechado por convite e sem
+ * portaria, a volta recebia CREDENCIAL RECUSADA.
+ *
+ * Aqui e não num lugar próprio porque a vida dela é a da pergunta: nasce
+ * quando a pergunta abre e morre quando ela fecha, por qualquer porta —
+ * aceitar (que a devolve à volta e fecha), recusar, Escape ou clicar fora. Um
+ * segundo lugar teria de ser esquecido em cada uma dessas portas, e uma porta
+ * esquecida é uma credencial que sobra.
+ *
+ * Só memória: nunca disco, nunca `localStorage`, nunca o console.
+ */
 let aceitePendente = null;
 
 /**
@@ -104,9 +122,10 @@ function linhaDeMod(mod, indice) {
  * @param {string} alvo      o servidor, como a pessoa o digitou
  * @param {Array}  mods      o que veio no anúncio
  * @param {string} conjunto  a identidade do conjunto, para gravar o sim
+ * @param {string|null} credencial  o segredo com que a batida chegou, ou `null`
  */
-async function abrirAceiteDeMods(alvo, mods, conjunto) {
-  aceitePendente = { alvo, conjunto, mods };
+async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
+  aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**
@@ -143,7 +162,14 @@ async function abrirAceiteDeMods(alvo, mods, conjunto) {
   $("mods-recusar").focus();
 }
 
-/** Fecha e devolve o teclado a quem o tinha. */
+/**
+ * Fecha e devolve o teclado a quem o tinha.
+ *
+ * **E esquece a credencial da tentativa**, que mora na pergunta: é esta linha
+ * que a esquece quando a pessoa desiste — recusar, Escape, clicar fora — e
+ * também quando ela aceita, porque `aceitarOsMods` passa por aqui antes da
+ * volta e entrega a credencial só como argumento dela.
+ */
 function fecharAceiteDeMods() {
   $("mods-aceite").hidden = true;
   aceitePendente = null;
@@ -198,10 +224,22 @@ async function aceitarOsMods() {
     return;
   }
 
+  // **A credencial da tentativa vai junto, para o mesmo alvo** — lote R da F5.
+  //
+  // Esta volta não é uma reconexão: é a mesma tentativa, que o servidor recusou
+  // antes de gastar o convite. Ia sem ele, e num servidor fechado por convite e
+  // sem portaria recebia CREDENCIAL RECUSADA — a pessoa aceitava e não entrava.
+  //
+  // Lida da pergunta **agora**, e não no começo desta função: a obtenção acima
+  // leva tempo, e quem fechou a pergunta nesse meio desistiu — a credencial já
+  // foi esquecida, e não é daqui que ela volta. Depois de lida, fechar a
+  // pergunta a esquece; daqui em diante ela existe só como argumento desta
+  // volta, e some com ela, entre a pessoa ou não.
+  const credencial = aceitePendente?.credencial ?? null;
   fecharAceiteDeMods();
   // A mesma porta de sempre. O aceite já está em disco, então esta tentativa
   // passa pelo ponto que recusou a anterior.
-  await conectar();
+  await conectar(alvo, null, credencial);
 }
 
 /**
@@ -277,11 +315,14 @@ async function obterOConjunto(mods) {
  *
  * O mesmo formato de `levarParaAEspera`: quem chama não precisa saber o que
  * aconteceu, só se ainda tem uma linha vermelha para escrever.
+ *
+ * `credencial` é o segredo com que esta batida chegou, e a pergunta o guarda
+ * para a volta que aceita. Ver `aceitePendente`.
  */
-function levarParaOAceiteDeMods(motivo, alvo) {
+function levarParaOAceiteDeMods(motivo, alvo, credencial) {
   const pedido = motivo?.ModsNaoAceitos;
   if (!pedido) return false;
-  abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "").catch((falha) =>
+  abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "", credencial).catch((falha) =>
     console.warn("abrir aceite:", falha),
   );
   return true;

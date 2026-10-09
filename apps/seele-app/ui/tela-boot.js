@@ -30,7 +30,12 @@
  * caminho de troca.
  *
  * Agora o token viaja como argumento de `conectar`, dentro da mesma chamada em
- * que foi lido. Não há o que sobreviver a nada. */
+ * que foi lido. Não há o que sobreviver a nada.
+ *
+ * **Com uma exceção, e ela não troca de servidor** (lote R da F5): a batida que
+ * para na pergunta dos MODs entrega a credencial à pergunta, que a guarda só
+ * na memória enquanto está aberta e a devolve à volta que aceita — para o
+ * mesmo alvo. Ver `aceitePendente`, em `camada-mods.js`. */
 
 /* `desenharVisitados` saiu com o formulário da entrada.
  *
@@ -128,11 +133,20 @@ function deOndeVeio(resposta) {
   };
 }
 
-async function conectar(alvo, apelido, token) {
+async function conectar(alvo, apelido, credencial) {
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
-  // O token **não** é lembrado: um convite de uso único vale uma vez, e
-  // reenviá-lo numa reconexão seria gastar de novo o que já foi gasto.
+  // A credencial — o token do convite, ou a senha do servidor: as duas viajam
+  // no mesmo `join_secret` — **não** é lembrada aqui: um convite de uso único
+  // vale uma vez, e reenviá-lo numa reconexão seria gastar de novo o que já foi
+  // gasto.
+  //
+  // **A volta da mesma tentativa não é uma reconexão** (lote R da F5). Quando
+  // a batida para na pergunta dos MODs, o servidor recusou **antes** de gastar
+  // o convite (`d0b98b9c`, da F1), e a volta que aceita precisa dele: sem ele,
+  // num servidor fechado por convite e sem portaria, ela recebia CREDENCIAL
+  // RECUSADA. Por isso a credencial desta chamada vai para a pergunta, e só
+  // para ela, no `catch` abaixo — e quem a devolve é `aceitarOsMods`.
   if (!ultimoAlvo) {
     // Sem lugar nenhum a que voltar: quem chegou aqui apertou reconectar antes
     // de ter entrado em algum lugar, e o diálogo é onde se escolhe.
@@ -258,7 +272,7 @@ async function conectar(alvo, apelido, token) {
       // lado: a ponte do Tauri converte para camelCase. A confirmação de
       // identidade do mesmo link não passa por aqui: ela ficou no Rust, que é
       // quem confere.
-      joinSecret: token ?? null,
+      joinSecret: credencial ?? null,
     });
     const { snapshot, veredito, geracao } = resposta;
 
@@ -300,7 +314,10 @@ async function conectar(alvo, apelido, token) {
     // ler e responder. Antes desta linha o que acontecia era uma frase
     // vermelha terminando em «a tela ainda não existe neste app», e o servidor
     // ficava inentrável.
-    if (levarParaOAceiteDeMods(motivo, ultimoAlvo ?? "")) {
+    //
+    // A credencial desta tentativa vai junto, e é o único lugar para onde ela
+    // vai: a pergunta a guarda enquanto está aberta e a esquece ao fechar.
+    if (levarParaOAceiteDeMods(motivo, ultimoAlvo ?? "", credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;

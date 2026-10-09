@@ -15052,8 +15052,10 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
     let obtem = corpo
         .find("obterOConjunto")
         .expect("aceitar tem de obter o conjunto que acabou de autorizar");
+    // `conectar(` e não `conectar()`: desde o lote R da F5 a volta leva a
+    // credencial da tentativa, e a chamada tem argumentos.
     let entra = corpo
-        .find("conectar()")
+        .find("conectar(")
         .expect("aceitar continua entrando no servidor");
     assert!(
         obtem < entra,
