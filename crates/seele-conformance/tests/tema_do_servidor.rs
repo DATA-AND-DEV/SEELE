@@ -153,6 +153,17 @@ async fn habilitar(daemon: &Daemon, mods: &[(&str, &str)]) -> Result<String> {
     Ok(seele_server::mods::anuncio::conjunto_exigido(&banco)?.identidade)
 }
 
+/// Quanto um ajudante espera pelo que procura, **no total**.
+///
+/// No total, e não por leitura. O servidor manda quadros o tempo todo (o estado
+/// de cada pessoa, a telemetria), e um prazo por leitura nunca vence enquanto
+/// eles chegam: a primeira versão tinha só esse, e a reversão «sem traduzir o
+/// evento» **pendurou** o teste em vez de reprová-lo (achado da orquestradora,
+/// 09/10). Um teste que trava em vez de reprovar é ele mesmo um defeito: quem
+/// o roda não sabe se esperou o bastante, e uma bateria inteira fica presa
+/// atrás dele.
+const PRAZO: Duration = Duration::from_secs(15);
+
 /// Uma pessoa conectada, e cada `TemaMudou` que ela já leu, na ordem.
 ///
 /// Os temas são guardados por **toda** leitura, e não só pela que os procura:
@@ -190,12 +201,13 @@ impl Pessoa {
     /// `Instancia`, antes de qualquer outra mensagem da sessão — é o que deixa
     /// a casca aplicá-lo antes de desenhar a sessão.
     async fn tema_da_chegada(&mut self) -> Result<Option<TemaDoServidor>> {
-        let primeiro = self.ler().await?;
+        let fim = tokio::time::Instant::now() + PRAZO;
+        let primeiro = self.ler(fim, "o Instancia da chegada").await?;
         assert!(
             matches!(primeiro, ServerMessage::Instancia { .. }),
             "o primeiro quadro depois do Session não é o Instancia: {primeiro:?}"
         );
-        match self.ler().await? {
+        match self.ler(fim, "o TemaMudou da chegada").await? {
             ServerMessage::TemaMudou { tema } => Ok(tema),
             outro => panic!(
                 "o quadro logo depois do Instancia tem de ser o TemaMudou, inclusive sem \
@@ -204,9 +216,18 @@ impl Pessoa {
         }
     }
 
-    async fn ler(&mut self) -> Result<ServerMessage> {
-        let quadro =
-            tokio::time::timeout(Duration::from_secs(15), self.cliente.next_event()).await??;
+    /// O próximo quadro, se ele chegar antes de `fim`; senão, a falha diz o que
+    /// se esperava e os temas vistos até ali.
+    async fn ler(&mut self, fim: tokio::time::Instant, o_que: &str) -> Result<ServerMessage> {
+        let quadro = tokio::time::timeout_at(fim, self.cliente.next_event())
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "esperou {o_que} por {} s e não veio; os TemaMudou vistos até aqui: {:?}",
+                    PRAZO.as_secs(),
+                    self.temas
+                )
+            })??;
         if let ServerMessage::TemaMudou { tema } = &quadro {
             self.temas.push(tema.clone());
         }
@@ -226,13 +247,14 @@ impl Pessoa {
                 serde_json::json!({ "tema": tema }).to_string(),
             )
             .await?;
+        let fim = tokio::time::Instant::now() + PRAZO;
         loop {
             if let ServerMessage::ModReply {
                 request,
                 part,
                 total,
                 payload,
-            } = self.ler().await?
+            } = self.ler(fim, "a resposta do pedido").await?
             {
                 if request == pedido {
                     assert_eq!((part, total), (0, 1), "a resposta do MOD de tema é pequena");
@@ -244,16 +266,19 @@ impl Pessoa {
 
     /// Lê até ter visto `quantos` `TemaMudou` desde a chegada.
     async fn esperar_temas(&mut self, quantos: usize) -> Result<&[Option<TemaDoServidor>]> {
+        let fim = tokio::time::Instant::now() + PRAZO;
+        let o_que = format!("{quantos} TemaMudou desde a chegada");
         while self.temas.len() < quantos {
-            self.ler().await?;
+            self.ler(fim, &o_que).await?;
         }
         Ok(&self.temas)
     }
 
     /// Lê até o servidor encerrar a sessão, e devolve o motivo.
     async fn esperar_a_despedida(&mut self) -> Result<DisconnectReason> {
+        let fim = tokio::time::Instant::now() + PRAZO;
         loop {
-            if let ServerMessage::Disconnecting { reason } = self.ler().await? {
+            if let ServerMessage::Disconnecting { reason } = self.ler(fim, "a despedida").await? {
                 return Ok(reason);
             }
         }

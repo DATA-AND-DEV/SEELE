@@ -119,3 +119,61 @@ fn o_ci_e_o_validar_rodam_os_crates_do_celular_dentro_do_wasm() {
         );
     }
 }
+
+/// **Os dois embrulham a mesma volta, e nenhum a reimplementa.**
+///
+/// Até 09/10/2026 o motor do celular tinha uma cópia menor da volta do
+/// desktop, e ela não sabia das rejeições, do balde do `console` nem dos tetos
+/// de temporizador: um MOD com uma `async` sem `catch` sumia calado no celular.
+/// A volta passou para o `seele-motor`, e o guarda é de dependência, que é o
+/// que não se contorna com cuidado: **sem `rquickjs`, o embrulho não tem como
+/// avaliar JavaScript**, e portanto não tem como ter outra volta.
+///
+/// E a prova de que a volta é a mesma nos dois alvos é uma tabela só
+/// (`crates/seele-motor/tests/casos.json`), que o nativo roda em `casos.rs` e
+/// o `cargo xtask web` roda dentro do `.wasm`.
+#[test]
+fn o_desktop_e_o_celular_embrulham_a_mesma_volta_sem_reimplementar_nada() {
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(raiz().join("Cargo.toml"))
+        .no_deps()
+        .exec()
+        .expect("o cargo metadata");
+    let dependencias = |nome: &str| -> Vec<String> {
+        metadata
+            .packages
+            .iter()
+            .find(|p| p.name.as_str() == nome)
+            .unwrap_or_else(|| panic!("o pacote {nome}"))
+            .dependencies
+            .iter()
+            .map(|d| d.name.clone())
+            .collect()
+    };
+    assert!(
+        dependencias("seele-motor").iter().any(|d| d == "rquickjs"),
+        "o seele-motor deixou de ter o motor: o guarda abaixo ficaria vazio"
+    );
+    for embrulho in ["seele-app", "seele-motor-web"] {
+        let deps = dependencias(embrulho);
+        assert!(
+            deps.iter().any(|d| d == "seele-motor"),
+            "{embrulho} não usa o seele-motor: de onde vem a volta dele?"
+        );
+        assert!(
+            !deps.iter().any(|d| d == "rquickjs"),
+            "{embrulho} depende do rquickjs direto: com ele, a volta do seele-motor \
+             pode ganhar uma segunda versão, e o celular e o desktop voltam a divergir"
+        );
+    }
+    assert!(
+        !raiz().join("crates/seele-motor-web/build.rs").exists(),
+        "o seele-motor-web voltou a ter build.rs: o prelúdio é o do seele-motor, e não uma cópia"
+    );
+    let web = std::fs::read_to_string(raiz().join("xtask/src/web.rs")).expect("o web.rs");
+    assert!(
+        web.contains("\"crates/seele-motor/tests/casos.json\""),
+        "o cargo xtask web não passa a tabela da volta ao .wasm: a prova de que os \
+         dois alvos rodam a mesma volta deixa de existir"
+    );
+}
