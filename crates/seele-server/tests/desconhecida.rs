@@ -197,15 +197,19 @@ async fn pingar(par: &mut Par, timestamp: u64) -> Result<bool> {
 /// um par defeituoso não enche o `seele.log`. A linha que vai diz o ordinal e
 /// a pessoa.
 ///
-/// **Um teste só, e não dois, de propósito.** O registro é capturado por um
-/// assinante deste fio (`set_default`), e o `tracing` guarda por ponto de
-/// registro se alguém se interessa por ele. Com um segundo teste rodando em
-/// paralelo, noutro fio e sem assinante, a linha deixava de chegar aqui: medido
-/// em 08/10, seis de seis reprovações em paralelo, e três de três aprovações em
-/// série. `current_thread` pelo mesmo motivo: o servidor e a sessão rodam
-/// neste fio, e é nele que o assinante vale.
+/// **Um caso só, de propósito, e o [`segundo_despachante`] antes da
+/// captura.** O registro é capturado por um assinante deste fio
+/// (`set_default`), e o `tracing` guarda por ponto de registro se alguém se
+/// interessa por ele. Com um segundo teste rodando em paralelo, noutro fio e
+/// sem assinante, a linha deixava de chegar aqui: medido em 08/10, seis de
+/// seis reprovações em paralelo, e três de três aprovações em série. O
+/// segundo despachante tira essa dependência (pendência 56), e o único outro
+/// teste deste arquivo é a prova dele. `current_thread` pelo mesmo motivo do
+/// assinante: o servidor e a sessão rodam neste fio, e é nele que o assinante
+/// vale.
 #[tokio::test]
 async fn a_mensagem_desconhecida_e_pulada_contada_e_registrada_uma_vez() -> Result<()> {
+    segundo_despachante();
     let rastro = Rastro::default();
     let escritor = rastro.clone();
     let _guarda = tracing::subscriber::set_default(
@@ -282,6 +286,65 @@ impl Rastro {
     fn texto(&self) -> String {
         String::from_utf8_lossy(&self.0.lock().expect("o rastro trancou")).into_owned()
     }
+}
+
+/// **Um segundo despachante, vivo o processo inteiro, que não escreve nada.**
+/// A cópia deste binário do auxiliar do crate (`src/rastro_de_teste.rs`), que
+/// um teste de integração não alcança: o `#[cfg(test)]` dele só vale para os
+/// testes da biblioteca. O mesmo do app (`apps/seele-app/src/main.rs`).
+///
+/// O `tracing` decide uma vez só, na primeira passagem de qualquer thread, se
+/// uma linha tem quem a ouça. Com um despachante só registrado, a pergunta vai
+/// só ao da **thread que passou** (`tracing-core` 0.1.36, `callsite.rs`:
+/// `Rebuilder::JustOne`), e um teste sem captura que passasse primeiro pela
+/// linha a deixava marcada como «nunca» para quem a captura. Com dois vivos, a
+/// pergunta vai a todos, e cada evento pergunta de novo à thread em que
+/// acontece.
+fn segundo_despachante() {
+    static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+    SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+}
+
+/// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+/// ainda é capturada.** A prova de ordem forçada da pendência 56, para a cópia
+/// de [`segundo_despachante`] deste binário, com a mesma captura do teste de
+/// cima.
+///
+/// A outra thread toca a linha primeiro, com a captura já de pé, e o resultado
+/// deixa de depender de quem chega antes. E a linha da outra thread continua
+/// fora: a captura segue sendo só da thread corrente.
+#[test]
+fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+    fn diz() {
+        tracing::warn!("linha tocada primeiro fora da captura");
+    }
+    segundo_despachante();
+    let rastro = Rastro::default();
+    let escritor = rastro.clone();
+    let assinante = tracing_subscriber::fmt()
+        .with_writer(move || escritor.clone())
+        .with_ansi(false)
+        .without_time()
+        .finish();
+    tracing::subscriber::with_default(assinante, || {
+        std::thread::spawn(diz)
+            .join()
+            .expect("a outra thread terminou");
+        diz();
+    });
+
+    let texto = rastro.texto();
+    assert!(
+        texto.contains("linha tocada primeiro fora da captura"),
+        "uma linha que outra thread tocou primeiro sumiu do rastro, e o teste da mensagem \
+         desconhecida passa ou falha conforme a ordem das threads: {texto}"
+    );
+    assert_eq!(
+        texto.lines().count(),
+        1,
+        "a linha da outra thread entrou no rastro desta captura, e um teste passaria a ler o \
+         que outro teste escreveu: {texto}"
+    );
 }
 
 /// A mensagem que a prova assina: o rótulo, a impressão do certificado que o
