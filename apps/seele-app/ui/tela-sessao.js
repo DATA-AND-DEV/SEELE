@@ -1270,8 +1270,16 @@ function abrirLinhaSozinho(snapshot) {
 async function sincronizarMensagens(revisao) {
   if (revisao === revisaoDesenhada || buscandoMensagens) return;
   buscandoMensagens = true;
+  // **A resposta é da sessão que pediu** (rodada 1 do lote I-b, M-1). Um pedido
+  // que sai na sessão A e volta depois de ela acabar traz a conversa de A, e
+  // escrevê-la — com a revisão de A — punha essa conversa na sessão seguinte,
+  // que a primeira sincronização dela podia nem corrigir se as revisões
+  // coincidissem. Toda saída zera a geração (`encerrarOAmbienteDosMods`).
+  const geracao = geracaoDaSessao;
   try {
-    mensagens = await invoke("messages");
+    const lidas = await invoke("messages");
+    if (geracao !== geracaoDaSessao) return;
+    mensagens = lidas;
     revisaoDesenhada = revisao;
     desenharMensagens();
   } catch (erro) {

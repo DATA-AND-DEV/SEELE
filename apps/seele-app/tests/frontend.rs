@@ -16826,6 +16826,33 @@ fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
     );
 }
 
+/// **A conversa pedida numa sessão não é escrita noutra.** Rodada 1 do lote
+/// I-b, M-1.
+///
+/// Um `messages` que sai na sessão A e volta depois de ela acabar traz a
+/// conversa de A. `sincronizarMensagens` a escrevia, com a revisão de A, e a
+/// sessão seguinte abria com ela — para sempre, se a primeira revisão dela
+/// coincidisse com a última de A. A bancada `conversa-com-estado.cjs` prova o
+/// caso com a resposta segurada no meio; este guarda prende a conferência no
+/// `cargo test`: a geração é lida antes do pedido e conferida depois, antes de
+/// escrever.
+#[test]
+fn a_conversa_pedida_numa_sessao_nao_e_escrita_noutra() {
+    let sincronizar = body_of(&scripts(), "async function sincronizarMensagens(revisao)");
+    let (antes, depois) = sincronizar
+        .split_once("await invoke(\"messages\")")
+        .unwrap_or_else(|| {
+            panic!("`sincronizarMensagens` não busca mais a conversa:\n{sincronizar}")
+        });
+    let escreve = depois.find("mensagens = ").unwrap_or(depois.len());
+    let confere = depois.find("geracaoDaSessao").unwrap_or(depois.len());
+    assert!(
+        antes.contains("geracaoDaSessao") && confere < escreve,
+        "`sincronizarMensagens` escreve a conversa sem conferir que a resposta é da \
+         sessão que a pediu: a conversa de um servidor aparece no seguinte:\n{sincronizar}"
+    );
+}
+
 /// **Todo mapa de topo da tela de sessão é esquecido quando a sessão acaba.**
 /// F1-vazamento, passo 3 (1).
 ///

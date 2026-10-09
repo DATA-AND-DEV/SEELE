@@ -57,6 +57,20 @@ const chromium = require("./playwright.cjs").chromium();
                   window.rejectSend = fail;
                 });
               }
+              // Os dois pedidos que a rodada 1 do lote I-b segura no meio: a
+              // conversa e os volumes. A resposta chega quando o teste mandar,
+              // com o que ele mandar — a de uma sessão que já acabou, ou uma
+              // leitura de volume de antes do último gesto.
+              if (cmd === "messages" && window.adiarMensagens) {
+                return new Promise((ok) => {
+                  window.soltarMensagens = ok;
+                });
+              }
+              if (cmd === "volumes_locais" && window.adiarVolumes) {
+                return new Promise((ok) => {
+                  window.soltarVolumes = ok;
+                });
+              }
               // **A recusa por falta de consentimento, no lugar certo.**
               //
               // Aqui e não num `invoke` trocado depois: `base.js` faz
@@ -334,6 +348,43 @@ const chromium = require("./playwright.cjs").chromium();
       );
     }
     console.log("F1-vazamento OK: rascunho, prévia e volume não passam de uma sessão para outra");
+
+    // ---- M-1 da rodada 1, em voo: a conversa pedida em A não é escrita em B ----
+    //
+    // Um `messages` pedido na sessão A e respondido depois de ela acabar trazia
+    // a conversa de A, e `sincronizarMensagens` a escrevia — com a revisão de
+    // A — por cima do que a sessão seguinte ainda nem tinha buscado.
+    const emVoo = await page.evaluate(async () => {
+      $("tela-boot").hidden = true;
+      $("tela-sessao").hidden = false;
+      entrarNaGeracao(7);
+      window.adiarMensagens = true;
+      const sincronia = sincronizarMensagens(9);
+      await ejetar();
+      window.soltarMensagens([
+        {
+          id: 71,
+          channel: 1,
+          author: 2,
+          author_nickname: "Lia",
+          at_seconds: 1_726_900_000,
+          body: "atrasada do servidor A",
+          own: false,
+          edited: false,
+          estado: "Confirmada",
+          client_message_id: null,
+        },
+      ]);
+      await sincronia;
+      window.adiarMensagens = false;
+      return { mensagens: mensagens.length, revisao: revisaoDesenhada };
+    });
+    assert.deepEqual(
+      emVoo,
+      { mensagens: 0, revisao: null },
+      `a conversa pedida na sessão que acabou foi escrita na seguinte: ${JSON.stringify(emVoo)}`,
+    );
+    console.log("M-1 OK: a conversa de uma sessão que acabou não chega à seguinte em voo");
   } finally {
     await browser.close();
     server.close();
