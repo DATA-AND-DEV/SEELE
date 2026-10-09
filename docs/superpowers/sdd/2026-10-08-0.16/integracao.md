@@ -31,9 +31,12 @@ nada dependa da memória de uma conversa.
 
 ## Antes de publicar
 
-- **Rodar a bateria inteira no `linha/0.15`** (a 0.15.2), inclusive os 4
-  chamadores do `seele-conformance` que a F6 só compilou ao mudar a assinatura de
-  `Hospedagem::iniciar` (o conserto da janela do Comandante, `ba99007`).
+- ~~**Rodar a bateria inteira no `linha/0.15`** (a 0.15.2)~~: **feita em 08/10, verde**,
+  em `fe1cd866` (com os dois consertos de segurança, `ba99007` e `40318ea`, a identidade
+  `9ff9b73` e a recusa de notas com condição `7e444fe8`): fmt, check-runtime, check-api,
+  check-versao, check-vetores, clippy, `cargo test --workspace -- --test-threads=1`
+  (2725 passaram, 0 falharam, 5 ignorados, com `SEELE_EXIGE_CODEC=1`), check-deps e deny.
+  **Se o `linha/0.15` mudar depois disto, ela roda de novo.**
 - **As medidas de campo do protocolo nas duas direções**, com o dono: o app
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
