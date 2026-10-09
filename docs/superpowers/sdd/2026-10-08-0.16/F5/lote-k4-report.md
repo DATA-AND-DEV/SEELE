@@ -334,3 +334,157 @@ números no `porque`», e é o que o MOD ouve. O que poderia virar texto da v6:
    `regiao-do-mod.cjs`) ainda fingem o `uri` no som do pacote. É inofensivo — a
    janela não o lê, e a prova principal do som agora responde sem ele —, mas
    o molde não é mais o que o Rust manda.
+
+## 7. Rodada 1 de conserto (FIX_BASE `deba6aff`)
+
+A revisão deu o lote como conforme e aceitou os desvios, com medida contra o
+`decodeAudioData` real: 300 mil entradas mutadas sem pânico, e o piso abaixo
+do real no Chromium e no WebKit. Esta rodada fecha o Importante I1 e os
+Menores M1 a M6, um commit por item. Brief da rodada:
+`.superpowers/sdd/lotes/lote-k4-rodada1.md`.
+
+| commit | item | o que muda |
+|---|---|---|
+| `f9ef3d23` | **I1** | três testes, um por margem do piso: o bloco do WAV, o pre-skip do Opus e o corte do MP3 |
+| `a9a47a8b` | **M1** | um WAV com dois `fmt ` fica sem piso (`None`) |
+| `0b9029ec` | **M2** | o `data` do WAV é limitado também ao tamanho do RIFF, salvo `0xFFFFFFFF` |
+| `de6c6774` | **M3** | doc: o «nunca passa do real» do MP3 vale num fluxo bem formado; o corte absorve uns oito quadros corrompidos |
+| `a21c2c04` | **M4** | doc: numa contribuição, a recusa do som do pacote chega no pedido de tocar, e a do servidor na montagem, uma vez por destino |
+| `29b58efc` | **M5** | o fundo, o retrato, o fundo da tela e o avatar contribuído recebem o som recusado pelo teto como o som que era (`soImagem`), e o MOD ouve deles o que ouvia |
+| `62790259` | **M6** | os dez moldes apontados respondem ao som do pacote sem `uri` |
+
+### I1 — as margens que fazem do valor um piso (`f9ef3d23`)
+
+Três testes no módulo `o_som_grande_demais_decodificado_e_recusado_antes`, com
+bytes sintéticos e o valor exato do piso. A margem já estava no código; o que
+faltava era o teste que a prende, e cada um nasceu verde e foi provado
+tirando a margem dele — o arquivo conferido com `cmp` depois de cada uma.
+
+| teste | o caso | sem a margem (vermelho) |
+|---|---|---|
+| `o_bloco_menor_que_a_amostra_nao_multiplica_o_piso_do_wav` | WAV estéreo de 16 bits a 8 kHz, um segundo, com o bloco declarado 1 em vez de 4: o piso é `383992` | `bloco.max(…)` só com o bloco declarado: «o piso do WAV contou os quadros pelo bloco que o cabeçalho declara, menor que a amostra: quatro vezes o real…», `Some(1535992)` contra `Some(383992)` |
+| `o_pre_skip_maior_que_a_primeira_pagina_sai_do_piso_do_opus` | Opus estéreo com pre-skip 3840 e a primeira página de dados em 1024: o piso é um segundo, `383992` | `primeira?.max(pre_skip)` sem o pre-skip: «o piso do Opus tirou do começo só a granule da primeira página…», `Some(406520)` contra `Some(383992)` |
+| `o_corte_do_decodificador_sai_do_piso_do_mp3` | cem quadros MPEG-1 camada III estéreo: 115 200 amostras, menos 9871 do corte, menos um da conversão, vezes oito: `842624` | `corte = 0`: «o piso do MP3 contou as amostras que o decodificador corta…», `Some(921592)` contra `Some(842624)` |
+
+### M1 — um segundo `fmt ` (`a9a47a8b`)
+
+`um_segundo_fmt_deixa_o_wav_sem_piso`: um WAV com dois `fmt ` (o primeiro
+estéreo, 16 bits, 48 kHz; o segundo mono, 8 bits, 8 kHz) e o RIFF acertado.
+- **Vermelho** antes: `Some(4607996)` contra `None` — o piso pelo último
+  `fmt `, doze vezes o segundo real do primeiro.
+- **Conserto**: em `cabecalho_de_som::wav`, um `fmt ` com um formato já lido
+  devolve `None`. O doc diz por quê: qual dos dois vale é pergunta de motor.
+- **Verde**; **reversão** (`if false && formato.is_some()`): o mesmo vermelho;
+  `cmp` igual.
+
+### M2 — o `data` limitado ao RIFF (`0b9029ec`)
+
+`o_data_do_wav_nao_passa_do_tamanho_do_riff`: um segundo de WAV com o `data`
+em `0xFFFFFFFF`, seguido de um pedaço `LIST` de 4000 bytes fora do tamanho que
+o RIFF declara.
+- **Vermelho** antes: `Some(288188)` contra `Some(191996)` — o `LIST` contado
+  como som.
+- **Conserto**: `wav` corta os bytes no fim que o RIFF declara (`8 + riff`),
+  salvo quando o RIFF também é `0xFFFFFFFF`. Um RIFF menor que o próprio
+  cabeçalho deixa o arquivo sem piso, o que não recusa nada.
+- **Verde** (e os WAV de antes, cujo RIFF cobre o arquivo); **reversão**
+  (`if true || riff == u32::MAX`): o mesmo vermelho; `cmp` igual.
+
+### M3 e M4 — os docs (`de6c6774`, `a21c2c04`)
+
+- **M3**: o doc de `cabecalho_de_som::mp3` diz que o «nunca passa do real» vale
+  para um fluxo bem formado — um quadro com cabeçalho certo e conteúdo
+  corrompido entra na cadeia, o Chromium o descarta e o WebKit recusa o
+  arquivo —, que o corte absorve uns oito quadros de 1152 amostras, e que com
+  mais que isso o piso passa do que o Chromium entrega (a revisão mediu 14 KB
+  com dez). O resumo de `bytes_decodificados_minimos` diz «num arquivo bem
+  formado» e ganha o limite do RIFF do M2, que o commit do M2 não tinha posto
+  ali.
+- **M4**: o doc de `recusarPeloTetoDoSom` e o de `montarSom` dizem os dois
+  momentos de uma contribuição: o som do pacote recusado nos bytes, no pedido
+  de tocar, uma vez, no destino que segura os sons; o do servidor recusado na
+  resposta, na montagem, **uma vez por destino**, como o `falhou` de antes —
+  o MOD ouve `recusada` de cada destino, e o registro ganha uma linha por
+  destino. Sem deduplicar, como o brief pede.
+
+### M5 — quem só mostra imagem ouve o que ouvia (`29b58efc`)
+
+**A decisão** (do controlador): para o fundo, o retrato, o fundo da tela e o
+avatar contribuído vale o comportamento de antes do lote — o «precisa ser
+imagem» vem antes da recusa do som, porque o que o MOD ouve é contrato.
+
+**Produto.** `soImagem(vindo)`, em `mods-regiao.js`, ao lado de
+`recusaDoSomGrandeDemais`: troca a rejeição `som-grande-demais-decodificado`
+por `{ papel: "som" }`, e deixa passar as outras rejeições como vieram. Os
+quatro lugares embrulham o pedido da mídia nela, e cada um segue o caminho
+que já tinha para um som — o papel é tudo o que cada um lê antes de recusar.
+Quem toca (`montarMidia`, `carregarSom`) continua dizendo o teto do som.
+
+**`base.js` mudou em código**, uma linha: o avatar contribuído
+(`avatarContribuido`) embrulha `dono.carregarMidiaDoServidor(…)` em
+`soImagem`. O brief da rodada previa isso como possibilidade. A bancada das
+contribuições (`contribuicoes-e-camadas.cjs`, fora da lista do lote) recorta
+`avatarContribuido` de `base.js` e traz de `mods-regiao.js` o que ele chama;
+sem trazer `soImagem`, ela reprovou no `check-runtime` com
+`ReferenceError: soImagem is not defined` — o que mostrou a dependência.
+Ela passou a trazer `SOM_GRANDE_DEMAIS_DECODIFICADO`, `recusaDoSomGrandeDemais`
+e `soImagem`, e ganhou o caso 15 do R4e: a recusa do som pelo teto chega ao
+MOD como «não é imagem».
+
+**Provas**, cada uma comparando o que se ouve com a resposta de antes do lote
+(o som chegando com o papel) e com a de agora (a recusa do Rust) — o evento ao
+MOD, as linhas do registro e as anotações da aba:
+- `regiao-do-mod.cjs`, seção 20, `quemSoMostraImagemOuveOQueOuviaDoSomRecusado`:
+  o fundo, o retrato e o fundo da tela. **Vermelho** antes, nos três: com a
+  recusa, o fundo dizia `falhou` ao MOD e «falhou no fundo» no registro, e o
+  retrato e o fundo da tela anotavam o motivo do som em vez do «precisa ser
+  imagem».
+- `diagnostico-de-mods.cjs`, `oAvatarOuveDoSomRecusadoOQueOuvia`, no Chromium
+  com a página de verdade. **Vermelho** antes: o MOD ouvia `falhou` com
+  `som-grande-demais-decodificado…`, e não com «o avatar não é imagem ou excede
+  o limite de mídia».
+- **Verde** depois, nas três bancadas.
+- **Reversões**, cada uma desfeita e conferida com `cmp`: `soImagem` como
+  passagem (`return vindo;`) — os três lugares da região e o avatar
+  vermelhos; cada embrulho tirado sozinho — o fundo, o retrato, o fundo da
+  tela, cada um vermelho no seu caso; o embrulho do avatar tirado — vermelhos
+  o `oAvatarOuveDoSomRecusadoOQueOuvia` e o caso 15 do R4e («o MOD não recebeu
+  «midia»/«falhou» do avatar que não montou (não é imagem)»).
+
+### M6 — os moldes sem `uri` (`62790259`)
+
+Os dez moldes apontados — `diagnostico-de-mods.cjs:1428` e `:1597`,
+`regiao-do-mod.cjs:1158`, `1248`, `1286`, `1403`, `1468`, `1528`, `2346` e
+`2392` — respondem ao som do pacote com `{ papel, bytes }`. Conferi cada um
+antes: todos respondem a um nó com `fonte` (ou a `midia_do_mod`). As duas
+bancadas continuam verdes.
+
+### O que rodou, sobre `62790259`
+
+- `cargo test -p seele-app --bin seele-app som`: 19 passaram;
+- `cargo test -p seele-app --test frontend`: 279 passaram;
+- `cargo xtask check-runtime`: as sete bancadas, saída 0 (`regiao-do-mod.cjs`:
+  46 provas);
+- `cargo xtask check-api`: verde;
+- `diagnostico-de-mods.cjs` (Playwright): verde, dez provas;
+- fmt limpo, e o clippy do `seele-app` só com o aviso ambiental do linker.
+
+Sem conformidade, sem push, sem subagentes.
+
+### Preocupações da rodada
+
+1. **Há mais moldes com `uri` no som do pacote do que os dez.** Uma leitura
+   por proximidade (`fonte: "som/…"` sem `doServidor` na mesma prova) acha uns
+   vinte em `regiao-do-mod.cjs` — por exemplo as linhas 1744, 1852, 1899,
+   3056, 3083, 3197, 3433 e 4958 de hoje. Outros servem às duas origens na
+   mesma prova (o `midiaDeSom` da seção 17, com «do pacote» e «do servidor do
+   MOD»), e esses precisam do `uri`. Fiquei nos dez da lista: mudar os outros
+   é a mesma troca, prova por prova, e a janela não lê esse `uri` em nenhum
+   deles.
+2. **O M5 depende de `soImagem` estar no contexto de quem roda `base.js`.**
+   Na página, `mods-regiao.js` carrega antes; numa bancada que recorta o
+   avatar, ela tem de trazer as três peças, como a das contribuições agora
+   traz.
+3. Sem mudança: o som do servidor numa contribuição segue recusado uma vez por
+   destino (M4), como o `falhou` de antes; a deduplicação ficou para depois,
+   como o brief pede.
