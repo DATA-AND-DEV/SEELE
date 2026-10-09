@@ -63,6 +63,14 @@ pub const PRELUDIO: &str = r#"
   const tetoDaMensagem = Number(globalThis.__seeleTetoDaMensagem) || 12288;
   delete globalThis.__seeleTetoDaMensagem;
 
+  // **O `Atomics` sai, nos dois alvos** (rascunho da API 6, §16, item 5). Era
+  // a única global que o motor nativo tinha e o `.wasm` não: o quickjs-ng o
+  // compila sem threads no `wasm32-wasip1`, e sem threads ele não serve para
+  // nada em nenhum dos dois. Um MOD que dependesse dele rodaria no desktop e
+  // quebraria no celular. No `.wasm` este `delete` não acha nada; a sonda de
+  // `tests/casos.json` cobra os dois.
+  delete globalThis.Atomics;
+
   // Bytes, e não caracteres: o teto do anfitrião conta UTF-8, e um nome com
   // acento ocupa dois. Medir em `length` diria que cabe o que não cabe.
   //
@@ -334,7 +342,11 @@ pub const PRELUDIO: &str = r#"
   }));
 
   globalThis.SeeleUI = Object.freeze({
-    regiao: (conteudo) => pedir('regiao', { conteudo }),
+    // **Pela capacidade, como o resto.** A API 6 não tem `regiao` nem
+    // `cartoes` (decisão do dono de 08/10), e eles faltam do `SeeleUI` dela
+    // como `superficies` falta do da 3: ausentes, e não montados para a
+    // janela recusar depois. As APIs 3 a 5 têm os dois.
+    ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
     tema: (valores) => pedir('tema', { valores }),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
@@ -347,7 +359,7 @@ pub const PRELUDIO: &str = r#"
     // região, montada pelo mesmo renderer, com uma gramática menor: nada que
     // receba foco ou clique, porque a linha do roster já tem um botão do
     // produto. É a única superfície fora da região, e ela sai com ela.
-    cartoes: (cartoes) => pedir('cartoes', { cartoes }),
+    ...(capacidades.has('cartoes') ? { cartoes: (cartoes) => pedir('cartoes', { cartoes }) } : {}),
     // ---- os eventos ----
     //
     // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem

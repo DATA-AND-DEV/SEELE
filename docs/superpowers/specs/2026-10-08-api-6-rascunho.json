@@ -61,7 +61,8 @@
     "may_*: a permissão vale na metade de servidor",
     "messages_revision, icon_revision, person_icons_revision, ended: estado interno da casca",
     "membros (o FORA DO AR da F1): ficam de fora (decisão de 08/10) — acrescentar depois é API somada, tirar é impossível (rascunho §6)",
-    "toque, chamada, código e agenda: nunca (guarda 12)"
+    "toque, chamada, código e agenda: nunca (guarda 12)",
+    "todo campo novo do Snapshot nasce fora do retrato: o retrato é copiado campo a campo em todos os níveis, e a lista permitida da telemetry é vazia (o telemetry.microfone_entrega_silencio_digital do I-b, uma permissão de privacidade do sistema, não chega ao MOD); o guarda prova pela forma: as chaves de cada nível são exatamente as da lista, e um Snapshot com um campo desconhecido em cada nível sai sem nenhum deles"
   ],
   "actions": {
     "pedir": "ModRequest",
@@ -223,7 +224,7 @@
       ],
       "celular": {
         "existe": true,
-        "forma": "gaveta SALAS, célula inteira, controles de 44 × 44"
+        "forma": "aba SERVIDOR (salas, canais, as entradas DOS MODS e a troca de servidor), célula inteira, controles de 44 × 44"
       }
     },
     "operador.barra": {
@@ -239,8 +240,9 @@
         "no ar"
       ],
       "celular": {
-        "existe": false,
-        "contribuicao": "recusada com regiao-ausente; a faixa de voz é do núcleo e não recebe capa"
+        "existe": true,
+        "forma": "no alto da aba AJUSTES, logo abaixo do cabeçalho SEU PERFIL (proposta da F8, aceita em 09/10); largura da tela, controles de 44 × 44; altura limitada com rolagem por dentro, para a gestão de MODs continuar à vista (o número sai da M3 no iPhone)",
+        "contribuicao": "aplicada; a pessoa.capa do operador vai no cabeçalho SEU PERFIL (D-capa-1); o MUDO, o SURDO e o SAIR continuam na faixa de voz, do núcleo"
       }
     },
     "canal.cabecalho": {
@@ -424,7 +426,7 @@
     "garantias-do-produto": [
       "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
       "o cabeçalho diz de qual MOD é a superfície",
-      "um modal torna o resto da aplicação inerte, e não só escuro",
+      "um modal torna o resto da aplicação inerte, e não só escuro — menos, no celular, a faixa de voz e as abas, que nunca ficam cobertas nem inertes (o foco do teclado continua contido no diálogo)",
       "o foco entra na abertura, fica contido, e volta ao acionador ao fechar",
       "o tamanho pedido é contido na área útil",
       "alterações não gravadas produzem a decisão de descartar, e o MOD recebe descartou",
@@ -463,7 +465,8 @@
       "erro": 10000
     },
     "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar",
-    "painel": "sai: a folha o substitui (decisão de 08/10)"
+    "painel": "sai: a folha o substitui (decisão de 08/10)",
+    "celular": "«tela cheia» é a tela acima da faixa de voz e das abas, para pagina, dialogo, folha e aviso; nenhuma superfície as cobre (medido no protótipo da F8, 09/10)"
   },
   "camadas": {
     "chamada.palco": {
@@ -577,7 +580,9 @@
     "na-7": [
       "tipo dos títulos e dos dados",
       "escala por escolha"
-    ]
+    ],
+    "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas",
+    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); o tema padrão reproduz os tokens (ΔE ≤ 2); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
@@ -597,9 +602,10 @@
       "a pergunta DE ONDE? e o seletor do sistema",
       "as áreas seguras",
       "44 px e 16 px",
-      "o zoom e os gestos"
+      "o zoom e os gestos",
+      "nenhuma superfície de MOD cobre a faixa de voz nem as abas, nem as torna inertes; AJUSTES e MODS DESTE SERVIDOR leem --nucleo-*, e não o tema"
     ],
-    "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal"
+    "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal; no celular, com pagina imersiva, dialogo, folha expandida e aviso abertos, o retângulo de cada um termina acima da faixa de voz, e o toque no MUDO e em AJUSTES chega ao produto; no desktop, mede se um dialogo aberto deixa o MUDO e o SAIR à vista e clicáveis"
   },
   "som": {
     "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",
@@ -632,9 +638,10 @@
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
     "onde-o-mod-sabe": "retrato.onde, retrato.regioes e o evento lugar",
-    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta",
-    "executor": "o mesmo rquickjs 0.12.2 do desktop em wasm32-wasip1, num Worker criado de dentro de um iframe de origem opaca, com o prelúdio extraído do executor.rs (spike da F4, spec-mestre 00935dac): um contrato e um motor só; nada depende de o MOD rodar fora de uma volta do anfitrião; os limites valem igual nos dois, e o teto de memória no web exige o RustAllocator; capacidades por plataforma",
-    "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida"
+    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta. Na 0.16, com o desenho da F8 (D-celular-1), nenhuma das oito regiões fica sem casa no celular; a regra fica para a casca que não tiver uma região (uma região da API 7 numa casca 1.0, ou o executor do navegador)",
+    "executor": "o mesmo rquickjs 0.12.2 do desktop em wasm32-wasip1, num Worker criado de dentro de um iframe de origem opaca, com o prelúdio extraído do executor.rs (spike da F4, spec-mestre 00935dac): um contrato e um motor só; nada depende de o MOD rodar fora de uma volta do anfitrião; os limites valem igual nos dois, e o teto de memória no web exige o RustAllocator; capacidades por plataforma; as globais do contexto são as mesmas nos dois alvos: a API 6 tira o Atomics também do desktop (decidido em 09/10), e a sonda de crates/seele-motor/tests/casos.json fica sem diferença declarada",
+    "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida",
+    "desenho": "da F8 (D-celular-1, spec-mestre fd4d298f): o contrato fixa o nome de cada região e o que ela faz com uma contribuição; o lugar na casca é da F8. A primeira aba se chama SERVIDOR (rótulo de tela)"
   },
   "decisoes-do-dono-de-08-10": {
     "superficies": "a folha substitui o painel",
@@ -664,6 +671,8 @@
       "tema-de-outro-mod (outro MOD é o escolhido e está ligado)",
       "tema-invalido (não é objeto nem null)",
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
+      "chave-desconhecida (tarefa 17j; leva a chave)",
+      "valor-invalido (tarefa 17j; leva a chave)",
       "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão"

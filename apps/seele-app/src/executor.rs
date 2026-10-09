@@ -424,6 +424,72 @@ mod testes {
         }
     }
 
+    /// O que um pacote vê de `SeeleUI` e `SeeleMods`, numa API escolhida.
+    fn o_que_a_api_entrega(api: u32) -> serde_json::Value {
+        let executor = executor();
+        executor
+            .iniciar_com_api(
+                "seele.postar(JSON.stringify({\
+                   contribuicoes: typeof SeeleUI.contribuicoes,\
+                   superficies: typeof SeeleUI.superficies,\
+                   enviar: typeof SeeleUI.enviar,\
+                   tema: typeof SeeleUI.tema,\
+                   snapshot: typeof SeeleMods.snapshot,\
+                   regiao: typeof SeeleUI.regiao,\
+                   cartoes: typeof SeeleUI.cartoes,\
+                   capacidades: SeeleUI.capacidades(),\
+                 }));",
+                api,
+            )
+            .expect("código");
+        serde_json::from_str(&uma_mensagem(&executor)).expect("o MOD posta JSON")
+    }
+
+    /// **A API 6 chega ao MOD com as capacidades dela** (tarefa 3 do plano da
+    /// F3), e sem as que saíram.
+    ///
+    /// `regiao` e `cartoes` saem da 6 (decisão do dono de 08/10), e saem como
+    /// o prelúdio promete para tudo que uma API não tem: **ausentes**, e não
+    /// recusados em tempo de execução. Até aqui os dois eram montados em toda
+    /// API, e a recusa só vinha quando a mensagem chegava à janela — um MOD da
+    /// 6 descobriria a ausência num `catch`, em produção. A API 5 continua com
+    /// os dois, e é a outra metade da prova.
+    ///
+    /// `SeeleMods.snapshot` ainda existe na 6: ele sai na tarefa 4, junto com a
+    /// entrada de `SeeleUI.retrato`.
+    #[test]
+    fn um_pacote_da_api_6_recebe_as_capacidades_dela_e_nao_as_que_sairam() {
+        let seis = o_que_a_api_entrega(6);
+        for (nome, tipo) in [
+            ("contribuicoes", "object"),
+            ("superficies", "object"),
+            ("enviar", "function"),
+            ("tema", "function"),
+            ("snapshot", "function"),
+        ] {
+            assert_eq!(seis[nome], tipo, "a API 6 sem «{nome}»: {seis}");
+        }
+        for saiu in ["regiao", "cartoes"] {
+            assert_eq!(
+                seis[saiu], "undefined",
+                "«{saiu}» saiu da API 6 e ainda é montado no `SeeleUI`: {seis}"
+            );
+        }
+        assert_eq!(
+            seis["capacidades"],
+            serde_json::json!(seele_ffi::mods::capacidades_da_api(6)),
+            "o MOD da API 6 lê outras capacidades que as do núcleo"
+        );
+
+        let cinco = o_que_a_api_entrega(5);
+        for continua in ["regiao", "cartoes"] {
+            assert_eq!(
+                cinco[continua], "function",
+                "a API 5 perdeu «{continua}», que ela tem: {cinco}"
+            );
+        }
+    }
+
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**
     ///
     /// O executor nativo não definia `console`, e o `console.warn` que o autor

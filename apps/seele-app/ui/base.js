@@ -2188,6 +2188,12 @@ function contrasteEntre(a, b) {
  * não nomeia a própria versão.
  */
 const CAPACIDADES_POR_API = Object.freeze({
+  // A API 6, sem `regiao` e sem `cartoes` (decisão do dono de 08/10), na mesma
+  // ordem de `capacidades_da_api(6)`: o teste espelho confere as duas.
+  6: Object.freeze([
+    "superficies", "contribuicoes", "estilos", "classes", "volume",
+    "arquivo", "tema", "eventos-da-tela", "aviso-do-servidor",
+  ]),
   5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
   4: Object.freeze([
     "regiao", "tema", "cartoes", "arquivo",
