@@ -3932,6 +3932,15 @@ function esquecerOEstadoDaSessao() {
   // O que se desenhou e a Linha em que se estava.
   desenhado = null;
   linhaAberta = null;
+  // E o que estava escrito no campo (rodada 2 do lote I-b). A Linha da sessão
+  // seguinte vem do retrato (`desenharCanais`), sem restaurar nada, e o texto
+  // que ficou no campo em A ia no primeiro Enter em B — ou virava, no primeiro
+  // clique noutra Linha, rascunho de B. Com nenhuma Linha aberta, restaurar é
+  // esvaziar, e é ele que acerta também a altura do campo e a conta de bytes.
+  restaurarRascunho();
+  // O termo da busca. As duas saídas já o zeram por `encerrarBusca`, que avisa
+  // também o Rust; aqui ele vale por si, como todo o resto desta função.
+  $("campo-busca").value = "";
   // A conversa e a revisão dela (M-1 da rodada 1). A revisão do próximo
   // servidor começa do zero, e guardar a do anterior fazia a primeira
   // sincronização concluir que nada mudou quando as duas coincidiam: a tela

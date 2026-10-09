@@ -17038,6 +17038,23 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         "`esquecerOEstadoDaSessao` não esvazia `#lista-mensagens`: a conversa desenhada \
          do servidor que acabou está à vista quando o seguinte aparece"
     );
+    // Os campos de entrada da sessão (rodada 2 do lote I-b). O de mensagem é
+    // esvaziado por `restaurarRascunho()` com nenhuma Linha aberta — depois do
+    // `linhaAberta = null` —, que é o que acerta também a altura e a contagem de
+    // bytes. Sem isso, a Linha de B vinha do retrato sem restaurar nada, e o
+    // texto escrito em A ia no primeiro Enter em B.
+    let sem_linha = esquecer.find("linhaAberta = null");
+    let restaura = esquecer.rfind("restaurarRascunho()");
+    assert!(
+        matches!((sem_linha, restaura), (Some(antes), Some(depois)) if antes < depois),
+        "`esquecerOEstadoDaSessao` não esvazia o campo de mensagem depois de fechar a \
+         Linha: o texto escrito num servidor vai no primeiro Enter do seguinte:\n{esquecer}"
+    );
+    assert!(
+        esquecer.contains("$(\"campo-busca\").value = \"\""),
+        "`esquecerOEstadoDaSessao` não esvazia o campo de busca: o termo de um servidor \
+         fica na barra do seguinte"
+    );
 
     // As duas saídas o chamam, e não esquecem nada por conta própria.
     let fim = without_comments(&read("ui/tela-fim.js"));

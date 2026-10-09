@@ -389,13 +389,27 @@ const chromium = require("./playwright.cjs").chromium();
     // por chave que o servidor dá: o canal 1 de um servidor não é o de outro.
     // As duas saídas passam por `esquecerOEstadoDaSessao`. Por último nesta
     // bancada, porque as duas tiram a tela de sessão da frente.
+    //
+    // **B pelo caminho do app** (rodada 2 do lote I-b). A cena chamava
+    // `restaurarRascunho()` à mão depois da saída, e provava o mapa por um
+    // caminho que o app não percorre: em B, a Linha vem do retrato
+    // (`desenharCanais`), sem restaurar nada, e o texto que ficou no campo em
+    // A ia no primeiro Enter. Agora B é o `desenhar` do retrato com a tela
+    // escondida e a tela mostrada depois — o que `conectar` faz —, o Enter de
+    // verdade, e os cliques de verdade nas Linhas.
     for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
       const depois = await page.evaluate(async (qual) => {
+        const pausa = () => new Promise((ok) => setTimeout(ok, 0));
         $("tela-boot").hidden = true;
         $("tela-sessao").hidden = false;
-        linhaAberta = 1;
-        $("campo-mensagem").value = "rascunho do servidor de antes";
+        desenhar(window.testTable.snapshot);
+        // Em A: um rascunho guardado no canal 2, e um texto escrito no canal 1
+        // sem trocar de Linha — ele só está no campo.
+        linhaAberta = 2;
+        $("campo-mensagem").value = "rascunho do canal 2 do servidor A";
         guardarRascunho();
+        linhaAberta = 1;
+        $("campo-mensagem").value = "texto escrito no servidor A";
         previasDeLink.set("https://exemplo.invalid/a.png", false);
         volumesLidos.set("Lia", 150);
         // M-2 da rodada 1: o relógio do UPTIME e o endereço da porta são de A.
@@ -405,25 +419,61 @@ const chromium = require("./playwright.cjs").chromium();
         else await limparSessaoEncerrada({ pararDeHospedar: false });
         const comeco = comecoDaSessao;
         const alvo = alvoDoServer;
-        // A sessão seguinte abre o canal 1 dela.
-        linhaAberta = 1;
-        restaurarRascunho();
+        const previas = previasDeLink.size;
+        const volumes = volumesLidos.size;
+        // B: o retrato com a tela escondida, e a tela mostrada.
+        desenhar(window.testTable.snapshot);
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        const noCampo = $("campo-mensagem").value;
+        const linha = linhaAberta;
+        // O primeiro Enter em B.
+        window.testCalls.length = 0;
+        await enviar({ preventDefault() {} });
+        const enviados = window.testCalls
+          .filter((c) => c.cmd === "send_message")
+          .map((c) => c.args);
+        // E os cliques de verdade: para o canal 2, e de volta ao 1.
+        $("lista-linhas").querySelector('[data-linha="2"]').click();
+        await pausa();
+        await pausa();
+        const noCanal2 = $("campo-mensagem").value;
+        $("lista-linhas").querySelector('[data-linha="1"]').click();
+        await pausa();
+        await pausa();
+        const deVoltaAo1 = $("campo-mensagem").value;
         return {
-          campo: $("campo-mensagem").value,
-          previas: previasDeLink.size,
-          volumes: volumesLidos.size,
+          linha,
+          noCampo,
+          enviados,
+          noCanal2,
+          deVoltaAo1,
+          previas,
+          volumes,
           comeco,
           alvo,
         };
       }, saida);
       assert.deepEqual(
         depois,
-        { campo: "", previas: 0, volumes: 0, comeco: null, alvo: null },
+        {
+          linha: 1,
+          noCampo: "",
+          enviados: [],
+          noCanal2: "",
+          deVoltaAo1: "",
+          previas: 0,
+          volumes: 0,
+          comeco: null,
+          alvo: null,
+        },
         `depois de ${saida}, o que a sessão guardou passou para a seguinte: ` +
           JSON.stringify(depois),
       );
     }
-    console.log("F1-vazamento OK: rascunho, prévia e volume não passam de uma sessão para outra");
+    console.log(
+      "F1-vazamento OK: o campo, o rascunho, a prévia e o volume não passam de uma sessão para outra",
+    );
 
     // ---- M-1 da rodada 1, em voo: a conversa pedida em A não é escrita em B ----
     //
