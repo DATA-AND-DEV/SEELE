@@ -193,7 +193,7 @@ function fecharAceiteDeMods() {
 }
 
 /**
- * Grava o sim, **obtém o conjunto autorizado**, e tenta entrar de novo.
+ * **Obtém o conjunto autorizado**, grava o sim, e tenta entrar de novo.
  *
  * **Por que a obtenção mora aqui, e não no laço que carrega os MODs.**
  *
@@ -218,17 +218,6 @@ async function aceitarOsMods() {
   const erro = $("mods-erro");
   botao.disabled = true;
   erro.hidden = true;
-  try {
-    await invoke("aceitar_mods", { alvo, conjunto });
-  } catch (falha) {
-    // O sim não foi gravado. **Não tenta entrar**: entrar agora falharia de
-    // novo pelo mesmo motivo, e a pessoa leria a mesma pergunta duas vezes sem
-    // saber que o problema foi gravar.
-    botao.disabled = false;
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-    return;
-  }
 
   if (!(await obterOConjunto(mods ?? []))) {
     // **Não entra.** Entrar sem os pacotes é chegar à sessão sem o que o
@@ -251,7 +240,37 @@ async function aceitarOsMods() {
   //
   // Pela identidade, e não por «há uma pergunta aberta»: uma pergunta nova,
   // de outra batida, não é a que este sim respondeu.
+  //
+  // **E o sim não é gravado** (lote W da F5, ADR 0045). Ele era gravado antes
+  // da obtenção: a volta não saía, mas na entrada seguinte neste servidor o
+  // aceite batia, ninguém perguntava e o MOD rodava — contra o «não» que a
+  // pessoa deu por último. `instalar_mod_do_catalogo` não lê o aceite, e por
+  // isso a ordem pôde mudar: obter primeiro, gravar só depois desta conferência.
   if (aceitePendente !== pergunta) return;
+
+  try {
+    await invoke("aceitar_mods", { alvo, conjunto });
+  } catch (falha) {
+    // O sim não foi gravado. **Não tenta entrar**: entrar agora falharia de
+    // novo pelo mesmo motivo, e a pessoa leria a mesma pergunta duas vezes sem
+    // saber que o problema foi gravar.
+    botao.disabled = false;
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+    return;
+  }
+
+  // **Quem desistiu enquanto o sim era gravado tem o «não» de volta.** A
+  // gravação também espera, e RECUSAR, Escape e clicar fora seguem à mão
+  // durante ela: a ordem nova não fecha essa janela, então o sim que terminou
+  // de ser gravado depois da desistência é desfeito aqui, pelo mesmo verbo da
+  // seção MODS de CONFIGURAÇÕES.
+  if (aceitePendente !== pergunta) {
+    await invoke("esquecer_aceite_de_mods", { alvo }).catch((falha) =>
+      console.warn("esquecer o aceite de quem desistiu:", falha),
+    );
+    return;
+  }
 
   // **A credencial da tentativa vai junto, para o mesmo alvo** — lote R da F5.
   //

@@ -10617,6 +10617,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-mods.js", "if (!pergunta) return;"),
         ("camada-mods.js", "const { alvo, conjunto, mods } = pergunta;"),
         ("camada-mods.js", "if (aceitePendente !== pergunta) return;"),
+        // A desistência durante a gravação do sim, que o desfaz e não volta
+        // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
+        // o alvo e mais nada.
+        ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",
@@ -15339,6 +15343,35 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
         obtem < entra,
         "o aceite entra antes de obter os pacotes: o convidado chega à sessão \
          sem o que o servidor exige e descobre pela cor que não mudou"
+    );
+
+    // **E o sim só é gravado depois da obtenção, conferida a pergunta**
+    // (lote W da F5, ADR 0045). Gravado antes, ele ficava valendo para quem
+    // desistia no meio da obtenção, e a entrada seguinte rodava o MOD sem
+    // perguntar. Depois da gravação, a mesma conferência de novo desfaz o sim
+    // de quem desistiu enquanto ele era gravado.
+    let Some(grava) = corpo.find("invoke(\"aceitar_mods\"") else {
+        panic!("`aceitarOsMods` não grava mais o sim:\n{corpo}");
+    };
+    let confere = corpo[obtem..]
+        .find("if (aceitePendente !== pergunta)")
+        .map(|depois| obtem + depois);
+    assert!(
+        obtem < grava && confere.is_some_and(|confere| confere < grava),
+        "`aceitarOsMods` grava o sim antes de obter o conjunto e de conferir que a \
+         pergunta continua aberta: quem desiste no meio da obtenção fica com o sim \
+         gravado, e a entrada seguinte neste servidor roda o MOD sem perguntar \
+         (ADR 0045)"
+    );
+    let depois_de_gravar = corpo.get(grava..).unwrap_or_default();
+    let desfaz = depois_de_gravar
+        .find("if (aceitePendente !== pergunta)")
+        .zip(depois_de_gravar.find("esquecer_aceite_de_mods"));
+    assert!(
+        desfaz.is_some_and(|(confere, esquece)| confere < esquece),
+        "`aceitarOsMods` deixou de desfazer o sim de quem desistiu enquanto ele era \
+         gravado: o «não» dado durante a gravação fica sem efeito, e o MOD roda na \
+         entrada seguinte (ADR 0045)"
     );
 
     let obter = camada

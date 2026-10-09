@@ -156,6 +156,10 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   await page.addInitScript(({ table, convite, mod, snapshot }) => {
     window.testTable = table; window.testCalls = []; window.testAtraso = {};
     window.testServidor = { aceitou: false, gasto: false };
+    // O sim dos MODs gravado nesta máquina, por alvo, como o disco o guarda
+    // (`seele_ffi::mods`): o `aceitar_mods` grava quando termina, e o
+    // `esquecer_aceite_de_mods` apaga (lote W da F5).
+    window.testAceites = {};
     // O console inteiro, com os argumentos serializados: um objeto passado ao
     // `console.warn` chega ao Playwright como «Object», e a credencial dentro
     // dele passaria sem ser vista.
@@ -171,7 +175,8 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
         if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
-        if (cmd === 'aceitar_mods') window.testServidor.aceitou = true;
+        if (cmd === 'aceitar_mods') { window.testServidor.aceitou = true; window.testAceites[args.alvo] = args.conjunto; }
+        if (cmd === 'esquecer_aceite_de_mods') delete window.testAceites[args.alvo];
         // Um link com erro de digitação: o `analisar_convite` de verdade
         // responde com o nome da falha, e nenhuma tentativa começa.
         if (cmd === 'analisar_convite' && String(args?.link).includes('erro-de-digitacao')) throw 'TokenInvalido';
@@ -325,7 +330,16 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   // janela entrar sozinha quando o pacote termina de chegar — «sair da
   // pergunta não entra em lugar nenhum» — e muito menos com a credencial que
   // desistir esqueceu.
-  await page.evaluate(() => { testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 600; });
+  //
+  // **E o sim não fica gravado** (lote W da F5, ADR 0045). Ele era gravado
+  // antes da obtenção: a volta não saía, mas o `aceitar_mods` já tinha valido,
+  // e na entrada seguinte neste servidor ninguém perguntava e o MOD rodava —
+  // contra o «não» que a pessoa deu por último. O sim da cena 1 é apagado
+  // antes, para esta medir só o desta pergunta.
+  await page.evaluate((alvo) => {
+    delete testAceites[alvo];
+    testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 600;
+  }, ALVO_R);
   await baterComOConvite(page);
   const antesDoAceite = (await conectsFeitos(page)).length;
   const conferenciasAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'mods_instalados').length);
@@ -352,7 +366,34 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     (depoisDoAceite.at(-1)?.joinSecret === CONVITE_R ? ', com a credencial que desistir devia ter esquecido' : ''));
   assert.equal(await credencialGuardada(page), null,
     'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
+  assert.equal(await page.evaluate((alvo) => testAceites[alvo] ?? null, ALVO_R), null,
+    'a pessoa desistiu enquanto o MOD chegava, e o sim dos MODs ficou gravado: na próxima entrada neste servidor ' +
+    'ninguém pergunta e o MOD roda, contra o «não» que ela deu por último (ADR 0045)');
   await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
+
+  // ---- 5c. Desistir enquanto o sim é gravado também o desfaz.
+  //
+  // Com o MOD já nesta máquina não há obtenção, e a única espera depois do
+  // ACEITAR é a do `aceitar_mods` (aqui, 500 ms). Quem fecha a pergunta nesse
+  // meio desistiu do mesmo jeito, e o sim que terminou de ser gravado depois
+  // disso não pode ficar valendo.
+  await page.evaluate((alvo) => { delete testAceites[alvo]; testAtraso.aceitar_mods = 500; }, ALVO_R);
+  await baterComOConvite(page);
+  const antesDaGravacao = (await conectsFeitos(page)).length;
+  const gravacoesAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'aceitar_mods').length);
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'aceitar_mods').length > antes,
+    gravacoesAntes, { timeout: 3000 },
+  ).catch(() => assert.fail('ACEITAR não chegou a gravar o sim, e desistir durante a gravação não foi medido'));
+  await page.click('#mods-recusar');
+  await page.waitForTimeout(900);
+  assert.equal(await page.evaluate((alvo) => testAceites[alvo] ?? null, ALVO_R), null,
+    'a pessoa desistiu enquanto o sim dos MODs era gravado, e ele ficou valendo: na próxima entrada neste servidor ' +
+    'ninguém pergunta e o MOD roda, contra o «não» que ela deu por último (ADR 0045)');
+  assert.equal((await conectsFeitos(page)).length, antesDaGravacao,
+    'a pessoa fechou a pergunta enquanto o sim era gravado, e a janela entrou mesmo assim');
+  await page.evaluate(() => { testAtraso = {}; });
 
   // ---- 5b. Uma pergunta nova que substitui a antiga durante a obtenção.
   //
@@ -663,5 +704,6 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     console.log('lote R: desistir da pergunta (RECUSAR, Escape, clicar fora, ou no meio da obtenção) esquece a credencial e não entra');
     console.log('lote R: com o último alvo trocado no meio da batida, a volta e o sim vão ao servidor que perguntou');
     console.log('lote R: a credencial não aparece no armazenamento, no DOM, no console nem em comando nenhum além do connect');
+    console.log('lote W: desistir no meio da obtenção ou da gravação não deixa o sim dos MODs valendo');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
