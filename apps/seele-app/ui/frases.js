@@ -209,6 +209,19 @@ const AVISOS = {
   // segunda faria quem lê procurar quem apagou. Não diz o número aqui porque o
   // número vem no campo — ver `desenharAviso`, que o insere.
   RetencaoApagouHistorico: "A RETENÇÃO DESTE SERVIDOR APAGOU HISTÓRICO ANTIGO",
+  // PROVISÓRIA (F1, 09/10/2026), para a casca trocar pela frase por pedido e
+  // causa. O pedido chega pelo nome (`"SetNickname"`), e a causa completa a
+  // frase em `fraseDoAviso`, por `CAUSAS_DE_RECUSA` logo abaixo. Sem ela, a
+  // faixa dizia só AVISO.
+  PedidoRecusado: "NÃO DEU",
+};
+
+// PROVISÓRIA, com a entrada `PedidoRecusado` de `AVISOS`: o que segue o «NÃO
+// DEU:» para cada causa. As três são as que a pessoa consegue resolver.
+const CAUSAS_DE_RECUSA = {
+  NomeTomado: "O NOME JÁ É DE OUTRA PESSOA",
+  NaoExiste: "ISSO NÃO EXISTE MAIS",
+  FalhaDoServidor: "O SERVIDOR FALHOU",
 };
 
 /**
