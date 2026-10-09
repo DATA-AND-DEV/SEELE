@@ -211,11 +211,48 @@ fn toda_regra_das_cascas_do_navegador_comeca_pela_marca() {
     );
 }
 
-/// G2. A marca é do celular e da ponte da F4, e de mais ninguém: uma folha do
-/// desktop que a citasse passaria a mudar com ela.
+/// As formas de ler a marca: o atributo (num seletor de CSS, num `[data-casca`
+/// de JS, num `getAttribute`) e o `dataset`. O `?.` sai antes da comparação: a
+/// leitura da oitava integração era `dataset?.casca`.
+const LEITURAS_DA_MARCA: &[&str] = &[
+    "data-casca",
+    "dataset.casca",
+    "dataset[\"casca\"]",
+    "dataset['casca']",
+    "dataset[`casca`]",
+];
+
+/// O código de um arquivo de texto da `ui/`, sem os comentários da língua dele.
+fn codigo_de(nome: &str, texto: &str) -> String {
+    if nome.ends_with(".js") {
+        sem_comentarios_js(texto)
+    } else if nome.ends_with(".css") {
+        sem_comentarios_css(texto)
+    } else {
+        let mut saida = String::with_capacity(texto.len());
+        let mut resto = texto;
+        while let Some(inicio) = resto.find("<!--") {
+            saida.push_str(&resto[..inicio]);
+            match resto[inicio..].find("-->") {
+                Some(fim) => resto = &resto[inicio + fim + 3..],
+                None => return saida,
+            }
+        }
+        saida.push_str(resto);
+        saida
+    }
+}
+
+/// G2. A marca é do celular e da ponte da F4, e de mais ninguém: um arquivo do
+/// desktop que a lesse passaria a mudar com ela. Lê o código sem os comentários,
+/// e em toda forma de ler a marca: na oitava integração, o `cascaDoRetrato` da F3
+/// lia `dataset?.casca`, e o guarda só reprovou porque o comentário ao lado citava
+/// `data-casca`. Sem o comentário, o código passava; com o comentário e sem o
+/// código, o guarda reprovava um texto.
 #[test]
 fn nenhum_arquivo_do_desktop_cita_a_marca() {
-    let mut citam = Vec::new();
+    let mut leem = Vec::new();
+    let mut lidos = 0;
     for entrada in std::fs::read_dir(ui()).expect("ui/").filter_map(Result::ok) {
         let nome = entrada.file_name().to_string_lossy().into_owned();
         let do_desktop = !CASCAS
@@ -223,13 +260,27 @@ fn nenhum_arquivo_do_desktop_cita_a_marca() {
             .any(|(prefixo, _, _)| nome.starts_with(prefixo))
             && nome != "ponte-web.js";
         let de_texto = [".css", ".js", ".html"].iter().any(|e| nome.ends_with(e));
-        if do_desktop && de_texto && ler(&nome).contains("data-casca") {
-            citam.push(nome);
+        if !(do_desktop && de_texto) {
+            continue;
+        }
+        lidos += 1;
+        let codigo = codigo_de(&nome, &ler(&nome))
+            .replace("?.[", "[")
+            .replace("?.", ".");
+        for leitura in LEITURAS_DA_MARCA {
+            if codigo.contains(leitura) {
+                leem.push(format!("{nome}: {leitura}"));
+            }
         }
     }
     assert!(
-        citam.is_empty(),
-        "o desktop cita `data-casca` em: {citam:?}"
+        lidos >= 20,
+        "o guarda leu {lidos} arquivos do desktop: a leitura da ui/ quebrou"
+    );
+    assert!(
+        leem.is_empty(),
+        "o desktop lê a marca da casca, e passaria a mudar com ela:\n{}",
+        leem.join("\n")
     );
 }
 
