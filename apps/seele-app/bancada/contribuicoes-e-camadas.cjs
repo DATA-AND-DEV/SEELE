@@ -579,10 +579,11 @@ function acordarTudo(no) {
 // ------------------------------------------- M1 · quem pinta cada lugar
 
 {
-  // **Só leitura, e por alvo.** `resumo` responde pelo alvo vazio, e por isso
-  // não via uma substituição registrada para uma pessoa só — que é como todo
-  // avatar do PERFIS é registrado. `quemPinta` pergunta a mesma
-  // `escolherSubstituicao` para cada alvo que tem contribuição.
+  // **Só leitura, e por alvo.** `resumo` respondia só pelo alvo vazio, e por
+  // isso não via uma substituição registrada para uma pessoa só — que é como
+  // todo avatar do PERFIS é registrado. `quemPinta` pergunta a mesma
+  // `escolherSubstituicao` para cada alvo que tem contribuição, e `resumo`
+  // passou a perguntar a ele no caso parcial e no automático misto.
   const registro = new R();
   const a = new I("mod/a", "a", 7, {});
   const b = new I("mod/b", "b", 7, {});
@@ -1012,6 +1013,12 @@ contexto.cartoesDosMods = new Map();
     "o descarte que lançou impediu a revogação de tirar a contribuição");
   confere("R4d · não saiu", dita("mod/a", "canal.item", "não saiu", "descarte quebrado"),
     `o descarte que lançou não chegou ao registro: ${JSON.stringify(anotadas)}`);
+  // **O ponto entre «», como nas outras recusas de contribuição** (pendência
+  // 51, item 23): `«ponto» não montou` e `N nó(s) de «ponto»`, em `base.js`.
+  // Uma busca pelo ponto entre «» no seele.log achava as outras e não esta.
+  confere("R4d · não saiu", dita("mod/a", "o conteúdo de «canal.item» não saiu"),
+    "a recusa do descarte escreveu o ponto sem «», ao contrário das outras recusas de contribuição: "
+      + `${JSON.stringify(anotadas.filter(([, texto]) => String(texto).includes("não saiu")))}`);
 
   // Cartões recusados, pelo `darCartoesDoMod` de verdade.
   const base = ler("base.js");
@@ -1468,7 +1475,7 @@ function anotando(...anotadas) {
 }
 
 // **O escolhido que desenha só quem declarou, na gestão** (D-I1 da revisão do
-// Lote Diagnóstico da correção ampla do Plano 1D). `resumo` decide pela
+// Lote Diagnóstico da correção ampla do Plano 1D). `resumo` decidia só pela
 // disputa do alvo vazio, e `quemPinta` soma os alvos. mod/a substitui o cartão
 // de todos, mod/b só o da pessoa 2, e esta máquina escolheu mod/b: no alvo
 // vazio ele não tem candidata, e a disputa diz `ausente` — mas ele desenha a
@@ -1676,6 +1683,115 @@ function anotando(...anotadas) {
       && comTodos.botoes.includes("USAR APRESENTAÇÃO DO SEELE"),
     "com mod/z escolhido e fora de pé, a gestão escondeu «USAR APRESENTAÇÃO DO SEELE», que mudaria a escolha: "
       + `«${comTodos.estado}», ${comTodos.botoes.join(", ")}`,
+  );
+}
+
+// **No automático misto, a gestão diz todos os que desenham** (pendência 49,
+// item 9; Docs-m2 do 1D). mod/a substitui o cartão de todos; mod/b, com mais
+// prioridade, o da pessoa 2; mod/e, com menos, o da pessoa 3, e perde para
+// mod/a. Sem escolha nesta máquina, a gestão lia só a disputa do alvo vazio e
+// dizia «apresentado por mod/a (escolha automática)», sem nota, enquanto mod/b
+// desenhava a pessoa 2 — e a aba DIAGNÓSTICO, logo abaixo, dizia a verdade.
+{
+  const caso = "M1 · a gestão · o automático misto";
+  const aba = abaDoDiagnostico();
+  const registro = aba.contribuicoesDosMods;
+  for (const id of ["mod/a", "mod/b", "mod/e"]) aba.modsCarregados.set(id, {});
+  registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  registro.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 10 });
+  registro.registrar({ id: "mod/e" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "3", prioridade: -5 });
+  const deDe = (id) => aba.modsCarregados.has(id);
+  const linha = registro.resumo(new Map([["pessoa.cartao", ""]]), deDe).find((l) => l.ponto === "pessoa.cartao");
+  const { estado, nota, botoes } = aba.oQueAGestaoDiz(linha, "");
+
+  // O comando da pendência: quem desenha a pessoa 2 é mod/b, e a 3, mod/a.
+  confere(
+    caso,
+    registro.escolherSubstituicao("pessoa.cartao", "2", "").escolhida?.mod === "mod/b"
+      && registro.escolherSubstituicao("pessoa.cartao", "3", "").escolhida?.mod === "mod/a",
+    "o registro deixou de dar a pessoa 2 a mod/b e a 3 a mod/a, e este caso não mede mais o automático misto",
+  );
+  confere(
+    caso,
+    estado === "automática: mod/a para todos, mod/b para quem declarou",
+    "no automático, mod/a desenha o cartão de todos e mod/b o da pessoa 2, e a gestão nomeou um MOD só — quem "
+      + `escreve mod/b lê que ele não desenha nada: «${estado}»`,
+  );
+  confere(
+    caso,
+    nota === "Também pediram este lugar e não o receberam: mod/e. Escolha abaixo qual deve desenhar.",
+    "mod/e pediu o cartão da pessoa 3 e perdeu para mod/a, e a gestão não o disse entre quem pediu e não recebeu: "
+      + `«${nota}»`,
+  );
+  confere(
+    caso,
+    botoes.map((b) => b.rotulo).join() === "USAR mod/b,USAR mod/e,USAR APRESENTAÇÃO DO SEELE",
+    `no automático misto, a gestão mudou o que oferece: ${botoes.map((b) => b.rotulo).join(", ")}`,
+  );
+  // E a gestão diz o que a aba diz, nos dois sentidos: quem desenha algum alvo
+  // é o mesmo conjunto; quem a aba dá como sem alvo nenhum está na nota; e
+  // ninguém da nota desenha — um MOD não é dito como quem desenha e como quem
+  // não recebeu ao mesmo tempo.
+  const concordam = (umaLinha, naAba) => {
+    const desenham = [umaLinha.escolhido, ...(umaLinha.tambemDesenham ?? [])];
+    return desenham.sort().join() === [...naAba.substitui].sort().join()
+      && naAba.perderam.every((id) => umaLinha.preteridos.includes(id))
+      && !umaLinha.preteridos.some((id) => desenham.includes(id));
+  };
+  const naAba = registro.quemPinta("pessoa.cartao", "", deDe);
+  confere(
+    caso,
+    concordam(linha, naAba),
+    `a gestão e a aba DIAGNÓSTICO disseram coisas diferentes do mesmo cartão: gestão ${JSON.stringify(linha)}, `
+      + `aba ${JSON.stringify(naAba)}`,
+  );
+
+  // **Quem perde o lugar de todos e vence o de alguém desenha** (M1 da revisão
+  // do K3). mod/c pede o cartão de todos, com prioridade 0, e perde para
+  // mod/a; pede também o da pessoa 2, com prioridade 20, e vence. A gestão
+  // dizia «automática: mod/a para todos, mod/c para quem declarou» e, logo
+  // abaixo, «Também pediram este lugar e não o receberam: mod/c.», com a aba
+  // dizendo que ninguém perdeu.
+  const dosDois = abaDoDiagnostico();
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir", prioridade: 10 });
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 20 });
+  const deC = dosDois.contribuicoesDosMods.resumo(new Map([["pessoa.cartao", ""]]), () => true)
+    .find((l) => l.ponto === "pessoa.cartao");
+  const disseDeC = dosDois.oQueAGestaoDiz(deC, "");
+  confere(
+    caso,
+    disseDeC.estado === "automática: mod/a para todos, mod/c para quem declarou" && disseDeC.nota === "",
+    "mod/c perdeu o cartão de todos e desenha o da pessoa 2, e a gestão o disse como quem desenha e como quem não "
+      + `recebeu: «${disseDeC.estado}», nota «${disseDeC.nota}»`,
+  );
+  const deCNaAba = dosDois.contribuicoesDosMods.quemPinta("pessoa.cartao", "", () => true);
+  confere(
+    caso,
+    concordam(deC, deCNaAba),
+    `com mod/c perdendo o cartão de todos e vencendo o da pessoa 2, a gestão e a aba se desmentem: gestão `
+      + `${JSON.stringify(deC)}, aba ${JSON.stringify(deCNaAba)}`,
+  );
+
+  // Os controles: sem ninguém noutro alvo, a frase continua a de um MOD só.
+  // Com mod/a escolhido, ou o SEELE, o automático misto não se aplica.
+  const sozinho = abaDoDiagnostico();
+  sozinho.contribuicoesDosMods.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  sozinho.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "2" });
+  const soA = sozinho.contribuicoesDosMods.resumo(new Map([["pessoa.cartao", ""]]), () => true)
+    .find((l) => l.ponto === "pessoa.cartao");
+  confere(
+    caso,
+    sozinho.oQueAGestaoDiz(soA, "").estado === "apresentado por mod/a (escolha automática)"
+      && (soA.tambemDesenham ?? []).length === 0,
+    `com mod/a sozinho a substituir o cartão, a gestão deixou de dizer que ele apresenta: ${JSON.stringify(soA)}`,
+  );
+  const escolhidos = ["mod/a", NATIVO].map((escolha) => registro
+    .resumo(new Map([["pessoa.cartao", escolha]]), deDe).find((l) => l.ponto === "pessoa.cartao"));
+  confere(
+    caso,
+    escolhidos.every((l) => (l.tambemDesenham ?? []).length === 0),
+    `com uma escolha gravada, a gestão disse «também desenham» do automático: ${JSON.stringify(escolhidos)}`,
   );
 }
 

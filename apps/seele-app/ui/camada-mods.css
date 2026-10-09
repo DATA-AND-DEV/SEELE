@@ -467,3 +467,10 @@
   border: var(--seele-b) solid var(--seele-laranja-nerv);
   pointer-events: none;
 }
+
+/* Quantos lugares à vista o teto de contornos deixou de fora, numa linha
+   própria dentro do aviso: o mesmo canto, a mesma cor. */
+.contornos-dos-pontos-nota {
+  display: block;
+  pointer-events: none;
+}

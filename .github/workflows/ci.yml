@@ -331,7 +331,7 @@ jobs:
   # # Por que um job próprio
   #
   # Elas moravam no fim do job acima, depois da instalação do Chromium e das
-  # quatro bancadas de navegador. No Actions um passo que falha pula os
+  # bancadas de navegador. No Actions um passo que falha pula os
   # seguintes, e uma instalação do Playwright que quebrasse as deixava como
   # «skipped» — nem verdes nem vermelhas. Aqui elas não dependem de nada disso.
   #

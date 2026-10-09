@@ -238,3 +238,46 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - a bancada `ajustes-v013.cjs` verde.
   - **A conformidade** ficou verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar` e `quem_hospeda_fecha`. O `quarto_pelo_link` ficou de fora, por causa da porta 8384.
   - **A ordem das verificações:** a conformidade e o servidor rodaram sobre `a495fe2`, antes do J. Depois do merge do J, rodaram de novo o app, o fmt, o clippy, o `check-runtime` e a bancada. O J mexe só em `ui/`, `bancada/` e `tests/frontend.rs`.
+- **A onda 4 foi despachada sobre `411778e`**, o merge de volta da `versao/0.16` em `a2b9f9d0`. A orquestradora prendeu a conformidade enquanto rodava a bateria da 0.15.2. O F escreveu e compilou os testes de conformidade, e os rodou depois da liberação.
+- **A pendência 56 entrou no plano** como item 7 do Z (`a68b994`), por pedido da orquestradora.
+- **K3 → integrado** (`411778e..b318691`, merge `81a72ba`). Foi aprovado na primeira revisão, com seis Menores, e uma rodada os consertou.
+  - **Os itens:**
+    - **P49-9**, em `66133ec`: no automático misto, a gestão diz todos os que desenham;
+    - **P51-23**, em `f62ed74`, `0db8cbc`, `f7cb4fc`, `19391f0` e `69f194f`: a nota dos contornos, o recorte vazio, o ajudante das recusas, os números do teto e o texto;
+    - **o caso que prende o bloco de mídia do K2**, em `4e4bc93`.
+  - **A rodada:**
+    - nenhum MOD aparece como quem desenha e como quem não recebeu (`e569ae9`);
+    - as recusas pelo mesmo teto ocupam uma vaga só na aba (`13cf168`);
+    - a quarta anotação ganhou guarda (`e4fcfc1`);
+    - o recorte está provado nas quatro bordas (`30ffb4e`);
+    - há um leitor só de classes (`4c6d5dc`);
+    - o plano 1C ganhou notas «Hoje» (`62bc035`).
+  - **Ficam para o Z:**
+    - a chave do teto do som não tem prova. Perdê-la só devolve aquele caminho ao comportamento de antes, e nenhum número sai errado;
+    - com um MOD escolhido, a gestão não cita os outros que perderam. Isso é anterior ao lote.
+- **F → integrado** (`411778e..3a60172`, merge `198b03d`), em 4 rodadas. A pendência 50 fecha em três itens:
+  - **P50-1**, em `dde763b`. O `Enlace::sair` espera o motor e a despedida. Quem sai some dos presentes dos outros em menos de 1 ms no laço local, e não nos ~20 s do prazo de ociosidade.
+  - **P50-2**, em `fd10af6`. A thread da conexão avisa antes de o runtime cair. A casca espera esse aviso por `encerrar_e_esperar(teto)`.
+  - **P50-3**, em `b7aeb74`. A saída do app revoga a sessão, e com isso diz a conta dos baldes. Ela manda parar os MODs da geração que fechou, espera até 200 ms sem segurar o cadeado e encerra a conexão em até 500 ms. A parada de um MOD nativo sobe para INFO.
+  - **A medida:** `saida_com_despedida.rs` é o teste novo, e é ele que mede.
+  - **As rodadas de conserto:**
+    - **1ª:**
+      - o guarda de `encerramento.rs` deixa de casar com comentário;
+      - o doc do `wait_idle` diz o que ele compra: o período de fechamento do QUIC, sem prova num laço que não perde pacote, com custo medido de ~86 ms;
+      - a reversão 1 foi decomposta, e a prova do P50-2 deixou de depender de corrida;
+      - a conta e a espera dos MODs ficaram só com a geração revogada.
+    - **2ª:** o gancho do `ExitRequested` também deixa de casar com comentário.
+    - **3ª:** o leitor de comentários passou a aninhar `/* */` e a conhecer `cr"`.
+  - **O que fica sem prova, e o doc diz:**
+    - o `wait_idle` como reenvio de um CLOSE perdido;
+    - a espera pelas alças abortadas de `largar_tudo_e_esperar`.
+- **A integração da versão em `bbb0ed9`.** A orquestradora a fez sem a onda 4, com o servidor da F1, o ENC/2 e a sala da F7, e a bateria passou com 3196 testes. O merge de volta deu `4a28357`, sem conflito de texto. O `enlace.rs`, o `seele-ffi/src/lib.rs` e o `tela_por_um_par.rs` foram mesclados sozinhos.
+- **Um conflito que o texto não mostrou** (`7f885a5`). A F7 trocou o campo `Destino::impressao_esperada` por `esperada: Option<Esperada>`, e o `saida_com_despedida.rs`, que é novo e veio do F, deixou de compilar. `None` continua querendo dizer «nada a conferir». Depois do conserto, o arquivo passou 3/3 em três rodadas.
+- **Onda 4 fechada.** O F e o K3 estão em `0.16/lotes`, no `7f885a5`, com a `versao/0.16` de `bbb0ed9` por baixo.
+  - **O branch combinado:**
+    - fmt e `clippy --workspace --all-targets --all-features -D warnings` limpos;
+    - `seele-app` com todos os binários verdes: bin 273, frontend 268, `encerramento` 2 e os menores;
+    - `seele-core --lib` 459, `seele-ffi --lib`, `seele-proto`, `seele-server` inteiro e `xtask` verdes;
+    - `check-runtime` verde;
+    - as bancadas `diagnostico-de-mods`, `contribuicoes-e-camadas`, `regiao-do-mod` e `ajustes-v013` verdes.
+  - **A conformidade, um arquivo por vez, com `--test-threads=1`, toda verde:** `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m3`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar`, `quem_hospeda_fecha`, `saida_com_despedida` e `tela_por_um_par`. O `quarto_pelo_link` ficou de fora, pela porta 8384.

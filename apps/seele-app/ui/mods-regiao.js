@@ -133,9 +133,24 @@ const LIMITES_DO_CARTAO = Object.freeze({
   nos: 64,
   /** Níveis de fundura dentro de um cartão. */
   fundura: 6,
-  /** Mídias somadas em todos os cartões deste MOD. */
+  /**
+   * Mídias no bolso de cartão de um renderer. O bolso é o mesmo de
+   * `bytesDeMidia`, abaixo: de todos os cartões deste MOD nos de
+   * `SeeleUI.cartoes`, e de cada destino numa contribuição.
+   */
   midias: 64,
-  /** Bytes de mídia somados em todos os cartões deste MOD. */
+  /**
+   * Bytes de mídia no bolso de cartão de um renderer — os do arquivo, como
+   * chegaram, como em `LIMITES_DA_REGIAO.bytesDeMidia`.
+   *
+   * **De quem é o bolso.** Nos cartões de `SeeleUI.cartoes`, de todos os
+   * cartões deste MOD: eles moram no renderer da região, e o bolso é um só.
+   * Numa contribuição, **de cada destino**: ela monta um renderer por destino
+   * (`montarContribuicao`, em `base.js`), e cada um conta a mídia que monta —
+   * um `pessoa.cartao` sem alvo numa sala de 64 pessoas tem 64 bolsos destes.
+   * O som decodificado não segue esta conta: o bolso dele numa contribuição é
+   * da contribuição inteira (`bytesDeSomDecodificado`, abaixo).
+   */
   bytesDeMidia: 20 * 1024 * 1024,
   /**
    * Bytes de som decodificado somados no bolso de cartão de um renderer — ver
@@ -1650,8 +1665,12 @@ class RegiaoDeMod {
         return;
       }
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
-        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`);
+        // Os números vão à anotação também, e não só ao registro: a aba
+        // DIAGNÓSTICO é onde quem escreve o MOD pergunta se a mídia era grande
+        // demais ou se o lugar já estava cheio.
+        const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
+        this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${bolso.teto}`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no fundo: ${porque}`);
         return;
       }
       // **Reservados antes do `decode()`**, como o som em `montarMidia`: duas
@@ -1748,8 +1767,9 @@ class RegiaoDeMod {
       const teto = plano.cartao ? LIMITES_DO_CARTAO.bytesDeMidia : this.perfil.bytesDeMidia;
       if (this[conta] + midia.bytes > teto) {
         elem.dataset.estadoDoRetrato = "cheia";
-        this.anotarMidia(elem, "recusada", `passou do teto de ${teto} bytes de mídia deste lugar`);
-        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`);
+        const porque = `${midia.bytes} bytes somados aos ${this[conta]} já montados passam do teto de ${teto}`;
+        this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${teto}`);
+        this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: ${porque}`);
         return;
       }
       // **Reservados antes do `decode()`**, como o som em `montarMidia`: dois
@@ -2448,10 +2468,11 @@ class RegiaoDeMod {
       if (this[bolso.conta] + midia.bytes > bolso.teto) {
         // O porquê vai ao MOD com os números, como no teto do som
         // decodificado (`carregarSom`): sem ele, «recusada» por teto e
-        // «recusada» por falta de um gesto chegavam iguais.
+        // «recusada» por falta de um gesto chegavam iguais. E vai à anotação
+        // que a aba DIAGNÓSTICO lê, com o lugar.
         const porque = `${midia.bytes} bytes somados aos ${this[bolso.conta]} já montados passam do teto de ${bolso.teto}`;
         elem.dataset.estado = "cheia";
-        this.anotarMidia(elem, "recusada", `passou do teto de ${bolso.teto} bytes de mídia deste lugar`);
+        this.anotarMidia(elem, "recusada", `${porque} bytes de mídia deste lugar`, undefined, `bytes de mídia:${bolso.teto}`);
         this.dono.falar({ nome: "midia", chave: plano.no.chave ?? "", estado: "recusada", porque });
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada: ${porque}`);
         return;
@@ -2759,11 +2780,12 @@ class RegiaoDeMod {
         const dosOutros = this[conta] - estado.bytes;
         if (dosOutros + novos > teto) {
           const porque = `${novos} bytes somados aos ${dosOutros} já montados passam do teto de ${teto}`;
-          const motivo = `passou do teto de ${teto} bytes de mídia deste lugar`;
+          const motivo = `${porque} bytes de mídia deste lugar`;
+          const tetoDaRecusa = `bytes de mídia:${teto}`;
           const recusado = this.somDaMidia.get(elem);
-          if (recusado) recusado.recusa = { figura: "cheia", motivo };
+          if (recusado) recusado.recusa = { figura: "cheia", motivo, teto: tetoDaRecusa };
           elem.dataset.estado = "cheia";
-          this.anotarMidia(elem, "recusada", motivo);
+          this.anotarMidia(elem, "recusada", motivo, undefined, tetoDaRecusa);
           this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
           this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
           return;
@@ -2805,10 +2827,11 @@ class RegiaoDeMod {
     const ocupa = som.length * som.numberOfChannels * 4;
     if (this[contaDoSom] + ocupa > tetoDoSom) {
       const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
+      const tetoDaRecusa = `bytes de som:${tetoDoSom}`;
       const recusado = this.somDaMidia.get(elem);
-      if (recusado) recusado.recusa = { figura: "cheia", motivo: porque };
+      if (recusado) recusado.recusa = { figura: "cheia", motivo: porque, teto: tetoDaRecusa };
       elem.dataset.estado = "cheia";
-      this.anotarMidia(elem, "recusada", porque);
+      this.anotarMidia(elem, "recusada", porque, undefined, tetoDaRecusa);
       this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
       this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
       return;
@@ -3256,7 +3279,7 @@ class RegiaoDeMod {
         som.recusa = recusa;
         if (som.montagem) delete som.montagem.origem.uri;
         elem.dataset.estado = recusa.figura;
-        this.anotarMidia(elem, "recusada", recusa.motivo, Boolean(som.montagem?.plano.cartao));
+        this.anotarMidia(elem, "recusada", recusa.motivo, Boolean(som.montagem?.plano.cartao), recusa.teto);
         return;
       }
     }
@@ -3319,14 +3342,19 @@ class RegiaoDeMod {
    *   um corte que parta um par substituto deixa meio caractere no motivo.
    * @param {boolean} [cartao] Se ela mora num cartão. Dito na primeira
    *   anotação e mantido nas seguintes.
+   * @param {string} [teto] Numa recusa por teto, qual: o tipo e o número, como
+   *   `"bytes de mídia:10485760"`. A aba junta numa vaga só as recusas pelo
+   *   mesmo teto (`contarAMidia`, em `base.js`): o motivo traz os números de
+   *   cada uma, e sem a chave cada uma seria um texto e ocuparia uma vaga.
    */
-  anotarMidia(elem, situacao, motivo = "", cartao) {
+  anotarMidia(elem, situacao, motivo = "", cartao, teto = "") {
     if (this.solta) return;
     const antes = this.estadosDeMidia.get(elem);
     this.estadosDeMidia.set(elem, {
       situacao,
       motivo: [...String(motivo ?? "")].slice(0, 200).join(""),
       cartao: cartao ?? antes?.cartao ?? false,
+      ...(teto ? { teto } : {}),
     });
     this.dono.midiaMudou?.();
   }
@@ -3841,6 +3869,12 @@ class TocadorDeSomDeMod {
   /**
    * @param {AudioBuffer} som O que `decodificarSomDeMod` devolveu.
    * @param {(aviso: string, comGesto?: boolean, naoLigou?: *, suspensoPeloProduto?: boolean) => void} avisar
+   *   Quem ouve o som. Na `recusada`, `naoLigou` é o que o navegador
+   *   respondeu ao recusar o `resume()` antes do prazo, e `undefined` quando o
+   *   prazo venceu sem resposta. É o que separa as duas recusas da saída que o
+   *   produto suspendeu: com `undefined`, ela «não acordou a tempo»; com uma
+   *   resposta, ela não acordou, sem «a tempo», e a resposta vai junto — ver
+   *   `SILENCIO_ANTES_DE_SUSPENDER_MS`.
    */
   constructor(som, avisar) {
     this.som = som;
