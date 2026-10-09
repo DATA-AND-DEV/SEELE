@@ -54,7 +54,10 @@ let focoAntesDoAceite = null;
  * segundo lugar teria de ser esquecido em cada uma dessas portas, e uma porta
  * esquecida é uma credencial que sobra.
  *
- * Só memória: nunca disco, nunca `localStorage`, nunca o console.
+ * Só memória: nunca disco, nunca `localStorage`, nunca o console. O guarda
+ * `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`, em
+ * `tests/frontend.rs`, confere cada linha que a toca, e a `ajustes-v013.cjs`
+ * a procura onde ela não pode estar.
  */
 let aceitePendente = null;
 

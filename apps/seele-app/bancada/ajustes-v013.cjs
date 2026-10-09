@@ -137,10 +137,20 @@ async function baterComOConvite(page) {
 async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const erros = []; page.on('pageerror', e => erros.push(e.message));
-  const consoles = []; page.on('console', m => consoles.push(m.text()));
   await page.addInitScript(({ table, convite, mod, snapshot }) => {
     window.testTable = table; window.testCalls = []; window.testAtraso = {};
     window.testServidor = { aceitou: false, gasto: false };
+    // O console inteiro, com os argumentos serializados: um objeto passado ao
+    // `console.warn` chega ao Playwright como «Object», e a credencial dentro
+    // dele passaria sem ser vista.
+    window.testConsole = [];
+    for (const nivel of ['log', 'info', 'warn', 'error', 'debug']) {
+      const original = console[nivel].bind(console);
+      console[nivel] = (...args) => {
+        try { window.testConsole.push(JSON.stringify(args)); } catch { window.testConsole.push(String(args)); }
+        original(...args);
+      };
+    }
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
@@ -249,9 +259,27 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
   await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
 
+  // ---- 6. Depois de tudo isso, a credencial não está em lugar nenhum além do
+  // `connect`: nem no armazenamento da página, nem no DOM, nem no console, nem
+  // em outro comando — que é por onde ela chegaria a um arquivo.
+  const vazou = await page.evaluate((convite) => {
+    const onde = [];
+    const guardado = (loja) => Object.keys(loja).map((k) => `${k}=${loja.getItem(k)}`).join('\n');
+    if (guardado(localStorage).includes(convite)) onde.push('localStorage');
+    if (guardado(sessionStorage).includes(convite)) onde.push('sessionStorage');
+    if (document.documentElement.outerHTML.includes(convite)) onde.push('o DOM');
+    if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
+    if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
+    for (const chamada of testCalls) {
+      if (chamada.cmd !== 'connect' && JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
+    }
+    return onde;
+  }, CONVITE_R);
+  assert.deepEqual(vazou, [],
+    `a credencial da tentativa apareceu fora do connect: ${vazou.join(', ')}. Ela é um convite de uso único ou a senha do servidor, e só vive na memória da pergunta dos MODs`);
+
   assert.deepEqual(erros, [], 'a cena do lote R lançou erro na página');
   await page.close();
-  return { consoles };
 }
 
 (async () => {
@@ -466,5 +494,6 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
     console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');
     console.log('lote R: desistir da pergunta (RECUSAR, Escape, clicar fora, ou no meio da obtenção) esquece a credencial e não entra');
+    console.log('lote R: a credencial não aparece no armazenamento, no DOM, no console nem em comando nenhum além do connect');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
