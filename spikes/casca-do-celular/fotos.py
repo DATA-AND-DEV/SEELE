@@ -82,7 +82,7 @@ ESTADOS = {
 # Os estados que levam também os dois temas do ESTILO e o hostil.
 COM_TEMA = ["09-servidor", "11-conversa", "13-pessoas", "14-ajustes", "17-chamada", "27-mudo", "28-este-servidor"]
 TEMAS = ["papel", "profundo", "hostil", "claro"]
-# O texto dinâmico a 150 % e a tela larga, em três estados.
+# O texto dinâmico a 150 %, em cinco estados.
 COM_TEXTO_GRANDE = ["11-conversa", "13-pessoas", "17-chamada", "14-ajustes", "26-segurar-para-falar"]
 
 MEDIR = r"""
@@ -216,6 +216,9 @@ def main() -> int:
                 casos.append((f"{nome}-{tema}-390", f"{consulta}&tema={tema}", "390"))
         if nome in COM_TEXTO_GRANDE:
             casos.append((f"{nome}-texto150-390", f"{consulta}&texto=1.5", "390"))
+    # A casca do celular numa tela grande: um tablet, ou a escolha à mão. O
+    # computador recebe a casca larga (D-web-3), que a prova sobre a casca
+    # fotografa.
     if not opcoes.so:
         casos.append(("11-conversa-larga", ESTADOS["11-conversa"], "larga"))
 

@@ -19,6 +19,11 @@ const UI = "../../apps/seele-app/ui/";
 
 // --------------------------------------------------------------- as frases
 
+// Para onde vai quem quer o app do SEELE: o site, que resolve a versão mais
+// nova sozinho (decisão da orquestradora, 09/10). Uma constante só, nunca
+// montada com dado de quem usa.
+const PAGINA_DO_APP = "https://seele.app.br/#baixar";
+
 const FRASES_DO_CELULAR = {
   abas: { servidor: "SERVIDOR", conversa: "CONVERSA", pessoas: "PESSOAS", ajustes: "AJUSTES" },
   inicio: {
@@ -27,6 +32,7 @@ const FRASES_DO_CELULAR = {
     colar: "COLAR UM LINK",
     entrar: "ENTRAR",
     hospedar: "Hospedar um servidor é pelo app do SEELE, instalado num computador.",
+    baixar: "BAIXAR O APP DO SEELE",
     identidade: "Sua identidade mora neste navegador, neste aparelho.",
   },
   entrar: {
@@ -58,7 +64,7 @@ const FRASES_DO_CELULAR = {
     },
     "servidor-0.15": {
       titulo: "ESTE LINK É DE UM SERVIDOR 0.15",
-      corpo: "O celular entra só no Servidor 1.0. Abra o link no SEELE do computador, ou peça a quem hospeda o Servidor 1.0.",
+      corpo: "O celular entra só no Servidor 1.0. Abra o link no app do SEELE, ou peça a quem hospeda o Servidor 1.0.",
     },
     incompleto: {
       titulo: "LINK INCOMPLETO",
@@ -183,7 +189,7 @@ const FRASES_DO_CELULAR = {
   foraDoCelular: {
     titulo: "O QUE O CELULAR NÃO FAZ",
     soNoApp: ["SÓ NO APP DO SEELE", [
-      ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador."],
+      ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador.", PAGINA_DO_APP],
       ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
       ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
       ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
@@ -364,6 +370,10 @@ function marcaAssinatura() {
   return h("img", { src: `${UI}marca-assinatura.svg`, alt: "SEELE" });
 }
 
+function linkDoApp() {
+  return h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: FRASES_DO_CELULAR.inicio.baixar });
+}
+
 function telaInicio() {
   const f = FRASES_DO_CELULAR.inicio;
   return h("section", { class: "tela cel-entrada", "aria-labelledby": "inicio-titulo" },
@@ -380,7 +390,7 @@ function telaInicio() {
               h("span", { class: "cel-linha-sub", text: `${s.endereco} · Servidor ${s.versao} · ${s.ultima}` })),
             h("span", { class: "rotulo", text: f.entrar }))))),
       h("p", { class: "cel-nota", style: { marginTop: "16px" }, text: f.identidade }),
-      h("p", { class: "cel-fora" }, rotulo("HOSPEDAR"), f.hospedar)),
+      h("p", { class: "cel-fora" }, rotulo("HOSPEDAR"), f.hospedar, linkDoApp())),
     h("div", { class: "cel-entrada-pe" },
       h("button", { class: "botao cel-largo", type: "button", onclick: () => mudar({ tela: "entrar", convite: "pronto" }) }, f.colar)));
 }
@@ -709,7 +719,8 @@ function subAjustes(id) {
   } else if (id === "computador") {
     const grupo = ([rotuloDoGrupo, itens]) => [
       h("div", { class: "cel-secao-titulo" }, rotulo(rotuloDoGrupo)),
-      h("ul", { class: "cel-no-computador" }, itens.map(([nome, frase]) => h("li", {}, h("strong", { text: nome }), h("p", { class: "cel-nota", text: frase })))),
+      h("ul", { class: "cel-no-computador" }, itens.map(([nome, frase, link]) =>
+        h("li", {}, h("strong", { text: nome }), h("p", { class: "cel-nota", text: frase }), link && linkDoApp()))),
     ];
     corpo = [grupo(f.foraDoCelular.soNoApp), grupo(f.foraDoCelular.noComputador)];
   } else if (id === "servidor") {

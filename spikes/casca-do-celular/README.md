@@ -20,11 +20,15 @@ celular reorganiza os nós que o desktop já desenha (a arquitetura híbrida do 
   `fotos.py` lista todos.
 
 **A prova sobre a casca** (`prova-sobre-a-casca/`): a arquitetura híbrida contra a
-`ui/` de hoje, por uma cópia, como o `tools/carga-da-casca.py`. Ela prova três
+`ui/` de hoje, por uma cópia, como o `tools/carga-da-casca.py`. Ela prova quatro
 coisas:
-- o desktop fica igual pixel a pixel com os arquivos do celular carregados;
+- o desktop fica igual pixel a pixel com os arquivos do celular carregados, no
+  Chromium e no WebKit;
 - a aba PESSOAS sai da `#lista-roster` do desktop;
-- o MUDO da faixa manda `set_muted` pelo `#botao-mudo` de sempre.
+- o MUDO da faixa manda `set_muted` pelo `#botao-mudo` de sempre;
+- a casca larga (D-web-3), com `larga-prova.css` e `larga-prova.js`, é o desktop
+  sem a barra da janela e com HOSPEDAR AQUI virando a frase do app. Com
+  `--foto-do-spec`, ela grava `docs/imagens/celular/casca-larga.png`.
 
 ## Como roda
 
@@ -36,16 +40,19 @@ python3 spikes/casca-do-celular/prova-sobre-a-casca/prova.py /tmp/prova
 python3 spikes/casca-do-celular/prova-sobre-a-casca/prova.py /tmp/prova --sem-viewport   # a reversão: reprova
 ```
 
-Precisa do Playwright com o Chromium (`python3 -m pip install playwright` e
-`python3 -m playwright install chromium`) e do Pillow, para a comparação de pixels.
+Precisa do Playwright com o Chromium e o WebKit (`python3 -m pip install playwright`
+e `python3 -m playwright install chromium webkit`) e do Pillow, para a comparação de
+pixels.
 
 ## O que o `fotos.py` mede
 
-São 95 casos:
+São 96 casos:
 - 31 estados × 390 × 844 e 360 × 800;
 - 7 estados nos temas PAPEL, PROFUNDO, hostil e claro;
-- 4 estados com o texto a 150 %;
-- a tela larga.
+- 5 estados com o texto a 150 %;
+- a casca do celular numa tela grande (um tablet, ou a escolha à mão).
+
+O computador recebe a casca larga, e quem a fotografa é a prova sobre a casca.
 
 Em cada caso ele mede:
 - rolagem lateral: só um trilho marcado `data-rola-de-lado` rola de lado;
@@ -59,10 +66,11 @@ Em cada caso ele mede:
   linha dos MODs, com contraste e a mesma cor computada com e sem tema;
 - erros de script.
 
-Os 95 passavam em 09/10. Cada medida foi vista reprovar um defeito de verdade antes
+Os 96 passam em 09/10. Cada medida foi vista reprovar um defeito de verdade antes
 do conserto que a fez passar, e a lista está no spec, §11.
 
 ## O que ele não prova
 
-O desenho foi medido no Chromium. Ficam por conferir no Safari do Simulador e no
-aparelho o texto dinâmico, as áreas seguras reais e o teclado (spec, §12).
+O desenho foi medido no Chromium. No Safari do Simulador passaram as fontes, os
+glifos, a área segura de cima, os temas e o texto do sistema. Ficam por conferir o
+web app instalado, o teclado de verdade, o deitado e o leitor de tela (spec, §12).

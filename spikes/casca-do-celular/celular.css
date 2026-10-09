@@ -643,6 +643,20 @@
 
 :root[data-casca="celular"] .cel-fora .rotulo { display: block; margin-bottom: 4px; }
 
+/* O link para baixar o app, junto da frase de hospedar: um alvo de 44, na cor
+   de ação, sublinhado porque sai da página. */
+:root[data-casca="celular"] .cel-baixar {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  color: var(--seele-laranja-nerv);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* ----------------------------------------------------------- a aba CONVERSA */
 
 :root[data-casca="celular"] .cel-mensagens {
