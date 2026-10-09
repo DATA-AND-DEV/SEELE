@@ -1728,15 +1728,49 @@ function anotando(...anotadas) {
     botoes.map((b) => b.rotulo).join() === "USAR mod/b,USAR mod/e,USAR APRESENTAÇÃO DO SEELE",
     `no automático misto, a gestão mudou o que oferece: ${botoes.map((b) => b.rotulo).join(", ")}`,
   );
-  // E a gestão diz o que a aba diz: quem desenha algum alvo e quem não
-  // desenha nenhum, a mesma soma de `quemPinta`.
+  // E a gestão diz o que a aba diz, nos dois sentidos: quem desenha algum alvo
+  // é o mesmo conjunto; quem a aba dá como sem alvo nenhum está na nota; e
+  // ninguém da nota desenha — um MOD não é dito como quem desenha e como quem
+  // não recebeu ao mesmo tempo.
+  const concordam = (umaLinha, naAba) => {
+    const desenham = [umaLinha.escolhido, ...(umaLinha.tambemDesenham ?? [])];
+    return desenham.sort().join() === [...naAba.substitui].sort().join()
+      && naAba.perderam.every((id) => umaLinha.preteridos.includes(id))
+      && !umaLinha.preteridos.some((id) => desenham.includes(id));
+  };
   const naAba = registro.quemPinta("pessoa.cartao", "", deDe);
   confere(
     caso,
-    [linha.escolhido, ...(linha.tambemDesenham ?? [])].sort().join() === [...naAba.substitui].sort().join()
-      && naAba.perderam.every((id) => linha.preteridos.includes(id)),
+    concordam(linha, naAba),
     `a gestão e a aba DIAGNÓSTICO disseram coisas diferentes do mesmo cartão: gestão ${JSON.stringify(linha)}, `
       + `aba ${JSON.stringify(naAba)}`,
+  );
+
+  // **Quem perde o lugar de todos e vence o de alguém desenha** (M1 da revisão
+  // do K3). mod/c pede o cartão de todos, com prioridade 0, e perde para
+  // mod/a; pede também o da pessoa 2, com prioridade 20, e vence. A gestão
+  // dizia «automática: mod/a para todos, mod/c para quem declarou» e, logo
+  // abaixo, «Também pediram este lugar e não o receberam: mod/c.», com a aba
+  // dizendo que ninguém perdeu.
+  const dosDois = abaDoDiagnostico();
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir", prioridade: 10 });
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  dosDois.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 20 });
+  const deC = dosDois.contribuicoesDosMods.resumo(new Map([["pessoa.cartao", ""]]), () => true)
+    .find((l) => l.ponto === "pessoa.cartao");
+  const disseDeC = dosDois.oQueAGestaoDiz(deC, "");
+  confere(
+    caso,
+    disseDeC.estado === "automática: mod/a para todos, mod/c para quem declarou" && disseDeC.nota === "",
+    "mod/c perdeu o cartão de todos e desenha o da pessoa 2, e a gestão o disse como quem desenha e como quem não "
+      + `recebeu: «${disseDeC.estado}», nota «${disseDeC.nota}»`,
+  );
+  const deCNaAba = dosDois.contribuicoesDosMods.quemPinta("pessoa.cartao", "", () => true);
+  confere(
+    caso,
+    concordam(deC, deCNaAba),
+    `com mod/c perdendo o cartão de todos e vencendo o da pessoa 2, a gestão e a aba se desmentem: gestão `
+      + `${JSON.stringify(deC)}, aba ${JSON.stringify(deCNaAba)}`,
   );
 
   // Os controles: sem ninguém noutro alvo, a frase continua a de um MOD só.

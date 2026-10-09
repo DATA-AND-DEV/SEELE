@@ -486,7 +486,8 @@ class RegistroDeContribuicoes {
    *   (`escolhido`); a soma dos alvos é a de `quemPinta`, com a mesma escolha:
    *   `tambemDesenham` diz quem vence algum outro alvo, fora o escolhido, e
    *   `preteridos` junta à disputa do alvo vazio quem pediu algum alvo e não
-   *   vence em nenhum (`perderam`). Fora deste caso, `tambemDesenham` é vazio;
+   *   vence em nenhum (`perderam`), sem ninguém que vença algum alvo. Fora
+   *   deste caso, `tambemDesenham` é vazio;
    * - **ninguém substitui o alvo vazio, e esta máquina escolheu.** A disputa
    *   dali não tem candidata, e `escolherSubstituicao` sai antes de olhar a
    *   escolha; a linha diz então a escolha gravada (`preferidos`): o SEELE
@@ -568,11 +569,14 @@ class RegistroDeContribuicoes {
           ? pelosAlvos.substitui.filter((mod) => mod !== disputa.escolhida.mod)
           : [],
         // A disputa do alvo vazio e, no automático misto, quem pediu algum
-        // alvo e não vence em nenhum (`perderam`, de `quemPinta`).
+        // alvo e não vence em nenhum (`perderam`, de `quemPinta`). E, ali,
+        // ninguém que vença algum alvo: quem perde o lugar de todos e vence o
+        // de alguém desenha, e dizê-lo também entre quem não recebeu era a
+        // gestão se desmentindo na mesma linha (M1 da revisão do K3).
         preteridos: [...new Set([
           ...disputa.preteridas.map((c) => c.mod),
           ...(pelosAlvos?.perderam ?? []),
-        ])],
+        ])].filter((mod) => !pelosAlvos?.substitui.includes(mod)),
         // **Os três estados, para a gestão poder desenhá-los** — R5.
         //
         // `escolhido` vazio significava duas coisas: «ninguém substitui» e
