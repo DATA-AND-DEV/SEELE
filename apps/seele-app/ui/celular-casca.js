@@ -83,7 +83,10 @@
   function acompanharOTeclado() {
     const campo = document.activeElement;
     const escrevendo = !!campo && (campo.tagName === "TEXTAREA" || campo.tagName === "INPUT");
-    const aberto = escrevendo && vista.height < window.innerHeight - 120;
+    // Contra a altura da raiz, e não a da janela: no Safari do iOS o
+    // `innerHeight` encolhe junto com o teclado (medido no iOS 27: 714 sem ele,
+    // 384 com ele, e o `clientHeight` da raiz em 714 nos dois).
+    const aberto = escrevendo && vista.height < raiz.clientHeight - 120;
     sessao.toggleAttribute("data-teclado", aberto);
     if (aberto) {
       sessao.style.setProperty("--cel-visivel", `${vista.height}px`);

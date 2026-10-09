@@ -1152,12 +1152,18 @@ def teclado(pg: Page) -> list[str]:
     falhas = []
     ir_para_aba(pg, "conversa", falhas)
     pg.locator("#campo-mensagem").focus()
-    altura = 480
-    pg.evaluate("""(altura) => {
+    # Como o Safari do iOS 27 faz (medido no Simulador, 09/10, a 402 × 874): o
+    # que se vê encolhe, o `innerHeight` encolhe junto (só o `clientHeight` da
+    # raiz fica), e a parte visível desce pela página. Um teclado falso que não
+    # encolhia o `innerHeight` passava, e o teclado de verdade não ligava nada.
+    altura, desceu = 480, 200
+    pg.evaluate("""([altura, desceu]) => {
         Object.defineProperty(window.visualViewport, 'height', { get: () => altura, configurable: true });
-        Object.defineProperty(window.visualViewport, 'offsetTop', { get: () => 0, configurable: true });
+        Object.defineProperty(window.visualViewport, 'offsetTop', { get: () => desceu, configurable: true });
+        window.__innerHeightOriginal = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+        Object.defineProperty(window, 'innerHeight', { get: () => altura, configurable: true });
         window.visualViewport.dispatchEvent(new Event('resize'));
-    }""", altura)
+    }""", [altura, desceu])
     pg.wait_for_timeout(200)
     visto = pg.evaluate("""(() => {
         const r = (s) => { const e = document.querySelector(s); if (!e || getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)]; };
@@ -1168,13 +1174,16 @@ def teclado(pg: Page) -> list[str]:
         return falhas + ["com o teclado aberto, a sessão não sabe dele (data-teclado)"]
     if visto["abas"] is not None:
         falhas.append("com o teclado aberto, as abas continuam à vista")
+    if visto["topo"] is None or abs(visto["topo"][0] - desceu) > 1:
+        falhas.append(f"com o teclado aberto, o topo não acompanha o que se vê: {visto['topo']} contra {desceu}")
     if visto["mudo"] is None or visto["topo"] is None or visto["mudo"][0] > visto["topo"][1] + 80:
         falhas.append(f"com o teclado aberto, o MUDO não está no alto: mudo {visto['mudo']}, topo {visto['topo']}")
-    if visto["compositor"] is None or abs(visto["compositor"][1] - altura) > 1:
-        falhas.append(f"o compositor não está colado ao teclado: {visto['compositor']} contra {altura}")
+    if visto["compositor"] is None or abs(visto["compositor"][1] - (desceu + altura)) > 1:
+        falhas.append(f"o compositor não está colado ao teclado: {visto['compositor']} contra {desceu + altura}")
     pg.locator("#campo-mensagem").blur()
     pg.evaluate("""(() => {
         delete window.visualViewport.height; delete window.visualViewport.offsetTop;
+        Object.defineProperty(window, 'innerHeight', window.__innerHeightOriginal);
         window.visualViewport.dispatchEvent(new Event('resize'));
     })()""")
     pg.wait_for_timeout(200)
