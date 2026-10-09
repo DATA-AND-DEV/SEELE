@@ -39,6 +39,9 @@ nada dependa da memória de uma conversa.
   check-versao, check-vetores, clippy, `cargo test --workspace -- --test-threads=1`
   (2725 passaram, 0 falharam, 5 ignorados, com `SEELE_EXIGE_CODEC=1`), check-deps e deny.
   **Se o `linha/0.15` mudar depois disto, ela roda de novo.**
+  Rodou de novo em 09/10, **verde**, em `148c9e60`, com o terceiro conserto de segurança
+  (a sala cheia, `250cde9c`): 2729 passaram, 0 falharam, 5 ignorados. Depois dela, só
+  as notas mudaram (`60788523`, a D-linha-2: a 0.15.2 sai agora como atualização normal).
 - **As medidas de campo do protocolo nas duas direções**, com o dono: o app
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
