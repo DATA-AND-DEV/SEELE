@@ -696,6 +696,38 @@ function fraseDeErro(erro, apelido, deOnde) {
         "Confirme o link com quem o mandou."
       );
     }
+    // **O servidor fala uma versão que este app não fala** (P8 do plano F1b;
+    // ADR 0058). Até a 0.15 isto era NADA RESPONDEU NESSE ENDEREÇO, de um
+    // servidor que tinha respondido, e respondido justamente a versão dele, no
+    // primeiro byte da resposta. A frase diz a versão do servidor, e não o
+    // número do fio.
+    //
+    // `servidor` é a versão como o launcher a chama (`linha_do_protocolo`):
+    // - «0.15», a legada, que este app não abre e o SEELE 0.15 abre;
+    // - `null`, um número das versões de antes da 0.15, que nenhum app
+    //   oferecido fala;
+    // - «1», que vem de um servidor que **recusou** o número deste app. Toda
+    //   1.x fala o primeiro número da 1.0 (ADR 0058), então quem recusa é mais
+    //   novo que este app, e o remédio é atualizar.
+    if (erro.OutraLinha) {
+      const { servidor } = erro.OutraLinha;
+      if (servidor?.startsWith("0.")) {
+        return (
+          `ESTE SERVIDOR É O SERVIDOR ${servidor}.\n` +
+          `Esta versão do app não conversa com ele. Para entrar, use o SEELE ${servidor}.`
+        );
+      }
+      if (servidor == null) {
+        return (
+          "ESTE SERVIDOR É DE UMA VERSÃO ANTIGA DO SEELE.\n" +
+          "Esta versão do app não conversa com ele, e nenhuma versão oferecida hoje conversa."
+        );
+      }
+      return (
+        "ESTE SERVIDOR É DE UMA VERSÃO MAIS NOVA DO SEELE.\n" +
+        "Atualize o app para entrar nele."
+      );
+    }
     // **O servidor exige MODs que esta máquina não aceitou.** ADR 0045.
     //
     // Não é uma falha: é uma pergunta, e ela tem tela (`camada-mods.js`). O

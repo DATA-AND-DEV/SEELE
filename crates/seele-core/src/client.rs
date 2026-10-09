@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
-use seele_proto::control::{ClientMessage, ConsentimentoDePar, ServerMessage};
+use seele_proto::control::{ClientMessage, ConsentimentoDePar, Lido, ServerMessage};
 use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
@@ -140,6 +140,20 @@ pub enum ConnectError {
     },
     /// The server said something that is not a handshake.
     ProtocolViolation,
+    /// **Quem atendeu fala um número de protocolo que esta build não fala**, e
+    /// disse qual no byte 0 da primeira resposta.
+    ///
+    /// O byte 0 de todo quadro é o número do protocolo, e é por ele que se lê a
+    /// linha de quem respondeu (ADR 0058): um servidor 0.15 responde carimbado
+    /// 8, uma 1.x mais nova que não fala o 9 responde no número dela. Até a
+    /// 0.15, isto caía em [`Self::Unreachable`] — «não foi possível alcançar o
+    /// servidor» —, e a pessoa ia procurar defeito na rede de um servidor que
+    /// tinha respondido. Quem resolve é abrir o app da versão do servidor, ou
+    /// atualizar este; insistir dá o mesmo número.
+    OutraLinha {
+        /// O número do byte 0 da resposta.
+        numero: u8,
+    },
     /// A impressão esperada (a do link, ou a da lista) prometia outra
     /// identidade, e nenhum pino desempata.
     ///
@@ -431,6 +445,11 @@ fn quarantine(path: &std::path::Path) {
 pub struct Client {
     connection: quinn::Connection,
     send: quinn::SendStream,
+    /// O número que o servidor carimbou na primeira resposta, e com que toda
+    /// escrita do fluxo de controle sai (adendo de 08/10/2026, §4). Na 1.0 é
+    /// sempre o 9; numa 1.x mais nova diante de um servidor mais velho, é o
+    /// dele, e é o que deixa os dois conversarem sem quebrar o fio.
+    carimbo: u8,
     /// Mensagens já decodificadas, vindas da tarefa que é dona do fluxo.
     ///
     /// O fluxo de leitura não fica aqui de propósito — ver [`Client::next_event`].
@@ -708,7 +727,7 @@ impl Client {
         // only holds inside this one connection, and that limit is written down
         // in `seele_server::transfer` rather than implied here.
         let _ = send.set_priority(CONTROL_PRIORITY);
-        let session = tokio::time::timeout(
+        let (session, carimbo) = tokio::time::timeout(
             HANDSHAKE_TIMEOUT,
             handshake(
                 &mut send,
@@ -748,12 +767,32 @@ impl Client {
         let (para_dentro, inbox) = tokio::sync::mpsc::unbounded_channel();
         tokio::spawn(async move {
             let mut recv = recv;
+            // As mensagens de um vocabulário mais novo que o servidor mandou. A
+            // primeira vai ao registro; as outras só à contagem, para um
+            // servidor defeituoso não encher o `seele.log`.
+            let mut desconhecidas = seele_proto::control::Desconhecidas::default();
             loop {
-                match frame::read::<ServerMessage>(&mut recv).await {
-                    Ok(mensagem) => {
+                match frame::ler_da_lista::<ServerMessage>(&mut recv).await {
+                    Ok(Lido::Mensagem(mensagem)) => {
                         if para_dentro.send(mensagem).is_err() {
                             // Ninguém mais escuta: o `Client` foi descartado.
                             return;
+                        }
+                    }
+                    // **Pulada, contada, e a sessão segue** (adendo de
+                    // 08/10/2026, §6), como no servidor. Até a 0.15 o `decode`
+                    // recusava, esta tarefa terminava, e a sessão parava de
+                    // receber tudo sem dizer por quê. O quadro tem comprimento
+                    // próprio, e pular não desalinha o próximo. Rede de
+                    // segurança, e não licença: o servidor continua não
+                    // mandando o que este app não entende (ADR 0058).
+                    Ok(Lido::Desconhecida { ordinal }) => {
+                        if desconhecidas.contar() {
+                            tracing::warn!(
+                                ordinal,
+                                "mensagem de controle desconhecida, pulada: o servidor fala um \
+                                 vocabulário mais novo que este app"
+                            );
                         }
                     }
                     Err(erro) => {
@@ -828,6 +867,7 @@ impl Client {
         Ok(Self {
             connection,
             send,
+            carimbo,
             inbox,
             session,
             pin,
@@ -894,8 +934,9 @@ impl Client {
         voice_room: VoiceRoomId,
         password: Option<String>,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::EnterVoiceRoom {
                 voice_room,
                 password,
@@ -944,7 +985,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn join_channel(&mut self, channel: ChannelId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::JoinChannel { channel }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::JoinChannel { channel },
+        )
+        .await
     }
 
     /// Posts a message.
@@ -961,8 +1007,9 @@ impl Client {
         body: &str,
         client_message_id: ClientMessageId,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::SendMessage {
                 channel,
                 body: body.to_owned(),
@@ -982,8 +1029,9 @@ impl Client {
         channel: ChannelId,
         payload: String,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::ModRequest {
                 request,
                 id,
@@ -1024,8 +1072,9 @@ impl Client {
         &mut self,
         attachment: seele_proto::ids::AttachmentId,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::FetchAttachment { attachment },
         )
         .await
@@ -1098,7 +1147,7 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn leave_voice_room(&mut self) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::LeaveVoiceRoom).await
+        frame::write_em(&mut self.send, self.carimbo, &ClientMessage::LeaveVoiceRoom).await
     }
 
     /// Announces the mudo — the microphone being muted.
@@ -1112,7 +1161,7 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn set_muted(&mut self, on: bool) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetMuted(on)).await
+        frame::write_em(&mut self.send, self.carimbo, &ClientMessage::SetMuted(on)).await
     }
 
     /// Announces Isolamento total — the speakers being muted.
@@ -1124,7 +1173,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn set_total_isolation(&mut self, on: bool) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetTotalIsolation(on)).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::SetTotalIsolation(on),
+        )
+        .await
     }
 
     /// Announces a presence hint.
@@ -1133,7 +1187,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn set_presence(&mut self, presence: seele_proto::control::Presence) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetPresence(presence)).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::SetPresence(presence),
+        )
+        .await
     }
 
     /// Asks the server to make a voice room.
@@ -1153,8 +1212,9 @@ impl Client {
         limit: u16,
         channel: Option<ChannelId>,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::CreateVoiceRoom {
                 name: name.to_owned(),
                 limit,
@@ -1170,8 +1230,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn create_channel(&mut self, name: &str) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::CreateChannel {
                 name: name.to_owned(),
             },
@@ -1185,8 +1246,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn rename_voice_room(&mut self, voice_room: VoiceRoomId, name: &str) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::RenameVoiceRoom {
                 voice_room,
                 name: name.to_owned(),
@@ -1201,8 +1263,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn rename_channel(&mut self, channel: ChannelId, name: &str) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::RenameChannel {
                 channel,
                 name: name.to_owned(),
@@ -1223,8 +1286,9 @@ impl Client {
     /// Fails if the control stream is closed, or if the name is blank or longer
     /// than `MAX_CLIENT_NAME_LEN` — `encode` refuses it before it leaves.
     pub async fn rename_server(&mut self, name: &str) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::RenameServer {
                 name: name.to_owned(),
             },
@@ -1244,7 +1308,12 @@ impl Client {
     /// Fails if the control stream is closed, or if the picture is not an
     /// acceptable icon.
     pub async fn set_server_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetServerIcon { icon }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::SetServerIcon { icon },
+        )
+        .await
     }
 
     /// Põe ou tira a imagem de perfil de quem está usando este cliente.
@@ -1253,7 +1322,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn set_person_icon(&mut self, icon: Option<Vec<u8>>) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetPersonIcon { icon }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::SetPersonIcon { icon },
+        )
+        .await
     }
 
     /// Troca o apelido de quem está usando este cliente.
@@ -1262,7 +1336,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn set_nickname(&mut self, name: String) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::SetNickname { name }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::SetNickname { name },
+        )
+        .await
     }
 
     /// Asks the server to end a person's session.
@@ -1277,7 +1356,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn kick_person(&mut self, person: PersonId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::KickPerson { person }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::KickPerson { person },
+        )
+        .await
     }
 
     /// Asks the server to bar a person from returning.
@@ -1291,8 +1375,9 @@ impl Client {
         reason: Option<&str>,
         expires_at: Option<i64>,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::BanPerson {
                 person,
                 reason: reason.map(str::to_owned),
@@ -1308,7 +1393,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn remove_message(&mut self, message: MessageId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::RemoveMessage { message }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::RemoveMessage { message },
+        )
+        .await
     }
 
     /// Asks the server to move a person into a voice room.
@@ -1317,8 +1407,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn move_person(&mut self, person: PersonId, voice_room: VoiceRoomId) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::MovePerson { person, voice_room },
         )
         .await
@@ -1335,8 +1426,9 @@ impl Client {
         cursor: Option<MessageId>,
         limit: u16,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::FetchHistory {
                 channel,
                 cursor,
@@ -1401,7 +1493,12 @@ impl Client {
     pub async fn send_ping(&mut self) -> Result<()> {
         let stamp = self.pending_ping.map_or(1, |(previous, _)| previous + 1);
         self.pending_ping = Some((stamp, std::time::Instant::now()));
-        frame::write(&mut self.send, &ClientMessage::Ping { timestamp: stamp }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::Ping { timestamp: stamp },
+        )
+        .await
     }
 
     /// O `Ping` que segue o pedido de entrada de número `numero` desta conexão.
@@ -1415,8 +1512,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn send_ping_de_entrada(&mut self, numero: u64) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::Ping {
                 timestamp: crate::assento::carimbo_da_entrada(numero),
             },
@@ -1441,7 +1539,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn send_ping_marcado(&mut self, carimbo: u64) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::Ping { timestamp: carimbo }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::Ping { timestamp: carimbo },
+        )
+        .await
     }
 
     /// What the transport says about flow control on this connection.
@@ -1525,8 +1628,9 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn delete_voice_room(&mut self, voice_room: VoiceRoomId) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::DeleteVoiceRoom { voice_room },
         )
         .await
@@ -1538,7 +1642,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn delete_channel(&mut self, channel: ChannelId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::DeleteChannel { channel }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::DeleteChannel { channel },
+        )
+        .await
     }
 
     /// Asks what destroying o canal would cost. Destroys nothing.
@@ -1550,7 +1659,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn weigh_channel(&mut self, channel: ChannelId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::WeighChannel { channel }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::WeighChannel { channel },
+        )
+        .await
     }
 
     // ---- compartilhamento de tela ----
@@ -1579,7 +1693,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn start_screen_share(&mut self) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::StartScreenShare).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::StartScreenShare,
+        )
+        .await
     }
 
     /// Diz ao servidor que esta transmissão acabou.
@@ -1593,7 +1712,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn stop_screen_share(&mut self) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::StopScreenShare).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::StopScreenShare,
+        )
+        .await
     }
 
     /// Pede um quadro-chave a quem está compartilhando.
@@ -1608,7 +1732,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn request_key_frame(&mut self, screen: ScreenId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::RequestKeyFrame { screen }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::RequestKeyFrame { screen },
+        )
+        .await
     }
 
     /// Pede para receber a imagem de uma transmissão.
@@ -1629,7 +1758,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn watch_screen(&mut self, screen: ScreenId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::WatchScreen { screen }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::WatchScreen { screen },
+        )
+        .await
     }
 
     /// Para de receber a imagem de uma transmissão.
@@ -1643,7 +1777,12 @@ impl Client {
     ///
     /// Fails if the control stream is closed.
     pub async fn unwatch_screen(&mut self, screen: ScreenId) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::UnwatchScreen { screen }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::UnwatchScreen { screen },
+        )
+        .await
     }
 
     /// Avisa o servidor que o par que devia servir esta transmissão não veio.
@@ -1661,7 +1800,12 @@ impl Client {
         screen: ScreenId,
         motivo: seele_proto::control::MotivoDeFalhaDePar,
     ) -> Result<()> {
-        frame::write(&mut self.send, &ClientMessage::ParFalhou { screen, motivo }).await
+        frame::write_em(
+            &mut self.send,
+            self.carimbo,
+            &ClientMessage::ParFalhou { screen, motivo },
+        )
+        .await
     }
 
     /// Declara ao servidor a identidade deste par — e se ela empresta a
@@ -1688,8 +1832,9 @@ impl Client {
         impressao: String,
         locais: Vec<SocketAddr>,
     ) -> Result<()> {
-        frame::write(
+        frame::write_em(
             &mut self.send,
+            self.carimbo,
             &ClientMessage::EmprestarSubida {
                 consentimento,
                 impressao,
@@ -2279,6 +2424,37 @@ mod a_decisao_que_falta_nao_vira_matches {
     }
 
     #[test]
+    fn o_fluxo_de_controle_escreve_no_numero_negociado() {
+        // **Na 1.0 o fio não distingue isto, então quem prende é o texto.** A
+        // mínima e o número desta build são o mesmo 9: um `Hello` carimbado
+        // com um ou com o outro é o mesmo byte, e uma escrita da sessão no
+        // número negociado é a mesma de uma no desta build. A diferença aparece
+        // na primeira 1.x que subir o número, diante de um servidor 1.0 — e
+        // ali já seria tarde para descobrir que o `Hello` saía com o número
+        // novo, que o servidor velho recusa. As agulhas são montadas, e não
+        // escritas: este é o arquivo que o teste lê.
+        let fonte: String = include_str!("client.rs").split_whitespace().collect();
+        let hello = format!(
+            "{}(send,seele_proto::version::{},&ClientMessage::Hello{{",
+            "frame::write_em", "VERSAO_MINIMA"
+        );
+        assert!(
+            fonte.contains(&hello),
+            "o `Hello` deixou de sair carimbado com a mínima desta build"
+        );
+        for sem_carimbo in [
+            format!("{}(send,", "frame::write"),
+            format!("{}(&mutself.send,", "frame::write"),
+        ] {
+            assert!(
+                !fonte.contains(&sem_carimbo),
+                "o fluxo de controle voltou a escrever com o número desta build \
+                 (`{sem_carimbo}`), e não com o que o servidor carimbou"
+            );
+        }
+    }
+
+    #[test]
     fn a_decisao_que_o_verificador_deixou_passa_como_veio() {
         for decisao in [
             PinDecision::FirstContact {
@@ -2398,9 +2574,13 @@ async fn handshake(
     impressao: &[u8; 32],
     join_secret: Option<&str>,
     aceito: Option<&str>,
-) -> Result<SessionInfo, ConnectError> {
-    frame::write(
+) -> Result<(SessionInfo, u8), ConnectError> {
+    // **O `Hello` sai com a mínima desta build** (adendo de 08/10/2026, §4):
+    // é o número que qualquer servidor da mesma linha lê. O da sessão é o que o
+    // servidor carimbar na primeira resposta, logo abaixo.
+    frame::write_em(
         send,
+        seele_proto::version::VERSAO_MINIMA,
         &ClientMessage::Hello {
             faixa: seele_proto::version::FAIXA,
             // As APIs de MOD que esta build roda (D-fio-7). O servidor ainda
@@ -2419,7 +2599,29 @@ async fn handshake(
         ConnectError::Unreachable
     })?;
 
-    let challenge = frame::read::<ServerMessage>(recv).await.map_err(|error| {
+    // **A primeira resposta é lida bruta**, e o byte 0 dela é conferido antes
+    // do `decode` (ADR 0058). O `decode` recusaria um número de fora sem dizer
+    // qual veio, e o erro virava `Unreachable`: a tela dizia «não foi possível
+    // alcançar o servidor» de um servidor que tinha respondido — e respondido
+    // justamente o que a pessoa precisava saber, a versão dele.
+    let primeira = frame::ler_bruto(recv).await.map_err(|error| {
+        tracing::warn!(%error, "no Challenge came back");
+        ConnectError::Unreachable
+    })?;
+    let Some(&numero) = primeira.first() else {
+        // `ler_bruto` recusa o quadro vazio antes; isto só fecha o `match`.
+        return Err(ConnectError::ProtocolViolation);
+    };
+    // Aceito, o número é o da sessão: toda escrita daqui em diante sai com ele.
+    let carimbo = seele_proto::version::confere_o_carimbo(numero).map_err(|recusa| {
+        tracing::warn!(
+            numero,
+            %recusa,
+            "o servidor respondeu num número de protocolo que esta build não fala"
+        );
+        ConnectError::OutraLinha { numero }
+    })?;
+    let challenge = seele_proto::control::decode::<ServerMessage>(&primeira).map_err(|error| {
         tracing::warn!(%error, "no Challenge came back");
         ConnectError::Unreachable
     })?;
@@ -2448,8 +2650,9 @@ async fn handshake(
         return Err(ConnectError::ProtocolViolation);
     };
     let assinada = seele_proto::assinatura::prova_de_cliente(impressao, &nonce);
-    frame::write(
+    frame::write_em(
         send,
+        carimbo,
         &ClientMessage::Response {
             proof: signing_key.sign(&assinada).to_bytes().to_vec(),
         },
@@ -2478,8 +2681,9 @@ async fn handshake(
     // que está guardado, e quem decide o que guardar é quem tem uma tela.
     if let ServerMessage::ModsExigidos { mods, conjunto } = answer {
         if aceito == Some(conjunto.as_str()) {
-            frame::write(
+            frame::write_em(
                 send,
+                carimbo,
                 &ClientMessage::AceitarMods {
                     conjunto: conjunto.clone(),
                 },
@@ -2498,7 +2702,7 @@ async fn handshake(
             // «leu e não quis» de «a conexão caiu» — ver
             // `ClientMessage::RecusarMods`. O erro devolvido não é uma queixa:
             // é a pergunta, com o que a casca precisa para fazê-la.
-            let _ = frame::write(send, &ClientMessage::RecusarMods).await;
+            let _ = frame::write_em(send, carimbo, &ClientMessage::RecusarMods).await;
             // **E uma recusa que não chega não é uma recusa.**
             //
             // Escrever não é entregar: logo abaixo esta função devolve erro, e
@@ -2532,15 +2736,18 @@ async fn handshake(
             channels,
             permissions,
             ..
-        } => Ok(SessionInfo {
-            id,
-            person,
-            ssrc,
-            server,
-            voice_rooms,
-            channels,
-            permissions,
-        }),
+        } => Ok((
+            SessionInfo {
+                id,
+                person,
+                ssrc,
+                server,
+                voice_rooms,
+                channels,
+                permissions,
+            },
+            carimbo,
+        )),
         ServerMessage::Disconnecting { reason } => Err(ConnectError::Refused { reason }),
         other => {
             tracing::warn!(?other, "expected Session");

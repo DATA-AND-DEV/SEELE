@@ -1716,6 +1716,20 @@ pub enum ConnectionError {
         /// The enumerated reason.
         reason: EndReason,
     },
+    /// **O servidor fala um número de protocolo que este app não fala**, e
+    /// disse qual no byte 0 da resposta (ADR 0058).
+    ///
+    /// Até a 0.15, isto chegava como `Unreachable`, e a tela dizia «não foi
+    /// possível alcançar» de um servidor que tinha respondido. A casca diz a
+    /// versão do servidor, e o launcher (a tarefa 13 da F6) abre o app dela.
+    OutraLinha {
+        /// O número do byte 0 da resposta.
+        numero: u8,
+        /// A versão do servidor que esse número fala, como o launcher a
+        /// chama: `"0.15"` para o 8, `"1"` do 9 em diante, ou `None` para um
+        /// número que nenhuma versão publicada fala.
+        servidor: Option<String>,
+    },
     /// The identity on disk could not be read or written.
     IdentityUnavailable,
     /// No usable microphone or speaker.

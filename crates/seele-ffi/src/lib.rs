@@ -6706,6 +6706,9 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
         seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
+        // Na volta, o servidor passou a falar outro número: foi atualizado, ou
+        // trocado por outra versão, no meio da sessão.
+        seele_core::ConnectError::OutraLinha { .. } => EndReason::Incompatible,
         // Não chega à volta hoje: ela é ao `IP:porta` que atendeu, e não ao
         // código. Se chegar, é a conversa que caiu, como as de rede.
         seele_core::ConnectError::NaoLocalizou(_)
@@ -6733,6 +6736,10 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 reason: EndReason::Incompatible,
             }
         }
+        seele_core::ConnectError::OutraLinha { numero } => ConnectionError::OutraLinha {
+            numero: *numero,
+            servidor: seele_core::linha_do_protocolo(*numero).map(str::to_owned),
+        },
         seele_core::ConnectError::PinChanged { pinned, offered } => ConnectionError::PinChanged {
             pinned: pinned.clone(),
             offered: offered.clone(),
