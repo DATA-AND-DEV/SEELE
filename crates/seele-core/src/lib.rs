@@ -36,6 +36,7 @@ pub mod confere_codigo;
 pub mod conhecidos;
 pub mod encontro;
 pub mod enlace;
+pub mod entrada;
 pub mod frame;
 pub mod identity;
 pub mod mods;
