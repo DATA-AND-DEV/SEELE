@@ -27,8 +27,12 @@ fn main_rs() -> String {
 }
 
 /// O corpo da função de nome `nome`, da assinatura até a chave que a fecha na
-/// coluna zero.
-fn corpo<'a>(fonte: &'a str, nome: &str) -> &'a str {
+/// coluna zero, **sem os comentários**.
+///
+/// Com eles dentro, a chamada certa escrita num comentário — `// era:
+/// despedir_da_sessao(...)` em cima de um `disconnect()` — deixava os dois
+/// guardas verdes com o app de volta ao defeito (medido na revisão do lote F).
+fn corpo(fonte: &str, nome: &str) -> String {
     let assinatura = format!("\nfn {nome}(");
     let comeco = fonte
         .find(&assinatura)
@@ -37,7 +41,61 @@ fn corpo<'a>(fonte: &'a str, nome: &str) -> &'a str {
     let fim = resto
         .find("\n}\n")
         .unwrap_or_else(|| panic!("a função `{nome}` não fecha na coluna zero"));
-    resto.get(..fim).expect("o fim é de um `find`")
+    sem_comentarios(resto.get(..fim).expect("o fim é de um `find`"))
+}
+
+/// O texto sem os comentários de linha (`//` até o fim da linha) e de bloco
+/// (`/* … */`), e com o que está entre aspas intacto: um `//` dentro de uma
+/// frase não corta a linha.
+///
+/// Não conhece a string crua (`r"…"`) nem o caractere `'"'`: nenhum dos dois
+/// aparece nas funções que estes guardas leem, e um deles aparecendo faz o
+/// guarda reprovar em vez de passar, porque corta texto a mais.
+fn sem_comentarios(texto: &str) -> String {
+    let mut limpo = String::with_capacity(texto.len());
+    let mut letras = texto.chars().peekable();
+    let mut entre_aspas = false;
+    while let Some(letra) = letras.next() {
+        if entre_aspas {
+            limpo.push(letra);
+            match letra {
+                '\\' => {
+                    if let Some(escapada) = letras.next() {
+                        limpo.push(escapada);
+                    }
+                }
+                '"' => entre_aspas = false,
+                _ => {}
+            }
+            continue;
+        }
+        match (letra, letras.peek()) {
+            ('"', _) => {
+                entre_aspas = true;
+                limpo.push(letra);
+            }
+            ('/', Some('/')) => {
+                for resto in letras.by_ref() {
+                    if resto == '\n' {
+                        limpo.push('\n');
+                        break;
+                    }
+                }
+            }
+            ('/', Some('*')) => {
+                letras.next();
+                let mut anterior = ' ';
+                for resto in letras.by_ref() {
+                    if anterior == '*' && resto == '/' {
+                        break;
+                    }
+                    anterior = resto;
+                }
+            }
+            _ => limpo.push(letra),
+        }
+    }
+    limpo
 }
 
 #[test]
@@ -81,16 +139,43 @@ fn a_despedida_espera_o_quadro_sair() {
     let despedida = corpo(&fonte, "despedir_se");
     let da_sessao = corpo(&fonte, "despedir_da_sessao");
     assert!(
-        !despedida.contains("sleep") && despedida.contains("despedir_da_sessao("),
+        !despedida.contains("sleep"),
         "a despedida voltou a dormir às cegas em vez de esperar a thread da conexão.\n\
          Um `sleep` não sabe se o `CONNECTION_CLOSE` saiu, e o defeito volta sem nada mudar \
          de aparência."
     );
     assert!(
-        da_sessao.contains("encerrar_e_esperar(std::time::Duration::from_millis(")
-            || da_sessao.contains("encerrar_e_esperar(Duration::from_millis("),
-        "a despedida deixou de esperar a thread da conexão com um teto.\n\
-         Sem a espera o processo pode morrer antes de o aviso deixar a máquina; sem o teto, \
-         uma thread presa segura o fim do app."
+        despedida.contains("despedir_da_sessao("),
+        "a despedida da janela deixou de passar por `despedir_da_sessao`, e com ela pela \
+         espera da thread da conexão: o processo pode morrer antes de o aviso deixar a máquina"
     );
+    let teto = teto_da_espera(&da_sessao);
+    assert!(
+        teto.is_some_and(|milissegundos| milissegundos > 0),
+        "a despedida deixou de esperar a thread da conexão com um teto que não seja zero \
+         (lido: {teto:?} ms).\n\
+         Sem a espera, ou com um teto zero, o processo pode morrer antes de o aviso deixar a \
+         máquina; sem teto nenhum, uma thread presa segura o fim do app."
+    );
+}
+
+/// O teto que o corpo passa a `encerrar_e_esperar`, em milissegundos, quando ele
+/// está escrito como `Duration::from_millis(N)` ou `Duration::from_secs(N)`.
+///
+/// `None` para qualquer outra forma: um teto que este guarda não sabe ler é um
+/// teto que ele não confere, e reprovar obriga quem o mudou a ensiná-lo.
+fn teto_da_espera(corpo: &str) -> Option<u64> {
+    let depois = corpo.split_once("encerrar_e_esperar(")?.1;
+    let depois = depois.strip_prefix("std::time::").unwrap_or(depois);
+    let depois = depois.strip_prefix("Duration::")?;
+    let (escala, numero) = match depois.strip_prefix("from_millis(") {
+        Some(numero) => (1, numero),
+        None => (1000, depois.strip_prefix("from_secs(")?),
+    };
+    let digitos: String = numero
+        .chars()
+        .take_while(|letra| letra.is_ascii_digit() || *letra == '_')
+        .filter(|letra| *letra != '_')
+        .collect();
+    digitos.parse::<u64>().ok()?.checked_mul(escala)
 }

@@ -3016,7 +3016,10 @@ impl Connection {
     /// teto venceu com a thread ainda correndo, e aí quem chama sabe que a
     /// despedida pode não ter saído.
     ///
-    /// **Bloqueia** quem chama, até `teto`.
+    /// **Bloqueia** quem chama. Sozinha, até `teto`. Duas chamadas ao mesmo tempo
+    /// não dividem a espera: a segunda espera a primeira soltar o cadeado do
+    /// recebedor, e depois o próprio teto — até o dobro, quando a thread não
+    /// termina.
     #[must_use]
     pub fn encerrar_e_esperar(&self, teto: Duration) -> bool {
         self.disconnect();
