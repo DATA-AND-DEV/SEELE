@@ -46,17 +46,25 @@ continua valendo para o celular.
 | `compartilhar_tela`, `parar_de_compartilhar`, `fontes_de_tela`, `permissao_de_tela`, `pedir_permissao_de_tela`, `ajustar_limites_da_tela`, `exclusao_do_som_da_captura` | compartilhar a tela pelo PC | **tarefa nova (3.10), depende de medida.** O `getDisplayMedia` escolhe a fonte e pede a permissão ele mesmo |
 | `modulo_de_video_a_baixar` | — | responde «nenhum»: quem codifica é o navegador |
 
-## Atendidas com a resposta de quem não hospeda
+## Mexem na hospedagem e não são recusadas
 
-Comandos que mexem na hospedagem local, e que a casca chama mesmo assim. No
-navegador, a resposta é a de quem não hospeda, e não uma recusa:
+Comandos que, no `main.rs`, mexem na hospedagem local, e que a casca chama
+mesmo assim. Aprovado pela orquestradora em 09/10.
 
-| comando | a resposta no navegador | por quê |
+**`NEUTROS_DE_QUEM_NAO_HOSPEDA`**, uma lista explícita na ponte, com a resposta
+e o motivo ao lado de cada um:
+
+| comando | a resposta, sempre esta | por quê |
 |---|---|---|
 | `estado_da_porta` | «não hospeda» | chamado sem gesto, na sessão (matriz da F8) |
 | `estou_hospedando` | `false` | a casca pergunta antes de mostrar o que é de quem hospeda |
-| `conjunto_exigido_agora` | `""` | o desktop responde assim a quem não hospeda (`main.rs`, sem `persistence_do_mod`) |
-| `disconnect` | sai da sessão | no desktop ele também derruba a hospedagem; no navegador só há a sessão |
+| `conjunto_exigido_agora` | `""` | o desktop responde assim a quem não hospeda |
+
+**`disconnect` é atendido, e não neutro.** Sair da sessão é do navegador também.
+No desktop, ele também derruba a hospedagem; no navegador, não há hospedagem
+para derrubar. Se ele caísse nos neutros, sair da sessão passaria a fazer
+nada, e isso seria defeito. Ele fica numa segunda lista explícita,
+`ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com esse motivo.
 
 ## Ficam recusadas no PC, com frase
 
@@ -89,18 +97,34 @@ que anota todo `invoke` sem gesto vale para as duas cascas.
 
 **Comando a comando, lendo o `main.rs`:** todo comando cujo corpo mexe na
 hospedagem local (`hospedagem`, `persistence_hospedada`, `portaria::`,
-`persistence_do_mod`) tem de estar no `RECUSAS_NOMEADAS` da ponte, ou numa
-lista explícita de neutros de quem não hospeda, com o motivo. Nunca no
-`COMANDOS_DA_PONTE` sem estar nela. Um comando novo que mexa na hospedagem
-reprova o guarda até alguém decidir de que lado ele fica.
+`persistence_do_mod`) tem de estar em uma de três listas da ponte, e nunca solto
+no `COMANDOS_DA_PONTE`:
+1. `RECUSAS_NOMEADAS`;
+2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta e o motivo;
+3. `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (hoje, só o `disconnect`).
+
+Um comando novo que mexa na hospedagem reprova o guarda até alguém decidir de
+que lado ele fica.
+
+**O guarda confere também a resposta de cada neutro**, e não só o nome. Na
+bancada, cada neutro é chamado pela ponte, e a resposta tem de ser a escrita na
+tabela acima. Se alguém trocar a resposta de um neutro por um atendimento de
+verdade, o guarda reprova.
+
+**As reversões:**
+- tirar um dos recusados da recusa reprova o guarda;
+- trocar a resposta do `estou_hospedando` por outra reprova o guarda;
+- pôr o `disconnect` nos neutros faz a bancada reprovar, porque sair da sessão
+  deixa de sair.
 
 **Medido em 09/10, sobre a `versao/0.16` de `f7fb8ab9`:** dos 156 comandos, 13
-mexem na hospedagem local. Nove ficam recusados: `apagar_servidor`,
-`aplicar_conjunto_de_mods`, `criar_convite_do_server`, `decidir_pedido`,
-`definir_senha_do_server`, `hospedar`, `ligar_portaria`, `pedidos_da_portaria`
-e `revogar_admissao`. Os outros quatro são os neutros da tabela acima.
+mexem na hospedagem local:
+- 9 ficam recusados: `apagar_servidor`, `aplicar_conjunto_de_mods`,
+  `criar_convite_do_server`, `decidir_pedido`, `definir_senha_do_server`,
+  `hospedar`, `ligar_portaria`, `pedidos_da_portaria` e `revogar_admissao`;
+- 3 são neutros;
+- 1 é atendido apesar da hospedagem (o `disconnect`).
 
 **O guarda já pegou um erro desta página:** o `conjunto_exigido_agora` estava
 na lista de atendidas, sem dizer que mexe na persistência de MODs de quem
 hospeda. Ele passou para os neutros, com o motivo.
-
