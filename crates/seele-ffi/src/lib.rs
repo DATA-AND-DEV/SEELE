@@ -4284,13 +4284,18 @@ async fn drive(
                         // braço da porta abaixo. Quem estava fora de sala não
                         // tem voz, e continua sem aparelho.
                         let (canal, ssrc) = ((*media).clone(), sessao.ssrc);
+                        let vez = Arc::clone(&shared.voice.vez_do_driver);
                         porta.na_volta(
                             &shared.voice,
                             move |atual: Voice| -> Futuro<Voice> {
-                                Box::pin(esperar_o_audio(
-                                    move || atual.reopen(canal, ssrc).map_err(|erro| format!("{erro:#}")),
-                                    PRAZO_DO_AUDIO,
-                                ))
+                                Box::pin(async move {
+                                    esperar_o_audio(
+                                        &vez,
+                                        move || atual.reopen(canal, ssrc).map_err(|erro| format!("{erro:#}")),
+                                        PRAZO_DO_AUDIO,
+                                    )
+                                    .await
+                                })
                             },
                             |pedidos| abrir_a_voz(&shared, pedidos),
                         );
@@ -4399,13 +4404,25 @@ struct Atraso;
 /// aparelho. Quem esperava já desistiu: o prazo venceu, ou a pessoa saiu da sala
 /// antes de a voz chegar.
 async fn esperar_o_audio<V: Send + 'static>(
+    vez: &Arc<Mutex<()>>,
     abrir: impl FnOnce() -> V + Send + 'static,
     prazo: Duration,
 ) -> Result<V, Atraso> {
     let (entrega, chegada) = tokio::sync::oneshot::channel();
+    let vez = Arc::clone(vez);
     let subiu = std::thread::Builder::new()
         .name("seele-abre-audio".into())
         .spawn(move || {
+            // **Uma abertura por vez no driver**, e a espera pela vez conta no
+            // prazo de quem pediu. Ver `VozDaSala::vez_do_driver`.
+            let _vez = vez
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if entrega.is_closed() {
+                // Quem pediu desistiu enquanto a outra abertura corria: o
+                // prazo venceu, ou a pessoa saiu da sala. Não há para quem abrir.
+                return;
+            }
             let aberta = abrir();
             // `Err(aberta)` quando ninguém espera mais, e ela é largada aqui.
             drop(entrega.send(aberta));
@@ -4538,6 +4555,15 @@ struct VozDaSala<V> {
     /// Se esta sessão pediu áudio ([`ConnectConfig::audio`]). Sem ele, nenhuma
     /// sala abre aparelho.
     quer_audio: bool,
+    /// A vez do driver: no máximo uma abertura de aparelho em voo por sessão.
+    ///
+    /// M-c da rodada 1 do lote I-a. Entrar e sair de uma sala depressa larga a
+    /// abertura em curso, mas a thread dela segue no driver até ele soltar; a
+    /// entrada seguinte poria uma segunda abertura no CoreAudio ao mesmo tempo,
+    /// e duas simultâneas nunca foram medidas. A thread de
+    /// [`esperar_o_audio`] toma esta vez antes de abrir, e a de uma abertura
+    /// de que ninguém espera mais desiste sem abrir nada quando a vez chega.
+    vez_do_driver: Arc<Mutex<()>>,
 }
 
 impl<V> VozDaSala<V> {
@@ -4547,6 +4573,7 @@ impl<V> VozDaSala<V> {
             escolhida: Mutex::new(ControlesGuardados::de_partida(aparelhos)),
             abertura: Mutex::new(AberturaDoAudio::ForaDeSala),
             quer_audio,
+            vez_do_driver: Arc::new(Mutex::new(())),
         }
     }
 
@@ -4854,11 +4881,13 @@ impl<V: VozViva> PortaDaVoz<V> {
 fn abrir_a_voz(shared: &Shared, pedidos: &seele_core::DeviceChoice) -> Futuro<Voice> {
     let canal = shared.media.lock().ok().and_then(|slot| slot.clone());
     let pedidos = pedidos.clone();
+    let vez = Arc::clone(&shared.voice.vez_do_driver);
     Box::pin(async move {
         let Some((media, ssrc)) = canal else {
             return Ok(Err("sem conexão por onde a voz saia".to_owned()));
         };
         esperar_o_audio(
+            &vez,
             move || {
                 Voice::start_preferring(&pedidos, media, ssrc).map_err(|erro| format!("{erro:#}"))
             },
@@ -9544,9 +9573,105 @@ mod a_abertura_do_audio {
     //! que dorme, e o que se afirma é quanto a espera leva e o que ela devolve.
 
     use super::{esperar_o_audio, Atraso};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
+
+    /// Uma vez do driver nova, de uma sessão só deste teste.
+    fn vez() -> Arc<Mutex<()>> {
+        Arc::new(Mutex::new(()))
+    }
+
+    /// Um abridor que conta quantas aberturas estão no driver ao mesmo tempo, e
+    /// quantas aconteceram.
+    #[derive(Default)]
+    struct Driver {
+        em_voo: AtomicUsize,
+        no_maximo: AtomicUsize,
+        aberturas: AtomicUsize,
+    }
+
+    impl Driver {
+        fn abrir(&self, demora: Duration) -> &'static str {
+            self.aberturas.fetch_add(1, Ordering::SeqCst);
+            let agora = self.em_voo.fetch_add(1, Ordering::SeqCst) + 1;
+            self.no_maximo.fetch_max(agora, Ordering::SeqCst);
+            std::thread::sleep(demora);
+            self.em_voo.fetch_sub(1, Ordering::SeqCst);
+            "a voz"
+        }
+    }
+
+    /// M-c: duas aberturas da mesma sessão nunca ficam no driver ao mesmo
+    /// tempo. Entrar, sair e entrar de novo depressa larga a primeira, e a
+    /// thread dela segue no driver; a segunda espera a vez.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn duas_aberturas_da_mesma_sessao_nunca_ficam_no_driver_ao_mesmo_tempo() {
+        let vez = vez();
+        let driver = Arc::new(Driver::default());
+        let (primeiro, segundo) = (Arc::clone(&driver), Arc::clone(&driver));
+
+        let (a, b) = tokio::join!(
+            esperar_o_audio(
+                &vez,
+                move || primeiro.abrir(Duration::from_millis(150)),
+                Duration::from_secs(5)
+            ),
+            esperar_o_audio(
+                &vez,
+                move || segundo.abrir(Duration::from_millis(150)),
+                Duration::from_secs(5)
+            ),
+        );
+
+        assert!(
+            a.is_ok() && b.is_ok(),
+            "as duas aberturas tinham tempo de sobra"
+        );
+        assert_eq!(
+            driver.no_maximo.load(Ordering::SeqCst),
+            1,
+            "duas aberturas da mesma sessão ficaram no driver ao mesmo tempo"
+        );
+    }
+
+    /// E a abertura de que ninguém espera mais desiste quando a vez chega, sem
+    /// abrir aparelho nenhum.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_abertura_que_ja_desistiu_nao_abre_quando_chega_a_vez() {
+        let vez = vez();
+        let driver = Arc::new(Driver::default());
+        let (primeiro, segundo) = (Arc::clone(&driver), Arc::clone(&driver));
+
+        let (a, b) = tokio::join!(
+            esperar_o_audio(
+                &vez,
+                move || primeiro.abrir(Duration::from_millis(300)),
+                Duration::from_secs(5)
+            ),
+            async {
+                // A segunda pede depois de a primeira tomar a vez, e desiste
+                // antes de a primeira terminar.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                esperar_o_audio(
+                    &vez,
+                    move || segundo.abrir(Duration::from_millis(10)),
+                    Duration::from_millis(50),
+                )
+                .await
+            },
+        );
+        assert!(a.is_ok());
+        assert_eq!(b, Err(Atraso));
+
+        // Dá tempo de a vez chegar à segunda thread.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(
+            driver.aberturas.load(Ordering::SeqCst),
+            1,
+            "a abertura de que ninguém esperava mais abriu o aparelho quando chegou a vez"
+        );
+    }
 
     /// (d) da pendência 52: um driver preso não prende quem espera.
     ///
@@ -9558,6 +9683,7 @@ mod a_abertura_do_audio {
     async fn um_audio_que_nao_abre_no_prazo_volta_atrasado_sem_esperar_o_driver() {
         let comeco = Instant::now();
         let veio = esperar_o_audio(
+            &vez(),
             || {
                 std::thread::sleep(Duration::from_secs(2));
                 "a voz"
@@ -9582,6 +9708,7 @@ mod a_abertura_do_audio {
     #[tokio::test]
     async fn a_voz_que_abre_no_prazo_chega_inteira_e_pela_thread_com_nome() {
         let veio = esperar_o_audio(
+            &vez(),
             || std::thread::current().name().map(str::to_owned),
             Duration::from_secs(5),
         )
@@ -9613,6 +9740,7 @@ mod a_abertura_do_audio {
         let largada = Arc::new(AtomicBool::new(false));
         let marca = Arc::clone(&largada);
         let veio = esperar_o_audio(
+            &vez(),
             move || {
                 std::thread::sleep(Duration::from_millis(300));
                 Aparelho(marca)
