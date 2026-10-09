@@ -281,3 +281,35 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - `check-runtime` verde;
     - as bancadas `diagnostico-de-mods`, `contribuicoes-e-camadas`, `regiao-do-mod` e `ajustes-v013` verdes.
   - **A conformidade, um arquivo por vez, com `--test-threads=1`, toda verde:** `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m3`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar`, `quem_hospeda_fecha`, `saida_com_despedida` e `tela_por_um_par`. O `quarto_pelo_link` ficou de fora, pela porta 8384.
+- **A onda 5 foi despachada sobre `02f1eca`**, o merge de volta da `versao/0.16` de `bd58a08`, que já traz a onda 4. O lote I foi dividido em I-a e I-b, como o plano sugeria (`dcf3794`).
+- **I-a → integrado** (`02f1eca..7aa4036`, merge `6a6f3aa`), em 3 rodadas. A 1ª teve de ser refeita depois de um timeout da API.
+  - **D-52, a decisão do dono para a pendência 52** (`d96fecc`):
+    - o áudio abre quando a pessoa senta numa sala de voz e fecha quando ela sai;
+    - a abertura roda numa thread própria (`seele-abre-audio`), com prazo de 10 s;
+    - os controles escolhidos fora de sala moram em `Shared` e valem ao abrir;
+    - o Snapshot ganha `AberturaDoAudio`;
+    - fora de sala, nenhuma tela diz «sem áudio».
+  - **O pânico** (`520f880`): um pânico em qualquer thread do app deixa uma linha no `seele.log`.
+  - **O achado da revisão, Crítico.** O servidor manda `VoiceRoomEntryRefused` também a quem ele mantém sentado: na troca de sala recusada, a cada volta numa sala com senha e pelo `nao_deu`. Com a D-52, isso deixava a pessoa surda e muda numa sala onde todos a viam.
+    - **A regra** (`a9e8c12`), única, em `seele_core::assento`, para o `Room` e para o motor: uma recusa desfaz só o pedido de entrada no ar e devolve o assento de antes; sem pedido no ar, ninguém se move.
+    - **Como se sabe que o pedido foi decidido:** pelo `Pong` de um Ping marcado, numerado (`893632a`).
+    - **O áudio** só abre no assento confirmado.
+    - **O resgate na volta** exige o mesmo SSRC **e** um `SessionId` maior (`d02743e`). Sem isso, um servidor reiniciado deixava a pessoa sentada na própria tela e fora de toda sala no servidor.
+  - **A prova nova:** `a_recusa_nao_tira_da_sala.rs`, com M1, M3, M5, M6 e o caso de controle. O M4, com o motor de verdade e um repasse cortado, a revisão mediu à mão.
+  - **O merge do meio da onda** (`9f87889`) trouxe o `PedidoRecusado` da F1. O M5 passou a esperá-lo.
+- **Três achados de servidor foram à orquestradora:**
+  - **a sala cheia que se deixava ouvir:** recusada por sala cheia, a pessoa passava a ouvir a sala que a recusou. Isso também existe na v0.15.1 publicada. Ficou com a F1, e a conformidade que o prova foi entregue;
+  - **o `nao_deu` com `VoiceRoomEntryRefused`:** ficou com a F1, que o trocou pelo `PedidoRecusado`;
+  - **a supressão e a sensibilidade do disco sem valer no connect:** vão no I-b.
+- **Ficam para o Z:**
+  - dois casos de sala apagada dentro de uma volta de rede de um pedido;
+  - o resíduo do N2, que só aparece com o limitador do servidor cortando;
+  - uma abertura presa no driver deixa as seguintes em `NaoAbriuNoPrazo`.
+- **Duas notas da orquestradora:**
+  - **o `nao_deu`:** a F1 trocou o `VoiceRoomEntryRefused` dele pelo `PedidoRecusado`, e o I-b usa o campo `pedido`;
+  - **os avisos «AVISO» seco:** o guarda de frases da F1 achou dois, `MovedByOperator` e `VoiceRoomOverHostUplink`, e eles vão no I-b.
+- **I-b despachado sobre `22059e5`.** Ele leva os passos 2 e 3 do lote I e quatro acréscimos:
+  - a supressão e a sensibilidade do disco valendo no connect;
+  - os volumes voltando ao reabrir a voz;
+  - as frases dos dois avisos;
+  - o `PedidoRecusado` na regra do assento.
