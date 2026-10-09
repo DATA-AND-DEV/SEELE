@@ -519,6 +519,9 @@ mod tests {
             .with_ansi(false)
             .without_time()
             .finish();
+        // Sem ele, a linha da recusa pode sumir quando a bateria roda em
+        // paralelo (pendência 56): ver `rastro_de_teste::segundo_despachante`.
+        crate::rastro_de_teste::segundo_despachante();
         let _guarda = tracing::subscriber::set_default(assinante);
 
         let resposta = super::executar(

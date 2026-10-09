@@ -197,15 +197,21 @@ async fn pingar(par: &mut Par, timestamp: u64) -> Result<bool> {
 /// um par defeituoso não enche o `seele.log`. A linha que vai diz o ordinal e
 /// a pessoa.
 ///
-/// **Um teste só, e não dois, de propósito.** O registro é capturado por um
-/// assinante deste fio (`set_default`), e o `tracing` guarda por ponto de
-/// registro se alguém se interessa por ele. Com um segundo teste rodando em
-/// paralelo, noutro fio e sem assinante, a linha deixava de chegar aqui: medido
-/// em 08/10, seis de seis reprovações em paralelo, e três de três aprovações em
-/// série. `current_thread` pelo mesmo motivo: o servidor e a sessão rodam
-/// neste fio, e é nele que o assinante vale.
+/// **O [`segundo_despachante`] vem antes da captura, e é ele que deixa este
+/// teste rodar ao lado de outros.** O registro é capturado por um assinante
+/// deste fio (`set_default`), e o `tracing` guarda por ponto de registro se
+/// alguém se interessa por ele. Antes do auxiliar, um segundo teste rodando em
+/// paralelo, noutro fio e sem assinante, fazia a linha deixar de chegar aqui
+/// (medido em 08/10: seis de seis reprovações em paralelo, três de três
+/// aprovações em série), e por isso este arquivo tinha um teste só. Essa razão
+/// morreu pelo auxiliar, e não por haver menos testes: com um vizinho sem
+/// captura, a revisão de 09/10 mediu este teste vermelho 10 em 20 rodadas sem
+/// o auxiliar, e 0 em 30 com ele (pendência 56). `current_thread` pelo mesmo
+/// motivo do assinante: o servidor e a sessão rodam neste fio, e é nele que o
+/// assinante vale.
 #[tokio::test]
 async fn a_mensagem_desconhecida_e_pulada_contada_e_registrada_uma_vez() -> Result<()> {
+    segundo_despachante();
     let rastro = Rastro::default();
     let escritor = rastro.clone();
     let _guarda = tracing::subscriber::set_default(
@@ -282,6 +288,102 @@ impl Rastro {
     fn texto(&self) -> String {
         String::from_utf8_lossy(&self.0.lock().expect("o rastro trancou")).into_owned()
     }
+}
+
+/// **Um segundo despachante, vivo o processo inteiro, que não escreve nada.**
+/// A cópia deste binário do auxiliar do crate (`src/rastro_de_teste.rs`), que
+/// um teste de integração não alcança: o `#[cfg(test)]` dele só vale para os
+/// testes da biblioteca. O mesmo do app (`apps/seele-app/src/main.rs`).
+///
+/// O `tracing` decide uma vez só, na primeira passagem de qualquer thread, se
+/// uma linha tem quem a ouça. Com um despachante só registrado, a pergunta vai
+/// só ao da **thread que passou** (`tracing-core` 0.1.36, `callsite.rs`:
+/// `Rebuilder::JustOne`), e um teste sem captura que passasse primeiro pela
+/// linha a deixava marcada como «nunca» para quem a captura. Com dois vivos, a
+/// pergunta vai a todos, e cada evento pergunta de novo à thread em que
+/// acontece.
+fn segundo_despachante() {
+    static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+    SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+}
+
+/// Marca o processo filho da prova abaixo: com ela, a prova roda a
+/// [`ordem_forcada`] em vez de chamar a si mesma.
+const PROVA_NO_FILHO: &str = "PROVA56_FILHO";
+
+/// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+/// ainda é capturada.** A prova de ordem forçada da pendência 56, para a cópia
+/// de [`segundo_despachante`] deste binário, com a mesma captura do teste de
+/// cima, rodada num processo filho.
+///
+/// **Por que num processo filho.** A ordem forçada só decide quando a captura
+/// dela é o único despachante vivo: é aí que o `tracing` pergunta só à thread
+/// que passou. Com o teste de cima de pé ao mesmo tempo, ela passava mesmo sem
+/// o auxiliar (3 em 10 rodadas do binário, em 09/10). O filho roda só ela
+/// (`--exact`, `--test-threads=1`), e ali a captura é a única. O pai exige
+/// `1 passed`, porque um `--exact` que não acha o teste sai com sucesso e
+/// `0 passed`, e a prova passaria sem ter rodado.
+#[test]
+fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+    if std::env::var_os(PROVA_NO_FILHO).is_some() {
+        return ordem_forcada();
+    }
+    let saida =
+        std::process::Command::new(std::env::current_exe().expect("o binário destes testes"))
+            .args([
+                "--exact",
+                "uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada",
+                "--test-threads=1",
+            ])
+            .env(PROVA_NO_FILHO, "1")
+            .output()
+            .expect("o processo filho da prova não subiu");
+    let fala = String::from_utf8_lossy(&saida.stdout);
+    assert!(
+        saida.status.success() && fala.contains("ok. 1 passed;"),
+        "a ordem forçada reprovou no processo filho, onde a captura é o único despachante \
+         vivo, ou o filtro não achou a prova e ela não rodou: {fala}{}",
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+/// A outra thread toca a linha primeiro, com a captura já de pé, e a linha
+/// ainda chega à captura. E a linha da outra thread continua fora: a captura
+/// segue sendo só da thread corrente.
+///
+/// Só decide com a captura dela como único despachante vivo, e por isso roda no
+/// processo filho da prova acima.
+fn ordem_forcada() {
+    fn diz() {
+        tracing::warn!("linha tocada primeiro fora da captura");
+    }
+    segundo_despachante();
+    let rastro = Rastro::default();
+    let escritor = rastro.clone();
+    let assinante = tracing_subscriber::fmt()
+        .with_writer(move || escritor.clone())
+        .with_ansi(false)
+        .without_time()
+        .finish();
+    tracing::subscriber::with_default(assinante, || {
+        std::thread::spawn(diz)
+            .join()
+            .expect("a outra thread terminou");
+        diz();
+    });
+
+    let texto = rastro.texto();
+    assert!(
+        texto.contains("linha tocada primeiro fora da captura"),
+        "uma linha que outra thread tocou primeiro sumiu do rastro, e o teste da mensagem \
+         desconhecida passa ou falha conforme a ordem das threads: {texto}"
+    );
+    assert_eq!(
+        texto.lines().count(),
+        1,
+        "a linha da outra thread entrou no rastro desta captura, e um teste passaria a ler o \
+         que outro teste escreveu: {texto}"
+    );
 }
 
 /// A mensagem que a prova assina: o rótulo, a impressão do certificado que o

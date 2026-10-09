@@ -2742,7 +2742,12 @@ mod testes {
         /// Só nesta thread: `set_default` fixa o `Subscriber` na thread corrente,
         /// e é nela que um `#[tokio::test]` de thread única roda tudo, inclusive
         /// as tarefas que ele sobe.
+        ///
+        /// O que ele guarda não depende de outro teste ter passado antes pela
+        /// mesma linha sem captura: ver `rastro_de_teste::segundo_despachante`
+        /// (pendência 56).
         fn de_info() -> (Self, tracing::subscriber::DefaultGuard) {
+            crate::rastro_de_teste::segundo_despachante();
             let rastro = Self::default();
             let escritor = rastro.clone();
             let subscriber = tracing_subscriber::fmt()
