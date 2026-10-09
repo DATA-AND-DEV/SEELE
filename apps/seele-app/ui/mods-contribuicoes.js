@@ -83,7 +83,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "canal.cabecalho": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "compositor.ferramentas": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "sala.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
-  "servidor.navegacao": { modos: ["adicionar"], perfil: null, porAlvo: false },
+  "servidor.navegacao": { modos: ["substituir", "adicionar"], perfil: null, porAlvo: false },
   "servidor.aparencia": { modos: ["substituir"], perfil: null, porAlvo: false },
   // **As regiões da API 6** (rascunho §3, tarefa 5), no orçamento do cartão
   // (64 nós) até a M3 medir, no desktop e no iPhone: o número delas sai da
@@ -176,6 +176,25 @@ class RegistroDeContribuicoes {
       || Array.isArray(pedido.conteudo.doServidor)
     )) {
       throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
+    }
+    // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
+    // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
+    // A linha de cada sala e de cada canal continua do produto. Outra forma é
+    // recusada pelo nome, e não desenhada como se fosse esta.
+    if (ponto === "servidor.navegacao" && modo === "substituir") {
+      const conteudo = pedido?.conteudo;
+      const lista = (parte) => parte === undefined || (
+        parte && typeof parte === "object" && Array.isArray(parte.grupos)
+        && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids))
+      );
+      if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
+        || (conteudo.salas === undefined && conteudo.canais === undefined)
+        || !lista(conteudo.salas) || !lista(conteudo.canais)) {
+        throw new Error(
+          "servidor.navegacao/substituir declara a ordem das listas: "
+          + "{ salas?, canais? }, cada um com grupos: [{ titulo, ids }]",
+        );
+      }
     }
     const quantas = this.porMod.get(mod.id) ?? 0;
     if (quantas >= TETO_DE_CONTRIBUICOES) {

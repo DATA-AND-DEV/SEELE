@@ -310,6 +310,78 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- a navegação, substituída
+    //
+    // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):
+    // o MOD toma **a ordem e os grupos** de cada lista — salas e canais —, e a
+    // linha de cada sala e de cada canal continua do produto, com ENTRAR, o
+    // renomear e o apagar. Ninguém some: quem não está em grupo vai para
+    // OUTRAS SALAS / OUTROS CANAIS. Uma substituição não vira entrada «DOS
+    // MODS», e uma declaração com outra forma é recusada pelo nome.
+    const navegacao = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const textos = (id) => [...$(id).children].map((li) =>
+        (li.querySelector(".linha-rotulo, .voice_room-nome") ?? li).textContent.trim());
+      const antes = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
+      const instancia = new InstanciaDeMod("mod/navegacao", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/navegacao", instancia);
+      let recusa = "";
+      try {
+        contribuicoesDosMods.registrar({ id: "mod/navegacao" }, instancia, {
+          ponto: "servidor.navegacao", modo: "substituir", conteudo: [{ forma: "texto", dentro: "x" }],
+        });
+      } catch (erro) {
+        recusa = erro.message;
+      }
+      const { handle } = contribuicoesDosMods.registrar({ id: "mod/navegacao" }, instancia, {
+        ponto: "servidor.navegacao",
+        modo: "substituir",
+        conteudo: {
+          salas: { grupos: [{ titulo: "MESA 1", ids: [1] }] },
+          canais: { grupos: [{ titulo: "MESA 1", ids: [2, 2, 99] }, { titulo: "VAZIO", ids: [98] }] },
+        },
+      });
+      desenhar(r);
+      await quadro();
+      const com = {
+        salas: textos("lista-voice_rooms"),
+        canais: textos("lista-linhas"),
+        canaisNaTela: $("lista-linhas").querySelectorAll("button[data-linha]").length,
+        entrar: $("lista-voice_rooms").querySelectorAll("li.voice_room").length,
+        entradasDeMod: !$("lista-mods-navegacao").hidden,
+      };
+      contribuicoesDosMods.revogar(handle, { id: "mod/navegacao", instancia });
+      modsCarregados.delete("mod/navegacao");
+      desenhar(r);
+      await quadro();
+      const depois = { salas: $("lista-voice_rooms").innerHTML, canais: $("lista-linhas").innerHTML };
+      return { recusa, com, voltou: depois.salas === antes.salas && depois.canais === antes.canais, canais: r.channels.length };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (navegacao.erro) {
+      falhas.push(`servidor.navegacao: ${navegacao.erro}`);
+    } else {
+      if (!navegacao.recusa.includes("servidor.navegacao")) {
+        falhas.push(`servidor.navegacao: uma substituição com outra forma não foi recusada pelo nome (${navegacao.recusa || "aceita"})`);
+      }
+      const esperado = ["MESA 1", "combinados", "OUTROS CANAIS", "geral"];
+      if (JSON.stringify(navegacao.com.canais) !== JSON.stringify(esperado)) {
+        falhas.push(`servidor.navegacao: os canais saíram ${JSON.stringify(navegacao.com.canais)}, e o esperado é ${JSON.stringify(esperado)}`);
+      }
+      if (JSON.stringify(navegacao.com.salas) !== JSON.stringify(["MESA 1", "Sala principal"])) {
+        falhas.push(`servidor.navegacao: as salas saíram ${JSON.stringify(navegacao.com.salas)}`);
+      }
+      if (navegacao.com.canaisNaTela !== navegacao.canais) {
+        falhas.push(`servidor.navegacao: ${navegacao.com.canaisNaTela} de ${navegacao.canais} canais na tela — alguém sumiu`);
+      }
+      if (navegacao.com.entrar !== 1) falhas.push("servidor.navegacao: a sala perdeu a linha do produto");
+      if (navegacao.com.entradasDeMod) falhas.push("servidor.navegacao: a substituição apareceu como entrada «DOS MODS»");
+      if (!navegacao.voltou) falhas.push("servidor.navegacao: revogada, e as listas não voltaram ao que eram");
+    }
+
     // ------------------------------------------- o orçamento de cada ponto
     //
     // `perfil`, na tabela de pontos, diz com que orçamento a declaração é

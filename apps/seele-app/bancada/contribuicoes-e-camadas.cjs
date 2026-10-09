@@ -1846,6 +1846,11 @@ function anotando(...anotadas) {
         registro.registrar({ id: "mod/a" }, dono, {
           ponto, modo, alvo: "1",
           ...(ponto === "pessoa.avatar" ? { conteudo: { doServidor: { canal: 1, pedido: {} } } } : {}),
+          // A navegação substituída é uma ordem das listas, e tem forma
+          // própria, como o avatar (rascunho §3, tarefa 5).
+          ...(ponto === "servidor.navegacao" && modo === "substituir"
+            ? { conteudo: { canais: { grupos: [] } } }
+            : {}),
         });
       } catch (falha) {
         erro = falha;

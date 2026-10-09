@@ -245,6 +245,30 @@ SeeleUI.contribuicoes.registrar({
   pode agrupar a lista e outro desenhar as linhas, e a escolha de quem
   administra vale ponto a ponto, como hoje.
 
+**`servidor.navegacao`, substituída** (tarefa 5; a mesma regra, aplicada por
+mim e levada à orquestradora): o MOD toma **a ordem e os grupos de cada
+lista**, salas e canais, separadamente:
+
+```js
+SeeleUI.contribuicoes.registrar({
+  ponto: 'servidor.navegacao', modo: 'substituir',
+  conteudo: {
+    salas: { grupos: [{ titulo: 'MESA 1', ids: [1] }] },
+    canais: { grupos: [{ titulo: 'MESA 1', ids: [2] }] },
+  },
+});
+```
+
+A linha de cada sala e de cada canal continua do produto — ENTRAR, renomear,
+apagar, e os `canal.item` e `sala.acoes` dos provedores deles —, e os `+` de
+criar ficam nos cabeçalhos do produto. Quem não está em grupo vai para OUTRAS
+SALAS / OUTROS CANAIS; um grupo sem ninguém presente não aparece; outra forma
+de declaração é recusada pelo nome no registro. Uma substituição não vira
+entrada «DOS MODS», que continuam sendo os `adicionar`. **Grupos mistos** —
+uma sala e um canal no mesmo grupo — **ficam para a API 7**: as duas listas
+têm verbos diferentes (entrar numa sala, abrir um canal), e misturá-las é
+desenho de tela, e não só ordem. [c, `regioes-do-produto.cjs`]
+
 **`conversa.mensagem`, substituída** (por mensagem, `alvo` sendo a mensagem).
 O MOD desenha **o corpo**. O produto mantém, na ordem: a calha do avatar (com
 `pessoa.avatar`), a cabeça (o apelido verificado do autor, lido pela chave, a

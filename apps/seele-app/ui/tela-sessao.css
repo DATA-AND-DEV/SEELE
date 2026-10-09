@@ -975,6 +975,20 @@ button.voice_room-nome:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
+/* O título de um grupo da navegação substituída (rascunho da API 6, §3): o texto
+   é do MOD, e o desenho é o dos títulos do produto — miúdo, espaçado, apagado —,
+   para ele ler como divisão da lista, e não como uma linha que se aperta. */
+.canais-grupo {
+  list-style: none;
+  padding: 10px 16px 4px;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  color: var(--seele-rotulo-painel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* `canal.cabecalho` substituído (rascunho da API 6, §3): o miolo da barra, no
    lugar do espaço, fechado — o nome do canal e a lupa, dos dois lados, são do
    produto, e nada do MOD passa por cima deles. **A base é zero**, como a do

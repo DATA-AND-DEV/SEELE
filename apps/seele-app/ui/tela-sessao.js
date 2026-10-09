@@ -836,6 +836,63 @@ function iniciaisDoApelido(apelido) {
  * dentro continua dito, e por duas vias: a marca laranja na borda da sala de voz e o
  * `(você)` ao lado do próprio nome na lista de quem está lá.
  */
+/**
+ * **A ordem que um MOD dá à navegação**, quando ele a substitui e é o escolhido
+ * (rascunho §3, tarefa 5): `{ salas?, canais? }`, ou `null`.
+ */
+function arranjoDaNavegacao() {
+  const escolhida = contribuicoesDosMods.escolherSubstituicao(
+    "servidor.navegacao",
+    "",
+    typeof modPreferidoPara === "function" ? modPreferidoPara("servidor.navegacao") : "",
+  ).escolhida;
+  return escolhida?.conteudo ?? null;
+}
+
+/** Quantos grupos uma lista substituída mostra, e quanto do título de cada um. */
+const TETO_DE_GRUPOS = 32;
+const TETO_DO_TITULO_DE_GRUPO = 64;
+
+/**
+ * **As linhas do produto, na ordem e nos grupos que o MOD deu** (rascunho §3).
+ *
+ * As linhas são as que o produto montou — com ENTRAR, renomear e apagar —, e
+ * só a ordem muda. **Ninguém some**: quem não está em grupo nenhum vai para um
+ * grupo do produto, no fim, com o título do produto. Um identificador de quem
+ * não está, ou repetido, é ignorado: a lista muda mais depressa do que o MOD a
+ * reescreve. Um grupo sem ninguém presente não aparece.
+ *
+ * O título do grupo é texto do MOD, e por isso `textContent`, cortado.
+ */
+function emGrupos(linhas, dados, arranjo, tituloDosOutros) {
+  if (!arranjo || !Array.isArray(arranjo.grupos)) return linhas;
+  const porId = new Map(dados.map((dado, i) => [String(dado.id), linhas[i]]));
+  const usadas = new Set();
+  const saida = [];
+  const cabecalho = (titulo) => {
+    const item = elemento("li", "canais-grupo", titulo);
+    item.setAttribute("role", "presentation");
+    return item;
+  };
+  for (const grupo of arranjo.grupos.slice(0, TETO_DE_GRUPOS)) {
+    const dele = (Array.isArray(grupo?.ids) ? grupo.ids : [])
+      .map(String)
+      .filter((id) => porId.has(id) && !usadas.has(id));
+    if (dele.length === 0) continue;
+    saida.push(cabecalho(String(grupo.titulo ?? "").slice(0, TETO_DO_TITULO_DE_GRUPO)));
+    for (const id of dele) {
+      usadas.add(id);
+      saida.push(porId.get(id));
+    }
+  }
+  const outras = dados.map((dado) => String(dado.id)).filter((id) => !usadas.has(id));
+  if (outras.length > 0) {
+    saida.push(cabecalho(tituloDosOutros));
+    for (const id of outras) saida.push(porId.get(id));
+  }
+  return saida;
+}
+
 function desenharCanais(snapshot) {
   const voice_rooms = snapshot.voice_rooms.map((voice_room) => {
     // `voice_room` com sublinhado, e não `voice room`: aqui é **nome de
@@ -938,7 +995,13 @@ function desenharCanais(snapshot) {
     item.append(cabeca, dentro, ir);
     return item;
   });
-  repovoar($("lista-voice_rooms"), voice_rooms);
+  // **`servidor.navegacao` substituído** (rascunho §3, tarefa 5): o MOD dá a
+  // ordem e os grupos de cada lista, e as linhas são as de cima, do produto.
+  const arranjo = arranjoDaNavegacao();
+  repovoar(
+    $("lista-voice_rooms"),
+    emGrupos(voice_rooms, snapshot.voice_rooms, arranjo?.salas, "OUTRAS SALAS"),
+  );
 
   const linhas = snapshot.channels.map((linha) => {
     const item = elemento("li", null);
@@ -987,7 +1050,7 @@ function desenharCanais(snapshot) {
     if (linha.open) linhaAberta = linha.id;
     return item;
   });
-  repovoar($("lista-linhas"), linhas);
+  repovoar($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
   // responde é o servidor, em `may_manage_voice_rooms`, resolvido pelo PERMISSIONS a
@@ -2621,8 +2684,10 @@ function redesenharAsEntradasDeMod() {
   const cabeca = $("cabeca-mods-navegacao");
   if (!lista || !cabeca) return;
 
+  // Só os acréscimos: uma substituição da navegação é a ordem das listas, e
+  // não uma entrada «DOS MODS».
   const entradas = contribuicoesDosMods.para("servidor.navegacao")
-    .filter(entrada => entrada.listarNaBarra !== false);
+    .filter(entrada => entrada.modo === "adicionar" && entrada.listarNaBarra !== false);
   const vazia = entradas.length === 0;
   lista.hidden = vazia;
   cabeca.hidden = vazia;
