@@ -1493,6 +1493,14 @@ def casca_larga(pg: Page) -> list[str]:
     atalhos = secao("secao-atalhos", "painel-atalhos")
     if atalhos and "foco" not in atalhos["frase"]:
         falhas.append(f"a tecla de falar não diz que só vale com a página em foco: {atalhos}")
+    # O teste do microfone fora da sala existe no PC (decisão da orquestradora,
+    # 09/10): a D-52 é do áudio da sessão, e o teste a pessoa abre de propósito.
+    # A larga deixa o bloco do desktop, sem frase por cima; quem atende os
+    # comandos pelo getUserMedia é a ponte da F4.
+    audio = secao("secao-audio", "painel-audio")
+    teste = pg.evaluate(visivel, "#server-testar-microfone")
+    if audio is None or audio["frase"] or not teste:
+        falhas.append(f"ÁUDIO na larga esconde o teste do microfone, ou põe frase no lugar dele: {audio}, botão {teste}")
     if exigir_toque(pg, "#larga-secao-fora", falhas):
         pg.wait_for_timeout(300)
         fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
