@@ -242,6 +242,18 @@ impl Hospedagem {
         })
     }
 
+    /// Como está o registro assinado da sala pessoal no ponto de encontro
+    /// (ENC/2, ADR 0062), para a casca dizer «SEU CÓDIGO NÃO ESTÁ ACHÁVEL
+    /// AGORA», e o motivo. `None` num servidor guardado, ou sem degrau 4.
+    #[must_use]
+    pub fn registro_no_quarto(
+        &self,
+    ) -> Option<tokio::sync::watch::Receiver<crate::alcance::encontro::EstadoDoRegistro>> {
+        self.escada
+            .as_ref()
+            .and_then(crate::alcance::Escada::registro_no_quarto)
+    }
+
     /// Até onde este servidor é alcançável, e por qual degrau do ADR 0022.
     ///
     /// É o que permite à casca dizer "só na sua rede, e foi por isto" em vez de

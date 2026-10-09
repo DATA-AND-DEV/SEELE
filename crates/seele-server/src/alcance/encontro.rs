@@ -274,9 +274,42 @@ pub struct Convocacao {
     pub marcas: Marcas,
     /// O endereço do ponto de encontro, como texto.
     pub ponto: String,
+    /// Quem assina o registro: só a sala pessoal tem (ENC/2, ADR 0062). Um
+    /// servidor guardado registra pelo ENC/1, sem assinatura.
+    pub assinante: Option<Assinante>,
 }
 
 impl Convocacao {
+    /// A convocação da sala pessoal: as marcas saem do código da chave, e o
+    /// registro sai assinado por ela, com o cookie do ponto, pelo ENC/2.
+    ///
+    /// `escuta` é a escuta do servidor da sala: a porta e as famílias das dicas
+    /// de rede local.
+    #[must_use]
+    pub fn para_sala(
+        socket: Arc<std::net::UdpSocket>,
+        escuta: super::Escuta,
+        chave: ed25519_dalek::SigningKey,
+        ponto: impl Into<String>,
+    ) -> Self {
+        let assinante = Assinante::novo(chave, escuta);
+        Self {
+            socket,
+            marcas: assinante.marcas(),
+            ponto: ponto.into(),
+            assinante: Some(assinante),
+        }
+    }
+
+    /// Se o registro sai assinado: a sala pessoal.
+    ///
+    /// A sala registra sempre, mesmo com IPv4 global, e o encontro dela não é
+    /// largado na escada: ela só é achável pelo quarto (spec de 23/09, «A sala
+    /// sempre se registra»). É a pergunta que a escada faz.
+    #[must_use]
+    pub fn assinada(&self) -> bool {
+        self.assinante.is_some()
+    }
     /// A convocação de um servidor guardado, com as marcas tiradas da
     /// impressão digital.
     ///
@@ -292,6 +325,7 @@ impl Convocacao {
             socket,
             marcas: Marcas::do_servidor(impressao_digital)?,
             ponto: ponto.into(),
+            assinante: None,
         })
     }
 
@@ -358,12 +392,278 @@ impl Convocacao {
     }
 }
 
+/// Quem assina o registro da sala no ponto (ENC/2, ADR 0062): a chave de
+/// identidade da pessoa, a mesma do código e do certificado da sala, e a escuta
+/// do servidor da sala, de onde saem as dicas de rede local.
+#[derive(Clone)]
+pub struct Assinante {
+    chave: ed25519_dalek::SigningKey,
+    escuta: super::Escuta,
+}
+
+/// Sem a chave: ela não aparece em log nenhum.
+impl std::fmt::Debug for Assinante {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Assinante")
+            .field("escuta", &self.escuta)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Assinante {
+    /// O assinante desta chave, para a sala que atende nesta escuta.
+    #[must_use]
+    pub fn novo(chave: ed25519_dalek::SigningKey, escuta: super::Escuta) -> Self {
+        Self { chave, escuta }
+    }
+
+    /// As marcas da sala desta chave (`Marcas::da_sala`).
+    #[must_use]
+    pub fn marcas(&self) -> Marcas {
+        Marcas::da_sala(&seele_proto::codigo::Codigo::da_chave(
+            &self.chave.verifying_key().to_bytes(),
+        ))
+    }
+}
+
+/// Como está o registro assinado da sala no ponto, para a casca dizer
+/// («SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA», e o motivo).
+///
+/// Sai da resposta do ponto ao `MORO2` da escuta de avisos. A do socket do
+/// servidor vai ao quinn, que a descarta, e por isso só a escuta conta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoDoRegistro {
+    /// Logo depois da subida, antes da primeira resposta.
+    Esperando,
+    /// O último `MORO2` foi guardado: quem liga pelo código acha esta máquina.
+    Registrado,
+    /// O ponto recusou porque os relógios diferem além da tolerância
+    /// (`TOLERANCIA_DO_CARIMBO`, 300 s).
+    RelogioTorto {
+        /// O relógio daqui menos o do ponto, em segundos: positivo, o daqui
+        /// está adiantado.
+        diferenca_s: i64,
+    },
+    /// O ponto recusou por outro motivo: cheio (o quarto, ou as 128 salas
+    /// desta rede), excesso de pedidos desta rede, ou um registro mais novo
+    /// desta chave vindo de outro endereço.
+    Recusado(encontro::Motivo),
+    /// O ponto não aceitou o cookie que ele mesmo acabou de dar: esta máquina
+    /// parece sair para a internet por mais de um endereço.
+    CookieRecusado,
+    /// O ponto não respondeu aos dois últimos registros: ou está fora do ar, ou
+    /// é anterior ao ENC/2.
+    SemResposta,
+}
+
+/// Quantos reavivamentos seguidos sem resposta viram
+/// [`EstadoDoRegistro::SemResposta`]. Dois: um pacote perdido não vira
+/// «o ponto não respondeu».
+const SILENCIOS_ATE_DIZER: u8 = 2;
+
+/// O registro assinado de uma sala, dentro de [`atender`]: monta os `MORO2` a
+/// cada envio, guarda o cookie, e transforma a resposta do ponto em
+/// [`EstadoDoRegistro`], com uma linha no `seele.log` a cada mudança.
+struct Assinatura {
+    assinante: Assinante,
+    estado: tokio::sync::watch::Sender<EstadoDoRegistro>,
+    /// O cookie que o ponto deu a este IP, pelo `DESAFIO` ou pelo `MOROU`.
+    cookie: Option<[u8; encontro::BYTES_DO_COOKIE]>,
+    /// O carimbo do último `MORO2`, para dizer de quanto é a diferença dos
+    /// relógios quando o ponto recusa.
+    ultimo_carimbo: u64,
+    /// Um `MORO2` saiu e a resposta ainda não veio.
+    pendente: bool,
+    /// Quantos reavivamentos seguidos ficaram sem resposta.
+    silencios: u8,
+    /// Se o registro já saiu de novo neste tique, por um `DESAFIO`.
+    reenviou: bool,
+}
+
+impl Assinatura {
+    fn nova(assinante: Assinante, estado: tokio::sync::watch::Sender<EstadoDoRegistro>) -> Self {
+        Self {
+            assinante,
+            estado,
+            cookie: None,
+            ultimo_carimbo: 0,
+            pendente: false,
+            silencios: 0,
+            reenviou: false,
+        }
+    }
+
+    /// O começo de um reavivamento: um registro anterior sem resposta conta
+    /// como silêncio, e [`SILENCIOS_ATE_DIZER`] seguidos viram
+    /// [`EstadoDoRegistro::SemResposta`].
+    fn no_tique(&mut self) {
+        if self.pendente {
+            self.silencios = self.silencios.saturating_add(1);
+            if self.silencios >= SILENCIOS_ATE_DIZER {
+                self.mudar(EstadoDoRegistro::SemResposta);
+            }
+        }
+        self.pendente = true;
+        self.reenviou = false;
+    }
+
+    /// Os dois `MORO2` deste envio, assinados agora, com o carimbo de agora e
+    /// o cookie que se tem: o da escuta, sem dicas, e o do servidor, com as
+    /// dicas de rede local desta máquina, recalculadas a cada envio (uma troca
+    /// de Wi-Fi muda a dica no tique seguinte).
+    fn moros(&mut self, marcas: &Marcas) -> (Vec<u8>, Vec<u8>) {
+        let carimbo = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |desde| desde.as_secs());
+        self.ultimo_carimbo = carimbo;
+        let dicas = dicas_desta_maquina(self.assinante.escuta, &super::interfaces::descobrir());
+        let da_escuta = self.assinado(marcas.escuta(), carimbo, Vec::new());
+        let do_servidor = self.assinado(marcas.servidor(), carimbo, dicas);
+        (encontro::moro2(&da_escuta), encontro::moro2(&do_servidor))
+    }
+
+    fn assinado(&self, marca: &Marca, carimbo: u64, dicas: Vec<SocketAddr>) -> encontro::Moro2 {
+        use ed25519_dalek::Signer as _;
+        let chave = self.assinante.chave.verifying_key().to_bytes();
+        let mensagem = seele_proto::assinatura::moro2(marca, &chave, carimbo, &dicas);
+        encontro::Moro2 {
+            marca: marca.clone(),
+            chave,
+            carimbo,
+            dicas,
+            assinatura: self.assinante.chave.sign(&mensagem).to_bytes(),
+            cookie: self.cookie,
+        }
+    }
+
+    /// Ouve uma resposta do ponto. Só a da marca da escuta conta. Devolve se o
+    /// registro tem de sair de novo agora: o primeiro `DESAFIO` do tique, com o
+    /// cookie novo. Um segundo `DESAFIO` no mesmo tique é um cookie que o
+    /// ponto não aceita, e é dito em vez de virar um laço.
+    fn ouviu(&mut self, resposta: &encontro::Resposta2, marcas: &Marcas) -> bool {
+        if resposta.marca() != marcas.escuta() {
+            return false;
+        }
+        self.pendente = false;
+        self.silencios = 0;
+        match *resposta {
+            encontro::Resposta2::Desafio { cookie, .. } => {
+                self.cookie = Some(cookie);
+                if self.reenviou {
+                    self.mudar(EstadoDoRegistro::CookieRecusado);
+                    return false;
+                }
+                self.reenviou = true;
+                true
+            }
+            encontro::Resposta2::Morou { cookie, .. } => {
+                self.cookie = Some(cookie);
+                self.mudar(EstadoDoRegistro::Registrado);
+                false
+            }
+            encontro::Resposta2::Recusa {
+                motivo: encontro::Motivo::Relogio,
+                agora,
+                ..
+            } => {
+                let diferenca_s =
+                    i64::try_from(i128::from(self.ultimo_carimbo) - i128::from(agora))
+                        .unwrap_or(i64::MAX);
+                self.mudar(EstadoDoRegistro::RelogioTorto { diferenca_s });
+                false
+            }
+            encontro::Resposta2::Recusa { motivo, .. } => {
+                self.mudar(EstadoDoRegistro::Recusado(motivo));
+                false
+            }
+            encontro::Resposta2::Aqui2 { .. } | encontro::Resposta2::Ninguem { .. } => false,
+        }
+    }
+
+    /// Muda o estado, e diz no `seele.log` (em `info`, o nível que ele grava)
+    /// só quando muda: o reavivamento sai a cada 15 s, e a mesma linha a cada
+    /// 15 s inundaria o log.
+    fn mudar(&self, novo: EstadoDoRegistro) {
+        if *self.estado.borrow() == novo {
+            return;
+        }
+        match novo {
+            EstadoDoRegistro::Esperando => {}
+            EstadoDoRegistro::Registrado => tracing::info!(
+                "encontro: a sala está registrada no ponto (ENC/2); quem liga pelo código acha \
+                 esta máquina"
+            ),
+            EstadoDoRegistro::RelogioTorto { diferenca_s } => tracing::info!(
+                diferenca_s,
+                "encontro: o ponto recusou o registro da sala porque o relógio desta máquina e o \
+                 dele diferem em {diferenca_s} s (a tolerância é de 300 s); quem liga pelo código \
+                 não acha esta máquina até os dois concordarem: confira se a data e a hora estão \
+                 automáticas"
+            ),
+            EstadoDoRegistro::Recusado(encontro::Motivo::Cheio) => tracing::info!(
+                "encontro: o ponto está cheio, ou cheio para esta rede (128 salas por endereço \
+                 público), e recusou o registro da sala; quem liga pelo código não acha esta \
+                 máquina até ele ter lugar"
+            ),
+            EstadoDoRegistro::Recusado(encontro::Motivo::Taxa) => tracing::info!(
+                "encontro: o ponto está recusando os registros desta rede por excesso; o limite é \
+                 por endereço público, e esta rede pode dividi-lo com outras pessoas. O \
+                 reavivamento seguinte tenta de novo"
+            ),
+            EstadoDoRegistro::Recusado(motivo) => tracing::info!(
+                motivo = motivo.texto(),
+                "encontro: o ponto tem um registro mais novo desta mesma sala, vindo de outro \
+                 endereço: o relógio desta máquina voltou, ou outra máquina usa a mesma \
+                 identidade"
+            ),
+            EstadoDoRegistro::CookieRecusado => tracing::info!(
+                "encontro: o ponto não aceita o cookie que acabou de dar a esta máquina: ela \
+                 parece sair para a internet por mais de um endereço, e a sala não se registra"
+            ),
+            EstadoDoRegistro::SemResposta => tracing::info!(
+                "encontro: o ponto não respondeu ao registro assinado da sala (ENC/2) nos últimos \
+                 dois reavivamentos: ou ele está fora do ar, ou é anterior ao ENC/2; quem liga \
+                 pelo código não acha esta máquina"
+            ),
+        }
+        self.estado.send_replace(novo);
+    }
+}
+
+/// As dicas de rede local da sala: os endereços das placas de rede físicas
+/// desta máquina que a escuta serve, na porta dela, só os que
+/// `encontro::serve_de_dica` aceita (rede de casa, sem escopo), IPv4 primeiro,
+/// no máximo `encontro::LIMITE_DE_DICAS`.
+///
+/// Só as placas físicas: um túnel ou uma ponte de máquina virtual não é a rede
+/// da casa de quem liga.
+#[must_use]
+pub fn dicas_desta_maquina(
+    escuta: super::Escuta,
+    achados: &[super::interfaces::Achado],
+) -> Vec<SocketAddr> {
+    let mut dicas: Vec<SocketAddr> = achados
+        .iter()
+        .filter(|achado| {
+            achado.classe() == super::interfaces::Origem::Fisica && escuta.serve(achado.ip)
+        })
+        .map(|achado| SocketAddr::new(achado.ip, escuta.porta()))
+        .filter(|dica| encontro::serve_de_dica(*dica))
+        .collect();
+    dicas.sort_by_key(|dica| u8::from(dica.is_ipv6()));
+    dicas.dedup();
+    dicas.truncate(encontro::LIMITE_DE_DICAS);
+    dicas
+}
+
 /// Um encontro aberto: o que o convite precisa dizer, e a tarefa que o mantém.
 pub struct Encontro {
     ponto: String,
     aviso: SocketAddr,
     publico: SocketAddr,
     tarefa: tokio::task::JoinHandle<()>,
+    /// O estado do registro assinado, numa sala; `None` num servidor guardado.
+    registro: Option<tokio::sync::watch::Receiver<EstadoDoRegistro>>,
 }
 
 impl std::fmt::Debug for Encontro {
@@ -377,6 +677,14 @@ impl std::fmt::Debug for Encontro {
 }
 
 impl Encontro {
+    /// Como está o registro assinado da sala no ponto, para a casca dizer; muda
+    /// a cada resposta do ponto. `None` num servidor guardado, que registra
+    /// pelo ENC/1 e não ouve resposta nenhuma ao registro.
+    #[must_use]
+    pub fn registro(&self) -> Option<tokio::sync::watch::Receiver<EstadoDoRegistro>> {
+        self.registro.clone()
+    }
+
     /// O endereço público do servidor, para entrar no convite como candidato.
     #[must_use]
     pub fn publico(&self) -> SocketAddr {
@@ -529,12 +837,23 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
 
     tracing::info!(%aviso, %publico, ponto = %convocacao.ponto, "degrau 4: o ponto de encontro nos viu");
 
+    let (assinatura, registro) = match &convocacao.assinante {
+        Some(assinante) => {
+            let (estado, leitor) = tokio::sync::watch::channel(EstadoDoRegistro::Esperando);
+            (
+                Some(Assinatura::nova(assinante.clone(), estado)),
+                Some(leitor),
+            )
+        }
+        None => (None, None),
+    };
     let tarefa = tokio::spawn(atender(
         avisos,
         Arc::clone(&convocacao.socket),
         ponto,
         aviso,
         marcas.clone(),
+        assinatura,
     ));
 
     Ok(Encontro {
@@ -542,6 +861,7 @@ pub async fn abrir(convocacao: &Convocacao) -> Result<Encontro, FalhaNoEncontro>
         aviso,
         publico,
         tarefa,
+        registro,
     })
 }
 
@@ -919,12 +1239,16 @@ async fn esperar_aqui(
 ///   sozinho e o endereço que está no convite deixa de valer;
 /// - **atender** os avisos de quem tem o link, furando o NAT para o endereço que
 ///   cada um traz.
+///
+/// Numa sala (`assinatura` com valor), o registro sai pelo ENC/2, assinado e
+/// com o cookie, e a resposta do ponto à escuta vira o [`EstadoDoRegistro`].
 async fn atender(
     avisos: tokio::net::UdpSocket,
     server: Arc<std::net::UdpSocket>,
     ponto: SocketAddr,
     aviso: SocketAddr,
     marcas: Marcas,
+    mut assinatura: Option<Assinatura>,
 ) {
     // **O primeiro tique sai na hora, e é de propósito.** O `interval` do
     // tokio completa o primeiro `tick` imediatamente, e esta função o
@@ -935,7 +1259,9 @@ async fn atender(
     // Registrar na subida custa os mesmos três datagramas que o reavivamento
     // já manda.
     let mut relogio = tokio::time::interval(REAVIVAR);
-    let mut balde = [0_u8; encontro::TAMANHO];
+    // Do tamanho do maior datagrama das duas versões, e um byte a mais: o
+    // `MOROU`, o `DESAFIO` e a `RECUSA` do ENC/2 têm 384 bytes.
+    let mut balde = [0_u8; encontro::TAMANHO2 + 1];
     let mut furos: Vec<tokio::time::Instant> = Vec::new();
     let mut registro = RegistroNoQuarto::default();
 
@@ -959,7 +1285,15 @@ async fn atender(
                 // próprio socket do servidor, onde quem lê é o QUIC, e o QUIC a
                 // descarta como já descarta todo `FURO` que chega ali. Ver o
                 // cabeçalho de `encontro::furo`.
-                let saiu = registrar(&avisos, &server, ponto, aviso, &marcas).await;
+                let (da_escuta, do_servidor) = match assinatura.as_mut() {
+                    Some(assinatura) => {
+                        assinatura.no_tique();
+                        assinatura.moros(&marcas)
+                    }
+                    None => (encontro::moro(marcas.escuta()), encontro::moro(marcas.servidor())),
+                };
+                let saiu =
+                    registrar(&avisos, &server, ponto, aviso, &marcas, &da_escuta, &do_servidor).await;
                 registro.anotar(ponto, saiu);
             }
             recebido = avisos.recv_from(&mut balde) => {
@@ -968,8 +1302,27 @@ async fn atender(
                     tracing::debug!(%origem, "aviso de fora do ponto de encontro; ignorado");
                     continue;
                 }
-                let Some((marca, endereco)) = balde.get(..lidos).and_then(encontro::ler_aqui)
-                else {
+                let datagrama = balde.get(..lidos).unwrap_or_default();
+                if let Some(resposta) = encontro::ler_resposta2(datagrama) {
+                    // A resposta do ponto ao registro assinado da escuta. Um
+                    // `DESAFIO` traz o cookie, e o registro sai de novo na
+                    // hora, uma vez por tique.
+                    let reenviar = assinatura
+                        .as_mut()
+                        .and_then(|assinatura| {
+                            assinatura
+                                .ouviu(&resposta, &marcas)
+                                .then(|| assinatura.moros(&marcas))
+                        });
+                    if let Some((da_escuta, do_servidor)) = reenviar {
+                        let saiu =
+                            registrar(&avisos, &server, ponto, aviso, &marcas, &da_escuta, &do_servidor)
+                                .await;
+                        registro.anotar(ponto, saiu);
+                    }
+                    continue;
+                }
+                let Some((marca, endereco)) = encontro::ler_aqui(datagrama) else {
                     continue;
                 };
                 if marca != *marcas.aviso() {
@@ -990,7 +1343,8 @@ async fn atender(
 }
 
 /// Os três datagramas de cada tique de [`atender`]: o registro das duas marcas
-/// no quarto e o reavivamento dos dois caminhos.
+/// no quarto e o reavivamento dos dois caminhos. O registro vem pronto: o
+/// `MORO` do ENC/1 de um servidor guardado, ou o `MORO2` assinado da sala.
 ///
 /// Os três saem sempre, mesmo que um falhe: são sockets diferentes, e um que não
 /// sai não diz nada sobre o outro. Devolve a falha que conta
@@ -1002,9 +1356,11 @@ async fn registrar(
     ponto: SocketAddr,
     aviso: SocketAddr,
     marcas: &Marcas,
+    moro_da_escuta: &[u8],
+    moro_do_servidor: &[u8],
 ) -> Result<(), NaoSaiu> {
     let escuta = avisos
-        .send_to(&encontro::moro(marcas.escuta()), ponto)
+        .send_to(moro_da_escuta, ponto)
         .await
         .map(|_| ())
         .map_err(|erro| {
@@ -1014,7 +1370,7 @@ async fn registrar(
             )
         });
     let leve = mandar_pelo_server(server, &encontro::leve(aviso, marcas.escuta()), ponto);
-    let servidor = mandar_pelo_server(server, &encontro::moro(marcas.servidor()), ponto);
+    let servidor = mandar_pelo_server(server, moro_do_servidor, ponto);
     a_falha_que_conta([escuta, leve, servidor])
 }
 
@@ -2033,7 +2389,36 @@ mod testes {
                 ponto,
                 self.avisos_endereco,
                 marcas,
+                None,
             ))
+        }
+
+        /// Sobe o `atender` de uma sala, que assina o registro com `chave`, e
+        /// devolve também o estado do registro.
+        fn subir_assinado(
+            self,
+            ponto: SocketAddr,
+            chave: ed25519_dalek::SigningKey,
+        ) -> (
+            tokio::task::JoinHandle<()>,
+            tokio::sync::watch::Receiver<EstadoDoRegistro>,
+        ) {
+            let porta = self.server_endereco.port();
+            let assinante = Assinante::novo(
+                chave,
+                crate::alcance::Escuta::nova(porta, crate::alcance::Pilha::SoIpv4),
+            );
+            let marcas = assinante.marcas();
+            let (estado, leitor) = tokio::sync::watch::channel(EstadoDoRegistro::Esperando);
+            let tarefa = tokio::spawn(atender(
+                self.avisos,
+                Arc::new(self.server),
+                ponto,
+                self.avisos_endereco,
+                marcas,
+                Some(Assinatura::nova(assinante, estado)),
+            ));
+            (tarefa, leitor)
         }
     }
 
@@ -2405,6 +2790,8 @@ mod testes {
                 mudo,
                 anfitriao.avisos_endereco,
                 &marcas,
+                &encontro::moro(marcas.escuta()),
+                &encontro::moro(marcas.servidor()),
             )
             .await;
             assert!(
@@ -2436,6 +2823,8 @@ mod testes {
                 bom,
                 anfitriao.avisos_endereco,
                 &marcas,
+                &encontro::moro(marcas.escuta()),
+                &encontro::moro(marcas.servidor()),
             )
             .await;
             assert!(
@@ -2637,6 +3026,7 @@ mod testes {
             aviso,
             publico: SocketAddr::from(([198, 51, 100, 7], 8383)),
             tarefa: tokio::spawn(async {}),
+            registro: None,
         };
         assert_eq!(
             com(PONTO_PADRAO).bilhete().ponto,
@@ -2692,5 +3082,383 @@ mod testes {
         // reprova, desfeito o guarda, é a falta do pânico.
         let ate = tokio::time::Instant::now() + PRAZO;
         let _ = super::resolver("216.128.168.216:8384", ate).await;
+    }
+
+    // ---------------------------------------------------------------------
+    // A sala pessoal no ENC/2 (ADR 0062)
+    // ---------------------------------------------------------------------
+
+    /// O cookie que o ponto de mentira dá a todo mundo.
+    const COOKIE_DE_TESTE: [u8; encontro::BYTES_DO_COOKIE] = [7; encontro::BYTES_DO_COOKIE];
+
+    type CadernoDoEnc2 = Arc<std::sync::Mutex<Vec<(encontro::Moro2, SocketAddr)>>>;
+
+    /// Um ponto de teste que fala a versão 2: a um `MORO2` sem o
+    /// [`COOKIE_DE_TESTE`] responde `DESAFIO` com ele; aos outros, o que
+    /// `responder` disser, ou cala. Anota todo `MORO2` com quem o mandou.
+    async fn ponto_do_enc2(
+        responder: impl Fn(&encontro::Moro2, SocketAddr) -> Option<encontro::Resposta2> + Send + 'static,
+    ) -> (SocketAddr, CadernoDoEnc2) {
+        let Ok(socket) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o ponto do ENC/2 de teste");
+        };
+        let Ok(onde) = socket.local_addr() else {
+            panic!("o ponto do ENC/2 de teste não tem endereço local");
+        };
+        let caderno: CadernoDoEnc2 = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotador = Arc::clone(&caderno);
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO2 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let Some(encontro::Pedido2::Moro2(pedido)) =
+                    balde.get(..lidos).and_then(encontro::analisar2)
+                else {
+                    continue;
+                };
+                let resposta = if pedido.cookie == Some(COOKIE_DE_TESTE) {
+                    responder(&pedido, de)
+                } else {
+                    Some(encontro::Resposta2::Desafio {
+                        marca: pedido.marca.clone(),
+                        cookie: COOKIE_DE_TESTE,
+                    })
+                };
+                if let Ok(mut lista) = anotador.lock() {
+                    lista.push((pedido, de));
+                }
+                if let Some(resposta) = resposta {
+                    let _ = socket.send_to(&encontro::resposta2(&resposta), de).await;
+                }
+            }
+        });
+        (onde, caderno)
+    }
+
+    fn chave_da_sala() -> ed25519_dalek::SigningKey {
+        ed25519_dalek::SigningKey::from_bytes(&[42; 32])
+    }
+
+    fn marcas_da_sala() -> Marcas {
+        Marcas::da_sala(&seele_proto::codigo::Codigo::da_chave(
+            &chave_da_sala().verifying_key().to_bytes(),
+        ))
+    }
+
+    /// Espera o estado do registro chegar a um que `aceita`, até `prazo`.
+    async fn esperar_estado(
+        estado: &mut tokio::sync::watch::Receiver<EstadoDoRegistro>,
+        prazo: Duration,
+        aceita: impl Fn(&EstadoDoRegistro) -> bool,
+    ) -> Option<EstadoDoRegistro> {
+        tokio::time::timeout(prazo, estado.wait_for(|e| aceita(e)))
+            .await
+            .ok()?
+            .ok()
+            .map(|e| *e)
+    }
+
+    #[test]
+    fn as_dicas_sao_da_placa_de_rede_local_ipv4_primeiro_e_no_maximo_duas() {
+        use crate::alcance::interfaces::{Achado, Origem};
+        use crate::alcance::{Escuta, Pilha};
+        let achado = |ip: &str, origem| Achado {
+            ip: ip.parse().unwrap_or(std::net::IpAddr::from([0, 0, 0, 0])),
+            mascara: None,
+            origem,
+        };
+        let achados = [
+            achado("fd12::5", Origem::Fisica),
+            achado("8.8.8.8", Origem::Fisica),
+            achado("10.8.0.2", Origem::Tunel),
+            achado("192.168.0.10", Origem::Fisica),
+            achado("172.17.0.1", Origem::Virtual),
+            achado("192.168.1.10", Origem::Fisica),
+            achado("192.168.1.11", Origem::Fisica),
+        ];
+        let dicas = dicas_desta_maquina(Escuta::nova(8385, Pilha::Dupla), &achados);
+        assert_eq!(
+            dicas,
+            vec![
+                SocketAddr::from(([192, 168, 0, 10], 8385)),
+                SocketAddr::from(([192, 168, 1, 10], 8385)),
+            ],
+            "as dicas não são as duas primeiras placas físicas de rede local, IPv4 primeiro"
+        );
+        let so_seis = dicas_desta_maquina(Escuta::nova(8385, Pilha::SoIpv6), &achados);
+        assert_eq!(
+            so_seis,
+            vec![SocketAddr::from((
+                "fd12::5"
+                    .parse::<std::net::Ipv6Addr>()
+                    .unwrap_or(Ipv6Addr::LOCALHOST),
+                8385
+            ))],
+            "uma escuta só IPv6 ofereceu dica IPv4"
+        );
+    }
+
+    #[test]
+    fn a_convocacao_da_sala_e_assinada_e_a_do_servidor_nao() {
+        let socket = || {
+            let Ok(socket) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+                panic!("não deu para abrir o socket de teste");
+            };
+            Arc::new(socket)
+        };
+        let Some(guardado) = Convocacao::para_servidor(socket(), IMPRESSAO, "127.0.0.1:9") else {
+            panic!("a impressão de teste forma marcas");
+        };
+        assert!(!guardado.assinada(), "um servidor guardado saiu assinado");
+        let sala = Convocacao::para_sala(
+            socket(),
+            crate::alcance::Escuta::nova(8385, crate::alcance::Pilha::Dupla),
+            chave_da_sala(),
+            "127.0.0.1:9",
+        );
+        assert!(sala.assinada(), "a sala saiu sem assinante");
+        assert_eq!(
+            sala.marcas,
+            marcas_da_sala(),
+            "as marcas da sala não saem do código da chave"
+        );
+    }
+
+    #[tokio::test]
+    async fn o_registro_da_sala_sai_assinado_com_a_marca_de_cada_socket_e_o_cookie_do_desafio() {
+        let (ponto, caderno) = ponto_do_enc2(|pedido, de| {
+            Some(encontro::Resposta2::Morou {
+                marca: pedido.marca.clone(),
+                endereco: de,
+                cookie: COOKIE_DE_TESTE,
+            })
+        })
+        .await;
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let (avisos_endereco, server_endereco) =
+            (anfitriao.avisos_endereco, anfitriao.server_endereco);
+        let (tarefa, mut estado) = anfitriao.subir_assinado(ponto, chave_da_sala());
+        let visto = esperar_estado(&mut estado, Duration::from_secs(2), |e| {
+            *e == EstadoDoRegistro::Registrado
+        })
+        .await;
+        tarefa.abort();
+        assert_eq!(
+            visto,
+            Some(EstadoDoRegistro::Registrado),
+            "a sala não se registrou"
+        );
+
+        let marcas = marcas_da_sala();
+        let publica = chave_da_sala().verifying_key();
+        let Ok(lista) = caderno.lock().map(|lista| lista.clone()) else {
+            panic!("o caderno trancou");
+        };
+        let com_cookie = |marca: &Marca, de: SocketAddr| {
+            lista.iter().find(|(pedido, origem)| {
+                pedido.marca == *marca && *origem == de && pedido.cookie == Some(COOKIE_DE_TESTE)
+            })
+        };
+        let Some((da_escuta, _)) = com_cookie(marcas.escuta(), avisos_endereco) else {
+            panic!("a escuta não mandou o MORO2 com o cookie do DESAFIO: {lista:?}");
+        };
+        let Some((do_servidor, _)) = com_cookie(marcas.servidor(), server_endereco) else {
+            panic!("o socket do servidor não mandou o MORO2 com o cookie do DESAFIO: {lista:?}");
+        };
+        for pedido in [da_escuta, do_servidor] {
+            assert_eq!(
+                pedido.chave,
+                publica.to_bytes(),
+                "o MORO2 não leva a chave da sala"
+            );
+            let mensagem = seele_proto::assinatura::moro2(
+                &pedido.marca,
+                &pedido.chave,
+                pedido.carimbo,
+                &pedido.dicas,
+            );
+            let assinatura = ed25519_dalek::Signature::from_bytes(&pedido.assinatura);
+            assert!(
+                publica.verify_strict(&mensagem, &assinatura).is_ok(),
+                "o MORO2 de {} não confere com a chave da sala",
+                pedido.marca
+            );
+        }
+        assert!(
+            da_escuta.dicas.is_empty(),
+            "a escuta levou dicas: elas são do servidor"
+        );
+        assert!(
+            do_servidor
+                .dicas
+                .iter()
+                .all(|dica| encontro::serve_de_dica(*dica) && dica.port() == server_endereco.port()),
+            "o servidor levou uma dica que não é de rede local, ou noutra porta: {:?}",
+            do_servidor.dicas
+        );
+    }
+
+    #[tokio::test]
+    async fn o_relogio_torto_vira_estado_e_uma_linha_no_log() {
+        let (rastro, _guarda) = Rastro::de_info();
+        let (ponto, _) = ponto_do_enc2(|pedido, _| {
+            Some(encontro::Resposta2::Recusa {
+                marca: pedido.marca.clone(),
+                motivo: encontro::Motivo::Relogio,
+                agora: pedido.carimbo.saturating_sub(1000),
+            })
+        })
+        .await;
+        let (tarefa, mut estado) = AnfitriaoDeTeste::abrir()
+            .await
+            .subir_assinado(ponto, chave_da_sala());
+        let visto = esperar_estado(&mut estado, Duration::from_secs(2), |e| {
+            matches!(e, EstadoDoRegistro::RelogioTorto { .. })
+        })
+        .await;
+        tarefa.abort();
+        assert_eq!(
+            visto,
+            Some(EstadoDoRegistro::RelogioTorto { diferenca_s: 1000 }),
+            "o relógio torto não virou estado, com a diferença"
+        );
+        assert_eq!(
+            rastro.linhas_com("relógio"),
+            1,
+            "o relógio torto não foi dito uma vez no seele.log: {}",
+            rastro.texto()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn um_ponto_que_cala_o_enc2_vira_sem_resposta_e_e_dito() {
+        let (rastro, _guarda) = Rastro::de_info();
+        let Ok(mudo) = tokio::net::UdpSocket::bind("127.0.0.1:0").await else {
+            panic!("não deu para abrir o ponto mudo");
+        };
+        let Ok(ponto) = mudo.local_addr() else {
+            panic!("o ponto mudo não tem endereço");
+        };
+        let (tarefa, mut estado) = AnfitriaoDeTeste::abrir()
+            .await
+            .subir_assinado(ponto, chave_da_sala());
+        let visto = esperar_estado(&mut estado, REAVIVAR * 4, |e| {
+            *e == EstadoDoRegistro::SemResposta
+        })
+        .await;
+        tarefa.abort();
+        drop(mudo);
+        assert_eq!(
+            visto,
+            Some(EstadoDoRegistro::SemResposta),
+            "um ponto mudo para o ENC/2 não virou SemResposta"
+        );
+        assert_eq!(
+            rastro.linhas_com("ENC/2"),
+            1,
+            "o ponto mudo para o ENC/2 não foi dito uma vez: {}",
+            rastro.texto()
+        );
+    }
+
+    #[tokio::test]
+    async fn um_cookie_que_o_ponto_nao_aceita_e_dito_e_nao_vira_laco() {
+        // Um ponto que responde DESAFIO a todo MORO2, com o cookie que for: a
+        // sala manda de novo uma vez com o cookie novo, e não fica num laço de
+        // DESAFIO e reenvio.
+        let (rastro, _guarda) = Rastro::de_info();
+        let (ponto, caderno) = ponto_do_enc2(|pedido, _| {
+            Some(encontro::Resposta2::Desafio {
+                marca: pedido.marca.clone(),
+                cookie: [9; encontro::BYTES_DO_COOKIE],
+            })
+        })
+        .await;
+        let anfitriao = AnfitriaoDeTeste::abrir().await;
+        let avisos_endereco = anfitriao.avisos_endereco;
+        let (tarefa, mut estado) = anfitriao.subir_assinado(ponto, chave_da_sala());
+        let visto = esperar_estado(&mut estado, Duration::from_secs(2), |e| {
+            *e == EstadoDoRegistro::CookieRecusado
+        })
+        .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        tarefa.abort();
+        assert_eq!(
+            visto,
+            Some(EstadoDoRegistro::CookieRecusado),
+            "o cookie recusado não virou estado"
+        );
+        let da_escuta = caderno
+            .lock()
+            .map(|lista| {
+                lista
+                    .iter()
+                    .filter(|(_, de)| *de == avisos_endereco)
+                    .count()
+            })
+            .unwrap_or_default();
+        assert!(
+            da_escuta <= 3,
+            "a escuta mandou {da_escuta} MORO2 num tique: o DESAFIO virou laço"
+        );
+        assert_eq!(
+            rastro.linhas_com("cookie"),
+            1,
+            "o cookie recusado não foi dito uma vez: {}",
+            rastro.texto()
+        );
+    }
+
+    #[test]
+    fn a_mesma_resposta_repetida_diz_uma_linha_so_e_os_silencios_contam_por_tique() {
+        // O reavivamento sai a cada 15 s, e a mesma recusa a cada 15 s
+        // inundaria o seele.log. Direto na `Assinatura`, sem rede: uma linha
+        // por mudança de estado, e o «sem resposta» depois de dois tiques mudos.
+        let (rastro, _guarda) = Rastro::de_info();
+        let (estado, leitor) = tokio::sync::watch::channel(EstadoDoRegistro::Esperando);
+        let assinante = Assinante::novo(
+            chave_da_sala(),
+            crate::alcance::Escuta::nova(8385, crate::alcance::Pilha::SoIpv4),
+        );
+        let marcas = assinante.marcas();
+        let mut assinatura = Assinatura::nova(assinante, estado);
+        let recusa = encontro::Resposta2::Recusa {
+            marca: marcas.escuta().clone(),
+            motivo: encontro::Motivo::Taxa,
+            agora: 1,
+        };
+        for _ in 0..3 {
+            assinatura.no_tique();
+            assert!(!assinatura.ouviu(&recusa, &marcas));
+        }
+        assert_eq!(
+            *leitor.borrow(),
+            EstadoDoRegistro::Recusado(encontro::Motivo::Taxa)
+        );
+        assert_eq!(
+            rastro.linhas_com("excesso"),
+            1,
+            "a mesma recusa, três vezes, não foi dita uma vez só: {}",
+            rastro.texto()
+        );
+
+        // A resposta de outra marca (a do servidor, que nunca chega à escuta,
+        // ou ruído) não conta como resposta ao registro da escuta.
+        let do_servidor = encontro::Resposta2::Ninguem {
+            marca: marcas.servidor().clone(),
+        };
+        assinatura.no_tique();
+        assert!(!assinatura.ouviu(&do_servidor, &marcas));
+        assinatura.no_tique();
+        assert_ne!(
+            *leitor.borrow(),
+            EstadoDoRegistro::SemResposta,
+            "um tique mudo já disse"
+        );
+        assinatura.no_tique();
+        assert_eq!(
+            *leitor.borrow(),
+            EstadoDoRegistro::SemResposta,
+            "dois tiques mudos não viraram SemResposta"
+        );
     }
 }

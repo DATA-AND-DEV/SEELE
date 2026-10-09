@@ -136,3 +136,8 @@ recusar-encontro-de-producao = []
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# O `test-util`, para o `#[tokio::test(start_paused = true)]`: provar que a sala
+# diz «o ponto não respondeu ao ENC/2» depois de dois reavivamentos de 15 s
+# exigiria, sem ele, esperar meio minuto de verdade. Mesmo crate, já na árvore,
+# e `dev-dependencies` não entra em binário publicado.
+tokio = { version = "1.53.1", features = ["test-util"] }
