@@ -1,16 +1,19 @@
 //! A casa comum de quem precisa **subir de novo na mesma porta**.
 //!
-//! Dois testes desta suíte derrubam o servidor e o levantam de volta no mesmo
-//! endereço, e os dois tropeçavam na mesma pedra. Ela não é do produto: é do
+//! Três testes desta suíte derrubam o servidor e o levantam de volta no mesmo
+//! endereço, e todos tropeçavam na mesma pedra. Ela não é do produto: é do
 //! sorteio de portas do sistema. Este módulo existe para que a resposta a ela
-//! seja uma só — corrigir aqui corrige nos dois, e ninguém precisa descobrir
-//! duas vezes por que a espera existe.
+//! seja uma só — corrigir aqui corrige nos três, e ninguém precisa descobrir
+//! de novo por que a espera existe.
 //!
-//! **Por que só dois.** Estes são os únicos binários da conformidade que pedem
+//! **Por que só três.** Estes são os únicos binários da conformidade que pedem
 //! uma porta fixa; todos os outros pedem porta efêmera ao sistema e não têm como
-//! tropeçar em «endereço já em uso». A cobertura deste módulo é de dois arquivos
-//! porque a exposição é de dois arquivos, e não porque os demais ficaram para
-//! trás — conferido em 15/09/2026, lendo todo `listen:` da suíte.
+//! tropeçar em «endereço já em uso». A cobertura deste módulo é de três arquivos
+//! porque a exposição é de três arquivos, e não porque os demais ficaram para
+//! trás — conferido em 15/09/2026, lendo todo `listen:` da suíte. O terceiro,
+//! `discar_pelo_codigo.rs`, entrou em 09/10/2026: a sala volta pela
+//! `Hospedagem`, e não por um `Daemon`, e por isso ele usa só
+//! [`a_porta_e_de_outro`].
 //!
 //! Não é um binário de teste: `cargo` só compila como teste os arquivos soltos
 //! em `tests/`, e não o que está dentro de uma pasta. Quem usa faz `mod porta;`.

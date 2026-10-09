@@ -297,6 +297,9 @@ const ENTRAR_SEM_NOME = "Você vai entrar com um nome tirado da sua chave. Dá p
 
 const ETAPAS = {
   Parada: "LENDO O CONVITE",
+  // Provisória: a frase de uma ligação é da tarefa 7f (CHAMANDO e CANCELAR),
+  // que troca esta. Até lá nada no app disca um código.
+  Localizando: "LOCALIZANDO PELO PONTO DE ENCONTRO",
   Avisando: "AVISANDO O PONTO DE ENCONTRO",
   Tentando: "TENTANDO UM ENDEREÇO DO CONVITE",
   // Diz o que abriu e não o que vem: quem lê isto ainda pode não entrar.

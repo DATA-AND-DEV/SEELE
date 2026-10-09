@@ -56,6 +56,13 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da P1 e da P2 da F1 (`bf559478`) | feito | `28003af4` |
 | 10 | 4d, o aperto de mão em três fases | **feita** | `312ec92e` |
 | 12b | 6b, o ramo do código no `connect_por` | **feita** | `1fb62a9a` |
+| — | merge da `versao/0.16` (`bbb0ed9c`): o servidor da F1 e o ENC/2 | feito | `8f19ddd2` |
+| 11 | 4f, a hospedagem da sala | **feita**; a rodada inteira da conformidade espera o fim da 5ª integração | `c3483884` |
+| 13 | 6a, `ler_entrada` | **feita** | `86edd3e4` |
+| — | merge da `versao/0.16` (`bd58a080`): o F da F5 e a P9 da F1 | feito; a rodada da 4f, 46 de 46 | `d3c1c596` |
+| 14a + 15 | 6c e 6d, discar pelo código | **feitas** | `1f1a1b35` |
+| — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
+| 17 | 6f, a bateria da ligação | **feita**, menos a volta do convidado sem tocar, que espera a 16 | `0d320448` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -294,3 +301,99 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
 - **14 e 15**: a F2;
 - **18 a 31**: a casca;
 - **as duas medidas do toque que abrem o microfone**, com o dono.
+
+## As tarefas 11 e 13 (09/10)
+
+- **Tarefa 11, a hospedagem da sala** (`c3483884`):
+  - `Hospedagem::iniciar_sala(porta, semente, apelido, ponto)`, com o gancho que
+    cria a conta de quem recebe (o achado A2), a `Convocacao::para_sala` da F2
+    e `PORTA_DA_SALA = 8385`.
+  - Na escada, três decisões puras pela `Convocacao::assinada()`: o degrau 4
+    sempre, a porta como `Papel::Sala` e o furo nunca largado.
+  - A sala não manda `Membros`, `MembroNovo` nem `MembroBanido`.
+  - A prova é `seele-conformance/tests/sala_pessoal.rs`, com 4 testes, mais 3
+    testes de unidade na escada.
+  - **A reversão do furo largado passou na prova de ponta a ponta**: o ponto
+    guarda o registro até o prazo dele. A regra ganhou um teste de unidade, que
+    reprova.
+  - **A rodada dos outros arquivos de conformidade foi interrompida** a pedido
+    da orquestradora (a 5ª integração). O `seele-server` inteiro rodou: 609 na
+    lib e as integrações.
+- **Tarefa 13, `ler_entrada`** (`86edd3e4`): as quatro regras da spec, em
+  `crates/seele-core/src/entrada.rs`.
+  - A guarda dos caracteres de endereço era redundante, medido pela reversão:
+    a leitura do código já os recusa. Ela saiu, e um teste prende o
+    comportamento.
+  - Uma entrada de teste que prometia o O e o I/L sem os ter virou um teste de
+    verdade.
+- **A 14, a 15 e a 17 esperam a 5ª integração (o F)**: as três mexem no
+  `enlace.rs` e na `chegada.rs`.
+
+## A quinta integração, a 14a e a 15 (09/10)
+
+- **O merge** de `bd58a080` entrou limpo (`d3c1c596`). A rodada inteira da 4f,
+  que tinha ficado parada, passou nele: `seele-server`, `seele-core`,
+  `seele-ffi` e `seele-audio` verdes, e a conformidade 46 de 46, arquivo por
+  arquivo.
+- **14a + 15, discar pelo código** (`1f1a1b35`):
+  - `Chegada::para_o_codigo(codigo, ponto, apelido)` nasce parada com zero
+    candidatos. `Etapa::Localizando{ponto}` pergunta ao quarto
+    (`encontro::localizar`, da F2). A resposta vira os candidatos e o bilhete:
+    as dicas primeiro, o servidor depois, sem repetir, todos com
+    `Esperada::Codigo`.
+  - As arestas são `Parada{0} → Localizando` e `Localizando → Avisando |
+    Tentando | Desistiu`. Localizar pode reprovar, ao contrário do aviso.
+  - `ConnectError::NaoLocalizou(FalhaAoLocalizar)`, com sete motivos. Na FFI,
+    `ConnectionError::NaoLocalizou{motivo}` e `ConnectStage::Localizando`.
+  - `Destino::marca_do_aviso`: a `Batida` recebe a marca, e não a impressão.
+    **O achado**: um destino de código não preparava batida nenhuma, nem na
+    entrada nem na volta da bateria. A ligação não avisava a escuta, e o furo
+    do lado de quem recebe nunca abria.
+  - A prova de ponta a ponta é `seele-conformance/tests/discar_pelo_codigo.rs`,
+    com 4 testes. Um deles é o «sem *hairpin*»: o ponto só conhece um endereço
+    público morto, e a ligação entra pela dica.
+  - Nove reversões medidas, listadas no commit.
+- **A linha provisória de `ETAPAS`** (`e3e32bfe`): «LOCALIZANDO PELO PONTO DE
+  ENCONTRO», num commit isolado e marcada para a 7f trocar. Sem ela, o guarda
+  `every_stage_of_an_arrival_has_a_sentence_in_the_page` fica vermelho, e foi
+  visto vermelho antes da linha.
+- **A rodada depois dos dois commits**: `seele-server` verde, e a conformidade
+  47 de 47, arquivo por arquivo, com o arquivo novo. A `Batida` mudou para toda
+  conexão que traz `enc=`, e por isso a rodada foi inteira. `seele-core`,
+  `seele-ffi` e o `seele-app` inteiro passaram antes do commit.
+
+## Tarefa 17 — a bateria da ligação (09/10)
+
+- `Battery::da_ligacao` dura um minuto (`CARGA_DA_LIGACAO`). O motor a escolhe
+  quando o destino espera um código (`bateria_de`). A carga virou campo da
+  bateria.
+- **A volta já era ao `IP:porta` que atendeu**: o motor nasce por candidato,
+  com o destino de quem venceu. A prova é de ponta a ponta. A ligação entra
+  pela segunda dica, porque a primeira e o público estão mortos. A sala cai
+  sem despedida e volta na mesma porta, e a ligação volta sozinha, com a
+  bateria começando em no máximo um minuto.
+- Um guarda novo prende a carga dentro da `TOLERANCIA_DE_RECONEXAO` da
+  campainha. Uma bateria mais longa voltaria tocando.
+- Reversões: o motor com cinco minutos, e a carga em 61 s. A volta ao
+  `IP:porta` não tem reversão direta: o motor não guarda lista a que voltar.
+  A disposição do teste é conferida nele.
+- `porta.rs` da conformidade passou a dizer três binários de porta fixa.
+- **Espera a 16**: a volta de um convidado sem tocar de novo. Ela precisa do
+  cliente que lê o `Tocando` para a primeira entrada. A frase «A LIGAÇÃO CAIU»
+  é da 7f.
+- **A rodada inteira depois da 17** (`39faee3d`, liberada de novo pela
+  orquestradora depois da bateria do `linha/0.15`): 46 de 47.
+  - O vermelho foi `tela_por_um_par::retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor`,
+    com `Error: SemResposta`. Enquanto ele falhava,
+    `a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor`, que
+    disputa a porta de propósito, já corria havia mais de 60 s.
+  - Rodado de novo: o teste sozinho passou 3 de 3, e o arquivo inteiro 19 de
+    19.
+  - **Por leitura, e não por medida**, nada da 14a nem da 17 está no caminho
+    dele: ele não usa bilhete nem destino de código. São os dois únicos lugares
+    em que as duas tarefas mudaram o comportamento de uma conexão.
+  - O arquivo tem uma família intermitente conhecida, a pendência 41. Lá o
+    sintoma registrado é «a paciência acabou», e não `SemResposta`: **não
+    afirmo que é a mesma**. Separar de vez pediria rodadas intercaladas contra
+    a base, como as que a pendência 41 fez.
+

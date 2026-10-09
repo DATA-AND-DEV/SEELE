@@ -1079,7 +1079,7 @@ async fn admitir(
         // `run_session`, porque só o `registrar_ou_achar` sabe que criou; e
         // vale mesmo que o portão dos MODs, adiante, não a deixe entrar —
         // a conta existe, e é membro na lista de quem entrar depois.
-        if criou {
+        if criou && manda_a_lista_de_membros(server) {
             let _ = server.events.send(Event::MembroNovo {
                 membro: seele_proto::control::Membro {
                     id: person.id,
@@ -2255,19 +2255,24 @@ async fn run_session(
     //
     // Um banco que não responde não manda parte nenhuma, e diz no registro:
     // uma parte vazia com `fim` afirmaria que o servidor não tem membros.
-    let membros = {
+    let membros = if manda_a_lista_de_membros(server) {
         let guard = server.persistence.lock().await;
-        Permissions::new(&guard).membros()
+        Some(Permissions::new(&guard).membros())
+    } else {
+        None
     };
     match membros {
-        Ok(membros) => {
+        // A sala pessoal: nem lista, nem linha no registro (ver
+        // [`manda_a_lista_de_membros`]).
+        None => {}
+        Some(Ok(membros)) => {
             for parte in partes_dos_membros(membros) {
                 if entende_a_mensagem(&parte, session.protocol_version) {
                     frame::write_em(&mut send, session.protocol_version, &parte).await?;
                 }
             }
         }
-        Err(erro) => {
+        Some(Err(erro)) => {
             tracing::warn!(
                 person = %session.person,
                 %erro,
@@ -2899,7 +2904,10 @@ async fn run_session(
                                 });
                                 // E deixa de ser membro para quem fica: o
                                 // FORA DO AR (D-fio-4) não mostra banido.
-                                let _ = server.events.send(Event::MembroBanido { person: alvo });
+                                if manda_a_lista_de_membros(server) {
+                                    let _ =
+                                        server.events.send(Event::MembroBanido { person: alvo });
+                                }
                             }
                             Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
@@ -5154,6 +5162,15 @@ fn announce(server: &Server, session: &Session, state: &AnnouncedState) {
         presence: state.presence,
         signal: state.signal,
     }));
+}
+
+/// Se este servidor manda a lista de membros (o FORA DO AR, D-fio-4).
+///
+/// A sala pessoal não manda: uma ligação não tem membros, e quem liga não
+/// precisa saber quem mais já ligou para a mesma pessoa. O mesmo vale para o
+/// `MembroNovo` e o `MembroBanido`.
+fn manda_a_lista_de_membros(server: &Server) -> bool {
+    server.recepcao.is_none()
 }
 
 /// A lista de membros em quadros de [`ServerMessage::Membros`]: partes de até
