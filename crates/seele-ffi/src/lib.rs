@@ -4322,8 +4322,9 @@ async fn drive(
         // **O gatilho da pendência 52**, depois de cada volta e não dentro de
         // cada braço: o assento muda por cinco caminhos — a entrada pedida, o
         // operador que move, a saída pedida, a recusa por `Alert` e a sala
-        // apagada —, e todos terminam em `Room::current_voice_room`. Olhar o
-        // antes e o depois aqui cobre os cinco, e o sexto que vier.
+        // apagada —, e todos terminam no assento do `Room`, pela porta única de
+        // `seele_core::assento`. Olhar o antes e o depois aqui cobre os cinco, e
+        // o sexto que vier. O assento olhado é o confirmado: ver `sala_de`.
         let antes = shared.voice.abertura();
         porta.olhar(&shared.voice, sala_de(&shared), |pedidos| {
             abrir_a_voz(&shared, pedidos)
@@ -4855,25 +4856,41 @@ fn abrir_a_voz(shared: &Shared, pedidos: &seele_core::DeviceChoice) -> Futuro<Vo
     })
 }
 
-/// O assento de agora, como a FFI o vê.
+/// O assento pelo qual o áudio abre e fecha.
+///
+/// **O confirmado, e não o especulativo** (M-d da rodada 1 do lote I-a): o
+/// assento muda no instante em que a entrada é pedida, e o servidor ainda pode
+/// recusá-la. Abrir o áudio por ele abriria o microfone numa sala que vai dizer
+/// não. O confirmado chega uma volta de rede depois: o `Pong` do `Ping` marcado
+/// que o motor manda atrás do pedido. Ver `seele_core::assento`.
+fn sala_do_audio(room: &Room) -> Option<VoiceRoomId> {
+    room.sala_confirmada()
+}
+
+/// [`sala_do_audio`], lida do `Room` desta sessão.
 fn sala_de(shared: &Shared) -> Option<VoiceRoomId> {
     shared
         .room
         .lock()
         .ok()
-        .and_then(|room| room.current_voice_room)
+        .and_then(|room| sala_do_audio(&room))
 }
 
-/// O que a volta do enlace faz com o `Room`: adota a sessão nova e senta a
-/// pessoa onde o motor a sentou de novo.
+/// O que a volta do enlace faz com o `Room`: adota a sessão nova e refaz o que
+/// o motor refez nela.
 ///
-/// `assento` é o de `Aviso::Reconectado`, e é a única fonte que há. A sessão
-/// nova chega sem assento — `Room::adopt` o zera, e tem de zerar, porque a
-/// fotografia que o servidor manda depois é só aditiva —, o servidor confirma a
-/// entrada por silêncio, e a fotografia de ocupação pula a própria pessoa.
-/// Medido em `a_volta_mostra_a_pessoa_na_sala_em_que_o_motor_a_sentou_de_novo`:
-/// sem esta linha, quem caía e voltava era desenhado FORA DE SALA com a voz
-/// dentro da sala, e o áudio da pendência 52, que segue o assento, fecharia.
+/// `assento` é o de `Aviso::Reconectado`: a sala em que o motor pediu a
+/// entrada de novo, ou nenhuma. A sessão nova chega sem assento, o servidor
+/// confirma a entrada por silêncio, e a fotografia de ocupação pula a própria
+/// pessoa. Medido em `a_volta_mostra_a_pessoa_na_sala_em_que_o_motor_a_sentou_de_novo`:
+/// sem refazer, quem caía e voltava era desenhado FORA DE SALA com a voz dentro
+/// da sala, e o áudio da pendência 52, que segue o assento, fecharia.
+///
+/// **A mesma conta do motor, pelo mesmo `seele_core::assento`.** `Room::adopt`
+/// guarda o assento que o servidor resgatou (o mesmo `ssrc`), e por cima dele
+/// vem o pedido que `restabelecer` mandou: a entrada, no ar até o servidor
+/// decidir — e a recusa dela, numa sala com senha, devolve o resgatado —, ou a
+/// saída de quem deixou a sala durante a queda.
 fn readotar_na_volta(
     room: &mut Room,
     sessao: &seele_core::SessionInfo,
@@ -4881,8 +4898,9 @@ fn readotar_na_volta(
     assento: Option<VoiceRoomId>,
 ) {
     room.adopt(sessao, apelido);
-    if let Some(sala) = assento {
-        room.enter_voice_room(sala);
+    match assento {
+        Some(sala) => room.enter_voice_room(sala),
+        None => room.leave_voice_room(),
     }
 }
 
@@ -9621,8 +9639,8 @@ mod o_audio_segue_a_sala {
     //! [`Voice`]: seele_core::Voice
 
     use super::{
-        readotar_na_volta, voice_rooms_of, Aberta, AberturaDoAudio, ControlesGuardados, Futuro,
-        PortaDaVoz, VozDaSala, VozViva,
+        readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta, AberturaDoAudio,
+        ControlesGuardados, Futuro, PortaDaVoz, VozDaSala, VozViva,
     };
     use seele_core::{
         AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
@@ -9672,7 +9690,8 @@ mod o_audio_segue_a_sala {
         ssrc: u32,
     ) -> u32 {
         let mut aberturas = 0;
-        porta.olhar(voz, room.current_voice_room, |_| {
+        // O assento pelo qual o áudio abre, como `sala_de` o lê em `drive`.
+        porta.olhar(voz, sala_do_audio(room), |_| {
             aberturas += 1;
             entregue(Ok(Ok(voz_de(ssrc))))
         });
@@ -9687,6 +9706,22 @@ mod o_audio_segue_a_sala {
 
     fn ha_voz(voz: &VozDaSala<Voz>) -> bool {
         voz.lock().expect("a voz").is_some()
+    }
+
+    /// O servidor decidiu o pedido de entrada que estava no ar: o `Pong` do
+    /// `Ping` marcado que o motor manda atrás de cada pedido.
+    fn decidida(room: &mut Room) {
+        room.apply(&ServerMessage::Pong {
+            timestamp: seele_core::assento::MARCA_DO_PING_DE_ENTRADA,
+        });
+    }
+
+    fn recusa(reason: AlertReason) -> ServerMessage {
+        ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason,
+            operator_text: None,
+        }
     }
 
     /// (a) Fora de sala, nenhum aparelho aberto; entrar numa sala abre, sair
@@ -9714,6 +9749,15 @@ mod o_audio_segue_a_sala {
 
         room.enter_voice_room(SALA);
         let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        assert_eq!(
+            aberturas, 0,
+            "o áudio abriu com a entrada ainda no ar: o microfone abre numa sala que \
+             ainda pode recusar (M-d)"
+        );
+        assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
+
+        decidida(&mut room);
+        let aberturas = olhar_e_esperar(&mut porta, &voz, &room, 700).await;
         assert_eq!(aberturas, 1, "entrar numa sala não abriu o áudio");
         assert!(ha_voz(&voz), "a voz que abriu não ficou no lugar");
         assert_eq!(voz.abertura(), AberturaDoAudio::Aberto);
@@ -9732,28 +9776,34 @@ mod o_audio_segue_a_sala {
     /// Os cinco caminhos para dentro e para fora de uma sala, um depois do outro.
     ///
     /// Todos são aplicados no `seele-core` — `Room::apply` e os dois métodos de
-    /// assento —, e a porta só vê o efeito em `current_voice_room`. É o que
-    /// este teste prende: um caminho novo que esquecesse o assento seria pego
-    /// aqui, e não na tela de alguém com o microfone aberto fora de sala.
+    /// assento, pela porta única de `seele_core::assento` —, e a porta da voz só
+    /// vê o efeito no assento confirmado. É o que este teste prende: um caminho
+    /// novo que esquecesse o assento seria pego aqui, e não na tela de alguém com
+    /// o microfone aberto fora de sala.
+    ///
+    /// Cada pedido de entrada vem com a resposta que o servidor dá a ele, na
+    /// ordem em que ela chega: a recusa, quando há, e o `Pong` do `Ping`
+    /// marcado. E entram as três recusas que **não** tiram ninguém da sala
+    /// (C1 da rodada 1): a troca recusada, a troca para uma sala lotada e a
+    /// recusa sem pedido no ar, que é o apelido tomado.
     #[tokio::test]
     async fn o_audio_abre_e_fecha_pelos_cinco_caminhos_da_sala() {
+        const OUTRA: VoiceRoomId = VoiceRoomId(2);
         let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
         let mut porta = PortaDaVoz::nova();
         let mut room = Room::new();
         room.adopt(&sessao(700), "marcela");
 
-        let alerta = |reason| ServerMessage::Alert {
-            severity: AlertSeverity::Warning,
-            reason,
-            operator_text: None,
-        };
         /// O nome do caminho, o que ele faz com o assento, e se a voz fica
         /// aberta depois dele.
         type Caminho = (&'static str, Box<dyn Fn(&mut Room)>, bool);
         let caminhos: Vec<Caminho> = vec![
             (
-                "a entrada pedida",
-                Box::new(|room| room.enter_voice_room(SALA)),
+                "a entrada pedida e aceita",
+                Box::new(|room| {
+                    room.enter_voice_room(SALA);
+                    decidida(room);
+                }),
                 true,
             ),
             ("a saída pedida", Box::new(Room::leave_voice_room), false),
@@ -9765,27 +9815,59 @@ mod o_audio_segue_a_sala {
                 true,
             ),
             (
-                "a entrada recusada",
-                Box::new(move |room| {
-                    room.apply(&alerta(AlertReason::VoiceRoomEntryRefused));
+                "a troca para outra sala, recusada",
+                Box::new(|room| {
+                    room.enter_voice_room(OUTRA);
+                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
+                    decidida(room);
                 }),
-                false,
-            ),
-            (
-                "a entrada pedida de novo",
-                Box::new(|room| room.enter_voice_room(SALA)),
                 true,
             ),
             (
-                "a sala lotada",
-                Box::new(move |room| {
-                    room.apply(&alerta(AlertReason::VoiceRoomFull));
+                "a troca para outra sala, lotada",
+                Box::new(|room| {
+                    room.enter_voice_room(OUTRA);
+                    room.apply(&recusa(AlertReason::VoiceRoomFull));
+                    decidida(room);
+                }),
+                true,
+            ),
+            (
+                "uma recusa sem pedido no ar (o apelido tomado)",
+                Box::new(|room| {
+                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
+                }),
+                true,
+            ),
+            (
+                "a saída pedida de novo",
+                Box::new(Room::leave_voice_room),
+                false,
+            ),
+            (
+                "a entrada recusada de quem estava fora",
+                Box::new(|room| {
+                    room.enter_voice_room(SALA);
+                    room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
+                    decidida(room);
                 }),
                 false,
             ),
             (
-                "a entrada pedida mais uma vez",
-                Box::new(|room| room.enter_voice_room(SALA)),
+                "a entrada lotada de quem estava fora",
+                Box::new(|room| {
+                    room.enter_voice_room(SALA);
+                    room.apply(&recusa(AlertReason::VoiceRoomFull));
+                    decidida(room);
+                }),
+                false,
+            ),
+            (
+                "a entrada pedida e aceita mais uma vez",
+                Box::new(|room| {
+                    room.enter_voice_room(SALA);
+                    decidida(room);
+                }),
                 true,
             ),
             (
@@ -9829,6 +9911,7 @@ mod o_audio_segue_a_sala {
         voz.escolher(|escolhida| escolhida.abertura_dbfs = Some(-48.0));
 
         room.enter_voice_room(SALA);
+        decidida(&mut room);
         olhar_e_esperar(&mut porta, &voz, &room, 700).await;
 
         let viva = voz.lock().expect("a voz");
@@ -9869,10 +9952,14 @@ mod o_audio_segue_a_sala {
         let mut room = Room::new();
         room.adopt(&sessao(700), "marcela");
         room.enter_voice_room(SALA);
+        decidida(&mut room);
         olhar_e_esperar(&mut porta, &voz, &room, 700).await;
         assert!(ha_voz(&voz));
 
-        readotar_na_volta(&mut room, &sessao(701), "marcela", Some(SALA));
+        // A volta dentro da carência: o servidor devolve o assento e o `ssrc`
+        // (o mesmo 700), e o motor refaz a entrada. O canal de mídia é novo, e
+        // a voz reabre nele.
+        readotar_na_volta(&mut room, &sessao(700), "marcela", Some(SALA));
         porta.na_volta(&voz, |_velha| entregue(Ok(Ok(voz_de(701)))), nada_abre);
         olhar_e_esperar(&mut porta, &voz, &room, 701).await;
 
@@ -9883,6 +9970,18 @@ mod o_audio_segue_a_sala {
              motor a sentou de novo, e o áudio fechou como se ela tivesse saído"
         );
         assert_eq!(voz.abertura(), AberturaDoAudio::Aberto);
+
+        // M3: a sala tem senha, e a entrada refeita sem ela é recusada. O
+        // servidor manteve a pessoa sentada, e a voz continua.
+        room.apply(&recusa(AlertReason::VoiceRoomEntryRefused));
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
+        assert!(
+            ha_voz(&voz),
+            "M3: a entrada refeita numa sala com senha foi recusada, o servidor manteve a \
+             pessoa sentada, e o áudio fechou: surda e muda numa sala em que todos a veem"
+        );
+        assert_eq!(room.current_voice_room, Some(SALA));
 
         // Fora de sala, sem voz: a volta não abre aparelho nenhum.
         let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());

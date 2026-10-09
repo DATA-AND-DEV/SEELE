@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use seele_proto::control::{AlertReason, ChannelInfo, Permission, PersonState, VoiceRoomInfo};
+use seele_proto::control::{ChannelInfo, Permission, PersonState, VoiceRoomInfo};
 use seele_proto::ids::{
     ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId,
 };
@@ -304,7 +304,15 @@ pub struct Room {
     /// for itself. **Convenience, never enforcement**: the server checks again.
     pub permissions: Vec<Permission>,
     /// The voice room this person's connection is in.
+    ///
+    /// **Especulativo**: o assento muda no instante em que a entrada é pedida,
+    /// antes de o servidor decidir. O que o servidor já confirmou é
+    /// [`Self::sala_confirmada`].
     pub current_voice_room: Option<VoiceRoomId>,
+    /// As entradas pedidas que o servidor ainda não decidiu. Ver
+    /// [`crate::assento`]: é por elas que uma recusa desfaz só o pedido no ar,
+    /// e não tira da sala quem o servidor manteve sentado.
+    entradas: crate::assento::EntradasPendentes,
     /// The Channel being read.
     pub current_channel: Option<ChannelId>,
     /// Everybody this client has heard of, by id.
@@ -566,6 +574,14 @@ impl Room {
     /// para sempre: um participante fantasma, visível e mudo, que o áudio do
     /// servidor já trata como `not_a_member` mas que a tela nunca tira do
     /// roster.
+    ///
+    /// **Menos o da própria pessoa, quando o servidor o devolveu.** Um `ssrc`
+    /// igual na sessão nova prova que o servidor resgatou o assento de quem
+    /// caiu ([`crate::assento::assento_resgatado`]); ele a senta de novo sem
+    /// avisar a ela, e a fotografia que segue pula a própria pessoa. Esquecido
+    /// aqui, o assento se perdia na própria tela — e com ele o áudio, que o
+    /// segue —, e a entrada que o motor refaz numa sala com senha, sem a senha,
+    /// era recusada e não tinha para onde voltar.
     fn reabrir(
         &mut self,
         person: PersonId,
@@ -575,6 +591,12 @@ impl Room {
         channels: Vec<ChannelInfo>,
         permissions: Vec<Permission>,
     ) {
+        // Antes de o `ssrc` mudar: é a comparação dos dois que diz.
+        let resgatada = crate::assento::assento_resgatado(
+            self.ssrc,
+            ssrc,
+            self.entradas.confirmada(self.current_voice_room),
+        );
         self.me = Some(person);
         self.ssrc = Some(ssrc);
         self.server = server;
@@ -626,7 +648,12 @@ impl Room {
         // relatado.
         self.seats.clear();
         self.presentes.clear();
-        self.current_voice_room = None;
+        // Os pedidos da conexão que caiu não terão resposta nesta.
+        self.entradas.esquecer();
+        self.current_voice_room = resgatada;
+        if let Some(sala) = resgatada {
+            self.seats.entry(sala).or_default().push(person);
+        }
     }
 
     /// Records that this person's connection is now in a voice room, and seats them in it.
@@ -634,19 +661,43 @@ impl Room {
     /// Called on the way *out*, when the client asks — not on the way in. The
     /// server confirms a voice room entry by silence, and a roster that waits for a
     /// message that never comes shows an empty room to the person sitting in it.
+    ///
+    /// O pedido fica no ar até o servidor decidir: uma recusa devolve o assento
+    /// de antes dele, e o `Pong` do `Ping` que segue o pedido o confirma. Ver
+    /// [`crate::assento`].
     pub fn enter_voice_room(&mut self, voice_room: VoiceRoomId) {
-        if let Some(me) = self.me {
-            if let Some(previous) = self.current_voice_room {
-                if let Some(seats) = self.seats.get_mut(&previous) {
-                    seats.retain(|seated| *seated != me);
-                }
+        let antes = self.current_voice_room;
+        self.entradas
+            .pedir(&mut self.current_voice_room, voice_room);
+        self.reassentar_me(antes);
+    }
+
+    /// A sala que o servidor já confirmou para esta pessoa.
+    ///
+    /// A mesma de [`Self::current_voice_room`] quando nenhum pedido de entrada
+    /// está no ar; com um no ar, a de antes dele. É por esta que o áudio da
+    /// pendência 52 abre: o microfone não abre numa sala que ainda pode recusar.
+    #[must_use]
+    pub fn sala_confirmada(&self) -> Option<VoiceRoomId> {
+        self.entradas.confirmada(self.current_voice_room)
+    }
+
+    /// Move esta pessoa, no mapa de assentos, da sala `antes` para a de agora.
+    fn reassentar_me(&mut self, antes: Option<VoiceRoomId>) {
+        let Some(me) = self.me else {
+            return;
+        };
+        if let Some(previous) = antes {
+            if let Some(seats) = self.seats.get_mut(&previous) {
+                seats.retain(|seated| *seated != me);
             }
-            let seats = self.seats.entry(voice_room).or_default();
+        }
+        if let Some(agora) = self.current_voice_room {
+            let seats = self.seats.entry(agora).or_default();
             if !seats.contains(&me) {
                 seats.push(me);
             }
         }
-        self.current_voice_room = Some(voice_room);
     }
 
     /// Records that this person's connection came **out**, and empties their seat.
@@ -662,12 +713,9 @@ impl Room {
     /// Idempotent: leaving a voice room nobody is in is not an error, it is a client
     /// asking twice.
     pub fn leave_voice_room(&mut self) {
-        if let (Some(me), Some(previous)) = (self.me, self.current_voice_room) {
-            if let Some(seats) = self.seats.get_mut(&previous) {
-                seats.retain(|seated| *seated != me);
-            }
-        }
-        self.current_voice_room = None;
+        let antes = self.current_voice_room;
+        self.entradas.sair(&mut self.current_voice_room);
+        self.reassentar_me(antes);
     }
 
     /// Esquece o aviso que está na tela, porque alguém o leu e o fechou.
@@ -1030,6 +1078,16 @@ impl Room {
     pub fn apply(&mut self, message: &ServerMessage) -> Changed {
         let mut changed = Changed::default();
 
+        // **O assento desta pessoa, pela porta única de [`crate::assento`]**, e
+        // antes dos braços abaixo: o operador que move, a sala apagada, a
+        // recusa de entrada e a confirmação dela. É a mesma regra que o motor do
+        // enlace segue para a sala que a reconexão refaz.
+        let antes = self.current_voice_room;
+        if self.entradas.ouvir(&mut self.current_voice_room, message) {
+            self.reassentar_me(antes);
+            changed.roster = true;
+        }
+
         match message {
             // **Qual servidor é este**, num quadro próprio — ver
             // `control::ServerMessage::Instancia`. Chega logo depois do
@@ -1261,28 +1319,15 @@ impl Room {
                 });
                 changed.notice = true;
 
-                // O servidor recusa a entrada sem nunca ter sentado a
-                // pessoa (`admissao::voice_room_liberado` em session.rs faz
-                // `continue` antes de anunciar). Mas o cliente já havia se
-                // sentado sozinho, sem esperar confirmação, ao mandar o
-                // pedido — ver `enter_voice_room` acima. Sem desfazer aqui,
-                // o assento local nunca mais bate com o do servidor: a
-                // pessoa se vê na sala para sempre, e o anfitrião nunca a vê
-                // nem a ouve.
-                //
-                // `VoiceRoomFull` entra aqui pela mesma razão, e não por
-                // simetria: ele **é** uma recusa de entrada, só que com o
-                // motivo que o ADR 0038 manda dar — o teto que quem hospeda
-                // declarou. Deixá-lo de fora reporia o defeito inteiro com um
-                // motivo novo: a pessoa se vendo dentro de uma sala onde
-                // ninguém a vê nem a ouve.
-                if matches!(
-                    *reason,
-                    AlertReason::VoiceRoomEntryRefused | AlertReason::VoiceRoomFull
-                ) {
-                    self.leave_voice_room();
-                    changed.roster = true;
-                }
+                // A recusa de entrada (`VoiceRoomEntryRefused`, e
+                // `VoiceRoomFull`, que é a mesma recusa com o motivo do teto)
+                // desfaz o assento que o cliente tomou sozinho ao pedir — e
+                // **só esse**: ela já passou pela porta de `crate::assento`, no
+                // começo de `apply`. O servidor manda o mesmo alerta mantendo
+                // a pessoa onde ela estava (a troca de sala recusada, a volta
+                // numa sala com senha, o apelido tomado), e tirá-la de toda sala
+                // aqui a deixava fora da própria tela, e surda e muda pela
+                // pendência 52, numa sala em que todos a veem.
             }
 
             // ---- attachments ----
@@ -1456,8 +1501,9 @@ impl Room {
             // because they are two different things: this is where the connection is,
             // that is what the person should be told, and only the shell knows
             // how to say the second.
-            ServerMessage::MovedToVoiceRoom { voice_room } => {
-                self.enter_voice_room(*voice_room);
+            // O assento já andou, pela porta de `crate::assento` no começo de
+            // `apply`: a mudança é do servidor, e não um pedido no ar.
+            ServerMessage::MovedToVoiceRoom { .. } => {
                 changed.roster = true;
             }
 
@@ -1477,12 +1523,10 @@ impl Room {
                 let before = self.voice_rooms.len();
                 self.voice_rooms.retain(|known| known.id != *voice_room);
                 self.seats.remove(voice_room);
-                if self.current_voice_room == Some(*voice_room) {
-                    // Not moved anywhere: this client is in na sala de voz now, which
-                    // is the truth. Choosing another room for somebody would be
-                    // putting them in a conversation they never asked to be in.
-                    self.current_voice_room = None;
-                }
+                // Quem estava nela não é movido para lugar nenhum, e já saiu
+                // dela pela porta de `crate::assento`, no começo de `apply`:
+                // escolher outra sala para alguém seria pô-lo numa conversa que
+                // ele nunca pediu.
                 changed.channels = self.voice_rooms.len() != before;
                 changed.roster = true;
             }
@@ -2229,6 +2273,127 @@ mod tests {
             .seats
             .get(&VOICE_ROOM)
             .is_some_and(|seats| seats.contains(&PersonId(7))));
+    }
+
+    /// O `Pong` do `Ping` que o motor manda atrás de cada pedido de entrada.
+    fn entrada_decidida() -> ServerMessage {
+        ServerMessage::Pong {
+            timestamp: crate::assento::MARCA_DO_PING_DE_ENTRADA,
+        }
+    }
+
+    fn recusa() -> ServerMessage {
+        ServerMessage::Alert {
+            severity: AlertSeverity::Warning,
+            reason: AlertReason::VoiceRoomEntryRefused,
+            operator_text: None,
+        }
+    }
+
+    fn sentada_em(room: &Room, sala: VoiceRoomId) -> bool {
+        room.current_voice_room == Some(sala)
+            && room
+                .seats
+                .get(&sala)
+                .is_some_and(|seats| seats.contains(&PersonId(7)))
+    }
+
+    /// M5 da rodada 1 do lote I-a: uma recusa sem pedido no ar — o apelido
+    /// tomado chega com `VoiceRoomEntryRefused` — não tira ninguém da sala.
+    #[test]
+    fn uma_recusa_sem_pedido_de_entrada_no_ar_nao_tira_da_sala() {
+        let mut room = room();
+        room.apply(&entrada_decidida());
+        assert_eq!(room.sala_confirmada(), Some(VOICE_ROOM));
+
+        room.apply(&recusa());
+
+        assert!(
+            sentada_em(&room, VOICE_ROOM),
+            "uma recusa que não era de entrada nenhuma tirou da sala quem o servidor \
+             manteve sentado: {:?}",
+            room.current_voice_room
+        );
+        assert_eq!(room.sala_confirmada(), Some(VOICE_ROOM));
+    }
+
+    /// M1: em A, pede B e é recusado. Volta para A, e não para fora.
+    #[test]
+    fn a_troca_de_sala_recusada_devolve_a_sala_de_antes() {
+        let outra = VoiceRoomId(2);
+        let mut room = room();
+        room.apply(&entrada_decidida());
+
+        room.enter_voice_room(outra);
+        assert!(sentada_em(&room, outra));
+        assert_eq!(
+            room.sala_confirmada(),
+            Some(VOICE_ROOM),
+            "com a troca no ar, o servidor ainda só confirmou a sala de antes"
+        );
+        let changed = room.apply(&recusa());
+        room.apply(&entrada_decidida());
+
+        assert!(changed.roster);
+        assert!(
+            sentada_em(&room, VOICE_ROOM),
+            "a troca recusada tirou de toda sala quem o servidor manteve na de antes: {:?}",
+            room.current_voice_room
+        );
+        assert!(!room
+            .seats
+            .get(&outra)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
+    }
+
+    /// M3: a volta com o mesmo `ssrc` é o servidor devolvendo o assento, e a
+    /// entrada refeita que ele recusa não tira a pessoa dele.
+    #[test]
+    fn a_volta_com_o_assento_resgatado_continua_na_sala_mesmo_com_a_reentrada_recusada() {
+        let mut room = room();
+        room.apply(&entrada_decidida());
+
+        // A volta: a mesma sessão de antes, com o mesmo `ssrc`.
+        room.apply(&session());
+        assert!(
+            sentada_em(&room, VOICE_ROOM),
+            "a volta com o `ssrc` resgatado esqueceu o assento que o servidor devolveu: {:?}",
+            room.current_voice_room
+        );
+        // A entrada que o motor refaz sem a senha, e a recusa dela.
+        room.enter_voice_room(VOICE_ROOM);
+        assert_eq!(room.sala_confirmada(), Some(VOICE_ROOM));
+        room.apply(&recusa());
+        room.apply(&entrada_decidida());
+
+        assert!(
+            sentada_em(&room, VOICE_ROOM),
+            "a recusa da entrada refeita tirou da sala quem o servidor resgatou: {:?}",
+            room.current_voice_room
+        );
+    }
+
+    /// E a volta com `ssrc` novo é sessão nova: o servidor não devolveu assento.
+    #[test]
+    fn a_volta_com_ssrc_novo_comeca_fora_de_sala() {
+        let mut room = room();
+        room.apply(&entrada_decidida());
+
+        room.adopt(
+            &SessionInfo {
+                id: SessionId(2),
+                person: PersonId(7),
+                ssrc: Ssrc(701),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                permissions: Vec::new(),
+            },
+            "marcela",
+        );
+
+        assert_eq!(room.current_voice_room, None);
+        assert!(room.seats.is_empty());
     }
 
     #[test]

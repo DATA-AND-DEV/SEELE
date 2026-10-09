@@ -27,6 +27,7 @@
 pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
+pub mod assento;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;
