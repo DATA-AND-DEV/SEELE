@@ -31,8 +31,10 @@ Ficaram intocados:
 Não há dependência nova, e nada foi baixado.
 
 Nenhum `.cjs` novo: os casos novos entraram nas duas bancadas que já existem.
-Nenhuma linha acrescentada diz «API 3» (`git diff 411778ef..HEAD | grep "^+" |
-grep "API 3"` não acha nada).
+Nenhuma linha acrescentada fora deste relatório diz «API 3»:
+`git diff 411778ef..HEAD -- . ':!docs/superpowers/sdd' | grep "^+" | grep -c "API 3"`
+dá 0. Sem o filtro, o `grep` acha as linhas deste relatório que citam a regra.
+A frase de antes dizia que ele não achava nada; foi corrigida na rodada 1.
 
 Não toquei nas frases da API 3 da gestão (`modsDoCaminhoAntigo`, o ramo
 `escolhidoNaoSubstitui` com `cartoesDosMods`, as frases «(API 3)»), nem em
@@ -447,3 +449,188 @@ evento, campo de retrato ou frase do `api/README.md` mudou.
 9. **Uma mensagem foi emendada.** A de `69f194f7` foi emendada (`--amend`, só a
    mensagem) antes do commit deste relatório, para não dizer «uma definição só»
    de mais do que as duas que mudaram. Tudo é local.
+
+## Rodada 1
+
+A revisão aprovou o lote e deixou seis Menores. A rodada parte de `607b83a7`
+(FIX_BASE) e tem sete commits: seis de código, asserção ou plano, e este
+relatório. Em cada reversão, o arquivo voltou da cópia verde e foi conferido
+com `cmp`, que deu idêntico.
+
+| commit | item |
+|---|---|
+| `e569ae93` | M1: quem desenha não entra na nota de quem não recebeu |
+| `13cf1684` | M6: as recusas pelo mesmo teto ocupam uma vaga só na aba |
+| `e4fcfc18` | M2: a recusa de `carregarSom` ganha guarda na `regiao-do-mod.cjs` |
+| `30ffb4e4` | M3: o recorte, provado nas quatro bordas e no recorte sem altura |
+| `4c6d5dc6` | M4: o guarda de CSS lê pelo leitor único; e o detalhe da «Task 1/Task 9» em `frontend.rs` |
+| `62bc035e` | M5: as notas «Hoje» no plano 1C |
+| este | o relatório, com a frase do `grep "API 3"` corrigida |
+
+### M1: quem desenha não é dito como quem não recebeu (`e569ae93`)
+
+- **O cenário:**
+  - mod/a no cartão de todos, com prioridade 10;
+  - mod/c no de todos, com prioridade 0;
+  - mod/c no da pessoa 2, com prioridade 20.
+- **Vermelho medido.** No caso novo de «M1 · a gestão · o automático misto», em
+  `contribuicoes-e-camadas.cjs`, o vermelho foi:
+  - «mod/c perdeu o cartão de todos e desenha o da pessoa 2, e a gestão o disse
+    como quem desenha e como quem não recebeu: «automática: mod/a para todos,
+    mod/c para quem declarou», nota «Também pediram este lugar e não o
+    receberam: mod/c. Escolha abaixo qual deve desenhar.»»;
+  - «com mod/c perdendo o cartão de todos e vencendo o da pessoa 2, a gestão e
+    a aba se desmentem: gestão {…"tambemDesenham":["mod/c"],"preteridos":["mod/c"]…}».
+- **Conserto.** No automático misto, `preteridos` deixa de fora quem está em
+  `pelosAlvos.substitui`.
+- **A concordância.** A função `concordam` passa a valer nos dois casos do
+  bloco. Ela confere três coisas:
+  - quem desenha é o mesmo conjunto na gestão e na aba;
+  - tudo de `aba.perderam` está em `preteridos`;
+  - nada de `preteridos` desenha. Este é o sentido novo.
+- **Reversão.** Sem o `.filter(...)`, as duas frases acima voltaram.
+
+### M6: as recusas pelo mesmo teto ocupam uma vaga só (`13cf1684`)
+
+- **Vermelho medido.** O caso `aRecusaPeloTetoDeBytesDizOsNumeros`
+  (`diagnostico-de-mods.cjs`) ganhou um quarto nó, `img/falta.png`, que o Rust
+  recusa com «… não está no pacote». O caso passou a ler os números de cada
+  anotação no próprio renderer, o que mantém a prova do T8 m1 por função. Na aba,
+  ele exige `[«11534336 … deste lugar (e mais 2 recusas pelo mesmo teto)», «img/falta.png não está no pacote»]`.
+  O vermelho foi «três recusas pelo mesmo teto ocuparam vagas diferentes na
+  aba, e o motivo de outro tipo — o arquivo que não está no pacote — saiu dela;
+  …». A aba tinha as três frases do teto e nenhuma do arquivo.
+- **Conserto.**
+  - `anotarMidia` ganha o quinto parâmetro `teto`, a chave do teto: `"bytes de
+    mídia:<teto>"` em `montarMidia`, `montarFundoDeMidia`, `montarRetrato` e na
+    recarga de `carregarSom`, e `"bytes de som:<teto>"` no som decodificado.
+  - A chave só entra na anotação quando há uma, e a recusa herdada de um som a
+    leva junto (`recusa.teto`).
+  - `contarAMidia` (`base.js`) dá uma vaga por MOD e por teto. As vagas ficam
+    num `WeakMap` fora da soma, porque as bancadas comparam a soma inteira.
+  - O motivo de outro tipo continua sendo deduplicado pelo texto, como antes.
+- **Os números escolhidos.** A vaga mostra os da **primeira** recusa, na ordem em
+  que as mídias foram montadas, e «(e mais N recusas pelo mesmo teto)».
+  - Não escolhi os da mais recente: a aba se redesenha a cada mudança de mídia,
+    e a ordem de montagem é a única que não muda entre um desenho e outro. Com a
+    mais recente, a frase trocaria de números a cada redesenho.
+  - A conta diz quantas o mesmo teto recusou.
+  - Os números de cada recusa continuam no `seele.log` e no evento do MOD.
+- **Reversões:**
+  - `contarAMidia` ignorando a chave (`if (!anotada.teto || true)`): vermelho
+    com a frase acima.
+  - `anotarMidia` sem gravar a chave: vermelho com a mesma frase.
+  - só `montarRetrato` sem a chave: vermelho. A aba ficou com «11534336 … (e
+    mais 1 recusa pelo mesmo teto)», «13631488 …» e o arquivo, e cada lugar que
+    passa a chave é provado.
+- **Não provado ponta a ponta:** a chave do som decodificado (`"bytes de
+  som:…"`). Só a `regiao-do-mod.cjs` passa por esse caminho, e nenhum caso dela
+  junta duas recusas pelo teto de som na mesma soma.
+
+### M2: a recusa de `carregarSom` ganha guarda (`e4fcfc18`)
+
+- **O endurecimento.** O caso «a resposta nova do servidor, acima do teto», da
+  `regiao-do-mod.cjs`, passa a exigir os números no `porque` ao MOD e na
+  anotação: `^22020096 bytes somados aos \d+ já montados passam do teto de
+  20971520`, com a anotação terminando em « bytes de mídia deste lugar».
+- **Vermelho medido, pela reversão.** Pus a anotação de `carregarSom` de volta
+  em `passou do teto de ${teto} bytes de mídia deste lugar`, como a revisão
+  fez. O vermelho foi «… a resposta nova do servidor passou do teto de bytes, e
+  a recusa não disse os números — quanto a resposta tem, quanto já estava
+  montado e o teto — ao MOD ou à anotação que a aba lê: porque "22020096 bytes
+  somados aos 0 já montados passam do teto de 20971520", anotada
+  {"situacao":"recusada","motivo":"passou do teto de 20971520 bytes de mídia
+  deste lugar",…}». Antes do endurecimento, a revisão mediu essa mesma reversão
+  verde, com «as 44 provas».
+- Não é bancada nova, e o `ci.yml` não mudou.
+
+### M3: o recorte nas quatro bordas e no recorte sem altura (`30ffb4e4`)
+
+- **A prova.** A lista rolada 20 px ganha um item de 50×20 encostado por fora em
+  cada borda:
+  - em cima, (1200, 300);
+  - embaixo, (1260, 400);
+  - à esquerda, (1200, 320);
+  - à direita, (1320, 340).
+
+  Um segundo recorte, de altura zero, em (1200, 450), tem um item de 50×20
+  dentro dele. O caso diz quais bordas ganharam o traço, e continua exigindo
+  que o único contorno novo seja o do vazio, `1210px 330px 0px×0px`.
+- **Vermelho medido**, com o critério só na borda de cima (`r.bottom <= cima`):
+  «um item com área encostado no recorte, sem nada à vista, ganhou contorno — o
+  traço de 2 px do recorte vazio — embaixo, à esquerda, à direita, no recorte
+  sem altura: 1260px 400px 50px×0px, 1200px 320px 0px×20px, 1320px 340px
+  0px×20px, 1210px 330px 0px×0px, 1200px 450px 50px×0px».
+- **Sem critério nenhum**, as cinco aparecem: «em cima, embaixo, à esquerda, à
+  direita, no recorte sem altura».
+
+### M4: o guarda de CSS lê pelo leitor único (`4c6d5dc6`)
+
+- **Vermelho medido antes do conserto.** Com `botao.classList.add("mods-pendente")`
+  trocado por `"mods-pendente-sem-regra"` em `camada-mods.js`, o
+  `toda_classe_que_o_script_aplica_tem_regra_de_css` de antes passou: «1
+  passed». O defeito existia e o guarda não o via.
+- **Conserto.**
+  - O guarda passa a usar `classes_que_os_scripts_aplicam`. O comentário guarda
+    o que ele aprendeu: o `className` e o corte por byte.
+  - A contagem mínima passa a ser a de aplicações com classe.
+  - A lista do vermelho diz a etiqueta, quando há.
+  - O doc do leitor diz que ele é a definição dos dois guardas.
+- **Depois, com o mesmo defeito:** «o script aplica classe que nenhuma folha
+  estiliza — o elemento aparece sem espaçamento nenhum e nada avisa:
+  `mods-pendente-sem-regra`».
+- **O defeito de campo continua reprovando.** Com
+  `elemento("div", "mods-linha texto")`, uma classe em prosa, o vermelho
+  listou `mods-linha (num <div>)` e `texto (num <div>)`.
+- **O detalhe.** O doc de
+  `o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio` dizia «a
+  Task 1 (antes) e a Task 9 (depois)». Passa a dizer onde está a medida no app
+  de verdade (`docs/evidencias/som-de-mod-wkwebview/registro.md`), como o
+  cabeçalho da bancada.
+
+### M5: o plano 1C ganha notas «Hoje» (`62bc035e`)
+
+O trecho histórico ficou como estava. Entraram duas notas.
+
+**Depois do bloco do guarda.** Ela diz:
+- que o trecho é o da época, e que só o nome foi trocado;
+- que o guarda de hoje é `os_quatro_comandos_de_midia_passam_pela_recusa_dita`;
+- os quatro pares:
+  - `midia_do_mod` com `midia_declarada_do_mod(`;
+  - `midia_em_bytes` com `midia_do_servidor_dita(`;
+  - `ler_imagem_mod` com `imagem_lida_dita(`;
+  - `som_do_mod` com `som_declarado_do_mod(`.
+
+**Sob o passo 2 da reversão.** Ela diz:
+- que o filtro agora casa e roda o guarda;
+- que o par de `ler_imagem_mod` é `imagem_lida_dita(`;
+- a frase de falha de hoje: «`async fn ler_imagem_mod(` não passa por
+  `imagem_lida_dita(`: a recusa dele volta à janela e não chega ao registro».
+
+A frase vem do formato da mensagem do guarda com esse par, e não de uma rodada:
+o `--bin` do app não está na lista desta rodada.
+
+### Os detalhes
+
+- O `frontend.rs` não diz mais «Task 1/Task 9» (`4c6d5dc6`).
+- A frase do `grep "API 3"`, na seção de abertura deste relatório, foi
+  corrigida.
+- Os commits desta rodada que mexem em código ou asserção não levam `docs:`.
+  - O `69f194f7`, da rodada anterior, levou `docs:` e mudou frases de asserção
+    de `frontend.rs`.
+  - A mensagem dele não foi reescrita, para não trocar os hashes que a revisão
+    cita.
+
+### Os testes da rodada
+
+Rodados em `62bc035e`:
+- `cargo test -p seele-app --test frontend`: 268 passaram.
+- `cargo xtask check-runtime`: as sete bancadas passaram.
+- `cargo test -p xtask`: todos passaram (61, 4, 108, 1, 2, 1 e 2).
+- `cargo fmt --all -- --check` passou.
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings` passou.
+- As bancadas `diagnostico-de-mods.cjs` (as nove provas),
+  `contribuicoes-e-camadas.cjs` e `regiao-do-mod.cjs` passaram, com
+  `PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright`.
+
+Não rodaram, por serem proibidos: conformidade, `--workspace` e push.
