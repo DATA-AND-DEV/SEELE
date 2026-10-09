@@ -4,66 +4,49 @@
 //! Emenda de 08/10/2026 ao ADR 0057, no molde do `seele-video` (ADR 0041) e do
 //! `seele-instalador` (ADR 0043).
 //!
-//! **Para dentro**, três funções do módulo `seele`, que o Worker fornece:
-//! `postar`, `console` e `agora_ms`. Elas e a WASI mínima (relógio, aleatório,
-//! ambiente vazio, escrita de registro) são tudo o que o `.wasm` importa, e
-//! portanto tudo o que o código de um MOD alcança, mesmo com um defeito de
-//! memória no motor: um `.wasm` só chama o que foi importado.
+//! **Para dentro, nada além da WASI mínima** (relógio, aleatório, ambiente
+//! vazio, escrita de registro). É tudo o que o `.wasm` importa, e portanto tudo o
+//! que o código de um MOD alcança, mesmo com um defeito de memória no motor: um
+//! `.wasm` só chama o que foi importado. A lista é fixa em `xtask/web/motor.mjs`.
+//! Até 09/10/2026 havia também três funções do módulo `seele`; elas saíram
+//! quando a volta passou a ser a do `seele-motor`, que fala por um canal.
 //!
 //! **Para fora**, as funções que o Worker chama. A memória é de quem a pede: o
 //! Worker pede um bloco com [`alocar`], escreve nele, chama e devolve com
-//! [`liberar`]. Uma chamada que falha deixa o texto do defeito na
-//! [saída](saida_ptr) e devolve 1; a que dá certo devolve 0.
+//! [`liberar`]. Cada chamada deixa na [saída](saida_ptr) as falas do motor
+//! desde a anterior, numa lista em JSON (`ParaOFora::em_json`), e devolve
+//! quantas são.
 
 #![allow(unsafe_code)]
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
-use crate::{Anfitriao, Motor};
-
-#[link(wasm_import_module = "seele")]
-extern "C" {
-    fn postar(ptr: *const u8, len: usize) -> u32;
-    fn console(metodo_ptr: *const u8, metodo_len: usize, texto_ptr: *const u8, texto_len: usize);
-    fn agora_ms() -> f64;
-}
-
-/// O anfitrião do `.wasm`: as três importações.
-struct Worker;
-
-impl Anfitriao for Worker {
-    fn postar(&self, json: &str) -> bool {
-        // SAFETY: `postar` é a importação do Worker, que só lê `len` bytes a
-        // partir de `ptr` durante a chamada; o `&str` vive até ela voltar.
-        unsafe { postar(json.as_ptr(), json.len()) == 1 }
-    }
-    fn console(&self, metodo: &str, texto: &str) {
-        // SAFETY: como em `postar`, com dois trechos vivos durante a chamada.
-        unsafe { console(metodo.as_ptr(), metodo.len(), texto.as_ptr(), texto.len()) }
-    }
-    fn agora_ms(&self) -> f64 {
-        // SAFETY: a importação não recebe ponteiro nem guarda estado nosso.
-        unsafe { agora_ms() }
-    }
-}
+use crate::Instancia;
 
 thread_local! {
-    static MOTOR: RefCell<Option<Motor>> = const { RefCell::new(None) };
+    static INSTANCIA: RefCell<Option<Instancia>> = const { RefCell::new(None) };
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-fn dizer(texto: impl Into<Vec<u8>>, codigo: u32) -> u32 {
-    SAIDA.with(|s| *s.borrow_mut() = texto.into());
-    codigo
+/// As falas desde a última chamada, na saída; devolve quantas são.
+fn dizer_as_falas() -> u32 {
+    let (quantas, falas) = INSTANCIA.with(|i| {
+        i.borrow()
+            .as_ref()
+            .map_or_else(|| (0, "[]".to_owned()), Instancia::falas)
+    });
+    SAIDA.with(|s| *s.borrow_mut() = falas.into_bytes());
+    u32::try_from(quantas).unwrap_or(u32::MAX)
 }
 
-fn resultado(r: Result<(), String>) -> u32 {
-    match r {
-        Ok(()) => dizer(Vec::new(), 0),
-        Err(e) => dizer(e, 1),
-    }
+fn com_a_instancia(f: impl FnOnce(&mut Instancia)) -> u32 {
+    INSTANCIA.with(|i| {
+        if let Some(instancia) = i.borrow_mut().as_mut() {
+            f(instancia);
+        }
+    });
+    dizer_as_falas()
 }
 
 /// O texto que o Worker escreveu num bloco de [`alocar`].
@@ -130,31 +113,18 @@ pub unsafe extern "C" fn iniciar(
     fonte_len: usize,
 ) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `texto`.
-    let capacidades: Vec<String> = unsafe { texto(caps_ptr, caps_len) }
+    let capacidades: Vec<&str> = unsafe { texto(caps_ptr, caps_len) }
         .split(',')
         .filter(|c| !c.is_empty())
-        .map(str::to_owned)
         .collect();
     // SAFETY: idem.
     let fonte = unsafe { texto(fonte_ptr, fonte_len) };
-    match Motor::subir(&capacidades, fonte, Rc::new(Worker)) {
-        Ok(motor) => {
-            MOTOR.with(|m| *m.borrow_mut() = Some(motor));
-            dizer(Vec::new(), 0)
-        }
-        Err(e) => dizer(e, 1),
-    }
+    let instancia = Instancia::subir(&capacidades, fonte);
+    INSTANCIA.with(|i| *i.borrow_mut() = Some(instancia));
+    dizer_as_falas()
 }
 
-fn com_o_motor(f: impl FnOnce(&Motor) -> Result<(), String>) -> u32 {
-    resultado(MOTOR.with(|m| {
-        m.borrow()
-            .as_ref()
-            .map_or_else(|| Err("o motor não subiu".into()), f)
-    }))
-}
-
-/// Entrega uma mensagem da janela ao MOD.
+/// Entrega uma resposta da janela ao MOD.
 ///
 /// # Safety
 ///
@@ -163,25 +133,55 @@ fn com_o_motor(f: impl FnOnce(&Motor) -> Result<(), String>) -> u32 {
 pub unsafe extern "C" fn entregar(ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `texto`.
     let json = unsafe { texto(ptr, len) };
-    com_o_motor(|m| m.entregar(json))
+    com_a_instancia(|i| i.resposta(json))
 }
 
-/// Dispara o temporizador `id`.
+/// Dispara os temporizadores na hora.
 #[no_mangle]
-pub extern "C" fn relogio(id: u32) -> u32 {
-    com_o_motor(|m| m.relogio(id))
+pub extern "C" fn vencer() -> u32 {
+    com_a_instancia(Instancia::vencer)
 }
 
-/// Os pedidos de relógio da última volta, em JSON, na saída. Devolve o tamanho.
+/// Pede ao motor que conte o que tem de pé.
 #[no_mangle]
-pub extern "C" fn pedidos_de_relogio() -> u32 {
-    let json = MOTOR.with(|m| {
-        m.borrow()
+pub extern "C" fn diagnostico() -> u32 {
+    com_a_instancia(Instancia::diagnostico)
+}
+
+/// Em quantos milissegundos chamar [`vencer`], ou `-1`.
+#[no_mangle]
+pub extern "C" fn proximo_prazo_ms() -> f64 {
+    INSTANCIA.with(|i| {
+        i.borrow()
             .as_ref()
-            .map_or_else(|| "[]".to_owned(), Motor::pedidos_de_relogio)
+            .map_or(-1.0, Instancia::proximo_prazo_ms)
+    })
+}
+
+/// A página atendeu uma mensagem de `bytes` bytes.
+#[no_mangle]
+pub extern "C" fn lido(bytes: usize) {
+    INSTANCIA.with(|i| {
+        if let Some(instancia) = i.borrow().as_ref() {
+            instancia.lido(bytes);
+        }
     });
-    let n = u32::try_from(json.len()).unwrap_or(u32::MAX);
-    dizer(json, n)
+}
+
+/// A página atendeu um aviso.
+#[no_mangle]
+pub extern "C" fn aviso_lido() {
+    INSTANCIA.with(|i| {
+        if let Some(instancia) = i.borrow().as_ref() {
+            instancia.aviso_lido();
+        }
+    });
+}
+
+/// Para o motor: as falas que ficaram saem, e a última é o `parou`.
+#[no_mangle]
+pub extern "C" fn parar() -> u32 {
+    com_a_instancia(Instancia::parar)
 }
 
 /// Quanto o motor alocou, em bytes.
@@ -191,9 +191,5 @@ pub extern "C" fn memoria_do_motor() -> f64 {
         clippy::cast_precision_loss,
         reason = "um número para o diagnóstico, e não uma conta"
     )]
-    MOTOR.with(|m| {
-        m.borrow()
-            .as_ref()
-            .map_or(0.0, |motor| motor.memoria() as f64)
-    })
+    INSTANCIA.with(|i| i.borrow().as_ref().map_or(0.0, |m| m.memoria() as f64))
 }

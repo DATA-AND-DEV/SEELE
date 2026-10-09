@@ -20,7 +20,7 @@
 //!   canal desconhecido é recusado pelo nome;
 //! - **a metade de janela só chama o que existe**: cada `SeeleMods.x` e
 //!   `SeeleUI.x` que ela usa é exposto pelo `PRELUDIO` de
-//!   `apps/seele-app/src/executor.rs`, fora o `console`, cada
+//!   `crates/seele-motor/src/preludio.rs`, fora o `console`, cada
 //!   `forma` que ela declara está na gramática de `montarODeclarado`, e cada
 //!   chave de tema está em `TEMA_DA_API`;
 //! - **o pacote atravessa a ponte inteiro**: instalado pelo caminho do produto,
@@ -183,14 +183,15 @@ fn a_metade_de_servidor_do_vetor_responde_e_guarda() {
 #[test]
 fn a_metade_de_janela_do_vetor_so_chama_o_que_a_api_expoe() {
     let cliente = vetor("cliente/main.js");
-    // **O prelúdio mora no executor**, e o executor é um só. Ele esteve
-    // duplicado em `base.js` enquanto o Worker de `blob:` ainda era o caminho
-    // do produto; o Worker foi reprovado por medição e saiu, e com ele a
-    // segunda cópia — que era a que podia divergir em silêncio.
+    // **O prelúdio mora no motor**, e o motor é um só. Ele esteve duplicado
+    // em `base.js` enquanto o Worker de `blob:` ainda era o caminho do
+    // produto; o Worker foi reprovado por medição e saiu, e com ele a segunda
+    // cópia — que era a que podia divergir em silêncio. Desde 09/10/2026 ele
+    // mora no `seele-motor`, que o desktop e o celular embrulham.
     let executor = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/seele-app/src/executor.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../seele-motor/src/preludio.rs"),
     )
-    .expect("apps/seele-app/src/executor.rs");
+    .expect("crates/seele-motor/src/preludio.rs");
     let preludio = executor
         .split_once("const PRELUDIO: &str = r#\"")
         .expect("o prelúdio dos MODs")
@@ -345,7 +346,7 @@ fn sem_o_console(preludio: &str) -> String {
                 "o prelúdio do executor não tem mais a linha `{ABRE}`, e o guarda do vetor \
                  não sabe onde o console começa: sem cortá-lo, ele cobraria do vetor o \
                  console, que não é API de MOD; ache o console no PRELUDIO de \
-                 apps/seele-app/src/executor.rs e conserte `sem_o_console`"
+                 crates/seele-motor/src/preludio.rs e conserte `sem_o_console`"
             )
         });
     let (antes, desde_a_abertura) = linhas.split_at(abre);

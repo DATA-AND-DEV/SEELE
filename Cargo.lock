@@ -5011,11 +5011,11 @@ dependencies = [
  "flate2",
  "image",
  "reqwest",
- "rquickjs",
  "rusqlite",
  "rustls",
  "seele-ffi",
  "seele-lancador",
+ "seele-motor",
  "seele-server",
  "serde",
  "serde_json",
@@ -5142,10 +5142,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "seele-motor-web"
+name = "seele-motor"
 version = "0.0.0"
 dependencies = [
  "rquickjs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "seele-motor-web"
+version = "0.0.0"
+dependencies = [
+ "seele-motor",
  "serde_json",
 ]
 

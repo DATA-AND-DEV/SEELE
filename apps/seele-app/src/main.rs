@@ -2533,25 +2533,13 @@ fn desmontar_o_cliente(app: &tauri::AppHandle, session: &State<'_, Session>) {
     }
 }
 
-/// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`**,
-/// contado em caracteres **como a linha os leva**.
-///
-/// Quinhentos e doze caracteres, o número que `registrar_da_janela` já usava
-/// escrito à mão. Nomeado quando o `console` dos MODs passou a escrever no
-/// mesmo arquivo: as portas põem lá texto que um terceiro escolheu, e o teto
-/// de uma não pode divergir do da outra por esquecimento.
-///
-/// **O mesmo em todas as portas, e é o tamanho escrito.** As quatro que
-/// escrevem o texto escapado pelo `Debug` de um `str` — a frase da janela
-/// ([`registrar_da_janela`]), o `console` do executor, o motivo
-/// ([`motivo_no_registro`]) e o caminho ([`caminho_no_registro`]) — cortam
-/// pelo tamanho já escapado, numa regra só
-/// ([`executor::ate_o_teto_do_registro`]): o escape pode fazer um caractere
-/// ocupar até dez (`\u{100000}`), e um corte contado antes dele deixava
-/// quinhentos e doze desses virarem 5122 caracteres na linha, com as aspas. A
-/// frase da janela e o `console` levam também o aviso do corte
-/// ([`executor::cortar_linha_do_console`]).
-const TETO_DA_FRASE_NO_REGISTRO: usize = 512;
+// **O teto de um pedaço de texto de terceiro numa linha do `seele.log`** mora
+// em `seele_motor::TETO_DA_FRASE_NO_REGISTRO` desde 09/10/2026, com a regra das
+// quatro portas: o corte do `console` é da volta do motor, e as portas daqui
+// cortam pela mesma regra ([`executor::ate_o_teto_do_registro`]). Os testes do
+// executor o leem por `crate::`, como liam quando ele morava aqui.
+#[cfg(test)]
+use seele_motor::TETO_DA_FRASE_NO_REGISTRO;
 
 /// **O maior id de MOD que uma linha do `seele.log` leva**, em caracteres.
 ///
@@ -9470,7 +9458,7 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info,seele_lancador=info"
+         seele_encontro=info,seele_lancador=info,seele_motor=info"
             .into()
     });
     match arquivo_de_log() {
