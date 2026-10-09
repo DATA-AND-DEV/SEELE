@@ -191,6 +191,16 @@ pub enum Aviso {
         media: Box<MediaChannel>,
         /// A sessão nova. O `ssrc` muda a cada conexão (falha G1).
         sessao: Box<SessionInfo>,
+        /// A sala de voz em que este motor sentou a pessoa de novo, nesta
+        /// conexão, antes de avisar. `None` para quem estava fora de sala.
+        ///
+        /// **A casca não tem outro jeito de saber.** A sessão nova chega sem
+        /// assento nenhum, o servidor confirma a entrada por silêncio, e a
+        /// fotografia de ocupação que ele manda pula a própria pessoa. Quem lia
+        /// só a sessão nova desenhava FORA DE SALA alguém que estava na sala,
+        /// falando e ouvindo — e a pendência 52 abre e fecha o áudio por esse
+        /// assento.
+        voice_room: Option<VoiceRoomId>,
     },
     /// Uma transferência andou. ADR 0027.
     Transferencia(Transferencia),
@@ -1576,7 +1586,7 @@ impl Enlace {
                 self.estado = *estado;
                 self.restante = *restante;
             }
-            Aviso::Reconectado { media, sessao } => {
+            Aviso::Reconectado { media, sessao, .. } => {
                 self.estado = Link::Online;
                 self.restante = None;
                 self.media = (**media).clone();
@@ -3096,9 +3106,12 @@ impl Motor {
                 // `Motor::consentimento`.
                 self.declarar_identidade_de_par(self.consentimento).await;
 
+                // A sala vai junto porque foi refeita aqui, por `restabelecer`,
+                // e só este motor sabe disso. Ver `Aviso::Reconectado::voice_room`.
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
                     sessao: Box::new(sessao),
+                    voice_room: self.voice_room,
                 });
             }
             // Uma recusa não melhora com insistência, e insistir contra uma
@@ -7380,6 +7393,40 @@ mod tests {
             "a volta que reconectou não passou por um aperto de mão do protocolo com o \
              servidor de teste, e o teste mediu outra coisa"
         );
+    }
+
+    /// O aviso da volta diz em que sala de voz o motor sentou a pessoa de novo.
+    ///
+    /// A pendência 52 abre o áudio pelo assento, e a casca não tem outro jeito de
+    /// saber dele depois de uma queda: a sessão nova chega sem assento, e o
+    /// servidor confirma a entrada por silêncio. Quem estava fora de sala volta
+    /// com `None`, e a casca não abre aparelho nenhum.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo() {
+        let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
+
+        for sala in [Some(VoiceRoomId(5)), None] {
+            let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
+            let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+            motor.avisos = avisos;
+            motor.voice_room = sala;
+
+            motor.tentar().await;
+
+            let mut avisada = None;
+            while let Ok(aviso) = avisos_rx.try_recv() {
+                if let Aviso::Reconectado { voice_room, .. } = aviso {
+                    avisada = Some(voice_room);
+                }
+            }
+            assert_eq!(
+                avisada,
+                Some(sala),
+                "a volta não avisou a sala que o motor refez nela: a casca desenha fora \
+                 de sala quem está sentado, e o áudio que segue o assento fecha a voz \
+                 de quem só caiu e voltou"
+            );
+        }
     }
 
     /// Uma ponta com certificado próprio que aceita todo aperto de mão do TLS e

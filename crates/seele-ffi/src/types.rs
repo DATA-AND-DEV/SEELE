@@ -928,6 +928,37 @@ impl From<seele_core::EstadoDoAparelho> for EstadoDoAparelho {
     }
 }
 
+/// Em que pé está a abertura do áudio desta sessão. Pendência 52.
+///
+/// # Por que existe
+///
+/// Na 0.16 o áudio abre quando a pessoa entra numa sala de voz e fecha quando
+/// ela sai: quem fica no servidor só pela conversa por escrito devolve o repouso
+/// à máquina. Com isso, [`Snapshot::audio_available`] falso deixou de querer
+/// dizer «falta áudio»: fora de sala ele é falso **sem faltar nada**, e uma
+/// casca que o lesse sozinho diria «sem áudio» a quem só não entrou numa sala.
+/// Este campo é o que separa os casos.
+///
+/// Só estado, nada desta máquina: nenhum nome de aparelho, nenhum volume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AberturaDoAudio {
+    /// Fora de toda sala de voz. Nenhum aparelho aberto, e é o certo.
+    #[default]
+    ForaDeSala,
+    /// Numa sala, com o aparelho abrindo. Dura o que o driver levar, até o
+    /// prazo de dez segundos.
+    Abrindo,
+    /// Numa sala, com a voz de pé.
+    Aberto,
+    /// Numa sala, sem voz: o aparelho não abriu, ou esta sessão entrou sem
+    /// áudio.
+    SemAparelho,
+    /// Numa sala, e o aparelho não abriu dentro do prazo. A conversa por
+    /// escrito segue; sair da sala e entrar de novo tenta outra vez.
+    NaoAbriuNoPrazo,
+}
+
 /// Connection quality.
 #[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize)]
 pub struct Telemetry {
@@ -1321,7 +1352,17 @@ pub struct Snapshot {
     /// How the microphone opens.
     pub voice_mode: VoiceMode,
     /// Whether audio is running at all.
+    ///
+    /// **Falso fora de sala, sem faltar nada** desde a pendência 52: o áudio só
+    /// abre dentro de uma sala de voz. Quem quer saber se falta áudio lê
+    /// [`Snapshot::abertura_do_audio`].
     pub audio_available: bool,
+    /// Em que pé está a abertura do áudio. Pendência 52.
+    ///
+    /// É o que deixa a casca dizer a coisa certa quando [`Self::audio_available`]
+    /// é falso: fora de sala não há o que dizer; abrindo, espera-se; e numa sala
+    /// em que o aparelho não abriu a tempo há uma frase própria.
+    pub abertura_do_audio: AberturaDoAudio,
     /// The microphone this session is actually capturing from.
     ///
     /// The device that **opened**, not the one that was asked for — those are
