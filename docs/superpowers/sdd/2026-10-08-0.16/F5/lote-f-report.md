@@ -326,3 +326,209 @@ do crate rodou de novo inteira em cima disso.
    `capturar`. Nenhum vermelho intermitente apareceu: o binário do app rodou
    inteiro três vezes, todas verdes, e cada vermelho e verde dos três foi
    rodado também pelo nome.
+
+## Rodada 1 de conserto (FIX_BASE `76227050`)
+
+A revisão achou o lote conforme e o comportamento bom, com lacunas na prova:
+dois Importantes e seis Menores. Esta rodada conserta os oito, e nada além.
+
+| commit | itens | o que muda |
+|---|---|---|
+| `72b57732` | I1, M5 | o guarda de `encerramento.rs` lê o corpo sem comentários e exige teto que não seja zero; o doc de `encerrar_e_esperar` diz o dobro do teto com duas chamadas |
+| `6a0d5bed` | M3, M4 | `despedir_da_sessao` conta e espera só a geração que revogou; dois testes com um MOD que confirma noutra thread |
+| `8a38df53` | M1 | o filho do P50-2 estaciona a thread da conexão antes de sair |
+| `29a31553` | M6 | o (c) lê a fila por `ja_na_fila`, sem o orçamento cooperativo |
+| `b9adf2f8` | I2, M2 | os docs de `ESPERA_DA_DESPEDIDA`, `Motor::despedir` e `largar_tudo_e_esperar` dizem o que cada passo compra e o que não tem prova |
+
+Como antes, cada reversão trocou o trecho exato, rodou os testes e devolveu o
+arquivo de uma cópia no scratchpad, conferida com `cmp`.
+
+### I1 — o guarda de `encerramento.rs` casava com comentário
+
+- **O vermelho medido, antes do conserto:** com o guarda de `76227050`, duas
+  trocas do corpo de `despedir_se` deixaram os dois guardas verdes (2 de 2
+  cada), com o app de volta ao defeito da P50:
+  - **A**, a da revisão: `// era: despedir_da_sessao(...)` em cima de um
+    `connection.disconnect()`;
+  - **B**: o mesmo `disconnect()`, com a chamada certa num comentário de fim
+    de linha.
+- **O conserto:** `corpo` devolve o corpo passado por `sem_comentarios`, que
+  tira o `//` até o fim da linha e o `/* … */`, e deixa intacto o que está
+  entre aspas. A asserção combinada de `a_despedida_espera_o_quadro_sair` foi
+  separada em duas (o `sleep` e a passagem por `despedir_da_sessao`), para cada
+  reversão ler a frase que a nomeia.
+- **A prova, com o guarda novo:** A e B vermelhas nos dois guardas.
+  `fechar_a_janela_avisa_o_servidor`: «a despedida da janela deixou de passar
+  por `despedir_da_sessao`, que é quem manda os MODs parar e espera a thread da
+  conexão». `a_despedida_espera_o_quadro_sair`: «a despedida da janela deixou de
+  passar por `despedir_da_sessao`, e com ela pela espera da thread da conexão:
+  …». O `main.rs` voltou a `e57b33fb…`, conferido com `cmp`.
+
+### I2 — a espera de escoamento sem vermelho, e o doc que a medida desmentia
+
+A espera fica, por decisão do controlador, e os docs dizem o que ela compra
+(`b9adf2f8`). `ESPERA_DA_DESPEDIDA` diz:
+- que o `CONNECTION_CLOSE` sai na primeira volta do driver, com ou sem ela;
+- que ela mantém o runtime e a ponta vivos no período de fechamento do QUIC,
+  para reenviar o fechamento se o primeiro se perder;
+- que nenhum teste prova isso, porque o laço local não perde pacote;
+- e o custo, de até 300 ms, medido em ~86 ms no laço local.
+
+`Motor::despedir` diz que o conserto da P50 é o `sair` esperar o motor, e qual
+passo tem prova. Nenhum proxy com perda foi construído.
+
+**A reversão 1 da rodada 0, decomposta e medida por mim** (`enlace.rs` em
+`4290ed0d…` antes e depois de cada parte, conferido com `cmp`):
+
+| parte revertida | (a) | (b) | filho do P50-2 | (c) |
+|---|---|---|---|---|
+| os dois braços de volta a `self.encerrar(Motivo::Pedido)`, com o `sair` esperando | verde 3 de 3 (388–436 µs) | verde 3 de 3 (361–503 µs) | verde 3 de 3 (152–158 ms) | verde 3 de 3 |
+| o `sair` sem esperar o motor, com os braços em `despedir` | vermelho, 20,0028 s | vermelho, 20,0016 s | vermelho, 20,0016 s | — |
+| só o `wait_idle` tirado | verde 3 de 3 | verde 3 de 3 | verde 3 de 3 | — |
+
+- O que cada parte do `despedir` prova:
+  - **o cancelamento** é provado pelo (c);
+  - **o `encerrar`** é o de antes;
+  - **o `wait_idle`** não tem prova, pelo motivo acima.
+- **O custo do `wait_idle`, medido:** com `sair` cronometrado no (b) (uma linha
+  provisória, tirada depois, com `saida_com_despedida.rs` conferido em
+  `4d9bf9ca…`), `sair` levou 85,9–87,4 ms em 5 rodadas com o `wait_idle`, e
+  0,08–0,13 ms sem ele.
+- **A janela de 300 ms é a que força um quadro a caminho no (c) revertido.**
+  Sem o cancelamento, o (c) reprova (abaixo, em M6) porque o motor fica de pé
+  no `wait_idle` depois do `Encerrado`, com o par entregando. Com os braços de
+  volta a `encerrar`, sem a janela, o motor cai e aborta as tarefas
+  microssegundos depois do aviso, e o (c) passa verde 3 de 3.
+
+### M1 — o vermelho do P50-2 dependia de uma corrida
+
+- **O conserto (`8a38df53`):** a alternativa que a revisão prototipou.
+  - O filho assina um `EventListener` (`Estaciona`). Armado, no primeiro
+    `RosterChanged` ele avisa por um canal e dorme `ESTACIONADA` (150 ms) na
+    thread da conexão, que é onde `on_event` roda.
+  - O filho arma o ouvinte e chama `leave_voice_room()`, que avisa
+    `RosterChanged` de dentro de `run_command`.
+  - Ele espera o «estacionei» (até 5 s) e só então chama
+    `encerrar_e_esperar(500 ms)` e `exit(0)`.
+  - Armar só depois da ordem do pai impede que um `RosterChanged` da chegada
+    estacione a thread cedo demais.
+- **Verde:** 3 de 3, em 153,6, 155,8 e 161,0 ms (os 150 ms estacionados
+  inclusive).
+- **Reversão** (`encerrar_e_esperar` voltando sem esperar o sinal): vermelha 3
+  de 3, por construção, em 20,0029, 20,0026 e 20,0020 s, com a frase de
+  sempre. `seele-ffi/src/lib.rs` voltou a `ba79ab59…`, conferido com `cmp`.
+- **Se o gatilho mudar, falha alto:** com o ouvinte desarmado, o filho reprova
+  em 5 s com «a thread da conexão do filho não estacionou em 5 s:
+  `leave_voice_room` deixou de avisar `RosterChanged` de dentro da thread da
+  conexão, …», e o pai mostra essa frase em «o filho não saiu limpo (exit
+  status: 101)». O arquivo de teste voltou ao que era, conferido com `cmp`.
+
+Isto substitui a preocupação 1 da rodada 0.
+
+### M2 — a espera de `largar_tudo_e_esperar` sem vermelho
+
+- **Medido:** com `largar_tudo()` (o `abort` sem esperar) no lugar de
+  `largar_tudo_e_esperar`:
+  - `a_despedida_cala_as_tarefas_de_par_antes_do_encerrado` ficou verde 5 de 5;
+  - `uma_saida_voluntaria_derruba_o_caminho_do_par_e_a_tela_para` ficou verde
+    3 de 3.
+- **O que mudou:** o doc da função e o de `Motor::despedir` dizem que a espera
+  é plausível e não provada. O que os dois testes provam é o cancelamento antes
+  do aviso. Sem teste novo, como pedido.
+
+### M3 — a espera dos MODs sem o cadeado não tinha guarda
+
+- **O teste (`6a0d5bed`):** `despedir_da_sessao_espera_os_mods_sem_segurar_o_cadeado`.
+  Uma thread (escopo de `std::thread::scope`) toma o cadeado da supervisão e
+  chama `confirmar_parada` 30 ms depois. O teste exige:
+  - que `despedir_da_sessao`, com teto de 2 s, volte antes de 1 s;
+  - que nenhuma linha «sem confirmar a parada» saia.
+  Verde.
+- **Reversão** (o guarda de `mods_nativos` preso durante toda a espera):
+  vermelho, «a saída do app levou 2.012082208s com um MOD que confirmou a
+  parada em 30 ms: a espera segurou o cadeado da supervisão, e a confirmação
+  ficou parada atrás dela até o teto». O `main.rs` voltou a `0db5b5b1…`,
+  conferido com `cmp`.
+- A mesma reversão também reprova o teste do M4. A frase de tempo dele foi
+  acertada para nomear as duas causas, e indicar este teste como o que as
+  separa.
+
+### M4 — `parando` contava o `encerrando` inteiro
+
+- **O vermelho, antes do conserto:**
+  `despedir_da_sessao_conta_e_espera_so_a_geracao_que_revogou` ficou vermelho
+  com «… contou também a instância de uma sessão anterior que nunca
+  confirmou: … mods=2», e a rodada levou 2,01 s (o teto inteiro). O teste põe
+  em `encerrando` uma instância de uma geração anterior que nunca confirma, e
+  uma da geração atual que confirma em 30 ms noutra thread.
+- **O conserto:** `parando` conta só as instâncias de `encerrando` da geração
+  fechada. **Escolhi a geração que o `revogar` devolve**, menos um: é a
+  geração que ele fechou, e `revogar_em` a calcula assim, inclusive com a
+  tabela envenenada. A linha INFO e a espera usam a mesma conta. O doc diz
+  por quê.
+- **Verde:** `mods=1`, de volta em menos de 1 s, e a instância antiga continua
+  em `encerrando`.
+- **Reversão** (`mods.encerrando.len()` de volta): vermelho com `mods=2`, em
+  2,01 s. O `main.rs` voltou a `0db5b5b1…`, conferido com `cmp`.
+- Depois das duas reversões, a frase de tempo do M4 foi acertada (M3) e o
+  `cargo fmt` reformatou os testes: o commit tem o `main.rs` em `f337eac1…`,
+  com o binário inteiro verde (273).
+
+### M5 — teto zero no guarda, e o doc de «bloqueia»
+
+- **Medido:** com `encerrar_e_esperar(std::time::Duration::from_millis(0))` no
+  `main.rs`, os dois guardas passaram (2 de 2).
+- **O conserto (`72b57732`):** `teto_da_espera` lê o número de
+  `Duration::from_millis(N)` ou `Duration::from_secs(N)` depois de
+  `encerrar_e_esperar(` no corpo sem comentários. O guarda exige um número
+  maior que zero. Qualquer outra forma dá `None` e reprova: um teto que o
+  guarda não sabe ler é um teto que ele não confere.
+- **A prova:** com o teto zero, `a_despedida_espera_o_quadro_sair` reprova:
+  «a despedida deixou de esperar a thread da conexão com um teto que não seja
+  zero (lido: Some(0) ms)». O `main.rs` voltou a `e57b33fb…`, conferido com
+  `cmp`.
+- **O doc de `encerrar_e_esperar`:** bloqueia até `teto` quando sozinha; com
+  duas chamadas ao mesmo tempo, a segunda espera a primeira soltar o cadeado e
+  depois o próprio teto, até o dobro quando a thread não termina.
+
+### M6 — o (c) lia com `timeout(Duration::ZERO)`
+
+- **Medido antes de consertar**, com um teste provisório no `seele-core`
+  (tirado depois, `enlace.rs` conferido em `4290ed0d…`):
+  - 500 avisos numa fila do `tokio` 1.53.1, a mesma `mpsc` do `Enlace`, lidos
+    com `timeout(Duration::ZERO, rx.recv())` numa volta só;
+  - resultado: **500 de 500**, no corpo do `#[tokio::test]` (o `block_on` em
+    que o (c) roda) e numa tarefa, com e sem `unconstrained`.
+  - Com o orçamento gasto, o `Timeout` consulta o relógio sob o mesmo
+    orçamento e devolve `Pending`: a tarefa cede e a leitura continua, em vez
+    de devolver `Elapsed`.
+  - **A premissa da revisão não se confirmou neste `tokio`.** Não há vermelho
+    a mostrar, nem antes nem por reversão.
+- **O conserto, mesmo assim, como pedido (`29a31553`):** `ja_na_fila`
+  embrulha a leitura em `tokio::task::unconstrained`, e o comentário diz a
+  medida. Ele tira do teste a dependência desse detalhe do `Timeout`: se ele
+  mudar, uma fila cheia não vira «a fila esvaziou».
+- **O (c) com `ja_na_fila`:** verde. A reversão da rodada 0 (sem o
+  cancelamento antes do aviso) continua vermelha, 3 de 3: «o quadro Some(36)
+  estava na fila de quem saiu **depois** do `Encerrado`: …».
+
+### O que rodou, na HEAD da rodada
+
+- `--test saida_com_despedida -- --test-threads=1`: 3 de 3. O filho em 157 ms
+  (150 deles estacionado); (a) e (b) em 0,5–0,6 ms.
+- `--test tela_por_um_par -- --test-threads=1`: 19 de 19.
+- `--test bateria_interna -- --test-threads=1`: 7 de 7.
+- `-p seele-core --lib`: 445.
+- `-p seele-ffi --lib`: 126, mais o 1 ignorado de antes.
+- `-p seele-app`: `--bin` 273, `--test encerramento` 2 e `--test frontend` 268.
+- `cargo fmt --all -- --check` limpo; o clippy dos quatro crates, com `-D
+  warnings`, limpo. O `cargo doc` do `seele-core` só tem os avisos que já
+  estavam lá.
+- As corridas de conformidade terminaram antes da pausa da integração. Nenhuma
+  começou depois dela.
+
+### O pedido da F1: vermelho que não se repete perto dos 20 s
+
+Não vi nenhum. Todos os vermelhos de ~20 s desta rodada e da anterior foram
+reversões de propósito, e se repetiram em toda rodada em que foram medidos.
+Nenhum verde ficou perto do `IDLE_TIMEOUT`.
