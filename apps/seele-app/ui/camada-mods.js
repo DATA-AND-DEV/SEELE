@@ -37,7 +37,28 @@
 /** Para onde o teclado volta quando o diálogo fecha. */
 let focoAntesDoAceite = null;
 
-/** O que este diálogo está perguntando agora. */
+/**
+ * O que este diálogo está perguntando agora — e a credencial da tentativa que
+ * parou nele.
+ *
+ * **A credencial mora aqui, e só aqui, enquanto a pergunta está aberta** (lote
+ * R da F5). É o token do convite, ou a senha do servidor, com que a batida
+ * chegou: o servidor recusou os MODs **antes** de gastá-lo (`d0b98b9c`, da
+ * F1), e a volta que aceita é a mesma tentativa, que precisa dele para passar
+ * pela porta outra vez. Sem ele, num servidor fechado por convite e sem
+ * portaria, a volta recebia CREDENCIAL RECUSADA.
+ *
+ * Aqui e não num lugar próprio porque a vida dela é a da pergunta: nasce
+ * quando a pergunta abre e morre quando ela fecha, por qualquer porta —
+ * aceitar (que a devolve à volta e fecha), recusar, Escape ou clicar fora. Um
+ * segundo lugar teria de ser esquecido em cada uma dessas portas, e uma porta
+ * esquecida é uma credencial que sobra.
+ *
+ * Só memória: nunca disco, nunca `localStorage`, nunca o console. O guarda
+ * `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`, em
+ * `tests/frontend.rs`, confere cada linha que a toca, e a `ajustes-v013.cjs`
+ * a procura onde ela não pode estar.
+ */
 let aceitePendente = null;
 
 /**
@@ -104,9 +125,15 @@ function linhaDeMod(mod, indice) {
  * @param {string} alvo      o servidor, como a pessoa o digitou
  * @param {Array}  mods      o que veio no anúncio
  * @param {string} conjunto  a identidade do conjunto, para gravar o sim
+ * @param {string|null} credencial  o segredo com que a batida chegou, ou `null`
  */
-async function abrirAceiteDeMods(alvo, mods, conjunto) {
-  aceitePendente = { alvo, conjunto, mods };
+async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
+  // **Uma pergunta que substitui outra limpa a credencial da antiga** (lote R,
+  // sobra da rodada 1). A obtenção da antiga pode estar em curso, com a cópia
+  // dela em `aceitarOsMods`; trocar só a referência deixava a credencial de lá
+  // alcançável até a obtenção acabar. A mesma limpeza de `fecharAceiteDeMods`.
+  if (aceitePendente) aceitePendente.credencial = null;
+  aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**
@@ -143,9 +170,21 @@ async function abrirAceiteDeMods(alvo, mods, conjunto) {
   $("mods-recusar").focus();
 }
 
-/** Fecha e devolve o teclado a quem o tinha. */
+/**
+ * Fecha e devolve o teclado a quem o tinha.
+ *
+ * **E esquece a credencial da tentativa**, que mora na pergunta: é esta linha
+ * que a esquece quando a pessoa desiste — recusar, Escape, clicar fora — e
+ * também quando ela aceita, porque `aceitarOsMods` passa por aqui antes da
+ * volta e entrega a credencial só como argumento dela.
+ */
 function fecharAceiteDeMods() {
   $("mods-aceite").hidden = true;
+  // **O campo antes da referência** (lote R, rodada 1). `aceitarOsMods` guarda
+  // uma cópia da pergunta (`pergunta`) enquanto o catálogo responde, e soltar
+  // só `aceitePendente` deixava a credencial alcançável por ela pelo tempo que
+  // o catálogo travasse.
+  if (aceitePendente) aceitePendente.credencial = null;
   aceitePendente = null;
   if (focoAntesDoAceite && document.contains(focoAntesDoAceite)) {
     focoAntesDoAceite.focus();
@@ -170,8 +209,11 @@ function fecharAceiteDeMods() {
  * isso o laço periódico continua sem baixar nada por conta própria.
  */
 async function aceitarOsMods() {
-  if (!aceitePendente) return;
-  const { alvo, conjunto, mods } = aceitePendente;
+  // A pergunta que este sim responde, guardada para ser conferida de novo
+  // antes da volta: ver o fim desta função.
+  const pergunta = aceitePendente;
+  if (!pergunta) return;
+  const { alvo, conjunto, mods } = pergunta;
   const botao = $("mods-aceitar");
   const erro = $("mods-erro");
   botao.disabled = true;
@@ -198,10 +240,35 @@ async function aceitarOsMods() {
     return;
   }
 
+  // **Quem fechou a pergunta enquanto o conjunto chegava desistiu, e a volta
+  // não sai** — lote R da F5.
+  //
+  // A obtenção leva tempo, e a pergunta continua aberta durante ela: RECUSAR,
+  // Escape e clicar fora seguem à mão, e as três dizem a mesma coisa — sair da
+  // pergunta não entra em lugar nenhum. Esta função seguia em frente mesmo
+  // assim, e a janela entrava sozinha quando o pacote terminava de chegar, por
+  // cima de uma tela que a pessoa tinha largado.
+  //
+  // Pela identidade, e não por «há uma pergunta aberta»: uma pergunta nova,
+  // de outra batida, não é a que este sim respondeu.
+  if (aceitePendente !== pergunta) return;
+
+  // **A credencial da tentativa vai junto, para o mesmo alvo** — lote R da F5.
+  //
+  // Esta volta não é uma reconexão: é a mesma tentativa, que o servidor recusou
+  // antes de gastar o convite. Ia sem ele, e num servidor fechado por convite e
+  // sem portaria recebia CREDENCIAL RECUSADA — a pessoa aceitava e não entrava.
+  //
+  // Lida da pergunta aberta **agora**, e não no começo desta função: quem
+  // desistiu durante a obtenção já teve a credencial esquecida, e ela não volta
+  // de uma cópia tirada antes. Depois de lida, fechar a pergunta a esquece;
+  // daqui em diante ela existe só como argumento desta volta, e some com ela,
+  // entre a pessoa ou não.
+  const credencial = aceitePendente?.credencial ?? null;
   fecharAceiteDeMods();
   // A mesma porta de sempre. O aceite já está em disco, então esta tentativa
   // passa pelo ponto que recusou a anterior.
-  await conectar();
+  await conectar(alvo, null, credencial);
 }
 
 /**
@@ -277,11 +344,14 @@ async function obterOConjunto(mods) {
  *
  * O mesmo formato de `levarParaAEspera`: quem chama não precisa saber o que
  * aconteceu, só se ainda tem uma linha vermelha para escrever.
+ *
+ * `credencial` é o segredo com que esta batida chegou, e a pergunta o guarda
+ * para a volta que aceita. Ver `aceitePendente`.
  */
-function levarParaOAceiteDeMods(motivo, alvo) {
+function levarParaOAceiteDeMods(motivo, alvo, credencial) {
   const pedido = motivo?.ModsNaoAceitos;
   if (!pedido) return false;
-  abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "").catch((falha) =>
+  abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "", credencial).catch((falha) =>
     console.warn("abrir aceite:", falha),
   );
   return true;

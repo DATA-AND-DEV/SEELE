@@ -71,7 +71,9 @@ pub enum Esperada {
 }
 
 /// Onde ficar batendo, e com que credencial.
-#[derive(Debug, Clone)]
+///
+/// O `Debug` é escrito à mão, logo abaixo, para não imprimir o segredo.
+#[derive(Clone)]
 pub struct Destino {
     /// Endereço do servidor.
     pub servidor: SocketAddr,
@@ -152,6 +154,34 @@ pub struct Destino {
     /// `None` em quem nunca aceitou nada daquele servidor — que é o estado de
     /// toda primeira entrada, e de todo servidor sem MOD.
     pub aceito: Option<String>,
+}
+
+/// **O segredo não sai pelo `Debug`** (lote R da F5, rodada 1).
+///
+/// `segredo` é o convite de uso único ou a senha do servidor, e um
+/// `tracing::debug!(?destino)` o levaria ao `seele.log` de quem entra. Aqui ele
+/// sai como `Some(<oculto>)` ou `None`: quem investiga uma recusa sabe se a
+/// entrada levou um, e não qual. O resto sai como o `derive` o escrevia.
+impl std::fmt::Debug for Destino {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// O lugar do segredo, sem ele.
+        struct Oculto;
+        impl std::fmt::Debug for Oculto {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("<oculto>")
+            }
+        }
+        f.debug_struct("Destino")
+            .field("servidor", &self.servidor)
+            .field("nome_tls", &self.nome_tls)
+            .field("chave_do_pin", &self.chave_do_pin)
+            .field("apelido", &self.apelido)
+            .field("segredo", &self.segredo.as_ref().map(|_| Oculto))
+            .field("esperada", &self.esperada)
+            .field("o_pino_prova_o_servidor", &self.o_pino_prova_o_servidor)
+            .field("aceito", &self.aceito)
+            .finish()
+    }
 }
 
 impl Destino {
@@ -10201,6 +10231,55 @@ mod tests {
             ligado.is_ok(),
             "quem assiste discou para uma ponta que devia estar atendendo e não fechou: {:?}",
             ligado.err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod o_debug_do_destino {
+    use super::Destino;
+
+    /// O segredo de um destino é o convite de uso único ou a senha do servidor,
+    /// e o `Debug` é por onde um `tracing::debug!(?destino)` o levaria ao
+    /// `seele.log`. Lote R da F5, rodada 1.
+    #[test]
+    fn o_debug_do_destino_esconde_o_segredo_e_mostra_o_resto() {
+        let segredo = "segredo-do-teste-do-debug-do-destino";
+        let destino = Destino {
+            servidor: "127.0.0.1:8384".parse().expect("endereço"),
+            nome_tls: "localhost".into(),
+            chave_do_pin: "casa".into(),
+            apelido: "bia".into(),
+            segredo: Some(segredo.to_owned()),
+            esperada: None,
+            o_pino_prova_o_servidor: true,
+            aceito: None,
+        };
+        for impresso in [format!("{destino:?}"), format!("{destino:#?}")] {
+            assert!(
+                !impresso.contains(segredo),
+                "o `Debug` de `Destino` imprime o segredo — o convite de uso único ou a \
+                 senha do servidor —, e um `tracing::debug!(?destino)` o levaria ao \
+                 `seele.log`:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("<oculto>"),
+                "o `Debug` de `Destino` não diz que há segredo, e quem investiga uma \
+                 recusa não sabe se a entrada levou um:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("bia") && impresso.contains("casa"),
+                "o `Debug` de `Destino` escondeu mais que o segredo:\n{impresso}"
+            );
+        }
+        let sem = Destino {
+            segredo: None,
+            ..destino
+        };
+        let impresso = format!("{sem:?}");
+        assert!(
+            impresso.contains("segredo: None"),
+            "sem segredo, o `Debug` de `Destino` não diz `None`:\n{impresso}"
         );
     }
 }
