@@ -414,9 +414,12 @@
   padding: 4px 6px;
   font: inherit;
   font-family: var(--nucleo-pilha);
-  font-size: 10px;
+  /* Cresce com o texto do sistema, com teto: medido no Safari 27 com o tamanho
+     de acessibilidade, os rótulos fixos em 10 px deixavam pequenos justamente
+     os controles mais importantes da tela. A 1,4× a faixa ainda cabe a 360. */
+  font-size: calc(10px * min(var(--cel-escala), 1.4));
   letter-spacing: 0.14em;
-  line-height: 12px;
+  line-height: 1.2;
   text-transform: uppercase;
   color: var(--nucleo-texto);
   background: var(--nucleo-painel);
@@ -425,7 +428,11 @@
   box-shadow: none;
 }
 
-:root[data-casca="celular"] .voz-nucleo .glifo { width: 18px; height: 18px; vertical-align: 0; }
+:root[data-casca="celular"] .voz-nucleo .glifo {
+  width: calc(18px * min(var(--cel-escala), 1.4));
+  height: calc(18px * min(var(--cel-escala), 1.4));
+  vertical-align: 0;
+}
 
 :root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] {
   color: var(--nucleo-fundo);

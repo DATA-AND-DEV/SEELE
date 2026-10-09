@@ -83,7 +83,7 @@ ESTADOS = {
 COM_TEMA = ["09-servidor", "11-conversa", "13-pessoas", "14-ajustes", "17-chamada", "27-mudo", "28-este-servidor"]
 TEMAS = ["papel", "profundo", "hostil", "claro"]
 # O texto dinâmico a 150 % e a tela larga, em três estados.
-COM_TEXTO_GRANDE = ["11-conversa", "13-pessoas", "17-chamada", "14-ajustes"]
+COM_TEXTO_GRANDE = ["11-conversa", "13-pessoas", "17-chamada", "14-ajustes", "26-segurar-para-falar"]
 
 MEDIR = r"""
 ([topo, pe]) => {
