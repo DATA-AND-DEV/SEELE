@@ -381,4 +381,19 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
 - **Espera a 16**: a volta de um convidado sem tocar de novo. Ela precisa do
   cliente que lê o `Tocando` para a primeira entrada. A frase «A LIGAÇÃO CAIU»
   é da 7f.
+- **A rodada inteira depois da 17** (`39faee3d`, liberada de novo pela
+  orquestradora depois da bateria do `linha/0.15`): 46 de 47.
+  - O vermelho foi `tela_por_um_par::retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor`,
+    com `Error: SemResposta`. Enquanto ele falhava,
+    `a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor`, que
+    disputa a porta de propósito, já corria havia mais de 60 s.
+  - Rodado de novo: o teste sozinho passou 3 de 3, e o arquivo inteiro 19 de
+    19.
+  - **Por leitura, e não por medida**, nada da 14a nem da 17 está no caminho
+    dele: ele não usa bilhete nem destino de código. São os dois únicos lugares
+    em que as duas tarefas mudaram o comportamento de uma conexão.
+  - O arquivo tem uma família intermitente conhecida, a pendência 41. Lá o
+    sintoma registrado é «a paciência acabou», e não `SemResposta`: **não
+    afirmo que é a mesma**. Separar de vez pediria rodadas intercaladas contra
+    a base, como as que a pendência 41 fez.
 
