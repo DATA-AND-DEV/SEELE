@@ -48,6 +48,7 @@ import tempfile
 from typing import Callable
 
 from PIL import Image, ImageChops
+from playwright.sync_api import Error as ErroDoPlaywright
 from playwright.sync_api import Page, sync_playwright
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -72,6 +73,8 @@ class Ponto:
     injetado: str
     # O que, achado no arquivo do produto, quer dizer que o ponto já entrou.
     sinal: str
+    # Se o ponto troca a âncora, em vez de entrar depois dela.
+    troca: bool = False
 
 
 PONTOS_INJETADOS = [
@@ -96,6 +99,29 @@ PONTOS_INJETADOS = [
         "function desenhar(snapshot) {\n  if (!snapshot) return;\n",
         "  queueMicrotask(() => CASCA.depoisDeDesenhar.forEach((f) => f(snapshot)));\n",
         "CASCA.depoisDeDesenhar",
+    ),
+    # A senha da sala sai do `window.prompt` (P7). E cancelar cancela: o
+    # desktop, com o `prompt`, tentava entrar sem senha quando a pessoa
+    # desistia, e a recusa do servidor era a resposta ao «cancelar».
+    Ponto(
+        "P7",
+        "tela-sessao.js",
+        '          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;\n',
+        '          item.dataset.senha_necessaria === "sim"\n'
+        "            ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? \"\")\n"
+        "            : null;\n"
+        '        if (item.dataset.senha_necessaria === "sim" && senha === null) return;\n',
+        "CASCA.pedirSenhaDaSala",
+        troca=True,
+    ),
+    # O Return do celular quebra a fileira (P8): o teclado do aparelho não tem
+    # Shift+Enter, e uma mensagem de duas fileiras não teria como ser escrita.
+    Ponto(
+        "P8",
+        "tela-sessao.js",
+        '  if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;\n',
+        "  if (!CASCA.enterEnvia) return;\n",
+        "CASCA.enterEnvia",
     ),
 ]
 
@@ -151,7 +177,7 @@ def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathli
             else:
                 if texto.count(ponto.ancora) != 1:
                     raise SystemExit(f"a âncora do {ponto.nome} mudou em {ponto.arquivo}; a bancada precisa dela")
-                texto = texto.replace(ponto.ancora, ponto.ancora + ponto.injetado)
+                texto = texto.replace(ponto.ancora, ponto.injetado if ponto.troca else ponto.ancora + ponto.injetado)
             arquivo.write_text(texto)
     else:
         for arquivo in pasta.iterdir():
@@ -196,7 +222,7 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
         fotos = {}
         for nome, celular in (("desktop-sem-celular", False), ("desktop-com-celular", True)):
             pagina = montar(temporaria / motor.name / nome, celular=celular, marca=None)
-            ctx = navegador.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+            ctx = navegador.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", locale="pt-BR")
             pg = ctx.new_page()
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
@@ -224,7 +250,7 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
 # --------------------------------------------------------------- as medidas
 
 MEDIR = r"""
-([topo, pe]) => {
+([topo, pe, raiz]) => {
   const W = innerWidth, H = innerHeight;
   const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !e.closest("[hidden]"); };
@@ -236,7 +262,10 @@ MEDIR = r"""
   const rolaX = (e) => !!e.parentElement?.closest("[data-rola-de-lado]");
   const rolaY = (e) => { for (let p = e.parentElement; p; p = p.parentElement) { const s = getComputedStyle(p);
       if (/(auto|scroll)/.test(s.overflowY) && p.scrollHeight > p.clientHeight) return true; } return false; };
-  const todos = [...document.querySelectorAll("body *")].filter(vis);
+  // O que se mede: a página inteira, ou só a parte que a tarefa já desenhou
+  // para o celular (as outras ainda são do desktop). A largura do documento é
+  // medida sempre na página inteira.
+  const todos = [...document.querySelectorAll(raiz)].flatMap((r) => [r, ...r.querySelectorAll("*")]).filter(vis);
   const vaza = todos.filter((e) => { const r = e.getBoundingClientRect(); return (r.right > W + 1 || r.left < -1) && !rolaX(e); })
     .filter((e) => ![...e.children].some((c) => vis(c) && c.getBoundingClientRect().right > W + 1));
   const tocavel = (e) => { const r = e.getBoundingClientRect(); const x = Math.min(Math.max(r.left + r.width / 2, 1), W - 1), y = r.top + r.height / 2;
@@ -350,13 +379,17 @@ class Caso:
 
     `levar` leva a página, já na sessão, ao estado, e devolve o que reprovou
     nele. `medir` liga as medidas do aparelho; um caso que ainda não tem a
-    moldura do celular (o primeiro) não as liga. `temas` repete o caso sob os
-    temas de teste, com o núcleo comparado ao da foto sem tema.
+    moldura do celular (o primeiro) não as liga, e `raiz` as restringe ao que já
+    é do celular. `temas` repete o caso sob os temas de teste, com o núcleo
+    comparado ao da foto sem tema.
     """
 
     levar: Callable[[Page], list[str]]
     medir: bool = True
     temas: tuple[str, ...] = ()
+    # O seletor do que as medidas do aparelho leem. Os painéis que uma tarefa
+    # ainda não adaptou ficam de fora, e entram quando a tarefa deles chegar.
+    raiz: str = "body"
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -379,8 +412,495 @@ def sessao_entrou(pg: Page) -> list[str]:
     return falhas
 
 
+def tocar(pg: Page, seletor: str) -> bool:
+    """Um toque no primeiro alvo que casa, se ele estiver à vista.
+
+    Devolve `False` sem tocar quando o alvo não existe ou está escondido: um
+    caso que toca num controle ausente diz o que faltou, em vez de esperar o
+    tempo-limite do Playwright e estourar.
+    """
+    alvo = pg.locator(seletor).first
+    if alvo.count() == 0 or not alvo.is_visible():
+        return False
+    try:
+        # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
+        # alcança: o Playwright desiste em três segundos, e o caso diz isso.
+        alvo.tap(timeout=3000)
+    except ErroDoPlaywright:
+        return False
+    return True
+
+
+def esperar_quadro(pg: Page) -> None:
+    """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
+    aparece no redesenho seguinte."""
+    pg.wait_for_timeout(700)
+
+
+def faixa_de_voz(pg: Page) -> list[str]:
+    """A moldura do celular: as quatro abas e a faixa de voz (Tarefa 3).
+
+    Termina no estado de partida (dentro da PONTE, na aba CONVERSA, com o áudio
+    aberto), que é o que as medidas e a foto leem.
+    """
+    falhas = []
+    # O celular nasce na VOZ (spec, §2.3); o duble vem com o modo do desktop.
+    pg.evaluate("SEELE_QUADRO.voice_mode = 'VoiceActivated'")
+    esperar_quadro(pg)
+    faixa = pg.evaluate("""(() => {
+        const v = document.getElementById('voz');
+        if (!v) return null;
+        return { escondida: v.hidden || !!v.closest('[hidden]'),
+                 nome: v.querySelector('.voz-sala-nome')?.textContent ?? '',
+                 conta: v.querySelector('.voz-sala-conta')?.textContent ?? '' };
+    })()""")
+    if faixa is None:
+        return ["não há faixa de voz (#voz)"]
+    if "PONTE" not in faixa["nome"] or faixa["conta"] != "3/8":
+        falhas.append(f"a faixa diz «{faixa['nome']}» «{faixa['conta']}», e não PONTE 3/8")
+    # Escondida, não há o que tocar: o resto do caso esperaria o tempo-limite do
+    # Playwright e estouraria, em vez de dizer o que reprovou.
+    if faixa["escondida"]:
+        return falhas + ["dentro da PONTE, a faixa de voz está escondida"]
+
+    pg.evaluate("window.__SEELE_ARGS.set_muted = undefined")
+    pg.locator("#voz-mudo").tap()
+    pg.wait_for_timeout(300)
+    mandou = pg.evaluate("window.__SEELE_ARGS.set_muted ?? null")
+    if not mandou or mandou.get("on") is not True:
+        falhas.append(f"o toque no MUDO mandou set_muted {mandou}, e não {{on: true}}")
+
+    paineis = {"servidor": ".painel-canais", "conversa": ".painel-linha", "pessoas": ".painel-pessoas"}
+    for aba in ("servidor", "conversa", "pessoas", "ajustes"):
+        pg.locator(f"#cel-aba-{aba}").tap()
+        estado = pg.evaluate("""(paineis) => {
+            const s = document.getElementById('tela-sessao');
+            const visivel = (sel) => { const e = s.querySelector('.paineis > ' + sel);
+                return !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0; };
+            return { aba: s.dataset.aba,
+                     atual: [...document.querySelectorAll('.cel-aba[aria-current="page"]')].map((b) => b.dataset.aba),
+                     visiveis: Object.entries(paineis).filter(([, sel]) => visivel(sel)).map(([a]) => a) };
+        }""", paineis)
+        if estado["aba"] != aba or estado["atual"] != [aba]:
+            falhas.append(f"o toque em {aba.upper()} deu data-aba={estado['aba']!r} e aria-current em {estado['atual']}")
+        esperado = [aba] if aba in paineis else []
+        if estado["visiveis"] != esperado:
+            falhas.append(f"na aba {aba.upper()}, os painéis visíveis são {estado['visiveis']}, e não {esperado}")
+
+    # A abertura do áudio (matriz, B-F08b e B-F08c): as palavras vêm do
+    # `ABERTURA_DO_AUDIO` do produto, e não de uma cópia.
+    for abertura in ("abrindo", "nao_abriu_no_prazo"):
+        pg.evaluate(f"SEELE_QUADRO.abertura_do_audio = '{abertura}'")
+        esperar_quadro(pg)
+        visto = pg.evaluate("""(abertura) => {
+            const quem = document.querySelector('#voz .voz-sala-quem')?.textContent ?? '';
+            const aviso = document.getElementById('aviso-audio');
+            const r = aviso.getBoundingClientRect(), v = document.getElementById('voz').getBoundingClientRect();
+            return { quem, rodape: ABERTURA_DO_AUDIO[abertura].rodape, frase: ABERTURA_DO_AUDIO[abertura].frase,
+                     aviso: aviso.hidden ? null : document.getElementById('aviso-audio-texto').textContent,
+                     dentro: r.left >= 0 && r.right <= innerWidth + 0.5, colado: Math.abs(r.bottom - v.top) <= 1 };
+        }""", abertura)
+        if visto["rodape"] not in visto["quem"]:
+            falhas.append(f"com o áudio em {abertura}, a faixa diz «{visto['quem']}», sem «{visto['rodape']}»")
+        if visto["frase"] is not None:
+            if visto["aviso"] != visto["frase"]:
+                falhas.append(f"com o áudio em {abertura}, o #aviso-audio diz {visto['aviso']!r}")
+            # Logo acima da faixa, colado nela, e não só em algum lugar acima:
+            # no alto da tela o aviso também estaria «acima», longe da voz que
+            # ele explica.
+            elif not (visto["dentro"] and visto["colado"]):
+                falhas.append(f"o #aviso-audio não fica logo acima da faixa, dentro da tela: {visto}")
+    pg.evaluate("SEELE_QUADRO.abertura_do_audio = 'aberto'")
+
+    pg.evaluate("window.__SEELE_CHAMADAS.length = 0")
+    pg.locator("#voz-sair").tap()
+    pg.wait_for_timeout(300)
+    if "leave_voice_room" not in pg.evaluate("window.__SEELE_CHAMADAS"):
+        falhas.append("o toque no SAIR não chamou leave_voice_room")
+
+    pg.evaluate("SEELE_QUADRO.voice_rooms.forEach((s) => { s.occupied_by_us = false; })")
+    esperar_quadro(pg)
+    if not pg.evaluate("document.getElementById('voz').hidden"):
+        falhas.append("fora de sala, a faixa de voz continua à vista")
+    pg.evaluate("SEELE_QUADRO.voice_rooms[0].occupied_by_us = true")
+    pg.locator("#cel-aba-conversa").tap()
+    esperar_quadro(pg)
+    return falhas
+
+
+def segurar(pg: Page) -> list[str]:
+    """SEGURAR PARA FALAR (Tarefa 4): fala só com o dedo no MUDO, e fecha sozinho.
+
+    Cada jeito de o dedo deixar de segurar tem de terminar com o último
+    `set_talking` em `false`: soltar, o sistema cancelar o toque, o dedo sair do
+    controle, a página sumir e o enlace cair. Um microfone que fica aberto depois
+    do dedo é o pior defeito que esta tela pode ter.
+    """
+    falhas = []
+    pg.evaluate("SEELE_QUADRO.voice_mode = 'PushToTalk'")
+    esperar_quadro(pg)
+    modo = pg.evaluate("(() => { const m = document.getElementById('voz-mudo'); return [m.dataset.modo, m.textContent]; })()")
+    if modo[0] != "segurar" or "SEGURE" not in modo[1]:
+        return [f"no PushToTalk, o MUDO é {modo}, e não o SEGURE"]
+
+    apertar = """() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerdown',
+        { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'touch', isPrimary: true }))"""
+    jeitos = {
+        "soltar": "() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, pointerType: 'touch' }))",
+        "o sistema cancelar o toque": "() => document.getElementById('voz-mudo').dispatchEvent(new Event('touchcancel', { bubbles: true }))",
+        "o dedo sair do controle": "() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerleave', { pointerId: 7, pointerType: 'touch' }))",
+        "a página sumir": """() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+            Object.defineProperty(document, 'hidden', { value: false, configurable: true }); }""",
+        "o enlace cair": "() => { SEELE_QUADRO.link = 'Down'; }",
+    }
+    for jeito, soltar in jeitos.items():
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        pg.evaluate(apertar)
+        pg.wait_for_timeout(100)
+        no_ar = pg.evaluate("document.getElementById('voz-mudo').textContent")
+        pg.evaluate(soltar)
+        if jeito == "o enlace cair":
+            esperar_quadro(pg)
+            pg.evaluate("SEELE_QUADRO.link = 'Up'")
+            esperar_quadro(pg)
+        else:
+            pg.wait_for_timeout(150)
+        falas = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_talking').map(([, a]) => a.talking)")
+        if falas[:1] != [True]:
+            falhas.append(f"{jeito}: apertar não abriu a fala (set_talking {falas})")
+        elif falas[-1] is not False:
+            falhas.append(f"{jeito}: o microfone ficou aberto (set_talking {falas})")
+        if jeito == "soltar" and "NO AR" not in no_ar:
+            falhas.append(f"segurando, o controle diz «{no_ar}», e não NO AR")
+        if pg.evaluate("window.__SEELE_HISTORICO.some(([c]) => c === 'set_muted')"):
+            falhas.append(f"{jeito}: segurar alternou o MUDO")
+    return falhas
+
+
+def aba_servidor(pg: Page) -> list[str]:
+    """A aba SERVIDOR (Tarefa 5): a lista de salas do desktop, em cartões.
+
+    O quadro do duble ganha os três casos que pedem marca: OFICINA lotada,
+    SILÊNCIO com senha e uma sala livre, PALCO, para o ENTRAR MUDO.
+    """
+    falhas = []
+    pg.evaluate("""(() => {
+        const [, oficina, silencio] = SEELE_QUADRO.voice_rooms;
+        oficina.limit = oficina.people.length;
+        silencio.password_required = true;
+        SEELE_QUADRO.voice_rooms.push({ id: 4, name: "PALCO", limit: 4, password_required: false,
+            occupied_by_us: false, channel: null, sync: null, people: [] });
+    })()""")
+    pg.locator("#cel-aba-servidor").tap()
+    esperar_quadro(pg)
+
+    visto = pg.evaluate("""(() => {
+        const visivel = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        const topo = document.querySelector('.cel-topo');
+        const selo = topo?.querySelector('.cel-selo-seguro');
+        const trilha = document.querySelector('.paineis > .trilha');
+        const salas = {};
+        for (const li of document.querySelectorAll('#lista-voice_rooms > li')) {
+            const ir = li.querySelector('button[data-voice_room]');
+            const nome = li.querySelector('.voice_room-nome');
+            salas[nome.textContent] = {
+                marcas: [...li.querySelectorAll('.cel-marca')].map((m) => m.textContent.trim()),
+                entrarAtivo: !!ir && !ir.disabled,
+                mudo: !!li.querySelector('.cel-entrar-mudo'),
+                nomeEhBotao: nome.tagName === 'BUTTON',
+            };
+        }
+        const fora = [...document.querySelectorAll('.painel-canais .cel-fora')].filter(visivel);
+        const gestao = ['#nova-voice_room', '#nova-linha', '.voice_room-apagar', '.linha-controles']
+            .filter((s) => [...document.querySelectorAll('.painel-canais ' + s)].some(visivel));
+        return {
+            topo: visivel(topo) ? topo.textContent : null,
+            selo: selo ? [selo.textContent, selo.dataset.padrao] : null,
+            trilha: visivel(trilha) && trilha.hasAttribute('data-rola-de-lado')
+                && trilha.getBoundingClientRect().bottom <= document.querySelector('#lista-voice_rooms').getBoundingClientRect().top + 1,
+            salas, fora: fora.map((p) => p.textContent), gestao,
+        };
+    })()""")
+    if not visto["topo"] or "TÓQUIO-3" not in visto["topo"]:
+        falhas.append(f"o topo da aba SERVIDOR não diz o servidor: {visto['topo']!r}")
+    if not visto["selo"] or "CONEXÃO SEGURA" not in visto["selo"][0] or visto["selo"][1] != "Verified":
+        falhas.append(f"o selo da conexão diz {visto['selo']}")
+    if not visto["trilha"]:
+        falhas.append("a trilha não é uma faixa deitada, marcada para rolar de lado, acima das salas")
+    esperadas = {"PONTE": ["VOCÊ ESTÁ AQUI"], "OFICINA": ["LOTADA"], "SILÊNCIO": ["COM SENHA"], "PALCO": []}
+    for nome, marcas in esperadas.items():
+        sala = visto["salas"].get(nome)
+        if sala is None:
+            falhas.append(f"não há cartão para {nome}")
+            continue
+        if sala["marcas"] != marcas:
+            falhas.append(f"{nome} tem as marcas {sala['marcas']}, e não {marcas}")
+        if not sala["entrarAtivo"]:
+            falhas.append(f"o ENTRAR de {nome} está desligado (quem recusa uma sala lotada é o servidor)")
+        if sala["mudo"] != (nome != "PONTE"):
+            falhas.append(f"o ENTRAR MUDO de {nome} {'falta' if nome != 'PONTE' else 'sobra'}")
+        if sala["nomeEhBotao"]:
+            falhas.append(f"o nome de {nome} é um botão (renomear é pelo SEELE no computador)")
+    if len(visto["fora"]) != 1 or "SALAS E CANAIS" not in visto["fora"][0]:
+        falhas.append(f"a frase de SALAS E CANAIS aparece assim: {visto['fora']}")
+    if visto["gestao"]:
+        falhas.append(f"a gestão de salas e canais continua à vista: {visto['gestao']}")
+
+    def chamadas():
+        return pg.evaluate("window.__SEELE_HISTORICO.map(([c, a]) => [c, a])")
+
+    # ENTRAR MUDO: o MUDO antes da entrada, e a CHAMADA abre na aba dela.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='4']) .cel-entrar-mudo"):
+        falhas.append("não há ENTRAR MUDO à vista em PALCO")
+    else:
+        pg.wait_for_timeout(600)
+        feitas = [c for c, _ in chamadas() if c in ("set_muted", "enter_voice_room")]
+        args = dict(chamadas())
+        if feitas[:2] != ["set_muted", "enter_voice_room"] or (args.get("set_muted") or {}).get("on") is not True:
+            falhas.append(f"o ENTRAR MUDO mandou {feitas} ({args.get('set_muted')}), e não set_muted {{on: true}} antes da entrada")
+        depois = pg.evaluate("[document.getElementById('tela-sessao').dataset.aba, document.getElementById('vista-chamada').hidden]")
+        if depois != ["conversa", False]:
+            falhas.append(f"entrar não abriu a CHAMADA na aba dela: aba {depois[0]}, vista-chamada escondida {depois[1]}")
+
+    # A sala com senha: a folha, a senha que ela manda, e o AGORA NÃO que cancela.
+    pg.locator("#cel-aba-servidor").tap()
+    for resposta in ("entrar", "agora-nao"):
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='3']) button[data-voice_room]"):
+            falhas.append("não há ENTRAR à vista em SILÊNCIO")
+            break
+        pg.wait_for_timeout(200)
+        folha = pg.locator("#cel-folha-senha")
+        if not folha.is_visible():
+            falhas.append("a sala com senha não abriu a folha SENHA DA SALA")
+            break
+        if resposta == "entrar":
+            folha.locator("input").fill("abc")
+            folha.locator("button[data-resposta='entrar']").tap()
+        else:
+            folha.locator("button[data-resposta='agora-nao']").tap()
+        pg.wait_for_timeout(400)
+        entradas = [a for c, a in chamadas() if c == "enter_voice_room"]
+        if resposta == "entrar" and entradas != [{"voiceRoom": 3, "senha": "abc"}]:
+            falhas.append(f"o ENTRAR da folha mandou {entradas}")
+        if resposta == "agora-nao" and entradas:
+            falhas.append(f"o AGORA NÃO da folha ainda tentou entrar: {entradas}")
+        if folha.is_visible():
+            falhas.append(f"a folha continua aberta depois de {resposta}")
+        pg.locator("#cel-aba-servidor").tap()
+
+    # O selo mora no topo de toda aba: o tema e a aba não o tiram de vista.
+    pg.locator("#cel-aba-conversa").tap()
+    if not pg.evaluate("(() => { const s = document.querySelector('.cel-topo .cel-selo-seguro'); return !!s && s.getBoundingClientRect().height > 0; })()"):
+        falhas.append("na aba CONVERSA, o selo da conexão some")
+    pg.locator("#cel-aba-servidor").tap()
+    esperar_quadro(pg)
+    return falhas
+
+
+def aba_conversa(pg: Page) -> list[str]:
+    """A aba CONVERSA (Tarefa 6): a conversa do desktop no tamanho do polegar.
+
+    Termina com uma mensagem própria recusada no fim da lista, que é o que a foto
+    e as medidas leem: a placa de alerta dela é do núcleo.
+    """
+    falhas = []
+    tocar(pg, "#cel-aba-conversa")
+
+    def feitas(cmd):
+        return pg.evaluate(f"window.__SEELE_HISTORICO.filter(([c]) => c === '{cmd}').map(([, a]) => a)")
+
+    # O Return quebra a fileira, e só o ENVIAR envia: no celular não há Shift.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    campo = pg.locator("#campo-mensagem")
+    campo.fill("primeira")
+    campo.press("Enter")
+    campo.press_sequentially("segunda")
+    if feitas("send_message"):
+        falhas.append("o Return no campo enviou a mensagem")
+    if campo.input_value() != "primeira\nsegunda":
+        falhas.append(f"o Return não quebrou a fileira: o campo tem {campo.input_value()!r}")
+    if not tocar(pg, "#botao-enviar"):
+        falhas.append("não há ENVIAR à vista")
+    pg.wait_for_timeout(300)
+    if [a.get("body") for a in feitas("send_message")] != ["primeira\nsegunda"]:
+        falhas.append(f"o ENVIAR mandou {feitas('send_message')}")
+    placeholder = pg.evaluate("document.getElementById('campo-mensagem').placeholder")
+    if "Enter" in placeholder:
+        falhas.append(f"o campo ainda promete que o Enter envia: {placeholder!r}")
+
+    # A folha da mensagem: COPIAR em todas, APAGAR só nas próprias, e a frase de
+    # REMOVER nas dos outros só para quem tem a permissão.
+    pg.evaluate("navigator.clipboard.writeText = async (texto) => { window.__copiado = texto; }")
+    propria = "#lista-mensagens > li.mensagem:has(.corpo:text-is('UDP. tá escrito no README, duas linhas depois do comando'))"
+    alheia = "#lista-mensagens > li.mensagem:has(.mensagem-autor:text-is('juli'))"
+    for nome, seletor, pode_remover in (("própria", propria, True), ("alheia", alheia, True), ("alheia sem permissão", alheia, False)):
+        pg.evaluate(f"SEELE_QUADRO.may_remove_message = {'true' if pode_remover else 'false'}")
+        esperar_quadro(pg)
+        if not tocar(pg, f"{seletor} .corpo"):
+            falhas.append(f"não há mensagem {nome} à vista")
+            continue
+        folha = pg.locator("#cel-folha-mensagem")
+        if not folha.is_visible():
+            falhas.append(f"o toque na mensagem {nome} não abriu a folha dela")
+            continue
+        tem = pg.evaluate("""(() => { const f = document.getElementById('cel-folha-mensagem');
+            return { copiar: !!f.querySelector('[data-acao="copiar"]'), apagar: !!f.querySelector('[data-acao="apagar"]'),
+                     remover: /REMOVER/.test(f.querySelector('.cel-fora')?.textContent ?? '') }; })()""")
+        esperado = {"copiar": True, "apagar": nome == "própria", "remover": nome == "alheia"}
+        if tem != esperado:
+            falhas.append(f"a folha da mensagem {nome} tem {tem}, e não {esperado}")
+        if nome == "própria":
+            tocar(pg, "#cel-folha-mensagem [data-acao='copiar']")
+            copiado = pg.evaluate("window.__copiado ?? null")
+            if copiado != "UDP. tá escrito no README, duas linhas depois do comando":
+                falhas.append(f"COPIAR O TEXTO copiou {copiado!r}")
+            tocar(pg, f"{seletor} .corpo")
+            tocar(pg, "#cel-folha-mensagem [data-acao='apagar']")
+            pg.wait_for_timeout(200)
+            if not pg.evaluate("!document.getElementById('moderar').hidden"):
+                falhas.append("APAGAR A MINHA MENSAGEM não abriu a confirmação do desktop")
+            pg.evaluate("document.getElementById('moderar').hidden = true")
+        else:
+            pg.keyboard.press("Escape")
+        if folha.is_visible():
+            falhas.append(f"a folha da mensagem {nome} não fechou")
+
+    # O + abre a folha ANEXAR; as duas escolhas pedem o arquivo pelo caminho do
+    # desktop, e quem abre o seletor do navegador é a ponte da F4.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if not tocar(pg, ".cel-anexar"):
+        falhas.append("não há + à vista no compositor")
+    elif not pg.locator("#cel-folha-anexar").is_visible():
+        falhas.append("o + não abriu a folha ANEXAR")
+    else:
+        escolhas = pg.evaluate("[...document.querySelectorAll('#cel-folha-anexar [data-escolha]')].map((b) => b.dataset.escolha)")
+        if escolhas != ["midia", "arquivo"]:
+            falhas.append(f"a folha ANEXAR oferece {escolhas}, e não FOTO OU VÍDEO e ARQUIVO")
+        tocar(pg, "#cel-folha-anexar [data-escolha='arquivo']")
+        pg.wait_for_timeout(200)
+        if not feitas("escolher_arquivo"):
+            falhas.append("ARQUIVO não pediu o arquivo pelo caminho do desktop (escolher_arquivo)")
+
+    # A mensagem que falhou: a placa de alerta, com as duas saídas do desktop.
+    pg.evaluate("""(() => {
+        SEELE_RESPOSTAS.messages.push({ id: 6, channel: 1, author: 1, author_nickname: "rafa", at_seconds: 1756000700,
+            body: "alguém tem o link do mapa?", own: true, edited: false, attachment: null,
+            estado: { Recusada: "PermissionDenied" }, client_message_id: "c-1" });
+        SEELE_QUADRO.messages_revision += 1;
+    })()""")
+    esperar_quadro(pg)
+    placa = pg.evaluate("""(() => {
+        const p = document.querySelector('#lista-mensagens [data-envio="falhou"]');
+        if (!p) return null;
+        const r = p.getBoundingClientRect();
+        return { acoes: [...p.querySelectorAll('button[data-acao]')].map((b) => [b.dataset.acao, Math.round(b.getBoundingClientRect().height)]),
+                 fundo: getComputedStyle(p).backgroundColor,
+                 alerta: getComputedStyle(document.documentElement).getPropertyValue('--seele-vermelho-fraco').trim(),
+                 dentro: r.left >= 0 && r.right <= innerWidth + 0.5 };
+    })()""")
+    if placa is None:
+        falhas.append("a mensagem recusada não mostra a placa de alerta")
+    else:
+        if [a for a, _ in placa["acoes"]] != ["reenviar", "descartar"] or any(h < 44 for _, h in placa["acoes"]):
+            falhas.append(f"a placa da mensagem recusada tem {placa['acoes']}, e não TENTAR DE NOVO e DESISTIR de 44")
+        if not placa["dentro"]:
+            falhas.append("a placa da mensagem recusada passa da tela")
+    pg.locator("#lista-mensagens").evaluate("(l) => { l.scrollTop = l.scrollHeight; }")
+    pg.wait_for_timeout(200)
+    return falhas
+
+
+def aba_pessoas(pg: Page) -> list[str]:
+    """A aba PESSOAS (Tarefa 7): a lista do desktop, e a folha de cada pessoa."""
+    falhas = []
+    tocar(pg, "#cel-aba-pessoas")
+    pg.wait_for_timeout(200)
+    linhas = pg.evaluate("""(() => [...document.querySelectorAll('#lista-roster li.pessoa')].map((li) => {
+        const visivel = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        return { nome: li.querySelector('.pessoa-nome')?.textContent ?? '', altura: Math.round(li.getBoundingClientRect().height),
+                 numero: visivel(li.querySelector('.pessoa-sync-valor')), barra: visivel(li.querySelector('.barra')),
+                 palavra: visivel(li.querySelector('.pastilha')), volume: visivel(li.querySelector('input.volume')) };
+    }))()""")
+    if len(linhas) < 4:
+        falhas.append(f"a aba PESSOAS mostra {len(linhas)} pessoas, e não 4")
+    for l in linhas:
+        if l["altura"] < 56:
+            falhas.append(f"a linha de {l['nome']} tem {l['altura']} de altura, e não 56")
+        if not (l["numero"] and l["barra"] and l["palavra"]):
+            falhas.append(f"o sinal de {l['nome']} não tem número, barra e palavra: {l}")
+        if l["volume"]:
+            falhas.append(f"o volume de {l['nome']} aparece na linha (ele mora na folha da pessoa)")
+
+    def abrir(nome):
+        if not tocar(pg, f"#lista-roster li.pessoa:has(.pessoa-nome:text-is('{nome}'))"):
+            return None
+        pg.wait_for_timeout(150)
+        if not pg.locator("#cel-folha-pessoa").is_visible():
+            return None
+        return pg.evaluate("""(() => { const f = document.getElementById('cel-folha-pessoa');
+            return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.cel-folha-volume')?.textContent ?? '',
+                     moderar: /MODERAR/.test(f.querySelector('.cel-fora')?.textContent ?? ''),
+                     moderacaoDoDesktop: !document.getElementById('moderar').hidden }; })()""")
+
+    folha = abrir("juli")
+    if folha is None:
+        falhas.append("o toque em juli não abriu a folha da pessoa")
+    else:
+        if not folha["volume"] or "100%" not in folha["rotulo"]:
+            falhas.append(f"a folha de juli não mostra o volume com o número: {folha}")
+        if not folha["moderar"]:
+            falhas.append("com may_kick, a folha de juli não diz onde se modera")
+        if folha["moderacaoDoDesktop"]:
+            falhas.append("o toque abriu também a moderação do desktop")
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        pg.evaluate("""(() => { const v = document.querySelector('#cel-folha-pessoa input[type=range]');
+            v.value = '150'; v.dispatchEvent(new Event('input', { bubbles: true })); })()""")
+        pg.wait_for_timeout(200)
+        do_desktop = pg.evaluate("document.querySelector(\"#lista-roster input.volume[data-pessoa='juli']\")?.value ?? null")
+        volumes = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_volume').map(([, a]) => a)")
+        rotulo = pg.evaluate("document.querySelector('#cel-folha-pessoa .cel-folha-volume')?.textContent ?? ''")
+        if do_desktop != "150" or {"nickname": "juli", "percent": 150} not in volumes:
+            falhas.append(f"o volume da folha não chegou ao desktop: input {do_desktop}, set_volume {volumes}")
+        if "150%" not in rotulo:
+            falhas.append(f"o número do volume não acompanhou: {rotulo!r}")
+        pg.keyboard.press("Escape")
+
+    propria = abrir("rafa (você)")
+    if propria is None:
+        falhas.append("o toque em rafa não abriu a folha")
+    elif propria["volume"] or propria["moderar"]:
+        falhas.append(f"a folha de quem usa o aparelho tem volume ou moderar: {propria}")
+    pg.keyboard.press("Escape")
+
+    pg.evaluate("SEELE_QUADRO.may_kick = SEELE_QUADRO.may_ban = SEELE_QUADRO.may_move_person = false")
+    esperar_quadro(pg)
+    sem = abrir("vitor")
+    if sem is None:
+        falhas.append("o toque em vitor não abriu a folha")
+    elif sem["moderar"]:
+        falhas.append("sem nenhuma permissão de moderar, a folha ainda fala em moderar")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(150)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
+    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
+                         raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
+    "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
+    # O claro entra com a Tarefa 13: o azul da sala ocupada e o fósforo de
+    # quem fala são cores de estado, e a derivação delas a partir do tema é a
+    # função 17e da F3. Até lá, o claro reprova o «VOCÊ ESTÁ AQUI» a 2,6:1.
+    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "hostil"),
+                         raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "hostil"),
+                         raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
+    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
+                        raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
 }
 
 
@@ -393,9 +913,12 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pagina = montar(temporaria / rotulo, celular=True, marca="celular")
             ctx = navegador.new_context(
                 viewport={"width": aparelho["largura"], "height": aparelho["altura"]},
-                device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce",
+                device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce", locale="pt-BR",
             )
             pg = ctx.new_page()
+            # Cinco segundos, e não os trinta do Playwright: nesta casca nada
+            # demora tanto, e um caso que espera um nó que não vem diz isso logo.
+            pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
@@ -410,7 +933,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.wait_for_timeout(250)
             pg.screenshot(path=saida / f"{rotulo}.png", animations="disabled")
             if caso.medir:
-                m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"]])
+                m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"], caso.raiz])
                 m["nucleo"] = pg.evaluate(NUCLEO)
                 (saida / f"{rotulo}.json").write_text(json.dumps(m, ensure_ascii=False, indent=2))
                 motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil")
