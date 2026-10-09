@@ -2114,8 +2114,8 @@ impl Enlace {
     /// seguida — a thread da conexão da FFI faz isso na linha seguinte —
     /// derrubava junto o motor que ainda ia fechar a conexão, e o fechamento
     /// não saía: ver `Motor::despedir`. Agora ela espera a tarefa do motor
-    /// terminar, com teto de [`ESPERA_DO_MOTOR_NA_SAIDA`]; vencido o teto, a
-    /// tarefa é abortada e a linha sai no registro.
+    /// terminar, com teto de um segundo (`ESPERA_DO_MOTOR_NA_SAIDA`); vencido o
+    /// teto, a tarefa é abortada e a linha sai no registro.
     ///
     /// Pelo caminho normal, quando ela volta o `Encerrado` e tudo o que veio
     /// antes dele já estão na fila de [`Self::proximo`].
