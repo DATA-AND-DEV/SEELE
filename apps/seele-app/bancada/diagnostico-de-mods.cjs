@@ -626,6 +626,55 @@ async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
 }
 
 /**
+ * **A recusa pelo teto de bytes diz os números à aba** (T8 m1 da revisão ampla
+ * do Plano 1D). O MOD e o registro recebiam «N bytes somados aos M já
+ * montados passam do teto de T»; a anotação que a aba lê dizia só o teto, e
+ * quem abria a aba não sabia se a mídia era grande demais ou se as outras já
+ * tinham ocupado o lugar. Três formas, cada uma com o seu tamanho: a mídia
+ * (`montarMidia`), o fundo de uma caixa (`montarFundoDeMidia`) e o retrato
+ * (`montarRetrato`), na região de um MOD, cujo teto é de 10 MiB.
+ */
+async function aRecusaPeloTetoDeBytesDizOsNumeros(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  const MIB = 1024 * 1024;
+  const soma = await pagina.evaluate(async (mib) => {
+    const foto = () => {
+      const tela = document.createElement("canvas");
+      tela.width = tela.height = 8;
+      return tela.toDataURL();
+    };
+    const tamanhos = { "img/midia.png": 11 * mib, "img/fundo.png": 12 * mib, "img/retrato.png": 13 * mib };
+    testTable.midia_do_mod = (args) => Promise.resolve({ papel: "imagem", uri: foto(), bytes: tamanhos[args.caminho] });
+    desenharARegiaoDoMod({ id: "mod/t", hash: "mod-t" }, instancia("mod/t"), [
+      { forma: "midia", chave: "midia", fonte: "img/midia.png" },
+      { forma: "caixa", chave: "fundo", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+      { forma: "retrato", chave: "retrato", fonte: "img/retrato.png", inicial: "T" },
+    ]);
+    for (let volta = 0; volta < 20; volta += 1) {
+      const soma = midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t");
+      if (soma?.recusada === 3) return soma;
+      await new Promise((pronto) => setTimeout(pronto, 25));
+    }
+    return midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t") ?? null;
+  }, MIB);
+  const teto = 10 * MIB;
+  const esperados = [11, 12, 13].map((n) => `${n * MIB} bytes somados aos 0 já montados passam do teto de ${teto} bytes de mídia deste lugar`);
+  assert.equal(
+    soma?.recusada,
+    3,
+    `a mídia, o fundo e o retrato de 11, 12 e 13 MiB, numa região de 10, não foram os três recusados: ${JSON.stringify(soma)}`,
+  );
+  assert.deepEqual(
+    [...soma.motivos].sort(),
+    esperados,
+    "a recusa pelo teto de bytes chegou à aba sem os números — quanto a mídia tinha e quanto já estava montado —, "
+      + "e quem abre a aba não sabe se a mídia era grande demais ou se o lugar já estava cheio",
+  );
+  assert.deepEqual(erros, [], `a página lançou erro durante a recusa pelo teto de bytes: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
+/**
  * **«Não está de pé» só de quem não está carregado** (I-3 da revisão ampla do
  * Plano 1D). A disputa diz `ausente` quando o escolhido não tem candidata no
  * lugar, e a aba traduzia isso sempre por «não está de pé» — de um MOD de pé,
@@ -1705,6 +1754,7 @@ const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
   aRegiaoEAsPaginasDeCadaModAparecemNaAba,
+  aRecusaPeloTetoDeBytesDizOsNumeros,
   oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe,
   quemDesenhaOQueDizAEscolhaDestaMaquina,
   oModoDeDesenvolvedorContornaSemTomarNada,
