@@ -56,6 +56,13 @@
         ["ESCOLHER A SAÍDA DE SOM", "O navegador do celular não escolhe a saída: troque entre fone, Bluetooth e alto-falante pelo controle de som do celular."],
       ]],
     ],
+    comoAbre: "COMO ESTA PÁGINA ABRE",
+    comoAbreSub: "Como celular ou como computador, na próxima vez que ela abrir.",
+    abriuComoCelular: "Esta página abriu como celular.",
+    abrirComoComputador: "ABRIR COMO COMPUTADOR",
+    pelaTela: "PELO TAMANHO DA TELA",
+    valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
+    naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
     sobre: "SOBRE",
     sairDoServidor: "SAIR DO SERVIDOR",
     segurarParaFalar: "SEGURAR PARA FALAR",
@@ -181,6 +188,41 @@
         h("p", { text: frase }),
         comLink && h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: PALAVRAS.baixar })))))));
 
+  // ---------------------------------------------- como esta página abre
+  //
+  // A escolha da casca à mão (D-web-3): ela fica guardada neste navegador, e a
+  // ponte a lê na próxima carga, antes do critério do aparelho. Nada troca no
+  // meio da sessão: trocar de casca é abrir a página de novo.
+
+  const estadoDaEscolha = h("p", { class: "casca-estado", role: "status" });
+  const pelaTela = h("button", { class: "botao-fantasma", type: "button", "data-casca-escolhida": "auto", hidden: true,
+    onclick: () => escolherCasca(null) }, PALAVRAS.pelaTela);
+  function guardada() {
+    try {
+      return localStorage.getItem("seele.casca");
+    } catch {
+      return null;
+    }
+  }
+  function escolherCasca(casca) {
+    try {
+      if (casca === null) localStorage.removeItem("seele.casca");
+      else localStorage.setItem("seele.casca", casca);
+      estadoDaEscolha.textContent = PALAVRAS.valeNaProxima;
+    } catch {
+      estadoDaEscolha.textContent = PALAVRAS.naoGuardou;
+    }
+    pelaTela.hidden = guardada() === null;
+  }
+  pelaTela.hidden = guardada() === null;
+  const comoAbre = secaoNova("cel-secao-casca", PALAVRAS.comoAbre, PALAVRAS.comoAbreSub, "atualizar",
+    h("p", { class: "cel-folha-nota", text: PALAVRAS.abriuComoCelular }),
+    h("div", { class: "cel-folha-acoes" },
+      h("button", { class: "botao", type: "button", "data-casca-escolhida": "larga", onclick: () => escolherCasca("larga") },
+        PALAVRAS.abrirComoComputador),
+      pelaTela),
+    estadoDaEscolha);
+
   // --------------------------------------------------- a lista do celular
   //
   // As seções do desktop que o celular tem, na ordem do spec, com os nomes do
@@ -206,9 +248,10 @@
     conexao,
     doDesktop("secao-identidade"),
     fora,
-    h("li", {}, // Ações, e não seções: o `abrirSecao` do desktop passa por toda
+    comoAbre,
+    // Ações, e não seções: o `abrirSecao` do desktop passa por toda
     // `.server-secao` escondendo o painel dela, e estas não têm painel.
-    h("button", { class: "cel-ajustes-acao cel-sobre", type: "button", onclick: () => abrirAjuda() },
+    h("li", {}, h("button", { class: "cel-ajustes-acao cel-sobre", type: "button", onclick: () => abrirAjuda() },
       h("span", { class: "server-secao-icone" }, glifo("comando")),
       h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.sobre })))),
     h("li", {}, h("button", {

@@ -59,7 +59,12 @@ carga = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(carga)
 
 VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-MARCA = '<script>document.documentElement.dataset.casca = "{}";</script>\n'
+# A marca, como a ponte da F4 a escreve na carga (spec, §9.2): a escolha
+# guardada à mão primeiro (`localStorage["seele.casca"]`, num `try`), e o
+# critério do aparelho depois, que aqui é a casca que o caso pede.
+MARCA = ('<script>{{ let casca = "{}"; try {{ const escolhida = localStorage.getItem("seele.casca");'
+         ' if (escolhida === "celular" || escolhida === "larga") casca = escolhida; }} catch {{}}'
+         ' document.documentElement.dataset.casca = casca; }}</script>\n')
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1059,7 +1064,7 @@ def ajustes_medida(pg: Page) -> list[str]:
 
 
 ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "CONEXÃO", "IDENTIDADE",
-                    "O QUE O CELULAR NÃO FAZ", "SOBRE", "SAIR DO SERVIDOR"]
+                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "SOBRE", "SAIR DO SERVIDOR"]
 
 
 def aba_ajustes(pg: Page) -> list[str]:
@@ -1341,6 +1346,63 @@ def casca_larga(pg: Page) -> list[str]:
     return falhas
 
 
+def escolha_da_casca(pg: Page) -> list[str]:
+    """A escolha da casca à mão (Tarefa 18): ela grava a preferência, diz que
+    vale na próxima abertura, e não troca nada ao vivo."""
+    falhas = []
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    outra, botao = ("larga", "#cel-secao-casca") if marca == "celular" else ("celular", "#larga-secao-casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    else:
+        exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(500)
+    if not exigir_toque(pg, botao, falhas):
+        return falhas
+    pg.wait_for_timeout(200)
+    if not exigir_toque(pg, f"[data-casca-escolhida='{outra}']", falhas):
+        return falhas
+    pg.wait_for_timeout(200)
+    visto = pg.evaluate("""(() => ({ marca: document.documentElement.dataset.casca,
+        guardada: localStorage.getItem('seele.casca'),
+        frase: document.querySelector('.casca-estado')?.textContent ?? '' }))()""")
+    if visto["guardada"] != outra:
+        falhas.append(f"a escolha guardou {visto['guardada']!r}, e não {outra!r}")
+    if "próxima vez" not in visto["frase"] or "sai da sessão" not in visto["frase"]:
+        falhas.append(f"a escolha não diz quando vale: {visto['frase']!r}")
+    if visto["marca"] != marca:
+        falhas.append(f"a casca trocou ao vivo, no meio da sessão: {marca} → {visto['marca']}")
+    pg.reload()
+    pg.wait_for_function("typeof conectar === 'function'")
+    depois = pg.evaluate("document.documentElement.dataset.casca")
+    if depois != outra:
+        falhas.append(f"aberta de novo, a página veio como {depois}, e não como a escolhida ({outra})")
+    return falhas
+
+
+def escolha_sem_armazenamento(pg: Page) -> list[str]:
+    """Sem armazenamento (navegação privada, cota cheia), a escolha diz que não
+    pôde guardar, e nada muda."""
+    falhas = []
+    # Só a chave da escolha é recusada: o desktop também guarda coisas no
+    # navegador, e recusar tudo quebraria ele, e não só a escolha.
+    pg.evaluate("""(() => { const original = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (chave, valor) {
+            if (chave === 'seele.casca') throw new DOMException('cheio', 'QuotaExceededError');
+            return original.call(this, chave, valor);
+        }; })()""")
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    exigir_toque(pg, "#cel-secao-casca", falhas)
+    pg.wait_for_timeout(200)
+    exigir_toque(pg, "[data-casca-escolhida='larga']", falhas)
+    pg.wait_for_timeout(200)
+    frase = pg.evaluate("document.querySelector('.casca-estado')?.textContent ?? ''")
+    if "não deixou guardar" not in frase:
+        falhas.append(f"sem armazenamento, a escolha não diz que não guardou: {frase!r}")
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -1375,6 +1437,10 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
+    "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
+    "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
+    "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
 }
 
 

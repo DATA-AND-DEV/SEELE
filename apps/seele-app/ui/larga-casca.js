@@ -27,6 +27,13 @@
     versoes: "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE.",
     malha: "No navegador, a tela de quem transmite vem sempre pelo servidor, e este computador não a repassa a ninguém.",
     tecla: "No navegador, a tecla de falar só vale com esta página em foco: o navegador não tem atalho para o computador inteiro.",
+    comoAbre: "COMO ESTA PÁGINA ABRE",
+    comoAbreSub: "Como computador ou como celular, na próxima vez que ela abrir.",
+    abriuComoComputador: "Esta página abriu como computador.",
+    abrirComoCelular: "ABRIR COMO CELULAR",
+    pelaTela: "PELO TAMANHO DA TELA",
+    valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
+    naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
     foraTitulo: "O QUE O NAVEGADOR NÃO FAZ",
     foraSub: "O que fica no app do SEELE, instalado num computador.",
     grupo: "SÓ NO APP DO SEELE",
@@ -95,6 +102,51 @@
   }, h("span", { class: "server-secao-icone" }, glifo("desligar")),
     h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.foraTitulo })));
   document.getElementById("secao-atualizacao").closest("ul").append(h("li", {}, botao));
+
+  // ---------------------------------------------- como esta página abre
+  //
+  // A escolha da casca à mão (D-web-3): ela fica guardada neste navegador, e a
+  // ponte a lê na próxima carga, antes do critério do aparelho. Nada troca no
+  // meio da sessão: trocar de casca é abrir a página de novo.
+
+  const estadoDaEscolha = h("p", { class: "casca-estado nota", role: "status" });
+  const pelaTela = h("button", { class: "botao-fantasma", type: "button", "data-casca-escolhida": "auto", hidden: true,
+    onclick: () => escolherCasca(null) }, PALAVRAS.pelaTela);
+  function guardada() {
+    try {
+      return localStorage.getItem("seele.casca");
+    } catch {
+      return null;
+    }
+  }
+  function escolherCasca(casca) {
+    try {
+      if (casca === null) localStorage.removeItem("seele.casca");
+      else localStorage.setItem("seele.casca", casca);
+      estadoDaEscolha.textContent = PALAVRAS.valeNaProxima;
+    } catch {
+      estadoDaEscolha.textContent = PALAVRAS.naoGuardou;
+    }
+    pelaTela.hidden = guardada() === null;
+  }
+  pelaTela.hidden = guardada() === null;
+  document.getElementById("tela-server").querySelector(".server-painel").append(
+    h("section", { id: "larga-painel-casca", class: "server-painel-secao", hidden: true },
+      h("p", { class: "larga-frase", text: PALAVRAS.abriuComoComputador }),
+      h("button", { class: "botao", type: "button", "data-casca-escolhida": "celular", onclick: () => escolherCasca("celular") },
+        PALAVRAS.abrirComoCelular),
+      pelaTela,
+      estadoDaEscolha));
+  document.getElementById("secao-atualizacao").closest("ul").append(h("li", {}, h("button", {
+    id: "larga-secao-casca",
+    class: "server-secao",
+    type: "button",
+    "data-painel": "larga-painel-casca",
+    "data-titulo": PALAVRAS.comoAbre,
+    "data-sub": PALAVRAS.comoAbreSub,
+    onclick: () => abrirSecao("larga-secao-casca"),
+  }, h("span", { class: "server-secao-icone" }, glifo("atualizar")),
+    h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.comoAbre })))));
 
   // ------------------------------------------------------- sair da página
 
