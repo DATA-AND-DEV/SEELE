@@ -819,6 +819,9 @@ mod tests {
             .without_time()
             .finish();
 
+        // Sem ele, a linha pode sumir quando a bateria roda em paralelo
+        // (pendência 56): ver `rastro_de_teste::segundo_despachante`.
+        crate::rastro_de_teste::segundo_despachante();
         let liberado = tracing::subscriber::with_default(subscriber, || {
             voice_room_liberado(&persistence, VoiceRoomId(1), None)
         });

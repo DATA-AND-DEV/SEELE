@@ -42,6 +42,8 @@ pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;
+#[cfg(test)]
+pub(crate) mod rastro_de_teste;
 pub mod recepcao;
 pub mod server;
 pub mod session;
@@ -672,6 +674,7 @@ impl Daemon {
             esperas: Arc::new(std::sync::Mutex::new(mods::volume::Esperas::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao,
             recepcao,
         });
@@ -719,6 +722,7 @@ impl Daemon {
                     Arc::clone(&server.persistence),
                     despachante,
                     pasta_dos_mods.clone(),
+                    Arc::clone(&server.avisador),
                 ));
             }
         }

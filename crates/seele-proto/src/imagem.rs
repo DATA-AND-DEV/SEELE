@@ -103,6 +103,25 @@ pub fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
     None
 }
 
+/// **Um formato que o produto reconhece e não aceita**, pelo nome, ou nada.
+///
+/// Existe para a recusa dizer o que a pessoa escolheu (rascunho da API 6, §7.1):
+/// as Fotos do iPhone entregam HEIC, e «formato desconhecido» mandaria procurar
+/// o defeito num arquivo que não tem defeito nenhum. **Não é um quinto formato
+/// de [`sniff`]**: o HEIC continua recusado, só que com o nome dele.
+///
+/// O HEIC é um contêiner ISO: a caixa `ftyp` vem primeiro, com a marca principal
+/// logo depois. `heic` e `heix` são o HEIC das câmeras; `mif1` é o HEIF genérico
+/// que o mesmo arquivo declara quando a marca principal é a da imagem.
+#[must_use]
+pub fn reconhecido_e_nao_aceito(bytes: &[u8]) -> Option<&'static str> {
+    let marca = bytes.get(8..12)?;
+    if bytes.get(4..8) == Some(b"ftyp") && matches!(marca, b"heic" | b"heix" | b"mif1") {
+        return Some("heic");
+    }
+    None
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -133,6 +152,46 @@ mod testes {
                 sniff(inteiro.get(..SNIFF_LEN).unwrap_or(inteiro)),
                 Some(formato),
                 "{formato:?} não foi reconhecido nos {SNIFF_LEN} primeiros bytes"
+            );
+        }
+    }
+
+    /// Um HEIC de verdade, de 8 × 8, feito pelo `sips` do macOS a partir de um
+    /// PNG de uma cor: é o formato que as Fotos do iPhone entregam.
+    const HEIC: &[u8] = include_bytes!("../tests/vetores/heic-8x8.heic");
+
+    /// **O HEIC é reconhecido para ser nomeado, e não para ser aceito**
+    /// (rascunho da API 6, §7.1; o bloqueio G do PERFIS). O MOD recebe
+    /// `tipo-recusado` com `detectado: 'heic'` e diz «HEIC não é aceito», em vez
+    /// de um «formato desconhecido» que manda a pessoa procurar o defeito no
+    /// arquivo.
+    #[test]
+    fn o_heic_e_reconhecido_e_nao_aceito() {
+        assert_eq!(reconhecido_e_nao_aceito(HEIC), Some("heic"));
+        assert_eq!(sniff(HEIC), None, "o HEIC passou a ser aceito como imagem");
+    }
+
+    #[test]
+    fn o_que_e_aceito_ou_desconhecido_nao_e_nomeado_como_recusado() {
+        for aceito in [
+            &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0][..],
+            &[0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0],
+            b"GIF89a______",
+            b"RIFF....WEBP",
+        ] {
+            assert_eq!(reconhecido_e_nao_aceito(aceito), None);
+        }
+        for outro in [
+            &b""[..],
+            b"\0\0\0\x18ftyp",
+            b"\0\0\0\x18ftypmp42\0\0\0\0",
+            b"\0\0\0\x18ftypisom\0\0\0\0",
+            b"%PDF-1.7",
+        ] {
+            assert_eq!(
+                reconhecido_e_nao_aceito(outro),
+                None,
+                "{outro:?} virou HEIC"
             );
         }
     }

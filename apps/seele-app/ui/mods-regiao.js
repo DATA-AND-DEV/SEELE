@@ -89,9 +89,20 @@ const LIMITES_DA_REGIAO = Object.freeze({
    * registro.
    *
    * **O teto vale para o que fica de pé.** A decodificação em si já aloca o som
-   * inteiro uma vez, antes de a conta poder ser feita — não há como saber a
-   * duração sem decodificar —, e o som acima do teto é largado logo em seguida,
-   * para o coletor levar. Ver `carregarSom`.
+   * inteiro uma vez, antes de a conta poder ser feita, e o som acima do teto é
+   * largado logo em seguida, para o coletor levar. Ver `carregarSom`.
+   *
+   * **O pico é cortado antes, no Rust, quando o cabeçalho permite** (P49-7a).
+   * O Rust lê do cabeçalho um piso do que o som ocupa decodificado — exato no
+   * WAV, pela última página no Ogg, pelos quadros no MP3 — e recusa, antes de
+   * servir, o som cujo piso sozinho já passa deste teto
+   * (`som-grande-demais-decodificado`, com os números): ele não caberia em
+   * lugar nenhum, e a janela nem chega a decodificá-lo. A recusa é dita como
+   * este teto (`recusarPeloTetoDoSom`). Um som cujo cabeçalho não diz o
+   * bastante segue como antes, decodificado e conferido aqui. O Rust repete
+   * este número e `TAXA_DA_DECODIFICACAO`, e um guarda de `main.rs`
+   * (`os_numeros_do_som_decodificado_sao_os_da_janela`) falha quando eles
+   * divergem.
    */
   bytesDeSomDecodificado: 64 * 1024 * 1024,
 });
@@ -456,6 +467,50 @@ function motivoDaFalha(falha) {
   if (typeof falha?.Recusado?.motivo === "string") return falha.Recusado.motivo;
   if (typeof falha?.message === "string") return falha.message;
   return String(falha);
+}
+
+/**
+ * O nome com que o Rust recusa o som que, decodificado, passa do teto do som
+ * (`SOM_GRANDE_DEMAIS_DECODIFICADO`, em `main.rs`). Os números vêm depois dele,
+ * no mesmo `motivo`.
+ */
+const SOM_GRANDE_DEMAIS_DECODIFICADO = "som-grande-demais-decodificado";
+
+/**
+ * O motivo da recusa do Rust ao som grande demais decodificado, ou `null`.
+ *
+ * **É o teto do som, e não uma falha de carga** (P49-7a): o Rust leu um piso
+ * do cabeçalho e recusou antes de servir o som que a janela recusaria depois
+ * de decodificá-lo — e de alocá-lo inteiro. Só a recusa do Rust conta, pelo
+ * formato com que ela chega: um `Error` da própria janela com as mesmas
+ * palavras não é ela.
+ */
+function recusaDoSomGrandeDemais(falha) {
+  const motivo = falha?.Recusado?.motivo;
+  return typeof motivo === "string" && motivo.startsWith(SOM_GRANDE_DEMAIS_DECODIFICADO) ? motivo : null;
+}
+
+/**
+ * **A mídia como a recebe quem só mostra imagem** (M5 da revisão do K4).
+ *
+ * O som do servidor do MOD que o Rust recusa pelo teto do som chega
+ * rejeitado, antes de o papel chegar à janela. Para quem toca, é o teto do som
+ * (`recusarPeloTetoDoSom`). Para o fundo, o retrato, o fundo de uma tela e o
+ * avatar contribuído (`avatarContribuido`, em `base.js`), que só mostram
+ * imagem, ele continua sendo o que era antes da recusa — um som —, e o
+ * «precisa ser imagem» de cada um vem antes da recusa do som: o que o MOD
+ * ouve de cada lugar é contrato da API, e a recusa nova não o muda.
+ *
+ * O som chega a eles só com o papel, que é tudo o que cada um lê antes de
+ * recusar o que não é imagem.
+ *
+ * @param {Promise<object> | null} vindo O pedido da mídia, ou nada.
+ * @returns {Promise<object> | null | undefined}
+ */
+function soImagem(vindo) {
+  return vindo?.catch((falha) => (recusaDoSomGrandeDemais(falha) === null
+    ? Promise.reject(falha)
+    : { papel: "som" }));
 }
 
 /**
@@ -1228,12 +1283,17 @@ class RegiaoDeMod {
           });
         })
         .catch((falha) => {
+          // Na API 6, a recusa pelo nome, com os campos dela (`detectado:
+          // 'heic'`); até a 5, o `porque` de antes, com a frase de tela.
+          const recusa = this.dono.recusaParaOMod?.(falha) ?? {
+            porque: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
+          };
           this.dono.falar({
             nome: "arquivo",
             chave: plano.no.chave ?? "",
             arquivo: null,
             resultado: "falhou",
-            porque: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
+            ...recusa,
           });
         })
         .finally(() => {
@@ -1629,9 +1689,11 @@ class RegiaoDeMod {
     });
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     const fonte = plano.no.fundoDeMidia;
-    const vindo = fonte.doServidor
+    // O fundo só mostra imagem: o som recusado pelo teto chega como o som que
+    // era (`soImagem`).
+    const vindo = soImagem(fonte.doServidor
       ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
-      : this.dono.carregarMidia(fonte.fonte);
+      : this.dono.carregarMidia(fonte.fonte));
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
@@ -1745,7 +1807,9 @@ class RegiaoDeMod {
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
-    const vindo = doServidor
+    // O retrato só mostra imagem: o som recusado pelo teto chega como o som
+    // que era (`soImagem`).
+    const vindo = soImagem(doServidor
       ? this.dono.carregarMidiaDoServidor(
           Number(doServidor.canal) || 0,
           doServidor.pedido ?? {},
@@ -1753,7 +1817,7 @@ class RegiaoDeMod {
         )
       : caminho
         ? this.dono.carregarMidia(caminho)
-        : null;
+        : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
@@ -2163,7 +2227,9 @@ class RegiaoDeMod {
       return;
     }
 
-    const vindo = declarado.doServidor
+    // O fundo da tela só mostra imagem: o som recusado pelo teto chega como o
+    // som que era (`soImagem`).
+    const vindo = soImagem(declarado.doServidor
       ? this.dono.carregarMidiaDoServidor(
           Number(declarado.doServidor.canal) || 0,
           declarado.doServidor.pedido ?? {},
@@ -2173,7 +2239,7 @@ class RegiaoDeMod {
         )
       : typeof declarado.fonte === "string" && declarado.fonte
         ? this.dono.carregarMidia(declarado.fonte)
-        : null;
+        : null);
     // Um fundo sem origem não é mídia nenhuma: a anotação do pedido anterior
     // não pode ficar valendo por ele.
     if (!vindo) {
@@ -2510,6 +2576,13 @@ class RegiaoDeMod {
       estado.ouvintes.push(["error", naoAbriu]);
     }).catch((falha) => {
       if (estado.cancelado || this.solta) return;
+      // O som do servidor que o Rust recusou pelo teto do som, antes de
+      // servi-lo: é o teto, e não uma falha de carga (`carregarSom`).
+      const peloTeto = recusaDoSomGrandeDemais(falha);
+      if (peloTeto !== null) {
+        this.recusarPeloTetoDoSom(elem, plano, estado, peloTeto);
+        return;
+      }
       elem.dataset.estado = "falhou";
       const porque = motivoDaFalha(falha);
       this.anotarMidia(elem, "recusada", porque);
@@ -2533,17 +2606,25 @@ class RegiaoDeMod {
    * `midia_em_bytes` já devolveu — lido como texto, nunca entregue a um
    * elemento de mídia. Quem os pede e decodifica é `carregarSom`.
    *
-   * **O som do pacote atravessa duas vezes**, até um plano Rust mudar o
-   * `midia_do_mod` para o papel `som`: em base64 pelo `midia_do_mod` (que
-   * `montarMidia` chama para saber o papel e os bytes a contar) e cru pelo
-   * `som_do_mod`. Nada se perde; só se lê o arquivo duas vezes.
+   * **O som do pacote atravessa a ponte uma vez só**, cru, pelo `som_do_mod`
+   * (P49-7b). O `midia_do_mod`, que `montarMidia` chama para saber o papel e
+   * os bytes a contar, devolve para um som só esses dois, sem `uri`: a
+   * origem do pacote é o caminho, e nunca o `data:`.
    *
    * **O som decodificado tem teto**, somado por bolso
    * (`LIMITES_DA_REGIAO.bytesDeSomDecodificado`, e o do cartão): o WebAudio
    * guarda o som inteiro em float32 desde que o decodifica, e o teto de bytes
    * de `montarMidia` conta o arquivo comprimido. Acima dele, o som é recusado
    * com as palavras daquele teto — figura «cheia», `recusada` ao MOD com os
-   * números —, e não vira tocador.
+   * números —, e não vira tocador. **O Rust corta antes o som que sozinho já
+   * passaria dele** (P49-7a): os bytes, ou a resposta do servidor, chegam
+   * recusados com `som-grande-demais-decodificado`, e a recusa é a mesma do
+   * teto, e não uma falha de carga (`recusarPeloTetoDoSom`). O som do pacote
+   * chega recusado na montagem, fora de uma contribuição, e no pedido de
+   * tocar, numa contribuição; o do servidor, na montagem — numa contribuição,
+   * uma vez por destino —, e também no pedido de tocar, quando o destino que
+   * tomou a marca sem o `data:` pede o som de novo ao servidor e o arquivo
+   * mudou nesse meio tempo.
    *
    * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
    * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
@@ -2795,6 +2876,15 @@ class RegiaoDeMod {
         bytes = bufferDaUri(midia.uri);
       }
     } catch (falha) {
+      // **O Rust recusou pelo teto do som, antes do pico** (P49-7a): é o
+      // mesmo não do teto conferido abaixo, depois de decodificar. Na
+      // montagem, para o som de uma região; no pedido de tocar, para o de uma
+      // contribuição.
+      const peloTeto = recusaDoSomGrandeDemais(falha);
+      if (peloTeto !== null) {
+        if (deAlguem()) this.recusarPeloTetoDoSom(elem, plano, estado, peloTeto);
+        return;
+      }
       falhou(motivoDaFalha(falha));
       return;
     }
@@ -2826,14 +2916,12 @@ class RegiaoDeMod {
     const { contaDoSom, tetoDoSom } = estado.bolso;
     const ocupa = som.length * som.numberOfChannels * 4;
     if (this[contaDoSom] + ocupa > tetoDoSom) {
-      const porque = `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`;
-      const tetoDaRecusa = `bytes de som:${tetoDoSom}`;
-      const recusado = this.somDaMidia.get(elem);
-      if (recusado) recusado.recusa = { figura: "cheia", motivo: porque, teto: tetoDaRecusa };
-      elem.dataset.estado = "cheia";
-      this.anotarMidia(elem, "recusada", porque, undefined, tetoDaRecusa);
-      this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
-      this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
+      this.recusarPeloTetoDoSom(
+        elem,
+        plano,
+        estado,
+        `o som decodificado ocupa ${ocupa} bytes, e com os ${this[contaDoSom]} já de pé passa do teto de ${tetoDoSom} bytes de som deste lugar`,
+      );
       return;
     }
     estado.bytesDoSom = ocupa;
@@ -2919,6 +3007,46 @@ class RegiaoDeMod {
     this.anotarMidia(elem, "recusada", motivo);
     this.dono.falar({ nome: "midia", chave, estado: "falhou", porque: motivo });
     this.dizerRecusaDeMidia(chave, `falhou ao carregar: ${motivo}`);
+  }
+
+  /**
+   * O som recusado pelo teto do som decodificado, **por um caminho só**, com
+   * as palavras do teto de bytes de `montarMidia`: figura «cheia», `recusada`
+   * ao MOD com os números no `porque`, a anotação com a chave do teto — que a
+   * aba DIAGNÓSTICO junta numa vaga só (`contarAMidia`, em `base.js`) — e
+   * «recusada» no registro.
+   *
+   * Duas recusas chegam aqui, e são o mesmo não: a da janela, quando o som
+   * decodificado não cabe no que o lugar ainda tem (`carregarSom`); e a do
+   * Rust, antes de decodificar, quando o piso do cabeçalho já passa do teto
+   * (`recusaDoSomGrandeDemais`). A do Rust chega em momentos diferentes
+   * conforme a origem:
+   * - **o som do pacote** chega recusado nos bytes (`bytesDoSom`, em
+   *   `carregarSom`): na montagem, fora de uma contribuição, e no pedido de
+   *   tocar, numa contribuição — uma vez, no destino que segura os sons dela;
+   * - **o som do servidor do MOD** chega recusado na resposta
+   *   (`montarMidia`), na montagem — numa contribuição, **uma vez por
+   *   destino**, como o `falhou` de antes chegava: cada destino pede a mídia
+   *   ao servidor, e o MOD ouve `recusada` de cada um, e o registro ganha uma
+   *   linha por destino. E pode chegar também no pedido de tocar: o destino
+   *   que toma a marca sem ter o `data:` pede o som de novo ao servidor
+   *   (`carregarSom`), e, se o servidor trocou o arquivo nesse meio tempo, a
+   *   recusa vem ali.
+   *
+   * A recusa fica guardada no som (`recusa`), e o destino que herda o som de
+   * uma contribuição a herda também (`herdarOSom`).
+   *
+   * Quem chama confere antes se o som ainda é de alguém.
+   */
+  recusarPeloTetoDoSom(elem, plano, estado, porque) {
+    const chave = plano.no.chave ?? "";
+    const teto = `bytes de som:${estado.bolso.tetoDoSom}`;
+    const som = this.somDaMidia.get(elem);
+    if (som) som.recusa = { figura: "cheia", motivo: porque, teto };
+    elem.dataset.estado = "cheia";
+    this.anotarMidia(elem, "recusada", porque, undefined, teto);
+    this.dono.falar({ nome: "midia", chave, estado: "recusada", porque });
+    this.dizerRecusaDeMidia(chave, `recusada: ${porque}`);
   }
 
   /**

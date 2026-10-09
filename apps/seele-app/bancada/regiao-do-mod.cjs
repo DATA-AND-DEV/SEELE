@@ -1155,7 +1155,7 @@ async function sairDuranteOCarregamentoNaoMonta() {
 
   // A pessoa sai **enquanto** os bytes vêm.
   regiao.soltar();
-  soltar({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 2 });
+  soltar({ papel: "som", bytes: 2 });
   await volta();
   await volta();
 
@@ -1245,7 +1245,7 @@ async function sairDuranteAReproducaoPara() {
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 1024 }),
+    Promise.resolve({ papel: "som", bytes: 1024 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
@@ -1283,7 +1283,7 @@ async function tirarUmNoSoltaOQueEleSegurava() {
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 512 }),
+    Promise.resolve({ papel: "som", bytes: 512 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -1400,7 +1400,7 @@ async function osTetosContemEARecusaEDita() {
     const quadros = Math.floor((tetoDoSom * 0.6) / 8);
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
-    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
     const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
     const som = (chave) => ({ forma: "midia", chave, fonte: `som/${chave}.ogg`, tocando: true });
     r.aplicar([som("s1"), som("s2")]);
@@ -1465,7 +1465,7 @@ async function osTetosContemEARecusaEDita() {
     const quadros = Math.floor(tetoDoCartao / 8) + 1;
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
-    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
     const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
     r.declararCartoes({ 7: [{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }] });
     await assentar();
@@ -1525,7 +1525,7 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
   const caso = "tudo chega à instância";
   const b = bancada();
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }),
+    Promise.resolve({ papel: "som", bytes: 8 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -1640,6 +1640,42 @@ async function aFinalidadeDoArquivoNaoPartePar() {
       + `\`serde_json\` recusa o pedido inteiro, e o seletor não abre: ${JSON.stringify(pedida?.slice(-3))}`,
   );
   r.soltar();
+}
+
+/**
+ * **A recusa do seletor chega ao MOD da API 6 pelo nome** (rascunho da API 6,
+ * §7.1; o bloqueio G do PERFIS). Um HEIC das Fotos volta do Rust como
+ * `tipo-recusado:heic`, e o evento `arquivo` leva `erro: 'tipo-recusado'` e
+ * `detectado: 'heic'` — e não a frase de tela, que o MOD não tem como ler. Até
+ * a API 5 o dono não dá nome (`recusaParaOMod` devolve `null`), e o evento
+ * continua com o `porque` de antes.
+ */
+async function aRecusaDoSeletorChegaPeloNome() {
+  const caso = "a recusa do seletor pelo nome";
+  const recusaDoRust = { Recusado: { motivo: "tipo-recusado:heic" } };
+  for (const [api, recusa] of [
+    [6, () => ({ erro: "tipo-recusado", detectado: "heic" })],
+    [5, () => null],
+  ]) {
+    const b = bancada();
+    const d = dono(b);
+    d.api.escolherArquivo = () => Promise.reject(recusaDoRust);
+    d.api.recusaParaOMod = recusa;
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    r.aplicar([{ forma: "arquivo", chave: "retrato", dentro: "ENVIAR" }]);
+    acharTag(r.raiz, "button")?.disparar("click");
+    await volta();
+    const dito = d.ditos.find((e) => e.nome === "arquivo");
+    if (api === 6) {
+      confere(caso, dito?.resultado === "falhou" && dito?.erro === "tipo-recusado"
+        && dito?.detectado === "heic" && !("porque" in dito),
+      `o MOD da API 6 não recebeu a recusa pelo nome: ${JSON.stringify(dito)}`);
+    } else {
+      confere(caso, dito?.resultado === "falhou" && typeof dito?.porque === "string" && !("erro" in dito),
+        `o MOD da API 5 deixou de receber o \`porque\` de antes: ${JSON.stringify(dito)}`);
+    }
+    r.soltar();
+  }
 }
 
 function oRodapeEReconciliadoSemMoverOBotao() {
@@ -2343,7 +2379,7 @@ async function oFundoEORetratoTambemDizemOEstado() {
   const caso = "fundo e retrato anotados";
   const b = bancada();
   const d = dono(b, (caminho) => Promise.resolve(caminho === "som/a.wav"
-    ? { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }
+    ? { papel: "som", bytes: 8 }
     : { uri: "data:image/png;base64,AA", papel: "imagem", bytes: 8 }));
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -2389,7 +2425,7 @@ async function oFundoEORetratoTambemDizemOEstado() {
   const recusas = {
     "o fundo que não é imagem": {
       no: fundo,
-      midia: () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }),
+      midia: () => Promise.resolve({ papel: "som", bytes: 8 }),
       motivo: /imagem/,
     },
     "o fundo acima do teto": { no: fundo, midia: (bb) => Promise.resolve(imagem(bb.PERFIS.regiao.bytesDeMidia + 1)), motivo: /teto/ },
@@ -2969,9 +3005,11 @@ async function oSomTocaPorWebAudioENuncaPorUmElementoDeMidia() {
   const caso = "o som toca por WebAudio";
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
-  const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 }),
-  );
+  // **Como `midia_do_mod` responde a um som do pacote** desde o P49-7b: o
+  // papel e os bytes a contar, sem `uri`. O som atravessa a ponte uma vez só,
+  // cru, por `bytesDoSom`; uma região que voltasse a ler o `uri` do som do
+  // pacote ficaria aqui sem o que decodificar.
+  const d = dono(b, () => Promise.resolve({ papel: "som", bytes: 12 }));
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   const declaracao = [{ forma: "midia", chave: "m", fonte: "som/a.wav", descricao: "Sino" }];
   regiao.aplicar(declaracao);
@@ -5427,6 +5465,226 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 19. O som grande demais decodificado, recusado pelo Rust, é o teto do som.
+// ---------------------------------------------------------------------------
+
+/**
+ * P49-7a. O Rust lê um piso do cabeçalho e recusa, antes de servir, o som que
+ * decodificado passa do teto do som — `{ Recusado: { motivo:
+ * "som-grande-demais-decodificado: …" } }`, com os números. É o mesmo não do
+ * teto que a janela confere depois de decodificar, só que antes do pico: a
+ * figura fica «cheia», o MOD ouve `recusada` com os números no `porque` — e
+ * não `falhou`, que é falha de carga —, o registro diz «recusada», e a
+ * anotação leva a chave do teto do som.
+ *
+ * Nos três lugares em que a recusa chega à janela: os bytes de um som de
+ * região, na montagem (`bytesDoSom`); a resposta do servidor do MOD, também na
+ * montagem (`carregarMidiaDoServidor`); e, numa contribuição, que só decodifica
+ * quando o MOD manda tocar (P49-7c), o pedido de tocar.
+ *
+ * **E a aba DIAGNÓSTICO a junta às outras do mesmo teto** (M6 da revisão do
+ * K3): com a regra de verdade, `contarAMidia` recortada de `base.js`, duas
+ * recusas do Rust e uma do teto da janela, na mesma região, ocupam uma vaga.
+ */
+async function oSomGrandeDemaisDecodificadoEOTetoDoSom() {
+  const caso = "o som grande demais decodificado é o teto do som";
+  const teto = bancada().LIMITES.bytesDeSomDecodificado;
+  const motivo = "som-grande-demais-decodificado: decodificado a 48000 Hz, o som ocupa ao menos "
+    + `251657180 bytes, acima do teto de ${teto} bytes de som`;
+  const recusaDoRust = () => Promise.reject({ Recusado: { motivo } });
+  const somDoPacote = () => Promise.resolve({ papel: "som", bytes: 12 });
+  const comoOTeto = (onde, r, d, chave, figura) => {
+    const ditos = d.ditos.filter((e) => e.nome === "midia" && e.chave === chave);
+    confere(
+      onde,
+      figura?.dataset.estado === "cheia",
+      `a figura do som que o Rust recusou pelo teto diz «${figura?.dataset.estado}», e não «cheia»`,
+    );
+    confere(
+      onde,
+      ditos.some((e) => e.estado === "recusada" && String(e.porque ?? "").includes(motivo))
+        && !ditos.some((e) => e.estado === "falhou"),
+      "o MOD não ouviu `recusada` com os números no `porque`, ou ouviu `falhou` — a recusa do teto "
+        + `virou falha de carga, e o MOD a trataria como um arquivo que sumiu: ${JSON.stringify(ditos)}`,
+    );
+    confere(
+      onde,
+      d.anotadas.some((t) => t.includes(`«${chave}» recusada:`) && t.includes("som-grande-demais-decodificado")),
+      `o registro não diz o som recusado pelo teto como «recusada»: ${JSON.stringify(d.anotadas)}`,
+    );
+    const anotadas = r.midiasAnotadas().filter((a) => a.situacao === "recusada");
+    confere(
+      onde,
+      anotadas.length === 1 && anotadas[0].teto === `bytes de som:${teto}` && anotadas[0].motivo.includes("som-grande-demais-decodificado"),
+      "a anotação do som recusado pelo teto não leva a chave do teto do som, e a aba DIAGNÓSTICO a "
+        + `conta como um motivo à parte: ${JSON.stringify(r.midiasAnotadas())}`,
+    );
+  };
+
+  // Os bytes de um som de região, na montagem.
+  {
+    const Audio = audioDeMentira();
+    const b = bancada({ audio: Audio });
+    const d = dono(b, somDoPacote);
+    d.api.bytesDoSom = recusaDoRust;
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    r.aplicar([{ forma: "midia", chave: "trilha", fonte: "som/trilha.ogg", tocando: true }]);
+    await assentar();
+    comoOTeto(`${caso} · o som de uma região`, r, d, "trilha", r.raiz.children[0]);
+    confere(
+      `${caso} · o som de uma região`,
+      Audio.decodificados.length === 0 && acharTag(r.raiz.children[0], "button") === null,
+      `o som recusado pelo Rust foi decodificado, ou ganhou botão: ${JSON.stringify(Audio.decodificados)}`,
+    );
+    r.soltar();
+  }
+
+  // A resposta do servidor do MOD, na montagem.
+  {
+    const b = bancada({ audio: audioDeMentira() });
+    const d = dono(b, recusaDoRust);
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    r.aplicar([{ forma: "midia", chave: "vinheta", doServidor: { canal: 1, pedido: { op: "som" } } }]);
+    await assentar();
+    comoOTeto(`${caso} · o som do servidor`, r, d, "vinheta", r.raiz.children[0]);
+    r.soltar();
+  }
+
+  // Numa contribuição, no pedido de tocar: na montagem, nada.
+  {
+    const onde = `${caso} · a contribuição, no pedido de tocar`;
+    const b = bancada({ audio: audioDeMentira() });
+    const d = dono(b, somDoPacote);
+    d.api.bytesDoSom = recusaDoRust;
+    const sonsDaContribuicao = { tomados: false };
+    const sino = (tocando) => [{ forma: "midia", chave: "sino", fonte: "som/sino.ogg", tocando }];
+    const destinos = ["1", "2"].map(() => {
+      const r = new b.RegiaoDeMod("a/b", d.api, b.raiz(), b.PERFIS.cartao);
+      r.sonsDaContribuicao = sonsDaContribuicao;
+      r.aplicar(sino(false));
+      return r;
+    });
+    await assentar();
+    const tomou = destinos.find((r) => r.tomouOsSons);
+    confere(
+      onde,
+      d.ditos.filter((e) => e.nome === "midia" && e.chave === "sino").length === 0
+        && todasAsTags(tomou?.raiz, "figure")[0]?.dataset.estado === "pronta",
+      `o som da contribuição foi recusado antes de o MOD mandá-lo tocar: ${JSON.stringify(d.ditos)}`,
+    );
+    for (const r of destinos) r.aplicar(sino(true));
+    await assentar();
+    comoOTeto(onde, tomou, d, "sino", todasAsTags(tomou?.raiz, "figure")[0]);
+    confere(
+      onde,
+      d.ditos.filter((e) => e.nome === "midia" && e.chave === "sino" && e.estado === "recusada").length === 1,
+      `a recusa do pedido de tocar não foi dita uma vez, no destino que segura o som: ${JSON.stringify(d.ditos)}`,
+    );
+    for (const r of destinos) r.soltar();
+  }
+
+  // A aba junta as recusas do mesmo teto numa vaga só: duas do Rust e uma da
+  // janela, que decodificou e passou do teto.
+  {
+    const onde = `${caso} · uma vaga só na aba`;
+    const quadros = Math.floor(teto / 8) + 1;
+    const b = bancada({ audio: audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } }) });
+    const d = dono(b, somDoPacote);
+    d.api.bytesDoSom = (caminho) => (caminho === "som/s3.ogg"
+      ? Promise.resolve(new b.Uint8Array(BYTES_DE_SOM).buffer)
+      : recusaDoRust());
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    r.aplicar(["s1", "s2", "s3"].map((chave) => ({ forma: "midia", chave, fonte: `som/${chave}.ogg` })));
+    await assentar();
+    const base = fs.readFileSync(path.join(raiz, "ui/base.js"), "utf8");
+    const inicio = base.indexOf("const vagasDosTetos");
+    const fim = base.indexOf("\n}\n", base.indexOf("function contarAMidia("));
+    confere(onde, inicio >= 0 && fim > inicio, "`contarAMidia` ou `vagasDosTetos` mudou de forma em `base.js`, e o recorte não a achou");
+    if (inicio >= 0 && fim > inicio) {
+      b.rodar(base.slice(inicio, fim + 3), "base.js");
+      const soma = { carregando: 0, pronta: 0, recusada: 0, motivos: [] };
+      for (const anotada of r.midiasAnotadas()) b.janela.contarAMidia(soma, anotada);
+      confere(
+        onde,
+        soma.recusada === 3 && soma.motivos.length === 1
+          && soma.motivos[0].endsWith("(e mais 2 recusas pelo mesmo teto)"),
+        "as recusas pelo teto do som — duas do Rust e uma da janela — não ocupam uma vaga só na aba, e "
+          + `tiram dela o motivo de outro tipo: ${JSON.stringify(soma)}`,
+      );
+    }
+    r.soltar();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 20. Quem só mostra imagem ouve, do som recusado pelo teto, o que ouvia.
+// ---------------------------------------------------------------------------
+
+/**
+ * M5 da revisão do K4. O som do servidor que o Rust recusa pelo teto do som
+ * chega rejeitado, antes de o papel chegar à janela. Para quem toca, é o teto
+ * do som (seção 19); para o fundo, o retrato e o fundo de uma tela, que só
+ * mostram imagem, ele é o que era antes da recusa: um som, e o «precisa ser
+ * imagem» de cada um. O que o MOD ouve é contrato da API, e o lote não o muda.
+ *
+ * A prova compara, lugar por lugar, as duas respostas: a de antes do lote — o
+ * som chegando com o papel — e a de agora — a recusa do Rust. O evento ao MOD,
+ * as linhas do registro e as anotações da aba têm de ser as mesmas.
+ */
+async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
+  const caso = "quem só mostra imagem ouve o que ouvia do som recusado";
+  const motivo = "som-grande-demais-decodificado: decodificado a 48000 Hz, o som ocupa ao menos "
+    + "251657180 bytes, acima do teto de 67108864 bytes de som";
+  const doServidor = { canal: 1, pedido: { op: "som" } };
+  const lugares = [
+    {
+      nome: "o fundo",
+      declarar: (r) => r.aplicar([{ forma: "caixa", chave: "cx", fundoDeMidia: { doServidor }, dentro: "Lia" }]),
+    },
+    {
+      nome: "o retrato",
+      declarar: (r) => r.aplicar([{ forma: "retrato", chave: "rosto", doServidor, inicial: "A" }]),
+    },
+    {
+      nome: "o fundo da tela",
+      // A primeira montagem ainda não tem pincel, e o fundo só é buscado
+      // quando a tela tem onde pintar.
+      declarar: (r) => {
+        const tela = [{ forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { doServidor } }];
+        r.aplicar(tela);
+        r.raiz.children[0].darPincel();
+        r.aplicar(tela);
+      },
+    },
+  ];
+  const ouvido = async (lugar, midia) => {
+    const b = bancada();
+    const d = dono(b, midia);
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    lugar.declarar(r);
+    await assentar();
+    const ouviu = JSON.stringify({ mod: d.ditos, registro: d.anotadas, aba: r.midiasAnotadas() });
+    r.soltar();
+    return ouviu;
+  };
+  for (const lugar of lugares) {
+    const antes = await ouvido(lugar, () => Promise.resolve({ uri: "data:audio/wav;base64,UklGRg==", papel: "som", bytes: 4 }));
+    const agora = await ouvido(lugar, () => Promise.reject({ Recusado: { motivo } }));
+    confere(
+      `${caso} · ${lugar.nome}`,
+      antes.includes("precisa ser imagem"),
+      `o som que chega a ${lugar.nome} deixou de ser recusado por não ser imagem, e a prova não mede o que devia: ${antes}`,
+    );
+    confere(
+      `${caso} · ${lugar.nome}`,
+      agora === antes,
+      `${lugar.nome} ouviu da recusa do som pelo teto outra coisa que ouvia do som — o contrato com o MOD `
+        + `mudou: antes ${antes}, agora ${agora}`,
+    );
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -5436,6 +5694,7 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     aChaveDoCampoNaoPartePar,
     aFinalidadeDoArquivoNaoPartePar,
+    aRecusaDoSeletorChegaPeloNome,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,
@@ -5473,6 +5732,8 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
     oSomDaContribuicaoMudaDeDestino,
     oDonoSemBytesDoSomDizPorQue,
     oDataDoSomDoServidorNaoFicaRetido,
+    oSomGrandeDemaisDecodificadoEOTetoDoSom,
+    quemSoMostraImagemOuveOQueOuviaDoSomRecusado,
   ];
   for (const prova of provas) {
     try {
