@@ -131,6 +131,96 @@ pub fn capacidades_da_api(api: u32) -> &'static [&'static str] {
     }
 }
 
+/// A forma do valor de uma chave do tema (rascunho da API 6, §9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormaDoValorDoTema {
+    /// `#rrggbb`, em maiúsculas ou minúsculas.
+    Cor,
+    /// Um inteiro de `minimo` a `maximo`, os dois inclusive, e sem unidade: a
+    /// unidade é do produto.
+    Inteiro {
+        /// O menor aceito.
+        minimo: i64,
+        /// O maior aceito.
+        maximo: i64,
+    },
+    /// `true` ou `false`, e nunca o texto de um deles.
+    Bandeira,
+    /// Um destes nomes, e o produto fornece o que cada um vale.
+    Escolha(&'static [&'static str]),
+}
+
+impl FormaDoValorDoTema {
+    /// O valor tem esta forma?
+    #[must_use]
+    pub fn aceita(self, valor: &serde_json::Value) -> bool {
+        match self {
+            Self::Cor => valor.as_str().is_some_and(|texto| {
+                texto
+                    .strip_prefix('#')
+                    .is_some_and(|hex| hex.len() == 6 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            }),
+            Self::Inteiro { minimo, maximo } => valor
+                .as_i64()
+                .is_some_and(|n| (minimo..=maximo).contains(&n)),
+            Self::Bandeira => valor.is_boolean(),
+            Self::Escolha(nomes) => valor.as_str().is_some_and(|nome| nomes.contains(&nome)),
+        }
+    }
+}
+
+/// **As chaves do tema: uma lista fechada** (rascunho da API 6, §9; tarefa
+/// 17j). O MOD escreve nomes do contrato, e nunca nomes de CSS; o produto
+/// traduz cada um para o token que ele redefine.
+///
+/// Espelho das tabelas da casca (`TEMA_DA_API`, `NUMEROS_DA_API`,
+/// `BANDEIRAS_DA_API` e `MEDIDAS_DA_API`, em `apps/seele-app/ui/base.js`),
+/// conferido nos dois sentidos por `as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor`
+/// em `apps/seele-app/tests/frontend.rs`, e caso a caso pelo vetor
+/// `tests/vetores/chaves-do-tema.json`, que os dois lados leem.
+pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[
+    ("fundo", FormaDoValorDoTema::Cor),
+    ("texto", FormaDoValorDoTema::Cor),
+    ("acento", FormaDoValorDoTema::Cor),
+    ("borda", FormaDoValorDoTema::Cor),
+    ("painel", FormaDoValorDoTema::Cor),
+    ("apagado", FormaDoValorDoTema::Cor),
+    (
+        "arredondamento",
+        FormaDoValorDoTema::Inteiro {
+            minimo: 0,
+            maximo: 24,
+        },
+    ),
+    ("brilho", FormaDoValorDoTema::Bandeira),
+    (
+        "densidade",
+        FormaDoValorDoTema::Escolha(&["compacta", "confortavel"]),
+    ),
+    ("fonte", FormaDoValorDoTema::Escolha(&["mono", "sans"])),
+];
+
+/// **Por que um tema não passa pela tabela**, com a chave, ou `None`.
+///
+/// `chave-desconhecida`: o nome não está em `CHAVES_DO_TEMA`.
+/// `valor-invalido`: está, e o valor não tem a forma dele. Com mais de uma
+/// chave errada, vale a primeira na ordem do objeto.
+#[must_use]
+pub fn recusa_das_chaves_do_tema(
+    tema: &serde_json::Map<String, serde_json::Value>,
+) -> Option<(&'static str, String)> {
+    for (chave, valor) in tema {
+        match CHAVES_DO_TEMA.iter().find(|(nome, _)| nome == chave) {
+            None => return Some(("chave-desconhecida", chave.clone())),
+            Some((_, forma)) if !forma.aceita(valor) => {
+                return Some(("valor-invalido", chave.clone()));
+            }
+            Some(_) => {}
+        }
+    }
+    None
+}
+
 /// What a MOD declares about itself.
 ///
 /// `deny_unknown_fields` is the decision, not the default: a misspelled key

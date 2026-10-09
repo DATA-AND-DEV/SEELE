@@ -2019,11 +2019,16 @@ function aplicarOTemaDoMod(id, valores) {
   }
 
   const pedido = new Map();
+  // **`Object.hasOwn`, e nunca `in`**: `in` enxerga o protótipo, e com ele
+  // `fonte: "toString"` era aplicado e `constructor` caía nas medidas. A
+  // tabela é a do servidor (`seele_proto::mods::CHAVES_DO_TEMA`), e as duas
+  // respondem igual a cada caso de `chaves-do-tema.json` (tarefa 17j).
+  const daTabela = (tabela, nome) => Object.hasOwn(tabela, nome);
   for (const [nome, valor] of Object.entries(valores ?? {})) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
     // recusaria o nome delas antes de alguém olhar.
-    if (nome in MEDIDAS_DA_API) {
-      if (!(valor in MEDIDAS_DA_API[nome])) {
+    if (daTabela(MEDIDAS_DA_API, nome)) {
+      if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
         throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
       }
@@ -2033,7 +2038,7 @@ function aplicarOTemaDoMod(id, valores) {
     // **Os números, com o intervalo conferido aqui.** Fora dele é recusa com o
     // intervalo escrito: quem pediu 40 precisa saber que o teto é 24, e não
     // que «não deu».
-    if (nome in NUMEROS_DA_API) {
+    if (daTabela(NUMEROS_DA_API, nome)) {
       const regra = NUMEROS_DA_API[nome];
       if (!Number.isInteger(valor) || valor < regra.minimo || valor > regra.maximo) {
         throw new Error(
@@ -2046,14 +2051,14 @@ function aplicarOTemaDoMod(id, valores) {
     // **As bandeiras, que são sim ou não.** Um `"sim"` em texto não passa: o
     // valor é booleano, e aceitar as duas formas faria o produto adivinhar o
     // que `"false"` quer dizer.
-    if (nome in BANDEIRAS_DA_API) {
+    if (daTabela(BANDEIRAS_DA_API, nome)) {
       if (typeof valor !== "boolean") {
         throw new Error(`«${nome}» é sim ou não, e veio «${valor}»`);
       }
       pedido.set(nome, valor);
       continue;
     }
-    if (!(nome in TEMA_DA_API)) {
+    if (!daTabela(TEMA_DA_API, nome)) {
       throw new Error(`a API de tema não conhece «${nome}»`);
     }
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
