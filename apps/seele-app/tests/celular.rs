@@ -290,6 +290,10 @@ const SELETORES_DO_NUCLEO: &[&str] = &[
     "[data-nucleo]",
     ".cel-nucleo",
     ".cel-placa-de-alerta",
+    // A mensagem que não foi gravada: a placa de alerta é do núcleo, e um tema
+    // não apaga o aviso de que algo se perdeu.
+    "[data-envio=\"falhou\"]",
+    "[data-envio=\"sem-resposta\"]",
 ];
 const PROPRIEDADES_DE_COR: &[&str] = &[
     "color",

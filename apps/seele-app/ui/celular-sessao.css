@@ -540,3 +540,149 @@
   display: block;
   margin-bottom: 4px;
 }
+
+/* ----------------------------------------------------------- a aba CONVERSA
+ *
+ * A conversa do desktop no tamanho do polegar. O cabeçalho do canal continua o
+ * do desktop, logo abaixo do topo, porque ele carrega a região de MOD
+ * `canal.cabecalho`; o nome do canal é texto, e a busca tem 44 de alvo. */
+
+:root[data-casca="celular"] #vista-conversa .linha-barra {
+  min-height: 52px;
+  gap: 8px;
+  padding: 4px calc(8px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] #vista-conversa #linha-nome {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  color: var(--seele-osso);
+  text-decoration: none;
+  cursor: default;
+}
+
+:root[data-casca="celular"] #vista-conversa #botao-buscar {
+  width: var(--cel-alvo);
+  height: var(--cel-alvo);
+}
+
+:root[data-casca="celular"] #vista-conversa #form-busca {
+  flex-wrap: wrap;
+  padding: 4px calc(8px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+}
+
+/* As mensagens: o avatar ocupa as duas fileiras (o autor e a hora em cima, o
+   texto embaixo), e o `remover` sai da fileira para a folha da mensagem. */
+:root[data-casca="celular"] #lista-mensagens {
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+  overscroll-behavior: contain;
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem {
+  grid-template-columns: 36px minmax(0, 1fr);
+  column-gap: 10px;
+  padding-left: 0;
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] #lista-mensagens .moderar-remover {
+  display: none;
+}
+
+/* O autor no osso e a hora no rótulo do painel: o apagado do desktop é, pelo
+   próprio token, «4,11:1 só texto grande». */
+:root[data-casca="celular"] #lista-mensagens .mensagem-autor {
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem.propria .mensagem-autor {
+  color: var(--seele-padrao-azul);
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem-hora {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-mensagens .mensagem .corpo {
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+/* **A mensagem que não foi gravada é do núcleo.** A placa de alerta lê só
+   `--nucleo-*`: um tema não apaga o aviso de que algo se perdeu, nem as duas
+   saídas dele (G6). */
+:root[data-casca="celular"] #lista-mensagens :is([data-envio="falhou"], [data-envio="sem-resposta"]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-texto);
+  background: var(--nucleo-alerta-fundo);
+  border-left: 3px solid var(--nucleo-alerta);
+}
+
+:root[data-casca="celular"] #lista-mensagens :is([data-envio="falhou"], [data-envio="sem-resposta"]) .envio-frase {
+  flex: 1 0 100%;
+  color: var(--nucleo-texto);
+}
+
+:root[data-casca="celular"] #lista-mensagens :is([data-envio="falhou"], [data-envio="sem-resposta"]) .envio-acao {
+  min-height: var(--cel-alvo);
+  padding: 0 12px;
+  font-family: var(--nucleo-pilha);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.12em;
+  color: var(--nucleo-texto);
+  background: var(--nucleo-fundo);
+  border: 1px solid var(--nucleo-rotulo);
+}
+
+/* O compositor: o `+` do celular, a caixa, e o ENVIAR de tracking curto. O
+   `+` do desktop fica escondido, e é ele que a folha ANEXAR aperta. */
+:root[data-casca="celular"] #form-mensagem {
+  gap: 8px;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #form-mensagem #botao-anexar,
+:root[data-casca="celular"] #form-mensagem .prompt {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-anexar {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: var(--cel-alvo);
+  height: var(--cel-alvo);
+  padding: 0;
+  color: var(--seele-osso);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] #form-mensagem .compor-caixa {
+  min-height: var(--cel-alvo);
+  min-width: 0;
+}
+
+/* O alvo é o campo, e não a caixa em volta dele: 44 de altura já na primeira
+   fileira. */
+:root[data-casca="celular"] #form-mensagem #campo-mensagem {
+  box-sizing: border-box;
+  min-height: var(--cel-alvo);
+  padding-block: 11px;
+  font-size: var(--cel-campo);
+}
+
+:root[data-casca="celular"] #form-mensagem .compor-enviar {
+  min-height: var(--cel-alvo);
+  letter-spacing: 0.08em;
+}

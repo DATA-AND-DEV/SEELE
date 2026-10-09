@@ -88,3 +88,16 @@
   gap: 8px;
   margin-top: 16px;
 }
+
+/* O texto da mensagem, citado na folha dela: até seis fileiras, e o resto
+   cortado, porque a folha é das ações e não da leitura. */
+:root[data-casca="celular"] .cel-folha-citacao {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-left: 10px;
+  border-left: 2px solid var(--seele-linha-forte);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

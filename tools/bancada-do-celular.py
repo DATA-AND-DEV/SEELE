@@ -113,6 +113,15 @@ PONTOS_INJETADOS = [
         "CASCA.pedirSenhaDaSala",
         troca=True,
     ),
+    # O Return do celular quebra a fileira (P8): o teclado do aparelho não tem
+    # Shift+Enter, e uma mensagem de duas fileiras não teria como ser escrita.
+    Ponto(
+        "P8",
+        "tela-sessao.js",
+        '  if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;\n',
+        "  if (!CASCA.enterEnvia) return;\n",
+        "CASCA.enterEnvia",
+    ),
 ]
 
 # As áreas seguras de um iPhone em retrato (a ilha em cima, a barra de gestos
@@ -685,6 +694,119 @@ def aba_servidor(pg: Page) -> list[str]:
     return falhas
 
 
+def aba_conversa(pg: Page) -> list[str]:
+    """A aba CONVERSA (Tarefa 6): a conversa do desktop no tamanho do polegar.
+
+    Termina com uma mensagem própria recusada no fim da lista, que é o que a foto
+    e as medidas leem: a placa de alerta dela é do núcleo.
+    """
+    falhas = []
+    tocar(pg, "#cel-aba-conversa")
+
+    def feitas(cmd):
+        return pg.evaluate(f"window.__SEELE_HISTORICO.filter(([c]) => c === '{cmd}').map(([, a]) => a)")
+
+    # O Return quebra a fileira, e só o ENVIAR envia: no celular não há Shift.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    campo = pg.locator("#campo-mensagem")
+    campo.fill("primeira")
+    campo.press("Enter")
+    campo.press_sequentially("segunda")
+    if feitas("send_message"):
+        falhas.append("o Return no campo enviou a mensagem")
+    if campo.input_value() != "primeira\nsegunda":
+        falhas.append(f"o Return não quebrou a fileira: o campo tem {campo.input_value()!r}")
+    if not tocar(pg, "#botao-enviar"):
+        falhas.append("não há ENVIAR à vista")
+    pg.wait_for_timeout(300)
+    if [a.get("body") for a in feitas("send_message")] != ["primeira\nsegunda"]:
+        falhas.append(f"o ENVIAR mandou {feitas('send_message')}")
+    placeholder = pg.evaluate("document.getElementById('campo-mensagem').placeholder")
+    if "Enter" in placeholder:
+        falhas.append(f"o campo ainda promete que o Enter envia: {placeholder!r}")
+
+    # A folha da mensagem: COPIAR em todas, APAGAR só nas próprias, e a frase de
+    # REMOVER nas dos outros só para quem tem a permissão.
+    pg.evaluate("navigator.clipboard.writeText = async (texto) => { window.__copiado = texto; }")
+    propria = "#lista-mensagens > li.mensagem:has(.corpo:text-is('UDP. tá escrito no README, duas linhas depois do comando'))"
+    alheia = "#lista-mensagens > li.mensagem:has(.mensagem-autor:text-is('juli'))"
+    for nome, seletor, pode_remover in (("própria", propria, True), ("alheia", alheia, True), ("alheia sem permissão", alheia, False)):
+        pg.evaluate(f"SEELE_QUADRO.may_remove_message = {'true' if pode_remover else 'false'}")
+        esperar_quadro(pg)
+        if not tocar(pg, f"{seletor} .corpo"):
+            falhas.append(f"não há mensagem {nome} à vista")
+            continue
+        folha = pg.locator("#cel-folha-mensagem")
+        if not folha.is_visible():
+            falhas.append(f"o toque na mensagem {nome} não abriu a folha dela")
+            continue
+        tem = pg.evaluate("""(() => { const f = document.getElementById('cel-folha-mensagem');
+            return { copiar: !!f.querySelector('[data-acao="copiar"]'), apagar: !!f.querySelector('[data-acao="apagar"]'),
+                     remover: /REMOVER/.test(f.querySelector('.cel-fora')?.textContent ?? '') }; })()""")
+        esperado = {"copiar": True, "apagar": nome == "própria", "remover": nome == "alheia"}
+        if tem != esperado:
+            falhas.append(f"a folha da mensagem {nome} tem {tem}, e não {esperado}")
+        if nome == "própria":
+            tocar(pg, "#cel-folha-mensagem [data-acao='copiar']")
+            copiado = pg.evaluate("window.__copiado ?? null")
+            if copiado != "UDP. tá escrito no README, duas linhas depois do comando":
+                falhas.append(f"COPIAR O TEXTO copiou {copiado!r}")
+            tocar(pg, f"{seletor} .corpo")
+            tocar(pg, "#cel-folha-mensagem [data-acao='apagar']")
+            pg.wait_for_timeout(200)
+            if not pg.evaluate("!document.getElementById('moderar').hidden"):
+                falhas.append("APAGAR A MINHA MENSAGEM não abriu a confirmação do desktop")
+            pg.evaluate("document.getElementById('moderar').hidden = true")
+        else:
+            pg.keyboard.press("Escape")
+        if folha.is_visible():
+            falhas.append(f"a folha da mensagem {nome} não fechou")
+
+    # O + abre a folha ANEXAR; as duas escolhas pedem o arquivo pelo caminho do
+    # desktop, e quem abre o seletor do navegador é a ponte da F4.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if not tocar(pg, ".cel-anexar"):
+        falhas.append("não há + à vista no compositor")
+    elif not pg.locator("#cel-folha-anexar").is_visible():
+        falhas.append("o + não abriu a folha ANEXAR")
+    else:
+        escolhas = pg.evaluate("[...document.querySelectorAll('#cel-folha-anexar [data-escolha]')].map((b) => b.dataset.escolha)")
+        if escolhas != ["midia", "arquivo"]:
+            falhas.append(f"a folha ANEXAR oferece {escolhas}, e não FOTO OU VÍDEO e ARQUIVO")
+        tocar(pg, "#cel-folha-anexar [data-escolha='arquivo']")
+        pg.wait_for_timeout(200)
+        if not feitas("escolher_arquivo"):
+            falhas.append("ARQUIVO não pediu o arquivo pelo caminho do desktop (escolher_arquivo)")
+
+    # A mensagem que falhou: a placa de alerta, com as duas saídas do desktop.
+    pg.evaluate("""(() => {
+        SEELE_RESPOSTAS.messages.push({ id: 6, channel: 1, author: 1, author_nickname: "rafa", at_seconds: 1756000700,
+            body: "alguém tem o link do mapa?", own: true, edited: false, attachment: null,
+            estado: { Recusada: "PermissionDenied" }, client_message_id: "c-1" });
+        SEELE_QUADRO.messages_revision += 1;
+    })()""")
+    esperar_quadro(pg)
+    placa = pg.evaluate("""(() => {
+        const p = document.querySelector('#lista-mensagens [data-envio="falhou"]');
+        if (!p) return null;
+        const r = p.getBoundingClientRect();
+        return { acoes: [...p.querySelectorAll('button[data-acao]')].map((b) => [b.dataset.acao, Math.round(b.getBoundingClientRect().height)]),
+                 fundo: getComputedStyle(p).backgroundColor,
+                 alerta: getComputedStyle(document.documentElement).getPropertyValue('--seele-vermelho-fraco').trim(),
+                 dentro: r.left >= 0 && r.right <= innerWidth + 0.5 };
+    })()""")
+    if placa is None:
+        falhas.append("a mensagem recusada não mostra a placa de alerta")
+    else:
+        if [a for a, _ in placa["acoes"]] != ["reenviar", "descartar"] or any(h < 44 for _, h in placa["acoes"]):
+            falhas.append(f"a placa da mensagem recusada tem {placa['acoes']}, e não TENTAR DE NOVO e DESISTIR de 44")
+        if not placa["dentro"]:
+            falhas.append("a placa da mensagem recusada passa da tela")
+    pg.locator("#lista-mensagens").evaluate("(l) => { l.scrollTop = l.scrollHeight; }")
+    pg.wait_for_timeout(200)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -695,6 +817,8 @@ CASOS: dict[str, Caso] = {
     # função 17e da F3. Até lá, o claro reprova o «VOCÊ ESTÁ AQUI» a 2,6:1.
     "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "hostil"),
+                         raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
 }
 
 
