@@ -37,7 +37,7 @@
       let ultimo = performance.now(), maior = 0;
       const id = setInterval(() => { const a = performance.now(); maior = Math.max(maior, a - ultimo); ultimo = a; }, 10);
       await l.executor.entregar({ tipo: "evento", nome: "x" });
-      r.laco = await esperar(() => l.falhas.find((f) => f.includes("interrompido")));
+      r.laco = await esperar(() => l.falhas.find((f) => f === "o MOD lançou"));
       clearInterval(id);
       r.travou_ms = Math.round(maior);
     } else {

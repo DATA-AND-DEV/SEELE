@@ -247,8 +247,25 @@ function executorNoNavegador(id, geracao, hash) {
               // `falhou` e `interrompido` pedem frases diferentes, como no
               // nativo: um é o MOD com defeito, o outro é o produto parando-o.
               const frase = m.tipo === "interrompido" ? "interrompido pelo produto" : m.corpo;
-              if (subiu) emOrdem(() => aoFalhar(frase));
-              else aoFalhar(frase);
+              // O crédito do aviso volta depois de dito, como a colheita do
+              // desktop o devolve: um MOD que falha num laço não enche a página.
+              const dizer = () => {
+                aoFalhar(frase);
+                if (!parou) mandarAoIframe({ tipo: "aviso-lido", n: numero });
+              };
+              if (subiu) emOrdem(dizer);
+              else dizer();
+              break;
+            }
+            case "console": {
+              // **O registro do MOD, no celular.** No desktop a linha vai ao
+              // `seele.log`; aqui, até o canal de diagnóstico ser decidido (ADR
+              // 0057, «O que este ADR não decide»), ela vai ao console da
+              // página, onde o inspetor do Safari a lê. O motor já a passou
+              // pelo balde e pelo corte do desktop.
+              const metodo = ["debug", "info", "warn", "error"].includes(m.nivel) ? m.nivel : "info";
+              const seguradas = m.suprimidas > 0 ? ` (e ${m.suprimidas} seguradas antes)` : "";
+              console[metodo](`MOD ${id}: ${m.texto}${seguradas}`);
               break;
             }
             case "subiu":

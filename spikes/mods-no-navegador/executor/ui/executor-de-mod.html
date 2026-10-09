@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-o+GTraYw2Em9Ez3qeWcuDU69j3frep018G8iyoC1HHE=' 'wasm-unsafe-eval'; worker-src blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-jhvGEwiMpEn4muUlXBtG5C6y9b13B8jRf1PYv695P+E=' 'wasm-unsafe-eval'; worker-src blob:">
 <title>executores de MOD</title>
 <script>
 // O `iframe` dos executores de MOD no navegador (ui/mods-no-navegador.js).
@@ -54,33 +54,26 @@
   // função vira o `blob:` do Worker, depois do preâmbulo. Ela mora dentro
   // deste script para o hash da CSP cobri-la também.
   //
-  // O motor é o `crates/seele-motor-web` compilado para `wasm32-wasip1`: o
-  // QuickJS, o prelúdio e os tetos do desktop. O anfitrião dá a ele as três
-  // funções do módulo `seele` e a WASI mínima, e faz a volta que a thread do
-  // executor faz no desktop (`executor.rs`, `rodar`): entregar, recolher os
-  // pedidos de relógio e disparar os relógios.
+  // O motor é o `crates/seele-motor-web`: a volta do `seele-motor`, **a mesma
+  // que o desktop embrulha numa thread** (o prelúdio, as rejeições, o balde do
+  // `console`, os temporizadores, os tetos e a fila de saída). Este anfitrião é
+  // só a espera: ele leva cada entrada ao motor, entrega ao `iframe` o que o
+  // motor disse, e agenda um `setTimeout` para o prazo que o motor dá
+  // (`proximo_prazo_ms`), no lugar do `recv_timeout` da thread do desktop.
   //
-  // **O que o código do MOD alcança daqui é o que o motor importa**: a lista de
-  // `xtask/web/motor.mjs`, conferida a cada `cargo xtask web`. Nada de disco nem
-  // de rede: a WASI declara essas funções, e aqui elas respondem que não há.
+  // **O que o código do MOD alcança daqui é o que o motor importa**: a WASI
+  // mínima, na lista de `xtask/web/motor.mjs`, conferida a cada
+  // `cargo xtask web`. Nada de disco nem de rede: a WASI declara essas funções,
+  // e aqui elas respondem que não há.
   function anfitriaoDoMotor() {
     "use strict";
-    // Os do desktop (`executor.rs`): `MENSAGENS_NA_FILA`, `BYTES_NA_FILA`,
-    // `TEMPORIZADORES_DE_PE`, `INTERVALO_MINIMO` e `ATRASO_MAXIMO`.
-    const FILA = { mensagens: 64, bytes: 256 * 1024 };
-    const TEMPORIZADORES_DE_PE = 256;
-    const INTERVALO_MINIMO_MS = 4;
-    const ATRASO_MAXIMO_MS = 24 * 60 * 60 * 1000;
     // O `errno` da WASI para «descritor inválido».
     const EBADF = 8;
-
     const enc = new TextEncoder();
     const dec = new TextDecoder();
     let inst = null;
     let parando = false;
-    const fila = { mensagens: 0, bytes: 0 };
-    /** id → o `setTimeout` de pé */
-    const relogios = new Map();
+    let espera = null;
 
     const mem = () => new Uint8Array(inst.exports.memory.buffer);
     const dv = () => new DataView(inst.exports.memory.buffer);
@@ -107,9 +100,7 @@
         dv().setUint32(ps, 0, true);
         return 0;
       },
-      environ_get() {
-        return 0;
-      },
+      environ_get: () => 0,
       clock_time_get(id, _precisao, p) {
         const ns = id === 0 ? BigInt(Date.now()) * 1000000n : BigInt(Math.round(performance.now() * 1e6));
         dv().setBigUint64(p, ns, true);
@@ -131,92 +122,37 @@
           texto += ler(p, l);
           total += l;
         }
-        if (texto) postMessage({ tipo: "console", nivel: "error", texto });
+        if (texto) postMessage({ tipo: "console", nivel: "error", texto, suprimidas: 0 });
         dv().setUint32(escritos, total, true);
         return 0;
       },
       proc_exit(c) {
         throw new Error(`o motor pediu proc_exit(${c})`);
       },
+      // Do `mpsc` do `std`: no Worker não há outra thread a quem ceder.
+      sched_yield: () => 0,
     };
 
-    const seele = {
-      // **O teto do acumulado**, como o `postar` do desktop: recusar, e não
-      // esperar. O de uma mensagem o motor já conferiu.
-      postar(p, n) {
-        if (parando) return 0;
-        if (fila.mensagens >= FILA.mensagens || fila.bytes + n > FILA.bytes) return 0;
-        fila.mensagens += 1;
-        fila.bytes += n;
-        postMessage({ tipo: "mensagem", corpo: ler(p, n) });
-        return 1;
-      },
-      console(mp, ml, tp, tl) {
-        postMessage({ tipo: "console", nivel: ler(mp, ml), texto: ler(tp, tl) });
-      },
-      agora_ms: () => performance.now(),
+    // O que o motor disse desde a chamada anterior, na ordem.
+    const dizer = () => {
+      for (const fala of JSON.parse(saida())) postMessage(fala);
     };
 
-    /** O fim de uma volta: o que ela disse, e os relógios que ela pediu. */
-    const depoisDaVolta = (codigo) => {
-      if (codigo !== 0) {
-        const texto = saida();
-        // `interrupted` é o QuickJS cortando a volta pelo prazo ou pelo trabalho:
-        // quem parou foi o produto, e não o MOD.
-        if (/\binterrupted\b/.test(texto)) postMessage({ tipo: "interrompido" });
-        else postMessage({ tipo: "falhou", corpo: texto });
-      }
-      recolherOsRelogios();
-    };
-
-    // `executor.rs`, `intervalo_valido`: aparado, e não recusado.
-    const intervaloValido = (ms) => {
-      if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
-      return Math.min(ATRASO_MAXIMO_MS, Math.max(INTERVALO_MINIMO_MS, ms));
-    };
-
-    const recolherOsRelogios = () => {
-      if (parando) return;
-      inst.exports.pedidos_de_relogio();
-      let pedidos = [];
-      try {
-        pedidos = JSON.parse(saida());
-      } catch {
-        return;
-      }
-      for (const { id, ms, repete, cancelar } of pedidos) {
-        if (cancelar) {
-          clearTimeout(relogios.get(id));
-          relogios.delete(id);
-          continue;
-        }
-        if (relogios.size >= TEMPORIZADORES_DE_PE) continue;
-        const intervalo = intervaloValido(ms);
-        if (intervalo === null) continue;
-        agendar(id, intervalo, repete === true);
-      }
-    };
-
-    // Reagendado a partir de **agora**, depois da volta, como no desktop: um MOD
-    // que demora mais que o intervalo não acumula disparos atrasados.
-    const agendar = (id, intervalo, repete) => {
-      clearTimeout(relogios.get(id));
-      relogios.set(
-        id,
-        setTimeout(() => {
-          if (parando) return;
-          if (repete) agendar(id, intervalo, true);
-          else relogios.delete(id);
-          depoisDaVolta(inst.exports.relogio(id));
-        }, intervalo),
-      );
-    };
-
-    const parar = () => {
-      parando = true;
-      for (const h of relogios.values()) clearTimeout(h);
-      relogios.clear();
-      postMessage({ tipo: "parou" });
+    // Uma espera só, a do prazo que o motor dá: o temporizador mais próximo,
+    // ou a ficha do balde do `console` que sobrou para dizer a conta.
+    const agendar = () => {
+      clearTimeout(espera);
+      espera = null;
+      if (parando || !inst) return;
+      const ms = inst.exports.proximo_prazo_ms();
+      if (ms < 0) return;
+      espera = setTimeout(() => {
+        espera = null;
+        if (parando) return;
+        inst.exports.vencer();
+        dizer();
+        agendar();
+      }, ms);
     };
 
     onmessage = async (e) => {
@@ -224,33 +160,43 @@
       if (parando || !m) return;
       if (m.tipo === "subir") {
         try {
-          inst = await WebAssembly.instantiate(m.motor, { seele, wasi_snapshot_preview1: wasi });
+          inst = await WebAssembly.instantiate(m.motor, { wasi_snapshot_preview1: wasi });
         } catch (falha) {
+          parando = true;
           postMessage({ tipo: "falhou", corpo: `o motor não subiu: ${falha}` });
-          parar();
+          postMessage({ tipo: "parou" });
           return;
         }
         const capacidades = Array.isArray(m.capacidades) ? m.capacidades.join(",") : "";
-        const codigo = comTexto(capacidades, (cp, cl) =>
+        comTexto(capacidades, (cp, cl) =>
           comTexto(String(m.fonte), (fp, fl) => inst.exports.iniciar(cp, cl, fp, fl)),
         );
-        if (codigo !== 0) {
-          postMessage({ tipo: "falhou", corpo: saida() });
-          postMessage({ tipo: "subiu" });
-          return;
-        }
-        recolherOsRelogios();
+        dizer();
         postMessage({ tipo: "subiu" });
+        agendar();
       } else if (m.tipo === "entregar") {
         if (!inst) return;
-        const codigo = comTexto(String(m.json), (p, n) => inst.exports.entregar(p, n));
+        comTexto(String(m.json), (p, n) => inst.exports.entregar(p, n));
         postMessage({ tipo: "entrada-lida", bytes: m.bytes });
-        depoisDaVolta(codigo);
+        dizer();
+        agendar();
       } else if (m.tipo === "lido") {
-        fila.mensagens = Math.max(0, fila.mensagens - 1);
-        fila.bytes = Math.max(0, fila.bytes - (Number(m.bytes) || 0));
+        // O crédito da fila de saída volta quando a página atende, como a
+        // colheita do desktop o devolve.
+        inst?.exports.lido(Number(m.bytes) || 0);
+      } else if (m.tipo === "aviso-lido") {
+        inst?.exports.aviso_lido();
       } else if (m.tipo === "encerrar") {
-        parar();
+        // Para pelo motor, para as rejeições e a conta do console saírem antes
+        // do `parou`, como no desktop.
+        parando = true;
+        clearTimeout(espera);
+        if (inst) {
+          inst.exports.parar();
+          dizer();
+        } else {
+          postMessage({ tipo: "parou" });
+        }
       }
     };
   }
@@ -347,6 +293,8 @@
       w.mensagens = Math.max(0, w.mensagens - 1);
       w.bytes = Math.max(0, w.bytes - (Number(m.bytes) || 0));
       w.worker.postMessage({ tipo: "lido", bytes: Number(m.bytes) || 0 });
+    } else if (m.tipo === "aviso-lido") {
+      w.worker.postMessage({ tipo: "aviso-lido" });
     } else if (m.tipo === "encerrar") {
       if (w.prazo !== null) return;
       w.worker.postMessage({ tipo: "encerrar" });

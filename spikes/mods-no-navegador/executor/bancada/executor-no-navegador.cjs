@@ -207,10 +207,12 @@ async function caso(pagina, nome, corpo) {
     const nova = async () => {
       const pagina = await navegador.newPage();
       const erros = [];
+      const consoles = [];
       pagina.on("pageerror", (e) => erros.push(String(e)));
+      pagina.on("console", (m) => consoles.push(`${m.type()}: ${m.text()}`));
       await pagina.goto(`${base}/`);
       await pagina.evaluate(NA_PAGINA);
-      return { pagina, erros };
+      return { pagina, erros, consoles };
     };
 
     // 1. O MOD comum fala a API do desktop, por todo o caminho.
@@ -249,17 +251,21 @@ async function caso(pagina, nome, corpo) {
       await pagina.close();
     });
 
-    // 3. Um laço sem fim é cortado, é dito como do produto, e a página não trava.
+    // 3. Um laço sem fim é cortado, a linha do registro diz o teto, e a página
+    //    não trava. As frases são as do desktop: o `Falhou` e a linha vêm da
+    //    mesma volta (`seele-motor`).
     await caso(null, "laço sem fim", async () => {
-      const { pagina } = await nova();
+      const { pagina, consoles } = await nova();
       const r = await pagina.evaluate(async () => {
         const b = await bancada.subir("SeeleUI.aoEvento(() => { while (true) {} });");
         const parar = bancada.monitorar();
         await b.executor.entregar({ tipo: "evento", nome: "x" });
-        const falhou = await bancada.esperar(() => b.falhas.find((f) => f.includes("interrompido")));
+        const falhou = await bancada.esperar(() => b.falhas.find((f) => f === "o MOD lançou"));
         return { falhou, falhas: b.falhas, travou_ms: parar() };
       });
-      confere("laço sem fim", r.falhou === "interrompido pelo produto", `falhas: ${JSON.stringify(r.falhas)}`);
+      confere("laço sem fim", r.falhou === "o MOD lançou", `falhas: ${JSON.stringify(r.falhas)}`);
+      confere("laço sem fim", consoles.some((c) => c.startsWith("error: MOD bancada:") && c.includes("passou do prazo de 500 ms")),
+        `a linha do teto não chegou ao console da página: ${JSON.stringify(consoles)}`);
       confere("laço sem fim", r.travou_ms < 200, `a página travou ${r.travou_ms} ms`);
       console.log(`  laço sem fim: «${r.falhou}», a página travou no máximo ${r.travou_ms} ms`);
       await pagina.close();
