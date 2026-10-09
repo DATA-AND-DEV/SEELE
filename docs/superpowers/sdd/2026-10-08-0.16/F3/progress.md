@@ -441,3 +441,35 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   ΔE2000 ≤ 4,5 continuam medidos.
   - Próximo: as tarefas que esperavam o K4, na ordem do plano: 5, 6, 7, 9, 10,
     17d, 17f.0, 17f, 17g, 17h, 17i.
+- **Tarefa 5, as regiões** (em andamento; bateria da nona integração no ar,
+  sem conformidade até o aviso).
+  - Step 1, o desenho da região substituída que carrega o núcleo: `1f3cf670`,
+    aprovado; as decisões em `0be3cece` (o apelido das linhas lê o tema e é
+    protegido pela estrutura; mensagens agrupadas pela chave).
+  - Regiões feitas, uma por commit: `redes` `1e67f782`, `operador.barra`
+    `3e4bfdb2`, `compositor` `ed1c4483`, `status.barra` `76943da5`,
+    `canal.cabecalho` com `substituir` `55ec1c16`.
+  - O orçamento pelo `perfil` do ponto e o aviso com perfil, teto e tamanho:
+    `a994601f` (decisão da orquestradora: `pessoa.detalhes` 4096 nós, as
+    regiões 64 até a M3).
+  - A bancada `regioes-do-produto.cjs` (Chromium, `index.html` real, no CI):
+    nó no contêiner e em nenhum outro lugar; o produto sem mudar de marcação
+    nem de tamanho; revogar devolve a região; com conteúdo grande, o núcleo
+    à vista nas quatro bordas e descoberto, com o desenho do MOD deslocado
+    mirando o centro de cada item.
+  - Achados medidos pela bancada e consertados: o guarda de «quem aplica»
+    casava com a lista do retrato; o nome do canal espremido (43 → 7 px); a
+    conversa empurrada para y = 1 230; o `+` da trilha fora da vista; o
+    `perfil` que ninguém lia; o `min-width`/`max-width` redundantes da barra
+    de baixo; o aviso de «não coube» só com a contagem.
+  - Uma correção minha: a mensagem do `3e4bfdb2` dizia que 60 linhas «não
+    montavam nada»; era o executor falso da bancada sem `entregar`.
+    Registrado no `a994601f`.
+  - Ruling: a bancada das regiões no navegador, e não na
+    `contribuicoes-e-camadas.cjs` (que roda num `vm`) como o plano dizia —
+    custo se errado: uma bancada a mais no job de navegador; o ganho é medir
+    a página que o MOD vê.
+  - Ruling: `overflow` e `contain: paint` juntos, sabendo que cada um corta
+    sozinho — custo se errado: uma linha de CSS por região.
+  - Próximo: `servidor.navegacao` com `substituir`, depois `conversa.mensagem`
+    e `pessoas.lista` (o desenho aprovado), e os Steps 6 a 8b.
