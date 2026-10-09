@@ -471,5 +471,22 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     a página que o MOD vê.
   - Ruling: `overflow` e `contain: paint` juntos, sabendo que cada um corta
     sozinho — custo se errado: uma linha de CSS por região.
-  - Próximo: `servidor.navegacao` com `substituir`, depois `conversa.mensagem`
-    e `pessoas.lista` (o desenho aprovado), e os Steps 6 a 8b.
+  - `servidor.navegacao` `66a4a1ea` (a ordem de cada lista; grupos mistos na
+    API 7, aprovado); a linha com o núcleo sob `pessoa.cartao` `9ca54ea1`
+    (D-nucleo-1, com guarda); `pessoas.lista` `d4f35bff` (decisão (a): as
+    salas continuam seções; a reversão «o MOD toma os grupos» reprova);
+    `conversa.mensagem` `86bb5589` (o corpo do MOD, a busca vence, a pendente
+    fica com o produto, agrupamento pela chave). **As oito regiões estão
+    feitas.**
+  - Achados no caminho, medidos: o subtítulo de grupo do MOD imitava o
+    cabeçalho de uma sala (agora recuado e com filete); uma substituição sem
+    alvo alcançava a mensagem pendente (agora não); o guarda de `.mensagem`
+    num `Match` reprovava o nome do ponto `conversa.mensagem` (agora só o
+    literal exato sai da busca).
+  - Um tropeço meu: um script truncou `tela-sessao.js` (abriu para escrita
+    antes de ler); restaurado do HEAD e as edições refeitas, antes de
+    qualquer commit.
+  - Pendente: os identificadores ignorados contarem na aba DIAGNÓSTICO
+    (espera `camada-mods.js`, onde está o lote W da F5).
+  - Próximo: os Steps 6 (`atualizar`), 7 (o teto por alvo), 7b (as recusas
+    nomeadas), 8 (`regiao-ausente`) e 8b (o `operador.barra` no celular).
