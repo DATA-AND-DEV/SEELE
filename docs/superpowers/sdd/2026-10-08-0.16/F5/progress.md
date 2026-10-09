@@ -238,3 +238,20 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
     - a bancada `ajustes-v013.cjs` verde.
   - **A conformidade** ficou verde em `bateria_interna`, `quarto`, `ocupante_da_escuta`, `volta_pela_trilha`, `acceptance_m5`, `estados`, `anexos`, `mod_de_referencia`, `ejetar` e `quem_hospeda_fecha`. O `quarto_pelo_link` ficou de fora, por causa da porta 8384.
   - **A ordem das verificações:** a conformidade e o servidor rodaram sobre `a495fe2`, antes do J. Depois do merge do J, rodaram de novo o app, o fmt, o clippy, o `check-runtime` e a bancada. O J mexe só em `ui/`, `bancada/` e `tests/frontend.rs`.
+- **A onda 4 foi despachada sobre `411778e`**, o merge de volta da `versao/0.16` em `a2b9f9d0`. A orquestradora prendeu a conformidade enquanto rodava a bateria da 0.15.2. O F escreveu e compilou os testes de conformidade, e os rodou depois da liberação.
+- **A pendência 56 entrou no plano** como item 7 do Z (`a68b994`), por pedido da orquestradora.
+- **K3 → integrado** (`411778e..b318691`, merge `81a72ba`). Foi aprovado na primeira revisão, com seis Menores, e uma rodada os consertou.
+  - **Os itens:**
+    - **P49-9**, em `66133ec`: no automático misto, a gestão diz todos os que desenham;
+    - **P51-23**, em `f62ed74`, `0db8cbc`, `f7cb4fc`, `19391f0` e `69f194f`: a nota dos contornos, o recorte vazio, o ajudante das recusas, os números do teto e o texto;
+    - **o caso que prende o bloco de mídia do K2**, em `4e4bc93`.
+  - **A rodada:**
+    - nenhum MOD aparece como quem desenha e como quem não recebeu (`e569ae9`);
+    - as recusas pelo mesmo teto ocupam uma vaga só na aba (`13cf168`);
+    - a quarta anotação ganhou guarda (`e4fcfc1`);
+    - o recorte está provado nas quatro bordas (`30ffb4e`);
+    - há um leitor só de classes (`4c6d5dc`);
+    - o plano 1C ganhou notas «Hoje» (`62bc035`).
+  - **Ficam para o Z:**
+    - a chave do teto do som não tem prova. Perdê-la só devolve aquele caminho ao comportamento de antes, e nenhum número sai errado;
+    - com um MOD escolhido, a gestão não cita os outros que perderam. Isso é anterior ao lote.
