@@ -1535,6 +1535,11 @@ Talvez também:
   - Quando o `PedidoRecusado` entrar na `versao/0.16`, o primeiro lote da F5 que vier depois o consome. Com isso, uma recusa que nomeia outro pedido não desfaz a entrada.
 - **Para a F1, fora da F5:** recusada por sala cheia, a pessoa passava a ouvir a sala que a recusou. A conformidade que o prova foi entregue à orquestradora: três testes, que hoje dão 1 verde e 2 vermelhos.
 - **No I-b:** a supressão e a sensibilidade salvas em disco passam a valer no connect, e o `ganhos_a_aplicar` cobre os volumes ao reabrir a voz.
+- **No I-b, por pedido da orquestradora (09/10): dois avisos que chegam à tela como «AVISO» seco.** Isso acontece desde antes da 0.16. Quem os achou foi o guarda da F1 `todo_motivo_de_aviso_tem_frase_na_pagina`, no fim do `frontend.rs`, em `29c15a9b`, no `0.16/protocolo`. Os dois estão na lista `AINDA_SEM_FRASE` desse guarda, que só encolhe:
+  - **`MovedByOperator`:** alguém com `MovePerson` mudou a pessoa de sala. Ele precisa de uma frase em `frases.js`;
+  - **`VoiceRoomOverHostUplink { precisa_bps, medido_bps }`:** a sala passou da subida medida de quem hospeda (ADR 0038). Ele leva números, e por isso precisa de um braço em `fraseDoAviso` (`tela-sessao.js`), como o da retenção.
+  - **Se o guarda já estiver na base do I-b** (ele entra na `versao/0.16` na próxima integração, e eu faço o merge antes de despachar o I-b), o I-b tira os dois nomes de `AINDA_SEM_FRASE`. O guarda reprova até a lista encolher.
+  - **Se o guarda ainda não estiver,** o I-b escreve as frases e o braço, e o Z tira os nomes depois que o guarda chegar.
 
 ### 1. D-52 e F1-audio-panico — o áudio abre na sala, numa thread própria, com prazo
 - **O gatilho.**
