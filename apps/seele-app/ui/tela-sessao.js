@@ -347,6 +347,25 @@ function desenharAvisoDeFone(snapshot) {
 }
 
 /**
+ * A faixa do áudio que não abriu, a partir do estado. Pendência 52.
+ *
+ * O áudio abre ao entrar numa sala, numa thread própria e com prazo. Quando o
+ * prazo vence, a sala segue só com a conversa por escrito, e esta faixa diz isso
+ * e o que fazer. Sem ela, a pessoa estaria numa sala muda sem saber por quê.
+ *
+ * Do retrato a cada quadro, e não de um evento: sair da sala muda o estado para
+ * `fora_de_sala`, e a faixa apaga sozinha. Revelada antes de escrita, como a do
+ * fone, pela mesma razão do `role="status"`.
+ */
+function desenharAberturaDoAudio(snapshot) {
+  const frase = ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? null;
+  $("aviso-audio").hidden = frase === null;
+  if (frase !== null && $("aviso-audio-texto").textContent !== frase) {
+    $("aviso-audio-texto").textContent = frase;
+  }
+}
+
+/**
  * Acende — ou apaga — a faixa de veredito da sessão.
  *
  * `deOnde` segue para a frase: ver `fraseDoVeredito`.
@@ -410,6 +429,7 @@ function desenhar(snapshot) {
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
+  desenharAberturaDoAudio(snapshot);
 
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
@@ -2489,9 +2509,15 @@ function desenharTelemetria(snapshot) {
   // `Snapshot` e nunca existiu no `Telemetry`. A comparação antiga lia
   // `undefined === false`, que é sempre falso — a sessão sem áudio imprimia
   // `0k` como se fosse uma medida.
+  //
+  // **Sem voz, a palavra sai do estado da abertura** (pendência 52): fora de
+  // sala o áudio não abre e não falta nada, e o rodapé fica no travessão em
+  // vez de acusar a falta que não há. Ver `ABERTURA_DO_AUDIO`.
   medido(
     $("tel-codec"),
-    snapshot.audio_available ? `OPUS ${Math.round(tel.bitrate_bps / 1000)}k` : "SEM ÁUDIO",
+    snapshot.audio_available
+      ? `OPUS ${Math.round(tel.bitrate_bps / 1000)}k`
+      : (ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.rodape ?? SEM_MEDIDA),
   );
 
   medido($("tel-uptime"), duracao(comecoDaSessao));
@@ -3772,6 +3798,9 @@ async function ejetar() {
   // servidor seguinte. A marca fica — o aviso é desta execução —, então ela não
   // volta a acender na próxima sala.
   $("aviso-fone").hidden = true;
+  // A do áudio que não abriu também: ela é da sala daquela sessão, e o primeiro
+  // quadro da próxima a redesenha do estado dela.
+  $("aviso-audio").hidden = true;
   document.body.classList.remove("na-bateria");
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.
