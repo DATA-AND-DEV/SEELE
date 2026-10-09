@@ -38,7 +38,7 @@
 use std::collections::VecDeque;
 
 use seele_proto::control::{AlertReason, ServerMessage};
-use seele_proto::ids::{Ssrc, VoiceRoomId};
+use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
 
 /// O carimbo do `Ping` que o motor manda logo depois de cada pedido de entrada.
 ///
@@ -198,23 +198,44 @@ impl EntradasPendentes {
     }
 }
 
+/// Uma conexão, pelo que a volta compara: o `ssrc` e o número da sessão.
+pub type Conexao = (Ssrc, SessionId);
+
 /// O assento que o servidor devolveu numa volta, se devolveu.
 ///
-/// **Um `ssrc` igual na sessão nova prova que o servidor resgatou o assento.** O
-/// servidor guarda o assento e o `ssrc` de quem cai por cinco minutos, e devolve
-/// os dois a quem volta dentro deles (`Slots::reclaim`, no `seele-server`); uma
-/// sessão nova ganha um `ssrc` novo. O assento resgatado é o confirmado de
-/// antes da queda.
+/// **Resgate é o mesmo `ssrc` com uma sessão de número maior.** O servidor
+/// guarda o assento e o `ssrc` de quem cai por cinco minutos, e devolve os dois
+/// a quem volta dentro deles, com uma sessão nova (`Slots::reclaim`; em
+/// `seele-server/src/session.rs`, linhas 1188–1200 de `8c62d559`: o `ssrc`
+/// resgatado no lugar do novo, e o `SessionId` sempre o recém-emitido). O
+/// assento resgatado é o confirmado de antes da queda.
+///
+/// **Só o `ssrc` não basta.** Os dois contadores recomeçam em 1 a cada subida
+/// do servidor e andam juntos (`Registry::new` e `Registry::issue`, linhas
+/// 202–208 e 221–226): depois de um reinício, quem volta pode ganhar o mesmo
+/// `ssrc` de antes, sem assento nenhum, e com uma sessão de número igual ou
+/// menor que a antiga. Tomado por resgate, ele deixava a pessoa sentada na
+/// própria tela e fora de toda sala no servidor — N1 da rodada 2 do lote I-a,
+/// medido com o servidor caindo e subindo de novo na mesma porta. Num resgate,
+/// a sessão nova é sempre maior: o contador de sessões não volta enquanto o
+/// processo vive.
+///
+/// Isto se apoia em como o servidor numera, e não em algo que o fio promete.
+/// Dizer o resgate no fio — um campo da sessão, ou uma mensagem — seria da F1.
 #[must_use]
 pub fn assento_resgatado(
-    ssrc_antes: Option<Ssrc>,
-    ssrc_agora: Ssrc,
+    antes: Option<Conexao>,
+    agora: Conexao,
     confirmada: Option<VoiceRoomId>,
 ) -> Option<VoiceRoomId> {
-    if ssrc_antes == Some(ssrc_agora) {
-        confirmada
-    } else {
-        None
+    let (ssrc_agora, sessao_agora) = agora;
+    match antes {
+        Some((ssrc_antes, sessao_antes))
+            if ssrc_antes == ssrc_agora && sessao_agora > sessao_antes =>
+        {
+            confirmada
+        }
+        _ => None,
     }
 }
 
@@ -222,7 +243,7 @@ pub fn assento_resgatado(
 mod testes {
     use super::{assento_resgatado, EntradasPendentes, MARCA_DO_PING_DE_ENTRADA};
     use seele_proto::control::{AlertReason, AlertSeverity, ServerMessage};
-    use seele_proto::ids::{Ssrc, VoiceRoomId};
+    use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
 
     const A: VoiceRoomId = VoiceRoomId(1);
     const B: VoiceRoomId = VoiceRoomId(2);
@@ -394,13 +415,46 @@ mod testes {
     }
 
     #[test]
-    fn o_ssrc_igual_e_o_assento_resgatado() {
-        assert_eq!(assento_resgatado(Some(Ssrc(2)), Ssrc(2), Some(A)), Some(A));
+    fn o_ssrc_igual_com_sessao_maior_e_o_assento_resgatado() {
         assert_eq!(
-            assento_resgatado(Some(Ssrc(2)), Ssrc(3), Some(A)),
+            assento_resgatado(
+                Some((Ssrc(2), SessionId(2))),
+                (Ssrc(2), SessionId(5)),
+                Some(A)
+            ),
+            Some(A),
+            "o resgate — o mesmo `ssrc`, numa sessão nova — não devolveu o assento"
+        );
+        assert_eq!(
+            assento_resgatado(
+                Some((Ssrc(2), SessionId(2))),
+                (Ssrc(3), SessionId(5)),
+                Some(A)
+            ),
             None,
             "uma sessão nova, com `ssrc` novo, não trouxe assento nenhum"
         );
-        assert_eq!(assento_resgatado(None, Ssrc(2), Some(A)), None);
+        assert_eq!(
+            assento_resgatado(None, (Ssrc(2), SessionId(5)), Some(A)),
+            None
+        );
+    }
+
+    /// N1: depois de um reinício do servidor, os contadores recomeçam juntos, e
+    /// o mesmo `ssrc` vem numa sessão de número igual ou menor.
+    #[test]
+    fn o_ssrc_igual_com_sessao_igual_ou_menor_e_um_servidor_que_subiu_de_novo() {
+        for sessao_agora in [SessionId(2), SessionId(1)] {
+            assert_eq!(
+                assento_resgatado(
+                    Some((Ssrc(2), SessionId(2))),
+                    (Ssrc(2), sessao_agora),
+                    Some(A)
+                ),
+                None,
+                "um `ssrc` repetido numa sessão {sessao_agora:?} — o servidor subiu de novo — foi \
+                 tomado por resgate"
+            );
+        }
     }
 }

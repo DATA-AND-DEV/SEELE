@@ -10104,9 +10104,9 @@ mod o_audio_segue_a_sala {
         assert!(ha_voz(&voz));
 
         // A volta dentro da carência: o servidor devolve o assento e o `ssrc`
-        // (o mesmo 700), e o motor refaz a entrada. O canal de mídia é novo, e
+        // (o mesmo 700, numa sessão nova), e o motor refaz a entrada. O canal de mídia é novo, e
         // a voz reabre nele.
-        readotar_na_volta(&mut room, &sessao(700), "marcela", Some(SALA));
+        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
         porta.na_volta(&voz, |_velha| entregue(Ok(Ok(voz_de(701)))), nada_abre);
         olhar_e_esperar(&mut porta, &voz, &room, 701).await;
 
@@ -10529,8 +10529,14 @@ mod o_audio_segue_a_sala {
 
     /// A sessão que o aperto de mão entrega. O `ssrc` muda a cada conexão.
     fn sessao(ssrc: u32) -> SessionInfo {
+        sessao_numero(ssrc, u64::from(ssrc))
+    }
+
+    /// A sessão com o número que o teste escolhe. O resgate de assento é o
+    /// mesmo `ssrc` numa sessão de número maior.
+    fn sessao_numero(ssrc: u32, numero: u64) -> SessionInfo {
         SessionInfo {
-            id: SessionId(u64::from(ssrc)),
+            id: SessionId(numero),
             person: PersonId(7),
             ssrc: Ssrc(ssrc),
             server: "Casa".into(),

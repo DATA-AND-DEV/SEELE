@@ -29,7 +29,7 @@ use std::collections::HashMap;
 
 use seele_proto::control::{ChannelInfo, Permission, PersonState, VoiceRoomInfo};
 use seele_proto::ids::{
-    ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, Ssrc, VoiceRoomId,
+    ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId,
 };
 use seele_proto::signal::SignalBand;
 use seele_proto::ServerMessage;
@@ -268,6 +268,11 @@ pub struct Room {
     pub me: Option<PersonId>,
     /// The media source the server assigned — gap G1.
     pub ssrc: Option<Ssrc>,
+    /// O número da sessão desta conexão.
+    ///
+    /// Com o `ssrc`, é o que diz se a volta foi um resgate de assento ou um
+    /// servidor que subiu de novo: ver [`crate::assento::assento_resgatado`].
+    sessao: Option<SessionId>,
     /// What the server is called.
     pub server: String,
     /// The picture the server chose for itself, if it chose one.
@@ -542,7 +547,7 @@ impl Room {
     pub fn adopt(&mut self, info: &SessionInfo, nickname: &str) {
         self.reabrir(
             info.person,
-            info.ssrc,
+            (info.ssrc, info.id),
             info.server.clone(),
             info.voice_rooms.clone(),
             info.channels.clone(),
@@ -575,9 +580,9 @@ impl Room {
     /// servidor já trata como `not_a_member` mas que a tela nunca tira do
     /// roster.
     ///
-    /// **Menos o da própria pessoa, quando o servidor o devolveu.** Um `ssrc`
-    /// igual na sessão nova prova que o servidor resgatou o assento de quem
-    /// caiu ([`crate::assento::assento_resgatado`]); ele a senta de novo sem
+    /// **Menos o da própria pessoa, quando o servidor o devolveu.** O mesmo
+    /// `ssrc` numa sessão de número maior prova que o servidor resgatou o
+    /// assento de quem caiu ([`crate::assento::assento_resgatado`]); ele a senta de novo sem
     /// avisar a ela, e a fotografia que segue pula a própria pessoa. Esquecido
     /// aqui, o assento se perdia na própria tela — e com ele o áudio, que o
     /// segue —, e a entrada que o motor refaz numa sala com senha, sem a senha,
@@ -585,20 +590,22 @@ impl Room {
     fn reabrir(
         &mut self,
         person: PersonId,
-        ssrc: Ssrc,
+        conexao: crate::assento::Conexao,
         server: String,
         voice_rooms: Vec<VoiceRoomInfo>,
         channels: Vec<ChannelInfo>,
         permissions: Vec<Permission>,
     ) {
-        // Antes de o `ssrc` mudar: é a comparação dos dois que diz.
+        // Antes de o `ssrc` e a sessão mudarem: é a comparação que diz.
+        let (ssrc, sessao) = conexao;
         let resgatada = crate::assento::assento_resgatado(
-            self.ssrc,
-            ssrc,
+            self.ssrc.zip(self.sessao),
+            conexao,
             self.entradas.confirmada(self.current_voice_room),
         );
         self.me = Some(person);
         self.ssrc = Some(ssrc);
+        self.sessao = Some(sessao);
         self.server = server;
         // **Esquecida aqui, e reposta pelo quadro que vem logo atrás.** Sem
         // isto, entrar num servidor de antes desta versão — que não manda o
@@ -1097,6 +1104,7 @@ impl Room {
                 self.instancia = identidade.clone();
             }
             ServerMessage::Session {
+                id,
                 person,
                 ssrc,
                 server,
@@ -1113,7 +1121,7 @@ impl Room {
                 // rodava.
                 self.reabrir(
                     *person,
-                    *ssrc,
+                    (*ssrc, *id),
                     server.clone(),
                     voice_rooms.clone(),
                     channels.clone(),
@@ -2275,6 +2283,34 @@ mod tests {
             .is_some_and(|seats| seats.contains(&PersonId(7))));
     }
 
+    /// A sessão da volta dentro da carência: o mesmo `ssrc` de [`session`],
+    /// numa sessão de número maior — é como o servidor devolve um assento.
+    fn sessao_resgatada() -> ServerMessage {
+        let ServerMessage::Session {
+            ssrc,
+            person,
+            server,
+            voice_rooms,
+            channels,
+            roles,
+            permissions,
+            ..
+        } = session()
+        else {
+            unreachable!("`session` é uma `Session`")
+        };
+        ServerMessage::Session {
+            id: SessionId(2),
+            person,
+            ssrc,
+            server,
+            voice_rooms,
+            channels,
+            roles,
+            permissions,
+        }
+    }
+
     /// O `Pong` do `Ping` que o motor manda atrás de cada pedido de entrada.
     fn entrada_decidida() -> ServerMessage {
         ServerMessage::Pong {
@@ -2353,8 +2389,8 @@ mod tests {
         let mut room = room();
         room.apply(&entrada_decidida());
 
-        // A volta: a mesma sessão de antes, com o mesmo `ssrc`.
-        room.apply(&session());
+        // A volta dentro da carência: o mesmo `ssrc`, numa sessão nova.
+        room.apply(&sessao_resgatada());
         assert!(
             sentada_em(&room, VOICE_ROOM),
             "a volta com o `ssrc` resgatado esqueceu o assento que o servidor devolveu: {:?}",
@@ -2371,6 +2407,33 @@ mod tests {
             "a recusa da entrada refeita tirou da sala quem o servidor resgatou: {:?}",
             room.current_voice_room
         );
+    }
+
+    /// N1 da rodada 2 do lote I-a: depois de um reinício do servidor, um `ssrc`
+    /// repetido não é resgate.
+    ///
+    /// O servidor recomeça a contar `ssrc` e sessões em 1 a cada subida, e quem
+    /// volta pode receber o mesmo `ssrc` de antes — com uma sessão de número
+    /// igual ou menor. Tomado por resgate, ele deixava a pessoa sentada na
+    /// própria tela e fora de toda sala no servidor, com o microfone aberto para
+    /// lugar nenhum.
+    #[test]
+    fn um_ssrc_repetido_depois_de_um_reinicio_do_servidor_nao_e_resgate() {
+        let mut room = room();
+        room.apply(&entrada_decidida());
+
+        // O servidor subiu de novo: a mesma sessão 1 e o mesmo `ssrc` 700.
+        room.apply(&session());
+
+        assert_eq!(
+            room.current_voice_room, None,
+            "um `ssrc` repetido depois de um reinício do servidor foi tomado por assento \
+             resgatado: a pessoa se vê na sala e o servidor não a tem em sala nenhuma"
+        );
+        assert!(!room
+            .seats
+            .get(&VOICE_ROOM)
+            .is_some_and(|seats| seats.contains(&PersonId(7))));
     }
 
     /// E a volta com `ssrc` novo é sessão nova: o servidor não devolveu assento.

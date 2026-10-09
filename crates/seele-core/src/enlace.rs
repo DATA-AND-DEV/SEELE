@@ -2397,6 +2397,7 @@ struct Motor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Queda {
     ssrc: seele_proto::ids::Ssrc,
+    sessao: seele_proto::ids::SessionId,
     confirmada: Option<VoiceRoomId>,
 }
 
@@ -2935,6 +2936,7 @@ impl Motor {
         if let Some(cliente) = self.cliente.take() {
             self.queda = Some(Queda {
                 ssrc: cliente.session().ssrc,
+                sessao: cliente.session().id,
                 confirmada: self.entradas.confirmada(self.voice_room),
             });
         }
@@ -3099,8 +3101,8 @@ impl Motor {
                 // `ssrc` da conexão que caiu. Ver `crate::assento`.
                 let resgatada = self.queda.and_then(|queda| {
                     crate::assento::assento_resgatado(
-                        Some(queda.ssrc),
-                        cliente.session().ssrc,
+                        Some((queda.ssrc, queda.sessao)),
+                        (cliente.session().ssrc, cliente.session().id),
                         queda.confirmada,
                     )
                 });
@@ -6775,11 +6777,13 @@ mod tests {
         }
     }
 
-    /// M3 no motor: a volta com o mesmo `ssrc` é o servidor devolvendo o
-    /// assento, e a recusa da entrada que `restabelecer` refaz sem a senha
-    /// devolve a pessoa a ele. Com `ssrc` novo, não havia assento a devolver.
+    /// M3 no motor: a volta com o mesmo `ssrc`, numa sessão de número maior, é
+    /// o servidor devolvendo o assento, e a recusa da entrada que `restabelecer`
+    /// refaz sem a senha devolve a pessoa a ele. Com `ssrc` novo não havia
+    /// assento a devolver, e com o mesmo `ssrc` numa sessão de número igual o
+    /// servidor subiu de novo (N1 da rodada 2): também não.
     ///
-    /// O servidor de teste devolve sempre o `ssrc` 1.
+    /// O servidor de teste devolve sempre o `ssrc` 1 na sessão 1.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_volta_com_o_assento_resgatado_nao_o_perde_para_a_reentrada_recusada() {
         let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
@@ -6789,9 +6793,22 @@ mod tests {
             operator_text: None,
         };
 
-        for (ssrc_da_queda, depois) in [
-            (seele_proto::ids::Ssrc(1), Some(VoiceRoomId(5))),
-            (seele_proto::ids::Ssrc(9), None),
+        for (ssrc_da_queda, sessao_da_queda, depois) in [
+            (
+                seele_proto::ids::Ssrc(1),
+                seele_proto::ids::SessionId(0),
+                Some(VoiceRoomId(5)),
+            ),
+            (
+                seele_proto::ids::Ssrc(9),
+                seele_proto::ids::SessionId(0),
+                None,
+            ),
+            (
+                seele_proto::ids::Ssrc(1),
+                seele_proto::ids::SessionId(1),
+                None,
+            ),
         ] {
             let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
             let (avisos, _avisos_rx) = mpsc::unbounded_channel();
@@ -6799,6 +6816,7 @@ mod tests {
             motor.voice_room = Some(VoiceRoomId(5));
             motor.queda = Some(Queda {
                 ssrc: ssrc_da_queda,
+                sessao: sessao_da_queda,
                 confirmada: Some(VoiceRoomId(5)),
             });
 
@@ -6813,7 +6831,7 @@ mod tests {
             motor.ouvir_o_assento(&entrada_decidida());
             assert_eq!(
                 motor.voice_room, depois,
-                "com o `ssrc` da queda {ssrc_da_queda:?}, a recusa da entrada refeita deixou a \
+                "com o `ssrc` {ssrc_da_queda:?} e a sessão {sessao_da_queda:?} da queda, a recusa da entrada refeita deixou a \
                  volta em {:?}",
                 motor.voice_room
             );

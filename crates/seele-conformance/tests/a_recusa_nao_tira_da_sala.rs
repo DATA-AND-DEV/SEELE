@@ -62,6 +62,7 @@ use seele_proto::ids::{PersonId, VoiceRoomId};
 use seele_server::persistence::{channels::Channels, Location};
 use seele_server::{admissao, Daemon, ServerConfig};
 
+mod porta;
 mod vaga;
 
 const SENHA: &str = "coelho-branco-42";
@@ -77,11 +78,17 @@ const PRAZO: Duration = Duration::from_secs(15);
 const ASSENTAR: Duration = Duration::from_millis(500);
 
 async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
+    servidor_em(0, Location::Memory).await
+}
+
+/// Um servidor nesta porta, com este banco. A porta e o banco de antes são o
+/// que faz o servidor que sobe de novo ser o mesmo, com o mesmo certificado.
+async fn servidor_em(porta: u16, banco: Location) -> Result<(SocketAddr, Arc<Daemon>)> {
     let daemon = Arc::new(
-        Daemon::bind(ServerConfig {
+        porta::ligar_insistindo(ServerConfig {
             name: "Casa".into(),
-            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
-            database: Location::Memory,
+            listen: SocketAddr::from(([127, 0, 0, 1], porta)),
+            database: banco,
             ..ServerConfig::default()
         })
         .await?,
@@ -186,9 +193,14 @@ fn quem_e(conexao: &Connection) -> PersonId {
 
 /// Entra numa sala pela FFI e espera as três pontas concordarem: o servidor a
 /// sentou, a tela a desenha lá, e o gatilho do áudio a dá por dentro.
-async fn sentar_pela_ffi(conexao: &Connection, daemon: &Daemon, sala: VoiceRoomId) {
+async fn sentar_pela_ffi(
+    conexao: &Connection,
+    daemon: &Daemon,
+    sala: VoiceRoomId,
+    senha: Option<&str>,
+) {
     conexao
-        .enter_voice_room(sala.get(), None)
+        .enter_voice_room(sala.get(), senha.map(str::to_owned))
         .expect("a sessão acabou");
     let quem = quem_e(conexao);
     let fim = tokio::time::Instant::now() + PRAZO;
@@ -249,7 +261,7 @@ async fn quem_e_recusado_noutra_sala_continua_na_sua_e_com_o_audio() -> Result<(
     let a = VoiceRoomId(p.snapshot().voice_rooms[0].id);
     assert_ne!(a, trancada, "a sala padrão e a trancada são a mesma");
 
-    sentar_pela_ffi(&p, &daemon, a).await;
+    sentar_pela_ffi(&p, &daemon, a, None).await;
     p.enter_voice_room(trancada.get(), Some("errada".into()))
         .expect("a sessão acabou");
     continua_em(&p, &daemon, a, "M1").await;
@@ -275,7 +287,7 @@ async fn um_apelido_tomado_nao_tira_ninguem_da_sala() -> Result<()> {
     let p = entrar_pela_ffi(config(casa.path(), endereco, "p")).await;
     let a = VoiceRoomId(p.snapshot().voice_rooms[0].id);
 
-    sentar_pela_ffi(&p, &daemon, a).await;
+    sentar_pela_ffi(&p, &daemon, a, None).await;
     p.set_nickname("lia".into()).expect("a sessão acabou");
     continua_em(&p, &daemon, a, "M5").await;
 
@@ -321,6 +333,66 @@ async fn quem_esta_fora_e_e_recusado_continua_fora() -> Result<()> {
 
     p.disconnect();
     daemon.shutdown();
+    Ok(())
+}
+
+/// **M6**: o servidor cai sem despedida e sobe de novo na mesma porta, com o
+/// mesmo banco. Ele não resgata assento nenhum — os assentos guardados morrem
+/// com o processo —, e a reentrada sem a senha é recusada: a pessoa fica fora
+/// de sala no servidor, e tem de ficar fora de sala na tela e no áudio.
+///
+/// N1 da rodada 2 do lote I-a. O `ssrc` e o número da sessão recomeçam em 1 a
+/// cada subida do servidor; com uma pessoa só, ela volta com o mesmo `ssrc` de
+/// antes, e o cliente o tomava por resgate. Com áudio de verdade, o microfone
+/// ficava aberto para lugar nenhum.
+#[tokio::test(flavor = "multi_thread")]
+async fn depois_de_um_reinicio_do_servidor_a_reentrada_recusada_deixa_fora_de_sala() -> Result<()> {
+    let _vaga = vaga::minha();
+    let pasta = tempfile::tempdir()?;
+    let banco = pasta.path().join("seele.db");
+    let (endereco, daemon) = servidor_em(0, Location::File(banco.clone())).await?;
+    let porta = endereco.port();
+    let casa = tempfile::tempdir()?;
+    let p = entrar_pela_ffi(config(casa.path(), endereco, "p")).await;
+    let sala = VoiceRoomId(p.snapshot().voice_rooms[0].id);
+    trancar(&daemon, sala).await;
+    sentar_pela_ffi(&p, &daemon, sala, Some(SENHA)).await;
+    let quem = quem_e(&p);
+
+    // A queda do processo que hospeda, sem despedida, e a volta.
+    daemon.shutdown();
+    daemon.wait_idle().await;
+    drop(daemon);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (_, de_novo) = servidor_em(porta, Location::File(banco)).await?;
+
+    // A FFI volta sozinha, e o motor refaz a entrada sem a senha.
+    assert!(
+        esperar(Duration::from_secs(30), || recusada(&p)).await,
+        "M6: a reentrada sem senha depois da volta não foi recusada, e o teste mediu outra \
+         coisa"
+    );
+    tokio::time::sleep(ASSENTAR).await;
+    assert_eq!(
+        no_servidor(&de_novo, quem).await,
+        None,
+        "M6: o servidor que subiu de novo sentou a pessoa, e o teste mediu outra coisa"
+    );
+    assert_eq!(
+        sala_na_tela(&p),
+        None,
+        "M6: o servidor subiu de novo sem assento nenhum, e um `ssrc` repetido foi tomado \
+         por resgate: a pessoa se vê na sala e o servidor não a tem em sala nenhuma"
+    );
+    assert_eq!(
+        abertura(&p),
+        AberturaDoAudio::ForaDeSala,
+        "M6: o gatilho do áudio dá por dentro de uma sala quem o servidor não tem em sala \
+         nenhuma: o microfone abre para lugar nenhum"
+    );
+
+    p.disconnect();
+    de_novo.shutdown();
     Ok(())
 }
 
