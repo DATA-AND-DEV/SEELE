@@ -37,7 +37,7 @@ pub mod mods;
 pub mod types;
 
 use std::net::{SocketAddr, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -238,8 +238,9 @@ pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
 /// A impressão digital da identidade desta máquina.
 ///
 /// A mesma chave com que este computador entra em qualquer servidor, e a mesma
-/// impressão que o outro lado vê — `identity.key` sob o `home`, criada na
-/// primeira vez se ainda não existir.
+/// impressão que o outro lado vê — `identity.key` na pasta da identidade
+/// ([`pasta_da_identidade`], ADR 0061), criada na primeira vez se ainda não
+/// existir.
 ///
 /// Existe porque quem hospeda precisa se reconhecer no próprio servidor **antes**
 /// de bater na própria porta, e o app não pode calcular isso sozinho: a regra de
@@ -250,14 +251,56 @@ pub fn permissao_de_microfone() -> PermissaoDeMicrofone {
 ///
 /// Falha se a identidade não puder ser lida nem criada.
 pub fn impressao_desta_maquina(home: &str) -> Result<String, ConnectionError> {
-    let chave =
-        identity::load_or_create(&PathBuf::from(home).join("identity.key")).map_err(|error| {
-            tracing::warn!(%error, "identity unavailable");
-            ConnectionError::IdentityUnavailable
-        })?;
+    impressao_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
+}
+
+/// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama. Separado
+/// para o teste não mexer no ambiente do processo, que os outros testes leem.
+fn impressao_com(home: &str, variavel: Option<&str>) -> Result<String, ConnectionError> {
+    let arquivo = arquivo_da_identidade_com(Path::new(home), variavel);
+    let chave = identity::load_or_create(&arquivo).map_err(|error| {
+        tracing::warn!(%error, "identity unavailable");
+        ConnectionError::IdentityUnavailable
+    })?;
     Ok(seele_core::key_fingerprint(
         chave.verifying_key().as_bytes(),
     ))
+}
+
+/// A variável que diz onde mora a identidade desta máquina. ADR 0061.
+///
+/// O valor é o caminho absoluto de uma **pasta**; a chave é
+/// `<pasta>/identity.key`, no formato do ADR 0017. Quem a põe é o launcher,
+/// apontando a pasta da identidade do próprio processo: assim uma versão aberta
+/// por outra é a mesma pessoa, e não uma chave nova na pasta de dados da linha
+/// (`dados/servidor-<linha>`). O mesmo nome, com o mesmo contrato, na
+/// `linha/0.15` e em `seele_lancador::inicializacao`.
+pub const VARIAVEL_DA_IDENTIDADE: &str = "SEELE_IDENTIDADE";
+
+/// A pasta da identidade: a de `SEELE_IDENTIDADE`, quando ela não está vazia;
+/// senão, `home`, que é a de sempre.
+///
+/// **Só a chave sai daí.** O banco, os pins, os conhecidos e as preferências
+/// continuam em `home` (o `SEELE_HOME`), que é o que separa as pastas de dados
+/// de cada linha. ADR 0061, «O contrato da variável».
+#[must_use]
+pub fn pasta_da_identidade(home: &Path, variavel: Option<&str>) -> PathBuf {
+    match variavel {
+        Some(pasta) if !pasta.is_empty() => PathBuf::from(pasta),
+        _ => home.to_path_buf(),
+    }
+}
+
+/// O arquivo da chave, `<pasta da identidade>/identity.key` (ADR 0017). **É o
+/// único lugar que monta o caminho**, e os dois leitores passam por ele; o
+/// guarda `so_um_lugar_monta_o_caminho_da_chave` prende isso.
+fn arquivo_da_identidade_com(home: &Path, variavel: Option<&str>) -> PathBuf {
+    pasta_da_identidade(home, variavel).join("identity.key")
+}
+
+/// O arquivo da chave desta máquina, com a variável do processo.
+fn arquivo_da_identidade(home: &Path) -> PathBuf {
+    arquivo_da_identidade_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
 }
 
 /// How often measurements are refreshed.
@@ -1340,7 +1383,9 @@ impl Connection {
             .collect();
 
         let home = PathBuf::from(&config.home);
-        let key = identity::load_or_create(&home.join("identity.key")).map_err(|error| {
+        // ADR 0061: a chave mora na pasta da identidade da máquina, quando o
+        // launcher a diz; os pins e o resto continuam em `home`.
+        let key = identity::load_or_create(&arquivo_da_identidade(&home)).map_err(|error| {
             tracing::warn!(%error, "identity unavailable");
             ConnectionError::IdentityUnavailable
         })?;
@@ -6071,6 +6116,166 @@ mod a_volta_recusada_diz_o_motivo {
              `fim_da_recusa` ficam verdes e a tela pode voltar a dizer «credencial recusada» \
              para toda volta recusada:\n{braco}"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod a_identidade_e_uma_por_maquina {
+    use std::path::{Path, PathBuf};
+
+    use super::{impressao_com, pasta_da_identidade};
+
+    fn pasta(nome: &str) -> PathBuf {
+        let caminho = std::env::temp_dir().join(format!(
+            "seele-ffi-identidade-{nome}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&caminho).unwrap();
+        caminho
+    }
+
+    /// O contrato do ADR 0061: a pasta da variável, quando ela não está vazia;
+    /// senão, a de hoje.
+    #[test]
+    fn a_pasta_da_identidade_e_a_da_variavel_quando_ela_nao_esta_vazia() {
+        let home = Path::new("/um/home");
+        assert_eq!(
+            pasta_da_identidade(home, Some("/a/maquina")),
+            PathBuf::from("/a/maquina")
+        );
+        assert_eq!(
+            pasta_da_identidade(home, Some("")),
+            home,
+            "vazia vale como ausente"
+        );
+        assert_eq!(pasta_da_identidade(home, None), home);
+    }
+
+    /// **A pessoa é a mesma nas duas linhas.** Com a variável, a impressão sai
+    /// da chave da pasta da máquina, e nenhuma chave nova nasce na pasta de
+    /// dados da linha — que é o que faria a pessoa ser outra nos servidores
+    /// 0.15.
+    #[test]
+    fn com_a_variavel_a_impressao_e_a_da_chave_da_maquina() {
+        let maquina = pasta("maquina");
+        let dados_da_linha = pasta("dados-da-linha");
+        std::fs::write(maquina.join("identity.key"), [5_u8; 32]).unwrap();
+        let esperada = seele_core::key_fingerprint(
+            super::identity::load_or_create(&maquina.join("identity.key"))
+                .unwrap()
+                .verifying_key()
+                .as_bytes(),
+        );
+
+        let lida = impressao_com(
+            dados_da_linha.to_str().unwrap(),
+            Some(maquina.to_str().unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(lida, esperada);
+        assert!(
+            !dados_da_linha.join("identity.key").exists(),
+            "uma chave nova nasceu na pasta de dados: a pessoa seria outra nesta linha"
+        );
+        let _ = std::fs::remove_dir_all(&maquina);
+        let _ = std::fs::remove_dir_all(&dados_da_linha);
+    }
+
+    /// Sem a variável, tudo como antes: a chave mora em `home`.
+    #[test]
+    fn sem_a_variavel_a_chave_e_a_de_home() {
+        let home = pasta("home");
+        std::fs::write(home.join("identity.key"), [6_u8; 32]).unwrap();
+        let esperada = seele_core::key_fingerprint(
+            super::identity::load_or_create(&home.join("identity.key"))
+                .unwrap()
+                .verifying_key()
+                .as_bytes(),
+        );
+        assert_eq!(
+            impressao_com(home.to_str().unwrap(), None).unwrap(),
+            esperada
+        );
+        assert_eq!(
+            impressao_com(home.to_str().unwrap(), Some("")).unwrap(),
+            esperada
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// O código de produção de `lib.rs`: o arquivo sem os módulos
+    /// `#[cfg(test)]`.
+    ///
+    /// Aqui, e não na `linha/0.15`, os módulos de teste ficam **espalhados**
+    /// entre funções de produção (`onde_mora_hoje`, `impressao_a_conferir`,
+    /// `pares_que_esta_versao_atende` vêm depois deles). Cortar no primeiro
+    /// `#[cfg(test)]`, como o guarda da 0.15 faz, deixaria de fora metade do
+    /// arquivo. Cada módulo de teste é de primeiro nível e fecha numa linha
+    /// `}` sozinha, que é onde a produção recomeça.
+    fn so_producao(fonte: &str) -> String {
+        let marca = format!("\n#[cfg({})]\n", "test");
+        let mut pedacos = fonte.split(marca.as_str());
+        let mut producao = pedacos.next().unwrap().to_owned();
+        for pedaco in pedacos {
+            let fim = pedaco
+                .find("\n}\n")
+                .expect("um módulo de teste sem a linha `}` que o fecha");
+            producao.push_str(&pedaco[fim + 3..]);
+        }
+        producao
+    }
+
+    /// **Os dois leitores de produção passam pela mesma resolução.** O
+    /// `impressao_desta_maquina` e o `connect` liam `identity.key` sob o `home`
+    /// cada um; um que continuasse lendo direto deixaria a pessoa com duas
+    /// chaves. As agulhas são montadas em tempo de execução para este teste não
+    /// ser contado.
+    #[test]
+    fn so_um_lugar_monta_o_caminho_da_chave() {
+        let fonte = so_producao(include_str!("lib.rs"));
+        // O guarda do guarda: a produção que vem **depois** dos módulos de
+        // teste está no texto lido, e nenhum teste está.
+        for depois_dos_testes in [
+            "pub async fn onde_mora_hoje",
+            "pub const fn pares_que_esta_versao_atende",
+        ] {
+            assert!(
+                fonte.contains(depois_dos_testes),
+                "a leitura da produção perdeu `{depois_dos_testes}`, que vem depois dos testes"
+            );
+        }
+        assert!(
+            !fonte.contains("fn a_pasta_da_identidade_e_a_da_variavel_quando_ela_nao_esta_vazia"),
+            "a leitura da produção levou um teste junto"
+        );
+
+        let monta = format!("{}(\"{}\")", ".join", "identity.key");
+        assert_eq!(
+            fonte.matches(&monta).count(),
+            1,
+            "a chave é procurada fora de `arquivo_da_identidade`"
+        );
+        // E cada um dos dois leitores usa o montador: a impressão desta
+        // máquina, e o `connect`.
+        for uso in [
+            format!("{}(Path::new(home), variavel)", "arquivo_da_identidade_com"),
+            format!("load_or_create(&{}(&home))", "arquivo_da_identidade"),
+        ] {
+            assert!(
+                fonte.contains(&uso),
+                "um dos dois leitores não passa pelo montador: falta `{uso}`"
+            );
+        }
     }
 }
 
