@@ -72,6 +72,11 @@ const RULES: &[(&str, &[&str])] = &[
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
     ("seele-web", &["seele-proto"]),
+    // A volta de um MOD da janela: o QuickJS do cliente, sem thread e sem E/S.
+    // Folha: não conhece o protocolo nem o manifesto, e as capacidades de uma
+    // API entram como lista. O desktop e o celular a embrulham, cada um com a
+    // sua espera, e nenhum dos dois reimplementa nada dela.
+    ("seele-motor", &[]),
     // O motor de MODs do celular (ADR 0057, D-web-1): o QuickJS do desktop em
     // `wasm32-wasip1`, que roda num Worker separado do protocolo. Folha.
     ("seele-motor-web", &[]),
@@ -137,9 +142,12 @@ const RULES: &[(&str, &[&str])] = &[
     // construído junto de nenhuma versão do produto — que é a propriedade
     // inteira da regra dele. O contrário — o lançador vendo a casca — é o que
     // trancaria alguém fora de uma versão que já funcionava.
+    // E a casca vê o motor de MODs, que é folha: o executor da janela é do
+    // cliente, roda o código de um MOD e não conhece o protocolo. Ele saiu do
+    // `executor.rs` para o celular rodar a mesma volta.
     (
         "seele-app",
-        &["seele-ffi", "seele-server", "seele-lancador"],
+        &["seele-ffi", "seele-server", "seele-lancador", "seele-motor"],
     ),
     // Tooling. Must not depend on the product, or `cargo xtask` would need the
     // product to compile before it could check the product.
@@ -284,6 +292,17 @@ mod tests {
         assert!(evaluate("seele-motor-web", &[]).is_empty());
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
+    }
+
+    /// A volta é uma folha: o QuickJS e mais nada. Ela não conhece o manifesto
+    /// nem o protocolo, e as capacidades de uma API entram como lista; uma
+    /// aresta para o `seele-proto` puxaria o protocolo para dentro do `.wasm`
+    /// do motor do celular.
+    #[test]
+    fn a_volta_dos_mods_nao_depende_de_ninguem_do_workspace() {
+        assert!(evaluate("seele-motor", &[]).is_empty());
+        assert_eq!(evaluate("seele-motor", &[edge("seele-proto")]).len(), 1);
+        assert_eq!(evaluate("seele-motor", &[edge("seele-core")]).len(), 1);
     }
 
     #[test]

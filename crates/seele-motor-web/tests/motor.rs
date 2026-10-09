@@ -124,7 +124,7 @@ fn ate_o_pronto(motor: &Motor, anfitriao: &Anotador) -> serde_json::Value {
 #[test]
 fn o_preludio_e_o_texto_do_executor_do_desktop() {
     let executor = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/seele-app/src/executor.rs"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../seele-motor/src/preludio.rs"),
     )
     .expect("o executor do desktop");
     assert!(
