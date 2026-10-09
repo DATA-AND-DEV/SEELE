@@ -10606,6 +10606,12 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "camada-mods.js",
             "aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };",
         ),
+        // O campo antes da referência: a cópia `pergunta` de `aceitarOsMods`
+        // não pode seguir alcançando a credencial (rodada 1, M1).
+        (
+            "camada-mods.js",
+            "if (aceitePendente) aceitePendente.credencial = null;",
+        ),
         ("camada-mods.js", "aceitePendente = null;"),
         ("camada-mods.js", "const pergunta = aceitePendente;"),
         ("camada-mods.js", "if (!pergunta) return;"),

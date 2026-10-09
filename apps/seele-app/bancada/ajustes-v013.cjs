@@ -264,9 +264,16 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   await baterComOConvite(page);
   const antesDoAceite = (await conectsFeitos(page)).length;
   const conferenciasAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'mods_instalados').length);
+  // A cópia que `aceitarOsMods` guarda da pergunta (`pergunta`) enquanto o
+  // catálogo responde: a bancada guarda a mesma referência, para ver o que ela
+  // ainda alcança depois de a pessoa desistir.
+  await page.evaluate(() => { window.testPergunta = aceitePendente; });
   await page.click('#mods-aceitar');
   await page.waitForFunction(() => testCalls.some(c => c.cmd === 'instalar_mod_do_catalogo'), null, { timeout: 3000 });
   await page.click('#mods-recusar');
+  // Ainda durante a obtenção: o catálogo não respondeu, e a cópia continua viva.
+  assert.equal(await page.evaluate(() => window.testPergunta?.credencial ?? null), null,
+    'desistir enquanto o catálogo responde soltou a pergunta, mas a cópia que `aceitarOsMods` guarda dela continua com a credencial — alcançável enquanto o catálogo trava');
   // A obtenção termina e confere o que chegou (a segunda leitura da lista); o
   // que viria depois dela é a volta.
   await page.waitForFunction(

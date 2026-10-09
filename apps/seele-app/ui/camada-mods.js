@@ -175,6 +175,11 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
  */
 function fecharAceiteDeMods() {
   $("mods-aceite").hidden = true;
+  // **O campo antes da referência** (lote R, rodada 1). `aceitarOsMods` guarda
+  // uma cópia da pergunta (`pergunta`) enquanto o catálogo responde, e soltar
+  // só `aceitePendente` deixava a credencial alcançável por ela pelo tempo que
+  // o catálogo travasse.
+  if (aceitePendente) aceitePendente.credencial = null;
   aceitePendente = null;
   if (focoAntesDoAceite && document.contains(focoAntesDoAceite)) {
     focoAntesDoAceite.focus();
