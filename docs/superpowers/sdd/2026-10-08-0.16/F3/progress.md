@@ -265,3 +265,14 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Ruling: a altura do `operador.barra` no celular é limitada, com rolagem por
     dentro — custo se errado: uma barra de MOD alta rola em vez de crescer, e o
     número sai da M3 no iPhone.
+- **A extração do executor entrou** (`d6d1a115`; merge no meu ramo em
+  `4734141`). O prelúdio está em `crates/seele-motor/src/preludio.rs`. As
+  tarefas 3 (passos 5 e 5b), 4 e 8 esperam só a orquestradora liberar, depois
+  da bateria da sétima integração.
+- **O `Atomics` sai do desktop na API 6** (decisão minha, com a recomendação da
+  F4): é a única global que difere entre o nativo e o `.wasm`, sem threads não
+  serve em nenhum dos dois, e nenhum dos três MODs oficiais o usa (lido nos três
+  repositórios; os três arquivos achados na MESA são cabeçalhos do QuickJS numa
+  pasta de build). Tarefa 3, passo 5b.
+  - Ruling: o `SharedArrayBuffer` fica — custo se errado: nenhum, porque ele
+    existe nos dois alvos e, sem threads, é só um buffer.

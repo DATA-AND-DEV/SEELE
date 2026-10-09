@@ -1121,12 +1121,23 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
    é do dono.
 4. **As capacidades ausentes por plataforma continuam** (§2): o que a ponte
    web não tiver some do `SeeleUI` lá.
+5. **As globais do contexto são as mesmas nos dois alvos.** A F4 extraiu a
+   volta do executor para `crates/seele-motor` (merge `d6d1a115`), e a tabela
+   `crates/seele-motor/tests/casos.json` roda nas duas pontas, com uma sonda
+   das globais. A única diferença medida é o **`Atomics`**: o QuickJS do
+   `wasm32-wasip1` não o expõe, e sem threads ele não serve para nada em
+   nenhum dos dois. **Decidido em 09/10: a API 6 tira o `Atomics` também do
+   desktop**, e a lista `globais_so_do_nativo` da sonda fica vazia. Um MOD
+   que dependesse dele rodaria no desktop e quebraria no celular, que é o
+   contrário de «um contrato só». Nenhum dos três MODs oficiais o usa [c,
+   lido nos três repositórios]. O `SharedArrayBuffer` fica: existe nos dois, e
+   sem threads é só um buffer. [tarefa 3, passo 5b]
 
 **A superfície que ele expõe é a deste documento, e é a mesma do desktop**:
 
-- o prelúdio inteiro de `executor.rs` (`SeeleMods.request`, `SeeleUI.*`, os
-  quatro temporizadores, o `console` da 0.15.1), com `SeeleUI.retrato()` no
-  lugar de `SeeleMods.snapshot()`;
+- o prelúdio inteiro, hoje em `crates/seele-motor/src/preludio.rs`
+  (`SeeleMods.request`, `SeeleUI.*`, os quatro temporizadores, o `console` da
+  0.15.1), com `SeeleUI.retrato()` no lugar de `SeeleMods.snapshot()`;
 - as capacidades **por plataforma** (§2): o que a ponte web não tiver fica
   ausente;
 - o teto de 12 KiB por mensagem, conferido antes de postar, igual
