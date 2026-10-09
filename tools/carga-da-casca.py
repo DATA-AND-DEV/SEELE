@@ -104,7 +104,10 @@ const P = (id, nome, opcoes = {}) => ({
   signal: 96, sync_band: "Verde", is_self: false, ...opcoes,
 });
 const SEELE_QUADRO = {
-  caminho: "UPNP", link: "Up", link_state: "Verified", server: "TÓQUIO-3",
+  // `link` é o `LinkState` de `seele-ffi`: "Online", ou { InternalBattery: {…} }
+  // quando cai. Um valor que o produto nunca manda faz a casca achar que caiu
+  // (e o celular confiou num "Up" que não existe; ver 0.16/celular).
+  caminho: "UPNP", link: "Online", link_state: "Verified", server: "TÓQUIO-3",
   icon_revision: 0, me: 1, nickname: "rafa",
   voice_rooms: [
     { id: 1, name: "PONTE", limit: 8, password_required: false, occupied_by_us: true,

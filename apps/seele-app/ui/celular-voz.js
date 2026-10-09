@@ -193,8 +193,10 @@
   CASCA.depoisDeDesenhar.push((snapshot) => {
     const aqui = (snapshot.voice_rooms ?? []).find((s) => s.occupied_by_us);
     // Fora de sala, com o enlace caído ou fora do PushToTalk, ninguém segura.
+    // O `link` é o `LinkState` de `seele-ffi`: "Online", ou a bateria interna
+    // (`{ InternalBattery: {…} }`) quando cai — como a CHAMADA do desktop lê.
     const segurarAgora = snapshot.voice_mode === "PushToTalk";
-    if (!aqui || snapshot.link !== "Up" || !segurarAgora) soltar();
+    if (!aqui || snapshot.link !== "Online" || !segurarAgora) soltar();
     modoSegurar = segurarAgora;
     faixa.hidden = !aqui;
     if (!aqui) return;
