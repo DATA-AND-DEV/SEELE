@@ -9,7 +9,8 @@
 //!
 //! # O cookie
 //!
-//! Os 16 primeiros bytes do HMAC-SHA256 do segredo do ponto sobre
+//! Os 16 primeiros bytes do HMAC-SHA256 (o `hmac` do RustCrypto) do segredo do
+//! ponto sobre
 //! `"SEELE-ENC/2 cookie\0" ‖ família ‖ IP ‖ janela`, com a janela de [`JANELA`]
 //! segundos em `u64` big-endian. Vale a janela corrente e a anterior: de dois a
 //! quatro minutos. **Preso ao IP, e não à porta**: a sala o recebe pela escuta
@@ -25,8 +26,13 @@
 
 use std::net::IpAddr;
 
+use hmac::{Hmac, KeyInit, Mac};
 use seele_proto::encontro::BYTES_DO_COOKIE;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
+
+/// O HMAC-SHA256 do `hmac` do RustCrypto. Nada de cripto escrita aqui: a conta
+/// e a comparação são dele.
+type HmacSha256 = Hmac<Sha256>;
 
 /// Quantos segundos tem uma janela do cookie. Ele vale a corrente e a
 /// anterior.
@@ -79,86 +85,74 @@ impl Cookies {
         Self { segredo }
     }
 
-    /// O cookie deste IP na janela de `agora_unix`.
+    /// O cookie deste IP na janela de `agora_unix`: os primeiros
+    /// [`BYTES_DO_COOKIE`] bytes do HMAC.
     #[must_use]
     pub fn emitir(&self, ip: IpAddr, agora_unix: u64) -> [u8; BYTES_DO_COOKIE] {
-        self.na_janela(ip, agora_unix / JANELA)
-    }
-
-    /// Se este cookie é o deste IP, na janela corrente ou na anterior.
-    ///
-    /// A comparação não para no primeiro byte diferente: quanto ela leva não
-    /// diz quantos bytes acertaram.
-    #[must_use]
-    pub fn confere(&self, ip: IpAddr, cookie: &[u8; BYTES_DO_COOKIE], agora_unix: u64) -> bool {
-        let janela = agora_unix / JANELA;
-        let corrente = iguais(&self.na_janela(ip, janela), cookie);
-        let anterior = iguais(&self.na_janela(ip, janela.saturating_sub(1)), cookie);
-        corrente | anterior
-    }
-
-    fn na_janela(&self, ip: IpAddr, janela: u64) -> [u8; BYTES_DO_COOKIE] {
-        let mut mensagem = ROTULO.to_vec();
-        match ip.to_canonical() {
-            IpAddr::V4(quatro) => {
-                mensagem.push(4);
-                mensagem.extend_from_slice(&quatro.octets());
-            }
-            IpAddr::V6(seis) => {
-                mensagem.push(6);
-                mensagem.extend_from_slice(&seis.octets());
-            }
-        }
-        mensagem.extend_from_slice(&janela.to_be_bytes());
-        let completo = hmac_sha256(&self.segredo, &mensagem);
+        let completo = self
+            .na_janela(ip, agora_unix / JANELA)
+            .finalize()
+            .into_bytes();
         let mut cookie = [0_u8; BYTES_DO_COOKIE];
         for (destino, byte) in cookie.iter_mut().zip(completo) {
             *destino = byte;
         }
         cookie
     }
+
+    /// Se este cookie é o deste IP, na janela corrente ou na anterior.
+    ///
+    /// **Pelo `verify_truncated_left` do `hmac`**, que compara os primeiros
+    /// bytes do HMAC com o cookie pelo `ct_eq` do `ctutils` (o `digest` 0.11):
+    /// a comparação não
+    /// para no primeiro byte diferente, e quanto ela leva não diz quantos
+    /// acertaram. As duas janelas são conferidas sempre, e juntadas sem atalho.
+    /// O guarda de fonte `o_cookie_so_e_conferido_pelo_verify_do_hmac` prende
+    /// isso.
+    #[must_use]
+    pub fn confere(&self, ip: IpAddr, cookie: &[u8; BYTES_DO_COOKIE], agora_unix: u64) -> bool {
+        let janela = agora_unix / JANELA;
+        let corrente = self
+            .na_janela(ip, janela)
+            .verify_truncated_left(cookie)
+            .is_ok();
+        let anterior = self
+            .na_janela(ip, janela.saturating_sub(1))
+            .verify_truncated_left(cookie)
+            .is_ok();
+        corrente | anterior
+    }
+
+    /// O HMAC do segredo sobre o rótulo, a família, o IP e a janela, ainda por
+    /// fechar.
+    fn na_janela(&self, ip: IpAddr, janela: u64) -> HmacSha256 {
+        let mut mac = mac_com(&self.segredo);
+        mac.update(ROTULO);
+        match ip.to_canonical() {
+            IpAddr::V4(quatro) => {
+                mac.update(&[4]);
+                mac.update(&quatro.octets());
+            }
+            IpAddr::V6(seis) => {
+                mac.update(&[6]);
+                mac.update(&seis.octets());
+            }
+        }
+        mac.update(&janela.to_be_bytes());
+        mac
+    }
 }
 
-/// Os bytes iguais, sem parar no primeiro diferente.
-fn iguais(um: &[u8; BYTES_DO_COOKIE], outro: &[u8; BYTES_DO_COOKIE]) -> bool {
-    um.iter()
-        .zip(outro)
-        .fold(0_u8, |diferenca, (a, b)| diferenca | (a ^ b))
-        == 0
-}
-
-/// O HMAC-SHA256 da RFC 2104, sobre o `sha2`.
+/// Um HMAC-SHA256 com esta chave.
 ///
-/// Escrito aqui porque o crate `hmac` não está na árvore, e são dez linhas: a
-/// chave maior que o bloco vira o hash dela, e o resto é `H((K ⊕ opad) ‖ H((K ⊕
-/// ipad) ‖ m))`. Os vetores da RFC 4231 o conferem.
-fn hmac_sha256(chave: &[u8], mensagem: &[u8]) -> [u8; 32] {
-    const BLOCO: usize = 64;
-    let mut bloco = [0_u8; BLOCO];
-    if chave.len() > BLOCO {
-        for (destino, byte) in bloco.iter_mut().zip(Sha256::digest(chave)) {
-            *destino = byte;
-        }
-    } else {
-        for (destino, byte) in bloco.iter_mut().zip(chave) {
-            *destino = *byte;
-        }
+/// O HMAC aceita chave de qualquer tamanho (a maior que o bloco vira o hash
+/// dela), e o `new_from_slice` dele nunca recusa: o braço do erro é
+/// inalcançável.
+fn mac_com(chave: &[u8]) -> HmacSha256 {
+    match <HmacSha256 as KeyInit>::new_from_slice(chave) {
+        Ok(mac) => mac,
+        Err(_) => unreachable!("o HMAC aceita chave de qualquer tamanho"),
     }
-    let ipad: Vec<u8> = bloco.iter().map(|byte| byte ^ 0x36).collect();
-    let opad: Vec<u8> = bloco.iter().map(|byte| byte ^ 0x5c).collect();
-    let dentro = Sha256::new()
-        .chain_update(&ipad)
-        .chain_update(mensagem)
-        .finalize();
-    let fora = Sha256::new()
-        .chain_update(&opad)
-        .chain_update(dentro)
-        .finalize();
-    let mut saida = [0_u8; 32];
-    for (destino, byte) in saida.iter_mut().zip(fora) {
-        *destino = byte;
-    }
-    saida
 }
 
 #[cfg(test)]
@@ -178,20 +172,27 @@ mod testes {
             .collect()
     }
 
+    /// O HMAC-SHA256 inteiro, pelo construtor que os cookies usam.
+    fn tag(chave: &[u8], mensagem: &[u8]) -> [u8; 32] {
+        let mut mac = mac_com(chave);
+        mac.update(mensagem);
+        mac.finalize().into_bytes().into()
+    }
+
     /// Os vetores da RFC 4231 (HMAC-SHA256): o 1, o 2, e o 6, com a chave
     /// maior que o bloco.
     #[test]
     fn o_hmac_e_o_da_rfc_4231() {
         assert_eq!(
-            hmac_sha256(&[0x0b; 20], b"Hi There").to_vec(),
+            tag(&[0x0b; 20], b"Hi There").to_vec(),
             hex("b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7")
         );
         assert_eq!(
-            hmac_sha256(b"Jefe", b"what do ya want for nothing?").to_vec(),
+            tag(b"Jefe", b"what do ya want for nothing?").to_vec(),
             hex("5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")
         );
         assert_eq!(
-            hmac_sha256(
+            tag(
                 &[0xaa; 131],
                 b"Test Using Larger Than Block-Size Key - Hash Key First"
             )
@@ -261,6 +262,47 @@ mod testes {
         let um = Cookies::novo().emitir(ip("203.0.113.7"), AGORA);
         let outro = Cookies::novo().emitir(ip("203.0.113.7"), AGORA);
         assert_ne!(um, outro, "dois pontos sortearam o mesmo segredo");
+    }
+
+    /// O código de produção de um arquivo deste crate, sem os módulos de
+    /// teste: o guarda de baixo não pode casar com o próprio texto.
+    fn producao(fonte: &str) -> &str {
+        fonte.split("\n#[cfg(test)]").next().unwrap_or(fonte)
+    }
+
+    /// **O cookie só é conferido pelo `verify` do HMAC, em tempo constante.**
+    ///
+    /// Uma comparação que para no primeiro byte diferente deixa o tempo de
+    /// resposta dizer quantos bytes acertaram, e o cookie de um IP se forja
+    /// byte a byte. O tempo constante não se prova bem por um teste de tempo,
+    /// e por isso o guarda é de fonte: no `seele-encontro`, o cookie não é
+    /// comparado com `==` nem `!=`, nem por uma comparação escrita à mão, e a
+    /// conferência passa pelo `verify_truncated_left` do `hmac`, que compara
+    /// com o `ct_eq` do `ctutils`.
+    #[test]
+    fn o_cookie_so_e_conferido_pelo_verify_do_hmac() {
+        let cookie = producao(include_str!("cookie.rs"));
+        let lib = producao(include_str!("lib.rs"));
+        assert!(
+            cookie.contains(".verify_truncated_left("),
+            "o cookie deixou de ser conferido pelo verify do hmac, em tempo constante"
+        );
+        assert!(
+            !cookie.contains("fn iguais") && !cookie.contains(".fold("),
+            "o cookie voltou a ser comparado por uma função escrita à mão"
+        );
+        for (nome, fonte) in [("cookie.rs", cookie), ("lib.rs", lib)] {
+            for (numero, linha) in fonte.lines().enumerate() {
+                let codigo = linha.split("//").next().unwrap_or_default();
+                assert!(
+                    !(codigo.contains("cookie")
+                        && (codigo.contains("==") || codigo.contains("!="))),
+                    "{nome}:{}: o cookie é comparado com == ou !=, que para no primeiro byte \
+                     diferente: {linha}",
+                    numero + 1
+                );
+            }
+        }
     }
 
     #[test]

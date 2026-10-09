@@ -91,9 +91,13 @@ ouve um `DESAFIO` com o cookie. O ponto não guarda nada para isso, e o pedido
 
 - O cookie são os 16 primeiros bytes do HMAC-SHA256 do segredo do ponto sobre
   `"SEELE-ENC/2 cookie\0" ‖ família ‖ IP ‖ janela`, com a janela de 120 s; vale
-  a corrente e a anterior (de dois a quatro minutos). O HMAC é escrito sobre o
-  `sha2`, conferido com os vetores da RFC 4231, e a comparação não depende do
-  tempo.
+  a corrente e a anterior (de dois a quatro minutos). O HMAC é o `hmac` do
+  RustCrypto, conferido com os vetores da RFC 4231, e a conferência é o
+  `verify_truncated_left` dele, que compara em tempo constante (o `ct_eq` do
+  `ctutils`). Nenhuma cripto escrita no ponto, e um guarda de fonte prende que o
+  cookie não é comparado com `==`. **Não o `ring`**, que também está na árvore:
+  ele compila C no build, e o ponto é Rust puro para quem o reimplanta numa VPS
+  sem compilador de C.
 - **Preso ao IP, e não à porta.** A sala recebe o cookie pela escuta de avisos,
   e o socket do servidor, que sai pelo mesmo IP público, usa o mesmo. O `MOROU`
   leva o cookie da janela corrente, para a sala renová-lo antes de ele vencer:
