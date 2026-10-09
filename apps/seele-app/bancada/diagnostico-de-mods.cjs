@@ -9,14 +9,19 @@
 // - **a mídia de cada ponto**: o que os renderers, o retrato de avatar e os
 //   cartões da API 3 anotam, somado por ponto de contribuição;
 // - **a gestão**: «quem pinta cada lugar» desenhada a partir do registro e da
-//   mídia de verdade, e redesenhada quando os bytes chegam;
+//   mídia de verdade, e redesenhada quando os bytes chegam; o bloco da região
+//   e das páginas de cada MOD, logo abaixo; e «quem desenha o que», com a
+//   escolha desta máquina;
 // - **o modo de desenvolvedor**: que os contornos deixam o clique chegar ao
-//   canal de baixo, não tiram o foco de quem escreve, e contornam só o que a
-//   rolagem deixa à vista;
+//   canal de baixo, não tiram o foco de quem escreve, contornam só o que a
+//   rolagem e uma página aberta deixam à vista — sem o traço de um nó que o
+//   recorte zera, e com o vazio que mostra onde um MOD entraria —, e dizem
+//   quantos lugares o teto de 300 deixou de fora;
 // - **o som**: `decodeAudioData` de verdade, sob a política que o produto
 //   declara (`default-src 'self'`, sem `media-src`) — medido no Chromium, o
-//   motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
-//   (depois) do Plano 1D.
+//   motor do WebView2; a medida no app de verdade, no WKWebView antes e
+//   depois do WebAudio e no WebView2, está em
+//   `docs/evidencias/som-de-mod-wkwebview/registro.md`.
 //
 // Só a ponte nativa é simulada, como em `avatares-do-mod.cjs`.
 //
@@ -588,6 +593,112 @@ async function quemPintaCadaLugar(navegador, servidor) {
 }
 
 /**
+ * **A região e as páginas de cada MOD aparecem na aba** (pendência 49, item 5).
+ * `desenharQuemPinta` desenha, logo abaixo dos onze lugares, o bloco que soma a
+ * mídia da faixa e das páginas de cada MOD (`desenharAMidiaDosMods`). A bancada
+ * de node mede a soma e as frases; esta mede que a aba as desenha, com uma
+ * recusa da região e uma da página do mesmo MOD.
+ */
+async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  await pagina.evaluate(() => {
+    testTable.midia_do_mod = (args) => Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } });
+    const x = instancia("mod/x");
+    const mod = { id: "mod/x", hash: "mod-x" };
+    desenharARegiaoDoMod(mod, x, [{ forma: "midia", chave: "na-regiao", fonte: "img/regiao.png" }]);
+    const conjunto = superficiesDoMod(mod, x);
+    conjunto.criar({ id: "mesa", tipo: "pagina", titulo: "Mesa de X" });
+    conjunto.de("mesa").montar([{ forma: "midia", chave: "na-pagina", fonte: "img/pagina.png" }]);
+    $("tela-server").hidden = false;
+    $("painel-mods").hidden = false;
+  });
+  await pagina.click("#mods-aba-diagnostico");
+  const bloco = () => document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? "(sem bloco)";
+  await esperarQue(
+    pagina,
+    () => /a região e as páginas de mod\/x: 2 recusadas — img\/regiao\.png não está no pacote; img\/pagina\.png não está no pacote/
+      .test(document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? ""),
+    "a aba DIAGNÓSTICO não desenhou, abaixo dos onze lugares, o bloco da região e das páginas de mod/x com as duas "
+      + "recusas e os motivos: a mídia recusada da faixa e da página de um MOD chega ao seele.log e ao MOD, e não à aba",
+    bloco,
+  );
+  assert.deepEqual(erros, [], `a página lançou erro durante o bloco da região e das páginas: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
+/**
+ * **A recusa pelo teto de bytes diz os números à aba** (T8 m1 da revisão ampla
+ * do Plano 1D). O MOD e o registro recebiam «N bytes somados aos M já
+ * montados passam do teto de T»; a anotação que a aba lê dizia só o teto, e
+ * quem abria a aba não sabia se a mídia era grande demais ou se as outras já
+ * tinham ocupado o lugar. Três formas, cada uma com o seu tamanho: a mídia
+ * (`montarMidia`), o fundo de uma caixa (`montarFundoDeMidia`) e o retrato
+ * (`montarRetrato`), na região de um MOD, cujo teto é de 10 MiB. A anotação
+ * de cada uma é lida no renderer.
+ *
+ * **E as recusas pelo mesmo teto ocupam uma vaga só na aba** (M6 da revisão
+ * do K3). A aba guarda até três motivos, iguais pelo texto: com os números,
+ * cada recusa pelo teto virava um texto diferente, e três delas tiravam da aba
+ * o motivo de outro tipo — aqui, um arquivo que não está no pacote. A vaga
+ * leva os números da primeira, na ordem em que as mídias foram montadas, e
+ * quantas mais o mesmo teto recusou.
+ */
+async function aRecusaPeloTetoDeBytesDizOsNumeros(navegador, servidor) {
+  const { pagina, erros } = await abrirASessao(navegador, servidor);
+  const MIB = 1024 * 1024;
+  const medido = await pagina.evaluate(async (mib) => {
+    const foto = () => {
+      const tela = document.createElement("canvas");
+      tela.width = tela.height = 8;
+      return tela.toDataURL();
+    };
+    const tamanhos = { "img/midia.png": 11 * mib, "img/fundo.png": 12 * mib, "img/retrato.png": 13 * mib };
+    testTable.midia_do_mod = (args) => (tamanhos[args.caminho]
+      ? Promise.resolve({ papel: "imagem", uri: foto(), bytes: tamanhos[args.caminho] })
+      : Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } }));
+    desenharARegiaoDoMod({ id: "mod/t", hash: "mod-t" }, instancia("mod/t"), [
+      { forma: "midia", chave: "midia", fonte: "img/midia.png" },
+      { forma: "caixa", chave: "fundo", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
+      { forma: "retrato", chave: "retrato", fonte: "img/retrato.png", inicial: "T" },
+      { forma: "midia", chave: "falta", fonte: "img/falta.png" },
+    ]);
+    const daRegiao = () => [...regioesDosMods.values()].find((regiao) => regiao.id === "mod/t");
+    for (let volta = 0; volta < 20; volta += 1) {
+      if (daRegiao()?.midiasAnotadas().filter((a) => a.situacao === "recusada").length === 4) break;
+      await new Promise((pronto) => setTimeout(pronto, 25));
+    }
+    return {
+      anotados: (daRegiao()?.midiasAnotadas() ?? []).filter((a) => a.situacao === "recusada").map((a) => a.motivo),
+      soma: midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t") ?? null,
+    };
+  }, MIB);
+  const teto = 10 * MIB;
+  const esperados = [11, 12, 13].map((n) => `${n * MIB} bytes somados aos 0 já montados passam do teto de ${teto} bytes de mídia deste lugar`);
+  assert.equal(
+    medido.anotados.length,
+    4,
+    "a mídia, o fundo e o retrato de 11, 12 e 13 MiB, numa região de 10, e o arquivo que não está no pacote não "
+      + `foram os quatro recusados: ${JSON.stringify(medido.anotados)}`,
+  );
+  assert.deepEqual(
+    medido.anotados.filter((motivo) => motivo.includes("teto")).sort(),
+    esperados,
+    "a recusa pelo teto de bytes foi anotada sem os números — quanto a mídia tinha e quanto já estava montado —, "
+      + "e quem abre a aba não sabe se a mídia era grande demais ou se o lugar já estava cheio",
+  );
+  assert.deepEqual(
+    medido.soma?.motivos,
+    [`${esperados[0]} (e mais 2 recusas pelo mesmo teto)`, "img/falta.png não está no pacote"],
+    "três recusas pelo mesmo teto ocuparam vagas diferentes na aba, e o motivo de outro tipo — o arquivo que não "
+      + "está no pacote — saiu dela; ou a vaga do teto perdeu os números ou a conta das outras: "
+      + `${JSON.stringify(medido.soma)}`,
+  );
+  assert.equal(medido.soma?.recusada, 4, `a aba não contou as quatro recusas: ${JSON.stringify(medido.soma)}`);
+  assert.deepEqual(erros, [], `a página lançou erro durante a recusa pelo teto de bytes: ${erros.join(" | ")}`);
+  await pagina.close();
+}
+
+/**
  * **«Não está de pé» só de quem não está carregado** (I-3 da revisão ampla do
  * Plano 1D). A disputa diz `ausente` quando o escolhido não tem candidata no
  * lugar, e a aba traduzia isso sempre por «não está de pé» — de um MOD de pé,
@@ -1058,6 +1169,131 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     comAPagina.cartoes > 0,
     "com a página de um MOD aberta, a lista de pessoas, que ela não cobre, perdeu os contornos",
   );
+
+  // **Um nó com área que o recorte zera não ganha traço** (T7 M3 da revisão
+  // ampla do Plano 1D), e **o vazio dentro do recorte continua contornado**.
+  // Uma lista rolada até um item acabar rente ao topo dela: a caixa do item
+  // encosta no recorte, a interseção tem altura zero, e o contorno saía como o
+  // traço de 2 px do `min-height` da folha. O vazio, sem área, é o que mostra
+  // onde um MOD entraria, e é contornado de propósito.
+  //
+  // **Nas quatro bordas, e no recorte sem altura** (M3 da revisão do K3): só a
+  // de cima deixava esta prova verde com o critério só na borda de cima.
+  const recorte = await pagina.evaluate(async () => {
+    const quadros = async () => {
+      for (let volta = 0; volta < 2; volta += 1) {
+        await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+      }
+    };
+    const contornos = () => [...document.querySelectorAll('.contorno-de-ponto[data-ponto="pessoa.avatar"]')]
+      .map((c) => `${c.style.left} ${c.style.top} ${c.style.width}×${c.style.height}`);
+    await quadros();
+    const antes = contornos();
+    const no = (pessoa, estilo) => {
+      const filho = document.createElement("span");
+      filho.dataset.pessoaDoAvatar = pessoa;
+      filho.style.cssText = `position: absolute; display: block; ${estilo}`;
+      return filho;
+    };
+    // A lista vai de 1200 a 1320 px e de 300 a 400 px, rolada 20 px. Cada
+    // item de 50×20 encosta numa borda dela por fora — em cima, embaixo, à
+    // esquerda e à direita —, e o vazio fica dentro dela, a (1210, 330). O
+    // resto da lista é o que dá o que rolar, e não é lugar nenhum.
+    const lista = document.createElement("div");
+    lista.style.cssText = "position: fixed; left: 1200px; top: 300px; width: 120px; height: 100px; overflow: hidden;";
+    const resto = document.createElement("div");
+    resto.style.cssText = "position: absolute; left: 0; top: 0; width: 10px; height: 400px;";
+    lista.append(
+      no("em-cima", "left: 0; top: 0; width: 50px; height: 20px;"),
+      no("embaixo", "left: 60px; top: 120px; width: 50px; height: 20px;"),
+      no("a-esquerda", "left: -50px; top: 40px; width: 50px; height: 20px;"),
+      no("a-direita", "left: 120px; top: 60px; width: 50px; height: 20px;"),
+      no("vazio", "left: 10px; top: 50px; width: 0; height: 0;"),
+      resto,
+    );
+    // E um recorte sem altura, a 450 px: o item dentro dele tem área, e nada
+    // dele se vê.
+    const semAltura = document.createElement("div");
+    semAltura.style.cssText = "position: fixed; left: 1200px; top: 450px; width: 120px; height: 0; overflow: hidden;";
+    semAltura.append(no("sem-altura", "left: 0; top: 0; width: 50px; height: 20px;"));
+    document.body.append(lista, semAltura);
+    lista.scrollTop = 20;
+    await quadros();
+    const depois = contornos();
+    const rolou = lista.scrollTop;
+    lista.remove();
+    semAltura.remove();
+    await quadros();
+    return { rolou, novos: depois.filter((c) => !antes.includes(c)) };
+  });
+  assert.equal(recorte.rolou, 20, "a lista da prova do recorte não rolou: os itens não encostam nas bordas dela");
+  // Onde cada item ganharia o traço, se ganhasse.
+  const bordas = {
+    "em cima": "1200px 300px",
+    embaixo: "1260px 400px",
+    "à esquerda": "1200px 320px",
+    "à direita": "1320px 340px",
+    "no recorte sem altura": "1200px 450px",
+  };
+  const vazaram = Object.entries(bordas)
+    .filter(([, onde]) => recorte.novos.some((c) => c.startsWith(`${onde} `)))
+    .map(([borda]) => borda);
+  assert.deepEqual(
+    vazaram,
+    [],
+    "um item com área encostado no recorte, sem nada à vista, ganhou contorno — o traço de 2 px do recorte vazio — "
+      + `${vazaram.join(", ")}: ${recorte.novos.join(", ")}`,
+  );
+  assert.deepEqual(
+    recorte.novos,
+    ["1210px 330px 0px×0px"],
+    "o contêiner vazio dentro do recorte perdeu o contorno, que é o que mostra onde um MOD entraria — ou outro "
+      + `contorno apareceu com ele: ${recorte.novos.join(", ")}`,
+  );
+
+  // **O teto diz quantos ficaram de fora** (T7 M2 da revisão ampla do Plano
+  // 1D). Com mais de 300 lugares à vista, os do fim do mapa saíam sem contorno
+  // e sem uma palavra: quem escreve o MOD concluía que o lugar dele não
+  // existe. Trezentos e vinte retratos de 4 px no alto da janela, todos à
+  // vista, somados aos que já tinham contorno.
+  const teto = await pagina.evaluate(async () => {
+    const quadros = async () => {
+      for (let volta = 0; volta < 2; volta += 1) {
+        await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+      }
+    };
+    const nota = () => document.querySelector(".contornos-dos-pontos-aviso .contornos-dos-pontos-nota")?.textContent ?? "";
+    await quadros();
+    const antes = document.querySelectorAll(".contorno-de-ponto").length;
+    const notaAntes = nota();
+    const muitos = document.createElement("div");
+    muitos.style.cssText = "position: fixed; left: 0; top: 0; width: 400px; display: flex; flex-wrap: wrap;";
+    for (let i = 0; i < 320; i += 1) {
+      const retrato = document.createElement("span");
+      retrato.dataset.pessoaDoAvatar = `muitos-${i}`;
+      retrato.style.cssText = "display: block; width: 4px; height: 4px;";
+      muitos.append(retrato);
+    }
+    document.body.append(muitos);
+    await quadros();
+    const comMuitos = { caixas: document.querySelectorAll(".contorno-de-ponto").length, nota: nota() };
+    muitos.remove();
+    await quadros();
+    return { antes, notaAntes, ...comMuitos, notaDepois: nota() };
+  });
+  assert.ok(
+    teto.antes > 0 && teto.antes < 300,
+    `antes dos trezentos e vinte retratos havia ${teto.antes} contornos: a prova do teto precisa começar abaixo dele`,
+  );
+  assert.equal(teto.notaAntes, "", `sem nada passar do teto, a camada disse que cortou: «${teto.notaAntes}»`);
+  assert.equal(teto.caixas, 300, `com mais lugares à vista que o teto, a camada desenhou ${teto.caixas} contornos, e não 300`);
+  assert.equal(
+    teto.nota,
+    `${teto.antes + 320 - 300} pontos não contornados (teto de 300)`,
+    `com ${teto.antes + 320} lugares à vista, o teto de 300 deixou ${teto.antes + 20} sem contorno, e a camada não `
+      + `disse quantos — quem escreve o MOD conclui que o lugar dele não existe: «${teto.nota}»`,
+  );
+  assert.equal(teto.notaDepois, "", `os retratos saíram, todos voltaram a caber, e a nota ficou: «${teto.notaDepois}»`);
 
   // E desligar tira tudo, e esquece.
   await pagina.evaluate(() => {
@@ -1566,6 +1802,8 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
+  aRegiaoEAsPaginasDeCadaModAparecemNaAba,
+  aRecusaPeloTetoDeBytesDizOsNumeros,
   oEscolhidoDePeNaoEDitoComoQuemNaoEstaDePe,
   quemDesenhaOQueDizAEscolhaDestaMaquina,
   oModoDeDesenvolvedorContornaSemTomarNada,

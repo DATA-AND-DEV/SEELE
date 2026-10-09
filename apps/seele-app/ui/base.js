@@ -582,6 +582,21 @@ async function aguardarVezDePedidoDeMod(geracao) {
   try { await vez; } finally { pedidosDeModNaFila -= 1; }
 }
 
+/**
+ * Uma recusa de pedido de MOD, dita a quem hospeda antes de ser lançada.
+ *
+ * O formato de toda recusa de MOD que a janela registra — o id na frente da
+ * frase, `"aviso"`, e o id em campo próprio, que o Rust escreve como
+ * `mod_id=` —, o mesmo de `anotarRecusa`. Num lugar só: escrito à mão nas
+ * quatro recusas de `pedirAoServidor`, um id que escorregasse de posição numa
+ * delas tirava a linha da busca por ele no `seele.log`.
+ * `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`, em
+ * `tests/frontend.rs`, confere este e que `pedirAoServidor` o chama.
+ */
+function dizerRecusaDoPedido(id, oQue) {
+  registrarNoAnfitriao("pedido-de-mod", `${id}: ${oQue}`, "aviso", id);
+}
+
 async function pedirAoServidor(id, canal, valor) {
   const geracaoDoPedido = geracaoDaSessao;
   await ouvirMod;
@@ -594,23 +609,23 @@ async function pedirAoServidor(id, canal, valor) {
   // dentro, um `catch` do MOD ou uma promessa que ninguém pega — e em nenhum
   // dos dois casos quem hospeda fica sabendo qual das três portas fechou.
   if (!daGeracaoDePe(geracao)) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: geração ${geracao} não é a de pé`, "aviso", id);
+    dizerRecusaDoPedido(id, `geração ${geracao} não é a de pé`);
     throw new Error("disconnected");
   }
   if (pedidosDeMod.size >= 8) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: oito pedidos em voo, este não cabe`, "aviso", id);
+    dizerRecusaDoPedido(id, "oito pedidos em voo, este não cabe");
     throw new Error("too-many-requests");
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
   if (new TextEncoder().encode(payload).length > 12 * 1024) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: carga de ${payload.length} caracteres não cabe`, "aviso", id);
+    dizerRecusaDoPedido(id, `carga de ${payload.length} caracteres não cabe`);
     throw new Error("request-too-large");
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pedidosDeMod.delete(request);
-      registrarNoAnfitriao("pedido-de-mod", `${id}: pedido ${request} venceu o prazo sem resposta`, "aviso", id);
+      dizerRecusaDoPedido(id, `pedido ${request} venceu o prazo sem resposta`);
       reject(new Error("timeout"));
     }, 15000);
     pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });
@@ -1531,6 +1546,9 @@ function aContribuicaoPinta(contribuicao, destino) {
     .escolhida === contribuicao;
 }
 
+/** A vaga de cada teto em cada soma de `contarAMidia`: o índice, o primeiro motivo e quantas mais. */
+const vagasDosTetos = new WeakMap();
+
 /**
  * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
  *
@@ -1541,8 +1559,19 @@ function aContribuicaoPinta(contribuicao, destino) {
  * índice partiria um par substituto. Duas cópias desta regra seriam duas
  * respostas no dia em que uma mudasse.
  *
+ * **As recusas pelo mesmo teto ocupam uma vaga só** (M6 da revisão do K3). O
+ * motivo de uma recusa por teto traz os números dela — quanto a mídia tinha,
+ * quanto já estava montado —, e cada uma é um texto: três delas ocupavam as
+ * três vagas e tiravam da aba o motivo de outro tipo. Com a chave do teto
+ * (`anotada.teto`, que `anotarMidia` grava), a vaga é uma por MOD e por teto,
+ * e diz os números da **primeira** recusa, na ordem em que as mídias foram
+ * montadas, e quantas mais o mesmo teto recusou. A primeira, e não a mais
+ * recente, porque a aba se redesenha a cada mudança de mídia e a ordem de
+ * montagem é a que não muda entre um desenho e outro; os números de cada
+ * recusa estão no `seele.log` e no evento do MOD.
+ *
  * @param {{ carregando: number, pronta: number, recusada: number, motivos: string[] }} soma
- * @param {{ situacao: string, motivo?: string }} anotada
+ * @param {{ situacao: string, motivo?: string, teto?: string }} anotada
  * @param {string} [mod] O MOD, na frente do motivo, quando a soma junta MODs.
  */
 function contarAMidia(soma, anotada, mod = "") {
@@ -1554,7 +1583,25 @@ function contarAMidia(soma, anotada, mod = "") {
     soma.recusada += 1;
     const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
     const texto = `${mod ? `${mod}: ` : ""}${motivo || "sem motivo dito"}`;
-    if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+    if (!anotada.teto) {
+      if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+      return;
+    }
+    // Fora da soma, e não um campo dela: quem a lê compara a soma inteira.
+    let vagas = vagasDosTetos.get(soma);
+    if (!vagas) {
+      vagas = new Map();
+      vagasDosTetos.set(soma, vagas);
+    }
+    const chave = `${mod}\u0000${anotada.teto}`;
+    const vaga = vagas.get(chave);
+    if (vaga) {
+      vaga.mais += 1;
+      soma.motivos[vaga.indice] = `${vaga.texto} (e mais ${vaga.mais} ${vaga.mais === 1 ? "recusa" : "recusas"} pelo mesmo teto)`;
+    } else if (soma.motivos.length < 3) {
+      vagas.set(chave, { indice: soma.motivos.length, texto, mais: 0 });
+      soma.motivos.push(texto);
+    }
   }
 }
 

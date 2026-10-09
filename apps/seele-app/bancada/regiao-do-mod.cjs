@@ -5221,6 +5221,22 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
         + `de bytes: ${pedidos} pedido(s), figura «${figura}», ${outro?.bytesDeCartao} bytes contados, recusas `
         + `${JSON.stringify(recusas)}`,
     );
+    // **E a recusa diz os números**, ao MOD e à anotação que a aba DIAGNÓSTICO
+    // lê, como a de `montarMidia` (M2 da revisão do K3): `/teto/` no `porque`
+    // passava com a anotação de volta à frase sem números.
+    if (novos !== 20) {
+      const numeros = new RegExp(`^${novos} bytes somados aos \\d+ já montados passam do teto de ${20 * 1024 * 1024}`);
+      const anotada = outro?.midiasAnotadas().find((a) => a.situacao === "recusada");
+      confere(
+        resposta,
+        numeros.test(recusas[0]?.porque ?? "")
+          && numeros.test(anotada?.motivo ?? "")
+          && (anotada?.motivo ?? "").endsWith(" bytes de mídia deste lugar"),
+        "a resposta nova do servidor passou do teto de bytes, e a recusa não disse os números — quanto a resposta "
+          + "tem, quanto já estava montado e o teto — ao MOD ou à anotação que a aba lê: porque "
+          + `${JSON.stringify(recusas[0]?.porque)}, anotada ${JSON.stringify(anotada)}`,
+      );
+    }
     for (const r of destinos) r.soltar();
   }
 
