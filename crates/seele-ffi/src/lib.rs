@@ -4755,25 +4755,26 @@ impl<V> VozDaSala<V> {
     /// Leva o volume de quem trocou de nome para o nome novo. M-4 da rodada 1.
     ///
     /// O nome de antes deixa de guardar qualquer coisa — senão o volume valeria
-    /// para quem pegasse aquele apelido depois. Um volume que já estava no nome
-    /// novo é trocado pelo da pessoa: é dela que o servidor está falando.
+    /// para quem pegasse aquele apelido depois. O que já estava guardado no
+    /// nome novo sai **sempre**: é da pessoa que trocou que o servidor está
+    /// falando, e o volume dela — ou nenhum — é o que vale sob esse nome. Era
+    /// só trocado quando ela tinha volume; sem volume, o de outra pessoa com
+    /// aquele nome, que já saiu, passava a valer para ela (rodada 2 do lote
+    /// I-b).
     fn renomear_volume(&self, antes: &str, agora: &str) {
         let mut volumes = self
             .volumes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(chave) = volumes
+        let dela = volumes
             .keys()
             .find(|guardado| guardado.eq_ignore_ascii_case(antes))
             .cloned()
-        else {
-            return;
-        };
-        let Some(percent) = volumes.remove(&chave) else {
-            return;
-        };
+            .and_then(|chave| volumes.remove(&chave));
         volumes.retain(|guardado, _| !guardado.eq_ignore_ascii_case(agora));
-        volumes.insert(agora.to_owned(), percent);
+        if let Some(percent) = dela {
+            volumes.insert(agora.to_owned(), percent);
+        }
     }
 
     /// Os volumes guardados, como a casca os lê.
@@ -11117,6 +11118,50 @@ mod o_audio_segue_a_sala {
             HashMap::from([("rafael".to_owned(), 150)]),
             "o volume não mudou de chave: «rafa» continua guardado, e vale para quem pegar \
              o apelido depois"
+        );
+    }
+
+    /// Rodada 2 do lote I-b: quem troca para um nome que tem volume guardado de
+    /// outra pessoa não herda esse volume.
+    ///
+    /// A Rafa, sem volume nenhum, vira «lia», e há `lia: 50` de uma Lia que saiu.
+    /// A troca não mexia em nada quando quem trocou não tinha volume, e o 50 da
+    /// outra Lia passava a valer para a Rafa — contra o que `renomear_volume`
+    /// diz de si: é da pessoa que trocou que o servidor está falando.
+    #[tokio::test]
+    async fn quem_troca_para_um_nome_com_volume_velho_nao_herda_o_volume() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let room = sala_com_a_rafa(900);
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+        // O volume de uma Lia que já saiu, e nenhum para a Rafa.
+        voz.guardar_volume("lia", 50);
+
+        super::dobrar_no_room(
+            &room,
+            &voz,
+            &ServerMessage::PersonRenamed {
+                person: PersonId(11),
+                nickname: "lia".into(),
+            },
+        );
+        volta_do_laco(&mut porta, &voz, &room).await;
+
+        assert_eq!(
+            ganho_de(&voz, 900).unwrap_or(1.0),
+            1.0,
+            "a Rafa trocou de nome para «lia» e passou a tocar com o volume que alguém deu \
+             a outra Lia, que já saiu"
+        );
+        assert!(
+            voz.volumes().is_empty(),
+            "o volume da outra Lia continua guardado sob o nome que agora é da Rafa: {:?}",
+            voz.volumes()
         );
     }
 
