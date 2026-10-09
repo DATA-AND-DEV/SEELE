@@ -185,6 +185,10 @@ async function limparSessaoEncerrada({ pararDeHospedar }) {
   mostrarVeredito(null);
   desenhado = null;
   linhaAberta = null;
+  // Os rascunhos, as prévias, os retratos e os volumes lidos daquela sessão:
+  // as chaves deles são números que o servidor dá, e a sessão seguinte —
+  // inclusive a do RECONECTAR — os reusa. Ver `esquecerOEstadoDaSessao`.
+  esquecerOEstadoDaSessao();
   await encerrarBusca();
   // **Nada a apagar.** Os três blocos do boot eram do formulário da entrada
   // antiga, que os acendia conforme a conexão subia; a entrada da 0.9.0 tem uma

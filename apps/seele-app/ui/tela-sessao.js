@@ -2794,6 +2794,13 @@ function desenharEnlace(link) {
  *
  * Só em memória, por sessão. Persistir rascunho é uma decisão sobre onde gravar
  * o que alguém escreveu e ainda não mandou, e ela não foi tomada.
+ *
+ * **Por sessão quer dizer que ele acaba com ela** (F1-vazamento). A chave é o
+ * número do canal, que o servidor dá, e o canal 1 de um servidor não é o de
+ * outro: sem esquecer, o rascunho de um servidor aparecia no campo do seguinte.
+ * `esquecerOEstadoDaSessao` o esvazia nas duas saídas — inclusive no RECONECTAR
+ * da tela de fim, que abre uma sessão nova. A reconexão automática da bateria
+ * interna é a mesma sessão, e não perde nada.
  */
 const rascunhos = new Map();
 
@@ -3840,6 +3847,36 @@ async function sairDoServidorParaAEntrada() {
   // seguinte. Havia um `limparConvite()` aqui, e ele não existia mais.
 }
 
+/**
+ * Esquece o que a sessão que acabou deixou nesta janela. F1-vazamento.
+ *
+ * Os mapas de topo deste arquivo são por sessão, e as chaves deles são números
+ * que o servidor dá: o canal 1 de um servidor não é o canal 1 de outro, nem o
+ * anexo 11. Nada os esvaziava ao sair, e o rascunho escrito no canal 1 de um
+ * servidor aparecia no campo do canal 1 do seguinte — com uma prévia de imagem
+ * de lá junto.
+ *
+ * Chamada pelas duas saídas: `ejetar` (SAIR DO SERVIDOR) e
+ * `limparSessaoEncerrada`, em `tela-fim.js`, que o RECONECTAR e a volta à
+ * entrada atravessam. A reconexão automática da bateria interna não passa por
+ * aqui: ela é a mesma sessão, e não perde nada.
+ *
+ * O guarda `todo_mapa_de_topo_da_sessao_e_esquecido_ao_sair` lê todo mapa de
+ * topo deste arquivo e cobra cada um aqui. Um mapa novo entra nesta lista, ou
+ * entra no guarda como exceção com o motivo escrito.
+ */
+function esquecerOEstadoDaSessao() {
+  rascunhos.clear();
+  previas.clear();
+  previasFechadas.clear();
+  previasDeLink.clear();
+  volumesLidos.clear();
+  // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
+  // e os casamentos da busca com o cursor e o contador.
+  esquecerRetratos();
+  limparBusca();
+}
+
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
 async function ejetar() {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
@@ -3867,7 +3904,7 @@ async function ejetar() {
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
   esquecerOLinkDaPorta();
-  esquecerRetratos();
+  esquecerOEstadoDaSessao();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
   // da próxima sessão com um ato armado sobre alguém do servidor anterior.

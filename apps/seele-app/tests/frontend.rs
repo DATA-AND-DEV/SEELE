@@ -16797,6 +16797,104 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
     );
 }
 
+/// **Todo mapa de topo da tela de sessão é esquecido quando a sessão acaba.**
+/// F1-vazamento, passo 3 (1).
+///
+/// Os mapas de `tela-sessao.js` são por sessão — rascunhos por canal, prévias
+/// por anexo, retratos por pessoa —, e as chaves deles são números que o
+/// servidor dá: o canal 1 de um servidor não é o canal 1 de outro. Nada os
+/// esvaziava ao sair, e o rascunho escrito no canal 1 de um servidor aparecia
+/// no campo do canal 1 do seguinte. `esquecerOEstadoDaSessao` esvazia todos, e
+/// as duas saídas a chamam: SAIR DO SERVIDOR (`ejetar`) e as duas do fim de
+/// sessão (`limparSessaoEncerrada`, que o RECONECTAR também atravessa).
+///
+/// O guarda lê **todo** `const|let X = new Map()/new Set()` de topo do arquivo,
+/// e não uma lista daqui: o mapa que alguém acrescentar amanhã reprova na rodada
+/// em que entrar, até ser esquecido também ou ganhar uma exceção com o motivo
+/// escrito — como a marca do aviso de fone do lote J, que é desta execução e não
+/// da sessão.
+#[test]
+fn todo_mapa_de_topo_da_sessao_e_esquecido_ao_sair() {
+    // Os mapas que se esquecem por uma chamada com nome, e não pelo `.clear()`
+    // deles: a chamada esvazia o mapa e mais o que anda com ele.
+    const CHAMADAS: &[(&str, &[&str])] = &[
+        // O cache e a revisão dele, juntos.
+        ("retratos", &["esquecerRetratos()"]),
+        // Reatribuído inteiro a cada busca; o cursor e o contador vão junto.
+        (
+            "casamentosPorMensagem",
+            &["limparBusca()", "encerrarBusca()"],
+        ),
+    ];
+    // Os mapas de topo que **atravessam** sessões de propósito, cada um com o
+    // motivo por escrito. Nenhum hoje.
+    const EXCECOES: &[(&str, &str)] = &[];
+
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let mapas: Vec<String> = sessao
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha
+                .strip_prefix("const ")
+                .or_else(|| linha.strip_prefix("let "))?;
+            let (nome, valor) = resto.split_once(" = ")?;
+            (valor.starts_with("new Map(") || valor.starts_with("new Set("))
+                .then(|| nome.trim().to_owned())
+        })
+        .collect();
+    assert!(
+        mapas.len() >= 7,
+        "só {} mapas de topo achados em `tela-sessao.js` ({mapas:?}): o guarda mede quase \
+         nada, ou a forma das declarações mudou",
+        mapas.len()
+    );
+
+    let esquecer = body_of(&sessao, "function esquecerOEstadoDaSessao()");
+    for mapa in &mapas {
+        if let Some((_, motivo)) = EXCECOES.iter().find(|(nome, _)| nome == mapa) {
+            assert!(
+                !motivo.trim().is_empty(),
+                "`{mapa}` atravessa sessões sem motivo escrito"
+            );
+            continue;
+        }
+        let esquecido = match CHAMADAS.iter().find(|(nome, _)| nome == mapa) {
+            Some((_, chamadas)) => chamadas.iter().any(|chamada| names(&esquecer, chamada)),
+            None => esquecer.contains(&format!("{mapa}.clear()")),
+        };
+        assert!(
+            esquecido,
+            "`{mapa}` não é esquecido em `esquecerOEstadoDaSessao`: o que ele guardou de \
+             um servidor aparece no seguinte, sob o mesmo número:\n{esquecer}"
+        );
+    }
+    for (nome, _) in EXCECOES {
+        assert!(
+            mapas.iter().any(|mapa| mapa == nome),
+            "`{nome}` tem exceção e já não é um mapa de topo; tire-o de `EXCECOES`"
+        );
+    }
+
+    // As duas saídas o chamam.
+    assert!(
+        names(
+            &body_of(&sessao, "async function ejetar()"),
+            "esquecerOEstadoDaSessao()"
+        ),
+        "SAIR DO SERVIDOR não esquece o estado da sessão: o rascunho e as prévias de \
+         um servidor aparecem no seguinte"
+    );
+    let fim = without_comments(&read("ui/tela-fim.js"));
+    assert!(
+        names(
+            &body_of(&fim, "async function limparSessaoEncerrada("),
+            "esquecerOEstadoDaSessao()"
+        ),
+        "o fim de sessão não esquece o estado dela: o RECONECTAR e a volta à entrada \
+         levam o rascunho e as prévias para a sessão seguinte"
+    );
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
