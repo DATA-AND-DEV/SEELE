@@ -965,3 +965,145 @@
   letter-spacing: var(--seele-tracking-rotulo);
   cursor: pointer;
 }
+
+/* A coluna do celular: SEU PERFIL no alto, e a lista na ordem do spec. Os
+   grupos do desktop (e o que só o app faz, que ficou neles) não aparecem. */
+:root[data-casca="celular"] #tela-server .server-coluna > :is(.server-marca, .server-grupo, ul.server-secoes) {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-perfil {
+  display: grid;
+  gap: 8px;
+  padding: 16px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-perfil-placa {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-perfil-retrato {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-perfil-apelido {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  color: var(--seele-osso);
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-ajustes-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* SOBRE e SAIR DO SERVIDOR são ações, e não seções: o mesmo desenho de uma
+   `.server-secao`, sem a classe que o `abrirSecao` do desktop percorre. */
+:root[data-casca="celular"] .cel-ajustes-acao {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font: inherit;
+  text-align: left;
+  color: var(--seele-osso);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--seele-linha);
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+
+/* A linha MODS DESTE SERVIDOR é a saída do tema (spec, §6): ela lê o núcleo,
+   como a aba AJUSTES. */
+:root[data-casca="celular"] #tela-server #secao-mods {
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border-left: 2px solid var(--nucleo-acento);
+}
+
+:root[data-casca="celular"] #tela-server #server-modo-aberto {
+  display: none;
+}
+
+/* CONEXÃO: as sete medidas numa grade de duas colunas. */
+:root[data-casca="celular"] .cel-medidas {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+:root[data-casca="celular"] .cel-medida {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-medida dd {
+  margin: 0;
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+/* O QUE O CELULAR NÃO FAZ: os dois grupos da lista canônica. */
+:root[data-casca="celular"] .cel-fora-grupo {
+  margin-bottom: 20px;
+}
+
+:root[data-casca="celular"] .cel-fora-grupo ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+:root[data-casca="celular"] .cel-fora-grupo li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-fora-grupo strong {
+  display: block;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-fora-grupo p {
+  margin: 4px 0 0;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  line-height: 1.5;
+}
+
+/* O link para baixar o app: um alvo de 44, na cor de ação, sublinhado porque
+   sai da página. */
+:root[data-casca="celular"] .cel-baixar {
+  display: flex;
+  align-items: center;
+  min-height: var(--cel-alvo);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  color: var(--seele-laranja-nerv);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

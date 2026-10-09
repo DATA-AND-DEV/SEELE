@@ -294,6 +294,8 @@ const SELETORES_DO_NUCLEO: &[&str] = &[
     // não apaga o aviso de que algo se perdeu.
     "[data-envio=\"falhou\"]",
     "[data-envio=\"sem-resposta\"]",
+    // A linha MODS DESTE SERVIDOR em AJUSTES: a saída do tema, como a aba.
+    "#secao-mods",
 ];
 const PROPRIEDADES_DE_COR: &[&str] = &[
     "color",

@@ -1039,6 +1039,89 @@ def ajustes_medida(pg: Page) -> list[str]:
     return falhas
 
 
+ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "CONEXÃO", "IDENTIDADE",
+                    "O QUE O CELULAR NÃO FAZ", "SOBRE", "SAIR DO SERVIDOR"]
+
+
+def aba_ajustes(pg: Page) -> list[str]:
+    """A aba AJUSTES (Tarefa 9): SEU PERFIL, as seções na ordem do spec, CONEXÃO,
+    o que o celular não faz, e as ações que o desktop já tem."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(500)
+    lista = pg.evaluate("""(() => {
+        const visivel = (e) => !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        const coluna = document.querySelector('#tela-server .server-coluna');
+        const perfil = coluna.querySelector('.cel-perfil');
+        const itens = [...coluna.querySelectorAll('button')].filter(visivel)
+            .filter((b) => !b.closest('.cel-perfil')).map((b) => (b.querySelector('.server-secao-nome') ?? b).textContent.trim());
+        const primeiro = [...coluna.querySelectorAll('*')].find(visivel);
+        return { perfil: visivel(perfil) ? perfil.textContent : null, perfilNoAlto: !!perfil && perfil.contains(primeiro) || primeiro === perfil, itens };
+    })()""")
+    if not lista["perfil"] or "rafa" not in lista["perfil"] or not lista["perfilNoAlto"]:
+        falhas.append(f"SEU PERFIL não está no alto de AJUSTES: {lista['perfil']!r}")
+    if lista["itens"] != ORDEM_DE_AJUSTES:
+        falhas.append(f"AJUSTES mostra {lista['itens']}, e não {ORDEM_DE_AJUSTES}")
+
+    def abrir(id_):
+        ok = exigir_toque(pg, f"#tela-server #{id_}", falhas)
+        pg.wait_for_timeout(250)
+        return ok
+
+    def voltar():
+        exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+
+    if abrir("cel-secao-conexao"):
+        medidas = pg.evaluate("[...document.querySelectorAll('#cel-painel-conexao .cel-medida')].map((m) => [m.querySelector('.rotulo').textContent, m.querySelector('.cel-medida-valor').textContent.trim()])")
+        rotulos = [r for r, _ in medidas]
+        if rotulos != ["ATRASO", "JITTER", "PERDA", "CODEC", "CAMINHO", "UPTIME", "SINAL DA SALA"] or any(not v for _, v in medidas):
+            falhas.append(f"CONEXÃO mostra {medidas}")
+        voltar()
+
+    if abrir("cel-secao-fora"):
+        fora = pg.evaluate("""(() => [...document.querySelectorAll('#cel-painel-fora .cel-fora-grupo')].map((g) => ({
+            grupo: g.querySelector('.rotulo').textContent, itens: g.querySelectorAll('li').length,
+            link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
+        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [7, 6]:
+            falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
+        elif fora[0]["link"] != "https://seele.app.br/#baixar":
+            falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
+        voltar()
+
+    # Tocar de novo na aba AJUSTES volta à raiz.
+    if abrir("secao-aparencia"):
+        exigir_toque(pg, "#cel-aba-ajustes", falhas)
+        if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
+            falhas.append("tocar de novo na aba AJUSTES não voltou à raiz")
+
+    if abrir("secao-audio"):
+        modos = pg.evaluate("[...document.querySelectorAll('#painel-audio .server-modo')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => [b.dataset.modo, b.querySelector('.server-modo-nome').textContent])")
+        if modos != [["PushToTalk", "SEGURAR PARA FALAR"], ["VoiceActivated", "VOZ"]]:
+            falhas.append(f"o modo de voz em ÁUDIO mostra {modos}, e não SEGURAR PARA FALAR e VOZ")
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        exigir_toque(pg, "#server-modo-tecla", falhas)
+        pg.wait_for_timeout(300)
+        modo = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_voice_mode').map(([, a]) => a)")
+        if {"mode": "PushToTalk"} not in modo:
+            falhas.append(f"SEGURAR PARA FALAR mandou {modo}, e não set_voice_mode PushToTalk")
+        voltar()
+
+    if exigir_toque(pg, "#tela-server .cel-perfil-editar", falhas):
+        pg.wait_for_timeout(300)
+        if not pg.evaluate("!document.getElementById('perfil').hidden"):
+            falhas.append("EDITAR PERFIL não abriu o perfil")
+        pg.evaluate("fecharPerfil()")
+        pg.wait_for_timeout(200)
+
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if exigir_toque(pg, "#tela-server .cel-sair-do-servidor", falhas):
+        pg.wait_for_timeout(500)
+        if not pg.evaluate("window.__SEELE_HISTORICO.some(([c]) => c === 'disconnect')"):
+            falhas.append("SAIR DO SERVIDOR não saiu do servidor")
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -1056,6 +1139,9 @@ CASOS: dict[str, Caso] = {
     "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
                     raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-medida": Caso(levar=ajustes_medida, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
+    # Termina fora do servidor (SAIR DO SERVIDOR): as medidas do aparelho
+    # ficam com o ajustes-medida, que termina na lista.
+    "aba-ajustes": Caso(levar=aba_ajustes, medir=False),
 }
 
 
