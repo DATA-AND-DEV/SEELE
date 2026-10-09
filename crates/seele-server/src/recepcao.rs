@@ -37,6 +37,27 @@ use crate::server::Event;
 /// para três pendentes.
 const AVISOS_NO_CANAL: usize = 64;
 
+/// O que faz de um servidor a sala pessoal de alguém.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sala {
+    /// A chave de quem recebe: ela entra sem tocar, e conta no teto.
+    pub dono: Chave,
+    /// Quanto tempo cada toque fica tocando. O padrão é
+    /// [`crate::campainha::PRAZO_DO_TOQUE`]; um prazo curto é para as provas.
+    pub prazo_do_toque: std::time::Duration,
+}
+
+impl Sala {
+    /// A sala de `dono`, com o prazo de sempre.
+    #[must_use]
+    pub fn de(dono: Chave) -> Self {
+        Self {
+            dono,
+            prazo_do_toque: crate::campainha::PRAZO_DO_TOQUE,
+        }
+    }
+}
+
 /// O que o app de quem recebe fica sabendo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Aviso {
@@ -93,6 +114,7 @@ pub struct Recepcao {
     estado: Mutex<Estado>,
     avisos: broadcast::Sender<Aviso>,
     eventos: broadcast::Sender<Event>,
+    sala: Sala,
 }
 
 /// Os 4 primeiros símbolos do código, para o log.
@@ -104,15 +126,28 @@ impl Recepcao {
     /// A recepção da sala de `dono`, ligada ao barramento `eventos` do servidor.
     #[must_use]
     pub fn nova(dono: Chave, eventos: broadcast::Sender<Event>) -> Self {
+        Self::da_sala(Sala::de(dono), eventos)
+    }
+
+    /// A recepção desta sala, ligada ao barramento `eventos` do servidor.
+    #[must_use]
+    pub fn da_sala(sala: Sala, eventos: broadcast::Sender<Event>) -> Self {
         let (avisos, _) = broadcast::channel(AVISOS_NO_CANAL);
         Self {
             estado: Mutex::new(Estado {
-                campainha: Campainha::nova(dono),
+                campainha: Campainha::nova(sala.dono).com_prazo(sala.prazo_do_toque),
                 esperando: HashMap::new(),
             }),
             avisos,
             eventos,
+            sala,
         }
+    }
+
+    /// A sala desta recepção.
+    #[must_use]
+    pub fn sala(&self) -> Sala {
+        self.sala
     }
 
     /// Um canal com os avisos daqui em diante.

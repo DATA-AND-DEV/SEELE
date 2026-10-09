@@ -333,46 +333,96 @@ pub async fn serve(
     // é de um número que esta build não fala. Antes de qualquer quadro, o
     // desta build.
     let mut carimbo = seele_proto::version::PROTOCOL_VERSION;
-    let outcome = tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        handshake(
-            &mut send,
-            &mut recv,
-            &config,
-            &registry,
-            &server,
-            &mut carimbo,
-        ),
-    )
-    .await;
 
-    let session = match outcome {
-        Ok(Ok(session)) => session,
+    // **O aperto em três fases** (ADR 0059). A primeira e a terceira têm os 10 s
+    // de sempre, cada uma; a do toque, só na sala pessoal, tem o prazo dela, e
+    // não conta contra as outras.
+    //
+    // Fase 1: `Hello`, `Challenge` e `Response`, até a chave provada.
+    let provado = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        handshake(&mut send, &mut recv, &server, &mut carimbo),
+    )
+    .await
+    {
+        Ok(Ok(provado)) => provado,
         Ok(Err(failure)) => {
-            let _ = frame::write_em(
+            return recusar_o_aperto(
+                &connection,
                 &mut send,
                 carimbo,
-                &ServerMessage::Disconnecting {
-                    reason: failure.reason,
-                },
+                failure.reason,
+                format!("handshake refused: {}", failure.detail),
             )
             .await;
-            let _ = send.finish();
-            despedir(&connection, &mut send, b"handshake refused").await;
-            bail!("handshake refused: {}", failure.detail);
         }
         Err(_elapsed) => {
-            let _ = frame::write_em(
+            return recusar_o_aperto(
+                &connection,
                 &mut send,
                 carimbo,
-                &ServerMessage::Disconnecting {
-                    reason: DisconnectReason::HandshakeTimeout,
-                },
+                DisconnectReason::HandshakeTimeout,
+                format!("handshake exceeded {HANDSHAKE_TIMEOUT:?}"),
             )
             .await;
-            let _ = send.finish();
-            despedir(&connection, &mut send, b"handshake refused").await;
-            bail!("handshake exceeded {HANDSHAKE_TIMEOUT:?}");
+        }
+    };
+
+    // A chave de quem entrou, para a recepção saber quem saiu quando a sessão
+    // acabar. Provada na fase 1, então os 32 bytes já foram conferidos.
+    let chave_provada: Option<crate::campainha::Chave> =
+        provado.public_key.as_slice().try_into().ok();
+
+    // Fase 2, só na sala pessoal: o toque.
+    if let Some(recepcao) = &server.recepcao {
+        match tocar(&connection, &mut send, recepcao, &provado).await {
+            Toque::Segue => {}
+            Toque::Recusa(reason) => {
+                return recusar_o_aperto(
+                    &connection,
+                    &mut send,
+                    carimbo,
+                    reason,
+                    format!("a sala não deixou entrar: {reason:?}"),
+                )
+                .await;
+            }
+            Toque::Fechou => {
+                connection.close(0_u32.into(), b"parou de tocar");
+                bail!("a conexão parou de tocar sem decisão: quem ligava desistiu, ou outra conexão da mesma pessoa tomou o lugar desta");
+            }
+        }
+    }
+
+    // Fase 3: a portaria, a conta, os MODs e o `Session`.
+    let session = match tokio::time::timeout(
+        HANDSHAKE_TIMEOUT,
+        admitir(provado, &mut send, &mut recv, &config, &registry, &server),
+    )
+    .await
+    {
+        Ok(Ok(session)) => session,
+        Ok(Err(failure)) => {
+            sair_da_sala(&server, chave_provada);
+            return recusar_o_aperto(
+                &connection,
+                &mut send,
+                carimbo,
+                failure.reason,
+                format!("handshake refused: {}", failure.detail),
+            )
+            .await;
+        }
+        Err(_elapsed) => {
+            sair_da_sala(&server, chave_provada);
+            return recusar_o_aperto(
+                &connection,
+                &mut send,
+                carimbo,
+                DisconnectReason::HandshakeTimeout,
+                format!("handshake exceeded {HANDSHAKE_TIMEOUT:?}"),
+            )
+            .await;
         }
     };
 
@@ -426,6 +476,10 @@ pub async fn serve(
         .await
         .saiu(session.person, id_da_conexao);
 
+    // E a sala pessoal fica sabendo quem saiu: quem recebe saindo desliga a
+    // ligação, e um convidado saindo abre a tolerância dele (ADR 0059).
+    sair_da_sala(&server, chave_provada);
+
     // E os contadores desta conexão saem da soma da subida.
     //
     // Sem isto eles ficariam para sempre: a janela seguinte veria os bytes de
@@ -463,6 +517,105 @@ fn manda_esta_sessao_embora(event: &Event, person: PersonId) -> bool {
     }
 }
 
+/// Recusa quem não passou do aperto de mão: o motivo no carimbo que o par lê,
+/// e a despedida. Devolve o erro da sessão, com `detalhe`.
+async fn recusar_o_aperto(
+    connection: &quinn::Connection,
+    send: &mut quinn::SendStream,
+    carimbo: u8,
+    reason: DisconnectReason,
+    detalhe: String,
+) -> Result<()> {
+    let _ = frame::write_em(send, carimbo, &ServerMessage::Disconnecting { reason }).await;
+    let _ = send.finish();
+    despedir(connection, send, b"handshake refused").await;
+    bail!("{detalhe}")
+}
+
+/// O que a fase do toque decidiu.
+enum Toque {
+    /// Segue para a conta e a sessão.
+    Segue,
+    /// Manda esta razão e fecha.
+    Recusa(DisconnectReason),
+    /// Fecha sem mandar nada: quem ligava desistiu, ou outra conexão da mesma
+    /// pessoa tomou o lugar desta.
+    Fechou,
+}
+
+/// A fase do toque, só na sala pessoal (ADR 0059).
+///
+/// Manda `Tocando` e espera, **sem a trava do banco**, a primeira de três
+/// coisas: a decisão de quem recebe, o prazo, ou a conexão fechar. Quem recebe
+/// e quem já foi atendido nesta ligação seguem sem tocar.
+async fn tocar(
+    connection: &quinn::Connection,
+    send: &mut quinn::SendStream,
+    recepcao: &crate::recepcao::Recepcao,
+    provado: &Provado,
+) -> Toque {
+    use crate::campainha::Desfecho;
+    use crate::recepcao::Entrada;
+
+    let Ok(chave) = <crate::campainha::Chave>::try_from(provado.public_key.as_slice()) else {
+        // A fase 1 já conferiu os 32 bytes; isto não acontece.
+        return Toque::Recusa(DisconnectReason::CredentialRejected);
+    };
+    match recepcao.chegou(chave, &provado.nickname) {
+        Entrada::Entra => Toque::Segue,
+        Entrada::Recusada(reason) => Toque::Recusa(reason),
+        Entrada::Toca { toque, mut decisao } => {
+            let prazo = recepcao.sala().prazo_do_toque;
+            let prazo_s = u16::try_from(prazo.as_secs()).unwrap_or(u16::MAX);
+            if frame::write_em(send, provado.version, &ServerMessage::Tocando { prazo_s })
+                .await
+                .is_err()
+            {
+                recepcao.desistiu(toque);
+                return Toque::Fechou;
+            }
+            // A decisão primeiro: um toque atendido no mesmo instante em que o
+            // prazo vence foi atendido.
+            tokio::select! {
+                biased;
+                desfecho = &mut decisao => match desfecho {
+                    Ok(Desfecho::Atendida) => Toque::Segue,
+                    Ok(outro) => outro.razao().map_or(Toque::Fechou, Toque::Recusa),
+                    // O canal fechou sem decisão: outra conexão da mesma pessoa
+                    // tomou o lugar desta, e a mesma pessoa continua tocando.
+                    Err(_) => Toque::Fechou,
+                },
+                () = tokio::time::sleep(prazo) => {
+                    recepcao.vencer();
+                    match decisao.try_recv() {
+                        Ok(Desfecho::Atendida) => Toque::Segue,
+                        Ok(outro) => outro.razao().map_or(Toque::Fechou, Toque::Recusa),
+                        Err(_) => Toque::Recusa(DisconnectReason::NinguemAtendeu),
+                    }
+                }
+                _ = connection.closed() => {
+                    recepcao.desistiu(toque);
+                    Toque::Fechou
+                }
+            }
+        }
+    }
+}
+
+/// Diz à recepção da sala que `chave` saiu: quem recebe saindo desliga a
+/// ligação, e um convidado abre a tolerância dele. Num servidor que não é sala,
+/// nada.
+fn sair_da_sala(server: &Server, chave: Option<crate::campainha::Chave>) {
+    let (Some(recepcao), Some(chave)) = (&server.recepcao, chave) else {
+        return;
+    };
+    if chave == recepcao.sala().dono {
+        recepcao.desligar();
+    } else {
+        recepcao.saiu(chave);
+    }
+}
+
 /// Espera o motivo da recusa sair do fio antes de a conexão morrer.
 ///
 /// `specs/02-protocolo.md` exige que a razão de uma recusa seja específica,
@@ -489,14 +642,24 @@ struct Refusal {
     detail: String,
 }
 
+/// O que a fase 1 do aperto deixa para a fase 3: quem provou a chave, e o que a
+/// admissão já disse antes da prova.
+struct Provado {
+    version: u8,
+    client: String,
+    nickname: String,
+    public_key: Vec<u8>,
+    passe: Option<crate::admissao::Passe>,
+    recusa_adiada: Option<String>,
+    chegada: (crate::portaria::Segredo, String),
+}
+
 async fn handshake(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
-    config: &ServerConfig,
-    registry: &Registry,
     server: &Server,
     carimbo: &mut u8,
-) -> std::result::Result<Session, Refusal> {
+) -> std::result::Result<Provado, Refusal> {
     // O primeiro quadro, **bruto**: o carimbo é conferido antes do `decode`.
     //
     // O `decode` recusaria um número fora da faixa sem dizer qual veio, e a
@@ -682,6 +845,36 @@ async fn handshake(
             reason: DisconnectReason::CredentialRejected,
             detail: "signature did not verify".into(),
         })?;
+
+    Ok(Provado {
+        version,
+        client,
+        nickname,
+        public_key,
+        passe,
+        recusa_adiada,
+        chegada,
+    })
+}
+
+/// A fase 3 do aperto: a portaria, a conta, os MODs e o `Session`.
+async fn admitir(
+    provado: Provado,
+    send: &mut quinn::SendStream,
+    recv: &mut quinn::RecvStream,
+    config: &ServerConfig,
+    registry: &Registry,
+    server: &Server,
+) -> std::result::Result<Session, Refusal> {
+    let Provado {
+        version,
+        client,
+        nickname,
+        public_key,
+        passe,
+        recusa_adiada,
+        chegada,
+    } = provado;
 
     // A portaria — ADR 0030. A terceira camada, e a única que decide sobre
     // gente em vez de sobre um segredo.
@@ -6060,6 +6253,7 @@ mod fim_de_tela_por_sessao {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             impressao: [0; 32],
+            recepcao: None,
             persistence,
             events,
             writes,
