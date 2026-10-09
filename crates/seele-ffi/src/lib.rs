@@ -1212,6 +1212,14 @@ impl Shared {
 pub struct Connection {
     commands: tokio::sync::mpsc::UnboundedSender<Command>,
     shared: Arc<Shared>,
+    /// Por onde a thread da conexão diz que terminou, para
+    /// [`Connection::encerrar_e_esperar`].
+    ///
+    /// O sinal sai quando `drive` volta — com a despedida do enlace já feita
+    /// — e **antes** de o runtime cair. Num `Mutex` porque o `Receiver` não é
+    /// `Sync` e a casca segura a `Connection` atrás de um `Arc`; `None` depois
+    /// de alguém já ter visto o fim, e na `Connection` montada à mão dos testes.
+    encerrada: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl std::fmt::Debug for Connection {
@@ -1346,6 +1354,7 @@ impl Connection {
 
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (encerrada_tx, encerrada_rx) = std::sync::mpsc::channel();
 
         let thread_shared = Arc::clone(&shared);
         let thread_config = config.clone();
@@ -1376,6 +1385,13 @@ impl Connection {
                     &ready_tx,
                     olhos,
                 ));
+                // **Antes de o runtime cair, e não depois.** `drive` voltou com
+                // a despedida do enlace feita (`Enlace::sair`), e é isso que
+                // `encerrar_e_esperar` espera. Soltar o runtime espera a piscina
+                // de bloqueio sem prazo — a bomba da tela é parada ali —, e um
+                // sinal depois dele seguraria a saída do app por isso.
+                let _ = encerrada_tx.send(());
+                drop(runtime);
             })
             .map_err(|error| {
                 tracing::error!(%error, "could not start the connection thread");
@@ -1390,6 +1406,7 @@ impl Connection {
         let connection = Arc::new(Self {
             commands: command_tx,
             shared,
+            encerrada: Mutex::new(Some(encerrada_rx)),
         });
         Ok((connection, trust))
     }
@@ -2982,6 +2999,44 @@ impl Connection {
     pub fn disconnect(&self) {
         self.shared.running.store(false, Ordering::Relaxed);
         let _ = self.commands.send(Command::Shutdown);
+    }
+
+    /// Encerra a sessão e espera a thread da conexão terminar, até `teto`.
+    ///
+    /// Para quem vai embora em seguida: a casca no `ExitRequested`, com o
+    /// processo morrendo depois. [`Self::disconnect`] só pede o fim, e o
+    /// `CONNECTION_CLOSE` sai pela despedida do enlace, na thread da conexão;
+    /// um processo que morre antes dela leva o aviso junto, e quem ficou só vê
+    /// a saída pelo prazo de ociosidade do servidor, 20 s. Era a espera cega de
+    /// 150 ms da casca, que não sabia se a despedida tinha acontecido.
+    ///
+    /// Devolve `true` quando a thread terminou: deu o sinal, ou acabou sem
+    /// chegar a ele — um runtime que não subiu, um pânico — e não há mais o que
+    /// esperar. Também quando outra chamada já viu o fim. `false` só quando o
+    /// teto venceu com a thread ainda correndo, e aí quem chama sabe que a
+    /// despedida pode não ter saído.
+    ///
+    /// **Bloqueia** quem chama. Sozinha, até `teto`. Duas chamadas ao mesmo tempo
+    /// não dividem a espera: a segunda espera a primeira soltar o cadeado do
+    /// recebedor, e depois o próprio teto — até o dobro, quando a thread não
+    /// termina.
+    #[must_use]
+    pub fn encerrar_e_esperar(&self, teto: Duration) -> bool {
+        self.disconnect();
+        let mut encerrada = self
+            .encerrada
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(fim) = encerrada.as_ref() else {
+            return true;
+        };
+        match fim.recv_timeout(teto) {
+            Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                *encerrada = None;
+                true
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+        }
     }
 
     fn command(&self, command: Command) -> Result<(), ConnectionError> {
@@ -6040,6 +6095,77 @@ mod tests {
         assert_eq!(notice.reason, NoticeReason::PermissionDenied);
     }
 
+    /// Uma `Connection` montada à mão, com o fim da thread da conexão em
+    /// `encerrada`.
+    fn conexao_com_o_fim(encerrada: std::sync::mpsc::Receiver<()>) -> Connection {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        Connection {
+            commands,
+            shared: bare_shared(),
+            encerrada: Mutex::new(Some(encerrada)),
+        }
+    }
+
+    /// **Sem o sinal da thread da conexão, `encerrar_e_esperar` espera o teto e
+    /// diz que não terminou.**
+    ///
+    /// O `false` é o que a casca escreve no `seele.log`: quem ficou vai notar a
+    /// saída pelo prazo de ociosidade. Uma `encerrar_e_esperar` que voltasse
+    /// `true` sem esperar o sinal deixaria o processo sair com a despedida no
+    /// meio, e a linha que diz isso nunca sairia.
+    #[test]
+    fn encerrar_e_esperar_sem_o_sinal_espera_o_teto_e_diz_que_nao_terminou() {
+        let (ainda_correndo, encerrada) = std::sync::mpsc::channel();
+        let connection = conexao_com_o_fim(encerrada);
+        let teto = Duration::from_millis(50);
+
+        let comeco = Instant::now();
+        let terminou = connection.encerrar_e_esperar(teto);
+        let levou = comeco.elapsed();
+
+        assert!(
+            !terminou,
+            "a thread da conexão não deu sinal nenhum, e `encerrar_e_esperar` disse que ela \
+             terminou: a casca deixa o processo sair com a despedida no meio, calada"
+        );
+        assert!(
+            levou >= teto,
+            "`encerrar_e_esperar` voltou em {levou:?}, antes do teto de {teto:?}: não esperou o \
+             sinal da thread da conexão"
+        );
+        drop(ainda_correndo);
+    }
+
+    /// **O sinal dado, ou a thread que terminou sem dá-lo, dizem que terminou.**
+    ///
+    /// O segundo é a thread que caiu antes de chegar ao sinal — o runtime que não
+    /// subiu, um pânico —: o remetente largado diz o mesmo fim, e esperar o teto
+    /// por ela seria segurar a saída por uma thread que não existe mais.
+    #[test]
+    fn encerrar_e_esperar_volta_na_hora_com_o_sinal_dado_ou_a_thread_acabada() {
+        let (sinal, encerrada) = std::sync::mpsc::channel();
+        sinal.send(()).expect("o sinal");
+        let deu_o_sinal = conexao_com_o_fim(encerrada);
+        let (sem_sinal, acabou) = std::sync::mpsc::channel::<()>();
+        drop(sem_sinal);
+        let acabou_sem_sinal = conexao_com_o_fim(acabou);
+        let teto = Duration::from_secs(5);
+
+        let comeco = Instant::now();
+        assert!(
+            deu_o_sinal.encerrar_e_esperar(teto),
+            "a thread da conexão deu o sinal, e `encerrar_e_esperar` disse que não terminou"
+        );
+        assert!(
+            acabou_sem_sinal.encerrar_e_esperar(teto),
+            "a thread da conexão acabou sem sinal, e `encerrar_e_esperar` disse que não terminou"
+        );
+        assert!(
+            comeco.elapsed() < teto,
+            "`encerrar_e_esperar` esperou o teto por uma thread que já tinha terminado"
+        );
+    }
+
     /// A `Shared` with nothing in it, for the folds below.
     fn bare_shared() -> Arc<Shared> {
         Arc::new(Shared {
@@ -6367,6 +6493,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&compartilhado),
+            encerrada: Mutex::new(None),
         };
         let mostrado = connection.snapshot().telemetry.jitter_ms;
 
@@ -6518,6 +6645,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
         assert!(connection.snapshot().may_manage_voice_rooms);
 
@@ -6554,6 +6682,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -6622,6 +6751,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -6686,6 +6816,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
 
         fold(
@@ -6751,7 +6882,11 @@ mod tests {
         // send that fails is how a dropped link looks from `enlace`.
         let shared = bare_shared();
         let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
-        let connection = Connection { commands, shared };
+        let connection = Connection {
+            commands,
+            shared,
+            encerrada: Mutex::new(None),
+        };
 
         assert_eq!(
             connection.set_server_icon(Some(b"%PDF-1.7".to_vec())),
@@ -6799,6 +6934,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
 
         let sessao = |permissions: Vec<Permission>| ServerMessage::Session {
@@ -6840,6 +6976,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
         };
 
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -6926,6 +7063,7 @@ mod tests {
         let connection = Connection {
             commands,
             shared: bare_shared(),
+            encerrada: Mutex::new(None),
         };
 
         for blank in ["", "   ", "\t\n"] {
@@ -7931,6 +8069,7 @@ mod uma_pendente_nao_e_uma_mensagem_do_servidor {
         let conexao = Connection {
             commands: manda,
             shared: super::tests::compartilhado_de_teste(),
+            encerrada: Mutex::new(None),
         };
         assert_eq!(
             conexao.remove_message(0),
