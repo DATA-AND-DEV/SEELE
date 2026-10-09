@@ -907,3 +907,61 @@
 :root[data-casca="celular"] #chamada-grade .chamada-pastilha[data-estado="escuta"] {
   color: var(--seele-rotulo-painel);
 }
+
+/* ------------------------------------------------------------ a aba AJUSTES
+ *
+ * A tela de CONFIGURAÇÕES do desktop, entre o topo e a faixa de voz, sem o véu
+ * de camada: a lista de seções numa página, e cada seção noutra. O tema do
+ * servidor não a alcança, como no desktop: ela é filha de `body`, e o tema mora
+ * em `#tela-sessao`. */
+
+:root[data-casca="celular"] #tela-server {
+  top: var(--cel-ajustes-topo, 0px);
+  bottom: var(--cel-ajustes-pe, 0px);
+  padding: 0;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] #tela-server::before {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-server > .server {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  border: 0;
+}
+
+:root[data-casca="celular"] #tela-server :is(.server-coluna, .server-corpo) {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 0;
+}
+
+:root[data-casca="celular"] #tela-server[data-cel-pagina="lista"] .server-corpo,
+:root[data-casca="celular"] #tela-server[data-cel-pagina="secao"] .server-coluna {
+  display: none;
+}
+
+/* A saída de AJUSTES é outra aba; o VOLTAR do desktop sai, e o «‹ AJUSTES»
+   volta à lista. */
+:root[data-casca="celular"] #tela-server #server-fechar {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-ajustes-voltar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--seele-osso);
+  background: none;
+  border: 1px solid var(--seele-linha-forte);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
+  cursor: pointer;
+}

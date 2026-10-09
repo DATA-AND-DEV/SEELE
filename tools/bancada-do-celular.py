@@ -995,6 +995,50 @@ def chamada(pg: Page) -> list[str]:
     return falhas
 
 
+def ajustes_medida(pg: Page) -> list[str]:
+    """A medida da Tarefa 9: as seções de `#tela-server` viram páginas da aba
+    AJUSTES só com o CSS e o celular-ajustes.js, sem mudar o tela-server.js?"""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(500)
+    caixa = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.bottom)]; }"""
+    camada, topo, faixa = (pg.evaluate(caixa, s) for s in ("#tela-server", ".cel-topo", "#voz"))
+    largura = pg.evaluate("innerWidth")
+    if camada is None:
+        return falhas + ["tocar AJUSTES não abriu a tela de configurações"]
+    if camada[2] < largura - 1 or abs(camada[1] - topo[3]) > 1 or abs(camada[3] - faixa[1]) > 1:
+        falhas.append(f"a tela de AJUSTES não fica entre o topo e a faixa: {camada}, topo {topo}, faixa {faixa}")
+    if pg.evaluate("getComputedStyle(document.getElementById('tela-server'), '::before').display") != "none":
+        falhas.append("a tela de AJUSTES ainda tem o véu de camada")
+    lista = pg.evaluate(caixa, "#tela-server .server-coluna"), pg.evaluate(caixa, "#tela-server .server-corpo")
+    if lista[0] is None or lista[1] is not None:
+        falhas.append(f"a primeira página não é a lista de seções: coluna {lista[0]}, corpo {lista[1]}")
+    if not exigir_toque(pg, "#secao-audio", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    secao = pg.evaluate("""(() => ({
+        coluna: getComputedStyle(document.querySelector('#tela-server .server-coluna')).display,
+        corpo: getComputedStyle(document.querySelector('#tela-server .server-corpo')).display,
+        paineis: [...document.querySelectorAll('#tela-server .server-painel > [id^="painel-"]')].filter((p) => !p.hidden).map((p) => p.id),
+        voltar: !!document.querySelector('#tela-server .cel-ajustes-voltar')?.offsetParent }))()""")
+    if secao["coluna"] != "none" or secao["corpo"] == "none" or secao["paineis"] != ["painel-audio"] or not secao["voltar"]:
+        falhas.append(f"a seção ÁUDIO não abriu sozinha, numa coluna, com «‹ AJUSTES»: {secao}")
+    exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+    if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
+        falhas.append("«‹ AJUSTES» não voltou à lista")
+    if not exigir_toque(pg, "#voz-mudo", falhas):
+        falhas.append("com AJUSTES aberto, o MUDO não está ao alcance")
+    ir_para_aba(pg, "conversa", falhas)
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("document.getElementById('tela-server').hidden"):
+        falhas.append("sair da aba AJUSTES não fechou a tela de configurações")
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -1011,6 +1055,7 @@ CASOS: dict[str, Caso] = {
                         raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
     "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
                     raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
+    "ajustes-medida": Caso(levar=ajustes_medida, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
 }
 
 
