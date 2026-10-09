@@ -24,7 +24,10 @@
 //!
 //! - a FFI, como o app a chama: `Connection::disconnect` e o `Arc` largado;
 //! - o `Enlace` num runtime de uma thread que cai logo depois de `sair`, que é
-//!   a forma da thread da conexão.
+//!   a forma da thread da conexão;
+//! - e a casca que sai do processo: `Connection::encerrar_e_esperar` e o
+//!   processo morrendo na linha seguinte, como o app morre depois do
+//!   `ExitRequested`. Este roda num processo filho, porque morrer é a prova.
 //!
 //! **Este arquivo é a medida.** A dedução de que a despedida cabe em menos de
 //! dois segundos veio da leitura do `quinn`; quem a confirma, ou não, é ele.
@@ -307,6 +310,109 @@ async fn o_enlace_que_sai_num_runtime_que_cai_em_seguida_ainda_avisa() -> Result
         "o enlace que saiu levou {levou:?} para sumir dos presentes de quem ficou, e o \
          prometido é {ATE_SUMIR:?}: `sair` voltou antes de o motor se despedir, o runtime caiu \
          com o `CONNECTION_CLOSE` na fila, e o servidor só viu a saída pelo prazo de ociosidade"
+    );
+
+    servidor.shutdown();
+    Ok(())
+}
+
+/// A variável que faz deste binário o filho de
+/// [`encerrar_e_esperar_volta_com_o_aviso_ja_dado`]. O valor é o endereço do
+/// servidor do pai — o molde é o `CANARY` de
+/// `crates/seele-audio/tests/realtime_safety.rs`.
+const FILHO: &str = "SEELE_SAIDA_COM_DESPEDIDA_FILHO";
+
+/// Onde o filho guarda a identidade e os pins: uma pasta do pai, que a apaga ao
+/// fim. O filho morre por `exit`, e nada dele roda depois.
+const CASA_DO_FILHO: &str = "SEELE_SAIDA_COM_DESPEDIDA_CASA";
+
+/// O filho: entra pela FFI no servidor do pai, espera a ordem de sair, e sai
+/// como o app sai — `encerrar_e_esperar` e o processo morrendo na linha
+/// seguinte.
+///
+/// Bloqueia uma thread do runtime do teste de propósito: neste processo não há
+/// mais nada para rodar, e a FFI tem a thread dela.
+fn ser_o_filho(endereco: &str) -> ! {
+    let endereco: SocketAddr = endereco
+        .parse()
+        .expect("o pai passa ao filho o endereço do servidor");
+    let casa = std::env::var_os(CASA_DO_FILHO).expect("o pai passa ao filho uma casa");
+    let sai = match Connection::connect(config(std::path::Path::new(&casa), endereco)) {
+        Ok((conexao, _)) => conexao,
+        Err(erro) => panic!("o filho não entrou pela FFI: {erro:?}"),
+    };
+    // A ordem é uma linha na entrada — ou a entrada fechada, que é o pai caindo.
+    let mut ordem = String::new();
+    let _ = std::io::stdin().read_line(&mut ordem);
+    assert!(
+        sai.encerrar_e_esperar(Duration::from_millis(500)),
+        "a thread da conexão do filho não terminou em 500 ms"
+    );
+    std::process::exit(0);
+}
+
+/// **A casca que espera a thread da conexão pode morrer na linha seguinte: o
+/// aviso já foi dado.**
+///
+/// É a saída do app inteira. No `ExitRequested`, a casca chama
+/// `encerrar_e_esperar` e o processo vai embora — tudo o que não saiu até ali
+/// morre com ele. Por isso o filho faz `exit(0)` logo depois, sem nada para
+/// dar tempo ao fechamento, e o pai lê a lista de presentes de quem ficou.
+///
+/// Uma `encerrar_e_esperar` que voltasse sem esperar o sinal da thread da
+/// conexão deixaria o processo morrer com a despedida no meio, e quem ficou só
+/// veria a saída pelo prazo de ociosidade.
+#[tokio::test(flavor = "multi_thread")]
+async fn encerrar_e_esperar_volta_com_o_aviso_ja_dado() -> Result<()> {
+    use std::io::Write as _;
+
+    let _vaga = vaga::minha();
+    if let Ok(endereco) = std::env::var(FILHO) {
+        ser_o_filho(&endereco);
+    }
+
+    let (endereco, servidor) = servidor().await?;
+    let (mut fica, mut sala) = quem_fica(endereco).await?;
+    let casa = tempfile::tempdir()?;
+    let mut filho = std::process::Command::new(std::env::current_exe()?)
+        .args([
+            "--exact",
+            "encerrar_e_esperar_volta_com_o_aviso_ja_dado",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(FILHO, endereco.to_string())
+        .env(CASA_DO_FILHO, casa.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+
+    let quem = ver_entrar(&mut fica, &mut sala).await;
+
+    let mut ordem = filho
+        .stdin
+        .take()
+        .expect("a entrada do filho, pedida acima");
+    let saiu_em = Instant::now();
+    ordem.write_all(b"sai\n")?;
+    drop(ordem);
+    let levou = ver_sumir(&mut fica, &mut sala, quem, saiu_em).await;
+    println!("o filho que saiu e morreu na linha seguinte sumiu dos presentes em {levou:?}");
+
+    let saida = tokio::task::spawn_blocking(move || filho.wait_with_output()).await??;
+    assert!(
+        saida.status.success(),
+        "o filho não saiu limpo ({}), e a medida acima não é a da saída do app:\n{}",
+        saida.status,
+        String::from_utf8_lossy(&saida.stderr)
+    );
+    assert!(
+        levou < ATE_SUMIR,
+        "o filho que saiu por `encerrar_e_esperar` e morreu na linha seguinte levou {levou:?} \
+         para sumir dos presentes de quem ficou, e o prometido é {ATE_SUMIR:?}: \
+         `encerrar_e_esperar` voltou antes de a despedida sair, o processo morreu com ela no \
+         meio, e o servidor só viu a saída pelo prazo de ociosidade"
     );
 
     servidor.shutdown();
