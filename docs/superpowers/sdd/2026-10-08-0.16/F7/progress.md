@@ -56,6 +56,9 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da P1 e da P2 da F1 (`bf559478`) | feito | `28003af4` |
 | 10 | 4d, o aperto de mão em três fases | **feita** | `312ec92e` |
 | 12b | 6b, o ramo do código no `connect_por` | **feita** | `1fb62a9a` |
+| — | merge da `versao/0.16` (`bbb0ed9c`): o servidor da F1 e o ENC/2 | feito | `8f19ddd2` |
+| 11 | 4f, a hospedagem da sala | **feita**; a rodada inteira da conformidade espera o fim da 5ª integração | `c3483884` |
+| 13 | 6a, `ler_entrada` | **feita** | `86edd3e4` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -294,3 +297,30 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
 - **14 e 15**: a F2;
 - **18 a 31**: a casca;
 - **as duas medidas do toque que abrem o microfone**, com o dono.
+
+## As tarefas 11 e 13 (09/10)
+
+- **Tarefa 11, a hospedagem da sala** (`c3483884`):
+  - `Hospedagem::iniciar_sala(porta, semente, apelido, ponto)`, com o gancho que
+    cria a conta de quem recebe (o achado A2), a `Convocacao::para_sala` da F2
+    e `PORTA_DA_SALA = 8385`.
+  - Na escada, três decisões puras pela `Convocacao::assinada()`: o degrau 4
+    sempre, a porta como `Papel::Sala` e o furo nunca largado.
+  - A sala não manda `Membros`, `MembroNovo` nem `MembroBanido`.
+  - A prova é `seele-conformance/tests/sala_pessoal.rs`, com 4 testes, mais 3
+    testes de unidade na escada.
+  - **A reversão do furo largado passou na prova de ponta a ponta**: o ponto
+    guarda o registro até o prazo dele. A regra ganhou um teste de unidade, que
+    reprova.
+  - **A rodada dos outros arquivos de conformidade foi interrompida** a pedido
+    da orquestradora (a 5ª integração). O `seele-server` inteiro rodou: 609 na
+    lib e as integrações.
+- **Tarefa 13, `ler_entrada`** (`86edd3e4`): as quatro regras da spec, em
+  `crates/seele-core/src/entrada.rs`.
+  - A guarda dos caracteres de endereço era redundante, medido pela reversão:
+    a leitura do código já os recusa. Ela saiu, e um teste prende o
+    comportamento.
+  - Uma entrada de teste que prometia o O e o I/L sem os ter virou um teste de
+    verdade.
+- **A 14, a 15 e a 17 esperam a 5ª integração (o F)**: as três mexem no
+  `enlace.rs` e na `chegada.rs`.
