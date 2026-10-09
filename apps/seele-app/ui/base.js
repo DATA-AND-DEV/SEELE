@@ -1289,7 +1289,9 @@ function avatarContribuido(pessoaId) {
     dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
   };
   const fonte = contribuicao.conteudo.doServidor;
-  dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes")
+  // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
+  // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
+  soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
     .then((midia) => {
       if (estado.cancelado || !dono.podeFalar()) return;
       let ocupados = 0;

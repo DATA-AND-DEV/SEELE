@@ -491,6 +491,29 @@ function recusaDoSomGrandeDemais(falha) {
 }
 
 /**
+ * **A mídia como a recebe quem só mostra imagem** (M5 da revisão do K4).
+ *
+ * O som do servidor do MOD que o Rust recusa pelo teto do som chega
+ * rejeitado, antes de o papel chegar à janela. Para quem toca, é o teto do som
+ * (`recusarPeloTetoDoSom`). Para o fundo, o retrato, o fundo de uma tela e o
+ * avatar contribuído (`avatarContribuido`, em `base.js`), que só mostram
+ * imagem, ele continua sendo o que era antes da recusa — um som —, e o
+ * «precisa ser imagem» de cada um vem antes da recusa do som: o que o MOD
+ * ouve de cada lugar é contrato da API, e a recusa nova não o muda.
+ *
+ * O som chega a eles só com o papel, que é tudo o que cada um lê antes de
+ * recusar o que não é imagem.
+ *
+ * @param {Promise<object> | null} vindo O pedido da mídia, ou nada.
+ * @returns {Promise<object> | null | undefined}
+ */
+function soImagem(vindo) {
+  return vindo?.catch((falha) => (recusaDoSomGrandeDemais(falha) === null
+    ? Promise.reject(falha)
+    : { papel: "som" }));
+}
+
+/**
  * Os argumentos de `dono.carregarMidiaDoServidor` para uma mídia declarada com
  * `doServidor`: o canal, o pedido, e o campo da resposta que traz o base64.
  *
@@ -1661,9 +1684,11 @@ class RegiaoDeMod {
     });
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     const fonte = plano.no.fundoDeMidia;
-    const vindo = fonte.doServidor
+    // O fundo só mostra imagem: o som recusado pelo teto chega como o som que
+    // era (`soImagem`).
+    const vindo = soImagem(fonte.doServidor
       ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
-      : this.dono.carregarMidia(fonte.fonte);
+      : this.dono.carregarMidia(fonte.fonte));
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
@@ -1777,7 +1802,9 @@ class RegiaoDeMod {
     elem.dataset.estadoDoRetrato = "inicial";
     const doServidor = plano.no.doServidor;
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
-    const vindo = doServidor
+    // O retrato só mostra imagem: o som recusado pelo teto chega como o som
+    // que era (`soImagem`).
+    const vindo = soImagem(doServidor
       ? this.dono.carregarMidiaDoServidor(
           Number(doServidor.canal) || 0,
           doServidor.pedido ?? {},
@@ -1785,7 +1812,7 @@ class RegiaoDeMod {
         )
       : caminho
         ? this.dono.carregarMidia(caminho)
-        : null;
+        : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
@@ -2195,7 +2222,9 @@ class RegiaoDeMod {
       return;
     }
 
-    const vindo = declarado.doServidor
+    // O fundo da tela só mostra imagem: o som recusado pelo teto chega como o
+    // som que era (`soImagem`).
+    const vindo = soImagem(declarado.doServidor
       ? this.dono.carregarMidiaDoServidor(
           Number(declarado.doServidor.canal) || 0,
           declarado.doServidor.pedido ?? {},
@@ -2205,7 +2234,7 @@ class RegiaoDeMod {
         )
       : typeof declarado.fonte === "string" && declarado.fonte
         ? this.dono.carregarMidia(declarado.fonte)
-        : null;
+        : null);
     // Um fundo sem origem não é mídia nenhuma: a anotação do pedido anterior
     // não pode ficar valendo por ele.
     if (!vindo) {

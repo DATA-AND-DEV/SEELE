@@ -1799,6 +1799,57 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
   await pagina.close();
 }
 
+/**
+ * **O avatar contribuído ouve, do som recusado pelo teto, o que ouvia** (M5 da
+ * revisão do K4). A leitura por volume que traz um som grande demais
+ * decodificado chega recusada pelo Rust, antes de o papel chegar à janela; o
+ * avatar só mostra imagem, e o «não é imagem» dele vem antes da recusa do som.
+ * O que o MOD ouve é contrato da API: a prova compara a resposta de antes do
+ * lote — o som chegando com o papel — e a de agora — a recusa do Rust —, no
+ * evento ao MOD e no motivo da aba.
+ */
+async function oAvatarOuveDoSomRecusadoOQueOuvia(navegador, servidor) {
+  const ouvido = async (resposta) => {
+    const { pagina, erros } = await abrirASessao(navegador, servidor);
+    await pagina.evaluate((comoResponde) => {
+      testTable.ler_imagem_mod = () => (comoResponde.recusa
+        ? Promise.reject({ Recusado: { motivo: comoResponde.recusa } })
+        : Promise.resolve(comoResponde.midia));
+      contribuicoesDosMods.registrar({ id: "mod/a" }, instancia("mod/a"), {
+        ponto: "pessoa.avatar",
+        modo: "substituir",
+        alvo: "1",
+        conteudo: { doServidor: { canal: 1, campo: "image", pedido: { transporte: "volume", path: "volume:som" } } },
+      });
+      desenhar(testTable.snapshot);
+    }, resposta);
+    await esperarQue(
+      pagina,
+      () => midiasDoPonto("pessoa.avatar").recusada === 1 && eventosDoMod.some((e) => e.mod === "mod/a"),
+      "o avatar que chegou como som não foi recusado, ou o MOD não ouviu nada",
+      () => ({ aba: midiasDoPonto("pessoa.avatar"), mod: eventosDoMod }),
+    );
+    const ouviu = await pagina.evaluate(() => JSON.stringify({
+      mod: eventosDoMod.filter((e) => e.mod === "mod/a"),
+      aba: midiasDoPonto("pessoa.avatar").motivos,
+    }));
+    assert.deepEqual(erros, [], `a página lançou erro no avatar que chegou como som: ${erros.join(" | ")}`);
+    await pagina.close();
+    return ouviu;
+  };
+  const antes = await ouvido({ midia: { papel: "som", uri: "data:audio/wav;base64,UklGRg==", bytes: 4 } });
+  const agora = await ouvido({
+    recusa: "som-grande-demais-decodificado: decodificado a 48000 Hz, o som ocupa ao menos 251657180 bytes, "
+      + "acima do teto de 67108864 bytes de som",
+  });
+  assert.match(antes, /não é imagem/, `o som que chega ao avatar deixou de ser recusado por não ser imagem: ${antes}`);
+  assert.equal(
+    agora,
+    antes,
+    "o avatar ouviu da recusa do som pelo teto outra coisa que ouvia do som — o contrato com o MOD mudou",
+  );
+}
+
 const PROVAS = [
   aMidiaDeCadaPontoEContadaEDita,
   quemPintaCadaLugar,
@@ -1809,6 +1860,7 @@ const PROVAS = [
   oModoDeDesenvolvedorContornaSemTomarNada,
   oSomDeModTocaPorWebAudioSobACspDoProduto,
   oSomQueSaiDaTelaPara,
+  oAvatarOuveDoSomRecusadoOQueOuvia,
 ];
 
 (async () => {

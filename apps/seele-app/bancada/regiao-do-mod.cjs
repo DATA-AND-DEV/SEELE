@@ -5581,6 +5581,74 @@ async function oSomGrandeDemaisDecodificadoEOTetoDoSom() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 20. Quem só mostra imagem ouve, do som recusado pelo teto, o que ouvia.
+// ---------------------------------------------------------------------------
+
+/**
+ * M5 da revisão do K4. O som do servidor que o Rust recusa pelo teto do som
+ * chega rejeitado, antes de o papel chegar à janela. Para quem toca, é o teto
+ * do som (seção 19); para o fundo, o retrato e o fundo de uma tela, que só
+ * mostram imagem, ele é o que era antes da recusa: um som, e o «precisa ser
+ * imagem» de cada um. O que o MOD ouve é contrato da API, e o lote não o muda.
+ *
+ * A prova compara, lugar por lugar, as duas respostas: a de antes do lote — o
+ * som chegando com o papel — e a de agora — a recusa do Rust. O evento ao MOD,
+ * as linhas do registro e as anotações da aba têm de ser as mesmas.
+ */
+async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
+  const caso = "quem só mostra imagem ouve o que ouvia do som recusado";
+  const motivo = "som-grande-demais-decodificado: decodificado a 48000 Hz, o som ocupa ao menos "
+    + "251657180 bytes, acima do teto de 67108864 bytes de som";
+  const doServidor = { canal: 1, pedido: { op: "som" } };
+  const lugares = [
+    {
+      nome: "o fundo",
+      declarar: (r) => r.aplicar([{ forma: "caixa", chave: "cx", fundoDeMidia: { doServidor }, dentro: "Lia" }]),
+    },
+    {
+      nome: "o retrato",
+      declarar: (r) => r.aplicar([{ forma: "retrato", chave: "rosto", doServidor, inicial: "A" }]),
+    },
+    {
+      nome: "o fundo da tela",
+      // A primeira montagem ainda não tem pincel, e o fundo só é buscado
+      // quando a tela tem onde pintar.
+      declarar: (r) => {
+        const tela = [{ forma: "tela", chave: "mapa", largura: 10, altura: 10, fundo: { doServidor } }];
+        r.aplicar(tela);
+        r.raiz.children[0].darPincel();
+        r.aplicar(tela);
+      },
+    },
+  ];
+  const ouvido = async (lugar, midia) => {
+    const b = bancada();
+    const d = dono(b, midia);
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    lugar.declarar(r);
+    await assentar();
+    const ouviu = JSON.stringify({ mod: d.ditos, registro: d.anotadas, aba: r.midiasAnotadas() });
+    r.soltar();
+    return ouviu;
+  };
+  for (const lugar of lugares) {
+    const antes = await ouvido(lugar, () => Promise.resolve({ uri: "data:audio/wav;base64,UklGRg==", papel: "som", bytes: 4 }));
+    const agora = await ouvido(lugar, () => Promise.reject({ Recusado: { motivo } }));
+    confere(
+      `${caso} · ${lugar.nome}`,
+      antes.includes("precisa ser imagem"),
+      `o som que chega a ${lugar.nome} deixou de ser recusado por não ser imagem, e a prova não mede o que devia: ${antes}`,
+    );
+    confere(
+      `${caso} · ${lugar.nome}`,
+      agora === antes,
+      `${lugar.nome} ouviu da recusa do som pelo teto outra coisa que ouvia do som — o contrato com o MOD `
+        + `mudou: antes ${antes}, agora ${agora}`,
+    );
+  }
+}
+
 (async () => {
   const provas = [
     fundoTrocaSoltaECancela,
@@ -5628,6 +5696,7 @@ async function oSomGrandeDemaisDecodificadoEOTetoDoSom() {
     oDonoSemBytesDoSomDizPorQue,
     oDataDoSomDoServidorNaoFicaRetido,
     oSomGrandeDemaisDecodificadoEOTetoDoSom,
+    quemSoMostraImagemOuveOQueOuviaDoSomRecusado,
   ];
   for (const prova of provas) {
     try {
