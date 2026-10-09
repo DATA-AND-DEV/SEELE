@@ -655,3 +655,127 @@ neste lote. Falta rodar sobre o topo, um arquivo por vez, com
   servidor anuncia a esta sessão move a chave.
 - **Fora desta rodada:** a projeção da telemetria para os MODs, que fica com a
   orquestradora.
+
+## Rodada 2
+
+FIX_BASE `0adad066`. Brief: `.superpowers/sdd/lotes/lote-i-b-rodada2.md`. A
+re-revisão deu o I-1 e o M-1 a M-6 como resolvidos, manteve as decisões da
+rodada 1 e achou dois pontos novos. Dois commits de código, cada um feito assim
+que o item ficou provado.
+
+| commit | item | o que muda |
+|---|---|---|
+| `85805fa5` | 1 (Importante, anterior ao lote) | `esquecerOEstadoDaSessao` chama `restaurarRascunho()` depois de `linhaAberta = null`, o que esvazia o campo de mensagem, e esvazia o de busca; o guarda (a) cobra os dois; a cena F1-vazamento da bancada segue B pelo caminho do app |
+| `451bb502` | 2 (Menor, no M-4) | `renomear_volume` tira sempre a entrada do nome novo |
+
+### 1. O texto do campo de mensagem ia de A para B
+
+**A causa**, como a re-revisão mediu: em B, `linhaAberta` vem do retrato
+(`desenharCanais`, `if (linha.open) linhaAberta = linha.id`), sem
+`restaurarRascunho()`, e nenhuma saída esvaziava `#campo-mensagem`. O texto
+escrito em A, sem trocar de Linha, ia no primeiro Enter em B — e, no primeiro
+clique noutra Linha, `guardarRascunho` o gravava como rascunho de B.
+
+**O conserto.** `restaurarRascunho()` logo depois do `linhaAberta = null`, dentro
+de `esquecerOEstadoDaSessao`. Com nenhuma Linha aberta, restaurar é esvaziar, e
+é a mesma função que acerta a altura do campo (`cresceOCampo`) e a conta de
+bytes (`medirOCorpo`). Um `value = ""` solto deixaria as duas para trás, e por
+isso fiquei com ela.
+
+**Os outros campos de entrada da sessão**, conferidos um a um:
+- **a busca (`#campo-busca`):** as duas saídas já a zeram por `encerrarBusca`,
+  que avisa também o Rust. Passou a ser zerada também dentro da função, para ela
+  valer por si, como o resto.
+- **a legenda do anexo:** não existe campo próprio. O texto que vai com o
+  arquivo é o de `#campo-mensagem`, e fica coberto pelo conserto acima.
+- **o nome de uma sala ou canal novo (`#nomear-valor`) e o motivo da moderação
+  (`#moderar-motivo`):** preenchidos ao abrir a caixa (`pedido.valor ?? ""` e
+  `value = ""`), e não passam.
+- **o nome do servidor na configuração (`#server-nome-valor`):** relido do
+  retrato a cada desenho, menos com o foco nele.
+- **os campos da portaria (`#portaria-senha`, `#portaria-observacao`):** são da
+  hospedagem desta máquina, e não da sessão. Não mexi.
+- **o resto** (redução de ruído, sensibilidade, modo de desenvolvedor, apelido,
+  endereço de conhecidos): preferências desta máquina.
+
+**A prova, na bancada `conversa-com-estado.cjs`.** A cena F1-vazamento deixou
+de chamar `restaurarRascunho()` à mão.
+- **Em A:** guarda um rascunho no canal 2 e escreve um texto no canal 1 sem
+  trocar de Linha.
+- **Em B:** pelas duas saídas, segue o caminho de `conectar`: o `desenhar` do
+  retrato com a tela escondida, depois a tela mostrada. Lê o campo, dá o Enter
+  de verdade e clica de verdade no canal 2 e de volta no 1.
+
+Vermelho em `0adad066`, igual ao da sonda da re-revisão:
+`{"linha":1,"noCampo":"texto escrito no servidor A","enviados":[{"channel":1,"body":"texto escrito no servidor A"}],…}`.
+
+E, no `cargo test`, o guarda (a) cobra o `restaurarRascunho()` depois do
+`linhaAberta = null` e o esvaziamento da busca. Vermelho antes do conserto:
+«`esquecerOEstadoDaSessao` não esvazia o campo de mensagem depois de fechar a
+Linha…».
+
+**Reversões**, com `cmp` idêntico:
+- **sem o `restaurarRascunho()`:** a bancada reprova com o vermelho acima, e o
+  guarda também;
+- **sem o zero da busca:** o guarda reprova com «… não esvazia o campo de busca…».
+
+### 2. O volume velho do nome novo
+
+`renomear_volume` voltava cedo quando quem trocou de nome não tinha volume, e a
+entrada que já estava no nome novo — de outra pessoa com aquele nome, que saiu —
+passava a valer para quem trocou. Agora a entrada do nome novo sai sempre, e só
+recebe o volume de quem trocou, se houver.
+
+- **Prova:** `quem_troca_para_um_nome_com_volume_velho_nao_herda_o_volume`, com
+  a voz de mentira e `dobrar_no_room`. A Rafa, sem volume, vira «lia», e há
+  `lia: 50` guardado.
+  - Vermelho em `0adad066`: «a Rafa trocou de nome para «lia» e passou a tocar
+    com o volume que alguém deu a outra Lia, que já saiu» (`left: 0.5, right:
+    1.0`).
+  - Verde.
+- **Reversões:**
+  - a volta cedo sem volume: o mesmo vermelho;
+  - refeita a do M-4 sobre o código novo, com o nome velho mantido: os dois
+    testes do M-4 reprovam.
+
+### O que rodou
+
+No topo (`451bb502`):
+- **Testes de crate:**
+  - `seele-ffi --lib`: 159 verdes, 1 ignorado de antes;
+  - `seele-app --bin seele-app`: 274;
+  - `--test frontend`: 279.
+- **Ferramentas:**
+  - `cargo xtask check-runtime`: verde;
+  - `cargo fmt --all -- --check`: limpo;
+  - o clippy de `seele-ffi`, `seele-app` e `seele-conformance` com
+    `-D warnings`: limpo.
+- **Bancadas:** `conversa-com-estado.cjs` (as nove cenas),
+  `tema-sai-com-a-sessao.cjs` e `telas.cjs`.
+- **Conformidade, só compilada:** os cinco arquivos da lista compilam com
+  `--no-run`.
+
+### A conformidade
+
+Continua **pausada**. Falta rodar sobre o topo, um arquivo por vez, com
+`-- --test-threads=1`:
+- `voz_na_reconexao`;
+- `a_recusa_nao_tira_da_sala`;
+- `acceptance_m5`;
+- `saida_com_despedida`;
+- `moderacao`.
+
+### Preocupações da rodada 2
+
+- **A bancada provava o mapa por fora do app.** O item 1 passou pelas rodadas
+  anteriores porque a cena restaurava o rascunho à mão. As cenas de saída deste
+  arquivo seguem agora o fluxo de `conectar`, mas as que montam estado à mão
+  (`linhaAberta = 1`, `guardarAnexo(…)`) continuam montando, e é assim que se
+  põe A de pé numa bancada sem servidor.
+- **A causa de fundo continua:** a Linha que vem do retrato não restaura o
+  rascunho dela. Com o campo esvaziado na saída, isso deixou de vazar entre
+  sessões. Dentro de uma sessão, o retrato só muda a Linha aberta quando ela
+  já é a que se pediu. Não mexi no `desenharCanais`, porque restaurar ali, a
+  cada desenho, poderia trocar o que se está escrevendo.
+- **Os campos da portaria** ficam como estão: são da hospedagem desta máquina,
+  e não da sessão.
