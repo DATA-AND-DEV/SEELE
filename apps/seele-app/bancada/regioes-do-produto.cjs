@@ -34,7 +34,12 @@ const chromium = require("./playwright.cjs").chromium();
  * com o MOD de pé.
  */
 const REGIOES = [
-  { ponto: "redes", conteiner: "#trilha-mods", doProduto: ["#trilha-server", "#trilha-adicionar"] },
+  {
+    ponto: "redes",
+    conteiner: "#trilha-mods",
+    doProduto: ["#trilha-server", "#trilha-adicionar"],
+    teto: { aVista: ["#trilha-server", "#trilha-adicionar"], descobertos: ["#trilha-server", "#trilha-adicionar"] },
+  },
   {
     ponto: "operador.barra",
     conteiner: "#operador-mods",
@@ -42,14 +47,14 @@ const REGIOES = [
     doProduto: ["#botao-mudo", "#botao-surdo", "#voz-estado", "#operador-sair"],
     // Conteúdo maior que a região rola por dentro, e o núcleo continua inteiro
     // na janela.
-    teto: { aVista: ["#botao-mudo", "#operador-sair"] },
+    teto: { aVista: ["#botao-mudo", "#operador-sair"], descobertos: ["#botao-mudo", "#botao-surdo", "#operador-sair"] },
   },
   {
     ponto: "compositor",
     conteiner: "#compositor-mods",
     // A caixa de escrever, o anexo e o ENVIAR: quem envia é a pessoa.
     doProduto: ["#campo-mensagem", "#botao-anexar", "#botao-enviar"],
-    teto: { aVista: ["#campo-mensagem", "#botao-enviar"] },
+    teto: { aVista: ["#campo-mensagem", "#botao-enviar"], descobertos: ["#campo-mensagem", "#botao-enviar"] },
   },
   {
     ponto: "status.barra",
@@ -61,7 +66,27 @@ const REGIOES = [
     // escondido no retrato da bancada, ele é mostrado para a medida. Sem o
     // `overflow: hidden` da região, ele saía da janela (1 302–1 387 px numa
     // janela de 1 280, medido).
-    teto: { aVista: ["#tel-rtt", "#tel-codec", "#tel-local"], mostrar: ["#tel-local"] },
+    teto: {
+      aVista: ["#tel-rtt", "#tel-codec", "#tel-local"],
+      mostrar: ["#tel-local"],
+      descobertos: ["#tel-rtt", "#tel-codec", "#tel-local"],
+    },
+  },
+  {
+    // **Substituir é desenhar o miolo** (rascunho §3): entre o nome do canal e
+    // a lupa, que são do produto — o nome é também o botão de renomear.
+    ponto: "canal.cabecalho",
+    modo: "substituir",
+    alvoDoCanalAberto: true,
+    conteiner: "#canal-cabecalho-miolo",
+    doProduto: ["#linha-nome", "#botao-buscar"],
+    // E a conversa embaixo: sem teto, um miolo alto fazia a barra crescer até
+    // 1 149 px, e a lista de mensagens ia para y = 1 230, fora da janela
+    // (medido).
+    teto: {
+      aVista: ["#linha-nome", "#botao-buscar", "#lista-mensagens"],
+      descobertos: ["#linha-nome", "#botao-buscar"],
+    },
   },
 ];
 
@@ -108,8 +133,9 @@ const REGIOES = [
     for (const regiao of REGIOES) {
       // Uma região que lança não esconde as outras: a falha é dela, e a rodada
       // segue.
-      const medido = await page.evaluate(async ({ ponto, conteiner, doProduto, teto }) => {
+      const medido = await page.evaluate(async ({ ponto, conteiner, doProduto, teto, modo = "adicionar", alvoDoCanalAberto }) => {
         const r = window.testTable.snapshot;
+        const alvo = alvoDoCanalAberto ? String(r.channels.find((c) => c.open).id) : undefined;
         const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
         const doProdutoAgora = () => doProduto.map((seletor) => document.querySelector(seletor)?.outerHTML ?? null);
         // O tamanho, e não só a marcação: um MOD largo espremeria as métricas
@@ -136,7 +162,8 @@ const REGIOES = [
         modsCarregados.set("mod/regiao", instancia);
         const { handle } = contribuicoesDosMods.registrar({ id: "mod/regiao" }, instancia, {
           ponto,
-          modo: "adicionar",
+          modo,
+          alvo,
           conteudo: [{ forma: "texto", chave: "marca", dentro: `marca de ${ponto}` }],
         });
         desenhar(r);
@@ -168,27 +195,66 @@ const REGIOES = [
         // produto corta e avisa — ver «o orçamento de cada ponto», abaixo.)
         let foraDaVista = null;
         let tamanhosNoTeto = null;
+        let cobertos = null;
         if (teto) {
+          // **O desenho deslocado, mirando**: `estilo.mover` vai a ±512 px
+          // (`mods-estilos.js`), e é assim que um MOD poria o desenho dele por
+          // cima do que está ao lado da região. Os nós deslocados vêm primeiro
+          // — a base deles é o canto da região — e cada um vai do canto até o
+          // centro de um item do produto. Um deslocamento fixo de ±512 caía ao
+          // lado dos alvos e passava sem a região conter nada (medido).
+          // O que a bancada mostra para medir é mostrado **depois** de cada
+          // desenho: o desenho do produto o esconde de novo.
+          const mostrar = () => { for (const seletor of teto.mostrar ?? []) document.querySelector(seletor).hidden = false; };
+          const linhas = [
+            ...Array.from({ length: 16 }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i} `.repeat(24) })),
+            // E uma linha sem quebra, ~2 500 px: é ela que espremeria uma
+            // barra de altura fixa na horizontal.
+            { forma: "texto", chave: "largo", dentro: "LARGO".repeat(80) },
+          ];
+          const semMira = contribuicoesDosMods.registrar({ id: "mod/regiao" }, instancia, { ponto, modo, alvo, conteudo: linhas });
+          desenhar(r);
+          mostrar();
+          await quadro();
+          const canto = document.querySelector(conteiner).getBoundingClientRect();
+          const limite = (n) => Math.max(-512, Math.min(512, Math.round(n)));
+          const mirados = (teto.descobertos ?? []).map((seletor, i) => {
+            const centro = document.querySelector(seletor).getBoundingClientRect();
+            return {
+              forma: "texto", chave: `mirado${i}`, dentro: "█".repeat(6),
+              estilo: {
+                mover: {
+                  x: limite(centro.left + centro.width / 2 - canto.left - 8),
+                  y: limite(centro.top + centro.height / 2 - canto.top - 8),
+                },
+              },
+            };
+          });
+          contribuicoesDosMods.revogar(semMira.handle, { id: "mod/regiao", instancia });
           const grande = contribuicoesDosMods.registrar({ id: "mod/regiao" }, instancia, {
-            ponto,
-            modo: "adicionar",
-            conteudo: [
-              ...Array.from({ length: 16 }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i} `.repeat(24) })),
-              // E uma linha sem quebra, ~2 500 px: é ela que espremeria uma
-              // barra de altura fixa na horizontal.
-              { forma: "texto", chave: "largo", dentro: "LARGO".repeat(80) },
-            ],
+            ponto, modo, alvo, conteudo: [...mirados, ...linhas],
           });
           modsCarregados.set("mod/regiao", instancia);
           desenhar(r);
+          mostrar();
           await quadro();
           tamanhosNoTeto = tamanhos();
-          for (const seletor of teto.mostrar ?? []) document.querySelector(seletor).hidden = false;
           foraDaVista = teto.aVista.filter((seletor) => {
             const caixaDoNucleo = document.querySelector(seletor)?.getBoundingClientRect();
             return !caixaDoNucleo || caixaDoNucleo.height === 0
               || caixaDoNucleo.top < 0 || caixaDoNucleo.bottom > innerHeight
               || caixaDoNucleo.left < 0 || caixaDoNucleo.right > innerWidth;
+          });
+          // **Nada do MOD por cima do produto**: no centro de cada um, o elemento
+          // que recebe o clique é ele, ou um filho dele.
+          cobertos = (teto.descobertos ?? []).filter((seletor) => {
+            const alvoDoProduto = document.querySelector(seletor);
+            const caixaDoAlvo = alvoDoProduto?.getBoundingClientRect();
+            if (!caixaDoAlvo) return true;
+            const noCentro = document.elementFromPoint(
+              caixaDoAlvo.left + caixaDoAlvo.width / 2, caixaDoAlvo.top + caixaDoAlvo.height / 2,
+            );
+            return !noCentro || !alvoDoProduto.contains(noCentro);
           });
           for (const seletor of teto.mostrar ?? []) document.querySelector(seletor).hidden = true;
           contribuicoesDosMods.revogar(grande.handle, { id: "mod/regiao", instancia });
@@ -198,7 +264,7 @@ const REGIOES = [
         }
         return {
           existe: Boolean(caixa), antes, dentro, emOutroLugar, comOMod, depois, foraDaVista,
-          tamanhosAntes, tamanhosComOMod, tamanhosNoTeto,
+          tamanhosAntes, tamanhosComOMod, tamanhosNoTeto, cobertos,
         };
       }, regiao).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
 
@@ -234,6 +300,9 @@ const REGIOES = [
             + `(${medido.tamanhosAntes[i]} → ${tamanho})`);
         }
       });
+      if (medido.cobertos?.length) {
+        falhas.push(`${ponto}: com conteúdo grande, o MOD ficou por cima de ${medido.cobertos.join(" e ")}`);
+      }
       if (medido.foraDaVista?.length) {
         const quais = medido.foraDaVista;
         falhas.push(`${ponto}: com conteúdo maior que a região, ${quais.join(" e ")} `

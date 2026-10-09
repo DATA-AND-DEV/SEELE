@@ -80,7 +80,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "pessoa.detalhes": { modos: ["adicionar"], perfil: "superficie", porAlvo: true },
   "pessoa.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "canal.item": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
-  "canal.cabecalho": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
+  "canal.cabecalho": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "compositor.ferramentas": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "sala.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "servidor.navegacao": { modos: ["adicionar"], perfil: null, porAlvo: false },

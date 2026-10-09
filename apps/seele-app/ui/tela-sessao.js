@@ -1180,6 +1180,24 @@ function desenharLinha(snapshot) {
   // Repovoado e não reconstruído: os nós vêm montados do registro, e movê-los
   // preserva o que eles seguram. Sem canal aberto não há alvo, e a faixa fica
   // vazia — uma contribuição de canal sem canal é uma afirmação sobre nada.
+  // **`canal.cabecalho` substituído** (rascunho §3, tarefa 5): o MOD desenha o
+  // miolo, entre o nome do canal e a lupa, e os dois continuam do produto — o
+  // nome é também o botão de renomear. Os acréscimos de outros MODs seguem ao
+  // lado, em `#canal-cabecalho-mods`.
+  const miolo = $("canal-cabecalho-miolo");
+  if (miolo) {
+    const escolhida = aberta
+      ? contribuicoesDosMods.escolherSubstituicao(
+        "canal.cabecalho",
+        String(aberta.id),
+        typeof modPreferidoPara === "function" ? modPreferidoPara("canal.cabecalho") : "",
+      ).escolhida
+      : null;
+    const desenho = escolhida ? montarContribuicao(escolhida, String(aberta.id)) : null;
+    repovoar(miolo, desenho ? [desenho] : []);
+    miolo.hidden = !desenho;
+  }
+
   const noCabecalho = $("canal-cabecalho-mods");
   if (noCabecalho) {
     repovoar(
