@@ -1511,6 +1511,19 @@ Talvez também:
 
 **O lote é grande.** A divisão natural, se não fechar numa sessão: o passo 1 (a abertura na sala, com o prazo e o pânico) numa sessão, e os passos 2 e 3 numa segunda, antes do K4.
 
+**Depois da onda 4 (09/10).**
+- **A divisão foi adotada.** O **I-a** é o passo 1. O **I-b** são os passos 2 e 3, sobre o I-a já integrado. Os dois mexem no mesmo `Shared`, no `lib.rs` da FFI, no `voice.rs` e no `tela-sessao.js`, e por isso não rodam em paralelo. O Snapshot muda só no I-a.
+- **As âncoras que mudaram de lugar:**
+  - `MovedToVoiceRoom`, `VoiceRoomDeleted` e os `Alert` de recusa são aplicados no `seele-core`: em `Room::apply`, no `state.rs`, e no motor do `enlace.rs`, para o `MovedToVoiceRoom`. A FFI não os casa. Ela vê o efeito em `room.current_voice_room`.
+  - `consentimento_do_microfone` mora na FFI, no `seele-core`, no `seele-audio` e em `tela-boot.js`, e não no `main.rs`.
+  - «SEM ÁUDIO» só aparece escrito em `tela-sessao.js`. `tela-server.js` (`if (!snapshot || !snapshot.audio_available)`) e `tela-chamada.js` (`pintarCartao(…, snapshot.audio_available)`) leem o campo sem a frase.
+- **O que a onda 4 deixou e o I mantém:**
+  - na FFI, o aviso da thread da conexão antes do `drop(runtime)`, e `encerrar_e_esperar`, do F;
+  - no `main.rs`, `despedir_da_sessao`, do F;
+  - no `enlace.rs`, a `Esperada` da F7;
+  - em `tela-sessao.js`, a faixa de fone do J, que se fecha na primeira entrada numa sala de voz.
+- **O teste (e) do pânico** usa `with_default` numa thread. Com a pendência 56, ele chama o `segundo_despachante()` do app.
+
 ### 1. D-52 e F1-audio-panico — o áudio abre na sala, numa thread própria, com prazo
 - **O gatilho.**
   - Na FFI, `Connection::enter_voice_room` e `leave_voice_room` mandam `Command::EnterVoiceRoom` e `LeaveVoiceRoom`, e `run_command` os trata (`client.entrar_na_voice_room` + `room.enter_voice_room`, e `room.leave_voice_room`).
