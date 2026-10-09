@@ -129,6 +129,7 @@ function retrato(extra = {}) {
     speaking: false,
     voice_mode: "PushToTalk",
     audio_available: true,
+    abertura_do_audio: "aberto",
     capture: { id: "mic", name: "Microfone interno", is_default: true },
     playback: { id: "saida", name: "Saída padrão", is_default: true },
     aparelho: "Pronto",

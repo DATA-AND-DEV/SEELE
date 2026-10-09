@@ -271,6 +271,55 @@ const PERMISSAO_DE_MICROFONE = {
 };
 
 /**
+ * O que a tela diz sobre a abertura do áudio, por estado. Pendência 52.
+ *
+ * Os nomes vêm de `seele_ffi::AberturaDoAudio`, como o serde os escreve. Na
+ * 0.16 o áudio abre quando a pessoa entra numa sala de voz e fecha quando ela
+ * sai, e `audio_available` falso deixou de querer dizer «falta áudio»: fora de
+ * sala ele é falso sem faltar nada. É daqui, e não dele, que sai a palavra.
+ *
+ * Três lugares, e cada um pega a sua:
+ * - `rodape`, a palavra do CODEC no rodapé da sessão. `null` é o travessão: fora
+ *   de sala não há o que medir, e com a voz de pé quem fala é o codec;
+ * - `medidor`, a linha do medidor em CONFIGURAÇÕES · MICROFONE E SOM;
+ * - `frase`, a faixa da sessão, quando há o que fazer.
+ *
+ * **Fora de sala, nenhuma das três acusa falta de áudio.** É o guarda
+ * `fora_de_sala_a_tela_nao_diz_sem_audio_e_a_frase_de_quando_nao_abriu_sai_do_estado`.
+ *
+ * A frase de quando não abriu a tempo **não manda escolher o microfone**: com a
+ * voz que não veio, não há o que trocar, e escolher um aparelho só grava a
+ * escolha para a próxima abertura.
+ */
+const ABERTURA_DO_AUDIO = {
+  fora_de_sala: {
+    rodape: null,
+    medidor: "— FORA DE SALA",
+    frase: null,
+  },
+  abrindo: {
+    rodape: "ABRINDO",
+    medidor: "— ABRINDO O ÁUDIO",
+    frase: null,
+  },
+  aberto: {
+    rodape: null,
+    medidor: null,
+    frase: null,
+  },
+  sem_aparelho: {
+    rodape: "SEM ÁUDIO",
+    medidor: "— SEM ÁUDIO NESTA SALA",
+    frase: null,
+  },
+  nao_abriu_no_prazo: {
+    rodape: "SEM ÁUDIO",
+    medidor: "— SEM ÁUDIO NESTA SALA",
+    frase: "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; para tentar a voz de novo, saia da sala e entre de novo.",
+  },
+};
+
+/**
  * O aviso de fone, dito ao entrar numa sala de voz.
  *
  * O SEELE não cancela eco — o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone

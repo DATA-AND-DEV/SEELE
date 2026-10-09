@@ -63,6 +63,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 14a + 15 | 6c e 6d, discar pelo código | **feitas** | `1f1a1b35` |
 | — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
 | 17 | 6f, a bateria da ligação | **feita**, menos a volta do convidado sem tocar, que espera a 16 | `0d320448` |
+| — | merge da `versao/0.16` (`cb426b19`), a sexta integração | feito; a árvore é a mesma da `cb426b19` (`38c21202`), verde na bateria da integração | `87fd6973` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -396,4 +397,17 @@ Feitas: 1–10 e 12, menos a 11. Esperando:
     sintoma registrado é «a paciência acabou», e não `SemResposta`: **não
     afirmo que é a mesma**. Separar de vez pediria rodadas intercaladas contra
     a base, como as que a pendência 41 fez.
+
+## Onde a frente está (09/10, depois da sexta integração)
+
+Feitas: 1–15 e 17, menos a volta do convidado sem tocar, que é da 17 e espera
+a 16. Esperando:
+- **16** (o `Tocando` no cliente): a P8 da F1;
+- **14b e 18 a 31**: a casca;
+- **as duas medidas do toque que abrem o microfone**: ficam com o dono, fora
+  do «fechar tudo» (a orquestradora as pôs na lista dele).
+
+O dono pediu, pela orquestradora, que a frente feche sem chamá-lo. Quando a P8
+e a casca forem liberadas, a F7 segue sem confirmação a cada passo, com as
+regras de sempre.
 

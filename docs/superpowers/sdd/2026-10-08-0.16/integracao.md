@@ -21,6 +21,7 @@ nada dependa da memória de uma conversa.
 | `apps/seele-app/src/main.rs` | F1 (P7b: `api: instalado.api` em `habilitar_mod` e `aplicar_conjunto_de_mods`), F6 (comandos finos, `setup`, `Abertura.pelo_lancador`) e F5 (C, D, E, F, K4 e I, em série nas ondas) | conflitos de texto esperados no `generate_handler!`, no `struct Session` e no fim do módulo de testes |
 | as migrações do banco | F1 (14, `api` em `mods`, `4112f96b`) e F3 (15, `temas_dos_mods`, `bfd5f5d`) | a próxima é a 16. Conferir com `git log --all -S "version: 1"` em `persistence/schema.rs` antes de uma migração nova |
 | `NOME_DA_SALA` | F1 (`seele_proto::transport`, `7e123ee5`) e F7 (`pub const` própria em `seele-server/src/tls.rs:27`) | quando os dois estiverem em `versao/0.16`, a F7 troca a sua por `pub use seele_proto::transport::NOME_DA_SALA;`. Conferir que não sobram duas cópias |
+| `apps/seele-app/src/executor.rs` | F4 (a extração do laço para um crate comum, aberta em 09/10), F3 (tarefas 3, passo 5, 4 e 8, que esperam a extração) e F5 (os Menores adiados do lote D no executor, se o Z os consertar) | ninguém além da F4 toca no arquivo até a extração ser integrada. Depois, a F3 e um eventual conserto do D entram em fila |
 | `apps/seele-app/ui/` (a casca do celular) | F8 (`0.16/celular`, os arquivos novos `celular-*` e os pontos de extensão), F5 (ondas 5 e 6) e F4 (`ponte-web.js`, `mods-no-navegador.js`, `voz-web.js`, `identidade-web.js`, `tela-boot.js` da 3.4) | a F8 só mexe nos arquivos existentes depois da liberação da `ui/`. Na integração: os guardas de texto leem os `celular-*`, e o desktop não muda de aparência |
 | `docs/superpowers/sdd/2026-10-08-0.16/F2/progress.md` | F2 (`a2181ad6`) | ~~trocar «deste branch» por «da `versao/0.16` depois da integração verde»~~: feito em `f5956869` |
 
@@ -54,6 +55,7 @@ nada dependa da memória de uma conversa.
   1. a chave `tema` em `CHAVES` e em `TIPOS`, como booleana (`:49-50`; hoje uma chave desconhecida sai `malformed`, `:144-146`), e levada ao catálogo para o site dizer «muda a aparência do servidor»;
   2. `VERSAO_DA_API` de 5 para 6 (`:20`; hoje a 4.0.0 sai `api-too-new`, `:186-187`);
   3. `APIS_ACEITAS` como a **união** das linhas que o launcher abre, `(6, 5, 4, 3)`, e não o espelho do app (`:22-43`; com `(6,)`, todo conserto legado futuro dos três MODs sai `api-too-old`, `:191-193`), e a amarração `catalogo.py:106-110` (`api_oferecida` contra `MOD_API_VERSION`) comparando a união.
+- **Os 28 roteiros da casca passam** (`tools/carga-da-casca.py --roteiro tools/roteiros/*.js`). Achado da F8, medido em 09/10: na `versao/0.16` (`f7bc902b`), 17 dos 28 reprovavam no mesmo ponto, a sessão que não aparece depois de HOSPEDAR AQUI. O duble não respondia o `linhas_para_hospedar`, que entrou com a F6 em `a2160d75`. Na `linha/0.15` (`148c9e60`), os 28 passam. Nada rodava os roteiros, e por isso a regressão passou calada. O conserto é o primeiro commit da F8, e os roteiros viram a 12ª etapa da bateria da integração.
 - **As notas não têm condição pendente**: o `publicar.sh` recusa notas com o marcador
   `<!-- CONDIÇÃO:` (F6, `36274663` e `7e444fe8`).
 
