@@ -156,6 +156,7 @@ window.__SEELE_ARGS = {};
 // A sequência inteira, e não só o último de cada comando: «apertou e soltou» é
 // uma ordem, e o último sozinho não diz se o meio aconteceu.
 window.__SEELE_HISTORICO = [];
+window.__SEELE_VOLUMES = {};
 window.__SEELE_EM_SESSAO = false;
 // **Uma máquina que já escolheu o nome**, o mesmo do quadro. Desde a `acbc1c29`
 // a primeira entrada de uma máquina sem nome abre «COMO OS OUTROS VÃO TE
@@ -185,6 +186,12 @@ window.__TAURI__ = {
       // próximo quadro dizer «mudo» antes de seguir só anda se ele disser.
       if (cmd === "set_muted") SEELE_QUADRO.muted = !!(args && args.on);
       if (cmd === "set_total_isolation") SEELE_QUADRO.total_isolation = !!(args && args.on);
+      // O volume por pessoa fica guardado, e o `volumes_locais` o devolve, como
+      // o Rust. A casca da API 6 relê os volumes e repinta os deslizantes: com o
+      // duble respondendo vazio, a releitura devolvia todo volume a 100 (medido:
+      // 16 em 40 trocas, na rodada da F3).
+      if (cmd === "set_volume" && args) window.__SEELE_VOLUMES[args.nickname] = args.percent;
+      if (cmd === "volumes_locais") return { ...window.__SEELE_VOLUMES };
       // **Sem sessão, `snapshot` recusa** — como o produto faz. Responder um
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente
