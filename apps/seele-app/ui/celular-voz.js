@@ -35,6 +35,9 @@
     micFechado: "Microfone fechado. Tocar abre.",
     somLigado: "Som ligado. Tocar desliga.",
     somDesligado: "Som desligado. Tocar liga.",
+    segure: "SEGURE",
+    noAr: "NO AR",
+    segurarParaFalar: "Segurar para falar",
     fala: (quem) => `${quem} fala`,
     naSala: (n) => `${n} na sala`,
     sinal: (n) => `sinal ${n}`,
@@ -99,7 +102,10 @@
     id: "voz-mudo",
     class: "voz-nucleo",
     type: "button",
-    onclick: () => doDesktop("botao-mudo").click(),
+    // No SEGURAR o toque não alterna nada: quem fala é o dedo parado em cima.
+    onclick: () => {
+      if (!modoSegurar) doDesktop("botao-mudo").click();
+    },
   });
 
   const faixa = h("section", { id: "voz", class: "voz-celular", hidden: true },
@@ -107,6 +113,70 @@
 
   sessao.append(faixa, abas);
   abrirAba("conversa");
+
+  // ------------------------------------------------- SEGURAR PARA FALAR
+  //
+  // Com o `voice_mode` em PushToTalk, o MUDO vira SEGURE: fala só enquanto o
+  // dedo está nele, pelo `segurarFala` do desktop, o mesmo da tecla (spec,
+  // §2.3). Todo jeito de o dedo deixar de segurar fecha a fala: soltar, o
+  // sistema cancelar o toque, o dedo sair do controle, a página sumir, sair da
+  // sala e o enlace cair. Um microfone aberto depois do dedo é o pior defeito
+  // que esta tela pode ter.
+
+  let modoSegurar = false;
+  let segurando = false;
+  let mutado = false;
+
+  function soltar() {
+    if (!segurando) return;
+    segurando = false;
+    segurarFala(false);
+    desenharMudo();
+  }
+
+  mudo.addEventListener("pointerdown", (evento) => {
+    if (!modoSegurar) return;
+    evento.preventDefault();
+    // Um toque prende o ponteiro ao alvo, e o `pointerleave` só chegaria
+    // depois de o dedo levantar. Solto, ele chega quando o dedo sai do
+    // controle, e a fala fecha ali.
+    try {
+      if (mudo.hasPointerCapture(evento.pointerId)) mudo.releasePointerCapture(evento.pointerId);
+    } catch {
+      // Um ponteiro que não existe mais não tem o que soltar.
+    }
+    segurando = true;
+    segurarFala(true);
+    desenharMudo();
+  });
+  for (const fim of ["pointerup", "pointercancel", "pointerleave", "touchcancel"]) {
+    mudo.addEventListener(fim, soltar);
+  }
+  // O menu do toque longo não abre sobre o SEGURE.
+  mudo.addEventListener("contextmenu", (evento) => {
+    if (modoSegurar) evento.preventDefault();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) soltar();
+  });
+
+  let mudoDesenhado = null;
+  function desenharMudo() {
+    const chave = modoSegurar ? `segurar:${segurando}` : `mudo:${mutado}`;
+    if (chave === mudoDesenhado) return;
+    mudoDesenhado = chave;
+    if (modoSegurar) {
+      mudo.dataset.modo = "segurar";
+      mudo.setAttribute("aria-pressed", String(segurando));
+      mudo.setAttribute("aria-label", PALAVRAS.segurarParaFalar);
+      mudo.replaceChildren(glifoComEstado("microfone", !segurando), segurando ? PALAVRAS.noAr : PALAVRAS.segure);
+    } else {
+      delete mudo.dataset.modo;
+      mudo.setAttribute("aria-pressed", String(mutado));
+      mudo.setAttribute("aria-label", mutado ? PALAVRAS.micFechado : PALAVRAS.micAberto);
+      mudo.replaceChildren(glifoComEstado("microfone", mutado), mutado ? PALAVRAS.mudo : PALAVRAS.mic);
+    }
+  }
 
   // Um controle só troca de glifo e de palavra quando o estado dele muda: o
   // snapshot chega a cada 500 ms, e redesenhar o mesmo SVG a cada vez é
@@ -122,6 +192,10 @@
 
   CASCA.depoisDeDesenhar.push((snapshot) => {
     const aqui = (snapshot.voice_rooms ?? []).find((s) => s.occupied_by_us);
+    // Fora de sala, com o enlace caído ou fora do PushToTalk, ninguém segura.
+    const segurarAgora = snapshot.voice_mode === "PushToTalk";
+    if (!aqui || snapshot.link !== "Up" || !segurarAgora) soltar();
+    modoSegurar = segurarAgora;
     faixa.hidden = !aqui;
     if (!aqui) return;
     faixa.setAttribute("aria-label", PALAVRAS.salaDeVoz(aqui.name));
@@ -137,8 +211,8 @@
     quem.textContent = abertura?.rodape
       ?? (falando ? `${PALAVRAS.fala(falando.nickname)} · ${sinal}` : `${PALAVRAS.naSala(aqui.people.length)} · ${sinal}`);
 
-    desenharControle(mudo, !!snapshot.muted, "microfone", [PALAVRAS.mic, PALAVRAS.mudo],
-      [PALAVRAS.micAberto, PALAVRAS.micFechado]);
+    mutado = !!snapshot.muted;
+    desenharMudo();
     desenharControle(surdo, !!snapshot.total_isolation, "fone", [PALAVRAS.som, PALAVRAS.surdo],
       [PALAVRAS.somLigado, PALAVRAS.somDesligado]);
   });

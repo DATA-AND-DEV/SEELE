@@ -150,6 +150,9 @@ SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
 window.__SEELE_ARGS = {};
+// A sequência inteira, e não só o último de cada comando: «apertou e soltou» é
+// uma ordem, e o último sozinho não diz se o meio aconteceu.
+window.__SEELE_HISTORICO = [];
 window.__SEELE_EM_SESSAO = false;
 // **Uma máquina que já escolheu o nome**, o mesmo do quadro. Desde a `acbc1c29`
 // a primeira entrada de uma máquina sem nome abre «COMO OS OUTROS VÃO TE
@@ -174,6 +177,7 @@ window.__TAURI__ = {
       // num embrulho de fora: os módulos capturam o `invoke` na carga, e trocá-lo
       // depois não alcança ninguém.
       window.__SEELE_ARGS[cmd] = args;
+      window.__SEELE_HISTORICO.push([cmd, args]);
       // **Sem sessão, `snapshot` recusa** — como o produto faz. Responder um
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente

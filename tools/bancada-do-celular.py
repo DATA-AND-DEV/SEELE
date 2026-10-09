@@ -399,6 +399,9 @@ def faixa_de_voz(pg: Page) -> list[str]:
     aberto), que é o que as medidas e a foto leem.
     """
     falhas = []
+    # O celular nasce na VOZ (spec, §2.3); o duble vem com o modo do desktop.
+    pg.evaluate("SEELE_QUADRO.voice_mode = 'VoiceActivated'")
+    esperar_quadro(pg)
     faixa = pg.evaluate("""(() => {
         const v = document.getElementById('voz');
         if (!v) return null;
@@ -480,10 +483,61 @@ def faixa_de_voz(pg: Page) -> list[str]:
     return falhas
 
 
+def segurar(pg: Page) -> list[str]:
+    """SEGURAR PARA FALAR (Tarefa 4): fala só com o dedo no MUDO, e fecha sozinho.
+
+    Cada jeito de o dedo deixar de segurar tem de terminar com o último
+    `set_talking` em `false`: soltar, o sistema cancelar o toque, o dedo sair do
+    controle, a página sumir e o enlace cair. Um microfone que fica aberto depois
+    do dedo é o pior defeito que esta tela pode ter.
+    """
+    falhas = []
+    pg.evaluate("SEELE_QUADRO.voice_mode = 'PushToTalk'")
+    esperar_quadro(pg)
+    modo = pg.evaluate("(() => { const m = document.getElementById('voz-mudo'); return [m.dataset.modo, m.textContent]; })()")
+    if modo[0] != "segurar" or "SEGURE" not in modo[1]:
+        return [f"no PushToTalk, o MUDO é {modo}, e não o SEGURE"]
+
+    apertar = """() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerdown',
+        { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'touch', isPrimary: true }))"""
+    jeitos = {
+        "soltar": "() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7, pointerType: 'touch' }))",
+        "o sistema cancelar o toque": "() => document.getElementById('voz-mudo').dispatchEvent(new Event('touchcancel', { bubbles: true }))",
+        "o dedo sair do controle": "() => document.getElementById('voz-mudo').dispatchEvent(new PointerEvent('pointerleave', { pointerId: 7, pointerType: 'touch' }))",
+        "a página sumir": """() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+            Object.defineProperty(document, 'hidden', { value: false, configurable: true }); }""",
+        "o enlace cair": "() => { SEELE_QUADRO.link = 'Down'; }",
+    }
+    for jeito, soltar in jeitos.items():
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        pg.evaluate(apertar)
+        pg.wait_for_timeout(100)
+        no_ar = pg.evaluate("document.getElementById('voz-mudo').textContent")
+        pg.evaluate(soltar)
+        if jeito == "o enlace cair":
+            esperar_quadro(pg)
+            pg.evaluate("SEELE_QUADRO.link = 'Up'")
+            esperar_quadro(pg)
+        else:
+            pg.wait_for_timeout(150)
+        falas = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_talking').map(([, a]) => a.talking)")
+        if falas[:1] != [True]:
+            falhas.append(f"{jeito}: apertar não abriu a fala (set_talking {falas})")
+        elif falas[-1] is not False:
+            falhas.append(f"{jeito}: o microfone ficou aberto (set_talking {falas})")
+        if jeito == "soltar" and "NO AR" not in no_ar:
+            falhas.append(f"segurando, o controle diz «{no_ar}», e não NO AR")
+        if pg.evaluate("window.__SEELE_HISTORICO.some(([c]) => c === 'set_muted')"):
+            falhas.append(f"{jeito}: segurar alternou o MUDO")
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
+    "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
 }
 
 

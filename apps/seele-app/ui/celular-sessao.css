@@ -254,3 +254,14 @@
 :root[data-casca="celular"] #voz-mudo {
   min-width: 64px;
 }
+
+/* SEGURAR PARA FALAR: o mesmo lugar do MUDO, mais largo. O dedo fica parado em
+   cima, então nada pode tirá-lo de lá: nem a seleção de texto, nem o menu do
+   toque longo do sistema, nem um gesto de rolagem, que cancelaria o toque. */
+:root[data-casca="celular"] #voz-mudo[data-modo="segurar"] {
+  min-width: 84px;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
