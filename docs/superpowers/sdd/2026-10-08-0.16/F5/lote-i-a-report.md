@@ -558,7 +558,8 @@ pedem que duas coisas caiam dentro da mesma volta de rede de um pedido.*
 
 - **Raro — uma recusa que não é de entrada, chegando com uma entrada no ar,** é
   tomada pela entrada (o apelido tomado no mesmo instante em que se pede uma
-  sala). É o encaixe do `PedidoRecusado` da F1, acima.
+  sala). É o encaixe do `PedidoRecusado` da F1, acima. *Desde o merge da
+  rodada 2 (`9f87889c`), deixou de existir: ver «O merge do `0.16/lotes`».*
 - **Raro — o operador que move a pessoa no instante em que ela pede outra
   sala**: a mudança do operador vale, e a resposta ao pedido é descartada. Se o
   servidor leu o pedido depois da mudança e o aceitou, a tela fica na sala do
@@ -629,13 +630,22 @@ numera, e não no que o fio promete, e que dizer o resgate no fio seria da F1.
   senha. Então o `Daemon` é derrubado (`shutdown`, `wait_idle`, `drop`) e outro
   sobe na mesma porta com o mesmo banco. O teste espera a recusa da reentrada e
   confere três coisas: o servidor sem a pessoa em sala, a tela fora de sala e a
-  abertura `ForaDeSala`. **Compilado (`--no-run`) e não rodado:** a
-  conformidade está pausada. Falta o vermelho em `8c62d559`, o verde e a
-  reversão. Se ela não couber estável, a regra fica coberta pelos três testes
-  de crate, e direi aqui por que não coube. Uma dúvida que só a corrida
-  responde: se o `shutdown` do `Daemon` se despede dos clientes, a FFI pode não
-  tentar voltar. Nesse caso a primeira asserção reprova com «… e o teste mediu
-  outra coisa», e não com a frase do N1.
+  abertura `ForaDeSala`. **Coube estável:**
+  - **vermelho com `crates/seele-core` e `crates/seele-ffi` de `8c62d559`** e o
+    arquivo de teste novo: «M6: o servidor subiu de novo sem assento nenhum,
+    e um `ssrc` repetido foi tomado por resgate: a pessoa se vê na sala e o
+    servidor não a tem em sala nenhuma» (`left: Some(1), right: None`). As
+    duas asserções de sanidade passaram antes: a recusa chegou e o servidor
+    não tinha a pessoa em sala. Os outros quatro do arquivo, verdes;
+  - **verde no topo**, antes e depois do merge, cinco vezes ao todo (três
+    seguidas), com o arquivo inteiro em ~6,3 s;
+  - **vermelho com a condição do `SessionId` revertida**, sobre o estado
+    mesclado, com a mesma frase e os mesmos valores; o arquivo voltou com
+    `cmp` idêntico.
+
+  A dúvida do `shutdown` ficou respondida: o `Daemon` cai sem uma despedida
+  que segure a FFI, e ela volta sozinha para o servidor novo na mesma porta.
+  Não precisei de outra forma de queda.
 
 ### N2: o `Ping` marcado leva o número do pedido
 
@@ -735,7 +745,8 @@ apagando uma sala no meio dela:
 
 Os dois pedem o mesmo conserto: marcar o pedido no ar cuja sala foi apagada e
 decidir na resposta dele. Uma recusa devolve o de antes; um `Pong` sem recusa
-deixa fora de sala quem dependia daquela sala.
+deixa fora de sala quem dependia daquela sala. **Por decisão da coordenação,
+os dois ficam documentados aqui e vão para o Z.**
 
 ### As reversões
 
@@ -747,7 +758,7 @@ deixa fora de sala quem dependia daquela sala.
 | a exceção | `&& !pedida_no_ar` → `&& (!pedida_no_ar \|\| true)` | `a_sala_apagada_que_ainda_e_um_pedido_no_ar_…`, com a frase acima; o outro passa |
 
 Nas quatro: arquivo devolvido da cópia, `cmp` idêntico. A reversão do N1 na
-conformidade (o M6) fica para quando ela voltar.
+conformidade reprovou o M6, como está na seção do N1.
 
 ### O relatório: a palavra «raro»
 
@@ -765,23 +776,56 @@ Corrigi a rodada 1 no lugar:
 - **A volta com troca de sala durante a queda** ganhou a frase do tamanho da
   janela: é a queda inteira, e não uma volta de rede.
 
+### O merge do `0.16/lotes`
+
+A coordenação pediu o merge de `17db18d7` antes da conformidade, para ela
+rodar uma vez só, sobre o estado final. Ele traz a sexta integração: da F1, o
+`AlertReason::PedidoRecusado { pedido, causa }` no lugar do
+`VoiceRoomEntryRefused` do `nao_deu` e o guarda
+`todo_motivo_de_aviso_tem_frase_na_pagina`; da F3, o tema no servidor; da F7,
+a sala. Merge em `9f87889c`, com dois conflitos, os dois resolvidos com os
+dois lados:
+- **`crates/seele-ffi/src/lib.rs`:** a lista do `pub use types::{…}` ganhou o
+  `AberturaDoAudio` do I-a e o `FalhaAoLocalizar` da F7;
+- **`apps/seele-app/tests/frontend.rs`:** os dois lados acrescentaram testes
+  no fim do arquivo. Ficam os do I-a e, depois deles, os da F1.
+
+**A semântica do encontro:**
+- **O braço de `Alert` de `EntradasPendentes::ouvir`** compila com a variante
+  nova e a deixa cair em `_ => false`: o `PedidoRecusado` não move ninguém. O
+  uso do `pedido` fica para o I-b.
+- **O M5 mudou no merge.** Ele esperava a recusa do apelido como
+  `VoiceRoomEntryRefused`, que o `nao_deu` deixou de mandar. Sem a mudança, a
+  primeira asserção reprovaria com «a recusa não chegou, e o teste mediu
+  outra coisa». Agora `continua_em` recebe a recusa que espera, e o M5 espera
+  `PedidoRecusado { pedido: "SetNickname", causa: NomeTomado }`. Ele
+  continua verde e continua medindo a mesma coisa: uma recusa que não é de
+  entrada não tira ninguém da sala.
+- **Com o `PedidoRecusado`, o primeiro raro da rodada 1 deixa de existir.**
+  Era a recusa que não é de entrada, tomada pela entrada. Depois do merge, as
+  quatro vezes em que o servidor manda `VoiceRoomEntryRefused` ou
+  `VoiceRoomFull` estão todas no braço de `ClientMessage::EnterVoiceRoom` de
+  `session.rs`. Dos raros da rodada 1 fica só o operador que move.
+
 ### O que rodou
 
-- `seele-core --lib` 482 (480 depois do N2, e os dois da sala apagada),
-  `seele-ffi --lib` 146 (1 ignorado, anterior), `seele-app --bin seele-app`
-  274, `--test frontend` 270, todos de novo depois de `4f737cc6`.
+- Antes do merge: `seele-core --lib` 482 (480 depois do N2, e os dois da
+  sala apagada), `seele-ffi --lib` 146 (1 ignorado, anterior), `seele-app
+  --bin seele-app` 274, `--test frontend` 270.
+- Sobre o merge: `seele-core --lib` 502, `seele-ffi --lib` 148 (1 ignorado,
+  anterior), `seele-app --bin seele-app` 274, `--test frontend` 272.
 - `cargo fmt --all -- --check` e o clippy de `seele-core`, `seele-ffi`,
   `seele-conformance` e `seele-app` com `-D warnings`: limpos.
 - `cargo test -p seele-conformance --test a_recusa_nao_tira_da_sala --no-run`:
   compila.
 
-### O que falta rodar: a conformidade, pausada
+### A conformidade
 
-Um arquivo por vez, com `-- --test-threads=1`:
-1. `a_recusa_nao_tira_da_sala`, os cinco. O M6 deve dar vermelho com
-   `crates/seele-core` e `crates/seele-ffi` de `8c62d559` e o arquivo de teste
-   novo, verde no topo, e vermelho de novo com a condição do `SessionId`
-   revertida;
-2. `voz_na_reconexao`;
-3. `reconexao_fantasma`;
-4. `limite_de_taxa`.
+Sobre o estado mesclado, um arquivo por vez, com `-- --test-threads=1`:
+- `a_recusa_nao_tira_da_sala`: 5 verdes, quatro vezes (uma antes do merge, e
+  três seguidas depois), e as duas rodadas vermelhas do M6 acima;
+- `voz_na_reconexao`: 1 verde;
+- `reconexao_fantasma`: 1 verde;
+- `limite_de_taxa`: 2 verdes;
+- `senha_da_sala`: 2 verdes. A coordenação o pediu porque o `PedidoRecusado`
+  mexe nas recusas.
