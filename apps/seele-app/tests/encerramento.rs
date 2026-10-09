@@ -110,11 +110,11 @@ fn sem_comentarios_lido(onde: &str, trecho: &str) -> String {
 }
 
 /// O texto sem os comentários de linha (`//` até o fim da linha) e de bloco
-/// (`/* … */`), e com o que está entre aspas intacto: um `//` dentro de uma
-/// frase não corta a linha.
+/// (`/* … */`, aninhados como o Rust os aninha), e com o que está entre aspas
+/// intacto: um `//` dentro de uma frase não corta a linha.
 ///
 /// **Não lê** o caractere `'"'` (nem `'\"'`) nem a string crua (`r"…"`,
-/// `r#"…"#`, e as de bytes): eles invertem o dentro e o fora das aspas.
+/// `r#"…"#`, e as de bytes e de C): eles invertem o dentro e o fora das aspas.
 /// Achando um deles no código — fora de aspas e de comentário —, ela devolve
 /// qual foi, e quem a chama reprova. Um `r` no fim de uma frase (`"parar"`) não
 /// é string crua: está entre aspas, e o `r` de uma string crua começa palavra.
@@ -148,7 +148,7 @@ fn sem_comentarios(texto: &str) -> Result<String, &'static str> {
             '\'' if em(i) == Some('"') || (em(i) == Some('\\') && em(i + 1) == Some('"')) => {
                 return Err("'\"'");
             }
-            'r' | 'b' if comeca_palavra => {
+            'r' | 'b' | 'c' if comeca_palavra => {
                 if let Some(perigo) = string_crua(&letras, i - 1) {
                     return Err(perigo);
                 }
@@ -168,14 +168,24 @@ fn sem_comentarios(texto: &str) -> Result<String, &'static str> {
                 }
             }
             '/' if em(i) == Some('*') => {
+                // **Aninhado, como o Rust aninha.** Fechar no primeiro `*/`
+                // deixava `/* era: /* nota */ despedir_se(handle); */` passar
+                // por código (medido na re-revisão da rodada 2 do lote F).
                 i += 1;
-                let mut anterior = ' ';
-                while let Some(resto) = em(i) {
-                    i += 1;
-                    if anterior == '*' && resto == '/' {
-                        break;
+                let mut fundura = 1_usize;
+                while fundura > 0 {
+                    match (em(i), em(i + 1)) {
+                        (Some('/'), Some('*')) => {
+                            fundura += 1;
+                            i += 2;
+                        }
+                        (Some('*'), Some('/')) => {
+                            fundura -= 1;
+                            i += 2;
+                        }
+                        (Some(_), _) => i += 1,
+                        (None, _) => break,
                     }
-                    anterior = resto;
                 }
             }
             _ => limpo.push(letra),
@@ -184,27 +194,48 @@ fn sem_comentarios(texto: &str) -> Result<String, &'static str> {
     Ok(limpo)
 }
 
-/// Se uma string crua começa em `onde`: `r"`, `r#…#"`, `br"` ou `br#…#"`.
-/// Devolve como o guarda a nomeia. `r#tipo`, o identificador cru, não é.
+/// Se uma string crua começa em `onde`: `r"` ou `r#…#"`, sozinha ou com o
+/// prefixo de bytes (`br`) ou de C (`cr`). Devolve como o guarda a nomeia.
+/// `r#tipo`, o identificador cru, não é.
+///
+/// O `c` entrou depois de medido: com `cr"\"` no corpo, o `\` escapava a aspa
+/// que fecha, o leitor ficava «dentro das aspas» até o fim do trecho, e o
+/// comentário passava por código (re-revisão da rodada 2 do lote F).
 fn string_crua(letras: &[char], onde: usize) -> Option<&'static str> {
     let mut i = onde;
-    if letras.get(i) == Some(&'b') {
+    let prefixo = match letras.get(i) {
+        Some('b') => Some('b'),
+        Some('c') => Some('c'),
+        _ => None,
+    };
+    if prefixo.is_some() {
         i += 1;
     }
     if letras.get(i) != Some(&'r') {
         return None;
     }
     i += 1;
-    match letras.get(i) {
-        Some('"') => Some("r\""),
+    let com_cerquilha = match letras.get(i) {
+        Some('"') => false,
         Some('#') => {
             while letras.get(i) == Some(&'#') {
                 i += 1;
             }
-            (letras.get(i) == Some(&'"')).then_some("r#\"")
+            if letras.get(i) != Some(&'"') {
+                return None;
+            }
+            true
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(match (prefixo, com_cerquilha) {
+        (None, false) => "r\"",
+        (None, true) => "r#\"",
+        (Some('b'), false) => "br\"",
+        (Some('b'), true) => "br#\"",
+        (_, false) => "cr\"",
+        (_, true) => "cr#\"",
+    })
 }
 
 #[test]
