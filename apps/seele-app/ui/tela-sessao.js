@@ -493,6 +493,9 @@ function desenhar(snapshot) {
   desenharTransmissoes(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
+  // Os eventos da tela aos MODs da API 6, pela comparação com o retrato de
+  // antes (rascunho da API 6, §7.2).
+  avisarOsModsDaTela(snapshot);
   // E o desenho que a tela escondida engoliu, agora que ela pode ter altura.
   if (mensagensPorDesenhar) desenharMensagens();
   // Os retratos, quando a revisão anda. `desenharMensagens` é chamada de novo se

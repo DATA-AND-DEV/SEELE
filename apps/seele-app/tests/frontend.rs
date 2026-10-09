@@ -17325,3 +17325,74 @@ fn a_casca_confere_as_mesmas_capacidades_que_o_nucleo() {
          ou aceitaria o que ele escondeu"
     );
 }
+
+/// **O guarda 12: o que é da ligação nunca chega a um MOD** (rascunho da API 6,
+/// §6; Parte II da spec de 23/09, «Onde as duas partes se tocam»; tarefa 4 do
+/// plano da F3).
+///
+/// Toque, chamada, código e agenda da sala pessoal ficam fora de tudo o que a
+/// janela entrega a um MOD: do retrato (`projetarORetrato`) e de cada evento
+/// (`falar({ … })`). O retrato já é por lista branca, e um campo novo nasce fora
+/// dele; este guarda pega o caso em que alguém o escreve lá de propósito, ou num
+/// evento novo, sem perceber o que leva.
+///
+/// Por nome e sem comentários: um comentário que explique por que o toque fica
+/// de fora não é o toque indo para o MOD.
+#[test]
+fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
+    const DA_LIGACAO: [&str; 5] = ["chamadaencerrada", "tocando", "codigo", "agenda", "toque"];
+    let leva = |texto: &str| -> Vec<&'static str> {
+        let minusculo = texto.to_lowercase();
+        DA_LIGACAO
+            .iter()
+            .copied()
+            .filter(|nome| minusculo.contains(nome))
+            .collect()
+    };
+
+    let base = without_comments(&read("ui/base.js"));
+    let retrato = body_of(&base, "function projetarORetrato(");
+    assert!(
+        leva(&retrato).is_empty(),
+        "o retrato do MOD leva {:?}, que é da ligação: {retrato}",
+        leva(&retrato)
+    );
+
+    let mut eventos = 0;
+    for nome in ui_files("js") {
+        let fonte = without_comments(&read(&format!("ui/{nome}")));
+        let mut resto = fonte.as_str();
+        while let Some(onde) = resto.find("falar({") {
+            let objeto = &resto[onde + "falar(".len()..];
+            // O objeto inteiro, contando chaves: um `falar` ocupa várias linhas.
+            let mut fundura = 0_usize;
+            let mut fim = objeto.len();
+            for (i, c) in objeto.char_indices() {
+                match c {
+                    '{' => fundura += 1,
+                    '}' => {
+                        fundura -= 1;
+                        if fundura == 0 {
+                            fim = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let evento = &objeto[..fim];
+            assert!(
+                leva(evento).is_empty(),
+                "ui/{nome}: um evento a um MOD leva {:?}, que é da ligação: falar({evento})",
+                leva(evento)
+            );
+            eventos += 1;
+            resto = &objeto[fim..];
+        }
+    }
+    assert!(
+        eventos >= 20,
+        "o guarda achou só {eventos} `falar({{ … }})`: a forma dos eventos mudou, e ele \
+         deixou de olhar para eles"
+    );
+}

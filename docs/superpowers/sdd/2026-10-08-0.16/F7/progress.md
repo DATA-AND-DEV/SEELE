@@ -64,6 +64,11 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
 | 17 | 6f, a bateria da ligação | **feita**, menos a volta do convidado sem tocar, que espera a 16 | `0d320448` |
 | — | merge da `versao/0.16` (`cb426b19`), a sexta integração | feito; a árvore é a mesma da `cb426b19` (`38c21202`), verde na bateria da integração | `87fd6973` |
+| — | merge da `versao/0.16` (`c8b3cd47`), a sétima integração | feito; a árvore é a mesma da `c8b3cd47` | `52d015f4` |
+| 22 | 4b, a identidade por máquina: a metade da FFI | **feita** (porte do `9ff9b73c` da 0.15); a semente da sala e o SEU CÓDIGO esperam a casca | `58552de8` |
+| — | os testes da corrida de volta (tirados por engano em `b4f5ef94`) | feito | `b6280079` |
+| 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita**; ligar na FFI e no `main.rs` espera a casca | `2b2bf744` |
+| — | o teste da janela de furos que caía sob carga (pendência 29, causa 3), pedido pela orquestradora | consertado | `7b2bbb96` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -410,4 +415,105 @@ a 16. Esperando:
 O dono pediu, pela orquestradora, que a frente feche sem chamá-lo. Quando a P8
 e a casca forem liberadas, a F7 segue sem confirmação a cada passo, com as
 regras de sempre.
+
+## A sétima integração e a metade da FFI da tarefa 22 (09/10)
+
+A orquestradora avisou que a P8 está parada, sem previsão, esperando o dono, e
+que a casca espera as ondas 5 e 6 da F5. Pediu o que não dependesse das duas.
+
+- **O merge** de `c8b3cd47` (`52d015f4`): a árvore é idêntica à da integração
+  verde.
+- **Tarefa 22, a metade da FFI** (`58552de8`). O launcher já passa
+  `SEELE_IDENTIDADE` e põe `SEELE_HOME` em `dados/servidor-<linha>`. A FFI da
+  0.16 lia `<home>/identity.key`, e uma 0.16 aberta por um launcher criaria uma
+  chave nova: a pessoa seria outra.
+  - O porte é o `9ff9b73c` da `linha/0.15`, com o mesmo contrato e a mesma
+    forma. A regra ficou na FFI, e não na casca como o plano dizia: nenhuma
+    assinatura mudou, e o `main.rs` não foi tocado.
+  - **O guarda da 0.15 não servia aqui**, e isso foi medido. Ele lê só o
+    prefixo antes do primeiro `#[cfg(test)]`. Na 0.16 a produção continua
+    depois dos módulos de teste, e um leitor escondido ali passava. O guarda
+    novo tira cada módulo de teste e lê o resto, e tem um guarda do guarda.
+  - **A `linha/0.15` tem a mesma forma de arquivo**: produção depois do primeiro
+    `#[cfg(test)]`, com dois `impl Connection`. O guarda de lá tem o mesmo
+    buraco para uma regressão futura. **O código de lá está certo hoje**, com
+    só os dois leitores, os dois pelo montador. Avisado à orquestradora, sem
+    mexer naquela linha.
+  - Quatro reversões medidas, todas reprovando. A segunda (vazia valendo)
+    criou uma chave nova em `crates/seele-ffi/identity.key`: o caminho vira
+    relativo, e o teste roda na pasta do crate. Era artefato da reversão, nunca
+    entrou no git, e foi apagado.
+
+## A metade de núcleo da 14b (09/10)
+
+A orquestradora liberou com a régua alta, porque toda conexão passa pelo
+`correr`. Pediu primeiro o teste que mostra o candidato tardio perdido hoje,
+depois a prova de que a ordem de hoje se mantém, a conformidade de quem passa
+pelo enlace, e reversões.
+
+- **Achado: a corrida estava sem teste desde 31/08.** Os cinco testes do
+  `correr` (`e09d537a`) saíram no revert `b4f5ef94`, que tirava outra coisa. O
+  doc continuava dizendo que a corrida era genérica para ter teste. Eles
+  voltaram antes de qualquer mudança (`b6280079`), com um sexto que escreve os
+  instantes de hoje (0, 250 e 500 ms). Reversões: a corrida em série e a
+  defasagem pela metade.
+- **O candidato tardio perdido hoje, medido**: com o lote ignorado (a corrida
+  de antes), os dois testes do tardio reprovaram, e todos os outros passaram.
+- **A corrida com tardios** (`2b2bf744`): o lote entra na frente de quem espera
+  a vez, um lote vazio não mexe em nada, a corrida o espera, quem já ganhava
+  não espera, e a posição é a ordem em que cada um começou. **O teste do lote
+  vazio pegou um defeito do primeiro desenho**: o `sleep` da defasagem era
+  refeito a cada volta, e um lote vazio empurrava a vez de todo mundo em
+  100 ms. A vez virou um instante.
+- **Só quem precisa de furo espera o quarto.** A pergunta é uma só
+  (`pede_furo`, a mesma do `avisar_pelo_candidato`). Quem espera avisa a escuta
+  de hoje (`Batida::com_aviso`). O endereço de hoje entra logo depois do alvo,
+  e a trilha conta mais um candidato quando ele chega.
+- **A conformidade nova** é `quarto_em_paralelo.rs`, com 3 testes:
+  - quem está na mesma casa entra antes do prazo de um quarto mudo;
+  - um servidor que mudou de endereço entra pelo que o quarto deu, registrado
+    pelo `Hospedagem::iniciar` de verdade;
+  - a trilha de uma volta que não entrou acaba em `Desistiu` no candidato que
+    chegou depois.
+- Dez reversões medidas, listadas no commit.
+- **Ligar na casca espera a `ui/`**: a FFI monta o `Quarto`, e o `main.rs` deixa
+  de perguntar antes.
+- **A rodada inteira da conformidade está pendente.** Ela começou depois do
+  commit e foi parada no quarto de 52 arquivos: a orquestradora avisou que a
+  bateria da oitava integração estava começando, e a porta 8384 é uma só. Os
+  três que rodaram passaram. O arquivo novo e os que a 14b toca já tinham
+  passado sozinhos antes: `quarto_em_paralelo`, 3 de 3, com as reversões. Fica
+  para quando a orquestradora liberar.
+
+## O teste da janela de furos que caía sob carga (09/10)
+
+Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
+(`seele-server --lib`) caiu uma vez na rodada paralela da F3.
+
+- **O que ele mede.** 61 avisos legítimos (um acima do teto) produzem
+  exatamente 60 furos: o teto vale dentro do `atender`, e não só no auxiliar.
+- **Por que caía.** A contagem lia com 600 ms por leitura e parava no primeiro
+  silêncio. Um soluço da linha do teste com uma leitura pendente fazia o prazo
+  vencer antes de o furo seguinte ser lido. É o «53 contra 60» da causa 3 da
+  pendência 29, que já estava registrada.
+- **Como foi medido.**
+  - Carga de CPU não reproduz, como a pendência 29 já dizia. Com 120 processos
+    em `nice 20`, os sessenta furos saíram em 7,20 s, com o maior intervalo em
+    134 ms. Um tropeço meu: devia ter lido a pendência antes de carregar a
+    máquina.
+  - Um soluço de 800 ms provocado no meio da fila encerrou a conta em 9 furos,
+    3 de 3.
+- **O conserto** (`7b2bbb96`): `contar_furos` conta até os esperados sem prazo
+  por leitura, e então espera um a mais. `um_soluco_no_meio` provoca o soluço
+  em toda rodada. O vizinho, `a_janela_cabe_uma_entrada_legitima_inteira`,
+  tinha o mesmo laço e foi consertado junto. A folga da janela ficou escrita.
+- Reversões:
+  - sem o teto, reprova com 61;
+  - com o prazo por leitura de volta, os dois reprovam com 3, em toda rodada;
+  - sem o teto e sem a espera de um a mais, passa: o controle.
+- **Um erro meu durante a medida**: o shell de uma rodada de carga morreu antes
+  de matar os processos. 120 `yes` em `nice 20` ficaram vivos por uns seis
+  minutos, com a carga média em ~77, durante a bateria da oitava integração.
+  Foram mortos (`pkill -x yes`, eram exatamente os 120). Dito à orquestradora.
+  Da próxima vez, cada processo de carga se mata sozinho com prazo.
 

@@ -198,6 +198,18 @@ pub enum Event {
         tema: Option<seele_proto::control::TemaDoServidor>,
     },
 
+    /// A metade de servidor de um MOD avisou as janelas dele (rascunho da API
+    /// 6, §7.3): já passou pela taxa do `Avisador`, e cada sessão o manda se a
+    /// pessoa pode ler o canal.
+    ModAviso {
+        /// O MOD que avisa, e cujas janelas recebem.
+        mod_id: String,
+        /// O canal do aviso; `None` é o servidor inteiro.
+        canal: Option<ChannelId>,
+        /// A carga, em JSON.
+        carga: String,
+    },
+
     /// A imagem de alguém mudou.
     ///
     /// Difundida a todos, como a do servidor — mas com o dono junto, porque a
@@ -1531,6 +1543,10 @@ pub struct Server {
     /// alcançada — a chave não pode ficar velha, porque ela é o conteúdo.
     pub pacotes_conferidos:
         Arc<std::sync::Mutex<std::collections::HashMap<String, PacoteConferido>>>,
+    /// A taxa dos avisos das metades de servidor, com o excedente junto por
+    /// canal (rascunho da API 6, §7.3). Um só por servidor, porque os pedidos e
+    /// os momentos de um MOD dividem a mesma taxa.
+    pub avisador: Arc<crate::mods::aviso::Avisador>,
     /// A impressão do certificado **de longa duração** deste servidor — a
     /// identidade —, em bytes: o SHA-256 do DER dele, o mesmo cujo hex vai no
     /// `fp=` do link.

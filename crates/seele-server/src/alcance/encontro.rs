@@ -1938,18 +1938,9 @@ mod testes {
 
         // `furar` é aguardado dentro do braço do `select!` de `atender`, então
         // os furos saem em fila, um a cada `INTERVALO_DO_FURO`. Doze levam
-        // ~1,4 s; o prazo aqui é folgado para não virar teste de máquina rápida.
-        let mut furos = 0_usize;
-        let mut balde = [0_u8; encontro::TAMANHO];
-        let ate = tokio::time::Instant::now() + Duration::from_secs(6);
-        while furos < ENTRADA_LEGITIMA && tokio::time::Instant::now() < ate {
-            let chegou =
-                tokio::time::timeout(Duration::from_millis(600), alvo.recv_from(&mut balde)).await;
-            match chegou {
-                Ok(Ok(_)) => furos += 1,
-                _ => break,
-            }
-        }
+        // ~1,4 s, e um soluço da máquina no meio não pode encerrar a conta.
+        um_soluco_no_meio();
+        let furos = contar_furos(&alvo, ENTRADA_LEGITIMA).await;
         tarefa.abort();
 
         assert_eq!(
@@ -1997,20 +1988,16 @@ mod testes {
             let _ = ponto_socket.send_to(&aviso_legitimo, avisos_endereco);
         }
 
-        // Conta até parar de chegar. O prazo de cada leitura é cinco vezes o
-        // `INTERVALO_DO_FURO`, então a fila normal nunca o estoura — quem o
-        // estoura é o fim dos furos.
-        let mut furos = 0_usize;
-        let mut balde = [0_u8; encontro::TAMANHO];
-        let ate = tokio::time::Instant::now() + Duration::from_secs(40);
-        while furos <= alem_do_teto && tokio::time::Instant::now() < ate {
-            let chegou =
-                tokio::time::timeout(Duration::from_millis(600), alvo.recv_from(&mut balde)).await;
-            match chegou {
-                Ok(Ok(_)) => furos += 1,
-                _ => break,
-            }
-        }
+        // Conta os sessenta, e espera um a mais. Contava «até parar de
+        // chegar», com 600 ms por leitura, e um soluço da máquina no meio da
+        // fila parecia o fim dos furos: a revisão de 21/09 viu 53 contra 60
+        // (pendência 29, causa 3), e a F3 viu de novo em 09/10. Ver
+        // `contar_furos`, e o soluço que este teste provoca de propósito.
+        //
+        // A folga que sobra é a da janela, e ela está escrita em
+        // `um_soluco_no_meio`.
+        um_soluco_no_meio();
+        let furos = contar_furos(&alvo, FUROS_POR_JANELA).await;
         tarefa.abort();
 
         assert_eq!(
@@ -2090,6 +2077,70 @@ mod testes {
     /// endereço da escuta de avisos (para onde o `AQUI` é mandado), o socket que
     /// receberia o `FURO`, o endereço dele, e a marca que um `AQUI` tem de
     /// trazer para não ser tratado como ruído.
+    /// Quanto a linha do teste fica parada em [`um_soluco_no_meio`]: mais que os
+    /// 600 ms por leitura com que a contagem antiga decidia que os furos
+    /// tinham acabado.
+    const SOLUCO: Duration = Duration::from_millis(800);
+
+    /// Quanto [`contar_furos`] espera por um furo além dos esperados.
+    ///
+    /// Oito vezes o `INTERVALO_DO_FURO`: depois do último furo esperado, o
+    /// aviso seguinte é lido um intervalo depois. Esta espera só decide se uma
+    /// regressão é pega (um furo a mais que chega atrasado); ela não reprova
+    /// teste verde nenhum, porque num servidor certo não há o que esperar.
+    const CONFIRMACAO: Duration = Duration::from_secs(1);
+
+    /// O prazo da contagem inteira: cinco vezes a fila mais longa destes
+    /// testes (sessenta furos, 7,2 s).
+    const PRAZO_DA_CONTAGEM: Duration = Duration::from_secs(40);
+
+    /// Um soluço da máquina no meio da fila de furos: a linha deste teste fica
+    /// parada [`SOLUCO`], como quando o sistema a tira de cena sob carga. Ela é
+    /// a mesma do `atender` (o `tokio::test` roda numa linha só), então os dois
+    /// param juntos.
+    ///
+    /// **Provocado em toda rodada, e não só quando a máquina quer.** A contagem
+    /// que se perdia num soluço (53 furos contra 60, na pendência 29) só
+    /// reprovava sob carga, uma vez em muitas; com o soluço aqui, ela reprova
+    /// sempre, e quem trouxer de volta um prazo por leitura vê na hora.
+    ///
+    /// **A folga da janela, escrita.** Os sessenta furos levam 7,2 s, e a
+    /// janela é de 10 s: o 61º aviso é conferido com 2,8 s de folga. O soluço
+    /// gasta 0,8 s dela, e sobram 2 s de escorregão acumulado da máquina antes
+    /// de o primeiro furo sair da janela e o 61º caber de verdade. Medido em
+    /// 09/10 sob 120 processos de carga: os sessenta saíram em 7,20 s, com o
+    /// maior intervalo em 134 ms.
+    fn um_soluco_no_meio() {
+        tokio::spawn(async {
+            tokio::time::sleep(INTERVALO_DO_FURO * 3).await;
+            std::thread::sleep(SOLUCO);
+        });
+    }
+
+    /// Conta os furos que chegam ao `alvo`: até `esperados`, e então um a mais,
+    /// se ele vier dentro de [`CONFIRMACAO`].
+    ///
+    /// **Sem prazo por leitura** até os esperados, só o da contagem inteira. A
+    /// versão anterior lia com 600 ms cada uma e parava no primeiro silêncio, e
+    /// silêncio não distingue «o servidor parou» de «esta linha ficou fora de
+    /// cena»: sob carga, um soluço com uma leitura pendente fazia o prazo vencer
+    /// antes de o furo seguinte ser lido, e a conta acabava no meio.
+    async fn contar_furos(alvo: &tokio::net::UdpSocket, esperados: usize) -> usize {
+        let mut furos = 0_usize;
+        let mut balde = [0_u8; encontro::TAMANHO];
+        let ate = tokio::time::Instant::now() + PRAZO_DA_CONTAGEM;
+        while furos < esperados {
+            match tokio::time::timeout_at(ate, alvo.recv_from(&mut balde)).await {
+                Ok(Ok(_)) => furos += 1,
+                Ok(Err(_)) | Err(_) => return furos,
+            }
+        }
+        if let Ok(Ok(_)) = tokio::time::timeout(CONFIRMACAO, alvo.recv_from(&mut balde)).await {
+            furos += 1;
+        }
+        furos
+    }
+
     async fn subir_atender_de_teste(
         ponto: SocketAddr,
     ) -> (

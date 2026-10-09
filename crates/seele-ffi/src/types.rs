@@ -1640,6 +1640,17 @@ pub enum Event {
         /// JSON fragment.
         payload: String,
     },
+    /// A metade de servidor de um MOD avisou as janelas dele (rascunho da API
+    /// 6, §7.3). A casca o entrega às janelas daquele MOD; a carga é o JSON do
+    /// MOD, sem interpretação aqui.
+    ModAviso {
+        /// O MOD que avisa.
+        mod_id: String,
+        /// O canal do aviso; `None` é o servidor inteiro.
+        canal: Option<u32>,
+        /// A carga, em JSON.
+        carga: String,
+    },
     /// Somebody joined, left, or changed state.
     RosterChanged,
     /// A message arrived, changed, or went away.

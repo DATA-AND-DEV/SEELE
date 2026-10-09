@@ -1,0 +1,101 @@
+/* SEELE — a raiz da casca do celular (F8 da 0.16).
+ *
+ * Spec: `docs/superpowers/specs/2026-10-09-0.16-celular-design.md`, §3 e §9.
+ *
+ * A casca do celular é esta mesma `ui/`, reorganizada pelos `celular-*.css` e com a
+ * moldura nova nos `celular-*.js`. **Toda regra daqui começa pela raiz
+ * `:root[data-casca="celular"]`**, e é isso que deixa o desktop fora do alcance
+ * dela: sem a marca, que só a ponte do navegador escreve, nenhum seletor desta
+ * folha casa com nada. O `tests/celular.rs` (G1) cobra a regra de cada folha,
+ * inclusive dentro de `@media`, e a bancada (G3) confere o desktop igual pixel a
+ * pixel com elas carregadas.
+ *
+ * Nenhuma cor literal e nenhuma cor nova: tudo vem de `tokens.css`. */
+
+:root[data-casca="celular"] {
+  /* A barra da janela não existe: o sistema desenha a dele. A `.tela` e as
+     superfícies dos MODs já leem esta variável. */
+  --seele-barra-janela: 0px;
+
+  /* As medidas de layout do celular. São medidas, e não tokens de desenho:
+     moram aqui como `--seele-barra-janela` mora em `base.css`, e não em
+     `tokens.css`, que é congelado. */
+  --cel-alvo: 44px;          /* o menor alvo de toque */
+  --cel-campo: 16px;         /* a letra de um campo: abaixo disso o iOS amplia a página ao focar */
+  --cel-topo: 56px;
+  --cel-faixa: 64px;
+  --cel-abas: 56px;
+  --cel-coluna: 480px;       /* o teto da coluna numa tela grande */
+  --cel-escala: 1;           /* o texto dinâmico do sistema (Tarefa 12) */
+  --cel-seguro-topo: env(safe-area-inset-top, 0px);
+  --cel-seguro-pe: env(safe-area-inset-bottom, 0px);
+  --cel-seguro-esq: env(safe-area-inset-left, 0px);
+  --cel-seguro-dir: env(safe-area-inset-right, 0px);
+
+  /* **O núcleo.** Declaradas na raiz a partir dos tokens, chegam a todo filho
+     já resolvidas: o tema escreve os `--seele-*` em `#tela-sessao`, e um
+     `--nucleo-*` herdado ali continua sendo a cor do produto. É isso que
+     garante o MUDO, o SURDO e o SAIR qualquer que seja o tema (spec, §6). O
+     tema não escreve `--nucleo-*` nenhum: as tabelas dele são fechadas, e o G7
+     confere. */
+  --nucleo-fundo: var(--seele-negro-absoluto);
+  --nucleo-painel: var(--seele-negro-painel);
+  --nucleo-texto: var(--seele-osso);
+  --nucleo-acento: var(--seele-laranja-nerv);
+  --nucleo-borda: var(--seele-linha-forte);
+  --nucleo-rotulo: var(--seele-rotulo-claro);
+  --nucleo-seguro: var(--seele-padrao-azul);
+  --nucleo-alerta: var(--seele-vermelho-alerta);
+  --nucleo-alerta-fundo: var(--seele-vermelho-fraco);
+  /* A letra também: o tema troca `--seele-mono` pela pilha sem serifa, e o
+     núcleo não muda de forma com o tema. */
+  --nucleo-pilha: var(--seele-pilha-mono);
+
+  /* Sem zoom de toque duplo (MUDO e SURDO tocados em seguida ampliavam a
+     página), e sem o iOS crescer a letra sozinho ao deitar o aparelho. A
+     pinça continua: a meta de viewport não a tira. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Puxar para baixo recarregaria a página, e recarregar derruba a sessão: o
+     navegador não deixa a página recusar a recarga. Cada painel rola dentro de
+     si, e a raiz não puxa. */
+  overscroll-behavior: none;
+}
+
+:root[data-casca="celular"] body {
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+/* A altura que o navegador mostra, e não a de trás da barra dele: `100vh` num
+   celular é a página com a barra do navegador recolhida, e o pé ficaria
+   embaixo dela. */
+:root[data-casca="celular"] .tela {
+  height: 100dvh;
+}
+
+/* O rótulo do celular é o de 12 px dos tokens (U04), e não os 10 px da coluna
+   densa do desktop: a distância do olho ao vidro é outra. */
+:root[data-casca="celular"] .rotulo {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .coordenada {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+}
+
+/* Todo controle tem 44 de alvo. */
+:root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary) {
+  min-height: var(--cel-alvo);
+  min-width: var(--cel-alvo);
+}
+
+/* A letra de campo de 16: abaixo disso o Safari do iOS amplia a página inteira ao
+   focar o campo, e não a devolve. */
+:root[data-casca="celular"] :is(input, textarea, select) {
+  font-size: var(--cel-campo);
+  font-family: var(--seele-mono);
+}

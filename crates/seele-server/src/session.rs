@@ -980,30 +980,8 @@ async fn admitir(
                         });
                     }
                 }
-                // Entrou de verdade: agora o convite é gasto — quando houve um.
-                // Sem passe não há o que gastar: é quem entrou pela porta que a
-                // portaria já tinha aberto, e ela não consome nada.
-                //
-                // Perder a corrida aqui é o mesmo caso de sempre — dois
-                // clientes com o mesmo convite no mesmo instante — e a recusa
-                // dele continua uniforme.
-                match passe.as_ref().map_or(Ok(Ok(())), |passe| {
-                    crate::admissao::gastar(&mut guard, passe)
-                }) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(recusa)) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::CredentialRejected,
-                            detail: format!("admissão recusada ao gastar: {recusa:?}"),
-                        });
-                    }
-                    Err(error) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::CredentialRejected,
-                            detail: format!("could not spend the invite: {error}"),
-                        });
-                    }
-                }
+                // O convite **não** é gasto aqui: só depois dos MODs, logo
+                // abaixo do `exigir_aceite_dos_mods`. Ver lá.
             }
             Ok(crate::portaria::Resposta::Pendente) => {
                 tracing::info!(%impressao, %nickname, "knock waiting for the host");
@@ -1142,6 +1120,37 @@ async fn admitir(
     // porque o laço compara identidades em vez de confiar no aviso.
     let aviso_de_mods = server.persistence.lock().await.mods_mudaram();
     let conjunto_aceito = exigir_aceite_dos_mods(send, recv, server, version).await?;
+
+    // **Entrou de verdade: agora o convite é gasto** — quando houve um. Sem
+    // passe não há o que gastar: é quem entrou pela porta que a portaria já
+    // tinha aberto, ou pela senha, e nada se consome.
+    //
+    // Era gasto na portaria, antes dos MODs, e quem os recusava — todo app que
+    // ainda não os tinha aceitado: ele recusa, devolve a lista à tela e entra de
+    // novo depois do sim — voltava com o mesmo convite e recebia
+    // `CredentialRejected` (hipótese da F8, medida em 09/10/2026; o caso irmão
+    // da P4, o apelido). Aqui, a recusa dos MODs deixa o convite intacto.
+    //
+    // Perder a corrida aqui é o mesmo caso de sempre — dois clientes com o
+    // mesmo convite no mesmo instante — e a recusa dele continua uniforme.
+    if let Some(passe) = passe.as_ref() {
+        let mut guard = server.persistence.lock().await;
+        match crate::admissao::gastar(&mut guard, passe) {
+            Ok(Ok(())) => {}
+            Ok(Err(recusa)) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("admissão recusada ao gastar: {recusa:?}"),
+                });
+            }
+            Err(error) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("could not spend the invite: {error}"),
+                });
+            }
+        }
+    }
 
     // Lido do PERSISTENCE, e não da [`ServerConfig`] que subiu o processo: renomear
     // com o servidor no ar é o caso normal — ADR 0032 —, e um nome que voltasse ao
@@ -3972,6 +3981,16 @@ async fn run_session(
                         continue;
                     }
                 }
+                // **O aviso de um MOD pede a permissão, e não a assinatura.** A
+                // janela da MESA precisa saber que a mesa do canal 7 mudou mesmo
+                // com a conversa de outro canal aberta: a assinatura é de quem
+                // lê mensagens, e o aviso é de quem pode ler o canal (rascunho da
+                // API 6, §7.3).
+                if let Event::ModAviso { canal: Some(canal), .. } = &event {
+                    if !pode_ler_canal(server, session.person, *canal).await {
+                        continue;
+                    }
+                }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
                         frame::write_em(&mut send, session.protocol_version, &message).await?;
@@ -5416,6 +5435,18 @@ fn translate(
         // a sessão, e é por este quadro que a casca sabe que o tema publicado é
         // outro (rascunho da API 6, §9).
         Event::TemaMudou { tema } => Some(ServerMessage::TemaMudou { tema: tema.clone() }),
+        // A todos os que chegaram até aqui: quem não pode ler o canal já ficou
+        // de fora, no laço, antes de `translate`. A janela de quem fez o pedido
+        // também recebe (pergunta do PERFIS, 09/10).
+        Event::ModAviso {
+            mod_id,
+            canal,
+            carga,
+        } => Some(ServerMessage::ModAviso {
+            mod_id: mod_id.clone(),
+            canal: *canal,
+            carga: carga.clone(),
+        }),
 
         // Acted on by the connection they name, in the loop, and carrying
         // nothing for anybody else. A move is visible to everybody as the
@@ -6347,6 +6378,7 @@ mod fim_de_tela_por_sessao {
             esperas: Arc::new(std::sync::Mutex::new(Default::default())),
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            avisador: Arc::new(crate::mods::aviso::Avisador::default()),
             impressao: [0; 32],
             recepcao: None,
             persistence,
@@ -6662,5 +6694,41 @@ mod a_causa_da_recusa {
             causa_da_falha(&anyhow::anyhow!("o disco encheu")),
             CausaDaRecusa::FalhaDoServidor
         );
+    }
+}
+
+/// O aviso da metade de servidor de um MOD, do barramento ao fio (rascunho da
+/// API 6, §7.3; tarefa 8 do plano da F3).
+#[cfg(test)]
+mod o_aviso_do_mod {
+    use super::translate;
+    use crate::server::Event;
+    use seele_proto::{
+        control::ServerMessage,
+        ids::{ChannelId, PersonId},
+    };
+
+    /// **Para todos, inclusive a janela de quem pediu** (pergunta do PERFIS,
+    /// 09/10): uma regra só, e a janela que gravou confere a revisão. O filtro
+    /// de quem pode ler o canal vem antes de `translate`, no laço da sessão; aqui
+    /// é a tradução, que não filtra por pessoa nem pela assinatura do canal.
+    #[test]
+    fn o_aviso_vira_o_mod_aviso_do_fio_para_todos() {
+        for canal in [Some(ChannelId(7)), None] {
+            let evento = Event::ModAviso {
+                mod_id: "seele/mesa".to_owned(),
+                canal,
+                carga: r#"{"revisao":3}"#.to_owned(),
+            };
+            assert_eq!(
+                translate(&evento, &[], PersonId(1)),
+                Some(ServerMessage::ModAviso {
+                    mod_id: "seele/mesa".to_owned(),
+                    canal,
+                    carga: r#"{"revisao":3}"#.to_owned(),
+                }),
+                "o aviso do canal {canal:?} não virou ModAviso para quem não assinou o canal"
+            );
+        }
     }
 }

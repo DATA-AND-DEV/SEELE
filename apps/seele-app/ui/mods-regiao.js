@@ -1283,12 +1283,17 @@ class RegiaoDeMod {
           });
         })
         .catch((falha) => {
+          // Na API 6, a recusa pelo nome, com os campos dela (`detectado:
+          // 'heic'`); até a 5, o `porque` de antes, com a frase de tela.
+          const recusa = this.dono.recusaParaOMod?.(falha) ?? {
+            porque: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
+          };
           this.dono.falar({
             nome: "arquivo",
             chave: plano.no.chave ?? "",
             arquivo: null,
             resultado: "falhou",
-            porque: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
+            ...recusa,
           });
         })
         .finally(() => {
