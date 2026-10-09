@@ -10189,6 +10189,101 @@ mod o_audio_segue_a_sala {
         assert_eq!(escolhida.aparelhos.playback.as_deref(), Some("caixa"));
     }
 
+    /// O corpo de `drive`, sem as linhas de comentário, e os três pedaços que a
+    /// ligação da porta da voz atravessa: antes do laço, o `select!`, e o resto
+    /// da volta do laço depois dele.
+    fn pedacos_de_drive() -> (String, String, String, String) {
+        let fonte = include_str!("lib.rs");
+        let sem_comentario: String = fonte
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let inicio = sem_comentario
+            .find(&format!("{} fn drive(", "async"))
+            .expect("`drive` sumiu de `lib.rs`");
+        let depois = &sem_comentario[inicio..];
+        let corpo = &depois[..depois.find("\n}\n").expect("`drive` nunca fecha")];
+        let (antes_do_laco, laco) = corpo
+            .split_once("    while shared.running")
+            .expect("o laço de `drive` mudou de forma, e este guarda tem de mudar com ele");
+        let (_, select) = laco
+            .split_once("tokio::select! {")
+            .expect("o `select!` de `drive` sumiu");
+        // O `select!` fecha na primeira linha com a indentação dele.
+        let (select, resto_da_volta) = select
+            .split_once("\n        }\n")
+            .expect("o `select!` de `drive` não fecha na indentação de sempre");
+        (
+            corpo.to_owned(),
+            antes_do_laco.to_owned(),
+            select.to_owned(),
+            resto_da_volta.to_owned(),
+        )
+    }
+
+    /// I2 da rodada 1 do lote I-a: a porta da voz está ligada ao laço de
+    /// `drive`, nos três lugares, e só nos três.
+    ///
+    /// Os testes acima provam a porta, e nenhum deles vê `drive`. A revisão
+    /// desfez duas ligações e ficou tudo verde: sem o olhar do fim da volta do
+    /// laço — o único ponto que abre o áudio ao entrar numa sala — e com um
+    /// `porta.comecar` logo depois do olhar do aperto de mão, que abre o áudio
+    /// ao conectar. Este guarda lê o texto de `drive` porque é ali que a ligação
+    /// mora, e nenhum valor a exibe sem um enlace de verdade.
+    #[test]
+    fn a_porta_da_voz_esta_ligada_ao_laco_de_drive() {
+        let (corpo, antes_do_laco, select, resto_da_volta) = pedacos_de_drive();
+        let olhar = "porta.olhar(&shared.voice, sala_de(&shared),";
+
+        assert_eq!(
+            antes_do_laco.matches("porta.").count(),
+            1,
+            "antes do laço, `drive` mexe na porta da voz mais de uma vez — ou nenhuma: o \
+             aperto de mão é um olhar só, com o servidor adotado e ninguém sentado, e \
+             qualquer outra coisa ali abre o áudio ao conectar"
+        );
+        assert!(
+            antes_do_laco.contains(olhar),
+            "o olhar do aperto de mão sumiu, ou deixou de ler o assento confirmado"
+        );
+        assert!(
+            select.contains("aberta = porta.chegada() =>"),
+            "o `select!` de `drive` não espera mais a abertura em curso: a voz abre e nunca \
+             chega ao lugar"
+        );
+        assert!(
+            resto_da_volta.contains(olhar),
+            "o olhar do fim da volta do laço sumiu: é o único ponto que abre o áudio ao \
+             entrar numa sala e o fecha ao sair"
+        );
+        for chamada in corpo
+            .match_indices("porta.")
+            .map(|(onde, _)| &corpo[onde..])
+        {
+            assert!(
+                [
+                    "porta.olhar(",
+                    "porta.na_volta(",
+                    "porta.chegada()",
+                    "porta.chegou("
+                ]
+                .iter()
+                .any(|permitida| chamada.starts_with(permitida)),
+                "`drive` chama a porta da voz por fora das quatro portas dela: {}",
+                chamada.lines().next().unwrap_or_default()
+            );
+        }
+        for (onde, _) in corpo.match_indices("abrir_a_voz(") {
+            let antes = corpo[..onde].trim_end().trim_end_matches('{').trim_end();
+            assert!(
+                antes.ends_with("|pedidos|"),
+                "`drive` chama `abrir_a_voz` fora de uma closure dada à porta: a voz abre \
+                 sem a porta decidir"
+            );
+        }
+    }
+
     /// Nenhum caminho abre a voz por fora da porta da sala.
     ///
     /// Os testes acima provam a decisão da porta, e nenhum deles vê `drive`:
