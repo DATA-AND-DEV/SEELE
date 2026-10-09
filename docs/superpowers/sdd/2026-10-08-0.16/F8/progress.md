@@ -14,7 +14,8 @@ Branch `0.16/celular`, saído de `versao/0.16` em `f7bc902b` (09/10). Spec-mestr
 | a prova sobre a casca | **feita**: o desktop igual pixel a pixel com os arquivos do celular; a aba PESSOAS da `#lista-roster` (980 px sem a meta de viewport, 390 com); o MUDO da faixa pelo `#botao-mudo` | `spikes/casca-do-celular/prova-sobre-a-casca/` |
 | o spec | **feito** | `specs/2026-10-09-0.16-celular-design.md` (`001b032d` e o commit do plano) |
 | o plano | **feito**: 16 tarefas, com os guardas conferidos num crate de rascunho (os sete passam e cada um reprova na sua reversão) | `plans/2026-10-09-0.16-F8-celular.md` |
-| as fotos no Safari do Simulador | **espera o dono**: o acesso ao iPhone 17 | spec §12 |
+| as fotos no Safari do Simulador | **feitas em parte** (iPhone 17, iOS 27, numa aba): fontes, glifos, área segura de cima, temas e o texto do sistema passam; a foto com o tamanho de acessibilidade achou os rótulos do núcleo fixos, e eles passaram a crescer até 1,4×. Faltam o web app instalado, o teclado de verdade e o deitado | spec §12, `b32b2043` |
+| o PC no navegador (D-web-3) | **no desenho**: a marca com dois valores (`celular`, `larga`), a coluna PC na matriz, o que fica de fora em dois grupos, a §2.8 do spec e as Tarefas 17 a 19 do plano | `aba56719` |
 
 ## Etapa B — a casca
 
