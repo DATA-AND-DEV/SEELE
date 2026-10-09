@@ -42,6 +42,7 @@ pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;
+pub mod recepcao;
 pub mod server;
 pub mod session;
 pub mod taxa;
