@@ -17147,6 +17147,39 @@ fn o_aviso_da_sala_alem_da_subida_diz_os_dois_numeros_em_kbps() {
     }
 }
 
+/// **A frase de quem é movido vale também para quem estava fora de toda sala.**
+/// Rodada 1 do lote I-b, M-5.
+///
+/// O servidor move a pessoa para uma sala sem conferir se ela estava em alguma
+/// (`seele-server`, `session.rs`, o braço de `Event::PersonMoved`). A primeira
+/// frase mandava «voltar à sala de antes», que não existe para quem estava fora.
+#[test]
+fn a_frase_de_quem_e_movido_vale_para_quem_estava_fora_de_sala() {
+    let script = without_comments(&scripts());
+    let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
+        panic!("frases.js no longer declares AVISOS");
+    };
+    let Some(trecho) = avisos
+        .split("MovedByOperator:")
+        .nth(1)
+        .and_then(|resto| resto.split("\",\n").next())
+    else {
+        panic!("`AVISOS` não tem mais a frase de `MovedByOperator`");
+    };
+    let frase = literals_in(&format!("{trecho}\"")).to_lowercase();
+    assert!(
+        !frase.is_empty(),
+        "a frase de `MovedByOperator` saiu vazia, e este guarda mediu outra coisa"
+    );
+    for suposicao in ["de antes", "voltar", "outra sala"] {
+        assert!(
+            !frase.contains(suposicao),
+            "a frase de quem é movido supõe uma sala de onde a pessoa saiu («{suposicao}»): \
+             quem estava fora de toda sala lê um conselho que não tem como seguir: {frase}"
+        );
+    }
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um

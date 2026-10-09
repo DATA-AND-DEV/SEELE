@@ -186,13 +186,17 @@ const AVISOS = {
   ScreenShareOverHostUplink:
     "A TELA PAROU: A SALA CRESCEU ALÉM DA CONEXÃO DE QUEM HOSPEDA O SERVIDOR",
 
-  // Alguém com a permissão de mover pessoas tirou esta da sala em que estava e
-  // a pôs noutra. Sem a frase, a pessoa se via noutra sala sem saber por quê —
-  // indistinguível de um defeito. Diz quem fez, onde ela está agora e como
-  // voltar; não acusa ninguém pelo nome, porque o aviso não traz o nome.
+  // Alguém com a permissão de mover pessoas pôs esta numa sala de voz. Sem a
+  // frase, a pessoa se via numa sala sem saber por quê — indistinguível de um
+  // defeito. Diz quem fez, onde ela está agora e o que dá para fazer; não acusa
+  // ninguém pelo nome, porque o aviso não traz o nome.
+  //
+  // **Não supõe uma sala de antes** (M-5 da rodada 1 do lote I-b): o servidor
+  // move também quem estava fora de toda sala, e «volte à de antes» seria um
+  // conselho sem como seguir.
   MovedByOperator:
-    "ALGUÉM QUE MODERA ESTE SERVIDOR MOVEU VOCÊ PARA OUTRA SALA DE VOZ. " +
-    "Você já está nela; para voltar, entre de novo na sala de antes.",
+    "ALGUÉM QUE MODERA ESTE SERVIDOR PÔS VOCÊ NUMA SALA DE VOZ. " +
+    "Você já está nela; se não quer ficar, saia da sala ou entre na que preferir.",
 
   // ADR 0038: uma sala passou do que a internet de quem hospeda consegue enviar
   // com todos falando juntos. Só chega a quem administra o servidor, que é quem
