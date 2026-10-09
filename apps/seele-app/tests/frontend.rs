@@ -10591,9 +10591,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
         ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
+        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
+        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
         (
             "tela-boot.js",
-            "if (levarParaOAceiteDeMods(motivo, ultimoAlvo ?? \"\", credencial ?? null)) {",
+            "if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
         ),
         ("camada-mods.js", "let aceitePendente = null;"),
         (

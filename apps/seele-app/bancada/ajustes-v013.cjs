@@ -282,7 +282,39 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
   await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
 
-  // ---- 6. Depois de tudo isso, a credencial não está em lugar nenhum além do
+  // ---- 6. A credencial fica presa ao alvo da batida, e não ao último alvo da
+  // janela.
+  //
+  // `hospedar()` reescreve o `ultimoAlvo`, e HOSPEDAR AQUI não fica apagado
+  // enquanto um `connect` anda. A revisão mediu (`corrida-r.cjs`, rodada 1):
+  // com o `ultimoAlvo` trocado no meio do `connect` de A, a pergunta guardava o
+  // alvo novo, e a volta levava o convite de A a outro servidor. Aqui o
+  // `connect` demora 400 ms, e a troca acontece aos 100.
+  await page.evaluate(([alvo, convite]) => {
+    window.testServidor = { aceitou: false, gasto: false };
+    testAtraso.connect = 400;
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    irParaOServidor(alvo, null, convite);
+    // O que `hospedar()` faz no meio: `ultimoAlvo = anfitriao.aqui`.
+    setTimeout(() => { ultimoAlvo = '127.0.0.1:9999'; }, 100);
+  }, [ALVO_R, CONVITE_R]);
+  await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('a batida da corrida não chegou à pergunta dos MODs, e a corrida não foi medida'));
+  await page.evaluate(() => { testAtraso = {}; });
+  const antesDaCorrida = (await conectsFeitos(page)).length;
+  await page.click('#mods-aceitar');
+  await page.waitForFunction((n) => testCalls.filter(c => c.cmd === 'connect').length > n, antesDaCorrida, { timeout: 3000 });
+  const voltaDaCorrida = (await conectsFeitos(page)).at(-1);
+  assert.equal(voltaDaCorrida.server, ALVO_R,
+    `com o último alvo da janela trocado no meio da batida, a volta que aceita os MODs foi a ${voltaDaCorrida.server}` +
+    (voltaDaCorrida.joinSecret === CONVITE_R ? `, levando o convite de ${ALVO_R}` : '') +
+    ': a pergunta amarrou a credencial ao alvo da janela, e não ao da batida');
+  const simGravado = await page.evaluate(() => testCalls.filter(c => c.cmd === 'aceitar_mods').at(-1)?.args?.alvo);
+  assert.equal(simGravado, ALVO_R,
+    `o sim dos MODs foi gravado para ${simGravado}, e não para o servidor que perguntou`);
+
+  // ---- 7. Depois de tudo isso, a credencial não está em lugar nenhum além do
   // `connect`: nem no armazenamento da página, nem no DOM, nem no console, nem
   // em outro comando — que é por onde ela chegaria a um arquivo.
   const vazou = await page.evaluate((convite) => {
@@ -520,6 +552,7 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
     console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');
     console.log('lote R: desistir da pergunta (RECUSAR, Escape, clicar fora, ou no meio da obtenção) esquece a credencial e não entra');
+    console.log('lote R: com o último alvo trocado no meio da batida, a volta e o sim vão ao servidor que perguntou');
     console.log('lote R: a credencial não aparece no armazenamento, no DOM, no console nem em comando nenhum além do connect');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

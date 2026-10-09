@@ -317,7 +317,13 @@ async function conectar(alvo, apelido, credencial) {
     //
     // A credencial desta tentativa vai junto, e é o único lugar para onde ela
     // vai: a pergunta a guarda enquanto está aberta e a esquece ao fechar.
-    if (levarParaOAceiteDeMods(motivo, ultimoAlvo ?? "", credencial ?? null)) {
+    //
+    // **Com o `alvo` desta chamada, e não com o `ultimoAlvo`** (lote R, rodada
+    // 1). O `ultimoAlvo` é da janela: `hospedar()` o reescreve, e HOSPEDAR
+    // AQUI não fica apagado enquanto este `connect` anda. A revisão mediu a
+    // troca no meio da batida: a pergunta guardava o alvo novo, e a volta
+    // levava o convite deste servidor a outro.
+    if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
