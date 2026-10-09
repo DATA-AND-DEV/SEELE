@@ -271,6 +271,69 @@ const chromium = require("./playwright.cjs").chromium();
         "responde vira uma batida constante na porta de alguém",
     );
     console.log("R06 OK: ler uma mensagem não dispara prévia, e o convite nomeia o domínio");
+
+    // ---- acréscimo C do lote I-b: os dois avisos que chegavam como «AVISO» ----
+    //
+    // O guarda `todo_motivo_de_aviso_tem_frase_na_pagina` prova que a frase
+    // existe. Aqui se prova a frase que sai, pela `fraseDoAviso` de verdade: a
+    // da sala além da subida leva os dois números em kbps, legíveis.
+    const avisos = await page.evaluate(() => ({
+      movido: fraseDoAviso("MovedByOperator"),
+      subida: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 6_480_000, medido_bps: 4_000_000 },
+      }),
+      semNumeros: fraseDoAviso({ VoiceRoomOverHostUplink: {} }),
+    }));
+    for (const [nome, frase] of Object.entries(avisos)) {
+      assert.ok(
+        typeof frase === "string" && frase.length > 0 && frase !== "AVISO",
+        `o aviso ${nome} chega à faixa sem frase: ${JSON.stringify(frase)}`,
+      );
+    }
+    assert.ok(
+      avisos.subida.includes("6.480 kbps") && avisos.subida.includes("4.000 kbps"),
+      `a sala além da subida não diz os dois números em kbps legíveis: ${avisos.subida}`,
+    );
+    assert.ok(
+      !/undefined|NaN/.test(avisos.semNumeros),
+      `sem os números, a frase escreve lixo no lugar deles: ${avisos.semNumeros}`,
+    );
+    console.log("C OK: quem é movido e quem hospeda uma sala além da subida leem uma frase");
+
+    // ---- F1-vazamento: o que a sessão guardou não passa para a seguinte ----
+    //
+    // O rascunho é por número de canal, e a prévia de link e o volume lido são
+    // por chave que o servidor dá: o canal 1 de um servidor não é o de outro.
+    // As duas saídas passam por `esquecerOEstadoDaSessao`. Por último nesta
+    // bancada, porque as duas tiram a tela de sessão da frente.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const depois = await page.evaluate(async (qual) => {
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        $("campo-mensagem").value = "rascunho do servidor de antes";
+        guardarRascunho();
+        previasDeLink.set("https://exemplo.invalid/a.png", false);
+        volumesLidos.set("Lia", 150);
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        // A sessão seguinte abre o canal 1 dela.
+        linhaAberta = 1;
+        restaurarRascunho();
+        return {
+          campo: $("campo-mensagem").value,
+          previas: previasDeLink.size,
+          volumes: volumesLidos.size,
+        };
+      }, saida);
+      assert.deepEqual(
+        depois,
+        { campo: "", previas: 0, volumes: 0 },
+        `depois de ${saida}, o que a sessão guardou passou para a seguinte: ` +
+          JSON.stringify(depois),
+      );
+    }
+    console.log("F1-vazamento OK: rascunho, prévia e volume não passam de uma sessão para outra");
   } finally {
     await browser.close();
     server.close();

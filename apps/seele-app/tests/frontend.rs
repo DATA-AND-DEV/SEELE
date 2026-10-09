@@ -16924,6 +16924,42 @@ fn todo_mapa_de_topo_da_sessao_e_esquecido_ao_sair() {
     );
 }
 
+/// **A sala além da subida de quem hospeda diz os dois números, em kbps.**
+/// Acréscimo C do lote I-b.
+///
+/// `todo_motivo_de_aviso_tem_frase_na_pagina` prova que o motivo tem frase em
+/// `AVISOS`; o motivo leva números, e é `fraseDoAviso` que os põe na frase,
+/// como a retenção põe a contagem. A bancada `conversa-com-estado.cjs` roda a
+/// função e confere «6.480 kbps»; este guarda prende, no `cargo test`, que ela
+/// lê os dois campos com os nomes que a ponte manda.
+#[test]
+fn o_aviso_da_sala_alem_da_subida_diz_os_dois_numeros_em_kbps() {
+    // Os nomes dos campos em Rust: renomear um deles não compila sem passar aqui.
+    fn _liga_os_dois_lados(motivo: seele_ffi::NoticeReason) -> Option<(u64, u32)> {
+        match motivo {
+            seele_ffi::NoticeReason::VoiceRoomOverHostUplink {
+                precisa_bps,
+                medido_bps,
+            } => Some((precisa_bps, medido_bps)),
+            _ => None,
+        }
+    }
+    let frase = body_of(&scripts(), "function fraseDoAviso(motivo)");
+    let Some((_, braco)) = frase.split_once("nome === \"VoiceRoomOverHostUplink\"") else {
+        panic!(
+            "`fraseDoAviso` não tem o braço da sala além da subida: quem hospeda lê o \
+             aviso sem os números, e «a sala está grande» não diz o que fazer"
+        );
+    };
+    for elo in ["precisa_bps", "medido_bps", "emKbps("] {
+        assert!(
+            braco.contains(elo),
+            "o braço da sala além da subida não passa por `{elo}`: um dos números não \
+             chega à frase, ou chega em bits por segundo crus:\n{braco}"
+        );
+    }
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
@@ -16957,7 +16993,7 @@ fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // Os que já chegavam sem frase quando este guarda nasceu (09/10/2026), e
     // que a orquestradora distribui. **A lista só encolhe**: um deles ganhando
     // frase também reprova, pedindo para sair daqui.
-    const AINDA_SEM_FRASE: &[&str] = &["MovedByOperator", "VoiceRoomOverHostUplink"];
+    const AINDA_SEM_FRASE: &[&str] = &[];
 
     let mudas: Vec<&String> = variantes
         .iter()

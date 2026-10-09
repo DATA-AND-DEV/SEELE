@@ -2733,6 +2733,24 @@ function fraseDoAviso(motivo) {
     const quantas = Number(motivo[nome]?.apagadas ?? 0);
     return `${frase} — ${quantas} ${quantas === 1 ? "MENSAGEM" : "MENSAGENS"}`;
   }
+  // A sala além da subida de quem hospeda diz os dois números (ADR 0038):
+  // «a sala está grande» não é acionável, e «pede 6.480 kbps, e a internet do
+  // servidor envia cerca de 4.000 kbps» é. «Cerca de» porque a subida é uma
+  // estimativa do servidor. Os números vêm do fio; a frase, o risco e a saída
+  // são daqui. Sem eles, a frase vai sozinha, e não com um buraco no meio.
+  if (nome === "VoiceRoomOverHostUplink") {
+    const precisa = emKbps(motivo[nome]?.precisa_bps);
+    const medido = emKbps(motivo[nome]?.medido_bps);
+    const numeros =
+      precisa && medido
+        ? ` Com todos falando juntos, ela pede ${precisa}, e a internet do servidor ` +
+          `envia cerca de ${medido}.`
+        : "";
+    return (
+      `${frase}.${numeros} Ninguém foi barrado, mas a voz pode picar para todos: ` +
+      "menos gente falando junto, ou o servidor numa internet que envie mais, resolve."
+    );
+  }
   // Provisória: a causa completa a frase. Ver `CAUSAS_DE_RECUSA`.
   if (nome === "PedidoRecusado") {
     const causa = CAUSAS_DE_RECUSA[motivo[nome]?.causa];

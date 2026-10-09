@@ -186,6 +186,22 @@ const AVISOS = {
   ScreenShareOverHostUplink:
     "A TELA PAROU: A SALA CRESCEU ALÉM DA CONEXÃO DE QUEM HOSPEDA O SERVIDOR",
 
+  // Alguém com a permissão de mover pessoas tirou esta da sala em que estava e
+  // a pôs noutra. Sem a frase, a pessoa se via noutra sala sem saber por quê —
+  // indistinguível de um defeito. Diz quem fez, onde ela está agora e como
+  // voltar; não acusa ninguém pelo nome, porque o aviso não traz o nome.
+  MovedByOperator:
+    "ALGUÉM QUE MODERA ESTE SERVIDOR MOVEU VOCÊ PARA OUTRA SALA DE VOZ. " +
+    "Você já está nela; para voltar, entre de novo na sala de antes.",
+
+  // ADR 0038: uma sala passou do que a internet de quem hospeda consegue enviar
+  // com todos falando juntos. Só chega a quem administra o servidor, que é quem
+  // pode fazer algo. **Não para nada** — ninguém é barrado —, e a frase diz o
+  // risco e a saída. Os dois números vêm no motivo e entram em `fraseDoAviso`,
+  // em kbps, como a retenção põe a contagem dela.
+  VoiceRoomOverHostUplink:
+    "UMA SALA DE VOZ PASSOU DO QUE A INTERNET DESTE SERVIDOR CONSEGUE ENVIAR",
+
   // ---- uma sala deixou de existir ----
   //
   // Três frases e não uma, porque pedem coisas diferentes de quem lê. As duas
@@ -1320,6 +1336,21 @@ function fraseDeAnexo(razao) {
     return base;
   }
   return ANEXOS[razao] ?? `FALHA NÃO IDENTIFICADA (${razao})`;
+}
+
+/**
+ * Uma taxa em bits por segundo do jeito que alguém lê uma: em kbps, inteiros,
+ * com o ponto dos milhares. `6480000` vira `6.480 kbps`.
+ *
+ * O separador escrito à mão, e não `toLocaleString`: a frase é desta casa, e o
+ * número não pode mudar de forma com a língua do sistema de quem lê. `null`
+ * quando o valor não é um número — e quem chama escreve a frase sem ele.
+ */
+function emKbps(bps) {
+  const numero = Number(bps);
+  if (!Number.isFinite(numero) || numero <= 0) return null;
+  const kbps = String(Math.round(numero / 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${kbps} kbps`;
 }
 
 /**
