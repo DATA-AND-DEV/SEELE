@@ -175,6 +175,14 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
         // Um link com erro de digitação: o `analisar_convite` de verdade
         // responde com o nome da falha, e nenhuma tentativa começa.
         if (cmd === 'analisar_convite' && String(args?.link).includes('erro-de-digitacao')) throw 'TokenInvalido';
+        // Um link de um servidor de outra linha: o Rust devolve o
+        // `versoes::ParaEntrar`, e a entrada segue por `entrarPelaLinha`.
+        if (cmd === 'analisar_convite' && String(args?.link).includes('outra-linha')) {
+          return {
+            alvo: '192.0.2.9:8384', token: 'convite-de-outra-linha',
+            para_entrar: { Abrir: { servidor: '0.15', linha: '0.15', perde_conversas: false } },
+          };
+        }
         if (cmd === 'instalar_mod_do_catalogo') window.testTable.mods_instalados = [{ id: mod.id, hash: mod.hash }];
         if (cmd === 'connect') {
           const servidor = window.testServidor;
@@ -281,6 +289,34 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   assert.equal((await conectsFeitos(page)).length, conectsAntesDoQuebrado,
     'o link recusado pelo analisar_convite chegou a um connect');
   await page.evaluate(() => fecharServidores());
+
+  // ---- 4c. Um link de outra linha segue para a tentativa dela, e o campo
+  // fica vazio.
+  //
+  // É a outra saída que leva o link adiante: `entrarPelaLinha` abre o SEELE
+  // daquela linha com o link (`abrir_versao`), e o convite dentro dele não
+  // pode ficar escrito no campo desta janela, que continua aberta.
+  const LINK_DE_OUTRA_LINHA = 'seele://192.0.2.9:8384?token=convite-de-outra-linha&v=outra-linha';
+  const conectsAntesDaOutraLinha = (await conectsFeitos(page)).length;
+  await page.evaluate(() => {
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_DE_OUTRA_LINHA);
+  await page.press('#servidores-endereco', 'Enter');
+  await page.waitForFunction(() => !document.getElementById('versoes-confirmar').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('o link de outra linha não chegou à pergunta de abrir a outra versão, e este caso não mede nada'));
+  await page.click('#versoes-confirmar-sim');
+  await page.waitForFunction(() => testCalls.some(c => c.cmd === 'abrir_versao'), null, { timeout: 3000 })
+    .catch(() => assert.fail('o link de outra linha não chegou ao abrir_versao'));
+  assert.equal(await page.evaluate(() => testCalls.filter(c => c.cmd === 'abrir_versao').at(-1).args.link), LINK_DE_OUTRA_LINHA,
+    'o abrir_versao não recebeu o link colado, e este caso não mede o caminho de verdade');
+  assert.equal(await campoDoLink(page), '',
+    'o link de outra linha seguiu para o SEELE daquela linha e ficou escrito no campo do diálogo de servidores desta janela, com o convite dentro');
+  assert.equal((await conectsFeitos(page)).length, conectsAntesDaOutraLinha,
+    'o link de outra linha chegou a um connect desta janela');
+  await page.evaluate(() => { $('versoes-confirmar').hidden = true; fecharServidores(); });
 
   // ---- 5. Desistir enquanto o MOD chega também esquece, e não entra.
   //
