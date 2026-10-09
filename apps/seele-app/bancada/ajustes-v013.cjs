@@ -172,6 +172,9 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
         window.testCalls.push({ cmd, args });
         if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
         if (cmd === 'aceitar_mods') window.testServidor.aceitou = true;
+        // Um link com erro de digitação: o `analisar_convite` de verdade
+        // responde com o nome da falha, e nenhuma tentativa começa.
+        if (cmd === 'analisar_convite' && String(args?.link).includes('erro-de-digitacao')) throw 'TokenInvalido';
         if (cmd === 'instalar_mod_do_catalogo') window.testTable.mods_instalados = [{ id: mod.id, hash: mod.hash }];
         if (cmd === 'connect') {
           const servidor = window.testServidor;
@@ -252,6 +255,29 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     assert.equal(await campoDoLink(page), '',
       `desistir por ${porta} deixou o link colado, com o convite dentro, no campo do diálogo de servidores`);
   }
+
+  // ---- 4b. Um link que o `analisar_convite` recusa fica no campo.
+  //
+  // Ele não inicia tentativa nenhuma e nada sai com ele; mantê-lo deixa a
+  // pessoa corrigir o erro de digitação em vez de colar tudo de novo. O que o
+  // campo não guarda é o link que **seguiu** para uma tentativa: os casos de
+  // entrar e de desistir, acima, continuam conferindo o campo vazio.
+  const LINK_QUEBRADO = `seele://${ALVO_R}?token=erro-de-digitacao`;
+  const conectsAntesDoQuebrado = (await conectsFeitos(page)).length;
+  await page.evaluate(() => {
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_QUEBRADO);
+  await page.press('#servidores-endereco', 'Enter');
+  await page.waitForFunction(() => !document.getElementById('servidores-erro').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('o link com erro de digitação não foi recusado no diálogo, e este caso não mede nada'));
+  assert.equal(await campoDoLink(page), LINK_QUEBRADO,
+    'o link que o analisar_convite recusou sumiu do campo: ele não iniciou tentativa nenhuma, e a pessoa tem de colar tudo de novo em vez de corrigir o erro de digitação');
+  assert.equal((await conectsFeitos(page)).length, conectsAntesDoQuebrado,
+    'o link recusado pelo analisar_convite chegou a um connect');
+  await page.evaluate(() => fecharServidores());
 
   // ---- 5. Desistir enquanto o MOD chega também esquece, e não entra.
   //
