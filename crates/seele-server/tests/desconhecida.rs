@@ -305,16 +305,53 @@ fn segundo_despachante() {
     SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
 }
 
+/// Marca o processo filho da prova abaixo: com ela, a prova roda a
+/// [`ordem_forcada`] em vez de chamar a si mesma.
+const PROVA_NO_FILHO: &str = "PROVA56_FILHO";
+
 /// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
 /// ainda é capturada.** A prova de ordem forçada da pendência 56, para a cópia
 /// de [`segundo_despachante`] deste binário, com a mesma captura do teste de
-/// cima.
+/// cima, rodada num processo filho.
 ///
-/// A outra thread toca a linha primeiro, com a captura já de pé, e o resultado
-/// deixa de depender de quem chega antes. E a linha da outra thread continua
-/// fora: a captura segue sendo só da thread corrente.
+/// **Por que num processo filho.** A ordem forçada só decide quando a captura
+/// dela é o único despachante vivo: é aí que o `tracing` pergunta só à thread
+/// que passou. Com o teste de cima de pé ao mesmo tempo, ela passava mesmo sem
+/// o auxiliar (3 em 10 rodadas do binário, em 09/10). O filho roda só ela
+/// (`--exact`, `--test-threads=1`), e ali a captura é a única. O pai exige
+/// `1 passed`, porque um `--exact` que não acha o teste sai com sucesso e
+/// `0 passed`, e a prova passaria sem ter rodado.
 #[test]
 fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+    if std::env::var_os(PROVA_NO_FILHO).is_some() {
+        return ordem_forcada();
+    }
+    let saida =
+        std::process::Command::new(std::env::current_exe().expect("o binário destes testes"))
+            .args([
+                "--exact",
+                "uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada",
+                "--test-threads=1",
+            ])
+            .env(PROVA_NO_FILHO, "1")
+            .output()
+            .expect("o processo filho da prova não subiu");
+    let fala = String::from_utf8_lossy(&saida.stdout);
+    assert!(
+        saida.status.success() && fala.contains("ok. 1 passed;"),
+        "a ordem forçada reprovou no processo filho, onde a captura é o único despachante \
+         vivo, ou o filtro não achou a prova e ela não rodou: {fala}{}",
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+/// A outra thread toca a linha primeiro, com a captura já de pé, e a linha
+/// ainda chega à captura. E a linha da outra thread continua fora: a captura
+/// segue sendo só da thread corrente.
+///
+/// Só decide com a captura dela como único despachante vivo, e por isso roda no
+/// processo filho da prova acima.
+fn ordem_forcada() {
     fn diz() {
         tracing::warn!("linha tocada primeiro fora da captura");
     }
