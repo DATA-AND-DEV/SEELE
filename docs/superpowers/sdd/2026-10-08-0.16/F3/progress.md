@@ -374,3 +374,15 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Ruling: a varredura mede todo texto visível da sessão, e não três
     seletores — custo se errado: nenhum, a bancada que fica no CI confere os
     três lugares que a orquestradora pediu.
+- **As conformidades das tarefas 4 e 8** (liberadas depois das duas baterias,
+  em cima de `c992a03`, com o conserto da orquestradora no `cascaDoRetrato`):
+  - `aviso_do_servidor.rs`: 3 de 3 verdes, e três reversões, todas compiladas e
+    reprovando — os pedidos sem entregar o aviso (dois casos), a sessão sem o
+    filtro de leitura do canal, o contexto sem a sala.
+  - `mod_de_referencia`: 4 de 4 verdes.
+  - O aviso que cai com o quintal tem a reversão no runtime («a falha não
+    esquece os avisos»); na integração, o `?` da chamada sai antes de tomar os
+    avisos, e uma reversão ali teria de quebrar duas coisas juntas.
+  - Nota da orquestradora (`12ed17d1`): o `onde` deixou de ler `dataset.casca`,
+    que o guarda G2 da F8 proíbe ao desktop, e passou a perguntar se o
+    `CELULAR` existe. O retrato segue a regra da casca, e não uma marca minha.
