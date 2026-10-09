@@ -9806,22 +9806,32 @@ const ESPERA_DOS_MODS_NA_SAIDA: std::time::Duration = std::time::Duration::from_
 ///
 /// 1. [`Session::revogar`], como [`desmontar_o_cliente`] faz: fecha a geração,
 ///    manda os MODs nativos dela parar e diz as contas dos baldes do registro,
-///    que a saída do app perdia. A linha INFO diz quantos MODs ficaram parando.
-/// 2. Espera, até `teto`, que `encerrando` esvazie — a bomba de cada MOD tira a
-///    instância dali quando o executor confirma (`assentar_fala`). O cadeado da
-///    supervisão é tomado a cada conferência e solto antes da pausa: é o mesmo
-///    que a bomba precisa para confirmar.
+///    que a saída do app perdia. A linha INFO diz quantos MODs **desta
+///    geração** ficaram parando.
+/// 2. Espera, até `teto`, que eles saiam de `encerrando` — a bomba de cada MOD
+///    tira a instância dali quando o executor confirma (`assentar_fala`). Só os
+///    desta geração: uma instância de uma sessão anterior que nunca confirmou
+///    fica em `encerrando` para sempre, de propósito, e contá-la faria toda
+///    saída esperar o teto inteiro. O cadeado da supervisão é tomado a cada
+///    conferência e solto antes da pausa: é o mesmo que a bomba precisa para
+///    confirmar.
 /// 3. [`Connection::encerrar_e_esperar`], com 500 ms: a thread da conexão só dá
 ///    o sinal depois de a despedida do enlace ter saído.
 ///
 /// Sem `AppHandle` para a prova não precisar de janela.
 fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
-    let _ = sessao.revogar();
+    // `revogar` devolve a geração nova; a que ele fechou é a anterior.
+    let fechada = sessao.revogar().saturating_sub(1);
     let parando = |sessao: &Session| {
         sessao
             .mods_nativos
             .lock()
-            .map(|mods| mods.encerrando.len())
+            .map(|mods| {
+                mods.encerrando
+                    .values()
+                    .filter(|instancia| instancia.geracao == fechada)
+                    .count()
+            })
             .unwrap_or(0)
     };
     tracing::info!(
@@ -10516,6 +10526,117 @@ mod a_supervisao_dos_mods_nativos {
                 && linha.contains("saída do app: MODs nativos mandados parar")
                 && linha.contains("mods=1")),
             "a saída do app não disse no seele.log quantos MODs nativos mandou parar: {rastro}"
+        );
+    }
+
+    /// Uma instância da geração `geracao` entre as vivas, e o número dela.
+    fn de_pe(sessao: &super::Session, geracao: u64) -> u64 {
+        sessao
+            .mods_nativos
+            .lock()
+            .expect("a supervisão")
+            .guardar(instancia(geracao))
+    }
+
+    /// Confirma a parada de `numero` depois de `depois`, tomando o cadeado da
+    /// supervisão como a bomba de um MOD toma.
+    fn confirmar_depois(sessao: &super::Session, numero: u64, depois: std::time::Duration) {
+        std::thread::sleep(depois);
+        sessao
+            .mods_nativos
+            .lock()
+            .expect("a supervisão")
+            .confirmar_parada(numero);
+    }
+
+    /// Roda `despedir_da_sessao` com um MOD que confirma a parada 30 ms depois,
+    /// noutra thread, e devolve quanto ela levou e o rastro.
+    fn despedir_com_um_mod_que_confirma(
+        sessao: &super::Session,
+        numero: u64,
+        teto: std::time::Duration,
+    ) -> (std::time::Duration, String) {
+        std::thread::scope(|escopo| {
+            escopo.spawn(|| confirmar_depois(sessao, numero, std::time::Duration::from_millis(30)));
+            let comeco = std::time::Instant::now();
+            let ((), rastro) =
+                crate::rastro_de_teste::capturar(|| super::despedir_da_sessao(sessao, teto));
+            (comeco.elapsed(), rastro)
+        })
+    }
+
+    /// **A saída do app espera os MODs sem segurar o cadeado da supervisão.**
+    ///
+    /// A bomba de cada MOD confirma a parada tomando esse cadeado
+    /// (`assentar_fala`). Uma espera que o segurasse de uma conferência a outra
+    /// deixaria a confirmação parada atrás dela até o teto, e toda saída do app
+    /// pagaria o teto inteiro dizendo que os MODs não confirmaram.
+    #[test]
+    fn despedir_da_sessao_espera_os_mods_sem_segurar_o_cadeado() {
+        let sessao = super::Session::default();
+        let numero = de_pe(&sessao, sessao.geracao());
+        let teto = std::time::Duration::from_secs(2);
+
+        let (levou, rastro) = despedir_com_um_mod_que_confirma(&sessao, numero, teto);
+
+        assert!(
+            levou < teto / 2,
+            "a saída do app levou {levou:?} com um MOD que confirmou a parada em 30 ms: a espera \
+             segurou o cadeado da supervisão, e a confirmação ficou parada atrás dela até o teto"
+        );
+        assert!(
+            !rastro.contains("sem confirmar a parada"),
+            "a saída do app disse que um MOD não confirmou a parada, e ele confirmou em 30 ms: \
+             {rastro}"
+        );
+    }
+
+    /// **A saída do app conta e espera só os MODs da sessão que ela fechou.**
+    ///
+    /// Uma instância de uma sessão anterior que nunca confirmou a parada fica em
+    /// `encerrando` para sempre, de propósito (ver [`ModsNativos::encerrando`]).
+    /// Contada junto, a linha dizia MODs a mais, e a espera corria sempre até o
+    /// teto por uma instância que nenhuma saída vai ver parar.
+    #[test]
+    fn despedir_da_sessao_conta_e_espera_so_a_geracao_que_revogou() {
+        let sessao = super::Session::default();
+        let antiga = {
+            let mut mods = sessao.mods_nativos.lock().expect("a supervisão");
+            let antiga = mods.guardar(instancia(sessao.geracao()));
+            mods.encerrar(antiga);
+            antiga
+        };
+        // A sessão da antiga acabou, e ela não confirmou.
+        let _ = sessao.revogar();
+        let atual = de_pe(&sessao, sessao.geracao());
+        let teto = std::time::Duration::from_secs(2);
+
+        let (levou, rastro) = despedir_com_um_mod_que_confirma(&sessao, atual, teto);
+
+        assert!(
+            sessao
+                .mods_nativos
+                .lock()
+                .expect("a supervisão")
+                .encerrando
+                .contains_key(&antiga),
+            "a instância antiga, que nunca confirmou, saiu da supervisão: o teste não mede mais \
+             o que diz medir"
+        );
+        assert!(
+            rastro.lines().any(
+                |linha| linha.contains("saída do app: MODs nativos mandados parar")
+                    && linha.split_whitespace().any(|campo| campo == "mods=1")
+            ),
+            "a saída do app não disse `mods=1`, o único MOD que ela mandou parar: contou também \
+             a instância de uma sessão anterior que nunca confirmou: {rastro}"
+        );
+        assert!(
+            levou < teto / 2,
+            "a saída do app levou {levou:?}, com o MOD da sessão dela confirmando em 30 ms: a \
+             espera correu até o teto por outra coisa — a instância de uma sessão anterior, que \
+             nunca vai confirmar, ou o cadeado da supervisão preso durante a espera (o teste \
+             irmão, `despedir_da_sessao_espera_os_mods_sem_segurar_o_cadeado`, separa os dois)"
         );
     }
 
