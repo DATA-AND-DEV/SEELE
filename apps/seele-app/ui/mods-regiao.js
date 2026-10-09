@@ -2585,8 +2585,10 @@ class RegiaoDeMod {
    * números —, e não vira tocador. **O Rust corta antes o som que sozinho já
    * passaria dele** (P49-7a): os bytes, ou a resposta do servidor, chegam
    * recusados com `som-grande-demais-decodificado`, e a recusa é a mesma do
-   * teto, e não uma falha de carga (`recusarPeloTetoDoSom`) — na montagem,
-   * para o que não é contribuição, e no pedido de tocar, para a contribuição.
+   * teto, e não uma falha de carga (`recusarPeloTetoDoSom`). O som do pacote
+   * chega recusado na montagem, fora de uma contribuição, e no pedido de
+   * tocar, numa contribuição; o do servidor, na montagem, sempre — numa
+   * contribuição, uma vez por destino.
    *
    * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
    * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
@@ -2981,10 +2983,19 @@ class RegiaoDeMod {
    * Duas recusas chegam aqui, e são o mesmo não: a da janela, quando o som
    * decodificado não cabe no que o lugar ainda tem (`carregarSom`); e a do
    * Rust, antes de decodificar, quando o piso do cabeçalho já passa do teto
-   * (`recusaDoSomGrandeDemais`) — na montagem, para o som de uma região ou o
-   * que vem do servidor do MOD (`montarMidia`), e no pedido de tocar, para o
-   * de uma contribuição. A recusa fica guardada no som (`recusa`), e o destino
-   * que herda o som de uma contribuição a herda também (`herdarOSom`).
+   * (`recusaDoSomGrandeDemais`). A do Rust chega em momentos diferentes
+   * conforme a origem:
+   * - **o som do pacote** chega recusado nos bytes (`bytesDoSom`, em
+   *   `carregarSom`): na montagem, fora de uma contribuição, e no pedido de
+   *   tocar, numa contribuição — uma vez, no destino que segura os sons dela;
+   * - **o som do servidor do MOD** chega recusado na resposta
+   *   (`montarMidia`), na montagem, sempre — numa contribuição, **uma vez por
+   *   destino**, como o `falhou` de antes chegava: cada destino pede a mídia
+   *   ao servidor, e o MOD ouve `recusada` de cada um, e o registro ganha uma
+   *   linha por destino.
+   *
+   * A recusa fica guardada no som (`recusa`), e o destino que herda o som de
+   * uma contribuição a herda também (`herdarOSom`).
    *
    * Quem chama confere antes se o som ainda é de alguém.
    */
