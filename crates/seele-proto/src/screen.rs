@@ -470,6 +470,15 @@ pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
 /// conta bytes e não guarda quadro.
 pub const MAX_QUADRO_LEN: usize = 4 * 1024 * 1024;
 
+/// Quanto um leitor reserva de uma vez para o corpo de um quadro: **64 KiB**.
+///
+/// Regra da orquestradora em 09/10/2026, sobre a revisão deste módulo: quem lê
+/// reserva `min(tamanho, RESERVA_INICIAL_DE_QUADRO)` e cresce com o que chega,
+/// e não o tamanho anunciado de uma vez. Com o teto em 4 MiB, reservar pelo
+/// anúncio faria um cabeçalho de cinco bytes custar 4 MiB antes de o corpo
+/// existir; assim, a memória acompanha os bytes recebidos.
+pub const RESERVA_INICIAL_DE_QUADRO: usize = 64 * 1024;
+
 /// O que vem dentro de um quadro do fluxo de tela.
 ///
 /// O byte de tipo era zero ou um, imagem comum ou imagem-chave, e ganhou um
@@ -558,9 +567,15 @@ pub const fn cabecalho_de_quadro(
 }
 
 /// Lê o cabeçalho de um quadro. **A única porta por onde o tamanho de um quadro
-/// entra**, nas duas leituras deste módulo: tipo desconhecido, quadro vazio e
+/// entra**: nas duas leituras deste módulo e no receptor do `seele-core`, que lê
+/// do fluxo e não passa pelo [`LeitorDeTela`]. Tipo desconhecido, quadro vazio e
 /// tamanho acima do teto saem daqui, antes de qualquer reserva.
-fn ler_cabecalho_de_quadro(
+///
+/// # Errors
+///
+/// [`ErroDeQuadro::TipoDesconhecido`], [`ErroDeQuadro::QuadroVazio`] e
+/// [`ErroDeQuadro::QuadroGrandeDemais`].
+pub fn ler_cabecalho_de_quadro(
     cabecalho: &[u8; CABECALHO_DE_QUADRO_LEN],
 ) -> Result<(TipoDeQuadro, usize), ErroDeQuadro> {
     let [byte, a, b, c, d] = *cabecalho;

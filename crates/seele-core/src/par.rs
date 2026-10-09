@@ -2053,14 +2053,12 @@ mod testes {
         eco.await.expect("a tarefa de eco do servidor morreu");
     }
 
-    /// Monta os bytes de um quadro completo — cabeçalho e corpo —, do jeito
-    /// que `crate::tela::escrever_cabecalho_de_quadro` grava no fio. Aquela
-    /// função é privada ao módulo `tela`, então os testes daqui reconstroem
-    /// os cinco bytes à mão: um de tipo, quatro de tamanho em big-endian.
+    /// Monta os bytes de um quadro completo — cabeçalho e corpo —, pelo
+    /// mesmo escritor que o emissor usa (`seele_proto::screen`, reexportado em
+    /// `crate::tela`), e não por uma cópia à mão do formato.
     fn quadro(tipo: crate::tela::TipoDeQuadro, corpo: &[u8]) -> Vec<u8> {
         let tamanho = u32::try_from(corpo.len()).unwrap();
-        let mut bytes = vec![tipo.byte()];
-        bytes.extend_from_slice(&tamanho.to_be_bytes());
+        let mut bytes = crate::tela::cabecalho_de_quadro(tipo, tamanho).to_vec();
         bytes.extend_from_slice(corpo);
         bytes
     }
