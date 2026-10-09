@@ -1155,7 +1155,7 @@ async function sairDuranteOCarregamentoNaoMonta() {
 
   // A pessoa sai **enquanto** os bytes vêm.
   regiao.soltar();
-  soltar({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 2 });
+  soltar({ papel: "som", bytes: 2 });
   await volta();
   await volta();
 
@@ -1245,7 +1245,7 @@ async function sairDuranteAReproducaoPara() {
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 1024 }),
+    Promise.resolve({ papel: "som", bytes: 1024 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([{ forma: "midia", chave: "m", fonte: "som/a.wav", tocando: true }]);
@@ -1283,7 +1283,7 @@ async function tirarUmNoSoltaOQueEleSegurava() {
   const Audio = audioDeMentira();
   const b = bancada({ audio: Audio });
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 512 }),
+    Promise.resolve({ papel: "som", bytes: 512 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -1400,7 +1400,7 @@ async function osTetosContemEARecusaEDita() {
     const quadros = Math.floor((tetoDoSom * 0.6) / 8);
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
-    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
     const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
     const som = (chave) => ({ forma: "midia", chave, fonte: `som/${chave}.ogg`, tocando: true });
     r.aplicar([som("s1"), som("s2")]);
@@ -1465,7 +1465,7 @@ async function osTetosContemEARecusaEDita() {
     const quadros = Math.floor(tetoDoCartao / 8) + 1;
     const Audio = audioDeMentira({ decodificado: { duration: quadros / 48000, length: quadros, numberOfChannels: 2 } });
     const bs = bancada({ audio: Audio });
-    const ds = dono(bs, () => Promise.resolve({ uri: "data:audio/ogg;base64,AA", papel: "som", bytes: 12 }));
+    const ds = dono(bs, () => Promise.resolve({ papel: "som", bytes: 12 }));
     const r = new bs.RegiaoDeMod("a/b", ds.api, bs.raiz());
     r.declararCartoes({ 7: [{ forma: "midia", chave: "c", fonte: "som/c.ogg", tocando: true }] });
     await assentar();
@@ -1525,7 +1525,7 @@ async function tudoChegaAInstanciaESoltarDuasVezesNaoDoi() {
   const caso = "tudo chega à instância";
   const b = bancada();
   const d = dono(b, () =>
-    Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }),
+    Promise.resolve({ papel: "som", bytes: 8 }),
   );
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -2343,7 +2343,7 @@ async function oFundoEORetratoTambemDizemOEstado() {
   const caso = "fundo e retrato anotados";
   const b = bancada();
   const d = dono(b, (caminho) => Promise.resolve(caminho === "som/a.wav"
-    ? { uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }
+    ? { papel: "som", bytes: 8 }
     : { uri: "data:image/png;base64,AA", papel: "imagem", bytes: 8 }));
   const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
   regiao.aplicar([
@@ -2389,7 +2389,7 @@ async function oFundoEORetratoTambemDizemOEstado() {
   const recusas = {
     "o fundo que não é imagem": {
       no: fundo,
-      midia: () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 8 }),
+      midia: () => Promise.resolve({ papel: "som", bytes: 8 }),
       motivo: /imagem/,
     },
     "o fundo acima do teto": { no: fundo, midia: (bb) => Promise.resolve(imagem(bb.PERFIS.regiao.bytesDeMidia + 1)), motivo: /teto/ },

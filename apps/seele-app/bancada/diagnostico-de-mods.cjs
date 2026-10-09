@@ -1425,7 +1425,7 @@ async function oSomDeModTocaPorWebAudioSobACspDoProduto(navegador, servidor) {
       window.paradas += 1;
       return parar.apply(this, args);
     };
-    testTable.midia_do_mod = { papel: "som", uri: "data:audio/wav;base64,UklGRg==", bytes: bytes.length };
+    testTable.midia_do_mod = { papel: "som", bytes: bytes.length };
     // `som_do_mod` como ele chega pelo protocolo `ipc:`: um `ArrayBuffer` novo
     // a cada pedido. O `number[]` do `postMessage` é o que a bancada em `vm`
     // (`regiao-do-mod.cjs`) entrega; as duas formas ficam medidas.
@@ -1594,7 +1594,7 @@ async function oSomQueSaiDaTelaPara(navegador, servidor) {
       });
       return comecar.apply(this, args);
     };
-    testTable.midia_do_mod = { papel: "som", uri: "data:audio/wav;base64,UklGRg==", bytes: bytes.length };
+    testTable.midia_do_mod = { papel: "som", bytes: bytes.length };
     testTable.som_do_mod = () => new Uint8Array(bytes).buffer;
     window.somA = instancia("mod/a");
     window.somB = instancia("mod/b");
