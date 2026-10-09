@@ -190,7 +190,7 @@ leitura (D-nucleo-1). **A forma exata de uma região substituída que ainda
 carrega os itens do núcleo é a primeira coisa a desenhar na tarefa 5 do
 plano** — desenhada abaixo, para revisão.
 
-### A região substituída que ainda carrega o núcleo (tarefa 5, Step 1; proposta)
+### A região substituída que ainda carrega o núcleo (tarefa 5, Step 1; aprovado em 09/10)
 
 **Substituir uma região é desenhar o miolo de cada linha, e não a moldura.** A
 moldura é do produto: o `<ul>` e cada `<li>` (o leitor de tela conta «3 de
@@ -225,12 +225,12 @@ SeeleUI.contribuicoes.registrar({
     chave da linha**, e nunca do que o MOD escreveu. Quando esta sessão tem
     verbo sobre a pessoa, ele **é** o botão de moderação, o mesmo elemento da
     linha nativa (`.pessoa-nome-porta`): a moderação sai do «⋯» e fica a um
-    clique. O halo e a pastilha de quem fala também são dele. Lê as cores do
-    produto pelo mesmo caminho dos outros itens do §10, e não o tema: no
-    celular, `--nucleo-*` (`celular-base.css:41-43` [c]); no desktop, que ainda
-    não declara `--nucleo-*`, pelo caminho que a tarefa 9 fizer. O apelido
-    longo é cortado com reticências, com o nome inteiro no `title` e no nome
-    acessível;
+    clique. O halo e a pastilha de quem fala também são dele. **Lê o `texto`
+    e o `painel` do tema** (decisão da orquestradora, 09/10), que os pares já
+    garantem a 4,5:1: o que protege o apelido é a estrutura — o lugar
+    reservado à esquerda, o miolo fechado ao lado, o nome lido da chave —, e
+    não a cor (§10, «O que protege cada item»). O apelido longo é cortado com
+    reticências, com o nome inteiro no `title` e no nome acessível;
   - **o miolo**: o cartão de `pessoa.cartao` quando ele tem conteúdo, e senão o
     resto da linha nativa (o número e a barra de sinal, o microfone). A capa e
     o avatar entram aqui por citação (`fundoDeMidia: { daPessoa: 'capa' }`,
@@ -278,16 +278,20 @@ fechada da lista.
 6. duas mensagens seguidas de pessoas diferentes com o mesmo apelido: cada uma
    tem a sua cabeça.
 
-**Três escolhas que pedem o olho da orquestradora (e talvez do dono):**
+**As três escolhas, decididas pela orquestradora em 09/10:**
 
-- **o núcleo com as cores do produto** (`--nucleo-*`) num tema claro é uma
-  placa escura em cada linha. É o que o §10 diz, e é o que o celular faz; a
-  alternativa é o núcleo com o `texto` e o `painel` do tema, que os pares já
-  garantem a 4,5:1, mas aí o núcleo é alcançado pelo tema;
-- **o apelido sai do «⋯» também sob `pessoa.cartao`**: muda a linha de quem
-  hoje usa o PERFIS, e é o que a D-nucleo-1 decidiu;
-- **ninguém some da lista**: um MOD pode ordenar e agrupar, e não esconder quem
-  está presente.
+- **o apelido nas linhas lê as cores do tema**, e não a placa do produto: uma
+  placa escura em cada linha de um tema claro pesaria a lista inteira, e um
+  MOD que desenhe um apelido falso no miolo o desenha **ao lado** do
+  verdadeiro, e não no lugar dele (§10);
+- **o apelido sai do «⋯» também sob `pessoa.cartao`**: é a D-nucleo-1. A linha
+  de quem usa o PERFIS muda, e é para mudar (§17, PERFIS R10). Guarda: com
+  `pessoa.cartao` substituído, o apelido está à vista, fora de todo
+  `<details>`;
+- **o MOD ordena e agrupa, e não esconde** quem está presente.
+
+E o achado do agrupamento das mensagens: **pela chave, nesta tarefa, com
+guarda** (o 6 acima), e a reversão — agrupar pelo apelido — reprova.
 
 **Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Hoje
 um tipo desconhecido vira `dialogo` em silêncio
@@ -1167,6 +1171,19 @@ pelo tema.** Fora deles, a tela é do MOD.
   continua contido no diálogo; o toque no MUDO, no SAIR e em AJUSTES chega ao
   produto.
 
+**O que protege cada item: a cor ou a estrutura** (decisão da orquestradora,
+09/10). São duas proteções, e cada item tem a sua:
+
+- **os controles** — MUDO, SURDO, SAIR, AJUSTES, o veredito — ficam sobre
+  superfícies que os pares do tema não conferem, e por isso **leem as cores do
+  produto** (`--nucleo-*`, a placa), que o tema não alcança;
+- **o apelido verificado nas linhas** (`pessoas.lista`, `pessoa.cartao`,
+  `conversa.mensagem`) lê o `texto` e o `painel` do tema, que os pares garantem
+  a 4,5:1. O que o protege é **a estrutura**: o lugar reservado à esquerda da
+  linha, o miolo do MOD numa caixa fechada que é irmã dele e nunca mãe, e o
+  nome lido da chave pelo produto (§3). Um apelido falso desenhado por um MOD
+  fica ao lado do verdadeiro, e não no lugar dele.
+
 **A saída de um tema ruim é do produto.** No celular, a aba AJUSTES e a página
 MODS DESTE SERVIDOR leem `--nucleo-*`, e não o tema, como CONFIGURAÇÕES no
 desktop: quem escolheu um tema ruim sempre consegue sair dele (desenho da F8).
@@ -1452,7 +1469,7 @@ no catálogo.
 | R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** | só fachada; evita o redesenho nativo entre revogar e registrar |
 | R8 | montagem parcial nas superfícies | **em aberto** com o teto de 12 KiB (§12) | a MESA pede o mesmo (item 1); a forma (atualizar por chave ou montar em partes) é a primeira decisão de desenho da tarefa 7 |
 | R9 | a falha dita a quem pode agir | **entrou**: `midia` com ponto e alvo (§7.1); a recusa `mensagem-grande` vai ao `seele.log` | — |
-| R10 | o apelido verificado à vista | **entrou** no núcleo (§10) | D-nucleo-1 |
+| R10 | o apelido verificado à vista | **entrou** no núcleo (§10); e **muda a linha do PERFIS**: com `pessoa.cartao` substituído, o apelido verificado sai do «⋯» e fica à esquerda do cartão, à vista, com o botão de moderação (§3, tarefa 5). Quem porta a 4.0.0 desenha o cartão sabendo que o apelido verdadeiro está ao lado, e não precisa repeti-lo | D-nucleo-1 |
 | R11 | presets de animação para moldura de retrato e capa; movimento reduzido em toda região | **entrou** a regra de movimento em toda região; **não entrou** o preset novo | a moldura é desenho do MOD, com o vocabulário de estilos que já existe; um preset novo é decisão de estética (`specs/07`), e não de API |
 | R12 | `folha` para o perfil | **entrou** (§5) | — |
 | R13 | capacidades verdadeiras por plataforma | **entrou** (§2) | — |
