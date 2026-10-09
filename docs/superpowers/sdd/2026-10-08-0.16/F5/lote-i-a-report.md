@@ -553,7 +553,7 @@ formatados.
   — não contam mensagens nem dependem de uma recusa sem pedido; os demais
   (`bateria_interna`, `ocupacao`, `moderacao`, `desassentar`, …) rodam na
   integração.
-*Corrigida na rodada 2: só os três primeiros abaixo são raros, porque só eles
+*Corrigida na rodada 2: só os dois primeiros abaixo são raros, porque só eles
 pedem que duas coisas caiam dentro da mesma volta de rede de um pedido.*
 
 - **Raro — uma recusa que não é de entrada, chegando com uma entrada no ar,** é
@@ -563,14 +563,9 @@ pedem que duas coisas caiam dentro da mesma volta de rede de um pedido.*
   sala**: a mudança do operador vale, e a resposta ao pedido é descartada. Se o
   servidor leu o pedido depois da mudança e o aceitou, a tela fica na sala do
   operador e o servidor, na pedida.
-- **Raro — a sala de antes apagada com um pedido no ar** *(achado na rodada 2,
-  lido no código, não medido)*: em A, pedir B; o servidor apaga A antes de ler o
-  pedido (`session.rs`, braço de `Event::VoiceRoomDeleted`, tira a pessoa de A)
-  e recusa B. O `VoiceRoomDeleted { A }` chega com o assento especulativo em B e
-  não mexe nele; a recusa de B devolve a pessoa a A, que já não existe. O
-  conserto caberia no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`
-  (o `antes` dos pedidos no ar que aponte para a sala apagada passa a `None`);
-  não o fiz, porque está fora do brief.
+- **A sala de antes apagada com um pedido no ar** *(achado e consertado na
+  rodada 2, `4f737cc6`)*: em A, pedir B; o servidor apaga A antes de ler o
+  pedido e recusa B, e a recusa devolvia a pessoa a A, que já não existe.
 - **A volta depois de sair e entrar noutra sala durante a queda**, com a
   reentrada recusada: o `Room` cai fora de sala e o motor volta ao assento
   resgatado. O `Room` confere o resgate com o confirmado dele na hora da volta,
@@ -593,6 +588,7 @@ achados que a rodada 1 abriu — N1 (Importante) e N2 (Menor) — e a palavra
 |---|---|---|
 | `d02743ea` | N1 | `assento_resgatado(antes: Option<Conexao>, agora: Conexao, confirmada)`, com `Conexao = (Ssrc, SessionId)`: resgate é o mesmo `ssrc` **e** um `SessionId` maior; o `Room` guarda o `SessionId` ao lado do `ssrc` e `reabrir` recebe a conexão inteira; o motor guarda o `SessionId` na `Queda`; o M6 em `a_recusa_nao_tira_da_sala.rs`, com `servidor_em(porta, banco)` |
 | `893632ab` | N2 | `carimbo_da_entrada(n)` (bit alto mais `n`) e `numero_do_carimbo`; `EntradasPendentes::pedir` numera os pedidos da conexão e devolve o número, e `esquecer` recomeça do 1; `Client::send_ping_de_entrada(numero)`; o `Pong` de número `n` tira da fila o pedido `n` e todos os mais velhos |
+| `4f737cc6` | a sala de antes apagada | no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`, o `antes` de um pedido no ar que aponta para a sala apagada passa a `None`, menos quando a sala apagada é ela mesma um pedido ainda no ar (autorizado pela coordenação durante a espera da conformidade) |
 
 ### N1: o resgate pede também uma sessão maior
 
@@ -684,14 +680,73 @@ até o `Pong` dele o fechar como aceito. Só acontece com o limitador cortando:
 mais de 60 quadros de controle de uma vez e depois mais de 20 por segundo. O
 limitador avisa uma vez quando começa a cortar, e esse aviso não chega à regra.
 
+### A sala de antes apagada com um pedido no ar
+
+Achado ao corrigir a palavra «raro», e consertado com a autorização da
+coordenação durante a espera da conformidade (`4f737cc6`).
+
+**O caso.** A pessoa está em A e pede B, e o servidor apaga A antes de ler o
+pedido. O braço de `Event::VoiceRoomDeleted` de `session.rs` tira a pessoa de A
+ao apagar, e depois o servidor recusa B. O `VoiceRoomDeleted { A }` chegava com
+o assento especulativo em B e não mexia em nada. A recusa de B devolvia a
+pessoa a A, que já não existe, e o áudio abria lá.
+
+**O conserto**, no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`:
+o `antes` de um pedido no ar que aponta para a sala apagada passa a `None`, e a
+recusa deixa a pessoa fora de sala. Se o servidor leu o pedido antes de
+apagar, a recusa chega antes do aviso e devolve a pessoa a A ainda de pé, e o
+aviso a tira de lá, como antes.
+
+**Com uma exceção.** Se a sala apagada é ela mesma um pedido ainda no ar,
+zerar o `antes` do pedido seguinte quebrava a corrente de `recusar`. Exemplo:
+em A, pedir B e logo C; o servidor apaga B antes de ler o pedido de B, recusa B
+(a sala não existe) e recusa C. A pessoa nunca saiu de A, e quem devolve o
+`antes` de C para A é a recusa de B. A forma que a coordenação autorizou,
+aplicada sem a exceção, deixava essa pessoa fora de sala. Pus a exceção e um
+teste para ela.
+
+**As provas.**
+- **Vermelho em `893632ab`:**
+  `assento::testes::a_recusa_nao_devolve_a_sala_de_antes_que_foi_apagada_com_o_pedido_no_ar`.
+  Reprovou com «a recusa de B devolveu a pessoa a A, que o servidor apagou
+  antes de ler o pedido: a tela a mostra numa sala que não existe» (`left:
+  Some(VoiceRoomId(1)), right: None`).
+- **O guarda da exceção:**
+  `assento::testes::a_sala_apagada_que_ainda_e_um_pedido_no_ar_fica_para_a_resposta_dele`.
+  Ele é verde em `893632ab`, porque lá nada zerava o `antes`. Reprovou contra
+  a forma sem a exceção, com «o servidor recusou B e C e manteve a pessoa em
+  A, e a tela a tirou de toda sala» (`left: None, right: Some(VoiceRoomId(1))`).
+
+**Dois casos da mesma família que ficam.** Achei-os lendo o servidor para
+este conserto; não os medi nem consertei, porque estão fora do autorizado.
+Os dois são raros, da mesma janela de uma volta de rede, e pedem o operador
+apagando uma sala no meio dela:
+- **A sala pedida apagada antes de o servidor ler o pedido.** Em A, pedir B.
+  O servidor apaga B, recusa B (a sala não existe) e mantém a pessoa em A. O
+  `VoiceRoomDeleted { B }` chega com o assento especulativo em B; o braço o
+  esvazia e atropela o pedido, e a recusa de um pedido atropelado não devolve
+  ninguém. A tela fica fora de sala, e o servidor a tem em A.
+- **Dois pedidos, o do meio aceito e apagado entre o pedido e o `Ping` dele.**
+  Em A, pedir B e C. O servidor aceita B, apaga B antes de ler o `Ping` marcado
+  de B (e tira a pessoa dela), e recusa C. O aviso chega com B ainda no ar, a
+  exceção acima deixa o `antes` de C em B, e a recusa de C devolve a pessoa a
+  B, que não existe. Se o `Pong` de B chega antes do aviso, o conserto já
+  cobre. É o comportamento de `893632ab`, sem piora.
+
+Os dois pedem o mesmo conserto: marcar o pedido no ar cuja sala foi apagada e
+decidir na resposta dele. Uma recusa devolve o de antes; um `Pong` sem recusa
+deixa fora de sala quem dependia daquela sala.
+
 ### As reversões
 
 | reversão | o que se desfez | reprovou |
 |---|---|---|
 | N1 | `sessao_agora > sessao_antes` → `(sessao_agora > sessao_antes \|\| true)` | 3 em `seele-core`: `o_ssrc_igual_com_sessao_igual_ou_menor_…` («um `ssrc` repetido numa sessão SessionId(2) — o servidor subiu de novo — foi tomado por resgate»), o caso `(Ssrc(1), SessionId(1))` do motor («… a recusa da entrada refeita deixou a volta em Some(VoiceRoomId(5))») e `um_ssrc_repetido_depois_de_um_reinicio_…` |
 | N2 | o laço do `Pong` → um `pop_front` por `Pong`, como em `8c62d559` | `um_ping_marcado_perdido_no_limitador_nao_desalinha_a_fila`, com a frase do vermelho |
+| a sala de antes apagada | sem o laço que zera o `antes` (o braço de `893632ab`) | `a_recusa_nao_devolve_a_sala_de_antes_…`, com a frase do vermelho; o guarda da exceção passa |
+| a exceção | `&& !pedida_no_ar` → `&& (!pedida_no_ar \|\| true)` | `a_sala_apagada_que_ainda_e_um_pedido_no_ar_…`, com a frase acima; o outro passa |
 
-Nas duas: arquivo devolvido da cópia, `cmp` idêntico. A reversão do N1 na
+Nas quatro: arquivo devolvido da cópia, `cmp` idêntico. A reversão do N1 na
 conformidade (o M6) fica para quando ela voltar.
 
 ### O relatório: a palavra «raro»
@@ -702,24 +757,19 @@ Corrigi a rodada 1 no lugar:
   volta depois de 5 min. O efeito é uma volta de rede sem áudio e os volumes
   por pessoa no padrão até o I-b.
 - **O servidor reiniciado** deixa de ser «raro»: era o N1.
-- **Ficam como raros só os três que pedem duas coisas na mesma volta de rede de
-  um pedido:**
-  - a recusa que não é de entrada;
-  - o operador que move;
-  - a sala de antes apagada com um pedido no ar.
-
-  O terceiro é novo. Achei-o lendo a regra para esta correção e não o medi: com
-  um pedido de B no ar, o `VoiceRoomDeleted` de A não mexe no `antes` do pedido,
-  e a recusa de B devolve a pessoa a uma sala que não existe. O conserto seria
-  de três linhas, no braço de `VoiceRoomDeleted` de `EntradasPendentes::ouvir`.
-  Não o fiz, porque está fora do brief.
+- **Ficam como raros só os dois que pedem duas coisas na mesma volta de rede de
+  um pedido:** a recusa que não é de entrada e o operador que move. A sala de
+  antes apagada com um pedido no ar, que achei nesta correção, saiu da lista:
+  está consertada (acima). Os dois casos da mesma família que ficam estão na
+  seção dela.
 - **A volta com troca de sala durante a queda** ganhou a frase do tamanho da
   janela: é a queda inteira, e não uma volta de rede.
 
 ### O que rodou
 
-- `seele-core --lib` 480, `seele-ffi --lib` 146 (1 ignorado, anterior),
-  `seele-app --bin seele-app` 274, `--test frontend` 270.
+- `seele-core --lib` 482 (480 depois do N2, e os dois da sala apagada),
+  `seele-ffi --lib` 146 (1 ignorado, anterior), `seele-app --bin seele-app`
+  274, `--test frontend` 270, todos de novo depois de `4f737cc6`.
 - `cargo fmt --all -- --check` e o clippy de `seele-core`, `seele-ffi`,
   `seele-conformance` e `seele-app` com `-D warnings`: limpos.
 - `cargo test -p seele-conformance --test a_recusa_nao_tira_da_sala --no-run`:
