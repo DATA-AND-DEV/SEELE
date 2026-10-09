@@ -1023,6 +1023,11 @@ function donoDaRegiao(mod, instancia) {
      * **O som do pacote atravessa a ponte uma vez só, e por aqui.** Para um
      * som, `carregarMidia` devolve o papel e os bytes a contar, sem `uri`
      * (P49-7b).
+     *
+     * **O som que, decodificado, passa do teto do som é recusado antes**, no
+     * Rust, por um piso tirado do cabeçalho (P49-7a): a rejeição chega como
+     * `{ Recusado: { motivo: "som-grande-demais-decodificado: …" } }`, com os
+     * números, e a região a diz como o teto, e não como falha de carga.
      */
     bytesDoSom: async (caminho) => {
       const geracao = geracaoDaSessao;
