@@ -16,6 +16,24 @@ do Mac. O Safari avisa do certificado uma vez («Mostrar detalhes → visitar
 este site»), como no `voz-no-navegador`.
 """
 import http.server, json, pathlib, ssl, subprocess, sys, threading, time
+import os
+
+
+def simulador():
+    """O Simulador onde a página abre: `SEELE_SIMULADOR` (o UDID), ou o único ligado.
+
+    Com dois ligados, `booted` é ambíguo, e a medida iria para o aparelho de
+    outra frente (a F8 usa o iPhone 17; a F4, o iPhone 18 Pro). Recusar e dizer
+    é melhor que medir no aparelho errado.
+    """
+    escolhido = os.environ.get("SEELE_SIMULADOR")
+    if escolhido:
+        return escolhido
+    ligados = [l.strip() for l in subprocess.run(["xcrun", "simctl", "list", "devices", "booted"],
+                                                 capture_output=True, text=True).stdout.splitlines() if "(Booted)" in l]
+    if len(ligados) != 1:
+        sys.exit(f"há {len(ligados)} Simuladores ligados ({'; '.join(ligados)}): diga qual com SEELE_SIMULADOR=<UDID>")
+    return "booted"
 
 AQUI = pathlib.Path(__file__).resolve().parent
 VERIFICADOR = AQUI / "target" / "release" / "spike-ed25519-do-navegador"
@@ -87,7 +105,7 @@ def abrir(nav):
         subprocess.run(["open", "-a", "Safari", url], check=True)
         return None
     if nav == "safari-sim":
-        subprocess.run(["xcrun", "simctl", "openurl", "booted", url], check=True)
+        subprocess.run(["xcrun", "simctl", "openurl", simulador(), url], check=True)
         return None
     if nav == "chromium":
         from playwright.sync_api import sync_playwright
