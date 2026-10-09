@@ -4618,15 +4618,29 @@ impl<V: VozViva> VozDaSala<V> {
     /// abriria com os padrões e o microfone de quem se mutou antes de entrar
     /// estaria aberto — com o roster dizendo «mudo», porque o servidor recebeu o
     /// pedido.
-    fn instalar(&self, nova: V) {
+    ///
+    /// **E é aqui que se confere o aparelho, sob o cadeado da voz** (M-b da
+    /// rodada 1 do lote I-a). `pedidos` são os aparelhos com que a voz abriu; se
+    /// a pessoa escolheu outro enquanto ela abria, a voz volta no `Err` e quem
+    /// chamou recomeça. Conferido fora do cadeado, como era em
+    /// [`PortaDaVoz::chegou`], uma troca entre a conferência e este cadeado
+    /// instalava uma voz aberta no aparelho de antes: `switch_device` grava a
+    /// escolha segurando este mesmo cadeado, e só sob ele as duas coisas não se
+    /// cruzam.
+    fn instalar(&self, nova: V, pedidos: &seele_core::DeviceChoice) -> Result<(), V> {
         match self.viva.lock() {
             Ok(mut viva) => {
-                nova.vestir(&self.escolhida());
+                let escolhida = self.escolhida();
+                if escolhida.aparelhos != *pedidos {
+                    return Err(nova);
+                }
+                nova.vestir(&escolhida);
                 *viva = Some(nova);
                 self.marcar(AberturaDoAudio::Aberto);
             }
             Err(_) => self.marcar(AberturaDoAudio::SemAparelho),
         }
+        Ok(())
     }
 
     /// Larga a voz viva, se há uma. O `drop` fecha o aparelho.
@@ -4811,15 +4825,13 @@ impl<V: VozViva> PortaDaVoz<V> {
         };
         match aberta {
             Ok(Ok(nova)) => {
-                if voz.escolhida().aparelhos != em_curso.pedidos {
+                if let Err(nova) = voz.instalar(nova, &em_curso.pedidos) {
                     // A pessoa escolheu outro aparelho enquanto este abria. O
                     // que abriu não é mais o pedido, e guardá-lo seria a tela
                     // dizendo ESCOLHIDO num e EM USO noutro.
                     drop(nova);
                     self.comecar(voz, abrir);
-                    return;
                 }
-                voz.instalar(nova);
             }
             Ok(Err(erro)) => {
                 // A metade de texto funciona, e `abertura_do_audio` diz qual
@@ -10065,6 +10077,34 @@ mod o_audio_segue_a_sala {
             voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
             Some(2)
         );
+    }
+
+    /// M-b: quem confere o aparelho é `instalar`, com o cadeado da voz preso.
+    ///
+    /// A corrida em si — uma troca entre a conferência e o cadeado — não tem
+    /// como ser forçada num teste sem uma costura no meio. O que se prende aqui
+    /// é que a conferência mora dentro de `instalar`: uma voz aberta com os
+    /// aparelhos de antes volta no `Err`, e o lugar fica vazio.
+    #[test]
+    fn instalar_recusa_a_voz_aberta_com_os_aparelhos_de_antes() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let pedidos = voz.escolhida().aparelhos;
+        voz.guardar_aparelho(super::Lado::Entrada, Some("fone".into()));
+
+        let devolvida = voz.instalar(voz_de(1), &pedidos);
+
+        assert!(
+            devolvida.is_err(),
+            "`instalar` pôs no lugar uma voz aberta no microfone de antes da escolha"
+        );
+        assert!(!ha_voz(&voz));
+        assert_eq!(
+            voz.instalar(voz_de(2), &voz.escolhida().aparelhos)
+                .map_err(|_| ()),
+            Ok(()),
+            "a voz aberta com os aparelhos de agora não entrou no lugar"
+        );
+        assert!(ha_voz(&voz));
     }
 
     /// O prazo vencido e o aparelho recusado têm estados próprios, e a sala
