@@ -425,7 +425,7 @@
     "garantias-do-produto": [
       "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
       "o cabeçalho diz de qual MOD é a superfície",
-      "um modal torna o resto da aplicação inerte, e não só escuro",
+      "um modal torna o resto da aplicação inerte, e não só escuro — menos, no celular, a faixa de voz e as abas, que nunca ficam cobertas nem inertes (o foco do teclado continua contido no diálogo)",
       "o foco entra na abertura, fica contido, e volta ao acionador ao fechar",
       "o tamanho pedido é contido na área útil",
       "alterações não gravadas produzem a decisão de descartar, e o MOD recebe descartou",
@@ -464,7 +464,8 @@
       "erro": 10000
     },
     "descarte": "sai com a instância do MOD, e a saída da sessão descarta sem perguntar",
-    "painel": "sai: a folha o substitui (decisão de 08/10)"
+    "painel": "sai: a folha o substitui (decisão de 08/10)",
+    "celular": "«tela cheia» é a tela acima da faixa de voz e das abas, para pagina, dialogo, folha e aviso; nenhuma superfície as cobre (medido no protótipo da F8, 09/10)"
   },
   "camadas": {
     "chamada.palco": {
@@ -579,7 +580,8 @@
       "tipo dos títulos e dos dados",
       "escala por escolha"
     ],
-    "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas"
+    "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas",
+    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); o tema padrão reproduz os tokens (ΔE ≤ 2); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
@@ -599,9 +601,10 @@
       "a pergunta DE ONDE? e o seletor do sistema",
       "as áreas seguras",
       "44 px e 16 px",
-      "o zoom e os gestos"
+      "o zoom e os gestos",
+      "nenhuma superfície de MOD cobre a faixa de voz nem as abas, nem as torna inertes; AJUSTES e MODS DESTE SERVIDOR leem --nucleo-*, e não o tema"
     ],
-    "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal"
+    "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal; no celular, com pagina imersiva, dialogo, folha expandida e aviso abertos, o retângulo de cada um termina acima da faixa de voz, e o toque no MUDO e em AJUSTES chega ao produto; no desktop, mede se um dialogo aberto deixa o MUDO e o SAIR à vista e clicáveis"
   },
   "som": {
     "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",

@@ -276,3 +276,23 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   pasta de build). Tarefa 3, passo 5b.
   - Ruling: o `SharedArrayBuffer` fica — custo se errado: nenhum, porque ele
     existe nos dois alvos e, sem threads, é só um buffer.
+- **Dois achados medidos no protótipo da F8**, pela orquestradora:
+  - **Uma superfície de MOD cobria a faixa de voz e as abas** (o diálogo do
+    ESTILO em tela cheia cobria o MUDO e o caminho para AJUSTES). Regra do
+    núcleo: no celular, «tela cheia» é a tela acima da faixa e das abas, para
+    `pagina`, `dialogo`, `folha` e `aviso`, e elas nunca ficam inertes — a
+    garantia do ADR 0052 de que um modal torna o resto inerte ganha essa
+    exceção, com o foco do teclado ainda contido no diálogo. Tarefa 7, passo
+    5d; tarefa 9, passo 4b. No desktop, o guarda mede antes de concluir se um
+    `dialogo` aberto deixa o MUDO e o SAIR à vista e clicáveis.
+  - **As cores de estado fora dos pares** (o «juli fala» some num `painel`
+    claro). Decidido: derivadas das superfícies do tema, com o matiz do produto
+    e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as
+    escreve; o núcleo lê `--nucleo-*`. Tarefa 17e.
+  - Ruling: derivar, e não pôr as três nos pares — custo se errado: um tema
+    muda o tom do fósforo, do azul e do vermelho dentro da sessão; com pares,
+    temas claros inteiros seriam recusados por cores que o MOD nem escolhe.
+  - Ruling: no desktop não decido sem medir — custo se errado: até a medida, o
+    contrato não promete o MUDO clicável sob um diálogo de MOD no desktop.
+  - Corrigido junto: o §4 dizia que a capa do operador não aparece no celular;
+    com o `operador.barra` em AJUSTES, ela pinta o cabeçalho SEU PERFIL.

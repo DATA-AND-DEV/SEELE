@@ -223,7 +223,7 @@ SeeleUI.contribuicoes.registrar({
 | lugar | desktop | celular |
 |---|---|---|
 | o cartão da pessoa na chamada (`pintarCartao`, `tela-chamada.js:453` [c]) | sim, animada até o teto | **sim, animada até o mesmo teto** (D-capa-1) |
-| o fundo da barra do operador (`.operador`, com `snapshot.me`) | sim | **não**: a barra sai da vista, e a faixa de voz é do núcleo |
+| o fundo da barra do operador (`.operador`, com `snapshot.me`) | sim | **não há barra na vista**: o `operador.barra` mora em AJUSTES (§11), e a capa do operador pinta o cabeçalho SEU PERFIL logo acima dele (a linha de baixo); a faixa de voz é do núcleo e não recebe capa |
 | o cabeçalho do perfil do PERFIS | sim, por citação (abaixo) | sim |
 | o «SEU PERFIL» nativo (`index.html:3816`) | sim, por um aplicador do produto | sim |
 | a linha da lista de pessoas | parada, se o MOD a citar no cartão | parada |
@@ -286,10 +286,10 @@ contrato, **com os números em aberto para a M3** (§12):
 | camada | o que é | modos ou tipo | celular |
 |---|---|---|---|
 | `chamada.palco` | sobre a chamada, com a grade de vídeo do produto por baixo (`#chamada-grade`, `index.html:1407` [c]) | ponto de perfil `superficie`, `substituir` e `adicionar` | **vista alternativa** à grade (MESA · CHAMADA), com quem fala numa tira no alto |
-| `dialogo` | modal; a saída é do produto (`mods-superficies.js:190` [c]) | superfície | **tela cheia**, com as ações fixas embaixo, acima da barra de gestos |
-| `folha` (nova) | coluna lateral que empilha, para edição e detalhes; parente do `painel` (`#palco-de-paineis`, `index.html:1702` [c]) | superfície | **folha de baixo**: sobe da borda até onde o polegar alcança e se expande à tela inteira |
-| `aviso` | fila de quatro, como hoje (`mods-superficies.js:206` [c]) | superfície | canto de baixo, com a área segura |
-| `pagina` | como na API 4 | superfície | célula inteira (§11) |
+| `dialogo` | modal; a saída é do produto (`mods-superficies.js:190` [c]) | superfície | **tela cheia acima da faixa de voz e das abas**, nunca por cima delas, com as ações fixas embaixo (§10) |
+| `folha` (nova) | coluna lateral que empilha, para edição e detalhes; parente do `painel` (`#palco-de-paineis`, `index.html:1702` [c]) | superfície | **folha de baixo**: sobe de cima da faixa de voz até onde o polegar alcança e se expande até o alto, sem cobrir a faixa nem as abas |
+| `aviso` | fila de quatro, como hoje (`mods-superficies.js:206` [c]) | superfície | canto de baixo, acima da faixa e das abas, com a área segura |
+| `pagina` | como na API 4 | superfície | célula inteira (§11), acima da faixa e das abas |
 
 ### `chamada.palco`
 
@@ -372,7 +372,8 @@ campo. A API 6 acrescenta:
 - **`emProgresso` no primário trava o segundo clique** (ESTILO A6);
 - **tela cheia com ações fixas** quando o produto decide (celular, ou
   `largo: true` numa janela estreita), com `abas` cabendo em 390 px
-  (D-estilo-1).
+  (D-estilo-1). No celular, «tela cheia» é a tela **acima da faixa de voz e
+  das abas** (§10).
 
 ### O que fica como está
 
@@ -805,6 +806,38 @@ no máximo ΔE 2 (por exemplo, o `acentoFraco` do padrão tem de dar o
 `--seele-laranja-fraco`, `#331704`). Os números finais saem da tarefa 17-B3, e
 o guia publica a mesma função em JavaScript, que a casca usa.
 
+### As cores de estado (achado da F8, 09/10)
+
+**As cores de estado do produto não são chaves do tema, e passam a ser
+derivadas dele.** São o fósforo (`--seele-fosforo`, quem fala, o nominal), o
+azul (`--seele-padrao-azul`) e o vermelho (`--seele-vermelho-alerta`), com os
+preenchimentos `-fraco` de cada um. A F8 mediu no protótipo: o «juli fala», em
+fósforo, some sobre um `painel` claro de tema. Pôr as três na lista de pares
+conferidos recusaria temas claros inteiros, por uma cor que o MOD nem escolhe.
+
+**Decidido em 09/10: sob um tema, o produto deriva cada cor de estado das
+superfícies do tema**, garantindo o piso:
+
+- mantém o matiz da cor do produto e move a luminosidade até a cor alcançar
+  **4,5:1 sobre `fundo` e sobre `painel`** (o estado aparece como texto: «juli
+  fala»), e o `-fraco` sai da cor derivada misturada à superfície, com a cor
+  sobre o próprio `-fraco` também em 4,5:1;
+- com o tema padrão, a derivação **reproduz os tokens do produto** (ΔE ≤ 2),
+  a mesma regra dos tons derivados acima;
+- se nenhuma luminosidade servir às duas superfícies, o tema é recusado com o
+  par, na mesma forma da recusa de contraste (`{ frente: 'fosforo', fundo:
+  'painel', razao, piso }`). Como os pares já pedem `texto` em 4,5:1 sobre as
+  duas, isso só acontece num tema que já está no limite;
+- **o MOD continua sem escrever nenhuma delas**: o `--seele-vermelho-alerta`
+  segue fora de todo caminho de tema, e o produto o deriva só para o que está
+  dentro do escopo do tema. Os itens do núcleo leem `--nucleo-*` (§10), e o
+  veredito «QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO» não muda de cor com tema
+  nenhum.
+
+A função é a mesma dos tons derivados, publicada no guia, e entra na tarefa
+17e com teste nos dois sentidos: o padrão reproduz os tokens, e um tema claro
+dá ao fósforo derivado 4,5:1 sobre o `painel`.
+
 ### A prévia (B4)
 
 - `SeeleUI.tema(valores, { previa: true, superficie: id })`: vale só nesta
@@ -893,10 +926,30 @@ pelo tema.** Fora deles, a tela é do MOD.
   da ilha ou da barra de gestos;
 - **44 px e 16 px**: nenhum estilo de MOD desce um controle abaixo de 44 px nem
   um campo abaixo de 16 px de letra;
-- **o zoom e os gestos** (`touch-action: manipulation`): nenhum MOD os religa.
+- **o zoom e os gestos** (`touch-action: manipulation`): nenhum MOD os religa;
+- **nenhuma superfície de MOD cobre a faixa de voz nem as abas** (achado
+  medido no protótipo da F8, 09/10: o diálogo do ESTILO em tela cheia cobria
+  o MUDO e o caminho para AJUSTES, onde se desliga um MOD). «Tela cheia», no
+  celular, é a tela acima delas, para `pagina`, `dialogo`, `folha` e `aviso`.
+  É a mesma regra do `operador.barra` em AJUSTES: os controles de voz e o
+  caminho para desligar um MOD nunca ficam cobertos. **E nunca ficam inertes**:
+  a garantia do ADR 0052 de que um modal torna o resto da aplicação inerte
+  ganha, no celular, a exceção da faixa de voz e das abas. O foco do teclado
+  continua contido no diálogo; o toque no MUDO, no SAIR e em AJUSTES chega ao
+  produto.
+
+**A saída de um tema ruim é do produto.** No celular, a aba AJUSTES e a página
+MODS DESTE SERVIDOR leem `--nucleo-*`, e não o tema, como CONFIGURAÇÕES no
+desktop: quem escolheu um tema ruim sempre consegue sair dele (desenho da F8).
 
 **O guarda 11** prova, para cada item, que ele não está dentro de nenhuma
-região, que nenhuma contribuição o cobre e que o tema não o alcança. Agora
+região, que nenhuma contribuição o cobre e que o tema não o alcança. **No
+celular, prova também que nenhuma superfície aberta cobre a faixa de voz nem
+as abas**: com uma `pagina` imersiva, um `dialogo`, uma `folha` expandida e um
+`aviso` abertos, o retângulo de cada um termina acima da faixa, e um toque no
+MUDO e em AJUSTES chega ao produto. **No desktop, o guarda mede antes de
+concluir**: se um `dialogo` aberto deixa o MUDO e o SAIR da barra do operador
+à vista e clicáveis. Se não deixar, é o mesmo conserto, e a mesma regra. Agora
 para o que existe (a portaria, `#portaria-batendo`, `index.html:192` [c]); o
 item «a ligação» (`#toque`) fecha depois da 7d da sala pessoal. **É isso que
 põe o congelamento no fim do pacote** (spec-mestre, F7).
@@ -921,9 +974,9 @@ estreita» (`celular.css:1-18`).
 | `status.barra` | **só na chamada** (`#tela-sessao:has(#vista-chamada[hidden]) .telemetria{display:none}`) | mínimo de 40 px | aplicada, visível só na chamada |
 | `chamada.palco` | **vista alternativa** à grade, que vira uma coluna de cartões de 160 px (`:531-541`) | largura da tela; o MOD recebe o tamanho (§7.2) | aplicada |
 | `pagina` | célula inteira; a imersiva **não cobre a faixa de voz nem as abas** | — | [inf] hoje cobre: é `fixed; inset: …; z-index: 30` sem área segura de baixo (`mods-superficies.css:142-146`). Conserto na tarefa 7 |
-| `folha` | folha de baixo | até a altura do polegar, expansível | — |
-| `dialogo` | tela cheia, ações fixas embaixo | — | — |
-| `aviso` | canto de baixo, com a área segura (`celular.css:79-84`) | `min(420px, 100vw-32px)` | — |
+| `folha` | folha de baixo, acima da faixa e das abas | até a altura do polegar, expansível até o alto, sem cobrir a faixa nem as abas | — |
+| `dialogo` | **tela cheia acima da faixa de voz e das abas**, ações fixas embaixo | a área entre o alto e a faixa | **[medido pela F8, 09/10]** no protótipo, o diálogo do ESTILO em tela cheia cobria o MUDO e o caminho para AJUSTES. Conserto na tarefa 7, guarda na 9 |
+| `aviso` | canto de baixo, acima da faixa e das abas, com a área segura (`celular.css:79-84`) | `min(420px, 100vw-32px)` | — |
 
 **O desenho do celular é da F8** (D-celular-1, spec-mestre `fd4d298f`): ela
 redesenha a casca de uma mão com paridade com o desktop, e as âncoras
@@ -1295,6 +1348,8 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | o `operador.barra` no celular, que o rascunho recusava com `regiao-ausente` | **aceita a proposta da F8**: ele mora no alto da aba AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões do celular e altura limitada, para a gestão de MODs continuar à vista; a capa do operador vai no cabeçalho SEU PERFIL | §11; plano, 5 passos 8 e 8b |
 | a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` ainda aceita qualquer chave, e fechar isso é a tarefa 17j, antes do congelamento | §9; plano, 17j |
 | o rótulo da primeira aba | SERVIDOR, e não SALAS; rótulo de tela, sem mudar o contrato | §11 |
+| uma superfície de MOD cobria a faixa de voz e as abas (medido no protótipo) | **nenhuma superfície as cobre**: «tela cheia», no celular, é a tela acima delas; regra do núcleo e do guarda 11; no desktop, o guarda mede o MUDO e o SAIR com um `dialogo` aberto | §5, §10, §11; plano, 7 e 9 |
+| as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve | §9; plano, 17e |
 
 ## 18. Em aberto
 
