@@ -64,6 +64,8 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | a linha provisória de `ETAPAS` (`Localizando`) | isolada, até a 7f | `e3e32bfe` |
 | 17 | 6f, a bateria da ligação | **feita**, menos a volta do convidado sem tocar, que espera a 16 | `0d320448` |
 | — | merge da `versao/0.16` (`cb426b19`), a sexta integração | feito; a árvore é a mesma da `cb426b19` (`38c21202`), verde na bateria da integração | `87fd6973` |
+| — | merge da `versao/0.16` (`c8b3cd47`), a sétima integração | feito; a árvore é a mesma da `c8b3cd47` | `52d015f4` |
+| 22 | 4b, a identidade por máquina: a metade da FFI | **feita** (porte do `9ff9b73c` da 0.15); a semente da sala e o SEU CÓDIGO esperam a casca | `58552de8` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -410,4 +412,32 @@ a 16. Esperando:
 O dono pediu, pela orquestradora, que a frente feche sem chamá-lo. Quando a P8
 e a casca forem liberadas, a F7 segue sem confirmação a cada passo, com as
 regras de sempre.
+
+## A sétima integração e a metade da FFI da tarefa 22 (09/10)
+
+A orquestradora avisou que a P8 está parada, sem previsão, esperando o dono, e
+que a casca espera as ondas 5 e 6 da F5. Pediu o que não dependesse das duas.
+
+- **O merge** de `c8b3cd47` (`52d015f4`): a árvore é idêntica à da integração
+  verde.
+- **Tarefa 22, a metade da FFI** (`58552de8`). O launcher já passa
+  `SEELE_IDENTIDADE` e põe `SEELE_HOME` em `dados/servidor-<linha>`. A FFI da
+  0.16 lia `<home>/identity.key`, e uma 0.16 aberta por um launcher criaria uma
+  chave nova: a pessoa seria outra.
+  - O porte é o `9ff9b73c` da `linha/0.15`, com o mesmo contrato e a mesma
+    forma. A regra ficou na FFI, e não na casca como o plano dizia: nenhuma
+    assinatura mudou, e o `main.rs` não foi tocado.
+  - **O guarda da 0.15 não servia aqui**, e isso foi medido. Ele lê só o
+    prefixo antes do primeiro `#[cfg(test)]`. Na 0.16 a produção continua
+    depois dos módulos de teste, e um leitor escondido ali passava. O guarda
+    novo tira cada módulo de teste e lê o resto, e tem um guarda do guarda.
+  - **A `linha/0.15` tem a mesma forma de arquivo**: produção depois do primeiro
+    `#[cfg(test)]`, com dois `impl Connection`. O guarda de lá tem o mesmo
+    buraco para uma regressão futura. **O código de lá está certo hoje**, com
+    só os dois leitores, os dois pelo montador. Avisado à orquestradora, sem
+    mexer naquela linha.
+  - Quatro reversões medidas, todas reprovando. A segunda (vazia valendo)
+    criou uma chave nova em `crates/seele-ffi/identity.key`: o caminho vira
+    relativo, e o teste roda na pasta do crate. Era artefato da reversão, nunca
+    entrou no git, e foi apagado.
 
