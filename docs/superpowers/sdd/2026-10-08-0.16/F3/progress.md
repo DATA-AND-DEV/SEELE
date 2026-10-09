@@ -243,3 +243,9 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
 - **ADR 0056**: a seção «Os candidatos da API 7» (`decorar`; tipo e escala no
   tema; o fundo por mídia se não medido a tempo; `tela` e transmissões no
   retrato; os membros fora do ar), e o «não decide» atualizado.
+- **O `executor.rs` é da F4 até a extração** (aviso da orquestradora): a volta
+  do executor vai para um crate que o desktop e o motor do celular usam. As
+  tarefas 4 e 8, e o passo 5 da 3, começam em cima da extração, mesmo se o K4
+  entrar antes; o plano diz isso na tabela de estado. As outras seguem com o K4,
+  sem confirmação a cada passo, com aviso nos marcos (pedido do dono, pela
+  orquestradora).
