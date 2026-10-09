@@ -42,7 +42,7 @@ continua valendo para o celular.
 | `tela_cheia` | o palco em tela cheia | a Fullscreen API do navegador, no lugar da janela |
 | `ajustar_reducao_de_ruido` | a supressão de ruído | a restrição `noiseSuppression` do `getUserMedia` |
 | `saidas`, `escolher_saida`, `saida_escolhida` | a saída de som | `setSinkId` onde houver. Onde não houver, a lista é só «a do sistema», e não uma recusa: hoje a recusa de `saidas` derruba a lista de entrada (achado 4 da matriz) |
-| `descrever_arquivo` | o arraste de arquivo | **com adaptação:** no navegador o arraste dá um `File`, e não um caminho de disco. A forma da chamada é a combinar com a F8 e a F5 |
+| `descrever_arquivo`, `escolher_arquivo`, `guardar_colado`, `enviar_anexo` | o arquivo, pelas três entradas (arraste, seletor e colar) | **por alça** (combinado com a F8 em 09/10). Ver «O arquivo sem caminho», abaixo |
 | `compartilhar_tela`, `parar_de_compartilhar`, `fontes_de_tela`, `permissao_de_tela`, `pedir_permissao_de_tela`, `ajustar_limites_da_tela`, `exclusao_do_som_da_captura` | compartilhar a tela pelo PC | **tarefa nova (3.10), depende de medida.** O `getDisplayMedia` escolhe a fonte e pede a permissão ele mesmo |
 | `modulo_de_video_a_baixar` | — | responde «nenhum»: quem codifica é o navegador |
 
@@ -80,12 +80,46 @@ nada, e isso seria defeito. Ele fica numa segunda lista explícita,
 | `baixar_modulo_de_video` | não há módulo a baixar no navegador |
 | `mod_nativo_*` (5) | não existem no web: o executor é o `executorNoNavegador`, e estes nunca são chamados |
 
+## O arquivo sem caminho (combinado com a F8 em 09/10)
+
+No navegador não há caminho de disco. **A forma das chamadas não muda**, e o
+«caminho» vira uma alça opaca que a ponte cria (`web-arquivo:N`) e guarda num
+mapa com o `File` ou o `Blob`:
+- **o arraste:** a ponte ouve o `drop` do documento (e o `dragover`, para
+  permiti-lo), guarda cada `File` sob uma alça e emite o mesmo
+  `tauri://drag-drop` com `{ paths: [alça] }` que a casca já ouve
+  (`tela-sessao.js:4388`);
+- **o seletor:** `escolher_arquivo` abre um `<input type=file>` e devolve a
+  alça. Desistir devolve `null`, como no desktop;
+- **o colar:** `guardar_colado({ tipo, base64 })` guarda o `Blob` sob uma alça;
+- **o envio:** `descrever_arquivo({ caminho: alça })` descreve, e
+  `enviar_anexo({ caminho: alça, … })` lê o `File` do mapa e o sobe pelo
+  WebTransport. O `tela-sessao.js` não muda em nenhuma das duas cascas.
+
+**As condições, que são da ponte e têm teste:**
+1. **o mapa tem teto e solta o que guarda**: depois do envio, ao descartar o
+   anexo e no fim da sessão. Um `Blob` colado está todo na memória;
+2. **uma alça desconhecida, ou já solta, é recusada.** A casca já diz «NÃO
+   CONSEGUI LER ESSE ARQUIVO»;
+3. **o `escolher_arquivo` abre o seletor sem nenhum `await` antes do
+   `input.click()`.** O navegador só abre o seletor dentro do gesto, e um
+   `await` no meio pode gastar a ativação;
+4. **desistir do seletor devolve `null`** (o evento `cancel` do
+   `<input type=file>`), e não deixa uma promessa pendurada.
+
+A F5 só entra se a forma do que o `descrever_arquivo` devolve tiver de mudar.
+
 ## A decidir com a F8
 
 - `abrir_teste_de_microfone`, `estado_do_teste_de_microfone`,
   `monitorar_o_microfone`: a matriz os põe fora por causa da D-52 (o áudio abre
-  na sala). Se a casca de desktop mantém o teste fora da sala, o PC o atende com
-  o `getUserMedia`. Se não mantém, ficam como estão.
+  na sala), e a D-web-3 diz «no PC, tudo menos hospedar». As duas se cruzam
+  aqui, e **a decisão é da orquestradora** (a F8 levou a pergunta em 09/10). Se
+  ela abrir, o PC os atende pelo `getUserMedia`, sem código da F8 além de tirar
+  a frase.
+- **o `fechar_teste_de_microfone` é atendido sempre**, nas duas cascas e com ou
+  sem o teste aberto. O `pararOTesteDeMicrofone` o chama a cada saída de ÁUDIO
+  (`tela-server.js:150`, `:684`), e uma recusa sujaria o console a cada troca.
 
 ## Como se prova
 
