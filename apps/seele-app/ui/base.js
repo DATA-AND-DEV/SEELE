@@ -2327,15 +2327,17 @@ const REGIOES_E_CAMADAS_DA_API = Object.freeze([
 /**
  * O que o retrato diz da casca: onde ela está e que regiões ela tem agora.
  *
- * **`onde` lê uma marca só**, que a casca põe na raiz: `data-casca="celular"`
- * na casca de uma mão (a da F8), e nada no computador — o web app no PC usa a
- * casca de desktop (D-web-3), e é `computador`.
+ * **`onde` pergunta à casca do celular se ela está de pé**: o `CELULAR` só
+ * existe quando o `celular-casca.js` achou a marca dele na raiz. Este arquivo é
+ * do desktop e não lê a marca (o guarda `nenhum_arquivo_do_desktop_cita_a_marca`,
+ * em `tests/celular.rs`). No computador não há `CELULAR` — o web app no PC usa a
+ * casca de desktop (D-web-3) —, e o retrato diz `computador`.
  */
 function cascaDoRetrato() {
   const pontos = typeof PONTOS_DE_CONTRIBUICAO === "object" ? PONTOS_DE_CONTRIBUICAO : {};
   const tipos = typeof TIPOS_DE_SUPERFICIE === "object" ? TIPOS_DE_SUPERFICIE : {};
   return {
-    onde: document.documentElement?.dataset?.casca === "celular" ? "celular" : "computador",
+    onde: typeof CELULAR === "object" && CELULAR !== null ? "celular" : "computador",
     regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
       Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
   };
