@@ -256,6 +256,47 @@ pub struct ChannelWeight {
     pub oldest_at_seconds: Option<i64>,
 }
 
+/// Por que a sala de um código não foi achada.
+///
+/// Espelho de `seele_core::encontro::FalhaAoLocalizar`, com os mesmos nomes: a
+/// casca escreve uma frase por variante, e cada uma é uma frase diferente da
+/// spec — o ponto calado não é a pessoa indisponível.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum FalhaAoLocalizar {
+    /// `$SEELE_ENCONTRO` desligou o ponto: sem ele, código não funciona, e
+    /// link com endereço continua funcionando.
+    SemPonto,
+    /// O ponto fala o ENC/2 e a sala não está registrada: o SEELE do outro
+    /// lado está fechado, ou não está recebendo ligações.
+    NinguemMora,
+    /// O ponto respondeu à sonda e calou a pergunta pela sala: é anterior ao
+    /// ENC/2, ou recusou por excesso e a recusa foi para outro pedido.
+    Enc2Calado,
+    /// O ponto recusou por excesso de pedidos desta rede.
+    PontoRecusou,
+    /// O ponto não respondeu a nada no prazo.
+    PontoMudo,
+    /// O nome do ponto não resolveu no prazo, ou não é um endereço.
+    PontoNaoResolve,
+    /// O ponto deu só a escuta da sala, e nenhum endereço a que conectar.
+    SoAEscuta,
+}
+
+impl From<seele_core::encontro::FalhaAoLocalizar> for FalhaAoLocalizar {
+    fn from(falha: seele_core::encontro::FalhaAoLocalizar) -> Self {
+        use seele_core::encontro::FalhaAoLocalizar as Nucleo;
+        match falha {
+            Nucleo::SemPonto => Self::SemPonto,
+            Nucleo::NinguemMora => Self::NinguemMora,
+            Nucleo::Enc2Calado => Self::Enc2Calado,
+            Nucleo::PontoRecusou => Self::PontoRecusou,
+            Nucleo::PontoMudo => Self::PontoMudo,
+            Nucleo::PontoNaoResolve => Self::PontoNaoResolve,
+            Nucleo::SoAEscuta => Self::SoAEscuta,
+        }
+    }
+}
+
 /// Why a session ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum EndReason {
@@ -2081,6 +2122,17 @@ pub enum ConnectionError {
     SePassouPorCodigo {
         /// O código de quem se passou.
         codigo: String,
+    },
+    /// Quem liga pelo código não achou onde a sala mora (spec de 23/09, «Erros
+    /// e frases»): o motivo é o que o ponto de encontro disse, ou a falta dele.
+    ///
+    /// Sai antes da corrida, sem endereço tentado: a trilha acaba em
+    /// `Localizando`. As frases («O PONTO DE ENCONTRO NÃO RESPONDEU», «ALICE NÃO
+    /// ESTÁ DISPONÍVEL») são da casca, com a tarefa 7f; até lá nada no app
+    /// disca um código, e esta variante não chega à tela.
+    NaoLocalizou {
+        /// O que faltou para achar a sala.
+        motivo: FalhaAoLocalizar,
     },
     /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
     /// que o assina.
