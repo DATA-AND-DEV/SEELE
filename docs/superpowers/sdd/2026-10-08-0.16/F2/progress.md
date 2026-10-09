@@ -60,19 +60,20 @@ não toca no `seele-core/src/encontro.rs`, então a Task 9 não espera.
 |---|---|---|---|
 | 1 | o fio do ENC/2 no `seele-proto` | feita | `d7d8a92b` |
 | 2 | a mensagem que a chave assina no `MORO2` | feita | `c7b2048e` |
-| 3 | o `PONTO_PADRAO` no `seele-proto` | **espera o G-servidor** | |
+| 3 | o `PONTO_PADRAO` no `seele-proto` | feita, em cima do G-servidor | `26e0cd80` |
 | 4 | o quarto assinado | feita | `830dd365` |
 | 5 | o limite por prefixo | feita | `0d273738` |
 | 6 | o ponto fala as duas versões | feita | `50488d25` |
 | 7 | o `sondar` aprende o `/2` | feita | `f3e1bff8` |
-| 8 | o anfitrião assina e diz | **espera o G-servidor** | |
+| 8 | o anfitrião assina e diz | feita, em cima do G-servidor | `0c6ff5f0` |
 | 9 | quem liga pergunta pelo `QUEM2` | feita | `7871d563` |
-| 10 | de ponta a ponta | espera a 8 | |
+| 10 | de ponta a ponta | feita | `057854d8` (e o guarda do `quarto.rs`, `76107d38`) |
 | 11 | o ENC/2 no fuzz | feita | `ff203557` |
 | 12 | o ADR 0062 e as frases públicas | feita | `3c12e223` |
 | 13 | o portão da VPS | feita | `e9b31450` (o `publicar.sh`, à parte; a F6 simulou o merge com o `36274663` e ele entra limpo), `8f006d8c` (a receita) |
 | 14–16 | o cookie (D-enc-4) e o teto por prefixo (D-enc-3) | feitas | `86caf16e`, `47233d9a` |
 | 17–18 | o `sondar` com o `DESAFIO`, o fuzz, os docs e o ADR | feitas | `86caf16e`, `ba8b7b85` |
+| — | o cookie pelo HMAC do RustCrypto (pedido da orquestradora) | feita | `04181a99` |
 
 ## A revisão independente (08/10) e os consertos
 
@@ -129,3 +130,51 @@ chamasse `localizar(ponto_de_quem_liga()…)` sem ambiente perguntaria à VPS.
 **Marco: o lado do ponto está pronto** (Tasks 1, 2, 4, 5, 6 e 7). Depois do merge,
 o binário do `seele-encontro` deste branch é o que vai para a VPS, e o
 `sondar --exige-enc2` confere de fora.
+
+## As Tasks 3, 8 e 10 (08/10, depois do merge do G-servidor)
+
+O `versao/0.16` em `a2b9f9d0` entrou no `0.16/enc2` pelo `14ab08ba`.
+
+- **Task 3** (`26e0cd80`): o `PONTO_PADRAO`, o `REDE_DO_PADRAO`, o `VARIAVEL`, o
+  `ponto_escolhido(variavel, sem_a_variavel)` e o `aponta_para_a_producao` vão
+  para o `seele-proto::encontro`; o `do_ambiente_ou` do G-servidor e o guarda do
+  anfitrião passam a chamá-los, sem mudar de sentido. Quem liga ganha o
+  `ponto_de_quem_liga()` e o gêmeo do guarda: o `resolver_ponto` e o `resolver`
+  da batida recusam a VPS de produção antes do DNS, pelo `cfg(test)` e pela
+  feature `recusar-encontro-de-producao` do `seele-core`, que só a
+  `[dev-dependencies]` do `seele-conformance` pede (e um `compile_error!` a
+  recusa num build otimizado).
+- **Task 8** (`0c6ff5f0`): `Convocacao::para_sala(socket, escuta, chave,
+  ponto)` assina o `MORO2` da escuta e o do servidor a cada reavivamento, com o
+  cookie do `DESAFIO`/`MOROU` e as dicas das interfaces físicas de rede local.
+  O `EstadoDoRegistro` (`Esperando`, `Registrado`, `RelogioTorto`, `Recusado`,
+  `CookieRecusado`, `SemResposta`) sai por um `watch`, lido por
+  `Hospedagem::registro_no_quarto()`, e cada mudança vira uma linha no
+  `seele.log`. Um servidor guardado (`do_ambiente`) continua só no ENC/1.
+- **Task 10** (`057854d8`): um ponto de verdade no `127.0.0.1`, uma sala que
+  chega a `Registrado` passando pelo `DESAFIO`, e quem liga achando pelo
+  `localizar` o servidor, a escuta e as dicas. Ao lado: a sala sem registro é
+  `NinguemMora`, e o servidor guardado é achado pelo ENC/1 no mesmo ponto. Três
+  reversões (o ponto calando o `MORO2`, a sala mandando o `MORO` da versão 1, a
+  sala esquecendo o cookie) reprovam.
+
+**Um guarda que eu quebrei e não vi.** A refatoração da Task 9 (`7871d563`) levou
+o `timeout_at(ate, resolver_ponto(ponto))` do `onde_mora_hoje` para o
+`consultar_o_ponto`, e o guarda de fonte
+`quarto.rs::resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele` passou a
+reprovar. Ninguém viu porque a conformidade estava bloqueada pela bateria da
+integração. Conserto em `76107d38`: o guarda segue a consulta até o
+`consultar_o_ponto` e confere que o `onde_mora_hoje` e o `localizar` passam por
+ele. Provado por duas reversões.
+
+**Rodado, um arquivo de cada vez:** `enc2`, `quarto`, `quarto_pelo_link`,
+`ocupante_da_escuta`, `furo`, `volta_pela_trilha`, `estados`, `ejetar` e
+`tela_por_um_par` do `seele-conformance`, e os testes de unidade do encontro em
+`seele-encontro`, `seele-proto`, `seele-core` e `seele-server`. `cargo fmt` e
+`clippy -D warnings --all-targets` limpos nos cinco crates. **Não rodado:** a
+bateria inteira, que é da integração.
+
+**Marco: a F2 está completa** para a próxima integração. O `0.16/enc2` entra
+limpo no `versao/0.16` de hoje (`4ef902ed`, conferido pelo `git merge-tree`).
+**O que fica com o dono:** subir o binário do `seele-encontro` deste branch na
+VPS. Até isso, o `publicar.sh` reprova a 0.16 no portão, como deve.
