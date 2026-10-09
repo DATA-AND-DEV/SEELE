@@ -56,13 +56,19 @@
     fecharAberta?.();
     const antes = document.activeElement;
     const veu = h("div", { class: "cel-veu", onclick: aoDesistir });
+    // O Escape é da folha, e para nela: na captura do `window`, antes de todo
+    // ouvinte do desktop. A CHAMADA fecha no Escape quando não há caixa por
+    // cima, e sem isto a folha sumia primeiro e a CHAMADA fechava junto.
     const tecla = (evento) => {
-      if (evento.key === "Escape") aoDesistir();
+      if (evento.key !== "Escape") return;
+      evento.stopPropagation();
+      evento.preventDefault();
+      aoDesistir();
     };
-    document.addEventListener("keydown", tecla);
+    window.addEventListener("keydown", tecla, true);
     sessao.append(veu, folha);
     const fechar = () => {
-      document.removeEventListener("keydown", tecla);
+      window.removeEventListener("keydown", tecla, true);
       veu.remove();
       folha.remove();
       fecharAberta = null;

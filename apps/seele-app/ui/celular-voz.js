@@ -41,6 +41,10 @@
     fala: (quem) => `${quem} fala`,
     naSala: (n) => `${n} na sala`,
     sinal: (n) => `sinal ${n}`,
+    recolher: "RECOLHER",
+    recolherChamada: "Recolher a chamada e voltar à sessão",
+    telemetria: "telemetria da chamada",
+    medidas: [["ATRASO", "tel-rtt"], ["JITTER", "tel-jit"], ["PERDA", "tel-loss"], ["CODEC", "tel-codec"]],
   });
 
   // ------------------------------------------------------------- as abas
@@ -70,15 +74,23 @@
   const nome = h("span", { class: "voz-sala-nome" });
   const conta = h("span", { class: "voz-sala-conta" });
   const quem = h("span", { class: "voz-sala-quem" });
+  // Um toque na faixa abre a CHAMADA, que mora na coluna da conversa; dentro
+  // dela, a mesma faixa, no mesmo lugar, diz RECOLHER e a fecha.
+  const dentroDaSala = h("span", {}, nome, " ", conta);
+  // Com a letra do nome da sala, para a faixa não mudar de altura ao trocar.
+  const recolher = h("span", { class: "voz-sala-nome", hidden: true }, glifo("aberto"), ` ${PALAVRAS.recolher}`);
   const sala = h("button", {
     class: "voz-sala",
     type: "button",
-    // Um toque na faixa abre a CHAMADA, que mora na coluna da conversa.
     onclick: () => {
+      if (sessao.hasAttribute("data-chamada")) {
+        fecharChamada();
+        return;
+      }
       abrirAba("conversa");
       abrirChamada();
     },
-  }, h("span", {}, nome, " ", conta), quem);
+  }, dentroDaSala, recolher, quem);
 
   const sair = h("button", {
     id: "voz-sair",
@@ -201,7 +213,6 @@
     faixa.hidden = !aqui;
     if (!aqui) return;
     faixa.setAttribute("aria-label", PALAVRAS.salaDeVoz(aqui.name));
-    sala.setAttribute("aria-label", PALAVRAS.abrirChamada(aqui.name));
     nome.textContent = aqui.name;
     conta.textContent = `${aqui.people.length}/${aqui.limit}`;
 
@@ -222,10 +233,46 @@
   // A CHAMADA mora na coluna da conversa. Quando o desktop a abre (ao entrar
   // numa sala, pela faixa, ao começar uma transmissão), o celular mostra a aba
   // em que ela está, venha a abertura de onde vier.
+  // ------------------------------------------------------------ a CHAMADA
+  //
+  // Ela cobre a sessão entre o topo e a faixa. A faixa fica onde estava, com o
+  // MUDO no mesmo lugar, e a fileira da telemetria entra no lugar das abas, da
+  // mesma altura.
+
   const vistaDaChamada = doDesktop("vista-chamada");
+  const vistaAberta = () => !vistaDaChamada.hidden;
+  let nomeDaSala = "";
+  function desenharChamada() {
+    const aberta = vistaAberta();
+    sessao.toggleAttribute("data-chamada", aberta);
+    dentroDaSala.hidden = aberta;
+    recolher.hidden = !aberta;
+    sala.setAttribute("aria-label", aberta ? PALAVRAS.recolherChamada : PALAVRAS.abrirChamada(nomeDaSala));
+  }
   new MutationObserver(() => {
-    if (!vistaDaChamada.hidden) abrirAba("conversa");
+    if (vistaAberta()) abrirAba("conversa");
+    desenharChamada();
   }).observe(vistaDaChamada, { attributes: true, attributeFilter: ["hidden"] });
+
+  // A telemetria lê o que o rodapé do desktop já escreveu, com as palavras do
+  // celular: PERDA, e não DISTÚRBIO (o glossário canônico).
+  const valores = PALAVRAS.medidas.map(([, id]) => [id, h("span", { class: "cel-telemetria-valor" })]);
+  sessao.append(h("div", { class: "cel-telemetria", role: "group", "aria-label": PALAVRAS.telemetria },
+    PALAVRAS.medidas.map(([rotulo], i) => h("div", { class: "cel-telemetria-celula" },
+      h("span", { class: "rotulo", text: rotulo }), valores[i][1]))));
+  CASCA.depoisDeDesenhar.push((snapshot) => {
+    nomeDaSala = (snapshot.voice_rooms ?? []).find((s) => s.occupied_by_us)?.name ?? "";
+    desenharChamada();
+    for (const [id, valor] of valores) valor.textContent = doDesktop(id)?.textContent ?? "";
+  });
+
+  // Um toque num cartão da grade abre a folha da pessoa, como na aba PESSOAS:
+  // o volume dela mora lá, e não nas dez celas do cartão do desktop.
+  doDesktop("chamada-grade").addEventListener("click", (evento) => {
+    if (evento.target.closest("button, a, input")) return;
+    const cartao = evento.target.closest("li[data-pessoa]");
+    if (cartao) CELULAR.ajudante("abrirPessoa")?.(cartao.getAttribute("data-pessoa"));
+  });
 
   CELULAR.registrar("abrirAba", abrirAba);
 })();

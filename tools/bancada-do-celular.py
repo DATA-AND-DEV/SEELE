@@ -431,6 +431,24 @@ def tocar(pg: Page, seletor: str) -> bool:
     return True
 
 
+def exigir_toque(pg: Page, seletor: str, falhas: list[str]) -> bool:
+    """O `tocar`, e a reprovação quando o alvo não está ao alcance do dedo."""
+    if tocar(pg, seletor):
+        return True
+    falhas.append(f"não há como tocar {seletor}")
+    return False
+
+
+def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
+    """Vai à aba como uma pessoa iria: com a CHAMADA aberta, as abas estão
+    escondidas, e primeiro se recolhe a CHAMADA pela faixa."""
+    if pg.evaluate("document.getElementById('tela-sessao').hasAttribute('data-chamada')"):
+        if not exigir_toque(pg, "#voz .voz-sala", falhas):
+            return False
+        pg.wait_for_timeout(200)
+    return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -464,7 +482,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
         return falhas + ["dentro da PONTE, a faixa de voz está escondida"]
 
     pg.evaluate("window.__SEELE_ARGS.set_muted = undefined")
-    pg.locator("#voz-mudo").tap()
+    exigir_toque(pg, "#voz-mudo", falhas)
     pg.wait_for_timeout(300)
     mandou = pg.evaluate("window.__SEELE_ARGS.set_muted ?? null")
     if not mandou or mandou.get("on") is not True:
@@ -472,7 +490,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
 
     paineis = {"servidor": ".painel-canais", "conversa": ".painel-linha", "pessoas": ".painel-pessoas"}
     for aba in ("servidor", "conversa", "pessoas", "ajustes"):
-        pg.locator(f"#cel-aba-{aba}").tap()
+        ir_para_aba(pg, aba, falhas)
         estado = pg.evaluate("""(paineis) => {
             const s = document.getElementById('tela-sessao');
             const visivel = (sel) => { const e = s.querySelector('.paineis > ' + sel);
@@ -513,7 +531,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
     pg.evaluate("SEELE_QUADRO.abertura_do_audio = 'aberto'")
 
     pg.evaluate("window.__SEELE_CHAMADAS.length = 0")
-    pg.locator("#voz-sair").tap()
+    exigir_toque(pg, "#voz-sair", falhas)
     pg.wait_for_timeout(300)
     if "leave_voice_room" not in pg.evaluate("window.__SEELE_CHAMADAS"):
         falhas.append("o toque no SAIR não chamou leave_voice_room")
@@ -523,7 +541,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
     if not pg.evaluate("document.getElementById('voz').hidden"):
         falhas.append("fora de sala, a faixa de voz continua à vista")
     pg.evaluate("SEELE_QUADRO.voice_rooms[0].occupied_by_us = true")
-    pg.locator("#cel-aba-conversa").tap()
+    ir_para_aba(pg, "conversa", falhas)
     esperar_quadro(pg)
     return falhas
 
@@ -598,7 +616,7 @@ def aba_servidor(pg: Page) -> list[str]:
         SEELE_QUADRO.voice_rooms.push({ id: 4, name: "PALCO", limit: 4, password_required: false,
             occupied_by_us: false, channel: null, sync: null, people: [] });
     })()""")
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     esperar_quadro(pg)
 
     visto = pg.evaluate("""(() => {
@@ -671,7 +689,7 @@ def aba_servidor(pg: Page) -> list[str]:
             falhas.append(f"entrar não abriu a CHAMADA na aba dela: aba {depois[0]}, vista-chamada escondida {depois[1]}")
 
     # A sala com senha: a folha, a senha que ela manda, e o AGORA NÃO que cancela.
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     for resposta in ("entrar", "agora-nao"):
         pg.evaluate("window.__SEELE_HISTORICO.length = 0")
         if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='3']) button[data-voice_room]"):
@@ -684,9 +702,9 @@ def aba_servidor(pg: Page) -> list[str]:
             break
         if resposta == "entrar":
             folha.locator("input").fill("abc")
-            folha.locator("button[data-resposta='entrar']").tap()
+            exigir_toque(pg, "#cel-folha-senha button[data-resposta='entrar']", falhas)
         else:
-            folha.locator("button[data-resposta='agora-nao']").tap()
+            exigir_toque(pg, "#cel-folha-senha button[data-resposta='agora-nao']", falhas)
         pg.wait_for_timeout(400)
         entradas = [a for c, a in chamadas() if c == "enter_voice_room"]
         if resposta == "entrar" and entradas != [{"voiceRoom": 3, "senha": "abc"}]:
@@ -695,13 +713,13 @@ def aba_servidor(pg: Page) -> list[str]:
             falhas.append(f"o AGORA NÃO da folha ainda tentou entrar: {entradas}")
         if folha.is_visible():
             falhas.append(f"a folha continua aberta depois de {resposta}")
-        pg.locator("#cel-aba-servidor").tap()
+        ir_para_aba(pg, "servidor", falhas)
 
     # O selo mora no topo de toda aba: o tema e a aba não o tiram de vista.
-    pg.locator("#cel-aba-conversa").tap()
+    ir_para_aba(pg, "conversa", falhas)
     if not pg.evaluate("(() => { const s = document.querySelector('.cel-topo .cel-selo-seguro'); return !!s && s.getBoundingClientRect().height > 0; })()"):
         falhas.append("na aba CONVERSA, o selo da conexão some")
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     esperar_quadro(pg)
     return falhas
 
@@ -893,6 +911,86 @@ def aba_pessoas(pg: Page) -> list[str]:
     return falhas
 
 
+def chamada(pg: Page) -> list[str]:
+    """A CHAMADA (Tarefa 8): por cima da sessão, com a faixa no mesmo lugar.
+
+    O duble ganha duas transmissões na sala, e a de juli assistida. Termina
+    com a CHAMADA aberta, que é o que a foto e as medidas leem.
+    """
+    falhas = []
+    pg.evaluate("""(() => {
+        SEELE_QUADRO.transmissoes = [
+            { tela: 1, de: 2, e_minha: false, assistida: true, espectadores: 2 },
+            { tela: 2, de: 3, e_minha: false, assistida: false, espectadores: 1 }];
+        SEELE_QUADRO.tela = { tela: 1, de: 2, e_minha: false, espectadores: 2, parada: null, pedido: null };
+    })()""")
+    esperar_quadro(pg)
+    caixa = "(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }"
+    mudo_antes = pg.evaluate(caixa, "#voz-mudo")
+    abas_antes = pg.evaluate(caixa, ".cel-abas")
+
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    visto = pg.evaluate("""(caixa) => {
+        const c = new Function('s', 'return (' + caixa + ')(s)');
+        return { aberta: document.getElementById('tela-sessao').hasAttribute('data-chamada'),
+                 vista: c('#vista-chamada'), topo: c('.cel-topo'), voz: c('#voz'), mudo: c('#voz-mudo'),
+                 abas: c('.cel-abas'), telemetria: c('.cel-telemetria'),
+                 palavras: [...document.querySelectorAll('.cel-telemetria .rotulo')].map((r) => r.textContent),
+                 sala: document.querySelector('#voz .voz-sala')?.textContent ?? '' };
+    }""", caixa)
+    if not visto["aberta"] or not visto["vista"]:
+        falhas.append("o toque na faixa não abriu a CHAMADA")
+    else:
+        v, t, z = visto["vista"], visto["topo"], visto["voz"]
+        largura = pg.evaluate("innerWidth")
+        if v[2] < largura - 1 or abs(v[1] - (t[1] + t[3])) > 1 or abs(v[1] + v[3] - z[1]) > 1:
+            falhas.append(f"a CHAMADA não cobre a sessão entre o topo e a faixa: {v}, topo {t}, faixa {z}")
+    if visto["mudo"] != mudo_antes:
+        falhas.append(f"o MUDO mudou de lugar com a CHAMADA: {mudo_antes} → {visto['mudo']}")
+    if visto["abas"] is not None or visto["telemetria"] is None:
+        falhas.append(f"a telemetria não tomou o lugar das abas: abas {visto['abas']}, telemetria {visto['telemetria']}")
+    elif abas_antes and (abs(visto["telemetria"][1] - abas_antes[1]) > 1 or abs(visto["telemetria"][3] - abas_antes[3]) > 1):
+        falhas.append(f"a telemetria não ocupa o lugar exato das abas: {visto['telemetria']} contra {abas_antes}")
+    if visto["palavras"] != ["ATRASO", "JITTER", "PERDA", "CODEC"]:
+        falhas.append(f"a telemetria da CHAMADA diz {visto['palavras']}")
+    if "RECOLHER" not in visto["sala"]:
+        falhas.append(f"na CHAMADA, a faixa diz «{visto['sala']}», e não RECOLHER")
+
+    palco = pg.evaluate("""(() => {
+        const alto = (e) => e && !e.closest('[hidden]') ? Math.round(e.getBoundingClientRect().height) : null;
+        return { escolha: [...document.querySelectorAll('#palco-escolha button')].map((b) => [b.textContent.trim(), alto(b)]),
+                 controles: ['#palco-mudo', '#palco-volume', '#palco-parar-de-assistir'].map((s) => [s, alto(document.querySelector(s))]),
+                 colunas: getComputedStyle(document.getElementById('chamada-grade')).gridTemplateColumns.split(' ').length };
+    })()""")
+    if len(palco["escolha"]) != 3 or "NÃO VER" not in palco["escolha"][-1][0]:
+        falhas.append(f"com duas transmissões, a escolha mostra {palco['escolha']}")
+    for texto, alto in palco["escolha"]:
+        if alto is not None and alto < 44:
+            falhas.append(f"«{texto}» na escolha tem {alto} de altura")
+    for seletor, alto in palco["controles"]:
+        if alto is None or alto < 44:
+            falhas.append(f"{seletor} no palco tem {alto} de altura, e não 44")
+    if palco["colunas"] != 2:
+        falhas.append(f"a grade da CHAMADA tem {palco['colunas']} colunas, e não 2")
+
+    if not tocar(pg, "#chamada-grade > li[data-pessoa='juli']"):
+        falhas.append("não há cartão de juli à vista na grade")
+    elif not pg.locator("#cel-folha-pessoa").is_visible():
+        falhas.append("o toque no cartão de juli não abriu a folha dela")
+    pg.keyboard.press("Escape")
+
+    tocar(pg, "#voz .voz-sala")
+    esperar_quadro(pg)
+    fechada = pg.evaluate("[document.getElementById('vista-chamada').hidden, document.getElementById('tela-sessao').hasAttribute('data-chamada')]")
+    if fechada != [True, False]:
+        falhas.append(f"RECOLHER não fechou a CHAMADA: vista escondida {fechada[0]}, marca {fechada[1]}")
+    tocar(pg, "#voz .voz-sala")
+    esperar_quadro(pg)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -907,6 +1005,8 @@ CASOS: dict[str, Caso] = {
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
                         raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
+    "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
+                    raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
 }
 
 

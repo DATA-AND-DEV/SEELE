@@ -74,6 +74,12 @@
   order: -1;
 }
 
+/* Só o painel do meio cede altura. O resto tem a altura do que diz: com a
+   CHAMADA cheia, a coluna encolhia também a telemetria, e o MUDO subia. */
+:root[data-casca="celular"] #tela-sessao > :is(.cel-topo, #veredito, #aviso-fone, #aviso-audio, .voz-celular, .cel-abas, .cel-telemetria) {
+  flex-shrink: 0;
+}
+
 :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) {
   order: 1;
 }
@@ -91,6 +97,10 @@
 :root[data-casca="celular"] .cel-abas {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* A altura é escrita, e não a que o conteúdo der: a fileira da telemetria
+     da CHAMADA entra neste lugar com a mesma, e o MUDO não se mexe. */
+  box-sizing: border-box;
+  height: calc(var(--cel-abas) + 1px + var(--cel-seguro-pe));
   padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
   border-top: 1px solid var(--seele-linha);
   background: var(--seele-negro-painel);
@@ -767,4 +777,133 @@
 
 :root[data-casca="celular"] #lista-roster input.volume {
   display: none;
+}
+
+/* ------------------------------------------------------------- a CHAMADA
+ *
+ * Por cima da sessão, entre o topo (que segura o selo da conexão) e a faixa de
+ * voz, que fica onde estava. A fileira da telemetria entra no lugar das abas,
+ * com a mesma altura, e é por isso que o MUDO não se mexe. */
+
+:root[data-casca="celular"] #tela-sessao[data-chamada] > .cel-abas {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-telemetria {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-chamada] > .cel-telemetria {
+  order: 3;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* A altura das abas, escrita do mesmo jeito: o MUDO fica no mesmo lugar. */
+  box-sizing: border-box;
+  height: calc(var(--cel-abas) + 1px + var(--cel-seguro-pe));
+  padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-telemetria-celula {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 2px;
+  border-top: 2px solid transparent;
+  border-left: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-telemetria-celula:first-child {
+  border-left: 0;
+}
+
+:root[data-casca="celular"] .cel-telemetria-celula .rotulo {
+  /* Com teto, como as abas: quatro rótulos numa largura de 390. */
+  font-size: min(calc(var(--seele-t-micro) * var(--cel-escala)), 11px);
+}
+
+:root[data-casca="celular"] .cel-telemetria-valor {
+  font-size: min(calc(var(--seele-t-dado) * var(--cel-escala)), 14px);
+  color: var(--seele-osso);
+  white-space: nowrap;
+}
+
+:root[data-casca="celular"] #vista-chamada {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+:root[data-casca="celular"] #vista-chamada .vista-chamada-barra {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #vista-chamada .chamada-palco {
+  margin: 0;
+  border-left: 0;
+  border-right: 0;
+}
+
+:root[data-casca="celular"] #palco-escolha,
+:root[data-casca="celular"] #palco-controles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+:root[data-casca="celular"] #palco-escolha[hidden],
+:root[data-casca="celular"] #palco-controles[hidden] {
+  display: none;
+}
+
+/* «VER —» vem no apagado do desktop, a 4,1:1. A escolha marcada continua a do
+   desktop, escura sobre o acento. */
+:root[data-casca="celular"] #palco-escolha button:not([aria-pressed="true"]) {
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #palco-volume {
+  min-height: var(--cel-alvo);
+  accent-color: var(--seele-laranja-nerv);
+}
+
+/* A grade em duas colunas, cada cartão numa placa opaca. O volume das dez
+   celas do desktop sai do cartão: ele mora na folha da pessoa. */
+:root[data-casca="celular"] #chamada-grade {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #chamada-grade > .chamada-cartao {
+  min-width: 0;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-volume {
+  display: none;
+}
+
+/* Em duas colunas, a cabeça do cartão quebra: a identidade numa fileira, os
+   estados na outra. Lado a lado, a 360, o nome e a nota ficavam com 3 px. */
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-topo {
+  flex-wrap: wrap;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-identidade {
+  flex: 1 1 100%;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-cartao-quem .nota {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] #chamada-grade .chamada-pastilha[data-estado="escuta"] {
+  color: var(--seele-rotulo-painel);
 }
