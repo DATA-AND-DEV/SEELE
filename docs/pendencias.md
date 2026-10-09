@@ -8719,7 +8719,7 @@ abertos** o 24 e o 25, que são de outros repositórios; do 25, a parte da
 janela fechou. O que os lotes deixaram de menor, ao fechar estes itens, está
 na pendência 58.
 
-## 52 · A voz segura o aparelho de som, e a máquina acordada, a sessão inteira, também fora de sala
+## 52 · Decidida em 2026-10-08 e fechada em 2026-10-09 · A voz segura o aparelho de som, e a máquina acordada, a sessão inteira, também fora de sala
 
 **Aberta em 2026-10-08**, medindo o repouso da pendência 49. Enquanto se está
 num servidor, o motor de voz mantém a saída e o microfone abertos, **também
@@ -8746,7 +8746,58 @@ quadro de quem fala logo ao entrar). É decisão de produto, e não conserto.
 grep -n "a supressão de ruído do microfone está tratando o sinal" crates/seele-core/src/voice.rs
 ```
 
-## 53 · Instalar um MOD de uma pasta com atalho: a recusa é certa, e a tela não sabe dizer qual é
+**Decidida em 2026-10-08 (D-52)**, entre as decisões do dono da 0.16
+(`docs/superpowers/specs/2026-10-08-0.16-design.md`): o áudio abre só ao entrar
+numa sala de voz, e fecha ao sair.
+
+**Fechada em 2026-10-09**, `d96fecc0` (lote I-a da F5 da 0.16, integrado em
+`6a6f3aa2`):
+- o áudio abre quando a pessoa senta numa sala de voz e fecha quando ela sai;
+- a abertura roda numa thread própria (`seele-abre-audio`), com prazo de 10 s
+  (`PRAZO_DO_AUDIO`);
+- os controles escolhidos fora de sala moram em `Shared` e valem ao abrir, com
+  a supressão e a sensibilidade carregadas em `e28cb84b`;
+- o `Snapshot` ganha `AberturaDoAudio`, e fora de sala nenhuma tela diz «sem
+  áudio» (`2b32795f`);
+- o motor esquece o assento que a volta refaz pelos mesmos caminhos do `Room`
+  da casca (`421d628d`).
+
+**A regra do assento**, do achado Crítico da revisão. O servidor manda
+`VoiceRoomEntryRefused` também a quem ele mantém sentado: na troca de sala
+recusada, a cada volta numa sala com senha e pelo `nao_deu`. Com a D-52, isso
+deixava a pessoa surda e muda numa sala onde todos a viam.
+- `a9e8c128` põe a regra única em `seele_core::assento`, para o `Room` e para o
+  motor: uma recusa desfaz só o pedido de entrada no ar e devolve o assento de
+  antes. Sem pedido no ar, ninguém se move. O áudio só abre no assento
+  confirmado.
+- O pedido se sabe decidido pelo `Pong` de um `Ping` marcado e numerado
+  (`893632ab`).
+- O resgate na volta exige o mesmo SSRC **e** um `SessionId` maior
+  (`d02743ea`): sem isso, um servidor reiniciado deixava a pessoa sentada na
+  própria tela e fora de toda sala no servidor.
+- A prova é `crates/seele-conformance/tests/a_recusa_nao_tira_da_sala.rs`.
+- No lote I-b, o `PedidoRecusado` da F1 entrou na regra (`2296ee5b`), e a
+  supressão e a sensibilidade gravadas em disco passaram a valer no connect
+  (`eaba0ea6`).
+
+**O subitem do pânico**, no mesmo lote (`520f880a`). Com a abertura numa
+thread própria, um pânico em qualquer thread do app deixa uma linha ERROR no
+`seele.log`, com a thread e o lugar.
+
+**Fica com o dono** (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que
+fica com o dono», e o relatório do I-a, «O que não rodou»), porque pede
+aparelho de verdade:
+- medir que o `PreventUserIdleSystemSleep` do macOS e o pedido do
+  `powercfg /requests` no Windows somem fora de sala;
+- calibrar o `PRAZO_DO_AUDIO` com a primeira abertura, o pedido de permissão do
+  macOS e o WASAPI;
+- ver se abrir e fechar o aparelho a cada sala pede a permissão de novo.
+
+Os dois custos que a D-52 aceitou continuam: a latência de abrir o aparelho a
+cada entrada, e o primeiro quadro de quem fala logo ao entrar. Os casos raros
+que a revisão do I-a deixou estão na pendência 58.
+
+## 53 · Fechada em 2026-10-08 · Instalar um MOD de uma pasta com atalho: a recusa é certa, e a tela não sabe dizer qual é
 
 **Aberta em 2026-10-08.** Uma pasta de MOD de quem desenvolve tem
 `node_modules/.bin/`, cheia de atalhos (symlinks). O instalador recusa um
@@ -8766,7 +8817,25 @@ grep -n "NaoCopiei" apps/seele-app/src/mods.rs
 grep -n "NaoCopiei" apps/seele-app/ui/frases.js   # vazio: não há frase
 ```
 
-## 54 · «PADRÃO DA MÁQUINA · <aparelho>» diz o aparelho em uso, e não o padrão, quando a escolha é outro aparelho
+**Fechada em 2026-10-08**, `c6ca70e4` e `6038abbe` (lote P53 da F5 da 0.16,
+integrado em `8476815b`):
+- `c6ca70e4`: o atalho tem variante própria, `FalhaAoInstalarMod::TemAtalho`,
+  com o caminho, e `NaoCopiei` fica para as outras falhas de cópia.
+  `instalar_de` escreve uma linha WARN em toda recusa, com a pasta e a recusa
+  inteira;
+- `6038abbe`: as frases de `TemAtalho`, `NaoCopiei`, `ManifestoRecusado` e
+  `SemManifesto`, em `ui/frases.js`; e o guarda das recusas passa a ler
+  `src/mods.rs` e as variantes com campo.
+
+Na revisão, a pasta passou a ir à linha WARN por `caminho_no_registro`, e um
+nome de pasta com quebra de linha deixou de forjar linha no `seele.log`
+(`1a7011e7`). O leitor das variantes prende a profundidade (`8b6ea89a`). A
+frase do atalho manda tirá-lo onde quer que ele esteja, com o `node_modules`
+como o lugar mais provável, e não como a regra (`14253634` e `2d2a914b`).
+Medido em 09/10/2026: o segundo comando de cima acha a frase. O que ficou de
+fora, por decisão do controlador, está na pendência 58.
+
+## 54 · Fechada em 2026-10-08 · «PADRÃO DA MÁQUINA · <aparelho>» diz o aparelho em uso, e não o padrão, quando a escolha é outro aparelho
 
 **Aberta em 2026-10-08.** Em CONFIGURAÇÕES · MICROFONE E SOM, a linha
 `PADRÃO DA MÁQUINA` ganha o nome do aparelho que a voz abriu
@@ -8781,6 +8850,19 @@ a escolhida, ou escrever nela o padrão do sistema.
 ```sh
 grep -n "PADRÃO DA MÁQUINA · " apps/seele-app/ui/tela-server.js
 ```
+
+**Fechada em 2026-10-08**, `0d68c95` (lote P54 da F5 da 0.16, integrado em
+`90e1377e`). `marcarUmaLista` decide pela escolha. Com o padrão escolhido, a
+linha diz no que ele deu, como antes. Com um aparelho escolhido à mão, ela diz
+o padrão do sistema, lido da linha que a máquina marcou como padrão: no caso
+de cima, «PADRÃO DA MÁQUINA · Alto-falantes (MacBook Pro)», e abaixo
+«27QHD240 EM USO». Sem padrão marcado, ela fica sem nome. A prova é a bancada
+`apps/seele-app/bancada/qualidade-da-voz.cjs` (`P54 OK`), vermelha antes do
+conserto; o revisor refez a reversão pelos dois lados, microfone e saída. O
+brief aceitava também a linha
+sem nome; a escolha pelo padrão do sistema, e o nome que aparece duas vezes
+com um aparelho escolhido, ficam para o dono conferir em tela. O resto está
+na pendência 58.
 
 ## 55 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
 
@@ -8804,8 +8886,22 @@ grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
 grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
 ```
 
+**O nome, corrigido em 2026-10-09.** A função que resolve o ponto de novo é
+`Batida::preparar`, e não `Encontro::preparar`, como está escrito acima. É um
+achado da conferência de 08/10 do plano da F5 da 0.16
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «Achados da conferência
+de 08/10»). O resto vale.
 
-## 56 · Os testes que leem o log perdem linhas quando rodam em paralelo
+**Continua aberta, com o Plano 5** (`lotes.md`, «Vão para outros planos»). Se
+o conserto for entregar ao `LEVE` o endereço já resolvido, ele parte da lista
+ordenada que o lote M1 deixou em `resolver_ponto` (`09accad`).
+
+```sh
+grep -n "impl Batida" -A 20 crates/seele-core/src/encontro.rs | grep -n "async fn preparar"
+```
+
+
+## 56 · Fechada em 2026-10-09 · Os testes que leem o log perdem linhas quando rodam em paralelo
 
 **Aberta em 2026-10-08**, achada pela F7 da 0.16 num teste da recepção da sala
 pessoal que reprovava junto com o módulo e passava sozinho. **Pode explicar
@@ -8866,6 +8962,37 @@ um crate novo (o auxiliar tem três linhas):
 
 **Quando fecha.** Com o auxiliar nos três crates e a prova de ordem forçada em
 cada um, provada por reversão.
+
+**Fechada em 2026-10-09** (lote Z1 da F5 da 0.16, integrado em `e8cc4fb5`):
+- `a4fcd99e`, no `seele-core`: `Rastro::a_partir_de` chama o
+  `segundo_despachante()`, e todo teste do crate que lê o log passa por ele;
+- `cefb5c53`, no `seele-server`: o módulo `#[cfg(test)] pub(crate) mod
+  rastro_de_teste`, chamado pelas capturas de `admissao`, `pedidos`,
+  `alcance/encontro` e `recepcao`, e uma cópia em `tests/desconhecida.rs`, que
+  também lia o log e não estava na lista de cima;
+- `12bb1769`, no `seele-ffi`: uma cópia local, chamada por
+  `o_log_da_trilha_diz_qual_candidato_deu_o_que`;
+- `f4cba99e`: as quatro provas de ordem forçada rodam num processo filho, e
+  decidem também na biblioteca inteira. Antes, a do core passava 5 em 5 na
+  biblioteca com o conserto tirado, porque os outros rastros deixavam dois
+  despachantes de pé;
+- `3230eb9a`: o guarda `xtask/tests/log_com_segundo_despachante.rs` reprova o
+  teste de log novo que esquecer o auxiliar, e compara as cópias dele.
+
+Sem o conserto, a recepção reprovou 5 em 5 no módulo. A revisão achou uma
+segunda vítima, no core:
+`encontro::testes::a_consulta_que_estoura_o_prazo_diz_no_rastro_o_que_perguntou_e_o_que_ouviu`
+reprovou 12 em 12 com `--test-threads=4`. Os outros testes da lista de cima
+passaram em todas as rodadas sem o conserto: o mecanismo os expõe, e nenhum
+foi visto falhar.
+
+**A prova do app ficou em processo único.**
+`uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada`
+(`apps/seele-app/src/main.rs`) roda a ordem forçada no mesmo processo, como a
+do core antes de `f4cba99e`, e por isso pode decidir só rodada sozinha. O que a
+cobre é o guarda de texto de `3230eb9a`, que lê o app e reprova a captura que
+esquecer o auxiliar. Ela ficou fora do Z1 porque o K4 mexia no `main.rs` ao
+mesmo tempo, e vai para a revisão final.
 
 ## 57 · O guarda da identidade da linha 0.15 lê só o texto antes do primeiro `#[cfg(test)]`
 
