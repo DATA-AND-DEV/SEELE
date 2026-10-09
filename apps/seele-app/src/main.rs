@@ -383,8 +383,8 @@ impl Session {
     /// Uma linha por balde que tinha linhas seguradas sem outra depois que as
     /// contasse ([`conta_do_balde_dita`]): sem ela, a conta caía com o balde,
     /// e o `seele.log` mostrava a rajada como se fosse tudo. [`Self::revogar`]
-    /// a chama ao fechar a sessão; a saída do app, que não passa por ele, é a
-    /// outra porta que a deve chamar.
+    /// a chama ao fechar a sessão, e a saída do app também passa por ele
+    /// ([`despedir_da_sessao`]).
     ///
     /// **O mapa sai do cadeado antes de a primeira linha ser escrita.** Com a
     /// guarda na mão, uma linha lenta no disco seguraria toda porta do
@@ -2768,8 +2768,8 @@ const CONTA_DO_BALDE_DO_REGISTRO: &str =
 /// **Diz a conta que um balde do registro guardou e nenhuma linha levou**.
 ///
 /// Quem a chama é [`Session::dizer_as_contas_do_registro`], quando os baldes
-/// vão embora: ao fechar a sessão ([`Session::revogar`]); a saída do app, que
-/// não passa por `revogar`, é a outra porta que a deve chamar (lote F).
+/// vão embora: ao fechar a sessão ([`Session::revogar`]), e é por `revogar`
+/// que a saída do app passa também ([`despedir_da_sessao`]).
 ///
 /// Com ficha ou sem, como a última linha de uma instância do `console`
 /// ([`executor::BaldeDoConsole::pendentes`]): o balde vai embora, e guardar a
@@ -4706,7 +4706,14 @@ fn assentar_fala(
         executor::ParaOFora::Mensagem(json) => ("mensagem", json, false),
         executor::ParaOFora::Falhou(motivo) => ("falhou", motivo, false),
         executor::ParaOFora::Interrompido => ("interrompido", String::new(), false),
-        executor::ParaOFora::Parou => ("parou", String::new(), true),
+        executor::ParaOFora::Parou => {
+            // **INFO, e não DEBUG**: é a outra metade da linha «MODs nativos
+            // mandados parar» da saída do app, e o filtro padrão não escreve
+            // DEBUG. A instância, e não a geração: o número não se repete nesta
+            // janela, e a linha da reserva o liga à geração.
+            tracing::info!(mod_id = %quem, instancia = numero, "MOD nativo parou");
+            ("parou", String::new(), true)
+        }
         executor::ParaOFora::Diagnostico { relogios } => {
             tracing::debug!(mod_id = %quem, relogios, "diagnóstico de MOD nativo");
             return Assentada::Nada;
@@ -9770,26 +9777,80 @@ fn main() {
     }
 }
 
-/// Avisa o servidor de que esta máquina está saindo, antes de o processo morrer.
+/// Avisa os MODs e o servidor de que esta máquina está saindo, antes de o
+/// processo morrer: [`despedir_da_sessao`], com o teto dos MODs.
 ///
-/// O `disconnect` encerra o laço do enlace, e é o fim dele que faz o QUIC mandar
-/// o `CONNECTION_CLOSE`. A espera curta depois existe porque isso é um datagrama:
-/// sem ela o processo pode sair antes de o quadro chegar ao cartão de rede, e o
-/// aviso que este código existe para dar não sai.
-///
-/// Cento e cinquenta milissegundos é muito para uma LAN e pouco para alguém
-/// notar ao fechar uma janela. Se não der tempo — a máquina desligando, a rede
-/// já morta —, o servidor cai no tempo limite de ociosidade como caía antes, que
-/// é o comportamento que este caminho melhora e não substitui.
+/// Segura a thread principal, que é a do `ExitRequested`, por até ~700 ms: até
+/// [`ESPERA_DOS_MODS_NA_SAIDA`] pelos MODs nativos e até 500 ms pela thread da
+/// conexão. No caso comum, numa LAN, são milissegundos. Era `disconnect` e uma
+/// espera cega de 150 ms, que não sabia se o `CONNECTION_CLOSE` tinha saído — e
+/// não saía: a thread da conexão derrubava o runtime com ele na fila, e quem
+/// ficou via a pessoa sair pelo prazo de ociosidade do servidor, 20 s
+/// (pendência 50). Se nem o teto der — a máquina desligando, a rede já morta —,
+/// o servidor cai nesse mesmo prazo, e o `seele.log` diz.
 fn despedir_se(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
-    let sessao = handle.state::<Session>();
+    despedir_da_sessao(&handle.state::<Session>(), ESPERA_DOS_MODS_NA_SAIDA);
+}
+
+/// Quanto a saída do app espera os MODs nativos confirmarem a parada.
+///
+/// Duzentos milissegundos: parar é o executor sair do laço dele e dizer
+/// `Parou`, e um MOD que não para nisso está preso numa volta que o teto do
+/// executor ainda vai interromper. O processo não espera por ele.
+const ESPERA_DOS_MODS_NA_SAIDA: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// **A saída do app, sem a janela**: os MODs param primeiro, na mesma
+/// despedida, e a conexão sai por último, esperada.
+///
+/// 1. [`Session::revogar`], como [`desmontar_o_cliente`] faz: fecha a geração,
+///    manda os MODs nativos dela parar e diz as contas dos baldes do registro,
+///    que a saída do app perdia. A linha INFO diz quantos MODs ficaram parando.
+/// 2. Espera, até `teto`, que `encerrando` esvazie — a bomba de cada MOD tira a
+///    instância dali quando o executor confirma (`assentar_fala`). O cadeado da
+///    supervisão é tomado a cada conferência e solto antes da pausa: é o mesmo
+///    que a bomba precisa para confirmar.
+/// 3. [`Connection::encerrar_e_esperar`], com 500 ms: a thread da conexão só dá
+///    o sinal depois de a despedida do enlace ter saído.
+///
+/// Sem `AppHandle` para a prova não precisar de janela.
+fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
+    let _ = sessao.revogar();
+    let parando = |sessao: &Session| {
+        sessao
+            .mods_nativos
+            .lock()
+            .map(|mods| mods.encerrando.len())
+            .unwrap_or(0)
+    };
+    tracing::info!(
+        mods = parando(sessao),
+        "saída do app: MODs nativos mandados parar"
+    );
+    let fim = std::time::Instant::now() + teto;
+    let mut restantes = parando(sessao);
+    while restantes > 0 && std::time::Instant::now() < fim {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        restantes = parando(sessao);
+    }
+    if restantes > 0 {
+        tracing::info!(
+            restantes,
+            ?teto,
+            "saída do app: MODs nativos sem confirmar a parada dentro do teto"
+        );
+    }
+
     let Ok(connection) = sessao.connection() else {
         return;
     };
-    connection.disconnect();
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    if !connection.encerrar_e_esperar(std::time::Duration::from_millis(500)) {
+        tracing::warn!(
+            "a despedida não terminou em 500 ms: quem ficou vai notar a saída pelo prazo de \
+             ociosidade, 20 s"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -10418,6 +10479,43 @@ mod a_supervisao_dos_mods_nativos {
         assert!(
             mods.vivos.is_empty() && mods.encerrando.is_empty(),
             "a instância continuou supervisionada depois de parar"
+        );
+    }
+
+    /// **A saída do app manda os MODs nativos parar, e diz quantos.**
+    ///
+    /// Fechar a janela não passava por [`super::Session::revogar`]: a
+    /// despedida era `disconnect` e um `sleep`, e um MOD nativo de pé seguia
+    /// rodando até o processo morrer, sem nenhuma linha no `seele.log` dizendo
+    /// que houve MOD algum. Aqui ninguém confirma a parada — não há bomba
+    /// ouvindo o executor —, então a instância fica onde a revogação a pôs:
+    /// em `encerrando`, que é o retrato de «mandei parar».
+    #[test]
+    fn despedir_da_sessao_manda_os_mods_nativos_parar_e_diz_quantos() {
+        let sessao = super::Session::default();
+        let mut reservada = instancia(sessao.geracao());
+        reservada.estado = EstadoNativo::Reservada;
+        let numero = sessao
+            .mods_nativos
+            .lock()
+            .expect("a supervisão")
+            .guardar(reservada);
+
+        let ((), rastro) = crate::rastro_de_teste::capturar(|| {
+            super::despedir_da_sessao(&sessao, std::time::Duration::from_millis(20));
+        });
+
+        let mods = sessao.mods_nativos.lock().expect("a supervisão");
+        assert!(
+            mods.encerrando.contains_key(&numero) && !mods.vivos.contains_key(&numero),
+            "a saída do app não mandou parar o MOD nativo de pé: ele continua entre os vivos, e \
+             roda até o processo morrer"
+        );
+        assert!(
+            rastro.lines().any(|linha| linha.contains("INFO")
+                && linha.contains("saída do app: MODs nativos mandados parar")
+                && linha.contains("mods=1")),
+            "a saída do app não disse no seele.log quantos MODs nativos mandou parar: {rastro}"
         );
     }
 
@@ -11814,6 +11912,31 @@ mod o_console_do_mod_chega_ao_registro {
             )
         });
         (assentada, rastro, fila)
+    }
+
+    /// **A parada de um MOD nativo sai no `seele.log` pelo filtro padrão**, com o
+    /// id e a instância.
+    ///
+    /// Era DEBUG, e o filtro padrão não a escreve: numa saída do app, o registro
+    /// dizia que os MODs foram mandados parar e nunca que algum parou. A
+    /// instância, e não a geração: o número não se repete nesta janela, e a
+    /// linha «MOD reservado no executor nativo» o liga à geração.
+    #[test]
+    fn a_parada_do_mod_nativo_sai_em_info_com_o_id_e_a_instancia() {
+        let mods = std::sync::Mutex::new(ModsNativos::default());
+        let fila = std::sync::Arc::new(Fila::default());
+        let (assentada, rastro) =
+            capturar(|| assentar_fala(&mods, &|| true, &fila, 7, ParaOFora::Parou, "seele/perfis"));
+        assert_eq!(assentada, Assentada::Fim { avisar: true });
+        assert!(
+            rastro.lines().any(|linha| linha.contains("INFO")
+                && linha.contains("MOD nativo parou")
+                && linha.contains("mod_id=seele/perfis")
+                && linha.contains("instancia=7")),
+            "a parada do MOD nativo não saiu em INFO com o id e a instância: o filtro padrão \
+             não a escreve, e o seele.log de uma saída do app nunca diz que algum MOD parou: \
+             {rastro}"
+        );
     }
 
     /// Nos quatro níveis: um MOD em laço escreve com `log` tanto quanto com
@@ -13580,9 +13703,36 @@ mod o_teto_de_vazao_do_registro {
         );
     }
 
+    /// **A saída do app diz a conta que nenhuma linha levou.**
+    ///
+    /// Fechar a janela não passava por `Session::revogar`, e a conta pendente de
+    /// um balde caía com o processo: o `seele.log` da última sessão mostrava a
+    /// rajada como se fosse tudo. `despedir_da_sessao` revoga primeiro, e
+    /// revogar diz as contas.
+    #[test]
+    fn despedir_da_sessao_diz_a_conta_que_nenhuma_linha_levou() {
+        let sessao = Session::default();
+        let agora = origem();
+        let a_mais = 5;
+        let ((), rastro) = capturar(|| {
+            for _ in 0..RAJADA_DO_CONSOLE as usize + a_mais {
+                da_janela(&sessao.baldes_do_registro, agora, "a/b");
+            }
+            super::despedir_da_sessao(&sessao, Duration::from_millis(20));
+        });
+        assert!(
+            rastro
+                .lines()
+                .any(|linha| linha.contains(super::CONTA_DO_BALDE_DO_REGISTRO)
+                    && linha.contains("mod_id=a/b")
+                    && linha.contains(&format!("suprimidas={a_mais}"))),
+            "a saída do app não disse as {a_mais} linhas seguradas do balde de `a/b`: a conta \
+             caiu com o processo, e o seele.log mostra a rajada como se fosse tudo: {rastro}"
+        );
+    }
+
     /// **A conta também é dita sem fechar a sessão**, por
-    /// `dizer_as_contas_do_registro` — que é o que a saída do app vai chamar.
-    /// Ela diz uma vez e esvazia os baldes: chamada de novo, não diz nada, e a
+    /// `dizer_as_contas_do_registro`. Ela diz uma vez e esvazia os baldes: chamada de novo, não diz nada, e a
     /// geração não anda.
     #[test]
     fn dizer_as_contas_do_registro_diz_uma_vez_e_esvazia() {
@@ -13615,8 +13765,8 @@ mod o_teto_de_vazao_do_registro {
         assert_eq!(
             sessao.geracao(),
             0,
-            "dizer as contas do registro fechou a sessão: ela é para a saída do app, e não \
-             revoga nada"
+            "dizer as contas do registro fechou a sessão: ela só diz as contas, e quem revoga \
+             é `revogar`"
         );
     }
 
