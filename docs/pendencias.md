@@ -7322,7 +7322,7 @@ pilha gtk-rs inteira, que é decisão dele.
 não voltar a ser um alerta vermelho sem contexto a cada push — que é o modo
 mais rápido de ensinar uma equipe a ignorar alerta.
 
-## 49 · Consertada em 2026-10-01, sem confirmação de campo · O som de MOD por WebAudio nunca foi medido no app de verdade
+## 49 · Consertada em 2026-10-01, medida em 07 e 08/10/2026, e toca no WKWebView e no WebView2 · O som de MOD por WebAudio nunca foi medido no app de verdade
 
 **Aberta em 2026-10-01**, no fim do Plano 1D da 1.0
 (`docs/superpowers/plans/2026-09-29-1.0-plano-1d-mods-na-casca.md`), pela
@@ -7494,6 +7494,16 @@ som a sessão inteira (pendência 52).
    grep -n "buscarFundoDaTela(elem, plano) {" -A 52 apps/seele-app/ui/mods-regiao.js | grep -c anotarMidia   # 0: a função inteira
    ```
 
+   **Fechado em 2026-10-08**, `82fd154` (lote K2 da F5 da 0.16), com a metade
+   do fundo de tela em `75fb60f`. A aba DIAGNÓSTICO ganhou o bloco «a região e
+   as páginas de cada MOD» (`midiasDaRegiaoEDasPaginas`, em `base.js`), que
+   soma as anotações da faixa e das superfícies de cada MOD **sem o filtro de
+   cartão**. O fundo de tela anota «carregando», «pronta» e «recusada». Como o
+   plano da F5 decidiu, a mesma mídia de cartão aparece em dois blocos da aba
+   enquanto a capacidade `cartoes` existir. O bloco é provado na página pela
+   `diagnostico-de-mods.cjs`, em `4e4bc93d` (lote K3). Medido em 09/10/2026: o
+   segundo comando de cima dá 2.
+
 6. **m-4, para a API 6 · `repetir`, ou o contrato de `tocando`.** Hoje um
    `tocando: true` declarado sobre um som que terminou o toca de novo, do
    começo, no próximo `aplicar` — como o `<audio>` fazia até a 0.15.0, e a
@@ -7506,6 +7516,18 @@ som a sessão inteira (pendência 52).
 
    ```sh
    grep -n "A repetição explícita" apps/seele-app/ui/mods-regiao.js
+   ```
+
+   **Cumprido em `563bc37`** (2026-10-01): o contrato de `tocando` está em
+   `api/README.md`, e o comportamento é guardado pela `regiao-do-mod.cjs`
+   (`oSomQueTerminouVoltaComOTocandoDeclarado`). `repetir` fica como opção, e
+   não como condição para congelar a v6: a D-api-2 da 0.16 (spec
+   `docs/superpowers/specs/2026-10-08-0.16-design.md`, §6) o põe no contrato
+   da API 6 como `repetir: true`. O contrato de `tocando` entra no texto da v6.
+
+   ```sh
+   grep -n "o contrato de \`tocando\` ficou escrito" api/README.md
+   grep -n "oSomQueTerminouVoltaComOTocandoDeclarado" apps/seele-app/bancada/regiao-do-mod.cjs
    ```
 
 7. **O pico da decodificação e a leitura dobrada, para um plano Rust.**
@@ -7541,6 +7563,28 @@ som a sessão inteira (pendência 52).
    grep -n "Bytes de som \*\*decodificado\*\* somados nesta região" apps/seele-app/ui/mods-regiao.js
    ```
 
+   **Em 09/10/2026, item por item (F5 da 0.16):**
+   - **7a, o pico: fechado em 2026-10-09**, `9b43de1d` (lote K4). O Rust lê do
+     cabeçalho do WAV, do Ogg ou do MP3 um piso do som decodificado
+     (`bytes_decodificados_minimos`) e, acima de 64 MiB, recusa antes de
+     servir, com `som-grande-demais-decodificado` e os números. A janela diz a
+     recusa como o teto do som. Na rodada de conserto, as três margens que
+     fazem do valor um piso ganharam teste (`f9ef3d23`), e dois WAV malformados
+     deixaram de enganar o piso: o de dois `fmt ` (`a9a47a8b`) e o de `data`
+     maior que o RIFF (`0b9029ec`).
+   - **7b, a leitura dobrada: fechada em 2026-10-09**, `e8a485cc` (lote K4).
+     `midia_do_mod` devolve ao som do pacote o papel e o tamanho, sem `uri`, e
+     os bytes atravessam a ponte só por `som_do_mod`. Medido em 09/10/2026: o
+     segundo comando de cima não acha mais nada.
+   - **7c, o teto por bolso: o conserto barato fechou em 2026-10-08**,
+     `6be3d244` (lote K5). O som de uma contribuição assenta «pronta» com o
+     tamanho do arquivo, e só pede os bytes, decodifica e confere o teto quando
+     o MOD manda tocar. Os docs de `LIMITES_DA_REGIAO` e de `LIMITES_DO_CARTAO`
+     mudaram no mesmo commit. **Fica com o dono o teto por MOD**: quanto som
+     decodificado um MOD segura somando os bolsos, que muda a frase pública
+     (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que fica com o
+     dono»). Um resto do K5 está na pendência 58.
+
 8. **S-m7 · O som de uma contribuição sem alvo pertence ao destino que o
    tomou, e não à contribuição.** Uma contribuição sem alvo é montada uma vez
    por destino, e o primeiro destino que chega a um som toma todos os sons
@@ -7558,6 +7602,19 @@ som a sessão inteira (pendência 52).
    ```sh
    grep -n "Numa contribuição, os sons moram num destino só" apps/seele-app/ui/mods-regiao.js
    ```
+
+   **Fechado em 2026-10-08**, `d9f481ee` (lote K5 da F5 da 0.16). O destino
+   que tomou os sons e saiu da tela solta o tocador, devolve o bolso e a marca
+   (`devolverOsSons`), e outro destino que desenha a contribuição a toma
+   (`tomarOsSonsDevolvidos`). A carga a caminho é cancelada e dita. Pela
+   decisão do controlador na revisão, o som que tocava recomeça, do começo,
+   onde a marca vai, também no mesmo destino quando ele volta à tela
+   (`108907f8`). As outras rodadas tiraram o `data:` retido do som do servidor
+   (`8f67e167`, `1d5c039f`), provaram a soltura do tocador (`8ff12f12`), não
+   deixam a marca devolvida ser tomada fora da tela (`fe1bff3a`) e contam no
+   teto a resposta nova do servidor (`946a4c77`). **Hoje o conserto vale para o
+   som que tocava:** o conteúdo de uma contribuição não muda depois de
+   registrado, e religar um som parado só existe na v6.
 
 9. **Docs-m2 do 1D · No automático misto, QUEM DESENHA O QUE nomeia um MOD
    só.** Dois MODs substituem `pessoa.cartao`: mod/a no cartão de todos (sem
@@ -7612,6 +7669,21 @@ som a sessão inteira (pendência 52).
    EOF
    ```
 
+   **Fechado em 2026-10-08**, `66133eca` (lote K3 da F5 da 0.16). No
+   automático misto, `resumo` soma os que desenham para quem declarou, e a
+   gestão diz «automática: mod/a para todos, mod/b para quem declarou». Na
+   revisão, `e569ae93` tirou quem desenha da nota de quem não recebeu. Medido
+   em 09/10/2026, o comando de cima imprime:
+
+   ```
+   9 · a gestão: automática: mod/a para todos, mod/b para quem declarou
+   9 · a pessoa 2: mod/b
+   10 · a gestão: você escolheu mod/d, que está de pé e não substitui este lugar — o SEELE desenha
+   ```
+
+   Fica de fora, porque é anterior ao K3: com um MOD **escolhido**, a gestão
+   não cita os outros que pediram o lugar e perderam (pendência 58).
+
 10. **Docs-m3 do 1D · Com um MOD da API 3 escolhido, a gestão diz que o
     SEELE desenha e cala os cartões dele.** mod/d, da API 3, desenha pelos
     cartões dele (`SeeleUI.cartoes`) e só acrescenta em `pessoa.cartao`.
@@ -7624,13 +7696,27 @@ som a sessão inteira (pendência 52).
     do caso «escolhido de pé sem substituição» dizer os cartões da API 3
     quando o escolhido os tem, com a mesma prova no portão de node.
 
+    **Perdeu o objeto com a API 6** (decisão de 08/10, spec da 0.16, §2 F5).
+    A API 6 não tem a capacidade `cartoes` (`4da1e4bd`, da F3), e a frase dos
+    cartões da API 3 sai junto com ela, quando a F3 tirar o código das APIs 3
+    a 5. Não há conserto a fazer aqui. Até lá, a linha «10 ·» do comando do
+    item 9 continua como está (medido em 09/10/2026).
+
 **Quando fecha.** A medição fecha quando
 `docs/evidencias/som-de-mod-wkwebview/registro.md` tiver o «Antes», o
 «Depois» com os casos novos e a linha do WebView2 respondida. Os itens 5 a 10
 ficam aqui até um plano os tomar, e o disparo do item 4 vale para toda
 publicação enquanto as bancadas de navegador só rodarem por ele.
 
-## 50 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
+**Em 09/10/2026, no fecho da F5 da 0.16** (lote Z2,
+`docs/superpowers/sdd/2026-10-08-0.16/F5/`). A medição está feita (itens 1 a
+3). Fecharam o 5, o 7a, o 7b, o 8 e o 9, cada um com o commit escrito no item;
+o 6 foi cumprido em `563bc37`; o 7c fechou o som adiado e deixa com o dono o
+teto por MOD; o 10 perdeu o objeto. **Continuam abertos:** o item 4, que vale
+para toda publicação enquanto o `ci.yml` só rodar por `workflow_dispatch`; o
+teto por MOD do 7c; e o macOS 11.0 a 11.2, não medido.
+
+## 50 · Consertada em 2026-10-08 · Quem sai pelo app continua no roster dos outros por cerca de 20 segundos
 
 **Aberta em 2026-10-01**, na revisão final do Plano 1 da 1.0 (o I6). **Não é
 regressão:** a v0.15.0 publicada sai pelo mesmo caminho (`git show
@@ -7693,6 +7779,78 @@ até a pessoa sumir da lista. Perto de 20 s.
 **Quando fecha.** Com o conserto e o teste de 2 s, ou com a medida da sessão
 separada achando outra causa, escrita aqui.
 
+### O conserto, na F5 da 0.16
+
+O plano da F5 dividiu a pendência em quatro itens
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lotes F e G-servidor).
+Os três primeiros são do lote F, integrado em `198b03d9`.
+
+- **P50-1 · O `Enlace::sair` espera a despedida. Fechado em 2026-10-08,
+  `dde763b5`.** `sair` manda o `Sair` e espera a tarefa do motor, com teto de
+  1 s. O motor larga as tarefas de par, encerra e espera o `wait_idle()` até
+  300 ms (`ESPERA_DA_DESPEDIDA`). É o conserto proposto acima.
+- **P50-2 · A casca espera a thread da conexão. Fechado em 2026-10-08,
+  `fd10af6b`.** A thread da conexão avisa antes de o runtime cair, e
+  `Connection::encerrar_e_esperar(teto)` (`seele-ffi`) espera esse aviso no
+  lugar do `sleep` cego de 150 ms. Na revisão, a prova deixou de depender de
+  corrida (`8a38df53`), e o guarda de `apps/seele-app/tests/encerramento.rs`
+  deixou de casar com comentário (`72b57732`, `aa9e7f4c` e `c429302c`).
+- **P50-3 · A saída para os MODs e diz isso no `seele.log`. Fechado em
+  2026-10-08, `b7aeb749`.** É «o vizinho, do Plano 1C», acima. `despedir_se`
+  passa por `despedir_da_sessao`: revoga a sessão, e com isso diz a conta dos
+  baldes do registro; manda parar os MODs nativos da geração que fechou; espera
+  até 200 ms por eles sem segurar o cadeado; e encerra a conexão em até
+  500 ms. A parada de um MOD nativo sobe para INFO. O doc de `despedir_se`
+  passou a dizer o que acontece de verdade, com os cerca de 700 ms de teto na
+  thread principal. Na revisão, a conta e a espera ficaram só com a geração
+  revogada (`6a0d5bed`).
+- **P50-4 · Fechar o app hospedando.** A **metade servidor** fechou em
+  2026-10-08, no lote G-servidor (integrado em `0cad324b`). `271360dd` dá o
+  `Event::ServidorEncerrando`, o `Daemon::encerrar_avisando`, o SAIR de quem
+  hospeda avisando cada sessão e a `Hospedagem::despedir`. `586c23de` faz o
+  cliente tratar `ServerShuttingDown` como fim. **A metade casca vai com o
+  Plano 2** (o G-casca): a saída do app chamar a `Hospedagem::despedir`. Até
+  lá, fechar o app hospedando continua sem aviso, porque o `Drop` de
+  `Hospedagem` só faz o `shutdown()` cru.
+
+**A medida.** A sonda `medida_do_disconnect.rs`, que o plano antigo citava,
+nunca foi commitada e não está em lugar nenhum. A medida é o teste novo,
+`crates/seele-conformance/tests/saida_com_despedida.rs`, que lê a lista de
+presentes de quem ficou, no laço local deste Mac:
+- quem sai pela FFI, `disconnect` e `drop`, sumiu dos presentes em 554 µs na
+  primeira rodada;
+- o `Enlace` que sai num runtime que cai na linha seguinte, em 1,1 ms;
+- os dois deram entre 340 e 700 µs em seis rodadas seguidas no fim do P50-1, e
+  0,5 a 0,6 ms no fim da rodada 1 de conserto;
+- o filho que sai por `encerrar_e_esperar` e morre na linha seguinte some em
+  cerca de 157 ms: 153,6, 155,8 e 161,0 ms em três rodadas. Desses, 150 ms são
+  de propósito. Desde `8a38df53`, o teste estaciona a thread da conexão do
+  filho por 150 ms antes da saída, para que o vermelho não dependa de corrida.
+  Os 611 µs da primeira versão do teste são de antes disso.
+
+Antes eram 19,98 s e 20,98 s.
+
+**O que cada espera prova.** É a reversão decomposta pelo lote F (rodada 1 de
+conserto, I2 e M1):
+- sem a espera do `sair` pelo motor, os três voltam aos 20,0 s do prazo de
+  ociosidade;
+- sem a espera de `encerrar_e_esperar` pelo sinal da thread, o filho volta aos
+  20,0 s;
+- sem o cancelamento das tarefas de par antes do aviso, o teste (c) de
+  `tela_por_um_par.rs` reprova, com um quadro do par na fila depois do
+  `Encerrado`;
+- **sem só o `wait_idle`, os três ficam verdes**, e também com os braços do
+  motor de volta ao `encerrar` de antes, com o `sair` esperando.
+
+**O que fica sem prova, e o doc diz** (lote F, rodada 1 de conserto,
+`b9adf2f8`): o `wait_idle` como reenvio de um `CONNECTION_CLOSE` perdido, que
+um laço local que não perde pacote não exercita; e a espera pelas alças
+abortadas de `largar_tudo_e_esperar`.
+
+**Em 09/10/2026.** Fechada pelo P50-1, o P50-2 e o P50-3, com o teste que
+mede. A metade casca do P50-4 é dívida do Plano 2, e a conferência à mão do
+fechar hospedando, no Mac e no Windows, vai com ela.
+
 ## 51 · O que o Plano 1 da 1.0 deixou para depois, fora das pendências 49 e 50
 
 **Aberta em 2026-10-01**, na revisão final do Plano 1 (o m6). O registro de
@@ -7750,6 +7908,12 @@ número depois do último, para que nenhum número já citado mude.
    grep -n "falhou-rodando" apps/seele-app/ui/base.js
    ```
 
+   **Fechado em 2026-10-08**, `3f1d2e93` (lote D da F5 da 0.16), nas duas
+   partes. O `Falhou` sai do rastreador e passa a esperar o fim da volta, junto
+   com a linha: só sai se ninguém pegou a rejeição, e vai cortado no teto do
+   registro, com o aviso do corte. Na revisão, o `Falhou` da conta das
+   rejeições além da espera ganhou o sujeito (`20404362`).
+
 2. **1B, revisão final · O impostor que falha a assinatura sai como «versão
    incompatível».** Quem manda o certificado certo e falha a assinatura do
    TLS chega como `ConnectError::TlsRefused`, que a FFI traduz por
@@ -7764,6 +7928,16 @@ número depois do último, para que nenhum número já citado mude.
    grep -n "^  Incompatible:" -A 2 apps/seele-app/ui/frases.js
    ```
 
+   **Fechado em 2026-10-08**, `663363d4` (lote H da F5 da 0.16, a metade
+   cliente da «recusa legível» do Plano 3). Quando o verificador já decidiu e
+   o TLS cai com o alerta `decrypt_error`, o cliente devolve
+   `ConnectError::ChaveNaoProvada`. A FFI o traduz por
+   `ConnectionError::ChaveNaoProvada`, com frase própria, e na volta da
+   bateria por `EndReason::ServidorTrocouNaVolta` (item 3): quem não prova a
+   chave deixa de mandar atualizar o SEELE. Outro alerta, ou nenhuma decisão
+   do verificador, continua `TlsRefused`. Na revisão, o `ChaveNaoProvada` da
+   corrida passou a sair em WARN (`1c199b9b`).
+
 3. **P9 do 1B · A recusa pela impressão numa reconexão sai como «credencial
    recusada».** Na volta da bateria, a recusa pela impressão vira
    `Motivo::Recusado("InviteMismatch …")`, que a FFI traduz por
@@ -7776,6 +7950,29 @@ número depois do último, para que nenhum número já citado mude.
    ```sh
    grep -n "Motivo::Recusado(_) => EndReason::CredentialRejected" crates/seele-ffi/src/lib.rs
    grep -n "recusada |= texto.contains(\"InviteMismatch\")" crates/seele-core/src/enlace.rs
+   ```
+
+   **Fechado em 2026-10-08**, `4807207b` (lote H da F5 da 0.16), com a frase
+   decidida na revisão em `4205d299`. `Motivo::Recusado` passou a levar o
+   `ConnectError`, e não o texto dele, e a volta recusada vai ao registro em
+   WARN. `fim_da_recusa`, na FFI, traduz cada recusa pelo que ela é:
+   `InviteMismatch` e `ChaveNaoProvada` dão `ServidorTrocouNaVolta`, que é
+   nova; `PinChanged` dá `ChaveMudouNaVolta`, também nova; e as de rede dão
+   `LinkLost`. **A frase de `ServidorTrocouNaVolta` mudou na revisão do H.** A
+   do plano («QUEM ATENDEU NA VOLTA NÃO É O SERVIDOR DO CONVITE. A sessão
+   acabou sem mandar nada a ele. Confirme o link com quem o mandou.») era
+   falsa por três motivos: o «nada» não vale, porque o `ClientHello` sai; o
+   convite e o link não valem para quem volta pela lista; e o remédio não
+   vale para o `ChaveNaoProvada`. A frase de hoje não diz de onde veio a
+   impressão, porque a tela de fim só recebe o `EndReason`: «QUEM ATENDEU NA
+   VOLTA NÃO É O SERVIDOR DESTA SESSÃO. O convite, a senha e o apelido não
+   chegaram a ele. Confirme com quem hospeda, por outro canal, antes de entrar
+   de novo.» O guarda
+   `a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo`, em
+   `apps/seele-app/tests/frontend.rs`, a prende.
+
+   ```sh
+   grep -n "ServidorTrocouNaVolta:" -A 3 apps/seele-app/ui/frases.js
    ```
 
 4. **m10 e m11 do 1C · Três recusas do roteador de MODs não chegam direito ao
@@ -7811,6 +8008,11 @@ número depois do último, para que nenhum número já citado mude.
    grep -n '"aviso" => tracing::warn!(onde = %onde, mod_id, "{o_que}")' apps/seele-app/src/main.rs
    ```
 
+   **Fechado em 2026-10-08**, `0844129b` (lote C da F5 da 0.16). A frase da
+   janela vai num campo próprio, `frase = ?…`, depois do `onde` e do
+   `mod_id`, cortada pela mesma regra do `console`, com o aviso do corte. O
+   roteiro da Task 9 do plano 1D mudou junto, no mesmo commit.
+
 6. **m6 do 1C e T6 · Um substituto UTF-16 solto faz a recusa sumir.** O texto
    que vai a `registrar_da_janela` não passa por `toWellFormed()`: um MOD com
    uma chave como `"avatar\uD800"` faz o `serde_json` do Tauri recusar o
@@ -7838,6 +8040,19 @@ número depois do último, para que nenhum número já citado mude.
    grep -n "montarRetrato(elem, plano) {" -A 50 apps/seele-app/ui/mods-regiao.js | grep -c "addEventListener"   # 0
    ```
 
+   **Fechado em 2026-10-08**, `75fb60f` (lote K2 da F5 da 0.16). A imagem só
+   vale depois do `decode()`, nos quatro caminhos, com os bytes reservados
+   antes e devolvidos na recusa; o `<img>` do retrato ganhou ouvinte de
+   `error`; e a recusa é dita. Na revisão, o passo de aplicar saiu do caminho
+   de recusa (`86d0a2d`), e o tropeço dele vai ao `seele.log` com o id do MOD
+   (`6ca4fdf`). O retrato continua sem falar com o MOD: um evento para isso é
+   da v6. Medido em 09/10/2026, o comando de cima ainda dá 0, porque a função
+   cresceu e o ouvinte ficou a 54 linhas do começo dela. Este acha o ouvinte:
+
+   ```sh
+   grep -n "montarRetrato(elem, plano) {" -A 60 apps/seele-app/ui/mods-regiao.js | grep -c 'addEventListener("error"'   # 1
+   ```
+
 8. **m1 do 1C e T7 M1 · As portas da janela e da mídia não têm teto de
    vazão.** O `console` tem balde (32 linhas, depois 4 por segundo); a porta
    da janela, as recusas de mídia e a mídia servida não. Um MOD feito para
@@ -7849,6 +8064,17 @@ número depois do último, para que nenhum número já citado mude.
    ```sh
    grep -n "^fn registrar_da_janela\|^fn recusa_de_midia_dita\|^fn midia_servida_dita" apps/seele-app/src/main.rs
    ```
+
+   **Fechado em 2026-10-08**, `37a5d902` (lote C da F5 da 0.16). Um balde de
+   vazão por MOD (o `BaldeDoConsole`) serve a porta da janela, a mídia
+   recusada, a servida e o som servido, num mapa de até 64 entradas com
+   transbordo, e `revogar` diz a conta que ficou segurada. Na revisão, o balde
+   passou a ser por MOD **e por classe** (`Aviso`, `Servida`, `Depuracao`,
+   `6979c2b7`): com um balde só, um aviso segurado era descartado, e a recusa
+   da 35ª mídia sumia, o defeito de 23/09 de volta. A linha DEBUG da mídia
+   vinda do servidor entrou no teto (`6e71e894`), com um teste que prova a
+   classe (`255fc574`). **Quatro portas que escrevem em nome de um MOD ficaram
+   sem balde**, fora do que este item nomeava: estão na pendência 58.
 
 9. **Fecho do 1C (F2-F5, R1 e A3) · «N comandos recusados» conta menos do que
    recusa.** A tela diz «N comandos recusados por serem de uma sessão
@@ -7863,6 +8089,18 @@ número depois do último, para que nenhum número já citado mude.
    grep -n "^fn liberar_reserva" -A 12 apps/seele-app/src/main.rs   # recusa a geração morta sem contar
    ```
 
+   **Fechado em 2026-10-08**, `bece2bd9` (lote E da F5 da 0.16), contando em
+   todos. As treze conferências de geração dos comandos de MOD passam por
+   `Session::recusar_se_morta`, que conta em `comandos_de_geracao_morta` e diz
+   a linha DEBUG; sete delas não contavam, entre elas `mod_nativo_colher`,
+   `mod_nativo_entregar`, as duas de `enviar_imagem_mod` e de `ler_imagem_mod`
+   e a segunda de `escolher_para_o_mod`. `liberar_reserva` conta também. No
+   fecho da revisão (`a2d86649`, `0b6b9193` e `06256c27`), a conta de
+   `recusar_se_morta` tem de bater com a lista do guarda, `reservar_no_executor`
+   entrou nela, e a ativação recusada passou a ser dita. A frase da tela não
+   mudou. Um guarda de `tests/frontend.rs` que o lote deixou vermelho foi
+   consertado na integração, em `9daa0c0`.
+
 10. **m14 do 1C e Fecho F2 · O doc do escape ANSI, e o `mod_id` cru.** O doc
     de `motivo_no_registro` diz que o formatador escapa ANSI em `%`; no
     tracing-subscriber 0.3.23 só a mensagem é escapada, e um campo em `%` sai
@@ -7875,6 +8113,19 @@ número depois do último, para que nenhum número já citado mude.
     grep -n "o formatador do registro escapa ANSI" apps/seele-app/src/main.rs
     grep -n "mod_id = %id" apps/seele-app/src/main.rs
     ```
+
+    **Fechado em 2026-10-08**, `9f90888b` (lote C da F5 da 0.16), junto com a
+    metade do app do item 26. Medido antes de escrever: no
+    `tracing-subscriber` 0.3.23 só a mensagem passa pelo escape, e só do
+    ANSI. O doc de `motivo_no_registro` diz isso, e diz que quem protege a
+    linha são as aspas e o escape da função. `midia_em_bytes` e
+    `escolher_para_o_mod` escrevem `mod_id = %id_no_registro(&id)`, as duas
+    linhas de `mod_request` passam pela escolha do item 26, e o doc de
+    `id_no_registro` lista as portas pelo nome. Medido em 09/10/2026: o
+    primeiro comando de cima não acha nada; o segundo acha também
+    `%id_no_registro`, e, com `"mod_id = %id[,)]"`, três linhas que o lote
+    deixou como estavam, as duas de «MOD não carregou» e a de «MOD reservado
+    no executor nativo».
 
 11. **m5 e m12 do 1C · `ler_imagem_mod`.** O guarda de fonte
     (`os_quatro_comandos_de_midia_passam_pela_recusa_dita`) só pergunta se
@@ -7889,6 +8140,14 @@ número depois do último, para que nenhum número já citado mude.
     grep -n "^async fn ler_imagem_mod" -A 30 apps/seele-app/src/main.rs | grep -n "sessao-encerrada\|recusa_de_midia_dita"
     ```
 
+    **Fechado em 2026-10-08**, `9abe0678` (lote E da F5 da 0.16), com a
+    geração morta contada em `bece2bd9` (item 9). As recusas de depois do
+    `await` de `ler_imagem_mod` saem por `imagem_lida_dita`, que tem teste de
+    rastro; a conexão ausente vai a `recusa_de_midia_dita` em DEBUG, e não
+    conta como geração morta; e os dois guardas de fonte da mídia acompanham.
+    No fecho da revisão (`a2d86649`), a recusa do servidor também passa por
+    `imagem_lida_dita`, e os guardas medem o caminho real.
+
 12. **A4 do 1C · A memória das recusas de carga atravessa sessões numa
     janela estreita.** `recusas_de_carga` é o que faz uma recusa de carga
     repetida a cada quatro segundos sair uma vez, e ela é esvaziada quando a
@@ -7900,6 +8159,13 @@ número depois do último, para que nenhum número já citado mude.
     ```sh
     grep -n "recusas_de_carga" apps/seele-app/src/main.rs | head
     ```
+
+    **Fechado em 2026-10-08**, `53587a1f` (lote C da F5 da 0.16). A recusa de
+    carga é guardada com a geração, e é dita de novo quando a geração é outra
+    ou o motivo mudou. O teste
+    `a_recusa_atrasada_da_sessao_que_acabou_nao_cala_a_da_seguinte` faz a
+    recusa atrasada da sessão 1 chegar depois do `revogar`, e exige que a mesma
+    recusa na sessão 2 saia.
 
 Vieram depois, da revisão do Lote F-Fecho:
 
@@ -7929,6 +8195,15 @@ Vieram depois, da revisão do Lote F-Fecho:
     a linha, o pedido do catálogo diz `catalogo=true`, e um id feito só do que
     o filtro tira diz `mod_id_ilegivel=true`. **A metade do app
     (`mod_request`) continua aberta**: é do lote C.
+
+    **Metade do app fechada em 2026-10-08**, `9f90888b` (lote C da F5 da
+    0.16). As duas linhas de `mod_request` saem por `pedido_a_caminho_dito`
+    (DEBUG) e `pedido_recusado_na_saida_dito` (WARN), com os três braços da
+    metade de servidor: o id vazio diz `catalogo=true`, sem `mod_id=`; o id que
+    o filtro esvazia diz `mod_id_ilegivel=true`; e o resto sai por
+    `id_no_registro`. Na revisão, o id ilegível ganhou balde próprio, para não
+    segurar a linha do catálogo (`33401b5e`). Essas duas linhas ainda não
+    passam pelo teto de vazão do item 8 (pendência 58).
 
 27. **FF-m2 da revisão do Lote F-Fecho · Quando a metade de servidor de um
     MOD lança, o `seele.log` diz só `mod threw`.** `Falha::Lancou`
@@ -8016,6 +8291,31 @@ Vieram depois, da revisão do Lote F-Fecho:
     cargo test -p seele-app --bin seele-app    # verde com qualquer uma das mutações de m8, m9 e T3 M2
     ```
 
+    **Fechado em 2026-10-08**, sub-item por sub-item:
+    - **m8:** `59d66aa0` (lote D da F5 da 0.16). A pilha (`\n    at `) passa a
+      ser exigida na linha do temporizador, na do ouvinte e no
+      `console.error` cru.
+    - **m9:** sem commit próprio, porque o lote C já o cobria. A porta da
+      janela entrou em `o_pior_caso_sai_com_o_mesmo_teto_pelas_tres_portas` em
+      `0844129b`, e passou pelo balde em `37a5d902`. O lote D conferiu o caso:
+      ele exige o aviso do corte e o teto escapado.
+    - **T3 M2:** `6bf9ddd7` (lote D). Dois testes por `registrar_da_janela_em`:
+      «erro» sai em ERROR e o resto em DEBUG, os dois com `mod_id`.
+    - **T1:** `bead90c2` (lote D). O `Error`, a função e o símbolo aninhados
+      são ditos, e um ciclo vira «[cíclico]» só onde é ancestral, numa segunda
+      passada. Na revisão, cada passada de `emTexto` ganhou um orçamento de
+      1024 objetos (`8719c9ee`): um grafo de 10 nós derrubava a volta.
+    - **T2 N1:** `74a5c427` (lote D), com as três rodadas da revisão
+      (`7817f871`, `047c40ea` e `b7ac8fc7`). A conta do balde sai sem esperar o
+      MOD parar, e só com uma ficha de sobra, para não tomar a vez das linhas
+      dele. A conta de fim de volta com uma ficha só vinha de antes do lote
+      (`7953a3b`), e um MOD com trabalho depois da linha perdia quase tudo para
+      ela. Medido pelo lote, num MOD que escreve a cada 100 ms e trabalha
+      120 ms depois da linha: antes, 0 linhas do MOD e 15 da conta; depois, 15
+      e 0.
+    - **T2 m1:** fechado antes, em `517afaa` (2026-10-01): o corte mede cada
+      caractere pelo escape e para no primeiro que não cabe, numa função só.
+
 15. **N-1 e T1 M5 do 1E · Duas reprovações do `check-api` sem teste, e um
     «panicked» no verde.** Os `push` de «não deu para ler» e de «não é json»
     em `conferir_api` podem ser apagados sem teste nem clippy perceberem
@@ -8031,6 +8331,23 @@ Vieram depois, da revisão do Lote F-Fecho:
     cargo test -p xtask check_api   # verde com qualquer um dos dois `push` apagado
     ```
 
+    **Fechado em 2026-10-08**, `1345e0e` (lote ferramentas da F5 da 0.16),
+    com `5f4e1bb` da revisão. Os dois fixtures existem: um `v7.json` que não é
+    json e um `v8.json` que não se abre reprovam dizendo qual. O braço `Err`
+    tem teste: `relatar` decide a saída, com três testes, e diz a falha de
+    escrita do resumo (`5f4e1bb`). As outras duas partes do item:
+    - a etapa do `check-api` no `publicar.sh` existe desde `8b766e5`
+      (2026-10-01): a bateria de quem publica roda o `check-api`, e um vermelho
+      para a publicação antes de empacotar;
+    - o «panicked» no stderr hoje não sai. Medido em 09/10/2026:
+      `cargo test --offline -p xtask --bin xtask check_api` passa 45 testes sem
+      nenhuma linha «panicked», com o `RUST_TEST_NOCAPTURE` do
+      `.cargo/config.toml`. **O commit que o tirou não foi identificado.** A
+      revisão do lote Z2 rodou o mesmo teste em onze versões do `check_api.rs`,
+      entre elas `4887565^` e `4887565`, e nenhuma imprime «panicked». Um
+      `#[should_panic]` posto numa cópia imprime a linha, então a medida a
+      enxergaria.
+
 16. **Higiene dos testes do quarto, do 1A (T4d, M4 e M5).**
     `um_ponto_de_encontro_fora_do_ar_nao_atrapalha_nada`
     (`crates/seele-server/src/hospedagem.rs`) troca `$SEELE_ENCONTRO` e a
@@ -8043,6 +8360,18 @@ Vieram depois, da revisão do Lote F-Fecho:
     ```sh
     grep -n "let restaurar = |valor: Option<String>|" crates/seele-server/src/hospedagem.rs
     ```
+
+    **Fechado em 2026-10-08**, `8669d99` (lote M2 da F5 da 0.16). O
+    `seele-server` ganhou `AmbienteDoEncontro`, com `Drop` e uma trava, num
+    `mod ambiente_de_teste` do `lib.rs`. Os dois testes que trocam
+    `$SEELE_ENCONTRO` passam por ele, e dois testes novos provam que a
+    variável volta mesmo num pânico e que a trava vive com o guarda. Na
+    revisão, o teste da trava passou a segurá-la por fora (`9a46b77`): ele era
+    o terceiro escritor fora dela, medido em 3 de 6000 rodadas antes e em 0 de
+    6000 depois. **A 8384 do `quarto_pelo_link.rs` fica como escolha
+    documentada**, no cabeçalho dele («Por que o ponto destes testes mora na
+    8384»): só um binário que usa a porta roda por vez. Medido em 09/10/2026:
+    o comando de cima não acha nada.
 
 17. **Os testes do quarto que provam menos do que parecem, do 1A.**
     - C1: a segunda marca dentro do teto, e os ramos do teto pelo dobro da
@@ -8081,6 +8410,44 @@ Vieram depois, da revisão do Lote F-Fecho:
     grep -n "pub aviso: Marca\|pub escuta: Marca\|pub servidor: Marca" crates/seele-proto/src/encontro.rs
     ```
 
+    **Fechado em 2026-10-08** (lote M1 da F5 da 0.16), sub-item por sub-item:
+    - **C1:** `2b20316`, testes de `teto_depois_da_resposta` e de
+      `consultar_por` com um ponto falso, para a segunda marca dentro do teto e
+      o `ONDE` perdido. Na revisão, a margem de um deles subiu para ~85 ms
+      (`70e1876`).
+    - **T5a e T5c:** `09accad`. `ordenar_os_achados` é pura: IPv4 na frente, e
+      a linha «resolveu para nenhum endereço» quando a lista é vazia.
+    - **T5d:** `8e7175a`. `separar_ponto("")` dá `EnderecoInvalido`, e
+      `Bilhete::novo` recusa o ponto vazio junto. A pendência supunha que o
+      vazio resolvia para o loopback; medido neste Mac, o `getaddrinfo` o
+      recusa, e o defeito real era o diagnóstico errado.
+    - **T6f:** `5e977ae`. Só a primeira volta recusada inteira acaba a
+      consulta; uma volta 2 ou 3 recusada conta como volta, e a ida e volta se
+      mede da última volta que saiu.
+    - **T7a:** `25b5aeb`. O teste virou
+      `um_ponto_mudo_ou_que_responde_lixo_volta_mudo_dentro_do_prazo`, com o
+      caso do ponto que responde lixo.
+    - **T1a:** `cc645fb`. `Marcas::do_servidor` confere o texto inteiro.
+    - **T1b:** sem commit. A reversão `..15` e a `..17` já deixavam vermelho o
+      teste que existia.
+    - **T1c:** `6243f13`. Os campos de `Marcas` são privados, com leitores, e
+      `do_servidor` é o único construtor, guardado por um doctest
+      `compile_fail` e pelo gêmeo que compila (`f6fefa6`).
+    - **T2c, T3c e M3:** `f8f85e3`. A marca de cada pedido da subida e do
+      registro é conferida por verbo e por origem.
+    - **T4a, T8b e T8d:** `640240d`. O laço de reabertura diz o último erro, e
+      `o_link_leva_ate_o_servidor_e_a_escuta_de_hoje` lê o bilhete do `enc=` de
+      volta e separa a culpa do anfitrião da da FFI.
+    - **T2 e T3 do 1B:** `4b127e3`. O contador do ponto só conta o `LEVE` com
+      a marca do aviso esperado, o que prende a asserção do `LEVE` na volta
+      pela trilha, e os `.ok()?` viraram `expect` com motivo. A montagem
+      repetida de `ponta_com_certificado_proprio` virou uma só,
+      `escuta_de_teste`, em `092dbfc` (lote M2).
+
+    Medido em 09/10/2026: o primeiro comando de cima acha o `sort_by_key`
+    dentro de `ordenar_os_achados`, que agora tem o teste do T5a; o terceiro
+    não acha nada.
+
 Veio depois, da revisão do Lote F-Bateria:
 
 28. **FB-m2 da revisão do Lote F-Bateria · O vetor de referência não exercita
@@ -8105,6 +8472,11 @@ Veio depois, da revisão do Lote F-Bateria:
     grep -n '"api"' apps/seele-app/testes/mod-de-referencia/mod.json
     ```
 
+    **Absorvido pela API 6** (decisão de 08/10, spec da 0.16, §2 F5). O guarda
+    do vetor de referência se reescreve contra o prelúdio da v6, e isso é da F3
+    (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «Para a F3, o
+    rascunho da v6»). Não há conserto a fazer aqui.
+
 ### O que o código faz e o texto diz de outro jeito
 
 18. **1A, revisão ampla · O `levou=` e o doc de `onde_mora_hoje`.** A linha
@@ -8118,6 +8490,16 @@ Veio depois, da revisão do Lote F-Bateria:
     grep -n 'tracing::info!(%ponto, ?resposta, "quarto: onde o anfitrião mora hoje")' crates/seele-core/src/encontro.rs
     grep -n "leitura falha\*\*: volta na hora" crates/seele-core/src/encontro.rs
     ```
+
+    **Fechado em 2026-10-08**, `aa106bc` (lote M2 da F5 da 0.16). A linha
+    «quarto: onde o anfitrião mora hoje» ganhou `levou=`, medido do começo da
+    consulta. O doc de `onde_mora_hoje` foi reescrito com o que o lote M1
+    deixou: os endereços do ponto, IPv4 primeiro, e o seguinte só quando nada
+    saiu; a volta recusada depois da primeira, que conta como volta; e a
+    leitura que falha depois de o ponto responder, que acaba como
+    `NinguemMora` ou `Achado`. Medido em 09/10/2026: os dois comandos de cima
+    não acham nada, e `grep -n "levou = ?comecou.elapsed()"
+    crates/seele-core/src/encontro.rs` acha o campo.
 
 19. **1A, revisão ampla e T5e · O que o 1A deixou de texto e de duplicação.**
     - C4: um `WouldBlock` num tique do anfitrião vira um par de linhas
@@ -8141,6 +8523,28 @@ Veio depois, da revisão do Lote F-Bateria:
     grep -n "fn restaurar" docs/superpowers/plans/2026-09-29-1.0-plano-1a-o-quarto.md
     grep -n "PUBLICADAS_ANTES_DO_GUARDA" docs/superpowers/plans/2026-09-29-1.0-plano-1e-a-api-congelada.md
     ```
+
+    **Fechado em 2026-10-08** (lote M1 da F5 da 0.16), sub-item por sub-item:
+    - **C4:** `56b4d02`. `mandar_pelo_server` e `registrar` devolvem
+      `NaoSaiu { motivo, passageira }`, e `RegistroNoQuarto::anotar` não muda
+      de estado numa falha passageira. A fiação ganhou um guarda de fonte
+      (`04a0ce3`), que casava com o próprio texto num renome e foi consertado
+      em `fba4015`.
+    - **T5e:** `e2a5b72`. O resolver do degrau 4 separa o ponto por
+      `separar_ponto`, com o comportamento de antes, guardado por teste.
+    - **M2:** `d35488a`. A consulta tenta os endereços do ponto um de cada vez,
+      no mesmo prazo, com uma linha `info` quando passa ao seguinte.
+    - **T3d e T3e:** `d564d1d`.
+    - **T5f:** fechado antes, em `27f86af` (2026-09-30): os três assinantes
+      escritos à mão do `seele-core` viraram `rastro_de_teste::Rastro`. Sobra o
+      `Espiao` do `seele-ffi`, que o plano da F5 deixou como opcional.
+    - **T7b:** `07bd5c3`. Um adendo no ADR 0047, no molde do ADR 0003, diz que
+      `onde_mora` virou `onde_mora_hoje`. A linha `:83` não muda, porque ela
+      diz o código «como ele está no commit»: o segundo comando de cima ainda a
+      acha, de propósito.
+    - **Os planos 1A e 1E:** `9ddd404`. Uma nota no topo de cada seção citada
+      diz o que a execução trocou, sem reescrever a história: os dois últimos
+      comandos de cima ainda acham o texto antigo, de propósito.
 
 20. **Os docs do 1B (C-M3, C-M4, C-M5, C-R1-m1, T4 e o pino).**
     - C-M3: o doc de `ConnectionError::InviteMismatch` (`types.rs`) diz que
@@ -8172,6 +8576,36 @@ Veio depois, da revisão do Lote F-Bateria:
     grep -n "O que ela não distingue" crates/seele-core/src/enlace.rs
     ```
 
+    **Fechado em 2026-10-08**, `70a0f12` (lote M2 da F5 da 0.16), com a frase
+    do C-M3 juntada numa só na revisão (`9de50a7`):
+    - **C-M3:** o doc de `ConnectionError::InviteMismatch` diz que a promessa
+      pode estar errada, ou certa com outro servidor atendendo: num alvo de
+      LAN, outro servidor no mesmo endereço.
+    - **C-M4:** o doc de `Marca` diz que a lista guardou «a impressão que a
+      conexão aceitou». **Sobrou uma sexta ocorrência**, fora da lista do lote,
+      num comentário de `crates/seele-encontro/tests/apresentacao.rs`
+      (pendência 58).
+    - **C-M5:** o plano 1B diz quem prova o loopback como alvo público: dois
+      testes do `seele-ffi`, e não o fixture de `convite.rs`.
+    - **C-R1-m1:** «até o quarto encher e chegar uma marca nova
+      (`Quarto::morar`)», nos cinco lugares.
+    - **T4:** o doc de `esperar_o_servidor_fechar` diz «volta em microssegundos
+      (medido: 4 µs)».
+    - **O pino:** o doc de `desfazer_pin_orfao` diz o segundo resíduo, com o
+      mesmo cabeçalho do primeiro, e que os dois falham para o lado seguro.
+
+    **Os comandos de cima, medidos em 09/10/2026.** O primeiro, o segundo, o
+    terceiro e o quinto não acham nada. O quarto **ainda acha** os cinco
+    lugares, porque a frase nova contém «quarto encher». O sexto acha **duas**
+    linhas, de propósito: os dois resíduos do pino. Para conferir que as
+    frases antigas do C-R1-m1 sumiram, sem casar com a nova nem com os
+    documentos que as citam, e para achar a sobra do C-M4:
+
+    ```sh
+    git grep -n "quarto encher (a varredura)\|quando o quarto enche,\|até o quarto encher,\|quarto encher (aí" -- docs crates ':!docs/pendencias.md' ':!docs/superpowers/sdd'   # nada
+    git grep -n "guardou a impressão de um link" -- crates   # a sobra do C-M4, em apresentacao.rs
+    ```
+
 21. **R-4 do 1E · O cabeçalho do `.gitattributes` se contradiz.** O
     cabeçalho do grupo `-text` diz que «a regra de cima já bastaria hoje»,
     e o comentário da linha `api/*.json` explica por que, para ela, não
@@ -8180,6 +8614,13 @@ Veio depois, da revisão do Lote F-Bateria:
     ```sh
     grep -n "já bastaria hoje\|a regra do topo normaliza" .gitattributes
     ```
+
+    **Fechado em 2026-10-08**, `d7ecb3e` (lote ferramentas da F5 da 0.16). O
+    comentário do grupo `-text` passou a dizer que a regra de cima basta para
+    os vetores que só chegam pelo checkout, e não para um arquivo escrito numa
+    máquina Windows e conferido pelo hash da cópia de trabalho. Medido em
+    09/10/2026: o comando de cima acha só a linha do `api/*.json`, que explica
+    por que não basta.
 
 22. **Achado ao escrever o m8 · O guia do repositório descreve a metade de
     janela de antes do ADR 0049.** `docs/como-se-faz-um-mod.md`, «A metade de
@@ -8195,6 +8636,10 @@ Veio depois, da revisão do Lote F-Bateria:
     ```sh
     grep -n "acesso à janela inteira\|document.documentElement.style\|\"api\": 1" docs/como-se-faz-um-mod.md
     ```
+
+    **Fechado em 2026-10-07**, `a77da2f`: o guia deixou a API 1 pela 5. O
+    plano da F5 da 0.16 o registrou como feito. Medido em 09/10/2026: o comando
+    de cima não acha nada.
 
 23. **Polimento do 1C e do 1D que não alcança quem usa.** Do 1C: o formato
     `<id>: … / aviso / id` escrito à mão em quatro lugares ao lado de
@@ -8216,6 +8661,26 @@ Veio depois, da revisão do Lote F-Bateria:
     grep -n "quatro bancadas de navegador" .github/workflows/ci.yml
     ```
 
+    **Fechado em 2026-10-08** (lote K3 da F5 da 0.16):
+    - os contornos: `f62ed74a`. O teto de 300 continua, e conta o que corta: o
+      aviso diz «N pontos não contornados (teto de 300)». Um nó com área que o
+      recorte zera não ganha caixa;
+    - o formato das recusas escrito à mão: `0db8cbc7`, com o ajudante
+      `dizerRecusaDoPedido` e o guarda reescrito no mesmo commit;
+    - a anotação do teto sem os números e os docs de `LIMITES_DO_CARTAO`:
+      `f7cb4fcf`. A anotação diz o porquê com os números, nos quatro lugares,
+      e os docs dizem que numa contribuição o bolso é de cada destino;
+    - a frase do P12 com o ponto sem «»: `19391f03`;
+    - o resto do texto: `69f194f7`. As duas definições de «classe que o script
+      aplica» e o «nenhum script cria» (T7 m1 e m2), o comentário do `ci.yml`,
+      o nome do guarda no plano 1C, os comentários da bancada e da aba (T6) e o
+      «a tempo» (Docs-m7). Os docs do resumo (Docs-m5) foram em `66133eca`.
+
+    Os textos das revisões T6 m1 a m4, Docs-m5 e Docs-m7 não estão no
+    repositório, e o lote achou os alvos pelo código (relatório do K3,
+    Preocupação 1). Medido em 09/10/2026: o segundo comando de cima não acha
+    nada; o primeiro acha o teto, que ficou.
+
 ### Fora deste repositório
 
 24. **M-5 do 1E e m8 da revisão final · O guia externo não conhece a API 5.**
@@ -8230,6 +8695,11 @@ Veio depois, da revisão do Lote F-Bateria:
     curl -sS https://mods.seele.app.br/guia/ | grep -o "APIS_ACEITAS = \[[0-9, ]*\]"
     grep -n "pub const APIS_ACEITAS" crates/seele-proto/src/mods.rs
     ```
+
+    **Continua aberto em 09/10/2026.** O conserto é no `SEELE-MODS-INDEXER`, e
+    a F5 da 0.16 não o toma: fica com o dono
+    (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que fica com o
+    dono»).
 
 25. **m2 da revisão final · Os laboratórios dos MODs publicados não conhecem
     o dono de hoje.** O `ferramentas/preview.cjs` de `SEELE-MOD-MESA`,
@@ -8249,11 +8719,26 @@ Veio depois, da revisão do Lote F-Bateria:
     for r in MESA PERFIS ESTILO; do grep -c "bytesDoSom\|anotarRecusa" "$irmaos/SEELE-MOD-$r/ferramentas/preview.cjs"; done   # 0 nos três
     ```
 
+    **A parte da janela fechou em 2026-10-08**, `8cadbc27` (lote K5 da F5 da
+    0.16): o som do pacote numa região cujo dono não tem `bytesDoSom` chega ao
+    MOD como `falhou`, com o porquê «o dono desta região não oferece
+    bytesDoSom», e ao registro com a mesma frase. Quem roda o laboratório lê
+    o motivo, e não um `falhou` mudo. **O resto continua aberto**: o conserto
+    é nos três repositórios dos MODs, e fica com o dono (`lotes.md`, «O que
+    fica com o dono»).
+
 **Quando fecha.** Item por item, quando um plano os tomar. Esta entrada
 existe para que a lista não suma com a árvore de trabalho, e não para segurar
 release nenhuma.
 
-## 52 · A voz segura o aparelho de som, e a máquina acordada, a sessão inteira, também fora de sala
+**Em 09/10/2026, no fecho da F5 da 0.16** (lote Z2). Cada item diz, no fim
+dele, o commit e o lote que o fecham. Estão fechados os itens 1 a 23, o 26,
+nas duas metades, e o 27. O 28 foi absorvido pela API 6. **Continuam
+abertos** o 24 e o 25, que são de outros repositórios; do 25, a parte da
+janela fechou. O que os lotes deixaram de menor, ao fechar estes itens, está
+na pendência 58.
+
+## 52 · Decidida em 2026-10-08 e fechada em 2026-10-09 · A voz segura o aparelho de som, e a máquina acordada, a sessão inteira, também fora de sala
 
 **Aberta em 2026-10-08**, medindo o repouso da pendência 49. Enquanto se está
 num servidor, o motor de voz mantém a saída e o microfone abertos, **também
@@ -8280,7 +8765,58 @@ quadro de quem fala logo ao entrar). É decisão de produto, e não conserto.
 grep -n "a supressão de ruído do microfone está tratando o sinal" crates/seele-core/src/voice.rs
 ```
 
-## 53 · Instalar um MOD de uma pasta com atalho: a recusa é certa, e a tela não sabe dizer qual é
+**Decidida em 2026-10-08 (D-52)**, entre as decisões do dono da 0.16
+(`docs/superpowers/specs/2026-10-08-0.16-design.md`): o áudio abre só ao entrar
+numa sala de voz, e fecha ao sair.
+
+**Fechada em 2026-10-09**, `d96fecc0` (lote I-a da F5 da 0.16, integrado em
+`6a6f3aa2`):
+- o áudio abre quando a pessoa senta numa sala de voz e fecha quando ela sai;
+- a abertura roda numa thread própria (`seele-abre-audio`), com prazo de 10 s
+  (`PRAZO_DO_AUDIO`);
+- os controles escolhidos fora de sala moram em `Shared` e valem ao abrir, com
+  a supressão e a sensibilidade carregadas em `e28cb84b`;
+- o `Snapshot` ganha `AberturaDoAudio`, e fora de sala nenhuma tela diz «sem
+  áudio» (`2b32795f`);
+- o motor esquece o assento que a volta refaz pelos mesmos caminhos do `Room`
+  da casca (`421d628d`).
+
+**A regra do assento**, do achado Crítico da revisão. O servidor manda
+`VoiceRoomEntryRefused` também a quem ele mantém sentado: na troca de sala
+recusada, a cada volta numa sala com senha e pelo `nao_deu`. Com a D-52, isso
+deixava a pessoa surda e muda numa sala onde todos a viam.
+- `a9e8c128` põe a regra única em `seele_core::assento`, para o `Room` e para o
+  motor: uma recusa desfaz só o pedido de entrada no ar e devolve o assento de
+  antes. Sem pedido no ar, ninguém se move. O áudio só abre no assento
+  confirmado.
+- O pedido se sabe decidido pelo `Pong` de um `Ping` marcado e numerado
+  (`893632ab`).
+- O resgate na volta exige o mesmo SSRC **e** um `SessionId` maior
+  (`d02743ea`): sem isso, um servidor reiniciado deixava a pessoa sentada na
+  própria tela e fora de toda sala no servidor.
+- A prova é `crates/seele-conformance/tests/a_recusa_nao_tira_da_sala.rs`.
+- No lote I-b, o `PedidoRecusado` da F1 entrou na regra (`2296ee5b`), e a
+  supressão e a sensibilidade gravadas em disco passaram a valer no connect
+  (`eaba0ea6`).
+
+**O subitem do pânico**, no mesmo lote (`520f880a`). Com a abertura numa
+thread própria, um pânico em qualquer thread do app deixa uma linha ERROR no
+`seele.log`, com a thread e o lugar.
+
+**Fica com o dono** (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «O que
+fica com o dono», e o relatório do I-a, «O que não rodou»), porque pede
+aparelho de verdade:
+- medir que o `PreventUserIdleSystemSleep` do macOS e o pedido do
+  `powercfg /requests` no Windows somem fora de sala;
+- calibrar o `PRAZO_DO_AUDIO` com a primeira abertura, o pedido de permissão do
+  macOS e o WASAPI;
+- ver se abrir e fechar o aparelho a cada sala pede a permissão de novo.
+
+Os dois custos que a D-52 aceitou continuam: a latência de abrir o aparelho a
+cada entrada, e o primeiro quadro de quem fala logo ao entrar. Os casos raros
+que a revisão do I-a deixou estão na pendência 58.
+
+## 53 · Fechada em 2026-10-08 · Instalar um MOD de uma pasta com atalho: a recusa é certa, e a tela não sabe dizer qual é
 
 **Aberta em 2026-10-08.** Uma pasta de MOD de quem desenvolve tem
 `node_modules/.bin/`, cheia de atalhos (symlinks). O instalador recusa um
@@ -8300,7 +8836,25 @@ grep -n "NaoCopiei" apps/seele-app/src/mods.rs
 grep -n "NaoCopiei" apps/seele-app/ui/frases.js   # vazio: não há frase
 ```
 
-## 54 · «PADRÃO DA MÁQUINA · <aparelho>» diz o aparelho em uso, e não o padrão, quando a escolha é outro aparelho
+**Fechada em 2026-10-08**, `c6ca70e4` e `6038abbe` (lote P53 da F5 da 0.16,
+integrado em `8476815b`):
+- `c6ca70e4`: o atalho tem variante própria, `FalhaAoInstalarMod::TemAtalho`,
+  com o caminho, e `NaoCopiei` fica para as outras falhas de cópia.
+  `instalar_de` escreve uma linha WARN em toda recusa, com a pasta e a recusa
+  inteira;
+- `6038abbe`: as frases de `TemAtalho`, `NaoCopiei`, `ManifestoRecusado` e
+  `SemManifesto`, em `ui/frases.js`; e o guarda das recusas passa a ler
+  `src/mods.rs` e as variantes com campo.
+
+Na revisão, a pasta passou a ir à linha WARN por `caminho_no_registro`, e um
+nome de pasta com quebra de linha deixou de forjar linha no `seele.log`
+(`1a7011e7`). O leitor das variantes prende a profundidade (`8b6ea89a`). A
+frase do atalho manda tirá-lo onde quer que ele esteja, com o `node_modules`
+como o lugar mais provável, e não como a regra (`14253634` e `2d2a914b`).
+Medido em 09/10/2026: o segundo comando de cima acha a frase. O que ficou de
+fora, por decisão do controlador, está na pendência 58.
+
+## 54 · Fechada em 2026-10-08 · «PADRÃO DA MÁQUINA · <aparelho>» diz o aparelho em uso, e não o padrão, quando a escolha é outro aparelho
 
 **Aberta em 2026-10-08.** Em CONFIGURAÇÕES · MICROFONE E SOM, a linha
 `PADRÃO DA MÁQUINA` ganha o nome do aparelho que a voz abriu
@@ -8315,6 +8869,19 @@ a escolhida, ou escrever nela o padrão do sistema.
 ```sh
 grep -n "PADRÃO DA MÁQUINA · " apps/seele-app/ui/tela-server.js
 ```
+
+**Fechada em 2026-10-08**, `0d68c95` (lote P54 da F5 da 0.16, integrado em
+`90e1377e`). `marcarUmaLista` decide pela escolha. Com o padrão escolhido, a
+linha diz no que ele deu, como antes. Com um aparelho escolhido à mão, ela diz
+o padrão do sistema, lido da linha que a máquina marcou como padrão: no caso
+de cima, «PADRÃO DA MÁQUINA · Alto-falantes (MacBook Pro)», e abaixo
+«27QHD240 EM USO». Sem padrão marcado, ela fica sem nome. A prova é a bancada
+`apps/seele-app/bancada/qualidade-da-voz.cjs` (`P54 OK`), vermelha antes do
+conserto; o revisor refez a reversão pelos dois lados, microfone e saída. O
+plano da F5 aceitava também a linha sem nome
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote P54); a escolha
+pelo padrão do sistema, e o nome que aparece duas vezes com um aparelho
+escolhido, ficam para o dono conferir em tela. O resto está na pendência 58.
 
 ## 55 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
 
@@ -8338,8 +8905,22 @@ grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
 grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
 ```
 
+**O nome, corrigido em 2026-10-09.** A função que resolve o ponto de novo é
+`Batida::preparar`, e não `Encontro::preparar`, como está escrito acima. É um
+achado da conferência de 08/10 do plano da F5 da 0.16
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, «Achados da conferência
+de 08/10»). O resto vale.
 
-## 56 · Os testes que leem o log perdem linhas quando rodam em paralelo
+**Continua aberta, com o Plano 5** (`lotes.md`, «Vão para outros planos»). Se
+o conserto for entregar ao `LEVE` o endereço já resolvido, ele parte da lista
+ordenada que o lote M1 deixou em `resolver_ponto` (`09accad`).
+
+```sh
+grep -n "impl Batida" -A 20 crates/seele-core/src/encontro.rs | grep -n "async fn preparar"
+```
+
+
+## 56 · Fechada em 2026-10-09 · Os testes que leem o log perdem linhas quando rodam em paralelo
 
 **Aberta em 2026-10-08**, achada pela F7 da 0.16 num teste da recepção da sala
 pessoal que reprovava junto com o módulo e passava sozinho. **Pode explicar
@@ -8401,6 +8982,37 @@ um crate novo (o auxiliar tem três linhas):
 **Quando fecha.** Com o auxiliar nos três crates e a prova de ordem forçada em
 cada um, provada por reversão.
 
+**Fechada em 2026-10-09** (lote Z1 da F5 da 0.16, integrado em `e8cc4fb5`):
+- `a4fcd99e`, no `seele-core`: `Rastro::a_partir_de` chama o
+  `segundo_despachante()`, e todo teste do crate que lê o log passa por ele;
+- `cefb5c53`, no `seele-server`: o módulo `#[cfg(test)] pub(crate) mod
+  rastro_de_teste`, chamado pelas capturas de `admissao`, `pedidos`,
+  `alcance/encontro` e `recepcao`, e uma cópia em `tests/desconhecida.rs`, que
+  também lia o log e não estava na lista de cima;
+- `12bb1769`, no `seele-ffi`: uma cópia local, chamada por
+  `o_log_da_trilha_diz_qual_candidato_deu_o_que`;
+- `f4cba99e`: as quatro provas de ordem forçada rodam num processo filho, e
+  decidem também na biblioteca inteira. Antes, a do core passava 5 em 5 na
+  biblioteca com o conserto tirado, porque os outros rastros deixavam dois
+  despachantes de pé;
+- `3230eb9a`: o guarda `xtask/tests/log_com_segundo_despachante.rs` reprova o
+  teste de log novo que esquecer o auxiliar, e compara as cópias dele.
+
+Sem o conserto, a recepção reprovou 5 em 5 no módulo. A revisão achou uma
+segunda vítima, no core:
+`encontro::testes::a_consulta_que_estoura_o_prazo_diz_no_rastro_o_que_perguntou_e_o_que_ouviu`
+reprovou 12 em 12 com `--test-threads=4`. Os outros testes da lista de cima
+passaram em todas as rodadas sem o conserto: o mecanismo os expõe, e nenhum
+foi visto falhar.
+
+**A prova do app ficou em processo único.**
+`uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada`
+(`apps/seele-app/src/main.rs`) roda a ordem forçada no mesmo processo, como a
+do core antes de `f4cba99e`, e por isso pode decidir só rodada sozinha. O que a
+cobre é o guarda de texto de `3230eb9a`, que lê o app e reprova a captura que
+esquecer o auxiliar. Ela ficou fora do Z1 porque o K4 mexia no `main.rs` ao
+mesmo tempo, e vai para a revisão final.
+
 ## 57 · O guarda da identidade da linha 0.15 lê só o texto antes do primeiro `#[cfg(test)]`
 
 **Aberta em 2026-10-09**, achada pela F7 da 0.16 ao portar o `9ff9b73c` (a 0.15.2
@@ -8415,3 +9027,429 @@ passaria. O código de hoje está certo: só os dois leitores, os dois pelo mont
 Na 0.16, o guarda novo tira cada módulo de teste e lê o resto, e tem um guarda do
 guarda. **O que fazer:** se a linha 0.15 ganhar uma 0.15.3, portar o guarda da
 0.16 junto. A 0.15.2 sai como está, com a bateria verde de `148c9e60`.
+
+## 58 · O que a F5 da 0.16 deixou
+
+**Aberta em 2026-10-09**, no fecho da frente F5 da 0.16 (lote Z2). Os lotes da
+frente (`docs/superpowers/sdd/2026-10-08-0.16/F5/`) fecharam a 52, a 53, a 54
+e a 56, cada uma com os commits escritos nela, e deixaram a 49, a 50 e a 51
+fechadas só em parte. O que fica aberto em cada uma está no parágrafo «Em
+09/10/2026» dela: na 49, o item 4, o teto por MOD do 7c e o macOS 11.0 a
+11.2; na 50, a metade casca do P50-4; na 51, o 24 e o 25. As revisões
+deixaram também Menores que não seguravam lote nenhum. O ledger
+da frente mora em `.superpowers/sdd/`, que o git ignora e que some junto com a
+árvore de trabalho. O que fica com quem opera mora aqui: um item por achado,
+com o lote, o arquivo, o que falta e a fonte. A fonte é o relatório do lote
+(`F5/lote-<id>-report.md`), o andamento da frente (`F5/progress.md`) ou,
+quando o achado só está no ledger, o próprio texto deste item.
+
+**Nada aqui foi consertado, e nenhum item segura release.** São menores para a
+revisão final da 0.16 decidir. Os números das linhas mudam com qualquer
+commit, e por isso cada item diz o nome da função, do teste ou da constante.
+
+### O registro e a tela
+
+1. **C · Quatro portas escrevem em nome de um MOD sem balde de vazão.** Em
+   `apps/seele-app/src/main.rs`: `pedido_a_caminho_dito` (DEBUG «pedido de MOD
+   a caminho do servidor») e `pedido_recusado_na_saida_dito` (WARN «pedido de
+   MOD recusado na saída»), as duas linhas de `mod_request`; e
+   `mod_nativo_colher` (DEBUG «falas colhidas pela janela») e
+   `mod_nativo_entregar` (WARN «entrega a um MOD nativo recusada»). O P51-08
+   nomeava só a janela, a mídia recusada, a servida e o som servido, e as
+   quatro ficaram fora. **Falta** decidir se elas passam por `linha_admitida`,
+   e com que classe. *Fonte:* relatório do C, rodada 3, item 3.
+
+   ```sh
+   grep -n "^fn pedido_a_caminho_dito\|^fn pedido_recusado_na_saida_dito\|^fn mod_nativo_colher\|^fn mod_nativo_entregar" apps/seele-app/src/main.rs
+   ```
+
+2. **C · As linhas que a conta do id ilegível conta não levam o rótulo dela.**
+   Em `main.rs`, `recusa_de_midia_dita` e a porta da janela com um id feito só
+   de espaço escrevem `mod_id=` em branco, enquanto a conta do balde
+   (`BALDE_ILEGIVEL`) sai com `mod_id_ilegivel=true`. Já era assim antes do
+   lote. **Falta** o mesmo rótulo nessas linhas. *Fonte:* o ledger (C, menor
+   adiado).
+
+3. **C · Os baldes de `Depuracao` ocupam os lugares próprios.** Em `main.rs`
+   (`BALDES_NO_REGISTRO`), os 61 lugares próprios do mapa valem para as três
+   classes. Muitos ids escrevendo em DEBUG os ocupam e empurram os avisos de
+   MODs novos para o transbordo de avisos. Ninguém perde ficha por isso, mas o
+   aviso do MOD novo passa a dividir o balde. *Fonte:* o ledger (C).
+
+4. **E · A linha DEBUG de `confere_geracao` não diz o comando nem passa pelo
+   teto.** Em `main.rs`, `Session::recusar_se_morta` não recebe o nome do
+   comando nem o id do MOD, e a linha da ativação recusada também não passa
+   pelo teto. *Fonte:* relatório do E, «Fica de fora, como nota».
+
+5. **E · A segunda conferência de `enviar_imagem_mod` vem depois do upload.**
+   Em `main.rs`, com a geração morta durante o `await`, os bytes já foram ao
+   servidor quando a conferência recusa. A recusa conta e é dita, mas o efeito
+   no servidor já aconteceu. *Fonte:* relatório do E, «Fica de fora, como
+   nota».
+
+6. **K2 · O tropeço de aplicar uma imagem divide o `onde` com as recusas.** Em
+   `apps/seele-app/ui/mods-regiao.js` (`dizerTropecoDaMidia`), o tropeço vai
+   ao registro no `onde` `recusa-de-mod`, e só o texto («tropeçou … e não foi
+   uma recusa») o separa de uma recusa. Nenhum consumidor conta por `onde`
+   hoje; um que contasse contaria os tropeços. *Fonte:* relatório do K2,
+   «Preocupações da rodada».
+
+7. **K5 · O `data:` do som do servidor que não toca fica no destino.** Em
+   `mods-regiao.js`, para um som do servidor declarado com `tocando: false`, o
+   `data:` fica pela vida da contribuição no destino que tomou o som, cerca de
+   1,33 vez o arquivo. Zero exigiria guardar só o plano também nele. *Fonte:*
+   o ledger (K5, para a v6 ou para cá).
+
+8. **P53 · A frase de `ManifestoRecusado` mostra o código cru.** Em
+   `apps/seele-app/ui/frases.js`, a frase diz `api-too-old`, `malformed` ou
+   `schema-too-new`, e não manda fazer nada, porque o remédio depende do
+   motivo: para `api-too-new` é atualizar o SEELE, e para `malformed` é com
+   quem fez o MOD. **Falta** um dicionário dos códigos de `refusal_name`
+   (`crates/seele-core/src/mods.rs`), cada um com a frase dele. *Fonte:*
+   relatório do P53, «Pendências para o lote Z», 1.
+
+9. **P53 · A recusa pelo catálogo nomeia uma pasta que já não existe.**
+   `instalar_do_catalogo` (`apps/seele-app/src/catalogo.rs`) chama
+   `instalar_de` sobre uma pasta de passagem em `temp_dir()`. A linha WARN da
+   recusa aponta `origem=` para essa pasta, que é apagada logo depois, e não
+   diz qual MOD do catálogo era. *Fonte:* relatório do P53, «Pendências para o
+   lote Z», 2.
+
+10. **P53 · `FalhaAoApagarPacote` não tem frase.** Em
+    `apps/seele-app/src/mods.rs`, `HashTorto` e `NaoEstaAqui` saem como o nome
+    cru, e `NaoApaguei(String)` sai como «ALGO FALHOU» com o JSON
+    (`apagarUmPacote`, em `camada-mods.js`, usa `fraseDeErro`). O guarda das
+    recusas não a inclui, e incluí-la o reprova até alguém escrever as três
+    frases. *Fonte:* relatório do P53, «Pendências para o lote Z», 3.
+
+11. **P53 · Duas recusas vizinhas não deixam linha no registro.** Em
+    `instalar_mod` (`main.rs`), um `escolha.into_path()` que falha devolve
+    `SemManifesto` sem passar por `instalar_de`; na prática, o diálogo de
+    pasta do sistema sempre devolve caminho. E `levar_pacotes_antigos_para_o_cache`
+    (`mods.rs`) pula calado um pacote do layout antigo cuja cópia falha, o
+    atalho incluído. *Fonte:* relatório do P53, «Pendências para o lote Z», 4.
+
+12. **I-a · Duas salas apagadas dentro de uma volta de rede.** Em
+    `crates/seele-core/src/assento.rs` (`EntradasPendentes::ouvir`), dois casos
+    que pedem um operador apagando uma sala no meio da volta de rede de um
+    pedido:
+    - em A, pedir B; o servidor apaga B antes de ler o pedido, recusa B e
+      mantém a pessoa em A. A tela fica fora de sala, e o servidor a tem em A
+      até a próxima entrada;
+    - em A, pedir B e C; o servidor aceita B, apaga B antes de ler o `Ping`
+      marcado dele e recusa C. A recusa de C devolve a pessoa a B, que não
+      existe. Se o `Pong` de B chega antes do aviso, o conserto de `4f737cc6`
+      já cobre.
+
+    **Falta** o mesmo conserto para os dois: marcar o pedido no ar cuja sala
+    foi apagada, e decidir na resposta dele. *Fonte:* relatório do I-a, rodada
+    2, «Dois casos da mesma família que ficam».
+
+13. **I-a · O resíduo do N2, com o limitador cortando.** Em `seele_core::assento`,
+    depois de um `Ping` marcado que o limitador do servidor descartou, uma
+    recusa que chegue antes do próximo `Pong` marcado é tomada pelo pedido
+    velho da frente. O pedido recusado fica na tela até o `Pong` dele o fechar
+    como aceito. Só acontece com mais de 60 quadros de controle de uma vez e
+    depois mais de 20 por segundo, e o aviso do limitador não chega à regra.
+    *Fonte:* relatório do I-a, rodada 2, N2.
+
+14. **I-a · Uma abertura presa no driver segura as seguintes.** Em
+    `crates/seele-ffi/src/lib.rs`, `VozDaSala::vez_do_driver` deixa uma
+    abertura por vez no driver (o M-c da revisão). Com o driver preso, cada
+    entrada nova deixa uma thread parada na vez até ele soltar, e as entradas
+    seguintes acabam em `NaoAbriuNoPrazo`. *Fonte:* relatório do I-a, rodada 1,
+    M-c.
+
+15. **K3 · Com um MOD escolhido, a gestão não cita os outros que perderam.** Em
+    `apps/seele-app/ui/camada-mods.js` (`oQueAGestaoDiz`), com mod/a
+    escolhido no cartão, a gestão não diz que mod/b e mod/e também pediram o
+    lugar. É anterior ao K3, e ficou fora do que o plano da F5 pediu a ele.
+    *Fonte:* `F5/progress.md` (K3); o ledger.
+
+### Guardas e testes que provam menos do que parecem
+
+16. **H · O guarda da frase da volta usa borda de palavra.** Em
+    `apps/seele-app/tests/frontend.rs`,
+    `a_volta_recusada_so_diz_o_que_vale_para_toda_origem_e_todo_motivo`
+    proíbe «nenhum» com borda de palavra, e «nenhuma» passaria. *Fonte:* o
+    ledger (H).
+
+17. **H · O guarda de `drive → fim_da_sessao` é de texto.** Em
+    `crates/seele-ffi/src/lib.rs`,
+    `drive_traduz_o_fim_que_o_enlace_avisa_por_fim_da_sessao` confere que a
+    chamada está no braço do `Encerrado`, e não que o `Event::Ended` sai com o
+    valor dela: uma regressão híbrida, com a chamada certa ao lado de uma
+    tradução à mão, passa. Um teste de comportamento pediria uma sessão viva
+    cuja volta o servidor recuse, e nenhum teste do crate abre uma. *Fonte:*
+    relatório do H, rodada 1, Menor 5, «O limite dele»; o ledger.
+
+18. **H · Um comentário diz mais do que o teste prova.** Em
+    `crates/seele-ffi/src/lib.rs`, o comentário de
+    `fim_da_recusa_diz_o_motivo_de_verdade_e_nao_credencial_recusada` diz que
+    o teste passa pelo mesmo `fim_da_sessao` «para que a fiação conte junto».
+    O teste não prova a fiação de `drive`: quem a prende é o guarda de texto do
+    item 17. *Fonte:* o ledger (H).
+
+19. **E · O guarda (b) não vê `if … else`, `match` nem receptor com caminho.**
+    Em `main.rs`, `nenhuma_geracao_morta_e_recusada_por_fora_de_recusar_se_morta`
+    procura `!<identificador>.geracao_vale(`. Escapam
+    `if session.geracao_vale(g) {} else { return … }`, um `match` e
+    `!self.inner.geracao_vale(`. *Fonte:* relatório do E, «Fica de fora, como
+    nota».
+
+20. **D · A tentativa lenta refeita não deixa rastro.** Em
+    `apps/seele-app/src/executor.rs`,
+    `o_fim_de_uma_volta_em_que_o_mod_nao_escreveu_espera_sobrar_uma_ficha` e
+    `o_fim_de_uma_volta_em_que_o_mod_escreveu_tambem_espera_sobrar_uma_ficha`
+    refazem a tentativa que passou de 480 ms e não dizem quantas vezes. Numa
+    máquina às vezes lenta, passam pela segunda sem rastro. O `eprintln!` o
+    libtest apaga; **falta** escrever no stderr direto, como o `em_voz_alta`
+    de `crates/seele-conformance/tests/vaga/mod.rs`. *Fonte:* relatório do D,
+    rodada 3, Preocupação 1.
+
+21. **ferramentas · `changelog_dos_commits` cala a falha do git.** Em
+    `empacotar/publicar.sh`, a contagem termina em `|| true` e o `git log` da
+    lista não tem o status conferido: um git que falha dá uma lista vazia, sem
+    aviso. A rodada de conserto do lote tirou o mesmo padrão de
+    `conferir_notas`. *Fonte:* `F5/progress.md` (ferramentas); o ledger.
+
+22. **ferramentas · A conferência dos alvos do fuzz lê o `ci.yml` inteiro.** Em
+    `xtask/tests/empacotamento.rs`, `o_ci_roda_deny_e_fuzz` acha os alvos em
+    qualquer job: um alvo movido para o job `deny` passa. *Fonte:*
+    `F5/progress.md` (ferramentas); o ledger.
+
+23. **ferramentas · O guarda do passo `--locked` não olha `continue-on-error`
+    nem `if:`.** Em `xtask/tests/empacotamento.rs`, `o_ci_roda_deny_e_fuzz`
+    exige o passo `cargo +nightly metadata --locked`, mas não olha o
+    `continue-on-error` nem o `if:` dele: um passo `--locked` que não reprova o
+    job passaria. *Fonte:* `F5/progress.md` (ferramentas); o ledger.
+
+24. **ferramentas · O teste do `git tag` na hora de montar só confere o
+    aviso.** Em `xtask/tests/empacotamento.rs`,
+    `o_corpo_do_release_avisa_quando_o_git_nao_lista_as_tags_na_hora_de_montar`
+    não confere o corpo. *Fonte:* o ledger (ferramentas).
+
+25. **K2 · O `try/catch` em volta de `dono.anotarRecusa` no avatar não tem
+    prova.** Em `apps/seele-app/ui/base.js`, no `.catch` do avatar
+    contribuído. Com o dono de verdade, o caminho é inalcançável. *Fonte:* o
+    ledger (K2).
+
+26. **K2 · O `recusar` do retrato pelo evento `error` não tem rede.** Em
+    `mods-regiao.js` (`montarRetrato`), a recusa chamada por `estado.naoAbriu`
+    roda num ouvinte de evento, fora da corrente de promessas: um dono que
+    lance dentro dela não cai no `.catch` que os outros caminhos de recusa
+    têm. Ficou fora do lote K2. *Fonte:* o ledger (K2).
+
+27. **K3 · A chave do teto do som não tem prova.** Em `mods-regiao.js`
+    (`recusarPeloTetoDoSom`), a anotação leva a chave do teto, que a aba
+    DIAGNÓSTICO junta numa vaga só. Perdê-la só devolve aquele caminho ao
+    comportamento de antes, e nenhum número sai errado. *Fonte:*
+    `F5/progress.md` (K3); o ledger.
+
+28. **M1 · A margem de detecção do T6f caiu.** Em
+    `crates/seele-core/src/encontro.rs`,
+    `a_ida_e_volta_se_mede_da_ultima_volta_que_saiu` detecta a reversão com
+    uns 50 ms de margem. Isso só enfraquece a reversão: o teste não reprova à
+    toa. *Fonte:* o ledger (M1).
+
+29. **P53 · Nenhum guarda mede o tamanho da frase de `TemAtalho`.** Em
+    `apps/seele-app/tests/frontend.rs`: a frase de `NomeRecusado` tem guarda de
+    tamanho, e a de `TemAtalho`, que não tem dicionário, não tem. *Fonte:*
+    `F5/progress.md` (P53); o ledger.
+
+30. **P53 · O teste do atalho compara duas formas que divergem.** Em
+    `apps/seele-app/src/mods.rs`, `a_recusa_do_atalho_fica_no_registro_com_o_caminho`
+    compara com `display()`, e o `recusa=` sai por `Debug`: as duas divergem
+    com `\` ou `"` no caminho. *Fonte:* o ledger (P53).
+
+31. **P54 · Faltam duas cenas.** Em `apps/seele-app/bancada/qualidade-da-voz.cjs`:
+    o escolhido que é o próprio padrão, e o escolhido que sumiu da lista.
+    *Fonte:* relatório do P54, Preocupação 2; `F5/progress.md` (P54).
+
+32. **P54 · Uma asserção redundante e um acesso sem mensagem.** Na mesma
+    bancada, `!da(2).nome.includes(...)` repete o que outra asserção já
+    confere, e `da(i)` lança `TypeError` sem mensagem se a linha `""` faltar.
+    *Fonte:* `F5/progress.md` (P54), que o resume; o ledger.
+
+33. **J · A frase do guarda de ordem culpa a faixa.** Em
+    `apps/seele-app/tests/frontend.rs`, a mensagem «`abrirServer` mostra a
+    configuração e espera alguma coisa antes de `atualizarServer` escrever a
+    faixa de contexto…» também sai para um `await atualizarServer()`
+    antecipado, quando o motivo real ali é o EM USO apagado da lista. Quem
+    tropeçar no guarda lê a explicação errada uma vez. *Fonte:*
+    `F5/progress.md` (J); o ledger, da re-revisão da rodada 3.
+
+34. **J · `without_comments` conta um `// nome` depois de uma string.** Em
+    `frontend.rs`, `fn without_comments` não tira o comentário que vem depois
+    de uma string na mesma linha. É falso positivo, do lado seguro. *Fonte:*
+    `F5/progress.md` (J); o ledger.
+
+35. **J · A bancada da faixa cobre uma cena só.** Em
+    `apps/seele-app/bancada/ajustes-v013.cjs`, a faixa no primeiro quadro é
+    medida só na cena de reabrir com o microfone mudo; e um erro lançado por
+    `setTimeout` depois da abertura por link não chega a `errosDoLink`.
+    *Fonte:* `F5/progress.md` (J); o ledger.
+
+36. **J · A troca de modo sem medida do atraso, e a faixa regravada.** Na
+    mesma bancada, a cena da troca de modo espera até 3 s pela faixa e não
+    mede quanto levou. E `atualizarServer` (`tela-server.js`) regrava o
+    `textContent` da faixa a cada 500 ms, mesmo sem mudança. São observação e
+    custo de DOM, e não defeito dito a quem usa. *Fonte:* relatório do J,
+    rodada 3; o ledger.
+
+37. **K4 · Moldes da bancada ainda dão `uri` ao som do pacote.** Em
+    `apps/seele-app/bancada/regiao-do-mod.cjs`, uns vinte moldes além dos dez
+    tirados, por exemplo perto das linhas 1744, 1852, 3083, 3433 e 4958 em
+    09/10. O Rust não manda mais esse `uri`, e a janela não o lê: é
+    inofensivo, mas o molde deixou de ser o que o Rust manda. *Fonte:*
+    relatório do K4, rodada 1, «Preocupações da rodada», 1.
+
+38. **G-servidor · O guarda do ponto de produção só olha o texto.** Em
+    `crates/seele-server/src/alcance/encontro.rs`, `recusar_a_producao`
+    reconhece o ponto pelo texto. Um nome que resolva para a VPS por
+    `/etc/hosts` ou por um apelido no DNS passa. Desde a decisão (d), sem
+    `$SEELE_ENCONTRO` não há ponto, e só chega a esse caso quem aponta um nome
+    de propósito. *Fonte:* relatório do G-servidor, Preocupação 3.
+
+39. **G-servidor · Três guardas de ambiente no `seele-conformance`.**
+    `crates/seele-conformance/tests/ambiente/mod.rs` repete a forma do
+    `AmbienteDoEncontro` de `quarto_pelo_link.rs`, que o lote não tocou por
+    causa da 8384. *Fonte:* relatório do G-servidor, Preocupação 4.
+
+40. **G-servidor · O custo da trava sem UPnP.** Os testes de hospedagem de
+    `crates/seele-server/src/hospedagem.rs` andam em fila pela trava do
+    `AmbienteDoEncontro` (`mod ambiente_de_teste`, em
+    `crates/seele-server/src/lib.rs`). Nesta rede ela custa +0,56 s; numa rede
+    sem UPnP, cada `iniciar` paga até 3 s de `PROCURA`, e os oito em fila podem
+    passar de 20 s. É estimativa: **falta** medir na CI. *Fonte:* relatório do
+    G-servidor, Preocupação 2.
+
+41. **Z1 · A prova do app ainda roda num processo só.** Em
+    `apps/seele-app/src/main.rs`,
+    `uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada` roda a ordem
+    forçada no mesmo processo, e pode decidir só rodada sozinha. Quem a cobre é
+    o guarda de texto `xtask/tests/log_com_segundo_despachante.rs`. O detalhe
+    está na pendência 56. *Fonte:* relatório do Z1, «Preocupações da rodada
+    1», 2.
+
+42. **M1 · O `Espiao` do `seele-ffi` ainda duplica o assinante de teste.** Em
+    `crates/seele-ffi/src/lib.rs`, `mod trilha_no_log`, o `Espiao` é um
+    assinante de `tracing` escrito à mão para os testes. É o resto do T5f da
+    pendência 51 (item 19): os três assinantes do `seele-core` viraram
+    `rastro_de_teste::Rastro` em `27f86af`, e o do `seele-ffi` ficou, que o
+    plano da F5 deixou como opcional. *Fonte:*
+    `docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote M1, «4. P51-19»;
+    o relatório do M1.
+
+### Texto
+
+43. **M2 · A sexta ocorrência do C-M4.** Em
+    `crates/seele-encontro/tests/apresentacao.rs`, um comentário diz que «a
+    lista guardou a impressão de um link». Desde a Tarefa 4 do 1B, ela guarda a
+    que a conexão aceitou. *Fonte:* relatório do M2, Preocupação 2.
+
+    ```sh
+    git grep -n "guardou a impressão de um link" -- crates
+    ```
+
+44. **P54 · O cabeçalho da tabela e o primeiro comentário de
+    `marcarUmaLista`.** Em `qualidade-da-voz.cjs`, o cabeçalho novo da tabela
+    ficou confuso. Em `apps/seele-app/ui/tela-server.js`, o primeiro
+    comentário de `marcarUmaLista` diz «A linha do padrão diz no que ela deu»
+    sem a condição: só quando o padrão é a escolha. *Fonte:* `F5/progress.md`
+    (P54), que o resume; o ledger.
+
+### Para o dono conferir em tela
+
+45. **P54 · O padrão do sistema aparece duas vezes.** Em `tela-server.js`
+    (`marcarUmaLista`), com um aparelho escolhido à mão, a linha `PADRÃO DA
+    MÁQUINA` diz o nome do padrão do sistema, e a linha desse aparelho diz
+    `PADRÃO` também: «no que daria», e não «no que deu». É uma das duas saídas
+    que o plano da F5 aceitava
+    (`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote P54); a outra é a
+    linha sem nome, e a troca é de uma linha.
+    *Fonte:* relatório do P54, Preocupações 1 e 4.
+
+### O que a revisão do lote R deixou
+
+O lote R, a credencial da tentativa (o achado 4 da F8), entrou no
+`0.16/lotes` em `75446300`, depois da conformidade (`volta_do_aceite`, 2 de 2).
+O relatório dele é `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-r-report.md`.
+Os commits que fecham cada parte são `211ed155` (a volta reenvia a
+credencial), `21471bfc` (desistir esquece), `3ff15974` (o guarda), `d521b41c` e
+`789729d5` (o campo do link), `a910b2e2` (o `Debug` que esconde o segredo em
+`ConnectConfig` e `Destino`), `9b1c2473` (a credencial presa ao alvo) e
+`6b23b694` (a pergunta que substitui outra). O R não fecha número de
+pendência. A revisão dele deixou:
+
+46. **R · O sim dos MODs fica gravado mesmo quando se desiste no download.**
+    Na pergunta dos MODs (`aceitarOsMods`, em `apps/seele-app/ui/camada-mods.js`),
+    quem aceita e desiste no meio da obtenção fica com o sim gravado (e o MOD
+    instalado). A revisão do R o marcou com prioridade alta, pelo ADR 0045.
+    *Fonte:* relatório do R, «Observações» (o M3 da revisão).
+
+47. **R · O segredo vive no Rust mais que a tentativa.** `Destino.segredo`
+    (`crates/seele-core/src/enlace.rs`) fica pela sessão inteira, e a
+    reconexão automática do núcleo o reenvia. `Session.abertura.entrar`
+    (`apps/seele-app/src/main.rs`) guarda o link do lançador, com o token, pela
+    vida do processo, e `Session.convite` guarda o convite lido, com o token.
+    *Fonte:* relatório do R, «Observações» (o M4 da revisão).
+
+48. **R · O token é esquecido depois de `NicknameTaken`.** Em
+    `apps/seele-app/ui/tela-boot.js`, a credencial da tentativa só vive na
+    chamada de `conectar` e segue apenas para a pergunta dos MODs. Com o apelido
+    tomado, ela é esquecida, e a pessoa tem de colar o link de novo, embora o
+    convite siga válido. *Fonte:* relatório do R, «Observações»; o ledger.
+
+49. **R · Outros tipos com `derive(Debug)` carregam o segredo.**
+    `ConviteLido.token` e `Abertura.entrar` (`apps/seele-app/src/main.rs`) e
+    `seele_proto::uri::Convite.token` (`crates/seele-proto/src/uri.rs`, o
+    que `Session.convite` guarda). Nenhum é logado hoje, e a parte 5 do guarda
+    do R não os cobre: um `tracing::info!(?lido)` no `analisar_convite`
+    passaria. **Falta**, nos três, o mesmo conserto de `a910b2e2`, um `Debug`
+    que oculte, ou um guarda. Só como referência: `ClientMessage::Hello.join_secret`
+    (`crates/seele-proto/src/control.rs`) também carrega o segredo num
+    `derive(Debug)`, e é arquivo da F1. *Fonte:* o ledger (re-revisão do R).
+
+50. **Achado pelo R · Um guarda anterior casa com `reconectar(`.** Em
+    `apps/seele-app/tests/frontend.rs`,
+    `entering_another_server_leaves_this_one_and_says_so_with_both_names`
+    procura `troca.find("conectar(")`, que casaria também com `reconectar(` e
+    `desconectar(`. É o mesmo tipo do M5 da revisão do R, que o R consertou no
+    guarda dele (`8097d310`). *Fonte:* relatório do R, «Rodada 1 de conserto»,
+    M5.
+
+51. **R · Duas metades do guarda da credencial ficam sem reversão.** Em
+    `apps/seele-app/tests/frontend.rs`,
+    `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`: as
+    metades das partes 4 e 5 que leem o `main.rs` e o `types.rs` da FFI não foram
+    revertidas, por decisão da coordenação: revertê-las pedia editar o
+    `main.rs`, do K4, ou o `types.rs` da FFI, que o lote R não tocava. A
+    cegueira delas é coberta só pelas contagens (duas linhas exatas de
+    `join_secret`, e pelo menos 30 campos do `Snapshot` lidos). É um guarda que
+    prova menos do que parece. *Fonte:* relatório do R, «3. O guarda».
+
+### Fora da F5, só como referência
+
+Achados das rodadas da F5 que são de outra frente. A orquestradora já foi
+avisada, e o registro é da frente dona; aqui fica só o apontamento:
+- **a sala cheia que se deixava ouvir** (F1): recusada por sala cheia, a
+  pessoa passava a ouvir a sala que a recusou. Existe também na v0.15.1
+  publicada, e a F1 tem a conformidade que o prova;
+- **o resgate explícito no fio** (F1), do comentário do N1 do I-a;
+- **a janela do aviso do G-servidor aceita conexão nova** (Plano 3): um
+  cliente que reconecta dentro dos 500 ms de `encerrar_avisando` é cortado sem
+  aviso, e o conserto é um sinal de `encerrando` no aperto de mão;
+- **a telemetria `microfone_entrega_silencio_digital`** (F3): ela chega aos
+  MODs pelo retrato, e deve ficar fora da projeção da API 6;
+- **o rótulo «cartões pela API 3»** (F3), do K2: `modsDoCaminhoAntigo`, em
+  `apps/seele-app/ui/camada-mods.js`, ainda o diz. Ele sai com o código das
+  APIs 3 a 5;
+- **para o Plano 2**: todo ponto de entrada novo que hospede pelo app, o
+  G-casca e a sala pessoal inclusive, sobe por
+  `Hospedagem::iniciar_com_o_ponto_padrao`. O guarda
+  `nenhuma_hospedagem_deste_arquivo_sobe_sem_o_ponto_padrao`, do G-servidor
+  (`f5a78c52`), o cobra.
+
+**Quando fecha.** Item por item, quando a revisão final da 0.16 decidir cada
+um: conserto, plano, ou «fica como está», escrito aqui com o motivo.
