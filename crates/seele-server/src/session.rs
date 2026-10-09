@@ -1287,16 +1287,18 @@ async fn exigir_aceite_dos_mods(
 /// Traduz um motivo de MOD para o que o par consegue decodificar.
 ///
 /// **Um motivo que o par não decodifica não é um motivo: é um fluxo de controle
-/// morto.** Os três motivos de MOD entraram depois da v4, e o postcard indexa
-/// variante por posição — um cliente v4 que recebesse `ModsRecusados` não leria
-/// «recusado», leria um erro de quadro, e a pessoa veria a conexão morrer sem
-/// uma palavra.
+/// morto.** O postcard indexa variante por posição, e um par que recebesse uma
+/// razão que não conhece não leria «recusado»: leria um erro de quadro, e a
+/// pessoa veria a conexão morrer sem uma palavra. Em que número cada razão
+/// nasceu é a tabela `seele_proto::vocabulario::desde_a_razao`.
 ///
-/// Para quem está abaixo da versão do anúncio o motivo verdadeiro é
+/// Para quem está abaixo da versão do anúncio (`limiar`, o portão dormente dos
+/// testes), ou abaixo do número da razão, o motivo verdadeiro é
 /// `Incompatible`, e não é um consolo: a build dele não tem como ser informada
-/// do que este servidor exige, que é literalmente incompatibilidade.
+/// do que este servidor exige, que é literalmente incompatibilidade. O ordinal
+/// dele é congelado (ADR 0058), e toda build o lê.
 fn recusa_de_mod(versao: u8, limiar: u8, reason: DisconnectReason, detail: String) -> Refusal {
-    let reason = if versao >= limiar {
+    let reason = if versao >= limiar && versao >= seele_proto::vocabulario::desde_a_razao(&reason) {
         reason
     } else {
         DisconnectReason::Incompatible
@@ -4295,82 +4297,28 @@ async fn moderavel(
 /// Se um cliente nesta versão de protocolo entende esta mensagem.
 ///
 /// **Uma mensagem que o outro lado não conhece não é ignorada por ele.** O
-/// postcard não é autodescritivo: um cliente v3 que receba uma variante da v4
-/// lê os bytes dela como se fossem de outra coisa, e o fluxo de controle dele
-/// fica deslocado **para sempre** — a partir dali ele segue conectado sem
-/// entender mais nenhum quadro. A janela de compatibilidade do ADR 0036
-/// promete que um cliente dentro dela continua funcionando, e é esta função
-/// que cumpre a promessa.
+/// postcard não é autodescritivo, e uma variante desconhecida deslocava o fluxo
+/// de controle do par para sempre. Desde o 9 o par pula uma variante
+/// desconhecida da lista de cima (`control::decode_da_lista`), mas isso é rede
+/// de segurança: a regra é quem manda não mandar o que o par não entende
+/// (ADR 0058), e esta função é onde o servidor a cumpre.
+///
+/// # A tabela mora no `seele-proto`
+///
+/// Até a 0.15 ela era um `match` aqui, com um portão `>=` por variante nova e
+/// um `_ => true` para o resto — e foi pelo `_` que `SirvaTelaPara` e
+/// `AssistaTelaPor` passaram um tempo sem portão. Com o piso em 9, todos os
+/// portões viraram vácuo. A tabela foi para
+/// `seele_proto::vocabulario::desde`, exaustiva e sem `_`, com o histórico
+/// dos números no doc dela, e a próxima variante não compila sem entrar lá.
 ///
 /// # Por que função pura, e não um `match` dentro do laço
 ///
 /// Porque a promessa é sobre um cliente que este servidor não tem em teste
-/// nenhum. Dentro do laço, a única forma de exercitá-la seria montar uma
-/// sessão v3 inteira; extraída, a regra é afirmável mensagem a mensagem — que
-/// é a mesma razão de `crate::pares::quem_desacreditar` ter saído do braço de
-/// `ParFalhou`.
-///
-/// # A linha que faltava
-///
-/// `SirvaTelaPara` e `AssistaTelaPor` são da v4 e caíam no `_ => true`. Hoje
-/// um cliente v3 não as recebe — `Pares::escolher` exige `emprestando: true`,
-/// que só chega por `EmprestarSubida`, que é v4 —, mas isso é um invariante de
-/// outra tarefa, e não uma linha que afirme a promessa. Estas duas afirmam.
+/// nenhum. Extraída, a regra é afirmável mensagem a mensagem.
 #[must_use]
 fn entende_a_mensagem(message: &ServerMessage, versao: u8) -> bool {
-    match message {
-        // A v2 acrescentou esta. O `>= 2` de antes já era vácuo — a janela de
-        // compatibilidade do ADR 0036 é de uma versão, e
-        // `oldest_supported_version()` já é 4, então nenhuma sessão viva chega
-        // aqui com menos que isso. Fica escrito com a versão em que a variante
-        // nasceu, e não apagado: no dia em que a janela alargar, é este número
-        // que volta a morder, e reconstruí-lo por arqueologia custaria mais do
-        // que a linha custa.
-        ServerMessage::UplinkLoss { .. } => versao >= 2,
-        // As duas da v4, o caminho entre pares.
-        ServerMessage::SirvaTelaPara { .. } | ServerMessage::AssistaTelaPor { .. } => versao >= 4,
-        // O anúncio de MODs, e desde 14/09/2026 a global o alcança: o dia do
-        // `PROTOCOL_VERSION` 5 chegou, e esta linha estava escrita à espera dele
-        // — ver `seele_proto::mods::VERSAO_DO_ANUNCIO`. Quem fica de fora agora
-        // é o par da janela anterior, a v4: um servidor com MOD habilitado o
-        // recusa com `Incompatible` no aperto de mão, em vez de mandar um quadro
-        // que mataria o fluxo de controle dele. O par da v3 da release
-        // `v0.10.5-1` já não chega a esse ponto — a janela de compatibilidade
-        // não o alcança mais, e ele é recusado com `PeerTooOld` antes de
-        // qualquer conversa sobre MOD.
-        // O anúncio nunca passa por aqui na prática — ele sai do aperto de mão,
-        // que decide com o limiar de `ServerConfig::versao_do_anuncio` e não com
-        // a constante. A linha existe para que a tabela fique completa.
-        ServerMessage::ModsExigidos { .. } => versao >= seele_proto::mods::VERSAO_DO_ANUNCIO,
-        ServerMessage::ModReply { .. } => versao >= 6,
-        // A v7, e é ela que morde hoje. Um par v6 não conhece esta variante, e
-        // o postcard não ignora o que não conhece — ele desloca a leitura do
-        // fluxo de controle para sempre. Foi por este portão que a identidade
-        // do servidor entrou como variante em vez de campo da `Session`: um
-        // campo não teria portão nenhum, porque a `Session` já sai para todos.
-        ServerMessage::Instancia { .. } => versao >= 7,
-        // ADR 0048, na mesma versão 7 e pela mesma razão: ela nasceu antes
-        // de a 7 sair, então não há par nenhum esperando por ela.
-        ServerMessage::VolumeRecusado { .. } => versao >= 7,
-        // A v8, e é ela que morde hoje: a recusa identificada de uma mensagem
-        // de texto. Um par v7 não conhece a variante, e o postcard não a
-        // ignora — ele desloca a leitura do fluxo de controle dele para sempre.
-        //
-        // O que o par v7 perde por este portão é exatamente o que ele já não
-        // tinha antes desta versão: a notícia de que uma mensagem dele foi
-        // recusada. Ele continua entrando, lendo e escrevendo.
-        ServerMessage::MessageRejected { .. } => versao >= 8,
-        // **Um motivo de alerta da v8, dentro de um quadro que é antigo.** O
-        // `Alert` existe desde a v1; o que um par v7 não conhece é este ordinal
-        // do `AlertReason`, e um ordinal desconhecido desloca a leitura do fluxo
-        // dele igual a uma variante desconhecida. O portão é por motivo, e não
-        // pelo quadro, porque é o motivo que é novo.
-        ServerMessage::Alert {
-            reason: AlertReason::RetencaoApagouHistorico { .. },
-            ..
-        } => versao >= 8,
-        _ => true,
-    }
+    versao >= seele_proto::vocabulario::desde(message)
 }
 
 /// Devolve ao cano do servidor quem estava sendo servido por um par que deixou
@@ -5300,183 +5248,121 @@ mod versao_no_fio {
         );
     }
 
-    fn sirva() -> ServerMessage {
-        ServerMessage::SirvaTelaPara {
-            screen: ScreenId(7),
-            enderecos: vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))],
-            impressao: "a".repeat(64),
-        }
-    }
-
-    fn assista() -> ServerMessage {
-        ServerMessage::AssistaTelaPor {
-            screen: ScreenId(7),
-            enderecos: vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))],
-            impressao: "a".repeat(64),
-        }
-    }
-
-    #[test]
-    fn as_duas_mensagens_da_v4_nao_saem_para_um_cliente_v3() {
-        // **A promessa do ADR 0036, escrita numa linha em vez de suposta.** Um
-        // cliente v3 que recebesse uma destas leria os bytes dela como se
-        // fossem de outra coisa — o postcard não é autodescritivo — e o fluxo
-        // de controle dele ficaria deslocado para sempre.
-        //
-        // Que ele não as receba hoje é verdade **por acidente**: `escolher`
-        // exige `emprestando: true`, e isso só chega por `EmprestarSubida`,
-        // que é v4. Um invariante de outra tarefa não é a promessa; estas
-        // asserções são.
-        //
-        // O laço cobre **toda** versão abaixo da v4, e não só a mais velha
-        // dentro da janela: a regra é por mensagem e não pode passar a depender
-        // de onde a janela está parada — ela mexeu duas vezes em duas semanas.
-        for versao in 0..4 {
-            assert!(
-                !entende_a_mensagem(&sirva(), versao),
-                "SirvaTelaPara saiu para um cliente v{versao}"
-            );
-            assert!(
-                !entende_a_mensagem(&assista(), versao),
-                "AssistaTelaPor saiu para um cliente v{versao}"
-            );
-        }
-    }
-
-    #[test]
-    fn as_duas_mensagens_da_v4_saem_para_um_cliente_v4() {
-        // A outra metade: um guarda que barrasse todo mundo passaria no teste
-        // acima e desligaria a malha inteira sem um rastro.
-        assert!(entende_a_mensagem(
-            &sirva(),
-            seele_proto::version::PROTOCOL_VERSION
-        ));
-        assert!(entende_a_mensagem(
-            &assista(),
-            seele_proto::version::PROTOCOL_VERSION
-        ));
-    }
-
-    fn resposta_de_mod() -> ServerMessage {
-        ServerMessage::ModReply {
-            request: 1,
-            part: 0,
-            total: 1,
-            payload: "{}".into(),
-        }
-    }
-
-    #[test]
-    fn a_versao_mais_velha_ainda_aceita_recebe_tudo_o_que_nao_e_da_v8() {
-        // **Este teste existe para reprovar quando a janela anda**, e já
-        // reprovou duas vezes fazendo exatamente isso. O registro das duas fica
-        // porque é ele que explica por que os números abaixo são o que são.
-        //
-        // Com a v5 o piso era 4, e o `>= 2` de `UplinkLoss` era vácuo. Com a
-        // **v6 o piso é 5**, e agora são *três* portões vácuos: o `>= 2` do
-        // `UplinkLoss`, o `>= 4` das duas mensagens da malha, e o `>= 5` do
-        // anúncio de MODs. Nenhum deles é apagado por isso — no dia em que a
-        // janela alargar, são estes números que voltam a morder, e
-        // reconstruí-los por arqueologia custaria mais do que a linha custa.
-        //
-        // Com a **v7 o piso é 6**, e o portão da resposta de MOD — `>= 6` —
-        // passou a ser o quarto vácuo. Ele fica pelo mesmo motivo dos outros
-        // três.
-        //
-        // Com a **v8 o piso é 7**, e o portão da identidade do servidor — `>= 7`
-        // — passou a ser o quinto vácuo. Ele fica pelo mesmo motivo dos outros
-        // quatro.
-        //
-        // O portão que **mordia** era o da v8: a recusa identificada de uma
-        // mensagem de texto não saía para o par da janela anterior.
-        //
-        // Com o **Servidor 1.0 o piso é 9** (ADR 0058), e todos os portões
-        // desta tabela viraram vácuo, inclusive o da v8: nenhuma sessão viva
-        // negocia abaixo do 9. Eles ficam pelo mesmo motivo de sempre, e a
-        // tabela muda de casa na sessão do Plano 3, quando a primeira 1.x
-        // trouxer uma variante nova e o portão voltar a morder.
-        assert_eq!(seele_proto::version::oldest_supported_version(), 9);
-
-        for (mensagem, nome) in [
+    /// Uma amostra do que mudou de número ao longo da história: o que nasceu
+    /// na v2, na v4, na v6, na v7, na v8 e na própria 1.0, e um motivo novo
+    /// dentro de um quadro antigo.
+    fn amostra() -> Vec<(ServerMessage, &'static str)> {
+        let enderecos = vec![std::net::SocketAddr::from(([203, 0, 113, 9], 8383))];
+        vec![
             (ServerMessage::UplinkLoss { fraction: 0.0 }, "UplinkLoss"),
-            (sirva(), "SirvaTelaPara"),
-            (assista(), "AssistaTelaPor"),
-            (resposta_de_mod(), "ModReply"),
+            (
+                ServerMessage::SirvaTelaPara {
+                    screen: ScreenId(7),
+                    enderecos: enderecos.clone(),
+                    impressao: "a".repeat(64),
+                },
+                "SirvaTelaPara",
+            ),
+            (
+                ServerMessage::AssistaTelaPor {
+                    screen: ScreenId(7),
+                    enderecos,
+                    impressao: "a".repeat(64),
+                },
+                "AssistaTelaPor",
+            ),
+            (
+                ServerMessage::ModReply {
+                    request: 1,
+                    part: 0,
+                    total: 1,
+                    payload: "{}".into(),
+                },
+                "ModReply",
+            ),
             (
                 ServerMessage::Instancia {
                     identidade: String::new(),
                 },
                 "Instancia",
             ),
-        ] {
+            (
+                ServerMessage::MessageRejected {
+                    channel: ChannelId(1),
+                    client_message_id: seele_proto::ids::ClientMessageId(1),
+                    reason: seele_proto::control::MessageRefusal::NoSuchChannel,
+                },
+                "MessageRejected",
+            ),
+            (
+                ServerMessage::Alert {
+                    severity: AlertSeverity::Info,
+                    reason: AlertReason::RetencaoApagouHistorico { apagadas: 1 },
+                    operator_text: None,
+                },
+                "Alert com RetencaoApagouHistorico",
+            ),
+            (
+                ServerMessage::Disconnecting {
+                    reason: DisconnectReason::ModsDeOutraApi { apis: 1 << 7 },
+                },
+                "Disconnecting com ModsDeOutraApi",
+            ),
+        ]
+    }
+
+    /// **Tudo sai para quem negociou o 9.** Sem esta metade, um portão que
+    /// barrasse todo mundo passaria no teste de baixo e desligaria a malha, a
+    /// ponte dos MODs e as recusas sem deixar rastro — o produto sabendo e não
+    /// contando.
+    #[test]
+    fn toda_mensagem_de_hoje_sai_para_quem_negociou_o_9() {
+        assert_eq!(seele_proto::version::oldest_supported_version(), 9);
+        for (mensagem, nome) in amostra() {
             assert!(
-                entende_a_mensagem(&mensagem, seele_proto::version::oldest_supported_version()),
-                "{nome} deixou de sair para a versão mais velha ainda aceita"
+                entende_a_mensagem(&mensagem, seele_proto::version::PROTOCOL_VERSION),
+                "{nome} deixou de sair para quem fala o 9"
             );
         }
+    }
 
-        assert!(
-            !entende_a_mensagem(&recusa_de_mensagem(), 7),
-            "a recusa de mensagem saiu para a v7, que não sabe decodificá-la: \
-             o postcard não é autodescritivo e o fluxo de controle dela fica \
-             deslocado para sempre"
+    /// **Nada sai para um número abaixo da linha 1.** Nenhuma sessão viva
+    /// negocia abaixo do 9 — o portão é vácuo hoje, e é este teste que diz
+    /// que ele ainda morde no dia em que alguém o desligar. Os portões antigos
+    /// (`>= 2` a `>= 8`) e a história deles estão no doc de
+    /// `seele_proto::vocabulario::desde`.
+    #[test]
+    fn nada_sai_para_um_numero_abaixo_da_linha_1() {
+        for versao in 0..seele_proto::version::PRIMEIRO_DA_LINHA_UM {
+            for (mensagem, nome) in amostra() {
+                assert!(
+                    !entende_a_mensagem(&mensagem, versao),
+                    "{nome} saiu para quem fala o {versao}"
+                );
+            }
+        }
+    }
+
+    /// A razão de MOD sai como é para quem fala o 9, e vira `Incompatible`,
+    /// que toda build lê, para quem está abaixo do limiar do anúncio.
+    #[test]
+    fn a_razao_de_mod_sai_para_quem_a_entende_e_vira_incompatible_para_o_resto() {
+        let hoje = seele_proto::version::PROTOCOL_VERSION;
+        let razao = DisconnectReason::ModsDeOutraApi { apis: 1 << 7 };
+        assert_eq!(
+            recusa_de_mod(hoje, hoje, razao, String::new()).reason,
+            razao
         );
-    }
-
-    /// Uma recusa de mensagem de texto, para os portões da v8.
-    fn recusa_de_mensagem() -> ServerMessage {
-        ServerMessage::MessageRejected {
-            channel: ChannelId(1),
-            client_message_id: seele_proto::ids::ClientMessageId(1),
-            reason: seele_proto::control::MessageRefusal::NoSuchChannel,
-        }
-    }
-
-    #[test]
-    fn a_recusa_de_mensagem_sai_para_um_cliente_da_versao_de_hoje() {
-        // A outra metade do portão da v8, como o `ModReply` tem a dele: sem
-        // esta linha, um guarda que barrasse todo mundo passaria no teste
-        // acima e a recusa nunca chegaria a ninguém — que é o defeito de
-        // origem, o produto sabendo e não contando.
-        assert!(entende_a_mensagem(
-            &recusa_de_mensagem(),
-            seele_proto::version::PROTOCOL_VERSION
-        ));
-    }
-
-    #[test]
-    fn a_recusa_de_mensagem_nao_sai_para_ninguem_abaixo_da_v8() {
-        for versao in 0..8 {
-            assert!(
-                !entende_a_mensagem(&recusa_de_mensagem(), versao),
-                "MessageRejected saiu para um cliente v{versao}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_resposta_de_mod_sai_para_um_cliente_da_versao_de_hoje() {
-        // A outra metade do portão acima. Sem esta linha, um guarda que
-        // barrasse todo mundo passaria no teste anterior e desligaria a ponte
-        // inteira sem deixar rastro — é o mesmo par de asserções que as duas
-        // mensagens da v4 já têm, pela mesma razão.
-        assert!(entende_a_mensagem(
-            &resposta_de_mod(),
-            seele_proto::version::PROTOCOL_VERSION
-        ));
-    }
-
-    #[test]
-    fn a_resposta_de_mod_nao_sai_para_ninguem_abaixo_da_v6() {
-        // Por mensagem e não pela janela, como
-        // `as_duas_mensagens_da_v4_nao_saem_para_um_cliente_v3`: a regra é da
-        // variante, e não pode passar a depender de onde a janela está parada.
-        for versao in 0..6 {
-            assert!(
-                !entende_a_mensagem(&resposta_de_mod(), versao),
-                "ModReply saiu para um cliente v{versao}"
-            );
-        }
+        assert_eq!(
+            recusa_de_mod(hoje, hoje + 1, razao, String::new()).reason,
+            DisconnectReason::Incompatible
+        );
+        // E a tabela, e não só o limiar: com o limiar no 8, quem fala o 8 ainda
+        // não lê uma razão que nasceu no 9.
+        assert_eq!(
+            recusa_de_mod(hoje - 1, hoje - 1, razao, String::new()).reason,
+            DisconnectReason::Incompatible
+        );
     }
 }
 
