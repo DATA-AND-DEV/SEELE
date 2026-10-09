@@ -1414,7 +1414,7 @@ impl Enlace {
             // contato que não confere nem chega a mandar o convite. É o mesmo
             // caminho para todo candidato da corrida do ADR 0037, porque todos
             // passam por aqui.
-            destino.impressao_esperada(),
+            destino.esperada.as_ref(),
             // E se o pino deste candidato prova o servidor: onde não prova (fora
             // do alvo, ou num alvo de escopo local), um pin que confere não
             // passa por cima da impressão.
@@ -2905,7 +2905,7 @@ impl Motor {
                     // existe e decide sozinho; ela pesa quando o pin sumiu entre
                     // a queda e a volta, e sem ela a reconexão fixaria às cegas
                     // quem atendesse. Guardado em `bateria_interna.rs`.
-                    self.destino.impressao_esperada(),
+                    self.destino.esperada.as_ref(),
                     // A volta é ao endereço que venceu, e o pino dele prova o
                     // servidor, ou não, como na entrada. Guardado nos dois
                     // sentidos em `a_volta_da_bateria_onde_o_pino_…`.
@@ -5553,6 +5553,9 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
         // casca recebe «não alcancei» sem ter o que mostrar, contra o contrato
         // da própria entrega: a tela mostra, a pessoa aceita, a casca guarda.
         ConnectError::ModsNaoAceitos { .. } => true,
+        // Alguém atendeu com uma chave que não é a do código: a mesma família
+        // da impressão que não confere, e o que a pessoa precisa ler.
+        ConnectError::CodigoNaoConfere(_) => true,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::HandshakeTimeout
@@ -5582,6 +5585,9 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         // casca dizendo «reconectando» a quem precisa ler uma lista e
         // responder.
         ConnectError::ModsNaoAceitos { .. } => false,
+        // Quem atendeu não é a sala do código: perguntar de novo dá a mesma
+        // chave, como com a impressão que não confere.
+        ConnectError::CodigoNaoConfere(_) => false,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::TlsRefused
