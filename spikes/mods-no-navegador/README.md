@@ -227,3 +227,70 @@ saída que ainda passa nos cinco critérios. A B não é saída.
 - **Um ataque ao motor.** O isolamento por importação é uma propriedade do
   `wasm`. Ninguém tentou um defeito de memória do QuickJS aqui.
 - **O `about:blank` dentro da B**: é a leitura acima, não uma medida.
+
+## Adendo de 09/10/2026: a segunda parede medida, e um furo dela no WebKit
+
+O spike de 08/10 mediu o MOD **dentro** do QuickJS. A segunda parede da AB (o
+`iframe` opaco e a CSP dele) ficou sem medida, porque nada ali saía do motor.
+Ela foi medida agora com a forma de produto do executor (`executor/`). No lugar
+do anfitrião do motor roda um **Worker fugido**: um código que tenta tudo
+direto, como teria um MOD que escapasse do QuickJS **e** do `wasm`.
+
+**O furo.** No Safari do Simulador iOS 27.0, o Worker que o `iframe` opaco
+cria **abre o `caches`**, e o que ele grava reaparece na abertura seguinte da
+página, com a mesma origem:
+
+| abertura | `caches_marca_anterior` | `caches_gravar` |
+|---|---|---|
+| 1ª | `(nenhuma)` | gravou |
+| 2ª | `marca-1791559254866` | gravou |
+
+Um Worker aninhado tem um global novo e abre o `caches` de novo. A CSP não
+alcança armazenamento. No Chromium 151, o `caches` não existe nesse Worker.
+
+**O conserto**, no `iframe`. Um preâmbulo vai no mesmo `blob:`, antes do
+anfitrião, e tira do Worker `caches`, `indexedDB`, `Worker`, `SharedWorker` e
+`navigator.storage`. Depois ele confere que saíram. Se algum ficar, o Worker
+**não sobe** e diz qual ficou (falha fechado).
+
+**Com o preâmbulo**, no Chromium 151, no Safari 27.0.1 do Mac e no Safari do
+Simulador iOS 27.0 (duas aberturas cada, com a mesma origem):
+
+| porta | o que o Worker fugido conseguiu |
+|---|---|
+| origem | `null` |
+| `fetch` para a origem da página | lançou (CSP) |
+| `WebSocket` | lançou (CSP) |
+| `importScripts` | lançou (CSP) |
+| `indexedDB`, `caches`, Worker aninhado | lançou `ReferenceError` (preâmbulo) |
+| OPFS | lançou |
+| canárias HTTP | nenhuma tocou |
+| `BroadcastChannel` | posta, mas só para a mesma origem opaca, onde ninguém ouve |
+
+**As oito provas por reversão** passam pela bancada
+(`executor/bancada/executor-no-navegador.cjs`). Cada guarda tirado reprova o
+caso dele:
+1. com `allow-same-origin`, a origem do Worker vira a da página;
+2. sem a CSP, as três canárias tocam;
+3. sem o teto da fila no Worker, o `iframe` o mata, e o caso da fila reprova;
+4. sem o teto da entrada na página, 80 entregas passam;
+5. sem o teto no `iframe`, as 500 mensagens de um Worker que inunda chegam;
+6. sem a parada anotada antes do número, um MOD encerrado durante a descarga
+   sobe;
+7. sem o preâmbulo, o Worker aninhado roda;
+8. com um preâmbulo que não consegue tirar, nenhum MOD sobe, e a frase diz o
+   que ficou.
+
+Como rodar:
+
+    cargo xtask web   # compila o motor
+    node spikes/mods-no-navegador/executor/bancada/executor-no-navegador.cjs \
+      target/wasm32-wasip1/release/seele_motor_web.wasm
+    python3 spikes/mods-no-navegador/executor/safari/servir.py \
+      spikes/mods-no-navegador/executor/ui target/wasm32-wasip1/release/seele_motor_web.wasm \
+      crates/seele-motor-web/tests/mod-comum.js sim 8461    # ou mac no lugar de sim
+
+Os arquivos de `executor/ui/` vão para `apps/seele-app/ui/` quando a `ui/` for
+liberada à F4. O anfitrião do motor mora **dentro** do `iframe`, como uma
+função que vira o texto do `blob:`. Assim o hash da CSP o cobre, e o guarda do
+`frontend.rs` não vê um `.js` que a página não carrega.

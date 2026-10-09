@@ -213,6 +213,16 @@ pub enum Aviso {
         media: Box<MediaChannel>,
         /// A sessão nova. O `ssrc` muda a cada conexão (falha G1).
         sessao: Box<SessionInfo>,
+        /// A sala de voz em que este motor sentou a pessoa de novo, nesta
+        /// conexão, antes de avisar. `None` para quem estava fora de sala.
+        ///
+        /// **A casca não tem outro jeito de saber.** A sessão nova chega sem
+        /// assento nenhum, o servidor confirma a entrada por silêncio, e a
+        /// fotografia de ocupação que ele manda pula a própria pessoa. Quem lia
+        /// só a sessão nova desenhava FORA DE SALA alguém que estava na sala,
+        /// falando e ouvindo — e a pendência 52 abre e fecha o áudio por esse
+        /// assento.
+        voice_room: Option<VoiceRoomId>,
     },
     /// Uma transferência andou. ADR 0027.
     Transferencia(Transferencia),
@@ -1533,6 +1543,8 @@ impl Enlace {
             bateria,
             inicio: Instant::now(),
             voice_room: None,
+            entradas: crate::assento::EntradasPendentes::default(),
+            queda: None,
             linha: None,
             muted: false,
             isolamento: false,
@@ -1597,7 +1609,7 @@ impl Enlace {
                 self.estado = *estado;
                 self.restante = *restante;
             }
-            Aviso::Reconectado { media, sessao } => {
+            Aviso::Reconectado { media, sessao, .. } => {
                 self.estado = Link::Online;
                 self.restante = None;
                 self.media = (**media).clone();
@@ -2288,6 +2300,14 @@ struct Motor {
     inicio: Instant,
     /// O que restaurar ao reconectar.
     voice_room: Option<VoiceRoomId>,
+    /// As entradas pedidas que o servidor ainda não decidiu, pela mesma regra
+    /// do `Room` da casca. Ver [`crate::assento`].
+    entradas: crate::assento::EntradasPendentes,
+    /// O que a conexão que caiu deixou: o `ssrc` dela e o assento confirmado.
+    ///
+    /// É com isto que a volta sabe se o servidor resgatou o assento — o
+    /// `ssrc` da sessão nova igual ao desta — e qual.
+    queda: Option<Queda>,
     linha: Option<ChannelId>,
     muted: bool,
     isolamento: bool,
@@ -2392,6 +2412,14 @@ struct Motor {
     /// porta: um mapa largado desprende as tarefas em vez de cancelá-las, e
     /// elas sobreviviam à morte do motor inteiro. Ver [`TarefasDePar`].
     tarefas_de_par: TarefasDePar,
+}
+
+/// O que uma conexão que caiu deixa para a volta. Ver [`Motor::queda`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Queda {
+    ssrc: seele_proto::ids::Ssrc,
+    sessao: seele_proto::ids::SessionId,
+    confirmada: Option<VoiceRoomId>,
 }
 
 /// Uma transmissão desta pessoa que está no ar.
@@ -2784,9 +2812,7 @@ impl Motor {
                         // um operador voltaria, depois de uma queda, para a
                         // sala de voz de onde foi tirado: o motor refaz a última sala de voz
                         // que este cliente pediu, e ele não pediu este.
-                        if let ServerMessage::MovedToVoiceRoom { voice_room } = mensagem {
-                            self.voice_room = Some(voice_room);
-                        }
+                        self.ouvir_o_assento(&mensagem);
                         if matches!(mensagem, ServerMessage::Pong { .. }) {
                             self.bateria.on_pong();
                             if let Some(medido) = self.cliente.as_ref().and_then(Client::rtt) {
@@ -2925,7 +2951,17 @@ impl Motor {
     ///
     /// Idempotente: chamada duas vezes, a segunda não tem o que largar.
     fn soltar_a_conexao(&mut self) {
-        self.cliente = None;
+        // O que a volta precisa saber desta conexão: o `ssrc` dela, para saber
+        // se o servidor resgatou o assento, e qual era o confirmado. Os pedidos
+        // que estavam no ar não terão resposta. Ver `crate::assento`.
+        if let Some(cliente) = self.cliente.take() {
+            self.queda = Some(Queda {
+                ssrc: cliente.session().ssrc,
+                sessao: cliente.session().id,
+                confirmada: self.entradas.confirmada(self.voice_room),
+            });
+        }
+        self.entradas.esquecer();
         // Os contadores do `quinn` morrem com a conexão, e a janela aberta
         // contra eles daria uma medida absurda na conexão seguinte. O que se
         // aprendeu sobre a casa desta pessoa fica: quem cai e volta em cinco
@@ -3082,9 +3118,32 @@ impl Motor {
                 // erro. Falhar aqui agora conta como a mesma coisa que a
                 // tentativa de `connect_por` ter falhado: a bateria continua
                 // correndo, e a próxima tentativa tenta de novo.
+                // O assento que o servidor devolveu, se devolveu: o mesmo
+                // `ssrc` da conexão que caiu. Ver `crate::assento`.
+                let resgatada = self.queda.and_then(|queda| {
+                    crate::assento::assento_resgatado(
+                        Some((queda.ssrc, queda.sessao)),
+                        (cliente.session().ssrc, cliente.session().id),
+                        queda.confirmada,
+                    )
+                });
+                // O assento desta conexão, pela mesma conta que a casca faz: o
+                // resgatado, e por cima dele o pedido que `restabelecer` refaz —
+                // a entrada, no ar até o `Pong` marcado do número dela, ou a
+                // saída. Montado antes, porque o número vai no `Ping`.
+                let mut entradas = crate::assento::EntradasPendentes::default();
+                let mut assento = resgatada;
+                let numero = match self.voice_room {
+                    Some(sala) => Some(entradas.pedir(&mut assento, sala)),
+                    None => {
+                        entradas.sair(&mut assento);
+                        None
+                    }
+                };
                 if let Err(erro) = restabelecer(
                     &mut cliente,
-                    self.voice_room,
+                    self.voice_room.zip(numero),
+                    resgatada,
                     self.linha,
                     self.muted,
                     self.isolamento,
@@ -3101,6 +3160,9 @@ impl Motor {
                     return;
                 }
 
+                self.entradas = entradas;
+                self.voice_room = assento;
+                self.queda = None;
                 let sessao = cliente.session().clone();
                 let media = cliente.media();
                 self.cliente = Some(cliente);
@@ -3117,9 +3179,12 @@ impl Motor {
                 // `Motor::consentimento`.
                 self.declarar_identidade_de_par(self.consentimento).await;
 
+                // A sala vai junto porque foi refeita aqui, por `restabelecer`,
+                // e só este motor sabe disso. Ver `Aviso::Reconectado::voice_room`.
                 let _ = self.avisos.send(Aviso::Reconectado {
                     media: Box::new(media),
                     sessao: Box::new(sessao),
+                    voice_room: self.voice_room,
                 });
             }
             // Uma recusa não melhora com insistência, e insistir contra uma
@@ -3165,14 +3230,22 @@ impl Motor {
             }
             _ => {}
         }
+        // O número do pedido de entrada que `lembrar` acabou de pôr no ar, se
+        // este comando é um: vai no carimbo do `Ping` marcado.
+        let numero_da_entrada = self.entradas.ultimo_numero().unwrap_or_default();
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
+            // O pedido, e logo atrás o `Ping` marcado: o `Pong` dele é o que
+            // diz que o servidor decidiu. Ver `crate::assento`.
             Comando::EntrarNaVoiceRoom(voice_room, password) => {
-                cliente.enter_voice_room(voice_room, password).await
+                match cliente.enter_voice_room(voice_room, password).await {
+                    Ok(()) => cliente.send_ping_de_entrada(numero_da_entrada).await,
+                    Err(erro) => Err(erro),
+                }
             }
             Comando::SairDaVoiceRoom => cliente.leave_voice_room().await,
             Comando::AbrirLinha(linha) => cliente.join_channel(linha).await,
@@ -4886,6 +4959,26 @@ impl Motor {
         matar(self.tela_viva.take());
     }
 
+    /// O que o servidor diz que muda a sala de voz que a reconexão refaz.
+    ///
+    /// **Pela mesma porta que o `Room` da casca**, [`EntradasPendentes::ouvir`]
+    /// (`crate::assento`): o operador que move, a sala apagada, a recusa de
+    /// entrada e a confirmação dela. A casca senta a pessoa, na volta, onde
+    /// `Aviso::Reconectado` diz que este motor a sentou, e abre o áudio por esse
+    /// assento; as duas contas têm de dar o mesmo.
+    ///
+    /// A recusa desfaz só o pedido de entrada que está no ar. Esquecer a sala a
+    /// cada recusa, como este braço fazia, deixava a volta sem sala — e a casca
+    /// com o áudio fechado — para quem o servidor manteve sentado: a troca de
+    /// sala recusada, a volta numa sala com senha, o apelido tomado. Sem esquecer
+    /// nada, como antes disso, a volta refazia a entrada numa sala apagada ou
+    /// que tinha acabado de recusar.
+    ///
+    /// [`EntradasPendentes::ouvir`]: crate::assento::EntradasPendentes::ouvir
+    fn ouvir_o_assento(&mut self, mensagem: &ServerMessage) {
+        self.entradas.ouvir(&mut self.voice_room, mensagem);
+    }
+
     /// Guarda o que a reconexão vai ter que refazer.
     fn lembrar(&mut self, comando: &Comando) {
         match comando {
@@ -4897,10 +4990,13 @@ impl Motor {
                     std::sync::atomic::Ordering::Relaxed,
                 );
             }
+            // Pelas entradas pendentes, como o `Room` da casca: o pedido fica no
+            // ar até o servidor decidir. Sem conexão, ele é só a intenção que a
+            // volta refaz, e a volta esquece a fila.
             Comando::EntrarNaVoiceRoom(voice_room, _password) => {
-                self.voice_room = Some(*voice_room)
+                self.entradas.pedir(&mut self.voice_room, *voice_room);
             }
-            Comando::SairDaVoiceRoom => self.voice_room = None,
+            Comando::SairDaVoiceRoom => self.entradas.sair(&mut self.voice_room),
             Comando::AbrirLinha(linha) => self.linha = Some(*linha),
             Comando::Muted(ligado) => self.muted = *ligado,
             Comando::Isolamento(ligado) => self.isolamento = *ligado,
@@ -5465,19 +5561,31 @@ async fn avisar_pelo_candidato(
 /// a conexão que acabou de completar o aperto de mão já morreu de novo.
 async fn restabelecer(
     cliente: &mut Client,
-    voice_room: Option<VoiceRoomId>,
+    voice_room: Option<(VoiceRoomId, u64)>,
+    resgatada: Option<VoiceRoomId>,
     linha: Option<ChannelId>,
     muted: bool,
     isolamento: bool,
 ) -> anyhow::Result<()> {
-    if let Some(voice_room) = voice_room {
+    if let Some((voice_room, numero)) = voice_room {
         // A senha não é guardada para a reconexão: uma sala com senha exigiria
         // pedi-la de novo aqui, e isso é o mesmo gap que existe para toda
         // credencial nesta struct — fora do escopo desta correção, que é só
         // não engolir a falha do restabelecimento. O que muda em relação ao
         // `let _ =` de antes é que a recusa por senha ausente agora conta como
         // tentativa que não deu, em vez de passar por reconexão bem-sucedida.
+        //
+        // **E a recusa não tira ninguém do assento resgatado.** O servidor
+        // devolve o assento de quem cai e volta dentro da carência, e recusa
+        // esta entrada numa sala com senha; ela é um pedido no ar como outro
+        // qualquer, com o `Ping` marcado atrás, e a recusa devolve o assento
+        // de antes dele — o resgatado. Ver `crate::assento`.
         cliente.enter_voice_room(voice_room, None).await?;
+        cliente.send_ping_de_entrada(numero).await?;
+    } else if resgatada.is_some() {
+        // A pessoa saiu da sala durante a queda, e o servidor, que não soube,
+        // a sentou de novo. A saída que ela pediu vale.
+        cliente.leave_voice_room().await?;
     }
     if let Some(linha) = linha {
         cliente.join_channel(linha).await?;
@@ -6718,6 +6826,172 @@ mod tests {
         assert_eq!(motor.voice_room, None);
     }
 
+    /// A sala que a volta refaz segue o que o servidor disse, pelos mesmos
+    /// caminhos que o assento da casca segue em `Room::apply`.
+    ///
+    /// Desde a pendência 52 isto deixou de ser só o roster: a casca senta a
+    /// pessoa, na volta, na sala que `Aviso::Reconectado` diz que o motor refez,
+    /// e o áudio abre por esse assento. Um motor que guardasse a sala apagada,
+    /// ou a que recusou a entrada, a refaria na volta — e a casca abriria o
+    /// microfone numa sala que não existe, ou que acabou de dizer não, até a
+    /// recusa chegar.
+    #[test]
+    fn a_voice_room_que_a_volta_refaz_segue_o_que_o_servidor_disse() {
+        let alerta = |reason| ServerMessage::Alert {
+            severity: seele_proto::control::AlertSeverity::Warning,
+            reason,
+            operator_text: None,
+        };
+        let mut motor = motor_de_teste();
+
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.ouvir_o_assento(&entrada_decidida());
+        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(9),
+        });
+        assert_eq!(
+            motor.voice_room,
+            Some(VoiceRoomId(2)),
+            "apagar outra sala tirou esta pessoa da dela"
+        );
+        motor.ouvir_o_assento(&ServerMessage::VoiceRoomDeleted {
+            voice_room: VoiceRoomId(2),
+        });
+        assert_eq!(
+            motor.voice_room, None,
+            "a volta refaria a entrada numa sala que foi apagada"
+        );
+
+        for recusa in [
+            seele_proto::control::AlertReason::VoiceRoomEntryRefused,
+            seele_proto::control::AlertReason::VoiceRoomFull,
+        ] {
+            motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(3), None));
+            motor.ouvir_o_assento(&alerta(recusa));
+            // E o `Pong` do `Ping` marcado, que o servidor manda depois de
+            // decidir cada pedido.
+            motor.ouvir_o_assento(&entrada_decidida());
+            assert_eq!(
+                motor.voice_room, None,
+                "a volta refaria a entrada que o servidor recusou ({recusa:?})"
+            );
+        }
+
+        motor.ouvir_o_assento(&ServerMessage::MovedToVoiceRoom {
+            voice_room: VoiceRoomId(5),
+        });
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(5)));
+    }
+
+    /// O `Pong` do `Ping` marcado que segue cada pedido de entrada.
+    fn entrada_decidida() -> ServerMessage {
+        ServerMessage::Pong {
+            // O `Pong` de um pedido mais novo que todos os destes testes: fecha
+            // o que está no ar, como o `Pong` do pedido que acabou de sair.
+            timestamp: crate::assento::carimbo_da_entrada(u64::from(u32::MAX)),
+        }
+    }
+
+    /// M3 no motor: a volta com o mesmo `ssrc`, numa sessão de número maior, é
+    /// o servidor devolvendo o assento, e a recusa da entrada que `restabelecer`
+    /// refaz sem a senha devolve a pessoa a ele. Com `ssrc` novo não havia
+    /// assento a devolver, e com o mesmo `ssrc` numa sessão de número igual o
+    /// servidor subiu de novo (N1 da rodada 2): também não.
+    ///
+    /// O servidor de teste devolve sempre o `ssrc` 1 na sessão 1.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_volta_com_o_assento_resgatado_nao_o_perde_para_a_reentrada_recusada() {
+        let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
+        let recusa = ServerMessage::Alert {
+            severity: seele_proto::control::AlertSeverity::Warning,
+            reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
+            operator_text: None,
+        };
+
+        for (ssrc_da_queda, sessao_da_queda, depois) in [
+            (
+                seele_proto::ids::Ssrc(1),
+                seele_proto::ids::SessionId(0),
+                Some(VoiceRoomId(5)),
+            ),
+            (
+                seele_proto::ids::Ssrc(9),
+                seele_proto::ids::SessionId(0),
+                None,
+            ),
+            (
+                seele_proto::ids::Ssrc(1),
+                seele_proto::ids::SessionId(1),
+                None,
+            ),
+        ] {
+            let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
+            let (avisos, _avisos_rx) = mpsc::unbounded_channel();
+            motor.avisos = avisos;
+            motor.voice_room = Some(VoiceRoomId(5));
+            motor.queda = Some(Queda {
+                ssrc: ssrc_da_queda,
+                sessao: sessao_da_queda,
+                confirmada: Some(VoiceRoomId(5)),
+            });
+
+            motor.tentar().await;
+            assert!(motor.cliente.is_some(), "a volta não reconectou");
+            assert_eq!(
+                motor.voice_room,
+                Some(VoiceRoomId(5)),
+                "a volta não refez a sala"
+            );
+            motor.ouvir_o_assento(&recusa);
+            motor.ouvir_o_assento(&entrada_decidida());
+            assert_eq!(
+                motor.voice_room, depois,
+                "com o `ssrc` {ssrc_da_queda:?} e a sessão {sessao_da_queda:?} da queda, a recusa da entrada refeita deixou a \
+                 volta em {:?}",
+                motor.voice_room
+            );
+        }
+    }
+
+    /// I1 da rodada 1 do lote I-a: o braço de `Alert` do motor esquece só o
+    /// pedido recusado, e não a sala em que o servidor manteve a pessoa.
+    ///
+    /// Esquecer a sala a cada recusa fazia a volta de uma queda sair sem sala
+    /// — e a casca, que segue o assento do motor, fechar o áudio — de quem o
+    /// servidor ainda tinha sentado: a troca de sala recusada, a volta numa
+    /// sala com senha, o apelido tomado.
+    #[test]
+    fn uma_recusa_esquece_so_o_pedido_e_nao_a_sala_que_a_volta_refaz() {
+        let recusa = ServerMessage::Alert {
+            severity: seele_proto::control::AlertSeverity::Warning,
+            reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
+            operator_text: None,
+        };
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.ouvir_o_assento(&entrada_decidida());
+
+        // Uma recusa sem pedido no ar: o apelido tomado.
+        motor.ouvir_o_assento(&recusa);
+        assert_eq!(
+            motor.voice_room,
+            Some(VoiceRoomId(2)),
+            "uma recusa sem pedido de entrada no ar fez a volta esquecer a sala em que o \
+             servidor manteve a pessoa"
+        );
+
+        // A troca recusada: volta à sala de antes, e não a lugar nenhum.
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(3), None));
+        motor.ouvir_o_assento(&recusa);
+        motor.ouvir_o_assento(&entrada_decidida());
+        assert_eq!(
+            motor.voice_room,
+            Some(VoiceRoomId(2)),
+            "a troca de sala recusada fez a volta esquecer a sala de antes, onde o servidor \
+             manteve a pessoa"
+        );
+    }
+
     #[tokio::test]
     async fn o_aperto_de_mao_sai_da_mesma_porta_que_bateu_no_ponto_de_encontro() {
         // O degrau 4 do ADR 0022 em uma asserção, e é **a** asserção: o NAT
@@ -7588,6 +7862,40 @@ mod tests {
             "a volta que reconectou não passou por um aperto de mão do protocolo com o \
              servidor de teste, e o teste mediu outra coisa"
         );
+    }
+
+    /// O aviso da volta diz em que sala de voz o motor sentou a pessoa de novo.
+    ///
+    /// A pendência 52 abre o áudio pelo assento, e a casca não tem outro jeito de
+    /// saber dele depois de uma queda: a sessão nova chega sem assento, e o
+    /// servidor confirma a entrada por silêncio. Quem estava fora de sala volta
+    /// com `None`, e a casca não abre aparelho nenhum.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo() {
+        let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
+
+        for sala in [Some(VoiceRoomId(5)), None] {
+            let (mut motor, _) = motor_que_volta_a(endereco, &impressao, true);
+            let (avisos, mut avisos_rx) = mpsc::unbounded_channel();
+            motor.avisos = avisos;
+            motor.voice_room = sala;
+
+            motor.tentar().await;
+
+            let mut avisada = None;
+            while let Ok(aviso) = avisos_rx.try_recv() {
+                if let Aviso::Reconectado { voice_room, .. } = aviso {
+                    avisada = Some(voice_room);
+                }
+            }
+            assert_eq!(
+                avisada,
+                Some(sala),
+                "a volta não avisou a sala que o motor refez nela: a casca desenha fora \
+                 de sala quem está sentado, e o áudio que segue o assento fecha a voz \
+                 de quem só caiu e voltou"
+            );
+        }
     }
 
     /// Uma ponta com certificado próprio que aceita todo aperto de mão do TLS e
@@ -8463,6 +8771,8 @@ mod tests {
             bateria: Battery::new(),
             inicio: Instant::now(),
             voice_room: None,
+            entradas: crate::assento::EntradasPendentes::default(),
+            queda: None,
             linha: None,
             muted: false,
             isolamento: false,

@@ -14,8 +14,8 @@
 //! casca roda) e o braço `ServerMessage::Session` de `Room::apply` (o caminho
 //! que os testes de conformidade mediam) eram duas cópias que já haviam
 //! divergido. Este arquivo agora exercita `adopt` — o caminho de verdade —
-//! chamando-o de novo sobre um `Room` que já tem gente sentada, exatamente
-//! como a FFI faz no braço de `Aviso::Reconectado`.
+//! chamando-o de novo sobre um `Room` que já tem gente sentada, como a FFI faz
+//! no braço de `Aviso::Reconectado` antes de refazer o pedido de entrada.
 //!
 //! # Como a queda é simulada
 //!
@@ -219,10 +219,13 @@ async fn quem_saiu_durante_a_queda_do_host_nao_volta_como_fantasma() -> Result<(
     // `ocupacao.rs::quem_volta_para_o_assento_guardado_reaparece_para_quem_ficou`.
     let mut a2 = conectar(endereco, 91, "a").await?;
 
-    // O braço de `Aviso::Reconectado` na FFI (`seele-ffi/src/lib.rs`) chama só
-    // `room.adopt(&sessao, &nickname)` sobre o **mesmo** `Room` que já tinha
-    // b sentado. É a chamada que este teste teria que provar sozinha, sem
-    // fundir as duas cópias em `state.rs`.
+    // O braço de `Aviso::Reconectado` na FFI (`readotar_na_volta`, em
+    // `seele-ffi/src/lib.rs`) chama `room.adopt(&sessao, &nickname)` sobre o
+    // **mesmo** `Room` que já tinha b sentado, e depois refaz o pedido que o
+    // motor refez — a entrada na sala, ou a saída. É o `adopt` que limpa os
+    // assentos dos outros, e é ele que este teste prova sozinho. O assento da
+    // própria A volta com ele quando o servidor o resgatou (o mesmo `ssrc`),
+    // e não entra na conta: a asserção é sobre b.
     sala_de_a.adopt(a2.sessao(), "a");
 
     // O que ainda chegar pelo fio depois da reconexão — não deveria haver
