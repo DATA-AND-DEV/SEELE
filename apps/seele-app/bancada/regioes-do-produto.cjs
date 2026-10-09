@@ -35,6 +35,15 @@ const chromium = require("./playwright.cjs").chromium();
  */
 const REGIOES = [
   { ponto: "redes", conteiner: "#trilha-mods", doProduto: ["#trilha-server", "#trilha-adicionar"] },
+  {
+    ponto: "operador.barra",
+    conteiner: "#operador-mods",
+    // O núcleo (§10): o microfone, o fone, o «no ar» e o SAIR.
+    doProduto: ["#botao-mudo", "#botao-surdo", "#voz-estado", "#operador-sair"],
+    // Conteúdo maior que a região rola por dentro, e o núcleo continua inteiro
+    // na janela.
+    teto: { aVista: ["#botao-mudo", "#operador-sair"] },
+  },
 ];
 
 (async () => {
@@ -78,7 +87,9 @@ const REGIOES = [
     await page.waitForSelector(".mensagens .corpo");
 
     for (const regiao of REGIOES) {
-      const medido = await page.evaluate(async ({ ponto, conteiner, doProduto }) => {
+      // Uma região que lança não esconde as outras: a falha é dela, e a rodada
+      // segue.
+      const medido = await page.evaluate(async ({ ponto, conteiner, doProduto, teto }) => {
         const r = window.testTable.snapshot;
         const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
         const doProdutoAgora = () => doProduto.map((seletor) => document.querySelector(seletor)?.outerHTML ?? null);
@@ -112,10 +123,41 @@ const REGIOES = [
         desenhar(r);
         await quadro();
         const depois = { conteiner: document.querySelector(conteiner)?.innerHTML ?? null, produto: doProdutoAgora() };
-        return { existe: Boolean(caixa), antes, dentro, emOutroLugar, comOMod, depois };
-      }, regiao);
+
+        // **O teto**: 16 linhas longas, ~1 700 px de conteúdo — mais do que a
+        // janela de 860 px, e dentro dos 64 nós de um cartão. Medido: com o
+        // teto, a região mostra 96 px e o SAIR fica a 778 px do topo; sem ele,
+        // o SAIR vai a 1 906 px, fora da janela. Muitas linhas curtas não
+        // serviam: 60 passavam do orçamento e não montavam nada, e 30 (480 px)
+        // cabiam na janela, encolhendo a lista de canais acima.
+        let foraDaVista = null;
+        if (teto) {
+          const grande = contribuicoesDosMods.registrar({ id: "mod/regiao" }, instancia, {
+            ponto,
+            modo: "adicionar",
+            conteudo: Array.from({ length: 16 }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i} `.repeat(24) })),
+          });
+          modsCarregados.set("mod/regiao", instancia);
+          desenhar(r);
+          await quadro();
+          foraDaVista = teto.aVista.filter((seletor) => {
+            const caixaDoNucleo = document.querySelector(seletor)?.getBoundingClientRect();
+            return !caixaDoNucleo || caixaDoNucleo.top < 0 || caixaDoNucleo.bottom > innerHeight
+              || caixaDoNucleo.height === 0;
+          });
+          contribuicoesDosMods.revogar(grande.handle, { id: "mod/regiao", instancia });
+          modsCarregados.delete("mod/regiao");
+          desenhar(r);
+          await quadro();
+        }
+        return { existe: Boolean(caixa), antes, dentro, emOutroLugar, comOMod, depois, foraDaVista };
+      }, regiao).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
 
       const { ponto } = regiao;
+      if (medido.erro) {
+        falhas.push(`${ponto}: ${medido.erro}`);
+        continue;
+      }
       if (!medido.existe) {
         falhas.push(`${ponto}: o contêiner ${regiao.conteiner} não está na página`);
         continue;
@@ -133,6 +175,11 @@ const REGIOES = [
       }
       if (medido.depois.produto.some((html, i) => html !== medido.antes.produto[i])) {
         falhas.push(`${ponto}: revogado, e o que é do produto não voltou ao que era`);
+      }
+      if (medido.foraDaVista?.length) {
+        const quais = medido.foraDaVista;
+        falhas.push(`${ponto}: com conteúdo maior que a região, ${quais.join(" e ")} `
+          + `${quais.length > 1 ? "saíram" : "saiu"} da vista`);
       }
     }
   } finally {

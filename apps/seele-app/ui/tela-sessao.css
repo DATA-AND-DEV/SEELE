@@ -861,6 +861,16 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
 }
 
+/* A região `operador.barra` (rascunho da API 6, §3): fechada como as outras, e
+   com teto de altura — o que passar rola por dentro, e o SAIR e o microfone,
+   embaixo dela, continuam onde estão. */
+.operador-mods {
+  max-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
 .operador-topo { display: flex; align-items: center; gap: 8px; }
 
 .operador-rotulo {

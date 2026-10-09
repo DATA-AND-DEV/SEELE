@@ -1042,6 +1042,7 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
+  aplicarARegiao("operador.barra", $("operador-mods"));
   $("operador-nome").textContent = snapshot.nickname;
   // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
   // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
