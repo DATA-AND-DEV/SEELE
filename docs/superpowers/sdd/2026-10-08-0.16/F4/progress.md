@@ -359,3 +359,38 @@ começar.
     servidor sobem para 4 MiB na troca;
   - **à orquestradora, o aviso de que o módulo está pronto** para a revisão da
     F1.
+
+### 09/10, a D-web-3: o web app também no PC, com a casca de desktop
+
+- **`b727691b`, o plano e a revisão das recusas.** As 68 recusas da matriz da
+  F8 (51 com nome e 17 com frase) foram revistas para o PC em
+  `F4/ponte-no-pc.md`. O lado de cada comando foi decidido pelo `main.rs`: o
+  que vai por `session.connection` é protocolo, e o que mexe na `hospedagem`
+  local só existe para quem hospeda.
+  - **Passam a ser atendidas:** a moderação **e a administração pela conexão**
+    (canais, salas, nome e ícone do servidor), a tecla de falar com a página em
+    foco, a tela cheia, a supressão de ruído, a saída de som e o
+    compartilhamento de tela (3.10).
+  - **Ficam recusadas:** hospedar e a portaria local, instalar e habilitar
+    MODs, as versões, o atualizador e o que é do sistema.
+  - A marca ganha dois valores, a Tarefa 3.10 entra, e a emenda D-web-3 do ADR
+    fica marcada para quando o plano fechar.
+- **`1e540682`, a medida da 3.10** (`spikes/tela-do-navegador/`): o Baseline
+  restrito 4.0 em Annex-B (`avc1.42E028`) sai no Chromium 151 e no Safari
+  27.0.1 do Mac, e o OpenH264 do desktop lê 60 de 60. **O `isConfigSupported`
+  do Safari mente:** em quatro dos seis perfis que ele diz aceitar, sai zero
+  pedaço e o `flush` não volta, sem erro. O botão só se oferece depois de uma
+  prova com prazo. O Chrome, o Edge, o Firefox e o som do `getDisplayMedia`
+  estão nos passos do dono.
+- **Pendente de envio**, com as mensagens entre sessões pausadas:
+  - **à orquestradora:**
+    - o resumo acima;
+    - um pedido de confirmação: estendi a «moderação» à administração pela
+      conexão, que é da mesma natureza (protocolo com papel);
+    - o achado do Safari;
+  - **à F8:**
+    - o critério da marca de dois valores;
+    - o teste do microfone fora da sala (fica ou não na casca de desktop);
+    - o `descrever_arquivo`, que no navegador recebe um `File`, e não um
+      caminho;
+  - **à F1**, o pedido de revisão do `354cf7c8` (registrado acima).
