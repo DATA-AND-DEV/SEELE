@@ -122,7 +122,8 @@ a specs/08. Cada endereço da resposta tem a sua barreira:
   servidor da mesma resposta, e a lista de conhecidos nunca guarda o que o
   quarto deu.
 
-**O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
+**O que sobra num servidor guardado**, que continua no `SEELE-ENC/1` (o
+`SEELE-ENC/2`, o registro assinado do ADR 0062, é da sala pessoal): quem
 toma as duas marcas do anfitrião no quarto — os nomes, tirados da impressão
 digital, sob os quais o servidor e a escuta se registram —, ou só a da escuta
 saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a porta e o

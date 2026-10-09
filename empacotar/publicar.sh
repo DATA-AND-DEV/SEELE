@@ -171,6 +171,12 @@ REPO_WINDOWS="${SEELE_WINDOWS_REPO:-C:\\SEELE}"
 TOKEN="${SEELE_GITHUB_TOKEN:-${GITHUB_TOKEN:-${GH_TOKEN:-}}}"
 PULAR=""
 SEM_BATERIA=nao
+SEM_PONTO=nao
+# O ponto de encontro que o portão do ENC/2 confere. O padrão é o de produção,
+# o mesmo `PONTO_PADRAO` que o app usa; a variável existe para conferir uma VPS
+# nova antes de o nome apontar para ela.
+PONTO_PADRAO_DO_PORTAO="encontro.seele.app.br"
+PONTO_DO_PORTAO="${SEELE_ENCONTRO_DO_PORTAO:-$PONTO_PADRAO_DO_PORTAO}"
 PARCIAL=nao
 SEM_ASSINATURA=nao
 SO_CONFERIR=nao
@@ -232,6 +238,8 @@ uso() {
 "  --repo <dono/repositório>    onde publicar; repita separando por espaço" \
 "  --pular <lista>              macos,windows,linux — separados por vírgula" \
 "  --sem-bateria                publica sem rodar os testes; para a emergência" \
+"  --sem-ponto                  publica sem conferir que o ponto de encontro em" \
+"                               produção fala o ENC/2; o corpo do release diz" \
 "  --parcial                    sobe o rascunho mesmo faltando sistema" \
 "  --sem-assinatura             segue sem a chave do projeto (release que não" \
 "                               atualiza ninguém)" \
@@ -248,6 +256,8 @@ uso() {
 "  TAURI_SIGNING_PRIVATE_KEY_PASSWORD    a senha dela" \
 "  SEELE_WINDOWS_SSH                     usuário@máquina do Windows" \
 "  SEELE_WINDOWS_REPO                    o repositório lá (hoje: C:\\SEELE)" \
+"  SEELE_ENCONTRO_DO_PORTAO              o ponto que o portão do ENC/2 confere" \
+"                                        (padrão: encontro.seele.app.br)" \
 "  SEELE_MANIFESTO_ANTERIOR              manifestos a acumular além do publicado" \
 "                                        (a 0.16.0 recebe o da 0.15.2 por aqui)"
 }
@@ -716,6 +726,34 @@ linha_da_bateria() {
     esac
 }
 
+# A linha do corpo do release que diz se o ponto de encontro foi conferido, e
+# qual.
+#
+# Como a da bateria: quem baixa não vê o terminal de quem publica, e uma versão
+# que saiu com `--sem-ponto` não pode sair com o mesmo texto de uma conferida.
+# A linha legada não fala o ENC/2 e não ganha linha nenhuma.
+#
+# **E qual ponto.** O `SEELE_ENCONTRO_DO_PORTAO` confere uma VPS nova antes de o
+# nome apontar para ela, e nesse caso o portão passa com o nome ainda no
+# binário velho. A linha dizia «o de produção fala o ENC/2» assim mesmo: a
+# armadilha do ADR 0047, dita como conferida (a revisão de 08/10/2026).
+#
+#   ./empacotar/publicar.sh --linha-do-ponto [--sem-ponto] [--linha-legada]
+linha_do_ponto() {
+    if [ "$2" = sim ]; then
+        return 0
+    fi
+    if [ "$1" = sim ]; then
+        printf '%s\n' "**Esta versão saiu com --sem-ponto: não foi conferido que o ponto de encontro em produção fala o ENC/2. Sem ele, ninguém acha ninguém pelo código.**"
+        return 0
+    fi
+    if [ "$PONTO_DO_PORTAO" != "$PONTO_PADRAO_DO_PORTAO" ]; then
+        printf '%s\n' "**Ponto de encontro: conferido em $PONTO_DO_PORTAO, que fala o ENC/2 — e não no padrão: $PONTO_PADRAO_DO_PORTAO, o que o app usa, não foi conferido.**"
+        return 0
+    fi
+    printf '%s\n' "Ponto de encontro: conferido antes de publicar — o de produção ($PONTO_DO_PORTAO) fala o ENC/2 em toda família que responde."
+}
+
 # A tag da versão publicada antes desta.
 #
 # Lê a lista de tags da entrada padrão — de novo para ser testável sem
@@ -762,6 +800,20 @@ if [ "${1:-}" = "--linha-da-bateria" ]; then
         SEM_BATERIA=sim
     fi
     linha_da_bateria "$SEM_BATERIA" "$2"
+    exit 0
+fi
+
+if [ "${1:-}" = "--linha-do-ponto" ]; then
+    # A linha do ponto do corpo do release, sozinha: sem git e sem rede.
+    shift
+    for lp_opcao in "$@"; do
+        case "$lp_opcao" in
+            --sem-ponto) SEM_PONTO=sim ;;
+            --linha-legada) LINHA_LEGADA=sim ;;
+            *) morrer "uso: $0 --linha-do-ponto [--sem-ponto] [--linha-legada]" ;;
+        esac
+    done
+    linha_do_ponto "$SEM_PONTO" "$LINHA_LEGADA"
     exit 0
 fi
 
@@ -815,6 +867,7 @@ while [ "$#" -gt 0 ]; do
             ;;
         --parcial) PARCIAL=sim; shift ;;
         --sem-bateria) SEM_BATERIA=sim; shift ;;
+        --sem-ponto) SEM_PONTO=sim; shift ;;
         --sem-assinatura) SEM_ASSINATURA=sim; shift ;;
         --conferir) SO_CONFERIR=sim; shift ;;
         --linha-legada) LINHA_LEGADA=sim; shift ;;
@@ -1237,6 +1290,56 @@ Write-Output ('estado=' + \$LASTEXITCODE)")
         fi
         passo "bateria no Windows: ok"
     fi
+}
+
+# **O ponto de encontro em produção fala o ENC/2** (D-enc-2, decidido pelo dono
+# em 08/10/2026; ADR 0062).
+#
+# Desde a 0.16 a sala pessoal se registra pelo ENC/2, e quem liga pelo código
+# pergunta por ele. Com o ponto de produção num binário anterior, ninguém acha
+# ninguém, e quem liga lê que o ponto não fala a versão 2. É o ADR 0047 de
+# novo: dez dias de recurso morto por um binário velho na VPS, com o app certo
+# do lado de cá. **A VPS vai antes do app** (spec-mestre da 0.16, §4), e este
+# passo é o que impede o esquecimento.
+#
+# Quem pergunta é o `sondar`, de fora, falando o protocolo: `--exige-enc2`
+# reprova quando alguma família que respondeu ao `ONDE` não fala o ENC/2, e
+# mede o relógio do ponto, que tem de estar a menos de 300 s. Ele roda só aqui,
+# na máquina de quem publica, e nenhum teste fala com o ponto de produção.
+#
+# **Antes de qualquer conferência com efeito**, como a das notas: o
+# `limpar_entrega` apaga, e o `conferir_windows` leva o Windows a outro commit.
+# A linha legada não fala o ENC/2 e não é conferida. `--sem-ponto` pula, para a
+# emergência que não depende do ponto, e o corpo do release diz.
+conferir_ponto_de_encontro() {
+    if [ "$LINHA_LEGADA" = sim ]; then
+        passo "linha legada: ela não fala o ENC/2, e o ponto de encontro não é conferido"
+        return 0
+    fi
+    if [ "$SEM_PONTO" = sim ]; then
+        aviso "ponto de encontro NÃO conferido, por --sem-ponto." \
+            "Se o de produção não falar o ENC/2, ninguém acha ninguém pelo código nesta" \
+            "versão. O corpo do release vai dizer isso."
+        return 0
+    fi
+    if ! cpe_saida=$(cargo run --manifest-path "$RAIZ/Cargo.toml" -q -p seele-encontro \
+        --example sondar -- --exige-enc2 "$PONTO_DO_PORTAO" 2>&1); then
+        morrer "o ponto de encontro em produção ($PONTO_DO_PORTAO) não fala o ENC/2 em toda família que responde." \
+            "Esta versão acha as pessoas pelo código por ele. Com o ponto velho, ninguém acha" \
+            "ninguém, e quem liga lê que o ponto não fala a versão 2." \
+            "" \
+            "Reimplante a VPS antes (docs/ponto-de-encontro.md, «Subir o seu»)." \
+            "O que o sondar disse:" \
+            "$cpe_saida" \
+            "" \
+            "Numa emergência que não depende do ponto: --sem-ponto, e o corpo do release diz."
+    fi
+    printf '%s\n' "$cpe_saida" | LC_ALL=C sed 's/^/    /'
+    if [ "$PONTO_DO_PORTAO" != "$PONTO_PADRAO_DO_PORTAO" ]; then
+        aviso "o ponto conferido foi $PONTO_DO_PORTAO, e não o padrão ($PONTO_PADRAO_DO_PORTAO)." \
+            "O app pergunta ao padrão. O corpo do release vai dizer que ele não foi conferido."
+    fi
+    passo "ponto de encontro ($PONTO_DO_PORTAO): fala o ENC/2 em toda família que responde"
 }
 
 conferir_arvore() {
@@ -1897,6 +2000,7 @@ conferir_ferramentas
 conferir_condicoes_das_notas
 conferir_arvore
 conferir_config_tauri
+conferir_ponto_de_encontro
 limpar_entrega
 conferir_chave
 conferir_docker
@@ -2204,6 +2308,8 @@ fi
 "alcançada por SSH — a partir do commit \`$COMMIT\`." \
 "" \
 "$(linha_da_bateria "$SEM_BATERIA" "$PEDIDOS")" \
+"" \
+"$(linha_do_ponto "$SEM_PONTO" "$LINHA_LEGADA")" \
 "" \
 "A consequência, e ela muda o que conferir: **não há atestado de procedência do" \
 "GitHub para esta versão.** \`gh attestation verify\` vai responder que não" \

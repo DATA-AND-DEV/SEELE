@@ -30,7 +30,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use seele_proto::control::Permission;
+use seele_proto::control::{Membro, Permission};
 use seele_proto::ids::{PersonId, RoleId};
 
 use crate::persistence::{now_seconds, Persistence};
@@ -148,6 +148,21 @@ impl<'a> Permissions<'a> {
     /// Returns [`Refusal::NicknameTaken`] if the name belongs to another key, or
     /// a database error.
     pub fn register_or_find(&self, public_key: &[u8], nickname: &str) -> Result<Person> {
+        self.registrar_ou_achar(public_key, nickname)
+            .map(|(person, _criou)| person)
+    }
+
+    /// O mesmo de [`Self::register_or_find`], dizendo se a conta **foi criada
+    /// agora**.
+    ///
+    /// É o que o FORA DO AR (D-fio-4) precisa para anunciar um membro novo
+    /// (`Event::MembroNovo`) só quando ele é novo: quem volta já era membro, e
+    /// um segundo anúncio faria a lista de todo mundo piscar.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::register_or_find`].
+    pub fn registrar_ou_achar(&self, public_key: &[u8], nickname: &str) -> Result<(Person, bool)> {
         if let Some(id) = self
             .connection
             .query_row(
@@ -198,7 +213,7 @@ impl<'a> Permissions<'a> {
             // servidor nunca teve Comandante; com marca, quem não tem o papel não
             // o tem por decisão de alguém.
             self.claim_never_held_commandership(id)?;
-            return self.person(PersonId(id as u64));
+            return Ok((self.person(PersonId(id as u64))?, false));
         }
 
         let taken: Option<i64> = self
@@ -221,7 +236,30 @@ impl<'a> Permissions<'a> {
         let id = self.connection.last_insert_rowid();
         self.seat_the_arrival(id)?;
 
-        self.person(PersonId(id as u64))
+        Ok((self.person(PersonId(id as u64))?, true))
+    }
+
+    /// Se `nickname` já é de outra chave: a mesma regra de [`Self::register_or_find`]
+    /// e de [`Self::rename`], **só lendo**.
+    ///
+    /// Existe para o aperto de mão perguntar antes de gastar o convite de uso
+    /// único: a recusa por apelido tomado vinha só ao criar a conta, com o
+    /// convite já gasto, e a pessoa que trocava de nome ficava com um link
+    /// morto. A conferência de dentro de `register_or_find` continua como rede.
+    ///
+    /// # Errors
+    ///
+    /// Se o banco não responder.
+    pub fn apelido_de_outra_chave(&self, public_key: &[u8], nickname: &str) -> Result<bool> {
+        let dono: Option<Vec<u8>> = self
+            .connection
+            .query_row(
+                "SELECT public_key FROM people WHERE nickname = ?1",
+                [nickname],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(dono.is_some_and(|dono| dono != public_key))
     }
 
     /// Gives a freshly created account its opening role.
@@ -575,6 +613,37 @@ impl<'a> Permissions<'a> {
         )?;
         Ok(count > 0)
     }
+
+    /// Os membros deste servidor: toda conta que não está banida agora, em
+    /// ordem de id.
+    ///
+    /// É a lista do grupo **FORA DO AR** (D-fio-4), que vai a quem entra em
+    /// `ServerMessage::Membros`. Só id e apelido: sem papéis e sem horário, de
+    /// propósito (ver `control::Membro`). Um banimento vencido não tira
+    /// ninguém, pela mesma regra de [`Self::is_banned`].
+    ///
+    /// # Errors
+    ///
+    /// Se o banco não responder.
+    pub fn membros(&self) -> Result<Vec<Membro>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, nickname FROM people
+             WHERE id NOT IN (
+                 SELECT person_id FROM bans
+                 WHERE expires_at IS NULL OR expires_at > ?1
+             )
+             ORDER BY id",
+        )?;
+        let membros = statement
+            .query_map([now_seconds()], |row| {
+                Ok(Membro {
+                    id: PersonId(row.get::<_, i64>(0)? as u64),
+                    nickname: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(membros)
+    }
 }
 
 #[cfg(test)]
@@ -625,6 +694,62 @@ mod tests {
         }
         permissions.grant_role(person.id, role).unwrap();
         person.id
+    }
+
+    /// **O FORA DO AR (D-fio-4):** os membros são as contas deste servidor, em
+    /// ordem de id, sem quem está banido agora. Um banimento vencido não tira
+    /// ninguém, pela mesma regra de `is_banned`.
+    #[test]
+    fn os_membros_sao_as_contas_sem_os_banidos_em_ordem_de_id() {
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let maya = permissions.register_or_find(&[2; 32], "maya").unwrap();
+        let shinji = permissions.register_or_find(&[3; 32], "shinji").unwrap();
+        let rei = permissions.register_or_find(&[4; 32], "rei").unwrap();
+        permissions
+            .ban(shinji.id, anfitriao.id, None, None)
+            .unwrap();
+        // Vencido em 1970.
+        permissions
+            .ban(rei.id, anfitriao.id, None, Some(1))
+            .unwrap();
+
+        let membro = |id, nickname: &str| Membro {
+            id,
+            nickname: nickname.into(),
+        };
+        assert_eq!(
+            permissions.membros().unwrap(),
+            vec![
+                membro(anfitriao.id, "anfitriao"),
+                membro(maya.id, "maya"),
+                membro(rei.id, "rei"),
+            ]
+        );
+    }
+
+    /// A consulta do aperto de mão segue a regra de `register_or_find`: o nome
+    /// de outra chave está tomado, o próprio não, e um nome de ninguém está livre.
+    #[test]
+    fn o_apelido_de_outra_chave_e_conferido_sem_escrever() {
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        permissions.register_or_find(&[1; 32], "maya").unwrap();
+
+        assert!(permissions
+            .apelido_de_outra_chave(&[2; 32], "maya")
+            .unwrap());
+        assert!(!permissions
+            .apelido_de_outra_chave(&[1; 32], "maya")
+            .unwrap());
+        assert!(!permissions
+            .apelido_de_outra_chave(&[2; 32], "shinji")
+            .unwrap());
+        assert!(
+            permissions.register_or_find(&[2; 32], "shinji").is_ok(),
+            "a consulta reservou o nome"
+        );
     }
 
     #[test]

@@ -3888,7 +3888,10 @@ fn build_destino(
         chave_do_pin: pin_key.to_owned(),
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
-        impressao_esperada: config.expected_fingerprint.clone(),
+        esperada: config
+            .expected_fingerprint
+            .clone()
+            .map(seele_core::enlace::Esperada::Certificado),
         // **O pino deste destino prova o servidor só no alvo, e só num alvo de
         // escopo público.** A regra mora aqui, e em nenhum outro lugar: ver
         // `seele_core::enlace::Destino::o_pino_prova_o_servidor`.
@@ -5181,6 +5184,17 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         seele_core::ConnectError::InviteMismatch { .. }
         | seele_core::ConnectError::ChaveNaoProvada => EndReason::ServidorTrocouNaVolta,
         seele_core::ConnectError::PinChanged { .. } => EndReason::ChaveMudouNaVolta,
+        // Na volta de uma ligação, quem atendeu não é mais a sala do código: o
+        // mesmo que o servidor que trocou, ou, com o pino, a chave que mudou.
+        seele_core::ConnectError::CodigoNaoConfere(falha) => match falha {
+            seele_core::confere_codigo::FalhaDoCodigo::SePassouPor { .. } => {
+                EndReason::ChaveMudouNaVolta
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::NaoEhChaveDePessoa { .. }
+            | seele_core::confere_codigo::FalhaDoCodigo::CodigoNaoBate { .. } => {
+                EndReason::ServidorTrocouNaVolta
+            }
+        },
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
         seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
@@ -5218,6 +5232,25 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                 offered: offered.clone(),
             }
         }
+        seele_core::ConnectError::CodigoNaoConfere(falha) => match falha {
+            seele_core::confere_codigo::FalhaDoCodigo::NaoEhChaveDePessoa { esperado } => {
+                ConnectionError::CodigoNaoBate {
+                    esperado: esperado.to_string(),
+                    veio: None,
+                }
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::CodigoNaoBate { esperado, veio } => {
+                ConnectionError::CodigoNaoBate {
+                    esperado: esperado.to_string(),
+                    veio: Some(veio.to_string()),
+                }
+            }
+            seele_core::confere_codigo::FalhaDoCodigo::SePassouPor { codigo } => {
+                ConnectionError::SePassouPorCodigo {
+                    codigo: codigo.to_string(),
+                }
+            }
+        },
         // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
         // certificado sem ter a chave aparecia como versão incompatível, e a
         // tela mandava atualizar o SEELE nas duas máquinas.
@@ -5457,7 +5490,7 @@ mod tests {
             playback_device: None,
         };
         let destino = build_destino(&with_fingerprint, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada, Some("aaaa1111".into()));
+        assert_eq!(destino.impressao_esperada(), Some("aaaa1111"));
 
         let without = ConnectConfig {
             expected_fingerprint: None,
@@ -5465,7 +5498,7 @@ mod tests {
             ..with_fingerprint
         };
         let destino = build_destino(&without, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada, None);
+        assert_eq!(destino.impressao_esperada(), None);
     }
 
     /// A configuração de uma conexão por link, com a impressão que ele promete.
@@ -5634,7 +5667,7 @@ mod tests {
         let verificador = TofuVerifier::new(
             Arc::clone(&loja) as Arc<dyn PinStore>,
             destino.chave_do_pin.clone(),
-            destino.impressao_esperada.clone(),
+            destino.impressao_esperada().map(str::to_owned),
             destino.o_pino_prova_o_servidor,
         );
         let decisao = verificador.decide(&destino.chave_do_pin, DE_QUEM_ATENDE);

@@ -272,20 +272,39 @@ fn resolver_o_nome_acontece_dentro_do_prazo_e_nao_antes_dele() {
 
     // **Sem os comentários.** A primeira versão deste guarda casou com a prosa
     // que explica o defeito e acusou o código de ter o defeito que o comentário
-    // descreve.
-    let corpo: String = fonte
-        .split("pub async fn onde_mora_hoje(")
-        .nth(1)
-        .and_then(|resto| resto.split("\nasync fn ").next())
-        .unwrap_or_default()
-        .lines()
-        .filter(|linha| !linha.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // descreve. O corpo de uma função vai da assinatura dela ao fecho na
+    // coluna zero.
+    let corpo_de = |assinatura: &str| -> String {
+        fonte
+            .split(assinatura)
+            .nth(1)
+            .and_then(|resto| resto.split("\n}\n").next())
+            .unwrap_or_default()
+            .lines()
+            .filter(|linha| !linha.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
+    // A resolução mora em `consultar_o_ponto`, que as duas consultas dividem
+    // desde o ENC/2: a do `QUEM` (`onde_mora_hoje`) e a do `QUEM2`
+    // (`localizar`). As duas têm de passar por ela, e é nela que o prazo vale.
+    for consulta in ["pub async fn onde_mora_hoje(", "pub async fn localizar("] {
+        let corpo = corpo_de(consulta);
+        assert!(
+            corpo.contains("consultar_o_ponto("),
+            "`{consulta}` deixou de passar por `consultar_o_ponto`, onde o ponto se resolve \
+             dentro do prazo:\n{corpo}"
+        );
+        assert!(
+            !corpo.contains("lookup_host"),
+            "`{consulta}` resolve o nome por conta própria, fora do prazo:\n{corpo}"
+        );
+    }
+    let corpo = corpo_de("async fn consultar_o_ponto<");
     assert!(
         corpo.contains("timeout_at(ate, resolver_ponto(ponto))"),
-        "`onde_mora_hoje` deixou de resolver o ponto dentro do prazo:\n{corpo}"
+        "`consultar_o_ponto` deixou de resolver o ponto dentro do prazo:\n{corpo}"
     );
     assert!(
         !corpo.contains("lookup_host"),

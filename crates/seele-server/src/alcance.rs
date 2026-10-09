@@ -1102,6 +1102,17 @@ impl Escada {
         }
     }
 
+    /// Como está o registro assinado da sala no ponto (ENC/2), para a casca
+    /// dizer; `None` sem degrau 4, ou num servidor guardado.
+    #[must_use]
+    pub fn registro_no_quarto(
+        &self,
+    ) -> Option<tokio::sync::watch::Receiver<encontro::EstadoDoRegistro>> {
+        self.encontro
+            .as_ref()
+            .and_then(encontro::Encontro::registro)
+    }
+
     /// O bilhete que vai no `seele://`, se o degrau 4 deu.
     ///
     /// `None` é o caso comum e o desejável: quem alcança de fora sem

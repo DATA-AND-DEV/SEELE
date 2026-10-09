@@ -40,8 +40,11 @@ const SPKI_ED25519: [u8; 12] = [
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FalhaDoCodigo {
     /// O certificado não traz uma chave Ed25519: não é uma sala pessoal.
-    #[error("quem atendeu não apresentou a chave de uma pessoa")]
-    NaoEhChaveDePessoa,
+    #[error("quem atendeu não apresentou a chave de uma pessoa; esperado {esperado}")]
+    NaoEhChaveDePessoa {
+        /// O código que quem liga digitou.
+        esperado: Codigo,
+    },
     /// A chave de quem atendeu tem outro código.
     #[error("quem atendeu não é o dono deste código: esperado {esperado}, veio {veio}")]
     CodigoNaoBate {
@@ -73,7 +76,11 @@ pub fn chave_do_pino(codigo: &Codigo) -> String {
 }
 
 /// A chave Ed25519 crua de um certificado, ou nada se ele não for Ed25519.
-fn chave_ed25519(certificado: &CertificateDer<'_>) -> Option<[u8; 32]> {
+///
+/// É o que quem disca pina sob [`chave_do_pino`] depois de uma ligação
+/// completa.
+#[must_use]
+pub fn chave_do_certificado(certificado: &CertificateDer<'_>) -> Option<[u8; 32]> {
     let analisado = rustls::server::ParsedCertificate::try_from(certificado).ok()?;
     let spki = analisado.subject_public_key_info();
     let bytes: &[u8] = spki.as_ref();
@@ -120,7 +127,9 @@ impl ConfereCodigo {
     ///
     /// [`FalhaDoCodigo`], dizendo qual dos três casos foi.
     pub fn confere(&self, certificado: &CertificateDer<'_>) -> Result<[u8; 32], FalhaDoCodigo> {
-        let chave = chave_ed25519(certificado).ok_or(FalhaDoCodigo::NaoEhChaveDePessoa)?;
+        let chave = chave_do_certificado(certificado).ok_or(FalhaDoCodigo::NaoEhChaveDePessoa {
+            esperado: self.esperado,
+        })?;
         let veio = Codigo::da_chave(&chave);
         if veio != self.esperado {
             return Err(FalhaDoCodigo::CodigoNaoBate {
@@ -226,10 +235,11 @@ mod tests {
         pkcs8.extend_from_slice(&semente);
         let der = rustls::pki_types::PrivatePkcs8KeyDer::from(pkcs8);
         let par = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&der, &rcgen::PKCS_ED25519).unwrap();
-        let certificado = rcgen::CertificateParams::new(vec!["seele-sala".to_owned()])
-            .unwrap()
-            .self_signed(&par)
-            .unwrap();
+        let certificado =
+            rcgen::CertificateParams::new(vec![seele_proto::transport::NOME_DA_SALA.to_owned()])
+                .unwrap()
+                .self_signed(&par)
+                .unwrap();
         (
             certificado.der().clone(),
             rustls::pki_types::PrivateKeyDer::Pkcs8(der),
@@ -281,7 +291,9 @@ mod tests {
         ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls)?,
         )));
-        let conexao = ponta.connect(endereco, "seele-sala")?.await?;
+        let conexao = ponta
+            .connect(endereco, seele_proto::transport::NOME_DA_SALA)?
+            .await?;
         let (mut envio, _) = conexao.open_bi().await?;
         envio.write_all(b"oi").await?;
         envio.finish()?;
@@ -361,11 +373,14 @@ mod tests {
 
     #[test]
     fn um_certificado_que_nao_e_ed25519_nao_e_uma_sala() {
-        let comum = rcgen::generate_simple_self_signed(vec!["seele-sala".to_owned()]).unwrap();
+        let comum = rcgen::generate_simple_self_signed(vec![
+            seele_proto::transport::NOME_DA_SALA.to_owned()
+        ])
+        .unwrap();
         let codigo = Codigo::da_chave(&chave_publica(SEMENTE));
         assert_eq!(
             ConfereCodigo::novo(codigo, None).confere(comum.cert.der()),
-            Err(FalhaDoCodigo::NaoEhChaveDePessoa)
+            Err(FalhaDoCodigo::NaoEhChaveDePessoa { esperado: codigo })
         );
     }
 

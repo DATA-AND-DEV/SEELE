@@ -72,7 +72,7 @@ fn destinos_mortos_de_teste() -> Vec<Destino> {
                 chave_do_pin: servidor.to_string(),
                 apelido: "pessoa".into(),
                 segredo: None,
-                impressao_esperada: None,
+                esperada: None,
                 o_pino_prova_o_servidor: posicao == 0,
                 aceito: None,
             }

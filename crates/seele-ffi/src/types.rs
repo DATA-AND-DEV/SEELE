@@ -2059,6 +2059,29 @@ pub enum ConnectionError {
         /// What the server offered.
         offered: String,
     },
+    /// Quem atendeu não é a sala do código para o qual se ligou (ADR 0060).
+    ///
+    /// Recusada dentro do TLS, antes do `Hello`: nada do que quem liga diria
+    /// chegou a quem atendeu. `veio` é o código da chave que quem atendeu
+    /// apresentou, e `None` quando nem era a chave de uma pessoa.
+    ///
+    /// A frase («QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO») é da casca, junto com
+    /// o caminho que disca um código (tarefa 7f da sala). Até lá, nada no app
+    /// disca um código, e esta variante não chega à tela.
+    CodigoNaoBate {
+        /// O código que quem liga digitou.
+        esperado: String,
+        /// O código da chave que quem atendeu apresentou.
+        veio: Option<String>,
+    },
+    /// A chave de quem atendeu tem o código certo e não é a que ficou pinada na
+    /// primeira ligação: alguém achou uma chave com o mesmo código (ADR 0060,
+    /// «Força»). A frase («ALGUÉM TENTOU SE PASSAR POR …») é da casca, como a
+    /// de [`Self::CodigoNaoBate`].
+    SePassouPorCodigo {
+        /// O código de quem se passou.
+        codigo: String,
+    },
     /// Quem atendeu mostrou o certificado do servidor sem provar ter a chave
     /// que o assina.
     ///

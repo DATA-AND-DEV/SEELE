@@ -8273,3 +8273,65 @@ grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
 grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
 ```
 
+
+## 56 · Os testes que leem o log perdem linhas quando rodam em paralelo
+
+**Aberta em 2026-10-08**, achada pela F7 da 0.16 num teste da recepção da sala
+pessoal que reprovava junto com o módulo e passava sozinho. **Pode explicar
+vermelhos intermitentes da bateria que ninguém reproduziu sozinho.**
+
+**O mecanismo (medido no `tracing-core` 0.1.36, `callsite.rs`).** Com um
+despachante só registrado, `Dispatchers::rebuilder` devolve
+`Rebuilder::JustOne`, e o interesse de uma linha de log é decidido por
+`dispatcher::get_default`, ou seja, pelo assinante **da thread que registra a
+linha primeiro**. Um teste sem captura que passa por uma linha, enquanto a
+captura de outro teste é o único despachante de pé, deixa a linha marcada como
+«nunca»; o teste que a captura deixa de vê-la. O `rebuild_interest_cache()` ao
+abrir a captura não basta, porque outra thread pode registrar a linha depois.
+
+- `crates/seele-server/src/recepcao.rs`: sem o conserto, 3 em 3 rodadas do
+  módulo vermelhas; com o `rebuild_interest_cache`, 10 em 10 vermelhas; com um
+  segundo despachante vivo, 20 em 20 verdes;
+- o app mediu 7 falhas em 20 rodadas do módulo do som com o
+  `rebuild_interest_cache` (`1405210b`).
+
+Com dois despachantes vivos, a pergunta vai a todos, a linha fica «às vezes», e
+cada evento pergunta à thread em que acontece.
+
+**O conserto que já existe:**
+- `apps/seele-app/src/main.rs`, `rastro_de_teste::segundo_despachante()`: um
+  `OnceLock<tracing::Dispatch>` com `NoSubscriber`, chamado por `capturar`, com
+  a prova de ordem forçada `uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada`;
+- `crates/seele-server/src/recepcao.rs`, o mesmo truque dentro do teste do log
+  (F7, `3fc72adb`).
+
+**Os testes expostos**, que leem o log por `with_default`/`set_default` sem o
+segundo despachante. Achados por `grep -rn "subscriber::with_default\|subscriber::set_default"`,
+nenhum medido um a um:
+- `seele-core`, todos pelo `Rastro` (`rastro_de_teste.rs`, `set_default`):
+  - `enlace.rs`, 10 testes (os pins desfeitos que vão ao log, a limpeza que não
+    escreve nada, a volta recusada no registro, as recusas de candidato, o
+    anexo não salvo);
+  - `encontro.rs`, 7 testes (os que dizem «no rastro»);
+  - `anexo_no_disco.rs`, 4 testes (os três «fica dito no log» e
+    `sem_link_fisico_o_recuo…`);
+  - `par.rs`: `repassar_avisa_quando_o_canal_fecha_sem_a_chave_chegar`;
+  - `tofu.rs`: o auxiliar `o_que_decide_diz` e quem o usa;
+  - `client.rs`: `um_aperto_de_mao_sem_decisao_do_verificador_falha_e_diz_por_que`;
+- `seele-server`: `admissao.rs` (o erro de banco do `voice_room_liberado`),
+  `mods/pedidos.rs` (o auxiliar `o_registro_da_recusa`), `alcance/encontro.rs`
+  (o auxiliar `de_info`, que devolve um `DefaultGuard`);
+- `seele-ffi`: `lib.rs`, `o_log_da_trilha_diz_qual_candidato_deu_o_que`.
+
+**O conserto proposto, no lote Z da F5 da 0.16.** Um auxiliar por crate, e não
+um crate novo (o auxiliar tem três linhas):
+- `seele-core`: `Rastro::a_partir_de` passa a chamar um `segundo_despachante()`
+  (`OnceLock`, o mesmo do app) — cerca de 24 testes consertados num lugar só;
+- `seele-server`: um `#[cfg(test)] pub(crate) mod rastro_de_teste` com o mesmo
+  auxiliar, usado por `admissao`, `pedidos`, `alcance/encontro` e `recepcao`;
+- `seele-ffi`: o único teste chama uma cópia local;
+- cada cópia leva a prova de ordem forçada do app, e tirar o
+  `segundo_despachante()` precisa reprová-la.
+
+**Quando fecha.** Com o auxiliar nos três crates e a prova de ordem forçada em
+cada um, provada por reversão.
