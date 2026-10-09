@@ -11,13 +11,20 @@
 use std::path::PathBuf;
 
 /// As cascas do navegador: o prefixo dos arquivos, a raiz que toda regra de CSS
-/// dela começa, e a primeira linha de todo script dela. A casca larga (D-web-3)
-/// entra nesta tabela na Tarefa 17, junto com os arquivos dela.
-const CASCAS: &[(&str, &str, &str)] = &[(
-    "celular-",
-    ":root[data-casca=\"celular\"]",
-    "if (document.documentElement.dataset.casca !== \"celular\") return;",
-)];
+/// dela começa, e a primeira linha de todo script dela.
+const CASCAS: &[(&str, &str, &str)] = &[
+    (
+        "celular-",
+        ":root[data-casca=\"celular\"]",
+        "if (document.documentElement.dataset.casca !== \"celular\") return;",
+    ),
+    // A casca larga (D-web-3): o desktop no navegador de um computador.
+    (
+        "larga-",
+        ":root[data-casca=\"larga\"]",
+        "if (document.documentElement.dataset.casca !== \"larga\") return;",
+    ),
+];
 
 fn ui() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui")

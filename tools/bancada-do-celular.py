@@ -134,6 +134,8 @@ APARELHOS = {
     "1280": {"largura": 1280, "altura": 800, "topo": 0, "pe": 0, "celular": False},
     # O iPhone deitado: a ilha vai para o lado, e a barra de gestos fica embaixo.
     "deitado": {"largura": 844, "altura": 390, "topo": 0, "pe": 21},
+    # Um computador, com mouse: a casca larga (D-web-3).
+    "1440": {"largura": 1440, "altura": 900, "topo": 0, "pe": 0, "celular": False, "toque": False},
 }
 
 # Os temas de teste, aplicados pelo produto (`temaDosMods`), e não à mão. São os
@@ -397,6 +399,10 @@ class Caso:
     # O texto do sistema (1 é o padrão; 1,5 é o tamanho grande de acessibilidade).
     escala: float = 1.0
     aparelhos: tuple[str, ...] = ("390", "360")
+    # A casca do navegador: "celular", ou "larga" para o computador.
+    marca: str = "celular"
+    # Entrar na sessão antes do caso; um caso da entrada entra ele mesmo.
+    entrar: bool = True
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -434,7 +440,11 @@ def tocar(pg: Page, seletor: str) -> bool:
     try:
         # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
         # alcança: o Playwright desiste em três segundos, e o caso diz isso.
-        alvo.tap(timeout=3000)
+        # Num computador (a casca larga) não há dedo, e o toque é o clique.
+        if pg.evaluate("navigator.maxTouchPoints") > 0:
+            alvo.tap(timeout=3000)
+        else:
+            alvo.click(timeout=3000)
     except ErroDoPlaywright:
         return False
     return True
@@ -1255,6 +1265,82 @@ def deitado(pg: Page) -> list[str]:
     return falhas
 
 
+def casca_larga(pg: Page) -> list[str]:
+    """A casca larga (Tarefa 17, D-web-3): o desktop no navegador de um
+    computador. O que é do Tauri sai, e o que só o app faz vira frase no lugar
+    do controle. O caso começa na entrada, antes de entrar."""
+    falhas = []
+    visivel = "(s) => { const e = document.querySelector(s); return !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; }"
+    pg.wait_for_function("typeof conectar === 'function'")
+    pg.wait_for_timeout(600)
+
+    entrada = pg.evaluate("""(visivel) => {
+        const v = new Function('s', 'return (' + visivel + ')(s)');
+        const link = document.querySelector('.larga-hospedar a');
+        return { barra: v('#barra-janela'), hospedar: v('#botao-hospedar'), nomePublico: v('#boot-nome-publico'),
+                 versoes: v('#boot-versoes'), frase: document.querySelector('.larga-hospedar')?.textContent ?? null,
+                 link: link?.getAttribute('href') ?? null,
+                 proposito: document.querySelector('#tela-boot .boot-proposito').textContent,
+                 topo: Math.round(document.getElementById('tela-boot').getBoundingClientRect().top) };
+    }""", visivel)
+    if entrada["barra"]:
+        falhas.append("a barra da janela continua à vista: no navegador, quem desenha a janela é ele")
+    if entrada["hospedar"] or entrada["nomePublico"] or entrada["versoes"]:
+        falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
+    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://seele.app.br/#baixar":
+        falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
+    if "pela" in entrada["proposito"] and "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
+        falhas.append(f"o propósito ainda fala em pôr um servidor no ar: {entrada['proposito']!r}")
+    if entrada["topo"] != 0:
+        falhas.append(f"a entrada não começa no alto da página: {entrada['topo']}")
+    antes = pg.evaluate("(() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()")
+    if antes:
+        falhas.append("sem sessão, sair da página pergunta antes (não há o que perder)")
+
+    entrar(pg)
+    sessao = pg.evaluate("""(() => { const r = document.getElementById('tela-sessao').getBoundingClientRect();
+        const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e);
+        return { topo: Math.round(r.top), altura: Math.round(r.height), pergunta: e.defaultPrevented }; })()""")
+    if sessao["topo"] != 0 or sessao["altura"] != pg.evaluate("innerHeight"):
+        falhas.append(f"a sessão não ocupa a página inteira: {sessao}")
+    if not sessao["pergunta"]:
+        falhas.append("com a sessão aberta, sair da página não pergunta antes: recarregar derruba a sessão")
+
+    # CONFIGURAÇÕES: o que é do app vira frase no lugar.
+    exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(600)
+
+    def secao(id_, painel):
+        if not exigir_toque(pg, f"#{id_}", falhas):
+            return None
+        pg.wait_for_timeout(300)
+        return pg.evaluate("""([painel, visivel]) => {
+            const v = new Function('s', 'return (' + visivel + ')(s)');
+            const p = document.getElementById(painel);
+            return { frase: p.querySelector('.larga-frase')?.textContent ?? '',
+                     blocos: [...p.querySelectorAll('.server-bloco')].filter((b) => getComputedStyle(b).display !== 'none').length,
+                     procurar: v('#atualizacao-procurar') };
+        }""", [painel, visivel])
+
+    atualizacao = secao("secao-atualizacao", "painel-atualizacao")
+    if atualizacao and ("origem" not in atualizacao["frase"] or atualizacao["procurar"] or atualizacao["blocos"]):
+        falhas.append(f"ATUALIZAÇÃO não diz que a página vem da origem, ou ainda procura e instala: {atualizacao}")
+    versoes = secao("secao-versoes", "painel-versoes")
+    if versoes and ("app do SEELE" not in versoes["frase"] or versoes["blocos"]):
+        falhas.append(f"VERSÕES não diz que guardar versões é do app: {versoes}")
+    atalhos = secao("secao-atalhos", "painel-atalhos")
+    if atalhos and "foco" not in atalhos["frase"]:
+        falhas.append(f"a tecla de falar não diz que só vale com a página em foco: {atalhos}")
+    if exigir_toque(pg, "#larga-secao-fora", falhas):
+        pg.wait_for_timeout(300)
+        fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
+            return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
+                     link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
+        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 7 or fora["link"] != "https://seele.app.br/#baixar":
+            falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -1287,6 +1373,8 @@ CASOS: dict[str, Caso] = {
     "tela-larga": Caso(levar=tela_larga, aparelhos=("1280",), medir=False),
     "voltar": Caso(levar=voltar, medir=False),
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
+    # A casca larga (Tarefa 17): o computador, com a marca larga.
+    "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
 }
 
 
@@ -1297,10 +1385,10 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
         nucleo_nativo = None
         for tema in (None, *caso.temas):
             rotulo = f"{nome}-{tamanho}" + (f"-{tema}" if tema else "")
-            pagina = montar(temporaria / rotulo, celular=True, marca="celular")
+            pagina = montar(temporaria / rotulo, celular=True, marca=caso.marca)
             ctx = navegador.new_context(
                 viewport={"width": aparelho["largura"], "height": aparelho["altura"]},
-                device_scale_factor=1, is_mobile=aparelho.get("celular", True), has_touch=True,
+                device_scale_factor=1, is_mobile=aparelho.get("celular", True), has_touch=aparelho.get("toque", True),
                 reduced_motion="reduce", locale="pt-BR",
             )
             pg = ctx.new_page()
@@ -1310,7 +1398,8 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
-            entrar(pg)
+            if caso.entrar:
+                entrar(pg)
             pg.evaluate(
                 f"""document.documentElement.style.setProperty('--cel-seguro-topo', '{aparelho['topo']}px');
                     document.documentElement.style.setProperty('--cel-seguro-pe', '{aparelho['pe']}px');"""
