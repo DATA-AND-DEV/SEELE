@@ -126,7 +126,9 @@ fn destino_com_nome(alvo: &str, nome_tls: &str, e_o_alvo: bool) -> Destino {
         chave_do_pin: alvo.to_owned(),
         apelido: "pessoa".to_owned(),
         segredo: None,
-        impressao_esperada: Some(IMPRESSAO.to_owned()),
+        esperada: Some(seele_core::enlace::Esperada::Certificado(
+            IMPRESSAO.to_owned(),
+        )),
         o_pino_prova_o_servidor,
         aceito: None,
     }

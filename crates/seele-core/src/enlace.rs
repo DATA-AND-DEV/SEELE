@@ -58,6 +58,18 @@ use crate::tofu::PinStore;
 use crate::tofu::{verdict, Verdict};
 use crate::video::{LimitesDeTela, PedidoDeTela};
 
+/// O que quem disca espera de quem atende, conferido **dentro do TLS**, antes
+/// do `Hello`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Esperada {
+    /// A impressão do certificado de um servidor: a do link colado nesta
+    /// sessão, ou a que a lista de servidores guardou para a entrada.
+    Certificado(String),
+    /// O código de uma pessoa: quem atende tem de ser a sala dela (ADR 0060),
+    /// conferida pelo [`crate::confere_codigo::ConfereCodigo`].
+    Codigo(seele_proto::codigo::Codigo),
+}
+
 /// Onde ficar batendo, e com que credencial.
 #[derive(Debug, Clone)]
 pub struct Destino {
@@ -71,9 +83,10 @@ pub struct Destino {
     pub apelido: String,
     /// Convite de uso único ou senha do servidor.
     pub segredo: Option<String>,
-    /// A impressão digital que se espera: a do link colado nesta sessão, ou a
-    /// que a lista de servidores guardou para a entrada (quem escolhe entre as
-    /// duas é a casca; `seele_ffi::impressao_a_conferir`).
+    /// O que se espera de quem atende: a impressão digital do link colado
+    /// nesta sessão ou da que a lista de servidores guardou para a entrada
+    /// (quem escolhe entre as duas é a casca; `seele_ffi::impressao_a_conferir`),
+    /// ou o código de uma pessoa. Ver [`Esperada`] e [`Destino::impressao_esperada`].
     ///
     /// `None` quando não há nenhuma das duas — quem digitou à mão um endereço
     /// que a lista não conhece: aí não há o que conferir, e o primeiro contato
@@ -87,7 +100,7 @@ pub struct Destino {
     /// verificador; onde não prova, é recusado como o primeiro contato (ver
     /// [`Destino::o_pino_prova_o_servidor`]). Vale na entrada e na volta da
     /// bateria interna.
-    pub impressao_esperada: Option<String>,
+    pub esperada: Option<Esperada>,
     /// Se o pino deste destino prova o servidor.
     ///
     /// O pin é por endereço de candidato, e prova só *este endereço*: este
@@ -139,6 +152,21 @@ pub struct Destino {
     /// `None` em quem nunca aceitou nada daquele servidor — que é o estado de
     /// toda primeira entrada, e de todo servidor sem MOD.
     pub aceito: Option<String>,
+}
+
+impl Destino {
+    /// A impressão esperada, quando o que se espera é um certificado.
+    ///
+    /// `None` também num destino de código: quem liga para uma pessoa espera
+    /// uma chave, e não uma impressão. A batida no ponto, o veredito e a
+    /// chegada leem por aqui.
+    #[must_use]
+    pub fn impressao_esperada(&self) -> Option<&str> {
+        match &self.esperada {
+            Some(Esperada::Certificado(impressao)) => Some(impressao),
+            Some(Esperada::Codigo(_)) | None => None,
+        }
+    }
 }
 
 /// O que a casca precisa saber.
@@ -1092,7 +1120,7 @@ impl Enlace {
             Some(bilhete) => {
                 let impressao = destinos
                     .first()
-                    .and_then(|destino| destino.impressao_esperada.as_deref());
+                    .and_then(|destino| destino.impressao_esperada());
                 crate::encontro::Batida::preparar(bilhete, impressao).await
             }
             None => None,
@@ -1386,7 +1414,7 @@ impl Enlace {
             // contato que não confere nem chega a mandar o convite. É o mesmo
             // caminho para todo candidato da corrida do ADR 0037, porque todos
             // passam por aqui.
-            destino.impressao_esperada.as_deref(),
+            destino.impressao_esperada(),
             // E se o pino deste candidato prova o servidor: onde não prova (fora
             // do alvo, ou num alvo de escopo local), um pin que confere não
             // passa por cima da impressão.
@@ -2854,11 +2882,7 @@ impl Motor {
         // do anfitrião a cada tica da bateria.
         let batida = match &self.bilhete {
             Some(bilhete) => {
-                crate::encontro::Batida::preparar(
-                    bilhete,
-                    self.destino.impressao_esperada.as_deref(),
-                )
-                .await
+                crate::encontro::Batida::preparar(bilhete, self.destino.impressao_esperada()).await
             }
             None => None,
         };
@@ -2881,7 +2905,7 @@ impl Motor {
                     // existe e decide sozinho; ela pesa quando o pin sumiu entre
                     // a queda e a volta, e sem ela a reconexão fixaria às cegas
                     // quem atendesse. Guardado em `bateria_interna.rs`.
-                    self.destino.impressao_esperada.as_deref(),
+                    self.destino.impressao_esperada(),
                     // A volta é ao endereço que venceu, e o pino dele prova o
                     // servidor, ou não, como na entrada. Guardado nos dois
                     // sentidos em `a_volta_da_bateria_onde_o_pino_…`.
@@ -4835,7 +4859,7 @@ fn conferir(
     pin: &PinDecision,
     pins: &dyn PinStore,
 ) -> Result<Verdict, ConnectError> {
-    let veredito = verdict(pin, destino.impressao_esperada.as_deref());
+    let veredito = verdict(pin, destino.impressao_esperada());
 
     // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
     // dentro do `if`: o verificador fixa a chave dentro do retorno de chamada
@@ -5571,6 +5595,29 @@ fn vale_insistir(erro: &ConnectError) -> bool {
 mod tests {
     use super::*;
 
+    /// A impressão esperada só existe para um certificado: quem liga para um
+    /// código espera uma chave, e não uma impressão (spec de 23/09, «Quem liga
+    /// confere o código dentro do TLS»). Os que leem a impressão (a batida no
+    /// ponto, o veredito, a chegada) passam a não ver nenhuma num destino de
+    /// código, e não uma impressão inventada.
+    #[test]
+    fn a_impressao_esperada_so_existe_para_um_certificado() {
+        let mut destino = destino_de_teste(Some("ab"));
+        assert_eq!(destino.impressao_esperada(), Some("ab"));
+
+        destino.esperada = Some(Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(
+            &[7; 32],
+        )));
+        assert_eq!(
+            destino.impressao_esperada(),
+            None,
+            "um destino de código passou a ter uma impressão esperada"
+        );
+
+        destino.esperada = None;
+        assert_eq!(destino.impressao_esperada(), None);
+    }
+
     /// Toda despedida do protocolo tem de escolher um lado, e escolher **aqui**.
     ///
     /// # O que este teste prova, e o que ele não prova
@@ -5906,7 +5953,7 @@ mod tests {
             chave_do_pin: "casa".into(),
             apelido: "pessoa".into(),
             segredo: None,
-            impressao_esperada: impressao_esperada.map(str::to_owned),
+            esperada: impressao_esperada.map(|fp| Esperada::Certificado(fp.to_owned())),
             o_pino_prova_o_servidor: true,
             aceito: None,
         }
@@ -6440,9 +6487,9 @@ mod tests {
             segredo: None,
             // Uma impressão digital de verdade: é dela que sai a marca do
             // aviso, e sem ela não se bate em ponto de encontro nenhum.
-            impressao_esperada: Some(
+            esperada: Some(Esperada::Certificado(
                 "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
-            ),
+            )),
             o_pino_prova_o_servidor,
             aceito: None,
         };
@@ -6611,7 +6658,7 @@ mod tests {
             chave_do_pin: chave.to_owned(),
             apelido: "pessoa".into(),
             segredo: None,
-            impressao_esperada: esperada.map(str::to_owned),
+            esperada: esperada.map(|fp| Esperada::Certificado(fp.to_owned())),
             o_pino_prova_o_servidor: true,
             aceito: None,
         }
@@ -6811,8 +6858,9 @@ mod tests {
         // e este teste mediria o próprio silêncio.
         motor.destino.servidor = "[::ffff:127.0.0.1]:9".parse().expect("endereço");
         motor.destino.nome_tls = "nome inválido com espaço".into();
-        motor.destino.impressao_esperada =
-            Some("3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned());
+        motor.destino.esperada = Some(Esperada::Certificado(
+            "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
+        ));
 
         motor.tentar().await;
         tokio::time::sleep(Duration::from_millis(2500)).await;
@@ -7038,7 +7086,7 @@ mod tests {
         motor.destino.servidor = endereco;
         motor.destino.nome_tls = "localhost".into();
         motor.destino.chave_do_pin = endereco.to_string();
-        motor.destino.impressao_esperada = Some("ab".repeat(32));
+        motor.destino.esperada = Some(Esperada::Certificado("ab".repeat(32)));
         motor.destino.o_pino_prova_o_servidor = o_pino_prova_o_servidor;
         (motor, loja)
     }
@@ -8023,7 +8071,7 @@ mod tests {
                 chave_do_pin: "127.0.0.1:1".into(),
                 apelido: "pessoa".into(),
                 segredo: None,
-                impressao_esperada: None,
+                esperada: None,
                 o_pino_prova_o_servidor: true,
                 aceito: None,
             },

@@ -57,7 +57,7 @@ fn destino(endereco: SocketAddr) -> Destino {
         chave_do_pin: endereco.to_string(),
         apelido: "marcela".into(),
         segredo: None,
-        impressao_esperada: None,
+        esperada: None,
         o_pino_prova_o_servidor: true,
         aceito: None,
     }
@@ -624,7 +624,7 @@ async fn a_volta_da_bateria_recusa_no_tls_o_impostor_que_a_impressao_desmente() 
     let loja = Arc::new(MemoryPinStore::new());
 
     let mut alvo = destino(endereco);
-    alvo.impressao_esperada = Some(real.clone());
+    alvo.esperada = Some(seele_core::enlace::Esperada::Certificado(real.clone()));
     let mut enlace = Enlace::conectar(
         alvo,
         ed25519_dalek::SigningKey::from_bytes(&[47; 32]),

@@ -16,15 +16,12 @@ use anyhow::{Context, Result};
 use quinn::crypto::rustls::QuicServerConfig;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
-/// O nome que o certificado da sala pessoal leva, e o SNI de quem liga.
+/// O nome que o certificado da sala pessoal leva no SAN, e o SNI de quem liga.
 ///
-/// Uma constante, e **nunca o código**: o SNI viaja legível no Initial do
-/// QUIC, e contaria para quem se está ligando (spec de 23/09, «Quem liga
-/// confere o código dentro do TLS»). Ele entra no DER da sala, então o valor
-/// está congelado pelo vetor de `tests/identidade_da_sala.rs`. Quando o
-/// `seele-proto` ganhar a constante (pedido à F1, item 12 do contrato de fio),
-/// esta passa a reexportá-la.
-pub const NOME_DA_SALA: &str = "seele-sala";
+/// Mora no `seele-proto`, porque quem liga também o usa, e o `seele-core` não
+/// pode importar daqui (ADR 0002). Ele entra no DER da sala, e o vetor de
+/// `tests/identidade_da_sala.rs` o prende.
+pub use seele_proto::transport::NOME_DA_SALA;
 
 /// O PKCS#8 v1 de uma chave Ed25519, sem a chave pública: estes 16 bytes e a
 /// semente (RFC 8410, §7).

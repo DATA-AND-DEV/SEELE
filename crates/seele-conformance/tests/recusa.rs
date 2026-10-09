@@ -100,7 +100,7 @@ async fn uma_recusa_depois_do_tls_nao_deixa_a_chave_fixada() -> Result<()> {
         chave_do_pin: chave_do_pin.clone(),
         apelido: "marcela".into(),
         segredo: None,
-        impressao_esperada: None,
+        esperada: None,
         o_pino_prova_o_servidor: true,
         aceito: None,
     };
