@@ -6408,12 +6408,14 @@ fn som_cabe_decodificado(bytes: &[u8]) -> Result<(), FalhaNoMod> {
 /// quadros a [`TAXA_DA_DECODIFICACAO`], vezes os canais, vezes quatro — o
 /// float32 que o `AudioBuffer` segura.
 ///
-/// **Um piso, e nunca uma estimativa que possa passar do real**: só ele
-/// recusa ([`som_cabe_decodificado`]). O cabeçalho é lido à mão, sem crate de
-/// áudio ([`cabecalho_de_som`]):
+/// **Um piso, e nunca uma estimativa que possa passar do real** num arquivo
+/// bem formado: só ele recusa ([`som_cabe_decodificado`]). Um MP3 com mais
+/// quadros corrompidos do que o corte absorve é o caso em que ele passa — ver
+/// [`cabecalho_de_som::mp3`]. O cabeçalho é lido à mão, sem crate de áudio
+/// ([`cabecalho_de_som`]):
 ///
 /// - **WAV**, exato, pelo `fmt ` e pelo `data`, com o `data` limitado aos
-///   bytes que estão no arquivo;
+///   bytes que estão no arquivo e ao tamanho que o RIFF declara;
 /// - **Ogg**, pelas páginas do fluxo Vorbis ou Opus: a granule da última,
 ///   menos a da primeira de dados — e, no Opus, que já conta a 48 kHz, menos o
 ///   pre-skip;
@@ -6768,6 +6770,16 @@ mod cabecalho_de_som {
     /// **E o que o decodificador pode cortar sai**: o próprio quadro
     /// Xing/Info, o atraso e o enchimento que a etiqueta do LAME declara (até
     /// 4095 amostras cada), e o atraso do decodificador (529).
+    ///
+    /// **O «nunca passa do real» vale para um fluxo bem formado.** Um quadro
+    /// com o cabeçalho certo e o conteúdo corrompido entra na cadeia, e o
+    /// decodificador não o entrega: o Chromium o descarta, e o WebKit recusa o
+    /// arquivo inteiro. O corte acima absorve uns oito quadros de 1152
+    /// amostras (9871 amostras); com mais corrompidos que isso, o piso passa
+    /// do que o Chromium entrega — a revisão mediu 14 KB com dez — e o som é
+    /// recusado pelo teto que, decodificado, ele talvez não passasse. No
+    /// WebKit, o motor do produto no Mac, esse arquivo não tocaria de
+    /// qualquer jeito.
     pub(super) fn mp3(bytes: &[u8]) -> Option<Piso> {
         let mut inicio = 0usize;
         while bytes.get(inicio..)?.starts_with(b"ID3") {
