@@ -467,9 +467,22 @@ pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
 ///
 /// O custo é a memória de um quadro em andamento por transmissão assistida, no
 /// leitor que remonta ([`LeitorDeTela::bytes_reservados`]), e ela segue o que
-/// chegou, e não o anúncio ([`RESERVA_INICIAL`]). O [`Enquadramento`] conta bytes
+/// chegou, e não o anúncio ([`RESERVA_INICIAL_DE_QUADRO`]). O [`Enquadramento`] conta bytes
 /// e não guarda quadro.
 pub const MAX_QUADRO_LEN: usize = 4 * 1024 * 1024;
+
+/// Quanto um leitor que remonta reserva para um quadro assim que o cabeçalho
+/// chega, no máximo: **64 KiB**.
+///
+/// **A memória segue o que chegou, e não o que foi anunciado** (regra da
+/// orquestradora, a partir da revisão da F1 de 09/10/2026). Reservar
+/// `min(tamanho, RESERVA_INICIAL_DE_QUADRO)` e crescer com o que chega: um par
+/// que anuncia um quadro de 4 MiB e manda devagar segura até isto e mais o que
+/// mandou, e não os 4 MiB. O corpo cresce dobrando, sem passar do anunciado,
+/// porque crescer o exato de cada pedaço faria um fluxo que pinga byte a byte
+/// custar uma realocação por byte. Vale para o [`LeitorDeTela`] e para o
+/// receptor do `seele-core`.
+pub const RESERVA_INICIAL_DE_QUADRO: usize = 64 * 1024;
 
 /// O que vem dentro de um quadro do fluxo de tela.
 ///
@@ -559,9 +572,19 @@ pub const fn cabecalho_de_quadro(
 }
 
 /// Lê o cabeçalho de um quadro. **A única porta por onde o tamanho de um quadro
-/// entra**, nas duas leituras deste módulo: tipo desconhecido, quadro vazio e
-/// tamanho acima do teto saem daqui, antes de qualquer reserva.
-fn ler_cabecalho_de_quadro(
+/// entra**: tipo desconhecido, quadro vazio e tamanho acima do teto saem daqui,
+/// antes de qualquer reserva.
+///
+/// Pública para quem lê o fluxo sem passar pelo [`LeitorDeTela`]: o receptor do
+/// `seele-core` lê os cinco bytes com `read_exact`, de forma assíncrona, e os
+/// confere por esta mesma porta. Assim continua havendo uma leitura só do
+/// formato.
+///
+/// # Errors
+///
+/// [`ErroDeQuadro::TipoDesconhecido`], [`ErroDeQuadro::QuadroVazio`] ou
+/// [`ErroDeQuadro::QuadroGrandeDemais`].
+pub fn ler_cabecalho_de_quadro(
     cabecalho: &[u8; CABECALHO_DE_QUADRO_LEN],
 ) -> Result<(TipoDeQuadro, usize), ErroDeQuadro> {
     let [byte, a, b, c, d] = *cabecalho;
@@ -747,15 +770,6 @@ pub struct LeitorDeTela {
     crescimentos: usize,
 }
 
-/// Quanto o leitor reserva para um quadro assim que o cabeçalho chega, no máximo.
-///
-/// **A memória segue o que chegou, e não o que foi anunciado** (sugestão da F1
-/// na revisão de 09/10/2026). Um par que anuncia um quadro de 4 MiB e manda
-/// devagar segura até isto e mais o que mandou, e não os 4 MiB. Daqui o corpo
-/// cresce dobrando, sem passar do anunciado: crescer o exato de cada pedaço faria
-/// um fluxo que pinga byte a byte custar uma realocação por byte.
-const RESERVA_INICIAL: usize = 64 * 1024;
-
 /// **A única reserva de corpo do leitor**, e ela anota o maior pedido.
 ///
 /// O guarda da ordem «conferir, e só então reservar» olha este pico: uma
@@ -871,10 +885,12 @@ impl LeitorDeTela {
                     match ler_cabecalho_de_quadro(&inteiro) {
                         // **Só agora**, com o tamanho conferido, o corpo é
                         // reservado, e só o começo dele: o resto cresce com o
-                        // que chegar ([`RESERVA_INICIAL`]).
+                        // que chegar ([`RESERVA_INICIAL_DE_QUADRO`]).
                         Ok((tipo, tamanho)) => {
-                            let inicio =
-                                reservar(&mut self.maior_reserva, tamanho.min(RESERVA_INICIAL));
+                            let inicio = reservar(
+                                &mut self.maior_reserva,
+                                tamanho.min(RESERVA_INICIAL_DE_QUADRO),
+                            );
                             *quadro = Some((tipo, inicio, tamanho));
                         }
                         Err(erro) => return Err(self.fechar(erro)),
@@ -1559,19 +1575,26 @@ mod os_quadros {
 
     /// **A memória segue o que chegou, e não o que foi anunciado** (sugestão
     /// da F1 na revisão de 09/10). Um par que anuncia 4 MiB e manda devagar
-    /// não segura 4 MiB: o leitor começa com até [`RESERVA_INICIAL`] e cresce
+    /// não segura 4 MiB: o leitor começa com até [`RESERVA_INICIAL_DE_QUADRO`] e cresce
     /// dobrando, sem passar do anunciado. Dobrar, e não crescer o exato do
     /// pedaço: um fluxo que pingasse byte a byte faria uma realocação por byte.
     #[test]
     fn um_quadro_grande_que_chega_devagar_segura_o_que_chegou() {
         let anunciado = u32::try_from(MAX_QUADRO_LEN).unwrap();
         let mut leitor = LeitorDeTela::novo();
-        let mut bytes = abertura();
-        bytes.extend_from_slice(&cabecalho_de_quadro(TipoDeQuadro::Chave, anunciado));
-        bytes.extend_from_slice(&[0xAB; 10]);
-        leitor.empurrar(&bytes).unwrap();
+        leitor.empurrar(&abertura()).unwrap();
+        // Só o cabeçalho de um quadro de 4 MiB: no máximo os 64 KiB do começo.
+        leitor
+            .empurrar(&cabecalho_de_quadro(TipoDeQuadro::Chave, anunciado))
+            .unwrap();
         assert!(
-            leitor.bytes_reservados() <= RESERVA_INICIAL,
+            leitor.bytes_reservados() <= RESERVA_INICIAL_DE_QUADRO,
+            "só o cabeçalho de um quadro de 4 MiB segurou {} bytes",
+            leitor.bytes_reservados()
+        );
+        leitor.empurrar(&[0xAB; 10]).unwrap();
+        assert!(
+            leitor.bytes_reservados() <= RESERVA_INICIAL_DE_QUADRO,
             "dez bytes de um quadro de 4 MiB seguram {} bytes",
             leitor.bytes_reservados()
         );
@@ -1585,11 +1608,11 @@ mod os_quadros {
                 "o que chegou não cabe no que foi reservado"
             );
             assert!(
-                reservado <= (2 * chegou).max(RESERVA_INICIAL),
+                reservado <= (2 * chegou).max(RESERVA_INICIAL_DE_QUADRO),
                 "com {chegou} bytes recebidos, o leitor segura {reservado}"
             );
         }
-        assert!(leitor.maior_reserva() <= (2 * chegou).max(RESERVA_INICIAL));
+        assert!(leitor.maior_reserva() <= (2 * chegou).max(RESERVA_INICIAL_DE_QUADRO));
     }
 
     /// **O corpo cresce dobrando.** Um quadro de 256 KiB que chega byte a
