@@ -386,3 +386,26 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Nota da orquestradora (`12ed17d1`): o `onde` deixou de ler `dataset.casca`,
     que o guarda G2 da F8 proíbe ao desktop, e passou a perguntar se o
     `CELULAR` existe. O retrato segue a regra da casca, e não uma marca minha.
+- **17e, as cores de estado derivadas do tema** (`bf8d8fb6`, sobre o K4 em
+  `cd2227c5`). Sob um tema, o fósforo, o azul, o vermelho e os preenchimentos
+  saem das superfícies dele, em OKLCH, com 4,5:1 sobre o `fundo` e o `painel`;
+  sem tema, nada é derivado.
+  - `tons-do-tema.cjs` (check-runtime): padrão → cores de estado iguais, fills a
+    ΔE2000 3,2–4,2; tema claro → tudo ≥ 4,5:1; cinza-médio → recusado pelo
+    fósforo; cor da raiz que não carregou → nem recusa nem tom.
+  - `tema-claro-legivel.cjs` (navegador): sincronia e nome de quem usa a
+    4,52:1; sem a derivação, 1,05:1.
+  - Sem tema: capturas iguais byte a byte ao HEAD anterior, 1280 e 900.
+  - frontend 280/280, check-runtime limpo, tokens e xtask verdes.
+  - Ruling: o ΔE ≤ 2 prometido não se cumpre e o contrato fica em ≤ 4,5 para
+    os preenchimentos — custo se errado: sob um tema com as cores do padrão,
+    um `-fraco` um pouco diferente do token, e só ali; sem tema, nada muda.
+  - Ruling: o `acento` sobre o `acentoFraco` sai da lista de recusa e passa a
+    ser garantido pela derivação — custo se errado: nenhum tema é recusado
+    por esse par, e o par continua em 4,5:1.
+  - Ruling: `bordaForte` não é derivado — custo se errado: num tema claro, a
+    régua forte sai escura, visível, talvez pesada.
+  - Ruling: a leitura da raiz ganhou um nome (`corDaRaiz`) em vez de afrouxar o
+    guarda do ADR 0049, e o guarda confere que ela só lê.
+  - Próximo: 17j (o servidor confere as chaves e os valores do tema por tabela
+    fechada, com o vetor comum da derivação).

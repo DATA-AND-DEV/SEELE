@@ -859,15 +859,45 @@ WCAG e pelos tokens que o produto já cumpre (`apps/seele-app/tests/tokens.rs`):
 |---|---|
 | `texto` sobre `fundo`; `texto` sobre `painel` | 4,5:1 |
 | `apagado` sobre `fundo`; `apagado` sobre `painel` | 3:1 |
-| `acento` sobre `fundo`; `acento` sobre `painel`; `acento` sobre `acentoFraco` | 4,5:1 |
+| `acento` sobre `fundo`; `acento` sobre `painel` | 4,5:1 |
+
+**A lista só recusa o que o MOD escolheu.** O `acento` sobre o `acentoFraco`
+estava nela, e saiu (tarefa 17e, 09/10): o `acentoFraco` é do produto, que o
+deriva, e o derivado **se ajusta** até o acento alcançar 4,5:1 sobre ele.
+Recusar um tema por uma cor que o produto mesmo escolheu seria recusá-lo por um
+motivo que o MOD não tem como consertar. O par continua garantido — pela
+derivação, e não pela recusa.
 
 Os itens do núcleo (o MUDO, o SAIR, o veredito) não entram na lista: eles leem
-os tokens do produto, que o tema não alcança (§10). **Os tons derivados**
-(`acentoFraco`, `bordaForte`, o segundo `apagado`) saem de uma fórmula que
-**reproduz os tokens do produto a partir dos dez do tema padrão**, com erro de
-no máximo ΔE 2 (por exemplo, o `acentoFraco` do padrão tem de dar o
-`--seele-laranja-fraco`, `#331704`). Os números finais saem da tarefa 17-B3, e
-o guia publica a mesma função em JavaScript, que a casca usa.
+os tokens do produto, que o tema não alcança (§10).
+
+**Os tons derivados** (tarefa 17e, medido em 09/10). Só existem sob um tema:
+**sem nenhuma cor de tema, nada é derivado**, e a sessão sai igual pixel a pixel
+à de antes (capturada a 1280 e a 900 de largura, contra o commit anterior).
+Sob um tema, em OKLCH:
+
+- **o preenchimento de uma cor** (`acentoFraco` e os `-fraco` das cores de
+  estado) tem o matiz da cor, 0,23 do croma dela, e a luminosidade do `fundo`
+  um passo de 0,122 na direção da cor; o passo **encolhe** até a cor alcançar
+  4,5:1 sobre o preenchimento;
+- **o segundo `apagado`** (`--seele-osso-apagado`, que nenhum tema escreve) é
+  mantido se já alcança 3:1 sobre o `fundo` e o `painel`, e senão tem a
+  luminosidade movida até alcançar, com o matiz;
+- **`bordaForte` não é derivado.** A régua do produto (`--seele-linha-forte`,
+  `#3a322a`) é escura e continua visível sobre um fundo claro; borda não tem
+  piso de contraste aqui, e derivar fica para quando um tema medido mostrar a
+  régua sumindo.
+
+**A promessa de ΔE ≤ 2 não se cumpriu, e o número é outro.** Com as cores do
+tema padrão declaradas por um MOD, as três cores de estado saem **idênticas**
+às do produto (ΔE 0: já alcançam o piso e são mantidas), e os preenchimentos
+saem a **ΔE2000 de 3,2 a 4,2** dos tokens (`acentoFraco` `#2f140c` contra
+`#331704`, a 4,18). Os quatro `-fraco` do produto foram escolhidos à mão, e
+nenhuma fórmula de uma regra só os reproduz abaixo de 4 — medido. O contrato
+fica em **ΔE2000 ≤ 4,5 para os preenchimentos, e igualdade para as cores de
+estado que já alcançam**, na bancada `apps/seele-app/bancada/tons-do-tema.cjs`.
+O guia publica a mesma função em JavaScript, que a casca usa (`tonsDoTema` em
+`ui/base.js`).
 
 ### As cores de estado (achado da F8, 09/10)
 
@@ -883,23 +913,34 @@ superfícies do tema**, garantindo o piso:
 
 - mantém o matiz da cor do produto e move a luminosidade até a cor alcançar
   **4,5:1 sobre `fundo` e sobre `painel`** (o estado aparece como texto: «juli
-  fala»), e o `-fraco` sai da cor derivada misturada à superfície, com a cor
+  fala»), indo para longe das superfícies, até o ponto mais perto da cor do
+  produto que alcança; o croma recua só o que for preciso para caber no sRGB.
+  O `-fraco` sai da cor derivada pela regra dos preenchimentos acima, com a cor
   sobre o próprio `-fraco` também em 4,5:1;
-- com o tema padrão, a derivação **reproduz os tokens do produto** (ΔE ≤ 2),
-  a mesma regra dos tons derivados acima;
+- com as cores do tema padrão, a derivação **devolve as cores do produto**
+  (ΔE 0) e os preenchimentos a ΔE2000 ≤ 4,5, como acima;
 - se nenhuma luminosidade servir às duas superfícies, o tema é recusado com o
   par, na mesma forma da recusa de contraste (`{ frente: 'fosforo', fundo:
   'painel', razao, piso }`). Como os pares já pedem `texto` em 4,5:1 sobre as
-  duas, isso só acontece num tema que já está no limite;
+  duas, isso só acontece num tema que já está no limite — medido: um tema de
+  superfícies cinza-médias, que o `texto` já não alcança, é o caso;
+- uma cor do produto que não pôde ser lida (uma folha que não carregou) não
+  vira recusa nem tom: sem cor medida não há medida;
 - **o MOD continua sem escrever nenhuma delas**: o `--seele-vermelho-alerta`
   segue fora de todo caminho de tema, e o produto o deriva só para o que está
   dentro do escopo do tema. Os itens do núcleo leem `--nucleo-*` (§10), e o
   veredito «QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO» não muda de cor com tema
   nenhum.
 
-A função é a mesma dos tons derivados, publicada no guia, e entra na tarefa
-17e com teste nos dois sentidos: o padrão reproduz os tokens, e um tema claro
-dá ao fósforo derivado 4,5:1 sobre o `painel`.
+A função é a mesma dos tons derivados, publicada no guia. **Feito na 17e**,
+com teste nos dois sentidos: as cores do padrão devolvem as do produto, e um
+tema claro dá ao fósforo, ao azul e ao vermelho derivados 4,5:1 sobre o
+`fundo`, o `painel` e o próprio `-fraco` (`tons-do-tema.cjs`); no navegador, o
+número da sincronia (fósforo) e o nome de quem usa (azul) saem a 4,52:1 sob o
+tema claro, e sem a derivação o fósforo do produto sai a 1,05:1
+(`tema-claro-legivel.cjs`). Os apelidos `--seele-sync-*` passaram a ser
+redefinidos em `#tela-sessao`: definidos com `var()` na raiz, resolviam lá e não
+acompanhavam a cor derivada.
 
 ### A prévia (B4)
 
@@ -1363,7 +1404,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 |---|---|---|---|
 | B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido (decidido em 09/10); **feito no servidor** (17a a 17c) | §9 |
 | B2 | o resultado da aplicação | o evento `tema`, com `aplicado`, `recusado` (com os pares) ou `nativo` | §9 |
-| B3 | os pares e a fórmula dos derivados | a lista com os pisos de partida; a fórmula reproduz os tokens do produto com ΔE ≤ 2 | §9 |
+| B3 | os pares e a fórmula dos derivados | a lista só com o que o MOD escolhe; a fórmula, em OKLCH, devolve as cores de estado do produto (ΔE 0) e os preenchimentos a ΔE2000 ≤ 4,5 — o ΔE ≤ 2 prometido não se cumpre, medido (17e) | §9 |
 | B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
 | B5 | a ampliação | na 6: `modo`, a densidade completa e os tokens por região; o fundo por mídia se medido a tempo; tipo e escala na API 7 | §9 |
 | B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |
@@ -1412,7 +1453,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` ainda aceita qualquer chave, e fechar isso é a tarefa 17j, antes do congelamento | §9; plano, 17j |
 | o rótulo da primeira aba | SERVIDOR, e não SALAS; rótulo de tela, sem mudar o contrato | §11 |
 | uma superfície de MOD cobria a faixa de voz e as abas (medido no protótipo) | **nenhuma superfície as cobre**: «tela cheia», no celular, é a tela acima delas; regra do núcleo e do guarda 11; no desktop, o guarda mede o MUDO e o SAIR com um `dialogo` aberto | §5, §10, §11; plano, 7 e 9 |
-| as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve | §9; plano, 17e |
+| as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve; **feito** | §9; plano, 17e |
 
 ## 18. Em aberto
 

@@ -544,7 +544,7 @@
         "bordaForte",
         "apagadoSecundario"
       ],
-      "formula": "reproduz os tokens do produto a partir dos dez do tema padrão, com erro de no máximo ΔE 2 (o acentoFraco do padrão dá #331704); publicada também como função de referência no guia"
+      "formula": "só sob um tema (sem tema, nada é derivado); em OKLCH: o preenchimento tem o matiz da cor, 0,23 do croma e a luminosidade do fundo um passo de 0,122 na direção da cor, encolhendo até a cor alcançar 4,5:1 sobre ele; com as cores do padrão, as cores de estado saem iguais às do produto e os preenchimentos a ΔE2000 ≤ 4,5 (o ΔE ≤ 2 prometido não se cumpre: os -fraco do produto foram escolhidos à mão; medido na 17e); bordaForte não é derivado; publicada também como função de referência no guia (tonsDoTema)"
     },
     "porta": "do lado do servidor, o manifesto (\"tema\": true), mostrado na tela de aceite; do lado de quem vê, servidor.aparencia: «o SEELE desenha» tira o tema daquele servidor nesta máquina",
     "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão; os itens do núcleo leem os tokens do produto, fora do alcance do tema",
@@ -567,7 +567,7 @@
       "apagado/painel": "3:1",
       "acento/fundo": "4,5:1",
       "acento/painel": "4,5:1",
-      "acento/acentoFraco": "4,5:1",
+      "acento/acentoFraco": "4,5:1, garantido pela derivação e não recusado: o acentoFraco é do produto",
       "estado": "pisos de partida; os números finais saem da tarefa 17-B3"
     },
     "na-6": [
@@ -583,7 +583,7 @@
       "escala por escolha"
     ],
     "chaves": "lista fechada de nomes do contrato, nunca nomes de CSS: o produto traduz cada nome por uma tabela fechada para o token --seele-* que ele redefine (TEMA_DA_API na casca); nenhum nome leva a --nucleo-*, que o MUDO, o SURDO e o SAIR leem no celular; chave fora da tabela ou valor fora da forma são recusados pelo nome, na casca e (tarefa 17j) no mundo.tema, com um teste espelho entre as duas listas",
-    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); o tema padrão reproduz os tokens (ΔE ≤ 2); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
+    "cores-de-estado": "o fósforo, o azul e o vermelho do produto (e os -fraco) não são chaves do tema: sob um tema, o produto os deriva das superfícies, com o matiz do produto e 4,5:1 sobre fundo e sobre painel (e sobre o próprio -fraco); as cores do padrão devolvem as do produto (ΔE 0); sem luminosidade que sirva às duas superfícies, o tema é recusado com o par; o MOD não escreve nenhuma delas, e os itens do núcleo leem --nucleo-* (decidido em 09/10, achado da F8)"
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
