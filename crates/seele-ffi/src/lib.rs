@@ -3007,6 +3007,7 @@ impl Connection {
                 input_level: audio.input_level,
                 local_fault: audio.local_fault,
                 frames_refused: audio.frames_refused,
+                microfone_entrega_silencio_digital: audio.silencio_digital,
             },
             notice: foto.notice,
             muted: audio.muted,
@@ -3146,6 +3147,7 @@ impl Connection {
             input_level: telemetry.local.input_level,
             local_fault: voice.falha_local(),
             frames_refused: voice.quadros_recusados(),
+            silencio_digital: telemetry.local.microfone_entrega_silencio_digital,
             bitrate_bps: telemetry.local.bitrate_bps,
             capture: aparelhos.capture.map(|device| CaptureDevice {
                 id: device.id,
@@ -3217,6 +3219,8 @@ struct AudioState {
     input_level: f32,
     local_fault: bool,
     frames_refused: u64,
+    /// Ver [`Telemetry::microfone_entrega_silencio_digital`].
+    silencio_digital: bool,
     bitrate_bps: u32,
     capture: Option<CaptureDevice>,
     playback: Option<PlaybackDevice>,
@@ -3244,6 +3248,8 @@ impl AudioState {
             input_level: 0.0,
             local_fault: false,
             frames_refused: 0,
+            // Sem voz não há microfone aberto, e nada a dizer sobre ele.
+            silencio_digital: false,
             bitrate_bps: 0,
             capture: None,
             playback: None,
@@ -10456,6 +10462,58 @@ mod o_audio_segue_a_sala {
         let escolhida = connection.shared.voice.escolhida();
         assert_eq!(escolhida.aparelhos.capture.as_deref(), Some("fone"));
         assert_eq!(escolhida.aparelhos.playback.as_deref(), Some("caixa"));
+    }
+
+    /// F1-microfone-macos: o silêncio digital atravessa a ponte na telemetria,
+    /// pelo nome que a tela lê, e falso sem voz.
+    ///
+    /// A tela o lê como `snapshot.telemetry.microfone_entrega_silencio_digital`
+    /// (`desenharAberturaDoAudio`). Um nome que mudasse deste lado calaria a
+    /// frase do macOS sem erro em lugar nenhum: o campo chegaria `undefined`.
+    #[test]
+    fn o_silencio_digital_chega_na_telemetria_pelo_nome_que_a_tela_le() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+        let retrato = serde_json::to_value(connection.snapshot()).expect("o retrato vira JSON");
+        assert_eq!(
+            retrato
+                .get("telemetry")
+                .and_then(|telemetria| telemetria.get("microfone_entrega_silencio_digital")),
+            Some(&serde_json::Value::Bool(false)),
+            "o retrato não leva `telemetry.microfone_entrega_silencio_digital`, ou o leva \
+             verdadeiro sem voz nenhuma: a frase do macOS nunca acende, ou acende fora de \
+             sala"
+        );
+    }
+
+    /// E com a voz de pé, o retrato lê o silêncio digital da telemetria dela.
+    ///
+    /// Lido do fonte porque o caminho com voz pede uma [`Voice`] de verdade, e
+    /// ela pede placa de som. Sem esta linha, um `false` escrito no lugar da
+    /// leitura deixava o teste de cima verde e a frase do macOS apagada para
+    /// sempre.
+    ///
+    /// [`Voice`]: seele_core::Voice
+    #[test]
+    fn o_retrato_com_voz_le_o_silencio_digital_da_telemetria_dela() {
+        let fonte = include_str!("lib.rs");
+        let programa = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
+        let Some(corpo) = programa
+            .split("fn audio_state(&self) -> AudioState {")
+            .nth(1)
+            .and_then(|resto| resto.split("\n    }\n").next())
+        else {
+            panic!("`Connection::audio_state` sumiu, e com ela o retrato da voz");
+        };
+        assert!(
+            corpo.contains("silencio_digital: telemetry.local.microfone_entrega_silencio_digital"),
+            "com a voz de pé, o retrato não lê o silêncio digital que o laço de voz \
+             mediu: o produto sabe que o microfone entrega zero e não conta"
+        );
     }
 
     /// O corpo de `drive`, sem as linhas de comentário, e os três pedaços que a

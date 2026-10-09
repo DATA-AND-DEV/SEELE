@@ -320,6 +320,24 @@ const ABERTURA_DO_AUDIO = {
 };
 
 /**
+ * O microfone que entrega zero exato, no macOS. F1-microfone-macos.
+ *
+ * O macOS entrega um microfone que ele bloqueia — o SEELE desligado em
+ * Privacidade e Segurança — sem erro nenhum: o aparelho abre e manda zeros. O
+ * laço de voz conta três segundos disso e a ponte o diz em
+ * `telemetry.microfone_entrega_silencio_digital`.
+ *
+ * **«Pode estar»**, e não «está»: uma interface USB com o ganho no mínimo também
+ * entrega zero exato. A frase diz onde conferir e o que fazer depois — entrar de
+ * novo, porque a permissão só vale para o aparelho aberto depois dela.
+ *
+ * Só no macOS: no Windows o consentimento é lido antes de abrir
+ * (`PERMISSAO_DE_MICROFONE`, acima), e este caminho de Ajustes não existe lá.
+ */
+const MICROFONE_EM_SILENCIO_NO_MACOS =
+  "O MACOS PODE ESTAR BLOQUEANDO O MICROFONE.\nAjustes → Privacidade e Segurança → Microfone → ligue o SEELE, e entre de novo.";
+
+/**
  * O aviso de fone, dito ao entrar numa sala de voz.
  *
  * O SEELE não cancela eco — o ADR 0007 tirou DSP em C/C++ do v1 e fez do fone

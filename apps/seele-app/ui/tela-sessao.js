@@ -358,11 +358,28 @@ function desenharAvisoDeFone(snapshot) {
  * fone, pela mesma razão do `role="status"`.
  */
 function desenharAberturaDoAudio(snapshot) {
-  const frase = ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? null;
+  // O estado da abertura primeiro: quando a voz não abriu, é isso que se diz.
+  // Com ela de pé, a faixa fala do microfone calado pelo sistema, se for o caso.
+  const frase =
+    ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? fraseDoMicrofoneCalado(snapshot);
   $("aviso-audio").hidden = frase === null;
   if (frase !== null && $("aviso-audio-texto").textContent !== frase) {
     $("aviso-audio-texto").textContent = frase;
   }
+}
+
+/**
+ * A frase do microfone que entrega zero exato, ou `null`. F1-microfone-macos.
+ *
+ * Do campo que a ponte manda, e só no macOS: é o sistema dele que entrega um
+ * microfone bloqueado como silêncio sem erro. No Windows o consentimento é
+ * lido antes de abrir, e a frase mandaria a pessoa a um menu que não existe.
+ * A plataforma é a que `arrumarBarraDaJanela` (`base.js`) perguntou ao Rust.
+ */
+function fraseDoMicrofoneCalado(snapshot) {
+  if (snapshot.telemetry?.microfone_entrega_silencio_digital !== true) return null;
+  if ($("barra-janela").dataset.plataforma !== "macos") return null;
+  return MICROFONE_EM_SILENCIO_NO_MACOS;
 }
 
 /**

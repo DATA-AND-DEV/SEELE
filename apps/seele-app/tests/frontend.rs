@@ -16676,6 +16676,65 @@ fn o_gancho_de_panico_e_instalado_logo_depois_do_assinante_do_log() {
     );
 }
 
+/// **O microfone que o macOS entrega mudo é dito, e só no macOS.**
+/// F1-microfone-macos, parte (1).
+///
+/// O laço de voz conta o zero exato no quadro cru e a ponte o leva em
+/// `telemetry.microfone_entrega_silencio_digital` (provado no `seele-core` e na
+/// FFI). Este guarda prende a outra metade: a frase existe em `frases.js`,
+/// inteira, e a tela a desenha **a partir do campo** e só no macOS. No Windows o
+/// consentimento já é lido antes de abrir (`consentimento_do_microfone`), e a
+/// frase de Ajustes do Mac lá seria uma instrução para um menu que não existe.
+#[test]
+fn o_microfone_em_silencio_digital_e_dito_so_no_macos() {
+    // O nome do campo em Rust, para um rename de um lado só não compilar.
+    fn _liga_os_dois_lados(instantaneo: &seele_ffi::Snapshot) -> bool {
+        instantaneo.telemetry.microfone_entrega_silencio_digital
+    }
+    const FRASE: &str = "O MACOS PODE ESTAR BLOQUEANDO O MICROFONE.\nAjustes → Privacidade e \
+                         Segurança → Microfone → ligue o SEELE, e entre de novo.";
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const MICROFONE_EM_SILENCIO_NO_MACOS =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, FRASE,
+        "`frases.js` não tem a frase do microfone que o macOS entrega mudo, ou a diz \
+         com outras palavras: quem tem o SEELE desligado nos Ajustes fala para \
+         ninguém e não sabe onde ligar"
+    );
+
+    let scripts = scripts();
+    let frase = body_of(&scripts, "function fraseDoMicrofoneCalado(snapshot)");
+    for elo in [
+        "snapshot.telemetry",
+        "microfone_entrega_silencio_digital",
+        "MICROFONE_EM_SILENCIO_NO_MACOS",
+    ] {
+        assert!(
+            frase.contains(elo),
+            "`fraseDoMicrofoneCalado` não passa por `{elo}`: a frase existe e não sai \
+             do campo para a tela:\n{frase}"
+        );
+    }
+    assert!(
+        frase.contains("dataset.plataforma") && frase.contains("\"macos\""),
+        "a frase do macOS não confere a plataforma: no Windows ela mandaria a pessoa a \
+         um menu de Ajustes que não existe lá:\n{frase}"
+    );
+    assert!(
+        names(
+            &body_of(&scripts, "function desenharAberturaDoAudio(snapshot)"),
+            "fraseDoMicrofoneCalado"
+        ),
+        "a faixa do áudio não passa pela frase do microfone calado, e ela nunca acende"
+    );
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
