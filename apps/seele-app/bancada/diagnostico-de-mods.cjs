@@ -1176,6 +1176,9 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
   // encosta no recorte, a interseção tem altura zero, e o contorno saía como o
   // traço de 2 px do `min-height` da folha. O vazio, sem área, é o que mostra
   // onde um MOD entraria, e é contornado de propósito.
+  //
+  // **Nas quatro bordas, e no recorte sem altura** (M3 da revisão do K3): só a
+  // de cima deixava esta prova verde com o critério só na borda de cima.
   const recorte = await pagina.evaluate(async () => {
     const quadros = async () => {
       for (let volta = 0; volta < 2; volta += 1) {
@@ -1186,38 +1189,60 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
       .map((c) => `${c.style.left} ${c.style.top} ${c.style.width}×${c.style.height}`);
     await quadros();
     const antes = contornos();
-    const lista = document.createElement("div");
-    lista.style.cssText = "position: fixed; left: 1200px; top: 300px; width: 120px; height: 100px; overflow: hidden;";
     const no = (pessoa, estilo) => {
       const filho = document.createElement("span");
       filho.dataset.pessoaDoAvatar = pessoa;
       filho.style.cssText = `position: absolute; display: block; ${estilo}`;
       return filho;
     };
-    // Rolada 20 px: o item de 20 px de altura acaba no topo da lista (300 px),
-    // e o vazio fica dentro dela, a 330 px. O resto da lista é o que dá o que
-    // rolar, e não é lugar nenhum.
+    // A lista vai de 1200 a 1320 px e de 300 a 400 px, rolada 20 px. Cada
+    // item de 50×20 encosta numa borda dela por fora — em cima, embaixo, à
+    // esquerda e à direita —, e o vazio fica dentro dela, a (1210, 330). O
+    // resto da lista é o que dá o que rolar, e não é lugar nenhum.
+    const lista = document.createElement("div");
+    lista.style.cssText = "position: fixed; left: 1200px; top: 300px; width: 120px; height: 100px; overflow: hidden;";
     const resto = document.createElement("div");
     resto.style.cssText = "position: absolute; left: 0; top: 0; width: 10px; height: 400px;";
     lista.append(
-      no("encostado", "left: 0; top: 0; width: 50px; height: 20px;"),
+      no("em-cima", "left: 0; top: 0; width: 50px; height: 20px;"),
+      no("embaixo", "left: 60px; top: 120px; width: 50px; height: 20px;"),
+      no("a-esquerda", "left: -50px; top: 40px; width: 50px; height: 20px;"),
+      no("a-direita", "left: 120px; top: 60px; width: 50px; height: 20px;"),
       no("vazio", "left: 10px; top: 50px; width: 0; height: 0;"),
       resto,
     );
-    document.body.append(lista);
+    // E um recorte sem altura, a 450 px: o item dentro dele tem área, e nada
+    // dele se vê.
+    const semAltura = document.createElement("div");
+    semAltura.style.cssText = "position: fixed; left: 1200px; top: 450px; width: 120px; height: 0; overflow: hidden;";
+    semAltura.append(no("sem-altura", "left: 0; top: 0; width: 50px; height: 20px;"));
+    document.body.append(lista, semAltura);
     lista.scrollTop = 20;
     await quadros();
     const depois = contornos();
     const rolou = lista.scrollTop;
     lista.remove();
+    semAltura.remove();
     await quadros();
     return { rolou, novos: depois.filter((c) => !antes.includes(c)) };
   });
-  assert.equal(recorte.rolou, 20, "a lista da prova do recorte não rolou: o item não encosta no topo dela");
-  assert.ok(
-    !recorte.novos.some((c) => c.startsWith("1200px 300px")),
-    "um item com área que a rolagem deixou rente ao topo da lista, sem nada à vista, ganhou contorno — o traço "
-      + `de 2 px do recorte vazio: ${recorte.novos.join(", ")}`,
+  assert.equal(recorte.rolou, 20, "a lista da prova do recorte não rolou: os itens não encostam nas bordas dela");
+  // Onde cada item ganharia o traço, se ganhasse.
+  const bordas = {
+    "em cima": "1200px 300px",
+    embaixo: "1260px 400px",
+    "à esquerda": "1200px 320px",
+    "à direita": "1320px 340px",
+    "no recorte sem altura": "1200px 450px",
+  };
+  const vazaram = Object.entries(bordas)
+    .filter(([, onde]) => recorte.novos.some((c) => c.startsWith(`${onde} `)))
+    .map(([borda]) => borda);
+  assert.deepEqual(
+    vazaram,
+    [],
+    "um item com área encostado no recorte, sem nada à vista, ganhou contorno — o traço de 2 px do recorte vazio — "
+      + `${vazaram.join(", ")}: ${recorte.novos.join(", ")}`,
   );
   assert.deepEqual(
     recorte.novos,
