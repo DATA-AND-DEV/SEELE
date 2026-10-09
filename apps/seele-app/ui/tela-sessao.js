@@ -2772,8 +2772,9 @@ function fraseDoAviso(motivo) {
   // estimativa do servidor. Os números vêm do fio; a frase, o risco e a saída
   // são daqui. Sem eles, a frase vai sozinha, e não com um buraco no meio.
   if (nome === "VoiceRoomOverHostUplink") {
-    const precisa = emKbps(motivo[nome]?.precisa_bps);
-    const medido = emKbps(motivo[nome]?.medido_bps);
+    // Os dois lado a lado nunca saem iguais quando não são (M-6): ver
+    // `doisEmKbps`.
+    const [precisa, medido] = doisEmKbps(motivo[nome]?.precisa_bps, motivo[nome]?.medido_bps);
     const numeros =
       precisa && medido
         ? ` Com todos falando juntos, ela pede ${precisa}, e a internet do servidor ` +

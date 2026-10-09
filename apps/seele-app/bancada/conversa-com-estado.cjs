@@ -297,6 +297,16 @@ const chromium = require("./playwright.cjs").chromium();
         VoiceRoomOverHostUplink: { precisa_bps: 6_480_000, medido_bps: 4_000_000 },
       }),
       semNumeros: fraseDoAviso({ VoiceRoomOverHostUplink: {} }),
+      // M-6 da rodada 1: dois números a menos de 500 bps um do outro.
+      pertos: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 4_000_400, medido_bps: 4_000_000 },
+      }),
+      // E a sala que pede menos que a subida medida: o aviso dispara acima de
+      // 60% dela (ADR 0038), e a frase não pode dizer que passou do que a
+      // internet consegue enviar com os números desmentindo.
+      abaixo: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 3_000_000, medido_bps: 4_000_000 },
+      }),
     }));
     for (const [nome, frase] of Object.entries(avisos)) {
       assert.ok(
@@ -311,6 +321,16 @@ const chromium = require("./playwright.cjs").chromium();
     assert.ok(
       !/undefined|NaN/.test(avisos.semNumeros),
       `sem os números, a frase escreve lixo no lugar deles: ${avisos.semNumeros}`,
+    );
+    const numeros = /pede ([\d.,]+ kbps).*cerca de ([\d.,]+ kbps)/.exec(avisos.pertos);
+    assert.ok(
+      numeros && numeros[1] !== numeros[2],
+      `com 400 bps de diferença, a frase diz dois números iguais: ${avisos.pertos}`,
+    );
+    assert.ok(
+      !/CONSEGUE ENVIAR/.test(avisos.abaixo),
+      `a sala pede menos do que a internet envia, e a frase diz que passou do que ela ` +
+        `consegue enviar: ${avisos.abaixo}`,
     );
     console.log("C OK: quem é movido e quem hospeda uma sala além da subida leem uma frase");
 

@@ -198,13 +198,19 @@ const AVISOS = {
     "ALGUÉM QUE MODERA ESTE SERVIDOR PÔS VOCÊ NUMA SALA DE VOZ. " +
     "Você já está nela; se não quer ficar, saia da sala ou entre na que preferir.",
 
-  // ADR 0038: uma sala passou do que a internet de quem hospeda consegue enviar
-  // com todos falando juntos. Só chega a quem administra o servidor, que é quem
+  // ADR 0038: uma sala passou do que a internet de quem hospeda aguenta com
+  // todos falando juntos. Só chega a quem administra o servidor, que é quem
   // pode fazer algo. **Não para nada** — ninguém é barrado —, e a frase diz o
   // risco e a saída. Os dois números vêm no motivo e entram em `fraseDoAviso`,
   // em kbps, como a retenção põe a contagem dela.
+  //
+  // **«Com folga», e não «consegue enviar»** (rodada 1 do lote I-b): o aviso
+  // dispara quando a sala passa de 60% da subida medida, e não dela inteira. A
+  // sala que pede 3.000 kbps de uma internet que envia 4.000 dispara, e a frase
+  // de antes dizia que ela passou do que a internet consegue enviar, com os
+  // números ao lado desmentindo.
   VoiceRoomOverHostUplink:
-    "UMA SALA DE VOZ PASSOU DO QUE A INTERNET DESTE SERVIDOR CONSEGUE ENVIAR",
+    "UMA SALA DE VOZ PASSOU DO QUE A INTERNET DESTE SERVIDOR AGUENTA COM FOLGA",
 
   // ---- uma sala deixou de existir ----
   //
@@ -1343,18 +1349,41 @@ function fraseDeAnexo(razao) {
 }
 
 /**
- * Uma taxa em bits por segundo do jeito que alguém lê uma: em kbps, inteiros,
- * com o ponto dos milhares. `6480000` vira `6.480 kbps`.
+ * Uma taxa em bits por segundo do jeito que alguém lê uma: em kbps, com o
+ * ponto dos milhares e, se pedidas, `casas` decimais depois da vírgula.
+ * `6480000` vira `6.480 kbps`; com uma casa, `4000400` vira `4.000,4 kbps`.
  *
- * O separador escrito à mão, e não `toLocaleString`: a frase é desta casa, e o
- * número não pode mudar de forma com a língua do sistema de quem lê. `null`
+ * Os separadores escritos à mão, e não `toLocaleString`: a frase é desta casa,
+ * e o número não pode mudar de forma com a língua do sistema de quem lê. `null`
  * quando o valor não é um número — e quem chama escreve a frase sem ele.
  */
-function emKbps(bps) {
+function emKbps(bps, casas = 0) {
   const numero = Number(bps);
   if (!Number.isFinite(numero) || numero <= 0) return null;
-  const kbps = String(Math.round(numero / 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${kbps} kbps`;
+  const [inteira, fracao] = (numero / 1000).toFixed(casas).split(".");
+  const milhares = inteira.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return fracao ? `${milhares},${fracao} kbps` : `${milhares} kbps`;
+}
+
+/**
+ * Duas taxas em kbps, para pôr lado a lado, que **nunca saem iguais quando são
+ * diferentes** (M-6 da rodada 1 do lote I-b).
+ *
+ * Inteiros quando bastam. Dois valores a menos de 500 bps um do outro
+ * arredondavam para o mesmo número, e a frase dizia «pede 4.000 kbps, e envia
+ * cerca de 4.000 kbps» sobre números que não eram iguais. Então ganham casas
+ * decimais, uma de cada vez, até se separarem — com três, o kbps é o bps
+ * exato. Iguais de verdade saem iguais.
+ */
+function doisEmKbps(a, b) {
+  let par = [emKbps(a), emKbps(b)];
+  for (let casas = 1; casas <= 3; casas += 1) {
+    if (par[0] === null || par[1] === null || par[0] !== par[1] || Number(a) === Number(b)) {
+      break;
+    }
+    par = [emKbps(a, casas), emKbps(b, casas)];
+  }
+  return par;
 }
 
 /**

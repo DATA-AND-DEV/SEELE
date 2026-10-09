@@ -17138,11 +17138,14 @@ fn o_aviso_da_sala_alem_da_subida_diz_os_dois_numeros_em_kbps() {
              aviso sem os números, e «a sala está grande» não diz o que fazer"
         );
     };
-    for elo in ["precisa_bps", "medido_bps", "emKbps("] {
+    // `doisEmKbps`, e não `emKbps` em cada um: lado a lado, dois números a menos
+    // de 500 bps um do outro saíam iguais (M-6 da rodada 1).
+    for elo in ["precisa_bps", "medido_bps", "doisEmKbps("] {
         assert!(
             braco.contains(elo),
             "o braço da sala além da subida não passa por `{elo}`: um dos números não \
-             chega à frase, ou chega em bits por segundo crus:\n{braco}"
+             chega à frase, chega em bits por segundo crus, ou os dois saem iguais quando \
+             não são:\n{braco}"
         );
     }
 }
