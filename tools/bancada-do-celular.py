@@ -891,12 +891,17 @@ def aba_pessoas(pg: Page) -> list[str]:
         return pg.evaluate("""(() => { const f = document.getElementById('cel-folha-pessoa');
             return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.cel-folha-volume')?.textContent ?? '',
                      moderar: /MODERAR/.test(f.querySelector('.cel-fora')?.textContent ?? ''),
-                     moderacaoDoDesktop: !document.getElementById('moderar').hidden }; })()""")
+                     moderacaoDoDesktop: !document.getElementById('moderar').hidden,
+                     foco: f.contains(document.activeElement) }; })()""")
 
     folha = abrir("juli")
     if folha is None:
         falhas.append("o toque em juli não abriu a folha da pessoa")
     else:
+        # Uma folha é um diálogo modal: o foco entra nela, e o leitor da tela lê
+        # a folha, e não a página de trás (Tarefa 15, na árvore do WebKit).
+        if not folha["foco"]:
+            falhas.append("a folha de juli abriu e o foco ficou na página de trás")
         if not folha["volume"] or "100%" not in folha["rotulo"]:
             falhas.append(f"a folha de juli não mostra o volume com o número: {folha}")
         if not folha["moderar"]:
@@ -921,6 +926,8 @@ def aba_pessoas(pg: Page) -> list[str]:
         falhas.append("o toque em rafa não abriu a folha")
     elif propria["volume"] or propria["moderar"]:
         falhas.append(f"a folha de quem usa o aparelho tem volume ou moderar: {propria}")
+    elif not propria["foco"]:
+        falhas.append("a folha de rafa abriu e o foco ficou na página de trás")
     pg.keyboard.press("Escape")
 
     pg.evaluate("SEELE_QUADRO.may_kick = SEELE_QUADRO.may_ban = SEELE_QUADRO.may_move_person = false")

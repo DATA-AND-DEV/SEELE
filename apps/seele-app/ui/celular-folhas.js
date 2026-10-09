@@ -197,13 +197,14 @@
    */
   function folhaDaPessoa({ nome, sinal, estado, volume, mudarVolume, podeModerar }) {
     let fechar = null;
+    let deslizante = null;
     const corpo = [h("div", { class: "cel-folha-sinal" },
       h("span", { class: "rotulo", text: PALAVRAS.sinal }),
       h("span", { class: "cel-folha-sinal-valor", text: sinal }),
       h("span", { class: "cel-folha-sinal-estado", text: estado }))];
     if (volume !== null) {
       const rotulo = h("span", { class: "rotulo cel-folha-volume", text: PALAVRAS.volume(volume) });
-      const deslizante = h("input", {
+      deslizante = h("input", {
         type: "range",
         class: "cel-folha-deslizante",
         min: "0",
@@ -221,9 +222,12 @@
     if (podeModerar) {
       corpo.push(h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: PALAVRAS.moderar }), PALAVRAS.foraModerar));
     }
-    corpo.push(h("div", { class: "cel-folha-acoes" },
-      h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar)));
+    const fecharBotao = h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar);
+    corpo.push(h("div", { class: "cel-folha-acoes" }, fecharBotao));
     fechar = abrirFolha(folha("cel-folha-pessoa", nome, ...corpo), () => fechar());
+    // O foco entra na folha, como nas outras: sem ele, o leitor da tela lia a
+    // sessão por baixo dela (medido na árvore do WebKit).
+    (deslizante ?? fecharBotao).focus();
   }
 
   // ------------------------------------------------------------- ANEXAR
