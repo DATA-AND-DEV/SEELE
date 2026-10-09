@@ -36,6 +36,11 @@
     apagarMinha: "APAGAR A MINHA MENSAGEM",
     remover: "REMOVER",
     foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
+    sinal: "SINAL",
+    volume: (n) => `VOLUME DESTA PESSOA · ${n}%`,
+    volumeDe: (quem) => `volume de ${quem}`,
+    moderar: "MODERAR",
+    foraModerar: "Expulsar, banir e mover pessoas é pelo SEELE no computador.",
     anexar: "ANEXAR",
     midia: "FOTO OU VÍDEO",
     arquivo: "ARQUIVO",
@@ -160,6 +165,47 @@
     folhaDeAcoes("cel-folha-mensagem", PALAVRAS.mensagemDe(autor, hora), antes, acoes);
   }
 
+  // ----------------------------------------------------- a folha da pessoa
+
+  /**
+   * O sinal de uma pessoa, o volume dela e onde se modera.
+   *
+   * O volume sai da linha da lista e vem para cá: um deslizante por pessoa,
+   * sempre à vista, faria da lista uma mesa de som, e no desktop ele só aparece
+   * com o ponteiro em cima. A folha escreve no deslizante do desktop, que é quem
+   * manda o `set_volume`. Quem usa o aparelho não tem volume para si.
+   */
+  function folhaDaPessoa({ nome, sinal, estado, volume, mudarVolume, podeModerar }) {
+    let fechar = null;
+    const corpo = [h("div", { class: "cel-folha-sinal" },
+      h("span", { class: "rotulo", text: PALAVRAS.sinal }),
+      h("span", { class: "cel-folha-sinal-valor", text: sinal }),
+      h("span", { class: "cel-folha-sinal-estado", text: estado }))];
+    if (volume !== null) {
+      const rotulo = h("span", { class: "rotulo cel-folha-volume", text: PALAVRAS.volume(volume) });
+      const deslizante = h("input", {
+        type: "range",
+        class: "cel-folha-deslizante",
+        min: "0",
+        max: "200",
+        step: "10",
+        value: String(volume),
+        "aria-label": PALAVRAS.volumeDe(nome),
+        oninput: () => {
+          rotulo.textContent = PALAVRAS.volume(deslizante.value);
+          mudarVolume(Number(deslizante.value));
+        },
+      });
+      corpo.push(h("label", { class: "cel-folha-campo-volume" }, rotulo, deslizante));
+    }
+    if (podeModerar) {
+      corpo.push(h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: PALAVRAS.moderar }), PALAVRAS.foraModerar));
+    }
+    corpo.push(h("div", { class: "cel-folha-acoes" },
+      h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar)));
+    fechar = abrirFolha(folha("cel-folha-pessoa", nome, ...corpo), () => fechar());
+  }
+
   // ------------------------------------------------------------- ANEXAR
 
   /**
@@ -183,5 +229,6 @@
 
   CELULAR.registrar("folhaDaMensagem", folhaDaMensagem);
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);
+  CELULAR.registrar("folhaDaPessoa", folhaDaPessoa);
   CELULAR.registrar("folhaDeFrase", folhaDeFrase);
 })();

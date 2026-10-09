@@ -48,6 +48,7 @@ import tempfile
 from typing import Callable
 
 from PIL import Image, ImageChops
+from playwright.sync_api import Error as ErroDoPlaywright
 from playwright.sync_api import Page, sync_playwright
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -421,7 +422,12 @@ def tocar(pg: Page, seletor: str) -> bool:
     alvo = pg.locator(seletor).first
     if alvo.count() == 0 or not alvo.is_visible():
         return False
-    alvo.tap()
+    try:
+        # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
+        # alcança: o Playwright desiste em três segundos, e o caso diz isso.
+        alvo.tap(timeout=3000)
+    except ErroDoPlaywright:
+        return False
     return True
 
 
@@ -807,6 +813,80 @@ def aba_conversa(pg: Page) -> list[str]:
     return falhas
 
 
+def aba_pessoas(pg: Page) -> list[str]:
+    """A aba PESSOAS (Tarefa 7): a lista do desktop, e a folha de cada pessoa."""
+    falhas = []
+    tocar(pg, "#cel-aba-pessoas")
+    pg.wait_for_timeout(200)
+    linhas = pg.evaluate("""(() => [...document.querySelectorAll('#lista-roster li.pessoa')].map((li) => {
+        const visivel = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        return { nome: li.querySelector('.pessoa-nome')?.textContent ?? '', altura: Math.round(li.getBoundingClientRect().height),
+                 numero: visivel(li.querySelector('.pessoa-sync-valor')), barra: visivel(li.querySelector('.barra')),
+                 palavra: visivel(li.querySelector('.pastilha')), volume: visivel(li.querySelector('input.volume')) };
+    }))()""")
+    if len(linhas) < 4:
+        falhas.append(f"a aba PESSOAS mostra {len(linhas)} pessoas, e não 4")
+    for l in linhas:
+        if l["altura"] < 56:
+            falhas.append(f"a linha de {l['nome']} tem {l['altura']} de altura, e não 56")
+        if not (l["numero"] and l["barra"] and l["palavra"]):
+            falhas.append(f"o sinal de {l['nome']} não tem número, barra e palavra: {l}")
+        if l["volume"]:
+            falhas.append(f"o volume de {l['nome']} aparece na linha (ele mora na folha da pessoa)")
+
+    def abrir(nome):
+        if not tocar(pg, f"#lista-roster li.pessoa:has(.pessoa-nome:text-is('{nome}'))"):
+            return None
+        pg.wait_for_timeout(150)
+        if not pg.locator("#cel-folha-pessoa").is_visible():
+            return None
+        return pg.evaluate("""(() => { const f = document.getElementById('cel-folha-pessoa');
+            return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.cel-folha-volume')?.textContent ?? '',
+                     moderar: /MODERAR/.test(f.querySelector('.cel-fora')?.textContent ?? ''),
+                     moderacaoDoDesktop: !document.getElementById('moderar').hidden }; })()""")
+
+    folha = abrir("juli")
+    if folha is None:
+        falhas.append("o toque em juli não abriu a folha da pessoa")
+    else:
+        if not folha["volume"] or "100%" not in folha["rotulo"]:
+            falhas.append(f"a folha de juli não mostra o volume com o número: {folha}")
+        if not folha["moderar"]:
+            falhas.append("com may_kick, a folha de juli não diz onde se modera")
+        if folha["moderacaoDoDesktop"]:
+            falhas.append("o toque abriu também a moderação do desktop")
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        pg.evaluate("""(() => { const v = document.querySelector('#cel-folha-pessoa input[type=range]');
+            v.value = '150'; v.dispatchEvent(new Event('input', { bubbles: true })); })()""")
+        pg.wait_for_timeout(200)
+        do_desktop = pg.evaluate("document.querySelector(\"#lista-roster input.volume[data-pessoa='juli']\")?.value ?? null")
+        volumes = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_volume').map(([, a]) => a)")
+        rotulo = pg.evaluate("document.querySelector('#cel-folha-pessoa .cel-folha-volume')?.textContent ?? ''")
+        if do_desktop != "150" or {"nickname": "juli", "percent": 150} not in volumes:
+            falhas.append(f"o volume da folha não chegou ao desktop: input {do_desktop}, set_volume {volumes}")
+        if "150%" not in rotulo:
+            falhas.append(f"o número do volume não acompanhou: {rotulo!r}")
+        pg.keyboard.press("Escape")
+
+    propria = abrir("rafa (você)")
+    if propria is None:
+        falhas.append("o toque em rafa não abriu a folha")
+    elif propria["volume"] or propria["moderar"]:
+        falhas.append(f"a folha de quem usa o aparelho tem volume ou moderar: {propria}")
+    pg.keyboard.press("Escape")
+
+    pg.evaluate("SEELE_QUADRO.may_kick = SEELE_QUADRO.may_ban = SEELE_QUADRO.may_move_person = false")
+    esperar_quadro(pg)
+    sem = abrir("vitor")
+    if sem is None:
+        falhas.append("o toque em vitor não abriu a folha")
+    elif sem["moderar"]:
+        falhas.append("sem nenhuma permissão de moderar, a folha ainda fala em moderar")
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(150)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
@@ -819,6 +899,8 @@ CASOS: dict[str, Caso] = {
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
     "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
+    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
+                        raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
 }
 
 

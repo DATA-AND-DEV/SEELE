@@ -686,3 +686,85 @@
   min-height: var(--cel-alvo);
   letter-spacing: 0.08em;
 }
+
+/* ------------------------------------------------------------ a aba PESSOAS
+ *
+ * A lista do desktop, na largura toda e no tamanho do polegar. O sinal fica
+ * em número, barra e palavra (specs/06: nunca só cor); o volume sai da linha
+ * e vai para a folha da pessoa. */
+
+:root[data-casca="celular"] .painel-pessoas .pessoas-cartela {
+  padding: 10px calc(16px + var(--cel-seguro-dir)) 10px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #lista-roster {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+:root[data-casca="celular"] #lista-roster .roster-sala {
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 6px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] #lista-roster .roster-sala-nome {
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa {
+  position: relative;
+  min-height: 56px;
+  gap: 4px;
+  padding: 10px calc(16px + var(--cel-seguro-dir)) 10px calc(16px + var(--cel-seguro-esq));
+  cursor: pointer;
+}
+
+/* Quem fala: a borda do fósforo, e **sem o fundo** do desktop. Sobre o tom
+   fraco do fósforo, o rótulo cai a 3,5:1 (medido na bancada). */
+:root[data-casca="celular"] #lista-roster .pessoa.falando {
+  background: none;
+}
+
+/* O nome é texto: abrir a folha é tocar a linha. */
+:root[data-casca="celular"] #lista-roster .pessoa-nome-porta {
+  pointer-events: none;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-nome {
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+}
+
+/* O resumo do diagnóstico sai: ele repete o número que o sinal já diz, e no
+   celular o toque é da linha, e não dele. Fica o sinal numa fileira só, o
+   número e a barra, com a palavra do estado no canto. */
+:root[data-casca="celular"] #lista-roster .pessoa-diagnostico-resumo {
+  display: none;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-diagnostico {
+  margin-top: 0;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-sync {
+  display: inline-flex;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-diagnostico .barra {
+  display: inline-block;
+  margin-left: 8px;
+}
+
+:root[data-casca="celular"] #lista-roster .pessoa-rodape {
+  position: absolute;
+  top: 12px;
+  right: calc(16px + var(--cel-seguro-dir));
+}
+
+:root[data-casca="celular"] #lista-roster .pastilha[data-estado="escuta"] {
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-roster input.volume {
+  display: none;
+}

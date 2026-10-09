@@ -101,3 +101,34 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* A folha da pessoa: o sinal numa fileira, e o volume com o número escrito. */
+:root[data-casca="celular"] .cel-folha-sinal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+}
+
+:root[data-casca="celular"] .cel-folha-sinal-valor {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-folha-sinal-estado {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.12em;
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-folha-campo-volume {
+  display: grid;
+  gap: 6px;
+}
+
+:root[data-casca="celular"] .cel-folha-deslizante {
+  width: 100%;
+  min-height: var(--cel-alvo);
+  accent-color: var(--seele-laranja-nerv);
+}
