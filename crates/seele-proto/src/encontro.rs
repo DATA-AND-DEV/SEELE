@@ -159,6 +159,116 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 /// duas na mesma tarde.
 pub const PORTA_PADRAO: u16 = 8383 + 1;
 
+/// O ponto de encontro do projeto, para quem hospeda pelo app e para quem liga
+/// por código, quando ninguém disse outro.
+///
+/// O ADR 0022 decidiu construir **com um ponto de encontro nosso por padrão**, e
+/// é isto. Ele é trocável por [`VARIAVEL`], e o endereço de quem hospeda um
+/// servidor guardado viaja dentro do próprio convite (`uri::Bilhete`).
+///
+/// **Padrão só do caminho de produção.** Desde a decisão (d) do lote
+/// G-servidor da F5, sem a variável os testes não convocam ponto nenhum, e a
+/// produção pede este de forma explícita ([`ponto_escolhido`] com ele como o
+/// que vale sem a variável).
+///
+/// Um **nome** e não um endereço, porque isto está compilado dentro de cada
+/// executável do mundo: com um nome, trocar de VPS é um registro de DNS; com um
+/// IP, seria uma versão nova e todo mundo reinstalando. E como DNS é mais uma
+/// coisa que pode estar ruim num dado dia, há uma rede embaixo: ver
+/// [`REDE_DO_PADRAO`]. Quem quiser o seu próprio sobe em dez linhas
+/// (`docs/ponto-de-encontro.md`).
+///
+/// Mora aqui, e não no `seele-server`, porque quem liga por código também
+/// precisa dele (um código não carrega ponto nenhum), e o `seele-core` não vê o
+/// `seele-server` (ADR 0002).
+pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
+
+/// Os endereços do [`PONTO_PADRAO`], para quando o nome não resolver, e para
+/// os guardas dos testes saberem que IP é o da produção
+/// ([`aponta_para_a_producao`]).
+///
+/// # Por que existir, e por que só para o nosso
+///
+/// O nome é o caminho principal porque ele é o que torna o servidor trocável:
+/// ele está compilado dentro de **cada executável do mundo**, e um IP gravado
+/// ali significaria que mudar de VPS quebra todo mundo até a próxima versão.
+///
+/// Mas DNS é mais uma coisa que pode estar ruim num dado dia — resolvedor do
+/// provedor caído, rede que sequestra consulta, zona em carência depois de uma
+/// mudança. Nesses casos o degrau 4 sumiria por um motivo que não tem nada a
+/// ver com ele.
+///
+/// **Isto vale só para o endereço padrão**, e a exceção é a parte importante: se
+/// alguém apontou `$SEELE_ENCONTRO` para o ponto de encontro dela e o nome não
+/// resolve, cair no nosso mandaria o metadado dessa pessoa para nós sem que ela
+/// tivesse pedido. Um recuo que atravessa uma escolha explícita de outra pessoa
+/// não é resiliência, é traição silenciosa.
+///
+/// Trocada em 2026-08-21, quando o ponto de encontro do projeto mudou de
+/// Atlanta para o Brasil. A distância não era detalhe de conforto: com o serviço
+/// em Atlanta, as duas pernas do furo — de quem entra até o ponto, e do ponto
+/// até quem hospeda — somavam ~280 ms, e quem entra espera o
+/// `seele_core::enlace::ESPERA_DO_FURO`, que são 200. O aperto de mão saía
+/// **antes** de o anfitrião ter furado, que é o defeito de origem deste degrau
+/// reaparecendo por geografia. Do Brasil as duas pernas somam ~34 ms.
+///
+/// E o endereço velho tinha de sair daqui por uma segunda razão: um IP de VPS
+/// destruída volta para o provedor e é entregue a outra pessoa. Enquanto esta
+/// constante o carregasse, todo SEELE do mundo mandaria `SEELE-ENC` para a
+/// máquina de um desconhecido sempre que o DNS falhasse — e ela aprenderia que
+/// endereço falou com que endereço, que é exatamente o metadado que o ADR 0022
+/// pesa em voz alta.
+pub const REDE_DO_PADRAO: [&str; 2] = [
+    "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
+    "216.128.168.216:8384",
+];
+
+/// A variável que troca o ponto de encontro, ou o desliga. Ver
+/// [`ponto_escolhido`].
+pub const VARIAVEL: &str = "SEELE_ENCONTRO";
+
+/// O ponto que vale, dado o valor de [`VARIAVEL`] (`None` sem ela) e o que vale
+/// sem ela.
+///
+/// **A leitura única do ambiente**, para quem hospeda e para quem liga: um
+/// texto troca o ponto (sem os espaços das pontas), e vazio ou `nao` (sem
+/// diferença de caixa) desligam. Sem a variável, `sem_a_variavel`, e os dois
+/// sentidos são de quem chama: `None` para o caminho que os testes usam
+/// (nenhum ponto), [`PONTO_PADRAO`] para a produção, que o pede de forma
+/// explícita (a decisão (d) do lote G-servidor da F5).
+#[must_use]
+pub fn ponto_escolhido(variavel: Option<&str>, sem_a_variavel: Option<&str>) -> Option<String> {
+    let escolhido = variavel.or(sem_a_variavel)?.trim();
+    if escolhido.is_empty() || escolhido.eq_ignore_ascii_case("nao") {
+        return None;
+    }
+    Some(escolhido.to_owned())
+}
+
+/// Se este texto de ponto é o de produção: o [`PONTO_PADRAO`], escrito como
+/// for, ou um dos IPs de [`REDE_DO_PADRAO`], em qualquer porta, também escrito
+/// como IPv4 dentro de IPv6 (`::ffff:a.b.c.d`).
+///
+/// É a regra dos dois guardas que impedem um teste de falar com a VPS de
+/// produção: o do anfitrião (`seele_server::alcance::encontro`, da F5) e o de
+/// quem liga (`seele_core::encontro`). Pela mesma regra que separa o texto do
+/// ponto (`uri::separar_ponto`): um texto que ela recusa não vira consulta
+/// nenhuma, e não há o que barrar.
+#[must_use]
+pub fn aponta_para_a_producao(ponto: &str) -> bool {
+    let Ok(alvo) = crate::uri::separar_ponto(ponto.trim()) else {
+        return false;
+    };
+    let maquina = alvo.maquina.trim_end_matches('.');
+    maquina.eq_ignore_ascii_case(PONTO_PADRAO)
+        || maquina.parse::<IpAddr>().is_ok_and(|ip| {
+            REDE_DO_PADRAO
+                .iter()
+                .filter_map(|texto| texto.parse::<SocketAddr>().ok())
+                .any(|producao| producao.ip() == ip.to_canonical())
+        })
+}
+
 /// O que todo datagrama deste protocolo começa dizendo.
 ///
 /// O `/1` é a versão. Um ponto de encontro que receba `/2` não responde, que é
@@ -1368,6 +1478,80 @@ mod testes {
             None,
             "a vizinhança maior virou vale-tudo"
         );
+    }
+
+    #[test]
+    fn a_variavel_troca_o_ponto_ou_o_desliga_e_a_ausencia_e_de_quem_chama() {
+        // Uma leitura só do ambiente, para quem hospeda e para quem liga. A
+        // ausência da variável tem dois sentidos (a decisão (d) do lote
+        // G-servidor da F5): nenhum ponto, para os testes e o `do_ambiente`; o
+        // padrão, para a produção, que o pede de forma explícita.
+        assert_eq!(ponto_escolhido(None, None), None);
+        assert_eq!(
+            ponto_escolhido(None, Some(PONTO_PADRAO)).as_deref(),
+            Some(PONTO_PADRAO)
+        );
+        for sem_a_variavel in [None, Some(PONTO_PADRAO)] {
+            assert_eq!(
+                ponto_escolhido(Some("  meu.ponto:9000 "), sem_a_variavel).as_deref(),
+                Some("meu.ponto:9000")
+            );
+            for desligado in ["", "   ", "nao", "NAO", "Nao"] {
+                assert_eq!(
+                    ponto_escolhido(Some(desligado), sem_a_variavel),
+                    None,
+                    "«{desligado}» não desligou o ponto"
+                );
+            }
+        }
+        assert_eq!(PONTO_PADRAO, "encontro.seele.app.br");
+        assert_eq!(VARIAVEL, "SEELE_ENCONTRO");
+    }
+
+    /// Escrito pela F5 no lote G-servidor, no guarda do anfitrião, e trazido
+    /// para cá junto com a regra: o guarda do anfitrião e o de quem liga
+    /// perguntam a ela.
+    #[test]
+    fn o_guarda_reconhece_o_ponto_de_producao_escrito_de_qualquer_jeito() {
+        // Um guarda que só casasse com o texto exato do `PONTO_PADRAO` deixaria
+        // passar o mesmo lugar escrito de outro jeito — com porta, em
+        // maiúsculas, com o ponto final do DNS, ou pelo IP da VPS.
+        for producao in [
+            PONTO_PADRAO,
+            "encontro.seele.app.br:8384",
+            "ENCONTRO.Seele.App.BR",
+            "encontro.seele.app.br.",
+            " encontro.seele.app.br ",
+            "216.128.168.216",
+            "216.128.168.216:8384",
+            "216.128.168.216:9999",
+            "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
+            "[::ffff:216.128.168.216]:8384",
+        ] {
+            assert!(
+                aponta_para_a_producao(producao),
+                "«{producao}» é o ponto de encontro de produção e o guarda não o reconheceu: \
+                 um teste que o escreva assim volta a registrar servidor de teste no quarto da VPS"
+            );
+        }
+        // E o que não é produção passa: um guarda que barrasse o ponto local
+        // derrubaria justamente os testes que fazem a coisa certa.
+        for local in [
+            "127.0.0.1",
+            "127.0.0.1:8384",
+            "[::1]:8384",
+            "192.0.2.1:8384",
+            "meu.ponto:9000",
+            "encontro.seele.app.br.exemplo",
+            "nao",
+            "",
+        ] {
+            assert!(
+                !aponta_para_a_producao(local),
+                "«{local}» não é o ponto de produção e o guarda o recusou: os testes que apontam \
+                 um ponto local reprovariam por fazerem o certo"
+            );
+        }
     }
 
     #[test]

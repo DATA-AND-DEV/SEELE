@@ -49,7 +49,57 @@ use seele_proto::uri::Bilhete;
 // `Marca` e `Marcas` reexportadas: quem chama `onde_mora_hoje` de fora precisa
 // das marcas prontas, e fazê-las vir daqui poupa a camada de cima de nomear
 // `seele-proto`, que o ADR 0002 não deixa a casca alcançar de qualquer jeito.
-pub use seele_proto::encontro::{Marca, Marcas};
+pub use seele_proto::encontro::{Marca, Marcas, PONTO_PADRAO, VARIAVEL};
+
+/// O ponto de encontro de quem liga por código: o que `$SEELE_ENCONTRO` diz,
+/// e o [`PONTO_PADRAO`] sem ela. `None` quando a variável o desliga: sem
+/// ponto, código não funciona, e link com endereço continua funcionando.
+///
+/// **Só a produção chama isto**, como o `com_o_ponto_padrao` de quem hospeda
+/// (a decisão (d) do lote G-servidor da F5): os testes dão o ponto deles a
+/// [`localizar`]. A leitura do ambiente é a única, a de
+/// `seele_proto::encontro::ponto_escolhido`. Um código não carrega ponto
+/// nenhum, e com `$SEELE_ENCONTRO` as duas pontas precisam do mesmo.
+#[must_use]
+pub fn ponto_de_quem_liga() -> Option<String> {
+    encontro::ponto_escolhido(std::env::var(VARIAVEL).ok().as_deref(), Some(PONTO_PADRAO))
+}
+
+// A feature do guarda nunca entra num build otimizado: com ela, perguntar ao
+// ponto padrão entra em pânico, e é o que o produto faz ao ligar por código.
+// Ver o gêmeo dela no `seele-server`.
+#[cfg(all(feature = "recusar-encontro-de-producao", not(debug_assertions)))]
+compile_error!(
+    "a feature `recusar-encontro-de-producao` do seele-core é só de teste e não pode ir num \
+     build otimizado: com ela, ligar por código pelo ponto de encontro padrão entra em pânico"
+);
+
+/// O gêmeo do guarda da F5, do lado de quem liga: nenhum teste pergunta à VPS
+/// de produção, nem pelo quarto ([`localizar`], [`onde_mora_hoje`]) nem pela
+/// batida (o `LEVE`).
+///
+/// A regra é a mesma do guarda de quem hospeda,
+/// `seele_proto::encontro::aponta_para_a_producao`: o [`PONTO_PADRAO`] escrito
+/// como for, ou um IP da rede dele. Age antes do DNS, nos dois lugares em que
+/// este módulo resolve um ponto. Ligado nos testes deste crate (`cfg(test)`) e
+/// pela feature `recusar-encontro-de-producao`, que só a `[dev-dependencies]`
+/// do `seele-conformance` pede; fora disso, não faz nada.
+///
+/// `onde` vai na frase do pânico e diz qual dos dois lugares pegou o teste.
+#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
+#[track_caller]
+fn recusar_a_producao(ponto: &str, onde: &str) {
+    assert!(
+        !encontro::aponta_para_a_producao(ponto),
+        "um teste ia perguntar ao ponto de encontro de produção («{ponto}», pego em {onde}): \
+         cada rodada mandaria pacotes de teste à VPS de produção, e o teste passaria a depender \
+         da rede de fora. Dê a ele um ponto local"
+    );
+}
+
+/// Fora dos testes, nada: ver a versão ligada logo acima.
+#[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
+fn recusar_a_producao(_ponto: &str, _onde: &str) {}
 
 /// Quanto tempo se gasta batendo antes de desistir e conectar assim mesmo.
 ///
@@ -245,6 +295,8 @@ impl Batida {
 
 /// Onde o ponto de encontro atende.
 async fn resolver(bilhete: &Bilhete) -> Option<SocketAddr> {
+    // Nos testes, antes do DNS: ver [`recusar_a_producao`].
+    recusar_a_producao(&bilhete.ponto, "encontro::resolver, a batida, antes do DNS");
     let alvo = bilhete.ponto().ok()?;
     let aviso = bilhete.aviso().ok()?;
     let achados: Vec<SocketAddr> = tokio::net::lookup_host((alvo.maquina, alvo.porta))
@@ -338,6 +390,8 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
 /// quem lê o log distingue um texto que não é endereço de um nome que não
 /// resolve.
 async fn resolver_ponto(ponto: &str) -> Vec<SocketAddr> {
+    // Nos testes, antes do DNS: ver [`recusar_a_producao`].
+    recusar_a_producao(ponto, "encontro::resolver_ponto, antes do DNS");
     let alvo = match seele_proto::uri::separar_ponto(ponto) {
         Ok(alvo) => alvo,
         Err(erro) => {
@@ -3075,5 +3129,36 @@ mod testes {
                 );
             }
         }
+    }
+
+    /// **O gêmeo do guarda da F5, do lado de quem liga.** Um IP escrito à mão,
+    /// e não o nome: o `resolver_ponto` com um IP volta sem rede, e nenhum
+    /// pacote sai daqui para a VPS em caso nenhum — o que reprova, desfeito o
+    /// guarda, é a falta do pânico.
+    #[tokio::test]
+    #[should_panic(expected = "pego em encontro::resolver_ponto, antes do DNS")]
+    async fn perguntar_ao_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
+        let _ = resolver_ponto("216.128.168.216:8384").await;
+    }
+
+    /// O mesmo, na batida: o `LEVE` sai para o ponto do bilhete.
+    #[tokio::test]
+    #[should_panic(expected = "pego em encontro::resolver, a batida, antes do DNS")]
+    async fn bater_no_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
+        let Ok(bilhete) = Bilhete::novo("216.128.168.216:8384", "203.0.113.7:41234") else {
+            panic!("o bilhete de teste não se montou");
+        };
+        let _ = resolver(&bilhete).await;
+    }
+
+    #[test]
+    fn quem_liga_por_codigo_usa_o_ponto_padrao_sem_a_variavel() {
+        // O caminho de produção de quem liga, como o `com_o_ponto_padrao` de
+        // quem hospeda: sem a variável, o ponto do projeto. A leitura é a
+        // única do `seele-proto`.
+        assert_eq!(
+            encontro::ponto_escolhido(None, Some(PONTO_PADRAO)).as_deref(),
+            Some("encontro.seele.app.br")
+        );
     }
 }

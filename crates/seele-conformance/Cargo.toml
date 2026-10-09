@@ -19,7 +19,9 @@ publish.workspace = true
 seele-proto = { path = "../seele-proto" }
 # The soak drives the real pipeline: codec, jitter buffer, network simulator.
 seele-audio = { path = "../seele-audio" }
-seele-core = { path = "../seele-core" }
+# Com o gêmeo do guarda, do lado de quem liga (`encontro::recusar_a_producao`):
+# um teste que ia perguntar à VPS de produção reprova antes do primeiro pacote.
+seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao"] }
 # Com o guarda que faz um teste reprovar quando ia falar com o ponto de
 # encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
 # dependência de teste: o binário do produto não a leva.

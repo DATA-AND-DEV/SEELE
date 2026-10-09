@@ -49,76 +49,20 @@ use std::time::Duration;
 use seele_proto::encontro::{self, Marca, Marcas};
 use seele_proto::uri::Bilhete;
 
-/// O ponto de encontro do projeto, para quem hospeda pelo app e não disse
-/// outro.
+/// O ponto de encontro do projeto, os endereços de reserva dele e a variável
+/// que o troca moram em `seele_proto::encontro`, com a leitura do ambiente
+/// (`ponto_escolhido`) e a regra que diz se um texto aponta para a produção
+/// (`aponta_para_a_producao`): quem liga por código também precisa deles, e o
+/// `seele-core` não vê o `seele-server` (ADR 0002).
 ///
-/// O ADR 0022 decidiu construir **com um ponto de encontro nosso por padrão**, e
-/// é isto. Ele é trocável por `$SEELE_ENCONTRO`, e o endereço de quem hospeda
-/// viaja dentro do próprio convite — ver [`Bilhete`].
-///
-/// **Padrão só do caminho de produção.** Desde a decisão (d) do lote
-/// G-servidor da F5, quem o pede é [`Convocacao::com_o_ponto_padrao`], pelo
+/// **Padrão só do caminho de produção** (a decisão (d) do lote G-servidor da
+/// F5): quem pede o [`PONTO_PADRAO`] é [`Convocacao::com_o_ponto_padrao`], pelo
 /// `Hospedagem::iniciar_com_o_ponto_padrao` do botão HOSPEDAR. Sem a variável,
 /// [`Convocacao::do_ambiente`] e o `Hospedagem::iniciar` curto não convocam
 /// ponto nenhum, e é com eles que os testes sobem.
-///
-/// Um **nome** e não um endereço, porque isto está compilado dentro de cada
-/// executável do mundo: com um nome, trocar de VPS é um registro de DNS; com um
-/// IP, seria uma versão nova e todo mundo reinstalando.
-///
-/// E como DNS é mais uma coisa que pode estar ruim num dado dia, há uma rede
-/// embaixo — ver [`REDE_DO_PADRAO`]. Quando as duas falham, a escada cai para o
-/// degrau de baixo e a frase que a pessoa lê é a mesma de antes deste degrau
-/// existir. Quem quiser o seu próprio sobe em dez linhas —
-/// `docs/ponto-de-encontro.md`.
-pub const PONTO_PADRAO: &str = "encontro.seele.app.br";
+pub use seele_proto::encontro::{PONTO_PADRAO, VARIAVEL};
 
-/// Os endereços do [`PONTO_PADRAO`], para quando o nome não resolver.
-///
-/// # Por que existir, e por que só para o nosso
-///
-/// O nome é o caminho principal porque ele é o que torna o servidor trocável:
-/// ele está compilado dentro de **cada executável do mundo**, e um IP gravado
-/// ali significaria que mudar de VPS quebra todo mundo até a próxima versão.
-///
-/// Mas DNS é mais uma coisa que pode estar ruim num dado dia — resolvedor do
-/// provedor caído, rede que sequestra consulta, zona em carência depois de uma
-/// mudança. Nesses casos o degrau 4 sumiria por um motivo que não tem nada a
-/// ver com ele.
-///
-/// **Isto vale só para o endereço padrão**, e a exceção é a parte importante: se
-/// alguém apontou `$SEELE_ENCONTRO` para o ponto de encontro dela e o nome não
-/// resolve, cair no nosso mandaria o metadado dessa pessoa para nós sem que ela
-/// tivesse pedido. Um recuo que atravessa uma escolha explícita de outra pessoa
-/// não é resiliência, é traição silenciosa.
-///
-/// IPv6 antes de IPv4, e a ordem é decidida pela máquina que pergunta: quem tem
-/// IPv6 global usa o IPv6, porque é justamente o par que só se alcança por lá
-/// que mais precisa deste degrau.
-/// Trocada em 2026-08-21, quando o ponto de encontro do projeto mudou de
-/// Atlanta para o Brasil. A distância não era detalhe de conforto: com o serviço
-/// em Atlanta, as duas pernas do furo — de quem entra até o ponto, e do ponto
-/// até quem hospeda — somavam ~280 ms, e quem entra espera
-/// [`seele_core`]`::enlace::ESPERA_DO_FURO`, que são 200. O aperto de mão saía
-/// **antes** de o anfitrião ter furado, que é o defeito de origem deste degrau
-/// reaparecendo por geografia. Do Brasil as duas pernas somam ~34 ms.
-///
-/// E o endereço velho tinha de sair daqui por uma segunda razão: um IP de VPS
-/// destruída volta para o provedor e é entregue a outra pessoa. Enquanto esta
-/// constante o carregasse, todo SEELE do mundo mandaria `SEELE-ENC` para a
-/// máquina de um desconhecido sempre que o DNS falhasse — e ela aprenderia que
-/// endereço falou com que endereço, que é exatamente o metadado que este ADR
-/// pesa em voz alta.
-pub(crate) const REDE_DO_PADRAO: [&str; 2] = [
-    "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
-    "216.128.168.216:8384",
-];
-
-/// A variável que troca o ponto de encontro, ou o desliga.
-///
-/// `SEELE_ENCONTRO=nao` (ou vazio) desliga o degrau 4 inteiro: nenhum pacote sai
-/// daqui para ninguém, e a escada volta a ser exatamente a de antes.
-pub const VARIAVEL: &str = "SEELE_ENCONTRO";
+pub(crate) use seele_proto::encontro::REDE_DO_PADRAO;
 
 /// Quanto tempo se espera pelo ponto de encontro antes de seguir a escada.
 ///
@@ -391,20 +335,15 @@ impl Convocacao {
     }
 
     /// `$SEELE_ENCONTRO`, ou `sem_a_variavel` quando ela não existe (ou não é
-    /// texto).
+    /// texto). A leitura é a de `seele_proto::encontro::ponto_escolhido`, a
+    /// mesma de quem liga por código.
     fn do_ambiente_ou(
         socket: Arc<std::net::UdpSocket>,
         impressao_digital: &str,
         sem_a_variavel: Option<&str>,
     ) -> Option<Self> {
-        let escolhido = match std::env::var(VARIAVEL) {
-            Ok(valor) => valor,
-            Err(_) => sem_a_variavel?.to_owned(),
-        };
-        let escolhido = escolhido.trim();
-        if escolhido.is_empty() || escolhido.eq_ignore_ascii_case("nao") {
-            return None;
-        }
+        let escolhido =
+            encontro::ponto_escolhido(std::env::var(VARIAVEL).ok().as_deref(), sem_a_variavel)?;
         let convocacao = Self::para_servidor(socket, impressao_digital, escolhido);
         if convocacao.is_none() {
             // Inalcançável com a impressão de um `Daemon`, que é sempre um
@@ -771,7 +710,7 @@ compile_error!(
 #[track_caller]
 pub(crate) fn recusar_a_producao(ponto: &str, onde: &str) {
     assert!(
-        !aponta_para_a_producao(ponto),
+        !encontro::aponta_para_a_producao(ponto),
         "um teste ia falar com o ponto de encontro de produção («{ponto}», pego em {onde}): cada \
          rodada registraria um servidor de teste no quarto da VPS de produção e deixaria lá o IP \
          desta máquina, e o teste passaria a depender da rede de fora. Aponte um ponto local, ou \
@@ -782,34 +721,6 @@ pub(crate) fn recusar_a_producao(ponto: &str, onde: &str) {
 /// Fora dos testes, nada: ver a versão ligada logo acima.
 #[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
 pub(crate) fn recusar_a_producao(_ponto: &str, _onde: &str) {}
-
-/// Se este texto de ponto é o de produção: o [`PONTO_PADRAO`], escrito como
-/// for, ou um dos IPs de [`REDE_DO_PADRAO`], em qualquer porta.
-///
-/// Pela mesma regra que [`resolver`] usa para separar o texto
-/// (`separar_ponto`): um texto que ela recusa não vira consulta nenhuma, e não
-/// há o que barrar.
-#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
-fn aponta_para_a_producao(ponto: &str) -> bool {
-    let Ok(alvo) = seele_proto::uri::separar_ponto(ponto.trim()) else {
-        return false;
-    };
-    let maquina = alvo.maquina.trim_end_matches('.');
-    maquina.eq_ignore_ascii_case(PONTO_PADRAO)
-        || maquina
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(e_da_rede_do_padrao)
-}
-
-/// Se este IP é um dos de [`REDE_DO_PADRAO`], também escrito como IPv4 dentro
-/// de IPv6 (`::ffff:a.b.c.d`).
-#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
-fn e_da_rede_do_padrao(ip: std::net::IpAddr) -> bool {
-    REDE_DO_PADRAO
-        .iter()
-        .filter_map(|texto| texto.parse::<SocketAddr>().ok())
-        .any(|producao| producao.ip() == ip.to_canonical())
-}
 
 /// A escuta de avisos, na mesma família do ponto de encontro.
 ///
@@ -2768,48 +2679,9 @@ mod testes {
 
     // --------------------------------------------- o guarda dos testes
 
-    #[test]
-    fn o_guarda_reconhece_o_ponto_de_producao_escrito_de_qualquer_jeito() {
-        // Um guarda que só casasse com o texto exato do `PONTO_PADRAO` deixaria
-        // passar o mesmo lugar escrito de outro jeito — com porta, em
-        // maiúsculas, com o ponto final do DNS, ou pelo IP da VPS.
-        for producao in [
-            PONTO_PADRAO,
-            "encontro.seele.app.br:8384",
-            "ENCONTRO.Seele.App.BR",
-            "encontro.seele.app.br.",
-            " encontro.seele.app.br ",
-            "216.128.168.216",
-            "216.128.168.216:8384",
-            "216.128.168.216:9999",
-            "[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384",
-            "[::ffff:216.128.168.216]:8384",
-        ] {
-            assert!(
-                aponta_para_a_producao(producao),
-                "«{producao}» é o ponto de encontro de produção e o guarda não o reconheceu: \
-                 um teste que o escreva assim volta a registrar servidor de teste no quarto da VPS"
-            );
-        }
-        // E o que não é produção passa: um guarda que barrasse o ponto local
-        // derrubaria justamente os testes que fazem a coisa certa.
-        for local in [
-            "127.0.0.1",
-            "127.0.0.1:8384",
-            "[::1]:8384",
-            "192.0.2.1:8384",
-            "meu.ponto:9000",
-            "encontro.seele.app.br.exemplo",
-            "nao",
-            "",
-        ] {
-            assert!(
-                !aponta_para_a_producao(local),
-                "«{local}» não é o ponto de produção e o guarda o recusou: os testes que apontam \
-                 um ponto local reprovariam por fazerem o certo"
-            );
-        }
-    }
+    // O teste da regra (`o_guarda_reconhece_o_ponto_de_producao_escrito_de_
+    // qualquer_jeito`, da F5) foi com ela para `seele_proto::encontro`, que é
+    // onde os dois guardas a perguntam.
 
     #[tokio::test]
     #[should_panic(expected = "pego em alcance::encontro::resolver, antes do DNS")]
