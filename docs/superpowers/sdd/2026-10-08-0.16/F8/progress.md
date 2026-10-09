@@ -21,4 +21,9 @@ Branch `0.16/celular`, saído de `versao/0.16` em `f7bc902b` (09/10). Spec-mestr
 
 ## Etapa B — a casca
 
-Liberada pela revisão de 09/10. As Tarefas 1 e 2 (os guardas e a bancada) andam já, só com arquivos novos. Da 3 em diante, a bancada injeta os pontos P1 a P10 numa cópia até a orquestradora liberar a `ui/`, depois das ondas 5 e 6 da F5.
+Liberada pela revisão de 09/10. Da Tarefa 3 em diante, a bancada injeta numa cópia os pontos que a `ui/` ainda não tem, até a orquestradora liberar a `ui/`, depois das ondas 5 e 6 da F5. O P2 e o P3 (as linhas que carregam cada arquivo novo) estão liberados: cada arquivo novo entra com a linha dele, num commit isolado.
+
+| tarefa | estado | onde |
+|---|---|---|
+| 1. os guardas de texto e a raiz do celular | **feita**: os cinco guardas de `tests/celular.rs` passam, e cada um reprova na sua reversão (seis); o `frontend` (272) e o `tokens` (3) passam com o P2 e o P3 | `790e4ab5`, `4ec186df` (o `index.html`, isolado) |
+| 2. a bancada do celular | **feita, menos o CI**: o G3 igual pixel a pixel no Chromium e no WebKit, os pontos P1, P5 e P6 injetados na cópia, as medidas do protótipo e os temas pelo produto; o caso `sessao-entrou` passa a 390 e a 360; as reversões reprovam (a regra dos 44 sem a marca, o script sem a guarda, o `CELULAR` ausente); o duble ganha o `abertura_do_audio`, e os 28 roteiros passam. Falta a bancada entrar na bateria, com o WebKit | `b9abb0f1` |
