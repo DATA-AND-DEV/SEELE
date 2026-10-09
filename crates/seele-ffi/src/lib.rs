@@ -2618,9 +2618,8 @@ impl Connection {
     /// [`ConnectionError::UnknownPerson`] if nobody here is called that,
     /// [`ConnectionError::NoAudioDevice`] if this session has no audio.
     pub fn set_volume(&self, nickname: String, percent: u16) -> Result<(), ConnectionError> {
-        if !self.shared.voice.quer_audio {
-            return Err(ConnectionError::NoAudioDevice);
-        }
+        // Quem não está aqui primeiro, com ou sem áudio: é a ordem de antes, e
+        // a conformidade conta com ela.
         let conhecida = self
             .shared
             .room
@@ -2628,6 +2627,9 @@ impl Connection {
             .is_ok_and(|room| room.ssrc_of(&nickname).is_some());
         if !conhecida {
             return Err(ConnectionError::UnknownPerson);
+        }
+        if !self.shared.voice.quer_audio {
+            return Err(ConnectionError::NoAudioDevice);
         }
         // Gravado antes de olhar a voz: ver a ordem dos cadeados em
         // `seguir_os_volumes`.
@@ -11083,6 +11085,16 @@ mod o_audio_segue_a_sala {
             .lock()
             .expect("a sala")
             .apply(&rafa_na_sala(900));
+        // A ordem das duas recusas é a de antes: quem não está aqui é dito
+        // primeiro, com ou sem áudio. A conformidade conta com ela
+        // (`acceptance_m5::the_volume_of_a_stranger_is_refused_by_name`, que
+        // conecta sem áudio).
+        assert_eq!(
+            sem_audio.set_volume("ninguém".into(), 50),
+            Err(crate::ConnectionError::UnknownPerson),
+            "numa sessão sem áudio, o volume de quem não está aqui deixou de ser \
+             recusado pelo nome: a casca diz «sem áudio» sobre uma pessoa que não existe"
+        );
         assert_eq!(
             sem_audio.set_volume("rafa".into(), 150),
             Err(crate::ConnectionError::NoAudioDevice),
