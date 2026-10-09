@@ -68,6 +68,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 22 | 4b, a identidade por máquina: a metade da FFI | **feita** (porte do `9ff9b73c` da 0.15); a semente da sala e o SEU CÓDIGO esperam a casca | `58552de8` |
 | — | os testes da corrida de volta (tirados por engano em `b4f5ef94`) | feito | `b6280079` |
 | 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita**; ligar na FFI e no `main.rs` espera a casca | `2b2bf744` |
+| — | o teste da janela de furos que caía sob carga (pendência 29, causa 3), pedido pela orquestradora | consertado | `7b2bbb96` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -483,4 +484,36 @@ pelo enlace, e reversões.
   três que rodaram passaram. O arquivo novo e os que a 14b toca já tinham
   passado sozinhos antes: `quarto_em_paralelo`, 3 de 3, com as reversões. Fica
   para quando a orquestradora liberar.
+
+## O teste da janela de furos que caía sob carga (09/10)
+
+Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
+(`seele-server --lib`) caiu uma vez na rodada paralela da F3.
+
+- **O que ele mede.** 61 avisos legítimos (um acima do teto) produzem
+  exatamente 60 furos: o teto vale dentro do `atender`, e não só no auxiliar.
+- **Por que caía.** A contagem lia com 600 ms por leitura e parava no primeiro
+  silêncio. Um soluço da linha do teste com uma leitura pendente fazia o prazo
+  vencer antes de o furo seguinte ser lido. É o «53 contra 60» da causa 3 da
+  pendência 29, que já estava registrada.
+- **Como foi medido.**
+  - Carga de CPU não reproduz, como a pendência 29 já dizia. Com 120 processos
+    em `nice 20`, os sessenta furos saíram em 7,20 s, com o maior intervalo em
+    134 ms. Um tropeço meu: devia ter lido a pendência antes de carregar a
+    máquina.
+  - Um soluço de 800 ms provocado no meio da fila encerrou a conta em 9 furos,
+    3 de 3.
+- **O conserto** (`7b2bbb96`): `contar_furos` conta até os esperados sem prazo
+  por leitura, e então espera um a mais. `um_soluco_no_meio` provoca o soluço
+  em toda rodada. O vizinho, `a_janela_cabe_uma_entrada_legitima_inteira`,
+  tinha o mesmo laço e foi consertado junto. A folga da janela ficou escrita.
+- Reversões:
+  - sem o teto, reprova com 61;
+  - com o prazo por leitura de volta, os dois reprovam com 3, em toda rodada;
+  - sem o teto e sem a espera de um a mais, passa: o controle.
+- **Um erro meu durante a medida**: o shell de uma rodada de carga morreu antes
+  de matar os processos. 120 `yes` em `nice 20` ficaram vivos por uns seis
+  minutos, com a carga média em ~77, durante a bateria da oitava integração.
+  Foram mortos (`pkill -x yes`, eram exatamente os 120). Dito à orquestradora.
+  Da próxima vez, cada processo de carga se mata sozinho com prazo.
 
