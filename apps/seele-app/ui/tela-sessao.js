@@ -2421,15 +2421,30 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   item.dataset.apresentadaPor = contribuicao.mod;
   item.classList.add("pessoa-apresentada");
 
-  // O conteúdo do MOD dentro de um alvo de clique do produto, quando há ação
-  // principal declarada.
+  // **O núcleo: o apelido verificado, à vista** (rascunho da API 6, §3 e §10;
+  // D-nucleo-1). Lido do retrato pela chave da linha, e nunca do que o MOD
+  // desenhou; quando esta sessão tem verbo sobre a pessoa, ele é o botão de
+  // moderação. Até a tarefa 5 o apelido e a moderação moravam no «⋯»
+  // recolhido, e um cartão que escrevesse outro nome era o único nome à vista.
+  // Um nome falso no cartão fica **ao lado** do verdadeiro, e não no lugar dele.
+  const nucleo = elemento("span", "pessoa-nucleo");
+  nucleo.append(nomeDaPessoa(pessoa));
+
+  // **O miolo é do MOD**, numa caixa fechada e irmã do núcleo — nunca mãe —, com
+  // o conteúdo dentro de um alvo de clique do produto quando há ação principal.
+  const miolo = elemento("div", "pessoa-miolo");
   if (contribuicao.acaoPrincipal) {
     const porta = aPortaDoProvedor(pessoa, contribuicao);
     porta.append(cartao);
-    item.append(porta);
+    miolo.append(porta);
   } else {
-    item.append(cartao);
+    miolo.append(cartao);
   }
+  // Os dois numa faixa própria: a linha continua a coluna de sempre — a faixa,
+  // o «⋯» e os acréscimos —, e a grade é só da faixa.
+  const faixa = elemento("div", "pessoa-apresentada-faixa");
+  faixa.append(nucleo, miolo);
+  item.append(faixa);
 
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
   // detalhes fossem recolhíveis «mantendo acesso ao diagnóstico nativo», e
@@ -2476,6 +2491,23 @@ function cartaoDeContribuicao(contribuicao, id) {
   return regiao ? regiao.cartaoDe(id) : null;
 }
 
+/**
+ * **O nome de uma pessoa no roster**, do produto: o apelido que o retrato dá
+ * para a chave da linha. Vira botão quando esta sessão tem algum verbo sobre a
+ * pessoa — nenhum elemento novo é desenhado: é o mesmo nome, que passa a
+ * responder. O mesmo elemento na linha nativa e no núcleo de uma linha
+ * apresentada por um MOD.
+ */
+function nomeDaPessoa(pessoa) {
+  if (!pessoa.moderar) return elemento("span", "pessoa-nome", pessoa.nome);
+  const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
+  porta.type = "button";
+  porta.dataset.moderarPessoa = pessoa.moderar;
+  porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
+  porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
+  return porta;
+}
+
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // `ratio: null` é «ninguém mediu isto», e não zero.
   //
@@ -2497,18 +2529,9 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
-  // O nome vira botão quando esta sessão tem algum verbo sobre esta pessoa.
-  // Nenhum elemento novo é desenhado: é o mesmo nome, que passa a responder.
-  if (pessoa.moderar) {
-    const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
-    porta.type = "button";
-    porta.dataset.moderarPessoa = pessoa.moderar;
-    porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
-    porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
-    identidade.append(porta);
-  } else {
-    identidade.append(elemento("span", "pessoa-nome", pessoa.nome));
-  }
+  // Como detalhe de uma linha apresentada, o nome já está no núcleo dela, à
+  // vista — repeti-lo aqui seria o leitor de tela anunciá-lo duas vezes.
+  if (!comoDetalhe) identidade.append(nomeDaPessoa(pessoa));
 
   // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que

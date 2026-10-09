@@ -638,6 +638,39 @@ span.regiao-de-mod-parte[data-forma="distintivo"] {
    presença primeiro, sinal e detalhes recolhíveis —, e recolher é diferente de
    tirar: quem precisa do sinal continua a um toque dele. */
 .pessoa-apresentada { position: relative; padding-right: 24px; }
+
+/* **A linha apresentada começa por `[núcleo] [miolo]`**, numa faixa própria; o
+   «⋯» e os acréscimos seguem embaixo, na coluna de sempre da linha (rascunho
+   da API 6, §3 e §10; D-nucleo-1). O núcleo é o apelido verificado, à vista,
+   nas cores do tema — o que o protege é a estrutura: o lugar à esquerda, e o
+   miolo do MOD numa caixa fechada ao lado. O `overflow` e o `contain: paint`
+   do miolo cortam o desenho que um MOD desloque por cima do apelido
+   (`estilo.mover`), medido em `regioes-do-produto.cjs`. */
+.pessoa-apresentada-faixa {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+}
+
+.pessoa-nucleo {
+  display: flex;
+  min-width: 0;
+  max-width: 112px;
+  padding-top: 2px;
+}
+
+.pessoa-nucleo .pessoa-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pessoa-miolo {
+  min-width: 0;
+  overflow: hidden;
+  contain: paint;
+}
 .pessoa-nativo { margin: 0; }
 .pessoa-nativo[open] { margin-top: 6px; }
 

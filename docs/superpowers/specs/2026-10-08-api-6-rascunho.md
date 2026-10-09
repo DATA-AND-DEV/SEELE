@@ -215,13 +215,22 @@ SeeleUI.contribuicoes.registrar({
 });
 ```
 
-- **Ninguém some da lista.** Quem está no servidor e não está em grupo nenhum
-  vai para um grupo do produto, no fim, com o título do produto (OUTRAS
-  PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
+- **As salas de voz continuam seções do produto** (decisão da orquestradora,
+  09/10). Quem está na sala de quem ouve você é verdade de confiança, do mesmo
+  tipo do apelido verificado, e um MOD não a reorganiza: os grupos do MOD
+  valem **dentro de cada sala** (e dentro de FORA DE SALA e de NO SERVIDOR,
+  FORA DAS SALAS), como subtítulos, na ordem dele. Um MOD que põe pessoas de
+  duas salas no mesmo grupo vê cada uma na sua sala. Grupos que cruzam salas
+  ficam para a API 7, se alguém pedir. O FORA DO AR é seção do produto, no
+  fim, e o MOD nem sabe dele: o retrato da 6 não leva os membros fora do ar
+  (§6).
+- **Ninguém some da lista.** Quem está na sala e não está em grupo nenhum do
+  MOD fica no fim da sala, sob um subtítulo do produto (OUTRAS PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
   dois grupos fica no primeiro; os dois contam na aba DIAGNÓSTICO. Nenhum dos
   dois é recusado: a lista muda mais depressa do que o MOD a reescreve.
 - **A linha tem três faixas**, numa grade do produto: `[núcleo] [miolo] [⋯]`.
-  - **o núcleo**, à esquerda: o apelido verificado, lido do retrato **pela
+  - **o núcleo**, à esquerda [c, tarefa 5, também sob `pessoa.cartao`]: o
+    apelido verificado, lido do retrato **pela
     chave da linha**, e nunca do que o MOD escreveu. Quando esta sessão tem
     verbo sobre a pessoa, ele **é** o botão de moderação, o mesmo elemento da
     linha nativa (`.pessoa-nome-porta`): a moderação sai do «⋯» e fica a um

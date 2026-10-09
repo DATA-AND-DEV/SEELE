@@ -310,6 +310,81 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- a linha de uma pessoa, apresentada
+    //
+    // `pessoa.cartao` substituído (rascunho §3 e §10; D-nucleo-1): a linha é
+    // `[núcleo] [miolo] [⋯]`. O apelido verificado fica no núcleo, **à vista**,
+    // lido do retrato pela chave da linha, e é o botão de moderação; o cartão do
+    // MOD fica no miolo, numa caixa fechada. Até a tarefa 5 o apelido e a
+    // moderação moravam dentro do «⋯» recolhido.
+    const linha = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const instancia = new InstanciaDeMod("mod/linha", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/linha", instancia);
+      const registrar = (conteudo) => contribuicoesDosMods.registrar({ id: "mod/linha" }, instancia, {
+        ponto: "pessoa.cartao", modo: "substituir", alvo: String(lia.id), conteudo,
+      }).handle;
+      // O cartão escreve outro nome: o núcleo continua dizendo quem é.
+      const cartao = [{ forma: "texto", chave: "nome", dentro: "alice" }];
+      let handle = registrar(cartao);
+      desenhar(r);
+      await quadro();
+      const achar = () => document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/linha"]');
+      const apelidoDe = (li) => li?.querySelector(".pessoa-nucleo .pessoa-nome");
+      // A mira: do canto do miolo até o centro do apelido.
+      const miolo = achar()?.querySelector(".pessoa-miolo")?.getBoundingClientRect();
+      const alvo = apelidoDe(achar())?.getBoundingClientRect();
+      if (miolo && alvo) {
+        contribuicoesDosMods.revogar(handle, { id: "mod/linha", instancia });
+        const limite = (n) => Math.max(-512, Math.min(512, Math.round(n)));
+        handle = registrar([
+          {
+            forma: "texto", chave: "mirado", dentro: "█".repeat(8),
+            estilo: { mover: { x: limite(alvo.left + alvo.width / 2 - miolo.left - 8), y: limite(alvo.top + alvo.height / 2 - miolo.top - 8) } },
+          },
+          ...cartao,
+        ]);
+        desenhar(r);
+        await quadro();
+      }
+      const li = achar();
+      const apelido = apelidoDe(li);
+      const caixa = apelido?.getBoundingClientRect();
+      const noCentro = caixa ? document.elementFromPoint(caixa.left + caixa.width / 2, caixa.top + caixa.height / 2) : null;
+      const moderar = li?.querySelector(`.pessoa-nucleo [data-moderar-pessoa="${lia.id}"]`);
+      const medido = {
+        achou: Boolean(li),
+        apelido: apelido?.textContent ?? null,
+        esperado: lia.nickname,
+        escondido: Boolean(apelido?.closest("details:not([open])")),
+        naVista: Boolean(caixa && caixa.width > 0 && caixa.height > 0 && caixa.top >= 0 && caixa.bottom <= innerHeight),
+        descoberto: Boolean(noCentro && apelido?.contains(noCentro)),
+        moderar: Boolean(moderar && !moderar.closest("details:not([open])")),
+        cartaoNoMiolo: Boolean(li?.querySelector(".pessoa-miolo")?.textContent.includes("alice")),
+      };
+      contribuicoesDosMods.revogar(handle, { id: "mod/linha", instancia });
+      modsCarregados.delete("mod/linha");
+      desenhar(r);
+      await quadro();
+      return medido;
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (linha.erro) falhas.push(`pessoa.cartao: ${linha.erro}`);
+    else if (!linha.achou) falhas.push("pessoa.cartao: a linha apresentada não está no roster");
+    else {
+      if (linha.apelido !== linha.esperado) {
+        falhas.push(`pessoa.cartao: o núcleo diz «${linha.apelido}», e o retrato diz «${linha.esperado}»`);
+      }
+      if (linha.escondido || !linha.naVista) falhas.push("pessoa.cartao: o apelido verificado não está à vista");
+      if (!linha.descoberto) falhas.push("pessoa.cartao: o desenho do MOD ficou por cima do apelido verificado");
+      if (!linha.moderar) falhas.push("pessoa.cartao: a moderação não está a um clique, fora do «⋯»");
+      if (!linha.cartaoNoMiolo) falhas.push("pessoa.cartao: o cartão do MOD não está no miolo");
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):
