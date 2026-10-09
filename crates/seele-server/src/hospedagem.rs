@@ -25,6 +25,29 @@ use anyhow::Result;
 use crate::persistence::{Location, Persistence};
 use crate::{Daemon, ServerConfig};
 
+/// A porta da sala pessoal: a 8385, ao lado da 8383 do servidor guardado e da
+/// 8384 do ponto de encontro.
+pub const PORTA_DA_SALA: u16 = 8385;
+
+/// A configuração de um servidor guardado, que é o que [`Hospedagem::iniciar`]
+/// sobe.
+fn config_guardada(
+    porta: u16,
+    banco: Location,
+    nome: &str,
+    pasta_dos_mods: Option<crate::RaizesDosMods>,
+) -> ServerConfig {
+    ServerConfig {
+        name: nome.to_owned(),
+        // ADR 0045. `None` desliga MODs; quem hospeda pelo app passa a pasta que
+        // ele já conhece, e o `seeled` a computa por si.
+        mods_dir: pasta_dos_mods,
+        listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
+        database: banco,
+        ..ServerConfig::default()
+    }
+}
+
 /// O PERSISTENCE de um servidor hospedado, compartilhado com quem o hospeda.
 ///
 /// Apelido, e não o tipo escrito por extenso, porque quem chama é a casca do
@@ -106,12 +129,11 @@ impl Hospedagem {
         antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
     ) -> Result<Self> {
         Self::subir(
-            porta,
-            banco,
-            nome,
-            pasta_dos_mods,
+            config_guardada(porta, banco, nome, pasta_dos_mods),
             antes_de_aceitar,
-            crate::alcance::encontro::Convocacao::do_ambiente,
+            |socket, impressao, _| {
+                crate::alcance::encontro::Convocacao::do_ambiente(socket, impressao)
+            },
         )
         .await
     }
@@ -140,38 +162,94 @@ impl Hospedagem {
         antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
     ) -> Result<Self> {
         Self::subir(
-            porta,
-            banco,
-            nome,
-            pasta_dos_mods,
+            config_guardada(porta, banco, nome, pasta_dos_mods),
             antes_de_aceitar,
-            crate::alcance::encontro::Convocacao::com_o_ponto_padrao,
+            |socket, impressao, _| {
+                crate::alcance::encontro::Convocacao::com_o_ponto_padrao(socket, impressao)
+            },
         )
         .await
     }
 
-    /// O corpo das duas: `convocar` é quem decide o ponto de encontro.
-    async fn subir(
+    /// A sala pessoal desta máquina: a segunda hospedagem do app (spec de 23/09,
+    /// «Do lado de quem recebe»; ADRs 0059 e 0060).
+    ///
+    /// - **Em memória e sem MODs**: a ligação não guarda conversa, e na sala não
+    ///   há MOD nenhum.
+    /// - **Com a identidade da pessoa**: o certificado sai de `semente`, a
+    ///   semente da `identity.key`, que nunca atravessa a webview
+    ///   ([`crate::tls::Identity::da_semente`]).
+    /// - **Com a campainha**: quem liga é segurado até quem recebe decidir, e o
+    ///   teto é de [`crate::campainha::TETO_DA_LIGACAO`] pessoas. A recepção sai
+    ///   por [`Self::recepcao`].
+    /// - **A conta de quem recebe é criada antes de aceitar** (o gancho de
+    ///   [`Self::iniciar`]). Na sala não há portaria, e quem recebe só conecta
+    ///   ao atender. Sem isto, o primeiro atendido seria a primeira conta, e a
+    ///   primeira conta vira a Comandante.
+    /// - **Registrada sempre no ponto de encontro**, assinada (ENC/2), quando há
+    ///   `ponto`: ela só é achável pelo código. `None` não registra, e é o caso
+    ///   dos testes. A produção passa o ponto que `$SEELE_ENCONTRO` escolher, ou
+    ///   o do projeto (`seele_proto::encontro::ponto_escolhido`).
+    ///
+    /// `porta` é [`PORTA_DA_SALA`] em produção, e zero nos testes.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a porta já estiver em uso, ou se o certificado da sala não
+    /// sair da semente.
+    pub async fn iniciar_sala(
         porta: u16,
-        banco: Location,
-        nome: &str,
-        pasta_dos_mods: Option<crate::RaizesDosMods>,
-        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
-        convocar: fn(
-            Arc<std::net::UdpSocket>,
-            &str,
-        ) -> Option<crate::alcance::encontro::Convocacao>,
+        semente: &[u8; 32],
+        apelido: &str,
+        ponto: Option<String>,
     ) -> Result<Self> {
+        let pessoa = ed25519_dalek::SigningKey::from_bytes(semente);
+        let dono = pessoa.verifying_key().to_bytes();
         let config = ServerConfig {
-            name: nome.to_owned(),
-            // ADR 0045. `None` desliga MODs; quem hospeda pelo app passa a
-            // pasta que ele já conhece, e o `seeled` a computa por si.
-            mods_dir: pasta_dos_mods,
+            name: apelido.to_owned(),
+            mods_dir: None,
             listen: SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)),
-            database: banco,
+            database: Location::Memory,
+            identidade: Some(crate::tls::Identity::da_semente(semente)?),
+            voice_room_limit: u16::try_from(crate::campainha::TETO_DA_LIGACAO).unwrap_or(u16::MAX),
+            sala: Some(crate::recepcao::Sala::de(dono)),
             ..ServerConfig::default()
         };
+        let apelido = apelido.to_owned();
+        Self::subir(
+            config,
+            move |persistence| {
+                crate::permissions::Permissions::new(persistence)
+                    .register_or_find(&dono, &apelido)
+                    .map(|_| ())
+            },
+            move |socket, _, escuta| {
+                ponto.map(|ponto| {
+                    crate::alcance::encontro::Convocacao::para_sala(socket, escuta, pessoa, ponto)
+                })
+            },
+        )
+        .await
+    }
 
+    /// A recepção da sala pessoal, para o app assinar o toque e decidir. `None`
+    /// num servidor guardado.
+    #[must_use]
+    pub fn recepcao(&self) -> Option<Arc<crate::recepcao::Recepcao>> {
+        self.server.server().recepcao.clone()
+    }
+
+    /// O corpo das três: `convocar` é quem decide o ponto de encontro, com o
+    /// socket do servidor, a impressão digital dele e a escuta.
+    async fn subir(
+        config: ServerConfig,
+        antes_de_aceitar: impl FnOnce(&mut Persistence) -> Result<()>,
+        convocar: impl FnOnce(
+            Arc<std::net::UdpSocket>,
+            &str,
+            crate::alcance::Escuta,
+        ) -> Option<crate::alcance::encontro::Convocacao>,
+    ) -> Result<Self> {
         let server = Arc::new(Daemon::bind(config).await?);
         let endereco = server.local_addr()?;
 
@@ -203,9 +281,10 @@ impl Hospedagem {
         //
         // Custa até `alcance::encontro::PRAZO` a mais, e só no caminho que hoje
         // termina em "só funciona na sua rede".
+        let escuta = crate::alcance::Escuta::nova(endereco.port(), server.pilha());
         let convocacao = server
             .espelho()
-            .and_then(|socket| convocar(socket, server.fingerprint()));
+            .and_then(|socket| convocar(socket, server.fingerprint(), escuta));
         // A segunda parede, só nos testes: um teste que chega aqui com o ponto
         // de produção — o ambiente apontando a VPS, ou
         // `iniciar_com_o_ponto_padrao` sem ambiente — reprova antes da escada,
@@ -218,11 +297,7 @@ impl Hospedagem {
                 "Hospedagem::iniciar, antes da escada",
             );
         }
-        let escada = crate::alcance::Escada::subir(
-            crate::alcance::Escuta::nova(endereco.port(), server.pilha()),
-            convocacao,
-        )
-        .await;
+        let escada = crate::alcance::Escada::subir(escuta, convocacao).await;
         tracing::info!(alcance = ?escada.alcance(), "escada do ADR 0022 subida");
 
         // O laço de aceitação numa tarefa própria: quem chamou tem interface
