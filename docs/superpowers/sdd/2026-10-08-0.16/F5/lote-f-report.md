@@ -597,3 +597,44 @@ guarda continuou idêntico à cópia.
 - `--test frontend`: 268.
 - `cargo fmt --all -- --check` limpo; `cargo clippy -p seele-app --all-targets
   --all-features -- -D warnings` limpo (o aviso do linker é ambiental).
+
+## Rodada 3 de conserto (FIX_BASE `0c6133d1`)
+
+Dois furos Menores no leitor de comentários de `encerramento.rs`, os dois
+consertados em `c429302c`.
+
+- **O vermelho medido, com o guarda de `0c6133d1`:** as três reversões da
+  re-revisão deixaram os dois guardas verdes (2 de 2 cada):
+  - **N1:** `/* era: /* nota */ despedir_da_sessao(…); */` no corpo de
+    `despedir_se`, com só um `disconnect()` no código;
+  - **N2:** `/* era: /* nota */ despedir_se(handle); */` no braço do
+    `ExitRequested`;
+  - **C:** `let _c = cr"\";` antes de `// despedir_da_sessao(…)`. O leitor não
+    via a string C crua, o `\` escapava a aspa que fecha, e o comentário
+    ficava «dentro das aspas».
+- **O conserto:**
+  - o laço do `/*` conta a profundidade, e o comentário só termina quando ela
+    volta a zero, como no Rust;
+  - `string_crua` aceita o prefixo `c` antes do `r` (`cr"`, `cr#"`), como já
+    aceitava o `b`. Ela devolve o prefixo exato, e a frase do guarda o nomeia.
+- **A prova, com o guarda novo** (cada reversão sobre o `main.rs` de
+  `f337eac1…`, de volta conferido com `cmp` depois; o guarda em `820e9c2d…`):
+  - N1: os dois guardas vermelhos, «a despedida da janela deixou de passar por
+    `despedir_da_sessao`, …»;
+  - N2: `fechar_a_janela_avisa_o_servidor` vermelho, «o braço do
+    `ExitRequested` não chama mais `despedir_se(handle)` fora de um
+    comentário: …»;
+  - C: os dois vermelhos, «o corpo de `despedir_se` tem `cr"`, e o leitor de
+    comentários deste guarda não lê esse trecho com segurança: …».
+- **As reversões das rodadas anteriores continuam vermelhas**, todas rodadas de
+  novo contra o guarda novo:
+  - da rodada 0: `despedir_se` de volta ao `disconnect()` com `sleep`;
+  - da rodada 1: A, B e o teto zero;
+  - da rodada 2: R1, R2, R3, `'"'`, `r"x"` e `r#"x"#`.
+- **O que rodou:**
+  - `--test encerramento`: 2 de 2;
+  - `--bin seele-app despedir`: 4 de 4;
+  - `--test frontend`: 268;
+  - fmt e o clippy do app, limpos.
+  
+  Sem conformidade, que segue pausada.
