@@ -151,7 +151,31 @@ impl EntradasPendentes {
                 *assento = Some(*voice_room);
                 mudou
             }
-            ServerMessage::VoiceRoomDeleted { voice_room } if *assento == Some(*voice_room) => {
+            ServerMessage::VoiceRoomDeleted { voice_room } => {
+                // Um pedido no ar que partia da sala apagada já não tem para
+                // onde voltar. Se o servidor apagou a sala antes de ler o
+                // pedido, ele tirou a pessoa dela (`desassentar`, no braço de
+                // `Event::VoiceRoomDeleted` de `session.rs`), e a recusa do
+                // pedido a deixa fora de sala. Se leu o pedido antes, a recusa
+                // chegou antes deste aviso e devolveu a pessoa à sala ainda de
+                // pé, e as linhas de baixo a tiram dela.
+                //
+                // Menos quando a sala apagada é ela mesma um pedido ainda no
+                // ar: aí o servidor pode tê-la recusado sem nunca sentar a
+                // pessoa nela, e quem conserta o `antes` dos pedidos seguintes
+                // é a recusa dela, pela corrente de `recusar`.
+                let mut pedida_no_ar = false;
+                for entrada in &mut self.fila {
+                    if entrada.antes == Some(*voice_room) && !pedida_no_ar {
+                        entrada.antes = None;
+                    }
+                    if entrada.sala == *voice_room && !entrada.recusada {
+                        pedida_no_ar = true;
+                    }
+                }
+                if *assento != Some(*voice_room) {
+                    return false;
+                }
                 self.superar();
                 *assento = None;
                 true
@@ -510,6 +534,57 @@ mod testes {
             &ServerMessage::VoiceRoomDeleted { voice_room: A }
         ));
         assert_eq!(assento, None);
+    }
+
+    /// Em A, pedir B; o servidor apaga A antes de ler o pedido — e tira a
+    /// pessoa de A ao apagar — e depois recusa B. A pessoa fica fora de sala no
+    /// servidor, e a recusa não pode devolvê-la a uma sala que não existe.
+    #[test]
+    fn a_recusa_nao_devolve_a_sala_de_antes_que_foi_apagada_com_o_pedido_no_ar() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: A },
+        );
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+
+        assert_eq!(
+            assento, None,
+            "a recusa de B devolveu a pessoa a A, que o servidor apagou antes de ler o \
+             pedido: a tela a mostra numa sala que não existe"
+        );
+        assert_eq!(
+            entradas.confirmada(assento),
+            None,
+            "o áudio abriria em A, que não existe"
+        );
+    }
+
+    /// O mesmo conserto não vale para a sala apagada que é ela mesma um pedido
+    /// ainda no ar. Em A, pedir B e logo C; o servidor apaga B antes de ler o
+    /// pedido de B, recusa B (a sala não existe) e recusa C: a pessoa nunca
+    /// saiu de A. Quem devolve C para A é a recusa de B, pela corrente.
+    #[test]
+    fn a_sala_apagada_que_ainda_e_um_pedido_no_ar_fica_para_a_resposta_dele() {
+        let (mut entradas, mut assento) = em_a();
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
+        entradas.ouvir(
+            &mut assento,
+            &ServerMessage::VoiceRoomDeleted { voice_room: B },
+        );
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
+
+        assert_eq!(
+            assento,
+            Some(A),
+            "o servidor recusou B e C e manteve a pessoa em A, e a tela a tirou de toda sala"
+        );
     }
 
     #[test]
