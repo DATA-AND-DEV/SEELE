@@ -1679,6 +1679,81 @@ function anotando(...anotadas) {
   );
 }
 
+// **No automático misto, a gestão diz todos os que desenham** (pendência 49,
+// item 9; Docs-m2 do 1D). mod/a substitui o cartão de todos; mod/b, com mais
+// prioridade, o da pessoa 2; mod/e, com menos, o da pessoa 3, e perde para
+// mod/a. Sem escolha nesta máquina, a gestão lia só a disputa do alvo vazio e
+// dizia «apresentado por mod/a (escolha automática)», sem nota, enquanto mod/b
+// desenhava a pessoa 2 — e a aba DIAGNÓSTICO, logo abaixo, dizia a verdade.
+{
+  const caso = "M1 · a gestão · o automático misto";
+  const aba = abaDoDiagnostico();
+  const registro = aba.contribuicoesDosMods;
+  for (const id of ["mod/a", "mod/b", "mod/e"]) aba.modsCarregados.set(id, {});
+  registro.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  registro.registrar({ id: "mod/b" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "2", prioridade: 10 });
+  registro.registrar({ id: "mod/e" }, null, { ponto: "pessoa.cartao", modo: "substituir", alvo: "3", prioridade: -5 });
+  const deDe = (id) => aba.modsCarregados.has(id);
+  const linha = registro.resumo(new Map([["pessoa.cartao", ""]]), deDe).find((l) => l.ponto === "pessoa.cartao");
+  const { estado, nota, botoes } = aba.oQueAGestaoDiz(linha, "");
+
+  // O comando da pendência: quem desenha a pessoa 2 é mod/b, e a 3, mod/a.
+  confere(
+    caso,
+    registro.escolherSubstituicao("pessoa.cartao", "2", "").escolhida?.mod === "mod/b"
+      && registro.escolherSubstituicao("pessoa.cartao", "3", "").escolhida?.mod === "mod/a",
+    "o registro deixou de dar a pessoa 2 a mod/b e a 3 a mod/a, e este caso não mede mais o automático misto",
+  );
+  confere(
+    caso,
+    estado === "automática: mod/a para todos, mod/b para quem declarou",
+    "no automático, mod/a desenha o cartão de todos e mod/b o da pessoa 2, e a gestão nomeou um MOD só — quem "
+      + `escreve mod/b lê que ele não desenha nada: «${estado}»`,
+  );
+  confere(
+    caso,
+    nota === "Também pediram este lugar e não o receberam: mod/e. Escolha abaixo qual deve desenhar.",
+    "mod/e pediu o cartão da pessoa 3 e perdeu para mod/a, e a gestão não o disse entre quem pediu e não recebeu: "
+      + `«${nota}»`,
+  );
+  confere(
+    caso,
+    botoes.map((b) => b.rotulo).join() === "USAR mod/b,USAR mod/e,USAR APRESENTAÇÃO DO SEELE",
+    `no automático misto, a gestão mudou o que oferece: ${botoes.map((b) => b.rotulo).join(", ")}`,
+  );
+  // E a gestão diz o que a aba diz: quem desenha algum alvo e quem não
+  // desenha nenhum, a mesma soma de `quemPinta`.
+  const naAba = registro.quemPinta("pessoa.cartao", "", deDe);
+  confere(
+    caso,
+    [linha.escolhido, ...(linha.tambemDesenham ?? [])].sort().join() === [...naAba.substitui].sort().join()
+      && naAba.perderam.every((id) => linha.preteridos.includes(id)),
+    `a gestão e a aba DIAGNÓSTICO disseram coisas diferentes do mesmo cartão: gestão ${JSON.stringify(linha)}, `
+      + `aba ${JSON.stringify(naAba)}`,
+  );
+
+  // Os controles: sem ninguém noutro alvo, a frase continua a de um MOD só.
+  // Com mod/a escolhido, ou o SEELE, o automático misto não se aplica.
+  const sozinho = abaDoDiagnostico();
+  sozinho.contribuicoesDosMods.registrar({ id: "mod/a" }, null, { ponto: "pessoa.cartao", modo: "substituir" });
+  sozinho.contribuicoesDosMods.registrar({ id: "mod/c" }, null, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "2" });
+  const soA = sozinho.contribuicoesDosMods.resumo(new Map([["pessoa.cartao", ""]]), () => true)
+    .find((l) => l.ponto === "pessoa.cartao");
+  confere(
+    caso,
+    sozinho.oQueAGestaoDiz(soA, "").estado === "apresentado por mod/a (escolha automática)"
+      && (soA.tambemDesenham ?? []).length === 0,
+    `com mod/a sozinho a substituir o cartão, a gestão deixou de dizer que ele apresenta: ${JSON.stringify(soA)}`,
+  );
+  const escolhidos = ["mod/a", NATIVO].map((escolha) => registro
+    .resumo(new Map([["pessoa.cartao", escolha]]), deDe).find((l) => l.ponto === "pessoa.cartao"));
+  confere(
+    caso,
+    escolhidos.every((l) => (l.tambemDesenham ?? []).length === 0),
+    `com uma escolha gravada, a gestão disse «também desenham» do automático: ${JSON.stringify(escolhidos)}`,
+  );
+}
+
 // **O tema da API 3 pinta a sessão, e a aba diz** (I-7 e m-3 da revisão ampla
 // do Plano 1D). O ESTILO, oficial, pinta pela `SeeleUI.tema` sem registrar
 // ponto nenhum. Sem a leitura de `temaDosMods`, a aba dizia «nenhum MOD usa

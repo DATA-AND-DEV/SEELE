@@ -763,18 +763,30 @@ function oQueAGestaoDiz(linha, escolha) {
   // pessoa, como sempre no avatar —, a linha diz a escolha gravada desta
   // máquina (`resumo`). Sem escolha, ela continua «N contribuição(ões)», e
   // quem diz quem desenha cada pessoa é a aba.
+  //
+  // **No automático misto, todos os que desenham** (pendência 49, item 9):
+  // quem vence o lugar de todos desenha todos, e quem vence o de alguém
+  // desenha quem o declarou (`tambemDesenham`). Nomear só o primeiro dizia a
+  // quem escreve o segundo que ele não desenha nada, com a aba logo abaixo
+  // dizendo que ele desenha.
   const comoApresenta = linha.oSeeleDesenhaOutros
     ? ", para quem declarou; o SEELE desenha os outros"
     : linha.automatica ? " (escolha automática)" : "";
+  const tambem = linha.tambemDesenham ?? [];
+  const osOutros = tambem.length > 1
+    ? `${tambem.join(" e ")}, cada um para quem declarou`
+    : `${tambem.join("")} para quem declarou`;
   const estado = linha.ausente
     ? `você escolheu ${linha.ausente}, e ele não está de pé agora — o SEELE desenha`
     : linha.escolhidoNaoSubstitui
       ? `você escolheu ${linha.escolhidoNaoSubstitui}, que está de pé e não substitui este lugar — o SEELE desenha`
       : linha.nativa
         ? "o SEELE desenha; nenhum MOD substitui este lugar"
-        : linha.escolhido
-          ? `apresentado por ${linha.escolhido}${comoApresenta}`
-          : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
+        : linha.escolhido && tambem.length
+          ? `automática: ${linha.escolhido} para todos, ${osOutros}`
+          : linha.escolhido
+            ? `apresentado por ${linha.escolhido}${comoApresenta}`
+            : `${linha.quantas} contribuição(ões) de ${linha.mods.join(", ")}`;
   // **A disputa é dita, e não resolvida em silêncio.** Um MOD preterido que
   // some sem explicação é a pessoa achando que o MOD não funciona.
   const nota = linha.preteridos.length && !linha.nativa
