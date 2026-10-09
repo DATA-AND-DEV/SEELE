@@ -35,8 +35,8 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
-    MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
-    ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+    Lido, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence,
+    Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
@@ -312,8 +312,11 @@ pub async fn serve(
         // `worth_retrying` na casca já trata `RateLimited` como coisa que
         // não se repete na hora, então o aviso também serve para o laço parar.
         tracing::warn!(peer = %connection.remote_address(), "handshake refused: rate limited");
-        let _ = frame::write(
+        // No número desta build: nenhum quadro do par foi lido ainda, e o
+        // balde existe justamente para não ler.
+        let _ = frame::write_em(
             &mut send,
+            seele_proto::version::PROTOCOL_VERSION,
             &ServerMessage::Disconnecting {
                 reason: DisconnectReason::RateLimited,
             },
@@ -324,17 +327,31 @@ pub async fn serve(
         bail!("handshake refused: too many attempts from this address");
     }
 
+    // O carimbo com que uma recusa sai, que o aperto de mão vai acertando
+    // conforme aprende: o do par depois do primeiro quadro, o negociado depois
+    // do `Hello`, e o de `control::carimbo_da_recusa` quando o carimbo do par
+    // é de um número que esta build não fala. Antes de qualquer quadro, o
+    // desta build.
+    let mut carimbo = seele_proto::version::PROTOCOL_VERSION;
     let outcome = tokio::time::timeout(
         HANDSHAKE_TIMEOUT,
-        handshake(&mut send, &mut recv, &config, &registry, &server),
+        handshake(
+            &mut send,
+            &mut recv,
+            &config,
+            &registry,
+            &server,
+            &mut carimbo,
+        ),
     )
     .await;
 
     let session = match outcome {
         Ok(Ok(session)) => session,
         Ok(Err(failure)) => {
-            let _ = frame::write(
+            let _ = frame::write_em(
                 &mut send,
+                carimbo,
                 &ServerMessage::Disconnecting {
                     reason: failure.reason,
                 },
@@ -345,8 +362,9 @@ pub async fn serve(
             bail!("handshake refused: {}", failure.detail);
         }
         Err(_elapsed) => {
-            let _ = frame::write(
+            let _ = frame::write_em(
                 &mut send,
+                carimbo,
                 &ServerMessage::Disconnecting {
                     reason: DisconnectReason::HandshakeTimeout,
                 },
@@ -477,10 +495,38 @@ async fn handshake(
     config: &ServerConfig,
     registry: &Registry,
     server: &Server,
+    carimbo: &mut u8,
 ) -> std::result::Result<Session, Refusal> {
-    let hello = frame::read::<ClientMessage>(recv)
-        .await
-        .map_err(|error| Refusal {
+    // O primeiro quadro, **bruto**: o carimbo é conferido antes do `decode`.
+    //
+    // O `decode` recusaria um número fora da faixa sem dizer qual veio, e a
+    // recusa saía como `ProtocolViolation` no carimbo deste servidor — que um
+    // par de outra versão não lê. A 0.15.1 via «não foi possível alcançar o
+    // servidor» em vez de «versão incompatível» (adendo de 08/10/2026, §5).
+    let primeiro = frame::ler_bruto(recv).await.map_err(|fim| Refusal {
+        reason: DisconnectReason::ProtocolViolation,
+        detail: format!("could not read Hello: {fim}"),
+    })?;
+    let Some(&carimbo_do_par) = primeiro.first() else {
+        return Err(Refusal {
+            reason: DisconnectReason::ProtocolViolation,
+            detail: "the first frame was empty".into(),
+        });
+    };
+    if let Err(incompativel) = seele_proto::version::confere_o_carimbo(carimbo_do_par) {
+        // `Disconnecting { Incompatible }` no carimbo que o par lê: os bytes
+        // de `control::recusa_por_versao`, congelados pelo ADR 0058.
+        *carimbo = seele_proto::control::carimbo_da_recusa(carimbo_do_par);
+        return Err(Refusal {
+            reason: DisconnectReason::Incompatible,
+            detail: format!("first frame stamped {carimbo_do_par}: {incompativel}"),
+        });
+    }
+    // Um número que esta build fala: é nele que o par lê o que vier antes da
+    // negociação.
+    *carimbo = carimbo_do_par;
+    let hello =
+        seele_proto::control::decode::<ClientMessage>(&primeiro).map_err(|error| Refusal {
             reason: DisconnectReason::ProtocolViolation,
             detail: format!("could not read Hello: {error}"),
         })?;
@@ -509,6 +555,8 @@ async fn handshake(
         reason: DisconnectReason::Incompatible,
         detail: format!("client speaks protocol {}..={}", faixa.minima, faixa.maxima),
     })?;
+    // Daqui em diante, toda recusa e todo quadro saem no número negociado.
+    *carimbo = version;
 
     // O porteiro, antes do desafio criptográfico. Quem não tem direito de estar
     // batendo à porta não deve custar uma verificação de assinatura, e um
@@ -588,8 +636,9 @@ async fn handshake(
 
     // A fresh nonce per handshake, or a recorded Response could be replayed.
     let nonce: [u8; NONCE_LEN] = rand::random();
-    frame::write(
+    frame::write_em(
         send,
+        version,
         &ServerMessage::Challenge {
             nonce: nonce.to_vec(),
         },
@@ -919,8 +968,9 @@ async fn handshake(
         None => (fresh_ssrc, None),
     };
 
-    frame::write(
+    frame::write_em(
         send,
+        version,
         &ServerMessage::Session {
             id: session_id,
             person: account.id,
@@ -953,7 +1003,7 @@ async fn handshake(
         identidade: identidade_da_instancia,
     };
     if entende_a_mensagem(&quadro_da_instancia, version) {
-        if let Err(error) = frame::write(send, &quadro_da_instancia).await {
+        if let Err(error) = frame::write_em(send, version, &quadro_da_instancia).await {
             // Não derruba quem está entrando: a identidade é para separar
             // estado entre servidores, e uma sessão sem ela funciona — só não
             // distingue.
@@ -984,7 +1034,7 @@ async fn handshake(
             icon: icone_do_server,
         };
         match anuncio.validate() {
-            Ok(()) => frame::write(send, &anuncio)
+            Ok(()) => frame::write_em(send, version, &anuncio)
                 .await
                 .map_err(|error| Refusal {
                     reason: DisconnectReason::ProtocolViolation,
@@ -1016,7 +1066,7 @@ async fn handshake(
             icon: Some(imagem),
         };
         match anuncio.validate() {
-            Ok(()) => frame::write(send, &anuncio)
+            Ok(()) => frame::write_em(send, version, &anuncio)
                 .await
                 .map_err(|error| Refusal {
                     reason: DisconnectReason::ProtocolViolation,
@@ -1186,7 +1236,7 @@ async fn exigir_aceite_dos_mods(
         });
     }
 
-    frame::write(send, &anuncio)
+    frame::write_em(send, versao, &anuncio)
         .await
         .map_err(|error| Refusal {
             reason: DisconnectReason::ProtocolViolation,
@@ -1352,13 +1402,36 @@ async fn run_session(
     let id_da_conexao = connection.stable_id() as u64;
 
     let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
+    let pessoa = session.person;
+    let contagem = Arc::clone(&server.desconhecidas);
     let leitora = tokio::spawn(async move {
         let mut recv = recv;
+        // As mensagens de um vocabulário mais novo que este par mandou. A
+        // primeira vai ao registro; as outras só à contagem, para um par
+        // defeituoso não encher o `seele.log`.
+        let mut desconhecidas = seele_proto::control::Desconhecidas::default();
         loop {
-            match frame::ler::<ClientMessage>(&mut recv).await {
-                Ok(mensagem) => {
+            match frame::ler_da_lista::<ClientMessage>(&mut recv).await {
+                Ok(Lido::Mensagem(mensagem)) => {
                     if para_dentro.send(mensagem).await.is_err() {
-                        return;
+                        break;
+                    }
+                }
+                // **Pulada, contada, e a sessão segue** (adendo de 08/10/2026,
+                // §6). Até a 0.15 isto era `NaoEntendi` e a sessão morria: o
+                // quadro tem comprimento próprio, e pular não desalinha o
+                // próximo. Rede de segurança, e não licença — quem manda
+                // continua não mandando o que o par não entende (ADR 0058).
+                Ok(Lido::Desconhecida { ordinal }) => {
+                    let primeira = desconhecidas.contar();
+                    contagem.registrar(primeira);
+                    if primeira {
+                        tracing::warn!(
+                            person = %pessoa,
+                            ordinal,
+                            "mensagem de controle desconhecida, pulada: o par fala um \
+                             vocabulário mais novo que este servidor"
+                        );
                     }
                 }
                 // **Fechar é rotina; não entender é notícia.** Os dois vinham
@@ -1376,13 +1449,21 @@ async fn run_session(
                         "um par mandou um quadro de controle que este servidor não entende; \
                          quase sempre é uma versão diferente dos dois lados"
                     );
-                    return;
+                    break;
                 }
                 Err(fim) => {
                     tracing::debug!(erro = %fim.erro(), "o fluxo de controle do cliente terminou");
-                    return;
+                    break;
                 }
             }
+        }
+        // O total, quando a primeira linha não disse tudo.
+        if desconhecidas.total() > 1 {
+            tracing::warn!(
+                person = %pessoa,
+                total = desconhecidas.total(),
+                "mensagens de controle desconhecidas puladas nesta sessão"
+            );
         }
     });
     // Abortada ao sair por qualquer caminho, inclusive por `?`.
@@ -1783,8 +1864,9 @@ async fn run_session(
             if quem.person == session.person {
                 continue;
             }
-            frame::write(
+            frame::write_em(
                 &mut send,
+                session.protocol_version,
                 &ServerMessage::PersonPresent {
                     profile: PersonProfile {
                         id: quem.person,
@@ -1847,8 +1929,9 @@ async fn run_session(
         if occupant.person == session.person {
             continue;
         }
-        frame::write(
+        frame::write_em(
             &mut send,
+            session.protocol_version,
             &ServerMessage::PersonJoined {
                 voice_room,
                 profile: PersonProfile {
@@ -1878,8 +1961,9 @@ async fn run_session(
     // inversa pode perder uma transmissão que começou entre as duas linhas, e
     // uma transmissão perdida é uma tela que ninguém sabe que existe.
     for (voice_room, person, screen) in server.telas.lock().await.todas() {
-        frame::write(
+        frame::write_em(
             &mut send,
+            session.protocol_version,
             &ServerMessage::ScreenShareStarted {
                 voice_room,
                 person,
@@ -1916,8 +2000,9 @@ async fn run_session(
     // família da pendência 1 — segurar um recurso compartilhado enquanto se
     // escreve para quem não lê.
     let subida_medida = server.subida.lock().await.medida();
-    frame::write(
+    frame::write_em(
         &mut send,
+        session.protocol_version,
         &ServerMessage::HostUplink {
             bps: crate::tela::caminho_no_fio(server.caminho_bps, subida_medida),
         },
@@ -1941,7 +2026,7 @@ async fn run_session(
                     Veredito::Passa => {}
                     Veredito::Avisa => {
                         tracing::warn!(person = %session.person, "control frames over budget");
-                        frame::write(&mut send, &ServerMessage::Alert {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::RateLimited,
                             operator_text: None,
@@ -1955,7 +2040,7 @@ async fn run_session(
                             descartados = vigia.descartados(),
                             "disconnecting: rate limited"
                         );
-                        let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
+                        let _ = frame::write_em(&mut send, session.protocol_version, &ServerMessage::Disconnecting {
                             reason: DisconnectReason::RateLimited,
                         }).await;
                         let _ = send.finish();
@@ -1970,7 +2055,7 @@ async fn run_session(
                         let parts = crate::mods::pedidos::partes(&response);
                         let total = parts.len() as u32;
                         for (part, payload) in parts.into_iter().enumerate() {
-                            frame::write(&mut send, &ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::ModReply { request, part: part as u32, total, payload }).await?;
                         }
                     }
                     ClientMessage::EnterVoiceRoom { voice_room: id, password } => {
@@ -1992,7 +2077,7 @@ async fn run_session(
                         // `specs/08-seguranca.md`: a segurança é o servidor
                         // recusando. Esconder o botão é conforto.
                         if !pode(server, session.person, Permission::EnterVoiceRoom).await {
-                            frame::write(&mut send, &ServerMessage::Alert {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2004,7 +2089,7 @@ async fn run_session(
                             id,
                             password.as_deref(),
                         ) {
-                            frame::write(&mut send, &ServerMessage::Alert {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2030,7 +2115,7 @@ async fn run_session(
                                 })
                         };
                         let Some(teto) = teto else {
-                            frame::write(&mut send, &ServerMessage::Alert {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomEntryRefused,
                                 operator_text: None,
@@ -2043,7 +2128,7 @@ async fn run_session(
                             // motivo vai por um alerta próprio para o cliente
                             // poder desfazer o assento que ele já tinha dado a
                             // si mesmo — ver `Room::apply`, braço `Alert`.
-                            frame::write(&mut send, &ServerMessage::Alert {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                 severity: AlertSeverity::Warning,
                                 reason: AlertReason::VoiceRoomFull,
                                 operator_text: None,
@@ -2078,7 +2163,7 @@ async fn run_session(
                         // isso como o produto travado. O defeito desta casa é o
                         // produto saber e não contar.
                         if !pode_ler_canal(server, session.person, channel).await {
-                            recusar(&mut send, session.person, "JoinChannel").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "JoinChannel").await?;
                             continue;
                         }
                         if !channels.contains(&channel) {
@@ -2134,12 +2219,12 @@ async fn run_session(
                                 reason,
                             };
                             if entende_a_mensagem(&aviso, session.protocol_version) {
-                                frame::write(&mut send, &aviso).await?;
+                                frame::write_em(&mut send, session.protocol_version, &aviso).await?;
                             } else {
                                 // Um par que não conhece a variante recebe o
                                 // que ele conhece. Sem isto, calar a variante
                                 // nova seria calar a recusa inteira para ele.
-                                frame::write(&mut send, &ServerMessage::Alert {
+                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::PermissionDenied,
                                     operator_text: None,
@@ -2164,7 +2249,7 @@ async fn run_session(
                         // PERMISSIONS. Uma conta autenticada cujo papel havia
                         // sido tirado recebia a conversa inteira.
                         if !pode_ler_canal(server, session.person, channel).await {
-                            recusar(&mut send, session.person, "FetchHistory").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "FetchHistory").await?;
                             continue;
                         }
                         let page = {
@@ -2178,7 +2263,7 @@ async fn run_session(
                         };
                         // Oldest first on the wire, so a client can append.
                         for stored in page.into_iter().rev() {
-                            frame::write(&mut send, &ServerMessage::MessageReceived {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::MessageReceived {
                                 channel: stored.channel,
                                 id: stored.id,
                                 author: stored.author,
@@ -2192,7 +2277,7 @@ async fn run_session(
                         }
                     }
                     ClientMessage::Ping { timestamp } => {
-                        frame::write(&mut send, &ServerMessage::Pong { timestamp }).await?;
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Pong { timestamp }).await?;
                     }
                     // The roster shows all three (specs/07-estetica.md).
                     // Ignoring them, as this did, made every mute local-only:
@@ -2247,7 +2332,7 @@ async fn run_session(
                     // server that is broken.
                     ClientMessage::CreateVoiceRoom { name, limit, channel } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "CreateVoiceRoom").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "CreateVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
@@ -2259,12 +2344,12 @@ async fn run_session(
                                 tracing::info!(person = %session.person, voice_room = %voice_room.id, "voice room created");
                                 let _ = server.events.send(Event::VoiceRoomCreated { voice_room });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::CreateChannel { name } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "CreateChannel").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "CreateChannel").await?;
                             continue;
                         }
                         let feito = {
@@ -2276,12 +2361,12 @@ async fn run_session(
                                 tracing::info!(person = %session.person, channel = %channel.id, "channel created");
                                 let _ = server.events.send(Event::ChannelCreated { channel });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::RenameVoiceRoom { voice_room: id, name } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "RenameVoiceRoom").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "RenameVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
@@ -2292,12 +2377,12 @@ async fn run_session(
                             Ok(name) => {
                                 let _ = server.events.send(Event::VoiceRoomRenamed { voice_room: id, name });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::RenameChannel { channel: id, name } => {
                         if !pode(server, session.person, Permission::ManageVoiceRooms).await {
-                            recusar(&mut send, session.person, "RenameChannel").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "RenameChannel").await?;
                             continue;
                         }
                         let feito = {
@@ -2308,7 +2393,7 @@ async fn run_session(
                             Ok(name) => {
                                 let _ = server.events.send(Event::ChannelRenamed { channel: id, name });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
 
@@ -2334,7 +2419,7 @@ async fn run_session(
                     // told about.
                     ClientMessage::RenameServer { name } => {
                         if !pode(server, session.person, Permission::AdministerServer).await {
-                            recusar(&mut send, session.person, "RenameServer").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "RenameServer").await?;
                             continue;
                         }
                         let feito = {
@@ -2346,7 +2431,7 @@ async fn run_session(
                                 tracing::info!(by = %session.person, %name, "the server was renamed");
                                 let _ = server.events.send(Event::ServerRenamed { name });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::SetNickname { name } => {
@@ -2380,7 +2465,7 @@ async fn run_session(
                                     nickname: name,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::SetPersonIcon { icon } => {
@@ -2416,12 +2501,12 @@ async fn run_session(
                                     icon,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::SetServerIcon { icon } => {
                         if !pode(server, session.person, Permission::AdministerServer).await {
-                            recusar(&mut send, session.person, "SetServerIcon").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "SetServerIcon").await?;
                             continue;
                         }
                         // Nada confere o formato aqui. `frame::read` já recusou
@@ -2442,7 +2527,7 @@ async fn run_session(
                                 );
                                 let _ = server.events.send(Event::ServerIconChanged { icon });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
 
@@ -2462,7 +2547,7 @@ async fn run_session(
                     // that is broken.
                     ClientMessage::KickPerson { person: alvo } => {
                         if !moderavel(server, session.person, alvo, Permission::Kick).await {
-                            recusar(&mut send, session.person, "KickPerson").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "KickPerson").await?;
                             continue;
                         }
                         tracing::info!(by = %session.person, %alvo, "kicked");
@@ -2481,7 +2566,7 @@ async fn run_session(
                         if alvo == session.person
                             || !moderavel(server, session.person, alvo, Permission::Ban).await
                         {
-                            recusar(&mut send, session.person, "BanPerson").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "BanPerson").await?;
                             continue;
                         }
                         // PERMISSIONS checks the permission again inside `ban`.
@@ -2510,7 +2595,7 @@ async fn run_session(
                                     reason: DisconnectReason::Banned,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::RemoveMessage { message: id } => {
@@ -2527,12 +2612,12 @@ async fn run_session(
                             // Already gone, or never there. Answered rather
                             // than ignored: a removal that silently does
                             // nothing looks exactly like one that worked.
-                            nao_deu(&mut send, &anyhow::anyhow!("no such message")).await?;
+                            nao_deu(&mut send, session.protocol_version, &anyhow::anyhow!("no such message")).await?;
                             continue;
                         };
                         let seu = alvo.author == session.person;
                         if !seu && !pode(server, session.person, Permission::RemoveMessage).await {
-                            recusar(&mut send, session.person, "RemoveMessage").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "RemoveMessage").await?;
                             continue;
                         }
                         // Soft in PERSISTENCE, gone on screen — and the two are one
@@ -2561,12 +2646,12 @@ async fn run_session(
                                     id,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::MovePerson { person: alvo, voice_room: destino } => {
                         if !moderavel(server, session.person, alvo, Permission::MovePerson).await {
-                            recusar(&mut send, session.person, "MovePerson").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "MovePerson").await?;
                             continue;
                         }
                         tracing::info!(by = %session.person, %alvo, voice_room = %destino, "moved");
@@ -2590,7 +2675,7 @@ async fn run_session(
                     // others.
                     ClientMessage::DeleteVoiceRoom { voice_room: id } => {
                         if !pode(server, session.person, Permission::AdministerServer).await {
-                            recusar(&mut send, session.person, "DeleteVoiceRoom").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "DeleteVoiceRoom").await?;
                             continue;
                         }
                         let feito = {
@@ -2624,18 +2709,18 @@ async fn run_session(
                             // Everything else a write can fail with is the
                             // database's business and goes to the operator's log.
                             Err(erro) if erro.downcast_ref::<LastVoiceRoom>().is_some() => {
-                                frame::write(&mut send, &ServerMessage::Alert {
+                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::LastVoiceRoom,
                                     operator_text: None,
                                 }).await?;
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     ClientMessage::DeleteChannel { channel: id } => {
                         if !pode(server, session.person, Permission::AdministerServer).await {
-                            recusar(&mut send, session.person, "DeleteChannel").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "DeleteChannel").await?;
                             continue;
                         }
                         let feito = {
@@ -2647,7 +2732,7 @@ async fn run_session(
                                 tracing::info!(by = %session.person, channel = %id, "channel destroyed");
                                 let _ = server.events.send(Event::ChannelDeleted { channel: id });
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
                     // A read, answered straight down this connection rather
@@ -2665,14 +2750,14 @@ async fn run_session(
                         };
                         match pesado {
                             Ok(peso) => {
-                                frame::write(&mut send, &ServerMessage::ChannelWeighed {
+                                frame::write_em(&mut send, session.protocol_version, &ServerMessage::ChannelWeighed {
                                     channel: id,
                                     messages: peso.messages,
                                     authors: peso.authors,
                                     oldest_at_seconds: peso.oldest_at_seconds,
                                 }).await?;
                             }
-                            Err(erro) => nao_deu(&mut send, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
                     }
 
@@ -2710,14 +2795,14 @@ async fn run_session(
                             None => false,
                         };
                         if !liberado {
-                            frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::NotFound,
                             }).await?;
                             continue;
                         }
                         let Some(anexos) = server.anexos.clone() else {
-                            frame::write(&mut send, &ServerMessage::AttachmentUnavailable {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::AttachmentUnavailable {
                                 attachment,
                                 reason: AttachmentRefusal::Unavailable,
                             }).await?;
@@ -2779,7 +2864,7 @@ async fn run_session(
                         // recusar em silêncio, que é indistinguível de um servidor
                         // quebrado.
                         let Some(voice_room) = current_voice_room else {
-                            recusar(&mut send, session.person, "StartScreenShare fora de voice room")
+                            recusar(&mut send, session.protocol_version, session.person, "StartScreenShare fora de voice room")
                                 .await?;
                             continue;
                         };
@@ -2788,7 +2873,7 @@ async fn run_session(
                         // transmitindo-a como imagem. `specs/08-seguranca.md`:
                         // verificado no servidor, sempre.
                         if !session.may_speak {
-                            recusar(&mut send, session.person, "StartScreenShare").await?;
+                            recusar(&mut send, session.protocol_version, session.person, "StartScreenShare").await?;
                             continue;
                         }
                         let screen = registry.issue_screen();
@@ -3245,8 +3330,9 @@ async fn run_session(
                         // não um motivo.
                         DisconnectReason::Incompatible
                     };
-                    let _ = frame::write(
+                    let _ = frame::write_em(
                         &mut send,
+                        session.protocol_version,
                         &ServerMessage::Disconnecting { reason: motivo },
                     )
                     .await;
@@ -3274,7 +3360,7 @@ async fn run_session(
                 // não vem. Escrita aqui porque este é o dono do fluxo de
                 // controle, e não pela tarefa que descobriu o motivo.
                 let Some(aviso) = aviso else { break };
-                frame::write(&mut send, &aviso).await?;
+                frame::write_em(&mut send, session.protocol_version, &aviso).await?;
             }
 
             event = events.recv() => {
@@ -3316,7 +3402,7 @@ async fn run_session(
                         // trocaria uma sessão com buraco por uma sessão presa.
                         let _ = tokio::time::timeout(
                             Duration::from_secs(1),
-                            frame::write(&mut send, &ServerMessage::Disconnecting {
+                            frame::write_em(&mut send, session.protocol_version, &ServerMessage::Disconnecting {
                                 reason: DisconnectReason::FellBehind,
                             }),
                         ).await;
@@ -3360,8 +3446,9 @@ async fn run_session(
                         ..
                     } => {
                         if pode(server, session.person, Permission::AdministerServer).await {
-                            frame::write(
+                            frame::write_em(
                                 &mut send,
+                                session.protocol_version,
                                 &ServerMessage::Alert {
                                     severity: AlertSeverity::Warning,
                                     reason: AlertReason::VoiceRoomOverHostUplink {
@@ -3431,7 +3518,7 @@ async fn run_session(
                             .await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
-                        let _ = frame::write(&mut send, &ServerMessage::Disconnecting {
+                        let _ = frame::write_em(&mut send, session.protocol_version, &ServerMessage::Disconnecting {
                             reason: *reason,
                         }).await;
                         let _ = send.finish();
@@ -3486,10 +3573,10 @@ async fn run_session(
                         // sentence only a shell knows how to write. Being moved
                         // in silence is indistinguishable from a client that
                         // lost track of where it was.
-                        frame::write(&mut send, &ServerMessage::MovedToVoiceRoom {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::MovedToVoiceRoom {
                             voice_room: *destino,
                         }).await?;
-                        frame::write(&mut send, &ServerMessage::Alert {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                             severity: AlertSeverity::Info,
                             reason: AlertReason::MovedByOperator,
                             operator_text: None,
@@ -3514,7 +3601,7 @@ async fn run_session(
                         desassentar(server, voice_rooms, session, Saida::Sala(Some(*id))).await;
                         current_voice_room = None;
                         midia.entrou(current_voice_room);
-                        frame::write(&mut send, &ServerMessage::VoiceRoomDeleted {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::VoiceRoomDeleted {
                             voice_room: *id,
                         }).await?;
                         // And then the sentence. Two frames for the reason
@@ -3522,7 +3609,7 @@ async fn run_session(
                         // fold in or go on sending voice into a room that is
                         // not there, the other is what the person should be
                         // told, and only a shell knows how to say it.
-                        frame::write(&mut send, &ServerMessage::Alert {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::VoiceRoomDeleted,
                             operator_text: None,
@@ -3536,10 +3623,10 @@ async fn run_session(
                     // one that still asks about a room that is gone.
                     Event::ChannelDeleted { channel: id } if channels.contains(id) => {
                         channels.retain(|aberta| aberta != id);
-                        frame::write(&mut send, &ServerMessage::ChannelDeleted {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::ChannelDeleted {
                             channel: *id,
                         }).await?;
-                        frame::write(&mut send, &ServerMessage::Alert {
+                        frame::write_em(&mut send, session.protocol_version, &ServerMessage::Alert {
                             severity: AlertSeverity::Warning,
                             reason: AlertReason::ChannelDeleted,
                             operator_text: None,
@@ -3573,7 +3660,7 @@ async fn run_session(
                 }
                 if let Some(message) = translate(&event, &channels, session.person) {
                     if entende_a_mensagem(&message, session.protocol_version) {
-                        frame::write(&mut send, &message).await?;
+                        frame::write_em(&mut send, session.protocol_version, &message).await?;
                     }
                 }
             }
@@ -3645,7 +3732,7 @@ async fn run_session(
                 let ratio = sync.update(inputs);
                 last_ratio = ratio;
 
-                frame::write(&mut send, &ServerMessage::Telemetry(Telemetry {
+                frame::write_em(&mut send, session.protocol_version, &ServerMessage::Telemetry(Telemetry {
                     rtt_ms,
                     jitter_ms: inputs.jitter_ms,
                     loss_fraction: inputs.loss_fraction,
@@ -4694,10 +4781,16 @@ async fn encerrar_telas(
 }
 
 /// Tells a client the server said no, and why.
-async fn recusar(send: &mut quinn::SendStream, person: PersonId, verbo: &str) -> Result<()> {
+async fn recusar(
+    send: &mut quinn::SendStream,
+    versao: u8,
+    person: PersonId,
+    verbo: &str,
+) -> Result<()> {
     tracing::warn!(%person, verbo, "refused: the server said no");
-    frame::write(
+    frame::write_em(
         send,
+        versao,
         &ServerMessage::Alert {
             severity: AlertSeverity::Warning,
             reason: AlertReason::PermissionDenied,
@@ -4715,10 +4808,11 @@ async fn recusar(send: &mut quinn::SendStream, person: PersonId, verbo: &str) ->
 /// inventing a variant for every way a write can fail would be inventing an
 /// error language. The detail goes to the operator's log, which is where a
 /// developer will look for it.
-async fn nao_deu(send: &mut quinn::SendStream, erro: &anyhow::Error) -> Result<()> {
+async fn nao_deu(send: &mut quinn::SendStream, versao: u8, erro: &anyhow::Error) -> Result<()> {
     tracing::warn!(%erro, "a room could not be made");
-    frame::write(
+    frame::write_em(
         send,
+        versao,
         &ServerMessage::Alert {
             severity: AlertSeverity::Warning,
             reason: AlertReason::VoiceRoomEntryRefused,
@@ -5163,6 +5257,48 @@ mod plano_de_midia {
 )]
 mod versao_no_fio {
     use super::*;
+
+    /// **Toda escrita do fluxo de controle diz com que carimbo sai.**
+    ///
+    /// Depois do `Hello`, o par lê o número negociado, e antes dele o carimbo
+    /// que mandou (adendo de 08/10/2026, §4). Na 1.0 os dois são 9 e o
+    /// `frame::write` de sempre daria o mesmo quadro — e por isso nenhum teste
+    /// de fio pegaria uma escrita nova que o esquecesse. Ela só apareceria na
+    /// primeira 1.x, como um quadro que a 1.0 não lê.
+    ///
+    /// Este guarda lê a fonte: nenhuma linha de código antes do primeiro
+    /// `#[cfg(test)]` chama `frame::write(`, que carimba com o número desta
+    /// build. E, para o corte não esconder código de produção, tudo o que vem
+    /// depois dele no nível de cima é módulo de teste.
+    #[test]
+    fn nenhuma_escrita_da_sessao_sai_sem_o_carimbo() {
+        let fonte = include_str!("session.rs");
+        let (producao, testes) = fonte.split_at(fonte.find("#[cfg(test)]").unwrap());
+
+        let sem_carimbo: Vec<String> = producao
+            .lines()
+            .enumerate()
+            .filter(|(_, linha)| !linha.trim_start().starts_with("//"))
+            .filter(|(_, linha)| linha.contains("frame::write("))
+            .map(|(numero, linha)| format!("{}: {}", numero + 1, linha.trim()))
+            .collect();
+        assert!(
+            sem_carimbo.is_empty(),
+            "escrita do fluxo de controle sem o carimbo negociado — use \
+             `frame::write_em(send, versao, …)`: {sem_carimbo:?}"
+        );
+
+        let fora_de_modulo: Vec<&str> = testes
+            .lines()
+            .filter(|linha| linha.starts_with(|c: char| c.is_ascii_lowercase()))
+            .filter(|linha| !linha.starts_with("mod "))
+            .collect();
+        assert!(
+            fora_de_modulo.is_empty(),
+            "há código no nível de cima depois do primeiro `#[cfg(test)]`, e o \
+             guarda não o lê: {fora_de_modulo:?}"
+        );
+    }
 
     fn sirva() -> ServerMessage {
         ServerMessage::SirvaTelaPara {
@@ -5933,6 +6069,7 @@ mod fim_de_tela_por_sessao {
             subida: Arc::new(Mutex::new(crate::tela::Subida::nova())),
             portaria: Arc::new(Mutex::new(crate::taxa::Portaria::nova())),
             atrasos: Arc::new(crate::server::Atrasos::default()),
+            desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,

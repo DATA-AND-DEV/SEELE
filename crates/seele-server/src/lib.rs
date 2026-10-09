@@ -647,6 +647,7 @@ impl Daemon {
             })),
             portaria: Arc::new(tokio::sync::Mutex::new(taxa::Portaria::nova())),
             atrasos: Arc::new(server::Atrasos::default()),
+            desconhecidas: Arc::new(server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(server::Desassentamentos::default()),
             telas: Arc::new(tokio::sync::Mutex::new(server::Telas::default())),
             pares: Arc::new(tokio::sync::Mutex::new(pares::Pares::nova())),

@@ -412,6 +412,7 @@ mod tests {
             subida: Arc::new(Mutex::new(crate::tela::Subida::nova())),
             portaria: Arc::new(Mutex::new(crate::taxa::Portaria::nova())),
             atrasos: Arc::new(crate::server::Atrasos::default()),
+            desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,
