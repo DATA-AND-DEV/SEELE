@@ -82,6 +82,20 @@
 
 :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) {
   order: 1;
+  flex-wrap: wrap;
+}
+
+/* O texto de um aviso divide a fileira com o botão enquanto cabe; com o texto do
+   sistema grande, o botão desce para debaixo dele, e não encolhe por cima das
+   letras (medido no Safari do Simulador: «dispensar» cortado no maior tamanho). */
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) > .veredito-texto {
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) > button {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 :root[data-casca="celular"] #tela-sessao > .voz-celular {
@@ -713,7 +727,7 @@
   box-sizing: border-box;
   min-height: var(--cel-alvo);
   padding-block: 11px;
-  font-size: var(--cel-campo);
+  font-size: var(--cel-letra-de-campo);
 }
 
 :root[data-casca="celular"] #form-mensagem .compor-enviar {
@@ -868,6 +882,23 @@
   margin: 0;
   border-left: 0;
   border-right: 0;
+}
+
+/* A cabeça do palco quebra fileira, e o TELA CHEIA não encolhe abaixo do nome
+   dele: com o texto do sistema a 150 %, a fileira única do desktop passava da
+   tela. */
+:root[data-casca="celular"] #vista-chamada .chamada-palco-cabeca {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+:root[data-casca="celular"] #vista-chamada .chamada-palco-razao {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] #palco-cheia {
+  flex-shrink: 0;
 }
 
 :root[data-casca="celular"] #palco-escolha,

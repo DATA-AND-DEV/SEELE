@@ -100,7 +100,15 @@ struct Bloco {
 }
 
 fn blocos(css: &str) -> Vec<Bloco> {
-    fn ler_blocos(texto: &str, saida: &mut Vec<Bloco>) {
+    blocos_com_contexto(css)
+        .into_iter()
+        .map(|(_, bloco)| bloco)
+        .collect()
+}
+
+/// Como `blocos`, e com as at-rules em volta de cada um, de fora para dentro.
+fn blocos_com_contexto(css: &str) -> Vec<(Vec<String>, Bloco)> {
+    fn ler_blocos(texto: &str, contexto: &[String], saida: &mut Vec<(Vec<String>, Bloco)>) {
         let mut resto = texto;
         while let Some(abre) = resto.find('{') {
             let preludio = resto[..abre].trim().to_owned();
@@ -125,18 +133,23 @@ fn blocos(css: &str) -> Vec<Bloco> {
                 .iter()
                 .any(|a| preludio.starts_with(a))
             {
-                ler_blocos(corpo, saida);
+                let mut dentro = contexto.to_vec();
+                dentro.push(preludio);
+                ler_blocos(corpo, &dentro, saida);
             } else {
-                saida.push(Bloco {
-                    preludio,
-                    corpo: corpo.to_owned(),
-                });
+                saida.push((
+                    contexto.to_vec(),
+                    Bloco {
+                        preludio,
+                        corpo: corpo.to_owned(),
+                    },
+                ));
             }
             resto = &resto[fecha + 1..];
         }
     }
     let mut saida = Vec::new();
-    ler_blocos(&sem_comentarios_css(css), &mut saida);
+    ler_blocos(&sem_comentarios_css(css), &[], &mut saida);
     saida
 }
 
@@ -178,7 +191,9 @@ fn toda_regra_das_cascas_do_navegador_comeca_pela_marca() {
                     continue;
                 }
                 for seletor in seletores(&bloco.preludio) {
-                    if !seletor.trim().starts_with(marca) {
+                    let seletor_ok = seletor.trim().starts_with(marca)
+                        || seletor.trim().starts_with(&format!(":where({marca})"));
+                    if !seletor_ok {
                         fora.push(format!(
                             "{nome}: {} (a raiz dela é {marca})",
                             seletor.trim()
@@ -358,4 +373,223 @@ fn o_nucleo_do_celular_so_le_o_nucleo() {
         "o núcleo lê o que o tema escreve:\n{}",
         fora.join("\n")
     );
+}
+
+// ------------------------------------------------------- o texto do sistema
+
+/// O texto do sistema (spec, §5): a casca escala a escala de tipo inteira do
+/// produto. O desktop declara o tamanho da letra em cerca de 270 regras, metade
+/// em token e metade em px, e escalar à mão uma a uma deixava de fora o que
+/// ninguém lembrou (medido no Safari do Simulador: as seções de AJUSTES, a
+/// CHAMADA, o campo de mensagem e as folhas ficavam no tamanho do desktop, ao
+/// lado de mensagens no dobro).
+///
+/// Por isso cada regra do desktop com tamanho ganha um gêmeo gerado:
+/// `:where(<marca>) <o mesmo seletor> { font-size: calc(<o mesmo tamanho> *
+/// var(--cel-escala)) }`. O `:where()` não pesa: o gêmeo tem a especificidade da
+/// regra dele e vem depois dela, então o cascateamento do desktop continua o
+/// mesmo, só que escalado; e as regras escritas à mão nos `celular-*.css`, que
+/// pesam a marca, continuam ganhando (os tetos das abas e do núcleo). A 1, o
+/// gêmeo dá o mesmo pixel.
+const TEXTO_GERADO: &str = "celular-texto.css";
+
+/// O que não ganha gêmeo, e fica no tamanho do desktop com qualquer texto do
+/// sistema. A bancada aceita os mesmos (`TEXTO_COM_TETO`, caso `texto-maior`).
+const SEM_GEMEO: &[(&str, &str)] = &[
+    (
+        "html",
+        "a raiz: o corpo, a casca escala ela mesma em celular-base.css",
+    ),
+    (
+        ".trilha-item",
+        "as iniciais de um servidor numa caixa de tamanho fixo: marca, e não texto de ler",
+    ),
+    (".trilha-mais", "o + da trilha, na mesma caixa"),
+    (
+        ".mensagem-avatar",
+        "as iniciais de quem escreveu, numa caixa de tamanho fixo",
+    ),
+    (
+        ".chamada-avatar",
+        "as iniciais do cartão da CHAMADA, numa caixa de tamanho fixo",
+    ),
+    (
+        ".barra",
+        "a barra do sinal é desenho; o número e a palavra ao lado crescem",
+    ),
+    (".pessoa .barra", "a mesma barra, na lista de PESSOAS"),
+    (".sync-marca", "o pedaço vazio da barra"),
+    (
+        ".chamada-cartao-barra",
+        "a barra do sinal no cartão da CHAMADA",
+    ),
+    (".chamada-cartao-marca", "o pedaço vazio dela"),
+    (
+        ".server-atualizacao-barra",
+        "a barra do progresso da atualização",
+    ),
+];
+
+/// As folhas do desktop, na ordem em que o index.html as carrega.
+fn folhas_do_desktop() -> Vec<String> {
+    let html = ler("index.html");
+    let folhas: Vec<String> = html
+        .split("<link rel=\"stylesheet\" href=\"")
+        .skip(1)
+        .filter_map(|resto| resto.split('"').next())
+        .filter(|folha| {
+            !CASCAS
+                .iter()
+                .any(|(prefixo, _, _)| folha.starts_with(prefixo))
+        })
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        folhas.len() >= 10,
+        "o index.html carrega só {folhas:?}: a leitura das folhas quebrou"
+    );
+    folhas
+}
+
+/// O tamanho de letra que uma regra declara, quando ele é um que escala. `None`
+/// quando ela não declara nenhum, ou declara um que segue o pai (`inherit`,
+/// `font: inherit`, `em`, `%`), que cresce com ele. Uma forma que este guarda não
+/// conhece reprova, e não passa calada.
+fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<String> {
+    let numero = |valor: &str, unidade: &str| {
+        valor
+            .strip_suffix(unidade)
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit() || c == '.'))
+    };
+    let mut tamanho = None;
+    for declaracao in corpo.split(';') {
+        let Some((propriedade, valor)) = declaracao.split_once(':') else {
+            continue;
+        };
+        let valor = valor.trim();
+        match propriedade.trim() {
+            "font-size" => {
+                tamanho = if numero(valor, "px")
+                    || numero(valor, "rem")
+                    || (valor.starts_with("var(--seele-t-") && valor.ends_with(')'))
+                {
+                    Some(valor.to_owned())
+                } else if valor == "inherit" || numero(valor, "em") || numero(valor, "%") {
+                    None
+                } else {
+                    panic!(
+                        "{onde}: `font-size: {valor}` é uma forma que o gerador do texto do \
+                         sistema não conhece; ensine `tamanho_da_letra` a escalá-la ou a deixá-la"
+                    )
+                };
+            }
+            "font" if valor == "inherit" => tamanho = None,
+            "font" => panic!(
+                "{onde}: `font: {valor}` traz o tamanho no atalho; ensine `tamanho_da_letra` \
+                 a lê-lo"
+            ),
+            _ => {}
+        }
+    }
+    tamanho
+}
+
+/// O conteúdo de `celular-texto.css`: os gêmeos, folha a folha, na ordem do
+/// index.html, com as at-rules de cada regra em volta dela.
+fn texto_do_celular() -> String {
+    let marca = CASCAS[0].1;
+    let mut saida = String::from(
+        "/* SEELE — o texto do sistema no celular (F8). GERADO: não edite à mão.\n \
+         *\n \
+         * Regere com `SEELE_REGERAR_TEXTO=1 cargo test -p seele-app --test celular`,\n \
+         * que também reprova quando este arquivo fica atrás do CSS do desktop. O\n \
+         * porquê e o que fica de fora estão em `tests/celular.rs` (`TEXTO_GERADO`,\n \
+         * `SEM_GEMEO`) e no spec, §5. */\n",
+    );
+    for folha in folhas_do_desktop() {
+        let mut da_folha = String::new();
+        for (contexto, bloco) in blocos_com_contexto(&ler(&folha)) {
+            if bloco.preludio.starts_with('@') {
+                continue;
+            }
+            let onde = format!("{folha}: {}", bloco.preludio);
+            let Some(tamanho) = tamanho_da_letra(&onde, &bloco.corpo) else {
+                continue;
+            };
+            let gemeos: Vec<String> = seletores(&bloco.preludio)
+                .into_iter()
+                .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
+                .filter(|s| !SEM_GEMEO.iter().any(|(sem, _)| sem == s))
+                .map(|s| {
+                    assert!(
+                        !s.starts_with(":root") && !s.starts_with("html"),
+                        "{onde}: um seletor preso à raiz não tem gêmeo debaixo da marca"
+                    );
+                    format!(":where({marca}) {s}")
+                })
+                .collect();
+            if gemeos.is_empty() {
+                continue;
+            }
+            let recuo = "  ".repeat(contexto.len());
+            let mut regra = format!(
+                "{recuo}{} {{ font-size: calc({tamanho} * var(--cel-escala)); }}\n",
+                gemeos.join(&format!(",\n{recuo}"))
+            );
+            for (nivel, at) in contexto.iter().enumerate().rev() {
+                let fora = "  ".repeat(nivel);
+                regra = format!("{fora}{at} {{\n{regra}{fora}}}\n");
+            }
+            da_folha.push_str(&regra);
+        }
+        if !da_folha.is_empty() {
+            saida.push_str(&format!("\n/* {folha} */\n{da_folha}"));
+        }
+    }
+    saida
+}
+
+/// Com `SEELE_REGERAR_TEXTO=1`, escreve o arquivo uma vez por processo, e de uma
+/// vez: os guardas deste arquivo correm em paralelo, e o G1 lê os `celular-*.css`
+/// enquanto este escreve. O nome provisório não termina em `.css`, e o G1 não o vê.
+fn regerar_o_texto_se_pedido() {
+    static FEITO: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if std::env::var("SEELE_REGERAR_TEXTO").as_deref() != Ok("1") {
+        return;
+    }
+    FEITO.get_or_init(|| {
+        let provisorio = ui().join(format!("{TEXTO_GERADO}.novo"));
+        std::fs::write(&provisorio, texto_do_celular()).expect("o texto gerado é gravável");
+        std::fs::rename(&provisorio, ui().join(TEXTO_GERADO))
+            .expect("o texto gerado troca de nome");
+    });
+}
+
+#[test]
+fn o_texto_do_sistema_alcanca_todo_tamanho_do_desktop() {
+    regerar_o_texto_se_pedido();
+    let esperado = texto_do_celular();
+    let no_disco = ler(TEXTO_GERADO);
+    assert!(
+        no_disco == esperado,
+        "ui/{TEXTO_GERADO} está atrás do CSS do desktop: uma regra nova ou mudada não cresce \
+         com o texto do sistema no celular. Regere com SEELE_REGERAR_TEXTO=1 cargo test -p \
+         seele-app --test celular"
+    );
+    // O gêmeo vence a regra dele por vir depois: o arquivo gerado carrega depois de
+    // toda folha do desktop que tem gêmeo nele.
+    let html = ler("index.html");
+    let posicao = |folha: &str| {
+        html.find(&format!("href=\"{folha}\""))
+            .unwrap_or_else(|| panic!("o index.html não carrega {folha}"))
+    };
+    let gerado = posicao(TEXTO_GERADO);
+    for folha in folhas_do_desktop() {
+        if no_disco.contains(&format!("/* {folha} */")) {
+            assert!(
+                posicao(&folha) < gerado,
+                "{folha} carrega depois de {TEXTO_GERADO}, e a regra dele vence o gêmeo"
+            );
+        }
+    }
 }

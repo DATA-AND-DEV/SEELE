@@ -1146,6 +1146,87 @@ def aba_ajustes(pg: Page) -> list[str]:
     return falhas
 
 
+# O que não cresce com o texto do sistema de propósito, e por quê. Todo o resto
+# cresce: o caso `texto-maior` reprova o texto à vista que ficar no tamanho. Os
+# mesmos de `SEM_GEMEO`, em `tests/celular.rs`, que deixa estes sem gêmeo no
+# `celular-texto.css`, mais as abas, que têm teto escrito à mão.
+TEXTO_COM_TETO = {
+    ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
+    ".cel-telemetria": "a telemetria da CHAMADA tem a altura das abas e teto como elas: quatro medidas em 390",
+    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar":
+        "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
+    ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
+        "a barra do sinal é desenho; o número e a palavra ao lado crescem",
+}
+
+TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
+    const raiz = document.documentElement;
+    const visivel = (e) => { for (let n = e; n; n = n.parentElement) { const s = getComputedStyle(n);
+        if (n.hidden || s.display === 'none' || s.visibility === 'hidden') return false; } return e.getBoundingClientRect().width > 0; };
+    const nos = [...document.querySelectorAll('#tela-sessao *, #tela-server *')].filter((e) =>
+        ([...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+         || (/^(INPUT|TEXTAREA)$/.test(e.tagName) && e.type !== 'range'))
+        && !e.closest(seletorDoTeto) && visivel(e));
+    const antes = raiz.style.getPropertyValue('--cel-escala');
+    raiz.style.setProperty('--cel-escala', '1');
+    const a1 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    raiz.style.setProperty('--cel-escala', '2');
+    const a2 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
+    const parados = {};
+    nos.forEach((e, i) => {
+        if (a2[i] >= a1[i] * 1.3) return;
+        const nome = e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
+        parados[nome] = `${a1[i]} → ${a2[i]} px, «${(e.textContent || e.placeholder || '').trim().slice(0, 20)}»`;
+    });
+    return { nos: nos.length, parados };
+}"""
+
+
+def texto_maior(pg: Page) -> list[str]:
+    """O texto do sistema (Tarefa 15): a 2, todo texto à vista na sessão cresce,
+    em cada aba, em cada seção de AJUSTES, na CHAMADA e nas folhas. O núcleo
+    cresce até 1,4× e passa; o que tem teto está em `TEXTO_COM_TETO`.
+
+    Achado no Safari do Simulador com o maior tamanho de acessibilidade: o
+    campo de mensagem, o ENVIAR, os nomes das seções e a lista de PESSOAS
+    ficavam no tamanho do desktop, ao lado de mensagens no dobro."""
+    falhas = []
+    teto = ", ".join(TEXTO_COM_TETO)
+
+    def conferir(estado):
+        pg.wait_for_timeout(200)
+        visto = pg.evaluate(TAMANHOS_DO_TEXTO, teto)
+        if visto["nos"] < 3:
+            falhas.append(f"{estado}: só {visto['nos']} textos à vista, e o caso não mediu nada")
+        for nome, medida in sorted(visto["parados"].items()):
+            falhas.append(f"{estado}: {nome} não cresce ({medida})")
+
+    for aba in ("servidor", "conversa", "pessoas"):
+        if ir_para_aba(pg, aba, falhas):
+            conferir(f"a aba {aba.upper()}")
+    if tocar(pg, "#lista-roster li.pessoa"):
+        conferir("a folha da pessoa")
+        pg.keyboard.press("Escape")
+    if ir_para_aba(pg, "conversa", falhas) and tocar(pg, "#lista-mensagens li.mensagem .corpo"):
+        conferir("a folha da mensagem")
+        pg.keyboard.press("Escape")
+    if ir_para_aba(pg, "ajustes", falhas):
+        conferir("a lista de AJUSTES")
+        for secao in ("secao-audio", "secao-aparencia", "secao-servidor", "secao-mods", "cel-secao-conexao",
+                      "secao-identidade", "cel-secao-fora", "cel-secao-casca"):
+            if not pg.locator(f"#{secao}").is_visible():
+                continue
+            if exigir_toque(pg, f"#{secao}", falhas):
+                conferir(f"a seção #{secao}")
+                exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+    ir_para_aba(pg, "servidor", falhas)
+    if tocar(pg, "#voz .voz-sala"):
+        esperar_quadro(pg)
+        conferir("a CHAMADA")
+    return falhas
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1440,6 +1521,8 @@ CASOS: dict[str, Caso] = {
     "aba-pessoas-150": Caso(levar=aba_pessoas, escala=1.5, raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
     "chamada-150": Caso(levar=chamada, escala=1.5, raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-150": Caso(levar=ajustes_medida, escala=1.5, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
+    # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
+    "texto-maior": Caso(levar=texto_maior, aparelhos=("390",), medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
     "tela-larga": Caso(levar=tela_larga, aparelhos=("1280",), medir=False),
     "voltar": Caso(levar=voltar, medir=False),
