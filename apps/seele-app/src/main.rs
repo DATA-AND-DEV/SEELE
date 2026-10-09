@@ -16231,6 +16231,59 @@ mod o_som_grande_demais_decodificado_e_recusado_antes {
         );
     }
 
+    /// **As margens que fazem do valor um piso**, uma por teste. Sem elas os
+    /// casos acima continuam verdes, e o piso passa do real: medido pela
+    /// revisão contra o `decodeAudioData` do Chromium e do WebKit — o motor do
+    /// produto no Mac —, um WAV com o bloco declarado menor dava quatro vezes
+    /// o real, um Opus com pre-skip de 3840 passava 23 032 bytes, e um MP3
+    /// comum, de 16 a 25 mil.
+    ///
+    /// O WAV: o bloco declarado (1) é menor que os canais vezes os bytes da
+    /// amostra (2 × 2). O quadro conta pelo maior: um segundo estéreo de
+    /// 16 bits a 8 kHz, e não quatro.
+    #[test]
+    fn o_bloco_menor_que_a_amostra_nao_multiplica_o_piso_do_wav() {
+        let mut wav = wav(2, 8_000, 16, 8_000 * 4);
+        if let Some(bloco) = wav.get_mut(32..34) {
+            bloco.copy_from_slice(&1u16.to_le_bytes());
+        }
+        assert_eq!(
+            bytes_decodificados_minimos(&wav),
+            Some(segundos(1, 2)),
+            "o piso do WAV contou os quadros pelo bloco que o cabeçalho declara, menor que a \
+             amostra: quatro vezes o real, e um som que cabe seria recusado"
+        );
+    }
+
+    /// O Opus: o pre-skip (3840) é maior que a granule da primeira página de
+    /// dados (1024, um pacote só). O que sai do começo é o maior dos dois: um
+    /// segundo depois do pre-skip, e não 2816 amostras a mais.
+    #[test]
+    fn o_pre_skip_maior_que_a_primeira_pagina_sai_do_piso_do_opus() {
+        let opus = ogg(&opus(2, 3_840), 48_000 + 3_840);
+        assert_eq!(
+            bytes_decodificados_minimos(&opus),
+            Some(segundos(1, 2)),
+            "o piso do Opus tirou do começo só a granule da primeira página, menor que o \
+             pre-skip: o decodificador corta o pre-skip inteiro, e o piso passa do real"
+        );
+    }
+
+    /// O MP3: cem quadros estéreo de 1152 amostras são 115 200; o corte do
+    /// decodificador — o quadro Xing/Info, o atraso e o enchimento do LAME, e o
+    /// atraso do decodificador — tira 1152 + 2 × 4095 + 529 = 9871, a
+    /// conversão de taxa tira um quadro, e o resto, vezes dois canais e quatro
+    /// bytes, é 842 624.
+    #[test]
+    fn o_corte_do_decodificador_sai_do_piso_do_mp3() {
+        assert_eq!(
+            bytes_decodificados_minimos(&mp3(2, None, 100 * 960)),
+            Some(842_624),
+            "o piso do MP3 contou as amostras que o decodificador corta — o quadro do Xing, o \
+             atraso e o enchimento —, e passa do real em todo MP3 comum"
+        );
+    }
+
     /// **As duas portas do servidor recusam o mesmo som**: a resposta de
     /// `midia_em_bytes` e a leitura por volume chegam à janela pelo `data:`, e
     /// a janela o decodifica inteiro, como o do pacote.
