@@ -116,16 +116,32 @@ function pontoDoVeu(page) {
   });
 }
 
-/** Uma batida nova, a partir da tela de entrada, com o convite colado. */
+/**
+ * O link que a pessoa cola, com o convite dentro.
+ *
+ * A forma é a de um `seele://`; quem o lê aqui é o `analisar_convite` de
+ * mentira, que devolve o alvo e o token como o Rust devolveria.
+ */
+const LINK_R = `seele://${ALVO_R}?token=${CONVITE_R}`;
+
+/** O que o campo do diálogo de servidores diz agora. */
+function campoDoLink(page) {
+  return page.evaluate(() => document.getElementById('servidores-endereco').value);
+}
+
+/**
+ * Uma batida nova, a partir da tela de entrada, **pelo campo**: o diálogo de
+ * servidores, o link colado e Enter — o caminho de quem recebe um convite.
+ */
 async function baterComOConvite(page) {
-  await page.evaluate(([alvo, convite]) => {
+  await page.evaluate(() => {
     window.testServidor = { aceitou: false, gasto: false };
     for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
     $('tela-boot').hidden = false;
-    // O caminho do diálogo de servidores depois de `analisar_convite`: o alvo e
-    // o token do link, na mesma chamada.
-    irParaOServidor(alvo, null, convite);
-  }, [ALVO_R, CONVITE_R]);
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_R);
+  await page.press('#servidores-endereco', 'Enter');
   try {
     await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 });
   } catch {
@@ -180,6 +196,7 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     table: respostas({
       apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
       mods_instalados: [{ id: MOD_R.id, hash: MOD_R.hash }],
+      analisar_convite: { alvo: ALVO_R, token: CONVITE_R, para_entrar: null },
     }),
     convite: CONVITE_R, mod: MOD_R, snapshot: retrato(),
   });
@@ -199,9 +216,11 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   await page.waitForFunction(() => !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
     .catch(async () => assert.fail(`a volta com a credencial não entrou — a entrada diz «${await page.evaluate(() => $('boot-erro').textContent)}»`));
 
-  // ---- 2. Ela é esquecida ao entrar.
+  // ---- 2. Ela é esquecida ao entrar — e o link colado também.
   assert.equal(await page.evaluate(() => aceitePendente?.credencial ?? null), null,
     'a credencial da tentativa continuou guardada depois de a pessoa entrar: um convite de uso único já gasto ficou na memória da janela');
+  assert.equal(await campoDoLink(page), '',
+    'o link colado, com o convite dentro, ficou no campo do diálogo de servidores depois de a pessoa entrar');
 
   // ---- 3. A reconexão depois de uma sessão que entrou vai sem ela.
   await page.evaluate(() => mostrarFim('Kicked'));
@@ -230,6 +249,8 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
       .catch(() => assert.fail(`desistir por ${porta} não fechou a pergunta dos MODs`));
     assert.equal(await credencialGuardada(page), null,
       `desistir por ${porta} fechou a pergunta e deixou a credencial da tentativa na memória da janela`);
+    assert.equal(await campoDoLink(page), '',
+      `desistir por ${porta} deixou o link colado, com o convite dentro, no campo do diálogo de servidores`);
   }
 
   // ---- 5. Desistir enquanto o MOD chega também esquece, e não entra.
@@ -272,8 +293,11 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     if (document.documentElement.outerHTML.includes(convite)) onde.push('o DOM');
     if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
     if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
+    // O `connect` a leva de propósito, e o `analisar_convite` recebe o link de
+    // onde ela sai: é a leitura dele, e não um caminho dela.
     for (const chamada of testCalls) {
-      if (chamada.cmd !== 'connect' && JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
+      if (chamada.cmd === 'connect' || chamada.cmd === 'analisar_convite') continue;
+      if (JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
     }
     return onde;
   }, CONVITE_R);

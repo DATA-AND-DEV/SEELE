@@ -162,6 +162,12 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
   evento.preventDefault();
   const escrito = $("servidores-endereco").value.trim();
   if (escrito === "") return;
+  // **O campo é zerado assim que é lido** (lote R da F5, rodada 1). Um
+  // `seele://` colado aqui carrega o convite de uso único, e o campo só era
+  // zerado ao reabrir o diálogo: quem colava, entrava ou desistia deixava o
+  // token escrito num campo da página até a próxima vez. Daqui em diante ele
+  // vive só em `escrito`, e segue o caminho da credencial da tentativa.
+  $("servidores-endereco").value = "";
   $("servidores-erro").hidden = true;
 
   let alvo = escrito;
