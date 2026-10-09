@@ -63,6 +63,14 @@ pub const PRELUDIO: &str = r#"
   const tetoDaMensagem = Number(globalThis.__seeleTetoDaMensagem) || 12288;
   delete globalThis.__seeleTetoDaMensagem;
 
+  // **O `Atomics` sai, nos dois alvos** (rascunho da API 6, §16, item 5). Era
+  // a única global que o motor nativo tinha e o `.wasm` não: o quickjs-ng o
+  // compila sem threads no `wasm32-wasip1`, e sem threads ele não serve para
+  // nada em nenhum dos dois. Um MOD que dependesse dele rodaria no desktop e
+  // quebraria no celular. No `.wasm` este `delete` não acha nada; a sonda de
+  // `tests/casos.json` cobra os dois.
+  delete globalThis.Atomics;
+
   // Bytes, e não caracteres: o teto do anfitrião conta UTF-8, e um nome com
   // acento ocupa dois. Medir em `length` diria que cabe o que não cabe.
   //
