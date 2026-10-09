@@ -1,0 +1,359 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-o+GTraYw2Em9Ez3qeWcuDU69j3frep018G8iyoC1HHE=' 'wasm-unsafe-eval'; worker-src blob:">
+<title>executores de MOD</title>
+<script>
+// O `iframe` dos executores de MOD no navegador (ui/mods-no-navegador.js).
+//
+// Ele existe para não ter a origem da página: a página o cria com
+// `sandbox="allow-scripts"`, e a origem dele é opaca. Os Workers que ele cria de
+// um `blob:` herdam essa origem e a CSP acima: nenhuma conexão, nenhum script
+// além deste (pelo hash, que `apps/seele-app/tests/web.rs` confere), o motor
+// compilado e Workers de `blob:`.
+//
+// Ele não confia no Worker: o que um Worker diz passa adiante só pelos campos
+// conhecidos, com o número que este `iframe` deu a ele. E é ele quem mata o
+// Worker que não para ou que passa do teto da fila que o motor garante.
+(() => {
+  "use strict";
+  const pai = parent;
+  // Os mesmos de mods-no-navegador.js e do desktop (`executor.rs`).
+  const FILA = { mensagens: 64, bytes: 256 * 1024 };
+  const PRAZO_DA_PARADA_MS = 1000;
+  const TIPOS = new Set(["mensagem", "console", "falhou", "interrompido", "subiu", "entrada-lida", "parou"]);
+  const bytesDoTexto = (texto) => new TextEncoder().encode(texto).length;
+  // **O que o Worker não pode ter, tirado antes do código dele**, no mesmo
+  // `blob:`. Medido no Safari do Simulador iOS 27 em 09/10/2026: um Worker deste
+  // `iframe` abre o `caches`, e o que ele grava lá reaparece na abertura
+  // seguinte da página. Um Worker aninhado tem um global novo, com `caches` de
+  // novo, e por isso o `Worker` sai também. A CSP não alcança armazenamento.
+  //
+  // Só importa se um MOD sair do motor: dentro do QuickJS nada disso existe.
+  // Se um navegador não deixar tirar, o Worker não sobe: falhar fechado, e
+  // dizer por quê.
+  const PREAMBULO = `(() => {
+  "use strict";
+  const PORTAS = ["caches", "indexedDB", "Worker", "SharedWorker"];
+  const tirar = (alvo, nome) => { try { delete alvo[nome]; } catch (_) {} };
+  for (const nome of PORTAS) {
+    for (let p = self; p; p = Object.getPrototypeOf(p)) tirar(p, nome);
+  }
+  for (let p = self.navigator; p; p = Object.getPrototypeOf(p)) tirar(p, "storage");
+  const ficaram = PORTAS.filter((nome) => typeof self[nome] !== "undefined");
+  if (self.navigator && typeof self.navigator.storage !== "undefined") ficaram.push("navigator.storage");
+  if (ficaram.length) {
+    postMessage({ tipo: "falhou", corpo: "o Worker do MOD não conseguiu se desfazer de " + ficaram.join(", ") + ", e não sobe" });
+    postMessage({ tipo: "parou" });
+    close();
+    throw new Error("preâmbulo");
+  }
+})();
+`;
+  // <anfitrião>
+  // **O anfitrião do motor, que roda no Worker**, e não aqui: o texto desta
+  // função vira o `blob:` do Worker, depois do preâmbulo. Ela mora dentro
+  // deste script para o hash da CSP cobri-la também.
+  //
+  // O motor é o `crates/seele-motor-web` compilado para `wasm32-wasip1`: o
+  // QuickJS, o prelúdio e os tetos do desktop. O anfitrião dá a ele as três
+  // funções do módulo `seele` e a WASI mínima, e faz a volta que a thread do
+  // executor faz no desktop (`executor.rs`, `rodar`): entregar, recolher os
+  // pedidos de relógio e disparar os relógios.
+  //
+  // **O que o código do MOD alcança daqui é o que o motor importa**: a lista de
+  // `xtask/web/motor.mjs`, conferida a cada `cargo xtask web`. Nada de disco nem
+  // de rede: a WASI declara essas funções, e aqui elas respondem que não há.
+  function anfitriaoDoMotor() {
+    "use strict";
+    // Os do desktop (`executor.rs`): `MENSAGENS_NA_FILA`, `BYTES_NA_FILA`,
+    // `TEMPORIZADORES_DE_PE`, `INTERVALO_MINIMO` e `ATRASO_MAXIMO`.
+    const FILA = { mensagens: 64, bytes: 256 * 1024 };
+    const TEMPORIZADORES_DE_PE = 256;
+    const INTERVALO_MINIMO_MS = 4;
+    const ATRASO_MAXIMO_MS = 24 * 60 * 60 * 1000;
+    // O `errno` da WASI para «descritor inválido».
+    const EBADF = 8;
+
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    let inst = null;
+    let parando = false;
+    const fila = { mensagens: 0, bytes: 0 };
+    /** id → o `setTimeout` de pé */
+    const relogios = new Map();
+
+    const mem = () => new Uint8Array(inst.exports.memory.buffer);
+    const dv = () => new DataView(inst.exports.memory.buffer);
+    const ler = (p, n) => dec.decode(mem().subarray(p, p + n));
+    const saida = () => ler(inst.exports.saida_ptr(), inst.exports.saida_len());
+    const comTexto = (texto, f) => {
+      const b = enc.encode(texto);
+      const p = inst.exports.alocar(b.length);
+      mem().set(b, p);
+      try {
+        return f(p, b.length);
+      } finally {
+        inst.exports.liberar(p, b.length);
+      }
+    };
+
+    const wasi = {
+      random_get(p, n) {
+        for (let i = 0; i < n; i += 65536) crypto.getRandomValues(mem().subarray(p + i, p + Math.min(n, i + 65536)));
+        return 0;
+      },
+      environ_sizes_get(pc, ps) {
+        dv().setUint32(pc, 0, true);
+        dv().setUint32(ps, 0, true);
+        return 0;
+      },
+      environ_get() {
+        return 0;
+      },
+      clock_time_get(id, _precisao, p) {
+        const ns = id === 0 ? BigInt(Date.now()) * 1000000n : BigInt(Math.round(performance.now() * 1e6));
+        dv().setBigUint64(p, ns, true);
+        return 0;
+      },
+      fd_close: () => EBADF,
+      fd_fdstat_get: () => EBADF,
+      // Nenhum diretório pré-aberto: o `std` para de procurar.
+      fd_prestat_get: () => EBADF,
+      fd_prestat_dir_name: () => EBADF,
+      fd_seek: () => EBADF,
+      // O `std` escreve aqui o pânico do motor. Vai para o registro do MOD.
+      fd_write(_fd, iovs, n, escritos) {
+        let total = 0;
+        let texto = "";
+        for (let i = 0; i < n; i++) {
+          const p = dv().getUint32(iovs + i * 8, true);
+          const l = dv().getUint32(iovs + i * 8 + 4, true);
+          texto += ler(p, l);
+          total += l;
+        }
+        if (texto) postMessage({ tipo: "console", nivel: "error", texto });
+        dv().setUint32(escritos, total, true);
+        return 0;
+      },
+      proc_exit(c) {
+        throw new Error(`o motor pediu proc_exit(${c})`);
+      },
+    };
+
+    const seele = {
+      // **O teto do acumulado**, como o `postar` do desktop: recusar, e não
+      // esperar. O de uma mensagem o motor já conferiu.
+      postar(p, n) {
+        if (parando) return 0;
+        if (fila.mensagens >= FILA.mensagens || fila.bytes + n > FILA.bytes) return 0;
+        fila.mensagens += 1;
+        fila.bytes += n;
+        postMessage({ tipo: "mensagem", corpo: ler(p, n) });
+        return 1;
+      },
+      console(mp, ml, tp, tl) {
+        postMessage({ tipo: "console", nivel: ler(mp, ml), texto: ler(tp, tl) });
+      },
+      agora_ms: () => performance.now(),
+    };
+
+    /** O fim de uma volta: o que ela disse, e os relógios que ela pediu. */
+    const depoisDaVolta = (codigo) => {
+      if (codigo !== 0) {
+        const texto = saida();
+        // `interrupted` é o QuickJS cortando a volta pelo prazo ou pelo trabalho:
+        // quem parou foi o produto, e não o MOD.
+        if (/\binterrupted\b/.test(texto)) postMessage({ tipo: "interrompido" });
+        else postMessage({ tipo: "falhou", corpo: texto });
+      }
+      recolherOsRelogios();
+    };
+
+    // `executor.rs`, `intervalo_valido`: aparado, e não recusado.
+    const intervaloValido = (ms) => {
+      if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
+      return Math.min(ATRASO_MAXIMO_MS, Math.max(INTERVALO_MINIMO_MS, ms));
+    };
+
+    const recolherOsRelogios = () => {
+      if (parando) return;
+      inst.exports.pedidos_de_relogio();
+      let pedidos = [];
+      try {
+        pedidos = JSON.parse(saida());
+      } catch {
+        return;
+      }
+      for (const { id, ms, repete, cancelar } of pedidos) {
+        if (cancelar) {
+          clearTimeout(relogios.get(id));
+          relogios.delete(id);
+          continue;
+        }
+        if (relogios.size >= TEMPORIZADORES_DE_PE) continue;
+        const intervalo = intervaloValido(ms);
+        if (intervalo === null) continue;
+        agendar(id, intervalo, repete === true);
+      }
+    };
+
+    // Reagendado a partir de **agora**, depois da volta, como no desktop: um MOD
+    // que demora mais que o intervalo não acumula disparos atrasados.
+    const agendar = (id, intervalo, repete) => {
+      clearTimeout(relogios.get(id));
+      relogios.set(
+        id,
+        setTimeout(() => {
+          if (parando) return;
+          if (repete) agendar(id, intervalo, true);
+          else relogios.delete(id);
+          depoisDaVolta(inst.exports.relogio(id));
+        }, intervalo),
+      );
+    };
+
+    const parar = () => {
+      parando = true;
+      for (const h of relogios.values()) clearTimeout(h);
+      relogios.clear();
+      postMessage({ tipo: "parou" });
+    };
+
+    onmessage = async (e) => {
+      const m = e.data;
+      if (parando || !m) return;
+      if (m.tipo === "subir") {
+        try {
+          inst = await WebAssembly.instantiate(m.motor, { seele, wasi_snapshot_preview1: wasi });
+        } catch (falha) {
+          postMessage({ tipo: "falhou", corpo: `o motor não subiu: ${falha}` });
+          parar();
+          return;
+        }
+        const capacidades = Array.isArray(m.capacidades) ? m.capacidades.join(",") : "";
+        const codigo = comTexto(capacidades, (cp, cl) =>
+          comTexto(String(m.fonte), (fp, fl) => inst.exports.iniciar(cp, cl, fp, fl)),
+        );
+        if (codigo !== 0) {
+          postMessage({ tipo: "falhou", corpo: saida() });
+          postMessage({ tipo: "subiu" });
+          return;
+        }
+        recolherOsRelogios();
+        postMessage({ tipo: "subiu" });
+      } else if (m.tipo === "entregar") {
+        if (!inst) return;
+        const codigo = comTexto(String(m.json), (p, n) => inst.exports.entregar(p, n));
+        postMessage({ tipo: "entrada-lida", bytes: m.bytes });
+        depoisDaVolta(codigo);
+      } else if (m.tipo === "lido") {
+        fila.mensagens = Math.max(0, fila.mensagens - 1);
+        fila.bytes = Math.max(0, fila.bytes - (Number(m.bytes) || 0));
+      } else if (m.tipo === "encerrar") {
+        parar();
+      }
+    };
+  }
+  // </anfitrião>
+  let urlDoWorker = null;
+  let motor = null;
+  const workers = new Map();
+
+  const dizer = (m) => pai.postMessage(m, "*");
+
+  const terminar = (n, forcado, porque) => {
+    const w = workers.get(n);
+    if (!w) return;
+    workers.delete(n);
+    clearTimeout(w.prazo);
+    w.worker.terminate();
+    if (porque) dizer({ n, tipo: "falhou", corpo: porque });
+    dizer({ n, tipo: "parou", forcado });
+  };
+
+  // Só os campos conhecidos, com os tipos conhecidos.
+  const doWorker = (n, w, d) => {
+    if (!d || typeof d !== "object" || !TIPOS.has(d.tipo)) return;
+    const m = { n, tipo: d.tipo };
+    if (d.tipo === "parou") {
+      terminar(n, false);
+      return;
+    }
+    if (d.tipo === "mensagem") {
+      if (typeof d.corpo !== "string") return;
+      // **O teto que o motor garante, conferido aqui.** O `postar` do motor
+      // recusa além dele; passar dele é um Worker que não é o nosso.
+      const bytes = bytesDoTexto(d.corpo);
+      w.mensagens += 1;
+      w.bytes += bytes;
+      if (w.mensagens > FILA.mensagens || w.bytes > FILA.bytes) {
+        terminar(n, true, "o Worker do MOD passou do teto da fila que o motor garante, e foi encerrado");
+        return;
+      }
+      m.corpo = d.corpo;
+      m.bytes = bytes;
+    } else if (d.tipo === "console") {
+      m.nivel = String(d.nivel);
+      m.texto = String(d.texto);
+      m.suprimidas = Number(d.suprimidas) || 0;
+    } else if (d.tipo === "falhou") {
+      m.corpo = String(d.corpo);
+    } else if (d.tipo === "entrada-lida") {
+      m.bytes = Number(d.bytes) || 0;
+    }
+    dizer(m);
+  };
+
+  addEventListener("message", async (e) => {
+    if (e.source !== pai) return;
+    const m = e.data;
+    if (!m || typeof m !== "object") return;
+    if (m.tipo === "preparar") {
+      try {
+        motor = await WebAssembly.compile(m.motor);
+        urlDoWorker = URL.createObjectURL(new Blob([PREAMBULO, `(${anfitriaoDoMotor})();\n`], { type: "text/javascript" }));
+        dizer({ tipo: "preparado" });
+      } catch (falha) {
+        dizer({ tipo: "nao-preparou", erro: String(falha) });
+      }
+      return;
+    }
+    const n = m.n;
+    if (m.tipo === "subir") {
+      if (!urlDoWorker || workers.has(n)) return;
+      let worker;
+      try {
+        worker = new Worker(urlDoWorker);
+      } catch (falha) {
+        dizer({ n, tipo: "falhou", corpo: `o Worker do MOD não subiu: ${falha}` });
+        dizer({ n, tipo: "parou", forcado: true });
+        return;
+      }
+      const w = { worker, mensagens: 0, bytes: 0, prazo: null };
+      workers.set(n, w);
+      worker.onmessage = (ev) => doWorker(n, w, ev.data);
+      worker.onerror = (ev) => {
+        ev.preventDefault();
+        terminar(n, true, `o Worker do MOD caiu: ${ev.message}`);
+      };
+      worker.postMessage({ tipo: "subir", motor, capacidades: m.capacidades, fonte: m.fonte });
+      return;
+    }
+    const w = workers.get(n);
+    if (!w) return;
+    if (m.tipo === "entregar") {
+      w.worker.postMessage({ tipo: "entregar", json: String(m.json), bytes: Number(m.bytes) || 0 });
+    } else if (m.tipo === "lido") {
+      w.mensagens = Math.max(0, w.mensagens - 1);
+      w.bytes = Math.max(0, w.bytes - (Number(m.bytes) || 0));
+      w.worker.postMessage({ tipo: "lido", bytes: Number(m.bytes) || 0 });
+    } else if (m.tipo === "encerrar") {
+      if (w.prazo !== null) return;
+      w.worker.postMessage({ tipo: "encerrar" });
+      // O Worker diz o que segurava e confirma; se não confirmar, morre.
+      w.prazo = setTimeout(() => terminar(n, true), PRAZO_DA_PARADA_MS);
+    }
+  });
+  dizer({ tipo: "carregou" });
+})();
+</script>

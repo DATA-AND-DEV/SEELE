@@ -204,3 +204,65 @@ Liberado pela orquestradora depois do `642a4d4`.
 - Clippy com `RUSTFLAGS="-D warnings"` e `--all-targets` depois da última
   edição. Ele pegou a indexação em `serde_json::Value` no teste novo, já
   consertada.
+
+### 09/10, a sexta integração e o executor do navegador
+
+- `0.16/web` trazido a `cb426b19` (fast-forward). A bateria pegou um teste
+  meu: `pelo_fio_1_0.rs` contava as **linhas** dos bytes-ouro contra o
+  `CONHECIDAS`, e a F1 acrescentou um segundo exemplar do `Alert`. A
+  orquestradora o consertou em `3f8babe0` (conta as variantes). Era um guarda
+  que casava com o arquivo, e não com o fio.
+- **Achado de paridade, levado à orquestradora:** o motor do celular roda o
+  mesmo prelúdio do desktop, mas não as ~1000 linhas do `executor.rs` fora
+  dele. Ficam de fora:
+  - o rastreador de rejeições (P51-01);
+  - o balde do console (P51-14);
+  - os tetos de relógio;
+  - a frase do teto e o `Interrompido`.
+
+  Recomendei extrair a volta para um crate comum. Espera a ordem dela, porque o
+  `executor.rs` teve 10 commits desde 07/10, e a F3 e os lotes C, D e E ainda
+  vão mexer nele.
+- **O executor JS, pronto para a `ui/`** (em
+  `spikes/mods-no-navegador/executor/` até a liberação):
+  - `executorNoNavegador` com a forma do `executorNativo`: os quatro verbos, o
+    `entregar` que devolve a recusa, o `encerrou` com prazo e conclusão tardia,
+    e a ordem da colheita;
+  - um `iframe` opaco (`executor-de-mod.html`) com a CSP por `<meta>` e o hash
+    do script. O anfitrião do motor mora **dentro** dele, como uma função que
+    vira o `blob:` do Worker;
+  - os tetos das filas do desktop (64 mensagens e 256 KiB) nas três pontas: o
+    Worker recusa o `postar`, a página recusa o `entregar`, e o `iframe` mata
+    o Worker que passar do teto que o motor garante.
+- **Achado medido, consertado:** no Safari do Simulador iOS 27.0, um Worker do
+  `iframe` opaco abre o `caches`, e o que ele grava **sobrevive** à abertura
+  seguinte da página. Um Worker aninhado o abre de novo, e a CSP não alcança
+  armazenamento.
+
+  Só importa se um MOD sair do motor, mas é armazenamento que sobrevive à
+  sessão. Um preâmbulo no `blob:` tira `caches`, `indexedDB`, `Worker`,
+  `SharedWorker` e `navigator.storage`, confere, e falha fechado.
+
+  Com ele, nos três navegadores (Chromium 151, Safari 27.0.1 do Mac e Safari
+  do Simulador), nenhuma canária tocou e nenhuma porta abriu.
+- **A bancada** (`executor-no-navegador.cjs`, no Chromium) tem nove casos:
+  - o MOD comum;
+  - o encerramento;
+  - o laço cortado, com a página parada 11 ms no pior caso;
+  - as duas filas;
+  - a parada antes do motor;
+  - o MOD hostil no motor;
+  - o Worker fugido;
+  - o Worker que inunda.
+
+  As oito provas por reversão reprovam, cada uma no caso dela
+  (`spikes/mods-no-navegador/README.md`, adendo de 09/10).
+- **Para a integração na `ui/`:**
+  - o guarda `the_page_loads_only_files_that_are_shipped` exige que todo `.js`
+    da `ui/` seja carregado pelo `index.html`. Foi por isso que o anfitrião
+    saiu de um `.js` próprio;
+  - medido numa cópia temporária, que não ficou na árvore, com os dois
+    arquivos na `ui/`: dos 270 guardas do `frontend.rs` e do `tokens.rs`,
+    269 passam. O que reprova é justamente esse, até o `index.html` carregar
+    o `mods-no-navegador.js`;
+  - a bancada precisa do `.wasm` do motor e do Playwright no mesmo job.
