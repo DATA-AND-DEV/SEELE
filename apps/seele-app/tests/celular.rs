@@ -83,7 +83,6 @@ fn sem_comentarios_js(js: &str) -> String {
 /// `@supports` e `@container` abrem blocos de regras; o resto é devolvido inteiro.
 struct Bloco {
     preludio: String,
-    #[expect(dead_code, reason = "o G6, da Tarefa 3, lê o corpo de cada regra do núcleo")]
     corpo: String,
 }
 
@@ -239,4 +238,38 @@ fn o_tema_nunca_escreve_o_nucleo() {
             assert!(token.starts_with("--seele-"), "{tabela} escreve {token}, e o tema só escreve `--seele-*`");
         }
     }
+}
+
+/// G6. O núcleo do celular lê só o núcleo: nenhuma cor, borda, fundo ou família de
+/// letra dos seletores do núcleo vem de um `--seele-*`, que o tema reescreve.
+const SELETORES_DO_NUCLEO: &[&str] = &[
+    "#voz-mudo", "#voz-surdo", "#voz-sair", ".voz-nucleo", ".voz-controles",
+    ".cel-selo-seguro", "#cel-aba-ajustes", "[data-nucleo]", ".cel-nucleo", ".cel-placa-de-alerta",
+];
+const PROPRIEDADES_DE_COR: &[&str] = &[
+    "color", "background", "background-color", "border", "border-color", "border-top",
+    "border-top-color", "border-right", "border-bottom", "border-left", "border-left-color",
+    "outline", "outline-color", "font-family", "box-shadow",
+];
+
+#[test]
+fn o_nucleo_do_celular_so_le_o_nucleo() {
+    let mut lidos = 0;
+    let mut fora = Vec::new();
+    for (nome, css) in da_casca("celular-", ".css") {
+        for bloco in blocos(&css) {
+            if !SELETORES_DO_NUCLEO.iter().any(|s| bloco.preludio.contains(s)) {
+                continue;
+            }
+            lidos += 1;
+            for declaracao in bloco.corpo.split(';') {
+                let Some((propriedade, valor)) = declaracao.split_once(':') else { continue };
+                if PROPRIEDADES_DE_COR.contains(&propriedade.trim()) && valor.contains("var(--seele-") {
+                    fora.push(format!("{nome}: {} {{ {}: {} }}", bloco.preludio, propriedade.trim(), valor.trim()));
+                }
+            }
+        }
+    }
+    assert!(lidos >= 3, "o guarda achou {lidos} regras do núcleo: a faixa de voz não está nos celular-*.css que ele lê");
+    assert!(fora.is_empty(), "o núcleo lê o que o tema escreve:\n{}", fora.join("\n"));
 }

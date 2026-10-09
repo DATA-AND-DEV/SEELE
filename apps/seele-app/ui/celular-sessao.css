@@ -1,0 +1,256 @@
+/* SEELE — a sessão do celular: um painel por vez, a faixa de voz e as abas (F8).
+ *
+ * Spec: `docs/superpowers/specs/2026-10-09-0.16-celular-design.md`, §2.2 e §9.
+ *
+ * Os painéis são os do desktop, desenhados pelo `tela-sessao.js` de sempre: esta
+ * folha só os reorganiza. A faixa de voz e as abas são montadas pelo
+ * `celular-voz.js`, e a faixa aciona os controles do desktop que continuam no
+ * DOM, escondidos. Toda regra começa pela marca (G1, em `tests/celular.rs`). */
+
+/* ------------------------------------------------- a moldura do desktop sai
+ *
+ * A barra da janela (o sistema desenha a dele), a trilha das redes (volta na
+ * aba SERVIDOR), o operador (os controles dele vão para a faixa de voz), o
+ * rodapé da telemetria (vai para a CHAMADA e para AJUSTES › CONEXÃO) e as portas
+ * das gavetas, que no celular são as abas. */
+
+:root[data-casca="celular"] #barra-janela,
+:root[data-casca="celular"] #tela-sessao .paineis > .trilha,
+:root[data-casca="celular"] #tela-sessao .operador,
+:root[data-casca="celular"] #tela-sessao > footer.telemetria,
+:root[data-casca="celular"] #tela-sessao .linha-canais,
+:root[data-casca="celular"] #tela-sessao .linha-pessoas {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ a sessão
+ *
+ * Uma coluna, de cima para baixo: o painel da aba, os avisos da sessão, a faixa
+ * de voz (só dentro de uma sala) e as abas. A ordem é a do `order`, e não a do
+ * DOM: os avisos vêm antes de `<main>` no desktop, e no celular moram logo
+ * acima da faixa, perto do polegar e da voz que eles explicam. O tema do
+ * servidor continua escrito neste contêiner, como no desktop. */
+
+:root[data-casca="celular"] #tela-sessao {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] #tela-sessao > main.paineis {
+  order: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  /* Um painel por vez, na largura toda: a grade de colunas do desktop não
+     cabe, e as gavetas de 900 px também não. */
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] #tela-sessao .paineis > .painel {
+  display: none;
+}
+
+/* A especificidade passa a das gavetas do desktop
+   (`#tela-sessao[data-canais="abertos"] .painel-canais`), que posicionariam o
+   painel por cima da conversa. */
+:root[data-casca="celular"] #tela-sessao[data-aba="servidor"] .paineis > .painel-canais,
+:root[data-casca="celular"] #tela-sessao[data-aba="conversa"] .paineis > .painel-linha,
+:root[data-casca="celular"] #tela-sessao[data-aba="pessoas"] .paineis > .painel-pessoas {
+  display: flex;
+  position: static;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: 0;
+}
+
+:root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) {
+  order: 1;
+}
+
+:root[data-casca="celular"] #tela-sessao > .voz-celular {
+  order: 2;
+}
+
+:root[data-casca="celular"] #tela-sessao > .cel-abas {
+  order: 3;
+}
+
+/* ------------------------------------------------------------------ as abas */
+
+:root[data-casca="celular"] .cel-abas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-aba {
+  position: relative;
+  min-height: var(--cel-abas);
+  display: grid;
+  place-items: end center;
+  padding: 0 2px 14px;
+  background: none;
+  border: 0;
+  border-top: 2px solid transparent;
+  color: var(--seele-rotulo-painel);
+  font: inherit;
+  /* **Com teto**, como a barra de abas do iOS: quatro palavras de oito letras
+     numa largura de 390 não crescem com o texto do sistema sem uma cobrir a
+     outra (medido a 150 %: 106 px de texto em 98 de aba). O nome inteiro da aba
+     continua no leitor de tela, e o conteúdo de cada aba cresce sem teto. */
+  font-size: min(calc(var(--seele-t-rotulo) * var(--cel-escala)), 13px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] .cel-aba[aria-current="page"] {
+  color: var(--seele-osso);
+  border-top-color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+/* A aba AJUSTES é a saída do tema: o caminho para «o SEELE desenha» e para
+   desligar o MOD que pintou a sessão. Ela lê o núcleo, como o MUDO, e um tema
+   ilegível não fecha a porta de sair dele (spec, §6). */
+:root[data-casca="celular"] .cel-aba[data-nucleo] {
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-rotulo);
+  background: var(--nucleo-painel);
+  border-left: 1px solid var(--nucleo-borda);
+}
+
+:root[data-casca="celular"] .cel-aba[data-nucleo][aria-current="page"] {
+  color: var(--nucleo-texto);
+  border-top-color: var(--nucleo-acento);
+  background: var(--nucleo-fundo);
+}
+
+/* ---------------------------------------------------------- a faixa de voz
+ *
+ * Do tema na superfície, do núcleo nos três controles. A faixa toma o fundo e a
+ * borda do tema como o resto da sessão; MUDO, SURDO e SAIR têm fundo, borda e
+ * texto opacos do núcleo, e o contraste deles é medido entre texto e fundo do
+ * núcleo, sem depender do que o tema pintou em volta. */
+
+:root[data-casca="celular"] .voz-celular {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  min-height: var(--cel-faixa);
+  padding: 0 var(--cel-seguro-dir) 0 var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .voz-sala {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 8px 8px 16px;
+  background: none;
+  border: 0;
+  border-left: 3px solid var(--seele-laranja-nerv);
+  color: var(--seele-osso);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] .voz-sala-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: uppercase;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-casca="celular"] .voz-sala-conta {
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  letter-spacing: 0;
+}
+
+:root[data-casca="celular"] .voz-sala-quem {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* **A placa do núcleo.** Os três controles moram numa placa opaca do núcleo, e
+   não sobre o fundo temado da faixa. É o que torna a borda deles mensurável: a
+   WCAG pede 3:1 entre o contorno de um controle e o que está em volta, e
+   nenhuma cor de borda alcança 3:1 contra qualquer fundo que um tema escolha
+   (medido no protótipo: `linha-forte` sobre o painel dá 1,59:1 já sem tema, e o
+   osso sobre um painel claro, 1,01:1). Sobre a placa, a borda é medida contra
+   uma cor que o tema não alcança. */
+:root[data-casca="celular"] .voz-controles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 8px 8px;
+  background: var(--nucleo-fundo);
+  border-left: 1px solid var(--nucleo-borda);
+}
+
+/* Os três controles do núcleo. Nenhuma linha deste bloco lê um `--seele-*` (G6). */
+:root[data-casca="celular"] .voz-nucleo {
+  display: grid;
+  place-items: center;
+  gap: 0;
+  min-width: 52px;
+  min-height: 48px;
+  padding: 4px 6px;
+  font: inherit;
+  font-family: var(--nucleo-pilha);
+  /* Cresce com o texto do sistema, com teto: medido no Safari 27 com o tamanho
+     de acessibilidade, os rótulos fixos em 10 px deixavam pequenos justamente
+     os controles mais importantes da tela. A 1,4× a faixa ainda cabe a 360. */
+  font-size: calc(10px * min(var(--cel-escala), 1.4));
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border: 2px solid var(--nucleo-rotulo);
+  border-radius: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] .voz-nucleo .glifo {
+  width: calc(18px * min(var(--cel-escala), 1.4));
+  height: calc(18px * min(var(--cel-escala), 1.4));
+  vertical-align: 0;
+}
+
+:root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] {
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-texto);
+}
+
+/* SAIR afastado dos outros dois: é o único que desfaz alguma coisa. */
+:root[data-casca="celular"] #voz-sair {
+  margin-right: 6px;
+}
+
+/* O MUDO é o controle mais tocado da tela, e o maior. */
+:root[data-casca="celular"] #voz-mudo {
+  min-width: 64px;
+}

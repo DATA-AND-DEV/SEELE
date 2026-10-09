@@ -196,7 +196,7 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
         fotos = {}
         for nome, celular in (("desktop-sem-celular", False), ("desktop-com-celular", True)):
             pagina = montar(temporaria / motor.name / nome, celular=celular, marca=None)
-            ctx = navegador.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce")
+            ctx = navegador.new_context(viewport={"width": 1440, "height": 900}, reduced_motion="reduce", locale="pt-BR")
             pg = ctx.new_page()
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
@@ -224,7 +224,7 @@ def g3(p, saida: pathlib.Path, temporaria: pathlib.Path) -> list[str]:
 # --------------------------------------------------------------- as medidas
 
 MEDIR = r"""
-([topo, pe]) => {
+([topo, pe, raiz]) => {
   const W = innerWidth, H = innerHeight;
   const vis = (e) => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !e.closest("[hidden]"); };
@@ -236,7 +236,10 @@ MEDIR = r"""
   const rolaX = (e) => !!e.parentElement?.closest("[data-rola-de-lado]");
   const rolaY = (e) => { for (let p = e.parentElement; p; p = p.parentElement) { const s = getComputedStyle(p);
       if (/(auto|scroll)/.test(s.overflowY) && p.scrollHeight > p.clientHeight) return true; } return false; };
-  const todos = [...document.querySelectorAll("body *")].filter(vis);
+  // O que se mede: a página inteira, ou só a parte que a tarefa já desenhou
+  // para o celular (as outras ainda são do desktop). A largura do documento é
+  // medida sempre na página inteira.
+  const todos = [...document.querySelectorAll(raiz)].flatMap((r) => [r, ...r.querySelectorAll("*")]).filter(vis);
   const vaza = todos.filter((e) => { const r = e.getBoundingClientRect(); return (r.right > W + 1 || r.left < -1) && !rolaX(e); })
     .filter((e) => ![...e.children].some((c) => vis(c) && c.getBoundingClientRect().right > W + 1));
   const tocavel = (e) => { const r = e.getBoundingClientRect(); const x = Math.min(Math.max(r.left + r.width / 2, 1), W - 1), y = r.top + r.height / 2;
@@ -350,13 +353,17 @@ class Caso:
 
     `levar` leva a página, já na sessão, ao estado, e devolve o que reprovou
     nele. `medir` liga as medidas do aparelho; um caso que ainda não tem a
-    moldura do celular (o primeiro) não as liga. `temas` repete o caso sob os
-    temas de teste, com o núcleo comparado ao da foto sem tema.
+    moldura do celular (o primeiro) não as liga, e `raiz` as restringe ao que já
+    é do celular. `temas` repete o caso sob os temas de teste, com o núcleo
+    comparado ao da foto sem tema.
     """
 
     levar: Callable[[Page], list[str]]
     medir: bool = True
     temas: tuple[str, ...] = ()
+    # O seletor do que as medidas do aparelho leem. Os painéis que uma tarefa
+    # ainda não adaptou ficam de fora, e entram quando a tarefa deles chegar.
+    raiz: str = "body"
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -379,8 +386,104 @@ def sessao_entrou(pg: Page) -> list[str]:
     return falhas
 
 
+def esperar_quadro(pg: Page) -> None:
+    """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
+    aparece no redesenho seguinte."""
+    pg.wait_for_timeout(700)
+
+
+def faixa_de_voz(pg: Page) -> list[str]:
+    """A moldura do celular: as quatro abas e a faixa de voz (Tarefa 3).
+
+    Termina no estado de partida (dentro da PONTE, na aba CONVERSA, com o áudio
+    aberto), que é o que as medidas e a foto leem.
+    """
+    falhas = []
+    faixa = pg.evaluate("""(() => {
+        const v = document.getElementById('voz');
+        if (!v) return null;
+        return { escondida: v.hidden || !!v.closest('[hidden]'),
+                 nome: v.querySelector('.voz-sala-nome')?.textContent ?? '',
+                 conta: v.querySelector('.voz-sala-conta')?.textContent ?? '' };
+    })()""")
+    if faixa is None:
+        return ["não há faixa de voz (#voz)"]
+    if "PONTE" not in faixa["nome"] or faixa["conta"] != "3/8":
+        falhas.append(f"a faixa diz «{faixa['nome']}» «{faixa['conta']}», e não PONTE 3/8")
+    # Escondida, não há o que tocar: o resto do caso esperaria o tempo-limite do
+    # Playwright e estouraria, em vez de dizer o que reprovou.
+    if faixa["escondida"]:
+        return falhas + ["dentro da PONTE, a faixa de voz está escondida"]
+
+    pg.evaluate("window.__SEELE_ARGS.set_muted = undefined")
+    pg.locator("#voz-mudo").tap()
+    pg.wait_for_timeout(300)
+    mandou = pg.evaluate("window.__SEELE_ARGS.set_muted ?? null")
+    if not mandou or mandou.get("on") is not True:
+        falhas.append(f"o toque no MUDO mandou set_muted {mandou}, e não {{on: true}}")
+
+    paineis = {"servidor": ".painel-canais", "conversa": ".painel-linha", "pessoas": ".painel-pessoas"}
+    for aba in ("servidor", "conversa", "pessoas", "ajustes"):
+        pg.locator(f"#cel-aba-{aba}").tap()
+        estado = pg.evaluate("""(paineis) => {
+            const s = document.getElementById('tela-sessao');
+            const visivel = (sel) => { const e = s.querySelector('.paineis > ' + sel);
+                return !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0; };
+            return { aba: s.dataset.aba,
+                     atual: [...document.querySelectorAll('.cel-aba[aria-current="page"]')].map((b) => b.dataset.aba),
+                     visiveis: Object.entries(paineis).filter(([, sel]) => visivel(sel)).map(([a]) => a) };
+        }""", paineis)
+        if estado["aba"] != aba or estado["atual"] != [aba]:
+            falhas.append(f"o toque em {aba.upper()} deu data-aba={estado['aba']!r} e aria-current em {estado['atual']}")
+        esperado = [aba] if aba in paineis else []
+        if estado["visiveis"] != esperado:
+            falhas.append(f"na aba {aba.upper()}, os painéis visíveis são {estado['visiveis']}, e não {esperado}")
+
+    # A abertura do áudio (matriz, B-F08b e B-F08c): as palavras vêm do
+    # `ABERTURA_DO_AUDIO` do produto, e não de uma cópia.
+    for abertura in ("abrindo", "nao_abriu_no_prazo"):
+        pg.evaluate(f"SEELE_QUADRO.abertura_do_audio = '{abertura}'")
+        esperar_quadro(pg)
+        visto = pg.evaluate("""(abertura) => {
+            const quem = document.querySelector('#voz .voz-sala-quem')?.textContent ?? '';
+            const aviso = document.getElementById('aviso-audio');
+            const r = aviso.getBoundingClientRect(), v = document.getElementById('voz').getBoundingClientRect();
+            return { quem, rodape: ABERTURA_DO_AUDIO[abertura].rodape, frase: ABERTURA_DO_AUDIO[abertura].frase,
+                     aviso: aviso.hidden ? null : document.getElementById('aviso-audio-texto').textContent,
+                     dentro: r.left >= 0 && r.right <= innerWidth + 0.5, colado: Math.abs(r.bottom - v.top) <= 1 };
+        }""", abertura)
+        if visto["rodape"] not in visto["quem"]:
+            falhas.append(f"com o áudio em {abertura}, a faixa diz «{visto['quem']}», sem «{visto['rodape']}»")
+        if visto["frase"] is not None:
+            if visto["aviso"] != visto["frase"]:
+                falhas.append(f"com o áudio em {abertura}, o #aviso-audio diz {visto['aviso']!r}")
+            # Logo acima da faixa, colado nela, e não só em algum lugar acima:
+            # no alto da tela o aviso também estaria «acima», longe da voz que
+            # ele explica.
+            elif not (visto["dentro"] and visto["colado"]):
+                falhas.append(f"o #aviso-audio não fica logo acima da faixa, dentro da tela: {visto}")
+    pg.evaluate("SEELE_QUADRO.abertura_do_audio = 'aberto'")
+
+    pg.evaluate("window.__SEELE_CHAMADAS.length = 0")
+    pg.locator("#voz-sair").tap()
+    pg.wait_for_timeout(300)
+    if "leave_voice_room" not in pg.evaluate("window.__SEELE_CHAMADAS"):
+        falhas.append("o toque no SAIR não chamou leave_voice_room")
+
+    pg.evaluate("SEELE_QUADRO.voice_rooms.forEach((s) => { s.occupied_by_us = false; })")
+    esperar_quadro(pg)
+    if not pg.evaluate("document.getElementById('voz').hidden"):
+        falhas.append("fora de sala, a faixa de voz continua à vista")
+    pg.evaluate("SEELE_QUADRO.voice_rooms[0].occupied_by_us = true")
+    pg.locator("#cel-aba-conversa").tap()
+    esperar_quadro(pg)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
+    "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
+                         raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
 }
 
 
@@ -393,7 +496,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pagina = montar(temporaria / rotulo, celular=True, marca="celular")
             ctx = navegador.new_context(
                 viewport={"width": aparelho["largura"], "height": aparelho["altura"]},
-                device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce",
+                device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce", locale="pt-BR",
             )
             pg = ctx.new_page()
             erros = []
@@ -410,7 +513,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.wait_for_timeout(250)
             pg.screenshot(path=saida / f"{rotulo}.png", animations="disabled")
             if caso.medir:
-                m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"]])
+                m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"], caso.raiz])
                 m["nucleo"] = pg.evaluate(NUCLEO)
                 (saida / f"{rotulo}.json").write_text(json.dumps(m, ensure_ascii=False, indent=2))
                 motivos += reprovacoes(m, aparelho, so_nucleo=tema == "hostil")
