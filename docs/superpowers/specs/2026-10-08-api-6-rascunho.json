@@ -61,7 +61,8 @@
     "may_*: a permissão vale na metade de servidor",
     "messages_revision, icon_revision, person_icons_revision, ended: estado interno da casca",
     "membros (o FORA DO AR da F1): ficam de fora (decisão de 08/10) — acrescentar depois é API somada, tirar é impossível (rascunho §6)",
-    "toque, chamada, código e agenda: nunca (guarda 12)"
+    "toque, chamada, código e agenda: nunca (guarda 12)",
+    "todo campo novo do Snapshot nasce fora do retrato: o retrato é copiado campo a campo em todos os níveis, e a lista permitida da telemetry é vazia (o telemetry.microfone_entrega_silencio_digital do I-b, uma permissão de privacidade do sistema, não chega ao MOD); o guarda prova pela forma: as chaves de cada nível são exatamente as da lista, e um Snapshot com um campo desconhecido em cada nível sai sem nenhum deles"
   ],
   "actions": {
     "pedir": "ModRequest",

@@ -423,6 +423,28 @@ campos e só estes:
 `falando` entra porque **o indicador de quem fala não é núcleo** (decisão de
 29/09): é região, e um MOD pode redesenhá-lo.
 
+**Todo campo novo do `Snapshot` nasce fora do retrato** (achado da revisão do
+I-b da F5, 09/10). O I-b acrescenta `telemetry.microfone_entrega_silencio_digital`,
+um sim ou não que conta o estado de uma permissão de privacidade do sistema.
+O MOD não tem o que fazer com ele, e na API 5 ele chegaria: lá o MOD lê o
+`Snapshot` inteiro. Na 6, o retrato é copiado campo a campo, em todos os
+níveis, e **a lista permitida da `telemetry` é vazia**: nenhum campo dela chega
+ao MOD. O guarda prova isso pela forma, e não por uma lista do que se proíbe: as
+chaves do retrato, em cada nível (o topo, `servidor`, cada pessoa, cada sala,
+cada canal), são **exatamente** as da tabela acima, e um `Snapshot` com um campo
+desconhecido em cada nível (o do I-b inclusive) sai sem nenhum deles. Um campo
+que alguém quiser dar ao MOD entra pela tabela, e não por esquecimento; depois
+do congelamento, tirar um campo quebra a API (tarefa 4, passo 4b).
+
+**Onde o campo chega hoje** [c, conferido em 09/10]: em nenhum lugar. Ele só
+existe no ramo `0.16/lotes-i-b`, ainda fora da `versao/0.16`, e não existe na
+v0.15.1 publicada (`54f542f`). Quando o I-b entrar, ele chega aos MODs da API 5
+**na build da 0.16 antes do corte**, pelo `snapshot` sem filtro
+(`base.js:2335`, `crates/seele-motor/src/preludio.rs:277`). Nenhum MOD
+instalado por alguém o recebe: o app 0.16 só sai depois do corte, com
+`APIS_ACEITAS = [6]` e o retrato. A linha 0.15 não tem o campo; ele só chegaria
+lá se o I-b fosse levado a ela, e aí o mesmo `snapshot` sem filtro o entregaria.
+
 **Ficam de fora, e por quê:**
 
 | campo | por quê |

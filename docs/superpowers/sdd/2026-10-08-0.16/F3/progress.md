@@ -296,3 +296,16 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     contrato não promete o MUDO clicável sob um diálogo de MOD no desktop.
   - Corrigido junto: o §4 dizia que a capa do operador não aparece no celular;
     com o `operador.barra` em AJUSTES, ela pinta o cabeçalho SEU PERFIL.
+- **A telemetria e o campo de privacidade do I-b** (achado da revisão do I-b da
+  F5): o retrato da 6 já deixa a `telemetry` inteira de fora (a lista permitida
+  dela é vazia). O que faltava era a garantia de que todo campo novo nasce
+  fora: o plano da tarefa 4 conferia uma lista de nomes proibidos, e não a
+  forma. Passo 4b novo: as chaves de cada nível são exatamente as da lista, e
+  um `Snapshot` com um campo desconhecido em cada nível sai sem nenhum deles.
+  - Onde o campo chega hoje [c]: em nenhum lugar — só existe no
+    `0.16/lotes-i-b`. Na v0.15.1 publicada (`54f542f`, conferido pela API de
+    releases) ele não existe. Quando o I-b entrar, chega aos MODs da API 5 na
+    build da 0.16 antes do corte (o `snapshot` sem filtro, `base.js:2335`),
+    e nenhum MOD instalado o recebe, porque o app 0.16 só sai com
+    `APIS_ACEITAS = [6]`. A linha 0.15 só o receberia se o I-b fosse levado
+    a ela.
