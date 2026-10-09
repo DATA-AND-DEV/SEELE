@@ -16483,6 +16483,63 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
     );
 }
 
+#[test]
+fn todo_motivo_de_aviso_tem_frase_na_pagina() {
+    // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
+    // `NoticeReason` sem frase em `AVISOS` chega à faixa da sessão como a
+    // palavra AVISO e mais nada: o produto sabe o que houve e não conta. Foi o
+    // que o `PedidoRecusado` faria ao entrar, e nenhum guarda cobrava: os que
+    // existiam olhavam motivos escolhidos à mão, um por um.
+    //
+    // Lido da fonte da ponte, e não de uma lista daqui, para a próxima
+    // variante reprovar na rodada em que entrar.
+    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
+        .expect("the bridge's types must be readable")
+        .replace("\r\n", "\n");
+
+    let script = without_comments(&scripts());
+    let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
+        panic!("frases.js no longer declares AVISOS");
+    };
+    let Some(avisos) = avisos.split("\n};").next() else {
+        panic!("AVISOS is never closed");
+    };
+
+    let variantes = variants_of(&ponte, "NoticeReason");
+    assert!(
+        variantes.len() >= 17,
+        "`NoticeReason` came out with {} variants, so this guard is asserting \
+         against almost nothing",
+        variantes.len()
+    );
+
+    // Os que já chegavam sem frase quando este guarda nasceu (09/10/2026), e
+    // que a orquestradora distribui. **A lista só encolhe**: um deles ganhando
+    // frase também reprova, pedindo para sair daqui.
+    const AINDA_SEM_FRASE: &[&str] = &["MovedByOperator", "VoiceRoomOverHostUplink"];
+
+    let mudas: Vec<&String> = variantes
+        .iter()
+        .filter(|variante| !avisos.contains(&format!("{variante}:")))
+        .filter(|variante| !AINDA_SEM_FRASE.contains(&variante.as_str()))
+        .collect();
+    assert!(
+        mudas.is_empty(),
+        "estes motivos de aviso chegam à faixa sem frase escrita, e ela diz só \
+         AVISO: {mudas:?}"
+    );
+    for pendente in AINDA_SEM_FRASE {
+        assert!(
+            variantes.iter().any(|variante| variante == pendente),
+            "`{pendente}` saiu da ponte; tire-o de `AINDA_SEM_FRASE`"
+        );
+        assert!(
+            !avisos.contains(&format!("{pendente}:")),
+            "`{pendente}` ganhou frase em `AVISOS`; tire-o de `AINDA_SEM_FRASE`"
+        );
+    }
+}
+
 /// As capacidades de cada API, as mesmas na casca e no núcleo.
 ///
 /// O comentário de `CAPACIDADES_POR_API`, em `base.js`, citava este teste

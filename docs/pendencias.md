@@ -6335,6 +6335,37 @@ folga maior nem com menos paralelismo: aumentar o limite esconderia exatamente o
 sintoma que aponta para o mecanismo. É trabalho da frente da malha, com a medida
 acima já pronta para quem pegar.
 
+**Um sintoma novo, em 09/10/2026, sem atribuição medida.** A rodada inteira da
+conformidade da F7 da 0.16 (`0.16/sala`, em `39faee3d`) roda arquivo por arquivo,
+e cada binário com os testes em paralelo, como vem. Nela,
+`retirar_o_consentimento_de_assistir_por_par_devolve_a_tela_ao_servidor`
+reprovou com `Error: SemResposta`, e não com «a paciência acabou». Até ali este
+teste não constava desta pendência.
+
+- `SemResposta` é o prazo de um candidato queimado inteiro sem nada de volta. O
+  erro subiu pelo `?` do teste, e o log não diz qual das conexões dele o
+  devolveu.
+- No momento da reprovação,
+  `a_porta_tomada_por_um_instante_nao_reprova_a_volta_do_servidor`, que disputa
+  a porta de propósito, corria havia mais de 60 s.
+- A carga da máquina não foi medida. Outras frentes podiam estar rodando.
+
+Medido logo depois, na mesma árvore:
+
+| Condição | Reprovações |
+| --- | --- |
+| o teste sozinho, repetido | 0 em 3 |
+| o binário inteiro (19 testes em paralelo) | 0 em 1 |
+
+O que se tem é **leitura, e não medida**: nada do que a F7 mudou ali está no
+caminho deste teste. As tarefas 14a e 17 dela mudaram o comportamento de uma
+conexão em dois lugares só, o destino de código e a batida com bilhete, e o teste
+não usa nenhum dos dois. A atribuição medida, com rodadas intercaladas contra
+`bd58a080`, ficou de fora de propósito: com as outras frentes rodando, ela mediria
+o ruído delas também. Fica para o lote Z da F5. A bateria da integração, que roda
+este arquivo com `--test-threads=1`, vigia: se ele cair lá, a atribuição medida
+vira tarefa, com a máquina quieta.
+
 **Numeração.** Estes três itens nasceram como #34, #35 e #36 numa ponta que
 ainda não tinha se integrado à main. Enquanto isso, a main recebeu quatro
 itens próprios com esses números (34 a 37) e a ponta do CI ocupou o #38.

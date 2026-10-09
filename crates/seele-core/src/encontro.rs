@@ -144,28 +144,21 @@ pub(crate) struct Batida {
 impl Batida {
     /// Abre o socket e resolve o ponto de encontro. **Não manda nada.**
     ///
-    /// `None` quando não dá para bater — nome que não resolve, convite sem
-    /// impressão digital, máquina sem rota. Nesse caso quem chama conecta como
-    /// sempre conectou: nenhum endereço do convite depende disto, e o degrau 4 é
-    /// o único que se perde.
+    /// `None` quando não dá para bater — nome que não resolve, destino sem
+    /// marca, máquina sem rota. Nesse caso quem chama conecta como sempre
+    /// conectou: nenhum endereço do convite depende disto, e o degrau 4 é o
+    /// único que se perde.
     ///
-    /// # Por que a impressão digital é obrigatória aqui
+    /// # Por que a marca é obrigatória aqui
     ///
-    /// A marca do aviso são os primeiros dígitos dela, e é o que diz ao
-    /// anfitrião que quem bateu tem o link dele. Sem impressão digital o aviso
-    /// chegaria com uma marca que o anfitrião não reconhece, e ele o ignoraria —
-    /// mandar o pacote assim mesmo seria gastar rede para produzir silêncio.
-    pub(crate) async fn preparar(
-        bilhete: &Bilhete,
-        impressao_digital: Option<&str>,
-    ) -> Option<Self> {
-        // A marca do aviso sai da mesma função com que o anfitrião a confere
-        // ([`Marcas::do_servidor`]): duas derivações da mesma regra são duas
-        // regras para discordarem no dia em que uma mudar.
-        let marca = impressao_digital
-            .and_then(Marcas::do_servidor)?
-            .aviso()
-            .clone();
+    /// É ela que diz a quem atende que o aviso é para ele: a do aviso de um
+    /// servidor sai da impressão digital do link, e a de uma sala sai do código
+    /// (`crate::enlace::Destino::marca_do_aviso`, que é quem escolhe). Sem
+    /// marca o aviso chegaria com uma etiqueta que ninguém reconhece, e seria
+    /// ignorado — mandar o pacote assim mesmo seria gastar rede para produzir
+    /// silêncio.
+    pub(crate) async fn preparar(bilhete: &Bilhete, marca: Option<Marca>) -> Option<Self> {
+        let marca = marca?;
         let aviso = bilhete.aviso().ok()?;
         let ponto = tokio::time::timeout(PRAZO, resolver(bilhete))
             .await
@@ -843,6 +836,34 @@ pub enum Localizacao {
     PontoMudo,
     /// O texto do ponto não é um endereço, ou o nome não resolveu no prazo.
     PontoNaoResolve,
+}
+
+/// Por que quem liga pelo código não achou onde conectar: o lado de
+/// [`Localizacao`] que não dá endereço nenhum, mais a falta de ponto a quem
+/// perguntar.
+///
+/// Atravessa como o motivo de `ConnectError::NaoLocalizou`, e cada variante é
+/// uma frase diferente da spec de 23/09 («Erros e frases»): o ponto calado, a
+/// pessoa que não está disponível. As frases são da casca (tarefa 7f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FalhaAoLocalizar {
+    /// Não há ponto de encontro: `$SEELE_ENCONTRO` o desligou
+    /// ([`ponto_de_quem_liga`]). Sem ponto, código não funciona; link com
+    /// endereço continua funcionando.
+    SemPonto,
+    /// [`Localizacao::NinguemMora`].
+    NinguemMora,
+    /// [`Localizacao::Enc2Calado`].
+    Enc2Calado,
+    /// [`Localizacao::PontoRecusou`].
+    PontoRecusou,
+    /// [`Localizacao::PontoMudo`].
+    PontoMudo,
+    /// [`Localizacao::PontoNaoResolve`].
+    PontoNaoResolve,
+    /// O ponto deu só a escuta: a resposta sobre o servidor não voltou a
+    /// tempo, e sem ela não há endereço a que conectar.
+    SoAEscuta,
 }
 
 /// O que as duas consultas ao quarto têm em comum: resolver o ponto dentro do
@@ -2607,18 +2628,65 @@ mod testes {
         "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
     const FP: &str = IMPRESSAO_DE_TESTE;
 
+    /// A marca do aviso de um servidor com esta impressão, como
+    /// `crate::enlace::Destino::marca_do_aviso` a tira.
+    fn marca(impressao: &str) -> Option<Marca> {
+        Marcas::do_servidor(impressao).map(|marcas| marcas.aviso().clone())
+    }
+
     #[tokio::test]
-    async fn sem_impressao_digital_nao_se_bate_em_ponto_nenhum() {
-        // A marca sai da impressão digital, e sem ela o aviso chegaria com uma
-        // etiqueta que o anfitrião não reconhece — rede gasta para produzir
-        // silêncio. E é a asserção que garante que nenhum pacote sai daqui por
-        // um link que não prometeu identidade nenhuma.
+    async fn sem_marca_nao_se_bate_em_ponto_nenhum() {
+        // Sem marca o aviso chegaria com uma etiqueta que ninguém reconhece —
+        // rede gasta para produzir silêncio. E é a asserção que garante que
+        // nenhum pacote sai daqui por um link que não prometeu identidade
+        // nenhuma. A impressão curta demais para dar marca é de
+        // `a_marca_do_aviso_sai_do_que_se_espera`, em `enlace.rs`, onde a marca
+        // é escolhida.
         assert!(Batida::preparar(&bilhete("192.0.2.1:8384"), None)
             .await
             .is_none());
-        assert!(Batida::preparar(&bilhete("192.0.2.1:8384"), Some("curto"))
-            .await
-            .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_batida_da_sala_leva_a_marca_do_aviso_dela_para_a_escuta() {
+        // Quem liga pelo código avisa a escuta que o quarto deu, com a marca do
+        // aviso da sala (ADR 0062): é a única que a sala reconhece. A marca de
+        // um servidor, tirada de uma impressão, chegaria a uma sala que não a
+        // conhece, e o furo não abriria.
+        let Ok(fingido) = std::net::UdpSocket::bind("127.0.0.1:0") else {
+            panic!("o loopback não abriu");
+        };
+        let Ok(ponto) = fingido.local_addr() else {
+            panic!("o ponto de encontro de teste não tem endereço local");
+        };
+        let codigo = seele_proto::codigo::Codigo::da_chave(&[3; 32]);
+        let escuta: SocketAddr = "198.51.100.4:41000".parse().expect("endereço");
+        let Ok(bilhete) = Bilhete::novo(ponto.to_string(), escuta.to_string()) else {
+            panic!("o bilhete da sala não se monta");
+        };
+
+        let Some(batida) =
+            Batida::preparar(&bilhete, Some(Marcas::da_sala(&codigo).aviso().clone())).await
+        else {
+            panic!("preparar tem de dar certo com um ponto de encontro que existe");
+        };
+        let saiu = batida.avisar().await;
+        assert!(saiu.is_ok(), "o aviso não saiu: {saiu:?}");
+
+        let prazo = fingido.set_read_timeout(Some(Duration::from_secs(2)));
+        assert!(prazo.is_ok(), "o prazo de leitura não pegou");
+        let mut balde = [0_u8; 1500];
+        let Ok((tamanho, _)) = fingido.recv_from(&mut balde) else {
+            panic!("nada chegou ao ponto de encontro");
+        };
+        assert_eq!(
+            balde.get(..tamanho).and_then(encontro::analisar),
+            Some(encontro::Pedido::Leve {
+                destino: escuta,
+                marca: Marcas::da_sala(&codigo).aviso().clone(),
+            }),
+            "o LEVE não foi para a escuta com a marca do aviso da sala"
+        );
     }
 
     #[tokio::test]
@@ -2627,7 +2695,7 @@ mod testes {
         // único de falha. Um nome que não existe custa o que a resolução custa,
         // e nunca mais que o prazo.
         let comeco = std::time::Instant::now();
-        let batida = Batida::preparar(&bilhete("nao-existe-mesmo.invalid:8384"), Some(FP)).await;
+        let batida = Batida::preparar(&bilhete("nao-existe-mesmo.invalid:8384"), marca(FP)).await;
         assert!(batida.is_none(), "um nome inexistente virou uma batida");
         assert!(
             comeco.elapsed() < PRAZO * 2,
@@ -2656,7 +2724,7 @@ mod testes {
             panic!("o ponto de encontro de teste não tem endereço local");
         };
 
-        let batida = Batida::preparar(&bilhete(&onde.to_string()), Some(FP)).await;
+        let batida = Batida::preparar(&bilhete(&onde.to_string()), marca(FP)).await;
         let Some(batida) = batida else {
             panic!("preparar tem de dar certo com um ponto de encontro que existe");
         };
@@ -2710,7 +2778,7 @@ mod testes {
         let Ok(onde) = ponto.local_addr() else { return };
 
         let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
+        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!("preparar tem de dar certo com um ponto de encontro que existe");
         };
@@ -2749,7 +2817,7 @@ mod testes {
         let Ok(onde) = ponto.local_addr() else { return };
 
         let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
+        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!("preparar tem de dar certo com um ponto de encontro que existe");
         };
@@ -2785,7 +2853,7 @@ mod testes {
         let Ok(onde) = ponto.local_addr() else { return };
 
         let bilhete = bilhete_de_teste(onde);
-        let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
+        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!("preparar tem de dar certo com um ponto de encontro que existe");
         };
@@ -2835,7 +2903,7 @@ mod testes {
             );
         };
         let bilhete = bilhete(&ponto.to_string());
-        let batida = Batida::preparar(&bilhete, Some(IMPRESSAO_DE_TESTE)).await;
+        let batida = Batida::preparar(&bilhete, marca(IMPRESSAO_DE_TESTE)).await;
         let Some(batida) = batida else {
             panic!(
                 "preparar tem de dar certo mesmo com um ponto de encontro que só \
@@ -2865,7 +2933,7 @@ mod testes {
             panic!("nenhum destino candidato é recusado nesta máquina");
         };
         assert!(
-            Batida::preparar(&bilhete(&ponto.to_string()), Some(FP))
+            Batida::preparar(&bilhete(&ponto.to_string()), marca(FP))
                 .await
                 .is_some(),
             "preparar tem de dar certo para este bilhete — quem falha lá em cima \
