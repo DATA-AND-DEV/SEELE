@@ -10758,6 +10758,22 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
              da página, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
         );
     }
+    // **E a página também não segura o fechar** (rodada 1, M2). O Tauri deixa
+    // a janela vetar o próprio fechamento (`onCloseRequested` com
+    // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois
+    // mantêm a página viva com a credencial dentro, sem que o `main.rs` diga
+    // nada. Hoje nenhum script os usa.
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for segura in ["onCloseRequested", "beforeunload"] {
+            assert!(
+                !texto.contains(segura),
+                "`{nome}` passou a usar `{segura}`: a página pode vetar o próprio \
+                 fechamento, e a credencial da tentativa, que só existe na memória \
+                 dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+            );
+        }
+    }
 
     // 5. Do outro lado da ponte: nem log, nem retrato.
     let nomeiam: Vec<&str> = main
