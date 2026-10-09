@@ -466,8 +466,9 @@ pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
 /// do codificador.
 ///
 /// O custo é a memória de um quadro em andamento por transmissão assistida, no
-/// leitor que remonta ([`LeitorDeTela::bytes_reservados`]). O [`Enquadramento`]
-/// conta bytes e não guarda quadro.
+/// leitor que remonta ([`LeitorDeTela::bytes_reservados`]), e ela segue o que
+/// chegou, e não o anúncio ([`RESERVA_INICIAL`]). O [`Enquadramento`] conta bytes
+/// e não guarda quadro.
 pub const MAX_QUADRO_LEN: usize = 4 * 1024 * 1024;
 
 /// O que vem dentro de um quadro do fluxo de tela.
@@ -741,7 +742,19 @@ pub struct LeitorDeTela {
     prontos: std::collections::VecDeque<LidoDaTela>,
     /// A maior reserva que o leitor já fez para um quadro. Ver [`reservar`].
     maior_reserva: usize,
+    /// Quantas vezes um corpo cresceu: o guarda de que ele dobra, e não cresce
+    /// pedaço a pedaço.
+    crescimentos: usize,
 }
+
+/// Quanto o leitor reserva para um quadro assim que o cabeçalho chega, no máximo.
+///
+/// **A memória segue o que chegou, e não o que foi anunciado** (sugestão da F1
+/// na revisão de 09/10/2026). Um par que anuncia um quadro de 4 MiB e manda
+/// devagar segura até isto e mais o que mandou, e não os 4 MiB. Daqui o corpo
+/// cresce dobrando, sem passar do anunciado: crescer o exato de cada pedaço faria
+/// um fluxo que pinga byte a byte custar uma realocação por byte.
+const RESERVA_INICIAL: usize = 64 * 1024;
 
 /// **A única reserva de corpo do leitor**, e ela anota o maior pedido.
 ///
@@ -753,6 +766,26 @@ pub struct LeitorDeTela {
 fn reservar(maior_reserva: &mut usize, tamanho: usize) -> Vec<u8> {
     *maior_reserva = (*maior_reserva).max(tamanho);
     Vec::with_capacity(tamanho)
+}
+
+/// Faz o corpo em andamento caber `precisa` bytes: dobra a reserva, sem passar
+/// do `anunciado`, e anota o maior pedido, como [`reservar`].
+fn crescer(
+    maior_reserva: &mut usize,
+    crescimentos: &mut usize,
+    corpo: &mut Vec<u8>,
+    precisa: usize,
+    anunciado: usize,
+) {
+    if precisa <= corpo.capacity() {
+        return;
+    }
+    *crescimentos += 1;
+    let nova = precisa
+        .max(corpo.capacity().saturating_mul(2))
+        .min(anunciado);
+    corpo.reserve_exact(nova - corpo.len());
+    *maior_reserva = (*maior_reserva).max(nova);
 }
 
 impl Default for LeitorDeTela {
@@ -772,6 +805,7 @@ impl LeitorDeTela {
             },
             prontos: std::collections::VecDeque::new(),
             maior_reserva: 0,
+            crescimentos: 0,
         }
     }
 
@@ -812,6 +846,13 @@ impl LeitorDeTela {
                 Estado::Quadros { cabecalho, quadro } => {
                     if let Some((tipo, bytes, tamanho)) = quadro {
                         let anda = (*tamanho - bytes.len()).min(resto.len());
+                        crescer(
+                            &mut self.maior_reserva,
+                            &mut self.crescimentos,
+                            bytes,
+                            bytes.len() + anda,
+                            *tamanho,
+                        );
                         bytes.extend_from_slice(resto.get(..anda).unwrap_or_default());
                         i += anda;
                         if bytes.len() == *tamanho {
@@ -829,10 +870,12 @@ impl LeitorDeTela {
                     };
                     match ler_cabecalho_de_quadro(&inteiro) {
                         // **Só agora**, com o tamanho conferido, o corpo é
-                        // reservado.
+                        // reservado, e só o começo dele: o resto cresce com o
+                        // que chegar ([`RESERVA_INICIAL`]).
                         Ok((tipo, tamanho)) => {
-                            *quadro =
-                                Some((tipo, reservar(&mut self.maior_reserva, tamanho), tamanho));
+                            let inicio =
+                                reservar(&mut self.maior_reserva, tamanho.min(RESERVA_INICIAL));
+                            *quadro = Some((tipo, inicio, tamanho));
                         }
                         Err(erro) => return Err(self.fechar(erro)),
                     }
@@ -1511,6 +1554,69 @@ mod os_quadros {
             leitor.bytes_reservados(),
             0,
             "o quadro pronto saiu do andamento"
+        );
+    }
+
+    /// **A memória segue o que chegou, e não o que foi anunciado** (sugestão
+    /// da F1 na revisão de 09/10). Um par que anuncia 4 MiB e manda devagar
+    /// não segura 4 MiB: o leitor começa com até [`RESERVA_INICIAL`] e cresce
+    /// dobrando, sem passar do anunciado. Dobrar, e não crescer o exato do
+    /// pedaço: um fluxo que pingasse byte a byte faria uma realocação por byte.
+    #[test]
+    fn um_quadro_grande_que_chega_devagar_segura_o_que_chegou() {
+        let anunciado = u32::try_from(MAX_QUADRO_LEN).unwrap();
+        let mut leitor = LeitorDeTela::novo();
+        let mut bytes = abertura();
+        bytes.extend_from_slice(&cabecalho_de_quadro(TipoDeQuadro::Chave, anunciado));
+        bytes.extend_from_slice(&[0xAB; 10]);
+        leitor.empurrar(&bytes).unwrap();
+        assert!(
+            leitor.bytes_reservados() <= RESERVA_INICIAL,
+            "dez bytes de um quadro de 4 MiB seguram {} bytes",
+            leitor.bytes_reservados()
+        );
+        let mut chegou = 10;
+        for _ in 0..50 {
+            leitor.empurrar(&[0xCD; 4096]).unwrap();
+            chegou += 4096;
+            let reservado = leitor.bytes_reservados();
+            assert!(
+                reservado >= chegou,
+                "o que chegou não cabe no que foi reservado"
+            );
+            assert!(
+                reservado <= (2 * chegou).max(RESERVA_INICIAL),
+                "com {chegou} bytes recebidos, o leitor segura {reservado}"
+            );
+        }
+        assert!(leitor.maior_reserva() <= (2 * chegou).max(RESERVA_INICIAL));
+    }
+
+    /// **O corpo cresce dobrando.** Um quadro de 256 KiB que chega byte a
+    /// byte cresce duas vezes (64 → 128 → 256 KiB), e não uma vez por byte:
+    /// crescer o exato de cada pedaço também caberia no limite de memória, mas
+    /// faria de um fluxo que pinga um trabalho quadrático.
+    #[test]
+    fn um_quadro_que_pinga_byte_a_byte_cresce_poucas_vezes() {
+        let tamanho = 256 * 1024;
+        let mut leitor = LeitorDeTela::novo();
+        leitor.empurrar(&abertura()).unwrap();
+        leitor
+            .empurrar(&cabecalho_de_quadro(
+                TipoDeQuadro::Chave,
+                u32::try_from(tamanho).unwrap(),
+            ))
+            .unwrap();
+        for _ in 0..tamanho {
+            leitor.empurrar(&[0xEE]).unwrap();
+        }
+        assert!(
+            leitor.crescimentos <= 4,
+            "um quadro de {tamanho} bytes, byte a byte, cresceu {} vezes",
+            leitor.crescimentos
+        );
+        assert!(
+            matches!(lidos(&mut leitor).last(), Some(LidoDaTela::Quadro { bytes, .. }) if bytes.len() == tamanho)
         );
     }
 
