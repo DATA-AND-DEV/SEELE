@@ -559,7 +559,10 @@ pedem que duas coisas caiam dentro da mesma volta de rede de um pedido.*
 - **Raro — uma recusa que não é de entrada, chegando com uma entrada no ar,** é
   tomada pela entrada (o apelido tomado no mesmo instante em que se pede uma
   sala). É o encaixe do `PedidoRecusado` da F1, acima. *Desde o merge da
-  rodada 2 (`9f87889c`), deixou de existir: ver «O merge do `0.16/lotes`».*
+  rodada 2 (`9f87889c`), deixou de existir contra um servidor 0.16: ver «O
+  merge do `0.16/lotes`». Contra um host 0.15.x, que ainda manda
+  `VoiceRoomEntryRefused` pelo `nao_deu`, ele continua, e continua raro
+  (corrigido pelo controlador depois da re-revisão da rodada 2).*
 - **Raro — o operador que move a pessoa no instante em que ela pede outra
   sala**: a mudança do operador vale, e a resposta ao pedido é descartada. Se o
   servidor leu o pedido depois da mudança e o aceitou, a tela fica na sala do
@@ -799,8 +802,16 @@ dois lados:
   primeira asserção reprovaria com «a recusa não chegou, e o teste mediu
   outra coisa». Agora `continua_em` recebe a recusa que espera, e o M5 espera
   `PedidoRecusado { pedido: "SetNickname", causa: NomeTomado }`. Ele
-  continua verde e continua medindo a mesma coisa: uma recusa que não é de
-  entrada não tira ninguém da sala.
+  continua verde, mas **não mede mais a mesma coisa**: hoje prova que o
+  `PedidoRecusado` não tira ninguém da sala, e já não guarda a regra «uma
+  recusa sem pedido no ar não move ninguém». A re-revisão da rodada 2 mediu
+  isso revertendo a regra: o M5 ficou verde. Quem guarda a regra agora são os
+  dois testes de unidade
+  `assento::…uma_recusa_sem_pedido_no_ar_nao_move_ninguem` e
+  `state::…uma_recusa_sem_pedido_de_entrada_no_ar_nao_tira_da_sala`, que
+  ficam vermelhos com a mesma reversão. A regra continua valendo contra um
+  host 0.15.x, que ainda manda `VoiceRoomEntryRefused` pelo `nao_deu`
+  (corrigido pelo controlador depois da re-revisão da rodada 2).
 - **Com o `PedidoRecusado`, o primeiro raro da rodada 1 deixa de existir.**
   Era a recusa que não é de entrada, tomada pela entrada. Depois do merge, as
   quatro vezes em que o servidor manda `VoiceRoomEntryRefused` ou
