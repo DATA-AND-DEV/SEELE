@@ -5,8 +5,8 @@
 //! com quem tem conta aqui e não está na sala. O servidor manda a lista em
 //! partes (`ServerMessage::Membros`, com `fim` só na última) no começo da
 //! sessão, e avisa quando alguém deixa de ser membro (`MembroBanido`). A
-//! tarefa P5 do plano F1b. O `MembroNovo` entra depois da 4d da F7, porque
-//! mexe no aperto de mão.
+//! tarefa P5 do plano F1b. O `MembroNovo` (quem entra pela primeira vez) entrou
+//! depois da 4d da F7, porque mexe no aperto de mão.
 //!
 //! # Por que um par cru
 //!
@@ -277,6 +277,64 @@ async fn quem_entra_recebe_os_membros_e_fica_sabendo_do_banimento() -> Result<()
         .flat_map(|(membros, _)| apelidos(membros))
         .collect();
     assert_eq!(todos, ["anfitria", "pessoa093", "pessoa094"]);
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// **Quem entra pela primeira vez vira membro para quem já está.** D é conta
+/// nova, e A e C recebem `MembroNovo` com o id e o apelido dela. Quando D volta,
+/// não sai outro: a conta já existia. A prova do «não sai» é a ordem — depois
+/// da volta de D entra E, e o próximo `MembroNovo` que A vê é o de E.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conta_nova_vira_membro_para_quem_ja_esta_e_a_volta_nao() -> Result<()> {
+    let (endereco, daemon) = servidor().await?;
+    let mut a = entrar(endereco, 101).await?;
+    let mut c = entrar(endereco, 103).await?;
+
+    // A já viu C chegar como conta nova; o que se mede aqui é D.
+    let c_para_a = esperar(&mut a, |mensagem| match mensagem {
+        ServerMessage::MembroNovo { membro } => Some(membro.id),
+        _ => None,
+    })
+    .await;
+    assert_eq!(c_para_a, Some(c.person));
+
+    let d = entrar(endereco, 104).await?;
+    let pessoa_d = d.person;
+    for (quem, par) in [("A", &mut a), ("C", &mut c)] {
+        let novo = esperar(par, |mensagem| match mensagem {
+            ServerMessage::MembroNovo { membro } => Some(membro),
+            _ => None,
+        })
+        .await;
+        assert_eq!(
+            novo,
+            Some(Membro {
+                id: pessoa_d,
+                nickname: "pessoa104".into(),
+            }),
+            "{quem} não soube da conta nova"
+        );
+    }
+
+    drop(d);
+    let d_de_novo = entrar(endereco, 104).await?;
+    assert_eq!(d_de_novo.person, pessoa_d, "a volta criou outra conta");
+    let e = entrar(endereco, 105).await?;
+    let proximo = esperar(&mut a, |mensagem| match mensagem {
+        ServerMessage::MembroNovo { membro } => Some(membro),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        proximo,
+        Some(Membro {
+            id: e.person,
+            nickname: "pessoa105".into(),
+        }),
+        "a volta de uma conta que já existia saiu como membro novo"
+    );
 
     daemon.shutdown();
     Ok(())

@@ -1035,8 +1035,8 @@ async fn admitir(
         let guard = server.persistence.lock().await;
         let permissions = Permissions::new(&guard);
 
-        let person = permissions
-            .register_or_find(&public_key, &nickname)
+        let (person, criou) = permissions
+            .registrar_ou_achar(&public_key, &nickname)
             .map_err(|error| {
                 // O apelido tomado ganha razão própria, e é o conserto de um
                 // defeito de campo: «aprovei a entrada e continua dando
@@ -1070,6 +1070,20 @@ async fn admitir(
             return Err(Refusal {
                 reason: DisconnectReason::Banned,
                 detail: format!("person {} is banned", person.id),
+            });
+        }
+
+        // **Uma conta nova é um membro novo** para quem já está (o FORA DO AR,
+        // D-fio-4). Só na criação: quem volta já era membro. Aqui, e não no
+        // `run_session`, porque só o `registrar_ou_achar` sabe que criou; e
+        // vale mesmo que o portão dos MODs, adiante, não a deixe entrar —
+        // a conta existe, e é membro na lista de quem entrar depois.
+        if criou {
+            let _ = server.events.send(Event::MembroNovo {
+                membro: seele_proto::control::Membro {
+                    id: person.id,
+                    nickname: person.nickname.clone(),
+                },
             });
         }
 
@@ -5122,6 +5136,9 @@ fn translate(
         }),
         // Para todo mundo, pela mesma razão do nome: o FORA DO AR é do
         // servidor inteiro.
+        Event::MembroNovo { membro } => Some(ServerMessage::MembroNovo {
+            membro: membro.clone(),
+        }),
         Event::MembroBanido { person } => Some(ServerMessage::MembroBanido { person: *person }),
         Event::MessagePosted(message) => {
             channels

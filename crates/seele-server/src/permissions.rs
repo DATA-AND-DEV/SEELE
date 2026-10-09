@@ -148,6 +148,21 @@ impl<'a> Permissions<'a> {
     /// Returns [`Refusal::NicknameTaken`] if the name belongs to another key, or
     /// a database error.
     pub fn register_or_find(&self, public_key: &[u8], nickname: &str) -> Result<Person> {
+        self.registrar_ou_achar(public_key, nickname)
+            .map(|(person, _criou)| person)
+    }
+
+    /// O mesmo de [`Self::register_or_find`], dizendo se a conta **foi criada
+    /// agora**.
+    ///
+    /// É o que o FORA DO AR (D-fio-4) precisa para anunciar um membro novo
+    /// (`Event::MembroNovo`) só quando ele é novo: quem volta já era membro, e
+    /// um segundo anúncio faria a lista de todo mundo piscar.
+    ///
+    /// # Errors
+    ///
+    /// Os mesmos de [`Self::register_or_find`].
+    pub fn registrar_ou_achar(&self, public_key: &[u8], nickname: &str) -> Result<(Person, bool)> {
         if let Some(id) = self
             .connection
             .query_row(
@@ -198,7 +213,7 @@ impl<'a> Permissions<'a> {
             // servidor nunca teve Comandante; com marca, quem não tem o papel não
             // o tem por decisão de alguém.
             self.claim_never_held_commandership(id)?;
-            return self.person(PersonId(id as u64));
+            return Ok((self.person(PersonId(id as u64))?, false));
         }
 
         let taken: Option<i64> = self
@@ -221,7 +236,7 @@ impl<'a> Permissions<'a> {
         let id = self.connection.last_insert_rowid();
         self.seat_the_arrival(id)?;
 
-        self.person(PersonId(id as u64))
+        Ok((self.person(PersonId(id as u64))?, true))
     }
 
     /// Se `nickname` já é de outra chave: a mesma regra de [`Self::register_or_find`]

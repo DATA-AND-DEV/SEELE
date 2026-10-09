@@ -209,6 +209,15 @@ pub enum Event {
         /// A figura, ou `None` quando foi tirada.
         icon: Option<Vec<u8>>,
     },
+    /// Alguém passou a ser membro deste servidor: uma conta criada agora.
+    ///
+    /// Difundido a todos, pela mesma razão do [`Self::MembroBanido`]. Só na
+    /// criação, e não na volta de quem já tinha conta (ver
+    /// `Permissions::registrar_ou_achar`).
+    MembroNovo {
+        /// Quem.
+        membro: seele_proto::control::Membro,
+    },
     /// Alguém deixou de ser membro deste servidor, por banimento.
     ///
     /// Difundido a todos: o grupo FORA DO AR (D-fio-4) é do servidor inteiro,
