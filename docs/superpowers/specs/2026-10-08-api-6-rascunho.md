@@ -341,8 +341,12 @@ campo. A API 6 acrescenta:
   cancela pela saída do produto. O MOD dá o texto, não o comportamento;
 - **a recusa do servidor volta ao campo que a causou**:
   `formulario.erros({ chave: 'motivo' })`;
-- **`sujo` derivado**: o produto compara com o valor inicial, e a pergunta ao
-  fechar não depende de o MOD chamar `suja`;
+- **`sujo` derivado**: o produto compara o valor atual de cada campo com o
+  inicial, e a pergunta ao fechar não depende de o MOD chamar `suja`. **O MOD
+  pode declarar os dois** (pedido do PERFIS, 09/10): `{ forma: 'campo', chave,
+  valor: <o rascunho guardado>, inicial: <o gravado> }`. Assim o editor que
+  reabre com um rascunho já nasce sujo, e voltar ao gravado o limpa. Sem
+  `inicial`, o inicial é o `valor` da montagem;
 - **confirmação declarada para ação destrutiva**, com as palavras do produto:
   `{ confirmar: 'isto muda a aparência para todo mundo neste servidor' }`
   (ESTILO A13). **Ela se declara em qualquer `botao`**, e não só no primário
@@ -438,9 +442,10 @@ leva, e leva só quem está presente.** Os motivos:
 - **Nenhuma sessão de MOD pediu os ausentes.** O PERFIS pede `me` e «as pessoas
   do servidor, com `id` e apelido» (R4) e a MESA pede «quem está no servidor»
   (item 3), os dois lendo `presentes` hoje.
-- **Os casos que pediriam têm o dado do próprio MOD.** O diretório do PERFIS
-  lista os perfis que a metade de servidor dele guarda, por `id`, estejam as
-  pessoas presentes ou não. A MESA, para dar uma ficha a quem joga e não está,
+- **Os casos que pediriam têm o dado do próprio MOD, ou não pedem.** O
+  diretório do PERFIS **não** lista perfis de quem está ausente: os ids vêm de
+  quem está presente (correção do PERFIS, 09/10, no plano do porte dele). A
+  MESA, para dar uma ficha a quem joga e não está,
   tem a lista de quem já entrou na campanha (a metade de servidor recebe
   `PersonJoined` com o apelido, §7.4).
 - **O MOD não é «todos».** A D-fio-4 diz que todos os presentes veem a lista,
@@ -478,6 +483,27 @@ Mudam, na 6:
   (MESA M14). No celular é comum.
 - **`contribuicao`** ganha o motivo `regiao-ausente` (§11).
 
+**Os nomes das recusas que o MOD recebe** (o K1-m3 da F5: o `erro` que chega ao
+MOD é um nome de lista fechada, e a frase fica na tela). No envio e na leitura
+de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
+(`VolumeRefusal`, `crates/seele-proto/src/volume.rs:70-83` [c]; os `motivo` de
+`apps/seele-app/src/main.rs` [c]):
+
+| nome | quando |
+|---|---|
+| `sem-espera` | não há espera com aquele token, para aquele MOD e aquela pessoa, dentro do prazo |
+| `tipo-recusado` | os bytes não são de um tipo que o MOD declarou aceitar; leva `detectado` quando o produto reconhece o formato (`'heic'`, por exemplo), para o MOD dizer «HEIC não é aceito» |
+| `formato-desconhecido` | os bytes não são de formato nenhum que o produto reconheça |
+| `arquivo-grande-demais` | passa do teto por arquivo |
+| `nao-gravei` | o disco de quem hospeda recusou a escrita |
+| `incompleto` | o fluxo terminou antes do que dizia carregar |
+| `sessao-encerrada` | a sessão acabou no meio |
+
+Hoje o farejador de imagem (`seele_proto::imagem::sniff`) não reconhece HEIC, e
+um HEIC cai em `tipo-recusado` sem `detectado`. Reconhecer o HEIC só para
+nomeá-lo é a tarefa 4 do plano; a conversão no celular, se houver, é da ponte
+da F4.
+
 ### 7.2 Os eventos da tela (novos)
 
 O MOD assina mudanças em vez de consultar o retrato em laço. Cada evento leva
@@ -510,7 +536,14 @@ mundo.avisar({ canal, carga });     // canal opcional: sem ele, o servidor intei
 SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
 ```
 
-- **Só para quem pode ler aquele canal**, e só para as janelas do mesmo MOD.
+- **Só para quem pode ler aquele canal**, e só para as janelas do mesmo MOD,
+  **inclusive a de quem fez o pedido que causou o aviso** (pergunta do PERFIS,
+  09/10): uma regra só, e a janela que gravou confere a revisão e ignora o que
+  já tem.
+- **A carga é um valor JSON** (objeto, lista, texto ou número): a metade de
+  servidor passa o valor, o servidor o serializa (o teto de bytes vale sobre o
+  texto serializado, e o fio leva texto, `ModAviso.carga: String`), e a janela
+  o recebe já lido em `e.carga`.
 - **Teto de tamanho e de taxa** [os números esperam a M3]: proposta, 1 KiB
   por aviso e 4 por segundo por MOD.
 - **O excedente é coalescido por canal, e não descartado** (pedido da MESA,
@@ -849,7 +882,7 @@ de hoje, lidos no código:
 | limite | hoje | onde [c] | na 6 |
 |---|---|---|---|
 | mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **fica 12 KiB por mensagem**, e a superfície ganha a montagem por partes (abaixo) |
-| contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **em aberto**: por ponto e por alvo (cartão, avatar e capa de 64 pessoas dão 192, PERFIS B10, R2) |
+| contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **muda de modelo** (abaixo): os pontos por pessoa deixam de gastar o teto agregado |
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
@@ -862,6 +895,21 @@ de hoje, lidos no código:
 | pedidos em voo / fila da janela | 8 / 128 | `executor.rs:1505`; `base.js:535` | M3 |
 | **novos**: capas animadas, quadros por capa, aviso do servidor | — | — | M3 (§4, §7.3) |
 
+**O teto de contribuições muda de modelo antes do congelamento** (o bloqueio C
+do PERFIS, 09/10). Com cartão, avatar e capa por pessoa, 128 por MOD dão **42
+pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
+
+- **os pontos por alvo** (`pessoa.cartao`, `pessoa.avatar`, `pessoa.capa`,
+  `pessoa.identidade`, `pessoa.detalhes`, `pessoa.acoes`, `canal.item`,
+  `sala.acoes`) **não contam no teto agregado**. Cada um aceita **uma
+  contribuição por alvo e por MOD** (registrar de novo para o mesmo alvo é
+  `atualizar`, e não uma segunda), e até um teto de alvos por ponto, maior que
+  a sala: proposta, 256;
+- **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
+  as entradas de navegação, as ferramentas do compositor;
+- os números (256 alvos, 128 sem alvo) **esperam a M3 com a API 6**, que mede a
+  lista de pessoas com 250 cartões de MOD (tarefa 11).
+
 **A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
 pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha
 `superficie.atualizar(chave, subarvore)`, que troca o nó de `chave` e tudo o
@@ -871,7 +919,9 @@ e não o da mensagem. Uma ficha cheia se monta em partes: o esqueleto numa
 montagem, cada seção (inventário, perícias, notas) num `atualizar`. Uma chave
 que não existe é recusada pelo nome; uma subárvore que leva a superfície além
 dos 4096 nós é recusada com os números. A montagem inteira (`montar`)
-continua, e substitui tudo.
+continua, e substitui tudo. É também o que tira a remontagem da prévia do
+editor do PERFIS a cada tecla (o bloqueio F dele): a prévia é um nó com chave,
+atualizado sozinho.
 
 **Bolsos de mídia por bytes decodificados** (PERFIS R3, M6): hoje uma foto de
 10 MiB gasta metade do bolso de todos os avatares do servidor. Na 6, a mídia de
@@ -995,12 +1045,17 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 
 ## 17. O que as sessões de MOD pediram: o que entrou, o que não entrou e por quê
 
+**As versões dos portes** (D-mods-1, spec-mestre `0703582a`): os três MODs
+portados para a API 6 saem como **4.0.0**, e não 3.4.0. A linha 3.x continua
+sendo a do Servidor 0.15 (pode ganhar uma 3.3.2, uma 3.1.2), e as duas convivem
+no catálogo.
+
 ### PERFIS (R1 a R13)
 
 | # | pedido | situação | por quê |
 |---|---|---|---|
 | R1 | `pessoa.capa` com legibilidade, halo, estados, movimento reduzido e custo | **entrou** (§4) | é a decisão do dono; os números de redução, quadros e capas animadas ficam para a M3 |
-| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou**: `cartoes` sai e o cartão é `pessoa.cartao` com `alvo`, por pessoa; e a citação (`daPessoa`). **Em aberto** só o teto por ponto e alvo (§12, M3) | decisão do dono de 08/10 |
+| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou**: `cartoes` sai e o cartão é `pessoa.cartao` com `alvo`, por pessoa; a citação (`daPessoa`); e os pontos por alvo deixam de gastar o teto agregado (§12; os números com a M3) | decisão do dono de 08/10, e o modelo do teto em 09/10 |
 | R3 | bolsos por bytes decodificados, redução no Rust | **entrou** (§12) | o custo é o quadro decodificado, e não o arquivo |
 | R4 | eventos da tela, retrato projetado, aviso do servidor | **entrou** (§6, §7); o aviso vai no fio da 1.0 (§14) | — |
 | R5 | pedidos endereçados ao servidor | **entrou como regra da v6, sem mudar o fio** (§8): o escopo de servidor (`ChannelId(0)`) já existe e passa a estar no contrato, e a permissão de escrita de cada escopo fica definida | medido: o servidor e o PERFIS servem o pedido sem canal; quem não manda o 0 é a casca comum dos MODs oficiais, e o conserto é do porte |
@@ -1092,6 +1147,20 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | B7 | o terceiro botão e o erro de dois campos | `confirmar` em qualquer `botao`; `formulario.erros` com as duas chaves | §5 |
 | B8 | as peças só no texto | cada uma com teste no produto, na tarefa 17 | §9; plano, 17 |
 | B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | mantido pela leitura (o `mod_data` é por identificador); a prova é a tarefa 18, com a F6 | §9 |
+
+**PERFIS** (`docs/plano-api-6.md` dele):
+
+| # | bloqueio | resposta | onde |
+|---|---|---|---|
+| A | o `daPessoa` sem tarefa | tarefa 6, passo 4b | §4; plano, 6 |
+| B | o `contribuicoes.atualizar` sem tarefa | tarefa 5, passo 6 | plano, 5 |
+| C | 128 contribuições dão 42 pessoas | **o teto muda de modelo**: os pontos por alvo não contam no agregado (uma por alvo e por MOD, até 256 alvos por ponto, a medir) | §12; plano, 5 passo 7 |
+| D | o sujo com o rascunho reaberto | o campo declara `valor` (o rascunho) e `inicial` (o gravado) | §5; plano, 7 |
+| E | o tipo da carga do `ModAviso`, e se a janela de quem gravou recebe | um valor JSON, serializado pelo servidor; e sim, ela recebe | §7.3; plano, 8 passo 4a |
+| F | a montagem parcial e a prévia a cada tecla | `superficie.atualizar(chave, subarvore)`: a prévia é um nó com chave | §12; plano, 7 passo 5c |
+| G | os nomes das recusas (o HEIC, o tipo recusado) | a lista fechada do §7.1, com `tipo-recusado` levando `detectado: 'heic'` | §7.1; plano, 4 passo 5b |
+| H | o `regiao-ausente` sem tarefa | tarefa 5, passo 8 | §11; plano, 5 |
+| — | os ausentes no diretório | corrigido no §6: o diretório lista só quem está presente | §6 |
 
 ## 18. Em aberto
 

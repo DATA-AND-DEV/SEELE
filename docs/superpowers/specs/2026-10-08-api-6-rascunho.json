@@ -27,7 +27,8 @@
     "saem": {
       "regiao": "a faixa de 240 px (U01–U03); nenhum oficial a pinta",
       "cartoes": "trocada por pessoa.cartao com alvo (PERFIS A1, R2)"
-    }
+    },
+    "versoes-dos-portes": "os três MODs oficiais portados saem como 4.0.0 (D-mods-1); a 3.x é a linha do Servidor 0.15"
   },
   "handlers": [
     "aoPedir",
@@ -104,7 +105,7 @@
     "mundo.buscar": "mundo::buscar",
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
-    "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (ModAviso, ordinal 46, no contrato da 1.0); acima do teto, coalescido por canal (o mais novo de cada canal sai assim que a taxa deixa); só sai depois de o quintal gravar",
+    "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (ModAviso, ordinal 46, no contrato da 1.0); acima do teto, coalescido por canal (o mais novo de cada canal sai assim que a taxa deixa); só sai depois de o quintal gravar; a carga é um valor JSON, serializado pelo servidor (o teto vale sobre o texto) e entregue já lido; a janela de quem fez o pedido também recebe",
     "mundo.tema": "novo: a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; confere os pares e devolve a recusa com o par e a razão; o servidor guarda o tema e o manda em TemaMudou (ordinal 47) logo depois do Session"
   },
   "moments": [
@@ -384,7 +385,7 @@
       "«usar apresentação padrão» existe no controle nativo de MODs",
       "uma contribuição para uma região que a casca não tem é recusada com motivo nomeado, e a aba DIAGNÓSTICO conta"
     ],
-    "teto": "EM ABERTO (M3): 128 por MOD hoje; proposta por ponto e por alvo (PERFIS B10, R2)",
+    "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (proposta 256); o agregado (proposta 128) é dos pontos sem alvo; os números com a M3",
     "descarte": "sai com a instância do MOD",
     "servidor.aparencia": "sai dos pontos registráveis: é a porta de quem vê sobre o tema declarado pelo servidor («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
@@ -449,7 +450,7 @@
         "erro": "em toda forma de entrada, inclusive cor e escolha",
         "botoes": "primário (envia todos os valores juntos) e secundário (sai), montados pelo produto",
         "recusa-do-servidor": "formulario.erros({ chave: motivo })",
-        "sujo": "derivado pelo produto contra o valor inicial",
+        "sujo": "derivado pelo produto, valor atual contra inicial; o MOD pode declarar os dois: { forma: 'campo', chave, valor: <rascunho>, inicial: <gravado> }; sem inicial, o inicial é o valor da montagem",
         "confirmacao": "declarada em qualquer botao (não só no primário), com as palavras do produto; o evento botao só chega depois do sim",
         "emProgresso": "o primário ignora o segundo clique",
         "erros-de-dois-campos": "formulario.erros({ a: motivo, b: motivo }); a resposta da metade de servidor é protocolo do próprio MOD"
@@ -645,5 +646,17 @@
     "todo nome da metade de servidor que a v6 lista é um nome que o runtime expõe: own e world conferidos contra as globais e membros registrados em crates/seele-server/src/mods/mod.rs, e não contra um símbolo qualquer (a regra que pegaria os 13 verbos e as 19 leituras da v1)",
     "todo teto que a v6 declara é o teto que o produto aplica: superficies.limites, contribuicoes.teto e os bolsos de mídia conferidos contra as constantes do renderer, e uma bancada prova o comportamento da mídia na superfície",
     "o escopo de um pedido está no contrato: 0 é o servidor, um id é o canal; e a permissão de escrita de cada escopo está definida (rascunho §8)"
-  ]
+  ],
+  "recusas": {
+    "o-que-e": "o erro que o MOD recebe é um nome de lista fechada (K1-m3); a frase fica na tela",
+    "volume": [
+      "sem-espera",
+      "tipo-recusado (com detectado, por exemplo 'heic')",
+      "formato-desconhecido",
+      "arquivo-grande-demais",
+      "nao-gravei",
+      "incompleto",
+      "sessao-encerrada"
+    ]
+  }
 }
