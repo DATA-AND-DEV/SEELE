@@ -5154,7 +5154,7 @@ dependencies = [
 name = "seele-motor-web"
 version = "0.0.0"
 dependencies = [
- "rquickjs",
+ "seele-motor",
  "serde_json",
 ]
 

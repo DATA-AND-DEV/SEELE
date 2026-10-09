@@ -77,9 +77,9 @@ const RULES: &[(&str, &[&str])] = &[
     // API entram como lista. O desktop e o celular a embrulham, cada um com a
     // sua espera, e nenhum dos dois reimplementa nada dela.
     ("seele-motor", &[]),
-    // O motor de MODs do celular (ADR 0057, D-web-1): o QuickJS do desktop em
-    // `wasm32-wasip1`, que roda num Worker separado do protocolo. Folha.
-    ("seele-motor-web", &[]),
+    // O motor de MODs do celular (ADR 0057, D-web-1): o `seele-motor` em
+    // `wasm32-wasip1`, num Worker separado do protocolo. Só a fronteira.
+    ("seele-motor-web", &["seele-motor"]),
     // The daemon speaks the wire format and nothing else.
     ("seele-server", &["seele-proto"]),
     // Shells translate events into pixels and input into commands. Nothing more.
@@ -284,12 +284,12 @@ mod tests {
         assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
     }
 
-    /// O motor de MODs do celular é uma folha: o QuickJS e mais nada. Uma
-    /// aresta para o `seele-web` misturaria o código do MOD com o do protocolo
-    /// no mesmo `.wasm`, que é o que a forma AB separa.
+    /// O motor de MODs do celular vê só a volta, o `seele-motor`. Uma aresta
+    /// para o `seele-web` misturaria o código do MOD com o do protocolo no
+    /// mesmo `.wasm`, que é o que a forma AB separa.
     #[test]
-    fn o_motor_do_celular_nao_depende_de_ninguem_do_workspace() {
-        assert!(evaluate("seele-motor-web", &[]).is_empty());
+    fn o_motor_do_celular_so_ve_a_volta() {
+        assert!(evaluate("seele-motor-web", &[edge("seele-motor")]).is_empty());
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
     }

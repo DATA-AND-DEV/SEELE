@@ -803,6 +803,19 @@ impl NivelDoConsole {
             _ => Self::Informacao,
         }
     }
+
+    /// O método do `console` do navegador que diz este nível: o inverso de
+    /// [`NivelDoConsole::do_metodo`], para quem leva a linha a uma página (o
+    /// celular) ou a um texto que compara o nativo com o `.wasm`.
+    #[must_use]
+    pub fn metodo(self) -> &'static str {
+        match self {
+            Self::Depuracao => "debug",
+            Self::Informacao => "info",
+            Self::Aviso => "warn",
+            Self::Erro => "error",
+        }
+    }
 }
 
 /// Corta uma linha de `console` no teto de uma frase do registro, e diz que
@@ -928,6 +941,34 @@ pub enum ParaOFora {
         /// Quantas linhas o balde segurou antes desta. Zero é o normal.
         suprimidas: u32,
     },
+}
+
+impl ParaOFora {
+    /// A fala em JSON, para quem a leva por um canal de texto: o Worker do
+    /// celular, e as bancadas que comparam o nativo com o `.wasm`. Os nomes são
+    /// os que o `iframe` dos executores aceita (`ui/executor-de-mod.html`).
+    #[must_use]
+    pub fn em_json(&self) -> serde_json::Value {
+        match self {
+            Self::Mensagem(corpo) => serde_json::json!({ "tipo": "mensagem", "corpo": corpo }),
+            Self::Falhou(corpo) => serde_json::json!({ "tipo": "falhou", "corpo": corpo }),
+            Self::Interrompido => serde_json::json!({ "tipo": "interrompido" }),
+            Self::Parou => serde_json::json!({ "tipo": "parou" }),
+            Self::Diagnostico { relogios } => {
+                serde_json::json!({ "tipo": "diagnostico", "relogios": relogios })
+            }
+            Self::Console {
+                nivel,
+                texto,
+                suprimidas,
+            } => serde_json::json!({
+                "tipo": "console",
+                "nivel": nivel.metodo(),
+                "texto": texto,
+                "suprimidas": suprimidas,
+            }),
+        }
+    }
 }
 
 /// O que o MOD pediu de temporizador, como o prelúdio o escreve.
