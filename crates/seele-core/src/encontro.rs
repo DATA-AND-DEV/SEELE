@@ -49,7 +49,57 @@ use seele_proto::uri::Bilhete;
 // `Marca` e `Marcas` reexportadas: quem chama `onde_mora_hoje` de fora precisa
 // das marcas prontas, e fazê-las vir daqui poupa a camada de cima de nomear
 // `seele-proto`, que o ADR 0002 não deixa a casca alcançar de qualquer jeito.
-pub use seele_proto::encontro::{Marca, Marcas};
+pub use seele_proto::encontro::{Marca, Marcas, PONTO_PADRAO, VARIAVEL};
+
+/// O ponto de encontro de quem liga por código: o que `$SEELE_ENCONTRO` diz,
+/// e o [`PONTO_PADRAO`] sem ela. `None` quando a variável o desliga: sem
+/// ponto, código não funciona, e link com endereço continua funcionando.
+///
+/// **Só a produção chama isto**, como o `com_o_ponto_padrao` de quem hospeda
+/// (a decisão (d) do lote G-servidor da F5): os testes dão o ponto deles a
+/// [`localizar`]. A leitura do ambiente é a única, a de
+/// `seele_proto::encontro::ponto_escolhido`. Um código não carrega ponto
+/// nenhum, e com `$SEELE_ENCONTRO` as duas pontas precisam do mesmo.
+#[must_use]
+pub fn ponto_de_quem_liga() -> Option<String> {
+    encontro::ponto_escolhido(std::env::var(VARIAVEL).ok().as_deref(), Some(PONTO_PADRAO))
+}
+
+// A feature do guarda nunca entra num build otimizado: com ela, perguntar ao
+// ponto padrão entra em pânico, e é o que o produto faz ao ligar por código.
+// Ver o gêmeo dela no `seele-server`.
+#[cfg(all(feature = "recusar-encontro-de-producao", not(debug_assertions)))]
+compile_error!(
+    "a feature `recusar-encontro-de-producao` do seele-core é só de teste e não pode ir num \
+     build otimizado: com ela, ligar por código pelo ponto de encontro padrão entra em pânico"
+);
+
+/// O gêmeo do guarda da F5, do lado de quem liga: nenhum teste pergunta à VPS
+/// de produção, nem pelo quarto ([`localizar`], [`onde_mora_hoje`]) nem pela
+/// batida (o `LEVE`).
+///
+/// A regra é a mesma do guarda de quem hospeda,
+/// `seele_proto::encontro::aponta_para_a_producao`: o [`PONTO_PADRAO`] escrito
+/// como for, ou um IP da rede dele. Age antes do DNS, nos dois lugares em que
+/// este módulo resolve um ponto. Ligado nos testes deste crate (`cfg(test)`) e
+/// pela feature `recusar-encontro-de-producao`, que só a `[dev-dependencies]`
+/// do `seele-conformance` pede; fora disso, não faz nada.
+///
+/// `onde` vai na frase do pânico e diz qual dos dois lugares pegou o teste.
+#[cfg(any(test, feature = "recusar-encontro-de-producao"))]
+#[track_caller]
+fn recusar_a_producao(ponto: &str, onde: &str) {
+    assert!(
+        !encontro::aponta_para_a_producao(ponto),
+        "um teste ia perguntar ao ponto de encontro de produção («{ponto}», pego em {onde}): \
+         cada rodada mandaria pacotes de teste à VPS de produção, e o teste passaria a depender \
+         da rede de fora. Dê a ele um ponto local"
+    );
+}
+
+/// Fora dos testes, nada: ver a versão ligada logo acima.
+#[cfg(not(any(test, feature = "recusar-encontro-de-producao")))]
+fn recusar_a_producao(_ponto: &str, _onde: &str) {}
 
 /// Quanto tempo se gasta batendo antes de desistir e conectar assim mesmo.
 ///
@@ -245,6 +295,8 @@ impl Batida {
 
 /// Onde o ponto de encontro atende.
 async fn resolver(bilhete: &Bilhete) -> Option<SocketAddr> {
+    // Nos testes, antes do DNS: ver [`recusar_a_producao`].
+    recusar_a_producao(&bilhete.ponto, "encontro::resolver, a batida, antes do DNS");
     let alvo = bilhete.ponto().ok()?;
     let aviso = bilhete.aviso().ok()?;
     let achados: Vec<SocketAddr> = tokio::net::lookup_host((alvo.maquina, alvo.porta))
@@ -338,6 +390,8 @@ fn mapear(destino: SocketAddr, socket: &tokio::net::UdpSocket) -> SocketAddr {
 /// quem lê o log distingue um texto que não é endereço de um nome que não
 /// resolve.
 async fn resolver_ponto(ponto: &str) -> Vec<SocketAddr> {
+    // Nos testes, antes do DNS: ver [`recusar_a_producao`].
+    recusar_a_producao(ponto, "encontro::resolver_ponto, antes do DNS");
     let alvo = match seele_proto::uri::separar_ponto(ponto) {
         Ok(alvo) => alvo,
         Err(erro) => {
@@ -536,7 +590,8 @@ impl OndeMora {
     /// Quem toma **as duas** marcas passa por aqui: o servidor dele mora no IP
     /// dele. O TLS recusa o servidor errado logo depois, e o convite, a senha e
     /// o apelido não saem. O que sai antes é o `LEVE`, com o IP e a porta
-    /// públicos de quem chega, até o SEELE-ENC/2 (Plano 4).
+    /// públicos de quem chega. Isto é do servidor guardado, que continua no
+    /// ENC/1: a sala pessoal se registra assinada pelo ENC/2 ([`localizar`]).
     ///
     /// **Compara o IP, e não a porta**: os dois sockets têm portas diferentes,
     /// e é a porta que o NAT troca. O IPv4 escrito como IPv6 mapeado
@@ -713,6 +768,91 @@ pub fn bilhete_desta_volta(guardado: &Bilhete, no_quarto: &OndeMora) -> Bilhete 
 /// `seele.log` grava): o prazo que venceu, o envio que o sistema recusou, a
 /// leitura que falhou, o endereço que a consulta deixou pelo seguinte.
 pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> OndeMora {
+    consultar_o_ponto(
+        ponto,
+        || PeloQuem::nova(marcas),
+        prazo,
+        "quarto: onde o anfitrião mora hoje",
+    )
+    .await
+}
+
+/// Onde a sala pessoal de quem tem estas marcas mora **agora**, pelo ENC/2
+/// (ADR 0062): o socket do servidor, a escuta de avisos e as dicas de rede
+/// local.
+///
+/// As marcas são as da sala (`Marcas::da_sala`), e as perguntas são o `QUEM2`
+/// de cada uma, com o `ONDE` da versão 1 como sonda. É a sonda que separa os
+/// quatro casos que, para quem liga, apontam para lugares diferentes
+/// ([`Localizacao`]): o ponto fala o ENC/2 e a sala está lá; fala, e ela não
+/// está (`NINGUEM`); responde ao `ONDE` e cala o `QUEM2`, porque é anterior ao
+/// ENC/2; ou não responde a nada.
+///
+/// Custa o que [`onde_mora_hoje`] custa, caso a caso, e passa pelo mesmo laço:
+/// três perguntas por volta, até três voltas, o teto depois da primeira
+/// resposta, e o endereço seguinte do ponto só quando nada saiu pelo primeiro.
+/// **Uma diferença**: enquanto só a sonda respondeu, a pergunta se repete a um
+/// ponto que está no ar, porque um ponto com o limite estourado diz a recusa uma
+/// vez por segundo e cala o resto. O caso [`Localizacao::Enc2Calado`] paga o
+/// prazo inteiro. O resultado vai para o log, como lá, sem as marcas: elas são
+/// o código de quem se procurava.
+pub async fn localizar(ponto: &str, marcas: &Marcas, prazo: Duration) -> Localizacao {
+    consultar_o_ponto(
+        ponto,
+        || PeloQuem2::nova(marcas),
+        prazo,
+        "quarto: onde a sala mora hoje (ENC/2)",
+    )
+    .await
+}
+
+/// O que [`localizar`] achou, para quem liga pelo código dizer o que houve
+/// (spec de 23/09/2026, «Erros e frases»).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Localizacao {
+    /// O ponto deu pelo menos um endereço da sala.
+    ///
+    /// Um dos dois pode faltar, quando a resposta sobre ele não voltou a
+    /// tempo. As duas marcas só se registram com a chave da pessoa, então a
+    /// escuta não precisa da regra do IP do servidor que a do ENC/1 precisa
+    /// ([`OndeMora::escuta_do_anfitriao`]).
+    Achada {
+        /// Para onde se conecta, visto de fora.
+        servidor: Option<SocketAddr>,
+        /// Para onde vai o `LEVE`, com a marca do aviso da sala.
+        escuta: Option<SocketAddr>,
+        /// As dicas de rede local do servidor, já conferidas por
+        /// `seele_proto::encontro::serve_de_dica`: é por elas que duas pessoas
+        /// na mesma casa se ligam sem *hairpin* no roteador.
+        dicas: Vec<SocketAddr>,
+    },
+    /// O ponto fala o ENC/2 e disse `NINGUEM`: a sala não está registrada. O
+    /// SEELE do outro lado está fechado, ou não está recebendo ligações.
+    NinguemMora,
+    /// O ponto respondeu ao `ONDE` e calou para o `QUEM2`, mesmo perguntado de
+    /// novo dentro do prazo. Dois casos dão isto, e a culpa não é de quem
+    /// recebe em nenhum: o ponto é anterior ao ENC/2 (ninguém acha ninguém pelo
+    /// código nele), ou está recusando os pedidos desta rede por excesso e a
+    /// recusa, que ele diz uma vez por segundo, foi para outro pedido.
+    Enc2Calado,
+    /// O ponto recusou por excesso de pedidos desta rede (o limite é por
+    /// endereço público, e a rede pode dividi-lo com outras pessoas).
+    PontoRecusou,
+    /// O ponto não respondeu a nada no prazo, ou a pergunta nem saiu. Como em
+    /// [`OndeMora::PontoMudo`].
+    PontoMudo,
+    /// O texto do ponto não é um endereço, ou o nome não resolveu no prazo.
+    PontoNaoResolve,
+}
+
+/// O que as duas consultas ao quarto têm em comum: resolver o ponto dentro do
+/// prazo, perguntar endereço por endereço, e dizer no log o que voltou.
+async fn consultar_o_ponto<C: Consulta>(
+    ponto: &str,
+    nova: impl Fn() -> C,
+    prazo: Duration,
+    o_que: &'static str,
+) -> C::Resposta {
     // **O prazo cobre a consulta inteira, e resolver o nome é parte dela.**
     // Numa rede sem internet (duas máquinas na mesma casa, o caso que menos
     // precisa de ponto de encontro), resolver o nome não falha rápido: espera
@@ -723,24 +863,36 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
     let ate = comecou + prazo;
     let resposta = match tokio::time::timeout_at(ate, resolver_ponto(ponto)).await {
         // `resolver_ponto` já deixou no log por que não achou.
-        Ok(destinos) if destinos.is_empty() => OndeMora::PontoNaoResolve,
-        Ok(destinos) => consultar(&destinos, marcas, ate).await,
+        Ok(destinos) if destinos.is_empty() => C::nao_resolve(),
+        Ok(destinos) => consultar_com_todos(&destinos, nova, ate).await,
         Err(_) => {
             tracing::info!(
                 ponto,
                 ?prazo,
                 "quarto: o nome do ponto de encontro não resolveu dentro do prazo"
             );
-            OndeMora::PontoNaoResolve
+            C::nao_resolve()
         }
     };
     tracing::info!(
         %ponto,
         ?resposta,
         levou = ?comecou.elapsed(),
-        "quarto: onde o anfitrião mora hoje"
+        "{o_que}"
     );
     resposta
+}
+
+/// A consulta do ENC/1 pelos endereços do ponto: [`consultar_com_todos`] com
+/// [`PeloQuem`], o mesmo caminho de [`onde_mora_hoje`]. Os testes do laço a
+/// chamam pelo nome de antes do ENC/2.
+#[cfg(test)]
+async fn consultar(
+    destinos: &[SocketAddr],
+    marcas: &Marcas,
+    ate: tokio::time::Instant,
+) -> OndeMora {
+    consultar_com_todos(destinos, || PeloQuem::nova(marcas), ate).await
 }
 
 /// A consulta pelos endereços do ponto, um de cada vez, **dentro do mesmo
@@ -755,15 +907,15 @@ pub async fn onde_mora_hoje(ponto: &str, marcas: &Marcas, prazo: Duration) -> On
 /// endereço: ele está no ar ou fora do ar pelos dois. A escolha é
 /// [`escolher`].
 ///
-/// Sem endereço que sirva, [`OndeMora::PontoMudo`], como antes: para fora,
-/// [`OndeMora`] não muda.
-async fn consultar(
+/// Sem endereço que sirva, o «ponto mudo» de cada consulta, como antes: para
+/// fora, [`OndeMora`] não muda.
+async fn consultar_com_todos<C: Consulta>(
     destinos: &[SocketAddr],
-    marcas: &Marcas,
+    nova: impl Fn() -> C,
     ate: tokio::time::Instant,
-) -> OndeMora {
+) -> C::Resposta {
     for (indice, destino) in destinos.iter().enumerate() {
-        match escolher(perguntar_a(*destino, marcas, ate).await) {
+        match escolher(perguntar_a(*destino, nova(), ate).await) {
             Escolha::Devolver(resposta) => return resposta,
             Escolha::TentarOSeguinte => {
                 // A causa deste endereço já está no log, numa linha de quem
@@ -779,50 +931,54 @@ async fn consultar(
             }
         }
     }
-    OndeMora::PontoMudo
+    C::mudo()
 }
 
 /// O que a consulta por um endereço do ponto deu, **por dentro**.
 ///
 /// Para fora, os dois primeiros e um ponto que calou até o prazo são o mesmo
-/// [`OndeMora::PontoMudo`]. Por dentro eles se separam, porque só os dois
-/// primeiros dizem que vale tentar o endereço seguinte: neles nenhuma pergunta
-/// chegou a sair, e o ponto não teve chance de responder.
+/// «ponto mudo». Por dentro eles se separam, porque só os dois primeiros dizem
+/// que vale tentar o endereço seguinte: neles nenhuma pergunta chegou a sair, e
+/// o ponto não teve chance de responder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PorUmEndereco {
+enum Desfecho<R> {
     /// O socket da família deste endereço não abriu.
     SemSocket,
     /// Nenhuma pergunta da primeira volta saiu: o sistema recusou as três.
     NadaSaiu,
     /// As perguntas saíram, e isto é o que o ponto disse, ou calou, até a
     /// consulta acabar.
-    Perguntou(OndeMora),
+    Perguntou(R),
 }
 
-/// O que [`consultar`] faz com o que um endereço deu.
+/// O [`Desfecho`] da consulta do ENC/1, pelo nome que os testes do laço usam.
+#[cfg(test)]
+type PorUmEndereco = Desfecho<OndeMora>;
+
+/// O que [`consultar_com_todos`] faz com o que um endereço deu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Escolha {
+enum Escolha<R> {
     /// A consulta acaba com esta resposta.
-    Devolver(OndeMora),
+    Devolver(R),
     /// Nenhuma pergunta saiu por este endereço: vale o seguinte.
     TentarOSeguinte,
 }
 
-/// A escolha de [`consultar`] depois de um endereço do ponto.
-fn escolher(desfecho: PorUmEndereco) -> Escolha {
+/// A escolha de [`consultar_com_todos`] depois de um endereço do ponto.
+fn escolher<R>(desfecho: Desfecho<R>) -> Escolha<R> {
     match desfecho {
-        PorUmEndereco::SemSocket | PorUmEndereco::NadaSaiu => Escolha::TentarOSeguinte,
-        PorUmEndereco::Perguntou(resposta) => Escolha::Devolver(resposta),
+        Desfecho::SemSocket | Desfecho::NadaSaiu => Escolha::TentarOSeguinte,
+        Desfecho::Perguntou(resposta) => Escolha::Devolver(resposta),
     }
 }
 
 /// Abre um socket da família de `destino` e pergunta por ele
-/// ([`consultar_por`]).
-async fn perguntar_a(
+/// ([`consultar_com`]).
+async fn perguntar_a<C: Consulta>(
     destino: SocketAddr,
-    marcas: &Marcas,
+    consulta: C,
     ate: tokio::time::Instant,
-) -> PorUmEndereco {
+) -> Desfecho<C::Resposta> {
     let local = if destino.is_ipv4() {
         SocketAddr::from(([0, 0, 0, 0], 0))
     } else {
@@ -832,18 +988,275 @@ async fn perguntar_a(
         Ok(socket) => socket,
         Err(erro) => {
             tracing::info!(%erro, %destino, "quarto: não abriu socket para perguntar");
-            return PorUmEndereco::SemSocket;
+            return Desfecho::SemSocket;
         }
     };
-    consultar_por(&socket, destino, marcas, ate).await
+    consultar_com(&socket, destino, consulta, ate).await
+}
+
+/// O que uma consulta ao quarto pergunta, como lê as respostas, e o que
+/// devolve. São duas: o `QUEM` do ENC/1 ([`PeloQuem`]) e o `QUEM2` do ENC/2
+/// ([`PeloQuem2`]). O laço que as pergunta é um só, [`consultar_com`], e é nele
+/// que mora tudo o que custou a acertar: as voltas, o teto depois da primeira
+/// resposta, a volta recusada que conta.
+trait Consulta: std::fmt::Debug {
+    /// O que a consulta devolve.
+    type Resposta: std::fmt::Debug;
+    /// As três perguntas de cada volta: as duas marcas e a sonda (`ONDE`).
+    fn pedidos(&self, sonda: &Marca) -> [Vec<u8>; 3];
+    /// Lê um datagrama do ponto. `None` quando ele não é deste protocolo, e
+    /// então não conta como resposta.
+    fn ler(&mut self, datagrama: &[u8], sonda: &Marca) -> Option<Lido>;
+    /// Se as duas marcas já responderam.
+    fn completa(&self) -> bool;
+    /// Se vale perguntar de novo a um ponto que já respondeu a alguma coisa.
+    ///
+    /// No ENC/1, não: a pergunta não se repete a um ponto que está no ar, e o
+    /// teto depois da primeira resposta decide quanto se espera. No ENC/2, sim,
+    /// enquanto só a sonda respondeu: um ponto com o limite estourado cala o
+    /// `QUEM2` e diz a recusa uma vez por segundo, e é a volta seguinte que a
+    /// ouve.
+    fn espera_mais(&self) -> bool {
+        false
+    }
+    /// O que a consulta devolve com o que chegou, sabendo se o ponto
+    /// respondeu a alguma coisa.
+    fn concluir(self, no_ar: bool) -> Self::Resposta;
+    /// Nenhum endereço do ponto serviu.
+    fn mudo() -> Self::Resposta;
+    /// O ponto não resolveu.
+    fn nao_resolve() -> Self::Resposta;
+}
+
+/// O que um datagrama lido do ponto era.
+enum Lido {
+    /// A resposta à sonda: o ponto está no ar, e dela sai a ida e volta.
+    Sonda,
+    /// Outra resposta do ponto: uma das marcas, ou uma que não é de ninguém.
+    /// O ponto está no ar.
+    Outra,
+}
+
+/// A consulta do ENC/1: `QUEM` pelas duas marcas, e o `ONDE` como sonda.
+struct PeloQuem<'m> {
+    marcas: &'m Marcas,
+    servidor: Option<SocketAddr>,
+    escuta: Option<SocketAddr>,
+}
+
+impl<'m> PeloQuem<'m> {
+    fn nova(marcas: &'m Marcas) -> Self {
+        Self {
+            marcas,
+            servidor: None,
+            escuta: None,
+        }
+    }
+}
+
+/// Só o que o ponto respondeu, e nunca as marcas: o rastro vai no `seele.log`,
+/// e a marca diz quem se procurava.
+impl std::fmt::Debug for PeloQuem<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PeloQuem")
+            .field("servidor", &self.servidor)
+            .field("escuta", &self.escuta)
+            .finish()
+    }
+}
+
+impl Consulta for PeloQuem<'_> {
+    type Resposta = OndeMora;
+
+    fn pedidos(&self, sonda: &Marca) -> [Vec<u8>; 3] {
+        [
+            encontro::quem(self.marcas.servidor()),
+            encontro::quem(self.marcas.escuta()),
+            encontro::onde(sonda),
+        ]
+    }
+
+    fn ler(&mut self, datagrama: &[u8], sonda: &Marca) -> Option<Lido> {
+        let (marca, endereco) = encontro::ler_aqui(datagrama)?;
+        if marca == *sonda {
+            return Some(Lido::Sonda);
+        }
+        if marca == *self.marcas.servidor() {
+            self.servidor = Some(endereco);
+        } else if marca == *self.marcas.escuta() {
+            self.escuta = Some(endereco);
+        }
+        Some(Lido::Outra)
+    }
+
+    fn completa(&self) -> bool {
+        self.servidor.is_some() && self.escuta.is_some()
+    }
+
+    fn concluir(self, no_ar: bool) -> OndeMora {
+        match (self.servidor, self.escuta) {
+            (None, None) if no_ar => OndeMora::NinguemMora,
+            (None, None) => OndeMora::PontoMudo,
+            (servidor, escuta) => OndeMora::Achado { servidor, escuta },
+        }
+    }
+
+    fn mudo() -> OndeMora {
+        OndeMora::PontoMudo
+    }
+
+    fn nao_resolve() -> OndeMora {
+        OndeMora::PontoNaoResolve
+    }
+}
+
+/// A consulta do ENC/2: `QUEM2` pelas duas marcas da sala, e o `ONDE` da
+/// versão 1 como sonda. É a sonda que separa «o ponto não fala o ENC/2» (ela
+/// responde, e os `QUEM2` calam) de «ninguém mora» (os `QUEM2` dizem
+/// `NINGUEM`).
+///
+/// Um `AQUI` da versão 1 com a marca da sala não é endereço da sala: só o
+/// `AQUI2` é. A marca da sala não se registra pela versão 1 num ponto com o
+/// ENC/2, e um ponto sem ele não a guarda assinada.
+struct PeloQuem2<'m> {
+    marcas: &'m Marcas,
+    servidor: Option<encontro::Resposta2>,
+    escuta: Option<encontro::Resposta2>,
+}
+
+impl<'m> PeloQuem2<'m> {
+    fn nova(marcas: &'m Marcas) -> Self {
+        Self {
+            marcas,
+            servidor: None,
+            escuta: None,
+        }
+    }
+}
+
+/// Só o que o ponto respondeu, sem a marca: no ENC/2 a marca é o código de
+/// quem se procurava, e o rastro vai no `seele.log`.
+impl std::fmt::Debug for PeloQuem2<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// A resposta sem a marca.
+        fn sem_marca(resposta: Option<&encontro::Resposta2>) -> String {
+            match resposta {
+                None => "nada".to_owned(),
+                Some(encontro::Resposta2::Aqui2 {
+                    endereco, dicas, ..
+                }) => format!("AQUI2 {endereco} dicas={dicas:?}"),
+                Some(encontro::Resposta2::Ninguem { .. }) => "NINGUEM".to_owned(),
+                Some(encontro::Resposta2::Recusa { motivo, agora, .. }) => {
+                    format!("RECUSA {} {agora}", motivo.texto())
+                }
+                Some(encontro::Resposta2::Morou { endereco, .. }) => format!("MOROU {endereco}"),
+                Some(encontro::Resposta2::Desafio { .. }) => "DESAFIO".to_owned(),
+            }
+        }
+        f.debug_struct("PeloQuem2")
+            .field("servidor", &sem_marca(self.servidor.as_ref()))
+            .field("escuta", &sem_marca(self.escuta.as_ref()))
+            .finish()
+    }
+}
+
+impl Consulta for PeloQuem2<'_> {
+    type Resposta = Localizacao;
+
+    fn pedidos(&self, sonda: &Marca) -> [Vec<u8>; 3] {
+        [
+            encontro::quem2(self.marcas.servidor()),
+            encontro::quem2(self.marcas.escuta()),
+            encontro::onde(sonda),
+        ]
+    }
+
+    fn ler(&mut self, datagrama: &[u8], sonda: &Marca) -> Option<Lido> {
+        if let Some((marca, _)) = encontro::ler_aqui(datagrama) {
+            return Some(if marca == *sonda {
+                Lido::Sonda
+            } else {
+                Lido::Outra
+            });
+        }
+        let resposta = encontro::ler_resposta2(datagrama)?;
+        if resposta.marca() == self.marcas.servidor() {
+            self.servidor = Some(resposta);
+        } else if resposta.marca() == self.marcas.escuta() {
+            self.escuta = Some(resposta);
+        }
+        Some(Lido::Outra)
+    }
+
+    fn completa(&self) -> bool {
+        self.servidor.is_some() && self.escuta.is_some()
+    }
+
+    fn espera_mais(&self) -> bool {
+        self.servidor.is_none() && self.escuta.is_none()
+    }
+
+    fn concluir(self, no_ar: bool) -> Localizacao {
+        let endereco = |resposta: &Option<encontro::Resposta2>| match resposta {
+            Some(encontro::Resposta2::Aqui2 { endereco, .. }) => Some(*endereco),
+            _ => None,
+        };
+        let (servidor, escuta) = (endereco(&self.servidor), endereco(&self.escuta));
+        if servidor.is_some() || escuta.is_some() {
+            let dicas = match self.servidor {
+                Some(encontro::Resposta2::Aqui2 { dicas, .. }) => dicas,
+                _ => Vec::new(),
+            };
+            return Localizacao::Achada {
+                servidor,
+                escuta,
+                dicas,
+            };
+        }
+        let respostas = [self.servidor, self.escuta];
+        if respostas
+            .iter()
+            .flatten()
+            .any(|resposta| matches!(resposta, encontro::Resposta2::Recusa { .. }))
+        {
+            Localizacao::PontoRecusou
+        } else if respostas.iter().flatten().next().is_some() {
+            Localizacao::NinguemMora
+        } else if no_ar {
+            Localizacao::Enc2Calado
+        } else {
+            Localizacao::PontoMudo
+        }
+    }
+
+    fn mudo() -> Localizacao {
+        Localizacao::PontoMudo
+    }
+
+    fn nao_resolve() -> Localizacao {
+        Localizacao::PontoNaoResolve
+    }
+}
+
+/// A consulta do ENC/1 por um endereço, num socket já aberto: [`consultar_com`]
+/// com [`PeloQuem`], o mesmo caminho de [`onde_mora_hoje`]. Os testes do laço a
+/// chamam pelo nome de antes do ENC/2.
+#[cfg(test)]
+async fn consultar_por(
+    canal: &impl Canal,
+    destino: SocketAddr,
+    marcas: &Marcas,
+    ate: tokio::time::Instant,
+) -> PorUmEndereco {
+    consultar_com(canal, destino, PeloQuem::nova(marcas), ate).await
 }
 
 /// As três perguntas a um endereço do ponto, num socket já aberto, repetidas
 /// até alguém responder ou o prazo vencer.
 ///
 /// Um socket só para as três: as respostas se separam pela marca, e é o `ONDE`
-/// saindo pelo mesmo caminho que as `QUEM` que prova que aquele caminho
-/// funciona.
+/// saindo pelo mesmo caminho que as perguntas das marcas que prova que aquele
+/// caminho funciona.
 ///
 /// Sai do laço, e com isso decide quanto a conexão espera (a lista caso a caso
 /// está em [`onde_mora_hoje`]):
@@ -857,32 +1270,26 @@ async fn perguntar_a(
 ///   falhou;
 /// - no prazo, quando nada respondeu.
 ///
-/// Separado de [`perguntar_a`] só para o teste poder dar o socket. É assim que
-/// ele manda a esta consulta um `AQUI` de outro IP, e prova a chamada de
+/// Recebe o socket, e não o abre, só para o teste poder dar o socket. É assim
+/// que ele manda a esta consulta um `AQUI` de outro IP, e prova a chamada de
 /// [`aceita_origem`] aqui dentro: o predicado sozinho tem teste, e a chamada
 /// trocada por um no-op passava em todos (o m1 da revisão final do Plano 1).
 /// Ver `um_aqui_de_outro_ip_nao_entra_na_resposta_da_consulta`. E é por isso
 /// que ele recebe um [`Canal`], e não o socket: um teste precisa de um envio
 /// que o sistema recusa numa volta e não na outra.
-async fn consultar_por(
+async fn consultar_com<C: Consulta>(
     canal: &impl Canal,
     destino: SocketAddr,
-    marcas: &Marcas,
+    mut consulta: C,
     ate: tokio::time::Instant,
-) -> PorUmEndereco {
+) -> Desfecho<C::Resposta> {
     let Some(sonda) = Marca::nova(MARCA_DA_CONSULTA) else {
         // Inalcançável: a constante é uma marca válida, e
         // `a_marca_da_consulta_e_valida_e_nao_colide_com_marca_de_morador` o prova.
-        return PorUmEndereco::NadaSaiu;
+        return Desfecho::NadaSaiu;
     };
-    let pedidos = [
-        encontro::quem(marcas.servidor()),
-        encontro::quem(marcas.escuta()),
-        encontro::onde(&sonda),
-    ];
+    let pedidos = consulta.pedidos(&sonda);
 
-    let mut servidor = None;
-    let mut escuta = None;
     let mut no_ar = false;
     let mut estourou = false;
     let mut enviados = 0_u32;
@@ -893,9 +1300,11 @@ async fn consultar_por(
     let mut saiu_em = proxima_volta;
     let mut primeira_resposta = None;
     let mut ida_e_volta = None;
-    let mut balde = [0_u8; encontro::TAMANHO];
+    // Do tamanho do maior datagrama das duas versões, e um byte a mais: um
+    // datagrama maior chega com o byte a mais e não se lê como resposta.
+    let mut balde = [0_u8; encontro::TAMANHO2 + 1];
 
-    while servidor.is_none() || escuta.is_none() {
+    while !consulta.completa() {
         let agora = tokio::time::Instant::now();
         if agora >= ate {
             estourou = true;
@@ -908,7 +1317,8 @@ async fn consultar_por(
         // está no quarto: um anfitrião 0.15.0 nunca registra a escuta com esta
         // marca, e um fora do ar não registra nada. Esperar a volta seguinte
         // era meio segundo cobrado de toda conexão a eles.
-        if teto.is_some_and(|teto| agora >= teto) {
+        let espera_mais = consulta.espera_mais();
+        if teto.is_some_and(|teto| agora >= teto) && !espera_mais {
             break;
         }
         if agora >= proxima_volta && enviados < ENVIOS_AO_QUARTO {
@@ -917,7 +1327,7 @@ async fn consultar_por(
             // é tão longa que o teto passa da volta seguinte. Quem não
             // respondeu teve um intervalo inteiro para isso, e repetir a
             // pergunta a um ponto que está no ar só atrasa a conexão.
-            if no_ar {
+            if no_ar && !espera_mais {
                 break;
             }
             // Uma linha por volta, e não por pergunta: um envio que o sistema
@@ -942,7 +1352,7 @@ async fn consultar_por(
                 );
             }
             if depois_da_volta(saidas, enviados) == DepoisDaVolta::NadaSaiu {
-                return PorUmEndereco::NadaSaiu;
+                return Desfecho::NadaSaiu;
             }
             // A ida e volta do `ONDE` se mede da última volta que saiu: numa
             // volta recusada, as perguntas no ar são as da anterior.
@@ -957,7 +1367,9 @@ async fn consultar_por(
         } else {
             ate
         };
-        let acordar = teto.map_or(acordar, |teto| teto.min(acordar));
+        let acordar = teto
+            .filter(|_| !espera_mais)
+            .map_or(acordar, |teto| teto.min(acordar));
         let (lidos, origem) =
             match tokio::time::timeout_at(acordar, canal.receber(&mut balde)).await {
                 Ok(Ok(recebido)) => recebido,
@@ -970,24 +1382,23 @@ async fn consultar_por(
                     break;
                 }
             };
-        // Só do ponto a que se perguntou. Um `AQUI` que chega de outro lugar é
-        // ruído da internet, ou alguém tentando escolher para onde esta máquina
-        // vai conectar.
+        // Só do ponto a que se perguntou. Uma resposta que chega de outro
+        // lugar é ruído da internet, ou alguém tentando escolher para onde esta
+        // máquina vai conectar.
         if !aceita_origem(origem, destino) {
             continue;
         }
-        let Some((marca, endereco)) = balde.get(..lidos).and_then(encontro::ler_aqui) else {
+        let Some(lido) = balde
+            .get(..lidos)
+            .and_then(|datagrama| consulta.ler(datagrama, &sonda))
+        else {
             continue;
         };
         no_ar = true;
         let chegou = tokio::time::Instant::now();
         primeira_resposta.get_or_insert(chegou);
-        if marca == sonda {
+        if let Lido::Sonda = lido {
             ida_e_volta.get_or_insert(chegou.saturating_duration_since(saiu_em));
-        } else if marca == *marcas.servidor() {
-            servidor = Some(endereco);
-        } else if marca == *marcas.escuta() {
-            escuta = Some(endereco);
         }
     }
 
@@ -996,16 +1407,11 @@ async fn consultar_por(
             %destino,
             enviados,
             no_ar,
-            ?servidor,
-            ?escuta,
+            ?consulta,
             "quarto: o prazo da consulta venceu antes de as duas marcas responderem"
         );
     }
-    PorUmEndereco::Perguntou(match (servidor, escuta) {
-        (None, None) if no_ar => OndeMora::NinguemMora,
-        (None, None) => OndeMora::PontoMudo,
-        (servidor, escuta) => OndeMora::Achado { servidor, escuta },
-    })
+    Desfecho::Perguntou(consulta.concluir(no_ar))
 }
 
 /// Por onde [`consultar_por`] fala com o ponto: em produção, o socket UDP que
@@ -2464,6 +2870,295 @@ mod testes {
                 .is_some(),
             "preparar tem de dar certo para este bilhete — quem falha lá em cima \
              é o envio"
+        );
+    }
+
+    /// Um ponto de teste da versão 2: responde ao `ONDE` (se `fala_v1`) e a
+    /// cada `QUEM2` com o que `responder` disser, ou cala.
+    async fn ponto_v2(
+        fala_v1: bool,
+        responder: impl Fn(&Marca) -> Option<encontro::Resposta2> + Send + 'static,
+    ) -> SocketAddr {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO2 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let dados = balde.get(..lidos).unwrap_or_default();
+                let resposta = if let Some(encontro::Pedido::Onde { marca }) =
+                    encontro::analisar(dados)
+                {
+                    fala_v1.then(|| encontro::aqui(&marca, de))
+                } else if let Some(encontro::Pedido2::Quem2 { marca }) = encontro::analisar2(dados)
+                {
+                    responder(&marca).map(|resposta| encontro::resposta2(&resposta))
+                } else {
+                    None
+                };
+                if let Some(resposta) = resposta {
+                    let _ = socket.send_to(&resposta, de).await;
+                }
+            }
+        });
+        onde
+    }
+
+    fn marcas_da_sala() -> Marcas {
+        Marcas::da_sala(&seele_proto::codigo::Codigo::da_chave(&[9; 32]))
+    }
+
+    #[tokio::test]
+    async fn a_sala_achada_traz_o_servidor_a_escuta_e_as_dicas() {
+        let marcas = marcas_da_sala();
+        let (servidor, escuta) = (marcas.servidor().clone(), marcas.escuta().clone());
+        let dica: SocketAddr = "192.168.0.10:8385".parse().unwrap();
+        let ponto = ponto_v2(true, move |marca| {
+            if *marca == servidor {
+                Some(encontro::Resposta2::Aqui2 {
+                    marca: marca.clone(),
+                    endereco: "203.0.113.7:4001".parse().unwrap(),
+                    dicas: vec![dica],
+                })
+            } else if *marca == escuta {
+                Some(encontro::Resposta2::Aqui2 {
+                    marca: marca.clone(),
+                    endereco: "203.0.113.7:4002".parse().unwrap(),
+                    dicas: Vec::new(),
+                })
+            } else {
+                None
+            }
+        })
+        .await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await,
+            Localizacao::Achada {
+                servidor: Some("203.0.113.7:4001".parse().unwrap()),
+                escuta: Some("203.0.113.7:4002".parse().unwrap()),
+                dicas: vec![dica],
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn duas_marcas_vazias_sao_ninguem_mora() {
+        let ponto = ponto_v2(true, |marca| {
+            Some(encontro::Resposta2::Ninguem {
+                marca: marca.clone(),
+            })
+        })
+        .await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            Localizacao::NinguemMora
+        );
+    }
+
+    #[tokio::test]
+    async fn um_ponto_que_so_fala_o_enc1_e_dito_como_tal_e_nao_como_ninguem_mora() {
+        // O ADR 0047, um degrau depois: com o ponto de produção sem o ENC/2,
+        // «ALICE NÃO ESTÁ DISPONÍVEL» seria mentira. O ONDE responde, e os
+        // QUEM2 calam.
+        let ponto = ponto_v2(true, |_| None).await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            Localizacao::Enc2Calado
+        );
+    }
+
+    #[tokio::test]
+    async fn o_ponto_que_recusa_por_taxa_e_dito() {
+        let ponto = ponto_v2(true, |marca| {
+            Some(encontro::Resposta2::Recusa {
+                marca: marca.clone(),
+                motivo: encontro::Motivo::Taxa,
+                agora: 1,
+            })
+        })
+        .await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            Localizacao::PontoRecusou
+        );
+    }
+
+    #[tokio::test]
+    async fn um_ponto_mudo_para_as_duas_versoes_e_ponto_mudo() {
+        let ponto = ponto_v2(false, |_| None).await;
+        assert_eq!(
+            localizar(
+                &ponto.to_string(),
+                &marcas_da_sala(),
+                Duration::from_millis(300)
+            )
+            .await,
+            Localizacao::PontoMudo
+        );
+    }
+
+    #[tokio::test]
+    async fn um_ponto_que_nao_e_endereco_nao_resolve() {
+        assert_eq!(
+            localizar("tem espaço", &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            Localizacao::PontoNaoResolve
+        );
+    }
+
+    #[tokio::test]
+    async fn uma_resposta_de_versao_1_nao_vira_achado_da_sala() {
+        // Um AQUI da versão 1 com a marca da sala, de um ponto que não fala o
+        // ENC/2, não é um endereço da sala: o QUEM2 é o único caminho.
+        let marcas = marcas_da_sala();
+        let servidor = marcas.servidor().clone();
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let ponto = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO2 + 1];
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let dados = balde.get(..lidos).unwrap_or_default();
+                if let Some(encontro::Pedido::Onde { marca }) = encontro::analisar(dados) {
+                    let _ = socket.send_to(&encontro::aqui(&marca, de), de).await;
+                    let _ = socket
+                        .send_to(
+                            &encontro::aqui(&servidor, "203.0.113.66:1".parse().unwrap()),
+                            de,
+                        )
+                        .await;
+                }
+            }
+        });
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await,
+            Localizacao::Enc2Calado
+        );
+    }
+
+    /// Um ponto que limita como o de verdade: responde ao `ONDE`, e a um
+    /// `QUEM2` só com a `RECUSA taxa`, uma vez por segundo, calando o resto.
+    /// A última recusa acabou de ser dita a um vizinho.
+    async fn ponto_que_limita() -> SocketAddr {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde = socket.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut balde = [0_u8; encontro::TAMANHO2 + 1];
+            let mut ultima_recusa = tokio::time::Instant::now();
+            while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
+                let dados = balde.get(..lidos).unwrap_or_default();
+                if let Some(encontro::Pedido::Onde { marca }) = encontro::analisar(dados) {
+                    let _ = socket.send_to(&encontro::aqui(&marca, de), de).await;
+                } else if let Some(encontro::Pedido2::Quem2 { marca }) = encontro::analisar2(dados)
+                {
+                    let agora = tokio::time::Instant::now();
+                    if agora.duration_since(ultima_recusa) >= Duration::from_secs(1) {
+                        ultima_recusa = agora;
+                        let recusa = encontro::Resposta2::Recusa {
+                            marca,
+                            motivo: encontro::Motivo::Taxa,
+                            agora: 1,
+                        };
+                        let _ = socket.send_to(&encontro::resposta2(&recusa), de).await;
+                    }
+                }
+            }
+        });
+        onde
+    }
+
+    #[tokio::test]
+    async fn quem_e_limitado_pela_taxa_ouve_que_o_ponto_recusou_e_nao_que_ele_e_velho() {
+        // O achado da revisão de 08/10: acima do limite, o ponto cala tudo
+        // menos uma recusa por segundo, o `ONDE` responde, e a consulta
+        // concluía que o ponto era anterior ao ENC/2. Ela pergunta de novo
+        // dentro do prazo, depois da janela da recusa.
+        let ponto = ponto_que_limita().await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            Localizacao::PontoRecusou
+        );
+    }
+
+    #[tokio::test]
+    async fn uma_marca_recusada_e_a_outra_calada_dizem_que_o_ponto_recusou() {
+        // O caso comum do limite de verdade: a primeira pergunta da volta ouve
+        // a recusa, e a segunda, dentro do mesmo segundo, é calada.
+        let marcas = marcas_da_sala();
+        let servidor = marcas.servidor().clone();
+        let ponto = ponto_v2(true, move |marca| {
+            (*marca == servidor).then(|| encontro::Resposta2::Recusa {
+                marca: marca.clone(),
+                motivo: encontro::Motivo::Taxa,
+                agora: 1,
+            })
+        })
+        .await;
+        assert_eq!(
+            localizar(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await,
+            Localizacao::PontoRecusou
+        );
+    }
+
+    #[tokio::test]
+    async fn o_rastro_da_consulta_nao_grava_a_marca_de_quem_se_procura() {
+        // O `seele.log` vai em relatório de defeito. A marca da sala é o
+        // código da pessoa procurada, e a do servidor guardado, o começo da
+        // impressão dele: o rastro diz o que o ponto respondeu, e não quem se
+        // procurava.
+        let captura = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::INFO);
+        let _guarda = tracing::subscriber::set_default(captura.clone());
+        let mudo = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let onde_fica = mudo.local_addr().unwrap().to_string();
+        let da_sala = marcas_da_sala();
+        let Some(do_servidor) = Marcas::do_servidor(FP) else {
+            panic!("a impressão digital de teste tem de formar marcas");
+        };
+
+        let _ = localizar(&onde_fica, &da_sala, Duration::from_millis(150)).await;
+        let _ = onde_mora_hoje(&onde_fica, &do_servidor, Duration::from_millis(150)).await;
+
+        let linhas = captura.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.contains("prazo")),
+            "o prazo venceu e o rastro não disse: este teste não mede nada. Rastro: {linhas:?}"
+        );
+        for marcas in [&da_sala, &do_servidor] {
+            for marca in [marcas.servidor(), marcas.escuta()] {
+                assert!(
+                    !linhas.iter().any(|linha| linha.contains(marca.texto())),
+                    "o rastro gravou a marca {} de quem se procurava: {linhas:?}",
+                    marca.texto()
+                );
+            }
+        }
+    }
+
+    /// **O gêmeo do guarda da F5, do lado de quem liga.** Um IP escrito à mão,
+    /// e não o nome: o `resolver_ponto` com um IP volta sem rede, e nenhum
+    /// pacote sai daqui para a VPS em caso nenhum — o que reprova, desfeito o
+    /// guarda, é a falta do pânico.
+    #[tokio::test]
+    #[should_panic(expected = "pego em encontro::resolver_ponto, antes do DNS")]
+    async fn perguntar_ao_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
+        let _ = resolver_ponto("216.128.168.216:8384").await;
+    }
+
+    /// O mesmo, na batida: o `LEVE` sai para o ponto do bilhete.
+    #[tokio::test]
+    #[should_panic(expected = "pego em encontro::resolver, a batida, antes do DNS")]
+    async fn bater_no_ip_da_vps_de_producao_reprova_antes_do_primeiro_pacote() {
+        let Ok(bilhete) = Bilhete::novo("216.128.168.216:8384", "203.0.113.7:41234") else {
+            panic!("o bilhete de teste não se montou");
+        };
+        let _ = resolver(&bilhete).await;
+    }
+
+    #[test]
+    fn quem_liga_por_codigo_usa_o_ponto_padrao_sem_a_variavel() {
+        // O caminho de produção de quem liga, como o `com_o_ponto_padrao` de
+        // quem hospeda: sem a variável, o ponto do projeto. A leitura é a
+        // única do `seele-proto`.
+        assert_eq!(
+            encontro::ponto_escolhido(None, Some(PONTO_PADRAO)).as_deref(),
+            Some("encontro.seele.app.br")
         );
     }
 }

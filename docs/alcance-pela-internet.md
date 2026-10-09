@@ -308,10 +308,11 @@ e o instante de quem tenta chegar. Quem chega só usa a escuta do quarto quando
 ela mora no mesmo IP que o servidor da mesma resposta (os dois saem da mesma
 máquina do anfitrião, pelo mesmo IP público); fora disso, o `LEVE` vai ao aviso
 do link ou da lista, e o `seele.log` diz por quê. A lista de conhecidos nunca
-guarda o que o quarto deu. **O que sobra, até o `SEELE-ENC/2`** (o registro
-assinado, no Plano 4): quem toma as duas marcas do anfitrião no quarto, ou só a
-da escuta saindo pelo mesmo IP público que ele, recebe o IP, a porta e o instante
-de quem tenta chegar. O conteúdo, o convite, a senha e o apelido não saem: o TLS
+guarda o que o quarto deu. **O que sobra num servidor
+guardado**, que continua no `SEELE-ENC/1` (o `SEELE-ENC/2`, o registro assinado
+do ADR 0062, é da sala pessoal): quem toma as duas marcas do anfitrião no
+quarto, ou só a da escuta saindo pelo mesmo IP público que ele, recebe o IP, a
+porta e o instante de quem tenta chegar. O conteúdo, o convite, a senha e o apelido não saem: o TLS
 recusa o servidor errado.
 
 Três coisas fazem parte da decisão, e não são promessas soltas:

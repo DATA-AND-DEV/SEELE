@@ -87,7 +87,7 @@ anfitrião saem da mesma máquina, pelo mesmo IP público. Fora disso, o `LEVE` 
 ao aviso do link ou da lista, e o `seele.log` diz por quê. E a lista de
 conhecidos guarda o bilhete do link ou da lista, e nunca o que o quarto deu.
 
-**O que sobra, até o `SEELE-ENC/2`** (o registro assinado, no Plano 4): quem
+**O que sobra num servidor guardado**, que continua no `SEELE-ENC/1`: quem
 toma as **duas** marcas do anfitrião no quarto, a do servidor e a da escuta, ou
 só a da escuta saindo pelo mesmo IP público que ele, recebe pelo `LEVE` o IP, a
 porta e o instante de quem tenta chegar. A marca do servidor só fica livre em
@@ -99,6 +99,40 @@ recém-reiniciado, antes de o anfitrião se registrar de novo (ele se registra a
 cada 15 segundos). A da escuta tem as mesmas janelas, e num anfitrião 0.15.0
 está sempre livre. O conteúdo, o convite, a senha e o apelido não saem: o TLS
 recusa o servidor errado.
+
+**A sala pessoal, no `SEELE-ENC/2`** (ADR 0062), não tem essa sobra. Ela se
+registra num segundo quarto, separado do primeiro, com um `MORO2` assinado pela
+chave da pessoa, e o ponto confere, nesta ordem, que o pedido traz o cookie que
+ele deu àquele IP (sem ele, o ponto responde um `DESAFIO` com o cookie e não
+guarda nada), que a marca sai daquela chave, que a assinatura vale e que o
+carimbo de hora está a menos de cinco minutos do relógio dele. Ninguém sem a
+chave ocupa as marcas de uma sala; um IP ocupa no máximo 128 marcas vivas; um
+`MORO2` copiado no
+caminho e repetido depois do original é recusado quando vem de outro endereço;
+e uma troca de rede de quem recebe vale no reavivamento seguinte, sem esperar os
+60 segundos. Dentro do limite de pedidos, quem pergunta pela sala com `QUEM2`
+ouve sempre uma resposta: o endereço e as dicas, ou `NINGUEM`. Acima dele, o
+ponto recusa, e diz a recusa uma vez por segundo.
+
+**O que sobra na sala.** Quem está no caminho entre a sala e o ponto, e consegue
+entregar a cópia de um `MORO2` antes do original, aponta a marca para si até o
+reavivamento seguinte, quinze segundos depois; com a marca da escuta, recebe
+pelo `LEVE` o IP e a porta de quem liga nesse meio tempo. A mensagem assinada
+não diz para qual ponto ela é, então ela vale em qualquer um. Quem forja a
+origem dos pacotes **não** registra nada em nome de outro IP, nem esvazia o
+limite de registro dele: ele não recebe o cookie do IP que forja. O que ele
+ainda faz é esvaziar o limite de **perguntas** de um IP, com `QUEM2` forjados, e
+quem está naquele IP não consegue procurar ninguém pelo código enquanto isso
+durar (continua achável); e fazer o ponto mandar um `DESAFIO` a um IP que não
+pediu nada, do tamanho do pedido, como o `ONDE` de sempre. Em nenhum dos casos o
+servidor errado atende: quem liga confere o código dentro do TLS.
+
+**O que a sala conta.** Quem tem o seu código consegue saber, sem ligar, se o seu
+SEELE está aberto, qual é o seu IP público, e as dicas de rede local da sua sala
+(até dois endereços da rede da sua casa, que é o que deixa duas pessoas na mesma
+casa se ligarem sem o roteador dar a volta). É a natureza de ser encontrável, e a
+alavanca é «não receber ligações». O operador do ponto aprende o mesmo, e quem
+procura quem, enquanto as perguntas passam por ele; nada disso vai a disco.
 
 **O link fica com o seu endereço público dentro.** O bilhete (`enc=`) carrega o
 endereço do ponto de encontro e o endereço público da sua escuta de avisos —
@@ -178,10 +212,31 @@ WantedBy=multi-user.target
 `DynamicUser=yes` porque ele não precisa de usuário, de casa, nem de permissão
 de escrita em lugar nenhum — não há o que persistir.
 
-Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama de 96
-bytes, e esvazia o quarto, que é o único estado dele. Cada anfitrião volta ao
-quarto no reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta
-por ele não o acha no quarto e tenta os endereços que já tinha.
+Reiniciá-lo no meio de uma apresentação custa a repetição de um datagrama (96
+bytes no ENC/1, 384 no ENC/2), e esvazia os dois quartos, que são, com o limite
+por prefixo, o único estado dele. Cada anfitrião e cada sala voltam ao quarto no
+reavivamento seguinte, a cada quinze segundos; até lá, quem pergunta por eles
+não os acha e tenta os endereços que já tinha.
+
+**O segredo dos cookies.** O ponto sorteia 32 bytes do sistema quando sobe
+(`getrandom`), e é com eles que ele faz e confere o cookie de cada IP. Eles
+moram só na memória do processo: nunca em disco, nunca num arquivo de
+configuração, nunca no `--barulhento`, e quem opera o ponto não configura nada.
+Reiniciar o ponto sorteia outros, e os cookies de antes param de valer: cada
+sala ouve um `DESAFIO` no reavivamento seguinte, manda de novo com o cookie
+novo, e volta ao quarto, que o reinício também esvaziou. Dois processos do ponto
+atrás do mesmo nome teriam segredos diferentes, e a sala que alternasse entre
+eles ouviria `DESAFIO` a cada troca; um ponto é um processo.
+
+**O relógio da máquina tem de estar certo.** A sala pessoal se registra pelo
+ENC/2 com um carimbo de hora, assinado, e o ponto o confere contra o próprio
+relógio, com tolerância de cinco minutos. Um ponto com o relógio torto recusa o
+registro de **toda** sala, e cada pessoa lê no `seele.log` que o relógio dela e
+o do ponto diferem. Numa VPS com systemd, confira que a hora vem da rede:
+
+```sh
+timedatectl          # «System clock synchronized: yes» e «NTP service: active»
+```
 
 ### Conferir que ele está mesmo no ar
 
@@ -205,6 +260,50 @@ precisam dele.
 Quando dá certo, ele imprime **o seu endereço visto de fora** — que é
 literalmente o serviço que este ponto de encontro presta.
 
+Depois ele confere as duas coisas que um ponto de pé pode não ter, e diz cada
+uma: **o quarto** (`MORO` e `QUEM`), que um binário anterior a 03/09/2026 não
+tem, e **o ENC/2** (`MORO2`, `QUEM2` e `NINGUEM`, com uma chave de sondagem
+nova a cada rodada), que um binário anterior à 0.16 não tem. Sem o ENC/2,
+ninguém acha ninguém pelo código. No ENC/2 ele também mede **o relógio do
+ponto**, e diz de quantos segundos ele difere do da máquina que sonda.
+
+Com `--exige-enc2`, ele sai com falha se alguma família que respondeu ao `ONDE`
+não falar o ENC/2:
+
+```sh
+cargo run -p seele-encontro --example sondar -- --exige-enc2 <endereço>
+```
+
+### Antes de publicar uma versão que depende do ENC/2
+
+A partir da 0.16, a sala pessoal se registra pelo ENC/2, e quem liga pelo código
+pergunta por ele. **O ponto de produção vai antes do app**: o binário novo fala
+as duas versões, então a 0.15 não muda nada com ele, e o app novo sem ele não
+acha ninguém pelo código. Foi assim com o quarto: o ADR 0047 registra dez dias
+de recurso morto por um binário velho na VPS, com o app certo do lado de cá.
+
+Na ordem:
+
+1. reimplantar a VPS com o `seele-encontro` da versão que vai sair (`cargo build
+   --release -p seele-encontro` e o `systemctl restart`, como em «Subir o seu»), e
+   conferir que o relógio dela está sincronizado (`timedatectl`);
+2. de **outra** máquina, conferir:
+
+   ```sh
+   cargo run -p seele-encontro --example sondar -- --exige-enc2 encontro.seele.app.br
+   ```
+
+   Ele sai com sucesso só se toda família que responde ao `ONDE` também falar o
+   ENC/2, com o relógio do ponto a menos de um minuto do da máquina que sonda,
+   e diz de quantos segundos é a diferença;
+3. publicar. O `empacotar/publicar.sh` roda a mesma conferência antes de
+   qualquer passo com efeito, e para se o ponto não falar o ENC/2. O
+   `--sem-ponto` pula a conferência, para a emergência que não depende do ponto,
+   e o corpo do release diz que ela foi pulada.
+
+Reiniciar o ponto esvazia os dois quartos por uns quinze segundos: cada
+anfitrião e cada sala voltam no reavivamento seguinte.
+
 ## O que ele **não** resolve
 
 **NAT simétrico dos dois lados não fura.** Nesse caso o mapeamento do roteador
@@ -222,8 +321,11 @@ tempo — é o que separa este produto do que ele existe para não ser.
 
 O protocolo — quatro verbos que chegam ao ponto (`ONDE`, `LEVE`, `MORO` e
 `QUEM`), a resposta `AQUI`, e uma função sem estado que decide o `ONDE` e o
-`LEVE` — está em `crates/seele-proto/src/encontro.rs`. O quarto, que guarda o
-`MORO` e responde ao `QUEM`, e o serviço estão em `crates/seele-encontro/`. O
+`LEVE` — está em `crates/seele-proto/src/encontro.rs`, e a versão 2 ao lado
+dele (`MORO2` e `QUEM2`, as respostas `MOROU`, `DESAFIO`, `AQUI2`, `NINGUEM` e
+`RECUSA`, ADR 0062). O quarto, que guarda o `MORO` e responde ao `QUEM`, o quarto
+assinado do ENC/2, o limite por prefixo e o serviço estão em
+`crates/seele-encontro/`. O
 lado de quem hospeda, em `crates/seele-server/src/alcance/encontro.rs`; o de quem
 entra, em `crates/seele-core/src/encontro.rs`. O bilhete que viaja no link é o
 `enc=` de `crates/seele-proto/src/uri.rs`.
@@ -234,6 +336,8 @@ alguém mexer:
 - **O ponto de encontro nunca copia bytes de um pedido para uma resposta.** A
   resposta é montada campo a campo. O único pedaço do pedido que reaparece é a
   marca, que é alfanumérica e curta justamente por isso.
-- **Todo datagrama tem 96 bytes, pedido e resposta.** Um refletor que responde
-  mais do que recebe é uma arma apontada para quem nunca ouviu falar deste
-  projeto. O enchimento é o que mantém o ganho em 1:1.
+- **Todo datagrama do ENC/1 tem 96 bytes, e todo do ENC/2 tem 384: pedido e
+  resposta, sempre do mesmo tamanho.** Um refletor que responde mais do que
+  recebe é uma arma apontada para quem nunca ouviu falar deste projeto. O
+  enchimento é o que mantém o ganho em 1:1, e um datagrama de qualquer outro
+  tamanho é calado.

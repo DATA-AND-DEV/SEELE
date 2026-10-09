@@ -19,7 +19,7 @@
 //! | o que a chave assina | começa por |
 //! |---|---|
 //! | a prova do cliente | [`ROTULO_PROVA_DE_CLIENTE`] |
-//! | o `MORO2` do ENC/2 | [`ROTULO_MORO2`] |
+//! | o `MORO2` do ENC/2 ([`moro2`]) | [`ROTULO_MORO2`] |
 //! | o certificado da sala (`TBSCertificate`) | `0x30`, um `SEQUENCE` em DER |
 //! | o CertificateVerify do TLS 1.3 | 64 vezes `0x20` |
 //!
@@ -32,8 +32,7 @@ pub const ROTULO_PROVA_DE_CLIENTE: &[u8] = b"SEELE/1 prova-de-cliente\0";
 
 /// O rótulo do registro assinado do ponto de encontro (`MORO2`, ENC/2).
 ///
-/// A mensagem do `MORO2` é montada pela F2, neste módulo, ao lado da prova:
-/// o formato dos campos dela é decisão do ENC/2.
+/// A mensagem do `MORO2` é [`moro2`], neste módulo, ao lado da prova.
 pub const ROTULO_MORO2: &[u8] = b"SEELE-ENC/2 moro\0";
 
 /// Todos os rótulos, para o guarda de que eles não se encontram.
@@ -59,6 +58,52 @@ pub fn prova_de_cliente(impressao: &[u8; IMPRESSAO_BYTES], nonce: &[u8; NONCE_BY
     mensagem.extend_from_slice(ROTULO_PROVA_DE_CLIENTE);
     mensagem.extend_from_slice(impressao);
     mensagem.extend_from_slice(nonce);
+    mensagem
+}
+
+/// O que a chave da pessoa assina no `MORO2` do ENC/2 (ADR 0062).
+///
+/// `ROTULO_MORO2 ‖ n(marca) ‖ marca ‖ chave ‖ carimbo ‖ n(dicas) ‖ dicas`: os
+/// dois tamanhos num byte, o carimbo em `u64` big-endian, e cada dica como a
+/// família (`4` ou `6`), o IP cru e a porta big-endian. Todo campo de tamanho
+/// variável vai com o tamanho dito, para que dois registros diferentes nunca
+/// deem a mesma mensagem.
+///
+/// O endereço público de quem registra não entra: quem o diz é o ponto, que o
+/// vê. A menor mensagem tem 60 bytes, então nenhuma cabe nos 32 de um nonce.
+#[must_use]
+pub fn moro2(
+    marca: &crate::encontro::Marca,
+    chave: &[u8; 32],
+    carimbo: u64,
+    dicas: &[std::net::SocketAddr],
+) -> Vec<u8> {
+    let marca = marca.texto().as_bytes();
+    let mut mensagem = Vec::with_capacity(
+        ROTULO_MORO2.len() + 1 + marca.len() + chave.len() + 8 + 1 + dicas.len() * 19,
+    );
+    mensagem.extend_from_slice(ROTULO_MORO2);
+    // Uma marca tem no máximo `LIMITE_DA_MARCA` (32) caracteres, e o ENC/2 leva
+    // no máximo `LIMITE_DE_DICAS` (2) dicas: os dois tamanhos cabem num byte, e
+    // o recuo é inalcançável.
+    mensagem.push(u8::try_from(marca.len()).unwrap_or(u8::MAX));
+    mensagem.extend_from_slice(marca);
+    mensagem.extend_from_slice(chave);
+    mensagem.extend_from_slice(&carimbo.to_be_bytes());
+    mensagem.push(u8::try_from(dicas.len()).unwrap_or(u8::MAX));
+    for dica in dicas {
+        match dica.ip() {
+            std::net::IpAddr::V4(quatro) => {
+                mensagem.push(4);
+                mensagem.extend_from_slice(&quatro.octets());
+            }
+            std::net::IpAddr::V6(seis) => {
+                mensagem.push(6);
+                mensagem.extend_from_slice(&seis.octets());
+            }
+        }
+        mensagem.extend_from_slice(&dica.port().to_be_bytes());
+    }
     mensagem
 }
 
@@ -88,6 +133,54 @@ mod tests {
             prova_de_cliente(&[2; 32], &nonce),
             prova_de_cliente(&[3; 32], &nonce)
         );
+    }
+
+    fn marca(texto: &str) -> crate::encontro::Marca {
+        crate::encontro::Marca::nova(texto).expect("marca de teste")
+    }
+
+    fn de(texto: &str) -> std::net::SocketAddr {
+        texto.parse().expect("endereço de teste")
+    }
+
+    #[test]
+    fn a_mensagem_do_moro2_e_rotulo_marca_chave_carimbo_e_dicas_nessa_ordem() {
+        let dicas = [de("192.168.0.10:8385"), de("[fd12::1]:8386")];
+        let mensagem = moro2(&marca("pAs"), &[0xAB; 32], 0x0102_0304_0506_0708, &dicas);
+        let mut esperada = b"SEELE-ENC/2 moro\0".to_vec();
+        esperada.push(3);
+        esperada.extend_from_slice(b"pAs");
+        esperada.extend_from_slice(&[0xAB; 32]);
+        esperada.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        esperada.push(2);
+        esperada.extend_from_slice(&[4, 192, 168, 0, 10, 0x20, 0xC1]);
+        esperada.push(6);
+        esperada.extend_from_slice(&[0xfd, 0x12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        esperada.extend_from_slice(&[0x20, 0xC2]);
+        assert_eq!(mensagem, esperada);
+    }
+
+    #[test]
+    fn cada_campo_do_moro2_muda_a_mensagem() {
+        let dica = de("192.168.0.10:8385");
+        let base = moro2(&marca("pAs"), &[1; 32], 10, &[dica]);
+        assert_ne!(base, moro2(&marca("pAe"), &[1; 32], 10, &[dica]));
+        assert_ne!(base, moro2(&marca("pAs"), &[2; 32], 10, &[dica]));
+        assert_ne!(base, moro2(&marca("pAs"), &[1; 32], 11, &[dica]));
+        assert_ne!(base, moro2(&marca("pAs"), &[1; 32], 10, &[]));
+        assert_ne!(
+            base,
+            moro2(&marca("pAs"), &[1; 32], 10, &[de("192.168.0.10:8386")])
+        );
+    }
+
+    /// A menor mensagem do `MORO2` passa de 32 bytes, então uma 0.15.2 que só
+    /// assine nonce de 32 bytes nunca assina um `MORO2` (o achado A1 da F7).
+    #[test]
+    fn a_mensagem_do_moro2_nunca_cabe_em_32_bytes() {
+        let menor = moro2(&marca("p"), &[0; 32], 0, &[]);
+        assert_eq!(menor.len(), 60);
+        assert!(menor.starts_with(ROTULO_MORO2));
     }
 
     /// Os quatro espaços que a mesma chave Ed25519 assina não se encontram: a
