@@ -471,17 +471,13 @@ pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
 /// e não guarda quadro.
 pub const MAX_QUADRO_LEN: usize = 4 * 1024 * 1024;
 
-/// Quanto um leitor que remonta reserva para um quadro assim que o cabeçalho
-/// chega, no máximo: **64 KiB**.
+/// Quanto um leitor reserva de uma vez para o corpo de um quadro: **64 KiB**.
 ///
-/// **A memória segue o que chegou, e não o que foi anunciado** (regra da
-/// orquestradora, a partir da revisão da F1 de 09/10/2026). Reservar
-/// `min(tamanho, RESERVA_INICIAL_DE_QUADRO)` e crescer com o que chega: um par
-/// que anuncia um quadro de 4 MiB e manda devagar segura até isto e mais o que
-/// mandou, e não os 4 MiB. O corpo cresce dobrando, sem passar do anunciado,
-/// porque crescer o exato de cada pedaço faria um fluxo que pinga byte a byte
-/// custar uma realocação por byte. Vale para o [`LeitorDeTela`] e para o
-/// receptor do `seele-core`.
+/// Regra da orquestradora em 09/10/2026, sobre a revisão deste módulo: quem lê
+/// reserva `min(tamanho, RESERVA_INICIAL_DE_QUADRO)` e cresce com o que chega,
+/// e não o tamanho anunciado de uma vez. Com o teto em 4 MiB, reservar pelo
+/// anúncio faria um cabeçalho de cinco bytes custar 4 MiB antes de o corpo
+/// existir; assim, a memória acompanha os bytes recebidos.
 pub const RESERVA_INICIAL_DE_QUADRO: usize = 64 * 1024;
 
 /// O que vem dentro de um quadro do fluxo de tela.
@@ -572,17 +568,13 @@ pub const fn cabecalho_de_quadro(
 }
 
 /// Lê o cabeçalho de um quadro. **A única porta por onde o tamanho de um quadro
-/// entra**: tipo desconhecido, quadro vazio e tamanho acima do teto saem daqui,
-/// antes de qualquer reserva.
-///
-/// Pública para quem lê o fluxo sem passar pelo [`LeitorDeTela`]: o receptor do
-/// `seele-core` lê os cinco bytes com `read_exact`, de forma assíncrona, e os
-/// confere por esta mesma porta. Assim continua havendo uma leitura só do
-/// formato.
+/// entra**: nas duas leituras deste módulo e no receptor do `seele-core`, que lê
+/// do fluxo e não passa pelo [`LeitorDeTela`]. Tipo desconhecido, quadro vazio e
+/// tamanho acima do teto saem daqui, antes de qualquer reserva.
 ///
 /// # Errors
 ///
-/// [`ErroDeQuadro::TipoDesconhecido`], [`ErroDeQuadro::QuadroVazio`] ou
+/// [`ErroDeQuadro::TipoDesconhecido`], [`ErroDeQuadro::QuadroVazio`] e
 /// [`ErroDeQuadro::QuadroGrandeDemais`].
 pub fn ler_cabecalho_de_quadro(
     cabecalho: &[u8; CABECALHO_DE_QUADRO_LEN],
@@ -784,6 +776,11 @@ fn reservar(maior_reserva: &mut usize, tamanho: usize) -> Vec<u8> {
 
 /// Faz o corpo em andamento caber `precisa` bytes: dobra a reserva, sem passar
 /// do `anunciado`, e anota o maior pedido, como [`reservar`].
+///
+/// **Dobrar, e não crescer o exato de cada pedaço:** com o exato, um fluxo que
+/// pinga byte a byte custaria uma realocação por byte, e remontar um quadro
+/// viraria trabalho quadrático. Dobrando, a memória fica em no máximo o dobro do
+/// que chegou (ou a [`RESERVA_INICIAL_DE_QUADRO`] do começo).
 fn crescer(
     maior_reserva: &mut usize,
     crescimentos: &mut usize,
