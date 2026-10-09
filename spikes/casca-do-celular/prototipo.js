@@ -26,7 +26,7 @@ const FRASES_DO_CELULAR = {
     vazio: "Nenhum servidor ainda. Abra um link de convite, ou cole um aqui.",
     colar: "COLAR UM LINK",
     entrar: "ENTRAR",
-    hospedar: "Hospedar um servidor é pelo SEELE no computador.",
+    hospedar: "Hospedar um servidor é pelo app do SEELE, instalado num computador.",
     identidade: "Sua identidade mora neste navegador, neste aparelho.",
   },
   entrar: {
@@ -159,7 +159,7 @@ const FRASES_DO_CELULAR = {
       ["previas", "linhas", "PRÉVIAS DE LINK", "perguntar antes"],
       ["conexao", "atualizar", "CONEXÃO", "atraso 23 ms · perda 0,2% · caminho direto"],
       ["aparelho", "chave", "ESTE APARELHO", "identidade guardada"],
-      ["computador", "teclado", "NO COMPUTADOR", "o que o celular não faz"],
+      ["computador", "teclado", "O QUE O CELULAR NÃO FAZ", "só no app · no computador"],
       ["sobre", "atualizar", "SOBRE", "página do Servidor 1.0"],
     ],
     sair: "SAIR DO SERVIDOR",
@@ -178,17 +178,28 @@ const FRASES_DO_CELULAR = {
     tratamentoNota: "Eco, ruído e ganho: os do navegador, ligados.",
     teste: "TESTE DO MICROFONE",
   },
-  noComputador: [
-    ["HOSPEDAR UM SERVIDOR", "O celular entra em servidores e não hospeda. Hospedar é pelo SEELE no computador."],
-    ["COMPARTILHAR A TELA", "O navegador do celular não grava a tela. A tela de quem compartilhar aparece na chamada."],
-    ["MODERAR", "Expulsar, banir, mover pessoas e remover mensagens de outros é pelo SEELE no computador."],
-    ["A PORTARIA", "Aprovar quem bate, a senha e os convites ficam na máquina que hospeda."],
-    ["SALAS E CANAIS", "Criar, renomear e apagar é pelo SEELE no computador."],
-    ["NOME E IMAGEM DO SERVIDOR", "Pelo SEELE no computador. A aparência do servidor se edita aqui, em ESTE SERVIDOR."],
-    ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar e desligar MODs no servidor é de quem hospeda."],
-    ["LIGAR PELO CÓDIGO", "Não existe no celular nesta versão: o navegador não abre o caminho que a ligação usa."],
-    ["VERSÕES LADO A LADO", "O celular abre a página da versão do servidor que o link pede. Guardar versões é do SEELE no computador."],
-  ],
+  // O que fica de fora, em dois grupos (D-web-3): o que só o app instalado faz,
+  // e o que o computador faz também no navegador.
+  foraDoCelular: {
+    titulo: "O QUE O CELULAR NÃO FAZ",
+    soNoApp: ["SÓ NO APP DO SEELE", [
+      ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador."],
+      ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
+      ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
+      ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
+      ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
+      ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
+      ["A TELA ENTRE PESSOAS", "No navegador, a tela de quem transmite vem sempre pelo servidor, e este aparelho não a repassa a ninguém."],
+    ]],
+    noComputador: ["NO COMPUTADOR", [
+      ["MODERAR", "Expulsar, banir, mover pessoas e remover mensagens de outros é pelo SEELE no computador."],
+      ["SALAS E CANAIS", "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador."],
+      ["NOME E IMAGEM DO SERVIDOR", "Pelo SEELE no computador. A aparência do servidor se edita aqui, em ESTE SERVIDOR."],
+      ["COMPARTILHAR A TELA", "O navegador do celular não grava a tela. Compartilhar é pelo SEELE no computador, e a tela de quem compartilhar aparece na chamada."],
+      ["TESTAR O MICROFONE FORA DE SALA", "O microfone do celular só abre numa sala de voz. Testar e ouvir a própria voz fora de sala é pelo SEELE no computador."],
+      ["ESCOLHER A SAÍDA DE SOM", "O navegador do celular não escolhe a saída: troque entre fone, Bluetooth e alto-falante pelo controle de som do celular."],
+    ]],
+  },
   estilo: {
     titulo: "APARÊNCIA DO SERVIDOR",
     de: "DO MOD ESTILO",
@@ -696,8 +707,11 @@ function subAjustes(id) {
       h("div", { class: "cel-campo" }, rotulo(a.saida), h("p", { class: "cel-nota", text: a.saidaNota })),
       h("div", { class: "cel-campo" }, rotulo(a.tratamento), h("p", { class: "cel-nota", text: a.tratamentoNota }))];
   } else if (id === "computador") {
-    corpo = [titulo("NO COMPUTADOR"),
-      h("ul", { class: "cel-no-computador" }, f.noComputador.map(([nome, frase]) => h("li", {}, h("strong", { text: nome }), h("p", { class: "cel-nota", text: frase }))))];
+    const grupo = ([rotuloDoGrupo, itens]) => [
+      h("div", { class: "cel-secao-titulo" }, rotulo(rotuloDoGrupo)),
+      h("ul", { class: "cel-no-computador" }, itens.map(([nome, frase]) => h("li", {}, h("strong", { text: nome }), h("p", { class: "cel-nota", text: frase })))),
+    ];
+    corpo = [grupo(f.foraDoCelular.soNoApp), grupo(f.foraDoCelular.noComputador)];
   } else if (id === "servidor") {
     corpo = [titulo("ESTE SERVIDOR"),
       h("ul", { class: "cel-lista" },
@@ -707,7 +721,7 @@ function subAjustes(id) {
         // MOD e para «o SEELE desenha», e o tema daquele MOD não a alcança.
         h("li", {}, h("button", { id: "linha-mods", class: "cel-ajuste cel-nucleo", type: "button" },
           glifo("engrenagem"), h("span", {}, "MODS DESTE SERVIDOR", h("span", { class: "cel-linha-sub", text: "PERFIS, MESA, ESTILO · quem desenha cada lugar" })), h("span", { class: "cel-seta" }, glifo("avancar"))))),
-      h("p", { class: "cel-fora" }, rotulo("NOME E IMAGEM"), f.noComputador[5][1])];
+      h("p", { class: "cel-fora" }, rotulo("NOME E IMAGEM"), f.foraDoCelular.noComputador[1][2][1])];
   } else if (id === "conexao") {
     const t = QUADRO.telemetry;
     const linha = (r, v) => [h("dt", {}, rotulo(r)), h("dd", { text: v })];
