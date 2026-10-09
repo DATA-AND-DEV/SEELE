@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
     MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
@@ -575,6 +575,16 @@ async fn handshake(
         reason: DisconnectReason::CredentialRejected,
         detail: "public key is not a valid Ed25519 point".into(),
     })?;
+    // Uma chave de ordem pequena não prova posse de nada: a conferência comum
+    // aceita com ela assinaturas que não pedem chave privada. Recusada aqui,
+    // antes do desafio, e a prova lá embaixo é conferida com `verify_strict`.
+    // Achado da F2, 08/10/2026.
+    if verifying.is_weak() {
+        return Err(Refusal {
+            reason: DisconnectReason::CredentialRejected,
+            detail: "public key has small order".into(),
+        });
+    }
 
     // A fresh nonce per handshake, or a recorded Response could be replayed.
     let nonce: [u8; NONCE_LEN] = rand::random();
@@ -618,7 +628,7 @@ async fn handshake(
     // de qualquer assinatura que não confere.
     let assinada = seele_proto::assinatura::prova_de_cliente(&server.impressao, &nonce);
     verifying
-        .verify(&assinada, &Signature::from_bytes(&signature))
+        .verify_strict(&assinada, &Signature::from_bytes(&signature))
         .map_err(|_| Refusal {
             reason: DisconnectReason::CredentialRejected,
             detail: "signature did not verify".into(),

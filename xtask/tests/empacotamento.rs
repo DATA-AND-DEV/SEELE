@@ -674,6 +674,15 @@ case "$*" in
         fi
         exit 0
         ;;
+    # Os crates do celular dentro do `.wasm`. Ao reprovar, o de verdade diz o
+    # passo que caiu e o porquê, inclusive numa máquina sem o hash do wasi-sdk.
+    *'xtask web'*)
+        if [ "${FALSO_XTASK_WEB:-ok}" != ok ]; then
+            echo 'web: FALHOU antes de começar: esta máquina (x86_64-macos) não tem SHA-256 fixado do wasi-sdk' >&2
+            exit 1
+        fi
+        exit 0
+        ;;
     # As três conferências de regra que o `validar` do `release.yml` roda. Ao
     # reprovar, cada uma diz o que quebrou, e é essa linha que quem publica
     # tem de ler.
@@ -1089,6 +1098,127 @@ fn o_conferir_avisa_dos_assuntos_sem_classe_sem_chegar_a_bateria() {
     assert!(
         saida.texto.contains("«telepatia» é um escopo que a tabela"),
         "o --conferir não avisou do escopo que a tabela não conhece:\n{}",
+        saida.texto
+    );
+}
+
+/// Põe `empacotar/notas/<versão>.md` na bancada, com commit, e devolve a cabeça
+/// nova, que o Windows de mentira precisa conhecer.
+fn com_notas(bancada: &Bancada, versao: &str, texto: &str) -> String {
+    escrever(
+        &bancada.repo.join(format!("empacotar/notas/{versao}.md")),
+        texto,
+        false,
+    );
+    bancada.git(&["add", "empacotar/notas"]);
+    bancada.git(&["commit", "-q", "-m", "docs: as notas da versão"]);
+    bancada.git(&["rev-parse", "HEAD"])
+}
+
+/// Uma nota que espera uma condição não sai antes dela.
+///
+/// O comentário HTML some na página do GitHub, e quem publica sem abrir o
+/// arquivo não o vê: um aviso que não impede é o «existir não é funcionar». Foi
+/// o caso das notas da 0.15.2, que afirmam uma impressão digital que só o passo
+/// 4 da medida de ponta a ponta prova.
+///
+/// A recusa vem antes de qualquer pergunta com efeito: o `limpar_entrega`
+/// apaga, e o `conferir_windows` leva o Windows a outro commit. O diário sem
+/// `ssh`, `docker` nem `curl` é a prova.
+#[test]
+fn uma_nota_com_condicao_pendente_para_a_publicacao_antes_de_qualquer_pergunta() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "> ### O que muda\n>\n<!-- CONDIÇÃO: o passo 4 da medida passa -->\n\
+         > A impressão digital é a mesma.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "as notas esperam uma condição e as conferências passaram:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("tudo conferido"),
+        "com uma condição pendente, as conferências deram o veredito:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("empacotar/notas/1.2.3.md")
+            && saida.texto.contains("linha 3: o passo 4 da medida passa"),
+        "a recusa não diz qual condição falta e onde ela está no arquivo:\n{}",
+        saida.texto
+    );
+    for pergunta in ["ssh", "docker", "curl"] {
+        assert!(
+            !saida.diario.contains(pergunta),
+            "a recusa veio depois de perguntar ao «{pergunta}», que é uma conferência \
+             com efeito ou cara:\n{}",
+            saida.diario
+        );
+    }
+}
+
+/// O marcador vale também partido em linhas, e em minúsculas.
+///
+/// Foi como o primeiro comentário de condição deste repositório nasceu: o `<!--`
+/// sozinho numa linha e a palavra na seguinte. Um marcador que só valesse na
+/// forma exata deixaria passar calado justamente esse.
+#[test]
+fn a_condicao_partida_em_linhas_tambem_para_a_publicacao() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "> ### O que muda\n\n<!--\n  condição: a medida no Windows\n  termina\n-->\n\
+         > Texto.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_ne!(
+        saida.estado, 0,
+        "a condição partida em linhas passou pelas conferências:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("linha 4: a medida no Windows termina"),
+        "a recusa não diz a condição partida em linhas, nem a linha onde ela está:\n{}",
+        saida.texto
+    );
+}
+
+/// Um comentário qualquer, e a palavra no texto, não param nada.
+///
+/// O marcador é o comentário que **começa** pela condição, e não a palavra: «A
+/// CONDIÇÃO: DO SERVIDOR» num título, ou um lembrete em comentário, são texto.
+#[test]
+fn um_comentario_qualquer_e_a_palavra_no_texto_nao_param_a_publicacao() {
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let cabeca = com_notas(
+        &bancada,
+        "1.2.3",
+        "<!-- um lembrete para quem edita -->\n> ### A CONDIÇÃO: DO SERVIDOR\n>\n\
+         > A condição: a sala abre.\n",
+    );
+    let saida = bancada.rodar(&["1.2.3", "--conferir"], &[("FALSO_SSH_HEAD", &cabeca)]);
+
+    assert_eq!(
+        saida.estado, 0,
+        "notas sem condição pendente foram recusadas:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("tudo conferido"),
+        "faltou o veredito das conferências:\n{}",
         saida.texto
     );
 }
@@ -4066,6 +4196,70 @@ fn uma_bancada_de_mod_vermelha_para_a_publicacao_antes_de_empacotar() {
     assert!(
         saida.nada_foi_empacotado(),
         "a bancada reprovou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn os_crates_do_celular_vermelhos_no_wasm_param_a_publicacao_antes_de_empacotar() {
+    // **O que só o `.wasm` prova** (os bytes-ouro pela fronteira do `seele-web`,
+    // o teto de memória e as importações do `seele-motor-web`) roda no
+    // `cargo xtask web`, e esta bateria é por onde as versões saem. Um passo
+    // que só o CI despachado à mão rodasse seria um guarda que ninguém vê
+    // reprovar (ADR 0057, emenda de 08/10/2026).
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_XTASK_WEB", "reprova"),
+        ],
+    );
+
+    assert!(
+        saida.diario.contains("cargo xtask web"),
+        "a bateria de quem publica não rodou os crates do celular no .wasm:\n{}",
+        saida.diario
+    );
+    assert_ne!(
+        saida.estado, 0,
+        "os crates do celular reprovaram no .wasm e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("Rode «cargo xtask web»"),
+        "a queixa não diz como rodar à mão:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.texto.contains("não tem SHA-256 fixado do wasi-sdk"),
+        "o porquê da recusa não chegou a quem publica:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "os crates do celular reprovaram e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
+fn o_sem_bateria_pula_tambem_os_crates_do_celular() {
+    // A saída de emergência pula a bateria inteira, e os crates do celular não
+    // podem virar uma etapa que roda mesmo assim.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let saida = bancada.rodar(
+        &["1.2.3", "--sem-bateria"],
+        &[("FALSO_XTASK_WEB", "reprova")],
+    );
+    assert!(
+        !saida.diario.contains("xtask web"),
+        "o --sem-bateria deixou de pular os crates do celular:\n{}",
         saida.diario
     );
 }

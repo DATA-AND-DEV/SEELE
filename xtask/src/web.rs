@@ -4,7 +4,8 @@
 //!
 //! 1. o `seele-web` compila para `wasm32-unknown-unknown`, e os bytes-ouro da
 //!    F1 cruzam a fronteira de verdade com os mesmos bytes, com o JSON passando
-//!    pelo JavaScript (`xtask/web/ouro.mjs`);
+//!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
+//!    da F1 passam pela fronteira (`xtask/web/links.mjs`);
 //! 2. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
 //!    `.cargo/config.toml` aponta a variável para uma pasta que não existe;
 //! 3. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
@@ -112,8 +113,72 @@ fn sem_wasi_sdk() -> Option<String> {
     }
 }
 
+/// O que falta nesta máquina para os passos rodarem, uma frase por item, com o
+/// conserto.
+///
+/// Sem isto, uma máquina sem os alvos reprovava com o erro do `cargo` no meio do
+/// primeiro passo, e uma sem hash fixado do wasi-sdk (Windows, Mac Intel) só no
+/// quarto. As duas razões são da máquina, e não do código, e quem publica
+/// precisa ler isso primeiro.
+///
+/// `alvos_instalados` é a saída de `rustup target list --installed`, ou `None`
+/// sem `rustup`: um toolchain sem ele pode ter os alvos, e aí quem diz é o build.
+fn o_que_falta(
+    alvos_instalados: Option<&str>,
+    tem_node: bool,
+    sufixo: Option<&str>,
+) -> Vec<String> {
+    let mut falta = Vec::new();
+    if let Some(instalados) = alvos_instalados {
+        let tem = |alvo: &str| instalados.lines().any(|l| l.trim() == alvo);
+        if !tem("wasm32-unknown-unknown") || !tem("wasm32-wasip1") {
+            falta.push(
+                "faltam os alvos wasm: rode «rustup target add wasm32-unknown-unknown wasm32-wasip1»".to_owned(),
+            );
+        }
+    }
+    if !tem_node {
+        falta.push("não há node nesta máquina: os dois guardas do .wasm rodam nele".to_owned());
+    }
+    match sufixo {
+        None => falta.push(
+            "o wasi-sdk não tem pacote para esta plataforma; os crates do celular se provam no Mac arm64 \
+             e no Linux x86_64"
+                .to_owned(),
+        ),
+        Some(s) if !crate::wasi_sdk::FIXADOS.iter().any(|(f, _)| *f == s) => falta.push(format!(
+            "esta máquina ({s}) não tem SHA-256 fixado do wasi-sdk, e o motor de MODs não compila com um \
+             SDK que ninguém conferiu. Rode numa máquina com hash fixado (Mac arm64 ou Linux x86_64), ou \
+             baixe, confira por outro meio e acrescente a linha em `FIXADOS` (xtask/src/wasi_sdk.rs)"
+        )),
+        Some(_) => {}
+    }
+    falta
+}
+
 pub(crate) fn run() -> ExitCode {
     let raiz = raiz();
+    let alvos = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .ok()
+        .filter(|s| s.status.success())
+        .map(|s| String::from_utf8_lossy(&s.stdout).into_owned());
+    let tem_node = Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|s| s.status.success());
+    let falta = o_que_falta(
+        alvos.as_deref(),
+        tem_node,
+        crate::wasi_sdk::sufixo_desta_maquina(),
+    );
+    if !falta.is_empty() {
+        for motivo in &falta {
+            eprintln!("web: FALHOU antes de começar: {motivo}");
+        }
+        return ExitCode::FAILURE;
+    }
     let mut passos: Vec<Passo> = Vec::new();
 
     let web = raiz.join("target/wasm32-unknown-unknown/release/seele_web.wasm");
@@ -137,6 +202,16 @@ pub(crate) fn run() -> ExitCode {
                 .arg("xtask/web/ouro.mjs")
                 .arg(&web)
                 .arg("crates/seele-proto/tests/fio_1_0.txt"),
+        )),
+    ));
+
+    passos.push((
+        "os links da F1 dentro do .wasm (xtask/web/links.mjs)",
+        deu_certo(rodar(
+            Command::new("node")
+                .arg("xtask/web/links.mjs")
+                .arg(&web)
+                .arg("crates/seele-web/tests/links-da-f1.json"),
         )),
     ));
 
@@ -204,5 +279,60 @@ pub(crate) fn run() -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::indexing_slicing, reason = "num teste, o pânico é o relatório")]
+mod tests {
+    use super::*;
+
+    const COM_OS_DOIS: &str = "aarch64-apple-darwin\nwasm32-unknown-unknown\nwasm32-wasip1\n";
+
+    #[test]
+    fn com_tudo_no_lugar_nada_falta() {
+        assert!(o_que_falta(Some(COM_OS_DOIS), true, Some("arm64-macos")).is_empty());
+    }
+
+    #[test]
+    fn sem_os_alvos_wasm_a_recusa_diz_o_rustup() {
+        let falta = o_que_falta(Some("aarch64-apple-darwin\n"), true, Some("arm64-macos"));
+        assert_eq!(falta.len(), 1, "{falta:?}");
+        assert!(
+            falta
+                .iter()
+                .any(|f| f.contains("rustup target add wasm32-unknown-unknown wasm32-wasip1")),
+            "{falta:?}"
+        );
+    }
+
+    #[test]
+    fn uma_maquina_sem_hash_fixado_e_recusada_dizendo_o_porque() {
+        let falta = o_que_falta(Some(COM_OS_DOIS), true, Some("x86_64-macos"));
+        assert_eq!(falta.len(), 1, "{falta:?}");
+        assert!(
+            falta[0].contains("x86_64-macos") && falta[0].contains("SHA-256"),
+            "{falta:?}"
+        );
+    }
+
+    #[test]
+    fn uma_plataforma_sem_pacote_do_wasi_sdk_e_recusada() {
+        let falta = o_que_falta(Some(COM_OS_DOIS), true, None);
+        assert_eq!(falta.len(), 1, "{falta:?}");
+        assert!(falta[0].contains("wasi-sdk"), "{falta:?}");
+    }
+
+    #[test]
+    fn sem_node_a_recusa_diz_o_node() {
+        let falta = o_que_falta(Some(COM_OS_DOIS), false, Some("arm64-macos"));
+        assert_eq!(falta.len(), 1, "{falta:?}");
+        assert!(falta[0].contains("node"), "{falta:?}");
+    }
+
+    #[test]
+    fn sem_rustup_os_alvos_nao_sao_cobrados_daqui() {
+        // Um toolchain sem `rustup` pode ter os alvos; quem diz é o build.
+        assert!(o_que_falta(None, true, Some("arm64-macos")).is_empty());
     }
 }

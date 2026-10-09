@@ -1160,7 +1160,9 @@ async fn abrir_porta(
             Some("esta escuta não atende em IPv4, então não há porta IPv4 a pedir".to_owned()),
         );
     }
-    match porta::abrir(achados, escuta.porta()).await {
+    // O papel ainda é sempre o do servidor guardado: a sala pessoal (tarefa
+    // 4f do Plano 5) passa o dela quando subir pela escada.
+    match porta::abrir(achados, escuta.porta(), porta::Papel::Servidor).await {
         Ok(aberta) => (Some(aberta), None),
         Err(falha) => {
             tracing::info!(%falha, "o degrau 3 não deu");

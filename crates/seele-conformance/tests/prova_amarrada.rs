@@ -237,6 +237,66 @@ async fn a_prova_da_0_15_sobre_o_nonce_cru_e_recusada() -> Result<()> {
     Ok(())
 }
 
+/// **Uma chave de ordem pequena é recusada no registro**, antes do desafio.
+///
+/// Uma chave dessas não prova posse de nada: a conferência comum do
+/// `ed25519-dalek` aceita com ela assinaturas que não exigem chave privada
+/// nenhuma. O servidor a recusa ao ler o `Hello`, com a mesma razão uniforme de
+/// toda credencial que não serve, e confere a prova com `verify_strict`. Achado
+/// da F2, pedido pela orquestradora em 08/10/2026.
+#[tokio::test(flavor = "multi_thread")]
+async fn uma_chave_de_ordem_pequena_e_recusada_antes_do_desafio() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+
+    // O elemento neutro da curva, comprimido: y = 1, x positivo.
+    let mut identidade = [0u8; 32];
+    identidade[0] = 1;
+    assert!(
+        ed25519_dalek::VerifyingKey::from_bytes(&identidade)?.is_weak(),
+        "a chave do teste deixou de ser de ordem pequena"
+    );
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut tls = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
+    )));
+    let conexao = ponta.connect(endereco, "localhost")?.await?;
+    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    frame::write(
+        &mut envio,
+        &ClientMessage::Hello {
+            faixa: seele_proto::FAIXA,
+            client: "par-cru".into(),
+            nickname: "pessoa064".into(),
+            public_key: identidade.to_vec(),
+            join_secret: None,
+            material_e2ee: None,
+            apis_de_mod: Vec::new(),
+        },
+    )
+    .await?;
+    let resposta = frame::read::<ServerMessage>(&mut recebe).await?;
+    assert_eq!(
+        resposta,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::CredentialRejected
+        },
+        "uma chave de ordem pequena chegou ao desafio"
+    );
+
+    drop(ponta);
+    daemon.shutdown();
+    Ok(())
+}
+
 /// **O lado do cliente:** o `Client::connect` de verdade assina a impressão do
 /// certificado que o TLS daquela conexão conferiu, e nenhuma outra.
 ///
