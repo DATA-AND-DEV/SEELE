@@ -51,12 +51,12 @@ use seele_core::{
 pub use types::{
     AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
-    EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FonteDeTela, LimitesDeTela, LinkState,
-    LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason, PermissaoDeMicrofone,
-    PermissaoDeTela, Person, PlaybackDevice, Preview, PreviewRefusal, PreviewRules,
-    SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot, SomDaTela, TelaEmCurso,
-    Telemetry, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom, VoiceRoomSync,
-    VolumeRefusal,
+    EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
+    LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason,
+    PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview, PreviewRefusal,
+    PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot, SomDaTela,
+    TelaEmCurso, Telemetry, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom,
+    VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -352,6 +352,14 @@ pub enum ConnectStage {
         /// núcleo, que escreve o que a bandeira sabe e o que ela não sabe.
         com_bilhete_e_impressao: bool,
     },
+    /// Perguntando ao ponto de encontro onde a sala de um código mora.
+    ///
+    /// Só numa ligação. Ver a variante do núcleo: ao contrário do aviso, esta
+    /// etapa pode reprovar a chegada, com [`ConnectionError::NaoLocalizou`].
+    Localizando {
+        /// O ponto de encontro a quem se pergunta.
+        ponto: String,
+    },
     /// Avisando o ponto de encontro de que estamos chegando.
     Avisando {
         /// O ponto de encontro, como o convite o escreveu.
@@ -451,6 +459,7 @@ impl ConnectStage {
     pub fn nome(&self) -> &'static str {
         match self {
             Self::Parada { .. } => "Parada",
+            Self::Localizando { .. } => "Localizando",
             Self::Avisando { .. } => "Avisando",
             Self::Tentando { .. } => "Tentando",
             Self::CaminhoAberto { .. } => "CaminhoAberto",
@@ -495,6 +504,9 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
                 candidatos: *candidatos,
                 com_bilhete_e_impressao: *com_bilhete_e_impressao,
             },
+            Etapa::Localizando { ponto } => Self::Localizando {
+                ponto: ponto.clone(),
+            },
             Etapa::Avisando { ponto } => Self::Avisando {
                 ponto: ponto.clone(),
             },
@@ -523,14 +535,17 @@ impl From<&seele_core::chegada::Etapa> for ConnectStage {
 /// Os três campos que uma etapa pode carregar sobre **onde** ela aconteceu.
 ///
 /// `Option` e não um valor de enfeite: `Dentro` não tem candidato, e escrever
-/// `candidato = 0` para ela seria inventar o zero. Para `Avisando` o «onde» é o
-/// ponto de encontro, que é para onde aquele passo mandou alguma coisa; para
+/// `candidato = 0` para ela seria inventar o zero. Para `Avisando` e
+/// `Localizando` o «onde» é o ponto de encontro, que é para onde aquele passo
+/// mandou alguma coisa; para
 /// `Parada` o `de` é quantos endereços o convite trouxe, que é a mesma
 /// grandeza que o `de` de uma tentativa — «de quantos».
 fn campos_do_passo(etapa: &seele_core::chegada::Etapa) -> (Option<String>, Option<u8>, Option<u8>) {
     use seele_core::chegada::Etapa;
     match etapa {
-        Etapa::Avisando { ponto } => (Some(ponto.clone()), None, None),
+        Etapa::Localizando { ponto } | Etapa::Avisando { ponto } => {
+            (Some(ponto.clone()), None, None)
+        }
         Etapa::Tentando {
             candidato,
             de,
@@ -577,6 +592,7 @@ fn avisou_do_passo(etapa: &seele_core::chegada::Etapa) -> Option<bool> {
     match etapa {
         Etapa::Tentando { avisou, .. } => Some(*avisou),
         Etapa::Parada { .. }
+        | Etapa::Localizando { .. }
         | Etapa::Avisando { .. }
         | Etapa::CaminhoAberto { .. }
         | Etapa::Dentro
@@ -5825,7 +5841,10 @@ fn fim_da_recusa(erro: &seele_core::ConnectError) -> EndReason {
         // Na volta, o anúncio que esta máquina não aceitou é o servidor que
         // passou a exigir outro conjunto no meio da sessão.
         seele_core::ConnectError::ModsNaoAceitos { .. } => EndReason::ModsMudaram,
-        seele_core::ConnectError::LocalEndpoint
+        // Não chega à volta hoje: ela é ao `IP:porta` que atendeu, e não ao
+        // código. Se chegar, é a conversa que caiu, como as de rede.
+        seele_core::ConnectError::NaoLocalizou(_)
+        | seele_core::ConnectError::LocalEndpoint
         | seele_core::ConnectError::Unreachable
         | seele_core::ConnectError::TlsRefused
         | seele_core::ConnectError::HandshakeTimeout
@@ -5877,6 +5896,9 @@ fn classify_connect_failure(error: &seele_core::ConnectError) -> ConnectionError
                     codigo: codigo.to_string(),
                 }
             }
+        },
+        seele_core::ConnectError::NaoLocalizou(falha) => ConnectionError::NaoLocalizou {
+            motivo: (*falha).into(),
         },
         // Era `TlsRefused`, e caía no braço de cima: o impostor que repete o
         // certificado sem ter a chave aparecia como versão incompatível, e a
@@ -8866,6 +8888,54 @@ mod trilha_no_log {
             pastas.contains(&perto.join("..")),
             "sem a pasta acima, uma árvore de fonte não acharia o módulo em \
              `target/`: {pastas:?}"
+        );
+    }
+
+    #[test]
+    fn uma_ligacao_que_nao_achou_a_sala_atravessa_com_o_motivo() {
+        // A tarefa 6c: cada motivo é uma frase diferente na tela (spec de
+        // 23/09), e a casca a escolhe pelo nome que atravessa. Achatar o motivo
+        // aqui, num `Unreachable`, mandaria quem liga procurar defeito de rede
+        // quando a pessoa só está com o SEELE fechado.
+        use seele_core::chegada::Etapa;
+        use seele_core::encontro::FalhaAoLocalizar as Nucleo;
+
+        for falha in [
+            Nucleo::SemPonto,
+            Nucleo::NinguemMora,
+            Nucleo::Enc2Calado,
+            Nucleo::PontoRecusou,
+            Nucleo::PontoMudo,
+            Nucleo::PontoNaoResolve,
+            Nucleo::SoAEscuta,
+        ] {
+            let etapa = Etapa::Desistiu(seele_core::ConnectError::NaoLocalizou(falha));
+            let Ok(json) = serde_json::to_string(&ConnectStage::from(&etapa)) else {
+                panic!("a desistência de uma ligação não serializa");
+            };
+            assert_eq!(
+                json,
+                format!(
+                    r#"{{"Desistiu":{{"motivo":{{"NaoLocalizou":{{"motivo":"{falha:?}"}}}}}}}}"#
+                ),
+                "o motivo de não achar a sala atravessou com outro nome"
+            );
+        }
+
+        // E a etapa que pergunta ao quarto atravessa com o ponto, que é o
+        // «onde» do passo no log.
+        let localizando = Etapa::Localizando {
+            ponto: "encontro.exemplo:8384".into(),
+        };
+        assert_eq!(
+            ConnectStage::from(&localizando),
+            ConnectStage::Localizando {
+                ponto: "encontro.exemplo:8384".into()
+            }
+        );
+        assert_eq!(
+            campos_do_passo(&localizando),
+            (Some("encontro.exemplo:8384".into()), None, None)
         );
     }
 

@@ -124,3 +124,102 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     telemetria fica inerte sob o diálogo e coberta pela página imersiva. Vai
     para a M3 com a API 6 (tarefa 11).
   - Falta, e é do dono: o Windows (WebView2) e o iPhone.
+
+## 09/10
+
+- **A tarefa 2 do plano, liberada pela orquestradora antes do K4** (só toca o
+  `xtask/src/check_api.rs` e uma função nova no fim do `frontend.rs`):
+  - `2cb0c3b`: o `check-api` ganha as regras da v6 — os pontos e os tipos de
+    superfície nos dois sentidos (o sentido casca → API é o que pega o
+    `pessoa.avatar`), os nomes da metade de servidor contra o que o runtime
+    registra, e os tetos declarados contra os do produto (um teto que o guarda
+    não sabe conferir reprova). Só cobram a partir da v6; a saída do
+    `cargo xtask check-api` não muda. 45 testes do `check_api`, 72 do binário do
+    `xtask`, clippy e fmt limpos.
+  - `0b012c1`: `a_casca_confere_as_mesmas_capacidades_que_o_nucleo`, o guarda que
+    o `base.js` citava e nunca existiu. Compara os dois mapas inteiros.
+  - **Prova por reversão de cada um**: o sentido casca → API dos pontos, os
+    nomes de servidor, a comparação dos tetos e a volta das regras na lista de
+    `conferir_arquivo` ficam vermelhos no teste deles; o espelho reprova com a
+    casca sem `volume` na API 5, com o núcleo com uma capacidade a mais na API 3,
+    e com uma API 6 só na casca.
+  - Ruling: um bloco ausente na v6 conta como vazio, e não como violação
+    própria — custo se errado: nenhum, porque o sentido contrário reprova cada
+    ponto e tipo que falta, nomeado.
+- **Respostas aos planos do porte das três sessões de MOD** (rascunho §17, uma
+  tabela por sessão; commits `365646c`, `9b27862`):
+  - MESA: o `ModAviso` coalescido por canal e só depois de o quintal gravar;
+    `volume` em toda mídia do servidor, inclusive o `fundo` da `tela`;
+    `contexto.sala` preenchido pelo servidor em todo pedido; o palco escondido
+    continua soando; `superficie.atualizar(chave, subarvore)`.
+  - ESTILO: a lacuna do tema (B0) virou a tarefa 17 — `mundo.tema`, o servidor
+    guardando e mandando o `TemaMudou`, a porta no manifesto, `servidor.aparencia`
+    como porta de quem vê, o evento `tema`, os pares e os derivados em números, a
+    prévia, a herança e a ampliação. O B9 é a tarefa 18, com a F6.
+  - PERFIS: o teto de contribuições muda de modelo (os pontos por alvo fora do
+    agregado); o sujo com `inicial`; a carga do aviso como valor JSON; os nomes
+    das recusas, com `detectado: 'heic'`; os portes em 4.0.0 (D-mods-1).
+  - Ruling: `contexto.sala` é do servidor, pela presença, e não da janela —
+    custo se errado: nenhum dado novo ao MOD, que já recebe `PersonJoined`.
+  - Ruling: os pontos por alvo aceitam uma contribuição por alvo e por MOD —
+    custo se errado: um MOD que quisesse duas por pessoa usa uma só, com mais
+    nós.
+  - Para o dono, pela orquestradora: um tema por servidor (17c) e os números
+    do teto (256 alvos por ponto, 128 sem alvo), que saem da M3.
+- **A orquestradora aprovou a revisão** e passou as decisões do dono: um tema
+  por servidor, o escolhido por quem administra (D-api-5); o modelo do teto
+  decidido, e os números com a M3. E liberou o servidor do tema (17a a 17c) no
+  `session.rs` e no `mods/mod.rs`, com aviso antes de tocar o `admitir` (dado e
+  aprovado: uma leitura a mais e um quadro depois do `Instancia`).
+- **Tarefas 17a a 17c feitas** (depois de `git merge versao/0.16`, `181b266`):
+  - `Manifest.tema` (a porta), com teste em `seele-proto`.
+  - Migração 15, `temas_dos_mods`, com o índice parcial `um_tema_por_servidor`;
+    `persistence/tema.rs` (`em_vigor`, `escolhido_ligado`, `declarar`). Seis
+    testes, e **as quatro regras provadas por reversão**: o tema em vigor só com
+    o MOD ligado; a recusa de outro MOD; tirar não devolve a porta; o desligado
+    não segura a porta.
+  - `mundo.tema` no runtime: `{ ok: true }` ou `{ ok: false, erro }`; a
+    declaração só vale se a chamada terminar, nos dois caminhos (pedido e
+    momento). Sete testes de unidade no runtime e **sete reversões que
+    reprovam** (a porta, o escolhido, o teto, a lista como tema, a falha que
+    não esquece, e a limpeza no começo de `chamar` e de `pedir`). A limpeza
+    passou na primeira bateria, sem teste que a cobrisse, e virou o teste
+    `um_tema_nao_tomado_nao_passa_para_a_chamada_do_vizinho`. No despacho, um
+    teste (`um_tema_declarado_num_momento_e_gravado_e_vai_ao_barramento`) e
+    duas reversões que reprovam (sem publicar, e sem recolher o tema na thread).
+  - O pedido e o momento gravam o tema depois do quintal, na mesma tomada, e
+    mandam `Event::TemaMudou` só quando o tema em vigor muda; o `admitir` manda o
+    `TemaMudou` logo depois do `Instancia`, sempre (um tema guardado inválido
+    vira `None`, e o quadro sai assim mesmo).
+  - Conformidade `tema_do_servidor.rs`, três testes verdes: todos recebem e o
+    tema sobrevive ao reinício; desligar tira, religar devolve; só o escolhido
+    pinta, e quem não tem a porta é recusado. Das cinco reversões de integração,
+    rodaram duas antes de a orquestradora pedir a pausa para a bateria da
+    `linha/0.15`: **sem o quadro no `admitir`, os três reprovam; publicar sem
+    gravar, reprova**. Faltam três (sem traduzir o evento, sem ler quem pinta,
+    sem a porta do manifesto), e repetir a segunda com a saída inteira: esperam
+    o aviso da orquestradora.
+  - **Um defeito meu, pego por um teste que já existia**: o `acompanhar` passou
+    a guardar um `Sender` do barramento, e o laço, que só sai quando o
+    barramento fecha, não saía mais. Em produção seria uma tarefa sobrevivendo
+    ao servidor, segurando o banco. Agora é um `WeakSender`, e o teste
+    `um_evento_do_barramento_chega_ao_mod_e_o_quintal_e_gravado`, que travou, é
+    a prova contra a volta.
+  - Ruling: escolhido é o primeiro MOD com a porta que declara, enquanto estiver
+    ligado; desligado, a porta fica livre — custo se errado: com dois MODs de
+    tema, desligar o escolhido e religá-lo depois de o outro declarar deixa o
+    outro pintando, até quem administra trocar (17f.0, na casca).
+  - Ruling: o servidor não confere quem pediu o `mundo.tema`; a porta é o
+    manifesto (O3 do ESTILO) — custo se errado: um MOD que quisesse restringir
+    a quem administra lê `contexto.admin`, como já pode.
+  - Achado para o corte: um manifesto com `"tema": true` e sem metade de
+    servidor tem uma porta que ninguém abre (tarefa 13, passo 6b). E o
+    indexador precisa ler a chave `tema` (tarefa 13, passo 6).
+- **Segunda volta dos planos do porte** (rascunho §17): ESTILO O1 a O5 (a
+  recusa é valor; o par com os dois nomes, `{ frente, fundo, razao, piso }`; cai
+  com o quintal; passa no pedido de quem não administra; decidido; números com a
+  M3) e PERFIS I e J (o `Error` do prelúdio leva os campos da recusa, como
+  `detectado`; números com a M3, como opções no laboratório).
+- **ADR 0056**: a seção «Os candidatos da API 7» (`decorar`; tipo e escala no
+  tema; o fundo por mídia se não medido a tempo; `tela` e transmissões no
+  retrato; os membros fora do ar), e o «não decide» atualizado.

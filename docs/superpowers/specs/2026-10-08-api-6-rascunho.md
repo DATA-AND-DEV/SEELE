@@ -42,6 +42,14 @@ mudam o texto abaixo, e cada seção já as segue.
 | os membros fora do ar no retrato (§6) | **ficam de fora** |
 | os três candidatos ao fio (§14) | **o aviso do servidor e o tema como dado vão para o contrato da 1.0**, pela F1; os pedidos de escopo de servidor **não mudam o fio**, porque já existem (§8) |
 
+### Decisões do dono (09/10/2026)
+
+| pergunta | resposta |
+|---|---|
+| dois MODs com a porta do tema (§9) | **um tema por servidor**, o escolhido por quem administra (D-api-5) |
+| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado); **os números** (256 alvos por ponto, 128 no agregado) **saem da M3** |
+| o que não entrar na 6 | **é candidato da API 7** (Servidor 1.1), e fica escrito no ADR 0056 |
+
 ---
 
 ## 0. O que muda, numa página
@@ -49,8 +57,9 @@ mudam o texto abaixo, e cada seção já as segue.
 1. **Só a API 6 roda no app 0.16.** Quem precisa de um MOD das APIs 3, 4 ou 5
    usa o Servidor 0.15 pelo launcher. **Servidor 1.0 = protocolo 1.0 + API 6.**
 2. **A janela inteira vira mapa de regiões nomeadas**, com dois modos
-   (`adicionar` e `substituir`). Os 11 pontos de hoje continuam com o mesmo
-   nome e passam a morar dentro das regiões.
+   (`adicionar` e `substituir`). Os pontos de hoje continuam com o mesmo
+   nome e passam a morar dentro das regiões; `servidor.aparencia` vira a porta
+   de quem vê sobre o tema.
 3. **`pessoa.capa`**: a capa de uma pessoa, no cartão da chamada, no fundo da
    barra do operador e nos dois cabeçalhos de perfil.
 4. **Camadas**: `chamada.palco` (sobre a chamada), `folha` (coluna que
@@ -58,16 +67,20 @@ mudam o texto abaixo, e cada seção já as segue.
 5. **O MOD deixa de ler o `Snapshot` inteiro.** Ele lê um **retrato projetado
    por lista branca** e assina **eventos da tela**. O veredito de conexão
    segura, os aparelhos da máquina e a telemetria saem do alcance dele.
-6. **A metade de servidor do MOD avisa as janelas** de que um dado dela mudou.
+6. **O tema é dado do servidor**: a metade de servidor o declara
+   (`mundo.tema`), o servidor o guarda e o manda logo depois do `Session`, e o
+   produto o aplica e diz ao MOD o que fez (§9). Um tema por servidor. A parte
+   do servidor está feita (tarefas 17a a 17c); a da casca espera o K4.
+7. **A metade de servidor do MOD avisa as janelas** de que um dado dela mudou.
    É o que tira a consulta em laço dos três MODs oficiais (2 s na MESA, 4 s no
    PERFIS e no ESTILO).
-7. **Toda região e toda camada diz o que faz no celular** (D-web-1): se existe
+8. **Toda região e toda camada diz o que faz no celular** (D-web-1): se existe
    na casca de uma mão, com que tamanho, e o que acontece com uma contribuição
    para uma região que lá não existe.
-8. **A v6 promete só o que é entregue**, e é escrita por inteiro, sem
+9. **A v6 promete só o que é entregue**, e é escrita por inteiro, sem
    `extends`. O que as versões 1 a 5 prometiam e nunca entregaram não entra
    (§13).
-9. **O núcleo de confiança vira contrato testado**, e passa a incluir o
+10. **O núcleo de confiança vira contrato testado**, e passa a incluir o
    apelido verificado (D-nucleo-1), a faixa de voz e as abas do celular, e o
    contraste dos itens do núcleo sob qualquer tema.
 
@@ -126,9 +139,11 @@ sem os controles de imagem, com uma frase. **Ausente, e não recusado depois de
 a pessoa escolher a foto.**
 
 **O guarda que nunca existiu.** O comentário de `base.js:1963-1965` [c] cita
-`a_casca_confere_as_mesmas_capacidades_que_o_nucleo`. O teste não existe: o
-`git log -S` só acha o comentário (`26ad0c2`). A API 6 o cria: `CAPACIDADES_POR_API`
-na casca e `capacidades_da_api` no Rust são comparados por teste.
+`a_casca_confere_as_mesmas_capacidades_que_o_nucleo`. O teste não existia: o
+`git log -S` só achava o comentário (`26ad0c2`). A tarefa 2 do plano o criou
+(`0b012c1`, em `apps/seele-app/tests/frontend.rs`): `CAPACIDADES_POR_API` na
+casca e `capacidades_da_api` no Rust são comparados por inteiro, e as três
+reversões provadas reprovam. [c]
 
 ## 3. Regiões e modos
 
@@ -154,8 +169,15 @@ O mecanismo é o de hoje: cada região vira uma linha de
 | `pessoas.lista` | a faixa de pessoas | substituir, adicionar | `pessoa.identidade`, `pessoa.cartao`, `pessoa.detalhes`, `pessoa.acoes`, `pessoa.avatar`, `pessoa.capa` | **o menu de moderação**, e o apelido verificado |
 | `status.barra` | a barra inferior (`footer.telemetria`, `index.html:1761`) | adicionar | — | **atraso, jitter, distúrbio e codec** |
 
-**Os 11 pontos de hoje ficam com o mesmo nome**, e `servidor.aparencia` passa a
-ser a porta do tema (§9). `pessoa.avatar` existe desde `14d9c30` (22/09) e
+**Os pontos de hoje ficam com o mesmo nome**, menos `servidor.aparencia`, que
+deixa de ser registrado pela janela e passa a ser a porta de quem vê sobre o
+tema declarado pelo servidor (§9).
+
+**`listarNaBarra` continua** (pergunta do ESTILO, B6): a entrada que um MOD
+registra em `servidor.navegacao` pode pedir `listarNaBarra: false`, e então
+ela não aparece na lista de quem não tem uso para ela, sem mudar permissão
+nenhuma (`api/v4.json`, `contribuicoes.listarNaBarra`). No celular a entrada
+mora na gaveta SALAS (§11), e o `false` vale lá do mesmo jeito. `pessoa.avatar` existe desde `14d9c30` (22/09) e
 saiu na 0.15.0, mas **nunca entrou num `vN.json`** (§13). A v6 o lista.
 
 **Uma substituição de região inteira não leva os pontos de dentro.** Quem
@@ -272,10 +294,14 @@ contrato, **com os números em aberto para a M3** (§12):
 ### `chamada.palco`
 
 - **Contexto.** A chamada é de uma sala de voz, e um pedido do MOD é por canal
-  (`SeeleMods.request(id, canal, valor)`, `executor.rs:1615` [c]). Um pedido
-  feito do palco diz **de que sala veio** (`contexto.sala`), e o retrato diz a
-  sala ocupada (§6). Não amarro sala a canal na API: é o MOD que decide (MESA,
-  item 5a).
+  (`SeeleMods.request(id, canal, valor)`, `executor.rs:1615` [c]).
+  **`contexto.sala` é preenchido pelo servidor em todo pedido**, e não só nos
+  feitos do palco (pergunta da MESA, 09/10): é a sala de voz em que a pessoa
+  está naquele instante, segundo a presença que o servidor mantém, ou `null`
+  fora de sala. Por construção, a janela não o manda e não o forja, e não há
+  o que conferir. Não é dado novo para o MOD: a metade de servidor já recebe
+  `PersonJoined` com a sala (§7.4). O retrato também diz a sala ocupada (§6).
+  Não amarro sala a canal na API: é o MOD que decide (MESA, item 5a).
 - **O que aceita**: a gramática inteira da superfície, inclusive `tela` com
   traço e arraste e `midia` de fundo. **Recebe toque e clique**, porque é
   superfície e não ponto de cartão.
@@ -288,6 +314,16 @@ contrato, **com os números em aberto para a M3** (§12):
 - **Saída.** Como toda superfície: a saída é do produto, e a grade de vídeo
   continua de pé por baixo. A faixa de toque e a de batida ficam fora, por
   construção (§10).
+
+### A mídia do servidor, em todo lugar, pelo mesmo caminho
+
+**Toda mídia que vem da metade de servidor aceita `transporte: 'volume'`**
+(pergunta da MESA, 09/10): a forma `midia`, o `fundoDeMidia` de uma caixa, o
+`retrato`, a `pessoa.capa` e **o `fundo` da `tela`** (o mapa sob as peças). É o
+mesmo `doServidor: { canal, pedido, campo }` da v5, com `pedido.transporte =
+'volume'` levando a leitura ao fluxo do ADR 0048, e não ao controle. A v5 só o
+dizia da mídia em geral (`api/v5.json`, `volume.leitura`); a 6 o diz de cada
+lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7).
 
 ### `folha`
 
@@ -316,11 +352,23 @@ campo. A API 6 acrescenta:
   cancela pela saída do produto. O MOD dá o texto, não o comportamento;
 - **a recusa do servidor volta ao campo que a causou**:
   `formulario.erros({ chave: 'motivo' })`;
-- **`sujo` derivado**: o produto compara com o valor inicial, e a pergunta ao
-  fechar não depende de o MOD chamar `suja`;
+- **`sujo` derivado**: o produto compara o valor atual de cada campo com o
+  inicial, e a pergunta ao fechar não depende de o MOD chamar `suja`. **O MOD
+  pode declarar os dois** (pedido do PERFIS, 09/10): `{ forma: 'campo', chave,
+  valor: <o rascunho guardado>, inicial: <o gravado> }`. Assim o editor que
+  reabre com um rascunho já nasce sujo, e voltar ao gravado o limpa. Sem
+  `inicial`, o inicial é o `valor` da montagem;
 - **confirmação declarada para ação destrutiva**, com as palavras do produto:
   `{ confirmar: 'isto muda a aparência para todo mundo neste servidor' }`
-  (ESTILO A13);
+  (ESTILO A13). **Ela se declara em qualquer `botao`**, e não só no primário
+  (pergunta do ESTILO, B7): RESTAURAR PADRÃO é um terceiro botão, destrutivo,
+  ao lado do primário e da saída. O produto mostra a confirmação com as
+  palavras dele por cima do diálogo, e o evento `botao` só chega ao MOD
+  depois do sim;
+- **um erro do servidor que fala de dois campos** vai a
+  `formulario.erros({ text: motivo, background: motivo })`: o produto marca
+  cada campo pela chave. O que a metade de servidor responde é protocolo do
+  próprio MOD (o produto só repassa o `ModReply`);
 - **`emProgresso` no primário trava o segundo clique** (ESTILO A6);
 - **tela cheia com ações fixas** quando o produto decide (celular, ou
   `largo: true` numa janela estreita), com `abas` cabendo em 390 px
@@ -405,9 +453,10 @@ leva, e leva só quem está presente.** Os motivos:
 - **Nenhuma sessão de MOD pediu os ausentes.** O PERFIS pede `me` e «as pessoas
   do servidor, com `id` e apelido» (R4) e a MESA pede «quem está no servidor»
   (item 3), os dois lendo `presentes` hoje.
-- **Os casos que pediriam têm o dado do próprio MOD.** O diretório do PERFIS
-  lista os perfis que a metade de servidor dele guarda, por `id`, estejam as
-  pessoas presentes ou não. A MESA, para dar uma ficha a quem joga e não está,
+- **Os casos que pediriam têm o dado do próprio MOD, ou não pedem.** O
+  diretório do PERFIS **não** lista perfis de quem está ausente: os ids vêm de
+  quem está presente (correção do PERFIS, 09/10, no plano do porte dele). A
+  MESA, para dar uma ficha a quem joga e não está,
   tem a lista de quem já entrou na campanha (a metade de servidor recebe
   `PersonJoined` com o apelido, §7.4).
 - **O MOD não é «todos».** A D-fio-4 diz que todos os presentes veem a lista,
@@ -445,6 +494,37 @@ Mudam, na 6:
   (MESA M14). No celular é comum.
 - **`contribuicao`** ganha o motivo `regiao-ausente` (§11).
 
+**Os nomes das recusas que o MOD recebe** (o K1-m3 da F5: o `erro` que chega ao
+MOD é um nome de lista fechada, e a frase fica na tela). No envio e na leitura
+de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
+(`VolumeRefusal`, `crates/seele-proto/src/volume.rs:70-83` [c]; os `motivo` de
+`apps/seele-app/src/main.rs` [c]):
+
+| nome | quando |
+|---|---|
+| `sem-espera` | não há espera com aquele token, para aquele MOD e aquela pessoa, dentro do prazo |
+| `tipo-recusado` | os bytes não são de um tipo que o MOD declarou aceitar; leva `detectado` quando o produto reconhece o formato (`'heic'`, por exemplo), para o MOD dizer «HEIC não é aceito» |
+| `formato-desconhecido` | os bytes não são de formato nenhum que o produto reconheça |
+| `arquivo-grande-demais` | passa do teto por arquivo |
+| `nao-gravei` | o disco de quem hospeda recusou a escrita |
+| `incompleto` | o fluxo terminou antes do que dizia carregar |
+| `sessao-encerrada` | a sessão acabou no meio |
+
+**Como a recusa chega ao MOD, com os campos dela** (o I do PERFIS, 09/10). Hoje
+o prelúdio rejeita a promessa com `new Error(m.erro)`, e nada além do nome
+atravessa (`apps/seele-app/src/executor.rs:1595` [c]). Na 6, o `Error` leva o
+nome **e os outros campos da resposta** como propriedades, que é o que a casca
+já faz com os `erros` de um formulário: `e.message` e `e.erro` são o nome
+(`'tipo-recusado'`), e `e.detectado` é `'heic'`. Vale para toda recusa que
+chega à janela pelo mesmo caminho, e não só para o volume: um campo que o
+produto acrescentar a uma recusa chega ao MOD sem outra mudança no prelúdio.
+O `ok` e o número do pedido não vão. [tarefa 4, passo 5b]
+
+Hoje o farejador de imagem (`seele_proto::imagem::sniff`) não reconhece HEIC, e
+um HEIC cai em `tipo-recusado` sem `detectado`. Reconhecer o HEIC só para
+nomeá-lo é a tarefa 4 do plano; a conversão no celular, se houver, é da ponte
+da F4.
+
 ### 7.2 Os eventos da tela (novos)
 
 O MOD assina mudanças em vez de consultar o retrato em laço. Cada evento leva
@@ -477,9 +557,28 @@ mundo.avisar({ canal, carga });     // canal opcional: sem ele, o servidor intei
 SeeleUI.aoEvento((e) => { if (e.nome === 'servidor') { /* e.carga */ } });
 ```
 
-- **Só para quem pode ler aquele canal**, e só para as janelas do mesmo MOD.
-- **Teto de tamanho e de taxa** [em aberto para a M3]: proposta, 1 KiB por
-  aviso e 4 por segundo por MOD; o excedente é contado e dito no `seele.log`.
+- **Só para quem pode ler aquele canal**, e só para as janelas do mesmo MOD,
+  **inclusive a de quem fez o pedido que causou o aviso** (pergunta do PERFIS,
+  09/10): uma regra só, e a janela que gravou confere a revisão e ignora o que
+  já tem.
+- **A carga é um valor JSON** (objeto, lista, texto ou número): a metade de
+  servidor passa o valor, o servidor o serializa (o teto de bytes vale sobre o
+  texto serializado, e o fio leva texto, `ModAviso.carga: String`), e a janela
+  o recebe já lido em `e.carga`.
+- **Teto de tamanho e de taxa** [os números esperam a M3]: proposta, 1 KiB
+  por aviso e 4 por segundo por MOD.
+- **O excedente é coalescido por canal, e não descartado** (pedido da MESA,
+  09/10). O servidor guarda, por MOD e por canal, só o aviso mais novo que
+  ainda não saiu, e o entrega assim que a taxa deixa; os do meio são
+  substituídos e contados no `seele.log`. Assim a última revisão sempre chega:
+  numa luta, as rolagens de cinco pessoas passam de 4 por segundo, e um aviso
+  descartado deixaria uma janela parada na revisão velha.
+- **O aviso só sai depois de o quintal gravar** (pedido da MESA, 09/10). Os
+  avisos feitos dentro de um `aoPedir` ou de um `aoAcontecer` são segurados
+  até o fim da chamada, e só saem se o `dados` gravar; se a chamada lançar, ou
+  se o quintal recusar a escrita (cheio), eles são descartados com ela. É a
+  mesma regra do quintal, que só grava depois de uma execução bem-sucedida
+  (`api/v2.json`, `notes`): um aviso nunca fala de uma revisão que não existe.
 - **Precisa de uma mensagem nova no fio** (servidor → cliente). Encaminhada
   em 08/10 ao contrato da 1.0, pela F1 (§14).
 
@@ -505,6 +604,7 @@ dois sentidos desde que o arquivo existe (`check_api.rs:78`, `:186-211` [c]).
 | `volume.esperar`, `.tamanho`, `.servir`, `.apagar` | ADR 0048 |
 | `mundo.buscar`, `.agora`, `.registrar` | rede de saída, relógio e registro |
 | `mundo.avisar` (novo) | §7.3 |
+| `mundo.tema` (novo) | §9: só para o MOD cujo manifesto declara `"tema": true` |
 
 **O que as versões 1 a 5 diziam e não é isto** (§13): os 13 verbos de `actions`
 da v1 (`mandarMensagem`, `criarSala`, `expulsarPessoa`…) e as 19 leituras de
@@ -574,49 +674,163 @@ próprio. Entra: é só fachada.
 
 O tema da API 4 tem dez nomes escritos em `#tela-sessao` (`base.js:1876-1888`
 [c]) e conferidos só como texto sobre fundo (`oTextoAlcancaOFundo`,
-`base.js:1928` [c]). O ESTILO mediu o que isso deixa passar (A4).
+`base.js:1928` [c]). O ESTILO mediu o que isso deixa passar (A4). Na 6, **o
+tema é dado do servidor**: a metade de servidor o declara, o servidor o guarda
+e o manda, e o produto o aplica. O fio já tem a mensagem, `TemaMudou { tema:
+Option<TemaDoServidor { mod_id, valores }> }`, ordinal 47, que sai sempre logo
+depois do `Session`, inclusive com `None`, e de novo a cada troca
+(`crates/seele-proto/src/control.rs:2559` [c]). **O que falta é o runtime**: o
+servidor não a produz e o núcleo a ignora (`crates/seele-core/src/state.rs:1647`
+[c]). Esta seção responde, item a item, aos bloqueios que o ESTILO listou no
+plano do porte (B0 a B9, `docs/plano-api-6.md` do ESTILO); as tarefas são as do
+grupo 17 do plano da F3.
 
-**O que entra na 6:**
+### Como o tema chega (B1)
 
-- **o contraste do núcleo é garantido pelo produto, com qualquer tema** (achado
+- **A metade de servidor declara com `mundo.tema(valores | null)`.** `valores`
+  é o objeto do tema (os nomes do §9, abaixo); `null` tira o tema. A chamada
+  confere o tema como a janela confere (os pares, abaixo) e devolve a recusa
+  com o par e a razão, em vez de mandar a todos um tema que a casca recusaria.
+- **A recusa é valor devolvido, e não exceção** (O1 do ESTILO). `mundo.tema`
+  devolve `{ ok: true }` ou `{ ok: false, erro }`, com `erro` da lista fechada:
+  `sem-porta-de-tema` (o manifesto não declara `"tema": true`),
+  `tema-de-outro-mod` (outro MOD é o escolhido e está ligado), `tema-invalido`
+  (não é objeto nem `null`: texto, número, lista), `tema-grande-demais` (o JSON
+  passa dos 12 KiB do fio) e, com a tarefa 17e, `contraste`, que leva
+  `pares: [{ frente, fundo, razao, piso }]` com **os dois nomes em campos
+  separados** (`frente: 'acento', fundo: 'acentoFraco'`), para o MOD pôr cada
+  lado no seu campo dos `erros`. Só lança o que o próprio MOD lançar ao ser
+  serializado (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a
+  17c; `contraste` na 17e]
+- **A declaração cai junto com o quintal** (O2). Ela só vale se o `aoPedir` ou
+  o `aoAcontecer` terminar: um MOD que declara e lança depois não publica nada,
+  e o `TemaMudou` só sai depois de o quintal e o tema gravados, na mesma
+  tomada do banco — a ordem que o aviso do servidor também segue (§7.3). [c,
+  com teste]
+- **O servidor não confere quem pediu** (O3). A porta é o manifesto, e não a
+  pessoa: um pedido de quem não administra pode levar o MOD a declarar (a
+  redeclaração da E6 do ESTILO, depois da subida do 0.15, quando o tema
+  guardado começa vazio). Se o MOD quiser restringir, ele lê `contexto.admin`.
+  [c]
+- **Funciona nos dois caminhos** em que a metade de servidor roda: o pedido e
+  o momento (`aoAcontecer`). [c, com teste]
+- **O servidor guarda o tema declarado** no banco dele (migração 15, tabela
+  `temas_dos_mods`), e não o MOD. Entre dois reinícios do `seeled`, o
+  `TemaMudou` logo depois do `Session` e do `Instancia` leva o tema guardado: a metade de servidor só roda dentro de `aoPedir` e de
+  `aoAcontecer`, sem gancho de carga, e um tema que dependesse dela sumiria no
+  reinício.
+- **A porta do lado do servidor é o manifesto.** Só um MOD cujo `mod.json`
+  declara `"tema": true` pode chamar `mundo.tema`. A tela de aceite mostra isso
+  numa linha própria («este MOD muda a aparência do servidor»), como o
+  alcance. Um MOD sem a declaração recebe a recusa pelo nome. A frase de
+  `TemaDoServidor` («quem tem o ponto `servidor.aparencia`») muda para «quem o
+  manifesto autoriza».
+- **`servidor.aparencia` passa a ser a porta de quem vê.** Ele deixa de ser um
+  ponto que a janela do MOD registra (o tema chega antes de qualquer janela) e
+  vira o lugar em que a escolha de cada pessoa vale: na gestão de MODs, «o SEELE
+  desenha» para a aparência **tira o tema daquele servidor nesta máquina**, e
+  a casca deixa de aplicar o `TemaMudou` dele até a escolha mudar. A aba
+  DIAGNÓSTICO diz qual MOD pinta a aparência pelo `mod_id` do tema. Ele sai de
+  `PONTOS_DE_CONTRIBUICAO` no corte, e a regra de pontos do `check-api` cobra a
+  saída nos dois sentidos.
+- **Desligar ou desinstalar o MOD manda `TemaMudou { tema: None }`** a todos.
+  O tema guardado fica, inativo, porque desligar preserva os dados (ADR 0045):
+  religar o MOD o devolve.
+- **Um tema por servidor** (decisão do dono, 09/10/2026). O servidor aceita
+  `mundo.tema` de um MOD só, o escolhido, e o que fica de fora recebe a
+  recusa `tema-de-outro-mod` na própria chamada. Escolhido é o primeiro MOD
+  com a porta que declara, e continua sendo enquanto estiver ligado.
+  Desligado, a porta fica livre: um servidor com outro MOD de tema ligado não
+  fica sem aparência até alguém reinstalar o primeiro. A troca explícita por
+  quem administra, na gestão de MODs (habilitar um segundo MOD com a porta
+  pede a escolha ali), é da casca, na tarefa 17f, e escreve na mesma coluna.
+  [c, tarefas 17a a 17c]
+- **Tirar o tema não devolve a porta.** O escolhido que declara `null` deixa o
+  servidor sem tema e continua escolhido: um «voltar ao padrão» não pode
+  entregar a aparência do servidor a outro MOD sem ninguém decidir. [c, com
+  teste]
+
+### O que o produto faz com ele, dito ao MOD (B2)
+
+**Um evento `tema` volta à janela do MOD** cada vez que a casca aplica um
+`TemaMudou` ou uma prévia: `{ estado: 'aplicado' | 'recusado' | 'nativo',
+pares?: [{ frente, fundo, razao, piso }], previa: boolean }`, com os pares na
+mesma forma da recusa de `mundo.tema`. `recusado` traz os pares e
+os números; `nativo` diz que quem vê escolheu «o SEELE desenha». É o que deixa
+o ESTILO dizer na tela o que aconteceu, e não o que ele supõe (o U24 dele).
+
+### Os pares e os tons derivados, em números (B3)
+
+O contrato publica **a lista de pares que o produto confere e o piso de cada
+um**, e **a fórmula dos tons derivados**, para a metade de servidor de um MOD
+conferir o mesmo que o produto antes de publicar. Os pisos de partida, pela
+WCAG e pelos tokens que o produto já cumpre (`apps/seele-app/tests/tokens.rs`):
+
+| par | piso |
+|---|---|
+| `texto` sobre `fundo`; `texto` sobre `painel` | 4,5:1 |
+| `apagado` sobre `fundo`; `apagado` sobre `painel` | 3:1 |
+| `acento` sobre `fundo`; `acento` sobre `painel`; `acento` sobre `acentoFraco` | 4,5:1 |
+
+Os itens do núcleo (o MUDO, o SAIR, o veredito) não entram na lista: eles leem
+os tokens do produto, que o tema não alcança (§10). **Os tons derivados**
+(`acentoFraco`, `bordaForte`, o segundo `apagado`) saem de uma fórmula que
+**reproduz os tokens do produto a partir dos dez do tema padrão**, com erro de
+no máximo ΔE 2 (por exemplo, o `acentoFraco` do padrão tem de dar o
+`--seele-laranja-fraco`, `#331704`). Os números finais saem da tarefa 17-B3, e
+o guia publica a mesma função em JavaScript, que a casca usa.
+
+### A prévia (B4)
+
+- `SeeleUI.tema(valores, { previa: true, superficie: id })`: vale só nesta
+  máquina, sobre o tema publicado, com o selo «prévia não publicada», e
+  pertence à superfície `id`.
+- Ela sai quando essa superfície fecha ou é descartada, ou com
+  `SeeleUI.tema(null, { previa: true })`, sem fechar a superfície.
+- **`SeeleUI.tema(valores)` sem `previa` não existe na 6**: o tema publicado é
+  o que a metade de servidor declara. Chamá-lo é recusado pelo nome, com a
+  razão.
+- No celular, «ver na sessão» recolhe o diálogo e mantém o selo (D-estilo-1).
+- A prévia também passa pelos pares, e o evento `tema` volta com `previa: true`.
+
+### O resto do que entra na 6
+
+- **O contraste do núcleo é garantido pelo produto, com qualquer tema** (achado
   do ESTILO, spec-mestre §8). Os itens do núcleo leem os tokens do produto num
   escopo que o tema não sobrescreve. Um guarda prova que os acentos `#331704`,
   `#050403` e `#0a0806` não mudam a cor computada do `#veredito`, do
-  `#botao-mudo` apertado e, no celular, do `#voz-mudo` e do `#voz-sair`;
-- **contraste conferido em todos os pares que o produto desenha**, e não só
-  texto sobre fundo: acento sobre `acentoFraco`, apagado sobre painel, texto
-  sobre painel. A recusa diz o par e a razão;
-- **tons derivados pelo produto** (`acentoFraco`, `bordaForte`, o segundo
-  `apagado`), calculados a partir dos dez e conferidos por ele;
-- **`servidor.aparencia` é a porta do tema.** Registrar o ponto passa a ser a
-  condição para pedir tema, e a escolha «o SEELE desenha» **tira** o tema já
-  aplicado (hoje só recusa o próximo, `camada-mods.js:982-985` [c]). É também
-  acessibilidade;
-- **a prévia é do produto**: `tema(valores, { previa: true })` vale só nesta
-  máquina, aparece com o selo «prévia não publicada» e sai sozinha quando a
-  superfície que a pediu fecha. No celular, «ver na sessão» recolhe o diálogo
-  e mantém o selo (D-estilo-1);
+  `#botao-mudo` apertado e, no celular, do `#voz-mudo` e do `#voz-sair`.
 - **`folha` e `dialogo` herdam o tema da sessão**, e um estilo de MOD pode
   citar um token (`cor: { tema: 'acento' }`), resolvido pelo produto (ESTILO
-  A16).
+  A16). Cada peça ganha um teste no produto antes de o ESTILO depender dela
+  (B8).
 
-**O tema como dado do servidor entra**, aplicado pelo produto antes do
-primeiro quadro e tirado na saída: tira a ida e volta e põe a saída do tema na
-mão do produto por construção (o A3 da v0.15.0). **Muda o fio** (o tema vai
-junto com a entrada na sessão), e foi encaminhado em 08/10 ao contrato da 1.0,
-pela F1 (§14).
+### A ampliação: o que entra na 6 e o que espera a API 7 (B5)
 
-**O resto da ampliação, com recomendação, a detalhar com o ESTILO no porte**
-(o dono decidiu que o tema fica e é ampliado; estes são os itens da
-ampliação):
+Os nomes congelam com o `v6.json`, e o que não entrar espera uma API somada
+depois, **que é a API 7** (Servidor 1.1): não há «6.x» na numeração de APIs.
+Com a recomendação do ESTILO, que adoto:
 
-- **tokens por região** (`regioes: { 'status.barra': { painel } }`): recomendo
-  que entre, com a mesma conferência por região;
-- **`modo: 'claro' | 'escuro'`**, tipo dos títulos separado do dos dados,
-  escala por escolha, densidade que cobre a escala `--seele-e*`, e **fundo da
-  sessão por mídia**. Recomendo `modo` e a densidade completa na 6; o fundo por
-  mídia **depois da M3 no celular** (custo de memória não medido num iPhone, e
-  o ESTILO aceita que o produto o dispense lá).
+| item | onde |
+|---|---|
+| `modo: 'claro' \| 'escuro'` | **6** |
+| a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **6** |
+| tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x |
+| fundo da sessão por mídia | **6 se a M3 com a API 6 o medir no iPhone antes do congelamento** (tarefa 11); senão, **7** |
+| tipo dos títulos e dos dados, e escala por escolha | **7**: não medidos |
+| família de tipo livre | fora, sempre |
+
+### Os dados do tema ao subir de linha (B9)
+
+Quem hospeda e sobe do Servidor 0.15 para o 1.0 **mantém o quintal do MOD**:
+a 0.16 abre e migra a pasta de dados de sempre (a cópia para
+`dados/servidor-0.15` é da linha legada), e a tabela `mod_data` é endereçada
+pelo identificador do MOD, e não pelo hash do pacote, então o ESTILO 4.0.0
+herda o que o `seele/estilo` 3.x gravou. **Isso pede um teste com a F6**
+(tarefa 18 do plano): hospedar a 0.16 sobre uma pasta da 0.15 com dados do
+`seele/estilo` e ver o `mod_data` intacto depois da migração. **O tema
+guardado pelo servidor (B1) é novo na 6**: ele começa vazio, e a primeira
+publicação do ESTILO 4.0.0 o preenche a partir do quintal.
 
 **Não entra, por nenhum caminho de tema:** `--seele-vermelho-alerta`, família
 livre, `url(…)`, CSS em texto, z-index, opacidade ou deslocamento sobre
@@ -692,6 +906,14 @@ retrato, e pelo evento `lugar` quando o aparelho deita.
 
 - o custo de capas animadas e de fundo por mídia num iPhone (o teto de memória
   de uma aba é muito menor, e passar dele encerra a aba);
+- **o som do palco quando a vista alterna** (pergunta da MESA, 09/10): no
+  celular, voltar do palco para a grade de vídeo **não tira o palco da
+  tela** no sentido da regra «fora da tela, a declaração não liga o som». A
+  regra vale para o lugar desmontado (a superfície fechada ou descartada, o
+  cartão que a casca não desenha); o palco escondido pela vista alternada
+  continua montado, e o som dele continua, com `repetir` ou sem ele,
+  enquanto a pessoa estiver na chamada. Sair da sala desmonta o palco, e o
+  som para;
 - o som de MOD com a tela bloqueada: ele só sobrevive no caminho de saída da
   voz, e só dentro de uma sala de voz (MESA, item 14; D-52). E o MOD só roda
   quando o anfitrião o chama (§16), o que, com a página oculta, pode não
@@ -713,8 +935,8 @@ de hoje, lidos no código:
 
 | limite | hoje | onde [c] | na 6 |
 |---|---|---|---|
-| mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **em aberto**: montagem parcial ou teto por superfície maior (MESA item 1, PERFIS R8) |
-| contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **em aberto**: por ponto e por alvo (cartão, avatar e capa de 64 pessoas dão 192, PERFIS B10, R2) |
+| mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **fica 12 KiB por mensagem**, e a superfície ganha a montagem por partes (abaixo) |
+| contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **muda de modelo** (abaixo): os pontos por pessoa deixam de gastar o teto agregado |
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
@@ -726,6 +948,37 @@ de hoje, lidos no código:
 | imagem por volume | 10 MiB | `midia_de_mod.rs:59` | fica; a redução no Rust (R3) entra |
 | pedidos em voo / fila da janela | 8 / 128 | `executor.rs:1505`; `base.js:535` | M3 |
 | **novos**: capas animadas, quadros por capa, aviso do servidor | — | — | M3 (§4, §7.3) |
+
+**O teto de contribuições muda de modelo antes do congelamento** (o bloqueio C
+do PERFIS, 09/10). Com cartão, avatar e capa por pessoa, 128 por MOD dão **42
+pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
+
+- **os pontos por alvo** (`pessoa.cartao`, `pessoa.avatar`, `pessoa.capa`,
+  `pessoa.identidade`, `pessoa.detalhes`, `pessoa.acoes`, `canal.item`,
+  `sala.acoes`) **não contam no teto agregado**. Cada um aceita **uma
+  contribuição por alvo e por MOD** (registrar de novo para o mesmo alvo é
+  `atualizar`, e não uma segunda), e até um teto de alvos por ponto, maior que
+  a sala (partida: 256);
+- **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
+  as entradas de navegação, as ferramentas do compositor;
+- **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128
+  sem alvo) **esperam a M3 com a API 6**, que mede a lista de pessoas com 250
+  cartões de MOD (tarefa 11). Até lá, o laboratório de cada MOD os tem como
+  opções, e não como constantes (o J do PERFIS): os mesmos números valem para
+  o aviso do servidor (1 KiB, 4 por segundo) e para as capas animadas.
+
+**A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
+pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha
+`superficie.atualizar(chave, subarvore)`, que troca o nó de `chave` e tudo o
+que está sob ele, numa mensagem própria. **O teto por mensagem continua 12
+KiB; o teto da superfície passa a ser o de nós (4096) e o de bytes de mídia**,
+e não o da mensagem. Uma ficha cheia se monta em partes: o esqueleto numa
+montagem, cada seção (inventário, perícias, notas) num `atualizar`. Uma chave
+que não existe é recusada pelo nome; uma subárvore que leva a superfície além
+dos 4096 nós é recusada com os números. A montagem inteira (`montar`)
+continua, e substitui tudo. É também o que tira a remontagem da prévia do
+editor do PERFIS a cada tecla (o bloqueio F dele): a prévia é um nó com chave,
+atualizado sozinho.
 
 **Bolsos de mídia por bytes decodificados** (PERFIS R3, M6): hoje uma foto de
 10 MiB gasta metade do bolso de todos os avatares do servidor. Na 6, a mídia de
@@ -849,12 +1102,17 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 
 ## 17. O que as sessões de MOD pediram: o que entrou, o que não entrou e por quê
 
+**As versões dos portes** (D-mods-1, spec-mestre `0703582a`): os três MODs
+portados para a API 6 saem como **4.0.0**, e não 3.4.0. A linha 3.x continua
+sendo a do Servidor 0.15 (pode ganhar uma 3.3.2, uma 3.1.2), e as duas convivem
+no catálogo.
+
 ### PERFIS (R1 a R13)
 
 | # | pedido | situação | por quê |
 |---|---|---|---|
 | R1 | `pessoa.capa` com legibilidade, halo, estados, movimento reduzido e custo | **entrou** (§4) | é a decisão do dono; os números de redução, quadros e capas animadas ficam para a M3 |
-| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou**: `cartoes` sai e o cartão é `pessoa.cartao` com `alvo`, por pessoa; e a citação (`daPessoa`). **Em aberto** só o teto por ponto e alvo (§12, M3) | decisão do dono de 08/10 |
+| R2 | cartão por pessoa, sem gastar o teto, citando a imagem da pessoa | **entrou**: `cartoes` sai e o cartão é `pessoa.cartao` com `alvo`, por pessoa; a citação (`daPessoa`); e os pontos por alvo deixam de gastar o teto agregado (§12; os números com a M3) | decisão do dono de 08/10, e o modelo do teto em 09/10 |
 | R3 | bolsos por bytes decodificados, redução no Rust | **entrou** (§12) | o custo é o quadro decodificado, e não o arquivo |
 | R4 | eventos da tela, retrato projetado, aviso do servidor | **entrou** (§6, §7); o aviso vai no fio da 1.0 (§14) | — |
 | R5 | pedidos endereçados ao servidor | **entrou como regra da v6, sem mudar o fio** (§8): o escopo de servidor (`ChannelId(0)`) já existe e passa a estar no contrato, e a permissão de escrita de cada escopo fica definida | medido: o servidor e o PERFIS servem o pedido sem canal; quem não manda o 0 é a casca comum dos MODs oficiais, e o conserto é do porte |
@@ -917,6 +1175,69 @@ cima da CSP, o laço sem fim trava a página por 3 s, e a memória não tem teto
 | o contrato de `tocando` (P49-6, `563bc37`) | **entrou** no texto da 6, como está no `api/README.md`, com `repetir: true` (decisão de 08/10) |
 | `capture`/`playback` no `Snapshot` | **entrou**: ficam fora da lista branca (§6) |
 
+### Os planos do porte (09/10): o que estava aberto e travava
+
+**MESA** (`docs/plano-api-6.md` dela, §4):
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| 1 | o `ModAviso` no fio da 1.0 | está, ordinal 46, pela F1 | §7.3, §14 |
+| 2 | o aviso acima do teto | **coalescido por canal**: o mais novo de cada canal sai assim que a taxa deixa | §7.3 |
+| 3 | o aviso antes de o quintal gravar | **só sai depois de o quintal gravar**; se a chamada lança ou o quintal recusa, ele cai junto | §7.3 |
+| 4 | a leitura por `volume` no `fundo` da `tela` | **sim**: toda mídia do servidor aceita `transporte: 'volume'` | §5 |
+| 5 | `contexto.sala` | **preenchido pelo servidor em todo pedido**, pela presença; a janela não o manda | §5 |
+| 6 | o som do palco quando a vista alterna no celular | **continua**: o palco escondido não é lugar desmontado | §11 |
+| 7 | a montagem parcial | **`superficie.atualizar(chave, subarvore)`**; 12 KiB por mensagem, 4096 nós por superfície | §12 |
+| — | `pessoa.detalhes` montado por quem vê | retirado pela MESA: cada janela já registra só o que aquela pessoa vê | — |
+
+**ESTILO** (`docs/plano-api-6.md` dele, §8): o B0 é a lacuna do plano (o lado do
+tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido (decidido em 09/10); **feito no servidor** (17a a 17c) | §9 |
+| B2 | o resultado da aplicação | o evento `tema`, com `aplicado`, `recusado` (com os pares) ou `nativo` | §9 |
+| B3 | os pares e a fórmula dos derivados | a lista com os pisos de partida; a fórmula reproduz os tokens do produto com ΔE ≤ 2 | §9 |
+| B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
+| B5 | a ampliação | na 6: `modo`, a densidade completa e os tokens por região; o fundo por mídia se medido a tempo; tipo e escala na API 7 | §9 |
+| B6 | `listarNaBarra` | continua; no celular, vale na gaveta SALAS | §3 |
+| B7 | o terceiro botão e o erro de dois campos | `confirmar` em qualquer `botao`; `formulario.erros` com as duas chaves | §5 |
+| B8 | as peças só no texto | cada uma com teste no produto, na tarefa 17 | §9; plano, 17 |
+| B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | mantido pela leitura (o `mod_data` é por identificador); a prova é a tarefa 18, com a F6 | §9 |
+
+**PERFIS** (`docs/plano-api-6.md` dele):
+
+| # | bloqueio | resposta | onde |
+|---|---|---|---|
+| A | o `daPessoa` sem tarefa | tarefa 6, passo 4b | §4; plano, 6 |
+| B | o `contribuicoes.atualizar` sem tarefa | tarefa 5, passo 6 | plano, 5 |
+| C | 128 contribuições dão 42 pessoas | **o teto muda de modelo**: os pontos por alvo não contam no agregado (uma por alvo e por MOD, até 256 alvos por ponto, a medir) | §12; plano, 5 passo 7 |
+| D | o sujo com o rascunho reaberto | o campo declara `valor` (o rascunho) e `inicial` (o gravado) | §5; plano, 7 |
+| E | o tipo da carga do `ModAviso`, e se a janela de quem gravou recebe | um valor JSON, serializado pelo servidor; e sim, ela recebe | §7.3; plano, 8 passo 4a |
+| F | a montagem parcial e a prévia a cada tecla | `superficie.atualizar(chave, subarvore)`: a prévia é um nó com chave | §12; plano, 7 passo 5c |
+| G | os nomes das recusas (o HEIC, o tipo recusado) | a lista fechada do §7.1, com `tipo-recusado` levando `detectado: 'heic'` | §7.1; plano, 4 passo 5b |
+| H | o `regiao-ausente` sem tarefa | tarefa 5, passo 8 | §11; plano, 5 |
+| — | os ausentes no diretório | corrigido no §6: o diretório lista só quem está presente | §6 |
+
+### A segunda volta dos planos do porte (09/10)
+
+**ESTILO** (plano `9c35359` do `revisao-0.16` dele):
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| O1 | a recusa de `mundo.tema`: valor ou exceção; o `par` como texto ou os dois nomes | **valor devolvido**: `{ ok: false, erro }`, nunca exceção por recusa; o par vem com **os dois nomes em campos separados**, `{ frente, fundo, razao, piso }`, na recusa e no evento `tema` | §9 |
+| O2 | o `mundo.tema` cai com o quintal quando o `aoPedir` lança | **cai**: a declaração só vale se a chamada terminar, e o `TemaMudou` sai depois do quintal e do tema gravados | §9 |
+| O3 | o `mundo.tema` no pedido de quem não administra | **passa**: a porta é o manifesto, e o servidor não confere quem pediu; o MOD restringe, se quiser, pelo `contexto.admin` | §9 |
+| O4 | «um tema por servidor» ainda como proposta na 17c | **decidido** (D-api-5); a marca saiu do rascunho e do plano, e a regra está no servidor | §9; plano, 17c |
+| O5 | os números da fórmula e do fundo por mídia | **com a M3**, e o ESTILO não depende deles para o porte | §9, §12 |
+
+**PERFIS** (plano `de4d88a`):
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| I | como o `detectado` chega ao MOD | o prelúdio rejeita com um `Error` que leva o nome **e os outros campos da resposta** (`e.erro`, `e.detectado`), como a casca faz com os `erros` | §7.1; plano, 4 passo 5b |
+| J | os números (256, 128, 1 KiB, 4/s, as capas) | **com a M3**; o laboratório os tem como opções | §12 |
+
 ## 18. Em aberto
 
 **Para a M3:** os limites do §12, os novos (capas animadas, quadros, aviso do
@@ -934,6 +1255,10 @@ servidor) e os do celular.
 4. ~~Os três candidatos ao fio (§14)~~: o aviso e o tema vão ao contrato da
    1.0, pela F1; o escopo de servidor já existia (§8).
 5. ~~Os membros fora do ar no retrato (§6)~~: ficam de fora.
+
+E em 09/10: ~~dois MODs com a porta do tema~~ (um tema por servidor) e ~~o
+modelo do teto de contribuições~~ (os pontos por alvo fora do agregado; os
+números com a M3).
 
 **Ainda em aberto, e de quem:** os itens da ampliação do tema (§9), com o
 ESTILO no porte; a montagem parcial e o teto de 12 KiB (§12), com a M3; o som

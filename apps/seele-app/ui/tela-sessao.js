@@ -2657,6 +2657,11 @@ function fraseDoAviso(motivo) {
     const quantas = Number(motivo[nome]?.apagadas ?? 0);
     return `${frase} — ${quantas} ${quantas === 1 ? "MENSAGEM" : "MENSAGENS"}`;
   }
+  // Provisória: a causa completa a frase. Ver `CAUSAS_DE_RECUSA`.
+  if (nome === "PedidoRecusado") {
+    const causa = CAUSAS_DE_RECUSA[motivo[nome]?.causa];
+    return causa ? `${frase}: ${causa}` : frase;
+  }
   return frase;
 }
 

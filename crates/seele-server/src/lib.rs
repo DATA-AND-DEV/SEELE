@@ -715,6 +715,7 @@ impl Daemon {
                 }
                 tokio::spawn(crate::mods::despacho::acompanhar(
                     server.events.subscribe(),
+                    server.events.downgrade(),
                     Arc::clone(&server.persistence),
                     despachante,
                     pasta_dos_mods.clone(),

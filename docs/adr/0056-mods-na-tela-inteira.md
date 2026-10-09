@@ -211,14 +211,37 @@ aparece esticado na largura da página, com casas de ~57 pontos.
   lista com 20 capas paradas — PERFIS R1). É o item 3 da F4, e do dono.
 - **Com as regiões da API 6**: depois do porte, na tarefa 11 do plano da F3.
 
+## Os candidatos da API 7
+
+**Não existe «6.x».** Os nomes congelam com o `api/v6.json`, e o que for somado
+depois é a **API 7** (Servidor 1.1), com o mecanismo de sempre: `extends: 6`,
+uma linha nova em `capacidades_da_api` e na casca, e o anúncio dizendo a API de
+cada MOD. Fica escrito aqui o que ficou de fora da 6, e por quê, para que a 7
+comece desta lista e não de uma lembrança:
+
+| candidato | por que não entra na 6 | de onde vem |
+|---|---|---|
+| **`decorar`**: z-index, opacidade e deslocamento sobre controle nativo, e esconder uma região | o produto não tem quem o aplique, e um guarda (`decorar_nao_volta_a_tabela_sem_quem_o_aplique`) impede que ele volte à tabela sem isso | decisão de 29/09; rascunho §3 e §9 |
+| **tipo dos títulos e dos dados, e escala por escolha**, no tema | não medidos | o B5 do ESTILO; rascunho §9 |
+| **o fundo da sessão por mídia**, no tema | entra na 6 **só se** a M3 com a API 6 o medir no iPhone antes do congelamento (tarefa 11); senão, é da 7 | o B5 do ESTILO; rascunho §9 |
+| **`tela`, `minha_transmissao` e `transmissoes`** no retrato | nenhum MOD oficial pede; um retrato que cresce é uma API somada | rascunho §6 |
+| **os membros fora do ar** no retrato | o dono decidiu deixá-los de fora (08/10); se um dia entrarem, a forma está no rascunho, §6 | rascunho §6 |
+
+**Não são candidatos, em nenhuma API:** a família de tipo livre, `url(…)` e CSS
+em texto no tema, `--seele-vermelho-alerta`, e qualquer leitura do que é da
+chamada (o veredito de conexão segura, os aparelhos, a telemetria, o código e
+a agenda da sala pessoal).
+
 ## O que este ADR não decide
 
-- **Os limites** (rascunho, §12): esperam a M3 com a API 6.
-- **`pagina` e `painel` contra `folha`; `regiao`, `cartoes` e `tema`; e o m-4
-  da pendência 49** (`repetir` ou o contrato de `tocando`): do dono com as
-  sessões de MOD, com a recomendação no rascunho, §18.
-- **Os três candidatos ao fio** (rascunho, §14): o aviso da metade de servidor,
-  os pedidos endereçados ao servidor e o tema como dado do servidor. Com a F1.
+- **Os números dos limites** (rascunho, §12): esperam a M3 com a API 6. O
+  **modelo** do teto de contribuições está decidido (dono, 09/10): os pontos por
+  alvo ficam fora do agregado.
+- Decididos depois do esqueleto, e por isso fora desta lista: `pagina`,
+  `dialogo`, `aviso` e `folha` (a `folha` substitui o `painel`); `regiao` e
+  `cartoes` saem, e o `tema` fica, ampliado; `repetir: true` por contrato; o
+  aviso do servidor e o tema como dado no contrato da 1.0; um tema por
+  servidor (rascunho, decisões de 08/10 e de 09/10).
 - **Como o MOD roda no navegador**: decidido pelo spike da F4 (o motor do
   desktop num Worker dentro de um `iframe` opaco, spec-mestre `00935dac`).
   Este ADR fixa só o que isso pede da API: um contrato e um motor, nada que

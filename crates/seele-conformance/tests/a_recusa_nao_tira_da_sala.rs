@@ -12,7 +12,9 @@
 //! - **M3**: cai e volta numa sala com senha. O servidor resgata o assento (o
 //!   mesmo `ssrc`), e o motor refaz a entrada sem a senha, que é recusada;
 //! - **M5**: sentada em A, escolhe um apelido que já é de outra pessoa. O
-//!   servidor recusa com o mesmo motivo (`nao_deu`, em `seele-server`).
+//!   servidor recusava com o mesmo motivo (`nao_deu`, em `seele-server`). Desde
+//!   a F1 ele recusa com `PedidoRecusado { pedido, causa }`, e o M5 continua:
+//!   ele mede que uma recusa que não é de entrada não tira ninguém da sala.
 //!
 //! Antes da pendência 52 isso só fazia a tela mentir. Com ela, o áudio segue o
 //! assento, e a pessoa ficava surda e muda numa sala em que todos a viam — o
@@ -56,6 +58,7 @@ use std::time::Duration;
 use anyhow::Result;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
+use seele_ffi::types::CausaDaRecusa;
 use seele_ffi::{AberturaDoAudio, ConnectConfig, Connection, NoticeReason};
 use seele_proto::control::AlertReason;
 use seele_proto::ids::{PersonId, VoiceRoomId};
@@ -187,6 +190,18 @@ fn recusada(conexao: &Connection) -> bool {
         .is_some_and(|aviso| aviso.reason == NoticeReason::VoiceRoomEntryRefused)
 }
 
+/// A recusa do apelido tomado, como ela chega desde a F1: o pedido pelo nome
+/// da variante, e a causa.
+fn apelido_recusado(conexao: &Connection) -> bool {
+    conexao.snapshot().notice.is_some_and(|aviso| {
+        aviso.reason
+            == NoticeReason::PedidoRecusado {
+                pedido: "SetNickname",
+                causa: CausaDaRecusa::NomeTomado,
+            }
+    })
+}
+
 fn quem_e(conexao: &Connection) -> PersonId {
     PersonId(conexao.snapshot().me.expect("a sessão sabe quem é"))
 }
@@ -224,9 +239,15 @@ async fn sentar_pela_ffi(
 }
 
 /// Depois da recusa: o servidor ainda a tem em `sala`, e a FFI também.
-async fn continua_em(conexao: &Connection, daemon: &Daemon, sala: VoiceRoomId, caso: &str) {
+async fn continua_em(
+    conexao: &Connection,
+    daemon: &Daemon,
+    sala: VoiceRoomId,
+    caso: &str,
+    recusa: fn(&Connection) -> bool,
+) {
     assert!(
-        esperar(PRAZO, || recusada(conexao)).await,
+        esperar(PRAZO, || recusa(conexao)).await,
         "{caso}: a recusa não chegou, e o teste mediu outra coisa"
     );
     tokio::time::sleep(ASSENTAR).await;
@@ -264,7 +285,7 @@ async fn quem_e_recusado_noutra_sala_continua_na_sua_e_com_o_audio() -> Result<(
     sentar_pela_ffi(&p, &daemon, a, None).await;
     p.enter_voice_room(trancada.get(), Some("errada".into()))
         .expect("a sessão acabou");
-    continua_em(&p, &daemon, a, "M1").await;
+    continua_em(&p, &daemon, a, "M1", recusada).await;
 
     p.disconnect();
     daemon.shutdown();
@@ -289,7 +310,7 @@ async fn um_apelido_tomado_nao_tira_ninguem_da_sala() -> Result<()> {
 
     sentar_pela_ffi(&p, &daemon, a, None).await;
     p.set_nickname("lia".into()).expect("a sessão acabou");
-    continua_em(&p, &daemon, a, "M5").await;
+    continua_em(&p, &daemon, a, "M5", apelido_recusado).await;
 
     p.disconnect();
     daemon.shutdown();

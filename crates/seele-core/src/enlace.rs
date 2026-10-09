@@ -158,13 +158,35 @@ impl Destino {
     /// A impressão esperada, quando o que se espera é um certificado.
     ///
     /// `None` também num destino de código: quem liga para uma pessoa espera
-    /// uma chave, e não uma impressão. A batida no ponto, o veredito e a
-    /// chegada leem por aqui.
+    /// uma chave, e não uma impressão. O veredito lê por aqui; a batida no
+    /// ponto e a chegada leem [`Destino::marca_do_aviso`], que serve aos dois.
     #[must_use]
     pub fn impressao_esperada(&self) -> Option<&str> {
         match &self.esperada {
             Some(Esperada::Certificado(impressao)) => Some(impressao),
             Some(Esperada::Codigo(_)) | None => None,
+        }
+    }
+
+    /// A marca com que o `LEVE` deste destino chega a quem atende.
+    ///
+    /// A de um servidor sai da impressão esperada, pela mesma função com que o
+    /// anfitrião a confere (`Marcas::do_servidor`); a de uma sala sai do código
+    /// (`Marcas::da_sala`, ADR 0062). Duas derivações da mesma regra seriam duas
+    /// regras para discordarem no dia em que uma mudar.
+    ///
+    /// `None` sem nada esperado, e com uma impressão que não dá marca (curta, ou
+    /// com um símbolo fora do alfabeto): aí não se bate em ponto nenhum.
+    #[must_use]
+    pub(crate) fn marca_do_aviso(&self) -> Option<crate::encontro::Marca> {
+        match &self.esperada {
+            Some(Esperada::Certificado(impressao)) => {
+                crate::encontro::Marcas::do_servidor(impressao).map(|marcas| marcas.aviso().clone())
+            }
+            Some(Esperada::Codigo(codigo)) => {
+                Some(crate::encontro::Marcas::da_sala(codigo).aviso().clone())
+            }
+            None => None,
         }
     }
 }
@@ -1130,10 +1152,8 @@ impl Enlace {
         // por candidato, e é essa mudança que conserta a corrida.
         let batida = match &bilhete {
             Some(bilhete) => {
-                let impressao = destinos
-                    .first()
-                    .and_then(|destino| destino.impressao_esperada());
-                crate::encontro::Batida::preparar(bilhete, impressao).await
+                let marca = destinos.first().and_then(Destino::marca_do_aviso);
+                crate::encontro::Batida::preparar(bilhete, marca).await
             }
             None => None,
         };
@@ -1508,6 +1528,7 @@ impl Enlace {
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
+        let bateria = bateria_de(&destino);
         let motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
@@ -1519,7 +1540,7 @@ impl Enlace {
             chave,
             pins,
             cliente: Some(cliente),
-            bateria: Battery::new(),
+            bateria,
             inicio: Instant::now(),
             voice_room: None,
             entradas: crate::assento::EntradasPendentes::default(),
@@ -3033,7 +3054,7 @@ impl Motor {
         // do anfitrião a cada tica da bateria.
         let batida = match &self.bilhete {
             Some(bilhete) => {
-                crate::encontro::Batida::preparar(bilhete, self.destino.impressao_esperada()).await
+                crate::encontro::Batida::preparar(bilhete, self.destino.marca_do_aviso()).await
             }
             None => None,
         };
@@ -5796,6 +5817,20 @@ impl FalhaAMostrar {
     }
 }
 
+/// A bateria de uma sessão: cinco minutos, e um numa ligação.
+///
+/// Uma ligação é o destino que espera um código (ADR 0060). A volta dela é ao
+/// `IP:porta` que atendeu, e não ao código: o `destino` do motor é o do
+/// candidato que venceu a corrida, e a corrida não se repete. A carga é a
+/// tolerância da campainha ([`crate::battery::CARGA_DA_LIGACAO`]): dentro dela
+/// quem volta entra sem tocar de novo, e passado ela a ligação caiu.
+fn bateria_de(destino: &Destino) -> Battery {
+    match destino.esperada {
+        Some(Esperada::Codigo(_)) => Battery::da_ligacao(),
+        Some(Esperada::Certificado(_)) | None => Battery::new(),
+    }
+}
+
 /// Se este erro veio de alguém que **respondeu**.
 ///
 /// A diferença decide qual erro sobra quando nenhum candidato entra. Um servidor
@@ -5832,6 +5867,9 @@ fn alguem_respondeu(erro: &ConnectError) -> bool {
         // Alguém atendeu com uma chave que não é a do código: a mesma família
         // da impressão que não confere, e o que a pessoa precisa ler.
         ConnectError::CodigoNaoConfere(_) => true,
+        // Não é de candidato nenhum: sai antes da corrida, quando o quarto não
+        // deu onde conectar, e nenhuma tentativa o produz.
+        ConnectError::NaoLocalizou(_) => false,
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::HandshakeTimeout
@@ -5864,6 +5902,18 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         // Quem atendeu não é a sala do código: perguntar de novo dá a mesma
         // chave, como com a impressão que não confere.
         ConnectError::CodigoNaoConfere(_) => false,
+        // Não chega aqui hoje: a volta da bateria é ao `IP:porta` que atendeu,
+        // e não ao código. Se um dia chegar, o que passa com o tempo é a rede —
+        // o ponto mudo, o nome que não resolveu, a recusa por excesso, a
+        // resposta pela metade. A sala que não está registrada, o ponto
+        // anterior ao ENC/2 e a falta de ponto não mudam por repetição.
+        ConnectError::NaoLocalizou(falha) => matches!(
+            falha,
+            crate::encontro::FalhaAoLocalizar::PontoMudo
+                | crate::encontro::FalhaAoLocalizar::PontoNaoResolve
+                | crate::encontro::FalhaAoLocalizar::PontoRecusou
+                | crate::encontro::FalhaAoLocalizar::SoAEscuta
+        ),
         ConnectError::LocalEndpoint
         | ConnectError::Unreachable
         | ConnectError::TlsRefused
@@ -5879,9 +5929,8 @@ mod tests {
 
     /// A impressão esperada só existe para um certificado: quem liga para um
     /// código espera uma chave, e não uma impressão (spec de 23/09, «Quem liga
-    /// confere o código dentro do TLS»). Os que leem a impressão (a batida no
-    /// ponto, o veredito, a chegada) passam a não ver nenhuma num destino de
-    /// código, e não uma impressão inventada.
+    /// confere o código dentro do TLS»). O veredito, que lê a impressão, não
+    /// vê nenhuma num destino de código, e não uma impressão inventada.
     #[test]
     fn a_impressao_esperada_so_existe_para_um_certificado() {
         let mut destino = destino_de_teste(Some("ab"));
@@ -5898,6 +5947,62 @@ mod tests {
 
         destino.esperada = None;
         assert_eq!(destino.impressao_esperada(), None);
+    }
+
+    #[test]
+    fn uma_ligacao_tem_a_bateria_de_um_minuto_e_um_servidor_a_de_cinco() {
+        let agora = Duration::from_secs(100);
+        let carga = |esperada: Option<Esperada>| {
+            let mut destino = destino_de_teste(None);
+            destino.esperada = esperada;
+            let mut bateria = bateria_de(&destino);
+            bateria.on_connection_lost(agora);
+            bateria.remaining(agora)
+        };
+
+        assert_eq!(
+            carga(Some(Esperada::Codigo(
+                seele_proto::codigo::Codigo::da_chave(&[7; 32])
+            ))),
+            Some(crate::battery::CARGA_DA_LIGACAO),
+            "uma ligação ganhou a bateria de cinco minutos"
+        );
+        assert_eq!(
+            carga(Some(Esperada::Certificado("ab".into()))),
+            Some(seele_proto::transport::SESSION_GRACE)
+        );
+        assert_eq!(carga(None), Some(seele_proto::transport::SESSION_GRACE));
+    }
+
+    /// A marca do aviso é a de quem se espera que atenda: a do servidor, tirada
+    /// da impressão, ou a da sala, tirada do código (ADR 0062). Antes da 6c a
+    /// batida lia a impressão, e um destino de código não tem impressão: uma
+    /// ligação não avisava ponto nenhum, e o furo do lado de quem recebe nunca
+    /// abria.
+    #[test]
+    fn a_marca_do_aviso_sai_do_que_se_espera() {
+        const FP: &str = "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9";
+        let mut destino = destino_de_teste(Some(FP));
+        assert_eq!(
+            destino.marca_do_aviso(),
+            crate::encontro::Marcas::do_servidor(FP).map(|marcas| marcas.aviso().clone())
+        );
+        assert!(destino.marca_do_aviso().is_some());
+
+        // Uma impressão que não dá marca não bate em ponto nenhum.
+        destino.esperada = Some(Esperada::Certificado("curto".into()));
+        assert_eq!(destino.marca_do_aviso(), None);
+
+        let codigo = seele_proto::codigo::Codigo::da_chave(&[7; 32]);
+        destino.esperada = Some(Esperada::Codigo(codigo));
+        assert_eq!(
+            destino.marca_do_aviso(),
+            Some(crate::encontro::Marcas::da_sala(&codigo).aviso().clone()),
+            "um destino de código não avisa com a marca do aviso da sala"
+        );
+
+        destino.esperada = None;
+        assert_eq!(destino.marca_do_aviso(), None);
     }
 
     /// Toda despedida do protocolo tem de escolher um lado, e escolher **aqui**.
@@ -6977,6 +7082,109 @@ mod tests {
             de_quem_conecta.port(),
             "o aviso saiu de {de_quem_bateu} e o aperto de mão de {de_quem_conecta}: o \
              anfitrião furaria o caminho para uma porta que o QUIC não usa"
+        );
+    }
+
+    /// O código da ligação dos testes de aviso, e um destino que liga para ele.
+    ///
+    /// Em `[::ffff:127.0.0.1]:9`: público na forma mapeada, que é o que faz o
+    /// laço pedir furo (ver `a_reconexao_tambem_para_a_repeticao_quando_a_tentativa_acaba`),
+    /// e sem ninguém do outro lado. O que se mede é o `LEVE`, e não a conexão.
+    fn ligacao_de_teste() -> (seele_proto::codigo::Codigo, Destino) {
+        let codigo = seele_proto::codigo::Codigo::da_chave(&[3; 32]);
+        let destino = Destino {
+            servidor: "[::ffff:127.0.0.1]:9".parse().expect("endereço"),
+            nome_tls: seele_proto::transport::NOME_DA_SALA.into(),
+            chave_do_pin: crate::confere_codigo::chave_do_pino(&codigo),
+            apelido: "pessoa".into(),
+            segredo: None,
+            esperada: Some(Esperada::Codigo(codigo)),
+            o_pino_prova_o_servidor: false,
+            aceito: None,
+        };
+        (codigo, destino)
+    }
+
+    /// Um ponto de encontro de teste, e o bilhete de uma ligação que o avisa,
+    /// com a escuta `198.51.100.4:41000`.
+    async fn ponto_e_bilhete_de_ligacao() -> (tokio::net::UdpSocket, seele_proto::uri::Bilhete) {
+        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback não abriu");
+        let bilhete = seele_proto::uri::Bilhete::novo(
+            ponto.local_addr().expect("endereço").to_string(),
+            "198.51.100.4:41000",
+        )
+        .expect("bilhete de teste");
+        (ponto, bilhete)
+    }
+
+    /// O que chegou ao ponto, lido como pedido do ENC/1.
+    fn pedido_lido(
+        lido: Result<std::io::Result<(usize, SocketAddr)>, tokio::time::error::Elapsed>,
+        balde: &[u8],
+    ) -> Option<seele_proto::encontro::Pedido> {
+        let Ok(Ok((lidos, _))) = lido else {
+            panic!("nenhum aviso chegou ao ponto de encontro: {lido:?}");
+        };
+        balde.get(..lidos).and_then(seele_proto::encontro::analisar)
+    }
+
+    #[tokio::test]
+    async fn uma_ligacao_avisa_a_escuta_com_a_marca_do_aviso_da_sala() {
+        // A fiação da entrada: o laço de candidatos prepara a batida com a
+        // marca do primeiro destino. Com a impressão no lugar da marca, um
+        // destino de código não preparava batida nenhuma, e nenhum `LEVE` saía.
+        let (codigo, destino) = ligacao_de_teste();
+        let (ponto, bilhete) = ponto_e_bilhete_de_ligacao().await;
+
+        let tentativa = tokio::spawn(Enlace::conectar_entre_com_bilhete(
+            vec![destino],
+            Some(bilhete),
+            SigningKey::from_bytes(&[7; 32]),
+            Arc::new(crate::tofu::MemoryPinStore::new()),
+        ));
+        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
+        let lido = tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)).await;
+        tentativa.abort();
+
+        assert_eq!(
+            pedido_lido(lido, &balde),
+            Some(seele_proto::encontro::Pedido::Leve {
+                destino: "198.51.100.4:41000".parse().expect("endereço"),
+                marca: crate::encontro::Marcas::da_sala(&codigo).aviso().clone(),
+            }),
+            "o LEVE da ligação não foi para a escuta com a marca do aviso da sala"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_volta_de_uma_ligacao_avisa_com_a_marca_do_aviso_da_sala() {
+        // A outra fiação: `Motor::tentar`, a volta da bateria, prepara a sua
+        // própria batida a cada tentativa. A ligação volta ao `IP:porta` que
+        // atendeu (tarefa 6f), e o furo do lado de quem recebe só abre para a
+        // marca da sala.
+        let (codigo, destino) = ligacao_de_teste();
+        let (ponto, bilhete) = ponto_e_bilhete_de_ligacao().await;
+        let mut motor = motor_de_teste();
+        motor.bilhete = Some(bilhete);
+        motor.destino = destino;
+
+        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
+        // Ninguém atende do outro lado: a tentativa é abandonada no prazo, e o
+        // que interessa sai antes do aperto de mão.
+        let (_, lido) = tokio::join!(
+            tokio::time::timeout(Duration::from_secs(3), motor.tentar()),
+            tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)),
+        );
+
+        assert_eq!(
+            pedido_lido(lido, &balde),
+            Some(seele_proto::encontro::Pedido::Leve {
+                destino: "198.51.100.4:41000".parse().expect("endereço"),
+                marca: crate::encontro::Marcas::da_sala(&codigo).aviso().clone(),
+            }),
+            "a volta da ligação não avisou a escuta com a marca do aviso da sala"
         );
     }
 

@@ -198,6 +198,14 @@ pub enum ConnectError {
     /// sala, a chave é de outro código, ou a chave não é a que ficou pinada na
     /// primeira ligação.
     CodigoNaoConfere(crate::confere_codigo::FalhaDoCodigo),
+
+    /// Quem liga pelo código não achou onde a sala mora (tarefa 6c do Plano 5).
+    ///
+    /// Sai **antes da corrida**, de [`crate::chegada::Chegada`]: o quarto é
+    /// quem dá os candidatos de uma ligação, e sem ele não há endereço a tentar.
+    /// O motivo diz qual das frases da spec de 23/09 cabe: o ponto calado, a
+    /// pessoa que não está disponível, o ponto que recusou.
+    NaoLocalizou(crate::encontro::FalhaAoLocalizar),
 }
 
 impl std::fmt::Display for ConnectError {
