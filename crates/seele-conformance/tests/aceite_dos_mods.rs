@@ -1033,6 +1033,127 @@ async fn um_par_dentro_da_janela_recebe_o_anuncio_antes_de_entrar() -> Result<()
     Ok(())
 }
 
+/// Bate com um convite e as APIs de MOD que se quiser, e devolve o quadro que
+/// veio depois da prova: o anúncio, o `Session` ou a recusa.
+async fn bater_com_apis(
+    endereco: SocketAddr,
+    semente: u8,
+    apis_de_mod: Vec<u32>,
+    convite: &str,
+) -> Result<ServerMessage> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut tls = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AceitaQualquer(provider)))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![seele_proto::transport::ALPN.to_vec()];
+    let mut ponta = quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0)))?;
+    ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("config do QUIC"),
+    )));
+    let conexao = ponta.connect(endereco, "localhost")?.await?;
+    let (mut envio, mut recebe) = conexao.open_bi().await?;
+    let chave = SigningKey::from_bytes(&[semente; 32]);
+    frame::write(
+        &mut envio,
+        &ClientMessage::Hello {
+            faixa: seele_proto::FAIXA,
+            client: "par-cru".into(),
+            nickname: format!("pessoa{semente:03}"),
+            public_key: chave.verifying_key().to_bytes().to_vec(),
+            join_secret: Some(convite.to_owned()),
+            material_e2ee: None,
+            apis_de_mod,
+        },
+    )
+    .await?;
+    let ServerMessage::Challenge { nonce } = frame::read::<ServerMessage>(&mut recebe).await?
+    else {
+        anyhow::bail!("o servidor não mandou Challenge");
+    };
+    frame::write(
+        &mut envio,
+        &ClientMessage::Response {
+            proof: chave
+                .sign(&prova_amarrada(&conexao, &nonce))
+                .to_bytes()
+                .to_vec(),
+        },
+    )
+    .await?;
+    let depois = frame::read::<ServerMessage>(&mut recebe).await?;
+    drop(ponta);
+    Ok(depois)
+}
+
+/// **O servidor recusa com `ModsDeOutraApi` antes da portaria e do convite.**
+///
+/// A P7c do plano F1b. O `Hello` leva as APIs de MOD que o app roda
+/// (`apis_de_mod`), e até aqui ninguém as lia: um app que não roda a API de um
+/// MOD exigido aceitava o anúncio e só descobria depois, com o convite de uso
+/// único já gasto. Agora as APIs exigidas que faltam voltam numa máscara, e a
+/// tela diz «atualize o app» em vez de deixar a pessoa presa na porta.
+///
+/// Com um MOD da API 7 e um app que só roda a 6, a recusa traz o bit 7, e o
+/// convite fica intacto: o mesmo convite, com a 6 e a 7, chega ao anúncio de
+/// sempre.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_app_sem_a_api_do_mod_e_recusado_antes_do_convite() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut da_api_7 = um_mod("fulano/da-api-7", 0x77);
+    da_api_7.api = 7;
+    habilitar(&daemon, &da_api_7).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let recusa = bater_com_apis(endereco, 71, vec![6], &convite).await?;
+    assert_eq!(
+        recusa,
+        ServerMessage::Disconnecting {
+            reason: DisconnectReason::ModsDeOutraApi {
+                apis: seele_proto::control::mascara_de_apis(&[7]),
+            }
+        }
+    );
+
+    let anuncio = bater_com_apis(endereco, 71, vec![6, 7], &convite).await?;
+    assert!(
+        matches!(anuncio, ServerMessage::ModsExigidos { .. }),
+        "o mesmo convite, com a API 7, não chegou ao anúncio: {anuncio:?}"
+    );
+
+    daemon.shutdown();
+    Ok(())
+}
+
+/// Uma API 0 é «não preenchida» — uma linha de antes da migração 14 cujo pacote
+/// a subida não conseguiu ler — e não recusa ninguém.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_api_nao_preenchida_nao_recusa_ninguem() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, daemon) = servidor().await?;
+    let mut sem_api = um_mod("fulano/sem-api", 0x70);
+    sem_api.api = 0;
+    habilitar(&daemon, &sem_api).await;
+    let convite = {
+        let mut banco = daemon.server().persistence.lock().await;
+        seele_server::admissao::criar_convite(&mut banco, "para quem roda a 6")?
+    };
+
+    let anuncio = bater_com_apis(endereco, 72, vec![6], &convite).await?;
+    assert!(
+        matches!(anuncio, ServerMessage::ModsExigidos { .. }),
+        "uma API não preenchida recusou alguém: {anuncio:?}"
+    );
+
+    daemon.shutdown();
+    Ok(())
+}
+
 /// A prova de identidade do S2: o rótulo, a impressão do certificado que o TLS
 /// desta conexão aceitou e o nonce, montados por `seele_proto::assinatura`.
 /// Desde o Servidor 1.0, o nonce cru não entra mais.
