@@ -41,27 +41,98 @@ fn corpo(fonte: &str, nome: &str) -> String {
     let fim = resto
         .find("\n}\n")
         .unwrap_or_else(|| panic!("a função `{nome}` não fecha na coluna zero"));
-    sem_comentarios(resto.get(..fim).expect("o fim é de um `find`"))
+    sem_comentarios_lido(
+        &format!("o corpo de `{nome}`"),
+        resto.get(..fim).expect("o fim é de um `find`"),
+    )
+}
+
+/// O fecho que `main` passa a `app.run`, **sem os comentários**: é ali que o
+/// `ExitRequested` chama a despedida.
+///
+/// Recortado do `app.run(|` até a chave que fecha `main` na coluna zero, e
+/// limpo só esse trecho. O `main.rs` inteiro não passa por
+/// [`sem_comentarios`]: ele tem `'"'` e strings cruas, que ela não lê.
+fn fecho_do_app_run(fonte: &str) -> String {
+    let comeco = fonte
+        .find("app.run(|")
+        .expect("o `main` deixou de rodar o app por `app.run` com um fecho");
+    let resto = fonte.get(comeco..).expect("o começo é de um `find`");
+    let fim = resto
+        .find("\n}\n")
+        .expect("o `main` não fecha na coluna zero depois de `app.run`");
+    let limpo = sem_comentarios_lido(
+        "o fim de `main`, de `app.run` em diante",
+        resto.get(..fim).expect("o fim é de um `find`"),
+    );
+    bloco(&limpo, 0)
+        .expect("o fecho de `app.run` não tem corpo entre chaves")
+        .to_owned()
+}
+
+/// O que está entre a primeira `{` a partir de `desde` e a `}` que a fecha.
+///
+/// Conta chaves sem olhar aspas: serve para texto já sem comentários e sem
+/// chave dentro de frase, que é o caso dos trechos que este guarda lê.
+fn bloco(texto: &str, desde: usize) -> Option<&str> {
+    let resto = texto.get(desde..)?;
+    let abre = resto.find('{')?;
+    let mut fundura = 0_usize;
+    for (onde, letra) in resto.char_indices().skip_while(|(onde, _)| *onde < abre) {
+        match letra {
+            '{' => fundura += 1,
+            '}' => {
+                fundura = fundura.checked_sub(1)?;
+                if fundura == 0 {
+                    return resto.get(abre + 1..onde);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// [`sem_comentarios`], com o guarda reprovando o trecho que ela não lê.
+///
+/// Medido na re-revisão do lote F: `let _aspa = '"';` antes de `//
+/// despedir_da_sessao(...)` deixava os dois guardas verdes — a aspa do
+/// caractere invertia o dentro e o fora das aspas, e o comentário passava por
+/// código. Aqui o guarda reprova, com frase própria, em vez de ler errado.
+fn sem_comentarios_lido(onde: &str, trecho: &str) -> String {
+    sem_comentarios(trecho).unwrap_or_else(|perigo| {
+        panic!(
+            "{onde} tem `{perigo}`, e o leitor de comentários deste guarda não lê esse trecho \
+             com segurança: um comentário pode passar por código. Tire o `{perigo}` dali, ou \
+             ensine `sem_comentarios` a lê-lo."
+        )
+    })
 }
 
 /// O texto sem os comentários de linha (`//` até o fim da linha) e de bloco
 /// (`/* … */`), e com o que está entre aspas intacto: um `//` dentro de uma
 /// frase não corta a linha.
 ///
-/// Não conhece a string crua (`r"…"`) nem o caractere `'"'`: nenhum dos dois
-/// aparece nas funções que estes guardas leem, e um deles aparecendo faz o
-/// guarda reprovar em vez de passar, porque corta texto a mais.
-fn sem_comentarios(texto: &str) -> String {
+/// **Não lê** o caractere `'"'` (nem `'\"'`) nem a string crua (`r"…"`,
+/// `r#"…"#`, e as de bytes): eles invertem o dentro e o fora das aspas.
+/// Achando um deles no código — fora de aspas e de comentário —, ela devolve
+/// qual foi, e quem a chama reprova. Um `r` no fim de uma frase (`"parar"`) não
+/// é string crua: está entre aspas, e o `r` de uma string crua começa palavra.
+fn sem_comentarios(texto: &str) -> Result<String, &'static str> {
+    let letras: Vec<char> = texto.chars().collect();
+    let em = |onde: usize| letras.get(onde).copied();
     let mut limpo = String::with_capacity(texto.len());
-    let mut letras = texto.chars().peekable();
     let mut entre_aspas = false;
-    while let Some(letra) = letras.next() {
+    let mut i = 0_usize;
+    while let Some(letra) = em(i) {
+        i += 1;
         if entre_aspas {
             limpo.push(letra);
             match letra {
                 '\\' => {
-                    if let Some(escapada) = letras.next() {
+                    if let Some(escapada) = em(i) {
                         limpo.push(escapada);
+                        i += 1;
                     }
                 }
                 '"' => entre_aspas = false,
@@ -69,23 +140,38 @@ fn sem_comentarios(texto: &str) -> String {
             }
             continue;
         }
-        match (letra, letras.peek()) {
-            ('"', _) => {
+        let comeca_palavra = i
+            .checked_sub(2)
+            .and_then(em)
+            .is_none_or(|antes| !(antes.is_alphanumeric() || antes == '_'));
+        match letra {
+            '\'' if em(i) == Some('"') || (em(i) == Some('\\') && em(i + 1) == Some('"')) => {
+                return Err("'\"'");
+            }
+            'r' | 'b' if comeca_palavra => {
+                if let Some(perigo) = string_crua(&letras, i - 1) {
+                    return Err(perigo);
+                }
+                limpo.push(letra);
+            }
+            '"' => {
                 entre_aspas = true;
                 limpo.push(letra);
             }
-            ('/', Some('/')) => {
-                for resto in letras.by_ref() {
+            '/' if em(i) == Some('/') => {
+                while let Some(resto) = em(i) {
+                    i += 1;
                     if resto == '\n' {
                         limpo.push('\n');
                         break;
                     }
                 }
             }
-            ('/', Some('*')) => {
-                letras.next();
+            '/' if em(i) == Some('*') => {
+                i += 1;
                 let mut anterior = ' ';
-                for resto in letras.by_ref() {
+                while let Some(resto) = em(i) {
+                    i += 1;
                     if anterior == '*' && resto == '/' {
                         break;
                     }
@@ -95,27 +181,59 @@ fn sem_comentarios(texto: &str) -> String {
             _ => limpo.push(letra),
         }
     }
-    limpo
+    Ok(limpo)
+}
+
+/// Se uma string crua começa em `onde`: `r"`, `r#…#"`, `br"` ou `br#…#"`.
+/// Devolve como o guarda a nomeia. `r#tipo`, o identificador cru, não é.
+fn string_crua(letras: &[char], onde: usize) -> Option<&'static str> {
+    let mut i = onde;
+    if letras.get(i) == Some(&'b') {
+        i += 1;
+    }
+    if letras.get(i) != Some(&'r') {
+        return None;
+    }
+    i += 1;
+    match letras.get(i) {
+        Some('"') => Some("r\""),
+        Some('#') => {
+            while letras.get(i) == Some(&'#') {
+                i += 1;
+            }
+            (letras.get(i) == Some(&'"')).then_some("r#\"")
+        }
+        _ => None,
+    }
 }
 
 #[test]
 fn fechar_a_janela_avisa_o_servidor() {
     let fonte = main_rs();
+    // No fecho de `app.run` e sem comentários: no texto cru, `//
+    // despedir_se(handle);` deixava este guarda verde com o app saindo sem
+    // despedida nenhuma (medido na re-revisão do lote F).
+    let fecho = fecho_do_app_run(&fonte);
+    let gancho = fecho.find("RunEvent::ExitRequested").unwrap_or_else(|| {
+        panic!(
+            "o app deixou de tratar o fim da última janela.\n\
+             Sem esse gancho o processo morre em silêncio e quem hospeda mantém a \
+             pessoa sentada na sala até o tempo limite de ociosidade."
+        )
+    });
+    // O braço é o bloco do `if` que confere o `ExitRequested`. O padrão
+    // `{ .. }` do `matches!` fecha antes do `)` dele, e o bloco vem depois.
+    let fim_do_padrao = fecho
+        .get(gancho..)
+        .and_then(|resto| resto.find(')'))
+        .map(|onde| gancho + onde)
+        .expect("o `matches!` do `ExitRequested` não fecha");
+    let braco = bloco(&fecho, fim_do_padrao).expect("o `ExitRequested` não tem braço entre chaves");
     assert!(
-        fonte.contains("RunEvent::ExitRequested"),
-        "o app deixou de tratar o fim da última janela.\n\
-         Sem esse gancho o processo morre em silêncio e quem hospeda mantém a \
-         pessoa sentada na sala até o tempo limite de ociosidade."
-    );
-    let gancho = fonte
-        .find("RunEvent::ExitRequested")
-        .expect("já conferido acima");
-    let chamada = fonte
-        .find("despedir_se(handle)")
-        .expect("o gancho de saída não chama mais quem avisa o servidor");
-    assert!(
-        gancho < chamada,
-        "o gancho de saída existe mas não é ele que chama a despedida"
+        braco.contains("despedir_se(handle)"),
+        "o braço do `ExitRequested` não chama mais `despedir_se(handle)` fora de um \
+         comentário: a última janela fecha e o processo morre sem avisar o servidor, ou avisa \
+         a cada evento em vez de no fim.\nO braço lido:{braco}"
     );
     assert!(
         corpo(&fonte, "despedir_se").contains("despedir_da_sessao("),
