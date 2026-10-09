@@ -830,6 +830,8 @@ function donoDaRegiao(mod, instancia) {
     instancia,
     geracao: instancia.geracao,
     podeFalar: meu,
+    /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
+    recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
     /**
      * Um evento da janela para o MOD.
      *
@@ -2330,6 +2332,36 @@ function cascaDoRetrato() {
   };
 }
 
+/**
+ * **A recusa como o MOD a recebe**, ou `null` até a API 5.
+ *
+ * Na API 6, um nome de lista fechada, com os campos da recusa (rascunho da API
+ * 6, §7.1; o K1-m3 da F5): a frase de tela é da tela, e um MOD não tem como ler
+ * uma frase para decidir o que dizer. Até a 5 continua a frase, que é o que os
+ * MODs publicados recebem — e por isso `null`, para quem chama manter o de
+ * antes.
+ *
+ * - a recusa nomeada do Rust (`{ Recusado: { motivo } }`) chega como veio; um
+ *   sufixo depois de `:` vira campo — `tipo-recusado:heic` é `erro:
+ *   'tipo-recusado'` e `detectado: 'heic'`, `papel-nao-serve:imagem` é `papel:
+ *   'imagem'`;
+ * - um `Error` da casca que traga o nome em `recusa` chega com ele;
+ * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
+ */
+function recusaParaOMod(mod, falha) {
+  if (Number(mod?.api) < 6) return null;
+  const SUFIXOS = { "tipo-recusado": "detectado", "papel-nao-serve": "papel" };
+  const nome = typeof falha?.Recusado?.motivo === "string"
+    ? falha.Recusado.motivo
+    : typeof falha?.recusa === "string" ? falha.recusa : null;
+  if (!nome) return { erro: "falhou" };
+  const corte = nome.indexOf(":");
+  const base = corte < 0 ? nome : nome.slice(0, corte);
+  const campo = SUFIXOS[base];
+  if (corte < 0 || !campo) return { erro: nome };
+  return { erro: base, [campo]: nome.slice(corte + 1) };
+}
+
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
 async function atenderOMod(mod, instancia, m) {
   if (!m || typeof m.n !== "number") return;
@@ -2582,7 +2614,7 @@ async function atenderOMod(mod, instancia, m) {
       }
     }
     registrarNoAnfitriao("atender-mod", `${mod.id}: «${m.tipo}» falhou — ${motivo}`, "aviso", mod.id);
-    responder(false, {
+    responder(false, recusaParaOMod(mod, falha) ?? {
       erro: typeof fraseDeErro === "function" ? fraseDeErro(falha) : String(falha?.message ?? falha),
     });
   }

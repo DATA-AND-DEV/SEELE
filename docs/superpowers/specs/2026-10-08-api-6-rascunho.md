@@ -533,6 +533,24 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 | `nao-gravei` | o disco de quem hospeda recusou a escrita |
 | `incompleto` | o fluxo terminou antes do que dizia carregar |
 | `sessao-encerrada` | a sessão acabou no meio |
+| `arquivo-ilegivel` | o arquivo escolhido não abriu |
+| `papel-nao-serve` | o arquivo escolhido é de outro papel que o pedido (um som onde o MOD pediu retrato); leva `papel` |
+| `arquivos-demais-de-pe` | o MOD já guarda o máximo de arquivos escolhidos ao mesmo tempo |
+| `arquivo-nao-esta-de-pe`, `arquivo-de-outro-mod` | o identificador não é de um arquivo guardado, ou é de outro MOD ou de outra sessão |
+| `banco-indisponivel` | a tabela dos arquivos escolhidos não respondeu |
+| `falhou` | uma falha sem nome; o motivo vai ao `seele.log`, com o `mod_id=` |
+
+**Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
+(`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
+`tipo-recusado:heic` chega como `erro: 'tipo-recusado'` e `detectado: 'heic'`,
+`papel-nao-serve:imagem` como `papel: 'imagem'` (`recusaParaOMod`, `base.js`).
+Ele chega pelos dois caminhos: a resposta de um pedido (o `Error` do prelúdio,
+com os campos) e o evento `arquivo` de um seletor que recusou (`resultado:
+'falhou'`, com `erro` e `detectado`). Um `Error` da casca pode trazer o nome em
+`recusa`; as recusas das contribuições e das superfícies ganham nome nas tarefas
+5 e 7, e até lá chegam como `falhou`, com o motivo no registro. **Até a API 5,
+nada muda**: o MOD recebe a frase de tela, como os publicados recebem (o K1-m3
+da F5).
 
 **Como a recusa chega ao MOD, com os campos dela** (o I do PERFIS, 09/10). Hoje
 o prelúdio rejeita a promessa com `new Error(m.erro)`, e nada além do nome
@@ -544,8 +562,12 @@ chega à janela pelo mesmo caminho, e não só para o volume: um campo que o
 produto acrescentar a uma recusa chega ao MOD sem outra mudança no prelúdio.
 O `ok` e o número do pedido não vão. [tarefa 4, passo 5b]
 
-Hoje o farejador de imagem (`seele_proto::imagem::sniff`) não reconhece HEIC, e
-um HEIC cai em `tipo-recusado` sem `detectado`. Reconhecer o HEIC só para
+**O HEIC é reconhecido para ser nomeado** [c, tarefa 4 passo 5b]:
+`seele_proto::imagem::reconhecido_e_nao_aceito` lê a caixa `ftyp` (`heic`,
+`heix`, `mif1`) e o seletor recusa o HEIC das Fotos com `tipo-recusado:heic`, e
+não mais com `formato-desconhecido`. O `sniff` não muda: o HEIC continua
+recusado, com o nome dele. A prova é um HEIC de verdade, de 8 × 8, feito pelo
+`sips` do macOS (`crates/seele-proto/tests/vetores/heic-8x8.heic`). Reconhecer o HEIC só para
 nomeá-lo é a tarefa 4 do plano; a conversão no celular, se houver, é da ponte
 da F4.
 

@@ -531,6 +531,11 @@ function fraseDeErro(erro, apelido, deOnde) {
   if (erro && typeof erro === "object") {
     if (erro.Recusado?.motivo) {
       const motivo = erro.Recusado.motivo;
+      // Um formato que o produto reconhece e não aceita, pelo nome dele: as
+      // Fotos do iPhone entregam HEIC (rascunho da API 6, §7.1).
+      if (motivo === "tipo-recusado:heic") {
+        return "Este arquivo é HEIC, que o SEELE não lê. Use uma imagem PNG, JPEG, WebP ou GIF.";
+      }
       return {
         "arquivo-grande-demais": "Escolha uma imagem de até 10 MB.",
         "midia-grande-demais": "A imagem excede 10 MB.",

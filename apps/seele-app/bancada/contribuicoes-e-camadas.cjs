@@ -2242,6 +2242,45 @@ function anotando(...anotadas) {
       "a falha que chega como variante de struct da FFI não foi ao registro inteira: "
         + `${JSON.stringify(anotadasDoRoteador)}`,
     );
+    // **A recusa chega ao MOD da API 6 pelo nome, e não pela frase** (o K1-m3
+    // da F5; rascunho da API 6, §7.1). A recusa nomeada do Rust vira
+    // `{ erro: nome, …campos }` — `tipo-recusado:heic` vira `erro:
+    // 'tipo-recusado'` e `detectado: 'heic'` —, uma falha sem nome vira
+    // `falhou`, e o motivo vai ao registro. Até a 5, a frase de antes.
+    const recusarComo = (falha) => {
+      contexto.invoke = () => Promise.reject(falha);
+    };
+    try {
+      recusarComo({ Recusado: { motivo: "tipo-recusado:heic" } });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "enviar-imagem", n: 30, arquivo: 1, token: "t" });
+      const seis = respostas.at(-1);
+      confere("recusa · a 6 pelo nome", seis?.ok === false && seis?.erro === "tipo-recusado"
+        && seis?.detectado === "heic",
+      `o MOD da API 6 não recebeu a recusa pelo nome: ${JSON.stringify(seis)}`);
+
+      recusarComo({ Recusado: { motivo: "sessao-encerrada" } });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "enviar-imagem", n: 31, arquivo: 1, token: "t" });
+      confere("recusa · o nome sem sufixo", respostas.at(-1)?.erro === "sessao-encerrada"
+        && !("detectado" in respostas.at(-1)),
+      `um nome sem sufixo não chegou como veio: ${JSON.stringify(respostas.at(-1))}`);
+
+      recusarComo(new Error("o disco sumiu"));
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "enviar-imagem", n: 32, arquivo: 1, token: "t" });
+      confere("recusa · a falha sem nome", respostas.at(-1)?.erro === "falhou",
+        `uma falha sem nome não virou «falhou»: ${JSON.stringify(respostas.at(-1))}`);
+      confere("recusa · a falha sem nome no registro", dita("«enviar-imagem»", "o disco sumiu"),
+        `o motivo da falha sem nome não foi ao registro: ${JSON.stringify(anotadasDoRoteador)}`);
+
+      recusarComo({ Recusado: { motivo: "tipo-recusado:heic" } });
+      await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "enviar-imagem", n: 33, arquivo: 1, token: "t" });
+      const cinco = respostas.at(-1);
+      confere("recusa · a 5 continua com a frase", cinco?.ok === false
+        && cinco?.erro !== "tipo-recusado" && !("detectado" in cinco),
+      `o MOD da API 5 passou a receber o nome, e não a frase: ${JSON.stringify(cinco)}`);
+    } finally {
+      delete contexto.invoke;
+    }
+
     // **O retrato da API 6 no lugar do `snapshot`** (tarefa 4 do plano da F3).
     // A 6 pede `retrato` e recebe o projetado por lista branca; a 5 não
     // alcança o `retrato`; e a 6 que emite `snapshot` direto, por
