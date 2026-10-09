@@ -37,7 +37,7 @@
   for (const parte of sessao.querySelectorAll(":scope > .cel-topo, :scope > .voz-celular, :scope > .cel-abas")) {
     observador.observe(parte);
   }
-  addEventListener("resize", encaixar);
+  window.addEventListener("resize", encaixar);
 
   // Entrar na aba abre a tela, e sair dela a fecha.
   new MutationObserver(() => {
