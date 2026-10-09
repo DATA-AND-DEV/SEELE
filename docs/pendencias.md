@@ -8878,10 +8878,10 @@ de cima, «PADRÃO DA MÁQUINA · Alto-falantes (MacBook Pro)», e abaixo
 «27QHD240 EM USO». Sem padrão marcado, ela fica sem nome. A prova é a bancada
 `apps/seele-app/bancada/qualidade-da-voz.cjs` (`P54 OK`), vermelha antes do
 conserto; o revisor refez a reversão pelos dois lados, microfone e saída. O
-brief aceitava também a linha
-sem nome; a escolha pelo padrão do sistema, e o nome que aparece duas vezes
-com um aparelho escolhido, ficam para o dono conferir em tela. O resto está
-na pendência 58.
+plano da F5 aceitava também a linha sem nome
+(`docs/superpowers/sdd/2026-10-08-0.16/F5/lotes.md`, lote P54); a escolha
+pelo padrão do sistema, e o nome que aparece duas vezes com um aparelho
+escolhido, ficam para o dono conferir em tela. O resto está na pendência 58.
 
 ## 55 · Na volta pela lista, o `LEVE` resolve de novo um ponto que acabou de não resolver
 
