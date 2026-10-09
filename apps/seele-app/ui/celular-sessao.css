@@ -32,6 +32,8 @@
  * servidor continua escrito neste contêiner, como no desktop. */
 
 :root[data-casca="celular"] #tela-sessao {
+  /* `relative` porque as folhas se prendem ao pé dela. */
+  position: relative;
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -66,6 +68,10 @@
   height: 100%;
   min-width: 0;
   border: 0;
+}
+
+:root[data-casca="celular"] #tela-sessao > .cel-topo {
+  order: -1;
 }
 
 :root[data-casca="celular"] #tela-sessao > :is(#veredito, #aviso-fone, #aviso-audio) {
@@ -264,4 +270,273 @@
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+/* ------------------------------------------------------------------ o topo
+ *
+ * Em que servidor se está e o estado da conexão, em toda aba: no desktop isso
+ * morava na barra da janela. O título é o da aba (o servidor, na SERVIDOR); na
+ * CONVERSA e na PESSOAS o cabeçalho ainda é o do desktop, e o título fica vazio. */
+
+:root[data-casca="celular"] .cel-topo {
+  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-topo-sobre {
+  margin: 0;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  /* Quebra, e não corta: o estado da conexão mora nesta linha, e com o texto
+     do sistema a 150 % as reticências o engoliam (medido no protótipo). */
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-topo-titulo {
+  margin: 4px 0 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-titulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: uppercase;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-topo-titulo:empty {
+  display: none;
+}
+
+/* O selo da conexão é do núcleo: um tema não apaga nem falsifica o estado da
+   conexão (spec, §6). A cor sai do enum que o desktop põe em `data-padrao`. */
+:root[data-casca="celular"] .cel-selo-seguro {
+  display: inline-block;
+  padding: 0 6px;
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-seguro);
+  background: var(--nucleo-fundo);
+  border: 1px solid var(--nucleo-borda);
+}
+
+:root[data-casca="celular"] .cel-selo-seguro:is([data-padrao="Unverified"], [data-padrao="Offline"]) {
+  color: var(--nucleo-alerta);
+  border-color: var(--nucleo-alerta);
+}
+
+/* ----------------------------------------------------------- a aba SERVIDOR
+ *
+ * A trilha das redes, deitada no alto, e a coluna de salas e canais do
+ * desktop em cartões. */
+
+:root[data-casca="celular"] #tela-sessao[data-aba="servidor"] > main.paineis {
+  display: flex;
+  flex-direction: column;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-aba="servidor"] .paineis > .trilha {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-right: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  scrollbar-width: none;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-aba="servidor"] .paineis > .painel-canais {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+/* O rótulo REDES é o da coluna de 60 px; deitada, a fila de siglas fala por si. */
+:root[data-casca="celular"] .trilha .trilha-titulo {
+  display: none;
+}
+
+:root[data-casca="celular"] .trilha :is(.trilha-item, .trilha-mais) {
+  flex: 0 0 auto;
+  width: var(--cel-alvo);
+  height: var(--cel-alvo);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+/* O `+` do desktop vem no apagado, que fica a 4,1:1 do painel: é um controle,
+   e lê o rótulo. */
+:root[data-casca="celular"] .trilha .trilha-mais {
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .trilha .trilha-atual {
+  border-color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .trilha .trilha-outros {
+  display: flex;
+  gap: 8px;
+}
+
+/* A gestão de salas e canais é pelo SEELE no computador; o que fica é a frase
+   dita uma vez, embaixo dos canais. A ajuda mora em AJUSTES. */
+:root[data-casca="celular"] .painel-canais :is(#nova-voice_room, #nova-linha, #ajuda-abrir, .voice_room-apagar, .linha-controles) {
+  display: none;
+}
+
+:root[data-casca="celular"] .painel-canais .canais-rolagem {
+  padding: 0 calc(16px + var(--cel-seguro-dir)) 24px calc(16px + var(--cel-seguro-esq));
+  overscroll-behavior: contain;
+}
+
+:root[data-casca="celular"] .painel-canais .canais-cabeca {
+  margin: 20px 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+/* Cada sala é um cartão. */
+:root[data-casca="celular"] #lista-voice_rooms > .voice_room {
+  margin: 0 0 8px;
+  padding: 12px;
+  gap: 10px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  box-shadow: var(--seele-sombra);
+}
+
+/* A sala em que se está: borda do acento e a marca escrita. **Sem o
+   preenchimento laranja-fraco do desktop**: as cores de estado derivadas do tema
+   só garantem 4,5:1 sobre o fundo e o painel, e sobre o tom fraco do acento
+   caíam a 3,8:1 (medido no protótipo). */
+:root[data-casca="celular"] #lista-voice_rooms > .voice_room.aberto {
+  background: var(--seele-negro-painel);
+  border-color: var(--seele-laranja-nerv);
+  border-left-width: 3px;
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .canal-cabeca {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: baseline;
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-nome {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+}
+
+/* A ocupação e quem está dentro vêm no apagado do desktop, a 4,1:1 do painel
+   já sem tema. No celular, o rótulo do painel, que o tema também alcança. */
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-ocupacao {
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+/* As marcas vão para o fim da cabeça, depois do espaço. */
+:root[data-casca="celular"] #lista-voice_rooms .canal-cabeca .espaco {
+  flex: 1 1 auto;
+}
+
+:root[data-casca="celular"] .cel-marca {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+}
+
+:root[data-casca="celular"] .cel-marca-aqui {
+  color: var(--seele-padrao-azul);
+}
+
+:root[data-casca="celular"] :is(.cel-marca-cheia, .cel-marca-senha) {
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-marca .glifo {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.1em;
+}
+
+/* Quem está dentro, numa fileira que quebra. */
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-dentro {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-pessoa {
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-pessoa-marca {
+  margin-left: 0;
+}
+
+/* «ninguém aqui» no tom da linha forte some num fundo escuro; é texto, e lê o
+   rótulo. */
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-vazio {
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-voice_rooms .voice_room-entrar {
+  min-height: var(--cel-alvo);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-sala-entrar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+:root[data-casca="celular"] .cel-entrar-mudo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.12em;
+}
+
+/* Os canais: uma fileira de 52 por canal, o canal aberto marcado na borda. */
+:root[data-casca="celular"] #lista-linhas .linha {
+  min-height: 52px;
+  padding: 8px 4px 8px 12px;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+/* O nome de um canal fechado vem no apagado do desktop, a 4,1:1 do painel; o
+   aberto, no osso. */
+:root[data-casca="celular"] #lista-linhas .linha .linha-rotulo {
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] #lista-linhas .linha.aberto .linha-rotulo {
+  color: var(--seele-osso);
+}
+
+/* O que o celular não faz, dito onde o controle estaria. */
+:root[data-casca="celular"] .cel-fora {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--seele-linha-forte);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-fora .rotulo {
+  display: block;
+  margin-bottom: 4px;
 }

@@ -217,5 +217,13 @@
       [PALAVRAS.somLigado, PALAVRAS.somDesligado]);
   });
 
+  // A CHAMADA mora na coluna da conversa. Quando o desktop a abre (ao entrar
+  // numa sala, pela faixa, ao começar uma transmissão), o celular mostra a aba
+  // em que ela está, venha a abertura de onde vier.
+  const vistaDaChamada = doDesktop("vista-chamada");
+  new MutationObserver(() => {
+    if (!vistaDaChamada.hidden) abrirAba("conversa");
+  }).observe(vistaDaChamada, { attributes: true, attributeFilter: ["hidden"] });
+
   CELULAR.registrar("abrirAba", abrirAba);
 })();

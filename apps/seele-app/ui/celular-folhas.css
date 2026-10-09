@@ -1,0 +1,90 @@
+/* SEELE — as folhas do celular (F8).
+ *
+ * Spec: `docs/superpowers/specs/2026-10-09-0.16-celular-design.md`, §2.4.
+ *
+ * A folha nasce presa ao pé da sessão, sobre um véu. Corte seco (specs/07): ela
+ * aparece, e não desliza. Toda regra começa pela marca (G1). */
+
+:root[data-casca="celular"] .cel-veu {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+:root[data-casca="celular"] .cel-folha {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  max-height: 85%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-top: 2px solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  padding-bottom: var(--cel-seguro-pe);
+}
+
+:root[data-casca="celular"] .cel-folha-cabeca {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--cel-alvo);
+  padding: 14px calc(8px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+/* A alça: só desenho, e não um controle. Quem fecha é a resposta, o véu ou o
+   voltar. */
+:root[data-casca="celular"] .cel-folha-cabeca::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 40px;
+  margin-left: -20px;
+  border-top: 2px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-folha-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: uppercase;
+}
+
+:root[data-casca="celular"] .cel-folha-corpo {
+  overflow-y: auto;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-folha-nota {
+  margin: 0 0 16px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  line-height: 1.5;
+}
+
+:root[data-casca="celular"] .cel-folha-campo {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--cel-alvo);
+  margin-top: 6px;
+  padding: 8px 12px;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+:root[data-casca="celular"] .cel-folha-acoes {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}

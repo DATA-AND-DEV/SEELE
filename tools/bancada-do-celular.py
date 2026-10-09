@@ -72,6 +72,8 @@ class Ponto:
     injetado: str
     # O que, achado no arquivo do produto, quer dizer que o ponto já entrou.
     sinal: str
+    # Se o ponto troca a âncora, em vez de entrar depois dela.
+    troca: bool = False
 
 
 PONTOS_INJETADOS = [
@@ -96,6 +98,20 @@ PONTOS_INJETADOS = [
         "function desenhar(snapshot) {\n  if (!snapshot) return;\n",
         "  queueMicrotask(() => CASCA.depoisDeDesenhar.forEach((f) => f(snapshot)));\n",
         "CASCA.depoisDeDesenhar",
+    ),
+    # A senha da sala sai do `window.prompt` (P7). E cancelar cancela: o
+    # desktop, com o `prompt`, tentava entrar sem senha quando a pessoa
+    # desistia, e a recusa do servidor era a resposta ao «cancelar».
+    Ponto(
+        "P7",
+        "tela-sessao.js",
+        '          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;\n',
+        '          item.dataset.senha_necessaria === "sim"\n'
+        "            ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? \"\")\n"
+        "            : null;\n"
+        '        if (item.dataset.senha_necessaria === "sim" && senha === null) return;\n',
+        "CASCA.pedirSenhaDaSala",
+        troca=True,
     ),
 ]
 
@@ -151,7 +167,7 @@ def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathli
             else:
                 if texto.count(ponto.ancora) != 1:
                     raise SystemExit(f"a âncora do {ponto.nome} mudou em {ponto.arquivo}; a bancada precisa dela")
-                texto = texto.replace(ponto.ancora, ponto.ancora + ponto.injetado)
+                texto = texto.replace(ponto.ancora, ponto.injetado if ponto.troca else ponto.ancora + ponto.injetado)
             arquivo.write_text(texto)
     else:
         for arquivo in pasta.iterdir():
@@ -386,6 +402,20 @@ def sessao_entrou(pg: Page) -> list[str]:
     return falhas
 
 
+def tocar(pg: Page, seletor: str) -> bool:
+    """Um toque no primeiro alvo que casa, se ele estiver à vista.
+
+    Devolve `False` sem tocar quando o alvo não existe ou está escondido: um
+    caso que toca num controle ausente diz o que faltou, em vez de esperar o
+    tempo-limite do Playwright e estourar.
+    """
+    alvo = pg.locator(seletor).first
+    if alvo.count() == 0 or not alvo.is_visible():
+        return False
+    alvo.tap()
+    return True
+
+
 def esperar_quadro(pg: Page) -> None:
     """A casca relê o `snapshot` a cada 500 ms; uma mudança no quadro do duble
     aparece no redesenho seguinte."""
@@ -533,11 +563,138 @@ def segurar(pg: Page) -> list[str]:
     return falhas
 
 
+def aba_servidor(pg: Page) -> list[str]:
+    """A aba SERVIDOR (Tarefa 5): a lista de salas do desktop, em cartões.
+
+    O quadro do duble ganha os três casos que pedem marca: OFICINA lotada,
+    SILÊNCIO com senha e uma sala livre, PALCO, para o ENTRAR MUDO.
+    """
+    falhas = []
+    pg.evaluate("""(() => {
+        const [, oficina, silencio] = SEELE_QUADRO.voice_rooms;
+        oficina.limit = oficina.people.length;
+        silencio.password_required = true;
+        SEELE_QUADRO.voice_rooms.push({ id: 4, name: "PALCO", limit: 4, password_required: false,
+            occupied_by_us: false, channel: null, sync: null, people: [] });
+    })()""")
+    pg.locator("#cel-aba-servidor").tap()
+    esperar_quadro(pg)
+
+    visto = pg.evaluate("""(() => {
+        const visivel = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        const topo = document.querySelector('.cel-topo');
+        const selo = topo?.querySelector('.cel-selo-seguro');
+        const trilha = document.querySelector('.paineis > .trilha');
+        const salas = {};
+        for (const li of document.querySelectorAll('#lista-voice_rooms > li')) {
+            const ir = li.querySelector('button[data-voice_room]');
+            const nome = li.querySelector('.voice_room-nome');
+            salas[nome.textContent] = {
+                marcas: [...li.querySelectorAll('.cel-marca')].map((m) => m.textContent.trim()),
+                entrarAtivo: !!ir && !ir.disabled,
+                mudo: !!li.querySelector('.cel-entrar-mudo'),
+                nomeEhBotao: nome.tagName === 'BUTTON',
+            };
+        }
+        const fora = [...document.querySelectorAll('.painel-canais .cel-fora')].filter(visivel);
+        const gestao = ['#nova-voice_room', '#nova-linha', '.voice_room-apagar', '.linha-controles']
+            .filter((s) => [...document.querySelectorAll('.painel-canais ' + s)].some(visivel));
+        return {
+            topo: visivel(topo) ? topo.textContent : null,
+            selo: selo ? [selo.textContent, selo.dataset.padrao] : null,
+            trilha: visivel(trilha) && trilha.hasAttribute('data-rola-de-lado')
+                && trilha.getBoundingClientRect().bottom <= document.querySelector('#lista-voice_rooms').getBoundingClientRect().top + 1,
+            salas, fora: fora.map((p) => p.textContent), gestao,
+        };
+    })()""")
+    if not visto["topo"] or "TÓQUIO-3" not in visto["topo"]:
+        falhas.append(f"o topo da aba SERVIDOR não diz o servidor: {visto['topo']!r}")
+    if not visto["selo"] or "CONEXÃO SEGURA" not in visto["selo"][0] or visto["selo"][1] != "Verified":
+        falhas.append(f"o selo da conexão diz {visto['selo']}")
+    if not visto["trilha"]:
+        falhas.append("a trilha não é uma faixa deitada, marcada para rolar de lado, acima das salas")
+    esperadas = {"PONTE": ["VOCÊ ESTÁ AQUI"], "OFICINA": ["LOTADA"], "SILÊNCIO": ["COM SENHA"], "PALCO": []}
+    for nome, marcas in esperadas.items():
+        sala = visto["salas"].get(nome)
+        if sala is None:
+            falhas.append(f"não há cartão para {nome}")
+            continue
+        if sala["marcas"] != marcas:
+            falhas.append(f"{nome} tem as marcas {sala['marcas']}, e não {marcas}")
+        if not sala["entrarAtivo"]:
+            falhas.append(f"o ENTRAR de {nome} está desligado (quem recusa uma sala lotada é o servidor)")
+        if sala["mudo"] != (nome != "PONTE"):
+            falhas.append(f"o ENTRAR MUDO de {nome} {'falta' if nome != 'PONTE' else 'sobra'}")
+        if sala["nomeEhBotao"]:
+            falhas.append(f"o nome de {nome} é um botão (renomear é pelo SEELE no computador)")
+    if len(visto["fora"]) != 1 or "SALAS E CANAIS" not in visto["fora"][0]:
+        falhas.append(f"a frase de SALAS E CANAIS aparece assim: {visto['fora']}")
+    if visto["gestao"]:
+        falhas.append(f"a gestão de salas e canais continua à vista: {visto['gestao']}")
+
+    def chamadas():
+        return pg.evaluate("window.__SEELE_HISTORICO.map(([c, a]) => [c, a])")
+
+    # ENTRAR MUDO: o MUDO antes da entrada, e a CHAMADA abre na aba dela.
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='4']) .cel-entrar-mudo"):
+        falhas.append("não há ENTRAR MUDO à vista em PALCO")
+    else:
+        pg.wait_for_timeout(600)
+        feitas = [c for c, _ in chamadas() if c in ("set_muted", "enter_voice_room")]
+        args = dict(chamadas())
+        if feitas[:2] != ["set_muted", "enter_voice_room"] or (args.get("set_muted") or {}).get("on") is not True:
+            falhas.append(f"o ENTRAR MUDO mandou {feitas} ({args.get('set_muted')}), e não set_muted {{on: true}} antes da entrada")
+        depois = pg.evaluate("[document.getElementById('tela-sessao').dataset.aba, document.getElementById('vista-chamada').hidden]")
+        if depois != ["conversa", False]:
+            falhas.append(f"entrar não abriu a CHAMADA na aba dela: aba {depois[0]}, vista-chamada escondida {depois[1]}")
+
+    # A sala com senha: a folha, a senha que ela manda, e o AGORA NÃO que cancela.
+    pg.locator("#cel-aba-servidor").tap()
+    for resposta in ("entrar", "agora-nao"):
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='3']) button[data-voice_room]"):
+            falhas.append("não há ENTRAR à vista em SILÊNCIO")
+            break
+        pg.wait_for_timeout(200)
+        folha = pg.locator("#cel-folha-senha")
+        if not folha.is_visible():
+            falhas.append("a sala com senha não abriu a folha SENHA DA SALA")
+            break
+        if resposta == "entrar":
+            folha.locator("input").fill("abc")
+            folha.locator("button[data-resposta='entrar']").tap()
+        else:
+            folha.locator("button[data-resposta='agora-nao']").tap()
+        pg.wait_for_timeout(400)
+        entradas = [a for c, a in chamadas() if c == "enter_voice_room"]
+        if resposta == "entrar" and entradas != [{"voiceRoom": 3, "senha": "abc"}]:
+            falhas.append(f"o ENTRAR da folha mandou {entradas}")
+        if resposta == "agora-nao" and entradas:
+            falhas.append(f"o AGORA NÃO da folha ainda tentou entrar: {entradas}")
+        if folha.is_visible():
+            falhas.append(f"a folha continua aberta depois de {resposta}")
+        pg.locator("#cel-aba-servidor").tap()
+
+    # O selo mora no topo de toda aba: o tema e a aba não o tiram de vista.
+    pg.locator("#cel-aba-conversa").tap()
+    if not pg.evaluate("(() => { const s = document.querySelector('.cel-topo .cel-selo-seguro'); return !!s && s.getBoundingClientRect().height > 0; })()"):
+        falhas.append("na aba CONVERSA, o selo da conexão some")
+    pg.locator("#cel-aba-servidor").tap()
+    esperar_quadro(pg)
+    return falhas
+
+
 CASOS: dict[str, Caso] = {
     "sessao-entrou": Caso(levar=sessao_entrou, medir=False),
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
     "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
+    # O claro entra com a Tarefa 13: o azul da sala ocupada e o fósforo de
+    # quem fala são cores de estado, e a derivação delas a partir do tema é a
+    # função 17e da F3. Até lá, o claro reprova o «VOCÊ ESTÁ AQUI» a 2,6:1.
+    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "hostil"),
+                         raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
 }
 
 
@@ -553,6 +710,9 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
                 device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce", locale="pt-BR",
             )
             pg = ctx.new_page()
+            # Cinco segundos, e não os trinta do Playwright: nesta casca nada
+            # demora tanto, e um caso que espera um nó que não vem diz isso logo.
+            pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
