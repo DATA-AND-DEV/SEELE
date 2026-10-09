@@ -43,13 +43,19 @@ fn da_casca(prefixo: &str, extensao: &str) -> Vec<(String, String)> {
         })
         .collect();
     achados.sort();
-    assert!(!achados.is_empty(), "ui/ não tem nenhum {prefixo}*{extensao}: um guarda sem arquivo passa sem ler nada");
+    assert!(
+        !achados.is_empty(),
+        "ui/ não tem nenhum {prefixo}*{extensao}: um guarda sem arquivo passa sem ler nada"
+    );
     achados
 }
 
 /// Todos os arquivos das cascas do navegador com esta extensão.
 fn das_cascas(extensao: &str) -> Vec<(String, String)> {
-    CASCAS.iter().flat_map(|(prefixo, _, _)| da_casca(prefixo, extensao)).collect()
+    CASCAS
+        .iter()
+        .flat_map(|(prefixo, _, _)| da_casca(prefixo, extensao))
+        .collect()
 }
 
 fn sem_comentarios_css(css: &str) -> String {
@@ -108,10 +114,16 @@ fn blocos(css: &str) -> Vec<Bloco> {
             }
             let fecha = fecha.unwrap_or_else(|| panic!("chave sem par perto de «{preludio}»"));
             let corpo = &resto[abre + 1..fecha];
-            if ["@media", "@supports", "@container"].iter().any(|a| preludio.starts_with(a)) {
+            if ["@media", "@supports", "@container"]
+                .iter()
+                .any(|a| preludio.starts_with(a))
+            {
                 ler_blocos(corpo, saida);
             } else {
-                saida.push(Bloco { preludio, corpo: corpo.to_owned() });
+                saida.push(Bloco {
+                    preludio,
+                    corpo: corpo.to_owned(),
+                });
             }
             resto = &resto[fecha + 1..];
         }
@@ -160,7 +172,10 @@ fn toda_regra_das_cascas_do_navegador_comeca_pela_marca() {
                 }
                 for seletor in seletores(&bloco.preludio) {
                     if !seletor.trim().starts_with(marca) {
-                        fora.push(format!("{nome}: {} (a raiz dela é {marca})", seletor.trim()));
+                        fora.push(format!(
+                            "{nome}: {} (a raiz dela é {marca})",
+                            seletor.trim()
+                        ));
                     }
                 }
             }
@@ -181,13 +196,19 @@ fn nenhum_arquivo_do_desktop_cita_a_marca() {
     let mut citam = Vec::new();
     for entrada in std::fs::read_dir(ui()).expect("ui/").filter_map(Result::ok) {
         let nome = entrada.file_name().to_string_lossy().into_owned();
-        let do_desktop = !CASCAS.iter().any(|(prefixo, _, _)| nome.starts_with(prefixo)) && nome != "ponte-web.js";
+        let do_desktop = !CASCAS
+            .iter()
+            .any(|(prefixo, _, _)| nome.starts_with(prefixo))
+            && nome != "ponte-web.js";
         let de_texto = [".css", ".js", ".html"].iter().any(|e| nome.ends_with(e));
         if do_desktop && de_texto && ler(&nome).contains("data-casca") {
             citam.push(nome);
         }
     }
-    assert!(citam.is_empty(), "o desktop cita `data-casca` em: {citam:?}");
+    assert!(
+        citam.is_empty(),
+        "o desktop cita `data-casca` em: {citam:?}"
+    );
 }
 
 /// G4. Um script do celular carregado no desktop não faz nada: é uma IIFE cuja
@@ -203,7 +224,10 @@ fn todo_script_das_cascas_do_navegador_e_inerte_sem_a_marca() {
                 "{nome}: o código mora inteiro numa IIFE, e nada roda fora dela"
             );
             let corpo = codigo["(() => {".len()..].trim_start();
-            assert!(corpo.starts_with(guarda), "{nome}: a primeira linha da IIFE tem de ser `{guarda}`");
+            assert!(
+                corpo.starts_with(guarda),
+                "{nome}: a primeira linha da IIFE tem de ser `{guarda}`"
+            );
         }
     }
 }
@@ -226,16 +250,29 @@ fn nenhum_script_das_cascas_do_navegador_chama_o_invoke() {
 #[test]
 fn o_tema_nunca_escreve_o_nucleo() {
     let base = ler("base.js");
-    for tabela in ["TEMA_DA_API", "NUMEROS_DA_API", "BANDEIRAS_DA_API", "MEDIDAS_DA_API"] {
+    for tabela in [
+        "TEMA_DA_API",
+        "NUMEROS_DA_API",
+        "BANDEIRAS_DA_API",
+        "MEDIDAS_DA_API",
+    ] {
         let inicio = base
             .find(&format!("const {tabela} = Object.freeze("))
-            .unwrap_or_else(|| panic!("base.js não declara {tabela}: a leitura deste guarda quebrou"));
+            .unwrap_or_else(|| {
+                panic!("base.js não declara {tabela}: a leitura deste guarda quebrou")
+            });
         let corpo = &base[inicio..];
         let corpo = &corpo[..corpo.find("\n});").expect("o fim da tabela")];
         let tokens: Vec<&str> = corpo.split('"').filter(|s| s.starts_with("--")).collect();
-        assert!(!tokens.is_empty(), "{tabela} sem nenhum token: a leitura deste guarda quebrou");
+        assert!(
+            !tokens.is_empty(),
+            "{tabela} sem nenhum token: a leitura deste guarda quebrou"
+        );
         for token in tokens {
-            assert!(token.starts_with("--seele-"), "{tabela} escreve {token}, e o tema só escreve `--seele-*`");
+            assert!(
+                token.starts_with("--seele-"),
+                "{tabela} escreve {token}, e o tema só escreve `--seele-*`"
+            );
         }
     }
 }
@@ -243,13 +280,33 @@ fn o_tema_nunca_escreve_o_nucleo() {
 /// G6. O núcleo do celular lê só o núcleo: nenhuma cor, borda, fundo ou família de
 /// letra dos seletores do núcleo vem de um `--seele-*`, que o tema reescreve.
 const SELETORES_DO_NUCLEO: &[&str] = &[
-    "#voz-mudo", "#voz-surdo", "#voz-sair", ".voz-nucleo", ".voz-controles",
-    ".cel-selo-seguro", "#cel-aba-ajustes", "[data-nucleo]", ".cel-nucleo", ".cel-placa-de-alerta",
+    "#voz-mudo",
+    "#voz-surdo",
+    "#voz-sair",
+    ".voz-nucleo",
+    ".voz-controles",
+    ".cel-selo-seguro",
+    "#cel-aba-ajustes",
+    "[data-nucleo]",
+    ".cel-nucleo",
+    ".cel-placa-de-alerta",
 ];
 const PROPRIEDADES_DE_COR: &[&str] = &[
-    "color", "background", "background-color", "border", "border-color", "border-top",
-    "border-top-color", "border-right", "border-bottom", "border-left", "border-left-color",
-    "outline", "outline-color", "font-family", "box-shadow",
+    "color",
+    "background",
+    "background-color",
+    "border",
+    "border-color",
+    "border-top",
+    "border-top-color",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-left-color",
+    "outline",
+    "outline-color",
+    "font-family",
+    "box-shadow",
 ];
 
 #[test]
@@ -258,18 +315,34 @@ fn o_nucleo_do_celular_so_le_o_nucleo() {
     let mut fora = Vec::new();
     for (nome, css) in da_casca("celular-", ".css") {
         for bloco in blocos(&css) {
-            if !SELETORES_DO_NUCLEO.iter().any(|s| bloco.preludio.contains(s)) {
+            if !SELETORES_DO_NUCLEO
+                .iter()
+                .any(|s| bloco.preludio.contains(s))
+            {
                 continue;
             }
             lidos += 1;
             for declaracao in bloco.corpo.split(';') {
-                let Some((propriedade, valor)) = declaracao.split_once(':') else { continue };
-                if PROPRIEDADES_DE_COR.contains(&propriedade.trim()) && valor.contains("var(--seele-") {
-                    fora.push(format!("{nome}: {} {{ {}: {} }}", bloco.preludio, propriedade.trim(), valor.trim()));
+                let Some((propriedade, valor)) = declaracao.split_once(':') else {
+                    continue;
+                };
+                if PROPRIEDADES_DE_COR.contains(&propriedade.trim())
+                    && valor.contains("var(--seele-")
+                {
+                    fora.push(format!(
+                        "{nome}: {} {{ {}: {} }}",
+                        bloco.preludio,
+                        propriedade.trim(),
+                        valor.trim()
+                    ));
                 }
             }
         }
     }
     assert!(lidos >= 3, "o guarda achou {lidos} regras do núcleo: a faixa de voz não está nos celular-*.css que ele lê");
-    assert!(fora.is_empty(), "o núcleo lê o que o tema escreve:\n{}", fora.join("\n"));
+    assert!(
+        fora.is_empty(),
+        "o núcleo lê o que o tema escreve:\n{}",
+        fora.join("\n")
+    );
 }
