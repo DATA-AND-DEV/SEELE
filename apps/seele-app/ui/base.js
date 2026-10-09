@@ -582,6 +582,21 @@ async function aguardarVezDePedidoDeMod(geracao) {
   try { await vez; } finally { pedidosDeModNaFila -= 1; }
 }
 
+/**
+ * Uma recusa de pedido de MOD, dita a quem hospeda antes de ser lançada.
+ *
+ * O formato de toda recusa de MOD que a janela registra — o id na frente da
+ * frase, `"aviso"`, e o id em campo próprio, que o Rust escreve como
+ * `mod_id=` —, o mesmo de `anotarRecusa`. Num lugar só: escrito à mão nas
+ * quatro recusas de `pedirAoServidor`, um id que escorregasse de posição numa
+ * delas tirava a linha da busca por ele no `seele.log`.
+ * `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`, em
+ * `tests/frontend.rs`, confere este e que `pedirAoServidor` o chama.
+ */
+function dizerRecusaDoPedido(id, oQue) {
+  registrarNoAnfitriao("pedido-de-mod", `${id}: ${oQue}`, "aviso", id);
+}
+
 async function pedirAoServidor(id, canal, valor) {
   const geracaoDoPedido = geracaoDaSessao;
   await ouvirMod;
@@ -594,23 +609,23 @@ async function pedirAoServidor(id, canal, valor) {
   // dentro, um `catch` do MOD ou uma promessa que ninguém pega — e em nenhum
   // dos dois casos quem hospeda fica sabendo qual das três portas fechou.
   if (!daGeracaoDePe(geracao)) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: geração ${geracao} não é a de pé`, "aviso", id);
+    dizerRecusaDoPedido(id, `geração ${geracao} não é a de pé`);
     throw new Error("disconnected");
   }
   if (pedidosDeMod.size >= 8) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: oito pedidos em voo, este não cabe`, "aviso", id);
+    dizerRecusaDoPedido(id, "oito pedidos em voo, este não cabe");
     throw new Error("too-many-requests");
   }
   const request = ++proximoPedidoDeMod;
   const payload = JSON.stringify(valor);
   if (new TextEncoder().encode(payload).length > 12 * 1024) {
-    registrarNoAnfitriao("pedido-de-mod", `${id}: carga de ${payload.length} caracteres não cabe`, "aviso", id);
+    dizerRecusaDoPedido(id, `carga de ${payload.length} caracteres não cabe`);
     throw new Error("request-too-large");
   }
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pedidosDeMod.delete(request);
-      registrarNoAnfitriao("pedido-de-mod", `${id}: pedido ${request} venceu o prazo sem resposta`, "aviso", id);
+      dizerRecusaDoPedido(id, `pedido ${request} venceu o prazo sem resposta`);
       reject(new Error("timeout"));
     }, 15000);
     pedidosDeMod.set(request, { resolve, reject, timer, parts: [], geracao });

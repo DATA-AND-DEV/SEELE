@@ -12909,23 +12909,37 @@ fn um_pedido_de_mod_nunca_fica_sem_resposta() {
 /// como o `nivel: String` do comando, o `invoke` volta recusado e o `.catch`
 /// dele o engole — a recusa some do `seele.log` com o id certo na quarta
 /// posição.
+///
+/// **As quatro recusas de `pedirAoServidor` passam por um ajudante**,
+/// `dizerRecusaDoPedido` (pendência 51, item 23): o formato estava escrito à
+/// mão nas quatro, ao lado do `anotarRecusa` que já o escrevia num lugar só. O
+/// guarda confere o ajudante como conferia cada uma, e que `pedirAoServidor`
+/// diz as quatro por ele, com o `id` do pedido.
 #[test]
 fn toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio() {
     let base = without_comments(&read("ui/base.js"));
-    for (assinatura, id) in [
-        ("async function pedirAoServidor(", "id"),
-        ("async function atenderOMod(", "mod.id"),
-    ] {
-        let corpo = js_function(&base, assinatura);
-        let chamadas: Vec<Vec<String>> = corpo
-            .match_indices("registrarNoAnfitriao(")
+    let chamadas_de = |corpo: &str, funcao: &str| -> Vec<Vec<String>> {
+        corpo
+            .match_indices(&format!("{funcao}("))
             .map(|(posicao, _)| {
-                argumentos_da_chamada(&corpo[posicao + "registrarNoAnfitriao".len()..])
+                argumentos_da_chamada(&corpo[posicao + funcao.len()..])
                     .iter()
                     .map(|argumento| argumento.trim().to_owned())
                     .collect()
             })
-            .collect();
+            .collect()
+    };
+    assert!(
+        base.contains("function dizerRecusaDoPedido("),
+        "`base.js` não tem o ajudante `dizerRecusaDoPedido`, e as recusas de \
+         `pedirAoServidor` escrevem à mão, cada uma, o formato de toda recusa de MOD"
+    );
+    for (assinatura, id) in [
+        ("function dizerRecusaDoPedido(", "id"),
+        ("async function atenderOMod(", "mod.id"),
+    ] {
+        let corpo = js_function(&base, assinatura);
+        let chamadas = chamadas_de(&corpo, "registrarNoAnfitriao");
         assert!(
             !chamadas.is_empty(),
             "`{assinatura}` deixou de chamar `registrarNoAnfitriao`, ou o recorte não \
@@ -12950,6 +12964,34 @@ fn toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio() {
             chamadas.len()
         );
     }
+
+    // E `pedirAoServidor` diz as quatro pelo ajudante — a da geração, a dos
+    // oito pedidos, a da carga e a do prazo —, com o `id` do pedido na frente,
+    // e nenhuma à mão ao lado dele.
+    let pedir = js_function(&base, "async function pedirAoServidor(");
+    let pelo_ajudante = chamadas_de(&pedir, "dizerRecusaDoPedido");
+    assert!(
+        pelo_ajudante.len() >= 4,
+        "`pedirAoServidor` diz {} recusa(s) por `dizerRecusaDoPedido`, e não as quatro — a da \
+         geração, a dos oito pedidos, a da carga e a do prazo: a que não passa por ele é \
+         lançada sem chegar ao seele.log com o id do MOD em campo próprio: {pedir}",
+        pelo_ajudante.len()
+    );
+    let de_outro: Vec<&Vec<String>> = pelo_ajudante
+        .iter()
+        .filter(|argumentos| argumentos.first().map(String::as_str) != Some("id"))
+        .collect();
+    assert!(
+        de_outro.is_empty(),
+        "`pedirAoServidor` diz recusa por `dizerRecusaDoPedido` sem o `id` do pedido como \
+         primeiro argumento, e a linha sai com o `mod_id=` de outro ou de ninguém: {de_outro:?}"
+    );
+    let a_mao = chamadas_de(&pedir, "registrarNoAnfitriao");
+    assert!(
+        a_mao.is_empty(),
+        "`pedirAoServidor` voltou a chamar `registrarNoAnfitriao` direto, com o formato de toda \
+         recusa de MOD escrito à mão ao lado do ajudante que o escreve num lugar só: {a_mao:?}"
+    );
 }
 
 /// **Arredondamento e brilho são aplicados, e o que os limita é número.**
