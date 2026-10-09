@@ -55,7 +55,7 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | 12a | 6b, o `Destino` com `Esperada` | **feita** | `a892f14a` |
 | — | merge da P1 e da P2 da F1 (`bf559478`) | feito | `28003af4` |
 | 10 | 4d, o aperto de mão em três fases | **feita** | `312ec92e` |
-| 12b | 6b, o ramo do código no `connect_por` | a fazer, depois da 4d | — |
+| 12b | 6b, o ramo do código no `connect_por` | **feita** | `1fb62a9a` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -263,3 +263,34 @@ O resto espera o G-servidor, a F2, a casca ou a F1.
     `7a9591f0`), com um teste;
   - a API do ENC/2 da F2 (`0.16/enc2`, `a2181ad6`): `Convocacao::para_sala`,
     `Hospedagem::registro_no_quarto` e, para quem liga, `localizar`.
+
+## Tarefa 12b — ligar pelo código (08/10)
+
+- **No `connect_por`, quando se espera um código:**
+  - o `ConfereCodigo` entra no lugar do `TofuVerifier`;
+  - o SNI é sempre o `NOME_DA_SALA`;
+  - o pino `@CÓDIGO` é lido antes de discar e gravado depois do `Session`;
+  - a recusa vem tipada (`ConnectError::CodigoNaoConfere`), lida do relato.
+- **Na FFI:** `CodigoNaoBate { esperado, veio }` e `SePassouPorCodigo`. **As
+  frases são da casca (tarefa 7f)**: nada no app disca um código ainda, então
+  essas recusas não chegam à tela antes dela.
+- **No `enlace.rs`:** as duas chamadas do `connect_por` e um braço em
+  `alguem_respondeu` e outro em `vale_insistir`. Na mensagem da 4d eu tinha dito
+  à orquestradora que a 12b não tocaria o `enlace.rs`. Estava errado, e foi
+  corrigido na mensagem seguinte.
+- **A prova** é `seele-conformance/tests/ligar_pelo_codigo.rs`, com 4 testes, e
+  as 4 reversões medidas reprovam.
+- **Rodados:** `seele-core --lib` (445), `seele-ffi --lib` (124) e os 43
+  arquivos de conformidade, um por vez, todos verdes.
+
+## Onde a frente está (08/10, fim da tarde)
+
+Feitas: 1–10 e 12, menos a 11. Esperando:
+- **17** (a reconexão de 60 s): o lote F da F5, que mexe no `enlace.rs`. A
+  orquestradora avisa;
+- **16** (o `Tocando` no cliente): a P8 da F1, no `client.rs`;
+- **11** (a hospedagem da sala): a P10 da F1 e o ENC/2 da F2 na `versao/0.16`;
+- **13** (`ler_entrada`): a P9 da F1;
+- **14 e 15**: a F2;
+- **18 a 31**: a casca;
+- **as duas medidas do toque que abrem o microfone**, com o dono.
