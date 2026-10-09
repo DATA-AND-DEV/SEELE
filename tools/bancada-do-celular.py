@@ -59,7 +59,12 @@ carga = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(carga)
 
 VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
-MARCA = '<script>document.documentElement.dataset.casca = "{}";</script>\n'
+# A marca, como a ponte da F4 a escreve na carga (spec, §9.2): a escolha
+# guardada à mão primeiro (`localStorage["seele.casca"]`, num `try`), e o
+# critério do aparelho depois, que aqui é a casca que o caso pede.
+MARCA = ('<script>{{ let casca = "{}"; try {{ const escolhida = localStorage.getItem("seele.casca");'
+         ' if (escolhida === "celular" || escolhida === "larga") casca = escolhida; }} catch {{}}'
+         ' document.documentElement.dataset.casca = casca; }}</script>\n')
 
 
 @dataclasses.dataclass(frozen=True)
@@ -130,6 +135,12 @@ PONTOS_INJETADOS = [
 APARELHOS = {
     "390": {"largura": 390, "altura": 844, "topo": 59, "pe": 34},
     "360": {"largura": 360, "altura": 800, "topo": 24, "pe": 24},
+    # Um tablet, ou a casca do celular escolhida à mão numa tela grande.
+    "1280": {"largura": 1280, "altura": 800, "topo": 0, "pe": 0, "celular": False},
+    # O iPhone deitado: a ilha vai para o lado, e a barra de gestos fica embaixo.
+    "deitado": {"largura": 844, "altura": 390, "topo": 0, "pe": 21},
+    # Um computador, com mouse: a casca larga (D-web-3).
+    "1440": {"largura": 1440, "altura": 900, "topo": 0, "pe": 0, "celular": False, "toque": False},
 }
 
 # Os temas de teste, aplicados pelo produto (`temaDosMods`), e não à mão. São os
@@ -390,6 +401,14 @@ class Caso:
     # O seletor do que as medidas do aparelho leem. Os painéis que uma tarefa
     # ainda não adaptou ficam de fora, e entram quando a tarefa deles chegar.
     raiz: str = "body"
+    # O texto do sistema (1 é o padrão; 1,5 é o tamanho grande de acessibilidade).
+    escala: float = 1.0
+    aparelhos: tuple[str, ...] = ("390", "360")
+    # A casca do navegador: "celular", ou "larga" para o computador; vazia é o
+    # desktop, com os arquivos das cascas carregados e inertes.
+    marca: str = "celular"
+    # Entrar na sessão antes do caso; um caso da entrada entra ele mesmo.
+    entrar: bool = True
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -407,6 +426,8 @@ def sessao_entrou(pg: Page) -> list[str]:
         falhas.append("a sessão não ficou visível")
     if not estado["celular"]:
         falhas.append("celular-casca.js não deixou CELULAR.h: a raiz do celular não rodou com a marca")
+    if pg.evaluate("getComputedStyle(document.documentElement).overscrollBehaviorY") != "none":
+        falhas.append("puxar a página para baixo a recarrega, e recarregar derruba a sessão")
     if estado["barra"] != "0px":
         falhas.append(f"a barra da janela mede {estado['barra']!r}, e no celular ela não existe")
     return falhas
@@ -425,10 +446,32 @@ def tocar(pg: Page, seletor: str) -> bool:
     try:
         # Um alvo coberto, ou que não recebe toque, é um alvo que o dedo não
         # alcança: o Playwright desiste em três segundos, e o caso diz isso.
-        alvo.tap(timeout=3000)
+        # Num computador (a casca larga) não há dedo, e o toque é o clique.
+        if pg.evaluate("navigator.maxTouchPoints") > 0:
+            alvo.tap(timeout=3000)
+        else:
+            alvo.click(timeout=3000)
     except ErroDoPlaywright:
         return False
     return True
+
+
+def exigir_toque(pg: Page, seletor: str, falhas: list[str]) -> bool:
+    """O `tocar`, e a reprovação quando o alvo não está ao alcance do dedo."""
+    if tocar(pg, seletor):
+        return True
+    falhas.append(f"não há como tocar {seletor}")
+    return False
+
+
+def ir_para_aba(pg: Page, aba: str, falhas: list[str]) -> bool:
+    """Vai à aba como uma pessoa iria: com a CHAMADA aberta, as abas estão
+    escondidas, e primeiro se recolhe a CHAMADA pela faixa."""
+    if pg.evaluate("document.getElementById('tela-sessao').hasAttribute('data-chamada')"):
+        if not exigir_toque(pg, "#voz .voz-sala", falhas):
+            return False
+        pg.wait_for_timeout(200)
+    return exigir_toque(pg, f"#cel-aba-{aba}", falhas)
 
 
 def esperar_quadro(pg: Page) -> None:
@@ -464,7 +507,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
         return falhas + ["dentro da PONTE, a faixa de voz está escondida"]
 
     pg.evaluate("window.__SEELE_ARGS.set_muted = undefined")
-    pg.locator("#voz-mudo").tap()
+    exigir_toque(pg, "#voz-mudo", falhas)
     pg.wait_for_timeout(300)
     mandou = pg.evaluate("window.__SEELE_ARGS.set_muted ?? null")
     if not mandou or mandou.get("on") is not True:
@@ -472,7 +515,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
 
     paineis = {"servidor": ".painel-canais", "conversa": ".painel-linha", "pessoas": ".painel-pessoas"}
     for aba in ("servidor", "conversa", "pessoas", "ajustes"):
-        pg.locator(f"#cel-aba-{aba}").tap()
+        ir_para_aba(pg, aba, falhas)
         estado = pg.evaluate("""(paineis) => {
             const s = document.getElementById('tela-sessao');
             const visivel = (sel) => { const e = s.querySelector('.paineis > ' + sel);
@@ -513,7 +556,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
     pg.evaluate("SEELE_QUADRO.abertura_do_audio = 'aberto'")
 
     pg.evaluate("window.__SEELE_CHAMADAS.length = 0")
-    pg.locator("#voz-sair").tap()
+    exigir_toque(pg, "#voz-sair", falhas)
     pg.wait_for_timeout(300)
     if "leave_voice_room" not in pg.evaluate("window.__SEELE_CHAMADAS"):
         falhas.append("o toque no SAIR não chamou leave_voice_room")
@@ -523,7 +566,7 @@ def faixa_de_voz(pg: Page) -> list[str]:
     if not pg.evaluate("document.getElementById('voz').hidden"):
         falhas.append("fora de sala, a faixa de voz continua à vista")
     pg.evaluate("SEELE_QUADRO.voice_rooms[0].occupied_by_us = true")
-    pg.locator("#cel-aba-conversa").tap()
+    ir_para_aba(pg, "conversa", falhas)
     esperar_quadro(pg)
     return falhas
 
@@ -598,7 +641,7 @@ def aba_servidor(pg: Page) -> list[str]:
         SEELE_QUADRO.voice_rooms.push({ id: 4, name: "PALCO", limit: 4, password_required: false,
             occupied_by_us: false, channel: null, sync: null, people: [] });
     })()""")
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     esperar_quadro(pg)
 
     visto = pg.evaluate("""(() => {
@@ -671,7 +714,7 @@ def aba_servidor(pg: Page) -> list[str]:
             falhas.append(f"entrar não abriu a CHAMADA na aba dela: aba {depois[0]}, vista-chamada escondida {depois[1]}")
 
     # A sala com senha: a folha, a senha que ela manda, e o AGORA NÃO que cancela.
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     for resposta in ("entrar", "agora-nao"):
         pg.evaluate("window.__SEELE_HISTORICO.length = 0")
         if not tocar(pg, "#lista-voice_rooms > li:has(button[data-voice_room='3']) button[data-voice_room]"):
@@ -684,9 +727,9 @@ def aba_servidor(pg: Page) -> list[str]:
             break
         if resposta == "entrar":
             folha.locator("input").fill("abc")
-            folha.locator("button[data-resposta='entrar']").tap()
+            exigir_toque(pg, "#cel-folha-senha button[data-resposta='entrar']", falhas)
         else:
-            folha.locator("button[data-resposta='agora-nao']").tap()
+            exigir_toque(pg, "#cel-folha-senha button[data-resposta='agora-nao']", falhas)
         pg.wait_for_timeout(400)
         entradas = [a for c, a in chamadas() if c == "enter_voice_room"]
         if resposta == "entrar" and entradas != [{"voiceRoom": 3, "senha": "abc"}]:
@@ -695,13 +738,13 @@ def aba_servidor(pg: Page) -> list[str]:
             falhas.append(f"o AGORA NÃO da folha ainda tentou entrar: {entradas}")
         if folha.is_visible():
             falhas.append(f"a folha continua aberta depois de {resposta}")
-        pg.locator("#cel-aba-servidor").tap()
+        ir_para_aba(pg, "servidor", falhas)
 
     # O selo mora no topo de toda aba: o tema e a aba não o tiram de vista.
-    pg.locator("#cel-aba-conversa").tap()
+    ir_para_aba(pg, "conversa", falhas)
     if not pg.evaluate("(() => { const s = document.querySelector('.cel-topo .cel-selo-seguro'); return !!s && s.getBoundingClientRect().height > 0; })()"):
         falhas.append("na aba CONVERSA, o selo da conexão some")
-    pg.locator("#cel-aba-servidor").tap()
+    ir_para_aba(pg, "servidor", falhas)
     esperar_quadro(pg)
     return falhas
 
@@ -849,12 +892,17 @@ def aba_pessoas(pg: Page) -> list[str]:
         return pg.evaluate("""(() => { const f = document.getElementById('cel-folha-pessoa');
             return { volume: !!f.querySelector('input[type=range]'), rotulo: f.querySelector('.cel-folha-volume')?.textContent ?? '',
                      moderar: /MODERAR/.test(f.querySelector('.cel-fora')?.textContent ?? ''),
-                     moderacaoDoDesktop: !document.getElementById('moderar').hidden }; })()""")
+                     moderacaoDoDesktop: !document.getElementById('moderar').hidden,
+                     foco: f.contains(document.activeElement) }; })()""")
 
     folha = abrir("juli")
     if folha is None:
         falhas.append("o toque em juli não abriu a folha da pessoa")
     else:
+        # Uma folha é um diálogo modal: o foco entra nela, e o leitor da tela lê
+        # a folha, e não a página de trás (Tarefa 15, na árvore do WebKit).
+        if not folha["foco"]:
+            falhas.append("a folha de juli abriu e o foco ficou na página de trás")
         if not folha["volume"] or "100%" not in folha["rotulo"]:
             falhas.append(f"a folha de juli não mostra o volume com o número: {folha}")
         if not folha["moderar"]:
@@ -879,6 +927,8 @@ def aba_pessoas(pg: Page) -> list[str]:
         falhas.append("o toque em rafa não abriu a folha")
     elif propria["volume"] or propria["moderar"]:
         falhas.append(f"a folha de quem usa o aparelho tem volume ou moderar: {propria}")
+    elif not propria["foco"]:
+        falhas.append("a folha de rafa abriu e o foco ficou na página de trás")
     pg.keyboard.press("Escape")
 
     pg.evaluate("SEELE_QUADRO.may_kick = SEELE_QUADRO.may_ban = SEELE_QUADRO.may_move_person = false")
@@ -890,6 +940,631 @@ def aba_pessoas(pg: Page) -> list[str]:
         falhas.append("sem nenhuma permissão de moderar, a folha ainda fala em moderar")
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(150)
+    return falhas
+
+
+def chamada(pg: Page) -> list[str]:
+    """A CHAMADA (Tarefa 8): por cima da sessão, com a faixa no mesmo lugar.
+
+    O duble ganha duas transmissões na sala, e a de juli assistida. Termina
+    com a CHAMADA aberta, que é o que a foto e as medidas leem.
+    """
+    falhas = []
+    pg.evaluate("""(() => {
+        SEELE_QUADRO.transmissoes = [
+            { tela: 1, de: 2, e_minha: false, assistida: true, espectadores: 2 },
+            { tela: 2, de: 3, e_minha: false, assistida: false, espectadores: 1 }];
+        SEELE_QUADRO.tela = { tela: 1, de: 2, e_minha: false, espectadores: 2, parada: null, pedido: null };
+    })()""")
+    esperar_quadro(pg)
+    caixa = "(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }"
+    mudo_antes = pg.evaluate(caixa, "#voz-mudo")
+    abas_antes = pg.evaluate(caixa, ".cel-abas")
+
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    visto = pg.evaluate("""(caixa) => {
+        const c = new Function('s', 'return (' + caixa + ')(s)');
+        return { aberta: document.getElementById('tela-sessao').hasAttribute('data-chamada'),
+                 vista: c('#vista-chamada'), topo: c('.cel-topo'), voz: c('#voz'), mudo: c('#voz-mudo'),
+                 abas: c('.cel-abas'), telemetria: c('.cel-telemetria'),
+                 palavras: [...document.querySelectorAll('.cel-telemetria .rotulo')].map((r) => r.textContent),
+                 sala: document.querySelector('#voz .voz-sala')?.textContent ?? '' };
+    }""", caixa)
+    if not visto["aberta"] or not visto["vista"]:
+        falhas.append("o toque na faixa não abriu a CHAMADA")
+    else:
+        v, t, z = visto["vista"], visto["topo"], visto["voz"]
+        largura = pg.evaluate("innerWidth")
+        if v[2] < largura - 1 or abs(v[1] - (t[1] + t[3])) > 1 or abs(v[1] + v[3] - z[1]) > 1:
+            falhas.append(f"a CHAMADA não cobre a sessão entre o topo e a faixa: {v}, topo {t}, faixa {z}")
+    if visto["mudo"] != mudo_antes:
+        falhas.append(f"o MUDO mudou de lugar com a CHAMADA: {mudo_antes} → {visto['mudo']}")
+    if visto["abas"] is not None or visto["telemetria"] is None:
+        falhas.append(f"a telemetria não tomou o lugar das abas: abas {visto['abas']}, telemetria {visto['telemetria']}")
+    elif abas_antes and (abs(visto["telemetria"][1] - abas_antes[1]) > 1 or abs(visto["telemetria"][3] - abas_antes[3]) > 1):
+        falhas.append(f"a telemetria não ocupa o lugar exato das abas: {visto['telemetria']} contra {abas_antes}")
+    if visto["palavras"] != ["ATRASO", "JITTER", "PERDA", "CODEC"]:
+        falhas.append(f"a telemetria da CHAMADA diz {visto['palavras']}")
+    if "RECOLHER" not in visto["sala"]:
+        falhas.append(f"na CHAMADA, a faixa diz «{visto['sala']}», e não RECOLHER")
+
+    palco = pg.evaluate("""(() => {
+        const alto = (e) => e && !e.closest('[hidden]') ? Math.round(e.getBoundingClientRect().height) : null;
+        return { escolha: [...document.querySelectorAll('#palco-escolha button')].map((b) => [b.textContent.trim(), alto(b)]),
+                 controles: ['#palco-mudo', '#palco-volume', '#palco-parar-de-assistir'].map((s) => [s, alto(document.querySelector(s))]),
+                 colunas: getComputedStyle(document.getElementById('chamada-grade')).gridTemplateColumns.split(' ').length };
+    })()""")
+    if len(palco["escolha"]) != 3 or "NÃO VER" not in palco["escolha"][-1][0]:
+        falhas.append(f"com duas transmissões, a escolha mostra {palco['escolha']}")
+    # Cada botão diz de quem é a tela, pelo nome dos presentes.
+    rotulos = " ".join(texto for texto, _ in palco["escolha"])
+    if "juli" not in rotulos or "vitor" not in rotulos or "—" in rotulos:
+        falhas.append(f"a escolha não diz de quem é cada tela: {rotulos!r}")
+    for texto, alto in palco["escolha"]:
+        if alto is not None and alto < 44:
+            falhas.append(f"«{texto}» na escolha tem {alto} de altura")
+    for seletor, alto in palco["controles"]:
+        if alto is None or alto < 44:
+            falhas.append(f"{seletor} no palco tem {alto} de altura, e não 44")
+    if palco["colunas"] != 2:
+        falhas.append(f"a grade da CHAMADA tem {palco['colunas']} colunas, e não 2")
+
+    if not tocar(pg, "#chamada-grade > li[data-pessoa='juli']"):
+        falhas.append("não há cartão de juli à vista na grade")
+    elif not pg.locator("#cel-folha-pessoa").is_visible():
+        falhas.append("o toque no cartão de juli não abriu a folha dela")
+    pg.keyboard.press("Escape")
+
+    tocar(pg, "#voz .voz-sala")
+    esperar_quadro(pg)
+    fechada = pg.evaluate("[document.getElementById('vista-chamada').hidden, document.getElementById('tela-sessao').hasAttribute('data-chamada')]")
+    if fechada != [True, False]:
+        falhas.append(f"RECOLHER não fechou a CHAMADA: vista escondida {fechada[0]}, marca {fechada[1]}")
+    tocar(pg, "#voz .voz-sala")
+    esperar_quadro(pg)
+    return falhas
+
+
+def ajustes_medida(pg: Page) -> list[str]:
+    """A medida da Tarefa 9: as seções de `#tela-server` viram páginas da aba
+    AJUSTES só com o CSS e o celular-ajustes.js, sem mudar o tela-server.js?"""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(500)
+    caixa = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.bottom)]; }"""
+    camada, topo, faixa = (pg.evaluate(caixa, s) for s in ("#tela-server", ".cel-topo", "#voz"))
+    largura = pg.evaluate("innerWidth")
+    if camada is None:
+        return falhas + ["tocar AJUSTES não abriu a tela de configurações"]
+    if camada[2] < largura - 1 or abs(camada[1] - topo[3]) > 1 or abs(camada[3] - faixa[1]) > 1:
+        falhas.append(f"a tela de AJUSTES não fica entre o topo e a faixa: {camada}, topo {topo}, faixa {faixa}")
+    if pg.evaluate("getComputedStyle(document.getElementById('tela-server'), '::before').display") != "none":
+        falhas.append("a tela de AJUSTES ainda tem o véu de camada")
+    lista = pg.evaluate(caixa, "#tela-server .server-coluna"), pg.evaluate(caixa, "#tela-server .server-corpo")
+    if lista[0] is None or lista[1] is not None:
+        falhas.append(f"a primeira página não é a lista de seções: coluna {lista[0]}, corpo {lista[1]}")
+    if not exigir_toque(pg, "#secao-audio", falhas):
+        return falhas
+    pg.wait_for_timeout(300)
+    secao = pg.evaluate("""(() => ({
+        coluna: getComputedStyle(document.querySelector('#tela-server .server-coluna')).display,
+        corpo: getComputedStyle(document.querySelector('#tela-server .server-corpo')).display,
+        paineis: [...document.querySelectorAll('#tela-server .server-painel > [id^="painel-"]')].filter((p) => !p.hidden).map((p) => p.id),
+        voltar: !!document.querySelector('#tela-server .cel-ajustes-voltar')?.offsetParent }))()""")
+    if secao["coluna"] != "none" or secao["corpo"] == "none" or secao["paineis"] != ["painel-audio"] or not secao["voltar"]:
+        falhas.append(f"a seção ÁUDIO não abriu sozinha, numa coluna, com «‹ AJUSTES»: {secao}")
+    exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+    if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
+        falhas.append("«‹ AJUSTES» não voltou à lista")
+    if not exigir_toque(pg, "#voz-mudo", falhas):
+        falhas.append("com AJUSTES aberto, o MUDO não está ao alcance")
+    ir_para_aba(pg, "conversa", falhas)
+    pg.wait_for_timeout(300)
+    if not pg.evaluate("document.getElementById('tela-server').hidden"):
+        falhas.append("sair da aba AJUSTES não fechou a tela de configurações")
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    return falhas
+
+
+ORDEM_DE_AJUSTES = ["ÁUDIO", "APARÊNCIA", "ESTE SERVIDOR", "MODS DESTE SERVIDOR", "CONEXÃO", "IDENTIDADE",
+                    "O QUE O CELULAR NÃO FAZ", "COMO ESTA PÁGINA ABRE", "SOBRE", "SAIR DO SERVIDOR"]
+
+
+def aba_ajustes(pg: Page) -> list[str]:
+    """A aba AJUSTES (Tarefa 9): SEU PERFIL, as seções na ordem do spec, CONEXÃO,
+    o que o celular não faz, e as ações que o desktop já tem."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(500)
+    lista = pg.evaluate("""(() => {
+        const visivel = (e) => !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0;
+        const coluna = document.querySelector('#tela-server .server-coluna');
+        const perfil = coluna.querySelector('.cel-perfil');
+        const itens = [...coluna.querySelectorAll('button')].filter(visivel)
+            .filter((b) => !b.closest('.cel-perfil')).map((b) => (b.querySelector('.server-secao-nome') ?? b).textContent.trim());
+        const primeiro = [...coluna.querySelectorAll('*')].find(visivel);
+        return { perfil: visivel(perfil) ? perfil.textContent : null, perfilNoAlto: !!perfil && perfil.contains(primeiro) || primeiro === perfil, itens };
+    })()""")
+    if not lista["perfil"] or "rafa" not in lista["perfil"] or not lista["perfilNoAlto"]:
+        falhas.append(f"SEU PERFIL não está no alto de AJUSTES: {lista['perfil']!r}")
+    if lista["itens"] != ORDEM_DE_AJUSTES:
+        falhas.append(f"AJUSTES mostra {lista['itens']}, e não {ORDEM_DE_AJUSTES}")
+
+    def abrir(id_):
+        ok = exigir_toque(pg, f"#tela-server #{id_}", falhas)
+        pg.wait_for_timeout(250)
+        return ok
+
+    def voltar():
+        exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+
+    if abrir("cel-secao-conexao"):
+        medidas = pg.evaluate("[...document.querySelectorAll('#cel-painel-conexao .cel-medida')].map((m) => [m.querySelector('.rotulo').textContent, m.querySelector('.cel-medida-valor').textContent.trim()])")
+        rotulos = [r for r, _ in medidas]
+        if rotulos != ["ATRASO", "JITTER", "PERDA", "CODEC", "CAMINHO", "UPTIME", "SINAL DA SALA"] or any(not v for _, v in medidas):
+            falhas.append(f"CONEXÃO mostra {medidas}")
+        voltar()
+
+    if abrir("cel-secao-fora"):
+        fora = pg.evaluate("""(() => [...document.querySelectorAll('#cel-painel-fora .cel-fora-grupo')].map((g) => ({
+            grupo: g.querySelector('.rotulo').textContent, itens: g.querySelectorAll('li').length,
+            link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
+        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [7, 6]:
+            falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
+        elif fora[0]["link"] != "https://seele.app.br/#baixar":
+            falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
+        voltar()
+
+    # Tocar de novo na aba AJUSTES volta à raiz.
+    if abrir("secao-aparencia"):
+        exigir_toque(pg, "#cel-aba-ajustes", falhas)
+        if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
+            falhas.append("tocar de novo na aba AJUSTES não voltou à raiz")
+
+    if abrir("secao-audio"):
+        modos = pg.evaluate("[...document.querySelectorAll('#painel-audio .server-modo')].filter((b) => getComputedStyle(b).display !== 'none').map((b) => [b.dataset.modo, b.querySelector('.server-modo-nome').textContent])")
+        if modos != [["PushToTalk", "SEGURAR PARA FALAR"], ["VoiceActivated", "VOZ"]]:
+            falhas.append(f"o modo de voz em ÁUDIO mostra {modos}, e não SEGURAR PARA FALAR e VOZ")
+        pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+        exigir_toque(pg, "#server-modo-tecla", falhas)
+        pg.wait_for_timeout(300)
+        modo = pg.evaluate("window.__SEELE_HISTORICO.filter(([c]) => c === 'set_voice_mode').map(([, a]) => a)")
+        if {"mode": "PushToTalk"} not in modo:
+            falhas.append(f"SEGURAR PARA FALAR mandou {modo}, e não set_voice_mode PushToTalk")
+        voltar()
+
+    if exigir_toque(pg, "#tela-server .cel-perfil-editar", falhas):
+        pg.wait_for_timeout(300)
+        if not pg.evaluate("!document.getElementById('perfil').hidden"):
+            falhas.append("EDITAR PERFIL não abriu o perfil")
+        pg.evaluate("fecharPerfil()")
+        pg.wait_for_timeout(200)
+
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    if exigir_toque(pg, "#tela-server .cel-sair-do-servidor", falhas):
+        pg.wait_for_timeout(500)
+        if not pg.evaluate("window.__SEELE_HISTORICO.some(([c]) => c === 'disconnect')"):
+            falhas.append("SAIR DO SERVIDOR não saiu do servidor")
+    return falhas
+
+
+# O que não cresce com o texto do sistema de propósito, e por quê. Todo o resto
+# cresce: o caso `texto-maior` reprova o texto à vista que ficar no tamanho. Os
+# mesmos de `NO_TAMANHO_DO_DESKTOP`, em `tests/celular.rs`, cujo gêmeo no
+# `celular-texto.css` repete o tamanho, mais os tetos escritos à mão.
+TEXTO_COM_TETO = {
+    ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
+    ".cel-telemetria": "a telemetria da CHAMADA tem a altura das abas e teto como elas: quatro medidas em 390",
+    ".trilha-item, .trilha-mais, .mensagem-avatar, .chamada-avatar":
+        "as iniciais numa caixa de tamanho fixo são marcas, e não texto de ler",
+    ".barra, .sync-marca, .chamada-cartao-barra, .chamada-cartao-marca":
+        "a barra do sinal é desenho; o número e a palavra ao lado crescem",
+}
+
+TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
+    const raiz = document.documentElement;
+    const visivel = (e) => { for (let n = e; n; n = n.parentElement) { const s = getComputedStyle(n);
+        if (n.hidden || s.display === 'none' || s.visibility === 'hidden') return false; } return e.getBoundingClientRect().width > 0; };
+    const nos = [...document.querySelectorAll('#tela-sessao *, #tela-server *')].filter((e) =>
+        ([...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())
+         || (/^(INPUT|TEXTAREA)$/.test(e.tagName) && e.type !== 'range'))
+        && !e.closest(seletorDoTeto) && visivel(e));
+    const antes = raiz.style.getPropertyValue('--cel-escala');
+    raiz.style.setProperty('--cel-escala', '1');
+    const a1 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    raiz.style.setProperty('--cel-escala', '2');
+    const a2 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
+    const parados = {};
+    nos.forEach((e, i) => {
+        if (a2[i] >= a1[i] * 1.3) return;
+        const nome = e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
+        parados[nome] = `${a1[i]} → ${a2[i]} px, «${(e.textContent || e.placeholder || '').trim().slice(0, 20)}»`;
+    });
+    return { nos: nos.length, parados };
+}"""
+
+
+# A 1, o celular-texto.css não muda nada: com ele ligado e desligado, todo nó da
+# página tem o mesmo tamanho de letra. O arquivo só declara tamanho de letra,
+# então o mesmo tamanho em todo nó é o mesmo pixel.
+A_UM_IGUAL = """() => {
+    const folha = document.querySelector('link[href="celular-texto.css"]');
+    if (!folha) return ['a página não carrega o celular-texto.css'];
+    const nos = [...document.querySelectorAll('*')];
+    const ligado = nos.map((e) => getComputedStyle(e).fontSize);
+    folha.disabled = true;
+    const desligado = nos.map((e) => getComputedStyle(e).fontSize);
+    folha.disabled = false;
+    const nome = (e) => e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
+    return nos.flatMap((e, i) => ligado[i] === desligado[i] ? [] : [`${nome(e)}: ${desligado[i]} sem ele, ${ligado[i]} com ele`]);
+}"""
+
+
+def texto_maior(pg: Page) -> list[str]:
+    """O texto do sistema (Tarefa 15): a 2, todo texto à vista na sessão cresce,
+    em cada aba, em cada seção de AJUSTES, na CHAMADA e nas folhas. O núcleo
+    cresce até 1,4× e passa; o que tem teto está em `TEXTO_COM_TETO`.
+
+    Achado no Safari do Simulador com o maior tamanho de acessibilidade: o
+    campo de mensagem, o ENVIAR, os nomes das seções e a lista de PESSOAS
+    ficavam no tamanho do desktop, ao lado de mensagens no dobro."""
+    falhas = []
+    teto = ", ".join(TEXTO_COM_TETO)
+
+    def conferir(estado):
+        pg.wait_for_timeout(200)
+        for diferenca in pg.evaluate(A_UM_IGUAL)[:8]:
+            falhas.append(f"{estado}: a 1, o celular-texto.css muda {diferenca}")
+        visto = pg.evaluate(TAMANHOS_DO_TEXTO, teto)
+        if visto["nos"] < 3:
+            falhas.append(f"{estado}: só {visto['nos']} textos à vista, e o caso não mediu nada")
+        for nome, medida in sorted(visto["parados"].items()):
+            falhas.append(f"{estado}: {nome} não cresce ({medida})")
+        # E cabe: a 2, nada rola de lado nem passa da caixa. Os casos a 150 %
+        # não viam a cabeça de PESSOAS cortando o «VOZ» (medido no Safari).
+        pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
+        pg.wait_for_timeout(100)
+        m = pg.evaluate(MEDIR, [0, 0, "#tela-sessao, #tela-server"])
+        pg.evaluate("document.documentElement.style.removeProperty('--cel-escala')")
+        if m["vaza"] or m["larguraDoDocumento"] > pg.evaluate("innerWidth"):
+            falhas.append(f"{estado}: a 2, rola de lado: {m['vaza']} (documento com {m['larguraDoDocumento']} px)")
+        if m["transborda"]:
+            falhas.append(f"{estado}: a 2, texto passa da caixa: {m['transborda']}")
+
+    for aba in ("servidor", "conversa", "pessoas"):
+        if ir_para_aba(pg, aba, falhas):
+            conferir(f"a aba {aba.upper()}")
+    if tocar(pg, "#lista-roster li.pessoa"):
+        conferir("a folha da pessoa")
+        pg.keyboard.press("Escape")
+    if ir_para_aba(pg, "conversa", falhas) and tocar(pg, "#lista-mensagens li.mensagem .corpo"):
+        conferir("a folha da mensagem")
+        pg.keyboard.press("Escape")
+    if ir_para_aba(pg, "ajustes", falhas):
+        conferir("a lista de AJUSTES")
+        for secao in ("secao-audio", "secao-aparencia", "secao-servidor", "secao-mods", "cel-secao-conexao",
+                      "secao-identidade", "cel-secao-fora", "cel-secao-casca"):
+            if not pg.locator(f"#{secao}").is_visible():
+                continue
+            if exigir_toque(pg, f"#{secao}", falhas):
+                conferir(f"a seção #{secao}")
+                exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
+    ir_para_aba(pg, "servidor", falhas)
+    if tocar(pg, "#voz .voz-sala"):
+        esperar_quadro(pg)
+        conferir("a CHAMADA")
+    return falhas
+
+
+def retrato_da_casca(onde: str) -> Callable[[Page], list[str]]:
+    """O retrato que um MOD recebe diz onde a casca está (API 6, `lugar.onde`):
+    `celular` com a casca do celular de pé, e `computador` na casca larga e no
+    desktop. O `cascaDoRetrato` do base.js pergunta se o `CELULAR` existe, que só
+    o celular-casca.js cria, e só com a marca dele; este caso prova que ele
+    chega lá, chamando a função da página.
+
+    A pedido da orquestradora, depois da oitava integração: o retrato lia a
+    marca dentro de um arquivo do desktop, e nada provava a troca."""
+
+    def levar(pg: Page) -> list[str]:
+        visto = pg.evaluate("""(() => {
+            if (typeof cascaDoRetrato !== 'function') return { erro: 'a página não tem o cascaDoRetrato' };
+            const retrato = cascaDoRetrato();
+            return { onde: retrato.onde, regioes: Array.isArray(retrato.regioes),
+                     celular: typeof CELULAR === 'object' && CELULAR !== null,
+                     marca: document.documentElement.getAttribute('data-casca') };
+        })()""")
+        if "erro" in visto:
+            return [visto["erro"]]
+        falhas = []
+        if visto["onde"] != onde:
+            falhas.append(f"com a marca {visto['marca']!r}, o retrato diz onde={visto['onde']!r}, e não {onde!r}"
+                          f" (CELULAR {'existe' if visto['celular'] else 'não existe'})")
+        if not visto["regioes"]:
+            falhas.append("o retrato não traz a lista de regiões")
+        return falhas
+
+    return levar
+
+
+def teclado(pg: Page) -> list[str]:
+    """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
+    e a faixa, com o MUDO, logo abaixo do topo."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.locator("#campo-mensagem").focus()
+    # Como o Safari do iOS 27 faz (medido no Simulador, 09/10, a 402 × 874): o
+    # que se vê encolhe, o `innerHeight` encolhe junto (só o `clientHeight` da
+    # raiz fica), e a parte visível desce pela página. Um teclado falso que não
+    # encolhia o `innerHeight` passava, e o teclado de verdade não ligava nada.
+    altura, desceu = 480, 200
+    pg.evaluate("""([altura, desceu]) => {
+        Object.defineProperty(window.visualViewport, 'height', { get: () => altura, configurable: true });
+        Object.defineProperty(window.visualViewport, 'offsetTop', { get: () => desceu, configurable: true });
+        window.__innerHeightOriginal = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+        Object.defineProperty(window, 'innerHeight', { get: () => altura, configurable: true });
+        window.visualViewport.dispatchEvent(new Event('resize'));
+    }""", [altura, desceu])
+    pg.wait_for_timeout(200)
+    visto = pg.evaluate("""(() => {
+        const r = (s) => { const e = document.querySelector(s); if (!e || getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom)]; };
+        return { marca: document.getElementById('tela-sessao').hasAttribute('data-teclado'),
+                 abas: r('.cel-abas'), mudo: r('#voz-mudo'), compositor: r('#form-mensagem'), topo: r('.cel-topo') };
+    })()""")
+    if not visto["marca"]:
+        return falhas + ["com o teclado aberto, a sessão não sabe dele (data-teclado)"]
+    if visto["abas"] is not None:
+        falhas.append("com o teclado aberto, as abas continuam à vista")
+    if visto["topo"] is None or abs(visto["topo"][0] - desceu) > 1:
+        falhas.append(f"com o teclado aberto, o topo não acompanha o que se vê: {visto['topo']} contra {desceu}")
+    if visto["mudo"] is None or visto["topo"] is None or visto["mudo"][0] > visto["topo"][1] + 80:
+        falhas.append(f"com o teclado aberto, o MUDO não está no alto: mudo {visto['mudo']}, topo {visto['topo']}")
+    if visto["compositor"] is None or abs(visto["compositor"][1] - (desceu + altura)) > 1:
+        falhas.append(f"o compositor não está colado ao teclado: {visto['compositor']} contra {desceu + altura}")
+    pg.locator("#campo-mensagem").blur()
+    pg.evaluate("""(() => {
+        delete window.visualViewport.height; delete window.visualViewport.offsetTop;
+        Object.defineProperty(window, 'innerHeight', window.__innerHeightOriginal);
+        window.visualViewport.dispatchEvent(new Event('resize'));
+    })()""")
+    pg.wait_for_timeout(200)
+    if pg.evaluate("document.getElementById('tela-sessao').hasAttribute('data-teclado')"):
+        falhas.append("com o teclado fechado, a sessão continua no modo do teclado")
+    return falhas
+
+
+def tela_larga(pg: Page) -> list[str]:
+    """Um tablet, ou a escolha à mão, numa tela grande (Tarefa 12): uma coluna de
+    até 480 px no meio, com as abas e AJUSTES presos a ela."""
+    falhas = []
+    largura = pg.evaluate("innerWidth")
+    for alvo in ("#tela-sessao", ".cel-abas"):
+        caixa = pg.evaluate("(s) => { const r = document.querySelector(s).getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; }", alvo)
+        if caixa[1] > 481 or abs(caixa[0] - (largura - caixa[1]) / 2) > 1:
+            falhas.append(f"{alvo} não é a coluna de até 480 no meio: {caixa}")
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    camada = pg.evaluate("(() => { const r = document.getElementById('tela-server').getBoundingClientRect(); return [Math.round(r.left), Math.round(r.width)]; })()")
+    if camada[1] > 481 or abs(camada[0] - (largura - camada[1]) / 2) > 1:
+        falhas.append(f"AJUSTES não fica na coluna: {camada}")
+    return falhas
+
+
+def voltar(pg: Page) -> list[str]:
+    """O voltar do aparelho (Tarefa 12): cada camada empurra um estado, e o
+    `history.back()` fecha uma por vez."""
+    falhas = []
+
+    def costas():
+        # Sem estado empilhado, o voltar sai da página, e a sessão cai junto.
+        try:
+            url = pg.url
+            pg.evaluate("history.back()")
+            pg.wait_for_timeout(400)
+            return pg.url == url
+        except ErroDoPlaywright:
+            return False
+
+    estado = lambda: pg.evaluate("""[!!document.getElementById('cel-folha-pessoa'),
+        !document.getElementById('vista-chamada').hidden,
+        document.getElementById('tela-sessao').dataset.aba]""")
+    exigir_toque(pg, "#voz .voz-sala", falhas)
+    esperar_quadro(pg)
+    exigir_toque(pg, "#chamada-grade > li[data-pessoa='juli']", falhas)
+    pg.wait_for_timeout(200)
+    if estado()[:2] != [True, True]:
+        return falhas + [f"a CHAMADA com a folha de juli não abriu: {estado()}"]
+    if not costas():
+        return falhas + ["o voltar com a folha aberta saiu da página: a sessão caiu"]
+    if estado()[:2] != [False, True]:
+        falhas.append(f"o primeiro voltar não fechou só a folha: {estado()}")
+    if not costas():
+        return falhas + ["o voltar com a CHAMADA aberta saiu da página: a sessão caiu"]
+    if estado()[:2] != [False, False]:
+        falhas.append(f"o segundo voltar não fechou a CHAMADA: {estado()}")
+
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    exigir_toque(pg, "#tela-server #secao-audio", falhas)
+    pg.wait_for_timeout(200)
+    if not costas():
+        return falhas + ["o voltar numa seção de AJUSTES saiu da página: a sessão caiu"]
+    pagina = pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')")
+    if pagina != "lista":
+        falhas.append(f"o voltar numa seção de AJUSTES não voltou à lista: {pagina}")
+    if pg.evaluate("document.getElementById('tela-server').hidden"):
+        falhas.append("o voltar numa seção de AJUSTES fechou AJUSTES inteiro")
+    return falhas
+
+
+def deitado(pg: Page) -> list[str]:
+    """O aparelho deitado na CHAMADA (Tarefa 12, vindo da 8): o palco toma o
+    espaço acima da faixa, e a faixa continua à mão."""
+    falhas = []
+    exigir_toque(pg, "#voz .voz-sala", falhas)
+    esperar_quadro(pg)
+    # A imagem de uma tela pede um servidor de verdade: o palco é posto no
+    # estado de quem transmite, que é o que o desktop escreve quando ela chega.
+    pg.evaluate("document.getElementById('palco').dataset.transmitindo = 'sim'")
+    pg.wait_for_timeout(200)
+    visto = pg.evaluate("""(() => {
+        const r = (s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width)]; };
+        return { palco: r('#palco'), voz: r('#voz'), mudo: r('#voz-mudo'), topo: r('.cel-topo') };
+    })()""")
+    if visto["voz"] is None or visto["mudo"] is None:
+        return falhas + ["deitado, com a tela no palco, a faixa de voz sumiu"]
+    if visto["palco"] is None or visto["palco"][0] > 1 or abs(visto["palco"][1] - visto["voz"][0]) > 1:
+        falhas.append(f"deitado, o palco não toma o espaço acima da faixa: palco {visto['palco']}, faixa {visto['voz']}")
+    if visto["topo"] is not None:
+        falhas.append("deitado, com a tela no palco, o topo ainda come altura")
+    return falhas
+
+
+def casca_larga(pg: Page) -> list[str]:
+    """A casca larga (Tarefa 17, D-web-3): o desktop no navegador de um
+    computador. O que é do Tauri sai, e o que só o app faz vira frase no lugar
+    do controle. O caso começa na entrada, antes de entrar."""
+    falhas = []
+    visivel = "(s) => { const e = document.querySelector(s); return !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; }"
+    pg.wait_for_function("typeof conectar === 'function'")
+    pg.wait_for_timeout(600)
+
+    entrada = pg.evaluate("""(visivel) => {
+        const v = new Function('s', 'return (' + visivel + ')(s)');
+        const link = document.querySelector('.larga-hospedar a');
+        return { barra: v('#barra-janela'), hospedar: v('#botao-hospedar'), nomePublico: v('#boot-nome-publico'),
+                 versoes: v('#boot-versoes'), frase: document.querySelector('.larga-hospedar')?.textContent ?? null,
+                 link: link?.getAttribute('href') ?? null,
+                 proposito: document.querySelector('#tela-boot .boot-proposito').textContent,
+                 topo: Math.round(document.getElementById('tela-boot').getBoundingClientRect().top) };
+    }""", visivel)
+    if entrada["barra"]:
+        falhas.append("a barra da janela continua à vista: no navegador, quem desenha a janela é ele")
+    if entrada["hospedar"] or entrada["nomePublico"] or entrada["versoes"]:
+        falhas.append(f"a entrada ainda oferece o que é de quem hospeda: {entrada}")
+    if not entrada["frase"] or "app do SEELE" not in entrada["frase"] or entrada["link"] != "https://seele.app.br/#baixar":
+        falhas.append(f"no lugar do HOSPEDAR AQUI não há a frase do app e o link: {entrada['frase']!r} {entrada['link']!r}")
+    if "pela" in entrada["proposito"] and "no ar a partir desta máquina" in entrada["proposito"] or "link" not in entrada["proposito"]:
+        falhas.append(f"o propósito ainda fala em pôr um servidor no ar: {entrada['proposito']!r}")
+    if entrada["topo"] != 0:
+        falhas.append(f"a entrada não começa no alto da página: {entrada['topo']}")
+    antes = pg.evaluate("(() => { const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; })()")
+    if antes:
+        falhas.append("sem sessão, sair da página pergunta antes (não há o que perder)")
+
+    entrar(pg)
+    sessao = pg.evaluate("""(() => { const r = document.getElementById('tela-sessao').getBoundingClientRect();
+        const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e);
+        return { topo: Math.round(r.top), altura: Math.round(r.height), pergunta: e.defaultPrevented }; })()""")
+    if sessao["topo"] != 0 or sessao["altura"] != pg.evaluate("innerHeight"):
+        falhas.append(f"a sessão não ocupa a página inteira: {sessao}")
+    if not sessao["pergunta"]:
+        falhas.append("com a sessão aberta, sair da página não pergunta antes: recarregar derruba a sessão")
+
+    # CONFIGURAÇÕES: o que é do app vira frase no lugar.
+    exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(600)
+
+    def secao(id_, painel):
+        if not exigir_toque(pg, f"#{id_}", falhas):
+            return None
+        pg.wait_for_timeout(300)
+        return pg.evaluate("""([painel, visivel]) => {
+            const v = new Function('s', 'return (' + visivel + ')(s)');
+            const p = document.getElementById(painel);
+            return { frase: p.querySelector('.larga-frase')?.textContent ?? '',
+                     blocos: [...p.querySelectorAll('.server-bloco')].filter((b) => getComputedStyle(b).display !== 'none').length,
+                     procurar: v('#atualizacao-procurar') };
+        }""", [painel, visivel])
+
+    atualizacao = secao("secao-atualizacao", "painel-atualizacao")
+    if atualizacao and ("origem" not in atualizacao["frase"] or atualizacao["procurar"] or atualizacao["blocos"]):
+        falhas.append(f"ATUALIZAÇÃO não diz que a página vem da origem, ou ainda procura e instala: {atualizacao}")
+    versoes = secao("secao-versoes", "painel-versoes")
+    if versoes and ("app do SEELE" not in versoes["frase"] or versoes["blocos"]):
+        falhas.append(f"VERSÕES não diz que guardar versões é do app: {versoes}")
+    atalhos = secao("secao-atalhos", "painel-atalhos")
+    if atalhos and "foco" not in atalhos["frase"]:
+        falhas.append(f"a tecla de falar não diz que só vale com a página em foco: {atalhos}")
+    # O teste do microfone fora da sala existe no PC (decisão da orquestradora,
+    # 09/10): a D-52 é do áudio da sessão, e o teste a pessoa abre de propósito.
+    # A larga deixa o bloco do desktop, sem frase por cima; quem atende os
+    # comandos pelo getUserMedia é a ponte da F4.
+    audio = secao("secao-audio", "painel-audio")
+    teste = pg.evaluate(visivel, "#server-testar-microfone")
+    if audio is None or audio["frase"] or not teste:
+        falhas.append(f"ÁUDIO na larga esconde o teste do microfone, ou põe frase no lugar dele: {audio}, botão {teste}")
+    if exigir_toque(pg, "#larga-secao-fora", falhas):
+        pg.wait_for_timeout(300)
+        fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
+            return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
+                     link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
+        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 7 or fora["link"] != "https://seele.app.br/#baixar":
+            falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
+    return falhas
+
+
+def escolha_da_casca(pg: Page) -> list[str]:
+    """A escolha da casca à mão (Tarefa 18): ela grava a preferência, diz que
+    vale na próxima abertura, e não troca nada ao vivo."""
+    falhas = []
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    outra, botao = ("larga", "#cel-secao-casca") if marca == "celular" else ("celular", "#larga-secao-casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    else:
+        exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(500)
+    if not exigir_toque(pg, botao, falhas):
+        return falhas
+    pg.wait_for_timeout(200)
+    if not exigir_toque(pg, f"[data-casca-escolhida='{outra}']", falhas):
+        return falhas
+    pg.wait_for_timeout(200)
+    visto = pg.evaluate("""(() => ({ marca: document.documentElement.dataset.casca,
+        guardada: localStorage.getItem('seele.casca'),
+        frase: document.querySelector('.casca-estado')?.textContent ?? '' }))()""")
+    if visto["guardada"] != outra:
+        falhas.append(f"a escolha guardou {visto['guardada']!r}, e não {outra!r}")
+    if "próxima vez" not in visto["frase"] or "sai da sessão" not in visto["frase"]:
+        falhas.append(f"a escolha não diz quando vale: {visto['frase']!r}")
+    if visto["marca"] != marca:
+        falhas.append(f"a casca trocou ao vivo, no meio da sessão: {marca} → {visto['marca']}")
+    pg.reload()
+    pg.wait_for_function("typeof conectar === 'function'")
+    depois = pg.evaluate("document.documentElement.dataset.casca")
+    if depois != outra:
+        falhas.append(f"aberta de novo, a página veio como {depois}, e não como a escolhida ({outra})")
+    return falhas
+
+
+def escolha_sem_armazenamento(pg: Page) -> list[str]:
+    """Sem armazenamento (navegação privada, cota cheia), a escolha diz que não
+    pôde guardar, e nada muda."""
+    falhas = []
+    # Só a chave da escolha é recusada: o desktop também guarda coisas no
+    # navegador, e recusar tudo quebraria ele, e não só a escolha.
+    pg.evaluate("""(() => { const original = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (chave, valor) {
+            if (chave === 'seele.casca') throw new DOMException('cheio', 'QuotaExceededError');
+            return original.call(this, chave, valor);
+        }; })()""")
+    ir_para_aba(pg, "ajustes", falhas)
+    pg.wait_for_timeout(500)
+    exigir_toque(pg, "#cel-secao-casca", falhas)
+    pg.wait_for_timeout(200)
+    exigir_toque(pg, "[data-casca-escolhida='larga']", falhas)
+    pg.wait_for_timeout(200)
+    frase = pg.evaluate("document.querySelector('.casca-estado')?.textContent ?? ''")
+    if "não deixou guardar" not in frase:
+        falhas.append(f"sem armazenamento, a escolha não diz que não guardou: {frase!r}")
     return falhas
 
 
@@ -907,19 +1582,53 @@ CASOS: dict[str, Caso] = {
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
     "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
                         raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
+    "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
+                    raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
+    "ajustes-medida": Caso(levar=ajustes_medida, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
+    # Termina fora do servidor (SAIR DO SERVIDOR): as medidas do aparelho
+    # ficam com o ajustes-medida, que termina na lista.
+    "aba-ajustes": Caso(levar=aba_ajustes, medir=False),
+    # O aparelho (Tarefa 12). O texto do sistema a 150 % passa pelas abas já
+    # adaptadas, com as mesmas medidas.
+    "faixa-de-voz-150": Caso(levar=faixa_de_voz, escala=1.5, raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
+    "aba-servidor-150": Caso(levar=aba_servidor, escala=1.5, raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
+    "aba-conversa-150": Caso(levar=aba_conversa, escala=1.5, raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
+    "aba-pessoas-150": Caso(levar=aba_pessoas, escala=1.5, raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
+    "chamada-150": Caso(levar=chamada, escala=1.5, raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
+    "ajustes-150": Caso(levar=ajustes_medida, escala=1.5, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
+    # O retrato dos MODs diz onde a casca está: celular só com a marca do
+    # celular; na larga e no desktop (os arquivos das cascas carregados, sem
+    # marca), computador.
+    "retrato-no-celular": Caso(levar=retrato_da_casca("celular"), aparelhos=("390",), medir=False),
+    "retrato-na-larga": Caso(levar=retrato_da_casca("computador"), marca="larga", aparelhos=("1440",), medir=False),
+    "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
+    # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
+    "texto-maior": Caso(levar=texto_maior, medir=False),
+    "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
+    "tela-larga": Caso(levar=tela_larga, aparelhos=("1280",), medir=False),
+    "voltar": Caso(levar=voltar, medir=False),
+    "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
+    # A casca larga (Tarefa 17): o computador, com a marca larga.
+    "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
+    "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
+    "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
+    "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
 }
 
 
 def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: str, caso: Caso) -> list[str]:
     falhas = []
-    for tamanho, aparelho in APARELHOS.items():
+    for tamanho in caso.aparelhos:
+        aparelho = APARELHOS[tamanho]
         nucleo_nativo = None
         for tema in (None, *caso.temas):
             rotulo = f"{nome}-{tamanho}" + (f"-{tema}" if tema else "")
-            pagina = montar(temporaria / rotulo, celular=True, marca="celular")
+            pagina = montar(temporaria / rotulo, celular=True, marca=caso.marca)
             ctx = navegador.new_context(
                 viewport={"width": aparelho["largura"], "height": aparelho["altura"]},
-                device_scale_factor=1, is_mobile=True, has_touch=True, reduced_motion="reduce", locale="pt-BR",
+                device_scale_factor=1, is_mobile=aparelho.get("celular", True), has_touch=aparelho.get("toque", True),
+                reduced_motion="reduce", locale="pt-BR",
             )
             pg = ctx.new_page()
             # Cinco segundos, e não os trinta do Playwright: nesta casca nada
@@ -928,17 +1637,34 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
             pg.goto(f"file://{pagina}")
-            entrar(pg)
+            if caso.entrar:
+                entrar(pg)
             pg.evaluate(
                 f"""document.documentElement.style.setProperty('--cel-seguro-topo', '{aparelho['topo']}px');
                     document.documentElement.style.setProperty('--cel-seguro-pe', '{aparelho['pe']}px');"""
             )
+            if caso.escala != 1.0:
+                pg.evaluate(f"document.documentElement.style.setProperty('--cel-escala', '{caso.escala}')")
             if tema:
                 aplicar_tema(pg, tema)
-            motivos = caso.levar(pg)
-            pg.wait_for_timeout(250)
-            pg.screenshot(path=saida / f"{rotulo}.png", animations="disabled")
-            if caso.medir:
+            # Um caso que estoura reprova com o motivo, e não derruba a bancada.
+            # O mais comum é a página ter saído (um voltar que passou da
+            # sessão): sem ela não há o que medir nem fotografar.
+            try:
+                motivos = caso.levar(pg)
+                estourou = False
+            except ErroDoPlaywright as erro:
+                estourou = True
+                try:
+                    saiu = pg.evaluate("typeof window.__SEELE_HISTORICO") == "undefined"
+                except ErroDoPlaywright:
+                    saiu = True
+                motivos = (["a página saiu da sessão no meio do caso: um voltar foi além dela"] if saiu
+                           else [f"o caso estourou: {str(erro).splitlines()[0][:200]}"])
+            if not estourou:
+                pg.wait_for_timeout(250)
+                pg.screenshot(path=saida / f"{rotulo}.png", animations="disabled")
+            if caso.medir and not estourou:
                 m = pg.evaluate(MEDIR, [aparelho["topo"], aparelho["pe"], caso.raiz])
                 m["nucleo"] = pg.evaluate(NUCLEO)
                 (saida / f"{rotulo}.json").write_text(json.dumps(m, ensure_ascii=False, indent=2))
