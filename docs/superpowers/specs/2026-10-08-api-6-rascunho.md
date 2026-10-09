@@ -125,8 +125,9 @@ o espelho `CAPACIDADES_POR_API` em `base.js:1982-1989` [c]):
 | `volume` | **sim** | ADR 0048. O PERFIS (R1, R3), a MESA (M11, item 16) e o ESTILO (§1, fundo por mídia) dependem dela. Confirmado à F5 em 08/10: o lote E (P51-11) tem objeto |
 | `arquivo` | sim | o seletor mediado e `pedaco`/`soltar` |
 | `tema` | **sim, ampliado** (decisão de 08/10) | §9, com `servidor.aparencia` como porta |
-| `regiao` | **sai** (decisão de 08/10) | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19) |
-| `cartoes` | **sai** (decisão de 08/10), trocada por `pessoa.cartao` com `alvo` | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2) |
+| `regiao` | **sai** (decisão de 08/10); **ausente** do `SeeleUI` da 6, como `superficies` do da 3, e não montado para a janela recusar depois [c, tarefa 3] | a faixa de 240 px é o U01–U03 da auditoria de 20/09 (ADR 0052). Nenhum oficial a pinta: os três calculam `aRegiao` e jogam fora (PERFIS B4, MESA B3, ESTILO A19) |
+| `cartoes` | **sai** (decisão de 08/10), trocada por `pessoa.cartao` com `alvo`; ausente do `SeeleUI` da 6 [c, tarefa 3] | o conjunto inteiro vai numa mensagem de 12 KiB e congela a lista com 14 pessoas (PERFIS A1, R2) |
+| `retrato` | **sim, nova** (09/10, na tarefa 4) | `SeeleUI.retrato()`, projetado por lista branca (§6), **no lugar** de `SeeleMods.snapshot`: quem tem `retrato` não tem o `snapshot` inteiro, nem no prelúdio nem no roteador (`SUBSTITUIDA_PELA_CAPACIDADE`). Uma capacidade, e não um teste de versão, porque é pelas capacidades que o prelúdio monta o `SeeleUI` [c] |
 | `eventos-da-tela` | sim, nova | §7 |
 | `aviso-do-servidor` | sim, nova (metade de servidor) | §7.3. No contrato de fio da 1.0, pela F1 (§14) |
 

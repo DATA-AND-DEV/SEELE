@@ -2242,6 +2242,46 @@ function anotando(...anotadas) {
       "a falha que chega como variante de struct da FFI não foi ao registro inteira: "
         + `${JSON.stringify(anotadasDoRoteador)}`,
     );
+    // **O retrato da API 6 no lugar do `snapshot`** (tarefa 4 do plano da F3).
+    // A 6 pede `retrato` e recebe o projetado por lista branca; a 5 não
+    // alcança o `retrato`; e a 6 que emite `snapshot` direto, por
+    // `seele.postar`, é recusada — o prelúdio dela não monta o método, e a
+    // fronteira é esta conferência.
+    const snapshotDoRoteador = {
+      me: 3, server: "Casa", link_state: "ConexaoSegura", caminho: "rede-local",
+      telemetry: { microfone_entrega_silencio_digital: true },
+      presentes: [{ id: 3, nickname: "ana", speaking: false, muted: false, is_self: true }],
+      voice_rooms: [], channels: [{ id: 7, name: "mesa", open: true }],
+    };
+    contexto.invoke = (comando) => (comando === "snapshot"
+      ? Promise.resolve(snapshotDoRoteador)
+      : Promise.reject(new Error(`invoke inesperado: ${comando}`)));
+    try {
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "retrato", n: 20 });
+      const retrato = respostas.at(-1);
+      confere("retrato · a 6 lê o projetado", retrato?.ok === true
+        && retrato.valor?.eu === 3 && retrato.valor?.canais?.[0]?.aberto === true
+        && !JSON.stringify(retrato.valor).includes("link_state")
+        && !JSON.stringify(retrato.valor).includes("microfone_entrega_silencio_digital"),
+      `o retrato da API 6 não veio projetado: ${JSON.stringify(retrato)}`);
+
+      await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "retrato", n: 21 });
+      confere("retrato · a 5 não alcança", respostas.at(-1)?.ok === false,
+        "um pacote da API 5 leu o retrato da 6");
+
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, { tipo: "snapshot", n: 22 });
+      confere("retrato · o snapshot saiu da 6", respostas.at(-1)?.ok === false,
+        `um pacote da API 6 leu o Snapshot inteiro pela mensagem direta: ${JSON.stringify(respostas.at(-1))}`);
+      confere("retrato · o snapshot saiu da 6, no registro", dita("«snapshot»", "não existe na API 6"),
+        `a recusa do snapshot da 6 foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador)}`);
+
+      await contexto.atenderOMod({ id: "mod/b", api: 5 }, b, { tipo: "snapshot", n: 23 });
+      confere("retrato · a 5 continua com o snapshot", respostas.at(-1)?.ok === true
+        && respostas.at(-1)?.valor?.link_state === "ConexaoSegura",
+      `a API 5 perdeu o snapshot inteiro que ela tem: ${JSON.stringify(respostas.at(-1))}`);
+    } finally {
+      delete contexto.invoke;
+    }
     contexto.registrarNoAnfitriao = registrarDeAntes;
 
     // **R4e · o avatar que não montou é dito.** Aqui, dentro do roteador, e não

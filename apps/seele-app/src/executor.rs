@@ -435,6 +435,7 @@ mod testes {
                    enviar: typeof SeeleUI.enviar,\
                    tema: typeof SeeleUI.tema,\
                    snapshot: typeof SeeleMods.snapshot,\
+                   retrato: typeof SeeleUI.retrato,\
                    regiao: typeof SeeleUI.regiao,\
                    cartoes: typeof SeeleUI.cartoes,\
                    capacidades: SeeleUI.capacidades(),\
@@ -455,8 +456,9 @@ mod testes {
     /// 6 descobriria a ausência num `catch`, em produção. A API 5 continua com
     /// os dois, e é a outra metade da prova.
     ///
-    /// `SeeleMods.snapshot` ainda existe na 6: ele sai na tarefa 4, junto com a
-    /// entrada de `SeeleUI.retrato`.
+    /// **E o retrato no lugar do `snapshot`** (tarefa 4): a 6 lê
+    /// `SeeleUI.retrato()`, projetado por lista branca, e não tem
+    /// `SeeleMods.snapshot`; a 5 tem o `snapshot` e não tem o retrato.
     #[test]
     fn um_pacote_da_api_6_recebe_as_capacidades_dela_e_nao_as_que_sairam() {
         let seis = o_que_a_api_entrega(6);
@@ -465,14 +467,14 @@ mod testes {
             ("superficies", "object"),
             ("enviar", "function"),
             ("tema", "function"),
-            ("snapshot", "function"),
+            ("retrato", "function"),
         ] {
             assert_eq!(seis[nome], tipo, "a API 6 sem «{nome}»: {seis}");
         }
-        for saiu in ["regiao", "cartoes"] {
+        for saiu in ["regiao", "cartoes", "snapshot"] {
             assert_eq!(
                 seis[saiu], "undefined",
-                "«{saiu}» saiu da API 6 e ainda é montado no `SeeleUI`: {seis}"
+                "«{saiu}» saiu da API 6 e ainda é montado (no `SeeleUI` ou no `SeeleMods`): {seis}"
             );
         }
         assert_eq!(
@@ -482,12 +484,16 @@ mod testes {
         );
 
         let cinco = o_que_a_api_entrega(5);
-        for continua in ["regiao", "cartoes"] {
+        for continua in ["regiao", "cartoes", "snapshot"] {
             assert_eq!(
                 cinco[continua], "function",
                 "a API 5 perdeu «{continua}», que ela tem: {cinco}"
             );
         }
+        assert_eq!(
+            cinco["retrato"], "undefined",
+            "a API 5 ganhou o retrato da 6: {cinco}"
+        );
     }
 
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**

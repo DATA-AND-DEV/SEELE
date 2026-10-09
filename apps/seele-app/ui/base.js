@@ -2192,7 +2192,7 @@ const CAPACIDADES_POR_API = Object.freeze({
   // ordem de `capacidades_da_api(6)`: o teste espelho confere as duas.
   6: Object.freeze([
     "superficies", "contribuicoes", "estilos", "classes", "volume",
-    "arquivo", "tema", "eventos-da-tela", "aviso-do-servidor",
+    "arquivo", "tema", "retrato", "eventos-da-tela", "aviso-do-servidor",
   ]),
   5: Object.freeze(["regiao", "tema", "cartoes", "arquivo", "superficies", "contribuicoes", "estilos", "classes", "volume"]),
   4: Object.freeze([
@@ -2221,6 +2221,19 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-descartar": "superficies",
   contribuir: "contribuicoes",
   "revogar-contribuicao": "contribuicoes",
+  retrato: "retrato",
+});
+
+/**
+ * As mensagens que uma capacidade **substituiu**: quem a tem não as alcança.
+ *
+ * O `snapshot` inteiro é da API 5 para baixo; a 6 lê o retrato projetado
+ * (rascunho da API 6, §6). O prelúdio da 6 não monta `SeeleMods.snapshot`, e
+ * isto é a fronteira, pela razão de sempre: `seele.postar` continua lá, e um
+ * pacote da 6 que emitisse `snapshot` direto leria o `Snapshot` inteiro.
+ */
+const SUBSTITUIDA_PELA_CAPACIDADE = Object.freeze({
+  snapshot: "retrato",
 });
 
 /**
@@ -2231,10 +2244,90 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
  * nenhuma — é o caso de um manifesto que não pôde ser lido.
  */
 function podePedir(mod, tipo) {
+  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
+  // Antes da exigida: o `snapshot` não exige capacidade nenhuma, e é por isso
+  // mesmo que a substituição tem de ser perguntada primeiro.
+  const substituta = SUBSTITUIDA_PELA_CAPACIDADE[tipo];
+  if (substituta && tem.includes(substituta)) return false;
   const exigida = CAPACIDADE_DA_MENSAGEM[tipo];
   if (!exigida) return true;
-  const tem = CAPACIDADES_POR_API[Number(mod?.api)] ?? [];
   return tem.includes(exigida);
+}
+
+/**
+ * O retrato que um MOD da API 6 lê (`SeeleUI.retrato()`), projetado do
+ * `Snapshot` por lista branca (rascunho da API 6, §6; tarefa 4 do plano da F3).
+ *
+ * **Campo a campo, sem `...spread`, em todos os níveis.** A lista branca é a
+ * lista do que se copia, e nunca a do que se apaga: um campo novo do `Snapshot`
+ * nasce fora do retrato até alguém o escrever aqui. É o que deixa de fora o
+ * veredito de conexão segura (`link_state`), a topologia da rede (`caminho`), os
+ * aparelhos da máquina, as permissões (`may_*`) e a telemetria inteira — com o
+ * `microfone_entrega_silencio_digital` do I-b, o estado de uma permissão de
+ * privacidade do sistema. Toque, chamada, código e agenda da sala pessoal nunca
+ * entram (o guarda 12).
+ *
+ * `casca` diz o que não está no `Snapshot`: `onde` (`computador` ou `celular`) e
+ * as `regioes` que existem nesta casca agora.
+ */
+function projetarORetrato(snapshot, casca) {
+  const s = snapshot ?? {};
+  const lista = (valor) => (Array.isArray(valor) ? valor : []);
+  return {
+    eu: typeof s.me === "number" ? s.me : null,
+    servidor: { nome: String(s.server ?? "") },
+    pessoas: lista(s.presentes).map((p) => ({
+      id: p.id,
+      apelido: String(p.nickname ?? ""),
+      falando: p.speaking === true,
+      mudo: p.muted === true,
+    })),
+    salas: lista(s.voice_rooms).map((sala) => ({
+      id: sala.id,
+      nome: String(sala.name ?? ""),
+      limite: Number(sala.limit) || 0,
+      pessoas: lista(sala.people).map((p) => p.id),
+      minha: sala.occupied_by_us === true,
+    })),
+    canais: lista(s.channels).map((canal) => ({
+      id: canal.id,
+      nome: String(canal.name ?? ""),
+      aberto: canal.open === true,
+    })),
+    onde: casca?.onde === "celular" ? "celular" : "computador",
+    regioes: lista(casca?.regioes).map(String),
+  };
+}
+
+/**
+ * As regiões e camadas da API 6, na ordem do contrato (rascunho §3 e §5).
+ *
+ * `regioes`, no retrato, é a parte desta lista que **existe nesta casca agora**:
+ * uma região entra quando o produto a monta (o ponto dela existe), e uma camada
+ * quando o tipo de superfície existe. Dizer uma região que a casca ainda não
+ * monta seria o retrato prometendo um lugar que recusa a contribuição.
+ */
+const REGIOES_E_CAMADAS_DA_API = Object.freeze([
+  "redes", "servidor.navegacao", "operador.barra", "canal.cabecalho",
+  "conversa.mensagem", "compositor", "pessoas.lista", "status.barra",
+  "chamada.palco", "pagina", "dialogo", "folha", "aviso",
+]);
+
+/**
+ * O que o retrato diz da casca: onde ela está e que regiões ela tem agora.
+ *
+ * **`onde` lê uma marca só**, que a casca põe na raiz: `data-casca="celular"`
+ * na casca de uma mão (a da F8), e nada no computador — o web app no PC usa a
+ * casca de desktop (D-web-3), e é `computador`.
+ */
+function cascaDoRetrato() {
+  const pontos = typeof PONTOS_DE_CONTRIBUICAO === "object" ? PONTOS_DE_CONTRIBUICAO : {};
+  const tipos = typeof TIPOS_DE_SUPERFICIE === "object" ? TIPOS_DE_SUPERFICIE : {};
+  return {
+    onde: document.documentElement?.dataset?.casca === "celular" ? "celular" : "computador",
+    regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
+      Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
+  };
 }
 
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
@@ -2337,6 +2430,13 @@ async function atenderOMod(mod, instancia, m) {
       case "pedido":
         responder(true, { valor: await pedirAoServidor(mod.id, m.canal, m.valor) });
         break;
+      case "retrato": {
+        // O mesmo cuidado do `snapshot`, logo abaixo: depois do `await`, quem
+        // responde é `responder`, que recusa se a sessão já acabou.
+        const valor = projetarORetrato(await invoke("snapshot"), cascaDoRetrato());
+        responder(true, { valor });
+        break;
+      }
       case "snapshot": {
         const valor = await invoke("snapshot");
         // Depois do `await`: a sessão pode ter acabado enquanto o retrato
