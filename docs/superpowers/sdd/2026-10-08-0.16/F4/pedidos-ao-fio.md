@@ -334,6 +334,10 @@ quem chama chamar `proximo` a cada pedaço. O cliente web vai chamar.
    presa à origem se perde com mais facilidade (ADR 0057, «O que isto custa»).
    **Conferir o apelido antes de gastar o convite**, nos dois transportes,
    evita que a pessoa perca o convite por um apelido ocupado.
+   **Feito** pela F1 (a P4 do plano F1b), integrado em `42bc866b`. Conferido no
+   código da `versao/0.16` em 09/10: no braço `Entra` da portaria,
+   `apelido_de_outra_chave` é perguntado antes do `admissao::gastar`
+   (`session.rs:957-991`), e a recusa diz que o convite ficou intacto.
 5. **O campo `client` do `Hello`** leva `seele-web/<versão>`, para o registro
    de quem hospeda. Não precisa de mudança.
 6. **O `Origin` do pedido WebTransport** chega ao servidor (bancada da medição
