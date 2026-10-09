@@ -13482,6 +13482,20 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
              quando a sessão sai"
         );
     }
+    // **A raiz só é lida, e por um caminho só** (tarefa 17e): os tons que o
+    // produto deriva partem da cor do produto, que só a raiz guarda com um tema
+    // de pé. O caminho até ela é `corDaRaiz`, e ele não escreve.
+    let raiz = js_function(&base, "function corDaRaiz(");
+    assert!(
+        escrever.contains("corDaRaiz") && raiz.contains("getComputedStyle(document.documentElement)"),
+        "a cor do produto deixou de ser lida da raiz pelo caminho nomeado: {escrever}"
+    );
+    for escrita in [".style", "setProperty", "setAttribute", "classList"] {
+        assert!(
+            !raiz.contains(escrita),
+            "o caminho que lê a raiz passou a escrever nela (`{escrita}`): {raiz}"
+        );
+    }
 
     // Só cor, e só `#rrggbb`: um valor livre numa propriedade de cor é a porta
     // por onde um MOD escreveria o que quisesse.
@@ -13536,7 +13550,7 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
 fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
     let base = without_comments(&read("ui/base.js"));
     let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
-    let mede = js_function(&base, "function oTextoAlcancaOFundo(");
+    let mede = js_function(&base, "function oTemaAlcancaOsPisos(");
 
     assert!(
         aplicar.contains("já é do MOD"),
@@ -13547,15 +13561,24 @@ fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
         aplicar.contains("throw new Error(legivel)"),
         "um tema ilegível deixou de ser recusado: {aplicar}"
     );
+    // Os pisos moram na tabela dos pares (rascunho da API 6, §9), e a medida
+    // passa por ela: o texto sobre o fundo continua em 4,5:1.
+    let pares = base
+        .split("const PARES_DO_TEMA")
+        .nth(1)
+        .and_then(|resto| resto.split("]);").next())
+        .unwrap_or_default();
     assert!(
-        mede.contains("4.5"),
-        "a medida de contraste saiu, ou deixou de ser 4,5:1 — que é o que \
-         `tokens.css` afirma linha a linha: {mede}"
+        pares.contains(r#"["texto", "fundo", 4.5]"#) && mede.contains("tonsDoTema("),
+        "a medida de contraste saiu, ou o texto sobre o fundo deixou de ser \
+         4,5:1 — que é o que `tokens.css` afirma linha a linha: {mede}"
     );
     // Lido da raiz: é o único lugar onde a cor do produto continua sendo a do
     // produto com um tema de pé. Medir na sessão mediria o próprio tema.
     assert!(
-        mede.contains("getComputedStyle(document.documentElement)"),
+        mede.contains("corDaRaiz")
+            && js_function(&base, "function corDaRaiz(")
+                .contains("getComputedStyle(document.documentElement)"),
         "a cor do produto passou a ser lida de onde o tema já escreveu: {mede}"
     );
 }

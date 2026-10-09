@@ -73,6 +73,12 @@
 
 #tela-sessao {
   color: var(--seele-osso);
+  /* Os apelidos de `tokens.css` também se resolvem na raiz: a sincronia ficava
+     com o fósforo, o laranja e o vermelho do produto sob qualquer tema. Aqui
+     eles seguem as cores que o tema e a derivação escrevem em `#tela-sessao`. */
+  --seele-sync-nominal: var(--seele-fosforo);
+  --seele-sync-degradado: var(--seele-laranja-nerv);
+  --seele-sync-critico: var(--seele-vermelho-alerta);
 }
 
 /* ---------- topo ----------

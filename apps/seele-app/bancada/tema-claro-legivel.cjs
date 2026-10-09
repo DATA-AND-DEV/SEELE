@@ -14,11 +14,11 @@
 //
 // # O que ela mede
 //
-// Três lugares que herdavam a cor resolvida acima de `#tela-sessao`: o corpo de
-// uma mensagem, o SAIR DA SALA e o nome de uma pessoa no roster. Cada um precisa
-// de 4,5:1 contra o primeiro fundo opaco acima dele. As cores de estado (o
-// fósforo da sincronia) ficam de fora: elas são derivadas do tema na tarefa 17e
-// do plano da F3.
+// Três lugares que herdavam a cor resolvida acima de `#tela-sessao` — o corpo de
+// uma mensagem, o SAIR DA SALA e o nome de uma pessoa no roster — e dois em cor
+// de estado, que o produto deriva do tema (tarefa 17e do plano da F3): o número
+// da sincronia, em fósforo, e o nome de quem usa, no azul. Cada um precisa de
+// 4,5:1 contra o primeiro fundo opaco acima dele.
 //
 // Rodar:  node apps/seele-app/bancada/tema-claro-legivel.cjs
 
@@ -115,11 +115,15 @@ const TEMA_CLARO = {
         };
       };
       return {
-        legivel: oTextoAlcancaOFundo(),
+        legivel: oTemaAlcancaOsPisos(),
         lugares: [
           medir(".mensagens .corpo"),
           medir("#operador-sair"),
           medir(".roster .pessoa-nome"),
+          // As cores de estado, derivadas do tema (tarefa 17e): o número da
+          // sincronia, em fósforo, e o nome de quem usa, no azul.
+          medir(".pessoa-sync-valor"),
+          medir("#operador-nome"),
         ],
       };
     }, TEMA_CLARO);
