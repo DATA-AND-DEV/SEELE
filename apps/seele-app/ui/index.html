@@ -745,6 +745,23 @@
   </div>
 
   <!--
+    O áudio que não abriu a tempo, numa sala. Pendência 52.
+
+    O áudio abre ao entrar numa sala de voz, numa thread própria e com prazo.
+    Quando o prazo vence, a sala segue só com a conversa por escrito, e esta
+    faixa diz isso e o que fazer. A frase é a de `nao_abriu_no_prazo` em
+    `ABERTURA_DO_AUDIO`, de `frases.js`, e `desenharAberturaDoAudio` a escreve a
+    partir do estado a cada quadro.
+
+    Sem botão de dispensar, e é a diferença para a do fone: aquela é um aviso
+    que se lê uma vez, e esta é um estado que vale enquanto for verdade. Ela
+    apaga sozinha quando a pessoa sai da sala.
+  -->
+  <div id="aviso-audio" class="veredito" role="status" hidden>
+    <span id="aviso-audio-texto" class="veredito-texto"></span>
+  </div>
+
+  <!--
     A queda, e o período de graça que ela abre. `specs/07-estetica.md` é
     explícito: o cliente não fecha nem mostra um spinner. A interface esmaece,
     conta cinco minutos, e o histórico continua ali para leitura. Por isso isto é

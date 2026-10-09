@@ -1,0 +1,30 @@
+[package]
+name = "seele-motor"
+description = "A volta de um MOD da janela: o motor QuickJS do cliente, sem thread e sem E/S, que o desktop e o celular embrulham."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Uma folha do grafo (a linha dele em `xtask/src/check_deps.rs`): o motor não
+# conhece o protocolo nem o manifesto. As capacidades de uma API entram como
+# lista, calculadas por quem embrulha.
+[dependencies]
+# O mesmo `rquickjs` que a metade de servidor usa, e **só o motor**: os bindings
+# de disco, rede e persistência dela ficam lá. A diretriz de 18/09 é explícita —
+# «reaproveitar a experiência com limites, não os poderes da metade de servidor».
+rquickjs = "0.12.2"
+# O pedido de temporizador que o prelúdio escreve, e o `console` do MOD. As
+# mesmas versões do `seele-app`, de onde este código saiu.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.151"
+
+# **O `RustAllocator`, só no `wasm`.** No `wasm32-wasip1`, o teto de memória do
+# QuickJS só existe com ele (`runtime_do_alvo`, em `src/lib.rs`). No desktop e no
+# servidor o build continua o mesmo: com o resolvedor 2, a feature de um alvo não
+# vaza para os outros.
+[target.'cfg(target_family = "wasm")'.dependencies]
+rquickjs = { version = "0.12.2", features = ["allocator"] }
+
+[lints]
+workspace = true

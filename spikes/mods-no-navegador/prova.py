@@ -17,7 +17,7 @@ import base64, hashlib, http.server, json, pathlib, re, socket, subprocess, sys,
 AQUI = pathlib.Path(__file__).resolve().parent
 PAGINA = AQUI / "pagina"
 MOTOR = AQUI / "motor" / "target" / "wasm32-wasip1" / "release" / "motor_de_mods_wasm.wasm"
-EXECUTOR = AQUI.parent.parent / "apps" / "seele-app" / "src" / "executor.rs"
+EXECUTOR = AQUI.parent.parent / "crates" / "seele-motor" / "src" / "preludio.rs"
 PORTA, PORTA_CANARIO = 8095, 8096
 UDP = {"A": 8097, "B": 8098, "AB": 8099}
 

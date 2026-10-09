@@ -204,3 +204,119 @@ Liberado pela orquestradora depois do `642a4d4`.
 - Clippy com `RUSTFLAGS="-D warnings"` e `--all-targets` depois da última
   edição. Ele pegou a indexação em `serde_json::Value` no teste novo, já
   consertada.
+
+### 09/10, a sexta integração e o executor do navegador
+
+- `0.16/web` trazido a `cb426b19` (fast-forward). A bateria pegou um teste
+  meu: `pelo_fio_1_0.rs` contava as **linhas** dos bytes-ouro contra o
+  `CONHECIDAS`, e a F1 acrescentou um segundo exemplar do `Alert`. A
+  orquestradora o consertou em `3f8babe0` (conta as variantes). Era um guarda
+  que casava com o arquivo, e não com o fio.
+- **Achado de paridade, levado à orquestradora:** o motor do celular roda o
+  mesmo prelúdio do desktop, mas não as ~1000 linhas do `executor.rs` fora
+  dele. Ficam de fora:
+  - o rastreador de rejeições (P51-01);
+  - o balde do console (P51-14);
+  - os tetos de relógio;
+  - a frase do teto e o `Interrompido`.
+
+  Recomendei extrair a volta para um crate comum. Espera a ordem dela, porque o
+  `executor.rs` teve 10 commits desde 07/10, e a F3 e os lotes C, D e E ainda
+  vão mexer nele.
+- **O executor JS, pronto para a `ui/`** (em
+  `spikes/mods-no-navegador/executor/` até a liberação):
+  - `executorNoNavegador` com a forma do `executorNativo`: os quatro verbos, o
+    `entregar` que devolve a recusa, o `encerrou` com prazo e conclusão tardia,
+    e a ordem da colheita;
+  - um `iframe` opaco (`executor-de-mod.html`) com a CSP por `<meta>` e o hash
+    do script. O anfitrião do motor mora **dentro** dele, como uma função que
+    vira o `blob:` do Worker;
+  - os tetos das filas do desktop (64 mensagens e 256 KiB) nas três pontas: o
+    Worker recusa o `postar`, a página recusa o `entregar`, e o `iframe` mata
+    o Worker que passar do teto que o motor garante.
+- **Achado medido, consertado:** no Safari do Simulador iOS 27.0, um Worker do
+  `iframe` opaco abre o `caches`, e o que ele grava **sobrevive** à abertura
+  seguinte da página. Um Worker aninhado o abre de novo, e a CSP não alcança
+  armazenamento.
+
+  Só importa se um MOD sair do motor, mas é armazenamento que sobrevive à
+  sessão. Um preâmbulo no `blob:` tira `caches`, `indexedDB`, `Worker`,
+  `SharedWorker` e `navigator.storage`, confere, e falha fechado.
+
+  Com ele, nos três navegadores (Chromium 151, Safari 27.0.1 do Mac e Safari
+  do Simulador), nenhuma canária tocou e nenhuma porta abriu.
+- **A bancada** (`executor-no-navegador.cjs`, no Chromium) tem nove casos:
+  - o MOD comum;
+  - o encerramento;
+  - o laço cortado, com a página parada 11 ms no pior caso;
+  - as duas filas;
+  - a parada antes do motor;
+  - o MOD hostil no motor;
+  - o Worker fugido;
+  - o Worker que inunda.
+
+  As oito provas por reversão reprovam, cada uma no caso dela
+  (`spikes/mods-no-navegador/README.md`, adendo de 09/10).
+- **Para a integração na `ui/`:**
+  - o guarda `the_page_loads_only_files_that_are_shipped` exige que todo `.js`
+    da `ui/` seja carregado pelo `index.html`. Foi por isso que o anfitrião
+    saiu de um `.js` próprio;
+  - medido numa cópia temporária, que não ficou na árvore, com os dois
+    arquivos na `ui/`: dos 270 guardas do `frontend.rs` e do `tokens.rs`,
+    269 passam. O que reprova é justamente esse, até o `index.html` carregar
+    o `mods-no-navegador.js`;
+  - a bancada precisa do `.wasm` do motor e do Playwright no mesmo job.
+
+### 09/10, a volta comum (o `executor.rs` extraído)
+
+Decidido pela orquestradora: extrair agora, com o `executor.rs` com a F4 até
+a integração. `0.16/web` trazido a `fd4d298f` (merge `b6c7eca1`) antes de
+começar.
+- **`a35e78ae`, o desktop.** A volta saiu do `executor.rs` para o
+  `crates/seele-motor`: folha do grafo, `forbid(unsafe_code)`, sem thread e sem
+  E/S. O `rodar` virou o `Motor` (`subir`, `codigo`, `resposta`, `diagnostico`,
+  `vencer`, `proximo_prazo`, `parar`), e a thread, o canal e a fila de entrada
+  ficam no `executor.rs`.
+  - Os 55 testes passam: 49 ficam no `executor.rs` e 6 vão para o motor (os
+    que leem campos privados). Os 71 blocos do módulo são idênticos byte a
+    byte, conferidos por script contra o arquivo de antes.
+  - O `seele-app` troca o `rquickjs` pelo `seele-motor`, e o filtro do log
+    ganha `seele_motor=info`.
+  - Os leitores do prelúdio (`imagens-por-volume.cjs`, `mod_de_referencia.rs`
+    e o spike) leem `crates/seele-motor/src/preludio.rs`.
+  - Ao virar biblioteca, apareceu um defeito antigo: a doc da `Fila` tinha
+    ficado grudada no `AVISOS_NA_FILA`.
+- **`c313e3e4`, o celular.** O `seele-motor-web` perde o `rquickjs`, o
+  `build.rs` e o `motor.rs`. Uma `Instancia` segura embrulha o `Motor`, e o
+  `.wasm` deixa de importar o módulo `seele`; o `sched_yield` do `mpsc` entra na
+  lista fixa depois de revisado.
+  - A tabela `crates/seele-motor/tests/casos.json` tem 13 casos e passa no
+    nativo (`casos.rs`) e no `.wasm` (`motor.mjs`).
+  - **Achado medido:** a única diferença entre os alvos é o `Atomics`, que o
+    QuickJS do `wasm32-wasip1` não expõe. A tabela a declara e as duas pontas a
+    cobram. Se a API o quiser fora do desktop também, é decisão da F3.
+  - O guarda `o_desktop_e_o_celular_embrulham_a_mesma_volta_sem_reimplementar_nada`:
+    nenhum dos dois embrulhos depende do `rquickjs`.
+- **`13450681`, o executor JS do spike.** O anfitrião só espera o prazo do
+  motor; as frases do laço cortado passam a ser as do desktop. Os nove casos
+  passam no Chromium, e os do Safari no Simulador.
+- **Provas:**
+  - o clippy do workspace passa com `-D warnings`;
+  - o `seele-app` passa inteiro (267 de unidade e todas as suítes);
+  - o `xtask` e o `check-deps` passam (15 crates);
+  - a conformidade de MOD por arquivo passa: `mod_de_referencia`,
+    `aceite_dos_mods`, `ponte_de_pedidos` e `imagens_de_mod` (este no
+    `seele-server`);
+  - o `cargo xtask web` passa nos oito passos, assim como o `check-runtime`, o
+    `cargo deny` e o `cargo fmt --check`.
+- **Reversões:**
+  - o `rquickjs` de volta no motor do celular reprova o guarda;
+  - a tabela fora do `web.rs` também o reprova;
+  - sem o `RustAllocator`, o MOD passa do teto com 64 blocos no `.wasm`;
+  - sem a conferência da fila no `postar`, o caso da fila reprova.
+- **De passagem, não tocado:** `crates/seele-server/src/mods/mod.rs:191` ainda
+  diz que o molde do `Lancado` está no `executor.rs`. É só doc, e o
+  `seele-server` está com a F1.
+- **A 3.5 passou para a F8** (aviso de 09/10). A marca `data-casca`, que a F8
+  quer antes da primeira pintura, fica a combinar com ela, e a orquestradora
+  recomenda que saia da `ponte-web.js`.
