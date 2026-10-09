@@ -46,6 +46,9 @@ Plano: `docs/superpowers/plans/2026-10-08-0.16-F1-protocolo.md`. Branch `0.16/pr
 
 | S2 estrito (achado da F2) | feito | ver `git log` | a conferência usava o `verify` comum. Passou a `verify_strict`, e uma chave de ordem pequena (`is_weak`) é recusada ao ler o `Hello`, antes do desafio, com `CredentialRejected`. O teste manda o elemento neutro como chave e espera a recusa; hoje ele chegava ao `Challenge`. Reversão: sem a recusa da chave, reprova. A troca para `verify_strict` não tem teste próprio de assinatura montada: a recusa da chave já barra o caso da F2 antes da conferência, e os testes do caminho honesto provam que a forma estrita não recusa quem assina de verdade |
 
+| merge da `versao/0.16` (`a2b9f9d0`) | feito | avanço rápido | a terceira integração, com o G-servidor |
+| P1 a recusa legível e o carimbo, no servidor | feito | ver `git log` | o aperto de mão lê o primeiro quadro **bruto** (`frame::ler_bruto`) e confere o byte 0 antes do `decode`. Um carimbo de fora sai como `Disconnecting { Incompatible }` no carimbo de `control::carimbo_da_recusa` (a regra de `recusa_por_versao`, separada e provada igual para os 256 carimbos). Toda escrita da sessão passou a `frame::write_em` com o número negociado, inclusive `recusar` e `nao_deu`. O teste é de crate (`seele-server/tests/recusa_legivel.rs`), e não de conformidade: só pede um par cru, e roda sem a 8384. Antes: `[9, 11, 9]` nos dois casos. Duas reversões reprovam: o `decode` antes do carimbo, e um `frame::write` sem carimbo de volta no laço (o guarda `nenhuma_escrita_da_sessao_sai_sem_o_carimbo`, que lê a fonte). **Falta a medida de campo**: o app 0.15.1 publicado contra o `seeled` deste branch, no Mac, lendo «VERSÃO INCOMPATÍVEL» |
+
 ## Verificação final (08/10)
 
 - `cargo fmt --all -- --check` limpo; `cargo clippy --workspace --all-targets` sem aviso.

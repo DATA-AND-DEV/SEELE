@@ -2620,12 +2620,26 @@ pub const ORDINAL_INCOMPATIBLE: u8 = 0;
 /// `decode` — que o recusaria justamente por estar fora da faixa.
 #[must_use]
 pub const fn recusa_por_versao(carimbo_do_par: u8) -> [u8; 3] {
-    let carimbo = if carimbo_do_par < crate::version::PRIMEIRO_DA_LINHA_UM {
+    [
+        carimbo_da_recusa(carimbo_do_par),
+        ORDINAL_DISCONNECTING,
+        ORDINAL_INCOMPATIBLE,
+    ]
+}
+
+/// O carimbo com que [`recusa_por_versao`] sai: o do par, se ele é de antes da
+/// 1.0; o desta build, da linha 1 em diante.
+///
+/// Separado para quem escreve a recusa pelo `encode` de sempre — o servidor,
+/// que manda todo `Disconnecting` pelo mesmo caminho — usar a mesma regra, e
+/// não uma cópia dela.
+#[must_use]
+pub const fn carimbo_da_recusa(carimbo_do_par: u8) -> u8 {
+    if carimbo_do_par < crate::version::PRIMEIRO_DA_LINHA_UM {
         carimbo_do_par
     } else {
         PROTOCOL_VERSION
-    };
-    [carimbo, ORDINAL_DISCONNECTING, ORDINAL_INCOMPATIBLE]
+    }
 }
 
 /// Parses a frame back into a message.
@@ -5811,6 +5825,23 @@ mod a_recusa_legivel {
         assert_eq!(recusa_por_versao(30), [PROTOCOL_VERSION, 11, 0]);
         assert_eq!(recusa_por_versao(9), [PROTOCOL_VERSION, 11, 0]);
         assert_eq!(recusa_por_versao(u8::MAX), [PROTOCOL_VERSION, 11, 0]);
+    }
+
+    /// O servidor escreve a recusa pelo `encode` de todo `Disconnecting`, com
+    /// [`carimbo_da_recusa`]. Para todo carimbo que um par mande, isso dá os
+    /// mesmos bytes de [`recusa_por_versao`].
+    #[test]
+    fn a_recusa_pelo_encode_com_o_carimbo_da_recusa_e_a_mesma() {
+        let incompativel = ServerMessage::Disconnecting {
+            reason: DisconnectReason::Incompatible,
+        };
+        for do_par in 0..=u8::MAX {
+            assert_eq!(
+                encode_em(carimbo_da_recusa(do_par), &incompativel).unwrap(),
+                recusa_por_versao(do_par).to_vec(),
+                "a recusa ao carimbo {do_par} sai diferente pelos dois caminhos"
+            );
+        }
     }
 
     #[test]

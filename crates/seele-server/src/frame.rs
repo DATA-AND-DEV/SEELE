@@ -107,6 +107,26 @@ pub async fn ler<T>(stream: &mut quinn::RecvStream) -> Result<T, FimDoQuadro>
 where
     T: for<'de> Deserialize<'de> + Validate,
 {
+    let frame = ler_bruto(stream).await?;
+    // E aqui é `NaoEntendi`: o quadro chegou inteiro e não virou mensagem.
+    seele_proto::control::decode::<T>(&frame).map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))
+}
+
+/// Um quadro inteiro, com o carimbo no byte 0, **sem decodificar**.
+///
+/// É o que deixa o aperto de mão olhar o carimbo antes do `decode`, que
+/// recusaria um número fora da faixa sem dizer qual veio — e a recusa por
+/// versão precisa dele para sair num carimbo que o par lê
+/// (`control::recusa_por_versao`). E é o que deixa o laço de controle pular
+/// uma mensagem de um vocabulário mais novo (`control::decode_da_lista`).
+///
+/// Nunca devolve um quadro vazio: o comprimento zero é recusado antes.
+///
+/// # Errors
+///
+/// [`FimDoQuadro::Fechou`] se o fluxo acabou, inclusive no meio de um quadro;
+/// [`FimDoQuadro::NaoEntendi`] para um comprimento vazio ou acima do teto.
+pub async fn ler_bruto(stream: &mut quinn::RecvStream) -> Result<Vec<u8>, FimDoQuadro> {
     let mut prefixo = [0_u8; seele_proto::quadro::PREFIXO_LEN];
     stream
         .read_exact(&mut prefixo)
@@ -133,11 +153,15 @@ where
         .read_exact(&mut frame)
         .await
         .map_err(|erro| FimDoQuadro::Fechou(erro.into()))?;
-    // E aqui é `NaoEntendi`: o quadro chegou inteiro e não virou mensagem.
-    seele_proto::control::decode::<T>(&frame).map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))
+    Ok(frame)
 }
 
 /// Encodes a message and writes it as one frame.
+///
+/// Carimbado com o número **desta build**. Serve a quem não negociou nada: os
+/// fluxos de anexo e de imagem, e os pares crus dos testes. **O fluxo de
+/// controle de uma sessão escreve com [`write_em`]**, no número que o `Hello`
+/// negociou (adendo de 08/10/2026, §4).
 ///
 /// # Errors
 ///
@@ -146,7 +170,24 @@ pub async fn write<T>(stream: &mut quinn::SendStream, message: &T) -> Result<()>
 where
     T: Serialize + Validate,
 {
-    let frame = seele_proto::control::encode(message)?;
+    write_em(stream, seele_proto::version::PROTOCOL_VERSION, message).await
+}
+
+/// Como [`write`], com o carimbo escolhido por quem escreve.
+///
+/// Depois do `Hello`, é o número negociado; antes, o carimbo que o par mandou,
+/// que é o que ele lê. Na 1.0 os dois são 9 e o quadro é o mesmo de [`write`]:
+/// a diferença aparece na primeira 1.x, que fala também um número que a 1.0
+/// não lê.
+///
+/// # Errors
+///
+/// Fails if the message is invalid or the stream is closed.
+pub async fn write_em<T>(stream: &mut quinn::SendStream, versao: u8, message: &T) -> Result<()>
+where
+    T: Serialize + Validate,
+{
+    let frame = seele_proto::control::encode_em(versao, message)?;
     stream
         .write_all(&seele_proto::quadro::enquadrar(&frame)?)
         .await?;
