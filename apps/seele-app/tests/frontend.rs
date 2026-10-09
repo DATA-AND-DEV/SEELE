@@ -16797,6 +16797,35 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
     );
 }
 
+/// **A casca veste a sessão com o que está gravado em disco, logo depois do
+/// `connect`.** Acréscimo A do lote I-b.
+///
+/// A FFI prova que `vestir_com_o_disco` leva a supressão, a sensibilidade e o
+/// modo à primeira abertura do áudio
+/// (`a_supressao_e_a_sensibilidade_gravadas_valem_na_primeira_abertura`). Nada
+/// disso vale se a casca não a chama: era o caso de antes, em que só o modo era
+/// aplicado ali, e a sessão começava com a supressão e a sensibilidade nos
+/// padrões, por cima do que a pessoa tinha gravado.
+#[test]
+fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
+    let conectar = body_of(&read("src/main.rs"), "async fn connect(");
+    let Some(veste) = conectar.find("connection.vestir_as_escolhas_gravadas(&") else {
+        panic!(
+            "`connect` não veste mais a sessão com o disco: a supressão e a sensibilidade \
+             gravadas não valem até a pessoa mexer de novo"
+        );
+    };
+    let Some(conectou) = conectar.find("Connection::connect_watching(") else {
+        panic!(
+            "`connect` não conecta mais por `connect_watching`, e este guarda mediu outra coisa"
+        );
+    };
+    assert!(
+        conectou < veste,
+        "a sessão é vestida com o disco antes de existir uma conexão para vestir"
+    );
+}
+
 /// **Todo mapa de topo da tela de sessão é esquecido quando a sessão acaba.**
 /// F1-vazamento, passo 3 (1).
 ///

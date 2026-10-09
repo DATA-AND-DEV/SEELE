@@ -2539,15 +2539,22 @@ impl Connection {
     ///
     /// Guardada fora de sala, e aplicada quando a voz abrir.
     pub fn set_abertura_da_voz_dbfs(&self, dbfs: Option<f32>) {
-        let dbfs = dbfs.map(|valor| {
-            valor.clamp(
-                *seele_core::FAIXA_DE_ABERTURA_DBFS.start(),
-                *seele_core::FAIXA_DE_ABERTURA_DBFS.end(),
-            )
-        });
+        let dbfs = dbfs.map(abertura_na_faixa);
         self.shared
             .voice
             .escolher(|escolhida| escolhida.abertura_dbfs = dbfs);
+    }
+
+    /// Veste esta sessão com o que está gravado em disco: o modo, a supressão
+    /// de ruído e a sensibilidade. Acréscimo A do lote I-b.
+    ///
+    /// A casca chama isto logo depois do `connect`. Antes ela aplicava só o
+    /// modo, e a supressão e a sensibilidade gravadas ficavam de fora: a sessão
+    /// começava nos padrões até a pessoa mexer, e a tela de configuração, que
+    /// lê o disco fora de sessão, mostrava outra coisa. Fora de sala, só grava;
+    /// a voz que abrir veste.
+    pub fn vestir_as_escolhas_gravadas(&self, ajustes: &preferences::Preferences) {
+        vestir_com_o_disco(&self.shared.voice, ajustes);
     }
 
     /// Os controles de voz desta sessão, como a casca os desenha. F01 e F02.
@@ -4606,6 +4613,37 @@ impl VozViva for Voice {
     fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
         self.set_gain(ssrc.get(), ganho);
     }
+}
+
+/// Veste a voz desta sessão com o que está gravado em disco: o modo, a
+/// supressão de ruído e a sensibilidade. Acréscimo A do lote I-b.
+///
+/// Só o que está gravado: um ajuste que a pessoa nunca escolheu fica no padrão
+/// da sessão. Gravado em [`VozDaSala`], e por isso vale fora de sala e na
+/// primeira abertura do áudio, como tudo o que se escolhe lá (pendência 52).
+fn vestir_com_o_disco<V: VozViva>(
+    voz: &VozDaSala<V>,
+    ajustes: &seele_core::preferences::Preferences,
+) {
+    voz.escolher(|escolhida| {
+        if let Some(modo) = ajustes.voice_mode() {
+            escolhida.modo = modo;
+        }
+        if let Some(forca) = ajustes.supressao_de_ruido() {
+            escolhida.supressao = forca.clamp(0.0, 1.0);
+        }
+        if let Some(dbfs) = ajustes.abertura_da_voz_dbfs() {
+            escolhida.abertura_dbfs = Some(abertura_na_faixa(dbfs));
+        }
+    });
+}
+
+/// A sensibilidade da ativação por voz, dentro da faixa que a voz aceita.
+fn abertura_na_faixa(dbfs: f32) -> f32 {
+    dbfs.clamp(
+        *seele_core::FAIXA_DE_ABERTURA_DBFS.start(),
+        *seele_core::FAIXA_DE_ABERTURA_DBFS.end(),
+    )
 }
 
 /// O teto de [`Connection::set_volume`], em por cento: quatro vezes o de origem.
@@ -10705,6 +10743,80 @@ mod o_audio_segue_a_sala {
             corpo.contains("silencio_digital: telemetry.local.microfone_entrega_silencio_digital"),
             "com a voz de pé, o retrato não lê o silêncio digital que o laço de voz \
              mediu: o produto sabe que o microfone entrega zero e não conta"
+        );
+    }
+
+    /// Acréscimo A do lote I-b: a supressão e a sensibilidade gravadas em disco
+    /// valem na primeira abertura do áudio.
+    ///
+    /// A casca aplicava só o modo logo depois do `connect`; a supressão e a
+    /// sensibilidade do disco ficavam de fora, e a sessão começava nos padrões
+    /// até a pessoa mexer — com a tela de configuração, que lê o disco fora de
+    /// sessão, mostrando outra coisa. `vestir_com_o_disco` é o que `main.rs`
+    /// chama ali (por [`super::Connection::vestir_as_escolhas_gravadas`]), e o
+    /// guarda `a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect`, em
+    /// `frontend.rs`, prende a chamada.
+    #[tokio::test]
+    async fn a_supressao_e_a_sensibilidade_gravadas_valem_na_primeira_abertura() {
+        use seele_core::preferences::Preferences;
+
+        let pasta = std::env::temp_dir().join(format!(
+            "seele-ffi-escolhas-gravadas-{}",
+            std::process::id()
+        ));
+        let arquivo = pasta.join("preferencias");
+        {
+            let mut ajustes = Preferences::open(arquivo.clone()).expect("as preferências");
+            ajustes
+                .set_supressao_de_ruido(Some(0.25))
+                .expect("grava a supressão");
+            ajustes
+                .set_abertura_da_voz_dbfs(Some(-48.0))
+                .expect("grava a sensibilidade");
+            ajustes
+                .set_voice_mode(Some(VoiceMode::VoiceActivated))
+                .expect("grava o modo");
+        }
+        // Lidas de novo do disco, como a casca as lê a cada conexão.
+        let do_disco = Preferences::open(arquivo).expect("relê as preferências");
+        let _ = std::fs::remove_dir_all(&pasta);
+
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        // O aperto de mão, e logo depois o que a casca faz com o disco.
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        super::vestir_com_o_disco(&voz, &do_disco);
+
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+
+        let vestida = voz
+            .lock()
+            .expect("a voz")
+            .as_ref()
+            .and_then(|viva| viva.vestida.lock().expect("o que a voz vestiu").clone());
+        let Some(vestida) = vestida else {
+            panic!("a voz da sala não abriu, e este teste mediu outra coisa");
+        };
+        assert!(
+            (vestida.supressao - 0.25).abs() < f32::EPSILON,
+            "a supressão gravada em disco não valeu na primeira abertura: a pessoa a \
+             baixou para 25% e a sessão abre com a redução inteira (vestiu {})",
+            vestida.supressao
+        );
+        assert_eq!(
+            vestida.abertura_dbfs,
+            Some(-48.0),
+            "a sensibilidade gravada em disco não valeu na primeira abertura: a ativação \
+             por voz abre no padrão, e não onde a pessoa a deixou"
+        );
+        assert_eq!(
+            vestida.modo,
+            VoiceMode::VoiceActivated,
+            "o modo gravado em disco deixou de valer no connect"
         );
     }
 
