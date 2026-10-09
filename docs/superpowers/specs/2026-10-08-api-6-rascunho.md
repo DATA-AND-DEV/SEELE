@@ -831,13 +831,29 @@ produto; é isso que garante o contraste deles sob qualquer tema, e a garantia
 só vale porque o MOD não escreve nomes livres. A F8 põe o guarda de que nenhum
 valor da tabela começa com `--nucleo-`.
 
-**O que falta: o `mundo.tema` ainda aceita qualquer objeto** [c, 17a a 17c]. Ele
-confere a forma (objeto ou `null`) e o tamanho, mas não as chaves, e um MOD lê
-`ok` para um tema que a casca vai recusar — o produto sabendo e não contando.
-**A tarefa 17j** fecha isso antes do congelamento: o `mundo.tema` confere chaves
-e valores pela mesma tabela da casca, com as recusas `chave-desconhecida` e
-`valor-invalido` (as duas com a `chave`), e um teste espelho prova que a lista
-do servidor e a da casca são a mesma.
+**O `mundo.tema` confere as chaves pela mesma tabela** [c, tarefa 17j]. Até a
+17j ele conferia só a forma (objeto ou `null`) e o tamanho, e um MOD lia `ok`
+para um tema que a casca ia recusar — o produto sabendo e não contando. Agora a
+tabela é `seele_proto::mods::CHAVES_DO_TEMA`, com a forma de cada valor (cor
+`#rrggbb`, inteiro com intervalo, bandeira, escolha), e a recusa volta na
+própria chamada:
+
+```js
+mundo.tema({ acento: "#331704", "--nucleo-mudo": "#ffffff" })
+// → { ok: false, erro: "chave-desconhecida", chave: "--nucleo-mudo" }
+mundo.tema({ arredondamento: 25 })
+// → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
+```
+
+Com mais de uma chave errada, vale a primeira na ordem do objeto. **«A mesma
+tabela» quer dizer a mesma resposta**: o vetor
+`crates/seele-proto/tests/vetores/chaves-do-tema.json` (37 casos) é lido pelo
+servidor e pela casca, e os dois têm de aceitar e recusar igual, pela mesma
+chave e pelo mesmo motivo; um teste espelho em `frontend.rs` confere que as
+duas tabelas têm as mesmas chaves e formas, e outro, que o vetor usa cada chave
+e cada escolha da tabela. O vetor achou um defeito da casca: ela conferia com
+`in`, que enxerga o protótipo — `fonte: "toString"` era aplicado, e
+`constructor` caía nas medidas. Agora é `Object.hasOwn`.
 
 ### O que o produto faz com ele, dito ao MOD (B2)
 
@@ -1450,7 +1466,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | pergunta | resposta | onde |
 |---|---|---|
 | o `operador.barra` no celular, que o rascunho recusava com `regiao-ausente` | **aceita a proposta da F8**: ele mora no alto da aba AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões do celular e altura limitada, para a gestão de MODs continuar à vista; a capa do operador vai no cabeçalho SEU PERFIL | §11; plano, 5 passos 8 e 8b |
-| a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` ainda aceita qualquer chave, e fechar isso é a tarefa 17j, antes do congelamento | §9; plano, 17j |
+| a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` confere pela mesma tabela (`CHAVES_DO_TEMA`), com `chave-desconhecida` e `valor-invalido`; **feito na 17j** | §9; plano, 17j |
 | o rótulo da primeira aba | SERVIDOR, e não SALAS; rótulo de tela, sem mudar o contrato | §11 |
 | uma superfície de MOD cobria a faixa de voz e as abas (medido no protótipo) | **nenhuma superfície as cobre**: «tela cheia», no celular, é a tela acima delas; regra do núcleo e do guarda 11; no desktop, o guarda mede o MUDO e o SAIR com um `dialogo` aberto | §5, §10, §11; plano, 7 e 9 |
 | as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve; **feito** | §9; plano, 17e |

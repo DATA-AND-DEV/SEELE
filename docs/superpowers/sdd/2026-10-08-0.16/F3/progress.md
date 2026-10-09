@@ -407,5 +407,27 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     régua forte sai escura, visível, talvez pesada.
   - Ruling: a leitura da raiz ganhou um nome (`corDaRaiz`) em vez de afrouxar o
     guarda do ADR 0049, e o guarda confere que ela só lê.
-  - Próximo: 17j (o servidor confere as chaves e os valores do tema por tabela
-    fechada, com o vetor comum da derivação).
+- **17j, as chaves do tema fechadas no servidor** (`f9050574`). O `mundo.tema`
+  confere por `seele_proto::mods::CHAVES_DO_TEMA` e responde
+  `chave-desconhecida` ou `valor-invalido`, com a `chave`.
+  - Vetor comum `crates/seele-proto/tests/vetores/chaves-do-tema.json` (37
+    casos), lido pelo servidor e pela casca (`chaves-do-tema.cjs`, no
+    check-runtime). Achou a casca conferindo com `in`: `fonte: "toString"`
+    aplicado, `constructor` recusado como medida. Consertado (`Object.hasOwn`).
+  - Espelho em `frontend.rs` nos dois sentidos; cobertura do vetor sobre a
+    tabela; dois testes de runtime, um por recusa.
+  - Sete reversões, todas reprovando por asserção (conferido: nenhuma por
+    compilação).
+  - frontend 281/281, `mods::` do servidor 125/125, seele-proto verde,
+    conformidade `tema_do_servidor` 3/3 (sem bateria rodando), check-runtime
+    limpo, clippy limpo.
+  - Ruling: feita antes da 17i, com a tabela de hoje — custo se errado:
+    nenhum; a 17g–i soma `modo` numa linha de cada tabela e um caso no vetor,
+    e o espelho reprova se faltar um dos três.
+  - Ruling: um vetor comum além do espelho pelo texto — custo se errado: um
+    arquivo a mais para manter; foi ele, e não o espelho, que achou o `in`.
+  - Ruling: com mais de uma chave errada, vale a primeira na ordem do objeto
+    (no servidor, a ordem do `serde_json::Map`) — custo se errado: o MOD
+    conserta uma chave por vez.
+  - Próximo: as tarefas que esperavam o K4, na ordem do plano: 5, 6, 7, 9, 10,
+    17d, 17f.0, 17f, 17g, 17h, 17i.
