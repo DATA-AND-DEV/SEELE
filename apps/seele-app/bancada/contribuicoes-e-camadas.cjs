@@ -1012,6 +1012,12 @@ contexto.cartoesDosMods = new Map();
     "o descarte que lançou impediu a revogação de tirar a contribuição");
   confere("R4d · não saiu", dita("mod/a", "canal.item", "não saiu", "descarte quebrado"),
     `o descarte que lançou não chegou ao registro: ${JSON.stringify(anotadas)}`);
+  // **O ponto entre «», como nas outras recusas de contribuição** (pendência
+  // 51, item 23): `«ponto» não montou` e `N nó(s) de «ponto»`, em `base.js`.
+  // Uma busca pelo ponto entre «» no seele.log achava as outras e não esta.
+  confere("R4d · não saiu", dita("mod/a", "o conteúdo de «canal.item» não saiu"),
+    "a recusa do descarte escreveu o ponto sem «», ao contrário das outras recusas de contribuição: "
+      + `${JSON.stringify(anotadas.filter(([, texto]) => String(texto).includes("não saiu")))}`);
 
   // Cartões recusados, pelo `darCartoesDoMod` de verdade.
   const base = ler("base.js");

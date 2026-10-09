@@ -317,10 +317,11 @@ class RegistroDeContribuicoes {
       // **No registro de quem hospeda, e não no console da janela**: num app
       // empacotado o console não é lugar nenhum. `registrarNoAnfitriao` é de
       // `base.js`, que carrega depois deste arquivo; esta chamada só acontece
-      // ao revogar, quando tudo já está de pé, e ela nunca lança.
+      // ao revogar, quando tudo já está de pé, e ela nunca lança. O ponto vai
+      // entre «», como nas outras recusas de contribuição, em `base.js`.
       registrarNoAnfitriao(
         "recusa-de-mod",
-        `${contribuicao.mod}: o conteúdo de ${contribuicao.ponto} não saiu — ${String(falha?.message ?? falha)}`,
+        `${contribuicao.mod}: o conteúdo de «${contribuicao.ponto}» não saiu — ${String(falha?.message ?? falha)}`,
         "aviso",
         contribuicao.mod,
       );
