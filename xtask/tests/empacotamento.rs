@@ -3962,3 +3962,90 @@ fn uma_assinatura_que_nao_sai_para_a_publicacao_em_vez_de_seguir() {
         saida.corpos
     );
 }
+
+/// Cada `$nome` sem chaves seguido de um byte não-ASCII, fora de aspas simples
+/// e de comentário, nos scripts de shell que rodam na máquina de alguém.
+fn variaveis_coladas_em_texto_nao_ascii(corpo: &str) -> Vec<(usize, String)> {
+    let e_do_nome = |b: &u8| b.is_ascii_alphanumeric() || *b == b'_';
+    let mut achadas = Vec::new();
+    for (numero, linha) in sem_comentario(corpo).lines().enumerate() {
+        let mut bytes = linha.bytes().peekable();
+        let mut dentro_de_aspas_simples = false;
+        while let Some(byte) = bytes.next() {
+            match byte {
+                b'\\' if !dentro_de_aspas_simples => {
+                    bytes.next();
+                }
+                b'\'' => dentro_de_aspas_simples = !dentro_de_aspas_simples,
+                b'$' if !dentro_de_aspas_simples
+                    && bytes
+                        .peek()
+                        .is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_') =>
+                {
+                    while bytes.next_if(e_do_nome).is_some() {}
+                    if bytes.peek().is_some_and(|b| *b >= 0x80) {
+                        achadas.push((numero + 1, linha.trim().to_owned()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    achadas
+}
+
+/// **Um `$nome` colado num caractere não-ASCII troca de nome no bash do Mac.**
+///
+/// O `/bin/bash` do macOS é o 3.2. Num locale UTF-8, que é o do terminal de
+/// quem publica, ele lê o primeiro byte de `»` ou de `é` como parte do nome:
+/// `"«$ma_extra»"` vira a variável `ma_extra\xc2`, e com `set -u` o script
+/// morre com «unbound variable» no lugar da frase que devia dizer. No locale
+/// `C` o mesmo texto funciona, e por isso o defeito passou numa bateria e
+/// reprovou na seguinte (09/10/2026, `publicar.sh` e o `SEELE_MANIFESTO_ANTERIOR`).
+/// A forma certa é `${nome}`. O guarda lê o texto, e não depende do locale de
+/// quem roda os testes.
+#[test]
+fn nenhum_script_cola_uma_variavel_num_caractere_nao_ascii() {
+    let mut scripts = vec![raiz().join("install.sh")];
+    for pasta in ["empacotar", "tools"] {
+        for entrada in std::fs::read_dir(raiz().join(pasta)).expect("a pasta existe") {
+            let caminho = entrada.expect("legível").path();
+            if caminho.extension().is_some_and(|e| e == "sh") {
+                scripts.push(caminho);
+            }
+        }
+    }
+    assert!(
+        scripts.iter().any(|s| s.ends_with("empacotar/publicar.sh")),
+        "o guarda não achou o publicar.sh: ele leria nada e passaria"
+    );
+
+    let mut defeitos = Vec::new();
+    for script in &scripts {
+        let corpo = std::fs::read_to_string(script).expect("o script tem que ser legível");
+        for (numero, linha) in variaveis_coladas_em_texto_nao_ascii(&corpo) {
+            defeitos.push(format!("{}:{numero}: {linha}", script.display()));
+        }
+    }
+    assert!(
+        defeitos.is_empty(),
+        "variável colada num caractere não-ASCII; no bash 3.2 do Mac, num locale UTF-8, \
+         o byte entra no nome. Use ${{nome}}:\n{}",
+        defeitos.join("\n")
+    );
+}
+
+#[test]
+fn o_guarda_das_variaveis_coladas_ve_o_defeito_e_respeita_aspas_simples() {
+    assert_eq!(
+        variaveis_coladas_em_texto_nao_ascii("morrer \"aponta para «$ma_extra», que não existe\"")
+            .len(),
+        1
+    );
+    assert!(
+        variaveis_coladas_em_texto_nao_ascii("morrer \"aponta para «${ma_extra}»\"").is_empty()
+    );
+    assert!(variaveis_coladas_em_texto_nao_ascii("echo '«$literal»'").is_empty());
+    assert!(variaveis_coladas_em_texto_nao_ascii("echo \"\\$preço\"").is_empty());
+    assert!(variaveis_coladas_em_texto_nao_ascii("# «$so_no_comentario»").is_empty());
+}

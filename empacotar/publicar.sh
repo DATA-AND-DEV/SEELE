@@ -2203,7 +2203,7 @@ for pub_repo in $REPOS; do
     fi
     for ma_extra in ${SEELE_MANIFESTO_ANTERIOR:-}; do
         if [ ! -s "$ma_extra" ]; then
-            morrer "SEELE_MANIFESTO_ANTERIOR aponta para «$ma_extra», que não existe ou está vazio."
+            morrer "SEELE_MANIFESTO_ANTERIOR aponta para «${ma_extra}», que não existe ou está vazio."
         fi
         ma_anteriores="$ma_anteriores --anterior $ma_extra"
     done
