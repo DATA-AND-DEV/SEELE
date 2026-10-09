@@ -194,11 +194,31 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Conformidade `tema_do_servidor.rs`, três testes verdes: todos recebem e o
     tema sobrevive ao reinício; desligar tira, religar devolve; só o escolhido
     pinta, e quem não tem a porta é recusado. Das cinco reversões de integração,
-    rodaram duas antes de a orquestradora pedir a pausa para a bateria da
-    `linha/0.15`: **sem o quadro no `admitir`, os três reprovam; publicar sem
-    gravar, reprova**. Faltam três (sem traduzir o evento, sem ler quem pinta,
-    sem a porta do manifesto), e repetir a segunda com a saída inteira: esperam
-    o aviso da orquestradora.
+    **só uma está provada**: sem o quadro no `admitir`, os três reprovam.
+  - **Correção do que registrei antes (09/10, tarde).** Escrevi aqui, e disse à
+    orquestradora, que «publicar sem gravar» reprovava. **Não reprovava: não
+    compilava.** O `match` sobre um literal de struct pede parênteses, o
+    compilador recusou com um `error:` sem código, e o meu detector só
+    reconhecia `error[`. Nas duas rodadas, o «reprova» era o build falhando.
+    A saída inteira de cada reversão agora fica guardada, e o detector lê
+    `could not compile`.
+  - **Um teste que travava em vez de reprovar** (achado da orquestradora). A
+    reversão «sem traduzir o evento» pendurou o `tema_do_servidor.rs`: o prazo
+    de 15 s era por leitura, e o servidor manda quadros o tempo todo (o estado
+    de cada pessoa, a telemetria), então a espera por um `TemaMudou` que nunca
+    vinha não vencia nunca. Matei o processo e devolvi o `session.rs` ao commit.
+    O conserto é um prazo **total** em cada espera (`PRAZO`, com
+    `timeout_at`), e a falha diz o que se esperava e os temas vistos até ali.
+  - **Rodado depois do aviso da orquestradora** (a sexta integração verde em
+    `cb426b19`): os três testes verdes com o prazo novo, e **as cinco reversões
+    de integração reprovam, todas compiladas**, com a saída inteira guardada:
+    | reversão | reprovam | por quê |
+    |---|---|---|
+    | sem o quadro no `admitir` | os 3 | o quadro depois do `Instancia` não é o `TemaMudou` |
+    | publicar sem gravar | os 3 | religar devolve `None`; o segundo MOD passa a pintar; o reinício perde o tema |
+    | sem traduzir o evento | os 3, em 45 s (3 × 15) | «esperou 2 TemaMudou … vistos até aqui: [None]» — reprova, e não pendura |
+    | sem ler quem pinta | `so_o_escolhido_pinta…` | o segundo MOD lê `ok` (o banco recusa na gravação, tarde demais para ele) |
+    | sem a porta do manifesto | os 3 | o ESTILO recebe `sem-porta-de-tema` |
   - **Um defeito meu, pego por um teste que já existia**: o `acompanhar` passou
     a guardar um `Sender` do barramento, e o laço, que só sai quando o
     barramento fecha, não saía mais. Em produção seria uma tarefa sobrevivendo
@@ -223,3 +243,9 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
 - **ADR 0056**: a seção «Os candidatos da API 7» (`decorar`; tipo e escala no
   tema; o fundo por mídia se não medido a tempo; `tela` e transmissões no
   retrato; os membros fora do ar), e o «não decide» atualizado.
+- **O `executor.rs` é da F4 até a extração** (aviso da orquestradora): a volta
+  do executor vai para um crate que o desktop e o motor do celular usam. As
+  tarefas 4 e 8, e o passo 5 da 3, começam em cima da extração, mesmo se o K4
+  entrar antes; o plano diz isso na tabela de estado. As outras seguem com o K4,
+  sem confirmação a cada passo, com aviso nos marcos (pedido do dono, pela
+  orquestradora).
