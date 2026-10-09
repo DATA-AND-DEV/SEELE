@@ -5924,6 +5924,134 @@ fn vale_insistir(erro: &ConnectError) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "num teste, o pânico é o relatório")]
+/// A corrida do RFC 8305, provada sem socket.
+///
+/// Estes testes nasceram com ela (`e09d537a`) e saíram por engano no revert
+/// `b4f5ef94`, que tirava outra coisa. De 31/08 a 09/10 a corrida não teve
+/// prova nenhuma, e o doc dela dizia que tinha.
+mod a_corrida {
+    use super::{correr, ConnectError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// O primeiro a fechar vence, mesmo estando por último na lista.
+    ///
+    /// É a propriedade inteira do RFC 8305, e a que a série não tem: em série o
+    /// candidato lento **precisa** terminar antes de o rápido começar.
+    #[tokio::test(start_paused = true)]
+    async fn o_rapido_vence_mesmo_estando_por_ultimo() {
+        let corrida = correr(3, Duration::from_millis(250), |posicao| async move {
+            // Os dois primeiros demoram uma eternidade; o terceiro fecha logo.
+            let espera = if posicao == 2 { 50 } else { 100_000 };
+            tokio::time::sleep(Duration::from_millis(espera)).await;
+            Ok::<usize, ConnectError>(posicao)
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(2));
+    }
+
+    /// O segundo candidato começa sem esperar o primeiro terminar.
+    ///
+    /// Sem esta propriedade não há Happy Eyeballs nenhum — é literalmente a
+    /// diferença entre 9,6 s e ~1,1 s na pendência nº 26.
+    #[tokio::test(start_paused = true)]
+    async fn o_segundo_comeca_antes_de_o_primeiro_terminar() {
+        let comecaram = Arc::new(AtomicUsize::new(0));
+        let contador = Arc::clone(&comecaram);
+
+        let corrida = correr(2, Duration::from_millis(250), move |posicao| {
+            let contador = Arc::clone(&contador);
+            async move {
+                contador.fetch_add(1, Ordering::SeqCst);
+                // O primeiro nunca termina dentro do horizonte deste teste.
+                let espera = if posicao == 0 { 100_000 } else { 10 };
+                tokio::time::sleep(Duration::from_millis(espera)).await;
+                Ok::<usize, ConnectError>(posicao)
+            }
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(
+            comecaram.load(Ordering::SeqCst),
+            2,
+            "o segundo candidato não chegou a começar"
+        );
+    }
+
+    /// Quando todos falham, todas as falhas voltam — quem chama precisa delas
+    /// para escolher a que melhor descreve o que houve, e para limpar os pins.
+    #[tokio::test(start_paused = true)]
+    async fn todas_as_falhas_voltam_quando_ninguem_fecha() {
+        let corrida = correr(3, Duration::from_millis(250), |_| async {
+            Err::<usize, ConnectError>(ConnectError::Unreachable)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert_eq!(corrida.falhas.len(), 3);
+    }
+
+    /// Uma lista vazia não trava: devolve sem vencedor e sem falha.
+    #[tokio::test(start_paused = true)]
+    async fn uma_corrida_sem_candidatos_termina() {
+        let corrida = correr(0, Duration::from_millis(250), |_| async {
+            Ok::<usize, ConnectError>(0)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert!(corrida.falhas.is_empty());
+    }
+
+    /// Quem falha cedo não impede quem vem depois de vencer.
+    #[tokio::test(start_paused = true)]
+    async fn uma_falha_imediata_nao_encerra_a_corrida() {
+        let corrida = correr(2, Duration::from_millis(250), |posicao| async move {
+            if posicao == 0 {
+                return Err(ConnectError::Unreachable);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            Ok::<usize, ConnectError>(posicao)
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(corrida.falhas.len(), 1);
+    }
+
+    /// Os candidatos começam um a cada defasagem, na ordem da lista: o
+    /// primeiro na hora, o segundo em 250 ms, o terceiro em 500 ms.
+    ///
+    /// É a ordem de hoje escrita em números. Quem mexer na corrida tem de
+    /// manter estes três instantes quando ninguém chega depois.
+    #[tokio::test(start_paused = true)]
+    async fn os_candidatos_comecam_um_a_cada_defasagem_na_ordem_da_lista() {
+        let comeco = tokio::time::Instant::now();
+        let quando = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotar = Arc::clone(&quando);
+        let corrida = correr(3, Duration::from_millis(250), move |posicao| {
+            let anotar = Arc::clone(&anotar);
+            async move {
+                anotar
+                    .lock()
+                    .unwrap()
+                    .push((posicao, comeco.elapsed().as_millis()));
+                tokio::time::sleep(Duration::from_secs(100)).await;
+                Err::<usize, ConnectError>(ConnectError::Unreachable)
+            }
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert_eq!(*quando.lock().unwrap(), vec![(0, 0), (1, 250), (2, 500)]);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
