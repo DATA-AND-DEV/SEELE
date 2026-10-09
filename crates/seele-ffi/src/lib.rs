@@ -3833,7 +3833,10 @@ fn build_destino(
         chave_do_pin: pin_key.to_owned(),
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
-        impressao_esperada: config.expected_fingerprint.clone(),
+        esperada: config
+            .expected_fingerprint
+            .clone()
+            .map(seele_core::enlace::Esperada::Certificado),
         // **O pino deste destino prova o servidor só no alvo, e só num alvo de
         // escopo público.** A regra mora aqui, e em nenhum outro lugar: ver
         // `seele_core::enlace::Destino::o_pino_prova_o_servidor`.
@@ -5402,7 +5405,7 @@ mod tests {
             playback_device: None,
         };
         let destino = build_destino(&with_fingerprint, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada, Some("aaaa1111".into()));
+        assert_eq!(destino.impressao_esperada(), Some("aaaa1111"));
 
         let without = ConnectConfig {
             expected_fingerprint: None,
@@ -5410,7 +5413,7 @@ mod tests {
             ..with_fingerprint
         };
         let destino = build_destino(&without, address, &name, &pin, &pin);
-        assert_eq!(destino.impressao_esperada, None);
+        assert_eq!(destino.impressao_esperada(), None);
     }
 
     /// A configuração de uma conexão por link, com a impressão que ele promete.
@@ -5579,7 +5582,7 @@ mod tests {
         let verificador = TofuVerifier::new(
             Arc::clone(&loja) as Arc<dyn PinStore>,
             destino.chave_do_pin.clone(),
-            destino.impressao_esperada.clone(),
+            destino.impressao_esperada().map(str::to_owned),
             destino.o_pino_prova_o_servidor,
         );
         let decisao = verificador.decide(&destino.chave_do_pin, DE_QUEM_ATENDE);

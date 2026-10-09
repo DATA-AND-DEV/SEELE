@@ -226,10 +226,11 @@ mod tests {
         pkcs8.extend_from_slice(&semente);
         let der = rustls::pki_types::PrivatePkcs8KeyDer::from(pkcs8);
         let par = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(&der, &rcgen::PKCS_ED25519).unwrap();
-        let certificado = rcgen::CertificateParams::new(vec!["seele-sala".to_owned()])
-            .unwrap()
-            .self_signed(&par)
-            .unwrap();
+        let certificado =
+            rcgen::CertificateParams::new(vec![seele_proto::transport::NOME_DA_SALA.to_owned()])
+                .unwrap()
+                .self_signed(&par)
+                .unwrap();
         (
             certificado.der().clone(),
             rustls::pki_types::PrivateKeyDer::Pkcs8(der),
@@ -281,7 +282,9 @@ mod tests {
         ponta.set_default_client_config(quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls)?,
         )));
-        let conexao = ponta.connect(endereco, "seele-sala")?.await?;
+        let conexao = ponta
+            .connect(endereco, seele_proto::transport::NOME_DA_SALA)?
+            .await?;
         let (mut envio, _) = conexao.open_bi().await?;
         envio.write_all(b"oi").await?;
         envio.finish()?;
@@ -361,7 +364,10 @@ mod tests {
 
     #[test]
     fn um_certificado_que_nao_e_ed25519_nao_e_uma_sala() {
-        let comum = rcgen::generate_simple_self_signed(vec!["seele-sala".to_owned()]).unwrap();
+        let comum = rcgen::generate_simple_self_signed(vec![
+            seele_proto::transport::NOME_DA_SALA.to_owned()
+        ])
+        .unwrap();
         let codigo = Codigo::da_chave(&chave_publica(SEMENTE));
         assert_eq!(
             ConfereCodigo::novo(codigo, None).confere(comum.cert.der()),

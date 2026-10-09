@@ -110,7 +110,7 @@ fn destino(endereco: SocketAddr, apelido: &str) -> Destino {
         chave_do_pin: endereco.to_string(),
         apelido: apelido.to_owned(),
         segredo: None,
-        impressao_esperada: None,
+        esperada: None,
         o_pino_prova_o_servidor: true,
         // Nenhum MOD neste teste: o que se mede é sessão, não conjunto.
         aceito: None,

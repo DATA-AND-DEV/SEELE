@@ -165,6 +165,7 @@ pub struct ParouDeTocar {
 #[derive(Debug)]
 pub struct Campainha {
     dono: Chave,
+    prazo: Duration,
     bloqueados: HashSet<Codigo>,
     toques: Vec<Toque>,
     proximo: u64,
@@ -180,12 +181,28 @@ impl Campainha {
     pub fn nova(dono: Chave) -> Self {
         Self {
             dono,
+            prazo: PRAZO_DO_TOQUE,
             bloqueados: HashSet::new(),
             toques: Vec::new(),
             proximo: 0,
             aprovadas: HashMap::new(),
             recusas: HashMap::new(),
         }
+    }
+
+    /// A mesma campainha, com outro prazo de toque.
+    ///
+    /// O padrão é [`PRAZO_DO_TOQUE`]. Um prazo curto existe para as provas do
+    /// aperto em três fases não esperarem 45 s de verdade.
+    #[must_use]
+    pub fn com_prazo(self, prazo: Duration) -> Self {
+        Self { prazo, ..self }
+    }
+
+    /// O prazo de cada toque.
+    #[must_use]
+    pub fn prazo(&self) -> Duration {
+        self.prazo
     }
 
     /// Troca a lista de bloqueados, que vem da agenda do app, ao vivo.
@@ -315,7 +332,7 @@ impl Campainha {
     pub fn vencer(&mut self, agora: Instant) -> Vec<ParouDeTocar> {
         let (vencidos, ficam): (Vec<Toque>, Vec<Toque>) = std::mem::take(&mut self.toques)
             .into_iter()
-            .partition(|toque| agora.saturating_duration_since(toque.comecou) >= PRAZO_DO_TOQUE);
+            .partition(|toque| agora.saturating_duration_since(toque.comecou) >= self.prazo);
         self.toques = ficam;
         vencidos
             .into_iter()
@@ -486,6 +503,22 @@ mod tests {
             campainha.atender(toque),
             None,
             "um toque vencido foi atendido"
+        );
+    }
+
+    #[test]
+    fn um_prazo_curto_vence_no_prazo_dele() {
+        let prazo = Duration::from_secs(1);
+        let mut campainha = Campainha::nova(DONO).com_prazo(prazo);
+        let agora = Instant::now();
+        tocou(campainha.chegou(chave(2), "rafa", agora));
+        assert!(campainha
+            .vencer(agora + prazo - Duration::from_millis(1))
+            .is_empty());
+        assert_eq!(
+            campainha.vencer(agora + prazo).len(),
+            1,
+            "o toque não venceu no prazo que a campainha recebeu"
         );
     }
 

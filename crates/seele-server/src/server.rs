@@ -1520,6 +1520,12 @@ pub struct Server {
     /// `seele_proto::assinatura::prova_de_cliente`): uma prova feita para
     /// outro servidor carrega a impressão dele, e não confere aqui.
     pub impressao: [u8; 32],
+    /// A recepção da sala pessoal, quando este servidor é uma.
+    ///
+    /// `None` em todo servidor de sempre. Com ela, o aperto de mão segura quem
+    /// liga até quem recebe decidir (ADR 0059), e o app de quem recebe a assina
+    /// pela hospedagem.
+    pub recepcao: Option<Arc<crate::recepcao::Recepcao>>,
 }
 
 /// Um pacote de MOD cujo hash já foi conferido.

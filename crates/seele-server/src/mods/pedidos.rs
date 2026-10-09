@@ -403,6 +403,7 @@ mod tests {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             impressao: [0; 32],
+            recepcao: None,
             persistence,
             events,
             writes,

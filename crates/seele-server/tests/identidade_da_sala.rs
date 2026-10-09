@@ -177,10 +177,11 @@ async fn ligar(endereco: SocketAddr, verificador: Arc<ConfereCodigoDeTeste>) -> 
 #[tokio::test]
 async fn o_ed25519_aperta_a_mao_no_quic_deste_repositorio() {
     let par = rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519).expect("um par Ed25519");
-    let certificado = rcgen::CertificateParams::new(vec!["seele-sala".to_owned()])
-        .unwrap()
-        .self_signed(&par)
-        .unwrap();
+    let certificado =
+        rcgen::CertificateParams::new(vec![seele_proto::transport::NOME_DA_SALA.to_owned()])
+            .unwrap()
+            .self_signed(&par)
+            .unwrap();
     let identidade = Identity {
         chain: vec![certificado.der().clone()],
         key: rustls::pki_types::PrivateKeyDer::try_from(par.serialize_der()).unwrap(),

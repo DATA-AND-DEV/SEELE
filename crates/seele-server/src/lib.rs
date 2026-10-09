@@ -42,6 +42,7 @@ pub mod perda_de_subida;
 pub mod permissions;
 pub mod persistence;
 pub mod portaria;
+pub mod recepcao;
 pub mod server;
 pub mod session;
 pub mod taxa;
@@ -271,6 +272,13 @@ pub struct ServerConfig {
     /// [`Daemon::bind`] a tira daqui antes de a configuração ir para as
     /// sessões, então nenhuma sessão segura a chave.
     pub identidade: Option<tls::Identity>,
+    /// Quando este servidor é a sala pessoal de alguém, de quem ela é.
+    ///
+    /// `None` é todo servidor de sempre. Com uma [`recepcao::Sala`], o aperto
+    /// de mão ganha a fase do toque (ADR 0059): quem liga é segurado até quem
+    /// recebe decidir, e quem recebe entra sem tocar. A recepção fica em
+    /// [`server::Server::recepcao`].
+    pub sala: Option<recepcao::Sala>,
 }
 
 impl Default for ServerConfig {
@@ -304,6 +312,8 @@ impl Default for ServerConfig {
             retencao_em_dias: None,
             // A de sempre: a do banco.
             identidade: None,
+            // Um servidor de sempre, e não uma sala pessoal.
+            sala: None,
         }
     }
 }
@@ -632,6 +642,12 @@ impl Daemon {
         if let Some(dias) = config.retencao_em_dias {
             spawn_retencao(Arc::clone(&persistence), dias, events.clone());
         }
+        // A recepção da sala pessoal, quando este servidor é uma, ligada ao
+        // mesmo barramento das sessões: é por ele que o desligar chega a quem
+        // está dentro.
+        let recepcao = config
+            .sala
+            .map(|sala| Arc::new(recepcao::Recepcao::da_sala(sala, events.clone())));
         let server = Arc::new(server::Server {
             mods_dir: config.mods_dir.clone(),
             persistence,
@@ -657,6 +673,7 @@ impl Daemon {
             mods_em_curso: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             pacotes_conferidos: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             impressao,
+            recepcao,
         });
 
         // Os MODs deste servidor, se houver pasta. ADR 0045.
