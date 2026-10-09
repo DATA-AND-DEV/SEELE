@@ -268,7 +268,9 @@ const TICK: Duration = Duration::from_millis(250);
 const HISTORY_PAGE: u16 = 50;
 
 /// What a shell needs to connect.
-#[derive(Debug, Clone)]
+///
+/// O `Debug` é escrito à mão, logo abaixo, para não imprimir o `join_secret`.
+#[derive(Clone)]
 pub struct ConnectConfig {
     /// `host` or `host:port`.
     pub server: String,
@@ -328,6 +330,36 @@ pub struct ConnectConfig {
     /// and independently of it: a headset left in another room must not cost
     /// somebody the microphone they chose.
     pub playback_device: Option<String>,
+}
+
+/// **O `join_secret` não sai pelo `Debug`** (lote R da F5, rodada 1).
+///
+/// Ele é o convite de uso único ou a senha do servidor, e um
+/// `tracing::info!(?config)` no `connect` do app o levaria ao `seele.log`. Aqui
+/// ele sai como `Some(<oculto>)` ou `None`: quem investiga uma recusa sabe se a
+/// entrada levou um, e não qual. O resto sai como o `derive` o escrevia.
+impl std::fmt::Debug for ConnectConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// O lugar do segredo, sem ele.
+        struct Oculto;
+        impl std::fmt::Debug for Oculto {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("<oculto>")
+            }
+        }
+        f.debug_struct("ConnectConfig")
+            .field("server", &self.server)
+            .field("alternate_servers", &self.alternate_servers)
+            .field("nickname", &self.nickname)
+            .field("home", &self.home)
+            .field("join_secret", &self.join_secret.as_ref().map(|_| Oculto))
+            .field("expected_fingerprint", &self.expected_fingerprint)
+            .field("bilhete", &self.bilhete)
+            .field("audio", &self.audio)
+            .field("capture_device", &self.capture_device)
+            .field("playback_device", &self.playback_device)
+            .finish()
+    }
 }
 
 /// Uma etapa de uma chegada, do jeito que uma casca a recebe.
@@ -11895,6 +11927,58 @@ mod onde_um_anexo_grava {
                 folder: pasta(),
             },
             "um anexo fora do histórico não foi recusado com motivo próprio"
+        );
+    }
+}
+
+#[cfg(test)]
+mod o_debug_da_configuracao {
+    use super::ConnectConfig;
+
+    /// O `join_secret` é o convite de uso único ou a senha do servidor, e o
+    /// `Debug` é por onde um `tracing::info!(?config)` no `connect` do app o
+    /// levaria ao `seele.log` (o filtro padrão, `seele_app=info`, escreve lá).
+    /// Lote R da F5, rodada 1.
+    #[test]
+    fn o_debug_da_configuracao_esconde_o_segredo_e_mostra_o_resto() {
+        let segredo = "segredo-do-teste-do-debug-da-configuracao";
+        let config = ConnectConfig {
+            server: "a.exemplo:8384".into(),
+            alternate_servers: Vec::new(),
+            nickname: "bia".into(),
+            home: "/tmp/casa-de-teste".into(),
+            join_secret: Some(segredo.to_owned()),
+            expected_fingerprint: None,
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        };
+        for impresso in [format!("{config:?}"), format!("{config:#?}")] {
+            assert!(
+                !impresso.contains(segredo),
+                "o `Debug` de `ConnectConfig` imprime o `join_secret` — o convite de uso \
+                 único ou a senha do servidor —, e um `tracing::info!(?config)` o levaria \
+                 ao `seele.log`:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("<oculto>"),
+                "o `Debug` de `ConnectConfig` não diz que há segredo, e quem investiga \
+                 uma recusa não sabe se a entrada levou um:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("a.exemplo:8384") && impresso.contains("bia"),
+                "o `Debug` de `ConnectConfig` escondeu mais que o segredo:\n{impresso}"
+            );
+        }
+        let sem = ConnectConfig {
+            join_secret: None,
+            ..config
+        };
+        let impresso = format!("{sem:?}");
+        assert!(
+            impresso.contains("join_secret: None"),
+            "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
         );
     }
 }
