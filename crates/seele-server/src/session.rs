@@ -34,9 +34,10 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, VerifyingKey};
 use seele_proto::control::{
-    AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
-    Lido, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence,
-    Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+    AlertReason, AlertSeverity, AttachmentRefusal, CausaDaRecusa, ChannelInfo, ClientMessage,
+    DisconnectReason, Lido, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile,
+    PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate,
+    VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
@@ -1635,7 +1636,9 @@ async fn run_session(
     // (fix round 3 da Task 8).
     let id_da_conexao = connection.stable_id() as u64;
 
-    let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
+    // Cada mensagem vai com o ordinal dela em `ClientMessage`: é como uma recusa
+    // diz **qual** pedido não deu (`AlertReason::PedidoRecusado`).
+    let (para_dentro, mut entrada) = mpsc::channel::<(u32, ClientMessage)>(ENTRADA_DEPTH);
     let pessoa = session.person;
     let contagem = Arc::clone(&server.desconhecidas);
     let leitora = tokio::spawn(async move {
@@ -1646,8 +1649,8 @@ async fn run_session(
         let mut desconhecidas = seele_proto::control::Desconhecidas::default();
         loop {
             match frame::ler_da_lista::<ClientMessage>(&mut recv).await {
-                Ok(Lido::Mensagem(mensagem)) => {
-                    if para_dentro.send(mensagem).await.is_err() {
+                Ok((pedido, Lido::Mensagem(mensagem))) => {
+                    if para_dentro.send((pedido, mensagem)).await.is_err() {
                         break;
                     }
                 }
@@ -1656,7 +1659,7 @@ async fn run_session(
                 // quadro tem comprimento próprio, e pular não desalinha o
                 // próximo. Rede de segurança, e não licença — quem manda
                 // continua não mandando o que o par não entende (ADR 0058).
-                Ok(Lido::Desconhecida { ordinal }) => {
+                Ok((_, Lido::Desconhecida { ordinal })) => {
                     let primeira = desconhecidas.contar();
                     contagem.registrar(primeira);
                     if primeira {
@@ -2280,7 +2283,7 @@ async fn run_session(
             // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
             // perde a corrida. É a propriedade que o `frame::read` não tem.
             incoming = entrada.recv() => {
-                let Some(message) = incoming else { break };
+                let Some((pedido, message)) = incoming else { break };
 
                 // O balde de depois de autenticar. O ADR 0021 fechou a porta e
                 // deixou escrito o que não resolvia: "um convidado legítimo
@@ -2610,7 +2613,7 @@ async fn run_session(
                                 tracing::info!(person = %session.person, voice_room = %voice_room.id, "voice room created");
                                 let _ = server.events.send(Event::VoiceRoomCreated { voice_room });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::CreateChannel { name } => {
@@ -2627,7 +2630,7 @@ async fn run_session(
                                 tracing::info!(person = %session.person, channel = %channel.id, "channel created");
                                 let _ = server.events.send(Event::ChannelCreated { channel });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::RenameVoiceRoom { voice_room: id, name } => {
@@ -2643,7 +2646,7 @@ async fn run_session(
                             Ok(name) => {
                                 let _ = server.events.send(Event::VoiceRoomRenamed { voice_room: id, name });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::RenameChannel { channel: id, name } => {
@@ -2659,7 +2662,7 @@ async fn run_session(
                             Ok(name) => {
                                 let _ = server.events.send(Event::ChannelRenamed { channel: id, name });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
 
@@ -2697,7 +2700,7 @@ async fn run_session(
                                 tracing::info!(by = %session.person, %name, "the server was renamed");
                                 let _ = server.events.send(Event::ServerRenamed { name });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::SetNickname { name } => {
@@ -2731,7 +2734,7 @@ async fn run_session(
                                     nickname: name,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::SetPersonIcon { icon } => {
@@ -2767,7 +2770,7 @@ async fn run_session(
                                     icon,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::SetServerIcon { icon } => {
@@ -2793,7 +2796,7 @@ async fn run_session(
                                 );
                                 let _ = server.events.send(Event::ServerIconChanged { icon });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
 
@@ -2864,7 +2867,7 @@ async fn run_session(
                                 // FORA DO AR (D-fio-4) não mostra banido.
                                 let _ = server.events.send(Event::MembroBanido { person: alvo });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::RemoveMessage { message: id } => {
@@ -2881,7 +2884,7 @@ async fn run_session(
                             // Already gone, or never there. Answered rather
                             // than ignored: a removal that silently does
                             // nothing looks exactly like one that worked.
-                            nao_deu(&mut send, session.protocol_version, &anyhow::anyhow!("no such message")).await?;
+                            nao_deu(&mut send, session.protocol_version, pedido, &anyhow::Error::new(MensagemNaoExiste)).await?;
                             continue;
                         };
                         let seu = alvo.author == session.person;
@@ -2915,7 +2918,7 @@ async fn run_session(
                                     id,
                                 });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::MovePerson { person: alvo, voice_room: destino } => {
@@ -2984,7 +2987,7 @@ async fn run_session(
                                     operator_text: None,
                                 }).await?;
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     ClientMessage::DeleteChannel { channel: id } => {
@@ -3001,7 +3004,7 @@ async fn run_session(
                                 tracing::info!(by = %session.person, channel = %id, "channel destroyed");
                                 let _ = server.events.send(Event::ChannelDeleted { channel: id });
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
                     // A read, answered straight down this connection rather
@@ -3026,7 +3029,7 @@ async fn run_session(
                                     oldest_at_seconds: peso.oldest_at_seconds,
                                 }).await?;
                             }
-                            Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
+                            Err(erro) => nao_deu(&mut send, session.protocol_version, pedido, &erro).await?,
                         }
                     }
 
@@ -4325,6 +4328,62 @@ async fn assentar(
     // **entrada**, e uma remoção de sala decidida por terceiro não é entrada.
     teto: Option<u16>,
 ) -> Result<bool> {
+    // **O assento e o teto primeiro; a mídia e a tela depois.**
+    //
+    // Era o contrário, e era uma falha de confidencialidade, presente na
+    // v0.15.1 (revisão do lote I-a da F5, 08/10/2026): a pessoa saía da sala
+    // antiga, a tela dela acabava, a mídia dela entrava na sala pedida, e **só
+    // então** o teto era conferido. Na recusa nada se desfazia, e quem pedia
+    // para entrar numa sala cheia ficava ouvindo a sala que o recusou — e
+    // deixava de ouvir e de ser ouvido na sua, sem tela. Um cliente hostil
+    // escutava qualquer sala cheia só por pedir. Medido em
+    // `seele-conformance/tests/sala_cheia_nao_se_escuta.rs` (o áudio) e em
+    // `sala_cheia_nao_leva_a_tela.rs` (a tela).
+    //
+    // Sentado primeiro, sob a trava da ocupação, a recusa volta sem ter tocado
+    // em nada. E a conta do teto e a inserção continuam na mesma trava: ver
+    // [`crate::server::Occupancy::sentar_se_couber`], contar fora e sentar
+    // dentro deixaria duas entradas simultâneas passarem pela última vaga.
+    //
+    // No burst of "who is already here": this connection was handed every
+    // voice room's occupants when it started, and has been told about every arrival
+    // and departure since, wherever it happened. Repeating the room it is
+    // walking into would be telling it something it already knows.
+    let saiu_de = {
+        let mut occupancy = server.occupancy.lock().await;
+        // O assento anterior cai dentro do próprio `seat`, que é quem sabe que
+        // sentar substitui — e devolve as salas que esvaziaram, que é o que o
+        // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
+        // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
+        // família de defeito que esta tarefa fechou.
+        let quem = crate::server::Occupant {
+            person: session.person,
+            nickname: session.nickname.clone(),
+            ssrc: session.ssrc,
+            sessao: session.id,
+        };
+        let mut saiu_de = match teto {
+            Some(teto) => match occupancy.sentar_se_couber(destino, quem, teto) {
+                Ok(saiu_de) => saiu_de,
+                Err(crate::server::Lotada) => {
+                    // **Nada foi tocado**, e agora é verdade: a ocupação, a
+                    // mídia e a tela desta pessoa continuam na sala de onde
+                    // ela pediu.
+                    tracing::info!(
+                        person = %session.person,
+                        voice_room = %destino,
+                        teto,
+                        "recusada a entrada: a sala já tem o tanto de gente que quem hospeda declarou"
+                    );
+                    return Ok(false);
+                }
+            },
+            None => occupancy.seat(destino, quem),
+        };
+        saiu_de.retain(|anterior| *anterior != destino);
+        saiu_de
+    };
+
     // Out of the old room before into the new one. Without this a person who
     // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
@@ -4350,48 +4409,6 @@ async fn assentar(
             tela: tela.clone(),
         })
         .await?;
-
-    // No burst of "who is already here": this connection was handed every
-    // voice room's occupants when it started, and has been told about every arrival
-    // and departure since, wherever it happened. Repeating the room it is
-    // walking into would be telling it something it already knows.
-    let saiu_de = {
-        let mut occupancy = server.occupancy.lock().await;
-        // O assento anterior cai dentro do próprio `seat`, que é quem sabe que
-        // sentar substitui — e devolve as salas que esvaziaram, que é o que o
-        // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
-        // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
-        // família de defeito que esta tarefa fechou.
-        let quem = crate::server::Occupant {
-            person: session.person,
-            nickname: session.nickname.clone(),
-            ssrc: session.ssrc,
-            sessao: session.id,
-        };
-        // A conta do teto e a inserção sob a mesma trava. Ver
-        // [`crate::server::Occupancy::sentar_se_couber`]: contar fora e sentar
-        // dentro deixaria duas entradas simultâneas passarem pela última vaga.
-        let mut saiu_de = match teto {
-            Some(teto) => match occupancy.sentar_se_couber(destino, quem, teto) {
-                Ok(saiu_de) => saiu_de,
-                Err(crate::server::Lotada) => {
-                    // **A sala não foi tocada.** Nada de anunciar saída, nada de
-                    // mexer na mídia, nada de fechar tela: quem não coube
-                    // continua exatamente onde estava.
-                    tracing::info!(
-                        person = %session.person,
-                        voice_room = %destino,
-                        teto,
-                        "recusada a entrada: a sala já tem o tanto de gente que quem hospeda declarou"
-                    );
-                    return Ok(false);
-                }
-            },
-            None => occupancy.seat(destino, quem),
-        };
-        saiu_de.retain(|anterior| *anterior != destino);
-        saiu_de
-    };
 
     // O teto contado do ADR 0038, conferido no instante em que a sala cresceu.
     //
@@ -5015,26 +5032,61 @@ async fn recusar(
     .await
 }
 
-/// Tells a client the room could not be made, without saying what the database
-/// thinks about it.
+/// Diz a quem pediu que o servidor não conseguiu fazer o pedido, e por quê,
+/// sem dizer o que o banco acha disso.
 ///
-/// `VoiceRoomEntryRefused` is the nearest enumerated reason for "that room is not
-/// there" — `specs/02-protocolo.md` allows no free-form string on the wire, and
-/// inventing a variant for every way a write can fail would be inventing an
-/// error language. The detail goes to the operator's log, which is where a
-/// developer will look for it.
-async fn nao_deu(send: &mut quinn::SendStream, versao: u8, erro: &anyhow::Error) -> Result<()> {
-    tracing::warn!(%erro, "a room could not be made");
+/// `pedido` é o ordinal do pedido em `ClientMessage`, e a causa sai do erro por
+/// [`causa_da_falha`]. O detalhe vai para o registro do operador, que é onde
+/// quem desenvolve vai procurá-lo; `specs/02-protocolo.md` não deixa frase livre
+/// no fio.
+///
+/// Até a 0.15 isto respondia `VoiceRoomEntryRefused` a toda falha — renomear,
+/// trocar de apelido, apagar uma mensagem que sumiu — e o cliente lia «entrada
+/// na sala recusada» (revisão do lote I-a da F5, 08/10/2026).
+async fn nao_deu(
+    send: &mut quinn::SendStream,
+    versao: u8,
+    pedido: u32,
+    erro: &anyhow::Error,
+) -> Result<()> {
+    let causa = causa_da_falha(erro);
+    tracing::warn!(%erro, pedido, ?causa, "um pedido não deu");
     frame::write_em(
         send,
         versao,
         &ServerMessage::Alert {
             severity: AlertSeverity::Warning,
-            reason: AlertReason::VoiceRoomEntryRefused,
+            reason: AlertReason::PedidoRecusado { pedido, causa },
             operator_text: None,
         },
     )
     .await
+}
+
+/// A mensagem que um pedido quis apagar já não existe.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("no such message")]
+struct MensagemNaoExiste;
+
+/// Qual das três causas do fio é esta falha.
+///
+/// Só as duas que a pessoa resolve sozinha têm nome — o alvo sumiu, o nome é de
+/// outro —, e todo o resto é falha do servidor: o banco, quase sempre.
+fn causa_da_falha(erro: &anyhow::Error) -> CausaDaRecusa {
+    if erro
+        .downcast_ref::<crate::persistence::channels::NoSuchChannel>()
+        .is_some()
+        || erro.downcast_ref::<MensagemNaoExiste>().is_some()
+    {
+        return CausaDaRecusa::NaoExiste;
+    }
+    if matches!(
+        erro.downcast_ref::<crate::permissions::Refusal>(),
+        Some(crate::permissions::Refusal::NicknameTaken)
+    ) {
+        return CausaDaRecusa::NomeTomado;
+    }
+    CausaDaRecusa::FalhaDoServidor
 }
 
 /// How long after the last datagram a person still counts as speaking.
@@ -6524,5 +6576,36 @@ mod o_fora_do_ar {
         for parte in partes_dos_membros(membros(600)) {
             parte.validate().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod a_causa_da_recusa {
+    use super::*;
+
+    /// As duas causas que a pessoa resolve sozinha têm nome, e o resto é falha
+    /// do servidor.
+    #[test]
+    fn cada_falha_vira_a_sua_causa() {
+        assert_eq!(
+            causa_da_falha(&anyhow::Error::new(
+                crate::persistence::channels::NoSuchChannel
+            )),
+            CausaDaRecusa::NaoExiste
+        );
+        assert_eq!(
+            causa_da_falha(&anyhow::Error::new(MensagemNaoExiste)),
+            CausaDaRecusa::NaoExiste
+        );
+        assert_eq!(
+            causa_da_falha(&anyhow::Error::new(
+                crate::permissions::Refusal::NicknameTaken
+            )),
+            CausaDaRecusa::NomeTomado
+        );
+        assert_eq!(
+            causa_da_falha(&anyhow::anyhow!("o disco encheu")),
+            CausaDaRecusa::FalhaDoServidor
+        );
     }
 }
