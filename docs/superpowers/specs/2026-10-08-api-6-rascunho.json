@@ -38,7 +38,7 @@
     "resposta": "ModReply",
     "contexto.pessoa": "PersonId",
     "contexto.canal": "ChannelId | null — null é o pedido de escopo de servidor (SeeleMods.request(id, 0, valor)); pedidos.rs:174-186",
-    "contexto.sala": "novo: VoiceRoomId no pedido feito de chamada.palco",
+    "contexto.sala": "VoiceRoomId | null — preenchido pelo servidor em todo pedido, com a sala em que a pessoa está segundo a presença que ele mantém; a janela não o manda",
     "retrato.eu": "novo: Retrato::eu (de Snapshot::me)",
     "retrato.servidor.nome": "novo: Retrato::servidor (de Snapshot::server)",
     "retrato.pessoas": "novo: Retrato::pessoas — id, apelido, falando, mudo (de Snapshot::presentes)",
@@ -86,7 +86,8 @@
     "revogar-contribuicao": "RegistroDeContribuicoes::revogar",
     "abrir-endereco": "abrir_no_navegador",
     "enviar-imagem": "enviar_imagem_mod",
-    "ler-imagem": "ler_imagem_mod"
+    "ler-imagem": "ler_imagem_mod",
+    "superficie-atualizar": "novo: superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem"
   },
   "own": {
     "dados": "recolher_quintal",
@@ -103,7 +104,8 @@
     "mundo.buscar": "mundo::buscar",
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
-    "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (rascunho §7.3); a mensagem ModAviso vai no contrato da 1.0 (F1)"
+    "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (ModAviso, ordinal 46, no contrato da 1.0); acima do teto, coalescido por canal (o mais novo de cada canal sai assim que a taxa deixa); só sai depois de o quintal gravar",
+    "mundo.tema": "novo: a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; confere os pares e devolve a recusa com o par e a razão; o servidor guarda o tema e o manda em TemaMudou (ordinal 47) logo depois do Session"
   },
   "moments": [
     "PersonJoined",
@@ -135,7 +137,8 @@
     "pessoas",
     "fala",
     "lugar",
-    "servidor"
+    "servidor",
+    "tema"
   ],
   "eventos-mudam": {
     "midia": "passa a levar ponto e alvo (PERFIS R9); e o retrato que não decodifica manda midia/falhou (K2)",
@@ -149,7 +152,8 @@
     "fala": "{ falando: [id] } — no máximo 4 por segundo",
     "lugar": "{ onde, regioes, largura, altura } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma",
     "servidor": "{ carga } — o aviso da metade de servidor (mundo.avisar)",
-    "nunca": "nenhum evento carrega toque, chamada, código ou agenda"
+    "nunca": "nenhum evento carrega toque, chamada, código ou agenda",
+    "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', pares?: [{ par, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia"
   },
   "formas": [
     "titulo",
@@ -361,9 +365,6 @@
       "servidor.navegacao": [
         "substituir",
         "adicionar"
-      ],
-      "servidor.aparencia": [
-        "substituir"
       ]
     },
     "modos": [
@@ -384,7 +385,9 @@
       "uma contribuição para uma região que a casca não tem é recusada com motivo nomeado, e a aba DIAGNÓSTICO conta"
     ],
     "teto": "EM ABERTO (M3): 128 por MOD hoje; proposta por ponto e por alvo (PERFIS B10, R2)",
-    "descarte": "sai com a instância do MOD"
+    "descarte": "sai com a instância do MOD",
+    "servidor.aparencia": "sai dos pontos registráveis: é a porta de quem vê sobre o tema declarado pelo servidor («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
+    "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
   },
   "capa": {
     "ponto": "pessoa.capa",
@@ -447,8 +450,9 @@
         "botoes": "primário (envia todos os valores juntos) e secundário (sai), montados pelo produto",
         "recusa-do-servidor": "formulario.erros({ chave: motivo })",
         "sujo": "derivado pelo produto contra o valor inicial",
-        "confirmacao": "declarada para ação destrutiva, com as palavras do produto",
-        "emProgresso": "o primário ignora o segundo clique"
+        "confirmacao": "declarada em qualquer botao (não só no primário), com as palavras do produto; o evento botao só chega depois do sim",
+        "emProgresso": "o primário ignora o segundo clique",
+        "erros-de-dois-campos": "formulario.erros({ a: motivo, b: motivo }); a resposta da metade de servidor é protocolo do próprio MOD"
       },
       "celular": "tela cheia, com as ações fixas embaixo e as abas cabendo em 390 px (D-estilo-1)"
     },
@@ -529,24 +533,19 @@
       "densidade",
       "fonte"
     ],
-    "derivados-pelo-produto": [
-      "acentoFraco",
-      "bordaForte",
-      "apagadoSecundario"
-    ],
-    "porta": "servidor.aparencia: registrar o ponto é a condição para pedir tema, e «o SEELE desenha» tira o tema já aplicado",
-    "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão",
+    "derivados-pelo-produto": {
+      "nomes": [
+        "acentoFraco",
+        "bordaForte",
+        "apagadoSecundario"
+      ],
+      "formula": "reproduz os tokens do produto a partir dos dez do tema padrão, com erro de no máximo ΔE 2 (o acentoFraco do padrão dá #331704); publicada também como função de referência no guia"
+    },
+    "porta": "do lado do servidor, o manifesto (\"tema\": true), mostrado na tela de aceite; do lado de quem vê, servidor.aparencia: «o SEELE desenha» tira o tema daquele servidor nesta máquina",
+    "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão; os itens do núcleo leem os tokens do produto, fora do alcance do tema",
     "conferencia": "contraste em todos os pares que o produto desenha, e não só texto sobre fundo; a recusa diz o par e a razão",
-    "previa": "tema(valores, { previa: true }): só nesta máquina, com o selo «prévia não publicada», sai quando a superfície que a pediu fecha",
+    "previa": "SeeleUI.tema(valores, { previa: true, superficie: id }): só nesta máquina, com o selo «prévia não publicada», sai quando a superfície fecha ou com SeeleUI.tema(null, { previa: true }); SeeleUI.tema(valores) sem previa não existe na 6",
     "nucleo": "nenhum item do núcleo é alcançado pelo tema; um guarda prova que acento #331704, #050403 e #0a0806 não mudam o #veredito, o #botao-mudo apertado, o #voz-mudo e o #voz-sair",
-    "em-aberto": [
-      "tokens por região",
-      "modo claro ou escuro",
-      "tipo dos títulos e dos dados",
-      "escala por escolha",
-      "densidade que cobre a escala --seele-e*",
-      "fundo da sessão por mídia (depois da M3 no celular)"
-    ],
     "fora": [
       "--seele-vermelho-alerta",
       "família livre",
@@ -555,7 +554,29 @@
       "z-index, opacidade ou deslocamento sobre controle nativo",
       "esconder uma região"
     ],
-    "dado-do-servidor": "entra: a metade de servidor declara o tema, e o produto o aplica antes do primeiro quadro e o tira na saída; a mensagem TemaMudou (JSON opaco, teto de 12 KiB) vai no contrato da 1.0 (F1)"
+    "dado-do-servidor": "mundo.tema(valores | null); o servidor guarda o tema no banco dele (sobrevive ao reinício) e o manda em TemaMudou logo depois do Session, inclusive com None; desligar ou desinstalar o MOD manda None, e o tema guardado fica inativo; um tema por servidor, o do MOD que quem administra escolheu [proposta]",
+    "pares": {
+      "texto/fundo": "4,5:1",
+      "texto/painel": "4,5:1",
+      "apagado/fundo": "3:1",
+      "apagado/painel": "3:1",
+      "acento/fundo": "4,5:1",
+      "acento/painel": "4,5:1",
+      "acento/acentoFraco": "4,5:1",
+      "estado": "pisos de partida; os números finais saem da tarefa 17-B3"
+    },
+    "na-6": [
+      "modo: 'claro' | 'escuro'",
+      "a densidade cobrindo a escala --seele-e*",
+      "tokens por região, com o destino de cada região no celular"
+    ],
+    "na-6-se-medido": [
+      "fundo da sessão por mídia (se a M3 com a API 6 o medir no iPhone antes do congelamento)"
+    ],
+    "na-7": [
+      "tipo dos títulos e dos dados",
+      "escala por escolha"
+    ]
   },
   "nucleo-de-confianca": {
     "regra": "nenhum item mora dentro de uma região, aceita contribuição ou é alcançado pelo tema",
@@ -582,7 +603,8 @@
   "som": {
     "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",
     "repetir": "repetir: true por contrato (decisão de 08/10): o som volta ao começo no fim sem redesenho, e o MOD recebe terminou só de um som sem repetir",
-    "celular": "som de MOD só com a tela acesa, até a medida da F4"
+    "celular": "som de MOD só com a tela acesa, até a medida da F4",
+    "palco": "o palco escondido pela vista alternada (celular) continua montado, e o som dele continua; a regra «fora da tela» vale para o lugar desmontado"
   },
   "volume": {
     "cliente": "SeeleUI.enviar(arquivo, token): Promise<void>; arquivo escolhido pelo usuário, até 10 MiB; resolve depois da gravação",
@@ -594,7 +616,8 @@
     ],
     "leitura": "doServidor.pedido.transporte = volume",
     "reducao": "a mídia de servidor de um MOD é reduzida ao tamanho de uso antes de chegar à janela, e os bolsos contam bytes decodificados (PERFIS R3)",
-    "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa'}"
+    "fundoDeMidia": "propriedade de caixa: {doServidor:{canal,pedido,campo}}, {fonte} ou {daPessoa:'capa'}",
+    "onde": "toda mídia do servidor aceita transporte: 'volume': midia, fundoDeMidia, retrato, pessoa.capa e o fundo da tela"
   },
   "limites": {
     "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone); cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
