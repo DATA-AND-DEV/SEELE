@@ -42,7 +42,7 @@ use anyhow::Result;
 use ed25519_dalek::SigningKey;
 use seele_core::enlace::{Aviso, Destino, Enlace};
 use seele_core::{MemoryPinStore, PinStore, Room};
-use seele_ffi::{ConnectConfig, Connection};
+use seele_ffi::{ConnectConfig, Connection, Event, EventListener};
 use seele_proto::ids::PersonId;
 use seele_proto::transport::IDLE_TIMEOUT;
 use seele_server::persistence::Location;
@@ -326,9 +326,42 @@ const FILHO: &str = "SEELE_SAIDA_COM_DESPEDIDA_FILHO";
 /// fim. O filho morre por `exit`, e nada dele roda depois.
 const CASA_DO_FILHO: &str = "SEELE_SAIDA_COM_DESPEDIDA_CASA";
 
-/// O filho: entra pela FFI no servidor do pai, espera a ordem de sair, e sai
-/// como o app sai — `encerrar_e_esperar` e o processo morrendo na linha
-/// seguinte.
+/// Quanto a thread da conexão do filho fica estacionada antes de seguir.
+///
+/// Bem mais que o caminho do `encerrar_e_esperar` até o `exit` (microssegundos)
+/// e bem menos que os 500 ms do teto: estacionada, a thread não tem como
+/// mandar o fechamento antes de o processo morrer, a menos que alguém a espere.
+const ESTACIONADA: Duration = Duration::from_millis(150);
+
+/// Estaciona a thread da conexão do filho, para o vermelho não depender de
+/// corrida.
+///
+/// `EventListener::on_event` é chamado **na thread da conexão**, e
+/// `leave_voice_room` avisa `RosterChanged` dali, de dentro do comando
+/// (`run_command`, em `seele-ffi`). Armado, o primeiro `RosterChanged` avisa o
+/// filho e dorme [`ESTACIONADA`] ali mesmo: o `Shutdown` que
+/// `encerrar_e_esperar` manda só é lido depois. Uma `encerrar_e_esperar` que não
+/// esperasse a thread deixaria o `exit(0)` matar o processo com ela dormindo,
+/// por construção — e não por ganhar uma corrida contra ela.
+struct Estaciona {
+    armado: std::sync::atomic::AtomicBool,
+    estacionei: std::sync::mpsc::Sender<()>,
+}
+
+impl EventListener for Estaciona {
+    fn on_event(&self, evento: Event) {
+        if matches!(evento, Event::RosterChanged)
+            && self.armado.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            let _ = self.estacionei.send(());
+            std::thread::sleep(ESTACIONADA);
+        }
+    }
+}
+
+/// O filho: entra pela FFI no servidor do pai, espera a ordem de sair,
+/// estaciona a thread da conexão ([`Estaciona`]) e sai como o app sai —
+/// `encerrar_e_esperar` e o processo morrendo na linha seguinte.
 ///
 /// Bloqueia uma thread do runtime do teste de propósito: neste processo não há
 /// mais nada para rodar, e a FFI tem a thread dela.
@@ -341,9 +374,29 @@ fn ser_o_filho(endereco: &str) -> ! {
         Ok((conexao, _)) => conexao,
         Err(erro) => panic!("o filho não entrou pela FFI: {erro:?}"),
     };
+    let (estacionei_tx, estacionei) = std::sync::mpsc::channel();
+    let estaciona = Arc::new(Estaciona {
+        armado: std::sync::atomic::AtomicBool::new(false),
+        estacionei: estacionei_tx,
+    });
+    sai.subscribe(Arc::clone(&estaciona) as Arc<dyn EventListener>);
     // A ordem é uma linha na entrada — ou a entrada fechada, que é o pai caindo.
     let mut ordem = String::new();
     let _ = std::io::stdin().read_line(&mut ordem);
+
+    estaciona
+        .armado
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    sai.leave_voice_room()
+        .expect("o filho não conseguiu pedir para sair da sala de voz");
+    // **Alto, se o gatilho mudar.** Sem o estacionamento, o teste volta a
+    // depender de o `exit` ganhar da thread da conexão.
+    assert!(
+        estacionei.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "a thread da conexão do filho não estacionou em 5 s: `leave_voice_room` deixou de \
+         avisar `RosterChanged` de dentro da thread da conexão, e o vermelho deste teste voltou \
+         a depender de uma corrida"
+    );
     assert!(
         sai.encerrar_e_esperar(Duration::from_millis(500)),
         "a thread da conexão do filho não terminou em 500 ms"
@@ -361,7 +414,11 @@ fn ser_o_filho(endereco: &str) -> ! {
 ///
 /// Uma `encerrar_e_esperar` que voltasse sem esperar o sinal da thread da
 /// conexão deixaria o processo morrer com a despedida no meio, e quem ficou só
-/// veria a saída pelo prazo de ociosidade.
+/// veria a saída pelo prazo de ociosidade. **Por construção, e não por
+/// corrida**: o filho estaciona a thread da conexão ([`Estaciona`]) antes de
+/// chamar `encerrar_e_esperar`. Na primeira versão deste teste o vermelho
+/// dependia de o `exit(0)` ganhar da thread, e ganhava — mas uma máquina em que
+/// a thread ganhasse passaria a reversão verde.
 #[tokio::test(flavor = "multi_thread")]
 async fn encerrar_e_esperar_volta_com_o_aviso_ja_dado() -> Result<()> {
     use std::io::Write as _;
