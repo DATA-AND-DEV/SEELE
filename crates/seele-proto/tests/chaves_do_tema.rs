@@ -96,3 +96,19 @@ fn nenhuma_chave_da_tabela_e_um_nome_de_css() {
         );
     }
 }
+
+/// **Com mais de uma chave errada, o servidor nomeia a primeira em ordem
+/// alfabética**, e não na ordem em que o MOD as escreveu: o `serde_json` deste
+/// workspace guarda o objeto num `BTreeMap` (sem `preserve_order`). A casca,
+/// que lê o objeto do JavaScript, nomeia a primeira na ordem do objeto. Os
+/// dois nomeiam uma chave errada; o vetor só tem casos de uma, para os dois
+/// lados poderem responder igual.
+#[test]
+fn com_mais_de_uma_chave_errada_o_servidor_nomeia_a_primeira_em_ordem_alfabetica() {
+    let tema: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_str(r##"{"zeta":"#000000","alfa":"#000000"}"##).expect("JSON");
+    assert_eq!(
+        recusa_das_chaves_do_tema(&tema),
+        Some(("chave-desconhecida", "alfa".to_owned()))
+    );
+}

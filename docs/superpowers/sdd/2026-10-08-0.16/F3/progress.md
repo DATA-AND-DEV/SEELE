@@ -426,8 +426,12 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     e o espelho reprova se faltar um dos três.
   - Ruling: um vetor comum além do espelho pelo texto — custo se errado: um
     arquivo a mais para manter; foi ele, e não o espelho, que achou o `in`.
-  - Ruling: com mais de uma chave errada, vale a primeira na ordem do objeto
-    (no servidor, a ordem do `serde_json::Map`) — custo se errado: o MOD
-    conserta uma chave por vez.
+  - Com mais de uma chave errada, o servidor nomeia a primeira **em ordem
+    alfabética** (o `serde_json::Map` é um `BTreeMap`, sem `preserve_order`), e
+    a casca a primeira na ordem do objeto. Eu tinha escrito «na ordem do
+    objeto» para os dois; medido antes de avisar, corrigido, e fixado num
+    teste (`com_mais_de_uma_chave_errada_o_servidor_nomeia_a_primeira_em_ordem_alfabetica`).
+    Custo: o MOD conserta uma chave por vez, e cada lado pode nomear uma
+    diferente — as duas erradas.
   - Próximo: as tarefas que esperavam o K4, na ordem do plano: 5, 6, 7, 9, 10,
     17d, 17f.0, 17f, 17g, 17h, 17i.

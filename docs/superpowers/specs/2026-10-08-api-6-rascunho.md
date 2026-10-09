@@ -845,7 +845,9 @@ mundo.tema({ arredondamento: 25 })
 // → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
 ```
 
-Com mais de uma chave errada, vale a primeira na ordem do objeto. **«A mesma
+Com mais de uma chave errada, o servidor nomeia a primeira em ordem
+alfabética, e a casca a primeira na ordem do objeto: as duas são chaves
+erradas, e o MOD conserta uma por vez. **«A mesma
 tabela» quer dizer a mesma resposta**: o vetor
 `crates/seele-proto/tests/vetores/chaves-do-tema.json` (37 casos) é lido pelo
 servidor e pela casca, e os dois têm de aceitar e recusar igual, pela mesma
