@@ -66,6 +66,8 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da `versao/0.16` (`cb426b19`), a sexta integração | feito; a árvore é a mesma da `cb426b19` (`38c21202`), verde na bateria da integração | `87fd6973` |
 | — | merge da `versao/0.16` (`c8b3cd47`), a sétima integração | feito; a árvore é a mesma da `c8b3cd47` | `52d015f4` |
 | 22 | 4b, a identidade por máquina: a metade da FFI | **feita** (porte do `9ff9b73c` da 0.15); a semente da sala e o SEU CÓDIGO esperam a casca | `58552de8` |
+| — | os testes da corrida de volta (tirados por engano em `b4f5ef94`) | feito | `b6280079` |
+| 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita**; ligar na FFI e no `main.rs` espera a casca | `2b2bf744` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -440,4 +442,45 @@ que a casca espera as ondas 5 e 6 da F5. Pediu o que não dependesse das duas.
     criou uma chave nova em `crates/seele-ffi/identity.key`: o caminho vira
     relativo, e o teste roda na pasta do crate. Era artefato da reversão, nunca
     entrou no git, e foi apagado.
+
+## A metade de núcleo da 14b (09/10)
+
+A orquestradora liberou com a régua alta, porque toda conexão passa pelo
+`correr`. Pediu primeiro o teste que mostra o candidato tardio perdido hoje,
+depois a prova de que a ordem de hoje se mantém, a conformidade de quem passa
+pelo enlace, e reversões.
+
+- **Achado: a corrida estava sem teste desde 31/08.** Os cinco testes do
+  `correr` (`e09d537a`) saíram no revert `b4f5ef94`, que tirava outra coisa. O
+  doc continuava dizendo que a corrida era genérica para ter teste. Eles
+  voltaram antes de qualquer mudança (`b6280079`), com um sexto que escreve os
+  instantes de hoje (0, 250 e 500 ms). Reversões: a corrida em série e a
+  defasagem pela metade.
+- **O candidato tardio perdido hoje, medido**: com o lote ignorado (a corrida
+  de antes), os dois testes do tardio reprovaram, e todos os outros passaram.
+- **A corrida com tardios** (`2b2bf744`): o lote entra na frente de quem espera
+  a vez, um lote vazio não mexe em nada, a corrida o espera, quem já ganhava
+  não espera, e a posição é a ordem em que cada um começou. **O teste do lote
+  vazio pegou um defeito do primeiro desenho**: o `sleep` da defasagem era
+  refeito a cada volta, e um lote vazio empurrava a vez de todo mundo em
+  100 ms. A vez virou um instante.
+- **Só quem precisa de furo espera o quarto.** A pergunta é uma só
+  (`pede_furo`, a mesma do `avisar_pelo_candidato`). Quem espera avisa a escuta
+  de hoje (`Batida::com_aviso`). O endereço de hoje entra logo depois do alvo,
+  e a trilha conta mais um candidato quando ele chega.
+- **A conformidade nova** é `quarto_em_paralelo.rs`, com 3 testes:
+  - quem está na mesma casa entra antes do prazo de um quarto mudo;
+  - um servidor que mudou de endereço entra pelo que o quarto deu, registrado
+    pelo `Hospedagem::iniciar` de verdade;
+  - a trilha de uma volta que não entrou acaba em `Desistiu` no candidato que
+    chegou depois.
+- Dez reversões medidas, listadas no commit.
+- **Ligar na casca espera a `ui/`**: a FFI monta o `Quarto`, e o `main.rs` deixa
+  de perguntar antes.
+- **A rodada inteira da conformidade está pendente.** Ela começou depois do
+  commit e foi parada no quarto de 52 arquivos: a orquestradora avisou que a
+  bateria da oitava integração estava começando, e a porta 8384 é uma só. Os
+  três que rodaram passaram. O arquivo novo e os que a 14b toca já tinham
+  passado sozinhos antes: `quarto_em_paralelo`, 3 de 3, com as reversões. Fica
+  para quando a orquestradora liberar.
 
