@@ -4325,6 +4325,61 @@ async fn assentar(
     // **entrada**, e uma remoção de sala decidida por terceiro não é entrada.
     teto: Option<u16>,
 ) -> Result<bool> {
+    // **O assento e o teto primeiro; a mídia e a tela depois.**
+    //
+    // Era o contrário, e era uma falha de confidencialidade, presente na
+    // v0.15.1 (revisão do lote I-a da F5, 08/10/2026): a pessoa saía da sala
+    // antiga, a tela dela acabava, a mídia dela entrava na sala pedida, e **só
+    // então** o teto era conferido. Na recusa nada se desfazia, e quem pedia
+    // para entrar numa sala cheia ficava ouvindo a sala que o recusou — e
+    // deixava de ouvir e de ser ouvido na sua, sem tela. Um cliente hostil
+    // escutava qualquer sala cheia só por pedir. Medido em
+    // `tests/recusa_da_sala_cheia.rs`.
+    //
+    // Sentado primeiro, sob a trava da ocupação, a recusa volta sem ter tocado
+    // em nada. E a conta do teto e a inserção continuam na mesma trava: ver
+    // [`crate::server::Occupancy::sentar_se_couber`], contar fora e sentar
+    // dentro deixaria duas entradas simultâneas passarem pela última vaga.
+    //
+    // No burst of "who is already here": this connection was handed every
+    // voice room's occupants when it started, and has been told about every arrival
+    // and departure since, wherever it happened. Repeating the room it is
+    // walking into would be telling it something it already knows.
+    let saiu_de = {
+        let mut occupancy = server.occupancy.lock().await;
+        // O assento anterior cai dentro do próprio `seat`, que é quem sabe que
+        // sentar substitui — e devolve as salas que esvaziaram, que é o que o
+        // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
+        // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
+        // família de defeito que esta tarefa fechou.
+        let quem = crate::server::Occupant {
+            person: session.person,
+            nickname: session.nickname.clone(),
+            ssrc: session.ssrc,
+            sessao: session.id,
+        };
+        let mut saiu_de = match teto {
+            Some(teto) => match occupancy.sentar_se_couber(destino, quem, teto) {
+                Ok(saiu_de) => saiu_de,
+                Err(crate::server::Lotada) => {
+                    // **Nada foi tocado**, e agora é verdade: a ocupação, a
+                    // mídia e a tela desta pessoa continuam na sala de onde
+                    // ela pediu.
+                    tracing::info!(
+                        person = %session.person,
+                        voice_room = %destino,
+                        teto,
+                        "recusada a entrada: a sala já tem o tanto de gente que quem hospeda declarou"
+                    );
+                    return Ok(false);
+                }
+            },
+            None => occupancy.seat(destino, quem),
+        };
+        saiu_de.retain(|anterior| *anterior != destino);
+        saiu_de
+    };
+
     // Out of the old room before into the new one. Without this a person who
     // walks from one voice room to another is still a member of the first, and goes
     // on hearing it.
@@ -4350,48 +4405,6 @@ async fn assentar(
             tela: tela.clone(),
         })
         .await?;
-
-    // No burst of "who is already here": this connection was handed every
-    // voice room's occupants when it started, and has been told about every arrival
-    // and departure since, wherever it happened. Repeating the room it is
-    // walking into would be telling it something it already knows.
-    let saiu_de = {
-        let mut occupancy = server.occupancy.lock().await;
-        // O assento anterior cai dentro do próprio `seat`, que é quem sabe que
-        // sentar substitui — e devolve as salas que esvaziaram, que é o que o
-        // aviso de saída à sala de onde a pessoa veio precisa. Pedir a remoção
-        // por fora seria a sétima cópia do desmonte por pessoa, e é justamente a
-        // família de defeito que esta tarefa fechou.
-        let quem = crate::server::Occupant {
-            person: session.person,
-            nickname: session.nickname.clone(),
-            ssrc: session.ssrc,
-            sessao: session.id,
-        };
-        // A conta do teto e a inserção sob a mesma trava. Ver
-        // [`crate::server::Occupancy::sentar_se_couber`]: contar fora e sentar
-        // dentro deixaria duas entradas simultâneas passarem pela última vaga.
-        let mut saiu_de = match teto {
-            Some(teto) => match occupancy.sentar_se_couber(destino, quem, teto) {
-                Ok(saiu_de) => saiu_de,
-                Err(crate::server::Lotada) => {
-                    // **A sala não foi tocada.** Nada de anunciar saída, nada de
-                    // mexer na mídia, nada de fechar tela: quem não coube
-                    // continua exatamente onde estava.
-                    tracing::info!(
-                        person = %session.person,
-                        voice_room = %destino,
-                        teto,
-                        "recusada a entrada: a sala já tem o tanto de gente que quem hospeda declarou"
-                    );
-                    return Ok(false);
-                }
-            },
-            None => occupancy.seat(destino, quem),
-        };
-        saiu_de.retain(|anterior| *anterior != destino);
-        saiu_de
-    };
 
     // O teto contado do ADR 0038, conferido no instante em que a sala cresceu.
     //
