@@ -85,7 +85,7 @@ A ordem é fixada pelos arquivos que vários lotes editam:
 | 3 | E · J · G-servidor (com os testes que deixam de falar com o ponto de produção) | E depois do D · J depois do K5, do P53 e do P54 · G-servidor depois do M2 |
 | 4 | F · K3 (sem o P49-10) | F depois do E e do G-servidor · K3 depois do J |
 | 5 | I, com o áudio que só abre na sala | I depois do F e do J |
-| 6 | K4 | K4 depois do I e do K3 |
+| 6 | K4 · R (a credencial da tentativa, entrou em 09/10) | K4 depois do I e do K3 · R depois do I-b e da `versao/0.16` com o `d0b98b9c` da F1 |
 | fecho | Z | depois da onda 6 |
 
 **Os arquivos de cada lote da onda 1**, que não se cruzam:
@@ -1718,6 +1718,44 @@ Talvez também:
 - O WebView2 e o WKWebView não se testam aqui.
 
 # Fecho
+
+## Lote R — a volta que aceita os MODs reenvia a credencial da tentativa, guardada só na memória
+
+**Onda 6, em paralelo com o K4.** Ele entrou em 09/10, por pedido da orquestradora: é o achado 4 da F8, que a F1 mediu com um par cru. Ele depende de duas coisas: do I-b, porque os dois mexem em `tela-fim.js`, e da `versao/0.16` com o `d0b98b9c` da F1, o conserto do servidor. A orquestradora avisa quando esse commit entrar.
+
+**O caso.** Um servidor fechado por convite, com a portaria desligada e um MOD exigido.
+- A primeira batida para na pergunta dos MODs.
+- A pessoa aceita, e `aceitarOsMods` (`camada-mods.js`) termina num `await conectar()` sem credencial.
+- A volta dá `CredentialRejected`.
+
+O lado do servidor a F1 já consertou em `d0b98b9c`: recusar os MODs deixa o convite intacto. Falta o app.
+
+**Hoje.**
+- `async function conectar(alvo, apelido, token)` (`tela-boot.js`) diz que o token «**não** é lembrado: um convite de uso único vale uma vez, e reenviá-lo numa reconexão seria gastar de novo o que já foi gasto». Isso vale para uma reconexão. Não vale para a volta da **mesma tentativa**, que o servidor recusou antes de gastar o convite.
+- `reconectar()` (`tela-fim.js`) não limpa o convite colado, porque «o token vale para este servidor». É outro caminho: o da tela de fim. Confira se ele também precisa da credencial da tentativa ou se fica como está, e diga qual.
+
+**O que fazer.**
+- A credencial da tentativa em curso, o token do convite ou a senha da portaria, fica guardada **só na memória**: nunca em disco, nunca no `seele.log`, nunca no Snapshot.
+- Ela é reenviada na volta que aceita os MODs.
+- Ela é esquecida assim que a pessoa **entrar**, **desistir** (recusar os MODs, fechar a pergunta, voltar à entrada) ou **fechar** a janela.
+- Uma reconexão depois de uma sessão que de fato entrou continua **sem** o token, como hoje.
+
+**Provas.**
+- O teste reprova hoje e passa com o conserto. O lugar é escolha do implementador:
+  - uma bancada de tela que encena a pergunta dos MODs e confere que o segundo `connect` leva a credencial;
+  - ou uma conformidade pela FFI, com o servidor que tem o `d0b98b9c`, em que a volta com a credencial entra.
+- Também se prova que a credencial é esquecida nos três casos, e que a reconexão de uma sessão encerrada não a leva.
+- Um guarda de texto confere que a credencial nunca vai a `localStorage`, a arquivo nem a log.
+- Reverter o reenvio deixa vermelho. Reverter o esquecimento também.
+
+**Arquivos:** `apps/seele-app/ui/tela-boot.js`, `camada-mods.js` e talvez `tela-fim.js`, `apps/seele-app/tests/frontend.rs` e uma bancada que já exista, ou `crates/seele-conformance/tests/` para a prova pela FFI.
+
+**NÃO fazer:**
+- não gravar a credencial em disco nem no log;
+- não reenviá-la numa reconexão depois de uma sessão que entrou;
+- não mexer no servidor, que é da F1;
+- não tocar em `apps/seele-app/src/executor.rs`, congelado para a F4;
+- não tocar na tela do celular, que é da F4.
 
 ## Lote Z — o fecho das pendências 49, 50 e 51, o registro do que a frente fechou, e o conserto da pendência 56
 

@@ -1814,6 +1814,63 @@ where
     PassoDoAparelho::Reaberto(Box::new(TrocaFeita { aberto, dimensoes }))
 }
 
+/// Quantos quadros de zero exato fazem o microfone ser dado como mudo pelo
+/// sistema: três segundos de quadros de 20 ms. F1-microfone-macos.
+const QUADROS_ATE_O_SILENCIO_DIGITAL: u32 = 3000 / FRAME_MS;
+
+/// Conta os quadros de **silêncio digital** do microfone. F1-microfone-macos.
+///
+/// # Por que existe
+///
+/// No macOS, um microfone que o sistema bloqueia — o SEELE desligado em Ajustes
+/// → Privacidade e Segurança → Microfone — abre sem erro nenhum e entrega
+/// zeros. O aparelho abriu, o laço roda, o portão mede silêncio, e a pessoa
+/// fala para ninguém sem que nada na tela diga por quê: o produto sabe e não
+/// conta. No Windows o consentimento é lido antes (`consentimento_do_microfone`),
+/// e é por isso que a frase da tela só existe no macOS.
+///
+/// # Zero exato, e não «baixo»
+///
+/// O piso de um microfone de verdade numa sala quieta fica em torno de −90 dBFS
+/// e nunca é zero: o conversor sempre tem ruído próprio. Zero exato em toda
+/// amostra é outra coisa — é ninguém entregando sinal. Por isso a conta lê o
+/// quadro **cru** (`bruto`), antes da supressão, que zera de propósito o que
+/// julga ruído, e antes do ganho. Uma interface USB com o ganho no mínimo
+/// também pode entregar zero exato, e é por isso que a tela diz «pode estar».
+///
+/// # Só com o microfone aberto e sem mudo
+///
+/// Sem aparelho de captura não há quadro, e nada conta. Com o mudo, a conta
+/// recomeça e a marca apaga: quem se mutou não está tentando ser ouvido, e a
+/// faixa sobre o sistema seria barulho.
+#[derive(Debug, Default)]
+struct SilencioDigital {
+    /// Quantos quadros seguidos chegaram com todas as amostras em zero exato.
+    seguidos: u32,
+}
+
+impl SilencioDigital {
+    /// Olha um quadro cru e diz se o microfone já entrega zero exato há três
+    /// segundos.
+    fn observar(&mut self, bruto: &[f32], mudo: bool) -> bool {
+        // `== 0.0` vale para +0 e −0, que são os dois zeros exatos. Nenhum
+        // limiar: um limiar transformaria isto num medidor de «baixo», e baixo
+        // não é bloqueio.
+        let zero_exato = !bruto.is_empty() && bruto.iter().all(|amostra| *amostra == 0.0);
+        self.seguidos = if mudo || !zero_exato {
+            0
+        } else {
+            self.seguidos.saturating_add(1)
+        };
+        self.marcado()
+    }
+
+    /// O que a última olhada concluiu.
+    const fn marcado(&self) -> bool {
+        self.seguidos >= QUADROS_ATE_O_SILENCIO_DIGITAL
+    }
+}
+
 /// The whole loop, on its own thread.
 #[allow(
     clippy::too_many_lines,
@@ -1892,6 +1949,8 @@ async fn pipeline(
     // ninguém ouvir.
     let mut ganho = seele_audio::ganho::Ganho::novo();
     let (mut ganho_avisado, mut quadros_com_ganho) = (false, 0_u32);
+    // O microfone que entrega zero exato. Ver `SilencioDigital`.
+    let mut silencio = SilencioDigital::default();
     let mut datagram = vec![0_u8; seele_proto::MAX_DATAGRAM_LEN];
     let mut mixed = vec![0.0_f32; FRAME_SAMPLES];
     let mut for_device = Vec::new();
@@ -2018,6 +2077,11 @@ async fn pipeline(
         let muted = controls.muted.load(Ordering::Relaxed);
         while pending.len() >= FRAME_SAMPLES {
             let bruto: Vec<f32> = pending.drain(..FRAME_SAMPLES).collect();
+
+            // **O silêncio digital, no quadro cru.** F1-microfone-macos. Antes
+            // da supressão, que zera de propósito o que julga ruído, e antes do
+            // ganho: o que se conta é o que o sistema entregou.
+            silencio.observar(&bruto, muted);
 
             // **A supressão, antes de qualquer decisão sobre o quadro.** F02, e a
             // ordem inteira é `captura → supressão → portão → ganho → codec`:
@@ -2319,7 +2383,8 @@ async fn pipeline(
                     controls.speaking.load(Ordering::Relaxed),
                 )
                 .with_playout(playout.metrics())
-                .with_pacing(ritmo.metrics()),
+                .with_pacing(ritmo.metrics())
+                .with_silencio_digital(silencio.marcado()),
                 sources: sources
                     .iter()
                     .map(|source| SourceTelemetry::assemble(source.ssrc, source.buffer.metrics()))
@@ -2512,6 +2577,43 @@ mod tests {
             ganho < codec,
             "o ganho passou a correr depois da codificação, onde ele não alcança \
              mais o que sai."
+        );
+    }
+
+    /// O detector de silêncio digital está ligado ao laço, sobre o quadro cru,
+    /// e o que ele conclui vai para a telemetria. F1-microfone-macos.
+    ///
+    /// Os testes de `silencio_digital` provam o detector, e nenhum deles vê o
+    /// laço: um detector que ninguém chama, ou que lê o quadro depois da
+    /// supressão — que zera de propósito o que julga ruído —, passaria por
+    /// todos. Lido do fonte pela mesma razão do guarda da ordem acima.
+    #[test]
+    fn o_silencio_digital_le_o_quadro_cru_e_chega_a_telemetria() {
+        let fonte = include_str!("voice.rs");
+        let programa = fonte.split("\n#[cfg(test)]").next().unwrap_or(fonte);
+        let laco = programa
+            .split("async fn pipeline(")
+            .nth(1)
+            .expect("o laço de voz sumiu de voice.rs");
+        let Some(observa) = laco.find("silencio.observar(&bruto, muted)") else {
+            panic!(
+                "o laço de voz não conta mais o silêncio digital do quadro cru: quem tem \
+                 o microfone bloqueado pelo sistema volta a falar para ninguém sem que a \
+                 tela diga nada"
+            );
+        };
+        let supressao = laco
+            .find("supressao.processar(&bruto, &mut limpo)")
+            .expect("a supressão de ruído sumiu do laço de captura");
+        assert!(
+            observa < supressao,
+            "o silêncio digital é contado depois da supressão, que zera o que julga \
+             ruído: uma sala quieta passaria a parecer um microfone bloqueado"
+        );
+        assert!(
+            laco.contains(".with_silencio_digital(silencio.marcado())"),
+            "o laço conta o silêncio digital e não o põe na telemetria: o produto \
+             sabe e não conta"
         );
     }
 
@@ -3191,6 +3293,135 @@ mod dimensoes_do_aparelho {
             EstadoDoAparelho::Perdido,
             "o laço vai encerrar e a tela continua dizendo que está tudo \
              funcionando; a pessoa fica sem som nenhum sem nada que explique"
+        );
+    }
+}
+
+#[cfg(test)]
+mod silencio_digital {
+    //! F1-microfone-macos, parte (1): o microfone que entrega **zero exato**.
+    //!
+    //! Os quadros são sintéticos e do tamanho dos do laço — 20 ms a 48 kHz —, e
+    //! o detector é o mesmo que o laço de captura chama sobre `bruto`.
+
+    use super::{SilencioDigital, QUADROS_ATE_O_SILENCIO_DIGITAL};
+    use seele_audio::FRAME_SAMPLES;
+
+    /// Três segundos de quadros de 20 ms.
+    const TRES_SEGUNDOS: u32 = 150;
+
+    fn zeros() -> Vec<f32> {
+        vec![0.0; FRAME_SAMPLES]
+    }
+
+    /// Um ruído de −90 dBFS: baixo demais para alguém ouvir, e diferente de
+    /// zero em toda amostra. É o piso de um microfone de verdade numa sala
+    /// quieta, e não o que um sistema que bloqueia o microfone entrega.
+    fn ruido_a_menos_90_dbfs(quadro: u32) -> Vec<f32> {
+        let amplitude = 10_f32.powf(-90.0 / 20.0);
+        (0..FRAME_SAMPLES)
+            .map(|i| {
+                let sinal = if (i + quadro as usize).is_multiple_of(2) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                sinal * amplitude
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tres_segundos_por_quadro_de_vinte_milissegundos() {
+        assert_eq!(
+            QUADROS_ATE_O_SILENCIO_DIGITAL, TRES_SEGUNDOS,
+            "o prazo do silêncio digital deixou de ser 3 s de quadros de 20 ms"
+        );
+    }
+
+    #[test]
+    fn tres_segundos_de_zero_exato_marcam_e_nenhum_antes() {
+        let mut detector = SilencioDigital::default();
+        for quadro in 1..TRES_SEGUNDOS {
+            assert!(
+                !detector.observar(&zeros(), false),
+                "o silêncio digital foi dito com {quadro} quadros, antes dos 3 s: \
+                 um microfone que só abriu calado acende a faixa à toa"
+            );
+        }
+        assert!(
+            detector.observar(&zeros(), false),
+            "três segundos de zero exato com o microfone aberto e sem mudo não \
+             marcaram: quem tem o microfone bloqueado pelo sistema fala para \
+             ninguém, e a tela não diz nada"
+        );
+        assert!(detector.marcado(), "o detector marcou e não guardou");
+    }
+
+    #[test]
+    fn ruido_a_menos_90_dbfs_nao_e_silencio_digital() {
+        let mut detector = SilencioDigital::default();
+        for quadro in 0..TRES_SEGUNDOS * 2 {
+            assert!(
+                !detector.observar(&ruido_a_menos_90_dbfs(quadro), false),
+                "um ruído de −90 dBFS foi tomado por silêncio digital: um microfone \
+                 de verdade numa sala quieta acende a faixa do macOS bloqueando"
+            );
+        }
+    }
+
+    #[test]
+    fn uma_unica_amostra_diferente_de_zero_recomeca_a_conta() {
+        let mut detector = SilencioDigital::default();
+        for quadro in 0..TRES_SEGUNDOS {
+            let mut bruto = zeros();
+            if quadro == TRES_SEGUNDOS / 2 {
+                if let Some(amostra) = bruto.get_mut(FRAME_SAMPLES / 3) {
+                    *amostra = 1.0e-9;
+                }
+            }
+            assert!(
+                !detector.observar(&bruto, false),
+                "uma amostra diferente de zero no meio dos 3 s não recomeçou a conta: \
+                 o detector mede «quase zero», e não o zero exato do bloqueio"
+            );
+        }
+    }
+
+    #[test]
+    fn com_o_microfone_mudo_nao_conta() {
+        let mut detector = SilencioDigital::default();
+        for _ in 0..TRES_SEGUNDOS * 2 {
+            assert!(
+                !detector.observar(&zeros(), true),
+                "o silêncio digital foi dito com o microfone mudo: o detector só \
+                 conta com o microfone aberto e não mudo"
+            );
+        }
+    }
+
+    #[test]
+    fn o_sinal_que_volta_apaga_a_marca() {
+        let mut detector = SilencioDigital::default();
+        for _ in 0..TRES_SEGUNDOS {
+            detector.observar(&zeros(), false);
+        }
+        assert!(
+            detector.marcado(),
+            "três segundos de zero exato não marcaram"
+        );
+        assert!(
+            !detector.observar(&ruido_a_menos_90_dbfs(0), false),
+            "o microfone voltou a entregar sinal e a marca ficou acesa: a faixa diz \
+             que o macOS bloqueia um microfone que já funciona"
+        );
+        // E o mudo também apaga: com ele, nada é dito.
+        for _ in 0..TRES_SEGUNDOS {
+            detector.observar(&zeros(), false);
+        }
+        assert!(
+            !detector.observar(&zeros(), true),
+            "o mudo não apagou a marca do silêncio digital"
         );
     }
 }

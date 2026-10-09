@@ -139,8 +139,71 @@ let falando = false;
  * seguro: este relógio não tem nada a ver com busca e mesmo assim o reprovava.
  */
 let comecoDaSessao = null;
-/** Volume por apelido, para o deslizante não pular de volta a cada redesenho. */
-const volumes = new Map();
+/**
+ * O volume de cada pessoa, por apelido, **como o Rust respondeu** da última vez.
+ * F1-vazamento.
+ *
+ * O volume mora na conexão, e chega por `volumes_locais`. Até a 0.16 ele morava
+ * num mapa desta janela, `volumes`, que lembrava o que ela tinha mandado — e a
+ * lembrança sobrevivia à sessão: o 150 dado à Rafa de um servidor aparecia no
+ * deslizante da Rafa de outro, que tocava a 100. Com a voz que abre a cada
+ * entrada numa sala, ela ainda mostrava um volume que a voz nova não tinha.
+ *
+ * Este mapa é só a última leitura: `lerVolumes` o troca inteiro pela resposta
+ * a cada quadro, e a sessão que acaba o esvazia (`esquecerOEstadoDaSessao`). O
+ * gesto escreve aqui a posição que acabou de mandar, para o redesenho seguinte
+ * não pular de volta antes de a leitura confirmar — e a leitura seguinte manda.
+ */
+const volumesLidos = new Map();
+
+/**
+ * Quantas vezes uma leitura de volumes em voo ficou velha: a cada gesto e a
+ * cada sessão que acaba. Rodada 1 do lote I-b, M-3.
+ *
+ * Uma leitura que sai antes do gesto volta com o que o Rust tinha antes dele, e
+ * aplicada ela devolvia o deslizante à posição de antes — com o Rust já no valor
+ * novo. A leitura guarda este número ao sair e é descartada se ele andou.
+ */
+let geracaoDosVolumes = 0;
+
+/** A posição que um gesto acabou de mandar, até a próxima leitura a confirmar. */
+function marcarVolume(apelido, percent) {
+  geracaoDosVolumes += 1;
+  volumesLidos.set(apelido, percent);
+}
+
+/** Esquece os volumes lidos, e a leitura que ainda estiver em voo. */
+function esquecerVolumes() {
+  geracaoDosVolumes += 1;
+  volumesLidos.clear();
+}
+
+/**
+ * Relê os volumes do Rust, e diz se algum mudou.
+ *
+ * Uma falha deixa a leitura anterior de pé: sem sessão, `volumes_locais`
+ * responde vazio, e não com erro. Uma resposta que saiu antes do último gesto,
+ * ou da sessão que acabou, é descartada: ver `geracaoDosVolumes`.
+ */
+async function lerVolumes() {
+  const geracao = geracaoDosVolumes;
+  let lidos;
+  try {
+    lidos = (await invoke("volumes_locais")) ?? {};
+  } catch (falha) {
+    console.warn("volumes_locais:", falha);
+    return false;
+  }
+  if (geracao !== geracaoDosVolumes) return false;
+  const entradas = Object.entries(lidos);
+  const mudou =
+    entradas.length !== volumesLidos.size ||
+    entradas.some(([apelido, percent]) => volumesLidos.get(apelido) !== percent);
+  if (!mudou) return false;
+  volumesLidos.clear();
+  for (const [apelido, percent] of entradas) volumesLidos.set(apelido, percent);
+  return true;
+}
 /**
  * Se esta sessão pode tirar a mensagem **de outra pessoa** da Linha.
  *
@@ -358,11 +421,28 @@ function desenharAvisoDeFone(snapshot) {
  * fone, pela mesma razão do `role="status"`.
  */
 function desenharAberturaDoAudio(snapshot) {
-  const frase = ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? null;
+  // O estado da abertura primeiro: quando a voz não abriu, é isso que se diz.
+  // Com ela de pé, a faixa fala do microfone calado pelo sistema, se for o caso.
+  const frase =
+    ABERTURA_DO_AUDIO[snapshot.abertura_do_audio]?.frase ?? fraseDoMicrofoneCalado(snapshot);
   $("aviso-audio").hidden = frase === null;
   if (frase !== null && $("aviso-audio-texto").textContent !== frase) {
     $("aviso-audio-texto").textContent = frase;
   }
+}
+
+/**
+ * A frase do microfone que entrega zero exato, ou `null`. F1-microfone-macos.
+ *
+ * Do campo que a ponte manda, e só no macOS: é o sistema dele que entrega um
+ * microfone bloqueado como silêncio sem erro. No Windows o consentimento é
+ * lido antes de abrir, e a frase mandaria a pessoa a um menu que não existe.
+ * A plataforma é a que `arrumarBarraDaJanela` (`base.js`) perguntou ao Rust.
+ */
+function fraseDoMicrofoneCalado(snapshot) {
+  if (snapshot.telemetry?.microfone_entrega_silencio_digital !== true) return null;
+  if ($("barra-janela").dataset.plataforma !== "macos") return null;
+  return MICROFONE_EM_SILENCIO_NO_MACOS;
 }
 
 /**
@@ -413,6 +493,9 @@ function desenhar(snapshot) {
   desenharTransmissoes(snapshot);
   abrirLinhaSozinho(snapshot);
   sincronizarMensagens(snapshot.messages_revision);
+  // Os eventos da tela aos MODs da API 6, pela comparação com o retrato de
+  // antes (rascunho da API 6, §7.2).
+  avisarOsModsDaTela(snapshot);
   // E o desenho que a tela escondida engoliu, agora que ela pode ter altura.
   if (mensagensPorDesenhar) desenharMensagens();
   // Os retratos, quando a revisão anda. `desenharMensagens` é chamada de novo se
@@ -426,6 +509,13 @@ function desenhar(snapshot) {
     })
     .catch((falha) => console.warn("retratos:", falha));
   desenharPessoas(snapshot);
+  // Os volumes, do Rust: o deslizante nasce com a última leitura, e uma leitura
+  // que mudou repinta os que não estão sob o dedo. Ver `volumesLidos`.
+  lerVolumes()
+    .then((mudou) => {
+      if (mudou) pintarVolumesDoRoster();
+    })
+    .catch((falha) => console.warn("volumes:", falha));
   desenharTelemetria(snapshot);
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
@@ -1208,8 +1298,16 @@ function abrirLinhaSozinho(snapshot) {
 async function sincronizarMensagens(revisao) {
   if (revisao === revisaoDesenhada || buscandoMensagens) return;
   buscandoMensagens = true;
+  // **A resposta é da sessão que pediu** (rodada 1 do lote I-b, M-1). Um pedido
+  // que sai na sessão A e volta depois de ela acabar traz a conversa de A, e
+  // escrevê-la — com a revisão de A — punha essa conversa na sessão seguinte,
+  // que a primeira sincronização dela podia nem corrigir se as revisões
+  // coincidissem. Toda saída zera a geração (`encerrarOAmbienteDosMods`).
+  const geracao = geracaoDaSessao;
   try {
-    mensagens = await invoke("messages");
+    const lidas = await invoke("messages");
+    if (geracao !== geracaoDaSessao) return;
+    mensagens = lidas;
     revisaoDesenhada = revisao;
     desenharMensagens();
   } catch (erro) {
@@ -1993,6 +2091,20 @@ function desenharPessoas(snapshot) {
   );
 }
 
+/**
+ * Põe nos deslizantes do roster o que a última leitura de `volumes_locais`
+ * disse.
+ *
+ * O que está sob o dedo fica: escrever nele no meio do arrasto tiraria o
+ * polegar de quem o move, que é o mesmo cuidado de `desenharSomDoPalco`.
+ */
+function pintarVolumesDoRoster() {
+  for (const deslizante of $("lista-roster").querySelectorAll("input.volume")) {
+    if (deslizante === document.activeElement) continue;
+    deslizante.value = String(volumesLidos.get(deslizante.dataset.pessoa) ?? 100);
+  }
+}
+
 /** Um grupo da faixa: o nome de uma sala e os cartões de quem está nela. */
 function grupoDeSala(nome, ocupacao, nossa, cartoes, sala = null) {
   const grupo = elemento("li", "roster-grupo");
@@ -2420,7 +2532,7 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
     volume.min = "0";
     volume.max = "200";
     volume.step = "10";
-    volume.value = String(volumes.get(pessoa.volume) ?? 100);
+    volume.value = String(volumesLidos.get(pessoa.volume) ?? 100);
     volume.title = `volume de ${pessoa.volume}`;
     volume.dataset.pessoa = pessoa.volume;
     item.append(volume);
@@ -2657,6 +2769,25 @@ function fraseDoAviso(motivo) {
     const quantas = Number(motivo[nome]?.apagadas ?? 0);
     return `${frase} — ${quantas} ${quantas === 1 ? "MENSAGEM" : "MENSAGENS"}`;
   }
+  // A sala além da subida de quem hospeda diz os dois números (ADR 0038):
+  // «a sala está grande» não é acionável, e «pede 6.480 kbps, e a internet do
+  // servidor envia cerca de 4.000 kbps» é. «Cerca de» porque a subida é uma
+  // estimativa do servidor. Os números vêm do fio; a frase, o risco e a saída
+  // são daqui. Sem eles, a frase vai sozinha, e não com um buraco no meio.
+  if (nome === "VoiceRoomOverHostUplink") {
+    // Os dois lado a lado nunca saem iguais quando não são (M-6): ver
+    // `doisEmKbps`.
+    const [precisa, medido] = doisEmKbps(motivo[nome]?.precisa_bps, motivo[nome]?.medido_bps);
+    const numeros =
+      precisa && medido
+        ? ` Com todos falando juntos, ela pede ${precisa}, e a internet do servidor ` +
+          `envia cerca de ${medido}.`
+        : "";
+    return (
+      `${frase}.${numeros} Ninguém foi barrado, mas a voz pode picar para todos: ` +
+      "menos gente falando junto, ou o servidor numa internet que envie mais, resolve."
+    );
+  }
   // Provisória: a causa completa a frase. Ver `CAUSAS_DE_RECUSA`.
   if (nome === "PedidoRecusado") {
     const causa = CAUSAS_DE_RECUSA[motivo[nome]?.causa];
@@ -2718,6 +2849,13 @@ function desenharEnlace(link) {
  *
  * Só em memória, por sessão. Persistir rascunho é uma decisão sobre onde gravar
  * o que alguém escreveu e ainda não mandou, e ela não foi tomada.
+ *
+ * **Por sessão quer dizer que ele acaba com ela** (F1-vazamento). A chave é o
+ * número do canal, que o servidor dá, e o canal 1 de um servidor não é o de
+ * outro: sem esquecer, o rascunho de um servidor aparecia no campo do seguinte.
+ * `esquecerOEstadoDaSessao` o esvazia nas duas saídas — inclusive no RECONECTAR
+ * da tela de fim, que abre uma sessão nova. A reconexão automática da bateria
+ * interna é a mesma sessão, e não perde nada.
  */
 const rascunhos = new Map();
 
@@ -3764,6 +3902,85 @@ async function sairDoServidorParaAEntrada() {
   // seguinte. Havia um `limparConvite()` aqui, e ele não existia mais.
 }
 
+/**
+ * Esquece o que a sessão que acabou deixou nesta janela. F1-vazamento.
+ *
+ * O estado de topo deste arquivo é da sessão, e as chaves dele são números que
+ * o servidor dá: o canal 1 de um servidor não é o canal 1 de outro, nem o anexo
+ * 11. Nada o esvaziava ao sair, e o rascunho escrito no canal 1 de um servidor
+ * aparecia no campo do canal 1 do seguinte — com uma prévia de imagem de lá
+ * junto. A revisão da rodada 1 achou mais: o arquivo escolhido em A ia junto da
+ * primeira mensagem de B, a conversa de A aparecia em B, e o UPTIME de B
+ * contava desde A.
+ *
+ * **É o único lugar que esquece.** Chamada pelas duas saídas — `ejetar` (SAIR
+ * DO SERVIDOR) e `limparSessaoEncerrada`, em `tela-fim.js`, que o RECONECTAR e a
+ * volta à entrada atravessam —, e nenhuma delas zera nada por conta própria:
+ * um estado zerado solto numa saída e não na outra foi o M-1 e o M-2. A
+ * reconexão automática da bateria interna não passa por aqui: ela é a mesma
+ * sessão, e não perde nada.
+ *
+ * O guarda `todo_estado_de_topo_da_sessao_e_esquecido_ao_sair` lê todo `let` e
+ * todo `const` que guarda coisas no topo deste arquivo, e cobra cada um aqui. Um
+ * novo entra nesta função, ou entra no guarda como exceção com o motivo
+ * escrito.
+ */
+function esquecerOEstadoDaSessao() {
+  rascunhos.clear();
+  previas.clear();
+  previasFechadas.clear();
+  previasDeLink.clear();
+  // Os volumes lidos, e a leitura deles que ainda estiver em voo (M-3).
+  esquecerVolumes();
+  // O que se desenhou e a Linha em que se estava.
+  desenhado = null;
+  linhaAberta = null;
+  // E o que estava escrito no campo (rodada 2 do lote I-b). A Linha da sessão
+  // seguinte vem do retrato (`desenharCanais`), sem restaurar nada, e o texto
+  // que ficou no campo em A ia no primeiro Enter em B — ou virava, no primeiro
+  // clique noutra Linha, rascunho de B. Com nenhuma Linha aberta, restaurar é
+  // esvaziar, e é ele que acerta também a altura do campo e a conta de bytes.
+  restaurarRascunho();
+  // O termo da busca. As duas saídas já o zeram por `encerrarBusca`, que avisa
+  // também o Rust; aqui ele vale por si, como todo o resto desta função.
+  $("campo-busca").value = "";
+  // A conversa e a revisão dela (M-1 da rodada 1). A revisão do próximo
+  // servidor começa do zero, e guardar a do anterior fazia a primeira
+  // sincronização concluir que nada mudou quando as duas coincidiam: a tela
+  // abria com a conversa de outro servidor. Antes de `limparBusca`, que redesenha.
+  mensagens = [];
+  revisaoDesenhada = null;
+  // O que cada retrato recalcula, e que até o primeiro dele seria do anterior:
+  // a permissão de tirar mensagem, os lugares de uma sala nova (copiados de uma
+  // sala daquele servidor), a trilha desenhada e o anúncio de troca de
+  // aparelho, cuja conta é da voz que acabou.
+  podeRemoverMensagem = false;
+  lugaresDeUmaSalaNova = 250;
+  trilhaDesenhada = null;
+  trocasDeAparelhoVistas = null;
+  ateQuandoAnunciarOAparelho = 0;
+  // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
+  // e os casamentos da busca com o cursor e o contador.
+  esquecerRetratos();
+  limparBusca();
+  // O arquivo escolhido e a subida dele (I-1 da rodada 1). Sem isto, o arquivo
+  // escolhido para um servidor ficava na caixa, e o primeiro Enter no seguinte
+  // o mandava junto com o que se escrevesse lá.
+  tirarAnexo();
+  // O relógio e o endereço (M-2 da rodada 1): um uptime que sobrevive à sessão
+  // conta o tempo passado noutro servidor — e, sem o zero, o primeiro quadro da
+  // seguinte não relê a trilha —, e um endereço que sobrevive põe no cabeçalho
+  // do próximo a porta do anterior. O RECONECTAR não perde o dele: `mostrarFim`
+  // o copiou para `alvoDoFim` antes.
+  comecoDaSessao = null;
+  alvoDoServer = null;
+  // E a conversa desenhada, por último (M-1 da rodada 1): com a tela escondida,
+  // `limparBusca` acima não redesenha, e a lista de A ficava à vista no
+  // instante em que B aparecia. Sem lista, também não há desenho pendente.
+  $("lista-mensagens").replaceChildren();
+  mensagensPorDesenhar = false;
+}
+
 /** Ejeta e volta para a tela de entrada, sem fechar o programa. */
 async function ejetar() {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
@@ -3791,7 +4008,7 @@ async function ejetar() {
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
   esquecerOLinkDaPorta();
-  esquecerRetratos();
+  esquecerOEstadoDaSessao();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima
   // da próxima sessão com um ato armado sobre alguém do servidor anterior.
@@ -3810,18 +4027,10 @@ async function ejetar() {
   // A gaveta pela mesma razão que a moderação: aberta, ela voltaria por cima
   // da próxima sessão com a lista de salas da anterior ainda desenhada.
   alternarCanais(false);
-  desenhado = null;
-  linhaAberta = null;
-  // O mesmo argumento do veredito, para o relógio e para o endereço: um uptime
-  // que sobrevive à sessão conta o tempo passado noutro servidor, e um endereço
-  // que sobrevive põe no cabeçalho do próximo a porta do anterior.
-  comecoDaSessao = null;
-  alvoDoServer = null;
-  // A conversa e a revisão pela mesma razão. A revisão do próximo servidor começa
-  // em zero, e guardar a do anterior faria a primeira sincronização concluir
-  // que nada mudou — a tela abriria com o histórico de outra sessão na frente.
-  mensagens = [];
-  revisaoDesenhada = null;
+  // O snapshot desenhado, a Linha aberta, a conversa, o relógio e o endereço
+  // saíram daqui para `esquecerOEstadoDaSessao`, que as duas saídas chamam:
+  // zerados só aqui, eles passavam pela outra (M-1 e M-2 da rodada 1).
+  //
   // Fecha a barra, e não só zera o termo: aberta, ela abriria a próxima sessão
   // já com o cursor num campo de busca sobre uma conversa que não existe.
   await alternarBusca(false);
@@ -4367,7 +4576,9 @@ $("lista-roster").addEventListener("input", (evento) => {
   const alvo = evento.target;
   if (!alvo.classList.contains("volume")) return;
   const percent = Number(alvo.value);
-  volumes.set(alvo.dataset.pessoa, percent);
+  // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
+  // confirmá-la — e uma leitura de antes dele não a desfaz. Ver `marcarVolume`.
+  marcarVolume(alvo.dataset.pessoa, percent);
   invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
     console.warn("set_volume:", falha);
   });

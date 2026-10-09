@@ -104,7 +104,10 @@ const P = (id, nome, opcoes = {}) => ({
   signal: 96, sync_band: "Verde", is_self: false, ...opcoes,
 });
 const SEELE_QUADRO = {
-  caminho: "UPNP", link: "Up", link_state: "Verified", server: "TÓQUIO-3",
+  // `link` é o `LinkState` de `seele-ffi`: "Online", ou { InternalBattery: {…} }
+  // quando cai. Um valor que o produto nunca manda faz a casca achar que caiu
+  // (e o celular confiou num "Up" que não existe; ver 0.16/celular).
+  caminho: "UPNP", link: "Online", link_state: "Verified", server: "TÓQUIO-3",
   icon_revision: 0, me: 1, nickname: "rafa",
   voice_rooms: [
     { id: 1, name: "PONTE", limit: 8, password_required: false, occupied_by_us: true,
@@ -128,6 +131,9 @@ const SEELE_QUADRO = {
   notice: null, muted: false, total_isolation: false, speaking: false,
   person_icons_revision: 1,
   voice_mode: "PushToTalk", audio_available: true, capture: null, playback: null,
+  // Dentro de sala, o áudio abriu: o Snapshot de verdade sempre traz o estado da
+  // abertura (pendência 52), e sem ele o rodapé e o medidor caem no «fora de sala».
+  abertura_do_audio: "aberto",
   may_manage_voice_rooms: true, may_kick: true, may_ban: true, may_remove_message: true,
   may_move_person: true, may_customise_server: true, may_delete_rooms: true,
   tela: null, ended: null,
@@ -147,6 +153,10 @@ SEELE_RESPOSTAS.snapshot = SEELE_QUADRO;
 SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
 window.__SEELE_ARGS = {};
+// A sequência inteira, e não só o último de cada comando: «apertou e soltou» é
+// uma ordem, e o último sozinho não diz se o meio aconteceu.
+window.__SEELE_HISTORICO = [];
+window.__SEELE_VOLUMES = {};
 window.__SEELE_EM_SESSAO = false;
 // **Uma máquina que já escolheu o nome**, o mesmo do quadro. Desde a `acbc1c29`
 // a primeira entrada de uma máquina sem nome abre «COMO OS OUTROS VÃO TE
@@ -171,6 +181,17 @@ window.__TAURI__ = {
       // num embrulho de fora: os módulos capturam o `invoke` na carga, e trocá-lo
       // depois não alcança ninguém.
       window.__SEELE_ARGS[cmd] = args;
+      window.__SEELE_HISTORICO.push([cmd, args]);
+      // O MUDO e o SURDO mudam o quadro, como no produto: uma tela que espera o
+      // próximo quadro dizer «mudo» antes de seguir só anda se ele disser.
+      if (cmd === "set_muted") SEELE_QUADRO.muted = !!(args && args.on);
+      if (cmd === "set_total_isolation") SEELE_QUADRO.total_isolation = !!(args && args.on);
+      // O volume por pessoa fica guardado, e o `volumes_locais` o devolve, como
+      // o Rust. A casca da API 6 relê os volumes e repinta os deslizantes: com o
+      // duble respondendo vazio, a releitura devolvia todo volume a 100 (medido:
+      // 16 em 40 trocas, na rodada da F3).
+      if (cmd === "set_volume" && args) window.__SEELE_VOLUMES[args.nickname] = args.percent;
+      if (cmd === "volumes_locais") return { ...window.__SEELE_VOLUMES };
       // **Sem sessão, `snapshot` recusa** — como o produto faz. Responder um
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente

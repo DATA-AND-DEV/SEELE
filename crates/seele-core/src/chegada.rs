@@ -68,7 +68,7 @@ use tokio::sync::watch;
 
 use crate::client::ConnectError;
 use crate::encontro::{FalhaAoLocalizar, Localizacao};
-use crate::enlace::{Destino, Enlace, Esperada};
+use crate::enlace::{Destino, DoQuarto, Enlace, Esperada};
 use crate::tofu::PinStore;
 
 /// O endereço de enfeite dos exemplares de [`Etapa::TODAS`].
@@ -545,6 +545,34 @@ pub struct Chegada {
     /// Numa ligação, o que se pergunta ao quarto antes da corrida. Consumido
     /// por [`Chegada::chegar`].
     pelo_codigo: Option<PeloCodigo>,
+    /// Na volta a um servidor guardado, o quarto perguntado **junto** com a
+    /// corrida. Ver [`Chegada::com_o_quarto`].
+    quarto: Option<Quarto>,
+}
+
+/// O quarto do ponto de encontro, para quem volta a um servidor guardado: com
+/// que impressão perguntar onde ele mora hoje, e como o endereço que o quarto
+/// der vira candidato.
+pub struct Quarto {
+    impressao: String,
+    candidato: Box<dyn Fn(SocketAddr) -> Destino + Send + Sync>,
+}
+
+impl Quarto {
+    /// `impressao` é a conferida: a do link desta sessão, ou a que a lista
+    /// guardou. `candidato` monta o destino de um endereço do jeito que quem
+    /// chama monta os outros (na FFI, `build_destino`): o endereço de hoje é um
+    /// candidato que ninguém escolheu, e a conferência dele é a dos outros.
+    #[must_use]
+    pub fn novo(
+        impressao: impl Into<String>,
+        candidato: impl Fn(SocketAddr) -> Destino + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            impressao: impressao.into(),
+            candidato: Box::new(candidato),
+        }
+    }
 }
 
 /// O que uma ligação sabe antes de localizar a sala: o código, a quem
@@ -566,6 +594,7 @@ impl std::fmt::Debug for Chegada {
             .field("bilhete", &self.bilhete.is_some())
             .field("passos", &self.trilha.len())
             .field("pelo_codigo", &self.pelo_codigo.is_some())
+            .field("quarto", &self.quarto.is_some())
             .finish()
     }
 }
@@ -600,7 +629,31 @@ impl Chegada {
             }],
             estado,
             pelo_codigo: None,
+            quarto: None,
         }
+    }
+
+    /// Esta chegada pergunta ao quarto onde o servidor mora hoje **junto** com
+    /// a corrida, e não antes dela (a pendência 55).
+    ///
+    /// Antes, quem voltava a um servidor guardado perguntava primeiro, e só
+    /// depois corria: até 1,5 s de prazo do quarto, pagos também por quem estava
+    /// na mesma casa, com o ponto ou o DNS mudos. Agora:
+    ///
+    /// - quem não precisa de furo começa na hora, e quem já ganhava continua
+    ///   ganhando sem esperar o quarto;
+    /// - quem precisa de furo espera a resposta, como esperava, e avisa a escuta
+    ///   de hoje quando o quarto a confirma
+    ///   ([`crate::encontro::bilhete_desta_volta`]);
+    /// - o endereço de hoje entra na corrida quando chega, se não é nenhum dos
+    ///   que já correm (pela chave de pino), e a trilha o conta.
+    ///
+    /// Só vale com bilhete: o ponto é o dele. Sem bilhete, ou com uma impressão
+    /// que não dá marcas, a chegada é a de sempre.
+    #[must_use]
+    pub fn com_o_quarto(mut self, quarto: Quarto) -> Self {
+        self.quarto = Some(quarto);
+        self
     }
 
     /// Uma ligação parada: o código de uma pessoa, ainda sem endereço nenhum.
@@ -686,7 +739,7 @@ impl Chegada {
             }
         }
 
-        let de = u8::try_from(self.destinos.len()).unwrap_or(u8::MAX);
+        let mut de = u8::try_from(self.destinos.len()).unwrap_or(u8::MAX);
         if self.destinos.is_empty() {
             // Um convite sem endereço nenhum. Ninguém chama assim, e desistir
             // com o motivo na mão é melhor que devolver uma chegada que não
@@ -705,7 +758,33 @@ impl Chegada {
         let destinos = std::mem::take(&mut self.destinos);
         let bilhete = self.bilhete.clone();
         let (contando, mut tentativas) = tokio::sync::mpsc::unbounded_channel();
-        let conectando = Enlace::conectar_entre_observado(destinos, bilhete, chave, pins, contando);
+        // O quarto, quando esta chegada o pergunta: junto com a corrida, e com
+        // a resposta entregue a ela quando vier.
+        let consulta = self.consulta_ao_quarto();
+        let ja_correm: Vec<String> = destinos
+            .iter()
+            .map(|destino| destino.chave_do_pin.clone())
+            .collect();
+        let (entrega, recebe) = tokio::sync::oneshot::channel();
+        let mut entrega = consulta.is_some().then_some(entrega);
+        let recebe = consulta.is_some().then_some(recebe);
+        let mut perguntado = consulta.is_none();
+        let perguntando = async move {
+            match consulta {
+                Some((ponto, marcas)) => {
+                    crate::encontro::onde_mora_hoje(
+                        &ponto,
+                        &marcas,
+                        crate::encontro::PRAZO_DO_QUARTO,
+                    )
+                    .await
+                }
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(perguntando);
+        let conectando =
+            Enlace::conectar_entre_com_o_quarto(destinos, bilhete, chave, pins, contando, recebe);
         tokio::pin!(conectando);
 
         let resultado = loop {
@@ -719,6 +798,20 @@ impl Chegada {
                 // não para resumi-la depois.
                 biased;
                 Some(tentativa) = tentativas.recv() => self.tentando(tentativa, de),
+                no_quarto = &mut perguntando, if !perguntado => {
+                    perguntado = true;
+                    if let Some(entrega) = entrega.take() {
+                        let do_quarto = self.do_quarto(&no_quarto, &ja_correm);
+                        // Um candidato a mais na conta: é por ela que a trilha
+                        // sabe qual tentativa é a última, e só a última desiste.
+                        if do_quarto.candidato.is_some() {
+                            de = de.saturating_add(1);
+                        }
+                        // A corrida pode ter acabado neste mesmo instante; aí
+                        // ninguém ouve, e não há o que entregar.
+                        let _ = entrega.send(do_quarto);
+                    }
+                }
                 resultado = &mut conectando => break resultado,
             }
         };
@@ -775,6 +868,36 @@ impl Chegada {
         self.destinos = destinos;
         self.bilhete = bilhete;
         Ok(())
+    }
+
+    /// O ponto e as marcas com que se pergunta ao quarto, quando esta chegada
+    /// pergunta: com o quarto, com bilhete, e com uma impressão que dá marcas.
+    fn consulta_ao_quarto(&self) -> Option<(String, crate::encontro::Marcas)> {
+        let quarto = self.quarto.as_ref()?;
+        let bilhete = self.bilhete.as_ref()?;
+        let marcas = crate::encontro::Marcas::do_servidor(&quarto.impressao)?;
+        Some((bilhete.ponto.clone(), marcas))
+    }
+
+    /// O que o quarto disse, para a corrida: o endereço de hoje como candidato,
+    /// quando ele não é nenhum dos que já correm, e o bilhete desta volta.
+    ///
+    /// «Já corre» é pela chave de pino, a regra de `seele_ffi::ja_esta_na_corrida`:
+    /// o mesmo servidor com dois candidatos receberia dois apertos de mão e dois
+    /// `Hello`, e um perdedor poderia desfazer o pin que o vencedor fixou.
+    fn do_quarto(&self, no_quarto: &crate::encontro::OndeMora, ja_correm: &[String]) -> DoQuarto {
+        let Some(quarto) = &self.quarto else {
+            return DoQuarto::default();
+        };
+        let candidato = no_quarto
+            .servidor()
+            .map(|endereco| (quarto.candidato)(endereco))
+            .filter(|destino| !ja_correm.contains(&destino.chave_do_pin));
+        let bilhete = self
+            .bilhete
+            .as_ref()
+            .map(|guardado| crate::encontro::bilhete_desta_volta(guardado, no_quarto));
+        DoQuarto { candidato, bilhete }
     }
 
     /// O ponto de encontro que vai ser avisado, se algum vai.

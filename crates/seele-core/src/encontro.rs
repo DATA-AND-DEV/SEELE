@@ -139,6 +139,9 @@ pub(crate) struct Batida {
     /// reencontrá-lo ali exigiria decodificar o próprio pacote.
     aviso: SocketAddr,
     datagrama: Vec<u8>,
+    /// A marca que vai no `LEVE`, guardada para [`Batida::com_aviso`] refazer o
+    /// datagrama com outro aviso.
+    marca: Marca,
 }
 
 impl Batida {
@@ -174,7 +177,25 @@ impl Batida {
             ponto,
             aviso,
             datagrama,
+            marca,
         })
+    }
+
+    /// A mesma batida, avisando outro endereço: o mesmo socket, o mesmo ponto e
+    /// a mesma marca, e o `LEVE` com `aviso`.
+    ///
+    /// É o que quem volta a um servidor guardado usa quando o quarto dá a escuta
+    /// de hoje ([`bilhete_desta_volta`]). A batida não é preparada de novo
+    /// porque o furo tem de abrir para a porta de onde saem os apertos de mão, e
+    /// essa porta é a do socket desta.
+    pub(crate) fn com_aviso(&self, aviso: SocketAddr) -> Self {
+        Self {
+            socket: Arc::clone(&self.socket),
+            ponto: self.ponto,
+            aviso,
+            datagrama: encontro::leve(aviso, &self.marca),
+            marca: self.marca.clone(),
+        }
     }
 
     /// Manda **um** datagrama de 96 bytes ao ponto de encontro.
