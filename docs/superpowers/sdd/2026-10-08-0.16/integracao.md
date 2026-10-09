@@ -19,6 +19,7 @@ nada dependa da memória de uma conversa.
 | `crates/seele-ffi/src/lib.rs` | F1 (reexportação e `material_e2ee: None`) e F5 (H: `drive`, `fim_da_recusa`, `classify_connect_failure`) | trechos diferentes |
 | `apps/seele-app/ui/frases.js` | F6 (`0c01558`, `0ba303f`, commits isolados) e F5 (H) | juntar |
 | `apps/seele-app/src/main.rs` | F1 (P7b: `api: instalado.api` em `habilitar_mod` e `aplicar_conjunto_de_mods`), F6 (comandos finos, `setup`, `Abertura.pelo_lancador`) e F5 (C, D, E, F, K4 e I, em série nas ondas) | conflitos de texto esperados no `generate_handler!`, no `struct Session` e no fim do módulo de testes |
+| as migrações do banco | F1 (14, `api` em `mods`, `4112f96b`) e F3 (15, `temas_dos_mods`, `bfd5f5d`) | a próxima é a 16. Conferir com `git log --all -S "version: 1"` em `persistence/schema.rs` antes de uma migração nova |
 | `NOME_DA_SALA` | F1 (`seele_proto::transport`, `7e123ee5`) e F7 (`pub const` própria em `seele-server/src/tls.rs:27`) | quando os dois estiverem em `versao/0.16`, a F7 troca a sua por `pub use seele_proto::transport::NOME_DA_SALA;`. Conferir que não sobram duas cópias |
 | `docs/superpowers/sdd/2026-10-08-0.16/F2/progress.md` | F2 (`a2181ad6`) | ~~trocar «deste branch» por «da `versao/0.16` depois da integração verde»~~: feito em `f5956869` |
 
@@ -45,6 +46,7 @@ nada dependa da memória de uma conversa.
 - **O ponto em produção fala o ENC/2**: `sondar --exige-enc2 encontro.seele.app.br`, de
   outra máquina, depois de o dono reimplantar a VPS (`docs/ponto-de-encontro.md`).
   A VPS vai antes do app (spec-mestre, §4).
+- **O indexador lê a chave `tema` do manifesto** (F3, tarefa 13): hoje ele recusa chave desconhecida, e recusaria o ESTILO 4.0.0. E aceita a união `(6, 5, 4, 3)` antes de qualquer pacote novo (spec-mestre §4, passo 0). As duas são do dono, no `SEELE-MODS-INDEXER`.
 - **As notas não têm condição pendente**: o `publicar.sh` recusa notas com o marcador
   `<!-- CONDIÇÃO:` (F6, `36274663` e `7e444fe8`).
 
