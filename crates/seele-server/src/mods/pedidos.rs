@@ -252,40 +252,47 @@ async fn executar_inner(
     // resposta é sempre a mesma enquanto o hash for o mesmo. Ver
     // `Server::pacotes_conferidos`.
     let conferidos = Arc::clone(&server.pacotes_conferidos);
-    let fonte = {
+    let (fonte, portas) = {
         let guardado = conferidos
             .lock()
             .map_err(|_| anyhow::anyhow!("o cache de pacotes de MOD foi envenenado"))?
             .get(&hash)
             .cloned();
         match guardado {
-            Some(pacote) => pacote.fonte,
+            Some(pacote) => (pacote.fonte, pacote.portas),
             None => {
                 let hash_para_conferir = hash.clone();
                 let id_do_pacote = id.clone();
                 let raiz = root.clone();
                 // Fora do Tokio: são leituras de disco e um SHA-256 sobre o
                 // pacote inteiro.
-                let fonte = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-                    let manifest = seele_proto::mods::read_manifest(&std::fs::read_to_string(
-                        raiz.join("mod.json"),
-                    )?)?;
-                    anyhow::ensure!(manifest.id == id_do_pacote, "wrong id");
-                    let mut files = Vec::new();
-                    package(&raiz, &raiz, &mut files)?;
-                    anyhow::ensure!(
-                        seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files))
-                            == hash_para_conferir,
-                        "package changed"
-                    );
-                    let entry = manifest
-                        .server
-                        .ok_or_else(|| anyhow::anyhow!("no server half"))?;
-                    let relative =
-                        seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
-                            .ok_or_else(|| anyhow::anyhow!("bad path"))?;
-                    Ok(std::fs::read_to_string(raiz.join(relative))?)
-                })
+                let (fonte, portas) = tokio::task::spawn_blocking(
+                    move || -> anyhow::Result<(String, super::Portas)> {
+                        let manifest = seele_proto::mods::read_manifest(&std::fs::read_to_string(
+                            raiz.join("mod.json"),
+                        )?)?;
+                        anyhow::ensure!(manifest.id == id_do_pacote, "wrong id");
+                        let mut files = Vec::new();
+                        package(&raiz, &raiz, &mut files)?;
+                        anyhow::ensure!(
+                            seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut files))
+                                == hash_para_conferir,
+                            "package changed"
+                        );
+                        let entry = manifest
+                            .server
+                            .ok_or_else(|| anyhow::anyhow!("no server half"))?;
+                        let relative =
+                            seele_proto::mods::inner_path(&entry.split('/').collect::<Vec<_>>())
+                                .ok_or_else(|| anyhow::anyhow!("bad path"))?;
+                        Ok((
+                            std::fs::read_to_string(raiz.join(relative))?,
+                            super::Portas {
+                                tema: manifest.tema,
+                            },
+                        ))
+                    },
+                )
                 .await??;
                 conferidos
                     .lock()
@@ -294,32 +301,39 @@ async fn executar_inner(
                         hash.clone(),
                         crate::server::PacoteConferido {
                             fonte: fonte.clone(),
+                            portas,
                         },
                     );
-                fonte
+                (fonte, portas)
             }
         }
     };
 
-    // O quintal é lido numa tomada curta, **antes** de o JavaScript rodar.
-    let mut data: BTreeMap<String, String> = {
+    // O quintal é lido numa tomada curta, **antes** de o JavaScript rodar — e,
+    // na mesma tomada, quem pinta este servidor, para `mundo.tema` responder
+    // `tema-de-outro-mod` na hora (rascunho da API 6, §9).
+    let (mut data, pintor): (BTreeMap<String, String>, Option<String>) = {
         let db = server.persistence.lock().await;
-        mods::ler_quintal(&db, &id)?
+        (
+            mods::ler_quintal(&db, &id)?,
+            crate::persistence::tema::escolhido_ligado(&db)?,
+        )
     };
     let before = data.clone();
     let id_do_pedido = id.clone();
     // O JavaScript nunca roda no Tokio, e agora também não roda com o banco na
     // mão.
-    let (response, data) = tokio::task::spawn_blocking(
-        move || -> anyhow::Result<(String, BTreeMap<String, String>)> {
+    let (response, data, tema) = tokio::task::spawn_blocking(
+        move || -> anyhow::Result<(String, BTreeMap<String, String>, Option<super::TemaDeclarado>)> {
             let mut host = super::Anfitriao::novo()?;
             // **Antes de `carregar`.** As ligações do QuickJS clonam este `Arc` ao
             // serem montadas; compartilhar depois deixaria o MOD escrevendo numa
             // lista que ninguém mais lê. Ver `Anfitriao::compartilhar_esperas`.
             host.compartilhar_esperas(esperas);
-            host.carregar(&id_do_pedido, &fonte, &dados)?;
+            host.carregar_com_portas(&id_do_pedido, &fonte, &dados, portas)?;
+            host.saber_quem_pinta(pintor);
             let response = host.pedir(&id_do_pedido, person, &context, &payload, &mut data)?;
-            Ok((response, data))
+            Ok((response, data, host.tomar_tema_declarado()))
         },
     )
     .await??;
@@ -328,11 +342,77 @@ async fn executar_inner(
     // ele que garante que ninguém leu o quintal entre a leitura acima e esta
     // gravação — que é a perda de atualização que soltar o mutex introduziria se
     // ele não existisse.
-    if data != before {
+    //
+    // O tema vai **depois** do quintal, na mesma tomada, e o `TemaMudou` só sai
+    // depois dos dois gravados: um quintal que falhasse com o tema já
+    // publicado seria o MOD contando a todos uma aparência que o estado dele
+    // não sustenta. A mesma ordem que o aviso do servidor terá (rascunho §7.3).
+    if data != before || tema.is_some() {
         let mut db = server.persistence.lock().await;
-        mods::gravar_quintal(&mut db, &id, &data)?;
+        if data != before {
+            mods::gravar_quintal(&mut db, &id, &data)?;
+        }
+        if let Some(tema) = tema {
+            publicar_o_tema(server, &db, &id, tema)?;
+        }
     }
     Ok(response)
+}
+
+/// Grava o tema que um MOD declarou e, se o tema em vigor mudou, o manda a
+/// todos.
+///
+/// Chamada pelos dois caminhos que rodam a metade de servidor — o pedido e o
+/// momento —, com o banco já na mão.
+///
+/// # Errors
+///
+/// Falha se o banco não responder. Uma recusa por outro MOD não é erro: o MOD
+/// já leu `ok` porque o banco mudou entre a leitura de quem pinta e a gravação
+/// (dois MODs com a porta declarando ao mesmo tempo), e é dita no registro de
+/// quem hospeda — o MOD não tem mais como ler.
+pub fn publicar_o_tema(
+    server: &Server,
+    db: &crate::persistence::Persistence,
+    id: &str,
+    tema: super::TemaDeclarado,
+) -> anyhow::Result<()> {
+    publicar_no_barramento(&server.events, db, id, tema)
+}
+
+/// [`publicar_o_tema`], com o barramento em vez do servidor: é o que o
+/// despachante dos momentos tem na mão.
+///
+/// # Errors
+///
+/// As de [`publicar_o_tema`].
+pub fn publicar_no_barramento(
+    barramento: &tokio::sync::broadcast::Sender<crate::server::Event>,
+    db: &crate::persistence::Persistence,
+    id: &str,
+    tema: super::TemaDeclarado,
+) -> anyhow::Result<()> {
+    use crate::persistence::tema::{declarar, em_vigor, Declaracao};
+
+    let antes = em_vigor(db)?;
+    match declarar(db, id, tema.valores.as_deref())? {
+        Declaracao::Aceita => {
+            let agora = em_vigor(db)?;
+            // **A cada troca**, e não a cada declaração: redeclarar o mesmo tema
+            // não é notícia para cinquenta sessões.
+            if agora != antes {
+                let _ = barramento.send(crate::server::Event::TemaMudou { tema: agora });
+            }
+        }
+        Declaracao::DeOutroMod { escolhido } => {
+            tracing::warn!(
+                mod_id = %id_seguro(id),
+                escolhido = %id_seguro(&escolhido),
+                "o MOD declarou um tema e leu ok, mas outro MOD passou a pintar este                  servidor antes da gravação; o tema dele não foi publicado"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Splits only at character boundaries, keeping each wire frame under its ceiling.

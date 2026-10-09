@@ -182,6 +182,22 @@ pub enum Event {
         icon: Option<Vec<u8>>,
     },
 
+    /// O tema do servidor mudou: um MOD com a porta declarou outro, ou tirou o
+    /// dele (rascunho da API 6, §9).
+    ///
+    /// O tema vai no barramento, e não um «vá ler de novo», pela razão do
+    /// ícone logo acima: cada sessão já drena o barramento, e cinquenta leituras
+    /// do mesmo valor no banco seriam cinquenta tomadas do mutex por um dado
+    /// que quem gravou já tem na mão.
+    ///
+    /// **Só a troca em vigor.** Ligar e desligar o MOD não passam por aqui: eles
+    /// mudam o conjunto exigido, a sessão acaba (`ModsMudaram`), e o tema chega
+    /// na reconexão, logo depois do `Session`.
+    TemaMudou {
+        /// O tema de agora, ou nenhum.
+        tema: Option<seele_proto::control::TemaDoServidor>,
+    },
+
     /// A imagem de alguém mudou.
     ///
     /// Difundida a todos, como a do servidor — mas com o dono junto, porque a
@@ -1549,6 +1565,9 @@ pub struct PacoteConferido {
     /// é o que tira a leitura do caminho de cada pedido. Cabe em memória pela
     /// mesma razão que o teto do pacote existe.
     pub fonte: String,
+    /// O que o manifesto desses bytes abre (a porta do tema). Do mesmo
+    /// manifesto que deu a `fonte`, e por isso cabe na mesma chave.
+    pub portas: crate::mods::Portas,
 }
 
 /// Starts the batching writer.

@@ -25,7 +25,7 @@
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{Anfitriao, Falha};
+use super::{Anfitriao, Falha, MetadeDeServidor, TemaDeclarado};
 
 /// One MOD's yard, as it crosses to the thread and back.
 pub type Quintal = BTreeMap<String, String>;
@@ -38,6 +38,8 @@ enum Pedido {
         momento: String,
         carga: String,
         quintais: BTreeMap<String, Quintal>,
+        /// Quem pinta o servidor agora, lido do banco com os quintais.
+        pintor: Option<String>,
         resposta: oneshot::Sender<Resposta>,
     },
     /// **O conjunto mudou; troque o código carregado.**
@@ -52,8 +54,8 @@ enum Pedido {
     /// e trocar o código enquanto um MOD roda seria a corrida que essa
     /// serialização existe para não ter.
     Recarregar {
-        /// `(id, fonte, pasta de dados)`, como `carregar_do_disco` devolve.
-        fontes: Vec<(String, String, std::path::PathBuf)>,
+        /// As metades, como `carregar_do_disco` as devolve.
+        fontes: Vec<MetadeDeServidor>,
         /// Quem não compilou, para quem pediu a troca poder dizer em voz alta.
         resposta: oneshot::Sender<Vec<(String, Falha)>>,
     },
@@ -78,6 +80,10 @@ pub struct Resposta {
     /// Who failed, and how. ADR 0045: a MOD that throws is disabled and the
     /// room continues.
     pub falharam: Vec<(String, Falha)>,
+    /// O tema que cada MOD declarou neste momento, de quem terminou a chamada
+    /// (rascunho da API 6, §9). Quem grava e manda a todos é o
+    /// [`acompanhar`], depois dos quintais.
+    pub temas: BTreeMap<String, TemaDeclarado>,
 }
 
 /// O que um MOD mudou no quintal dele, por chave.
@@ -169,9 +175,8 @@ impl Despachante {
     /// compile is reported and the others still start: one broken MOD is not a
     /// server that will not host.
     #[must_use]
-    pub fn iniciar(
-        fontes: Vec<(String, String, std::path::PathBuf)>,
-    ) -> (Self, Vec<(String, Falha)>) {
+    pub fn iniciar<M: Into<MetadeDeServidor>>(fontes: Vec<M>) -> (Self, Vec<(String, Falha)>) {
+        let fontes: Vec<MetadeDeServidor> = fontes.into_iter().map(Into::into).collect();
         let (para_dentro, mut de_fora) = mpsc::unbounded_channel::<Pedido>();
         let (avisar, recolher) = std::sync::mpsc::channel::<Vec<(String, Falha)>>();
 
@@ -187,9 +192,14 @@ impl Despachante {
                 };
 
                 let mut recusados = Vec::new();
-                for (id, fonte, pasta) in fontes {
-                    if let Err(falha) = anfitriao.carregar(&id, &fonte, &pasta) {
-                        recusados.push((id, falha));
+                for metade in fontes {
+                    if let Err(falha) = anfitriao.carregar_com_portas(
+                        &metade.id,
+                        &metade.fonte,
+                        &metade.pasta,
+                        metade.portas,
+                    ) {
+                        recusados.push((metade.id, falha));
                     }
                 }
                 let _ = avisar.send(recusados);
@@ -207,9 +217,14 @@ impl Despachante {
                             // identificador, que é o que faz um MOD ser
                             // atualizável sem reiniciar o servidor.
                             let mut recusados = Vec::new();
-                            for (id, fonte, pasta) in fontes {
-                                if let Err(falha) = anfitriao.carregar(&id, &fonte, &pasta) {
-                                    recusados.push((id, falha));
+                            for metade in fontes {
+                                if let Err(falha) = anfitriao.carregar_com_portas(
+                                    &metade.id,
+                                    &metade.fonte,
+                                    &metade.pasta,
+                                    metade.portas,
+                                ) {
+                                    recusados.push((metade.id, falha));
                                 }
                             }
                             let _ = resposta.send(recusados);
@@ -218,15 +233,21 @@ impl Despachante {
                             momento,
                             carga,
                             quintais: entrada,
+                            pintor,
                             resposta,
                         } => {
                             let mut quintais = BTreeMap::new();
                             let mut falharam = Vec::new();
+                            let mut temas = BTreeMap::new();
+                            anfitriao.saber_quem_pinta(pintor);
 
                             for (id, mut quintal) in entrada {
                                 let antes = quintal.clone();
                                 match anfitriao.chamar(&id, &momento, &carga, &mut quintal) {
                                     Ok(()) => {
+                                        if let Some(tema) = anfitriao.tomar_tema_declarado() {
+                                            temas.insert(id.clone(), tema);
+                                        }
                                         let mudanca = MudancaNoQuintal::entre(&antes, &quintal);
                                         if !mudanca.vazia() {
                                             quintais.insert(id, mudanca);
@@ -236,7 +257,11 @@ impl Despachante {
                                 }
                             }
 
-                            let _ = resposta.send(Resposta { quintais, falharam });
+                            let _ = resposta.send(Resposta {
+                                quintais,
+                                falharam,
+                                temas,
+                            });
                         }
                     }
                 }
@@ -260,10 +285,7 @@ impl Despachante {
     ///
     /// Devolve quem não compilou. `None` quando a thread dos MODs já saiu — o
     /// servidor está descendo, e não há o que recarregar.
-    pub async fn recarregar(
-        &self,
-        fontes: Vec<(String, String, std::path::PathBuf)>,
-    ) -> Option<Vec<(String, Falha)>> {
+    pub async fn recarregar(&self, fontes: Vec<MetadeDeServidor>) -> Option<Vec<(String, Falha)>> {
         let (responder, esperar) = oneshot::channel();
         self.fila
             .send(Pedido::Recarregar {
@@ -289,12 +311,25 @@ impl Despachante {
         carga: &str,
         quintais: BTreeMap<String, Quintal>,
     ) -> Option<Resposta> {
+        self.entregar_com_tema(momento, carga, quintais, None).await
+    }
+
+    /// [`Self::entregar`], dizendo quem pinta o servidor agora — o que deixa
+    /// `mundo.tema` responder `tema-de-outro-mod` dentro do momento.
+    pub async fn entregar_com_tema(
+        &self,
+        momento: &str,
+        carga: &str,
+        quintais: BTreeMap<String, Quintal>,
+        pintor: Option<String>,
+    ) -> Option<Resposta> {
         let (responder, esperar) = oneshot::channel();
         self.fila
             .send(Pedido::Momento {
                 momento: momento.to_owned(),
                 carga: carga.to_owned(),
                 quintais,
+                pintor,
                 resposta: responder,
             })
             .ok()?;
@@ -322,6 +357,12 @@ impl Despachante {
 /// server going down.
 pub async fn acompanhar(
     mut eventos: tokio::sync::broadcast::Receiver<crate::server::Event>,
+    // **Fraco, e não um `Sender`.** Este laço só sai quando o barramento fecha,
+    // e um `Sender` guardado aqui o manteria aberto para sempre: a tarefa
+    // sobreviveria ao servidor, segurando o banco. Foi o que o teste
+    // `um_evento_do_barramento_chega_ao_mod_e_o_quintal_e_gravado` pegou,
+    // travando, na primeira versão do tema.
+    barramento: tokio::sync::broadcast::WeakSender<crate::server::Event>,
     persistence: std::sync::Arc<tokio::sync::Mutex<crate::persistence::Persistence>>,
     despachante: Despachante,
     raizes: crate::RaizesDosMods,
@@ -383,7 +424,7 @@ pub async fn acompanhar(
 
         // Carregar e soltar o cadeado **antes** de entregar: um MOD lento não
         // pode segurar o banco de quem está conversando.
-        let quintais = {
+        let (quintais, pintor) = {
             let banco = persistence.lock().await;
             let Ok(ligados) = crate::persistence::mods::enabled(&banco) else {
                 continue;
@@ -394,13 +435,19 @@ pub async fn acompanhar(
                     crate::persistence::mods::ler_quintal(&banco, &ligado.id).unwrap_or_default();
                 quintais.insert(ligado.id, quintal);
             }
-            quintais
+            // Um banco que não diz quem pinta não impede o momento: `None`, e a
+            // conferência que vale é a da gravação, em `publicar_no_barramento`.
+            let pintor = crate::persistence::tema::escolhido_ligado(&banco).unwrap_or(None);
+            (quintais, pintor)
         };
         if quintais.is_empty() {
             continue;
         }
 
-        let Some(resposta) = despachante.entregar(momento, &carga, quintais).await else {
+        let Some(resposta) = despachante
+            .entregar_com_tema(momento, &carga, quintais, pintor)
+            .await
+        else {
             // A thread dos MODs sumiu. Não há o que reiniciar aqui: o servidor
             // está descendo, ou subiu sem MOD nenhum.
             break;
@@ -416,6 +463,18 @@ pub async fn acompanhar(
             mudanca.aplicar(&mut atual);
             if let Err(erro) = crate::persistence::mods::gravar_quintal(&mut banco, id, &atual) {
                 tracing::error!(%erro, mod_id = %id, "não deu para gravar o quintal do MOD");
+            }
+        }
+        // O tema depois dos quintais, como no pedido: o `TemaMudou` só sai com o
+        // estado do MOD gravado.
+        // Sem barramento, o servidor está descendo, e não há a quem mandar.
+        if let Some(barramento) = barramento.upgrade() {
+            for (id, tema) in resposta.temas {
+                if let Err(erro) =
+                    super::pedidos::publicar_no_barramento(&barramento, &banco, &id, tema)
+                {
+                    tracing::error!(%erro, mod_id = %id, "não deu para gravar o tema do MOD");
+                }
             }
         }
         for (id, falha) in &resposta.falharam {
@@ -588,6 +647,7 @@ mod tests {
         let (bus, receptor) = tokio::sync::broadcast::channel(16);
         let acompanhando = tokio::spawn(acompanhar(
             receptor,
+            bus.downgrade(),
             std::sync::Arc::clone(&persistence),
             despachante,
             // Uma raiz que não existe: estes testes não recarregam, e uma raiz
@@ -626,6 +686,82 @@ mod tests {
         let _ = acompanhando.await;
     }
 
+    /// **O tema declarado num momento é gravado e vai a todos** (rascunho da
+    /// API 6, §9). O caminho dos eventos é o segundo lugar onde a metade de
+    /// servidor roda, e um `mundo.tema` que só valesse no pedido seria um MOD
+    /// lendo `ok` sem o tema sair.
+    #[tokio::test]
+    async fn um_tema_declarado_num_momento_e_gravado_e_vai_ao_barramento() {
+        use crate::persistence::{Location, Persistence};
+        use seele_proto::ids::{PersonId, VoiceRoomId};
+
+        let banco = Persistence::open(&Location::Memory).expect("banco");
+        crate::persistence::mods::enable(
+            &banco,
+            &crate::persistence::mods::EnabledMod {
+                id: "seele/estilo".to_owned(),
+                version: "4.0.0".to_owned(),
+                hash: "h".to_owned(),
+                repo: String::new(),
+                reach: Vec::new(),
+                server_half: true,
+                api: 6,
+            },
+        )
+        .expect("ligar");
+        let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
+
+        let (despachante, _) = Despachante::iniciar(vec![MetadeDeServidor {
+            id: "seele/estilo".to_owned(),
+            fonte: "globalThis.aoAcontecer = () => { mundo.tema({ acento: '#c86b1f' }); };"
+                .to_owned(),
+            pasta: pasta("tema-no-momento"),
+            portas: super::super::Portas { tema: true },
+        }]);
+
+        let (bus, receptor) = tokio::sync::broadcast::channel(16);
+        let mut quem_ouve = bus.subscribe();
+        let acompanhando = tokio::spawn(acompanhar(
+            receptor,
+            bus.downgrade(),
+            std::sync::Arc::clone(&persistence),
+            despachante,
+            crate::RaizesDosMods {
+                pacotes: std::path::PathBuf::from("sem-pacotes-neste-teste"),
+                dados: std::path::PathBuf::from("sem-dados-neste-teste"),
+            },
+        ));
+
+        bus.send(crate::server::Event::PersonLeft {
+            voice_room: VoiceRoomId(3),
+            person: PersonId(7),
+        })
+        .expect("mandar");
+
+        let esperado = Some(seele_proto::control::TemaDoServidor {
+            mod_id: "seele/estilo".to_owned(),
+            valores: r##"{"acento":"#c86b1f"}"##.to_owned(),
+        });
+        let ouvido = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(crate::server::Event::TemaMudou { tema }) = quem_ouve.recv().await {
+                    return tema;
+                }
+            }
+        })
+        .await
+        .expect("o tema declarado no momento não chegou ao barramento");
+        assert_eq!(ouvido, esperado);
+        assert_eq!(
+            crate::persistence::tema::em_vigor(&*persistence.lock().await).expect("ler"),
+            esperado,
+            "o tema chegou ao barramento sem ter sido gravado"
+        );
+
+        drop((bus, quem_ouve));
+        let _ = acompanhando.await;
+    }
+
     /// **E um MOD que quebra é desabilitado no banco, não só na memória.**
     ///
     /// Se o desabilitar não fosse gravado, o arranque seguinte religaria o MOD,
@@ -661,6 +797,7 @@ mod tests {
         let (bus, receptor) = tokio::sync::broadcast::channel(16);
         let acompanhando = tokio::spawn(acompanhar(
             receptor,
+            bus.downgrade(),
             std::sync::Arc::clone(&persistence),
             despachante,
             // Uma raiz que não existe: estes testes não recarregam, e uma raiz
@@ -1077,10 +1214,11 @@ mod tests {
         // O servidor sobe **sem MOD nenhum** ligado.
         let banco = Persistence::open(&Location::Memory).expect("banco");
         let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
-        let (despachante, _) = Despachante::iniciar(Vec::new());
+        let (despachante, _) = Despachante::iniciar(Vec::<MetadeDeServidor>::new());
         let (bus, receptor) = tokio::sync::broadcast::channel(16);
         let acompanhando = tokio::spawn(acompanhar(
             receptor,
+            bus.downgrade(),
             std::sync::Arc::clone(&persistence),
             despachante,
             crate::RaizesDosMods {
@@ -1185,10 +1323,11 @@ mod tests {
         .expect("ligar");
         let persistence = std::sync::Arc::new(tokio::sync::Mutex::new(banco));
 
-        let (despachante, _) = Despachante::iniciar(Vec::new());
+        let (despachante, _) = Despachante::iniciar(Vec::<MetadeDeServidor>::new());
         let (bus, receptor) = tokio::sync::broadcast::channel(16);
         let acompanhando = tokio::spawn(acompanhar(
             receptor,
+            bus.downgrade(),
             std::sync::Arc::clone(&persistence),
             despachante,
             crate::RaizesDosMods {

@@ -607,6 +607,37 @@ pub const MIGRATIONS: &[Migration] = &[
             ALTER TABLE mods ADD COLUMN api INTEGER NOT NULL DEFAULT 0;
         "#,
     },
+    Migration {
+        version: 15,
+        description: "o tema que a metade de servidor de um MOD declara, guardado pelo servidor",
+        sql: r#"
+            -- Rascunho da API 6, §9: o tema é dado do servidor. A metade de
+            -- servidor só roda dentro de `aoPedir` e de `aoAcontecer`, sem gancho
+            -- de carga, e um tema que dependesse dela sumiria a cada reinício do
+            -- `seeled`. Quem guarda é o servidor, e é daqui que sai o
+            -- `TemaMudou` logo depois do `Session`.
+            --
+            -- Uma linha por MOD, e não uma só para o servidor: desligar um MOD
+            -- preserva os dados dele (ADR 0045), e o tema é um dado. Religado,
+            -- ele volta com o tema que tinha.
+            --
+            -- `valores` é o JSON do tema, como o fio o leva; nulo quando o MOD
+            -- o tirou e continua sendo o escolhido.
+            --
+            -- `escolhido` é o tema por servidor (decisão do dono, 09/10/2026):
+            -- o índice parcial impede, no banco, duas linhas escolhidas. Em
+            -- vigor está o tema do escolhido, **se ele estiver ligado** — uma
+            -- leitura com a tabela `mods`, e não uma coluna de «ativo» que teria
+            -- de ser mantida em dia por todo caminho que liga e desliga.
+            CREATE TABLE temas_dos_mods (
+                mod_id     TEXT PRIMARY KEY NOT NULL REFERENCES mods(id),
+                valores    TEXT,
+                escolhido  INTEGER NOT NULL DEFAULT 0 CHECK (escolhido IN (0, 1))
+            );
+            CREATE UNIQUE INDEX um_tema_por_servidor
+                ON temas_dos_mods (escolhido) WHERE escolhido = 1;
+        "#,
+    },
 ];
 
 #[cfg(test)]
