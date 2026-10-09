@@ -1,0 +1,1535 @@
+/* O celular — protótipo do desenho de `docs/superpowers/specs/2026-10-09-0.16-celular-design.md`.
+ *
+ * **Toda regra começa pela raiz `data-casca="celular"`.** É a regra que o guarda
+ * da Etapa B vai cobrar de todo `celular-*.css`, e o protótipo a segue desde já:
+ * com ela, nada daqui alcança a casca do desktop, mesmo carregado junto.
+ *
+ * Nenhuma cor literal: tudo vem de `tokens.css`, lido de `apps/seele-app/ui/`.
+ * Canto reto e sem sombra, salvo o que o tema do servidor levantar (a exceção
+ * nomeada da `specs/07`), e nunca no núcleo nem na marca. */
+
+/* ---------------------------------------------------------------- a moldura */
+
+:root[data-casca="celular"] {
+  /* A barra da janela não existe: o sistema desenha a dele. */
+  --seele-barra-janela: 0px;
+
+  /* Medidas de layout do celular, e não tokens de desenho: moram aqui como
+     `--seele-barra-janela` mora em `base.css`. */
+  --cel-alvo: 44px;          /* o menor alvo de toque */
+  --cel-campo: 16px;         /* a letra de um campo: abaixo disso o iOS amplia a página ao focar */
+  --cel-topo: 56px;
+  --cel-faixa: 64px;
+  --cel-abas: 56px;
+  --cel-coluna: 480px;       /* o teto da coluna numa tela larga */
+  --cel-escala: 1;           /* o texto dinâmico do sistema, medido em `prototipo.js` */
+  --cel-seguro-topo: env(safe-area-inset-top, 0px);
+  --cel-seguro-pe: env(safe-area-inset-bottom, 0px);
+  --cel-seguro-esq: env(safe-area-inset-left, 0px);
+  --cel-seguro-dir: env(safe-area-inset-right, 0px);
+
+  /* **O núcleo.** Declaradas na raiz a partir dos tokens, chegam a todo filho
+     já resolvidas: o tema escreve os `--seele-*` em `#tela-sessao`, e um
+     `--nucleo-*` herdado ali continua sendo a cor do produto. É isso que
+     garante o MUDO, o SURDO e o SAIR qualquer que seja o tema. */
+  --nucleo-fundo: var(--seele-negro-absoluto);
+  --nucleo-painel: var(--seele-negro-painel);
+  --nucleo-texto: var(--seele-osso);
+  --nucleo-acento: var(--seele-laranja-nerv);
+  --nucleo-borda: var(--seele-linha-forte);
+  --nucleo-rotulo: var(--seele-rotulo-claro);
+  --nucleo-seguro: var(--seele-padrao-azul);
+  --nucleo-alerta: var(--seele-vermelho-alerta);
+  --nucleo-alerta-fundo: var(--seele-vermelho-fraco);
+  /* A letra também: o tema troca `--seele-mono` pela pilha sem serifa, e o
+     núcleo não muda de forma com o tema. */
+  --nucleo-pilha: var(--seele-pilha-mono);
+
+  /* Sem zoom de toque duplo (MUDO e SURDO tocados em seguida ampliavam a
+     página), e sem o iOS crescer a letra sozinho ao deitar o aparelho. A
+     pinça continua: a meta de viewport não a tira. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Puxar para baixo recarregaria a página, e recarregar derruba a sessão: o
+     navegador não deixa a página recusar a recarga. Cada painel rola dentro
+     de si (`overscroll-behavior: contain`), e a raiz não puxa. */
+  overscroll-behavior: none;
+}
+
+:root[data-casca="celular"] body {
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] #app {
+  position: relative;
+  height: 100dvh;
+  width: 100%;
+  max-width: var(--cel-coluna);
+  margin: 0 auto;
+  overflow: hidden;
+  background: var(--seele-negro-absoluto);
+}
+
+/* **Numa tela larga, a coluna de um celular grande**, centrada, com as abas
+   presas a ela. O web app num notebook recebe esta casca (a marca diz
+   «navegador», e não «celular»), e esticar abas de 4 colunas a 1400 px faria
+   cada uma ter 350 px de alvo para uma palavra de 8 letras. */
+@media (min-width: 600px) {
+  :root[data-casca="celular"] #app {
+    border-left: 1px solid var(--seele-linha);
+    border-right: 1px solid var(--seele-linha);
+  }
+}
+
+:root[data-casca="celular"] .tela {
+  height: 100dvh;
+}
+
+/* O rótulo do celular é o de 12 px dos tokens (U04), e não os 10 px da
+   coluna densa do desktop: a distância do olho ao vidro é outra. */
+:root[data-casca="celular"] .rotulo {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .coordenada {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+}
+
+/* Todo controle tem 44 de alvo. */
+:root[data-casca="celular"] :is(button, .botao, .botao-fantasma, select, summary) {
+  min-height: var(--cel-alvo);
+  min-width: var(--cel-alvo);
+}
+
+:root[data-casca="celular"] :is(input, textarea, select) {
+  font-size: var(--cel-campo);
+  font-family: var(--seele-mono);
+}
+
+:root[data-casca="celular"] .botao,
+:root[data-casca="celular"] .botao-fantasma {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-rotulo);
+  text-transform: uppercase;
+  border-radius: var(--seele-raio);
+}
+
+:root[data-casca="celular"] .botao-fantasma {
+  margin-left: 0;
+  color: var(--seele-osso);
+  border-color: var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-largo { width: 100%; }
+
+:root[data-casca="celular"] .cel-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+:root[data-casca="celular"] .cel-titulo-grande { font-size: calc(var(--seele-t-titulo) * var(--cel-escala)); }
+:root[data-casca="celular"] .cel-titulo-medio { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
+
+:root[data-casca="celular"] .cel-dado {
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-nota {
+  margin: 0;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  line-height: 1.45;
+  color: var(--seele-osso);
+}
+
+/* **O texto secundário da sessão é `--seele-rotulo-painel`, e nunca o
+   `--seele-rotulo-claro`.** O claro é o rótulo das camadas que o tema não
+   alcança (as configurações do desktop); dentro da sessão o tema reescreve o
+   painel, e só o `rotulo-painel` muda junto (é o «apagado» do tema). Medido no
+   protótipo: o claro sobre o painel de um tema claro dava 2,21:1. */
+:root[data-casca="celular"] .cel-apagado { color: var(--seele-rotulo-painel); }
+
+:root[data-casca="celular"] .cel-seguro { color: var(--seele-padrao-azul); }
+
+/* **O selo da conexão segura é do núcleo** (o veredito, §10 do rascunho da API
+   6). No desktop ele mora na barra da janela, fora de `#tela-sessao`, e o tema
+   não o alcança; no celular o topo está dentro da sessão, então o selo ganha a
+   placa do núcleo, como o MUDO. Medido no protótipo: sem a placa, o azul sobre
+   o painel claro de um tema caía abaixo de 3:1. */
+:root[data-casca="celular"] .cel-selo-seguro {
+  display: inline-block;
+  padding: 0 6px;
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-seguro);
+  background: var(--nucleo-fundo);
+  border: 1px solid var(--nucleo-borda);
+}
+
+:root[data-casca="celular"] .cel-selo-seguro[data-estado="sem"] { color: var(--nucleo-acento); }
+
+/* ------------------------------------------------------------------ a sessão
+ *
+ * Quatro faixas de cima para baixo: o topo da aba, o painel que rola, a faixa
+ * de voz (só dentro de uma sala) e as abas. O tema do servidor é escrito neste
+ * contêiner, como no desktop. */
+
+:root[data-casca="celular"] #tela-sessao {
+  position: relative;
+  height: 100%;
+  display: grid;
+  /* A coluna é a largura da tela, e não a do conteúdo mais largo: sem o
+     `minmax(0, …)` a grade cresce com a fileira de telemetria ou com uma palavra
+     longa, e a página passa a rolar de lado (medido: 394 px a 390). */
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background: var(--seele-negro-absoluto);
+  color: var(--seele-osso);
+  font-family: var(--seele-mono);
+}
+
+:root[data-casca="celular"] .cel-topo {
+  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  min-height: calc(var(--cel-topo) + var(--cel-seguro-topo));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-topo-texto { flex: 1 1 auto; min-width: 0; }
+
+:root[data-casca="celular"] .cel-topo-sobre {
+  margin: 0 0 2px;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+  /* Quebra, e não corta: o estado da conexão segura mora nesta linha, e com o
+     texto do sistema a 150 % as reticências o engoliam (medido no protótipo). */
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-topo-canal {
+  margin: 0;
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-topo-canal .cel-cerquilha { color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-topo-acao {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  font-size: 16px;
+}
+
+:root[data-casca="celular"] .cel-painel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 calc(16px + var(--cel-seguro-dir)) 24px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-painel-cheio {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Com a queda, a sessão esmaece e continua legível (specs/07: a queda não
+   fecha a tela). */
+:root[data-casca="celular"] #tela-sessao[data-queda] .cel-painel { opacity: 0.55; }
+
+/* ------------------------------------------------------------------ as abas */
+
+:root[data-casca="celular"] .cel-abas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-aba {
+  position: relative;
+  min-height: var(--cel-abas);
+  display: grid;
+  place-items: end center;
+  padding: 0 2px 14px;
+  background: none;
+  border: 0;
+  border-top: 2px solid transparent;
+  color: var(--seele-rotulo-painel);
+  font: inherit;
+  /* **Com teto**, como a barra de abas do iOS: quatro palavras de oito letras
+     numa largura de 390 não crescem com o texto do sistema sem uma cobrir a
+     outra (medido a 150 %: 106 px de texto em 98 de aba). O nome inteiro da aba
+     continua no leitor de tela, e o conteúdo de cada aba cresce sem teto. */
+  font-size: min(calc(var(--seele-t-rotulo) * var(--cel-escala)), 13px);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+:root[data-casca="celular"] .cel-aba[aria-current="page"] {
+  color: var(--seele-osso);
+  border-top-color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+}
+
+/* A aba AJUSTES e a linha MODS DESTE SERVIDOR são a saída do tema: o caminho
+   para «o SEELE desenha» e para desligar o MOD que pintou a sessão. Elas leem o
+   núcleo, como o MUDO, e um tema ilegível não fecha a porta de sair dele. */
+:root[data-casca="celular"] .cel-aba[data-nucleo] {
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-rotulo);
+  background: var(--nucleo-painel);
+  border-left: 1px solid var(--nucleo-borda);
+}
+
+:root[data-casca="celular"] .cel-aba[data-nucleo][aria-current="page"] {
+  color: var(--nucleo-texto);
+  border-top-color: var(--nucleo-acento);
+  background: var(--nucleo-fundo);
+}
+
+:root[data-casca="celular"] .cel-ajuste.cel-nucleo {
+  font-family: var(--nucleo-pilha);
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border: 1px solid var(--nucleo-borda);
+  padding: 8px;
+}
+
+:root[data-casca="celular"] .cel-ajuste.cel-nucleo .cel-linha-sub,
+:root[data-casca="celular"] .cel-ajuste.cel-nucleo .glifo { color: var(--nucleo-rotulo); }
+
+:root[data-casca="celular"] .cel-aba-conta {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 18px;
+  padding: 0 4px;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0;
+  line-height: 16px;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+/* Com o teclado do sistema aberto, as abas saem e a faixa de voz se recolhe no
+   topo: o compositor fica colado ao teclado. */
+:root[data-casca="celular"] #tela-sessao[data-teclado] .cel-abas { display: none; }
+
+/* ---------------------------------------------------------- a faixa de voz
+ *
+ * Do tema na superfície, do núcleo nos três controles. A faixa toma o fundo e a
+ * borda do tema como o resto da sessão; MUDO, SURDO e SAIR têm fundo, borda e
+ * texto opacos do núcleo, e o contraste deles é medido entre texto e fundo do
+ * núcleo — não depende do que o tema pintou em volta. */
+
+:root[data-casca="celular"] .voz-celular {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  min-height: var(--cel-faixa);
+  padding: 0 var(--cel-seguro-dir) 0 var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .voz-sala {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 8px 8px 16px;
+  background: none;
+  border: 0;
+  border-left: 3px solid var(--seele-laranja-nerv);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+:root[data-casca="celular"] .voz-sala-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  letter-spacing: var(--seele-tracking-cartela);
+  text-transform: uppercase;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-casca="celular"] .voz-sala-quem {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-casca="celular"] .voz-sala-quem .cel-falando { color: var(--seele-fosforo); }
+
+/* **A placa do núcleo.** Os três controles moram numa placa opaca do núcleo, e
+   não sobre o fundo temado da faixa. É o que torna a borda deles mensurável: a
+   WCAG pede 3:1 entre o contorno de um controle e o que está em volta, e
+   nenhuma cor de borda alcança 3:1 contra qualquer fundo que um tema escolha
+   (medido no protótipo: `linha-forte` sobre o painel dá 1,59:1 já sem tema, e o
+   osso sobre um painel claro, 1,01:1). Sobre a placa, a borda é medida contra
+   uma cor que o tema não alcança. */
+:root[data-casca="celular"] .voz-controles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 8px 8px;
+  background: var(--nucleo-fundo);
+  border-left: 1px solid var(--nucleo-borda);
+}
+
+/* Os três controles do núcleo. Nenhuma linha deste bloco lê um `--seele-*`. */
+:root[data-casca="celular"] .voz-nucleo {
+  display: grid;
+  place-items: center;
+  gap: 0;
+  min-width: 52px;
+  min-height: 48px;
+  padding: 4px 6px;
+  font: inherit;
+  font-family: var(--nucleo-pilha);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  line-height: 12px;
+  text-transform: uppercase;
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border: 2px solid var(--nucleo-rotulo);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+:root[data-casca="celular"] .voz-nucleo .glifo { width: 18px; height: 18px; vertical-align: 0; }
+
+:root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] {
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-texto);
+}
+
+/* SAIR afastado dos outros dois: é o único que desfaz alguma coisa. */
+:root[data-casca="celular"] #voz-sair { margin-right: 6px; }
+
+/* O MUDO é o controle mais tocado da tela, e o maior. */
+:root[data-casca="celular"] #voz-mudo { min-width: 64px; }
+
+/* SEGURAR PARA FALAR: o mesmo lugar do MUDO, mais largo; só fala com o dedo nele. */
+:root[data-casca="celular"] #voz-mudo[data-modo="segurar"] { min-width: 84px; }
+
+/* No topo, com o teclado aberto: o MUDO continua a um toque. */
+:root[data-casca="celular"] .voz-recolhida {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+:root[data-casca="celular"] .voz-recolhida .voz-recolhida-sala {
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* ----------------------------------------------------------- a aba SERVIDOR */
+
+:root[data-casca="celular"] .cel-secao-titulo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 24px 0 8px;
+}
+
+:root[data-casca="celular"] .cel-redes {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 0 calc(-16px - var(--cel-seguro-esq));
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 12px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+  scrollbar-width: none;
+}
+
+:root[data-casca="celular"] .cel-rede {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--cel-alvo);
+  padding: 4px 12px 4px 4px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-rede[aria-current="true"] { border-color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-sigla {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 14px;
+  color: var(--seele-laranja-nerv);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-sala {
+  margin: 0 0 8px;
+  padding: 12px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  box-shadow: var(--seele-sombra);
+}
+
+/* A sala em que se está: borda e barra do acento, e a marca escrita. **Sem o
+   preenchimento laranja-fraco do desktop**: as cores de estado derivadas do tema
+   (o fósforo de quem fala, o azul da marca) só garantem 4,5:1 sobre o fundo e o
+   painel, e sobre o tom fraco do acento caíam a 3,8:1 (medido com os temas do
+   protótipo). */
+:root[data-casca="celular"] .cel-sala[data-nossa] {
+  border-color: var(--seele-laranja-nerv);
+  border-left-width: 3px;
+}
+
+:root[data-casca="celular"] .cel-sala-cabeca {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+:root[data-casca="celular"] .cel-sala-nome { flex: 1 1 auto; }
+
+:root[data-casca="celular"] .cel-marca {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border: 1px solid currentColor;
+}
+
+:root[data-casca="celular"] .cel-marca-aqui { color: var(--seele-padrao-azul); }
+:root[data-casca="celular"] .cel-marca-cheia { color: var(--seele-rotulo-painel); }
+:root[data-casca="celular"] .cel-marca-senha { color: var(--seele-rotulo-painel); }
+
+:root[data-casca="celular"] .cel-sala-pessoas {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-sala-pessoas .cel-falando { color: var(--seele-fosforo); }
+:root[data-casca="celular"] .cel-sala-vazia { color: var(--seele-rotulo-painel); }
+
+:root[data-casca="celular"] .cel-sala-entrar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+:root[data-casca="celular"] .cel-entrar-mudo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.12em;
+}
+
+:root[data-casca="celular"] .cel-lista {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-linha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 4px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+  font: inherit;
+  text-align: left;
+}
+
+:root[data-casca="celular"] .cel-linha[aria-current="true"] {
+  background: var(--seele-negro-painel);
+  box-shadow: inset 3px 0 0 var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-linha-texto { flex: 1 1 auto; min-width: 0; }
+:root[data-casca="celular"] .cel-linha-sub {
+  display: block;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-conta {
+  padding: 0 6px;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-seta { color: var(--seele-rotulo-painel); }
+
+/* «Do MOD X»: toda superfície diz de qual MOD é (núcleo: atribuição). */
+:root[data-casca="celular"] .cel-de-mod {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+/* O que o celular não faz, dito onde o controle estaria. */
+:root[data-casca="celular"] .cel-fora {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--seele-linha-forte);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-fora .rotulo { display: block; margin-bottom: 4px; }
+
+/* ----------------------------------------------------------- a aba CONVERSA */
+
+:root[data-casca="celular"] .cel-mensagens {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0 16px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+:root[data-casca="celular"] .cel-dia {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 16px;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-dia::before,
+:root[data-casca="celular"] .cel-dia::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-msg {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 2px 10px;
+  padding: 8px 16px;
+}
+
+:root[data-casca="celular"] .cel-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] .cel-msg > .cel-avatar { grid-row: span 2; }
+
+:root[data-casca="celular"] .cel-avatar[data-proprio] { color: var(--seele-padrao-azul); border-color: var(--seele-padrao-azul); }
+:root[data-casca="celular"] .cel-avatar[data-retrato] { background: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-msg-autor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-msg-nome { color: var(--seele-osso); font-weight: 600; }
+:root[data-casca="celular"] .cel-msg[data-propria] .cel-msg-nome { color: var(--seele-padrao-azul); }
+:root[data-casca="celular"] .cel-msg-hora { color: var(--seele-rotulo-painel); font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+
+/* O apelido verificado, ao lado do nome que um MOD desenha (D-nucleo-1).
+   Azul, que é a cor de identidade verificada (specs/07). */
+:root[data-casca="celular"] .cel-verificado {
+  color: var(--seele-padrao-azul);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-msg-corpo {
+  grid-column: 2;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+}
+
+/* O vermelho fica fora de todo caminho de tema (F3, §9), então ele mora numa
+   placa própria, como a faixa da queda: vermelho sobre o vermelho-fraco, e
+   nunca sobre o painel que o tema pintou. */
+:root[data-casca="celular"] .cel-msg-falhou {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: var(--nucleo-alerta-fundo);
+  color: var(--nucleo-alerta);
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-msg-falhou .botao-fantasma {
+  color: var(--nucleo-texto);
+  border-color: var(--nucleo-texto);
+}
+
+:root[data-casca="celular"] .cel-anexo {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  min-height: var(--cel-alvo);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-painel);
+  color: var(--seele-osso);
+  font: inherit;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  text-align: left;
+}
+
+:root[data-casca="celular"] .cel-compor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  padding: 8px calc(12px + var(--cel-seguro-dir)) 8px calc(12px + var(--cel-seguro-esq));
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+/* O ENVIAR com o tracking mais curto: a 360, o tracking largo do rótulo
+   empurrava o campo para 180 px e o «escrever em #geral» quebrava em dois. */
+:root[data-casca="celular"] .cel-compor .botao { padding: 8px 12px; letter-spacing: 0.1em; }
+
+:root[data-casca="celular"] .cel-compor textarea {
+  width: 100%;
+  min-height: var(--cel-alvo);
+  max-height: 140px;
+  resize: none;
+  padding: 10px;
+  line-height: 1.4;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+:root[data-casca="celular"] .cel-compor textarea:focus { outline: none; border-color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-compor-anexar {
+  display: grid;
+  place-items: center;
+  background: none;
+  color: var(--seele-osso);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+  font-size: 18px;
+}
+
+/* O teclado do sistema, desenhado só no protótipo para a foto mostrar o que
+   sobra de tela. No produto quem o desenha é o sistema, e a casca mede a altura
+   dele pelo `visualViewport`. */
+:root[data-casca="celular"] .cel-teclado-falso {
+  height: 291px;
+  display: grid;
+  place-items: center;
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+  color: var(--seele-rotulo-painel);
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.2em;
+}
+
+/* ------------------------------------------------------------ a aba PESSOAS */
+
+:root[data-casca="celular"] .cel-pessoa {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 4px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+  font: inherit;
+  text-align: left;
+}
+
+:root[data-casca="celular"] .cel-pessoa .cel-avatar { width: 40px; height: 40px; font-size: 12px; }
+
+:root[data-casca="celular"] .cel-pessoa-nome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-pessoa-estado {
+  display: block;
+  margin-top: 2px;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-pessoa-estado[data-estado="falando"] { color: var(--seele-fosforo); }
+
+/* O sinal: número, barra de blocos e a palavra da faixa. Nunca só cor (specs/06). */
+:root[data-casca="celular"] .cel-sinal {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-sinal-numero { font-weight: 600; }
+:root[data-casca="celular"] .cel-sinal-barra { font-size: 7px; line-height: 10px; letter-spacing: 0; white-space: nowrap; }
+:root[data-casca="celular"] .cel-sinal[data-faixa="Verde"] .cel-sinal-barra { color: var(--seele-sync-nominal); }
+:root[data-casca="celular"] .cel-sinal[data-faixa="Laranja"] .cel-sinal-barra { color: var(--seele-sync-degradado); }
+:root[data-casca="celular"] .cel-sinal[data-faixa="Vermelho"] .cel-sinal-barra { color: var(--seele-sync-critico); }
+:root[data-casca="celular"] .cel-sinal-faixa {
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.16em;
+  color: var(--seele-rotulo-painel);
+  text-transform: uppercase;
+}
+
+/* FORA DO AR: apagado e sem horário (D-fio-4). Apagado pela cor do rótulo, que
+   passa AA; o grupo inteiro diz o estado em palavra, então a cor não carrega
+   nada sozinha. */
+:root[data-casca="celular"] .cel-fora-do-ar {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-casca="celular"] .cel-fora-do-ar li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-rotulo-painel);
+}
+
+:root[data-casca="celular"] .cel-fora-do-ar .cel-avatar {
+  color: var(--seele-rotulo-painel);
+  border-style: dashed;
+}
+
+/* ------------------------------------------------------------ a aba AJUSTES */
+
+:root[data-casca="celular"] .cel-perfil {
+  position: relative;
+  margin: 0 calc(-16px - var(--cel-seguro-esq));
+  min-height: 168px;
+  display: flex;
+  align-items: flex-end;
+  padding: 16px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] .cel-perfil .cel-capa { position: absolute; inset: 0; }
+
+/* O texto do produto sobre uma capa fica numa placa opaca (contrato do §4 do
+   rascunho da API 6): a capa aparece em volta, nunca por trás de uma letra. */
+:root[data-casca="celular"] .cel-placa {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-retrato {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-family: var(--seele-display);
+  font-weight: 900;
+  font-size: 20px;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] .cel-operador-barra {
+  margin: 12px 0 0;
+  max-height: 96px;          /* parâmetro: o número sai da M3 no iPhone */
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-ajuste {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 4px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+  font: inherit;
+  text-align: left;
+}
+
+:root[data-casca="celular"] .cel-ajuste .glifo { width: 18px; height: 18px; color: var(--seele-rotulo-painel); }
+
+:root[data-casca="celular"] .cel-voltar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 0 8px 0 0;
+  color: var(--seele-laranja-nerv);
+  font: inherit;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+:root[data-casca="celular"] .cel-campo {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0 0;
+}
+
+:root[data-casca="celular"] .cel-campo input[type="text"],
+:root[data-casca="celular"] .cel-campo select {
+  width: 100%;
+  min-height: var(--cel-alvo);
+  padding: 8px 10px;
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: 1px solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+:root[data-casca="celular"] .cel-segmento {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border: 1px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-segmento button {
+  background: none;
+  border: 0;
+  color: var(--seele-rotulo-painel);
+  font: inherit;
+  font-size: calc(var(--seele-t-rotulo) * var(--cel-escala));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+:root[data-casca="celular"] .cel-segmento button[aria-pressed="true"] {
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-laranja-nerv);
+}
+
+:root[data-casca="celular"] input[type="range"] { width: 100%; min-height: var(--cel-alvo); accent-color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-medidor {
+  height: 12px;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .cel-medidor > span {
+  display: block;
+  height: 100%;
+  background: var(--seele-fosforo);
+}
+
+:root[data-casca="celular"] .cel-no-computador {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+:root[data-casca="celular"] .cel-no-computador li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-no-computador strong {
+  display: block;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  text-transform: uppercase;
+  letter-spacing: var(--seele-tracking-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+}
+
+/* --------------------------------------------------------------- a CHAMADA
+ *
+ * Tela cheia dentro da sessão, cobrindo o painel e as abas. A fileira de baixo
+ * fica exatamente onde a faixa de voz estava, com os três controles no mesmo
+ * x e y; no lugar das abas, a telemetria. */
+
+:root[data-casca="celular"] .cel-chamada {
+  /* Absoluta, e não uma célula da grade da sessão: uma célula que ocupa as
+     quatro fileiras empurra os outros quatro filhos para fileiras implícitas
+     abaixo dela (medido: a CHAMADA ficou com 260 px e a conversa por baixo). */
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .cel-palco {
+  position: relative;
+  margin: 0;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] .cel-palco-bloco { display: grid; gap: 8px; margin: 0 0 12px; }
+
+:root[data-casca="celular"] .cel-palco-escolha {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+:root[data-casca="celular"] .cel-palco-escolha [aria-pressed="true"] { border-color: var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .cel-palco-som {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+:root[data-casca="celular"] .cel-palco-volume { display: grid; gap: 2px; }
+
+/* A tela que o aparelho não decodifica: o lugar do palco fica, com a frase, e o
+   resto da chamada segue (D-celular-2; o H.264 High no iPhone está por medir). */
+:root[data-casca="celular"] .cel-palco-nao-abre {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+  border-style: dashed;
+}
+
+:root[data-casca="celular"] .cel-palco-legenda {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+:root[data-casca="celular"] .cel-palco-cheia {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+}
+
+:root[data-casca="celular"] .cel-pastilha {
+  padding: 2px 8px;
+  font-size: calc(var(--seele-t-micro) * var(--cel-escala));
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--seele-negro-absoluto);
+  background: var(--seele-fosforo);
+}
+
+:root[data-casca="celular"] .cel-pastilha-mudo { color: var(--seele-osso); background: var(--seele-negro-painel); border: 1px solid var(--seele-linha-forte); }
+
+:root[data-casca="celular"] .cel-grade-rolagem { overflow-y: auto; padding: 12px 16px 16px; }
+
+:root[data-casca="celular"] .cel-grade {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+:root[data-casca="celular"] .cel-cartao {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px;
+  border: 1px solid var(--seele-linha);
+  border-radius: var(--seele-raio);
+  background: var(--seele-negro-painel);
+  overflow: hidden;
+  box-shadow: var(--seele-sombra);
+}
+
+:root[data-casca="celular"] .cel-cartao[data-falando] {
+  box-shadow: inset 0 0 0 2px var(--seele-fosforo);
+}
+
+:root[data-casca="celular"] .cel-cartao .cel-capa { position: absolute; inset: 0; }
+
+:root[data-casca="celular"] .cel-cartao .cel-avatar { position: relative; width: 40px; height: 40px; }
+
+:root[data-casca="celular"] .cel-cartao-placa {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--seele-negro-painel);
+  border: 1px solid var(--seele-linha);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-cartao-linha { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 6px; align-items: baseline; min-width: 0; }
+:root[data-casca="celular"] .cel-cartao-linha > * { min-width: 0; overflow-wrap: anywhere; }
+
+:root[data-casca="celular"] .cel-telemetria {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: var(--cel-abas);
+  padding: 0 var(--cel-seguro-dir) var(--cel-seguro-pe) var(--cel-seguro-esq);
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-telemetria > div {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  border-right: 1px solid var(--seele-linha);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+:root[data-casca="celular"] .cel-telemetria > div:last-child { border-right: 0; }
+
+:root[data-casca="celular"] .cel-chamada .voz-sala { border-left-color: transparent; }
+
+/* --------------------------------------------------------------- as folhas
+ *
+ * Corte seco (specs/07): a folha aparece, não desliza. Só acompanha o dedo
+ * enquanto é arrastada. */
+
+:root[data-casca="celular"] .cel-veu {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: var(--seele-negro-absoluto);
+  opacity: 0.72;
+}
+
+:root[data-casca="celular"] .cel-folha {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  max-height: 85%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-top: 2px solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  padding-bottom: var(--cel-seguro-pe);
+}
+
+:root[data-casca="celular"] .cel-folha-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px calc(8px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+/* A alça de arrasto: só desenho; o FECHAR é o caminho. */
+:root[data-casca="celular"] .cel-folha-cabeca::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  width: 40px;
+  margin-left: -20px;
+  border-top: 2px solid var(--seele-linha-forte);
+}
+
+:root[data-casca="celular"] .cel-folha-corpo {
+  overflow-y: auto;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-folha-acoes {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* A confirmação: a mesma folha, com o verbo destrutivo dito por inteiro. */
+:root[data-casca="celular"] .cel-folha[data-confirmacao] { border-top-color: var(--seele-vermelho-alerta); }
+
+/* ----------------------------------------------------------- a entrada
+ *
+ * Uma coluna, a marca no alto (uma forma por tela, docs/marca.md), o que se
+ * confere no meio e as ações embaixo, ao alcance do polegar. */
+
+:root[data-casca="celular"] .cel-entrada {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .cel-entrada-marca {
+  padding: calc(var(--cel-seguro-topo) + 16px) 16px 8px;
+}
+
+:root[data-casca="celular"] .cel-entrada-marca img { height: 40px; width: auto; display: block; }
+
+:root[data-casca="celular"] .cel-entrada-corpo {
+  overflow-y: auto;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-entrada-pe {
+  display: grid;
+  gap: 8px;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) calc(12px + var(--cel-seguro-pe)) calc(16px + var(--cel-seguro-esq));
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+/* O rótulo em cima do valor, e não ao lado: com o rótulo na coluna da esquerda,
+   a impressão ficava com 130 px e o quarto grupo de cada fileira saía da tela
+   (medido a 390). A impressão é o dado que se confere; ela tem a largura toda. */
+:root[data-casca="celular"] .cel-ficha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-ficha dt { margin: 8px 0 0; }
+:root[data-casca="celular"] .cel-ficha dt:first-child { margin-top: 0; }
+:root[data-casca="celular"] .cel-ficha dd { margin: 0; font-size: calc(var(--seele-t-dado) * var(--cel-escala)); overflow-wrap: anywhere; }
+
+/* A impressão em grupos de quatro, quatro grupos por fileira: dezesseis grupos
+   que se comparam a olho com a impressão que quem hospeda lê no SEELE dele. */
+:root[data-casca="celular"] .cel-impressao {
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: 2px 10px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  letter-spacing: 0.06em;
+}
+
+:root[data-casca="celular"] .cel-aviso {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: 1px solid var(--seele-laranja-nerv);
+  border-left-width: 3px;
+  background: var(--seele-laranja-fraco);
+}
+
+:root[data-casca="celular"] .cel-aviso[data-tipo="erro"] {
+  border-color: var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+}
+
+:root[data-casca="celular"] .cel-aviso .cel-titulo { margin-bottom: 6px; }
+
+:root[data-casca="celular"] .cel-passos {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+/* -------------------------------------------------------- conectando
+ *
+ * A única animação da marca (docs/marca.md): o enlace se desenha do nó cheio
+ * ao vazio. Dura o tempo da conexão; sob movimento reduzido, o símbolo fica
+ * inteiro e parado (`acessibilidade.css` desliga toda animação). */
+
+:root[data-casca="celular"] .cel-conectando {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 24px;
+  height: 100%;
+  padding: 24px;
+}
+
+:root[data-casca="celular"] .cel-conectando svg { width: 96px; height: 96px; }
+
+:root[data-casca="celular"] .cel-conectando svg path {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: cel-enlace 1200ms linear infinite;
+}
+
+@keyframes cel-enlace {
+  to { stroke-dashoffset: 0; }
+}
+
+:root[data-casca="celular"] .cel-etapas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 340px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-etapas li { padding: 4px 0; border-bottom: 1px solid var(--seele-linha); }
+:root[data-casca="celular"] .cel-etapas li[data-feita] { color: var(--seele-rotulo-claro); }
+
+/* --------------------------------------------------------- a queda
+ *
+ * Faixa sobre a sessão, e não tela no lugar dela: a conversa continua ali para
+ * leitura (specs/07). A marca perde o enlace e os nós ficam — nada troca de
+ * cor na marca; o vermelho é da faixa. */
+
+:root[data-casca="celular"] .cel-queda {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 15;
+  padding: calc(var(--cel-seguro-topo) + 10px) 16px 12px;
+  border-bottom: 2px solid var(--nucleo-alerta);
+  background: var(--nucleo-alerta-fundo);
+  color: var(--nucleo-texto);
+}
+
+:root[data-casca="celular"] .cel-queda .cel-titulo { color: var(--nucleo-alerta); }
+
+:root[data-casca="celular"] .cel-queda-conta {
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- os MODs
+ *
+ * As superfícies que um MOD declara, nos lugares do §11 do rascunho da API 6. A
+ * saída é do produto, com 44 de alvo (no desktop ela tem 28). */
+
+:root[data-casca="celular"] .cel-superficie-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-bottom: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-superficie-cabeca .cel-superficie-titulo { flex: 1 1 auto; min-width: 0; }
+
+:root[data-casca="celular"] .cel-superficie-corpo { padding: 16px; }
+
+/* O diálogo de MOD em tela cheia, com as ações fixas embaixo, acima da barra
+   de gestos (D-estilo-1). */
+/* O palco dos MODs ocupa as duas primeiras fileiras da sessão — o topo e o
+   painel —, e nunca a faixa de voz nem as abas. É estrutural: uma superfície de
+   MOD montada aqui não tem como cobrir o MUDO, o SAIR ou o caminho para
+   AJUSTES, que é o único jeito de desligar um MOD no celular. */
+:root[data-casca="celular"] .cel-palco-dos-mods {
+  grid-row: 1 / 3;
+  grid-column: 1;
+  position: relative;
+  pointer-events: none;
+}
+
+:root[data-casca="celular"] .cel-palco-dos-mods > * { pointer-events: auto; }
+
+:root[data-casca="celular"] .cel-pe-da-sessao { grid-row: 3; grid-column: 1; }
+:root[data-casca="celular"] #tela-sessao > .cel-topo { grid-row: 1; grid-column: 1; }
+:root[data-casca="celular"] #tela-sessao > .cel-painel { grid-row: 2; grid-column: 1; }
+:root[data-casca="celular"] #tela-sessao > .cel-abas { grid-row: 4; grid-column: 1; }
+
+:root[data-casca="celular"] .cel-dialogo {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  padding-top: var(--cel-seguro-topo);
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] .cel-dialogo-acoes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) 12px calc(16px + var(--cel-seguro-esq));
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-dialogo-acoes .cel-largo { grid-column: 1 / -1; }
+
+/* A prévia de tema, com o diálogo recolhido: o selo fica acima da faixa e das
+   abas, e um toque devolve o formulário. */
+:root[data-casca="celular"] .cel-selo-previa {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  border-top: 2px solid var(--nucleo-acento);
+  background: var(--nucleo-painel);
+  color: var(--nucleo-texto);
+}
+
+:root[data-casca="celular"] .cel-avisos {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  z-index: 25;
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+}
+
+:root[data-casca="celular"] .cel-aviso-de-mod {
+  pointer-events: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--seele-linha-forte);
+  border-left: 3px solid var(--seele-laranja-nerv);
+  background: var(--seele-negro-painel);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+/* A amostra de tema dentro do formulário do ESTILO: seis cores numa coluna. */
+:root[data-casca="celular"] .cel-cores {
+  display: grid;
+  gap: 8px;
+}
+
+:root[data-casca="celular"] .cel-cor {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] .cel-cor-amostra { width: 44px; height: 44px; border: 1px solid var(--seele-linha-forte); }
+
+/* As capas de exemplo do protótipo: desenho de amostra, no lugar da mídia que
+   a metade de servidor do PERFIS entregaria. Animadas, porque a D-capa-1 as quer
+   animadas; sob movimento reduzido, `acessibilidade.css` as para. */
+:root[data-casca="celular"] .cel-capa {
+  background-color: var(--seele-placa-negro-3);
+  background-image: repeating-linear-gradient(115deg,
+    var(--seele-placa-negro-3) 0 14px, var(--seele-placa-negro-2) 14px 28px);
+  background-size: 200% 200%;
+  animation: cel-capa 6s linear infinite;
+}
+
+:root[data-casca="celular"] .cel-capa[data-capa="b"] {
+  background-image: repeating-linear-gradient(45deg,
+    var(--seele-azul-fraco) 0 10px, var(--seele-padrao-azul) 10px 12px);
+}
+
+:root[data-casca="celular"] .cel-capa[data-capa="c"] {
+  background-image: repeating-linear-gradient(0deg,
+    var(--seele-fosforo-fraco) 0 6px, var(--seele-negro-painel) 6px 12px);
+}
+
+@keyframes cel-capa {
+  to { background-position: 100% 100%; }
+}
