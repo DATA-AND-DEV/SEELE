@@ -47,6 +47,7 @@ import tempfile
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
 PROTO_MODS = RAIZ / "crates" / "seele-proto" / "src" / "mods.rs"
+PROTO_VERSAO = RAIZ / "crates" / "seele-proto" / "src" / "version.rs"
 
 
 def apis_aceitas() -> str:
@@ -62,11 +63,35 @@ def apis_aceitas() -> str:
     return "[" + achado.group(1) + "]"
 
 
+def versao_do_servidor() -> str:
+    """`VERSAO_DO_SERVIDOR` lida do Rust, pela mesma razão de `apis_aceitas`.
+
+    É a versão da linha desta janela, a que `linhas_para_hospedar` devolve
+    primeiro. Falha alto se a constante mudar de forma.
+    """
+    achado = re.search(r'pub const VERSAO_DO_SERVIDOR: &str = "([0-9]+\.[0-9]+)";', PROTO_VERSAO.read_text())
+    if not achado:
+        raise SystemExit(f"não achei `VERSAO_DO_SERVIDOR` em {PROTO_VERSAO}; o duble precisa dela.")
+    return achado.group(1)
+
+
+def linha_desta_janela() -> str:
+    """A linha desta janela, com a mesma regra de `Linha::do_servidor`.
+
+    `seele-lancador/src/linha.rs`: o Servidor 0.15 é a linha `0.15`, e do 1.0 em
+    diante a linha é só o número maior (`1`).
+    """
+    maior, menor = versao_do_servidor().split(".")
+    return f"0.{menor}" if maior == "0" else maior
+
+
 DUBLE = """<script>
 // O duble do Tauri. Responde o bastante para a casca andar; ver o cabeçalho de
 // `tools/carga-da-casca.py` sobre o que ele deliberadamente não finge.
 const SEELE_RETRATO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4FCSPFTEMLQkA4oZYwU22lhgAAAAASUVORK5CYII=";
 const SEELE_APIS_ACEITAS = __APIS_ACEITAS__;
+const SEELE_VERSAO_DO_SERVIDOR = "__VERSAO_DO_SERVIDOR__";
+const SEELE_LINHA = "__LINHA__";
 const SEELE_RESPOSTAS = {
   hospedar: { aqui: "127.0.0.1:8383", convite: "seele://127.0.0.1:8383?fp=abc",
               alcance: "SoRedeLocal", porta_recusada: null, encontro_recusado: null },
@@ -123,7 +148,12 @@ SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
 window.__SEELE_CHAMADAS = [];
 window.__SEELE_ARGS = {};
 window.__SEELE_EM_SESSAO = false;
-window.__SEELE_APELIDO = "";
+// **Uma máquina que já escolheu o nome**, o mesmo do quadro. Desde a `acbc1c29`
+// a primeira entrada de uma máquina sem nome abre «COMO OS OUTROS VÃO TE
+// CHAMAR?» antes do `connect` e espera a resposta; com `""` aqui, todo roteiro
+// que passa por `entrarNaSessao` parava nessa pergunta. Um roteiro sobre a
+// máquina sem nome põe `""` antes de entrar.
+window.__SEELE_APELIDO = "rafa";
 window.__SEELE_SERVIDORES = [];
 window.__SEELE_SEM_RESPOSTA = new Set();
 window.__SEELE_OUVINTES = {};
@@ -168,6 +198,18 @@ window.__TAURI__ = {
       // carga limpa. Um roteiro pode pôr servidores em `__SEELE_SERVIDORES`.
       if (cmd === "servidores_guardados") return window.__SEELE_SERVIDORES;
       if (cmd === "versoes_instaladas") return [];
+      // **A versão do servidor desta janela, e só ela**, com o formato de
+      // `versoes::LinhaParaHospedar`. O produto devolve sempre ao menos esta,
+      // primeiro e escolhida; as outras vêm de um catálogo guardado que o
+      // duble não tem. Sem esta linha o `null` estourava em `linhas.length`
+      // dentro de `desenharVersoesParaHospedar`, desde a `a2160d75`: a tela de
+      // preparar já estava na frente, o `TypeError` caía num `console.warn` e
+      // o bloco das versões nunca era desenhado. Nenhum roteiro reprovava por
+      // isso, e é por isso que ninguém viu.
+      if (cmd === "linhas_para_hospedar") {
+        return [{ linha: SEELE_LINHA, servidor: SEELE_VERSAO_DO_SERVIDOR, apis: SEELE_APIS_ACEITAS,
+                  app: null, esta: true, instalada: true, tem_pacote: true, perde_conversas: false }];
+      }
       // Com `null`, `ultimaQueEsteBuildEntende` estourava em `.length` e o
       // catálogo inteiro virava «ALGO FALHOU».
       if (cmd === "apis_de_mod_aceitas") return SEELE_APIS_ACEITAS;
@@ -335,7 +377,11 @@ def main() -> int:
         if opcoes.roteiro:
             corpo = opcoes.roteiro.read_text()
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
-        duble = DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
+        duble = (
+            DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
+            .replace("__VERSAO_DO_SERVIDOR__", versao_do_servidor())
+            .replace("__LINHA__", linha_desta_janela())
+        )
         pagina.write_text(texto[:corte] + duble + texto[corte:] + roteiro)
 
         saida = subprocess.run(
