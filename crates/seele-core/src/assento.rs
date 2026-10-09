@@ -7,7 +7,7 @@
 //! servidor confirma a entrada por silêncio, e uma tela que esperasse uma
 //! mensagem que não vem mostraria a sala vazia a quem está nela. Quem desfaz o
 //! assento especulativo é a recusa — `Alert` com `VoiceRoomEntryRefused` ou
-//! `VoiceRoomFull`.
+//! `VoiceRoomFull`, ou um `PedidoRecusado` que nomeia a entrada.
 //!
 //! **E o servidor manda esses alertas também quando mantém a pessoa onde ela
 //! estava.** A revisão do lote I-a da F5 mediu três casos com a pessoa sentada
@@ -37,7 +37,7 @@
 
 use std::collections::VecDeque;
 
-use seele_proto::control::{AlertReason, ServerMessage};
+use seele_proto::control::{nome_do_pedido, AlertReason, ServerMessage};
 use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
 
 /// A marca do `Ping` que o motor manda logo depois de cada pedido de entrada.
@@ -184,6 +184,16 @@ impl EntradasPendentes {
                 reason: AlertReason::VoiceRoomEntryRefused | AlertReason::VoiceRoomFull,
                 ..
             } => self.recusar(assento),
+            // **A recusa que diz qual pedido foi** (F1, `PedidoRecusado`). Só a
+            // da entrada desfaz a entrada, e pela mesma regra das duas de cima:
+            // a F1 escreve que, com dois pedidos do mesmo tipo em voo, a recusa
+            // é do mais antigo sem resposta — que é a frente desta fila. A de
+            // qualquer outro pedido — o apelido tomado, o canal que sumiu — não
+            // é de entrada nenhuma e cai no `_` lá embaixo, sem mover ninguém.
+            ServerMessage::Alert {
+                reason: AlertReason::PedidoRecusado { pedido, .. },
+                ..
+            } if e_a_entrada(*pedido) => self.recusar(assento),
             ServerMessage::Pong { timestamp } => {
                 // O pedido deste número está decidido, e todos os mais velhos
                 // também: recusados, e a recusa já desfez o assento; aceitos, e
@@ -208,8 +218,8 @@ impl EntradasPendentes {
     fn recusar(&mut self, assento: &mut Option<VoiceRoomId>) -> bool {
         let Some(recusada) = self.fila.front_mut() else {
             // Sem pedido no ar, a recusa não é de entrada nenhuma desta
-            // pessoa — a troca de apelido recusada chega com este motivo — e
-            // não move ninguém.
+            // pessoa — de um host 0.15.x, a troca de apelido recusada chega com
+            // este motivo — e não move ninguém.
             return false;
         };
         if recusada.recusada {
@@ -279,6 +289,19 @@ impl EntradasPendentes {
     }
 }
 
+/// Se o pedido de ordinal `pedido`, em `ClientMessage`, é a entrada numa sala de
+/// voz.
+///
+/// Pelo nome, com `nome_do_pedido`, que a F1 deixou para isto: «é por nome que a
+/// casca escreve a frase de um `PedidoRecusado` e acha o pedido a desfazer». O
+/// ordinal é congelado na linha 1 (`tests/fio_1_0.rs`); o nome não, e o teste
+/// `a_recusa_que_nomeia_a_entrada_a_desfaz_como_as_recusas_de_sala` lê o
+/// ordinal de um quadro de entrada de verdade, então um nome trocado reprova
+/// lá em vez de calar aqui.
+fn e_a_entrada(pedido: u32) -> bool {
+    nome_do_pedido(pedido) == Some("EnterVoiceRoom")
+}
+
 /// Uma conexão, pelo que a volta compara: o `ssrc` e o número da sessão.
 pub type Conexao = (Ssrc, SessionId);
 
@@ -323,8 +346,10 @@ pub fn assento_resgatado(
 #[cfg(test)]
 mod testes {
     use super::{assento_resgatado, EntradasPendentes};
-    use seele_proto::control::{AlertReason, AlertSeverity, ServerMessage};
-    use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
+    use seele_proto::control::{
+        AlertReason, AlertSeverity, CausaDaRecusa, ClientMessage, ServerMessage,
+    };
+    use seele_proto::ids::{MessageId, SessionId, Ssrc, VoiceRoomId};
 
     const A: VoiceRoomId = VoiceRoomId(1);
     const B: VoiceRoomId = VoiceRoomId(2);
@@ -584,6 +609,129 @@ mod testes {
             assento,
             Some(A),
             "o servidor recusou B e C e manteve a pessoa em A, e a tela a tirou de toda sala"
+        );
+    }
+
+    /// O ordinal de um pedido em `ClientMessage`, lido de um quadro de verdade,
+    /// do jeito que o servidor o lê para dizer qual pedido recusou
+    /// (`ordinal_do_quadro`, no braço de cada pedido de `session.rs`).
+    fn ordinal_de(pedido: &ClientMessage) -> u32 {
+        let quadro = seele_proto::control::encode(pedido).expect("o quadro do pedido");
+        seele_proto::control::ordinal_do_quadro(&quadro).expect("o ordinal do pedido")
+    }
+
+    fn pedido_recusado(pedido: &ClientMessage, causa: CausaDaRecusa) -> ServerMessage {
+        recusa(AlertReason::PedidoRecusado {
+            pedido: ordinal_de(pedido),
+            causa,
+        })
+    }
+
+    /// Acréscimo D do lote I-b: a recusa de um pedido que **não** é a entrada
+    /// não desfaz a entrada no ar.
+    ///
+    /// Era o caso que o I-a deixou: até a sexta integração o servidor recusava
+    /// o apelido tomado com `VoiceRoomEntryRefused`, e uma troca de apelido
+    /// recusada no mesmo instante de um pedido de sala tirava a pessoa da sala
+    /// pedida. Com o `PedidoRecusado`, a recusa diz qual pedido foi, e só o da
+    /// entrada desfaz a entrada.
+    #[test]
+    fn a_recusa_de_outro_pedido_com_uma_entrada_no_ar_nao_desfaz_a_entrada() {
+        for (pedido, causa) in [
+            (
+                ClientMessage::SetNickname { name: "lia".into() },
+                CausaDaRecusa::NomeTomado,
+            ),
+            (
+                ClientMessage::RenameVoiceRoom {
+                    voice_room: C,
+                    name: "Outra".into(),
+                },
+                CausaDaRecusa::NaoExiste,
+            ),
+            (
+                ClientMessage::RemoveMessage {
+                    message: MessageId(9),
+                },
+                CausaDaRecusa::FalhaDoServidor,
+            ),
+        ] {
+            let (mut entradas, mut assento) = em_a();
+            let b = entradas.pedir(&mut assento, B);
+
+            let mudou = entradas.ouvir(&mut assento, &pedido_recusado(&pedido, causa));
+            assert!(
+                !mudou && assento == Some(B),
+                "a recusa de {pedido:?} ({causa:?}) desfez a entrada em B que estava no ar: \
+                 a tela devolve a pessoa a A enquanto o servidor a senta em B (assento: \
+                 {assento:?})"
+            );
+
+            // E a recusa de verdade da entrada, que chega depois, continua sendo
+            // dela: a recusa do outro pedido não tomou o lugar da resposta da
+            // entrada na fila.
+            entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+            entradas.ouvir(&mut assento, &pong_do_pedido(b));
+            assert_eq!(
+                assento,
+                Some(A),
+                "depois da recusa de {pedido:?}, a recusa de B não devolveu a pessoa a A: a \
+                 primeira recusa ficou com o lugar da resposta da entrada"
+            );
+        }
+    }
+
+    /// Acréscimo D: o `PedidoRecusado` que nomeia a própria entrada desfaz a
+    /// entrada como as recusas de sala.
+    ///
+    /// A F1 diz do ordinal (`AlertReason::PedidoRecusado`, em `control.rs`):
+    /// com dois pedidos do mesmo tipo em voo, a recusa é do mais antigo, e quem
+    /// recebe desfaz o mais antigo dos pedidos daquele ordinal que ainda não
+    /// teve resposta. É a mesma regra que `recusar` já segue para
+    /// `VoiceRoomEntryRefused` e `VoiceRoomFull`. O servidor da 0.16 ainda não
+    /// manda esta recusa para a entrada — as quatro recusas de entrada dele são
+    /// as duas de sala —, mas o fio a permite, e uma 1.x que a mande não pode
+    /// deixar a pessoa sentada numa sala que disse não.
+    #[test]
+    fn a_recusa_que_nomeia_a_entrada_a_desfaz_como_as_recusas_de_sala() {
+        let entrada = ClientMessage::EnterVoiceRoom {
+            voice_room: B,
+            password: None,
+        };
+        for causa in [
+            CausaDaRecusa::NaoExiste,
+            CausaDaRecusa::FalhaDoServidor,
+            CausaDaRecusa::NomeTomado,
+        ] {
+            let (mut entradas, mut assento) = em_a();
+            let b = entradas.pedir(&mut assento, B);
+
+            let mudou = entradas.ouvir(&mut assento, &pedido_recusado(&entrada, causa));
+            assert_eq!(
+                assento,
+                Some(A),
+                "o servidor recusou a entrada em B ({causa:?}) e a tela deixou a pessoa em B, \
+                 numa sala em que ninguém a vê, com o áudio abrindo lá"
+            );
+            assert!(
+                mudou,
+                "a recusa da entrada desfez o assento e não disse que ele mudou: o roster \
+                 não redesenha"
+            );
+            entradas.ouvir(&mut assento, &pong_do_pedido(b));
+            assert_eq!(entradas.confirmada(assento), Some(A));
+        }
+
+        // E, como as recusas de sala, sem pedido no ar não move ninguém.
+        let (mut entradas, mut assento) = em_a();
+        assert!(!entradas.ouvir(
+            &mut assento,
+            &pedido_recusado(&entrada, CausaDaRecusa::NaoExiste)
+        ));
+        assert_eq!(
+            assento,
+            Some(A),
+            "uma recusa de entrada sem pedido no ar tirou a pessoa da sala"
         );
     }
 

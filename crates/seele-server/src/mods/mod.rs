@@ -29,6 +29,7 @@
 
 pub mod anuncio;
 pub mod arquivos;
+pub mod aviso;
 pub mod despacho;
 pub mod mundo;
 pub mod pedidos;
@@ -188,8 +189,9 @@ fn onde_dito(onde: Option<&str>) -> String {
 
 /// **O que saiu de uma volta do MOD**, já cortado no teto da linha.
 ///
-/// O molde é o `Lancado` do executor da janela (`apps/seele-app/src/executor.rs`),
-/// copiado e não importado: o servidor não depende do app.
+/// O molde é o `Lancado` do motor de MOD da janela (`crates/seele-motor/src/lib.rs`,
+/// que saiu do `executor.rs` do app), copiado e não importado: o servidor não
+/// depende do `seele-motor`.
 struct Lancado {
     /// `nome: mensagem`, o valor lançado como texto, ou o erro do motor.
     texto: String,
@@ -468,6 +470,9 @@ pub struct Anfitriao {
     pintor: Arc<std::sync::Mutex<Option<String>>>,
     /// O tema declarado na chamada em curso, que só sai daqui se ela terminar.
     declarado: Arc<std::sync::Mutex<Option<TemaDeclarado>>>,
+    /// Os avisos declarados na chamada em curso (`mundo.avisar`), o mais novo
+    /// de cada canal, que só saem daqui se ela terminar.
+    avisos: Arc<std::sync::Mutex<Vec<aviso::AvisoDeclarado>>>,
 }
 
 impl Anfitriao {
@@ -504,6 +509,7 @@ impl Anfitriao {
             atendendo: Arc::new(std::sync::Mutex::new(None)),
             pintor: Arc::new(std::sync::Mutex::new(None)),
             declarado: Arc::new(std::sync::Mutex::new(None)),
+            avisos: Arc::new(std::sync::Mutex::new(Vec::new())),
         })
     }
 
@@ -750,6 +756,35 @@ impl Anfitriao {
                 },
             )?,
         )?;
+        // O aviso às janelas do mesmo MOD (rascunho da API 6, §7.3). Como o
+        // tema, a chamada **declara**: o aviso fica aqui e só sai se ela
+        // terminar e o quintal gravar.
+        let avisos = Arc::clone(&self.avisos);
+        mundo_js.set(
+            "avisar",
+            Function::new(
+                ctx.clone(),
+                move |ctx: rquickjs::Ctx<'js>,
+                      valor: rquickjs::Value<'js>|
+                      -> rquickjs::Result<rquickjs::Object<'js>> {
+                    let resposta = rquickjs::Object::new(ctx.clone())?;
+                    let guardado = aviso::aviso_da_chamada(&ctx, valor)?.and_then(|declarado| {
+                        avisos
+                            .lock()
+                            .map_err(|_| "falhou")
+                            .and_then(|mut lista| aviso::juntar(&mut lista, declarado))
+                    });
+                    match guardado {
+                        Ok(()) => resposta.set("ok", true)?,
+                        Err(nome) => {
+                            resposta.set("ok", false)?;
+                            resposta.set("erro", nome)?;
+                        }
+                    }
+                    Ok(resposta)
+                },
+            )?,
+        )?;
         ctx.globals().set("mundo", mundo_js)?;
 
         ctx.eval::<(), _>(fonte)
@@ -786,7 +821,7 @@ impl Anfitriao {
         // Each call gets the whole budget: a MOD that was slow once is not a
         // MOD that is broken forever.
         hospede.passos.store(0, Ordering::Relaxed);
-        self.esquecer_o_tema();
+        self.esquecer_o_declarado();
 
         let resultado = hospede.contexto.with(|ctx| {
             // The yard goes in as a plain object and comes back as one.
@@ -828,7 +863,7 @@ impl Anfitriao {
             self.recolher_quintal(id, quintal)?;
             self.assumir_a_porta_se_declarou(id);
         } else {
-            self.esquecer_o_tema();
+            self.esquecer_o_declarado();
         }
         resultado
     }
@@ -845,7 +880,7 @@ impl Anfitriao {
     ) -> Result<String, Falha> {
         let hospede = self.hospedes.get(id).ok_or(Falha::NaoCarregadoAqui)?;
         hospede.passos.store(0, Ordering::Relaxed);
-        self.esquecer_o_tema();
+        self.esquecer_o_declarado();
 
         // **Quem está sendo atendido, dito pelo servidor.** É contra isto que
         // `volume.esperar` prende a autorização; ver o campo `atendendo`.
@@ -881,13 +916,13 @@ impl Anfitriao {
         if let Ok(mut atendendo) = self.atendendo.lock() {
             *atendendo = None;
         }
-        let resposta = resposta.inspect_err(|_| self.esquecer_o_tema())?;
+        let resposta = resposta.inspect_err(|_| self.esquecer_o_declarado())?;
         if resposta.len() > 1024 * 1024 {
-            self.esquecer_o_tema();
+            self.esquecer_o_declarado();
             return Err(Falha::QuintalCheio);
         }
         self.recolher_quintal(id, quintal)
-            .inspect_err(|_| self.esquecer_o_tema())?;
+            .inspect_err(|_| self.esquecer_o_declarado())?;
         self.assumir_a_porta_se_declarou(id);
         Ok(resposta)
     }
@@ -912,9 +947,26 @@ impl Anfitriao {
         self.declarado.lock().ok().and_then(|mut d| d.take())
     }
 
-    fn esquecer_o_tema(&self) {
+    /// Os avisos que a última chamada declarou, se ela terminou — tirados
+    /// daqui, o mais novo de cada canal.
+    ///
+    /// Quem chama os entrega ao `Avisador` do servidor depois de gravar o
+    /// quintal. Uma chamada que falhou não deixa nada para tomar.
+    pub fn tomar_avisos(&mut self) -> Vec<aviso::AvisoDeclarado> {
+        self.avisos
+            .lock()
+            .map(|mut lista| std::mem::take(&mut *lista))
+            .unwrap_or_default()
+    }
+
+    /// Esquece o que a chamada declarou — o tema e os avisos —, no começo de
+    /// cada chamada e quando ela falha.
+    fn esquecer_o_declarado(&self) {
         if let Ok(mut declarado) = self.declarado.lock() {
             *declarado = None;
+        }
+        if let Ok(mut avisos) = self.avisos.lock() {
+            avisos.clear();
         }
     }
 
@@ -2279,5 +2331,172 @@ mod tests {
         pedir_tema(&mut anfitriao, "seele/estilo", r##"{"acento":"#c86b1f"}"##);
         pedir_tema(&mut anfitriao, "seele/perfis", "null");
         assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// Um MOD cujo `aoPedir` chama `mundo.avisar` com o que o pedido trouxe e
+    /// devolve, como texto, o que a chamada respondeu.
+    const AVISA_O_QUE_PEDIREM: &str = "globalThis.aoPedir = (contexto, pedido) => \
+         JSON.stringify(mundo.avisar(JSON.parse(pedido).aviso));";
+
+    fn pedir_aviso(anfitriao: &mut Anfitriao, aviso: &str) -> String {
+        anfitriao
+            .pedir(
+                "seele/mesa",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                &format!(r#"{{"aviso":{aviso}}}"#),
+                &mut BTreeMap::new(),
+            )
+            .expect("o pedido falhou")
+    }
+
+    fn quem_avisa(fonte: &str) -> Anfitriao {
+        let mut anfitriao = Anfitriao::novo().expect("anfitrião");
+        anfitriao
+            .carregar("seele/mesa", fonte, &pasta_de_teste("aviso"))
+            .expect("carregar");
+        anfitriao
+    }
+
+    /// **O aviso da metade de servidor** (rascunho da API 6, §7.3; tarefa 8 do
+    /// plano da F3). A chamada declara, e não manda: quem manda é o servidor,
+    /// depois de a chamada terminar e o quintal gravar. A carga é um valor JSON,
+    /// serializada aqui.
+    #[test]
+    fn um_mod_avisa_e_o_aviso_fica_para_quem_chamou_tomar() {
+        let mut anfitriao = quem_avisa(AVISA_O_QUE_PEDIREM);
+        assert_eq!(
+            pedir_aviso(&mut anfitriao, r#"{"canal":7,"carga":{"revisao":3}}"#),
+            r#"{"ok":true}"#
+        );
+        assert_eq!(
+            anfitriao.tomar_avisos(),
+            vec![aviso::AvisoDeclarado {
+                canal: Some(seele_proto::ids::ChannelId(7)),
+                carga: r#"{"revisao":3}"#.to_owned(),
+            }]
+        );
+        assert!(
+            anfitriao.tomar_avisos().is_empty(),
+            "o aviso foi tomado duas vezes"
+        );
+
+        // Sem canal, o servidor inteiro; e a carga pode ser texto ou número.
+        pedir_aviso(&mut anfitriao, r#"{"carga":"mudou"}"#);
+        assert_eq!(
+            anfitriao.tomar_avisos(),
+            vec![aviso::AvisoDeclarado {
+                canal: None,
+                carga: r#""mudou""#.to_owned(),
+            }]
+        );
+    }
+
+    /// **Dentro de uma chamada, o mais novo de cada canal.** É a mesma regra do
+    /// servidor para o excedente: dois avisos do mesmo canal na mesma volta
+    /// dizem a mesma coisa, e só o último importa.
+    #[test]
+    fn dois_avisos_do_mesmo_canal_numa_chamada_ficam_no_mais_novo() {
+        let mut anfitriao = quem_avisa(
+            "globalThis.aoPedir = () => { \
+               mundo.avisar({ canal: 7, carga: 1 }); \
+               mundo.avisar({ canal: 8, carga: 2 }); \
+               mundo.avisar({ canal: 7, carga: 3 }); \
+               return '{}'; };",
+        );
+        pedir_aviso(&mut anfitriao, "null");
+        assert_eq!(
+            anfitriao.tomar_avisos(),
+            vec![
+                aviso::AvisoDeclarado {
+                    canal: Some(seele_proto::ids::ChannelId(7)),
+                    carga: "3".to_owned(),
+                },
+                aviso::AvisoDeclarado {
+                    canal: Some(seele_proto::ids::ChannelId(8)),
+                    carga: "2".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn um_aviso_grande_ou_malformado_e_recusado_pelo_nome() {
+        let mut anfitriao = quem_avisa(AVISA_O_QUE_PEDIREM);
+        let grande = format!(r#"{{"carga":"{}"}}"#, "a".repeat(aviso::TETO_DO_AVISO));
+        assert_eq!(
+            pedir_aviso(&mut anfitriao, &grande),
+            r#"{"ok":false,"erro":"aviso-grande-demais"}"#
+        );
+        for malformado in [
+            "3",
+            r#""texto""#,
+            r#"{"canal":7}"#,
+            r#"{"canal":-1,"carga":1}"#,
+            r#"{"canal":1.5,"carga":1}"#,
+            r#"{"canal":"7","carga":1}"#,
+        ] {
+            assert_eq!(
+                pedir_aviso(&mut anfitriao, malformado),
+                r#"{"ok":false,"erro":"aviso-invalido"}"#,
+                "aceitou {malformado}"
+            );
+        }
+        assert!(anfitriao.tomar_avisos().is_empty());
+    }
+
+    /// **O aviso cai com o quintal** (pedido da MESA, 09/10): um `aoPedir` que
+    /// avisa e lança, ou cujo quintal não cabe, não deixa aviso nenhum — um
+    /// aviso nunca fala de uma revisão que não existe.
+    #[test]
+    fn um_aviso_de_uma_chamada_que_falhou_nao_fica() {
+        let mut lanca = quem_avisa(
+            "globalThis.aoPedir = () => { mundo.avisar({ carga: 1 }); throw new Error('x'); };",
+        );
+        assert!(lanca
+            .pedir(
+                "seele/mesa",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            )
+            .is_err());
+        assert!(
+            lanca.tomar_avisos().is_empty(),
+            "o aviso de quem lançou ficou"
+        );
+
+        let mut quintal_cheio = quem_avisa(&format!(
+            "globalThis.aoPedir = () => {{ mundo.avisar({{ carga: 1 }}); \
+               dados.grande = 'a'.repeat({}); return '{{}}'; }};",
+            Anfitriao::TETO_DO_QUINTAL + 1
+        ));
+        assert!(matches!(
+            quintal_cheio.pedir(
+                "seele/mesa",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new()
+            ),
+            Err(Falha::QuintalCheio)
+        ));
+        assert!(
+            quintal_cheio.tomar_avisos().is_empty(),
+            "o aviso de um quintal recusado ficou"
+        );
+    }
+
+    /// Pelo caminho dos momentos também.
+    #[test]
+    fn um_momento_tambem_avisa() {
+        let mut anfitriao = quem_avisa(
+            "globalThis.aoAcontecer = () => { mundo.avisar({ canal: 2, carga: 'x' }); };",
+        );
+        anfitriao
+            .chamar("seele/mesa", "PersonJoined", "{}", &mut BTreeMap::new())
+            .expect("o momento falhou");
+        assert_eq!(anfitriao.tomar_avisos().len(), 1);
     }
 }

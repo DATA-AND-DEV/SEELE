@@ -54,14 +54,36 @@ pub const PRELUDIO: &str = r#"
     const espera = pendentes.get(m.n);
     if (!espera) return;
     pendentes.delete(m.n);
-    if (m.ok) espera.resolve(m.valor);
-    else espera.reject(new Error(m.erro || 'recusado'));
+    if (m.ok) {
+      espera.resolve(m.valor);
+      return;
+    }
+    // **A recusa leva os campos dela** (rascunho da API 6, §7.1). O nome vai
+    // em `message` e em `erro`, e o resto da resposta — o `detectado: 'heic'`
+    // de um `tipo-recusado` — vai como propriedade do `Error`, que é como o
+    // MOD o lê num `catch`. O `ok`, o número do pedido e o tipo da mensagem são
+    // da ponte, e ficam de fora.
+    const recusa = new Error(m.erro || 'recusado');
+    for (const [campo, valor] of Object.entries(m)) {
+      if (campo === 'ok' || campo === 'n' || campo === 'tipo' || campo === '__proto__') continue;
+      recusa[campo] = valor;
+    }
+    recusa.erro = m.erro || 'recusado';
+    espera.reject(recusa);
   };
 
   // Quanto cabe numa mensagem, dito pelo anfitrião. Lido e apagado como as
   // capacidades, e pela mesma razão.
   const tetoDaMensagem = Number(globalThis.__seeleTetoDaMensagem) || 12288;
   delete globalThis.__seeleTetoDaMensagem;
+
+  // **O `Atomics` sai, nos dois alvos** (rascunho da API 6, §16, item 5). Era
+  // a única global que o motor nativo tinha e o `.wasm` não: o quickjs-ng o
+  // compila sem threads no `wasm32-wasip1`, e sem threads ele não serve para
+  // nada em nenhum dos dois. Um MOD que dependesse dele rodaria no desktop e
+  // quebraria no celular. No `.wasm` este `delete` não acha nada; a sonda de
+  // `tests/casos.json` cobra os dois.
+  delete globalThis.Atomics;
 
   // Bytes, e não caracteres: o teto do anfitrião conta UTF-8, e um nome com
   // acento ocupa dois. Medir em `length` diria que cabe o que não cabe.
@@ -272,11 +294,6 @@ pub const PRELUDIO: &str = r#"
     clear: () => {},
   };
 
-  globalThis.SeeleMods = Object.freeze({
-    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
-    snapshot: () => pedir('snapshot', {}),
-  });
-
   // ---- as capacidades desta execução ----
   //
   // **O que o pacote declarou, e não o que este build oferece.** O anfitrião
@@ -291,6 +308,15 @@ pub const PRELUDIO: &str = r#"
     ? globalThis.__seeleCapacidades
     : []);
   delete globalThis.__seeleCapacidades;
+
+  // **O `snapshot` inteiro é da API 5 para baixo.** A 6 lê
+  // `SeeleUI.retrato()`, projetado por lista branca (rascunho da API 6, §6), e
+  // o `snapshot` falta do `SeeleMods` dela como qualquer coisa que a API não
+  // tem. Montado aqui, depois das capacidades, porque é delas que depende.
+  globalThis.SeeleMods = Object.freeze({
+    request: (id, canal, valor) => pedir('pedido', { id, canal, valor }),
+    ...(capacidades.has('retrato') ? {} : { snapshot: () => pedir('snapshot', {}) }),
+  });
 
   /**
    * Monta um objeto só com o que esta API tem.
@@ -334,8 +360,13 @@ pub const PRELUDIO: &str = r#"
   }));
 
   globalThis.SeeleUI = Object.freeze({
-    regiao: (conteudo) => pedir('regiao', { conteudo }),
+    // **Pela capacidade, como o resto.** A API 6 não tem `regiao` nem
+    // `cartoes` (decisão do dono de 08/10), e eles faltam do `SeeleUI` dela
+    // como `superficies` falta do da 3: ausentes, e não montados para a
+    // janela recusar depois. As APIs 3 a 5 têm os dois.
+    ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
     tema: (valores) => pedir('tema', { valores }),
+    ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),
     // A lista, legível pelo próprio MOD: um pacote que queira degradar em vez
@@ -347,7 +378,7 @@ pub const PRELUDIO: &str = r#"
     // região, montada pelo mesmo renderer, com uma gramática menor: nada que
     // receba foco ou clique, porque a linha do roster já tem um botão do
     // produto. É a única superfície fora da região, e ela sai com ela.
-    cartoes: (cartoes) => pedir('cartoes', { cartoes }),
+    ...(capacidades.has('cartoes') ? { cartoes: (cartoes) => pedir('cartoes', { cartoes }) } : {}),
     // ---- os eventos ----
     //
     // **A janela fala com o MOD sem que ele tenha perguntado.** Um pedido tem

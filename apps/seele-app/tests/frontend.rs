@@ -16676,6 +16676,530 @@ fn o_gancho_de_panico_e_instalado_logo_depois_do_assinante_do_log() {
     );
 }
 
+/// **O microfone que o macOS entrega mudo é dito, e só no macOS.**
+/// F1-microfone-macos, parte (1).
+///
+/// O laço de voz conta o zero exato no quadro cru e a ponte o leva em
+/// `telemetry.microfone_entrega_silencio_digital` (provado no `seele-core` e na
+/// FFI). Este guarda prende a outra metade: a frase existe em `frases.js`,
+/// inteira, e a tela a desenha **a partir do campo** e só no macOS. No Windows o
+/// consentimento já é lido antes de abrir (`consentimento_do_microfone`), e a
+/// frase de Ajustes do Mac lá seria uma instrução para um menu que não existe.
+#[test]
+fn o_microfone_em_silencio_digital_e_dito_so_no_macos() {
+    // O nome do campo em Rust, para um rename de um lado só não compilar.
+    fn _liga_os_dois_lados(instantaneo: &seele_ffi::Snapshot) -> bool {
+        instantaneo.telemetry.microfone_entrega_silencio_digital
+    }
+    const FRASE: &str = "O MACOS PODE ESTAR BLOQUEANDO O MICROFONE.\nAjustes → Privacidade e \
+                         Segurança → Microfone → ligue o SEELE, e entre de novo.";
+
+    let frases = without_comments(&read("ui/frases.js"));
+    let escrita = frases
+        .split("const MICROFONE_EM_SILENCIO_NO_MACOS =")
+        .nth(1)
+        .and_then(|resto| resto.split(';').next())
+        .map(literals_in)
+        .unwrap_or_default();
+    assert_eq!(
+        escrita, FRASE,
+        "`frases.js` não tem a frase do microfone que o macOS entrega mudo, ou a diz \
+         com outras palavras: quem tem o SEELE desligado nos Ajustes fala para \
+         ninguém e não sabe onde ligar"
+    );
+
+    let scripts = scripts();
+    let frase = body_of(&scripts, "function fraseDoMicrofoneCalado(snapshot)");
+    for elo in [
+        "snapshot.telemetry",
+        "microfone_entrega_silencio_digital",
+        "MICROFONE_EM_SILENCIO_NO_MACOS",
+    ] {
+        assert!(
+            frase.contains(elo),
+            "`fraseDoMicrofoneCalado` não passa por `{elo}`: a frase existe e não sai \
+             do campo para a tela:\n{frase}"
+        );
+    }
+    assert!(
+        frase.contains("dataset.plataforma") && frase.contains("\"macos\""),
+        "a frase do macOS não confere a plataforma: no Windows ela mandaria a pessoa a \
+         um menu de Ajustes que não existe lá:\n{frase}"
+    );
+    assert!(
+        names(
+            &body_of(&scripts, "function desenharAberturaDoAudio(snapshot)"),
+            "fraseDoMicrofoneCalado"
+        ),
+        "a faixa do áudio não passa pela frase do microfone calado, e ela nunca acende"
+    );
+}
+
+/// **O volume de cada pessoa chega à janela por `volumes_locais`, e a janela
+/// não guarda o dela.** F1-vazamento, passo 3 (2).
+///
+/// O volume morava num mapa `volumes` de `tela-sessao.js`, dividido com a
+/// chamada, que lembrava o que a janela tinha mandado. A lembrança sobrevivia à
+/// sessão — o 150 da Rafa de um servidor aparecia na Rafa de outro, que tocava
+/// a 100 — e, com a voz da pendência 52 abrindo a cada entrada numa sala, ela
+/// mostrava um volume que a voz nova não tinha. Agora o volume mora na conexão
+/// (`Connection::volumes_locais`, provado na FFI), e as duas telas desenham o que
+/// o Rust responde.
+#[test]
+fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
+    let scripts = without_comments(&scripts());
+    for declaracao in ["const volumes =", "let volumes =", "var volumes ="] {
+        assert!(
+            !scripts.contains(declaracao),
+            "a janela voltou a guardar o volume de cada pessoa num mapa dela \
+             (`{declaracao}`): a lembrança sobrevive à sessão e passa o volume de um \
+             servidor para outro"
+        );
+    }
+    assert!(
+        invoked_commands(&scripts).contains("volumes_locais"),
+        "nenhuma tela lê `volumes_locais`: o deslizante desenha um volume que ninguém \
+         perguntou ao Rust"
+    );
+
+    let ler = body_of(&scripts, "async function lerVolumes()");
+    assert!(
+        ler.contains("invoke(\"volumes_locais\")") && ler.contains("volumesLidos.clear()"),
+        "`lerVolumes` não substitui a leitura inteira pela resposta do Rust: um volume \
+         que sumiu de lá fica desenhado aqui:\n{ler}"
+    );
+    // M-3 da rodada 1: a leitura que saiu antes do último gesto é descartada, e
+    // os dois gestos — o deslizante do roster e o controle da chamada — passam
+    // pelo mesmo `marcarVolume`, que a faz velha.
+    let (antes, depois) = ler
+        .split_once("await invoke(\"volumes_locais\")")
+        .unwrap_or_default();
+    let substitui = depois.find("volumesLidos.clear()").unwrap_or(0);
+    let confere = depois.find("geracaoDosVolumes").unwrap_or(depois.len());
+    assert!(
+        antes.contains("geracaoDosVolumes") && confere < substitui,
+        "`lerVolumes` aplica uma resposta sem conferir que ela é de depois do último \
+         gesto: o deslizante volta à posição de antes, com o Rust no valor novo:\n{ler}"
+    );
+    for funcao in [
+        "function marcarVolume(apelido, percent)",
+        "function esquecerVolumes()",
+    ] {
+        assert!(
+            body_of(&scripts, funcao).contains("geracaoDosVolumes"),
+            "`{funcao}` não faz velha a leitura de volumes em voo: ela desfaz o gesto, ou \
+             enche a sessão seguinte com os volumes da que acabou"
+        );
+    }
+    for (tela, arquivo, ouvinte) in [
+        (
+            "o deslizante do roster",
+            "ui/tela-sessao.js",
+            "$(\"lista-roster\").addEventListener(\"input\", (evento) => {",
+        ),
+        (
+            "o controle da chamada",
+            "ui/tela-chamada.js",
+            "$(\"chamada-grade\").addEventListener(\"click\", (evento) => {",
+        ),
+    ] {
+        let corpo = body_of(&without_comments(&read(arquivo)), ouvinte);
+        assert!(
+            corpo.contains("marcarVolume(") && !corpo.contains("volumesLidos.set("),
+            "{tela} escreve o volume do gesto sem passar por `marcarVolume`: uma leitura de \
+             antes dele o desfaz:\n{corpo}"
+        );
+    }
+    assert!(
+        names(
+            &body_of(&scripts, "function desenhar(snapshot)"),
+            "lerVolumes"
+        ),
+        "a tela de operação não relê os volumes a cada quadro"
+    );
+    assert!(
+        names(
+            &body_of(&scripts, "async function atualizarChamada()"),
+            "lerVolumes"
+        ),
+        "a chamada não relê os volumes a cada quadro"
+    );
+    let cartao = body_of(
+        &scripts,
+        "function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false)",
+    );
+    assert!(
+        cartao.contains("volumesLidos.get(pessoa.volume)"),
+        "o deslizante do roster não nasce da leitura do Rust:\n{cartao}"
+    );
+    assert!(
+        body_of(&scripts, "function pintarVolume(cartao, apelido)")
+            .contains("volumesLidos.get(apelido)"),
+        "o controle de volume da chamada não desenha a leitura do Rust"
+    );
+}
+
+/// **A casca veste a sessão com o que está gravado em disco, logo depois do
+/// `connect`.** Acréscimo A do lote I-b.
+///
+/// A FFI prova que `vestir_com_o_disco` leva a supressão, a sensibilidade e o
+/// modo à primeira abertura do áudio
+/// (`a_supressao_e_a_sensibilidade_gravadas_valem_na_primeira_abertura`). Nada
+/// disso vale se a casca não a chama: era o caso de antes, em que só o modo era
+/// aplicado ali, e a sessão começava com a supressão e a sensibilidade nos
+/// padrões, por cima do que a pessoa tinha gravado.
+#[test]
+fn a_casca_veste_a_sessao_com_o_disco_logo_depois_do_connect() {
+    let conectar = body_of(&read("src/main.rs"), "async fn connect(");
+    let Some(veste) = conectar.find("connection.vestir_as_escolhas_gravadas(&") else {
+        panic!(
+            "`connect` não veste mais a sessão com o disco: a supressão e a sensibilidade \
+             gravadas não valem até a pessoa mexer de novo"
+        );
+    };
+    let Some(conectou) = conectar.find("Connection::connect_watching(") else {
+        panic!(
+            "`connect` não conecta mais por `connect_watching`, e este guarda mediu outra coisa"
+        );
+    };
+    assert!(
+        conectou < veste,
+        "a sessão é vestida com o disco antes de existir uma conexão para vestir"
+    );
+}
+
+/// **A conversa pedida numa sessão não é escrita noutra.** Rodada 1 do lote
+/// I-b, M-1.
+///
+/// Um `messages` que sai na sessão A e volta depois de ela acabar traz a
+/// conversa de A. `sincronizarMensagens` a escrevia, com a revisão de A, e a
+/// sessão seguinte abria com ela — para sempre, se a primeira revisão dela
+/// coincidisse com a última de A. A bancada `conversa-com-estado.cjs` prova o
+/// caso com a resposta segurada no meio; este guarda prende a conferência no
+/// `cargo test`: a geração é lida antes do pedido e conferida depois, antes de
+/// escrever.
+#[test]
+fn a_conversa_pedida_numa_sessao_nao_e_escrita_noutra() {
+    let sincronizar = body_of(&scripts(), "async function sincronizarMensagens(revisao)");
+    let (antes, depois) = sincronizar
+        .split_once("await invoke(\"messages\")")
+        .unwrap_or_else(|| {
+            panic!("`sincronizarMensagens` não busca mais a conversa:\n{sincronizar}")
+        });
+    let escreve = depois.find("mensagens = ").unwrap_or(depois.len());
+    let confere = depois.find("geracaoDaSessao").unwrap_or(depois.len());
+    assert!(
+        antes.contains("geracaoDaSessao") && confere < escreve,
+        "`sincronizarMensagens` escreve a conversa sem conferir que a resposta é da \
+         sessão que a pediu: a conversa de um servidor aparece no seguinte:\n{sincronizar}"
+    );
+}
+
+/// **Todo estado de topo da tela de sessão é esquecido quando a sessão acaba.**
+/// F1-vazamento, passo 3 (1), e a rodada 1 do lote I-b (I-1, M-1 e M-2).
+///
+/// O estado de `tela-sessao.js` é da sessão — o rascunho por canal, a prévia por
+/// anexo, o retrato por pessoa, o arquivo escolhido, a conversa e a revisão
+/// dela, o relógio do UPTIME, o endereço da porta —, e as chaves dele são
+/// números que o servidor dá: o canal 1 de um servidor não é o de outro. A
+/// primeira versão deste guarda só olhava `Map` e `Set`, e a revisão da rodada 1
+/// achou o que passava por baixo: o arquivo escolhido no servidor A ia junto da
+/// primeira mensagem do B (`anexoPendente`, um `let`), a conversa de A aparecia
+/// em B pela saída do fim de sessão, e o UPTIME de B contava desde A.
+///
+/// O guarda lê **todo** `let` de topo do arquivo, qualquer que seja o
+/// inicializador, e todo `const` de topo que guarda coisas (`new Map(`,
+/// `new Set(`, `new WeakMap(`, `[` ou `{`). De cada um ele exige, dentro de
+/// `esquecerOEstadoDaSessao`, uma de três: uma atribuição, um `.clear()` ou um
+/// `.length = 0`; uma chamada com nome desta tabela; ou uma exceção com o motivo
+/// escrito aqui. Um `let` novo sem nenhuma das três reprova na rodada em que
+/// entrar.
+///
+/// E as duas saídas — SAIR DO SERVIDOR (`ejetar`) e o fim de sessão
+/// (`limparSessaoEncerrada`, que o RECONECTAR atravessa) — chamam a função e não
+/// esquecem nada por conta própria: um estado zerado solto numa saída e não na
+/// outra foi exatamente o M-1 e o M-2.
+#[test]
+fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
+    // Os que se esquecem por uma chamada com nome, que esvazia também o que anda
+    // junto (a tela do anexo, o contador da busca).
+    const CHAMADAS: &[(&str, &str)] = &[
+        ("retratos", "esquecerRetratos()"),
+        ("revisaoDosRetratos", "esquecerRetratos()"),
+        ("casamentosPorMensagem", "limparBusca()"),
+        ("ocorrenciaAtual", "limparBusca()"),
+        ("anexoPendente", "tirarAnexo()"),
+        ("subindo", "tirarAnexo()"),
+        ("volumesLidos", "esquecerVolumes()"),
+        ("geracaoDosVolumes", "esquecerVolumes()"),
+    ];
+    // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
+    // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.
+    const EXCECOES: &[(&str, &str)] = &[
+        (
+            "falando",
+            "do teclado: é a tecla de falar segura agora, e não um fato da sessão; a \
+             soltura dela a fecha e manda o `set_talking(false)` (R03)",
+        ),
+        (
+            "teclaQueAbriuAFala",
+            "do teclado: a tecla que abriu a fala, para a soltura dela fechar (R03)",
+        ),
+        (
+            "teclaDeFalar",
+            "da preferência desta máquina, lida do disco, e não de um servidor",
+        ),
+        (
+            "foneJaAvisado",
+            "da execução: o aviso de fone é uma vez por abertura do app, e o guarda do \
+             lote J exige que só a declaração o zere",
+        ),
+        (
+            "geracaoDoAvisoDeFone",
+            "da execução: a geração em que a faixa de fone acendeu, comparada com \
+             `geracaoDaSessao`, que já muda a cada sessão",
+        ),
+        (
+            "limiteDaMensagem",
+            "do app: o teto do corpo em bytes é do protocolo, lido uma vez no \
+             carregamento",
+        ),
+        (
+            "regrasDePrevia",
+            "do app: o limite e os tipos de prévia, lidos uma vez no carregamento",
+        ),
+        (
+            "dominiosDeGif",
+            "do app: os domínios de GIF desta máquina, lidos uma vez no carregamento",
+        ),
+        (
+            "pastaDeDestino",
+            "do app: a pasta de downloads desta máquina, lida uma vez no carregamento",
+        ),
+        (
+            "conhecidosDaTrilha",
+            "desta máquina: a lista de servidores conhecidos, e não de um servidor; o \
+             primeiro quadro de cada sessão a relê (`recarregarTrilha`, pelo \
+             `comecoDaSessao` que esta função zera)",
+        ),
+        (
+            "buscandoMensagens",
+            "pedido em voo: o `finally` o apaga, e a resposta de outra sessão é \
+             descartada (`sincronizarMensagens` confere a geração)",
+        ),
+        (
+            "abrindoLinha",
+            "pedido em voo: o `finally` o apaga, e a resposta não escreve estado \
+             nenhum desta tela",
+        ),
+        (
+            "RECUSAS_DE_MENSAGEM",
+            "tabela fixa de frases, nunca escrita",
+        ),
+    ];
+
+    let sessao = without_comments(&read("ui/tela-sessao.js"));
+    let estado = estado_de_topo(&sessao);
+    assert!(
+        estado.len() >= 30,
+        "só {} declarações de estado achadas no topo de `tela-sessao.js` ({estado:?}): o \
+         guarda mede quase nada, ou a forma das declarações mudou",
+        estado.len()
+    );
+
+    let esquecer = body_of(&sessao, "function esquecerOEstadoDaSessao()");
+    for nome in &estado {
+        if let Some((_, motivo)) = EXCECOES.iter().find(|(excecao, _)| excecao == nome) {
+            assert!(
+                !motivo.trim().is_empty(),
+                "`{nome}` atravessa sessões sem motivo escrito"
+            );
+            continue;
+        }
+        let esquecido = match CHAMADAS.iter().find(|(dono, _)| dono == nome) {
+            Some((_, chamada)) => names(&esquecer, chamada),
+            None => esquece(&esquecer, nome),
+        };
+        assert!(
+            esquecido,
+            "`{nome}` não é esquecido em `esquecerOEstadoDaSessao`: o que ele guardou de \
+             um servidor aparece no seguinte:\n{esquecer}"
+        );
+    }
+    for (nome, _) in EXCECOES.iter().chain(CHAMADAS.iter()) {
+        assert!(
+            estado.iter().any(|declarado| declarado == nome),
+            "`{nome}` está no guarda e já não é estado de topo de `tela-sessao.js`; tire-o \
+             da tabela"
+        );
+    }
+    assert!(
+        esquecer.contains("$(\"lista-mensagens\").replaceChildren()"),
+        "`esquecerOEstadoDaSessao` não esvazia `#lista-mensagens`: a conversa desenhada \
+         do servidor que acabou está à vista quando o seguinte aparece"
+    );
+    // Os campos de entrada da sessão (rodada 2 do lote I-b). O de mensagem é
+    // esvaziado por `restaurarRascunho()` com nenhuma Linha aberta — depois do
+    // `linhaAberta = null` —, que é o que acerta também a altura e a contagem de
+    // bytes. Sem isso, a Linha de B vinha do retrato sem restaurar nada, e o
+    // texto escrito em A ia no primeiro Enter em B.
+    let sem_linha = esquecer.find("linhaAberta = null");
+    let restaura = esquecer.rfind("restaurarRascunho()");
+    assert!(
+        matches!((sem_linha, restaura), (Some(antes), Some(depois)) if antes < depois),
+        "`esquecerOEstadoDaSessao` não esvazia o campo de mensagem depois de fechar a \
+         Linha: o texto escrito num servidor vai no primeiro Enter do seguinte:\n{esquecer}"
+    );
+    assert!(
+        esquecer.contains("$(\"campo-busca\").value = \"\""),
+        "`esquecerOEstadoDaSessao` não esvazia o campo de busca: o termo de um servidor \
+         fica na barra do seguinte"
+    );
+
+    // As duas saídas o chamam, e não esquecem nada por conta própria.
+    let fim = without_comments(&read("ui/tela-fim.js"));
+    for (saida, corpo) in [
+        (
+            "SAIR DO SERVIDOR (`ejetar`)",
+            body_of(&sessao, "async function ejetar()"),
+        ),
+        (
+            "o fim de sessão (`limparSessaoEncerrada`)",
+            body_of(&fim, "async function limparSessaoEncerrada("),
+        ),
+    ] {
+        assert!(
+            names(&corpo, "esquecerOEstadoDaSessao()"),
+            "{saida} não esquece o estado da sessão: o rascunho, o arquivo escolhido e as \
+             prévias de um servidor aparecem no seguinte"
+        );
+        for nome in &estado {
+            assert!(
+                !esquece(&corpo, nome),
+                "{saida} esquece `{nome}` por conta própria, fora de \
+                 `esquecerOEstadoDaSessao`: a outra saída fica sem ele"
+            );
+        }
+    }
+}
+
+/// Os nomes de estado declarados no topo de um script: todo `let`, e todo
+/// `const` que guarda coisas.
+fn estado_de_topo(script: &str) -> Vec<String> {
+    script
+        .lines()
+        .filter_map(|linha| {
+            if let Some(resto) = linha.strip_prefix("let ") {
+                let nome = resto.split([' ', '=', ';']).next()?;
+                return Some(nome.to_owned());
+            }
+            let (nome, valor) = linha.strip_prefix("const ")?.split_once(" = ")?;
+            ["new Map(", "new Set(", "new WeakMap(", "[", "{"]
+                .iter()
+                .any(|inicio| valor.starts_with(inicio))
+                .then(|| nome.trim().to_owned())
+        })
+        .collect()
+}
+
+/// Se o texto esquece `nome`: atribui a ele (`=`, `+=`, `-=`), o esvazia com
+/// `.clear()` ou zera o comprimento dele. O nome inteiro, e não uma propriedade
+/// de outro objeto com o mesmo nome.
+fn esquece(texto: &str, nome: &str) -> bool {
+    texto.match_indices(nome).any(|(onde, _)| {
+        let antes = texto[..onde].chars().next_back();
+        if antes.is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.' || c == '$') {
+            return false;
+        }
+        let depois = &texto[onde + nome.len()..];
+        if depois
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        {
+            return false;
+        }
+        let depois = depois.trim_start();
+        (depois.starts_with('=') && !depois.starts_with("=="))
+            || depois.starts_with("+=")
+            || depois.starts_with("-=")
+            || depois.starts_with(".clear()")
+            || depois.starts_with(".length = 0")
+    })
+}
+
+/// **A sala além da subida de quem hospeda diz os dois números, em kbps.**
+/// Acréscimo C do lote I-b.
+///
+/// `todo_motivo_de_aviso_tem_frase_na_pagina` prova que o motivo tem frase em
+/// `AVISOS`; o motivo leva números, e é `fraseDoAviso` que os põe na frase,
+/// como a retenção põe a contagem. A bancada `conversa-com-estado.cjs` roda a
+/// função e confere «6.480 kbps»; este guarda prende, no `cargo test`, que ela
+/// lê os dois campos com os nomes que a ponte manda.
+#[test]
+fn o_aviso_da_sala_alem_da_subida_diz_os_dois_numeros_em_kbps() {
+    // Os nomes dos campos em Rust: renomear um deles não compila sem passar aqui.
+    fn _liga_os_dois_lados(motivo: seele_ffi::NoticeReason) -> Option<(u64, u32)> {
+        match motivo {
+            seele_ffi::NoticeReason::VoiceRoomOverHostUplink {
+                precisa_bps,
+                medido_bps,
+            } => Some((precisa_bps, medido_bps)),
+            _ => None,
+        }
+    }
+    let frase = body_of(&scripts(), "function fraseDoAviso(motivo)");
+    let Some((_, braco)) = frase.split_once("nome === \"VoiceRoomOverHostUplink\"") else {
+        panic!(
+            "`fraseDoAviso` não tem o braço da sala além da subida: quem hospeda lê o \
+             aviso sem os números, e «a sala está grande» não diz o que fazer"
+        );
+    };
+    // `doisEmKbps`, e não `emKbps` em cada um: lado a lado, dois números a menos
+    // de 500 bps um do outro saíam iguais (M-6 da rodada 1).
+    for elo in ["precisa_bps", "medido_bps", "doisEmKbps("] {
+        assert!(
+            braco.contains(elo),
+            "o braço da sala além da subida não passa por `{elo}`: um dos números não \
+             chega à frase, chega em bits por segundo crus, ou os dois saem iguais quando \
+             não são:\n{braco}"
+        );
+    }
+}
+
+/// **A frase de quem é movido vale também para quem estava fora de toda sala.**
+/// Rodada 1 do lote I-b, M-5.
+///
+/// O servidor move a pessoa para uma sala sem conferir se ela estava em alguma
+/// (`seele-server`, `session.rs`, o braço de `Event::PersonMoved`). A primeira
+/// frase mandava «voltar à sala de antes», que não existe para quem estava fora.
+#[test]
+fn a_frase_de_quem_e_movido_vale_para_quem_estava_fora_de_sala() {
+    let script = without_comments(&scripts());
+    let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
+        panic!("frases.js no longer declares AVISOS");
+    };
+    let Some(trecho) = avisos
+        .split("MovedByOperator:")
+        .nth(1)
+        .and_then(|resto| resto.split("\",\n").next())
+    else {
+        panic!("`AVISOS` não tem mais a frase de `MovedByOperator`");
+    };
+    let frase = literals_in(&format!("{trecho}\"")).to_lowercase();
+    assert!(
+        !frase.is_empty(),
+        "a frase de `MovedByOperator` saiu vazia, e este guarda mediu outra coisa"
+    );
+    for suposicao in ["de antes", "voltar", "outra sala"] {
+        assert!(
+            !frase.contains(suposicao),
+            "a frase de quem é movido supõe uma sala de onde a pessoa saiu («{suposicao}»): \
+             quem estava fora de toda sala lê um conselho que não tem como seguir: {frase}"
+        );
+    }
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um
@@ -16709,7 +17233,7 @@ fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // Os que já chegavam sem frase quando este guarda nasceu (09/10/2026), e
     // que a orquestradora distribui. **A lista só encolhe**: um deles ganhando
     // frase também reprova, pedindo para sair daqui.
-    const AINDA_SEM_FRASE: &[&str] = &["MovedByOperator", "VoiceRoomOverHostUplink"];
+    const AINDA_SEM_FRASE: &[&str] = &[];
 
     let mudas: Vec<&String> = variantes
         .iter()
@@ -16799,5 +17323,76 @@ fn a_casca_confere_as_mesmas_capacidades_que_o_nucleo() {
         "as capacidades de cada API divergem entre `capacidades_da_api` (seele-proto) e \
          `CAPACIDADES_POR_API` (base.js): o anfitrião recusaria o que o prelúdio ofereceu, \
          ou aceitaria o que ele escondeu"
+    );
+}
+
+/// **O guarda 12: o que é da ligação nunca chega a um MOD** (rascunho da API 6,
+/// §6; Parte II da spec de 23/09, «Onde as duas partes se tocam»; tarefa 4 do
+/// plano da F3).
+///
+/// Toque, chamada, código e agenda da sala pessoal ficam fora de tudo o que a
+/// janela entrega a um MOD: do retrato (`projetarORetrato`) e de cada evento
+/// (`falar({ … })`). O retrato já é por lista branca, e um campo novo nasce fora
+/// dele; este guarda pega o caso em que alguém o escreve lá de propósito, ou num
+/// evento novo, sem perceber o que leva.
+///
+/// Por nome e sem comentários: um comentário que explique por que o toque fica
+/// de fora não é o toque indo para o MOD.
+#[test]
+fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
+    const DA_LIGACAO: [&str; 5] = ["chamadaencerrada", "tocando", "codigo", "agenda", "toque"];
+    let leva = |texto: &str| -> Vec<&'static str> {
+        let minusculo = texto.to_lowercase();
+        DA_LIGACAO
+            .iter()
+            .copied()
+            .filter(|nome| minusculo.contains(nome))
+            .collect()
+    };
+
+    let base = without_comments(&read("ui/base.js"));
+    let retrato = body_of(&base, "function projetarORetrato(");
+    assert!(
+        leva(&retrato).is_empty(),
+        "o retrato do MOD leva {:?}, que é da ligação: {retrato}",
+        leva(&retrato)
+    );
+
+    let mut eventos = 0;
+    for nome in ui_files("js") {
+        let fonte = without_comments(&read(&format!("ui/{nome}")));
+        let mut resto = fonte.as_str();
+        while let Some(onde) = resto.find("falar({") {
+            let objeto = &resto[onde + "falar(".len()..];
+            // O objeto inteiro, contando chaves: um `falar` ocupa várias linhas.
+            let mut fundura = 0_usize;
+            let mut fim = objeto.len();
+            for (i, c) in objeto.char_indices() {
+                match c {
+                    '{' => fundura += 1,
+                    '}' => {
+                        fundura -= 1;
+                        if fundura == 0 {
+                            fim = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let evento = &objeto[..fim];
+            assert!(
+                leva(evento).is_empty(),
+                "ui/{nome}: um evento a um MOD leva {:?}, que é da ligação: falar({evento})",
+                leva(evento)
+            );
+            eventos += 1;
+            resto = &objeto[fim..];
+        }
+    }
+    assert!(
+        eventos >= 20,
+        "o guarda achou só {eventos} `falar({{ … }})`: a forma dos eventos mudou, e ele \
+         deixou de olhar para eles"
     );
 }

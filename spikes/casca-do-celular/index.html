@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR" data-casca="celular">
+<head>
+<meta charset="utf-8">
+<!--
+  A meta de viewport da casca do celular: a largura do aparelho, a página por
+  baixo do entalhe e da ilha (`viewport-fit=cover`, e as áreas seguras devolvem
+  o espaço), e a pinça mantida — nada de `user-scalable=no`, que tira o zoom de
+  quem precisa dele.
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0A0806">
+<title>SEELE · protótipo do celular</title>
+<link rel="icon" href="../../apps/seele-app/ui/marca-muda.svg" type="image/svg+xml">
+<!--
+  As folhas de verdade, lidas de `apps/seele-app/ui/` e não copiadas: as fontes,
+  os tokens congelados, os primitivos de `base.css` (`.botao`, `.rotulo`,
+  `.varredura`, `.glifo`). A folha do celular vem depois de `base.css` e antes de
+  `acessibilidade.css`, que continua com a última palavra, como na casca.
+-->
+<link rel="stylesheet" href="../../apps/seele-app/ui/fontes.css">
+<link rel="stylesheet" href="../../apps/seele-app/ui/tokens.css">
+<link rel="stylesheet" href="../../apps/seele-app/ui/base.css">
+<link rel="stylesheet" href="celular.css">
+<link rel="stylesheet" href="../../apps/seele-app/ui/acessibilidade.css">
+</head>
+<body>
+<div class="varredura" aria-hidden="true"></div>
+<div id="app"></div>
+<script src="../../apps/seele-app/ui/glifos.js"></script>
+<script src="../../apps/seele-app/ui/frases.js"></script>
+<script src="dados.js"></script>
+<script src="prototipo.js"></script>
+</body>
+</html>

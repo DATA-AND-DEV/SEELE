@@ -1,0 +1,95 @@
+/* A prova da arquitetura híbrida: a casca do desktop, reorganizada pelo CSS
+ * do celular. Toda regra começa pela raiz `data-casca="celular"` — sem a marca,
+ * este arquivo não toca em nada, e a prova confere isso pixel a pixel. */
+
+:root[data-casca="celular"] {
+  --seele-barra-janela: 0px;
+  --nucleo-fundo: var(--seele-negro-absoluto);
+  --nucleo-painel: var(--seele-negro-painel);
+  --nucleo-texto: var(--seele-osso);
+  --nucleo-acento: var(--seele-laranja-nerv);
+  --nucleo-rotulo: var(--seele-rotulo-claro);
+  --nucleo-borda: var(--seele-linha-forte);
+}
+
+/* A moldura do desktop sai: a barra da janela, a trilha, o operador e o rodapé. */
+:root[data-casca="celular"] :is(#barra-janela, .trilha, .operador, footer.telemetria, #aviso-fone) { display: none !important; }
+
+/* A sessão vira a pilha do celular: um painel por vez, a faixa e as abas. */
+:root[data-casca="celular"] #tela-sessao {
+  height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+:root[data-casca="celular"] #tela-sessao > main.paineis {
+  display: block;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] #tela-sessao .paineis > .painel { display: none; }
+:root[data-casca="celular"] #tela-sessao[data-aba="pessoas"] .paineis > .painel-pessoas { display: flex; height: 100%; }
+:root[data-casca="celular"] #tela-sessao[data-aba="conversa"] .paineis > .painel-linha { display: flex; height: 100%; }
+:root[data-casca="celular"] #tela-sessao[data-aba="servidor"] .paineis > .painel-canais { display: flex; height: 100%; }
+
+/* A aba PESSOAS, desenhada pelo desktop e lida pelo celular: a mesma lista,
+   na largura toda, com alvos de toque. */
+:root[data-casca="celular"] .painel-pessoas { flex-direction: column; width: 100%; }
+:root[data-casca="celular"] .roster .pessoa { min-height: 56px; padding: 10px 16px; }
+:root[data-casca="celular"] .roster .volume { display: none; } /* vai para a folha da pessoa */
+
+/* A faixa de voz. */
+:root[data-casca="celular"] .voz-celular {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 64px;
+  border-top: 1px solid var(--seele-linha-forte);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .voz-sala { padding: 8px 16px; border-left: 3px solid var(--seele-laranja-nerv); }
+
+:root[data-casca="celular"] .voz-controles {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px 12px 8px 8px;
+  background: var(--nucleo-fundo);
+}
+
+:root[data-casca="celular"] .voz-nucleo {
+  min-width: 56px;
+  min-height: 48px;
+  font: 10px/12px var(--seele-pilha-mono);
+  letter-spacing: 0.14em;
+  color: var(--nucleo-texto);
+  background: var(--nucleo-painel);
+  border: 2px solid var(--nucleo-rotulo);
+}
+
+:root[data-casca="celular"] .voz-nucleo[aria-pressed="true"] {
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-texto);
+}
+
+:root[data-casca="celular"] .cel-abas {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-aba {
+  min-height: 56px;
+  font: 12px var(--seele-mono);
+  letter-spacing: 0.08em;
+  color: var(--seele-rotulo-painel);
+  background: none;
+  border: 0;
+  border-top: 2px solid transparent;
+}
+
+:root[data-casca="celular"] .cel-aba[aria-current="page"] { color: var(--seele-osso); border-top-color: var(--seele-laranja-nerv); }

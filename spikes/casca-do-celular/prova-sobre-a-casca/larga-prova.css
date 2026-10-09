@@ -1,0 +1,34 @@
+/* A casca larga (D-web-3), do lado do CSS, sobre a casca de verdade.
+
+   O desktop no navegador não é redesenhado. O navegador desenha a janela, então
+   a barra da janela sai inteira, com o relógio e os controles, e a variável
+   que a mede vai a zero: a `.tela` e as superfícies dos MODs já a leem. */
+:root[data-casca="larga"] {
+  --seele-barra-janela: 0px;
+}
+
+:root[data-casca="larga"] #barra-janela {
+  display: none;
+}
+
+/* HOSPEDAR AQUI sai do lugar dele, e a frase do app entra embaixo do
+   CONECTAR (o script a monta). O nome público e as outras versões são de quem
+   hospeda, e saem junto (matriz, PA-05 e PA-06). */
+:root[data-casca="larga"] #botao-hospedar,
+:root[data-casca="larga"] #boot-nome-publico,
+:root[data-casca="larga"] #boot-versoes {
+  display: none;
+}
+
+:root[data-casca="larga"] .larga-hospedar {
+  margin: 4px 0 0;
+}
+
+/* O link numa linha própria, para não quebrar no meio. */
+:root[data-casca="larga"] .larga-hospedar a {
+  display: block;
+  margin-top: 4px;
+  color: var(--seele-laranja-nerv);
+  letter-spacing: 0.18em;
+  text-underline-offset: 3px;
+}

@@ -127,6 +127,15 @@ pub struct LocalTelemetry {
     ///
     /// Uma no arranque é o normal — o anel começa vazio.
     pub pacing_primes: u64,
+
+    /// Se o microfone entrega **zero exato** há três segundos, aberto e sem
+    /// mudo. F1-microfone-macos.
+    ///
+    /// Zero exato não é «baixo»: o piso de um microfone de verdade nunca é zero,
+    /// e um sistema que bloqueia o microfone — o macOS sem a permissão —
+    /// entrega zeros sem erro nenhum. Medido pelo laço de voz sobre o quadro
+    /// cru, antes da supressão, e falso num caminho de áudio sem laço próprio.
+    pub microfone_entrega_silencio_digital: bool,
 }
 
 impl LocalTelemetry {
@@ -156,7 +165,20 @@ impl LocalTelemetry {
             pacing_target_ms: 0.0,
             pacing_clamps: 0,
             pacing_primes: 0,
+            microfone_entrega_silencio_digital: false,
         }
+    }
+
+    /// Anexa o que o laço de voz concluiu sobre o silêncio digital do
+    /// microfone.
+    ///
+    /// Separado de [`Self::assemble`] pela mesma razão que
+    /// [`Self::with_playout`]: quem conta os quadros de zero exato é o laço de
+    /// voz, que é quem vê o quadro cru antes da supressão.
+    #[must_use]
+    pub const fn with_silencio_digital(mut self, entrega: bool) -> Self {
+        self.microfone_entrega_silencio_digital = entrega;
+        self
     }
 
     /// Anexa o que o relógio de reprodução mediu.
@@ -678,6 +700,31 @@ mod tests {
             ..LocalTelemetry::default()
         };
         assert_eq!(tropecando.tropecos(), 16);
+    }
+
+    /// F1-microfone-macos: o silêncio digital que o laço de voz mediu chega à
+    /// telemetria, e só por quem o mediu.
+    #[test]
+    fn o_silencio_digital_vem_de_quem_o_mediu() {
+        let montada = LocalTelemetry::assemble(
+            StreamMetrics::default(),
+            GateMetrics::default(),
+            MixMetrics::default(),
+            0,
+            false,
+        );
+        assert!(
+            !montada.microfone_entrega_silencio_digital,
+            "a telemetria nasceu dizendo que o microfone entrega silêncio digital, \
+             sem ninguém ter medido: a faixa do macOS acenderia para todo mundo"
+        );
+        assert!(
+            montada
+                .with_silencio_digital(true)
+                .microfone_entrega_silencio_digital,
+            "o silêncio digital que o laço mediu não chegou à telemetria: a tela \
+             nunca diz que o sistema pode estar bloqueando o microfone"
+        );
     }
 
     #[test]

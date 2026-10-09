@@ -8400,3 +8400,18 @@ um crate novo (o auxiliar tem três linhas):
 
 **Quando fecha.** Com o auxiliar nos três crates e a prova de ordem forçada em
 cada um, provada por reversão.
+
+## 57 · O guarda da identidade da linha 0.15 lê só o texto antes do primeiro `#[cfg(test)]`
+
+**Aberta em 2026-10-09**, achada pela F7 da 0.16 ao portar o `9ff9b73c` (a 0.15.2
+lê a identidade em `$SEELE_IDENTIDADE`) para a 0.16 (`58552de8`). **Não é defeito
+de hoje: é um guarda que não pegaria uma regressão futura.**
+
+No `seele-ffi` da `linha/0.15`, o guarda que confere que só os dois leitores da
+identidade existem lê o arquivo até o primeiro `#[cfg(test)]`. Mas o arquivo tem
+produção depois dele (dois `impl Connection`), e um terceiro leitor escrito ali
+passaria. O código de hoje está certo: só os dois leitores, os dois pelo montador.
+
+Na 0.16, o guarda novo tira cada módulo de teste e lê o resto, e tem um guarda do
+guarda. **O que fazer:** se a linha 0.15 ganhar uma 0.15.3, portar o guarda da
+0.16 junto. A 0.15.2 sai como está, com a bateria verde de `148c9e60`.
