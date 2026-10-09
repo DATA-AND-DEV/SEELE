@@ -325,7 +325,11 @@ quem chama chamar `proximo` a cada pedaço. O cliente web vai chamar.
    roda a API 6 como o desktop. O item 16 sai, e o `Hello` declara as mesmas
    APIs (D-fio-7).
 3. **Nada para a tela compartilhada**, que fica fora do celular na 0.16 (o bug
-   do WebKit em 16 MB ou 7600 fluxos). Quem decide não mandar tela a uma sessão
+   do WebKit em 16 MB ou 7600 fluxos). **Correção de 09/10:** isto era uma
+   inferência da F4, e não uma decisão. O ADR 0057 prevê o contrário: o
+   cliente conta fluxos e bytes e reconecta antes do teto. A matriz da F8
+   (`F8/paridade.md`, área 4) põe o celular assistindo. Se o celular assiste
+   à tela na 0.16 é decisão da orquestradora. Quem decide não mandar tela a uma sessão
    `h3` é o servidor, pelo transporte, sem mudar o fio. A casca do celular diz
    por que a tela não aparece.
 4. **Um pedido para a sessão do Plano 3, e não para o vocabulário.** Hoje o
