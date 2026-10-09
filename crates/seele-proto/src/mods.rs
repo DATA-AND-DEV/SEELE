@@ -204,9 +204,10 @@ pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[
 ///
 /// `chave-desconhecida`: o nome não está em `CHAVES_DO_TEMA`.
 /// `valor-invalido`: está, e o valor não tem a forma dele. Com mais de uma
-/// chave errada, vale a primeira **em ordem alfabética**, e não na ordem em
-/// que o MOD as escreveu: o `serde_json` deste workspace guarda o objeto num
-/// `BTreeMap`. A casca nomeia a primeira na ordem do objeto.
+/// chave errada, vale a primeira **em ordem alfabética** (a dos bytes UTF-8,
+/// que é a dos pontos de código), e não a primeira que o MOD escreveu: o
+/// `serde_json` deste workspace guarda o objeto num `BTreeMap`. A casca ordena
+/// do mesmo jeito antes de conferir, e as duas nomeiam a mesma chave.
 #[must_use]
 pub fn recusa_das_chaves_do_tema(
     tema: &serde_json::Map<String, serde_json::Value>,

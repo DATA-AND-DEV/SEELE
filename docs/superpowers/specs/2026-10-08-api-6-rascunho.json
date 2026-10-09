@@ -544,7 +544,7 @@
         "bordaForte",
         "apagadoSecundario"
       ],
-      "formula": "só sob um tema (sem tema, nada é derivado); em OKLCH: o preenchimento tem o matiz da cor, 0,23 do croma e a luminosidade do fundo um passo de 0,122 na direção da cor, encolhendo até a cor alcançar 4,5:1 sobre ele; com as cores do padrão, as cores de estado saem iguais às do produto e os preenchimentos a ΔE2000 ≤ 4,5 (o ΔE ≤ 2 prometido não se cumpre: os -fraco do produto foram escolhidos à mão; medido na 17e); bordaForte não é derivado; publicada também como função de referência no guia (tonsDoTema)"
+      "formula": "só sob um tema (sem tema, nada é derivado); em OKLCH: o preenchimento tem o matiz da cor, 0,23 do croma e a luminosidade do fundo um passo de 0,122 na direção da cor, encolhendo até a cor alcançar 4,5:1 sobre ele; com o fundo e o painel exatos do produto, o preenchimento de uma cor do produto é o token dela (ΔE 0); fora delas, as cores de estado do produto e os preenchimentos a ΔE2000 ≤ 4,5 (o ΔE ≤ 2 em todo lugar não se cumpre: os -fraco do produto foram escolhidos à mão; medido na 17e); bordaForte não é derivado; publicada também como função de referência no guia (tonsDoTema)"
     },
     "porta": "do lado do servidor, o manifesto (\"tema\": true), mostrado na tela de aceite; do lado de quem vê, servidor.aparencia: «o SEELE desenha» tira o tema daquele servidor nesta máquina",
     "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão; os itens do núcleo leem os tokens do produto, fora do alcance do tema",
@@ -672,7 +672,7 @@
       "tema-de-outro-mod (outro MOD é o escolhido e está ligado)",
       "tema-invalido (não é objeto nem null)",
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
-      "chave-desconhecida (leva a chave; a tabela é seele_proto::mods::CHAVES_DO_TEMA, a mesma da casca, conferida caso a caso por crates/seele-proto/tests/vetores/chaves-do-tema.json; tarefa 17j)",
+      "chave-desconhecida (leva a chave; com mais de uma errada, a primeira em ordem de ponto de código, igual nas duas pontas; a tabela é seele_proto::mods::CHAVES_DO_TEMA, a mesma da casca, conferida caso a caso por crates/seele-proto/tests/vetores/chaves-do-tema.json; tarefa 17j)",
       "valor-invalido (leva a chave; a forma de cada valor está na mesma tabela: cor #rrggbb, inteiro com intervalo, bandeira, escolha; tarefa 17j)",
       "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
     ],

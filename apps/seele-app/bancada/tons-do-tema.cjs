@@ -53,23 +53,21 @@ vm.runInContext(
 );
 const { tonsDoTema, contrasteEntre } = contexto.__api;
 
-/** As cores do produto, como `tokens.css` as escreve. */
-const PRODUTO = {
-  "--seele-negro-absoluto": "#050403",
-  "--seele-negro-painel": "#0a0806",
-  "--seele-osso": "#eae3cf",
-  "--seele-rotulo-painel": "#7a7061",
-  "--seele-laranja-nerv": "#f2521f",
-  "--seele-linha": "#241f19",
-  "--seele-laranja-fraco": "#331704",
-  "--seele-fosforo": "#6bffb6",
-  "--seele-fosforo-fraco": "#06220f",
-  "--seele-padrao-azul": "#2f8fe0",
-  "--seele-azul-fraco": "#04182b",
-  "--seele-vermelho-alerta": "#ff1a1a",
-  "--seele-vermelho-fraco": "#2c0508",
-  "--seele-osso-apagado": "#7a7061",
-};
+/**
+ * As cores do produto, lidas de `tokens.css` — e não copiadas aqui: o atalho
+ * das superfícies do padrão promete os tokens **exatos**, e uma cópia que
+ * envelhecesse provaria a cópia.
+ */
+const PRODUTO = Object.fromEntries(
+  [...fs.readFileSync(`${repo}/apps/seele-app/ui/tokens.css`, "utf8")
+    .matchAll(/^\s*(--seele-[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})\s*;/gm)]
+    .map(([, token, cor]) => [token, cor.toLowerCase()]),
+);
+for (const token of ["--seele-negro-absoluto", "--seele-negro-painel", "--seele-osso", "--seele-laranja-nerv",
+  "--seele-laranja-fraco", "--seele-fosforo", "--seele-fosforo-fraco", "--seele-padrao-azul", "--seele-azul-fraco",
+  "--seele-vermelho-alerta", "--seele-vermelho-fraco", "--seele-osso-apagado"]) {
+  if (!PRODUTO[token]) throw new Error(`${token} sumiu de tokens.css`);
+}
 const daRaiz = (token) => PRODUTO[token] ?? "";
 
 // ---------------------------------------- CIEDE2000, para medir o «perto»
@@ -128,20 +126,50 @@ const ESTADO = [
     `sem tema, o produto derivou ou recusou alguma coisa: ${JSON.stringify(r)}`);
 }
 
-// ---------------------------------------- as cores do padrão, declaradas por um tema
+// ---------------------------------------- as superfícies exatas do padrão: os tokens do produto
 
 {
-  const padrao = { fundo: "#050403", painel: "#0a0806", texto: "#eae3cf", apagado: "#7a7061", acento: "#f2521f", borda: "#241f19" };
+  // Os `-fraco` do produto foram escolhidos à mão sobre estas superfícies, e
+  // nenhuma fórmula os reproduz (ΔE2000 de 3,2 a 4,2, medido na 17e): com elas,
+  // o tema recebe os tokens, ΔE 0.
+  const padrao = {
+    fundo: PRODUTO["--seele-negro-absoluto"], painel: PRODUTO["--seele-negro-painel"], texto: PRODUTO["--seele-osso"],
+    apagado: "#7a7061", acento: PRODUTO["--seele-laranja-nerv"], borda: "#241f19",
+  };
   const r = tonsDoTema(padrao, daRaiz);
   confere("padrão · aceito", r.pares.length === 0, `as cores do padrão foram recusadas: ${JSON.stringify(r.pares)}`);
+  for (const token of ["--seele-laranja-fraco", "--seele-osso-apagado", ...ESTADO.flat()]) {
+    confere("padrão · o token do produto", r.tons[token] === PRODUTO[token],
+      `${token} saiu ${r.tons[token]}, e o do produto é ${PRODUTO[token]}`);
+  }
+  confere("padrão · o acento sobre o preenchimento", contrasteEntre(padrao.acento, r.tons["--seele-laranja-fraco"]) >= 4.5,
+    `o acento do produto sobre o preenchimento do produto ficou abaixo de 4,5:1`);
+
+  // As superfícies do padrão com outro acento: o preenchimento do acento é
+  // derivado (é dele), e as cores de estado continuam as do produto.
+  const outroAcento = { ...padrao, acento: "#2f8fe0" };
+  const o = tonsDoTema(outroAcento, daRaiz);
+  confere("superfícies do padrão, outro acento · preenchimento derivado",
+    o.tons["--seele-laranja-fraco"] !== PRODUTO["--seele-laranja-fraco"]
+      && contrasteEntre(outroAcento.acento, o.tons["--seele-laranja-fraco"]) >= 4.5,
+    `o preenchimento de um acento azul saiu ${o.tons["--seele-laranja-fraco"]}`);
+  for (const token of ESTADO.flat()) {
+    confere("superfícies do padrão, outro acento · estado do produto", o.tons[token] === PRODUTO[token],
+      `${token} saiu ${o.tons[token]}, e o do produto é ${PRODUTO[token]}`);
+  }
+
+  // A um passo das superfícies do padrão, a derivação vale, e o número medido
+  // é o do contrato: as cores de estado iguais, os preenchimentos a ΔE2000 ≤ 4,5.
+  const quase = { ...padrao, fundo: "#060403" };
+  const q = tonsDoTema(quase, daRaiz);
   for (const token of ESTADO.map(([cor]) => cor)) {
-    confere("padrão · cor de estado igual", r.tons[token] === PRODUTO[token],
-      `${token} derivado como ${r.tons[token]}, e o do produto é ${PRODUTO[token]}`);
+    confere("quase o padrão · cor de estado igual", q.tons[token] === PRODUTO[token],
+      `${token} derivado como ${q.tons[token]}, e o do produto é ${PRODUTO[token]}`);
   }
   for (const token of ["--seele-laranja-fraco", ...ESTADO.map(([, f]) => f)]) {
-    const d = de2000(r.tons[token] ?? "#000000", PRODUTO[token]);
-    confere("padrão · perto do produto", d <= 4.5,
-      `${token} derivado como ${r.tons[token]}, a ΔE2000 ${d.toFixed(2)} do produto (${PRODUTO[token]})`);
+    const d = de2000(q.tons[token] ?? "#000000", PRODUTO[token]);
+    confere("quase o padrão · perto do produto", q.tons[token] !== PRODUTO[token] && d <= 4.5,
+      `${token} derivado como ${q.tons[token]}, a ΔE2000 ${d.toFixed(2)} do produto (${PRODUTO[token]})`);
   }
 }
 

@@ -845,11 +845,13 @@ mundo.tema({ arredondamento: 25 })
 // → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
 ```
 
-Com mais de uma chave errada, o servidor nomeia a primeira em ordem
-alfabética, e a casca a primeira na ordem do objeto: as duas são chaves
-erradas, e o MOD conserta uma por vez. **«A mesma
+Com mais de uma chave errada, **as duas pontas nomeiam a primeira em ordem
+alfabética** — a dos pontos de código, que é a dos bytes UTF-8: o servidor lê o
+objeto num `BTreeMap`, e a casca ordena do mesmo jeito antes de conferir (o
+`<` do JavaScript compara unidades UTF-16, que discordam acima de U+FFFF). A
+primeira chave errada não depende de quem respondeu. **«A mesma
 tabela» quer dizer a mesma resposta**: o vetor
-`crates/seele-proto/tests/vetores/chaves-do-tema.json` (37 casos) é lido pelo
+`crates/seele-proto/tests/vetores/chaves-do-tema.json` (39 casos) é lido pelo
 servidor e pela casca, e os dois têm de aceitar e recusar igual, pela mesma
 chave e pelo mesmo motivo; um teste espelho em `frontend.rs` confere que as
 duas tabelas têm as mesmas chaves e formas, e outro, que o vetor usa cada chave
@@ -906,14 +908,19 @@ Sob um tema, em OKLCH:
   piso de contraste aqui, e derivar fica para quando um tema medido mostrar a
   régua sumindo.
 
-**A promessa de ΔE ≤ 2 não se cumpriu, e o número é outro.** Com as cores do
-tema padrão declaradas por um MOD, as três cores de estado saem **idênticas**
-às do produto (ΔE 0: já alcançam o piso e são mantidas), e os preenchimentos
-saem a **ΔE2000 de 3,2 a 4,2** dos tokens (`acentoFraco` `#2f140c` contra
-`#331704`, a 4,18). Os quatro `-fraco` do produto foram escolhidos à mão, e
-nenhuma fórmula de uma regra só os reproduz abaixo de 4 — medido. O contrato
-fica em **ΔE2000 ≤ 4,5 para os preenchimentos, e igualdade para as cores de
-estado que já alcançam**, na bancada `apps/seele-app/bancada/tons-do-tema.cjs`.
+**Com as superfícies exatas do produto, os tokens do produto (ΔE 0).** Os
+quatro `-fraco` do produto foram escolhidos à mão sobre o `fundo` e o `painel`
+dele, e nenhuma fórmula de uma regra só os reproduz: derivados, saíam a
+**ΔE2000 de 3,2 a 4,2** (`acentoFraco` `#2f140c` contra `#331704`, a 4,18 —
+medido na 17e). Por isso a fórmula tem um atalho: com o `fundo` e o `painel`
+iguais aos do produto, o preenchimento de uma cor do produto é o token dela, e
+só o que depende de uma cor que o MOD mudou é derivado (um acento azul sobre as
+superfícies do padrão ganha o preenchimento dele; as cores de estado continuam
+as do produto). **Fora delas, a derivação vale, com ΔE2000 ≤ 4,5** dos tokens
+para os preenchimentos e igualdade para as cores de estado que já alcançam —
+medido com um `fundo` a um passo do padrão. A promessa de ΔE ≤ 2 em todo lugar
+não se cumpre; o contrato é este, na bancada
+`apps/seele-app/bancada/tons-do-tema.cjs`, que lê os tokens do `tokens.css`.
 O guia publica a mesma função em JavaScript, que a casca usa (`tonsDoTema` em
 `ui/base.js`).
 
@@ -935,8 +942,9 @@ superfícies do tema**, garantindo o piso:
   produto que alcança; o croma recua só o que for preciso para caber no sRGB.
   O `-fraco` sai da cor derivada pela regra dos preenchimentos acima, com a cor
   sobre o próprio `-fraco` também em 4,5:1;
-- com as cores do tema padrão, a derivação **devolve as cores do produto**
-  (ΔE 0) e os preenchimentos a ΔE2000 ≤ 4,5, como acima;
+- com as superfícies exatas do padrão, a derivação **devolve as cores e os
+  preenchimentos do produto** (ΔE 0); perto delas, as cores do produto e os
+  preenchimentos a ΔE2000 ≤ 4,5, como acima;
 - se nenhuma luminosidade servir às duas superfícies, o tema é recusado com o
   par, na mesma forma da recusa de contraste (`{ frente: 'fosforo', fundo:
   'painel', razao, piso }`). Como os pares já pedem `texto` em 4,5:1 sobre as
@@ -1422,7 +1430,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 |---|---|---|---|
 | B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido (decidido em 09/10); **feito no servidor** (17a a 17c) | §9 |
 | B2 | o resultado da aplicação | o evento `tema`, com `aplicado`, `recusado` (com os pares) ou `nativo` | §9 |
-| B3 | os pares e a fórmula dos derivados | a lista só com o que o MOD escolhe; a fórmula, em OKLCH, devolve as cores de estado do produto (ΔE 0) e os preenchimentos a ΔE2000 ≤ 4,5 — o ΔE ≤ 2 prometido não se cumpre, medido (17e) | §9 |
+| B3 | os pares e a fórmula dos derivados | a lista só com o que o MOD escolhe; a fórmula, em OKLCH: com as superfícies exatas do padrão, os tokens do produto (ΔE 0); fora delas, as cores de estado do produto e os preenchimentos a ΔE2000 ≤ 4,5 — o ΔE ≤ 2 em todo lugar não se cumpre, medido (17e) | §9 |
 | B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
 | B5 | a ampliação | na 6: `modo`, a densidade completa e os tokens por região; o fundo por mídia se medido a tempo; tipo e escala na API 7 | §9 |
 | B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |

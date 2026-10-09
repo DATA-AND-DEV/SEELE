@@ -1,5 +1,5 @@
 {
-  "o-que-e": "Os casos das chaves do tema (rascunho da API 6, §9; tarefa 17j). O servidor (`seele_proto::mods::recusa_das_chaves_do_tema`, em `crates/seele-proto/tests/chaves_do_tema.rs`) e a casca (`aplicarOTemaDoMod`, em `apps/seele-app/bancada/chaves-do-tema.cjs`) leem este arquivo, e cada um tem de dar a mesma resposta: aceita, ou recusa pela mesma chave. Todo nome da tabela aparece aceito em algum caso, e quem soma uma chave à tabela soma um caso aqui.",
+  "o-que-e": "Os casos das chaves do tema (rascunho da API 6, §9; tarefa 17j). O servidor (`seele_proto::mods::recusa_das_chaves_do_tema`, em `crates/seele-proto/tests/chaves_do_tema.rs`) e a casca (`aplicarOTemaDoMod`, em `apps/seele-app/bancada/chaves-do-tema.cjs`) leem este arquivo, e cada um tem de dar a mesma resposta: aceita, ou recusa pela mesma chave. Com mais de uma chave errada, os dois nomeiam a primeira em ordem alfabética (a dos pontos de código, que é a dos bytes UTF-8). Todo nome da tabela aparece aceito em algum caso, e quem soma uma chave à tabela soma um caso aqui.",
   "casos": [
     { "nome": "vazio", "tema": {}, "recusa": null },
     { "nome": "as seis cores", "tema": { "fundo": "#050403", "painel": "#0a0806", "texto": "#eae3cf", "apagado": "#7a7061", "acento": "#f2521f", "borda": "#241f19" }, "recusa": null },
@@ -39,6 +39,9 @@
     { "nome": "uma fonte livre", "tema": { "fonte": "Comic Sans MS" }, "recusa": { "erro": "valor-invalido", "chave": "fonte" } },
     { "nome": "uma escolha com o nome do protótipo", "tema": { "fonte": "toString" }, "recusa": { "erro": "valor-invalido", "chave": "fonte" } },
     { "nome": "uma escolha em número", "tema": { "densidade": 1 }, "recusa": { "erro": "valor-invalido", "chave": "densidade" } },
-    { "nome": "uma escolha dentro de uma lista", "tema": { "densidade": ["compacta"] }, "recusa": { "erro": "valor-invalido", "chave": "densidade" } }
+    { "nome": "uma escolha dentro de uma lista", "tema": { "densidade": ["compacta"] }, "recusa": { "erro": "valor-invalido", "chave": "densidade" } },
+
+    { "nome": "duas chaves erradas fora de ordem: vale a primeira em ordem alfabética, e não a primeira escrita", "tema": { "zeta": "#000000", "acento": "vermelho" }, "recusa": { "erro": "valor-invalido", "chave": "acento" } },
+    { "nome": "a ordem é a dos pontos de código, e não a das unidades UTF-16", "tema": { "\ud83d\ude00": "#000000", "\uff01": "#000000" }, "recusa": { "erro": "chave-desconhecida", "chave": "\uff01" } }
   ]
 }

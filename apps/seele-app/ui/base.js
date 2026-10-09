@@ -2024,7 +2024,19 @@ function aplicarOTemaDoMod(id, valores) {
   // tabela é a do servidor (`seele_proto::mods::CHAVES_DO_TEMA`), e as duas
   // respondem igual a cada caso de `chaves-do-tema.json` (tarefa 17j).
   const daTabela = (tabela, nome) => Object.hasOwn(tabela, nome);
-  for (const [nome, valor] of Object.entries(valores ?? {})) {
+  // **Em ordem alfabética, e a dos pontos de código**: com mais de uma chave
+  // errada, a casca e o servidor nomeiam a mesma — o servidor lê o objeto num
+  // `BTreeMap`, que ordena pelos bytes UTF-8, e o `<` do JavaScript compara
+  // unidades UTF-16, que discordam dele acima de U+FFFF.
+  const porPontoDeCodigo = ([a], [b]) => {
+    const [x, y] = [Array.from(a), Array.from(b)];
+    for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+      const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
+      if (diferenca !== 0) return diferenca;
+    }
+    return x.length - y.length;
+  };
+  for (const [nome, valor] of Object.entries(valores ?? {}).sort(porPontoDeCodigo)) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
     // recusaria o nome delas antes de alguém olhar.
     if (daTabela(MEDIDAS_DA_API, nome)) {
@@ -2251,11 +2263,24 @@ function tonsDoTema(emVigor, daRaiz) {
   // Uma cor que não carregou não vira recusa, nem tom: sem cor medida não há
   // medida, e derivar dela seria escrever na sessão um valor que não é cor.
   const medida = (...cs) => cs.every((cor) => COR_DO_TEMA.test(cor));
+  const raiz = (token) => String(daRaiz(token)).toLowerCase();
+  // **As superfícies exatas do produto recebem os tons do produto.** Os
+  // `-fraco` foram escolhidos à mão sobre elas, e nenhuma fórmula os reproduz
+  // (ΔE2000 de 3,2 a 4,2, medido na 17e): com o fundo e o painel do produto, o
+  // preenchimento de uma cor do produto é o token dela, ΔE 0. Só o que depende
+  // de uma cor que o MOD mudou é derivado.
+  const doProduto = c.fundo === raiz(TEMA_DA_API.fundo) && c.painel === raiz(TEMA_DA_API.painel);
+  const preenchimento = (cor, corDoProduto, tokenDoProduto) =>
+    doProduto && cor === corDoProduto && medida(raiz(tokenDoProduto))
+      ? raiz(tokenDoProduto)
+      : preenchimentoDe(cor, c.fundo);
   const tons = {};
-  if (medida(c.acento, c.fundo)) tons["--seele-laranja-fraco"] = preenchimentoDe(c.acento, c.fundo);
+  if (medida(c.acento, c.fundo)) {
+    tons["--seele-laranja-fraco"] = preenchimento(c.acento, raiz(TEMA_DA_API.acento), "--seele-laranja-fraco");
+  }
   const superficies = medida(c.fundo, c.painel);
   for (const estado of CORES_DE_ESTADO) {
-    const cor = String(daRaiz(estado.token)).toLowerCase();
+    const cor = raiz(estado.token);
     if (!superficies || !medida(cor)) continue;
     const derivada = corDeEstadoPara(cor, c.fundo, c.painel);
     if (!derivada) {
@@ -2263,11 +2288,11 @@ function tonsDoTema(emVigor, daRaiz) {
       continue;
     }
     tons[estado.token] = derivada;
-    tons[estado.fraco] = preenchimentoDe(derivada, c.fundo);
+    tons[estado.fraco] = preenchimento(derivada, cor, estado.fraco);
   }
   // **O segundo apagado do produto** (`--seele-osso-apagado`), que nenhum tema
   // escreve: no piso dos apagados, 3:1 sobre o fundo e o painel.
-  const apagado = String(daRaiz("--seele-osso-apagado")).toLowerCase();
+  const apagado = raiz("--seele-osso-apagado");
   if (superficies && medida(apagado)) {
     const segundo = corDeEstadoPara(apagado, c.fundo, c.painel, 3);
     if (segundo) tons["--seele-osso-apagado"] = segundo;
