@@ -980,30 +980,8 @@ async fn admitir(
                         });
                     }
                 }
-                // Entrou de verdade: agora o convite é gasto — quando houve um.
-                // Sem passe não há o que gastar: é quem entrou pela porta que a
-                // portaria já tinha aberto, e ela não consome nada.
-                //
-                // Perder a corrida aqui é o mesmo caso de sempre — dois
-                // clientes com o mesmo convite no mesmo instante — e a recusa
-                // dele continua uniforme.
-                match passe.as_ref().map_or(Ok(Ok(())), |passe| {
-                    crate::admissao::gastar(&mut guard, passe)
-                }) {
-                    Ok(Ok(())) => {}
-                    Ok(Err(recusa)) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::CredentialRejected,
-                            detail: format!("admissão recusada ao gastar: {recusa:?}"),
-                        });
-                    }
-                    Err(error) => {
-                        return Err(Refusal {
-                            reason: DisconnectReason::CredentialRejected,
-                            detail: format!("could not spend the invite: {error}"),
-                        });
-                    }
-                }
+                // O convite **não** é gasto aqui: só depois dos MODs, logo
+                // abaixo do `exigir_aceite_dos_mods`. Ver lá.
             }
             Ok(crate::portaria::Resposta::Pendente) => {
                 tracing::info!(%impressao, %nickname, "knock waiting for the host");
@@ -1142,6 +1120,37 @@ async fn admitir(
     // porque o laço compara identidades em vez de confiar no aviso.
     let aviso_de_mods = server.persistence.lock().await.mods_mudaram();
     let conjunto_aceito = exigir_aceite_dos_mods(send, recv, server, version).await?;
+
+    // **Entrou de verdade: agora o convite é gasto** — quando houve um. Sem
+    // passe não há o que gastar: é quem entrou pela porta que a portaria já
+    // tinha aberto, ou pela senha, e nada se consome.
+    //
+    // Era gasto na portaria, antes dos MODs, e quem os recusava — todo app que
+    // ainda não os tinha aceitado: ele recusa, devolve a lista à tela e entra de
+    // novo depois do sim — voltava com o mesmo convite e recebia
+    // `CredentialRejected` (hipótese da F8, medida em 09/10/2026; o caso irmão
+    // da P4, o apelido). Aqui, a recusa dos MODs deixa o convite intacto.
+    //
+    // Perder a corrida aqui é o mesmo caso de sempre — dois clientes com o
+    // mesmo convite no mesmo instante — e a recusa dele continua uniforme.
+    if let Some(passe) = passe.as_ref() {
+        let mut guard = server.persistence.lock().await;
+        match crate::admissao::gastar(&mut guard, passe) {
+            Ok(Ok(())) => {}
+            Ok(Err(recusa)) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("admissão recusada ao gastar: {recusa:?}"),
+                });
+            }
+            Err(error) => {
+                return Err(Refusal {
+                    reason: DisconnectReason::CredentialRejected,
+                    detail: format!("could not spend the invite: {error}"),
+                });
+            }
+        }
+    }
 
     // Lido do PERSISTENCE, e não da [`ServerConfig`] que subiu o processo: renomear
     // com o servidor no ar é o caso normal — ADR 0032 —, e um nome que voltasse ao
