@@ -124,9 +124,13 @@ const REGIOES = [
 
         // Uma instância viva, como a de um MOD carregado: sem ela a contribuição
         // não monta (`montarContribuicao` pede `instancia.admite`).
+        // O executor guarda o que é entregue ao MOD. Sem `entregar`, o aviso de
+        // «não coube» lançava aqui e a montagem inteira virava «não montou» —
+        // um artefato da bancada que já foi lido como comportamento do produto.
         const instancia = new InstanciaDeMod("mod/regiao", "h", geracaoDaSessao, {
           pedirEncerramento() {},
           async encerrou() { return true; },
+          entregar() {},
         });
         instancia.estado = ESTADOS_DE_MOD.ativa;
         modsCarregados.set("mod/regiao", instancia);
@@ -155,8 +159,13 @@ const REGIOES = [
         // janela de 860 px, e dentro dos 64 nós de um cartão. Medido: com o
         // teto, a região mostra 96 px e o SAIR fica a 778 px do topo; sem ele,
         // o SAIR vai a 1 906 px, fora da janela. Muitas linhas curtas não
-        // serviam: 60 passavam do orçamento e não montavam nada, e 30 (480 px)
-        // cabiam na janela, encolhendo a lista de canais acima.
+        // servem: 30 (480 px) cabem na janela, encolhendo a lista de canais
+        // acima, e acima de 32 o orçamento do cartão corta o resto.
+        //
+        // (Uma versão anterior deste comentário dizia que 60 linhas «não
+        // montavam nada». Era a bancada: o executor falso não tinha `entregar`,
+        // o aviso de «não coube» lançava, e a montagem virava «não montou». O
+        // produto corta e avisa — ver «o orçamento de cada ponto», abaixo.)
         let foraDaVista = null;
         let tamanhosNoTeto = null;
         if (teto) {
@@ -230,6 +239,56 @@ const REGIOES = [
         falhas.push(`${ponto}: com conteúdo maior que a região, ${quais.join(" e ")} `
           + `${quais.length > 1 ? "saíram" : "saiu"} da vista`);
       }
+    }
+
+    // ------------------------------------------- o orçamento de cada ponto
+    //
+    // `perfil`, na tabela de pontos, diz com que orçamento a declaração é
+    // montada; `montarContribuicao` montava tudo com o do cartão (64 nós), e o
+    // `superficie` de `pessoa.detalhes` nunca valeu (achado da tarefa 5,
+    // decidido pela orquestradora em 09/10). E o que passa do teto é dito ao
+    // MOD com o perfil, o teto e o tamanho — e não só com a contagem.
+    const orcamento = await page.evaluate(() => {
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/orcamento", "h", geracaoDaSessao, {
+        pedirEncerramento() {},
+        async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/orcamento", instancia);
+      const montar = (ponto, alvo, linhas) => {
+        const { handle } = contribuicoesDosMods.registrar({ id: "mod/orcamento" }, instancia, {
+          ponto, modo: "adicionar", alvo,
+          conteudo: Array.from({ length: linhas }, (_, i) => ({ forma: "texto", chave: `l${i}`, dentro: `linha ${i}` })),
+        });
+        const contribuicao = contribuicoesDosMods.porHandle.get(handle);
+        const no = montarContribuicao(contribuicao, alvo);
+        const linhasNaTela = no ? [...no.querySelectorAll("*")].filter((n) => /^linha \d+$/.test(n.textContent)).length : 0;
+        contribuicoesDosMods.revogar(handle, { id: "mod/orcamento", instancia });
+        return linhasNaTela;
+      };
+      const naRegiao = montar("operador.barra", "", 40);
+      const avisoDaRegiao = entregues.splice(0).find((m) => m.nome === "contribuicao") ?? null;
+      const nosDetalhes = montar("pessoa.detalhes", "12", 40);
+      const avisoDosDetalhes = entregues.splice(0).find((m) => m.nome === "contribuicao") ?? null;
+      modsCarregados.delete("mod/orcamento");
+      return { naRegiao, avisoDaRegiao, nosDetalhes, avisoDosDetalhes };
+    });
+    // Uma linha de texto custa dois nós: 40 linhas são 80, e o cartão tem 64.
+    // Montam 32, e as 8 que sobram são recusadas inteiras, com o texto junto.
+    if (orcamento.naRegiao !== 32) {
+      falhas.push(`orçamento: uma região montou ${orcamento.naRegiao} de 40 linhas, e o cartão (64 nós) monta 32`);
+    }
+    const aviso = orcamento.avisoDaRegiao;
+    if (!aviso || aviso.motivo !== "orcamento" || aviso.perfil !== "cartao" || aviso.teto !== 64
+      || aviso.tamanho !== 80 || aviso.recusados !== 8) {
+      falhas.push("orçamento: o MOD não soube, com o perfil, o teto e o tamanho, que a declaração "
+        + `passou do teto — recebeu ${JSON.stringify(aviso)}`);
+    }
+    if (orcamento.nosDetalhes !== 40 || orcamento.avisoDosDetalhes !== null) {
+      falhas.push(`orçamento: pessoa.detalhes (perfil «superficie», 4096 nós) montou ${orcamento.nosDetalhes} `
+        + `de 40 linhas, com o aviso ${JSON.stringify(orcamento.avisoDosDetalhes)}`);
     }
   } finally {
     await browser.close();

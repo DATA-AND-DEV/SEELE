@@ -85,10 +85,13 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "sala.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "servidor.navegacao": { modos: ["adicionar"], perfil: null, porAlvo: false },
   "servidor.aparencia": { modos: ["substituir"], perfil: null, porAlvo: false },
-  "redes": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
-  "operador.barra": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
-  "compositor": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
-  "status.barra": { modos: ["adicionar"], perfil: "regiao", porAlvo: false },
+  // **As regiões da API 6** (rascunho §3, tarefa 5), no orçamento do cartão
+  // (64 nós) até a M3 medir, no desktop e no iPhone: o número delas sai da
+  // medida, e não do plano (decisão da orquestradora, 09/10).
+  "redes": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "operador.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "compositor": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
 });
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */

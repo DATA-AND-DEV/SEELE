@@ -146,7 +146,7 @@
   "eventos-mudam": {
     "midia": "passa a levar ponto e alvo (PERFIS R9); e o retrato que não decodifica manda midia/falhou (K2)",
     "traco": "ganha a fase cancelou (MESA M14)",
-    "contribuicao": "ganha o motivo regiao-ausente (celular)"
+    "contribuicao": "ganha o motivo regiao-ausente (celular) e o motivo orcamento: { ponto, destino, recusados, motivo: 'orcamento', perfil, teto, tamanho } quando a declaração passa do teto do ponto (tarefa 5); o orçamento é o perfil do ponto — pessoa.detalhes 4096 nós, as regiões 64 até a M3"
   },
   "eventos-da-tela": {
     "canal": "{ canal } — o canal aberto mudou",

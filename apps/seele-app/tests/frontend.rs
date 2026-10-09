@@ -15955,6 +15955,69 @@ fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
     );
 }
 
+/// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**
+///
+/// A tabela declarava `perfil` — «com que orçamento a declaração é montada» —
+/// e `montarContribuicao` montava tudo com `PERFIS_DE_RENDER.cartao`: o
+/// `superficie` de `pessoa.detalhes` nunca valeu, e um ponto novo podia
+/// declarar qualquer nome sem efeito nenhum (achado da tarefa 5 da F3,
+/// decidido pela orquestradora em 09/10). Um `perfil` que ninguém lê é a
+/// tabela dizendo uma coisa e a tela fazendo outra.
+#[test]
+fn o_perfil_de_cada_ponto_e_o_orcamento_com_que_ele_monta() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1
+        .split_once("});")
+        .expect("a tabela fecha")
+        .0;
+    let perfis: Vec<(String, String)> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (ponto, resto) = resto.split_once('"')?;
+            let perfil = resto.split_once("perfil: ")?.1;
+            let perfil = perfil.split([',', ' ', '}']).next()?.trim_matches('"');
+            Some((ponto.to_owned(), perfil.to_owned()))
+        })
+        .collect();
+    assert!(
+        perfis.len() >= 12,
+        "só {} pontos com `perfil` lidos da tabela: a leitura quebrou",
+        perfis.len()
+    );
+
+    let regiao = read("ui/mods-regiao.js");
+    let orcamentos = regiao
+        .split_once("const PERFIS_DE_RENDER = Object.freeze({")
+        .expect("`PERFIS_DE_RENDER` em mods-regiao.js")
+        .1;
+    for (ponto, perfil) in &perfis {
+        if perfil == "null" {
+            continue;
+        }
+        assert!(
+            orcamentos.contains(&format!("\n  {perfil}: Object.freeze({{")),
+            "«{ponto}» declara `perfil: \"{perfil}\"`, e `PERFIS_DE_RENDER` não tem esse orçamento"
+        );
+    }
+
+    let base = without_comments(&read("ui/base.js"));
+    let montar = js_function(&base, "function montarContribuicao(");
+    assert!(
+        montar.contains("PONTOS_DE_CONTRIBUICAO[")
+            && montar.contains(".perfil")
+            && montar.contains("PERFIS_DE_RENDER["),
+        "`montarContribuicao` deixou de montar com o `perfil` do ponto: {montar}"
+    );
+    assert!(
+        !montar.contains("PERFIS_DE_RENDER.cartao"),
+        "`montarContribuicao` voltou a montar todo ponto com o orçamento do cartão: {montar}"
+    );
+}
+
 /// Nenhum modo aceito pela tabela deixa de ter aplicação.
 ///
 /// A outra metade de R3, e a que sobrou depois de ligar os oito pontos: um

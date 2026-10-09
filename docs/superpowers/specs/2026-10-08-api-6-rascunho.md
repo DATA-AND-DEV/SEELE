@@ -619,7 +619,14 @@ Mudam, na 6:
 - **`traco`** ganha a fase `cancelou`. Hoje `pointercancel` chega como
   `terminou` (`mods-regiao.js:1898` [c]) e um gesto cancelado move a peça
   (MESA M14). No celular é comum.
-- **`contribuicao`** ganha o motivo `regiao-ausente` (§11).
+- **`contribuicao`** ganha o motivo `regiao-ausente` (§11), e o motivo
+  **`orcamento`**: uma declaração que passa do teto do ponto é montada até o
+  teto, e o MOD recebe `{ nome: 'contribuicao', ponto, destino, recusados,
+  motivo: 'orcamento', perfil, teto, tamanho }` — o orçamento do ponto, quantos
+  nós cabem nele e quantos a declaração tem [c, tarefa 5]. Até a tarefa 5 ele
+  recebia só `recusados`, que não diz a quem escreveu quanto cabe nem quanto
+  pediu. As recusas por forma (uma forma que o ponto não aceita) continuam sem
+  `motivo`.
 
 **Os nomes das recusas que o MOD recebe** (o K1-m3 da F5: o `erro` que chega ao
 MOD é um nome de lista fechada, e a frase fica na tela). No envio e na leitura
@@ -1275,6 +1282,7 @@ de hoje, lidos no código:
 |---|---|---|---|
 | mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **fica 12 KiB por mensagem**, e a superfície ganha a montagem por partes (abaixo) |
 | contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **muda de modelo** (abaixo): os pontos por pessoa deixam de gastar o teto agregado |
+| nós de uma contribuição | 64, para **todo** ponto: `montarContribuicao` montava com o orçamento do cartão, e o `perfil` da tabela de pontos não era lido [c, até a tarefa 5] | `base.js`, `PERFIS_DE_RENDER` em `mods-regiao.js` | **o `perfil` de cada ponto vale** (decidido pela orquestradora, 09/10): `pessoa.detalhes` monta com o de superfície (**4096 nós**: um painel de uma pessoa por vez, aberto sob demanda); **as regiões ficam no do cartão (64) até a M3 medir**, no desktop e no iPhone. Um guarda reprova um `perfil` que `montarContribuicao` não lê |
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
@@ -1467,6 +1475,7 @@ no catálogo.
 | R5 | pedidos endereçados ao servidor | **entrou como regra da v6, sem mudar o fio** (§8): o escopo de servidor (`ChannelId(0)`) já existe e passa a estar no contrato, e a permissão de escrita de cada escopo fica definida | medido: o servidor e o PERFIS servem o pedido sem canal; quem não manda o 0 é a casca comum dos MODs oficiais, e o conserto é do porte |
 | R6 | formulários no diálogo | **entrou** (§5) | — |
 | R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** | só fachada; evita o redesenho nativo entre revogar e registrar |
+| — | o orçamento de `pessoa.detalhes` (achado da tarefa 5) | **muda na 6**: o `pessoa.detalhes` do PERFIS passa a montar com **4096 nós** (o perfil de superfície, que a tabela prometia e não valia), e uma declaração que passa do teto chega como `contribuicao` com `motivo: 'orcamento'`, o perfil, o teto e o tamanho (§7.1). As regiões ficam em 64 até a M3. Na 0.15.x nada muda | §12 |
 | R8 | montagem parcial nas superfícies | **em aberto** com o teto de 12 KiB (§12) | a MESA pede o mesmo (item 1); a forma (atualizar por chave ou montar em partes) é a primeira decisão de desenho da tarefa 7 |
 | R9 | a falha dita a quem pode agir | **entrou**: `midia` com ponto e alvo (§7.1); a recusa `mensagem-grande` vai ao `seele.log` | — |
 | R10 | o apelido verificado à vista | **entrou** no núcleo (§10); e **muda a linha do PERFIS**: com `pessoa.cartao` substituído, o apelido verificado sai do «⋯» e fica à esquerda do cartão, à vista, com o botão de moderação (§3, tarefa 5). Quem porta a 4.0.0 desenha o cartão sabendo que o apelido verdadeiro está ao lado, e não precisa repeti-lo | D-nucleo-1 |

@@ -208,6 +208,21 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *   tem a área de uma aplicação. O teto dela é o que uma ficha de RPG e um
  *   tabuleiro exigem — e continua sendo teto.
  */
+/**
+ * **Quantos nós uma declaração pede**, contados como `planejar` os conta: um
+ * texto é um nó, uma forma é um nó mais os de dentro, e uma lista é a soma.
+ *
+ * Para o aviso de «não coube» dizer o tamanho: o renderer para de contar quando
+ * o orçamento acaba — uma forma recusada leva os filhos junto sem contá-los —,
+ * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
+ */
+function nosDaDeclaracao(no) {
+  if (Array.isArray(no)) return no.reduce((soma, um) => soma + nosDaDeclaracao(um), 0);
+  if (typeof no === "string") return 1;
+  if (no === null || typeof no !== "object") return 0;
+  return 1 + nosDaDeclaracao(no.dentro);
+}
+
 const PERFIS_DE_RENDER = Object.freeze({
   regiao: Object.freeze({
     nome: "regiao",
@@ -733,6 +748,9 @@ class RegiaoDeMod {
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
+    // Os recusados **por teto**, à parte dos recusados por forma: é o que
+    // separa «não coube» de «não entra aqui» no aviso ao MOD.
+    this.foraDoTeto = 0;
     const orcamento = { nos: this.perfil.nos };
     const planos = this.planejar(conteudo, 0, orcamento, this.perfil.formas);
     const fixas = [];
@@ -855,7 +873,7 @@ class RegiaoDeMod {
       ));
     }
     if (typeof no === "string") {
-      if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+      if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
       orcamento.nos -= 1;
       return [{ texto: no.slice(0, LIMITES_DA_REGIAO.texto) }];
     }
@@ -873,7 +891,7 @@ class RegiaoDeMod {
       if (permitidas) this.recusados += 1;
       return [];
     }
-    if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+    if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
     orcamento.nos -= 1;
 
     // A chave é o que faz a atualização ser incremental. Sem uma, a posição

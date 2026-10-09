@@ -1391,6 +1391,22 @@ function montarContribuicao(contribuicao, destino = "") {
 
   const instancia = contribuicao.instancia;
   if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
+  // **O orçamento é o do ponto** (`perfil`, na tabela de pontos). Era sempre o
+  // do cartão, e o `superficie` de `pessoa.detalhes` nunca valeu (achado da
+  // tarefa 5, decidido pela orquestradora em 09/10). Um ponto sem perfil não
+  // monta declaração: é recusado pelo nome, e não montado com um orçamento
+  // que ninguém escolheu.
+  const perfil = PONTOS_DE_CONTRIBUICAO[contribuicao.ponto]?.perfil;
+  const orcamento = Object.hasOwn(PERFIS_DE_RENDER, perfil ?? "") ? PERFIS_DE_RENDER[perfil] : null;
+  if (!orcamento) {
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não monta declaração`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return null;
+  }
   // **O hash é o da instância.** O registro guarda só o id do MOD, e o dono
   // pede a mídia com os dois: sem o hash, `midia_do_mod` e `som_do_mod`
   // recusam o pedido antes de ler um byte, e nenhuma mídia de contribuição
@@ -1405,7 +1421,7 @@ function montarContribuicao(contribuicao, destino = "") {
     contribuicao.mod,
     donoDaRegiao(mod, instancia),
     raiz,
-    PERFIS_DE_RENDER.cartao,
+    orcamento,
   );
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
@@ -1444,16 +1460,26 @@ function montarContribuicao(contribuicao, destino = "") {
     if (recusados > 0) {
       // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
       // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
-      donoDaRegiao(mod, instancia).falar({
-        nome: "contribuicao",
-        ponto: contribuicao.ponto,
-        destino: chave,
-        recusados,
-      });
+      //
+      // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
+      // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
+      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      if (renderer.foraDoTeto > 0) {
+        Object.assign(aviso, {
+          motivo: "orcamento",
+          perfil: orcamento.nome,
+          teto: orcamento.nos,
+          tamanho: nosDaDeclaracao(contribuicao.conteudo),
+        });
+      }
+      donoDaRegiao(mod, instancia).falar(aviso);
       registrarNoAnfitriao(
         "recusa-de-mod",
         `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
-          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`,
+          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`
+          + (aviso.motivo
+            ? ` — a declaração tem ${aviso.tamanho}, e o teto de «${aviso.perfil}» é ${aviso.teto}`
+            : ""),
         "aviso",
         contribuicao.mod,
       );
