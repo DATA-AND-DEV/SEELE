@@ -146,3 +146,23 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Ruling: um bloco ausente na v6 conta como vazio, e não como violação
     própria — custo se errado: nenhum, porque o sentido contrário reprova cada
     ponto e tipo que falta, nomeado.
+- **Respostas aos planos do porte das três sessões de MOD** (rascunho §17, uma
+  tabela por sessão; commits `365646c`, `9b27862`):
+  - MESA: o `ModAviso` coalescido por canal e só depois de o quintal gravar;
+    `volume` em toda mídia do servidor, inclusive o `fundo` da `tela`;
+    `contexto.sala` preenchido pelo servidor em todo pedido; o palco escondido
+    continua soando; `superficie.atualizar(chave, subarvore)`.
+  - ESTILO: a lacuna do tema (B0) virou a tarefa 17 — `mundo.tema`, o servidor
+    guardando e mandando o `TemaMudou`, a porta no manifesto, `servidor.aparencia`
+    como porta de quem vê, o evento `tema`, os pares e os derivados em números, a
+    prévia, a herança e a ampliação. O B9 é a tarefa 18, com a F6.
+  - PERFIS: o teto de contribuições muda de modelo (os pontos por alvo fora do
+    agregado); o sujo com `inicial`; a carga do aviso como valor JSON; os nomes
+    das recusas, com `detectado: 'heic'`; os portes em 4.0.0 (D-mods-1).
+  - Ruling: `contexto.sala` é do servidor, pela presença, e não da janela —
+    custo se errado: nenhum dado novo ao MOD, que já recebe `PersonJoined`.
+  - Ruling: os pontos por alvo aceitam uma contribuição por alvo e por MOD —
+    custo se errado: um MOD que quisesse duas por pessoa usa uma só, com mais
+    nós.
+  - Para o dono, pela orquestradora: um tema por servidor (17c) e os números
+    do teto (256 alvos por ponto, 128 sem alvo), que saem da M3.
