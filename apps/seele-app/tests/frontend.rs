@@ -10763,9 +10763,16 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois
     // mantêm a página viva com a credencial dentro, sem que o `main.rs` diga
     // nada. Hoje nenhum script os usa.
+    //
+    // E um terceiro, achado na re-revisão: um ouvinte do evento
+    // `tauri://close-requested` com alvo de janela (`getCurrentWindow().listen`)
+    // também veta, porque o Tauri chama `prevent_close` sempre que há ouvinte
+    // JS desse evento com alvo da janela (`on_window_event`, em
+    // `src/manager/window.rs` do crate `tauri` 2.11.5, linhas 171 e 172). O
+    // `onCloseRequested` é um embrulho dele; o nome do evento pega os dois.
     for nome in ui_files(".js") {
         let texto = without_comments(&read(&format!("ui/{nome}")));
-        for segura in ["onCloseRequested", "beforeunload"] {
+        for segura in ["onCloseRequested", "beforeunload", "close-requested"] {
             assert!(
                 !texto.contains(segura),
                 "`{nome}` passou a usar `{segura}`: a página pode vetar o próprio \
