@@ -378,3 +378,187 @@ Todas: arquivo devolvido da cópia, `cmp` idêntico.
   conformidade deste lote é só a dos dois arquivos.
 - **`Aviso::Reconectado` ganhou um campo.** É tipo interno do núcleo; os
   padrões da conformidade já usavam `{ .. }` ou `{ sessao, .. }` e compilam.
+
+## Rodada 1
+
+FIX_BASE `fc6d0346`. Brief: `.superpowers/sdd/lotes/lote-i-a-rodada1.md`. Uma
+Crítica, dois Importantes e os Menores M-b, M-c, M-e e M-f; o M-d entrou porque
+o mecanismo da C1 o deu por uma volta de rede. Cada item foi commitado assim que
+ficou provado. Nada no fio nem no servidor: o `Ping` e o `Pong` são os de
+sempre, e o servidor devolve o carimbo sem lê-lo.
+
+| commit | item | o que muda |
+|---|---|---|
+| `a9e8c128` | C1, I1 e M-d | `seele_core::assento` (novo): a regra única, `EntradasPendentes`, `MARCA_DO_PING_DE_ENTRADA` e `assento_resgatado`; o `Room` (`state.rs`) e o motor (`enlace.rs`) passam pela mesma porta, `EntradasPendentes::ouvir`; `Client::send_ping_de_entrada`; o motor manda o `Ping` marcado atrás de cada entrada, guarda o `ssrc` e o assento confirmado da queda, e `restabelecer` refaz a entrada (ou a saída) sobre o assento resgatado; na FFI, `readotar_na_volta` refaz o que o motor refez, e o áudio abre pelo assento confirmado (`sala_do_audio`); a conformidade nova, `a_recusa_nao_tira_da_sala.rs` |
+| `ba37e44b` | I2 | o guarda de texto sobre `drive`, `a_porta_da_voz_esta_ligada_ao_laco_de_drive` |
+| `432576e2` | M-b | a conferência do aparelho dentro de `VozDaSala::instalar`, sob o cadeado da voz |
+| `37cc2c60` | M-c | `VozDaSala::vez_do_driver`: uma abertura por vez no driver, e a abertura abandonada desiste sem abrir |
+| `f0fc934f` | M-e | `controles_da_voz` devolve `None` numa sessão sem áudio, e a casca volta ao disco |
+| `502eaef3` | M-f | o comentário de `reconexao_fantasma.rs` |
+
+### C1: o mecanismo, e por que este
+
+**A regra**, em `crates/seele-core/src/assento.rs`: uma recusa
+(`VoiceRoomEntryRefused | VoiceRoomFull`) desfaz só o pedido de entrada no ar e
+devolve o assento de antes dele; sem pedido no ar, não move ninguém. A fila é
+FIFO, porque o servidor decide os pedidos na ordem em que os lê. O pedido sai da
+fila quando chega o `Pong` do `Ping` que o motor manda logo atrás dele, e a
+recusa, quando há, chega antes desse `Pong`. Um pedido que outra coisa
+atropelou — um pedido novo, a saída, o operador que move, a sala apagada —
+deixa de definir o assento, e a recusa dele não move ninguém. Um segundo pedido
+que partia de um recusado passa a partir do que havia antes dele.
+
+**O fim da pendência é o `Pong` de um `Ping` marcado**, com o carimbo `1 << 63`
+(`MARCA_DO_PING_DE_ENTRADA`). Medi o caminho antes de escolher:
+- o servidor responde o `Ping` na mesma volta em que o lê
+  (`session.rs`, `ClientMessage::Ping` → `Pong { timestamp }`), e lê o fluxo de
+  controle em ordem, então o que ele diz sobre o pedido sai antes do `Pong`;
+- o carimbo dos `Ping` de rotina é um contador que **recomeça em 1** a cada
+  `Pong` recebido (`Client::send_ping`), e `pending_ping` guarda só o último.
+  Um `Pong` de rotina pode ser de um `Ping` de antes do pedido, e confirmaria a
+  entrada cedo demais; o bit alto nunca colide com o contador. O `Ping` marcado
+  não mexe na medida do ida-e-volta;
+- a confirmação pelo assento anunciado não serve: o servidor não anuncia o
+  assento à própria pessoa (`PersonJoined` pula `session.person`);
+- uma `Aviso::EntradaConfirmada` vinda do motor também daria certo, mas só para
+  quem a repassa: o `Room` dobrado à mão (a conformidade inteira) nunca
+  confirmaria. Com o `Pong` marcado, `Room::apply` resolve sozinho.
+
+**A volta.** Um `ssrc` igual na sessão nova prova que o servidor resgatou o
+assento (`assento_resgatado`). `Room::adopt` (e `apply(Session)`, que passa pelo
+mesmo `reabrir`) guarda então o assento confirmado de antes; o motor guarda o
+`ssrc` e o confirmado ao soltar a conexão (`Queda`), e `restabelecer` refaz a
+entrada sobre o resgatado — no ar, com o `Ping` marcado — ou manda a saída, se
+a pessoa deixou a sala durante a queda e o servidor a sentou de novo sem saber.
+A FFI espelha: `readotar_na_volta` adota e refaz a entrada, ou a saída.
+
+**M-d.** O áudio abre pelo assento confirmado (`Room::sala_confirmada`, lido por
+`sala_do_audio`): o microfone não abre numa sala que ainda pode recusar. Custa
+uma volta de rede na entrada; o rodapé mostra o travessão nesse intervalo. Numa
+volta sem assento resgatado (`ssrc` novo), o áudio fecha e reabre uma volta de
+rede depois.
+
+**Onde o `PedidoRecusado` da F1 vai encaixar:** no braço de `Alert` de
+`EntradasPendentes::ouvir`, a única porta das recusas para o `Room` e para o
+motor — um `PedidoRecusado` que nomeia outro pedido que não a entrada cai no
+`_ => false` e não desfaz nada.
+
+**Por que não o M4.** O motor de verdade só volta depois de três `Ping` sem
+resposta (cerca de 15 s) e o servidor só solta a conexão pelo prazo de
+ociosidade (20 s); o corte da revisão levou 26 s. O M3 emulado — dois `Enlace`
+com a mesma chave, o assento e o `ssrc` resgatados de verdade pelo servidor, e a
+entrada refeita sem a senha — cobre a decisão; a do motor (`Queda` e
+`restabelecer`) tem o teste
+`a_volta_com_o_assento_resgatado_nao_o_perde_para_a_reentrada_recusada`, com o
+servidor de teste do `enlace.rs`.
+
+### As provas: vermelho e verde
+
+**A conformidade nova**, `crates/seele-conformance/tests/a_recusa_nao_tira_da_sala.rs`,
+com `vaga::minha()` em cada teste. M1 e M5 pela FFI (`audio: false`: numa sala
+o estado é `SemAparelho`, fora dela `ForaDeSala`, e é ele que diz onde o
+gatilho do áudio acha que a pessoa está); o M3 emulado; o de controle pela FFI.
+Rodada no `fc6d0346`, antes do conserto:
+- **M1** (`quem_e_recusado_noutra_sala_continua_na_sua_e_com_o_audio`): «M1: o
+  servidor manteve a pessoa em VoiceRoomId(1) e a tela dela a tirou da sala:
+  todos a veem lá, e ela se vê fora» (`left: None, right: Some(1)`);
+- **M3** (`a_volta_numa_sala_com_senha_nao_tira_quem_o_servidor_resgatou`): «M3:
+  a pessoa caiu e voltou numa sala com senha, o servidor a sentou de novo, e a
+  recusa da entrada refeita a tirou da sala na própria tela» (`left: None`);
+- **M5** (`um_apelido_tomado_nao_tira_ninguem_da_sala`): a mesma frase do M1;
+- **o de controle** (`quem_esta_fora_e_e_recusado_continua_fora`): verde antes e
+  depois, e é o papel dele — prova que a regra nova não desmontou o conserto da
+  recusa de quem estava fora (`senha_da_sala.rs`). Com o M-d o áudio dele não
+  chega a abrir; a prova disso é do teste da FFI, abaixo, porque a janela entre
+  a entrada e a recusa é de menos de um milissegundo no laço local.
+
+Nos três vermelhos, as asserções de sanidade passaram antes: o servidor tinha a
+pessoa em A. Depois do conserto, os quatro verdes, três vezes seguidas. A
+asserção do M3 sobre `sala_confirmada` entrou depois do vermelho, porque o
+método não existia no `fc6d0346`.
+
+**Os testes de crate**, escritos antes de cada conserto:
+- `assento::testes` (9): a regra sozinha — a troca recusada volta à de antes,
+  a recusa sem pedido não move, o `Pong` de rotina não confirma, dois pedidos no
+  ar, a saída e o operador atropelando o pedido, a sala apagada, o `ssrc`;
+- `state::tests`: `uma_recusa_sem_pedido_de_entrada_no_ar_nao_tira_da_sala` (M5),
+  `a_troca_de_sala_recusada_devolve_a_sala_de_antes` (M1),
+  `a_volta_com_o_assento_resgatado_continua_na_sala_mesmo_com_a_reentrada_recusada`
+  (M3), `a_volta_com_ssrc_novo_comeca_fora_de_sala`;
+- **I1**, `enlace::tests::uma_recusa_esquece_so_o_pedido_e_nao_a_sala_que_a_volta_refaz`.
+  Vermelho no motor de `421d628d`: «uma recusa sem pedido de entrada no ar fez a
+  volta esquecer a sala em que o servidor manteve a pessoa» (`left: None, right:
+  Some(VoiceRoomId(2))`). O teste de `421d628d`
+  (`a_voice_room_que_a_volta_refaz_segue_o_que_o_servidor_disse`) continua, agora
+  com o `Pong` de cada pedido, como o servidor manda;
+- na FFI, o teste dos cinco caminhos passa a mandar a resposta do servidor a
+  cada pedido, e ganha as três recusas que não tiram ninguém da sala; o (a)
+  ganha o M-d: «o áudio abriu com a entrada ainda no ar» se o áudio abrir antes
+  do `Pong`; o (c) ganha o M3 na porta da voz.
+
+### As reversões
+
+| reversão | o que se desfez | reprovou |
+|---|---|---|
+| a regra da C1 | o braço de `Alert` de `EntradasPendentes::ouvir` de volta a «toda recusa esvazia o assento» | 11 em `seele-core` (assento, `state`, os dois do motor), 2 em `seele-ffi` (os cinco caminhos e o (c)), e M1, M3 e M5 na conformidade |
+| o assento resgatado | `assento_resgatado` devolvendo sempre `None` | `o_ssrc_igual_e_o_assento_resgatado`, o M3 do `Room` e o do motor, e o (c) da FFI |
+| I1 | o braço de `Alert` do motor de volta a `self.voice_room = None` | `uma_recusa_esquece_so_o_pedido_…` e `a_volta_com_o_assento_resgatado_…` |
+| o `Ping` marcado | o motor sem `send_ping_de_entrada` depois da entrada | a conformidade: M1 e M5 em «a entrada em VoiceRoomId(1) não assentou: … abertura ForaDeSala» (nenhuma entrada se confirma), e o M3 |
+| M-d | `sala_do_audio` lendo `current_voice_room` | (a): «o áudio abriu com a entrada ainda no ar: o microfone abre numa sala que ainda pode recusar (M-d)» |
+| R7 | sem o olhar do fim da volta do laço | I2: «o olhar do fim da volta do laço sumiu: é o único ponto que abre o áudio ao entrar numa sala e o fecha ao sair» |
+| R8 | `porta.comecar(…)` depois do olhar do aperto de mão | I2: «antes do laço, `drive` mexe na porta da voz mais de uma vez — ou nenhuma…» |
+| M-b | sem a conferência dentro de `instalar` | `instalar_recusa_a_voz_aberta_com_os_aparelhos_de_antes` e `o_aparelho_escolhido_enquanto_a_voz_abre_nao_se_perde` |
+| M-c, a vez | a thread sem tomar a vez do driver | `duas_aberturas_da_mesma_sessao_nunca_ficam_no_driver_ao_mesmo_tempo` («… ficaram no driver ao mesmo tempo», `left: 2`) e `a_abertura_que_ja_desistiu_…` |
+| M-c, a desistência | a thread abrindo mesmo sem ninguém esperando | `a_abertura_que_ja_desistiu_nao_abre_quando_chega_a_vez` («… abriu o aparelho quando chegou a vez») |
+| M-e | `controles_da_voz` sem o `None` da sessão sem áudio | `a_sessao_sem_audio_deixa_os_controles_da_voz_para_o_disco` |
+
+Todas: arquivo devolvido da cópia, `cmp` idêntico, sobre os arquivos já
+formatados.
+
+### Os Menores
+
+- **M-b.** A conferência do aparelho mora em `VozDaSala::instalar`, sob o
+  cadeado da voz, e é o mesmo cadeado que `switch_device` segura ao gravar a
+  escolha. A corrida em si não tem como ser forçada num teste sem uma costura
+  no meio; o teste barato prende que a conferência está em `instalar`.
+- **M-c.** `VozDaSala::vez_do_driver`: a thread de `esperar_o_audio` toma a vez
+  antes de abrir, e a espera conta no prazo de quem pediu. Uma abertura de que
+  ninguém espera mais (o prazo venceu, ou a pessoa saiu) desiste sem abrir
+  quando a vez chega. O custo: com o driver preso, cada nova entrada deixa uma
+  thread parada na vez até ele soltar.
+- **M-e.** `controles_da_voz` devolve `None` com `audio: false`, e
+  `controles_da_voz` do `main.rs` volta a cair no disco.
+- **M-f.** O comentário de `reconexao_fantasma.rs` diz que o braço da volta
+  adota a sessão e refaz o pedido do motor.
+
+### O que rodou
+
+- `seele-core --lib` 477, `seele-ffi --lib` 146 (1 ignorado, anterior),
+  `seele-app --bin seele-app` 274, `--test frontend` 270.
+- Conformidade, um arquivo por vez, `--test-threads=1`: `a_recusa_nao_tira_da_sala`
+  (4, e mais três vezes), `voz_na_reconexao` (1), `saida_com_despedida` (3),
+  `reconexao_fantasma` (1).
+- `cargo fmt --all -- --check` e o clippy de `seele-core`, `seele-ffi`,
+  `seele-conformance` e `seele-app` com `-D warnings`: limpos.
+
+### O que não rodou, e as preocupações
+
+- **O resto da conformidade.** O motor manda agora um `Ping` a mais por entrada
+  numa sala (e um na volta), e o `Room` trata o `Pong` dele. Os testes que
+  li — `senha_da_sala.rs`, `teto_e_permissao_da_sala.rs`, `reconexao_fantasma.rs`
+  — não contam mensagens nem dependem de uma recusa sem pedido; os demais
+  (`bateria_interna`, `ocupacao`, `moderacao`, `desassentar`, …) rodam na
+  integração.
+- **Uma recusa que não é de entrada, chegando com uma entrada no ar,** é tomada
+  pela entrada (o apelido tomado no mesmo instante em que se pede uma sala).
+  É o encaixe do `PedidoRecusado` da F1, acima.
+- **A volta depois de sair e entrar noutra sala durante a queda**, com a
+  reentrada recusada: o `Room` cai fora de sala e o motor volta ao assento
+  resgatado. O `Room` confere o resgate com o confirmado dele na hora da volta,
+  e uma saída durante a queda o zera; o motor confere com o da hora da queda.
+- **Um servidor reiniciado** recomeça a contar os `ssrc` em 1, e uma sessão nova
+  pode ganhar o mesmo número da antiga: seria tomada por resgatada. Raro, e só
+  pesa se a reentrada for recusada.
+- **O operador que move a pessoa no instante em que ela pede outra sala**: a
+  mudança do operador vale, e a resposta ao pedido é descartada.
+
