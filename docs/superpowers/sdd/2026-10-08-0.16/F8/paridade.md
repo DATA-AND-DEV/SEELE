@@ -120,6 +120,24 @@ Cada linha tem a coluna **PC (navegador)**, com o mesmo critério. O padrão é
   aparelhos de áudio, o executor de MODs, e o compartilhar a tela, que passa a ser
   pelo `getDisplayMedia`.
 - **Moderar e compartilhar a tela entram** no PC. No celular, continuam fora.
+- **Quando compartilhar não dá no PC.** A ponte da F4 só oferece o botão depois
+  de uma prova com prazo (no Safari, o `isConfigSupported` aceita perfis que não
+  produzem nada), e devolve `{ erro: "compartilhar-indisponivel", motivo }`. As
+  frases, no lugar do COMPARTILHAR, vão para o `frases.js` com o P10:
+
+  | `motivo` | frase |
+  |---|---|
+  | `sem-captura` (não há `getDisplayMedia`) | «Este navegador não compartilha a tela. O app do SEELE compartilha.» |
+  | `sem-codificador` (não há `VideoEncoder`, ou ele recusa o perfil) | «Este navegador não codifica vídeo do jeito que a sala recebe. O app do SEELE compartilha.» |
+  | `codificador-mudo` (aceita, e não devolve pedaço no prazo) | «Este navegador disse que codificava a tela, e nenhum quadro saiu no prazo. Daqui não dá para compartilhar; o app do SEELE compartilha.» |
+  | `captura-negada` (a pessoa recusou na caixa do navegador) | «O navegador não recebeu a permissão. Para compartilhar, toque em COMPARTILHAR de novo e escolha a tela ou a janela.» |
+
+  As três primeiras levam o link BAIXAR O APP DO SEELE (`PAGINA_DO_APP`); a
+  quarta não, porque o caminho é tentar de novo.
+- **O arquivo, no PC e no celular, vai por uma alça** (combinado com a F4, 09/10):
+  a ponte guarda o `File` do arraste, do seletor ou do colar sob uma alça opaca
+  (`web-arquivo:N`), emite o mesmo `tauri://drag-drop` com ela, e o
+  `descrever_arquivo` e o envio leem dela. O `tela-sessao.js` não muda.
 
 A coluna foi gerada por regra, pelos `invoke` e pelo texto de cada linha. Depois
 foi revisada linha a linha onde não deu «igual», e nas linhas que ficam fora no
