@@ -6492,11 +6492,20 @@ mod cabecalho_de_som {
     ///
     /// O tamanho que o `data` declara é limitado aos bytes que estão no
     /// arquivo: um WAV gravado aos poucos leva ali `0xFFFFFFFF`, e um cortado,
-    /// mais do que tem.
+    /// mais do que tem. **E ao tamanho que o RIFF declara**, salvo quando o
+    /// RIFF também foi gravado aos poucos (`0xFFFFFFFF`): o WebKit para onde o
+    /// RIFF diz que o arquivo acaba, e o que vem depois não é som para ele.
     ///
     /// **Um segundo `fmt ` dá `None`.** O Chromium decodifica pelo primeiro, e
     /// qual deles vale é pergunta de motor: um piso não escolhe.
     pub(super) fn wav(bytes: &[u8]) -> Option<Piso> {
+        let riff = u32_le(bytes, 4)?;
+        let bytes = if riff == u32::MAX {
+            bytes
+        } else {
+            let fim = usize::try_from(riff).ok()?.checked_add(8)?;
+            bytes.get(..fim.min(bytes.len()))?
+        };
         let mut resto = bytes.get(12..)?;
         let mut formato = None;
         loop {
@@ -16284,6 +16293,27 @@ mod o_som_grande_demais_decodificado_e_recusado_antes {
             None,
             "um WAV com dois `fmt ` ganhou um piso por um deles, e o motor pode decodificar pelo \
              outro: a revisão mediu a recusa de um som que cabia"
+        );
+    }
+
+    /// **O `data` não passa do tamanho do RIFF.** Um `data` gravado aos poucos
+    /// (`0xFFFFFFFF`) seguido de outro pedaço: o WebKit para onde o RIFF diz
+    /// que o arquivo acaba, e o piso que contasse até o fim do arquivo passaria
+    /// do real — a revisão mediu 2,28 MB a mais.
+    #[test]
+    fn o_data_do_wav_nao_passa_do_tamanho_do_riff() {
+        let mut wav = wav(1, 8_000, 8, 8_000);
+        if let Some(tamanho) = wav.get_mut(40..44) {
+            tamanho.copy_from_slice(&u32::MAX.to_le_bytes());
+        }
+        wav.extend_from_slice(b"LIST");
+        wav.extend_from_slice(&4_000u32.to_le_bytes());
+        wav.resize(wav.len() + 4_000, 0);
+        assert_eq!(
+            bytes_decodificados_minimos(&wav),
+            Some(segundos(1, 1)),
+            "o piso do WAV contou como som o pedaço que vem depois do fim que o RIFF declara, e \
+             o WebKit para ali: o piso passa do real"
         );
     }
 
