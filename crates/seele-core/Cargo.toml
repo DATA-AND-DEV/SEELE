@@ -62,6 +62,18 @@ rcgen = "0.14.8"
 # ordenação por heurística de VPN que só importa para o convite.
 if-addrs = "0.15"
 
+[features]
+# O gêmeo do guarda da F5 (`seele-server`, a mesma feature), do lado de quem
+# liga: um teste que ia perguntar à VPS de produção, pelo quarto ou pela batida,
+# reprova antes do primeiro pacote (`encontro::recusar_a_producao`). Os testes
+# deste crate o têm pelo `cfg(test)`; os do `seele-conformance` não veem esse
+# `cfg`, e é para eles que a feature existe, pela `[dev-dependencies]` dele.
+#
+# **Nunca ligada no binário do produto**: com o resolvedor 2, a feature de uma
+# dependência de teste não se une ao build normal, e um `compile_error!` no
+# `encontro.rs` recusa um build otimizado com ela.
+recusar-encontro-de-producao = []
+
 [dev-dependencies]
 # O relógio virtual do tokio, e nada além dele.
 #

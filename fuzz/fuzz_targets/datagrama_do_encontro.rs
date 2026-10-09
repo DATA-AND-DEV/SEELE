@@ -1,9 +1,11 @@
-//! O fuzz do datagrama do ponto de encontro (`SEELE-ENC/1`).
+//! O fuzz do datagrama do ponto de encontro, nas duas versões (`SEELE-ENC/1` e
+//! `SEELE-ENC/2`, ADR 0062).
 //!
 //! Os dois lados leem bytes de qualquer um. O ponto de encontro lê o pedido com
-//! `analisar` antes de qualquer conferência — o protocolo não tem chave nenhuma
-//! —, e o anfitrião lê o `AQUI` com `ler_aqui` de quem quer que tenha mandado
-//! um pacote para a escuta de avisos dele. O analisador mora em `seele-proto`,
+//! `analisar` e `analisar2` antes de qualquer conferência — a assinatura do
+//! `MORO2` só é conferida depois de lida —, e o anfitrião e quem liga leem o
+//! `AQUI` e as respostas do ENC/2 de quem quer que tenha mandado um pacote para
+//! eles. O analisador mora em `seele-proto`,
 //! e não no `seele-encontro`, e é por isso que o alvo mora aqui.
 //!
 //! Rode com:
@@ -17,12 +19,16 @@
 
 use libfuzzer_sys::fuzz_target;
 use seele_proto::encontro::{
-    analisar, ler_aqui, moro, onde, quem, Pedido, LIMITE_DA_MARCA, TAMANHO,
+    analisar, analisar2, ler_aqui, ler_resposta2, moro, moro2, onde, quem, quem2,
+    resposta2 as montar_resposta2, serve_de_dica, Pedido, Pedido2, Resposta2, LIMITE_DA_MARCA,
+    LIMITE_DE_DICAS, TAMANHO, TAMANHO2,
 };
 
 fuzz_target!(|dados: &[u8]| {
     let pedido = analisar(dados);
     let aqui = ler_aqui(dados);
+    // Antes do `match` de baixo, que consome o pedido.
+    let leu_pedido = pedido.is_some();
 
     // Todo datagrama deste protocolo tem `TAMANHO` bytes, e é essa a defesa
     // contra a amplificação: um pedido menor que a resposta que ele provoca
@@ -55,5 +61,36 @@ fuzz_target!(|dados: &[u8]| {
             assert_eq!(analisar(&quem(&marca)), Some(Pedido::Quem { marca }));
         }
         Some(Pedido::Leve { .. }) | None => {}
+    }
+
+    // O ENC/2: o mesmo, com o tamanho dele. As duas versões não se leem, e uma
+    // resposta nunca é lida como pedido.
+    let pedido2 = analisar2(dados);
+    let resposta2 = ler_resposta2(dados);
+    if pedido2.is_some() || resposta2.is_some() {
+        assert_eq!(dados.len(), TAMANHO2);
+    }
+    assert!(pedido2.is_none() || resposta2.is_none());
+    assert!(!leu_pedido || pedido2.is_none());
+    assert!(aqui.is_none() || resposta2.is_none());
+
+    // Cada campo tem uma escrita só, então o que se lê volta igual pelos
+    // montadores, inclusive o endereço: `analisar2` só aceita o texto que o
+    // `Display` escreve.
+    match &pedido2 {
+        Some(Pedido2::Moro2(registro)) => {
+            assert!(registro.dicas.len() <= LIMITE_DE_DICAS);
+            assert!(registro.dicas.iter().all(|dica| serve_de_dica(*dica)));
+            assert_eq!(analisar2(&moro2(registro)), pedido2);
+        }
+        Some(Pedido2::Quem2 { marca }) => assert_eq!(analisar2(&quem2(marca)), pedido2),
+        None => {}
+    }
+    if let Some(resposta) = &resposta2 {
+        if let Resposta2::Aqui2 { dicas, .. } = resposta {
+            assert!(dicas.len() <= LIMITE_DE_DICAS);
+            assert!(dicas.iter().all(|dica| serve_de_dica(*dica)));
+        }
+        assert_eq!(ler_resposta2(&montar_resposta2(resposta)), resposta2);
     }
 });

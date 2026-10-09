@@ -9,9 +9,20 @@
 //! Um laço que recebe um datagrama e responde. A decisão sobre `ONDE` e `LEVE`
 //! é [`seele_proto::encontro::responder`], uma função sem estado: o que sai
 //! depende só do que entrou. `MORO` e `QUEM` são as duas linhas que passam pelo
-//! quarto, o único estado deste processo (a seção abaixo diz o que ele guarda).
-//! Não tem banco, não tem arquivo, não tem sessão; reiniciá-lo no meio de uma
-//! apresentação custa uma repetição de 96 bytes, e esvazia o quarto.
+//! quarto; `MORO2` e `QUEM2`, as do ENC/2, passam pelo quarto assinado
+//! ([`assinado`]). Os dois quartos e o limite por prefixo ([`taxa`]) são o
+//! único estado deste processo (a seção abaixo diz o que ele guarda). Não tem
+//! banco, não tem arquivo, não tem sessão; reiniciá-lo no meio de uma
+//! apresentação custa uma repetição de 96 bytes (384 no ENC/2), e esvazia os
+//! quartos.
+//!
+//! # As duas versões, ao mesmo tempo
+//!
+//! A magia separa as duas (`SEELE-ENC/1` e `SEELE-ENC/2`, ADR 0062), e o
+//! tamanho também: 96 bytes numa, 384 na outra, pedido e resposta. Quem está
+//! na 0.15 fala a versão 1 e não muda nada. A sala pessoal registra pela
+//! versão 2, assinada pela chave da pessoa, e quem liga pelo código pergunta
+//! pela versão 2.
 //!
 //! É de propósito que ele seja assim tão pequeno. O ADR 0022 aceita este degrau
 //! com a condição de o ponto de encontro ser **trocável** — quem hospeda aponta
@@ -23,14 +34,25 @@
 //! Aprende **metadado**: que endereço falou com que endereço, e quando. É o
 //! custo que o ADR 0022 nomeia em voz alta, e é real.
 //!
-//! Guarda **uma coisa**: o quarto, um mapa de marca (os 16 primeiros dos 64
-//! caracteres da impressão digital do servidor, e uma letra) para o endereço em
-//! que o anfitrião disse morar. Fica em memória, com teto de 4096 marcas. Uma
-//! entrada vale 60 segundos desde o último `MORO`: vencida, deixa de responder
-//! ao `QUEM`, e continua na memória até o quarto encher e chegar uma marca nova
+//! Guarda **o quarto**, um mapa de marca (os 16 primeiros dos 64 caracteres da
+//! impressão digital do servidor, e uma letra) para o endereço em que o
+//! anfitrião disse morar. Fica em memória, com teto de 4096 marcas. Uma entrada
+//! vale 60 segundos desde o último `MORO`: vencida, deixa de responder ao
+//! `QUEM`, e continua na memória até o quarto encher e chegar uma marca nova
 //! (`Quarto::morar`, que só então varre o que venceu), um `MORO` novo da mesma
-//! marca a substituir, ou o processo reiniciar. Nada vai a disco, e reiniciar o
-//! processo o esvazia.
+//! marca a substituir, ou o processo reiniciar.
+//!
+//! Guarda também **o quarto assinado** do ENC/2: a marca de cada sala, o
+//! endereço, a chave, o maior carimbo e até duas dicas de rede local, com teto
+//! de 16 384 marcas e 128 vivas por prefixo; **o limite por prefixo**, dois
+//! baldes por `/32` ou `/64` que fez um pedido do ENC/2 nos últimos segundos; e
+//! **o segredo dos cookies** do `MORO2` ([`cookie`]), sorteado na subida. Nada
+//! vai a disco, e reiniciar o processo esvazia os três e sorteia outro segredo.
+//!
+//! **O relógio de parede passa a importar.** O carimbo do `MORO2` é conferido
+//! contra ele, com tolerância de 300 s: uma máquina com o relógio torto recusa
+//! o registro de toda sala, e cada pessoa lê no `seele.log` que o relógio dela
+//! difere do do ponto.
 //!
 //! Por padrão nem imprime: o registro de quem falou com quem é justamente a
 //! coisa que este projeto não quer que exista, e um log ligado por padrão seria
@@ -44,13 +66,20 @@
 //! IPv4 e um IPv6, cada um numa linha de execução, é a versão que funciona
 //! igual no Linux, no BSD e no Windows sem dependência nenhuma.
 
+pub mod assinado;
+pub mod cookie;
+pub mod taxa;
+
 use std::collections::HashMap;
 use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use seele_proto::encontro::{analisar, aqui, responder_em, Pedido, Vizinhanca, TAMANHO};
+use seele_proto::encontro::{
+    analisar, analisar2, aqui, responder_em, resposta2, Marca, Moro2, Motivo, Pedido, Pedido2,
+    Resposta, Resposta2, Vizinhanca, TAMANHO2,
+};
 
 /// O que aconteceu com um datagrama.
 ///
@@ -94,11 +123,13 @@ const MARCAS_NO_QUARTO: usize = 4096;
 
 /// Onde cada marca disse que mora, e desde quando.
 ///
-/// **A única memória deste processo, e o ADR 0022 a recusava.** A revisão de
+/// **A memória deste processo, e o ADR 0022 a recusava.** A revisão de
 /// 03/09/2026 está escrita no cabeçalho de `seele_proto::encontro`, com o que
 /// ela custa. O resumo do que vive aqui: um mapa dos 16 primeiros caracteres da
 /// impressão digital (e uma letra) para um endereço, em RAM, com prazo. Nunca em
-/// disco. Nunca no `--barulhento`.
+/// disco. Nunca no `--barulhento`. Ao lado dele moram o quarto assinado do
+/// ENC/2 ([`assinado`], ADR 0062) e o limite por prefixo ([`taxa`]), com as
+/// mesmas regras: em memória, e nunca escritos.
 ///
 /// `Mutex` e não `RwLock`: as duas famílias são duas linhas de execução e cada
 /// datagrama toca o mapa uma vez, então não há leitura concorrente longa a
@@ -106,6 +137,14 @@ const MARCAS_NO_QUARTO: usize = 4096;
 #[derive(Debug, Default)]
 pub struct Quarto {
     moradores: Mutex<HashMap<String, (SocketAddr, Instant)>>,
+    /// O quarto do ENC/2, onde só a chave da sala registra. Separado deste de
+    /// propósito: ver [`assinado`].
+    assinados: assinado::QuartoAssinado,
+    /// O limite por prefixo, só do ENC/2: ver [`taxa`].
+    taxa: taxa::Taxa,
+    /// O segredo dos cookies do `MORO2`, sorteado na subida: ver [`cookie`].
+    /// Um só para as duas famílias, como o resto do quarto.
+    cookies: cookie::Cookies,
 }
 
 impl Quarto {
@@ -167,6 +206,12 @@ impl Quarto {
     pub fn quantos(&self) -> usize {
         self.moradores.lock().map_or(0, |m| m.len())
     }
+
+    /// O quarto assinado do ENC/2, que este quarto divide com quem divide ele.
+    #[must_use]
+    pub fn assinados(&self) -> &assinado::QuartoAssinado {
+        &self.assinados
+    }
 }
 
 /// Um ponto de encontro escutando numa porta.
@@ -178,6 +223,15 @@ pub struct Ponto {
     /// Compartilhado entre as duas famílias: um anfitrião registra por uma e
     /// quem procura pode perguntar pela outra.
     quarto: Arc<Quarto>,
+}
+
+/// O relógio de parede, em segundos Unix: o carimbo do `MORO2` é conferido
+/// contra ele, e é ele que vai na `RECUSA`. Um relógio antes de 1970 vale zero,
+/// e todo carimbo é recusado pelo relógio, que é o que se quer dizer.
+fn agora_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |desde| desde.as_secs())
 }
 
 /// Liga o socket, dizendo ao sistema qual família ele atende.
@@ -279,40 +333,22 @@ impl Ponto {
     /// daqui: o destino de um `LEVE` é escolhido por quem pediu, e uma rota que
     /// não existe é problema dele, não motivo para derrubar o serviço.
     pub fn atender(&self) -> io::Result<Movimento> {
-        // Exatamente o tamanho do protocolo. Um datagrama maior chega truncado
-        // e é recusado pelo tamanho, que é o que se quer.
-        let mut balde = [0_u8; TAMANHO];
+        // **Um byte a mais** que o maior datagrama do protocolo. Num balde do
+        // tamanho exato, o Linux e o macOS truncam sem erro, e o pedaço
+        // truncado de um datagrama maior era analisado como um pedido (medido
+        // no macOS em 08/10/2026: um `ONDE` com um byte a mais era respondido).
+        // Com o byte a mais, todo datagrama maior que o ENC/2 chega com
+        // `TAMANHO2 + 1` e não forma pedido nenhum, nas duas versões.
+        let mut balde = [0_u8; TAMANHO2 + 1];
         let (lidos, de) = self.socket.recv_from(&mut balde)?;
 
         let recebido = balde.get(..lidos);
+        let resposta = match recebido {
+            Some(datagrama) if datagrama.len() == TAMANHO2 => self.atender2(datagrama, de),
+            _ => self.atender1(recebido, de),
+        };
 
-        // O quarto, antes da decisão sem estado. `MORO` registra e depois é
-        // respondido como um `ONDE` qualquer, lá dentro; `QUEM` é a única linha
-        // deste protocolo que a função livre não sabe responder, porque a
-        // resposta dela não está no pedido — está aqui.
-        //
-        // **Nada disto é impresso, nem com `--barulhento`.** Aquela bandeira
-        // liga o registro de quem falou com quem, que é metadado de passagem;
-        // o quarto é metadado guardado, e escrevê-lo em disco seria fazer
-        // justamente a coisa que o prazo existe para evitar.
-        let do_quarto =
-            recebido.and_then(analisar).and_then(|pedido| match pedido {
-                Pedido::Moro { marca } => {
-                    self.quarto.morar(marca.texto(), de);
-                    None
-                }
-                Pedido::Quem { marca } => self.quarto.onde_mora(marca.texto()).map(|onde| {
-                    seele_proto::encontro::Resposta {
-                        destino: de,
-                        datagrama: aqui(&marca, onde),
-                    }
-                }),
-                Pedido::Onde { .. } | Pedido::Leve { .. } => None,
-            });
-
-        let Some(resposta) = do_quarto
-            .or_else(|| recebido.and_then(|recebido| responder_em(recebido, de, self.vizinhanca)))
-        else {
+        let Some(resposta) = resposta else {
             if self.barulhento {
                 eprintln!("calado para {de} ({lidos} bytes)");
             }
@@ -333,19 +369,171 @@ impl Ponto {
         })
     }
 
+    /// A versão 1: o quarto de `MORO` e `QUEM`, e a decisão sem estado de
+    /// `ONDE` e `LEVE`. Igual ao que era antes do ENC/2.
+    fn atender1(&self, recebido: Option<&[u8]>, de: SocketAddr) -> Option<Resposta> {
+        // O quarto, antes da decisão sem estado. `MORO` registra e depois é
+        // respondido como um `ONDE` qualquer, lá dentro; `QUEM` é a única linha
+        // deste protocolo que a função livre não sabe responder, porque a
+        // resposta dela não está no pedido — está aqui.
+        //
+        // **Nada disto é impresso, nem com `--barulhento`.** Aquela bandeira
+        // liga o registro de quem falou com quem, que é metadado de passagem;
+        // o quarto é metadado guardado, e escrevê-lo em disco seria fazer
+        // justamente a coisa que o prazo existe para evitar.
+        let do_quarto = recebido.and_then(analisar).and_then(|pedido| match pedido {
+            Pedido::Moro { marca } => {
+                self.quarto.morar(marca.texto(), de);
+                None
+            }
+            Pedido::Quem { marca } => self.quarto.onde_mora(marca.texto()).map(|onde| Resposta {
+                destino: de,
+                datagrama: aqui(&marca, onde),
+            }),
+            Pedido::Onde { .. } | Pedido::Leve { .. } => None,
+        });
+
+        do_quarto
+            .or_else(|| recebido.and_then(|recebido| responder_em(recebido, de, self.vizinhanca)))
+    }
+
+    /// A versão 2 (ADR 0062): o `MORO2` no quarto assinado e o `QUEM2` que
+    /// sempre responde, sempre a quem pediu e com o tamanho do pedido.
+    ///
+    /// A ordem é a do custo. O limite por prefixo vem antes da assinatura, que
+    /// é o que custa; a assinatura vem antes do relógio, para que só quem tem a
+    /// chave ouça a hora do ponto. Uma assinatura que não confere é calada.
+    ///
+    /// **Nada disto é impresso, nem com `--barulhento`**, pelo motivo do quarto
+    /// da versão 1: o registro é metadado guardado.
+    fn atender2(&self, datagrama: &[u8], de: SocketAddr) -> Option<Resposta> {
+        let resposta = match analisar2(datagrama)? {
+            Pedido2::Moro2(moro) => self.registrar(&moro, de)?,
+            Pedido2::Quem2 { marca } => self.responder_quem2(marca, de)?,
+        };
+        Some(Resposta {
+            destino: de,
+            datagrama: resposta2(&resposta),
+        })
+    }
+
+    /// O `MORO2`, nesta ordem: o cookie, o limite, a assinatura, o quarto.
+    ///
+    /// **O cookie vem antes do limite** (D-enc-4): um `MORO2` sem ele, ou com
+    /// um que não confere para este IP, ouve o `DESAFIO` e não gasta o balde de
+    /// registro. Quem forja a origem não recebe o cookie do IP que forja, então
+    /// não esvazia o balde de ninguém nem registra em nome de ninguém. O
+    /// `DESAFIO` tem o tamanho do pedido e vai a quem pediu, como o `ONDE`.
+    fn registrar(&self, moro: &Moro2, de: SocketAddr) -> Option<Resposta2> {
+        let agora = agora_unix();
+        let marca = moro.marca.clone();
+        let cookie_valido = moro
+            .cookie
+            .is_some_and(|cookie| self.quarto.cookies.confere(de.ip(), &cookie, agora));
+        if !cookie_valido {
+            return Some(Resposta2::Desafio {
+                marca,
+                cookie: self.quarto.cookies.emitir(de.ip(), agora),
+            });
+        }
+        match self
+            .quarto
+            .taxa
+            .pedir(de.ip(), taxa::Classe::Registro, Instant::now())
+        {
+            taxa::Decisao::Recusa { dizer: false } => return None,
+            taxa::Decisao::Recusa { dizer: true } => {
+                return Some(Resposta2::Recusa {
+                    marca,
+                    motivo: Motivo::Taxa,
+                    agora,
+                })
+            }
+            taxa::Decisao::Passa => {}
+        }
+        if !assinado::conferir(moro) {
+            return None;
+        }
+        Some(
+            match self.quarto.assinados.morar(moro, de, Instant::now(), agora) {
+                Ok(()) => Resposta2::Morou {
+                    marca,
+                    endereco: de,
+                    cookie: self.quarto.cookies.emitir(de.ip(), agora),
+                },
+                Err(motivo) => Resposta2::Recusa {
+                    marca,
+                    motivo,
+                    agora,
+                },
+            },
+        )
+    }
+
+    /// O `QUEM2`: o limite de perguntas, e a resposta, que sempre vem dentro
+    /// dele. Sem cookie: a pergunta não guarda nada, e o balde dela é outro.
+    fn responder_quem2(&self, marca: Marca, de: SocketAddr) -> Option<Resposta2> {
+        match self
+            .quarto
+            .taxa
+            .pedir(de.ip(), taxa::Classe::Pergunta, Instant::now())
+        {
+            taxa::Decisao::Recusa { dizer: false } => None,
+            taxa::Decisao::Recusa { dizer: true } => Some(Resposta2::Recusa {
+                marca,
+                motivo: Motivo::Taxa,
+                agora: agora_unix(),
+            }),
+            taxa::Decisao::Passa => Some(
+                match self.quarto.assinados.onde_mora(&marca, Instant::now()) {
+                    Some((endereco, dicas)) => Resposta2::Aqui2 {
+                        marca,
+                        endereco,
+                        dicas,
+                    },
+                    None => Resposta2::Ninguem { marca },
+                },
+            ),
+        }
+    }
+
     /// Atende para sempre.
     ///
-    /// Só volta se a **leitura** falhar, que é a única falha que não é de quem
-    /// mandou o datagrama.
+    /// Só volta se a **leitura** falhar por um motivo que não é de um
+    /// datagrama só ([`erro_de_um_datagrama`]): esses são calados, e o serviço
+    /// segue.
     ///
     /// # Errors
     ///
     /// O erro de leitura que o fez parar.
     pub fn servir(&self) -> io::Result<std::convert::Infallible> {
         loop {
-            self.atender()?;
+            match self.atender() {
+                Ok(_) => {}
+                Err(erro) if erro_de_um_datagrama(&erro) => {
+                    if self.barulhento {
+                        eprintln!("um datagrama não se leu, e foi calado: {erro}");
+                    }
+                }
+                Err(erro) => return Err(erro),
+            }
         }
     }
+}
+
+/// Se este erro de leitura é de um datagrama só, e não do socket.
+///
+/// No Windows, um datagrama maior que o balde dá erro na leitura
+/// (`WSAEMSGSIZE`, 10040), e o «porta fechada» de um envio anterior também
+/// (`WSAECONNRESET`, que a `std` lê como `ConnectionReset`). Com o `servir`
+/// parando no primeiro, um ponto no Windows morria com o primeiro datagrama
+/// grande ou com um ICMP qualquer (a revisão de 08/10/2026; não medido no
+/// Windows). O 10040 é conferido em todo sistema: nos outros, os números de
+/// erro são pequenos, e ele não colide com nenhum.
+fn erro_de_um_datagrama(erro: &io::Error) -> bool {
+    /// `WSAEMSGSIZE`: o datagrama não coube no balde.
+    const WSAEMSGSIZE: i32 = 10040;
+    erro.kind() == io::ErrorKind::ConnectionReset || erro.raw_os_error() == Some(WSAEMSGSIZE)
 }
 
 #[cfg(test)]
@@ -404,6 +592,33 @@ mod tests {
 }
 
 #[cfg(test)]
+mod um_datagrama_so {
+    use super::*;
+
+    #[test]
+    fn o_erro_de_um_datagrama_nao_para_o_servico() {
+        // No Windows, um datagrama maior que o balde dá erro na leitura
+        // (`WSAEMSGSIZE`, 10040), e o «porta fechada» de um envio anterior
+        // também (`WSAECONNRESET`, que vira `ConnectionReset`). Os dois são de
+        // um datagrama só. Com o `servir` parando na primeira leitura que
+        // falhava, um ponto no Windows morria com o primeiro `QUEM2` de 384
+        // bytes que chegasse a um balde menor, ou com um ICMP qualquer.
+        assert!(erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::ConnectionReset
+        )));
+        assert!(erro_de_um_datagrama(&io::Error::from_raw_os_error(10040)));
+        // E o resto continua parando: um socket que deixou de existir não
+        // volta, e girar em volta dele seria um laço quente.
+        assert!(!erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::NotConnected
+        )));
+        assert!(!erro_de_um_datagrama(&io::Error::from(
+            io::ErrorKind::PermissionDenied
+        )));
+    }
+}
+
+#[cfg(test)]
 mod o_quarto {
     #![allow(
         clippy::expect_used,
@@ -412,6 +627,7 @@ mod o_quarto {
     )]
 
     use super::*;
+    use seele_proto::encontro::TAMANHO;
 
     fn em(porta: u16) -> SocketAddr {
         SocketAddr::from(([203, 0, 113, 7], porta))

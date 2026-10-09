@@ -104,8 +104,10 @@ fn ajuda() {
     eprintln!("  --rede-local    também apresentar endereços de rede local (só para experimentar)");
     eprintln!("  --barulhento    imprimir quem falou com quem (é metadado; desligue depois)");
     eprintln!();
+    eprintln!("Ele fala o ENC/1 e o ENC/2 ao mesmo tempo, e guarda só os dois quartos (onde cada");
+    eprintln!("anfitrião e cada sala disseram morar, em memória, nunca em disco) e o limite por");
+    eprintln!("prefixo do ENC/2. Não vê nada do que é dito: o TLS é ponta a ponta.");
     eprintln!(
-        "Ele guarda só o quarto (onde cada anfitrião disse morar, em memória, nunca em disco)"
+        "O relógio da máquina tem de estar certo: o registro assinado das salas é conferido contra ele."
     );
-    eprintln!("e não vê nada do que é dito: o TLS é ponta a ponta.");
 }
