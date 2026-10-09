@@ -2616,8 +2616,10 @@ class RegiaoDeMod {
    * recusados com `som-grande-demais-decodificado`, e a recusa é a mesma do
    * teto, e não uma falha de carga (`recusarPeloTetoDoSom`). O som do pacote
    * chega recusado na montagem, fora de uma contribuição, e no pedido de
-   * tocar, numa contribuição; o do servidor, na montagem, sempre — numa
-   * contribuição, uma vez por destino.
+   * tocar, numa contribuição; o do servidor, na montagem — numa contribuição,
+   * uma vez por destino —, e também no pedido de tocar, quando o destino que
+   * tomou a marca sem o `data:` pede o som de novo ao servidor e o arquivo
+   * mudou nesse meio tempo.
    *
    * **O botão substitui o `<audio controls>`**, que era o único jeito de uma
    * pessoa tocar um som que o MOD não mandou tocar. Ele não existe num cartão
@@ -3018,10 +3020,13 @@ class RegiaoDeMod {
    *   `carregarSom`): na montagem, fora de uma contribuição, e no pedido de
    *   tocar, numa contribuição — uma vez, no destino que segura os sons dela;
    * - **o som do servidor do MOD** chega recusado na resposta
-   *   (`montarMidia`), na montagem, sempre — numa contribuição, **uma vez por
+   *   (`montarMidia`), na montagem — numa contribuição, **uma vez por
    *   destino**, como o `falhou` de antes chegava: cada destino pede a mídia
    *   ao servidor, e o MOD ouve `recusada` de cada um, e o registro ganha uma
-   *   linha por destino.
+   *   linha por destino. E pode chegar também no pedido de tocar: o destino
+   *   que toma a marca sem ter o `data:` pede o som de novo ao servidor
+   *   (`carregarSom`), e, se o servidor trocou o arquivo nesse meio tempo, a
+   *   recusa vem ali.
    *
    * A recusa fica guardada no som (`recusa`), e o destino que herda o som de
    * uma contribuição a herda também (`herdarOSom`).

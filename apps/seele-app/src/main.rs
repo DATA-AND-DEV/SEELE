@@ -6773,13 +6773,16 @@ mod cabecalho_de_som {
     ///
     /// **O «nunca passa do real» vale para um fluxo bem formado.** Um quadro
     /// com o cabeçalho certo e o conteúdo corrompido entra na cadeia, e o
-    /// decodificador não o entrega: o Chromium o descarta, e o WebKit recusa o
-    /// arquivo inteiro. O corte acima absorve uns oito quadros de 1152
-    /// amostras (9871 amostras); com mais corrompidos que isso, o piso passa
-    /// do que o Chromium entrega — a revisão mediu 14 KB com dez — e o som é
-    /// recusado pelo teto que, decodificado, ele talvez não passasse. No
-    /// WebKit, o motor do produto no Mac, esse arquivo não tocaria de
-    /// qualquer jeito.
+    /// decodificador não o entrega. O Chromium o descarta. O WebKit, conforme
+    /// o defeito, recusa o arquivo inteiro — medido com dez quadros
+    /// corrompidos seguidos — ou descarta os quadros como o Chromium — com
+    /// dez espalhados. O corte acima absorve uns oito quadros de 1152 amostras
+    /// (9871 amostras): com um corrompido, o piso fica abaixo do real nos dois
+    /// motores. Com mais que isso, e o arquivo decodificado, o piso pode
+    /// passar do real **nos dois** — a revisão mediu, com dez espalhados no
+    /// `City_Night_Crowd`, 18 952 bytes a mais no WebKit e 14 352 no
+    /// Chromium —, e o som pode ser recusado pelo teto que, decodificado, ele
+    /// talvez não passasse.
     pub(super) fn mp3(bytes: &[u8]) -> Option<Piso> {
         let mut inicio = 0usize;
         while bytes.get(inicio..)?.starts_with(b"ID3") {
