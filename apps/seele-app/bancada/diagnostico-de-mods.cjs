@@ -633,44 +633,67 @@ async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
  * quem abria a aba não sabia se a mídia era grande demais ou se as outras já
  * tinham ocupado o lugar. Três formas, cada uma com o seu tamanho: a mídia
  * (`montarMidia`), o fundo de uma caixa (`montarFundoDeMidia`) e o retrato
- * (`montarRetrato`), na região de um MOD, cujo teto é de 10 MiB.
+ * (`montarRetrato`), na região de um MOD, cujo teto é de 10 MiB. A anotação
+ * de cada uma é lida no renderer.
+ *
+ * **E as recusas pelo mesmo teto ocupam uma vaga só na aba** (M6 da revisão
+ * do K3). A aba guarda até três motivos, iguais pelo texto: com os números,
+ * cada recusa pelo teto virava um texto diferente, e três delas tiravam da aba
+ * o motivo de outro tipo — aqui, um arquivo que não está no pacote. A vaga
+ * leva os números da primeira, na ordem em que as mídias foram montadas, e
+ * quantas mais o mesmo teto recusou.
  */
 async function aRecusaPeloTetoDeBytesDizOsNumeros(navegador, servidor) {
   const { pagina, erros } = await abrirASessao(navegador, servidor);
   const MIB = 1024 * 1024;
-  const soma = await pagina.evaluate(async (mib) => {
+  const medido = await pagina.evaluate(async (mib) => {
     const foto = () => {
       const tela = document.createElement("canvas");
       tela.width = tela.height = 8;
       return tela.toDataURL();
     };
     const tamanhos = { "img/midia.png": 11 * mib, "img/fundo.png": 12 * mib, "img/retrato.png": 13 * mib };
-    testTable.midia_do_mod = (args) => Promise.resolve({ papel: "imagem", uri: foto(), bytes: tamanhos[args.caminho] });
+    testTable.midia_do_mod = (args) => (tamanhos[args.caminho]
+      ? Promise.resolve({ papel: "imagem", uri: foto(), bytes: tamanhos[args.caminho] })
+      : Promise.reject({ Recusado: { motivo: `${args.caminho} não está no pacote` } }));
     desenharARegiaoDoMod({ id: "mod/t", hash: "mod-t" }, instancia("mod/t"), [
       { forma: "midia", chave: "midia", fonte: "img/midia.png" },
       { forma: "caixa", chave: "fundo", fundoDeMidia: { fonte: "img/fundo.png" }, dentro: [{ forma: "texto", dentro: "F" }] },
       { forma: "retrato", chave: "retrato", fonte: "img/retrato.png", inicial: "T" },
+      { forma: "midia", chave: "falta", fonte: "img/falta.png" },
     ]);
+    const daRegiao = () => [...regioesDosMods.values()].find((regiao) => regiao.id === "mod/t");
     for (let volta = 0; volta < 20; volta += 1) {
-      const soma = midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t");
-      if (soma?.recusada === 3) return soma;
+      if (daRegiao()?.midiasAnotadas().filter((a) => a.situacao === "recusada").length === 4) break;
       await new Promise((pronto) => setTimeout(pronto, 25));
     }
-    return midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t") ?? null;
+    return {
+      anotados: (daRegiao()?.midiasAnotadas() ?? []).filter((a) => a.situacao === "recusada").map((a) => a.motivo),
+      soma: midiasDaRegiaoEDasPaginas(regioesDosMods, superficiesDosMods).get("mod/t") ?? null,
+    };
   }, MIB);
   const teto = 10 * MIB;
   const esperados = [11, 12, 13].map((n) => `${n * MIB} bytes somados aos 0 já montados passam do teto de ${teto} bytes de mídia deste lugar`);
   assert.equal(
-    soma?.recusada,
-    3,
-    `a mídia, o fundo e o retrato de 11, 12 e 13 MiB, numa região de 10, não foram os três recusados: ${JSON.stringify(soma)}`,
+    medido.anotados.length,
+    4,
+    "a mídia, o fundo e o retrato de 11, 12 e 13 MiB, numa região de 10, e o arquivo que não está no pacote não "
+      + `foram os quatro recusados: ${JSON.stringify(medido.anotados)}`,
   );
   assert.deepEqual(
-    [...soma.motivos].sort(),
+    medido.anotados.filter((motivo) => motivo.includes("teto")).sort(),
     esperados,
-    "a recusa pelo teto de bytes chegou à aba sem os números — quanto a mídia tinha e quanto já estava montado —, "
+    "a recusa pelo teto de bytes foi anotada sem os números — quanto a mídia tinha e quanto já estava montado —, "
       + "e quem abre a aba não sabe se a mídia era grande demais ou se o lugar já estava cheio",
   );
+  assert.deepEqual(
+    medido.soma?.motivos,
+    [`${esperados[0]} (e mais 2 recusas pelo mesmo teto)`, "img/falta.png não está no pacote"],
+    "três recusas pelo mesmo teto ocuparam vagas diferentes na aba, e o motivo de outro tipo — o arquivo que não "
+      + "está no pacote — saiu dela; ou a vaga do teto perdeu os números ou a conta das outras: "
+      + `${JSON.stringify(medido.soma)}`,
+  );
+  assert.equal(medido.soma?.recusada, 4, `a aba não contou as quatro recusas: ${JSON.stringify(medido.soma)}`);
   assert.deepEqual(erros, [], `a página lançou erro durante a recusa pelo teto de bytes: ${erros.join(" | ")}`);
   await pagina.close();
 }

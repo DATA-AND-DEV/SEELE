@@ -1546,6 +1546,9 @@ function aContribuicaoPinta(contribuicao, destino) {
     .escolhida === contribuicao;
 }
 
+/** A vaga de cada teto em cada soma de `contarAMidia`: o índice, o primeiro motivo e quantas mais. */
+const vagasDosTetos = new WeakMap();
+
 /**
  * Soma uma anotação de mídia — a regra das duas contas da aba DIAGNÓSTICO.
  *
@@ -1556,8 +1559,19 @@ function aContribuicaoPinta(contribuicao, destino) {
  * índice partiria um par substituto. Duas cópias desta regra seriam duas
  * respostas no dia em que uma mudasse.
  *
+ * **As recusas pelo mesmo teto ocupam uma vaga só** (M6 da revisão do K3). O
+ * motivo de uma recusa por teto traz os números dela — quanto a mídia tinha,
+ * quanto já estava montado —, e cada uma é um texto: três delas ocupavam as
+ * três vagas e tiravam da aba o motivo de outro tipo. Com a chave do teto
+ * (`anotada.teto`, que `anotarMidia` grava), a vaga é uma por MOD e por teto,
+ * e diz os números da **primeira** recusa, na ordem em que as mídias foram
+ * montadas, e quantas mais o mesmo teto recusou. A primeira, e não a mais
+ * recente, porque a aba se redesenha a cada mudança de mídia e a ordem de
+ * montagem é a que não muda entre um desenho e outro; os números de cada
+ * recusa estão no `seele.log` e no evento do MOD.
+ *
  * @param {{ carregando: number, pronta: number, recusada: number, motivos: string[] }} soma
- * @param {{ situacao: string, motivo?: string }} anotada
+ * @param {{ situacao: string, motivo?: string, teto?: string }} anotada
  * @param {string} [mod] O MOD, na frente do motivo, quando a soma junta MODs.
  */
 function contarAMidia(soma, anotada, mod = "") {
@@ -1569,7 +1583,25 @@ function contarAMidia(soma, anotada, mod = "") {
     soma.recusada += 1;
     const motivo = [...String(anotada.motivo ?? "")].slice(0, 200).join("");
     const texto = `${mod ? `${mod}: ` : ""}${motivo || "sem motivo dito"}`;
-    if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+    if (!anotada.teto) {
+      if (soma.motivos.length < 3 && !soma.motivos.includes(texto)) soma.motivos.push(texto);
+      return;
+    }
+    // Fora da soma, e não um campo dela: quem a lê compara a soma inteira.
+    let vagas = vagasDosTetos.get(soma);
+    if (!vagas) {
+      vagas = new Map();
+      vagasDosTetos.set(soma, vagas);
+    }
+    const chave = `${mod}\u0000${anotada.teto}`;
+    const vaga = vagas.get(chave);
+    if (vaga) {
+      vaga.mais += 1;
+      soma.motivos[vaga.indice] = `${vaga.texto} (e mais ${vaga.mais} ${vaga.mais === 1 ? "recusa" : "recusas"} pelo mesmo teto)`;
+    } else if (soma.motivos.length < 3) {
+      vagas.set(chave, { indice: soma.motivos.length, texto, mais: 0 });
+      soma.motivos.push(texto);
+    }
   }
 }
 
