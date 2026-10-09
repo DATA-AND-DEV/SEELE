@@ -400,3 +400,9 @@ começar.
   `h3` (as minhas 2.4 e 2.6), e não o servidor de mentira da 3.4. **Pendente
   de envio à orquestradora e à F8:** essa dependência, e que a F4 entrega o
   como subir e o link quando a 2.4 e a 2.6 existirem.
+
+- **A oitava integração (`f7fb8ab9`), trazida em `36e3d307`.** O `0.16/web` não
+  entrou nela, porque o módulo de quadros espera a revisão da F1, **que a
+  orquestradora pediu**: esse item sai da lista do que falta mandar. Na `ui/`
+  que entrou, a ponte só põe a marca (o `CELULAR` é da F8), e atende o
+  `volumes_locais` novo do I-b da F5. As duas coisas estão no plano (3.1).
