@@ -2539,8 +2539,15 @@ impl Connection {
     /// os que a pessoa escolheu**, que são os que a voz vai vestir ao abrir
     /// (pendência 52). Era `None` aí, e a tela de configuração caía nos
     /// valores do disco, que podem não ser os desta sessão.
+    ///
+    /// **`None` numa sessão que entrou sem áudio**, e a casca lê o disco: ali
+    /// não há voz que vá vestir controle nenhum, e os guardados seriam só os
+    /// padrões, por cima da escolha gravada (M-e da rodada 1 do lote I-a).
     #[must_use]
     pub fn controles_da_voz(&self) -> Option<ControlesDaVoz> {
+        if !self.shared.voice.quer_audio {
+            return None;
+        }
         if let Ok(voice) = self.shared.voice.lock() {
             if let Some(voice) = voice.as_ref() {
                 let (abertura_dbfs, escolhida) = voice.abertura_dbfs();
@@ -10274,8 +10281,8 @@ mod o_audio_segue_a_sala {
         assert_eq!(voz.abertura(), AberturaDoAudio::SemAparelho);
     }
 
-    /// Um `Shared` de uma sessão que pediu áudio, sem voz de pé.
-    fn compartilhado_com_audio() -> std::sync::Arc<super::Shared> {
+    /// Um `Shared` sem voz de pé, de uma sessão que pediu áudio ou não.
+    fn compartilhado(quer_audio: bool) -> std::sync::Arc<super::Shared> {
         use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8};
         std::sync::Arc::new(super::Shared {
             caminho_medido: AtomicU32::new(0),
@@ -10287,7 +10294,7 @@ mod o_audio_segue_a_sala {
             person_icons_revision: AtomicU64::new(0),
             room: Mutex::new(Room::new()),
             listeners: Mutex::new(Vec::new()),
-            voice: VozDaSala::nova(true, DeviceChoice::default()),
+            voice: VozDaSala::nova(quer_audio, DeviceChoice::default()),
             media: Mutex::new(None),
             nickname: Mutex::new("marcela".into()),
             link_state: AtomicU8::new(0),
@@ -10303,6 +10310,28 @@ mod o_audio_segue_a_sala {
         })
     }
 
+    /// M-e: numa sessão que entrou sem áudio, `controles_da_voz` não responde,
+    /// e a casca lê os controles do disco, como sempre leu.
+    ///
+    /// Os guardados da sessão são os padrões — nada os aplica a voz nenhuma, e
+    /// nenhuma tela os muda —, e devolvê-los escondia da configuração a escolha
+    /// gravada (`controles_da_voz`, em `main.rs`, cai no disco só com `None`).
+    #[test]
+    fn a_sessao_sem_audio_deixa_os_controles_da_voz_para_o_disco() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(false),
+            encerrada: Mutex::new(None),
+        };
+        assert_eq!(
+            connection.controles_da_voz(),
+            None,
+            "a sessão sem áudio respondeu os controles com os padrões dela, e a tela de \
+             configuração deixou de mostrar o que está gravado no disco"
+        );
+    }
+
     /// Fora de sala, cada controle da conexão é guardado, nenhum é recusado, e
     /// o retrato mostra o escolhido.
     ///
@@ -10316,7 +10345,7 @@ mod o_audio_segue_a_sala {
         let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
         let connection = super::Connection {
             commands,
-            shared: compartilhado_com_audio(),
+            shared: compartilhado(true),
             encerrada: Mutex::new(None),
         };
 
