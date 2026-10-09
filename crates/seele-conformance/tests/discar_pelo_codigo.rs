@@ -9,7 +9,9 @@
 //!   ligação entra pela dica de rede local, e a dica é tentada primeiro;
 //! - um código que não mora no ponto desiste com `NinguemMora`, e um ponto que
 //!   não responde, com `PontoMudo` — cada um com o seu motivo, e não com um
-//!   «não alcancei» de endereço nenhum.
+//!   «não alcancei» de endereço nenhum;
+//! - **a ligação que cai** (tarefa 6f) roda a bateria de um minuto, e volta ao
+//!   `IP:porta` que atendeu: nem ao primeiro candidato, nem ao código.
 //!
 //! Todo ponto daqui é `127.0.0.1`, e os guardas das duas pontas reprovariam um
 //! teste que perguntasse à VPS de produção.
@@ -27,13 +29,21 @@ use std::time::Duration;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_core::chegada::{Caminho, Chegada, Etapa, Passo};
 use seele_core::encontro::FalhaAoLocalizar;
-use seele_core::{ConnectError, MemoryPinStore, PinStore};
+use seele_core::enlace::{Aviso, Enlace};
+use seele_core::{ConnectError, Link, MemoryPinStore, PinStore};
 use seele_proto::codigo::Codigo;
 use seele_proto::encontro::{Marcas, Moro2, Resposta2, Vizinhanca};
 use seele_server::alcance::encontro::EstadoDoRegistro;
 use seele_server::alcance::{Escuta, Pilha};
 use seele_server::hospedagem::Hospedagem;
 
+/// A espera pela porta que outro binário da suíte levou por um instante. Só a
+/// conferência dela: a sala volta pela `Hospedagem`, e não por um `Daemon`.
+#[expect(
+    dead_code,
+    reason = "a sala volta pela Hospedagem, e não pelo `ligar_insistindo`"
+)]
+mod porta;
 mod vaga;
 
 /// A semente de quem recebe.
@@ -153,12 +163,28 @@ async fn quem_recebe_disca_o_proprio_codigo_pelo_ponto_e_entra() {
     sala.encerrar().await;
 }
 
+/// A dica desta máquina na porta da sala, como a sala de verdade a registraria.
+fn dica_desta_maquina(sala: &Hospedagem) -> SocketAddr {
+    let Some(dica) = seele_server::alcance::encontro::dicas_desta_maquina(
+        Escuta::nova(sala.endereco().port(), Pilha::Dupla),
+        &seele_server::alcance::interfaces::descobrir(),
+    )
+    .first()
+    .copied() else {
+        panic!(
+            "esta máquina não tem placa de rede local física com endereço de casa \
+             (RFC 1918 ou ULA): o teste da dica precisa de uma"
+        );
+    };
+    dica
+}
+
 /// Registra no ponto a marca do servidor da sala de `DONO` por um socket que
-/// morre em seguida, com `dica` como a dica de rede local.
+/// morre em seguida, com estas dicas de rede local.
 ///
 /// É o que o ponto vê de uma casa cujo roteador não faz *hairpin*: o endereço
 /// público, visto de dentro da mesma casa, não atende.
-async fn registrar_com_o_publico_morto(ponto: SocketAddr, dica: SocketAddr) {
+async fn registrar_com_o_publico_morto(ponto: SocketAddr, dicas: Vec<SocketAddr>) {
     let fantasma = tokio::net::UdpSocket::bind("127.0.0.1:0")
         .await
         .expect("o loopback não abriu");
@@ -168,7 +194,6 @@ async fn registrar_com_o_publico_morto(ponto: SocketAddr, dica: SocketAddr) {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("o relógio anda")
         .as_secs();
-    let dicas = vec![dica];
     let assinatura = chave(DONO)
         .sign(&seele_proto::assinatura::moro2(
             &marca, &publica, carimbo, &dicas,
@@ -213,18 +238,8 @@ async fn sem_hairpin_a_ligacao_entra_pela_dica() {
     let _vaga = vaga::minha();
     let ponto = subir_o_ponto();
     let sala = subir_a_sala(None).await;
-    let Some(dica) = seele_server::alcance::encontro::dicas_desta_maquina(
-        Escuta::nova(sala.endereco().port(), Pilha::Dupla),
-        &seele_server::alcance::interfaces::descobrir(),
-    )
-    .first()
-    .copied() else {
-        panic!(
-            "esta máquina não tem placa de rede local física com endereço de casa \
-             (RFC 1918 ou ULA): o teste da dica precisa de uma"
-        );
-    };
-    registrar_com_o_publico_morto(ponto, dica).await;
+    let dica = dica_desta_maquina(&sala);
+    registrar_com_o_publico_morto(ponto, vec![dica]).await;
 
     let chegada = Chegada::para_o_codigo(codigo_de(DONO), Some(ponto.to_string()), "dona".into());
     let chegado = chegada
@@ -306,4 +321,146 @@ async fn um_ponto_que_nao_responde_desiste_com_o_ponto_mudo() {
         comeco.elapsed()
     );
     drop(mudo);
+}
+
+#[test]
+fn a_bateria_da_ligacao_cabe_na_tolerancia_da_campainha() {
+    // Quem volta dentro da tolerância entra sem tocar de novo. Uma bateria mais
+    // longa que ela voltaria tocando, no meio de uma conversa que a pessoa do
+    // outro lado já tinha atendido. As duas constantes moram em crates
+    // diferentes, e só aqui alguém vê as duas.
+    assert!(
+        seele_core::battery::CARGA_DA_LIGACAO <= seele_server::campainha::TOLERANCIA_DE_RECONEXAO,
+        "a bateria da ligação ({:?}) passou da tolerância da campainha ({:?})",
+        seele_core::battery::CARGA_DA_LIGACAO,
+        seele_server::campainha::TOLERANCIA_DE_RECONEXAO
+    );
+}
+
+/// Um endereço da rede de casa onde ninguém atende: a placa da dica, numa porta
+/// que foi aberta e devolvida.
+fn dica_morta(viva: SocketAddr) -> SocketAddr {
+    let socket = std::net::UdpSocket::bind(SocketAddr::new(viva.ip(), 0))
+        .expect("a placa da dica não abriu");
+    let morta = socket.local_addr().expect("o socket sabe onde ligou");
+    drop(socket);
+    morta
+}
+
+/// A sala de `DONO` de novo, na mesma porta: a mesma semente, o mesmo
+/// certificado. Insiste só enquanto a porta for de outro binário da suíte
+/// (`porta::a_porta_e_de_outro`).
+async fn subir_a_sala_de_novo(porta: u16) -> Hospedagem {
+    let comeco = std::time::Instant::now();
+    loop {
+        match Hospedagem::iniciar_sala(porta, &[DONO; 32], "dona", None).await {
+            Ok(sala) => return sala,
+            Err(erro)
+                if porta::a_porta_e_de_outro(&erro)
+                    && comeco.elapsed() < Duration::from_secs(10) =>
+            {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(erro) => panic!("a sala não voltou na porta {porta}: {erro:#}"),
+        }
+    }
+}
+
+/// Espera um aviso que interesse, ou desiste.
+async fn esperar<F>(enlace: &mut Enlace, prazo: Duration, mut aceita: F) -> Option<Aviso>
+where
+    F: FnMut(&Aviso) -> bool,
+{
+    let fim = tokio::time::Instant::now() + prazo;
+    while tokio::time::Instant::now() < fim {
+        if let Ok(aviso) = tokio::time::timeout(Duration::from_millis(300), enlace.proximo()).await
+        {
+            if aceita(&aviso) {
+                return Some(aviso);
+            }
+        }
+    }
+    None
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ligacao_que_cai_roda_um_minuto_e_volta_ao_endereco_que_atendeu() {
+    // A tarefa 6f. A ponta que atendeu é a segunda dica: a primeira não atende,
+    // e o endereço público que o ponto deu também não. Uma volta ao primeiro
+    // candidato bateria na dica morta, e uma volta pelo código passaria de novo
+    // pela corrida; quem volta é a sessão que estava de pé, pelo `IP:porta` que
+    // atendeu.
+    //
+    // Quem liga aqui é quem recebe, que não toca: a volta de um convidado sem
+    // tocar de novo (a tolerância da campainha) precisa do cliente que lê o
+    // `Tocando`, a tarefa 6e.
+    let _vaga = vaga::minha();
+    let ponto = subir_o_ponto();
+    let sala = subir_a_sala(None).await;
+    let porta_da_sala = sala.endereco().port();
+    let viva = dica_desta_maquina(&sala);
+    let morta = dica_morta(viva);
+    registrar_com_o_publico_morto(ponto, vec![morta, viva]).await;
+
+    let chegada = Chegada::para_o_codigo(codigo_de(DONO), Some(ponto.to_string()), "dona".into());
+    let chegado = chegada
+        .chegar(chave(DONO), pins())
+        .await
+        .unwrap_or_else(|frustrada| {
+            panic!(
+                "a ligação não entrou: {:?} depois de {:?}",
+                frustrada.motivo(),
+                frustrada.trilha()
+            )
+        });
+    assert_eq!(
+        primeira_tentativa(&chegado.trilha),
+        morta,
+        "a dica morta não foi a primeira tentativa, e o teste não separa o \
+         candidato que atendeu do primeiro: {:?}",
+        chegado.trilha
+    );
+    let mut enlace = chegado.enlace;
+    assert_eq!(enlace.estado(), Link::Online);
+
+    // ---- a sala cai, sem despedida
+    drop(sala);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let aviso = esperar(&mut enlace, Duration::from_secs(20), |aviso| {
+        matches!(
+            aviso,
+            Aviso::Estado {
+                estado: Link::InternalBattery { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let Some(Aviso::Estado {
+        restante: Some(restante),
+        ..
+    }) = aviso
+    else {
+        panic!("a ligação não entrou na bateria: {aviso:?}");
+    };
+    assert!(
+        restante <= seele_core::battery::CARGA_DA_LIGACAO,
+        "a bateria da ligação começou em {restante:?}, e não em um minuto"
+    );
+
+    // ---- a sala volta, na mesma porta e com a mesma chave
+    let de_novo = subir_a_sala_de_novo(porta_da_sala).await;
+    let voltou = esperar(&mut enlace, Duration::from_secs(30), |aviso| {
+        matches!(aviso, Aviso::Reconectado { .. })
+    })
+    .await;
+    assert!(
+        voltou.is_some(),
+        "a ligação não voltou ao endereço que atendeu"
+    );
+    assert_eq!(enlace.estado(), Link::Online);
+
+    drop(enlace);
+    de_novo.encerrar().await;
 }

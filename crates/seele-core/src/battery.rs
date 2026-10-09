@@ -42,6 +42,17 @@ pub const MISSES_BEFORE_RECONNECT: u32 = 3;
 /// First reconnection delay.
 const FIRST_BACKOFF: Duration = Duration::from_millis(500);
 
+/// Quanto dura a bateria de uma ligação: um minuto, e não cinco (spec da sala
+/// pessoal, «Do lado de quem liga», 6).
+///
+/// É a tolerância da campainha (`seele_server::campainha::TOLERANCIA_DE_RECONEXAO`):
+/// quem volta dentro dela entra sem tocar de novo. Uma bateria mais longa
+/// voltaria depois dela e tocaria outra vez no meio de uma conversa que a
+/// pessoa do outro lado já tinha atendido; passado o minuto, a ligação caiu. O
+/// guarda das duas é `seele-conformance/tests/discar_pelo_codigo.rs`, que vê os
+/// dois crates.
+pub const CARGA_DA_LIGACAO: Duration = Duration::from_secs(60);
+
 /// Longest reconnection delay.
 ///
 /// Capped well inside the grace window so the last minute still gets several
@@ -78,7 +89,8 @@ pub enum Action {
     EndSession,
 }
 
-/// Tracks the link and the five-minute grace window.
+/// Tracks the link and the five-minute grace window — one minute on a call
+/// ([`Battery::da_ligacao`]).
 ///
 /// Time is passed in, never read.
 #[derive(Debug)]
@@ -94,6 +106,9 @@ pub struct Battery {
     next_attempt_at: Option<Duration>,
     backoff: Duration,
     attempts: u32,
+    /// Quanto a bateria dura: [`SESSION_GRACE`] numa sessão, e
+    /// [`CARGA_DA_LIGACAO`] numa ligação.
+    carga: Duration,
 }
 
 impl Default for Battery {
@@ -114,6 +129,16 @@ impl Battery {
             next_attempt_at: None,
             backoff: FIRST_BACKOFF,
             attempts: 0,
+            carga: SESSION_GRACE,
+        }
+    }
+
+    /// A bateria de uma ligação: [`CARGA_DA_LIGACAO`], e não cinco minutos.
+    #[must_use]
+    pub fn da_ligacao() -> Self {
+        Self {
+            carga: CARGA_DA_LIGACAO,
+            ..Self::new()
         }
     }
 
@@ -123,14 +148,15 @@ impl Battery {
         self.state
     }
 
-    /// How much of the five minutes is left.
+    /// How much of the window is left: of the five minutes, or of the one
+    /// minute of a call.
     ///
     /// `specs/07-estetica.md` puts this on screen as a countdown from
     /// 04:59. Returns `None` while online, because there is nothing counting.
     #[must_use]
     pub fn remaining(&self, now: Duration) -> Option<Duration> {
         let since = self.discharging_since?;
-        Some(SESSION_GRACE.saturating_sub(now.saturating_sub(since)))
+        Some(self.carga.saturating_sub(now.saturating_sub(since)))
     }
 
     /// Reconnection attempts made in the current outage.
@@ -366,6 +392,31 @@ mod tests {
         }
 
         assert_eq!(ended_at, Some(SESSION_GRACE.as_secs()), "the window moved");
+    }
+
+    #[test]
+    fn a_bateria_de_uma_ligacao_acaba_em_um_minuto() {
+        // «A LIGAÇÃO CAIU» depois de um minuto, e não de cinco: a carga é a
+        // tolerância da campainha. A contagem começa no minuto, e nem as
+        // tentativas a esticam.
+        let mut battery = Battery::da_ligacao();
+        battery.on_connection_lost(at(0));
+        assert_eq!(battery.remaining(at(0)), Some(CARGA_DA_LIGACAO));
+
+        let mut ended_at = None;
+        for second in 0..600 {
+            let action = battery.poll(at(second));
+            if action == Action::Reconnect {
+                battery.on_reconnect_failed(at(second));
+            }
+            if action == Action::EndSession {
+                ended_at = Some(second);
+                break;
+            }
+        }
+
+        assert_eq!(ended_at, Some(CARGA_DA_LIGACAO.as_secs()));
+        assert_eq!(battery.state(), Link::Discharged);
     }
 
     #[test]

@@ -1518,6 +1518,7 @@ impl Enlace {
         let (avisos_tx, avisos_rx) = mpsc::unbounded_channel();
         let (resultados_do_par_tx, resultados_do_par) = mpsc::unbounded_channel();
 
+        let bateria = bateria_de(&destino);
         let motor = Motor {
             destino,
             // Guardado para a reconexão, e não só para a primeira entrada: uma
@@ -1529,7 +1530,7 @@ impl Enlace {
             chave,
             pins,
             cliente: Some(cliente),
-            bateria: Battery::new(),
+            bateria,
             inicio: Instant::now(),
             voice_room: None,
             linha: None,
@@ -5708,6 +5709,20 @@ impl FalhaAMostrar {
     }
 }
 
+/// A bateria de uma sessão: cinco minutos, e um numa ligação.
+///
+/// Uma ligação é o destino que espera um código (ADR 0060). A volta dela é ao
+/// `IP:porta` que atendeu, e não ao código: o `destino` do motor é o do
+/// candidato que venceu a corrida, e a corrida não se repete. A carga é a
+/// tolerância da campainha ([`crate::battery::CARGA_DA_LIGACAO`]): dentro dela
+/// quem volta entra sem tocar de novo, e passado ela a ligação caiu.
+fn bateria_de(destino: &Destino) -> Battery {
+    match destino.esperada {
+        Some(Esperada::Codigo(_)) => Battery::da_ligacao(),
+        Some(Esperada::Certificado(_)) | None => Battery::new(),
+    }
+}
+
 /// Se este erro veio de alguém que **respondeu**.
 ///
 /// A diferença decide qual erro sobra quando nenhum candidato entra. Um servidor
@@ -5824,6 +5839,31 @@ mod tests {
 
         destino.esperada = None;
         assert_eq!(destino.impressao_esperada(), None);
+    }
+
+    #[test]
+    fn uma_ligacao_tem_a_bateria_de_um_minuto_e_um_servidor_a_de_cinco() {
+        let agora = Duration::from_secs(100);
+        let carga = |esperada: Option<Esperada>| {
+            let mut destino = destino_de_teste(None);
+            destino.esperada = esperada;
+            let mut bateria = bateria_de(&destino);
+            bateria.on_connection_lost(agora);
+            bateria.remaining(agora)
+        };
+
+        assert_eq!(
+            carga(Some(Esperada::Codigo(
+                seele_proto::codigo::Codigo::da_chave(&[7; 32])
+            ))),
+            Some(crate::battery::CARGA_DA_LIGACAO),
+            "uma ligação ganhou a bateria de cinco minutos"
+        );
+        assert_eq!(
+            carga(Some(Esperada::Certificado("ab".into()))),
+            Some(seele_proto::transport::SESSION_GRACE)
+        );
+        assert_eq!(carga(None), Some(seele_proto::transport::SESSION_GRACE));
     }
 
     /// A marca do aviso é a de quem se espera que atenda: a do servidor, tirada
