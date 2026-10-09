@@ -743,6 +743,10 @@
 
 :root[data-casca="celular"] .painel-pessoas .pessoas-cartela {
   padding: 10px calc(16px + var(--cel-seguro-dir)) 10px calc(16px + var(--cel-seguro-esq));
+  /* A contagem desce para debaixo de PESSOAS quando não cabe ao lado: com o
+     texto do sistema no maior tamanho, o «VOZ» passava da tela. */
+  flex-wrap: wrap;
+  row-gap: 2px;
 }
 
 :root[data-casca="celular"] #lista-roster {
@@ -1098,10 +1102,19 @@
   display: none;
 }
 
-/* CONEXÃO: as sete medidas numa grade de duas colunas. */
+/* Os cartões dos modos partem de 130 vezes a escala, e dividem a fileira por
+   igual como antes: a 1, dois cabem lado a lado a 360 e a 390; com o texto do
+   sistema grande, cada um toma a fileira, em vez de partir o SEGURAR no meio. */
+:root[data-casca="celular"] #tela-server .server-modo {
+  flex-basis: calc(130px * var(--cel-escala));
+}
+
+/* CONEXÃO: as sete medidas numa grade de duas colunas, que vira uma quando o
+   texto do sistema não cabe em duas (a 1, o mínimo de 150 dá duas a 360 e a
+   480). */
 :root[data-casca="celular"] .cel-medidas {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(150px * var(--cel-escala))), 1fr));
   gap: 12px;
   margin: 0;
 }

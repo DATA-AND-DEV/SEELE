@@ -1155,8 +1155,8 @@ def aba_ajustes(pg: Page) -> list[str]:
 
 # O que não cresce com o texto do sistema de propósito, e por quê. Todo o resto
 # cresce: o caso `texto-maior` reprova o texto à vista que ficar no tamanho. Os
-# mesmos de `SEM_GEMEO`, em `tests/celular.rs`, que deixa estes sem gêmeo no
-# `celular-texto.css`, mais as abas, que têm teto escrito à mão.
+# mesmos de `NO_TAMANHO_DO_DESKTOP`, em `tests/celular.rs`, cujo gêmeo no
+# `celular-texto.css` repete o tamanho, mais os tetos escritos à mão.
 TEXTO_COM_TETO = {
     ".cel-abas": "as abas têm teto de 13 px, como a barra de abas do iOS (spec, §5)",
     ".cel-telemetria": "a telemetria da CHAMADA tem a altura das abas e teto como elas: quatro medidas em 390",
@@ -1190,6 +1190,22 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
 }"""
 
 
+# A 1, o celular-texto.css não muda nada: com ele ligado e desligado, todo nó da
+# página tem o mesmo tamanho de letra. O arquivo só declara tamanho de letra,
+# então o mesmo tamanho em todo nó é o mesmo pixel.
+A_UM_IGUAL = """() => {
+    const folha = document.querySelector('link[href="celular-texto.css"]');
+    if (!folha) return ['a página não carrega o celular-texto.css'];
+    const nos = [...document.querySelectorAll('*')];
+    const ligado = nos.map((e) => getComputedStyle(e).fontSize);
+    folha.disabled = true;
+    const desligado = nos.map((e) => getComputedStyle(e).fontSize);
+    folha.disabled = false;
+    const nome = (e) => e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
+    return nos.flatMap((e, i) => ligado[i] === desligado[i] ? [] : [`${nome(e)}: ${desligado[i]} sem ele, ${ligado[i]} com ele`]);
+}"""
+
+
 def texto_maior(pg: Page) -> list[str]:
     """O texto do sistema (Tarefa 15): a 2, todo texto à vista na sessão cresce,
     em cada aba, em cada seção de AJUSTES, na CHAMADA e nas folhas. O núcleo
@@ -1203,11 +1219,23 @@ def texto_maior(pg: Page) -> list[str]:
 
     def conferir(estado):
         pg.wait_for_timeout(200)
+        for diferenca in pg.evaluate(A_UM_IGUAL)[:8]:
+            falhas.append(f"{estado}: a 1, o celular-texto.css muda {diferenca}")
         visto = pg.evaluate(TAMANHOS_DO_TEXTO, teto)
         if visto["nos"] < 3:
             falhas.append(f"{estado}: só {visto['nos']} textos à vista, e o caso não mediu nada")
         for nome, medida in sorted(visto["parados"].items()):
             falhas.append(f"{estado}: {nome} não cresce ({medida})")
+        # E cabe: a 2, nada rola de lado nem passa da caixa. Os casos a 150 %
+        # não viam a cabeça de PESSOAS cortando o «VOZ» (medido no Safari).
+        pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
+        pg.wait_for_timeout(100)
+        m = pg.evaluate(MEDIR, [0, 0, "#tela-sessao, #tela-server"])
+        pg.evaluate("document.documentElement.style.removeProperty('--cel-escala')")
+        if m["vaza"] or m["larguraDoDocumento"] > pg.evaluate("innerWidth"):
+            falhas.append(f"{estado}: a 2, rola de lado: {m['vaza']} (documento com {m['larguraDoDocumento']} px)")
+        if m["transborda"]:
+            falhas.append(f"{estado}: a 2, texto passa da caixa: {m['transborda']}")
 
     for aba in ("servidor", "conversa", "pessoas"):
         if ir_para_aba(pg, aba, falhas):
@@ -1529,7 +1557,7 @@ CASOS: dict[str, Caso] = {
     "chamada-150": Caso(levar=chamada, escala=1.5, raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-150": Caso(levar=ajustes_medida, escala=1.5, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
-    "texto-maior": Caso(levar=texto_maior, aparelhos=("390",), medir=False),
+    "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
     "tela-larga": Caso(levar=tela_larga, aparelhos=("1280",), medir=False),
     "voltar": Caso(levar=voltar, medir=False),

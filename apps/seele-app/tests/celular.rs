@@ -384,22 +384,29 @@ fn o_nucleo_do_celular_so_le_o_nucleo() {
 /// CHAMADA, o campo de mensagem e as folhas ficavam no tamanho do desktop, ao
 /// lado de mensagens no dobro).
 ///
-/// Por isso cada regra do desktop com tamanho ganha um gêmeo gerado:
-/// `:where(<marca>) <o mesmo seletor> { font-size: calc(<o mesmo tamanho> *
-/// var(--cel-escala)) }`. O `:where()` não pesa: o gêmeo tem a especificidade da
-/// regra dele e vem depois dela, então o cascateamento do desktop continua o
-/// mesmo, só que escalado; e as regras escritas à mão nos `celular-*.css`, que
-/// pesam a marca, continuam ganhando (os tetos das abas e do núcleo). A 1, o
-/// gêmeo dá o mesmo pixel.
+/// Por isso cada regra do desktop que declara tamanho de letra ganha um gêmeo
+/// gerado, `:where(<marca>) <o mesmo seletor>`, na mesma ordem:
+/// - o tamanho que escala vem vezes a escala (`calc(<tamanho> *
+///   var(--cel-escala))`);
+/// - o que segue o pai (`inherit`, `em`, `%`, `font: inherit`) vem igual, e
+///   cresce com o pai;
+/// - o de `NO_TAMANHO_DO_DESKTOP` vem igual, e fica.
+///
+/// O `:where()` não pesa: o gêmeo tem a especificidade da regra dele, e o
+/// arquivo carrega depois do desktop. Como toda declaração de tamanho tem o seu
+/// gêmeo na mesma ordem, o cascateamento do desktop se repete inteiro, escalado:
+/// um gêmeo que faltasse deixaria um gêmeo anterior vencer a regra que antes o
+/// vencia (medido: o `.linha-renomear { font-size: inherit }` perdia para o
+/// gêmeo do `.botao-fantasma`, e o lápis do canal ia de 14 a 13 px a 1). As
+/// regras escritas à mão nos `celular-*.css`, que pesam a marca, continuam
+/// ganhando (os tetos das abas, do núcleo e da telemetria). A 1, todo nó tem o
+/// mesmo tamanho com e sem o arquivo: a bancada confere (caso `texto-maior`).
 const TEXTO_GERADO: &str = "celular-texto.css";
 
-/// O que não ganha gêmeo, e fica no tamanho do desktop com qualquer texto do
-/// sistema. A bancada aceita os mesmos (`TEXTO_COM_TETO`, caso `texto-maior`).
-const SEM_GEMEO: &[(&str, &str)] = &[
-    (
-        "html",
-        "a raiz: o corpo, a casca escala ela mesma em celular-base.css",
-    ),
+/// O que fica no tamanho do desktop com qualquer texto do sistema: o gêmeo
+/// repete o tamanho, sem a escala. A bancada aceita os mesmos (`TEXTO_COM_TETO`,
+/// caso `texto-maior`).
+const NO_TAMANHO_DO_DESKTOP: &[(&str, &str)] = &[
     (
         ".trilha-item",
         "as iniciais de um servidor numa caixa de tamanho fixo: marca, e não texto de ler",
@@ -451,11 +458,17 @@ fn folhas_do_desktop() -> Vec<String> {
     folhas
 }
 
-/// O tamanho de letra que uma regra declara, quando ele é um que escala. `None`
-/// quando ela não declara nenhum, ou declara um que segue o pai (`inherit`,
-/// `font: inherit`, `em`, `%`), que cresce com ele. Uma forma que este guarda não
-/// conhece reprova, e não passa calada.
-fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<String> {
+/// O tamanho de letra que uma regra declara, quando declara.
+enum Tamanho {
+    /// Em px, rem ou token: o gêmeo multiplica pela escala.
+    Escala(String),
+    /// `inherit`, `em` ou `%`: o gêmeo repete, e ele cresce com o pai.
+    SegueOPai(String),
+}
+
+/// A última declaração de tamanho de uma regra, contando o `font: inherit`. Uma
+/// forma que este guarda não conhece reprova, e não passa calada.
+fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<Tamanho> {
     let numero = |valor: &str, unidade: &str| {
         valor
             .strip_suffix(unidade)
@@ -469,21 +482,25 @@ fn tamanho_da_letra(onde: &str, corpo: &str) -> Option<String> {
         let valor = valor.trim();
         match propriedade.trim() {
             "font-size" => {
-                tamanho = if numero(valor, "px")
-                    || numero(valor, "rem")
-                    || (valor.starts_with("var(--seele-t-") && valor.ends_with(')'))
-                {
-                    Some(valor.to_owned())
-                } else if valor == "inherit" || numero(valor, "em") || numero(valor, "%") {
-                    None
-                } else {
-                    panic!(
-                        "{onde}: `font-size: {valor}` é uma forma que o gerador do texto do \
-                         sistema não conhece; ensine `tamanho_da_letra` a escalá-la ou a deixá-la"
-                    )
-                };
+                tamanho = Some(
+                    if numero(valor, "px")
+                        || numero(valor, "rem")
+                        || (valor.starts_with("var(--seele-t-") && valor.ends_with(')'))
+                    {
+                        Tamanho::Escala(valor.to_owned())
+                    } else if valor == "inherit" || numero(valor, "em") || numero(valor, "%") {
+                        Tamanho::SegueOPai(valor.to_owned())
+                    } else {
+                        panic!(
+                            "{onde}: `font-size: {valor}` é uma forma que o gerador do texto do \
+                             sistema não conhece; ensine `tamanho_da_letra` a lê-la"
+                        )
+                    },
+                );
             }
-            "font" if valor == "inherit" => tamanho = None,
+            "font" if valor == "inherit" => {
+                tamanho = Some(Tamanho::SegueOPai("inherit".to_owned()))
+            }
             "font" => panic!(
                 "{onde}: `font: {valor}` traz o tamanho no atalho; ensine `tamanho_da_letra` \
                  a lê-lo"
@@ -503,8 +520,8 @@ fn texto_do_celular() -> String {
          *\n \
          * Regere com `SEELE_REGERAR_TEXTO=1 cargo test -p seele-app --test celular`,\n \
          * que também reprova quando este arquivo fica atrás do CSS do desktop. O\n \
-         * porquê e o que fica de fora estão em `tests/celular.rs` (`TEXTO_GERADO`,\n \
-         * `SEM_GEMEO`) e no spec, §5. */\n",
+         * porquê e o que fica no tamanho estão em `tests/celular.rs` (`TEXTO_GERADO`,\n \
+         * `NO_TAMANHO_DO_DESKTOP`) e no spec, §5. */\n",
     );
     for folha in folhas_do_desktop() {
         let mut da_folha = String::new();
@@ -516,31 +533,52 @@ fn texto_do_celular() -> String {
             let Some(tamanho) = tamanho_da_letra(&onde, &bloco.corpo) else {
                 continue;
             };
-            let gemeos: Vec<String> = seletores(&bloco.preludio)
-                .into_iter()
-                .map(|s| s.split_whitespace().collect::<Vec<_>>().join(" "))
-                .filter(|s| !SEM_GEMEO.iter().any(|(sem, _)| sem == s))
-                .map(|s| {
-                    assert!(
-                        !s.starts_with(":root") && !s.starts_with("html"),
-                        "{onde}: um seletor preso à raiz não tem gêmeo debaixo da marca"
-                    );
-                    format!(":where({marca}) {s}")
-                })
-                .collect();
-            if gemeos.is_empty() {
+            // Os seletores da regra, separados pelo valor do gêmeo: o tamanho vezes
+            // a escala, ou o mesmo tamanho (o que segue o pai e o que fica).
+            let mut escalados = Vec::new();
+            let mut iguais = Vec::new();
+            for seletor in seletores(&bloco.preludio) {
+                let seletor = seletor.split_whitespace().collect::<Vec<_>>().join(" ");
+                // A raiz não casa debaixo da marca; o corpo, a casca escala ela
+                // mesma em celular-base.css.
+                if seletor == "html" {
+                    continue;
+                }
+                assert!(
+                    !seletor.starts_with(":root") && !seletor.starts_with("html"),
+                    "{onde}: um seletor preso à raiz não tem gêmeo debaixo da marca"
+                );
+                let gemeo = format!(":where({marca}) {seletor}");
+                let fica = NO_TAMANHO_DO_DESKTOP.iter().any(|(s, _)| *s == seletor);
+                match &tamanho {
+                    Tamanho::Escala(_) if !fica => escalados.push(gemeo),
+                    _ => iguais.push(gemeo),
+                }
+            }
+            let valor = match &tamanho {
+                Tamanho::Escala(v) | Tamanho::SegueOPai(v) => v,
+            };
+            let recuo = "  ".repeat(contexto.len());
+            let mut regras = String::new();
+            for (gemeos, declarado) in [
+                (escalados, format!("calc({valor} * var(--cel-escala))")),
+                (iguais, valor.clone()),
+            ] {
+                if !gemeos.is_empty() {
+                    regras.push_str(&format!(
+                        "{recuo}{} {{ font-size: {declarado}; }}\n",
+                        gemeos.join(&format!(",\n{recuo}"))
+                    ));
+                }
+            }
+            if regras.is_empty() {
                 continue;
             }
-            let recuo = "  ".repeat(contexto.len());
-            let mut regra = format!(
-                "{recuo}{} {{ font-size: calc({tamanho} * var(--cel-escala)); }}\n",
-                gemeos.join(&format!(",\n{recuo}"))
-            );
             for (nivel, at) in contexto.iter().enumerate().rev() {
                 let fora = "  ".repeat(nivel);
-                regra = format!("{fora}{at} {{\n{regra}{fora}}}\n");
+                regras = format!("{fora}{at} {{\n{regras}{fora}}}\n");
             }
-            da_folha.push_str(&regra);
+            da_folha.push_str(&regras);
         }
         if !da_folha.is_empty() {
             saida.push_str(&format!("\n/* {folha} */\n{da_folha}"));

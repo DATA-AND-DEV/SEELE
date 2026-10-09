@@ -2,14 +2,16 @@
  *
  * Regere com `SEELE_REGERAR_TEXTO=1 cargo test -p seele-app --test celular`,
  * que também reprova quando este arquivo fica atrás do CSS do desktop. O
- * porquê e o que fica de fora estão em `tests/celular.rs` (`TEXTO_GERADO`,
- * `SEM_GEMEO`) e no spec, §5. */
+ * porquê e o que fica no tamanho estão em `tests/celular.rs` (`TEXTO_GERADO`,
+ * `NO_TAMANHO_DO_DESKTOP`) e no spec, §5. */
 
 /* base.css */
 :where(:root[data-casca="celular"]) body { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .rotulo { font-size: calc(10px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .coordenada { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .legenda-ausente { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) input { font-size: inherit; }
+:where(:root[data-casca="celular"]) .botao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .botao-fantasma { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .nota { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .barra-marca { font-size: calc(14px * var(--cel-escala)); }
@@ -20,11 +22,13 @@
 
 /* tela-boot.css */
 :where(:root[data-casca="celular"]) .visitados-titulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .visitado-ir { font-size: inherit; }
 :where(:root[data-casca="celular"]) .visitado-apelido,
 :where(:root[data-casca="celular"]) .visitado-quando { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-meta { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-sistema { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-glossario dt { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .boot-tecla { font-size: inherit; }
 :where(:root[data-casca="celular"]) .boot-tentativa-rotulo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-tentativa-marca { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-conectar { font-size: calc(17px * var(--cel-escala)); }
@@ -35,6 +39,7 @@
 :where(:root[data-casca="celular"]) .boot-proposito { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-detalhes > summary { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-linha { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .boot-perfil { font-size: inherit; }
 :where(:root[data-casca="celular"]) .boot-rodape > .botao-fantasma { font-size: calc(13px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .boot-nome-publico > summary { font-size: calc(12px * var(--cel-escala)); }
 
@@ -46,10 +51,13 @@
 :where(:root[data-casca="celular"]) .relogio { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .veredito-texto { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .trilha-titulo { font-size: calc(8px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .trilha-item { font-size: 15px; }
+:where(:root[data-casca="celular"]) .trilha-mais { font-size: 18px; }
 :where(:root[data-casca="celular"]) .painel-titulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .painel-ajuda { font-size: calc(10px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .painel-acao { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-nome { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) button.voice_room-nome { font-size: inherit; }
 :where(:root[data-casca="celular"]) .voice_room-ocupacao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-pessoa { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .voice_room-vazio { font-size: calc(11px * var(--cel-escala)); }
@@ -57,13 +65,19 @@
 :where(:root[data-casca="celular"]) .voice_room-apagar,
 :where(:root[data-casca="celular"]) .linha-apagar,
 :where(:root[data-casca="celular"]) .linha-renomear { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-renomear { font-size: inherit; }
+:where(:root[data-casca="celular"]) .barra { font-size: var(--seele-t-rotulo); }
 :where(:root[data-casca="celular"]) .linha { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-nome { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-config { font-size: calc(15px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .operador-glifo { font-size: inherit; }
 :where(:root[data-casca="celular"]) .linha-barra-cerquilha { font-size: calc(16px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .linha-nome { font-size: calc(17px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) button.linha-nome { font-size: inherit; }
 :where(:root[data-casca="celular"]) .linha-nome-vazio { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .linha-buscar { font-size: inherit; }
+:where(:root[data-casca="celular"]) .mensagem-avatar { font-size: 14px; }
 :where(:root[data-casca="celular"]) .mensagem-autor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagem-hora { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .mensagens-dia { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
@@ -76,6 +90,7 @@
 :where(:root[data-casca="celular"]) .compor input,
 :where(:root[data-casca="celular"]) .compor textarea { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .compor-enviar { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .compor-anexar { font-size: inherit; }
 :where(:root[data-casca="celular"]) .anexo-nome { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .anexo-tamanho { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .anexo-estado { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -90,12 +105,16 @@
 :where(:root[data-casca="celular"]) .pessoa-nome { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-diagnostico-resumo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-cartao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-cartao .regiao-de-mod-parte { font-size: inherit; }
+:where(:root[data-casca="celular"]) .sync-marca { font-size: 11px; }
 :where(:root[data-casca="celular"]) .pessoa-sync-valor { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa .barra { font-size: 11px; }
 :where(:root[data-casca="celular"]) .pessoa-rodape { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .metrica .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .metrica span { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .falha-local { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .luzes li { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .convite-link { font-size: inherit; }
 :where(:root[data-casca="celular"]) .convite-alcance-detalhe { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .convite-alcance-conserto { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .convite-alcance-parede { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -112,7 +131,9 @@
   :where(:root[data-casca="celular"]) .linha-canais { font-size: calc(11px * var(--cel-escala)); }
 }
 :where(:root[data-casca="celular"]) .operador-frase { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .operador-quem { font-size: inherit; }
 :where(:root[data-casca="celular"]) .operador-inicial { font-size: calc(13px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-nome-porta { font-size: inherit; }
 
 /* camada-alerta.css */
 :where(:root[data-casca="celular"]) .alerta-fechar { font-size: calc(20px * var(--cel-escala)); }
@@ -167,6 +188,7 @@
 /* camada-nomear.css */
 :where(:root[data-casca="celular"]) .nomear-titulo { font-size: calc(24px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .nomear-erro { font-size: calc(12px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .nomear-confirmar { font-size: inherit; }
 :where(:root[data-casca="celular"]) .perfil-previa { font-size: calc(28px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .perfil-apelido { font-size: calc(17px * var(--cel-escala)); }
 
@@ -209,18 +231,21 @@
 :where(:root[data-casca="celular"]) button.regiao-de-mod-parte { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) figure.regiao-de-mod-parte::before { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) button.regiao-de-mod-parte[data-forma="arquivo"][data-exigencia]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .regiao-de-mod-area { font-size: inherit; }
 :where(:root[data-casca="celular"]) label.regiao-de-mod-parte[data-mensagem-de-erro]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) form.regiao-de-mod-parte[data-erro]::before { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-tira { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="retrato"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="distintivo"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .entrada-de-mod-origem { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .pessoa-apresentada-porta { font-size: inherit; }
 :where(:root[data-casca="celular"]) .pessoa-nativo-resumo { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .pessoa-apresentada-porta-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .contribuicao-de-mod > .regiao-de-mod-parte { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .acao-de-mod { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 
 /* camada-servidores.css */
+:where(:root[data-casca="celular"]) .servidor-linha { font-size: inherit; }
 :where(:root[data-casca="celular"]) .servidor-sigla { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .servidor-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .servidor-endereco { font-size: calc(11px * var(--cel-escala)); }
@@ -241,13 +266,17 @@
 :where(:root[data-casca="celular"]) .chamada-palco-acao { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-palco-aperto { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-avatar { font-size: var(--seele-t-secao); }
 :where(:root[data-casca="celular"]) .chamada-cartao-nome { font-size: calc(20px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-pastilha { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-cartao-linha .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-marca { font-size: 11px; }
 :where(:root[data-casca="celular"]) .chamada-cartao-valor { font-size: calc(18px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-cartao-barra { font-size: 11px; }
 :where(:root[data-casca="celular"]) .chamada-volume .rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vol-passo { font-size: calc(var(--seele-t-corpo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-vol-valor { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .chamada-acao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .chamada-acao-glifo { font-size: calc(var(--seele-t-secao) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-acao-titulo { font-size: calc(16px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .chamada-titulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
@@ -273,6 +302,7 @@
 
 /* tela-server.css */
 :where(:root[data-casca="celular"]) .server-marca-titulo { font-size: calc(22px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-secao { font-size: inherit; }
 :where(:root[data-casca="celular"]) .server-secao-icone { font-size: calc(16px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-secao-nome { font-size: calc(15px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-grupo { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
@@ -285,6 +315,7 @@
 :where(:root[data-casca="celular"]) .server-dispositivo-marca { font-size: calc(11px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-dispositivos-vazio { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-medidor { font-size: calc(11px * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-modo { font-size: inherit; }
 :where(:root[data-casca="celular"]) .server-modo-nome { font-size: calc(14px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-modo-desc { font-size: calc(12px * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atalho-acao { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
@@ -300,6 +331,7 @@
 :where(:root[data-casca="celular"]) .server-atualizacao-estado { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atualizacao-notas { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-atualizacao-aviso p { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .server-atualizacao-barra { font-size: 11px; }
 :where(:root[data-casca="celular"]) .server-atualizacao-baixados { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .server-icone-vazio { font-size: calc(var(--seele-t-rotulo) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .aparencia-estado { font-size: calc(9px * var(--cel-escala)); }
