@@ -3106,9 +3106,22 @@ impl Motor {
                         queda.confirmada,
                     )
                 });
+                // O assento desta conexão, pela mesma conta que a casca faz: o
+                // resgatado, e por cima dele o pedido que `restabelecer` refaz —
+                // a entrada, no ar até o `Pong` marcado do número dela, ou a
+                // saída. Montado antes, porque o número vai no `Ping`.
+                let mut entradas = crate::assento::EntradasPendentes::default();
+                let mut assento = resgatada;
+                let numero = match self.voice_room {
+                    Some(sala) => Some(entradas.pedir(&mut assento, sala)),
+                    None => {
+                        entradas.sair(&mut assento);
+                        None
+                    }
+                };
                 if let Err(erro) = restabelecer(
                     &mut cliente,
-                    self.voice_room,
+                    self.voice_room.zip(numero),
                     resgatada,
                     self.linha,
                     self.muted,
@@ -3126,15 +3139,7 @@ impl Motor {
                     return;
                 }
 
-                // O assento desta conexão, pela mesma conta que a casca faz: o
-                // resgatado, e por cima dele o pedido que `restabelecer` refez —
-                // a entrada, no ar até o `Pong` marcado, ou a saída.
-                self.entradas.esquecer();
-                let mut assento = resgatada;
-                match self.voice_room {
-                    Some(sala) => self.entradas.pedir(&mut assento, sala),
-                    None => self.entradas.sair(&mut assento),
-                }
+                self.entradas = entradas;
                 self.voice_room = assento;
                 self.queda = None;
                 let sessao = cliente.session().clone();
@@ -3204,6 +3209,9 @@ impl Motor {
             }
             _ => {}
         }
+        // O número do pedido de entrada que `lembrar` acabou de pôr no ar, se
+        // este comando é um: vai no carimbo do `Ping` marcado.
+        let numero_da_entrada = self.entradas.ultimo_numero().unwrap_or_default();
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
@@ -3214,7 +3222,7 @@ impl Motor {
             // diz que o servidor decidiu. Ver `crate::assento`.
             Comando::EntrarNaVoiceRoom(voice_room, password) => {
                 match cliente.enter_voice_room(voice_room, password).await {
-                    Ok(()) => cliente.send_ping_de_entrada().await,
+                    Ok(()) => cliente.send_ping_de_entrada(numero_da_entrada).await,
                     Err(erro) => Err(erro),
                 }
             }
@@ -5532,13 +5540,13 @@ async fn avisar_pelo_candidato(
 /// a conexão que acabou de completar o aperto de mão já morreu de novo.
 async fn restabelecer(
     cliente: &mut Client,
-    voice_room: Option<VoiceRoomId>,
+    voice_room: Option<(VoiceRoomId, u64)>,
     resgatada: Option<VoiceRoomId>,
     linha: Option<ChannelId>,
     muted: bool,
     isolamento: bool,
 ) -> anyhow::Result<()> {
-    if let Some(voice_room) = voice_room {
+    if let Some((voice_room, numero)) = voice_room {
         // A senha não é guardada para a reconexão: uma sala com senha exigiria
         // pedi-la de novo aqui, e isso é o mesmo gap que existe para toda
         // credencial nesta struct — fora do escopo desta correção, que é só
@@ -5552,7 +5560,7 @@ async fn restabelecer(
         // qualquer, com o `Ping` marcado atrás, e a recusa devolve o assento
         // de antes dele — o resgatado. Ver `crate::assento`.
         cliente.enter_voice_room(voice_room, None).await?;
-        cliente.send_ping_de_entrada().await?;
+        cliente.send_ping_de_entrada(numero).await?;
     } else if resgatada.is_some() {
         // A pessoa saiu da sala durante a queda, e o servidor, que não soube,
         // a sentou de novo. A saída que ela pediu vale.
@@ -6773,7 +6781,9 @@ mod tests {
     /// O `Pong` do `Ping` marcado que segue cada pedido de entrada.
     fn entrada_decidida() -> ServerMessage {
         ServerMessage::Pong {
-            timestamp: crate::assento::MARCA_DO_PING_DE_ENTRADA,
+            // O `Pong` de um pedido mais novo que todos os destes testes: fecha
+            // o que está no ar, como o `Pong` do pedido que acabou de sair.
+            timestamp: crate::assento::carimbo_da_entrada(u64::from(u32::MAX)),
         }
     }
 

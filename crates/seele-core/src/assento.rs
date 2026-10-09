@@ -40,13 +40,41 @@ use std::collections::VecDeque;
 use seele_proto::control::{AlertReason, ServerMessage};
 use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
 
-/// O carimbo do `Ping` que o motor manda logo depois de cada pedido de entrada.
+/// A marca do `Ping` que o motor manda logo depois de cada pedido de entrada.
 ///
 /// O bit mais alto de um `u64`, que o contador dos `Ping` de rotina
 /// (`Client::send_ping`, de um em um a partir de 1) nunca alcança: um `Pong`
-/// com este carimbo é sempre a resposta a um pedido de entrada, e nunca a de um
-/// `Ping` de rotina. Ver o doc do módulo.
+/// com esta marca é sempre a resposta a um pedido de entrada, e nunca a de um
+/// `Ping` de rotina. Ver o doc do módulo e [`carimbo_da_entrada`].
 pub const MARCA_DO_PING_DE_ENTRADA: u64 = 1 << 63;
+
+/// O carimbo do `Ping` do pedido de entrada de número `numero`: a marca e o
+/// número.
+///
+/// **Numerado por causa do limitador do servidor** (N2 da rodada 2 do lote
+/// I-a). Ele limita o `Ping` como qualquer quadro de controle, e acima da
+/// rajada descarta calado: um `Ping` marcado que não volta deixava o pedido
+/// dele na frente da fila, e o `Pong` do pedido seguinte o tirava no lugar do
+/// seu. Com o número, o `Pong` do pedido `n` fecha o pedido `n` e todos os mais
+/// velhos: o servidor os decidiu antes, porque lê o fluxo de controle em ordem.
+///
+/// Os pedidos são contados por conexão, a partir de 1, na ordem em que saem —
+/// o `Room` da casca e o motor contam os mesmos pedidos na mesma ordem.
+#[must_use]
+pub const fn carimbo_da_entrada(numero: u64) -> u64 {
+    MARCA_DO_PING_DE_ENTRADA | numero
+}
+
+/// O número do pedido de entrada que este carimbo de `Pong` fecha, se ele é de
+/// um `Ping` marcado.
+#[must_use]
+pub const fn numero_do_carimbo(carimbo: u64) -> Option<u64> {
+    if carimbo & MARCA_DO_PING_DE_ENTRADA == 0 {
+        None
+    } else {
+        Some(carimbo & !MARCA_DO_PING_DE_ENTRADA)
+    }
+}
 
 /// Um pedido de entrada que o servidor ainda não decidiu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +92,8 @@ struct Entrada {
     vale: bool,
     /// Se a recusa dele já chegou. O `Pong` que vem atrás o tira da fila.
     recusada: bool,
+    /// O número dele nesta conexão, que vai no carimbo do `Ping` marcado.
+    numero: u64,
 }
 
 /// As entradas pedidas que o servidor ainda não decidiu, na ordem em que foram
@@ -71,20 +101,35 @@ struct Entrada {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EntradasPendentes {
     fila: VecDeque<Entrada>,
+    /// O número do último pedido desta conexão. Ver [`carimbo_da_entrada`].
+    ultimo: u64,
 }
 
 impl EntradasPendentes {
     /// Um pedido de entrada saiu: senta a pessoa na sala pedida, e guarda de
-    /// onde ela veio.
-    pub fn pedir(&mut self, assento: &mut Option<VoiceRoomId>, sala: VoiceRoomId) {
+    /// onde ela veio. Devolve o número dele, para o carimbo do `Ping` marcado.
+    pub fn pedir(&mut self, assento: &mut Option<VoiceRoomId>, sala: VoiceRoomId) -> u64 {
         self.superar();
+        self.ultimo += 1;
         self.fila.push_back(Entrada {
             sala,
             antes: *assento,
             vale: true,
             recusada: false,
+            numero: self.ultimo,
         });
         *assento = Some(sala);
+        self.ultimo
+    }
+
+    /// O número do último pedido desta conexão, se já houve um.
+    #[must_use]
+    pub const fn ultimo_numero(&self) -> Option<u64> {
+        if self.ultimo == 0 {
+            None
+        } else {
+            Some(self.ultimo)
+        }
     }
 
     /// A pessoa saiu da sala. Os pedidos ainda no ar deixam de definir o
@@ -115,10 +160,20 @@ impl EntradasPendentes {
                 reason: AlertReason::VoiceRoomEntryRefused | AlertReason::VoiceRoomFull,
                 ..
             } => self.recusar(assento),
-            ServerMessage::Pong { timestamp } if *timestamp == MARCA_DO_PING_DE_ENTRADA => {
-                // Decidido: recusado, e a recusa já desfez o assento; ou aceito,
-                // e o assento especulativo era o de verdade.
-                self.fila.pop_front();
+            ServerMessage::Pong { timestamp } => {
+                // O pedido deste número está decidido, e todos os mais velhos
+                // também: recusados, e a recusa já desfez o assento; aceitos, e
+                // o assento especulativo era o de verdade; ou perdidos no
+                // limitador do servidor, sem resposta que ainda vá chegar.
+                if let Some(numero) = numero_do_carimbo(*timestamp) {
+                    while self
+                        .fila
+                        .front()
+                        .is_some_and(|entrada| entrada.numero <= numero)
+                    {
+                        self.fila.pop_front();
+                    }
+                }
                 false
             }
             _ => false,
@@ -186,9 +241,11 @@ impl EntradasPendentes {
         self.fila.is_empty()
     }
 
-    /// A conexão acabou: os pedidos dela não terão resposta.
+    /// A conexão acabou: os pedidos dela não terão resposta, e a conexão nova
+    /// conta os dela do 1.
     pub fn esquecer(&mut self) {
         self.fila.clear();
+        self.ultimo = 0;
     }
 
     fn superar(&mut self) {
@@ -241,7 +298,7 @@ pub fn assento_resgatado(
 
 #[cfg(test)]
 mod testes {
-    use super::{assento_resgatado, EntradasPendentes, MARCA_DO_PING_DE_ENTRADA};
+    use super::{assento_resgatado, EntradasPendentes};
     use seele_proto::control::{AlertReason, AlertSeverity, ServerMessage};
     use seele_proto::ids::{SessionId, Ssrc, VoiceRoomId};
 
@@ -257,9 +314,11 @@ mod testes {
         }
     }
 
-    fn pong_da_entrada() -> ServerMessage {
+    /// O `Pong` do `Ping` marcado do pedido de número `n` desta conexão, como o
+    /// cliente o carimba.
+    fn pong_do_pedido(n: u64) -> ServerMessage {
         ServerMessage::Pong {
-            timestamp: MARCA_DO_PING_DE_ENTRADA,
+            timestamp: super::carimbo_da_entrada(n),
         }
     }
 
@@ -267,15 +326,15 @@ mod testes {
     fn em_a() -> (EntradasPendentes, Option<VoiceRoomId>) {
         let mut entradas = EntradasPendentes::default();
         let mut assento = None;
-        entradas.pedir(&mut assento, A);
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        let a = entradas.pedir(&mut assento, A);
+        entradas.ouvir(&mut assento, &pong_do_pedido(a));
         (entradas, assento)
     }
 
     #[test]
     fn a_recusa_de_outra_sala_devolve_a_de_antes() {
         let (mut entradas, mut assento) = em_a();
-        entradas.pedir(&mut assento, B);
+        let b = entradas.pedir(&mut assento, B);
         assert_eq!(assento, Some(B), "o assento especulativo não foi para B");
         assert_eq!(
             entradas.confirmada(assento),
@@ -289,7 +348,7 @@ mod testes {
             Some(A),
             "a recusa de B tirou de toda sala quem o servidor manteve em A"
         );
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
         assert!(entradas.is_empty());
         assert_eq!(entradas.confirmada(assento), Some(A));
     }
@@ -314,10 +373,10 @@ mod testes {
     fn a_recusa_de_quem_estava_fora_devolve_para_fora() {
         let mut entradas = EntradasPendentes::default();
         let mut assento = None;
-        entradas.pedir(&mut assento, A);
+        let a = entradas.pedir(&mut assento, A);
         assert_eq!(entradas.confirmada(assento), None);
         entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomFull));
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(a));
         assert_eq!(assento, None, "a recusa deixou sentado quem nunca entrou");
         assert!(entradas.is_empty());
     }
@@ -326,14 +385,14 @@ mod testes {
     fn o_pong_da_entrada_confirma_e_o_de_rotina_nao() {
         let mut entradas = EntradasPendentes::default();
         let mut assento = None;
-        entradas.pedir(&mut assento, A);
+        let a = entradas.pedir(&mut assento, A);
         entradas.ouvir(&mut assento, &ServerMessage::Pong { timestamp: 4 });
         assert_eq!(
             entradas.confirmada(assento),
             None,
             "o `Pong` de um `Ping` de rotina, que pode ser de antes do pedido, confirmou a entrada"
         );
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(a));
         assert_eq!(entradas.confirmada(assento), Some(A));
         // E uma recusa depois disso já não é desta entrada.
         entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
@@ -344,8 +403,8 @@ mod testes {
     fn dois_pedidos_no_ar_cada_resposta_e_do_seu() {
         // Em A, pede B e logo C. O servidor recusa B e aceita C.
         let (mut entradas, mut assento) = em_a();
-        entradas.pedir(&mut assento, B);
-        entradas.pedir(&mut assento, C);
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
         assert_eq!(assento, Some(C));
         assert_eq!(entradas.confirmada(assento), Some(A));
 
@@ -356,8 +415,8 @@ mod testes {
             "a recusa de B, que já não definia o assento, tirou a pessoa de C"
         );
         assert_eq!(entradas.confirmada(assento), Some(A));
-        entradas.ouvir(&mut assento, &pong_da_entrada());
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
         assert_eq!(assento, Some(C));
         assert_eq!(entradas.confirmada(assento), Some(C));
         assert!(entradas.is_empty());
@@ -367,12 +426,12 @@ mod testes {
     fn a_recusa_do_segundo_pedido_volta_ao_que_havia_antes_do_primeiro_recusado() {
         // Em A, pede B e logo C. O servidor recusa os dois: a pessoa fica em A.
         let (mut entradas, mut assento) = em_a();
-        entradas.pedir(&mut assento, B);
-        entradas.pedir(&mut assento, C);
+        let b = entradas.pedir(&mut assento, B);
+        let c = entradas.pedir(&mut assento, C);
         entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(b));
         entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomFull));
-        entradas.ouvir(&mut assento, &pong_da_entrada());
+        entradas.ouvir(&mut assento, &pong_do_pedido(c));
         assert_eq!(assento, Some(A));
     }
 
@@ -397,6 +456,45 @@ mod testes {
             "a recusa de B desfez a mudança do operador"
         );
         assert_eq!(entradas.confirmada(assento), Some(C));
+    }
+
+    /// N2 da rodada 2 do lote I-a: um `Ping` marcado que o limitador do
+    /// servidor descarta não desalinha a fila.
+    ///
+    /// O servidor limita o `Ping` como qualquer quadro de controle, e acima da
+    /// rajada descarta calado. O `Pong` que não vem deixava o pedido dele na
+    /// frente da fila, e o `Pong` do pedido seguinte o tirava no lugar do seu:
+    /// o pedido seguinte ficava no ar para sempre, o áudio nunca abria nele, e
+    /// a primeira recusa sem pedido tirava a pessoa da sala.
+    #[test]
+    fn um_ping_marcado_perdido_no_limitador_nao_desalinha_a_fila() {
+        let mut entradas = EntradasPendentes::default();
+        let mut assento = None;
+        // O pedido de A, e o `Ping` marcado dele se perde no limitador.
+        entradas.pedir(&mut assento, A);
+        // A pessoa sai, pede B, e o servidor aceita.
+        entradas.sair(&mut assento);
+        entradas.pedir(&mut assento, B);
+        entradas.ouvir(&mut assento, &pong_do_pedido(2));
+
+        assert_eq!(
+            entradas.confirmada(assento),
+            Some(B),
+            "o `Pong` de B tirou da fila o pedido velho de A, e B ficou no ar para sempre: \
+             o áudio nunca abre em B"
+        );
+        assert!(
+            entradas.is_empty(),
+            "o pedido de A, sem `Pong`, ficou na fila"
+        );
+
+        // E uma recusa sem pedido no ar não tira a pessoa de B.
+        entradas.ouvir(&mut assento, &recusa(AlertReason::VoiceRoomEntryRefused));
+        assert_eq!(
+            assento,
+            Some(B),
+            "uma recusa sem pedido tirou a pessoa de B"
+        );
     }
 
     #[test]

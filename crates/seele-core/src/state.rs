@@ -2314,7 +2314,9 @@ mod tests {
     /// O `Pong` do `Ping` que o motor manda atrás de cada pedido de entrada.
     fn entrada_decidida() -> ServerMessage {
         ServerMessage::Pong {
-            timestamp: crate::assento::MARCA_DO_PING_DE_ENTRADA,
+            // O `Pong` de um pedido mais novo que todos os destes testes: fecha
+            // o que está no ar, como o `Pong` do pedido que acabou de sair.
+            timestamp: crate::assento::carimbo_da_entrada(u64::from(u32::MAX)),
         }
     }
 

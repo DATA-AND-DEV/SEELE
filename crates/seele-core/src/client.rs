@@ -1419,20 +1419,21 @@ impl Client {
         frame::write(&mut self.send, &ClientMessage::Ping { timestamp: stamp }).await
     }
 
-    /// O `Ping` que segue um pedido de entrada numa sala de voz.
+    /// O `Ping` que segue o pedido de entrada de número `numero` desta conexão.
     ///
-    /// O carimbo é [`crate::assento::MARCA_DO_PING_DE_ENTRADA`], e o `Pong` dele
-    /// diz que o pedido foi decidido: ver o doc de [`crate::assento`]. Não mexe
-    /// no `Ping` de rotina que mede o ida-e-volta, e o `Pong` dele não é medido.
+    /// O carimbo é [`crate::assento::carimbo_da_entrada`], e o `Pong` dele diz
+    /// que o pedido foi decidido — ele e os mais velhos: ver o doc de
+    /// [`crate::assento`]. Não mexe no `Ping` de rotina que mede o ida-e-volta,
+    /// e o `Pong` dele não é medido.
     ///
     /// # Errors
     ///
     /// Fails if the control stream is closed.
-    pub async fn send_ping_de_entrada(&mut self) -> Result<()> {
+    pub async fn send_ping_de_entrada(&mut self, numero: u64) -> Result<()> {
         frame::write(
             &mut self.send,
             &ClientMessage::Ping {
-                timestamp: crate::assento::MARCA_DO_PING_DE_ENTRADA,
+                timestamp: crate::assento::carimbo_da_entrada(numero),
             },
         )
         .await
