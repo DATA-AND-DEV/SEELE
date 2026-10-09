@@ -128,6 +128,11 @@ function linhaDeMod(mod, indice) {
  * @param {string|null} credencial  o segredo com que a batida chegou, ou `null`
  */
 async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
+  // **Uma pergunta que substitui outra limpa a credencial da antiga** (lote R,
+  // sobra da rodada 1). A obtenção da antiga pode estar em curso, com a cópia
+  // dela em `aceitarOsMods`; trocar só a referência deixava a credencial de lá
+  // alcançável até a obtenção acabar. A mesma limpeza de `fecharAceiteDeMods`.
+  if (aceitePendente) aceitePendente.credencial = null;
   aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };
   focoAntesDoAceite = document.activeElement;
 

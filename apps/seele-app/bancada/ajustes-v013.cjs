@@ -181,7 +181,10 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
           const recusa = (error) => { throw { error, trail: [] }; };
           // A forma é a de `ConnectionError::Refused` da FFI, que a tela lê
           // como CREDENCIAL RECUSADA (`fraseDeErro`).
-          if (args.joinSecret !== convite || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
+          // `testOutroConvite` é o segredo de uma segunda batida, para a cena em
+          // que uma pergunta substitui outra (5b).
+          const aceita = args.joinSecret === convite || (window.testOutroConvite && args.joinSecret === window.testOutroConvite);
+          if (!aceita || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
           if (!servidor.aceitou) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-r' } });
           servidor.gasto = true;
           return {
@@ -314,6 +317,43 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   assert.equal(await credencialGuardada(page), null,
     'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
   await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
+
+  // ---- 5b. Uma pergunta nova que substitui a antiga durante a obtenção.
+  //
+  // A revisão da rodada 1 mediu (`troca-r.cjs`): com uma batida nova enquanto
+  // o MOD da antiga chega, `abrirAceiteDeMods` troca `aceitePendente`, e a
+  // cópia que a obtenção antiga guarda (`pergunta`) ainda alcança a credencial
+  // de A até a obtenção acabar.
+  const CONVITE_B = `${CONVITE_R}-da-segunda-batida`;
+  await page.evaluate(() => { testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 800; });
+  await baterComOConvite(page);
+  await page.evaluate(() => { window.testPergunta = aceitePendente; });
+  const obtencoesAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'instalar_mod_do_catalogo').length);
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'instalar_mod_do_catalogo').length > antes,
+    obtencoesAntes, { timeout: 3000 },
+  );
+  // A segunda batida, a outro servidor, com outro segredo, durante a obtenção.
+  await page.evaluate((convite) => {
+    window.testOutroConvite = convite;
+    window.testServidor = { aceitou: false, gasto: false };
+    irParaOServidor('192.0.2.8:8384', null, convite);
+  }, CONVITE_B);
+  await page.waitForFunction(() => aceitePendente && aceitePendente !== window.testPergunta, null, { timeout: 3000 })
+    .catch(() => assert.fail('a segunda batida não abriu uma pergunta nova, e a troca não foi medida'));
+  assert.equal(await credencialGuardada(page), CONVITE_B,
+    'a pergunta nova não guardou a credencial da segunda batida, e esta cena não mede nada');
+  assert.equal(await page.evaluate(() => window.testPergunta?.credencial ?? null), null,
+    'uma pergunta nova substituiu a antiga, e a cópia que a obtenção antiga guarda ainda alcança a credencial da primeira batida');
+  // A obtenção antiga termina sem voltar (a pergunta dela já não é a aberta), e
+  // a nova é recusada: a página volta ao estado de antes.
+  await page.waitForTimeout(1000);
+  await page.click('#mods-recusar');
+  await page.evaluate((m) => {
+    testAtraso = {}; window.testOutroConvite = null;
+    testTable.mods_instalados = [{ id: m.id, hash: m.hash }];
+  }, MOD_R);
 
   // ---- 6. A credencial fica presa ao alvo da batida, e não ao último alvo da
   // janela.
