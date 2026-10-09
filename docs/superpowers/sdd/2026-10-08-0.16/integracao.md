@@ -46,7 +46,10 @@ nada dependa da memória de uma conversa.
 - **O ponto em produção fala o ENC/2**: `sondar --exige-enc2 encontro.seele.app.br`, de
   outra máquina, depois de o dono reimplantar a VPS (`docs/ponto-de-encontro.md`).
   A VPS vai antes do app (spec-mestre, §4).
-- **O indexador lê a chave `tema` do manifesto** (F3, tarefa 13): hoje ele recusa chave desconhecida, e recusaria o ESTILO 4.0.0. E aceita a união `(6, 5, 4, 3)` antes de qualquer pacote novo (spec-mestre §4, passo 0). As duas são do dono, no `SEELE-MODS-INDEXER`.
+- **O indexador, antes dos pacotes da API 6** (conferido pelo ESTILO em `SEELE-MODS-INDEXER/ferramentas/manifesto.py`); do dono, no `SEELE-MODS-INDEXER`:
+  1. a chave `tema` em `CHAVES` e em `TIPOS`, como booleana (`:49-50`; hoje uma chave desconhecida sai `malformed`, `:144-146`), e levada ao catálogo para o site dizer «muda a aparência do servidor»;
+  2. `VERSAO_DA_API` de 5 para 6 (`:20`; hoje a 4.0.0 sai `api-too-new`, `:186-187`);
+  3. `APIS_ACEITAS` como a **união** das linhas que o launcher abre, `(6, 5, 4, 3)`, e não o espelho do app (`:22-43`; com `(6,)`, todo conserto legado futuro dos três MODs sai `api-too-old`, `:191-193`), e a amarração `catalogo.py:106-110` (`api_oferecida` contra `MOD_API_VERSION`) comparando a união.
 - **As notas não têm condição pendente**: o `publicar.sh` recusa notas com o marcador
   `<!-- CONDIÇÃO:` (F6, `36274663` e `7e444fe8`).
 
