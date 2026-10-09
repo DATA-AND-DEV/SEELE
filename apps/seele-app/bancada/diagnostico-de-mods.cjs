@@ -9,10 +9,14 @@
 // - **a mídia de cada ponto**: o que os renderers, o retrato de avatar e os
 //   cartões da API 3 anotam, somado por ponto de contribuição;
 // - **a gestão**: «quem pinta cada lugar» desenhada a partir do registro e da
-//   mídia de verdade, e redesenhada quando os bytes chegam;
+//   mídia de verdade, e redesenhada quando os bytes chegam; o bloco da região
+//   e das páginas de cada MOD, logo abaixo; e «quem desenha o que», com a
+//   escolha desta máquina;
 // - **o modo de desenvolvedor**: que os contornos deixam o clique chegar ao
-//   canal de baixo, não tiram o foco de quem escreve, e contornam só o que a
-//   rolagem deixa à vista;
+//   canal de baixo, não tiram o foco de quem escreve, contornam só o que a
+//   rolagem e uma página aberta deixam à vista — sem o traço de um nó que o
+//   recorte zera, e com o vazio que mostra onde um MOD entraria —, e dizem
+//   quantos lugares o teto de 300 deixou de fora;
 // - **o som**: `decodeAudioData` de verdade, sob a política que o produto
 //   declara (`default-src 'self'`, sem `media-src`) — medido no Chromium, o
 //   motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
@@ -1092,6 +1096,106 @@ async function oModoDeDesenvolvedorContornaSemTomarNada(navegador, servidor) {
     comAPagina.cartoes > 0,
     "com a página de um MOD aberta, a lista de pessoas, que ela não cobre, perdeu os contornos",
   );
+
+  // **Um nó com área que o recorte zera não ganha traço** (T7 M3 da revisão
+  // ampla do Plano 1D), e **o vazio dentro do recorte continua contornado**.
+  // Uma lista rolada até um item acabar rente ao topo dela: a caixa do item
+  // encosta no recorte, a interseção tem altura zero, e o contorno saía como o
+  // traço de 2 px do `min-height` da folha. O vazio, sem área, é o que mostra
+  // onde um MOD entraria, e é contornado de propósito.
+  const recorte = await pagina.evaluate(async () => {
+    const quadros = async () => {
+      for (let volta = 0; volta < 2; volta += 1) {
+        await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+      }
+    };
+    const contornos = () => [...document.querySelectorAll('.contorno-de-ponto[data-ponto="pessoa.avatar"]')]
+      .map((c) => `${c.style.left} ${c.style.top} ${c.style.width}×${c.style.height}`);
+    await quadros();
+    const antes = contornos();
+    const lista = document.createElement("div");
+    lista.style.cssText = "position: fixed; left: 1200px; top: 300px; width: 120px; height: 100px; overflow: hidden;";
+    const no = (pessoa, estilo) => {
+      const filho = document.createElement("span");
+      filho.dataset.pessoaDoAvatar = pessoa;
+      filho.style.cssText = `position: absolute; display: block; ${estilo}`;
+      return filho;
+    };
+    // Rolada 20 px: o item de 20 px de altura acaba no topo da lista (300 px),
+    // e o vazio fica dentro dela, a 330 px. O resto da lista é o que dá o que
+    // rolar, e não é lugar nenhum.
+    const resto = document.createElement("div");
+    resto.style.cssText = "position: absolute; left: 0; top: 0; width: 10px; height: 400px;";
+    lista.append(
+      no("encostado", "left: 0; top: 0; width: 50px; height: 20px;"),
+      no("vazio", "left: 10px; top: 50px; width: 0; height: 0;"),
+      resto,
+    );
+    document.body.append(lista);
+    lista.scrollTop = 20;
+    await quadros();
+    const depois = contornos();
+    const rolou = lista.scrollTop;
+    lista.remove();
+    await quadros();
+    return { rolou, novos: depois.filter((c) => !antes.includes(c)) };
+  });
+  assert.equal(recorte.rolou, 20, "a lista da prova do recorte não rolou: o item não encosta no topo dela");
+  assert.ok(
+    !recorte.novos.some((c) => c.startsWith("1200px 300px")),
+    "um item com área que a rolagem deixou rente ao topo da lista, sem nada à vista, ganhou contorno — o traço "
+      + `de 2 px do recorte vazio: ${recorte.novos.join(", ")}`,
+  );
+  assert.deepEqual(
+    recorte.novos,
+    ["1210px 330px 0px×0px"],
+    "o contêiner vazio dentro do recorte perdeu o contorno, que é o que mostra onde um MOD entraria — ou outro "
+      + `contorno apareceu com ele: ${recorte.novos.join(", ")}`,
+  );
+
+  // **O teto diz quantos ficaram de fora** (T7 M2 da revisão ampla do Plano
+  // 1D). Com mais de 300 lugares à vista, os do fim do mapa saíam sem contorno
+  // e sem uma palavra: quem escreve o MOD concluía que o lugar dele não
+  // existe. Trezentos e vinte retratos de 4 px no alto da janela, todos à
+  // vista, somados aos que já tinham contorno.
+  const teto = await pagina.evaluate(async () => {
+    const quadros = async () => {
+      for (let volta = 0; volta < 2; volta += 1) {
+        await new Promise((pronto) => requestAnimationFrame(() => requestAnimationFrame(pronto)));
+      }
+    };
+    const nota = () => document.querySelector(".contornos-dos-pontos-aviso .contornos-dos-pontos-nota")?.textContent ?? "";
+    await quadros();
+    const antes = document.querySelectorAll(".contorno-de-ponto").length;
+    const notaAntes = nota();
+    const muitos = document.createElement("div");
+    muitos.style.cssText = "position: fixed; left: 0; top: 0; width: 400px; display: flex; flex-wrap: wrap;";
+    for (let i = 0; i < 320; i += 1) {
+      const retrato = document.createElement("span");
+      retrato.dataset.pessoaDoAvatar = `muitos-${i}`;
+      retrato.style.cssText = "display: block; width: 4px; height: 4px;";
+      muitos.append(retrato);
+    }
+    document.body.append(muitos);
+    await quadros();
+    const comMuitos = { caixas: document.querySelectorAll(".contorno-de-ponto").length, nota: nota() };
+    muitos.remove();
+    await quadros();
+    return { antes, notaAntes, ...comMuitos, notaDepois: nota() };
+  });
+  assert.ok(
+    teto.antes > 0 && teto.antes < 300,
+    `antes dos trezentos e vinte retratos havia ${teto.antes} contornos: a prova do teto precisa começar abaixo dele`,
+  );
+  assert.equal(teto.notaAntes, "", `sem nada passar do teto, a camada disse que cortou: «${teto.notaAntes}»`);
+  assert.equal(teto.caixas, 300, `com mais lugares à vista que o teto, a camada desenhou ${teto.caixas} contornos, e não 300`);
+  assert.equal(
+    teto.nota,
+    `${teto.antes + 320 - 300} pontos não contornados (teto de 300)`,
+    `com ${teto.antes + 320} lugares à vista, o teto de 300 deixou ${teto.antes + 20} sem contorno, e a camada não `
+      + `disse quantos — quem escreve o MOD conclui que o lugar dele não existe: «${teto.nota}»`,
+  );
+  assert.equal(teto.notaDepois, "", `os retratos saíram, todos voltaram a caber, e a nota ficou: «${teto.notaDepois}»`);
 
   // E desligar tira tudo, e esquece.
   await pagina.evaluate(() => {

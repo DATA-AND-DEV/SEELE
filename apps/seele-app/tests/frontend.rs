@@ -16398,6 +16398,7 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
         ".contorno-de-ponto {",
         ".contorno-de-ponto-nome {",
         ".contornos-dos-pontos-aviso {",
+        ".contornos-dos-pontos-nota {",
     ] {
         let regra = folha
             .split_once(seletor)

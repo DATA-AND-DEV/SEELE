@@ -1235,7 +1235,12 @@ function agendarContornos() {
  * As comparações são estritas de propósito: um contêiner vazio (0×0) dentro do
  * recorte **está** à vista, e o contorno dele é o que mostra onde um MOD
  * entraria. Pela mesma razão a pergunta não é `elementFromPoint`: no meio de
- * um contêiner vazio está quem o cerca, e não ele.
+ * um contêiner vazio está quem o cerca, e não ele. Um nó **com** área precisa
+ * de mais: a interseção dele com o recorte tem de ter largura e altura, ou o
+ * contorno seria um traço sobre nada.
+ *
+ * Passados `TETO_DE_CONTORNOS`, os lugares à vista que sobram são contados, e
+ * o aviso diz quantos.
  */
 function desenharContornos() {
   const camada = $("contornos-dos-pontos");
@@ -1260,9 +1265,16 @@ function desenharContornos() {
   // mostra é do MOD —, então o que cai dentro da área dela é o que ela cobre.
   const tapada = document.querySelector(".palco-de-paginas:not([hidden])")?.getBoundingClientRect() ?? null;
   const caixas = [];
+  // **O teto conta o que corta** (T7 M2 da revisão ampla do Plano 1D). Um
+  // `break` aqui saía só do laço do ponto, e cada ponto seguinte saía na
+  // primeira volta: os lugares do fim do mapa ficavam sem contorno e sem uma
+  // palavra, e quem escreve o MOD concluía que o lugar dele não existe. Os
+  // que passam do teto são contados com o mesmo critério de «à vista» dos
+  // contornados — o custo de olhar cada nó já era pago pelos que o recorte
+  // esconde —, e só o desenho para.
+  let deFora = 0;
   for (const [ponto, seletor] of Object.entries(CONTEINERES_DOS_PONTOS)) {
     for (const no of document.querySelectorAll(seletor)) {
-      if (caixas.length >= TETO_DE_CONTORNOS) break;
       // Sem retângulo nenhum é um nó fora da tela — escondido, ou dentro de
       // algo escondido. Um contêiner vazio **está** na tela, só sem área, e o
       // contorno dele é o que mostra onde um MOD entraria.
@@ -1292,21 +1304,45 @@ function desenharContornos() {
       if (r.bottom < cima || r.right < esquerda || r.top > baixo || r.left > direita) continue;
       const topo = Math.max(r.top, cima);
       const lado = Math.max(r.left, esquerda);
+      const larguraVista = Math.min(r.right, direita) - lado;
+      const alturaVista = Math.min(r.bottom, baixo) - topo;
+      // **Um nó com área precisa de área à vista** (T7 M3 da revisão ampla do
+      // Plano 1D). Encostado no recorte — o item que a rolagem deixou rente ao
+      // topo da lista, `r.bottom` igual a `cima` — ou dentro de um recorte que
+      // não tem altura, a interseção dele tem largura ou altura zero: nada
+      // dele se vê, e o contorno saía como o traço de 2 px do `min-height` da
+      // folha. O critério é a interseção, e não a caixa do nó: o vazio, sem
+      // área, continua pelas comparações estritas de cima.
+      if (r.width > 0 && r.height > 0 && (larguraVista <= 0 || alturaVista <= 0)) continue;
+      if (caixas.length >= TETO_DE_CONTORNOS) {
+        deFora += 1;
+        continue;
+      }
       const caixa = elemento("div", "contorno-de-ponto");
       caixa.dataset.ponto = ponto;
       caixa.style.setProperty("left", `${Math.round(lado)}px`);
       caixa.style.setProperty("top", `${Math.round(topo)}px`);
-      caixa.style.setProperty("width", `${Math.round(Math.max(0, Math.min(r.right, direita) - lado))}px`);
-      caixa.style.setProperty("height", `${Math.round(Math.max(0, Math.min(r.bottom, baixo) - topo))}px`);
+      caixa.style.setProperty("width", `${Math.round(Math.max(0, larguraVista))}px`);
+      caixa.style.setProperty("height", `${Math.round(Math.max(0, alturaVista))}px`);
       caixa.append(elemento("span", "contorno-de-ponto-nome", ponto));
       caixas.push(caixa);
     }
   }
-  caixas.push(elemento(
+  const aviso = elemento(
     "p",
     "contornos-dos-pontos-aviso",
     "MODO DE DESENVOLVEDOR · desligue em CONFIGURAÇÕES › MODS › DIAGNÓSTICO",
-  ));
+  );
+  // Dentro do aviso, numa linha própria: é o mesmo canto da janela, e é o que
+  // quem liga o modo já lê.
+  if (deFora > 0) {
+    aviso.append(elemento(
+      "span",
+      "contornos-dos-pontos-nota",
+      `${emQuantidade(deFora, "ponto não contornado", "pontos não contornados")} (teto de ${TETO_DE_CONTORNOS})`,
+    ));
+  }
+  caixas.push(aviso);
   camada.replaceChildren(...caixas);
   camada.hidden = false;
 }
