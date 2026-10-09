@@ -188,7 +188,106 @@ moderação e o apelido verificado de cada linha (§10). [inf] Isto é o que
 mantém duas garantias juntas: a de identidade (o menu age pela chave) e a de
 leitura (D-nucleo-1). **A forma exata de uma região substituída que ainda
 carrega os itens do núcleo é a primeira coisa a desenhar na tarefa 5 do
-plano.**
+plano** — desenhada abaixo, para revisão.
+
+### A região substituída que ainda carrega o núcleo (tarefa 5, Step 1; proposta)
+
+**Substituir uma região é desenhar o miolo de cada linha, e não a moldura.** A
+moldura é do produto: o `<ul>` e cada `<li>` (o leitor de tela conta «3 de
+12»), a faixa do núcleo de cada linha, e o que a linha diz sobre a verdade da
+conversa. O MOD desenha o que está entre eles. Medido no código de hoje
+(`linhaSubstituida`, `tela-sessao.js` [c]): com `pessoa.cartao` substituído, o
+apelido real e o menu de moderação descem para um `<details>` recolhido («⋯»).
+O menu continua alcançável, mas **o apelido não fica à vista**, que é o que a
+D-nucleo-1 pede. A forma abaixo vale também para `pessoa.cartao`, e conserta
+isso.
+
+**`pessoas.lista`, substituída.** O MOD toma **a lista**: a ordem, os grupos e
+os títulos deles. A linha de cada pessoa continua vindo de `pessoa.cartao` —
+dele ou de quem for o escolhido para esse ponto —, e é por isso que a
+declaração cabe no fio com 250 pessoas (os identificadores, ~1 KiB, e não 250
+cartões):
+
+```js
+SeeleUI.contribuicoes.registrar({
+  ponto: 'pessoas.lista', modo: 'substituir',
+  conteudo: { grupos: [{ titulo: 'MESA 1', pessoas: [12, 7] }, { titulo: 'PLATEIA', pessoas: [3] }] },
+});
+```
+
+- **Ninguém some da lista.** Quem está no servidor e não está em grupo nenhum
+  vai para um grupo do produto, no fim, com o título do produto (OUTRAS
+  PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
+  dois grupos fica no primeiro; os dois contam na aba DIAGNÓSTICO. Nenhum dos
+  dois é recusado: a lista muda mais depressa do que o MOD a reescreve.
+- **A linha tem três faixas**, numa grade do produto: `[núcleo] [miolo] [⋯]`.
+  - **o núcleo**, à esquerda: o apelido verificado, lido do retrato **pela
+    chave da linha**, e nunca do que o MOD escreveu. Quando esta sessão tem
+    verbo sobre a pessoa, ele **é** o botão de moderação, o mesmo elemento da
+    linha nativa (`.pessoa-nome-porta`): a moderação sai do «⋯» e fica a um
+    clique. O halo e a pastilha de quem fala também são dele. Lê as cores do
+    produto pelo mesmo caminho dos outros itens do §10, e não o tema: no
+    celular, `--nucleo-*` (`celular-base.css:41-43` [c]); no desktop, que ainda
+    não declara `--nucleo-*`, pelo caminho que a tarefa 9 fizer. O apelido
+    longo é cortado com reticências, com o nome inteiro no `title` e no nome
+    acessível;
+  - **o miolo**: o cartão de `pessoa.cartao` quando ele tem conteúdo, e senão o
+    resto da linha nativa (o número e a barra de sinal, o microfone). A capa e
+    o avatar entram aqui por citação (`fundoDeMidia: { daPessoa: 'capa' }`,
+    `retrato({ daPessoa: 'avatar' })`, §4), com o carregamento do produto. O
+    miolo é uma caixa com `overflow: hidden` e `contain: paint`: nada que o MOD
+    desenhe — posição absoluta, transformação, margem negativa — sai dela, e a
+    faixa do núcleo é **irmã** dele, nunca filha;
+  - **o «⋯»**, à direita: o diagnóstico nativo, `pessoa.detalhes` e
+    `pessoa.acoes`, como hoje.
+- **Os pontos de dentro ficam com os provedores deles.** Quem substitui a lista
+  não fica dono de `pessoa.cartao`, `pessoa.avatar` nem `pessoa.capa`: um MOD
+  pode agrupar a lista e outro desenhar as linhas, e a escolha de quem
+  administra vale ponto a ponto, como hoje.
+
+**`conversa.mensagem`, substituída** (por mensagem, `alvo` sendo a mensagem).
+O MOD desenha **o corpo**. O produto mantém, na ordem: a calha do avatar (com
+`pessoa.avatar`), a cabeça (o apelido verificado do autor, lido pela chave, a
+hora, «editada» e o REMOVER), o miolo do MOD no lugar de `.corpo`, as
+contribuições `adicionar`, o bloco do anexo (ADR 0027, com o consentimento das
+prévias) e o selo do envio (pendente ou recusada). O miolo tem a mesma caixa
+fechada da lista.
+
+- **O agrupamento passa a ser pela chave do autor** (`author`), e a cabeça
+  aparece na primeira mensagem de cada grupo. Hoje ele é pelo apelido
+  (`anterior.author_nickname === mensagem.author_nickname`,
+  `tela-sessao.js:1605` [c]): se o servidor admitir dois apelidos iguais, a
+  mensagem da segunda pessoa sai sem cabeça, debaixo da primeira — e com o
+  corpo desenhado por um MOD, a cabeça é a única autoria à vista. A troca é
+  desta tarefa, com o guarda; um nome que o MOD escreva no corpo nunca ocupa o
+  lugar dela.
+- **A busca vence.** Enquanto a busca marca uma mensagem substituída, ela volta
+  ao corpo nativo: o realce é o que a pessoa procura, e o produto não marca
+  dentro do desenho de um MOD. Saindo da busca, o miolo volta.
+
+**Os guardas** (Steps 2 a 5, e o guarda 11):
+
+1. o apelido da faixa do núcleo é o do retrato: um cartão que escreve «alice»
+   na linha de bob deixa «bob» no núcleo;
+2. um miolo com um elemento em posição absoluta por cima do núcleo:
+   `elementFromPoint` no centro do apelido devolve o elemento do produto;
+3. um grupo que omite uma pessoa presente: ela aparece em OUTRAS PESSOAS;
+4. o botão de moderação é alcançável sem abrir o «⋯» (Tab e clique);
+5. uma mensagem substituída mantém a cabeça, o anexo e o selo; com a busca
+   marcando, o corpo nativo e o realce voltam;
+6. duas mensagens seguidas de pessoas diferentes com o mesmo apelido: cada uma
+   tem a sua cabeça.
+
+**Três escolhas que pedem o olho da orquestradora (e talvez do dono):**
+
+- **o núcleo com as cores do produto** (`--nucleo-*`) num tema claro é uma
+  placa escura em cada linha. É o que o §10 diz, e é o que o celular faz; a
+  alternativa é o núcleo com o `texto` e o `painel` do tema, que os pares já
+  garantem a 4,5:1, mas aí o núcleo é alcançado pelo tema;
+- **o apelido sai do «⋯» também sob `pessoa.cartao`**: muda a linha de quem
+  hoje usa o PERFIS, e é o que a D-nucleo-1 decidiu;
+- **ninguém some da lista**: um MOD pode ordenar e agrupar, e não esconder quem
+  está presente.
 
 **Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Hoje
 um tipo desconhecido vira `dialogo` em silêncio
