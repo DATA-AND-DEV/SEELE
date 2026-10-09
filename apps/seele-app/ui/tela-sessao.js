@@ -653,6 +653,26 @@ async function recarregarTrilha() {
 }
 
 /**
+ * **Uma região da API 6 no modo `adicionar`** (rascunho §3; tarefa 5): o que os
+ * MODs acrescentam, montado pelo caminho dos outros pontos, no contêiner da
+ * região. Escondida quando ninguém acrescenta nada: uma faixa vazia é uma
+ * régua sobre nada.
+ *
+ * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
+ * preserva o que eles seguram — como em `canal.cabecalho`.
+ */
+function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
+  if (!conteiner) return;
+  const nos = [
+    ...conteudoDasContribuicoes(ponto, alvo),
+    ...acoesDasContribuicoes(ponto, alvo, contexto),
+  ];
+  repovoar(conteiner, nos);
+  ligarAcoesDeApresentacao(conteiner);
+  conteiner.hidden = nos.length === 0;
+}
+
+/**
  * A coluna de 60px: o servidor em que se está, e os do histórico embaixo.
  *
  * O atual é desenhado à parte, e não como o primeiro da lista, porque ele pode
@@ -665,6 +685,9 @@ async function recarregarTrilha() {
  * mesma sessão.
  */
 function desenharTrilha(snapshot) {
+  // A região `redes` antes da comparação abaixo: o que os MODs acrescentam muda
+  // sem o histórico mudar, e a comparação só sabe do histórico.
+  aplicarARegiao("redes", $("trilha-mods"));
   const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
   const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);

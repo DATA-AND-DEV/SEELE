@@ -326,6 +326,12 @@ jobs:
       - run: node apps/seele-app/bancada/tema-claro-legivel.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As regiões da API 6 no `index.html` real (tarefa 5 da F3): o nó de um MOD
+      # aparece no contêiner da região, o que é do produto continua lá, e
+      # revogar devolve a região ao que era.
+      - run: node apps/seele-app/bancada/regioes-do-produto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

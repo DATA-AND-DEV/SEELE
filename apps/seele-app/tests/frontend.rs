@@ -15935,10 +15935,19 @@ fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
-    let orfaos: Vec<&String> = pontos
-        .iter()
-        .filter(|ponto| !aplicadores.contains(&format!("\"{ponto}\"")))
-        .collect();
+    // **Como primeiro argumento de uma chamada**, e não em qualquer lugar: a
+    // lista das regiões do retrato (`REGIOES_E_CAMADAS_DA_API`, tarefa 4) já
+    // escreve os oito nomes de região, e o texto sozinho passava para uma
+    // região sem aplicador nenhum (medido em 09/10, na tarefa 5). Quem aplica
+    // pergunta pelo ponto — `conteudoDasContribuicoes("…"`,
+    // `escolherSubstituicao(\n "…"` —, e uma lista o enumera.
+    let chamado = |ponto: &str| {
+        let alvo = format!("\"{ponto}\"");
+        aplicadores
+            .match_indices(&alvo)
+            .any(|(i, _)| aplicadores[..i].trim_end().ends_with('('))
+    };
+    let orfaos: Vec<&String> = pontos.iter().filter(|ponto| !chamado(ponto)).collect();
     assert!(
         orfaos.is_empty(),
         "estes pontos são anunciados pela API de MODs e nenhuma tela os aplica — \

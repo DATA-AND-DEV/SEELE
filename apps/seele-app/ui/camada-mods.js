@@ -853,6 +853,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "sala.acoes": "Ações dentro de uma sala de voz",
   "servidor.navegacao": "Entradas na navegação",
   "servidor.aparencia": "A aparência da sessão",
+  "redes": "A coluna de servidores",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1124,6 +1125,7 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "sala.acoes": ".roster-sala",
   "servidor.navegacao": "#lista-mods-navegacao",
   "servidor.aparencia": "#tela-sessao",
+  "redes": "#trilha-mods",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

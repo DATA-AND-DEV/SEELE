@@ -356,6 +356,18 @@
   object-fit: contain;
 }
 
+/* A região `redes` (rascunho da API 6, §3): o que os MODs acrescentam à trilha.
+   Uma caixa fechada — `overflow: hidden` e `contain: paint` —, para nada que um
+   MOD desenhe sair dela por cima do servidor atual ou do `+`. */
+.trilha-mods {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--seele-linha);
+  overflow: hidden;
+  contain: paint;
+}
+
 /* O `+` de 48px, que hoje faz alguma coisa: leva à entrada para conectar a um
    servidor que ainda não está nesta coluna. Enquanto ele não fazia, era pintado
    em `linha-forte` e com `cursor: default`, porque era moldura; um controle vivo
