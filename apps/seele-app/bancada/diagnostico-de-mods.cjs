@@ -19,8 +19,9 @@
 //   quantos lugares o teto de 300 deixou de fora;
 // - **o som**: `decodeAudioData` de verdade, sob a política que o produto
 //   declara (`default-src 'self'`, sem `media-src`) — medido no Chromium, o
-//   motor do WebView2; a medida no WKWebView é a Task 1 (antes) e a Task 9
-//   (depois) do Plano 1D.
+//   motor do WebView2; a medida no app de verdade, no WKWebView antes e
+//   depois do WebAudio e no WebView2, está em
+//   `docs/evidencias/som-de-mod-wkwebview/registro.md`.
 //
 // Só a ponte nativa é simulada, como em `avatares-do-mod.cjs`.
 //

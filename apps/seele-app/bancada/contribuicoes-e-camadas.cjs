@@ -579,10 +579,11 @@ function acordarTudo(no) {
 // ------------------------------------------- M1 · quem pinta cada lugar
 
 {
-  // **Só leitura, e por alvo.** `resumo` responde pelo alvo vazio, e por isso
-  // não via uma substituição registrada para uma pessoa só — que é como todo
-  // avatar do PERFIS é registrado. `quemPinta` pergunta a mesma
-  // `escolherSubstituicao` para cada alvo que tem contribuição.
+  // **Só leitura, e por alvo.** `resumo` respondia só pelo alvo vazio, e por
+  // isso não via uma substituição registrada para uma pessoa só — que é como
+  // todo avatar do PERFIS é registrado. `quemPinta` pergunta a mesma
+  // `escolherSubstituicao` para cada alvo que tem contribuição, e `resumo`
+  // passou a perguntar a ele no caso parcial e no automático misto.
   const registro = new R();
   const a = new I("mod/a", "a", 7, {});
   const b = new I("mod/b", "b", 7, {});
@@ -1474,7 +1475,7 @@ function anotando(...anotadas) {
 }
 
 // **O escolhido que desenha só quem declarou, na gestão** (D-I1 da revisão do
-// Lote Diagnóstico da correção ampla do Plano 1D). `resumo` decide pela
+// Lote Diagnóstico da correção ampla do Plano 1D). `resumo` decidia só pela
 // disputa do alvo vazio, e `quemPinta` soma os alvos. mod/a substitui o cartão
 // de todos, mod/b só o da pessoa 2, e esta máquina escolheu mod/b: no alvo
 // vazio ele não tem candidata, e a disputa diz `ausente` — mas ele desenha a

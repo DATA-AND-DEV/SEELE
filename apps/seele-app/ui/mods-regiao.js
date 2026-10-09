@@ -3862,6 +3862,12 @@ class TocadorDeSomDeMod {
   /**
    * @param {AudioBuffer} som O que `decodificarSomDeMod` devolveu.
    * @param {(aviso: string, comGesto?: boolean, naoLigou?: *, suspensoPeloProduto?: boolean) => void} avisar
+   *   Quem ouve o som. Na `recusada`, `naoLigou` é o que o navegador
+   *   respondeu ao recusar o `resume()` antes do prazo, e `undefined` quando o
+   *   prazo venceu sem resposta. É o que separa as duas recusas da saída que o
+   *   produto suspendeu: com `undefined`, ela «não acordou a tempo»; com uma
+   *   resposta, ela não acordou, sem «a tempo», e a resposta vai junto — ver
+   *   `SILENCIO_ANTES_DE_SUSPENDER_MS`.
    */
   constructor(som, avisar) {
     this.som = som;

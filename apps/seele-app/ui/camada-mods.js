@@ -1110,7 +1110,7 @@ function quemPintaEstaAVista() {
  * `escreverOTemaDaSessao` para a aparência.
  * `todo_ponto_de_contribuicao_tem_onde_ser_contornado`, em `tests/frontend.rs`,
  * confere que cada ponto da tabela está aqui e que cada seletor ainda casa com
- * algo que a página ou os scripts criam.
+ * algo que a página tem ou que os scripts aplicam a um elemento.
  */
 const CONTEINERES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": ".pessoa-identidade",
@@ -2186,7 +2186,7 @@ globalThis.addEventListener("seele-mods-estado", () => {
 // ------------------------------------------------- as abas da gestão de MODs
 
 /**
- * Quatro atividades, quatro abas — U12 e U32.
+ * Cinco abas: as quatro atividades de U12 e U32, e o DIAGNÓSTICO da fase M1.
  *
  * «Gestão de MODs junta ativação, catálogo, cache, consentimentos e contadores
  * técnicos numa página longa», e a consequência: «Pacotes repetidos em
