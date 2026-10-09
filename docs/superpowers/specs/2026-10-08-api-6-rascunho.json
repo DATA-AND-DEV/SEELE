@@ -106,7 +106,7 @@
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
     "mundo.avisar": "novo: o aviso da metade de servidor às janelas do mesmo MOD (ModAviso, ordinal 46, no contrato da 1.0); acima do teto, coalescido por canal (o mais novo de cada canal sai assim que a taxa deixa); só sai depois de o quintal gravar; a carga é um valor JSON, serializado pelo servidor (o teto vale sobre o texto) e entregue já lido; a janela de quem fez o pedido também recebe",
-    "mundo.tema": "novo: a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; confere os pares e devolve a recusa com o par e a razão; o servidor guarda o tema e o manda em TemaMudou (ordinal 47) logo depois do Session"
+    "mundo.tema": "a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; devolve { ok: true } ou { ok: false, erro } — valor, nunca exceção por recusa — com erro em recusas.tema; a declaração só vale se aoPedir ou aoAcontecer terminar, e o TemaMudou sai depois do quintal e do tema gravados; o servidor não confere quem pediu (a porta é o manifesto; o MOD lê contexto.admin se quiser restringir); o servidor guarda o tema (migração 15, temas_dos_mods) e o manda em TemaMudou (ordinal 47) logo depois do Session e do Instancia, inclusive com None, e a todos a cada troca"
   },
   "moments": [
     "PersonJoined",
@@ -385,7 +385,7 @@
       "«usar apresentação padrão» existe no controle nativo de MODs",
       "uma contribuição para uma região que a casca não tem é recusada com motivo nomeado, e a aba DIAGNÓSTICO conta"
     ],
-    "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (proposta 256); o agregado (proposta 128) é dos pontos sem alvo; os números com a M3",
+    "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (partida: 256); o agregado (partida: 128) é dos pontos sem alvo; o modelo está decidido (09/10), os números saem da M3",
     "descarte": "sai com a instância do MOD",
     "servidor.aparencia": "sai dos pontos registráveis: é a porta de quem vê sobre o tema declarado pelo servidor («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
@@ -544,7 +544,7 @@
     },
     "porta": "do lado do servidor, o manifesto (\"tema\": true), mostrado na tela de aceite; do lado de quem vê, servidor.aparencia: «o SEELE desenha» tira o tema daquele servidor nesta máquina",
     "onde-vale": "o contêiner da sessão; folha e dialogo herdam; sai inteiro com a sessão; os itens do núcleo leem os tokens do produto, fora do alcance do tema",
-    "conferencia": "contraste em todos os pares que o produto desenha, e não só texto sobre fundo; a recusa diz o par e a razão",
+    "conferencia": "contraste em todos os pares que o produto desenha, e não só texto sobre fundo; a recusa diz o par com os dois nomes em campos separados: pares: [{ frente, fundo, razao, piso }], na recusa de mundo.tema e no evento tema",
     "previa": "SeeleUI.tema(valores, { previa: true, superficie: id }): só nesta máquina, com o selo «prévia não publicada», sai quando a superfície fecha ou com SeeleUI.tema(null, { previa: true }); SeeleUI.tema(valores) sem previa não existe na 6",
     "nucleo": "nenhum item do núcleo é alcançado pelo tema; um guarda prova que acento #331704, #050403 e #0a0806 não mudam o #veredito, o #botao-mudo apertado, o #voz-mudo e o #voz-sair",
     "fora": [
@@ -555,7 +555,7 @@
       "z-index, opacidade ou deslocamento sobre controle nativo",
       "esconder uma região"
     ],
-    "dado-do-servidor": "mundo.tema(valores | null); o servidor guarda o tema no banco dele (sobrevive ao reinício) e o manda em TemaMudou logo depois do Session, inclusive com None; desligar ou desinstalar o MOD manda None, e o tema guardado fica inativo; um tema por servidor, o do MOD que quem administra escolheu [proposta]",
+    "dado-do-servidor": "mundo.tema(valores | null); o servidor guarda o tema no banco dele (sobrevive ao reinício) e o manda em TemaMudou logo depois do Session e do Instancia, inclusive com None; desligar ou desinstalar o MOD manda None (na reconexão que o ModsMudaram pede), e o tema guardado fica inativo; religar o devolve; um tema por servidor (decisão do dono, 09/10/2026): escolhido é o primeiro MOD com a porta que declara, enquanto estiver ligado; desligado, a porta fica livre; a troca explícita por quem administra é da gestão de MODs (tarefa 17f); tirar o tema (null) não devolve a porta",
     "pares": {
       "texto/fundo": "4,5:1",
       "texto/painel": "4,5:1",
@@ -626,7 +626,8 @@
     "aviso-do-servidor": "proposta de 1 KiB por aviso e 4 por segundo por MOD",
     "capas-animadas": "proposta de 6",
     "quadros-por-capa": "proposta de 60 quadros, 10 s",
-    "folhas": "proposta de 3"
+    "folhas": "proposta de 3",
+    "laboratorio": "até a M3, o laboratório de cada MOD tem os números como opções, e não como constantes (o J do PERFIS)"
   },
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
@@ -657,6 +658,19 @@
       "nao-gravei",
       "incompleto",
       "sessao-encerrada"
-    ]
+    ],
+    "tema": [
+      "sem-porta-de-tema (o manifesto não declara \"tema\": true)",
+      "tema-de-outro-mod (outro MOD é o escolhido e está ligado)",
+      "tema-invalido (não é objeto nem null)",
+      "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
+      "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
+    ],
+    "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão"
+  },
+  "decisoes-do-dono-de-09-10": {
+    "tema": "um tema por servidor, o escolhido por quem administra (D-api-5)",
+    "teto-de-contribuicoes": "o modelo está decidido (os pontos por alvo fora do agregado); os números, 256 alvos por ponto e 128 no agregado, saem da M3",
+    "api-7": "o que não entrar na 6 é candidato da API 7 (Servidor 1.1), escrito no ADR 0056"
   }
 }

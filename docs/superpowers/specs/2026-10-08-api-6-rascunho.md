@@ -42,6 +42,14 @@ mudam o texto abaixo, e cada seção já as segue.
 | os membros fora do ar no retrato (§6) | **ficam de fora** |
 | os três candidatos ao fio (§14) | **o aviso do servidor e o tema como dado vão para o contrato da 1.0**, pela F1; os pedidos de escopo de servidor **não mudam o fio**, porque já existem (§8) |
 
+### Decisões do dono (09/10/2026)
+
+| pergunta | resposta |
+|---|---|
+| dois MODs com a porta do tema (§9) | **um tema por servidor**, o escolhido por quem administra (D-api-5) |
+| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado); **os números** (256 alvos por ponto, 128 no agregado) **saem da M3** |
+| o que não entrar na 6 | **é candidato da API 7** (Servidor 1.1), e fica escrito no ADR 0056 |
+
 ---
 
 ## 0. O que muda, numa página
@@ -61,7 +69,8 @@ mudam o texto abaixo, e cada seção já as segue.
    segura, os aparelhos da máquina e a telemetria saem do alcance dele.
 6. **O tema é dado do servidor**: a metade de servidor o declara
    (`mundo.tema`), o servidor o guarda e o manda logo depois do `Session`, e o
-   produto o aplica e diz ao MOD o que fez (§9).
+   produto o aplica e diz ao MOD o que fez (§9). Um tema por servidor. A parte
+   do servidor está feita (tarefas 17a a 17c); a da casca espera o K4.
 7. **A metade de servidor do MOD avisa as janelas** de que um dado dela mudou.
    É o que tira a consulta em laço dos três MODs oficiais (2 s na MESA, 4 s no
    PERFIS e no ESTILO).
@@ -130,9 +139,11 @@ sem os controles de imagem, com uma frase. **Ausente, e não recusado depois de
 a pessoa escolher a foto.**
 
 **O guarda que nunca existiu.** O comentário de `base.js:1963-1965` [c] cita
-`a_casca_confere_as_mesmas_capacidades_que_o_nucleo`. O teste não existe: o
-`git log -S` só acha o comentário (`26ad0c2`). A API 6 o cria: `CAPACIDADES_POR_API`
-na casca e `capacidades_da_api` no Rust são comparados por teste.
+`a_casca_confere_as_mesmas_capacidades_que_o_nucleo`. O teste não existia: o
+`git log -S` só achava o comentário (`26ad0c2`). A tarefa 2 do plano o criou
+(`0b012c1`, em `apps/seele-app/tests/frontend.rs`): `CAPACIDADES_POR_API` na
+casca e `capacidades_da_api` no Rust são comparados por inteiro, e as três
+reversões provadas reprovam. [c]
 
 ## 3. Regiões e modos
 
@@ -499,6 +510,16 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 | `incompleto` | o fluxo terminou antes do que dizia carregar |
 | `sessao-encerrada` | a sessão acabou no meio |
 
+**Como a recusa chega ao MOD, com os campos dela** (o I do PERFIS, 09/10). Hoje
+o prelúdio rejeita a promessa com `new Error(m.erro)`, e nada além do nome
+atravessa (`apps/seele-app/src/executor.rs:1595` [c]). Na 6, o `Error` leva o
+nome **e os outros campos da resposta** como propriedades, que é o que a casca
+já faz com os `erros` de um formulário: `e.message` e `e.erro` são o nome
+(`'tipo-recusado'`), e `e.detectado` é `'heic'`. Vale para toda recusa que
+chega à janela pelo mesmo caminho, e não só para o volume: um campo que o
+produto acrescentar a uma recusa chega ao MOD sem outra mudança no prelúdio.
+O `ok` e o número do pedido não vão. [tarefa 4, passo 5b]
+
 Hoje o farejador de imagem (`seele_proto::imagem::sniff`) não reconhece HEIC, e
 um HEIC cai em `tipo-recusado` sem `detectado`. Reconhecer o HEIC só para
 nomeá-lo é a tarefa 4 do plano; a conversão no celular, se houver, é da ponte
@@ -670,9 +691,32 @@ grupo 17 do plano da F3.
   é o objeto do tema (os nomes do §9, abaixo); `null` tira o tema. A chamada
   confere o tema como a janela confere (os pares, abaixo) e devolve a recusa
   com o par e a razão, em vez de mandar a todos um tema que a casca recusaria.
-- **O servidor guarda o tema declarado** no banco dele, e não o MOD. Entre dois
-  reinícios do `seeled`, o `TemaMudou` depois do `Session` leva o tema
-  guardado: a metade de servidor só roda dentro de `aoPedir` e de
+- **A recusa é valor devolvido, e não exceção** (O1 do ESTILO). `mundo.tema`
+  devolve `{ ok: true }` ou `{ ok: false, erro }`, com `erro` da lista fechada:
+  `sem-porta-de-tema` (o manifesto não declara `"tema": true`),
+  `tema-de-outro-mod` (outro MOD é o escolhido e está ligado), `tema-invalido`
+  (não é objeto nem `null`: texto, número, lista), `tema-grande-demais` (o JSON
+  passa dos 12 KiB do fio) e, com a tarefa 17e, `contraste`, que leva
+  `pares: [{ frente, fundo, razao, piso }]` com **os dois nomes em campos
+  separados** (`frente: 'acento', fundo: 'acentoFraco'`), para o MOD pôr cada
+  lado no seu campo dos `erros`. Só lança o que o próprio MOD lançar ao ser
+  serializado (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a
+  17c; `contraste` na 17e]
+- **A declaração cai junto com o quintal** (O2). Ela só vale se o `aoPedir` ou
+  o `aoAcontecer` terminar: um MOD que declara e lança depois não publica nada,
+  e o `TemaMudou` só sai depois de o quintal e o tema gravados, na mesma
+  tomada do banco — a ordem que o aviso do servidor também segue (§7.3). [c,
+  com teste]
+- **O servidor não confere quem pediu** (O3). A porta é o manifesto, e não a
+  pessoa: um pedido de quem não administra pode levar o MOD a declarar (a
+  redeclaração da E6 do ESTILO, depois da subida do 0.15, quando o tema
+  guardado começa vazio). Se o MOD quiser restringir, ele lê `contexto.admin`.
+  [c]
+- **Funciona nos dois caminhos** em que a metade de servidor roda: o pedido e
+  o momento (`aoAcontecer`). [c, com teste]
+- **O servidor guarda o tema declarado** no banco dele (migração 15, tabela
+  `temas_dos_mods`), e não o MOD. Entre dois reinícios do `seeled`, o
+  `TemaMudou` logo depois do `Session` e do `Instancia` leva o tema guardado: a metade de servidor só roda dentro de `aoPedir` e de
   `aoAcontecer`, sem gancho de carga, e um tema que dependesse dela sumiria no
   reinício.
 - **A porta do lado do servidor é o manifesto.** Só um MOD cujo `mod.json`
@@ -692,16 +736,26 @@ grupo 17 do plano da F3.
 - **Desligar ou desinstalar o MOD manda `TemaMudou { tema: None }`** a todos.
   O tema guardado fica, inativo, porque desligar preserva os dados (ADR 0045):
   religar o MOD o devolve.
-- **Um tema por servidor.** O servidor aceita `mundo.tema` de um MOD só: o que
-  quem administra escolheu na gestão de MODs. Habilitar um segundo MOD com
-  `"tema": true` pede a escolha ali, e o que fica de fora recebe a recusa
-  `tema-de-outro-mod`. [proposta; o dono pode mudar]
+- **Um tema por servidor** (decisão do dono, 09/10/2026). O servidor aceita
+  `mundo.tema` de um MOD só, o escolhido, e o que fica de fora recebe a
+  recusa `tema-de-outro-mod` na própria chamada. Escolhido é o primeiro MOD
+  com a porta que declara, e continua sendo enquanto estiver ligado.
+  Desligado, a porta fica livre: um servidor com outro MOD de tema ligado não
+  fica sem aparência até alguém reinstalar o primeiro. A troca explícita por
+  quem administra, na gestão de MODs (habilitar um segundo MOD com a porta
+  pede a escolha ali), é da casca, na tarefa 17f, e escreve na mesma coluna.
+  [c, tarefas 17a a 17c]
+- **Tirar o tema não devolve a porta.** O escolhido que declara `null` deixa o
+  servidor sem tema e continua escolhido: um «voltar ao padrão» não pode
+  entregar a aparência do servidor a outro MOD sem ninguém decidir. [c, com
+  teste]
 
 ### O que o produto faz com ele, dito ao MOD (B2)
 
 **Um evento `tema` volta à janela do MOD** cada vez que a casca aplica um
 `TemaMudou` ou uma prévia: `{ estado: 'aplicado' | 'recusado' | 'nativo',
-pares?: [{ par, razao, piso }], previa: boolean }`. `recusado` traz os pares e
+pares?: [{ frente, fundo, razao, piso }], previa: boolean }`, com os pares na
+mesma forma da recusa de `mundo.tema`. `recusado` traz os pares e
 os números; `nativo` diz que quem vê escolheu «o SEELE desenha». É o que deixa
 o ESTILO dizer na tela o que aconteceu, e não o que ele supõe (o U24 dele).
 
@@ -904,11 +958,14 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
   `sala.acoes`) **não contam no teto agregado**. Cada um aceita **uma
   contribuição por alvo e por MOD** (registrar de novo para o mesmo alvo é
   `atualizar`, e não uma segunda), e até um teto de alvos por ponto, maior que
-  a sala: proposta, 256;
+  a sala (partida: 256);
 - **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
   as entradas de navegação, as ferramentas do compositor;
-- os números (256 alvos, 128 sem alvo) **esperam a M3 com a API 6**, que mede a
-  lista de pessoas com 250 cartões de MOD (tarefa 11).
+- **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128
+  sem alvo) **esperam a M3 com a API 6**, que mede a lista de pessoas com 250
+  cartões de MOD (tarefa 11). Até lá, o laboratório de cada MOD os tem como
+  opções, e não como constantes (o J do PERFIS): os mesmos números valem para
+  o aviso do servidor (1 KiB, 4 por segundo) e para as capas animadas.
 
 **A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
 pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha
@@ -1138,7 +1195,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 
 | # | pergunta | resposta | onde |
 |---|---|---|---|
-| B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido [proposta] | §9 |
+| B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido (decidido em 09/10); **feito no servidor** (17a a 17c) | §9 |
 | B2 | o resultado da aplicação | o evento `tema`, com `aplicado`, `recusado` (com os pares) ou `nativo` | §9 |
 | B3 | os pares e a fórmula dos derivados | a lista com os pisos de partida; a fórmula reproduz os tokens do produto com ΔE ≤ 2 | §9 |
 | B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
@@ -1162,6 +1219,25 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | H | o `regiao-ausente` sem tarefa | tarefa 5, passo 8 | §11; plano, 5 |
 | — | os ausentes no diretório | corrigido no §6: o diretório lista só quem está presente | §6 |
 
+### A segunda volta dos planos do porte (09/10)
+
+**ESTILO** (plano `9c35359` do `revisao-0.16` dele):
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| O1 | a recusa de `mundo.tema`: valor ou exceção; o `par` como texto ou os dois nomes | **valor devolvido**: `{ ok: false, erro }`, nunca exceção por recusa; o par vem com **os dois nomes em campos separados**, `{ frente, fundo, razao, piso }`, na recusa e no evento `tema` | §9 |
+| O2 | o `mundo.tema` cai com o quintal quando o `aoPedir` lança | **cai**: a declaração só vale se a chamada terminar, e o `TemaMudou` sai depois do quintal e do tema gravados | §9 |
+| O3 | o `mundo.tema` no pedido de quem não administra | **passa**: a porta é o manifesto, e o servidor não confere quem pediu; o MOD restringe, se quiser, pelo `contexto.admin` | §9 |
+| O4 | «um tema por servidor» ainda como proposta na 17c | **decidido** (D-api-5); a marca saiu do rascunho e do plano, e a regra está no servidor | §9; plano, 17c |
+| O5 | os números da fórmula e do fundo por mídia | **com a M3**, e o ESTILO não depende deles para o porte | §9, §12 |
+
+**PERFIS** (plano `de4d88a`):
+
+| # | pergunta | resposta | onde |
+|---|---|---|---|
+| I | como o `detectado` chega ao MOD | o prelúdio rejeita com um `Error` que leva o nome **e os outros campos da resposta** (`e.erro`, `e.detectado`), como a casca faz com os `erros` | §7.1; plano, 4 passo 5b |
+| J | os números (256, 128, 1 KiB, 4/s, as capas) | **com a M3**; o laboratório os tem como opções | §12 |
+
 ## 18. Em aberto
 
 **Para a M3:** os limites do §12, os novos (capas animadas, quadros, aviso do
@@ -1179,6 +1255,10 @@ servidor) e os do celular.
 4. ~~Os três candidatos ao fio (§14)~~: o aviso e o tema vão ao contrato da
    1.0, pela F1; o escopo de servidor já existia (§8).
 5. ~~Os membros fora do ar no retrato (§6)~~: ficam de fora.
+
+E em 09/10: ~~dois MODs com a porta do tema~~ (um tema por servidor) e ~~o
+modelo do teto de contribuições~~ (os pontos por alvo fora do agregado; os
+números com a M3).
 
 **Ainda em aberto, e de quem:** os itens da ampliação do tema (§9), com o
 ESTILO no porte; a montagem parcial e o teto de 12 KiB (§12), com a M3; o som
