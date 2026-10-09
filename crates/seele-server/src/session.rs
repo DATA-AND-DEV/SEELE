@@ -35,8 +35,8 @@ use anyhow::{bail, Context, Result};
 use ed25519_dalek::{Signature, VerifyingKey};
 use seele_proto::control::{
     AlertReason, AlertSeverity, AttachmentRefusal, ChannelInfo, ClientMessage, DisconnectReason,
-    MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
-    ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+    Lido, MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence,
+    Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
 };
 use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
 use seele_proto::screen::SCREEN_HEADER_LEN;
@@ -1402,13 +1402,36 @@ async fn run_session(
     let id_da_conexao = connection.stable_id() as u64;
 
     let (para_dentro, mut entrada) = mpsc::channel::<ClientMessage>(ENTRADA_DEPTH);
+    let pessoa = session.person;
+    let contagem = Arc::clone(&server.desconhecidas);
     let leitora = tokio::spawn(async move {
         let mut recv = recv;
+        // As mensagens de um vocabulário mais novo que este par mandou. A
+        // primeira vai ao registro; as outras só à contagem, para um par
+        // defeituoso não encher o `seele.log`.
+        let mut desconhecidas = seele_proto::control::Desconhecidas::default();
         loop {
-            match frame::ler::<ClientMessage>(&mut recv).await {
-                Ok(mensagem) => {
+            match frame::ler_da_lista::<ClientMessage>(&mut recv).await {
+                Ok(Lido::Mensagem(mensagem)) => {
                     if para_dentro.send(mensagem).await.is_err() {
-                        return;
+                        break;
+                    }
+                }
+                // **Pulada, contada, e a sessão segue** (adendo de 08/10/2026,
+                // §6). Até a 0.15 isto era `NaoEntendi` e a sessão morria: o
+                // quadro tem comprimento próprio, e pular não desalinha o
+                // próximo. Rede de segurança, e não licença — quem manda
+                // continua não mandando o que o par não entende (ADR 0058).
+                Ok(Lido::Desconhecida { ordinal }) => {
+                    let primeira = desconhecidas.contar();
+                    contagem.registrar(primeira);
+                    if primeira {
+                        tracing::warn!(
+                            person = %pessoa,
+                            ordinal,
+                            "mensagem de controle desconhecida, pulada: o par fala um \
+                             vocabulário mais novo que este servidor"
+                        );
                     }
                 }
                 // **Fechar é rotina; não entender é notícia.** Os dois vinham
@@ -1426,13 +1449,21 @@ async fn run_session(
                         "um par mandou um quadro de controle que este servidor não entende; \
                          quase sempre é uma versão diferente dos dois lados"
                     );
-                    return;
+                    break;
                 }
                 Err(fim) => {
                     tracing::debug!(erro = %fim.erro(), "o fluxo de controle do cliente terminou");
-                    return;
+                    break;
                 }
             }
+        }
+        // O total, quando a primeira linha não disse tudo.
+        if desconhecidas.total() > 1 {
+            tracing::warn!(
+                person = %pessoa,
+                total = desconhecidas.total(),
+                "mensagens de controle desconhecidas puladas nesta sessão"
+            );
         }
     });
     // Abortada ao sair por qualquer caminho, inclusive por `?`.
@@ -6038,6 +6069,7 @@ mod fim_de_tela_por_sessao {
             subida: Arc::new(Mutex::new(crate::tela::Subida::nova())),
             portaria: Arc::new(Mutex::new(crate::taxa::Portaria::nova())),
             atrasos: Arc::new(crate::server::Atrasos::default()),
+            desconhecidas: Arc::new(crate::server::MensagensDesconhecidas::default()),
             desassentamentos: Arc::new(crate::server::Desassentamentos::default()),
             pares: Arc::new(Mutex::new(crate::pares::Pares::default())),
             versao_do_anuncio: seele_proto::mods::VERSAO_DO_ANUNCIO,

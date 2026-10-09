@@ -1252,6 +1252,50 @@ impl Atrasos {
     }
 }
 
+/// Quantas mensagens de controle de um vocabulário mais novo os pares
+/// mandaram, e em quantas sessões.
+///
+/// Desde o Servidor 1.0, um ordinal acima dos que esta build conhece na lista
+/// de cima é pulado, e a sessão segue (adendo de 08/10/2026, §6). Pular calado
+/// seria o «o produto sabe e não conta» do `CLAUDE.md`: um par mais novo que
+/// manda o que este servidor não entende é exatamente o que quem hospeda quer
+/// saber antes de alguém perguntar por que um botão não fez nada. A primeira
+/// de cada sessão vai ao registro, com o ordinal e a pessoa; o total fica aqui.
+///
+/// É rede de segurança, e não licença: a regra continua sendo quem manda não
+/// mandar o que o par não entende (ADR 0058). Zero é a resposta boa.
+///
+/// Do processo inteiro e não por sessão, pela mesma razão que [`Atrasos`].
+#[derive(Debug, Default)]
+pub struct MensagensDesconhecidas {
+    mensagens: std::sync::atomic::AtomicU64,
+    sessoes: std::sync::atomic::AtomicU64,
+}
+
+impl MensagensDesconhecidas {
+    /// Conta uma mensagem pulada. `primeira_da_sessao` conta também a sessão.
+    pub fn registrar(&self, primeira_da_sessao: bool) {
+        self.mensagens
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if primeira_da_sessao {
+            self.sessoes
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Quantas mensagens foram puladas.
+    #[must_use]
+    pub fn mensagens(&self) -> u64 {
+        self.mensagens.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Em quantas sessões isso aconteceu.
+    #[must_use]
+    pub fn sessoes(&self) -> u64 {
+        self.sessoes.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Quantas conexões velhas chegaram ao fim depois de a pessoa delas já ter
 /// voltado por outra.
 ///
@@ -1354,6 +1398,9 @@ pub struct Server {
     pub portaria: Arc<Mutex<crate::taxa::Portaria>>,
     /// How often the bus outran a session. See [`Atrasos`].
     pub atrasos: Arc<Atrasos>,
+    /// Quantas mensagens de um vocabulário mais novo foram puladas. Ver
+    /// [`MensagensDesconhecidas`].
+    pub desconhecidas: Arc<MensagensDesconhecidas>,
     /// Quantas conexões velhas o guarda de sessão já defendeu. Ver
     /// [`Desassentamentos`].
     pub desassentamentos: Arc<Desassentamentos>,

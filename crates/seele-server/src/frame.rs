@@ -14,7 +14,7 @@
 //! service there is.
 
 use anyhow::Result;
-use seele_proto::control::{ControlError, Validate, MAX_FRAME_LEN};
+use seele_proto::control::{ControlError, Lido, ListaDeCima, Validate, MAX_FRAME_LEN};
 use serde::{Deserialize, Serialize};
 
 /// Por que a leitura de um quadro parou.
@@ -110,6 +110,24 @@ where
     let frame = ler_bruto(stream).await?;
     // E aqui é `NaoEntendi`: o quadro chegou inteiro e não virou mensagem.
     seele_proto::control::decode::<T>(&frame).map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))
+}
+
+/// Como [`ler`], para uma das listas de cima: um ordinal que esta build não
+/// conhece vira [`Lido::Desconhecida`] em vez de [`FimDoQuadro::NaoEntendi`].
+///
+/// É o laço de controle que usa isto. Um ordinal conhecido com o corpo errado
+/// continua `NaoEntendi`: aquilo não é um vocabulário mais novo, é um quadro
+/// estragado.
+///
+/// # Errors
+///
+/// [`FimDoQuadro`], que nomeia o caso.
+pub async fn ler_da_lista<T: ListaDeCima>(
+    stream: &mut quinn::RecvStream,
+) -> Result<Lido<T>, FimDoQuadro> {
+    let frame = ler_bruto(stream).await?;
+    seele_proto::control::decode_da_lista::<T>(&frame)
+        .map_err(|erro| FimDoQuadro::NaoEntendi(erro.into()))
 }
 
 /// Um quadro inteiro, com o carimbo no byte 0, **sem decodificar**.
