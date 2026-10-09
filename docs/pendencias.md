@@ -8319,7 +8319,12 @@ Vieram depois, da revisão do Lote F-Fecho:
     **Fechado em 2026-10-08**, em três partes, as duas primeiras de antes do
     plano da F5, conferidas por ele em `d4eb6f1`:
     - o «panicked» no stderr saiu em `4887565` (2026-09-30): `conferir_api`
-      devolve `Err` com a linha do que não se lê, e o `run` só imprime;
+      devolve `Err` com a linha do que não se lê, e o `run` só imprime. O
+      commit é anterior ao texto deste item, escrito em `c1cc3ae9` (01/10) a
+      partir das revisões do 1E, e a atribuição é a da conferência do plano.
+      Medido em 09/10/2026: `cargo test -p xtask --bin xtask check_api` passa
+      45 testes sem nenhuma linha «panicked», com o `RUST_TEST_NOCAPTURE` do
+      `.cargo/config.toml`;
     - a etapa do `check-api` no `publicar.sh` existe desde `8b766e5`
       (2026-10-01): a bateria de quem publica roda o `check-api`, e um vermelho
       para a publicação antes de empacotar;
