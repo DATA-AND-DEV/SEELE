@@ -1080,6 +1080,16 @@ pub struct Telemetry {
     /// leaves**, which sounds identical to network loss and has the opposite
     /// fix.
     pub frames_refused: u64,
+    /// Se o microfone entrega **zero exato** há três segundos, aberto e sem
+    /// mudo. F1-microfone-macos.
+    ///
+    /// É como o macOS entrega um microfone que ele bloqueia: abre sem erro e
+    /// manda zeros. A casca do macOS diz então que o sistema **pode** estar
+    /// bloqueando — uma interface USB com o ganho no mínimo também entrega zero
+    /// exato. Falso sem voz de pé. Ver `seele_core::LocalTelemetry`.
+    ///
+    /// Só um sim ou não: nenhum nome de aparelho, nada desta máquina.
+    pub microfone_entrega_silencio_digital: bool,
 }
 
 /// Something worth surfacing.
@@ -1629,6 +1639,17 @@ pub enum Event {
         total: u32,
         /// JSON fragment.
         payload: String,
+    },
+    /// A metade de servidor de um MOD avisou as janelas dele (rascunho da API
+    /// 6, §7.3). A casca o entrega às janelas daquele MOD; a carga é o JSON do
+    /// MOD, sem interpretação aqui.
+    ModAviso {
+        /// O MOD que avisa.
+        mod_id: String,
+        /// O canal do aviso; `None` é o servidor inteiro.
+        canal: Option<u32>,
+        /// A carga, em JSON.
+        carga: String,
     },
     /// Somebody joined, left, or changed state.
     RosterChanged,

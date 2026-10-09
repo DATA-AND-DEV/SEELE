@@ -1642,6 +1642,42 @@ async function aFinalidadeDoArquivoNaoPartePar() {
   r.soltar();
 }
 
+/**
+ * **A recusa do seletor chega ao MOD da API 6 pelo nome** (rascunho da API 6,
+ * §7.1; o bloqueio G do PERFIS). Um HEIC das Fotos volta do Rust como
+ * `tipo-recusado:heic`, e o evento `arquivo` leva `erro: 'tipo-recusado'` e
+ * `detectado: 'heic'` — e não a frase de tela, que o MOD não tem como ler. Até
+ * a API 5 o dono não dá nome (`recusaParaOMod` devolve `null`), e o evento
+ * continua com o `porque` de antes.
+ */
+async function aRecusaDoSeletorChegaPeloNome() {
+  const caso = "a recusa do seletor pelo nome";
+  const recusaDoRust = { Recusado: { motivo: "tipo-recusado:heic" } };
+  for (const [api, recusa] of [
+    [6, () => ({ erro: "tipo-recusado", detectado: "heic" })],
+    [5, () => null],
+  ]) {
+    const b = bancada();
+    const d = dono(b);
+    d.api.escolherArquivo = () => Promise.reject(recusaDoRust);
+    d.api.recusaParaOMod = recusa;
+    const r = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+    r.aplicar([{ forma: "arquivo", chave: "retrato", dentro: "ENVIAR" }]);
+    acharTag(r.raiz, "button")?.disparar("click");
+    await volta();
+    const dito = d.ditos.find((e) => e.nome === "arquivo");
+    if (api === 6) {
+      confere(caso, dito?.resultado === "falhou" && dito?.erro === "tipo-recusado"
+        && dito?.detectado === "heic" && !("porque" in dito),
+      `o MOD da API 6 não recebeu a recusa pelo nome: ${JSON.stringify(dito)}`);
+    } else {
+      confere(caso, dito?.resultado === "falhou" && typeof dito?.porque === "string" && !("erro" in dito),
+        `o MOD da API 5 deixou de receber o \`porque\` de antes: ${JSON.stringify(dito)}`);
+    }
+    r.soltar();
+  }
+}
+
 function oRodapeEReconciliadoSemMoverOBotao() {
   const b = bancada();
   const d = dono(b);
@@ -5436,6 +5472,7 @@ async function oDataDoSomDoServidorNaoFicaRetido() {
     oErroDoCampoAcompanhaAEdicaoSemRoubarFoco,
     aChaveDoCampoNaoPartePar,
     aFinalidadeDoArquivoNaoPartePar,
+    aRecusaDoSeletorChegaPeloNome,
     oArrasteViraTracoAgregado,
     oArrastePegaAFiguraDeCima,
     sairDuranteOCarregamentoNaoMonta,

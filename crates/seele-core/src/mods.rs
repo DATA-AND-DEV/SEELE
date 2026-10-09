@@ -333,6 +333,10 @@ pub struct MidiaDeMod {
 /// **O teto por arquivo de mídia de um MOD.**
 pub use seele_proto::midia_de_mod::TETO_DE_ARQUIVO as TETO_DE_MIDIA;
 
+/// Um formato que o produto reconhece e não aceita (o HEIC), para a recusa
+/// dizer o nome dele — ver [`seele_proto::imagem::reconhecido_e_nao_aceito`].
+pub use seele_proto::imagem::reconhecido_e_nao_aceito;
+
 /// O que estes bytes são, **sem montar um `data:` deles**.
 ///
 /// [`ler_midia`] serve para o que vai virar um elemento na hora: ela devolve o
