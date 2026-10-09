@@ -128,6 +128,9 @@ const SEELE_QUADRO = {
   notice: null, muted: false, total_isolation: false, speaking: false,
   person_icons_revision: 1,
   voice_mode: "PushToTalk", audio_available: true, capture: null, playback: null,
+  // Dentro de sala, o áudio abriu: o Snapshot de verdade sempre traz o estado da
+  // abertura (pendência 52), e sem ele o rodapé e o medidor caem no «fora de sala».
+  abertura_do_audio: "aberto",
   may_manage_voice_rooms: true, may_kick: true, may_ban: true, may_remove_message: true,
   may_move_person: true, may_customise_server: true, may_delete_rooms: true,
   tela: null, ended: null,
