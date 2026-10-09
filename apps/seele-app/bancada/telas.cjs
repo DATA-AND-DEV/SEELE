@@ -122,6 +122,7 @@ function retrato(extra = {}) {
       input_level: 0.2,
       local_fault: false,
       frames_refused: 0,
+      microfone_entrega_silencio_digital: false,
     },
     notice: null,
     muted: false,
@@ -191,6 +192,10 @@ function respostas(extra = {}) {
     },
     pasta_de_downloads: "/tmp",
     telemetria_da_malha: null,
+    // O volume de cada pessoa mora no Rust e chega por este comando, e não pelo
+    // retrato (F1-vazamento). A Lia a 150 põe no desenho um deslizante fora do
+    // padrão, que é o caso que a leitura do Rust tem de manter.
+    volumes_locais: { Lia: 150 },
     ...extra,
   };
 }

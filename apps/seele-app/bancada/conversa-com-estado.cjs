@@ -57,6 +57,20 @@ const chromium = require("./playwright.cjs").chromium();
                   window.rejectSend = fail;
                 });
               }
+              // Os dois pedidos que a rodada 1 do lote I-b segura no meio: a
+              // conversa e os volumes. A resposta chega quando o teste mandar,
+              // com o que ele mandar — a de uma sessão que já acabou, ou uma
+              // leitura de volume de antes do último gesto.
+              if (cmd === "messages" && window.adiarMensagens) {
+                return new Promise((ok) => {
+                  window.soltarMensagens = ok;
+                });
+              }
+              if (cmd === "volumes_locais" && window.adiarVolumes) {
+                return new Promise((ok) => {
+                  window.soltarVolumes = ok;
+                });
+              }
               // **A recusa por falta de consentimento, no lugar certo.**
               //
               // Aqui e não num `invoke` trocado depois: `base.js` faz
@@ -271,6 +285,330 @@ const chromium = require("./playwright.cjs").chromium();
         "responde vira uma batida constante na porta de alguém",
     );
     console.log("R06 OK: ler uma mensagem não dispara prévia, e o convite nomeia o domínio");
+
+    // ---- acréscimo C do lote I-b: os dois avisos que chegavam como «AVISO» ----
+    //
+    // O guarda `todo_motivo_de_aviso_tem_frase_na_pagina` prova que a frase
+    // existe. Aqui se prova a frase que sai, pela `fraseDoAviso` de verdade: a
+    // da sala além da subida leva os dois números em kbps, legíveis.
+    const avisos = await page.evaluate(() => ({
+      movido: fraseDoAviso("MovedByOperator"),
+      subida: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 6_480_000, medido_bps: 4_000_000 },
+      }),
+      semNumeros: fraseDoAviso({ VoiceRoomOverHostUplink: {} }),
+      // M-6 da rodada 1: dois números a menos de 500 bps um do outro.
+      pertos: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 4_000_400, medido_bps: 4_000_000 },
+      }),
+      // E a sala que pede menos que a subida medida: o aviso dispara acima de
+      // 60% dela (ADR 0038), e a frase não pode dizer que passou do que a
+      // internet consegue enviar com os números desmentindo.
+      abaixo: fraseDoAviso({
+        VoiceRoomOverHostUplink: { precisa_bps: 3_000_000, medido_bps: 4_000_000 },
+      }),
+    }));
+    for (const [nome, frase] of Object.entries(avisos)) {
+      assert.ok(
+        typeof frase === "string" && frase.length > 0 && frase !== "AVISO",
+        `o aviso ${nome} chega à faixa sem frase: ${JSON.stringify(frase)}`,
+      );
+    }
+    assert.ok(
+      avisos.subida.includes("6.480 kbps") && avisos.subida.includes("4.000 kbps"),
+      `a sala além da subida não diz os dois números em kbps legíveis: ${avisos.subida}`,
+    );
+    assert.ok(
+      !/undefined|NaN/.test(avisos.semNumeros),
+      `sem os números, a frase escreve lixo no lugar deles: ${avisos.semNumeros}`,
+    );
+    const numeros = /pede ([\d.,]+ kbps).*cerca de ([\d.,]+ kbps)/.exec(avisos.pertos);
+    assert.ok(
+      numeros && numeros[1] !== numeros[2],
+      `com 400 bps de diferença, a frase diz dois números iguais: ${avisos.pertos}`,
+    );
+    assert.ok(
+      !/CONSEGUE ENVIAR/.test(avisos.abaixo),
+      `a sala pede menos do que a internet envia, e a frase diz que passou do que ela ` +
+        `consegue enviar: ${avisos.abaixo}`,
+    );
+    console.log("C OK: quem é movido e quem hospeda uma sala além da subida leem uma frase");
+
+    // ---- M-3 da rodada 1: uma leitura de volume de antes do gesto não o desfaz ----
+    //
+    // A leitura de `volumes_locais` sai, a pessoa arrasta o deslizante da Lia
+    // para 150, e a resposta chega com o que o Rust tinha **antes** do gesto.
+    // Aplicada, ela devolvia a Lia a 100 na tela, com o Rust já em 150.
+    const volume = await page.evaluate(async () => {
+      $("tela-boot").hidden = true;
+      $("tela-sessao").hidden = false;
+      const tinha = window.testTable.volumes_locais;
+      window.testTable.volumes_locais = {};
+      desenhar(window.testTable.snapshot);
+      await new Promise((ok) => setTimeout(ok, 0));
+      await new Promise((ok) => setTimeout(ok, 0));
+      window.adiarVolumes = true;
+      const leitura = lerVolumes();
+      const deslizante = $("lista-roster").querySelector('input.volume[data-pessoa="Lia"]');
+      deslizante.value = "150";
+      deslizante.dispatchEvent(new Event("input", { bubbles: true }));
+      window.soltarVolumes({});
+      await leitura;
+      window.adiarVolumes = false;
+      window.testTable.volumes_locais = tinha;
+      return volumesLidos.get("Lia") ?? null;
+    });
+    assert.equal(
+      volume,
+      150,
+      "uma leitura de volume que saiu antes do gesto desfez o gesto: a Lia voltou a 100 " +
+        "na tela, com o Rust em 150",
+    );
+    // E a leitura em voo quando a sessão acaba não enche a seguinte com os
+    // volumes da que acabou: `esquecerOEstadoDaSessao` a faz velha.
+    const entreSessoes = await page.evaluate(async () => {
+      window.adiarVolumes = true;
+      const leitura = lerVolumes();
+      esquecerVolumes();
+      window.soltarVolumes({ Lia: 150 });
+      await leitura;
+      window.adiarVolumes = false;
+      return volumesLidos.size;
+    });
+    assert.equal(
+      entreSessoes,
+      0,
+      "a leitura de volume em voo quando a sessão acabou encheu a seguinte com os volumes " +
+        "da que acabou",
+    );
+    console.log("M-3 OK: uma leitura de volume velha não desfaz o último gesto");
+
+    // ---- F1-vazamento: o que a sessão guardou não passa para a seguinte ----
+    //
+    // O rascunho é por número de canal, e a prévia de link e o volume lido são
+    // por chave que o servidor dá: o canal 1 de um servidor não é o de outro.
+    // As duas saídas passam por `esquecerOEstadoDaSessao`. Por último nesta
+    // bancada, porque as duas tiram a tela de sessão da frente.
+    //
+    // **B pelo caminho do app** (rodada 2 do lote I-b). A cena chamava
+    // `restaurarRascunho()` à mão depois da saída, e provava o mapa por um
+    // caminho que o app não percorre: em B, a Linha vem do retrato
+    // (`desenharCanais`), sem restaurar nada, e o texto que ficou no campo em
+    // A ia no primeiro Enter. Agora B é o `desenhar` do retrato com a tela
+    // escondida e a tela mostrada depois — o que `conectar` faz —, o Enter de
+    // verdade, e os cliques de verdade nas Linhas.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const depois = await page.evaluate(async (qual) => {
+        const pausa = () => new Promise((ok) => setTimeout(ok, 0));
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        desenhar(window.testTable.snapshot);
+        // Em A: um rascunho guardado no canal 2, e um texto escrito no canal 1
+        // sem trocar de Linha — ele só está no campo.
+        linhaAberta = 2;
+        $("campo-mensagem").value = "rascunho do canal 2 do servidor A";
+        guardarRascunho();
+        linhaAberta = 1;
+        $("campo-mensagem").value = "texto escrito no servidor A";
+        previasDeLink.set("https://exemplo.invalid/a.png", false);
+        volumesLidos.set("Lia", 150);
+        // M-2 da rodada 1: o relógio do UPTIME e o endereço da porta são de A.
+        comecoDaSessao = Date.now() - 600_000;
+        alvoDoServer = "servidor-a.invalid:8383";
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        const comeco = comecoDaSessao;
+        const alvo = alvoDoServer;
+        const previas = previasDeLink.size;
+        const volumes = volumesLidos.size;
+        // B: o retrato com a tela escondida, e a tela mostrada.
+        desenhar(window.testTable.snapshot);
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        const noCampo = $("campo-mensagem").value;
+        const linha = linhaAberta;
+        // O primeiro Enter em B.
+        window.testCalls.length = 0;
+        await enviar({ preventDefault() {} });
+        const enviados = window.testCalls
+          .filter((c) => c.cmd === "send_message")
+          .map((c) => c.args);
+        // E os cliques de verdade: para o canal 2, e de volta ao 1.
+        $("lista-linhas").querySelector('[data-linha="2"]').click();
+        await pausa();
+        await pausa();
+        const noCanal2 = $("campo-mensagem").value;
+        $("lista-linhas").querySelector('[data-linha="1"]').click();
+        await pausa();
+        await pausa();
+        const deVoltaAo1 = $("campo-mensagem").value;
+        return {
+          linha,
+          noCampo,
+          enviados,
+          noCanal2,
+          deVoltaAo1,
+          previas,
+          volumes,
+          comeco,
+          alvo,
+        };
+      }, saida);
+      assert.deepEqual(
+        depois,
+        {
+          linha: 1,
+          noCampo: "",
+          enviados: [],
+          noCanal2: "",
+          deVoltaAo1: "",
+          previas: 0,
+          volumes: 0,
+          comeco: null,
+          alvo: null,
+        },
+        `depois de ${saida}, o que a sessão guardou passou para a seguinte: ` +
+          JSON.stringify(depois),
+      );
+    }
+    console.log(
+      "F1-vazamento OK: o campo, o rascunho, a prévia e o volume não passam de uma sessão para outra",
+    );
+
+    // ---- M-1 da rodada 1, em voo: a conversa pedida em A não é escrita em B ----
+    //
+    // Um `messages` pedido na sessão A e respondido depois de ela acabar trazia
+    // a conversa de A, e `sincronizarMensagens` a escrevia — com a revisão de
+    // A — por cima do que a sessão seguinte ainda nem tinha buscado.
+    const emVoo = await page.evaluate(async () => {
+      $("tela-boot").hidden = true;
+      $("tela-sessao").hidden = false;
+      entrarNaGeracao(7);
+      window.adiarMensagens = true;
+      const sincronia = sincronizarMensagens(9);
+      await ejetar();
+      window.soltarMensagens([
+        {
+          id: 71,
+          channel: 1,
+          author: 2,
+          author_nickname: "Lia",
+          at_seconds: 1_726_900_000,
+          body: "atrasada do servidor A",
+          own: false,
+          edited: false,
+          estado: "Confirmada",
+          client_message_id: null,
+        },
+      ]);
+      await sincronia;
+      window.adiarMensagens = false;
+      return { mensagens: mensagens.length, revisao: revisaoDesenhada };
+    });
+    assert.deepEqual(
+      emVoo,
+      { mensagens: 0, revisao: null },
+      `a conversa pedida na sessão que acabou foi escrita na seguinte: ${JSON.stringify(emVoo)}`,
+    );
+    console.log("M-1 OK: a conversa de uma sessão que acabou não chega à seguinte em voo");
+
+    // ---- I-1 da rodada 1: o anexo escolhido em A não vai a B ----
+    //
+    // A cena que a revisão mediu: o arquivo escolhido para um servidor ficava
+    // na caixa depois de qualquer saída, e o primeiro Enter no servidor seguinte
+    // o mandava, junto com o que se escrevesse ali.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const anexo = await page.evaluate(async (qual) => {
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        guardarAnexo({
+          nome: "contrato-do-servidor-A.pdf",
+          caminho: "/tmp/contrato-A.pdf",
+          tamanho: 2048,
+          tipo: "application/pdf",
+        });
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        // Em B: a Linha 1 dela, e o primeiro Enter.
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        window.testCalls.length = 0;
+        $("campo-mensagem").value = "oi, servidor B";
+        await enviar({ preventDefault() {} });
+        return {
+          caixa: $("anexo-pendente").hidden ? null : $("anexo-nome").textContent,
+          arquivos: window.testCalls
+            .filter((c) => c.cmd === "enviar_anexo")
+            .map((c) => c.args.caminho),
+          textos: window.testCalls
+            .filter((c) => c.cmd === "send_message")
+            .map((c) => c.args.body),
+        };
+      }, saida);
+      assert.deepEqual(
+        anexo,
+        { caixa: null, arquivos: [], textos: ["oi, servidor B"] },
+        `depois de ${saida}, o arquivo escolhido para o servidor A foi junto com a ` +
+          `primeira mensagem do B: ${JSON.stringify(anexo)}`,
+      );
+    }
+    console.log("I-1 OK: o arquivo escolhido para um servidor não vai para o seguinte");
+
+    // ---- M-1 da rodada 1: a conversa de A não aparece em B ----
+    //
+    // Nem de passagem — a lista desenhada de A, à vista quando B aparece —, nem
+    // para ficar, quando a primeira revisão de B coincide com a última de A e a
+    // sincronização conclui que não há o que buscar.
+    for (const saida of ["ejetar", "limparSessaoEncerrada"]) {
+      const conversa = await page.evaluate(async (qual) => {
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        linhaAberta = 1;
+        const deA = {
+          id: 70,
+          channel: 1,
+          author: 2,
+          author_nickname: "Lia",
+          at_seconds: 1_726_900_000,
+          body: "segredo do servidor A",
+          own: false,
+          edited: false,
+          estado: "Confirmada",
+          client_message_id: null,
+        };
+        mensagens = [deA];
+        revisaoDesenhada = 5;
+        desenharMensagens();
+        const desenhadaEmA = $("lista-mensagens").textContent.includes("segredo do servidor A");
+        if (qual === "ejetar") await ejetar();
+        else await limparSessaoEncerrada({ pararDeHospedar: false });
+        // B aparece, e a primeira revisão dela é a mesma 5, com outra conversa.
+        $("tela-boot").hidden = true;
+        $("tela-sessao").hidden = false;
+        const deAAoAparecer = $("lista-mensagens").textContent.includes("segredo do servidor A");
+        const conversaDeA = window.testTable.messages;
+        window.testTable.messages = [{ ...deA, id: 1, body: "oi do servidor B" }];
+        linhaAberta = 1;
+        await sincronizarMensagens(5);
+        const texto = $("lista-mensagens").textContent;
+        window.testTable.messages = conversaDeA;
+        return {
+          desenhadaEmA,
+          deAAoAparecer,
+          deADepois: texto.includes("segredo do servidor A"),
+          deB: texto.includes("oi do servidor B"),
+        };
+      }, saida);
+      assert.deepEqual(
+        conversa,
+        { desenhadaEmA: true, deAAoAparecer: false, deADepois: false, deB: true },
+        `depois de ${saida}, a conversa do servidor A apareceu no B, ou a do B não foi ` +
+          `buscada porque a revisão coincidia: ${JSON.stringify(conversa)}`,
+      );
+    }
+    console.log("M-1 OK: a conversa de A não aparece em B, nem com a revisão coincidente");
   } finally {
     await browser.close();
     server.close();

@@ -1080,6 +1080,16 @@ pub struct Telemetry {
     /// leaves**, which sounds identical to network loss and has the opposite
     /// fix.
     pub frames_refused: u64,
+    /// Se o microfone entrega **zero exato** há três segundos, aberto e sem
+    /// mudo. F1-microfone-macos.
+    ///
+    /// É como o macOS entrega um microfone que ele bloqueia: abre sem erro e
+    /// manda zeros. A casca do macOS diz então que o sistema **pode** estar
+    /// bloqueando — uma interface USB com o ganho no mínimo também entrega zero
+    /// exato. Falso sem voz de pé. Ver `seele_core::LocalTelemetry`.
+    ///
+    /// Só um sim ou não: nenhum nome de aparelho, nada desta máquina.
+    pub microfone_entrega_silencio_digital: bool,
 }
 
 /// Something worth surfacing.
