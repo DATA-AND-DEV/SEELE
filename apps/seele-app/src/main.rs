@@ -1331,14 +1331,20 @@ async fn connect(
 
     connection.subscribe(ponte);
 
-    // O modo de microfone gravado, aplicado assim que há o que aplicar.
+    // O modo de microfone, a supressão de ruído e a sensibilidade gravados,
+    // aplicados assim que há o que aplicar.
     //
     // Aqui e não num campo de `connect`: a sessão nasce no padrão da spec —
     // push-to-talk, microfone fechado — e só então abre para o que a pessoa
     // escolheu. A ordem é a segura; a inversa teria um instante em que um
     // microfone poderia estar aberto antes de alguém ter dito que podia.
-    if let Some(modo) = preferencias(&app).and_then(|p| p.voice_mode()) {
-        connection.set_voice_mode(VoiceMode::from(modo));
+    //
+    // **Os três, e não só o modo** (acréscimo A do lote I-b). A supressão e a
+    // sensibilidade gravadas ficavam de fora, e a sessão começava nos padrões
+    // até a pessoa mexer. Desde a pendência 52 os três moram na conexão e valem
+    // ao abrir o áudio, então aplicá-los aqui é gravá-los lá.
+    if let Some(ajustes) = preferencias(&app) {
+        connection.vestir_as_escolhas_gravadas(&ajustes);
     }
 
     // **O retrato desta máquina sobe junto com a conexão.**
@@ -7878,6 +7884,22 @@ fn set_volume(
     session.connection()?.set_volume(nickname, percent)
 }
 
+/// O volume que esta sessão guardou para cada pessoa, por apelido. F1-vazamento.
+///
+/// Um comando próprio, e não um campo do `snapshot`: o retrato vai inteiro aos
+/// MODs, e quanto esta máquina quer ouvir cada um não é deles. A janela relê
+/// isto a cada quadro em vez de lembrar o que mandou — a lembrança dela
+/// sobrevivia à sessão e passava o volume de uma Rafa para a de outro servidor.
+///
+/// Sem sessão, nenhum: não há de quem.
+#[tauri::command]
+fn volumes_locais(session: State<'_, Session>) -> std::collections::HashMap<String, u16> {
+    session
+        .connection()
+        .map(|conexao| conexao.volumes_locais())
+        .unwrap_or_default()
+}
+
 // ------------------------------------------------------- compartilhar a tela
 //
 // Seis comandos e nenhuma decisão, como todo o resto deste arquivo. O teto de
@@ -9739,6 +9761,7 @@ fn main() {
             set_talking,
             set_voice_mode,
             set_volume,
+            volumes_locais,
             fontes_de_tela,
             permissao_de_tela,
             pedir_permissao_de_tela,

@@ -189,8 +189,9 @@ fn onde_dito(onde: Option<&str>) -> String {
 
 /// **O que saiu de uma volta do MOD**, já cortado no teto da linha.
 ///
-/// O molde é o `Lancado` do executor da janela (`apps/seele-app/src/executor.rs`),
-/// copiado e não importado: o servidor não depende do app.
+/// O molde é o `Lancado` do motor de MOD da janela (`crates/seele-motor/src/lib.rs`,
+/// que saiu do `executor.rs` do app), copiado e não importado: o servidor não
+/// depende do `seele-motor`.
 struct Lancado {
     /// `nome: mensagem`, o valor lançado como texto, ou o erro do motor.
     texto: String,

@@ -3895,6 +3895,40 @@ atrás do `--exclude seele-conformance`, que nunca a excluiu —, mas a partir
 desta entrega ela é a instabilidade mais provável do comando único, e é por isso
 que está nomeada.
 
+**Consertada em 2026-10-09, em `7b2bbb96` (a F7, a pedido da orquestradora).**
+Ela reprovou de novo na rodada paralela da F3 em 09/10, e o mecanismo escrito
+acima estava certo, com um detalhe que a medida acrescentou. Não é a máquina
+lenta que encerra a contagem: é a linha do teste ficar fora de cena com uma
+leitura pendente. O `tokio::test` roda o `atender` e a contagem na mesma linha.
+Quando o sistema a para, o prazo de 600 ms daquela leitura vence antes de o
+furo seguinte ser lido, e o `break` encerra a contagem no meio. Silêncio não
+distingue «o servidor parou» de «esta linha não rodou».
+
+- **A carga de CPU, de novo, não reproduz.** Com 120 processos em `nice 20` e a
+  carga média perto de 77, os sessenta furos saíram em 7,20 s, com o maior
+  intervalo em 134 ms. A janela de 10 s nem chegou perto de escorregar.
+- **A reprodução** foi provocar o soluço: uma tarefa na mesma linha que a para
+  por 800 ms no meio da fila. A contagem antiga acabou em 9 furos, 3 de 3.
+- **O conserto** foi o que este registro sugeria, e um pouco mais:
+  - `contar_furos` conta até os esperados sem prazo por leitura, só o da
+    contagem inteira (40 s). Depois espera um a mais por 1 s. Essa espera só
+    decide se uma regressão é pega, e não reprova teste verde;
+  - `um_soluco_no_meio` provoca o soluço de 800 ms em **toda** rodada. Uma
+    contagem frágil passa a reprovar sempre, e não uma vez em muitas;
+  - a folga que sobra está escrita no teste: 7,2 s de fila contra a janela de
+    10 s. O soluço gasta 0,8 s, e sobram 2 s de escorregão acumulado antes de o
+    61º caber de verdade;
+  - o vizinho `a_janela_cabe_uma_entrada_legitima_inteira` tinha o mesmo laço,
+    e foi junto.
+- **As reversões medidas:**
+  - sem o teto no `atender`, reprova com 61 furos (o defeito que o teste guarda);
+  - com o prazo de 600 ms por leitura de volta, os dois testes reprovam com 3
+    furos, em toda rodada;
+  - o controle: sem o teto e sem a espera de um a mais, passa. É essa espera que
+    pega o teto.
+- O teste passou de 7,8 s para 9,0 s, e o `seele-server --lib` inteiro deu 624
+  de 624, três vezes.
+
 **5. `tela_por_um_par::a_reconexao_ao_servidor_nao_deixa_a_conexao_velha_\
 atrapalhar_o_par_novo` reprova com a permissão armada, e é o achado da terceira
 revisão independente.** Ela não veio da minha medição: veio de a revisão ler os
@@ -8366,3 +8400,18 @@ um crate novo (o auxiliar tem três linhas):
 
 **Quando fecha.** Com o auxiliar nos três crates e a prova de ordem forçada em
 cada um, provada por reversão.
+
+## 57 · O guarda da identidade da linha 0.15 lê só o texto antes do primeiro `#[cfg(test)]`
+
+**Aberta em 2026-10-09**, achada pela F7 da 0.16 ao portar o `9ff9b73c` (a 0.15.2
+lê a identidade em `$SEELE_IDENTIDADE`) para a 0.16 (`58552de8`). **Não é defeito
+de hoje: é um guarda que não pegaria uma regressão futura.**
+
+No `seele-ffi` da `linha/0.15`, o guarda que confere que só os dois leitores da
+identidade existem lê o arquivo até o primeiro `#[cfg(test)]`. Mas o arquivo tem
+produção depois dele (dois `impl Connection`), e um terceiro leitor escrito ali
+passaria. O código de hoje está certo: só os dois leitores, os dois pelo montador.
+
+Na 0.16, o guarda novo tira cada módulo de teste e lê o resto, e tem um guarda do
+guarda. **O que fazer:** se a linha 0.15 ganhar uma 0.15.3, portar o guarda da
+0.16 junto. A 0.15.2 sai como está, com a bateria verde de `148c9e60`.

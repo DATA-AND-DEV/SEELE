@@ -929,26 +929,54 @@ const DEFASAGEM_ENTRE_CANDIDATOS: Duration = Duration::from_millis(250);
 /// para a limpeza de pin órfão dos perdedores, e precisa saber **quem** venceu
 /// para pular a chave dele. Ver o ADR 0037.
 #[derive(Debug)]
-struct Corrida<T> {
-    /// Quem fechou primeiro, e a posição dele na lista que foi corrida.
+struct Corrida<P, T> {
+    /// Quem fechou primeiro, e a posição dele em [`Corrida::iniciados`].
     vencedor: Option<(usize, T)>,
     /// Quem não fechou, na ordem em que desistiram.
     falhas: Vec<(usize, ConnectError)>,
+    /// Quem começou, **na ordem em que começou**: a posição de um corredor é o
+    /// índice dele aqui. Quem ficou na fila sem começar não está, porque não
+    /// tentou nada e não tem o que limpar.
+    iniciados: Vec<P>,
 }
 
-/// Corre `quantos` tentativas, disparando uma a cada `defasagem`, e fica com a
-/// primeira que fechar.
+/// Corre os candidatos da `fila`, disparando um a cada `defasagem`, e fica com
+/// o primeiro que fechar.
 ///
 /// É o RFC 8305 — «Happy Eyeballs» — e a razão de existir está medida na
 /// pendência nº 26: em série, três candidatos sem chance custam 9,6 s antes de o
 /// quarto sequer ser tentado.
 ///
-/// # Por que genérica sobre `T`
+/// # Os que chegam depois
 ///
-/// Para que a defasagem e o «primeiro vence» tenham teste. Um teste que
-/// provasse isto com sockets de verdade dependeria de rede, e o que precisa ser
-/// provado aqui não é a rede: é que o segundo candidato **começa** sem esperar o
-/// primeiro terminar, e que o rápido vence mesmo estando por último na lista.
+/// `tardios` é quem só fica pronto com a corrida já andando: o que o quarto
+/// do ponto de encontro dá a quem volta a um servidor guardado (a pendência
+/// 55). Antes, a corrida acabava quando a lista dela acabava, e quem consultava
+/// o quarto tinha de esperar a resposta antes de começar — até 1,5 s, pagos
+/// também por quem estava na mesma casa.
+///
+/// - **O lote que chega entra na frente** de quem ainda espera a vez, e o
+///   primeiro dele começa na hora. A defasagem recomeça dele.
+/// - **Um lote vazio não mexe em nada**: ninguém começa fora da vez.
+/// - **A corrida espera o lote** quando ninguém mais corre e a fila acabou. Ela
+///   não acaba antes de ele chegar, e por isso quem passa `tardios` responde
+///   por ele chegar: o quarto tem prazo.
+/// - **Quem já ganhava não espera**: o primeiro a fechar vence, chegue o lote
+///   quando chegar.
+/// - **A posição é a ordem em que cada um começou**, e não a da lista. A trilha
+///   numera por ela, e a regra de que só o último candidato desiste
+///   (`Etapa::transicao_legal`) continua valendo com quem chegou depois.
+///
+/// Sem `tardios`, a corrida é a de sempre, nos mesmos instantes: os testes de
+/// `a_corrida` escrevem esses instantes em números.
+///
+/// # Por que genérica
+///
+/// Para que a defasagem e o «primeiro vence» tenham teste sem socket. Um teste
+/// que provasse isto com sockets de verdade dependeria de rede, e o que precisa
+/// ser provado aqui não é a rede: é que o segundo candidato **começa** sem
+/// esperar o primeiro terminar, e que o rápido vence mesmo estando por último na
+/// lista. Os testes moram em `a_corrida`.
 ///
 /// # Por que `JoinSet` e não `futures::FuturesUnordered`
 ///
@@ -962,40 +990,81 @@ struct Corrida<T> {
 /// Elas não continuam escrevendo em lugar nenhum, e o que uma delas possa ter
 /// escrito em disco — um pin de TLS — é assunto de quem chama, que sabe qual
 /// chave o vencedor usou.
-async fn correr<T, F, Fut>(quantos: usize, defasagem: Duration, tentar: F) -> Corrida<T>
+async fn correr<P, T, F, Fut, L>(
+    fila: Vec<P>,
+    defasagem: Duration,
+    tardios: Option<L>,
+    tentar: F,
+) -> Corrida<P, T>
 where
+    P: Clone,
     T: Send + 'static,
-    F: Fn(usize) -> Fut,
+    F: Fn(usize, P) -> Fut,
     Fut: std::future::Future<Output = Result<T, ConnectError>> + Send + 'static,
+    L: std::future::Future<Output = Vec<P>>,
 {
+    let mut fila: std::collections::VecDeque<P> = fila.into();
     let mut corredores = tokio::task::JoinSet::new();
     let mut falhas: Vec<(usize, ConnectError)> = Vec::new();
-    let mut proximo = 0_usize;
+    let mut iniciados: Vec<P> = Vec::new();
+    // Sem tardios, eles já chegaram: um lote vazio, que nunca é esperado.
+    let mut tardios_chegaram = tardios.is_none();
+    let tardios = async move {
+        match tardios {
+            Some(tardios) => tardios.await,
+            None => Vec::new(),
+        }
+    };
+    tokio::pin!(tardios);
+    // O primeiro sai sem espera nenhuma.
+    let mut disparar = true;
+    // A vez do próximo, contada de quem começou por último. É um instante, e
+    // não um `sleep` refeito a cada volta do laço: um lote vazio que chega no
+    // meio da defasagem não pode empurrar a vez de ninguém.
+    let mut vez = tokio::time::Instant::now() + defasagem;
 
     loop {
-        // Dispara o próximo, se ainda houver. O primeiro sai sem espera nenhuma.
-        if proximo < quantos {
-            let posicao = proximo;
-            let futuro = tentar(posicao);
-            corredores.spawn(async move { (posicao, futuro.await) });
-            proximo += 1;
+        // Dispara o próximo, se for a vez e ainda houver.
+        if std::mem::take(&mut disparar) {
+            if let Some(proximo) = fila.pop_front() {
+                let posicao = iniciados.len();
+                iniciados.push(proximo.clone());
+                let futuro = tentar(posicao, proximo);
+                corredores.spawn(async move { (posicao, futuro.await) });
+                vez = tokio::time::Instant::now() + defasagem;
+            }
         }
 
-        if corredores.is_empty() {
-            break;
+        if corredores.is_empty() && fila.is_empty() {
+            if tardios_chegaram {
+                break;
+            }
+            // Ninguém correndo e ninguém na vez: só o lote pode trazer alguém,
+            // e a corrida o espera em vez de acabar sem ele.
+            let lote = (&mut tardios).await;
+            tardios_chegaram = true;
+            disparar = receber_o_lote(&mut fila, lote);
+            continue;
         }
 
         // Enquanto os que já estão no ar correm, o relógio da defasagem anda. Se
         // alguém fechar antes dela, a corrida acaba ali — que é o caso comum, e
         // é o motivo de isto existir.
-        let terminou = if proximo < quantos {
-            tokio::select! {
-                terminou = corredores.join_next() => terminou,
-                () = tokio::time::sleep(defasagem) => continue,
+        let terminou = tokio::select! {
+            terminou = corredores.join_next(), if !corredores.is_empty() => terminou,
+            () = tokio::time::sleep_until(vez), if !fila.is_empty() => {
+                disparar = true;
+                continue;
             }
-        } else {
-            corredores.join_next().await
+            lote = &mut tardios, if !tardios_chegaram => {
+                tardios_chegaram = true;
+                disparar = receber_o_lote(&mut fila, lote);
+                continue;
+            }
         };
+        // Quem terminou sem vencer abre a vez do próximo, sem esperar a
+        // defasagem: é o comportamento de sempre.
+        disparar = true;
 
         match terminou {
             Some(Ok((posicao, Ok(pronto)))) => {
@@ -1004,24 +1073,114 @@ where
                 return Corrida {
                     vencedor: Some((posicao, pronto)),
                     falhas,
+                    iniciados,
                 };
             }
             Some(Ok((posicao, Err(erro)))) => falhas.push((posicao, erro)),
             // Uma tentativa que entrou em pânico ou foi cancelada. Não é
             // vencedora e não tem erro próprio a contar.
-            Some(Err(_)) => {}
-            None => {
-                if proximo >= quantos {
-                    break;
-                }
-            }
+            Some(Err(_)) | None => {}
         }
     }
 
     Corrida {
         vencedor: None,
         falhas,
+        iniciados,
     }
+}
+
+/// O que o quarto do ponto de encontro deu a quem volta a um servidor guardado,
+/// para a corrida que já está andando (a pendência 55).
+///
+/// Quem monta é [`crate::chegada::Chegada`], que pergunta ao quarto: ela sabe
+/// quem já corre, e só manda o endereço de hoje quando ele é novo.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DoQuarto {
+    /// O endereço de hoje como candidato, quando ele não é nenhum dos que já
+    /// correm.
+    pub(crate) candidato: Option<Destino>,
+    /// O bilhete desta volta: o guardado, com a escuta de hoje quando o quarto a
+    /// confirma (`crate::encontro::bilhete_desta_volta`). `None` deixa o
+    /// guardado.
+    pub(crate) bilhete: Option<seele_proto::uri::Bilhete>,
+}
+
+/// Um candidato da corrida e o que ele leva: a batida e o bilhete com que avisa
+/// e com que o motor dele volta depois, e o pin da chave dele antes da corrida,
+/// para a limpeza dos perdedores.
+///
+/// A batida e o bilhete são **por corredor** porque quem espera o quarto avisa
+/// a escuta de hoje, e quem começou antes avisa a guardada.
+#[derive(Clone)]
+struct Corredor {
+    destino: Destino,
+    antes: Option<String>,
+    batida: Option<crate::encontro::Batida>,
+    bilhete: Option<seele_proto::uri::Bilhete>,
+}
+
+/// Se um `LEVE` sai por este candidato: há batida, e o endereço é público.
+///
+/// **A pergunta é uma só.** É ela que `avisar_pelo_candidato` faz antes de
+/// mandar, e é ela que decide quem espera o quarto: quem não seria avisado não
+/// tem por que esperar a escuta de hoje. Uma segunda opinião sobre «quem precisa
+/// de furo» já foi escrita e desfeita uma vez (`b4f5ef94`), justamente onde as
+/// duas discordavam.
+fn pede_furo(batida: Option<&crate::encontro::Batida>, onde: SocketAddr) -> bool {
+    batida.is_some() && e_publico(onde.ip())
+}
+
+/// O lote que o quarto solta na corrida: quem esperava, com o bilhete desta
+/// volta e uma batida que avisa a escuta dele, e o endereço de hoje logo depois
+/// do alvo (se o alvo esperava) ou na frente (se não).
+fn lote_do_quarto(
+    do_quarto: DoQuarto,
+    esperam: Vec<Corredor>,
+    o_alvo_espera: bool,
+    batida: Option<&crate::encontro::Batida>,
+    guardado: Option<seele_proto::uri::Bilhete>,
+    pins: &dyn PinStore,
+) -> Vec<Corredor> {
+    let bilhete = do_quarto.bilhete.or(guardado);
+    // A mesma batida, com o aviso desta volta: o furo tem de abrir para a porta
+    // de onde saem os apertos de mão.
+    let batida = match (
+        batida,
+        bilhete.as_ref().and_then(|bilhete| bilhete.aviso().ok()),
+    ) {
+        (Some(batida), Some(aviso)) => Some(batida.com_aviso(aviso)),
+        (batida, _) => batida.cloned(),
+    };
+    let mut lote: Vec<Corredor> = esperam
+        .into_iter()
+        .map(|corredor| Corredor {
+            batida: batida.clone(),
+            bilhete: bilhete.clone(),
+            ..corredor
+        })
+        .collect();
+    if let Some(destino) = do_quarto.candidato {
+        let de_hoje = Corredor {
+            antes: pins.pinned(&destino.chave_do_pin),
+            destino,
+            batida,
+            bilhete,
+        };
+        lote.insert(usize::from(o_alvo_espera).min(lote.len()), de_hoje);
+    }
+    lote
+}
+
+/// Põe o lote que chegou depois **na frente** de quem espera a vez, na ordem
+/// dele, e diz se alguém tem de começar agora: o primeiro do lote começa na
+/// hora, e um lote vazio não dispara ninguém fora da vez.
+fn receber_o_lote<P>(fila: &mut std::collections::VecDeque<P>, lote: Vec<P>) -> bool {
+    let alguem = !lote.is_empty();
+    for tardio in lote.into_iter().rev() {
+        fila.push_front(tardio);
+    }
+    alguem
 }
 
 impl Enlace {
@@ -1111,7 +1270,7 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
     ) -> Result<Self, ConnectError> {
-        Self::entre(destinos, bilhete, chave, pins, None).await
+        Self::entre(destinos, bilhete, chave, pins, None, None).await
     }
 
     /// O mesmo, contando cada candidato a quem observa.
@@ -1136,16 +1295,53 @@ impl Enlace {
         pins: Arc<dyn PinStore>,
         olhos: mpsc::UnboundedSender<Tentativa>,
     ) -> Result<Self, ConnectError> {
-        Self::entre(destinos, bilhete, chave, pins, Some(olhos)).await
+        Self::entre(destinos, bilhete, chave, pins, Some(olhos), None).await
     }
 
-    /// A preparação que os dois compartilham, e o laço.
+    /// O mesmo, com o quarto do ponto de encontro correndo **junto** com a
+    /// corrida, e não antes dela (a pendência 55).
+    ///
+    /// A porta por onde [`crate::chegada::Chegada`] entra quando volta a um
+    /// servidor guardado. `quarto` é a resposta, quando ela vier: o endereço de
+    /// hoje vira um candidato tardio, e o bilhete desta volta vale para quem
+    /// precisa de furo.
+    ///
+    /// - **Quem não precisa de furo não espera**: um endereço da rede de casa
+    ///   começa na hora, e quem está na mesma casa entra sem pagar o prazo do
+    ///   quarto.
+    /// - **Quem precisa de furo espera a resposta**, como esperava antes: o
+    ///   `LEVE` dele vai à escuta de hoje, quando o quarto a confirma, e não à
+    ///   guardada.
+    /// - O endereço de hoje entra logo depois do alvo, se o alvo também
+    ///   esperava, e na frente dos que esperavam, se não. É a posição que ele
+    ///   tinha quando o `connect` do app o punha na frente dos alternativos.
+    ///
+    /// Quem passa `quarto` responde por ele chegar: a corrida não acaba sem ele.
+    /// Um remetente largado vale como um quarto que não trouxe nada. Sem
+    /// `quarto`, é [`Enlace::conectar_entre_observado`].
+    ///
+    /// # Errors
+    ///
+    /// O mesmo de [`Enlace::conectar_entre`].
+    pub(crate) async fn conectar_entre_com_o_quarto(
+        destinos: Vec<Destino>,
+        bilhete: Option<seele_proto::uri::Bilhete>,
+        chave: SigningKey,
+        pins: Arc<dyn PinStore>,
+        olhos: mpsc::UnboundedSender<Tentativa>,
+        quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
+    ) -> Result<Self, ConnectError> {
+        Self::entre(destinos, bilhete, chave, pins, Some(olhos), quarto).await
+    }
+
+    /// A preparação que os três compartilham, e o laço.
     async fn entre(
         destinos: Vec<Destino>,
         bilhete: Option<seele_proto::uri::Bilhete>,
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
         olhos: Option<mpsc::UnboundedSender<Tentativa>>,
+        quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
         // Preparado antes do laço porque o socket tem de ser um só — o NAT
         // mapeia por porta interna. Mas **nenhum pacote sai daqui**: o aviso é
@@ -1164,6 +1360,7 @@ impl Enlace {
             chave,
             pins,
             olhos.as_ref(),
+            quarto,
         )
         .await
     }
@@ -1176,6 +1373,7 @@ impl Enlace {
         chave: SigningKey,
         pins: Arc<dyn PinStore>,
         olhos: Option<&mpsc::UnboundedSender<Tentativa>>,
+        quarto: Option<tokio::sync::oneshot::Receiver<DoQuarto>>,
     ) -> Result<Self, ConnectError> {
         // Uma cópia por tentativa, e o original vivo até o fim: um `Endpoint`
         // fecha o socket dele ao ser recolhido, e sem o original a porta que o
@@ -1198,7 +1396,9 @@ impl Enlace {
             // laço que termina sem resposta nenhuma.
             return Err(ConnectError::Unreachable);
         };
-        if candidatos.peek().is_none() {
+        // Com o quarto a caminho não há candidato único: o endereço de hoje
+        // ainda pode chegar, e só a corrida o recebe.
+        if candidatos.peek().is_none() && quarto.is_none() {
             // Um convite de um endereço só continua sem prazo novo — o caminho
             // de antes, para um link antigo. Mas o aviso ele leva: um convite
             // que traz **só** o endereço refletido é exatamente a casa que mais
@@ -1228,13 +1428,6 @@ impl Enlace {
 
         let mut a_mostrar = FalhaAMostrar::default();
 
-        // Duas voltas: a primeira com pouca paciência para todo mundo, a
-        // segunda com a paciência inteira. Ver `PRAZO_DA_PRIMEIRA_VOLTA`.
-        //
-        // A lista é clonada porque ela é percorrida duas vezes; `Destino` é
-        // barato — endereços e uma impressão digital.
-        let todos: Vec<Destino> = std::iter::once(primeiro).chain(candidatos).collect();
-
         // A corrida do RFC 8305, no lugar das duas voltas em série.
         //
         // As duas voltas existiam para dar pouca paciência a todo mundo antes de
@@ -1244,87 +1437,128 @@ impl Enlace {
         // continua valendo no caminho de candidato único, logo acima.
         //
         // O que **não** muda: `avisar_pelo_candidato` decide sozinho quem precisa
-        // de furo, por `e_publico`, e o aviso continua saindo colado ao aperto de
+        // de furo, por `pede_furo`, e o aviso continua saindo colado ao aperto de
         // mão que ele acompanha — agora escalonado junto com ele. Ver o ADR 0037.
-        let chaves: Vec<(String, Option<String>)> = todos
-            .iter()
-            .map(|destino| {
-                let chave = destino.chave_do_pin.clone();
-                let antes = pins.pinned(&chave);
-                (chave, antes)
-            })
+        //
+        // Cada corredor leva a fotografia do pin da chave dele **antes** da
+        // corrida, que é o que a limpeza dos perdedores lê lá embaixo.
+        let corredor = |destino: Destino| Corredor {
+            antes: pins.pinned(&destino.chave_do_pin),
+            destino,
+            batida: batida.cloned(),
+            bilhete: bilhete.clone(),
+        };
+        let todos: Vec<Corredor> = std::iter::once(primeiro)
+            .chain(candidatos)
+            .map(corredor)
             .collect();
 
-        let corredores = Arc::new(todos.clone());
-        let quantos = corredores.len();
-        let corrida = correr(quantos, DEFASAGEM_ENTRE_CANDIDATOS, |posicao| {
-            let corredores = Arc::clone(&corredores);
+        // Com o quarto a caminho, quem precisa de furo espera a resposta dele, e
+        // quem não precisa começa na hora. Ver `conectar_entre_com_o_quarto`.
+        let o_alvo_espera = quarto.is_some()
+            && todos
+                .first()
+                .is_some_and(|alvo| pede_furo(batida, alvo.destino.servidor));
+        let (ja, esperam): (Vec<Corredor>, Vec<Corredor>) =
+            todos.into_iter().partition(|corredor| {
+                quarto.is_none() || !pede_furo(batida, corredor.destino.servidor)
+            });
+        let tardios = quarto.map(|quarto| {
             let batida = batida.cloned();
-            let bilhete = bilhete.clone();
-            let chave = chave.clone();
+            let guardado = bilhete.clone();
             let pins = Arc::clone(&pins);
-            let endpoint = endpoint.clone();
-            let olhos = olhos.cloned();
             async move {
-                let Some(destino) = corredores.get(posicao).cloned() else {
-                    return Err(ConnectError::Unreachable);
-                };
-                let onde = destino.servidor;
-
-                // O aviso sai **agora**, para este candidato, e o aperto de mão
-                // sai logo atrás dele. O furo do outro lado dura menos de um
-                // segundo, e a única forma de o `Initial` caber dentro dele é os
-                // dois saírem juntos — que continua valendo com a corrida,
-                // porque cada corredor leva o seu.
-                let repeticao = avisar_pelo_candidato(batida.as_ref(), onde).await;
-                contar(
-                    olhos.as_ref(),
-                    Tentativa {
-                        candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
-                        onde,
-                        avisou: repeticao.is_some(),
-                    },
-                );
-
-                // Um candidato privado de outra casa não devolve ICMP nenhum:
-                // ele queima o prazo inteiro sem nunca ter tido chance. Aqui o
-                // prazo curto não economiza tempo de parede — a corrida já faz
-                // isso — e sim **solta** o corredor, em vez de deixá-lo
-                // pendurado enquanto os outros terminam.
-                let prazo = if e_de_outra_casa(onde) {
-                    PRAZO_DE_CANDIDATO_DISTANTE
-                } else {
-                    PRAZO_POR_CANDIDATO
-                };
-
-                let tentativa = Self::conectar_por(&endpoint, bilhete, destino, chave, pins);
-                let resultado = match tokio::time::timeout(prazo, tentativa).await {
-                    Ok(resultado) => resultado,
-                    // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
-                    // **candidato inteiro**, e queimá-lo é não ter recebido nada
-                    // de volta. O aperto de mão tem um prazo próprio, dentro de
-                    // `Client::connect`, e é ele quem sabe dizer «o servidor
-                    // recebeu e demorou» — porque só ele roda depois de haver
-                    // conexão.
-                    //
-                    // Enquanto os dois casos saíam por aqui, a separação escrita
-                    // em `ConnectError::SemResposta` não chegava à tela uma vez
-                    // sequer: quatro segundos de silêncio na LAN eram anunciados
-                    // como problema de sincronização, e a frase mandava conferir
-                    // versão e protocolo — as duas coisas que estavam certas.
-                    Err(_) => Err(ConnectError::SemResposta),
-                };
-                // A repetição para quando o candidato termina, dando certo ou
-                // não: avisar sobre um candidato que já falhou gastaria furo da
-                // janela do anfitrião por um caminho que ninguém vai tentar de
-                // novo.
-                if let Some(repeticao) = repeticao {
-                    repeticao.abort();
-                }
-                resultado
+                // Um remetente largado é um quarto que não trouxe nada.
+                let do_quarto = quarto.await.unwrap_or_default();
+                lote_do_quarto(
+                    do_quarto,
+                    esperam,
+                    o_alvo_espera,
+                    batida.as_ref(),
+                    guardado,
+                    pins.as_ref(),
+                )
             }
-        })
+        });
+
+        let corrida = correr(
+            ja,
+            DEFASAGEM_ENTRE_CANDIDATOS,
+            tardios,
+            |posicao, corredor: Corredor| {
+                let chave = chave.clone();
+                let pins = Arc::clone(&pins);
+                let endpoint = endpoint.clone();
+                let olhos = olhos.cloned();
+                async move {
+                    let Corredor {
+                        destino,
+                        batida,
+                        bilhete,
+                        ..
+                    } = corredor;
+                    let onde = destino.servidor;
+
+                    // O aviso sai **agora**, para este candidato, e o aperto de mão
+                    // sai logo atrás dele. O furo do outro lado dura menos de um
+                    // segundo, e a única forma de o `Initial` caber dentro dele é os
+                    // dois saírem juntos — que continua valendo com a corrida,
+                    // porque cada corredor leva o seu.
+                    let repeticao = avisar_pelo_candidato(batida.as_ref(), onde).await;
+                    contar(
+                        olhos.as_ref(),
+                        Tentativa {
+                            candidato: u8::try_from(posicao).unwrap_or(u8::MAX),
+                            onde,
+                            avisou: repeticao.is_some(),
+                        },
+                    );
+
+                    // Um candidato privado de outra casa não devolve ICMP nenhum:
+                    // ele queima o prazo inteiro sem nunca ter tido chance. Aqui o
+                    // prazo curto não economiza tempo de parede — a corrida já faz
+                    // isso — e sim **solta** o corredor, em vez de deixá-lo
+                    // pendurado enquanto os outros terminam.
+                    let prazo = if e_de_outra_casa(onde) {
+                        PRAZO_DE_CANDIDATO_DISTANTE
+                    } else {
+                        PRAZO_POR_CANDIDATO
+                    };
+
+                    let tentativa = Self::conectar_por(&endpoint, bilhete, destino, chave, pins);
+                    let resultado = match tokio::time::timeout(prazo, tentativa).await {
+                        Ok(resultado) => resultado,
+                        // `SemResposta` e não `HandshakeTimeout`: este prazo é o do
+                        // **candidato inteiro**, e queimá-lo é não ter recebido nada
+                        // de volta. O aperto de mão tem um prazo próprio, dentro de
+                        // `Client::connect`, e é ele quem sabe dizer «o servidor
+                        // recebeu e demorou» — porque só ele roda depois de haver
+                        // conexão.
+                        //
+                        // Enquanto os dois casos saíam por aqui, a separação escrita
+                        // em `ConnectError::SemResposta` não chegava à tela uma vez
+                        // sequer: quatro segundos de silêncio na LAN eram anunciados
+                        // como problema de sincronização, e a frase mandava conferir
+                        // versão e protocolo — as duas coisas que estavam certas.
+                        Err(_) => Err(ConnectError::SemResposta),
+                    };
+                    // A repetição para quando o candidato termina, dando certo ou
+                    // não: avisar sobre um candidato que já falhou gastaria furo da
+                    // janela do anfitrião por um caminho que ninguém vai tentar de
+                    // novo.
+                    if let Some(repeticao) = repeticao {
+                        repeticao.abort();
+                    }
+                    resultado
+                }
+            },
+        )
         .await;
+        let Corrida {
+            vencedor,
+            falhas,
+            iniciados,
+        } = corrida;
 
         // A limpeza de pin órfão dos perdedores, **depois** do vencedor e
         // pulando a chave dele.
@@ -1341,19 +1575,28 @@ impl Enlace {
         // `conectar_por`, e só do que ele mesmo escreveu. Esta volta existe para
         // o que aquela não alcança: o candidato cujo prazo estourou, derrubado
         // no meio do aperto de mão sem chance de se limpar.
-        let chave_do_vencedor = corrida
-            .vencedor
+        //
+        // As posições são a ordem em que cada um começou, e é por ela que se lê
+        // `iniciados`: um tardio que entrou na frente de quem esperava a vez
+        // tem a posição de quando começou, e não a da lista.
+        let chave_do_vencedor = vencedor
             .as_ref()
-            .and_then(|(posicao, _)| chaves.get(*posicao))
-            .map(|(chave, _)| chave.clone());
-        for (posicao, falha) in &corrida.falhas {
-            let Some((chave_perdida, antes)) = chaves.get(*posicao) else {
+            .and_then(|(posicao, _)| iniciados.get(*posicao))
+            .map(|corredor| corredor.destino.chave_do_pin.clone());
+        for (posicao, falha) in &falhas {
+            let Some(perdido) = iniciados.get(*posicao) else {
                 continue;
             };
+            let chave_perdida = &perdido.destino.chave_do_pin;
             if chave_do_vencedor.as_deref() == Some(chave_perdida.as_str()) {
                 continue;
             }
-            desfazer_pin_orfao(pins.as_ref(), chave_perdida, antes.as_deref(), falha);
+            desfazer_pin_orfao(
+                pins.as_ref(),
+                chave_perdida,
+                perdido.antes.as_deref(),
+                falha,
+            );
         }
 
         // **Quem ganhou, dito por extenso.** O log tinha uma linha por candidato
@@ -1373,10 +1616,15 @@ impl Enlace {
         // está o evento que a conferência da impressão existe para barrar: um
         // servidor com a chave errada num endereço da corrida (o que o quarto
         // devolveu, por exemplo). Ver [`registrar_a_falha_do_candidato`].
-        if let Some((posicao, enlace)) = corrida.vencedor {
-            let onde = todos.get(posicao).map(|destino| destino.servidor);
-            for (perdedor, falha) in &corrida.falhas {
-                let de_quem = todos.get(*perdedor).map(|destino| destino.servidor);
+        let onde_de = |posicao: usize| {
+            iniciados
+                .get(posicao)
+                .map(|corredor| corredor.destino.servidor)
+        };
+        if let Some((posicao, enlace)) = vencedor {
+            let onde = onde_de(posicao);
+            for (perdedor, falha) in &falhas {
+                let de_quem = onde_de(*perdedor);
                 registrar_a_falha_do_candidato(de_quem, falha, onde);
             }
             tracing::info!(?onde, "este é o endereço que deu");
@@ -1387,8 +1635,8 @@ impl Enlace {
             return Ok(enlace);
         }
 
-        for (posicao, falha) in corrida.falhas {
-            let onde = todos.get(posicao).map(|destino| destino.servidor);
+        for (posicao, falha) in falhas {
+            let onde = onde_de(posicao);
             registrar_a_falha_do_candidato(onde, &falha, None);
             a_mostrar.anotar(falha);
         }
@@ -5491,7 +5739,6 @@ async fn avisar_pelo_candidato(
     batida: Option<&crate::encontro::Batida>,
     onde: SocketAddr,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    let batida = batida?;
     // Só o candidato refletido depende de alguém ter furado o caminho. O da rede
     // de casa não paga metadado, não gasta furo da janela do anfitrião, e não
     // espera um milissegundo.
@@ -5508,9 +5755,10 @@ async fn avisar_pelo_candidato(
     //
     // O que esta guarda economiza continua sendo o principal: um convite só de
     // endereços de rede de casa não gasta furo nenhum.
-    if !e_publico(onde.ip()) {
+    if !pede_furo(batida, onde) {
         return None;
     }
+    let batida = batida?;
 
     if let Err(erro) = batida.avisar().await {
         tracing::info!(
@@ -5920,6 +6168,272 @@ fn vale_insistir(erro: &ConnectError) -> bool {
         | ConnectError::HandshakeTimeout
         | ConnectError::SemResposta
         | ConnectError::ProtocolViolation => true,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "num teste, o pânico é o relatório")]
+/// A corrida do RFC 8305, provada sem socket.
+///
+/// Estes testes nasceram com ela (`e09d537a`) e saíram por engano no revert
+/// `b4f5ef94`, que tirava outra coisa. De 31/08 a 09/10 a corrida não teve
+/// prova nenhuma, e o doc dela dizia que tinha.
+mod a_corrida {
+    use super::{correr, ConnectError};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    const DEFASAGEM: Duration = Duration::from_millis(250);
+
+    /// Uma corrida sem ninguém que chegue depois: a de sempre.
+    fn sem_tardios() -> Option<std::future::Pending<Vec<usize>>> {
+        None
+    }
+
+    /// Quem chega `depois`, e com quem.
+    fn tardios(
+        depois: Duration,
+        quem: Vec<usize>,
+    ) -> Option<impl std::future::Future<Output = Vec<usize>>> {
+        Some(async move {
+            tokio::time::sleep(depois).await;
+            quem
+        })
+    }
+
+    /// Uma tentativa de teste: o que `correr` recebe de `tentar`.
+    type Futuro =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<usize, ConnectError>> + Send>>;
+
+    /// O diário de quem começou: posição, quem, e em que milissegundo.
+    type Diario = Arc<std::sync::Mutex<Vec<(usize, usize, u128)>>>;
+
+    /// Quem começou, com o quê e quando, e o que cada um faz: os candidatos de
+    /// `rapidos` fecham em 10 ms, os de `falham` falham na hora, e os outros
+    /// demoram uma eternidade e então desistem.
+    fn anotando(
+        rapidos: &'static [usize],
+        falham: &'static [usize],
+    ) -> (Diario, impl Fn(usize, usize) -> Futuro) {
+        let comeco = tokio::time::Instant::now();
+        let quando = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let anotar = Arc::clone(&quando);
+        let tentar = move |posicao: usize, quem: usize| {
+            anotar
+                .lock()
+                .unwrap()
+                .push((posicao, quem, comeco.elapsed().as_millis()));
+            Box::pin(async move {
+                if falham.contains(&quem) {
+                    return Err(ConnectError::Unreachable);
+                }
+                if !rapidos.contains(&quem) {
+                    tokio::time::sleep(Duration::from_secs(100)).await;
+                    return Err(ConnectError::SemResposta);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok(quem)
+            }) as Futuro
+        };
+        (quando, tentar)
+    }
+
+    /// O primeiro a fechar vence, mesmo estando por último na lista.
+    ///
+    /// É a propriedade inteira do RFC 8305, e a que a série não tem: em série o
+    /// candidato lento **precisa** terminar antes de o rápido começar.
+    #[tokio::test(start_paused = true)]
+    async fn o_rapido_vence_mesmo_estando_por_ultimo() {
+        let corrida = correr(
+            vec![0, 1, 2],
+            DEFASAGEM,
+            sem_tardios(),
+            |posicao, _| async move {
+                // Os dois primeiros demoram uma eternidade; o terceiro fecha logo.
+                let espera = if posicao == 2 { 50 } else { 100_000 };
+                tokio::time::sleep(Duration::from_millis(espera)).await;
+                Ok::<usize, ConnectError>(posicao)
+            },
+        )
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(2));
+    }
+
+    /// O segundo candidato começa sem esperar o primeiro terminar.
+    ///
+    /// Sem esta propriedade não há Happy Eyeballs nenhum — é literalmente a
+    /// diferença entre 9,6 s e ~1,1 s na pendência nº 26.
+    #[tokio::test(start_paused = true)]
+    async fn o_segundo_comeca_antes_de_o_primeiro_terminar() {
+        let comecaram = Arc::new(AtomicUsize::new(0));
+        let contador = Arc::clone(&comecaram);
+
+        let corrida = correr(vec![0, 1], DEFASAGEM, sem_tardios(), move |posicao, _| {
+            let contador = Arc::clone(&contador);
+            async move {
+                contador.fetch_add(1, Ordering::SeqCst);
+                // O primeiro nunca termina dentro do horizonte deste teste.
+                let espera = if posicao == 0 { 100_000 } else { 10 };
+                tokio::time::sleep(Duration::from_millis(espera)).await;
+                Ok::<usize, ConnectError>(posicao)
+            }
+        })
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(
+            comecaram.load(Ordering::SeqCst),
+            2,
+            "o segundo candidato não chegou a começar"
+        );
+    }
+
+    /// Quando todos falham, todas as falhas voltam — quem chama precisa delas
+    /// para escolher a que melhor descreve o que houve, e para limpar os pins.
+    #[tokio::test(start_paused = true)]
+    async fn todas_as_falhas_voltam_quando_ninguem_fecha() {
+        let corrida = correr(vec![0, 1, 2], DEFASAGEM, sem_tardios(), |_, _| async {
+            Err::<usize, ConnectError>(ConnectError::Unreachable)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert_eq!(corrida.falhas.len(), 3);
+    }
+
+    /// Uma lista vazia não trava: devolve sem vencedor e sem falha.
+    #[tokio::test(start_paused = true)]
+    async fn uma_corrida_sem_candidatos_termina() {
+        let corrida = correr(Vec::new(), DEFASAGEM, sem_tardios(), |_, _| async {
+            Ok::<usize, ConnectError>(0)
+        })
+        .await;
+
+        assert!(corrida.vencedor.is_none());
+        assert!(corrida.falhas.is_empty());
+    }
+
+    /// Quem falha cedo não impede quem vem depois de vencer.
+    #[tokio::test(start_paused = true)]
+    async fn uma_falha_imediata_nao_encerra_a_corrida() {
+        let corrida = correr(
+            vec![0, 1],
+            DEFASAGEM,
+            sem_tardios(),
+            |posicao, _| async move {
+                if posicao == 0 {
+                    return Err(ConnectError::Unreachable);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok::<usize, ConnectError>(posicao)
+            },
+        )
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(posicao, _)| posicao), Some(1));
+        assert_eq!(corrida.falhas.len(), 1);
+    }
+
+    /// Os candidatos começam um a cada defasagem, na ordem da lista: o
+    /// primeiro na hora, o segundo em 250 ms, o terceiro em 500 ms.
+    ///
+    /// É a ordem de hoje escrita em números. Quem mexer na corrida tem de
+    /// manter estes três instantes quando ninguém chega depois.
+    #[tokio::test(start_paused = true)]
+    async fn os_candidatos_comecam_um_a_cada_defasagem_na_ordem_da_lista() {
+        let (quando, tentar) = anotando(&[], &[]);
+        let corrida = correr(vec![10, 11, 12], DEFASAGEM, sem_tardios(), tentar).await;
+
+        assert!(corrida.vencedor.is_none());
+        assert_eq!(
+            *quando.lock().unwrap(),
+            vec![(0, 10, 0), (1, 11, 250), (2, 12, 500)]
+        );
+    }
+
+    /// **O candidato tardio que hoje se perde.** Todos os da lista falham na
+    /// hora, e o único que fecharia chega 100 ms depois — o endereço que o
+    /// quarto dá a quem volta a um servidor guardado. A corrida de antes acaba
+    /// quando a lista acaba, e ele chega a uma corrida que já terminou.
+    #[tokio::test(start_paused = true)]
+    async fn um_tardio_que_chega_depois_de_todos_falharem_ainda_corre() {
+        let (_, tentar) = anotando(&[20], &[10, 11]);
+        let corrida = correr(
+            vec![10, 11],
+            DEFASAGEM,
+            tardios(Duration::from_millis(100), vec![20]),
+            tentar,
+        )
+        .await;
+
+        assert_eq!(
+            corrida.vencedor.map(|(_, quem)| quem),
+            Some(20),
+            "o candidato tardio se perdeu: a corrida acabou antes de ele chegar"
+        );
+    }
+
+    /// O tardio começa **na hora** em que chega, na frente de quem ainda espera
+    /// a vez, e a defasagem recomeça dele. As posições são a ordem em que cada
+    /// um começou, que é o que a trilha numera.
+    #[tokio::test(start_paused = true)]
+    async fn um_tardio_comeca_na_hora_e_na_frente_dos_que_esperam() {
+        let (quando, tentar) = anotando(&[], &[]);
+        let corrida = correr(
+            vec![10, 11, 12],
+            DEFASAGEM,
+            tardios(Duration::from_millis(100), vec![20]),
+            tentar,
+        )
+        .await;
+
+        assert_eq!(
+            *quando.lock().unwrap(),
+            vec![(0, 10, 0), (1, 20, 100), (2, 11, 350), (3, 12, 600)]
+        );
+        assert_eq!(corrida.iniciados, vec![10, 20, 11, 12]);
+    }
+
+    /// Um quarto que não traz ninguém não mexe nos instantes: ninguém começa
+    /// fora da vez por causa dele.
+    #[tokio::test(start_paused = true)]
+    async fn um_tardio_vazio_nao_muda_a_ordem_de_hoje() {
+        let (quando, tentar) = anotando(&[], &[]);
+        let _ = correr(
+            vec![10, 11, 12],
+            DEFASAGEM,
+            tardios(Duration::from_millis(100), Vec::new()),
+            tentar,
+        )
+        .await;
+
+        assert_eq!(
+            *quando.lock().unwrap(),
+            vec![(0, 10, 0), (1, 11, 250), (2, 12, 500)]
+        );
+    }
+
+    /// Quem já ganhava continua ganhando, sem esperar quem ainda vai chegar.
+    #[tokio::test(start_paused = true)]
+    async fn quem_ja_ganhava_nao_espera_o_tardio() {
+        let (_, tentar) = anotando(&[10], &[]);
+        let comeco = tokio::time::Instant::now();
+        let corrida = correr(
+            vec![10, 11],
+            DEFASAGEM,
+            tardios(Duration::from_secs(60), vec![20]),
+            tentar,
+        )
+        .await;
+
+        assert_eq!(corrida.vencedor.map(|(_, quem)| quem), Some(10));
+        assert!(
+            comeco.elapsed() < Duration::from_millis(100),
+            "quem ganhava esperou {:?} por um tardio",
+            comeco.elapsed()
+        );
     }
 }
 
@@ -7185,6 +7699,210 @@ mod tests {
                 marca: crate::encontro::Marcas::da_sala(&codigo).aviso().clone(),
             }),
             "a volta da ligação não avisou a escuta com a marca do aviso da sala"
+        );
+    }
+
+    /// Um destino guardado em `servidor`, com uma impressão de verdade: é dela
+    /// que sai a marca do aviso.
+    fn guardado_em(servidor: &str) -> Destino {
+        Destino {
+            servidor: servidor.parse().expect("endereço"),
+            nome_tls: "localhost".into(),
+            chave_do_pin: servidor.to_owned(),
+            apelido: "pessoa".into(),
+            segredo: None,
+            esperada: Some(Esperada::Certificado(
+                "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".to_owned(),
+            )),
+            o_pino_prova_o_servidor: false,
+            aceito: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn quem_precisa_de_furo_espera_o_quarto_e_avisa_a_escuta_de_hoje() {
+        // A razão de quem precisa de furo esperar o quarto: o `LEVE` dele vai à
+        // escuta de hoje, e não à guardada, que o roteador do anfitrião já pode
+        // ter dado a outro. Sem a espera, o aviso sairia na hora, para a escuta
+        // de ontem.
+        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback não abriu");
+        let ponto_texto = ponto.local_addr().expect("endereço").to_string();
+        let guardado = seele_proto::uri::Bilhete::novo(ponto_texto.clone(), "198.51.100.4:41000")
+            .expect("bilhete de teste");
+        let de_hoje = seele_proto::uri::Bilhete::novo(ponto_texto, "198.51.100.5:42000")
+            .expect("bilhete de teste");
+        let (entrega, quarto) = tokio::sync::oneshot::channel();
+        let (olhos, _tentativas) = mpsc::unbounded_channel();
+
+        // Público na forma mapeada, que é o que faz pedir furo.
+        let tentativa = tokio::spawn(Enlace::conectar_entre_com_o_quarto(
+            vec![guardado_em("[::ffff:127.0.0.1]:9")],
+            Some(guardado),
+            SigningKey::from_bytes(&[7; 32]),
+            Arc::new(crate::tofu::MemoryPinStore::new()),
+            olhos,
+            Some(quarto),
+        ));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _ = entrega.send(DoQuarto {
+            candidato: None,
+            bilhete: Some(de_hoje),
+        });
+
+        let mut balde = [0_u8; seele_proto::encontro::TAMANHO];
+        let lido = tokio::time::timeout(Duration::from_secs(3), ponto.recv_from(&mut balde)).await;
+        tentativa.abort();
+        let Some(seele_proto::encontro::Pedido::Leve { destino, .. }) = pedido_lido(lido, &balde)
+        else {
+            panic!("o primeiro pacote no ponto não foi um LEVE");
+        };
+        assert_eq!(
+            destino.to_string(),
+            "198.51.100.5:42000",
+            "o primeiro aviso foi à escuta guardada, e não à de hoje: quem precisa de furo \
+             não esperou o quarto"
+        );
+    }
+
+    #[tokio::test]
+    async fn quem_esta_na_mesma_casa_comeca_sem_esperar_o_quarto() {
+        // A pendência 55: com o ponto ou o DNS mudos, quem estava na mesma casa
+        // pagava o prazo inteiro do quarto antes de tentar o endereço de casa.
+        // Aqui o quarto nunca responde, e a tentativa de casa tem de começar na
+        // hora.
+        let ponto = tokio::net::UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("o loopback não abriu");
+        let guardado = seele_proto::uri::Bilhete::novo(
+            ponto.local_addr().expect("endereço").to_string(),
+            "198.51.100.4:41000",
+        )
+        .expect("bilhete de teste");
+        let (_entrega, quarto) = tokio::sync::oneshot::channel::<DoQuarto>();
+        let (olhos, mut tentativas) = mpsc::unbounded_channel();
+
+        let tentativa = tokio::spawn(Enlace::conectar_entre_com_o_quarto(
+            vec![
+                guardado_em("127.0.0.1:9"),
+                guardado_em("[::ffff:127.0.0.1]:9"),
+            ],
+            Some(guardado),
+            SigningKey::from_bytes(&[7; 32]),
+            Arc::new(crate::tofu::MemoryPinStore::new()),
+            olhos,
+            Some(quarto),
+        ));
+        let primeira = tokio::time::timeout(Duration::from_millis(500), tentativas.recv()).await;
+        // E quem precisa de furo continua esperando o quarto, que não veio.
+        let segunda = tokio::time::timeout(Duration::from_millis(500), tentativas.recv()).await;
+        tentativa.abort();
+
+        let Ok(Some(primeira)) = primeira else {
+            panic!("a tentativa de casa não começou em meio segundo: esperou o quarto");
+        };
+        assert_eq!(primeira.onde.to_string(), "127.0.0.1:9");
+        assert!(
+            segunda.is_err(),
+            "quem precisa de furo começou sem a resposta do quarto: {segunda:?}"
+        );
+    }
+
+    #[test]
+    fn o_endereco_de_hoje_entra_logo_depois_do_alvo_que_espera() {
+        // A posição que ele tinha quando o `connect` do app o punha na frente
+        // dos alternativos: logo depois do alvo.
+        let pins = crate::tofu::MemoryPinStore::new();
+        let corredor = |onde: &str| Corredor {
+            destino: guardado_em(onde),
+            antes: None,
+            batida: None,
+            bilhete: None,
+        };
+        let de_hoje = |onde: &str| DoQuarto {
+            candidato: Some(guardado_em(onde)),
+            bilhete: None,
+        };
+        let ordem = |lote: Vec<Corredor>| -> Vec<String> {
+            lote.iter()
+                .map(|corredor| corredor.destino.servidor.to_string())
+                .collect()
+        };
+
+        let alvo_espera = lote_do_quarto(
+            de_hoje("203.0.113.9:8383"),
+            vec![corredor("203.0.113.1:8383"), corredor("203.0.113.2:8383")],
+            true,
+            None,
+            None,
+            &pins,
+        );
+        assert_eq!(
+            ordem(alvo_espera),
+            ["203.0.113.1:8383", "203.0.113.9:8383", "203.0.113.2:8383"]
+        );
+
+        let alvo_ja_corre = lote_do_quarto(
+            de_hoje("203.0.113.9:8383"),
+            vec![corredor("203.0.113.2:8383")],
+            false,
+            None,
+            None,
+            &pins,
+        );
+        assert_eq!(
+            ordem(alvo_ja_corre),
+            ["203.0.113.9:8383", "203.0.113.2:8383"]
+        );
+    }
+
+    #[test]
+    fn quem_esperava_o_quarto_leva_o_bilhete_desta_volta() {
+        let pins = crate::tofu::MemoryPinStore::new();
+        let guardado =
+            seele_proto::uri::Bilhete::novo("p:8384", "198.51.100.4:41000").expect("bilhete");
+        let de_hoje =
+            seele_proto::uri::Bilhete::novo("p:8384", "198.51.100.5:42000").expect("bilhete");
+        let esperava = Corredor {
+            destino: guardado_em("203.0.113.1:8383"),
+            antes: None,
+            batida: None,
+            bilhete: Some(guardado.clone()),
+        };
+
+        let lote = lote_do_quarto(
+            DoQuarto {
+                candidato: Some(guardado_em("203.0.113.9:8383")),
+                bilhete: Some(de_hoje.clone()),
+            },
+            vec![esperava],
+            true,
+            None,
+            Some(guardado.clone()),
+            &pins,
+        );
+        for corredor in &lote {
+            assert_eq!(corredor.bilhete.as_ref(), Some(&de_hoje));
+        }
+
+        // Um quarto que não confirmou escuta nenhuma deixa o guardado.
+        let sem_escuta = lote_do_quarto(
+            DoQuarto {
+                candidato: Some(guardado_em("203.0.113.9:8383")),
+                bilhete: None,
+            },
+            Vec::new(),
+            false,
+            None,
+            Some(guardado.clone()),
+            &pins,
+        );
+        assert_eq!(
+            sem_escuta
+                .first()
+                .and_then(|corredor| corredor.bilhete.as_ref()),
+            Some(&guardado)
         );
     }
 
