@@ -9117,6 +9117,63 @@ mod trilha_no_log {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
+    /// **Um segundo despachante, vivo o processo inteiro, que não escreve
+    /// nada.** A cópia deste crate do auxiliar do app
+    /// (`apps/seele-app/src/main.rs`, `rastro_de_teste`), chamada antes de o
+    /// [`Espiao`] ouvir (pendência 56).
+    ///
+    /// O `tracing` decide uma vez só, na primeira passagem de qualquer thread,
+    /// se uma linha que escreve (o *callsite*) tem quem a ouça, e guarda a
+    /// resposta. Se, no último registro de despachante, só havia um vivo, a
+    /// pergunta vai só ao despachante da **thread que passou** (`tracing-core`
+    /// 0.1.36, `callsite.rs`: `Dispatchers::rebuilder` devolve
+    /// `Rebuilder::JustOne`). Um teste sem captura que passasse primeiro por
+    /// uma linha, com o espião como único despachante de pé, a deixava marcada
+    /// como «nunca» — e a mesma linha não chegava ao espião. Com dois vivos, a
+    /// pergunta vai a todos, e cada evento pergunta de novo à thread em que
+    /// acontece.
+    fn segundo_despachante() {
+        static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+        SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+    }
+
+    /// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+    /// ainda chega ao espião.** A prova de ordem forçada da pendência 56, a
+    /// mesma do app, para a cópia de [`segundo_despachante`] deste crate.
+    ///
+    /// A outra thread toca a linha primeiro, com o espião já de pé, e o
+    /// resultado deixa de depender de quem chega antes. E a linha da outra
+    /// thread continua fora: o espião segue sendo só da thread corrente.
+    #[test]
+    fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+        fn diz() {
+            tracing::warn!("linha tocada primeiro fora da captura");
+        }
+        segundo_despachante();
+        let espiao = Espiao::default();
+        tracing::subscriber::with_default(espiao.clone(), || {
+            std::thread::spawn(diz)
+                .join()
+                .expect("a outra thread terminou");
+            diz();
+        });
+
+        let escrito = espiao.escrito();
+        assert!(
+            escrito
+                .iter()
+                .any(|linha| linha.contains("linha tocada primeiro fora da captura")),
+            "uma linha que outra thread tocou primeiro sumiu do espião, e o guarda do log da \
+             trilha passa ou falha conforme a ordem das threads: {escrito:?}"
+        );
+        assert_eq!(
+            escrito.len(),
+            1,
+            "a linha da outra thread chegou a este espião, e um teste passaria a ler o que \
+             outro teste escreveu: {escrito:?}"
+        );
+    }
+
     #[test]
     fn a_escolha_da_pessoa_vira_degrau_arredondando_para_baixo() {
         // §5: o que se escolhe é o **máximo**. Arredondar para cima seria a
@@ -9266,6 +9323,9 @@ mod trilha_no_log {
             },
         ];
 
+        // Sem ele, uma linha da trilha pode sumir quando a bateria roda em
+        // paralelo (pendência 56): ver `segundo_despachante`.
+        segundo_despachante();
         let espiao = Espiao::default();
         tracing::subscriber::with_default(espiao.clone(), || registrar_trilha(&trilha));
 
