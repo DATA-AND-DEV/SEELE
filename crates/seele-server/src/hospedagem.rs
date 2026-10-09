@@ -56,6 +56,23 @@ fn config_guardada(
 /// variável — uma dependência inteira paga em nome de uma anotação.
 pub type PersistenceCompartilhada = Arc<tokio::sync::Mutex<crate::persistence::Persistence>>;
 
+/// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
+/// quem hospeda.
+///
+/// Hoje, as mensagens de controle de um vocabulário mais novo que o servidor
+/// pulou (`server::MensagensDesconhecidas`): quem usa um SEELE mais novo está
+/// mandando o que esta versão não entende, e quem hospeda resolve atualizando.
+/// Sem este número, o servidor sabia e não contava — só o `seele.log` dizia.
+/// A tela (o comando `estado_do_servidor` e a linha nas configurações do
+/// servidor) entra quando a casca for liberada: a P12 do plano F1b.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EstadoDoServidor {
+    /// Quantas mensagens de um vocabulário mais novo foram puladas.
+    pub mensagens_desconhecidas: u64,
+    /// Em quantas sessões isso aconteceu.
+    pub sessoes_com_desconhecidas: u64,
+}
+
 /// Um servidor rodando dentro deste processo.
 ///
 /// Descartar isto encerra o servidor e derruba quem estiver conectado. É o
@@ -336,6 +353,17 @@ impl Hospedagem {
     #[must_use]
     pub fn alcance(&self) -> Option<&crate::alcance::Alcance> {
         self.escada.as_ref().map(crate::alcance::Escada::alcance)
+    }
+
+    /// O que o servidor desta hospedagem tem a dizer de si à tela de quem
+    /// hospeda. Ver [`EstadoDoServidor`].
+    #[must_use]
+    pub fn estado(&self) -> EstadoDoServidor {
+        let desconhecidas = &self.server.server().desconhecidas;
+        EstadoDoServidor {
+            mensagens_desconhecidas: desconhecidas.mensagens(),
+            sessoes_com_desconhecidas: desconhecidas.sessoes(),
+        }
     }
 
     /// Onde o servidor está escutando.
@@ -702,6 +730,40 @@ mod tests {
         assert_eq!(
             lido.impressao_digital, numerico.impressao_digital,
             "a impressão digital não atravessou: um link sem ela é um link em              que a primeira visita não confere nada"
+        );
+    }
+
+    /// **O estado que a janela de quem hospeda lê** (a P12): as mensagens de
+    /// um vocabulário mais novo que o servidor pulou, e em quantas sessões.
+    /// Zero num servidor que não pulou nada, e os números do contador do
+    /// servidor, e não de outro, quando pulou.
+    #[tokio::test]
+    async fn o_estado_conta_as_mensagens_de_apps_mais_novos() {
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
+        let hospedagem = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("subir");
+        assert_eq!(
+            hospedagem.estado(),
+            EstadoDoServidor {
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+
+        // Duas mensagens numa sessão, uma noutra: o que a leitora do laço de
+        // controle registra (`session::run_session`).
+        let contador = &hospedagem.server.server().desconhecidas;
+        contador.registrar(true);
+        contador.registrar(false);
+        contador.registrar(true);
+        assert_eq!(
+            hospedagem.estado(),
+            EstadoDoServidor {
+                mensagens_desconhecidas: 3,
+                sessoes_com_desconhecidas: 2,
+            }
         );
     }
 
