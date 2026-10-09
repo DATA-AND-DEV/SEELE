@@ -394,3 +394,9 @@ começar.
     - o `descrever_arquivo`, que no navegador recebe um `File`, e não um
       caminho;
   - **à F1**, o pedido de revisão do `354cf7c8` (registrado acima).
+- **A Etapa A da F8, aprovada em 09/10.** Os valores finais da marca estão no
+  plano (3.1), conferidos no §9.2 do spec dela (`0.16/celular`, `04c0f1a8`).
+  O servidor que a Tarefa 19 dela pede para os 28 roteiros é um `seeled` com
+  `h3` (as minhas 2.4 e 2.6), e não o servidor de mentira da 3.4. **Pendente
+  de envio à orquestradora e à F8:** essa dependência, e que a F4 entrega o
+  como subir e o link quando a 2.4 e a 2.6 existirem.
