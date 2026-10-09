@@ -47,13 +47,23 @@
   });
 
   let fecharAberta = null;
+  // Uma entrada no voltar do aparelho para a folha aberta. Uma folha que toma o
+  // lugar de outra herda a entrada dela, e não empilha outra.
+  let sairDoVoltar = null;
+  let desistirDaAberta = null;
 
   /**
    * Mostra uma folha e devolve a função que a fecha. Fechar devolve o foco a
    * quem o tinha antes, se esse nó ainda estiver na página.
    */
   function abrirFolha(folha, aoDesistir) {
-    fecharAberta?.();
+    const herdada = fecharAberta !== null;
+    if (herdada) fecharAberta(true);
+    desistirDaAberta = aoDesistir;
+    if (!herdada) sairDoVoltar = CELULAR.ajudante("empilhar")(() => {
+      sairDoVoltar = null;
+      desistirDaAberta?.();
+    });
     const antes = document.activeElement;
     const veu = h("div", { class: "cel-veu", onclick: aoDesistir });
     // O Escape é da folha, e para nela: na captura do `window`, antes de todo
@@ -67,11 +77,15 @@
     };
     window.addEventListener("keydown", tecla, true);
     sessao.append(veu, folha);
-    const fechar = () => {
+    const fechar = (trocando = false) => {
       window.removeEventListener("keydown", tecla, true);
       veu.remove();
       folha.remove();
       fecharAberta = null;
+      desistirDaAberta = null;
+      if (trocando) return;
+      sairDoVoltar?.();
+      sairDoVoltar = null;
       if (antes?.isConnected) antes.focus();
     };
     fecharAberta = fechar;

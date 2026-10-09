@@ -194,7 +194,31 @@
   text-overflow: ellipsis;
 }
 
+/* A primeira linha da faixa é uma fileira só, com a altura escrita, nos dois
+   estados (a sala, ou o RECOLHER da CHAMADA): a 360 com o texto a 150 %, o
+   «PONTE 3/8» quebrava em duas, a faixa crescia, e o MUDO mudava de lugar ao
+   abrir a CHAMADA. O nome corta com reticências; a contagem fica inteira. */
+:root[data-casca="celular"] .voz-sala-cabeca {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: calc(var(--seele-t-secao) * var(--cel-escala) * 1.25);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+:root[data-casca="celular"] .voz-sala-cabeca[hidden] {
+  display: none;
+}
+
+:root[data-casca="celular"] .voz-sala-cabeca > .voz-sala-nome {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 :root[data-casca="celular"] .voz-sala-conta {
+  flex: 0 0 auto;
   font-family: var(--seele-mono);
   font-size: calc(var(--seele-t-dado) * var(--cel-escala));
   letter-spacing: 0;
@@ -1106,4 +1130,63 @@
   color: var(--seele-laranja-nerv);
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* -------------------------------------------------------------- o aparelho
+ *
+ * O teclado do sistema: a sessão ocupa só o que se vê acima dele, as abas saem
+ * e a faixa de voz sobe para logo abaixo do topo, com o MUDO à mão. O
+ * compositor, no fim da conversa, fica colado ao teclado. */
+
+:root[data-casca="celular"] #tela-sessao[data-teclado] {
+  height: var(--cel-visivel);
+  transform: translateY(var(--cel-visivel-topo, 0px));
+}
+
+:root[data-casca="celular"] #tela-sessao[data-teclado] > .cel-abas {
+  display: none;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-teclado] > .cel-topo {
+  order: -3;
+}
+
+:root[data-casca="celular"] #tela-sessao[data-teclado] > .voz-celular {
+  order: -2;
+}
+
+/* Numa tela grande (um tablet, ou a escolha à mão), a coluna de um celular
+   grande no meio, com as abas presas a ela: quatro abas de 320 px para uma
+   palavra de oito letras não servem a ninguém. */
+@media (min-width: 600px) {
+  :root[data-casca="celular"] #tela-sessao {
+    width: 100%;
+    max-width: var(--cel-coluna);
+    margin-inline: auto;
+    border-left: 1px solid var(--seele-linha);
+    border-right: 1px solid var(--seele-linha);
+  }
+
+  :root[data-casca="celular"] #tela-server {
+    left: max(0px, calc((100vw - var(--cel-coluna)) / 2));
+    right: max(0px, calc((100vw - var(--cel-coluna)) / 2));
+  }
+}
+
+/* Deitado, com uma tela no palco, a CHAMADA põe o palco em todo o espaço acima
+   da faixa: o topo, a barra da chamada, a grade e a telemetria saem. A faixa
+   fica, com o MUDO: o palco nunca a cobre. */
+@media (orientation: landscape) and (max-height: 500px) {
+  :root[data-casca="celular"] #tela-sessao[data-chamada]:has(#palco[data-transmitindo="sim"]) > :is(.cel-topo, .cel-telemetria) {
+    display: none;
+  }
+
+  :root[data-casca="celular"] #tela-sessao[data-chamada] #vista-chamada:has(#palco[data-transmitindo="sim"]) > :not(#palco) {
+    display: none;
+  }
+
+  :root[data-casca="celular"] #tela-sessao[data-chamada] #vista-chamada > #palco[data-transmitindo="sim"] {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
 }

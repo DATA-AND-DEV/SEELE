@@ -107,6 +107,23 @@
     if (evento.target.closest(".server-coluna .server-secao")) camada.setAttribute("data-cel-pagina", "secao");
   });
 
+  // Uma seção aberta é uma entrada no voltar do aparelho: o voltar volta à
+  // lista. Voltar à lista por outro caminho (o «‹ AJUSTES», a aba, sair da aba)
+  // tira a entrada.
+  let sairDoVoltar = null;
+  new MutationObserver(() => {
+    const naSecao = !camada.hidden && camada.getAttribute("data-cel-pagina") === "secao";
+    if (naSecao) {
+      sairDoVoltar ??= CELULAR.ajudante("empilhar")(() => {
+        sairDoVoltar = null;
+        camada.setAttribute("data-cel-pagina", "lista");
+      });
+    } else {
+      sairDoVoltar?.();
+      sairDoVoltar = null;
+    }
+  }).observe(camada, { attributes: true, attributeFilter: ["data-cel-pagina", "hidden"] });
+
   // Tocar de novo na aba AJUSTES volta à raiz. Na captura, o ouvinte vê a aba
   // de antes do toque; o da troca de aba, no mesmo botão, vem depois.
   document.getElementById("cel-aba-ajustes").addEventListener("click", () => {

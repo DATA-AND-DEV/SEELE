@@ -76,9 +76,9 @@
   const quem = h("span", { class: "voz-sala-quem" });
   // Um toque na faixa abre a CHAMADA, que mora na coluna da conversa; dentro
   // dela, a mesma faixa, no mesmo lugar, diz RECOLHER e a fecha.
-  const dentroDaSala = h("span", {}, nome, " ", conta);
+  const dentroDaSala = h("span", { class: "voz-sala-cabeca" }, nome, conta);
   // Com a letra do nome da sala, para a faixa não mudar de altura ao trocar.
-  const recolher = h("span", { class: "voz-sala-nome", hidden: true }, glifo("aberto"), ` ${PALAVRAS.recolher}`);
+  const recolher = h("span", { class: "voz-sala-cabeca voz-sala-nome", hidden: true }, glifo("aberto"), ` ${PALAVRAS.recolher}`);
   const sala = h("button", {
     class: "voz-sala",
     type: "button",
@@ -249,8 +249,19 @@
     recolher.hidden = !aberta;
     sala.setAttribute("aria-label", aberta ? PALAVRAS.recolherChamada : PALAVRAS.abrirChamada(nomeDaSala));
   }
+  // A CHAMADA aberta é uma entrada no voltar do aparelho: o voltar a recolhe.
+  let sairDoVoltar = null;
   new MutationObserver(() => {
-    if (vistaAberta()) abrirAba("conversa");
+    if (vistaAberta()) {
+      abrirAba("conversa");
+      sairDoVoltar ??= CELULAR.ajudante("empilhar")(() => {
+        sairDoVoltar = null;
+        fecharChamada();
+      });
+    } else {
+      sairDoVoltar?.();
+      sairDoVoltar = null;
+    }
     desenharChamada();
   }).observe(vistaDaChamada, { attributes: true, attributeFilter: ["hidden"] });
 
