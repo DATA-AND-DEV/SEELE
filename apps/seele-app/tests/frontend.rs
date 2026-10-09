@@ -16768,6 +16768,48 @@ fn o_volume_chega_a_janela_por_volumes_locais_e_a_janela_nao_guarda_o_dela() {
         "`lerVolumes` não substitui a leitura inteira pela resposta do Rust: um volume \
          que sumiu de lá fica desenhado aqui:\n{ler}"
     );
+    // M-3 da rodada 1: a leitura que saiu antes do último gesto é descartada, e
+    // os dois gestos — o deslizante do roster e o controle da chamada — passam
+    // pelo mesmo `marcarVolume`, que a faz velha.
+    let (antes, depois) = ler
+        .split_once("await invoke(\"volumes_locais\")")
+        .unwrap_or_default();
+    let substitui = depois.find("volumesLidos.clear()").unwrap_or(0);
+    let confere = depois.find("geracaoDosVolumes").unwrap_or(depois.len());
+    assert!(
+        antes.contains("geracaoDosVolumes") && confere < substitui,
+        "`lerVolumes` aplica uma resposta sem conferir que ela é de depois do último \
+         gesto: o deslizante volta à posição de antes, com o Rust no valor novo:\n{ler}"
+    );
+    for funcao in [
+        "function marcarVolume(apelido, percent)",
+        "function esquecerVolumes()",
+    ] {
+        assert!(
+            body_of(&scripts, funcao).contains("geracaoDosVolumes"),
+            "`{funcao}` não faz velha a leitura de volumes em voo: ela desfaz o gesto, ou \
+             enche a sessão seguinte com os volumes da que acabou"
+        );
+    }
+    for (tela, arquivo, ouvinte) in [
+        (
+            "o deslizante do roster",
+            "ui/tela-sessao.js",
+            "$(\"lista-roster\").addEventListener(\"input\", (evento) => {",
+        ),
+        (
+            "o controle da chamada",
+            "ui/tela-chamada.js",
+            "$(\"chamada-grade\").addEventListener(\"click\", (evento) => {",
+        ),
+    ] {
+        let corpo = body_of(&without_comments(&read(arquivo)), ouvinte);
+        assert!(
+            corpo.contains("marcarVolume(") && !corpo.contains("volumesLidos.set("),
+            "{tela} escreve o volume do gesto sem passar por `marcarVolume`: uma leitura de \
+             antes dele o desfaz:\n{corpo}"
+        );
+    }
     assert!(
         names(
             &body_of(&scripts, "function desenhar(snapshot)"),
@@ -16888,6 +16930,8 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
         ("ocorrenciaAtual", "limparBusca()"),
         ("anexoPendente", "tirarAnexo()"),
         ("subindo", "tirarAnexo()"),
+        ("volumesLidos", "esquecerVolumes()"),
+        ("geracaoDosVolumes", "esquecerVolumes()"),
     ];
     // Os que **atravessam** sessões de propósito, cada um com o motivo. Conferidos
     // um por um na rodada 1: nenhum guarda nada que um servidor tenha dito.

@@ -314,6 +314,55 @@ const chromium = require("./playwright.cjs").chromium();
     );
     console.log("C OK: quem é movido e quem hospeda uma sala além da subida leem uma frase");
 
+    // ---- M-3 da rodada 1: uma leitura de volume de antes do gesto não o desfaz ----
+    //
+    // A leitura de `volumes_locais` sai, a pessoa arrasta o deslizante da Lia
+    // para 150, e a resposta chega com o que o Rust tinha **antes** do gesto.
+    // Aplicada, ela devolvia a Lia a 100 na tela, com o Rust já em 150.
+    const volume = await page.evaluate(async () => {
+      $("tela-boot").hidden = true;
+      $("tela-sessao").hidden = false;
+      const tinha = window.testTable.volumes_locais;
+      window.testTable.volumes_locais = {};
+      desenhar(window.testTable.snapshot);
+      await new Promise((ok) => setTimeout(ok, 0));
+      await new Promise((ok) => setTimeout(ok, 0));
+      window.adiarVolumes = true;
+      const leitura = lerVolumes();
+      const deslizante = $("lista-roster").querySelector('input.volume[data-pessoa="Lia"]');
+      deslizante.value = "150";
+      deslizante.dispatchEvent(new Event("input", { bubbles: true }));
+      window.soltarVolumes({});
+      await leitura;
+      window.adiarVolumes = false;
+      window.testTable.volumes_locais = tinha;
+      return volumesLidos.get("Lia") ?? null;
+    });
+    assert.equal(
+      volume,
+      150,
+      "uma leitura de volume que saiu antes do gesto desfez o gesto: a Lia voltou a 100 " +
+        "na tela, com o Rust em 150",
+    );
+    // E a leitura em voo quando a sessão acaba não enche a seguinte com os
+    // volumes da que acabou: `esquecerOEstadoDaSessao` a faz velha.
+    const entreSessoes = await page.evaluate(async () => {
+      window.adiarVolumes = true;
+      const leitura = lerVolumes();
+      esquecerVolumes();
+      window.soltarVolumes({ Lia: 150 });
+      await leitura;
+      window.adiarVolumes = false;
+      return volumesLidos.size;
+    });
+    assert.equal(
+      entreSessoes,
+      0,
+      "a leitura de volume em voo quando a sessão acabou encheu a seguinte com os volumes " +
+        "da que acabou",
+    );
+    console.log("M-3 OK: uma leitura de volume velha não desfaz o último gesto");
+
     // ---- F1-vazamento: o que a sessão guardou não passa para a seguinte ----
     //
     // O rascunho é por número de canal, e a prévia de link e o volume lido são

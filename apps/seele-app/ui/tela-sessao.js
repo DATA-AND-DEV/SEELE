@@ -157,12 +157,36 @@ let comecoDaSessao = null;
 const volumesLidos = new Map();
 
 /**
+ * Quantas vezes uma leitura de volumes em voo ficou velha: a cada gesto e a
+ * cada sessão que acaba. Rodada 1 do lote I-b, M-3.
+ *
+ * Uma leitura que sai antes do gesto volta com o que o Rust tinha antes dele, e
+ * aplicada ela devolvia o deslizante à posição de antes — com o Rust já no valor
+ * novo. A leitura guarda este número ao sair e é descartada se ele andou.
+ */
+let geracaoDosVolumes = 0;
+
+/** A posição que um gesto acabou de mandar, até a próxima leitura a confirmar. */
+function marcarVolume(apelido, percent) {
+  geracaoDosVolumes += 1;
+  volumesLidos.set(apelido, percent);
+}
+
+/** Esquece os volumes lidos, e a leitura que ainda estiver em voo. */
+function esquecerVolumes() {
+  geracaoDosVolumes += 1;
+  volumesLidos.clear();
+}
+
+/**
  * Relê os volumes do Rust, e diz se algum mudou.
  *
  * Uma falha deixa a leitura anterior de pé: sem sessão, `volumes_locais`
- * responde vazio, e não com erro.
+ * responde vazio, e não com erro. Uma resposta que saiu antes do último gesto,
+ * ou da sessão que acabou, é descartada: ver `geracaoDosVolumes`.
  */
 async function lerVolumes() {
+  const geracao = geracaoDosVolumes;
   let lidos;
   try {
     lidos = (await invoke("volumes_locais")) ?? {};
@@ -170,6 +194,7 @@ async function lerVolumes() {
     console.warn("volumes_locais:", falha);
     return false;
   }
+  if (geracao !== geracaoDosVolumes) return false;
   const entradas = Object.entries(lidos);
   const mudou =
     entradas.length !== volumesLidos.size ||
@@ -3901,7 +3926,8 @@ function esquecerOEstadoDaSessao() {
   previas.clear();
   previasFechadas.clear();
   previasDeLink.clear();
-  volumesLidos.clear();
+  // Os volumes lidos, e a leitura deles que ainda estiver em voo (M-3).
+  esquecerVolumes();
   // O que se desenhou e a Linha em que se estava.
   desenhado = null;
   linhaAberta = null;
@@ -4538,8 +4564,8 @@ $("lista-roster").addEventListener("input", (evento) => {
   if (!alvo.classList.contains("volume")) return;
   const percent = Number(alvo.value);
   // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
-  // confirmá-la. Ver `volumesLidos`.
-  volumesLidos.set(alvo.dataset.pessoa, percent);
+  // confirmá-la — e uma leitura de antes dele não a desfaz. Ver `marcarVolume`.
+  marcarVolume(alvo.dataset.pessoa, percent);
   invoke("set_volume", { nickname: alvo.dataset.pessoa, percent }).catch((falha) => {
     console.warn("set_volume:", falha);
   });

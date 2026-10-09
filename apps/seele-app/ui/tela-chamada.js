@@ -831,8 +831,9 @@ $("chamada-grade").addEventListener("click", (evento) => {
   const valor = Math.max(0, Math.min(VOLUME_MAXIMO, pedido));
 
   // A posição que o gesto acabou de mandar, até a próxima leitura do Rust
-  // confirmá-la. Ver `volumesLidos`, em `tela-sessao.js`.
-  volumesLidos.set(apelido, valor);
+  // confirmá-la — e uma leitura de antes dele não a desfaz. Ver `marcarVolume`,
+  // em `tela-sessao.js`.
+  marcarVolume(apelido, valor);
   pintarVolume(cartao, apelido);
   invoke("set_volume", { nickname: apelido, percent: valor }).catch((falha) => {
     console.warn("set_volume:", falha);
