@@ -30,7 +30,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
-use seele_proto::control::Permission;
+use seele_proto::control::{Membro, Permission};
 use seele_proto::ids::{PersonId, RoleId};
 
 use crate::persistence::{now_seconds, Persistence};
@@ -575,6 +575,37 @@ impl<'a> Permissions<'a> {
         )?;
         Ok(count > 0)
     }
+
+    /// Os membros deste servidor: toda conta que não está banida agora, em
+    /// ordem de id.
+    ///
+    /// É a lista do grupo **FORA DO AR** (D-fio-4), que vai a quem entra em
+    /// `ServerMessage::Membros`. Só id e apelido: sem papéis e sem horário, de
+    /// propósito (ver `control::Membro`). Um banimento vencido não tira
+    /// ninguém, pela mesma regra de [`Self::is_banned`].
+    ///
+    /// # Errors
+    ///
+    /// Se o banco não responder.
+    pub fn membros(&self) -> Result<Vec<Membro>> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, nickname FROM people
+             WHERE id NOT IN (
+                 SELECT person_id FROM bans
+                 WHERE expires_at IS NULL OR expires_at > ?1
+             )
+             ORDER BY id",
+        )?;
+        let membros = statement
+            .query_map([now_seconds()], |row| {
+                Ok(Membro {
+                    id: PersonId(row.get::<_, i64>(0)? as u64),
+                    nickname: row.get(1)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(membros)
+    }
 }
 
 #[cfg(test)]
@@ -625,6 +656,39 @@ mod tests {
         }
         permissions.grant_role(person.id, role).unwrap();
         person.id
+    }
+
+    /// **O FORA DO AR (D-fio-4):** os membros são as contas deste servidor, em
+    /// ordem de id, sem quem está banido agora. Um banimento vencido não tira
+    /// ninguém, pela mesma regra de `is_banned`.
+    #[test]
+    fn os_membros_sao_as_contas_sem_os_banidos_em_ordem_de_id() {
+        let persistence = store();
+        let permissions = Permissions::new(&persistence);
+        let anfitriao = permissions.register_or_find(&[1; 32], "anfitriao").unwrap();
+        let maya = permissions.register_or_find(&[2; 32], "maya").unwrap();
+        let shinji = permissions.register_or_find(&[3; 32], "shinji").unwrap();
+        let rei = permissions.register_or_find(&[4; 32], "rei").unwrap();
+        permissions
+            .ban(shinji.id, anfitriao.id, None, None)
+            .unwrap();
+        // Vencido em 1970.
+        permissions
+            .ban(rei.id, anfitriao.id, None, Some(1))
+            .unwrap();
+
+        let membro = |id, nickname: &str| Membro {
+            id,
+            nickname: nickname.into(),
+        };
+        assert_eq!(
+            permissions.membros().unwrap(),
+            vec![
+                membro(anfitriao.id, "anfitriao"),
+                membro(maya.id, "maya"),
+                membro(rei.id, "rei"),
+            ]
+        );
     }
 
     #[test]

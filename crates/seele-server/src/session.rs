@@ -1975,6 +1975,38 @@ async fn run_session(
         .await?;
     }
 
+    // **Os membros deste servidor**, para o grupo FORA DO AR da lista de
+    // pessoas (D-fio-4): quem tem conta aqui, presente ou não, sem os banidos.
+    //
+    // Aqui, e não logo depois da `Instancia` no aperto de mão, pelo mesmo
+    // motivo das presenças acima: depois do `subscribe()`, um banimento entre
+    // a leitura da lista e a assinatura chega como `MembroBanido` em vez de se
+    // perder. Em partes de `MAX_MEMBROS_POR_PARTE`, e só a última diz `fim`:
+    // é ela que deixa quem recebe tratar a lista como inteira.
+    //
+    // Um banco que não responde não manda parte nenhuma, e diz no registro:
+    // uma parte vazia com `fim` afirmaria que o servidor não tem membros.
+    let membros = {
+        let guard = server.persistence.lock().await;
+        Permissions::new(&guard).membros()
+    };
+    match membros {
+        Ok(membros) => {
+            for parte in partes_dos_membros(membros) {
+                if entende_a_mensagem(&parte, session.protocol_version) {
+                    frame::write_em(&mut send, session.protocol_version, &parte).await?;
+                }
+            }
+        }
+        Err(erro) => {
+            tracing::warn!(
+                person = %session.person,
+                %erro,
+                "não deu para ler os membros; a lista FORA DO AR desta sessão fica sem chegar"
+            );
+        }
+    }
+
     // E quanto a subida **desta máquina** carrega, que é a perna do teto do
     // §5.1 que só o servidor sabe:
     //
@@ -2596,6 +2628,9 @@ async fn run_session(
                                     person: alvo,
                                     reason: DisconnectReason::Banned,
                                 });
+                                // E deixa de ser membro para quem fica: o
+                                // FORA DO AR (D-fio-4) não mostra banido.
+                                let _ = server.events.send(Event::MembroBanido { person: alvo });
                             }
                             Err(erro) => nao_deu(&mut send, session.protocol_version, &erro).await?,
                         }
@@ -4803,6 +4838,28 @@ fn announce(server: &Server, session: &Session, state: &AnnouncedState) {
     }));
 }
 
+/// A lista de membros em quadros de [`ServerMessage::Membros`]: partes de até
+/// [`seele_proto::control::MAX_MEMBROS_POR_PARTE`], e `fim` só na última.
+///
+/// Uma lista vazia ainda vira uma parte, vazia e com `fim`: é o `fim` que diz
+/// a quem recebe que a lista acabou.
+fn partes_dos_membros(membros: Vec<seele_proto::control::Membro>) -> Vec<ServerMessage> {
+    if membros.is_empty() {
+        return vec![ServerMessage::Membros { membros, fim: true }];
+    }
+    let quantas = membros
+        .len()
+        .div_ceil(seele_proto::control::MAX_MEMBROS_POR_PARTE);
+    membros
+        .chunks(seele_proto::control::MAX_MEMBROS_POR_PARTE)
+        .enumerate()
+        .map(|(posicao, parte)| ServerMessage::Membros {
+            membros: parte.to_vec(),
+            fim: posicao + 1 == quantas,
+        })
+        .collect()
+}
+
 /// Decides whether an event concerns this connection, and what to send.
 fn translate(
     event: &Event,
@@ -4845,6 +4902,9 @@ fn translate(
             person: *person,
             icon: icon.clone(),
         }),
+        // Para todo mundo, pela mesma razão do nome: o FORA DO AR é do
+        // servidor inteiro.
+        Event::MembroBanido { person } => Some(ServerMessage::MembroBanido { person: *person }),
         Event::MessagePosted(message) => {
             channels
                 .contains(&message.channel)
@@ -6167,5 +6227,66 @@ mod fim_de_tela_por_sessao {
             chamadas >= 3,
             "só {chamadas} fins de tela encontrados — o guarda perdeu o alvo"
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod o_fora_do_ar {
+    use super::*;
+    use seele_proto::control::{Membro, MAX_MEMBROS_POR_PARTE};
+
+    fn membros(quantos: usize) -> Vec<Membro> {
+        (0..quantos)
+            .map(|n| Membro {
+                id: PersonId(n as u64 + 1),
+                nickname: format!("m{n}"),
+            })
+            .collect()
+    }
+
+    /// Os tamanhos e os `fim` de cada parte.
+    fn forma(quantos: usize) -> Vec<(usize, bool)> {
+        partes_dos_membros(membros(quantos))
+            .into_iter()
+            .map(|parte| match parte {
+                ServerMessage::Membros { membros, fim } => (membros.len(), fim),
+                outra => panic!("saiu {outra:?} no lugar de uma parte"),
+            })
+            .collect()
+    }
+
+    /// Uma lista vazia ainda vira uma parte, vazia e com `fim`: sem ela, quem
+    /// recebe nunca saberia que a lista acabou.
+    #[test]
+    fn a_lista_vazia_vira_uma_parte_vazia_com_fim() {
+        assert_eq!(forma(0), [(0, true)]);
+    }
+
+    /// `fim` só na última, e nenhuma parte vazia a mais quando a conta fecha.
+    #[test]
+    fn o_fim_vai_so_na_ultima_parte() {
+        assert_eq!(forma(1), [(1, true)]);
+        assert_eq!(
+            forma(MAX_MEMBROS_POR_PARTE),
+            [(MAX_MEMBROS_POR_PARTE, true)]
+        );
+        assert_eq!(
+            forma(MAX_MEMBROS_POR_PARTE + 1),
+            [(MAX_MEMBROS_POR_PARTE, false), (1, true)]
+        );
+        assert_eq!(forma(300), [(MAX_MEMBROS_POR_PARTE, false), (44, true)]);
+    }
+
+    /// E cada parte cabe num quadro: a validação do fio aceita todas.
+    #[test]
+    fn toda_parte_passa_na_validacao_do_fio() {
+        for parte in partes_dos_membros(membros(600)) {
+            parte.validate().unwrap();
+        }
     }
 }
