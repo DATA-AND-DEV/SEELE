@@ -16483,6 +16483,199 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
     );
 }
 
+/// Todo estado de abertura do áudio que a ponte sabe mandar. Pendência 52.
+///
+/// Conferida por um `match` sem braço coringa, como a dos estados do aparelho:
+/// um estado novo **não compila** até entrar aqui.
+fn todos_os_estados_da_abertura() -> Vec<seele_ffi::AberturaDoAudio> {
+    use seele_ffi::AberturaDoAudio::{Aberto, Abrindo, ForaDeSala, NaoAbriuNoPrazo, SemAparelho};
+    let todos = vec![ForaDeSala, Abrindo, Aberto, SemAparelho, NaoAbriuNoPrazo];
+    for estado in &todos {
+        match estado {
+            ForaDeSala | Abrindo | Aberto | SemAparelho | NaoAbriuNoPrazo => {}
+        }
+    }
+    todos
+}
+
+/// O nome com que um estado de abertura chega ao script: o do serde.
+fn nome_da_abertura(estado: seele_ffi::AberturaDoAudio) -> String {
+    let Ok(json) = serde_json::to_string(&estado) else {
+        panic!("AberturaDoAudio não serializa: nenhuma casca consegue lê-la");
+    };
+    json.trim_matches('"').to_owned()
+}
+
+/// A entrada de um estado em `ABERTURA_DO_AUDIO`, do nome até o fim do objeto.
+fn entrada_da_abertura(dicionario: &str, nome: &str) -> String {
+    let Some(depois) = dicionario.split(&format!("{nome}:")).nth(1) else {
+        panic!("`ABERTURA_DO_AUDIO` não tem entrada para «{nome}»");
+    };
+    depois.split('}').next().unwrap_or(depois).to_owned()
+}
+
+/// **(f) da pendência 52: fora de sala a tela não diz «sem áudio», e a frase de
+/// quando o áudio não abriu a tempo existe e é desenhada a partir do estado.**
+///
+/// Com o áudio abrindo só dentro de uma sala, `audio_available` é falso para
+/// quem está no servidor só pela conversa por escrito — sem faltar nada. As três
+/// telas que o liam diziam «SEM ÁUDIO» (a sessão), «SEM SESSÃO DE ÁUDIO» (o
+/// medidor da configuração) ou escondiam o controle (a chamada) sempre que ele
+/// era falso, e passariam a acusar de falta de áudio todo mundo fora de sala.
+///
+/// A palavra agora sai do estado, por `ABERTURA_DO_AUDIO` em `frases.js`, e
+/// nenhuma das três a escreve por conta própria.
+#[test]
+fn fora_de_sala_a_tela_nao_diz_sem_audio_e_a_frase_de_quando_nao_abriu_sai_do_estado() {
+    const FRASE: &str = "O ÁUDIO NÃO ABRIU A TEMPO. A conversa por escrito já funciona; \
+                         para tentar a voz de novo, saia da sala e entre de novo.";
+    let frases = read("ui/frases.js");
+    let dicionario = js_function(&frases, "const ABERTURA_DO_AUDIO = ");
+
+    for estado in todos_os_estados_da_abertura() {
+        let nome = nome_da_abertura(estado);
+        assert!(
+            names(&dicionario, &nome),
+            "o estado «{nome}» não tem entrada em `ABERTURA_DO_AUDIO`: ele chega à tela \
+             como silêncio, ou como a palavra de outro estado"
+        );
+    }
+
+    let fora = entrada_da_abertura(&dicionario, "fora_de_sala");
+    for acusacao in ["SEM ÁUDIO", "SEM SESSÃO DE ÁUDIO", "SEM SOM"] {
+        assert!(
+            !fora.contains(acusacao),
+            "fora de sala a tela diz «{acusacao}»: quem está no servidor só pela \
+             conversa por escrito lê que falta áudio, e não falta nada:\n{fora}"
+        );
+    }
+    let nao_abriu = entrada_da_abertura(&dicionario, "nao_abriu_no_prazo");
+    assert!(
+        nao_abriu.contains(FRASE),
+        "a frase de quando o áudio não abriu a tempo sumiu de `frases.js`, ou foi \
+         reescrita: ela diz que o texto funciona e o que fazer, e sem ela a sala \
+         fica muda sem explicação:\n{nao_abriu}"
+    );
+
+    // Desenhada a partir do estado, e chamada a cada quadro.
+    let scripts = scripts();
+    let faixa = body_of(&scripts, "function desenharAberturaDoAudio(snapshot)");
+    for elo in [
+        "snapshot.abertura_do_audio",
+        "ABERTURA_DO_AUDIO",
+        "aviso-audio",
+        ".frase",
+    ] {
+        assert!(
+            faixa.contains(elo),
+            "`desenharAberturaDoAudio` não passa por `{elo}`: a frase existe e não sai \
+             do estado para a tela:\n{faixa}"
+        );
+    }
+    assert!(
+        names(
+            &body_of(&scripts, "function desenhar(snapshot)"),
+            "desenharAberturaDoAudio"
+        ),
+        "`desenhar` não chama `desenharAberturaDoAudio`, e a faixa nunca acende"
+    );
+    let pagina = without_comments(&read("ui/index.html"));
+    let Some(marca) = pagina
+        .split("id=\"aviso-audio\"")
+        .next()
+        .and_then(|antes| antes.rsplit('<').next())
+    else {
+        panic!("a página não tem a faixa `#aviso-audio`");
+    };
+    assert!(
+        pagina.contains("id=\"aviso-audio\"") && marca.starts_with("div"),
+        "a página não tem a faixa `#aviso-audio` em que a frase é escrita"
+    );
+
+    // O rodapé e o medidor leem o estado, e não só `audio_available`.
+    let rodape = body_of(&scripts, "function desenharTelemetria(snapshot)");
+    assert!(
+        rodape.contains("abertura_do_audio"),
+        "o CODEC do rodapé não lê o estado da abertura: fora de sala ele volta a \
+         dizer que falta áudio:\n{rodape}"
+    );
+    let medidor = body_of(&scripts, "function desenharNivel(snapshot)");
+    assert!(
+        medidor.contains("abertura_do_audio"),
+        "o medidor da configuração não lê o estado da abertura:\n{medidor}"
+    );
+
+    // Nenhuma das três telas escreve a acusação por conta própria.
+    for tela in [
+        "ui/tela-sessao.js",
+        "ui/tela-server.js",
+        "ui/tela-chamada.js",
+    ] {
+        let codigo = without_comments(&read(tela));
+        for acusacao in ["\"SEM ÁUDIO\"", "SEM SESSÃO DE ÁUDIO"] {
+            assert!(
+                !codigo.contains(acusacao),
+                "`{tela}` escreve {acusacao} por conta própria, por cima do estado: \
+                 fora de sala ela diz que falta áudio"
+            );
+        }
+    }
+
+    // A chamada só pinta cartões da sala em que se está: fora de sala ela diz
+    // «VOCÊ NÃO ESTÁ EM NENHUMA SALA», e o controle de volume nem chega a ser
+    // desenhado.
+    let chamada = without_comments(&read("ui/tela-chamada.js"));
+    assert!(
+        body_of(&chamada, "function desenharChamada(snapshot)").contains("occupied_by_us"),
+        "a chamada deixou de desenhar só a sala em que se está"
+    );
+    let cartoes = body_of(&chamada, "function desenharCartoes(snapshot, voice_room)");
+    let (antes_de_pintar, _) = cartoes
+        .split_once("pintarCartao(")
+        .unwrap_or_else(|| panic!("a chamada não pinta mais cartões"));
+    assert!(
+        antes_de_pintar.contains("if (!voice_room"),
+        "a chamada pinta cartões sem sala ocupada, e o volume escondido por \
+         `audio_available` passa a dizer «sem áudio» a quem está fora de sala"
+    );
+}
+
+/// **O gancho de pânico é instalado, e logo depois do assinante do log.**
+/// F1-audio-panico.
+///
+/// O teste `um_panico_numa_thread_deixa_linha_no_log`, no binário, prova o que o
+/// gancho escreve, e chama ele mesmo a instalação: um `main` que deixasse de
+/// chamá-la passaria por ele, e o `seele.log` voltaria a não ter linha nenhuma
+/// sobre a thread que morreu. «Existir não é funcionar.»
+///
+/// A ordem também importa: o gancho escreve pelo `tracing`, e instalado antes
+/// do assinante um pânico ainda no arranque iria para lugar nenhum.
+#[test]
+fn o_gancho_de_panico_e_instalado_logo_depois_do_assinante_do_log() {
+    let corpo = body_of(&read("src/main.rs"), "fn main() {");
+    let Some(instala) = corpo.find("instalar_gancho_de_panico();") else {
+        panic!(
+            "`main` não instala o gancho de pânico: um pânico numa thread solta — a \
+             que abre o áudio, a da voz — volta a sumir sem linha no `seele.log`"
+        );
+    };
+    let Some(assinante) = corpo.find(".init()") else {
+        panic!("`main` não arma mais o assinante do log, e este guarda mediu outra coisa");
+    };
+    assert!(
+        assinante < instala,
+        "o gancho de pânico é instalado antes do assinante do log: um pânico nesse \
+         intervalo não tem onde ser escrito"
+    );
+    let Some(janela) = corpo.find("tauri::Builder::default()") else {
+        panic!("`main` não monta mais a janela, e este guarda mediu outra coisa");
+    };
+    assert!(
+        instala < janela,
+        "o gancho de pânico é instalado depois de a janela começar a subir"
+    );
+}
+
 #[test]
 fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     // O gêmeo do guarda dos motivos de fim de sessão, na outra lista. Um

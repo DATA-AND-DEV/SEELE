@@ -906,6 +906,15 @@ fn carregar_controles(de: &Controls, para: &Controls) {
         .store(de.mode.load(Ordering::Relaxed), Ordering::Relaxed);
     para.key_held
         .store(de.key_held.load(Ordering::Relaxed), Ordering::Relaxed);
+    // A supressão e a sensibilidade de F01 e F02 ficavam de fora, e a reabertura
+    // as devolvia ao padrão calada: ver
+    // `a_supressao_e_a_sensibilidade_atravessam_a_reabertura`.
+    para.supressao
+        .store(de.supressao.load(Ordering::Relaxed), Ordering::Relaxed);
+    para.abertura_dbfs_milesimos.store(
+        de.abertura_dbfs_milesimos.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
     // O relógio de mídia **não** vai daqui: ele é entregue ao caminho novo na
     // criação (`Voice::around`), antes de a thread nascer. Gravado aqui, depois
     // do `spawn`, ele chegava tarde quando a thread ganhava a corrida.
@@ -1158,8 +1167,8 @@ impl Voice {
     ///
     /// # What has to survive, and why it is decided here
     ///
-    /// mudo, Isolamento total, the mode, the held key and every per-talker
-    /// volume. Left to a shell, this list would be written once per shell and
+    /// mudo, Isolamento total, the mode, the held key, every per-talker volume,
+    /// and the noise suppression and gate sensitivity of F01 and F02. Left to a shell, this list would be written once per shell and
     /// each copy would forget a different item — and the item that hurts is
     /// mudo: a switch that quietly unmutes a microphone is a switch that
     /// puts a room on the air.
@@ -2914,6 +2923,39 @@ mod controles_na_reabertura {
             novo.gains.lock().expect("ganhos").get(&7).copied(),
             Some(0.25),
             "o volume que alguém ajustou para uma pessoa voltou ao padrão"
+        );
+    }
+
+    /// A supressão e a sensibilidade atravessam a reabertura como o resto.
+    ///
+    /// Ficavam de fora da lista, e a pendência 52 é o que as torna visíveis: com
+    /// a voz abrindo a cada entrada numa sala, a reabertura da reconexão e a
+    /// troca de aparelho deixam de ser raras, e cada uma devolvia a redução de
+    /// ruído inteira e a sensibilidade no padrão a quem tinha escolhido outra
+    /// coisa — com a tela de F01 e F02 lendo da voz nova e mostrando o padrão
+    /// como se fosse a escolha.
+    #[test]
+    fn a_supressao_e_a_sensibilidade_atravessam_a_reabertura() {
+        let velho = Controls::novos();
+        velho.supressao.store(250, Ordering::Relaxed);
+        velho
+            .abertura_dbfs_milesimos
+            .store(-42_000, Ordering::Relaxed);
+
+        let novo = Controls::novos();
+        carregar_controles(&velho, &novo);
+
+        assert_eq!(
+            novo.supressao.load(Ordering::Relaxed),
+            250,
+            "a reabertura devolveu a redução de ruído inteira a quem a tinha \
+             baixado, e a tela de F02 passa a mostrar o padrão como escolha"
+        );
+        assert_eq!(
+            novo.abertura_dbfs_milesimos.load(Ordering::Relaxed),
+            -42_000,
+            "a reabertura devolveu a sensibilidade ao padrão: quem calibrou o \
+             portão de F01 volta abrindo com o ventilador"
         );
     }
 

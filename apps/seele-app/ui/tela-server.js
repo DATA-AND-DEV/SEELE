@@ -341,14 +341,24 @@ function desenharNivel(snapshot) {
   const nota = $("server-nivel-nota");
   if (!snapshot || !snapshot.audio_available) {
     medidor.dataset.vivo = "nao";
-    medidor.textContent = "— SEM SESSÃO DE ÁUDIO";
+    // **Sem voz, a linha sai do estado da abertura** — pendência 52. O áudio
+    // só abre dentro de uma sala, então fora dela não há voz e não falta nada:
+    // a linha diz onde a pessoa está, e não que ela está sem áudio. Ver
+    // `ABERTURA_DO_AUDIO`.
+    const abertura = snapshot
+      ? ABERTURA_DO_AUDIO[snapshot.abertura_do_audio] ?? ABERTURA_DO_AUDIO.fora_de_sala
+      : null;
+    medidor.textContent = abertura?.medidor ?? "— SEM SESSÃO";
     // **A frase de baixo sai do mesmo estado que a de cima** — U08. Ela era
     // fixa, e dizia «Fale normalmente: os blocos sobem com a sua voz» debaixo
     // de um medidor que acabara de dizer que não há sessão de áudio.
     if (nota) {
-      nota.textContent = "O medidor mede a voz que está indo para uma sala. "
-        + "Aqui fora não há nenhuma: escolha os aparelhos agora e entre numa "
-        + "sala de voz para ver o nível.";
+      const foraDeSala = !snapshot || snapshot.abertura_do_audio === "fora_de_sala";
+      nota.textContent = foraDeSala
+        ? "O medidor mede a voz que está indo para uma sala. "
+          + "Aqui fora não há nenhuma: escolha os aparelhos agora e entre numa "
+          + "sala de voz para ver o nível."
+        : (abertura?.frase ?? "");
     }
     return;
   }
