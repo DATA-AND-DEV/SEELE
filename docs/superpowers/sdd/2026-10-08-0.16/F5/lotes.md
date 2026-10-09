@@ -1524,6 +1524,18 @@ Talvez também:
   - em `tela-sessao.js`, a faixa de fone do J, que se fecha na primeira entrada numa sala de voz.
 - **O teste (e) do pânico** usa `with_default` numa thread. Com a pendência 56, ele chama o `segundo_despachante()` do app.
 
+**Da revisão do I-a (09/10).**
+- O servidor manda `VoiceRoomEntryRefused` também quando mantém a pessoa sentada:
+  - numa troca de sala recusada;
+  - a cada volta numa sala com senha;
+  - pelo `nao_deu`, como no apelido tomado.
+- Com a D-52, isso fechava o áudio de quem continuava na sala. A regra do cliente, em `seele-core` (no `Room` e no motor), é esta: uma recusa desfaz só o pedido de entrada **pendente** e devolve o assento de antes. Sem pedido pendente, ela não move ninguém. A orquestradora confirmou que a regra fica.
+- O `nao_deu` passa a `AlertReason::PedidoRecusado { pedido, causa }`, que é fio e é da F1. O `pedido` é o ordinal do pedido recusado em `ClientMessage`.
+  - O I-a não programa contra essa variante, porque ela ainda não está na árvore. Ele só deixa a regra num lugar só.
+  - Quando o `PedidoRecusado` entrar na `versao/0.16`, o primeiro lote da F5 que vier depois o consome. Com isso, uma recusa que nomeia outro pedido não desfaz a entrada.
+- **Para a F1, fora da F5:** recusada por sala cheia, a pessoa passava a ouvir a sala que a recusou. A conformidade que o prova foi entregue à orquestradora: três testes, que hoje dão 1 verde e 2 vermelhos.
+- **No I-b:** a supressão e a sensibilidade salvas em disco passam a valer no connect, e o `ganhos_a_aplicar` cobre os volumes ao reabrir a voz.
+
 ### 1. D-52 e F1-audio-panico — o áudio abre na sala, numa thread própria, com prazo
 - **O gatilho.**
   - Na FFI, `Connection::enter_voice_room` e `leave_voice_room` mandam `Command::EnterVoiceRoom` e `LeaveVoiceRoom`, e `run_command` os trata (`client.entrar_na_voice_room` + `room.enter_voice_room`, e `room.leave_voice_room`).
