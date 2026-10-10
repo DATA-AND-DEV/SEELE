@@ -244,8 +244,9 @@ enum Desfecho {
 /// Manda o `Ping` atrás da rajada e lê o fluxo de volta até o `Pong` dele ou
 /// a despedida — sem prazo por leitura.
 ///
-/// Devolve também as chaves que o servidor recusou com `MessageRejected`: a
-/// recusa é dita a quem escreveu, e a mensagem recusada falta com razão.
+/// Devolve também as chaves que o servidor recusou com `MessageRejected`, para
+/// o teste exigir que não haja nenhuma: neste cenário a LINE existe e todo
+/// falante pode escrever nela.
 async fn desfecho(falante: &mut Par) -> (Desfecho, Vec<u64>) {
     // Se a sessão já se despediu, o fluxo de ida pode estar parado: a escrita
     // falha, e a despedida está no fluxo de volta.
@@ -427,10 +428,16 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     let gravadas_de = gravadas_por_falante(&servidor).await?;
     for (indice, ((desfecho, recusadas), numeros)) in desfechos.iter().zip(&gravadas_de).enumerate()
     {
-        let recusadas: Vec<usize> = recusadas
-            .iter()
-            .filter_map(|chave| usize::try_from(chave.checked_sub(1)?).ok())
-            .collect();
+        // **Nenhuma recusa.** A LINE existe e todo falante pode escrever nela:
+        // uma recusa aqui é o braço `SendMessage` errando, e aceitá-la deixaria
+        // um servidor que recusa tudo passar com zero gravadas, sem a pendência
+        // nº 1 nem acontecer (achado da revisão do lote Y).
+        assert!(
+            recusadas.is_empty(),
+            "o servidor recusou {} mensagens do falante {indice:02} (chaves {recusadas:?}) \
+             num canal que existe e em que ele pode escrever",
+            recusadas.len()
+        );
         let mut sem_repetir = numeros.clone();
         sem_repetir.dedup();
         assert_eq!(
@@ -439,7 +446,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
         );
         let ate = numeros.last().map_or(0, |ultimo| ultimo + 1);
         let buracos: Vec<usize> = (0..ate)
-            .filter(|numero| !numeros.contains(numero) && !recusadas.contains(numero))
+            .filter(|numero| !numeros.contains(numero))
             .collect();
         assert!(
             buracos.is_empty(),
@@ -447,7 +454,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
              faltam {buracos:?} — perder do meio não tem despedida que explique"
         );
         let faltam: Vec<usize> = (0..CADA)
-            .filter(|numero| !numeros.contains(numero) && !recusadas.contains(numero))
+            .filter(|numero| !numeros.contains(numero))
             .collect();
         match desfecho {
             Desfecho::LeuTudo => assert!(
