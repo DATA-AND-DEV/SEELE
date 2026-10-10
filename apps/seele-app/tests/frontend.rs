@@ -532,22 +532,24 @@ fn every_command_the_frontend_calls_is_registered() {
 // `assistir` esteve aqui por dois commits — o servidor e o núcleo prontos, a
 // tela não — e saiu quando `palco-imagem.js` passou a desenhar a escolha entre
 // transmissões. A lista voltou ao estado de repouso, que é vazia.
-// `habilitar_mod` e `desabilitar_mod` entraram com o ADR 0045: o núcleo, o
-// FFI e o banco estão prontos, e a tela que liga e desliga MOD é de um plano
-// posterior. `mods_instalados` **não** está aqui — o `base.js` já o chama para
-// carregar os MODs habilitados, que é a metade que existe hoje.
-// `aceite_de_mods`, `aceitar_mods` e `esquecer_aceite_de_mods` entram pelo outro
-// lado do mesmo ADR 0045: os três de cima são de quem hospeda e decidem o que a
-// sala exige; estes três são de quem entra e registram o que esta máquina
-// respondeu. O protocolo, o servidor, o núcleo e o FFI estão prontos — a lista
-// já chega à janela pelo `ConnectionError::ModsNaoAceitos`, e o `frases.js` a
-// desenha —, e o que falta é a tela com o botão de aceitar, que é de um plano
-// posterior junto com o download dos bytes.
+// `habilitar_mod` e `desabilitar_mod` entraram com o ADR 0045, quando o
+// núcleo, o FFI e o banco estavam prontos e a tela que liga e desliga MOD era
+// de um plano posterior. `mods_instalados` **não** esteve aqui — o `base.js` já
+// o chamava para carregar os MODs habilitados, a metade que existia então.
+// `aceite_de_mods`, `aceitar_mods` e `esquecer_aceite_de_mods` entraram pelo
+// outro lado do mesmo ADR 0045: os verbos de cima são de quem hospeda e
+// decidem o que a sala exige; estes três são de quem entra e registram o que
+// esta máquina respondeu. O protocolo, o servidor, o núcleo e o FFI estavam prontos
+// — a lista já chegava à janela pelo `ConnectionError::ModsNaoAceitos`, e o
+// `frases.js` a desenhava —, e o que faltava era a tela com o botão de
+// aceitar, junto com o download dos bytes. As duas telas chegaram em
+// 2026-09-17 (logo abaixo), e a frase do `frases.js` que dizia que a de aceite
+// não existia só foi corrigida no lote W2 da F5, em 2026-10-10.
 //
-// **Por que registrá-los antes da tela**, em vez de esperar por ela: sem eles a
-// pergunta que a janela já mostra não tem resposta possível. A pessoa lê o que o
-// servidor exige e não tem o que fazer com a leitura — que é meia funcionalidade
-// entregue como se fosse uma.
+// **Por que foram registrados antes da tela**, em vez de esperar por ela: sem
+// eles a pergunta que a janela já mostrava não teria resposta possível. A
+// pessoa leria o que o servidor exige e não teria o que fazer com a leitura —
+// que é meia funcionalidade entregue como se fosse uma.
 // **A lista voltou a ser vazia em 2026-09-17.** As cinco entradas que estavam
 // aqui saíram juntas, com as duas telas que faltavam: a camada de aceite
 // (`camada-mods.js`), que é de quem entra, e a seção MODS de CONFIGURAÇÕES, que
