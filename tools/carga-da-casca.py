@@ -454,9 +454,38 @@ def rodar_navegador(comando: list[str], prazo_s: float) -> tuple[str, bool]:
         saida, erro = processo.communicate(timeout=prazo_s)
         return saida + erro, False
     except subprocess.TimeoutExpired:
-        os.killpg(processo.pid, signal.SIGKILL)
+        matar_o_grupo(processo)
         saida, erro = processo.communicate()
         return (saida or "") + (erro or ""), True
+    except BaseException:
+        # **Qualquer outra saída antecipada mata o grupo também.** O grupo
+        # próprio põe o navegador fora do alcance do Ctrl+C do terminal, que vai
+        # só ao grupo da frente: interromper à mão uma carga com um roteiro que
+        # trava deixava 5 processos órfãos, o renderer a 100% (R2-M2 da revisão
+        # do lote RT, medido de novo aqui). O `KeyboardInterrupt` chega aqui
+        # sozinho; o SIGTERM, pelo tratador que `main` instala.
+        matar_o_grupo(processo)
+        raise
+
+
+def matar_o_grupo(processo: subprocess.Popen) -> None:
+    """Mata o grupo de processos do navegador, se ele ainda existir, e colhe o
+    principal, que é filho da carga e ficaria zumbi até ela sair."""
+    try:
+        os.killpg(processo.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        processo.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def terminar_pelo_sinal(numero: int, _quadro) -> None:
+    """O SIGTERM vira `SystemExit`, que passa pelo `except` de
+    `rodar_navegador` e mata o navegador antes de a carga sair. Sem isto, o
+    Python sai na hora e não limpa nada."""
+    raise SystemExit(128 + numero)
 
 
 def argumentos_da_carga() -> argparse.ArgumentParser:
@@ -489,6 +518,7 @@ def argumentos_da_carga() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    signal.signal(signal.SIGTERM, terminar_pelo_sinal)
     argumentos = argumentos_da_carga()
     opcoes = argumentos.parse_args()
     if opcoes.autoteste:
@@ -683,12 +713,50 @@ def autoteste() -> int:
         os.kill(filho, signal.SIGKILL)
         return f"o filho do navegador ({filho}) continuou vivo depois do prazo"
 
+    def o_sinal() -> str | None:
+        # R2-M2: um SIGTERM no meio da espera, mandado pela própria carga a si
+        # mesma 0,5 s depois de abrir o «navegador», tem de matar o grupo
+        # dele antes de a carga sair. O «navegador» escreve num arquivo o
+        # número dele e o do filho, porque a saída se perde com o sinal.
+        with tempfile.TemporaryDirectory() as pasta:
+            numeros = pathlib.Path(pasta) / "numeros"
+            falso = ("import subprocess, sys, os, time; "
+                     "filho = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                     f"open({str(numeros)!r}, 'w').write(f'{{os.getpid()}} {{filho.pid}}'); "
+                     "time.sleep(30)")
+            anterior = signal.signal(signal.SIGALRM,
+                                     lambda *_: os.kill(os.getpid(), signal.SIGTERM))
+            signal.setitimer(signal.ITIMER_REAL, 0.5)
+            try:
+                rodar_navegador([sys.executable, "-c", falso], 30.0)
+                return "o SIGTERM não interrompeu a espera pelo «navegador»"
+            except SystemExit:
+                pass
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, anterior)
+            vivos = []
+            for numero in numeros.read_text().split():
+                for _ in range(30):
+                    try:
+                        os.kill(int(numero), 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.1)
+                else:
+                    vivos.append(numero)
+                    os.kill(int(numero), signal.SIGKILL)
+            if vivos:
+                return f"depois do SIGTERM, continuaram vivos: {' '.join(vivos)}"
+            return None
+
     casos = [
         ("o relato atravessa a aspa", a_aspa),
         ("vários --roteiro numa chamada", os_argumentos),
         ("a lista roda todos e diz quem reprovou", a_lista),
         ("a carga não cai", nao_cai),
         ("o prazo mata o navegador e os filhos", o_prazo),
+        ("um SIGTERM no meio mata o navegador e os filhos", o_sinal),
     ]
     falharam = 0
     for nome, caso in casos:

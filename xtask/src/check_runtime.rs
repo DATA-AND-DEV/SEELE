@@ -913,7 +913,8 @@ mod tests {
     /// carga (`--autoteste`) exercita, sem abrir navegador, o mesmo código que a
     /// carga usa: a leitura do relato sobre uma linha do console no formato do
     /// Chromium, a leitura dos argumentos, a lista que roda todos e diz quem
-    /// reprovou, a carga que não cai e o prazo que mata o grupo do navegador.
+    /// reprovou, a carga que não cai, e o prazo e o SIGTERM que matam o grupo do
+    /// navegador.
     ///
     /// Aqui, e não num passo do job de navegador: o `cargo test` roda em todo
     /// disparo do CI, no `validar` do `release.yml` e na bateria do
@@ -948,8 +949,8 @@ mod tests {
             "o autoteste da carga da casca reprovou, e um dos consertos dela voltou atrás:\n{dito}"
         );
         assert!(
-            dito.contains("autoteste: os 5 passaram"),
-            "o autoteste da carga saiu com 0 sem dizer que os cinco passaram:\n{dito}"
+            dito.contains("autoteste: os 6 passaram"),
+            "o autoteste da carga saiu com 0 sem dizer que os seis passaram:\n{dito}"
         );
     }
 
