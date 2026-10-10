@@ -15572,19 +15572,24 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 /// Um campo servindo a duas perguntas responde mal a uma delas. São dois
 /// campos, e este guarda cobra as duas metades: que `aplicar_mod` leia o certo,
 /// e que o certo seja preenchido antes de qualquer condição sobre o endereço.
+///
+/// Desde a rodada 1 do lote X da F5, `aplicar_mod` grava o sim por
+/// `gravar_o_sim_de_quem_hospeda`, que só o grava quando a sessão é com o
+/// servidor daqui. É ali que o endereço desta sessão é lido.
 #[test]
 fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let fonte = read("src/main.rs");
 
     let aplicar = body_of(&fonte, "async fn aplicar_mod");
+    let grava = body_of(&fonte, "fn gravar_o_sim_de_quem_hospeda");
     assert!(
-        aplicar.contains("endereco_da_sessao"),
-        "`aplicar_mod` não lê o endereço desta sessão: {aplicar}"
+        aplicar.contains("gravar_o_sim_de_quem_hospeda(") && grava.contains("endereco_da_sessao"),
+        "`aplicar_mod` não grava o sim pelo endereço desta sessão: {aplicar}\n{grava}"
     );
     assert!(
-        !aplicar.contains("session.alvo"),
+        !aplicar.contains("session.alvo") && !grava.contains("session.alvo"),
         "`aplicar_mod` lê `alvo`, que é «onde voltar» e está vazio justamente \
-         quando quem liga o MOD é quem hospeda:\n{aplicar}"
+         quando quem liga o MOD é quem hospeda:\n{aplicar}\n{grava}"
     );
 
     // E o preenchimento vem antes da condição que exclui o servidor local.

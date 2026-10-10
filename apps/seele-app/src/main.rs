@@ -1993,7 +1993,7 @@ async fn hospedar(
 
     let alcance = server.alcance();
     let anfitriao = Anfitriao {
-        aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
+        aqui: endereco_do_servidor_daqui(),
         convite: server.convite_com_nome(nome_publico.as_deref()),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
@@ -5134,17 +5134,247 @@ async fn aplicar_mod(
 
     // `endereco_da_sessao` e não `alvo`: o segundo é «onde voltar» e exclui um
     // servidor hospedado aqui, que é justamente o caso em que quem liga o MOD é
-    // quem hospeda. Ver o campo.
+    // quem hospeda. Ver o campo. E só quando a sessão é com o servidor daqui
+    // (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    Ok(identidade)
+}
+
+/// Onde esta janela entra no servidor que ela mesma hospeda: o `aqui` que
+/// [`hospedar`] devolve, e que a tela usa como alvo da entrada seguinte.
+fn endereco_do_servidor_daqui() -> String {
+    format!("127.0.0.1:{PORTA_PADRAO}")
+}
+
+/// Se a sessão desta janela é com o servidor que ela mesma hospeda.
+///
+/// **Lote X da F5, rodada 1.** Fazer esta pergunta é necessário porque o sim
+/// de quem hospeda vai a `endereco_da_sessao`, e a janela pode estar de pé
+/// hospedando e, ao mesmo tempo, na sessão de **outro** servidor. Isso acontece
+/// quando a entrada no próprio servidor falha ou é recusada e a pessoa entra
+/// noutro.
+///
+/// A comparação é **pelo `aqui` de [`hospedar`]**, na chave em que o aceite é
+/// guardado ([`seele_ffi::chave_do_servidor`]). Não serve
+/// [`hospedado_aqui`], porque o prefixo de loopback diz só «nesta máquina»: o
+/// HOSPEDAR COM ESTA da F6 põe o servidor de outra versão em `127.0.0.1`. Nem a
+/// impressão digital, porque a conexão não a entrega à casca (o `Trust::Known`
+/// não a traz).
+///
+/// Só quem já sabe que esta janela hospeda chama esta função
+/// (`persistence_do_mod`). Duas hospedagens não seguram a mesma porta, então o
+/// `aqui` é o servidor desta janela.
+fn a_sessao_e_com_o_servidor_daqui(endereco_da_sessao: &str) -> bool {
+    seele_ffi::chave_do_servidor(endereco_da_sessao).is_some_and(|chave| {
+        seele_ffi::chave_do_servidor(&endereco_do_servidor_daqui()).as_ref() == Some(&chave)
+    })
+}
+
+/// Grava o sim de quem hospeda ao conjunto que acabou de aplicar, **só** quando
+/// a sessão é com o servidor daqui.
+///
+/// Há dois gravadores: [`aplicar_mod`] (a atualização pela gestão, QA-01) e
+/// [`aplicar_conjunto_de_mods`] (o SALVAR). Os dois gravavam
+/// `aceitar(endereco_da_sessao, identidade do servidor daqui)`, fosse a
+/// sessão com quem fosse. `Aceites::guardar` substitui o sim por alvo, então,
+/// com a sessão em outro servidor S, o sim que a pessoa deu a S era trocado
+/// por uma identidade que não descreve S:
+/// - S perguntava de novo;
+/// - quando o conjunto de S era igual ao daqui, S **não** perguntava, contra o
+///   ADR 0045;
+/// - a lista de aceites mostrava um sim a S que ninguém deu.
+///
+/// Fora do servidor daqui, nada é gravado: o sim de quem hospeda é ao
+/// conjunto que ele acabou de decidir, e não ao de outro servidor.
+fn gravar_o_sim_de_quem_hospeda(
+    config: &str,
+    session: &Session,
+    identidade: &str,
+) -> Result<(), String> {
     let alvo = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    match alvo {
+        Some(alvo) if a_sessao_e_com_o_servidor_daqui(&alvo) => {
+            seele_ffi::mods::aceitar(config, &alvo, identidade)
+        }
+        _ => Ok(()),
     }
-    Ok(identidade)
+}
+
+/// **O sim de quem hospeda vai só ao servidor daqui** — lote X da F5, rodada 1,
+/// ADR 0045. Ver [`gravar_o_sim_de_quem_hospeda`].
+///
+/// Os dois gravadores têm `AppHandle` e pedem uma hospedagem de pé, que num
+/// teste abriria UPnP e PCP no roteador. Por isso o que roda aqui é:
+/// - a identidade que cada um calcula, sobre o banco de verdade do servidor
+///   hospedado, em memória;
+/// - a gravação que os dois fazem, sobre o arquivo de aceites de verdade, numa
+///   pasta de passagem.
+///
+/// O guarda de texto-fonte prende os dois gravadores a essa gravação.
+#[cfg(test)]
+mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{definir_conjunto, enable, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{
+        corpo_de, endereco_do_servidor_daqui, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
+        Session,
+    };
+
+    /// Outro servidor, onde a sessão está.
+    const S: &str = "198.51.100.7:8383";
+
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: "autor/rpg".to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// Uma pasta de configuração só deste teste.
+    fn pasta(nome: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("seele-lote-x-{nome}-"))
+            .tempdir()
+            .unwrap()
+    }
+
+    /// Uma janela cuja sessão está em `onde`.
+    fn sessao_em(onde: &str) -> Session {
+        let sessao = Session::default();
+        *sessao.endereco_da_sessao.lock().unwrap() = Some(onde.to_owned());
+        sessao
+    }
+
+    /// A identidade que cada gravador grava, calculada como ele a calcula.
+    fn identidades_dos_gravadores() -> [(&'static str, String); 2] {
+        let salvar = Persistence::open(&Location::Memory).unwrap();
+        definir_conjunto(&salvar, &[versao("1.0.0", 'a')]).unwrap();
+        let atualizar = Persistence::open(&Location::Memory).unwrap();
+        enable(&atualizar, &versao("1.0.0", 'a')).unwrap();
+        enable(&atualizar, &versao("2.0.0", 'b')).unwrap();
+        [
+            (
+                "o SALVAR da gestão (`aplicar_conjunto_de_mods`)",
+                conjunto_exigido(&salvar).unwrap().identidade,
+            ),
+            (
+                "a atualização pela gestão (`aplicar_mod`, QA-01)",
+                conjunto_exigido(&atualizar).unwrap().identidade,
+            ),
+        ]
+    }
+
+    /// A medida da rodada: a sessão em S, a janela hospedando, e cada gravador
+    /// gravando o sim do conjunto daqui. Os dois gravadores são medidos antes
+    /// de o teste reprovar, e a frase diz quais trocaram o sim de S.
+    #[test]
+    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
+        let de_s = "5".repeat(64);
+        let mut trocaram = Vec::new();
+        let mut criaram = Vec::new();
+        for (quem, daqui) in identidades_dos_gravadores() {
+            let config = pasta("outro");
+            let config = config.path().to_str().unwrap();
+            seele_ffi::mods::aceitar(config, S, &de_s).unwrap();
+            gravar_o_sim_de_quem_hospeda(config, &sessao_em(S), &daqui).unwrap();
+            if seele_ffi::mods::aceite_de(config, S).as_deref() != Some(de_s.as_str()) {
+                trocaram.push(quem);
+            }
+
+            // Sem sim nenhum a S, o gravador não cria um: com o conjunto de S
+            // igual ao daqui, a entrada em S deixaria de perguntar.
+            let config = pasta("sem-sim");
+            let config = config.path().to_str().unwrap();
+            gravar_o_sim_de_quem_hospeda(config, &sessao_em(S), &daqui).unwrap();
+            if seele_ffi::mods::aceite_de(config, S).is_some() {
+                criaram.push(quem);
+            }
+        }
+        assert!(
+            trocaram.is_empty() && criaram.is_empty(),
+            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui. \
+             Trocaram o sim que a pessoa tinha dado: {trocaram:?}, e ele pergunta de novo. \
+             Criaram um sim que ela nunca deu: {criaram:?}, e a lista de aceites mente; com \
+             os conjuntos iguais, a entrada nele não pergunta (ADR 0045)"
+        );
+    }
+
+    /// O A04 continua: na sessão do servidor daqui, o sim de quem hospeda é
+    /// gravado. E um outro servidor nesta máquina, noutra porta de loopback,
+    /// não é o daqui.
+    #[test]
+    fn na_sessao_do_servidor_daqui_o_sim_continua_gravado() {
+        for (quem, daqui) in identidades_dos_gravadores() {
+            let config = pasta("daqui");
+            let config = config.path().to_str().unwrap();
+            let aqui = endereco_do_servidor_daqui();
+            gravar_o_sim_de_quem_hospeda(config, &sessao_em(&aqui), &daqui).unwrap();
+            assert_eq!(
+                seele_ffi::mods::aceite_de(config, &aqui).as_deref(),
+                Some(daqui.as_str()),
+                "{quem}, na sessão do servidor daqui, deixou de gravar o sim de quem hospeda: \
+                 quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
+            );
+
+            let vizinho = "127.0.0.1:8384";
+            gravar_o_sim_de_quem_hospeda(config, &sessao_em(vizinho), &daqui).unwrap();
+            assert_eq!(
+                seele_ffi::mods::aceite_de(config, vizinho),
+                None,
+                "{quem} tomou por servidor daqui um servidor em outra porta desta máquina: \
+                 o loopback diz «nesta máquina», e não «nesta janela»"
+            );
+        }
+    }
+
+    /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
+    /// e `hospedar` devolve o `aqui` com que ela compara.
+    ///
+    /// As agulhas são montadas por `concat!`, para que este guarda não case com
+    /// o próprio texto.
+    #[test]
+    fn os_dois_gravadores_passam_pelo_sim_de_quem_hospeda() {
+        let fonte = fonte_sem_comentarios();
+        let fora: Vec<&str> = [
+            ("aplicar_mod", concat!("async fn aplicar_mod", "(")),
+            (
+                "aplicar_conjunto_de_mods",
+                concat!("async fn aplicar_conjunto_de_mods", "("),
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, cabecalho)| {
+            let corpo = corpo_de(&fonte, cabecalho);
+            !(corpo.contains(concat!("gravar_o_sim_de_quem_hospeda", "("))
+                && !corpo.contains(concat!("seele_ffi::mods::aceitar", "("))
+                && !corpo.contains(concat!("endereco_da", "_sessao")))
+        })
+        .map(|(quem, _)| quem)
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "{fora:?} grava o sim sem passar por `gravar_o_sim_de_quem_hospeda`: com a sessão \
+             em outro servidor, o sim dele vira a identidade do servidor daqui (ADR 0045)"
+        );
+        let hospedar = corpo_de(&fonte, concat!("async fn hospedar", "("));
+        assert!(
+            hospedar.contains(concat!("aqui: endereco_do_servidor_daqui", "()")),
+            "`hospedar` devolve um `aqui` que não é o de `endereco_do_servidor_daqui`: a \
+             tela entra num endereço, o sim de quem hospeda compara com outro, e nunca é gravado"
+        );
+    }
 }
 
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
@@ -7505,16 +7735,10 @@ async fn aplicar_conjunto_de_mods(
     // **Um sim, para o conjunto resultante.** Salvar já é a decisão informada
     // do operador sobre o conjunto que vai valer; perguntar de novo, logo
     // depois, seria perguntar o que acabou de ser respondido. Isto não autoriza
-    // mudança futura, e não dispensa o aceite de quem entra.
-    let alvo = session
-        .endereco_da_sessao
-        .lock()
-        .ok()
-        .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
-    }
+    // mudança futura, e não dispensa o aceite de quem entra. E só ao servidor
+    // daqui (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     Ok(identidade)
 }
 
