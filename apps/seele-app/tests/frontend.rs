@@ -579,12 +579,16 @@ fn every_command_the_frontend_calls_is_registered() {
 // ligações» do PERFIL. Os dois saem quando a linha de estado da sala e o PERFIL
 // os chamarem, na vez da F8, dentro do mesmo conjunto da sala viva.
 // `toques_agora` entrou com a tarefa 24: a faixa `#toque` da tela que abre com
-// o toque já tocando. Sai com a faixa, na tarefa 26.
+// o toque já tocando. Sai com a faixa, na tarefa 26, com `atender`, `recusar` e
+// `encerrar_a_ligacao`, da tarefa 27.
 const AGUARDANDO_TELA: &[&str] = &[
     "onde_estou",
     "estado_da_sala",
     "receber_ligacoes",
     "toques_agora",
+    "atender",
+    "recusar",
+    "encerrar_a_ligacao",
 ];
 
 #[test]
@@ -18729,5 +18733,24 @@ fn o_toque_chama_a_atencao_e_nunca_toma_a_tela() {
     assert!(
         subir_agora.contains("tokio::spawn(crate::toque::ouvir(app.clone(),avisos,"),
         "a subida da sala não liga o vigia da campainha: quem tocar não chega à casca"
+    );
+}
+
+/// **O `connect` confere a sala desta máquina pelo código** (o ATENDER, tarefa
+/// 27 da F7). A regra é `sala::codigo_se_for_a_sala`, provada lá; o que só se vê
+/// aqui é o `connect` usá-la, porque ele é um comando Tauri e não roda sem casca.
+/// Sem ela, entrar na própria sala seria um primeiro contato cego: a sala
+/// apresenta a chave da pessoa, e lista nenhuma guardou o certificado dela.
+#[test]
+fn o_connect_confere_a_sala_desta_maquina_pelo_codigo() {
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        connect.contains("letcodigo_da_sala=sala::codigo_se_for_a_sala(&session,&server,&home);")
+            && connect.contains("codigo_esperado:codigo_da_sala,"),
+        "o `connect` não confere a sala desta máquina pelo código: o ATENDER entraria na própria \
+         sala sem conferir quem atende"
     );
 }

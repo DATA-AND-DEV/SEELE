@@ -297,6 +297,134 @@ pub(crate) async fn desligar<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// A porta em que a sala desta máquina atende, quando está no ar.
+pub(crate) fn porta_da_sala(sessao: &crate::Session) -> Option<u16> {
+    sessao.hospedagens.lock().ok().and_then(|hospedagens| {
+        hospedagens
+            .pessoal
+            .as_ref()
+            .map(|sala| sala.hospedagem.endereco().port())
+    })
+}
+
+/// Se `server` é a sala desta máquina: um endereço desta máquina, na porta em
+/// que a sala atende.
+pub(crate) fn e_a_sala_daqui(server: &str, porta_da_sala: Option<u16>) -> bool {
+    porta_da_sala.is_some() && crate::porta_desta_maquina(server) == porta_da_sala
+}
+
+/// O código que o `connect` confere quando o alvo é a sala desta máquina: o
+/// desta máquina (o ATENDER, tarefa 27 da F7). `None` para todo outro alvo.
+///
+/// A sala apresenta a chave da pessoa, e não um certificado que lista nenhuma
+/// guardou: sem isto, entrar na própria sala seria um primeiro contato cego.
+pub(crate) fn codigo_se_for_a_sala(
+    sessao: &crate::Session,
+    server: &str,
+    home: &str,
+) -> Option<seele_ffi::Codigo> {
+    if !e_a_sala_daqui(server, porta_da_sala(sessao)) {
+        return None;
+    }
+    seele_ffi::codigo_desta_maquina(home)
+        .map_err(|erro| {
+            tracing::warn!(
+                ?erro,
+                "o código desta máquina não saiu: a entrada na sala segue sem conferi-lo"
+            );
+        })
+        .ok()
+}
+
+/// O que o ATENDER devolve à casca.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct Atendido {
+    /// A sessão desta janela já está na sala: atender acaba aqui.
+    pub(crate) ja_na_sala: bool,
+    /// Onde a casca entra para atender, quando não está: a sala desta máquina.
+    /// O `connect` a confere pelo código desta máquina ([`codigo_se_for_a_sala`]).
+    pub(crate) alvo: String,
+}
+
+/// Por que atender, recusar ou encerrar não aconteceu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum FalhaAoAtender {
+    /// A sala não está no ar.
+    SemSala,
+    /// O toque já tinha parado: quem ligava desistiu, o prazo venceu, ou ele já
+    /// foi decidido.
+    JaParou,
+}
+
+/// A campainha da sala no ar, e a porta dela.
+fn campainha(
+    sessao: &crate::Session,
+) -> Result<(std::sync::Arc<seele_server::recepcao::Recepcao>, u16), FalhaAoAtender> {
+    let hospedagens = sessao
+        .hospedagens
+        .lock()
+        .map_err(|_| FalhaAoAtender::SemSala)?;
+    let sala = hospedagens
+        .pessoal
+        .as_ref()
+        .ok_or(FalhaAoAtender::SemSala)?;
+    let recepcao = sala.hospedagem.recepcao().ok_or(FalhaAoAtender::SemSala)?;
+    Ok((recepcao, sala.hospedagem.endereco().port()))
+}
+
+/// O toque de `quem`, se ainda toca.
+fn toque_de(
+    sessao: &crate::Session,
+    quem: &str,
+) -> Result<seele_server::campainha::IdDoToque, FalhaAoAtender> {
+    sessao
+        .toques
+        .lock()
+        .ok()
+        .and_then(|toques| toques.de(quem))
+        .ok_or(FalhaAoAtender::JaParou)
+}
+
+/// ATENDER, os dois primeiros passos de «Atender, nesta ordem» (spec de 23/09):
+/// decidir na campainha, e parar aí se a sessão já está na sala. O resto
+/// (desmontar só o cliente e entrar na sala) é da casca, pelo `connect`, com o
+/// [`Atendido::alvo`].
+pub(crate) fn atender_em(sessao: &crate::Session, quem: &str) -> Result<Atendido, FalhaAoAtender> {
+    let (recepcao, porta) = campainha(sessao)?;
+    let toque = toque_de(sessao, quem)?;
+    if !recepcao.atender(toque) {
+        return Err(FalhaAoAtender::JaParou);
+    }
+    Ok(Atendido {
+        ja_na_sala: crate::onde_estou_na(sessao) == crate::OndeEstou::Pessoal,
+        alvo: format!("127.0.0.1:{porta}"),
+    })
+}
+
+/// RECUSAR: quem ligava ouve a recusa, e a campainha segura um novo toque dela
+/// por um tempo.
+pub(crate) fn recusar_em(sessao: &crate::Session, quem: &str) -> Result<(), FalhaAoAtender> {
+    let (recepcao, _) = campainha(sessao)?;
+    let toque = toque_de(sessao, quem)?;
+    if recepcao.recusar(toque) {
+        Ok(())
+    } else {
+        Err(FalhaAoAtender::JaParou)
+    }
+}
+
+/// Encerra a ligação: quem estava dentro ouve «chamada encerrada». Devolve
+/// quantos estavam.
+///
+/// É a saída da falha dupla do ATENDER: quem recebe não conseguiu entrar na
+/// própria sala, e quem já foi atendido não pode ficar lá sozinho. Quando quem
+/// recebe está na sala, sair dela já encerra (a sessão dele avisa a
+/// campainha, no `seele-server`).
+pub(crate) fn encerrar_a_ligacao_em(sessao: &crate::Session) -> Result<usize, FalhaAoAtender> {
+    let (recepcao, _) = campainha(sessao)?;
+    Ok(recepcao.desligar().len())
+}
+
 /// Guarda o estado, para quem perguntar depois, e o anuncia à casca.
 fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
     tracing::info!(?estado, "sala pessoal");
@@ -316,8 +444,9 @@ fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
 )]
 mod a_sala_pessoal {
     use super::{
-        desligar, guardar_se_ainda_subindo, registro_de, subir, subir_em, EstadoDaSala,
-        FalhaDaSala, Registro, Subida,
+        atender_em, desligar, e_a_sala_daqui, encerrar_a_ligacao_em, guardar_se_ainda_subindo,
+        porta_da_sala, recusar_em, registro_de, subir, subir_em, Atendido, EstadoDaSala,
+        FalhaAoAtender, FalhaDaSala, Registro, Subida,
     };
     use tauri::Manager;
 
@@ -472,13 +601,7 @@ mod a_sala_pessoal {
             }
         );
         assert!(no_ar(&app), "a sala subiu e não ficou nas hospedagens");
-        let porta = app
-            .state::<crate::Session>()
-            .hospedagens
-            .lock()
-            .unwrap()
-            .portas()
-            .1;
+        let porta = porta_da_sala(&app.state::<crate::Session>());
 
         desligar(app.handle()).await;
 
@@ -520,6 +643,212 @@ mod a_sala_pessoal {
             "a sala que subiu sem ninguém desligar não foi guardada"
         );
         desligar(app.handle()).await;
+    }
+
+    /// A sala de verdade nas hospedagens do app de teste, com o vigia da
+    /// campainha ouvindo (e um alarme que anota em vez de tocar).
+    async fn sala_no_ar(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        casa: &tempfile::TempDir,
+    ) -> (std::sync::Arc<seele_server::recepcao::Recepcao>, u16) {
+        let sessao = app.state::<crate::Session>();
+        *sessao.sala.lock().unwrap() = EstadoDaSala::Subindo;
+        let sala = subir_em(casa.path().to_str().unwrap(), 0, None)
+            .await
+            .unwrap();
+        let porta = sala.endereco().port();
+        let recepcao = sala.recepcao().unwrap();
+        let avisos = recepcao.assinar();
+        assert!(guardar_se_ainda_subindo(&sessao, sala).is_none());
+        tokio::spawn(crate::toque::ouvir(
+            app.handle().clone(),
+            avisos,
+            casa.path().to_str().unwrap().to_owned(),
+            crate::toque::AlarmeAnotado::default(),
+        ));
+        (recepcao, porta)
+    }
+
+    /// Espera o toque chegar à faixa, e devolve quem toca.
+    async fn quem_toca(app: &tauri::App<tauri::test::MockRuntime>) -> String {
+        for _ in 0..200 {
+            let faixa = app
+                .state::<crate::Session>()
+                .toques
+                .lock()
+                .unwrap()
+                .na_faixa();
+            if let Some(tocando) = faixa.first() {
+                return tocando.quem.clone();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("o toque não chegou à faixa");
+    }
+
+    #[tokio::test]
+    async fn atender_decide_na_campainha_e_diz_por_onde_entrar_na_sala() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (recepcao, porta) = sala_no_ar(&app, &casa).await;
+        let seele_server::recepcao::Entrada::Toca { decisao, .. } =
+            recepcao.chegou([2; 32], "rafa")
+        else {
+            panic!("a campainha não tocou");
+        };
+        let quem = quem_toca(&app).await;
+
+        let atendido = atender_em(&app.state::<crate::Session>(), &quem);
+
+        assert_eq!(
+            atendido,
+            Ok(Atendido {
+                ja_na_sala: false,
+                alvo: format!("127.0.0.1:{porta}"),
+            })
+        );
+        assert_eq!(
+            decisao.await.ok(),
+            Some(seele_server::campainha::Desfecho::Atendida),
+            "quem ligava não soube que foi atendido"
+        );
+        assert_eq!(
+            atender_em(&app.state::<crate::Session>(), &quem),
+            Err(FalhaAoAtender::JaParou),
+            "atender duas vezes o mesmo toque passou"
+        );
+        desligar(app.handle()).await;
+    }
+
+    #[tokio::test]
+    async fn recusar_decide_na_campainha() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (recepcao, _) = sala_no_ar(&app, &casa).await;
+        let seele_server::recepcao::Entrada::Toca { decisao, .. } =
+            recepcao.chegou([2; 32], "rafa")
+        else {
+            panic!("a campainha não tocou");
+        };
+        let quem = quem_toca(&app).await;
+
+        assert_eq!(recusar_em(&app.state::<crate::Session>(), &quem), Ok(()));
+        assert_eq!(
+            decisao.await.ok(),
+            Some(seele_server::campainha::Desfecho::Recusada)
+        );
+        assert_eq!(
+            recusar_em(&app.state::<crate::Session>(), "ninguem"),
+            Err(FalhaAoAtender::JaParou)
+        );
+        desligar(app.handle()).await;
+    }
+
+    #[tokio::test]
+    async fn sem_a_sala_no_ar_nao_ha_quem_atender() {
+        let app = app_de_teste();
+        assert_eq!(
+            atender_em(&app.state::<crate::Session>(), "alguem"),
+            Err(FalhaAoAtender::SemSala)
+        );
+        assert_eq!(
+            encerrar_a_ligacao_em(&app.state::<crate::Session>()),
+            Err(FalhaAoAtender::SemSala)
+        );
+    }
+
+    /// **A falha dupla não deixa ninguém sozinho na sala** (spec de 23/09,
+    /// «Atender, nesta ordem»): quem já foi atendido está dentro, e encerrar a
+    /// ligação o tira com `ChamadaEncerrada`.
+    #[tokio::test]
+    async fn encerrar_a_ligacao_tira_quem_ja_foi_atendido() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (recepcao, _) = sala_no_ar(&app, &casa).await;
+        let _toca = recepcao.chegou([2; 32], "rafa");
+        let quem = quem_toca(&app).await;
+        atender_em(&app.state::<crate::Session>(), &quem).unwrap();
+
+        assert_eq!(
+            encerrar_a_ligacao_em(&app.state::<crate::Session>()),
+            Ok(1),
+            "quem foi atendido ficou na sala depois de a ligação acabar"
+        );
+        desligar(app.handle()).await;
+    }
+
+    /// **Quem já está na sala atende sem trocar de servidor.** A sessão é a de
+    /// quem recebe, conectada pela ponte à própria sala e conferida pelo
+    /// próprio código, como o ATENDER entra.
+    #[tokio::test]
+    async fn quem_ja_esta_na_sala_atende_sem_trocar_de_servidor() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (recepcao, porta) = sala_no_ar(&app, &casa).await;
+        let home = casa.path().to_str().unwrap().to_owned();
+        let alvo = format!("127.0.0.1:{porta}");
+        let config = seele_ffi::ConnectConfig {
+            server: alvo.clone(),
+            alternate_servers: Vec::new(),
+            nickname: "dona".into(),
+            codigo_esperado: Some(seele_ffi::codigo_desta_maquina(&home).unwrap()),
+            home,
+            join_secret: None,
+            expected_fingerprint: None,
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        };
+        let (conexao, _) =
+            tokio::task::spawn_blocking(move || seele_ffi::Connection::connect(config))
+                .await
+                .unwrap()
+                .expect("quem recebe não entrou na própria sala");
+        {
+            let sessao = app.state::<crate::Session>();
+            *sessao.connection.lock().unwrap() = Some(std::sync::Arc::clone(&conexao));
+            *sessao.endereco_da_sessao.lock().unwrap() = Some(alvo.clone());
+        }
+        let _toca = recepcao.chegou([2; 32], "rafa");
+        let quem = quem_toca(&app).await;
+
+        assert_eq!(
+            atender_em(&app.state::<crate::Session>(), &quem),
+            Ok(Atendido {
+                ja_na_sala: true,
+                alvo,
+            })
+        );
+        tokio::task::spawn_blocking(move || {
+            conexao.encerrar_e_esperar(std::time::Duration::from_secs(5))
+        })
+        .await
+        .unwrap();
+        desligar(app.handle()).await;
+    }
+
+    /// O `connect` confere pelo código desta máquina só a sala desta máquina: um
+    /// endereço daqui, na porta em que ela atende, e com ela no ar.
+    #[test]
+    fn so_a_sala_desta_maquina_se_confere_pelo_codigo_desta_maquina() {
+        for alvo in ["127.0.0.1:8385", "localhost:8385", "[::1]:8385"] {
+            assert!(e_a_sala_daqui(alvo, Some(8385)), "{alvo} é a sala daqui");
+        }
+        for (alvo, porta) in [
+            ("127.0.0.1:8383", Some(8385)),
+            ("192.168.1.20:8385", Some(8385)),
+            ("casa.exemplo:8385", Some(8385)),
+            ("127.0.0.1:8385", None),
+            // Sem sala no ar e com um alvo de fora, as duas portas são «nenhuma»:
+            // e nenhuma não é igual a nenhuma.
+            ("casa.exemplo:8383", None),
+        ] {
+            assert!(
+                !e_a_sala_daqui(alvo, porta),
+                "{alvo} com a sala em {porta:?} foi conferido pelo código desta máquina"
+            );
+        }
     }
 
     /// **Produção sobe na porta da sala, com o ponto de quem liga.** Os testes

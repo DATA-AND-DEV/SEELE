@@ -49,13 +49,6 @@ impl Toques {
     }
 
     /// O toque desta pessoa, para atender ou recusar.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "o ATENDER e o RECUSAR (tarefa 27 da F7) atendem pelo toque guardado aqui"
-        )
-    )]
     pub(crate) fn de(&self, quem: &str) -> Option<IdDoToque> {
         self.por_impressao.get(quem).map(|tocando| tocando.toque)
     }
@@ -361,6 +354,35 @@ fn anunciar<R: Runtime>(app: &AppHandle<R>, aviso: &AvisoDoToque) {
     }
 }
 
+/// O alarme que anota em vez de tocar: nenhum teste toca som de verdade. Aqui,
+/// e não dentro de um módulo de teste, porque os testes da sala também o usam.
+#[cfg(test)]
+#[derive(Clone, Default)]
+pub(crate) struct AlarmeAnotado(std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>);
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "num teste, o pânico é o relatório")]
+impl Alarme for AlarmeAnotado {
+    fn comecar(&mut self) -> bool {
+        self.0.lock().unwrap().push("comecar");
+        true
+    }
+    fn lembrar(&mut self) {
+        self.0.lock().unwrap().push("lembrar");
+    }
+    fn parar(&mut self) {
+        self.0.lock().unwrap().push("parar");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "num teste, o pânico é o relatório")]
+impl AlarmeAnotado {
+    pub(crate) fn visto(&self) -> Vec<&'static str> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -375,30 +397,7 @@ mod o_toque_por_evento {
     use seele_server::recepcao::{Entrada, Recepcao};
     use tauri::{Listener, Manager};
 
-    use super::{caminho_da_agenda, ouvir, Alarme, CANAL_DO_TOQUE};
-
-    /// O alarme que anota em vez de tocar: nenhum teste toca som de verdade.
-    #[derive(Clone, Default)]
-    struct AlarmeAnotado(Arc<Mutex<Vec<&'static str>>>);
-
-    impl Alarme for AlarmeAnotado {
-        fn comecar(&mut self) -> bool {
-            self.0.lock().unwrap().push("comecar");
-            true
-        }
-        fn lembrar(&mut self) {
-            self.0.lock().unwrap().push("lembrar");
-        }
-        fn parar(&mut self) {
-            self.0.lock().unwrap().push("parar");
-        }
-    }
-
-    impl AlarmeAnotado {
-        fn visto(&self) -> Vec<&'static str> {
-            self.0.lock().unwrap().clone()
-        }
-    }
+    use super::{caminho_da_agenda, ouvir, AlarmeAnotado, CANAL_DO_TOQUE};
 
     struct Banca {
         app: tauri::App<tauri::test::MockRuntime>,

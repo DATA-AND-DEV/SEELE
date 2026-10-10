@@ -1242,6 +1242,11 @@ async fn connect(
     // é perguntado na ponte, e ele não volta para cá (ver o começo desta
     // função e `caminhos_a_guardar`).
     let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
+    // **A sala desta máquina se confere pelo código** (o ATENDER, tarefa 27 da
+    // F7): ela apresenta a chave da pessoa, e nenhuma lista guardou o
+    // certificado dela. Com o código, vale ele
+    // (`seele_ffi::ConnectConfig::codigo_esperado`).
+    let codigo_da_sala = sala::codigo_se_for_a_sala(&session, &server, &home);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -1255,7 +1260,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
-        codigo_esperado: None,
+        codigo_esperado: codigo_da_sala,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1581,6 +1586,12 @@ enum OndeEstou {
 /// hospedagens, nenhum dos três dizia em qual das duas a sessão está.
 #[tauri::command]
 fn onde_estou(session: State<'_, Session>) -> OndeEstou {
+    onde_estou_na(&session)
+}
+
+/// [`onde_estou`] sobre a sessão, para quem não é comando: o ATENDER pergunta a
+/// mesma coisa ([`sala::atender_em`]), e tem de ouvir a mesma resposta.
+fn onde_estou_na(session: &Session) -> OndeEstou {
     let endereco = session
         .endereco_da_sessao
         .lock()
@@ -1603,6 +1614,53 @@ fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
         .sala
         .lock()
         .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
+}
+
+/// ATENDER (tarefa 27 da F7): decide na campainha, e diz à casca se a sessão já
+/// está na sala ou por onde entrar nela.
+///
+/// O resto de «Atender, nesta ordem» (spec de 23/09) é da casca: encerrar os
+/// MODs, desmontar só o cliente e entrar pelo `connect` no `alvo` do
+/// [`sala::Atendido`], que o `connect` confere pelo código desta máquina. Se
+/// entrar falhar duas vezes, a casca chama [`encerrar_a_ligacao`], e ninguém
+/// fica sozinho na sala.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn atender(
+    session: State<'_, Session>,
+    quem: String,
+) -> Result<sala::Atendido, sala::FalhaAoAtender> {
+    let atendido = sala::atender_em(&session, &quem);
+    tracing::info!(?atendido, "ATENDER");
+    atendido
+}
+
+/// RECUSAR (tarefa 27 da F7).
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn recusar(session: State<'_, Session>, quem: String) -> Result<(), sala::FalhaAoAtender> {
+    let recusado = sala::recusar_em(&session, &quem);
+    tracing::info!(?recusado, "RECUSAR");
+    recusado
+}
+
+/// Encerra a ligação da sala pessoal: quem estava dentro ouve «chamada
+/// encerrada» (tarefa 27 da F7). Devolve quantos estavam.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender::SemSala`] quando a sala não está no ar.
+#[tauri::command]
+fn encerrar_a_ligacao(session: State<'_, Session>) -> Result<usize, sala::FalhaAoAtender> {
+    let encerrada = sala::encerrar_a_ligacao_em(&session);
+    tracing::info!(?encerrada, "a ligação da sala pessoal foi encerrada");
+    encerrada
 }
 
 /// Quem está tocando na sala pessoal agora (tarefa 24 da F7), para a tela que
@@ -10534,6 +10592,9 @@ fn main() {
             estado_da_sala,
             receber_ligacoes,
             toques_agora,
+            atender,
+            recusar,
+            encerrar_a_ligacao,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
