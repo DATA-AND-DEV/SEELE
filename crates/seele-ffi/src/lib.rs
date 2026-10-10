@@ -2423,15 +2423,21 @@ impl Connection {
 
     /// O volume e o mudo do som da transmissão, como a casca os desenha.
     ///
-    /// `None` sem voz aberta, que é a mesma resposta de «não há o que ajustar».
+    /// Com a voz viva, os dela. **Sem voz — fora de sala, ou com ela abrindo —,
+    /// os guardados**, que são os que a voz vai vestir ao abrir. Era `None` ali,
+    /// e SILENCIAR sem voz gravava o mudo sem o botão mudar (achado 6 da revisão
+    /// do lote V). `None` só numa sessão que entrou sem áudio.
     #[must_use]
     pub fn som_da_tela(&self) -> Option<SomDaTela> {
-        let voice = self.shared.voice.lock().ok()?;
-        let voice = voice.as_ref()?;
-        Some(SomDaTela {
-            volume: voice.volume_da_tela(),
-            calada: voice.tela_calada(),
-        })
+        if let Ok(voice) = self.shared.voice.lock() {
+            if let Some(voice) = voice.as_ref() {
+                return Some(SomDaTela {
+                    volume: voice.volume_da_tela(),
+                    calada: voice.tela_calada(),
+                });
+            }
+        }
+        self.shared.voice.som_da_tela_escolhido()
     }
 
     /// Diz o que esta máquina aceita no caminho entre pares — ADR 0045 do §5.
@@ -4973,6 +4979,23 @@ impl<V> VozDaSala<V> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// O som da tela guardado, como a casca o desenha sem voz viva. Achado 6
+    /// da revisão do lote V.
+    ///
+    /// É o que a voz que abrir vai vestir, e por isso o que o botão tem de
+    /// mostrar. `None` numa sessão sem áudio, que nunca terá voz a vestir — a
+    /// mesma regra de [`Connection::controles_da_voz`].
+    fn som_da_tela_escolhido(&self) -> Option<SomDaTela> {
+        if !self.quer_audio {
+            return None;
+        }
+        let escolhida = self.escolhida();
+        Some(SomDaTela {
+            volume: escolhida.volume_da_tela,
+            calada: escolhida.tela_calada,
+        })
     }
 
     /// Em que pé a abertura está, guardado.
@@ -11548,6 +11571,101 @@ mod o_audio_segue_a_sala {
             sem_audio.ajustar_volume_da_tela(0.3),
             Err(crate::ConnectionError::NotConnected),
             "numa sessão sem áudio o volume da tela foi aceito, e nenhuma voz vai tocá-lo"
+        );
+    }
+
+    /// Achado 6 da revisão do lote V: sem voz viva, `som_da_tela` mostra o que
+    /// ficou guardado.
+    ///
+    /// O M-2 passou a gravar o som da tela sem voz, e `som_da_tela` continuava
+    /// `None` ali: a janela relê depois de SILENCIAR (`tela-chamada.js`,
+    /// `desenharSomDoPalco`), não acha nada, e o botão não muda — enquanto a voz
+    /// que abrir depois abre calada. A sessão sem áudio continua `None`, como
+    /// em `controles_da_voz`.
+    #[test]
+    fn sem_voz_viva_o_som_da_tela_mostra_o_que_ficou_guardado() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+        connection
+            .calar_a_tela(true)
+            .expect("o mudo da tela, sem voz");
+        assert_eq!(
+            connection.som_da_tela(),
+            Some(super::SomDaTela {
+                volume: 1.0,
+                calada: true
+            }),
+            "SILENCIAR sem voz viva gravou o mudo da tela, e o botão relê nada: ele segue \
+             dizendo SILENCIAR, e a voz que abrir depois abre calada"
+        );
+        connection
+            .ajustar_volume_da_tela(0.3)
+            .expect("o volume da tela, sem voz");
+        assert_eq!(
+            connection.som_da_tela(),
+            Some(super::SomDaTela {
+                volume: 0.3,
+                calada: true
+            }),
+            "o volume da tela guardado sem voz viva não chega à janela: o controle volta \
+             ao que era, e a voz abre no guardado"
+        );
+
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let sem_audio = super::Connection {
+            commands,
+            shared: compartilhado(false),
+            encerrada: Mutex::new(None),
+        };
+        assert_eq!(
+            sem_audio.som_da_tela(),
+            None,
+            "numa sessão sem áudio o som da tela aparece para ajustar, e nenhuma voz vai \
+             tocá-lo"
+        );
+    }
+
+    /// Achado 6, os dois de acordo: o botão que a janela desenha sem voz e a voz
+    /// que abre depois dizem o mesmo som da tela.
+    #[tokio::test]
+    async fn o_botao_sem_voz_e_a_voz_que_abre_dizem_o_mesmo_som_da_tela() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+
+        voz.escolher_o_som_da_tela(|escolhida| escolhida.tela_calada = true)
+            .expect("o mudo da tela, fora de sala");
+        voz.escolher_o_som_da_tela(|escolhida| escolhida.volume_da_tela = 0.3)
+            .expect("o volume da tela, fora de sala");
+        let botao = voz.som_da_tela_escolhido();
+
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        let vestida = voz.lock().expect("a voz").as_ref().and_then(|viva| {
+            viva.vestida
+                .lock()
+                .expect("o que a voz vestiu")
+                .as_ref()
+                .map(|vestida| super::SomDaTela {
+                    volume: vestida.volume_da_tela,
+                    calada: vestida.tela_calada,
+                })
+        });
+        assert!(
+            vestida.is_some(),
+            "a voz da sala não abriu, e este teste mediu outra coisa"
+        );
+        assert_eq!(
+            botao, vestida,
+            "o botão que a janela desenha sem voz e a voz que abre depois discordam do som \
+             da tela: a pessoa vê SILENCIAR e a transmissão abre calada"
         );
     }
 
