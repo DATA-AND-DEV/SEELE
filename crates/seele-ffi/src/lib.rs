@@ -5263,6 +5263,11 @@ impl<V: VozViva> PortaDaVoz<V> {
                 // de sala» com aparelho aberto.
                 self.em_curso = None;
                 voz.marcar(AberturaDoAudio::ForaDeSala);
+                // **A tecla guardada volta a solta** (rodada 1 do lote V). Uma
+                // soltura que a janela perdeu nesta sala não pode abrir o
+                // microfone transmitindo na próxima; uma pressão no «ABRINDO»
+                // da próxima vem depois de entrar, e continua valendo.
+                voz.segurar_a_tecla(false);
                 voz.largar();
             }
             PassoDaVoz::SemAudio => voz.marcar(AberturaDoAudio::SemAparelho),
@@ -11263,6 +11268,63 @@ mod o_audio_segue_a_sala {
             mudo,
             Some(true),
             "o mudo pedido durante a reabertura não chegou à voz que entrou no lugar"
+        );
+    }
+
+    /// Rodada 1 do lote V, achado 2: a tecla guardada não atravessa a saída da
+    /// sala.
+    ///
+    /// A janela perde soltura — numa recarga com a tecla segura, ou num
+    /// `invoke` que falha, porque `segurarFala` grava `falando` e engole o erro.
+    /// Antes do lote, toda voz aberta do zero nascia com a tecla solta; com a
+    /// tecla guardada, a soltura perdida entrava na sala seguinte e o microfone
+    /// abria transmitindo nela. É o c7 da revisão.
+    #[tokio::test]
+    async fn a_tecla_segura_nao_atravessa_a_saida_da_sala() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+
+        // Segura a tecla, e a soltura nunca chega.
+        voz.segurar_a_tecla(true);
+        room.leave_voice_room();
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
+
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
+        assert_eq!(
+            tecla_de(&voz),
+            Some(false),
+            "a soltura que a janela perdeu numa sala entrou na seguinte: o microfone abre \
+             transmitindo, sem a pessoa ter apertado nada nesta sala"
+        );
+
+        // E a pressão no «ABRINDO» da entrada seguinte vem depois de entrar:
+        // continua valendo.
+        room.leave_voice_room();
+        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        porta.olhar(&voz, sala_do_audio(&room), |_| {
+            entregue(Ok(Ok(voz_de(702))))
+        });
+        assert_eq!(voz.abertura(), AberturaDoAudio::Abrindo);
+        voz.segurar_a_tecla(true);
+        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+            .await
+            .expect("a abertura não chegou");
+        porta.chegou(&voz, aberta, nada_abre);
+        assert_eq!(
+            tecla_de(&voz),
+            Some(true),
+            "a tecla apertada no «ABRINDO» da sala seguinte foi esquecida: a pessoa segura a \
+             tecla e ninguém a ouve"
         );
     }
 
