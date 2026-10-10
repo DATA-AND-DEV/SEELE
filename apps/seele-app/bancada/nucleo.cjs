@@ -11,7 +11,11 @@
 //    recusa pelos pares e que esta bancada aplica por baixo dela, como a do
 //    celular (`tools/bancada-do-celular.py`), para ver que o núcleo aguenta
 //    mesmo assim. O fundo efetivo é o primeiro opaco atrás da peça: um MUDO
-//    transparente sobre a barra mostraria o fundo do tema.
+//    transparente sobre a barra mostraria o fundo do tema. **E com os tokens
+//    por região no `.operador`** (tarefa 17i, item 3; pedido da orquestradora,
+//    10/10): os três temas escritos como a região `operador.barra`, que pinta
+//    o contêiner onde o MUDO, o fone e o SAIR moram — sozinhos e por cima do
+//    tema da sessão.
 // 2. **O guarda 11** (Step 3), um por item: a portaria, o MUDO, o fone, o «no
 //    ar», o SAIR, o veredito, a moderação, o aceite, e a atribuição e a saída
 //    de uma superfície aberta. (a) Nenhum mora dentro do contêiner de um ponto
@@ -116,6 +120,29 @@ const TEMAS = {
         }
       }
       await page.evaluate(() => { temaDosMods.delete('bancada'); escreverOTemaDaSessao(); });
+    }
+    // Os mesmos três, como a região que mora em volta do núcleo: sozinha, e por
+    // cima do tema da sessão.
+    const daRegiao = ({ fundo, texto, apagado, acento, borda }) => ({ fundo, texto, apagado, acento, borda });
+    for (const [nome, valores] of Object.entries(TEMAS)) {
+      for (const [como, tema] of [
+        ['só a região', { regioes: { 'operador.barra': daRegiao(valores) } }],
+        ['a região sobre o tema', { ...TEMAS.papel, regioes: { 'operador.barra': daRegiao(valores) } }],
+      ]) {
+        const comRegiao = await page.evaluate((tema) => {
+          temaDosMods.set('bancada', tema);
+          escreverOTemaDaSessao();
+          return document.querySelector('.operador').style.getPropertyValue('--seele-negro-painel');
+        }, tema);
+        assert.ok(comRegiao, `${nome}, ${como}: a região não pintou o contêiner do operador, e o caso não mede nada`);
+        const medida = await medir();
+        for (const [peca, semTemaDaPeca] of Object.entries(semTema)) {
+          for (const [parte, cor] of Object.entries(semTemaDaPeca)) {
+            if (medida[peca]?.[parte] !== cor) diferencas.push(`${nome}, ${como}: ${peca}.${parte} ${cor} → ${medida[peca]?.[parte]}`);
+          }
+        }
+        await page.evaluate(() => { temaDosMods.delete('bancada'); escreverOTemaDaSessao(); });
+      }
     }
     assert.deepEqual(diferencas, [], 'o tema alcançou um controle do núcleo');
 

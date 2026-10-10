@@ -2218,9 +2218,129 @@ const MEDIDAS_DA_API = Object.freeze({
     mono: { "--seele-mono": 'var(--seele-pilha-mono)' },
     sans: { "--seele-mono": 'var(--seele-pilha-sans)' },
   },
+  // **O modo** (rascunho da API 6, §9; tarefa 17i, item 2): o `color-scheme`
+  // da sessão — as barras de rolagem e os controles nativos claros ou escuros.
+  // Tem de concordar com o fundo (`modoDoFundo`), ou é recusado: um modo claro
+  // sobre fundo escuro pinta controles nativos que somem nele.
+  modo: {
+    claro: { "color-scheme": "light" },
+    escuro: { "color-scheme": "dark" },
+  },
 });
 
 const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
+
+/**
+ * **Os tokens por região** (rascunho da API 6, §9; tarefa 17i, item 3): as oito
+ * regiões que o tema alcança, cada uma com os contêineres do produto em que as
+ * cores dela são escritas. Espelho de `seele_proto::mods::REGIOES_DO_TEMA`,
+ * conferido pelo espelho de `frontend.rs` e caso a caso pelo vetor.
+ *
+ * O contêiner é **o nó do produto que abriga a região**, e não a faixa do MOD
+ * dentro dela: o tema por região pinta a coluna de canais, a barra do canal,
+ * a lista de pessoas. Os itens do núcleo continuam nas cores do produto: eles
+ * leem os `--nucleo-*`, resolvidos na raiz.
+ */
+const REGIOES_DO_TEMA = Object.freeze({
+  "canal.cabecalho": Object.freeze([".linha-barra"]),
+  "compositor": Object.freeze(["#compositor-mods", "#form-mensagem"]),
+  "conversa.mensagem": Object.freeze(["#lista-mensagens"]),
+  "operador.barra": Object.freeze([".operador"]),
+  "pessoas.lista": Object.freeze([".painel-pessoas"]),
+  "redes": Object.freeze([".trilha"]),
+  "servidor.navegacao": Object.freeze([".painel-canais"]),
+  "status.barra": Object.freeze(["footer.telemetria"]),
+});
+
+/**
+ * As cores que uma região redefine: as do contrato, menos o `painel` — uma
+ * região é um painel, e o `fundo` dela é o dele. Espelho de
+ * `seele_proto::mods::CORES_DA_REGIAO`.
+ */
+const CORES_DA_REGIAO = Object.freeze(["acento", "apagado", "borda", "fundo", "texto"]);
+
+/**
+ * **A ordem dos pontos de código**: com mais de um nome errado, a casca e o
+ * servidor nomeiam o mesmo — o servidor lê o objeto num `BTreeMap`, que ordena
+ * pelos bytes UTF-8, e o `<` do JavaScript compara unidades UTF-16, que
+ * discordam dele acima de U+FFFF.
+ */
+function porPontoDeCodigo(a, b) {
+  const [x, y] = [Array.from(a), Array.from(b)];
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+    const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (diferenca !== 0) return diferenca;
+  }
+  return x.length - y.length;
+}
+
+/**
+ * **Por que as `regioes` de um tema não passam**, ou `null` — a mesma regra de
+ * `seele_proto::mods::recusa_das_regioes`, na mesma ordem. A recusa leva o
+ * nome e os campos para o MOD da 6 (`recusa`, `camposDaRecusa`), e a frase diz
+ * a chave e a região.
+ */
+function recusaDasRegioes(valor) {
+  const recusa = (nome, frase, chave, regiao) => {
+    const erro = new Error(frase);
+    erro.recusa = nome;
+    erro.camposDaRecusa = regiao === undefined ? { chave } : { chave, regiao };
+    return erro;
+  };
+  if (valor === null || typeof valor !== "object" || Array.isArray(valor)) {
+    return recusa("valor-invalido", "«regioes» é um objeto de regiões", "regioes");
+  }
+  for (const regiao of Object.keys(valor).sort(porPontoDeCodigo)) {
+    if (!Object.hasOwn(REGIOES_DO_TEMA, regiao)) {
+      return recusa("regiao-desconhecida", `«regioes» não tem a região «${regiao}»`, "regioes", regiao);
+    }
+    const cores = valor[regiao];
+    if (cores === null || typeof cores !== "object" || Array.isArray(cores)) {
+      return recusa("valor-invalido", `«regioes»: a região «${regiao}» é um objeto de cores`, "regioes", regiao);
+    }
+    for (const chave of Object.keys(cores).sort(porPontoDeCodigo)) {
+      if (!CORES_DA_REGIAO.includes(chave)) {
+        return recusa(
+          "chave-desconhecida",
+          `a API de tema não conhece «${chave}» na região «${regiao}»`,
+          chave,
+          regiao,
+        );
+      }
+      const cor = cores[chave];
+      if (typeof cor !== "string" || !COR_DO_TEMA.test(cor)) {
+        return recusa(
+          "valor-invalido",
+          `«${chave}» da região «${regiao}» precisa ser uma cor #rrggbb, e veio «${cor}»`,
+          chave,
+          regiao,
+        );
+      }
+    }
+  }
+  return null;
+}
+
+/** WCAG 2.1: a luminância relativa de uma cor `#rrggbb`, de 0 a 1. */
+function luminanciaRelativa(cor) {
+  const canais = [1, 3, 5].map((i) => {
+    const c = parseInt(cor.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
+}
+
+/**
+ * **O modo que um fundo pede**: `claro` de 0,18 de luminância para cima,
+ * `escuro` abaixo; sem fundo no tema, o do produto, que é escuro. Espelho de
+ * `seele_proto::mods::modo_do_fundo`, e as duas cortam no mesmo lugar nos
+ * casos vizinhos do limiar de `chaves-do-tema.json` (0,1778 e 0,1811).
+ */
+const LUMINANCIA_DO_FUNDO_CLARO = 0.18;
+function modoDoFundo(fundo) {
+  if (fundo === undefined) return "escuro";
+  return luminanciaRelativa(fundo) >= LUMINANCIA_DO_FUNDO_CLARO ? "claro" : "escuro";
+}
 
 /**
  * O tema que um MOD pede, aplicado **ao contêiner da sessão** — ADR 0049.
@@ -2298,25 +2418,38 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
   // tabela é a do servidor (`seele_proto::mods::CHAVES_DO_TEMA`), e as duas
   // respondem igual a cada caso de `chaves-do-tema.json` (tarefa 17j).
   const daTabela = (tabela, nome) => Object.hasOwn(tabela, nome);
-  // **Em ordem alfabética, e a dos pontos de código**: com mais de uma chave
-  // errada, a casca e o servidor nomeiam a mesma — o servidor lê o objeto num
-  // `BTreeMap`, que ordena pelos bytes UTF-8, e o `<` do JavaScript compara
-  // unidades UTF-16, que discordam dele acima de U+FFFF.
-  const porPontoDeCodigo = ([a], [b]) => {
-    const [x, y] = [Array.from(a), Array.from(b)];
-    for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
-      const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
-      if (diferenca !== 0) return diferenca;
+  // **Em ordem alfabética, e a dos pontos de código** (`porPontoDeCodigo`).
+  for (const [nome, valor] of Object.entries(valores ?? {}).sort(([a], [b]) => porPontoDeCodigo(a, b))) {
+    // **As regiões** (17i, item 3), cada uma com o nome e a cor que falhou.
+    if (nome === "regioes") {
+      const recusa = recusaDasRegioes(valor);
+      if (recusa) throw recusa;
+      for (const [outro, seus] of previa ? [] : temaDosMods) {
+        if (outro !== id && Object.hasOwn(seus, "regioes")) {
+          throw new Error(`«regioes» já é do MOD «${outro}» nesta sessão`);
+        }
+      }
+      pedido.set(nome, valor);
+      continue;
     }
-    return x.length - y.length;
-  };
-  for (const [nome, valor] of Object.entries(valores ?? {}).sort(porPontoDeCodigo)) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
     // recusaria o nome delas antes de alguém olhar.
     if (daTabela(MEDIDAS_DA_API, nome)) {
       if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
         throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
+      }
+      // O modo concorda com o fundo, na vez dele: um fundo errado já foi
+      // recusado, porque vem antes na ordem alfabética.
+      if (nome === "modo") {
+        const fundo = Object.hasOwn(valores, "fundo") ? valores.fundo : undefined;
+        const pede = modoDoFundo(fundo);
+        if (valor !== pede) {
+          throw new Error(
+            `«modo» tem de ser «${pede}» para ${fundo === undefined ? "o fundo do produto" : `o fundo ${fundo}`}, `
+            + `e veio «${valor}»`,
+          );
+        }
       }
       pedido.set(nome, valor);
       continue;
@@ -2376,9 +2509,11 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
     const antesDaPrevia = previasDoTema.get(id);
     previasDoTema.set(id, { valores: Object.fromEntries(pedido), superficie: String(previa.superficie ?? "") });
     const abaixo = paresDoTemaAbaixoDoPiso();
-    if (abaixo.length) {
+    const regiaoAbaixo = abaixo.length ? null : aRegiaoAbaixoDoPiso(oTemaEmVigor());
+    if (abaixo.length || regiaoAbaixo) {
       if (antesDaPrevia) previasDoTema.set(id, antesDaPrevia);
       else previasDoTema.delete(id);
+      if (regiaoAbaixo) throw recusaDaRegiaoAbaixoDoPiso(regiaoAbaixo);
       const recusa = new Error(`a prévia não alcança os pisos: ${fraseDoPar(abaixo[0])}`);
       recusa.recusa = "contraste";
       recusa.camposDaRecusa = { pares: abaixo };
@@ -2391,9 +2526,13 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
   const antes = temaDosMods.get(id);
   temaDosMods.set(id, Object.fromEntries(pedido));
   const legivel = oTemaAlcancaOsPisos();
-  if (legivel !== true) {
+  // **E cada região**, com o tema dela (17i, item 3): uma região abaixo do
+  // piso recusa o tema inteiro, como um par da sessão.
+  const regiaoAbaixo = legivel === true ? aRegiaoAbaixoDoPiso(oTemaEmVigor()) : null;
+  if (legivel !== true || regiaoAbaixo) {
     if (antes) temaDosMods.set(id, antes);
     else temaDosMods.delete(id);
+    if (regiaoAbaixo) throw recusaDaRegiaoAbaixoDoPiso(regiaoAbaixo);
     throw new Error(legivel);
   }
   escreverOTemaDaSessao();
@@ -2453,6 +2592,12 @@ function aplicarOTemaDoServidor(tema) {
       "aviso",
       modId,
     );
+    // **A região que recusou**, com os pares dela (17i, item 3).
+    const daRegiao = falha?.camposDaRecusa?.regiao;
+    if (daRegiao !== undefined) {
+      dizerODesfechoDoTema({ estado: "recusado", regiao: daRegiao, pares: falha.camposDaRecusa.pares ?? [] });
+      return;
+    }
     // Os pares, na forma da recusa de `mundo.tema` (17e): o que a casca mediu
     // com este tema sozinho. Uma recusa que não é de par vai sem eles.
     const pares = valores && typeof valores === "object" && COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))
@@ -2460,6 +2605,17 @@ function aplicarOTemaDoServidor(tema) {
       : [];
     dizerODesfechoDoTema({ estado: "recusado", pares });
   }
+}
+
+/**
+ * **O tema do servidor de novo, na hora** (tarefa 17f): a escolha de quem vê
+ * para `servidor.aparencia` mudou em QUEM DESENHA O QUE, e ela está na chave
+ * do tema em vigor. Sem isto, a troca só valia no retrato seguinte.
+ */
+function reaplicarOTemaDoServidor() {
+  if (!temaDoServidorEmVigor) return;
+  const { mod_id: modId, valores } = temaDoServidorEmVigor;
+  aplicarOTemaDoServidor({ mod_id: modId, valores });
 }
 
 /**
@@ -2690,6 +2846,96 @@ function tonsDoTema(emVigor, daRaiz) {
 }
 
 /**
+ * **O tema de uma região** (tarefa 17i, item 3): o da sessão, com as cores da
+ * região por cima. O `fundo` da região vale também como `painel` — uma região
+ * é um painel, e é dele que os contêineres tiram o fundo.
+ */
+function oTemaDaRegiao(emVigor, cores) {
+  const daRegiao = { ...emVigor };
+  delete daRegiao.regioes;
+  for (const nome of CORES_DA_REGIAO) {
+    if (typeof cores?.[nome] === "string") daRegiao[nome] = cores[nome];
+  }
+  if (typeof cores?.fundo === "string") daRegiao.painel = cores.fundo;
+  return daRegiao;
+}
+
+/**
+ * **A primeira região abaixo do piso**, na ordem dos pontos de código, ou
+ * `null`: os pares conferidos com o tema da região (`oTemaDaRegiao`), pela
+ * mesma tabela da sessão.
+ */
+function aRegiaoAbaixoDoPiso(emVigor) {
+  if (!COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))) return null;
+  const regioes = emVigor.regioes ?? {};
+  for (const regiao of Object.keys(regioes).sort(porPontoDeCodigo)) {
+    const { pares } = tonsDoTema(oTemaDaRegiao(emVigor, regioes[regiao]), corDaRaiz);
+    if (pares.length) {
+      return { regiao, pares: pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso })) };
+    }
+  }
+  return null;
+}
+
+/** A recusa de uma região abaixo do piso, com o nome e os campos para o MOD. */
+function recusaDaRegiaoAbaixoDoPiso({ regiao, pares }) {
+  const recusa = new Error(`a região «${regiao}» não alcança os pisos: ${fraseDoPar(pares[0])}`);
+  recusa.recusa = "contraste";
+  recusa.camposDaRecusa = { regiao, pares };
+  return recusa;
+}
+
+/** O que cada contêiner de região recebeu, para a troca seguinte tirar. */
+const tokensDasRegioes = new Map();
+
+/**
+ * **As cores de cada região, no contêiner dela** (tarefa 17i, item 3): as
+ * cores da região e os tons que o produto deriva delas (`tonsDoTema` sobre o
+ * tema da região), escritos em cada nó de `REGIOES_DO_TEMA`. O que a troca
+ * anterior escreveu sai antes: uma região que deixou o tema volta a herdar o
+ * da sessão. No celular, a casca pode dar outros contêineres
+ * (`CELULAR.conteineresDasRegioes`), e uma região que ela não tem não é pintada.
+ *
+ * **Os contêineres padrão são procurados dentro da sessão; os que a casca
+ * declara, no documento todo** (pedido da F8, 10/10): no celular, o
+ * `operador.barra` mora em AJUSTES (`#tela-server`), irmão da sessão, e a
+ * casca o declara com o seletor completo. A saída é a mesma: a troca seguinte,
+ * e a do fim da sessão, tiram o que foi escrito.
+ */
+function escreverAsRegioesDoTema(emVigor) {
+  for (const [no, tokens] of tokensDasRegioes) {
+    for (const token of tokens) no.style.removeProperty(token);
+  }
+  tokensDasRegioes.clear();
+  const sessao = $("tela-sessao");
+  if (typeof sessao?.querySelectorAll !== "function") return;
+  const regioes = emVigor.regioes ?? {};
+  for (const regiao of Object.keys(regioes)) {
+    if (!Object.hasOwn(REGIOES_DO_TEMA, regiao) || !aCascaTemARegiao(regiao)) continue;
+    const daRegiao = oTemaDaRegiao(emVigor, regioes[regiao]);
+    const escrever = {};
+    for (const nome of CORES_DA_REGIAO) {
+      if (typeof regioes[regiao][nome] === "string") escrever[TEMA_DA_API[nome]] = daRegiao[nome];
+    }
+    if (typeof regioes[regiao].fundo === "string") escrever[TEMA_DA_API.painel] = daRegiao.painel;
+    Object.assign(escrever, tonsDoTema(daRegiao, corDaRaiz).tons);
+    const daCasca = typeof CELULAR === "object" ? CELULAR?.conteineresDasRegioes?.[regiao] : undefined;
+    const seletores = Array.isArray(daCasca) ? daCasca : REGIOES_DO_TEMA[regiao];
+    const onde = Array.isArray(daCasca) ? document : sessao;
+    for (const seletor of seletores) {
+      for (const no of onde.querySelectorAll(seletor)) {
+        const tokens = tokensDasRegioes.get(no) ?? new Set();
+        for (const [token, valor] of Object.entries(escrever)) {
+          no.style.setProperty(token, valor);
+          tokens.add(token);
+        }
+        tokensDasRegioes.set(no, tokens);
+      }
+    }
+  }
+}
+
+/**
  * Escreve no contêiner da sessão o que os MODs de pé pediram, e só isso — e
  * avisa a aba DIAGNÓSTICO, que diz quem pediu o tema.
  *
@@ -2725,6 +2971,7 @@ function escreverOTemaDaSessao() {
     if (tons[token]) sessao.style.setProperty(token, tons[token]);
     else sessao.style.removeProperty(token);
   }
+  escreverAsRegioesDoTema(Object.fromEntries(emVigor));
   // Os números viram medida com unidade **aqui**, e não no MOD: o que
   // atravessa a API é 8, e o que vai para a folha é `8px`. Um MOD que
   // mandasse a unidade mandaria uma string, e uma string é onde cabe o resto.
@@ -2827,14 +3074,7 @@ function fraseDoPar({ frente, fundo, razao, piso }) {
 
 /** WCAG 2.1: a razão de contraste entre duas cores `#rrggbb`. */
 function contrasteEntre(a, b) {
-  const luz = (cor) => {
-    const canais = [1, 3, 5].map((i) => {
-      const c = parseInt(cor.slice(i, i + 2), 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
-  };
-  const [claro, escuro] = [luz(a), luz(b)].sort((x, y) => y - x);
+  const [claro, escuro] = [luminanciaRelativa(a), luminanciaRelativa(b)].sort((x, y) => y - x);
   return (claro + 0.05) / (escuro + 0.05);
 }
 
@@ -3026,9 +3266,20 @@ function aCascaTemARegiao(nome) {
 
 /**
  * Quantas contribuições já foram avisadas de que a região delas não existe
- * nesta casca, por ponto — para a aba DIAGNÓSTICO.
+ * nesta casca, por ponto — para a aba DIAGNÓSTICO. Desta sessão: o aviso
+ * mora na contribuição, que sai com ela, e `encerrarOAmbienteDosMods` o zera.
  */
 const regioesAusentesAvisadas = new Map();
+
+/**
+ * **Os identificadores de uma lista substituída que nenhuma linha usa**, por
+ * ponto — quem não está, ou repetido (rascunho §3; tarefa 5, Step 5). Escrito
+ * a cada desenho da lista (`quantosIgnorados`, em `tela-sessao.js`) e lido
+ * pela aba DIAGNÓSTICO. **A medida do agora, e não uma soma**: a lista se
+ * redesenha a cada retrato, e o mesmo identificador ignorado contaria de novo
+ * a cada um.
+ */
+const identificadoresIgnorados = new Map();
 
 /**
  * **Uma região que a casca não tem não some calada** (rascunho §11 e §7.1;
@@ -3263,7 +3514,14 @@ function aplicarAPreviaDoTema(mod, instancia, m) {
     aplicarOTemaDoMod(mod.id, m.valores, { previa: { superficie: superficie.chave } });
   } catch (falha) {
     if (falha?.recusa === "contraste") {
-      dizerOTemaAoMod(mod.id, { estado: "recusado", pares: falha.camposDaRecusa?.pares ?? [], previa: true });
+      // A região que recusou, quando foi uma (17i, item 3).
+      const regiao = falha.camposDaRecusa?.regiao;
+      dizerOTemaAoMod(mod.id, {
+        estado: "recusado",
+        ...(regiao === undefined ? {} : { regiao }),
+        pares: falha.camposDaRecusa?.pares ?? [],
+        previa: true,
+      });
     }
     throw falha;
   }
@@ -3828,6 +4086,9 @@ function encerrarOAmbienteDosMods() {
   temaDoServidorEmVigor = null;
   previasDoTema.clear();
   escreverOTemaDaSessao();
+  // As contagens da aba DIAGNÓSTICO são desta sessão, como o que elas contam.
+  regioesAusentesAvisadas.clear();
+  identificadoresIgnorados.clear();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância
   // solta os tocadores dela só quando o executor confirma que parou — e a

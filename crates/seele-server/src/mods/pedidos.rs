@@ -3,6 +3,7 @@
 //! each request; the database lock serializes read/modify/commit across people.
 
 use crate::{
+    autorizacao::{self, Acesso},
     permissions::Permissions,
     persistence::{channels::Channels, mods},
     server::Server,
@@ -185,26 +186,45 @@ async fn executar_inner(
     // variante quebraria a janela de compatibilidade do protocolo sem
     // necessidade — o mesmo byte já diz a coisa nova.
     let com_canal = channel.0 != 0;
-    // As três perguntas restantes ao banco, numa tomada curta e só de leitura.
-    let (canal_existe, admin, write) = {
+    // As perguntas restantes ao banco, numa tomada curta e só de leitura.
+    //
+    // **O escopo de um pedido** (rascunho da API 6, §8; tarefa 16 da F3): num
+    // canal, ler e escrever são **os do canal**, com o papel mínimo dele, por
+    // `autorizacao::pode_no_canal`, como no texto. Antes era a permissão
+    // global com o canal existindo: um pedido num canal que a pessoa não lê
+    // chegava ao MOD, e o `write` dele ignorava o papel de escrita do canal. No
+    // escopo de servidor (canal zero), o `write` é a permissão global.
+    //
+    // Hoje nenhum caminho do produto grava o papel mínimo, e as duas formas dão
+    // o mesmo resultado (medido em 10/10, pendência 62); o guarda
+    // `o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes`
+    // avisa quem criar um. Uma falha de banco lê como negação, como em todo
+    // `pode_no_canal`.
+    let (canal_existe, le_o_canal, admin, write) = {
         let db = server.persistence.lock().await;
-        let canal_existe = !com_canal
-            || Channels::new(&db)
+        let permissions = Permissions::new(&db);
+        let admin = permissions
+            .may(person, Permission::AdministerServer)
+            .unwrap_or(false);
+        if com_canal {
+            let existe = Channels::new(&db)
                 .channels()?
                 .iter()
                 .any(|c| c.id == channel);
-        let permissions = Permissions::new(&db);
-        (
-            canal_existe,
-            permissions
-                .may(person, Permission::AdministerServer)
-                .unwrap_or(false),
-            permissions
+            let le =
+                autorizacao::pode_no_canal(&db, person, channel, Acesso::Leitura).unwrap_or(false);
+            let escreve =
+                autorizacao::pode_no_canal(&db, person, channel, Acesso::Escrita).unwrap_or(false);
+            (existe, le, admin, escreve)
+        } else {
+            let escreve = permissions
                 .may(person, Permission::WriteChannel)
-                .unwrap_or(false),
-        )
+                .unwrap_or(false);
+            (true, true, admin, escreve)
+        }
     };
     anyhow::ensure!(canal_existe, "unknown channel");
+    anyhow::ensure!(le_o_canal, "cannot read channel");
     let raizes = server
         .mods_dir
         .as_ref()
@@ -509,6 +529,13 @@ mod tests {
     /// todo pedido de MOD é recusado antes de chegar ao QuickJS, e a recusa é
     /// a linha que o teste lê.
     fn servidor_que_recusa() -> std::sync::Arc<crate::server::Server> {
+        servidor_em_memoria(None)
+    }
+
+    /// Um servidor em memória, com ou sem a pasta de MODs.
+    fn servidor_em_memoria(
+        mods_dir: Option<crate::RaizesDosMods>,
+    ) -> std::sync::Arc<crate::server::Server> {
         use crate::persistence::{Location, Persistence};
         use crate::server::{spawn_writer, Server, Telas};
         use std::sync::Arc;
@@ -542,7 +569,7 @@ mod tests {
             telas: Arc::new(Mutex::new(Telas::default())),
             anexos: None,
             caminho_bps: None,
-            mods_dir: None,
+            mods_dir,
         })
     }
 
@@ -705,6 +732,297 @@ mod tests {
         assert!(
             texto.contains("MOD request refused") && texto.contains("mod_id=a/b"),
             "a linha da recusa sumiu, ou perdeu o começo do id: {texto:?}"
+        );
+    }
+
+    /// O MOD de eco: devolve o contexto que a ponte lhe entregou, e só.
+    const ECO: &str =
+        "globalThis.aoPedir = (contexto) => JSON.stringify({ ok: true, contexto: JSON.parse(contexto) });";
+
+    /// Um servidor em memória com o MOD de eco ligado, o canal 1, e duas pessoas:
+    /// a primeira, que toma o comando, e uma Pessoa comum — quem pede.
+    async fn servidor_com_eco(
+        pasta: &std::path::Path,
+    ) -> (
+        std::sync::Arc<crate::server::Server>,
+        seele_proto::ids::PersonId,
+    ) {
+        let obras = pasta.join("em-obras");
+        std::fs::create_dir_all(obras.join("servidor")).expect("a pasta do pacote");
+        let manifesto = serde_json::json!({
+            "schema": 1,
+            "id": "prova/eco",
+            "version": "1.0.0",
+            "api": seele_proto::mods::MOD_API_VERSION,
+            "repo": "https://example.invalid/eco",
+            "reach": ["estado no servidor"],
+            "server": "servidor/main.js",
+        })
+        .to_string();
+        let mut arquivos = vec![
+            ("mod.json".to_owned(), manifesto.into_bytes()),
+            ("servidor/main.js".to_owned(), ECO.as_bytes().to_vec()),
+        ];
+        for (caminho, bytes) in &arquivos {
+            std::fs::write(obras.join(caminho), bytes).expect("o arquivo do pacote");
+        }
+        let hash = seele_proto::mods::hex(&seele_proto::mods::content_hash(&mut arquivos));
+        let raizes = crate::RaizesDosMods {
+            pacotes: pasta.to_path_buf(),
+            dados: pasta.join("mod-data"),
+        };
+        let destino = raizes.pacote_de(&hash);
+        std::fs::create_dir_all(destino.parent().expect("o pai")).expect("o cache");
+        std::fs::rename(&obras, &destino).expect("o pacote no cache");
+
+        let servidor = servidor_em_memoria(Some(raizes));
+        let pessoa = {
+            let db = servidor.persistence.lock().await;
+            db.connection()
+                .execute("INSERT INTO channels (id, name) VALUES (1, 'geral')", [])
+                .expect("o canal");
+            crate::persistence::mods::enable(
+                &db,
+                &crate::persistence::mods::EnabledMod {
+                    id: "prova/eco".to_owned(),
+                    version: "1.0.0".to_owned(),
+                    hash,
+                    repo: "https://example.invalid/eco".to_owned(),
+                    reach: vec!["estado no servidor".to_owned()],
+                    server_half: true,
+                    api: seele_proto::mods::MOD_API_VERSION,
+                },
+            )
+            .expect("ligar o MOD");
+            let permissoes = crate::permissions::Permissions::new(&db);
+            permissoes
+                .register_or_find(&[1; 32], "comando")
+                .expect("a primeira conta");
+            permissoes
+                .register_or_find(&[2; 32], "pessoa")
+                .expect("a pessoa")
+                .id
+        };
+        (servidor, pessoa)
+    }
+
+    /// Grava um papel mínimo no canal 1, como nenhum caminho do produto grava
+    /// hoje (medido em 10/10: só a migração 1 cria as colunas, e só os testes
+    /// de `autorizacao.rs` as escrevem).
+    async fn papel_minimo_no_canal_1(
+        servidor: &crate::server::Server,
+        coluna: &str,
+        papel: seele_proto::ids::RoleId,
+    ) {
+        let db = servidor.persistence.lock().await;
+        db.connection()
+            .execute(
+                &format!("UPDATE channels SET {coluna} = ?1 WHERE id = 1"),
+                [i64::from(papel.0)],
+            )
+            .expect("o papel mínimo");
+    }
+
+    async fn pedir(
+        servidor: &std::sync::Arc<crate::server::Server>,
+        pessoa: seele_proto::ids::PersonId,
+        canal: u32,
+    ) -> serde_json::Value {
+        let resposta = super::executar(
+            servidor,
+            pessoa,
+            seele_proto::ids::ChannelId(canal),
+            "prova/eco",
+            "{}",
+        )
+        .await;
+        serde_json::from_str(&resposta).expect("a resposta é JSON")
+    }
+
+    /// **Um pedido de MOD num canal que a pessoa não lê não chega ao MOD**
+    /// (tarefa 16 da F3; rascunho da API 6, §8, «O escopo de um pedido»). A
+    /// leitura é a do canal (`autorizacao::pode_no_canal`), e não só a
+    /// permissão global com o canal existindo.
+    #[tokio::test(flavor = "current_thread")]
+    async fn um_pedido_num_canal_que_a_pessoa_nao_le_nao_chega_ao_mod() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let (servidor, pessoa) = servidor_com_eco(pasta.path()).await;
+        let antes = pedir(&servidor, pessoa, 1).await;
+        assert_eq!(
+            antes["ok"], true,
+            "sem papel mínimo, o MOD não respondeu: {antes}"
+        );
+
+        papel_minimo_no_canal_1(
+            &servidor,
+            "minimum_read_role",
+            crate::permissions::OPERATOR_ROLE,
+        )
+        .await;
+        let depois = pedir(&servidor, pessoa, 1).await;
+        assert_eq!(
+            depois["error"], "bridge-refused",
+            "um pedido de MOD num canal que a pessoa não lê chegou ao MOD: {depois}"
+        );
+    }
+
+    /// **O `write` que o MOD recebe é o do canal**, e no escopo de servidor
+    /// (canal zero) é a permissão global de escrita.
+    #[tokio::test(flavor = "current_thread")]
+    async fn o_write_que_o_mod_recebe_e_o_do_canal() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let (servidor, pessoa) = servidor_com_eco(pasta.path()).await;
+        let antes = pedir(&servidor, pessoa, 1).await;
+        assert_eq!(
+            antes["contexto"]["write"], true,
+            "sem papel mínimo: {antes}"
+        );
+
+        papel_minimo_no_canal_1(
+            &servidor,
+            "minimum_write_role",
+            crate::permissions::OPERATOR_ROLE,
+        )
+        .await;
+        let no_canal = pedir(&servidor, pessoa, 1).await;
+        assert_eq!(
+            no_canal["contexto"]["write"], false,
+            "o MOD leu que a pessoa escreve num canal cujo papel de escrita ela não tem: {no_canal}"
+        );
+        let sem_canal = pedir(&servidor, pessoa, 0).await;
+        assert_eq!(
+            sem_canal["contexto"]["write"], true,
+            "no escopo de servidor, o `write` deixou de ser a permissão global: {sem_canal}"
+        );
+    }
+
+    /// Os `.rs` do `src/` de cada crate e app, sem `target/` e `node_modules/`.
+    fn fontes_do_produto(dir: &std::path::Path, saida: &mut Vec<std::path::PathBuf>) {
+        let Ok(entradas) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entrada in entradas.flatten() {
+            let caminho = entrada.path();
+            let nome = entrada.file_name();
+            if caminho.is_dir() {
+                if nome != "target" && nome != "node_modules" && nome != ".git" {
+                    fontes_do_produto(&caminho, saida);
+                }
+            } else if caminho.extension().is_some_and(|e| e == "rs")
+                && caminho.components().any(|parte| parte.as_os_str() == "src")
+            {
+                saida.push(caminho);
+            }
+        }
+    }
+
+    /// As linhas de um arquivo antes do módulo de testes dele: o `#[cfg(test)]`
+    /// seguido, depois dos atributos, de um `mod` com corpo, que neste
+    /// repositório vai até o fim do arquivo. Um `#[cfg(test)]` sobre uma função
+    /// ou um `mod x;` de fora não corta nada.
+    fn antes_dos_testes(texto: &str) -> Vec<&str> {
+        let linhas: Vec<&str> = texto.lines().collect();
+        for (i, linha) in linhas.iter().enumerate() {
+            if linha.trim() != "#[cfg(test)]" {
+                continue;
+            }
+            let item = linhas.iter().skip(i + 1).map(|l| l.trim_start()).find(|l| {
+                [
+                    "mod ",
+                    "pub mod ",
+                    "pub(crate) mod ",
+                    "fn ",
+                    "pub ",
+                    "pub(crate) ",
+                    "async ",
+                    "const ",
+                    "static ",
+                    "use ",
+                    "impl",
+                    "struct ",
+                    "enum ",
+                    "type ",
+                    "macro_rules!",
+                ]
+                .iter()
+                .any(|inicio| l.starts_with(inicio))
+            });
+            if let Some(item) = item {
+                let modulo = ["mod ", "pub mod ", "pub(crate) mod "]
+                    .iter()
+                    .any(|m| item.starts_with(m));
+                if modulo && !item.trim_end().ends_with(';') {
+                    return linhas[..i].to_vec();
+                }
+            }
+        }
+        linhas
+    }
+
+    /// **O papel mínimo de um canal só é gravado pela migração e pelos testes**
+    /// (pedido da orquestradora, 10/10; pendência 62).
+    ///
+    /// Até a tarefa 16, um pedido de MOD num canal conferia só a permissão
+    /// global: ele chegava ao MOD num canal que a pessoa não lê, e o `write`
+    /// ignorava o papel de escrita do canal. Não se alcançava em nenhuma versão
+    /// porque **nenhum caminho do produto grava `minimum_read_role` nem
+    /// `minimum_write_role`** (medido em 10/10, no v0.15.1, na linha 0.15 e
+    /// aqui). O dia em que um recurso gravar o papel mínimo é o dia em que
+    /// essa conferência passa a valer — e este guarda reprova nesse dia, com o
+    /// lugar e o que conferir, para quem cria o recurso ver a dependência.
+    ///
+    /// De texto, e simples de propósito: lê o `src/` de cada crate e app, sem
+    /// os módulos de teste e sem comentários. As menções permitidas são a
+    /// migração que cria as colunas e a leitura em `Acesso::coluna`.
+    #[test]
+    fn o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes() {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut fontes = Vec::new();
+        for topo in ["crates", "apps"] {
+            fontes_do_produto(&raiz.join(topo), &mut fontes);
+        }
+        assert!(
+            fontes
+                .iter()
+                .any(|f| f.ends_with("seele-server/src/autorizacao.rs")),
+            "o guarda não achou as fontes do produto em {}",
+            raiz.display()
+        );
+        let mut achados = Vec::new();
+        for fonte in &fontes {
+            let texto = std::fs::read_to_string(fonte).expect("a fonte");
+            let relativo = fonte
+                .strip_prefix(&raiz)
+                .unwrap_or(fonte)
+                .display()
+                .to_string();
+            for (n, linha) in antes_dos_testes(&texto).iter().enumerate() {
+                let limpa = linha.trim_start();
+                if limpa.starts_with("//")
+                    || !(limpa.contains("minimum_read_role")
+                        || limpa.contains("minimum_write_role"))
+                {
+                    continue;
+                }
+                let permitida = relativo.ends_with("seele-server/src/persistence/schema.rs")
+                    || (relativo.ends_with("seele-server/src/autorizacao.rs")
+                        && limpa.starts_with("Self::")
+                        && limpa.contains("=> \"minimum_"));
+                if !permitida {
+                    achados.push(format!("{relativo}:{}: {limpa}", n + 1));
+                }
+            }
+        }
+        assert!(
+            achados.is_empty(),
+            "um caminho do produto passou a mencionar o papel mínimo de um canal fora da migração \
+             e da leitura de `autorizacao.rs`:\n{}\n\nO pedido de MOD num canal confere a leitura e \
+             a escrita pelo papel mínimo (`autorizacao::pode_no_canal`, em `mods/pedidos.rs`; \
+             tarefa 16 da F3, pendência 62), e é a partir de agora que isso vale. Confira que ele \
+             ainda o faz, e que `um_pedido_num_canal_que_a_pessoa_nao_le_nao_chega_ao_mod` e \
+             `o_write_que_o_mod_recebe_e_o_do_canal` cobrem o recurso novo; então ponha o lugar \
+             novo como permitido neste guarda.",
+            achados.join("\n")
         );
     }
 }

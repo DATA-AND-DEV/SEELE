@@ -9,8 +9,9 @@
 //! Decisão do dono (09/10/2026): o servidor aceita o tema de **um** MOD, o
 //! escolhido. Escolhido é o primeiro que declara, e continua sendo enquanto
 //! estiver ligado; desligado, a porta fica livre para outro MOD de tema. A
-//! troca explícita por quem administra, na gestão de MODs, é da casca (tarefa
-//! 17f do plano da F3) e escreve na mesma coluna.
+//! troca explícita por quem administra (tarefa 17f.0 da F3) escreve na mesma
+//! coluna, por [`escolher`]: quem confere a porta e avisa as sessões é
+//! `crate::mods::tema::escolher`, e quem pergunta é a gestão de MODs.
 //!
 //! **Tirar o tema não devolve a porta.** O escolhido que declara `null` deixa o
 //! servidor sem tema e continua escolhido: um «voltar ao padrão» não pode
@@ -18,10 +19,14 @@
 //!
 //! # O que aqui não se confere
 //!
-//! A porta e os valores. Quem confere se o MOD tem a porta, e se o tema é um
-//! objeto que cabe no fio, é o runtime (`crate::mods`), no instante da chamada,
-//! que é onde a recusa pode voltar ao MOD como resposta. Os pares de contraste
-//! entram com a tarefa 17e, com a mesma tabela da casca.
+//! A porta e os valores. Quem confere se o MOD tem a porta, e a forma do tema
+//! — objeto que cabe no fio, as chaves e os valores da tabela, o `modo` e as
+//! regiões (`seele_proto::mods::recusa_das_chaves_do_tema`) —, é o runtime
+//! (`crate::mods`), no instante da chamada, que é onde a recusa pode voltar ao
+//! MOD como resposta. **Os pares de contraste não são do servidor** (decidido em
+//! 10/10): quem os confere é cada janela, que conhece a palheta do produto, e o
+//! MOD fica sabendo pelo evento `tema` — o `ok` de `mundo.tema` quer dizer «a
+//! forma vale e o tema foi publicado», e não «aplicado».
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 

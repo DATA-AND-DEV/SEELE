@@ -798,6 +798,12 @@ function escolherApresentacao(ponto, id) {
     // fechamento, e quem escolheu tem direito de saber disso.
     console.warn("preferência de apresentação não foi guardada:", falha);
   }
+  // **O tema do servidor, na hora** (tarefa 17f): a escolha da aparência está
+  // na chave dele, e sem reaplicar a troca só valia no retrato seguinte. Antes
+  // de redesenhar a gestão, para a linha dizer o desfecho novo.
+  if (ponto === "servidor.aparencia" && typeof reaplicarOTemaDoServidor === "function") {
+    reaplicarOTemaDoServidor();
+  }
   // O registro redesenha o que depende dela; ver `contribuicoesDosMods.avisar`.
   // `redesenharAsPessoas` também cala o som de quem deixou de desenhar — o de
   // uma substituição que perdeu, o de um cartão da API 3 sob «o SEELE desenha»
@@ -833,15 +839,26 @@ function desenharApresentacoes() {
     Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => [ponto, modPreferidoPara(ponto)]),
   );
   const linhas = contribuicoesDosMods.resumo(preferidos, (id) => modsCarregados.has(id));
-  secao.hidden = linhas.length === 0;
-  if (!linhas.length) {
+  // **A aparência pintada pelo tema do servidor** (tarefa 17f): o tema do
+  // servidor não passa pelo registro de contribuições, e a linha dele não sai
+  // de lá. Só quando nenhum MOD registrou a aparência — um MOD de janela ainda
+  // a registra (D-api-2) —: com registro, a linha do registro é a que diz quem
+  // vale.
+  const doServidor = linhas.some((linha) => linha.ponto === "servidor.aparencia")
+    ? null
+    : aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), modPreferidoPara("servidor.aparencia"));
+  secao.hidden = linhas.length === 0 && !doServidor;
+  if (secao.hidden) {
     lista.replaceChildren();
     return;
   }
 
-  repovoar(lista, linhas.map((linha) => {
-    const { estado, nota, botoes } = oQueAGestaoDiz(linha, preferidos.get(linha.ponto) ?? "");
+  repovoar(lista, [...linhas, ...(doServidor ? [doServidor] : [])].map((linha) => {
+    const { estado, nota, botoes } = linha === doServidor
+      ? doServidor
+      : oQueAGestaoDiz(linha, preferidos.get(linha.ponto) ?? "");
     const item = elemento("li", "server-dispositivo mods-linha-gestao");
+    item.dataset.ponto = linha.ponto;
     const texto = elemento("div", "mods-linha-texto");
     texto.append(
       elemento("span", "mods-id", NOMES_DOS_PONTOS[linha.ponto] ?? linha.ponto),
@@ -961,6 +978,50 @@ function oQueAGestaoDiz(linha, escolha) {
   return { estado, nota, botoes };
 }
 
+/** O tema do servidor em vigor (`base.js`), ou nenhum. */
+function oTemaDoServidorAqui() {
+  return typeof temaDoServidorEmVigor === "undefined" ? null : temaDoServidorEmVigor;
+}
+
+/**
+ * A linha da aparência quando quem a pinta é **o tema do servidor** — sem
+ * desenhar nada (tarefa 17f; rascunho da API 6, §9).
+ *
+ * Na API 6 a metade de servidor de um MOD declara o tema, e quem vê ainda
+ * pode preferir o desenho do SEELE nesta máquina. A escolha é a mesma
+ * preferência de `servidor.aparencia` que a linha de um MOD que registra o
+ * ponto grava (ele continua registrável, D-api-2); só a lista de onde a linha
+ * sai é outra.
+ *
+ * @param {{ mod_id: string, desfecho?: { estado: string } } | null} tema O
+ *   tema em vigor, ou nenhum.
+ * @param {string} escolha A escolha desta máquina para a aparência, neste
+ *   servidor: `""`, `APRESENTACAO_NATIVA` ou um `id`.
+ * @returns {null | { ponto: string, estado: string, nota: string, botoes: { rotulo: string, escolha: string }[] }}
+ */
+function aLinhaDoTemaDoServidor(tema, escolha) {
+  if (!tema) return null;
+  const de = `o tema deste servidor, de ${tema.mod_id}`;
+  const nativa = escolha === APRESENTACAO_NATIVA;
+  // **O recusado é dito**, e não dado como pintando: a casca o mediu e não o
+  // aplicou (pisos, tabela), e o SEELE desenha.
+  const recusado = tema.desfecho?.estado === "recusado";
+  const estado = nativa
+    ? `o SEELE desenha, por escolha desta máquina; ${de}, não vale aqui`
+    : recusado
+      ? `${de}, foi recusado nesta máquina: o SEELE desenha`
+      : `pintada pelo ${de.slice(2)}`;
+  const nota = recusado && !nativa ? "O motivo está no seele.log desta máquina." : "";
+  const botoes = nativa
+    ? [{ rotulo: "USAR O TEMA DO SERVIDOR", escolha: "" }]
+    : [{ rotulo: "USAR APRESENTAÇÃO DO SEELE", escolha: APRESENTACAO_NATIVA }];
+  // Uma escolha de MOD gravada — de um MOD que registra a aparência, e que
+  // não está registrando agora — não muda nada aqui, e desfazê-la é uma
+  // escolha.
+  if (escolha && !nativa) botoes.push({ rotulo: "DECIDIR AUTOMATICAMENTE", escolha: "" });
+  return { ponto: "servidor.aparencia", estado, nota, botoes };
+}
+
 /**
  * O valor que quer dizer «o SEELE desenha, e nenhum MOD».
  *
@@ -990,6 +1051,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "status.barra": "A barra de baixo",
   "pessoas.lista": "A lista de pessoas",
   "conversa.mensagem": "Cada mensagem da conversa",
+  "chamada.palco": "O palco sobre a chamada",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1021,7 +1083,15 @@ function modsDoCaminhoAntigo(ponto) {
     };
   }
   if (ponto === "servidor.aparencia") {
-    return { rotulo: "tema pedido por", valem: [...temaDosMods.keys()], perdem: [] };
+    // **O tema do servidor não é o caminho antigo** (tarefa 17f): ele mora em
+    // `temaDosMods` porque entra por `aplicarOTemaDoMod`, e sem este filtro a
+    // aba o chamava de tema da API 3. Ele é dito por `temaDoServidor`.
+    const doServidor = oTemaDoServidorAqui()?.mod_id ?? null;
+    return {
+      rotulo: "tema pedido por",
+      valem: [...temaDosMods.keys()].filter((id) => id !== doServidor),
+      perdem: [],
+    };
   }
   return { rotulo: "", valem: [], perdem: [] };
 }
@@ -1035,6 +1105,15 @@ function quemPintaCadaPonto() {
       preferencia,
       herdada: ponto === "pessoa.avatar" && !modPreferidoPara(ponto) && preferencia !== "",
       antigos: modsDoCaminhoAntigo(ponto),
+      // O que a linha de QUEM DESENHA O QUE diz do tema do servidor, ou nada.
+      temaDoServidor: ponto === "servidor.aparencia"
+        ? aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), preferencia)?.estado ?? null
+        : null,
+      // As contagens da tarefa 5 (`base.js`): os identificadores que a lista
+      // substituída ignora agora, e a região que esta casca não tem.
+      ignorados: typeof identificadoresIgnorados === "undefined" ? 0 : identificadoresIgnorados.get(ponto) ?? 0,
+      semARegiao: typeof aCascaTemARegiao === "function" && !aCascaTemARegiao(ponto),
+      avisadasSemARegiao: typeof regioesAusentesAvisadas === "undefined" ? 0 : regioesAusentesAvisadas.get(ponto) ?? 0,
       midias: midiasDoPonto(ponto),
     };
   });
@@ -1123,7 +1202,8 @@ function frasesDeQuemPinta(linha) {
   const antigos = linha.antigos;
   const ninguem = linha.contribuicoes === 0
     && antigos.valem.length === 0
-    && antigos.perdem.length === 0;
+    && antigos.perdem.length === 0
+    && !linha.temaDoServidor;
   if (ninguem) {
     frases.push("nenhum MOD usa este lugar agora");
     if (linha.substituivel && linha.preferencia) frases.push(fraseDaPreferencia(linha));
@@ -1138,7 +1218,11 @@ function frasesDeQuemPinta(linha) {
     const comOTema = linha.ponto === "servidor.aparencia" && antigos.valem.length
       ? `, com o tema de ${antigos.valem.join(" e ")} em vigor (API 3)`
       : "";
-    if (linha.ausente) {
+    if (linha.temaDoServidor && linha.contribuicoes === 0) {
+      // Na API 6, quem pinta a aparência é o tema do servidor, e não uma
+      // contribuição: a mesma frase da linha de QUEM DESENHA O QUE.
+      frases.push(linha.temaDoServidor);
+    } else if (linha.ausente) {
       frases.push(`você escolheu ${linha.ausente}, e ele não está de pé agora: o SEELE desenha${comOTema}`);
     } else if (linha.escolhidoNaoSubstitui) {
       // De pé, e sem candidata aqui: o avatar que herda a escolha do cartão,
@@ -1170,6 +1254,21 @@ function frasesDeQuemPinta(linha) {
   const perderam = [...new Set([...linha.perderam, ...antigos.perdem])];
   if (perderam.length) frases.push(`pediram e não receberam: ${perderam.join(", ")}`);
   if (linha.substituivel) frases.push(fraseDaPreferencia(linha));
+  // **O que a casca deixou de fora, contado** (tarefa 5): sem isto, quem
+  // escreve o MOD via a lista dele com gente faltando, ou a contribuição
+  // sumida, e nenhuma palavra sobre o porquê.
+  if (linha.ignorados > 0) {
+    frases.push(
+      `a ordem que o MOD deu cita ${emQuantidade(linha.ignorados, "identificador", "identificadores")} ` +
+        `de quem não está aqui, ou repetido: ${linha.ignorados === 1 ? "ignorado" : "ignorados"}`,
+    );
+  }
+  if (linha.semARegiao) {
+    frases.push(
+      "esta casca não tem este lugar: o que os MODs registram aqui não aparece " +
+        `(regiao-ausente; ${emQuantidade(linha.avisadasSemARegiao, "contribuição avisada", "contribuições avisadas")} nesta sessão)`,
+    );
+  }
   const midia = fraseDaMidia(linha.midias);
   if (midia) frases.push(midia);
   return frases;
@@ -1268,6 +1367,7 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "status.barra": "#telemetria-mods",
   "pessoas.lista": "#roster-mods",
   "conversa.mensagem": ".mensagem-miolo",
+  "chamada.palco": "#palco-de-mods",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

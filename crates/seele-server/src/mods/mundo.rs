@@ -133,19 +133,27 @@ pub fn recusa_do_tema(porta: bool, pintor: Option<&str>, quem: &str) -> Option<&
     None
 }
 
-/// Uma recusa de `mundo.tema`: o nome, de lista fechada, e a chave quando a
-/// recusa é de uma (`chave-desconhecida` e `valor-invalido`).
+/// Uma recusa de `mundo.tema`: o nome, de lista fechada, a chave quando a
+/// recusa é de uma (`chave-desconhecida`, `valor-invalido` e
+/// `regiao-desconhecida`), e a região quando a chave é de dentro de uma.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecusaDoTema {
     /// O nome que o MOD lê em `erro`.
     pub erro: &'static str,
     /// A chave do tema que causou a recusa, quando há uma.
     pub chave: Option<String>,
+    /// A região dos tokens por região (tarefa 17i, item 3), quando a recusa é
+    /// de dentro de uma.
+    pub regiao: Option<String>,
 }
 
 impl From<&'static str> for RecusaDoTema {
     fn from(erro: &'static str) -> Self {
-        Self { erro, chave: None }
+        Self {
+            erro,
+            chave: None,
+            regiao: None,
+        }
     }
 }
 
@@ -189,10 +197,11 @@ pub fn valores_do_tema<'js>(
     let Ok(serde_json::Value::Object(tema)) = serde_json::from_str(&texto) else {
         return Ok(Err("tema-invalido".into()));
     };
-    if let Some((erro, chave)) = seele_proto::mods::recusa_das_chaves_do_tema(&tema) {
+    if let Some(recusa) = seele_proto::mods::recusa_das_chaves_do_tema(&tema) {
         return Ok(Err(RecusaDoTema {
-            erro,
-            chave: Some(chave),
+            erro: recusa.erro,
+            chave: Some(recusa.chave),
+            regiao: recusa.regiao,
         }));
     }
     Ok(Ok(crate::mods::TemaDeclarado {

@@ -170,8 +170,9 @@ O mecanismo é o de hoje: cada região vira uma linha de
 | `pessoas.lista` | a faixa de pessoas | substituir, adicionar | `pessoa.identidade`, `pessoa.cartao`, `pessoa.detalhes`, `pessoa.acoes`, `pessoa.avatar`, `pessoa.capa` | **o menu de moderação**, e o apelido verificado |
 | `status.barra` | a barra inferior (`footer.telemetria`, `index.html:1761`) | adicionar | — | **atraso, jitter, distúrbio e codec** |
 
-**Os pontos de hoje ficam com o mesmo nome**, menos `servidor.aparencia`, que
-deixa de ser registrado pela janela e passa a ser a porta de quem vê sobre o
+**Os pontos de hoje ficam com o mesmo nome**, e o `servidor.aparencia`
+continua registrável (decidido em 10/10, pela D-api-2: o tema «fica, ampliado,
+pela porta do `servidor.aparencia`»). Ele é também a porta de quem vê sobre o
 tema declarado pelo servidor (§9).
 
 **`listarNaBarra` continua** (pergunta do ESTILO, B6): a entrada que um MOD
@@ -466,12 +467,32 @@ contrato, **com os números em aberto para a M3** (§12):
 - **De quem.** O palco é **por pessoa**: cada janela monta o que o MOD dela
   declarar. Quem mestra vê peças ocultas e notas; quem joga não (MESA, 5c). Um
   palco compartilhado seria estado de servidor, e o MOD já o tem.
-- **Tamanho.** O MOD recebe a largura e a altura que tem ali, e um evento
-  quando elas mudam (§7.2); as `classes` com `consultas: [{ ateLargura }]`
-  valem dentro do palco.
-- **Saída.** Como toda superfície: a saída é do produto, e a grade de vídeo
-  continua de pé por baixo. A faixa de toque e a de batida ficam fora, por
-  construção (§10).
+- **Os dois modos** (decidido em 10/10), como nos outros pontos: a
+  substituição escolhida — pela preferência de quem vê, ou pela prioridade —
+  é o miolo do palco; os acréscimos moram numa faixa abaixo dele. O palco
+  aparece quando há pelo menos um dos dois, e só dentro de uma sala. [c,
+  `desenharOPalcoDosMods`]
+- **Vista alternativa à grade, e começa escondido** (decidido em 10/10). O
+  palco chega montado atrás da grade, e a barra da chamada oferece VER O
+  PALCO: quem o traz à frente é a pessoa. A grade é onde moram as capas de
+  quem fala (§4, D-capa-1), e um MOD que registra o palco não a tira da vista
+  de ninguém sem a pessoa pedir. Com o palco à frente, a grade sai da vista e
+  continua no DOM, repintada a cada retrato. [c, `palco-da-chamada.cjs`]
+- **Tamanho.** O MOD recebe a largura e a altura que tem ali — a
+  substituição, o miolo; o acréscimo, a faixa — no evento `lugar`, com
+  `regiao: 'chamada.palco'` (§7.2), quando chega ao palco e a cada mudança;
+  escondido, 0 × 0. As `classes` com `consultas: [{ ateLargura }]` valem
+  dentro do palco. [c]
+- **Saída.** Como toda superfície: a saída é do produto — VER A GRADE, na
+  barra do palco, que diz de quem ele é —, e esconder não desmonta.
+- **O palco escondido soa** (decidido em 10/10). Inclusive o que a pessoa
+  ainda não abriu: ele está montado atrás da grade, e a regra «fora da tela,
+  a declaração não liga o som» vale para o lugar desmontado (§11). O som
+  ambiente da MESA é o caso de uso, e ele vem de um MOD que a pessoa aceitou,
+  numa sala em que ela entrou. Quem escreve o MOD que não quer tocar
+  escondido lê o `lugar` do palco (0 × 0 escondido) e pausa. A grade de vídeo continua de pé por baixo.
+  Sair da sala desmonta o palco. A faixa de toque e a de batida ficam fora,
+  por construção (§10).
 
 ### A mídia do servidor, em todo lugar, pelo mesmo caminho
 
@@ -839,7 +860,7 @@ contrato (MESA, item 3).
 | `sala` | quem usa entrou numa sala de voz ou saiu dela | `{ sala | null }` |
 | `pessoas` | alguém entrou no servidor ou saiu | `{ entrou?: id, saiu?: id }` |
 | `fala` | o conjunto de quem fala mudou | `{ falando: [id] }`, no máximo 4 por segundo |
-| `lugar` | a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma | `{ onde, regioes, largura, altura }` |
+| `lugar` | a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma | `{ onde, regioes, largura, altura, regiao? }` |
 
 **Nunca carregam a ligação.** O MOD do servidor em que a pessoa está não fica
 sabendo que ela recebe uma ligação, de quem, nem qual é o código de ninguém.
@@ -852,6 +873,12 @@ tem `eventos-da-tela` os recebem. A fala sai no máximo a cada 250 ms, e o
 conjunto mais novo sempre chega (`criarRitmoDaFala`). O `lugar` sai quando
 `onde` ou as `regioes` mudam, com a largura e a altura da sessão; o tamanho de
 cada região, e o `lugar` quando ele muda, são da tarefa 5.
+
+**`regiao` diz de que lugar é o tamanho** (decidido em 10/10): sem ela, o
+tamanho é o da sessão; com ela, é o do lugar que o MOD tem naquela região ou
+camada. O primeiro a levá-la é o `chamada.palco` (§5): o MOD que substitui
+ouve o tamanho do miolo, o que acrescenta, o da faixa, quando chega ao palco
+e a cada mudança, e 0 × 0 com o palco escondido. [c, `dizerOTamanhoDoPalco`]
 
 ### 7.3 O aviso da metade de servidor às janelas (novo)
 
@@ -967,9 +994,9 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
    pedido de escopo de servidor, e o `aoPedir` o recebe com `channel: null`.
    Um dado que é do servidor (o perfil, o tema) é pedido com 0; um dado que é
    de um canal (a campanha da MESA), com o canal.
-2. **A permissão de escrita é definida por escopo** (hoje o `write` do
-   contexto é `may(person, WriteChannel)` global, qualquer que seja o canal,
-   `pedidos.rs:203-205` [c]):
+2. **A permissão de escrita é definida por escopo** (feito em 10/10, tarefa
+   16, `dcd6f287`; até ali o `write` do contexto era `may(person,
+   WriteChannel)` global, qualquer que fosse o canal):
    - **escopo de servidor:** `contexto.write` é a permissão global de escrever
      (`WriteChannel`), e `contexto.admin` é a de administrar o servidor
      (`AdministerServer`). É o que vale hoje, e passa a estar escrito. Uma
@@ -980,11 +1007,16 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
      Escrita)` (`crates/seele-server/src/autorizacao.rs:104` [c]): a permissão
      global **e** o papel mínimo do canal;
    - **e o pedido num canal que a pessoa não lê é recusado**, com
-     `pode_no_canal(…, Leitura)`, como o histórico. Hoje só se confere que o
-     canal existe (`pedidos.rs:191-195` [c]).
-   Os dois últimos não mordem hoje — nada grava papel mínimo em canal nenhum
-   (`autorizacao.rs:40-44` [c]) —, mas mordem no dia em que um canal privado
-   existir, e a v6 congela antes disso.
+     `pode_no_canal(…, Leitura)`, como o histórico (`cannot read channel` no
+     registro; `bridge-refused` para a janela). Até a tarefa 16 só se conferia
+     que o canal existe.
+   Os dois últimos não mordem hoje: nada grava papel mínimo em canal nenhum,
+   em nenhuma versão (medido em 10/10 no v0.15.1, na linha 0.15 e na 0.16;
+   pendência 62). Eles passam a valer no dia em que um canal privado existir, e
+   a v6 congela antes disso. O guarda
+   `o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes`
+   reprova quando aparecer um caminho do produto que grave o papel mínimo, e
+   manda conferir esta regra.
 
 **Pedido da MESA (item 9):** o orçamento do quintal legível pela metade de
 servidor (`dados.uso()`, `dados.teto`), e a recusa por quintal cheio com código
@@ -1009,19 +1041,28 @@ grupo 17 do plano da F3.
 
 - **A metade de servidor declara com `mundo.tema(valores | null)`.** `valores`
   é o objeto do tema (os nomes do §9, abaixo); `null` tira o tema. A chamada
-  confere o tema como a janela confere (os pares, abaixo) e devolve a recusa
-  com o par e a razão, em vez de mandar a todos um tema que a casca recusaria.
+  confere **a forma** — as chaves, os valores, o `modo` e as regiões, pela
+  tabela de «As chaves do tema» — e devolve a recusa pelo nome. **`ok` quer
+  dizer «a forma é válida e o tema foi publicado», e não «aplicado»** (decidido
+  em 10/10): os pares de contraste são da casca, que conhece a palheta do
+  produto e as cores que ela deriva, e cada janela os confere e conta ao MOD
+  pelo evento `tema` — `aplicado`, ou `recusado` com os pares e, quando foi uma
+  região, a `regiao`. O servidor não tem uma segunda conta de contraste.
 - **A recusa é valor devolvido, e não exceção** (O1 do ESTILO). `mundo.tema`
   devolve `{ ok: true }` ou `{ ok: false, erro }`, com `erro` da lista fechada:
   `sem-porta-de-tema` (o manifesto não declara `"tema": true`),
   `tema-de-outro-mod` (outro MOD é o escolhido e está ligado), `tema-invalido`
   (não é objeto nem `null`: texto, número, lista), `tema-grande-demais` (o JSON
-  passa dos 12 KiB do fio) e, com a tarefa 17e, `contraste`, que leva
-  `pares: [{ frente, fundo, razao, piso }]` com **os dois nomes em campos
-  separados** (`frente: 'acento', fundo: 'acentoFraco'`), para o MOD pôr cada
-  lado no seu campo dos `erros`. Só lança o que o próprio MOD lançar ao ser
-  serializado (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a
-  17c; `contraste` na 17e]
+  passa dos 12 KiB do fio), `chave-desconhecida` e `valor-invalido` (com a
+  `chave`; tarefa 17j) e `regiao-desconhecida` (com `chave: 'regioes'` e a
+  `regiao`; tarefa 17i). Só lança o que o próprio MOD lançar ao ser serializado
+  (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a 17c, 17i e
+  17j]
+- **`contraste` não é recusa de `mundo.tema`**: ele vem no evento `tema` e na
+  resposta da prévia (17g), com `pares: [{ frente, fundo, razao, piso }]` e
+  **os dois nomes em campos separados** (`frente: 'acento', fundo:
+  'acentoFraco'`), para o MOD pôr cada lado no seu campo dos `erros`. [c,
+  tarefa 17e, e a região na 17i]
 - **A declaração cai junto com o quintal** (O2). Ela só vale se o `aoPedir` ou
   o `aoAcontecer` terminar: um MOD que declara e lança depois não publica nada,
   e o `TemaMudou` só sai depois de o quintal e o tema gravados, na mesma
@@ -1051,14 +1092,16 @@ grupo 17 do plano da F3.
   alcance. Um MOD sem a declaração recebe a recusa pelo nome. A frase de
   `TemaDoServidor` («quem tem o ponto `servidor.aparencia`») muda para «quem o
   manifesto autoriza».
-- **`servidor.aparencia` passa a ser a porta de quem vê.** Ele deixa de ser um
-  ponto que a janela do MOD registra (o tema chega antes de qualquer janela) e
-  vira o lugar em que a escolha de cada pessoa vale: na gestão de MODs, «o SEELE
-  desenha» para a aparência **tira o tema daquele servidor nesta máquina**, e
-  a casca deixa de aplicar o `TemaMudou` dele até a escolha mudar. A aba
-  DIAGNÓSTICO diz qual MOD pinta a aparência pelo `mod_id` do tema. Ele sai de
-  `PONTOS_DE_CONTRIBUICAO` no corte, e a regra de pontos do `check-api` cobra a
-  saída nos dois sentidos.
+- **`servidor.aparencia` é também a porta de quem vê.** O tema do servidor
+  chega antes de qualquer janela, e o ponto é o lugar em que a escolha de cada
+  pessoa vale: na gestão de MODs, «o SEELE desenha» para a aparência **tira o
+  tema daquele servidor nesta máquina**, e a casca deixa de aplicar o
+  `TemaMudou` dele até a escolha mudar. A aba DIAGNÓSTICO diz qual MOD pinta a
+  aparência pelo `mod_id` do tema. **E ele continua um ponto registrável na 6**
+  (decidido em 10/10, D-api-2), publicado em `contribuicoes.pontos`: o MOD de
+  janela pinta por ele como na 5, e o tema do servidor da 17d se soma. Se a
+  medida mostrar que as duas portas brigam na mesma sessão, a regra de quem
+  vence vem para este parágrafo, e QUEM DESENHA O QUE (17f) é o lugar dela.
 - **Desligar ou desinstalar o MOD manda `TemaMudou { tema: None }`** a todos.
   O tema guardado fica, inativo, porque desligar preserva os dados (ADR 0045):
   religar o MOD o devolve.
@@ -1080,12 +1123,50 @@ grupo 17 do plano da F3.
 
 **O MOD escreve nomes do contrato, e nunca nomes de CSS.** O tema é um objeto
 cujas chaves são os nomes do §9 (`fundo`, `texto`, `acento`, `borda`, `painel`,
-`apagado`, os números e as bandeiras, e o que a ampliação somar: `modo`, a
-densidade, os tokens por região). O produto traduz cada nome por uma **tabela
+`apagado`, os números e as bandeiras, `densidade`, `fonte` e `modo`, e o que a
+ampliação somar: os tokens por região). O produto traduz cada nome por uma **tabela
 fechada** para o token `--seele-*` que ele redefine, como a casca já faz hoje
 (`TEMA_DA_API`, `base.js:1844` [c]): uma chave fora da tabela é recusada pelo
 nome (`base.js:2038` [c]), e um valor fora da forma (`#rrggbb`, o intervalo do
 número, o booleano) também.
+
+**Os tokens por região** (tarefa 17i, item 3; aprovado em 10/10). A chave
+`regioes` leva um objeto cujas chaves são as oito regiões do §3 (`redes`,
+`servidor.navegacao`, `operador.barra`, `canal.cabecalho`,
+`conversa.mensagem`, `compositor`, `pessoas.lista`, `status.barra`; nenhuma
+camada) e cujos valores são objetos de `fundo`, `texto`, `apagado`, `acento`
+e `borda` — o `painel` não, porque uma região é um painel, e o fundo dela é o
+dele:
+
+```js
+mundo.tema({ fundo: '#050403', regioes: { 'pessoas.lista': { fundo: '#0e0b08', acento: '#c86b1f' } } });
+```
+
+As recusas, na ordem alfabética das regiões e, dentro de cada uma, das cores
+(a mesma das chaves de fora): `regiao-desconhecida`, com `chave: 'regioes'` e
+a `regiao`; `chave-desconhecida` e `valor-invalido`, com a cor em `chave` e a
+`regiao`; e `valor-invalido` com `chave: 'regioes'` quando o valor não é um
+objeto. [c, `seele_proto::mods::recusa_das_regioes` e `recusaDasRegioes`, nas
+duas pontas pelo vetor `chaves-do-tema.json`; o `mundo.tema` responde
+`{ ok: false, erro, chave, regiao }`]
+
+**Onde a região pinta.** No contêiner do produto que a abriga — a coluna de
+canais, a barra do canal, a lista de pessoas, a barra de baixo —, e não na
+faixa do MOD dentro dela: as cores da região, o `fundo` valendo também como
+`painel`, e os tons que o produto deriva delas (o preenchimento do acento,
+as cores de estado). O resto da sessão fica com o tema da sessão, e os itens
+do núcleo com as cores do produto (eles leem os `--nucleo-*`, resolvidos na
+raiz). No celular, a casca pode dar outros contêineres
+(`CELULAR.conteineresDasRegioes`), procurados no documento todo — o
+`operador.barra` mora em AJUSTES, fora da sessão —, e uma região que ela não
+tem não é pintada.
+
+**Os pares por região.** Cada região é conferida com o tema da sessão e as
+cores dela por cima, pela mesma tabela de pares. Uma região abaixo do piso
+recusa o tema inteiro: `contraste`, com a `regiao` e os `pares`, na resposta
+da prévia e no evento `tema` (`{ estado: 'recusado', regiao, pares }`). [c,
+`escreverAsRegioesDoTema` e `aRegiaoAbaixoDoPiso`; seção 11 da
+`tema-do-servidor.cjs`]
 
 **Nenhum nome da tabela leva a `--nucleo-*`.** No celular, o MUDO, o SURDO e o
 SAIR leem variáveis `--nucleo-*`, declaradas na raiz a partir dos tokens do
@@ -1105,6 +1186,10 @@ mundo.tema({ acento: "#331704", "--nucleo-mudo": "#ffffff" })
 // → { ok: false, erro: "chave-desconhecida", chave: "--nucleo-mudo" }
 mundo.tema({ arredondamento: 25 })
 // → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
+mundo.tema({ acento: "#331704" })
+// → { ok: true } — a forma vale e o tema foi publicado; **não quer dizer
+//   aplicado**: cada janela confere os pares e conta pelo evento `tema`
+//   ({ estado: "recusado", pares: [{ frente: "acento", fundo: "fundo", … }] })
 ```
 
 Com mais de uma chave errada, **as duas pontas nomeiam a primeira em ordem
@@ -1277,12 +1362,26 @@ Com a recomendação do ESTILO, que adoto:
 
 | item | onde |
 |---|---|
-| `modo: 'claro' \| 'escuro'` | **6** |
-| a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **6** |
-| tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x |
+| `modo: 'claro' \| 'escuro'` | **6** [c, 17i, item 2: escreve o `color-scheme` da sessão; recusado como `valor-invalido`, com a `chave`, quando discorda do fundo — claro de 0,18 de luminância relativa para cima, escuro abaixo; sem `fundo` no tema, o do produto, que é escuro; nas duas pontas, pelo vetor `chaves-do-tema.json`, com os vizinhos do limiar, 0,1778 e 0,1811] |
+| a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **7**, com «tokens além de cor» (decidido em 10/10, depois da medida abaixo) |
+| tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x [c, 17i, item 3: a forma, as recusas com a `regiao`, a pintura no contêiner de cada região e os pares por região; os contêineres do celular são da F8] |
 | fundo da sessão por mídia | **6 se a M3 com a API 6 o medir no iPhone antes do congelamento** (tarefa 11); senão, **7** |
 | tipo dos títulos e dos dados, e escala por escolha | **7**: não medidos |
 | família de tipo livre | fora, sempre |
+
+**A densidade, medida antes de implementar** (17i, item 1; 10/10). O CSS da
+sessão é feito de px literais, e os estilos de MOD de números: escrever os
+`--seele-e*` compactos em `#tela-sessao` mudava **16 de 343** nós, e todos da
+PORTARIA — uma tela de decisão de quem hospeda, que um tema nem deveria
+apertar. Um `aplicado` que não aplica nada, e por isso a escala inteira vai
+para a 7, quando o CSS da sessão passar a ler os tokens.
+
+**O que `densidade` alcança hoje, e é o que a 6 promete:** o espaçamento do
+que o MOD declara — `--seele-celula-x/y` na raiz da região, entre as partes,
+no recuo das listas, nos botões, nas escolhas, nos formulários e nas tiras —
+e o recheio do `aviso`. **Nada do produto**: medido, com `compacta`, zero dos
+343 nós da sessão mudam; com um palco de MOD aberto, mudam dois, e os dois do
+MOD. [c, a medida de 10/10]
 
 ### Os dados do tema ao subir de linha (B9)
 
@@ -1290,9 +1389,15 @@ Quem hospeda e sobe do Servidor 0.15 para o 1.0 **mantém o quintal do MOD**:
 a 0.16 abre e migra a pasta de dados de sempre (a cópia para
 `dados/servidor-0.15` é da linha legada), e a tabela `mod_data` é endereçada
 pelo identificador do MOD, e não pelo hash do pacote, então o ESTILO 4.0.0
-herda o que o `seele/estilo` 3.x gravou. **Isso pede um teste com a F6**
-(tarefa 18 do plano): hospedar a 0.16 sobre uma pasta da 0.15 com dados do
-`seele/estilo` e ver o `mod_data` intacto depois da migração. **O tema
+herda o que o `seele/estilo` 3.x gravou. **Provado** (tarefa 18 do plano,
+`versoes::o_quintal_sobe_da_0_15` [c]): uma pasta escrita pelo código da
+v0.15.1, com o tema que a metade de servidor do 3.1.0 gravou em `dados.theme`,
+aberta pela 0.16 (a primeira abertura, o servidor sobre o banco de sempre,
+migrado), e o 4.0.0 — outro pacote, outro hash — lendo o `dados.theme` igual,
+byte a byte. A linha 0.15 guarda a cópia dela, com o mesmo quintal, para quem
+voltar a um Servidor 0.15. **Para as notas do ESTILO 4.0.0:** o `dados` da 4.0.0
+começa com tudo o que a 3.x gravou, nas mesmas chaves; nada é migrado pelo
+produto, e a forma dos valores é a que a 3.x escreveu. **O tema
 guardado pelo servidor (B1) é novo na 6**: ele começa vazio, e a primeira
 publicação do ESTILO 4.0.0 o preenche a partir do quintal.
 
@@ -1481,6 +1586,7 @@ de hoje, lidos no código:
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
+| figuras numa `tela` | 256 | `mods-regiao.js:47` | **fica 256, e quem manda é a mensagem** (decidido em 10/10): com figuras completas, com `chave` e `cor` (71 bytes cada), cabem **155** numa mensagem de 12 KiB; as 256 só cabem sem `chave` e sem `cor` (45 bytes), figuras de enfeite, sem toque. Uma `tela` que passa dos 12 KiB é recusada pelo teto da mensagem (`mensagem-grande`, com o tamanho e o teto), e não pelo de figuras [c, medido pela conferência do MOD de carga da M3, `conferir-carga.rs`] |
 | bytes de mídia por superfície | 24 MiB declarados, **10 MiB na forma `midia`** | `mods-regiao.js:194`, `:2159-2161`, `:2226` | §13: a 6 diz o que é entregue |
 | região | 512 nós, 8 de fundura, 10 MiB | `mods-regiao.js:33-65` | sai com `regiao` (§2) |
 | cartões | 64 pessoas, 64 nós, 6 de fundura, 64 mídias, 20 MiB somados | `mods-regiao.js:104-131` | troca por `pessoa.cartao` com `alvo` (R2) |
@@ -1766,7 +1872,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |
 | B7 | o terceiro botão e o erro de dois campos | `confirmar` em qualquer `botao`; `formulario.erros` com as duas chaves | §5 |
 | B8 | as peças só no texto | cada uma com teste no produto, na tarefa 17 | §9; plano, 17 |
-| B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | mantido pela leitura (o `mod_data` é por identificador); a prova é a tarefa 18, com a F6 | §9 |
+| B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | **mantido, e provado** (tarefa 18): uma pasta escrita pela v0.15.1, aberta pela 0.16, e o 4.0.0 lendo o quintal do 3.1.0 | §9 |
 
 **PERFIS** (`docs/plano-api-6.md` dele):
 

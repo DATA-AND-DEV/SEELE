@@ -108,7 +108,147 @@ function desenharChamada(snapshot) {
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
+  desenharOPalcoDosMods(snapshot);
 }
+
+// ------------------------------------------------------- o palco dos MODs
+
+/**
+ * Se o palco está escondido atrás da grade. **Começa escondido**, e volta a
+ * escondido quando o palco sai: quem o traz à frente é a pessoa, com VER O
+ * PALCO. A grade é onde moram as capas de quem fala (D-capa-1), e um MOD que
+ * registra o palco não tira a grade da vista de ninguém sem ela pedir.
+ */
+let palcoDosModsEscondido = true;
+
+/**
+ * **`chamada.palco`** (rascunho da API 6, §5; tarefa 7, Step 5): o palco dos
+ * MODs, como vista alternativa à grade.
+ *
+ * A substituição escolhida — pela preferência desta máquina, ou pela
+ * prioridade — é o miolo; os acréscimos moram numa faixa abaixo dele, na
+ * ordem do registro. Só dentro de uma sala: o palco é da chamada.
+ *
+ * **Começa escondido**: o palco que chega não toma a vista. VER O PALCO, na
+ * barra da chamada, aparece com ele e o traz à frente; VER A GRADE o devolve
+ * para trás.
+ *
+ * **Chamado também pelo desenho da sessão**, e não só pelo desta tela: a
+ * chamada só se redesenha com a vista dela à frente, e quem sai da sala com a
+ * conversa à frente deixaria o palco montado — e o som dele seguiria. Sair da
+ * sala o desmonta, e `calarOsSonsQueSairamDaTela` cala o que ele tocava; o
+ * palco escondido por VER A GRADE continua montado, e o som dele continua
+ * (rascunho §11).
+ */
+function desenharOPalcoDosMods(snapshot) {
+  const palco = $("palco-de-mods");
+  if (!palco) return;
+  const sala = snapshot?.voice_rooms?.find((s) => s.occupied_by_us) ?? null;
+  // A região que a casca não tem fica vazia, e quem contribui sabe
+  // (`regiaoAusente`, em `base.js`).
+  const naCasca = Boolean(sala) && !regiaoAusente("chamada.palco");
+  const escolhida = naCasca
+    ? contribuicoesDosMods.escolherSubstituicao(
+      "chamada.palco",
+      "",
+      typeof modPreferidoPara === "function" ? modPreferidoPara("chamada.palco") : "",
+    ).escolhida
+    : null;
+  const desenho = escolhida ? montarContribuicao(escolhida, "") : null;
+  const acrescimos = naCasca ? conteudoDasContribuicoes("chamada.palco") : [];
+  repovoar($("palco-de-mods-miolo"), desenho ? [desenho] : []);
+  repovoar($("palco-de-mods-acrescimos"), acrescimos);
+  $("palco-de-mods-acrescimos").hidden = acrescimos.length === 0;
+
+  const tem = Boolean(desenho) || acrescimos.length > 0;
+  if (!tem) palcoDosModsEscondido = true;
+  // **De quem é o palco**, escrito pelo produto, e não pelo MOD.
+  const quem = [...new Set([
+    ...(desenho ? [escolhida.mod] : []),
+    ...acrescimos.map((no) => no.dataset.mod),
+  ])];
+  $("palco-de-mods-quem").textContent = tem ? `PALCO DE ${quem.join(" E ")}` : "";
+  const aFrente = tem && !palcoDosModsEscondido;
+  palco.hidden = !aFrente;
+  $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
+  $("palco-de-mods-ver-o-palco").hidden = !(tem && palcoDosModsEscondido);
+
+  // Quem está no palco, e onde: a substituição no miolo, os acréscimos na
+  // faixa. Um MOD que faz os dois mede pelo miolo.
+  modsDoPalco.clear();
+  for (const no of acrescimos) modsDoPalco.set(no.dataset.mod, "palco-de-mods-acrescimos");
+  if (desenho) modsDoPalco.set(escolhida.mod, "palco-de-mods-miolo");
+  // Só a quem chegou, ou mudou de lugar: o tamanho que muda é do observador.
+  dizerOTamanhoDoPalco(true);
+}
+
+/** Os MODs do palco agora, cada um com o contêiner que é dele. */
+const modsDoPalco = new Map();
+
+/** O que cada MOD do palco já ouviu: `contêiner:largura×altura`. */
+const tamanhoDoPalcoDito = new Map();
+
+/**
+ * **O tamanho do palco, a cada MOD dele** (rascunho da API 6, §5 e §7.2): o
+ * `lugar` com a largura e a altura que ele tem ali — a substituição, o miolo;
+ * o acréscimo, a faixa — e `regiao: 'chamada.palco'`, para o MOD saber de que
+ * lugar é o tamanho. Escondido, 0 × 0. Só quando muda, e para quem a API tem
+ * os eventos da tela; quem chega ao palco ouve o tamanho de agora.
+ *
+ * **Dois caminhos, um dono cada.** O desenho chama com `soQuemChegou`: só o
+ * MOD que entrou no palco, ou trocou de lugar nele, ouve o tamanho de agora.
+ * O tamanho que muda — a janela, a coluna, VER O PALCO e VER A GRADE — é do
+ * `ResizeObserver`. Medir a cada desenho cobriria o observador: o laço da
+ * chamada passa a cada meio segundo, e a bancada não veria o observador
+ * faltar (medido).
+ */
+function dizerOTamanhoDoPalco(soQuemChegou = false) {
+  for (const id of [...tamanhoDoPalcoDito.keys()]) {
+    if (!modsDoPalco.has(id)) tamanhoDoPalcoDito.delete(id);
+  }
+  if (modsDoPalco.size === 0) return;
+  const casca = cascaDoRetrato();
+  for (const [id, onde] of modsDoPalco) {
+    const caixa = $(onde);
+    const largura = Math.round(caixa?.clientWidth ?? 0);
+    const altura = Math.round(caixa?.clientHeight ?? 0);
+    const chave = `${onde}:${largura}×${altura}`;
+    const dito = tamanhoDoPalcoDito.get(id);
+    if (dito === chave) continue;
+    if (soQuemChegou && dito?.startsWith(`${onde}:`)) continue;
+    const instancia = modsCarregados.get(id);
+    if (!instancia?.admite?.(geracaoDaSessao)) continue;
+    if (!(CAPACIDADES_POR_API[Number(instancia.api)] ?? []).includes("eventos-da-tela")) continue;
+    tamanhoDoPalcoDito.set(id, chave);
+    donoDaRegiao({ id, hash: instancia.hash }, instancia).falar({
+      nome: "lugar",
+      onde: casca.onde,
+      regioes: casca.regioes,
+      largura,
+      altura,
+      regiao: "chamada.palco",
+    });
+  }
+}
+
+// O tamanho muda sem retrato novo: a janela, a coluna, VER O PALCO.
+if (typeof ResizeObserver === "function") {
+  const observador = new ResizeObserver(() => dizerOTamanhoDoPalco());
+  observador.observe($("palco-de-mods-miolo"));
+  observador.observe($("palco-de-mods-acrescimos"));
+}
+
+// **A saída é do produto**: ver a grade esconde o palco sem desmontá-lo, e a
+// volta é do mesmo lado. Registrados uma vez, como os controles do palco da
+// transmissão.
+$("palco-de-mods-ver-a-grade").addEventListener("click", () => {
+  palcoDosModsEscondido = true;
+  desenharOPalcoDosMods(desenhado);
+});
+$("palco-de-mods-ver-o-palco").addEventListener("click", () => {
+  palcoDosModsEscondido = false;
+  desenharOPalcoDosMods(desenhado);
+});
 
 /**
  * O palco: a transmissão de tela desta sala, ou o que a tela diz sem nenhuma.
