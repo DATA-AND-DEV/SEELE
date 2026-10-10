@@ -108,6 +108,13 @@ function alvoDaSessao() {
  */
 let conhecidosDaTrilha = [];
 /**
+ * O servidor que esta janela hospeda, quando a sessão está **noutro** (tarefa
+ * 20 da F7): o VOLTAR AO MEU SERVIDOR da trilha. `null` quando não há servidor
+ * no ar, ou quando a sessão já está nele. Lido com o histórico, uma vez por
+ * sessão.
+ */
+let meuServidorNaTrilha = null;
+/**
  * O que a trilha já tem desenhado, para não reconstruir os botões dela.
  *
  * `null` quer dizer «desenhe de novo». Não é economia de pintura: os botões do
@@ -660,6 +667,20 @@ async function recarregarTrilha() {
     console.warn("conhecidos:", falha);
     return;
   }
+  // **O VOLTAR AO MEU SERVIDOR** (tarefa 20 da F7): sair não derruba mais o
+  // servidor que esta janela hospeda, e quem foi visitar outro precisa do
+  // caminho de volta. Só com a sessão **noutro** servidor (`Outro`): dentro do
+  // próprio, oferecer voltar a ele seria oferecer entrar onde já se está. No
+  // navegador, que não hospeda, a ponte responde que não há, e nada aparece.
+  meuServidorNaTrilha = null;
+  try {
+    const [meu, onde] = await Promise.all([invoke("meu_servidor"), invoke("onde_estou")]);
+    if (meu && onde === "Outro") {
+      meuServidorNaTrilha = { alvo: meu.alvo, nome: meu.nome || "O SEU SERVIDOR" };
+    }
+  } catch {
+    meuServidorNaTrilha = null;
+  }
   trilhaDesenhada = null;
   if (desenhado) desenharTrilha(desenhado);
 }
@@ -708,12 +729,14 @@ function desenharTrilha(snapshot) {
   const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
   const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);
+  const voltar = meuServidorNaTrilha;
   // A chave inclui nome e presença de imagem: sem isso, um servidor que ganhou
   // distintivo desde o último desenho não seria redesenhado — a lista teria
   // mudado e a comparação diria que não.
-  const chave = outros
-    .map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`)
-    .join("\n");
+  const chave = [
+    voltar ? `voltar|${voltar.alvo}|${voltar.nome}` : "",
+    ...outros.map((conhecido) => `${conhecido.alvo}|${conhecido.nome ?? ""}|${conhecido.icone ? 1 : 0}`),
+  ].join("\n");
   if (
     trilhaDesenhada !== null &&
     trilhaDesenhada.nome === nome &&
@@ -734,9 +757,25 @@ function desenharTrilha(snapshot) {
     uri,
   );
 
+  // O VOLTAR AO MEU SERVIDOR vai primeiro, e pelo mesmo clique dos outros
+  // (`pedirTrocaDeServidor`, com o nome na caixa): é um servidor como os outros,
+  // e é o único que esta janela sabe que está no ar.
+  const itemDeVoltar = voltar
+    ? (() => {
+        const linha = elemento("li");
+        const botao = elemento("button", "trilha-item trilha-outro trilha-voltar");
+        botao.type = "button";
+        botao.dataset.alvo = voltar.alvo;
+        botao.dataset.nome = voltar.nome;
+        vestirItemDaTrilha(botao, sigla(voltar.nome), `VOLTAR AO MEU SERVIDOR: ${voltar.nome}`, null);
+        botao.title = `VOLTAR AO MEU SERVIDOR: ${voltar.nome}`;
+        linha.append(botao);
+        return [linha];
+      })()
+    : [];
   repovoar(
     $("trilha-outros"),
-    outros.map((conhecido) => {
+    [...itemDeVoltar, ...outros.map((conhecido) => {
       const linha = elemento("li");
       const botao = elemento("button", "trilha-item trilha-outro");
       botao.type = "button";
@@ -770,7 +809,7 @@ function desenharTrilha(snapshot) {
       botao.title = rotulo;
       linha.append(botao);
       return linha;
-    }),
+    })],
   );
 }
 
@@ -3975,24 +4014,37 @@ function nomeDesteServidor() {
 }
 
 /**
- * Se é esta janela que está hospedando o servidor desta sessão.
+ * Se a sessão desta janela está no servidor que esta janela hospeda.
  *
- * Pergunta a `estado_da_porta`, que já responde isso à camada da portaria, em
- * vez de um comando novo com a mesma resposta: quando não se hospeda ele
- * devolve `hospedando: false` sem tocar no banco do servidor, que é o caso
- * barato e o caso comum.
+ * Pergunta ao `onde_estou`, a única resposta a «estou no meu servidor?» (Plano
+ * 2), que reconhece o servidor pela chave, e não pelo endereço (lote X da F5).
+ * Era o `estado_da_porta().hospedando`, que diz se **há** servidor no ar, e não
+ * se a sessão está nele: desde a tarefa 19 da F7 sair não derruba nada, e quem
+ * hospeda pode estar visitando outro servidor.
  *
- * Falha vira `false`, e isso não é otimismo: o `false` só **omite** uma linha da
- * consequência — a de que o servidor cai junto —, e nenhuma frase daqui afirma
- * que nada mais cai. Omitir o que não se sabe é honesto; afirmá-lo não seria.
+ * Falha vira `false`, e isso não é otimismo: o `false` só **omite** uma frase
+ * da consequência — a de que o servidor continua no ar —, e nenhuma frase daqui
+ * afirma o contrário. No navegador, que não hospeda, a ponte recusa, e é isso.
  */
-async function hospedandoAqui() {
+async function estouNoMeuServidor() {
   try {
-    return (await invoke("estado_da_porta")).hospedando === true;
+    return (await invoke("onde_estou")) === "Guardado";
   } catch (falha) {
-    console.warn("estado_da_porta:", falha);
+    console.warn("onde_estou:", falha);
     return false;
   }
+}
+
+/**
+ * A frase de quem sai do próprio servidor: ele **continua** no ar (tarefa 19 da
+ * F7). Sair derrubava o servidor junto, e a frase avisava isso; agora quem
+ * derruba é o PARAR DE HOSPEDAR, e a frase diz como voltar.
+ */
+function oMeuServidorContinua(daqui) {
+  return (
+    `${daqui} continua no ar neste computador, com quem estiver nele: você ` +
+    "volta a ele pelo VOLTAR AO MEU SERVIDOR, na entrada."
+  );
 }
 
 /**
@@ -4001,33 +4053,27 @@ async function hospedandoAqui() {
  * A forma é a das frases da moderação, e pela mesma razão: «tem certeza?» não
  * acrescenta nada a quem já apertou uma vez, e dizer o que vai acontecer sim.
  *
- * A terceira linha só aparece para quem hospeda, e é a que muda a decisão: para
- * essa pessoa trocar de servidor não é sair de uma conversa, é fechar a
- * conversa de todo mundo. Ela não pode ser um `title` nem uma nota — é a
- * consequência, e vai onde as outras vão.
+ * A terceira frase só aparece para quem está no próprio servidor, e diz que ele
+ * **continua** no ar (tarefa 19 da F7): sair não fecha mais a conversa de todo
+ * mundo, e quem sai precisa saber por onde volta. Ela não pode ser um `title`
+ * nem uma nota — é a consequência, e vai onde as outras vão.
  */
-function consequenciaDeTrocar(daqui, ate, hospedando) {
+function consequenciaDeTrocar(daqui, ate, noMeuServidor) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e entra em ${ate}.\n` +
     "Dá para estar em um servidor por vez: entrar em outro é sair deste.";
-  if (!hospedando) return comum;
-  return (
-    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
-    "todo mundo que estiver nele sai."
-  );
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
 /** O que ir à entrada custa. Mesma forma, e um destino que não é servidor nenhum. */
-function consequenciaDeIrParaAEntrada(daqui, hospedando) {
+function consequenciaDeIrParaAEntrada(daqui, noMeuServidor) {
   const comum =
     `Você sai de ${daqui} agora, no meio do que estiver fazendo, e volta à tela ` +
     "de entrada sem estar em servidor nenhum.\n" +
     "O campo do endereço fica vazio, esperando o do servidor novo.";
-  if (!hospedando) return comum;
-  return (
-    `${comum}\n${daqui} está no ar dentro deste computador: ele cai junto, e ` +
-    "todo mundo que estiver nele sai."
-  );
+  if (!noMeuServidor) return comum;
+  return `${comum}\n${oMeuServidorContinua(daqui)}`;
 }
 
 /**
@@ -4038,7 +4084,7 @@ function consequenciaDeIrParaAEntrada(daqui, hospedando) {
  * botão é a caixa que treina a apertar duas vezes sem ler. Estes dois controles
  * dizem outra coisa — «vá para aquele servidor», «conecte a um novo» —, e a
  * parte que não está no rótulo deles é o que a caixa existe para escrever: você
- * sai deste, e o servidor que este computador hospeda cai junto.
+ * sai deste, e, se ele é o seu, ele continua no ar sem você.
  *
  * A caixa é a de `camada-moderar.js`, e não uma nova. Ela não é da moderação —
  * salvar um anexo já entra por ela —, é a superfície de confirmação deste
@@ -4047,7 +4093,7 @@ function consequenciaDeIrParaAEntrada(daqui, hospedando) {
  */
 async function pedirTrocaDeServidor(alvo, apelido, nome) {
   const daqui = nomeDesteServidor();
-  const hospedando = await hospedandoAqui();
+  const noMeuServidor = await estouNoMeuServidor();
   // **O nome, e o endereço só quando não há nome.**
   //
   // A caixa dizia `ENTRAR EM 192.168.0.39:8383` — um endereço IP no meio de uma
@@ -4066,7 +4112,7 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
   const chamado = (nome ?? "").trim() || alvo;
   abrirConfirmacao(
     "TROCAR DE SERVIDOR",
-    consequenciaDeTrocar(daqui, chamado, hospedando),
+    consequenciaDeTrocar(daqui, chamado, noMeuServidor),
     `ENTRAR EM ${chamado}`,
     () => trocarDeServidor(alvo, apelido),
   );
@@ -4075,10 +4121,10 @@ async function pedirTrocaDeServidor(alvo, apelido, nome) {
 /** O mesmo, para o `+`: a entrada, sem destino escolhido. */
 async function pedirAEntrada() {
   const daqui = nomeDesteServidor();
-  const hospedando = await hospedandoAqui();
+  const noMeuServidor = await estouNoMeuServidor();
   abrirConfirmacao(
     "CONECTAR A OUTRO SERVIDOR",
-    consequenciaDeIrParaAEntrada(daqui, hospedando),
+    consequenciaDeIrParaAEntrada(daqui, noMeuServidor),
     `SAIR DE ${daqui}`,
     sairDoServidorParaAEntrada,
   );
@@ -4207,6 +4253,9 @@ function esquecerOEstadoDaSessao() {
   podeRemoverMensagem = false;
   lugaresDeUmaSalaNova = 250;
   trilhaDesenhada = null;
+  // O VOLTAR AO MEU SERVIDOR da trilha diz onde **esta** sessão está (noutro
+  // servidor); a seguinte o relê com o histórico (`recarregarTrilha`).
+  meuServidorNaTrilha = null;
   trocasDeAparelhoVistas = null;
   ateQuandoAnunciarOAparelho = 0;
   // Os dois que se esquecem com o que anda junto: o retrato e a revisão dele,
@@ -4234,42 +4283,35 @@ function esquecerOEstadoDaSessao() {
 /**
  * Ejeta e volta para a tela de entrada, sem fechar o programa.
  *
- * `soOCliente` desmonta só a sessão desta janela (`desmontar_a_sessao`) e deixa
- * as hospedagens de pé. É o ATENDER (tarefa 27 da F7, `camada-toque.js`): quem
- * hospeda e atende uma ligação sai do próprio servidor para entrar na sala, e o
- * servidor continua no ar com quem estiver nele. Sem a opção, o caminho é o de
- * sempre, o `disconnect`, que derruba o servidor junto.
+ * **Desmonta só a sessão desta janela** (tarefa 19 da F7): as hospedagens ficam
+ * de pé, e o servidor que esta janela hospeda continua no ar com quem estiver
+ * nele. Quem quer derrubá-lo aperta PARAR DE HOSPEDAR (`camada-hospedagem.js`).
+ * Por isso o link da porta também fica: ele continua levando a algum lugar.
  */
-async function ejetar(soOCliente = false) {
+async function ejetar() {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
   // contrato de API própria: «revogar a geração: a partir desse ponto, nenhum
   // novo efeito daquela instância é admitido, mesmo que mensagens já estejam na
   // fila».
   //
   // A ordem estava invertida, e o custo era uma janela aberta. `disconnect` é
-  // um `await` sobre a ponte: ele derruba a hospedagem, espera a porta voltar,
-  // e leva o tempo que levar. Durante ele a sessão ainda era a de pé para esta
+  // um `await` sobre a ponte (ele derrubava a hospedagem e esperava a porta
+  // voltar, antes da tarefa 19 da F7), e leva o tempo que levar. Durante ele a sessão ainda era a de pé para esta
   // janela — então uma mensagem de worker que chegasse ali desenhava, pedia ao
   // servidor e escrevia tema, tudo depois de a pessoa ter apertado sair.
   //
   // Encerrando antes, a janela para de admitir efeito no instante do gesto, e o
   // `disconnect` passa a ser só a metade nativa da mesma saída.
   //
-  // **`disconnect` continua sendo esperado**, e não disparado e esquecido: ele
-  // é quem derruba o servidor hospedado, e mostrar a tela de entrada antes de
-  // ele terminar deixaria o botão de hospedar oferecendo uma porta que ainda
-  // não voltou.
+  // **`disconnect` continua sendo esperado**, e não disparado e esquecido: a
+  // entrada que aparece depois dele pergunta pelas hospedagens, e tem de ouvir
+  // a resposta de depois da saída.
   encerrarOAmbienteDosMods();
-  if (soOCliente) {
-    await invoke("desmontar_a_sessao");
-  } else {
-    await invoke("disconnect");
-  }
+  await invoke("disconnect");
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
-  esquecerOLinkDaPorta();
   esquecerOEstadoDaSessao();
   $("bateria").hidden = true;
   // A moderação pela mesma razão que a bateria: aberta, ela voltaria por cima

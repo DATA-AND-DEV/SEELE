@@ -2720,52 +2720,110 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
     FalhaAoHospedar::NaoSubiu
 }
 
-/// Termina a sessão **desta janela** e deixa a hospedagem de pé.
+/// Termina a sessão **desta janela**, e só ela (tarefa 19 da F7, Plano 2).
 ///
-/// **A03 da auditoria de 17/09.** RECONECTAR passava por `disconnect`, que
-/// também derruba o servidor hospedado — e em seguida tentava entrar no
-/// endereço que ele acabara de tirar do ar. Quem hospedava e teve a sessão
-/// local encerrada, inclusive por uma troca de MODs, apertava um botão que
-/// promete voltar e desligava o próprio servidor, levando junto todo mundo que
-/// estava dentro.
+/// **As hospedagens ficam de pé.** O servidor guardado continua no ar com quem
+/// estiver nele, e a sala pessoal continua recebendo ligações. Quem quer
+/// derrubar o guardado diz isso com outro verbo, [`parar_de_hospedar`], e a sala
+/// desce pelo «receber ligações» ([`receber_ligacoes`]).
 ///
-/// Verbo próprio, e não `disconnect` com um argumento: são duas intenções
-/// diferentes da mesma pessoa. SAIR fecha o assunto e o anfitrião fecha junto;
-/// RECONECTAR diz «volto já», e derrubar quem ficou é o contrário disso.
+/// **A03 da auditoria de 17/09, resolvido de vez.** Este verbo derrubava o
+/// servidor hospedado junto, e o RECONECTAR, que passava por ele, tirava do ar o
+/// endereço em que ia entrar em seguida. A cura de então foi um segundo verbo
+/// (`desmontar_a_sessao`), que não derrubava. Com sair deixando de derrubar, os
+/// dois eram o mesmo, e um saiu: dois verbos iguais são dois lugares para
+/// divergirem.
 ///
 /// # Errors
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
 #[tauri::command]
-async fn desmontar_a_sessao(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
+async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
     desmontar_o_cliente(&app, &session);
     Ok(())
 }
 
+/// PARAR DE HOSPEDAR (tarefa 19 da F7): derruba o servidor guardado. Quem estava
+/// dentro lê «O SERVIDOR ESTÁ ENCERRANDO», e não uma queda de transporte
+/// (`Hospedagem::encerrar`, que avisa).
+///
+/// **Só o guardado.** A sala pessoal desce pelo «receber ligações»
+/// ([`receber_ligacoes`]), que grava a escolha: um segundo caminho para ela que
+/// não gravasse nada a faria voltar na abertura seguinte.
+///
+/// Devolve se havia servidor no ar.
+///
+/// # Errors
+///
+/// Nunca: parar o que não está no ar é o desfecho de quem apertou duas vezes.
 #[tauri::command]
-async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
-    desmontar_o_cliente(&app, &session);
+async fn parar_de_hospedar(session: State<'_, Session>) -> Result<bool, ()> {
+    let parou = parar_de_hospedar_em(&session).await;
+    tracing::info!(parou, "PARAR DE HOSPEDAR");
+    Ok(parou)
+}
 
-    // Quem hospedava para de hospedar ao sair, e quem estava dentro é
-    // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
-    // espera a porta voltar, para hospedar de novo em seguida funcionar.
-    //
-    // Com o servidor sai também qual guardado ele era: sem isto, um
-    // `renomear_server` depois de entrar em **outro** servidor acertaria o nome
-    // do que ficou para trás.
+/// [`parar_de_hospedar`] sobre a sessão. `encerrar`, e não o `despedir` da
+/// saída do app: o app continua aberto, e hospedar de novo em seguida tem de
+/// achar a porta livre.
+async fn parar_de_hospedar_em(session: &Session) -> bool {
     let guardado = session
         .hospedagens
         .lock()
         .ok()
         .and_then(|mut hospedagens| hospedagens.guardado.take());
-    if let Some(guardado) = guardado {
-        guardado.hospedagem.encerrar().await;
-    }
-    Ok(())
+    let Some(guardado) = guardado else {
+        return false;
+    };
+    guardado.hospedagem.encerrar().await;
+    true
 }
 
-/// A metade que as duas saídas fazem igual: desmontar a sessão de cliente.
+/// O servidor guardado no ar, do jeito que o VOLTAR AO MEU SERVIDOR precisa
+/// dele (tarefa 20 da F7).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+struct MeuServidor {
+    /// Onde entrar para voltar: esta máquina, na porta em que ele atende.
+    alvo: String,
+    /// O nome que a lista de servidores mostra, quando a pessoa deu um.
+    ///
+    /// O nome de verdade mora no banco do servidor; o da lista é o que o
+    /// `renomear_server` mantém em dia, e é o que a pessoa escolheu de olho.
+    nome: Option<String>,
+}
+
+/// O servidor guardado no ar, para o VOLTAR AO MEU SERVIDOR e o PARAR DE
+/// HOSPEDAR da entrada (tarefa 20 da F7). `None` quando não há.
+#[tauri::command]
+fn meu_servidor(app: AppHandle, session: State<'_, Session>) -> Option<MeuServidor> {
+    let hospedagens = session.hospedagens.lock().ok()?;
+    meu_servidor_em(&hospedagens, &config_dir(&app))
+}
+
+/// [`meu_servidor`] sobre as hospedagens e a pasta de dados.
+fn meu_servidor_em(hospedagens: &Hospedagens, config: &str) -> Option<MeuServidor> {
+    let (porta, id) = {
+        let guardado = hospedagens.guardado.as_ref()?;
+        (
+            guardado.hospedagem.endereco().port(),
+            guardado.servidor.clone(),
+        )
+    };
+    let nome = id.and_then(|id| {
+        servidores::listar(config)
+            .into_iter()
+            .find(|servidor| servidor.id == id)
+            .map(|servidor| servidor.nome)
+            .filter(|nome| !nome.trim().is_empty())
+    });
+    Some(MeuServidor {
+        alvo: format!("127.0.0.1:{porta}"),
+        nome,
+    })
+}
+
+/// O que a saída faz: desmontar a sessão de cliente.
 ///
 /// **Revoga antes de desmontar** — §5 do contrato de API própria, passo 1: «a
 /// partir desse ponto, nenhum novo efeito daquela instância é admitido, mesmo
@@ -11258,7 +11316,8 @@ fn main() {
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
-            desmontar_a_sessao,
+            parar_de_hospedar,
+            meu_servidor,
             snapshot,
             messages,
             enter_voice_room,
@@ -17708,6 +17767,110 @@ mod o_tipo_do_arquivo_escolhido {
         let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
         let lido = tipo_do_escolhido(&png).expect("o PNG foi recusado");
         assert_eq!(lido.media_type, "image/png");
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "num teste, o pânico é o relatório"
+)]
+mod parar_de_hospedar_e_so_o_guardado {
+    //! A 19 e a 20 da F7: sair não derruba nada, e o verbo que derruba é o
+    //! `parar_de_hospedar`, só para o guardado. O `meu_servidor` diz à entrada
+    //! para onde o VOLTAR AO MEU SERVIDOR leva.
+
+    use super::{meu_servidor_em, parar_de_hospedar_em, Hospedado, MeuServidor, Session};
+    use seele_server::hospedagem::Hospedagem;
+
+    /// Uma sala no lugar do guardado, com a porta dela: este arquivo só sobe
+    /// hospedagem pelo ponto padrão (o guarda
+    /// `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS de
+    /// produção. O que se prova aqui é o lugar do guardado na sessão.
+    async fn guardado_de_teste(sessao: &Session, servidor: Option<String>) -> u16 {
+        let hospedagem = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
+            .await
+            .expect("o guardado de teste não subiu");
+        let porta = hospedagem.endereco().port();
+        sessao.hospedagens.lock().unwrap().guardado = Some(Hospedado {
+            hospedagem,
+            servidor,
+        });
+        porta
+    }
+
+    #[tokio::test]
+    async fn parar_de_hospedar_derruba_o_guardado_devolve_a_porta_e_deixa_a_sala() {
+        let sessao = Session::default();
+        let porta = guardado_de_teste(&sessao, None).await;
+        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        sessao.hospedagens.lock().unwrap().pessoal = Some(Hospedado {
+            hospedagem: sala,
+            servidor: None,
+        });
+
+        assert!(parar_de_hospedar_em(&sessao).await, "havia guardado no ar");
+
+        {
+            let hospedagens = sessao.hospedagens.lock().unwrap();
+            assert!(hospedagens.guardado.is_none(), "o guardado ficou no ar");
+            assert!(
+                hospedagens.pessoal.is_some(),
+                "PARAR DE HOSPEDAR derrubou a sala pessoal, que desce pelo «receber ligações»"
+            );
+        }
+        assert!(
+            std::net::UdpSocket::bind(("::", porta)).is_ok(),
+            "o guardado parou e a porta {porta} ficou presa: hospedar de novo não subiria"
+        );
+        assert!(
+            !parar_de_hospedar_em(&sessao).await,
+            "parar duas vezes disse que havia o que parar"
+        );
+
+        let sala = sessao.hospedagens.lock().unwrap().pessoal.take();
+        if let Some(sala) = sala {
+            sala.hospedagem.encerrar().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn meu_servidor_diz_onde_voltar_e_o_nome_que_a_lista_mostra() {
+        let casa = tempfile::tempdir().unwrap();
+        let config = casa.path().to_str().unwrap();
+        let registrado = crate::servidores::criar(config, "Casa da Rafa", "0.16.0");
+        let sessao = Session::default();
+        let meu = |sessao: &Session| meu_servidor_em(&sessao.hospedagens.lock().unwrap(), config);
+        assert_eq!(
+            meu(&sessao),
+            None,
+            "sem guardado no ar, a entrada ofereceu VOLTAR a lugar nenhum"
+        );
+
+        let porta = guardado_de_teste(&sessao, Some(registrado.id.clone())).await;
+        assert_eq!(
+            meu(&sessao),
+            Some(MeuServidor {
+                alvo: format!("127.0.0.1:{porta}"),
+                nome: Some("Casa da Rafa".into()),
+            })
+        );
+
+        // O legado (o banco de sempre, sem registro) volta sem nome, e a frase
+        // diz «o seu servidor».
+        sessao
+            .hospedagens
+            .lock()
+            .unwrap()
+            .guardado
+            .as_mut()
+            .unwrap()
+            .servidor = None;
+        assert_eq!(meu(&sessao).and_then(|meu| meu.nome), None);
+        parar_de_hospedar_em(&sessao).await;
     }
 }
 
