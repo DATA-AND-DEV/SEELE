@@ -1881,16 +1881,26 @@ const PROPOSTAS_DE_PORTA: usize = 16;
 /// volta que não voltava; no produto, é a entrada ou a volta que de vez em
 /// quando espera 20 s por nada, quando outro programa segura um socket UDP
 /// ligado ao endereço por onde a resposta volta (medido com `127.0.0.1` e com
-/// o endereço da rede de casa).
+/// o endereço da rede de casa, e também com um socket IPv4 no curinga
+/// `0.0.0.0:X`).
 ///
-/// # Por que ligar de novo, e não perguntar
+/// # Por que a sonda IPv4, e não só ligar de novo
 ///
-/// A escolha de porta do sistema confere só a família do socket; a ligação
-/// **explícita** a `[::]:X` confere as duas, e recusa com `AddrInUse` a porta
-/// que um socket IPv4 segura, em qualquer endereço. Então a escolha do sistema
-/// vira proposta: larga-se o socket proposto e liga-se de novo, explícito, na
-/// mesma porta. Se a porta é de alguém, propõe-se outra. Ligado, o socket é
-/// dono da porta nas duas famílias: um IPv4 que viesse depois é recusado.
+/// A escolha de porta do sistema confere só a família do socket. Então a
+/// escolha vira proposta, e quem confere é uma **sonda IPv4 no curinga**,
+/// ligada explicitamente a `0.0.0.0:X`: o macOS a recusa com `AddrInUse`
+/// quando qualquer socket IPv4 segura `X` — num endereço da máquina ou no
+/// próprio curinga — e quando um de pilha dupla a segura. A ligação explícita
+/// a `[::]:X` sozinha não basta: ela recusa um IPv4 ligado a um endereço, mas
+/// **aceita** um IPv4 no curinga, e a resposta a `127.0.0.1:X` vai a ele
+/// (medido: 20 de 20).
+///
+/// A sonda é largada **antes** de ligar `[::]:X`: segurá-la junto funciona no
+/// macOS, mas um sistema que trate a pilha dupla e o curinga IPv4 como o mesmo
+/// lugar recusaria o `[::]:X` sempre, e todo cliente cairia para só IPv4.
+/// Ligado, o socket é dono da porta nas duas famílias: um IPv4 que viesse
+/// depois, no endereço ou no curinga, é recusado, e a escolha de porta IPv4
+/// não cai nela (medido no macOS: 0 em 3 000).
 ///
 /// # Errors
 ///
@@ -1908,17 +1918,29 @@ fn socket_conferido(
             .map(|onde| onde.port())
             .ok_or_else(|| std::io::Error::other("o socket proposto não tem porta IP"))?;
         drop(proposta);
-        match pilha_dupla(porta) {
-            Ok(socket) => {
-                socket.set_nonblocking(true)?;
-                return Ok(socket.into());
-            }
+        // Um erro que não seja `AddrInUse` — uma máquina sem IPv4, por
+        // exemplo — não diz nada sobre a porta: a ligação abaixo decide.
+        match std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, porta)) {
+            Ok(sonda) => drop(sonda),
             Err(erro) if erro.kind() == std::io::ErrorKind::AddrInUse => {
                 tracing::debug!(
                     porta,
                     "a porta que o sistema propôs é de um socket IPv4 desta máquina, \
                      que ficaria com a resposta do servidor; outra"
                 );
+                recusa = Some(erro);
+                continue;
+            }
+            Err(_) => {}
+        }
+        match pilha_dupla(porta) {
+            Ok(socket) => {
+                socket.set_nonblocking(true)?;
+                return Ok(socket.into());
+            }
+            // Alguém tomou a porta entre a sonda e a ligação.
+            Err(erro) if erro.kind() == std::io::ErrorKind::AddrInUse => {
+                tracing::debug!(porta, "a porta proposta foi tomada antes da ligação; outra");
                 recusa = Some(erro);
             }
             Err(erro) => return Err(erro),
@@ -2987,7 +3009,7 @@ pub enum Previewed {
 
 #[cfg(test)]
 pub(crate) mod testes_do_socket {
-    use std::net::{SocketAddr, UdpSocket};
+    use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
     use std::time::Duration;
 
     use super::{pilha_dupla, socket_conferido};
@@ -3044,8 +3066,19 @@ pub(crate) mod testes_do_socket {
     /// específico dos dois, o IPv4. Linux e Windows não foram medidos: é o CI
     /// deles que diz em qual braço caem.
     pub(crate) fn encenar_a_colisao() -> Encenacao {
+        encenar_a_colisao_com(Ipv4Addr::LOCALHOST)
+    }
+
+    /// [`encenar_a_colisao`] com os ladrões ligados a `endereco`: um endereço
+    /// da máquina, ou o curinga `0.0.0.0`.
+    ///
+    /// O curinga também rouba (medido no macOS: 535 colisões em 3 000, e a
+    /// resposta a `127.0.0.1:X` foi ao IPv4 curinga 20 de 20), e com uma
+    /// diferença que pesa no conserto: a ligação explícita a `[::]:X` **não** é
+    /// recusada por ele.
+    pub(crate) fn encenar_a_colisao_com(endereco: Ipv4Addr) -> Encenacao {
         let mut ladroes: Vec<UdpSocket> = (0..LADROES)
-            .filter_map(|_| UdpSocket::bind("127.0.0.1:0").ok())
+            .filter_map(|_| UdpSocket::bind((endereco, 0)).ok())
             .collect();
         let portas: Vec<u16> = ladroes
             .iter()
@@ -3096,9 +3129,18 @@ pub(crate) mod testes_do_socket {
     /// - onde o sistema recusa, a recusa fica medida ([`PROPOSTAS`] propostas
     ///   sem cair numa porta presa), e o socket aberto pelo caminho do produto,
     ///   com os ladrões de pé, recebe a resposta.
+    ///
+    /// Duas vezes: com os ladrões em `127.0.0.1` e no curinga `0.0.0.0`.
     #[test]
     fn o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4() {
-        match encenar_a_colisao() {
+        for endereco in [Ipv4Addr::LOCALHOST, Ipv4Addr::UNSPECIFIED] {
+            println!("ladrões em {endereco}:");
+            nao_divide_com_ladroes_em(endereco);
+        }
+    }
+
+    fn nao_divide_com_ladroes_em(endereco: Ipv4Addr) {
+        match encenar_a_colisao_com(endereco) {
             // Se este sistema também aceitasse a ligação explícita na porta
             // presa, `socket_conferido` devolveria a mesma porta, e é a
             // resposta que reprova abaixo.
