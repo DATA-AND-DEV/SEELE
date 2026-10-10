@@ -1,0 +1,78 @@
+/* SEELE — a casca larga: o desktop no navegador de um computador (F8, D-web-3).
+ *
+ * Spec: `docs/superpowers/specs/2026-10-09-0.16-celular-design.md`, §2.8.
+ *
+ * A casca larga não é redesenhada: é a casca de desktop de hoje, sem o que é do
+ * Tauri. O navegador desenha a janela, então a barra da janela sai inteira, com
+ * o relógio e os controles, e a variável que a mede vai a zero: a `.tela` e as
+ * superfícies dos MODs já a leem. Toda regra começa pela marca (G1, em
+ * `tests/celular.rs`); sem ela, nada daqui casa com o desktop. */
+
+:root[data-casca="larga"] {
+  --seele-barra-janela: 0px;
+}
+
+:root[data-casca="larga"] #barra-janela {
+  display: none;
+}
+
+/* A entrada: HOSPEDAR AQUI sai, e a frase do app entra embaixo do CONECTAR (o
+   `larga-casca.js` a monta). O nome público e as outras versões são de quem
+   hospeda, e saem junto (matriz, PA-05 e PA-06). */
+:root[data-casca="larga"] #botao-hospedar,
+:root[data-casca="larga"] #boot-nome-publico,
+:root[data-casca="larga"] #boot-versoes {
+  display: none;
+}
+
+:root[data-casca="larga"] .larga-hospedar {
+  margin: 4px 0 0;
+}
+
+/* O link numa fileira própria, para não quebrar no meio. */
+:root[data-casca="larga"] .larga-hospedar a,
+:root[data-casca="larga"] .larga-frase a {
+  display: block;
+  margin-top: 4px;
+  color: var(--seele-laranja-nerv);
+  letter-spacing: 0.18em;
+  text-underline-offset: 3px;
+}
+
+/* CONFIGURAÇÕES: o que é do app sai do painel e fica a frase dele (a
+   atualização, as versões, o caminho entre pares). */
+:root[data-casca="larga"] :is(#painel-atualizacao, #painel-versoes, #painel-malha) .server-bloco {
+  display: none;
+}
+
+:root[data-casca="larga"] .larga-frase {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border: 1px dashed var(--seele-linha-forte);
+  color: var(--seele-osso);
+  line-height: 1.5;
+}
+
+:root[data-casca="larga"] .larga-fora-grupo ul {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+:root[data-casca="larga"] .larga-fora-grupo li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--seele-linha);
+  color: var(--seele-osso);
+}
+
+:root[data-casca="larga"] .larga-fora-grupo strong {
+  display: block;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  letter-spacing: var(--seele-tracking-cartela);
+}
+
+:root[data-casca="larga"] .larga-fora-grupo p {
+  margin: 4px 0 0;
+  line-height: 1.5;
+}

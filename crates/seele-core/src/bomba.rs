@@ -339,6 +339,13 @@ impl Bomba {
         self.ordens.send(Ordem::Chave).is_ok()
     }
 
+    /// Uma alça que só sabe pedir quadro-chave, para quem escoa. Ver
+    /// [`PedidoDeChave`].
+    #[must_use]
+    pub fn pedido_de_chave(&self) -> PedidoDeChave {
+        PedidoDeChave(self.ordens.clone())
+    }
+
     /// Quantos quadros foram largados por quem escreve estar atrasado.
     ///
     /// Não é perda de rede e não é erro: é o §1 valendo na fronteira. Vale para
@@ -939,6 +946,22 @@ impl<C: Captura> Laco<C> {
 // O outro lado: quem escreve no fio
 // ---------------------------------------------------------------------------
 
+/// Uma alça da [`Bomba`] que só sabe pedir quadro-chave.
+///
+/// Existe para o laço que escoa ([`escoar_com_espelho`]) pedir a chave quando
+/// descarta um quadro que outros usariam de referência — um quadro acima do
+/// teto do fio. O laço não é dono da bomba (ela mora no enlace), e não precisa
+/// de mais nada dela.
+#[derive(Debug, Clone)]
+pub struct PedidoDeChave(mpsc::Sender<Ordem>);
+
+impl PedidoDeChave {
+    /// Pede um quadro-chave. `false` quando a thread da bomba já acabou.
+    pub fn pedir(&self) -> bool {
+        self.0.send(Ordem::Chave).is_ok()
+    }
+}
+
 /// O que uma transmissão inteira somou.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Contagem {
@@ -948,6 +971,11 @@ pub struct Contagem {
     pub enviados: u64,
     /// Quantos o teto ou o quadro-chave em voo descartaram.
     pub descartados: u64,
+    /// Quantos quadros passaram do teto do fio (`MAX_QUADRO_LEN`, 4 MiB) e
+    /// foram descartados. Contados à parte dos de cima porque não são
+    /// política de orçamento: são um codificador mandando o que o fio não
+    /// carrega. Cada um foi dito no registro e pediu quadro-chave.
+    pub grandes_demais: u64,
     /// Quantos bytes foram para o fio, cabeçalhos incluídos.
     pub bytes: u64,
 }
@@ -998,8 +1026,17 @@ impl Escoadouro {
         fonte: ScreenSource,
         eventos: &mut canal::Receiver<EventoDaBomba>,
         espelho: impl FnMut(EspelhoDaTela<'_>),
+        pedido_de_chave: Option<&PedidoDeChave>,
     ) -> Result<Contagem, ErroDeTela> {
-        escoar_com_espelho(&self.conexao, tela, fonte, eventos, espelho).await
+        escoar_com_espelho(
+            &self.conexao,
+            tela,
+            fonte,
+            eventos,
+            espelho,
+            pedido_de_chave,
+        )
+        .await
     }
 }
 
@@ -1053,7 +1090,7 @@ pub async fn escoar(
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
 ) -> Result<Contagem, ErroDeTela> {
-    escoar_com_espelho(conexao, tela, fonte, eventos, |_| {}).await
+    escoar_com_espelho(conexao, tela, fonte, eventos, |_| {}, None).await
 }
 
 /// [`escoar`], com alguém olhando o que passa. Ver [`EspelhoDaTela`].
@@ -1071,6 +1108,7 @@ pub async fn escoar_com_espelho(
     fonte: ScreenSource,
     eventos: &mut canal::Receiver<EventoDaBomba>,
     mut espelho: impl FnMut(EspelhoDaTela<'_>),
+    pedido_de_chave: Option<&PedidoDeChave>,
 ) -> Result<Contagem, ErroDeTela> {
     let mut transmissao: Option<Transmissao> = None;
     let mut geracao = 0_u64;
@@ -1135,6 +1173,28 @@ pub async fn escoar_com_espelho(
                     let envio = viva
                         .enviar_quadro(&quadro.bytes, quadro.chave, Instant::now())
                         .await?;
+                    // **Acima do teto do fio, dito e seguido de chave.** Com o
+                    // teto em 4 MiB, acima do quadro cru de 1080p, isto é um
+                    // codificador doente, e o quadro descartado era referência
+                    // dos que vêm depois: quem assiste decodificaria imagem
+                    // quebrada até alguém pedir um quadro-chave. O laço pede, e
+                    // diz no registro, em vez de somar o descarte calado com os
+                    // do orçamento.
+                    if envio
+                        == crate::tela::Envio::Descartado(
+                            crate::tela::MotivoDeDescarte::GrandeDemais,
+                        )
+                    {
+                        contagem.grandes_demais += 1;
+                        let pediu_chave = pedido_de_chave.is_some_and(PedidoDeChave::pedir);
+                        tracing::warn!(
+                            tamanho = quadro.bytes.len(),
+                            teto = crate::tela::MAX_QUADRO_LEN,
+                            pediu_chave,
+                            "um quadro de tela passou do teto do fio e foi descartado; o próximo \
+                             sai como quadro-chave"
+                        );
+                    }
                     // Só o que de fato saiu. Um quadro descartado pelo teto não
                     // chega a ninguém, e ver no próprio espelho um quadro que a
                     // sala não recebeu é o tipo de mentira que faz alguém
@@ -1849,6 +1909,79 @@ mod tests {
         );
         assert_eq!(captura.inicios(), vec![(1280, 720), (1280, 720)]);
         bomba.parar();
+    }
+
+    /// **Um quadro acima do teto do fio é dito, contado à parte e seguido de
+    /// quadro-chave** (a P13 do plano F1b, pedido da orquestradora).
+    ///
+    /// Com o teto em 4 MiB (D-fio-9), acima do quadro I420 cru de 1080p, isto
+    /// só acontece com um codificador doente. Mesmo assim: o quadro descartado
+    /// era a referência dos que vêm depois, e quem assiste decodificaria imagem
+    /// quebrada até alguém pedir um quadro-chave. O laço pede, e diz no
+    /// registro o tamanho e o teto, em vez de somar o descarte calado com os do
+    /// orçamento.
+    ///
+    /// Num runtime de uma thread só, e com o registro capturado nesta thread:
+    /// a linha sai de dentro do laço, que roda aqui.
+    #[test]
+    fn um_quadro_acima_do_teto_do_fio_e_dito_contado_e_pede_quadro_chave() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("o runtime do teste");
+        let (contagem, ordem) = runtime.block_on(async {
+            let (saida, _entrada) = crate::tela::tests::par().await;
+            let (manda, mut eventos) = canal::channel(8);
+            let (manda_ordem, recebe_ordem) = mpsc::channel();
+            let pedido = PedidoDeChave(manda_ordem);
+            let escoando = tokio::spawn(async move {
+                escoar_com_espelho(
+                    &saida,
+                    ScreenId(1),
+                    ScreenSource::Monitor,
+                    &mut eventos,
+                    |_| {},
+                    Some(&pedido),
+                )
+                .await
+            });
+            for evento in [
+                EventoDaBomba::Fluxo {
+                    geracao: 1,
+                    resolucao: Resolucao::P720,
+                    teto_bps: 8_000_000,
+                },
+                EventoDaBomba::Quadro(QuadroParaOFio {
+                    geracao: 1,
+                    chave: false,
+                    bytes: vec![0; crate::tela::MAX_QUADRO_LEN + 1],
+                }),
+                EventoDaBomba::Fim(None),
+            ] {
+                manda.send(evento).await.expect("o laço está ouvindo");
+            }
+            let contagem = escoando
+                .await
+                .expect("a tarefa de escoar")
+                .expect("o laço acabou bem");
+            (contagem, recebe_ordem.try_recv().ok())
+        });
+
+        assert_eq!(contagem.grandes_demais, 1, "{contagem:?}");
+        assert_eq!(
+            ordem,
+            Some(Ordem::Chave),
+            "o quadro descartado era referência dos próximos, e ninguém pediu chave"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.contains("passou do teto do fio") && linha.contains("4194305")),
+            "o descarte não foi dito no registro com o tamanho: {linhas:#?}"
+        );
     }
 
     /// A bomba inteira, ligada num par QUIC de verdade: da captura ao byte que

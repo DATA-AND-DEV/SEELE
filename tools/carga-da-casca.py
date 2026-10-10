@@ -261,6 +261,15 @@ window.__TAURI__ = {
         window.__SEELE_APELIDO = args && args.apelido;
         return null;
       }
+      // Os controles de voz no padrão do produto (`ControlesDaVoz`, seele-ffi):
+      // a supressão ligada (SUPRESSAO_PADRAO), a abertura de −60 dBFS que vale
+      // com ela, ninguém escolheu, e a faixa de FAIXA_DE_ABERTURA_DBFS. Com o
+      // `null`, a seção ÁUDIO estourava ao abrir e desenhava a régua sem os
+      // extremos.
+      if (cmd === "controles_da_voz") {
+        return { supressao: 1, abertura_dbfs: -60, abertura_escolhida: false,
+                 abertura_minima_dbfs: -72, abertura_maxima_dbfs: -24 };
+      }
       if (/apelido|nickname|preferenc|link|caminho/i.test(cmd)) return "";
       // **O que caiu aqui fica anotado.** Metade dos comandos responde `null`
       // de verdade; a outra metade devolve uma lista ou um objeto, e o `null`

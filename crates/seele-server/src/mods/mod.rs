@@ -737,13 +737,16 @@ impl Anfitriao {
                         &quem,
                     );
                     let declaracao = match recusa {
-                        Some(nome) => Err(nome),
+                        Some(nome) => Err(mundo::RecusaDoTema::from(nome)),
                         None => mundo::valores_do_tema(&ctx, valores)?,
                     };
                     match declaracao {
-                        Err(nome) => {
+                        Err(recusa) => {
                             resposta.set("ok", false)?;
-                            resposta.set("erro", nome)?;
+                            resposta.set("erro", recusa.erro)?;
+                            if let Some(chave) = recusa.chave {
+                                resposta.set("chave", chave)?;
+                            }
                         }
                         Ok(tema) => {
                             if let Ok(mut guardado) = declarado.lock() {
@@ -2245,6 +2248,35 @@ mod tests {
         assert_eq!(
             pedir_tema(&mut anfitriao, "seele/estilo", &grande),
             r#"{"ok":false,"erro":"tema-grande-demais"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// **As chaves do tema são as do contrato** (rascunho da API 6, §9; tarefa
+    /// 17j). Um nome fora de `CHAVES_DO_TEMA` — um token de CSS, um
+    /// `--nucleo-*` — volta pelo nome, com a chave, e nada fica declarado: o
+    /// MOD lia `ok` para um tema que a casca ia recusar.
+    #[test]
+    fn uma_chave_fora_da_tabela_e_recusada_com_a_chave() {
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        assert_eq!(
+            pedir_tema(
+                &mut anfitriao,
+                "seele/estilo",
+                r##"{"acento":"#331704","--nucleo-mudo":"#ffffff"}"##
+            ),
+            r#"{"ok":false,"erro":"chave-desconhecida","chave":"--nucleo-mudo"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// E um nome da tabela com o valor fora da forma dele, também com a chave.
+    #[test]
+    fn um_valor_fora_da_forma_e_recusado_com_a_chave() {
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        assert_eq!(
+            pedir_tema(&mut anfitriao, "seele/estilo", r#"{"arredondamento":25}"#),
+            r#"{"ok":false,"erro":"valor-invalido","chave":"arredondamento"}"#
         );
         assert_eq!(anfitriao.tomar_tema_declarado(), None);
     }

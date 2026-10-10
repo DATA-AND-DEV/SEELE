@@ -5042,7 +5042,7 @@ impl Motor {
         };
 
         let avisos = self.avisos.clone();
-        self.nascer_a_tela(tela, move |origem, mut eventos| {
+        self.nascer_a_tela(tela, move |origem, mut eventos, pedido_de_chave| {
             // Numa tarefa própria pelo mesmo motivo de `Comando::Anexar`:
             // escoar dura o que a transmissão durar, e fazê-lo dentro do laço
             // pararia quem lê a conexão e atende comandos até a pessoa parar de
@@ -5071,7 +5071,7 @@ impl Motor {
                     let _ = avisos.send(aviso);
                 };
                 let fim = escoadouro
-                    .escoar_espelhado(tela, origem, &mut eventos, espelho)
+                    .escoar_espelhado(tela, origem, &mut eventos, espelho, Some(&pedido_de_chave))
                     .await;
                 let _ = avisos.send(Aviso::TelaFechou { tela });
                 // Pelo mesmo motivo da de cima: são as duas linhas que contam o
@@ -5097,7 +5097,11 @@ impl Motor {
     fn nascer_a_tela(
         &mut self,
         tela: ScreenId,
-        escoar: impl FnOnce(seele_proto::screen::ScreenSource, mpsc::Receiver<crate::EventoDaBomba>),
+        escoar: impl FnOnce(
+            seele_proto::screen::ScreenSource,
+            mpsc::Receiver<crate::EventoDaBomba>,
+            crate::bomba::PedidoDeChave,
+        ),
     ) {
         if self.tela_viva.is_some() {
             return;
@@ -5132,7 +5136,7 @@ impl Motor {
             }
         };
 
-        escoar(origem, eventos);
+        escoar(origem, eventos, bomba.pedido_de_chave());
         self.tela_viva = Some(TelaViva {
             tela,
             bomba,
@@ -9139,7 +9143,7 @@ mod tests {
 
         // O servidor respondeu, e a transmissão ganhou nome.
         let mut canal = None;
-        motor.nascer_a_tela(ScreenId(7), |origem, eventos| {
+        motor.nascer_a_tela(ScreenId(7), |origem, eventos, _| {
             canal = Some((origem, eventos));
         });
 
@@ -9215,7 +9219,7 @@ mod tests {
         // A mesma forma da produção: uma tarefa própria, porque escoar dura o
         // que a transmissão durar.
         let mut escoando = None;
-        motor.nascer_a_tela(tela, |origem, mut eventos| {
+        motor.nascer_a_tela(tela, |origem, mut eventos, _| {
             escoando = Some(tokio::spawn(async move {
                 escoadouro.escoar(tela, origem, &mut eventos).await
             }));
@@ -9262,7 +9266,7 @@ mod tests {
         // tela.
         let mut motor = motor_de_teste();
         let mut chamou = false;
-        motor.nascer_a_tela(ScreenId(1), |_, _| chamou = true);
+        motor.nascer_a_tela(ScreenId(1), |_, _, _| chamou = true);
         assert!(!chamou, "ligou uma bomba que ninguém pediu");
         assert!(motor.tela_viva.is_none());
     }
