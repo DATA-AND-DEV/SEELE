@@ -1438,7 +1438,10 @@ profundidade pelo `dentro`, e a primeira achada vale; as duas recusas vêm
 antes de mexer na tela, e a recusada não fica na declaração; o que não muda é
 mantido pela reconciliação. `bancada/camadas.cjs` monta uma ficha de 40.002
 bytes em quatro partes de 9.552 a 10.462 bytes. **Está na capacidade `superficies`**, como o
-`atualizar` das contribuições: as APIs 4 e 5 também o veem]
+`atualizar` das contribuições: as APIs 4 e 5 também o veem]. **No contrato, o
+método existe desde a 6** (ruling aceito em 09/10): a v6 o publica, e a v4 e
+a v5 não. É API somada, e um pacote da 4 ou da 5 que o chame funciona, mas
+quem escreve para a 4 ou a 5 não deve contar com ele.
 
 **Bolsos de mídia por bytes decodificados** (PERFIS R3, M6): hoje uma foto de
 10 MiB gasta metade do bolso de todos os avatares do servidor. Na 6, a mídia de

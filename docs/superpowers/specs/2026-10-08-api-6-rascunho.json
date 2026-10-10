@@ -90,7 +90,7 @@
     "abrir-endereco": "abrir_no_navegador",
     "enviar-imagem": "enviar_imagem_mod",
     "ler-imagem": "ler_imagem_mod",
-    "superficie-atualizar": "novo: superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem"
+    "superficie-atualizar": "novo na 6: superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem. No contrato, existe desde a 6; na casca, mora na capacidade superficies, e as APIs 4 e 5 também o veem (API somada; ruling aceito em 09/10)"
   },
   "own": {
     "dados": "recolher_quintal",
