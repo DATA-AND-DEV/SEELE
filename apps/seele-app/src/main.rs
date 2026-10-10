@@ -1626,8 +1626,44 @@ fn soltar_a_entrada(session: State<'_, Session>, geracao: u64) -> bool {
 }
 
 /// O corpo de [`soltar_a_entrada`], sem o `State`, para o teste.
-fn soltar_a_entrada_em(_session: &Session, _geracao: u64) -> bool {
-    false
+///
+/// **Só a geração dada, e só se ela ainda é a de pé**, conferida com o slot na
+/// mão e revogada ali mesmo. Um `connect` novo que chega neste instante espera
+/// o cadeado, acha o slot vazio e revoga depois: a geração dele é a seguinte, e
+/// não esta. E uma entrada que outra já substituiu no Rust não derruba a de
+/// quem a substituiu, porque a geração dela já não é a de pé.
+///
+/// **O convite fica.** Ele pode ser da tentativa nova, que ainda vai lê-lo no
+/// `connect` dela; é a diferença deste para `desmontar_o_cliente`, que o
+/// apaga com a sessão que ele abriu.
+fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
+    let solta = match session.connection.lock() {
+        Ok(mut slot) if slot.is_some() && session.geracao_vale(geracao) => {
+            session.revogar();
+            slot.take()
+        }
+        _ => None,
+    };
+    let Some(conexao) = solta else {
+        tracing::info!(
+            geracao,
+            de_pe = session.geracao(),
+            "a janela largou uma entrada que já não estava de pé: nada a soltar"
+        );
+        return false;
+    };
+    conexao.disconnect();
+    drop(conexao);
+    // Onde a sessão estava deixa de existir com ela, como na saída.
+    if let Ok(mut onde) = session.endereco_da_sessao.lock() {
+        *onde = None;
+    }
+    tracing::warn!(
+        geracao,
+        "a janela largou a entrada da geração {geracao}: outra tentativa a substituiu enquanto \
+         ela entrava, e a conexão dela foi fechada"
+    );
+    true
 }
 
 /// **A entrada velha que chega tarde** (pendência 58, item 54; lote E54 da F5).
