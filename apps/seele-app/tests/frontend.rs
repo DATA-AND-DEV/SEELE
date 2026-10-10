@@ -10764,6 +10764,29 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // Destroyed`): a página já foi, e a credencial com ela. O que continua
     // proibido é segurar a **janela** (`prevent_close`, `CloseRequested`), e
     // segurar a saída de outro jeito, com a janela ainda aberta.
+    //
+    // **Para quem atualizar o Tauri:** a medida é do código do runtime, e não
+    // de documentação. Ela está em `tauri-runtime-wry/src/lib.rs`, no braço
+    // `TaoWindowEvent::Destroyed` do laço de eventos: a janela sai da lista e,
+    // com a lista vazia, sai o `RunEvent::ExitRequested { code: None }`. Com
+    // outra versão do `tauri-runtime-wry`, confira que o evento continua saindo
+    // dali, e só então troque a versão abaixo. Se ele passar a sair antes de a
+    // janela ser destruída, segurar a saída volta a manter a página viva.
+    const RUNTIME_MEDIDO: &str = "2.11.4";
+    let trava = std::fs::read_to_string(app_dir().join("../../Cargo.lock"))
+        .unwrap_or_else(|erro| panic!("o `Cargo.lock` tem de ser legível: {erro}"));
+    let runtime = trava
+        .split("name = \"tauri-runtime-wry\"\nversion = \"")
+        .nth(1)
+        .and_then(|resto| resto.split('"').next());
+    assert_eq!(
+        runtime,
+        Some(RUNTIME_MEDIDO),
+        "o `tauri-runtime-wry` mudou de versão, e a saída segurada com `code: None` foi \
+         medida na {RUNTIME_MEDIDO}. Reconfira no código do runtime que o `ExitRequested` \
+         com `code: None` ainda sai do `Destroyed` da última janela, com ela já fora da \
+         lista, e então troque `RUNTIME_MEDIDO`"
+    );
     let main = without_comments(&read("src/main.rs"));
     for segura in ["prevent_close", "CloseRequested"] {
         assert!(
