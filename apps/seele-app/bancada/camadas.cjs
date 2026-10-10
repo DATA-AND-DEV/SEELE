@@ -50,6 +50,10 @@
 //    do produto, alcançável com o modal aberto, e o evento `botao` só chega
 //    ao MOD depois do sim; cancelar não manda nada; um botão sem `confirmar`
 //    manda na hora.
+// 12. **O `erro` vale em toda forma de entrada** (Step 6e; rascunho §5, o
+//    ESTILO §4): a `escolha` e a `cor` mostram o `erro` do MOD como o campo,
+//    recebem o `formulario.erros` e sujam a superfície; o hexadecimal
+//    incompleto continua marcado enquanto se digita, sem frase.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -530,8 +534,44 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(await botoesDe('restaurar'), 1, 'o sim na confirmação não mandou o evento do botão, uma vez');
     await page.evaluate(() => pedir(6, { tipo: 'superficie-descartar', superficie: 'aparencia' }));
 
+    // 12. O erro na escolha e na cor.
+    const marcaDe = (chave) => page.evaluate((chave) => {
+      const parte = document.querySelector(`[data-superficie="cores"] [data-chave-do-mod="${chave}"]`);
+      const caixa = parte?.querySelector('select, input.regiao-de-mod-hexa');
+      return { invalido: parte?.dataset.invalido ?? null, frase: parte?.dataset.mensagemDeErro ?? null, aria: caixa?.getAttribute('aria-invalid') ?? null };
+    }, chave);
+    const arvoreDasCores = (comErro) => [{
+      forma: 'formulario', chave: 'f', dentro: [
+        { forma: 'escolha', chave: 'paleta', rotulo: 'Paleta', valor: 'noite', opcoes: [{ valor: 'noite' }, { valor: 'dia' }], ...(comErro ? { erro: 'esta paleta não combina com o tema' } : {}) },
+        { forma: 'cor', chave: 'acento', rotulo: 'Acento', valor: '#ff6a00', ...(comErro ? { erro: 'contraste 1,2 contra o fundo' } : {}) },
+      ],
+    }];
+    await page.evaluate(async (arvore) => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'cores', tipo: 'dialogo', modal: false, titulo: 'Cores', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'cores', arvore });
+    }, arvoreDasCores(true));
+    assert.deepEqual(await marcaDe('paleta'), { invalido: 'sim', frase: 'esta paleta não combina com o tema', aria: 'true' }, 'a escolha não mostrou o erro do MOD');
+    assert.deepEqual(await marcaDe('acento'), { invalido: 'sim', frase: 'contraste 1,2 contra o fundo', aria: 'true' }, 'a cor não mostrou o erro do MOD');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'cores', arvore }), arvoreDasCores(false));
+    assert.deepEqual([await marcaDe('paleta'), await marcaDe('acento')], [{ invalido: null, frase: null, aria: null }, { invalido: null, frase: null, aria: null }],
+      'o erro redeclarado como nenhum não saiu da escolha e da cor');
+    const pelasChaves = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'cores', erros: { paleta: 'recusada pelo servidor', acento: 'recusada pelo servidor' } }));
+    assert.equal(pelasChaves?.ok, true, `formulario.erros não alcança a escolha e a cor: ${JSON.stringify(pelasChaves)}`);
+    assert.deepEqual([(await marcaDe('paleta')).frase, (await marcaDe('acento')).frase], ['recusada pelo servidor', 'recusada pelo servidor'], 'formulario.erros não marcou a escolha e a cor');
+    await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'cores', erros: {} }));
+    // O hexadecimal incompleto: marcado, sem frase; completo, desmarcado.
+    await page.fill('[data-superficie="cores"] [data-chave-do-mod="acento"] .regiao-de-mod-hexa', '#f2');
+    assert.deepEqual(await marcaDe('acento'), { invalido: 'sim', frase: null, aria: 'true' }, 'o hexadecimal incompleto deixou de ficar marcado');
+    await page.fill('[data-superficie="cores"] [data-chave-do-mod="acento"] .regiao-de-mod-hexa', '#ff6a00');
+    assert.deepEqual(await marcaDe('acento'), { invalido: null, frase: null, aria: null }, 'o hexadecimal completo continuou marcado');
+    // E a escolha mexida suja a superfície.
+    await page.selectOption('[data-superficie="cores"] [data-chave-do-mod="paleta"] select', 'dia');
+    await page.click('[data-superficie="cores"] .superficie-de-mod-sair');
+    assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'trocar a escolha não sujou a superfície');
+    await page.click('#moderar-confirmar');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

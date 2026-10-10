@@ -235,7 +235,9 @@ function regrasDeclaradas(no) {
  */
 function fraseDaRegraViolada(regras, caixa) {
   const texto = caixa.value;
-  if (regras.obrigatorio && texto.trim() === "") return "Preencha este campo.";
+  if (regras.obrigatorio && texto.trim() === "") {
+    return caixa.tagName === "SELECT" ? "Escolha uma opção." : "Preencha este campo.";
+  }
   const emPortugues = (n) => n.toLocaleString("pt-BR");
   if (caixa.type === "number" && texto !== "") {
     const n = Number(texto);
@@ -716,6 +718,10 @@ class RegiaoDeMod {
     this.iniciais = new WeakMap();
     // A consequência que um botão destrutivo declara em `confirmar` (Step 6d).
     this.confirmacoes = new WeakMap();
+    // A caixa que vale por cada campo — o `input`, o `textarea`, o `select`, o
+    // hexadecimal da cor —, e as cores com o hexadecimal pela metade (Step 6e).
+    this.caixasDoCampo = new WeakMap();
+    this.coresIncompletas = new WeakSet();
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -1270,6 +1276,7 @@ class RegiaoDeMod {
     const caixa = elemento("select", "regiao-de-mod-escolha");
     elem.append(rotulo, caixa);
     const aoTrocar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "escolha",
         chave: plano.no.chave ?? "",
@@ -1295,6 +1302,8 @@ class RegiaoDeMod {
     if (!rotulo || !caixa) return;
     const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    // O `erro` da escolha, como o do campo (Step 6e).
+    this.marcarValidade(elem, caixa, plano);
     if (document.activeElement === caixa) return;
 
     const opcoes = (Array.isArray(plano.no.opcoes) ? plano.no.opcoes : [])
@@ -1681,18 +1690,23 @@ class RegiaoDeMod {
     };
     const aoEscolher = () => {
       hexa.value = seletor.value;
+      this.coresIncompletas.delete(elem);
+      this.aoMexerNoCampo(elem, hexa);
       dizer(seletor.value);
     };
     const aoDigitar = () => {
       const escrito = hexa.value.trim();
       // Um hexadecimal incompleto — `#f2` no meio da digitação — não vira
-      // pedido: ele viraria uma cor recusada a cada tecla.
-      if (/^#[0-9a-f]{6}$/i.test(escrito)) {
+      // pedido: ele viraria uma cor recusada a cada tecla. Ele fica marcado,
+      // sem frase, até completar (`pintarValidade`).
+      const completo = /^#[0-9a-f]{6}$/i.test(escrito);
+      if (completo || !escrito) this.coresIncompletas.delete(elem);
+      else this.coresIncompletas.add(elem);
+      this.aoMexerNoCampo(elem, hexa);
+      this.pintarValidade(elem, hexa);
+      if (completo) {
         seletor.value = escrito;
-        elem.dataset.invalido = "nao";
         dizer(escrito);
-      } else {
-        elem.dataset.invalido = escrito ? "sim" : "nao";
       }
     };
     seletor.addEventListener("input", aoEscolher);
@@ -1716,6 +1730,8 @@ class RegiaoDeMod {
       : "#000000";
     if (document.activeElement !== seletor && seletor.value !== valor) seletor.value = valor;
     if (document.activeElement !== hexa && hexa.value !== valor) hexa.value = valor;
+    // O `erro` da cor, no hexadecimal, como o do campo (Step 6e).
+    this.marcarValidade(elem, hexa, plano);
   }
 
   /**
@@ -2120,7 +2136,7 @@ class RegiaoDeMod {
     let primeiro = null;
     for (const campo of raiz.querySelectorAll("[data-chave-do-mod]")) {
       const regras = this.regrasDoCampo.get(campo);
-      const caixa = regras && campo.querySelector("input,textarea");
+      const caixa = regras && this.caixasDoCampo.get(campo);
       if (!caixa) continue;
       const frase = fraseDaRegraViolada(regras, caixa);
       if (frase) this.errosDoProduto.set(campo, frase);
@@ -2147,7 +2163,7 @@ class RegiaoDeMod {
   temAlteracoes() {
     for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
       if (!this.iniciais.has(parte)) continue;
-      const caixa = parte.querySelector("input,textarea");
+      const caixa = this.caixasDoCampo.get(parte);
       if (caixa && caixa.value !== this.iniciais.get(parte)) return true;
     }
     return false;
@@ -2157,7 +2173,7 @@ class RegiaoDeMod {
   camposPorChave() {
     const campos = new Map();
     for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
-      const caixa = this.regrasDoCampo.has(parte) && parte.querySelector("input,textarea");
+      const caixa = this.caixasDoCampo.get(parte);
       if (caixa && !campos.has(parte.dataset.chaveDoMod)) campos.set(parte.dataset.chaveDoMod, { parte, caixa });
     }
     return campos;
@@ -2223,12 +2239,21 @@ class RegiaoDeMod {
     else if (!this.iniciais.has(elem)) this.iniciais.set(elem, comoTexto(plano.no.valor));
     this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");
     this.regrasDoCampo.set(elem, regrasDeclaradas(plano.no));
+    this.caixasDoCampo.set(elem, caixa);
     this.pintarValidade(elem, caixa);
   }
 
   pintarValidade(elem, caixa) {
     const erro = this.errosDoProduto.get(elem) || this.errosDoServidor.get(elem)
       || this.errosDoMod.get(elem) || "";
+    // A cor com o hexadecimal pela metade é inválida sem frase: quem digita
+    // vê a borda, e não um erro a cada tecla.
+    if (!erro && this.coresIncompletas.has(elem)) {
+      elem.dataset.invalido = "sim";
+      caixa.setAttribute("aria-invalid", "true");
+      delete elem.dataset.mensagemDeErro;
+      return;
+    }
     if (erro) {
       elem.dataset.invalido = "sim";
       caixa.setAttribute("aria-invalid", "true");

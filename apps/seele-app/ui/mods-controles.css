@@ -446,7 +446,8 @@ button.regiao-de-mod-parte[data-forma="link"] {
    `data-mensagem-de-erro`, escrita pelo renderer a partir do que o MOD mandou.
    U04 pede medir contraste e alvo; a mensagem existe para quem não vê a cor. */
 label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-caixa,
-label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area {
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area,
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-escolha {
   border-color: var(--seele-vermelho-alerta);
 }
 

@@ -518,7 +518,10 @@ campo. A API 6 acrescenta:
   frase do produto convive com o `erro` do MOD e sai quando a pessoa mexe no
   campo; o contador diz `13/10` e fica vermelho ao passar];
 - **`erro` em toda forma de entrada**, inclusive `cor` e `escolha`
-  (hoje só `campo`, `textoLongo`, `numero` e `formulario`, ESTILO §4);
+  (hoje só `campo`, `textoLongo`, `numero` e `formulario`, ESTILO §4) [c,
+  tarefa 7, Step 6e: as duas mostram o `erro`, recebem o `formulario.erros`
+  e entram no sujo derivado; na `cor`, a frase fica no hexadecimal, e o
+  hexadecimal incompleto continua marcado, sem frase, enquanto se digita];
 - **botões primário e secundário montados pelo produto**: o primário envia o
   formulário com **todos os valores juntos** no `submeter`; o secundário
   cancela pela saída do produto. O MOD dá o texto, não o comportamento;
