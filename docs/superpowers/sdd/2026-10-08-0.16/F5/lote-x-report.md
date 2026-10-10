@@ -581,3 +581,116 @@ quando a orquestradora liberar.
 
 A conformidade rodou um arquivo de cada vez, com `--test-threads=1`, depois da
 liberação.
+
+## A impressão: o portão pela chave (commits A, B e C)
+
+A orquestradora decidiu que «estou no meu servidor?» tem uma resposta só, a
+`onde_estou_em` da F7, e que o critério passa a ser **a chave**, e não o
+endereço. Esta seção substitui o portão das rodadas 1 e 2 e do merge, que era o
+`aqui` mais os endereços do convite. A leitura dos endereços na hora, que
+chegou a ser escrita, não foi commitada; ela está em
+`scratchpad/lotex-r1/leitura-na-hora.patch`.
+
+### A medida, antes do conserto
+
+**A casca não tinha a chave da sessão em todos os casos.**
+- O `Trust` do `connect` traz a impressão em `FirstContact`,
+  `FirstContactVerified` e `InviteDisagrees`. Em `Known` não traz, nem no core
+  nem na FFI.
+- O caso mais comum é justamente esse. Quem hospeda entra no próprio servidor
+  pelo `aqui`, sem link, num servidor que a lista de conhecidos exclui. Da
+  segunda vez em diante o veredito é `Known` sem impressão esperada, e a casca
+  fica sem chave.
+- O pin não serve: ele é do `seele-core`, e ler o arquivo `pins` na casca
+  passaria por cima do ADR 0002.
+- Não há loopback sem certificado: toda conexão passa pelo `TofuVerifier`.
+
+**A FFI tinha a chave e a jogava fora.** Em toda conexão que sobe,
+`client.pin_decision()` é `FirstContact { fingerprint }` ou
+`Matches { fingerprint }`.
+
+**As chaves das hospedagens já estavam à mão**, em
+`Hospedagem::impressao_digital()`.
+
+### O que mudou
+
+| commit | o que muda |
+|---|---|
+| `a85fcb1b` (A) | `Shared::impressao_do_servidor`, gravada por `gravar_impressao` a partir do `pin_decision()` no único aperto de mão, e `Connection::impressao_do_servidor()`, em `crates/seele-ffi/src/lib.rs`. `Trust::Known` não muda de forma. A prova é o arquivo novo `crates/seele-conformance/tests/impressao_da_sessao.rs`. |
+| `251280d1` (B) | `onde_estou_em(endereco, impressao, do_guardado, da_sala)` compara a impressão da sessão com a do guardado e a da sala, sem diferenciar maiúsculas. O endereço só diz se há sessão; com sessão e sem impressão, a resposta é `Outro`. `Hospedagens::portas` vira `impressoes`, e `onde_estou_na(&Session)` é a mesma resposta para quem não é comando. |
+| `c83cd779` (C) | `gravar_o_sim_de_quem_hospeda` passa a decidir por `onde_estou_na(session)`, e `gravar_o_sim_se_for_o_guardado` grava só com `Guardado`. Saem `a_sessao_e_com_o_servidor_daqui`, `enderecos_do_convite`, `endereco_do_servidor_daqui` e o campo `Hospedado::enderecos_do_convite`. O `Hospedado`, `hospedar` e o teste da F7 voltam a ser exatamente os da versão. |
+
+**O que isto fecha:**
+- **Os nomes do mesmo servidor.** `127.0.0.1`, `localhost`, `[::1]`, a rede
+  local, o endereço público e o nome são todos `Guardado`. Isso fecha também o
+  link com nome público, que a leitura dos endereços do convite não
+  alcançava.
+- **Um endereço velho.** O mesmo endereço com outra chave é `Outro`: o servidor
+  de outra versão que o HOSPEDAR COM ESTA da F6 põe em `127.0.0.1`, ou um
+  endereço da rede local que hoje é de outra máquina. Aí o sim não é gravado,
+  e o erro fica do lado fechado.
+
+O guarda de `ultimoAlvo = anfitriao.aqui`, no `frontend.rs`, continua valendo
+para a dispensa de conferir a própria chave (`nossoServidorEm === ultimoAlvo`).
+O sim não depende mais dele.
+
+### Os testes e as reversões
+
+Os testes:
+- **A, conformidade.** `a_conexao_diz_a_impressao_do_servidor_que_conferiu`
+  sobe a hospedagem com `Hospedagem::iniciar` e entra três vezes com a mesma
+  casa: o primeiro contato, a volta com `Known` e `localhost`. Nas três, o
+  getter é igual a `impressao_digital()`.
+- **B.** `onde_estou_pela_chave_e_nao_pelo_endereco` cobre sem sessão, os cinco
+  endereços com a chave em maiúsculas, e a sala.
+  `o_mesmo_endereco_com_outra_chave_e_outro_lugar` cobre S em `127.0.0.1:8383`,
+  na rede local e na porta da sala, cada hospedagem fora do ar, e a sessão sem
+  impressão.
+- **C.** Quatro casos sobre `onde_estou_em`, mais a gravação no arquivo de
+  aceites de verdade, nos dois gravadores:
+  - S noutro endereço e no mesmo endereço do guardado;
+  - o próprio link pela rede local, e o `aqui`;
+  - a sala;
+  - a ausência de guardado, também pela `Session` de verdade.
+
+  O guarda de texto-fonte (agulhas de `concat!`, fonte sem comentários) prende
+  os dois gravadores a `gravar_o_sim_de_quem_hospeda`, ela a
+  `onde_estou_na(session)`, o portão a `OndeEstou::Guardado`, e o comando
+  `onde_estou` à mesma resposta.
+
+Em cada commit, o vermelho veio antes:
+- **A:** o getter devolvendo `None` reprovou já no primeiro contato.
+- **B:** os testes rodaram primeiro com o critério de antes, a porta de
+  loopback.
+- **C:** o portão ignorando a resposta.
+
+As reversões. Em todas, o arquivo voltou idêntico (`cmp`) e foi tocado antes de
+recompilar.
+
+| commit | reversão | o que reprova |
+|---|---|---|
+| A | o getter devolve `None` | a conformidade, no primeiro contato |
+| A | só `FirstContact` grava a impressão | a conformidade, na volta com `Known` |
+| B | volta a comparar por endereço (a porta de loopback) | os dois testes novos: S em `127.0.0.1:8383` passa pelo guardado, e a rede local e o nome deixam de ser ele |
+| C | o portão ignora a resposta | a sessão em S, a sala e a ausência de guardado, nos dois gravadores, e o guarda |
+| C | `aplicar_mod` grava direto | o guarda, com `["aplicar_mod"]` |
+| C | `aplicar_conjunto_de_mods` grava direto | o guarda, com `["aplicar_conjunto_de_mods"]` |
+| C | o portão sem `onde_estou_na` | o guarda, e o caso da `Session` de verdade |
+
+**No estado final:**
+
+| o quê | resultado |
+|---|---|
+| `--bin seele-app` | 307 de 307 |
+| `--test frontend` | 288 de 288 |
+| `-p seele-ffi --lib` | 180 de 180 |
+| `check-runtime` | verde |
+| fmt | limpo |
+| clippy do app e do `seele-ffi` | limpos |
+| clippy da conformidade (o arquivo novo) | limpo |
+| conformidade `aceite_dos_mods` | 15 de 15 |
+| conformidade `volta_do_aceite` | 2 de 2 |
+| conformidade `impressao_da_sessao` | 1 de 1 |
+
+A conformidade rodou um arquivo de cada vez, com `--test-threads=1`. A `ui/`
+não mudou nesta etapa, e por isso as bancadas não rodaram.
