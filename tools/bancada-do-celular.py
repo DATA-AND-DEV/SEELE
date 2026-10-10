@@ -1143,15 +1143,20 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
          || (/^(INPUT|TEXTAREA)$/.test(e.tagName) && e.type !== 'range'))
         && !e.closest(seletorDoTeto) && visivel(e));
     const antes = raiz.style.getPropertyValue('--cel-escala');
+    // A leitura depois de um recálculo inteiro (o `offsetHeight` da raiz força
+    // estilo e layout), e não só o do nó: medido em 10/10, uma rodada a cada
+    // dez da bancada inteira, nós que já viam `--cel-escala` 2 devolviam o
+    // tamanho de antes numa leitura logo depois da troca.
+    const ler = () => { void raiz.offsetHeight; return nos.map((e) => parseFloat(getComputedStyle(e).fontSize)); };
     raiz.style.setProperty('--cel-escala', '1');
-    const a1 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    const a1 = ler();
     raiz.style.setProperty('--cel-escala', '2');
-    const a2 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
-    // Para quando um nó não cresce, o porquê vem junto: medido uma vez em 21
-    // rodadas da bancada inteira (10/10), na seção MODS DESTE SERVIDOR, sem se
-    // repetir sozinho nem com carga. Na próxima, a reprovação diz o que o nó via.
+    const a2 = ler();
+    // Para quando um nó não cresce, o porquê vem junto, inclusive o tamanho
+    // relido depois: se ele mudar, era a leitura, e não a página.
     const primeiro = nos.find((e, i) => a2[i] < a1[i] * 1.3);
     const porque = primeiro ? {
+        relido: parseFloat(getComputedStyle(primeiro).fontSize),
         escalaNoNo: getComputedStyle(primeiro).getPropertyValue('--cel-escala').trim(),
         escalaNaRaiz: raiz.style.getPropertyValue('--cel-escala'),
         folha: ((l) => !l ? 'ausente' : l.disabled ? 'desligada' : 'ligada')(document.querySelector('link[href="celular-texto.css"]')),
