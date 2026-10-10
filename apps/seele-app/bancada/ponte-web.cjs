@@ -384,7 +384,7 @@ async function osNeutros() {
 /// sessão da ponte.
 async function sairSai() {
   const caso = "sair sai";
-  for (const comando of ["disconnect", "desmontar_a_sessao"]) {
+  for (const comando of ["disconnect"]) {
     const p = pagina();
     let saiu = 0;
     p.ler("sessaoDaPonte").atual = { encerrar: async () => { saiu += 1; } };

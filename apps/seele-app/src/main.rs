@@ -2730,26 +2730,14 @@ fn classificar(erro: &anyhow::Error) -> FalhaAoHospedar {
 /// **A03 da auditoria de 17/09, resolvido de vez.** Este verbo derrubava o
 /// servidor hospedado junto, e o RECONECTAR, que passava por ele, tirava do ar o
 /// endereço em que ia entrar em seguida. A cura de então foi um segundo verbo
-/// ([`desmontar_a_sessao`]), que não derrubava. Com sair deixando de derrubar,
-/// os dois passam a ser o mesmo, e o segundo sai quando a casca deixar de
-/// chamá-lo: dois verbos iguais são dois lugares para divergirem.
+/// (`desmontar_a_sessao`), que não derrubava. Com sair deixando de derrubar, os
+/// dois eram o mesmo, e um saiu: dois verbos iguais são dois lugares para
+/// divergirem.
 ///
 /// # Errors
 ///
 /// Nunca: o tipo existe para a ponte, e desmontar o que já está desmontado é o
 /// desfecho normal de quem apertou duas vezes.
-/// O mesmo que o [`disconnect`] desde a tarefa 19 da F7: desmonta só a sessão
-/// desta janela. Fica até a casca deixar de chamá-lo (a tela de fim).
-///
-/// # Errors
-///
-/// Nunca, como o `disconnect`.
-#[tauri::command]
-async fn desmontar_a_sessao(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
-    desmontar_o_cliente(&app, &session);
-    Ok(())
-}
-
 #[tauri::command]
 async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Result<(), ()> {
     desmontar_o_cliente(&app, &session);
@@ -11324,7 +11312,6 @@ fn main() {
             catalogo_de_mods,
             instalar_mod_do_catalogo,
             disconnect,
-            desmontar_a_sessao,
             parar_de_hospedar,
             meu_servidor,
             snapshot,

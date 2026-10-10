@@ -201,7 +201,7 @@ const COMANDOS_DA_PONTE = new Set([
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
   "calar_a_tela", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
-  "desmontar_a_sessao", "destino_do_anexo", "disconnect", "dispensar_aviso",
+  "destino_do_anexo", "disconnect", "dispensar_aviso",
   "dominios_de_gif", "enter_voice_room", "enviar_anexo", "enviar_imagem_mod",
   "escolher_apelido", "escolher_apelido_local", "escolher_arquivo",
   "escolher_microfone", "escolher_minha_imagem", "escolher_para_o_mod",
@@ -793,8 +793,6 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
   disconnect: sairDaSessaoDaPonte,
-  // O mesmo que o `disconnect`: não há hospedagem a manter.
-  desmontar_a_sessao: sairDaSessaoDaPonte,
   // «Nenhum»: quem codifica é o navegador (só no PC).
   modulo_de_video_a_baixar: () => null,
   // O teste do microfone do PC (3.3, decidido em 09/10): o `getUserMedia`, com
