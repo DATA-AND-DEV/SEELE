@@ -1333,7 +1333,18 @@ as abas**: com uma `pagina` imersiva, um `dialogo`, uma `folha` expandida e um
 `aviso` abertos, o retângulo de cada um termina acima da faixa, e um toque no
 MUDO e em AJUSTES chega ao produto. **No desktop, o guarda mede antes de
 concluir**: se um `dialogo` aberto deixa o MUDO e o SAIR da barra do operador
-à vista e clicáveis. Se não deixar, é o mesmo conserto, e a mesma regra. Agora
+à vista e clicáveis. Se não deixar, é o mesmo conserto, e a mesma regra.
+**Medido em 09/10: não deixava** — com um diálogo modal, o MUDO, o fone e o
+SAIR ficavam inertes e sob o véu, a 1400 e a 1024. **A regra, decidida pela
+orquestradora em 09/10: o modal de MOD não cobre a barra do operador, no
+desktop e no celular.** No desktop, o véu ganha um furo no retângulo da barra
+(e, abaixo de 900 px, onde a barra mora na gaveta, também no da porta dela),
+o MUDO, o fone e o SAIR ficam acordados, e a caixa do diálogo nunca cruza o
+furo — a área dela começa à direita da barra, e o que não couber rola dentro
+dela. No resto, o modal continua modal: o Tab preso no diálogo, o Esc o
+fechando, e a sessão inerte e coberta [c, tarefa 9, Step 4b;
+`mods-superficies.js`, `foraDoModal` e `recortarOVeu`; `bancada/nucleo.cjs`,
+seção 3]. Agora
 para o que existe (a portaria, `#portaria-batendo`, `index.html:192` [c]); o
 item «a ligação» (`#toque`) fecha depois da 7d da sala pessoal. **É isso que
 põe o congelamento no fim do pacote** (spec-mestre, F7).

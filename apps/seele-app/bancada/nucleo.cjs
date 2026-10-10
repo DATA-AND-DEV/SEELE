@@ -22,6 +22,13 @@
 //    os que estão à vista: no centro de cada um, quem recebe o clique é ele.
 //    Numa bancada, e não em texto no `frontend.rs`: os contêineres são
 //    seletores sobre o DOM, e alguns só existem desenhados.
+// 3. **O modal de MOD não cobre a barra do operador** (Step 4b; decisão da
+//    orquestradora, 09/10: o recorte). A 1400 e a 900 de largura, com um
+//    diálogo modal alto e largo aberto: o MUDO, o fone e o SAIR ficam
+//    acordados e no furo do véu — a 900, com a gaveta fechada, a porta dela, e
+//    aberta, o MUDO —; o resto da sessão continua inerte e coberto; o Tab fica
+//    no diálogo, e o Esc o fecha; e o diálogo nunca cruza a barra, rolando por
+//    dentro.
 //
 // Rodar:  node apps/seele-app/bancada/nucleo.cjs
 
@@ -180,8 +187,81 @@ const TEMAS = {
     assert.deepEqual(guarda.dentro, [], 'um item do núcleo mora dentro do contêiner de um ponto de contribuição');
     assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
 
+    // 3. O modal não cobre a barra.
+    const abrirModal = () => page.evaluate(async () => {
+      const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
+      const inst = modsCarregados.get(mod.id);
+      superficiesDoMod(mod, inst).soltarTudo();
+      await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 2, descricao: { id: 'alto', tipo: 'dialogo', titulo: 'Alto e largo', tamanho: { largura: 1600 } } });
+      await atenderOMod(mod, inst, { tipo: 'superficie-montar', n: 3, superficie: 'alto', arvore: [
+        ...Array.from({ length: 80 }, (_, i) => ({ forma: 'texto', chave: `l${i}`, dentro: `linha ${i} do diálogo alto` })),
+        { forma: 'campo', chave: 'a', rotulo: 'A' }, { forma: 'campo', chave: 'b', rotulo: 'B' },
+      ] });
+      await new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+    });
+    const medirOModal = () => page.evaluate(() => {
+      const alcancado = (el) => {
+        if (!el || !el.getClientRects().length) return 'invisivel';
+        if (el.closest('[inert]')) return 'inerte';
+        const r = el.getBoundingClientRect();
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return alvo && (alvo === el || el.contains(alvo)) ? 'sim' : `coberto por ${alvo?.className ?? alvo?.tagName}`;
+      };
+      const cruza = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const caixa = document.querySelector('[data-superficie="alto"].dialogo-de-mod, [data-superficie="alto"] .dialogo-de-mod, .dialogo-de-mod[data-superficie="alto"]');
+      const barra = document.querySelector('#tela-sessao .operador');
+      const porta = document.querySelector('#tela-sessao .linha-canais');
+      const corpo = caixa?.querySelector('.dialogo-de-mod-corpo');
+      return {
+        mudo: alcancado(document.getElementById('botao-mudo')),
+        fone: alcancado(document.getElementById('botao-surdo')),
+        sair: alcancado(document.getElementById('operador-sair')),
+        porta: alcancado(porta),
+        resto: alcancado(document.querySelector('#tela-sessao textarea')),
+        cruzaBarra: Boolean(caixa && barra?.getClientRects().length && cruza(caixa.getBoundingClientRect(), barra.getBoundingClientRect())),
+        cruzaPorta: Boolean(caixa && porta?.getClientRects().length && cruza(caixa.getBoundingClientRect(), porta.getBoundingClientRect())),
+        rola: Boolean(corpo && corpo.scrollHeight > corpo.clientHeight),
+        dentroDaJanela: Boolean(caixa && caixa.getBoundingClientRect().bottom <= innerHeight && caixa.getBoundingClientRect().right <= innerWidth),
+      };
+    });
+
+    await abrirModal();
+    const largo = await medirOModal();
+    assert.deepEqual({ mudo: largo.mudo, fone: largo.fone, sair: largo.sair }, { mudo: 'sim', fone: 'sim', sair: 'sim' },
+      `a 1400, com o modal aberto, a barra do operador não está alcançável: ${JSON.stringify(largo)}`);
+    assert.equal(largo.resto, 'inerte', `a 1400, o resto da sessão escapou do modal: ${JSON.stringify(largo)}`);
+    assert.deepEqual({ cruzaBarra: largo.cruzaBarra, rola: largo.rola, dentroDaJanela: largo.dentroDaJanela }, { cruzaBarra: false, rola: true, dentroDaJanela: true },
+      `a 1400, o diálogo alto cruza a barra, não rola por dentro, ou sai da janela: ${JSON.stringify(largo)}`);
+    // O Tab fica no diálogo, e o Esc o fecha.
+    const dentroDoAlto = () => page.evaluate(() => Boolean(document.activeElement?.closest('[data-superficie="alto"]')));
+    const tabs = [];
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press('Tab');
+      tabs.push(await dentroDoAlto());
+    }
+    assert.deepEqual(tabs, [true, true, true, true, true, true], 'um Tab levou o foco para fora do diálogo modal');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.evaluate(() => Boolean(document.querySelector('[data-superficie="alto"]')?.isConnected)), false, 'o Esc não fechou o diálogo modal');
+
+    // A 900, a coluna é gaveta: fechada, a porta dela fica alcançável; aberta,
+    // o MUDO.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await abrirModal();
+    const estreito = await medirOModal();
+    assert.equal(estreito.porta, 'sim', `a 900, com o modal aberto, a porta da gaveta não está alcançável: ${JSON.stringify(estreito)}`);
+    assert.equal(estreito.resto, 'inerte', `a 900, o resto da sessão escapou do modal: ${JSON.stringify(estreito)}`);
+    assert.deepEqual({ cruzaPorta: estreito.cruzaPorta, rola: estreito.rola, dentroDaJanela: estreito.dentroDaJanela }, { cruzaPorta: false, rola: true, dentroDaJanela: true },
+      `a 900, o diálogo cruza a porta da gaveta, não rola, ou sai da janela: ${JSON.stringify(estreito)}`);
+    await page.click('#tela-sessao .linha-canais');
+    await page.evaluate(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok))));
+    const gavetaAberta = await medirOModal();
+    assert.deepEqual({ mudo: gavetaAberta.mudo, sair: gavetaAberta.sair }, { mudo: 'sim', sair: 'sim' },
+      `a 900, com a gaveta aberta e o modal aberto, o MUDO ou o SAIR não está alcançável: ${JSON.stringify(gavetaAberta)}`);
+    assert.equal(gavetaAberta.cruzaBarra, false, `a 900, o diálogo cruza a barra da gaveta aberta: ${JSON.stringify(gavetaAberta)}`);
+    await page.setViewportSize({ width: 1400, height: 900 });
+
     assert.deepEqual(errors, []);
-    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os dez itens, com a capa e a barra do MOD montadas.');
+    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os dez itens, com a capa e a barra do MOD montadas; e o modal de MOD não cobre a barra, a 1400 e a 900, e continua modal no resto.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

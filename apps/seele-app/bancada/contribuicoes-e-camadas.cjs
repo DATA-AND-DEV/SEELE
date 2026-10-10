@@ -236,6 +236,9 @@ function dialogoDeTeste() {
     camada,
     raiz: new No("div", ""),
     focarPrimeiro() {},
+    // O furo do véu (tarefa 9, Step 4b) mede retângulos, que este DOM não tem;
+    // a bancada `nucleo.cjs` o mede no navegador.
+    vigiarORecorte() {},
     solta: false,
   };
 }

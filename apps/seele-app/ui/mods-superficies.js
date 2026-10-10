@@ -111,14 +111,38 @@ function inertarMenos(no, acordados, mudados) {
 }
 
 /**
- * O que a casca pede acordado com um modal de MOD aberto: no celular, a faixa
- * de voz e as abas, pelo ajudante dela (`CELULAR.acordadosNoModal`, da F8). No
- * desktop não há `CELULAR`, e a lista é vazia. Perguntado a cada recálculo,
- * porque a sessão monta e desmonta a faixa.
+ * **O que um modal de MOD não cobre nem adormece** (rascunho da API 6, §10):
+ * os controles de voz e a saída, que quem transmite precisa alcançar agora, e
+ * não «a um Esc de distância».
+ *
+ * - No celular, a faixa de voz e as abas, pelo ajudante da casca dela
+ *   (`CELULAR.acordadosNoModal`, da F8; tarefa 7, Step 5d).
+ * - No desktop (tarefa 9, Step 4b; decisão da orquestradora, 09/10: o
+ *   recorte), o MUDO, o fone e o SAIR da barra do operador ficam acordados, e
+ *   o véu ganha um furo no retângulo da barra; abaixo de 900 px a barra mora
+ *   na gaveta, e a porta dela entra nos dois.
+ *
+ * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
+ * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
+ * sessão monta e desmonta a faixa e a gaveta. Só elementos de verdade.
  */
+function foraDoModal() {
+  const deVerdade = (no) => typeof Element !== "undefined" && no instanceof Element;
+  const daCasca = globalThis.CELULAR?.acordadosNoModal?.();
+  if (Array.isArray(daCasca)) {
+    const nos = daCasca.filter(deVerdade);
+    return { acordados: nos, recortes: nos };
+  }
+  const achar = (seletor) => document.querySelector?.(seletor) ?? null;
+  const porta = achar("#tela-sessao .linha-canais");
+  return {
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), porta].filter(deVerdade),
+  };
+}
+
 function acordadosNoModal() {
-  const lista = globalThis.CELULAR?.acordadosNoModal?.();
-  return Array.isArray(lista) ? lista.filter((no) => no instanceof Element) : [];
+  return foraDoModal().acordados;
 }
 
 /**
@@ -550,7 +574,65 @@ class SuperficieDeMod {
     // No WebKit, clicar num botão pode deixar o foco no documento. O teclado
     // pertence à camada do topo, mesmo sem um descendente focado.
     document.addEventListener("keydown", this.aoTeclar);
+    this.vigiarORecorte();
     this.focarPrimeiro();
+  }
+
+  /**
+   * **O furo do véu** (rascunho da API 6, §10; tarefa 9, Step 4b): num modal,
+   * o véu não pinta nem recebe clique no retângulo do que `foraDoModal`
+   * recorta, e a caixa do diálogo nunca o cruza — a área dela começa à
+   * direita do que fica à esquerda, e acaba acima do que fica embaixo. O
+   * recorte segue a janela e a gaveta: um `ResizeObserver` nos recortados e o
+   * `resize` da janela o refazem.
+   */
+  vigiarORecorte() {
+    if (this.tipo !== "dialogo" || !this.modal || !this.camada || this.pararORecorte) return;
+    const refazer = () => this.recortarOVeu();
+    const recortados = foraDoModal().recortes;
+    const observador = typeof ResizeObserver === "function" ? new ResizeObserver(refazer) : null;
+    for (const no of recortados) observador?.observe(no);
+    window.addEventListener("resize", refazer);
+    this.pararORecorte = () => {
+      observador?.disconnect();
+      window.removeEventListener("resize", refazer);
+      this.pararORecorte = null;
+    };
+    this.recortarOVeu();
+  }
+
+  recortarOVeu() {
+    const camada = this.camada;
+    if (!camada || this.solta) return;
+    const caixa = camada.getBoundingClientRect();
+    const furos = foraDoModal().recortes
+      .filter((no) => no.getClientRects().length)
+      .map((no) => no.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0 && r.right > caixa.left && r.left < caixa.right
+        && r.bottom > caixa.top && r.top < caixa.bottom);
+    const px = (n) => `${Math.round(n)}px`;
+    if (!furos.length) {
+      camada.style.removeProperty("clip-path");
+      camada.style.removeProperty("--recorte-esquerda");
+      camada.style.removeProperty("--recorte-baixo");
+      return;
+    }
+    // A camada inteira, e cada furo como um retângulo dentro dela: com a
+    // regra par-ímpar, o que está dentro de um furo fica de fora do véu.
+    const caminho = ["0 0", "100% 0", "100% 100%", "0 100%", "0 0"];
+    for (const r of furos) {
+      const [x1, y1, x2, y2] = [r.left - caixa.left, r.top - caixa.top, r.right - caixa.left, r.bottom - caixa.top].map(px);
+      caminho.push(`${x1} ${y1}`, `${x1} ${y2}`, `${x2} ${y2}`, `${x2} ${y1}`, `${x1} ${y1}`, "0 0");
+    }
+    camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
+    // A área do diálogo: à direita dos furos da metade esquerda, e acima dos
+    // da metade de baixo que não estão à esquerda.
+    const meioX = caixa.left + caixa.width / 2;
+    const meioY = caixa.top + caixa.height / 2;
+    const aEsquerda = furos.filter((r) => r.right <= meioX);
+    const embaixo = furos.filter((r) => r.right > meioX && r.top >= meioY);
+    camada.style.setProperty("--recorte-esquerda", px(Math.max(0, ...aEsquerda.map((r) => r.right - caixa.left))));
+    camada.style.setProperty("--recorte-baixo", px(Math.max(0, ...embaixo.map((r) => caixa.bottom - r.top))));
   }
 
   /** O que dá para focar aqui dentro, na ordem em que aparece. */
@@ -829,6 +911,7 @@ class SuperficieDeMod {
     // abre por cima, e A fecha primeiro porque o MOD dela respondeu. A pilha
     // tira A do meio e recalcula para B, que continua aberta.
     desempilharCamada(this.camada ?? this.raiz);
+    this.pararORecorte?.();
     if (this.aoTeclar) {
       document.removeEventListener("keydown", this.aoTeclar);
       this.aoTeclar = null;
