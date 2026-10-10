@@ -198,13 +198,18 @@ function deOndeVeio(resposta) {
  * O Rust só solta se aquela geração ainda é a de pé: um pedido atrasado não
  * derruba a sessão de ninguém.
  *
+ * **E a batida de uma espera que a pessoa largou** (`aBatidaFoiLargada`):
+ * sair da espera não começa outra tentativa, e a batida admitida depois
+ * reabria `#tela-auth` em aperto de mão por cima da entrada que a pessoa
+ * escolheu. `porque` diz qual das duas, no registro.
+ *
  * Vai ao `seele.log` como aviso, com o alvo e a geração, e **sem a
  * credencial**: o alvo é o desta chamada, e a credencial não passa por aqui.
  */
-function largarAEntrada(alvo, geracao) {
+function largarAEntrada(alvo, geracao, porque) {
   registrarNoAnfitriao(
     "entrada",
-    `a tentativa a ${alvo} entrou depois que outra a substituiu, e a tela não a mostra: a sessão dela (geração ${geracao}) é solta`,
+    `a tentativa a ${alvo} entrou depois de largada (${porque}), e a tela não a mostra: a sessão dela (geração ${geracao}) é solta`,
     "aviso",
   );
   invoke("soltar_a_entrada", { geracao }).catch((falha) =>
@@ -391,10 +396,11 @@ async function conectar(alvo, apelido, credencial) {
       joinSecret: credencial ?? null,
     });
     // **A tentativa que outra substituiu não entra na tela** (pendência 58,
-    // item 54; lote E54 da F5). Num lugar só, antes do primeiro passo do
-    // sucesso: ver `largarAEntrada`.
-    if (esta !== tentativas) {
-      largarAEntrada(alvo, resposta?.geracao);
+    // item 54; lote E54 da F5), nem a batida de uma espera que a pessoa largou
+    // (`aBatidaFoiLargada`, em `tela-auth.js`). Num lugar só, antes do
+    // primeiro passo do sucesso: ver `largarAEntrada`.
+    if (esta !== tentativas || aBatidaFoiLargada(esta)) {
+      largarAEntrada(alvo, resposta?.geracao, esta !== tentativas ? "outra a substituiu" : "a pessoa saiu da espera");
       return;
     }
     const { snapshot, veredito, geracao } = resposta;

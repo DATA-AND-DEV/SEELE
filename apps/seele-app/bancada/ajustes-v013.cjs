@@ -1867,5 +1867,6 @@ async function aEntradaVelhaNaoTomaATela(browser, porta) {
     console.log('lote W2: a tentativa substituída não apaga o CONECTAR, não pergunta o nome nem chama o connect, e conta ao seele.log que desistiu');
     console.log('lote W2: a batida da espera só cala a si mesma, e conta ao seele.log; a falha de outra tentativa fala na linha vermelha');
     console.log('lote E54: a tentativa que outra substituiu e entra depois não toca na tela, vai ao seele.log, e a sessão dela é solta pela geração dela');
+    console.log('lote E54: a batida de uma espera que a pessoa largou, admitida depois, também não toca na tela, e é solta');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
