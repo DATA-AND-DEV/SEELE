@@ -348,7 +348,11 @@ async function obterOConjunto(mods) {
   for (const [quantos, m] of faltando.entries()) {
     dizer(`obtendo ${m.id} (${quantos + 1} de ${faltando.length})…`);
     try {
-      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version });
+      // **Obter, e não atualizar** (lote X da F5, ADR 0045): este pacote é o
+      // que o servidor da pergunta exige, e não muda o que exige o servidor que
+      // esta janela hospeda — nem depois de a pessoa desistir, quando a
+      // obtenção ainda segue.
+      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version, uso: "obter" });
     } catch (falha) {
       // **Nomeia o MOD, a etapa e o próximo passo.** «Falhou» sozinho manda a
       // pessoa adivinhar qual dos três, e o que fazer a respeito.
@@ -2382,8 +2386,9 @@ async function instalarDoCatalogo(id, versao) {
     // **QA-03: a frase era fixa e mentia na metade dos casos.** Ela dizia
     // «instalado, e desligado» também quando a atualização acabara de reaplicar
     // a exigência num MOD que estava ligado. O comando devolve o que de fato
-    // aconteceu, e a frase passa a sair daí.
-    const reaplicado = await invoke("instalar_mod_do_catalogo", { id, versao });
+    // aconteceu, e a frase passa a sair daí. E só este uso reaplica (lote X da
+    // F5): é a gestão atualizando um MOD do servidor que esta janela hospeda.
+    const reaplicado = await invoke("instalar_mod_do_catalogo", { id, versao, uso: "atualizar" });
     resultado = reaplicado
       ? `${id} ${versao} instalado e aplicado neste servidor. Quem estava dentro ` +
         `precisa entrar de novo e aceitar — o conjunto mudou.`

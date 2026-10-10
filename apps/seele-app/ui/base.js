@@ -3658,7 +3658,9 @@ async function buscarOQueFaltaSeJaFoiAceito(catalogo, ausentes) {
   for (const m of ausentes) {
     anotarEstadoDoMod(m.id, "obtendo");
     try {
-      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version });
+      // Obter, e não atualizar (lote X da F5, ADR 0045): o que este servidor
+      // exige não muda o que exige o servidor que esta janela hospeda.
+      await invoke("instalar_mod_do_catalogo", { id: m.id, versao: m.version, uso: "obter" });
     } catch (falha) {
       // **Visível, e não só no console.** A falha é de um MOD que o servidor
       // exige: sem frase, a sessão continuaria sem ele e a pessoa descobriria

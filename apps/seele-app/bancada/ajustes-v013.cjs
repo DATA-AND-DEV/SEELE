@@ -372,6 +372,14 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   assert.equal(await page.evaluate((alvo) => testAceites[alvo] ?? null, ALVO_R), null,
     'a pessoa desistiu enquanto o MOD chegava, e o sim dos MODs ficou gravado: na próxima entrada neste servidor ' +
     'ninguém pergunta e o MOD roda, contra o «não» que ela deu por último (ADR 0045)');
+  // E a obtenção que terminou depois do «não» disse ao comando que é obtenção
+  // (lote X da F5, ADR 0045): só a atualização pela gestão reaplica o MOD no
+  // servidor que esta janela hospeda. Toda obtenção desta bancada é da pergunta.
+  const usos = await page.evaluate(() =>
+    testCalls.filter(c => c.cmd === 'instalar_mod_do_catalogo').map(c => c.args?.uso ?? null));
+  assert.ok(usos.length > 0 && usos.every(uso => uso === 'obter'),
+    'a obtenção da pergunta dos MODs, que segue até o fim mesmo depois de a pessoa desistir, não diz ao comando que é ' +
+    `obtenção (usos: ${JSON.stringify(usos)}): no servidor que esta janela hospeda, a versão exigida troca pela deste (ADR 0045)`);
   await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
 
   // ---- 5c. Desistir enquanto o sim é gravado também o desfaz.

@@ -1143,6 +1143,13 @@ struct Shared {
     /// por causa de um `send_to` que falhou num soluço de rede seria movimento
     /// sem informação.
     caminho: Mutex<Option<&'static str>>,
+    /// A impressão do certificado que o aperto de mão conferiu, gravada antes
+    /// de a casca poder perguntar. Ver [`Connection::impressao_do_servidor`].
+    ///
+    /// Não é reescrita quando o enlace reconecta: a reconexão de
+    /// `seele_core::enlace` volta ao mesmo destino, e uma chave diferente
+    /// nele é recusada pelo pin (`PinDecision::Changed`).
+    impressao_do_servidor: Mutex<Option<String>>,
     /// Quantas vezes o histórico mudou desde que esta sessão começou.
     ///
     /// Existe para o [`Snapshot`] poder dizer "mudou" sem carregar a conversa
@@ -1368,6 +1375,22 @@ impl Shared {
         // outro número: `Math.round` na casca, `{:.0}` na TUI. Abaixo disso o
         // evento acordaria a tela para ela redesenhar o mesmo texto.
         antes.abs_diff(micros) >= 500
+    }
+
+    /// Guarda a impressão que o pin conferiu nesta conexão.
+    ///
+    /// `FirstContact` e `Matches` trazem a impressão; `Changed` e
+    /// `InviteRefused` nunca chegam aqui, porque o aperto de mão já falhou.
+    fn gravar_impressao(&self, decisao: &seele_core::PinDecision) {
+        let impressao = match decisao {
+            seele_core::PinDecision::FirstContact { fingerprint }
+            | seele_core::PinDecision::Matches { fingerprint } => Some(fingerprint.clone()),
+            seele_core::PinDecision::Changed { .. }
+            | seele_core::PinDecision::InviteRefused { .. } => None,
+        };
+        if let Ok(mut slot) = self.impressao_do_servidor.lock() {
+            *slot = impressao;
+        }
     }
 
     /// Guarda por qual caminho a chegada saiu, se ela soube dizer.
@@ -1604,6 +1627,7 @@ impl Connection {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(false),
             pending_weights: Mutex::new(Vec::new()),
@@ -3345,6 +3369,25 @@ impl Connection {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// A impressão do certificado do servidor que esta conexão conferiu.
+    ///
+    /// **Em toda conexão que subiu**, e não só nas que o veredito conta:
+    /// [`Trust::Known`], o de toda volta a um servidor já fixado, não leva a
+    /// impressão, e é justamente o de quem hospeda entrando no próprio
+    /// servidor pela segunda vez. A casca compara esta com a das hospedagens
+    /// dela para saber se a sessão é com uma delas: pela chave, e não pelo
+    /// endereço (lote X da F5 da 0.16).
+    ///
+    /// `None` só numa `Connection` montada à mão, sem aperto de mão.
+    #[must_use]
+    pub fn impressao_do_servidor(&self) -> Option<String> {
+        self.shared
+            .impressao_do_servidor
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+
     /// Ends the session.
     pub fn disconnect(&self) {
         self.shared.running.store(false, Ordering::Relaxed);
@@ -4465,6 +4508,7 @@ async fn drive(
     registrar_trilha(&chegado.trilha);
     shared.gravar_caminho(chegado.caminho());
     let mut client = chegado.enlace;
+    shared.gravar_impressao(client.pin_decision());
 
     // `Enlace::conectar` already returned `Err` above for anything that would
     // have made this a `PinDecision::Changed` or a refused invite — see
@@ -7981,6 +8025,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -9130,6 +9175,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -9172,6 +9218,7 @@ mod tests {
             rtt_micros: std::sync::atomic::AtomicU64::new(0),
             jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
@@ -12212,6 +12259,7 @@ mod o_audio_segue_a_sala {
             rtt_micros: AtomicU64::new(0),
             jitter_de_chegada_micros: AtomicU64::new(0),
             caminho: Mutex::new(None),
+            impressao_do_servidor: Mutex::new(None),
             signal: AtomicU8::new(0),
             running: AtomicBool::new(true),
             pending_weights: Mutex::new(Vec::new()),
