@@ -48,6 +48,7 @@ mod mods;
 mod reducao;
 mod sala;
 mod servidores;
+mod toque;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -162,6 +163,9 @@ struct Session {
     /// ou por que não subiu. Guardado aqui para a tela que abre depois do
     /// anúncio por [`sala::CANAL_DA_SALA`]; ver [`estado_da_sala`].
     sala: Mutex<sala::EstadoDaSala>,
+    /// Quem está tocando na sala pessoal agora (tarefa 24 da F7): a faixa da
+    /// tela que abre com o toque já tocando, e o toque de quem se atende.
+    toques: Mutex<toque::Toques>,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -1599,6 +1603,18 @@ fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
         .sala
         .lock()
         .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
+}
+
+/// Quem está tocando na sala pessoal agora (tarefa 24 da F7), para a tela que
+/// abre com o toque já tocando. Cada toque chega por [`toque::CANAL_DO_TOQUE`]
+/// quando começa e quando para.
+#[tauri::command]
+fn toques_agora(session: State<'_, Session>) -> Vec<toque::NaFaixa> {
+    session
+        .toques
+        .lock()
+        .map(|toques| toques.na_faixa())
+        .unwrap_or_default()
 }
 
 /// «Não receber ligações», no PERFIL: desliga a sala inteira, ou a religa
@@ -10517,6 +10533,7 @@ fn main() {
             onde_estou,
             estado_da_sala,
             receber_ligacoes,
+            toques_agora,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,

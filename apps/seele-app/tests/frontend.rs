@@ -578,7 +578,14 @@ fn every_command_the_frontend_calls_is_registered() {
 // `seele://sala` lê por ele. `receber_ligacoes` entrou junto: é o «Não receber
 // ligações» do PERFIL. Os dois saem quando a linha de estado da sala e o PERFIL
 // os chamarem, na vez da F8, dentro do mesmo conjunto da sala viva.
-const AGUARDANDO_TELA: &[&str] = &["onde_estou", "estado_da_sala", "receber_ligacoes"];
+// `toques_agora` entrou com a tarefa 24: a faixa `#toque` da tela que abre com
+// o toque já tocando. Sai com a faixa, na tarefa 26.
+const AGUARDANDO_TELA: &[&str] = &[
+    "onde_estou",
+    "estado_da_sala",
+    "receber_ligacoes",
+    "toques_agora",
+];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -18670,4 +18677,57 @@ fn a_semente_da_sala_nunca_atravessa_a_webview() {
             corpo.lines().take(3).collect::<Vec<_>>().join("\n")
         );
     }
+}
+
+/// **O toque chama, e não toma a tela** (tarefa 24 da F7, spec de 23/09,
+/// «Testes» 8).
+///
+/// O toque pede atenção ao sistema (`request_user_attention`: o Dock pula no
+/// macOS, a barra pisca no Windows), e **nunca** põe a janela na frente nem a
+/// desminimiza: quem está jogando, apresentando ou digitando noutro programa
+/// decide se olha. E a subida da sala liga o vigia da campainha: os testes do
+/// vigia (`toque::o_toque_por_evento`) o provam sozinho, e só este texto prova
+/// que a sala de verdade o chama.
+#[test]
+fn o_toque_chama_a_atencao_e_nunca_toma_a_tela() {
+    for arquivo in ["src/toque.rs", "src/sala.rs"] {
+        let producao = producao_rust(&read(arquivo));
+        for proibido in ["set_focus(", "unminimize("] {
+            assert!(
+                !producao.contains(proibido),
+                "`{arquivo}` chama `{proibido}` no caminho do toque: o toque toma a tela de quem \
+                 está noutra coisa"
+            );
+        }
+    }
+    let toque = producao_rust(&read("src/toque.rs"));
+    assert!(
+        toque.contains(".request_user_attention(tipo)"),
+        "o toque deixou de pedir atenção ao sistema: com a janela atrás de outra, ninguém vê"
+    );
+
+    let sala = producao_rust(&read("src/sala.rs"));
+    let subir_agora: String = sala
+        .split("async fn subir_agora<R: Runtime>(")
+        .nth(1)
+        .and_then(|depois| depois.split("\n}\n").next())
+        .expect("`sala::subir_agora`")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let assina = subir_agora
+        .find("letcampainha=sala.recepcao().map(|recepcao|recepcao.assinar());")
+        .expect("a subida da sala não assina a campainha");
+    let guarda = subir_agora
+        .find("guardar_se_ainda_subindo(")
+        .expect("a subida da sala não guarda a sala");
+    assert!(
+        assina < guarda,
+        "a campainha é assinada depois de a sala ir para as hospedagens: um toque no instante \
+         seguinte não teria quem o ouvisse"
+    );
+    assert!(
+        subir_agora.contains("tokio::spawn(crate::toque::ouvir(app.clone(),avisos,"),
+        "a subida da sala não liga o vigia da campainha: quem tocar não chega à casca"
+    );
 }

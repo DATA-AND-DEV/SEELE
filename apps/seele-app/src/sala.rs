@@ -210,10 +210,25 @@ pub(crate) async fn subir_agora<R: Runtime>(app: AppHandle<R>, subida: Subida) {
         }
     };
     let registro = sala.registro_no_quarto();
+    // Assinada **antes** de a sala ir para as hospedagens: um toque que chegue
+    // no instante seguinte já tem quem o ouça.
+    let campainha = sala.recepcao().map(|recepcao| recepcao.assinar());
     if let Some(largada) = guardar_se_ainda_subindo(&app.state::<crate::Session>(), sala) {
         tracing::info!("a sala terminou de subir depois de desligada, e desce");
         largada.encerrar().await;
         return;
+    }
+    match campainha {
+        Some(avisos) => {
+            let alarme = crate::toque::AlarmeDaJanela::novo(app.clone(), subida.config.clone());
+            tokio::spawn(crate::toque::ouvir(
+                app.clone(),
+                avisos,
+                subida.config.clone(),
+                alarme,
+            ));
+        }
+        None => tracing::error!("a sala subiu sem campainha: ninguém vai ouvir quem tocar"),
     }
     let firewall_nao_cobre = crate::firewall_nao_cobre_este_executavel();
     let no_ar = |registro| EstadoDaSala::NoAr {

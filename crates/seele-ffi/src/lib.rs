@@ -218,6 +218,9 @@ impl TesteDeMicrofone {
     }
 }
 
+/// O volume padrão do toque, de 0 a 1: audível, e longe do teto da escala.
+pub const VOLUME_DO_TOQUE: f32 = seele_core::VOLUME_DO_TOQUE;
+
 /// O toque da sala pessoal tocando (tarefas 24 e 25 da F7). Largar a alça
 /// para o som.
 ///
