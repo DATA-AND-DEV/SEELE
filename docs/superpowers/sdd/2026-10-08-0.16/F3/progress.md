@@ -525,3 +525,31 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     se errado: um MOD com muitas capas animadas recusado antes da medida, ou
     memória demais num celular; a M3 mede.
   - Próximo: a tarefa 7.
+- **Tarefa 7, as camadas** (09/10).
+  - Steps 1–2 `34535f6d`: `tipo-desconhecido` na 6, com `tipoPedido` e
+    `tipos`; até a 5, o `dialogo` de antes com a linha no `seele.log`. **Um
+    achado no meio:** o campo se chamava `tipo`, e `responder` espalhava a
+    carga sobre `{ tipo: "resposta", n, ok }` — a resposta virava uma
+    mensagem que o executor não reconhece, e o pedido do MOD esperaria para
+    sempre. O caso passava, porque olhava só o campo. Agora o envelope vai por
+    último, e dois casos o conferem. Seis reversões.
+  - Step 3: **espera a tarefa 11** (o teto da `midia` numa superfície se
+    decide com a medida).
+  - Step 4 `0f10718b`: a `folha`, os tipos por API (`tiposDaApi`), a API no
+    dono, a pilha de três à vista por MOD (`teto-de-folhas`), o `painel` na 6
+    recusado com «use folha», e o `teto-de-superficies` com nome. Bancada de
+    navegador nova, `camadas.cjs`, no CI. Sete reversões.
+  - Rulings: (a) **até a 5, o tipo desconhecido segue abrindo `dialogo`** — o
+    rascunho diz «na 6», e os três publicados só pedem tipos que existem;
+    custo se errado: um pacote de laboratório da 5 com um tipo errado segue
+    vendo um diálogo, agora com a linha no `seele.log`. (b) **a pilha de
+    folhas é por MOD**, como os outros tetos; custo se errado: dois MODs
+    empilham seis folhas na mesma coluna (só a de cima aparece).
+  - Para a tarefa 13: o `check-api` compara `TIPOS_DE_SUPERFICIE` inteira
+    com os tipos de cada versão a partir da 6; com a v6 escrita, ele acusará
+    o `painel` que a tabela ainda tem, até o corte o tirar (ou até ele ler
+    `tiposDaApi(6)`).
+  - Achado de desenho, fora do passo: numa coluna de 300 px, o título de uma
+    folha ou de um painel quebra no meio da palavra («EDITA / R / PERFIL»):
+    `overflow-wrap: anywhere` no título, que divide a linha com a origem e o
+    FECHAR.
