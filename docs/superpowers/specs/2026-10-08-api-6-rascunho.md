@@ -1020,7 +1020,16 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
 
 **Pedido da MESA (item 9):** o orçamento do quintal legível pela metade de
 servidor (`dados.uso()`, `dados.teto`), e a recusa por quintal cheio com código
-próprio. Entra: é só fachada.
+próprio. Entra: é só fachada. **Feito em 10/10** (`3bfa9fd3`; achado montando o
+`v6.json`: a tarefa 8 o listava e não o fez, e a promessa só não foi acusada
+porque o `check-api` aceitava uma frase como apontador). `dados.uso()` dá os
+bytes do quintal, chave mais valor, em UTF-8, pela **mesma leitura da
+gravação** (`ler_o_quintal`), e `dados.teto` é o teto dela (262144); os dois
+moram no protótipo do `dados`, e não são gravados. **Medido antes:** com o
+quintal cheio, o `aoPedir` terminava, a gravação recusava, e a janela recebia a
+recusa genérica (`bridge-refused`), a de qualquer falha; agora o pedido volta
+com `{ ok: false, error: 'quintal-cheio' }`. A resposta acima de 1 MiB, que
+saía como quintal cheio, ganhou falha própria e continua `bridge-refused`.
 
 ## 9. O tema
 

@@ -704,6 +704,14 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   `color` no contêiner, cinco regiões passam, e quatro contêineres
   transparentes (`.linha-barra`, `#compositor-mods`, `#form-mensagem`,
   `#lista-mensagens`) mostram que o fundo de região nunca apareceu neles.
-- **Esperam:** as três decisões da orquestradora (o fundo das regiões, a
-  `carga-cartoes`, o `dados.uso`), a tarefa 13 (o corte), o Step 5 da tarefa 9
-  (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não mediu).
+- **As três decisões, feitas:** o fundo das regiões só quando declarado
+  (`3180c124`, com a cor; a validação de uma região só com `texto` escuro já
+  recusa); a `carga-cartoes` pronta para a orquestradora rodar (`8fe32c96`:
+  os 250 calados num processo, no ritmo da portaria, e a lista contada pela
+  acessibilidade antes de medir); e o `dados.uso()`/`dados.teto` com o
+  `quintal-cheio` nomeado (`3bfa9fd3`; medido antes: chegava `bridge-refused`).
+  O guarda dos apontadores resolve pela definição (`2a29f62c`), e achou os
+  quatro do `volume` (`e2ad334f`); da v1 à v5, tudo resolve.
+- **Esperam:** os números da `carga-cartoes`, a tarefa 13 (o corte), o Step 5
+  da tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
+  mediu).
