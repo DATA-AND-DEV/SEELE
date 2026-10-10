@@ -14,8 +14,9 @@ local: sem push, tag nem release. Sem conformidade. Nada no fio.
 | `5bc3c84e` | **produto**: a rejeição de `aceitarOsMods` vira frase no diálogo, o ACEITAR volta e o motivo vai ao `seele.log`; o roteiro novo `aceite-de-mods-que-falha.js` (§7) |
 | `9a53cc13` | `aceite-de-mods.js` exige o sim gravado antes do `connect` da volta (§3, E14) |
 | `142505db` | o relatório com as medidas e o que falta rodar |
-| `ee11e9f9` | a rodada 1, **em curso, não rodada**: I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
-| a rodada 2 | **em curso, não rodada**: a corrida de `abrirAceiteDeMods` (§12) |
+| `ee11e9f9` | a rodada 1 (escrita em curso, sem rodar): I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
+| `23b9cdbc` | a rodada 2 (escrita em curso, sem rodar): a corrida de `abrirAceiteDeMods` (§12) |
+| este | **verde**: as rodadas 1 e 2 foram rodadas, e as medidas estão no §13 |
 
 **O que mudou fora de `tools/roteiros/`.** Em `apps/seele-app/ui/camada-mods.js`,
 uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
@@ -23,7 +24,7 @@ uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
 (§7). **Na rodada 1 (§11, não rodada):** em `camada-mods.js`,
 `levarParaOAceiteDeMods` e duas funções novas (`perguntaNaoAbriu`,
 `motivoEmTexto`), e a frase de `aceiteFalhou`; em `camada-mods.css`, o
-`pre-line` de `#mods-erro`; em `frontend.rs`, três linhas na lista do guarda da
+`pre-line` de `#mods-erro`; na rodada 2, a conferência de `abrirAceiteDeMods` depois do `await` (§12); em `frontend.rs`, três linhas na lista do guarda da
 credencial e a leitura de `pergunta` nas três funções. Nada em `crates/`, no
 fio, em `tools/carga-da-casca.py`, em `main.rs`, em `tela-boot.js`. Os
 outros roteiros que usam `exigir` não foram rodados de novo: o aparelho que os
@@ -357,7 +358,7 @@ separar os que relatam o que dizem provar.
    comparar a saída antiga com a nova do `catalogo-de-mods.js` vê o selo do MOD
    diferente. É de propósito.
 
-## 11. Rodada 1: a revisão (EM CURSO, NÃO RODADO)
+## 11. Rodada 1: a revisão (escrita sem rodar; rodada no §13)
 
 **Estado.** Escrito, commitado e **não rodado**: a pausa da orquestradora (CPU
 e quadros) proíbe `cargo`, roteiros, bancadas e `check-runtime`. Nem um
@@ -523,7 +524,7 @@ do M2; (3) as 37 anteriores, de novo, porque os três roteiros mudaram (o script
 e `contribuicoes-e-camadas`. Tudo isto está **por rodar**: o relatório não diz
 «verde» para nada desta rodada.
 
-## 12. Rodada 2: a corrida de `abrirAceiteDeMods` (EM CURSO, NÃO RODADA)
+## 12. Rodada 2: a corrida de `abrirAceiteDeMods` (escrita sem rodar; rodada no §13)
 
 **Estado.** Escrito e commitado, **não rodado**: a pausa continua. A corrida
 abaixo é como eu a li. **Se a cena nova não ficar vermelha sem o conserto, a
@@ -605,3 +606,133 @@ Depois H2; o roteiro novo, limpo; e a verificação inteira da rodada 1 (§11) �
 `check-runtime`, fmt, clippy e as três bancadas. A `ajustes-v013.cjs` (cenas 5b
 e 6) é a que mais pode sentir a conferência nova: ela abre perguntas em
 sequência.
+
+## 13. O que rodou nas rodadas 1 e 2 (VERDE)
+
+A pausa acabou, e tudo o que os §11 e §12 deixaram por rodar foi rodado, na
+ordem que eles pediam. Nada falhou por tempo, nem precisou de segunda rodada
+(o lote W2 roda bancadas noutro worktree ao mesmo tempo; nenhuma das minhas
+falhou).
+
+### A corrida existe como li
+
+O roteiro `aceite-de-mods-em-corrida.js`, **sem o conserto**, fica vermelho nas
+duas formas, com a frase que o §12 previa:
+
+| forma | resultado |
+|---|---|
+| H1: o bloco `if (aceitePendente !== pergunta) {…}` tirado | `REPROVADO: o diálogo mostra [seele/placar] e o ACEITAR responde por [ponte/retransmissor]: a pessoa lê a lista de um pedido e aceita o conjunto do outro` |
+| contra o `ui/` de `ee11e9f9` (`git archive`, `--casca`), que não tem o bloco | a mesma frase, e o relato `itens [seele/placar], servidor 203.0.113.9:8383, o ACEITAR responde por [ponte/retransmissor]` |
+| H2: a conferência fica, o registro sai | `REPROVADO: a abertura que perdeu a vez não foi ao seele.log com o alvo e o nível aviso (registros de «aceite-de-mods»: nenhum)` |
+| com o conserto | `carga limpa`; `itens [ponte/retransmissor]`, `servidor 198.51.100.4:8383`, 1 registro, o sim com o alvo e o conjunto de B e a volta a B |
+
+Ou seja: com o `await` da leitura pendente, a abertura velha repovoa a lista **e
+o servidor** por cima da pergunta nova, e o ACEITAR responde pela nova. O
+conserto fica.
+
+### I2: o vermelho antes
+
+`aceite-de-mods-que-nao-abre.js` contra o `ui/` de `9a53cc13` (sem a rodada 1):
+`REPROVADO: a pergunta dos MODs não abriu e a entrada não diz nada: sem diálogo e
+sem linha vermelha com a recusa (linha vermelha=escondida, o registro tem 0
+linha(s))`, e o relato mostra **a pergunta pendente de `203.0.113.9:8383` com o
+diálogo escondido**: a credencial na memória sem diálogo que a feche. É o defeito
+que a revisão leu.
+
+### As reversões
+
+**53 reversões, todas vermelhas com a frase do §4, do §6, do §7 ou dos §11 e
+§12**, e `cmp` igual depois de cada restauração (o `git status` limpo no fim):
+
+| roteiro | casos | resultado |
+|---|---|---|
+| `aceite-de-mods.js` | R0, R0b, R1 a R16 (19) | as 19 vermelhas |
+| `catalogo-de-mods.js` | K0 a K8 (14) | as 14 vermelhas |
+| `aceite-de-mods-que-falha.js` | F1 a F12 (12) | as 12 vermelhas |
+| `aceite-de-mods-que-nao-abre.js` | G1 a G6 (6) | **5 vermelhas; G6 não** |
+| `aceite-de-mods-em-corrida.js` | H1, H2 (2) | as 2 vermelhas |
+
+As 37 antigas (R0 a R12, K0 a K6, F1 a F10) saíram todas vermelhas de novo,
+com as frases do relatório, salvo três que mudaram de texto por causa da
+rodada 1: o R0 agora termina em `a sequência foi: mods_instalados →
+registrar_da_janela` (a falha de `aceitarOsMods` passou a ir ao registro); o R5
+diz `o item 2 (ponte/retransmissor) não traz a linha «roda na máquina de quem
+hospeda», e o anúncio marca no_servidor nele`; e o K2b traz, no excerto da
+linha, o alcance da 1.1.0. As 16 novas:
+
+| # | a frase medida |
+|---|---|
+| R13 `if (!mod.no_servidor)` | `o item 1 (seele/placar) traz a linha «roda na máquina de quem hospeda», e o anúncio não marca no_servidor nele` |
+| R14 o alcance que não aparece | `o item 1 (seele/placar) mostra o alcance [nada declarado], e o anúncio trouxe [dom · mensagens do servidor]` |
+| R15 o repositório trocado | `o item 1 (seele/placar) mostra o repositório «não declarado», e o anúncio trouxe «https://example.invalid/placar»` |
+| R16 a volta a outro servidor | `a volta foi a 198.51.100.4:8383, e a tentativa que o servidor recusou era a 203.0.113.9:8383: aceitar os MODs de um servidor e entrar em outro` |
+| K7 o alcance da 1.0.0 | `o alcance desenhado é [falar com um serviço de fora], e o da versão exibida (1.1.0) é [mensagens do servidor]; o da 1.0.0 é [falar com um serviço de fora]` |
+| K8 nenhum alcance | `o alcance desenhado é [], e o da versão exibida (1.1.0) é [mensagens do servidor]; …` |
+| F11 sem o motivo | `a frase da falha não traz o motivo (o TypeError que a casca viu): …` |
+| F12 sem o `pre-line` | `o motivo da falha sai emendado: #mods-erro tem white-space «normal», e a frase tem uma linha por parte` |
+| G1 o `console.warn` de volta | `a pergunta dos MODs não abriu e a entrada não diz nada: sem diálogo e sem linha vermelha com a recusa (linha vermelha=escondida, o registro tem 0 linha(s))` |
+| G2 sem fechar a pergunta | `a pergunta que não abriu ficou na memória com a credencial da tentativa, sem diálogo que a feche: uma pergunta de 203.0.113.9:8383, com o diálogo escondida` |
+| G3 sem o registro | `a pergunta dos MODs não abriu e o motivo não foi ao seele.log com o alvo, o erro e o nível aviso (registros de «aceite-de-mods»: nenhum)` |
+| G4 a tentativa substituída fala | `a pergunta de uma tentativa que outra substituiu não abriu e a falha apareceu na linha vermelha da entrada: «ESTE SERVIDOR EXIGE MODS QUE VOCÊ AINDA NÃO ACEITOU.»` |
+| G5 sem a frase de reserva | `a lista da recusa nem é lista, a frase dela não se montou e a entrada ficou calada, em vez de dizer a falha (linha vermelha=escondida: …)` |
+| H1, H2 | acima |
+
+**G6 não fica vermelho, e é um mutante equivalente, não um furo.** Com a
+conferência de `abrirAceiteDeMods` (§12), a abertura que perdeu a vez **volta
+antes de falhar**, então `perguntaNaoAbriu` nunca roda para uma pergunta que
+outra já substituiu: `aceitePendente === pergunta` ali passou a valer sempre, e
+tirar a condição (`fecharAceiteDeMods()` incondicional) não muda nada
+observável. A defesa em camadas é real e foi medida:
+
+- **G6c** (tira a conferência da abertura, **deixa** a de `perguntaNaoAbriu`):
+  `carga limpa`. A segunda camada sozinha segura a cena 3.
+- **G6b** (tira as duas): `REPROVADO: a pergunta antiga não abriu e a falha dela
+  fechou a pergunta nova, que a pessoa estava lendo (diálogo=escondida, pergunta
+  pendente: nenhuma)`.
+
+A condição de `perguntaNaoAbriu` fica como defesa: se alguém puser outro `await`
+em `abrirAceiteDeMods` depois da conferência, ela volta a decidir. A cena 3 do
+`aceite-de-mods-que-nao-abre.js` prova o resultado (a pergunta nova fica
+aberta), não qual das duas camadas o produz; para isso, G6b.
+
+### M2: a sonda e o buraco
+
+- **Antes** (o guarda de `9a53cc13` e o `ui/` dele, com `JSON.stringify(pergunta)`
+  no registro de `aceiteFalhou`): `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`
+  **passa**. O buraco que a revisão leu existia.
+- **Depois** (o guarda desta ponta): a mesma sonda no registro de `aceiteFalhou`
+  **reprova** com `a credencial da tentativa ganhou um caminho novo em
+  `camada-mods.js`: …${JSON.stringify(pergunta)}…`, e a sonda no registro de
+  `perguntaNaoAbriu` também. O conserto do guarda (a leitura de `pergunta` nas
+  três funções) vale.
+
+### A verificação
+
+- Os **cinco roteiros**, limpos, `exit=0`: `aceite-de-mods`, `catalogo-de-mods`,
+  `aceite-de-mods-que-falha`, `aceite-de-mods-que-nao-abre`,
+  `aceite-de-mods-em-corrida`. As contas de orçamento virtual (1,6 s e 2,7 s)
+  não precisaram de ajuste: nenhum deles ficou sem chegar ao fim.
+- `cargo test -p seele-app --test frontend`: **287 passed**.
+- `cargo test -p seele-app --bin seele-app`: **312 passed**.
+- `cargo xtask check-runtime`: exit 0, 12 bancadas.
+- `cargo fmt --all -- --check`: limpo.
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpo.
+- `ajustes-v013.cjs`: exit 0. As linhas `lote R: …` e `lote W: …` só são
+  escritas no fim, depois de **todas** as asserções, e saíram as nove. As cenas
+  que o coordenador pediu para olhar passaram: a **5b** (uma pergunta nova
+  substitui a antiga durante a obtenção; é a linha `lote R: desistir da
+  pergunta…`) e a **6** (o último alvo trocado no meio da batida; a linha `lote R:
+  com o último alvo trocado no meio da batida, a volta e o sim vão ao servidor
+  que perguntou`). A conferência nova da abertura não as atrapalhou: a 5b abre
+  a pergunta nova quando a antiga já está aberta e na obtenção, e a conferência
+  só vale **antes** de a abertura desenhar.
+- `diagnostico-de-mods.cjs` e `contribuicoes-e-camadas.cjs`: exit 0.
+- Não rodados: `cargo test --workspace`, conformidade.
+
+### O que sobra
+
+- **M3** vai ao lote RT, como a decisão disse.
+- A **observação** do §11 (a corrida) deixou de ser observação: está consertada e
+  provada.
+- Os dois `.catch` da mesma classe estão fechados; a preocupação 2 do §10 está
+  tratada. A 1 (roteiros no Actions) é do lote RT.
