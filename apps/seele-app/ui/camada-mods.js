@@ -140,6 +140,15 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
   // A pergunta que esta abertura gravou, para conferir depois do `await` que
   // ainda é a da tela.
   const pergunta = aceitePendente;
+  // **O diálogo que já estava aberto não responde pela pergunta nova** (lote W3
+  // da F5, rodada 3). `aceitePendente` acabou de trocar, e a lista, o servidor e o
+  // texto do ACEITAR só são desenhados depois do `await` abaixo: até lá o
+  // diálogo da pergunta antiga seguia na tela com o ACEITAR aceso, e o clique
+  // gravava o sim da nova — consentimento trocado, a metade da corrida que a
+  // conferência de depois do `await` não alcança. O desenho acende o botão de
+  // novo; uma abertura que perdeu a vez não o toca, e quem tomou o lugar dela
+  // o acende.
+  $("mods-aceitar").disabled = true;
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**

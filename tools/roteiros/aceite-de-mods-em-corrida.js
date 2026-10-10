@@ -22,6 +22,12 @@
 //   3. A leitura de A responde. O diálogo tem de continuar com a lista de B, no
 //      servidor B, e a abertura de A vai só ao `seele.log`.
 //   4. ACEITAR grava o sim de B, com o conjunto de B, e a volta vai a B.
+//   5. (rodada 3, M6) **O diálogo já estava aberto.** A pergunta de A está na
+//      tela, a pessoa a lê, e chega uma segunda recusa com a leitura pendente:
+//      a abertura nova troca `aceitePendente` na hora e só desenha depois da
+//      leitura. Na janela, o diálogo ainda mostrava a lista de A com o ACEITAR
+//      aceso — que responderia por B. O ACEITAR fica apagado até a pergunta
+//      nova desenhar, e volta aceso com a lista de B.
 //
 // As reversões de cada exigência estão no relatório do lote W3
 // (`docs/superpowers/sdd/2026-10-08-0.16/F5/lote-w3-report.md`).
@@ -110,3 +116,50 @@ exigir(gravado !== undefined && gravado.alvo === ALVO_B && gravado.conjunto === 
   `ACEITAR gravou o sim de ${gravado?.alvo} (${gravado?.conjunto}), e a lista que a pessoa leu era a de ${ALVO_B} (${CONJUNTO_B})`);
 exigir(volta.server === ALVO_B,
   `a volta foi a ${volta.server}, e a pergunta que a pessoa respondeu era a de ${ALVO_B}`);
+
+// ---- 5. O diálogo já está aberto, e a recusa nova chega com a leitura pendente.
+// A pergunta de A está na tela e a pessoa a lê.
+SEELE_RESPOSTAS.aceite_de_mods = null;
+SEELE_RESPOSTAS.connect = { __recusa: anuncio(CONJUNTO_A, [MOD_A]) };
+await conectar(ALVO_A, "eu", CONVITE_A);
+await espera(200);
+exigir(visivel("mods-aceite") === "VISIVEL" && lista(desenhados()) === lista([MOD_A.id]) && alvoNoCabecalho() === ALVO_A,
+  "a pergunta de A não abriu aberta, e esta cena não mede nada " +
+    `(diálogo=${visivel("mods-aceite")}, itens=${lista(desenhados())}, servidor=${alvoNoCabecalho()})`);
+
+// Chega a de B, com a leitura do aceite anterior pendente: a abertura troca
+// `aceitePendente` na hora, e só desenha depois.
+SEELE_RESPOSTAS.aceite_de_mods = new Promise((resolver) => { soltar = resolver; });
+SEELE_RESPOSTAS.connect = { __recusa: anuncio(CONJUNTO_B, [MOD_B]) };
+SEELE_RESPOSTAS.mods_instalados = [MOD_A, MOD_B].map(({ id, hash }) => ({ id, hash }));
+await conectar(ALVO_B, "eu", CONVITE_B);
+await espera(100);
+exigir(aceitePendente !== null && aceitePendente.alvo === ALVO_B,
+  "a segunda recusa por MODs não tomou o lugar de `aceitePendente`, e esta cena não mede nada");
+const respondePor = `${aceitePendente.alvo} ${lista(aceitePendente.mods.map((mod) => mod.id))}`;
+const naJanela = `${alvoNoCabecalho()} ${lista(desenhados())}`;
+const botaoNaJanela = document.getElementById("mods-aceitar").disabled ? "apagado" : "aceso";
+relatar(`na janela: o diálogo mostra ${naJanela}, ACEITAR ${botaoNaJanela}; o ACEITAR responde por ${respondePor}`);
+exigir(botaoNaJanela === "apagado" || naJanela === respondePor,
+  `na janela entre a pergunta nova e o desenho dela, o diálogo mostra ${naJanela} com o ACEITAR aceso, ` +
+    `e o ACEITAR responde por ${respondePor}`);
+
+// A pessoa aperta ACEITAR dentro da janela: nada pode ser gravado.
+SEELE_RESPOSTAS.connect = { snapshot: SEELE_QUADRO, veredito: null };
+window.__SEELE_CHAMADAS.length = 0;
+delete window.__SEELE_ARGS.aceitar_mods;
+document.getElementById("mods-aceitar").click();
+await espera(300);
+const naJanelaGravou = window.__SEELE_ARGS.aceitar_mods;
+relatar(`ACEITAR na janela: ${naJanelaGravou ? `gravou ${naJanelaGravou.alvo} ${naJanelaGravou.conjunto}` : "nada gravado"}`);
+exigir(naJanelaGravou === undefined,
+  `a pessoa lia a pergunta de ${ALVO_A} [${MOD_A.id}] e ACEITAR gravou o sim de ${naJanelaGravou?.alvo} (${naJanelaGravou?.conjunto})`);
+
+// A leitura responde: a pergunta nova desenha, e o ACEITAR volta aceso.
+soltar(null);
+await espera(300);
+relatar(`depois da leitura: o diálogo mostra ${alvoNoCabecalho()} ${lista(desenhados())}, ` +
+  `ACEITAR ${document.getElementById("mods-aceitar").disabled ? "apagado" : "aceso"}`);
+exigir(alvoNoCabecalho() === ALVO_B && lista(desenhados()) === lista([MOD_B.id]) && !document.getElementById("mods-aceitar").disabled,
+  "a pergunta nova desenhou e o diálogo não ficou com ela e o ACEITAR aceso " +
+    `(mostra ${alvoNoCabecalho()} ${lista(desenhados())}, ACEITAR ${document.getElementById("mods-aceitar").disabled ? "apagado" : "aceso"})`);
