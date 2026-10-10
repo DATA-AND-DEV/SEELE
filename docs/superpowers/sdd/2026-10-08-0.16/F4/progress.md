@@ -805,3 +805,23 @@ começar.
   `ejetar`, o `desassentar` e o `sala_cheia_nao_se_escuta` (38 testes). É a
   prova de que a régua do portão no `seele-voz` (`f1f5dfd5`), que veio depois do
   que a bateria cobriu, não mudou a voz do desktop.
+
+## 10/10: a fase 2 da 2.2, o retrato comum
+
+- **Passo 1, a mudança de lugar** (`d0f72c7c`). Os tipos de vista, as
+  conversões e as seis funções da projeção saem do `seele-ffi` para
+  `seele-sessao/src/retrato.rs`, e o `seele-ffi` os reexporta pelo
+  `seele-core`. Os guardas de texto do `frontend.rs` que liam o `types.rs`
+  leem os dois arquivos juntos (`tipos_da_ponte`). Um `#[cfg(test)]` no topo do
+  `lib.rs` cortou o «programa» que quatro guardas de texto do `seele-ffi` leem,
+  e os quatro reprovaram; o import foi para dentro dos módulos de teste.
+- **Passo 2, os dois produtores** (`f087a500`). O `RetratoDaSala` com os nomes
+  de campo do `Snapshot`; a `Sessao` do `seele-web`, que entra pelo `adopt` e
+  dobra quadros; o `seele_ffi::sem_rede`, atrás da feature `conformidade`. O
+  `dois_produtores_de_snapshot.rs` compara os 19 campos depois de cada uma de
+  onze mensagens, com o `TemaMudou` que chega e o que sai. Três reversões no
+  navegador reprovaram, cada uma no campo e no passo certos.
+- O `.wasm` do `seele-web` com a `prova` ficou em 985 KB (era 885 antes da
+  voz e da sessão).
+- **A fechar** depois da décima segunda, como a orquestradora pediu: os campos
+  novos do `Snapshot` da sala viva, cada um com o seu lado.
