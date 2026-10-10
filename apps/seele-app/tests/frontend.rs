@@ -18768,3 +18768,78 @@ fn o_connect_confere_a_sala_desta_maquina_pelo_codigo() {
          sala sem conferir quem atende"
     );
 }
+
+/// As variantes de um `enum` de `src/sala.rs`, pelo texto: cada linha de quatro
+/// espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o fecha.
+fn variantes_da_sala(nome: &str) -> Vec<String> {
+    let sala = without_comments(&read("src/sala.rs"));
+    let Some(depois) = sala.split(&format!("enum {nome} {{")).nth(1) else {
+        panic!("`src/sala.rs` não tem mais o `enum {nome}`");
+    };
+    let corpo = depois.split("\n}").next().unwrap_or_default();
+    let variantes: Vec<String> = corpo
+        .lines()
+        .filter(|linha| linha.starts_with("    ") && !linha.starts_with("     "))
+        .filter_map(|linha| {
+            let nome: String = linha
+                .trim()
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .collect();
+            nome.chars().next().is_some_and(|c| c.is_ascii_uppercase()).then_some(nome)
+        })
+        .collect();
+    assert!(!variantes.is_empty(), "a leitura do `enum {nome}` não achou variante nenhuma");
+    variantes
+}
+
+/// **Toda variante da sala pessoal tem frase** (tarefas 23 a 29 da F7). O Rust
+/// manda enums e a frase é do `frases.js`: uma variante nova sem frase é uma
+/// sala que sabe e não conta. As que não têm nada a dizer (subindo, esperando o
+/// ponto, registrada) estão lá com `null`, de propósito, para a decisão ficar
+/// escrita.
+#[test]
+fn toda_variante_da_sala_pessoal_tem_frase() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(depois) = frases.split("const SALA_PESSOAL = Object.freeze({").nth(1) else {
+        panic!("o `frases.js` não tem o bloco `SALA_PESSOAL`");
+    };
+    let bloco = depois.split("\n});").next().unwrap_or_default();
+    let mut faltam = Vec::new();
+    for tipo in [
+        "EstadoDaSala",
+        "Registro",
+        "FalhaDaSala",
+        "FalhaAoAtender",
+        "FalhaNaAgenda",
+    ] {
+        for variante in variantes_da_sala(tipo) {
+            if !bloco.contains(&format!("{variante}:")) {
+                faltam.push(format!("{tipo}::{variante}"));
+            }
+        }
+    }
+    // O desfecho do toque chega numa palavra (`toque::palavra` e o
+    // `sala_fechou`), e cada uma tem a frase dela.
+    let toque = without_comments(&read("src/toque.rs"));
+    let palavras: Vec<&str> = toque
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|resto| resto.split('"').next())
+        .chain(["sala_fechou"])
+        .collect();
+    assert!(palavras.len() >= 6, "a leitura dos desfechos quebrou: {palavras:?}");
+    for palavra in palavras {
+        if !bloco.contains(&format!("{palavra}:")) {
+            faltam.push(format!("desfecho `{palavra}`"));
+        }
+    }
+    assert!(
+        faltam.is_empty(),
+        "a sala pessoal manda à casca o que o `frases.js` não sabe dizer: {faltam:?}"
+    );
+    assert!(
+        !bloco.to_lowercase().contains("linha"),
+        "o texto da sala diz «linha», que a tela nunca diz (ADR 0033)"
+    );
+}
