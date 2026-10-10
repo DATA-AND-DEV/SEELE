@@ -401,3 +401,43 @@ Sobre o estado final (`6b41f811`), e também depois de cada item:
    ter de manter essas linhas (ou atualizar a lista com a razão). Em
    `camada-mods.js` o diff ficou só dentro de `aceitarOsMods`, longe das 8
    linhas da F3.
+
+## O merge do `0.16/lotes` (`5b47b598`)
+
+A pedido da coordenação, o `0.16/lotes` de `baed898c` entrou no ramo depois do
+relatório (`6904ab06`): a onda 6, a nona integração e o conserto da
+orquestradora no guarda do R (`963593b7`). Sem conflito de texto; o guarda é o
+único ponto em que os dois trabalhos se encontram.
+
+**As duas intenções ficaram.** A do W segue `recusaDoApelido` (partes 1, 2 e
+6). A de `963593b7` aceita o `beforeunload` da casca larga (`larga-casca.js`,
+da F8) só com `fecharAceiteDeMods()` antes do `preventDefault`, mantém
+proibidos os dois vetos do Tauri, e conta as ocorrências de `beforeunload`. A
+contagem não pega linha nenhuma do W: nenhuma cita `beforeunload`.
+
+**Um aperto, no laço dela, sem afrouxar nada.** O `fecharAceiteDeMods()` do
+ouvinte esquece a credencial da pergunta dos MODs, e não a que um apelido
+tomado deixou. O ouvinte só segura com a sessão à vista, e aí `recusaDoApelido`
+está vazia: `#tela-sessao` só aparece pela `#tela-auth` (`tela-auth.js`), depois
+de um `conectar` que entrou e a esqueceu na primeira linha (parte 6), e toda
+tentativa de dentro da sessão passa antes por `ejetar()`, que esconde a sessão.
+Esse raciocínio dependia de o ouvinte só segurar com a sessão à vista, e agora
+o guarda cobra isso: um `beforeunload` que segura precisa ter
+`getElementById("tela-sessao").hidden) return;` antes do `preventDefault`, ou
+reprova dizendo que `recusaDoApelido` pode estar viva fora da sessão.
+`larga-casca.js` não foi editada.
+
+- **Reversão do aperto** (a linha da sessão tirada da `larga-casca.js`): «`larga-casca.js` segura o `beforeunload` sem conferir antes que a sessão está à vista…».
+- **A parte dela continua reprovando** (o `fecharAceiteDeMods();` tirado): «`larga-casca.js` segura o `beforeunload` sem esquecer antes a credencial da tentativa…».
+- Nas duas vezes, o arquivo voltou idêntico, conferido com `cmp`.
+
+**Sobre o estado mesclado:** `--test frontend` 283 de 283; `check-runtime`,
+fmt e `clippy -p seele-app` limpos; a `ajustes-v013.cjs` verde; os 28 roteiros
+passando, `apelido-recusado.js` entre eles; as nove cenas da `telas.cjs` saindo
+com 0, com a mesma linha de «erros:» de antes, que não é do lote.
+
+**Uma preocupação a mais.** Com duas credenciais da tentativa, a casca larga
+esquece só a dos MODs no `beforeunload`, e cobre a do apelido pelo estado da
+tela. Se um dia ela precisar segurar fora da sessão, o aperto reprova, e o
+conserto natural é uma função de `tela-boot.js` que esqueça as duas, chamada
+pela casca larga. Esse conserto mexe num arquivo da F8.
