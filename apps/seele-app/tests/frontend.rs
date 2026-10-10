@@ -17904,3 +17904,74 @@ fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
          deixou de olhar para eles"
     );
 }
+
+#[test]
+fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
+    // A P12 do plano F1b. O servidor conta as mensagens de um vocabulário mais
+    // novo que ele pulou (`Hospedagem::estado`), e só o `seele.log` dizia: o
+    // produto sabia e não contava. A janela que hospeda passa a mostrar o
+    // número na seção ESTE SERVIDOR, com o remédio junto.
+    //
+    // Três coisas são presas aqui, porque cada uma é uma forma de a linha
+    // voltar a calar sem nenhum teste de Rust perceber.
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(corpo) = frases
+        .split("function fraseDasMensagensDeAppsMaisNovos(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`fraseDasMensagensDeAppsMaisNovos` sumiu de ui/frases.js");
+    };
+    // 1. **O zero é dito.** Uma linha que só aparece quando há problema deixa
+    //    quem hospeda sem saber se o número existe.
+    assert!(
+        corpo.contains(": 0`"),
+        "a frase não diz o zero, e a linha passa a existir só quando há problema: {corpo}"
+    );
+    assert!(
+        !corpo.contains("return \"\"") && !corpo.contains("return null"),
+        "a frase pode sair vazia, e a linha some calada: {corpo}"
+    );
+    // 2. **O remédio vai junto**, e sem o vocabulário que não é de pessoas.
+    assert!(
+        corpo.contains("atualizar o SEELE daqui resolve"),
+        "a frase diz o número e não diz o que fazer: {corpo}"
+    );
+    for termo in ["linha", "protocolo"] {
+        assert!(
+            !corpo.to_lowercase().contains(termo),
+            "a frase diz «{termo}», que não é palavra de pessoas: {corpo}"
+        );
+    }
+
+    // 3. **Só a janela que não hospeda esconde a linha**: o número, por menor
+    //    que seja, nunca a esconde.
+    let tela = without_comments(&read("ui/tela-server.js"));
+    let Some(desenho) = tela
+        .split("async function desenharEstadoDoServidor()")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`desenharEstadoDoServidor` sumiu de ui/tela-server.js");
+    };
+    assert!(
+        desenho.contains("invoke(\"estado_do_servidor\")"),
+        "a linha não pergunta ao comando do servidor: {desenho}"
+    );
+    let escondes: Vec<&str> = desenho
+        .lines()
+        .filter(|linha| linha.contains(".hidden ="))
+        .collect();
+    assert!(
+        !escondes.is_empty()
+            && escondes
+                .iter()
+                .all(|linha| linha.contains("hospedando") && !linha.contains("mensagens")),
+        "a linha é escondida por outra coisa que não «esta janela não hospeda»: {escondes:?}"
+    );
+    let main = read("src/main.rs");
+    assert!(
+        main.contains("fn estado_do_servidor(") && main.contains("estado_do_servidor,"),
+        "o comando `estado_do_servidor` não existe ou não está registrado"
+    );
+}

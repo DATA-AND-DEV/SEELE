@@ -1007,6 +1007,7 @@ async function atualizarServer() {
   desenharModos(snapshot, gravado);
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
+  await desenharEstadoDoServidor();
   const grupoServidor = document.querySelector('[aria-labelledby="server-grupo-servidor"]');
   const temDestino = Array.from(grupoServidor?.children ?? []).some(item => !item.hidden);
   if (grupoServidor) grupoServidor.hidden = !temDestino;
@@ -1156,6 +1157,51 @@ function desenharServidor(snapshot) {
 
   const campo = $("server-nome-valor");
   if (document.activeElement !== campo) campo.value = snapshot.server ?? "";
+}
+
+/** O bloco da linha, criado na primeira volta e guardado aqui, sem id. */
+const appsMaisNovos = { bloco: null, frase: null };
+
+/**
+ * As mensagens de apps mais novos que o servidor desta janela pulou (a P12).
+ *
+ * **Só na janela que hospeda**: `estado_do_servidor` responde
+ * `hospedando: false` em qualquer outra, e aí a linha some, porque não há
+ * servidor de que falar. Na que hospeda ela fica **sempre à vista**, com o
+ * zero dito — nunca escondida por o número ser zero.
+ *
+ * A linha nasce aqui, dentro do `#painel-servidor`, e não no `index.html`:
+ * é um bloco só, e o resto do painel continua sendo do HTML.
+ */
+async function desenharEstadoDoServidor() {
+  let estado = null;
+  try {
+    estado = await invoke("estado_do_servidor");
+  } catch (falha) {
+    console.warn("estado_do_servidor:", falha);
+  }
+  if (!appsMaisNovos.bloco) {
+    const bloco = document.createElement("div");
+    bloco.className = "server-bloco";
+    const topo = document.createElement("div");
+    topo.className = "server-bloco-topo";
+    const nome = document.createElement("h3");
+    nome.className = "server-bloco-nome";
+    nome.textContent = "VERSÕES DE QUEM ENTRA";
+    topo.append(nome);
+    const frase = document.createElement("p");
+    frase.className = "nota";
+    bloco.append(topo, frase);
+    $("painel-servidor").append(bloco);
+    appsMaisNovos.bloco = bloco;
+    appsMaisNovos.frase = frase;
+  }
+  appsMaisNovos.bloco.hidden = estado?.hospedando !== true;
+  if (appsMaisNovos.bloco.hidden) return;
+  appsMaisNovos.frase.textContent = fraseDasMensagensDeAppsMaisNovos(
+    estado.mensagens_desconhecidas,
+    estado.sessoes_com_desconhecidas,
+  );
 }
 
 /**
