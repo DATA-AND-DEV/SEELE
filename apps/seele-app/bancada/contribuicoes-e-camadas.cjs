@@ -1934,6 +1934,56 @@ function anotando(...anotadas) {
     "revogada a contribuição de um alvo, o alvo continuou ocupado");
 }
 
+// ------------- as recusas do registro têm nome (tarefa 5 da F3, Step 7b)
+//
+// Rascunho §7.1, «Como o nome chega»: o `erro` que chega ao MOD da 6 é um nome
+// de lista fechada, e a frase fica no `seele.log`. Até o Step 7b, toda recusa
+// do registro chegava a ele como `falhou`.
+
+{
+  const nomeDa = (fazer) => {
+    try {
+      fazer();
+      return "(aceita)";
+    } catch (falha) {
+      return falha.recusa ?? `(sem nome: ${falha.message})`;
+    }
+  };
+  const registro = new R();
+  const dono = new I("mod/nomes", "n", 7, {});
+  const outro = new I("mod/outro", "o", 7, {});
+  const registrar = (pedido, quem = dono, id = "mod/nomes") => registro.registrar({ id }, quem, pedido);
+  const casos = [
+    ["ponto-desconhecido", () => registrar({ ponto: "nao.existe" })],
+    ["modo-recusado", () => registrar({ ponto: "pessoa.identidade", modo: "substituir", alvo: "1" })],
+    ["modo-recusado", () => registrar({ ponto: "pessoa.cartao", modo: "decorar", alvo: "1" })],
+    ["sem-alvo", () => registrar({ ponto: "pessoa.avatar", modo: "substituir", conteudo: { doServidor: { canal: 1 } } })],
+    ["conteudo-invalido", () => registrar({ ponto: "pessoa.avatar", modo: "substituir", alvo: "1", conteudo: {} })],
+    ["conteudo-invalido", () => registrar({ ponto: "pessoas.lista", modo: "substituir", conteudo: [] })],
+    ["conteudo-invalido", () => registrar({ ponto: "servidor.navegacao", modo: "substituir", conteudo: {} })],
+  ];
+  for (const [nome, fazer] of casos) {
+    const visto = nomeDa(fazer);
+    confere("Step 7b · o nome", visto === nome, `esperava «${nome}», e veio ${visto}`);
+  }
+  const { handle } = registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
+  confere("Step 7b · contribuicao-ja-existe",
+    nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" })) === "contribuicao-ja-existe",
+    "a segunda contribuição para o mesmo alvo não veio com o nome");
+  confere("Step 7b · contribuicao-de-outro-mod",
+    nomeDa(() => registro.revogar(handle, { id: "mod/outro", instancia: outro })) === "contribuicao-de-outro-mod"
+      && nomeDa(() => registro.atualizar(handle, { id: "mod/outro", instancia: outro }, null)) === "contribuicao-de-outro-mod",
+    "revogar ou atualizar o que é de outro MOD não veio com o nome");
+  for (let i = 2; i <= 256; i += 1) registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(i) });
+  confere("Step 7b · teto-de-alvos",
+    nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" })) === "teto-de-alvos",
+    "o teto de alvos não veio com o nome");
+  for (let i = 0; i < 128; i += 1) registrar({ ponto: "servidor.navegacao", rotulo: `e${i}` });
+  confere("Step 7b · teto-de-contribuicoes",
+    nomeDa(() => registrar({ ponto: "servidor.navegacao", rotulo: "e128" })) === "teto-de-contribuicoes",
+    "o teto agregado não veio com o nome");
+}
+
 // V14: duas instâncias compartilham o destino central e conservam o rascunho.
 {
   const montar = S.prototype.montarCasca;
@@ -2227,6 +2277,26 @@ function anotando(...anotadas) {
       registro.porHandle.get(handle)?.conteudo?.[0]?.dentro === "de A, de novo",
       "o roteador respondeu, e o conteúdo da contribuição não mudou",
     );
+
+    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1), e ao
+    // da API 4 com a frase, como os publicados recebem. O teto agregado, pelo
+    // roteador de verdade: 128 entradas, e a 129ª.
+    {
+      const c = { geracao: 7, admite: () => true, registrar() { return () => {}; }, executor: escuta };
+      contexto.modsCarregados.set("mod/c", c);
+      for (let i = 0; i < 128; i += 1) registro.registrar({ id: "mod/c" }, c, { ponto: "servidor.navegacao", rotulo: `c${i}` });
+      await contexto.atenderOMod({ id: "mod/c", api: 6 }, c, {
+        tipo: "contribuir", n: 41, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
+      });
+      confere("Step 7b · o nome chega à 6", respostas.at(-1)?.erro === "teto-de-contribuicoes",
+        `o MOD da 6 recebeu ${JSON.stringify(respostas.at(-1))}`);
+      await contexto.atenderOMod({ id: "mod/c", api: 4 }, c, {
+        tipo: "contribuir", n: 42, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
+      });
+      confere("Step 7b · a frase segue na 4", String(respostas.at(-1)?.erro ?? "").includes("128"),
+        `o MOD da API 4 deixou de receber a frase: ${JSON.stringify(respostas.at(-1))}`);
+      contexto.modsCarregados.delete("mod/c");
+    }
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
     // fechada para todo mundo — e uma porta fechada passa no teste de

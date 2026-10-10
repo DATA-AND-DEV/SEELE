@@ -15960,6 +15960,55 @@ fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
     );
 }
 
+/// **Toda recusa do registro de contribuições tem nome** (rascunho da API 6,
+/// §7.1; tarefa 5 da F3, Step 7b).
+///
+/// O MOD da 6 recebe o nome, de lista fechada, e a frase vai ao `seele.log`.
+/// Uma recusa lançada com `new Error(...)` sem nome chega a ele como `falhou`
+/// — o produto sabendo por que recusou e não contando. E a lista é contrato:
+/// cada nome dela está no rascunho, onde quem escreve MOD a lê.
+#[test]
+fn toda_recusa_do_registro_de_contribuicoes_tem_nome() {
+    let registro = without_comments(&read("ui/mods-contribuicoes.js"));
+    assert!(
+        !registro.contains("throw new Error("),
+        "uma recusa do registro de contribuições voltou a nascer sem nome: o MOD da 6 a \
+         recebe como `falhou`"
+    );
+    let lista = registro
+        .split_once("const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(corpo, _)| corpo)
+        .expect("`RECUSAS_DAS_CONTRIBUICOES` em mods-contribuicoes.js");
+    let nomes: BTreeSet<String> = lista
+        .split(',')
+        .map(|nome| nome.trim().trim_matches('"').to_owned())
+        .filter(|nome| !nome.is_empty())
+        .collect();
+    assert!(
+        nomes.len() >= 8,
+        "só {} nomes lidos da lista: a leitura quebrou",
+        nomes.len()
+    );
+    for uso in registro.split("recusaNomeada(").skip(1) {
+        let Some(nome) = uso.trim_start().strip_prefix('"') else {
+            continue; // a própria definição: `recusaNomeada(nome, frase)`
+        };
+        let nome = nome.split('"').next().unwrap_or_default();
+        assert!(
+            nomes.contains(nome),
+            "«{nome}» é usado como recusa e não está em `RECUSAS_DAS_CONTRIBUICOES`"
+        );
+    }
+    let rascunho = read("../../docs/superpowers/specs/2026-10-08-api-6-rascunho.md");
+    for nome in &nomes {
+        assert!(
+            rascunho.contains(&format!("`{nome}`")),
+            "«{nome}» é uma recusa que o MOD da 6 recebe, e o rascunho §7.1 não a lista"
+        );
+    }
+}
+
 /// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**
 ///
 /// A tabela declarava `perfil` — «com que orçamento a declaração é montada» —

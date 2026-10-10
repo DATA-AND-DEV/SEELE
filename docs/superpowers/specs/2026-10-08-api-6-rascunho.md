@@ -688,6 +688,21 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 | `banco-indisponivel` | a tabela dos arquivos escolhidos não respondeu |
 | `falhou` | uma falha sem nome; o motivo vai ao `seele.log`, com o `mod_id=` |
 
+**As recusas das contribuições** [c, tarefa 5, Step 7b] — no registro, no
+`atualizar` e no `revogar`, com a mesma forma (`e.message` e `e.erro` são o
+nome; a frase vai ao `seele.log`):
+
+| nome | quando |
+|---|---|
+| `ponto-desconhecido` | o ponto não está na tabela de pontos |
+| `modo-recusado` | o ponto não aceita o modo pedido — inclusive `decorar`, que não está na 6 |
+| `sem-alvo` | o ponto exige alvo (o `pessoa.avatar`) e o pedido não trouxe |
+| `conteudo-invalido` | o conteúdo não tem a forma que o ponto exige (o `doServidor` do avatar; a ordem de `pessoas.lista` e de `servidor.navegacao` substituídas) |
+| `teto-de-contribuicoes` | o MOD já tem 128 contribuições **sem alvo** de pé (§12) |
+| `teto-de-alvos` | o MOD já alcança 256 alvos neste ponto (§12) |
+| `contribuicao-ja-existe` | o MOD já tem uma contribuição para este alvo, neste ponto e neste modo: use `atualizar` |
+| `contribuicao-de-outro-mod` | o `handle` de `atualizar` ou `revogar` é de outro MOD, ou de outra instância dele |
+
 **Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
 (`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
 `tipo-recusado:heic` chega como `erro: 'tipo-recusado'` e `detectado: 'heic'`,
@@ -695,8 +710,9 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 Ele chega pelos dois caminhos: a resposta de um pedido (o `Error` do prelúdio,
 com os campos) e o evento `arquivo` de um seletor que recusou (`resultado:
 'falhou'`, com `erro` e `detectado`). Um `Error` da casca pode trazer o nome em
-`recusa`; as recusas das contribuições e das superfícies ganham nome nas tarefas
-5 e 7, e até lá chegam como `falhou`, com o motivo no registro. **Até a API 5,
+`recusa`; as recusas das contribuições ganharam nome na tarefa 5 (a tabela
+acima), e as das superfícies ganham na 7 — até lá chegam como `falhou`, com o
+motivo no registro. **Até a API 5,
 nada muda**: o MOD recebe a frase de tela, como os publicados recebem (o K1-m3
 da F5).
 

@@ -126,19 +126,48 @@ const TETO_DE_ALVOS_POR_PONTO = 256;
 const NATIVO = ":nativo";
 
 /**
+ * **Os nomes das recusas do registro** (rascunho da API 6, §7.1; tarefa 5,
+ * Step 7b). O MOD da 6 recebe o nome, de lista fechada, e a frase vai ao
+ * `seele.log`; até a API 5, o MOD recebe a frase, como os publicados recebem.
+ * Até o Step 7b, toda recusa daqui chegava ao MOD da 6 como `falhou`.
+ */
+const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([
+  "ponto-desconhecido",
+  "modo-recusado",
+  "sem-alvo",
+  "conteudo-invalido",
+  "teto-de-contribuicoes",
+  "teto-de-alvos",
+  "contribuicao-ja-existe",
+  "contribuicao-de-outro-mod",
+]);
+
+/** Uma recusa do registro: a frase, e o nome em `recusa`, da lista fechada. */
+function recusaNomeada(nome, frase) {
+  if (!RECUSAS_DAS_CONTRIBUICOES.includes(nome)) {
+    throw new TypeError(`«${nome}» não está na lista das recusas das contribuições`);
+  }
+  const recusa = new Error(frase);
+  recusa.recusa = nome;
+  return recusa;
+}
+
+/**
  * **A forma que cada ponto exige do conteúdo**, no registro e no `atualizar` —
  * a mesma conferência nos dois, para um MOD não trocar por `atualizar` o que o
  * registro recusaria. Lança com o nome do ponto; não devolve nada.
  */
 function conferirOConteudo(ponto, modo, alvo, conteudo) {
   // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
+  if (ponto === "pessoa.avatar" && (alvo === undefined || alvo === null || String(alvo) === "")) {
+    throw recusaNomeada("sem-alvo", "pessoa.avatar exige alvo e conteudo.doServidor");
+  }
   if (ponto === "pessoa.avatar" && (
-    alvo === undefined || alvo === null || String(alvo) === ""
-    || !conteudo?.doServidor
+    !conteudo?.doServidor
     || typeof conteudo.doServidor !== "object"
     || Array.isArray(conteudo.doServidor)
   )) {
-    throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
+    throw recusaNomeada("conteudo-invalido", "pessoa.avatar exige alvo e conteudo.doServidor");
   }
   // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
   // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
@@ -152,14 +181,18 @@ function conferirOConteudo(ponto, modo, alvo, conteudo) {
   // dentro de cada sala — as salas são do produto (decisão da orquestradora,
   // 09/10).
   if (ponto === "pessoas.lista" && modo === "substituir" && !comGrupos(conteudo)) {
-    throw new Error("pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }");
+    throw recusaNomeada(
+      "conteudo-invalido",
+      "pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }",
+    );
   }
   if (ponto === "servidor.navegacao" && modo === "substituir") {
     const lista = (parte) => parte === undefined || comGrupos(parte);
     if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
       || (conteudo.salas === undefined && conteudo.canais === undefined)
       || !lista(conteudo.salas) || !lista(conteudo.canais)) {
-      throw new Error(
+      throw recusaNomeada(
+        "conteudo-invalido",
         "servidor.navegacao/substituir declara a ordem das listas: "
         + "{ salas?, canais? }, cada um com grupos: [{ titulo, ids }]",
       );
@@ -215,7 +248,8 @@ class RegistroDeContribuicoes {
     // **Recusado e nomeado.** Um ponto que não existe não pode virar silêncio:
     // o MOD ficaria esperando para sempre uma contribuição que nunca aparece.
     if (!regra) {
-      throw new Error(
+      throw recusaNomeada(
+        "ponto-desconhecido",
         `a API de MODs não conhece o ponto «${ponto}»; os que existem são `
         + Object.keys(PONTOS_DE_CONTRIBUICAO).join(", "),
       );
@@ -227,14 +261,15 @@ class RegistroDeContribuicoes {
       // decorar» e concluiria que errou o ponto. Ele não errou: o modo existe
       // no plano, e não existe nesta versão.
       if (modo === "decorar") {
-        throw new Error(
+        throw recusaNomeada(
+          "modo-recusado",
           "«decorar» não está na API 4: ele mudaria a apresentação de um nó do "
           + "SEELE, e o subconjunto de estilo que impede um MOD de encobrir o "
           + `nome que abre a moderação ainda não existe. Em «${ponto}», use `
           + "«adicionar» — o conteúdo entra ao lado do nativo, sem cobri-lo",
         );
       }
-      throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
+      throw recusaNomeada("modo-recusado", `«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
     }
     conferirOConteudo(ponto, modo, pedido?.alvo, pedido?.conteudo);
     const alvo = regra.porAlvo && pedido?.alvo !== undefined && pedido?.alvo !== null
@@ -248,14 +283,18 @@ class RegistroDeContribuicoes {
     if (noAgregado) {
       const quantas = this.porMod.get(mod.id) ?? 0;
       if (quantas >= TETO_DE_CONTRIBUICOES) {
-        throw new Error(`um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições sem alvo de pé`);
+        throw recusaNomeada(
+          "teto-de-contribuicoes",
+          `um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições sem alvo de pé`,
+        );
       }
     } else {
       const doPonto = this.porPonto.get(ponto);
       const minhas = (lista) => (lista ?? []).filter((c) => c.mod === mod.id && c.instancia === instancia);
       const nesteAlvo = minhas(doPonto?.get(alvo));
       if (nesteAlvo.some((c) => c.modo === modo)) {
-        throw new Error(
+        throw recusaNomeada(
+          "contribuicao-ja-existe",
           `«${ponto}» já tem uma contribuição de ${mod.id} para «${alvo}» em «${modo}»; `
           + "use atualizar para trocar o conteúdo dela",
         );
@@ -266,7 +305,10 @@ class RegistroDeContribuicoes {
           if (outro !== "" && minhas(lista).length > 0) alvos += 1;
         }
         if (alvos >= TETO_DE_ALVOS_POR_PONTO) {
-          throw new Error(`um MOD contribui para até ${TETO_DE_ALVOS_POR_PONTO} alvos em «${ponto}»`);
+          throw recusaNomeada(
+            "teto-de-alvos",
+            `um MOD contribui para até ${TETO_DE_ALVOS_POR_PONTO} alvos em «${ponto}»`,
+          );
         }
       }
     }
@@ -345,7 +387,8 @@ class RegistroDeContribuicoes {
     const contribuicao = this.porHandle.get(handle);
     if (!contribuicao) return false;
     if (!dono || !eDoDono(contribuicao, dono)) {
-      throw new Error(
+      throw recusaNomeada(
+        "contribuicao-de-outro-mod",
         `a contribuição «${handle}» não é de ${dono?.id ?? "ninguém"}: um MOD atualiza o que `
         + "ele registrou",
       );
@@ -382,7 +425,8 @@ class RegistroDeContribuicoes {
     const contribuicao = this.porHandle.get(handle);
     if (!contribuicao) return false;
     if (dono && !eDoDono(contribuicao, dono)) {
-      throw new Error(
+      throw recusaNomeada(
+        "contribuicao-de-outro-mod",
         `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
         + "ele registrou, e a saída da sessão limpa o resto",
       );
