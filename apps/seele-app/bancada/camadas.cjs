@@ -40,6 +40,11 @@
 //    uma vez, com a frase, e leva o foco ao primeiro; mexer num campo apaga só
 //    a marca dele; uma chave que não existe é recusada pelo nome, sem marcar
 //    nada; e um mapa vazio limpa.
+// 10. **O `sujo` é derivado** (Step 6c; rascunho §5, o bloqueio D do
+//    PERFIS): um campo declarado com `valor` (o rascunho) e `inicial` (o
+//    gravado) nasce sujo, e fechar pergunta; voltar ao gravado o limpa, e
+//    fechar não pergunta; e mexer num campo sem `inicial` suja, sem o MOD
+//    chamar `suja`.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -464,8 +469,39 @@ const { chromium } = require('./playwright.cjs');
     await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: {} }));
     assert.deepEqual(await marcadosEm('estilo'), [], 'um mapa vazio não limpou as marcas');
 
+    // 10. O sujo derivado.
+    const fecharPelaSaida = async () => {
+      await page.click('[data-superficie="editor"] .superficie-de-mod-sair');
+      return page.evaluate(() => ({
+        perguntou: !$('moderar').hidden,
+        aberta: Boolean(document.querySelector('[data-superficie="editor"]')?.isConnected),
+      }));
+    };
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'editor', tipo: 'dialogo', modal: false, titulo: 'Editor', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'editor', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'bio', rotulo: 'Bio', valor: 'o rascunho guardado', inicial: 'o gravado' },
+          { forma: 'campo', chave: 'nome', rotulo: 'Nome', valor: 'Alex' },
+        ],
+      }] });
+    });
+    const comRascunho = await fecharPelaSaida();
+    assert.deepEqual(comRascunho, { perguntou: true, aberta: true }, `o editor que reabre com rascunho não nasceu sujo: ${JSON.stringify(comRascunho)}`);
+    await page.click('#moderar-cancelar');
+    await page.fill('[data-superficie="editor"] [data-chave-do-mod="bio"] input', 'o gravado');
+    const deVoltaAoGravado = await fecharPelaSaida();
+    assert.deepEqual(deVoltaAoGravado, { perguntou: false, aberta: false }, `voltar ao gravado não limpou o sujo: ${JSON.stringify(deVoltaAoGravado)}`);
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-mostrar', superficie: 'editor' }));
+    await page.fill('[data-superficie="editor"] [data-chave-do-mod="nome"] input', 'Outro nome');
+    const mexido = await fecharPelaSaida();
+    assert.deepEqual(mexido, { perguntou: true, aberta: true }, `mexer num campo não sujou sem o MOD chamar suja: ${JSON.stringify(mexido)}`);
+    await page.click('#moderar-confirmar');
+    const descartado = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'editor').at(-1));
+    assert.equal(descartado?.descartou, true, `descartar o editor sujo não disse descartou: ${JSON.stringify(descartado)}`);
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

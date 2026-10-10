@@ -532,7 +532,10 @@ campo. A API 6 acrescenta:
   pode declarar os dois** (pedido do PERFIS, 09/10): `{ forma: 'campo', chave,
   valor: <o rascunho guardado>, inicial: <o gravado> }`. Assim o editor que
   reabre com um rascunho já nasce sujo, e voltar ao gravado o limpa. Sem
-  `inicial`, o inicial é o `valor` da montagem;
+  `inicial`, o inicial é o `valor` da montagem [c, tarefa 7, Step 6c: no
+  `campo`, no `textoLongo` e no `numero`; suja é o que o MOD disse com
+  `suja` **ou** o que os campos mostram; depois de gravar, o MOD redeclara
+  `inicial` com o valor novo];
 - **confirmação declarada para ação destrutiva**, com as palavras do produto:
   `{ confirmar: 'isto muda a aparência para todo mundo neste servidor' }`
   (ESTILO A13). **Ela se declara em qualquer `botao`**, e não só no primário

@@ -721,7 +721,11 @@ class SuperficieDeMod {
    */
   pedirFechamento(porque) {
     if (this.solta) return;
-    if (this.suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
+    // **Suja é o que o MOD disse ou o que os campos mostram** (rascunho da API
+    // 6, §5; Step 6c): um campo que difere do inicial suja a superfície sem o
+    // MOD chamar `suja`, e voltar ao gravado a limpa.
+    const suja = this.suja || this.renderer.temAlteracoes?.() === true;
+    if (suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
       this.dono.falar({
         nome: "fechar-pedido",
         superficie: this.chave,

@@ -711,6 +711,9 @@ class RegiaoDeMod {
     // E a recusa do servidor de volta ao campo (Step 6b), que também vale até
     // a pessoa mexer nele.
     this.errosDoServidor = new WeakMap();
+    // O valor inicial de cada campo, para o `sujo` derivado (Step 6c): o
+    // `inicial` declarado — o gravado —, ou o valor da montagem.
+    this.iniciais = new WeakMap();
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -2104,6 +2107,20 @@ class RegiaoDeMod {
     this.pintarContador(elem, caixa);
   }
 
+  /**
+   * **Algum campo difere do inicial?** O `sujo` derivado (Step 6c): a
+   * pergunta ao fechar não depende de o MOD chamar `suja`, e voltar ao valor
+   * gravado limpa.
+   */
+  temAlteracoes() {
+    for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
+      if (!this.iniciais.has(parte)) continue;
+      const caixa = parte.querySelector("input,textarea");
+      if (caixa && caixa.value !== this.iniciais.get(parte)) return true;
+    }
+    return false;
+  }
+
   /** Os campos desta raiz, pela chave: o nó da parte e a caixa dele. */
   camposPorChave() {
     const campos = new Map();
@@ -2166,6 +2183,12 @@ class RegiaoDeMod {
    * pintura junta o erro do MOD ao do produto.
    */
   marcarValidade(elem, caixa, plano) {
+    // **O inicial, para o sujo derivado** (rascunho da API 6, §5; Step 6c): o
+    // MOD que declara `inicial` (o gravado) ao lado de `valor` (o rascunho)
+    // tem um campo que nasce sujo; sem `inicial`, vale o valor da montagem.
+    const comoTexto = (valor) => (valor === null || valor === undefined ? "" : String(valor));
+    if (Object.hasOwn(plano.no, "inicial")) this.iniciais.set(elem, comoTexto(plano.no.inicial));
+    else if (!this.iniciais.has(elem)) this.iniciais.set(elem, comoTexto(plano.no.valor));
     this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");
     this.regrasDoCampo.set(elem, regrasDeclaradas(plano.no));
     this.pintarValidade(elem, caixa);
