@@ -687,3 +687,72 @@ começar.
 - **A seguir, o lote A**: a fronteira da voz no `seele-web`, com o cabeçalho, o
   relógio e a tabela (a alça opaca no lugar do SSRC) pelo `wasm`.
 
+
+## 09/10, noite: a 3.3, lote A (a voz pela fronteira do `seele-web`)
+
+- **`af0bea6d`.** Quem manda: `voz_envio`, `voz_reabrir` e o datagrama
+  montado no `.wasm` com o `RelogioDeMidia`. Quem recebe: `voz_recepcao`,
+  `voz_chegou` e `voz_esquecer` com a `TabelaDeFontes`, e a página recebe uma
+  alça u32 no lugar do SSRC (ADR 0057).
+- **Provas:** quatro testes nativos repetem as sequências gravadas do desktop,
+  e o `xtask/web/voz.mjs` roda os mesmos casos dentro do `.wasm`, como passo
+  do `cargo xtask web`. As duas reversões reprovaram nos dois lugares.
+
+## 10/10, madrugada: a 3.3, lote C (a voz no navegador)
+
+- **Passo 1, a régua do portão no `seele-voz`** (`f1f5dfd5`):
+  `GateConfig::dos_controles`. A conversa e o teste do microfone do desktop
+  montavam a régua cada um com o seu corpo, e a voz do navegador seria o
+  terceiro. Os dois do desktop passam a chamá-la, e o guarda exige que nenhum
+  monte a sua (as agulhas vêm de `concat!`, para não casar com o próprio
+  texto). Três reversões.
+- **Passo 2, o portão, o jitter e o mixer pela fronteira** (`b550f452`):
+  - **o portão mora no `Envio`, na thread da página**, e não no worklet: cada
+    quadro solto precisa do carimbo do mesmo relógio, e vai para o
+    `AudioEncoder`, que não existe no worklet. O `capturou` segue a ordem do
+    laço do desktop, e o `reabrir` monta outro portão com a mesma régua, o
+    mesmo modo e a mesma tecla;
+  - **o ganho automático do desktop não roda no navegador.** O DSP da
+    plataforma foi aceito pelo ADR, e o ganho do navegador vem **antes** do
+    portão, que é a ordem que o doc do `ganho` desaconselha. Não está medido;
+  - **o jitter e o mixer moram na `Reproducao`, no worklet**, sobre som já
+    decodificado: o `AudioDecoder` não existe lá nem oculta quadro. Um quadro
+    que falta vira silêncio com fade de 2,5 ms (a emenda do ADR 0057 ao ADR
+    0010);
+  - nove testes nativos e o `voz.mjs` dentro do `.wasm`. Sete reversões
+    reprovaram no nativo, e três delas também no `.wasm`.
+- **Passo 3, a `ui/voz-web.js` e o `ui/voz-worklet.js`** (`47a46827`), na
+  ordem da rodada 5. A bancada `voz-no-navegador.cjs` (no job
+  `bancadas-de-mod`, depois do `cargo xtask web`) prova, no Chromium com
+  microfone falso e um laço local que troca o SSRC:
+  - a voz de ponta a ponta;
+  - o mudo e o isolamento;
+  - **os controles depois de uma reconexão** (o Step 1 da 3.3): mudo,
+    isolamento, modo e régua. O mudo escondia o isolamento, e por isso eles
+    são conferidos um de cada vez;
+  - o `messageerror` dito.
+  O `.wasm` compila no worklet em 2 a 6 ms.
+- **Duas medidas que mudaram o código:**
+  - **o `usedtx: true` atrasa a voz 340 ms no Chromium.** O `AudioEncoder`
+    segura 17 quadros antes do primeiro; sem o DTX, zero. A voz do navegador
+    fica sem DTX, porque o portão fechado já não manda nada. A bancada reprova
+    acima de três quadros no codificador;
+  - **o Chromium devolve o instante do codec um microssegundo antes**
+    (259 999 por 260 000), no codificador e no decodificador. O casamento
+    passou a ser pelo número do quadro.
+- **Os guardas da janela:**
+  - a `voz-web.js` entra na `index.html` depois da `mods-no-navegador.js`.
+    **Para a F8**, a dona da fila da `index.html`: uma linha e um comentário;
+  - o worklet e a tag `<audio>` da voz são exceções conferidas;
+  - a página não nomeia mais SSRC nem datagrama: a exportação virou
+    `voz_empacotar`.
+- **O que falta na 3.3:**
+  - o ganho por pessoa, que precisa do `Room` (o `ganhos_a_aplicar` do
+    `seele-ffi` no `.wasm`, com a 2.6);
+  - os comandos da ponte (entrar e sair da voz, que esperam a sessão, 2.6);
+  - o teste do microfone do PC;
+  - a medida do eco, que é do dono;
+  - a conformidade de áudio, que espera o aviso da orquestradora.
+- **O guarda da hospedagem** (`c6fca33e`) aprende o `servidor_do_mod` da F3 e
+  o `sala::` da F7, a pedido das duas. Provado por injeção, porque nesta
+  branch nenhum corpo os usa ainda.
