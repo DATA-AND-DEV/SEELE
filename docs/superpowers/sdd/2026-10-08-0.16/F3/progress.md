@@ -549,7 +549,30 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     com os tipos de cada versão a partir da 6; com a v6 escrita, ele acusará
     o `painel` que a tabela ainda tem, até o corte o tirar (ou até ele ler
     `tiposDaApi(6)`).
-  - Achado de desenho, fora do passo: numa coluna de 300 px, o título de uma
-    folha ou de um painel quebra no meio da palavra («EDITA / R / PERFIL»):
-    `overflow-wrap: anywhere` no título, que divide a linha com a origem e o
-    FECHAR.
+  - Achado de desenho: numa coluna de 300 px, o título de uma folha ou de
+    um painel quebrava no meio da palavra («EDITA / R / PERFIL»). Consertado
+    em `97cff58d`, a pedido da orquestradora; medido, a causa era o título
+    espremido, e não o `overflow-wrap: anywhere` (trocá-lo não mudava as
+    onze quebras): o cabeçalho quebra a linha, e o FECHAR fica na borda.
+  - Rulings aceitos: (a) e (b) acima; e o `superficie.atualizar` na
+    capacidade `superficies` (as 4 e 5 o veem; no contrato, desde a 6).
+  - Step 5b `e886840a`: medido, a mídia por volume já ia ao `ler_imagem_mod`
+    nos cinco lugares; a bancada prova, e duas reversões a fazem reprovar.
+  - Step 5c `3161fc14`: `superficie.atualizar(chave, arvore)`, a ficha de
+    40.002 bytes em quatro partes; `chave-desconhecida` e `orcamento` antes
+    de mexer na tela.
+  - Step 5d, dividido com a F8: a minha metade, a pilha de inércia que
+    pergunta `CELULAR.acordadosNoModal()` e desce no ramo dos acordados,
+    `682f39ba`; a dela, `d9f5fc03` (o desenho e o ajudante), validada com a
+    minha numa cópia. A cena com o toque e o Tab entra quando as duas
+    estiverem na `versao/0.16`.
+  - Step 6 inteiro: 6a as regras declaradas `135111f3`; 6b
+    `formulario.erros` `58d86c65`; 6c o sujo derivado `52a175ce`; 6d a ação
+    destrutiva confirmada `70e5dd2b`. Do §5, fora da lista: o `erro` em `cor`
+    e `escolha`, e os botões primário e secundário do produto.
+  - **Um tropeço meu, consertado:** o contador do 6a quebrou o guarda do
+    `celular-texto.css` (`tests/celular.rs`), porque a minha verificação
+    rodava só o `--test frontend`. Regerado em `19239d36`. Agora verifico
+    com `cargo test -p seele-app --tests`, todos os alvos.
+  - Esperam: o Step 3 (a tarefa 11) e o Step 5 (`chamada.palco`, o
+    `camada-mods.js` livre depois da bateria da décima).
