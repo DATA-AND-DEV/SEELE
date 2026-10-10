@@ -4197,8 +4197,16 @@ function esquecerOEstadoDaSessao() {
   mensagensPorDesenhar = false;
 }
 
-/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
-async function ejetar() {
+/**
+ * Ejeta e volta para a tela de entrada, sem fechar o programa.
+ *
+ * `soOCliente` desmonta só a sessão desta janela (`desmontar_a_sessao`) e deixa
+ * as hospedagens de pé. É o ATENDER (tarefa 27 da F7, `camada-toque.js`): quem
+ * hospeda e atende uma ligação sai do próprio servidor para entrar na sala, e o
+ * servidor continua no ar com quem estiver nele. Sem a opção, o caminho é o de
+ * sempre, o `disconnect`, que derruba o servidor junto.
+ */
+async function ejetar(soOCliente = false) {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
   // contrato de API própria: «revogar a geração: a partir desse ponto, nenhum
   // novo efeito daquela instância é admitido, mesmo que mensagens já estejam na
@@ -4218,7 +4226,11 @@ async function ejetar() {
   // ele terminar deixaria o botão de hospedar oferecendo uma porta que ainda
   // não voltou.
   encerrarOAmbienteDosMods();
-  await invoke("disconnect");
+  if (soOCliente) {
+    await invoke("desmontar_a_sessao");
+  } else {
+    await invoke("disconnect");
+  }
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;

@@ -17993,7 +17993,7 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
     for (saida, corpo) in [
         (
             "SAIR DO SERVIDOR (`ejetar`)",
-            body_of(&sessao, "async function ejetar()"),
+            body_of(&sessao, "async function ejetar("),
         ),
         (
             "o fim de sessão (`limparSessaoEncerrada`)",
