@@ -268,8 +268,9 @@ Simulador iOS 27.0 (duas aberturas cada, com a mesma origem):
 | `BroadcastChannel` | posta, mas só para a mesma origem opaca, onde ninguém ouve |
 
 **As oito provas por reversão** passam pela bancada
-(`executor/bancada/executor-no-navegador.cjs`). Cada guarda tirado reprova o
-caso dele:
+(`executor/bancada/executor-no-navegador.cjs`, hoje
+`apps/seele-app/bancada/executor-no-navegador.cjs`). Cada guarda tirado
+reprova o caso dele:
 1. com `allow-same-origin`, a origem do Worker vira a da página;
 2. sem a CSP, as três canárias tocam;
 3. sem o teto da fila no Worker, o `iframe` o mata, e o caso da fila reprova;
@@ -284,13 +285,16 @@ caso dele:
 Como rodar:
 
     cargo xtask web   # compila o motor
-    node spikes/mods-no-navegador/executor/bancada/executor-no-navegador.cjs \
+    node apps/seele-app/bancada/executor-no-navegador.cjs \
       target/wasm32-wasip1/release/seele_motor_web.wasm
     python3 spikes/mods-no-navegador/executor/safari/servir.py \
-      spikes/mods-no-navegador/executor/ui target/wasm32-wasip1/release/seele_motor_web.wasm \
+      apps/seele-app/ui target/wasm32-wasip1/release/seele_motor_web.wasm \
       crates/seele-motor-web/tests/mod-comum.js sim 8461    # ou mac no lugar de sim
 
-Os arquivos de `executor/ui/` vão para `apps/seele-app/ui/` quando a `ui/` for
-liberada à F4. O anfitrião do motor mora **dentro** do `iframe`, como uma
-função que vira o texto do `blob:`. Assim o hash da CSP o cobre, e o guarda do
-`frontend.rs` não vê um `.js` que a página não carrega.
+**Os arquivos de `executor/ui/` estão em `apps/seele-app/ui/` desde 09/10**
+(o passo 6 da Tarefa 3.2), e a bancada em `apps/seele-app/bancada/`, rodada
+pelo job `bancadas-de-mod` do `ci.yml` depois do `cargo xtask web`. Só as
+ferramentas do Safari (`executor/safari/`) ficaram aqui. O anfitrião do motor
+mora **dentro** do `iframe`, como uma função que vira o texto do `blob:`.
+Assim o hash da CSP o cobre (`apps/seele-app/tests/web.rs` o confere), e o
+guarda do `frontend.rs` não vê um `.js` que a página não carrega.

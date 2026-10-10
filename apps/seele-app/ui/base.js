@@ -702,7 +702,7 @@ async function montarOMod(mod) {
   });
   if (!daGeracaoDePe(geracao) || !modsCarregados.has(mod.id)) return;
 
-  const executor = executorNativo(mod.id, geracao, mod.hash);
+  const executor = executorDoMod(mod.id, geracao, mod.hash);
 
   // A instância é a dona de tudo o que este MOD criar — §4.2 do contrato. A
   // geração viaja com ela: quem atende as mensagens precisa saber de que sessão
