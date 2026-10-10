@@ -787,3 +787,21 @@ começar.
 - **O guarda da credencial** passa a ler a `identidade-web.js` (cada linha que
   nomeia `credencial`, `segredos` ou `linkDaCarga`). A chamada de `conectar`
   dela é a quarta que leva credencial, com o porquê.
+
+## 10/10: a décima primeira integração trazida, e a conformidade da voz
+
+- **A `versao/0.16` de `330f3ab4`** (a décima primeira, verde de primeira)
+  entrou em `a6af3539`. Teve um conflito só, no guarda da credencial do
+  `frontend.rs`, e os dois lados ficam: a `recusaDoApelido` e a parte 6 do lote
+  W da F5, e a identidade do navegador. Conferido no código que a identidade
+  segue o contrato do W. Na árvore integrada passam os guardas da janela, o
+  `tests/web.rs`, os crates da F4, o `empacotamento`, o `check-deps`, o
+  `cargo xtask web` e as bancadas da ponte, da voz e da identidade. A
+  `ponte-sem-gesto` ficou limpa nas duas cascas: o `CASCA is not defined` do
+  celular era a ordem da integração da F8.
+- **A conformidade que toca o laço da voz, liberada pela orquestradora, um
+  arquivo por vez**: passam o `voz_na_reconexao`, o `soak_audio`, o
+  `troca_de_aparelho`, o `som_da_tela_segue_o_aparelho`, o `acceptance_m2`, o
+  `ejetar`, o `desassentar` e o `sala_cheia_nao_se_escuta` (38 testes). É a
+  prova de que a régua do portão no `seele-voz` (`f1f5dfd5`), que veio depois do
+  que a bateria cobriu, não mudou a voz do desktop.
