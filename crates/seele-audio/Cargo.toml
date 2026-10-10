@@ -9,6 +9,8 @@ publish.workspace = true
 # specs/01-arquitetura.md, dependency rule: `audio` depends only on `proto`.
 # Enforced by `cargo xtask check-deps`.
 [dependencies]
+# O portão, o jitter, o mixer e o simulador de rede, puros (Tarefa 3.3 da F4).
+seele-voz = { path = "../seele-voz" }
 audioadapter-buffers = "4"
 cpal = "0.18.1"
 seele-proto = { path = "../seele-proto" }

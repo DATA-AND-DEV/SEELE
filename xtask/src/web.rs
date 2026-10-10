@@ -9,6 +9,8 @@
 //! 2. o `seele-sessao` (o `Room` que o navegador dobra, Tarefa 2.2) compila
 //!    para `wasm32-unknown-unknown`: uma dependência nova dele que não compile
 //!    no navegador para aqui, e não no dia em que o `seele-web` a usar;
+//!    O mesmo vale para o `seele-voz` (o portão, o jitter e o mixer da voz,
+//!    Tarefa 3.3);
 //! 3. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
 //!    `.cargo/config.toml` aponta a variável para uma pasta que não existe;
 //! 4. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
@@ -208,6 +210,17 @@ pub(crate) fn run() -> ExitCode {
             "--release",
             "-p",
             "seele-sessao",
+            "--target",
+            "wasm32-unknown-unknown",
+        ]))),
+    ));
+    passos.push((
+        "seele-voz para wasm32-unknown-unknown (o portão, o jitter e o mixer da voz)",
+        deu_certo(rodar(cargo().args([
+            "build",
+            "--release",
+            "-p",
+            "seele-voz",
             "--target",
             "wasm32-unknown-unknown",
         ]))),

@@ -5043,6 +5043,7 @@ dependencies = [
  "rtrb",
  "rubato",
  "seele-proto",
+ "seele-voz",
  "shiguredo_opus",
  "thiserror 2.0.19",
  "tracing",
@@ -5227,6 +5228,10 @@ dependencies = [
  "windows 0.62.2",
  "windows-capture",
 ]
+
+[[package]]
+name = "seele-voz"
+version = "0.0.0"
 
 [[package]]
 name = "seele-web"

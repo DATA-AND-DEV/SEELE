@@ -55,7 +55,7 @@ const RULES: &[(&str, &[&str])] = &[
     // parte da conversa — que é o degrau 5, e o ADR 0022 o deixou de fora por
     // decisão. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-encontro", &["seele-proto"]),
-    ("seele-audio", &["seele-proto"]),
+    ("seele-audio", &["seele-proto", "seele-voz"]),
     // Compartilhamento de tela: captura e codec, ao lado de `seele-audio` e com
     // exatamente a mesma vizinhança. Não é um degrau novo no grafo, é a segunda
     // folha de mídia.
@@ -73,6 +73,11 @@ const RULES: &[(&str, &[&str])] = &[
     // o compila para o `wasm32-unknown-unknown` a cada vez, e é ali que uma
     // aresta nova daqui teria de compilar.
     ("seele-sessao", &["seele-proto"]),
+    // O caminho da voz que não toca em nada (Tarefa 3.3 da F4): o portão, o
+    // buffer de jitter, o mixer e o simulador de rede, que saíram do
+    // `seele-audio` para o navegador tocar a mesma voz. Sem dependência
+    // nenhuma: o `cargo xtask web` o compila para o `wasm32-unknown-unknown`.
+    ("seele-voz", &[]),
     (
         "seele-core",
         &["seele-proto", "seele-sessao", "seele-audio", "seele-video"],
@@ -312,6 +317,17 @@ mod tests {
         assert_eq!(evaluate("seele-sessao", &[edge("seele-core")]).len(), 1);
         assert_eq!(evaluate("seele-sessao", &[edge("seele-audio")]).len(), 1);
         assert!(evaluate("seele-core", &[edge("seele-sessao")]).is_empty());
+    }
+
+    /// O caminho da voz é uma folha: o navegador o compila, e uma aresta para
+    /// o `seele-audio` traria o cpal e a libopus junto. O `seele-audio` é quem
+    /// depende dele, e não o contrário.
+    #[test]
+    fn o_caminho_da_voz_nao_depende_de_ninguem() {
+        assert!(evaluate("seele-voz", &[]).is_empty());
+        assert_eq!(evaluate("seele-voz", &[edge("seele-audio")]).len(), 1);
+        assert_eq!(evaluate("seele-voz", &[edge("seele-proto")]).len(), 1);
+        assert!(evaluate("seele-audio", &[edge("seele-voz")]).is_empty());
     }
 
     /// A volta é uma folha: o QuickJS e mais nada. Ela não conhece o manifesto
