@@ -241,14 +241,12 @@ const TAREFA_33 = "3.3 (a voz)";
 const TAREFA_34 = "3.4 (a identidade e a entrada)";
 const TAREFA_39 = "3.9 (assistir à tela)";
 const TAREFA_310 = "3.10 (compartilhar a tela pelo PC)";
-const TAREFA_B = "3.1, lote B (o que mora na origem)";
 const TAREFA_C = "3.1, lote C (o arquivo por alça)";
 const TAREFA_D = "3.1, lote D (o microfone fora da sala, a saída de som e a tela cheia)";
 const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["abrir_no_navegador", TAREFA_B],
   ["abrir_teste_de_microfone", TAREFA_D],
   ["aceitar_mods", TAREFA_34],
   ["aceite_de_mods", TAREFA_34],
@@ -271,7 +269,6 @@ const AINDA_A_FAZER = new Map([
   ["compartilhar_tela", TAREFA_310],
   ["conhecidos", TAREFA_34],
   ["connect", TAREFA_34],
-  ["consentir_previa", TAREFA_B],
   ["criar_linha", TAREFA_26],
   ["criar_voice_room", TAREFA_26],
   ["descartar_mensagem", TAREFA_26],
@@ -282,7 +279,6 @@ const AINDA_A_FAZER = new Map([
   ["enviar_anexo", TAREFA_C],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_apelido", TAREFA_26],
-  ["escolher_apelido_local", TAREFA_B],
   ["escolher_arquivo", TAREFA_C],
   ["escolher_icone_do_server", TAREFA_26],
   ["escolher_microfone", TAREFA_33],
@@ -292,7 +288,6 @@ const AINDA_A_FAZER = new Map([
   ["escolher_tecla_de_falar", TAREFA_33],
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
-  ["esquecer_previa", TAREFA_B],
   ["estado_da_sessao", TAREFA_MODS],
   ["estado_do_teste_de_microfone", TAREFA_D],
   ["exclusao_do_som_da_captura", TAREFA_310],
@@ -326,7 +321,6 @@ const AINDA_A_FAZER = new Map([
   ["preparar_icone_do_server", TAREFA_26],
   ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
-  ["previas_consentidas", TAREFA_B],
   ["reenviar_mensagem", TAREFA_26],
   ["remover_mensagem", TAREFA_26],
   ["renomear_linha", TAREFA_26],
@@ -424,11 +418,71 @@ function guardadoNaOrigem(chave) {
   }
 }
 
-/** As chaves da origem. Quem escreve nelas é o lote B da 3.1. */
+/**
+ * Grava na origem (`null` apaga), e diz se conseguiu. Sem armazenamento
+ * (navegação privada, cota), a escolha não fica: quem chama diz isso.
+ */
+function gravarNaOrigem(chave, valor) {
+  try {
+    if (valor === null) localStorage.removeItem(chave);
+    else localStorage.setItem(chave, valor);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** As chaves da origem: as preferências deste aparelho. */
 const CHAVES_DA_ORIGEM = Object.freeze({
   apelido: "seele.apelido",
   retrato: "seele.retrato",
+  previas: "seele.previas",
 });
+
+/**
+ * Sem tab nem quebra de linha: o `sanitise` das preferências do desktop
+ * (`seele-core/src/preferences.rs`). Lá é o formato do arquivo; aqui, que um
+ * apelido ou um domínio guardado não ganhe uma quebra que o de lá não teria.
+ */
+const semQuebras = (texto) => texto.replace(/[\t\n\r]/g, "");
+
+/** Minúsculas só no ASCII, como o `to_ascii_lowercase` do Rust. */
+const minusculasAscii = (texto) => texto.replace(/[A-Z]/g, (letra) => letra.toLowerCase());
+
+/** Os domínios com a prévia liberada neste aparelho (ADR 0053). */
+function previasConsentidas() {
+  try {
+    const lista = JSON.parse(guardadoNaOrigem(CHAVES_DA_ORIGEM.previas) ?? "[]");
+    return Array.isArray(lista) ? lista.filter((dominio) => typeof dominio === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** O `previa_consentida` do desktop: o domínio, ou um subdomínio dele. */
+const previaConsentida = (lista, alvo) =>
+  lista.some((liberado) => alvo === liberado || alvo.endsWith(`.${liberado}`));
+
+/**
+ * O endereço que pode sair para uma aba nova, ou a recusa: o
+ * `endereco_que_pode_sair` do desktop (`main.rs`). Só `http` e `https`: o resto
+ * (`javascript:`, `data:`, `file:` e os esquemas que abrem programas) é alguém
+ * de fora escolhendo o que roda aqui.
+ */
+function enderecoQuePodeSair(bruto) {
+  const url = bruto.trim();
+  if (new TextEncoder().encode(url).length > 2048) return { recusa: "endereço longo demais" };
+  const minusculo = minusculasAscii(url);
+  if (!minusculo.startsWith("http://") && !minusculo.startsWith("https://")) {
+    return {
+      recusa:
+        "só abro endereços `http` e `https`: qualquer outro esquema é um programa que alguém de fora escolheu iniciar nesta máquina",
+    };
+  }
+  if (/[\s\p{Cc}]/u.test(url)) return { recusa: "endereço com espaço ou caractere de controle" };
+  if (url.length <= "https://".length) return { recusa: "endereço vazio" };
+  return { alvo: url };
+}
 
 // ------------------------------------------------------------------- os corpos
 
@@ -480,6 +534,44 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   apelido_local: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido),
   meu_retrato: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato),
+  // Aparado e sem quebras; vazio apaga (`Preferences::set_nickname`).
+  escolher_apelido_local: ({ apelido } = {}) => {
+    const limpo = semQuebras(String(apelido ?? "").trim());
+    const valor = limpo.trim() === "" ? null : limpo;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.apelido, valor)) return Promise.reject("NaoGravei");
+    return null;
+  },
+  // **É o clique que consente**, para o domínio (ADR 0053). Uma palavra só, em
+  // minúsculas; um subdomínio de um liberado já está liberado.
+  consentir_previa: ({ dominio } = {}) => {
+    const alvo = minusculasAscii(semQuebras(String(dominio ?? ""))).trim();
+    if (alvo === "" || /\s/.test(alvo)) return null;
+    const lista = previasConsentidas();
+    if (previaConsentida(lista, alvo)) return null;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.previas, JSON.stringify([...lista, alvo]))) {
+      return Promise.reject("não consegui gravar a escolha");
+    }
+    return null;
+  },
+  esquecer_previa: ({ dominio } = {}) => {
+    const alvo = minusculasAscii(String(dominio ?? ""));
+    const lista = previasConsentidas();
+    const restam = lista.filter((liberado) => liberado !== alvo);
+    if (restam.length === lista.length) return null;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.previas, JSON.stringify(restam))) {
+      return Promise.reject("não consegui gravar a escolha");
+    }
+    return null;
+  },
+  previas_consentidas: () => previasConsentidas(),
+  // **Numa aba nova, que não leva a página junto.** Sem `await` antes do
+  // `open`: o navegador só abre a aba dentro do gesto de quem clicou.
+  abrir_no_navegador: ({ url } = {}) => {
+    const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
+    if (recusa) return Promise.reject(recusa);
+    window.open(alvo, "_blank", "noopener,noreferrer");
+    return null;
+  },
 });
 
 // ------------------------------------------------------------------- os verbos

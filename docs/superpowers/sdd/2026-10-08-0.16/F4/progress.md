@@ -489,3 +489,24 @@ começar.
   É do encontro da F3 com a F8 (o `0.16/web` não muda CSS nenhum), e a F8 o
   regera com `SEELE_REGERAR_TEXTO=1`. Avisado à orquestradora.
 
+## 09/10, noite: a ponte, lote B (o que mora na origem)
+
+- **Cinco comandos saem de `AINDA_A_FAZER`**: `escolher_apelido_local`,
+  `consentir_previa`, `esquecer_previa`, `previas_consentidas` e
+  `abrir_no_navegador`. Ficam 94.
+- **As regras são as do desktop**, lidas do código e não da matriz:
+  - o apelido aparado e sem tab nem quebra (`Preferences::set_nickname`), e
+    vazio apaga;
+  - o domínio em minúsculas ASCII, uma palavra só, e um subdomínio de um
+    liberado já está liberado (`consentir_previa`, `previa_consentida`);
+  - só `http` e `https`, até 2048 bytes, sem espaço nem controle
+    (`endereco_que_pode_sair`), numa aba nova com `noopener,noreferrer` e sem
+    `await` antes do `open`.
+- **Gravar que falha é dito**: `NaoGravei` no apelido, como o desktop, e a
+  frase no consentimento. Sem armazenamento (navegação privada, cota), a
+  escolha não fica, e quem chama sabe.
+- **Medido:** a `ponte-web.cjs` com 12 provas; `web.rs` 10, `frontend.rs` 282
+  e `celular.rs` passam. **Cinco reversões**, cada uma reprovando o seu caso:
+  abrir sem conferir, abrir levando a página junto, o apelido sem aparar, o
+  subdomínio consentido de novo e a gravação que falha em silêncio.
+

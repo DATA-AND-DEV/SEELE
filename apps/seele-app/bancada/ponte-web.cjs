@@ -43,20 +43,46 @@ const igual = (a, b) => util.isDeepStrictEqual(emJson(a), emJson(b));
  * nada, `Error` para um armazenamento que lança). `tauri` põe o
  * `__TAURI_INTERNALS__`; `duble` põe um `__TAURI__` antes da ponte.
  */
-function pagina({ guardado, toque = false, largura = 1280, tauri = false, duble = null, hash = "" } = {}) {
+function pagina({
+  guardado,
+  toque = false,
+  largura = 1280,
+  tauri = false,
+  duble = null,
+  hash = "",
+  gravacaoFalha = false,
+} = {}) {
   const ouvidos = [];
   const avisos = [];
   const linhas = [];
+  const abertos = [];
+  // O resto da origem, que o lote B grava. O `seele.casca` continua vindo de
+  // `guardado`.
+  const origem = new Map();
   const janela = {
     structuredClone,
+    TextEncoder,
     innerWidth: largura,
     location: { hash, href: `https://seele.invalid/${hash}` },
     document: { documentElement: { dataset: {} } },
     localStorage: {
       getItem(chave) {
         if (guardado instanceof Error) throw guardado;
-        return chave === "seele.casca" && guardado !== undefined ? guardado : null;
+        if (chave === "seele.casca") return guardado !== undefined ? guardado : null;
+        return origem.has(chave) ? origem.get(chave) : null;
       },
+      setItem(chave, valor) {
+        if (gravacaoFalha) throw new Error("QuotaExceededError");
+        origem.set(chave, String(valor));
+      },
+      removeItem(chave) {
+        if (gravacaoFalha) throw new Error("QuotaExceededError");
+        origem.delete(chave);
+      },
+    },
+    open: (...argumentos) => {
+      abertos.push(argumentos);
+      return null;
     },
     matchMedia(consulta) {
       return {
@@ -86,6 +112,8 @@ function pagina({ guardado, toque = false, largura = 1280, tauri = false, duble 
     ouvidos,
     avisos,
     linhas,
+    abertos,
+    origem,
     invoke: (comando, args) => janela.__TAURI__.core.invoke(comando, args),
   };
 }
@@ -311,6 +339,80 @@ async function oListenEORegistro() {
   confere(caso, linha !== undefined, `o registro da janela não chegou ao console: ${util.inspect(p.avisos)}`);
 }
 
+/// **O apelido de entrada mora na origem**, com as regras do desktop
+/// (`escolher_apelido_local`, `Preferences::set_nickname`): aparado, sem as
+/// quebras que o formato do arquivo não aceita, e vazio apaga. Não conseguir
+/// gravar volta `NaoGravei`, e não um silêncio.
+async function oApelidoLocal() {
+  const caso = "o apelido local";
+  const p = pagina();
+  for (const [escrito, guardado] of [
+    ["  Ana  ", "Ana"],
+    ["Bea\tTriz\n", "BeaTriz"],
+    ["", null],
+    ["   ", null],
+  ]) {
+    const r = await desfecho(p.invoke("escolher_apelido_local", { apelido: escrito }));
+    confere(caso, r.ok === null, `escolher «${escrito}» voltou ${util.inspect(r)}`);
+    const lido = await desfecho(p.invoke("apelido_local"));
+    confere(caso, lido.ok === guardado, `depois de «${escrito}», o apelido lido é ${util.inspect(lido)}, e não ${guardado}`);
+  }
+  const sem = pagina({ gravacaoFalha: true });
+  const r = await desfecho(sem.invoke("escolher_apelido_local", { apelido: "Ana" }));
+  confere(caso, r.erro === "NaoGravei", `sem gravar, o apelido voltou ${util.inspect(r)}`);
+}
+
+/// **As prévias consentidas** (ADR 0053), com as regras do desktop
+/// (`Preferences::consentir_previa`): o domínio em minúsculas, uma palavra só,
+/// e um subdomínio de um liberado já está liberado.
+async function asPreviasConsentidas() {
+  const caso = "as prévias consentidas";
+  const p = pagina();
+  const lista = async () => (await desfecho(p.invoke("previas_consentidas"))).ok;
+  confere(caso, igual(await lista(), []), "sem nada consentido, a lista não é vazia");
+  await p.invoke("consentir_previa", { dominio: "Exemplo.COM" });
+  await p.invoke("consentir_previa", { dominio: "fotos.exemplo.com" });
+  await p.invoke("consentir_previa", { dominio: "dois dominios" });
+  await p.invoke("consentir_previa", { dominio: "" });
+  await p.invoke("consentir_previa", { dominio: "outro.net" });
+  confere(caso, igual(await lista(), ["exemplo.com", "outro.net"]),
+    `a lista saiu ${util.inspect(await lista())}`);
+  await p.invoke("esquecer_previa", { dominio: "EXEMPLO.com" });
+  confere(caso, igual(await lista(), ["outro.net"]), `esquecer deixou ${util.inspect(await lista())}`);
+  const sem = pagina({ gravacaoFalha: true });
+  const r = await desfecho(sem.invoke("consentir_previa", { dominio: "exemplo.com" }));
+  confere(caso, typeof r.erro === "string" && r.erro.includes("não consegui gravar"),
+    `sem gravar, consentir voltou ${util.inspect(r)}`);
+}
+
+/// **Abrir um endereço é abrir uma aba nova, e só `http` e `https`**, com a
+/// conferência do desktop (`endereco_que_pode_sair`). A aba nova não leva a
+/// página junto (`noopener`, `noreferrer`).
+async function abrirNoNavegador() {
+  const caso = "abrir no navegador";
+  const p = pagina();
+  const r = await desfecho(p.invoke("abrir_no_navegador", { url: "  https://exemplo.com/a?b=c  " }));
+  confere(caso, r.ok === null, `um endereço bom voltou ${util.inspect(r)}`);
+  confere(caso, igual(p.abertos, [["https://exemplo.com/a?b=c", "_blank", "noopener,noreferrer"]]),
+    `a aba aberta foi ${util.inspect(p.abertos)}`);
+  for (const ruim of [
+    "javascript:alert(1)",
+    "data:text/html,oi",
+    "file:///etc/passwd",
+    "seele://x",
+    "https://exemplo.com/a b",
+    "https://exemplo.com/\u0007",
+    "http://",
+    `https://exemplo.com/${"a".repeat(2048)}`,
+    "",
+  ]) {
+    const q = pagina();
+    const s = await desfecho(q.invoke("abrir_no_navegador", { url: ruim }));
+    confere(caso, typeof s.erro === "string" && q.abertos.length === 0,
+      `«${ruim.slice(0, 40)}» voltou ${util.inspect(s)} e abriu ${q.abertos.length}`);
+  }
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -322,6 +424,9 @@ async function oListenEORegistro() {
     semSessao,
     aAberturaNuncaEntra,
     oListenEORegistro,
+    oApelidoLocal,
+    asPreviasConsentidas,
+    abrirNoNavegador,
   ];
   for (const prova of provas) {
     try {
