@@ -2314,17 +2314,22 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// **As duas conferências do `connect`, pela forma.**
     ///
-    /// O cenário de cima prova o comportamento quando a velha termina depois de
-    /// a nova ter entrado, e a primeira conferência basta para ele. A segunda
-    /// fecha a corrida entre a primeira e a gravação do slot — a nova começando
-    /// no meio dos efeitos de entrada —, e nenhum teste daqui consegue parar o
-    /// `connect` ali. Então este guarda prende a forma, sem ler comentário:
+    /// O comportamento das duas tem teste: a primeira em
+    /// `a_velha_que_entra_depois_da_nova_nao_toma_a_conexao`, e a segunda em
+    /// `a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot`,
+    /// que para o `connect` no cadeado do slot. (Este doc dizia que nenhum teste
+    /// conseguia parar o `connect` ali, e não era verdade: a sonda P2 da
+    /// revisão o parou, e o teste dela entrou aqui.) Este guarda prende a forma
+    /// que dá aquele comportamento, sem ler comentário:
     ///
     /// 1. entre o `connect_watching` voltar e o primeiro efeito de entrada há a
-    ///    conferência da geração, que larga a substituída;
+    ///    conferência da geração, e ela **volta** com a substituída largada;
     /// 2. o slot só é gravado com o cadeado dele tomado e a geração conferida
     ///    ali, sem espera no meio;
-    /// 3. quem não gravou é largado antes de o endereço da sessão ser escrito.
+    /// 3. quem não gravou **volta** largada, antes de o endereço da sessão ser
+    ///    escrito. Largar sem voltar (o mutante R3b da revisão) fechava a
+    ///    conexão e seguia gravando o endereço e a lista da velha, e devolvia
+    ///    `Ok`: o guarda só conferia a ordem do texto, e o deixava passar.
     #[test]
     fn o_connect_confere_a_geracao_antes_dos_efeitos_e_ao_gravar_o_slot() {
         let fonte = super::fonte_sem_comentarios();
@@ -2346,7 +2351,7 @@ mod a_entrada_velha_que_chega_tarde {
         let antes_dos_efeitos = &corpo[volta..primeiro_efeito];
         assert!(
             antes_dos_efeitos.contains("session.confere_geracao(geracao).is_err()")
-                && antes_dos_efeitos.contains("largar_a_substituida("),
+                && antes_dos_efeitos.contains("return Err(largar_a_substituida("),
             "o `connect` aplica os efeitos de entrada sem conferir antes se a geração dele \
              ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
              consentimento ao servidor que a pessoa deixou.\n{antes_dos_efeitos}"
@@ -2366,15 +2371,23 @@ mod a_entrada_velha_que_chega_tarde {
              da nova.\n{ao_gravar}"
         );
         let depois = &corpo[gravar..];
-        let largada = depois.find("largar_a_substituida(");
+        let Some(ramo) = depois.find("if let Some(connection) = substituida {") else {
+            panic!(
+                "depois de gravar o slot, o `connect` não tem mais o ramo da tentativa que não \
+                 gravou: {depois}"
+            );
+        };
+        let Some(fim_do_ramo) = depois[ramo..].find("\n    }\n").map(|n| ramo + n) else {
+            panic!("o ramo da tentativa que não gravou não fecha: {depois}");
+        };
+        let bloco = &depois[ramo..fim_do_ramo];
         let endereco = depois.find("endereco_da_sessao");
         assert!(
-            largada
-                .zip(endereco)
-                .is_some_and(|(largada, endereco)| largada < endereco),
-            "depois de gravar o slot, a tentativa que não gravou não é largada antes de o \
-             endereço da sessão ser escrito: o endereço, o alvo e a lista de visitados \
-             passariam a ser os dela.\n{depois}"
+            bloco.contains("return Err(largar_a_substituida(")
+                && endereco.is_some_and(|endereco| fim_do_ramo < endereco),
+            "depois de gravar o slot, a tentativa que não gravou não volta largada antes de o \
+             endereço da sessão ser escrito: largada sem voltar, ela fecha a conexão e segue \
+             gravando o endereço, o alvo e a lista de visitados dela, e volta `Ok`.\n{bloco}"
         );
     }
 
