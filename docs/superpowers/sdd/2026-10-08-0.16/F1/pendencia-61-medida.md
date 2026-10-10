@@ -172,3 +172,46 @@ Lido pelo agente que mapeou o cliente, e não medido por mim: TENTAR DE NOVO num
 mensagem recusada por tamanho (`TooLong`) derruba o enlace. `reenviar_mensagem`
 (`lib.rs:1964-1986`) não confere o tamanho, o `encode` falha no núcleo, e
 `enlace.rs:3808-3810` chama `cair()`. Fica para quem é dono da casca.
+
+## 5. Depois da decisão: o conserto, e a linha 0.15
+
+A orquestradora decidiu **defeito** e pôs o servidor comigo. O conserto da 0.16
+é `1ebf85a4`: `TETO_DO_LOTE` (256, um quarto do anel) e `TETO_NO_AR` (8 por
+conexão, pela pré-condição no ramo da entrada). O guarda é
+`seele-conformance/tests/rajada_de_muitos.rs`, sem `#[ignore]`.
+
+**Cada metade sozinha, na 0.16 e na 0.15, 3 rodadas cada:**
+
+| | 18 × 58 | 24 × 58, 4 KiB |
+|---|---|---|
+| nada | 19 de 19 para trás | 25 de 25 para trás |
+| só o teto do lote | verde | **25 de 25 para trás** |
+| só a contrapressão | verde | verde |
+| as duas | verde | verde |
+
+O teto do lote sozinho segura um anúncio, e não uma sequência: lotes de 256
+seguidos ainda passam à frente das sessões ocupadas com as próprias mensagens.
+Quem segura a rajada é a contrapressão. O teto do lote cobre o que ela não
+cobre, mais de 128 conexões com mensagens no ar, e isso a porta de fora não
+alcança (30 apertos de mão por endereço); o guarda dele é
+`o_lote_cheio_e_gravado_sem_esperar_o_relogio`, no relógio de mentira.
+
+**A linha 0.15.** Medido numa cópia destacada da `linha/0.15` em `40066a7c`,
+sem commit lá. Entre a v0.15.1 publicada (`54f542f94`) e `40066a7c` o
+`seele-server` só mudou o `assentar` (`250cde9c`), longe do barramento: o que
+vale para uma vale para a outra.
+
+- **Sem conserto, a 0.15 derruba todo mundo do mesmo jeito**: 18 × 58, 19 de 19
+  sessões para trás; 24 × 58 com 4 KiB, 25 de 25.
+- **«Só o teto do lote» não basta lá também**: o 24 × 58 com 4 KiB reprova, 3 de
+  3.
+- **O conserto mínimo que passa é o mesmo da 0.16**, as duas metades. Na 0.15
+  ele pede uma linha a mais, o `tokio` com `test-util` nas `dev-dependencies` do
+  `seele-server`, para o teste do teto no relógio de mentira (a 0.16 já tem).
+  Com ele: o guarda verde em 3 rodadas, o teste do teto verde, o `seele-server`
+  inteiro verde (571 em 11 alvos), e a conformidade `rajada`, `acceptance_m3` e
+  `moderacao` verde.
+- O porte está em `pendencia-61-linha-0.15.patch`, ao lado deste arquivo,
+  conferido contra a cópia medida (`git apply --check -R`): o guarda, o
+  `Cargo.toml`, o `lib.rs`, o `server.rs` e o `session.rs`, aplicáveis em
+  `40066a7c`.
