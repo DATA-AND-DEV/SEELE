@@ -44,14 +44,22 @@ use std::{net::SocketAddr, sync::Arc, time::{Duration, Instant}};
 
 const QUADRO: usize = 960; // 20 ms a 48 kHz, mono
 
-async fn entrar(endereco: SocketAddr, chave: &SigningKey, apelido: &str) -> Result<Client> {
+/// Entra aceitando o conjunto de MODs que o servidor exigir. O conjunto aceito
+/// fica em `aceito` e vai já na primeira tentativa da entrada seguinte: sem
+/// isto, cada calado gastava dois apertos (a recusa e a volta com o sim), e a
+/// portaria recusava a partir do 15º (medido em 10/10, `RateLimited`).
+async fn entrar(endereco: SocketAddr, chave: &SigningKey, apelido: &str,
+                aceito: &mut Option<String>) -> Result<Client> {
     let pins = Arc::new(MemoryPinStore::new());
     match Client::connect(endereco, "localhost", &endereco.to_string(), apelido, chave,
-                          pins.clone(), None, None).await {
+                          pins.clone(), None, aceito.as_deref()).await {
         Ok(cliente) => Ok(cliente),
-        Err(ConnectError::ModsNaoAceitos { conjunto, .. }) => Ok(Client::connect(
-            endereco, "localhost", &endereco.to_string(), apelido, chave, pins,
-            None, Some(&conjunto)).await?),
+        Err(ConnectError::ModsNaoAceitos { conjunto, .. }) => {
+            let cliente = Client::connect(endereco, "localhost", &endereco.to_string(), apelido,
+                                          chave, pins, None, Some(&conjunto)).await?;
+            *aceito = Some(conjunto);
+            Ok(cliente)
+        }
         Err(outro) => Err(outro.into()),
     }
 }
@@ -68,6 +76,7 @@ async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos:
     let comeco = Instant::now();
     let fim = comeco + Duration::from_secs(segundos);
     let mut tarefas = Vec::with_capacity(n);
+    let mut aceito = None;
     for i in 0..n {
         if i >= RAJADA {
             tokio::time::sleep(RITMO).await;
@@ -76,7 +85,7 @@ async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos:
         let chave = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
         let mut tentativas = 0;
         let mut cliente = loop {
-            match entrar(endereco, &chave, &apelido).await {
+            match entrar(endereco, &chave, &apelido, &mut aceito).await {
                 Ok(cliente) => break cliente,
                 Err(erro) if tentativas < 30 => {
                     tentativas += 1;
@@ -124,7 +133,7 @@ async fn main() -> Result<()> {
         return muitos_calados(endereco, calados, &apelido, segundos).await;
     }
     let chave = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-    let mut cliente = entrar(endereco, &chave, &apelido).await?;
+    let mut cliente = entrar(endereco, &chave, &apelido, &mut None).await?;
     for n in 0..mensagens {
         cliente.send_message(ChannelId(1), &format!("mensagem {n} da carga M3"), ClientMessageId(n + 1)).await?;
     }

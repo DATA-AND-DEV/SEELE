@@ -241,6 +241,17 @@ foram medidas, e o molde mudado não as alcança.
   que chega. São uns 7,6 minutos antes do app (medido com 40: 25 s, nenhuma
   recusa, nenhuma queda, 40 pessoas no banco). Uma queda vai ao `.out` com o
   motivo, e um `FellBehind` não passa calado.
+- **O primeiro `carga-cartoes` falhou, e o meu ensaio não tinha como pegar**
+  (medido pela orquestradora, 10/10; `medidas/descartados/cartoes-portaria/`).
+  Com o servidor exigindo o MOD de carga, cada calado gastava **dois apertos**:
+  a recusa `ModsNaoAceitos` e a volta com o sim. A rajada de 28 acabou no 15º,
+  o ritmo de 2,05 s não repunha dois por calado, e o `m3-cartao-015` esgotou as
+  tentativas. **O ensaio com 40 foi contra um `m3-servidor` sem MOD**, em que
+  cada calado gasta um aperto só: ele provou o ritmo, e não o ritmo com o
+  aceite, que é o caso da campanha. O conserto, da orquestradora: o conjunto
+  aceito na primeira recusa vai na primeira tentativa de todo calado seguinte,
+  e só o primeiro paga dois. Conferido por ela contra o `m3-servidor` **com** o
+  `m3-carga-cartoes`: 40 em 25 s, nenhuma recusa.
 - **O cenário só mede com a lista inteira**: o roteiro conta pela
   acessibilidade os cartões distintos (`cartão <apelido> · linha 1`) e só
   segue com os 251; o relato leva `cartoes_na_lista`. O `carga_a_vista` leva o
