@@ -11146,11 +11146,10 @@ fn ramo_da_tentativa_substituida(conectar: &str) -> (String, std::ops::Range<usi
 /// 4. dentro dele a recusa vai ao registro por `registrarNoAnfitriao`, com o
 ///    alvo e o motivo, e como `"aviso"`: qualquer outro texto sai em DEBUG,
 ///    que o filtro de produção não escreve (ver
-///    `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`);
-/// 5. no `finally` do `connect`, todo botão reacendido o é só pela tentativa
-///    mais nova: o da velha reacendia o CONECTAR que a nova tinha apagado, com
-///    ela ainda andando. E algum é reacendido — sem isso, o botão ficaria
-///    apagado para sempre depois da primeira entrada.
+///    `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`).
+///
+/// O botão da entrada tem guarda próprio:
+/// `so_a_tentativa_mais_nova_mexe_no_conectar`.
 #[test]
 fn a_tentativa_que_outra_substituiu_nao_fala_na_tela() {
     let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
@@ -11228,58 +11227,112 @@ fn a_tentativa_que_outra_substituiu_nao_fala_na_tela() {
          ({argumentos:?}): sem os dois, quem investiga não sabe qual servidor recusou nem \
          por quê"
     );
+}
 
-    // 5. O `finally` que segue o `catch`: o bloco dele, casado contando.
-    let Some(finally) = conectar
-        .find(&decisao)
-        .map(|inicio| inicio + decisao.len())
-        .filter(|fim| conectar[*fim..].starts_with("} finally {"))
-    else {
-        panic!("o `catch` do `connect` deixou de terminar num `finally`: {conectar}");
-    };
-    let chave = finally + "} finally ".len();
+/// O fim do bloco que abre na chave em `chave`, casado contando, como em
+/// `js_function`.
+fn fim_do_bloco(texto: &str, chave: usize) -> Option<usize> {
     let mut profundidade = 0_i32;
-    let mut fim = None;
-    for (indice, caractere) in conectar[chave..].char_indices() {
+    for (indice, caractere) in texto[chave..].char_indices() {
         match caractere {
             '{' => profundidade += 1,
             '}' => {
                 profundidade -= 1;
                 if profundidade == 0 {
-                    fim = Some(chave + indice + 1);
-                    break;
+                    return Some(chave + indice + 1);
                 }
             }
             _ => {}
         }
     }
-    let Some(fim) = fim else {
+    None
+}
+
+/// **Só a tentativa mais nova mexe no CONECTAR** (lote W2 da F5, rodadas 1 e
+/// 2 da revisão).
+///
+/// `conectar` apaga o botão duas vezes — para a pergunta do nome e para a
+/// travessia — e o devolve duas — no `finally` da pergunta e no do `connect`.
+/// Uma tentativa que outra já substituiu mexia nele como se ainda fosse dona:
+/// o `finally` dela o reacendia com a nova andando (rodada 1), e, parada na
+/// pergunta do nome enquanto a nova começava e terminava, ela o apagava
+/// depois de a nova o ter devolvido, e ninguém mais o devolvia (rodada 2,
+/// medido pela revisão). A `ajustes-v013.cjs` (`oConectarTemDono` e o passo
+/// 2 de `aTentativaSubstituidaNaoFala`) prova o comportamento; este guarda
+/// prende a forma, sem ler comentário:
+///
+/// 1. todo `.disabled = false` de `conectar` começa com a conferência de que a
+///    tentativa ainda é a mais nova;
+/// 2. todo `.disabled = true` tem, entre a última espera (`await`) antes dele
+///    e ele, um `if (esta !== tentativas) {` que registra e volta — sem espera
+///    no meio, nada mais roda entre a conferência e o apagar;
+/// 3. há os dois apagares e o `finally` do `connect` devolve o botão: sem
+///    isso, o guarda passaria por não achar o que cobra, e o botão ficaria
+///    apagado para sempre depois da primeira entrada.
+#[test]
+fn so_a_tentativa_mais_nova_mexe_no_conectar() {
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    let mut acende = 0;
+    let mut apaga = 0;
+    for (posicao, _) in conectar.match_indices(".disabled = ") {
+        let inicio_da_linha = conectar[..posicao].rfind('\n').map_or(0, |n| n + 1);
+        let fim_da_linha = conectar[posicao..]
+            .find('\n')
+            .map_or(conectar.len(), |n| posicao + n);
+        let linha = conectar[inicio_da_linha..fim_da_linha].trim();
+        if linha.contains(".disabled = false") {
+            acende += 1;
+            assert!(
+                ["if (esta === tentativas)", "if (tentativas === esta)"]
+                    .iter()
+                    .any(|conferencia| linha.starts_with(conferencia)),
+                "`conectar` reacende um botão sem conferir que a tentativa ainda é a mais nova \
+                 ({linha:?}): a que outra já substituiu termina e o reacende com a nova ainda \
+                 andando, e um clique ali abre uma terceira entrada por baixo dela"
+            );
+        } else if linha.contains(".disabled = true") {
+            apaga += 1;
+            let espera = conectar[..posicao].rfind("await ").unwrap_or(0);
+            let entre = &conectar[espera..posicao];
+            let conferida = entre.find("if (esta !== tentativas) {").and_then(|abre| {
+                let chave = abre + "if (esta !== tentativas) ".len();
+                fim_do_bloco(entre, chave).map(|fim| &entre[chave..fim])
+            });
+            assert!(
+                conferida.is_some_and(|bloco| {
+                    bloco.contains("return") && bloco.contains("registrarNoAnfitriao(")
+                }),
+                "`conectar` apaga um botão ({linha:?}) sem conferir antes, depois da última \
+                 espera, que a tentativa ainda é a mais nova, e sem desistir e registrar se \
+                 não for: uma velha que volta da espera depois de a nova ter devolvido o \
+                 botão o apaga, e ninguém mais o devolve.\n{entre}"
+            );
+        }
+    }
+    assert!(
+        apaga >= 2 && acende >= 2,
+        "`conectar` apaga o botão {apaga} vez(es) e o devolve {acende}: eram duas e duas (a \
+         pergunta do nome e a travessia). Se a forma mudou, este guarda precisa mudar junto, \
+         e não passar por não achar o que cobra.\n{conectar}"
+    );
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(finally) = conectar[connect..]
+        .find("} finally {")
+        .map(|depois| connect + depois)
+    else {
+        panic!("o `connect` deixou de ter um `finally`: {conectar}");
+    };
+    let chave = finally + "} finally ".len();
+    let Some(fim) = fim_do_bloco(&conectar, chave) else {
         panic!("o `finally` do `connect` não fecha: {conectar}");
     };
     let bloco = &conectar[chave..fim];
-    let reacende: Vec<&str> = bloco
-        .lines()
-        .map(str::trim)
-        .filter(|linha| linha.contains(".disabled = false"))
-        .collect();
     assert!(
-        !reacende.is_empty(),
+        bloco.contains(".disabled = false"),
         "o `finally` do `connect` deixou de devolver o botão que a entrada apaga: depois \
          da primeira tentativa, ele fica apagado para sempre.\n{bloco}"
-    );
-    let sem_conferir: Vec<&&str> = reacende
-        .iter()
-        .filter(|linha| {
-            !["if (esta === tentativas)", "if (tentativas === esta)"]
-                .iter()
-                .any(|conferencia| linha.starts_with(conferencia))
-        })
-        .collect();
-    assert!(
-        sem_conferir.is_empty(),
-        "o `finally` do `connect` reacende um botão sem conferir que a tentativa ainda é a \
-         mais nova ({sem_conferir:?}): a que outra já substituiu termina e o reacende com a \
-         nova ainda andando, e um clique ali abre uma terceira entrada por baixo dela"
     );
 }
 

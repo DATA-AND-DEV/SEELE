@@ -225,6 +225,24 @@ async function conectar(alvo, apelido, credencial) {
       console.warn("apelido_local:", falha);
     }
   }
+  // **Uma tentativa que outra já substituiu desiste aqui, antes de mexer no
+  // CONECTAR** (lote W2, rodada 2 da revisão). Daqui até o `connect` a entrada
+  // apaga o botão duas vezes — para a pergunta do nome e para a travessia —,
+  // e só a tentativa mais nova o devolve. Uma velha que apagasse o botão
+  // depois de a nova o ter devolvido o deixava apagado para sempre (medido
+  // pela revisão: a velha parada na pergunta do nome, a nova entrando pelo
+  // HOSPEDAR AQUI). E ela não pergunta o nome por cima da nova, nem chama um
+  // `connect` que voltaria `AlreadyConnected` ou revogaria a geração da nova.
+  // A conferência vem depois de cada espera e antes de cada apagar: entre as
+  // duas, nada mais roda. Vai ao `seele.log`, como a recusa dela no `catch`.
+  if (esta !== tentativas) {
+    registrarNoAnfitriao(
+      "entrada",
+      `a tentativa a ${alvo} desistiu antes da pergunta do nome: outra começou enquanto ela lia o apelido desta máquina`,
+      "aviso",
+    );
+    return;
+  }
   // **Sem nome nenhum, a primeira entrada desta execução pergunta antes.**
   //
   // Quem nunca se nomeou entrava calado com o nome tirado da chave, e só o
@@ -241,15 +259,28 @@ async function conectar(alvo, apelido, credencial) {
   // segunda entrada por baixo da caixa — que já não perguntava, porque a marca
   // estava posta, e entrava com o nome vazio. Volta a valer no `finally`, e logo
   // abaixo, sem `await` no meio, a entrada o apaga de novo até o `connect`
-  // responder.
+  // responder. **Só se esta tentativa ainda é a mais nova** (lote W2, rodada 2
+  // da revisão): o HOSPEDAR AQUI continua alcançável por baixo da caixa, e uma
+  // nova que começou com ela aberta e ainda anda é a dona do botão — reacendê-lo
+  // aqui seria abrir uma terceira entrada por baixo dela.
   if (apelido === "" && !jaPergunteiONome) {
     jaPergunteiONome = true;
     $("botao-conectar").disabled = true;
     try {
       apelido = await perguntarONome();
     } finally {
-      $("botao-conectar").disabled = false;
+      if (esta === tentativas) $("botao-conectar").disabled = false;
     }
+  }
+  // A mesma conferência depois da pergunta do nome: a caixa espera a pessoa,
+  // e a nova pode ter começado e terminado enquanto ela estava aberta.
+  if (esta !== tentativas) {
+    registrarNoAnfitriao(
+      "entrada",
+      `a tentativa a ${alvo} desistiu depois da pergunta do nome: outra começou enquanto a caixa estava aberta`,
+      "aviso",
+    );
+    return;
   }
   // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
   // um defeito de campo que não tinha saída.
@@ -433,9 +464,15 @@ async function conectar(alvo, apelido, credencial) {
   } finally {
     // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
     // outra já substituiu terminava e o reacendia com a nova ainda andando, e
-    // um clique ali abria uma terceira entrada por baixo dela. A mais nova
-    // sempre chega aqui — ou ao `finally` da pergunta do nome, que também o
-    // devolve —, então o botão nunca fica apagado sem dono.
+    // um clique ali abria uma terceira entrada por baixo dela.
+    //
+    // **E só a mais nova o apaga** (rodada 2 da revisão): a velha desiste
+    // antes de cada apagar, logo depois de cada espera. Com as duas regras, o
+    // botão só fica apagado enquanto a tentativa mais nova anda, e a última a
+    // começar sempre termina por um caminho que o devolve — este `finally`, ou
+    // o da pergunta do nome quando ela falha ali. Até a primeira rodada, a
+    // velha ainda o apagava depois de a nova o ter devolvido, e ele ficava
+    // apagado sem dono: a revisão mediu, com a velha parada na pergunta do nome.
     if (esta === tentativas) botao.disabled = false;
     // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
     // veredito ou o erro, e não o último candidato tentado.
