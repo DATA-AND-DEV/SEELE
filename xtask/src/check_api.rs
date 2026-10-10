@@ -317,8 +317,9 @@ struct Casca {
     /// Os pontos de `PONTOS_DE_CONTRIBUICAO` (`mods-contribuicoes.js`), com os
     /// modos de cada um.
     pontos: std::collections::BTreeMap<String, Vec<String>>,
-    /// Os tipos de `TIPOS_DE_SUPERFICIE` (`mods-superficies.js`).
-    tipos: BTreeSet<String>,
+    /// Os tipos de `TIPOS_DE_SUPERFICIE` (`mods-superficies.js`), com as APIs
+    /// em que cada um vale: `desde` e `ate`, os dois inclusive, da tabela.
+    tipos: std::collections::BTreeMap<String, (u64, u64)>,
     /// Os tetos que o produto aplica, pelo nome com que a API os declara.
     tetos: std::collections::BTreeMap<String, u64>,
     /// O que o runtime do servidor expõe a uma metade de servidor
@@ -364,13 +365,36 @@ fn pontos_da_casca(contribuicoes: &str) -> std::collections::BTreeMap<String, Ve
     pontos
 }
 
-/// Os tipos de `TIPOS_DE_SUPERFICIE`: uma linha por tipo, `nome: { host: … }`.
-fn tipos_da_casca(superficies: &str) -> BTreeSet<String> {
+/// Os tipos de `TIPOS_DE_SUPERFICIE`: uma linha por tipo, `nome: { host: … }`,
+/// com as APIs em que ele vale (`desde: N` e `ate: N`; sem eles, todas). É a
+/// mesma regra de `tiposDaApi`, na casca, lida dos mesmos campos.
+fn tipos_da_casca(superficies: &str) -> std::collections::BTreeMap<String, (u64, u64)> {
+    let numero = |resto: &str, campo: &str| {
+        resto
+            .split_once(&format!("{campo}: "))
+            .and_then(|(_, depois)| {
+                depois
+                    .split(|c: char| !c.is_ascii_digit())
+                    .next()
+                    .and_then(|n| n.parse::<u64>().ok())
+            })
+    };
     tabela_da_casca(superficies, "TIPOS_DE_SUPERFICIE")
         .lines()
         .filter_map(|linha| linha.trim().split_once(": {"))
-        .map(|(nome, _)| nome.trim().to_owned())
-        .filter(|nome| !nome.is_empty() && nome.chars().all(|c| c.is_ascii_alphanumeric()))
+        .filter(|(nome, _)| {
+            let nome = nome.trim();
+            !nome.is_empty() && nome.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .map(|(nome, resto)| {
+            (
+                nome.trim().to_owned(),
+                (
+                    numero(resto, "desde").unwrap_or(0),
+                    numero(resto, "ate").unwrap_or(u64::MAX),
+                ),
+            )
+        })
         .collect()
 }
 
@@ -579,13 +603,21 @@ fn pontos_e_tipos(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> 
                 .collect()
         })
         .unwrap_or_default();
-    for tipo in tipos.difference(&casca.tipos) {
+    // **Os tipos desta versão**, e não todos: a casca monta o `painel` até a 5
+    // e a `folha` desde a 6 (`desde`/`ate` na tabela, a regra de `tiposDaApi`).
+    let da_casca: BTreeSet<String> = casca
+        .tipos
+        .iter()
+        .filter(|(_, (desde, ate))| *desde <= versao && versao <= *ate)
+        .map(|(nome, _)| nome.clone())
+        .collect();
+    for tipo in tipos.difference(&da_casca) {
         violacoes.push(format!(
             "a API {versao} publica o tipo de superfície `{tipo}`, e a casca não o monta \
-             (`TIPOS_DE_SUPERFICIE`)"
+             nela (`TIPOS_DE_SUPERFICIE`)"
         ));
     }
-    for tipo in casca.tipos.difference(&tipos) {
+    for tipo in da_casca.difference(&tipos) {
         violacoes.push(format!(
             "a casca monta o tipo de superfície `{tipo}`, e a API {versao} não o publica"
         ));
@@ -2049,7 +2081,7 @@ const PERFIS_DE_RENDER = Object.freeze({
             casca.pontos
         );
         assert_eq!(
-            casca.tipos,
+            casca.tipos.keys().cloned().collect::<BTreeSet<_>>(),
             BTreeSet::from(["pagina".to_owned(), "dialogo".to_owned()]),
             "os tipos de superfície não foram lidos"
         );
@@ -2095,7 +2127,7 @@ const PERFIS_DE_RENDER = Object.freeze({
                 "o ponto `{ponto}` não foi achado: {pontos:?}"
             );
         }
-        assert!(tipos_da_casca(superficies).contains("dialogo"));
+        assert!(tipos_da_casca(superficies).contains_key("dialogo"));
         let expostos = nomes_do_runtime(runtime);
         for nome in ["arquivos.ler", "volume.esperar", "mundo.buscar", "dados"] {
             assert!(
@@ -2152,6 +2184,56 @@ const PERFIS_DE_RENDER = Object.freeze({
         assert!(
             violacoes.iter().any(|v| v.contains("folha")),
             "um tipo de superfície que ninguém monta passou: {violacoes:?}"
+        );
+    }
+
+    /// **O tipo vale na API em que a casca diz que vale** (a revisão do
+    /// rascunho contra a casca, 10/10): a casca monta o `painel` até a 5 e a
+    /// `folha` desde a 6, nos campos `ate` e `desde` da tabela, e a publicação
+    /// de cada versão é conferida com os tipos dela. Comparada com todos, a v6
+    /// reprovava por não publicar o `painel` que ela recusa.
+    #[test]
+    fn a_publicacao_de_cada_versao_e_conferida_com_os_tipos_dela() {
+        let superficies = r#"
+const TIPOS_DE_SUPERFICIE = Object.freeze({
+  pagina: { host: "palco-de-paginas", foco: false, camada: false },
+  painel: { host: "palco-de-paineis", foco: false, camada: false, ate: 5 },
+  folha: { host: "palco-de-paineis", foco: false, camada: false, desde: 6 },
+});
+"#;
+        let casca = Casca {
+            tipos: tipos_da_casca(superficies),
+            ..casca_de_fixture()
+        };
+        let com = |tipos: &[&str]| {
+            serde_json::json!({
+                "contribuicoes": { "pontos": {
+                    "pessoa.avatar": ["substituir"],
+                    "pessoa.cartao": ["substituir", "adicionar"],
+                } },
+                "superficies": { "tipos": tipos },
+            })
+        };
+        let de_tipo = |versao: u64, tipos: &[&str]| -> Vec<Violation> {
+            pontos_e_tipos(versao, &com(tipos), &casca)
+                .into_iter()
+                .filter(|v| v.contains("tipo de superfície"))
+                .collect()
+        };
+        assert_eq!(
+            de_tipo(6, &["pagina", "folha"]),
+            Vec::<Violation>::new(),
+            "a v6 sem o painel, que ela recusa, reprovou"
+        );
+        assert!(
+            de_tipo(6, &["pagina", "folha", "painel"])
+                .iter()
+                .any(|v| v.contains("painel")),
+            "a v6 publicando o painel, que a casca só monta até a 5, passou"
+        );
+        assert!(
+            de_tipo(6, &["pagina"]).iter().any(|v| v.contains("folha")),
+            "a v6 sem a folha, que a casca monta na 6, passou"
         );
     }
 
