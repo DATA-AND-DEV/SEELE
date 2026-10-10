@@ -9875,34 +9875,6 @@ fn arquivo_de_log() -> Option<std::fs::File> {
 /// duas vezes.
 const TETO_DO_LOG: u64 = 8 * 1024 * 1024;
 
-/// Troca o rastro por um novo quando o atual passa do teto. R15.
-///
-/// # Por que ele precisa girar
-///
-/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
-/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
-/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
-/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
-///
-/// # Duas gerações, e não dez
-///
-/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
-/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
-/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
-/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
-/// para responder uma pergunta que ninguém faz.
-///
-/// # Na abertura, e não por relógio
-///
-/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
-/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
-/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
-/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
-/// gira na próxima abertura.
-///
-/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
-/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
-/// era o que uma interrogação aqui causaria.
 /// Um pânico, em qualquer thread, deixa uma linha no `seele.log`. F1-audio-panico.
 ///
 /// # Por que existe
@@ -9942,6 +9914,34 @@ fn instalar_gancho_de_panico() {
     });
 }
 
+/// Troca o rastro por um novo quando o atual passa do teto. R15.
+///
+/// # Por que ele precisa girar
+///
+/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
+/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
+/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
+/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
+///
+/// # Duas gerações, e não dez
+///
+/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
+/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
+/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
+/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
+/// para responder uma pergunta que ninguém faz.
+///
+/// # Na abertura, e não por relógio
+///
+/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
+/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
+/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
+/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
+/// gira na próxima abertura.
+///
+/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
+/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
+/// era o que uma interrogação aqui causaria.
 fn girar_o_log(arquivo: &std::path::Path) {
     let Ok(dados) = std::fs::metadata(arquivo) else {
         // Não existe ainda, que é o caso da primeira abertura.

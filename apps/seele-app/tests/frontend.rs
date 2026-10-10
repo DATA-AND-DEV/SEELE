@@ -10565,20 +10565,30 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// Lote R da F5. A batida que para na pergunta dos MODs entrega o segredo com
 /// que chegou — o token do convite, ou a senha do servidor, que viajam no mesmo
 /// `join_secret` — à pergunta, que o guarda em `aceitePendente` enquanto está
-/// aberta e o devolve à volta que aceita. É a única credencial que esta janela
-/// guarda entre duas chamadas, e ela tem guarda próprio, em cinco partes:
+/// aberta e o devolve à volta que aceita. O lote W acrescentou o segundo e
+/// último lugar: a recusa por apelido tomado, que vem antes do gasto, a deixa
+/// em `recusaDoApelido` (`tela-boot.js`) para a tentativa seguinte ao mesmo
+/// alvo. São as duas únicas credenciais que esta janela guarda entre duas
+/// chamadas, e elas têm guarda próprio, em seis partes:
 ///
 /// 1. **Cada linha que a toca está na lista.** Toda linha de `tela-boot.js` e
-///    `camada-mods.js` que nomeia `credencial` ou `aceitePendente`, e a cópia
-///    `pergunta` de `aceitarOsMods`. Um caminho novo — um `localStorage`, um
-///    `console.warn` com o objeto da pergunta, um `invoke` que a grave em
-///    arquivo — é uma linha nova, e reprova aqui até alguém olhar para ela.
-/// 2. **Nenhum outro script lê a pergunta.** Um segundo leitor de
-///    `aceitePendente` seria um segundo lugar por onde ela sai.
-/// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
-///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
-///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
-///    reconexão que a levasse gastaria de novo o convite que a entrada gastou.
+///    `camada-mods.js` que nomeia `credencial`, `aceitePendente` ou
+///    `recusaDoApelido`, e a cópia `pergunta` de `aceitarOsMods`. Um caminho
+///    novo — um `localStorage`, um `console.warn` com o objeto da pergunta, um
+///    `invoke` que a grave em arquivo — é uma linha nova, e reprova aqui até
+///    alguém olhar para ela.
+/// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
+///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
+///    ela sai.
+/// 3. **Só três chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador e a volta que aceita os MODs. O
+///    RECONECTAR, a batida da espera, o hospedar e a troca de servidor não
+///    passam nenhuma — uma reconexão que a passasse gastaria de novo o convite
+///    que a entrada gastou. Desde o lote W, `conectar` anexa por conta própria
+///    a credencial que um apelido tomado deixou (`recusaDoApelido`), quando o
+///    alvo é o mesmo; essas chamadas sem argumento também a recebem nesse caso.
+///    Ela nunca é um convite gasto: só fica guardada depois de uma recusa que
+///    não gastou nada, e toda tentativa a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
 ///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
 ///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
@@ -10586,16 +10596,36 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
 ///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+/// 6. **A do apelido tomado morre na tentativa seguinte, qualquer que seja.**
+///    `conectar` a esquece e conta a tentativa antes da primeira espera, e a
+///    recusa só a guarda se a tentativa dela ainda é a mais nova: uma
+///    tentativa a outro alvo, ou uma que entra, não pode deixá-la para a
+///    próxima, nem mesmo quando a recusa de uma mais velha chega depois. A
+///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
+///    nova a abre com a credencial dela.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
         ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
-        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
-        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
+        // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
+        // esquecimento no começo de toda tentativa, e a guarda na recusa.
+        ("tela-boot.js", "let recusaDoApelido = null;"),
         (
             "tela-boot.js",
-            "if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
+            "if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;",
+        ),
+        ("tela-boot.js", "recusaDoApelido = null;"),
+        (
+            "tela-boot.js",
+            "if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };",
+        ),
+        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
+        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3); e só se
+        // esta tentativa ainda é a mais nova (lote W, re-revisão da rodada 1).
+        (
+            "tela-boot.js",
+            "if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
         ),
         ("camada-mods.js", "let aceitePendente = null;"),
         (
@@ -10617,6 +10647,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-mods.js", "if (!pergunta) return;"),
         ("camada-mods.js", "const { alvo, conjunto, mods } = pergunta;"),
         ("camada-mods.js", "if (aceitePendente !== pergunta) return;"),
+        // A desistência durante a gravação do sim, que o desfaz e não volta
+        // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
+        // o alvo e mais nada.
+        ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",
@@ -10649,7 +10683,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     for arquivo in ["tela-boot.js", "camada-mods.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial") || names(linha, "aceitePendente") {
+            if names(linha, "credencial")
+                || names(linha, "aceitePendente")
+                || names(linha, "recusaDoApelido")
+            {
                 conferir(arquivo, linha);
             }
         }
@@ -10670,20 +10707,26 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
     }
 
-    // 2. Nenhum outro script lê a pergunta.
-    for nome in ui_files(".js") {
-        if nome == "camada-mods.js" {
-            continue;
+    // 2. Nenhum outro script lê os dois lugares.
+    for (lugar, dono) in [
+        ("aceitePendente", "camada-mods.js"),
+        ("recusaDoApelido", "tela-boot.js"),
+    ] {
+        for nome in ui_files(".js") {
+            if nome == dono {
+                continue;
+            }
+            let texto = without_comments(&read(&format!("ui/{nome}")));
+            assert!(
+                !names(&texto, lugar),
+                "`{nome}` lê `{lugar}`, que guarda a credencial da tentativa: um \
+                 segundo leitor é um segundo lugar por onde ela sai"
+            );
         }
-        let texto = without_comments(&read(&format!("ui/{nome}")));
-        assert!(
-            !names(&texto, "aceitePendente"),
-            "`{nome}` lê `aceitePendente`, que guarda a credencial da tentativa: um \
-             segundo leitor é um segundo lugar por onde ela sai"
-        );
     }
 
-    // 3. Só três chamadas de `conectar` levam credencial.
+    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
@@ -10797,6 +10840,25 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                  que só existe na memória dela, sobreviveria ao fechar. Chame \
                  `fecharAceiteDeMods()` antes do `preventDefault`:\n{ouvinte}"
             );
+            // **E só segura com a sessão à vista** (lote W). `fecharAceiteDeMods()`
+            // esquece a credencial da pergunta dos MODs, e não a que um apelido
+            // tomado deixou (`recusaDoApelido`). Com a sessão à vista, essa já foi
+            // esquecida: `#tela-sessao` só aparece pela `#tela-auth`, depois de um
+            // `conectar` que entrou e a esqueceu na primeira linha (parte 6), e toda
+            // tentativa de dentro da sessão passa antes por `ejetar()`, que esconde
+            // a sessão. Um ouvinte que segure fora da sessão — na entrada, com a
+            // linha vermelha do apelido tomado — seguraria a página com ela dentro.
+            if let Some(segura) = segura {
+                let so_na_sessao = ouvinte.find("getElementById(\"tela-sessao\").hidden) return;");
+                assert!(
+                    so_na_sessao.is_some_and(|condicao| condicao < segura),
+                    "`{nome}` segura o `beforeunload` sem conferir antes que a sessão \
+                     está à vista: fora dela, a credencial que um apelido tomado deixou \
+                     (`recusaDoApelido`, em `tela-boot.js`) pode estar viva, e \
+                     `fecharAceiteDeMods()` não a esquece. Segure só com a sessão à \
+                     vista, ou esqueça as duas antes:\n{ouvinte}"
+                );
+            }
         }
         assert!(
             texto.matches("beforeunload").count() == texto.matches("\"beforeunload\"").count(),
@@ -10854,6 +10916,64 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             );
         }
     }
+
+    // 6. A do apelido tomado morre na tentativa seguinte, antes da primeira
+    //    espera (lote W). A lista da parte 1 prende as linhas, e não a ordem.
+    let conectar = without_comments(&js_function(
+        &read("ui/tela-boot.js"),
+        "async function conectar(",
+    ));
+    let esquece = conectar.find("recusaDoApelido = null;");
+    let espera = conectar.find("await ");
+    assert!(
+        esquece
+            .zip(espera)
+            .is_some_and(|(esquece, espera)| esquece < espera),
+        "`conectar` deixou de esquecer a credencial do apelido tomado antes da \
+         primeira espera: uma tentativa que entra, ou que vai a outro alvo, pode \
+         deixá-la para a próxima, e o convite de um servidor acaba mandado a \
+         outro ou gasto duas vezes.\n{conectar}"
+    );
+    // **E a recusa de uma tentativa mais velha não a guarda** (rodada 1, M1).
+    // Uma tentativa lenta recusada pelo apelido depois que outra começou — o
+    // `hospedar()` entrando no servidor daqui no meio dela — guardava a
+    // credencial para uma tentativa seguinte que já tinha acontecido.
+    let conta = conectar.find("const esta = ++tentativas;");
+    assert!(
+        conta
+            .zip(espera)
+            .is_some_and(|(conta, espera)| conta < espera),
+        "`conectar` deixou de contar a tentativa antes da primeira espera, e a \
+         recusa por apelido não tem como saber se ela ainda é a mais nova.\n{conectar}"
+    );
+    let guarda = conectar
+        .lines()
+        .find(|linha| linha.contains("recusaDoApelido = {"));
+    assert!(
+        guarda.is_some_and(|linha| linha.contains("esta === tentativas")),
+        "a recusa por apelido guarda a credencial sem conferir que a tentativa dela \
+         ainda é a mais nova ({guarda:?}): a recusa de uma tentativa lenta, chegando \
+         depois que outra entrou, deixa o convite na memória da janela durante a \
+         sessão inteira"
+    );
+    // **Nem abre a pergunta dos MODs com ela** (re-revisão da rodada 1, sonda
+    // P6). A mesma corrida, com a tentativa velha voltando `ModsNaoAceitos`:
+    // a pergunta abria por cima da sessão, com o convite dentro.
+    let pergunta = conectar
+        .lines()
+        .find(|linha| linha.contains("levarParaOAceiteDeMods("));
+    let conferida = pergunta.and_then(|linha| {
+        linha
+            .find("esta === tentativas")
+            .zip(linha.find("levarParaOAceiteDeMods("))
+    });
+    assert!(
+        conferida.is_some_and(|(confere, abre)| confere < abre),
+        "`conectar` leva a recusa pelos MODs à pergunta sem conferir antes que a \
+         tentativa ainda é a mais nova ({pergunta:?}): uma tentativa lenta, voltando \
+         depois que outra entrou, abre a pergunta por cima da sessão com o convite \
+         dentro"
+    );
 }
 
 #[test]
@@ -12037,6 +12157,22 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
          Lembrar o vazio, ou um recurso, faz o perfil parar de ser consultado \
          nas tentativas seguintes — e quem corrigir o nome no perfil vai vê-lo \
          gravado no disco sem nunca sair da máquina.\n{corpo}"
+    );
+
+    // **E esquece o que o servidor recusou** (lote W da F5). Um nome escolhido
+    // no perfil também era lembrado, e quando o servidor o recusava por ser de
+    // outra chave a pessoa o trocava no perfil e a tentativa seguinte mandava o
+    // recusado de novo — o mesmo relato de cima, com um nome que alguém
+    // escolheu. A `ajustes-v013.cjs` troca o apelido e confere o que sai.
+    let recusa = corpo
+        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\") {")
+        .and_then(|(_, depois)| depois.split_once('}'))
+        .map(|(bloco, _)| bloco);
+    assert!(
+        recusa.is_some_and(|bloco| bloco.contains("ultimoApelido = null;")),
+        "a casca deixou de esquecer o apelido que o servidor recusou por ser de \
+         outra chave: a pessoa troca o nome no perfil, como a frase manda, e a \
+         tentativa seguinte manda o recusado de novo.\n{corpo}"
     );
 }
 
@@ -15569,6 +15705,35 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
          sem o que o servidor exige e descobre pela cor que não mudou"
     );
 
+    // **E o sim só é gravado depois da obtenção, conferida a pergunta**
+    // (lote W da F5, ADR 0045). Gravado antes, ele ficava valendo para quem
+    // desistia no meio da obtenção, e a entrada seguinte rodava o MOD sem
+    // perguntar. Depois da gravação, a mesma conferência de novo desfaz o sim
+    // de quem desistiu enquanto ele era gravado.
+    let Some(grava) = corpo.find("invoke(\"aceitar_mods\"") else {
+        panic!("`aceitarOsMods` não grava mais o sim:\n{corpo}");
+    };
+    let confere = corpo[obtem..]
+        .find("if (aceitePendente !== pergunta)")
+        .map(|depois| obtem + depois);
+    assert!(
+        obtem < grava && confere.is_some_and(|confere| confere < grava),
+        "`aceitarOsMods` grava o sim antes de obter o conjunto e de conferir que a \
+         pergunta continua aberta: quem desiste no meio da obtenção fica com o sim \
+         gravado, e a entrada seguinte neste servidor roda o MOD sem perguntar \
+         (ADR 0045)"
+    );
+    let depois_de_gravar = corpo.get(grava..).unwrap_or_default();
+    let desfaz = depois_de_gravar
+        .find("if (aceitePendente !== pergunta)")
+        .zip(depois_de_gravar.find("esquecer_aceite_de_mods"));
+    assert!(
+        desfaz.is_some_and(|(confere, esquece)| confere < esquece),
+        "`aceitarOsMods` deixou de desfazer o sim de quem desistiu enquanto ele era \
+         gravado: o «não» dado durante a gravação fica sem efeito, e o MOD roda na \
+         entrada seguinte (ADR 0045)"
+    );
+
     let obter = camada
         .split_once("async function obterOConjunto(")
         .expect("a função que põe o conjunto nesta máquina")
@@ -17902,5 +18067,214 @@ fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
         eventos >= 20,
         "o guarda achou só {eventos} `falar({{ … }})`: a forma dos eventos mudou, e ele \
          deixou de olhar para eles"
+    );
+}
+
+/// As chaves de topo de um objeto literal de JS, na ordem em que aparecem, e se
+/// a leitura chegou à `}` que o fecha.
+///
+/// `corpo` começa logo depois da `{` que abre o objeto. Cadeias, modelos (com
+/// `${…}` dentro), comentários e chaves aninhadas são pulados; uma chave é o
+/// nome, a cadeia ou o número que abre uma entrada de topo — depois da `{` ou
+/// de uma vírgula de topo. O `false` do fim diz que a leitura se perdeu antes
+/// de fechar o objeto, e quem chama reprova em vez de confiar numa lista curta.
+fn chaves_de_topo(corpo: &str) -> (Vec<String>, bool) {
+    let c: Vec<char> = corpo.chars().collect();
+    let fim_da_cadeia = |de: usize| {
+        let aspa = c[de];
+        let mut i = de + 1;
+        while i < c.len() && c[i] != aspa {
+            i += if c[i] == '\\' { 2 } else { 1 };
+        }
+        i
+    };
+    let nome = |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '$';
+    let mut chaves = Vec::new();
+    // `{`, `[`, `(`, `` ` `` (dentro de um modelo) e `$` (dentro de um `${…}`).
+    let mut pilha: Vec<char> = Vec::new();
+    let mut espera_chave = true;
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if pilha.last() == Some(&'`') {
+            match ch {
+                '\\' => i += 2,
+                '`' => {
+                    pilha.pop();
+                    i += 1;
+                }
+                '$' if c.get(i + 1) == Some(&'{') => {
+                    pilha.push('$');
+                    i += 2;
+                }
+                _ => i += 1,
+            }
+            continue;
+        }
+        match ch {
+            '/' if c.get(i + 1) == Some(&'/') => {
+                while i < c.len() && c[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if c.get(i + 1) == Some(&'*') => {
+                i += 2;
+                while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            '"' | '\'' => {
+                let fim = fim_da_cadeia(i);
+                if pilha.is_empty() && espera_chave {
+                    chaves.push(c[i + 1..fim.min(c.len())].iter().collect());
+                    espera_chave = false;
+                }
+                i = fim + 1;
+            }
+            '`' | '{' | '[' | '(' => {
+                pilha.push(ch);
+                espera_chave = false;
+                i += 1;
+            }
+            '}' | ']' | ')' => {
+                if pilha.pop().is_none() {
+                    return (chaves, true);
+                }
+                i += 1;
+            }
+            ',' if pilha.is_empty() => {
+                espera_chave = true;
+                i += 1;
+            }
+            _ if pilha.is_empty() && espera_chave && nome(ch) => {
+                let inicio = i;
+                while i < c.len() && nome(c[i]) {
+                    i += 1;
+                }
+                chaves.push(c[inicio..i].iter().collect());
+                espera_chave = false;
+            }
+            _ => {
+                // Um `...` de topo espalha outro objeto: o nome que vem depois
+                // dele não é chave desta tabela.
+                if pilha.is_empty() && ch == '.' {
+                    espera_chave = false;
+                }
+                i += 1;
+            }
+        }
+    }
+    (chaves, false)
+}
+
+/// **Nenhuma tabela constante da `ui/` repete uma chave.**
+///
+/// Lote W da F5. Num objeto literal de JS, a segunda chave com o mesmo nome
+/// substitui a primeira **calada**: nem o navegador, nem o `node --check`, nem
+/// guarda nenhum desta suíte dizia nada. `GLIFOS` tinha `chave` e `aparencia`
+/// duas vezes cada, porque dois commits da 0.9.0 redesenharam glifos que já
+/// estavam na tabela; os desenhos eram iguais, e por isso a tela não mudou — no
+/// dia em que alguém corrigisse um dos dois, seria o de baixo que valeria, e o
+/// de cima ficaria mentindo sobre o que a tela mostra. Uma frase repetida em
+/// `FRASES` é a mesma armadilha com texto.
+///
+/// Cobra **toda** `const` de topo em caixa alta cuja linha termina abrindo um
+/// objeto literal — `= {` ou `= Object.freeze({` (rodada 1, M4: as congeladas,
+/// como `CAPACIDADES_POR_API`, ficavam de fora) —, em todo script da `ui/`: as
+/// tabelas de frases e de glifos são escritas assim, e uma tabela nova nasce
+/// coberta.
+///
+/// **O que fica de fora**, dito para o guarda não prometer mais do que cobre:
+///
+/// - as chaves **dentro** de uma entrada aninhada: só as de topo de cada tabela
+///   são comparadas entre si;
+/// - a tabela escrita numa linha só (`const X = { a: 1 };`), e a que não abre
+///   um objeto literal na linha da `const` — uma lista (`Object.freeze([`), ou
+///   uma tabela montada por outra expressão;
+/// - os objetos de estado (`estadoDosContornos`, `escolhidoDe`…), escritos em
+///   caixa baixa e mudados em tempo de execução.
+#[test]
+fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
+    let mut tabelas: Vec<(String, String, usize)> = Vec::new();
+    let mut repetidas: Vec<String> = Vec::new();
+    for arquivo in ui_files(".js") {
+        let texto = read(&format!("ui/{arquivo}"));
+        let mut onde = 0;
+        for linha in texto.split_inclusive('\n') {
+            let comeco = onde;
+            onde += linha.len();
+            let Some(resto) = linha.strip_prefix("const ") else {
+                continue;
+            };
+            let Some((nome, depois)) = resto.split_once(" = ") else {
+                continue;
+            };
+            let tabela = !nome.is_empty()
+                && nome
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if !tabela || !["{", "Object.freeze({"].contains(&depois.trim_end()) {
+                continue;
+            }
+            let corpo = texto.get(comeco + linha.len()..).unwrap_or_default();
+            let (chaves, fechou) = chaves_de_topo(corpo);
+            assert!(
+                fechou && !chaves.is_empty(),
+                "este guarda se perdeu em `{nome}` (`{arquivo}`): leu {} chaves e {}. \
+                 A tabela ganhou uma forma que a leitura não conhece, e o guarda ficou \
+                 cego para ela",
+                chaves.len(),
+                if fechou {
+                    "chegou ao fim"
+                } else {
+                    "não achou a `}` que a fecha"
+                }
+            );
+            let mut vistas: Vec<&String> = Vec::new();
+            for chave in &chaves {
+                if vistas.contains(&chave) {
+                    let vezes = chaves.iter().filter(|outra| *outra == chave).count();
+                    let achado = format!("{arquivo}: {nome}.{chave} ({vezes} vezes)");
+                    if !repetidas.contains(&achado) {
+                        repetidas.push(achado);
+                    }
+                }
+                vistas.push(chave);
+            }
+            tabelas.push((arquivo.clone(), nome.to_owned(), chaves.len()));
+        }
+    }
+
+    // Contra a cegueira: as seis tabelas que o lote nomeou estão entre as
+    // lidas, e as duas maiores com um número de chaves que só a leitura inteira
+    // alcança. E uma congelada, para a forma `Object.freeze({` não sumir calada.
+    for (dono, nome, minimo) in [
+        ("base.js", "CAPACIDADES_POR_API", 4),
+        ("glifos.js", "GLIFOS", 20),
+        ("frases.js", "MOTIVOS", 5),
+        ("frases.js", "AVISOS", 3),
+        ("frases.js", "ETAPAS", 3),
+        ("frases.js", "MOTIVOS_DE_REVOGACAO", 1),
+        ("frases.js", "FRASES", 30),
+    ] {
+        assert!(
+            tabelas
+                .iter()
+                .any(|(arquivo, lida, quantas)| arquivo == dono
+                    && lida == nome
+                    && *quantas >= minimo),
+            "este guarda não leu `{nome}` em `{dono}` com pelo menos {minimo} chaves: a \
+             tabela mudou de forma ou de lugar, e ele deixou de olhar para ela. Lidas: \
+             {tabelas:?}"
+        );
+    }
+
+    assert!(
+        repetidas.is_empty(),
+        "uma tabela constante da `ui/` repete chave, e a segunda substitui a primeira \
+         calada — o que está escrito em cima não é o que a tela mostra:\n  {}\n\
+         Tire a repetida; se as duas dizem coisas diferentes, decida qual vale.",
+        repetidas.join("\n  ")
     );
 }
