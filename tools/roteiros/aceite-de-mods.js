@@ -13,7 +13,8 @@
 // estourava em `.some` de `null` e parava ali — num `console.warn`, com o botão
 // apagado. O produto estava certo; o roteiro é que não sabia mais responder à
 // primeira pergunta do aceite. Cada `exigir` abaixo tem a reversão que o faz
-// reprovar, no relatório do lote.
+// reprovar, no relatório do lote W3
+// (`docs/superpowers/sdd/2026-10-08-0.16/F5/lote-w3-report.md`).
 //
 // Era o caminho inteiro que não existia: antes desta tela, o que a pessoa lia
 // era uma frase terminando em «a tela para ler e aceitar esta lista ainda não
