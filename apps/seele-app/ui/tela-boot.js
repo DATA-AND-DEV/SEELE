@@ -99,6 +99,10 @@ let recusaDoApelido = null;
  * revisão — guardava a credencial para uma «tentativa seguinte» que já tinha
  * acontecido, e ela ficava na memória da janela durante a sessão inteira. A
  * mesma ideia da identidade da pergunta, em `aceitarOsMods`.
+ *
+ * E a recusa de uma tentativa que já não é a mais nova não vai à tela (lote
+ * W2): nem à pergunta dos MODs, nem à espera da portaria, nem à linha
+ * vermelha. Vai ao `seele.log`. Ver o `catch` de `conectar`.
  */
 let tentativas = 0;
 
@@ -373,7 +377,9 @@ async function conectar(alvo, apelido, credencial) {
     // e não uma falha: a lista chega inteira no erro, e o que falta é a pessoa
     // ler e responder. Antes desta linha o que acontecia era uma frase
     // vermelha terminando em «a tela ainda não existe neste app», e o servidor
-    // ficava inentrável.
+    // ficava inentrável. A frase sobreviveu à tela e só deixou de mentir no
+    // lote W2 da F5; hoje nenhuma recusa da tentativa mais nova chega a ela,
+    // porque toda `ModsNaoAceitos` dela vem para cá. Ver `fraseDeErro`.
     //
     // A credencial desta tentativa vai junto, e é o único lugar para onde ela
     // vai: a pergunta a guarda enquanto está aberta e a esquece ao fechar.
@@ -389,9 +395,31 @@ async function conectar(alvo, apelido, credencial) {
     // servidor daqui enquanto ela andava — abria a pergunta por cima da sessão,
     // com o convite deste servidor dentro, e aceitar o mandaria a um servidor
     // que a pessoa já deixou. Abrir sem a credencial seria o mesmo modal por
-    // cima da sessão, para um sim que não entra. A recusa dela cai na linha
-    // vermelha da entrada, como a de toda tentativa velha. Ver `tentativas`.
-    if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
+    // cima da sessão, para um sim que não entra.
+    //
+    // **E a tentativa que outra substituiu não fala em lugar nenhum da tela**
+    // (lote W2 da F5). A mais nova está em curso, ou já entrou, e é ela que
+    // fala. A recusa da velha caía na linha vermelha da entrada — a pelos MODs
+    // com a frase que dizia que a tela de aceite não existe, visível enquanto
+    // a nova andava, e lida por quem desconectava da sessão em que a nova
+    // entrou — e, com a espera da portaria na frente, tomava o lugar da frase
+    // dela. A pela portaria abria a espera por cima da sessão. Vale para toda
+    // recusa, e não só para a dos MODs: nenhuma é sobre o lugar em que a
+    // pessoa está agora.
+    //
+    // **E ela não some sem rastro**: vai ao `seele.log`, com o alvo e o
+    // motivo, pela mesma porta que a janela usa para o que ela sabe e a tela
+    // não mostra (`registrarNoAnfitriao`, em `base.js`). Como aviso, que é o
+    // nível que o filtro de produção escreve. O motivo é o erro como a ponte o
+    // mandou: o `connect` nunca devolve a credencial nele.
+    if (esta !== tentativas) {
+      const dito = motivo instanceof Error ? String(motivo) : JSON.stringify(motivo);
+      registrarNoAnfitriao(
+        "entrada",
+        `a tentativa a ${alvo} voltou recusada depois que outra a substituiu, e a tela não a mostra: ${dito}`,
+        "aviso",
+      );
+    } else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;
