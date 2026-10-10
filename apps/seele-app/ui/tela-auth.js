@@ -540,6 +540,13 @@ function tituloDaFrase(frase) {
  * numa batida feita de dentro da espera, ela é o fim desta espera e é dita
  * aqui — mudar de tela para dar uma resposta que a pessoa está esperando seria
  * arrancá-la do lugar em que ela perguntou.
+ *
+ * **Só a falha da tentativa mais nova chega aqui** (lote W2 da F5). A de uma
+ * tentativa que outra já substituiu é calada antes, no `catch` de `conectar`,
+ * e vai ao `seele.log`: com a espera na frente, ela tomava o lugar da frase
+ * desta espera, e um `AdmissionPending` dela abria esta tela por cima da
+ * sessão em que a pessoa já estava. «Venha de onde vier», acima, é de onde
+ * vier a tentativa mais nova.
  */
 function levarParaAEspera(falha, endereco) {
   const tela = $("tela-auth");

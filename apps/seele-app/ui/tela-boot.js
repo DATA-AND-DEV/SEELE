@@ -370,9 +370,11 @@ async function conectar(alvo, apelido, credencial) {
       if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };
     }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
-    // uma falha que chega enquanto essa tela está na frente pertence a ela:
-    // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
-    // tratou a falha, e só o que sobra vira a linha vermelha daqui.
+    // uma falha da tentativa mais nova que chega enquanto essa tela está na
+    // frente pertence a ela: `#boot-erro` estaria escondido atrás.
+    // `levarParaAEspera` responde se tratou a falha, e só o que sobra vira a
+    // linha vermelha daqui. A de uma tentativa que outra já substituiu não vai
+    // a nenhuma das duas: ver o ramo dela, logo abaixo.
     // A pergunta dos MODs tem tela própria — ADR 0045 —, e ela é uma pergunta
     // e não uma falha: a lista chega inteira no erro, e o que falta é a pessoa
     // ler e responder. Antes desta linha o que acontecia era uma frase
