@@ -9197,6 +9197,96 @@ fn persistence_hospedada(
     Ok(server.persistence())
 }
 
+/// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
+/// quem hospeda (a P12 do plano F1b).
+///
+/// Hoje, as mensagens de controle de um vocabulário mais novo que o servidor
+/// pulou: quem usa um SEELE mais novo está mandando o que esta versão não
+/// entende, e atualizar o SEELE daqui resolve. Sem isto, o servidor sabia e só
+/// dizia no `seele.log`. **Uma janela que não hospeda responde
+/// `hospedando: false`**, e a tela não desenha a linha: não há servidor de que
+/// falar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+struct EstadoDoServidor {
+    /// Se há um servidor no ar nesta janela.
+    hospedando: bool,
+    /// Quantas mensagens de um vocabulário mais novo o servidor pulou.
+    mensagens_desconhecidas: u64,
+    /// Em quantas sessões isso aconteceu.
+    sessoes_com_desconhecidas: u64,
+}
+
+/// O estado de uma hospedagem, ou o de quem não hospeda.
+fn estado_do_servidor_de(
+    estado: Option<seele_server::hospedagem::EstadoDoServidor>,
+) -> EstadoDoServidor {
+    estado.map_or_else(EstadoDoServidor::default, |estado| EstadoDoServidor {
+        hospedando: true,
+        mensagens_desconhecidas: estado.mensagens_desconhecidas,
+        sessoes_com_desconhecidas: estado.sessoes_com_desconhecidas,
+    })
+}
+
+/// O estado do servidor que esta janela hospeda. Ver [`EstadoDoServidor`].
+///
+/// Lido do servidor embutido, em memória: barato o bastante para a tela de
+/// configurações perguntar a cada volta do laço dela.
+#[tauri::command]
+fn estado_do_servidor(session: State<'_, Session>) -> Result<EstadoDoServidor, &'static str> {
+    let aberto = session
+        .hospedagem
+        .lock()
+        .map_err(|_| "HospedagemIndisponivel")?;
+    Ok(estado_do_servidor_de(
+        aberto
+            .as_ref()
+            .map(seele_server::hospedagem::Hospedagem::estado),
+    ))
+}
+
+#[cfg(test)]
+mod o_estado_do_servidor {
+    use super::*;
+
+    #[test]
+    fn quem_nao_hospeda_diz_que_nao_hospeda_e_nada_mais() {
+        assert_eq!(
+            estado_do_servidor_de(None),
+            EstadoDoServidor {
+                hospedando: false,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn quem_hospeda_diz_os_numeros_do_servidor_e_o_zero_tambem() {
+        let numeros = |mensagens, sessoes| {
+            estado_do_servidor_de(Some(seele_server::hospedagem::EstadoDoServidor {
+                mensagens_desconhecidas: mensagens,
+                sessoes_com_desconhecidas: sessoes,
+            }))
+        };
+        assert_eq!(
+            numeros(0, 0),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+        assert_eq!(
+            numeros(3, 1),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 3,
+                sessoes_com_desconhecidas: 1,
+            }
+        );
+    }
+}
+
 /// O estado das três camadas da porta.
 #[tauri::command]
 async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
@@ -10330,6 +10420,7 @@ fn main() {
             regras_de_previa,
             pasta_de_downloads,
             estado_da_porta,
+            estado_do_servidor,
             definir_senha_do_server,
             criar_convite_do_server,
             ligar_portaria,
