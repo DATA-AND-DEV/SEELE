@@ -9429,6 +9429,36 @@ pendência. A revisão dele deixou:
     `join_secret`, e pelo menos 30 campos do `Snapshot` lidos). É um guarda que
     prova menos do que parece. *Fonte:* relatório do R, «3. O guarda».
 
+52. **W2 · A tentativa substituída ainda apaga a linha de etapa da nova.** Em
+    `apps/seele-app/ui/tela-boot.js`, o `finally` de `conectar` chama
+    `mostrarEtapa(null)` sem conferir `esta === tentativas`. Depois do W2, a
+    velha não fala mais na linha vermelha nem reacende o CONECTAR (`6af0bedd`),
+    mas a etapa ela ainda apaga. O W2 leu no código, e não mediu (a bancada
+    não emite etapas), que o `connect` do `main.rs` revoga a geração ao
+    começar, e a `Bridge` descarta os eventos de uma geração revogada. Assim as
+    etapas da velha só escapam no trecho entre o `++tentativas` da nova e o
+    `invoke("connect")` dela: o apelido, a pergunta do nome e
+    `conferir_esta_versao`. **O conserto sugerido**, em três passos:
+    - condicionar o `mostrarEtapa(null)` do `finally` a `esta === tentativas`;
+    - fechar aquele trecho na janela com uma bandeira, posta no `++tentativas`
+      e reaberta logo antes do `connect`. Enquanto ela está posta, o ouvinte de
+      etapas descarta o que chega. Isso não toca no fio nem na FFI;
+    - ou, no Rust, revogar a geração mais cedo, o que pede outro lote.
+
+    O que falta, em qualquer forma, é a identidade da tentativa nos eventos de
+    etapa. *Fonte:* relatório do W2 (`lote-w2-report.md`), a rodada da
+    revisão.
+
+53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
+    Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,
+    `tentou entrar de novo: false` e `diálogo depois: VISIVEL`, e nunca reprova,
+    porque só usa `relatar` e não tem `exigir`. O cabeçalho dele diz que prova
+    «que ACEITAR grava o sim com a identidade certa e tenta entrar de novo».
+    **Em conserto na 0.16**, a pedido da orquestradora, no lote W3: o roteiro
+    passa a exigir o sim gravado no alvo e a volta tentando entrar, e reprova
+    sem isso. A causa do `alvo=undefined` é medida no lote. *Fonte:* relatório
+    do W2; o ledger.
+
 ### Fora da F5, só como referência
 
 Achados das rodadas da F5 que são de outra frente. A orquestradora já foi
