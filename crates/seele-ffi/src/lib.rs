@@ -34,6 +34,10 @@
 )]
 
 pub mod mods;
+/// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
+/// para os testes daqui e para a conformidade dos dois produtores de retrato.
+#[cfg(any(test, feature = "conformidade"))]
+pub mod sem_rede;
 pub mod types;
 
 use std::collections::HashMap;
@@ -3166,21 +3170,12 @@ impl Connection {
             // antes dava.
             Err(_) => foto_da_sala(&Room::new(), None, None),
         };
-        // **O nome vem do roster quando o roster nos conhece.**
-        //
-        // O `Mutex` local guarda o que se digitou ao conectar, e só isso: ele é
-        // escrito uma vez, na construção. Trocar de apelido manda um comando, o
-        // servidor confirma com `PersonRenamed`, o roster muda — e este número
-        // continuava lendo o nome antigo, para sempre. Quem trocasse via o
-        // próprio nome mudar na lista de gente e **não** no bloco do operador,
-        // que é onde ele está escrito ao lado do próprio retrato. Foi relatado
-        // assim: «nome do usuário não altera em tempo real».
-        //
-        // O `Mutex` continua sendo a resposta antes de o servidor apresentar
-        // esta conexão a si mesma — entre o `connect` e o `Welcome` não há
-        // roster, e um nome vazio ali seria a janela dizendo que ninguém está
-        // usando ela.
-        let nickname = foto.nickname.clone().unwrap_or_else(|| {
+        // A perda que o servidor contou vai na telemetria, e não na parte do
+        // `Room`: ela é lida antes de a foto virar o retrato da sala. O apelido
+        // e as permissões saem do retrato (`seele_core::retrato`), que é a
+        // mesma conta do navegador.
+        let loss_fraction = foto.loss_fraction;
+        let sala = foto.retrato(|| {
             self.shared
                 .nickname
                 .lock()
@@ -3201,14 +3196,14 @@ impl Connection {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
-            server: foto.server.clone(),
+            server: sala.server,
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             person_icons_revision: self.shared.person_icons_revision.load(Ordering::Relaxed),
-            me: foto.instancia_me.map(|person| person.0),
-            nickname,
-            voice_rooms: foto.voice_rooms,
-            presentes: foto.presentes,
-            channels: foto.channels,
+            me: sala.me,
+            nickname: sala.nickname,
+            voice_rooms: sala.voice_rooms,
+            presentes: sala.presentes,
+            channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
@@ -3217,7 +3212,7 @@ impl Connection {
                 // porque o servidor não tem como medir jitter. Ver
                 // [`Shared::jitter_de_chegada_micros`].
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
-                loss_fraction: foto.loss_fraction,
+                loss_fraction,
                 bitrate_bps: audio.bitrate_bps,
                 signal,
                 sync_band: SignalBand::of(signal).into(),
@@ -3226,7 +3221,7 @@ impl Connection {
                 frames_refused: audio.frames_refused,
                 microfone_entrega_silencio_digital: audio.silencio_digital,
             },
-            notice: foto.notice,
+            notice: sala.notice,
             muted: audio.muted,
             total_isolation: audio.total_isolation,
             speaking: audio.speaking,
@@ -3237,28 +3232,18 @@ impl Connection {
             playback: audio.playback,
             aparelho: audio.aparelho,
             trocas_de_aparelho: audio.trocas_de_aparelho,
-            may_manage_voice_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::ManageVoiceRooms),
-            may_kick: foto.permissions.contains(&seele_core::Permission::Kick),
-            may_ban: foto.permissions.contains(&seele_core::Permission::Ban),
-            may_remove_message: foto
-                .permissions
-                .contains(&seele_core::Permission::RemoveMessage),
-            may_move_person: foto
-                .permissions
-                .contains(&seele_core::Permission::MovePerson),
-            may_customise_server: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            may_delete_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            tela: foto.tela,
-            minha_transmissao: foto.minha_transmissao,
-            transmissoes: foto.transmissoes,
-            ended: foto.ended,
-            tema_do_servidor: foto.tema,
+            may_manage_voice_rooms: sala.may_manage_voice_rooms,
+            may_kick: sala.may_kick,
+            may_ban: sala.may_ban,
+            may_remove_message: sala.may_remove_message,
+            may_move_person: sala.may_move_person,
+            may_customise_server: sala.may_customise_server,
+            may_delete_rooms: sala.may_delete_rooms,
+            tela: sala.tela,
+            minha_transmissao: sala.minha_transmissao,
+            transmissoes: sala.transmissoes,
+            ended: sala.ended,
+            tema_do_servidor: sala.tema_do_servidor,
         }
     }
 
@@ -7748,32 +7733,10 @@ mod tests {
         );
     }
 
-    /// A `Shared` with nothing in it, for the folds below.
+    /// A `Shared` with nothing in it, for the folds below. O mesmo da
+    /// conformidade dos dois produtores (`crate::sem_rede`).
     fn bare_shared() -> Arc<Shared> {
-        Arc::new(Shared {
-            caminho_medido: std::sync::atomic::AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            icon_revision: std::sync::atomic::AtomicU64::new(0),
-            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        })
+        crate::sem_rede::shared("marcela")
     }
 
     #[test]

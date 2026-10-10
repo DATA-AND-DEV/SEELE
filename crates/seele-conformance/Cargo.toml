@@ -26,7 +26,11 @@ seele-core = { path = "../seele-core", features = ["recusar-encontro-de-producao
 # encontro de produção (`alcance::encontro::recusar_a_producao`). Só aqui, numa
 # dependência de teste: o binário do produto não a leva.
 seele-server = { path = "../seele-server", features = ["recusar-encontro-de-producao"] }
-seele-ffi = { path = "../seele-ffi" }
+# Com o retrato sem rede (`sem_rede::retratos`), para a conformidade dos dois
+# produtores de retrato: o desktop e o navegador, com as mesmas mensagens.
+seele-ffi = { path = "../seele-ffi", features = ["conformidade"] }
+# O outro produtor: a sessão do navegador (`seele_web::sessao`), no nativo.
+seele-web = { path = "../seele-web" }
 # O ponto de encontro, para o teste do quarto: ele precisa das duas pontas — um
 # anfitrião registrando e um cliente perguntando — com o serviço de verdade no
 # meio, e este crate é o único lugar onde as duas cabem juntas.

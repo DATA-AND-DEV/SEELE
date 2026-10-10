@@ -856,6 +856,96 @@ pub struct FotoDaSala {
     pub tema: Option<TemaDaSessao>,
 }
 
+/// A parte do `Snapshot` que sai do `Room`, **com os nomes de campo dele**.
+///
+/// O navegador manda à casca exatamente este JSON no lugar dessa parte, e o
+/// `seele-ffi` monta o `Snapshot` a partir dele: o apelido com o recurso do
+/// digitado e as sete permissões saem daqui, e não de duas contas. A
+/// conformidade dos dois produtores (`dois_produtores_de_snapshot.rs`) confere,
+/// campo a campo, que o JSON deste e o do `Snapshot` do desktop são o mesmo
+/// depois das mesmas mensagens. O doc de cada campo é o do `Snapshot`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct RetratoDaSala {
+    /// O nome do servidor.
+    pub server: String,
+    /// Quem esta sessão é.
+    pub me: Option<u64>,
+    /// O apelido desta pessoa: o do roster, ou o digitado ao conectar.
+    pub nickname: String,
+    /// As salas de voz.
+    pub voice_rooms: Vec<VoiceRoom>,
+    /// Todo mundo conectado.
+    pub presentes: Vec<Person>,
+    /// As linhas de texto.
+    pub channels: Vec<Channel>,
+    /// O aviso em curso.
+    pub notice: Option<Notice>,
+    /// Pode criar, renomear e apagar salas de voz.
+    pub may_manage_voice_rooms: bool,
+    /// Pode expulsar.
+    pub may_kick: bool,
+    /// Pode banir.
+    pub may_ban: bool,
+    /// Pode remover mensagens.
+    pub may_remove_message: bool,
+    /// Pode mover pessoas entre salas.
+    pub may_move_person: bool,
+    /// Pode mudar o nome e o ícone do servidor.
+    pub may_customise_server: bool,
+    /// Pode apagar salas.
+    pub may_delete_rooms: bool,
+    /// A transmissão escolhida.
+    pub tela: Option<TelaEmCurso>,
+    /// A transmissão desta pessoa.
+    pub minha_transmissao: Option<TelaEmCurso>,
+    /// Tudo o que se transmite na sala desta pessoa.
+    pub transmissoes: Vec<TransmissaoNaSala>,
+    /// Por que a sessão acabou.
+    pub ended: Option<EndReason>,
+    /// O tema do servidor.
+    pub tema_do_servidor: Option<TemaDaSessao>,
+}
+
+impl FotoDaSala {
+    /// O retrato desta foto. `digitado` é o apelido de quem conectou, lido só
+    /// quando o roster ainda não conhece esta pessoa.
+    ///
+    /// **O nome vem do roster quando o roster nos conhece.** O apelido digitado
+    /// é o que se escreveu ao conectar, e só isso. Trocar de apelido manda um
+    /// comando, o servidor confirma com `PersonRenamed`, o roster muda — e um
+    /// retrato que lesse o digitado mostraria o nome antigo para sempre. Foi
+    /// relatado assim: «nome do usuário não altera em tempo real».
+    ///
+    /// O digitado continua sendo a resposta antes de o servidor apresentar esta
+    /// conexão a si mesma: entre o `connect` e o `Welcome` não há roster, e um
+    /// nome vazio ali seria a janela dizendo que ninguém está usando ela.
+    #[must_use]
+    pub fn retrato(self, digitado: impl FnOnce() -> String) -> RetratoDaSala {
+        let pode = |permissao: Permission| self.permissions.contains(&permissao);
+        RetratoDaSala {
+            may_manage_voice_rooms: pode(Permission::ManageVoiceRooms),
+            may_kick: pode(Permission::Kick),
+            may_ban: pode(Permission::Ban),
+            may_remove_message: pode(Permission::RemoveMessage),
+            may_move_person: pode(Permission::MovePerson),
+            may_customise_server: pode(Permission::AdministerServer),
+            may_delete_rooms: pode(Permission::AdministerServer),
+            nickname: self.nickname.unwrap_or_else(digitado),
+            server: self.server,
+            me: self.instancia_me.map(|person| person.0),
+            voice_rooms: self.voice_rooms,
+            presentes: self.presentes,
+            channels: self.channels,
+            notice: self.notice,
+            tela: self.tela,
+            minha_transmissao: self.minha_transmissao,
+            transmissoes: self.transmissoes,
+            ended: self.ended,
+            tema_do_servidor: self.tema,
+        }
+    }
+}
+
 /// O aviso do `Room` na forma da casca.
 #[must_use]
 pub fn aviso_de(notice: &crate::state::Notice) -> Notice {
