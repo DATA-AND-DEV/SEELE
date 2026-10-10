@@ -1902,6 +1902,16 @@ const PROPOSTAS_DE_PORTA: usize = 16;
 /// depois, no endereço ou no curinga, é recusado, e a escolha de porta IPv4
 /// não cai nela (medido no macOS: 0 em 3 000).
 ///
+/// **A janela entre largar a sonda e ligar não está coberta.** Um IPv4 que
+/// se ligue a `X` *num endereço* ali dentro faz o `[::]:X` voltar `AddrInUse`,
+/// e vem outra proposta. Um que se ligue ao *curinga* `0.0.0.0:X` ali dentro é
+/// aceito junto (revisão do lote Y), e a resposta daquela conexão vai a ele,
+/// como antes do conserto. A janela medida é de 4,1 µs na mediana (9,0 µs no
+/// p99, em 5 000); para cair nela, outro programa tem de ligar um IPv4 no
+/// curinga exatamente em `X` nesses microssegundos. Com `r` ligações dessas
+/// por segundo na máquina, a chance por conexão é ~`r` × 9 µs / 16 384 — com
+/// `r` = 100, uma em 18 milhões. `r` não foi medido.
+///
 /// # Errors
 ///
 /// Os de `propor`, os da ligação que não sejam `AddrInUse`, e `AddrInUse` se
@@ -1938,7 +1948,9 @@ fn socket_conferido(
                 socket.set_nonblocking(true)?;
                 return Ok(socket.into());
             }
-            // Alguém tomou a porta entre a sonda e a ligação.
+            // Alguém tomou a porta entre a sonda e a ligação, num endereço, ou
+            // em IPv6. O IPv4 que a tomar no curinga não chega aqui: a ligação
+            // o aceita junto, e é a janela que a doc acima diz não cobrir.
             Err(erro) if erro.kind() == std::io::ErrorKind::AddrInUse => {
                 tracing::debug!(porta, "a porta proposta foi tomada antes da ligação; outra");
                 recusa = Some(erro);
