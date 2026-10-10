@@ -572,7 +572,13 @@ fn every_command_the_frontend_calls_is_registered() {
 // `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
 // outras frentes quando o comando nasceu. Sai quando eles passarem a
 // perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
-const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
+//
+// `escolher_o_tema_do_servidor` entrou em 2026-10-10, com a metade do
+// `main.rs` da tarefa 17f.0 da F3 (a escolha de quem administra, D-api-5),
+// num commit isolado porque a F7 também mexe no `main.rs`. Quem chama é a
+// gestão de MODs (`camada-mods.js`), com a pergunta dos dois MODs de tema,
+// no commit seguinte da F3; sai daqui nele.
+const AGUARDANDO_TELA: &[&str] = &["onde_estou", "escolher_o_tema_do_servidor"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
