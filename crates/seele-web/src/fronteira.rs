@@ -16,13 +16,19 @@
 //! | `decodificar(quadro)` | 0 | `{"mensagem": …}` ou `{"desconhecida": N}` |
 //! | | 1 | `{"erro": …, "texto": …, "versao": N}`, com `versao` quando o carimbo é de outra versão |
 //!
-//! **A voz** (Tarefa 3.3, lote A; [`crate::voz`]), uma de cada lado por página:
+//! **A voz que sai e a que chega** (Tarefa 3.3, lotes A e C; [`crate::voz`]),
+//! na instância da página, uma de cada lado:
 //!
 //! | função | devolve | na saída |
 //! |---|---|---|
 //! | `voz_envio(ssrc)` | — | — |
-//! | `voz_quadro_passou()` | o carimbo de agora | — |
-//! | `voz_carimbo_do_quadro(quantos, indice)` | o carimbo do quadro | — |
+//! | `voz_regua(abertura_milesimos, com_supressao)` | — | — |
+//! | `voz_modo(modo)` (0 aperte-para-falar, 1 por voz, 2 aberto) | — | — |
+//! | `voz_tecla(segurando)` | — | — |
+//! | `voz_capturou(pcm, mudo)` | quantos quadros saem, de 0 a 3 | cada um: o carimbo (u32) e as 960 amostras (f32), em little-endian |
+//! | | `u32::MAX` | `{"erro": …}` |
+//! | `voz_portao_contas()` | 0 | `{"nivel_dbfs", "abertura_dbfs", …}` |
+//! | | 1 | `{"erro": …}` |
 //! | `voz_datagrama(carimbo, opus)` | 0 | o datagrama |
 //! | | 2 | nada: o DTX não sai |
 //! | | 1 | `{"erro": …}` |
@@ -33,6 +39,27 @@
 //! | | 1 | `{"erro": …}` |
 //! | `voz_esquecer(agora_ms)` | quantas alças | cada alça esquecida, u32 em little-endian |
 //!
+//! **A voz que toca** (lote C), na instância do `AudioWorklet`. O mesmo
+//! `.wasm`, compilado lá dentro a partir dos bytes: o Chromium recusa um
+//! `WebAssembly.Module` mandado pela porta (`spikes/voz-em-wasm/`).
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `voz_tocar()` | — | — |
+//! | `voz_tocar_chegou(alca, seq, carimbo, chegada_ms, pcm)` | 0 | — |
+//! | | 1 | `{"erro": …}` |
+//! | `voz_tocar_quadro()` | 0 | as 960 amostras da mistura (f32, little-endian) |
+//! | | 1 | `{"erro": …}` |
+//! | `voz_tocar_ganho(alca, ganho)` | — | — |
+//! | `voz_tocar_isolado(isolado)` | — | — |
+//! | `voz_tocar_esquecer(alca)` | — | — |
+//! | `voz_tocar_contas()` | 0 | `{"fontes": {alça: …}, "fades", "mistura", …}` |
+//! | | 1 | `{"erro": …}` |
+//!
+//! O som atravessa como bytes de `f32` em little-endian, e não como um
+//! `Float32Array` sobre a memória: um bloco de [`alocar`] não promete
+//! alinhamento de quatro bytes.
+//!
 //! Uma chamada sobrescreve a saída da anterior, e o `.wasm` é de uma thread só.
 
 #![allow(unsafe_code)]
@@ -41,14 +68,16 @@
 use std::cell::RefCell;
 
 use seele_proto::control::ControlError;
+use seele_voz::gate::GateMode;
 
-use crate::voz::{Envio, Recepcao};
+use crate::voz::{Envio, Recepcao, Reproducao};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
 
 thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
+    static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
 }
 
 fn dizer(bytes: Vec<u8>, codigo: u32) -> u32 {
@@ -202,19 +231,113 @@ pub extern "C" fn voz_envio(ssrc: u32) {
     ENVIO.with(|e| *e.borrow_mut() = Some(Envio::novo(ssrc)));
 }
 
-/// Um quadro de 20 ms passou: o carimbo de agora (0 sem envio).
+/// A régua do portão: a sensibilidade escolhida em milésimos de dBFS (zero é
+/// o padrão) e se a supressão está ligada.
 #[no_mangle]
-pub extern "C" fn voz_quadro_passou() -> u32 {
-    ENVIO.with(|e| e.borrow_mut().as_mut().map_or(0, Envio::quadro_passou))
+pub extern "C" fn voz_regua(abertura_milesimos: i32, com_supressao: u32) {
+    ENVIO.with(|e| {
+        if let Some(envio) = e.borrow_mut().as_mut() {
+            envio.regua(abertura_milesimos, com_supressao != 0);
+        }
+    });
 }
 
-/// O carimbo do quadro `indice` de `quantos` que o portão soltou.
+/// Como o microfone abre, nos bytes do `VoiceMode` do desktop: 1 por voz, 2
+/// aberto, e qualquer outro aperte-para-falar.
 #[no_mangle]
-pub extern "C" fn voz_carimbo_do_quadro(quantos: u32, indice: u32) -> u32 {
+pub extern "C" fn voz_modo(modo: u32) {
+    let modo = match modo {
+        1 => GateMode::VoiceActivated,
+        2 => GateMode::Open,
+        _ => GateMode::PushToTalk,
+    };
     ENVIO.with(|e| {
-        e.borrow().as_ref().map_or(0, |envio| {
-            envio.carimbo_do_quadro(quantos as usize, indice as usize)
-        })
+        if let Some(envio) = e.borrow_mut().as_mut() {
+            envio.modo(modo);
+        }
+    });
+}
+
+/// A tecla do aperte-para-falar.
+#[no_mangle]
+pub extern "C" fn voz_tecla(segurando: u32) {
+    ENVIO.with(|e| {
+        if let Some(envio) = e.borrow_mut().as_mut() {
+            envio.tecla(segurando != 0);
+        }
+    });
+}
+
+/// As amostras `f32` em little-endian de um bloco, ou `None` se o tamanho
+/// não for múltiplo de quatro.
+fn amostras(bytes: &[u8]) -> Option<Vec<f32>> {
+    let pedacos = bytes.chunks_exact(4);
+    if !pedacos.remainder().is_empty() {
+        return None;
+    }
+    Some(
+        pedacos
+            .map(|b| <[u8; 4]>::try_from(b).map_or(0.0, f32::from_le_bytes))
+            .collect(),
+    )
+}
+
+/// Um quadro de 20 ms do microfone: o portão, o relógio e os carimbos, numa
+/// chamada. Devolve quantos quadros saem para o `AudioEncoder`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_capturou(ptr: *const u8, len: usize, mudo: u32) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let falhou = |texto: &str| {
+        erro_da_voz(texto);
+        u32::MAX
+    };
+    let Some(quadro) = amostras(bytes) else {
+        return falhou("o quadro não é de f32");
+    };
+    ENVIO.with(|e| {
+        let mut envio = e.borrow_mut();
+        let Some(envio) = envio.as_mut() else {
+            return falhou("a voz não tem envio");
+        };
+        let saem = envio.capturou(&quadro, mudo != 0);
+        let mut saida = Vec::with_capacity(saem.len() * (4 + 4 * quadro.len()));
+        for (carimbo, pcm) in &saem {
+            saida.extend_from_slice(&carimbo.to_le_bytes());
+            for amostra in pcm {
+                saida.extend_from_slice(&amostra.to_le_bytes());
+            }
+        }
+        dizer(saida, u32::try_from(saem.len()).unwrap_or(u32::MAX))
+    })
+}
+
+/// O que o portão decidiu por último, para o medidor.
+#[no_mangle]
+pub extern "C" fn voz_portao_contas() -> u32 {
+    ENVIO.with(|e| {
+        let envio = e.borrow();
+        let Some(envio) = envio.as_ref() else {
+            return erro_da_voz("a voz não tem envio");
+        };
+        let m = envio.portao();
+        dizer(
+            serde_json::json!({
+                "nivel_dbfs": seele_voz::gate::dbfs_de_rms(m.input_rms),
+                "abertura_dbfs": m.abertura_efetiva_dbfs,
+                "aberturas": m.openings,
+                "abertos": m.frames_open,
+                "fechados": m.frames_closed,
+                "retidos_entregues": m.quadros_retidos_entregues,
+            })
+            .to_string()
+            .into_bytes(),
+            0,
+        )
     })
 }
 
@@ -301,14 +424,127 @@ pub extern "C" fn voz_esquecer(agora_ms: f64) -> u32 {
     )
 }
 
-/// As duas funções só de teste: o `cargo xtask web` confere com elas os
-/// bytes-ouro dentro do `.wasm`. O `.wasm` da página sai sem a feature.
+// ------------------------------------------------------- a voz que toca
+
+fn com_a_reproducao(f: impl FnOnce(&mut Reproducao) -> u32) -> u32 {
+    REPRODUCAO.with(|r| match r.borrow_mut().as_mut() {
+        Some(reproducao) => f(reproducao),
+        None => erro_da_voz("a voz não tem reprodução"),
+    })
+}
+
+/// A reprodução, sem fonte nenhuma. Na instância do worklet.
+#[no_mangle]
+pub extern "C" fn voz_tocar() {
+    REPRODUCAO.with(|r| *r.borrow_mut() = Some(Reproducao::nova()));
+}
+
+/// Um quadro decodificado da fonte `alca`, com o cabeçalho que ele trouxe e a
+/// hora em que o datagrama chegou à página.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_tocar_chegou(
+    alca: u32,
+    seq: u32,
+    carimbo: u32,
+    chegada_ms: f64,
+    ptr: *const u8,
+    len: usize,
+) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let Some(pcm) = amostras(bytes) else {
+        return erro_da_voz("o quadro não é de f32");
+    };
+    let Ok(seq) = u16::try_from(seq) else {
+        return erro_da_voz("a sequência não cabe em 16 bits");
+    };
+    com_a_reproducao(|reproducao| {
+        reproducao.chegou(alca, seq, carimbo, chegada_ms, pcm);
+        0
+    })
+}
+
+/// Os próximos 20 ms da mistura.
+#[no_mangle]
+pub extern "C" fn voz_tocar_quadro() -> u32 {
+    com_a_reproducao(|reproducao| {
+        let bytes = reproducao
+            .quadro()
+            .iter()
+            .flat_map(|amostra| amostra.to_le_bytes())
+            .collect();
+        dizer(bytes, 0)
+    })
+}
+
+/// O ganho de quem fala pela alça `alca`.
+#[no_mangle]
+pub extern "C" fn voz_tocar_ganho(alca: u32, ganho: f32) {
+    let _ = com_a_reproducao(|reproducao| {
+        reproducao.ganho(alca, ganho);
+        0
+    });
+}
+
+/// O isolamento total.
+#[no_mangle]
+pub extern "C" fn voz_tocar_isolado(isolado: u32) {
+    let _ = com_a_reproducao(|reproducao| {
+        reproducao.isolar(isolado != 0);
+        0
+    });
+}
+
+/// Esquece a fonte `alca`.
+#[no_mangle]
+pub extern "C" fn voz_tocar_esquecer(alca: u32) {
+    let _ = com_a_reproducao(|reproducao| {
+        reproducao.esquecer(alca);
+        0
+    });
+}
+
+/// As contas de cada fonte e da mistura.
+#[no_mangle]
+pub extern "C" fn voz_tocar_contas() -> u32 {
+    com_a_reproducao(|reproducao| dizer(reproducao.contas().to_string().into_bytes(), 0))
+}
+
+/// As funções só de teste: o `cargo xtask web` confere com elas os bytes-ouro
+/// e o relógio de mídia dentro do `.wasm`. O `.wasm` da página sai sem a
+/// feature.
 #[cfg(feature = "prova")]
 pub mod prova {
     use seele_proto::control::{decode, encode_em, ClientMessage, ServerMessage};
 
-    use super::{dizer, dizer_o_link, entrada, erro};
+    use super::{dizer, dizer_o_link, entrada, erro, ENVIO};
+    use crate::voz::Envio;
     use crate::ErroDaPonte;
+
+    /// Um quadro de 20 ms passou: o carimbo de agora (0 sem envio).
+    ///
+    /// **Só para a prova**: a página usa [`super::voz_capturou`], que anda o
+    /// relógio junto com o portão. As duas peças soltas servem para repetir,
+    /// dentro do `.wasm`, a sequência fixa que o desktop grava.
+    #[no_mangle]
+    pub extern "C" fn voz_quadro_passou() -> u32 {
+        ENVIO.with(|e| e.borrow_mut().as_mut().map_or(0, Envio::quadro_passou))
+    }
+
+    /// O carimbo do quadro `indice` de `quantos` que o portão soltou. Só para
+    /// a prova, como [`voz_quadro_passou`].
+    #[no_mangle]
+    pub extern "C" fn voz_carimbo_do_quadro(quantos: u32, indice: u32) -> u32 {
+        ENVIO.with(|e| {
+            e.borrow().as_ref().map_or(0, |envio| {
+                envio.carimbo_do_quadro(quantos as usize, indice as usize)
+            })
+        })
+    }
 
     /// O JSON de uma mensagem do cliente, a partir do quadro.
     ///

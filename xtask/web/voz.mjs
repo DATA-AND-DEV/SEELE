@@ -110,8 +110,99 @@ const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   confere("recepção", torto === 1, `um datagrama torto voltou ${torto}`);
 }
 
+// ------------------------------------------------- o portão (lote C)
+// O que a página chama por quadro de 20 ms: o portão, o relógio e o carimbo de
+// cada quadro solto, numa chamada. Os mesmos casos dos testes nativos do
+// `seele-web` (`voz::testes`), agora pela fronteira.
+const QUADRO = 960;
+const bytesDe = (f32) => new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+const CALADO = new Float32Array(QUADRO);
+const FALA = new Float32Array(QUADRO).fill(0.3);
+function capturou(pcm, mudo = false) {
+  // `>>> 0`: o `.wasm` devolve i32, e o `u32::MAX` do erro chegaria como -1.
+  const quantos = comBytes(bytesDe(pcm), (p, n) => e.voz_capturou(p, n, mudo ? 1 : 0)) >>> 0;
+  if (quantos === 0xffff_ffff) return `erro: ${new TextDecoder().decode(saida())}`;
+  const d = new DataView(saida().buffer);
+  const passo = 4 + 4 * QUADRO;
+  return Array.from({ length: quantos }, (_, i) => d.getUint32(i * passo, true));
+}
+function contasDoPortao() {
+  confere("portão", e.voz_portao_contas() === 0, "as contas do portão falharam");
+  return JSON.parse(new TextDecoder().decode(saida()));
+}
+{
+  e.voz_envio(77);
+  e.voz_modo(1);
+  confere("portão", igual(capturou(CALADO), []), "o portão abriu no silêncio");
+  confere("portão", igual(capturou(CALADO), []), "o portão abriu no silêncio");
+  confere("portão", igual(capturou(FALA), [960, 1_920, 2_880]), "a abertura não levou os retidos com o carimbo de cada um");
+  confere("portão", igual(capturou(FALA), [3_840]), "aberto, não saiu um quadro por quadro");
+
+  e.voz_envio(77);
+  e.voz_modo(2);
+  confere("portão", igual(capturou(FALA, true), []), "no mudo saiu voz");
+  confere("portão", contasDoPortao().nivel_dbfs > -20, "no mudo o medidor parou");
+  confere("portão", igual(capturou(FALA), [1_920]), "no mudo o relógio parou");
+
+  e.voz_envio(77);
+  e.voz_regua(-50_000, 1);
+  e.voz_modo(0);
+  e.voz_tecla(1);
+  e.voz_reabrir(78);
+  confere("portão", capturou(CALADO).length === 1, "a tecla segurada não atravessou o reabrir");
+  confere("portão", Math.abs(contasDoPortao().abertura_dbfs + 50) < 0.01, "a régua escolhida não atravessou o reabrir");
+
+  const torto = comBytes(new Uint8Array(3), (p, n) => e.voz_capturou(p, n, 0)) >>> 0;
+  confere("portão", torto === 0xffff_ffff, `um quadro que não é de f32 voltou ${torto}`);
+}
+
+// ---------------------------------------------- a reprodução (lote C)
+// O que o worklet chama: um quadro decodificado por chegada e a mistura a cada
+// 20 ms do relógio de áudio. O quadro 4 se perde, e a saída tem de descer a
+// zero com fade e voltar com fade, sem degrau.
+{
+  const tocar = (perdidos, isolamento) => {
+    e.voz_tocar();
+    const saidas = [];
+    for (let k = 0; k < 16; k++) {
+      if (k < 10 && !perdidos.includes(k)) {
+        const pcm = new Float32Array(QUADRO).fill(0.01 * (k + 1));
+        const codigo = comBytes(bytesDe(pcm), (p, n) => e.voz_tocar_chegou(1, k, k * 960, k * 20, p, n));
+        confere("reprodução", codigo === 0, `a chegada do quadro ${k} voltou ${codigo}`);
+      }
+      e.voz_tocar_isolado(isolamento.includes(k) ? 1 : 0);
+      confere("reprodução", e.voz_tocar_quadro() === 0, "a mistura falhou");
+      saidas.push(new Float32Array(saida().buffer));
+    }
+    return saidas;
+  };
+  const meios = (saidas) => saidas.map((q) => Math.round(q[QUADRO / 2] * 100));
+  const livre = meios(tocar([], []));
+  confere("reprodução", igual(livre.filter((c) => c !== 0), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), `os quadros não saíram em ordem: ${livre}`);
+
+  const comPerda = tocar([4], []);
+  const tocados = meios(comPerda);
+  confere("reprodução", !tocados.includes(5), `o quadro perdido tocou: ${tocados}`);
+  const continuo = comPerda.flatMap((q) => [...q]);
+  const inicio = tocados.findIndex((c) => c !== 0) * QUADRO;
+  const fim = (tocados.findLastIndex((c) => c !== 0) + 1) * QUADRO;
+  let pior = 0;
+  for (let i = inicio + 1; i < fim; i++) pior = Math.max(pior, Math.abs(continuo[i] - continuo[i - 1]));
+  confere("reprodução", pior <= 0.0101, `um degrau de ${pior} no buraco do quadro perdido: ${tocados}`);
+  confere("reprodução", e.voz_tocar_contas() === 0, "as contas da reprodução falharam");
+  const contas = JSON.parse(new TextDecoder().decode(saida()));
+  confere("reprodução", contas.fades >= 1, `o buraco não foi contado como fade: ${JSON.stringify(contas)}`);
+
+  const isolado = meios(tocar([], [4, 5, 6, 7]));
+  confere("reprodução", [4, 5, 6, 7].every((t) => isolado[t] === 0), `o isolamento deixou som sair: ${isolado}`);
+  confere("reprodução", igual(isolado.slice(9), livre.slice(9)), `depois do isolamento a voz ficou atrasada: ${isolado} contra ${livre}`);
+
+  const torto = comBytes(new Uint8Array(3), (p, n) => e.voz_tocar_chegou(1, 0, 0, 0, p, n));
+  confere("reprodução", torto === 1, `um quadro que não é de f32 voltou ${torto}`);
+}
+
 if (falhas.length) {
   for (const f of falhas) console.error(`FALHOU — ${f}`);
   process.exit(1);
 }
-console.log("voz: o envio e a recepção do desktop passam pela fronteira, dentro do .wasm");
+console.log("voz: o envio, o portão, a recepção e a reprodução passam pela fronteira, dentro do .wasm");
