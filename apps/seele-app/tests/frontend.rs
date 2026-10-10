@@ -10592,8 +10592,10 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
 ///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
 /// 6. **A do apelido tomado morre na tentativa seguinte, qualquer que seja.**
-///    `conectar` a esquece antes da primeira espera: uma tentativa a outro
-///    alvo, ou uma que entra, não pode deixá-la para a próxima.
+///    `conectar` a esquece e conta a tentativa antes da primeira espera, e a
+///    recusa só a guarda se a tentativa dela ainda é a mais nova: uma
+///    tentativa a outro alvo, ou uma que entra, não pode deixá-la para a
+///    próxima, nem mesmo quando a recusa de uma mais velha chega depois.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
@@ -10609,7 +10611,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("tela-boot.js", "recusaDoApelido = null;"),
         (
             "tela-boot.js",
-            "if (credencial != null) recusaDoApelido = { alvo, credencial };",
+            "if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };",
         ),
         // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
         // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
@@ -10922,6 +10924,28 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          primeira espera: uma tentativa que entra, ou que vai a outro alvo, pode \
          deixá-la para a próxima, e o convite de um servidor acaba mandado a \
          outro ou gasto duas vezes.\n{conectar}"
+    );
+    // **E a recusa de uma tentativa mais velha não a guarda** (rodada 1, M1).
+    // Uma tentativa lenta recusada pelo apelido depois que outra começou — o
+    // `hospedar()` entrando no servidor daqui no meio dela — guardava a
+    // credencial para uma tentativa seguinte que já tinha acontecido.
+    let conta = conectar.find("const esta = ++tentativas;");
+    assert!(
+        conta
+            .zip(espera)
+            .is_some_and(|(conta, espera)| conta < espera),
+        "`conectar` deixou de contar a tentativa antes da primeira espera, e a \
+         recusa por apelido não tem como saber se ela ainda é a mais nova.\n{conectar}"
+    );
+    let guarda = conectar
+        .lines()
+        .find(|linha| linha.contains("recusaDoApelido = {"));
+    assert!(
+        guarda.is_some_and(|linha| linha.contains("esta === tentativas")),
+        "a recusa por apelido guarda a credencial sem conferir que a tentativa dela \
+         ainda é a mais nova ({guarda:?}): a recusa de uma tentativa lenta, chegando \
+         depois que outra entrou, deixa o convite na memória da janela durante a \
+         sessão inteira"
     );
 }
 

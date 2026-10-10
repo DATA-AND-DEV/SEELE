@@ -91,6 +91,18 @@ let ultimoApelido = null;
 let recusaDoApelido = null;
 
 /**
+ * **Quantas tentativas esta janela já começou** (lote W, rodada 1).
+ *
+ * Uma recusa por apelido só guarda a credencial se a tentativa dela ainda for
+ * a mais nova. Sem isto, uma tentativa lenta recusada **depois** de outra ter
+ * começado — `hospedar()` entrando no servidor daqui no meio dela, medido pela
+ * revisão — guardava a credencial para uma «tentativa seguinte» que já tinha
+ * acontecido, e ela ficava na memória da janela durante a sessão inteira. A
+ * mesma ideia da identidade da pergunta, em `aceitarOsMods`.
+ */
+let tentativas = 0;
+
+/**
  * Se a entrada já perguntou o nome nesta execução.
  *
  * Por execução, e não por servidor: a pergunta é sobre esta máquina não ter
@@ -188,6 +200,7 @@ async function conectar(alvo, apelido, credencial) {
   // de qualquer espera, para toda tentativa. Ver `recusaDoApelido`.
   if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;
   recusaDoApelido = null;
+  const esta = ++tentativas;
   // **O apelido desta máquina, quando esta chamada não trouxe um.**
   //
   // Ele era `ultimoApelido ?? ""`, e o `ultimoApelido` só existe depois de
@@ -348,8 +361,9 @@ async function conectar(alvo, apelido, credencial) {
       ultimoApelido = null;
       // E a credencial desta tentativa fica para a seguinte a este alvo — o
       // `alvo` desta chamada, e não o `ultimoAlvo`, pela razão do lote R logo
-      // abaixo. Ver `recusaDoApelido`.
-      if (credencial != null) recusaDoApelido = { alvo, credencial };
+      // abaixo —, se a seguinte ainda não começou. Ver `recusaDoApelido` e
+      // `tentativas`.
+      if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };
     }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
     // uma falha que chega enquanto essa tela está na frente pertence a ela:

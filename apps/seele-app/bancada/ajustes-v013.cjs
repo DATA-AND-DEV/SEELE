@@ -506,6 +506,8 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
 const CONVITE_W = `convite-do-lote-w-${process.pid}-${Date.now()}`;
 const ALVO_W = '192.0.2.17:8384';
 const OUTRO_ALVO_W = '192.0.2.18:8384';
+/** O servidor que esta janela levanta ao hospedar. */
+const AQUI_W = '127.0.0.1:8383';
 const LINK_W = `seele://${ALVO_W}?token=${CONVITE_W}`;
 
 /**
@@ -558,9 +560,12 @@ async function trocarOApelido(page, novo) {
 async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const erros = []; page.on('pageerror', e => erros.push(e.message));
-  await page.addInitScript(({ table, convite, alvo, mod, snapshot }) => {
+  await page.addInitScript(({ table, convite, alvo, aqui, mod, snapshot }) => {
     window.testTable = table; window.testCalls = [];
     window.testServidor = { gasto: false, tomados: ['Bia'], exigeMods: false };
+    // Um `connect` lento por alvo, para as corridas: o do servidor daqui, que
+    // o `hospedar` levanta, não espera.
+    window.testAtrasoPorAlvo = {};
     // O console inteiro, com os argumentos serializados, como na cena do R.
     window.testConsole = [];
     for (const nivel of ['log', 'info', 'warn', 'error', 'debug']) {
@@ -577,6 +582,10 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
         if (cmd === 'connect') {
           const servidor = window.testServidor;
           const recusa = (error) => { throw { error, trail: [] }; };
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          // O servidor que esta janela acabou de levantar: entra.
+          if (args.server === aqui) return { snapshot, veredito: null, geracao: window.testCalls.length };
           // Outro servidor, também fechado, para o qual esta máquina não tem
           // convite nenhum.
           if (args.server !== alvo) recusa({ Refused: { reason: 'CredentialRejected' } });
@@ -599,8 +608,13 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     table: respostas({
       apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
       analisar_convite: { alvo: ALVO_W, token: CONVITE_W, para_entrar: null },
+      // A forma de `Anfitriao` no Rust, como a do duble de `carga-da-casca.py`.
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
     }),
-    convite: CONVITE_W, alvo: ALVO_W, mod: MOD_R, snapshot: retrato(),
+    convite: CONVITE_W, alvo: ALVO_W, aqui: AQUI_W, mod: MOD_R, snapshot: retrato(),
   });
   await page.goto(`http://127.0.0.1:${porta}`);
   await page.waitForTimeout(500);
@@ -669,6 +683,37 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   const depoisDeDesistir = await tentarPeloCampo(page, ALVO_W);
   assert.equal(depoisDeDesistir.joinSecret ?? null, null,
     'depois de a pessoa desistir, a tentativa seguinte ainda levou o convite');
+
+  // ---- 5b. Uma tentativa mais velha, recusada pelo apelido depois que outra
+  // entrou, não deixa a credencial (rodada 1, M1).
+  //
+  // A sonda P1 da revisão: uma tentativa a este servidor, com o convite, leva
+  // 600 ms e volta com `NicknameTaken`; aos 100 ms, `hospedar()` entra no
+  // servidor daqui. A recusa chega com a janela já dentro de outro servidor,
+  // e guardava a credencial para «a tentativa seguinte» — que já tinha
+  // acontecido.
+  await page.evaluate(([alvo, convite]) => {
+    testServidor.gasto = false; testServidor.tomados = [testTable.apelido_local];
+    testAtrasoPorAlvo[alvo] = 600;
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    window.testCorrida = { antes: testCalls.filter(c => c.cmd === 'connect').length };
+    irParaOServidor(alvo, null, convite);
+    setTimeout(() => { window.testCorrida.hospedou = hospedar(); }, 100);
+  }, [ALVO_W, CONVITE_W]);
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= testCorrida.antes + 2, null, { timeout: 3000 })
+    .catch(() => assert.fail('a corrida não chegou aos dois connect, e não foi medida'));
+  await page.evaluate(() => testCorrida.hospedou);
+  await page.waitForTimeout(800);
+  const naCorrida = await page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').slice(testCorrida.antes).map(c => [c.args.server, c.args.joinSecret ?? null]));
+  assert.deepEqual(naCorrida, [[ALVO_W, CONVITE_W], [AQUI_W, null]],
+    `a corrida não foi a esperada (o convite a ${ALVO_W}, e depois o servidor daqui sem nada): ${JSON.stringify(naCorrida)}`);
+  assert.equal(await page.evaluate(() => document.getElementById('tela-sessao').hidden && document.getElementById('tela-auth').hidden), false,
+    'o hospedar do meio da corrida não entrou, e a corrida não foi medida');
+  assert.equal(await credencialDoApelido(page), null,
+    `uma tentativa a ${ALVO_W}, recusada pelo apelido depois que o hospedar já tinha entrado no servidor daqui, deixou a ` +
+    'credencial guardada para uma «tentativa seguinte» que já tinha acontecido: o convite fica na memória da janela durante a sessão inteira');
+  await page.evaluate((alvo) => { delete testAtrasoPorAlvo[alvo]; }, ALVO_W);
 
   // ---- 6. A credencial não está em lugar nenhum além do `connect`.
   const vazou = await page.evaluate((convite) => {
