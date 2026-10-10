@@ -20,6 +20,14 @@
 // da sincronia, em fósforo, e o nome de quem usa, no azul. Cada um precisa de
 // 4,5:1 contra o primeiro fundo opaco acima dele.
 //
+// **E o mesmo, por região** (achado da F8, 10/10; tarefa 17i, item 3, da F3).
+// Um tema que pinta uma região clara escreve os tokens dela no contêiner do
+// produto; quem está dentro e não declara cor herda a de `#tela-sessao`, já
+// resolvida — medido pela F8 no `operador.barra`: um texto de contribuição a
+// 1,09:1. Aqui, cada região de `REGIOES_DO_TEMA`, uma de cada vez, com um tema
+// claro só nela: uma sonda de texto sem cor própria em cada contêiner, contra o
+// primeiro fundo opaco acima dela.
+//
 // Rodar:  node apps/seele-app/bancada/tema-claro-legivel.cjs
 
 const path = require("node:path");
@@ -79,6 +87,117 @@ const TEMA_CLARO = {
       desenhar(r);
     }, retrato());
     await page.waitForSelector(".mensagens .corpo");
+
+    const porRegiao = await page.evaluate((tema) => {
+      const rgb = (s) => (s.match(/[\d.]+/g) || []).map(Number);
+      const lum = ([r, g, b]) =>
+        [r, g, b]
+          .map((c) => {
+            const v = c / 255;
+            return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+          })
+          .reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+      const razao = (a, b) => {
+        const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+        return (x + 0.05) / (y + 0.05);
+      };
+      const fundoDe = (el) => {
+        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+          const c = rgb(getComputedStyle(n).backgroundColor);
+          if (c.length >= 3 && (c.length < 4 || c[3] > 0.5)) return c.slice(0, 3);
+        }
+        return rgb(getComputedStyle(document.body).backgroundColor).slice(0, 3);
+      };
+      const daRegiao = {
+        fundo: tema.fundo,
+        texto: tema.texto,
+        apagado: tema.apagado,
+        acento: tema.acento,
+        borda: tema.borda,
+      };
+      // O fundo de cada contêiner sem tema nenhum, para o caso da região que
+      // só muda o `texto`.
+      const fundoProprio = (seletor) => {
+        const no = document.querySelector(`#tela-sessao ${seletor}`);
+        return no ? getComputedStyle(no).backgroundColor : null;
+      };
+      const semTema = Object.fromEntries(
+        Object.values(REGIOES_DO_TEMA).flat().map((seletor) => [seletor, fundoProprio(seletor)]),
+      );
+      const saida = [];
+      const soTexto = [];
+      for (const [regiao, seletores] of Object.entries(REGIOES_DO_TEMA)) {
+        // **Só o `texto`, claro**, que a validação aceita sobre o fundo da
+        // sessão: nenhum contêiner troca de fundo.
+        aplicarOTemaDoServidor({
+          mod_id: "seele/estilo",
+          valores: JSON.stringify({ regioes: { [regiao]: { texto: "#f4efe6" } } }),
+        });
+        try {
+          for (const seletor of seletores) {
+            soTexto.push({ regiao, seletor, antes: semTema[seletor], depois: fundoProprio(seletor) });
+          }
+        } finally {
+          aplicarOTemaDoServidor(null);
+        }
+        aplicarOTemaDoServidor({
+          mod_id: "seele/estilo",
+          valores: JSON.stringify({ regioes: { [regiao]: daRegiao } }),
+        });
+        try {
+          for (const seletor of seletores) {
+            const conteiner = document.querySelector(`#tela-sessao ${seletor}`);
+            if (!conteiner) {
+              saida.push({ regiao, seletor, achado: false });
+              continue;
+            }
+            const sonda = document.createElement("span");
+            sonda.textContent = "texto de uma contribuição";
+            conteiner.append(sonda);
+            const cor = rgb(getComputedStyle(sonda).color).slice(0, 3);
+            const fundo = fundoDe(sonda);
+            sonda.remove();
+            saida.push({
+              regiao,
+              seletor,
+              achado: true,
+              cor: `rgb(${cor.join(",")})`,
+              fundo: `rgb(${fundo.join(",")})`,
+              razao: Number(razao(cor, fundo).toFixed(2)),
+            });
+          }
+        } finally {
+          aplicarOTemaDoServidor(null);
+        }
+      }
+      // A pergunta da orquestradora (10/10): uma região só com `texto` escuro,
+      // sem `fundo`, contra qual fundo a validação mede? Aplicada, ela deixaria
+      // o texto escuro sobre o fundo escuro da sessão.
+      aplicarOTemaDoServidor({
+        mod_id: "seele/estilo",
+        valores: JSON.stringify({ regioes: { "pessoas.lista": { texto: tema.texto } } }),
+      });
+      const escuroSemFundo = document.querySelector("#tela-sessao .painel-pessoas").style.getPropertyValue("--seele-osso");
+      aplicarOTemaDoServidor(null);
+      return { saida, soTexto, escuroSemFundo };
+    }, TEMA_CLARO);
+    const { saida: medidasPorRegiao, soTexto, escuroSemFundo } = porRegiao;
+    const regioesMedidas = new Set(medidasPorRegiao.map((m) => m.regiao));
+    assert.equal(regioesMedidas.size, 8, `as regiões medidas não são as oito: ${[...regioesMedidas]}`);
+    const ilegiveis = medidasPorRegiao.filter((m) => !m.achado || m.razao < 4.5);
+    assert.deepEqual(
+      ilegiveis,
+      [],
+      "sob um tema claro só na região, um texto sem cor própria no contêiner dela não alcança 4,5:1 " +
+        "(a cor foi resolvida acima do contêiner, onde a região não chega, ou o contêiner não pinta o fundo dela)",
+    );
+    // Com `fundo` declarado, cada contêiner pinta o fundo da região.
+    const semOFundo = medidasPorRegiao.filter((m) => m.fundo !== "rgb(242,236,224)");
+    assert.deepEqual(semOFundo, [], "um contêiner não pinta o fundo que a região declarou");
+    // Com só o `texto`, nenhum contêiner troca de fundo.
+    const trocaram = soTexto.filter((m) => m.antes !== m.depois);
+    assert.deepEqual(trocaram, [], "uma região que só muda o texto trocou o fundo de um contêiner");
+    console.log("texto escuro sem fundo, na região:", escuroSemFundo === "" ? "recusado" : `aplicado (${escuroSemFundo})`);
 
     const medido = await page.evaluate((tema) => {
       aplicarOTemaDoMod("seele/estilo", tema);
@@ -140,6 +259,8 @@ const TEMA_CLARO = {
     console.log(
       "tema claro legível:",
       medido.lugares.map((l) => `${l.seletor} ${l.razao}:1`).join(" · "),
+      "· por região:",
+      medidasPorRegiao.map((m) => `${m.regiao} ${m.seletor} ${m.razao}:1`).join(" · "),
     );
   } finally {
     await browser.close();

@@ -123,6 +123,17 @@
    numa linha só, fica com a altura de antes. */
 .perfil-cabeca .nomear-titulo { flex: 1; line-height: 1.15; }
 
+/* **As placas do cabeçalho sobre a capa** (D-capa-1; rascunho da API 6, §4):
+   com a capa de quem usa no cabeçalho, o título e o FECHAR ficam sobre placas
+   opacas da cor do fundo nativo da caixa, e o contraste é o de sem capa —
+   medido em `bancada/capa.cjs` contra uma capa branca, uma preta e uma da cor
+   da tinta. O título encolhe ao tamanho do texto, para a capa aparecer. */
+.perfil-cabeca[data-com-capa] :where(.nomear-titulo, #perfil-fechar) {
+  background-color: var(--seele-negro-painel);
+}
+
+.perfil-cabeca[data-com-capa] .nomear-titulo { flex: 0 1 auto; margin-right: auto; }
+
 .perfil-imagem {
   display: flex;
   align-items: flex-start;

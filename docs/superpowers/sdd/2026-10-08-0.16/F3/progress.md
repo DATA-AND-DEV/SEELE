@@ -683,6 +683,35 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   `exemplo_com_mod.rs` reprovou com a instalação por identificador e passa por
   hash (a reversão reprova); rodado de verdade numa porta à parte; o guia diz
   como usá-lo. O Step 3 (a prova de janela) fica para a campanha do dono.
-- **Esperam:** a M3 (depois da décima segunda integração, o dono a roda da
-  `versao/0.16`), as tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da
-  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (a 11).
+- **A M3 da API 6, 24 de 24 válidos** (o dono, em `6e845e0d`; os relatos em
+  `docs/evidencias/m3-custo-dos-mods/medidas-api6.json`, `f1ec26ea`). No
+  caminho, a orquestradora consertou o roteiro (a pergunta do nome da casa
+  nova; o diálogo e a página que deixavam o ENTRAR NA SALA inerte) e a F4 achou
+  o falante com o número de voz de antes do `f3aaf9ce` — sete cenários com voz
+  refeitos; levei os três à evidência (`c7d8dd50`, `da0f403b`, `7ea68f93`,
+  `0f1303bc`), o do falante por remendo, para a base continuar compilando. A
+  leitura contra o `sem-mod` da 0.16 (a sala pessoal está em todos); o critério
+  no §12 (`9be776e7`): nenhum commit acima de um quadro, p95 abaixo de 1 ms,
+  jitter no máximo +0,5 ms; as capas são o ponto mais caro (+17,5 pontos de
+  CPU, +151 MiB). **Não mediu** a lista de 250 cartões, de que o teto de
+  contribuições depende (decisão pedida à orquestradora).
+- **Tarefa 12, o `v6.json` em construção** `49283905`, com o guarda mais forte
+  (`49e7e0f8`: apontador em prosa reprova; alvos por ponto e folhas
+  conferidos). Achado no caminho: o `dados.uso` que a 6 promete não existe no
+  código (decisão pedida).
+- **A capa no SEU PERFIL do desktop** `e0423d56` (achado da F8; duas
+  reversões). **A cor por região** espera a decisão sobre o fundo: com o
+  `color` no contêiner, cinco regiões passam, e quatro contêineres
+  transparentes (`.linha-barra`, `#compositor-mods`, `#form-mensagem`,
+  `#lista-mensagens`) mostram que o fundo de região nunca apareceu neles.
+- **As três decisões, feitas:** o fundo das regiões só quando declarado
+  (`3180c124`, com a cor; a validação de uma região só com `texto` escuro já
+  recusa); a `carga-cartoes` pronta para a orquestradora rodar (`8fe32c96`:
+  os 250 calados num processo, no ritmo da portaria, e a lista contada pela
+  acessibilidade antes de medir); e o `dados.uso()`/`dados.teto` com o
+  `quintal-cheio` nomeado (`3bfa9fd3`; medido antes: chegava `bridge-refused`).
+  O guarda dos apontadores resolve pela definição (`2a29f62c`), e achou os
+  quatro do `volume` (`e2ad334f`); da v1 à v5, tudo resolve.
+- **Esperam:** os números da `carga-cartoes`, a tarefa 13 (o corte), o Step 5
+  da tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
+  mediu).

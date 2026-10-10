@@ -1,0 +1,1516 @@
+[
+ {
+  "cenario": "sem-mod",
+  "mods": [],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.2,
+  "carga_media_no_comeco": "{ 2.90 4.71 6.59 }",
+  "pid": 33959,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 33959,
+   "GPU": 33969,
+   "WebContent": 33971,
+   "Networking": 33978
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 39.4,
+   "GPU": 97.6,
+   "WebContent": 102.5,
+   "Networking": 5.8,
+   "total": 245.3
+  },
+  "cpu_pct": 4.4,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 127,
+   "commits_por_s": 4.2,
+   "commit_ms": {
+    "p50": 0.14,
+    "p95": 0.21,
+    "p99": 0.24,
+    "max": 0.3
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.35,
+  "carga_media_no_fim": "{ 3.67 4.51 6.33 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "1-mod",
+  "mods": [
+   "perfis"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.24,
+  "carga_media_no_comeco": "{ 2.86 4.24 6.16 }",
+  "pid": 36047,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Perfis — de seele/perfis"
+  ],
+  "processos": {
+   "seele-app": 36047,
+   "GPU": 36052,
+   "WebContent": 36053,
+   "Networking": 36054
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 42.7,
+   "GPU": 98.4,
+   "WebContent": 120.8,
+   "Networking": 5.7,
+   "total": 267.6
+  },
+  "cpu_pct": 5.6,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 136,
+   "commits_por_s": 4.5,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.23,
+    "p99": 0.25,
+    "max": 0.38
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.16,
+  "carga_media_no_fim": "{ 2.91 3.97 5.86 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "3-mods",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.21,
+  "carga_media_no_comeco": "{ 2.88 3.88 5.76 }",
+  "pid": 38085,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Aparência do servidor — de seele/estilo",
+   "Mesa — de seele/mesa",
+   "Perfis — de seele/perfis"
+  ],
+  "processos": {
+   "seele-app": 38085,
+   "GPU": 38090,
+   "WebContent": 38091,
+   "Networking": 38092
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 48.3,
+   "GPU": 98.5,
+   "WebContent": 122.5,
+   "Networking": 5.7,
+   "total": 275.0
+  },
+  "cpu_pct": 7.2,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 162,
+   "commits_por_s": 5.4,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.26,
+    "p99": 0.3,
+    "max": 0.33
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.3,
+  "carga_media_no_fim": "{ 2.86 3.67 5.48 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "3-mods-editor",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.13,
+  "carga_media_no_comeco": "{ 3.07 3.65 5.41 }",
+  "pid": 39786,
+  "apelido": "pulado",
+  "acao": "EDITAR MEU PERFIL aberto",
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 39786,
+   "GPU": 39792,
+   "WebContent": 39793,
+   "Networking": 39794
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 49.9,
+   "GPU": 103.8,
+   "WebContent": 160.0,
+   "Networking": 5.8,
+   "total": 319.5
+  },
+  "cpu_pct": 10.1,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 396,
+   "commits_por_s": 13.2,
+   "commit_ms": {
+    "p50": 0.16,
+    "p95": 0.26,
+    "p99": 0.32,
+    "max": 0.36
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.01,
+  "carga_media_no_fim": "{ 3.34 3.56 5.19 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "3-mods-mesa",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.15,
+  "carga_media_no_comeco": "{ 2.72 3.39 5.07 }",
+  "pid": 41157,
+  "apelido": "pulado",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   2830,
+   640
+  ],
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 41157,
+   "GPU": 41162,
+   "WebContent": 41163,
+   "Networking": 41164
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 51.1,
+   "GPU": 114.3,
+   "WebContent": 231.3,
+   "Networking": 5.7,
+   "total": 402.4
+  },
+  "cpu_pct": 14.0,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 1602,
+   "commits_por_s": 53.4,
+   "commit_ms": {
+    "p50": 0.05,
+    "p95": 0.16,
+    "p99": 0.19,
+    "max": 0.4
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.22,
+  "carga_media_no_fim": "{ 3.70 3.52 4.88 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "sem-mod+voz",
+  "mods": [],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.36,
+  "carga_media_no_comeco": "{ 3.07 2.89 2.93 }",
+  "pid": 69307,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 69307,
+   "GPU": 69316,
+   "WebContent": 69319,
+   "Networking": 69323
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 41.2,
+   "GPU": 98.3,
+   "WebContent": 150.1,
+   "Networking": 5.7,
+   "total": 295.3
+  },
+  "cpu_pct": 10.3,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 228,
+   "commits_por_s": 7.6,
+   "commit_ms": {
+    "p50": 0.13,
+    "p95": 0.22,
+    "p99": 0.3,
+    "max": 0.48
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.33,
+  "carga_media_no_fim": "{ 3.34 2.96 2.95 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 29,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.236,
+   "max": 1.746
+  }
+ },
+ {
+  "cenario": "1-mod+voz",
+  "mods": [
+   "perfis"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.03,
+  "carga_media_no_comeco": "{ 2.75 2.85 2.91 }",
+  "pid": 70860,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Perfis — de seele/perfis"
+  ],
+  "processos": {
+   "seele-app": 70860,
+   "GPU": 70865,
+   "WebContent": 70866,
+   "Networking": 70867
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 44.5,
+   "GPU": 100.3,
+   "WebContent": 147.3,
+   "Networking": 5.7,
+   "total": 297.8
+  },
+  "cpu_pct": 11.5,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 229,
+   "commits_por_s": 7.6,
+   "commit_ms": {
+    "p50": 0.13,
+    "p95": 0.21,
+    "p99": 0.25,
+    "max": 0.56
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.51,
+  "carga_media_no_fim": "{ 2.74 2.82 2.89 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 29,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.221,
+   "max": 2.394
+  }
+ },
+ {
+  "cenario": "3-mods+voz",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.74,
+  "carga_media_no_comeco": "{ 2.50 2.76 2.86 }",
+  "pid": 71324,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Aparência do servidor — de seele/estilo",
+   "Mesa — de seele/mesa",
+   "Perfis — de seele/perfis"
+  ],
+  "processos": {
+   "seele-app": 71324,
+   "GPU": 71329,
+   "WebContent": 71330,
+   "Networking": 71331
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 49.7,
+   "GPU": 100.0,
+   "WebContent": 149.6,
+   "Networking": 5.8,
+   "total": 305.1
+  },
+  "cpu_pct": 12.7,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 257,
+   "commits_por_s": 8.6,
+   "commit_ms": {
+    "p50": 0.12,
+    "p95": 0.2,
+    "p99": 0.35,
+    "max": 0.46
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.08,
+  "carga_media_no_fim": "{ 2.90 2.80 2.86 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 27,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.388,
+   "max": 1.925
+  }
+ },
+ {
+  "cenario": "3-mods-editor+voz",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.05,
+  "carga_media_no_comeco": "{ 3.63 2.98 2.92 }",
+  "pid": 71776,
+  "apelido": "pulado",
+  "acao": "EDITAR MEU PERFIL aberto",
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 71776,
+   "GPU": 71781,
+   "WebContent": 71782,
+   "Networking": 71783
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 49.6,
+   "GPU": 104.3,
+   "WebContent": 173.8,
+   "Networking": 5.7,
+   "total": 333.4
+  },
+  "cpu_pct": 15.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 477,
+   "commits_por_s": 15.9,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.27,
+    "p99": 0.33,
+    "max": 0.47
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.42,
+  "carga_media_no_fim": "{ 2.61 2.77 2.84 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 0,
+   "mediana": null,
+   "max": null
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.281,
+   "max": 2.063
+  }
+ },
+ {
+  "cenario": "3-mods-mesa+voz",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.92,
+  "carga_media_no_comeco": "{ 2.25 2.67 2.80 }",
+  "pid": 72228,
+  "apelido": "pulado",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   2830,
+   640
+  ],
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 72228,
+   "GPU": 72233,
+   "WebContent": 72234,
+   "Networking": 72235
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 53.3,
+   "GPU": 115.0,
+   "WebContent": 237.5,
+   "Networking": 5.7,
+   "total": 411.5
+  },
+  "cpu_pct": 18.1,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 1610,
+   "commits_por_s": 53.7,
+   "commit_ms": {
+    "p50": 0.05,
+    "p95": 0.15,
+    "p99": 0.21,
+    "max": 0.71
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.0,
+  "carga_media_no_fim": "{ 2.85 2.71 2.79 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 0,
+   "mediana": null,
+   "max": null
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 2.358,
+   "max": 2.62
+  }
+ },
+ {
+  "cenario": "3-mods-mesa-continuo",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.69,
+  "carga_media_no_comeco": "{ 2.65 2.72 3.29 }",
+  "pid": 54829,
+  "apelido": "pulado",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   2830,
+   640
+  ],
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 54829,
+   "GPU": 54834,
+   "WebContent": 54835,
+   "Networking": 54836
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 51.9,
+   "GPU": 123.6,
+   "WebContent": 227.0,
+   "Networking": 5.7,
+   "total": 408.2
+  },
+  "cpu_pct": 17.1,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 3204,
+   "commits_por_s": 106.8,
+   "commit_ms": {
+    "p50": 0.04,
+    "p95": 0.13,
+    "p99": 0.17,
+    "max": 0.29
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.99,
+  "carga_media_no_fim": "{ 3.09 2.87 3.26 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  }
+ },
+ {
+  "cenario": "3-mods-mesa-continuo+voz",
+  "mods": [
+   "perfis",
+   "mesa",
+   "estilo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.94,
+  "carga_media_no_comeco": "{ 2.83 2.61 2.70 }",
+  "pid": 73431,
+  "apelido": "pulado",
+  "acao": [
+   "apertado: AXButton | Mesa — de seele/mesa | Mesa — de seele/mesa |  → 0",
+   "escrito: AXTextField | NOME DA CAMPANHA |  | Campanha M3 → 0",
+   "apertado: AXButton | CRIAR MESA |  |  → 0",
+   "escrito: AXTextField | CENA NOVA |  | Cena M3 → 0",
+   "apertado: AXButton | CRIAR CENA |  |  → 0",
+   "apertado: AXPopUpButton | CENA EM CIMA DA MESA |  |  → 0",
+   "apertado: AXMenuItem | Cena M3 |  |  → 0"
+  ],
+  "peca": [
+   2831,
+   640
+  ],
+  "entradas_dos_mods": [],
+  "processos": {
+   "seele-app": 73431,
+   "GPU": 73436,
+   "WebContent": 73437,
+   "Networking": 73438
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 53.1,
+   "GPU": 124.2,
+   "WebContent": 242.1,
+   "Networking": 5.8,
+   "total": 425.2
+  },
+  "cpu_pct": 22.2,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 3147,
+   "commits_por_s": 104.9,
+   "commit_ms": {
+    "p50": 0.05,
+    "p95": 0.16,
+    "p99": 0.19,
+    "max": 0.57
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 0.92,
+  "carga_media_no_fim": "{ 3.37 2.85 2.78 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 0,
+   "mediana": null,
+   "max": null
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 2.377,
+   "max": 2.618
+  }
+ },
+ {
+  "cenario": "carga-regioes",
+  "mods": [
+   "carga-regioes"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.91,
+  "carga_media_no_comeco": "{ 2.50 2.79 2.97 }",
+  "pid": 64301,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Carga M3 — de m3/carga"
+  ],
+  "carga_a_vista": {
+   "redes · linha 1": true,
+   "operador.barra · linha 1": true,
+   "compositor · linha 1": true,
+   "status.barra · linha 1": true,
+   "pessoas.lista · linha 1": true,
+   "canal.cabecalho · linha 1": true,
+   "conversa.mensagem · linha 1": false,
+   "Carga M3": true
+  },
+  "processos": {
+   "seele-app": 64301,
+   "GPU": 64363,
+   "WebContent": 64364,
+   "Networking": 64365
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 40.5,
+   "GPU": 103.9,
+   "WebContent": 133.3,
+   "Networking": 5.7,
+   "total": 283.4
+  },
+  "cpu_pct": 8.8,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 157,
+   "commits_por_s": 5.2,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.22,
+    "p99": 0.29,
+    "max": 0.51
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.2,
+  "carga_media_no_fim": "{ 2.88 2.88 2.99 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-regioes+voz",
+  "mods": [
+   "carga-regioes"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.92,
+  "carga_media_no_comeco": "{ 2.61 2.45 2.59 }",
+  "pid": 74525,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Carga M3 — de m3/carga"
+  ],
+  "carga_a_vista": {
+   "redes · linha 1": true,
+   "operador.barra · linha 1": true,
+   "compositor · linha 1": false,
+   "status.barra · linha 1": true,
+   "pessoas.lista · linha 1": true,
+   "canal.cabecalho · linha 1": false,
+   "conversa.mensagem · linha 1": false,
+   "Carga M3": true
+  },
+  "processos": {
+   "seele-app": 74525,
+   "GPU": 74530,
+   "WebContent": 74531,
+   "Networking": 74532
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 43.9,
+   "GPU": 103.7,
+   "WebContent": 146.4,
+   "Networking": 5.8,
+   "total": 299.8
+  },
+  "cpu_pct": 13.7,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 254,
+   "commits_por_s": 8.5,
+   "commit_ms": {
+    "p50": 0.13,
+    "p95": 0.21,
+    "p99": 0.43,
+    "max": 0.6
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 0.94,
+  "carga_media_no_fim": "{ 2.32 2.48 2.59 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 29,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 1.205,
+   "max": 1.777
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-capas",
+  "mods": [
+   "carga-capas"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.41,
+  "carga_media_no_comeco": "{ 2.15 2.43 2.56 }",
+  "pid": 74891,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {},
+  "processos": {
+   "seele-app": 74891,
+   "GPU": 74905,
+   "WebContent": 74906,
+   "Networking": 74908
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 61.1,
+   "GPU": 123.2,
+   "WebContent": 206.3,
+   "Networking": 5.8,
+   "total": 396.4
+  },
+  "cpu_pct": 21.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 372,
+   "commits_por_s": 12.4,
+   "commit_ms": {
+    "p50": 0.19,
+    "p95": 0.27,
+    "p99": 0.31,
+    "max": 0.45
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.12,
+  "carga_media_no_fim": "{ 2.20 2.33 2.50 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-capas+voz",
+  "mods": [
+   "carga-capas"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.92,
+  "carga_media_no_comeco": "{ 2.54 2.38 2.52 }",
+  "pid": 75337,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {},
+  "processos": {
+   "seele-app": 75337,
+   "GPU": 75342,
+   "WebContent": 75343,
+   "Networking": 75344
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 61.2,
+   "GPU": 122.3,
+   "WebContent": 206.9,
+   "Networking": 5.7,
+   "total": 396.1
+  },
+  "cpu_pct": 26.0,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 465,
+   "commits_por_s": 15.5,
+   "commit_ms": {
+    "p50": 0.18,
+    "p95": 0.27,
+    "p99": 0.3,
+    "max": 0.37
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 2.39,
+  "carga_media_no_fim": "{ 4.95 3.19 2.81 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 29,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.393,
+   "max": 1.965
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-folhas",
+  "mods": [
+   "carga-folhas"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.0,
+  "carga_media_no_comeco": "{ 3.85 3.11 2.79 }",
+  "pid": 75861,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {
+   "Carga M3 · folha 1": false,
+   "Carga M3 · folha 3": true,
+   "folha 3 · parte 19": true
+  },
+  "processos": {
+   "seele-app": 75861,
+   "GPU": 75866,
+   "WebContent": 75867,
+   "Networking": 75868
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 42.1,
+   "GPU": 101.3,
+   "WebContent": 170.8,
+   "Networking": 5.8,
+   "total": 320.0
+  },
+  "cpu_pct": 6.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 159,
+   "commits_por_s": 5.3,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.24,
+    "p99": 0.3,
+    "max": 0.69
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.05,
+  "carga_media_no_fim": "{ 2.89 2.94 2.75 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-avisos",
+  "mods": [
+   "carga-avisos"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 0.95,
+  "carga_media_no_comeco": "{ 3.45 3.07 2.81 }",
+  "pid": 76395,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {},
+  "processos": {
+   "seele-app": 76395,
+   "GPU": 76401,
+   "WebContent": 76402,
+   "Networking": 76403
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 41.7,
+   "GPU": 98.3,
+   "WebContent": 152.3,
+   "Networking": 5.7,
+   "total": 298.0
+  },
+  "cpu_pct": 13.8,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 284,
+   "commits_por_s": 9.5,
+   "commit_ms": {
+    "p50": 0.15,
+    "p95": 0.23,
+    "p99": 0.29,
+    "max": 0.38
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.13,
+  "carga_media_no_fim": "{ 2.57 2.95 2.79 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-avisos+voz",
+  "mods": [
+   "carga-avisos"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.04,
+  "carga_media_no_comeco": "{ 2.37 2.86 2.76 }",
+  "pid": 76776,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {},
+  "processos": {
+   "seele-app": 76776,
+   "GPU": 76781,
+   "WebContent": 76782,
+   "Networking": 76783
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 43.5,
+   "GPU": 98.8,
+   "WebContent": 150.2,
+   "Networking": 5.8,
+   "total": 298.3
+  },
+  "cpu_pct": 18.1,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 328,
+   "commits_por_s": 10.9,
+   "commit_ms": {
+    "p50": 0.12,
+    "p95": 0.23,
+    "p99": 0.28,
+    "max": 0.68
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.22,
+  "carga_media_no_fim": "{ 3.12 3.04 2.84 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 29,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.336,
+   "max": 2.849
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-palco",
+  "mods": [
+   "carga-palco"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.03,
+  "carga_media_no_comeco": "{ 3.14 3.04 2.85 }",
+  "pid": 77217,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {
+   "PALCO DE m3/carga": true
+  },
+  "processos": {
+   "seele-app": 77217,
+   "GPU": 77225,
+   "WebContent": 77226,
+   "Networking": 77227
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 43.3,
+   "GPU": 102.9,
+   "WebContent": 136.2,
+   "Networking": 5.7,
+   "total": 288.1
+  },
+  "cpu_pct": 9.9,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 219,
+   "commits_por_s": 7.3,
+   "commit_ms": {
+    "p50": 0.14,
+    "p95": 0.22,
+    "p99": 0.26,
+    "max": 0.32
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.16,
+  "carga_media_no_fim": "{ 2.85 3.08 2.89 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-dialogo+voz",
+  "mods": [
+   "carga-dialogo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.02,
+  "carga_media_no_comeco": "{ 3.60 3.22 3.01 }",
+  "pid": 81357,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {
+   "Carga M3 · diálogo": true,
+   "diálogo · parte 3": true
+  },
+  "processos": {
+   "seele-app": 81357,
+   "GPU": 81363,
+   "WebContent": 81364,
+   "Networking": 81365
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 43.7,
+   "GPU": 99.0,
+   "WebContent": 146.1,
+   "Networking": 5.8,
+   "total": 294.6
+  },
+  "cpu_pct": 13.0,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 257,
+   "commits_por_s": 8.6,
+   "commit_ms": {
+    "p50": 0.12,
+    "p95": 0.21,
+    "p99": 0.38,
+    "max": 0.72
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.4,
+  "carga_media_no_fim": "{ 2.36 2.96 2.93 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 0,
+   "mediana": null,
+   "max": null
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.302,
+   "max": 1.82
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-pagina+voz",
+  "mods": [
+   "carga-pagina"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.05,
+  "carga_media_no_comeco": "{ 2.49 2.94 2.92 }",
+  "pid": 81758,
+  "apelido": "pulado",
+  "entradas_dos_mods": [],
+  "carga_a_vista": {
+   "Carga M3 · página": true,
+   "página · parte 3": true
+  },
+  "processos": {
+   "seele-app": 81758,
+   "GPU": 81764,
+   "WebContent": 81765,
+   "Networking": 81766
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 43.8,
+   "GPU": 99.0,
+   "WebContent": 168.9,
+   "Networking": 5.7,
+   "total": 317.4
+  },
+  "cpu_pct": 12.3,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 199,
+   "commits_por_s": 6.6,
+   "commit_ms": {
+    "p50": 0.13,
+    "p95": 0.22,
+    "p99": 0.35,
+    "max": 0.39
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.03,
+  "carga_media_no_fim": "{ 3.60 3.12 2.99 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 0,
+   "mediana": null,
+   "max": null
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 1.293,
+   "max": 2.158
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-tudo",
+  "mods": [
+   "carga-tudo"
+  ],
+  "voz": false,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.59,
+  "carga_media_no_comeco": "{ 3.09 3.05 2.90 }",
+  "pid": 78358,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Carga M3 — de m3/carga"
+  ],
+  "carga_a_vista": {
+   "status.barra · linha 1": true,
+   "Carga M3 · folha 3": true
+  },
+  "processos": {
+   "seele-app": 78358,
+   "GPU": 78363,
+   "WebContent": 78364,
+   "Networking": 78365
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 56.9,
+   "GPU": 133.7,
+   "WebContent": 422.6,
+   "Networking": 5.8,
+   "total": 619.0
+  },
+  "cpu_pct": 37.7,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 545,
+   "commits_por_s": 18.2,
+   "commit_ms": {
+    "p50": 0.56,
+    "p95": 0.74,
+    "p99": 0.81,
+    "max": 0.86
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.47,
+  "carga_media_no_fim": "{ 3.33 3.10 2.93 }",
+  "rustc_no_fim": 0,
+  "jitter_do_registro_ms": {
+   "amostras": 31,
+   "mediana": 0.0,
+   "max": 0.0
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ },
+ {
+  "cenario": "carga-tudo+voz",
+  "mods": [
+   "carga-tudo"
+  ],
+  "voz": true,
+  "segundos": 60,
+  "app": "0.0.0",
+  "commit": "6e845e0d",
+  "nucleos_ocupados_no_comeco": 1.09,
+  "carga_media_no_comeco": "{ 3.43 3.14 2.95 }",
+  "pid": 79179,
+  "apelido": "pulado",
+  "entradas_dos_mods": [
+   "Carga M3 — de m3/carga"
+  ],
+  "carga_a_vista": {
+   "status.barra · linha 1": true,
+   "Carga M3 · folha 3": true
+  },
+  "processos": {
+   "seele-app": 79179,
+   "GPU": 79184,
+   "WebContent": 79185,
+   "Networking": 79186
+  },
+  "bloqueou": false,
+  "interrompido": false,
+  "rustc_durante": 0,
+  "memoria_mib": {
+   "seele-app": 63.8,
+   "GPU": 133.2,
+   "WebContent": 414.8,
+   "Networking": 5.8,
+   "total": 617.6
+  },
+  "cpu_pct": 46.3,
+  "quadros": {
+   "janela_s": 30,
+   "commits": 535,
+   "commits_por_s": 17.8,
+   "commit_ms": {
+    "p50": 0.62,
+    "p95": 0.78,
+    "p99": 0.85,
+    "max": 0.92
+   },
+   "acima_de_um_quadro": 0,
+   "tempo_acima_ms": 0
+  },
+  "nucleos_ocupados_no_fim": 1.35,
+  "carga_media_no_fim": "{ 3.22 3.10 2.95 }",
+  "rustc_no_fim": 0,
+  "jitter_ms": {
+   "amostras": 25,
+   "mediana": 1.0,
+   "max": 2.0
+  },
+  "jitter_do_registro_ms": {
+   "amostras": 32,
+   "mediana": 1.556,
+   "max": 2.09
+  },
+  "tropecos_do_mod": {
+   "linhas": 0,
+   "primeiras": []
+  }
+ }
+]

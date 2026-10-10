@@ -34,11 +34,13 @@ Cenários (ADR 0052:189-193, mais o 0/1/3 do plano da F3):
 `--app` apontando a build de medição de `preparar-api6.sh`:
     3-mods-mesa-continuo   o arraste da MESA sem pausa, a janela inteira
     carga-regioes  carga-capas  carga-folhas  carga-avisos  carga-palco
-    carga-tudo  carga-dialogo  carga-pagina
+    carga-tudo  carga-dialogo  carga-pagina  carga-cartoes
 o MOD de carga sintético (`m3-carga/`) em cada ponto da API 6 no teto
 declarado. Os cenários de carga sobem participantes calados (o `m3-falante
 --calado`): um posta 30 mensagens no canal 1; nas capas, a sala 1 fica com
-sete pessoas e a lista com vinte e sete. O jitter também é lido do
+sete pessoas e a lista com vinte e sete; nos cartões, a lista tem 251 (os
+calados entram num processo só, no ritmo da portaria, antes do app, e o
+cenário só mede depois de a acessibilidade mostrar os 251 cartões). O jitter também é lido do
 `seele.log` (a linha que o remendo da cópia escreve a cada 2 s), porque com o
 diálogo e a página a barra fica inerte e a acessibilidade não a lê.
 """
@@ -66,11 +68,18 @@ PACOTES = {
     "estilo": RAIZ / "pacotes/seele-estilo-3.1.0",
 }
 # As variantes do MOD de carga da API 6 (`gerar-carga.py`), uma por cenário.
-CARGAS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo"]
+CARGAS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo", "cartoes"]
+# A lista da carga-cartoes: quem usa e os calados (e o falante, com voz).
+LISTA = 251
 PACOTES.update({f"carga-{c}": RAIZ / f"pacotes/m3-carga-{c}" for c in CARGAS})
 # Os cenários de carga que precisam de quem usa dentro da sala: a capa anima no
 # cartão da chamada e na barra; o palco é da chamada.
 NA_SALA = {"carga-capas", "carga-tudo", "carga-palco"}
+# O diálogo modal e a página imersiva abrem quando quem usa entra na sala
+# (`quandoNaSala`, no molde), e deixam o SAIR DA SALA inerte antes de o roteiro
+# o achar (medido em 10/10). Neles, a superfície à vista prova a entrada: ela só
+# abre com quem usa numa sala.
+ABRE_NA_SALA = {"carga-dialogo": "Carga M3 · diálogo", "carga-pagina": "Carga M3 · página"}
 PORTA = 8391  # nunca a 8383 (app) nem a 8384 (bateria de testes)
 # Os quadros são gravados nos primeiros 30 s da janela de 60: o trace de 60 s
 # com os instrumentos de engasgo passava de 500 MB e o xctrace levava mais de
@@ -109,8 +118,14 @@ def esperar(condicao, prazo, passo=0.5):
     return False
 
 
-def tem(pid, texto):
-    return texto.lower() in ax("textos", pid, texto).lower()
+def tem(pid, texto, fundura=None):
+    extra = [str(fundura)] if fundura else []
+    return texto.lower() in ax("textos", pid, texto, *extra).lower()
+
+
+def cartoes_na_lista(pid):
+    """Os cartões de MOD distintos que a acessibilidade acha, fundo na árvore."""
+    return len(set(re.findall(r"cartão (\S+) · linha 1", ax("textos", pid, "· linha 1", "200"))))
 
 
 def irmaos_webkit(pid: int):
@@ -291,7 +306,21 @@ def main():
                 participantes.append(subprocess.Popen(
                     [str(FALANTE), endereco, str(sala), duracao, "--calado", "--apelido", apelido, *extra_args],
                     stdout=open(pasta / f"{apelido}.out", "w"), stderr=subprocess.STDOUT))
-            calado("m3-mensagens", 0, "--mensagens", "30")
+            if base == "carga-cartoes":
+                # **Os calados da lista, num processo só, no ritmo da portaria**
+                # (30 apertos de rajada por endereço, repostos a 30 por minuto):
+                # uns 8 minutos, antes do app. Com voz, o falante é o 251º.
+                quantos = LISTA - 1 - (1 if voz else 0)
+                saida = pasta / "m3-cartoes.out"
+                participantes.append(subprocess.Popen(
+                    [str(FALANTE), endereco, "0", "1500", "--calados", str(quantos), "--apelido", "m3-cartao"],
+                    stdout=open(saida, "w"), stderr=subprocess.STDOUT))
+                assert esperar(lambda: "M3 calados prontos" in saida.read_text(), 900, passo=5), \
+                    "os calados não entraram"
+                relato["calados"] = quantos
+                time.sleep(10)  # a portaria repõe os apertos do app
+            else:
+                calado("m3-mensagens", 0, "--mensagens", "30")
             if base in ("carga-capas", "carga-tudo"):
                 for n in range(5 if voz else 6):
                     calado(f"m3-sala-{n}", 1)
@@ -307,7 +336,15 @@ def main():
         assert esperar(novo_pid, 20), "o app não abriu"
         pid = novo_pid().pop()
         relato["pid"] = pid
-        assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR"), 40), "a entrada não apareceu"
+        # Na 0.16 a casa nova pergunta o apelido antes de seguir o link (medido
+        # em 10/10: sem isto o cenário esperava a entrada atrás do diálogo).
+        # CANCELAR entra com o nome tirado da chave, como quem pula a pergunta.
+        assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR")
+                       or tem(pid, "COMO OS OUTROS VÃO TE CHAMAR"), 40), "a entrada não apareceu"
+        if tem(pid, "COMO OS OUTROS VÃO TE CHAMAR"):
+            ax("apertar", pid, "CANCELAR")
+            relato["apelido"] = "pulado"
+            assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR"), 40), "a entrada não apareceu"
         if tem(pid, "ACEITAR"):
             ax("apertar", pid, "ACEITAR")
             assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR"), 40)
@@ -322,7 +359,8 @@ def main():
             time.sleep(3)
         if voz or base in NA_SALA:
             ax("apertar", pid, "ENTRAR NA SALA")
-            assert esperar(lambda: tem(pid, "SAIR DA SALA"), 20), "não entrou na sala"
+            assert esperar(lambda: tem(pid, "SAIR DA SALA")
+                           or (base in ABRE_NA_SALA and tem(pid, ABRE_NA_SALA[base])), 20), "não entrou na sala"
         if base in NA_SALA:
             # A grade da chamada à vista: é nela que as capas animam, e é a
             # barra dela que oferece VER O PALCO.
@@ -343,8 +381,14 @@ def main():
         relato["entradas_dos_mods"] = sorted(set(
             l.split("|")[1].strip() for l in ax("textos", pid, "— de ").splitlines()
             if l.startswith("AXButton") and ("— de seele/" in l or "— de m3/" in l)))
+        if base == "carga-cartoes":
+            # **Só mede com a lista inteira à vista**: os 251 cartões, contados
+            # pela acessibilidade, e não presumidos.
+            esperar(lambda: cartoes_na_lista(pid) >= LISTA, 180, passo=5)
+            relato["cartoes_na_lista"] = cartoes_na_lista(pid)
+            assert relato["cartoes_na_lista"] >= LISTA, f"a lista tem {relato['cartoes_na_lista']} cartões, e não {LISTA}"
         if base.startswith("carga-"):
-            relato["carga_a_vista"] = carga_a_vista(pid, base)
+            relato["carga_a_vista"] = carga_a_vista(pid, base, voz)
         registro = casa / "seele.log"
         inicio_do_registro = registro.stat().st_size if registro.exists() else 0
         pids = {"seele-app": pid, **irmaos_webkit(pid)}
@@ -533,7 +577,7 @@ def arrastar_sem_pausa(pid):
     _sintetico["ultimo"] = time.time()
 
 
-def carga_a_vista(pid, base):
+def carga_a_vista(pid, base, voz=False):
     """A prova de que o MOD de carga desenha, e não só carrega: o que cada
     cenário põe na tela, lido pela acessibilidade antes da janela de medida."""
     if base == "carga-palco":
@@ -552,8 +596,18 @@ def carga_a_vista(pid, base):
         # O palco fica escondido no tudo: à frente, ele tiraria da vista a grade,
         # onde as capas animam. Montado e escondido, ele custa e soa.
         "carga-tudo": ["status.barra · linha 1", "Carga M3 · folha 3"],
+        # O primeiro e o último cartão, e a última das 128 sem alvo.
+        "carga-cartoes": ["cartão m3-cartao-000 · linha 1",
+                          f"cartão m3-cartao-{LISTA - 3 if voz else LISTA - 2:03d} · linha 1",
+                          "agregado 128 · linha 1"],
     }.get(base, [])
-    return {texto: tem(pid, texto) for texto in procurar}
+    vista = {texto: tem(pid, texto, 200 if base == "carga-cartoes" else None) for texto in procurar}
+    if base == "carga-regioes":
+        # **A linha de dentro de uma mensagem, mais fundo na árvore** (10/10):
+        # com a fundura de sempre (60) ela não foi achada, e «a região montou»
+        # precisa de medida, e não do custo em MiB.
+        vista["conversa.mensagem · linha 1 (fundura 200)"] = tem(pid, "conversa.mensagem · linha 1", 200)
+    return vista
 
 
 ACOES = {"3-mods-editor": abrir_editor_do_perfis, "3-mods-mesa": preparar_mesa,
