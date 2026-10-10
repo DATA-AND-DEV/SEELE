@@ -690,7 +690,8 @@
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
       "chave-desconhecida (leva a chave; com mais de uma errada, a primeira em ordem de ponto de código, igual nas duas pontas; a tabela é seele_proto::mods::CHAVES_DO_TEMA, a mesma da casca, conferida caso a caso por crates/seele-proto/tests/vetores/chaves-do-tema.json; tarefa 17j)",
       "valor-invalido (leva a chave; a forma de cada valor está na mesma tabela: cor #rrggbb, inteiro com intervalo, bandeira, escolha; tarefa 17j)",
-      "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
+      "regiao-desconhecida (leva chave: 'regioes' e a regiao; a região não está em seele_proto::mods::REGIOES_DO_TEMA; chave-desconhecida e valor-invalido de dentro de uma região levam a regiao também; tarefa 17i, item 3)",
+      "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }], e a regiao quando quem recusou foi uma região)"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
     "superficies": [

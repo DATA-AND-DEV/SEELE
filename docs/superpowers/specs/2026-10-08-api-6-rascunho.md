@@ -1042,7 +1042,9 @@ grupo 17 do plano da F3.
   `sem-porta-de-tema` (o manifesto não declara `"tema": true`),
   `tema-de-outro-mod` (outro MOD é o escolhido e está ligado), `tema-invalido`
   (não é objeto nem `null`: texto, número, lista), `tema-grande-demais` (o JSON
-  passa dos 12 KiB do fio) e, com a tarefa 17e, `contraste`, que leva
+  passa dos 12 KiB do fio), `chave-desconhecida` e `valor-invalido` (com a
+  `chave`; tarefa 17j), `regiao-desconhecida` (com `chave: 'regioes'` e a
+  `regiao`; tarefa 17i) e, com a tarefa 17e, `contraste`, que leva
   `pares: [{ frente, fundo, razao, piso }]` com **os dois nomes em campos
   separados** (`frente: 'acento', fundo: 'acentoFraco'`), para o MOD pôr cada
   lado no seu campo dos `erros`. Só lança o que o próprio MOD lançar ao ser
