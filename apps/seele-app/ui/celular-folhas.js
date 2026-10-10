@@ -47,25 +47,45 @@
   });
 
   let fecharAberta = null;
+  // Uma entrada no voltar do aparelho para a folha aberta. Uma folha que toma o
+  // lugar de outra herda a entrada dela, e não empilha outra.
+  let sairDoVoltar = null;
+  let desistirDaAberta = null;
 
   /**
    * Mostra uma folha e devolve a função que a fecha. Fechar devolve o foco a
    * quem o tinha antes, se esse nó ainda estiver na página.
    */
   function abrirFolha(folha, aoDesistir) {
-    fecharAberta?.();
+    const herdada = fecharAberta !== null;
+    if (herdada) fecharAberta(true);
+    desistirDaAberta = aoDesistir;
+    if (!herdada) sairDoVoltar = CELULAR.ajudante("empilhar")(() => {
+      sairDoVoltar = null;
+      desistirDaAberta?.();
+    });
     const antes = document.activeElement;
     const veu = h("div", { class: "cel-veu", onclick: aoDesistir });
+    // O Escape é da folha, e para nela: na captura do `window`, antes de todo
+    // ouvinte do desktop. A CHAMADA fecha no Escape quando não há caixa por
+    // cima, e sem isto a folha sumia primeiro e a CHAMADA fechava junto.
     const tecla = (evento) => {
-      if (evento.key === "Escape") aoDesistir();
+      if (evento.key !== "Escape") return;
+      evento.stopPropagation();
+      evento.preventDefault();
+      aoDesistir();
     };
-    document.addEventListener("keydown", tecla);
+    window.addEventListener("keydown", tecla, true);
     sessao.append(veu, folha);
-    const fechar = () => {
-      document.removeEventListener("keydown", tecla);
+    const fechar = (trocando = false) => {
+      window.removeEventListener("keydown", tecla, true);
       veu.remove();
       folha.remove();
       fecharAberta = null;
+      desistirDaAberta = null;
+      if (trocando) return;
+      sairDoVoltar?.();
+      sairDoVoltar = null;
       if (antes?.isConnected) antes.focus();
     };
     fecharAberta = fechar;
@@ -177,13 +197,14 @@
    */
   function folhaDaPessoa({ nome, sinal, estado, volume, mudarVolume, podeModerar }) {
     let fechar = null;
+    let deslizante = null;
     const corpo = [h("div", { class: "cel-folha-sinal" },
       h("span", { class: "rotulo", text: PALAVRAS.sinal }),
       h("span", { class: "cel-folha-sinal-valor", text: sinal }),
       h("span", { class: "cel-folha-sinal-estado", text: estado }))];
     if (volume !== null) {
       const rotulo = h("span", { class: "rotulo cel-folha-volume", text: PALAVRAS.volume(volume) });
-      const deslizante = h("input", {
+      deslizante = h("input", {
         type: "range",
         class: "cel-folha-deslizante",
         min: "0",
@@ -201,9 +222,12 @@
     if (podeModerar) {
       corpo.push(h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: PALAVRAS.moderar }), PALAVRAS.foraModerar));
     }
-    corpo.push(h("div", { class: "cel-folha-acoes" },
-      h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar)));
+    const fecharBotao = h("button", { class: "botao-fantasma", type: "button", onclick: () => fechar() }, PALAVRAS.fechar);
+    corpo.push(h("div", { class: "cel-folha-acoes" }, fecharBotao));
     fechar = abrirFolha(folha("cel-folha-pessoa", nome, ...corpo), () => fechar());
+    // O foco entra na folha, como nas outras: sem ele, o leitor da tela lia a
+    // sessão por baixo dela (medido na árvore do WebKit).
+    (deslizante ?? fecharBotao).focus();
   }
 
   // ------------------------------------------------------------- ANEXAR

@@ -1,0 +1,43 @@
+//! Medida temporária da F4 (09/10/2026), fora da árvore: o OpenH264 do desktop
+//! decodifica o que o VideoEncoder de um navegador produziu?
+//!
+//!     cargo run --release -p seele-video --example ler_do_navegador -- <libopenh264> <fluxo.bin>...
+use std::path::PathBuf;
+
+use seele_video::codec::Decodificador;
+use seele_video::modulo::BibliotecaDeVideo;
+
+fn main() -> Result<(), String> {
+    let mut args = std::env::args().skip(1);
+    let lib = PathBuf::from(args.next().ok_or("o libopenh264")?);
+    let biblioteca = BibliotecaDeVideo::carregar(&lib).map_err(|e| format!("carregar: {e}"))?;
+    for caminho in args {
+        let bytes = std::fs::read(&caminho).map_err(|e| format!("{caminho}: {e}"))?;
+        let mut dec = Decodificador::novo(&biblioteca).map_err(|e| format!("decodificador: {e}"))?;
+        let (mut unidades, mut quadros, mut erros, mut primeiro_erro) = (0, 0, 0, None);
+        let mut i = 0;
+        while i + 4 <= bytes.len() {
+            let n = u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+            let au = &bytes[i + 4..i + 4 + n];
+            i += 4 + n;
+            unidades += 1;
+            match dec.decodificar(au) {
+                Ok(Some(q)) => {
+                    quadros += 1;
+                    let _ = q;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    erros += 1;
+                    primeiro_erro.get_or_insert_with(|| e.to_string());
+                }
+            }
+        }
+        println!(
+            "{:40} unidades {unidades:3}  quadros {quadros:3}  erros {erros:3}  {}",
+            std::path::Path::new(&caminho).file_name().unwrap().to_string_lossy(),
+            primeiro_erro.unwrap_or_default()
+        );
+    }
+    Ok(())
+}

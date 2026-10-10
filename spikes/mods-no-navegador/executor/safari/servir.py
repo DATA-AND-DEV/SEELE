@@ -2,6 +2,24 @@
 # ui/ copiada em /normal/ e em /fugido/ (com o Worker que saiu do motor), conta
 # as canárias e recebe os resultados. Descartável.
 import base64, hashlib, http.server, json, pathlib, re, subprocess, sys, threading, time
+import os
+
+
+def simulador():
+    """O Simulador onde a página abre: `SEELE_SIMULADOR` (o UDID), ou o único ligado.
+
+    Com dois ligados, `booted` é ambíguo, e a medida iria para o aparelho de
+    outra frente (a F8 usa o iPhone 17; a F4, o iPhone 18 Pro). Recusar e dizer
+    é melhor que medir no aparelho errado.
+    """
+    escolhido = os.environ.get("SEELE_SIMULADOR")
+    if escolhido:
+        return escolhido
+    ligados = [l.strip() for l in subprocess.run(["xcrun", "simctl", "list", "devices", "booted"],
+                                                 capture_output=True, text=True).stdout.splitlines() if "(Booted)" in l]
+    if len(ligados) != 1:
+        sys.exit(f"há {len(ligados)} Simuladores ligados ({'; '.join(ligados)}): diga qual com SEELE_SIMULADOR=<UDID>")
+    return "booted"
 UI = pathlib.Path(sys.argv[1]); MOTOR = pathlib.Path(sys.argv[2]); MOD = pathlib.Path(sys.argv[3]); AQUI = pathlib.Path(__file__).parent
 ALVO = sys.argv[4]
 FUGIDO = open(AQUI / "fugido.js").read()
@@ -45,7 +63,7 @@ threading.Thread(target=s.serve_forever, daemon=True).start()
 for modo in ("normal", "fugido"):
     url = f"http://127.0.0.1:{porta}/{modo}/auto.html?t={time.time()}"
     antes = len(resultados); c0 = len(canarias)
-    if ALVO == "sim": subprocess.run(["xcrun", "simctl", "openurl", "booted", url], check=True)
+    if ALVO == "sim": subprocess.run(["xcrun", "simctl", "openurl", simulador(), url], check=True)
     else: subprocess.run(["open", "-a", "Safari", url], check=True)
     t0 = time.time()
     while len(resultados) == antes and time.time() - t0 < 60: time.sleep(0.2)

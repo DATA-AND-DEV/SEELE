@@ -748,13 +748,17 @@ async function pararDeVer() {
 }
 
 /**
- * O nome de quem transmite, ou um travessão se o roster ainda não o tem.
+ * O nome de quem transmite, ou um travessão se os presentes ainda não o têm.
  *
- * O roster é a única fonte de nome desta casca. Um id cru na tela seria pior que
- * o travessão: parece um dado e não é nome de ninguém.
+ * Os presentes (`Snapshot::presentes`, de `seele-ffi`) são a única fonte de nome
+ * desta casca. Um id cru na tela seria pior que o travessão: parece um dado e
+ * não é nome de ninguém.
+ *
+ * Isto lia `snapshot.roster`, que o `Snapshot` nunca teve, e a fileira dizia
+ * «VER —» para todo mundo, desde a 0.15.
  */
 function nomeDeQuem(snapshot, id) {
-  const pessoa = (snapshot?.roster ?? []).find((quem) => quem.id === id);
+  const pessoa = (snapshot?.presentes ?? []).find((quem) => quem.id === id);
   return pessoa?.nickname ?? "—";
 }
 
