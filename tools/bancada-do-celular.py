@@ -1292,6 +1292,56 @@ MOD_DE_PE = """() => {
   window.__pedirAoProduto = (m) => atenderOMod(mod, inst, { ...m, n: ++n });
 }"""
 
+def modal_deixa_a_faixa(pg: Page, nome: str, seletor: str) -> list[str]:
+    """Com um modal de MOD aberto (o diálogo, a página imersiva), a faixa e as
+    abas continuam acordadas: a pilha de inércia da F3 (682f39ba) pergunta ao
+    `CELULAR.acordadosNoModal()`. O SEGURE fala, o SOM troca, AJUSTES abre, e o
+    SAIR recebe o toque; o Tab fica dentro da superfície. O SAIR não é
+    apertado: sair da sala tiraria a faixa das superfícies seguintes."""
+    falhas = []
+    estado = pg.evaluate("""() => { const centro = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); };
+        return { faixa: !document.querySelector('.voz-celular').closest('[inert]'), abas: !document.querySelector('.cel-abas').closest('[inert]'),
+                 conversa: !!document.getElementById('lista-mensagens').closest('[inert]'),
+                 sair: !!centro('voz-sair')?.closest('#voz-sair') }; }""")
+    if not estado["faixa"] or not estado["abas"]:
+        falhas.append(f"com {nome} na tela, a faixa ou as abas ficam inertes: {estado}")
+    if not estado["conversa"]:
+        falhas.append(f"com {nome} na tela, a conversa por trás não fica inerte")
+    if not estado["sair"]:
+        falhas.append(f"com {nome} na tela, o SAIR da faixa não recebe o toque")
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    centro = pg.evaluate("(() => { const b = document.getElementById('voz-mudo').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+    pg.mouse.move(*centro)
+    pg.mouse.down()
+    pg.wait_for_timeout(250)
+    pg.mouse.up()
+    pg.wait_for_timeout(150)
+    tocar(pg, "#voz-surdo")
+    pg.wait_for_timeout(150)
+    tocar(pg, "#voz-surdo")
+    pg.wait_for_timeout(150)
+    feitos = pg.evaluate("window.__SEELE_HISTORICO.map(([c]) => c)")
+    if "set_talking" not in feitos:
+        falhas.append(f"com {nome} na tela, segurar o SEGURE não fala: {feitos}")
+    if feitos.count("set_total_isolation") < 2:
+        falhas.append(f"com {nome} na tela, o SOM da faixa não troca: {feitos}")
+    # O Tab, a partir de dentro: seis vezes, e o foco não sai da superfície.
+    pg.evaluate("(s) => [...document.querySelectorAll(s)].at(-1)?.querySelector('button, [tabindex]')?.focus()", seletor)
+    fora = []
+    for _ in range(6):
+        pg.keyboard.press("Tab")
+        if not pg.evaluate("(s) => !![...document.querySelectorAll(s)].at(-1)?.contains(document.activeElement)", seletor):
+            fora.append(pg.evaluate("document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName"))
+    if fora:
+        falhas.append(f"com {nome} na tela, o Tab sai da superfície: {fora}")
+    tocar(pg, "#cel-aba-ajustes")
+    pg.wait_for_timeout(300)
+    if pg.evaluate("document.getElementById('tela-sessao').dataset.aba") != "ajustes":
+        falhas.append(f"com {nome} na tela, AJUSTES não abre")
+    ir_para_aba(pg, "conversa", falhas)
+    return falhas
+
+
 SUPERFICIES_DE_MOD = [
     ("a página", {"id": "p", "tipo": "pagina", "titulo": "PÁGINA DE TESTE"}, ".pagina-de-mod"),
     ("a página imersiva", {"id": "pi", "tipo": "pagina", "titulo": "IMERSIVA", "imersiva": True}, ".pagina-de-mod"),
@@ -1343,6 +1393,8 @@ def superficies_de_mod(pg: Page) -> list[str]:
         if descricao["tipo"] in ("aviso", "folha") or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
             if not visto["mudo"] or not visto["ajustes"]:
                 falhas.append(f"com {nome} aberta, o MUDO ou AJUSTES não recebe o toque: {visto}")
+        else:
+            falhas += modal_deixa_a_faixa(pg, nome, seletor)
         pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-fechar', superficie: id })", descricao["id"])
         pg.wait_for_timeout(200)
     # Uma pilha de folhas: só a de cima aparece, e ela continua acima do pé.
