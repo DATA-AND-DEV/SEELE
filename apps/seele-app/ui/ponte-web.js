@@ -17,11 +17,22 @@
 //
 // O Tauri sempre injeta o `__TAURI_INTERNALS__` (o `__TAURI__` depende do
 // `withGlobalTauri`). **Um `__TAURI__` que já existe sem ele é o duble de uma
-// bancada** (`bancada/*.cjs`, `tools/carga-da-casca.py`), escrito antes deste
-// script: a ponte não o troca, e a marca fica com quem a pôs. Quem mais
-// precisa saber onde está lê `PONTE_NO_LUGAR_DO_TAURI` (o `executorDoMod`, em
-// `mods-runtime.js`). `tests/web.rs` segura que ninguém mais lê o Tauri para
-// isso.
+// bancada** (`bancada/*.cjs`, `tools/carga-da-casca.py`,
+// `tools/bancada-do-celular.py`), escrito antes deste script: a ponte não o
+// troca, e a marca fica com quem a pôs.
+//
+// **Por quê:** o duble faz o papel do desktop. Se a ponte o trocasse, a
+// bancada passaria a medir a ponte no lugar da casca do desktop que ela finge,
+// e os roteiros de `tools/roteiros/` e o G3 da F8 (o desktop igual pixel a
+// pixel) deixariam de provar o que dizem. E a marca que a
+// `bancada-do-celular.py` escolhe seria trocada pelo critério da ponte. Achado
+// ao escrever o lote A: essas ferramentas põem o duble antes do primeiro
+// `<script src=`, que passou a ser este.
+//
+// Quem mais precisa saber onde está lê `PONTE_NO_LUGAR_DO_TAURI` (o
+// `executorDoMod`, em `mods-runtime.js`: sob um duble, o executor é o nativo,
+// como no desktop que ele finge). `tests/web.rs` segura que ninguém mais lê o
+// Tauri para isso, e a bancada `ponte-web.cjs` prova a regra nos três lugares.
 //
 // # As listas
 //
