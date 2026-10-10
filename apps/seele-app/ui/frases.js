@@ -1551,6 +1551,8 @@ const FRASES_DO_CELULAR = Object.freeze({
     sairDoServidor: "SAIR DO SERVIDOR",
     segurarParaFalar: "SEGURAR PARA FALAR",
     segurarNota: "fala só enquanto o dedo está no SEGURE",
+    // Na faixa de contexto de CONFIGURAÇÕES, no lugar do «segura ESPAÇO».
+    modoSegurar: "microfone abre só enquanto o dedo está no SEGURE",
   }),
 });
 

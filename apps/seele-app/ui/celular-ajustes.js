@@ -218,6 +218,10 @@
   // O modo de voz do celular: SEGURAR PARA FALAR ou VOZ. O botão TECLA do
   // desktop já manda o PushToTalk, que no celular é o SEGURE da faixa; o ABERTO
   // não aparece (spec, §2.3).
+  // A faixa de contexto diz o botão que se segura, e não a tecla: o celular não
+  // tem ESPAÇO. Os outros modos dizem o que o desktop diz.
+  CASCA.fraseDoModo = (modo, doDesktop) => (modo === "PushToTalk" ? PALAVRAS.modoSegurar : doDesktop);
+
   const tecla = document.getElementById("server-modo-tecla");
   tecla.querySelector(".server-modo-nome").textContent = PALAVRAS.segurarParaFalar;
   tecla.querySelector(".server-modo-desc").textContent = PALAVRAS.segurarNota;

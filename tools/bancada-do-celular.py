@@ -1018,6 +1018,13 @@ def ajustes_medida(pg: Page) -> list[str]:
         voltar: !!document.querySelector('#tela-server .cel-ajustes-voltar')?.offsetParent }))()""")
     if secao["coluna"] != "none" or secao["corpo"] == "none" or secao["paineis"] != ["painel-audio"] or not secao["voltar"]:
         falhas.append(f"a seção ÁUDIO não abriu sozinha, numa coluna, com «‹ AJUSTES»: {secao}")
+    # A faixa de contexto diz como o microfone abre (CASCA.fraseDoModo): no
+    # celular, o botão que se segura, e não a tecla que ele não tem. Achado na
+    # foto do Safari: «microfone abre enquanto segura ESPAÇO».
+    pg.wait_for_timeout(600)
+    contexto = pg.evaluate("document.getElementById('server-contexto').textContent")
+    if "SEGURE" not in contexto or "ESPAÇO" in contexto:
+        falhas.append(f"a faixa de contexto de ÁUDIO diz «{contexto}», e não o SEGURE")
     exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
     if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
         falhas.append("«‹ AJUSTES» não voltou à lista")
@@ -1455,6 +1462,12 @@ def casca_larga(pg: Page) -> list[str]:
     versoes = secao("secao-versoes", "painel-versoes")
     if versoes and ("app do SEELE" not in versoes["frase"] or versoes["blocos"]):
         falhas.append(f"VERSÕES não diz que guardar versões é do app: {versoes}")
+    # No computador há tecla, e a faixa de contexto continua a nomeá-la (o padrão
+    # do CASCA.fraseDoModo é a frase do desktop).
+    pg.wait_for_timeout(600)
+    contexto = pg.evaluate("document.getElementById('server-contexto').textContent")
+    if "ESPAÇO" not in contexto:
+        falhas.append(f"a faixa de contexto da larga não nomeia a tecla de falar: «{contexto}»")
     atalhos = secao("secao-atalhos", "painel-atalhos")
     if atalhos and "foco" not in atalhos["frase"]:
         falhas.append(f"a tecla de falar não diz que só vale com a página em foco: {atalhos}")
