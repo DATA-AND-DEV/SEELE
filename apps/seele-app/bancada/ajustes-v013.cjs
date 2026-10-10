@@ -1222,6 +1222,140 @@ async function oConectarTemDono(browser, porta) {
   await page.close();
 }
 
+// --------------------------------------------------------------------------
+// Lote W2 da F5, rodada 2 da revisão: a batida da espera só cala a si mesma
+// --------------------------------------------------------------------------
+//
+// **O caso** (M1 da revisão, que já existia antes do W2). A espera da portaria
+// bate de novo sozinha; quem sai dela pela porta com uma batida no ar deixa
+// essa batida calada quando ela volta (`levarParaAEspera`). A bandeira era um
+// sim, e calava **qualquer** falha que voltasse com a batida no ar: quem saía
+// e apertava HOSPEDAR AQUI tinha a recusa da entrada nova calada, sem tela e
+// sem registro. Agora a bandeira guarda o número da tentativa da batida: a
+// falha de outra tentativa fala na linha vermelha, e a da batida, calada na
+// tela, vai ao `seele.log`.
+
+async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        if (cmd === 'connect') {
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          if (recusa) throw { error: recusa, trail: [] };
+          return { snapshot, veredito: null, geracao: window.testCalls.length };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
+    }),
+    snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  const NA_PORTARIA = { Refused: { reason: 'AdmissionPending' } };
+  const LOTADO = { Refused: { reason: 'ServerFull' } };
+
+  /** A espera aberta por uma batida pendente na portaria. */
+  async function abrirAEspera() {
+    await page.evaluate(([alvo, recusa]) => {
+      window.testAtrasoPorAlvo = {};
+      window.testRecusaPorAlvo = { [alvo]: recusa };
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      irParaOServidor(alvo, null, null);
+    }, [PORTARIA_W2, NA_PORTARIA]);
+    await page.waitForFunction(() => !document.getElementById('tela-auth').hidden && $('tela-auth').dataset.modo === 'espera', null, { timeout: 3000 })
+      .catch(() => assert.fail('a batida pendente não abriu a espera, e este caso não mede nada'));
+  }
+  const respondida = (alvo) => page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    alvo, { timeout: 3000 },
+  ).catch(() => assert.fail(`a tentativa a ${alvo} não voltou, e este caso não mede nada`));
+  const noRegistro = (trecho) => page.evaluate((trecho) => testCalls.slice(testAntes)
+    .filter(c => c.cmd === 'registrar_da_janela' && String(c.args?.oQue).includes(trecho))
+    .map(c => [c.args.nivel, c.args.oQue]), trecho);
+
+  // ---- 1. A sonda do revisor: a batida no ar, a pessoa sai da espera e
+  // aperta HOSPEDAR AQUI, e o servidor daqui recusa a entrada (lotado) antes
+  // de a batida voltar. Quem fala é a entrada nova.
+  await abrirAEspera();
+  await page.evaluate(([alvo, aqui, lotado]) => {
+    window.testAtrasoPorAlvo[alvo] = 1500;
+    window.testRecusaPorAlvo[aqui] = lotado;
+    window.testAntes = testCalls.length;
+    window.testBatida = baterDeNovo();
+    setTimeout(() => voltarParaAEntrada(), 100);
+    setTimeout(() => { window.testHospedou = hospedar(); }, 200);
+  }, [PORTARIA_W2, AQUI_W, LOTADO]);
+  await respondida(AQUI_W);
+  await page.waitForTimeout(100);
+  const daNova = await page.evaluate(([lotado]) => ({
+    escrita: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+    titulo: fraseDeErro(lotado).split('\n')[0],
+  }), [LOTADO]);
+  assert.ok(daNova.escrita !== null && daNova.escrita.startsWith(daNova.titulo),
+    `a pessoa saiu da espera com uma batida no ar e apertou HOSPEDAR AQUI; a entrada nova foi recusada («${daNova.titulo}») ` +
+    `e a linha vermelha ${daNova.escrita === null ? 'ficou calada' : `disse «${daNova.escrita}»`}: a batida no ar calou a falha de outra tentativa, sem tela e sem registro`);
+  // A batida volta depois, já substituída: calada na tela (W2), no registro.
+  await respondida(PORTARIA_W2);
+  await page.evaluate(() => testBatida);
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.getElementById('tela-auth').hidden), true,
+    'a batida que voltou depois de a pessoa sair da espera e entrar por outro caminho reabriu a espera');
+  assert.ok((await page.evaluate(() => $('boot-erro').textContent)).startsWith(daNova.titulo),
+    'a batida que voltou depois tirou da linha vermelha a recusa da entrada nova');
+  assert.deepEqual((await noRegistro(PORTARIA_W2)).map(([nivel]) => nivel), ['aviso'],
+    `a batida que voltou depois de outra tentativa começar não deixou uma linha (e uma só) no seele.log: ${JSON.stringify(await noRegistro(PORTARIA_W2))}`);
+  await page.evaluate(() => { if (!document.getElementById('porta').hidden) fecharPorta(); return ejetar(); });
+
+  // ---- 2. Só a batida: a pessoa sai da espera e não faz mais nada. A batida
+  // volta calada na tela — a espera foi largada de propósito —, e no registro.
+  await abrirAEspera();
+  await page.evaluate((alvo) => {
+    window.testAtrasoPorAlvo[alvo] = 600;
+    window.testAntes = testCalls.length;
+    window.testBatida = baterDeNovo();
+    setTimeout(() => voltarParaAEntrada(), 100);
+  }, PORTARIA_W2);
+  await respondida(PORTARIA_W2);
+  await page.evaluate(() => testBatida);
+  await page.waitForTimeout(100);
+  const calada = await page.evaluate(() => ({
+    espera: !document.getElementById('tela-auth').hidden,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+  }));
+  assert.deepEqual(calada, { espera: false, linha: null },
+    `a batida que voltou depois de a pessoa sair da espera falou na tela: ${JSON.stringify(calada)}`);
+  const daBatida = await noRegistro(PORTARIA_W2);
+  assert.deepEqual(daBatida.map(([nivel]) => nivel), ['aviso'],
+    `a batida que voltou depois de a pessoa sair da espera foi calada na tela sem deixar uma linha (e uma só) no seele.log: ${JSON.stringify(daBatida)}`);
+  assert.ok(daBatida[0][1].includes('AdmissionPending'),
+    `a linha da batida calada não diz o motivo: ${JSON.stringify(daBatida)}`);
+
+  assert.deepEqual(erros, [], 'a cena da batida da espera do lote W2 lançou erro na página');
+  await page.close();
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -1432,6 +1566,7 @@ async function oConectarTemDono(browser, porta) {
     await oApelidoTomadoNaoPerdeATentativa(browser, server.address().port);
     await aTentativaSubstituidaNaoFala(browser, server.address().port);
     await oConectarTemDono(browser, server.address().port);
+    await aBatidaDaEsperaSoCalaASiMesma(browser, server.address().port);
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
@@ -1445,5 +1580,6 @@ async function oConectarTemDono(browser, porta) {
     console.log('lote W2: a recusa de uma tentativa que outra substituiu não fala na entrada nem na espera, e vai ao seele.log');
     console.log('lote W2: a frase dos MODs manda entrar de novo, e entrar de novo abre a pergunta');
     console.log('lote W2: a tentativa substituída não apaga o CONECTAR, não pergunta o nome nem chama o connect, e conta ao seele.log que desistiu');
+    console.log('lote W2: a batida da espera só cala a si mesma, e conta ao seele.log; a falha de outra tentativa fala na linha vermelha');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

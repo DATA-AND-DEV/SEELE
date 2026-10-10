@@ -454,7 +454,7 @@ async function conectar(alvo, apelido, credencial) {
       );
     } else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
-    } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
+    } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "", esta)) {
       erro.hidden = false;
       // O apelido que esta tentativa mandou, para a recusa por nome tomado
       // poder dizer **qual** nome foi recusado, e de onde veio a impressão,

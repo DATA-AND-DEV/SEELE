@@ -547,8 +547,11 @@ function tituloDaFrase(frase) {
  * desta espera, e um `AdmissionPending` dela abria esta tela por cima da
  * sessão em que a pessoa já estava. «Venha de onde vier», acima, é de onde
  * vier a tentativa mais nova.
+ *
+ * `tentativa` é o número da tentativa desta falha (`esta`, em `conectar`):
+ * é ele que diz se a falha é da batida desta tela. Ver `batendoDaEspera`.
  */
-function levarParaAEspera(falha, endereco) {
+function levarParaAEspera(falha, endereco, tentativa) {
   const tela = $("tela-auth");
   // Quem saiu pela porta enquanto uma batida estava no ar levou a espera junto.
   // Reabrir esta tela por cima da entrada seria arrancar a pessoa do lugar em
@@ -558,7 +561,23 @@ function levarParaAEspera(falha, endereco) {
   // A corrida existia antes e era preciso apertar dois botões seguidos para
   // vê-la. Agora a batida parte de um relógio, então ela pode acontecer com a
   // pessoa apertando um botão só, e a culpa deixou de poder ser dela.
-  if (tela.hidden && batendoDaEspera) return true;
+  //
+  // **Só a falha da própria batida** (lote W2, rodada 2 da revisão, M1). A
+  // bandeira era um sim, e calava qualquer falha que chegasse com uma batida no
+  // ar: quem saía pela porta e apertava HOSPEDAR AQUI, que não fica apagado,
+  // tinha a recusa da entrada nova calada, sem tela e sem registro (medido
+  // pela revisão, e igual na base). Agora ela guarda o número da tentativa da
+  // batida, e a falha de outra tentativa segue para a linha vermelha. **E a da
+  // batida não some sem rastro**: vai ao `seele.log`, como aviso.
+  if (tela.hidden && batendoDaEspera !== null && batendoDaEspera === tentativa) {
+    const dito = falha instanceof Error ? String(falha) : JSON.stringify(falha);
+    registrarNoAnfitriao(
+      "espera",
+      `a batida da espera a ${endereco || AUSENTE} voltou depois que a pessoa saiu da espera, e a tela não a mostra: ${dito}`,
+      "aviso",
+    );
+    return true;
+  }
 
   const naEspera = !tela.hidden && tela.dataset.modo === "espera";
   const razao = falha?.Refused?.reason;
@@ -657,12 +676,15 @@ let faltam = 0;
 let esperando = false;
 
 /**
- * Se a batida em curso partiu desta tela, e não do formulário da entrada.
+ * O número da tentativa que esta tela mandou bater, enquanto ela está no ar,
+ * ou `null`.
  *
  * Só serve para uma coisa: saber, quando a resposta chega, se a tela que a
- * pediu ainda está na frente.
+ * pediu ainda está na frente. **Um número, e não um sim** (lote W2, rodada 2
+ * da revisão): com um sim, a falha de qualquer outra tentativa que voltasse
+ * com a batida no ar era tomada por ela e calada. Ver `levarParaAEspera`.
  */
-let batendoDaEspera = false;
+let batendoDaEspera = null;
 
 /**
  * Para de contar e apaga a contagem da tela.
@@ -756,11 +778,18 @@ function alguemOlhando() {
  */
 async function baterDeNovo() {
   registrar("BATENDO DE NOVO", "apagado");
-  batendoDaEspera = true;
+  // **O número da batida** é o que `conectar` conta antes da primeira espera
+  // (`++tentativas`, cobrado pelo guarda da credencial): ele já está em
+  // `tentativas` quando a chamada devolve a promessa, e a resposta só chega
+  // depois. Sem alvo, `conectar` volta sem contar, e não há batida a seguir.
+  const antes = tentativas;
+  const batida = conectar();
+  const esta = tentativas !== antes ? tentativas : null;
+  batendoDaEspera = esta;
   try {
-    await conectar();
+    await batida;
   } finally {
-    batendoDaEspera = false;
+    if (batendoDaEspera === esta) batendoDaEspera = null;
   }
 }
 
