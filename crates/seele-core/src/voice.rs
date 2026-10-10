@@ -2588,6 +2588,151 @@ mod relogio_gravado {
 }
 
 #[cfg(test)]
+mod fontes_gravadas {
+    //! **A tabela de quem fala numa sequência fixa de chegadas, gravada antes de
+    //! sair do laço** (Tarefa 3.3 da F4, combinado com a orquestradora em
+    //! 09/10/2026).
+    //!
+    //! O `pipeline` separa o que chega por fonte: uma por SSRC, criada na
+    //! primeira chegada (se o decodificador abre), o próprio SSRC jogado fora,
+    //! e quem calou 30 s esquecido. Este teste grava o que ele faz numa
+    //! sequência fixa, com o relógio passado por argumento: sem esperar 30 s
+    //! de parede.
+    //!
+    //! **Quem produz** é [`produzir`], que repete as instruções da tabela do
+    //! laço; [`a_replica_e_o_laco_de_hoje`] confere que cada uma está no
+    //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando a
+    //! tabela sair do laço: muda só quem produz.
+
+    use super::SILENCIO_ATE_ESQUECER_MS;
+
+    const EU: u32 = 5;
+    const ANA: u32 = 7;
+    const BIA: u32 = 9;
+    const SEM_DECODIFICADOR: u32 = 13;
+
+    /// O que acontece com a tabela.
+    enum Evento {
+        /// Um quadro de `ssrc` chegou em `ms`.
+        Chega(u32, f64),
+        /// O laço passa pela limpeza em `ms`.
+        Limpa(f64),
+    }
+
+    /// Depois de cada evento, quem está na tabela, em ordem; e, no fim, quem
+    /// foi criado, em ordem.
+    ///
+    /// As instruções da tabela do `pipeline`, na ordem dele. O decodificador
+    /// de `SEM_DECODIFICADOR` não abre.
+    fn produzir(eventos: &[Evento]) -> (Vec<Vec<u32>>, Vec<u32>) {
+        struct Source {
+            ssrc: u32,
+            ultimo_ms: f64,
+        }
+        let ssrc = EU;
+        let mut sources: Vec<Source> = Vec::new();
+        let mut criadas = Vec::new();
+        let mut depois = Vec::new();
+        for evento in eventos {
+            match *evento {
+                Evento::Chega(chegou, arrival_ms) => 'chegada: {
+                    if chegou == ssrc {
+                        break 'chegada;
+                    }
+                    let index = match sources.iter().position(|s| s.ssrc == chegou) {
+                        Some(index) => index,
+                        None => {
+                            if chegou == SEM_DECODIFICADOR {
+                                break 'chegada;
+                            }
+                            criadas.push(chegou);
+                            sources.push(Source {
+                                ssrc: chegou,
+                                ultimo_ms: arrival_ms,
+                            });
+                            sources.len() - 1
+                        }
+                    };
+                    if let Some(source) = sources.get_mut(index) {
+                        source.ultimo_ms = arrival_ms;
+                    }
+                }
+                Evento::Limpa(agora_ms) => {
+                    sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);
+                }
+            }
+            depois.push(sources.iter().map(|fonte| fonte.ssrc).collect());
+        }
+        (depois, criadas)
+    }
+
+    /// **A sequência fixa de chegadas, e a tabela depois de cada uma.**
+    #[test]
+    fn a_tabela_de_quem_fala_numa_sequencia_fixa() {
+        let (depois, criadas) = produzir(&[
+            Evento::Chega(ANA, 0.0),
+            Evento::Chega(BIA, 10.0),
+            // A própria voz voltando: não é de ninguém para tocar.
+            Evento::Chega(EU, 20.0),
+            Evento::Chega(ANA, 1_000.0),
+            // A Bia calou 29 995 ms: ainda fica.
+            Evento::Limpa(30_005.0),
+            // Calou 30 010 ms: é esquecida. A Ana, que falou depois, fica.
+            Evento::Limpa(30_020.0),
+            // A Bia volta, e é criada de novo.
+            Evento::Chega(BIA, 30_030.0),
+            // Um decodificador que não abre não cria fonte nenhuma.
+            Evento::Chega(SEM_DECODIFICADOR, 30_040.0),
+            // A Ana calou 30 005 ms.
+            Evento::Limpa(31_005.0),
+        ]);
+        assert_eq!(
+            depois,
+            [
+                vec![ANA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![BIA],
+            ],
+            "a tabela de quem fala mudou na sequência fixa"
+        );
+        assert_eq!(criadas, [ANA, BIA, BIA], "as fontes criadas mudaram");
+    }
+
+    /// **A réplica é o laço de hoje.** Cada instrução da tabela que
+    /// [`produzir`] repete está no `pipeline`, com o mesmo texto.
+    #[test]
+    fn a_replica_e_o_laco_de_hoje() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        for instrucao in [
+            "if header.ssrc == ssrc.get() {",
+            "let index = match sources.iter().position(|s| s.ssrc == header.ssrc) {",
+            "let Ok(decoder) = VoiceDecoder::new() else {",
+            "sources.len() - 1",
+            "source.ultimo_ms = arrival_ms;",
+            "sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);",
+        ] {
+            assert!(
+                laco.contains(instrucao),
+                "o `pipeline` não tem mais `{instrucao}`"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
 
     /// O laço de áudio conduz o acompanhamento do aparelho a cada volta.
