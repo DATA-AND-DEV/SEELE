@@ -10580,10 +10580,15 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
 ///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
 ///    ela sai.
-/// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
-///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
-///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
-///    reconexão que a levasse gastaria de novo o convite que a entrada gastou.
+/// 3. **Só três chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador e a volta que aceita os MODs. O
+///    RECONECTAR, a batida da espera, o hospedar e a troca de servidor não
+///    passam nenhuma — uma reconexão que a passasse gastaria de novo o convite
+///    que a entrada gastou. Desde o lote W, `conectar` anexa por conta própria
+///    a credencial que um apelido tomado deixou (`recusaDoApelido`), quando o
+///    alvo é o mesmo; essas chamadas sem argumento também a recebem nesse caso.
+///    Ela nunca é um convite gasto: só fica guardada depois de uma recusa que
+///    não gastou nada, e toda tentativa a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
 ///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
 ///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
@@ -10717,7 +10722,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só três chamadas de `conectar` levam credencial.
+    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
