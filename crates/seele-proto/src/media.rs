@@ -293,6 +293,14 @@ mod tests {
     /// byte 1, e quem ouve o lê (achado da M3 da API 6, 10/10/2026).
     #[test]
     fn o_encode_grava_sempre_o_numero_do_layout() {
+        // O guarda só mede alguma coisa com um número que não é o do layout:
+        // no dia em que os dois coincidirem, ele passaria sem medir nada
+        // (nota da F1 na revisão).
+        assert_ne!(
+            crate::PROTOCOL_VERSION,
+            MEDIA_HEADER_VERSION,
+            "o guarda precisa de um número que não é o do layout"
+        );
         let cabecalho = MediaHeader {
             version: crate::PROTOCOL_VERSION,
             ssrc: 7,
