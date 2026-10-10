@@ -1526,6 +1526,291 @@ async fn connect<R: tauri::Runtime>(
     })
 }
 
+/// **A entrada velha que chega tarde** (pendência 58, item 54; lote E54 da F5).
+///
+/// Duas tentativas passam pelo `AlreadyConnected` do começo de [`connect`] antes
+/// de qualquer uma terminar: o HOSPEDAR AQUI fica aceso enquanto um `connect`
+/// anda. A velha é lenta; a nova entra; a velha entra depois. Este módulo mede,
+/// com dois servidores de verdade em porta zero e o `connect` de verdade (pelo
+/// runtime falso do Tauri), qual conexão fica no slot da [`Session`] e qual
+/// servidor recebe a mensagem que a pessoa manda em seguida.
+///
+/// A velha fica lenta pelo banco do servidor dela: o aperto de mão do
+/// servidor pega o cadeado do banco antes de responder, e o teste o segura até
+/// a nova ter entrado. A ordem é a do cenário, e não a de um relógio.
+///
+/// **Medido na base** (`b101e385`, com o `connect` genérico de `ecc3d9b5`): a
+/// velha devolvia `Ok(Entrada { geracao: 1 })` com a geração de pé em 2, o
+/// slot ficava com o servidor velho, a mensagem ia a ele, e a conexão da nova
+/// era solta e desligada calada — nenhum `Ended` chegava à janela, e a pessoa
+/// sumia da lista do servidor novo.
+#[cfg(test)]
+mod a_entrada_velha_que_chega_tarde {
+    use super::{connect, send_message, Session};
+    use seele_server::persistence::Location;
+    use seele_server::{Daemon, ServerConfig};
+    use std::net::SocketAddr;
+    use std::sync::{Arc, OnceLock};
+    use std::time::Duration;
+    use tauri::test::{mock_builder, mock_context, noop_assets, MockRuntime};
+    use tauri::{AppHandle, Manager};
+
+    /// A casa do app neste teste: identidade e pinos numa pasta temporária,
+    /// e não na de quem roda a bateria. Uma só para o processo inteiro, porque
+    /// `SEELE_HOME` é do processo.
+    fn casa() -> &'static std::path::Path {
+        static CASA: OnceLock<tempfile::TempDir> = OnceLock::new();
+        let pasta = CASA
+            .get_or_init(|| tempfile::tempdir().expect("a pasta temporária não abriu"))
+            .path();
+        std::env::set_var("SEELE_HOME", pasta);
+        pasta
+    }
+
+    /// Um servidor de verdade, em porta zero e banco em memória.
+    async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
+        let config = ServerConfig {
+            name: nome.into(),
+            listen: SocketAddr::from(([127, 0, 0, 1], 0)),
+            database: Location::Memory,
+            ..ServerConfig::default()
+        };
+        let servidor = Arc::new(Daemon::bind(config).await.expect("o servidor não subiu"));
+        let endereco = servidor
+            .local_addr()
+            .expect("o servidor não disse o endereço");
+        let aceitando = Arc::clone(&servidor);
+        tokio::spawn(async move {
+            let _ = aceitando.run().await;
+        });
+        (endereco, servidor)
+    }
+
+    /// O app, com o runtime falso. Vazado: o `connect` corre numa tarefa
+    /// própria, e o `State` que ele recebe empresta do app.
+    fn app() -> &'static AppHandle<MockRuntime> {
+        let app = mock_builder()
+            .manage(Session::default())
+            .build(mock_context(noop_assets()))
+            .expect("o app falso não montou");
+        let handle = app.handle().clone();
+        Box::leak(Box::new(app));
+        Box::leak(Box::new(handle))
+    }
+
+    /// Quem recebeu `corpo`, entre os servidores dados, esperando até `prazo`.
+    async fn quem_recebeu(
+        ouvidos: &mut [(
+            &str,
+            tokio::sync::broadcast::Receiver<seele_server::server::Event>,
+        )],
+        corpo: &str,
+        prazo: Duration,
+    ) -> Vec<String> {
+        let fim = tokio::time::Instant::now() + prazo;
+        let mut receberam = Vec::new();
+        while tokio::time::Instant::now() < fim {
+            for (nome, ouvido) in ouvidos.iter_mut() {
+                while let Ok(evento) = ouvido.try_recv() {
+                    if let seele_server::server::Event::MessagePosted(mensagem) = evento {
+                        if mensagem.body == corpo && !receberam.contains(&(*nome).to_owned()) {
+                            receberam.push((*nome).to_owned());
+                        }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        receberam
+    }
+
+    /// Quantos estão presentes no servidor, esperando até `prazo` pelo número
+    /// que se espera.
+    async fn presentes(servidor: &Daemon, espera: usize, prazo: Duration) -> usize {
+        let fim = tokio::time::Instant::now() + prazo;
+        loop {
+            let agora = servidor.server().presentes.lock().await.todos().len();
+            if agora == espera || tokio::time::Instant::now() >= fim {
+                return agora;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// O cenário inteiro, do começo da velha à mensagem: o que ficou errado.
+    async fn a_velha_termina_depois_da_nova() -> Vec<String> {
+        casa();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+
+        // A velha sai primeiro e fica presa no aperto de mão do servidor dela.
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = tokio::spawn(connect(
+            app.clone(),
+            app.state::<Session>(),
+            velho.to_string(),
+            "velha".to_owned(),
+            false,
+            None,
+        ));
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !velha.is_finished(),
+            "a tentativa velha terminou antes da hora"
+        );
+
+        // A nova entra, inteira, com a velha ainda andando.
+        let nova = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                novo.to_string(),
+                "nova".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa nova não voltou")
+        .map_err(|falha| format!("{falha:?}"))
+        .expect("a tentativa nova não entrou");
+        assert_eq!(nova.geracao, 2, "a tentativa nova não abriu a geração dois");
+        let canal = nova
+            .snapshot
+            .channels
+            .first()
+            .map(|canal| canal.id)
+            .expect("o servidor novo não tem canal nenhum");
+
+        // Solta a velha, e ela termina depois da nova.
+        drop(trava);
+        let velha = tokio::time::timeout(Duration::from_secs(10), velha)
+            .await
+            .expect("a tentativa velha não voltou")
+            .expect("a tarefa da tentativa velha caiu");
+
+        let mut vermelhos = Vec::new();
+        match &velha {
+            Ok(entrada) => vermelhos.push(format!(
+                "a tentativa velha voltou como entrada (geração {}), depois de a nova ter entrado",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da tentativa velha não diz que ela foi substituída, e a janela \
+                         não tem como calá-la: {dita}"
+                    ));
+                }
+            }
+        }
+        let qual = |impressao: Option<&str>| match impressao {
+            Some(i) if i == servidor_novo.fingerprint() => "o servidor novo",
+            Some(i) if i == servidor_velho.fingerprint() => "o servidor velho",
+            Some(_) => "um servidor desconhecido",
+            None => "nenhum",
+        };
+        let no_slot = sessao
+            .connection()
+            .ok()
+            .and_then(|conexao| conexao.impressao_do_servidor());
+        if qual(no_slot.as_deref()) != "o servidor novo" {
+            vermelhos.push(format!(
+                "o slot da sessão ficou com {}, e não com a conexão da nova",
+                qual(no_slot.as_deref())
+            ));
+        }
+        if sessao.geracao() != nova.geracao {
+            vermelhos.push(format!(
+                "a geração de pé é {}, e não a da nova ({})",
+                sessao.geracao(),
+                nova.geracao
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.as_deref() != Some(novo.to_string().as_str()) {
+            vermelhos.push(format!(
+                "o endereço da sessão é {onde:?}, e não o do servidor novo ({novo})"
+            ));
+        }
+
+        // A mensagem que a pessoa manda em seguida: qual servidor a recebe.
+        let mut ouvidos = [
+            (
+                "o servidor velho",
+                servidor_velho.server().events.subscribe(),
+            ),
+            ("o servidor novo", servidor_novo.server().events.subscribe()),
+        ];
+        let corpo = "para onde eu vou?";
+        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
+        }
+        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
+        if receberam != ["o servidor novo"] {
+            vermelhos.push(format!(
+                "a mensagem mandada em seguida chegou a {receberam:?}, e não só ao servidor novo"
+            ));
+        }
+
+        // E a conexão da velha não fica pendurada no servidor que a pessoa
+        // deixou, nem a da nova sai do servidor em que ela está.
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a conexão da velha continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
+        if no_novo != 1 {
+            vermelhos.push(format!(
+                "a pessoa não está presente no servidor novo ({no_novo})"
+            ));
+        }
+        vermelhos
+    }
+
+    /// O cenário, com o `seele.log` capturado: a linha da velha descartada
+    /// sai na thread do teste, que é a do runtime em que o `connect` corre.
+    #[test]
+    fn a_velha_que_entra_depois_da_nova_nao_toma_a_conexao() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("o runtime do teste não subiu");
+        let (mut vermelhos, rastro) =
+            crate::rastro_de_teste::capturar(|| runtime.block_on(a_velha_termina_depois_da_nova()));
+        let linha = rastro
+            .lines()
+            .find(|linha| linha.contains("substituída") && linha.contains(" WARN "));
+        if linha.is_none() {
+            vermelhos.push(
+                "o seele.log não tem uma linha WARN dizendo que a entrada substituída foi \
+                 descartada"
+                    .to_owned(),
+            );
+        }
+        assert!(
+            vermelhos.is_empty(),
+            "a entrada velha que chegou tarde tomou a sessão nova:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+}
+
 /// As hospedagens deste app (Plano 2, spec de 23/09, «Hospedagens»): o
 /// servidor guardado, que a pessoa sobe com HOSPEDAR, e a sala pessoal.
 ///
