@@ -2218,9 +2218,38 @@ const MEDIDAS_DA_API = Object.freeze({
     mono: { "--seele-mono": 'var(--seele-pilha-mono)' },
     sans: { "--seele-mono": 'var(--seele-pilha-sans)' },
   },
+  // **O modo** (rascunho da API 6, §9; tarefa 17i, item 2): o `color-scheme`
+  // da sessão — as barras de rolagem e os controles nativos claros ou escuros.
+  // Tem de concordar com o fundo (`modoDoFundo`), ou é recusado: um modo claro
+  // sobre fundo escuro pinta controles nativos que somem nele.
+  modo: {
+    claro: { "color-scheme": "light" },
+    escuro: { "color-scheme": "dark" },
+  },
 });
 
 const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
+
+/** WCAG 2.1: a luminância relativa de uma cor `#rrggbb`, de 0 a 1. */
+function luminanciaRelativa(cor) {
+  const canais = [1, 3, 5].map((i) => {
+    const c = parseInt(cor.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
+}
+
+/**
+ * **O modo que um fundo pede**: `claro` de 0,18 de luminância para cima,
+ * `escuro` abaixo; sem fundo no tema, o do produto, que é escuro. Espelho de
+ * `seele_proto::mods::modo_do_fundo`, e as duas cortam no mesmo lugar nos
+ * casos vizinhos do limiar de `chaves-do-tema.json` (0,1778 e 0,1811).
+ */
+const LUMINANCIA_DO_FUNDO_CLARO = 0.18;
+function modoDoFundo(fundo) {
+  if (fundo === undefined) return "escuro";
+  return luminanciaRelativa(fundo) >= LUMINANCIA_DO_FUNDO_CLARO ? "claro" : "escuro";
+}
 
 /**
  * O tema que um MOD pede, aplicado **ao contêiner da sessão** — ADR 0049.
@@ -2317,6 +2346,18 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
       if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
         throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
+      }
+      // O modo concorda com o fundo, na vez dele: um fundo errado já foi
+      // recusado, porque vem antes na ordem alfabética.
+      if (nome === "modo") {
+        const fundo = Object.hasOwn(valores, "fundo") ? valores.fundo : undefined;
+        const pede = modoDoFundo(fundo);
+        if (valor !== pede) {
+          throw new Error(
+            `«modo» tem de ser «${pede}» para ${fundo === undefined ? "o fundo do produto" : `o fundo ${fundo}`}, `
+            + `e veio «${valor}»`,
+          );
+        }
       }
       pedido.set(nome, valor);
       continue;
@@ -2838,14 +2879,7 @@ function fraseDoPar({ frente, fundo, razao, piso }) {
 
 /** WCAG 2.1: a razão de contraste entre duas cores `#rrggbb`. */
 function contrasteEntre(a, b) {
-  const luz = (cor) => {
-    const canais = [1, 3, 5].map((i) => {
-      const c = parseInt(cor.slice(i, i + 2), 16) / 255;
-      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-    });
-    return 0.2126 * canais[0] + 0.7152 * canais[1] + 0.0722 * canais[2];
-  };
-  const [claro, escuro] = [luz(a), luz(b)].sort((x, y) => y - x);
+  const [claro, escuro] = [luminanciaRelativa(a), luminanciaRelativa(b)].sort((x, y) => y - x);
   return (claro + 0.05) / (escuro + 0.05);
 }
 

@@ -46,6 +46,8 @@ vm.runInContext(
     "const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;",
     "const TEMA_DA_API = Object.freeze({ fundo: '--seele-negro-absoluto', texto: '--seele-osso', acento: '--seele-laranja-nerv', borda: '--seele-linha', painel: '--seele-negro-painel', apagado: '--seele-rotulo-painel' });",
     bloco("const PARES_DO_TEMA", "function tonsDoTema("),
+    // A luminância mora numa função só desde a 17i (o `modo` a usa também).
+    "function luminanciaRelativa(cor) {" + base.split("function luminanciaRelativa(cor) {")[1].split("\n}\n")[0] + "\n}",
     "function contrasteEntre(a, b) {" + base.split("function contrasteEntre(a, b) {")[1].split("\n}\n")[0] + "\n}",
     "globalThis.__api = { tonsDoTema, contrasteEntre, oklabDe };",
   ].join("\n"),

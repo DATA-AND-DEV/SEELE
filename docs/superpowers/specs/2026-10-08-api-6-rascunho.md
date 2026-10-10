@@ -1298,7 +1298,7 @@ Com a recomendação do ESTILO, que adoto:
 
 | item | onde |
 |---|---|
-| `modo: 'claro' \| 'escuro'` | **6** |
+| `modo: 'claro' \| 'escuro'` | **6** [c, 17i, item 2: escreve o `color-scheme` da sessão; recusado como `valor-invalido`, com a `chave`, quando discorda do fundo — claro de 0,18 de luminância relativa para cima, escuro abaixo; sem `fundo` no tema, o do produto, que é escuro; nas duas pontas, pelo vetor `chaves-do-tema.json`, com os vizinhos do limiar, 0,1778 e 0,1811] |
 | a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **6** |
 | tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x |
 | fundo da sessão por mídia | **6 se a M3 com a API 6 o medir no iPhone antes do congelamento** (tarefa 11); senão, **7** |

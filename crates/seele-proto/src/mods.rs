@@ -198,12 +198,50 @@ pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[
         FormaDoValorDoTema::Escolha(&["compacta", "confortavel"]),
     ),
     ("fonte", FormaDoValorDoTema::Escolha(&["mono", "sans"])),
+    // **O modo** (tarefa 17i, item 2): o `color-scheme` da sessão, que tem de
+    // concordar com o fundo — ver [`modo_do_fundo`].
+    ("modo", FormaDoValorDoTema::Escolha(&["claro", "escuro"])),
 ];
+
+/// **A luminância a partir da qual um fundo é claro** (rascunho da API 6, §9;
+/// tarefa 17i): a relativa da WCAG 2.1, a mesma conta de `contrasteEntre` na
+/// casca. Num fundo de 0,18 para cima, o texto escuro tem mais contraste que o
+/// claro.
+pub const LUMINANCIA_DO_FUNDO_CLARO: f64 = 0.18;
+
+/// **O modo que um fundo `#rrggbb` pede**: `"claro"` de
+/// [`LUMINANCIA_DO_FUNDO_CLARO`] para cima, `"escuro"` abaixo. Sem fundo no
+/// tema, o fundo é o do produto, que é escuro.
+///
+/// `None` para o que não é uma cor: quem confere a forma do fundo é a tabela,
+/// e ele vem antes do modo na ordem alfabética.
+#[must_use]
+pub fn modo_do_fundo(fundo: Option<&str>) -> Option<&'static str> {
+    let Some(fundo) = fundo else {
+        return Some("escuro");
+    };
+    let hex = fundo.strip_prefix('#').filter(|hex| hex.len() == 6)?;
+    let canal = |i: usize| -> Option<f64> {
+        let c = f64::from(u8::from_str_radix(hex.get(i..i + 2)?, 16).ok()?) / 255.0;
+        Some(if c <= 0.039_28 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        })
+    };
+    let luz = 0.2126 * canal(0)? + 0.7152 * canal(2)? + 0.0722 * canal(4)?;
+    Some(if luz >= LUMINANCIA_DO_FUNDO_CLARO {
+        "claro"
+    } else {
+        "escuro"
+    })
+}
 
 /// **Por que um tema não passa pela tabela**, com a chave, ou `None`.
 ///
 /// `chave-desconhecida`: o nome não está em `CHAVES_DO_TEMA`.
-/// `valor-invalido`: está, e o valor não tem a forma dele. Com mais de uma
+/// `valor-invalido`: está, e o valor não tem a forma dele — ou é o `modo`, e
+/// discorda do fundo ([`modo_do_fundo`]). Com mais de uma
 /// chave errada, vale a primeira **em ordem alfabética** (a dos bytes UTF-8,
 /// que é a dos pontos de código), e não a primeira que o MOD escreveu: o
 /// `serde_json` deste workspace guarda o objeto num `BTreeMap`. A casca ordena
@@ -216,6 +254,15 @@ pub fn recusa_das_chaves_do_tema(
         match CHAVES_DO_TEMA.iter().find(|(nome, _)| nome == chave) {
             None => return Some(("chave-desconhecida", chave.clone())),
             Some((_, forma)) if !forma.aceita(valor) => {
+                return Some(("valor-invalido", chave.clone()));
+            }
+            // O modo que discorda do fundo, na vez dele: o fundo, se errado,
+            // já foi recusado, porque vem antes na ordem alfabética.
+            Some(_)
+                if chave == "modo"
+                    && valor.as_str()
+                        != modo_do_fundo(tema.get("fundo").and_then(serde_json::Value::as_str)) =>
+            {
                 return Some(("valor-invalido", chave.clone()));
             }
             Some(_) => {}

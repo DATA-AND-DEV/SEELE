@@ -538,8 +538,10 @@
       "acento",
       "borda",
       "densidade",
-      "fonte"
+      "fonte",
+      "modo"
     ],
+    "modo": "'claro' | 'escuro': o color-scheme da sessão; tem de concordar com o fundo (claro de 0,18 de luminância relativa para cima; sem fundo no tema, o do produto, escuro), senão valor-invalido com a chave",
     "derivados-pelo-produto": {
       "nomes": [
         "acentoFraco",
@@ -573,7 +575,7 @@
       "estado": "pisos de partida; os números finais saem da tarefa 17-B3"
     },
     "na-6": [
-      "modo: 'claro' | 'escuro'",
+      "modo: 'claro' | 'escuro' (feito)",
       "a densidade cobrindo a escala --seele-e*",
       "tokens por região, com o destino de cada região no celular"
     ],

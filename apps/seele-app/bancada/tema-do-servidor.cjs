@@ -38,6 +38,10 @@
 //    do registro; ela diz quem pinta, oferece «o SEELE desenha» e a volta, e a
 //    troca vale **na hora**, sem outro retrato. O recusado é dito, e o
 //    DIAGNÓSTICO chama o tema do servidor pelo nome, e não de tema da API 3.
+// 10. **O modo** (tarefa 17i, item 2): `modo: 'claro' | 'escuro'` escreve o
+//    `color-scheme` da sessão, e sai com o tema; o que discorda do fundo é
+//    recusado, e o tema não fica. (A conferência, caso a caso, é do vetor
+//    `chaves-do-tema.json`, nas duas pontas.)
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -321,6 +325,20 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await aparencia()).texto, null, 'sem tema do servidor, a linha da aparência ficou');
     await desenharCom(comoVeio);
 
+    // 10. O modo escreve o color-scheme da sessão.
+    const esquema = () => page.evaluate(() => getComputedStyle($('tela-sessao')).colorScheme);
+    assert.equal(await esquema(), 'normal', 'sem modo, a sessão já tinha um color-scheme');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, modo: 'claro' }) });
+    assert.equal(await esquema(), 'light', 'o modo claro não escreveu o color-scheme da sessão');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...PAPEL, modo: 'escuro' }) });
+    assert.equal(await esquema(), 'dark', 'o modo escuro não escreveu o color-scheme da sessão');
+    await desenharCom(comoVeio);
+    assert.equal(await esquema(), 'normal', 'o tema sem modo deixou o color-scheme do anterior');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...PAPEL, modo: 'claro' }) });
+    assert.deepEqual(await tokens(), {}, 'um modo claro sobre o fundo escuro foi aplicado');
+    assert.equal(await esquema(), 'normal', 'o modo recusado escreveu o color-scheme');
+    await desenharCom(comoVeio);
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -332,7 +350,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora; e o modo escreve o color-scheme.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
