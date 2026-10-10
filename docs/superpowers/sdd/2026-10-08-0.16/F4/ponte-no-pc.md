@@ -60,7 +60,7 @@ e o motivo ao lado de cada um:
 | `estado_da_porta` | «não hospeda» | chamado sem gesto, na sessão (matriz da F8) |
 | `estou_hospedando` | `false` | a casca pergunta antes de mostrar o que é de quem hospeda |
 | `conjunto_exigido_agora` | `""` | o desktop responde assim a quem não hospeda |
-| `estado_do_servidor` | `{ hospedando: false, … 0, 0 }` | a P12 da F1 (décima integração): a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde a linha |
+| `estado_do_servidor` | `{ hospedando: false, … 0, 0 }` | a P12 da F1 (décima integração): a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde o número |
 
 **`disconnect` é atendido, e não neutro.** Sair da sessão é do navegador também.
 No desktop, ele também derruba a hospedagem; no navegador, não há hospedagem
