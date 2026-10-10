@@ -576,3 +576,23 @@ começar.
   porquê; os 28 roteiros e o G3 da F8 (o desktop igual pixel a pixel no
   Chromium e no WebKit) passaram no `0.16/web` em `792dc2a4`.
 
+## 09/10, noite: a 2.2 liberada, e a medida do retrato
+
+- **A orquestradora liberou a 2.2 e a 3.3**, nesta ordem. Os lotes B, C e D da
+  ponte entram na décima primeira integração; o `index.html` não precisa de
+  commits isolados.
+- **Mapeado** (por um agente de leitura): o `Room` é puro fora de três peças
+  (o `SessionInfo`, num arquivo com o quinn; o `assento.rs`, puro; e o
+  `teto_de_video`, que só os testes chamam). A projeção do `Snapshot` e os
+  tipos dele moram no `seele-ffi` (`lib.rs` e `types.rs`), os arquivos mais
+  disputados com a F5.
+- **Medido no spike** (`3e733d3e`): os números estão no plano (2.2). Uma sala
+  cheia custa 0,11 ms no Chromium e 0,17 ms no Safari do Simulador; o produtor
+  não pesa.
+- **Achado: as chaves do `HashMap` são fixas no navegador**, conferido por um
+  hash de prova igual em duas instâncias do módulo e nos dois motores. Com ids
+  escolhidos pelo servidor, isso é uma porta para deixar a aba quadrática; a
+  proposta é `BTreeMap` nos seis mapas do `Room`.
+- **A proposta de corte foi à orquestradora**, em duas fases (o `seele-core`
+  primeiro; o `seele-ffi` numa janela dela). Esperando a resposta.
+
