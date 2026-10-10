@@ -1160,7 +1160,7 @@ function desenharServidor(snapshot) {
 }
 
 /** O bloco da linha, criado na primeira volta e guardado aqui, sem id. */
-const appsMaisNovos = { bloco: null, frase: null };
+const appsMaisNovos = { bloco: null, corpo: null, texto: null };
 
 /**
  * As mensagens de apps mais novos que o servidor desta janela pulou (a P12).
@@ -1189,19 +1189,33 @@ async function desenharEstadoDoServidor() {
     nome.className = "server-bloco-nome";
     nome.textContent = "VERSÕES DE QUEM ENTRA";
     topo.append(nome);
-    const frase = document.createElement("p");
-    frase.className = "nota";
-    bloco.append(topo, frase);
+    // No corpo, como os outros blocos do painel: direto no bloco, a frase
+    // encostava na borda (1 px, medido no roteiro `apps-mais-novos.js`).
+    const corpo = document.createElement("div");
+    corpo.className = "server-bloco-corpo";
+    bloco.append(topo, corpo);
     $("painel-servidor").append(bloco);
     appsMaisNovos.bloco = bloco;
-    appsMaisNovos.frase = frase;
+    appsMaisNovos.corpo = corpo;
   }
   appsMaisNovos.bloco.hidden = estado?.hospedando !== true;
   if (appsMaisNovos.bloco.hidden) return;
-  appsMaisNovos.frase.textContent = fraseDasMensagensDeAppsMaisNovos(
+  const texto = fraseDasMensagensDeAppsMaisNovos(
     estado.mensagens_desconhecidas,
     estado.sessoes_com_desconhecidas,
   );
+  // A cada meio segundo chega a mesma frase; reescrever o corpo sem mudança
+  // desfaria uma seleção de texto no meio.
+  if (texto === appsMaisNovos.texto) return;
+  appsMaisNovos.texto = texto;
+  // **Um parágrafo por linha da frase.** O número numa, o que fazer na outra:
+  // `.nota` reflui a quebra num espaço, e as duas partes saíam coladas.
+  appsMaisNovos.corpo.replaceChildren(...texto.split("\n").map((parte) => {
+    const paragrafo = document.createElement("p");
+    paragrafo.className = "nota";
+    paragrafo.textContent = parte;
+    return paragrafo;
+  }));
 }
 
 /**
