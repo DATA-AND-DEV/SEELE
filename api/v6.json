@@ -37,7 +37,7 @@
   "reads": {
     "resposta": "ModReply",
     "contexto.pessoa": "PersonId",
-    "contexto.canal": "pedidos::contexto_do_canal",
+    "contexto.canal": "pedidos::executar",
     "contexto.sala": "Occupancy::onde_esta",
     "retrato.eu": "projetarORetrato",
     "retrato.servidor.nome": "projetarORetrato",
@@ -47,7 +47,9 @@
     "retrato.onde": "cascaDoRetrato",
     "retrato.regioes": "cascaDoRetrato",
     "capacidades": "capacidades_da_api",
-    "servidor.contexto": "pedidos::executar"
+    "servidor.contexto": "pedidos::executar",
+    "servidor.dados.uso": "ler_o_quintal",
+    "servidor.dados.teto": "Anfitriao::TETO_DO_QUINTAL"
   },
   "retrato-fica-de-fora": [
     "link_state e link: o veredito de conexão segura é do núcleo",
@@ -95,10 +97,10 @@
     "arquivos.escrever": "arquivos::escrever",
     "arquivos.listar": "arquivos::listar",
     "arquivos.apagar": "arquivos::apagar",
-    "volume.esperar": "volume::esperar",
-    "volume.tamanho": "volume::tamanho",
-    "volume.servir": "volume::servir",
-    "volume.apagar": "volume::apagar"
+    "volume.esperar": "Esperas::registrar",
+    "volume.tamanho": "arquivos::dentro",
+    "volume.servir": "arquivos::dentro",
+    "volume.apagar": "arquivos::apagar"
   },
   "world": {
     "mundo.buscar": "mundo::buscar",
@@ -118,6 +120,8 @@
     "retrato.onde": "computador | celular",
     "retrato.regioes": "as regiões e camadas que existem nesta casca agora",
     "servidor.contexto": "aoPedir(contexto) = { person, channel (id | null), admin, write }; write: no escopo de servidor, a permissão global WriteChannel; no de canal, pode_no_canal(pessoa, canal, Escrita); e o pedido num canal que a pessoa não lê é recusado",
+    "servidor.dados.uso": "dados.uso(): os bytes do quintal, chave mais valor, em UTF-8 — a conta da gravação",
+    "servidor.dados.teto": "dados.teto: o teto da gravação; acima dele, o pedido volta com o erro quintal-cheio",
     "retrato": "SeeleUI.retrato, no lugar de SeeleMods.snapshot",
     "formulario-erros": "a recusa do servidor de volta ao campo — s.formulario.erros({ chave: frase }), um campo ou vários; {} limpa; chave que não é de um campo: chave-desconhecida (tarefa 7, Step 6b)",
     "atualizar-contribuicao": "atualiza uma contribuição de pé, pelo punho (PERFIS R7)",

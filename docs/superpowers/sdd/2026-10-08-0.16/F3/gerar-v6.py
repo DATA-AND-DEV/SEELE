@@ -25,7 +25,7 @@ r = json.load(open(sys.argv[1]), object_pairs_hook=O)
 READS = [
     ("resposta", "ModReply", None),
     ("contexto.pessoa", "PersonId", None),
-    ("contexto.canal", "pedidos::contexto_do_canal", r["reads"]["contexto.canal"]),
+    ("contexto.canal", "pedidos::executar", r["reads"]["contexto.canal"]),
     ("contexto.sala", "Occupancy::onde_esta", r["reads"]["contexto.sala"]),
     ("retrato.eu", "projetarORetrato", "quem usa (de Snapshot::me)"),
     ("retrato.servidor.nome", "projetarORetrato", "o nome do servidor (de Snapshot::server)"),
@@ -37,7 +37,22 @@ READS = [
     ("capacidades", "capacidades_da_api", None),
     ("servidor.contexto", "pedidos::executar", r["reads"]["servidor"]["contexto"]
      if isinstance(r["reads"].get("servidor"), dict) else r["reads"]["servidor.contexto"]),
+    # O orçamento do quintal (pedido da MESA, item 9): a mesma leitura da
+    # gravação, e o teto dela.
+    ("servidor.dados.uso", "ler_o_quintal",
+     "dados.uso(): os bytes do quintal, chave mais valor, em UTF-8 — a conta da gravação"),
+    ("servidor.dados.teto", "Anfitriao::TETO_DO_QUINTAL",
+     "dados.teto: o teto da gravação; acima dele, o pedido volta com o erro quintal-cheio"),
 ]
+# O que cada ligação da metade de servidor de fato chama (`carregar_com_portas`,
+# em `crates/seele-server/src/mods/mod.rs`): o rascunho apontava para
+# `volume::esperar` e afins, que não existem, e passavam pela ocorrência.
+OWN = {
+    "volume.esperar": "Esperas::registrar",
+    "volume.tamanho": "arquivos::dentro",
+    "volume.servir": "arquivos::dentro",
+    "volume.apagar": "arquivos::apagar",
+}
 ACTIONS_NOVOS = {
     "retrato": ("projetarORetrato", "SeeleUI.retrato, no lugar de SeeleMods.snapshot"),
     "formulario-erros": ("SuperficieDeMod::marcarErros", r["actions"]["formulario-erros"].removeprefix("novo: ")),
@@ -71,7 +86,10 @@ for nome, valor in r["actions"].items():
     else:
         actions[nome] = valor
 v6["actions"] = actions
-v6["own"] = r["own"]
+own = O()
+for nome, valor in r["own"].items():
+    own[nome] = OWN.get(nome, valor)
+v6["own"] = own
 world = O()
 for nome, valor in r["world"].items():
     if nome in WORLD_NOVOS:
