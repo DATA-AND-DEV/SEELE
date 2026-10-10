@@ -691,40 +691,14 @@ const SUPRESSAO_PADRAO: u32 = 1_000;
 
 /// A configuração do portão que os controles de agora descrevem. F01.
 ///
-/// Zero em `abertura_dbfs_milesimos` quer dizer «o padrão», e o padrão depende de
-/// a supressão estar ligada. É a decisão central de F01: −60 dBFS só é defensável
-/// com o piso da sala removido, e sem supressão o portão volta a ser a única
-/// defesa contra o ventilador — o argumento que `gate::OPEN_RMS` registra.
-///
-/// # O padrão é um alvo, e a escolha é um número
-///
-/// O padrão vai por [`GateConfig::automatico`]: −60 dBFS passa a ser o **mais
-/// sensível que o portão chega**, e o limiar de verdade é o ruído medido mais
-/// `gate::MARGEM_SOBRE_O_RUIDO_DB`. A auditoria de 22/09/2026 (A03) mediu por que:
-/// como número fixo, −60 dBFS abriu em 200 de 200 quadros de ruído sem fala
-/// nenhuma, porque o residual **depois** da supressão fica em torno de −59 dBFS —
-/// perto de zero decibel de folga.
-///
-/// Um valor escolhido à mão vai por [`GateConfig::de_dbfs`], que é fixo: F01 pede
-/// o ajuste manual, e um ajuste que o produto corrige por cima não é ajuste.
+/// A régua mora em [`GateConfig::dos_controles`], no `seele-voz`, e não aqui: o
+/// teste do microfone e a voz do navegador usam a mesma. O doc dela diz por que
+/// o padrão depende da supressão e por que uma escolha fica fixa.
 fn configuracao_do_portao(controls: &Controls) -> GateConfig {
-    let escolhido = controls.abertura_dbfs_milesimos.load(Ordering::Relaxed);
-    let dbfs = if escolhido == 0 {
-        if controls.supressao.load(Ordering::Relaxed) > 0 {
-            seele_audio::gate::ABERTURA_COM_SUPRESSAO_DBFS
-        } else {
-            seele_audio::gate::ABERTURA_SEM_SUPRESSAO_DBFS
-        }
-    } else {
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "milésimos de decibel cabem exatos num f32 nesta faixa"
-        )]
-        let convertido = escolhido as f32 / 1000.0;
-        // **Fixo**, porque foi escolhido. Ver o doc.
-        return GateConfig::de_dbfs(convertido);
-    };
-    GateConfig::automatico(dbfs)
+    GateConfig::dos_controles(
+        controls.abertura_dbfs_milesimos.load(Ordering::Relaxed),
+        controls.supressao.load(Ordering::Relaxed) > 0,
+    )
 }
 
 /// Põe um pacote de som de tela na fila, trocando de tela se for outra. R17.
