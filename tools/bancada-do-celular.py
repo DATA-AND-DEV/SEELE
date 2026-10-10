@@ -1292,6 +1292,7 @@ SUPERFICIES_DE_MOD = [
     ("a página imersiva", {"id": "pi", "tipo": "pagina", "titulo": "IMERSIVA", "imersiva": True}, ".pagina-de-mod"),
     ("o diálogo", {"id": "d", "tipo": "dialogo", "titulo": "DIÁLOGO DE TESTE"}, ".dialogo-de-mod"),
     ("o aviso", {"id": "a", "tipo": "aviso", "titulo": "AVISO DE TESTE"}, "#avisos-de-mod > *"),
+    ("a folha", {"id": "f", "tipo": "folha", "titulo": "FOLHA DE TESTE"}, "#palco-de-paineis > .folha-de-mod"),
 ]
 
 
@@ -1332,11 +1333,21 @@ def superficies_de_mod(pg: Page) -> list[str]:
             falhas.append(f"{nome} cobre a faixa ou as abas: {visto['superficie']}, e o pé começa em {visto['pe']}")
         if visto["sair"] is not None and visto["sair"] < 44:
             falhas.append(f"a saída de {nome} tem {visto['sair']} de altura, e não 44")
-        if descricao["tipo"] == "aviso" or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
+        if visto["superficie"] is not None and descricao["tipo"] == "folha" and visto["superficie"][2] - visto["superficie"][0] < pg.evaluate("innerWidth") - 1:
+            falhas.append(f"a folha não ocupa a largura toda: {visto['superficie']}")
+        if descricao["tipo"] in ("aviso", "folha") or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
             if not visto["mudo"] or not visto["ajustes"]:
                 falhas.append(f"com {nome} aberta, o MUDO ou AJUSTES não recebe o toque: {visto}")
         pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-fechar', superficie: id })", descricao["id"])
         pg.wait_for_timeout(200)
+    # Uma pilha de folhas: só a de cima aparece, e ela continua acima do pé.
+    for id_ in ("f1", "f2"):
+        pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id, tipo: 'folha', titulo: 'FOLHA ' + id } })", id_)
+    pg.wait_for_timeout(300)
+    pilha = pg.evaluate("""() => [...document.querySelectorAll('#palco-de-paineis > .folha-de-mod')]
+        .filter((f) => f.getClientRects().length > 0 && getComputedStyle(f).display !== 'none').map((f) => f.dataset.superficie)""")
+    if pilha != ["f2"]:
+        falhas.append(f"numa pilha de duas folhas, aparecem {pilha}, e não só a de cima")
     return falhas
 
 
