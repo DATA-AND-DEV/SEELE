@@ -115,6 +115,7 @@ testes).
 | `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |
 | `medidas.json` | os relatos da campanha de base de 08/10 |
 | `medidas-api6.json` | os 24 relatos da campanha da API 6, de 10/10 (commit `6e845e0d`) |
+| `preparar-cartoes.sh` | a `carga-cartoes` na pasta de uma campanha já preparada, sem recompilar o app |
 | `resumir-api6.py` | a tabela da campanha da API 6, contra o `sem-mod` dela, depois de conferir o commit, a interrupção e a compilação |
 | `preparar-api6.sh` | monta a pasta de trabalho da campanha da API 6 |
 | `remendar-api6.py` | os remendos da cópia da medição |
@@ -215,6 +216,40 @@ outras seis (`regioes`, `capas`, `folhas`, `avisos`, `palco`, `tudo`) foram
 medidas com o molde anterior, e o comportamento delas é o mesmo. As novas, na
 campanha: o `dialogo` como `c005c3fb…`, e a `pagina` como `dd585396…`; as
 antigas ficaram em `/tmp/m3-6/pacotes-antigos/`.
+
+**A `carga-cartoes`, a lista de 251 cartões** (pedida pela orquestradora em
+10/10, depois da campanha: o teto de contribuições da 6 esperava a medida da
+lista, e nenhuma variante a fazia). A variante `cartoes` do molde registra um
+`pessoa.cartao` no teto do cartão (64 nós, `substituir`) para cada pessoa do
+retrato, de novo a cada evento `pessoas`, e as 128 contribuições sem alvo do
+teto agregado, cada uma no teto do cartão, em seis pontos. Conferida contra o
+prelúdio da 0.16 (`conferir-carga`): 155 contribuições com o retrato de 27 do
+conferente, maior mensagem de 2,3 KiB, nenhum tropeço. Ela roda **na mesma
+build e na mesma pasta** dos outros cenários, sem recompilar o app, para ser
+lida contra o mesmo `sem-mod`: `preparar-cartoes.sh` troca o roteiro (só se
+a cópia de trabalho for a da campanha), recompila só o exemplo do falante,
+refaz o `ax` e põe **só a variante nova** no cache — as outras ficam como
+foram medidas, e o molde mudado não as alcança.
+
+- **Como os 250 calados entram: no ritmo da portaria, e não com a taxa
+  folgada.** O `taxa.rs` guarda 30 apertos de rajada por endereço, repostos a
+  30 por minuto, e todos saem de 127.0.0.1, como o app. Folgar a taxa pedia
+  remendar o servidor da medição, e o servidor deixaria de ser o dos outros
+  cenários. O `m3-falante --calados <n>` sobe os `n` num processo só (num
+  processo por participante, 250 pesariam na máquina medida): 28 de rajada,
+  um a cada 2,05 s depois, tentando de novo quando recusado, cada um drenando o
+  que chega. São uns 7,6 minutos antes do app (medido com 40: 25 s, nenhuma
+  recusa, nenhuma queda, 40 pessoas no banco). Uma queda vai ao `.out` com o
+  motivo, e um `FellBehind` não passa calado.
+- **O cenário só mede com a lista inteira**: o roteiro conta pela
+  acessibilidade os cartões distintos (`cartão <apelido> · linha 1`) e só
+  segue com os 251; o relato leva `cartoes_na_lista`. O `carga_a_vista` leva o
+  primeiro cartão, o último e a última das 128 sem alvo.
+- **A fundura da acessibilidade**: o `ax textos` passou a aceitar a fundura
+  (60, como sempre, quando não dita). A lista e a linha de uma contribuição
+  dentro de uma mensagem são procuradas a 200. No `carga-regioes`, o relato
+  ganha `conversa.mensagem · linha 1 (fundura 200)`, para «a região montou»
+  ser medida, e não lida do custo em MiB.
 
 **O jitter se lê só nos cenários com voz.** Sem falante não há fonte, e o
 `jitter_do_registro_ms` fica no zero inicial: nos cenários sem voz, o zero não

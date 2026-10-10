@@ -189,7 +189,11 @@ case "escrever":
     if !feito { print("não achei:", alvo); exit(1) }
 case "textos":
     let alvo = a[3]
-    percorrerJanelas(Int32(a[2])!, 60) { e, _ in
+    // A fundura é opcional, 60 como sempre. A carga-cartoes (10/10) pede mais:
+    // a lista com 251 cartões e a linha de uma contribuição dentro de uma
+    // mensagem moram mais fundo, e «não achei» precisa querer dizer «não está».
+    let fundura = a.count > 4 ? Int(a[4])! : 60
+    percorrerJanelas(Int32(a[2])!, fundura) { e, _ in
         if casa(e, alvo) { print(descreve(e)) }
         return false
     }

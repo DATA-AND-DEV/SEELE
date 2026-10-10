@@ -17,6 +17,7 @@
 // | pagina    | uma página imersiva (idem)                                           |
 // | palco     | o `chamada.palco` com uma `tela` de 1024 × 768 (o lado máximo) e as peças que cabem numa mensagem |
 // | tudo      | regioes + capas + folhas + avisos + palco                            |
+// | cartoes   | um `pessoa.cartao` no teto (64 nós) para cada pessoa do retrato — a lista de 251 —, e as 128 contribuições sem alvo do teto agregado, cada uma no teto do cartão |
 //
 // O que cada cenário montou vai ao `seele.log` pela recusa e pelo aviso do
 // produto; o roteiro confere o desenho pela acessibilidade.
@@ -201,6 +202,36 @@ async function montarOPalco() {
   await tentar("palco", () => SeeleUI.contribuicoes.registrar(pedido()));
 }
 
+// ------------------------------------------------------------ os cartões
+// **O teto de contribuições, medido** (a `carga-cartoes`, 10/10): o modelo da 6
+// tira os pontos por alvo do teto agregado. A lista com um cartão de MOD por
+// pessoa, até os 256 alvos por ponto, e as 128 sem alvo, cada uma no teto do
+// cartão. O roteiro abre os 250 calados antes do app, e quem chegar depois
+// também ganha cartão.
+const cartoesRegistrados = new Set();
+async function vestirOsCartoes() {
+  const retrato = await tentar("retrato", () => SeeleUI.retrato());
+  for (const pessoa of retrato?.pessoas ?? []) {
+    const alvo = String(pessoa.id);
+    if (cartoesRegistrados.has(alvo)) continue;
+    cartoesRegistrados.add(alvo);
+    await tentar(`cartão de ${alvo}`, () => SeeleUI.contribuicoes.registrar({
+      ponto: "pessoa.cartao", modo: "substituir", alvo, prioridade: 0,
+      conteudo: NO_TETO_DO_CARTAO(`cartão ${pessoa.apelido}`),
+    }));
+  }
+}
+
+async function encherOAgregado() {
+  const pontos = ["redes", "operador.barra", "compositor", "status.barra", "pessoas.lista", "compositor.ferramentas"];
+  for (let i = 0; i < 128; i += 1) {
+    await tentar(`agregado ${i + 1}`, () => SeeleUI.contribuicoes.registrar({
+      ponto: pontos[i % pontos.length], modo: "adicionar", prioridade: 0,
+      conteudo: NO_TETO_DO_CARTAO(`agregado ${i + 1}`),
+    }));
+  }
+}
+
 // ------------------------------------------------------------- a subida
 (async () => {
   const retrato = await tentar("retrato", () => SeeleUI.retrato());
@@ -218,4 +249,9 @@ async function montarOPalco() {
   if (quer("palco")) await montarOPalco();
   if (CENARIO === "dialogo") await quandoNaSala(abrirODialogo);
   if (CENARIO === "pagina") await quandoNaSala(abrirAPagina);
+  if (CENARIO === "cartoes") {
+    await vestirOsCartoes();
+    SeeleUI.aoEvento((evento) => { if (evento?.nome === "pessoas") vestirOsCartoes(); });
+    await encherOAgregado();
+  }
 })();
