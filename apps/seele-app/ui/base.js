@@ -841,6 +841,11 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
+    // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
+    api: Number(mod.api) || 0,
+    // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
+    imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
     /**
      * Um evento da janela para o MOD.
      *
@@ -880,11 +885,13 @@ function donoDaRegiao(mod, instancia) {
      * cabe numa declaração de região, e o MOD não precisa carregá-la na fila
      * dele para mostrá-la.
      */
-    carregarMidiaDoServidor: async (canal, pedido, campo) => {
+    // `uso` nomeia o lugar em que a imagem vai aparecer (`"capa"`), e o Rust a
+    // reduz a ele e diz quanto ela pesa decodificada (tarefa 6, Step 5).
+    carregarMidiaDoServidor: async (canal, pedido, campo, uso) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
       if (pedido?.transporte === "volume") {
-        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido) });
+        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido), uso });
         if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
         return midia;
       }
@@ -914,7 +921,7 @@ function donoDaRegiao(mod, instancia) {
         if (voltas === PEDACOS_DE_MIDIA - 1) throw new Error("Envio de imagem incompleto.");
         pedidoAtual = { ...pedido, ...resposta.proximo };
       }
-      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64 });
+      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64, uso });
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },
@@ -1235,6 +1242,7 @@ contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
+  if (typeof redesenharCapas === "function") redesenharCapas();
 });
 
 /**
@@ -1248,23 +1256,132 @@ contribuicoesDosMods.aoMudar(() => {
  * `preferenciaConsultadaPara`, a mesma que a gestão de MODs lê.
  */
 function avatarContribuido(pessoaId) {
+  return imagemContribuida("pessoa.avatar", pessoaId)?.uri ?? null;
+}
+
+/**
+ * **A capa de uma pessoa, contribuída por um MOD** (`pessoa.capa`; rascunho da
+ * API 6, §4; tarefa 6). A mesma regra do avatar — a mesma carga, o mesmo
+ * cache, a mesma preferência herdada de `pessoa.cartao` —, com o quadro
+ * estático que o movimento reduzido usa.
+ *
+ * @returns {{ url: string, estatico: string|null } | null}
+ */
+function capaContribuida(pessoaId) {
+  const estado = imagemContribuida("pessoa.capa", pessoaId);
+  return estado?.uri ? { url: estado.uri, estatico: estado.estatico ?? null } : null;
+}
+
+/**
+ * **O bolso das capas de um MOD, em bytes decodificados** (rascunho da API 6,
+ * §4 e §12; tarefa 6, Step 5b): largura × altura × 4 × quadros, como o Rust os
+ * conta depois de reduzir a capa ao lugar dela. 128 MiB é a partida — umas cem
+ * capas paradas, ou uma animada inteira e umas quarenta paradas —, e a M3 mede.
+ */
+const LIMITES_DA_CAPA = Object.freeze({ bytesDecodificados: 128 * 1024 * 1024 });
+
+/**
+ * O que cada imagem de pessoa diz no `midia`, quem a redesenha, e o bolso dela:
+ * o uso que ela nomeia ao Rust, o teto, e o que ela custa nele. **O avatar não
+ * nomeia uso** e conta o arquivo; a capa é reduzida ao lugar dela e conta o
+ * quadro decodificado. Bolsos separados: uma capa não gasta o dos avatares.
+ */
+const IMAGENS_DE_PESSOA = Object.freeze({
+  "pessoa.avatar": {
+    chave: "avatar",
+    uso: undefined,
+    teto: () => LIMITES_DO_CARTAO.bytesDeMidia,
+    custo: (midia) => midia.bytes,
+    redesenhar: () => redesenharAvatares(),
+  },
+  "pessoa.capa": {
+    chave: "capa",
+    uso: "capa",
+    teto: () => LIMITES_DA_CAPA.bytesDecodificados,
+    custo: (midia) => midia.decodificados ?? midia.bytes,
+    redesenhar: () => {
+      if (typeof redesenharCapas === "function") redesenharCapas();
+    },
+  },
+});
+
+/**
+ * **O primeiro quadro de uma imagem**, parado: o que a capa mostra com o
+ * movimento reduzido (rascunho §4). `animation: none` não para um GIF; um
+ * quadro desenhado num `canvas` para. `null` quando o `canvas` não pôde ser lido.
+ */
+function quadroEstatico(imagem) {
+  try {
+    const tela = document.createElement("canvas");
+    tela.width = imagem.naturalWidth;
+    tela.height = imagem.naturalHeight;
+    tela.getContext("2d").drawImage(imagem, 0, 0);
+    // Sem tipo escrito: o padrão do `canvas` é PNG, e o que sai daqui são os
+    // pixels recodificados, e não bytes de alguém com um tipo juntado a eles.
+    return tela.toDataURL();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **A imagem de pessoa que um MOD contribui** — o avatar ou a capa —, com a
+ * carga, o cache por contribuição e a troca do `atualizar`. Devolve o estado
+ * da carga (`{ uri, estatico, situacao, … }`), ou `null` enquanto não há
+ * contribuição ou ela ainda não começou.
+ */
+/**
+ * **A imagem de uma pessoa, citada** por um cartão (`daPessoa`; rascunho da API
+ * 6, §4; tarefa 6, Step 4b; o bloqueio A do PERFIS). A que a contribuição dela
+ * já carregou, decodificou e contou no bolso — por isso `bytes: 0` aqui —, sem
+ * pedido novo. `null` sem contribuição, ou quando ela não carregou. A capa,
+ * com o movimento reduzido, é o quadro parado.
+ *
+ * @returns {Promise<{ papel: string, bytes: number, uri: string } | null>}
+ */
+function imagemCitada(qual, pessoaId) {
+  const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
+  if (!ponto || pessoaId === "" || pessoaId == null) return Promise.resolve(null);
+  // A primeira consulta começa a carga, quando há contribuição; a segunda
+  // devolve o estado dela.
+  const estado = imagemContribuida(ponto, pessoaId) ?? imagemContribuida(ponto, pessoaId);
+  if (!estado) return Promise.resolve(null);
+  const comoMidia = () => {
+    const parada = ponto === "pessoa.capa" && typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const uri = parada ? estado.estatico : estado.uri;
+    return uri ? { papel: "imagem", bytes: 0, uri } : null;
+  };
+  if (estado.situacao !== "carregando") return Promise.resolve(comoMidia());
+  return new Promise((resolve) => {
+    (estado.aoTerminar ??= []).push(() => resolve(comoMidia()));
+  });
+}
+
+function imagemContribuida(ponto, pessoaId) {
+  const imagem = IMAGENS_DE_PESSOA[ponto];
   const preferido = typeof preferenciaConsultadaPara === "function"
-    ? preferenciaConsultadaPara("pessoa.avatar")
+    ? preferenciaConsultadaPara(ponto)
     : "";
   const contribuicao = contribuicoesDosMods.escolherSubstituicao(
-    "pessoa.avatar", String(pessoaId), preferido,
+    ponto, String(pessoaId), preferido,
   ).escolhida;
   if (!contribuicao) return null;
   const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
   if (!dono.podeFalar()) return null;
-  if (contribuicao.retrato) return contribuicao.retrato.uri;
-  const estado = { uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" };
-  contribuicao.retrato = estado;
+  if (contribuicao.retrato) return contribuicao.retrato;
+  const novoRetrato = () => ({ uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" });
+  const estadoInicial = novoRetrato();
+  contribuicao.retrato = estadoInicial;
   contribuicao.soltarMontagem = () => {
-    estado.cancelado = true;
-    estado.uri = null;
-    estado.bytes = 0;
+    for (const um of [contribuicao.retrato, contribuicao.retratoPendente]) {
+      if (!um) continue;
+      um.cancelado = true;
+      um.uri = null;
+      um.bytes = 0;
+    }
     contribuicao.retrato = null;
+    contribuicao.retratoPendente = null;
     avisarQueAMidiaMudou();
   };
   avisarQueAMidiaMudou();
@@ -1274,70 +1391,174 @@ function avatarContribuido(pessoaId) {
   // o `uri` ainda posto: o `.catch` do fim leva o tropeço ao `console` e ao
   // `seele.log`, pelo `dono.anotarRecusa`, e o estado fica o que a tela mostra
   // (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
-  const aplicar = (midia) => {
-    if (!midia || estado.cancelado) return;
-    if (!dono.podeFalar()) {
+  // **A carga de um retrato**, para o primeiro e para cada `atualizar`. Os
+  // ganchos: `aoPronto` roda quando a imagem está decodificada, antes do
+  // redesenho; `aoFalhar`, quando ela é recusada; e `substituindo` tira o
+  // retrato que esta contribuição já mostra da conta do teto de mídia — ele
+  // sai quando o novo entra.
+  const carregar = (estado, ganchos = {}) => {
+    const substituindo = ganchos.substituindo === true;
+    const aplicar = (midia) => {
+      if (!midia || estado.cancelado) return;
+      if (!dono.podeFalar()) {
+        estado.bytes = 0;
+        return;
+      }
+      estado.uri = midia.uri;
+      estado.estatico = midia.estatico ?? null;
+      estado.situacao = "pronta";
+      ganchos.aoPronto?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
+      avisarQueAMidiaMudou();
+      imagem.redesenhar();
+    };
+    const recusar = (falha) => {
+      // A reserva volta antes de qualquer pergunta: um avatar recusado não
+      // ocupa o teto de quem vier depois, nem numa sessão que acabou.
       estado.bytes = 0;
-      return;
-    }
-    estado.uri = midia.uri;
-    estado.situacao = "pronta";
-    avisarQueAMidiaMudou();
-    redesenharAvatares();
-  };
-  const recusar = (falha) => {
-    // A reserva volta antes de qualquer pergunta: um avatar recusado não
-    // ocupa o teto de quem vier depois, nem numa sessão que acabou.
-    estado.bytes = 0;
-    if (estado.cancelado || !dono.podeFalar()) return;
-    const porque = motivoDaFalha(falha);
-    estado.situacao = "recusada";
-    estado.motivo = porque;
-    avisarQueAMidiaMudou();
-    dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
-    // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
-    // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-    dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
-  };
-  const fonte = contribuicao.conteudo.doServidor;
-  // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
-  // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
-  soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
-    .then((midia) => {
+      ganchos.aoFalhar?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
       if (estado.cancelado || !dono.podeFalar()) return;
-      let ocupados = 0;
-      for (const outra of contribuicoesDosMods.porHandle.values()) {
-        if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
-      }
-      if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
-        || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
-        throw new Error("o avatar não é imagem ou excede o limite de mídia");
-      }
-      // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
-      // cima soma os `bytes` dos outros retratos desta instância, e dois
-      // avatares decodificando juntos passariam os dois por ela se a reserva
-      // esperasse. A imagem que não abre os devolve, em `recusar`.
-      estado.bytes = midia.bytes;
-      return provarImagem(midia.uri).then(() => midia);
-    })
-    .then(aplicar, recusar)
-    .catch((falha) => {
-      console.warn(
-        `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
-        falha,
-      );
-      // **E ao `seele.log`**, pela porta das outras linhas do avatar
-      // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
-      // dono que lança aqui terminaria numa promessa que ninguém pega.
-      try {
-        dono.anotarRecusa(
-          `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+      const porque = motivoDaFalha(falha);
+      estado.situacao = "recusada";
+      estado.motivo = porque;
+      avisarQueAMidiaMudou();
+      // **Com o ponto e o alvo** (rascunho §7.1): o MOD diz a quem enviou que a
+      // imagem não vai aparecer, e para isso precisa saber de quem ela era.
+      dono.falar({
+        nome: "midia", chave: imagem.chave, ponto, alvo: String(pessoaId), estado: "falhou", porque,
+      });
+      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+      dono.anotarRecusa(`${imagem.chave} da pessoa ${pessoaId} não montou — ${porque}`);
+    };
+    const fonte = contribuicao.conteudo.doServidor;
+    // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
+    // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
+    soImagem(dono.carregarMidiaDoServidor(
+      Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes", imagem.uso,
+    ))
+      .then((midia) => {
+        if (estado.cancelado || !dono.podeFalar()) return;
+        // O bolso deste ponto, nesta instância: os avatares somam os avatares,
+        // e as capas, as capas.
+        let ocupados = 0;
+        for (const outra of contribuicoesDosMods.porHandle.values()) {
+          if (substituindo && outra === contribuicao) continue;
+          if (outra.instancia === contribuicao.instancia && outra.ponto === ponto) {
+            ocupados += outra.retrato?.bytes ?? 0;
+          }
+        }
+        const custo = midia?.papel === "imagem" ? imagem.custo(midia) : NaN;
+        if (!Number.isFinite(custo) || custo < 0 || ocupados + custo > imagem.teto()) {
+          throw new Error(`o ${imagem.chave} não é imagem ou excede o limite de mídia`);
+        }
+        // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
+        // cima soma os `bytes` dos outros retratos desta instância, e dois
+        // avatares decodificando juntos passariam os dois por ela se a reserva
+        // esperasse. A imagem que não abre os devolve, em `recusar`.
+        estado.bytes = custo;
+        return provarImagem(midia.uri).then((decodificada) => {
+          // A capa guarda o quadro parado, para o movimento reduzido (§4).
+          if (ponto === "pessoa.capa") midia.estatico = quadroEstatico(decodificada);
+          return midia;
+        });
+      })
+      .then(aplicar, recusar)
+      .catch((falha) => {
+        console.warn(
+          `MOD ${contribuicao.mod}: o ${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+          falha,
         );
-      } catch (tropeco) {
-        console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
-      }
+        // **E ao `seele.log`**, pela porta das outras linhas do avatar
+        // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
+        // dono que lança aqui terminaria numa promessa que ninguém pega.
+        try {
+          dono.anotarRecusa(
+            `${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+          );
+        } catch (tropeco) {
+          console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
+        }
+      });
+  };
+
+  // **Atualizar troca a foto sem passar pelo nativo** (R7 do PERFIS; tarefa 5,
+  // Step 6). A nova carrega ao lado; a velha continua na tela até a nova estar
+  // decodificada, e só então as duas trocam de lugar. Se a nova falhar, a velha
+  // fica — e o MOD sabe, pelo `midia` de sempre.
+  contribuicao.aoAtualizar = () => {
+    if (contribuicao.retratoPendente) contribuicao.retratoPendente.cancelado = true;
+    const nova = novoRetrato();
+    contribuicao.retratoPendente = nova;
+    carregar(nova, {
+      substituindo: true,
+      aoPronto: () => {
+        const velha = contribuicao.retrato;
+        if (velha && velha !== nova) {
+          velha.cancelado = true;
+          velha.bytes = 0;
+        }
+        contribuicao.retrato = nova;
+        contribuicao.retratoPendente = null;
+      },
+      aoFalhar: () => {
+        if (contribuicao.retratoPendente === nova) contribuicao.retratoPendente = null;
+      },
     });
+  };
+
+  carregar(estadoInicial);
   return null;
+}
+
+/**
+ * **Aplica o conteúdo de uma contribuição num destino, e diz o que não coube.**
+ * Na primeira montagem e em cada `atualizar`. Devolve `false` quando a
+ * aplicação lançou — e aí quem chamou solta a montagem.
+ */
+function aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia) {
+  try {
+    const recusados = renderer.aplicar(contribuicao.conteudo);
+    if (recusados > 0) {
+      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
+      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
+      //
+      // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
+      // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
+      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      if (renderer.foraDoTeto > 0) {
+        Object.assign(aviso, {
+          motivo: "orcamento",
+          perfil: orcamento.nome,
+          teto: orcamento.nos,
+          tamanho: nosDaDeclaracao(contribuicao.conteudo),
+        });
+      }
+      donoDaRegiao(mod, instancia).falar(aviso);
+      registrarNoAnfitriao(
+        "recusa-de-mod",
+        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
+          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`
+          + (aviso.motivo
+            ? ` — a declaração tem ${aviso.tamanho}, e o teto de «${aviso.perfil}» é ${aviso.teto}`
+            : ""),
+        "aviso",
+        contribuicao.mod,
+      );
+    }
+  } catch (falha) {
+    // **No registro, e não no console da janela**: num app empacotado o
+    // console não é lugar nenhum, e foi lá que esta falha morava.
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1391,6 +1612,22 @@ function montarContribuicao(contribuicao, destino = "") {
 
   const instancia = contribuicao.instancia;
   if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
+  // **O orçamento é o do ponto** (`perfil`, na tabela de pontos). Era sempre o
+  // do cartão, e o `superficie` de `pessoa.detalhes` nunca valeu (achado da
+  // tarefa 5, decidido pela orquestradora em 09/10). Um ponto sem perfil não
+  // monta declaração: é recusado pelo nome, e não montado com um orçamento
+  // que ninguém escolheu.
+  const perfil = PONTOS_DE_CONTRIBUICAO[contribuicao.ponto]?.perfil;
+  const orcamento = Object.hasOwn(PERFIS_DE_RENDER, perfil ?? "") ? PERFIS_DE_RENDER[perfil] : null;
+  if (!orcamento) {
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não monta declaração`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return null;
+  }
   // **O hash é o da instância.** O registro guarda só o id do MOD, e o dono
   // pede a mídia com os dois: sem o hash, `midia_do_mod` e `som_do_mod`
   // recusam o pedido antes de ler um byte, e nenhuma mídia de contribuição
@@ -1405,8 +1642,11 @@ function montarContribuicao(contribuicao, destino = "") {
     contribuicao.mod,
     donoDaRegiao(mod, instancia),
     raiz,
-    PERFIS_DE_RENDER.cartao,
+    orcamento,
   );
+  // De quem é este destino, quando ele é uma pessoa: é o que a citação
+  // `daPessoa` cita (Step 4b). Num canal, nada.
+  renderer.pessoaDoDestino = contribuicao.ponto.startsWith("pessoa.") ? chave : "";
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
@@ -1439,34 +1679,18 @@ function montarContribuicao(contribuicao, destino = "") {
     montadas.clear();
   };
 
-  try {
-    const recusados = renderer.aplicar(contribuicao.conteudo);
-    if (recusados > 0) {
-      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
-      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
-      donoDaRegiao(mod, instancia).falar({
-        nome: "contribuicao",
-        ponto: contribuicao.ponto,
-        destino: chave,
-        recusados,
-      });
-      registrarNoAnfitriao(
-        "recusa-de-mod",
-        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
-          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`,
-        "aviso",
-        contribuicao.mod,
-      );
+  // **Atualizar reaplica no mesmo nó** (R7 do PERFIS; tarefa 5, Step 6): cada
+  // destino montado recebe o conteúdo novo pelo mesmo renderer, que reconcilia
+  // por chave — sem desmontar, e sem a apresentação nativa entre os dois.
+  contribuicao.aoAtualizar = () => {
+    for (const [destino, montagem] of Array.from(montadas.entries())) {
+      if (!aplicarAContribuicao(contribuicao, destino, montagem.renderer, orcamento, mod, instancia)) {
+        montagem.soltar();
+      }
     }
-  } catch (falha) {
-    // **No registro, e não no console da janela**: num app empacotado o
-    // console não é lugar nenhum, e foi lá que esta falha morava.
-    registrarNoAnfitriao(
-      "recusa-de-mod",
-      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
-      "aviso",
-      contribuicao.mod,
-    );
+  };
+
+  if (!aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia)) {
     soltar();
     return null;
   }
@@ -2468,6 +2692,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-descartar": "superficies",
   contribuir: "contribuicoes",
   "revogar-contribuicao": "contribuicoes",
+  "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
 });
 
@@ -2575,8 +2800,59 @@ function cascaDoRetrato() {
   return {
     onde: typeof CELULAR === "object" && CELULAR !== null ? "celular" : "computador",
     regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
-      Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
+      (Object.hasOwn(pontos, nome) && aCascaTemARegiao(nome)) || Object.hasOwn(tipos, nome)),
   };
+}
+
+/**
+ * **As regiões que esta casca tem** (rascunho da API 6, §11; tarefa 5, Step 8).
+ * No computador, todas. No celular, as que a casca dele declarar em
+ * `CELULAR.regioes`, e todas quando ela não declara. Na 0.16 a casca do
+ * celular declara sete: o `status.barra` não existe nela, porque ela tira o
+ * rodapé da telemetria (medido e decidido com a F8, 09/10). Uma casca futura
+ * declara do mesmo jeito: uma região da API 7 numa casca 1.0, ou um executor
+ * que não desenhe alguma.
+ */
+function aCascaTemARegiao(nome) {
+  const declaradas = typeof CELULAR === "object" && CELULAR !== null && CELULAR.regioes instanceof Set
+    ? CELULAR.regioes
+    : null;
+  return !declaradas || declaradas.has(nome);
+}
+
+/**
+ * Quantas contribuições já foram avisadas de que a região delas não existe
+ * nesta casca, por ponto — para a aba DIAGNÓSTICO.
+ */
+const regioesAusentesAvisadas = new Map();
+
+/**
+ * **Uma região que a casca não tem não some calada** (rascunho §11 e §7.1;
+ * tarefa 5, Step 8). Devolve `true` quando a casca não tem a região — e quem
+ * desenha não desenha —, avisando cada contribuição dela uma vez: o MOD recebe
+ * o evento `contribuicao` com `motivo: 'regiao-ausente'`, e o `seele.log` a
+ * linha. A contribuição continua registrada, e desenha se a região existir.
+ */
+function regiaoAusente(ponto) {
+  if (aCascaTemARegiao(ponto)) return false;
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    if (contribuicao.ponto !== ponto || contribuicao.avisadaAusente) continue;
+    contribuicao.avisadaAusente = true;
+    regioesAusentesAvisadas.set(ponto, (regioesAusentesAvisadas.get(ponto) ?? 0) + 1);
+    const instancia = contribuicao.instancia;
+    if (instancia?.admite?.(geracaoDaSessao)) {
+      donoDaRegiao({ id: contribuicao.mod, hash: instancia.hash }, instancia).falar({
+        nome: "contribuicao", ponto, destino: contribuicao.alvo, motivo: "regiao-ausente",
+      });
+    }
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${ponto}» não existe nesta casca, e a contribuição não aparece`,
+      "aviso",
+      contribuicao.mod,
+    );
+  }
+  return true;
 }
 
 /**
@@ -2735,7 +3011,9 @@ function avisarOsModsDaTela(snapshot) {
  *   sufixo depois de `:` vira campo — `tipo-recusado:heic` é `erro:
  *   'tipo-recusado'` e `detectado: 'heic'`, `papel-nao-serve:imagem` é `papel:
  *   'imagem'`;
- * - um `Error` da casca que traga o nome em `recusa` chega com ele;
+ * - um `Error` da casca que traga o nome em `recusa` chega com ele, e com os
+ *   campos de `camposDaRecusa`, quando os tem (o `tipo-desconhecido` das
+ *   superfícies leva `tipoPedido` e `tipos`);
  * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
  */
 function recusaParaOMod(mod, falha) {
@@ -2745,6 +3023,8 @@ function recusaParaOMod(mod, falha) {
     ? falha.Recusado.motivo
     : typeof falha?.recusa === "string" ? falha.recusa : null;
   if (!nome) return { erro: "falhou" };
+  const campos = falha?.camposDaRecusa;
+  if (campos && typeof campos === "object") return { ...campos, erro: nome };
   const corte = nome.indexOf(":");
   const base = corte < 0 ? nome : nome.slice(0, corte);
   const campo = SUFIXOS[base];
@@ -2783,7 +3063,11 @@ async function atenderOMod(mod, instancia, m) {
     // deles. Mandar o **valor** para uma instância encerrada é falar com quem
     // já saiu.
     if (meu()) {
-      instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
+      // O envelope **por último**: `tipo`, `n` e `ok` são da ponte, e uma
+      // carga que trouxesse um deles trocaria a resposta por uma mensagem que
+      // o executor não reconhece — o pedido do MOD esperaria para sempre. Foi
+      // o que o `tipo` do tipo de superfície pedido fazia (tarefa 7, Step 1).
+      instancia.executor.entregar({ ...carga, tipo: "resposta", n: m.n, ok });
       return;
     }
     // **Mas calar não é a alternativa.** Um pedido sem resposta deixa o MOD
@@ -2970,6 +3254,13 @@ async function atenderOMod(mod, instancia, m) {
         // contribuição de outro. A revisão de 20/09/2026 reproduziu.
         responder(true, {
           valor: contribuicoesDosMods.revogar(m.handle, { id: mod.id, instancia }),
+        });
+        break;
+      case "atualizar-contribuicao":
+        // O dono vem daqui, como no `revogar`: um MOD não troca o conteúdo da
+        // contribuição de outro (R7 do PERFIS; tarefa 5, Step 6).
+        responder(true, {
+          valor: contribuicoesDosMods.atualizar(m.handle, { id: mod.id, instancia }, m.conteudo),
         });
         break;
       default:

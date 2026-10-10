@@ -441,3 +441,115 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   ΔE2000 ≤ 4,5 continuam medidos.
   - Próximo: as tarefas que esperavam o K4, na ordem do plano: 5, 6, 7, 9, 10,
     17d, 17f.0, 17f, 17g, 17h, 17i.
+- **Tarefa 5, as regiões** (em andamento; bateria da nona integração no ar,
+  sem conformidade até o aviso).
+  - Step 1, o desenho da região substituída que carrega o núcleo: `1f3cf670`,
+    aprovado; as decisões em `0be3cece` (o apelido das linhas lê o tema e é
+    protegido pela estrutura; mensagens agrupadas pela chave).
+  - Regiões feitas, uma por commit: `redes` `1e67f782`, `operador.barra`
+    `3e4bfdb2`, `compositor` `ed1c4483`, `status.barra` `76943da5`,
+    `canal.cabecalho` com `substituir` `55ec1c16`.
+  - O orçamento pelo `perfil` do ponto e o aviso com perfil, teto e tamanho:
+    `a994601f` (decisão da orquestradora: `pessoa.detalhes` 4096 nós, as
+    regiões 64 até a M3).
+  - A bancada `regioes-do-produto.cjs` (Chromium, `index.html` real, no CI):
+    nó no contêiner e em nenhum outro lugar; o produto sem mudar de marcação
+    nem de tamanho; revogar devolve a região; com conteúdo grande, o núcleo
+    à vista nas quatro bordas e descoberto, com o desenho do MOD deslocado
+    mirando o centro de cada item.
+  - Achados medidos pela bancada e consertados: o guarda de «quem aplica»
+    casava com a lista do retrato; o nome do canal espremido (43 → 7 px); a
+    conversa empurrada para y = 1 230; o `+` da trilha fora da vista; o
+    `perfil` que ninguém lia; o `min-width`/`max-width` redundantes da barra
+    de baixo; o aviso de «não coube» só com a contagem.
+  - Uma correção minha: a mensagem do `3e4bfdb2` dizia que 60 linhas «não
+    montavam nada»; era o executor falso da bancada sem `entregar`.
+    Registrado no `a994601f`.
+  - Ruling: a bancada das regiões no navegador, e não na
+    `contribuicoes-e-camadas.cjs` (que roda num `vm`) como o plano dizia —
+    custo se errado: uma bancada a mais no job de navegador; o ganho é medir
+    a página que o MOD vê.
+  - Ruling: `overflow` e `contain: paint` juntos, sabendo que cada um corta
+    sozinho — custo se errado: uma linha de CSS por região.
+  - `servidor.navegacao` `66a4a1ea` (a ordem de cada lista; grupos mistos na
+    API 7, aprovado); a linha com o núcleo sob `pessoa.cartao` `9ca54ea1`
+    (D-nucleo-1, com guarda); `pessoas.lista` `d4f35bff` (decisão (a): as
+    salas continuam seções; a reversão «o MOD toma os grupos» reprova);
+    `conversa.mensagem` `86bb5589` (o corpo do MOD, a busca vence, a pendente
+    fica com o produto, agrupamento pela chave). **As oito regiões estão
+    feitas.**
+  - Achados no caminho, medidos: o subtítulo de grupo do MOD imitava o
+    cabeçalho de uma sala (agora recuado e com filete); uma substituição sem
+    alvo alcançava a mensagem pendente (agora não); o guarda de `.mensagem`
+    num `Match` reprovava o nome do ponto `conversa.mensagem` (agora só o
+    literal exato sai da busca).
+  - Um tropeço meu: um script truncou `tela-sessao.js` (abriu para escrita
+    antes de ler); restaurado do HEAD e as edições refeitas, antes de
+    qualquer commit.
+  - Pendente: os identificadores ignorados contarem na aba DIAGNÓSTICO
+    (espera `camada-mods.js`, onde está o lote W da F5).
+  - Steps 6 a 8: `atualizar` `4409a271`; o teto por alvo `6317df2c` (por
+    alvo, MOD e modo, aceito; o caso dos dois modos `b1c9e4fd`); as recusas
+    nomeadas `577e899f`; `regiao-ausente` `fb13e65e` (declarado pelo
+    `CELULAR`, e não pela marca, aceito). O `status.barra` não existe no
+    celular (medido pela F8, decidido): `7f5b45f0`. O 8b é da F8, com os
+    meus critérios.
+  - Pendente: as duas contagens na aba DIAGNÓSTICO (espera `camada-mods.js`,
+    onde a F5 vai antes).
+- **Tarefa 6, `pessoa.capa`** (09/10).
+  - Steps 1–3 `439f05a4`: a carga do avatar virou `imagemContribuida`, a
+    mesma para o avatar e a capa; a capa é uma camada atrás do conteúdo, com o
+    véu e o halo no `::after` dela; o quadro parado para o movimento reduzido;
+    o `midia` com ponto e alvo.
+  - Step 4 `eaa994e6`: as placas na cor do fundo nativo; o guarda **medido**
+    (contraste de cada texto contra uma capa branca e uma preta, calado e
+    falando), e não de texto; a capa de quem usa vestia só a identidade, e o
+    MUDO, o fone e o SAIR nunca ficavam sob ela (uma contradição do §4).
+  - Step 4, refeito `85e58bc2`: a orquestradora recusou a identidade sozinha,
+    pelo pedido do dono (08/10). A capa pinta o fundo da barra do operador
+    inteira, e todo texto e controle dela fica sobre a placa do negro do
+    painel. A bancada mede a cor e a borda contra **três** capas: a branca, a
+    preta e a da cor da própria tinta — sem a terceira, a reversão do MUDO
+    passava, porque o cinza dele ganha contraste sobre as duas pontas (4,11 →
+    4,86 e 4,32). Reversões: MUDO e fone 4,11 → 1; SAIR 15,6 → 1,28.
+  - Step 4b `2e1867bd`: a citação `daPessoa`, sem pedido novo e com zero
+    bytes no bolso do cartão.
+  - Step 5: a redução no Rust `97332b9c`; o uso e o bolso decodificado
+    `7dbd5928`; seis capas animadas `b6fa329c`.
+  - Esperam a F8: o «SEU PERFIL» e a capa no celular.
+  - Um tropeço de processo: dois commits saíram com um guarda vermelho porque
+    eu encadeei a verificação e o commit num comando só. Os dois foram
+    emendados antes de qualquer integração; agora verifico e commito em
+    passos separados.
+  - Ruling: o teto do bolso das capas, 128 MiB decodificados por MOD — custo
+    se errado: um MOD com muitas capas animadas recusado antes da medida, ou
+    memória demais num celular; a M3 mede.
+  - Próximo: a tarefa 7.
+- **Tarefa 7, as camadas** (09/10).
+  - Steps 1–2 `34535f6d`: `tipo-desconhecido` na 6, com `tipoPedido` e
+    `tipos`; até a 5, o `dialogo` de antes com a linha no `seele.log`. **Um
+    achado no meio:** o campo se chamava `tipo`, e `responder` espalhava a
+    carga sobre `{ tipo: "resposta", n, ok }` — a resposta virava uma
+    mensagem que o executor não reconhece, e o pedido do MOD esperaria para
+    sempre. O caso passava, porque olhava só o campo. Agora o envelope vai por
+    último, e dois casos o conferem. Seis reversões.
+  - Step 3: **espera a tarefa 11** (o teto da `midia` numa superfície se
+    decide com a medida).
+  - Step 4 `0f10718b`: a `folha`, os tipos por API (`tiposDaApi`), a API no
+    dono, a pilha de três à vista por MOD (`teto-de-folhas`), o `painel` na 6
+    recusado com «use folha», e o `teto-de-superficies` com nome. Bancada de
+    navegador nova, `camadas.cjs`, no CI. Sete reversões.
+  - Rulings: (a) **até a 5, o tipo desconhecido segue abrindo `dialogo`** — o
+    rascunho diz «na 6», e os três publicados só pedem tipos que existem;
+    custo se errado: um pacote de laboratório da 5 com um tipo errado segue
+    vendo um diálogo, agora com a linha no `seele.log`. (b) **a pilha de
+    folhas é por MOD**, como os outros tetos; custo se errado: dois MODs
+    empilham seis folhas na mesma coluna (só a de cima aparece).
+  - Para a tarefa 13: o `check-api` compara `TIPOS_DE_SUPERFICIE` inteira
+    com os tipos de cada versão a partir da 6; com a v6 escrita, ele acusará
+    o `painel` que a tabela ainda tem, até o corte o tirar (ou até ele ler
+    `tiposDaApi(6)`).
+  - Achado de desenho, fora do passo: numa coluna de 300 px, o título de uma
+    folha ou de um painel quebra no meio da palavra («EDITA / R / PERFIL»):
+    `overflow-wrap: anywhere` no título, que divide a linha com a origem e o
+    FECHAR.

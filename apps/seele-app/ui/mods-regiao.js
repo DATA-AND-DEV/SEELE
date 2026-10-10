@@ -208,6 +208,21 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *   tem a área de uma aplicação. O teto dela é o que uma ficha de RPG e um
  *   tabuleiro exigem — e continua sendo teto.
  */
+/**
+ * **Quantos nós uma declaração pede**, contados como `planejar` os conta: um
+ * texto é um nó, uma forma é um nó mais os de dentro, e uma lista é a soma.
+ *
+ * Para o aviso de «não coube» dizer o tamanho: o renderer para de contar quando
+ * o orçamento acaba — uma forma recusada leva os filhos junto sem contá-los —,
+ * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
+ */
+function nosDaDeclaracao(no) {
+  if (Array.isArray(no)) return no.reduce((soma, um) => soma + nosDaDeclaracao(um), 0);
+  if (typeof no === "string") return 1;
+  if (no === null || typeof no !== "object") return 0;
+  return 1 + nosDaDeclaracao(no.dentro);
+}
+
 const PERFIS_DE_RENDER = Object.freeze({
   regiao: Object.freeze({
     nome: "regiao",
@@ -604,6 +619,10 @@ class RegiaoDeMod {
    *   `dizerRecusaDeMidia`).
    * - `midiaMudou()`: o aviso, para o diagnóstico, de que o estado de alguma
    *   mídia mudou.
+   * - `imagemDaPessoa(qual, pessoaId)`: a imagem já carregada de uma pessoa
+   *   (`'avatar'` ou `'capa'`), para a citação `daPessoa` (rascunho da API 6,
+   *   §4; tarefa 6, Step 4b) — uma promessa de `{ papel, bytes: 0, uri }`, ou de
+   *   `null`. Sem ela, a citação fica sem imagem, sem erro.
    *
    * O do produto também leva `geracao`, que a região não lê: quem confere a
    * geração é `podeFalar`.
@@ -733,6 +752,9 @@ class RegiaoDeMod {
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
+    // Os recusados **por teto**, à parte dos recusados por forma: é o que
+    // separa «não coube» de «não entra aqui» no aviso ao MOD.
+    this.foraDoTeto = 0;
     const orcamento = { nos: this.perfil.nos };
     const planos = this.planejar(conteudo, 0, orcamento, this.perfil.formas);
     const fixas = [];
@@ -855,7 +877,7 @@ class RegiaoDeMod {
       ));
     }
     if (typeof no === "string") {
-      if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+      if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
       orcamento.nos -= 1;
       return [{ texto: no.slice(0, LIMITES_DA_REGIAO.texto) }];
     }
@@ -873,7 +895,7 @@ class RegiaoDeMod {
       if (permitidas) this.recusados += 1;
       return [];
     }
-    if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+    if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
     orcamento.nos -= 1;
 
     // A chave é o que faz a atualização ser incremental. Sem uma, a posição
@@ -1690,10 +1712,13 @@ class RegiaoDeMod {
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     const fonte = plano.no.fundoDeMidia;
     // O fundo só mostra imagem: o som recusado pelo teto chega como o som que
-    // era (`soImagem`).
-    const vindo = soImagem(fonte.doServidor
-      ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
-      : this.dono.carregarMidia(fonte.fonte));
+    // era (`soImagem`). **A citação `daPessoa`** (Step 4b) usa a imagem que a
+    // pessoa do destino já tem, sem pedido novo; sem ela, nada.
+    const vindo = soImagem(fonte.daPessoa
+      ? this.imagemCitada(fonte.daPessoa)
+      : fonte.doServidor
+        ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
+        : this.dono.carregarMidia(fonte.fonte));
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
@@ -1717,6 +1742,9 @@ class RegiaoDeMod {
     };
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
+      // A citação de uma imagem que a pessoa não tem: o fundo fica liso, e
+      // isso não é recusa.
+      if (!midia) { this.esquecerMidia(elem); return; }
       // **As duas recusas são anotadas, além de ditas ao registro.** A linha
       // do `seele.log` é de quem investiga; a anotação é o que «quem pinta
       // cada lugar» soma — sem ela, o fundo que não veio seria só uma caixa
@@ -1809,20 +1837,25 @@ class RegiaoDeMod {
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
     // O retrato só mostra imagem: o som recusado pelo teto chega como o som
     // que era (`soImagem`).
-    const vindo = soImagem(doServidor
-      ? this.dono.carregarMidiaDoServidor(
-          Number(doServidor.canal) || 0,
-          doServidor.pedido ?? {},
-          typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
-        )
-      : caminho
-        ? this.dono.carregarMidia(caminho)
-        : null);
+    const vindo = soImagem(plano.no.daPessoa
+      ? this.imagemCitada(plano.no.daPessoa)
+      : doServidor
+        ? this.dono.carregarMidiaDoServidor(
+            Number(doServidor.canal) || 0,
+            doServidor.pedido ?? {},
+            typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
+          )
+        : caminho
+          ? this.dono.carregarMidia(caminho)
+          : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+      // A citação de uma imagem que a pessoa não tem: a inicial fica, e isso
+      // não é recusa.
+      if (!midia) { this.esquecerMidia(elem); return; }
       if (midia.papel !== "imagem") {
         this.anotarMidia(elem, "recusada", `o retrato precisa ser imagem, e os bytes são ${midia.papel}`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
@@ -1847,6 +1880,19 @@ class RegiaoDeMod {
       const porque = motivoDaFalha(falha);
       recusar(porque, porque);
     }).catch((falha) => this.dizerTropecoDaMidia("o retrato", plano.no.chave, falha));
+  }
+
+  /**
+   * **A imagem que a pessoa deste destino já tem** (`daPessoa`; rascunho da API
+   * 6, §4; tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Só num destino que é uma
+   * pessoa (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa
+   * põe): num canal, «a pessoa 3» seria outra pessoa. Uma promessa de `null`
+   * quando não há o que citar.
+   */
+  imagemCitada(qual) {
+    const pessoa = this.pessoaDoDestino ?? "";
+    if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
+    return this.dono.imagemDaPessoa(String(qual), pessoa);
   }
 
   atualizarRetrato(elem, plano) {

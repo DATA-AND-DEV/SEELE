@@ -982,6 +982,11 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
             "the script never names `{field}`, which is what a Match serialises to"
         );
     }
+    // **O nome de um ponto não é a leitura de um campo.** A região
+    // `conversa.mensagem` da API 6 (tarefa 5) tem `.mensagem` no nome, e o
+    // guarda de «quem aplica» exige o nome como argumento de uma chamada aqui.
+    // Só o literal exato sai da busca: `casamento.mensagem` continua reprovando.
+    let script = script.replace("\"conversa.mensagem\"", "\"ponto-da-api\"");
     for wrong in [".mensagem", ".inicio", ".fim"] {
         assert!(
             !script.contains(wrong),
@@ -16486,14 +16491,135 @@ fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
-    let orfaos: Vec<&String> = pontos
-        .iter()
-        .filter(|ponto| !aplicadores.contains(&format!("\"{ponto}\"")))
-        .collect();
+    // **Como primeiro argumento de uma chamada**, e não em qualquer lugar: a
+    // lista das regiões do retrato (`REGIOES_E_CAMADAS_DA_API`, tarefa 4) já
+    // escreve os oito nomes de região, e o texto sozinho passava para uma
+    // região sem aplicador nenhum (medido em 09/10, na tarefa 5). Quem aplica
+    // pergunta pelo ponto — `conteudoDasContribuicoes("…"`,
+    // `escolherSubstituicao(\n "…"` —, e uma lista o enumera.
+    let chamado = |ponto: &str| {
+        let alvo = format!("\"{ponto}\"");
+        aplicadores
+            .match_indices(&alvo)
+            .any(|(i, _)| aplicadores[..i].trim_end().ends_with('('))
+    };
+    let orfaos: Vec<&String> = pontos.iter().filter(|ponto| !chamado(ponto)).collect();
     assert!(
         orfaos.is_empty(),
         "estes pontos são anunciados pela API de MODs e nenhuma tela os aplica — \
          um MOD registra, recebe punho, e nada acontece: {orfaos:?}"
+    );
+}
+
+/// **Toda recusa do registro de contribuições tem nome** (rascunho da API 6,
+/// §7.1; tarefa 5 da F3, Step 7b).
+///
+/// O MOD da 6 recebe o nome, de lista fechada, e a frase vai ao `seele.log`.
+/// Uma recusa lançada com `new Error(...)` sem nome chega a ele como `falhou`
+/// — o produto sabendo por que recusou e não contando. E a lista é contrato:
+/// cada nome dela está no rascunho, onde quem escreve MOD a lê.
+#[test]
+fn toda_recusa_do_registro_de_contribuicoes_tem_nome() {
+    let registro = without_comments(&read("ui/mods-contribuicoes.js"));
+    assert!(
+        !registro.contains("throw new Error("),
+        "uma recusa do registro de contribuições voltou a nascer sem nome: o MOD da 6 a \
+         recebe como `falhou`"
+    );
+    let lista = registro
+        .split_once("const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(corpo, _)| corpo)
+        .expect("`RECUSAS_DAS_CONTRIBUICOES` em mods-contribuicoes.js");
+    let nomes: BTreeSet<String> = lista
+        .split(',')
+        .map(|nome| nome.trim().trim_matches('"').to_owned())
+        .filter(|nome| !nome.is_empty())
+        .collect();
+    assert!(
+        nomes.len() >= 8,
+        "só {} nomes lidos da lista: a leitura quebrou",
+        nomes.len()
+    );
+    for uso in registro.split("recusaNomeada(").skip(1) {
+        let Some(nome) = uso.trim_start().strip_prefix('"') else {
+            continue; // a própria definição: `recusaNomeada(nome, frase)`
+        };
+        let nome = nome.split('"').next().unwrap_or_default();
+        assert!(
+            nomes.contains(nome),
+            "«{nome}» é usado como recusa e não está em `RECUSAS_DAS_CONTRIBUICOES`"
+        );
+    }
+    let rascunho = read("../../docs/superpowers/specs/2026-10-08-api-6-rascunho.md");
+    for nome in &nomes {
+        assert!(
+            rascunho.contains(&format!("`{nome}`")),
+            "«{nome}» é uma recusa que o MOD da 6 recebe, e o rascunho §7.1 não a lista"
+        );
+    }
+}
+
+/// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**
+///
+/// A tabela declarava `perfil` — «com que orçamento a declaração é montada» —
+/// e `montarContribuicao` montava tudo com `PERFIS_DE_RENDER.cartao`: o
+/// `superficie` de `pessoa.detalhes` nunca valeu, e um ponto novo podia
+/// declarar qualquer nome sem efeito nenhum (achado da tarefa 5 da F3,
+/// decidido pela orquestradora em 09/10). Um `perfil` que ninguém lê é a
+/// tabela dizendo uma coisa e a tela fazendo outra.
+#[test]
+fn o_perfil_de_cada_ponto_e_o_orcamento_com_que_ele_monta() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1
+        .split_once("});")
+        .expect("a tabela fecha")
+        .0;
+    let perfis: Vec<(String, String)> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (ponto, resto) = resto.split_once('"')?;
+            let perfil = resto.split_once("perfil: ")?.1;
+            let perfil = perfil.split([',', ' ', '}']).next()?.trim_matches('"');
+            Some((ponto.to_owned(), perfil.to_owned()))
+        })
+        .collect();
+    assert!(
+        perfis.len() >= 12,
+        "só {} pontos com `perfil` lidos da tabela: a leitura quebrou",
+        perfis.len()
+    );
+
+    let regiao = read("ui/mods-regiao.js");
+    let orcamentos = regiao
+        .split_once("const PERFIS_DE_RENDER = Object.freeze({")
+        .expect("`PERFIS_DE_RENDER` em mods-regiao.js")
+        .1;
+    for (ponto, perfil) in &perfis {
+        if perfil == "null" {
+            continue;
+        }
+        assert!(
+            orcamentos.contains(&format!("\n  {perfil}: Object.freeze({{")),
+            "«{ponto}» declara `perfil: \"{perfil}\"`, e `PERFIS_DE_RENDER` não tem esse orçamento"
+        );
+    }
+
+    let base = without_comments(&read("ui/base.js"));
+    let montar = js_function(&base, "function montarContribuicao(");
+    assert!(
+        montar.contains("PONTOS_DE_CONTRIBUICAO[")
+            && montar.contains(".perfil")
+            && montar.contains("PERFIS_DE_RENDER["),
+        "`montarContribuicao` deixou de montar com o `perfil` do ponto: {montar}"
+    );
+    assert!(
+        !montar.contains("PERFIS_DE_RENDER.cartao"),
+        "`montarContribuicao` voltou a montar todo ponto com o orçamento do cartão: {montar}"
     );
 }
 
@@ -16534,16 +16660,34 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
+    // **Pelo intermediário das listas** (tarefa 5): a navegação e a lista de
+    // pessoas substituídas são uma ordem, e quem a pede é `arranjoDe("ponto")`.
+    // Ele só conta se o corpo dele de fato consulta `escolherSubstituicao` — sem
+    // isto, a navegação passava por proximidade, porque o nome dela ficava a
+    // menos de 400 caracteres da chamada dentro de `arranjoDe` (medido).
+    // E `imagemContribuida("ponto", …)`, que pergunta pelas imagens de pessoa —
+    // o avatar e a capa (tarefa 6) —, pela mesma regra.
+    let intermediarios: Vec<&str> = ["arranjoDe", "imagemContribuida"]
+        .into_iter()
+        .filter(|nome| {
+            js_function(&telas, &format!("function {nome}(")).contains("escolherSubstituicao(")
+        })
+        .collect();
     for ponto in &substituiveis {
-        let citado = telas
-            .match_indices(&format!("\"{ponto}\""))
-            .any(|(onde, _)| {
-                // A chamada e o nome do ponto na mesma vizinhança: a consulta é
-                // escrita em várias linhas, com o alvo e o preferido entre elas.
-                let inicio = onde.saturating_sub(400);
-                let fim = (onde + 400).min(telas.len());
-                telas[inicio..fim].contains("escolherSubstituicao")
-            });
+        let pelo_intermediario = intermediarios.iter().any(|nome| {
+            telas.contains(&format!("{nome}(\"{ponto}\")"))
+                || telas.contains(&format!("{nome}(\"{ponto}\","))
+        });
+        let citado = pelo_intermediario
+            || telas
+                .match_indices(&format!("\"{ponto}\""))
+                .any(|(onde, _)| {
+                    // A chamada e o nome do ponto na mesma vizinhança: a consulta é
+                    // escrita em várias linhas, com o alvo e o preferido entre elas.
+                    let inicio = onde.saturating_sub(400);
+                    let fim = (onde + 400).min(telas.len());
+                    telas[inicio..fim].contains("escolherSubstituicao")
+                });
         assert!(
             citado,
             "«{ponto}» anuncia o modo `substituir` e nenhuma tela chama \
