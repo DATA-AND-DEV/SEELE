@@ -11,7 +11,9 @@ Ramo `0.16/lotes-y`, a partir de `d9124cea`. Worktree:
 | `2bb78972` | o relatório, primeira versão |
 | `d7b969af` | parte 1: a reprodução roda e mede nos três sistemas, com teto (a preocupação bloqueante do controlador) |
 | `99142c72` | parte 1: o conserto também cobre o IPv4 no curinga `0.0.0.0:X`, que `6061e38c` deixava passar |
-| este | o relatório com a seção «v0.15.1», Linux e Windows |
+| `06d0a208` | o relatório com a seção «v0.15.1», Linux e Windows |
+| `5b167586` … `866718cc` | rodada 2: I1, I2, M4, M3, M5, M1, M2 (ver «Rodada 2») |
+| este | o relatório com a rodada 2 |
 
 Nada fora de `crates/seele-core`, `crates/seele-server/tests/par_lento.rs` e
 `docs/`. Nenhum gancho em `crates/seele-server/src`. O `seele-sessao` não foi
@@ -152,7 +154,8 @@ largada antes de ligar `[::]:X` de propósito: segurá-la junto funciona no
 macOS, mas um sistema que trate a pilha dupla e o curinga IPv4 como o mesmo
 lugar recusaria o `[::]:X` sempre, e todo cliente cairia para só IPv4. A
 janela entre largar a sonda e ligar é de microssegundos; depois de ligado,
-nenhum IPv4 entra na porta.
+nenhum IPv4 entra na porta. *(Corrigido na rodada 2: a janela **não** está
+coberta para um IPv4 no curinga — ver M1, abaixo.)*
 
 No produto o defeito era a entrada ou a volta que, de vez em quando, espera
 20 s por nada (ver «v0.15.1», abaixo).
@@ -341,6 +344,12 @@ perdesse a mensagem *e* seguisse lendo deixaria buraco, e é pego; um que
 perdesse e não se despedisse é pego; um que perdesse de um falante que teve o
 `Pong` é pego.
 
+*(Corrigido na rodada 2: isto estava errado. A revisão achou mais dois casos
+em que o teste de `de04ab26` ficava mais fraco — o servidor que recusa tudo
+passava com zero gravadas (I1), e a despedida calada só reprovava pelo prazo
+de segurança (I2). Os dois estão consertados abaixo, em «Rodada 2». O caso
+estreito continua o único que sobra.)*
+
 Fora desse caso o teste novo é mais forte que o antigo, e medido:
 - nas rodadas sem carga extra (6 de 6 pelo `cargo`), nenhum falante foi
   desligado: todos tiveram o `Pong`, e o teste exige as 1 160, como o antigo;
@@ -379,14 +388,77 @@ desfeito por `becb0257`, que a causa medida é outra, e que o conserto novo é
 
 ---
 
+## Rodada 2 — o que a revisão pediu
+
+A revisão aprovou a parte 1 e pediu conserto na parte 2 (2 Importantes, 5
+Menores). Cada passo foi commitado verde; o vermelho veio antes de cada
+conserto, as alavancas de reversão foram temporárias em `session.rs` (por
+variável de ambiente, no mesmo binário), e `session.rs` voltou idêntico depois
+de cada uma (`cmp` contra a cópia de `06d0a208`, e tocado antes de recompilar).
+
+| | commit | o quê |
+|---|---|---|
+| I1 | `5b167586` | nenhuma recusa: o teste exige zero `MessageRejected` |
+| I2 | `fa8a5974` | o ouvinte assina o canal da testemunha e lê até ela ou até a despedida |
+| M4 | `0c53a0c2` | a escrita que falha no meio da rajada vira desfecho, e não erro |
+| M3 | `deca9d10` | o comentário do braço `Lagged` diz o segundo jeito de ficar para trás |
+| M5 | `de6a4a98` | «pode repetir com a mesma chave», a pedido (`reenviar_mensagem`) |
+| M1 | `885bda67` | a janela entre a sonda e a ligação fica dita, com a medida |
+| M2 | `866718cc` | a batida diz no registro quando o socket conferido não abre |
+
+### As reversões e os vermelhos
+
+| reversão (alavanca temporária) | antes do conserto | depois |
+|---|---|---|
+| **I1**: o braço `SendMessage` recusa toda mensagem com `PermissionDenied`, antes da fila (a da revisão) | 3 de 3 **verdes**, «gravadas 0, chegaram 0, perdidos no barramento 0» | 3 de 3 vermelhos: «o servidor recusou 58 mensagens do falante 00 (chaves [1, …, 58]) num canal que existe e em que ele pode escrever» |
+| **I2**: o braço `Lagged` volta a `continue`, calado, sem a reprodução (a da revisão) | vermelho só pelo prazo, em **120,9 s**: «o ouvinte não teve nem tudo nem a despedida: o servidor travou: Elapsed(())» | 3 de 3 vermelhos em 0,4–1,0 s pela asserção: «pendência nº 1: 1023 de 1160 chegaram e o servidor não disse nada — 0 eventos morreram no barramento (a leitura acabou em Some("a testemunha"))» |
+| **M4**: a sessão despede cada falante com `FellBehind` ao ler a chave 20 | 3 de 3 com «Error: connection lost — closed by peer: fell behind (code 0)», antes de qualquer asserção | sem contar em `atrasos`: 3 de 3 vermelhos pela asserção certa, «a sessão foi encerrada por ter ficado para trás e o contador marcou zero»; contando: 3 de 3 verdes, 380 gravadas (19 por falante), os 20 `Desligado(FellBehind)`, o ouvinte com as 380 e a testemunha |
+| **M2**: o socket conferido da batida encenado como erro | «o socket conferido da batida não abriu e o registro não disse nada, nem por quê. Linhas: []» | 3 de 3 verdes, com a linha `WARN` e o motivo |
+
+M1, M3 e M5 são só comentário e texto.
+
+### M1, a janela que fica aberta
+
+Entre largar a sonda `0.0.0.0:X` e ligar `[::]:X`, um IPv4 que se ligue a
+`X` num endereço faz a ligação voltar `AddrInUse` (vem outra proposta), mas
+um que se ligue ao curinga é aceito junto, e a resposta daquela conexão vai a
+ele. Medido aqui (Python, 5 000 vezes, carga ~10): **4,1 µs na mediana, 9,0
+µs no p99, 82,7 µs no máximo**. A chance por conexão é ~`r` × 9 µs / 16 384,
+com `r` as ligações de IPv4 no curinga por segundo na máquina; com `r` = 100,
+uma em 18 milhões. `r` não foi medido. Dito na doc de `socket_conferido`.
+
+De passagem, a mesma medida deu um número de campo para a conta de N da
+seção «v0.15.1»: das 5 006 propostas de `[::]:0`, **6** caíram numa porta que
+um IPv4 desta máquina segurava naquele instante (0,12 %, N ≈ 20 sockets IPv4
+na faixa efêmera, com a bateria da orquestradora rodando).
+
+### M3, o achado de produto
+
+O comentário do braço `Lagged` em `crates/seele-server/src/session.rs` dizia
+que só acontece com quem parou de ler. Agora diz o segundo jeito medido: o
+par que lê e escreve em rajada, cuja sessão espera no cadeado de PERSISTENCE e
+na fila do escritor enquanto os lotes dos outros anunciam mais de um anel. Só
+comentário; a pendência de produto (61) fica com o controlador.
+
+### As rodadas da rodada 2
+
+- `cargo test -p seele-server --test par_lento`, 5 rodadas, carga 8,2–8,7:
+  5 de 5, 1 160 gravadas, nenhum falante desligado, o ouvinte desligado com
+  `FellBehind` e a leitura acabando na despedida; 0,24–0,25 s de teste.
+- `cargo test -p seele-core --lib -- --test-threads=1` com o codec, uma vez
+  (o core mudou em M1 e M2): 459 de 459, 24,88 s, carga 7,7.
+- `cargo test -p seele-server` inteiro, uma vez: rodando quando este commit saiu; o resultado vem no seguinte.
+- fmt limpo; clippy `-p seele-core -p seele-server --all-targets -D warnings`
+  limpo.
+
 ## Preocupações
 
 1. **Um achado de produto da parte 2, que não consertei.** Quem só escreve
    também é desligado com `FellBehind` quando lotes grandes passam do anel de
    1 024 do barramento; a despedida é dita e o cliente de verdade marca o resto
-   `SemResposta`, mas o comentário de `session.rs` só prevê o par que parou de
-   ler. Num servidor de 50 pessoas um lote não chega perto de 1 024 em 200 ms;
-   sob carga de teste, chegou. Decidir se isso vira pendência é do controlador.
+   `SemResposta`. Num servidor de 50 pessoas um lote não chega perto de 1 024
+   em 200 ms; sob carga de teste, chegou. Na rodada 2 o comentário de
+   `session.rs` passou a dizer isso (M3); a pendência (61) é do controlador.
 2. **O teste da parte 2 mudou o que guarda** (ver a pergunta acima). Se a
    decisão for outra, `de04ab26` sai sozinho.
 3. **As minhas medidas pesaram na máquina compartilhada.** Entre 01:33:15 e
@@ -408,3 +480,10 @@ desfeito por `becb0257`, que a causa medida é outra, e que o conserto novo é
    pendência 60 (`a0bdcd9a`) foi escrita antes e não tem esse caso.
 8. A sonda IPv4 roda a cada socket de quem conecta: um `bind` a mais por
    tentativa de conexão, sem custo medido que pese.
+9. **A janela entre a sonda e a ligação continua aberta** para um IPv4 no
+   curinga (M1): 4,1 µs na mediana, a chance por conexão depende de `r`, que
+   não medi. Fechá-la exigiria segurar a sonda junto, o que funciona no macOS
+   e, pelo que espero do Linux, recusaria todo `[::]:X` lá.
+10. **O caso estreito do `par_lento` sobra:** uma mensagem lida, perdida, e a
+    despedida antes da seguinte do mesmo falante passam. Nem o teste antigo o
+    pegava.
