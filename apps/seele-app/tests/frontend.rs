@@ -18988,10 +18988,16 @@ fn variantes_da_sala(nome: &str) -> Vec<String> {
                 .chars()
                 .take_while(char::is_ascii_alphanumeric)
                 .collect();
-            nome.chars().next().is_some_and(|c| c.is_ascii_uppercase()).then_some(nome)
+            nome.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+                .then_some(nome)
         })
         .collect();
-    assert!(!variantes.is_empty(), "a leitura do `enum {nome}` não achou variante nenhuma");
+    assert!(
+        !variantes.is_empty(),
+        "a leitura do `enum {nome}` não achou variante nenhuma"
+    );
     variantes
 }
 
@@ -19030,7 +19036,10 @@ fn toda_variante_da_sala_pessoal_tem_frase() {
         .filter_map(|resto| resto.split('"').next())
         .chain(["sala_fechou"])
         .collect();
-    assert!(palavras.len() >= 6, "a leitura dos desfechos quebrou: {palavras:?}");
+    assert!(
+        palavras.len() >= 6,
+        "a leitura dos desfechos quebrou: {palavras:?}"
+    );
     for palavra in palavras {
         if !bloco.contains(&format!("{palavra}:")) {
             faltam.push(format!("desfecho `{palavra}`"));
