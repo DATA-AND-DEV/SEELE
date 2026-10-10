@@ -1038,6 +1038,15 @@ struct FalhaDaEntrada {
     /// De onde veio a impressão que esta tentativa conferia.
     #[serde(flatten)]
     de_onde: DeOndeVeio,
+    /// **Esta tentativa entrou, e outra já a tinha substituído** (pendência
+    /// 58, item 54; lote E54 da F5). A conexão dela foi fechada aqui, e a
+    /// sessão de pé é a de quem a substituiu: a janela não diz nada na tela
+    /// sobre ela. Ver [`largar_a_substituida`].
+    ///
+    /// Fora do JSON quando falso: toda outra recusa chega à janela como
+    /// chegava.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    substituida: bool,
 }
 
 impl From<ConnectionError> for FalhaDaEntrada {
@@ -1046,7 +1055,42 @@ impl From<ConnectionError> for FalhaDaEntrada {
         Self {
             falha: ConnectFailure::from(error),
             de_onde: DeOndeVeio::default(),
+            substituida: false,
         }
+    }
+}
+
+/// **Fecha a conexão de uma tentativa que outra substituiu, e diz.**
+///
+/// O `connect` revoga a geração ao começar, e uma tentativa nova que começa
+/// enquanto outra anda tira a geração dela. A velha que termina depois não
+/// pode entrar: ela gravava o slot por cima da nova, e a pessoa passava a
+/// escrever num servidor que tinha deixado, com a tela mostrando o outro
+/// (medido em `a_entrada_velha_que_chega_tarde`). Aqui a conexão dela é
+/// fechada, uma linha vai ao `seele.log`, e a janela recebe a recusa marcada
+/// como substituída.
+fn largar_a_substituida(
+    connection: &Connection,
+    geracao: u64,
+    de_pe: u64,
+    alvo: &str,
+    origem_da_impressao: Option<OrigemDaImpressao>,
+) -> FalhaDaEntrada {
+    connection.disconnect();
+    tracing::warn!(
+        geracao,
+        de_pe,
+        alvo,
+        "a entrada a {alvo} foi substituída por outra antes de entrar: a conexão dela foi \
+         fechada, e a sessão de pé é a de quem a substituiu"
+    );
+    FalhaDaEntrada {
+        falha: ConnectFailure::from(ConnectionError::NotConnected),
+        de_onde: DeOndeVeio {
+            origem_da_impressao,
+            a_lista_guardou: false,
+        },
+        substituida: true,
     }
 }
 
@@ -1307,7 +1351,24 @@ async fn connect<R: tauri::Runtime>(
             origem_da_impressao,
             a_lista_guardou: false,
         },
+        substituida: false,
     })?;
+
+    // **A tentativa que outra substituiu não entra** (pendência 58, item 54;
+    // lote E54 da F5). Duas tentativas passam pelo `AlreadyConnected` lá em
+    // cima antes de qualquer uma terminar, e a mais nova revogou a geração
+    // desta. Conferido aqui, antes de qualquer efeito: as escolhas gravadas, o
+    // retrato e o consentimento de par não vão ao servidor que a pessoa
+    // deixou. E de novo ao gravar o slot, logo abaixo.
+    if !session.geracao_vale(geracao) {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
+    }
 
     connection.subscribe(ponte);
 
@@ -1392,8 +1453,28 @@ async fn connect<R: tauri::Runtime>(
 
     let snapshot = connection.snapshot();
 
-    if let Ok(mut slot) = session.connection.lock() {
-        *slot = Some(connection);
+    // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
+    // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
+    // cadeado tomado não há espera entre conferir e gravar: ou a geração ainda
+    // é desta e o slot é dela, ou a conexão dela é fechada e nada do que vem
+    // abaixo — o endereço da sessão, o alvo, a lista de visitados — vale para
+    // ela. Gravar sem conferir punha a conexão da velha no lugar da nova.
+    let substituida = match session.connection.lock() {
+        Ok(mut slot) if session.geracao_vale(geracao) => {
+            *slot = Some(connection);
+            None
+        }
+        Ok(_) => Some(connection),
+        Err(_) => None,
+    };
+    if let Some(connection) = substituida {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
     }
 
     // A metade invisível da lista de visitados: sem isto a seção da tela de
@@ -1637,9 +1718,20 @@ mod a_entrada_velha_que_chega_tarde {
         }
     }
 
+    /// Um retrato desta máquina, para o `connect` ter um efeito de entrada que
+    /// o servidor vê: ele manda o retrato guardado logo depois de conectar.
+    fn guardar_um_retrato() {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("o retrato de teste não codificou");
+        std::fs::write(casa().join("retrato.png"), png.into_inner())
+            .expect("o retrato de teste não gravou");
+    }
+
     /// O cenário inteiro, do começo da velha à mensagem: o que ficou errado.
     async fn a_velha_termina_depois_da_nova() -> Vec<String> {
-        casa();
+        guardar_um_retrato();
         let (velho, servidor_velho) = servidor("Velho").await;
         let (novo, servidor_novo) = servidor("Novo").await;
         let app = app();
@@ -1690,7 +1782,9 @@ mod a_entrada_velha_que_chega_tarde {
             .map(|canal| canal.id)
             .expect("o servidor novo não tem canal nenhum");
 
-        // Solta a velha, e ela termina depois da nova.
+        // Solta a velha, e ela termina depois da nova. O que o servidor velho
+        // recebe dela daqui em diante é o que os efeitos de entrada fizeram.
+        let mut do_velho = servidor_velho.server().events.subscribe();
         drop(trava);
         let velha = tokio::time::timeout(Duration::from_secs(10), velha)
             .await
@@ -1778,6 +1872,24 @@ mod a_entrada_velha_que_chega_tarde {
         if no_novo != 1 {
             vermelhos.push(format!(
                 "a pessoa não está presente no servidor novo ({no_novo})"
+            ));
+        }
+
+        // Nem os efeitos de entrada valem para ela: o retrato desta máquina
+        // não vai ao servidor que a pessoa deixou.
+        let mut retratos = 0;
+        while let Ok(evento) = do_velho.try_recv() {
+            if matches!(
+                evento,
+                seele_server::server::Event::PersonIconChanged { .. }
+            ) {
+                retratos += 1;
+            }
+        }
+        if retratos != 0 {
+            vermelhos.push(format!(
+                "a tentativa velha mandou o retrato ao servidor que a pessoa deixou ({retratos} \
+                 vez(es)): os efeitos de entrada valeram para ela"
             ));
         }
         vermelhos
@@ -13849,10 +13961,17 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
                 origem_da_impressao: Some(OrigemDaImpressao::Lista),
                 a_lista_guardou: false,
             },
+            substituida: false,
         };
         let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(&falha) else {
             panic!("a falha da entrada tem de serializar para objeto");
         };
+        // A marca da tentativa substituída (lote E54) só aparece quando é
+        // verdade: toda outra recusa chega à janela com a forma de antes.
+        assert!(
+            !mapa.contains_key("substituida"),
+            "uma recusa que não é de tentativa substituída chegou à janela com a marca: {mapa:?}"
+        );
         for chave in ["error", "trail", "origem_da_impressao", "a_lista_guardou"] {
             assert!(
                 mapa.contains_key(chave),
