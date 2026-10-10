@@ -368,6 +368,58 @@
   flex: 0 0 auto;
 }
 
+/* ---------- o palco dos MODs ----------
+
+   `chamada.palco` (rascunho da API 6, §5): uma vista alternativa à grade. Com
+   ele à frente, a grade sai da vista e continua no DOM, repintada a cada
+   retrato — `display: none`, e não uma sobreposição por posição: a altura da
+   grade muda com a transmissão de tela acima dela, e uma geometria calculada
+   ficaria para trás. A barra é do produto, nas cores do núcleo. */
+#vista-chamada[data-palco-de-mods] > .chamada-grade { display: none; }
+
+.palco-de-mods {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.palco-de-mods[hidden] { display: none; }
+
+.palco-de-mods-barra {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+  padding: 4px 16px;
+  border-bottom: var(--seele-b) solid var(--seele-linha);
+  background: var(--nucleo-painel);
+  color: var(--nucleo-texto);
+  flex: 0 0 auto;
+}
+
+.palco-de-mods-quem {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* O miolo rola por dentro: um palco maior que a coluna não empurra a barra
+   para fora da janela. */
+.palco-de-mods-miolo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.palco-de-mods-acrescimos {
+  flex: 0 0 auto;
+  max-height: 40%;
+  overflow: auto;
+  border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+.palco-de-mods-acrescimos[hidden] { display: none; }
+
 /* ---------- a grade de cartões ----------
 
    O comp corta o roster em `slice(0,4)` e é sempre 2×2. Aqui a grade se acomoda

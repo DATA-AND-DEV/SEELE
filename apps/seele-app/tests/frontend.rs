@@ -582,18 +582,23 @@ fn every_command_the_frontend_calls_is_registered() {
 // `bytesDoSom` em `base.js`, e a lista voltou ao estado de repouso, que é
 // vazia.
 //
-// `onde_estou` entrou em 2026-10-09, com a metade do `main.rs` da tarefa 18 da
-// F7 (Plano 2): é a única resposta a «estou no meu servidor?», e quem pergunta
-// hoje são o `estado_da_porta().hospedando` da `tela-sessao.js` e o
-// `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
-// outras frentes quando o comando nasceu. Sai quando eles passarem a
-// perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+// `onde_estou` esteve aqui de 2026-10-09 a 2026-10-10: entrou com a metade do
+// `main.rs` da tarefa 18 da F7 (Plano 2), e saiu quando a faixa `#toque` passou
+// a perguntá-lo (tarefa 26). **A metade da casca da 18 continua por fazer**: o
+// `estado_da_porta().hospedando` da `tela-sessao.js` e o `nossoServidorEm` da
+// `tela-boot.js` ainda respondem «estou no meu servidor?» pelo critério deles.
+// Está no andamento da F7, porque este guarda já não a cobra.
 //
 // `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
 // 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
 // commit isolado do `main.rs`, porque a F7 também mexe lá, e saiu quando a
 // gestão de MODs passou a chamá-lo com a pergunta dos dois MODs de tema.
-const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
+//
+// Os onze comandos da sala viva da F7 (tarefas 23, 24, 27 e 29) estiveram aqui
+// em 2026-10-10, entre a metade do Rust e a da casca, no ramo `0.16/sala-viva`,
+// e saíram quando a faixa `#toque` e o PERFIL passaram a chamá-los. A lista
+// voltou ao estado de repouso, que é vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -11421,6 +11426,16 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
         hospedar.contains("nossoServidorEm = anfitriao.aqui"),
         "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
     );
+    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). A dispensa
+    // é `nossoServidorEm === ultimoAlvo`: entrando por outro endereço, quem
+    // hospeda volta a ser mandado conferir a própria chave. O sim de quem
+    // hospeda não depende mais disto: desde a impressão, o Rust reconhece o
+    // servidor daqui pela chave (`onde_estou_em`), entre por onde entrar.
+    assert!(
+        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
+        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: a \
+         dispensa de conferir a própria chave não casa com o alvo: {hospedar}"
+    );
 
     // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
     // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
@@ -14315,8 +14330,52 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
         nomes.sort();
         juntar(nome, format!("escolha {}", nomes.join("|")));
     }
+    // **Os tokens por região** (17i, item 3): as regiões pelos nomes, e as
+    // cores que uma região redefine.
+    let lista_js = |inicio: &str| -> Vec<String> {
+        let (_, resto) = casca
+            .split_once(inicio)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de base.js"));
+        let mut nomes: Vec<String> = resto
+            .split(']')
+            .next()
+            .unwrap_or_default()
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes
+    };
+    let mut regioes_da_casca: Vec<String> =
+        entradas_js(objeto_js(&casca, "const REGIOES_DO_TEMA = Object.freeze("))
+            .into_iter()
+            .map(|(nome, _)| nome)
+            .collect();
+    regioes_da_casca.sort();
+    juntar(
+        "regioes".to_owned(),
+        format!(
+            "regioes {}; {}",
+            regioes_da_casca.join("|"),
+            lista_js("const CORES_DA_REGIAO = Object.freeze([").join("|")
+        ),
+    );
 
     let rust = read("../../crates/seele-proto/src/mods.rs");
+    let lista_rust = |inicio: &str| -> String {
+        let mut nomes: Vec<String> = rust
+            .split_once(inicio)
+            .and_then(|(_, resto)| resto.split_once("];"))
+            .map(|(corpo, _)| corpo)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de seele-proto"))
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes.join("|")
+    };
     let tabela: String = rust
         .split_once("pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[")
         .and_then(|(_, resto)| resto.split_once("\n];"))
@@ -14352,6 +14411,12 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
                 .collect();
             nomes.sort();
             format!("escolha {}", nomes.join("|"))
+        } else if forma.starts_with("Regioes") {
+            format!(
+                "regioes {}; {}",
+                lista_rust("pub const REGIOES_DO_TEMA: &[&str] = &["),
+                lista_rust("pub const CORES_DA_REGIAO: &[&str] = &[")
+            )
         } else {
             panic!("uma forma de `CHAVES_DO_TEMA` que este guarda não conhece: {forma}");
         };
@@ -14538,6 +14603,65 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
             "a fase `{fase}` não tem frase no painel"
         );
     }
+}
+
+/// **Só a atualização pela gestão reaplica o MOD no servidor que esta janela
+/// hospeda** — lote X da F5, ADR 0045.
+///
+/// `instalar_mod_do_catalogo` serve a dois usos, e o `main.rs` decide pelo que
+/// a janela diz (`UsoDoCatalogo`). Obter o que outro servidor exige reaplicava
+/// no servidor hospedado aqui e trocava a versão que ele exige pela do outro:
+/// na pergunta dos MODs, também depois de a pessoa desistir dela, e na sessão
+/// que já aceitou. Cada chamada da janela diz o seu uso, e o uso certo.
+#[test]
+fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
+    let camada = read("ui/camada-mods.js");
+    let base = read("ui/base.js");
+    let chamadas = [
+        (
+            js_function(&camada, "async function obterOConjunto("),
+            "obter",
+            "a obtenção da pergunta dos MODs de outro servidor",
+        ),
+        (
+            js_function(&base, "async function buscarOQueFaltaSeJaFoiAceito("),
+            "obter",
+            "a obtenção da sessão que já aceitou",
+        ),
+        (
+            js_function(&camada, "async function instalarDoCatalogo("),
+            "atualizar",
+            "a atualização pela gestão (QA-01)",
+        ),
+    ];
+    for (corpo, uso, quem) in &chamadas {
+        assert!(
+            corpo.contains("invoke(\"instalar_mod_do_catalogo\"")
+                && corpo.contains(&format!("uso: \"{uso}\"")),
+            "{quem} não diz `uso: \"{uso}\"` ao `instalar_mod_do_catalogo`: a obtenção para \
+             outro servidor troca o MOD do servidor hospedado aqui, ou a atualização pela \
+             gestão deixa o servidor exigindo a versão antiga:\n{corpo}"
+        );
+    }
+
+    // E nenhuma outra chamada, nem uma sem uso: o comando recusa a que não diz,
+    // e uma chamada nova tem de entrar aqui com o uso dela.
+    let todas = without_comments(&scripts());
+    let usos: Vec<bool> = todas
+        .split("invoke(\"instalar_mod_do_catalogo\"")
+        .skip(1)
+        .map(|depois| {
+            depois
+                .split_once(')')
+                .is_some_and(|(argumentos, _)| argumentos.contains("uso: \""))
+        })
+        .collect();
+    assert_eq!(
+        usos, [true; 3],
+        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+         sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
+         reaplicar no servidor hospedado aqui sem ninguém ter decidido"
+    );
 }
 
 /// **Nada da sessão anterior é admitido na seguinte** — etapa E2.
@@ -15690,19 +15814,24 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 /// Um campo servindo a duas perguntas responde mal a uma delas. São dois
 /// campos, e este guarda cobra as duas metades: que `aplicar_mod` leia o certo,
 /// e que o certo seja preenchido antes de qualquer condição sobre o endereço.
+///
+/// Desde a rodada 1 do lote X da F5, `aplicar_mod` grava o sim por
+/// `gravar_o_sim_de_quem_hospeda`, que só o grava quando a sessão é com o
+/// servidor daqui. É ali que o endereço desta sessão é lido.
 #[test]
 fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let fonte = read("src/main.rs");
 
     let aplicar = body_of(&fonte, "async fn aplicar_mod");
+    let grava = body_of(&fonte, "fn gravar_o_sim_de_quem_hospeda");
     assert!(
-        aplicar.contains("endereco_da_sessao"),
-        "`aplicar_mod` não lê o endereço desta sessão: {aplicar}"
+        aplicar.contains("gravar_o_sim_de_quem_hospeda(") && grava.contains("endereco_da_sessao"),
+        "`aplicar_mod` não grava o sim pelo endereço desta sessão: {aplicar}\n{grava}"
     );
     assert!(
-        !aplicar.contains("session.alvo"),
+        !aplicar.contains("session.alvo") && !grava.contains("session.alvo"),
         "`aplicar_mod` lê `alvo`, que é «onde voltar» e está vazio justamente \
-         quando quem liga o MOD é quem hospeda:\n{aplicar}"
+         quando quem liga o MOD é quem hospeda:\n{aplicar}\n{grava}"
     );
 
     // E o preenchimento vem antes da condição que exclui o servidor local.
@@ -16808,8 +16937,18 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
                 .any(|(onde, _)| {
                     // A chamada e o nome do ponto na mesma vizinhança: a consulta é
                     // escrita em várias linhas, com o alvo e o preferido entre elas.
-                    let inicio = onde.saturating_sub(400);
-                    let fim = (onde + 400).min(telas.len());
+                    // **Na fronteira de um caractere**: os 400 bytes caem no
+                    // meio de um «ç» tão bem quanto num espaço, e o fatiamento
+                    // por byte entrava em pânico (o comentário do palco, em
+                    // `mods-contribuicoes.js`, achou).
+                    let mut inicio = onde.saturating_sub(400);
+                    while !telas.is_char_boundary(inicio) {
+                        inicio -= 1;
+                    }
+                    let mut fim = (onde + 400).min(telas.len());
+                    while !telas.is_char_boundary(fim) {
+                        fim += 1;
+                    }
                     telas[inicio..fim].contains("escolherSubstituicao")
                 });
         assert!(
@@ -16840,7 +16979,7 @@ fn decorar_nao_volta_a_tabela_sem_quem_o_aplique() {
     if !tabela.contains("\"decorar\"") {
         // O estado de hoje: suspenso, e recusado pelo nome.
         assert!(
-            registro.contains("«decorar» não está na API 4"),
+            registro.contains("«decorar» não está nesta API"),
             "`decorar` saiu da tabela e a recusa deixou de dizer o nome dele: um \
              MOD que o peça lê «aceita adicionar, e veio decorar» e conclui que \
              errou o ponto, que não foi o que ele fez"
@@ -18060,7 +18199,7 @@ fn todo_estado_de_topo_da_sessao_e_esquecido_ao_sair() {
     for (saida, corpo) in [
         (
             "SAIR DO SERVIDOR (`ejetar`)",
-            body_of(&sessao, "async function ejetar()"),
+            body_of(&sessao, "async function ejetar("),
         ),
         (
             "o fim de sessão (`limparSessaoEncerrada`)",
@@ -18671,5 +18810,316 @@ fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
     assert!(
         main.contains("fn estado_do_servidor(") && main.contains("estado_do_servidor,"),
         "o comando `estado_do_servidor` não existe ou não está registrado"
+    );
+}
+
+/// O código de produção de um arquivo Rust do app: sem comentários, e sem os
+/// módulos `#[cfg(test)]`, que no `main.rs` ficam espalhados entre funções de
+/// produção. Cada módulo de teste é de primeiro nível e fecha numa linha `}`
+/// sozinha, que é onde a produção recomeça.
+fn producao_rust(fonte: &str) -> String {
+    let marca = "\n#[cfg(test)]\n";
+    let mut pedacos = fonte.split(marca);
+    let mut producao = pedacos.next().unwrap_or_default().to_owned();
+    for pedaco in pedacos {
+        if let Some(fim) = pedaco.find("\n}\n") {
+            producao.push_str(&pedaco[fim + 3..]);
+        }
+    }
+    without_comments(&producao)
+}
+
+/// **A semente da sala nunca atravessa a webview** (tarefa 23 da F7).
+///
+/// Ela é a chave privada da pessoa: quem a tem entra em qualquer servidor como
+/// ela e atende a sala dela. A FFI a entrega num tipo que não é `Serialize`
+/// (`seele_ffi::SementeDaSala`), e o que sobra para prender é o app: ela é
+/// pedida num lugar só, `sala::subir_em`, e vai direto a `iniciar_sala`; nenhum
+/// comando a toca; e o app nunca mexe na `identity.key`, que é da FFI. A cópia
+/// da primeira abertura a nomeia só para deixá-la de fora.
+#[test]
+fn a_semente_da_sala_nunca_atravessa_a_webview() {
+    let mut pedidas = Vec::new();
+    for entrada in std::fs::read_dir(app_dir().join("src")).expect("a pasta src") {
+        let caminho = entrada.expect("uma entrada de src").path();
+        if caminho.extension().is_none_or(|extensao| extensao != "rs") {
+            continue;
+        }
+        let nome = caminho
+            .file_name()
+            .and_then(|nome| nome.to_str())
+            .expect("um nome de arquivo")
+            .to_owned();
+        let producao = producao_rust(&read(&format!("src/{nome}")));
+        pedidas.extend(producao.matches("semente_da_sala(").map(|_| nome.clone()));
+        // A única menção legítima: a cópia da primeira abertura **deixa a chave
+        // de fora** (ADR 0061), e para isso a nomeia.
+        let mencoes: Vec<&str> = producao
+            .lines()
+            .filter(|linha| linha.contains("identity.key"))
+            .map(str::trim)
+            .filter(|linha| !linha.starts_with("const DEIXADOS_DE_FORA_DA_COPIA:"))
+            .collect();
+        assert!(
+            mencoes.is_empty(),
+            "`src/{nome}` mexe na `identity.key`: a chave é da FFI, e o app só recebe dela o \
+             que precisa (a impressão, o código, a semente para a sala). Linhas: {mencoes:?}"
+        );
+    }
+    assert_eq!(
+        pedidas,
+        ["sala.rs"],
+        "a semente da sala é pedida fora de `sala::subir_em`, ou em mais de um lugar: cada \
+         pedido a mais é um caminho para ela chegar a um comando"
+    );
+
+    let sala = producao_rust(&read("src/sala.rs"));
+    let subir_em: String = sala
+        .split("async fn subir_em(")
+        .nth(1)
+        .and_then(|depois| depois.split("\n}\n").next())
+        .expect("`sala::subir_em`")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        subir_em.contains("letsemente=seele_ffi::semente_da_sala(config)")
+            && subir_em.matches("semente.").count() == 1
+            && subir_em.contains("iniciar_sala(porta,semente.bytes(),"),
+        "a semente faz em `sala::subir_em` outra coisa além de ir a `iniciar_sala`"
+    );
+
+    let main = read("src/main.rs");
+    let comandos = main.split("#[tauri::command]").skip(1);
+    for comando in comandos {
+        let corpo = comando.split("\n}\n").next().unwrap_or_default();
+        assert!(
+            !corpo.contains("semente_da_sala") && !corpo.contains("SementeDaSala"),
+            "um comando toca a semente da sala, e o que um comando devolve chega à webview:\n{}",
+            corpo.lines().take(3).collect::<Vec<_>>().join("\n")
+        );
+    }
+}
+
+/// **O toque chama, e não toma a tela** (tarefa 24 da F7, spec de 23/09,
+/// «Testes» 8).
+///
+/// O toque pede atenção ao sistema (`request_user_attention`: o Dock pula no
+/// macOS, a barra pisca no Windows), e **nunca** põe a janela na frente nem a
+/// desminimiza: quem está jogando, apresentando ou digitando noutro programa
+/// decide se olha. E a subida da sala liga o vigia da campainha: os testes do
+/// vigia (`toque::o_toque_por_evento`) o provam sozinho, e só este texto prova
+/// que a sala de verdade o chama.
+#[test]
+fn o_toque_chama_a_atencao_e_nunca_toma_a_tela() {
+    for arquivo in ["src/toque.rs", "src/sala.rs"] {
+        let producao = producao_rust(&read(arquivo));
+        for proibido in ["set_focus(", "unminimize("] {
+            assert!(
+                !producao.contains(proibido),
+                "`{arquivo}` chama `{proibido}` no caminho do toque: o toque toma a tela de quem \
+                 está noutra coisa"
+            );
+        }
+    }
+    let toque = producao_rust(&read("src/toque.rs"));
+    assert!(
+        toque.contains(".request_user_attention(tipo)"),
+        "o toque deixou de pedir atenção ao sistema: com a janela atrás de outra, ninguém vê"
+    );
+
+    let sala = producao_rust(&read("src/sala.rs"));
+    let subir_agora: String = sala
+        .split("async fn subir_agora<R: Runtime>(")
+        .nth(1)
+        .and_then(|depois| depois.split("\n}\n").next())
+        .expect("`sala::subir_agora`")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let assina = subir_agora
+        .find("letcampainha=recepcao.map(|recepcao|recepcao.assinar());")
+        .expect("a subida da sala não assina a campainha");
+    let guarda = subir_agora
+        .find("guardar_se_ainda_subindo(")
+        .expect("a subida da sala não guarda a sala");
+    assert!(
+        assina < guarda,
+        "a campainha é assinada depois de a sala ir para as hospedagens: um toque no instante \
+         seguinte não teria quem o ouvisse"
+    );
+    assert!(
+        subir_agora.contains("tokio::spawn(crate::toque::ouvir(app.clone(),avisos,"),
+        "a subida da sala não liga o vigia da campainha: quem tocar não chega à casca"
+    );
+}
+
+/// **O `connect` confere a sala desta máquina pelo código** (o ATENDER, tarefa
+/// 27 da F7). A regra é `sala::codigo_se_for_a_sala`, provada lá; o que só se vê
+/// aqui é o `connect` usá-la, porque ele é um comando Tauri e não roda sem casca.
+/// Sem ela, entrar na própria sala seria um primeiro contato cego: a sala
+/// apresenta a chave da pessoa, e lista nenhuma guardou o certificado dela.
+#[test]
+fn o_connect_confere_a_sala_desta_maquina_pelo_codigo() {
+    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        connect.contains("letcodigo_da_sala=sala::codigo_se_for_a_sala(&session,&server,&home);")
+            && connect.contains("codigo_esperado:codigo_da_sala,"),
+        "o `connect` não confere a sala desta máquina pelo código: o ATENDER entraria na própria \
+         sala sem conferir quem atende"
+    );
+}
+
+/// As variantes de um `enum` de `src/sala.rs`, pelo texto: cada linha de quatro
+/// espaços que começa com maiúscula, entre `enum {nome}` e o `}` que o fecha.
+fn variantes_da_sala(nome: &str) -> Vec<String> {
+    let sala = without_comments(&read("src/sala.rs"));
+    let Some(depois) = sala.split(&format!("enum {nome} {{")).nth(1) else {
+        panic!("`src/sala.rs` não tem mais o `enum {nome}`");
+    };
+    let corpo = depois.split("\n}").next().unwrap_or_default();
+    let variantes: Vec<String> = corpo
+        .lines()
+        .filter(|linha| linha.starts_with("    ") && !linha.starts_with("     "))
+        .filter_map(|linha| {
+            let nome: String = linha
+                .trim()
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .collect();
+            nome.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+                .then_some(nome)
+        })
+        .collect();
+    assert!(
+        !variantes.is_empty(),
+        "a leitura do `enum {nome}` não achou variante nenhuma"
+    );
+    variantes
+}
+
+/// **Toda variante da sala pessoal tem frase** (tarefas 23 a 29 da F7). O Rust
+/// manda enums e a frase é do `frases.js`: uma variante nova sem frase é uma
+/// sala que sabe e não conta. As que não têm nada a dizer (subindo, esperando o
+/// ponto, registrada) estão lá com `null`, de propósito, para a decisão ficar
+/// escrita.
+#[test]
+fn toda_variante_da_sala_pessoal_tem_frase() {
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(depois) = frases.split("const SALA_PESSOAL = Object.freeze({").nth(1) else {
+        panic!("o `frases.js` não tem o bloco `SALA_PESSOAL`");
+    };
+    let bloco = depois.split("\n});").next().unwrap_or_default();
+    let mut faltam = Vec::new();
+    for tipo in [
+        "EstadoDaSala",
+        "Registro",
+        "FalhaDaSala",
+        "FalhaAoAtender",
+        "FalhaNaAgenda",
+    ] {
+        for variante in variantes_da_sala(tipo) {
+            if !bloco.contains(&format!("{variante}:")) {
+                faltam.push(format!("{tipo}::{variante}"));
+            }
+        }
+    }
+    // O desfecho do toque chega numa palavra (`toque::palavra` e o
+    // `sala_fechou`), e cada uma tem a frase dela.
+    let toque = without_comments(&read("src/toque.rs"));
+    let palavras: Vec<&str> = toque
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|resto| resto.split('"').next())
+        .chain(["sala_fechou"])
+        .collect();
+    assert!(
+        palavras.len() >= 6,
+        "a leitura dos desfechos quebrou: {palavras:?}"
+    );
+    for palavra in palavras {
+        if !bloco.contains(&format!("{palavra}:")) {
+            faltam.push(format!("desfecho `{palavra}`"));
+        }
+    }
+    assert!(
+        faltam.is_empty(),
+        "a sala pessoal manda à casca o que o `frases.js` não sabe dizer: {faltam:?}"
+    );
+    assert!(
+        !bloco.to_lowercase().contains("linha"),
+        "o texto da sala diz «linha», que a tela nunca diz (ADR 0033)"
+    );
+}
+
+/// **A faixa do toque chama e não toma a tela, e é núcleo de confiança**
+/// (tarefas 24 e 26 da F7; spec de 23/09, «O toque», «Testes» 8 e 11).
+///
+/// O contrato é o da faixa de quem bate à porta, que os dois guardas logo acima
+/// provam: fora de toda tela (e por isso fora de toda região de MOD), sem
+/// `role=alert`, sem `aria-modal`, sem `autofocus`, e o script nunca toma o
+/// teclado. A frase sai uma vez por aparição, pela transição para a vista. E os
+/// eventos de MOD nunca ficam sabendo dela: a faixa não fala com MOD nenhum.
+/// O comportamento (o anúncio, o RECUSAR, o ATENDER que desmonta só o cliente e
+/// a falha dupla) é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
+    let page = without_comments(&read("ui/index.html"));
+    let Some(faixa) = page.find("id=\"toque\"") else {
+        panic!("a página não tem mais a faixa do toque");
+    };
+    let Some(primeira) = page.find("<section id=\"tela-") else {
+        panic!("index.html no longer draws screens");
+    };
+    assert!(
+        faixa < primeira,
+        "a faixa do toque entrou numa tela: um `hidden` nela a tira junto, e uma região \
+         de MOD pode cobri-la"
+    );
+    let tag = tag_with_id(&read("ui/index.html"), "toque");
+    for roubo in ["role=\"alert\"", "aria-modal", "autofocus"] {
+        assert!(
+            !tag.contains(roubo),
+            "a faixa do toque leva `{roubo}`, que interrompe quem está lendo ou falando: <{tag}>"
+        );
+    }
+    assert!(
+        tag.contains("data-sala-pessoal"),
+        "a faixa do toque não leva `data-sala-pessoal`, e as cascas do navegador, que não \
+         têm sala, a mostrariam: <{tag}>"
+    );
+
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    for roubo in [".focus(", "abrirTela(", "avisarOsModsDaTela", "postMessage"] {
+        assert!(
+            !toque.contains(roubo),
+            "a faixa do toque usa `{roubo}`: ela toma o teclado, ou conta a um MOD quem está \
+             ligando"
+        );
+    }
+    let desenhar = js_function(&toque, "async function desenharToque(");
+    let Some(fala) = desenhar.find("if (faixa.hidden) anunciar(") else {
+        panic!("a faixa do toque não diz a frase na transição para a vista:\n{desenhar}");
+    };
+    let Some(mostra) = desenhar.find("faixa.hidden = false") else {
+        panic!("nada mostra a faixa do toque:\n{desenhar}");
+    };
+    assert!(
+        fala < mostra,
+        "a frase é dita depois de a faixa aparecer, e a pergunta «estava escondida?» já \
+         responde não:\n{desenhar}"
+    );
+
+    // O ATENDER desmonta só o cliente: quem hospeda não derruba o próprio
+    // servidor ao atender.
+    let entrar = js_function(&toque, "async function entrarNaSalaAoAtender(");
+    assert!(
+        entrar.contains("ejetar(true)") && !entrar.contains("\"disconnect\""),
+        "o ATENDER não desmonta só o cliente:\n{entrar}"
     );
 }

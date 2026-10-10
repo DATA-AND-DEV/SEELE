@@ -518,6 +518,10 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
         // `hospedagens` desde a tarefa 18 da F7 (décima integração): o servidor
         // guardado e a sala pessoal moram em `Session::hospedagens`, e um comando
         // que só lia `.hospedagem` passou a ler `.hospedagens`.
+        // `.sala` e `.toques` pela sala viva da F7: o `estado_da_sala` e o
+        // `toques_agora` leem `Session::sala` e `Session::toques`, e são neutros
+        // («não há sala neste lugar»). Na grafia do corpo, que o `rustfmt` quebra
+        // em uma linha por elo da cadeia.
         let toca = [
             "hospedagem",
             "hospedagens",
@@ -531,6 +535,8 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
             // deles mexe na hospedagem sem escrever a palavra no corpo.
             "servidor_do_mod",
             "sala::",
+            ".sala\n",
+            ".toques\n",
         ]
         .iter()
         .any(|marca| corpo.contains(marca));
@@ -551,10 +557,19 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
     // navegador não há registro, e essa parte não acontece. A decisão fica
     // escrita aqui, com o motivo, e o comando continua conferido: ele tem de
     // estar numa lista que o atende.
-    let leem_e_seguem_a_lista: &[(&str, &str)] = &[(
-        "renomear_server",
-        "o nome vai pela conexão; o registro local só existe para quem hospeda",
-    )];
+    let leem_e_seguem_a_lista: &[(&str, &str)] = &[
+        (
+            "renomear_server",
+            "o nome vai pela conexão; o registro local só existe para quem hospeda",
+        ),
+        // Desde a sala viva da F7 (décima segunda integração): o `connect`
+        // pergunta se o alvo é a sala desta máquina, para conferi-la pelo
+        // código. No navegador não há sala, e a conexão é a da 2.6.
+        (
+            "connect",
+            "só pergunta se o alvo é a sala desta máquina; no navegador não há sala",
+        ),
+    ];
     for (comando, _motivo) in leem_e_seguem_a_lista {
         assert!(
             mexem.contains(*comando),

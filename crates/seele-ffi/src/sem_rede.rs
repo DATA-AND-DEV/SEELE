@@ -34,6 +34,7 @@ pub(crate) fn shared(apelido: &str) -> Arc<Shared> {
         rtt_micros: std::sync::atomic::AtomicU64::new(0),
         jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
         caminho: Mutex::new(None),
+        impressao_do_servidor: Mutex::new(None),
         signal: AtomicU8::new(0),
         running: AtomicBool::new(true),
         pending_weights: Mutex::new(Vec::new()),

@@ -567,3 +567,86 @@ Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxilia
   que usa o `Client::connect` direto, que a 14b não tocou. Sozinho, o arquivo
   deu 3 de 3, 8 de 8 cada, em 4 s.
 
+
+## A sala viva, no `0.16/sala-viva` (10/10)
+
+O conjunto (tarefas 23, 24, 26, 27 e 29) num ramo à parte, para entrar inteiro:
+não há sala que toca sem ninguém atender. A décima primeira integração veio
+para o ramo em `97ae94a7`, com um conflito só, no `AGUARDANDO_TELA`, e os dois
+lados mantidos.
+
+**A FFI** (`6be6d49a`, `d0a97fba` no núcleo):
+- `semente_da_sala` e `codigo_desta_maquina` saem da pasta da identidade, pela
+  mesma chave da impressão. A `SementeDaSala` não é `Serialize` nem `Clone`, e o
+  `Debug` não a imprime;
+- `ConnectConfig::codigo_esperado`: o ATENDER confere `Esperada::Codigo`.
+  `esperada_de` decide num lugar só, e com o código o quarto não é perguntado;
+- a agenda, a leitura da entrada, o `Codigo`, o `Toque` (que toca na saída
+  padrão quando a escolhida sumiu) e o `ponto_de_encontro`;
+- **achado no caminho, e consertado no núcleo:** um primeiro contato pelo
+  código saía `FirstContact`, o cego. O código prova a chave dentro do TLS, e
+  agora sai `FirstContactVerified`. A `atender_pela_ponte.rs` o prova de ponta a
+  ponta.
+
+**O Rust do app:**
+
+| tarefa | o que | commits |
+|---|---|---|
+| 23 | a sala sobe sozinha no `setup` e anuncia o estado por `seele://sala`; a semente nunca atravessa a webview (guarda); o ponto é o de quem liga; «receber ligações» desliga e religa; a sala que termina de subir depois do desligar desce | `3f3c3aff`, `7546c9e8` |
+| 24 | o toque por `seele://toque`, com pedido de atenção ao sistema e nunca `set_focus`; o alarme para no último toque **e quando a sala fecha**, provado com a sala de verdade; cada toque é anotado na agenda | `fad0662a` |
+| 27 | `atender`, `recusar` e `encerrar_a_ligacao`; o `connect` confere a sala desta máquina pelo código; `onde_estou_na`, com o nome e a forma do lote X da F5 | `fcbc38cd` |
+| 29 | `meu_codigo`, a agenda e o `bloquear` ao vivo; **os bloqueados valem desde a subida da sala** | `17966fba` |
+
+**A casca:**
+
+| peça | commits |
+|---|---|
+| as frases da sala (isolado) e o guarda delas | `f2c57c54`, `0838a73c` |
+| o `ejetar(soOCliente)`, que desmonta só o cliente (isolado) | `58926889` |
+| a faixa `#toque`, ATENDER e RECUSAR, com a parte da ponte do navegador | `a53c1349` |
+| o SEU CÓDIGO, a agenda, «receber ligações» e a linha da sala, com a outra parte da ponte | `086082d0` |
+
+- Toda peça da sala leva `data-sala-pessoal`, que as cascas do navegador
+  escondem (combinado com a F8). Os lados na ponte são os do
+  `F4/ponte-no-pc.md`. Escrevi as linhas a pedido da F4, junto com a peça que
+  chama cada comando: o guarda dela reprova uma ponte que lista o que a casca
+  ainda não chama.
+- Os roteiros novos `toque.js` e `sala.js` só valem no desktop. A F4 os tira da
+  rodada da casca larga.
+
+**Medido no caminho:**
+- o desligar precisava do `encerrar`: com o `despedir`, a 8385 ficava presa, e
+  religar não subia;
+- a primeira reversão do bloqueio ao vivo **travou** a suíte em vez de
+  reprovar: sem rede, nenhuma sessão vence o toque. Toda espera de decisão dos
+  testes da sala ganhou prazo;
+- este Chromium sem cabeça não roda `requestAnimationFrame`: o `#anuncio` fica
+  vazio com a frase dita, e o roteiro mede a chamada do `anunciar`;
+- sob carga de 21 a 54 (outras sessões compilando), três coisas reprovaram uma
+  vez e passaram sozinhas: duas provas do enlace com prazo de 20 s, o
+  `discar_pelo_codigo` e o `texto-maior-390` da bancada do celular. Nenhuma
+  passa pelo que mudou; é a assinatura da pendência 29.
+
+**Como está:** app 694/694; carga limpa; 31/31 roteiros; `ponte-sem-gesto`
+limpa nas duas cascas; a bancada do celular inteira (72, e o G3 igual nos dois
+motores). A conformidade da sala (`atender_pela_ponte`, `sala_pessoal`,
+`ligar_pelo_codigo`, `discar_pelo_codigo`, `quarto_em_paralelo`) passou arquivo
+por arquivo depois da décima primeira integração; desde o aviso da
+orquestradora, não rodo conformidade.
+
+**O que ficou de fora, dito para não ficar calado:**
+- **a metade da casca da 18**: o `estado_da_porta().hospedando` da
+  `tela-sessao.js` e o `nossoServidorEm` da `tela-boot.js` ainda respondem «estou
+  no meu servidor?» pelo critério deles. O `onde_estou` saiu da
+  `AGUARDANDO_TELA` quando a faixa passou a chamá-lo, e o guarda já não cobra
+  isso;
+- as tarefas 19 e 20 (o `disconnect` que desmonta só o cliente, e VOLTAR AO MEU
+  SERVIDOR), a confirmação ao fechar (21, só o guardado) e as 28 e 30 (LIGAR pelo
+  código), que esperam a 16 da F1;
+- o lembrete de atenção do macOS (`Informational` a cada 4 s) não tem teste de
+  relógio; a lógica do alarme tem;
+- a agenda é um arquivo regravado inteiro. Um nome dado no instante em que um
+  toque termina pode perder uma das duas escritas. Raro, e da conveniência e não
+  da segurança;
+- **depois do encontro com o lote X da F5:** o teste da sala com
+  `codigo_esperado` provando `onde_estou_na == Pessoal` pela chave.

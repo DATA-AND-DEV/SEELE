@@ -46,7 +46,9 @@ mod executor;
 mod icone;
 mod mods;
 mod reducao;
+mod sala;
 mod servidores;
+mod toque;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -157,6 +159,13 @@ struct Session {
     /// comando que as criou: cada uma fica de pé enquanto a janela estiver
     /// aberta, e independente da sessão. Ver [`Hospedagens`].
     hospedagens: Mutex<Hospedagens>,
+    /// Como está a sala pessoal: subindo, no ar (e se o código está achável),
+    /// ou por que não subiu. Guardado aqui para a tela que abre depois do
+    /// anúncio por [`sala::CANAL_DA_SALA`]; ver [`estado_da_sala`].
+    sala: Mutex<sala::EstadoDaSala>,
+    /// Quem está tocando na sala pessoal agora (tarefa 24 da F7): a faixa da
+    /// tela que abre com o toque já tocando, e o toque de quem se atende.
+    toques: Mutex<toque::Toques>,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -1233,6 +1242,11 @@ async fn connect(
     // é perguntado na ponte, e ele não volta para cá (ver o começo desta
     // função e `caminhos_a_guardar`).
     let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
+    // **A sala desta máquina se confere pelo código** (o ATENDER, tarefa 27 da
+    // F7): ela apresenta a chave da pessoa, e nenhuma lista guardou o
+    // certificado dela. Com o código, vale ele
+    // (`seele_ffi::ConnectConfig::codigo_esperado`).
+    let codigo_da_sala = sala::codigo_se_for_a_sala(&session, &server, &home);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -1246,7 +1260,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
-        codigo_esperado: None,
+        codigo_esperado: codigo_da_sala,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1522,8 +1536,8 @@ async fn connect(
 struct Hospedagens {
     /// O servidor guardado no ar, quando está.
     guardado: Option<Hospedado>,
-    /// A sala pessoal no ar, quando está. Ela sobe sozinha a partir da tarefa
-    /// 23 do plano da F7; até lá, ninguém a sobe.
+    /// A sala pessoal no ar, quando está. Ela sobe sozinha, no `setup`
+    /// ([`sala::subir`]), e o estado dela é [`Session::sala`].
     pessoal: Option<Hospedado>,
 }
 
@@ -1533,14 +1547,15 @@ impl Hospedagens {
         self.guardado.as_ref().map(|guardado| &guardado.hospedagem)
     }
 
-    /// As portas em que as duas atendem, para [`onde_estou_em`].
-    fn portas(&self) -> (Option<u16>, Option<u16>) {
-        let porta = |hospedado: &Option<Hospedado>| {
+    /// As impressões das duas, para [`onde_estou_em`]: é pela chave que uma
+    /// sessão é de uma delas, e não pelo endereço por onde entrou.
+    fn impressoes(&self) -> (Option<String>, Option<String>) {
+        let impressao = |hospedado: &Option<Hospedado>| {
             hospedado
                 .as_ref()
-                .map(|hospedado| hospedado.hospedagem.endereco().port())
+                .map(|hospedado| hospedado.hospedagem.impressao_digital().to_owned())
         };
-        (porta(&self.guardado), porta(&self.pessoal))
+        (impressao(&self.guardado), impressao(&self.pessoal))
     }
 }
 
@@ -1572,32 +1587,248 @@ enum OndeEstou {
 /// hospedagens, nenhum dos três dizia em qual das duas a sessão está.
 #[tauri::command]
 fn onde_estou(session: State<'_, Session>) -> OndeEstou {
+    onde_estou_na(&session)
+}
+
+/// [`onde_estou`] sobre a sessão, para quem não é comando: o sim de quem
+/// hospeda ([`gravar_o_sim_de_quem_hospeda`]) e o ATENDER
+/// ([`sala::atender_em`]) perguntam a mesma coisa, e têm de ouvir a mesma
+/// resposta.
+fn onde_estou_na(session: &Session) -> OndeEstou {
     let endereco = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|onde| onde.clone());
+    // A chave que o aperto de mão conferiu (`Connection::impressao_do_servidor`),
+    // em toda conexão que subiu, e não só nas que o veredito conta.
+    let impressao = session
+        .connection()
+        .ok()
+        .and_then(|connection| connection.impressao_do_servidor());
     let (guardado, pessoal) = session
         .hospedagens
         .lock()
-        .map_or((None, None), |hospedagens| hospedagens.portas());
-    onde_estou_em(endereco.as_deref(), guardado, pessoal)
+        .map_or((None, None), |hospedagens| hospedagens.impressoes());
+    onde_estou_em(
+        endereco.as_deref(),
+        impressao.as_deref(),
+        guardado.as_deref(),
+        pessoal.as_deref(),
+    )
 }
 
-/// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
-/// guardado e a sala atendem quando estão no ar.
+/// Como está a sala pessoal desta máquina agora (tarefa 23 da F7).
+///
+/// O estado chega por [`sala::CANAL_DA_SALA`] a cada mudança; este comando é
+/// para a tela que abre depois do anúncio, e não o ouviu.
+#[tauri::command]
+fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
+    session
+        .sala
+        .lock()
+        .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
+}
+
+/// ATENDER (tarefa 27 da F7): decide na campainha, e diz à casca se a sessão já
+/// está na sala ou por onde entrar nela.
+///
+/// O resto de «Atender, nesta ordem» (spec de 23/09) é da casca: encerrar os
+/// MODs, desmontar só o cliente e entrar pelo `connect` no `alvo` do
+/// [`sala::Atendido`], que o `connect` confere pelo código desta máquina. Se
+/// entrar falhar duas vezes, a casca chama [`encerrar_a_ligacao`], e ninguém
+/// fica sozinho na sala.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn atender(
+    session: State<'_, Session>,
+    quem: String,
+) -> Result<sala::Atendido, sala::FalhaAoAtender> {
+    let atendido = sala::atender_em(&session, &quem);
+    tracing::info!(?atendido, "ATENDER");
+    atendido
+}
+
+/// SEU CÓDIGO (tarefa 29 da F7): o código desta máquina, o do dono da sala que
+/// ela sobe. Ao lado de `impressao_desta_maquina`, e da mesma chave.
+///
+/// # Errors
+///
+/// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
+/// mostra o campo vazio.
+#[tauri::command]
+fn meu_codigo(app: AppHandle) -> Result<String, ()> {
+    sala::meu_codigo_em(&config_dir(&app)).ok_or(())
+}
+
+/// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda::NaoGravou`] quando a agenda não abre.
+#[tauri::command]
+fn contatos_da_agenda(app: AppHandle) -> Result<Vec<sala::ContatoNaTela>, sala::FalhaNaAgenda> {
+    sala::contatos_em(&config_dir(&app))
+}
+
+/// Dá um nome a uma pessoa da agenda (tarefa 29 da F7). Vazio tira o nome.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn dar_nome_na_agenda(
+    app: AppHandle,
+    codigo: String,
+    nome: String,
+) -> Result<(), sala::FalhaNaAgenda> {
+    sala::dar_nome_em(&config_dir(&app), &codigo, &nome)
+}
+
+/// Bloqueia ou desbloqueia um código (tarefa 29 da F7), **ao vivo**: quem
+/// estava tocando e passou a estar bloqueado para de tocar como recusado.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn bloquear(
+    app: AppHandle,
+    session: State<'_, Session>,
+    codigo: String,
+    bloqueado: bool,
+) -> Result<(), sala::FalhaNaAgenda> {
+    // A campainha mora em `session.hospedagens`: `sala::bloquear_em` leva a ela
+    // a lista nova, quando a sala está no ar.
+    let bloqueio = sala::bloquear_em(&session, &config_dir(&app), &codigo, bloqueado);
+    tracing::info!(?bloqueio, bloqueado, "bloqueio na agenda");
+    bloqueio
+}
+
+/// RECUSAR (tarefa 27 da F7).
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn recusar(session: State<'_, Session>, quem: String) -> Result<(), sala::FalhaAoAtender> {
+    let recusado = sala::recusar_em(&session, &quem);
+    tracing::info!(?recusado, "RECUSAR");
+    recusado
+}
+
+/// Encerra a ligação da sala pessoal: quem estava dentro ouve «chamada
+/// encerrada» (tarefa 27 da F7). Devolve quantos estavam.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender::SemSala`] quando a sala não está no ar.
+#[tauri::command]
+fn encerrar_a_ligacao(session: State<'_, Session>) -> Result<usize, sala::FalhaAoAtender> {
+    let encerrada = sala::encerrar_a_ligacao_em(&session);
+    tracing::info!(?encerrada, "a ligação da sala pessoal foi encerrada");
+    encerrada
+}
+
+/// Quem está tocando na sala pessoal agora (tarefa 24 da F7), para a tela que
+/// abre com o toque já tocando. Cada toque chega por [`toque::CANAL_DO_TOQUE`]
+/// quando começa e quando para.
+#[tauri::command]
+fn toques_agora(session: State<'_, Session>) -> Vec<toque::NaFaixa> {
+    session
+        .toques
+        .lock()
+        .map(|toques| toques.na_faixa())
+        .unwrap_or_default()
+}
+
+/// «Não receber ligações», no PERFIL: desliga a sala inteira, ou a religa
+/// (tarefa 23 da F7). A escolha atravessa o processo.
+///
+/// Desligar despede a sala: quem estiver nela, ou tocando, ouve «chamada
+/// encerrada». Religar sobe a sala de novo, a menos que ela já esteja no ar ou
+/// subindo. O que aconteceu chega pelo [`sala::CANAL_DA_SALA`], como na subida
+/// do `setup`.
+///
+/// # Errors
+///
+/// Nunca: uma escolha que não foi guardada vale até o app fechar, e o
+/// `seele.log` diz.
+#[tauri::command]
+async fn receber_ligacoes(
+    app: AppHandle,
+    session: State<'_, Session>,
+    receber: bool,
+) -> Result<(), ()> {
+    match preferencias(&app).map(|mut preferencias| preferencias.set_receber_ligacoes(receber)) {
+        Some(Ok(())) => {}
+        Some(Err(erro)) => tracing::warn!(
+            %erro,
+            receber,
+            "a escolha de receber ligações não foi guardada: vale até o app fechar"
+        ),
+        None => tracing::warn!(
+            receber,
+            "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
+        ),
+    }
+    if !receber {
+        sala::desligar(&app).await;
+        return Ok(());
+    }
+    let no_ar = session
+        .hospedagens
+        .lock()
+        .is_ok_and(|hospedagens| hospedagens.pessoal.is_some());
+    let subindo = session
+        .sala
+        .lock()
+        .is_ok_and(|estado| *estado == sala::EstadoDaSala::Subindo);
+    if !no_ar && !subindo {
+        tauri::async_runtime::spawn(sala::subir_agora(
+            app.clone(),
+            sala::Subida::da_producao(&app),
+        ));
+    }
+    Ok(())
+}
+
+/// [`onde_estou`] sem estado: o endereço da sessão, a impressão que ela
+/// conferiu, e as impressões do guardado e da sala quando estão no ar.
+///
+/// **Pela chave, e não pelo endereço** (lote X da F5, decisão da orquestradora).
+/// `127.0.0.1`, `localhost`, `[::1]`, o endereço da rede local, o público e o
+/// nome são a mesma hospedagem, porque a chave é a mesma; um endereço velho
+/// que hoje é de outra máquina tem outra chave, e é `Outro`. Comparar pela
+/// porta de loopback errava os dois: o próprio link não era o guardado, e o
+/// servidor de outra versão que o HOSPEDAR COM ESTA da F6 põe em `127.0.0.1`
+/// passava por ele.
+///
+/// O endereço só diz se há sessão. Com sessão e sem impressão (uma conexão
+/// sem aperto de mão), é `Outro`: falha fechado.
 fn onde_estou_em(
     endereco: Option<&str>,
-    porta_do_guardado: Option<u16>,
-    porta_da_sala: Option<u16>,
+    impressao: Option<&str>,
+    do_guardado: Option<&str>,
+    da_sala: Option<&str>,
 ) -> OndeEstou {
-    let Some(endereco) = endereco else {
+    if endereco.is_none() {
         return OndeEstou::Nenhum;
+    }
+    let e_a_chave_de = |hospedada: Option<&str>| {
+        impressao
+            .zip(hospedada)
+            .is_some_and(|(da_sessao, hospedada)| da_sessao.eq_ignore_ascii_case(hospedada))
     };
-    match porta_desta_maquina(endereco) {
-        Some(porta) if Some(porta) == porta_do_guardado => OndeEstou::Guardado,
-        Some(porta) if Some(porta) == porta_da_sala => OndeEstou::Pessoal,
-        Some(_) | None => OndeEstou::Outro,
+    if e_a_chave_de(do_guardado) {
+        OndeEstou::Guardado
+    } else if e_a_chave_de(da_sala) {
+        OndeEstou::Pessoal
+    } else {
+        OndeEstou::Outro
     }
 }
 
@@ -4223,15 +4454,24 @@ async fn mods_instalados(
                 .iter()
                 .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash);
             ModNaTela {
-                // O escolhido é um identificador, e a marca vai só no pacote
-                // ligado dele: o outro conteúdo do mesmo MOD não pinta nada.
-                pinta: enabled && quem_pinta.as_deref() == Some(instalado.id.as_str()),
+                pinta: pinta_o_servidor(enabled, quem_pinta.as_deref(), &instalado.id),
                 enabled,
                 exigencia_vale_na_rede,
                 instalado,
             }
         })
         .collect())
+}
+
+/// **Se este pacote é o que pinta o servidor desta janela** — o
+/// [`ModNaTela::pinta`] (D-api-5; tarefa 17f.0 da F3).
+///
+/// O escolhido que o servidor guarda é um identificador, e a marca vai só no
+/// pacote **ligado** dele: com dois conteúdos do mesmo MOD no disco, o outro
+/// não pinta nada. Uma função pura para o teste de unidade ver o lado do
+/// Rust: a bancada da gestão responde o `mods_instalados` por conta própria.
+fn pinta_o_servidor(ligado: bool, quem_pinta: Option<&str>, id: &str) -> bool {
+    ligado && quem_pinta == Some(id)
 }
 
 /// Um pacote guardado nesta máquina, como a manutenção local o desenha.
@@ -5222,17 +5462,305 @@ async fn aplicar_mod(
 
     // `endereco_da_sessao` e não `alvo`: o segundo é «onde voltar» e exclui um
     // servidor hospedado aqui, que é justamente o caso em que quem liga o MOD é
-    // quem hospeda. Ver o campo.
+    // quem hospeda. Ver o campo. E só quando a sessão é com o servidor daqui
+    // (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    Ok(identidade)
+}
+
+/// Grava o sim de quem hospeda ao conjunto que acabou de aplicar, **só** quando
+/// a sessão é com o servidor guardado que esta janela hospeda.
+///
+/// Há dois gravadores: [`aplicar_mod`] (a atualização pela gestão, QA-01) e
+/// [`aplicar_conjunto_de_mods`] (o SALVAR). Os dois gravavam
+/// `aceitar(endereco_da_sessao, identidade do servidor daqui)`, fosse a
+/// sessão com quem fosse. `Aceites::guardar` substitui o sim por alvo, então,
+/// com a sessão em outro servidor S, o sim que a pessoa deu a S era trocado
+/// por uma identidade que não descreve S:
+/// - S perguntava de novo;
+/// - quando o conjunto de S era igual ao daqui, S **não** perguntava, contra o
+///   ADR 0045;
+/// - a lista de aceites mostrava um sim a S que ninguém deu.
+///
+/// **O portão é [`onde_estou_na`]**, a única resposta a «estou no meu
+/// servidor?», e ela é pela chave: o sim vai ao endereço da sessão quando a
+/// impressão que ela conferiu é a do guardado, entre por onde ela entrar.
+/// Fora dele nada é gravado, nem na sala, que não tem MODs, nem sem guardado
+/// de pé.
+fn gravar_o_sim_de_quem_hospeda(
+    config: &str,
+    session: &Session,
+    identidade: &str,
+) -> Result<(), String> {
     let alvo = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    gravar_o_sim_se_for_o_guardado(config, alvo.as_deref(), onde_estou_na(session), identidade)
+}
+
+/// [`gravar_o_sim_de_quem_hospeda`] sem a sessão: o endereço dela e a
+/// resposta de [`onde_estou_na`]. Separada para os testes, que não sobem
+/// hospedagem nem conexão.
+fn gravar_o_sim_se_for_o_guardado(
+    config: &str,
+    endereco_da_sessao: Option<&str>,
+    onde: OndeEstou,
+    identidade: &str,
+) -> Result<(), String> {
+    match endereco_da_sessao {
+        Some(alvo) if onde == OndeEstou::Guardado => {
+            seele_ffi::mods::aceitar(config, alvo, identidade)
+        }
+        _ => Ok(()),
     }
-    Ok(identidade)
+}
+
+/// **O sim de quem hospeda vai só ao servidor guardado** — lote X da F5,
+/// ADR 0045. Ver [`gravar_o_sim_de_quem_hospeda`].
+///
+/// Os dois gravadores têm `AppHandle` e pedem uma hospedagem de pé, que num
+/// teste abriria UPnP e PCP no roteador, e a impressão da sessão pede uma
+/// conexão. Por isso o que roda aqui é:
+/// - a resposta de [`onde_estou_em`], a função pura sobre impressões que o
+///   portão usa;
+/// - a identidade que cada gravador calcula, sobre o banco de verdade do
+///   servidor hospedado, em memória;
+/// - a gravação, sobre o arquivo de aceites de verdade, numa pasta de passagem.
+///
+/// O guarda de texto-fonte prende os dois gravadores ao `onde_estou`.
+#[cfg(test)]
+mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{definir_conjunto, enable, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{
+        corpo_de, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
+        gravar_o_sim_se_for_o_guardado, onde_estou_em, Session,
+    };
+
+    /// A chave do guardado, a da sala e a de outro servidor S.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
+
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: "autor/rpg".to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// Uma pasta de configuração só deste teste.
+    fn pasta(nome: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("seele-lote-x-{nome}-"))
+            .tempdir()
+            .unwrap()
+    }
+
+    /// A identidade que cada gravador grava, calculada como ele a calcula.
+    fn identidades_dos_gravadores() -> [(&'static str, String); 2] {
+        let salvar = Persistence::open(&Location::Memory).unwrap();
+        definir_conjunto(&salvar, &[versao("1.0.0", 'a')]).unwrap();
+        let atualizar = Persistence::open(&Location::Memory).unwrap();
+        enable(&atualizar, &versao("1.0.0", 'a')).unwrap();
+        enable(&atualizar, &versao("2.0.0", 'b')).unwrap();
+        [
+            (
+                "o SALVAR da gestão (`aplicar_conjunto_de_mods`)",
+                conjunto_exigido(&salvar).unwrap().identidade,
+            ),
+            (
+                "a atualização pela gestão (`aplicar_mod`, QA-01)",
+                conjunto_exigido(&atualizar).unwrap().identidade,
+            ),
+        ]
+    }
+
+    /// Um caso do portão: por onde a sessão entrou, a chave que ela conferiu, e
+    /// as das hospedagens no ar.
+    struct Caso {
+        nome: &'static str,
+        endereco: &'static str,
+        impressao: &'static str,
+        guardado: Option<&'static str>,
+        grava: bool,
+    }
+
+    /// O que o portão grava, para cada caso e cada gravador: a lista do que
+    /// saiu diferente do esperado.
+    fn o_portao_nos(casos: &[Caso]) -> Vec<String> {
+        let mut errados = Vec::new();
+        for (quem, daqui) in identidades_dos_gravadores() {
+            for caso in casos {
+                let config = pasta("portao");
+                let config = config.path().to_str().unwrap();
+                let antes = "5".repeat(64);
+                seele_ffi::mods::aceitar(config, caso.endereco, &antes).unwrap();
+                let onde = onde_estou_em(
+                    Some(caso.endereco),
+                    Some(caso.impressao),
+                    caso.guardado,
+                    Some(SALA),
+                );
+                gravar_o_sim_se_for_o_guardado(config, Some(caso.endereco), onde, &daqui).unwrap();
+                let esperado = if caso.grava { &daqui } else { &antes };
+                if seele_ffi::mods::aceite_de(config, caso.endereco).as_deref()
+                    != Some(esperado.as_str())
+                {
+                    errados.push(format!("{quem}, {}", caso.nome));
+                }
+            }
+        }
+        errados
+    }
+
+    /// A medida: a sessão em S, a janela hospedando, e o sim de S fica como
+    /// estava. Pela chave, também com S no mesmo endereço do guardado.
+    #[test]
+    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sessão em S, noutro endereço",
+                endereco: "198.51.100.7:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "a sessão em S, no mesmo endereço do guardado",
+                endereco: "127.0.0.1:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui: \
+             {errados:?}. Ele pergunta de novo, ou, com os conjuntos iguais, não pergunta, e a \
+             lista de aceites mostra um sim que a pessoa não deu (ADR 0045)"
+        );
+    }
+
+    /// O A04 e o próprio link: com a chave do guardado, o sim de quem hospeda é
+    /// gravado, entre a sessão pelo `aqui` ou pelo endereço da rede local que o
+    /// convite anuncia.
+    #[test]
+    fn na_sessao_do_guardado_o_sim_e_gravado_entre_por_onde_entrar() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "o `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+            Caso {
+                nome: "o próprio link, pela rede local",
+                endereco: "192.168.1.20:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "na sessão do servidor guardado, o sim de quem hospeda não foi gravado: \
+             {errados:?}. Quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
+        );
+    }
+
+    /// A sala pessoal não tem MODs, e sem guardado de pé não há servidor daqui:
+    /// nos dois, nada é gravado.
+    #[test]
+    fn na_sala_e_sem_guardado_nada_e_gravado() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sala pessoal",
+                endereco: "127.0.0.1:8385",
+                impressao: SALA,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "sem guardado de pé, no `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: None,
+                grava: false,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "o sim de quem hospeda foi gravado fora do servidor guardado: {errados:?} (ADR 0045)"
+        );
+
+        // E pela sessão de verdade: sem conexão nem hospedagem, nada.
+        let sessao = Session::default();
+        *sessao.endereco_da_sessao.lock().unwrap() = Some("127.0.0.1:8383".to_owned());
+        let config = pasta("sem-guardado");
+        let config = config.path().to_str().unwrap();
+        gravar_o_sim_de_quem_hospeda(config, &sessao, &"6".repeat(64)).unwrap();
+        assert_eq!(
+            seele_ffi::mods::aceite_de(config, "127.0.0.1:8383"),
+            None,
+            "sem conexão nem hospedagem, o sim de quem hospeda foi gravado no endereço da sessão"
+        );
+    }
+
+    /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
+    /// e ela só pela resposta de `onde_estou`.
+    ///
+    /// As agulhas são montadas por `concat!`, para que este guarda não case com
+    /// o próprio texto, e a fonte é lida sem as linhas de comentário.
+    #[test]
+    fn os_dois_gravadores_passam_pelo_sim_de_quem_hospeda() {
+        let fonte = fonte_sem_comentarios();
+        let fora: Vec<&str> = [
+            ("aplicar_mod", concat!("async fn aplicar_mod", "(")),
+            (
+                "aplicar_conjunto_de_mods",
+                concat!("async fn aplicar_conjunto_de_mods", "("),
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, cabecalho)| {
+            let corpo = corpo_de(&fonte, cabecalho);
+            !(corpo.contains(concat!("gravar_o_sim_de_quem_hospeda", "("))
+                && !corpo.contains(concat!("seele_ffi::mods::aceitar", "("))
+                && !corpo.contains(concat!("endereco_da", "_sessao")))
+        })
+        .map(|(quem, _)| quem)
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "{fora:?} grava o sim sem passar por `gravar_o_sim_de_quem_hospeda`: com a sessão \
+             em outro servidor, o sim dele vira a identidade do servidor daqui (ADR 0045)"
+        );
+
+        let grava = corpo_de(&fonte, concat!("fn gravar_o_sim_de_quem_hospeda", "("));
+        let se_for = corpo_de(&fonte, concat!("fn gravar_o_sim_se_for_o_guardado", "("));
+        let comando = corpo_de(&fonte, concat!("fn onde_estou", "(session"));
+        assert!(
+            grava.contains(concat!("onde_estou_na", "(session)"))
+                && grava.contains(concat!("gravar_o_sim_se_for_o", "_guardado("))
+                && se_for.contains(concat!("onde == OndeEstou::", "Guardado"))
+                && comando.contains(concat!("onde_estou_na", "(&session)")),
+            "o sim de quem hospeda deixou de passar pela resposta de `onde_estou`, ou o comando \
+             deixou de dar a mesma: são duas respostas a «estou no meu servidor?», e o sim vai \
+             a um servidor que não é o guardado (ADR 0045):\n{grava}\n{se_for}\n{comando}"
+        );
+    }
 }
 
 /// O texto deste arquivo, para os guardas que afirmam sobre ele.
@@ -7642,16 +8170,10 @@ async fn aplicar_conjunto_de_mods(
     // **Um sim, para o conjunto resultante.** Salvar já é a decisão informada
     // do operador sobre o conjunto que vai valer; perguntar de novo, logo
     // depois, seria perguntar o que acabou de ser respondido. Isto não autoriza
-    // mudança futura, e não dispensa o aceite de quem entra.
-    let alvo = session
-        .endereco_da_sessao
-        .lock()
-        .ok()
-        .and_then(|a| a.clone());
-    if let Some(alvo) = alvo {
-        seele_ffi::mods::aceitar(&config_dir(&app), &alvo, &identidade)
-            .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
-    }
+    // mudança futura, e não dispensa o aceite de quem entra. E só ao servidor
+    // daqui (lote X, rodada 1): ver `gravar_o_sim_de_quem_hospeda`.
+    gravar_o_sim_de_quem_hospeda(&config_dir(&app), &session, &identidade)
+        .map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
     Ok(identidade)
 }
 
@@ -7854,12 +8376,51 @@ async fn catalogo_de_mods() -> Result<catalogo::Catalogo, catalogo::FalhaNoCatal
     catalogo::buscar_catalogo().await
 }
 
+/// Para que a janela chama [`instalar_mod_do_catalogo`]. São dois usos, e só
+/// um deles mexe no servidor que esta janela hospeda.
+///
+/// **Lote X da F5, ADR 0045.** Instalar, exigir num servidor e consentir são
+/// três decisões. O comando servia aos dois usos sem saber qual era cada um, e
+/// reaplicava no servidor hospedado aqui todo MOD que ele já exigia. Na
+/// obtenção para outro servidor, isso trocava a versão que o servidor daqui
+/// exige pela que o outro exige, e quem estava dentro dele caía. Acontecia
+/// também depois de a pessoa desistir da pergunta, porque a obtenção segue até
+/// o fim.
+///
+/// **Obrigatório, sem padrão.** Uma chamada que não diz o uso é recusada pela
+/// ponte do Tauri antes de baixar qualquer coisa, e a recusa chega à tela. Um
+/// padrão seria um defeito calado nos dois sentidos: reaplicar por omissão é o
+/// achado deste lote, e não reaplicar por omissão traz o QA-01 de volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum UsoDoCatalogo {
+    /// A gestão de MODs atualiza um MOD pelo catálogo (`instalarDoCatalogo`,
+    /// em `camada-mods.js`). Se o servidor hospedado aqui já o exigia, a
+    /// exigência passa aos bytes novos: é o QA-01.
+    Atualizar,
+    /// A janela obtém o que um servidor exige para entrar nele
+    /// (`obterOConjunto`, em `camada-mods.js`, e
+    /// `buscarOQueFaltaSeJaFoiAceito`, em `base.js`). Só instala: o servidor
+    /// hospedado aqui continua exigindo o que exigia.
+    Obter,
+}
+
+/// Se este uso reaplica o MOD no servidor que esta janela hospeda: só a
+/// atualização pela gestão, e só de um MOD que ele já exigia. Ver
+/// [`UsoDoCatalogo`].
+fn reaplica_no_hospedado(uso: UsoDoCatalogo, ja_exigido: bool) -> bool {
+    ja_exigido && uso == UsoDoCatalogo::Atualizar
+}
+
 /// Baixa do catálogo uma versão de um MOD e a instala nesta máquina.
 ///
 /// Confere a assinatura do catálogo, a lista de revogações, e o **hash do
 /// conjunto** dos arquivos baixados — nesta ordem, e nada vai para o disco
 /// antes da última. Instala desligado, como toda instalação de MOD: ligar é
 /// outra decisão.
+///
+/// `uso` diz quem chama ([`UsoDoCatalogo`]), e a resposta diz se o MOD foi
+/// reaplicado no servidor que esta janela hospeda.
 ///
 /// # Errors
 ///
@@ -7870,8 +8431,9 @@ async fn instalar_mod_do_catalogo(
     session: State<'_, Session>,
     id: String,
     versao: String,
+    uso: UsoDoCatalogo,
 ) -> Result<bool, catalogo::FalhaNoCatalogo> {
-    let ja_exigido = mod_exigido_aqui(&session, &id).await;
+    let reaplicar = reaplica_no_hospedado(uso, mod_exigido_aqui(&session, &id).await);
     let hash = catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
 
     // **QA-01: baixar não é aplicar.** Trocar os arquivos no disco não mexe na
@@ -7888,13 +8450,14 @@ async fn instalar_mod_do_catalogo(
     // sim, mesmo sendo a mesma decisão de segundos antes.
     //
     // Só para um MOD que **já estava exigido**: atualizar não é ligar, e um que
-    // estava desligado continua desligado.
-    if ja_exigido {
+    // estava desligado continua desligado. E só quando quem chama é a gestão:
+    // obter o que um servidor exige não decide nada sobre o servidor daqui.
+    if reaplicar {
         aplicar_mod(app, session, id, hash, true)
             .await
             .map_err(|erro| catalogo::FalhaNoCatalogo::NaoAplicou(format!("{erro:?}")))?;
     }
-    Ok(ja_exigido)
+    Ok(reaplicar)
 }
 
 /// Se este MOD está exigido pelo servidor que **esta janela** hospeda.
@@ -7908,6 +8471,160 @@ async fn mod_exigido_aqui(session: &State<'_, Session>, id: &str) -> bool {
     let persistence = persistence.lock().await;
     seele_server::persistence::mods::enabled(&persistence)
         .is_ok_and(|ligados| ligados.iter().any(|ligado| ligado.id == id))
+}
+
+/// **Só a atualização pela gestão reaplica no servidor hospedado** — lote X da
+/// F5, ADR 0045. Ver [`UsoDoCatalogo`].
+///
+/// O comando tem `AppHandle` e baixa da rede, e não roda num teste. O que roda
+/// é o banco de verdade do servidor hospedado (`Persistence`), em memória, com
+/// a decisão do comando ([`reaplica_no_hospedado`]) e o efeito de
+/// [`aplicar_mod`]: `habilitar_mod` grava a linha **por identificador**, então
+/// reaplicar troca a versão exigida e a identidade do conjunto — e, com a
+/// identidade nova, o servidor derruba quem estava dentro.
+#[cfg(test)]
+mod so_a_gestao_reaplica_no_servidor_hospedado {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{enable, enabled, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{corpo_de, fonte_sem_comentarios, reaplica_no_hospedado, UsoDoCatalogo};
+
+    const ID: &str = "autor/rpg";
+
+    /// Uma versão do MOD, como o banco do servidor a guarda.
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: ID.to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// O servidor que esta janela hospeda, exigindo o MOD na 1.0.0.
+    fn hospedado() -> Persistence {
+        let banco = Persistence::open(&Location::Memory).unwrap();
+        enable(&banco, &versao("1.0.0", 'a')).unwrap();
+        banco
+    }
+
+    /// A versão que o servidor hospedado exige, e a identidade que ele anuncia.
+    fn exigido(banco: &Persistence) -> (String, String) {
+        let ligado = enabled(banco)
+            .unwrap()
+            .into_iter()
+            .find(|ligado| ligado.id == ID)
+            .unwrap();
+        (ligado.version, conjunto_exigido(banco).unwrap().identidade)
+    }
+
+    /// O que `instalar_mod_do_catalogo` faz no servidor hospedado depois de
+    /// baixar `chegou`: a decisão do comando, sobre o que `mod_exigido_aqui`
+    /// lê, e, se ela mandar, o que `aplicar_mod` grava.
+    fn depois_de_baixar(banco: &Persistence, uso: UsoDoCatalogo, chegou: &EnabledMod) -> bool {
+        let ja_exigido = enabled(banco).unwrap().iter().any(|ligado| ligado.id == ID);
+        let reaplicar = reaplica_no_hospedado(uso, ja_exigido);
+        if reaplicar {
+            enable(banco, chegou).unwrap();
+        }
+        reaplicar
+    }
+
+    /// A medida do lote: outro servidor exige o mesmo MOD na 2.0.0, e a janela
+    /// o obtém. É a mesma chamada na pergunta dos MODs, depois de a pessoa
+    /// desistir dela (a obtenção segue até o fim) e na sessão que já aceitou.
+    #[test]
+    fn obter_o_que_outro_servidor_exige_nao_troca_a_versao_do_servidor_hospedado() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Obter, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert_eq!(
+            depois, antes,
+            "obter o MOD que outro servidor exige trocou a versão exigida pelo servidor que \
+             esta janela hospeda, de {} para {}: quem estava dentro dele cai, e ele passa a \
+             exigir uma versão que quem hospeda não escolheu (ADR 0045)",
+            antes.0, depois.0
+        );
+        assert!(
+            !reaplicou,
+            "a obtenção para outro servidor respondeu que reaplicou no servidor hospedado aqui"
+        );
+    }
+
+    /// O QA-01 continua: atualizar pela gestão um MOD que o servidor daqui
+    /// exige passa a exigência aos bytes novos, e um que ele não exige fica
+    /// desligado.
+    #[test]
+    fn a_atualizacao_pela_gestao_continua_reaplicando() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert!(
+            reaplicou && depois.0 == "2.0.0" && depois.1 != antes.1,
+            "atualizar pela gestão um MOD exigido aqui deixou de reaplicar: o disco tem a \
+             versão nova e o servidor continua exigindo a antiga (QA-01) — {antes:?} → {depois:?}"
+        );
+
+        let vazio = Persistence::open(&Location::Memory).unwrap();
+        assert!(
+            !depois_de_baixar(&vazio, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'))
+                && enabled(&vazio).unwrap().is_empty(),
+            "atualizar um MOD que o servidor daqui não exige o ligou: atualizar não é ligar"
+        );
+    }
+
+    /// A janela diz o uso com estas palavras (`camada-mods.js`, `base.js`), e
+    /// nenhuma outra passa.
+    #[test]
+    fn a_janela_diz_o_uso_com_as_palavras_que_o_comando_entende() {
+        let ler = |texto: &str| serde_json::from_str::<UsoDoCatalogo>(texto).ok();
+        assert_eq!(
+            (ler("\"obter\""), ler("\"atualizar\"")),
+            (Some(UsoDoCatalogo::Obter), Some(UsoDoCatalogo::Atualizar)),
+            "o comando deixou de entender a palavra que a janela manda: toda obtenção e \
+             toda atualização pelo catálogo são recusadas antes de baixar"
+        );
+        assert_eq!(
+            (ler("null"), ler("\"Atualizar\"")),
+            (None, None),
+            "o comando aceita um uso que a janela não escreve: uma chamada sem uso passaria \
+             a ter um padrão calado"
+        );
+    }
+
+    /// O comando reaplica pela decisão que lê o uso, e por nenhum outro
+    /// caminho. Sem isto, a decisão acima podia estar certa e o comando voltar
+    /// a reaplicar por `mod_exigido_aqui` sozinho.
+    ///
+    /// A agulha do cabeçalho é montada por `concat!` (rodada 1): escrita
+    /// inteira, ela casava com este mesmo teste quando o comando mudava de
+    /// nome ou de cabeçalho, e o guarda conferia a si mesmo.
+    #[test]
+    fn o_comando_reaplica_pela_decisao_que_le_o_uso() {
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, concat!("async fn instalar_mod_do_catalogo", "("));
+        let decide = corpo.find("reaplica_no_hospedado(uso,");
+        let aplica = corpo.find("if reaplicar {");
+        assert!(
+            corpo.contains("uso: UsoDoCatalogo,")
+                && matches!((decide, aplica), (Some(decide), Some(aplica)) if decide < aplica)
+                && corpo.matches("aplicar_mod(").count() == 1
+                && corpo.contains("Ok(reaplicar)"),
+            "`instalar_mod_do_catalogo` deixou de reaplicar só pela decisão que lê o uso: a \
+             obtenção para outro servidor volta a trocar o MOD do servidor hospedado aqui \
+             (ADR 0045):\n{corpo}"
+        );
+    }
 }
 
 /// Todo sim que esta máquina já deu a um servidor.
@@ -10467,6 +11184,13 @@ fn main() {
                     }
                 });
             }
+            // **A sala pessoal sobe sozinha, em segundo plano** (tarefa 23 da
+            // F7): a escada custa até ~4 s, e a janela não espera por ela. O
+            // estado chega à casca por `sala::CANAL_DA_SALA`.
+            tauri::async_runtime::spawn(sala::subir(
+                app.handle().clone(),
+                sala::Subida::da_producao(app.handle()),
+            ));
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })
@@ -10511,6 +11235,16 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             onde_estou,
+            estado_da_sala,
+            receber_ligacoes,
+            toques_agora,
+            atender,
+            recusar,
+            encerrar_a_ligacao,
+            meu_codigo,
+            contatos_da_agenda,
+            dar_nome_na_agenda,
+            bloquear,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
@@ -10810,7 +11544,7 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
 
 #[cfg(test)]
 mod a_tela_le_o_que_o_rust_manda {
-    use super::ModNaTela;
+    use super::{pinta_o_servidor, ModNaTela};
     use seele_ffi::mods::ModInstalado;
     use std::collections::BTreeSet;
 
@@ -10860,6 +11594,29 @@ mod a_tela_le_o_que_o_rust_manda {
     /// A regra é sobre a **forma** do defeito, e não sobre o nome `instalado`:
     /// ler `x.<meio>.<folha>` em que `<meio>` não é chave e `<folha>` é, é
     /// exatamente atravessar um invólucro que o `flatten` apagou.
+    /// **O `pinta` nos dois valores** (tarefa 17f.0 da F3): o pacote ligado do
+    /// escolhido pinta; o outro MOD ligado, o pacote desligado do mesmo MOD e
+    /// um servidor sem escolhido, não.
+    #[test]
+    fn so_o_pacote_ligado_do_escolhido_pinta_o_servidor() {
+        assert!(
+            pinta_o_servidor(true, Some("seele/estilo"), "seele/estilo"),
+            "o pacote ligado do escolhido tem de pintar"
+        );
+        assert!(
+            !pinta_o_servidor(true, Some("seele/estilo"), "seele/noite"),
+            "outro MOD ligado não pinta"
+        );
+        assert!(
+            !pinta_o_servidor(false, Some("seele/estilo"), "seele/estilo"),
+            "o outro conteúdo do mesmo MOD, desligado, não pinta"
+        );
+        assert!(
+            !pinta_o_servidor(true, None, "seele/estilo"),
+            "sem escolhido, ninguém pinta"
+        );
+    }
+
     #[test]
     fn a_pagina_nao_atravessa_um_involucro_que_o_flatten_apagou() {
         let chaves = chaves_serializadas();
@@ -16993,47 +17750,90 @@ mod a_saida_despede_as_hospedagens {
 
 #[cfg(test)]
 mod a_resposta_a_estou_no_meu_servidor {
-    use super::{endereco_desta_maquina, onde_estou_em, porta_desta_maquina, OndeEstou};
+    use super::{
+        corpo_de, endereco_desta_maquina, fonte_sem_comentarios, onde_estou_em,
+        porta_desta_maquina, Hospedado, Hospedagens, OndeEstou,
+    };
+    use seele_server::hospedagem::Hospedagem;
+
+    /// A chave do guardado, a da sala e a de um servidor S qualquer.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
 
     #[test]
-    fn onde_estou_nas_quatro_situacoes() {
-        // A tela perguntava isto de três jeitos, e com duas hospedagens nenhum
-        // dizia em qual delas a sessão está.
+    fn onde_estou_pela_chave_e_nao_pelo_endereco() {
         assert_eq!(
-            onde_estou_em(None, Some(8383), Some(8385)),
-            OndeEstou::Nenhum
+            onde_estou_em(None, None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Nenhum,
+            "sem sessão, não há onde estar"
+        );
+        // Os cinco endereços por onde se entra na mesma hospedagem: a chave é
+        // a mesma, e a resposta também. A impressão chega da conexão em
+        // maiúsculas aqui de propósito: a comparação não as diferencia.
+        let fora: Vec<&str> = [
+            "127.0.0.1:8383",
+            "localhost:8383",
+            "[::1]:8383",
+            "192.168.1.20:8383",
+            "casa.exemplo:8383",
+        ]
+        .into_iter()
+        .filter(|endereco| {
+            onde_estou_em(
+                Some(endereco),
+                Some(&GUARDADO.to_ascii_uppercase()),
+                Some(GUARDADO),
+                Some(SALA),
+            ) != OndeEstou::Guardado
+        })
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "a sessão com a chave do guardado, aberta por {fora:?}, não foi dita no guardado: \
+             o próprio link e os outros nomes da mesma máquina deixam de ser o servidor daqui"
         );
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), Some(8383), Some(8385)),
-            OndeEstou::Guardado
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), Some(8385)),
-            OndeEstou::Pessoal
-        );
-        assert_eq!(
-            onde_estou_em(Some("casa.exemplo:8383"), Some(8383), Some(8385)),
-            OndeEstou::Outro
+            onde_estou_em(
+                Some("127.0.0.1:8385"),
+                Some(SALA),
+                Some(GUARDADO),
+                Some(SALA)
+            ),
+            OndeEstou::Pessoal,
+            "a sessão com a chave da sala não foi dita na sala"
         );
     }
 
     #[test]
-    fn um_servidor_desta_maquina_que_este_app_nao_hospeda_e_outro_lugar() {
-        // Um `seeled` à parte na mesma máquina, ou a porta da sala com a sala
-        // fora do ar: o endereço é desta máquina, e a sessão não está em
-        // nenhuma das hospedagens deste app.
+    fn o_mesmo_endereco_com_outra_chave_e_outro_lugar() {
+        // Um servidor S no mesmo endereço do guardado, com outra chave: o
+        // HOSPEDAR COM ESTA da F6 pondo outra versão em 127.0.0.1, ou um
+        // endereço da rede local que hoje é de outra máquina.
+        for endereco in ["127.0.0.1:8383", "192.168.1.20:8383", "127.0.0.1:8385"] {
+            assert_eq!(
+                onde_estou_em(Some(endereco), Some(DE_S), Some(GUARDADO), Some(SALA)),
+                OndeEstou::Outro,
+                "um servidor com outra chave em {endereco} passou por uma das hospedagens desta \
+                 janela: o sim de quem hospeda iria a ele (ADR 0045)"
+            );
+        }
+        // Sem a hospedagem no ar, a chave dela não é de ninguém aqui.
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:9000"), Some(8383), Some(8385)),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), None),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), None, Some(8385)),
+            onde_estou_em(Some("127.0.0.1:8383"), Some(GUARDADO), None, Some(SALA)),
             OndeEstou::Outro,
-            "sem guardado no ar, a porta dele é de outro servidor"
+            "sem guardado no ar, a sessão foi dita no guardado"
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8385"), Some(SALA), Some(GUARDADO), None),
+            OndeEstou::Outro,
+            "sem sala no ar, a sessão foi dita na sala"
+        );
+        // Com sessão e sem impressão, falha fechado.
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8383"), None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Outro,
+            "uma sessão sem a chave conferida foi dita numa hospedagem desta janela"
         );
     }
 
@@ -17065,5 +17865,96 @@ mod a_resposta_a_estou_no_meu_servidor {
         for de_fora in ["192.168.0.7:8383", "casa.exemplo:8383", "203.0.113.7"] {
             assert!(!endereco_desta_maquina(de_fora), "{de_fora:?}");
         }
+    }
+
+    /// **As impressões das duas hospedagens, cada uma no seu lugar** (lote X da
+    /// F5, a impressão, commit D). `onde_estou_em` recebe a do guardado em
+    /// terceiro e a da sala em quarto; o par trocado diria `Guardado` na sala e
+    /// gravaria nela o sim de quem hospeda.
+    ///
+    /// Duas salas, e não um servidor guardado e uma sala, pela razão que
+    /// `a_saida_despede_as_hospedagens` escreve: este arquivo só sobe
+    /// hospedagem pelo ponto padrão. Sementes diferentes, chaves diferentes.
+    #[tokio::test]
+    async fn as_impressoes_saem_na_ordem_do_guardado_e_da_sala() {
+        let guardado = Hospedagem::iniciar_sala(0, &[3; 32], "casa", None)
+            .await
+            .expect("o guardado não subiu");
+        let sala = Hospedagem::iniciar_sala(0, &[4; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        let do_guardado = guardado.impressao_digital().to_owned();
+        let da_sala = sala.impressao_digital().to_owned();
+        assert_ne!(
+            do_guardado, da_sala,
+            "as duas hospedagens saíram com a mesma chave, e este teste não mede a ordem"
+        );
+
+        let mut hospedagens = Hospedagens {
+            guardado: Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            }),
+            pessoal: Some(Hospedado {
+                hospedagem: sala,
+                servidor: None,
+            }),
+        };
+        assert_eq!(
+            hospedagens.impressoes(),
+            (Some(do_guardado), Some(da_sala)),
+            "`Hospedagens::impressoes` não devolve a chave do guardado primeiro e a da sala \
+             depois: a sessão na sala passa por guardado, e o sim de quem hospeda vai a ela \
+             (ADR 0045)"
+        );
+
+        for hospedado in [hospedagens.guardado.take(), hospedagens.pessoal.take()]
+            .into_iter()
+            .flatten()
+        {
+            hospedado.hospedagem.encerrar().await;
+        }
+    }
+
+    /// **A ligação de `onde_estou_na`** (commit D). Os testes acima são puros:
+    /// recebem as impressões prontas. Este prende o que a função da sessão
+    /// passa a eles: a chave que a **conexão** conferiu em segundo, e as das
+    /// hospedagens, na ordem de `impressoes()`, em terceiro e quarto. Trocar a
+    /// chave da sessão pela do guardado diria `Guardado` em qualquer sessão
+    /// com o guardado de pé, e o sim de quem hospeda iria a S.
+    ///
+    /// Olha a chamada e as ligações que a alimentam, sem espaço e sem as
+    /// linhas de comentário, com as agulhas montadas por `concat!`.
+    #[test]
+    fn onde_estou_na_passa_a_chave_da_conexao_e_as_das_hospedagens() {
+        let fonte = fonte_sem_comentarios();
+        let corpo: String = corpo_de(&fonte, concat!("fn onde_estou_na", "(session"))
+            .chars()
+            .filter(|letra| !letra.is_whitespace())
+            .collect::<String>()
+            // A vírgula final que o rustfmt põe numa chamada partida em linhas.
+            .replace(",)", ")");
+        let ligacao = |nome: &str| {
+            corpo
+                .split_once(nome)
+                .and_then(|(_, depois)| depois.split_once(';'))
+                .map(|(ligacao, _)| ligacao.to_owned())
+                .unwrap_or_default()
+        };
+        let da_sessao = ligacao(concat!("let", "impressao="));
+        let das_hospedagens = ligacao(concat!("let(guardado,", "pessoal)="));
+        assert!(
+            da_sessao.starts_with(concat!("session.connection", "()"))
+                && da_sessao.contains(concat!(".impressao_do_", "servidor()"))
+                && das_hospedagens.contains(concat!(".impressoes", "()"))
+                && corpo.contains(concat!(
+                    "onde_estou_em(endereco.as_deref(),",
+                    "impressao.as_deref(),guardado.as_deref(),pessoal.as_deref())"
+                )),
+            "`onde_estou_na` deixou de passar a `onde_estou_em` a chave que a conexão conferiu \
+             em segundo e as das hospedagens, na ordem de `impressoes()`, em terceiro e \
+             quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
+             a ela (ADR 0045):\n{corpo}"
+        );
     }
 }

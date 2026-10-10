@@ -294,6 +294,20 @@ const PERMISSAO_DE_MICROFONE = {
       "O microfone está ligado, e o interruptor separado dos aplicativos de " +
       "área de trabalho não — ele fica no fim da mesma página, depois da lista.",
   },
+  // **Só no navegador**, e não do Rust: a ponte da F4 a devolve quando a
+  // Permissions API diz que o navegador negou o microfone a esta página (matriz
+  // da F8, achado 3). Sem ela, o bloco ficava escondido justamente quando a
+  // página não pode usar o microfone. Não há botão: uma página não abre os
+  // ajustes do sistema, e as duas cascas do navegador o tiram. A nota serve às
+  // duas, porque a tabela é uma só.
+  NegadaPeloNavegador: {
+    diz: "O NAVEGADOR NÃO DEIXA ESTA PÁGINA USAR O MICROFONE.",
+    nota:
+      "Libere o microfone para esta página nos ajustes do navegador: no " +
+      "computador, no ícone ao lado do endereço da página; no iPhone, em " +
+      "Ajustes › Apps › Safari › Microfone; no Android, em Configurações do " +
+      "site › Microfone. Depois, entre de novo na sala de voz.",
+  },
 };
 
 /**
@@ -1429,6 +1443,136 @@ function fraseDasMensagensDeAppsMaisNovos(mensagens, sessoes) {
     "Quem usa um SEELE mais novo está mandando o que esta versão não entende; " +
     "atualizar o SEELE daqui resolve."
   );
+}
+
+// ------------------------------------------- a sala pessoal (F7, 23 a 29)
+//
+// As frases de quem recebe ligações pelo SEU CÓDIGO (spec de 23/09, «Erros e
+// frases», «Quem recebe»). O Rust manda enums (`sala::EstadoDaSala`,
+// `sala::Registro`, `sala::FalhaDaSala`, `sala::FalhaAoAtender`,
+// `sala::FalhaNaAgenda`) e o desfecho do toque numa palavra; a frase é daqui.
+// O guarda `toda_variante_da_sala_pessoal_tem_frase` confere cada nome contra o
+// Rust. As que não têm nada a dizer estão com `null`, de propósito: a sala
+// subindo, o código esperando a primeira resposta do ponto, o código achável.
+//
+// Só o desktop lê isto: o navegador não tem sala, e as peças dela levam
+// `data-sala-pessoal`, que as duas cascas do navegador escondem.
+
+const SALA_PESSOAL = Object.freeze({
+  /** O nome que a pessoa lê, o mesmo da lista SÓ NO APP DO SEELE da F8. */
+  nome: "RECEBER LIGAÇÕES PELO SEU CÓDIGO",
+
+  /** `EstadoDaSala`: o que a linha da sala diz; `NoAr` diz pelo registro. */
+  estado: Object.freeze({
+    Subindo: null,
+    Desligada: "VOCÊ NÃO ESTÁ RECEBENDO LIGAÇÕES",
+    NoAr: null,
+    Falhou: null,
+  }),
+
+  /** `FalhaDaSala`: por que a sala não subiu. */
+  falhou: Object.freeze({
+    PortaOcupada:
+      "NINGUÉM CONSEGUE TE LIGAR AGORA: a porta 8385 está em uso, talvez por outro SEELE aberto neste computador.",
+    IdentidadeIndisponivel:
+      "NINGUÉM CONSEGUE TE LIGAR AGORA: a chave deste computador não abriu.",
+    NaoSubiu:
+      "NINGUÉM CONSEGUE TE LIGAR AGORA: a sala não subiu. O motivo está no seele.log.",
+  }),
+
+  /**
+   * `Registro`: se quem liga pelo código acha este computador. A frase é
+   * «SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA» e o motivo (`fraseDaSala`).
+   */
+  naoAchavel: "SEU CÓDIGO NÃO ESTÁ ACHÁVEL AGORA",
+  registro: Object.freeze({
+    SemPonto:
+      "o ponto de encontro está desligado neste computador, e só quem está na mesma rede chega até você",
+    Esperando: null,
+    Registrado: null,
+    // O sinal diz para que lado: positivo, o relógio daqui está adiantado.
+    RelogioTorto: (diferencaS) => {
+      const minutos = Math.max(1, Math.round(Math.abs(diferencaS) / 60));
+      const lado = diferencaS > 0 ? "adiantado" : "atrasado";
+      return `o relógio deste computador está ${minutos} min ${lado}. Acerte o relógio, e o código volta a ser achado`;
+    },
+    // O motivo como o fio o escreve (`Motivo::texto`).
+    Recusado: Object.freeze({
+      velho: "outro computador com a sua chave registrou o seu código depois deste",
+      cheio: "o ponto de encontro está cheio agora",
+      taxa: "esta rede pediu demais ao ponto de encontro, e ele volta a aceitar em instantes",
+      relogio: "o relógio deste computador está fora da hora",
+    }),
+    CookieRecusado:
+      "esta rede sai para a internet por mais de um endereço, e o ponto de encontro não consegue confirmá-la",
+    SemResposta:
+      "o ponto de encontro não respondeu. Ele pode estar fora do ar, ou ainda não conhecer este jeito de registrar",
+  }),
+
+  /**
+   * O firewall do Windows sem a regra deste SEELE (D-sala-1): a frase do Rust
+   * vem antes desta, que diz para que serve a 8385.
+   */
+  firewall:
+    "A porta 8385 é a da sua sala: é por ela que quem liga pelo seu código entra. Sem a regra, quem liga de fora da sua rede pode não chegar.",
+  abrirAPorta: "ABRIR A PORTA AGORA",
+
+  /** A faixa `#toque`: o apelido entre aspas, porque é o que a pessoa diz. */
+  ligando: ({ apelido, codigo, nome_na_agenda: nome }) => {
+    const quem = nome ? `${nome} («${apelido}»)` : `«${apelido}»`;
+    return `${quem} · ${codigo} está ligando`;
+  },
+  semSom: "SEM SOM: nenhuma saída de áudio abriu, e este aviso é o único.",
+  atenderSaiDe: (daqui) => `ATENDER SAI DE ${daqui}`,
+  naoEntrou: "VOCÊ ATENDEU, MAS NÃO CONSEGUIU ENTRAR NA SUA SALA",
+  tentarDeNovo: "TENTAR DE NOVO",
+  encerrada: "A LIGAÇÃO FOI ENCERRADA: você não conseguiu entrar na sua sala, e ninguém ficou lá sozinho.",
+
+  /** `FalhaAoAtender`. */
+  aoAtender: Object.freeze({
+    SemSala: "A SUA SALA NÃO ESTÁ NO AR",
+    JaParou: "ESSA LIGAÇÃO JÁ PAROU DE TOCAR",
+  }),
+
+  /** `FalhaNaAgenda`. */
+  naAgenda: Object.freeze({
+    CodigoInvalido: "ESSE CÓDIGO TEM UM ERRO DE DIGITAÇÃO",
+    NaoGravou: "A AGENDA NÃO GRAVOU. O motivo está no seele.log.",
+  }),
+
+  /** O desfecho de um toque, dito quando a faixa some. */
+  desfecho: Object.freeze({
+    atendida: "LIGAÇÃO ATENDIDA",
+    recusada: "LIGAÇÃO RECUSADA",
+    ninguem_atendeu: "CHAMADA PERDIDA",
+    caiu_antes: "QUEM LIGAVA DESISTIU",
+    cheia: "A LIGAÇÃO ESTÁ CHEIA",
+    sala_fechou: "A SUA SALA FECHOU",
+  }),
+});
+
+/**
+ * A frase da linha da sala, ou `null` quando não há o que dizer.
+ *
+ * Um estado que a casca não conhece também é `null`: a peça fica escondida, e
+ * não mostra um estado que esta versão não sabe ler.
+ */
+function fraseDaSala(estado) {
+  switch (estado?.estado) {
+    case "Desligada":
+      return SALA_PESSOAL.estado.Desligada;
+    case "Falhou":
+      return SALA_PESSOAL.falhou[estado.motivo] ?? null;
+    case "NoAr": {
+      const registro = estado.registro ?? {};
+      let motivo = SALA_PESSOAL.registro[registro.registro] ?? null;
+      if (typeof motivo === "function") motivo = motivo(registro.diferenca_s ?? 0);
+      if (motivo && typeof motivo === "object") motivo = motivo[registro.motivo] ?? null;
+      return motivo ? `${SALA_PESSOAL.naoAchavel}: ${motivo}.` : null;
+    }
+    default:
+      return null;
+  }
 }
 
 // ---------------------------------------------- as cascas do navegador (P10)

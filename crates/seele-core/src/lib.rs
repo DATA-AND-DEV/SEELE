@@ -108,6 +108,8 @@ pub use seele_audio::device::{DeviceError, Tocador};
 pub use seele_audio::gate::{
     ABERTURA_COM_SUPRESSAO_DBFS, ABERTURA_SEM_SUPRESSAO_DBFS, FAIXA_DE_ABERTURA_DBFS,
 };
+/// O volume padrão do toque: audível, e longe do teto da escala.
+pub use seele_audio::toque::VOLUME as VOLUME_DO_TOQUE;
 /// O módulo do Cisco e os degraus que a pessoa escolhe.
 ///
 /// Reexportados porque [`PedidoDeTela`] pede os três e o ADR 0002 não deixa uma

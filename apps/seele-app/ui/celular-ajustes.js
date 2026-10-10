@@ -98,11 +98,19 @@
   const coluna = camada.querySelector(".server-coluna");
   const apelido = h("span", { class: "cel-perfil-apelido" });
   const iniciais = h("span", { class: "cel-perfil-retrato", "aria-hidden": "true" });
-  coluna.prepend(h("div", { class: "cel-perfil" },
+  const perfil = h("div", { class: "cel-perfil" },
     h("span", { class: "rotulo", text: PALAVRAS.seuPerfil }),
     h("div", { class: "cel-perfil-placa" }, iniciais, apelido),
     h("button", { class: "botao-fantasma cel-perfil-editar", type: "button", onclick: () => abrirPerfil() },
-      PALAVRAS.editarPerfil)));
+      PALAVRAS.editarPerfil));
+  coluna.prepend(perfil);
+
+  // A região `operador.barra` (F3, passo 8b): a tira do operador não existe no
+  // celular, e a região vem para logo abaixo de SEU PERFIL. O mesmo nó, e não
+  // uma cópia: o `desenharOperador` a acha pelo id a cada quadro. O teto de
+  // altura é da casca (`celular-sessao.css`): o que passar rola por dentro, e
+  // a gestão de MODs, mais abaixo, continua ao alcance.
+  perfil.after(document.getElementById("operador-mods"));
 
   // ----------------------------------------------------- as seções novas
   //

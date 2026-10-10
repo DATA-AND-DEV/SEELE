@@ -108,7 +108,7 @@
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
     "mundo.avisar": "a metade de servidor avisa as janelas do mesmo MOD ({ canal?, carga }); devolve { ok: true } ou { ok: false, erro } com aviso-invalido, aviso-grande-demais ou avisos-demais; a declaração só vale se a chamada terminar e o quintal gravar; dentro da chamada, o mais novo de cada canal; até 1 KiB por aviso, 4 por segundo por MOD em qualquer janela de um segundo, 16 canais por chamada (números da M3); o excedente fica, por canal, só o mais novo, e sai quando a janela abre; vai a quem pode ler o canal, inclusive a janela de quem pediu; a janela recebe o evento servidor, com canal e carga já lida",
-    "mundo.tema": "a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; devolve { ok: true } ou { ok: false, erro } — valor, nunca exceção por recusa — com erro em recusas.tema; a declaração só vale se aoPedir ou aoAcontecer terminar, e o TemaMudou sai depois do quintal e do tema gravados; o servidor não confere quem pediu (a porta é o manifesto; o MOD lê contexto.admin se quiser restringir); o servidor guarda o tema (migração 15, temas_dos_mods) e o manda em TemaMudou (ordinal 47) logo depois do Session e do Instancia, inclusive com None, e a todos a cada troca"
+    "mundo.tema": "a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; devolve { ok: true } ou { ok: false, erro } — valor, nunca exceção por recusa — com erro em recusas.tema; ok quer dizer «a forma é válida e o tema foi publicado», e não «aplicado»: os pares de contraste são da casca, e cada janela conta pelo evento tema (aplicado, ou recusado com os pares e a regiao); a declaração só vale se aoPedir ou aoAcontecer terminar, e o TemaMudou sai depois do quintal e do tema gravados; o servidor não confere quem pediu (a porta é o manifesto; o MOD lê contexto.admin se quiser restringir); o servidor guarda o tema (migração 15, temas_dos_mods) e o manda em TemaMudou (ordinal 47) logo depois do Session e do Instancia, inclusive com None, e a todos a cada troca"
   },
   "moments": [
     "PersonJoined",
@@ -153,10 +153,10 @@
     "sala": "{ sala | null } — quem usa entrou numa sala de voz ou saiu",
     "pessoas": "{ entrou?, saiu? } — alguém entrou no servidor ou saiu",
     "fala": "{ falando: [id] } — no máximo 4 por segundo",
-    "lugar": "{ onde, regioes, largura, altura } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma",
+    "lugar": "{ onde, regioes, largura, altura, regiao? } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma; com regiao, o tamanho é o do lugar do MOD nela (o chamada.palco: o miolo ou a faixa, 0 × 0 escondido); sem, o da sessão",
     "servidor": "{ carga } — o aviso da metade de servidor (mundo.avisar)",
     "nunca": "nenhum evento carrega toque, chamada, código ou agenda",
-    "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', pares?: [{ par, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia"
+    "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', regiao?, pares?: [{ frente, fundo, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia; regiao quando quem recusou foi uma região"
   },
   "formas": [
     "titulo",
@@ -334,6 +334,13 @@
   "contribuicoes": {
     "o-que-e": "um registro de regiões e pontos semânticos da interface do SEELE, por nome e por modo — nunca um seletor de CSS, um nó do documento ou HTML de texto",
     "pontos": {
+      "chamada.palco": [
+        "substituir",
+        "adicionar"
+      ],
+      "servidor.aparencia": [
+        "substituir"
+      ],
       "pessoa.identidade": [
         "adicionar"
       ],
@@ -390,7 +397,7 @@
     ],
     "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (partida: 256); o agregado (partida: 128) é dos pontos sem alvo; o modelo está decidido (09/10), os números saem da M3",
     "descarte": "sai com a instância do MOD",
-    "servidor.aparencia": "sai dos pontos registráveis: é a porta de quem vê sobre o tema declarado pelo servidor («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
+    "servidor.aparencia": "um ponto registrável na 6 (decidido em 10/10, D-api-2): o MOD de janela pinta a aparência por ele como na 5, e o tema do servidor (17d) se soma; é também a porta de quem vê («o SEELE desenha» tira o tema daquele servidor nesta máquina); se as duas portas brigarem na mesma sessão, a regra de quem vence vai ao §9",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
   },
   "capa": {
@@ -480,7 +487,10 @@
       "contexto": "o pedido feito do palco leva contexto.sala",
       "de-quem": "por pessoa: cada janela monta o que o MOD dela declarar",
       "toque": "recebe toque e clique",
-      "tamanho": "o MOD recebe largura e altura, e o evento lugar quando mudam",
+      "tamanho": "o MOD recebe largura e altura no evento lugar, com regiao: 'chamada.palco', ao chegar e a cada mudança: a substituição, o miolo; o acréscimo, a faixa; escondido, 0 × 0",
+      "vista": "alternativa à grade, e começa escondido: VER O PALCO, na barra da chamada, o traz à frente; VER A GRADE o devolve, sem desmontar; sair da sala o desmonta",
+      "som": "o palco escondido soa, inclusive o que a pessoa ainda não abriu (está montado; §11); o MOD que não quer lê o lugar, 0 × 0 escondido, e pausa",
+      "modos-no-palco": "a substituição escolhida no miolo; os acréscimos numa faixa abaixo dele",
       "celular": "vista alternativa à grade (MESA · CHAMADA), com quem fala numa tira no alto"
     }
   },
@@ -536,8 +546,12 @@
       "acento",
       "borda",
       "densidade",
-      "fonte"
+      "fonte",
+      "modo",
+      "regioes"
     ],
+    "regioes": "{ '<região>': { fundo, texto, apagado, acento, borda } } — as oito regiões do §3, nenhuma camada; pintadas no contêiner do produto de cada uma (o fundo vale também de painel, com os tons derivados), conferidas por região (contraste com regiao e pares); recusas: regiao-desconhecida (chave: 'regioes', regiao), chave-desconhecida e valor-invalido (a cor em chave, e a regiao), valor-invalido (chave: 'regioes') para o que não é objeto; na ordem alfabética das regiões e das cores",
+    "modo": "'claro' | 'escuro': o color-scheme da sessão; tem de concordar com o fundo (claro de 0,18 de luminância relativa para cima; sem fundo no tema, o do produto, escuro), senão valor-invalido com a chave",
     "derivados-pelo-produto": {
       "nomes": [
         "acentoFraco",
@@ -570,15 +584,16 @@
       "acento/acentoFraco": "4,5:1, garantido pela derivação e não recusado: o acentoFraco é do produto",
       "estado": "pisos de partida; os números finais saem da tarefa 17-B3"
     },
+    "densidade": "compacta | confortavel: o espaçamento do que o MOD declara (--seele-celula-x/y: a raiz da região, as partes, as listas, os botões, as escolhas, os formulários, as tiras) e o recheio do aviso; nada do produto (medido em 10/10: 0 de 343 nós da sessão)",
     "na-6": [
-      "modo: 'claro' | 'escuro'",
-      "a densidade cobrindo a escala --seele-e*",
-      "tokens por região, com o destino de cada região no celular"
+      "modo: 'claro' | 'escuro' (feito)",
+      "tokens por região, com o destino de cada região no celular (feito; os contêineres do celular são da F8)"
     ],
     "na-6-se-medido": [
       "fundo da sessão por mídia (se a M3 com a API 6 o medir no iPhone antes do congelamento)"
     ],
     "na-7": [
+      "a densidade cobrindo a escala --seele-e* (medido em 10/10: o CSS da sessão não lê os tokens, e escrevê-los mudava só a portaria)",
       "tipo dos títulos e dos dados",
       "escala por escolha"
     ],
@@ -636,7 +651,8 @@
   },
   "limites": {
     "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone); cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
-    "mensagem": "12 KiB hoje; em aberto montagem parcial ou teto por superfície maior (MESA item 1, PERFIS R8)",
+    "mensagem": "12 KiB por mensagem; a superfície se monta por partes (superficie.atualizar), com o teto de nós dela (4096)",
+    "figuras-por-tela": "256, e quem manda é a mensagem: com chave e cor (71 bytes cada) cabem 155 em 12 KiB; as 256 só sem chave e sem cor (45 bytes), figuras de enfeite, sem toque; uma tela acima de 12 KiB é recusada como mensagem-grande, com o tamanho e o teto",
     "aviso-do-servidor": "proposta de 1 KiB por aviso e 4 por segundo por MOD",
     "capas-animadas": "proposta de 6",
     "quadros-por-capa": "proposta de 60 quadros, 10 s",
@@ -681,7 +697,7 @@
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
       "chave-desconhecida (leva a chave; com mais de uma errada, a primeira em ordem de ponto de código, igual nas duas pontas; a tabela é seele_proto::mods::CHAVES_DO_TEMA, a mesma da casca, conferida caso a caso por crates/seele-proto/tests/vetores/chaves-do-tema.json; tarefa 17j)",
       "valor-invalido (leva a chave; a forma de cada valor está na mesma tabela: cor #rrggbb, inteiro com intervalo, bandeira, escolha; tarefa 17j)",
-      "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
+      "regiao-desconhecida (leva chave: 'regioes' e a regiao; a região não está em seele_proto::mods::REGIOES_DO_TEMA; chave-desconhecida e valor-invalido de dentro de uma região levam a regiao também; tarefa 17i, item 3)"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
     "superficies": [
@@ -703,6 +719,9 @@
       "teto-de-alvos (256 alvos num ponto)",
       "contribuicao-ja-existe (já há uma deste MOD para o alvo, o ponto e o modo: use atualizar)",
       "contribuicao-de-outro-mod (o handle de atualizar ou revogar é de outro MOD)"
+    ],
+    "tema-pela-janela": [
+      "contraste (no evento tema e na resposta da prévia, e não em mundo.tema; leva pares: [{ frente, fundo, razao, piso }], e a regiao quando quem recusou foi uma região; tarefa 17e)"
     ]
   },
   "decisoes-do-dono-de-09-10": {

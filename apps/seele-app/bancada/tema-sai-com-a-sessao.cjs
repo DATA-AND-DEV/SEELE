@@ -52,6 +52,10 @@ const codigo = [
   trecho(base, "function daGeracaoDePe("),
   bloco(base, "const temaDosMods = new Map();", "function contrasteEntre("),
   trecho(base, "function limparARegiaoDoMod("),
+  // As contagens da aba DIAGNÓSTICO, que a saída da sessão zera (tarefa 5):
+  // moram depois do bloco do tema, em `base.js`.
+  "const regioesAusentesAvisadas = new Map();",
+  "const identificadoresIgnorados = new Map();",
   trecho(base, "function encerrarOAmbienteDosMods("),
   // O que `case "tema"` faz, base.js: `aplicarOTemaDoMod(mod.id, m.valores)`.
   // O que `regiaoDoMod` registra na criação, base.js: a linha do registrar.
