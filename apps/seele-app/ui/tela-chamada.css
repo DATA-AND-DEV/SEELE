@@ -411,6 +411,23 @@
   box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
 }
 
+/* **As placas sobre a capa** (`pessoa.capa`; rascunho da API 6, §4; tarefa 6,
+   Step 4). Todo texto do produto sobre a capa mantém pelo menos o contraste
+   que tem sem ela: cada um fica numa placa opaca da cor do fundo que ele teria
+   sem a capa — o negro do painel, e o laranja de carga de quem fala. A capa
+   aparece no resto. `:where()`, para a placa não passar por cima do fundo da
+   pastilha FALANDO. Medido em `capa.cjs`, contra uma capa branca e uma preta. */
+.chamada-cartao[data-com-capa] { --fundo-da-placa: var(--seele-negro-absoluto); }
+.chamada-cartao[data-com-capa][data-fala="sim"] { --fundo-da-placa: var(--seele-laranja-carga); }
+
+.chamada-cartao[data-com-capa] :where(
+  .chamada-cartao-nome, .nota, .rotulo, .chamada-cartao-marca, .chamada-cartao-valor,
+  .chamada-cartao-barra, .chamada-vol-passo, .chamada-vol-valor,
+  .chamada-pastilha:not([data-estado="fala"])
+) {
+  background-color: var(--fundo-da-placa);
+}
+
 /* Uma sala vazia, ou nenhuma sala em que se esteja. Ocupa a grade inteira. */
 .chamada-vazio {
   grid-column: 1 / -1;

@@ -365,7 +365,7 @@ SeeleUI.contribuicoes.registrar({
 | lugar | desktop | celular |
 |---|---|---|
 | o cartão da pessoa na chamada (`pintarCartao`, `tela-chamada.js:453` [c]) | sim, animada até o teto | **sim, animada até o mesmo teto** (D-capa-1) |
-| o fundo da barra do operador (`.operador`, com `snapshot.me`) | sim | **não há barra na vista**: o `operador.barra` mora em AJUSTES (§11), e a capa do operador pinta o cabeçalho SEU PERFIL logo acima dele (a linha de baixo); a faixa de voz é do núcleo e não recebe capa |
+| a identidade de quem usa na barra do operador (`#operador-quem`, com `snapshot.me`) — **só ela**, e não a barra inteira: o MUDO, o fone e o SAIR moram na barra, e nunca ficam sobre a capa (§10) [c, tarefa 6] | sim | **não há barra na vista**: o `operador.barra` mora em AJUSTES (§11), e a capa do operador pinta o cabeçalho SEU PERFIL logo acima dele (a linha de baixo); a faixa de voz é do núcleo e não recebe capa |
 | o cabeçalho do perfil do PERFIS | sim, por citação (abaixo) | sim |
 | o «SEU PERFIL» nativo (`index.html:3816`) | sim, por um aplicador do produto | sim |
 | a linha da lista de pessoas | parada, se o MOD a citar no cartão | parada |
@@ -387,10 +387,13 @@ sinal, e do volume. O PERFIS calculou o contraste dos tokens reais sobre o pior
 quadro com um véu uniforme (R1, tabela): só um véu de 0,9 segura o laranja e o
 vermelho perto do nativo, e aí a capa quase não se vê. O contrato:
 
-- **o texto do produto fica em placas opacas** do negro do painel, ou num véu
-  opaco onde há texto. A capa aparece no resto;
+- **o texto do produto fica em placas opacas** da cor do fundo que ele teria
+  sem a capa — o negro do painel, e o laranja de carga de quem fala —, ou num
+  véu opaco onde há texto. A capa aparece no resto [c, tarefa 6];
 - **todo texto do produto sobre a capa mantém pelo menos o contraste que tem
-  sem capa**, conferido contra um quadro branco e um quadro preto, com guarda;
+  sem capa**, conferido contra um quadro branco e um quadro preto, com guarda
+  [c, `capa.cjs`: cada elemento com texto do cartão e da identidade, calado e
+  falando; sem a placa, o nome cai de 15,99:1 para 1,28:1 sobre a capa branca];
 - **MUDO, fone e SAIR nunca ficam sobre a capa** (núcleo, §10).
 
 **Quem fala.** O halo `inset` e a pastilha FALANDO ficam acima da capa, e

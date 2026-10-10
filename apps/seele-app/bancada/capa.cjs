@@ -83,6 +83,46 @@ const { chromium } = require('./playwright.cjs');
     });
     const cartao = `.chamada-cartao[data-pessoa-da-capa="${alvo}"]`;
 
+    // **A legibilidade, medida** (rascunho §4; tarefa 6, Step 4): todo texto do
+    // produto sobre a capa mantém pelo menos o contraste que tem sem ela,
+    // conferido contra uma capa branca e uma preta, com a pessoa calada e
+    // falando. O fundo efetivo de um texto é a primeira cor opaca entre ele e o
+    // cartão; sem nenhuma, é a capa.
+    const falar = (sim) => page.evaluate(([alvo, sim]) => {
+      const r = testTable.snapshot;
+      for (const p of r.voice_rooms.flatMap(s => s.people)) if (String(p.id) === alvo) p.speaking = sim;
+      desenharChamada(r);
+    }, [alvo, sim]);
+    const medirEm = (seletorDoQuadro, cor) => page.evaluate(([seletor, corDaCapa]) => {
+      const quadro = document.querySelector(seletor);
+      const rgb = (texto) => (texto.match(/[\d.]+/g) || []).map(Number);
+      const lum = ([r, g, b]) => [r, g, b]
+        .map((c) => { const v = c / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
+        .reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i], 0);
+      const razao = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+      const fundo = (el) => {
+        for (let n = el; n; n = n.parentElement) {
+          const c = rgb(getComputedStyle(n).backgroundColor);
+          if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c.slice(0, 3);
+          if (n === quadro && corDaCapa) return corDaCapa;
+        }
+        return [0, 0, 0];
+      };
+      const textos = [...quadro.querySelectorAll('*')]
+        .filter((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) && e.getClientRects().length);
+      return Object.fromEntries(textos.map((e, i) => [
+        `${e.className}#${i}`,
+        Number(razao(rgb(getComputedStyle(e).color).slice(0, 3), fundo(e)).toFixed(2)),
+      ]));
+    }, [seletorDoQuadro, cor]);
+    const medir = (cor) => medirEm(`.chamada-cartao[data-pessoa-da-capa="${alvo}"]`, cor);
+    const identidadeSemCapa = await medirEm('#operador-quem', null);
+    await falar(false);
+    const semCapa = { calado: await medir(null) };
+    await falar(true);
+    semCapa.falando = await medir(null);
+    await falar(false);
+
     // 1. A capa pinta o cartão.
     const registro = await page.evaluate(alvo => {
       try {
@@ -97,6 +137,44 @@ const { chromium } = require('./playwright.cjs');
       const camada = el?.querySelector(':scope > .capa-camada');
       return camada && getComputedStyle(camada).backgroundImage.includes(window.daCapa);
     }, cartao, { timeout: 5000 });
+
+    // A legibilidade, com a capa branca e com a preta, calado e falando.
+    const pioras = [];
+    for (const [nomeDaCapa, cor] of [['branca', [255, 255, 255]], ['preta', [0, 0, 0]]]) {
+      for (const sim of [false, true]) {
+        await falar(sim);
+        const com = await medir(cor);
+        const sem = semCapa[sim ? 'falando' : 'calado'];
+        for (const [texto, antes] of Object.entries(sem)) {
+          if ((com[texto] ?? 0) < antes - 0.01) pioras.push(`${texto} (${sim ? 'falando' : 'calado'}, capa ${nomeDaCapa}): ${antes} → ${com[texto]}`);
+        }
+      }
+    }
+    await falar(false);
+    assert.deepEqual(pioras, [], 'um texto do produto perdeu contraste sobre a capa');
+
+    // E a capa de quem usa veste a identidade, e não os controles: MUDO, fone e
+    // SAIR nunca ficam sobre ela (núcleo, §10).
+    const nucleo = await page.evaluate(() => {
+      contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.capa', modo: 'substituir', alvo: String(testTable.snapshot.me),
+        conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:eu' } } },
+      });
+      desenhar(testTable.snapshot);
+      return new Promise(ok => setTimeout(() => ok({
+        vestida: Boolean(document.querySelector('#operador-quem[data-com-capa]')),
+        sobACapa: ['#botao-mudo', '#botao-surdo', '#operador-sair'].filter(s => document.querySelector(s)?.closest('[data-com-capa]')),
+      }), 500));
+    });
+    assert.ok(nucleo.vestida, 'a capa de quem usa não vestiu a identidade na barra do operador');
+    for (const [nomeDaCapa, cor] of [['branca', [255, 255, 255]], ['preta', [0, 0, 0]]]) {
+      const com = await medirEm('#operador-quem', cor);
+      for (const [texto, antes] of Object.entries(identidadeSemCapa)) {
+        if ((com[texto] ?? 0) < antes - 0.01) pioras.push(`operador ${texto} (capa ${nomeDaCapa}): ${antes} → ${com[texto]}`);
+      }
+    }
+    assert.deepEqual(pioras, [], 'um texto da identidade de quem usa perdeu contraste sobre a capa');
+    assert.deepEqual(nucleo.sobACapa, [], 'um controle do núcleo ficou sobre a capa');
 
     // 2. A pastilha e o nome ficam acima da capa: no centro de cada um, o
     //    elemento que recebe o clique é ele (ou um filho dele).

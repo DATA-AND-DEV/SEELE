@@ -1128,9 +1128,10 @@ function desenharOperador(snapshot) {
   // coisa sobre a mesma pessoa.
   $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
   vestirAvatar($("operador-inicial"), snapshot.me);
-  // E a capa de quem usa, no fundo da barra do operador (rascunho §4).
-  const barraDoOperador = document.querySelector("#tela-sessao .operador");
-  if (barraDoOperador) vestirCapa(barraDoOperador, snapshot.me);
+  // E a capa de quem usa, atrás da identidade dela na barra do operador
+  // (rascunho §4) — e **só** atrás da identidade: o microfone, o fone e o SAIR
+  // são do núcleo, e nunca ficam sobre a capa (§10).
+  vestirCapa($("operador-quem"), snapshot.me);
 
   // **SAIR DA SALA ou SAIR DO SERVIDOR, a cada quadro.** O rótulo só era
   // reescrito pelo desenho da chamada, e só com a chamada na frente: quem saía
