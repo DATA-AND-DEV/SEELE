@@ -609,8 +609,15 @@
     "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal; no celular, com pagina imersiva, dialogo, folha expandida e aviso abertos, o retângulo de cada um termina acima da faixa de voz, e o toque no MUDO e em AJUSTES chega ao produto; no desktop, mede se um dialogo aberto deixa o MUDO e o SAIR à vista e clicáveis"
   },
   "som": {
-    "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",
-    "repetir": "repetir: true por contrato (decisão de 08/10): o som volta ao começo no fim sem redesenho, e o MOD recebe terminou só de um som sem repetir",
+    "de-onde": "o contrato de tocando do api/README.md da 0.15.1 (P49-6), palavra por palavra, e a linha nova de repetir (tarefa 10)",
+    "tocando": [
+      "tocando vale quando muda: um som que a pessoa pausou não volta sozinho no redesenho seguinte que o declare tocando: true",
+      "a exceção é o som que terminou: tocando: true sobre um som cujo último aviso foi terminou toca de novo, do começo, como o <audio> fazia até a 0.15.0",
+      "no fim, o MOD recebe só terminou",
+      "o botão é do produto: um TOCAR/PAUSAR ao lado do som (num cartão, nenhum)",
+      "fora da tela, a declaração não liga o som: recusada, com o motivo, e um som que tocava ali é pausado"
+    ],
+    "repetir": "repetir: true toca em laço (AudioBufferSourceNode.loop): volta ao começo no fim sem redesenho, e o MOD não recebe terminou dele; desligado num redesenho, a fonte de pé sai do laço e o próximo fim é dito; pausado e retomado, continua de onde parou dentro da volta (tarefa 10)",
     "celular": "som de MOD só com a tela acesa, até a medida da F4",
     "palco": "o palco escondido pela vista alternada (celular) continua montado, e o som dele continua; a regra «fora da tela» vale para o lugar desmontado"
   },

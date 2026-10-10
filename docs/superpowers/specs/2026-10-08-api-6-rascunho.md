@@ -487,6 +487,30 @@ lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7). [c, tarefa 7, Step
 `bancada/camadas.cjs` prova os cinco, cada um com o seu caminho de volume,
 lidos pelo `ler_imagem_mod` e nenhum pelo `mod_request`]
 
+### O contrato do som: `tocando` e `repetir`
+
+O de `tocando` é o do `api/README.md` da 0.15.1 (P49-6, `563bc37`), palavra
+por palavra, e a linha de `repetir` é a nova da 6 [c, tarefa 10]:
+
+- **`tocando` vale quando muda.** Um som que a pessoa pausou não volta
+  sozinho no redesenho seguinte que o declare `tocando: true`.
+- **A exceção é o som que terminou:** `tocando: true` sobre um som cujo
+  último aviso foi `terminou` toca de novo, do começo, como o `<audio>`
+  fazia até a 0.15.0.
+- **`repetir: true` toca em laço** (`AudioBufferSourceNode.loop`): o som
+  volta ao começo no fim sem redesenho, e o MOD não recebe `terminou` dele.
+  Desligar o `repetir` num redesenho, com o som tocando, o tira do laço, e o
+  próximo fim é dito. Pausado e retomado, ele continua de onde parou dentro
+  da volta.
+- **No fim, o MOD recebe só `terminou`.** O `<audio>` dizia `pausada`
+  antes dele.
+- **O botão é do produto.** No lugar dos controles do `<audio>`, o produto
+  desenha um TOCAR/PAUSAR ao lado do som (num cartão, nenhum).
+- **Fora da tela, a declaração não liga o som.** Um `tocando: true` num som
+  cujo lugar saiu da tela — uma página fechada, um cartão que o SEELE não
+  desenha agora — é recusado (`recusada`, com o motivo «o lugar deste som
+  saiu da tela…»), e um som que tocava ali é pausado (`pausada`).
+
 ### `folha`
 
 - Empilha **até 3** [proposta], cada uma com título e a saída do produto

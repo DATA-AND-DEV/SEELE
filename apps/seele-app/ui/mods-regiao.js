@@ -3318,6 +3318,8 @@ class RegiaoDeMod {
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
     entrada.tocador = tocador;
+    // A declaração mais nova de `repetir`, que pode ter chegado antes do som.
+    tocador.definirRepetir(entrada.repetir ?? plano.no.repetir === true);
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       recusou(motivoDaFalha(falha));
@@ -3516,6 +3518,8 @@ class RegiaoDeMod {
   atualizarMidia(elem, plano) {
     const som = this.somDaMidia.get(elem);
     if (!som) return;
+    som.repetir = plano.no.repetir === true;
+    som.tocador?.definirRepetir(som.repetir);
     som.quer = plano.no.tocando === true;
     this.aplicarTocando(elem);
   }
@@ -4376,12 +4380,24 @@ class TocadorDeSomDeMod {
     /** O pedido que espera o áudio da janela ligar, enquanto espera; 0 quando nenhum. */
     this.pedidoEsperando = 0;
     this.solto = false;
+    /** Em laço (`repetir: true`, a API 6): a fonte não termina. */
+    this.repetir = false;
     tocadoresDeSomDeMod.add(this);
   }
 
   /** Está tocando agora? */
   get tocando() {
     return this.fonte !== null;
+  }
+
+  /**
+   * **`repetir: true`** (rascunho da API 6, §5; tarefa 10 da F3): a fonte de
+   * buffer toca em laço (`loop`), e o fim natural não acontece. Vale também
+   * para a fonte de pé, quando o MOD muda a declaração com o som tocando.
+   */
+  definirRepetir(sim) {
+    this.repetir = sim === true;
+    if (this.fonte) this.fonte.loop = this.repetir;
   }
 
   /**
@@ -4463,6 +4479,7 @@ class TocadorDeSomDeMod {
       }
       fonte = contexto.createBufferSource();
       fonte.buffer = this.som;
+      fonte.loop = this.repetir;
       fonte.connect(this.ganho);
       fonte.start(0, de);
     } catch (falha) {
@@ -4492,7 +4509,9 @@ class TocadorDeSomDeMod {
     const fonte = this.fonte;
     if (!fonte) return;
     this.fonte = null;
-    this.deslocamento = Math.max(0, this.contexto.currentTime - this.comecou);
+    // Em laço, o tempo tocado passa da duração: onde parou é o resto dele.
+    const tocado = Math.max(0, this.contexto.currentTime - this.comecou);
+    this.deslocamento = this.repetir && this.som.duration > 0 ? tocado % this.som.duration : tocado;
     fonte.onended = null;
     fonte.stop();
     fonte.disconnect();
