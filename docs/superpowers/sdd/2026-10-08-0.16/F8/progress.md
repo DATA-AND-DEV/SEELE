@@ -70,4 +70,4 @@ O nome que a pessoa lê é «RECEBER LIGAÇÕES PELO SEU CÓDIGO» (o termo da s
 
 - [ ] a regra `[data-sala-pessoal] { display: none }` sob as duas marcas;
 - [ ] a frase da sala na lista O QUE … NÃO FAZ (grupo SÓ NO APP DO SEELE), com o nome que a F7 der;
-- [ ] o caso nas duas cascas: pelo menos um `[data-sala-pessoal]` na página, e nenhum à vista; sem a regra, reprova.
+- [ ] o caso nas duas cascas: as quatro peças marcadas da F7 (`#toque`, `#boot-sala-estado`, `#sala-estado` e `#perfil-sala`, no `0.16/sala-viva`, `a53c1349` e `086082d0`) existem na página. **Elas nascem `hidden`, e no navegador a ponte responde neutro**: «nenhuma à vista» passaria sem a regra. O caso as mostra como o desktop mostraria (tira o `hidden` de cada uma) e exige que a casca as esconda; sem a regra, reprova.
