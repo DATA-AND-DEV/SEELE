@@ -595,3 +595,50 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     SAIR acordados, o diálogo fora do furo e rolando por dentro; o resto
     inerte e coberto. Seis reversões.
   - Espera: o Step 5 (a 7d da sala pessoal).
+
+## 10/10
+
+O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
+
+- **O tema do servidor na casca** (09/10).
+  - 17d `87b36aa9`: o núcleo guarda o `TemaMudou`, o retrato o leva
+    (`tema_do_servidor`), e a casca o aplica antes de desenhar a sessão.
+  - 17f.0, o servidor `747e81e6`: `persistence::tema::escolher`.
+  - 17f, a casca `7df2c421` e `78fdf546`: a escolha de quem vê, o evento
+    `tema` (`aplicado`, `recusado` com os pares, `nativo`), e a janela que
+    sobe depois sabendo do desfecho.
+  - 17g `68253601`: a prévia, só nesta máquina, com o selo, saindo com a
+    superfície dona.
+  - 17h `8485cacb`: `cor: { tema: 'acento' }`; medido, a folha e o diálogo já
+    herdavam o tema.
+  - Tarefa 10, Steps 1 a 3 `17c6890e`: `repetir: true`.
+  - `ee3f4e50`: o MOD de referência exercita o `atualizar` e o
+    `formulario.erros` do punho da superfície.
+- **17f.0 inteira** (10/10): `68244ced` o servidor confere a porta e manda o
+  `TemaMudou`; `38421122` o comando no `main.rs`, isolado; `fbd8a013` a
+  pergunta na gestão (QUEM PINTA ESTE SERVIDOR), com a linha em
+  `RECUSAS_NOMEADAS` da ponte (a F4 avisada, e da lacuna no guarda da
+  hospedagem, que não vê `servidor_do_mod`); `f1811d9f` o `pinta` com prova
+  do lado do Rust.
+- **17f, a linha em QUEM DESENHA O QUE** `b2129755`, e o DIAGNÓSTICO que
+  dizia «(API 3)» sobre o tema do servidor.
+- **Tarefa 5, as contagens do DIAGNÓSTICO** `2af9a35a`: os identificadores
+  ignorados (a medida do agora) e o lugar que a casca não tem; o contador de
+  avisos passou a sair com a sessão.
+- **Tarefa 7, Step 5, o `chamada.palco`** `c7c64814`, `23a5bccf`,
+  `9b7e826c`, com as duas decisões da orquestradora: os modos como nos outros
+  pontos, a vista alternativa que começa escondida, e o `lugar` com
+  `regiao`. **Tarefa 10, Step 4** no `23a5bccf`.
+- **Tropeços medidos no caminho**, todos por bancada ou reversão: a recusa
+  da escolha sumia debaixo da frase do catálogo (escrita depois do
+  redesenho); a reversão do filtro do DIAGNÓSTICO passou, e a seção ganhou o
+  caso da contagem dupla; o guarda de `substituir` fatiava por byte e caiu
+  num «ç»; a primeira medida do som contava o `ended`, que não chega com o
+  áudio suspenso; e a reversão sem o `ResizeObserver` passou, porque o laço
+  da chamada media a cada meio segundo — o desenho passou a dizer o tamanho
+  só a quem chega.
+- **Esperam:** a M3 (tarefa 11: a build de medição numa cópia e o MOD de
+  carga sintético da 6), a 17i (itens 1, 2 e 3, um commit cada), as tarefas
+  12, 13 e 18, o Step 5 da tarefa 9 (a 7d) e o Step 3 da tarefa 7 (a 11), e
+  as duas revisões aceitas (o rascunho contra a casca; os comentários
+  velhos).
