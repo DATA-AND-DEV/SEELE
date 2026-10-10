@@ -24,46 +24,21 @@
 //! [`Enquadramento`] lê são os cinco bytes que separam um quadro do outro —
 //! tipo e tamanho — e nada além disso. Cinco bytes não são um decodificador.
 //!
-//! # Por que estas constantes estão repetidas
+//! # O formato mora no `seele-proto`
 //!
-//! O ADR 0002 proíbe o daemon de depender do `seele-core`, que é o *cliente*.
-//! `CABECALHO_DE_QUADRO_LEN`, `MAX_QUADRO_LEN`, [`FRACAO_DO_CAMINHO`] e
-//! [`PISO_DE_BANDA_BPS`] existem lá em `seele_core::tela` com estes mesmos
-//! valores, pela mesma razão que `crate::frame` é gêmeo de `seele_core::frame`
-//! e que o balde de bytes é gêmeo do daqui: quarenta linhas repetidas custam
-//! menos que um crate de transporte que os dois dependeriam e nenhum seria
-//! dono. **O que não pode divergir é o formato**, e ele está escrito nos dois
-//! lados a partir do mesmo §3.
+//! O cabeçalho de cada quadro, os tipos, o teto e o enquadramento que conta
+//! bytes vêm de `seele_proto::screen`, a mesma leitura do cliente e do
+//! celular. Até 09/10/2026 eles estavam escritos aqui e no `seele-core`, com
+//! um comentário dizendo que um crate de transporte não teria dono; o dono é o
+//! `seele-proto`, que já tinha a abertura do mesmo fluxo (a P13 do plano F1b).
+//!
+//! [`FRACAO_DO_CAMINHO`] e [`PISO_DE_BANDA_BPS`] continuam gêmeos dos de
+//! `seele_core::tela`: são política de banda de cada ponta, e não formato.
 
 use std::time::{Duration, Instant};
 
 use seele_proto::ids::ScreenId;
 use tokio::sync::mpsc;
-
-/// Bytes de cabeçalho na frente de cada quadro codificado.
-///
-/// Um byte de tipo e quatro de tamanho, big-endian. Gêmeo de
-/// `seele_core::tela::CABECALHO_DE_QUADRO_LEN` — ver o cabeçalho deste módulo.
-pub const CABECALHO_DE_QUADRO_LEN: usize = 5;
-/// O byte de tipo de um quadro de imagem que basta a si mesmo.
-///
-/// Gêmeo de `seele_core::tela::TipoDeQuadro::Chave` — este módulo não depende
-/// daquele crate, e os dois lados do fio concordam por escrito e não por tipo.
-pub const TIPO_CHAVE: u8 = 1;
-/// O byte de tipo de um quadro de som.
-///
-/// Gêmeo de `seele_core::tela::TipoDeQuadro::Som`. O maior que este
-/// enquadramento aceita: ver a conferência em [`Enquadramento::entrada`].
-pub const TIPO_SOM: u8 = 2;
-
-/// Maior quadro codificado que este servidor repassa, em bytes.
-///
-/// `specs/08-seguranca.md`: o tamanho anunciado por um par é conferido **antes**
-/// de qualquer alocação. Aqui ele não aloca nada — o encaminhamento é por
-/// pedaço, sem remontar quadro —, mas um tamanho absurdo é a única coisa que
-/// distingue um fluxo de tela de um fluxo de lixo, e um enquadramento que
-/// aceitasse 4 GiB nunca perceberia que perdeu o passo.
-pub const MAX_QUADRO_LEN: usize = 512 * 1024;
 
 /// Que fração do caminho medido o vídeo pode ocupar, em por cento.
 ///
@@ -846,104 +821,11 @@ pub enum FimDaTela {
     AlemDoQueOHospedeiroCarrega,
     /// O fluxo deixou de ser um fluxo de tela.
     ///
-    /// Um tamanho de quadro impossível ou um byte de tipo que não é 0 nem 1.
-    /// Encaminhar depois disso seria encaminhar lixo para N pessoas.
+    /// O `seele_proto::screen::Enquadramento` recusou um cabeçalho de quadro:
+    /// um tipo desconhecido, um quadro vazio ou um tamanho acima do teto.
+    /// Encaminhar depois disso seria encaminhar lixo para N pessoas. O motivo
+    /// exato vai ao registro, em `voice_room`.
     FluxoMalformado,
-}
-
-/// Onde o enquadramento de um fluxo de tela está, quadro a quadro.
-///
-/// Existe por causa de uma pergunta só, e ela é o §5.1 em movimento: **gente
-/// entra na sala no meio da transmissão.** Um espectador ligado num byte
-/// qualquer leria o meio de um quadro como cabeçalho e nunca mais acertaria o
-/// passo. Ligado num começo de **quadro-chave** ele acerta o passo e ainda
-/// consegue decodificar, que são as duas coisas de que precisa.
-///
-/// O que ele **não** faz é remontar quadro. Remontar o quadro-chave para
-/// reenviá-lo inteiro desfaria o §3.3, que é a medida mais barata de toda a
-/// spec: espalhar o mesmo quadro-chave em quatro tiques leva o p95 da voz de
-/// 78,9 para 35,8 ms **com o mesmo bitrate entregue**. O servidor repassa o pedaço
-/// que chegou, quando chegou, e só conta os bytes para saber onde está.
-#[derive(Debug, Default)]
-pub struct Enquadramento {
-    /// Quantos bytes faltam do quadro que está passando.
-    restam: usize,
-    /// O cabeçalho do próximo quadro, enquanto ele chega partido em dois
-    /// pedaços.
-    cabecalho: Vec<u8>,
-}
-
-impl Enquadramento {
-    /// Um enquadramento no começo de um fluxo, esperando o primeiro cabeçalho.
-    #[must_use]
-    pub fn novo() -> Self {
-        Self::default()
-    }
-
-    /// Passa um pedaço pelo enquadramento e diz onde alguém pode entrar.
-    ///
-    /// Devolve o deslocamento, dentro deste pedaço, do primeiro cabeçalho de
-    /// **quadro-chave que começa e termina neste mesmo pedaço**. Um cabeçalho
-    /// partido entre dois pedaços não vira porta de entrada: os bytes da
-    /// primeira metade já saíram, e quem entrasse agora receberia a segunda
-    /// metade de um cabeçalho como se fosse a primeira. Perder essa
-    /// oportunidade custa um quadro-chave de espera, e quem entra pede um
-    /// (`ClientMessage::RequestKeyFrame`, que a onda 1 já atende).
-    ///
-    /// # Errors
-    ///
-    /// [`FimDaTela::FluxoMalformado`] para um tamanho de quadro fora de
-    /// [`MAX_QUADRO_LEN`], um quadro vazio, ou um byte de tipo que não é 0 nem
-    /// 1.
-    pub fn entrada(&mut self, bytes: &[u8]) -> Result<Option<usize>, FimDaTela> {
-        let mut entrada = None;
-        let mut i = 0;
-        while i < bytes.len() {
-            if self.restam > 0 {
-                let anda = self.restam.min(bytes.len().saturating_sub(i));
-                self.restam -= anda;
-                i += anda;
-                continue;
-            }
-            let comeca_aqui = self.cabecalho.is_empty();
-            let inicio = i;
-            let falta = CABECALHO_DE_QUADRO_LEN.saturating_sub(self.cabecalho.len());
-            let anda = falta.min(bytes.len().saturating_sub(i));
-            self.cabecalho
-                .extend_from_slice(bytes.get(i..i.saturating_add(anda)).unwrap_or_default());
-            i += anda;
-            if self.cabecalho.len() < CABECALHO_DE_QUADRO_LEN {
-                break;
-            }
-            let tipo = self.cabecalho.first().copied().unwrap_or(u8::MAX);
-            let tamanho = self
-                .cabecalho
-                .get(1..CABECALHO_DE_QUADRO_LEN)
-                .and_then(|quatro| <[u8; 4]>::try_from(quatro).ok())
-                .map_or(0, u32::from_be_bytes) as usize;
-            self.cabecalho.clear();
-            // Os três tipos que este fluxo carrega — imagem comum, imagem-chave
-            // e som —, e nada mais. Aceitar um quarto seria aceitar que o fluxo
-            // já não é o que se pensa que é, e o resto da leitura seria
-            // adivinhação sobre um tamanho que o outro lado escolheu.
-            //
-            // O `2` entrou quando o som passou a viajar junto com a imagem. Este
-            // servidor **não o entende** e não precisa: ele repassa por pedaço,
-            // sem remontar quadro. O que ele precisa saber é que o byte é
-            // legítimo, para não confundir um fluxo bom com lixo.
-            if tipo > TIPO_SOM || tamanho == 0 || tamanho > MAX_QUADRO_LEN {
-                return Err(FimDaTela::FluxoMalformado);
-            }
-            self.restam = tamanho;
-            // **A porta de entrada é um quadro-chave de imagem, e só ele.** Um
-            // quadro de som não serve a quem chega no meio: ele não começa nada,
-            // e entrar por ele entregaria imagem pela metade.
-            if tipo == TIPO_CHAVE && comeca_aqui && entrada.is_none() {
-                entrada = Some(inicio);
-            }
-        }
-        Ok(entrada)
-    }
 }
 
 /// Escreve as transmissões de uma sala no fluxo de um espectador.
@@ -1427,14 +1309,6 @@ mod tests {
 
     use super::*;
 
-    /// Um quadro como `seele_core::tela` o escreve: tipo, tamanho, corpo.
-    fn quadro(chave: bool, tamanho: usize) -> Vec<u8> {
-        let mut bytes = vec![u8::from(chave)];
-        bytes.extend_from_slice(&(tamanho as u32).to_be_bytes());
-        bytes.extend(std::iter::repeat_n(0xAB, tamanho));
-        bytes
-    }
-
     #[test]
     fn o_teto_do_hospedeiro_e_dividido_pelos_espectadores() {
         // A primeira linha do min do §5.1, e a razão inteira desta onda: com o
@@ -1517,122 +1391,6 @@ mod tests {
         // `caminho × 60` estoura `u32` a partir de uns 71 Mbit/s. Feito em
         // `u32` isto devolveria um teto minúsculo, e só na casa boa.
         assert_eq!(teto_do_hospedeiro(900_000_000, 1), Some(540_000_000));
-    }
-
-    #[test]
-    fn a_porta_de_entrada_e_o_comeco_de_um_quadro_chave() {
-        let mut enq = Enquadramento::novo();
-        let mut fluxo = quadro(false, 10);
-        let onde = fluxo.len();
-        fluxo.extend(quadro(true, 20));
-        fluxo.extend(quadro(false, 5));
-        assert_eq!(enq.entrada(&fluxo), Ok(Some(onde)));
-    }
-
-    #[test]
-    fn sem_quadro_chave_nao_ha_porta() {
-        let mut enq = Enquadramento::novo();
-        let mut fluxo = quadro(false, 10);
-        fluxo.extend(quadro(false, 20));
-        assert_eq!(enq.entrada(&fluxo), Ok(None));
-    }
-
-    #[test]
-    fn um_cabecalho_partido_ao_meio_nao_vira_porta() {
-        // O caso que uma divisão exata esconderia: os bytes da primeira metade
-        // do cabeçalho já saíram para quem já assistia, e ligar alguém agora o
-        // faria ler a segunda metade como se fosse a primeira. A porta é
-        // pulada; quem entrou pede um quadro-chave e espera o próximo.
-        let mut enq = Enquadramento::novo();
-        let chave = quadro(true, 20);
-        assert_eq!(enq.entrada(chave.get(..3).unwrap_or_default()), Ok(None));
-        assert_eq!(enq.entrada(chave.get(3..).unwrap_or_default()), Ok(None));
-        // E o passo continua certo: o quadro seguinte é reconhecido.
-        assert_eq!(enq.entrada(&quadro(true, 8)), Ok(Some(0)));
-    }
-
-    #[test]
-    fn o_enquadramento_atravessa_pedacos_de_qualquer_tamanho() {
-        // O tamanho do pedaço é do QUIC, não nosso: o mesmo fluxo tem de dar a
-        // mesma resposta byte a byte e de uma vez só.
-        let mut fluxo = quadro(false, 300);
-        let onde = fluxo.len();
-        fluxo.extend(quadro(true, 100));
-        let mut inteiro = Enquadramento::novo();
-        assert_eq!(inteiro.entrada(&fluxo), Ok(Some(onde)));
-
-        let mut picado = Enquadramento::novo();
-        let mut achado = None;
-        for (i, byte) in fluxo.iter().enumerate() {
-            if let Ok(Some(_)) = picado.entrada(&[*byte]) {
-                achado = Some(i);
-            }
-        }
-        // Um cabeçalho que chega byte a byte nunca começa e termina no mesmo
-        // pedaço, então não há porta — e é exatamente o que a regra diz.
-        assert_eq!(achado, None);
-    }
-
-    #[test]
-    fn um_tamanho_impossivel_encerra_o_fluxo() {
-        let mut enq = Enquadramento::novo();
-        let mut cabecalho = vec![0_u8];
-        cabecalho.extend_from_slice(&(MAX_QUADRO_LEN as u32 + 1).to_be_bytes());
-        assert_eq!(enq.entrada(&cabecalho), Err(FimDaTela::FluxoMalformado));
-    }
-
-    #[test]
-    fn um_quadro_vazio_encerra_o_fluxo() {
-        let mut enq = Enquadramento::novo();
-        assert_eq!(
-            enq.entrada(&[0, 0, 0, 0, 0]),
-            Err(FimDaTela::FluxoMalformado)
-        );
-    }
-
-    #[test]
-    fn um_byte_de_tipo_que_este_fluxo_nao_conhece_o_encerra() {
-        // O `2` **deixou de ser desconhecido**: é o som, que passou a viajar no
-        // mesmo fluxo da imagem. Este teste subiu para o primeiro byte que
-        // continua não sendo nada, e é o que ele sempre guardou — que um fluxo
-        // que já não é o que se pensa não é lido por adivinhação sobre um
-        // tamanho que o outro lado escolheu.
-        let mut enq = Enquadramento::novo();
-        assert_eq!(
-            enq.entrada(&[3, 0, 0, 0, 8]),
-            Err(FimDaTela::FluxoMalformado)
-        );
-    }
-
-    #[test]
-    fn um_quadro_de_som_atravessa_e_nao_e_porta_de_entrada() {
-        // O servidor **não entende** o som: ele repassa por pedaço, sem
-        // remontar quadro. O que ele precisa saber é que o byte é legítimo, para
-        // não confundir um fluxo bom com lixo.
-        let mut enq = Enquadramento::novo();
-        let som = {
-            let mut fluxo = vec![TIPO_SOM, 0, 0, 0, 4];
-            fluxo.extend_from_slice(&[1, 2, 3, 4]);
-            fluxo
-        };
-        assert_eq!(
-            enq.entrada(&som),
-            Ok(None),
-            "um quadro de som foi tratado como fluxo malformado"
-        );
-
-        // E ele não abre a porta para quem chega no meio: quem entra precisa de
-        // uma imagem que baste a si mesma, e som não começa imagem nenhuma.
-        let mut enq = Enquadramento::novo();
-        let mut fluxo = vec![TIPO_SOM, 0, 0, 0, 4];
-        fluxo.extend_from_slice(&[1, 2, 3, 4]);
-        let onde = fluxo.len();
-        fluxo.extend(quadro(true, 20));
-        assert_eq!(
-            enq.entrada(&fluxo),
-            Ok(Some(onde)),
-            "a porta de entrada não é o quadro-chave de imagem"
-        );
     }
 }
 

@@ -133,14 +133,35 @@ pub fn recusa_do_tema(porta: bool, pintor: Option<&str>, quem: &str) -> Option<&
     None
 }
 
-/// O tema que o MOD passou a `mundo.tema`, como o fio o leva, ou o nome da
-/// recusa.
+/// Uma recusa de `mundo.tema`: o nome, de lista fechada, e a chave quando a
+/// recusa é de uma (`chave-desconhecida` e `valor-invalido`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecusaDoTema {
+    /// O nome que o MOD lê em `erro`.
+    pub erro: &'static str,
+    /// A chave do tema que causou a recusa, quando há uma.
+    pub chave: Option<String>,
+}
+
+impl From<&'static str> for RecusaDoTema {
+    fn from(erro: &'static str) -> Self {
+        Self { erro, chave: None }
+    }
+}
+
+/// O tema que o MOD passou a `mundo.tema`, como o fio o leva, ou a recusa.
 ///
 /// `null` e `undefined` tiram o tema. Um objeto vira o JSON dele, que é o que
 /// o `TemaMudou` carrega. O resto — texto, número, lista, função — não é tema
 /// (`tema-invalido`), e um JSON maior que o teto do fio não sairia
 /// (`tema-grande-demais`): recusado aqui, onde o MOD lê a recusa, e não no
 /// envio, onde ninguém leria.
+///
+/// **As chaves e os valores passam pela tabela do contrato**
+/// (`seele_proto::mods::CHAVES_DO_TEMA`, tarefa 17j), a mesma da casca: um
+/// nome fora dela é `chave-desconhecida`, um valor fora da forma é
+/// `valor-invalido`, as duas com a chave. Sem isso o MOD lia `ok` para um
+/// tema que a casca ia recusar.
 ///
 /// # Errors
 ///
@@ -149,20 +170,30 @@ pub fn recusa_do_tema(porta: bool, pintor: Option<&str>, quem: &str) -> Option<&
 pub fn valores_do_tema<'js>(
     ctx: &rquickjs::Ctx<'js>,
     valores: rquickjs::Value<'js>,
-) -> rquickjs::Result<Result<crate::mods::TemaDeclarado, &'static str>> {
+) -> rquickjs::Result<Result<crate::mods::TemaDeclarado, RecusaDoTema>> {
     if valores.is_null() || valores.is_undefined() {
         return Ok(Ok(crate::mods::TemaDeclarado { valores: None }));
     }
     if valores.type_of() != rquickjs::Type::Object {
-        return Ok(Err("tema-invalido"));
+        return Ok(Err("tema-invalido".into()));
     }
     let Some(texto) = ctx.json_stringify(valores)? else {
         // Um `toJSON` que devolve `undefined`: não há tema para mandar.
-        return Ok(Err("tema-invalido"));
+        return Ok(Err("tema-invalido".into()));
     };
     let texto = texto.to_string()?;
     if texto.len() > seele_proto::control::MAX_CARGA_DE_MOD {
-        return Ok(Err("tema-grande-demais"));
+        return Ok(Err("tema-grande-demais".into()));
+    }
+    // Um `toJSON` pode devolver o que quiser: só um objeto é tema.
+    let Ok(serde_json::Value::Object(tema)) = serde_json::from_str(&texto) else {
+        return Ok(Err("tema-invalido".into()));
+    };
+    if let Some((erro, chave)) = seele_proto::mods::recusa_das_chaves_do_tema(&tema) {
+        return Ok(Err(RecusaDoTema {
+            erro,
+            chave: Some(chave),
+        }));
     }
     Ok(Ok(crate::mods::TemaDeclarado {
         valores: Some(texto),
