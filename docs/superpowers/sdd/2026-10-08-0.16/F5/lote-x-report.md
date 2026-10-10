@@ -342,10 +342,23 @@ gravar_o_sim_de_quem_hospeda`.
   Quem chama já sabe que esta janela hospeda (`persistence_do_mod`), e duas
   hospedagens não seguram a mesma porta.
 
-**O limite, e para que lado ele erra.** Se quem hospeda entrar no próprio
-servidor por outro endereço, como o IP da rede local ou o link, o sim não é
-gravado. A próxima volta pergunta de novo. É o lado seguro, e nenhum caminho
-da tela entra assim hoje.
+**O limite, e para que lado ele erra.** *Corrigido na rodada 2.* A primeira
+versão desta frase dizia que nenhum caminho da tela entra no próprio servidor
+por outro endereço que não o `aqui`, e isso era falso.
+
+O caminho existe:
+- **a pré-condição** é a medida na seção 1: a janela está na entrada, com a
+  hospedagem de pé;
+- a pessoa cola o próprio link no CONECTAR;
+- o convite nunca aponta para o loopback, só para o endereço da rede local e
+  os alvos do alcance (`Hospedagem::convite`), então a sessão fica no
+  endereço da rede local;
+- a lista de conhecidos o guarda, e o VOLTAR o reusa.
+
+Com o portão desta rodada, só o `aqui`, o SALVAR e a atualização pela gestão
+deixavam de gravar o sim nesse caminho, e a volta perguntava de novo (o A04).
+**O caminho está fechado na rodada 2**: o portão aceita também os endereços
+que o convite da hospedagem anuncia. Ver «Rodada 2».
 
 **Os guardas:**
 - `com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava`: a medida, que
@@ -404,3 +417,87 @@ A preocupação 2 passou a citar o SALVAR, e diz que foi consertada aqui.
 A `ui/` e as bancadas não mudaram nesta rodada. A conformidade está pausada
 pela orquestradora: `aceite_dos_mods` e `volta_do_aceite` rodam depois do
 aviso. Nenhum dos dois toca os gravadores do app.
+
+## Rodada 2 (FIX_BASE `90a5ed44`)
+
+A re-revisão deu os três pontos da rodada 1 como resolvidos e provados por
+reversão. Sobraram dois Menores.
+
+| commit | item | o que muda |
+|---|---|---|
+| `f4f557cf` | 1 | o portão do sim de quem hospeda aceita os endereços que o convite da hospedagem anuncia |
+| `2daaf8cf` | 2 | o guarda da dispensa em `tests/frontend.rs` prende `ultimoAlvo = anfitriao.aqui` |
+| este | relatório | a frase do limite corrigida, e esta seção |
+
+### Item 1: o caminho do próprio link
+
+**O caminho.** É o que a seção «O limite» descreve agora. A janela está na
+entrada com a hospedagem de pé, e a pessoa cola o próprio link no CONECTAR. A
+sessão fica no endereço da rede local que o convite anuncia, e o VOLTAR o
+reusa pela lista de conhecidos. Com o portão da rodada 1, que só aceitava o
+`aqui`, o SALVAR e a atualização pela gestão não gravavam o sim ali. Antes da
+rodada 1, gravavam.
+
+**O conserto, só no `main.rs`:**
+- `Session` ganha `enderecos_do_convite_daqui`. `hospedar` o preenche com
+  `enderecos_do_convite(&anfitriao.convite)`: o alvo e os alternativos do
+  **mesmo** convite que devolve à tela, lidos por `seele_ffi::uri::analisar`.
+- O `disconnect` esquece esses endereços junto com a hospedagem.
+- `a_sessao_e_com_o_servidor_daqui(endereco, do_convite)` aceita o `aqui` e
+  esses endereços, comparando sempre na chave do aceite.
+- `gravar_o_sim_de_quem_hospeda` lê os dois da sessão. Nada no `seele-ffi`.
+
+**Por que o convite devolvido, e não `Hospedagem::convite()` lido na hora.** O
+devolvido é o que a hospedagem anuncia de fato. Com um nome público, o alvo
+dele é o nome, e os números descem para alternativos
+(`Hospedagem::convite_com_nome`). Ler `convite()` na hora perderia o nome. Ler
+o devolvido também deixa o teste montar a sessão sem subir uma hospedagem, o
+que abriria UPnP e PCP no roteador.
+
+**A prova.** `pelo_proprio_link_o_sim_de_quem_hospeda_continua_gravado` monta o
+convite como `Hospedagem::convite` monta: `192.168.1.20:8383`, depois
+`203.0.113.9:8383`, com a impressão digital. Com a sessão em cada um desses
+endereços, os dois gravadores gravam o sim. Em S (`198.51.100.7:8383`), com o
+mesmo convite à mão, não gravam. Com o portão da rodada 1, o teste ficou
+vermelho: «o sim de quem hospeda não foi gravado», nos dois gravadores e nos
+dois endereços. O guarda de texto-fonte
+`os_dois_gravadores_passam_pelo_sim_de_quem_hospeda` passou a cobrar que
+`hospedar` guarde os endereços do convite que devolve e que o `disconnect` os
+esqueça.
+
+**As reversões.** As três ficaram vermelhas, o `main.rs` voltou idêntico
+(`cmp`) e foi tocado antes de recompilar.
+
+| reversão | o que ficou vermelho |
+|---|---|
+| o portão só com o `aqui` (o estado da rodada 1) | `pelo_proprio_link_…` |
+| `hospedar` guarda uma lista vazia | o guarda de texto-fonte |
+| o `disconnect` não esquece | o guarda de texto-fonte |
+
+### Item 2: a ponta da janela
+
+`the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after`
+(`tests/frontend.rs`) já prendia `nossoServidorEm = anfitriao.aqui`, e agora
+prende também `ultimoAlvo = anfitriao.aqui`. A prova foi trocar, em
+`tela-boot.js`, `ultimoAlvo` por `localhost:<porta>`: o guarda reprovou. O
+arquivo voltou idêntico (`cmp`) e não entra em commit nenhum, porque o
+`tela-boot.js` não mudou.
+
+**Se essa ponta ainda importa com o portão novo: sim, do mesmo jeito, no
+caminho comum.** O portão aceita o `aqui` e os endereços do convite, e o
+convite nunca aponta para o loopback. Se `hospedar` entrasse por `localhost` ou
+`[::1]`, o endereço não estaria em nenhuma das duas listas. O SALVAR e a
+atualização pela gestão deixariam de gravar o sim, e a dispensa de conferir a
+própria chave (`nossoServidorEm === ultimoAlvo`) também deixaria de casar.
+
+### Os testes da rodada 2
+
+| o quê | resultado |
+|---|---|
+| `--bin seele-app` | 292 de 292 |
+| `--test frontend` | 284 de 284 |
+| `check-runtime` | verde |
+| fmt e clippy do app | limpos |
+
+A conformidade continua pausada. `aceite_dos_mods` e `volta_do_aceite` rodam
+quando a orquestradora liberar.
