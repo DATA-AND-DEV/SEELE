@@ -29,7 +29,7 @@
 //! | | `u32::MAX` | `{"erro": …}` |
 //! | `voz_portao_contas()` | 0 | `{"nivel_dbfs", "abertura_dbfs", …}` |
 //! | | 1 | `{"erro": …}` |
-//! | `voz_datagrama(carimbo, opus)` | 0 | o datagrama |
+//! | `voz_empacotar(carimbo, opus)` | 0 | o datagrama |
 //! | | 2 | nada: o DTX não sai |
 //! | | 1 | `{"erro": …}` |
 //! | `voz_reabrir(ssrc)` | — | — |
@@ -347,7 +347,7 @@ pub extern "C" fn voz_portao_contas() -> u32 {
 ///
 /// `ptr` e `len` como em [`entrada`].
 #[no_mangle]
-pub unsafe extern "C" fn voz_datagrama(carimbo: u32, ptr: *const u8, len: usize) -> u32 {
+pub unsafe extern "C" fn voz_empacotar(carimbo: u32, ptr: *const u8, len: usize) -> u32 {
     // SAFETY: repassa o contrato desta função ao de `entrada`.
     let opus = unsafe { entrada(ptr, len) };
     ENVIO.with(|e| {

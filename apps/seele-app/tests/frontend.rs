@@ -685,8 +685,23 @@ fn the_page_loads_only_files_that_are_shipped() {
         );
     }
 
+    // **O worklet da voz é a exceção**, e ela é conferida em vez de só
+    // declarada: ele roda na thread de áudio, sem `window`, e quem o carrega é
+    // a `voz-web.js`, com `audioWorklet.addModule`. Carregado pela página, ele
+    // estouraria no `AudioWorkletProcessor`, que a janela não tem. Os outros
+    // guardas desta suíte continuam lendo o arquivo, porque `ui_files` o lista.
+    let voz = read("ui/voz-web.js");
+    assert!(
+        voz.contains("worklet: \"voz-worklet.js\"")
+            && voz.contains("audioWorklet.addModule(cfg.worklet)"),
+        "a voz-web.js deixou de carregar o voz-worklet.js, e a exceção abaixo \
+         passou a esconder um arquivo que ninguém carrega"
+    );
     for (extension, loaded) in [(".css", &stylesheets), (".js", &sources)] {
         for shipped in ui_files(extension) {
+            if shipped == "voz-worklet.js" {
+                continue;
+            }
             assert!(
                 loaded.contains(&shipped),
                 "ui/ ships {shipped}, and index.html never loads it — so it is a \
@@ -11513,6 +11528,15 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "ImageData",
         "OffscreenCanvas",
         "MediaStream",
+        // A voz do navegador (Tarefa 3.3 da F4): o WebCodecs de áudio e o
+        // `AudioWorklet`. O `registerProcessor` é do escopo do worklet, que é
+        // onde o `voz-worklet.js` roda.
+        "AudioData",
+        "AudioDecoder",
+        "AudioEncoder",
+        "AudioWorkletNode",
+        "EncodedAudioChunk",
+        "registerProcessor",
         "parseInt",
         "parseFloat",
         "isNaN",
@@ -16679,9 +16703,25 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
              parou de achá-lo, este guarda passa por não olhar onde a montagem de MOD mora"
         );
     }
+    // **A voz do navegador é a exceção, conferida.** Ela toca pela tag
+    // `<audio>` porque foi o que manteve a voz com a tela bloqueada no iPhone
+    // (a rodada 5 do `spikes/voz-no-navegador/`, fixada pelo ADR 0057), e o
+    // que a tag toca é um `MediaStream` do próprio grafo, por `srcObject`:
+    // nada passa por `src`, nem por `media-src`, nem por `data:`.
+    let voz = without_comments(&read("ui/voz-web.js"));
+    assert!(
+        voz.contains("elemento.srcObject = destino.stream;") && !voz.contains(".src ="),
+        "a tag de áudio da voz deixou de tocar só o `MediaStream` do grafo: com um `src`, \
+         ela cai na política de `media-src` que este guarda existe para lembrar"
+    );
     for nome in &da_janela {
         let fonte = without_comments(&read(&format!("ui/{nome}")));
-        for agulha in ["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"] {
+        let agulhas: &[&str] = if nome == "voz-web.js" {
+            &["new Audio(", "<audio"]
+        } else {
+            &["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"]
+        };
+        for agulha in agulhas {
             assert!(
                 !fonte.contains(agulha),
                 "`{nome}` voltou a criar um elemento de áudio (`{agulha}`): ele toca o \

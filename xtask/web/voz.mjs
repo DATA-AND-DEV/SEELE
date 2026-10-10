@@ -35,7 +35,7 @@ const igual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   e.voz_envio(77);
   const opus = new Uint8Array(40).fill(0xab);
   const pacotes = [];
-  const datagrama = (carimbo, corpo) => comBytes(corpo, (p, n) => e.voz_datagrama(carimbo, p, n));
+  const datagrama = (carimbo, corpo) => comBytes(corpo, (p, n) => e.voz_empacotar(carimbo, p, n));
   const abre = (quantos, vazios) => {
     e.voz_quadro_passou();
     for (let indice = 0; indice < quantos; indice++) {

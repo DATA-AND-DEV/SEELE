@@ -4424,6 +4424,12 @@
   `executorDoMod` só escolhe sem o Tauri.
 -->
 <script src="mods-no-navegador.js"></script>
+<!--
+  A voz no navegador (Tarefa 3.3 da F4): o microfone, o codec e o alto-falante
+  em volta do `.wasm` do `seele-web`. Na carga ela só declara, nas duas cascas.
+  O worklet dela (`voz-worklet.js`) não entra aqui: é ela quem o carrega.
+-->
+<script src="voz-web.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>

@@ -435,42 +435,48 @@ mod tests {
         }
     }
 
-    /// **A bancada do executor no navegador lê o motor que o job acabou de
-    /// compilar.** Ela recebe o `.wasm` pelo caminho; num passo antes do
-    /// `cargo xtask web`, ou com outro caminho, ela mediria um motor velho do
-    /// cache, ou nenhum.
+    /// **As bancadas de navegador com `.wasm` leem o que o job acabou de
+    /// compilar.** Cada uma recebe o `.wasm` pelo caminho: a do executor, o
+    /// motor; a da voz, o `seele-web`. Num passo antes do `cargo xtask web`,
+    /// ou com outro caminho, ela mediria um `.wasm` velho do cache, ou nenhum.
     #[test]
     fn a_bancada_do_executor_no_navegador_roda_depois_do_motor_compilado() {
-        const MOTOR: &str = "target/wasm32-wasip1/release/seele_motor_web.wasm";
         let passos = passos_do_job("bancadas-de-mod");
         let compila = passos
             .iter()
             .position(|passo| chave_do_passo(passo, "run") == Some("cargo xtask web"))
             .expect("o job `bancadas-de-mod` roda `cargo xtask web`");
-        let roda = passos
-            .iter()
-            .position(|passo| {
-                bancada_do_passo(passo).as_deref() == Some("executor-no-navegador.cjs")
-            })
-            .expect("o job `bancadas-de-mod` roda a `executor-no-navegador.cjs`");
-        assert!(
-            compila < roda,
-            "ci.yml: a `executor-no-navegador.cjs` roda antes do `cargo xtask web`, e mede o \
-             motor que estiver no cache"
-        );
-        assert_eq!(
-            passos
-                .get(roda)
-                .and_then(|passo| chave_do_passo(passo, "run")),
-            Some(format!("node apps/seele-app/bancada/executor-no-navegador.cjs {MOTOR}").as_str()),
-            "ci.yml: a `executor-no-navegador.cjs` tem de receber o `.wasm` que o \
-             `cargo xtask web` compila"
-        );
-        assert!(
-            ler("xtask/src/web.rs").contains(&format!("\"{MOTOR}\"")),
-            "o `cargo xtask web` deixou de compilar o motor em {MOTOR}, e a bancada do CI lê \
-             esse caminho"
-        );
+        for (bancada, wasm) in [
+            (
+                "executor-no-navegador.cjs",
+                "target/wasm32-wasip1/release/seele_motor_web.wasm",
+            ),
+            (
+                "voz-no-navegador.cjs",
+                "target/wasm32-unknown-unknown/release/seele_web.wasm",
+            ),
+        ] {
+            let roda = passos
+                .iter()
+                .position(|passo| bancada_do_passo(passo).as_deref() == Some(bancada))
+                .unwrap_or_else(|| panic!("o job `bancadas-de-mod` roda a `{bancada}`"));
+            assert!(
+                compila < roda,
+                "ci.yml: a `{bancada}` roda antes do `cargo xtask web`, e mede o `.wasm` que \
+                 estiver no cache"
+            );
+            assert_eq!(
+                passos
+                    .get(roda)
+                    .and_then(|passo| chave_do_passo(passo, "run")),
+                Some(format!("node apps/seele-app/bancada/{bancada} {wasm}").as_str()),
+                "ci.yml: a `{bancada}` tem de receber o `.wasm` que o `cargo xtask web` compila"
+            );
+            assert!(
+                ler("xtask/src/web.rs").contains(&format!("\"{wasm}\"")),
+                "o `cargo xtask web` deixou de compilar {wasm}, e a bancada do CI lê esse caminho"
+            );
+        }
     }
 
     /// O que a lista escreve, num diário que o `node` de mentira também usa:
