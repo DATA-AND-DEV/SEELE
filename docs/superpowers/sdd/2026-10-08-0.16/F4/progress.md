@@ -628,3 +628,34 @@ começar.
   `crates/seele-conformance/tests/sincronia.rs:34`. Ficam para a fila da
   orquestradora.
 
+## 09/10, noite: a 3.3, lote B (o `seele-voz`) e as preferências da voz na ponte
+
+- **O corte do `seele-voz`** (`a4330b2d`): o `gate.rs`, o `jitter.rs`, o
+  `mixer.rs` e o `netsim.rs` movidos byte a byte do `seele-audio`, com as três
+  constantes e o teste delas; o `seele-audio` os reexporta. Passam o
+  `seele-voz` (77), o `seele-audio` e o `seele-core` inteiros e a
+  `qualidade-da-voz.cjs`. Reversões: o `seele-proto` pendurado reprova o
+  `check-deps`; a libopus pendurada reprova a compilação para o navegador.
+- **O mixer em `BTreeMap`** (`1c915683`), medido no nativo como a orquestradora
+  pediu: 765 a 792 ns por quadro de oito fontes, contra 788 a 877 com o
+  `HashMap`, em rodadas alternadas. Um guarda contra mapas de hash no crate
+  pegou um `HashSet` nos testes do `netsim.rs`.
+- **A emenda do ADR 0057** (`beb1e851`): a exceção em JavaScript não foi
+  preciso, com os números.
+- **O relógio de mídia e a tabela de fontes moram dentro do laço do
+  `voice.rs`.** Escrevê-los no `seele-web` seria uma segunda implementação. A
+  extração deles para o `seele-voz` foi perguntada à orquestradora, e o lote A
+  espera a resposta.
+- **As preferências da voz na ponte**, enquanto isso: o modo (sem escolha, o
+  VOZ), o microfone escolhido e a lista de microfones, a sensibilidade e a
+  redução de ruído (em milésimos, como o desktop) com os controles da voz
+  derivados pela regra do desktop sem sessão, a tecla de falar do PC e a
+  permissão do microfone pela Permissions API. Um guarda prende a abertura
+  sem supressão ao `seele_ffi`. Seis reversões; a da tecla no celular não
+  reprovava de primeira, porque a bancada começava sem tecla guardada, e a
+  bancada foi corrigida. Ficam 78 a fazer na ponte.
+- **Para a F8:** a permissão negada pelo navegador volta
+  `NegadaPeloNavegador` (o achado 3 da matriz), que a tabela
+  `PERMISSAO_DE_MICROFONE` da casca ainda não tem; até ela ter a frase, o
+  bloco fica escondido.
+

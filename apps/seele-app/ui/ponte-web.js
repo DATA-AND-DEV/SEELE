@@ -261,8 +261,6 @@ const AINDA_A_FAZER = new Map([
   ["aceite_de_mods", TAREFA_34],
   ["aceites_de_mods", TAREFA_34],
   ["ajustar_limites_da_tela", TAREFA_310],
-  ["ajustar_reducao_de_ruido", TAREFA_33],
-  ["ajustar_sensibilidade_da_voz", TAREFA_33],
   ["ajustar_volume_da_tela", TAREFA_39],
   ["analisar_convite", TAREFA_34],
   ["apagar_linha", TAREFA_26],
@@ -288,10 +286,8 @@ const AINDA_A_FAZER = new Map([
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_apelido", TAREFA_26],
   ["escolher_icone_do_server", TAREFA_26],
-  ["escolher_microfone", TAREFA_33],
   ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["escolher_tecla_de_falar", TAREFA_33],
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
   ["estado_da_sessao", TAREFA_MODS],
@@ -306,12 +302,9 @@ const AINDA_A_FAZER = new Map([
   ["lembrar_aparencia_do_servidor", TAREFA_26],
   ["ler_imagem_mod", TAREFA_MODS],
   ["messages", TAREFA_26],
-  ["microfone_escolhido", TAREFA_33],
-  ["microfones", TAREFA_33],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
   ["mod_request", TAREFA_26],
-  ["modo_de_voz_escolhido", TAREFA_33],
   ["mods_instalados", TAREFA_MODS],
   ["monitorar_o_microfone", TAREFA_33],
   ["mover_pessoa", TAREFA_26],
@@ -320,7 +313,6 @@ const AINDA_A_FAZER = new Map([
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
   ["pedir_quadro_chave", TAREFA_39],
-  ["permissao_de_microfone", TAREFA_33],
   ["permissao_de_tela", TAREFA_310],
   ["peso_da_linha", TAREFA_26],
   ["preparar_icone_do_server", TAREFA_26],
@@ -336,7 +328,6 @@ const AINDA_A_FAZER = new Map([
   ["set_muted", TAREFA_33],
   ["set_talking", TAREFA_33],
   ["set_total_isolation", TAREFA_33],
-  ["set_voice_mode", TAREFA_33],
   ["set_volume", TAREFA_33],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
@@ -549,7 +540,50 @@ const CHAVES_DA_ORIGEM = Object.freeze({
   retrato: "seele.retrato",
   previas: "seele.previas",
   saida: "seele.saida",
+  modo: "seele.modo-de-voz",
+  microfone: "seele.microfone",
+  sensibilidade: "seele.sensibilidade-da-voz",
+  reducao: "seele.reducao-de-ruido",
+  tecla: "seele.tecla-de-falar",
 });
+
+/**
+ * A regra da voz que o desktop aplica sem sessão, **JSON estrito**:
+ * `tests/web.rs` a confere contra o `seele_ffi`. Sem redução de ruído, a
+ * abertura padrão do portão é esta, e não a de com supressão.
+ */
+const REGRAS_DA_VOZ = Object.freeze({
+  "abertura_sem_supressao_dbfs": -42
+});
+
+/** Os modos de voz do desktop (`VoiceMode`). */
+const MODOS_DE_VOZ = Object.freeze(["PushToTalk", "VoiceActivated", "Open"]);
+
+/** Um número guardado em milésimos, como as preferências do desktop o guardam. */
+function milesimosGuardados(chave) {
+  const texto = guardadoNaOrigem(chave);
+  const milesimos = texto === null ? NaN : Number(texto);
+  return Number.isInteger(milesimos) ? milesimos / 1000 : null;
+}
+
+/**
+ * Os controles da voz sem sessão, pela regra do `controles_da_voz` do desktop:
+ * a força guardada (ou a padrão), a abertura escolhida (ou a padrão daquela
+ * força) e os extremos do portão.
+ */
+function controlesDaVozGuardados() {
+  const padrao = CONSTANTES_DO_DESKTOP.controles_da_voz;
+  const supressao = milesimosGuardados(CHAVES_DA_ORIGEM.reducao) ?? padrao.supressao;
+  const escolhida = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
+  return {
+    supressao,
+    abertura_dbfs:
+      escolhida ?? (supressao > 0 ? padrao.abertura_dbfs : REGRAS_DA_VOZ.abertura_sem_supressao_dbfs),
+    abertura_escolhida: escolhida !== null,
+    abertura_minima_dbfs: padrao.abertura_minima_dbfs,
+    abertura_maxima_dbfs: padrao.abertura_maxima_dbfs,
+  };
+}
 
 /**
  * As saídas de som do PC, na forma do `PlaybackDevice` do desktop. Sem os
@@ -561,14 +595,23 @@ const CHAVES_DA_ORIGEM = Object.freeze({
  */
 async function saidasDeSom() {
   if (!("setSinkId" in window.HTMLMediaElement.prototype)) return [];
-  const aparelhos = await navigator.mediaDevices.enumerateDevices();
-  const saidas = aparelhos.filter((aparelho) => aparelho.kind === "audiooutput");
-  const grupoDoPadrao = saidas.find((aparelho) => aparelho.deviceId === "default")?.groupId;
-  return saidas
+  return aparelhosDoTipo("audiooutput", "SAÍDA");
+}
+
+/**
+ * Os aparelhos de um tipo, como o desktop os lista (`CaptureDevice`,
+ * `PlaybackDevice`): sem os pseudo-aparelhos, sem os ids vazios, e com o
+ * padrão pelo grupo do `default`. Um aparelho sem nome (o navegador só os
+ * nomeia depois da permissão) leva o número dele.
+ */
+async function aparelhosDoTipo(tipo, semNome) {
+  const aparelhos = (await navigator.mediaDevices.enumerateDevices()).filter((aparelho) => aparelho.kind === tipo);
+  const grupoDoPadrao = aparelhos.find((aparelho) => aparelho.deviceId === "default")?.groupId;
+  return aparelhos
     .filter((aparelho) => aparelho.deviceId !== "" && !["default", "communications"].includes(aparelho.deviceId))
     .map((aparelho, ordem) => ({
       id: aparelho.deviceId,
-      name: aparelho.label || `SAÍDA ${ordem + 1}`,
+      name: aparelho.label || `${semNome} ${ordem + 1}`,
       default: grupoDoPadrao !== undefined && aparelho.groupId === grupoDoPadrao,
     }));
 }
@@ -638,14 +681,16 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   pasta_de_downloads: () => "",
   versoes_instaladas: () => [],
   estado_da_primeira_abertura: () => null,
-  // Sem tecla escolhida. A tecla de falar do PC chega com a voz (3.3).
-  tecla_de_falar: () => null,
+  // **Opaca**, como no desktop: um `KeyboardEvent.code`, que quem lê o teclado
+  // (a casca) nomeia. No celular não há tecla: falar apertando é o SEGURAR
+  // PARA FALAR da faixa de voz.
+  tecla_de_falar: () => (CASCA_DA_PONTE === "larga" ? guardadoNaOrigem(CHAVES_DA_ORIGEM.tecla) : null),
   limite_da_mensagem: () => structuredClone(CONSTANTES_DO_DESKTOP.limite_da_mensagem),
   regras_de_previa: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_de_previa),
   regras_do_icone_do_server: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_do_icone_do_server),
   apis_de_mod_aceitas: () => structuredClone(CONSTANTES_DO_DESKTOP.apis_de_mod_aceitas),
   dominios_de_gif: () => structuredClone(CONSTANTES_DO_DESKTOP.dominios_de_gif),
-  controles_da_voz: () => structuredClone(CONSTANTES_DO_DESKTOP.controles_da_voz),
+  controles_da_voz: controlesDaVozGuardados,
   // Sem sessão, o mapa vazio, como o `unwrap_or_default` do desktop.
   volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
@@ -746,6 +791,47 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // Uma alça que não está aqui é o caminho que não existe do desktop.
   descrever_arquivo: ({ caminho } = {}) => descreverAlca(String(caminho ?? "")) ?? Promise.reject("NotConnected"),
   saidas: saidasDeSom,
+  microfones: () => aparelhosDoTipo("audioinput", "MICROFONE"),
+  microfone_escolhido: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone),
+  // Grava; numa sala, a voz (3.3, lote C) reabre a captura com ele.
+  escolher_microfone: ({ dispositivo } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.microfone, dispositivo == null ? null : String(dispositivo))
+      ? null
+      : Promise.reject("NaoGravei"),
+  // Sem escolha, o VOZ, que é o que funciona com a tela travada (matriz da F8).
+  modo_de_voz_escolhido: () => {
+    const guardado = guardadoNaOrigem(CHAVES_DA_ORIGEM.modo);
+    return MODOS_DE_VOZ.includes(guardado) ? guardado : "VoiceActivated";
+  },
+  set_voice_mode: ({ mode } = {}) => {
+    if (!MODOS_DE_VOZ.includes(mode)) return Promise.reject(`modo de voz desconhecido: ${String(mode)}`);
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.modo, mode) ? null : Promise.reject("NaoGravei");
+  },
+  // Em milésimos, como as preferências do desktop; `null` volta ao padrão.
+  ajustar_sensibilidade_da_voz: ({ dbfs } = {}) => {
+    if (dbfs != null && !Number.isFinite(dbfs)) return Promise.reject("a sensibilidade tem de ser um número");
+    const valor = dbfs == null ? null : String(Math.trunc(dbfs * 1000));
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.sensibilidade, valor) ? null : Promise.reject("não consegui gravar a escolha");
+  },
+  // A força entre 0 e 1, como o desktop; o navegador só liga ou desliga o
+  // `noiseSuppression`, e a voz (3.3, lote C) o liga com qualquer força acima de 0.
+  ajustar_reducao_de_ruido: ({ forca } = {}) => {
+    if (forca != null && !Number.isFinite(forca)) return Promise.reject("a força tem de ser um número");
+    const valor = forca == null ? null : String(Math.trunc(Math.min(1, Math.max(0, forca)) * 1000));
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.reducao, valor) ? null : Promise.reject("não consegui gravar a escolha");
+  },
+  escolher_tecla_de_falar: ({ tecla } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.tecla, tecla == null ? null : String(tecla)) ? null : Promise.reject("NaoGravei"),
+  // A Permissions API: concedida, negada pelo navegador (achado 3 da matriz da
+  // F8), ou não se sabe, inclusive onde ela não pergunta pelo microfone.
+  permissao_de_microfone: async () => {
+    try {
+      const { state } = await navigator.permissions.query({ name: "microphone" });
+      return { granted: "Permitida", denied: "NegadaPeloNavegador" }[state] ?? "NaoSeSabe";
+    } catch {
+      return "NaoSeSabe";
+    }
+  },
   saida_escolhida: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
   // Grava; numa sessão, a voz (3.3) a aplica com `setSinkId`.
   escolher_saida: ({ dispositivo } = {}) =>

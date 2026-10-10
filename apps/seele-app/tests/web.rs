@@ -826,3 +826,30 @@ fn as_regras_do_arquivo_da_ponte_sao_as_do_desktop() {
         serde_json::to_string_pretty(&do_desktop).expect("JSON")
     );
 }
+
+/// **A regra da voz sem sessão é a do desktop.** Sem redução de ruído, o
+/// `controles_da_voz` do desktop abre o portão em
+/// `ABERTURA_SEM_SUPRESSAO_DBFS`, e não na abertura de com supressão. A ponte a
+/// aplica com uma cópia, e este guarda a prende ao `seele_ffi`.
+#[test]
+fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    let json = ponte
+        .split_once("const REGRAS_DA_VOZ = Object.freeze(")
+        .expect("a ponte declara `REGRAS_DA_VOZ`")
+        .1
+        .split_once(");")
+        .expect("`REGRAS_DA_VOZ` fecha")
+        .0;
+    let da_ponte: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|erro| panic!("`REGRAS_DA_VOZ` tem de ser JSON estrito: {erro}"));
+    let do_desktop = serde_json::json!({
+        "abertura_sem_supressao_dbfs": seele_ffi::ABERTURA_SEM_SUPRESSAO_DBFS,
+    });
+    assert_eq!(
+        numeros_como_f64(da_ponte),
+        numeros_como_f64(do_desktop.clone()),
+        "as `REGRAS_DA_VOZ` da ponte discordam do `seele_ffi`. As de hoje são:\n{}",
+        serde_json::to_string_pretty(&do_desktop).expect("JSON")
+    );
+}

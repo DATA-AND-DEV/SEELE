@@ -55,6 +55,7 @@ function pagina({
   aparelhos = [],
   temSetSinkId = true,
   telaCheiaFalha = false,
+  permissao = "prompt",
 } = {}) {
   const telaCheia = { pedidos: 0, saidas: 0, elemento: null };
   const ouvidos = [];
@@ -79,7 +80,19 @@ function pagina({
     atob,
     innerWidth: largura,
     location: { hash, href: `https://seele.invalid/${hash}` },
-    navigator: { mediaDevices: { enumerateDevices: async () => aparelhos.map((a) => ({ ...a })) } },
+    navigator: {
+      mediaDevices: { enumerateDevices: async () => aparelhos.map((a) => ({ ...a })) },
+      permissions:
+        permissao === null
+          ? undefined
+          : {
+              query: async ({ name }) => {
+                if (name !== "microphone") throw new TypeError(name);
+                if (permissao instanceof Error) throw permissao;
+                return { state: permissao };
+              },
+            },
+    },
     HTMLMediaElement: temSetSinkId ? class { setSinkId() {} } : class {},
     document: {
       get fullscreenElement() {
@@ -646,6 +659,95 @@ async function aTelaCheia() {
   confere(caso, q.avisos.some(([texto]) => String(texto).includes("tela cheia")), "o pedido recusado não foi dito");
 }
 
+/// **As preferências da voz moram na origem**, com as regras do desktop
+/// (`set_voice_mode`, `escolher_microfone`, `ajustar_sensibilidade_da_voz`,
+/// `ajustar_reducao_de_ruido`) e os controles derivados delas pela regra do
+/// `controles_da_voz` sem sessão. Sem escolha, o modo é `VoiceActivated` (a
+/// matriz da F8). A tecla de falar é só do PC.
+async function asPreferenciasDaVoz() {
+  const caso = "as preferências da voz";
+  const p = pagina({ largura: 1280 });
+  const ler = async (comando) => (await desfecho(p.invoke(comando))).ok;
+  confere(caso, (await ler("modo_de_voz_escolhido")) === "VoiceActivated", "sem escolha, o modo não é VoiceActivated");
+  await p.invoke("set_voice_mode", { mode: "PushToTalk" });
+  confere(caso, (await ler("modo_de_voz_escolhido")) === "PushToTalk", "o modo escolhido não ficou");
+  const estranho = await desfecho(p.invoke("set_voice_mode", { mode: "Grito" }));
+  confere(caso, typeof estranho.erro === "string" && (await ler("modo_de_voz_escolhido")) === "PushToTalk",
+    `um modo desconhecido voltou ${util.inspect(estranho)} ou trocou o guardado`);
+
+  confere(caso, (await ler("microfone_escolhido")) === null, "sem escolha, o microfone escolhido não é nulo");
+  await p.invoke("escolher_microfone", { dispositivo: "mic-usb" });
+  confere(caso, (await ler("microfone_escolhido")) === "mic-usb", "o microfone escolhido não ficou");
+  await p.invoke("escolher_microfone", { dispositivo: null });
+  confere(caso, (await ler("microfone_escolhido")) === null, "voltar ao padrão não apagou o microfone");
+
+  const padrao = await ler("controles_da_voz");
+  await p.invoke("ajustar_sensibilidade_da_voz", { dbfs: -50 });
+  const sensivel = await ler("controles_da_voz");
+  confere(caso, sensivel.abertura_dbfs === -50 && sensivel.abertura_escolhida === true,
+    `a sensibilidade escolhida não chegou aos controles: ${util.inspect(sensivel)}`);
+  await p.invoke("ajustar_sensibilidade_da_voz", { dbfs: null });
+  confere(caso, igual(await ler("controles_da_voz"), padrao), "voltar ao padrão não devolveu os controles de antes");
+  await p.invoke("ajustar_reducao_de_ruido", { forca: 0 });
+  const semReducao = await ler("controles_da_voz");
+  confere(caso, semReducao.supressao === 0 && semReducao.abertura_dbfs === p.ler("REGRAS_DA_VOZ").abertura_sem_supressao_dbfs,
+    `sem redução de ruído, a abertura padrão não é a sem supressão: ${util.inspect(semReducao)}`);
+  await p.invoke("ajustar_reducao_de_ruido", { forca: 7 });
+  confere(caso, (await ler("controles_da_voz")).supressao === 1, "a força da redução não foi fixada entre 0 e 1");
+
+  confere(caso, (await ler("tecla_de_falar")) === null, "sem escolha, a tecla de falar não é nula");
+  await p.invoke("escolher_tecla_de_falar", { tecla: "KeyT" });
+  confere(caso, (await ler("tecla_de_falar")) === "KeyT", "a tecla escolhida não ficou");
+  // Uma tecla guardada (de uma visita no PC, no mesmo aparelho) não vale no
+  // celular: ele não tem tecla de falar.
+  const celular = pagina({ toque: true });
+  celular.origem.set("seele.tecla-de-falar", "KeyT");
+  confere(caso, (await desfecho(celular.invoke("tecla_de_falar"))).ok === null, "no celular a tecla de falar não é nula");
+
+  const sem = pagina({ gravacaoFalha: true });
+  for (const [comando, args] of [["set_voice_mode", { mode: "Open" }], ["escolher_microfone", { dispositivo: "x" }]]) {
+    const r = await desfecho(sem.invoke(comando, args));
+    confere(caso, r.erro === "NaoGravei", `sem gravar, ${comando} voltou ${util.inspect(r)}`);
+  }
+}
+
+/// **Os microfones do aparelho**, na forma do `CaptureDevice` do desktop: o
+/// `enumerateDevices` sem os pseudo-aparelhos e sem os ids vazios de antes da
+/// permissão, com o padrão marcado pelo grupo do `default`.
+async function osMicrofones() {
+  const caso = "os microfones";
+  const aparelhos = [
+    { kind: "audioinput", deviceId: "default", groupId: "a", label: "Padrão - Interno" },
+    { kind: "audioinput", deviceId: "interno", groupId: "a", label: "Microfone interno" },
+    { kind: "audioinput", deviceId: "usb", groupId: "b", label: "" },
+    { kind: "audiooutput", deviceId: "falante", groupId: "a", label: "Alto-falantes" },
+  ];
+  const r = await desfecho(pagina({ aparelhos }).invoke("microfones"));
+  confere(caso, igual(r.ok, [
+    { id: "interno", name: "Microfone interno", default: true },
+    { id: "usb", name: "MICROFONE 2", default: false },
+  ]), `a lista saiu ${util.inspect(r)}`);
+  const semPermissao = await desfecho(pagina({ aparelhos: [{ kind: "audioinput", deviceId: "", groupId: "", label: "" }] }).invoke("microfones"));
+  confere(caso, igual(semPermissao.ok, []), `sem permissão a lista saiu ${util.inspect(semPermissao)}`);
+}
+
+/// **A permissão do microfone, pela Permissions API**: concedida é
+/// `Permitida`, negada é `NegadaPeloNavegador` (o achado 3 da matriz da F8), e o
+/// resto, inclusive a API que não pergunta pelo microfone, é `NaoSeSabe`.
+async function aPermissaoDoMicrofone() {
+  const caso = "a permissão do microfone";
+  for (const [estado, esperada] of [
+    ["granted", "Permitida"],
+    ["denied", "NegadaPeloNavegador"],
+    ["prompt", "NaoSeSabe"],
+    [new TypeError("microphone"), "NaoSeSabe"],
+    [null, "NaoSeSabe"],
+  ]) {
+    const r = await desfecho(pagina({ permissao: estado }).invoke("permissao_de_microfone"));
+    confere(caso, r.ok === esperada, `com «${estado}», voltou ${util.inspect(r)}, e não ${esperada}`);
+  }
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -665,6 +767,9 @@ async function aTelaCheia() {
     oArraste,
     aSaidaDeSom,
     aTelaCheia,
+    asPreferenciasDaVoz,
+    osMicrofones,
+    aPermissaoDoMicrofone,
   ];
   for (const prova of provas) {
     try {
