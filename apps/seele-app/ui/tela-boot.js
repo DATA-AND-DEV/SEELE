@@ -178,6 +178,40 @@ function deOndeVeio(resposta) {
   };
 }
 
+/**
+ * **A entrada de uma tentativa que outra substituiu, largada** (pendência 58,
+ * item 54; lote E54 da F5).
+ *
+ * Uma tentativa lenta que **entra** depois de outra começar tomava a tela da
+ * mais nova: a revisão do lote W2 mediu a velha voltando 1,2 s depois de o
+ * `hospedar()` ter entrado, e reabrindo `#tela-auth` com o endereço dela por
+ * cima da sessão, com a geração da sessão de volta à dela. Agora ela não toca
+ * na tela: nem a geração, nem o desenho, nem a autenticação.
+ *
+ * **E a sessão dela é solta no Rust**, pela geração que o `connect` devolveu
+ * (`soltar_a_entrada`, em `main.rs`). Quando a mais nova já chegou ao
+ * `connect`, o Rust nem deixa a velha entrar: ela volta recusada como
+ * substituída, e cai no ramo dela no `catch`. Mas a nova pode estar entre o
+ * começo (`++tentativas`) e o `connect` dela — no `conferir_esta_versao`, por
+ * exemplo —, e aí a velha entra com a geração ainda de pé. Sem soltá-la, a
+ * conexão dela ficava no slot sem tela, e a nova recebia `AlreadyConnected`.
+ * O Rust só solta se aquela geração ainda é a de pé: um pedido atrasado não
+ * derruba a sessão de ninguém.
+ *
+ * Vai ao `seele.log` como aviso, com o alvo e a geração, e **sem a
+ * credencial**: o alvo é o desta chamada, e a credencial não passa por aqui.
+ */
+function largarAEntrada(alvo, geracao) {
+  registrarNoAnfitriao(
+    "entrada",
+    `a tentativa a ${alvo} entrou depois que outra a substituiu, e a tela não a mostra: a sessão dela (geração ${geracao}) é solta`,
+    "aviso",
+  );
+  invoke("soltar_a_entrada", { geracao }).catch((falha) =>
+    console.warn("soltar_a_entrada:", falha),
+  );
+}
+
 async function conectar(alvo, apelido, credencial) {
   ultimoAlvo = alvo ?? ultimoAlvo;
   ultimoApelido = apelido ?? ultimoApelido;
@@ -356,6 +390,13 @@ async function conectar(alvo, apelido, credencial) {
       // quem confere.
       joinSecret: credencial ?? null,
     });
+    // **A tentativa que outra substituiu não entra na tela** (pendência 58,
+    // item 54; lote E54 da F5). Num lugar só, antes do primeiro passo do
+    // sucesso: ver `largarAEntrada`.
+    if (esta !== tentativas) {
+      largarAEntrada(alvo, resposta?.geracao);
+      return;
+    }
     const { snapshot, veredito, geracao } = resposta;
 
 

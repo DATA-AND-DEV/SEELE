@@ -11472,6 +11472,132 @@ fn so_a_tentativa_mais_nova_mexe_no_conectar() {
     );
 }
 
+/// **A entrada de uma tentativa que outra substituiu não toca na tela, e é
+/// solta** (pendência 58, item 54; lote E54 da F5).
+///
+/// Uma tentativa lenta que **entra** depois de outra começar tomava a tela da
+/// mais nova: a geração da sessão voltava à dela, e `#tela-auth` reabria com o
+/// endereço dela por cima da sessão. A `ajustes-v013.cjs`
+/// (`aEntradaVelhaNaoTomaATela`) prova o comportamento; este guarda prende a
+/// forma, num lugar só, sem ler comentário:
+///
+/// 1. depois do `invoke("connect"`, a primeira decisão do sucesso é
+///    `if (esta !== tentativas`: nada do sucesso — a geração, o desenho, a
+///    autenticação, ou o `depoisDeConectar` que a F8 extrai — vem antes dela, e
+///    nenhuma espera fica entre o `connect` e ela;
+/// 2. o bloco dela não faz nada do sucesso, volta, e larga a entrada com a
+///    geração da resposta;
+/// 3. o sucesso continua depois dela — um guarda que não acha o que cobra passa
+///    sem olhar nada;
+/// 4. `largarAEntrada` registra uma vez, como aviso, com o alvo; pede
+///    `soltar_a_entrada` com a geração; e não nomeia a credencial.
+#[test]
+fn a_entrada_que_outra_substituiu_nao_toca_na_tela_e_e_solta() {
+    const SUCESSO: &[&str] = &[
+        "entrarNaGeracao(",
+        "desenhar(",
+        "entrarNaAutenticacao(",
+        "depoisDeConectar(",
+    ];
+    let fonte = read("ui/tela-boot.js");
+    let conectar = js_function(&fonte, "async function conectar(");
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(fim_da_chamada) = conectar[connect..].find("});").map(|n| connect + n + 3) else {
+        panic!("a chamada ao `connect` não fecha: {conectar}");
+    };
+    let Some(catch) = conectar[fim_da_chamada..]
+        .find("} catch (falha) {")
+        .map(|n| fim_da_chamada + n)
+    else {
+        panic!("`conectar` perdeu o `catch` do `connect`: {conectar}");
+    };
+    let sucesso = &conectar[fim_da_chamada..catch];
+    let Some(abre) = sucesso.find("if (esta !== tentativas") else {
+        panic!(
+            "o caminho de sucesso de `conectar` não confere se a tentativa ainda é a mais nova \
+             (`if (esta !== tentativas`): uma tentativa que outra substituiu e entra depois toma \
+             a tela da sessão nova.\n{sucesso}"
+        );
+    };
+    let antes = &sucesso[..abre];
+    for passo in SUCESSO {
+        assert!(
+            !antes.contains(passo),
+            "o caminho de sucesso de `conectar` faz `{passo}` antes de conferir se a tentativa \
+             ainda é a mais nova: a que outra substituiu toma a tela antes de ser largada.\n{sucesso}"
+        );
+    }
+    assert!(
+        !antes.contains("await "),
+        "há uma espera entre o `connect` voltar e a conferência da tentativa: o que muda nela \
+         não é conferido.\n{sucesso}"
+    );
+    let Some(chave) = sucesso[abre..].find('{').map(|n| abre + n) else {
+        panic!("a conferência da tentativa não tem bloco: {sucesso}");
+    };
+    let Some(fim_do_ramo) = fim_do_bloco(sucesso, chave) else {
+        panic!("o bloco da conferência da tentativa não fecha: {sucesso}");
+    };
+    let ramo = &sucesso[chave..fim_do_ramo];
+    for passo in SUCESSO {
+        assert!(
+            !ramo.contains(passo),
+            "o ramo da tentativa que outra substituiu faz `{passo}`: ela entra na tela que \
+             devia largar.\n{ramo}"
+        );
+    }
+    assert!(
+        ramo.contains("return") && ramo.contains("largarAEntrada(") && names(ramo, "geracao"),
+        "o ramo da tentativa que outra substituiu não volta, ou não larga a entrada pela \
+         geração que o `connect` devolveu: sem soltá-la, a conexão dela fica no slot do Rust \
+         sem tela, e a nova recebe `AlreadyConnected`.\n{ramo}"
+    );
+    let depois = &sucesso[fim_do_ramo..];
+    assert!(
+        SUCESSO.iter().any(|passo| depois.contains(passo)),
+        "o sucesso de `conectar` saiu de depois da conferência da tentativa, e este guarda \
+         não acha mais o que cobra.\n{sucesso}"
+    );
+
+    let largar = js_function(&fonte, "function largarAEntrada(");
+    let chamadas: Vec<Vec<String>> = largar
+        .match_indices("registrarNoAnfitriao(")
+        .map(|(posicao, _)| {
+            argumentos_da_chamada(&largar[posicao + "registrarNoAnfitriao".len()..])
+                .iter()
+                .map(|argumento| argumento.trim().to_owned())
+                .collect()
+        })
+        .collect();
+    assert!(
+        chamadas.len() == 1,
+        "`largarAEntrada` não escreve a entrada largada no registro, uma vez ({} chamada(s)): \
+         calada na tela e fora do seele.log, ela some sem rastro.\n{largar}",
+        chamadas.len()
+    );
+    let argumentos = &chamadas[0];
+    assert!(
+        argumentos.get(2).map(String::as_str) == Some("\"aviso\"")
+            && argumentos.get(1).is_some_and(|frase| names(frase, "alvo")),
+        "a linha da entrada largada não vai como aviso, ou não diz o alvo ({argumentos:?})"
+    );
+    let Some(pedido) = largar.find("invoke(\"soltar_a_entrada\"") else {
+        panic!("`largarAEntrada` não pede ao Rust que solte a sessão largada: {largar}");
+    };
+    let objeto = argumentos_da_chamada(&largar[pedido + "invoke".len()..]);
+    assert!(
+        objeto.get(1).is_some_and(|objeto| names(objeto, "geracao")),
+        "`largarAEntrada` pede `soltar_a_entrada` sem a geração da entrada ({objeto:?}): o Rust \
+         só solta a sessão daquela geração, e sem ela não solta nada"
+    );
+    assert!(
+        !names(&largar, "credencial"),
+        "`largarAEntrada` nomeia a credencial da tentativa: ela vai ao connect e a mais nada.\n{largar}"
+    );
+}
+
 #[test]
 fn the_decoder_profile_is_read_from_the_stream_and_never_spelled_out() {
     // **This guard exists because the bug already happened, in the field.**
