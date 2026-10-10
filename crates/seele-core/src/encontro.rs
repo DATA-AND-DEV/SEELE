@@ -470,6 +470,16 @@ const ENVIOS_AO_QUARTO: u32 = 3;
 /// O intervalo entre uma volta e a seguinte.
 const INTERVALO_DOS_ENVIOS: Duration = Duration::from_millis(500);
 
+// As voltas cabem no prazo, como [`PRAZO_DO_QUARTO`] promete: cada uma, a última
+// inclusive, com um intervalo inteiro para ser respondida. Uma última volta que
+// saísse em cima do prazo seria uma pergunta que ninguém espera ouvir. Conferido
+// em tempo de compilação, e não pelo teste do ponto que limita: aquele mede o
+// comportamento com um prazo largo, para a carga da máquina não o reprovar.
+const _: () = assert!(
+    ENVIOS_AO_QUARTO as u128 * INTERVALO_DOS_ENVIOS.as_millis() <= PRAZO_DO_QUARTO.as_millis(),
+    "as voltas ao quarto não cabem no PRAZO_DO_QUARTO"
+);
+
 /// O piso da espera pela marca que falta, depois da primeira resposta.
 ///
 /// Num caminho curto o dobro da ida e volta são microssegundos, e isso não daria
@@ -3174,10 +3184,17 @@ mod testes {
         // não fica nada além do socket da consulta. Com mais de 1 s ali, a
         // primeira volta já ouviria a recusa, e o teste passaria com uma
         // consulta que não pergunta de novo.
+        //
+        // **Com um prazo largo, e não o `PRAZO_DO_QUARTO`.** A pergunta aqui é
+        // se a consulta pergunta de novo depois da janela da recusa. Que as
+        // voltas cabem no prazo do produto é conta, e é conferida em tempo de
+        // compilação, ao lado das constantes. Com o prazo do produto, uma linha
+        // parada meio segundo perto da terceira volta reprovava este teste, e a
+        // bateria inteira carrega a máquina por uma hora e meia.
         let marcas = marcas_da_sala();
         let ponto = ponto_que_limita().await;
         assert_eq!(
-            localizar(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await,
+            localizar(&ponto.to_string(), &marcas, Duration::from_secs(30)).await,
             Localizacao::PontoRecusou
         );
     }
