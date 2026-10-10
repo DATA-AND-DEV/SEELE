@@ -1280,7 +1280,7 @@ estreita» (`celular.css:1-18`).
 | `conversa.mensagem` | existe | — | aplicada |
 | `compositor` | existe; campos de 16 px | botões de 44 × 44 | aplicada |
 | `pessoas.lista` | gaveta PESSOAS, célula inteira (`:397-407`) | cartão de 44 px | aplicada; a capa da linha fica parada |
-| `status.barra` | **só na chamada** (`#tela-sessao:has(#vista-chamada[hidden]) .telemetria{display:none}`) | mínimo de 40 px | aplicada, visível só na chamada |
+| `status.barra` | **não existe** (decidido com a F8, 09/10): a casca do celular tira o rodapé da telemetria, e as medidas dele foram para a fileira da CHAMADA — que tem a altura exata das abas — e para AJUSTES › CONEXÃO | — | **`regiao-ausente`**: a casca declara as sete outras em `CELULAR.regioes`, e o MOD que contribui aqui recebe o motivo, e a aba DIAGNÓSTICO conta |
 | `chamada.palco` | **vista alternativa** à grade, que vira uma coluna de cartões de 160 px (`:531-541`) | largura da tela; o MOD recebe o tamanho (§7.2) | aplicada |
 | `pagina` | célula inteira; a imersiva **não cobre a faixa de voz nem as abas** | — | [inf] hoje cobre: é `fixed; inset: …; z-index: 30` sem área segura de baixo (`mods-superficies.css:142-146`). Conserto na tarefa 7 |
 | `folha` | folha de baixo, acima da faixa e das abas | até a altura do polegar, expansível até o alto, sem cobrir a faixa nem as abas | — |
@@ -1297,10 +1297,16 @@ não muda o contrato.
 
 **Uma contribuição para uma região que a casca não tem é recusada com motivo
 nomeado** (`contribuicao` com `motivo: 'regiao-ausente'`), e não some calada.
-A aba DIAGNÓSTICO conta. **Na 0.16, com o desenho da F8, nenhuma das oito
-regiões fica sem casa no celular.** A regra continua no contrato para a casca
-que não tiver uma região: uma região da API 7 numa casca 1.0, ou o executor do
-navegador da F4 se ele não desenhar alguma. O MOD sabe onde está pelo `onde` e pelas `regioes` do
+A aba DIAGNÓSTICO conta. **Na 0.16, o celular tem sete das oito regiões: o
+`status.barra` não existe nele** (medido e decidido com a F8, 09/10: a casca
+do celular tira o rodapé da telemetria, e uma barra de estado escondida a dois
+toques em AJUSTES › CONEXÃO prometeria o que não cumpre). A casca do celular
+declara as sete em `CELULAR.regioes`, e um MOD que contribui no `status.barra`
+recebe `regiao-ausente` — sabe antes de escrever, pela tabela acima e pelas
+`regioes` do retrato. No PC no navegador (a casca larga), as oito valem, como
+no desktop. A regra vale também para a casca futura que não tiver uma região:
+uma região da API 7 numa casca 1.0, ou o executor do navegador da F4 se ele
+não desenhar alguma. [c, tarefa 5, Step 8; a declaração das sete é da F8] O MOD sabe onde está pelo `onde` e pelas `regioes` do
 retrato, e pelo evento `lugar` quando o aparelho deita.
 
 **Pontos ainda não medidos, que a F4 e a M3 no iPhone respondem:**

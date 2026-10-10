@@ -2739,9 +2739,11 @@ function cascaDoRetrato() {
 /**
  * **As regiões que esta casca tem** (rascunho da API 6, §11; tarefa 5, Step 8).
  * No computador, todas. No celular, as que a casca dele declarar em
- * `CELULAR.regioes`, e todas quando ela não declara — na 0.16 o desenho da F8
- * dá casa às oito. Quem declara menos é uma casca futura: uma região da API 7
- * numa casca 1.0, ou um executor que não desenhe alguma.
+ * `CELULAR.regioes`, e todas quando ela não declara. Na 0.16 a casca do
+ * celular declara sete: o `status.barra` não existe nela, porque ela tira o
+ * rodapé da telemetria (medido e decidido com a F8, 09/10). Uma casca futura
+ * declara do mesmo jeito: uma região da API 7 numa casca 1.0, ou um executor
+ * que não desenhe alguma.
  */
 function aCascaTemARegiao(nome) {
   const declaradas = typeof CELULAR === "object" && CELULAR !== null && CELULAR.regioes instanceof Set
