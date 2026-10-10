@@ -584,6 +584,44 @@ mod testes {
         );
     }
 
+    /// **A recusa do servidor volta aos campos** (rascunho da API 6, §5; tarefa
+    /// 7 da F3, Step 6b): o punho da superfície tem `formulario.erros(mapa)`,
+    /// que manda `formulario-erros` com a superfície e o mapa de chave a frase.
+    #[test]
+    fn a_recusa_do_servidor_volta_aos_campos_do_formulario() {
+        let executor = executor();
+        executor
+            .iniciar_com_api(
+                "SeeleUI.superficies.criar({ id: 'estilo', tipo: 'dialogo' })\
+                   .then((s) => s.formulario.erros({ texto: 'claro demais', fundo: 'claro demais' }));",
+                6,
+            )
+            .expect("código");
+        let criar: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        let n = campo(&criar, "n").as_u64().expect("o pedido tem número");
+        executor
+            .entregar(&format!(
+                r#"{{"tipo":"resposta","n":{n},"ok":true,"valor":{{"superficie":"estilo","reaproveitada":false}}}}"#
+            ))
+            .expect("entregar");
+        let erros: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        assert_eq!(
+            (
+                campo(&erros, "tipo"),
+                campo(&erros, "superficie"),
+                campo(&erros, "erros")
+            ),
+            (
+                &serde_json::json!("formulario-erros"),
+                &serde_json::json!("estilo"),
+                &serde_json::json!({ "texto": "claro demais", "fundo": "claro demais" }),
+            ),
+            "o punho da superfície não manda os erros do formulário: {erros}"
+        );
+    }
+
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**
     ///
     /// O executor nativo não definia `console`, e o `console.warn` que o autor

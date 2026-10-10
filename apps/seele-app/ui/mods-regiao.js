@@ -708,6 +708,9 @@ class RegiaoDeMod {
     this.regrasDoCampo = new WeakMap();
     this.errosDoProduto = new WeakMap();
     this.errosDoMod = new WeakMap();
+    // E a recusa do servidor de volta ao campo (Step 6b), que também vale até
+    // a pessoa mexer nele.
+    this.errosDoServidor = new WeakMap();
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -2093,10 +2096,45 @@ class RegiaoDeMod {
     return primeiro;
   }
 
-  /** A pessoa mexeu no campo: a frase do produto sai, e o contador anda. */
+  /** A pessoa mexeu no campo: a frase do produto e a do servidor saem, e o contador anda. */
   aoMexerNoCampo(elem, caixa) {
-    if (this.errosDoProduto.delete(elem)) this.pintarValidade(elem, caixa);
+    const tinhaDoProduto = this.errosDoProduto.delete(elem);
+    const tinhaDoServidor = this.errosDoServidor.delete(elem);
+    if (tinhaDoProduto || tinhaDoServidor) this.pintarValidade(elem, caixa);
     this.pintarContador(elem, caixa);
+  }
+
+  /** Os campos desta raiz, pela chave: o nó da parte e a caixa dele. */
+  camposPorChave() {
+    const campos = new Map();
+    for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
+      const caixa = this.regrasDoCampo.has(parte) && parte.querySelector("input,textarea");
+      if (caixa && !campos.has(parte.dataset.chaveDoMod)) campos.set(parte.dataset.chaveDoMod, { parte, caixa });
+    }
+    return campos;
+  }
+
+  /** A primeira chave que não é de um campo desta raiz, ou `null`. */
+  chaveQueNaoEhCampo(chaves) {
+    const campos = this.camposPorChave();
+    const falta = chaves.find((chave) => !campos.has(chave));
+    return falta === undefined ? null : String(falta).slice(0, 64);
+  }
+
+  /**
+   * Põe as frases do servidor nos campos, e tira as que o mapa não traz.
+   * Devolve a caixa do primeiro marcado, na ordem da declaração, ou `null`.
+   */
+  marcarErrosDoServidor(erros) {
+    let primeira = null;
+    for (const [chave, { parte, caixa }] of this.camposPorChave()) {
+      const frase = typeof erros[chave] === "string" ? erros[chave].slice(0, 200) : "";
+      if (frase) this.errosDoServidor.set(parte, frase);
+      else this.errosDoServidor.delete(parte);
+      this.pintarValidade(parte, caixa);
+      if (frase && !primeira) primeira = caixa;
+    }
+    return primeira;
   }
 
   /**
@@ -2134,7 +2172,8 @@ class RegiaoDeMod {
   }
 
   pintarValidade(elem, caixa) {
-    const erro = this.errosDoProduto.get(elem) || this.errosDoMod.get(elem) || "";
+    const erro = this.errosDoProduto.get(elem) || this.errosDoServidor.get(elem)
+      || this.errosDoMod.get(elem) || "";
     if (erro) {
       elem.dataset.invalido = "sim";
       caixa.setAttribute("aria-invalid", "true");

@@ -2711,6 +2711,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-criar": "superficies",
   "superficie-montar": "superficies",
   "superficie-atualizar": "superficies",
+  "formulario-erros": "superficies",
   "superficie-classes": "superficies",
   "superficie-mostrar": "superficies",
   "superficie-ocultar": "superficies",
@@ -3243,6 +3244,13 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       }
+      case "formulario-erros":
+        // A recusa do servidor de volta aos campos (rascunho da API 6, §5;
+        // tarefa 7, Step 6b): uma chave que não existe recusa o pedido
+        // inteiro, antes de marcar qualquer campo.
+        superficieDoMod(mod, instancia, m.superficie).marcarErros(m.erros);
+        responder(true, { valor: null });
+        break;
       case "superficie-classes": {
         const recusados = superficieDoMod(mod, instancia, m.superficie)
           .declararClasses(m.classes);

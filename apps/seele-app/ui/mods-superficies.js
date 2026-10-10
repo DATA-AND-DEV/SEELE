@@ -627,6 +627,23 @@ class SuperficieDeMod {
     return this.montar(raiz.declaracao);
   }
 
+  /**
+   * **A recusa do servidor de volta aos campos** (rascunho da API 6, §5;
+   * tarefa 7, Step 6b): `{ chave: frase }` marca cada campo pela chave, e o
+   * foco vai ao primeiro; `{}` limpa. Uma chave que a superfície não tem
+   * recusa o pedido inteiro pelo nome, antes de marcar qualquer campo.
+   */
+  marcarErros(mapa) {
+    if (this.solta) return;
+    const erros = mapa && typeof mapa === "object" ? mapa : {};
+    const falta = this.renderer.chaveQueNaoEhCampo(Object.keys(erros));
+    if (falta !== null) {
+      throw recusaDaSuperficie("chave-desconhecida",
+        `a superfície «${this.chave}» não tem um campo com a chave «${falta}»`, { chave: falta });
+    }
+    this.renderer.marcarErrosDoServidor(erros)?.focus();
+  }
+
   /** As classes que esta superfície oferece aos nós dela. */
   declararClasses(classes) {
     return this.renderer.declararClasses(classes);

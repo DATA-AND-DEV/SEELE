@@ -343,6 +343,11 @@ pub const PRELUDIO: &str = r#"
         // não cabe nos 12 KiB de uma mensagem se monta num esqueleto e numa
         // parte por vez; o teto que vale é o de nós da superfície.
         atualizar: (chave, arvore) => pedir('superficie-atualizar', { superficie: id, chave, arvore }),
+        // **A recusa do servidor de volta aos campos** (rascunho da API 6,
+        // §5): `{ chave: frase }`, um campo ou vários de uma vez; `{}` limpa.
+        formulario: Object.freeze({
+          erros: (mapa) => pedir('formulario-erros', { superficie: id, erros: mapa }),
+        }),
         classes: (mapa) => pedir('superficie-classes', { superficie: id, classes: mapa }),
         mostrar: () => pedir('superficie-mostrar', { superficie: id }),
         ocultar: () => pedir('superficie-ocultar', { superficie: id }),

@@ -523,7 +523,10 @@ campo. A API 6 acrescenta:
   formulário com **todos os valores juntos** no `submeter`; o secundário
   cancela pela saída do produto. O MOD dá o texto, não o comportamento;
 - **a recusa do servidor volta ao campo que a causou**:
-  `formulario.erros({ chave: 'motivo' })`;
+  `formulario.erros({ chave: 'motivo' })` [c, tarefa 7, Step 6b: no punho da
+  superfície, `s.formulario.erros(mapa)`; o foco vai ao primeiro marcado, a
+  frase sai quando a pessoa mexe no campo, `{}` limpa, e uma chave que não é
+  de um campo recusa o pedido inteiro com `chave-desconhecida`];
 - **`sujo` derivado**: o produto compara o valor atual de cada campo com o
   inicial, e a pergunta ao fechar não depende de o MOD chamar `suja`. **O MOD
   pode declarar os dois** (pedido do PERFIS, 09/10): `{ forma: 'campo', chave,
@@ -744,7 +747,7 @@ nome; a frase vai ao `seele.log`):
 
 | nome | quando |
 |---|---|
-| `chave-desconhecida` | `superficie.atualizar` pediu uma chave que a superfície não tem; leva `chave` |
+| `chave-desconhecida` | `superficie.atualizar` pediu uma chave que a superfície não tem, ou `formulario.erros` uma que não é de um campo; leva `chave` |
 | `orcamento` | `superficie.atualizar` levaria a superfície além do teto de nós; leva `perfil`, `teto` e `tamanho`, e a superfície fica como estava |
 | `teto-de-folhas` | o MOD já tem 3 folhas à vista (§5); leva `teto` |
 | `teto-de-superficies` | o MOD já mantém 12 superfícies de pé; leva `teto`. Chegava à 6 como `falhou` |

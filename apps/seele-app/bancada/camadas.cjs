@@ -35,6 +35,11 @@
 //    resto da sessão dorme. `inert` desce, então a pilha desce também: não
 //    adormece o ancestral que os contém. O desenho e a medida no aparelho são
 //    da F8 (a cena `folhas-e-mods`); aqui, um dublê do `CELULAR` no desktop.
+// 9. **A recusa do servidor volta aos campos** (Step 6b; rascunho §5, o B7 do
+//    ESTILO): `formulario.erros({ texto, fundo })` marca os dois campos de
+//    uma vez, com a frase, e leva o foco ao primeiro; mexer num campo apaga só
+//    a marca dele; uma chave que não existe é recusada pelo nome, sem marcar
+//    nada; e um mapa vazio limpa.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -431,8 +436,36 @@ const { chromium } = require('./playwright.cjs');
       `com o modal aberto, o que a casca pede não ficou acordado, ou o resto não dormiu: ${JSON.stringify(inercia)}`);
     assert.deepEqual(inercia.depois, { mudo: false, sair: false, outro: false }, `fechar o modal não devolveu a sessão: ${JSON.stringify(inercia)}`);
 
+    // 9. A recusa do servidor de volta aos campos.
+    const marcadosEm = (superficie) => page.evaluate((superficie) => [...document.querySelectorAll(`[data-superficie="${superficie}"] [data-chave-do-mod][data-invalido="sim"]`)]
+      .map((e) => `${e.dataset.chaveDoMod}: ${e.dataset.mensagemDeErro ?? ''}`), superficie);
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'estilo', tipo: 'dialogo', modal: false, titulo: 'Estilo' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'estilo', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'texto', rotulo: 'Texto', valor: '#ffffff' },
+          { forma: 'campo', chave: 'fundo', rotulo: 'Fundo', valor: '#fefefe' },
+          { forma: 'campo', chave: 'acento', rotulo: 'Acento', valor: '#ff6a00' },
+        ],
+      }] });
+    });
+    const doisDeUmaVez = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: { texto: 'contraste 1,01 contra o fundo', fundo: 'contraste 1,01 contra o texto' } }));
+    assert.equal(doisDeUmaVez?.ok, true, `formulario.erros foi recusado: ${JSON.stringify(doisDeUmaVez)}`);
+    assert.deepEqual(await marcadosEm('estilo'), ['texto: contraste 1,01 contra o fundo', 'fundo: contraste 1,01 contra o texto'],
+      'formulario.erros não marcou os dois campos com as frases');
+    assert.equal(await page.evaluate(() => document.activeElement?.closest('[data-chave-do-mod]')?.dataset.chaveDoMod ?? null), 'texto',
+      'o foco não foi ao primeiro campo marcado');
+    await page.fill('[data-superficie="estilo"] [data-chave-do-mod="texto"] input', '#000000');
+    assert.deepEqual(await marcadosEm('estilo'), ['fundo: contraste 1,01 contra o texto'], 'mexer num campo não apagou só a marca dele');
+    const semChave = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: { acento: 'x', 'nao-existe': 'y' } }));
+    assert.equal(semChave?.erro, 'chave-desconhecida', `uma chave que não existe não foi recusada pelo nome: ${JSON.stringify(semChave)}`);
+    assert.equal(semChave?.chave, 'nao-existe', `a recusa não disse qual chave: ${JSON.stringify(semChave)}`);
+    assert.deepEqual(await marcadosEm('estilo'), ['fundo: contraste 1,01 contra o texto'], 'o pedido recusado marcou um campo assim mesmo');
+    await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: {} }));
+    assert.deepEqual(await marcadosEm('estilo'), [], 'um mapa vazio não limpou as marcas');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
