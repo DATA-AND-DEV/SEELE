@@ -51,6 +51,7 @@
 <link rel="stylesheet" href="camada-portaria.css">
 <link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-sala.css">
+<link rel="stylesheet" href="camada-hospedagem.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
@@ -339,6 +340,21 @@
       ninguém no meio. Entre no servidor de alguém, ou ponha o seu no ar a
       partir desta máquina.</p>
 
+    <!--
+      O servidor que esta janela hospeda, no ar, com a sessão fora dele (tarefas
+      19 e 20 da F7): sair não o derruba mais, e quem saiu precisa saber que ele
+      continua lá e como voltar. VOLTAR AO MEU SERVIDOR entra nele; PARAR DE
+      HOSPEDAR o derruba, perguntando antes, porque derrubar tira todo mundo.
+      Escondido sem servidor no ar (`camada-hospedagem.js`), e no navegador, que
+      não hospeda.
+    -->
+    <div id="boot-meu-servidor" class="boot-meu-servidor" hidden>
+      <p id="boot-meu-servidor-frase" class="nota" role="status"></p>
+      <div class="boot-saidas">
+        <button id="boot-voltar-ao-meu-servidor" type="button" class="botao">VOLTAR AO MEU SERVIDOR</button>
+        <button id="boot-parar-de-hospedar" type="button" class="botao-fantasma">PARAR DE HOSPEDAR</button>
+      </div>
+    </div>
     <div class="boot-saidas">
       <button id="botao-conectar" type="button" class="botao">CONECTAR</button>
       <button id="botao-hospedar" type="button" class="botao botao-secundario">HOSPEDAR AQUI</button>
@@ -4609,6 +4625,7 @@
 <script src="camada-portaria.js"></script>
 <script src="camada-toque.js"></script>
 <script src="camada-sala.js"></script>
+<script src="camada-hospedagem.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>

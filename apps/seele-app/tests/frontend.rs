@@ -583,11 +583,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // e saíram quando a faixa `#toque` e o PERFIL passaram a chamá-los. A lista
 // voltou ao estado de repouso, que é vazia.
 //
-// `meu_servidor` e `parar_de_hospedar` entraram com as tarefas 19 e 20 da F7
-// (sair não derruba mais o servidor). O `meu_servidor` saiu quando a trilha
-// passou a chamá-lo; o `parar_de_hospedar` sai com o PARAR DE HOSPEDAR da
-// entrada, no commit seguinte.
-const AGUARDANDO_TELA: &[&str] = &["parar_de_hospedar"];
+// `meu_servidor` e `parar_de_hospedar` (tarefas 19 e 20 da F7) estiveram aqui
+// entre o Rust e a tela: saíram quando a trilha e a entrada (o VOLTAR AO MEU
+// SERVIDOR e o PARAR DE HOSPEDAR) passaram a chamá-los. A lista voltou a ser
+// vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

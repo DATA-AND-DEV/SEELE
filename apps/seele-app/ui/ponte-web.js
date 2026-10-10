@@ -133,6 +133,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["ocupacao_do_deposito", RECUSA_VERSOES],
   ["onde_estou", RECUSA_SALA],
   ["pacotes_no_cache", RECUSA_MODS],
+  ["parar_de_hospedar", RECUSA_HOSPEDAR],
   ["pedidos_da_portaria", RECUSA_PORTARIA],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
   ["receber_ligacoes", RECUSA_SALA],
