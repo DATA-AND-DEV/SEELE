@@ -46,7 +46,9 @@ mod executor;
 mod icone;
 mod mods;
 mod reducao;
+mod sala;
 mod servidores;
+mod toque;
 mod versoes;
 
 use std::sync::{Arc, Mutex};
@@ -157,6 +159,13 @@ struct Session {
     /// comando que as criou: cada uma fica de pé enquanto a janela estiver
     /// aberta, e independente da sessão. Ver [`Hospedagens`].
     hospedagens: Mutex<Hospedagens>,
+    /// Como está a sala pessoal: subindo, no ar (e se o código está achável),
+    /// ou por que não subiu. Guardado aqui para a tela que abre depois do
+    /// anúncio por [`sala::CANAL_DA_SALA`]; ver [`estado_da_sala`].
+    sala: Mutex<sala::EstadoDaSala>,
+    /// Quem está tocando na sala pessoal agora (tarefa 24 da F7): a faixa da
+    /// tela que abre com o toque já tocando, e o toque de quem se atende.
+    toques: Mutex<toque::Toques>,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -1233,6 +1242,11 @@ async fn connect(
     // é perguntado na ponte, e ele não volta para cá (ver o começo desta
     // função e `caminhos_a_guardar`).
     let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
+    // **A sala desta máquina se confere pelo código** (o ATENDER, tarefa 27 da
+    // F7): ela apresenta a chave da pessoa, e nenhuma lista guardou o
+    // certificado dela. Com o código, vale ele
+    // (`seele_ffi::ConnectConfig::codigo_esperado`).
+    let codigo_da_sala = sala::codigo_se_for_a_sala(&session, &server, &home);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -1246,7 +1260,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
-        codigo_esperado: None,
+        codigo_esperado: codigo_da_sala,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -1522,8 +1536,8 @@ async fn connect(
 struct Hospedagens {
     /// O servidor guardado no ar, quando está.
     guardado: Option<Hospedado>,
-    /// A sala pessoal no ar, quando está. Ela sobe sozinha a partir da tarefa
-    /// 23 do plano da F7; até lá, ninguém a sobe.
+    /// A sala pessoal no ar, quando está. Ela sobe sozinha, no `setup`
+    /// ([`sala::subir`]), e o estado dela é [`Session::sala`].
     pessoal: Option<Hospedado>,
 }
 
@@ -1577,8 +1591,9 @@ fn onde_estou(session: State<'_, Session>) -> OndeEstou {
 }
 
 /// [`onde_estou`] sobre a sessão, para quem não é comando: o sim de quem
-/// hospeda ([`gravar_o_sim_de_quem_hospeda`]) pergunta a mesma coisa, e tem de
-/// ouvir a mesma resposta.
+/// hospeda ([`gravar_o_sim_de_quem_hospeda`]) e o ATENDER
+/// ([`sala::atender_em`]) perguntam a mesma coisa, e têm de ouvir a mesma
+/// resposta.
 fn onde_estou_na(session: &Session) -> OndeEstou {
     let endereco = session
         .endereco_da_sessao
@@ -1601,6 +1616,184 @@ fn onde_estou_na(session: &Session) -> OndeEstou {
         guardado.as_deref(),
         pessoal.as_deref(),
     )
+}
+
+/// Como está a sala pessoal desta máquina agora (tarefa 23 da F7).
+///
+/// O estado chega por [`sala::CANAL_DA_SALA`] a cada mudança; este comando é
+/// para a tela que abre depois do anúncio, e não o ouviu.
+#[tauri::command]
+fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
+    session
+        .sala
+        .lock()
+        .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
+}
+
+/// ATENDER (tarefa 27 da F7): decide na campainha, e diz à casca se a sessão já
+/// está na sala ou por onde entrar nela.
+///
+/// O resto de «Atender, nesta ordem» (spec de 23/09) é da casca: encerrar os
+/// MODs, desmontar só o cliente e entrar pelo `connect` no `alvo` do
+/// [`sala::Atendido`], que o `connect` confere pelo código desta máquina. Se
+/// entrar falhar duas vezes, a casca chama [`encerrar_a_ligacao`], e ninguém
+/// fica sozinho na sala.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn atender(
+    session: State<'_, Session>,
+    quem: String,
+) -> Result<sala::Atendido, sala::FalhaAoAtender> {
+    let atendido = sala::atender_em(&session, &quem);
+    tracing::info!(?atendido, "ATENDER");
+    atendido
+}
+
+/// SEU CÓDIGO (tarefa 29 da F7): o código desta máquina, o do dono da sala que
+/// ela sobe. Ao lado de `impressao_desta_maquina`, e da mesma chave.
+///
+/// # Errors
+///
+/// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
+/// mostra o campo vazio.
+#[tauri::command]
+fn meu_codigo(app: AppHandle) -> Result<String, ()> {
+    sala::meu_codigo_em(&config_dir(&app)).ok_or(())
+}
+
+/// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda::NaoGravou`] quando a agenda não abre.
+#[tauri::command]
+fn contatos_da_agenda(app: AppHandle) -> Result<Vec<sala::ContatoNaTela>, sala::FalhaNaAgenda> {
+    sala::contatos_em(&config_dir(&app))
+}
+
+/// Dá um nome a uma pessoa da agenda (tarefa 29 da F7). Vazio tira o nome.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn dar_nome_na_agenda(
+    app: AppHandle,
+    codigo: String,
+    nome: String,
+) -> Result<(), sala::FalhaNaAgenda> {
+    sala::dar_nome_em(&config_dir(&app), &codigo, &nome)
+}
+
+/// Bloqueia ou desbloqueia um código (tarefa 29 da F7), **ao vivo**: quem
+/// estava tocando e passou a estar bloqueado para de tocar como recusado.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn bloquear(
+    app: AppHandle,
+    session: State<'_, Session>,
+    codigo: String,
+    bloqueado: bool,
+) -> Result<(), sala::FalhaNaAgenda> {
+    // A campainha mora em `session.hospedagens`: `sala::bloquear_em` leva a ela
+    // a lista nova, quando a sala está no ar.
+    let bloqueio = sala::bloquear_em(&session, &config_dir(&app), &codigo, bloqueado);
+    tracing::info!(?bloqueio, bloqueado, "bloqueio na agenda");
+    bloqueio
+}
+
+/// RECUSAR (tarefa 27 da F7).
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender`]: a sala não está no ar, ou o toque já parou.
+#[tauri::command]
+fn recusar(session: State<'_, Session>, quem: String) -> Result<(), sala::FalhaAoAtender> {
+    let recusado = sala::recusar_em(&session, &quem);
+    tracing::info!(?recusado, "RECUSAR");
+    recusado
+}
+
+/// Encerra a ligação da sala pessoal: quem estava dentro ouve «chamada
+/// encerrada» (tarefa 27 da F7). Devolve quantos estavam.
+///
+/// # Errors
+///
+/// [`sala::FalhaAoAtender::SemSala`] quando a sala não está no ar.
+#[tauri::command]
+fn encerrar_a_ligacao(session: State<'_, Session>) -> Result<usize, sala::FalhaAoAtender> {
+    let encerrada = sala::encerrar_a_ligacao_em(&session);
+    tracing::info!(?encerrada, "a ligação da sala pessoal foi encerrada");
+    encerrada
+}
+
+/// Quem está tocando na sala pessoal agora (tarefa 24 da F7), para a tela que
+/// abre com o toque já tocando. Cada toque chega por [`toque::CANAL_DO_TOQUE`]
+/// quando começa e quando para.
+#[tauri::command]
+fn toques_agora(session: State<'_, Session>) -> Vec<toque::NaFaixa> {
+    session
+        .toques
+        .lock()
+        .map(|toques| toques.na_faixa())
+        .unwrap_or_default()
+}
+
+/// «Não receber ligações», no PERFIL: desliga a sala inteira, ou a religa
+/// (tarefa 23 da F7). A escolha atravessa o processo.
+///
+/// Desligar despede a sala: quem estiver nela, ou tocando, ouve «chamada
+/// encerrada». Religar sobe a sala de novo, a menos que ela já esteja no ar ou
+/// subindo. O que aconteceu chega pelo [`sala::CANAL_DA_SALA`], como na subida
+/// do `setup`.
+///
+/// # Errors
+///
+/// Nunca: uma escolha que não foi guardada vale até o app fechar, e o
+/// `seele.log` diz.
+#[tauri::command]
+async fn receber_ligacoes(
+    app: AppHandle,
+    session: State<'_, Session>,
+    receber: bool,
+) -> Result<(), ()> {
+    match preferencias(&app).map(|mut preferencias| preferencias.set_receber_ligacoes(receber)) {
+        Some(Ok(())) => {}
+        Some(Err(erro)) => tracing::warn!(
+            %erro,
+            receber,
+            "a escolha de receber ligações não foi guardada: vale até o app fechar"
+        ),
+        None => tracing::warn!(
+            receber,
+            "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
+        ),
+    }
+    if !receber {
+        sala::desligar(&app).await;
+        return Ok(());
+    }
+    let no_ar = session
+        .hospedagens
+        .lock()
+        .is_ok_and(|hospedagens| hospedagens.pessoal.is_some());
+    let subindo = session
+        .sala
+        .lock()
+        .is_ok_and(|estado| *estado == sala::EstadoDaSala::Subindo);
+    if !no_ar && !subindo {
+        tauri::async_runtime::spawn(sala::subir_agora(
+            app.clone(),
+            sala::Subida::da_producao(&app),
+        ));
+    }
+    Ok(())
 }
 
 /// [`onde_estou`] sem estado: o endereço da sessão, a impressão que ela
@@ -10982,6 +11175,13 @@ fn main() {
                     }
                 });
             }
+            // **A sala pessoal sobe sozinha, em segundo plano** (tarefa 23 da
+            // F7): a escada custa até ~4 s, e a janela não espera por ela. O
+            // estado chega à casca por `sala::CANAL_DA_SALA`.
+            tauri::async_runtime::spawn(sala::subir(
+                app.handle().clone(),
+                sala::Subida::da_producao(app.handle()),
+            ));
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })
@@ -11026,6 +11226,16 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             onde_estou,
+            estado_da_sala,
+            receber_ligacoes,
+            toques_agora,
+            atender,
+            recusar,
+            encerrar_a_ligacao,
+            meu_codigo,
+            contatos_da_agenda,
+            dar_nome_na_agenda,
+            bloquear,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,

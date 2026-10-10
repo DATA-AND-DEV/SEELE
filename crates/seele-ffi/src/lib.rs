@@ -218,6 +218,9 @@ impl TesteDeMicrofone {
     }
 }
 
+/// O volume padrão do toque, de 0 a 1: audível, e longe do teto da escala.
+pub const VOLUME_DO_TOQUE: f32 = seele_core::VOLUME_DO_TOQUE;
+
 /// O toque da sala pessoal tocando (tarefas 24 e 25 da F7). Largar a alça
 /// para o som.
 ///
@@ -372,6 +375,22 @@ pub fn codigo_desta_maquina(home: &str) -> Result<Codigo, ConnectionError> {
 fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionError> {
     let chave = chave_com(home, variavel)?;
     Ok(Codigo::da_chave(chave.verifying_key().as_bytes()))
+}
+
+/// O ponto de encontro desta máquina: o que `$SEELE_ENCONTRO` diz, e o do
+/// projeto sem ela; `None` quando a variável o desliga.
+///
+/// **O mesmo dos dois lados** da sala pessoal: a sala se registra nele (tarefa
+/// 23 da F7), e quem liga pelo código pergunta nele. É a leitura única do
+/// ambiente, a de `seele_core::encontro::ponto_de_quem_liga`: com
+/// `$SEELE_ENCONTRO`, uma leitura diferente aqui deixaria a sala registrada
+/// num ponto onde ninguém pergunta.
+///
+/// **Só a produção chama isto**, como o `iniciar_com_o_ponto_padrao` de quem
+/// hospeda: os testes sobem a sala com o ponto deles, ou sem ponto nenhum.
+#[must_use]
+pub fn ponto_de_encontro() -> Option<String> {
+    seele_core::encontro::ponto_de_quem_liga()
 }
 
 /// A semente da sala pessoal: a chave desta máquina, de onde saem o

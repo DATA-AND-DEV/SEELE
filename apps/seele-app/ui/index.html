@@ -49,6 +49,8 @@
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-portaria.css">
+<link rel="stylesheet" href="camada-toque.css">
+<link rel="stylesheet" href="camada-sala.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
@@ -212,6 +214,24 @@
   <p id="portaria-batendo-texto" class="portaria-batendo-texto"></p>
   <button id="portaria-batendo-ver" class="botao-fantasma" type="button">VER QUEM É</button>
   <button id="portaria-batendo-depois" class="botao-fantasma" type="button">DEPOIS</button>
+</div>
+
+<!--
+  A faixa do toque (tarefas 24 e 26 da F7; spec de 23/09, «O toque»): quem está
+  ligando para a sua sala, com o apelido entre aspas (é o que a pessoa diz) e o
+  código (a prova), e ATENDER e RECUSAR. O contrato é o da faixa de cima: fora
+  das telas, sem `role=alert` e sem `autofocus`, e o script nunca toma o
+  teclado. Fora das telas também é o que a deixa fora de toda região de MOD
+  (núcleo de confiança, Parte II da spec).
+
+  `data-sala-pessoal`: o navegador não tem sala, e as duas cascas dele escondem
+  toda peça com esta marca (F8).
+-->
+<div id="toque" class="toque" data-sala-pessoal hidden>
+  <p id="toque-texto" class="toque-texto"></p>
+  <button id="toque-atender" class="botao" type="button">ATENDER</button>
+  <button id="toque-recusar" class="botao-fantasma" type="button">RECUSAR</button>
+  <p id="toque-nota" class="toque-nota" hidden></p>
 </div>
 
 <!--
@@ -462,6 +482,13 @@
               data-glifo="engrenagem"></button>
     </div>
 
+    <!--
+      A linha da sala pessoal, na entrada (tarefa 23 da F7): só aparece quando
+      há o que dizer — a porta 8385 ocupada, o código não achável, «não
+      recebendo». Um elemento próprio, com `data-sala-pessoal`: as cascas do
+      navegador, que não têm sala, o escondem inteiro.
+    -->
+    <p id="boot-sala-estado" class="nota sala-estado" role="status" data-sala-pessoal hidden></p>
     <p id="boot-etapa" class="etapa" role="status" hidden></p>
     <p id="boot-erro" class="erro" role="alert" hidden></p>
   </div>
@@ -1189,6 +1216,12 @@
           que sobra aqui é dizer o que está acontecendo.
         -->
         <p id="voz-estado" class="operador-frase" role="status"></p>
+        <!--
+          A linha da sala pessoal, na sessão (tarefa 23 da F7): a mesma da
+          entrada, num elemento próprio ao lado da frase da voz, e não dentro
+          dela. Só aparece quando há o que dizer.
+        -->
+        <p id="sala-estado" class="operador-frase sala-estado" role="status" data-sala-pessoal hidden></p>
         <!--
           **O seletor de modo saiu daqui.** A comp da 0.9.0 não o desenha no
           operador: ela o põe na configuração, sob `MODO DE VOZ`, e no operador
@@ -4032,6 +4065,36 @@
       </div>
       <p id="perfil-erro" class="nomear-erro" role="alert" hidden></p>
     </form>
+    <!--
+      A sala pessoal no PERFIL (tarefas 23 e 29 da F7; spec de 23/09, «"SEU
+      CÓDIGO" e a agenda»): o SEU CÓDIGO só de leitura, com COPIAR; «receber
+      ligações», que desliga a sala inteira; o firewall do Windows (D-sala-1); e
+      a agenda. Depois do formulário porque tudo aqui vale na hora, e o SALVAR
+      de cima é do apelido. Escondido até o `meu_codigo` responder
+      (`camada-sala.js`), e com `data-sala-pessoal`: o navegador não tem sala.
+    -->
+    <section id="perfil-sala" class="perfil-sala" data-sala-pessoal
+             aria-labelledby="perfil-sala-titulo" hidden>
+      <span id="perfil-sala-titulo" class="rotulo">SEU CÓDIGO</span>
+      <div class="perfil-sala-codigo">
+        <input id="perfil-codigo" readonly spellcheck="false" autocomplete="off"
+               aria-labelledby="perfil-sala-titulo">
+        <button id="perfil-copiar-codigo" class="botao-fantasma" type="button">COPIAR</button>
+      </div>
+      <label class="perfil-sala-receber">
+        <input id="perfil-receber" type="checkbox" checked>
+        <span>RECEBER LIGAÇÕES PELO SEU CÓDIGO</span>
+      </label>
+      <p id="perfil-sala-estado" class="nota sala-estado" role="status" hidden></p>
+      <div id="perfil-sala-firewall" class="perfil-sala-firewall" hidden>
+        <p id="perfil-sala-firewall-frase" class="nota"></p>
+        <button id="perfil-sala-firewall-abrir" class="botao-fantasma" type="button">ABRIR A PORTA AGORA</button>
+      </div>
+      <span class="rotulo">AGENDA</span>
+      <p id="perfil-agenda-vazia" class="nota" hidden>Ninguém ligou para o seu código ainda.</p>
+      <ul id="perfil-agenda" class="perfil-agenda"></ul>
+      <p id="perfil-agenda-erro" class="nomear-erro" role="alert" hidden></p>
+    </section>
   </div>
 </div>
 
@@ -4510,6 +4573,8 @@
   precise pensar nisso.
 -->
 <script src="camada-portaria.js"></script>
+<script src="camada-toque.js"></script>
+<script src="camada-sala.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>
