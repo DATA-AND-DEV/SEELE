@@ -889,7 +889,7 @@ O botão de fechar a ajuda diz «FECHAR».
 | `CELULAR.tratamentoDoMicrofone` | «O navegador trata o microfone deste aparelho: cancela o eco, reduz o ruído de fundo e ajusta o ganho. Vale sempre aqui.» |
 | `CELULAR.sensibilidade` | «Mais sensível abre com fala baixa e também com mais ruído. Escolher um valor aqui o deixa fixo. Só vale no modo VOZ.» |
 | `CELULAR.testeNaSala` | «O microfone só abre numa sala de voz. Entre numa para ver o nível da sua voz no medidor acima.» |
-| `AVISO_DE_FONE_CELULAR` | «O navegador deste aparelho cancela o eco. Com fone, o som do alto-falante não volta para o microfone.» |
+| `AVISO_DE_FONE_CELULAR` | «USE FONE. Sem fone, o som do alto-falante pode voltar pelo microfone, e quem fala com você se ouve de volta.» A frase de antes («O navegador deste aparelho cancela o eco…») afirmava o que ninguém mediu: a voz toca pelo Web Audio, e se o cancelador do navegador a pega varia por motor (F4, 09/10). Volta a ser revista com a medida da 3.3 da F4 |
 | `CELULAR.saidaDiz` / `CELULAR.saidaNota` | «O SOM SAI POR ONDE O CELULAR MANDAR.» / «O navegador não escolhe a saída. Troque entre fone, Bluetooth e alto-falante pela Central de Controle do iPhone ou pelo controle de som do Android.» |
 | `CELULAR.contraste` | «O contraste segue o do celular. No iPhone: Ajustes › Acessibilidade › Tela e Tamanho do Texto › Aumentar Contraste. No Android: Configurações › Acessibilidade.» |
 | `CELULAR.chave` | «A chave mora neste navegador, guardada pela página, e não sai dele. Apagar os dados do site apaga a chave, e com ela o apelido em todo servidor que você já visitou.» |

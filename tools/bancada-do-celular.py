@@ -385,9 +385,8 @@ def sessao_entrou(pg: Page) -> list[str]:
         falhas.append("puxar a página para baixo a recarrega, e recarregar derruba a sessão")
     if estado["barra"] != "0px":
         falhas.append(f"a barra da janela mede {estado['barra']!r}, e no celular ela não existe")
-    # O aviso de fone diz a verdade do navegador (P9): a frase do desktop, «o
-    # SEELE ainda não cancela eco», é falsa onde o eco do navegador vem ligado.
-    # A `entrar` o dispensa, e o texto continua escrito na faixa.
+    # O aviso de fone é o do navegador (P9; a frase e o porquê estão no
+    # frases.js). A `entrar` o dispensa, e o texto continua escrito na faixa.
     fone = pg.evaluate("[document.getElementById('aviso-fone-texto').textContent, AVISO_DE_FONE_CELULAR]")
     if fone[0] != fone[1]:
         falhas.append(f"o aviso de fone do celular diz «{fone[0]}», e não a frase do navegador")
@@ -1429,7 +1428,7 @@ def casca_larga(pg: Page) -> list[str]:
 
     entrar(pg)
     # A larga ainda diz a frase do desktop no aviso de fone: o P9 só a troca no
-    # celular, e a do navegador espera a F4 confirmar o eco ligado na voz do PC.
+    # celular, e a larga espera a medida do eco da F4 (a 3.3 dela).
     if pg.evaluate("document.getElementById('aviso-fone-texto').textContent !== AVISO_DE_FONE"):
         falhas.append("o aviso de fone da larga mudou de frase sem a F4 confirmar o eco do navegador")
     sessao = pg.evaluate("""(() => { const r = document.getElementById('tela-sessao').getBoundingClientRect();

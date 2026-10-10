@@ -1419,12 +1419,17 @@ const PAGINA_DO_APP = "https://seele.app.br/#baixar";
 /**
  * O aviso de fone no navegador (P9; matriz, achado E-6).
  *
- * O do desktop diz que o SEELE não cancela eco, e no navegador isso é falso: o
- * eco do navegador vem ligado. O fone continua valendo pelo que o eco do
- * navegador não pega, e a frase diz isso sem prometer o que não é do SEELE.
+ * O do desktop diz que o SEELE não cancela eco, o que no navegador conta só
+ * metade: a voz pede o `echoCancellation` do navegador. **Mas pedir não é
+ * cancelar**, e isso não foi medido (F4, 09/10): a voz do SEELE toca pelo Web
+ * Audio, e não por um `RTCPeerConnection`, e se o cancelador do navegador usa
+ * essa saída como referência varia por motor. Dizer «cancela» sem a medida
+ * convenceria a tirar o fone justamente quem faz o outro lado ouvir a própria
+ * voz. Até a medida da F4 (a 3.3 dela), a frase pede o fone sem afirmar o que o
+ * navegador faz.
  */
 const AVISO_DE_FONE_CELULAR =
-  "O navegador deste aparelho cancela o eco. Com fone, o som do alto-falante não volta para o microfone.";
+  "USE FONE. Sem fone, o som do alto-falante pode voltar pelo microfone, e quem fala com você se ouve de volta.";
 
 /**
  * O que só o app do SEELE faz, a lista canônica da matriz: a mesma nas duas
