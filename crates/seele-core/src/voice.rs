@@ -2476,6 +2476,150 @@ mod relogio_de_midia {
 }
 
 #[cfg(test)]
+mod relogio_gravado {
+    //! **O relógio de mídia numa sequência fixa, gravado antes de sair do laço**
+    //! (Tarefa 3.3 da F4, combinado com a orquestradora em 09/10/2026).
+    //!
+    //! O relógio (a sequência e o carimbo de cada pacote que sai) mora dentro
+    //! do `pipeline`, que só roda com um aparelho de áudio e uma conexão QUIC.
+    //! Este teste grava o que ele produz numa sequência fixa de quadros, com os
+    //! valores escritos à mão: quadros calados, o atraso da supressão, o portão
+    //! soltando os retidos, um quadro de DTX, o mudo e uma reabertura, a partir
+    //! de perto da volta da sequência.
+    //!
+    //! **Quem produz** é [`produzir`], que repete as instruções do relógio do
+    //! laço; [`a_replica_e_o_laco_de_hoje`] confere que cada uma delas está no
+    //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando o
+    //! relógio sair do laço: muda só quem produz.
+
+    use super::{carimbo_do_quadro, Voice, FRAME_MS, FRAME_SAMPLES};
+
+    /// Um quadro de 20 ms do laço, pelo que ele faz com o relógio.
+    enum Evento {
+        /// A supressão ainda no atraso dela: nada sai, e o tempo passa.
+        Atrasado,
+        /// O portão fechado.
+        Calado,
+        /// O portão aberto e o microfone mudo.
+        Mudo,
+        /// O portão soltou `quantos` quadros (os retidos e o de agora); os de
+        /// `vazios` o codificador devolveu vazios (DTX).
+        Abre {
+            quantos: usize,
+            vazios: &'static [usize],
+        },
+        /// O caminho foi trocado (outro aparelho, ou a reconexão).
+        Reabre,
+    }
+
+    /// Os pacotes que saem, `(sequência, carimbo)`, e o relógio no fim.
+    ///
+    /// As instruções do relógio do `pipeline`, na ordem dele.
+    fn produzir(inicio: (u16, u32), eventos: &[Evento]) -> (Vec<(u16, u32)>, (u16, u32)) {
+        let (mut seq, mut timestamp) = inicio;
+        let mut pacotes = Vec::new();
+        for evento in eventos {
+            match evento {
+                Evento::Atrasado | Evento::Calado | Evento::Mudo => {
+                    timestamp =
+                        timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                }
+                Evento::Abre { quantos, vazios } => {
+                    timestamp =
+                        timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                    let quantos = *quantos;
+                    for indice in 0..quantos {
+                        let carimbo = carimbo_do_quadro(timestamp, quantos, indice);
+                        if vazios.contains(&indice) {
+                            continue;
+                        }
+                        seq = seq.wrapping_add(1);
+                        pacotes.push((seq, carimbo));
+                    }
+                }
+                Evento::Reabre => (seq, timestamp) = Voice::salto_do_relogio(seq, timestamp),
+            }
+        }
+        (pacotes, (seq, timestamp))
+    }
+
+    /// **A sequência fixa, e o que sai dela.** Cinco minutos de conversa, com a
+    /// sequência a dois pacotes da volta.
+    #[test]
+    fn o_relogio_de_midia_numa_sequencia_fixa() {
+        let (pacotes, fim) = produzir(
+            (65_534, 14_400_000),
+            &[
+                // Um quadro calado: o carimbo anda, a sequência não.
+                Evento::Calado,
+                // O atraso da supressão: o carimbo anda mesmo assim.
+                Evento::Atrasado,
+                // O portão abre e solta os dois retidos e o de agora, cada um
+                // com o instante dele; a sequência dá a volta no meio.
+                Evento::Abre {
+                    quantos: 3,
+                    vazios: &[],
+                },
+                // Um quadro que o codificador devolveu vazio (DTX).
+                Evento::Abre {
+                    quantos: 1,
+                    vazios: &[0],
+                },
+                Evento::Mudo,
+                Evento::Abre {
+                    quantos: 1,
+                    vazios: &[],
+                },
+                // Outro aparelho: dois quadros à frente, a sequência junto.
+                Evento::Reabre,
+                // Dois soltos, o primeiro vazio.
+                Evento::Abre {
+                    quantos: 2,
+                    vazios: &[0],
+                },
+            ],
+        );
+        assert_eq!(
+            pacotes,
+            [
+                (65_535, 14_400_960),
+                (0, 14_401_920),
+                (1, 14_402_880),
+                (2, 14_405_760),
+                (5, 14_408_640),
+            ],
+            "os pacotes da sequência fixa mudaram"
+        );
+        assert_eq!(fim, (5, 14_408_640), "o relógio terminou noutro lugar");
+    }
+
+    /// **A réplica é o laço de hoje.** Cada instrução do relógio que
+    /// [`produzir`] repete está no `pipeline`, com o mesmo texto.
+    #[test]
+    fn a_replica_e_o_laco_de_hoje() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        for instrucao in [
+            "controls.relogio_seq.load(Ordering::Relaxed) as u16,",
+            "controls.relogio_carimbo.load(Ordering::Relaxed),",
+            "timestamp =\n                    timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));",
+            "timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));",
+            "let carimbo = carimbo_do_quadro(timestamp, quantos, indice);",
+            "seq = seq.wrapping_add(1);",
+            "timestamp: carimbo,",
+        ] {
+            assert!(laco.contains(instrucao), "o `pipeline` não tem mais `{instrucao}`");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
 
     /// O laço de áudio conduz o acompanhamento do aparelho a cada volta.
