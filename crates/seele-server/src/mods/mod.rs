@@ -33,6 +33,7 @@ pub mod aviso;
 pub mod despacho;
 pub mod mundo;
 pub mod pedidos;
+pub mod tema;
 pub mod volume;
 
 use std::collections::BTreeMap;
