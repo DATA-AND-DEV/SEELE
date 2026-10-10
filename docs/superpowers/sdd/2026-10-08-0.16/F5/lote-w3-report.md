@@ -16,7 +16,10 @@ local: sem push, tag nem release. Sem conformidade. Nada no fio.
 | `142505db` | o relatório com as medidas e o que falta rodar |
 | `ee11e9f9` | a rodada 1 (escrita em curso, sem rodar): I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
 | `23b9cdbc` | a rodada 2 (escrita em curso, sem rodar): a corrida de `abrirAceiteDeMods` (§12) |
-| este | **verde**: as rodadas 1 e 2 foram rodadas, e as medidas estão no §13 |
+| `a46f3f86` | as rodadas 1 e 2 rodadas e verdes, com as medidas no §13 |
+| `0d56ef6d` | rodada 3, M6: o ACEITAR apagado na janela da abertura nova (§14) |
+| `b0e032ff` | rodada 3, M2b: o guarda da credencial lê os três aliases (§14) |
+| este | o relatório da rodada 3 |
 
 **O que mudou fora de `tools/roteiros/`.** Em `apps/seele-app/ui/camada-mods.js`,
 uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
@@ -628,7 +631,8 @@ duas formas, com a frase que o §12 previa:
 
 Ou seja: com o `await` da leitura pendente, a abertura velha repovoa a lista **e
 o servidor** por cima da pergunta nova, e o ACEITAR responde pela nova. O
-conserto fica.
+conserto fica. **Fechava só a repintura da abertura velha**; a janela de antes
+do desenho da nova ficou aberta, e a revisão a achou (M6, §14).
 
 ### I2: o vermelho antes
 
@@ -732,7 +736,87 @@ aberta), não qual das duas camadas o produz; para isso, G6b.
 ### O que sobra
 
 - **M3** vai ao lote RT, como a decisão disse.
-- A **observação** do §11 (a corrida) deixou de ser observação: está consertada e
-  provada.
+- A **observação** do §11 (a corrida) deixou de ser observação, mas **não estava
+  consertada inteira**: este parágrafo dizia «consertada e provada», e a revisão
+  mostrou a metade que faltava (M6). Ela está no §14.
 - Os dois `.catch` da mesma classe estão fechados; a preocupação 2 do §10 está
   tratada. A 1 (roteiros no Actions) é do lote RT.
+
+## 14. Rodada 3: a janela da abertura nova (M6) e os três aliases (M2b) — VERDE
+
+A revisão aprovou o W3 com três Menores (Crítico 0, Importante 0). O M3 (os
+roteiros fora do Actions) é do lote RT. Os outros dois:
+
+### M6: a corrida não estava fechada inteira
+
+**O caso.** Um diálogo já está **aberto** com a pergunta Z, e chega outra recusa
+por MODs. `abrirAceiteDeMods` troca `aceitePendente` na hora e só desenha depois
+do `await invoke("aceite_de_mods")`. A conferência da rodada 2 fechava o desenho
+da abertura **velha**; não fechava esta janela, a de antes do desenho da
+**nova**: a lista de Z ficava na tela, com o ACEITAR aceso, e o ACEITAR
+respondia pela nova. O mesmo dano de consentimento, durante a latência de uma
+leitura local.
+
+**O conserto** (o que o revisor validou numa cópia): `$("mods-aceitar").disabled
+= true;` logo depois de `const pergunta = aceitePendente;` em
+`abrirAceiteDeMods`. O desenho já fazia `disabled = false`: a pergunta nova o
+acende quando desenha. Uma abertura que perdeu a vez não toca o botão, e quem
+tomou o lugar dela o acende. Uma que falha (`perguntaNaoAbriu`) fecha o
+diálogo, e a próxima abertura apaga e acende de novo.
+
+**A prova: a cena 5 de `aceite-de-mods-em-corrida.js`**, a sonda do revisor
+trazida para o roteiro e com uma exigência a mais. A pergunta de A está aberta;
+a de B chega com a leitura pendente; na janela, o roteiro exige que o ACEITAR
+esteja apagado **ou** que o diálogo mostre o que ele responde, aperta o ACEITAR
+e exige que nada seja gravado, e depois de a leitura responder exige a lista de
+B, o servidor de B e o ACEITAR aceso.
+
+| passo | resultado |
+|---|---|
+| **o vermelho, sem o conserto** | `REPROVADO: na janela entre a pergunta nova e o desenho dela, o diálogo mostra 203.0.113.9:8383 [seele/placar] com o ACEITAR aceso, e o ACEITAR responde por 198.51.100.4:8383 [ponte/retransmissor]` — a frase da sonda do revisor |
+| com o conserto | `na janela: … ACEITAR apagado`, `ACEITAR na janela: nada gravado`, `depois da leitura: o diálogo mostra 198.51.100.4:8383 [ponte/retransmissor], ACEITAR aceso`; `carga limpa` |
+| **J1**, a reversão (a linha tirada) | a mesma frase do vermelho, `exit=1`, `cmp` igual depois de restaurar |
+| a sonda original do revisor (`janela.js`) com o conserto | `botão=apagado`, `o sim gravado: undefined undefined`, `carga limpa` |
+
+A exigência de «aperta o ACEITAR e nada é gravado» não tem reversão própria: a
+primeira a subsume, porque um botão apagado não grava. Ela fica como a leitura
+da sonda do revisor.
+
+### M2b: o guarda da credencial era cego a três aliases
+
+A rodada 1 estendeu a leitura de `pergunta` a `aceiteFalhou` e a
+`perguntaNaoAbriu`, mas pôs o alias `const pergunta = aceitePendente;` em mais
+três lugares que o guarda não lia: `abrirAceiteDeMods`,
+`levarParaOAceiteDeMods` e o ouvinte do clique.
+
+- **Antes** (o guarda da rodada 2): `JSON.stringify(pergunta)` num log de
+  cada uma das três **passa**, 3 em 3 (`levar`, `abrir`, `clique`), todas com
+  `cmp` igual depois de restaurar. O buraco que a revisão mediu existia.
+- **O conserto:** a parte 1 do guarda lê as linhas que nomeiam `pergunta` nas
+  **seis** funções (`aceitarOsMods`, `abrirAceiteDeMods`,
+  `levarParaOAceiteDeMods`, `aceiteFalhou`, `perguntaNaoAbriu` e o ouvinte do
+  clique, achado pelo início), e a lista ganha as duas linhas que passam a
+  pergunta adiante (`abrindo.catch(… perguntaNaoAbriu(…, pergunta, …))` e
+  `aceitarOsMods().catch(… aceiteFalhou(pergunta, …))`). As aliases em si já
+  nomeiam `aceitePendente` e são conhecidas.
+- **Depois:** as três sondas **reprovam** com `a credencial da tentativa ganhou
+  um caminho novo em camada-mods.js` e a linha da sonda. `--test frontend` limpo
+  (287).
+
+### A verificação
+
+- **Os cinco roteiros**, limpos, `exit=0`.
+- `cargo test -p seele-app --test frontend`: **287 passed**.
+- `cargo test -p seele-app --bin seele-app`: **312 passed**.
+- `cargo xtask check-runtime`: exit 0.
+- `cargo fmt --all -- --check`: limpo.
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpo.
+- `ajustes-v013.cjs`: exit 0, as dez linhas `lote …`. `diagnostico-de-mods.cjs`
+  e `contribuicoes-e-camadas.cjs`: exit 0.
+- Reversões novas desta rodada: **J1** e as **3 sondas do M2b**. As 53 do §13
+  **não foram refeitas** nesta rodada (o pedido era os cinco roteiros limpos e
+  a verificação, com pressa). A única mudança de comportamento é o
+  `disabled = true` do M6, que o desenho da pergunta desfaz; pela leitura, nenhuma
+  delas o observa, mas isso é leitura, e fica para a próxima integração se
+  alguém quiser a prova.
+- Não rodados: `cargo test --workspace`, conformidade.
