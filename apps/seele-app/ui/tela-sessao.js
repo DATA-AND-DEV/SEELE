@@ -658,6 +658,31 @@ async function recarregarTrilha() {
 }
 
 /**
+ * **Uma região da API 6 no modo `adicionar`** (rascunho §3; tarefa 5): o que os
+ * MODs acrescentam, montado pelo caminho dos outros pontos, no contêiner da
+ * região. Escondida quando ninguém acrescenta nada: uma faixa vazia é uma
+ * régua sobre nada.
+ *
+ * Repovoada e não reconstruída: os nós vêm montados do registro, e movê-los
+ * preserva o que eles seguram — como em `canal.cabecalho`.
+ *
+ * `contexto` `null` é a região sem onde valer agora — o compositor sem canal
+ * aberto —, e ela fica vazia.
+ */
+function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
+  if (!conteiner) return;
+  // A região que a casca não tem fica vazia, e quem contribui para ela sabe
+  // (`regiaoAusente`, em `base.js`; tarefa 5, Step 8).
+  const nos = contexto === null || regiaoAusente(ponto) ? [] : [
+    ...conteudoDasContribuicoes(ponto, alvo),
+    ...acoesDasContribuicoes(ponto, alvo, contexto),
+  ];
+  repovoar(conteiner, nos);
+  ligarAcoesDeApresentacao(conteiner);
+  conteiner.hidden = nos.length === 0;
+}
+
+/**
  * A coluna de 60px: o servidor em que se está, e os do histórico embaixo.
  *
  * O atual é desenhado à parte, e não como o primeiro da lista, porque ele pode
@@ -670,6 +695,9 @@ async function recarregarTrilha() {
  * mesma sessão.
  */
 function desenharTrilha(snapshot) {
+  // A região `redes` antes da comparação abaixo: o que os MODs acrescentam muda
+  // sem o histórico mudar, e a comparação só sabe do histórico.
+  aplicarARegiao("redes", $("trilha-mods"));
   const nome = snapshot.server;
   const uri = iconeDesenhado.uri;
   const outros = conhecidosDaTrilha.filter((conhecido) => conhecido.alvo !== alvoDoServer);
@@ -815,6 +843,72 @@ function iniciaisDoApelido(apelido) {
  * dentro continua dito, e por duas vias: a marca laranja na borda da sala de voz e o
  * `(você)` ao lado do próprio nome na lista de quem está lá.
  */
+/**
+ * **A ordem que um MOD dá à navegação**, quando ele a substitui e é o escolhido
+ * (rascunho §3, tarefa 5): `{ salas?, canais? }`, ou `null`.
+ */
+function arranjoDaNavegacao() {
+  return arranjoDe("servidor.navegacao");
+}
+
+/** A ordem que o MOD escolhido dá a um ponto de lista, ou `null`. */
+function arranjoDe(ponto) {
+  if (regiaoAusente(ponto)) return null;
+  const escolhida = contribuicoesDosMods.escolherSubstituicao(
+    ponto,
+    "",
+    typeof modPreferidoPara === "function" ? modPreferidoPara(ponto) : "",
+  ).escolhida;
+  return escolhida?.conteudo ?? null;
+}
+
+/** Quantos grupos uma lista substituída mostra, e quanto do título de cada um. */
+const TETO_DE_GRUPOS = 32;
+const TETO_DO_TITULO_DE_GRUPO = 64;
+
+/**
+ * **As linhas do produto, na ordem e nos grupos que o MOD deu** (rascunho §3).
+ *
+ * As linhas são as que o produto montou — com ENTRAR, renomear e apagar —, e
+ * só a ordem muda. **Ninguém some**: quem não está em grupo nenhum vai para um
+ * grupo do produto, no fim, com o título do produto. Um identificador de quem
+ * não está, ou repetido, é ignorado: a lista muda mais depressa do que o MOD a
+ * reescreve. Um grupo sem ninguém presente não aparece.
+ *
+ * O título do grupo é texto do MOD, e por isso `textContent`, cortado.
+ */
+function emGrupos(linhas, dados, arranjo, tituloDosOutros, classe = "canais-grupo") {
+  if (!arranjo || !Array.isArray(arranjo.grupos)) return linhas;
+  const porId = new Map(dados.map((dado, i) => [String(dado.id), linhas[i]]));
+  const usadas = new Set();
+  const saida = [];
+  const cabecalho = (titulo) => {
+    const item = elemento("li", classe, titulo);
+    item.setAttribute("role", "presentation");
+    return item;
+  };
+  for (const grupo of arranjo.grupos.slice(0, TETO_DE_GRUPOS)) {
+    const dele = (Array.isArray(grupo?.ids) ? grupo.ids : [])
+      .map(String)
+      .filter((id) => porId.has(id) && !usadas.has(id));
+    if (dele.length === 0) continue;
+    saida.push(cabecalho(String(grupo.titulo ?? "").slice(0, TETO_DO_TITULO_DE_GRUPO)));
+    for (const id of dele) {
+      usadas.add(id);
+      saida.push(porId.get(id));
+    }
+  }
+  // Uma seção onde nenhum grupo do MOD tem ninguém fica como é: um subtítulo
+  // OUTRAS PESSOAS sobre a seção inteira não diria nada.
+  if (saida.length === 0) return linhas;
+  const outras = dados.map((dado) => String(dado.id)).filter((id) => !usadas.has(id));
+  if (outras.length > 0) {
+    saida.push(cabecalho(tituloDosOutros));
+    for (const id of outras) saida.push(porId.get(id));
+  }
+  return saida;
+}
+
 function desenharCanais(snapshot) {
   const voice_rooms = snapshot.voice_rooms.map((voice_room) => {
     // `voice_room` com sublinhado, e não `voice room`: aqui é **nome de
@@ -917,7 +1011,13 @@ function desenharCanais(snapshot) {
     item.append(cabeca, dentro, ir);
     return item;
   });
-  repovoar($("lista-voice_rooms"), voice_rooms);
+  // **`servidor.navegacao` substituído** (rascunho §3, tarefa 5): o MOD dá a
+  // ordem e os grupos de cada lista, e as linhas são as de cima, do produto.
+  const arranjo = arranjoDaNavegacao();
+  repovoar(
+    $("lista-voice_rooms"),
+    emGrupos(voice_rooms, snapshot.voice_rooms, arranjo?.salas, "OUTRAS SALAS"),
+  );
 
   const linhas = snapshot.channels.map((linha) => {
     const item = elemento("li", null);
@@ -966,7 +1066,7 @@ function desenharCanais(snapshot) {
     if (linha.open) linhaAberta = linha.id;
     return item;
   });
-  repovoar($("lista-linhas"), linhas);
+  repovoar($("lista-linhas"), emGrupos(linhas, snapshot.channels, arranjo?.canais, "OUTROS CANAIS"));
 
   // Os dois formulários de criar sala só aparecem para quem pode criar. Quem
   // responde é o servidor, em `may_manage_voice_rooms`, resolvido pelo PERMISSIONS a
@@ -1024,6 +1124,7 @@ function linhaDeQuemEstaDentro(pessoa, snapshot) {
 
 /** A tira do operador, no rodapé da coluna de canais. */
 function desenharOperador(snapshot) {
+  aplicarARegiao("operador.barra", $("operador-mods"));
   $("operador-nome").textContent = snapshot.nickname;
   // O próprio retrato, no quadrado que já mostrava a inicial. `snapshot.me` é
   // quem esta janela é para o servidor; sem ele não há a quem pedir a imagem.
@@ -1032,6 +1133,13 @@ function desenharOperador(snapshot) {
   // coisa sobre a mesma pessoa.
   $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
   vestirAvatar($("operador-inicial"), snapshot.me);
+  // E a capa de quem usa, **no fundo da barra do operador inteira** (rascunho
+  // §4; o pedido do dono, reafirmado em 08/10). O microfone, o fone e o SAIR
+  // são do núcleo (§10): ficam sobre placas opacas da cor do fundo nativo, com
+  // o contraste que têm sem capa (as placas, em `tela-sessao.css`).
+  if (snapshot.speaking) anotarQuemFala(snapshot.me);
+  const barraDoOperador = document.querySelector("#tela-sessao .operador");
+  if (barraDoOperador) vestirCapa(barraDoOperador, snapshot.me);
 
   // **SAIR DA SALA ou SAIR DO SERVIDOR, a cada quadro.** O rótulo só era
   // reescrito pelo desenho da chamada, e só com a chamada na frente: quem saía
@@ -1158,11 +1266,30 @@ function desenharLinha(snapshot) {
   // Repovoado e não reconstruído: os nós vêm montados do registro, e movê-los
   // preserva o que eles seguram. Sem canal aberto não há alvo, e a faixa fica
   // vazia — uma contribuição de canal sem canal é uma afirmação sobre nada.
+  // **`canal.cabecalho` substituído** (rascunho §3, tarefa 5): o MOD desenha o
+  // miolo, entre o nome do canal e a lupa, e os dois continuam do produto — o
+  // nome é também o botão de renomear. Os acréscimos de outros MODs seguem ao
+  // lado, em `#canal-cabecalho-mods`.
+  const miolo = $("canal-cabecalho-miolo");
+  const cabecalhoNaCasca = !regiaoAusente("canal.cabecalho");
+  if (miolo) {
+    const escolhida = aberta && cabecalhoNaCasca
+      ? contribuicoesDosMods.escolherSubstituicao(
+        "canal.cabecalho",
+        String(aberta.id),
+        typeof modPreferidoPara === "function" ? modPreferidoPara("canal.cabecalho") : "",
+      ).escolhida
+      : null;
+    const desenho = escolhida ? montarContribuicao(escolhida, String(aberta.id)) : null;
+    repovoar(miolo, desenho ? [desenho] : []);
+    miolo.hidden = !desenho;
+  }
+
   const noCabecalho = $("canal-cabecalho-mods");
   if (noCabecalho) {
     repovoar(
       noCabecalho,
-      aberta
+      aberta && cabecalhoNaCasca
         ? [
           ...conteudoDasContribuicoes("canal.cabecalho", String(aberta.id)),
           ...acoesDasContribuicoes("canal.cabecalho", String(aberta.id), { canal: aberta.id }),
@@ -1171,6 +1298,10 @@ function desenharLinha(snapshot) {
     );
     ligarAcoesDeApresentacao(noCabecalho);
   }
+
+  // A região `compositor`, acima da fileira de escrever (rascunho §3). Sem canal
+  // aberto não há onde escrever, e ela fica vazia como as ferramentas.
+  aplicarARegiao("compositor", $("compositor-mods"), "", aberta ? { canal: aberta.id } : null);
 
   // **`compositor.ferramentas`** — botões que entregam conteúdo a quem escreve.
   //
@@ -1453,10 +1584,35 @@ function itemDeMensagem(mensagem, indice, segue) {
   // ponte recebeu. Colapsar aqui deslocaria o realce em toda mensagem de mais
   // de uma linha; colapsar dos dois lados alinharia o realce achatando a
   // conversa, que é o preço errado a pagar por um índice.
-  const corpo = elemento("span", "corpo");
-  const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
-  corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
-  conteudo.append(corpo);
+  // **`conversa.mensagem` substituída** (rascunho §3, tarefa 5): o MOD desenha o
+  // corpo, num miolo fechado; a cabeça acima, os acréscimos, o anexo e o selo
+  // abaixo continuam do produto. Só numa mensagem que o servidor gravou: uma
+  // pendente tem `id` zero, e todas as pendentes dividiriam o mesmo alvo.
+  //
+  // **A busca vence**: marcada, a mensagem volta ao corpo nativo — o realce é o
+  // que a pessoa procura, e o produto não marca dentro do desenho de um MOD.
+  // Na casca que não tem a região, a mensagem é a nativa (Step 8).
+  const alvoDaMensagem = mensagem.id && !regiaoAusente("conversa.mensagem") ? String(mensagem.id) : "";
+  const marcada = (casamentosPorMensagem.get(indice)?.length ?? 0) > 0;
+  const substituta = alvoDaMensagem && !marcada
+    ? contribuicoesDosMods.escolherSubstituicao(
+      "conversa.mensagem",
+      alvoDaMensagem,
+      typeof modPreferidoPara === "function" ? modPreferidoPara("conversa.mensagem") : "",
+    ).escolhida
+    : null;
+  const desenhoDoMod = substituta ? montarContribuicao(substituta, alvoDaMensagem) : null;
+  if (desenhoDoMod) {
+    const miolo = elemento("span", "mensagem-miolo");
+    miolo.append(desenhoDoMod);
+    conteudo.append(miolo);
+  } else {
+    const corpo = elemento("span", "corpo");
+    const aceso = ocorrenciaAtual?.indice === indice ? ocorrenciaAtual.ordinal : null;
+    corpo.append(...corpoComRealce(mensagem.body, casamentosPorMensagem.get(indice), aceso));
+    conteudo.append(corpo);
+  }
+  if (alvoDaMensagem) conteudo.append(...conteudoDasContribuicoes("conversa.mensagem", alvoDaMensagem));
   // O arquivo, embaixo do texto. ADR 0027: o texto sobrevive ao arquivo, e é
   // por isso que este bloco continua aparecendo depois de os bytes irem
   // embora — com o nome, o tamanho, e a frase que diz o que houve.
@@ -1604,10 +1760,14 @@ function desenharMensagens() {
     // Sem hora dos dois lados não há como saber se a rajada é a mesma, e o
     // desconhecido abre cabeçalho: repetir o nome custa uma linha, e engolir
     // o nome de quem falou custa a autoria.
+    // **Pela chave do autor, e não pelo apelido** (rascunho §3, tarefa 5): com
+    // dois apelidos iguais, a mensagem da segunda pessoa saía sem cabeça,
+    // debaixo da primeira — e com o corpo desenhado por um MOD, a cabeça é a
+    // única autoria à vista.
     const segue =
       anterior !== null &&
       !trocouDeDia &&
-      anterior.author_nickname === mensagem.author_nickname &&
+      anterior.author === mensagem.author &&
       Boolean(anterior.at_seconds) &&
       Boolean(mensagem.at_seconds) &&
       mensagem.at_seconds - anterior.at_seconds <= JUNTA_ATE_SEGUNDOS;
@@ -1947,6 +2107,14 @@ function redesenharAsPessoas() {
 
 function desenharPessoas(snapshot) {
   const nossa = snapshot.voice_rooms.find((c) => c.occupied_by_us);
+  // **`pessoas.lista`** (rascunho §3, tarefa 5): o que os MODs acrescentam,
+  // acima da lista; e, substituída, a ordem e os grupos **dentro de cada
+  // seção**. As seções — as salas, FORA DE SALA, NO SERVIDOR — são do produto:
+  // quem está na sala de quem ouve você é verdade de confiança, e um MOD não a
+  // reorganiza (decisão da orquestradora, 09/10).
+  aplicarARegiao("pessoas.lista", $("roster-mods"));
+  const arranjo = arranjoDe("pessoas.lista");
+  const ordenar = (linhas, pessoas) => emGrupos(linhas, pessoas, arranjo, "OUTRAS PESSOAS", "roster-subgrupo");
 
   const grupos = snapshot.voice_rooms
     .filter((voice_room) => voice_room.people.length > 0)
@@ -1955,7 +2123,7 @@ function desenharPessoas(snapshot) {
         voice_room.name,
         `${voice_room.people.length}/${voice_room.limit}`,
         voice_room.occupied_by_us,
-        voice_room.people.map((pessoa) =>
+        ordenar(voice_room.people.map((pessoa) =>
           linhaDoRoster(
             {
               // **O `id` vem junto.** Ele é o que liga a linha à pessoa real —
@@ -1984,7 +2152,7 @@ function desenharPessoas(snapshot) {
             },
             snapshot.audio_available,
           ),
-        ),
+        ), voice_room.people),
         voice_room.id,
       ),
     );
@@ -1997,7 +2165,7 @@ function desenharPessoas(snapshot) {
   // um cartão solto no alto da lista pareceria pertencer à primeira sala.
   if (!nossa) {
     grupos.unshift(
-      grupoDeSala("FORA DE SALA", null, false, [
+      grupoDeSala("FORA DE SALA", null, false, ordenar([
         linhaDoRoster(
           {
             id: snapshot.me,
@@ -2024,7 +2192,7 @@ function desenharPessoas(snapshot) {
           },
           snapshot.audio_available,
         ),
-      ]),
+      ], [{ id: snapshot.me }])),
     );
   }
 
@@ -2053,7 +2221,7 @@ function desenharPessoas(snapshot) {
         "NO SERVIDOR, FORA DAS SALAS",
         `${noSaguao.length}`,
         false,
-        noSaguao.map((pessoa) =>
+        ordenar(noSaguao.map((pessoa) =>
           linhaDoRoster(
             {
               id: pessoa.id,
@@ -2076,7 +2244,7 @@ function desenharPessoas(snapshot) {
             },
             snapshot.audio_available,
           ),
-        ),
+        ), noSaguao),
       ),
     );
   }
@@ -2314,15 +2482,30 @@ function linhaSubstituida(pessoa, temAudio, contribuicao, cartao) {
   item.dataset.apresentadaPor = contribuicao.mod;
   item.classList.add("pessoa-apresentada");
 
-  // O conteúdo do MOD dentro de um alvo de clique do produto, quando há ação
-  // principal declarada.
+  // **O núcleo: o apelido verificado, à vista** (rascunho da API 6, §3 e §10;
+  // D-nucleo-1). Lido do retrato pela chave da linha, e nunca do que o MOD
+  // desenhou; quando esta sessão tem verbo sobre a pessoa, ele é o botão de
+  // moderação. Até a tarefa 5 o apelido e a moderação moravam no «⋯»
+  // recolhido, e um cartão que escrevesse outro nome era o único nome à vista.
+  // Um nome falso no cartão fica **ao lado** do verdadeiro, e não no lugar dele.
+  const nucleo = elemento("span", "pessoa-nucleo");
+  nucleo.append(nomeDaPessoa(pessoa));
+
+  // **O miolo é do MOD**, numa caixa fechada e irmã do núcleo — nunca mãe —, com
+  // o conteúdo dentro de um alvo de clique do produto quando há ação principal.
+  const miolo = elemento("div", "pessoa-miolo");
   if (contribuicao.acaoPrincipal) {
     const porta = aPortaDoProvedor(pessoa, contribuicao);
     porta.append(cartao);
-    item.append(porta);
+    miolo.append(porta);
   } else {
-    item.append(cartao);
+    miolo.append(cartao);
   }
+  // Os dois numa faixa própria: a linha continua a coluna de sempre — a faixa,
+  // o «⋯» e os acréscimos —, e a grade é só da faixa.
+  const faixa = elemento("div", "pessoa-apresentada-faixa");
+  faixa.append(nucleo, miolo);
+  item.append(faixa);
 
   // **O diagnóstico nativo não some: ele recolhe.** U15 pediu que sinal e
   // detalhes fossem recolhíveis «mantendo acesso ao diagnóstico nativo», e
@@ -2369,6 +2552,23 @@ function cartaoDeContribuicao(contribuicao, id) {
   return regiao ? regiao.cartaoDe(id) : null;
 }
 
+/**
+ * **O nome de uma pessoa no roster**, do produto: o apelido que o retrato dá
+ * para a chave da linha. Vira botão quando esta sessão tem algum verbo sobre a
+ * pessoa — nenhum elemento novo é desenhado: é o mesmo nome, que passa a
+ * responder. O mesmo elemento na linha nativa e no núcleo de uma linha
+ * apresentada por um MOD.
+ */
+function nomeDaPessoa(pessoa) {
+  if (!pessoa.moderar) return elemento("span", "pessoa-nome", pessoa.nome);
+  const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
+  porta.type = "button";
+  porta.dataset.moderarPessoa = pessoa.moderar;
+  porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
+  porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
+  return porta;
+}
+
 function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
   // `ratio: null` é «ninguém mediu isto», e não zero.
   //
@@ -2390,18 +2590,9 @@ function linhaNativaDoRoster(pessoa, temAudio, comoDetalhe = false) {
 
   const cabeca = elemento("span", "pessoa-cabeca");
   const identidade = elemento("span", "pessoa-identidade");
-  // O nome vira botão quando esta sessão tem algum verbo sobre esta pessoa.
-  // Nenhum elemento novo é desenhado: é o mesmo nome, que passa a responder.
-  if (pessoa.moderar) {
-    const porta = elemento("button", "pessoa-nome pessoa-nome-porta", pessoa.nome);
-    porta.type = "button";
-    porta.dataset.moderarPessoa = pessoa.moderar;
-    porta.setAttribute("aria-label", `moderar ${pessoa.nome}`);
-    porta.title = `expulsar, banir ou mover ${pessoa.nome}`;
-    identidade.append(porta);
-  } else {
-    identidade.append(elemento("span", "pessoa-nome", pessoa.nome));
-  }
+  // Como detalhe de uma linha apresentada, o nome já está no núcleo dela, à
+  // vista — repeti-lo aqui seria o leitor de tela anunciá-lo duas vezes.
+  if (!comoDetalhe) identidade.append(nomeDaPessoa(pessoa));
 
   // `PERMISSIONS·01`, o subsistema por pessoa, não entra. O protocolo não diz qual
   // atende quem, e um travessão explicado em toda linha do roster é o ruído que
@@ -2577,8 +2768,10 @@ function redesenharAsEntradasDeMod() {
   const cabeca = $("cabeca-mods-navegacao");
   if (!lista || !cabeca) return;
 
-  const entradas = contribuicoesDosMods.para("servidor.navegacao")
-    .filter(entrada => entrada.listarNaBarra !== false);
+  // Só os acréscimos: uma substituição da navegação é a ordem das listas, e
+  // não uma entrada «DOS MODS».
+  const entradas = regiaoAusente("servidor.navegacao") ? [] : contribuicoesDosMods.para("servidor.navegacao")
+    .filter(entrada => entrada.modo === "adicionar" && entrada.listarNaBarra !== false);
   const vazia = entradas.length === 0;
   lista.hidden = vazia;
   cabeca.hidden = vazia;
@@ -2616,6 +2809,7 @@ function redesenharAsEntradasDeMod() {
 // ---------------------------------------------------------------- telemetria
 
 function desenharTelemetria(snapshot) {
+  aplicarARegiao("status.barra", $("telemetria-mods"));
   const tel = snapshot.telemetry;
 
   medido($("tel-rtt"), `${Math.round(tel.rtt_ms)}ms`);
@@ -3940,6 +4134,10 @@ async function sairDoServidorParaAEntrada() {
  * escrito.
  */
 function esquecerOEstadoDaSessao() {
+  // Quem falou por último é de um servidor (a escolha das capas animadas); a
+  // marca do quadro agendado volta junto.
+  falouPorUltimo.clear();
+  capasAgendadas = false;
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
@@ -4834,6 +5032,100 @@ function vestirAvatar(quadrado, pessoaId) {
   quadrado.dataset.pessoaDoAvatar = pessoaId == null ? "" : String(pessoaId);
   quadrado.dataset.iniciaisDoAvatar = quadrado.textContent;
   return aplicarAvatar(quadrado);
+}
+
+/**
+ * **Veste um elemento com a capa de uma pessoa** (`pessoa.capa`; rascunho da
+ * API 6, §4; tarefa 6): o cartão dela na chamada, a barra do operador. O
+ * elemento ganha `data-pessoa-da-capa` — nunca `data-faixa`, que é a faixa de
+ * sincronia (PERFIS R1) — e a capa entra como a primeira camada dele, atrás de
+ * todo o conteúdo: o halo de quem fala, as pastilhas e o texto ficam por cima.
+ */
+function vestirCapa(quadro, pessoaId) {
+  quadro.dataset.pessoaDaCapa = pessoaId == null ? "" : String(pessoaId);
+  agendarAsCapas();
+  return aplicarCapa(quadro);
+}
+
+/**
+ * **Quantas capas animam ao mesmo tempo** (rascunho da API 6, §4; tarefa 6,
+ * Step 5c), contando a de quem usa. As outras mostram o quadro parado. O teto
+ * não depende do tamanho da sala — uma sala vai a 250 pessoas. 6 é a partida
+ * do rascunho, e a M3 mede.
+ */
+const TETO_DE_CAPAS_ANIMADAS = 6;
+
+/** Quando cada pessoa foi vista falando por último: a ordem da escolha. */
+const falouPorUltimo = new Map();
+
+/** Anota que a pessoa está falando agora (o cartão dela, a barra de quem usa). */
+function anotarQuemFala(pessoaId) {
+  if (pessoaId != null) falouPorUltimo.set(String(pessoaId), performance.now());
+}
+
+/**
+ * **Escolhe as capas que animam**: as visíveis, e entre elas quem falou por
+ * último; no empate, a ordem da tela. Marca cada quadro com `data-capa-animada`,
+ * que `aplicarCapa` lê.
+ */
+function escolherAsCapasAnimadas() {
+  const quadros = [...document.querySelectorAll("[data-pessoa-da-capa]")];
+  const naVista = quadros.filter((quadro) => {
+    const caixa = quadro.getBoundingClientRect();
+    return caixa.width > 0 && caixa.height > 0 && caixa.bottom > 0 && caixa.top < innerHeight
+      && caixa.right > 0 && caixa.left < innerWidth
+      && Boolean(quadro.dataset.pessoaDaCapa && capaContribuida(quadro.dataset.pessoaDaCapa));
+  });
+  const falou = (quadro) => falouPorUltimo.get(quadro.dataset.pessoaDaCapa) ?? 0;
+  // `sort` é estável: no empate, fica a ordem da tela.
+  const escolhidos = new Set(naVista.sort((a, b) => falou(b) - falou(a)).slice(0, TETO_DE_CAPAS_ANIMADAS));
+  for (const quadro of quadros) quadro.dataset.capaAnimada = escolhidos.has(quadro) ? "sim" : "nao";
+}
+
+/** Uma escolha por quadro de animação, por mais capas que se vistam nele. */
+let capasAgendadas = false;
+function agendarAsCapas() {
+  if (capasAgendadas) return;
+  capasAgendadas = true;
+  requestAnimationFrame(() => {
+    capasAgendadas = false;
+    redesenharCapas();
+  });
+}
+
+/** Atualiza só as capas: a chegada da mídia não remonta a chamada. */
+function redesenharCapas() {
+  escolherAsCapasAnimadas();
+  document.querySelectorAll("[data-pessoa-da-capa]").forEach(aplicarCapa);
+}
+
+/**
+ * Põe ou tira a camada da capa. **Com o movimento reduzido, o quadro parado**:
+ * `animation: none` não para um GIF, e a capa guarda o primeiro quadro para
+ * isso (`quadroEstatico`, em `base.js`). Sem o quadro parado, nada — uma capa
+ * que se move para quem pediu que nada se movesse é pior que nenhuma.
+ */
+function aplicarCapa(quadro) {
+  const id = quadro.dataset.pessoaDaCapa;
+  const capa = id ? capaContribuida(id) : null;
+  // Parada com o movimento reduzido, e fora das capas escolhidas para animar.
+  const parada = quadro.dataset.capaAnimada !== "sim"
+    || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const url = capa ? (parada ? capa.estatico : capa.url) : null;
+  let camada = quadro.querySelector(":scope > .capa-camada");
+  if (!url) {
+    camada?.remove();
+    delete quadro.dataset.comCapa;
+    return quadro;
+  }
+  if (!camada) {
+    camada = elemento("span", "capa-camada");
+    camada.setAttribute("aria-hidden", "true");
+    quadro.prepend(camada);
+  }
+  camada.style.backgroundImage = `url(${url})`;
+  quadro.dataset.comCapa = "sim";
+  return quadro;
 }
 
 /** Atualiza só as imagens: a chegada da mídia não remonta a chamada. */

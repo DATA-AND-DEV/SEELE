@@ -915,6 +915,12 @@ fn carregar_controles(de: &Controls, para: &Controls) {
         de.abertura_dbfs_milesimos.load(Ordering::Relaxed),
         Ordering::Relaxed,
     );
+    // O som da tela também ficava de fora: ver
+    // `o_som_da_tela_atravessa_a_reabertura` (M-2 do lote V).
+    para.volume_da_tela
+        .store(de.volume_da_tela.load(Ordering::Relaxed), Ordering::Relaxed);
+    para.tela_calada
+        .store(de.tela_calada.load(Ordering::Relaxed), Ordering::Relaxed);
     // O relógio de mídia **não** vai daqui: ele é entregue ao caminho novo na
     // criação (`Voice::around`), antes de a thread nascer. Gravado aqui, depois
     // do `spawn`, ele chegava tarde quando a thread ganhava a corrida.
@@ -1168,7 +1174,8 @@ impl Voice {
     /// # What has to survive, and why it is decided here
     ///
     /// mudo, Isolamento total, the mode, the held key, every per-talker volume,
-    /// and the noise suppression and gate sensitivity of F01 and F02. Left to a shell, this list would be written once per shell and
+    /// the noise suppression and gate sensitivity of F01 and F02, and the volume
+    /// and mute of a shared screen's sound. Left to a shell, this list would be written once per shell and
     /// each copy would forget a different item — and the item that hurts is
     /// mudo: a switch that quietly unmutes a microphone is a switch that
     /// puts a room on the air.
@@ -1852,7 +1859,13 @@ struct SilencioDigital {
 impl SilencioDigital {
     /// Olha um quadro cru e diz se o microfone já entrega zero exato há três
     /// segundos.
+    ///
+    /// **A subida vai ao `seele.log`**, uma vez (M-1 do lote V). A telemetria
+    /// só chega à tela, e a frase da tela só existe no macOS: no Windows e no
+    /// Linux, quem fala para ninguém não deixava rastro no log que a pessoa
+    /// manda pelo COPIAR DIAGNÓSTICO.
     fn observar(&mut self, bruto: &[f32], mudo: bool) -> bool {
+        let antes = self.marcado();
         // `== 0.0` vale para +0 e −0, que são os dois zeros exatos. Nenhum
         // limiar: um limiar transformaria isto num medidor de «baixo», e baixo
         // não é bloqueio.
@@ -1862,7 +1875,16 @@ impl SilencioDigital {
         } else {
             self.seguidos.saturating_add(1)
         };
-        self.marcado()
+        let agora = self.marcado();
+        if agora && !antes {
+            tracing::warn!(
+                "o microfone entrega silêncio digital há 3 s, aberto e sem mudo: zero exato \
+                 em toda amostra, e a sala não ouve nada. O sistema pode estar bloqueando o \
+                 microfone (no macOS, Ajustes → Privacidade e Segurança → Microfone), ou o \
+                 ganho da interface está no mínimo"
+            );
+        }
+        agora
     }
 
     /// O que a última olhada concluiu.
@@ -3061,6 +3083,32 @@ mod controles_na_reabertura {
         );
     }
 
+    /// O volume e o mudo do som da tela atravessam a reabertura. M-2 do lote V.
+    ///
+    /// Ficavam de fora da lista: trocar de microfone ou de saída no meio de uma
+    /// transmissão devolvia o som dela a 100 e audível a quem o tinha calado.
+    #[test]
+    fn o_som_da_tela_atravessa_a_reabertura() {
+        let velho = Controls::novos();
+        velho.volume_da_tela.store(300, Ordering::Relaxed);
+        velho.tela_calada.store(true, Ordering::Relaxed);
+
+        let novo = Controls::novos();
+        carregar_controles(&velho, &novo);
+
+        assert_eq!(
+            novo.volume_da_tela.load(Ordering::Relaxed),
+            300,
+            "a troca de aparelho devolveu o som da transmissão a 100 a quem o tinha \
+             baixado"
+        );
+        assert!(
+            novo.tela_calada.load(Ordering::Relaxed),
+            "a troca de aparelho devolveu audível o som da transmissão que a pessoa tinha \
+             calado"
+        );
+    }
+
     #[test]
     fn o_relogio_de_midia_continua_dois_quadros_a_frente() {
         // O defeito que calava a pessoa do outro lado: um caminho novo sobre o
@@ -3386,6 +3434,53 @@ mod silencio_digital {
                  o detector mede «quase zero», e não o zero exato do bloqueio"
             );
         }
+    }
+
+    /// M-1 do lote V: a subida do silêncio digital vai ao `seele.log`, uma vez
+    /// por subida.
+    ///
+    /// Ela só alimentava a telemetria, e a frase da tela só existe no macOS: no
+    /// Windows e no Linux, quem falava para ninguém não deixava rastro no log
+    /// que manda pelo COPIAR DIAGNÓSTICO. Uma linha por quadro, por outro lado,
+    /// seriam cinquenta por segundo.
+    #[test]
+    fn a_subida_do_silencio_digital_vai_ao_log_uma_vez_por_subida() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let avisos = || {
+            rastro
+                .linhas()
+                .iter()
+                .filter(|linha| linha.starts_with("WARN") && linha.contains("silêncio digital"))
+                .count()
+        };
+
+        let mut detector = SilencioDigital::default();
+        for _ in 0..TRES_SEGUNDOS * 2 {
+            detector.observar(&zeros(), false);
+        }
+        assert_eq!(
+            avisos(),
+            1,
+            "seis segundos de zero exato deixaram {} linhas no `seele.log`, e eram uma: \
+             sem ela, quem fala para ninguém no Windows e no Linux não deixa rastro; com \
+             uma por quadro, o log se enche. Rastro: {:?}",
+            avisos(),
+            rastro.linhas()
+        );
+
+        // O sinal volta, e o zero exato volta depois: é outra subida.
+        detector.observar(&ruido_a_menos_90_dbfs(0), false);
+        for _ in 0..TRES_SEGUNDOS {
+            detector.observar(&zeros(), false);
+        }
+        assert_eq!(
+            avisos(),
+            2,
+            "a segunda subida do silêncio digital não foi ao `seele.log`: o log diz só a \
+             primeira vez que o microfone parou. Rastro: {:?}",
+            rastro.linhas()
+        );
     }
 
     #[test]

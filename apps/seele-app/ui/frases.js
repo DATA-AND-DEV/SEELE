@@ -1421,6 +1421,26 @@ function emBytes(bytes) {
   return `${bytes} B`;
 }
 
+/**
+ * As mensagens de apps mais novos que o servidor desta janela pulou (a P12 do
+ * plano F1b), para a seção ESTE SERVIDOR das configurações.
+ *
+ * **O zero também é dito**, e não escondido: uma linha que só aparece quando
+ * há problema deixa quem hospeda sem saber se o número existe. E o número
+ * vem com o que fazer, porque saber sem dizer o remédio é contar pela metade.
+ * Sem «linha» e sem «protocolo»: para pessoas, é a versão do SEELE.
+ */
+function fraseDasMensagensDeAppsMaisNovos(mensagens, sessoes) {
+  const titulo = "MENSAGENS DE APPS MAIS NOVOS QUE ESTE SERVIDOR";
+  if (!mensagens) return `${titulo}: 0`;
+  const emSessoes = `${sessoes} ${sessoes === 1 ? "SESSÃO" : "SESSÕES"}`;
+  return (
+    `${titulo}: ${mensagens}, EM ${emSessoes}.\n` +
+    "Quem usa um SEELE mais novo está mandando o que esta versão não entende; " +
+    "atualizar o SEELE daqui resolve."
+  );
+}
+
 // ---------------------------------------------- as cascas do navegador (P10)
 //
 // As frases da casca do celular e da casca larga (F8; o spec da F8, §13, e a

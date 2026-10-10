@@ -208,7 +208,7 @@ const contexto = vm.createContext({
 });
 vm.runInContext(
   `${ler("mods-runtime.js")}\n${ler("mods-contribuicoes.js")}\n${ler("mods-superficies.js")}\n`
-  + "this.R = RegistroDeContribuicoes; this.S = SuperficieDeMod;"
+  + "this.R = RegistroDeContribuicoes; this.S = SuperficieDeMod; this.SS = SuperficiesDoMod;"
   + "this.I = InstanciaDeMod; this.PONTOS = PONTOS_DE_CONTRIBUICAO;"
   + "this.NATIVO = NATIVO; this.ESTADOS_DE_MOD = ESTADOS_DE_MOD;",
   contexto,
@@ -769,9 +769,14 @@ contexto.cartoesDosMods = new Map();
 
 {
   const base = ler("base.js");
-  const inicio = base.indexOf("function montarContribuicao(");
+  // Desde `aplicarAContribuicao`, que `montarContribuicao` chama e que vem logo
+  // antes dela (tarefa 5, Step 6: a mesma aplicação na montagem e no
+  // `atualizar`).
+  const inicio = base.indexOf("function aplicarAContribuicao(");
   const fim = base.indexOf("/**\n * As ações que os MODs acrescentaram", inicio);
-  confere("R4b · o recorte", inicio >= 0 && fim > inicio, "`montarContribuicao` mudou de forma e o recorte não a achou");
+  confere("R4b · o recorte", inicio >= 0 && fim > inicio
+    && base.slice(inicio, fim).includes("function montarContribuicao("),
+  "`montarContribuicao` mudou de forma e o recorte não a achou");
   vm.runInContext(base.slice(inicio, fim), contexto);
 
   const tela = ler("tela-sessao.js");
@@ -1845,7 +1850,15 @@ function anotando(...anotadas) {
       try {
         registro.registrar({ id: "mod/a" }, dono, {
           ponto, modo, alvo: "1",
-          ...(ponto === "pessoa.avatar" ? { conteudo: { doServidor: { canal: 1, pedido: {} } } } : {}),
+          ...(ponto === "pessoa.avatar" || ponto === "pessoa.capa"
+            ? { conteudo: { doServidor: { canal: 1, pedido: {} } } }
+            : {}),
+          // A navegação substituída é uma ordem das listas, e tem forma
+          // própria, como o avatar (rascunho §3, tarefa 5).
+          ...(ponto === "servidor.navegacao" && modo === "substituir"
+            ? { conteudo: { canais: { grupos: [] } } }
+            : {}),
+          ...(ponto === "pessoas.lista" && modo === "substituir" ? { conteudo: { grupos: [] } } : {}),
         });
       } catch (falha) {
         erro = falha;
@@ -1867,6 +1880,123 @@ function anotando(...anotadas) {
       `«${ponto}» não explicou a suspensão de «decorar»: ${mensagem || "aceitou o registro"}`,
     );
   }
+}
+
+// ------------------- o teto por alvo (tarefa 5 da F3, Step 7; rascunho §12)
+//
+// O bloqueio C do PERFIS: com cartão, avatar e capa por pessoa, as 128
+// contribuições de um MOD davam 42 pessoas, e uma sala vai a 250. Os pontos
+// por alvo saem do teto agregado; cada alvo aceita uma contribuição por MOD
+// (e por modo) — registrar de novo é `atualizar` —, até um teto de alvos por
+// ponto; o agregado fica para os pontos sem alvo.
+
+{
+  const registro = new R();
+  const dono = new I("mod/perfis", "p", 7, {});
+  const recusa = (pedido) => {
+    try {
+      registro.registrar({ id: "mod/perfis" }, dono, pedido);
+      return "";
+    } catch (falha) {
+      return falha.message;
+    }
+  };
+  let recusadas = 0;
+  for (let id = 1; id <= 250; id += 1) {
+    if (recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(id) })) recusadas += 1;
+    if (recusa({ ponto: "pessoa.avatar", modo: "substituir", alvo: String(id), conteudo: { doServidor: { canal: 1 } } })) {
+      recusadas += 1;
+    }
+  }
+  confere("Step 7 · 250 pessoas", recusadas === 0, `${recusadas} das 500 contribuições por pessoa foram recusadas`);
+
+  const segunda = recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
+  confere("Step 7 · a segunda para o mesmo alvo", segunda.includes("atualizar") && segunda.includes("pessoa.cartao"),
+    `uma segunda contribuição para o mesmo alvo não foi recusada com «use atualizar»: ${segunda || "aceita"}`);
+  confere("Step 7 · outro modo, o mesmo alvo",
+    recusa({ ponto: "pessoa.cartao", modo: "adicionar", alvo: "1" }) === "",
+    "acrescentar à linha de quem o MOD já apresenta foi recusado como se fosse a mesma contribuição");
+  // **Dois por alvo, e não três** (decisão da orquestradora, 09/10): com o
+  // cartão substituído e a linha acrescida, uma terceira, num modo que já está
+  // de pé, é recusada pelo nome.
+  {
+    let nome = "";
+    try {
+      registro.registrar({ id: "mod/perfis" }, dono, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "1" });
+    } catch (falha) {
+      nome = falha.recusa ?? `(sem nome: ${falha.message})`;
+    }
+    confere("Step 7 · o terceiro no mesmo alvo", nome === "contribuicao-ja-existe",
+      `a terceira contribuição para o mesmo alvo, num modo já de pé, veio com ${nome || "(aceita)"}`);
+  }
+
+  for (let id = 251; id <= 256; id += 1) recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(id) });
+  const alem = recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" });
+  confere("Step 7 · o teto de alvos", alem.includes("256") && alem.includes("pessoa.cartao"),
+    `o 257º alvo de «pessoa.cartao» não foi recusado com o número: ${alem || "aceito"}`);
+
+  let entradas = 0;
+  for (let i = 0; i < 128; i += 1) if (!recusa({ ponto: "servidor.navegacao", rotulo: `entrada ${i}` })) entradas += 1;
+  confere("Step 7 · o agregado é dos pontos sem alvo", entradas === 128,
+    `só ${entradas} entradas de navegação couberam: as contribuições por pessoa ainda gastam o teto agregado`);
+  const a129 = recusa({ ponto: "servidor.navegacao", rotulo: "entrada 128" });
+  confere("Step 7 · a 129ª entrada", a129.includes("128"), `a 129ª entrada não foi recusada com o número: ${a129 || "aceita"}`);
+
+  // Revogar devolve o alvo: o mesmo alvo aceita de novo.
+  const umAlvo = [...registro.porHandle.values()].find((c) => c.ponto === "pessoa.cartao" && c.alvo === "2" && c.modo === "substituir");
+  registro.revogar(umAlvo.handle, { id: "mod/perfis", instancia: dono });
+  confere("Step 7 · revogar devolve o alvo", recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "2" }) === "",
+    "revogada a contribuição de um alvo, o alvo continuou ocupado");
+}
+
+// ------------- as recusas do registro têm nome (tarefa 5 da F3, Step 7b)
+//
+// Rascunho §7.1, «Como o nome chega»: o `erro` que chega ao MOD da 6 é um nome
+// de lista fechada, e a frase fica no `seele.log`. Até o Step 7b, toda recusa
+// do registro chegava a ele como `falhou`.
+
+{
+  const nomeDa = (fazer) => {
+    try {
+      fazer();
+      return "(aceita)";
+    } catch (falha) {
+      return falha.recusa ?? `(sem nome: ${falha.message})`;
+    }
+  };
+  const registro = new R();
+  const dono = new I("mod/nomes", "n", 7, {});
+  const outro = new I("mod/outro", "o", 7, {});
+  const registrar = (pedido, quem = dono, id = "mod/nomes") => registro.registrar({ id }, quem, pedido);
+  const casos = [
+    ["ponto-desconhecido", () => registrar({ ponto: "nao.existe" })],
+    ["modo-recusado", () => registrar({ ponto: "pessoa.identidade", modo: "substituir", alvo: "1" })],
+    ["modo-recusado", () => registrar({ ponto: "pessoa.cartao", modo: "decorar", alvo: "1" })],
+    ["sem-alvo", () => registrar({ ponto: "pessoa.avatar", modo: "substituir", conteudo: { doServidor: { canal: 1 } } })],
+    ["conteudo-invalido", () => registrar({ ponto: "pessoa.avatar", modo: "substituir", alvo: "1", conteudo: {} })],
+    ["conteudo-invalido", () => registrar({ ponto: "pessoas.lista", modo: "substituir", conteudo: [] })],
+    ["conteudo-invalido", () => registrar({ ponto: "servidor.navegacao", modo: "substituir", conteudo: {} })],
+  ];
+  for (const [nome, fazer] of casos) {
+    const visto = nomeDa(fazer);
+    confere("Step 7b · o nome", visto === nome, `esperava «${nome}», e veio ${visto}`);
+  }
+  const { handle } = registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
+  confere("Step 7b · contribuicao-ja-existe",
+    nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" })) === "contribuicao-ja-existe",
+    "a segunda contribuição para o mesmo alvo não veio com o nome");
+  confere("Step 7b · contribuicao-de-outro-mod",
+    nomeDa(() => registro.revogar(handle, { id: "mod/outro", instancia: outro })) === "contribuicao-de-outro-mod"
+      && nomeDa(() => registro.atualizar(handle, { id: "mod/outro", instancia: outro }, null)) === "contribuicao-de-outro-mod",
+    "revogar ou atualizar o que é de outro MOD não veio com o nome");
+  for (let i = 2; i <= 256; i += 1) registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(i) });
+  confere("Step 7b · teto-de-alvos",
+    nomeDa(() => registrar({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" })) === "teto-de-alvos",
+    "o teto de alvos não veio com o nome");
+  for (let i = 0; i < 128; i += 1) registrar({ ponto: "servidor.navegacao", rotulo: `e${i}` });
+  confere("Step 7b · teto-de-contribuicoes",
+    nomeDa(() => registrar({ ponto: "servidor.navegacao", rotulo: "e128" })) === "teto-de-contribuicoes",
+    "o teto agregado não veio com o nome");
 }
 
 // V14: duas instâncias compartilham o destino central e conservam o rascunho.
@@ -1963,6 +2093,14 @@ function anotando(...anotadas) {
     // frase dele, e não por um `TypeError` que derrubaria a bancada inteira.
     confere("o elo · anotarRecusa", typeof dono.anotarRecusa === "function",
       "o dono de `base.js` não tem `anotarRecusa`, e `mods-regiao.js` a chama em cada mídia recusada");
+    // **A API do pacote, no dono** (tarefa 7, Step 4): as superfícies que um
+    // MOD tem dependem dela, e sem ela todo MOD seria tratado como de API 0.
+    confere(
+      "o elo · a api",
+      elo.donoDaRegiao({ id: "mod/x", hash: "h", api: 6 }, instancia).api === 6
+        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "5" }, instancia).api === 5,
+      "o dono de `base.js` não diz a API do pacote, e `tipoDaSuperficie` a lê para saber se há folha ou painel",
+    );
 
     // (1) A instância é a carregada e a sessão é a de pé: uma linha, inteira.
     elo.modsCarregados.set("mod/a", instancia);
@@ -2141,6 +2279,142 @@ function anotando(...anotadas) {
       pedido: { ponto: "servidor.navegacao", rotulo: "API 4" },
     });
     confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 4 foi recusada: ${respostas.at(-1)?.erro}`);
+
+    // **`atualizar`, pelo roteador** (R7 do PERFIS; tarefa 5, Step 6): B não
+    // troca o conteúdo do que é de A, e A troca o dele — com o dono vindo do
+    // roteador, e não do corpo da mensagem, como no `revogar`.
+    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+      tipo: "atualizar-contribuicao", n: 31, handle, conteudo: [{ forma: "texto", dentro: "de B" }],
+    });
+    confere("R2 · atualizar, o dono", respostas.at(-1)?.ok === false, "mod/b atualizou a contribuição de mod/a");
+    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+      tipo: "atualizar-contribuicao", n: 32, handle, conteudo: [{ forma: "texto", dentro: "de A, de novo" }],
+    });
+    confere(
+      "R2 · atualizar",
+      respostas.at(-1)?.ok === true && respostas.at(-1)?.valor === true,
+      `mod/a não atualizou a própria contribuição: ${respostas.at(-1)?.erro}`,
+    );
+    confere(
+      "R2 · atualizar",
+      registro.porHandle.get(handle)?.conteudo?.[0]?.dentro === "de A, de novo",
+      "o roteador respondeu, e o conteúdo da contribuição não mudou",
+    );
+
+    // **A recusa chega ao MOD da 6 com o nome** (Step 7b; rascunho §7.1), e ao
+    // da API 4 com a frase, como os publicados recebem. O teto agregado, pelo
+    // roteador de verdade: 128 entradas, e a 129ª.
+    {
+      const c = { geracao: 7, admite: () => true, registrar() { return () => {}; }, executor: escuta };
+      contexto.modsCarregados.set("mod/c", c);
+      for (let i = 0; i < 128; i += 1) registro.registrar({ id: "mod/c" }, c, { ponto: "servidor.navegacao", rotulo: `c${i}` });
+      await contexto.atenderOMod({ id: "mod/c", api: 6 }, c, {
+        tipo: "contribuir", n: 41, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
+      });
+      confere("Step 7b · o nome chega à 6", respostas.at(-1)?.erro === "teto-de-contribuicoes",
+        `o MOD da 6 recebeu ${JSON.stringify(respostas.at(-1))}`);
+      await contexto.atenderOMod({ id: "mod/c", api: 4 }, c, {
+        tipo: "contribuir", n: 42, pedido: { ponto: "servidor.navegacao", rotulo: "a 129ª" },
+      });
+      confere("Step 7b · a frase segue na 4", String(respostas.at(-1)?.erro ?? "").includes("128"),
+        `o MOD da API 4 deixou de receber a frase: ${JSON.stringify(respostas.at(-1))}`);
+      contexto.modsCarregados.delete("mod/c");
+    }
+
+    // **Um tipo de superfície desconhecido é recusado pelo nome na 6** (tarefa
+    // 7, Step 1; rascunho §3 e §7.1). Ele virava `dialogo` em silêncio: o MOD
+    // que escreveu `janela` via um diálogo e não sabia por quê, e o produto
+    // sabia e não contava. Na 6, `tipo-desconhecido`, com o tipo pedido e os
+    // que existem, e a linha no `seele.log`; até a 5 — o que os publicados
+    // recebem —, o diálogo de antes, e a linha também. Sem tipo, `dialogo`.
+    //
+    // Pelo roteador de verdade vai a recusa, com o conjunto de verdade
+    // (`SuperficiesDoMod`) e o dono nas duas peças que ela usa: a `api` do
+    // pacote e `anotarRecusa`. «O elo» confere as duas no dono de verdade — a
+    // `api` e a linha no `seele.log` —, e o roteador responde pela
+    // `recusaParaOMod` de `base.js`, no recorte. A recusa sai antes de montar; os
+    // casos que montam — sem tipo, e a API 4 — precisam de um DOM que o desta
+    // bancada não tem, e conferem a decisão em `tipoDaSuperficie`, que o
+    // `criar` usa.
+    {
+      const anotadasDoDono = [];
+      const donoDe = (mod, instancia) => ({
+        ...contexto.donoDaRegiao(mod, instancia),
+        api: Number(mod.api) || 0,
+        anotarRecusa: (oQue) => anotadasDoDono.push(`${mod.id}: ${oQue}`),
+      });
+      const conjunto = new contexto.SS("mod/b", donoDe({ id: "mod/b", api: 6 }, b), { camadas });
+      const superficiesDeAntes = contexto.superficiesDoMod;
+      contexto.superficiesDoMod = () => conjunto;
+
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "superficie-criar", n: 51, descricao: { id: "x", tipo: "janela" },
+      });
+      const recusa = respostas.at(-1);
+      // **A resposta continua sendo uma resposta.** O campo do tipo pedido
+      // chamava-se `tipo`, e `responder` espalha a recusa sobre `{ tipo:
+      // "resposta", n, ok }`: a mensagem saía com `tipo: "janela"`, o executor
+      // não a reconhecia, e o pedido do MOD esperava para sempre. Este caso
+      // passava, porque só olhava o campo (medido na tarefa 7, Step 1).
+      confere("Step 1 · a resposta é resposta", recusa?.tipo === "resposta" && recusa?.n === 51,
+        `a recusa trocou o tipo ou o número da mensagem da ponte: ${JSON.stringify(recusa)}`);
+      confere(
+        "Step 1 · o tipo desconhecido, na 6",
+        recusa?.ok === false && recusa?.erro === "tipo-desconhecido" && recusa?.tipoPedido === "janela"
+          && Array.isArray(recusa?.tipos) && recusa.tipos.includes("dialogo") && !recusa.tipos.includes("janela"),
+        `um tipo desconhecido não chegou ao MOD da 6 como \`tipo-desconhecido\`, com \`tipoPedido\` e \`tipos\` — virou dialogo em silêncio, ou perdeu os campos: ${JSON.stringify(recusa)}`,
+      );
+      confere("Step 1 · o tipo desconhecido, na 6", conjunto.de("x") === null,
+        "a superfície recusada ficou de pé");
+      confere("Step 1 · o tipo desconhecido no registro", dita("«superficie-criar»", "janela"),
+        `a recusa do tipo foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador.slice(-2))}`);
+
+      // **E nenhuma carga troca o envelope** (`tipo`, `n` e `ok` são da ponte):
+      // uma recusa cujos campos tragam os três chega com os da ponte.
+      contexto.superficiesDoMod = () => ({
+        criar() {
+          const falha = new Error("x");
+          falha.recusa = "tipo-desconhecido";
+          falha.camposDaRecusa = { tipo: "janela", n: 999, ok: true };
+          throw falha;
+        },
+      });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "superficie-criar", n: 54, descricao: { id: "y" },
+      });
+      confere(
+        "Step 1 · o envelope é da ponte",
+        respostas.at(-1)?.tipo === "resposta" && respostas.at(-1)?.n === 54 && respostas.at(-1)?.ok === false,
+        `uma carga trocou o tipo, o número ou o ok da resposta: ${JSON.stringify(respostas.at(-1))}`,
+      );
+      contexto.superficiesDoMod = superficiesDeAntes;
+
+      // A decisão, caso a caso.
+      const decide = (api, descricao) => {
+        try {
+          return contexto.tipoDaSuperficie(descricao, donoDe({ id: "mod/b", api }, b));
+        } catch (falha) {
+          return { recusa: falha?.recusa ?? String(falha) };
+        }
+      };
+      for (const api of [4, 6]) {
+        confere(`Step 1 · sem tipo, dialogo (API ${api})`, decide(api, { id: "s" }) === "dialogo"
+          && decide(api, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
+        confere(`Step 1 · um tipo que existe (API ${api})`, decide(api, { id: "p", tipo: "pagina" }) === "pagina",
+          "um tipo que existe deixou de ser o pedido");
+      }
+      confere("Step 1 · o tipo desconhecido, na 6", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
+        "`tipoDaSuperficie` não recusou o tipo desconhecido na 6");
+      anotadasDoDono.length = 0;
+      confere("Step 1 · até a 5, o de antes", decide(4, { id: "antiga", tipo: "janela" }) === "dialogo",
+        "um pacote de API 4 com um tipo desconhecido deixou de abrir o dialogo");
+      confere(
+        "Step 1 · até a 5, dito",
+        anotadasDoDono.length === 1 && anotadasDoDono[0].startsWith("mod/b: ")
+          && anotadasDoDono[0].includes("janela") && anotadasDoDono[0].includes("dialogo"),
+        `o dialogo de um tipo desconhecido, até a 5, não foi ao seele.log: ${JSON.stringify(anotadasDoDono)}`,
+      );
+    }
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
     // fechada para todo mundo — e uma porta fechada passa no teste de
@@ -2339,8 +2613,10 @@ function anotando(...anotadas) {
       // começo do R2. `provarImagem` e o teto do cartão moram no mesmo
       // `mods-regiao.js`, e entram aqui: o avatar chama as duas antes de dar a
       // imagem por pronta.
+      // Até o fim de `imagemContribuida`, que o avatar chama desde a tarefa 6
+      // (a mesma carga para o avatar e a capa).
       const inicioDoAvatar = base.indexOf("function avatarContribuido(");
-      const fimDoAvatar = base.indexOf("\n}\n", inicioDoAvatar) + 3;
+      const fimDoAvatar = base.indexOf("\n}\n", base.indexOf("function imagemContribuida(", inicioDoAvatar)) + 3;
       confere("R4e · o recorte", inicioDoAvatar >= 0,
         "`avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);

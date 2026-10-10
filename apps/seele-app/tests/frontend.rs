@@ -565,7 +565,14 @@ fn every_command_the_frontend_calls_is_registered() {
 // e o pedido entrou noutro. Saiu quando o dono da região passou a pedi-los,
 // `bytesDoSom` em `base.js`, e a lista voltou ao estado de repouso, que é
 // vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+//
+// `onde_estou` entrou em 2026-10-09, com a metade do `main.rs` da tarefa 18 da
+// F7 (Plano 2): é a única resposta a «estou no meu servidor?», e quem pergunta
+// hoje são o `estado_da_porta().hospedando` da `tela-sessao.js` e o
+// `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
+// outras frentes quando o comando nasceu. Sai quando eles passarem a
+// perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -784,7 +791,14 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
         //
         // Entre eles a ordem também importa, e está logo abaixo: o renderer usa
         // `aplicarEstiloDeMod`, e as superfícies constroem `RegiaoDeMod`.
+        //
+        // A ponte do navegador (`ponte-web.js`) é a outra exceção, e pelo
+        // motivo oposto: ela não chama nada de `base.js`, ela é o que `base.js`
+        // lê na primeira linha (`window.__TAURI__`), e põe a marca da casca
+        // antes da primeira pintura. `tests/web.rs` exige que ela seja o
+        // primeiro script da página.
         if !source.ends_with(".js")
+            || source == "ponte-web.js"
             || source == "base.js"
             || source == "mods-runtime.js"
             || source == "mods-estilos.js"
@@ -975,6 +989,11 @@ fn the_script_reads_the_field_names_a_match_actually_serialises() {
             "the script never names `{field}`, which is what a Match serialises to"
         );
     }
+    // **O nome de um ponto não é a leitura de um campo.** A região
+    // `conversa.mensagem` da API 6 (tarefa 5) tem `.mensagem` no nome, e o
+    // guarda de «quem aplica» exige o nome como argumento de uma chamada aqui.
+    // Só o literal exato sai da busca: `casamento.mensagem` continua reprovando.
+    let script = script.replace("\"conversa.mensagem\"", "\"ponto-da-api\"");
     for wrong in [".mensagem", ".inicio", ".fim"] {
         assert!(
             !script.contains(wrong),
@@ -1551,7 +1570,7 @@ fn a_faixa_de_um_pino_que_a_impressao_desmente_diz_de_onde_ela_veio() {
     //   (`a_lista_guardou`), e a faixa não promete o que não aconteceu.
     // - Da lista, sem gravar: dois motivos dão aqui, a gravação que falhou e o
     //   servidor desta máquina, que o `connect` não anota de propósito
-    //   (`hospedado_aqui`). «Não conseguiu» só vale para o primeiro; o que vale
+    //   (`endereco_desta_maquina`). «Não conseguiu» só vale para o primeiro; o que vale
     //   para os dois é que a lista continua com a impressão antiga.
     let corpo = body_of(&scripts(), "function fraseDoVeredito(");
     let Some(ramo) = corpo
@@ -1999,7 +2018,7 @@ fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
     );
 
     let Some(visita) = connect
-        .split("if!hospedado_aqui(&alvo){")
+        .split("if!endereco_desta_maquina(&alvo){")
         .nth(1)
         .and_then(|resto| resto.split("lista.registrar(").next())
     else {
@@ -8123,10 +8142,16 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // so the choice was this channel or a second base64 encoder in `main.rs`.
     //
     // The exception is held to exactly that shape below, rather than trusted.
+    //
+    // **And the bridge of the browser** (`ponte-web.js`, ADR 0057) answers
+    // `regras_de_previa` itself there, where no Rust is on the other side. Its
+    // copy is held to `seele_ffi::Connection::preview_rules()` by
+    // `as_constantes_da_ponte_sao_as_do_desktop` in `tests/web.rs`, so the two
+    // cannot drift: the copy this test exists to forbid is one nobody checks.
     let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {
-        if name == excecao {
+        if name == excecao || name == "ponte-web.js" {
             continue;
         }
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));
@@ -10573,20 +10598,30 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// Lote R da F5. A batida que para na pergunta dos MODs entrega o segredo com
 /// que chegou — o token do convite, ou a senha do servidor, que viajam no mesmo
 /// `join_secret` — à pergunta, que o guarda em `aceitePendente` enquanto está
-/// aberta e o devolve à volta que aceita. É a única credencial que esta janela
-/// guarda entre duas chamadas, e ela tem guarda próprio, em cinco partes:
+/// aberta e o devolve à volta que aceita. O lote W acrescentou o segundo e
+/// último lugar: a recusa por apelido tomado, que vem antes do gasto, a deixa
+/// em `recusaDoApelido` (`tela-boot.js`) para a tentativa seguinte ao mesmo
+/// alvo. São as duas únicas credenciais que esta janela guarda entre duas
+/// chamadas, e elas têm guarda próprio, em seis partes:
 ///
 /// 1. **Cada linha que a toca está na lista.** Toda linha de `tela-boot.js` e
-///    `camada-mods.js` que nomeia `credencial` ou `aceitePendente`, e a cópia
-///    `pergunta` de `aceitarOsMods`. Um caminho novo — um `localStorage`, um
-///    `console.warn` com o objeto da pergunta, um `invoke` que a grave em
-///    arquivo — é uma linha nova, e reprova aqui até alguém olhar para ela.
-/// 2. **Nenhum outro script lê a pergunta.** Um segundo leitor de
-///    `aceitePendente` seria um segundo lugar por onde ela sai.
-/// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
-///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
-///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
-///    reconexão que a levasse gastaria de novo o convite que a entrada gastou.
+///    `camada-mods.js` que nomeia `credencial`, `aceitePendente` ou
+///    `recusaDoApelido`, e a cópia `pergunta` de `aceitarOsMods`. Um caminho
+///    novo — um `localStorage`, um `console.warn` com o objeto da pergunta, um
+///    `invoke` que a grave em arquivo — é uma linha nova, e reprova aqui até
+///    alguém olhar para ela.
+/// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
+///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
+///    ela sai.
+/// 3. **Só três chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador e a volta que aceita os MODs. O
+///    RECONECTAR, a batida da espera, o hospedar e a troca de servidor não
+///    passam nenhuma — uma reconexão que a passasse gastaria de novo o convite
+///    que a entrada gastou. Desde o lote W, `conectar` anexa por conta própria
+///    a credencial que um apelido tomado deixou (`recusaDoApelido`), quando o
+///    alvo é o mesmo; essas chamadas sem argumento também a recebem nesse caso.
+///    Ela nunca é um convite gasto: só fica guardada depois de uma recusa que
+///    não gastou nada, e toda tentativa a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
 ///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
 ///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
@@ -10594,16 +10629,36 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
 ///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+/// 6. **A do apelido tomado morre na tentativa seguinte, qualquer que seja.**
+///    `conectar` a esquece e conta a tentativa antes da primeira espera, e a
+///    recusa só a guarda se a tentativa dela ainda é a mais nova: uma
+///    tentativa a outro alvo, ou uma que entra, não pode deixá-la para a
+///    próxima, nem mesmo quando a recusa de uma mais velha chega depois. A
+///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
+///    nova a abre com a credencial dela.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
         ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
-        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
-        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
+        // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
+        // esquecimento no começo de toda tentativa, e a guarda na recusa.
+        ("tela-boot.js", "let recusaDoApelido = null;"),
         (
             "tela-boot.js",
-            "if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
+            "if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;",
+        ),
+        ("tela-boot.js", "recusaDoApelido = null;"),
+        (
+            "tela-boot.js",
+            "if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };",
+        ),
+        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
+        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3); e só se
+        // esta tentativa ainda é a mais nova (lote W, re-revisão da rodada 1).
+        (
+            "tela-boot.js",
+            "if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
         ),
         ("camada-mods.js", "let aceitePendente = null;"),
         (
@@ -10625,6 +10680,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-mods.js", "if (!pergunta) return;"),
         ("camada-mods.js", "const { alvo, conjunto, mods } = pergunta;"),
         ("camada-mods.js", "if (aceitePendente !== pergunta) return;"),
+        // A desistência durante a gravação do sim, que o desfaz e não volta
+        // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
+        // o alvo e mais nada.
+        ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",
@@ -10657,7 +10716,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     for arquivo in ["tela-boot.js", "camada-mods.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial") || names(linha, "aceitePendente") {
+            if names(linha, "credencial")
+                || names(linha, "aceitePendente")
+                || names(linha, "recusaDoApelido")
+            {
                 conferir(arquivo, linha);
             }
         }
@@ -10678,20 +10740,26 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
     }
 
-    // 2. Nenhum outro script lê a pergunta.
-    for nome in ui_files(".js") {
-        if nome == "camada-mods.js" {
-            continue;
+    // 2. Nenhum outro script lê os dois lugares.
+    for (lugar, dono) in [
+        ("aceitePendente", "camada-mods.js"),
+        ("recusaDoApelido", "tela-boot.js"),
+    ] {
+        for nome in ui_files(".js") {
+            if nome == dono {
+                continue;
+            }
+            let texto = without_comments(&read(&format!("ui/{nome}")));
+            assert!(
+                !names(&texto, lugar),
+                "`{nome}` lê `{lugar}`, que guarda a credencial da tentativa: um \
+                 segundo leitor é um segundo lugar por onde ela sai"
+            );
         }
-        let texto = without_comments(&read(&format!("ui/{nome}")));
-        assert!(
-            !names(&texto, "aceitePendente"),
-            "`{nome}` lê `aceitePendente`, que guarda a credencial da tentativa: um \
-             segundo leitor é um segundo lugar por onde ela sai"
-        );
     }
 
-    // 3. Só três chamadas de `conectar` levam credencial.
+    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
@@ -10756,16 +10824,56 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          a credencial de uma entrada que já a gastou:\n{reconectar}"
     );
 
-    // 4. Fechar a janela encerra o processo, e a memória da página vai junto.
+    // 4. Fechar a janela leva a memória da página junto.
+    //
+    // **Desde a tarefa 21 da F7, a saída do processo é segurada**, e só de um
+    // jeito: no `ExitRequested` com `code: None`, para as hospedagens se
+    // despedirem. O runtime manda esse evento do `Destroyed` da última janela,
+    // com ela já fora da lista (`tauri-runtime-wry` 2.11.4, `TaoWindowEvent::
+    // Destroyed`): a página já foi, e a credencial com ela. O que continua
+    // proibido é segurar a **janela** (`prevent_close`, `CloseRequested`), e
+    // segurar a saída de outro jeito, com a janela ainda aberta.
+    //
+    // **Para quem atualizar o Tauri:** a medida é do código do runtime, e não
+    // de documentação. Ela está em `tauri-runtime-wry/src/lib.rs`, no braço
+    // `TaoWindowEvent::Destroyed` do laço de eventos: a janela sai da lista e,
+    // com a lista vazia, sai o `RunEvent::ExitRequested { code: None }`. Com
+    // outra versão do `tauri-runtime-wry`, confira que o evento continua saindo
+    // dali, e só então troque a versão abaixo. Se ele passar a sair antes de a
+    // janela ser destruída, segurar a saída volta a manter a página viva.
+    const RUNTIME_MEDIDO: &str = "2.11.4";
+    let trava = std::fs::read_to_string(app_dir().join("../../Cargo.lock"))
+        .unwrap_or_else(|erro| panic!("o `Cargo.lock` tem de ser legível: {erro}"));
+    let runtime = trava
+        .split("name = \"tauri-runtime-wry\"\nversion = \"")
+        .nth(1)
+        .and_then(|resto| resto.split('"').next());
+    assert_eq!(
+        runtime,
+        Some(RUNTIME_MEDIDO),
+        "o `tauri-runtime-wry` mudou de versão, e a saída segurada com `code: None` foi \
+         medida na {RUNTIME_MEDIDO}. Reconfira no código do runtime que o `ExitRequested` \
+         com `code: None` ainda sai do `Destroyed` da última janela, com ela já fora da \
+         lista, e então troque `RUNTIME_MEDIDO`"
+    );
     let main = without_comments(&read("src/main.rs"));
-    for segura in ["prevent_exit", "prevent_close", "CloseRequested"] {
+    for segura in ["prevent_close", "CloseRequested"] {
         assert!(
             !main.contains(segura),
             "o `main.rs` passou a usar `{segura}`: fechar a janela pode não encerrar \
-             mais o processo, e a credencial da tentativa, que só existe na memória \
-             da página, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+             mais a página, e a credencial da tentativa, que só existe na memória \
+             dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
         );
     }
+    let compacto: String = main.split_whitespace().collect();
+    assert!(
+        compacto.matches("prevent_exit").count() <= 1
+            && (!compacto.contains("prevent_exit")
+                || compacto.contains("ExitRequested{code:None,api,..}=&evento{api.prevent_exit()")),
+        "o `main.rs` segura a saída de um jeito que não é o `ExitRequested` com `code: None`: \
+         uma saída pedida com a janela aberta, segurada, manteria a página viva, e a \
+         credencial da tentativa sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+    );
     // **E a página também não segura o fechar** (rodada 1, M2). O Tauri deixa
     // a janela vetar o próprio fechamento (`onCloseRequested` com
     // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois
@@ -10805,6 +10913,25 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                  que só existe na memória dela, sobreviveria ao fechar. Chame \
                  `fecharAceiteDeMods()` antes do `preventDefault`:\n{ouvinte}"
             );
+            // **E só segura com a sessão à vista** (lote W). `fecharAceiteDeMods()`
+            // esquece a credencial da pergunta dos MODs, e não a que um apelido
+            // tomado deixou (`recusaDoApelido`). Com a sessão à vista, essa já foi
+            // esquecida: `#tela-sessao` só aparece pela `#tela-auth`, depois de um
+            // `conectar` que entrou e a esqueceu na primeira linha (parte 6), e toda
+            // tentativa de dentro da sessão passa antes por `ejetar()`, que esconde
+            // a sessão. Um ouvinte que segure fora da sessão — na entrada, com a
+            // linha vermelha do apelido tomado — seguraria a página com ela dentro.
+            if let Some(segura) = segura {
+                let so_na_sessao = ouvinte.find("getElementById(\"tela-sessao\").hidden) return;");
+                assert!(
+                    so_na_sessao.is_some_and(|condicao| condicao < segura),
+                    "`{nome}` segura o `beforeunload` sem conferir antes que a sessão \
+                     está à vista: fora dela, a credencial que um apelido tomado deixou \
+                     (`recusaDoApelido`, em `tela-boot.js`) pode estar viva, e \
+                     `fecharAceiteDeMods()` não a esquece. Segure só com a sessão à \
+                     vista, ou esqueça as duas antes:\n{ouvinte}"
+                );
+            }
         }
         assert!(
             texto.matches("beforeunload").count() == texto.matches("\"beforeunload\"").count(),
@@ -10862,6 +10989,64 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             );
         }
     }
+
+    // 6. A do apelido tomado morre na tentativa seguinte, antes da primeira
+    //    espera (lote W). A lista da parte 1 prende as linhas, e não a ordem.
+    let conectar = without_comments(&js_function(
+        &read("ui/tela-boot.js"),
+        "async function conectar(",
+    ));
+    let esquece = conectar.find("recusaDoApelido = null;");
+    let espera = conectar.find("await ");
+    assert!(
+        esquece
+            .zip(espera)
+            .is_some_and(|(esquece, espera)| esquece < espera),
+        "`conectar` deixou de esquecer a credencial do apelido tomado antes da \
+         primeira espera: uma tentativa que entra, ou que vai a outro alvo, pode \
+         deixá-la para a próxima, e o convite de um servidor acaba mandado a \
+         outro ou gasto duas vezes.\n{conectar}"
+    );
+    // **E a recusa de uma tentativa mais velha não a guarda** (rodada 1, M1).
+    // Uma tentativa lenta recusada pelo apelido depois que outra começou — o
+    // `hospedar()` entrando no servidor daqui no meio dela — guardava a
+    // credencial para uma tentativa seguinte que já tinha acontecido.
+    let conta = conectar.find("const esta = ++tentativas;");
+    assert!(
+        conta
+            .zip(espera)
+            .is_some_and(|(conta, espera)| conta < espera),
+        "`conectar` deixou de contar a tentativa antes da primeira espera, e a \
+         recusa por apelido não tem como saber se ela ainda é a mais nova.\n{conectar}"
+    );
+    let guarda = conectar
+        .lines()
+        .find(|linha| linha.contains("recusaDoApelido = {"));
+    assert!(
+        guarda.is_some_and(|linha| linha.contains("esta === tentativas")),
+        "a recusa por apelido guarda a credencial sem conferir que a tentativa dela \
+         ainda é a mais nova ({guarda:?}): a recusa de uma tentativa lenta, chegando \
+         depois que outra entrou, deixa o convite na memória da janela durante a \
+         sessão inteira"
+    );
+    // **Nem abre a pergunta dos MODs com ela** (re-revisão da rodada 1, sonda
+    // P6). A mesma corrida, com a tentativa velha voltando `ModsNaoAceitos`:
+    // a pergunta abria por cima da sessão, com o convite dentro.
+    let pergunta = conectar
+        .lines()
+        .find(|linha| linha.contains("levarParaOAceiteDeMods("));
+    let conferida = pergunta.and_then(|linha| {
+        linha
+            .find("esta === tentativas")
+            .zip(linha.find("levarParaOAceiteDeMods("))
+    });
+    assert!(
+        conferida.is_some_and(|(confere, abre)| confere < abre),
+        "`conectar` leva a recusa pelos MODs à pergunta sem conferir antes que a \
+         tentativa ainda é a mais nova ({pergunta:?}): uma tentativa lenta, voltando \
+         depois que outra entrou, abre a pergunta por cima da sessão com o convite \
+         dentro"
+    );
 }
 
 #[test]
@@ -12045,6 +12230,22 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
          Lembrar o vazio, ou um recurso, faz o perfil parar de ser consultado \
          nas tentativas seguintes — e quem corrigir o nome no perfil vai vê-lo \
          gravado no disco sem nunca sair da máquina.\n{corpo}"
+    );
+
+    // **E esquece o que o servidor recusou** (lote W da F5). Um nome escolhido
+    // no perfil também era lembrado, e quando o servidor o recusava por ser de
+    // outra chave a pessoa o trocava no perfil e a tentativa seguinte mandava o
+    // recusado de novo — o mesmo relato de cima, com um nome que alguém
+    // escolheu. A `ajustes-v013.cjs` troca o apelido e confere o que sai.
+    let recusa = corpo
+        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\") {")
+        .and_then(|(_, depois)| depois.split_once('}'))
+        .map(|(bloco, _)| bloco);
+    assert!(
+        recusa.is_some_and(|bloco| bloco.contains("ultimoApelido = null;")),
+        "a casca deixou de esquecer o apelido que o servidor recusou por ser de \
+         outra chave: a pessoa troca o nome no perfil, como a frase manda, e a \
+         tentativa seguinte manda o recusado de novo.\n{corpo}"
     );
 }
 
@@ -14353,13 +14554,15 @@ fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
         "`base.js` voltou a construir um `Worker` direto, e o executor virou \
          dependência estrutural outra vez"
     );
-    // **E não há mais escolha para fazer.** O Worker de `blob:` foi reprovado
+    // **E a única escolha é a do lugar.** O Worker de `blob:` foi reprovado
     // por medição — ele herda a origem de quem o cria, e o que um MOD gravou
     // nela sobreviveu ao encerramento do aplicativo. Guardá-lo como reserva
-    // seria guardar, como reserva, exatamente o que não isola.
+    // seria guardar, como reserva, exatamente o que não isola. O
+    // `executorDoMod` escolhe entre o nativo (desktop) e o do navegador (o
+    // mesmo motor, num `iframe` opaco); `tests/web.rs` guarda a escolha.
     assert!(
-        base.contains("executorNativo(mod.id, geracao, mod.hash)"),
-        "`base.js` deixou de pedir o executor pelo nome: {base}"
+        base.contains("executorDoMod(mod.id, geracao, mod.hash)"),
+        "`base.js` deixou de pedir o executor ao `executorDoMod`: {base}"
     );
     for sumido in ["executorDeWorker", "PRELUDIO_DO_MOD", "executor_de_mods"] {
         assert!(
@@ -15376,7 +15579,8 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 ///
 /// **QA-02 do reteste de 17/09, e o defeito era do conserto entregue no mesmo
 /// dia.** `aplicar_mod` prendia o consentimento a `session.alvo` — e `alvo` é
-/// «onde voltar», preenchido **dentro** de `if !hospedado_aqui`, porque
+/// «onde voltar», preenchido **dentro** de `if !endereco_desta_maquina` (o
+/// antigo `hospedado_aqui`), porque
 /// `127.0.0.1` não entra na lista de atalhos. Num servidor hospedado aqui,
 /// que é exatamente o caso de quem liga um MOD, o campo estava vazio: o aceite
 /// não era gravado, e o diálogo que tinha acabado de prometer «você não vai ser
@@ -15404,7 +15608,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let conectar = body_of(&fonte, "async fn connect");
     let (Some(onde), Some(condicao)) = (
         conectar.find("session.endereco_da_sessao"),
-        conectar.find("if !hospedado_aqui"),
+        conectar.find("if !endereco_desta_maquina"),
     ) else {
         panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
     };
@@ -15413,6 +15617,40 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
         "o endereço da sessão é gravado **dentro** do filtro da lista de \
          visitados, então hospedar aqui volta a deixá-lo vazio — que é o \
          defeito inteiro"
+    );
+}
+
+/// **«Estou no meu servidor?» tem uma resposta só, e ela é o `onde_estou`**
+/// (Plano 2, spec de 23/09, «Hospedagens»).
+///
+/// Eram três critérios, cada um com a sua régua: o `hospedado_aqui` do
+/// `main.rs` (qualquer endereço desta máquina), o `hospedando` do
+/// `estado_da_porta` e o `nossoServidorEm` da tela de entrada. Com duas
+/// hospedagens no mesmo processo, o servidor guardado e a sala pessoal, nenhum
+/// dos três dizia em qual das duas a sessão está, e cada tela respondia do seu
+/// jeito.
+///
+/// Esta é a metade do `main.rs`. A da casca (`tela-sessao.js` e
+/// `tela-boot.js`) entra quando esses arquivos passarem a perguntar ao
+/// `onde_estou`, na vez da F7 neles.
+#[test]
+fn estou_no_meu_servidor_tem_uma_resposta_so() {
+    let app = without_comments(&read("src/main.rs"));
+    assert!(
+        !app.contains("hospedado_aqui"),
+        "o `hospedado_aqui` voltou ao `main.rs`: é a segunda resposta a «estou no \
+         meu servidor?», e ela não sabe qual das duas hospedagens é"
+    );
+    assert!(
+        app.contains("fn onde_estou(") && app.contains("onde_estou,"),
+        "o `onde_estou` sumiu, ou deixou de ser um comando da janela"
+    );
+    // A regra da lista de visitados é outra pergunta («este endereço é desta
+    // máquina?»), e ela usa a mesma leitura do endereço que o `onde_estou`.
+    let regra_da_lista = body_of(&app, "fn endereco_desta_maquina");
+    assert!(
+        regra_da_lista.contains("porta_desta_maquina("),
+        "a lista de visitados voltou a ler o endereço do jeito dela:\n{regra_da_lista}"
     );
 }
 
@@ -15490,7 +15728,8 @@ fn a_malha_tem_onde_ser_consentida_da_tela_ate_o_nucleo() {
 /// cano, é o que a sonda mediu, e ela parte de 2 Mbps enquanto não mediu nada.
 ///
 /// A semente por servidor existia e era chamada, mas **dentro** do ramo
-/// `if !hospedado_aqui(&alvo)` — o mesmo ramo que causou o QA-02. Quem hospeda
+/// `if !endereco_desta_maquina(&alvo)` (o antigo `hospedado_aqui`) — o mesmo
+/// ramo que causou o QA-02. Quem hospeda
 /// nunca a recebia, e os vinte e cinco segundos de subida que o comentário de
 /// `camada-compartilhar.js` mediu em campo se repetiam em toda transmissão.
 ///
@@ -15503,7 +15742,7 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
 
     let (Some(semente), Some(filtro)) = (
         conectar.find("lembrar_o_caminho"),
-        conectar.find("if !hospedado_aqui"),
+        conectar.find("if !endereco_desta_maquina"),
     ) else {
         panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
     };
@@ -15575,6 +15814,35 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
         obtem < entra,
         "o aceite entra antes de obter os pacotes: o convidado chega à sessão \
          sem o que o servidor exige e descobre pela cor que não mudou"
+    );
+
+    // **E o sim só é gravado depois da obtenção, conferida a pergunta**
+    // (lote W da F5, ADR 0045). Gravado antes, ele ficava valendo para quem
+    // desistia no meio da obtenção, e a entrada seguinte rodava o MOD sem
+    // perguntar. Depois da gravação, a mesma conferência de novo desfaz o sim
+    // de quem desistiu enquanto ele era gravado.
+    let Some(grava) = corpo.find("invoke(\"aceitar_mods\"") else {
+        panic!("`aceitarOsMods` não grava mais o sim:\n{corpo}");
+    };
+    let confere = corpo[obtem..]
+        .find("if (aceitePendente !== pergunta)")
+        .map(|depois| obtem + depois);
+    assert!(
+        obtem < grava && confere.is_some_and(|confere| confere < grava),
+        "`aceitarOsMods` grava o sim antes de obter o conjunto e de conferir que a \
+         pergunta continua aberta: quem desiste no meio da obtenção fica com o sim \
+         gravado, e a entrada seguinte neste servidor roda o MOD sem perguntar \
+         (ADR 0045)"
+    );
+    let depois_de_gravar = corpo.get(grava..).unwrap_or_default();
+    let desfaz = depois_de_gravar
+        .find("if (aceitePendente !== pergunta)")
+        .zip(depois_de_gravar.find("esquecer_aceite_de_mods"));
+    assert!(
+        desfaz.is_some_and(|(confere, esquece)| confere < esquece),
+        "`aceitarOsMods` deixou de desfazer o sim de quem desistiu enquanto ele era \
+         gravado: o «não» dado durante a gravação fica sem efeito, e o MOD roda na \
+         entrada seguinte (ADR 0045)"
     );
 
     let obter = camada
@@ -16246,14 +16514,135 @@ fn todo_ponto_de_contribuicao_anunciado_tem_quem_o_aplique() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
-    let orfaos: Vec<&String> = pontos
-        .iter()
-        .filter(|ponto| !aplicadores.contains(&format!("\"{ponto}\"")))
-        .collect();
+    // **Como primeiro argumento de uma chamada**, e não em qualquer lugar: a
+    // lista das regiões do retrato (`REGIOES_E_CAMADAS_DA_API`, tarefa 4) já
+    // escreve os oito nomes de região, e o texto sozinho passava para uma
+    // região sem aplicador nenhum (medido em 09/10, na tarefa 5). Quem aplica
+    // pergunta pelo ponto — `conteudoDasContribuicoes("…"`,
+    // `escolherSubstituicao(\n "…"` —, e uma lista o enumera.
+    let chamado = |ponto: &str| {
+        let alvo = format!("\"{ponto}\"");
+        aplicadores
+            .match_indices(&alvo)
+            .any(|(i, _)| aplicadores[..i].trim_end().ends_with('('))
+    };
+    let orfaos: Vec<&String> = pontos.iter().filter(|ponto| !chamado(ponto)).collect();
     assert!(
         orfaos.is_empty(),
         "estes pontos são anunciados pela API de MODs e nenhuma tela os aplica — \
          um MOD registra, recebe punho, e nada acontece: {orfaos:?}"
+    );
+}
+
+/// **Toda recusa do registro de contribuições tem nome** (rascunho da API 6,
+/// §7.1; tarefa 5 da F3, Step 7b).
+///
+/// O MOD da 6 recebe o nome, de lista fechada, e a frase vai ao `seele.log`.
+/// Uma recusa lançada com `new Error(...)` sem nome chega a ele como `falhou`
+/// — o produto sabendo por que recusou e não contando. E a lista é contrato:
+/// cada nome dela está no rascunho, onde quem escreve MOD a lê.
+#[test]
+fn toda_recusa_do_registro_de_contribuicoes_tem_nome() {
+    let registro = without_comments(&read("ui/mods-contribuicoes.js"));
+    assert!(
+        !registro.contains("throw new Error("),
+        "uma recusa do registro de contribuições voltou a nascer sem nome: o MOD da 6 a \
+         recebe como `falhou`"
+    );
+    let lista = registro
+        .split_once("const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([")
+        .and_then(|(_, resto)| resto.split_once("]);"))
+        .map(|(corpo, _)| corpo)
+        .expect("`RECUSAS_DAS_CONTRIBUICOES` em mods-contribuicoes.js");
+    let nomes: BTreeSet<String> = lista
+        .split(',')
+        .map(|nome| nome.trim().trim_matches('"').to_owned())
+        .filter(|nome| !nome.is_empty())
+        .collect();
+    assert!(
+        nomes.len() >= 8,
+        "só {} nomes lidos da lista: a leitura quebrou",
+        nomes.len()
+    );
+    for uso in registro.split("recusaNomeada(").skip(1) {
+        let Some(nome) = uso.trim_start().strip_prefix('"') else {
+            continue; // a própria definição: `recusaNomeada(nome, frase)`
+        };
+        let nome = nome.split('"').next().unwrap_or_default();
+        assert!(
+            nomes.contains(nome),
+            "«{nome}» é usado como recusa e não está em `RECUSAS_DAS_CONTRIBUICOES`"
+        );
+    }
+    let rascunho = read("../../docs/superpowers/specs/2026-10-08-api-6-rascunho.md");
+    for nome in &nomes {
+        assert!(
+            rascunho.contains(&format!("`{nome}`")),
+            "«{nome}» é uma recusa que o MOD da 6 recebe, e o rascunho §7.1 não a lista"
+        );
+    }
+}
+
+/// **Todo `perfil` da tabela de pontos é o orçamento com que o ponto monta.**
+///
+/// A tabela declarava `perfil` — «com que orçamento a declaração é montada» —
+/// e `montarContribuicao` montava tudo com `PERFIS_DE_RENDER.cartao`: o
+/// `superficie` de `pessoa.detalhes` nunca valeu, e um ponto novo podia
+/// declarar qualquer nome sem efeito nenhum (achado da tarefa 5 da F3,
+/// decidido pela orquestradora em 09/10). Um `perfil` que ninguém lê é a
+/// tabela dizendo uma coisa e a tela fazendo outra.
+#[test]
+fn o_perfil_de_cada_ponto_e_o_orcamento_com_que_ele_monta() {
+    let registro = read("ui/mods-contribuicoes.js");
+    let tabela = registro
+        .split_once("const PONTOS_DE_CONTRIBUICAO = Object.freeze({")
+        .expect("a tabela de pontos de contribuição")
+        .1
+        .split_once("});")
+        .expect("a tabela fecha")
+        .0;
+    let perfis: Vec<(String, String)> = tabela
+        .lines()
+        .filter_map(|linha| {
+            let resto = linha.trim().strip_prefix('"')?;
+            let (ponto, resto) = resto.split_once('"')?;
+            let perfil = resto.split_once("perfil: ")?.1;
+            let perfil = perfil.split([',', ' ', '}']).next()?.trim_matches('"');
+            Some((ponto.to_owned(), perfil.to_owned()))
+        })
+        .collect();
+    assert!(
+        perfis.len() >= 12,
+        "só {} pontos com `perfil` lidos da tabela: a leitura quebrou",
+        perfis.len()
+    );
+
+    let regiao = read("ui/mods-regiao.js");
+    let orcamentos = regiao
+        .split_once("const PERFIS_DE_RENDER = Object.freeze({")
+        .expect("`PERFIS_DE_RENDER` em mods-regiao.js")
+        .1;
+    for (ponto, perfil) in &perfis {
+        if perfil == "null" {
+            continue;
+        }
+        assert!(
+            orcamentos.contains(&format!("\n  {perfil}: Object.freeze({{")),
+            "«{ponto}» declara `perfil: \"{perfil}\"`, e `PERFIS_DE_RENDER` não tem esse orçamento"
+        );
+    }
+
+    let base = without_comments(&read("ui/base.js"));
+    let montar = js_function(&base, "function montarContribuicao(");
+    assert!(
+        montar.contains("PONTOS_DE_CONTRIBUICAO[")
+            && montar.contains(".perfil")
+            && montar.contains("PERFIS_DE_RENDER["),
+        "`montarContribuicao` deixou de montar com o `perfil` do ponto: {montar}"
+    );
+    assert!(
+        !montar.contains("PERFIS_DE_RENDER.cartao"),
+        "`montarContribuicao` voltou a montar todo ponto com o orçamento do cartão: {montar}"
     );
 }
 
@@ -16294,16 +16683,34 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
         .map(|nome| read(&format!("ui/{nome}")))
         .collect();
 
+    // **Pelo intermediário das listas** (tarefa 5): a navegação e a lista de
+    // pessoas substituídas são uma ordem, e quem a pede é `arranjoDe("ponto")`.
+    // Ele só conta se o corpo dele de fato consulta `escolherSubstituicao` — sem
+    // isto, a navegação passava por proximidade, porque o nome dela ficava a
+    // menos de 400 caracteres da chamada dentro de `arranjoDe` (medido).
+    // E `imagemContribuida("ponto", …)`, que pergunta pelas imagens de pessoa —
+    // o avatar e a capa (tarefa 6) —, pela mesma regra.
+    let intermediarios: Vec<&str> = ["arranjoDe", "imagemContribuida"]
+        .into_iter()
+        .filter(|nome| {
+            js_function(&telas, &format!("function {nome}(")).contains("escolherSubstituicao(")
+        })
+        .collect();
     for ponto in &substituiveis {
-        let citado = telas
-            .match_indices(&format!("\"{ponto}\""))
-            .any(|(onde, _)| {
-                // A chamada e o nome do ponto na mesma vizinhança: a consulta é
-                // escrita em várias linhas, com o alvo e o preferido entre elas.
-                let inicio = onde.saturating_sub(400);
-                let fim = (onde + 400).min(telas.len());
-                telas[inicio..fim].contains("escolherSubstituicao")
-            });
+        let pelo_intermediario = intermediarios.iter().any(|nome| {
+            telas.contains(&format!("{nome}(\"{ponto}\")"))
+                || telas.contains(&format!("{nome}(\"{ponto}\","))
+        });
+        let citado = pelo_intermediario
+            || telas
+                .match_indices(&format!("\"{ponto}\""))
+                .any(|(onde, _)| {
+                    // A chamada e o nome do ponto na mesma vizinhança: a consulta é
+                    // escrita em várias linhas, com o alvo e o preferido entre elas.
+                    let inicio = onde.saturating_sub(400);
+                    let fim = (onde + 400).min(telas.len());
+                    telas[inicio..fim].contains("escolherSubstituicao")
+                });
         assert!(
             citado,
             "«{ponto}» anuncia o modo `substituir` e nenhuma tela chama \
@@ -17910,5 +18317,285 @@ fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
         eventos >= 20,
         "o guarda achou só {eventos} `falar({{ … }})`: a forma dos eventos mudou, e ele \
          deixou de olhar para eles"
+    );
+}
+
+/// As chaves de topo de um objeto literal de JS, na ordem em que aparecem, e se
+/// a leitura chegou à `}` que o fecha.
+///
+/// `corpo` começa logo depois da `{` que abre o objeto. Cadeias, modelos (com
+/// `${…}` dentro), comentários e chaves aninhadas são pulados; uma chave é o
+/// nome, a cadeia ou o número que abre uma entrada de topo — depois da `{` ou
+/// de uma vírgula de topo. O `false` do fim diz que a leitura se perdeu antes
+/// de fechar o objeto, e quem chama reprova em vez de confiar numa lista curta.
+fn chaves_de_topo(corpo: &str) -> (Vec<String>, bool) {
+    let c: Vec<char> = corpo.chars().collect();
+    let fim_da_cadeia = |de: usize| {
+        let aspa = c[de];
+        let mut i = de + 1;
+        while i < c.len() && c[i] != aspa {
+            i += if c[i] == '\\' { 2 } else { 1 };
+        }
+        i
+    };
+    let nome = |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '$';
+    let mut chaves = Vec::new();
+    // `{`, `[`, `(`, `` ` `` (dentro de um modelo) e `$` (dentro de um `${…}`).
+    let mut pilha: Vec<char> = Vec::new();
+    let mut espera_chave = true;
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if pilha.last() == Some(&'`') {
+            match ch {
+                '\\' => i += 2,
+                '`' => {
+                    pilha.pop();
+                    i += 1;
+                }
+                '$' if c.get(i + 1) == Some(&'{') => {
+                    pilha.push('$');
+                    i += 2;
+                }
+                _ => i += 1,
+            }
+            continue;
+        }
+        match ch {
+            '/' if c.get(i + 1) == Some(&'/') => {
+                while i < c.len() && c[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if c.get(i + 1) == Some(&'*') => {
+                i += 2;
+                while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            '"' | '\'' => {
+                let fim = fim_da_cadeia(i);
+                if pilha.is_empty() && espera_chave {
+                    chaves.push(c[i + 1..fim.min(c.len())].iter().collect());
+                    espera_chave = false;
+                }
+                i = fim + 1;
+            }
+            '`' | '{' | '[' | '(' => {
+                pilha.push(ch);
+                espera_chave = false;
+                i += 1;
+            }
+            '}' | ']' | ')' => {
+                if pilha.pop().is_none() {
+                    return (chaves, true);
+                }
+                i += 1;
+            }
+            ',' if pilha.is_empty() => {
+                espera_chave = true;
+                i += 1;
+            }
+            _ if pilha.is_empty() && espera_chave && nome(ch) => {
+                let inicio = i;
+                while i < c.len() && nome(c[i]) {
+                    i += 1;
+                }
+                chaves.push(c[inicio..i].iter().collect());
+                espera_chave = false;
+            }
+            _ => {
+                // Um `...` de topo espalha outro objeto: o nome que vem depois
+                // dele não é chave desta tabela.
+                if pilha.is_empty() && ch == '.' {
+                    espera_chave = false;
+                }
+                i += 1;
+            }
+        }
+    }
+    (chaves, false)
+}
+
+/// **Nenhuma tabela constante da `ui/` repete uma chave.**
+///
+/// Lote W da F5. Num objeto literal de JS, a segunda chave com o mesmo nome
+/// substitui a primeira **calada**: nem o navegador, nem o `node --check`, nem
+/// guarda nenhum desta suíte dizia nada. `GLIFOS` tinha `chave` e `aparencia`
+/// duas vezes cada, porque dois commits da 0.9.0 redesenharam glifos que já
+/// estavam na tabela; os desenhos eram iguais, e por isso a tela não mudou — no
+/// dia em que alguém corrigisse um dos dois, seria o de baixo que valeria, e o
+/// de cima ficaria mentindo sobre o que a tela mostra. Uma frase repetida em
+/// `FRASES` é a mesma armadilha com texto.
+///
+/// Cobra **toda** `const` de topo em caixa alta cuja linha termina abrindo um
+/// objeto literal — `= {` ou `= Object.freeze({` (rodada 1, M4: as congeladas,
+/// como `CAPACIDADES_POR_API`, ficavam de fora) —, em todo script da `ui/`: as
+/// tabelas de frases e de glifos são escritas assim, e uma tabela nova nasce
+/// coberta.
+///
+/// **O que fica de fora**, dito para o guarda não prometer mais do que cobre:
+///
+/// - as chaves **dentro** de uma entrada aninhada: só as de topo de cada tabela
+///   são comparadas entre si;
+/// - a tabela escrita numa linha só (`const X = { a: 1 };`), e a que não abre
+///   um objeto literal na linha da `const` — uma lista (`Object.freeze([`), ou
+///   uma tabela montada por outra expressão;
+/// - os objetos de estado (`estadoDosContornos`, `escolhidoDe`…), escritos em
+///   caixa baixa e mudados em tempo de execução.
+#[test]
+fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
+    let mut tabelas: Vec<(String, String, usize)> = Vec::new();
+    let mut repetidas: Vec<String> = Vec::new();
+    for arquivo in ui_files(".js") {
+        let texto = read(&format!("ui/{arquivo}"));
+        let mut onde = 0;
+        for linha in texto.split_inclusive('\n') {
+            let comeco = onde;
+            onde += linha.len();
+            let Some(resto) = linha.strip_prefix("const ") else {
+                continue;
+            };
+            let Some((nome, depois)) = resto.split_once(" = ") else {
+                continue;
+            };
+            let tabela = !nome.is_empty()
+                && nome
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if !tabela || !["{", "Object.freeze({"].contains(&depois.trim_end()) {
+                continue;
+            }
+            let corpo = texto.get(comeco + linha.len()..).unwrap_or_default();
+            let (chaves, fechou) = chaves_de_topo(corpo);
+            assert!(
+                fechou && !chaves.is_empty(),
+                "este guarda se perdeu em `{nome}` (`{arquivo}`): leu {} chaves e {}. \
+                 A tabela ganhou uma forma que a leitura não conhece, e o guarda ficou \
+                 cego para ela",
+                chaves.len(),
+                if fechou {
+                    "chegou ao fim"
+                } else {
+                    "não achou a `}` que a fecha"
+                }
+            );
+            let mut vistas: Vec<&String> = Vec::new();
+            for chave in &chaves {
+                if vistas.contains(&chave) {
+                    let vezes = chaves.iter().filter(|outra| *outra == chave).count();
+                    let achado = format!("{arquivo}: {nome}.{chave} ({vezes} vezes)");
+                    if !repetidas.contains(&achado) {
+                        repetidas.push(achado);
+                    }
+                }
+                vistas.push(chave);
+            }
+            tabelas.push((arquivo.clone(), nome.to_owned(), chaves.len()));
+        }
+    }
+
+    // Contra a cegueira: as seis tabelas que o lote nomeou estão entre as
+    // lidas, e as duas maiores com um número de chaves que só a leitura inteira
+    // alcança. E uma congelada, para a forma `Object.freeze({` não sumir calada.
+    for (dono, nome, minimo) in [
+        ("base.js", "CAPACIDADES_POR_API", 4),
+        ("glifos.js", "GLIFOS", 20),
+        ("frases.js", "MOTIVOS", 5),
+        ("frases.js", "AVISOS", 3),
+        ("frases.js", "ETAPAS", 3),
+        ("frases.js", "MOTIVOS_DE_REVOGACAO", 1),
+        ("frases.js", "FRASES", 30),
+    ] {
+        assert!(
+            tabelas
+                .iter()
+                .any(|(arquivo, lida, quantas)| arquivo == dono
+                    && lida == nome
+                    && *quantas >= minimo),
+            "este guarda não leu `{nome}` em `{dono}` com pelo menos {minimo} chaves: a \
+             tabela mudou de forma ou de lugar, e ele deixou de olhar para ela. Lidas: \
+             {tabelas:?}"
+        );
+    }
+
+    assert!(
+        repetidas.is_empty(),
+        "uma tabela constante da `ui/` repete chave, e a segunda substitui a primeira \
+         calada — o que está escrito em cima não é o que a tela mostra:\n  {}\n\
+         Tire a repetida; se as duas dizem coisas diferentes, decida qual vale.",
+        repetidas.join("\n  ")
+    );
+}
+
+#[test]
+fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
+    // A P12 do plano F1b. O servidor conta as mensagens de um vocabulário mais
+    // novo que ele pulou (`Hospedagem::estado`), e só o `seele.log` dizia: o
+    // produto sabia e não contava. A janela que hospeda passa a mostrar o
+    // número na seção ESTE SERVIDOR, com o remédio junto.
+    //
+    // Três coisas são presas aqui, porque cada uma é uma forma de a linha
+    // voltar a calar sem nenhum teste de Rust perceber.
+    let frases = without_comments(&read("ui/frases.js"));
+    let Some(corpo) = frases
+        .split("function fraseDasMensagensDeAppsMaisNovos(")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`fraseDasMensagensDeAppsMaisNovos` sumiu de ui/frases.js");
+    };
+    // 1. **O zero é dito.** Uma linha que só aparece quando há problema deixa
+    //    quem hospeda sem saber se o número existe.
+    assert!(
+        corpo.contains(": 0`"),
+        "a frase não diz o zero, e a linha passa a existir só quando há problema: {corpo}"
+    );
+    assert!(
+        !corpo.contains("return \"\"") && !corpo.contains("return null"),
+        "a frase pode sair vazia, e a linha some calada: {corpo}"
+    );
+    // 2. **O remédio vai junto**, e sem o vocabulário que não é de pessoas.
+    assert!(
+        corpo.contains("atualizar o SEELE daqui resolve"),
+        "a frase diz o número e não diz o que fazer: {corpo}"
+    );
+    for termo in ["linha", "protocolo"] {
+        assert!(
+            !corpo.to_lowercase().contains(termo),
+            "a frase diz «{termo}», que não é palavra de pessoas: {corpo}"
+        );
+    }
+
+    // 3. **Só a janela que não hospeda esconde a linha**: o número, por menor
+    //    que seja, nunca a esconde.
+    let tela = without_comments(&read("ui/tela-server.js"));
+    let Some(desenho) = tela
+        .split("async function desenharEstadoDoServidor()")
+        .nth(1)
+        .and_then(|resto| resto.split("\n}").next())
+    else {
+        panic!("`desenharEstadoDoServidor` sumiu de ui/tela-server.js");
+    };
+    assert!(
+        desenho.contains("invoke(\"estado_do_servidor\")"),
+        "a linha não pergunta ao comando do servidor: {desenho}"
+    );
+    let escondes: Vec<&str> = desenho
+        .lines()
+        .filter(|linha| linha.contains(".hidden ="))
+        .collect();
+    assert!(
+        !escondes.is_empty()
+            && escondes
+                .iter()
+                .all(|linha| linha.contains("hospedando") && !linha.contains("mensagens")),
+        "a linha é escondida por outra coisa que não «esta janela não hospeda»: {escondes:?}"
+    );
+    let main = read("src/main.rs");
+    assert!(
+        main.contains("fn estado_do_servidor(") && main.contains("estado_do_servidor,"),
+        "o comando `estado_do_servidor` não existe ou não está registrado"
     );
 }

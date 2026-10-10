@@ -1010,6 +1010,7 @@ async function atualizarServer() {
   desenharModos(snapshot, gravado);
   desenharIdentidade(snapshot);
   desenharServidor(snapshot);
+  await desenharEstadoDoServidor();
   const grupoServidor = document.querySelector('[aria-labelledby="server-grupo-servidor"]');
   const temDestino = Array.from(grupoServidor?.children ?? []).some(item => !item.hidden);
   if (grupoServidor) grupoServidor.hidden = !temDestino;
@@ -1159,6 +1160,65 @@ function desenharServidor(snapshot) {
 
   const campo = $("server-nome-valor");
   if (document.activeElement !== campo) campo.value = snapshot.server ?? "";
+}
+
+/** O bloco da linha, criado na primeira volta e guardado aqui, sem id. */
+const appsMaisNovos = { bloco: null, corpo: null, texto: null };
+
+/**
+ * As mensagens de apps mais novos que o servidor desta janela pulou (a P12).
+ *
+ * **Só na janela que hospeda**: `estado_do_servidor` responde
+ * `hospedando: false` em qualquer outra, e aí a linha some, porque não há
+ * servidor de que falar. Na que hospeda ela fica **sempre à vista**, com o
+ * zero dito — nunca escondida por o número ser zero.
+ *
+ * A linha nasce aqui, dentro do `#painel-servidor`, e não no `index.html`:
+ * é um bloco só, e o resto do painel continua sendo do HTML.
+ */
+async function desenharEstadoDoServidor() {
+  let estado = null;
+  try {
+    estado = await invoke("estado_do_servidor");
+  } catch (falha) {
+    console.warn("estado_do_servidor:", falha);
+  }
+  if (!appsMaisNovos.bloco) {
+    const bloco = document.createElement("div");
+    bloco.className = "server-bloco";
+    const topo = document.createElement("div");
+    topo.className = "server-bloco-topo";
+    const nome = document.createElement("h3");
+    nome.className = "server-bloco-nome";
+    nome.textContent = "VERSÕES DE QUEM ENTRA";
+    topo.append(nome);
+    // No corpo, como os outros blocos do painel: direto no bloco, a frase
+    // encostava na borda (1 px, medido no roteiro `apps-mais-novos.js`).
+    const corpo = document.createElement("div");
+    corpo.className = "server-bloco-corpo";
+    bloco.append(topo, corpo);
+    $("painel-servidor").append(bloco);
+    appsMaisNovos.bloco = bloco;
+    appsMaisNovos.corpo = corpo;
+  }
+  appsMaisNovos.bloco.hidden = estado?.hospedando !== true;
+  if (appsMaisNovos.bloco.hidden) return;
+  const texto = fraseDasMensagensDeAppsMaisNovos(
+    estado.mensagens_desconhecidas,
+    estado.sessoes_com_desconhecidas,
+  );
+  // A cada meio segundo chega a mesma frase; reescrever o corpo sem mudança
+  // desfaria uma seleção de texto no meio.
+  if (texto === appsMaisNovos.texto) return;
+  appsMaisNovos.texto = texto;
+  // **Um parágrafo por linha da frase.** O número numa, o que fazer na outra:
+  // `.nota` reflui a quebra num espaço, e as duas partes saíam coladas.
+  appsMaisNovos.corpo.replaceChildren(...texto.split("\n").map((parte) => {
+    const paragrafo = document.createElement("p");
+    paragrafo.className = "nota";
+    paragrafo.textContent = parte;
+    return paragrafo;
+  }));
 }
 
 /**
