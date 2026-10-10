@@ -46,5 +46,5 @@ pub mod toque;
 /// lá o navegador os compila. Reexportados aqui, quem os chamava pelo
 /// `seele_audio` não mudou.
 pub use seele_voz::{
-    gate, jitter, mixer, netsim, relogio, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ,
+    fontes, gate, jitter, mixer, netsim, relogio, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ,
 };

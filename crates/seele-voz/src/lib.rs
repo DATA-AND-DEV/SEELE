@@ -1,6 +1,6 @@
 //! O caminho da voz que não toca em nada: o portão, o buffer de jitter, o
-//! mixer, o relógio de mídia e o simulador de rede dos testes, com as três
-//! constantes do quadro.
+//! mixer, o relógio de mídia, a tabela de quem fala e o simulador de rede dos
+//! testes, com as três constantes do quadro.
 //!
 //! # Por que um crate à parte
 //!
@@ -16,6 +16,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod fontes;
 pub mod gate;
 pub mod jitter;
 pub mod mixer;

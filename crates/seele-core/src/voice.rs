@@ -27,6 +27,7 @@ use anyhow::Result;
 use seele_audio::codec::{VoiceDecoder, VoiceEncoder, DEFAULT_BITRATE_BPS};
 use seele_audio::device::{self, AudioIo};
 use seele_audio::drift::DriftTracker;
+use seele_audio::fontes::TabelaDeFontes;
 use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
 use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
@@ -1506,39 +1507,13 @@ impl Drop for Voice {
     }
 }
 
-/// One talker being decoded.
+/// One talker being decoded. Quem é (o SSRC) e quando chegou o último quadro
+/// dele moram na [`TabelaDeFontes`], que é quem o cria e o esquece.
 struct Source {
-    ssrc: u32,
     buffer: JitterBuffer<Vec<u8>>,
     drift: DriftTracker,
     decoder: VoiceDecoder,
-    /// Quando chegou o último quadro desta pessoa, no relógio deste laço.
-    ///
-    /// Serve para esquecê-la depois de [`SILENCIO_ATE_ESQUECER_MS`]. Ver ali
-    /// por que esquecer é o certo.
-    ultimo_ms: f64,
 }
-
-/// Quanto silêncio faz uma pessoa ser esquecida por quem escuta.
-///
-/// # Por que esquecer alguém é bom
-///
-/// A tabela de quem fala era um `Vec` que só crescia: uma pessoa que entrou,
-/// falou e saiu ficava lá com um decodificador e um buffer inteiros até a
-/// sessão acabar. Isso era só desperdício.
-///
-/// O que **não** era desperdício é a segunda metade: um buffer velho guarda até
-/// onde aquela pessoa já tocou, e recusa qualquer carimbo anterior a isso. Se o
-/// relógio dela recomeçar por qualquer motivo — o conserto de
-/// `Controls::relogio_seq` cobre o motivo conhecido, e nada garante que era o
-/// único —, a pessoa some para sempre e nem sair e voltar resolve. Esquecê-la
-/// depois de meio minuto calado transforma «para sempre» em «meio minuto».
-///
-/// Meio minuto e não cinco segundos porque o silêncio aqui é normal: o DTX não
-/// manda nada enquanto ninguém fala, então uma pessoa quieta numa reunião fica
-/// sem mandar um quadro por minutos a fio. O preço de esquecer é o buffer
-/// encher de novo na primeira palavra — algumas dezenas de milissegundos.
-const SILENCIO_ATE_ESQUECER_MS: f64 = 30_000.0;
 
 /// Quem reabre os aparelhos por conta do laço.
 ///
@@ -1886,7 +1861,7 @@ async fn pipeline(
     let mut a_transmitir: Vec<Vec<f32>> = Vec::new();
     let mut supressao_avisada = false;
     let mut mixer = Mixer::new();
-    let mut sources: Vec<Source> = Vec::new();
+    let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(ssrc.get());
     // O decodificador do som da tela, à parte dos das pessoas.
     //
     // À parte porque a fonte é outra: a voz de cada um chega por datagrama, com
@@ -1967,39 +1942,28 @@ async fn pipeline(
             let Ok((header, payload)) = MediaHeader::decode(&bytes) else {
                 continue;
             };
-            // Our own audio coming back is not something to play.
-            if header.ssrc == ssrc.get() {
+            // A própria voz voltando não é de ninguém para tocar, e uma fonte
+            // nova só entra se o decodificador dela abrir: ver
+            // `TabelaDeFontes::chegou`.
+            let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {
+                VoiceDecoder::new().ok().map(|decoder| Source {
+                    buffer: JitterBuffer::new(JitterConfig::default()),
+                    drift: DriftTracker::new(),
+                    decoder,
+                })
+            }) else {
                 continue;
-            }
-            let index = match sources.iter().position(|s| s.ssrc == header.ssrc) {
-                Some(index) => index,
-                None => {
-                    let Ok(decoder) = VoiceDecoder::new() else {
-                        continue;
-                    };
-                    sources.push(Source {
-                        ssrc: header.ssrc,
-                        buffer: JitterBuffer::new(JitterConfig::default()),
-                        drift: DriftTracker::new(),
-                        decoder,
-                        ultimo_ms: arrival_ms,
-                    });
-                    sources.len() - 1
-                }
             };
-            if let Some(source) = sources.get_mut(index) {
-                source.ultimo_ms = arrival_ms;
-                let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
-                source.drift.observe(arrival_ms - sent_ms, arrival_ms);
-                source
-                    .buffer
-                    .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
-            }
+            let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
+            source.drift.observe(arrival_ms - sent_ms, arrival_ms);
+            source
+                .buffer
+                .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
         }
 
         // Quem calou faz meio minuto é esquecido. Ver `SILENCIO_ATE_ESQUECER_MS`.
         let agora_ms = started.elapsed().as_secs_f64() * 1000.0;
-        sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);
+        sources.esquecer_caladas(agora_ms);
 
         // ---- capture, encode, send ----
         gate.set_mode(VoiceMode::from_byte(controls.mode.load(Ordering::Relaxed)).to_gate());
@@ -2232,14 +2196,14 @@ async fn pipeline(
 
             for _ in 0..vencidos {
                 let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
-                for source in &mut sources {
+                for (de_quem, source) in sources.iter_mut() {
                     let samples = match source.buffer.tick() {
                         Decision::Play(payload) => source.decoder.decode(&payload).ok(),
                         Decision::Conceal => source.decoder.conceal().ok(),
                         Decision::Silence | Decision::Comfort | Decision::Starved => None,
                     };
                     if let Some(samples) = samples {
-                        decoded.push((source.ssrc, samples));
+                        decoded.push((de_quem, samples));
                     }
                 }
                 // O som da tela, como mais uma fonte da mistura.
@@ -2340,7 +2304,9 @@ async fn pipeline(
                 .with_silencio_digital(silencio.marcado()),
                 sources: sources
                     .iter()
-                    .map(|source| SourceTelemetry::assemble(source.ssrc, source.buffer.metrics()))
+                    .map(|(de_quem, source)| {
+                        SourceTelemetry::assemble(de_quem, source.buffer.metrics())
+                    })
                     .collect(),
             };
             if let Ok(mut slot) = telemetry.lock() {
@@ -2604,7 +2570,7 @@ mod fontes_gravadas {
     //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando a
     //! tabela sair do laço: muda só quem produz.
 
-    use super::SILENCIO_ATE_ESQUECER_MS;
+    use super::TabelaDeFontes;
 
     const EU: u32 = 5;
     const ANA: u32 = 7;
@@ -2622,46 +2588,22 @@ mod fontes_gravadas {
     /// Depois de cada evento, quem está na tabela, em ordem; e, no fim, quem
     /// foi criado, em ordem.
     ///
-    /// As instruções da tabela do `pipeline`, na ordem dele. O decodificador
-    /// de `SEM_DECODIFICADOR` não abre.
+    /// A [`TabelaDeFontes`] sozinha, chamada como o `pipeline` a chama. O
+    /// decodificador de `SEM_DECODIFICADOR` não abre.
     fn produzir(eventos: &[Evento]) -> (Vec<Vec<u32>>, Vec<u32>) {
-        struct Source {
-            ssrc: u32,
-            ultimo_ms: f64,
-        }
-        let ssrc = EU;
-        let mut sources: Vec<Source> = Vec::new();
+        let mut tabela: TabelaDeFontes<()> = TabelaDeFontes::nova(EU);
         let mut criadas = Vec::new();
         let mut depois = Vec::new();
         for evento in eventos {
             match *evento {
-                Evento::Chega(chegou, arrival_ms) => 'chegada: {
-                    if chegou == ssrc {
-                        break 'chegada;
-                    }
-                    let index = match sources.iter().position(|s| s.ssrc == chegou) {
-                        Some(index) => index,
-                        None => {
-                            if chegou == SEM_DECODIFICADOR {
-                                break 'chegada;
-                            }
-                            criadas.push(chegou);
-                            sources.push(Source {
-                                ssrc: chegou,
-                                ultimo_ms: arrival_ms,
-                            });
-                            sources.len() - 1
-                        }
-                    };
-                    if let Some(source) = sources.get_mut(index) {
-                        source.ultimo_ms = arrival_ms;
-                    }
+                Evento::Chega(chegou, arrival_ms) => {
+                    let _ = tabela.chegou(chegou, arrival_ms, || {
+                        (chegou != SEM_DECODIFICADOR).then(|| criadas.push(chegou))
+                    });
                 }
-                Evento::Limpa(agora_ms) => {
-                    sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);
-                }
+                Evento::Limpa(agora_ms) => tabela.esquecer_caladas(agora_ms),
             }
-            depois.push(sources.iter().map(|fonte| fonte.ssrc).collect());
+            depois.push(tabela.iter().map(|(ssrc, ())| ssrc).collect());
         }
         (depois, criadas)
     }
@@ -2704,10 +2646,11 @@ mod fontes_gravadas {
         assert_eq!(criadas, [ANA, BIA, BIA], "as fontes criadas mudaram");
     }
 
-    /// **A réplica é o laço de hoje.** Cada instrução da tabela que
-    /// [`produzir`] repete está no `pipeline`, com o mesmo texto.
+    /// **O laço usa a tabela, e não faz conta própria.** Uma conta de quem fala
+    /// que voltasse ao `pipeline` seria a segunda implementação que o ADR 0057
+    /// proíbe (o navegador usa a mesma tabela).
     #[test]
-    fn a_replica_e_o_laco_de_hoje() {
+    fn o_laco_usa_a_tabela_e_nao_faz_conta_propria() {
         let fonte = include_str!("voice.rs");
         let laco = fonte
             .split_once("\nasync fn pipeline(")
@@ -2716,17 +2659,25 @@ mod fontes_gravadas {
             .split_once("\n}\n")
             .expect("o fim do `pipeline`")
             .0;
-        for instrucao in [
-            "if header.ssrc == ssrc.get() {",
-            "let index = match sources.iter().position(|s| s.ssrc == header.ssrc) {",
-            "let Ok(decoder) = VoiceDecoder::new() else {",
-            "sources.len() - 1",
-            "source.ultimo_ms = arrival_ms;",
-            "sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);",
+        for exigido in [
+            "let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(ssrc.get());",
+            "let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {",
+            "sources.esquecer_caladas(agora_ms);",
         ] {
             assert!(
-                laco.contains(instrucao),
-                "o `pipeline` não tem mais `{instrucao}`"
+                laco.contains(exigido),
+                "o `pipeline` não tem mais `{exigido}`"
+            );
+        }
+        for proibido in [
+            "header.ssrc == ssrc.get()",
+            ".position(|s| s.ssrc",
+            "sources.retain(",
+            "ultimo_ms",
+        ] {
+            assert!(
+                !laco.contains(proibido),
+                "o `pipeline` voltou a fazer conta de quem fala: `{proibido}`"
             );
         }
     }
