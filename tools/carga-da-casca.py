@@ -37,12 +37,14 @@ Uso:
 """
 
 import argparse
+import json
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
@@ -378,7 +380,11 @@ PE_DO_ROTEIRO = """
   } catch (erro) {
     if (!(erro && erro.reprovado)) relatar("ROTEIRO ESTOUROU: " + erro);
   }
-  console.log("SEELE-RELATO " + window.__SEELE_RELATO.join(" | "));
+  // **Codificado, para atravessar o registro do navegador inteiro.** O Chromium
+  // escreve a linha entre aspas duplas e não escapa as de dentro, e o aparelho
+  // lia até a primeira: uma aspa num relato **antes** de um `exigir` que
+  // reprovava escondia o REPROVADO, e a carga saía limpa (medido no lote RT).
+  console.log("SEELE-RELATO " + encodeURIComponent(JSON.stringify(window.__SEELE_RELATO)));
   console.log("SEELE-SEM-RESPOSTA " + [...window.__SEELE_SEM_RESPOSTA].sort().join(" "));
 }, 800);
 </script>
@@ -458,8 +464,12 @@ def main() -> int:
     # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
     # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
     estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
-    relatos = re.findall(r"SEELE-RELATO ([^\"]*)", tudo)
-    partes = [parte for linha in relatos for parte in linha.split(" | ")]
+    # Cada relato é a lista que o roteiro relatou, em JSON e codificada para URL
+    # (ver `PE_DO_ROTEIRO`): o código não tem aspa nem espaço, e o que o roteiro
+    # escreveu volta inteiro, com aspas, quebras e « | » dentro.
+    relatos = [json.loads(urllib.parse.unquote(codigo))
+               for codigo in re.findall(r"SEELE-RELATO ([^\s\"]*)", tudo)]
+    partes = [parte for relato in relatos for parte in relato]
     sem_resposta = sorted({c for linha in re.findall(r"SEELE-SEM-RESPOSTA ([^\"]*)", tudo)
                            for c in linha.split()})
     # Um roteiro que reprovou, que estourou no meio, ou que nem chegou ao fim
