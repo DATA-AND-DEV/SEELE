@@ -526,6 +526,9 @@ function desenhar(snapshot) {
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
   desenharAberturaDoAudio(snapshot);
+  // O palco dos MODs sobre a chamada, também com a chamada escondida: sair da
+  // sala o desmonta, e é este desenho que vê a sala mudar (`tela-chamada.js`).
+  if (typeof desenharOPalcoDosMods === "function") desenharOPalcoDosMods(snapshot);
 
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que
@@ -881,6 +884,27 @@ const TETO_DO_TITULO_DE_GRUPO = 64;
  *
  * O título do grupo é texto do MOD, e por isso `textContent`, cortado.
  */
+/**
+ * **Quantos identificadores dos grupos de `arranjo` nenhuma linha usa**: os
+ * que não estão em `ids`, e os repetidos (tarefa 5, Step 5). É o que
+ * `emGrupos` deixa de fora calado, contado contra **todos** os identificadores
+ * da lista: a lista de pessoas é ordenada seção a seção, e quem está noutra
+ * seção não é ignorado.
+ */
+function quantosIgnorados(arranjo, ids) {
+  if (!arranjo || !Array.isArray(arranjo.grupos)) return 0;
+  const existem = new Set([...ids].map(String));
+  const vistos = new Set();
+  let ignorados = 0;
+  for (const grupo of arranjo.grupos.slice(0, TETO_DE_GRUPOS)) {
+    for (const id of (Array.isArray(grupo?.ids) ? grupo.ids : []).map(String)) {
+      if (!existem.has(id) || vistos.has(id)) ignorados += 1;
+      vistos.add(id);
+    }
+  }
+  return ignorados;
+}
+
 function emGrupos(linhas, dados, arranjo, tituloDosOutros, classe = "canais-grupo") {
   if (!arranjo || !Array.isArray(arranjo.grupos)) return linhas;
   const porId = new Map(dados.map((dado, i) => [String(dado.id), linhas[i]]));
@@ -1018,6 +1042,11 @@ function desenharCanais(snapshot) {
   // **`servidor.navegacao` substituído** (rascunho §3, tarefa 5): o MOD dá a
   // ordem e os grupos de cada lista, e as linhas são as de cima, do produto.
   const arranjo = arranjoDaNavegacao();
+  identificadoresIgnorados.set(
+    "servidor.navegacao",
+    quantosIgnorados(arranjo?.salas, snapshot.voice_rooms.map((sala) => sala.id))
+      + quantosIgnorados(arranjo?.canais, snapshot.channels.map((canal) => canal.id)),
+  );
   repovoar(
     $("lista-voice_rooms"),
     emGrupos(voice_rooms, snapshot.voice_rooms, arranjo?.salas, "OUTRAS SALAS"),
@@ -2118,6 +2147,11 @@ function desenharPessoas(snapshot) {
   // reorganiza (decisão da orquestradora, 09/10).
   aplicarARegiao("pessoas.lista", $("roster-mods"));
   const arranjo = arranjoDe("pessoas.lista");
+  // Contra todos, nas salas e fora delas: cada seção é ordenada à parte.
+  identificadoresIgnorados.set("pessoas.lista", quantosIgnorados(arranjo, new Set([
+    ...snapshot.presentes.map((pessoa) => pessoa.id),
+    ...snapshot.voice_rooms.flatMap((sala) => sala.people.map((pessoa) => pessoa.id)),
+  ])));
   const ordenar = (linhas, pessoas) => emGrupos(linhas, pessoas, arranjo, "OUTRAS PESSOAS", "roster-subgrupo");
 
   const grupos = snapshot.voice_rooms
@@ -4197,8 +4231,16 @@ function esquecerOEstadoDaSessao() {
   mensagensPorDesenhar = false;
 }
 
-/** Ejeta e volta para a tela de entrada, sem fechar o programa. */
-async function ejetar() {
+/**
+ * Ejeta e volta para a tela de entrada, sem fechar o programa.
+ *
+ * `soOCliente` desmonta só a sessão desta janela (`desmontar_a_sessao`) e deixa
+ * as hospedagens de pé. É o ATENDER (tarefa 27 da F7, `camada-toque.js`): quem
+ * hospeda e atende uma ligação sai do próprio servidor para entrar na sala, e o
+ * servidor continua no ar com quem estiver nele. Sem a opção, o caminho é o de
+ * sempre, o `disconnect`, que derruba o servidor junto.
+ */
+async function ejetar(soOCliente = false) {
   // **Encerrar vem primeiro, e o `disconnect` depois** — etapa E2, §5 do
   // contrato de API própria: «revogar a geração: a partir desse ponto, nenhum
   // novo efeito daquela instância é admitido, mesmo que mensagens já estejam na
@@ -4218,7 +4260,11 @@ async function ejetar() {
   // ele terminar deixaria o botão de hospedar oferecendo uma porta que ainda
   // não voltou.
   encerrarOAmbienteDosMods();
-  await invoke("disconnect");
+  if (soOCliente) {
+    await invoke("desmontar_a_sessao");
+  } else {
+    await invoke("disconnect");
+  }
   $("tela-sessao").hidden = true;
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;

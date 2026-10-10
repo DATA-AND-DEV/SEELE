@@ -5436,7 +5436,19 @@ fn conferir(
     pin: &PinDecision,
     pins: &dyn PinStore,
 ) -> Result<Verdict, ConnectError> {
-    let veredito = verdict(pin, destino.impressao_esperada());
+    let veredito = match (
+        &destino.esperada,
+        verdict(pin, destino.impressao_esperada()),
+    ) {
+        // **O código conferiu dentro do TLS** (`ConfereCodigo`): a chave é a do
+        // código, como a impressão de um link prova um certificado. Um primeiro
+        // contato por ele é conferido, e não cego, e a casca não pergunta «confia
+        // nesta chave?» a quem acabou de prová-la.
+        (Some(Esperada::Codigo(_)), Verdict::FirstContact { fingerprint }) => {
+            Verdict::FirstContactVerified { fingerprint }
+        }
+        (_, veredito) => veredito,
+    };
 
     // O efeito vem **antes** de qualquer saída, e por isso está aqui e não
     // dentro do `if`: o verificador fixa a chave dentro do retorno de chamada
@@ -6868,6 +6880,44 @@ mod tests {
         aplicar_veredito(&veredito, &loja, "casa");
 
         assert_eq!(loja.pinned("casa"), None, "a recusa deixou o pin para trás");
+    }
+
+    /// **Um primeiro contato pelo código é conferido, e não cego.** O
+    /// `ConfereCodigo` provou dentro do TLS que a chave é a do código, como a
+    /// impressão de um link prova um certificado. Dizer `FirstContact` faria a
+    /// casca perguntar «confia nesta chave?» a quem acabou de prová-la, e na
+    /// própria sala de quem recebe (o ATENDER, tarefa 27 da F7).
+    #[test]
+    fn um_primeiro_contato_pelo_codigo_e_conferido_e_nao_cego() {
+        let mut destino = destino_de_teste(None);
+        destino.esperada = Some(Esperada::Codigo(seele_proto::codigo::Codigo::da_chave(
+            &[7; 32],
+        )));
+        let loja = crate::tofu::MemoryPinStore::new();
+
+        let primeiro = conferir(
+            &destino,
+            &PinDecision::FirstContact {
+                fingerprint: "aaaa1111".into(),
+            },
+            &loja,
+        );
+        assert!(
+            matches!(
+                &primeiro,
+                Ok(Verdict::FirstContactVerified { fingerprint }) if fingerprint == "aaaa1111"
+            ),
+            "o primeiro contato pelo código saiu {primeiro:?}, e não conferido"
+        );
+
+        let depois = conferir(
+            &destino,
+            &PinDecision::Matches {
+                fingerprint: "aaaa1111".into(),
+            },
+            &loja,
+        );
+        assert!(matches!(depois, Ok(Verdict::Known)), "{depois:?}");
     }
 
     #[test]

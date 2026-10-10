@@ -376,28 +376,14 @@ fn laco(mut io: seele_audio::device::AudioIo, controles: &Arc<Controles>) {
 
 /// A régua do portão que os controles do teste descrevem.
 ///
-/// A mesma decisão de `voice::configuracao_do_portao`, e a mesma razão: o padrão
-/// **acompanha o ruído medido** e um valor escolhido à mão fica onde foi posto. Um
-/// teste que calibrasse com outra régua daria confiança num número que a conversa
-/// não usa — é o que `a_regua_do_teste_e_a_mesma_da_conversa` guarda.
+/// A mesma da conversa, porque é a mesma função: [`GateConfig::dos_controles`].
+/// Um teste que calibrasse com outra régua daria confiança num número que a
+/// conversa não usa, e é o que `a_regua_do_teste_e_a_mesma_da_conversa` guarda.
 fn config(controles: &Controles) -> GateConfig {
-    let escolhido = controles.abertura_dbfs_milesimos.load(Ordering::Relaxed);
-    let dbfs = if escolhido == 0 {
-        if controles.supressao.load(Ordering::Relaxed) > 0 {
-            seele_audio::gate::ABERTURA_COM_SUPRESSAO_DBFS
-        } else {
-            seele_audio::gate::ABERTURA_SEM_SUPRESSAO_DBFS
-        }
-    } else {
-        #[allow(
-            clippy::cast_precision_loss,
-            reason = "milésimos de decibel cabem exatos num f32 nesta faixa"
-        )]
-        let convertido = escolhido as f32 / 1000.0;
-        // **Fixo**, porque foi escolhido.
-        return GateConfig::de_dbfs(convertido);
-    };
-    GateConfig::automatico(dbfs)
+    GateConfig::dos_controles(
+        controles.abertura_dbfs_milesimos.load(Ordering::Relaxed),
+        controles.supressao.load(Ordering::Relaxed) > 0,
+    )
 }
 
 /// A força da supressão que os controles do teste pedem.
@@ -422,30 +408,30 @@ mod testes {
     /// numa sala com outro corte — e o teste passa a ser pior que não ter teste,
     /// porque ele dá confiança num número errado.
     ///
-    /// Guarda de texto-fonte: a regra é «estas duas funções decidem igual», e não
-    /// há tipo que a expresse. As duas são curtas e a comparação é do corpo delas.
+    /// Guarda de texto-fonte: a regra é «as duas chamam a mesma régua, e
+    /// nenhuma escreve a sua», e não há tipo que a expresse. A régua mora em
+    /// `GateConfig::dos_controles`, no `seele-voz`, provada lá. As agulhas que
+    /// não podem aparecer são montadas com `concat!`, para o guarda não casar
+    /// com o próprio texto.
     #[test]
     fn a_regua_do_teste_e_a_mesma_da_conversa() {
         let daqui = include_str!("teste_de_microfone.rs");
         let da_voz = include_str!("voice.rs");
-        for pedaco in [
-            "ABERTURA_COM_SUPRESSAO_DBFS",
-            "ABERTURA_SEM_SUPRESSAO_DBFS",
-            // O padrão acompanha o ruído; a escolha manual fica onde foi posta.
-            // Os dois caminhos precisam ser os mesmos nos dois lugares — ver a
-            // auditoria A03 em `gate::MARGEM_SOBRE_O_RUIDO_DB`.
-            "GateConfig::automatico(dbfs)",
-            "GateConfig::de_dbfs(convertido)",
-        ] {
+        for (onde, fonte) in [("o teste de microfone", daqui), ("a conversa", da_voz)] {
             assert!(
-                daqui.contains(pedaco),
-                "o teste de microfone deixou de usar `{pedaco}`: ele passou a \
-                 calibrar com uma régua que a conversa não usa"
+                fonte.contains("GateConfig::dos_controles("),
+                "{onde} deixou de usar a régua do `seele-voz`: passou a calibrar \
+                 com uma régua que o outro lado não usa"
             );
-            assert!(
-                da_voz.contains(pedaco),
-                "a conversa deixou de usar `{pedaco}`, e o teste continua usando"
-            );
+            for propria in [
+                concat!("GateConfig::", "automatico("),
+                concat!("GateConfig::", "de_dbfs("),
+            ] {
+                assert!(
+                    !fonte.contains(propria),
+                    "{onde} voltou a montar a régua por conta própria (`{propria}`)"
+                );
+            }
         }
     }
 

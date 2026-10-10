@@ -97,6 +97,11 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "pessoas.lista": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: false },
   "conversa.mensagem": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
+  // **O palco sobre a chamada** (rascunho da API 6, §5; tarefa 7, Step 5): o
+  // orçamento de uma superfície, com a gramática inteira — a `tela` com traço
+  // e arraste, os campos, o toque e o clique. A substituição escolhida é o
+  // palco; os acréscimos moram numa faixa dele. Ver `desenharOPalcoDosMods`.
+  "chamada.palco": { modos: ["substituir", "adicionar"], perfil: "superficie", porAlvo: false },
 });
 
 /**
@@ -266,12 +271,17 @@ class RegistroDeContribuicoes {
       // decorar» e concluiria que errou o ponto. Ele não errou: o modo existe
       // no plano, e não existe nesta versão.
       if (modo === "decorar") {
+        // **O modo que o ponto aceita**, e não sempre `adicionar`: a frase
+        // mandava usar `adicionar` no avatar e na capa, que só aceitam
+        // `substituir`.
+        const sugestao = regra.modos.includes("adicionar")
+          ? "«adicionar» — o conteúdo entra ao lado do nativo, sem cobri-lo"
+          : `«${regra.modos.join("» ou «")}»`;
         throw recusaNomeada(
           "modo-recusado",
-          "«decorar» não está na API 4: ele mudaria a apresentação de um nó do "
+          "«decorar» não está nesta API (é da API 7): ele mudaria a apresentação de um nó do "
           + "SEELE, e o subconjunto de estilo que impede um MOD de encobrir o "
-          + `nome que abre a moderação ainda não existe. Em «${ponto}», use `
-          + "«adicionar» — o conteúdo entra ao lado do nativo, sem cobri-lo",
+          + `nome que abre a moderação ainda não existe. Em «${ponto}», use ${sugestao}`,
         );
       }
       throw recusaNomeada("modo-recusado", `«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);

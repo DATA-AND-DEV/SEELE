@@ -33,6 +33,20 @@
 //    `dialogo` pintam com o tema em vigor, e um estilo que cita um token —
 //    `cor: { tema: 'acento' }` — tem a cor do tema, e muda quando ele muda; um
 //    nome que não é do tema é recusado como qualquer cor que não serve.
+// 9. **A linha da aparência em QUEM DESENHA O QUE** (tarefa 17f): na API 6 o
+//    tema é do servidor e a janela não registra o ponto, então a linha não sai
+//    do registro; ela diz quem pinta, oferece «o SEELE desenha» e a volta, e a
+//    troca vale **na hora**, sem outro retrato. O recusado é dito, e o
+//    DIAGNÓSTICO chama o tema do servidor pelo nome, e não de tema da API 3.
+// 10. **O modo** (tarefa 17i, item 2): `modo: 'claro' | 'escuro'` escreve o
+//    `color-scheme` da sessão, e sai com o tema; o que discorda do fundo é
+//    recusado, e o tema não fica. (A conferência, caso a caso, é do vetor
+//    `chaves-do-tema.json`, nas duas pontas.)
+// 11. **Os tokens por região** (tarefa 17i, item 3): as cores de uma região
+//    vão ao contêiner dela — a lista de pessoas escura numa sessão clara —, o
+//    resto da sessão fica com o tema da sessão, e os itens do núcleo com as
+//    cores do produto; uma região abaixo do piso recusa o tema inteiro, e o MOD
+//    ouve `recusado` com a `regiao` e os pares; o tema sem regiões as tira.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -265,6 +279,145 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     );
     await desenharCom(comoVeio);
 
+    // 9. QUEM DESENHA O QUE tem a linha da aparência com o tema do servidor, a
+    //    troca reaplica na hora, e o DIAGNÓSTICO o chama pelo nome.
+    const aparencia = () => page.evaluate(() => {
+      desenharApresentacoes();
+      const item = $('lista-apresentacoes').querySelector('li[data-ponto="servidor.aparencia"]');
+      return {
+        secao: !$('mods-apresentacao').hidden,
+        texto: item?.querySelector('.mods-linha-texto')?.textContent ?? null,
+        botoes: item ? [...item.querySelectorAll('button')].map((b) => b.textContent) : [],
+      };
+    });
+    const apertar = (rotulo) => page.evaluate((rotulo) => {
+      [...$('lista-apresentacoes').querySelectorAll('li[data-ponto="servidor.aparencia"] button')]
+        .find((b) => b.textContent === rotulo).click();
+    }, rotulo);
+    // A instância de pé desde a seção 7 guarda os eventos em `eventosDoTema`.
+    const diagnostico = () => page.evaluate(() =>
+      frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === 'servidor.aparencia')));
+    await desenharCom(comoVeio);
+    let linhaDaAparencia = await aparencia();
+    assert.ok(linhaDaAparencia.secao && linhaDaAparencia.texto,
+      `QUEM DESENHA O QUE não tem a linha da aparência com o tema do servidor: ${JSON.stringify(linhaDaAparencia)}`);
+    assert.match(linhaDaAparencia.texto, /pintada pelo tema deste servidor, de seele\/estilo/);
+    assert.deepEqual(linhaDaAparencia.botoes, ['USAR APRESENTAÇÃO DO SEELE']);
+    const frasesComOTema = await diagnostico();
+    assert.ok(frasesComOTema.some((f) => /tema deste servidor, de seele\/estilo/.test(f)),
+      `o DIAGNÓSTICO não diz que o tema do servidor pinta a aparência: ${JSON.stringify(frasesComOTema)}`);
+    assert.ok(!frasesComOTema.some((f) => /API 3/.test(f)),
+      `o DIAGNÓSTICO chama o tema do servidor de tema da API 3: ${JSON.stringify(frasesComOTema)}`);
+    assert.ok(!frasesComOTema.some((f) => /tema pedido por/.test(f)),
+      `o DIAGNÓSTICO conta o tema do servidor de novo como pedido do caminho antigo: ${JSON.stringify(frasesComOTema)}`);
+    // A troca pelo botão vale **na hora**, sem outro retrato.
+    await apertar('USAR APRESENTAÇÃO DO SEELE');
+    assert.deepEqual(await tokens(), {}, '«o SEELE desenha» só tirou o tema do servidor no retrato seguinte');
+    assert.equal((await ultimoEvento())?.estado, 'nativo', 'o MOD não soube, na hora, que quem vê escolheu o SEELE');
+    linhaDaAparencia = await aparencia();
+    assert.match(linhaDaAparencia.texto, /o SEELE desenha, por escolha desta máquina/);
+    assert.deepEqual(linhaDaAparencia.botoes, ['USAR O TEMA DO SERVIDOR']);
+    await apertar('USAR O TEMA DO SERVIDOR');
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'voltar ao tema do servidor só valeu no retrato seguinte');
+    assert.equal((await ultimoEvento())?.estado, 'aplicado', 'o MOD não soube, na hora, que o tema voltou');
+    // O recusado é dito, e não dado como aplicado.
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, acento: CLARO.fundo }) });
+    linhaDaAparencia = await aparencia();
+    assert.match(linhaDaAparencia.texto, /tema deste servidor, de seele\/estilo, foi recusado nesta máquina/,
+      `um tema recusado aparece como se pintasse: ${linhaDaAparencia.texto}`);
+    // Sem tema do servidor, sem a linha.
+    await desenharCom(null);
+    assert.equal((await aparencia()).texto, null, 'sem tema do servidor, a linha da aparência ficou');
+    await desenharCom(comoVeio);
+
+    // 10. O modo escreve o color-scheme da sessão.
+    const esquema = () => page.evaluate(() => getComputedStyle($('tela-sessao')).colorScheme);
+    assert.equal(await esquema(), 'normal', 'sem modo, a sessão já tinha um color-scheme');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, modo: 'claro' }) });
+    assert.equal(await esquema(), 'light', 'o modo claro não escreveu o color-scheme da sessão');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...PAPEL, modo: 'escuro' }) });
+    assert.equal(await esquema(), 'dark', 'o modo escuro não escreveu o color-scheme da sessão');
+    await desenharCom(comoVeio);
+    assert.equal(await esquema(), 'normal', 'o tema sem modo deixou o color-scheme do anterior');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...PAPEL, modo: 'claro' }) });
+    assert.deepEqual(await tokens(), {}, 'um modo claro sobre o fundo escuro foi aplicado');
+    assert.equal(await esquema(), 'normal', 'o modo recusado escreveu o color-scheme');
+    await desenharCom(comoVeio);
+
+    // 11. Os tokens por região.
+    const ESCURA = { fundo: '#0e0b08', texto: '#eae3cf', apagado: '#9a907f', acento: '#f2a65a', borda: '#3a332b' };
+    const pintura = () => page.evaluate(() => {
+      const cor = (seletor, propriedade) => {
+        const no = document.querySelector(seletor);
+        return no ? getComputedStyle(no)[propriedade] : null;
+      };
+      return {
+        pessoas: cor('.painel-pessoas', 'backgroundColor'),
+        nomeDaPessoa: cor('.painel-pessoas .pessoa-nome', 'color'),
+        canais: cor('.painel-canais', 'backgroundColor'),
+        fracoDaRegiao: document.querySelector('.painel-pessoas').style.getPropertyValue('--seele-laranja-fraco'),
+        sair: cor('#operador-sair', 'color'),
+      };
+    });
+    const semRegiao = await pintura();
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, regioes: { 'pessoas.lista': ESCURA, 'operador.barra': ESCURA } }) });
+    const comRegiao = await pintura();
+    assert.equal(comRegiao.pessoas, rgb(ESCURA.fundo), `a lista de pessoas não ficou com o fundo da região: ${JSON.stringify(comRegiao)}`);
+    assert.equal(comRegiao.nomeDaPessoa, rgb(ESCURA.texto), `o nome na lista não ficou com o texto da região: ${JSON.stringify(comRegiao)}`);
+    assert.equal(comRegiao.canais, rgb(CLARO.painel), `a região vazou para a coluna de canais: ${JSON.stringify(comRegiao)}`);
+    assert.match(comRegiao.fracoDaRegiao, /^#[0-9a-f]{6}$/i, 'o preenchimento do acento não foi derivado para a região');
+    assert.equal(comRegiao.sair, semRegiao.sair, `o SAIR, do núcleo, mudou de cor com a região: ${JSON.stringify(comRegiao)}`);
+    // Uma região abaixo do piso recusa o tema inteiro, e o MOD sabe qual.
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, regioes: { 'pessoas.lista': { fundo: '#0e0b08', texto: '#1a1a1a' } } }) });
+    assert.deepEqual(await tokens(), {}, 'um tema com uma região abaixo do piso foi aplicado');
+    const daRegiao = await ultimoEvento();
+    assert.equal(daRegiao?.estado, 'recusado', `o MOD não soube da recusa pela região: ${JSON.stringify(daRegiao)}`);
+    assert.equal(daRegiao.regiao, 'pessoas.lista', `a recusa não disse a região: ${JSON.stringify(daRegiao)}`);
+    assert.ok(daRegiao.pares?.some((p) => p.frente === 'texto' && p.fundo === 'fundo'),
+      `a recusa da região não trouxe o par: ${JSON.stringify(daRegiao)}`);
+    // E a prévia, pelo mesmo caminho: recusada pelo nome, com a região e os
+    // pares, na resposta e no evento.
+    await desenharCom(comoVeio);
+    const previaDaRegiao = await pedir({
+      tipo: 'tema', previa: true, superficie: 'editor',
+      valores: { ...CLARO, regioes: { 'pessoas.lista': { fundo: '#0e0b08', texto: '#1a1a1a' } } },
+    });
+    assert.equal(previaDaRegiao?.erro, 'contraste', `a prévia com uma região abaixo do piso não foi recusada pelo nome: ${JSON.stringify(previaDaRegiao)}`);
+    assert.equal(previaDaRegiao.regiao, 'pessoas.lista', `a recusa da prévia não disse a região: ${JSON.stringify(previaDaRegiao)}`);
+    assert.ok(previaDaRegiao.pares?.length, `a recusa da prévia não trouxe os pares da região: ${JSON.stringify(previaDaRegiao)}`);
+    const eventoDaPrevia = await ultimoEvento();
+    assert.ok(eventoDaPrevia?.previa === true && eventoDaPrevia.regiao === 'pessoas.lista',
+      `o evento da prévia recusada não disse a região: ${JSON.stringify(eventoDaPrevia)}`);
+    // **Os contêineres que a casca declara valem no documento todo** (pedido
+    // da F8, 10/10): no celular, o `operador.barra` mora em AJUSTES
+    // (`#tela-server`), fora de `#tela-sessao`. Aqui, um nó do desktop fora da
+    // sessão faz o papel dele.
+    const naCasca = await page.evaluate((cores) => {
+      globalThis.CELULAR = {
+        regioes: new Set(REGIOES_E_CAMADAS_DA_API),
+        conteineresDasRegioes: { 'operador.barra': ['#tela-server .server-coluna'] },
+      };
+      try {
+        aplicarOTemaDoServidor({ mod_id: 'seele/estilo', valores: JSON.stringify({ regioes: { 'operador.barra': cores } }) });
+        return {
+          fora: document.querySelector('#tela-server .server-coluna').style.getPropertyValue('--seele-negro-painel'),
+          padrao: document.querySelector('.operador').style.getPropertyValue('--seele-negro-painel'),
+        };
+      } finally {
+        delete globalThis.CELULAR;
+        aplicarOTemaDoServidor(null);
+      }
+    }, ESCURA);
+    assert.equal(naCasca.fora, ESCURA.fundo, `o contêiner que a casca declarou, fora da sessão, não recebeu a região: ${JSON.stringify(naCasca)}`);
+    assert.equal(naCasca.padrao, '', `com o contêiner da casca, a região também pintou o do desktop: ${JSON.stringify(naCasca)}`);
+    assert.equal(await page.evaluate(() => document.querySelector('#tela-server .server-coluna').style.getPropertyValue('--seele-negro-painel')), '',
+      'o tema saiu, e o contêiner da casca ficou com a região');
+    // O tema sem regiões as tira do contêiner.
+    await desenharCom(comoVeio);
+    const depois = await pintura();
+    assert.equal(depois.pessoas, rgb(CLARO.painel), `sem regiões, a lista de pessoas ficou com a cor da região: ${JSON.stringify(depois)}`);
+    assert.equal(depois.fracoDaRegiao, '', 'sem regiões, o preenchimento da região ficou no contêiner');
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -276,7 +429,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora; e o modo escreve o color-scheme; e cada região pinta o contêiner dela, com os pares conferidos por região.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

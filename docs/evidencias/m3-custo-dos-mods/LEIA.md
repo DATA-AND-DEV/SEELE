@@ -114,6 +114,83 @@ testes).
 | `m3-falante.rs` | o falante sintético |
 | `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |
 | `medidas.json` | os relatos da campanha de base de 08/10 |
+| `preparar-api6.sh` | monta a pasta de trabalho da campanha da API 6 |
+| `remendar-api6.py` | os remendos da cópia da medição |
+| `campanha-api6.sh` | os 24 cenários da campanha da API 6 |
+| `gerar-carga.py` | as variantes do MOD de carga, com os GIFs da capa |
+| `m3-carga/` | o modelo do MOD de carga sintético da API 6 |
+| `conferir-carga.rs` | confere uma variante contra o prelúdio da cópia |
+
+## A campanha da API 6 (tarefa 11 do plano da F3)
+
+A mesma medição, com três diferenças. Os cenários da base continuam rodando
+como antes, com o app publicado.
+
+**O app é uma build de medição, e não o publicado.** `preparar-api6.sh` copia
+o código de um commit da `0.16/api-6` (o `HEAD` de quem chama, por padrão) por
+`git archive`, e `remendar-api6.py` muda **só a cópia**:
+
+- a API 6 passa a ser aceita (`MOD_API_VERSION = 6`, `APIS_ACEITAS = [6, 5, 4,
+  3]`, e as duas constantes da casca). No produto, ela só entra com o
+  `v6.json` (tarefa 12);
+- a casca escreve o jitter no `seele.log` a cada 2 s, o mesmo número da barra
+  (`modId` `m3`, com balde próprio). Com o diálogo modal e com a página
+  imersiva, a barra fica inerte, e um nó inerte sai da árvore de
+  acessibilidade: a base não leu o jitter desses cenários. O remendo vale em
+  todos os cenários desta campanha, para o custo dele ser o mesmo em todos;
+- o `m3-servidor.rs` ganha o `api` do `EnabledMod` (migração 14).
+
+O app sai de `cargo tauri build --bundles app`, com a assinatura ad-hoc da
+configuração, em `<pasta>/alvo/release/bundle/macos/SEELE.app`. O commit fica
+em `<pasta>/fonte/COMMIT_DA_MEDICAO`, e cada relato o leva.
+
+**O MOD de carga sintético** (`m3-carga/`, gerado por `gerar-carga.py`) põe
+cada ponto da API 6 no teto declarado, uma variante por cenário:
+
+| variante | o que fica de pé |
+|---|---|
+| `regioes` | as oito regiões ao mesmo tempo, cada uma no teto do cartão (64 nós), e o acréscimo de `conversa.mensagem` em cada uma das 30 mensagens |
+| `capas` | 7 capas animadas (60 quadros, 480 × 144, 9,6 s) na chamada e na barra, e 20 paradas, citadas pelo cartão na lista: 121,6 MB decodificados, 91 % do bolso de 128 MiB |
+| `folhas` | três folhas empilhadas, montadas em 20 partes de 199 nós cada (3980 nós; uma mensagem tem 12 KiB) |
+| `avisos` | um pedido a cada 250 ms, cada um com um `mundo.avisar` de 1 KiB (o teto: 4 por segundo, 1024 bytes) |
+| `palco` | o `chamada.palco` com uma `tela` de 1024 × 768 e as figuras que cabem numa mensagem (155 completas) |
+| `dialogo`, `pagina` | um diálogo modal e uma página imersiva, para o jitter sob eles |
+| `tudo` | regiões, capas, folhas, avisos e o palco (escondido, para a grade das capas ficar à vista) |
+
+Ele não está no indexador: a preparação confere cada variante contra o
+prelúdio da cópia (`conferir-carga.rs`, no `Motor` de verdade, com as
+capacidades da API 6) e a põe no cache por hash, onde o app a acha. **A
+conferência achou dois defeitos antes da campanha**: o MOD chamava
+`SeeleMods.snapshot()`, que a API 6 não tem (o retrato é `SeeleUI.retrato()`), e
+teria parado na primeira linha; e o palco com 200 figuras completas passava
+dos 12 KiB de uma mensagem. **O teto de 256 figuras só se alcança com figuras
+sem `chave` e sem `cor`** (45 bytes cada): com elas completas (71 bytes),
+cabem 155.
+
+**Os participantes.** Nos cenários de carga, o `m3-falante --calado` sobe
+participantes que não falam: um posta 30 mensagens no canal 1 (a região da
+conversa); nas capas, a sala 1 fica com sete pessoas, contando quem usa e o
+falante, e o servidor com vinte e sete. Quem usa entra na sala nas capas e no
+palco, mesmo sem voz.
+
+**Os cenários novos**, além dos dez da base:
+
+| cenário | o que muda |
+|---|---|
+| `3-mods-mesa-continuo` | a peça vai e volta em arrastes de 1,9 s seguidos, sem a pausa do laço: na base, o arraste ocupava 1,5 s de cada ~2 s |
+| `carga-<variante>` | o MOD de carga; o relato diz o que ele pôs à vista (`carga_a_vista`, pela acessibilidade) e o que o `seele.log` diz dele (`tropecos_do_mod`) |
+
+O jitter vai em `jitter_ms` (a barra, como na base) e em
+`jitter_do_registro_ms` (o `seele.log`), que é o que vale para o diálogo e a
+página.
+
+```sh
+sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6
+sh /tmp/m3-6/roteiro/campanha-api6.sh        # os 24
+```
+
+A preparação compila o app inteiro em release numa pasta de alvo nova (ver o
+tempo no fim do `preparar-api6.sh`).
 
 ## O que este roteiro não mede
 

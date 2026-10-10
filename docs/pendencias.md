@@ -9542,3 +9542,21 @@ revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
 Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
 `becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
 os testes esquecem de propósito continuam vazando (não roubam mais respostas).
+
+## 62 · O pedido de MOD ignora o papel mínimo do canal, e nada grava o papel mínimo
+
+**Aberta em 2026-10-10**, medida pela F3 da 0.16 na tarefa 16. Em `mods/pedidos.rs`,
+um `ModRequest` num canal com papel mínimo de leitura que a pessoa não tem chega
+ao MOD, e o `write` que o MOD recebe é a permissão global, que ignora o papel
+mínimo de escrita do canal. **O código está assim na v0.15.1 publicada
+(`54f542f94`), na linha 0.15 (`40066a7c`) e na 0.16.**
+
+**Hoje não é alcançável:** nenhum caminho do produto grava `minimum_read_role` nem
+`minimum_write_role` (só a migração 1, que as cria vazias, e os testes do
+`autorizacao.rs`); o fio não tem campo para isso. Com as colunas vazias, o
+`pode_no_canal` se reduz ao que o `pedidos.rs` já confere. Viraria escalada de
+permissão por MOD no dia em que algo gravasse o papel mínimo.
+
+**Na 0.16:** consertado na tarefa 16 da F3, antes de qualquer recurso gravar as
+colunas. **Na linha 0.15:** fica como está, porque ali não há nem haverá caminho
+que grave o papel mínimo.

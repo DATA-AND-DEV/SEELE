@@ -366,6 +366,12 @@ jobs:
       - run: node apps/seele-app/bancada/gestao-do-tema.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O palco dos MODs sobre a chamada (tarefa 7, Step 5, da F3): monta
+      # sobre a grade, que continua no DOM; a saída é do produto e não
+      # desmonta; sair da sala desmonta, mesmo com a conversa à frente.
+      - run: node apps/seele-app/bancada/palco-da-chamada.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as
@@ -438,6 +444,19 @@ jobs:
       - run: npx playwright install --with-deps chromium
         if: ${{ !cancelled() }}
       - run: node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A voz no navegador (Tarefa 3.3 da F4), com o `.wasm` do `seele-web` que
+      # o mesmo passo compilou: o microfone falso do Chromium passa pelo
+      # portão, pelo codec e por um laço local, e toca pela mistura do worklet.
+      # O mesmo teste de ordem segura esta.
+      - run: node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A identidade do navegador (Tarefa 3.4 da F4): o link lido pelo `.wasm` com
+      # a `prova` que o mesmo passo compilou, e o token da tentativa contra um
+      # servidor de mentira. O mesmo teste de ordem segura esta.
+      - run: node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 

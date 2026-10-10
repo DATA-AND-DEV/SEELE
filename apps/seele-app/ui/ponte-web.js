@@ -86,6 +86,9 @@ const RECUSA_ATUALIZAR = "a versão é a desta página: não há o que instalar"
 const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
+// A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
+const RECUSA_SALA = "a sala pessoal e as ligações moram no app do SEELE: o navegador não recebe ligação";
+const RECUSA_AGENDA = "o código e a agenda moram no app do SEELE, nesta máquina";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
@@ -96,15 +99,20 @@ const RECUSAS_NOMEADAS = new Map([
   ["apagar_pacote_do_cache", RECUSA_MODS],
   ["apagar_servidor", RECUSA_HOSPEDAR],
   ["aplicar_conjunto_de_mods", RECUSA_MODS],
+  ["atender", RECUSA_SALA],
   ["baixar_modulo_de_video", RECUSA_MODULO],
   ["baixar_versao", RECUSA_VERSOES],
+  ["bloquear", RECUSA_SALA],
   ["caminho_entre_pares", RECUSA_REDE],
   ["catalogo_de_mods", RECUSA_MODS],
   ["consentir_no_caminho_entre_pares", RECUSA_REDE],
+  ["contatos_da_agenda", RECUSA_AGENDA],
   ["criar_convite_do_server", RECUSA_PORTARIA],
   ["criar_servidor", RECUSA_HOSPEDAR],
+  ["dar_nome_na_agenda", RECUSA_AGENDA],
   ["decidir_pedido", RECUSA_PORTARIA],
   ["definir_senha_do_server", RECUSA_PORTARIA],
+  ["encerrar_a_ligacao", RECUSA_SALA],
   // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
   // hospeda, e o navegador não hospeda.
   ["escolher_o_tema_do_servidor", RECUSA_MODS],
@@ -113,15 +121,19 @@ const RECUSAS_NOMEADAS = new Map([
   ["instalar_mod", RECUSA_MODS],
   ["ligar_portaria", RECUSA_PORTARIA],
   ["linhas_para_hospedar", RECUSA_HOSPEDAR],
+  ["meu_codigo", RECUSA_AGENDA],
   ["mod_nativo_ativar", RECUSA_NATIVO],
   ["mod_nativo_colher", RECUSA_NATIVO],
   ["mod_nativo_encerrar", RECUSA_NATIVO],
   ["mod_nativo_entregar", RECUSA_NATIVO],
   ["mod_nativo_reservar", RECUSA_NATIVO],
   ["ocupacao_do_deposito", RECUSA_VERSOES],
+  ["onde_estou", RECUSA_SALA],
   ["pacotes_no_cache", RECUSA_MODS],
   ["pedidos_da_portaria", RECUSA_PORTARIA],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
+  ["receber_ligacoes", RECUSA_SALA],
+  ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
   ["revogar_admissao", RECUSA_PORTARIA],
   ["servidor_hospedado", RECUSA_HOSPEDAR],
@@ -245,6 +257,17 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
       motivo: "a P12 da F1: a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde o número (main.rs)",
     },
   ],
+  // A sala viva da F7: `null` e `[]` dizem «não há sala neste lugar», e nunca
+  // `Desligada`, que diria que existe uma e que alguém a desligou. A casca
+  // esconde a linha da sala com o `null` (`fraseDaSala`).
+  [
+    "estado_da_sala",
+    { resposta: null, motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-sala.js)" },
+  ],
+  [
+    "toques_agora",
+    { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },
+  ],
 ]);
 
 /**
@@ -266,7 +289,6 @@ const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["abrir_teste_de_microfone", TAREFA_33],
   ["aceitar_mods", TAREFA_34],
   ["aceite_de_mods", TAREFA_34],
   ["aceites_de_mods", TAREFA_34],
@@ -301,7 +323,6 @@ const AINDA_A_FAZER = new Map([
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
   ["estado_da_sessao", TAREFA_MODS],
-  ["estado_do_teste_de_microfone", TAREFA_33],
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["expulsar_pessoa", TAREFA_26],
   ["fontes_de_tela", TAREFA_310],
@@ -316,7 +337,6 @@ const AINDA_A_FAZER = new Map([
   ["midia_em_bytes", TAREFA_MODS],
   ["mod_request", TAREFA_26],
   ["mods_instalados", TAREFA_MODS],
-  ["monitorar_o_microfone", TAREFA_33],
   ["mover_pessoa", TAREFA_26],
   ["open_channel", TAREFA_26],
   ["parar_de_compartilhar", TAREFA_310],
@@ -569,6 +589,74 @@ const REGRAS_DA_VOZ = Object.freeze({
 /** Os modos de voz do desktop (`VoiceMode`). */
 const MODOS_DE_VOZ = Object.freeze(["PushToTalk", "VoiceActivated", "Open"]);
 
+/**
+ * A voz da página (`voz-web.js`), nascida no primeiro uso: por ora, o teste do
+ * microfone. Uma carga que falhou não fica guardada.
+ */
+const vozDaPonte = { atual: null, nascendo: null };
+
+function aVozDaPonte() {
+  if (!vozDaPonte.nascendo) {
+    vozDaPonte.nascendo = carregarOWasmDaPagina().then(({ bytes, instancia }) => {
+      vozDaPonte.atual = criarVozDoNavegador({ wasm: instancia.exports, bytesDoWasm: bytes });
+      return vozDaPonte.atual;
+    });
+    vozDaPonte.nascendo.catch(() => {
+      vozDaPonte.nascendo = null;
+    });
+  }
+  return vozDaPonte.nascendo;
+}
+
+/**
+ * Por que o microfone não abriu, numa frase. O desktop devolve a do aparelho;
+ * aqui quem recusa é o navegador, e cada recusa dele tem um conserto
+ * diferente.
+ */
+function fraseDoMicrofoneQueNaoAbriu(erro) {
+  const nome = erro && erro.name;
+  if (nome === "NotAllowedError") {
+    return "O navegador não deu o microfone a esta página. Permita o microfone nos ajustes do site e tente de novo.";
+  }
+  if (nome === "NotFoundError") return "Esta máquina não mostrou nenhum microfone ao navegador.";
+  if (nome === "NotReadableError") {
+    return "O microfone não abriu: outro programa pode estar com ele, ou o sistema não o entregou ao navegador.";
+  }
+  return `O microfone não abriu (${nome ?? "erro"}: ${erro && erro.message ? erro.message : erro}).`;
+}
+
+/**
+ * A recusa do microfone que o `getUserMedia` deu nesta página
+ * (`NotAllowedError`). Só na memória: ela vale enquanto a página vive, que é o
+ * tempo em que o navegador a mantém sem perguntar de novo.
+ */
+const recusaDoMicrofone = { nestaPagina: false };
+
+/** O teste do microfone com o que está guardado nesta origem. */
+async function abrirOTesteNaPonte() {
+  let voz;
+  try {
+    voz = await aVozDaPonte();
+  } catch (erro) {
+    return Promise.reject(`A voz desta página não carregou (${erro && erro.message ? erro.message : erro}).`);
+  }
+  const supressao = milesimosGuardados(CHAVES_DA_ORIGEM.reducao) ?? CONSTANTES_DO_DESKTOP.controles_da_voz.supressao;
+  const escolhida = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
+  try {
+    await voz.abrirTeste({
+      microfone: guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone),
+      saida: guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
+      supressao: supressao > 0,
+      abertura: escolhida === null ? 0 : Math.round(escolhida * 1000),
+    });
+  } catch (erro) {
+    if (erro && erro.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
+    return Promise.reject(fraseDoMicrofoneQueNaoAbriu(erro));
+  }
+  recusaDoMicrofone.nestaPagina = false;
+  return null;
+}
+
 /** Um número guardado em milésimos, como as preferências do desktop o guardam. */
 function milesimosGuardados(chave) {
   const texto = guardadoNaOrigem(chave);
@@ -709,9 +797,18 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   desmontar_a_sessao: sairDaSessaoDaPonte,
   // «Nenhum»: quem codifica é o navegador (só no PC).
   modulo_de_video_a_baixar: () => null,
-  // Atendido sempre, aberto ou não: `pararOTesteDeMicrofone` o chama a cada
-  // saída de ÁUDIO. Sem teste aberto, não há o que soltar; o teste é do lote D.
-  fechar_teste_de_microfone: () => null,
+  // O teste do microfone do PC (3.3, decidido em 09/10): o `getUserMedia`, com
+  // o mesmo portão da voz. No celular os três primeiros são recusados
+  // (`SO_NA_CASCA_LARGA`). O fechar é atendido sempre, aberto ou não:
+  // `pararOTesteDeMicrofone` o chama a cada saída de ÁUDIO, e fora da sala ele
+  // solta o microfone de verdade (`F4/ponte-no-pc.md`).
+  abrir_teste_de_microfone: abrirOTesteNaPonte,
+  estado_do_teste_de_microfone: () => vozDaPonte.atual?.estadoDoTeste() ?? null,
+  monitorar_o_microfone: ({ ligado } = {}) => {
+    vozDaPonte.atual?.monitorar(ligado);
+    return null;
+  },
+  fechar_teste_de_microfone: () => (vozDaPonte.atual ? vozDaPonte.atual.fecharTeste().then(() => null) : null),
   // **O registro da janela, no console.** O desktop o escreve no `seele.log`;
   // o canal de diagnóstico do navegador está em aberto (ADR 0057, «O que este
   // ADR não decide»), e até lá ele vai aonde o inspetor o lê.
@@ -833,14 +930,21 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   escolher_tecla_de_falar: ({ tecla } = {}) =>
     gravarNaOrigem(CHAVES_DA_ORIGEM.tecla, tecla == null ? null : String(tecla)) ? null : Promise.reject("NaoGravei"),
   // A Permissions API: concedida, negada pelo navegador (achado 3 da matriz da
-  // F8), ou não se sabe, inclusive onde ela não pergunta pelo microfone.
+  // F8), ou não se sabe. **E a recusa que esta página já viu**: o Safari nem
+  // sempre conta o microfone pela Permissions API, e depois de um «Não
+  // Permitir» de verdade ela pode dizer «perguntar» ou nem responder. Sem a
+  // lembrança, o aviso sumiria justo quando a sala ficou muda por isso
+  // (pergunta da F8, 10/10). Uma concessão posterior vence a lembrança.
   permissao_de_microfone: async () => {
+    let estado = null;
     try {
-      const { state } = await navigator.permissions.query({ name: "microphone" });
-      return { granted: "Permitida", denied: "NegadaPeloNavegador" }[state] ?? "NaoSeSabe";
+      ({ state: estado } = await navigator.permissions.query({ name: "microphone" }));
     } catch {
-      return "NaoSeSabe";
+      estado = null;
     }
+    if (estado === "granted") return "Permitida";
+    if (estado === "denied" || recusaDoMicrofone.nestaPagina) return "NegadaPeloNavegador";
+    return "NaoSeSabe";
   },
   saida_escolhida: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
   // Grava; numa sessão, a voz (3.3) a aplica com `setSinkId`.

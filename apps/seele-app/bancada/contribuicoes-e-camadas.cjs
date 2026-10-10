@@ -1883,8 +1883,18 @@ function anotando(...anotadas) {
     }
     confere(
       "R3 · decorar",
-      mensagem.includes("decorar") && mensagem.includes("API 4"),
+      mensagem.includes("decorar") && mensagem.includes("API 7"),
       `«${ponto}» não explicou a suspensão de «decorar»: ${mensagem || "aceitou o registro"}`,
+    );
+    // E sugere um modo que o ponto aceita: o avatar e a capa só substituem, e
+    // mandá-los usar `adicionar` era mandar o MOD a outra recusa.
+    const esperada = regra.modos.includes("adicionar")
+      ? "use «adicionar»"
+      : `use «${regra.modos.join("» ou «")}»`;
+    confere(
+      "R3 · decorar sugere o modo do ponto",
+      mensagem.includes(esperada) && (regra.modos.includes("adicionar") || !mensagem.includes("«adicionar»")),
+      `«${ponto}» (${regra.modos.join(", ")}) não sugeriu ${esperada}: ${mensagem}`,
     );
   }
 }
