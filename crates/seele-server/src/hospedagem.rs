@@ -535,6 +535,22 @@ impl Hospedagem {
         }
     }
 
+    /// O motivo com que quem está dentro é avisado de que esta hospedagem
+    /// fecha, em [`Self::encerrar`] e em [`Self::despedir`].
+    ///
+    /// Num servidor guardado, o servidor está encerrando. Numa sala pessoal, a
+    /// **ligação** acabou: `ChamadaEncerrada`, a mesma razão de quando quem
+    /// recebe desliga, e a frase que quem ligou lê é «ALICE ENCERROU A
+    /// LIGAÇÃO», e não a de um servidor que saiu do ar (spec de 23/09, «Erros e
+    /// frases»).
+    fn motivo_da_despedida(&self) -> seele_proto::control::DisconnectReason {
+        if self.recepcao().is_some() {
+            seele_proto::control::DisconnectReason::ChamadaEncerrada
+        } else {
+            seele_proto::control::DisconnectReason::ServerShuttingDown
+        }
+    }
+
     /// Encerra o servidor **avisando quem está dentro**, e devolve a porta.
     ///
     /// É o SAIR de quem hospeda: a casca chama isto pelo comando `disconnect`,
@@ -556,8 +572,9 @@ impl Hospedagem {
     /// Era `shutdown()` cru, e quem estava dentro lia uma queda de transporte:
     /// a tela dizia «não foi possível alcançar o servidor», e a bateria batia
     /// cinco minutos numa porta fechada. Agora cada sessão lê
-    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO») e acaba. Ver
-    /// [`Daemon::encerrar_avisando`].
+    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO»), ou
+    /// `ChamadaEncerrada` numa sala ([`Self::motivo_da_despedida`]), e acaba.
+    /// Ver [`Daemon::encerrar_avisando`].
     ///
     /// O roteador vem **antes** do aviso aqui, e depois em [`Self::despedir`]:
     /// no SAIR o processo continua vivo, e as duas esperas cabem; na saída do
@@ -569,10 +586,7 @@ impl Hospedagem {
             escada.descer().await;
         }
         self.server
-            .encerrar_avisando(
-                seele_proto::control::DisconnectReason::ServerShuttingDown,
-                PRAZO_DO_AVISO,
-            )
+            .encerrar_avisando(self.motivo_da_despedida(), PRAZO_DO_AVISO)
             .await;
         self.server.wait_idle().await;
         if let Some(aceitando) = self.aceitando.take() {
@@ -613,10 +627,7 @@ impl Hospedagem {
     /// [`Self::encerrar`]: o processo está saindo, e ninguém vai reabri-la.
     pub async fn despedir(mut self, teto: std::time::Duration) {
         self.server
-            .encerrar_avisando(
-                seele_proto::control::DisconnectReason::ServerShuttingDown,
-                teto / 2,
-            )
+            .encerrar_avisando(self.motivo_da_despedida(), teto / 2)
             .await;
         let _ = tokio::time::timeout(teto / 4, self.server.wait_idle()).await;
         if let Some(escada) = self.escada.take() {
