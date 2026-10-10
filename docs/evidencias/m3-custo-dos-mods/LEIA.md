@@ -127,7 +127,8 @@ A mesma medição, com três diferenças. Os cenários da base continuam rodando
 como antes, com o app publicado.
 
 **O app é uma build de medição, e não o publicado.** `preparar-api6.sh` copia
-o código de um commit da `0.16/api-6` (o `HEAD` de quem chama, por padrão) por
+o código de um commit (o `HEAD` de quem chama, por padrão; a campanha de 10/10
+passou o da décima segunda integração, `6e845e0d`, explícito) por
 `git archive`, e `remendar-api6.py` muda **só a cópia**:
 
 - a API 6 passa a ser aceita (`MOD_API_VERSION = 6`, `APIS_ACEITAS = [6, 5, 4,
@@ -183,6 +184,22 @@ palco, mesmo sem voz.
 O jitter vai em `jitter_ms` (a barra, como na base) e em
 `jitter_do_registro_ms` (o `seele.log`), que é o que vale para o diálogo e a
 página.
+
+**A casa nova pergunta o nome.** Na 0.16, o app de uma pasta nova abre «COMO OS
+OUTROS VÃO TE CHAMAR?» antes de seguir o `--entrar` (medido pela orquestradora
+em 10/10, no primeiro cenário da campanha: «a entrada não apareceu»). O
+`m3.py` espera também esse diálogo, aperta CANCELAR — a chegada segue com o
+nome tirado da chave, como quem pula a pergunta — e o relato leva
+`"apelido": "pulado"`. Na base o diálogo não aparece, e nada muda nela.
+
+**Contra o que se lê o custo da API 6: o `sem-mod` da 0.16, e não a base.** Ao
+abrir, a 0.16 sobe a sala pessoal (um servidor em `[::]:8385`, a escada do
+alcance e o registro no ponto de encontro, ENC/2), e a 0.15.1 da base não tinha
+nada disso. O `sem-mod` da 0.16 já carrega esse custo, então comparar um
+cenário de MOD da 0.16 com a base mistura a API 6 com a sala pessoal. Cada
+cenário desta campanha é lido contra o `sem-mod` (e o `sem-mod+voz`) **desta
+mesma campanha**; a comparação com a base fica só para o custo total de subir
+de versão, e é dita como tal.
 
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6

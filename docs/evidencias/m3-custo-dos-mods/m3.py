@@ -307,7 +307,15 @@ def main():
         assert esperar(novo_pid, 20), "o app não abriu"
         pid = novo_pid().pop()
         relato["pid"] = pid
-        assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR"), 40), "a entrada não apareceu"
+        # Na 0.16 a casa nova pergunta o apelido antes de seguir o link (medido
+        # em 10/10: sem isto o cenário esperava a entrada atrás do diálogo).
+        # CANCELAR entra com o nome tirado da chave, como quem pula a pergunta.
+        assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR")
+                       or tem(pid, "COMO OS OUTROS VÃO TE CHAMAR"), 40), "a entrada não apareceu"
+        if tem(pid, "COMO OS OUTROS VÃO TE CHAMAR"):
+            ax("apertar", pid, "CANCELAR")
+            relato["apelido"] = "pulado"
+            assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR") or tem(pid, "ACEITAR"), 40), "a entrada não apareceu"
         if tem(pid, "ACEITAR"):
             ax("apertar", pid, "ACEITAR")
             assert esperar(lambda: tem(pid, "ENTRAR NO SERVIDOR"), 40)
