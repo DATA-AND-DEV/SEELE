@@ -1834,11 +1834,11 @@ pub(crate) fn socket_de_quem_conecta() -> std::io::Result<std::net::UdpSocket> {
 /// `quinn::Endpoint::client` abria.
 ///
 /// Nos testes, a proposta guardada em [`PROPOSTA_DE_TESTE`] por esta thread
-/// passa na frente, uma vez.
+/// passa na frente, uma vez — um socket, ou um erro.
 fn proposta_do_sistema() -> std::io::Result<socket2::Socket> {
     #[cfg(test)]
     if let Some(proposta) = PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow_mut().take()) {
-        return Ok(proposta);
+        return proposta;
     }
     pilha_dupla(0)
 }
@@ -1967,9 +1967,11 @@ thread_local! {
     ///
     /// Existe para um teste encenar o que o sistema faz por conta própria de
     /// vez em quando — ver [`testes_do_socket::encenar_a_colisao`] — no
-    /// socket que `Motor::tentar` abre, que nenhum parâmetro alcança.
-    pub(crate) static PROPOSTA_DE_TESTE: std::cell::RefCell<Option<socket2::Socket>> =
-        const { std::cell::RefCell::new(None) };
+    /// socket que `Motor::tentar` abre, que nenhum parâmetro alcança. Um erro
+    /// guardado encena o socket de pilha dupla que não abre.
+    pub(crate) static PROPOSTA_DE_TESTE: std::cell::RefCell<
+        Option<std::io::Result<socket2::Socket>>,
+    > = const { std::cell::RefCell::new(None) };
 }
 
 /// A decisão do verificador, depois de um aperto de mão que terminou.

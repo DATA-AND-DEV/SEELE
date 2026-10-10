@@ -8670,7 +8670,7 @@ mod tests {
                 match encenar_a_colisao() {
                     Encenacao::Colisao { ladrao, proposta } => {
                         crate::client::PROPOSTA_DE_TESTE
-                            .with(|vaga| *vaga.borrow_mut() = Some(proposta));
+                            .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
                         (vec![ladrao], true)
                     }
                     Encenacao::Recusa { ladroes, .. } => (ladroes, false),

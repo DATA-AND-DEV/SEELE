@@ -359,13 +359,40 @@ fn escolher_ponto(achados: &[SocketAddr], aviso: SocketAddr) -> Option<SocketAdd
 /// **E a porta é a mesma conferida do QUIC** ([`crate::client::socket_de_quem_conecta`]):
 /// este socket é emprestado ao aperto de mão depois do furo, e uma porta que um
 /// socket IPv4 da máquina segura entregaria a ele a resposta do servidor.
+///
+/// **Quando cai para o só IPv4, diz por quê**, como `local_endpoint` diz: o
+/// socket de pilha dupla que não abriu — sem IPv6, ou as propostas de porta
+/// todas recusadas — mudava em silêncio o socket por onde o aviso sai.
 fn abrir_socket_local() -> Option<std::net::UdpSocket> {
     let seis = || -> Option<std::net::UdpSocket> {
-        let socket = crate::client::socket_de_quem_conecta().ok()?;
-        if socket2::SockRef::from(&socket).only_v6().ok()? {
-            return None;
+        let socket = match crate::client::socket_de_quem_conecta() {
+            Ok(socket) => socket,
+            Err(erro) => {
+                tracing::warn!(
+                    %erro,
+                    "a batida não abriu o socket de pilha dupla conferido; o aviso sai \
+                     só por IPv4"
+                );
+                return None;
+            }
+        };
+        match socket2::SockRef::from(&socket).only_v6() {
+            Ok(false) => Some(socket),
+            Ok(true) => {
+                tracing::warn!(
+                    "o socket da batida ficou só IPv6, sem pilha dupla; o aviso sai só por IPv4"
+                );
+                None
+            }
+            Err(erro) => {
+                tracing::warn!(
+                    %erro,
+                    "não deu para ler se o socket da batida é de pilha dupla; o aviso sai \
+                     só por IPv4"
+                );
+                None
+            }
         }
-        Some(socket)
     };
     let quatro = || std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok();
 
@@ -1718,7 +1745,8 @@ mod testes {
 
         let (ladroes, encenada) = match encenar_a_colisao() {
             Encenacao::Colisao { ladrao, proposta } => {
-                crate::client::PROPOSTA_DE_TESTE.with(|vaga| *vaga.borrow_mut() = Some(proposta));
+                crate::client::PROPOSTA_DE_TESTE
+                    .with(|vaga| *vaga.borrow_mut() = Some(Ok(proposta)));
                 (vec![ladrao], true)
             }
             Encenacao::Recusa { ladroes, .. } => (ladroes, false),
@@ -1735,6 +1763,36 @@ mod testes {
             );
         }
         a_resposta_chega(&socket, &ladroes.iter().collect::<Vec<_>>());
+    }
+
+    /// O socket conferido que não abre — sem IPv6, ou as 16 propostas
+    /// recusadas — cai para o só IPv4 dizendo no registro por quê.
+    ///
+    /// O `.ok()?` de antes caía calado, e quem lesse o `seele.log` de uma
+    /// batida que não furou não teria como saber que o socket já era outro.
+    /// `#[test]` comum: `abrir_socket_local` roda inteiro nesta thread, onde
+    /// estão o rastro e a proposta guardada.
+    #[test]
+    fn a_batida_diz_no_registro_quando_o_socket_conferido_nao_abre() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        crate::client::PROPOSTA_DE_TESTE.with(|vaga| {
+            *vaga.borrow_mut() = Some(Err(std::io::Error::other("proposta recusada de propósito")));
+        });
+
+        let socket = abrir_socket_local();
+
+        assert!(
+            socket.is_some(),
+            "a batida não caiu para o socket só IPv4 quando o de pilha dupla não abriu"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas.iter().any(|linha| linha.starts_with("WARN")
+                && linha.contains("proposta recusada de propósito")),
+            "o socket conferido da batida não abriu e o registro não disse nada, nem por quê. \
+             Linhas: {linhas:?}"
+        );
     }
 
     #[tokio::test]
