@@ -45,6 +45,11 @@
 //    gravado) nasce sujo, e fechar pergunta; voltar ao gravado o limpa, e
 //    fechar não pergunta; e mexer num campo sem `inicial` suja, sem o MOD
 //    chamar `suja`.
+// 11. **A ação destrutiva é confirmada pelo produto** (Step 6d; rascunho §5,
+//    o A13 e o B7 do ESTILO): um `botao` com `confirmar` abre a confirmação
+//    do produto, alcançável com o modal aberto, e o evento `botao` só chega
+//    ao MOD depois do sim; cancelar não manda nada; um botão sem `confirmar`
+//    manda na hora.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -500,8 +505,33 @@ const { chromium } = require('./playwright.cjs');
     const descartado = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'editor').at(-1));
     assert.equal(descartado?.descartou, true, `descartar o editor sujo não disse descartou: ${JSON.stringify(descartado)}`);
 
+    // 11. O botão que pede confirmação.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'aparencia', tipo: 'dialogo', titulo: 'Aparência' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'aparencia', arvore: [
+        { forma: 'botao', chave: 'salvar', dentro: 'SALVAR' },
+        { forma: 'botao', chave: 'restaurar', dentro: 'RESTAURAR PADRÃO', variante: 'perigo', confirmar: 'isto muda a aparência para todo mundo neste servidor' },
+      ] });
+    });
+    const botoesDe = (chave) => page.evaluate((chave) => eventosDe(6).filter((e) => e.nome === 'botao' && e.chave === chave).length, chave);
+    const botaoDaAparencia = (chave) => `[data-superficie="aparencia"] button[data-chave-do-mod="${chave}"]`;
+    await page.click(botaoDaAparencia('salvar'));
+    assert.equal(await botoesDe('salvar'), 1, 'um botão sem confirmar não mandou o evento na hora');
+    await page.click(botaoDaAparencia('restaurar'));
+    const pergunta = await page.evaluate(() => ({ aberta: !$('moderar').hidden, alcancavel: !$('moderar').closest('[inert]'), texto: $('moderar').textContent }));
+    assert.equal(pergunta.aberta, true, 'o botão com confirmar não abriu a confirmação do produto');
+    assert.equal(pergunta.alcancavel, true, 'a confirmação abriu inerte, atrás do diálogo modal');
+    assert.ok(pergunta.texto.includes('isto muda a aparência para todo mundo neste servidor'), `a confirmação não diz a consequência que o MOD escreveu: ${pergunta.texto.slice(0, 200)}`);
+    assert.equal(await botoesDe('restaurar'), 0, 'o evento do botão chegou antes do sim');
+    await page.click('#moderar-cancelar');
+    assert.equal(await botoesDe('restaurar'), 0, 'cancelar a confirmação mandou o evento do botão');
+    await page.click(botaoDaAparencia('restaurar'));
+    await page.click('#moderar-confirmar', { timeout: 3000 });
+    assert.equal(await botoesDe('restaurar'), 1, 'o sim na confirmação não mandou o evento do botão, uma vez');
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-descartar', superficie: 'aparencia' }));
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

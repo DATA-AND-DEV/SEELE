@@ -542,7 +542,10 @@ campo. A API 6 acrescenta:
   (pergunta do ESTILO, B7): RESTAURAR PADRÃO é um terceiro botão, destrutivo,
   ao lado do primário e da saída. O produto mostra a confirmação com as
   palavras dele por cima do diálogo, e o evento `botao` só chega ao MOD
-  depois do sim;
+  depois do sim [c, tarefa 7, Step 6d: a caixa da moderação, a mesma do
+  «FECHAR SEM GRAVAR?», com o nome do botão como título e ato, a consequência
+  do MOD e quem pede; acordada da pilha de inércia enquanto pergunta; sem a
+  caixa, a ação não sai];
 - **um erro do servidor que fala de dois campos** vai a
   `formulario.erros({ text: motivo, background: motivo })`: o produto marca
   cada campo pela chave. O que a metade de servidor responde é protocolo do

@@ -714,6 +714,8 @@ class RegiaoDeMod {
     // O valor inicial de cada campo, para o `sujo` derivado (Step 6c): o
     // `inicial` declarado — o gravado —, ou o valor da montagem.
     this.iniciais = new WeakMap();
+    // A consequência que um botão destrutivo declara em `confirmar` (Step 6d).
+    this.confirmacoes = new WeakMap();
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -1172,6 +1174,9 @@ class RegiaoDeMod {
   /** O botão, com a variante que o MOD pediu e o estado de ação em curso. */
   atualizarBotao(elem, plano) {
     elem.disabled = plano.no.desligado === true || plano.no.emProgresso === true;
+    const consequencia = typeof plano.no.confirmar === "string" ? plano.no.confirmar.trim().slice(0, 300) : "";
+    if (consequencia) this.confirmacoes.set(elem, consequencia);
+    else this.confirmacoes.delete(elem);
     const variantes = ["primaria", "secundaria", "perigo", "discreta"];
     const variante = variantes.includes(plano.no.variante) ? plano.no.variante : "secundaria";
     if (elem.dataset.variante !== variante) elem.dataset.variante = variante;
@@ -1319,12 +1324,39 @@ class RegiaoDeMod {
   montarBotao(elem, plano) {
     elem.type = "button";
     const aoApertar = () => {
-      this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+      const falar = () => this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+      const consequencia = this.confirmacoes.get(elem);
+      if (consequencia) this.confirmarAntes(elem, consequencia, falar);
+      else falar();
     };
     elem.addEventListener("click", aoApertar);
     this.guardar(elem, `botao ${plano.chave}`, () => {
       elem.removeEventListener("click", aoApertar);
     });
+  }
+
+  /**
+   * **A ação destrutiva é confirmada pelo produto** (rascunho da API 6, §5;
+   * tarefa 7, Step 6d; o A13 e o B7 do ESTILO): a caixa de confirmação da
+   * moderação — a mesma do «FECHAR SEM GRAVAR?» —, com o nome do botão, a
+   * consequência que o MOD escreveu e as palavras do produto. O evento só
+   * sai no sim; cancelar não manda nada.
+   *
+   * A caixa é acordada da pilha de inércia enquanto pergunta, como no
+   * descarte: com um diálogo modal aberto, ela é irmã do ramo adormecido. Sem
+   * a camada de confirmação carregada, a ação **não** sai: uma ação que pede
+   * um sim não acontece sem ele.
+   */
+  confirmarAntes(botao, consequencia, executar) {
+    if (typeof abrirConfirmacao !== "function") return;
+    const confirmacao = document.getElementById("moderar");
+    const readormecer = typeof acordarDaPilha === "function" ? acordarDaPilha(confirmacao) : () => {};
+    const nome = (botao.textContent ?? "").trim().slice(0, 60) || "CONFIRMAR";
+    abrirConfirmacao(`${nome.toUpperCase()}?`, `${consequencia} (pedido por ${this.id})`, nome.toUpperCase(), () => {
+      readormecer();
+      if (this.solta) return;
+      executar();
+    }, readormecer);
   }
 
   // ------------------------------------------------------------ arquivo
