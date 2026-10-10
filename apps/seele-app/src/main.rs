@@ -10286,7 +10286,8 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info,seele_lancador=info,seele_motor=info"
+         seele_encontro=info,seele_lancador=info,seele_motor=info,\
+         seele_sessao=info,seele_voz=info"
             .into()
     });
     match arquivo_de_log() {
