@@ -8,7 +8,10 @@ Ramo `0.16/lotes-y`, a partir de `d9124cea`. Worktree:
 | `6061e38c` | parte 1: o socket de quem conecta não divide a porta com um socket IPv4 (`seele-core`) |
 | `de04ab26` | parte 2: o `par_lento` espera por sinais do servidor e afirma o que ele promete (salvo pelo controlador como «em curso»; o código é o que foi medido abaixo) |
 | `ffbcc3fc` | parte 2: o acréscimo em `docs/pendencias.md` |
-| este | o relatório |
+| `2bb78972` | o relatório, primeira versão |
+| `d7b969af` | parte 1: a reprodução roda e mede nos três sistemas, com teto (a preocupação bloqueante do controlador) |
+| `99142c72` | parte 1: o conserto também cobre o IPv4 no curinga `0.0.0.0:X`, que `6061e38c` deixava passar |
+| este | o relatório com a seção «v0.15.1», Linux e Windows |
 
 Nada fora de `crates/seele-core`, `crates/seele-server/tests/par_lento.rs` e
 `docs/`. Nenhum gancho em `crates/seele-server/src`. O `seele-sessao` não foi
@@ -65,12 +68,17 @@ O socket do cliente é `*:63456`, de pilha dupla. O **mesmo processo** segura
 | 4 000 `127.0.0.1:0`, depois 4 000 `[::]:0` de pilha dupla | **992** portas repetidas (o esperado de sorteio independente é ~977) |
 | 3 000 no endereço da rede de casa, depois `[::]:0` | **525** repetidas |
 | para onde vai a resposta a `127.0.0.1:X` (ou `192.168.x.y:X`) com os dois de pé | ao socket IPv4, nos dois casos |
-| ligação **explícita** a `[::]:X` com um IPv4 segurando `X` | `EADDRINUSE` (127.0.0.1 e rede de casa) |
-| curinga IPv4 `0.0.0.0:0` depois de IPv4 específicos | 0 repetidas |
-| com `[::]:X` nosso de pé, ligar `127.0.0.1:X` ou `0.0.0.0:X` | `EADDRINUSE` |
+| ligação **explícita** a `[::]:X` com um IPv4 segurando `X` num endereço | `EADDRINUSE` (127.0.0.1 e rede de casa) |
+| 3 000 IPv4 no **curinga** `0.0.0.0:0`, depois `[::]:0` | **535** repetidas; a resposta a `127.0.0.1:X` vai ao IPv4 curinga, 20 de 20 |
+| ligação **explícita** a `[::]:X` com um IPv4 no curinga segurando `X` | **aceita**, 20 de 20, e a resposta vai ao IPv4 curinga |
+| 3 000 IPv4 **conectados** (como o QUIC de um navegador) no endereço da rede de casa, depois `[::]:0` | 503 repetidas, mas a resposta de outro remetente vai à pilha dupla, 20 de 20: conectado **não rouba** |
+| ligação explícita de uma sonda `0.0.0.0:X` com `X` de um IPv4 em `127.0.0.1`, na rede de casa, no curinga, ou de um `[::]:X` | `EADDRINUSE` nos quatro |
+| curinga IPv4 `0.0.0.0:0` depois de IPv4 específicos, ou de 3 000 `[::]:0` | 0 repetidas |
+| com `[::]:X` nosso de pé, ligar `127.0.0.1:X`, o da rede de casa ou `0.0.0.0:X` | `EADDRINUSE` |
 
-A escolha de porta de `[::]:0` confere só a família IPv6; a ligação explícita
-confere as duas.
+A escolha de porta de `[::]:0` confere só a família IPv6. A ligação explícita
+a `[::]:X` recusa o IPv4 ligado a um endereço, mas não o do curinga; a sonda
+IPv4 explícita em `0.0.0.0:X` recusa os dois.
 
 **Descartadas pela medida:**
 - conexão estranha no servidor de teste: 310 `Incoming` em 30 rodadas, todos
@@ -95,15 +103,26 @@ com sockets em `127.0.0.1` sobem a chance. A F1 viu 1 em 5.
 ### A reprodução, em toda rodada
 
 `client::PROPOSTA_DE_TESTE` (só com `cfg(test)`, por thread) põe na frente da
-proposta do sistema uma que colide de verdade:
-`client::testes_do_socket::proposta_que_colide` segura 64 sockets IPv4 em
-`127.0.0.1` e pede `[::]:0` ao sistema até ele cair na porta de um deles
-(espera de 256 pedidos; 8 192 no máximo, chance de não achar e^-32). A
-primeira volta de `a_volta_avisa_…` passa a encenar a colisão sempre — o
-`tentar` roda no futuro do `block_on`, na thread do teste — e confere que
-encenou. Fora do macOS a escolha de porta confere as duas famílias e não há
-colisão a encenar; ali o teste segue sem ela, e no macOS reprova se não a
-encenar.
+proposta do sistema uma que colide de verdade.
+`client::testes_do_socket::encenar_a_colisao_com(endereço)` segura 64 sockets
+IPv4 (em `127.0.0.1`, ou no curinga) e pede `[::]:0` ao sistema, **no máximo
+8 192 vezes**, e acaba sempre com uma de duas medidas (`d7b969af`):
+- `Colisao`: o sistema deu a porta de um ladrão (o macOS; espera de 256
+  pedidos). O teste encena e prova o conserto;
+- `Recusa`: nenhuma das 8 192 caiu numa porta presa — onde o sistema deixa, a
+  chance disso é e^-32. O teste abre o socket pelo caminho do produto com os
+  ladrões de pé, e a resposta a `127.0.0.1` na porta dele tem de chegar a ele;
+  a ligação explícita numa porta presa fica dita, não afirmada (onde a escolha
+  de porta já recusa, o produto está a salvo com ela ou sem ela, e reprovar por
+  ela seria reprovar o sistema por estar certo).
+
+Não há `cfg!(target_os = …)` nos testes: os três rodam e medem nos três
+sistemas. A primeira volta de `a_volta_avisa_…` encena a colisão quando há
+colisão — o `tentar` roda no futuro do `block_on`, na thread do teste — e só
+então exige a proposta consumida. O braço `Recusa` foi forçado aqui, para
+rodar o caminho que o Linux e o Windows devem tomar: verde, 0,20 s para os
+dois testes de socket (8 192 propostas cada), e a ligação explícita numa porta
+presa em `127.0.0.1` recusada.
 
 Antes do conserto (a proposta usada como vem, que é o que
 `Endpoint::client([::]:0)` fazia), **3 de 3**, 20,04 s cada, a mensagem da
@@ -119,20 +138,28 @@ assertion `left == right` failed: a volta não avisou a sala que o motor refez n
 
 `client::socket_de_quem_conecta` abre o mesmo socket de pilha dupla que
 `Endpoint::client` abria, mas trata a porta do sistema como proposta: larga o
-socket proposto, liga de novo, explícito, em `[::]:X`, e propõe outra se a
-ligação volta `AddrInUse` (até 16 propostas; depois cai para o socket só IPv4,
-que não tem o defeito). `local_endpoint` adota o socket com `Endpoint::new`. O
-gêmeo, o socket da `Batida` (`encontro::abrir_socket_local`, que o QUIC adota
-depois do furo), passa pelo mesmo caminho e continua exigindo pilha dupla.
+socket proposto, liga uma **sonda IPv4 em `0.0.0.0:X`** e a larga, e só então
+liga `[::]:X` explícito; se a sonda ou a ligação voltam `AddrInUse`, propõe
+outra (até 16 propostas; depois cai para o socket só IPv4, que não tem o
+defeito). `local_endpoint` adota o socket com `Endpoint::new`. O gêmeo, o
+socket da `Batida` (`encontro::abrir_socket_local`, que o QUIC adota depois do
+furo), passa pelo mesmo caminho e continua exigindo pilha dupla.
+
+A sonda veio em `99142c72`. `6061e38c` conferia só pela ligação explícita a
+`[::]:X`, que recusa o IPv4 ligado a um endereço mas **aceita** o do curinga
+(tabela acima); achei isso ao medir o custo para a orquestradora. A sonda é
+largada antes de ligar `[::]:X` de propósito: segurá-la junto funciona no
+macOS, mas um sistema que trate a pilha dupla e o curinga IPv4 como o mesmo
+lugar recusaria o `[::]:X` sempre, e todo cliente cairia para só IPv4. A
+janela entre largar a sonda e ligar é de microssegundos; depois de ligado,
+nenhum IPv4 entra na porta.
 
 No produto o defeito era a entrada ou a volta que, de vez em quando, espera
-20 s por nada, quando outro programa segura um socket UDP ligado ao endereço
-por onde a resposta volta (medido com `127.0.0.1` e com o da rede de casa).
+20 s por nada (ver «v0.15.1», abaixo).
 
 Testes novos: `client::testes_do_socket::o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4`
-e `encontro::testes::o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4`
-(a proposta que colide entra, e um datagrama a `127.0.0.1:porta` tem de chegar
-ao socket devolvido).
+(com os ladrões em `127.0.0.1` e no curinga) e
+`encontro::testes::o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4`.
 
 ### As reversões (cada arquivo de volta conferido com `cmp`, e tocado antes de recompilar)
 
@@ -142,6 +169,8 @@ ao socket devolvido).
 | o guarda do teste: `Aviso::Reconectado` com `voice_room: None` fixo | só `a_volta_avisa_…` (76 de 77 do `enlace`), `left: Some(None)`, `right: Some(Some(VoiceRoomId(5)))` |
 | `local_endpoint` de volta ao `Endpoint::client([::]:0)` | `a_volta_avisa_…`: «a volta não abriu o socket pela proposta guardada, e o teste não encenou a colisão» |
 | o socket da `Batida` de volta ao `[::]:0` de antes | `o_socket_da_batida_…`: «o socket da batida não passou pela proposta guardada» |
+| sem a sonda (o conserto de `6061e38c`, com o teste de `99142c72`) — é também o vermelho antes da sonda | `o_socket_de_quem_conecta_…`: o caso de `127.0.0.1` passa, o do curinga reprova, «a resposta mandada a 127.0.0.1:60117 não chegou ao socket de quem conecta (a porta de um socket IPv4 preso que é a mesma: Some(60117))» |
+| sem o conserto, com os testes de `d7b969af` | os dois de socket reprovam (portas 55837 e 58537 iguais às de um ladrão), `a_volta_avisa_…` em 20,0 s com `left: None`, `right: Some(Some(VoiceRoomId(5)))` |
 
 ### As rodadas — `cargo test -p seele-core --lib -- --test-threads=1`, com o codec
 
@@ -152,12 +181,80 @@ ao socket devolvido).
 | 3 | 458 passados | 24,50 s | 14,9 |
 | 4 | 458 passados | 24,58 s | 14,7 |
 | 5 | 458 passados | 24,59 s | 11,1 |
-| 6 (sobre o commit) | 458 passados | 24,65 s | 5,7 |
-| 7 (sobre o commit) | 458 passados | 25,56 s | 13,4 |
-| 8 (sobre o commit) | 458 passados | 25,69 s | 36,6 |
+| 6 (sobre `6061e38c`) | 458 passados | 24,65 s | 5,7 |
+| 7 (sobre `6061e38c`) | 458 passados | 25,56 s | 13,4 |
+| 8 (sobre `6061e38c`) | 458 passados | 25,69 s | 36,6 |
+| 9 (sobre `d7b969af`) | 458 passados | 24,60 s | 4,6 |
+| 10 (sobre `d7b969af`) | 458 passados | 24,44 s | 4,6 |
+| 11 (sobre `99142c72`) | 458 passados | 24,60 s | 5,7 |
+| 12 (sobre `99142c72`) | 458 passados | 24,53 s | 5,8 |
+| 13 (sobre `99142c72`) | 458 passados | 24,47 s | 5,7 |
 
-`a_volta_avisa_…` sozinho, 5 de 5, 0,01–0,02 s. Clippy (`-p seele-core
--p seele-server --all-targets -D warnings`) e fmt limpos.
+`a_volta_avisa_…` sozinho, 3 de 3 sobre `99142c72`, 0,01 s. Clippy (`-p
+seele-core -p seele-server --all-targets -D warnings`) e fmt limpos.
+
+---
+
+## v0.15.1
+
+**1. O defeito existe na v0.15.1 publicada?** Sim. Conferido pelo que está
+publicado e não suposto: a API de releases dá `v0.15.1 · 54f542f94 ·
+2026-10-08T04:14:07Z`, a mais nova. Em `54f542f94`:
+- `client.rs`, `local_endpoint` (linha 1658): `quinn::Endpoint::client(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0)))`;
+- `encontro.rs`, `abrir_socket_local` (linhas 294–296): `set_only_v6(false)` e
+  `bind([::]:0)`;
+- `enlace.rs` chama `local_endpoint` na entrada (linhas 1096 e 1319) e na volta
+  da bateria, em `tentar` (linha 2836, `local_endpoint(furo)`);
+- `transport.rs`: `IDLE_TIMEOUT` de 20 s.
+
+É o código em que a colisão foi medida, e nos dois casos que ele não cobre: o
+IPv4 ligado a um endereço e o IPv4 no curinga.
+
+**2. O custo para quem usa.** Por tentativa, a chance é ~N/16 384 (a faixa
+efêmera do macOS). Quando cai, é uma tentativa que espera 20 s e falha com
+`SemResposta`; a bateria tenta de novo com um socket novo. Com uma ressalva à
+conta do controlador, medida: **N não é todo socket UDP IPv4 no endereço.**
+- Contam os IPv4 **não conectados** na faixa efêmera ligados ao endereço
+  exato por onde a resposta volta (o da rede de casa depois do NAT; `127.0.0.1`
+  para quem fala com um servidor na própria máquina) **e os ligados ao curinga
+  `0.0.0.0`**, que roubam também (535 colisões em 3 000, e a resposta a
+  `127.0.0.1:X` foi ao IPv4 curinga 20 de 20; com o endereço da rede de casa
+  no lugar de `127.0.0.1`, não medi).
+- **Não contam os conectados.** Com 3 000 IPv4 conectados no endereço da rede
+  de casa (um `connect` a um destino, como o QUIC de um navegador faz), houve
+  503 colisões de porta, e a resposta de outro remetente foi à pilha dupla 20
+  de 20.
+- Nesta máquina, agora: os 5 a 6 sockets no IP da rede de casa que o `lsof`
+  mostra são todos conectados (`192.168.50.142:… -> …:443`, do navegador e do
+  Claude); os `IPv4 *:*` não têm porta. **N = 0** aqui, agora. O processo do
+  SEELE abre IPv4 no curinga também — `encontro::perguntar_a` liga `0.0.0.0:0`
+  para perguntar ao quarto, por pouco tempo —, e esse pode cair na conta da
+  própria entrada.
+
+O número de campo (quantas máquinas de quem usa têm IPv4 não conectados ou no
+curinga na faixa efêmera) não foi medido.
+
+**3. Windows e Linux.**
+- **Medido só no macOS** (o Darwin desta máquina): a colisão, para onde vai a
+  resposta, a recusa da ligação explícita, a sonda, o conserto, e o braço
+  `Recusa` do teste forçado.
+- **O que sei do Linux, sem ter medido:** pelo que conheço do kernel, a
+  escolha de porta de um `[::]` sem `IPV6_V6ONLY` confere os IPv4 na mesma
+  porta, e o defeito não existiria lá. Também espero que o Linux recuse ligar
+  `[::]:X` com um `0.0.0.0:X` de pé — é por isso que a sonda é largada antes.
+  Nada disso foi medido.
+- **Windows:** não sei. As regras de compartilhamento de porta dos sockets de
+  modo duplo são outras, e eu não as medi; não sei nem em qual braço o teste
+  cai.
+- **O que só o CI vai provar** (`ubuntu-24.04`, `windows-2022`, `macos-15`):
+  em qual braço cada sistema cai, e que o socket do produto recebe a resposta
+  com os ladrões de pé. Se o Linux ou o Windows caírem em `Colisao` e
+  aceitarem a ligação explícita na porta presa, o teste reprova pela resposta
+  — e isso seria o defeito existindo lá sem o conserto cobrir. Se a sonda
+  largada antes não bastar num deles, `socket_de_quem_conecta` volta erro, o
+  `expect` do teste reprova, e é igualmente visível. A pendência 60
+  (`a0bdcd9a`) registra a mesma lacuna; o caso do curinga é posterior a ela e
+  vale acrescentar lá.
 
 ---
 
@@ -303,6 +400,11 @@ desfeito por `becb0257`, que a causa medida é outra, e que o conserto novo é
    resposta, mas seguem sendo vazamento.
 5. `tipo_de_fluxo.rs` também perdeu a tolerância em `becb0257`; está fora deste
    lote.
-6. A reprodução da parte 1 só encena no macOS; em Linux e Windows a escolha de
-   porta já confere as duas famílias (não medi lá), e o teste segue sem a
-   colisão.
+6. **Linux e Windows não foram medidos.** Os testes da parte 1 rodam e medem
+   nos três (`d7b969af`), mas em qual braço cada um cai, e se a sonda largada
+   antes basta lá, só o CI diz. O braço `Recusa` foi forçado aqui e passa.
+7. **O conserto de `6061e38c` estava incompleto, e eu só vi ao medir o custo:**
+   o IPv4 no curinga passava pela ligação explícita. `99142c72` cobre; a
+   pendência 60 (`a0bdcd9a`) foi escrita antes e não tem esse caso.
+8. A sonda IPv4 roda a cada socket de quem conecta: um `bind` a mais por
+   tentativa de conexão, sem custo medido que pese.
