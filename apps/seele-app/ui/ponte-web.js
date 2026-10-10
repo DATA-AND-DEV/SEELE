@@ -44,9 +44,12 @@
 //   (`F4/ponte-no-pc.md`);
 // - `RECUSAS_NOMEADAS`: recusados nas duas, com a frase;
 // - `NEUTROS_DE_QUEM_NAO_HOSPEDA`: mexem na hospedagem, e respondem sempre o
-//   que o desktop responde a quem não hospeda;
-// - `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: mexem na hospedagem e são atendidos (o
-//   `disconnect`: sair da sessão é do navegador também).
+//   que o desktop responde a quem não hospeda.
+//
+// Havia uma sexta, `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, só com o `disconnect`, que
+// derrubava a hospedagem no desktop. Desde a tarefa 19 da F7 ele desmonta só a
+// sessão, e é um atendido comum: a lista saiu inteira, com o ramo dela no guarda,
+// porque uma lista vazia que o guarda ainda lê é onde um comando se esconde.
 //
 // **E `AINDA_A_FAZER`**: os atendidos que ainda não têm corpo, cada um com a
 // tarefa do plano que o traz (a sessão pelo navegador é a 2.6, que espera a
@@ -197,7 +200,7 @@ const COMANDOS_DA_PONTE = new Set([
   "atualizacao_que_nao_pegou", "busca_andar", "busca_limpar", "buscar",
   "calar_a_tela", "codigo_do_mod", "conferir_esta_versao", "conhecidos",
   "connect", "consentir_previa", "controles_da_voz", "descartar_mensagem",
-  "desmontar_a_sessao", "destino_do_anexo", "dispensar_aviso",
+  "desmontar_a_sessao", "destino_do_anexo", "disconnect", "dispensar_aviso",
   "dominios_de_gif", "enter_voice_room", "enviar_anexo", "enviar_imagem_mod",
   "escolher_apelido", "escolher_apelido_local", "escolher_arquivo",
   "escolher_microfone", "escolher_minha_imagem", "escolher_para_o_mod",
@@ -268,16 +271,6 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
     "toques_agora",
     { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },
   ],
-]);
-
-/**
- * **Mexem na hospedagem local, e são atendidos mesmo assim.** No desktop, o
- * `disconnect` também derruba a hospedagem; no navegador não há hospedagem,
- * e sair da sessão é dele também. Como neutro, sair passaria a não fazer
- * nada.
- */
-const ATENDIDOS_APESAR_DA_HOSPEDAGEM = new Map([
-  ["disconnect", "sair da sessão é do navegador também; não há hospedagem a derrubar"],
 ]);
 
 const TAREFA_26 = "2.6 (a sessão pelo navegador)";

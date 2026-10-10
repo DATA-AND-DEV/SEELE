@@ -582,7 +582,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // em 2026-10-10, entre a metade do Rust e a da casca, no ramo `0.16/sala-viva`,
 // e saíram quando a faixa `#toque` e o PERFIL passaram a chamá-los. A lista
 // voltou ao estado de repouso, que é vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+//
+// `meu_servidor` e `parar_de_hospedar` entraram com as tarefas 19 e 20 da F7
+// (sair não derruba mais o servidor), e saem quando a entrada e a trilha os
+// chamarem, nos commits seguintes.
+const AGUARDANDO_TELA: &[&str] = &["meu_servidor", "parar_de_hospedar"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -19119,5 +19123,35 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
     assert!(
         entrar.contains("ejetar(true)") && !entrar.contains("\"disconnect\""),
         "o ATENDER não desmonta só o cliente:\n{entrar}"
+    );
+}
+
+/// **Sair não derruba o servidor de ninguém** (tarefa 19 da F7, Plano 2).
+///
+/// O `disconnect` desmontava a sessão **e** o servidor que esta janela
+/// hospedava, e todo mundo que estava nele saía junto com quem só queria ir a
+/// outro lugar. Agora ele desmonta só o cliente, e quem derruba o guardado é o
+/// `parar_de_hospedar`, que a pessoa aperta sabendo o que faz. Este guarda fica
+/// vermelho se o corpo do `disconnect` voltar a tocar nas hospedagens.
+#[test]
+fn sair_nao_derruba_o_servidor_de_ninguem() {
+    let main = read("src/main.rs");
+    let sair = body_of(&main, "async fn disconnect(");
+    assert!(
+        sair.contains("desmontar_o_cliente"),
+        "o `disconnect` não desmonta mais a sessão de cliente:\n{sair}"
+    );
+    for derruba in ["hospedag", ".encerrar(", ".despedir(", "parar_de_hospedar"] {
+        assert!(
+            !sair.contains(derruba),
+            "o `disconnect` voltou a mexer nas hospedagens (`{derruba}`): sair de uma \
+             sessão derrubaria o servidor de quem estiver nele:\n{sair}"
+        );
+    }
+    let parar = body_of(&main, "async fn parar_de_hospedar_em(");
+    assert!(
+        parar.contains("guardado.take()") && !parar.contains("pessoal"),
+        "o `parar_de_hospedar` não derruba o guardado, ou mexe na sala, que desce pelo \
+         «receber ligações»:\n{parar}"
     );
 }
