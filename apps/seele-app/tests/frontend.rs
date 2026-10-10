@@ -10714,6 +10714,14 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
         // o alvo e mais nada.
         ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
+        // A falha que `aceitarOsMods` não pegou por dentro (lote W3): só compara
+        // a identidade da pergunta para decidir se a tela fala. O registro leva
+        // o alvo e o motivo, e `aceiteFalhou` não nomeia a credencial em linha
+        // nenhuma — esta é a única do corpo dela que toca `aceitePendente`.
+        (
+            "camada-mods.js",
+            "if (!pergunta || aceitePendente !== pergunta) return;",
+        ),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",

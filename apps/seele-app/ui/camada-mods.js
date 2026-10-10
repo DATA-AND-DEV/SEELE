@@ -409,10 +409,60 @@ function levarParaOAceiteDeMods(motivo, alvo, credencial) {
   return true;
 }
 
+/**
+ * **O que `aceitarOsMods` não pegou por dentro** — lote W3 da F5.
+ *
+ * Todo `invoke` de `aceitarOsMods` está dentro de um `try` que escreve uma
+ * frase (medido no W3: `mods_instalados` nas duas leituras, a obtenção e o
+ * `aceitar_mods` voltando `Err` acendem o ACEITAR de novo, com o motivo), e a
+ * volta é do `conectar`, que escreve a linha vermelha da entrada. O que
+ * escapa é a **resposta de forma errada** — a lista de instalados que não é lista, ou que
+ * tem um `null` dentro —, que estoura em `.some` fora de qualquer `try`. O
+ * produto não a manda hoje (`mods_instalados` devolve um `Vec`, e o anúncio é
+ * decodificado no Rust), mas o que acontecia quando ela viesse era um
+ * `console.warn`, o ACEITAR apagado e a tela sem uma palavra: «o produto sabe e
+ * não conta». A medida do roteiro `aceite-de-mods.js` foi exatamente essa.
+ *
+ * Agora a tela diz, o ACEITAR volta, e o motivo vai ao `seele.log`.
+ *
+ * **Só a pergunta que falhou fala na tela**, a mesma regra da recusa de uma
+ * tentativa substituída (lote W2): quem desistiu enquanto o aceite andava, ou
+ * já está diante de outra pergunta, não lê o erro de uma que largou. Esse caso
+ * vai só ao registro.
+ *
+ * **O registro leva o alvo e o motivo, e nunca a credencial** — nem o convite,
+ * nem a senha. O motivo é o erro como a ponte o mandou, ou o `TypeError` da
+ * casca; nenhum dos dois carrega o segredo da tentativa.
+ */
+function aceiteFalhou(pergunta, falha) {
+  const alvo = pergunta?.alvo ?? "";
+  let dito;
+  try {
+    dito = falha instanceof Error ? String(falha) : JSON.stringify(falha);
+  } catch {
+    dito = Object.prototype.toString.call(falha);
+  }
+  registrarNoAnfitriao(
+    "aceite-de-mods",
+    `o aceite dos MODs de ${alvo} rejeitou por dentro: ${dito}`,
+    "aviso",
+  );
+  if (!pergunta || aceitePendente !== pergunta) return;
+  const erro = $("mods-erro");
+  erro.hidden = false;
+  erro.textContent =
+    `não consegui concluir o aceite dos MODs de ${alvo}: ${fraseDeErro(falha)}. ` +
+    "Tente de novo, ou recuse a entrada.";
+  $("mods-aceitar").disabled = false;
+}
+
 // ------------------------------------------------------------------- ligação
 
 $("mods-aceitar").addEventListener("click", () => {
-  aceitarOsMods().catch((falha) => console.warn("aceitar mods:", falha));
+  // A pergunta que este clique responde, para a falha de dentro dela saber se
+  // ainda é a que está na tela. Ver `aceiteFalhou`.
+  const pergunta = aceitePendente;
+  aceitarOsMods().catch((falha) => aceiteFalhou(pergunta, falha));
 });
 $("mods-recusar").addEventListener("click", fecharAceiteDeMods);
 
