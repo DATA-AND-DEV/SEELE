@@ -305,6 +305,14 @@ async function conectar(alvo, apelido, credencial) {
     if (Array.isArray(falha?.trail) && falha.trail.length > 0) {
       console.warn("chegada:", falha.trail);
     }
+    // **Um apelido que o servidor recusou não é lembrado** (lote W da F5).
+    // A frase manda escolher outro e entrar de novo, e o lugar de escolher é o
+    // perfil. Com o recusado em `ultimoApelido`, a tentativa seguinte não lia
+    // mais o perfil, e o nome novo ficava gravado sem sair da máquina — o
+    // relato do `d084cfb4`, agora com um nome que alguém escolheu.
+    if (motivo?.Refused?.reason === "NicknameTaken") {
+      ultimoApelido = null;
+    }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
     // uma falha que chega enquanto essa tela está na frente pertence a ela:
     // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se

@@ -12019,6 +12019,22 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
          nas tentativas seguintes — e quem corrigir o nome no perfil vai vê-lo \
          gravado no disco sem nunca sair da máquina.\n{corpo}"
     );
+
+    // **E esquece o que o servidor recusou** (lote W da F5). Um nome escolhido
+    // no perfil também era lembrado, e quando o servidor o recusava por ser de
+    // outra chave a pessoa o trocava no perfil e a tentativa seguinte mandava o
+    // recusado de novo — o mesmo relato de cima, com um nome que alguém
+    // escolheu. A `ajustes-v013.cjs` troca o apelido e confere o que sai.
+    let recusa = corpo
+        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\") {")
+        .and_then(|(_, depois)| depois.split_once('}'))
+        .map(|(bloco, _)| bloco);
+    assert!(
+        recusa.is_some_and(|bloco| bloco.contains("ultimoApelido = null;")),
+        "a casca deixou de esquecer o apelido que o servidor recusou por ser de \
+         outra chave: a pessoa troca o nome no perfil, como a frase manda, e a \
+         tentativa seguinte manda o recusado de novo.\n{corpo}"
+    );
 }
 
 #[test]

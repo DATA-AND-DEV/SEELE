@@ -490,6 +490,115 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   await page.close();
 }
 
+// --------------------------------------------------------------------------
+// Lote W da F5: o apelido tomado e a tentativa seguinte
+// --------------------------------------------------------------------------
+//
+// **O caso.** Um servidor fechado por convite, sem portaria, onde o apelido
+// desta máquina já é de outra chave. A frase diz «Não é o convite nem a senha:
+// escolha outro apelido e entre de novo», e o servidor guarda o convite
+// intacto (`seele-server/src/session.rs`, «o convite ficou intacto»). A pessoa
+// troca o apelido no perfil e tenta de novo.
+//
+// **O servidor de mentira confere na ordem do de verdade**: o segredo, depois
+// o apelido, e só gasta o convite na entrada.
+
+const CONVITE_W = `convite-do-lote-w-${process.pid}-${Date.now()}`;
+const ALVO_W = '192.0.2.17:8384';
+const LINK_W = `seele://${ALVO_W}?token=${CONVITE_W}`;
+
+/**
+ * Uma tentativa pelo campo do diálogo de servidores — o link colado ou o
+ * endereço digitado —, esperando a resposta dela: a linha vermelha da entrada
+ * ou a `#tela-auth`.
+ */
+async function tentarPeloCampo(page, escrito) {
+  const antes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').length);
+  await page.evaluate(() => {
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', escrito);
+  await page.press('#servidores-endereco', 'Enter');
+  await page.waitForFunction(
+    (n) => testCalls.filter(c => c.cmd === 'connect').length > n
+      && (!document.getElementById('boot-erro').hidden || !document.getElementById('tela-auth').hidden),
+    antes, { timeout: 3000 },
+  ).catch(() => assert.fail(`a tentativa por «${escrito}» não chegou a uma resposta`));
+  return page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').at(-1).args);
+}
+
+/** Troca o apelido pelo perfil da entrada, como a pessoa faz. */
+async function trocarOApelido(page, novo) {
+  await page.click('#boot-perfil');
+  await page.waitForFunction(() => !document.getElementById('perfil').hidden, null, { timeout: 3000 });
+  await page.fill('#perfil-apelido', novo);
+  await page.press('#perfil-apelido', 'Enter');
+  await page.waitForFunction(() => document.getElementById('perfil').hidden, null, { timeout: 3000 });
+  assert.equal(await page.evaluate(() => testTable.apelido_local), novo,
+    'o perfil da entrada não gravou o apelido novo, e esta cena não mede a troca');
+}
+
+async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, convite, alvo, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    window.testServidor = { gasto: false, tomados: ['Bia'] };
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        window.testCalls.push({ cmd, args });
+        if (cmd === 'escolher_apelido_local') window.testTable.apelido_local = args.apelido;
+        if (cmd === 'connect') {
+          const servidor = window.testServidor;
+          const recusa = (error) => { throw { error, trail: [] }; };
+          // Outro servidor, também fechado, para o qual esta máquina não tem
+          // convite nenhum.
+          if (args.server !== alvo) recusa({ Refused: { reason: 'CredentialRejected' } });
+          if (args.joinSecret !== convite || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
+          if (servidor.tomados.includes(args.nickname)) recusa({ Refused: { reason: 'NicknameTaken' } });
+          servidor.gasto = true;
+          return {
+            snapshot,
+            veredito: { FirstContactVerified: { fingerprint: 'ef'.repeat(32) } },
+            geracao: window.testCalls.length,
+          };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      analisar_convite: { alvo: ALVO_W, token: CONVITE_W, para_entrar: null },
+    }),
+    convite: CONVITE_W, alvo: ALVO_W, snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  // ---- 1. O link colado, com o apelido desta máquina já tomado.
+  const primeira = await tentarPeloCampo(page, LINK_W);
+  assert.equal(primeira.joinSecret, CONVITE_W, 'a primeira tentativa não levou o convite do link, e esta cena não mede nada');
+  assert.ok((await page.evaluate(() => $('boot-erro').textContent)).includes('«Bia» JÁ É DE OUTRA PESSOA'),
+    `a primeira tentativa não foi recusada pelo apelido — a entrada diz «${await page.evaluate(() => $('boot-erro').textContent)}»`);
+
+  // ---- 2. A troca de apelido, pelo perfil da entrada.
+  await trocarOApelido(page, 'Bia2');
+
+  // ---- 3. A tentativa seguinte, ao mesmo servidor, sem colar o link de novo.
+  const segunda = await tentarPeloCampo(page, ALVO_W);
+  assert.equal(segunda.nickname, 'Bia2',
+    `a pessoa trocou o apelido no perfil e a tentativa seguinte mandou «${segunda.nickname}»: o apelido recusado ficou ` +
+    'lembrado, o perfil não foi lido, e a frase que manda escolher outro apelido e entrar de novo não tem como ser cumprida');
+
+  assert.deepEqual(erros, [], 'a cena do lote W lançou erro na página');
+  await page.close();
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -697,6 +806,7 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     await link.close();
 
     await aVoltaDoAceiteLevaACredencial(browser, server.address().port);
+    await oApelidoTomadoNaoPerdeATentativa(browser, server.address().port);
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
