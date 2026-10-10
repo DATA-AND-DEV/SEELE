@@ -4831,7 +4831,8 @@ struct VozDaSala<V> {
     volumes: Mutex<HashMap<String, u16>>,
     /// Os ganhos que já estão na voz viva, do jeito que [`ganhos_a_aplicar`] os
     /// deu. `None` com uma voz que ainda não recebeu nenhum — é o que
-    /// [`Self::instalar`] põe, e o que faz a voz nova recebê-los.
+    /// [`Self::instalar`] põe numa voz aberta do zero, e o que faz a voz nova
+    /// recebê-los. A reaberta da volta traz os da velha, e os mantém.
     aplicados: Mutex<Option<Vec<(Ssrc, f32)>>>,
 }
 
@@ -4981,7 +4982,12 @@ impl<V: VozViva> VozDaSala<V> {
     /// instalava uma voz aberta no aparelho de antes: `switch_device` grava a
     /// escolha segurando este mesmo cadeado, e só sob ele as duas coisas não se
     /// cruzam.
-    fn instalar(&self, nova: V, pedidos: &seele_core::DeviceChoice) -> Result<(), V> {
+    fn instalar(
+        &self,
+        nova: V,
+        pedidos: &seele_core::DeviceChoice,
+        origem: Origem,
+    ) -> Result<(), V> {
         match self.viva.lock() {
             Ok(mut viva) => {
                 let escolhida = self.escolhida();
@@ -4993,10 +4999,18 @@ impl<V: VozViva> VozDaSala<V> {
                 // Uma voz nova nasce com todo mundo a 1.0, e os volumes ainda
                 // não estão nela: zerar os aplicados é o que faz o fim desta
                 // volta do laço os pôr (`seguir_os_volumes`, acréscimo B).
-                *self
-                    .aplicados
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                //
+                // **A reaberta, não** (item 2 do lote V): ela traz os ganhos da
+                // velha, e os aplicados continuam dizendo o que está nela.
+                // Zerados, `seguir_os_volumes` não sabia que o número de quem
+                // tinha volume estava com ele, e não o devolvia a 1.0 quando o
+                // número passava a ser de outra pessoa.
+                if origem == Origem::Nova {
+                    *self
+                        .aplicados
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                }
                 self.marcar(AberturaDoAudio::Aberto);
             }
             Err(_) => self.marcar(AberturaDoAudio::SemAparelho),
@@ -5089,6 +5103,17 @@ type Futuro<V> = std::pin::Pin<Box<dyn std::future::Future<Output = Aberta<V>>>>
 struct EmCurso<V> {
     futuro: Futuro<V>,
     pedidos: seele_core::DeviceChoice,
+    origem: Origem,
+}
+
+/// De onde vem a voz que entra no lugar, e o que isso diz dos ganhos dela.
+/// Item 2 do lote V.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Origem {
+    /// Aberta do zero: todo mundo a 1.0, e os volumes ainda não estão nela.
+    Nova,
+    /// A reabertura da volta: `Voice::reopen` carrega os ganhos da velha.
+    Reaberta,
 }
 
 /// O que o assento pede da voz.
@@ -5190,6 +5215,7 @@ impl<V: VozViva> PortaDaVoz<V> {
         self.em_curso = Some(EmCurso {
             futuro: abrir(&pedidos),
             pedidos,
+            origem: Origem::Nova,
         });
     }
 
@@ -5218,7 +5244,13 @@ impl<V: VozViva> PortaDaVoz<V> {
             .ok()
             .and_then(|mut viva| reabrir_voz_na_reconexao(&mut viva, reabrir));
         match reaberta {
-            Some(futuro) => self.em_curso = Some(EmCurso { futuro, pedidos }),
+            Some(futuro) => {
+                self.em_curso = Some(EmCurso {
+                    futuro,
+                    pedidos,
+                    origem: Origem::Reaberta,
+                });
+            }
             None => voz.marcar(AberturaDoAudio::SemAparelho),
         }
     }
@@ -5246,7 +5278,7 @@ impl<V: VozViva> PortaDaVoz<V> {
         };
         match aberta {
             Ok(Ok(nova)) => {
-                if let Err(nova) = voz.instalar(nova, &em_curso.pedidos) {
+                if let Err(nova) = voz.instalar(nova, &em_curso.pedidos, em_curso.origem) {
                     // A pessoa escolheu outro aparelho enquanto este abria. O
                     // que abriu não é mais o pedido, e guardá-lo seria a tela
                     // dizendo ESCOLHIDO num e EM USO noutro.
@@ -10589,7 +10621,7 @@ mod o_audio_segue_a_sala {
 
     use super::{
         ganhos_a_aplicar, readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta,
-        AberturaDoAudio, ControlesGuardados, Futuro, PortaDaVoz, VozDaSala, VozViva,
+        AberturaDoAudio, ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
     };
     use seele_core::{
         AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
@@ -11240,7 +11272,7 @@ mod o_audio_segue_a_sala {
         let pedidos = voz.escolhida().aparelhos;
         voz.guardar_aparelho(super::Lado::Entrada, Some("fone".into()));
 
-        let devolvida = voz.instalar(voz_de(1), &pedidos);
+        let devolvida = voz.instalar(voz_de(1), &pedidos, Origem::Nova);
 
         assert!(
             devolvida.is_err(),
@@ -11248,7 +11280,7 @@ mod o_audio_segue_a_sala {
         );
         assert!(!ha_voz(&voz));
         assert_eq!(
-            voz.instalar(voz_de(2), &voz.escolhida().aparelhos)
+            voz.instalar(voz_de(2), &voz.escolhida().aparelhos, Origem::Nova)
                 .map_err(|_| ()),
             Ok(()),
             "a voz aberta com os aparelhos de agora não entrou no lugar"
@@ -11707,6 +11739,99 @@ mod o_audio_segue_a_sala {
             Some(1.5),
             "saiu da sala e entrou de novo, e a voz nova abriu com a Rafa a 100 enquanto \
              a janela mostra 150"
+        );
+    }
+
+    /// Item 2 do lote V: depois de uma volta, o número que mudou de dono volta
+    /// a 1.0, e o volume vai com a pessoa para o número novo.
+    ///
+    /// A volta com o assento resgatado reinstala a voz que `Voice::reopen`
+    /// abriu, com os ganhos por número da velha. Enquanto ela reabre, a
+    /// fotografia de ocupação chega: o 900, que era da Rafa, é da Bia, e a Rafa
+    /// está no 901. `instalar` zerava os aplicados, e `seguir_os_volumes` não
+    /// sabia que o 900 tinha 1.5: medido pela revisão, `900=Some(1.5)
+    /// 901=Some(1.5)` — a Bia a 150 com a janela dizendo 100.
+    ///
+    /// O `seele-server` de hoje não dá um número a outra pessoa no mesmo
+    /// processo (`Registry::issue` só conta para a frente), e depois de um
+    /// reinício não há resgate: o olhar do fim da volta fecha a voz, e a que
+    /// abre é nova. O fio não promete nenhuma das duas coisas.
+    #[tokio::test]
+    async fn depois_da_volta_o_numero_que_mudou_de_dono_volta_a_um() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let room = sala_com_a_rafa(900);
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.enter_voice_room(SALA);
+            decidida(&mut sala);
+        }
+        volta_do_laco(&mut porta, &voz, &room).await;
+        voz.guardar_volume("rafa", 150);
+        voz.seguir_os_volumes(&room);
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.5),
+            "antes da volta, o volume da Rafa não chegou à voz"
+        );
+
+        // O braço `Reconectado`, com o assento resgatado, e o fim da volta dele.
+        readotar_na_volta(
+            &mut room.lock().expect("a sala"),
+            &sessao_numero(700, 701),
+            "marcela",
+            Some(SALA),
+        );
+        porta.na_volta(
+            &voz,
+            |velha| entregue(Ok(Ok(reaberta(&velha, 701)))),
+            nada_abre,
+        );
+        let sala = sala_do_audio(&room.lock().expect("a sala"));
+        porta.olhar(&voz, sala, nada_abre);
+        voz.seguir_os_volumes(&room);
+
+        // A fotografia de ocupação chega enquanto a voz reabre.
+        {
+            let mut sala = room.lock().expect("a sala");
+            sala.apply(&ServerMessage::PersonJoined {
+                voice_room: SALA,
+                profile: PersonProfile {
+                    id: PersonId(12),
+                    nickname: "bia".into(),
+                    roles: Vec::new(),
+                    material_e2ee: None,
+                },
+                ssrc: Ssrc(900),
+            });
+            sala.apply(&rafa_na_sala(901));
+        }
+        voz.seguir_os_volumes(&room);
+
+        // A reabertura chega, e o fim da volta segue os volumes.
+        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+            .await
+            .expect("a reabertura não chegou");
+        porta.chegou(&voz, aberta, nada_abre);
+        voz.seguir_os_volumes(&room);
+        let ssrc = voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc);
+        assert_eq!(
+            ssrc,
+            Some(701),
+            "a voz no lugar não é a reaberta, e o teste mediu outra coisa"
+        );
+
+        assert_eq!(
+            ganho_de(&voz, 901),
+            Some(1.5),
+            "a Rafa voltou no 901 e o volume dela não foi junto: a janela diz 150 e ela \
+             toca a 100"
+        );
+        assert_eq!(
+            ganho_de(&voz, 900),
+            Some(1.0),
+            "depois da volta, o 900 passou a ser da Bia e ficou com o volume que a Marcela \
+             deu à Rafa: a Bia toca a 150 com a janela dizendo 100"
         );
     }
 
