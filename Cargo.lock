@@ -5086,6 +5086,7 @@ dependencies = [
  "rustls",
  "seele-audio",
  "seele-proto",
+ "seele-sessao",
  "seele-video",
  "serde",
  "socket2",
@@ -5198,6 +5199,13 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "seele-sessao"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
 ]
 
 [[package]]

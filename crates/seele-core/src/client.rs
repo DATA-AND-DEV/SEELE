@@ -20,9 +20,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, ConsentimentoDePar, ServerMessage};
-use seele_proto::ids::{
-    ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId,
-};
+use seele_proto::ids::{ChannelId, ClientMessageId, MessageId, PersonId, ScreenId, VoiceRoomId};
 use seele_proto::transport::{HANDSHAKE_TIMEOUT, IDLE_TIMEOUT, KEEPALIVE};
 
 use crate::frame;
@@ -217,31 +215,10 @@ impl std::fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
-/// Everything the server told us on the way in.
-#[derive(Debug, Clone)]
-pub struct SessionInfo {
-    /// Session identifier.
-    pub id: SessionId,
-    /// Which person this connection is.
-    pub person: PersonId,
-    /// The media source the server assigned. Gap G1.
-    pub ssrc: Ssrc,
-    /// What the server is called.
-    pub server: String,
-    /// Voice channels visible to us.
-    pub voice_rooms: Vec<seele_proto::control::VoiceRoomInfo>,
-    /// Text channels visible to us.
-    ///
-    /// Carried through rather than dropped: an interface that knows the voice_rooms
-    /// but not the Channels can only ever open whichever Channel it was started with.
-    pub channels: Vec<seele_proto::control::ChannelInfo>,
-    /// What this person may do, as PERMISSIONS resolved it.
-    ///
-    /// So a shell can decide whether to offer a control at all. **Convenience,
-    /// never enforcement** — `specs/08-seguranca.md` puts the security in the
-    /// server refusing, and it refuses again whatever this list says.
-    pub permissions: Vec<seele_proto::control::Permission>,
-}
+/// Everything the server told us on the way in: o `SessionInfo` mora no
+/// `seele-sessao`, com o `Room` que o dobra, para o navegador montar o mesmo
+/// retrato (Tarefa 2.2 da F4).
+pub use seele_sessao::SessionInfo;
 
 /// The media half of a connection, usable independently of the control stream.
 ///

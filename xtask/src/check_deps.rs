@@ -67,7 +67,16 @@ const RULES: &[(&str, &[&str])] = &[
     // decisão do outro lado, pendurada no sinal da voz que `seele-core` já
     // calcula. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-video", &["seele-proto"]),
-    ("seele-core", &["seele-proto", "seele-audio", "seele-video"]),
+    // A sessão como o servidor a conta (Tarefa 2.2 da F4): o `Room`, a porta do
+    // assento e o `SessionInfo`, que saíram do `seele-core` para o navegador
+    // montar o mesmo retrato que o desktop. Só o protocolo: o `cargo xtask web`
+    // o compila para o `wasm32-unknown-unknown` a cada vez, e é ali que uma
+    // aresta nova daqui teria de compilar.
+    ("seele-sessao", &["seele-proto"]),
+    (
+        "seele-core",
+        &["seele-proto", "seele-sessao", "seele-audio", "seele-video"],
+    ),
     // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
@@ -292,6 +301,17 @@ mod tests {
         assert!(evaluate("seele-motor-web", &[edge("seele-motor")]).is_empty());
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
+    }
+
+    /// A sessão vê o protocolo e mais nada: é o que deixa o navegador
+    /// compilá-la. Uma aresta para o `seele-core` traria o quinn e o OpenH264
+    /// junto, e o `seele-core` é quem depende dela, e não o contrário.
+    #[test]
+    fn a_sessao_so_ve_o_protocolo() {
+        assert!(evaluate("seele-sessao", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-sessao", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-sessao", &[edge("seele-audio")]).len(), 1);
+        assert!(evaluate("seele-core", &[edge("seele-sessao")]).is_empty());
     }
 
     /// A volta é uma folha: o QuickJS e mais nada. Ela não conhece o manifesto

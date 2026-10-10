@@ -1,4 +1,4 @@
-//! `cargo xtask web`: os dois crates do celular, dentro do `.wasm`.
+//! `cargo xtask web`: os crates do celular, dentro do `.wasm`.
 //!
 //! O que os testes nativos não provam, porque só existe no `wasm`:
 //!
@@ -6,12 +6,15 @@
 //!    F1 cruzam a fronteira de verdade com os mesmos bytes, com o JSON passando
 //!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
 //!    da F1 passam pela fronteira (`xtask/web/links.mjs`);
-//! 2. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
+//! 2. o `seele-sessao` (o `Room` que o navegador dobra, Tarefa 2.2) compila
+//!    para `wasm32-unknown-unknown`: uma dependência nova dele que não compile
+//!    no navegador para aqui, e não no dia em que o `seele-web` a usar;
+//! 3. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
 //!    `.cargo/config.toml` aponta a variável para uma pasta que não existe;
-//! 3. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
-//! 4. o clippy passa no `wasm32-wasip1`, que é o único alvo onde a
+//! 4. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
+//! 5. o clippy passa no `wasm32-wasip1`, que é o único alvo onde a
 //!    `fronteira.rs` do motor existe, e com ela o `// SAFETY:` cobrado;
-//! 5. o motor, dentro do `.wasm`, só importa as funções da lista, fala a API do
+//! 6. o motor, dentro do `.wasm`, só importa as funções da lista, fala a API do
 //!    desktop e **passa a tabela da volta do `seele-motor`**
 //!    (`crates/seele-motor/tests/casos.json`), a mesma que o nativo passa: o
 //!    laço cortado, as rejeições, o balde do `console`, os temporizadores, a
@@ -196,6 +199,17 @@ pub(crate) fn run() -> ExitCode {
             "wasm32-unknown-unknown",
             "--features",
             "prova",
+        ]))),
+    ));
+    passos.push((
+        "seele-sessao para wasm32-unknown-unknown (o Room que o navegador dobra)",
+        deu_certo(rodar(cargo().args([
+            "build",
+            "--release",
+            "-p",
+            "seele-sessao",
+            "--target",
+            "wasm32-unknown-unknown",
         ]))),
     ));
     passos.push((
