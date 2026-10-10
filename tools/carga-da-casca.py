@@ -34,6 +34,14 @@ para o instalador.
 Uso:
     python3 tools/carga-da-casca.py            # só a carga
     python3 tools/carga-da-casca.py --roteiro tools/roteiros/hospedar.js
+    python3 tools/carga-da-casca.py --roteiro tools/roteiros/a.js --roteiro tools/roteiros/b.js
+
+Com mais de um `--roteiro`, cada um roda com a sua carga, todos rodam mesmo
+depois de um vermelho, e o fim diz quais reprovaram e com que frase. É assim
+que o job `bancadas` do `ci.yml` e a bateria do `empacotar/publicar.sh` os
+rodam, cada um com a lista inteira da pasta (o teste
+`todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`, em
+`xtask/src/check_runtime.rs`, reprova o roteiro que faltar numa delas).
 """
 
 import argparse
@@ -413,7 +421,9 @@ def navegador() -> str:
 
 def main() -> int:
     argumentos = argparse.ArgumentParser(description=__doc__)
-    argumentos.add_argument("--roteiro", type=pathlib.Path, default=None)
+    # Repetível. Antes, o segundo `--roteiro` tomava o lugar do primeiro em
+    # silêncio, e um vermelho na frente da lista sumia sem ter rodado.
+    argumentos.add_argument("--roteiro", type=pathlib.Path, action="append", default=None)
     argumentos.add_argument("--janela", default="1440,900")
     # Para comparar contra uma versão antiga: aponte para o `ui/` de um
     # `git worktree`, e o mesmo roteiro roda contra o passado.
@@ -425,7 +435,53 @@ def main() -> int:
     # silêncio, o `console.warn` é o que ela tinha para dizer.
     argumentos.add_argument("--tudo", action="store_true")
     opcoes = argumentos.parse_args()
+    roteiros = opcoes.roteiro or []
+    if len(roteiros) > 1 and opcoes.foto:
+        argumentos.error("--foto guarda a foto de um roteiro só; com vários, "
+                         "cada um cobriria a do anterior.")
+    if len(roteiros) > 1:
+        return varios(opcoes, roteiros)
+    return 1 if carregar(opcoes, roteiros[0] if roteiros else None) else 0
 
+
+def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
+    """Todos os roteiros, cada um com a sua carga, e no fim quais reprovaram.
+
+    **Todos, e não até o primeiro vermelho**: saber que dois quebraram é outra
+    informação que saber que um quebrou. E o fim repete, numa linha por motivo,
+    o roteiro e a frase com que ele reprovou: a bateria do `publicar.sh` mostra
+    só as últimas linhas do que a etapa disse, e é ali que a frase tem de estar.
+    """
+    # **Dito antes de rodar, e sem esperar o buffer.** Um roteiro que pendura
+    # não reprova: quem o para é o prazo de quem chamou (`timeout-minutes` no
+    # CI, `PRAZO_DA_ETAPA_S` no `publicar.sh`), e a última linha escrita tem de
+    # ser o nome dele. Com a saída num arquivo ou num cano, o Python guardaria
+    # essa linha no buffer, e o `kill -9` do prazo a levaria junto.
+    sys.stdout.reconfigure(line_buffering=True)
+    reprovados = []
+    for roteiro in roteiros:
+        print(f"roteiro: rodando {roteiro}")
+        if roteiro.is_file():
+            motivos = carregar(opcoes, roteiro)
+        else:
+            motivos = ["o arquivo do roteiro não existe"]
+            print(motivos[0])
+        if motivos:
+            reprovados.append((roteiro, motivos))
+        print()
+    if not reprovados:
+        print(f"roteiros: os {len(roteiros)} passaram.")
+        return 0
+    print(f"roteiros: {len(reprovados)} de {len(roteiros)} reprovaram:")
+    for roteiro, motivos in reprovados:
+        for motivo in motivos:
+            print(f"  {roteiro}: {motivo}")
+    return 1
+
+
+def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) -> list[str]:
+    """Uma carga, com um roteiro ou sem nenhum. Escreve o que viu e devolve os
+    motivos da reprovação: os estouros e as falhas do roteiro, ou nada."""
     with tempfile.TemporaryDirectory() as temporaria:
         pasta = pathlib.Path(temporaria) / "ui"
         shutil.copytree(opcoes.casca, pasta)
@@ -433,8 +489,8 @@ def main() -> int:
         texto = pagina.read_text()
         corte = texto.index("<script src=")
         roteiro = ""
-        if opcoes.roteiro:
-            corpo = opcoes.roteiro.read_text()
+        if roteiro_pedido:
+            corpo = roteiro_pedido.read_text()
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
         duble = (
             DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
@@ -476,7 +532,7 @@ def main() -> int:
     # dentro do orçamento de tempo não é uma carga limpa — e as três coisas
     # terminavam com «carga limpa» antes.
     falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
-    if opcoes.roteiro and not relatos:
+    if roteiro_pedido and not relatos:
         falhas.append("o roteiro não chegou ao fim: nenhum relato saiu da página")
 
     if opcoes.tudo:
@@ -498,9 +554,9 @@ def main() -> int:
         for f in falhas:
             print(f"  {f}")
     if estouros or falhas:
-        return 1
+        return estouros + falhas
     print("\ncarga limpa: nenhum script estourou.")
-    return 0
+    return []
 
 
 if __name__ == "__main__":
