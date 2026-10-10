@@ -46,3 +46,14 @@ Liberada pela revisão de 09/10. Da Tarefa 3 em diante, a bancada injeta numa c�
 | (pedidos da oitava integração) | o G2 lê o código sem os comentários e toda forma de ler a marca, o `dataset` também (a leitura do retrato de volta reprova, e um comentário só passa; o G2 de antes fazia o contrário); três casos na bancada provam que o retrato diz `celular` só com a casca do celular, revertidos nos dois sentidos; o duble responde os controles de voz, e ÁUDIO deixa de estourar ao abrir; a versao/0.16 entrou no ramo sem conflito, e a bancada (69) e os 28 roteiros passam | `4bb1bb87` (a versao/0.16), `7565d8a8`, `137a05c3`, `90431754` |
 | (os pontos no produto) | liberados na nona integração, com a versao/0.16 trazida antes (`f07c51d1`, `aa0ca936`): o P1 (`9208e82a`), o P5 (`415fcc37`), o P6 (`a1ab87cb`), o P7 (`2551b0c9`) e o P8 (`f78d5247`), cada um num commit, com a injeção dele tirada da bancada no mesmo commit, e cada um reprovando a bancada na sua reversão. A tabela de injeção fica vazia. Com eles e o P9 e o P10, a bancada inteira passa sem injeção nenhuma (69), com o G3 igual nos dois motores, e os 28 roteiros passam | `9208e82a` … `02957ef7` |
 | (a tela cheia da larga) | achado da F4: no navegador, o Esc sai da tela cheia sem a página receber a tecla, e o cinema ficava ligado. A larga ouve o `fullscreenchange` e sai do cinema pelo caminho do desktop; o caso `larga-tela-cheia` entra em tela cheia de verdade e sai pelo navegador, e reprova sem o ouvinte | `612e4f10` |
+
+### Quando o `0.16/api-6` da F3 chegar à `versao/0.16`
+
+O que espera essa integração, e o commit da F3 de que cada coisa depende:
+
+- [ ] trazer a `versao/0.16` e rodar o `tests/celular.rs`: o `celular-texto.css` é regerado se o CSS da API 6 mudou tamanho de letra;
+- [ ] `CELULAR.regioes` com as sete regiões, sem o `status.barra` (decidido em 09/10), e o caso que confere que toda região declarada tem caixa à vista em alguma aba e que uma não declarada recebe `regiao-ausente` (`aCascaTemARegiao`, `fb13e65e`, `7f5b45f0`);
+- [ ] o `#operador-mods` (`operador.barra`) no alto de AJUSTES, abaixo de SEU PERFIL, com os quatro critérios da F3 e o vermelho sem o `max-height` mandado a ela (Tarefa 9);
+- [ ] no caso `superficies-de-mod`: o toque no SEGURE, no SOM, no SAIR e em AJUSTES com o diálogo modal e a imersiva abertos, e o Tab contido (a inércia, `682f39ba`, validada numa cópia em 09/10); e a `folha` (`0f10718b`), com só a de cima à vista;
+- [ ] tirar do `celular-base.css` os cinco `--nucleo-*` que o desktop passou a declarar com os mesmos nomes e valores (`e26e9edc`), e ver a medida do núcleo continuar igual sob os quatro temas;
+- [ ] a Tarefa 13: as cores de estado sob o tema pela `tonsDoTema` da 17e (`bf8d8fb6`), e o tema claro de volta ao caso `aba-servidor`.
