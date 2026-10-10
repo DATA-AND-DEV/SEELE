@@ -825,3 +825,37 @@ começar.
   voz e da sessão).
 - **A fechar** depois da décima segunda, como a orquestradora pediu: os campos
   novos do `Snapshot` da sala viva, cada um com o seu lado.
+
+## 10/10, tarde: a décima segunda, o jitter zero da M3 e o fecho da fase 2
+
+- **A décima segunda trazida** (`bb1944bc`). O conflito foi o `bare_shared`:
+  fica o `sem_rede::shared`, com o `impressao_do_servidor` do lote X. Ela não
+  trouxe campo novo ao `Snapshot`.
+- **A pausa da M3** (cerca de duas horas sem compilar): o código foi escrito, e
+  rodado e commitado só depois dela.
+- **O jitter zero da M3**, achado lendo, sem rodar. O falante de medição
+  gravava `PROTOCOL_VERSION` (9) no cabeçalho de mídia, e desde o `f3aaf9ce`
+  (fora da v0.15.1) o primeiro byte da voz é 1. Quem ouvia jogava fora toda a
+  voz dele, e o jitter ficava no zero inicial. A orquestradora consertou o
+  falante e mediu de 1,06 a 1,58 ms. As duas pontas que ficavam no produto
+  mudam em `67bfeee1`:
+  - o laço de voz conta, por motivo, os datagramas que o cabeçalho recusa, e
+    diz o primeiro no log (`ler_o_datagrama`, `CabecalhosRecusados`);
+  - o `encode` do `MediaHeader` grava sempre o número do layout. A F1 revisa.
+  O teste da cadeia de recepção vai dos bytes à telemetria, e com o byte do
+  falante reprova como a M3 viu.
+- **O fecho da fase 2 da 2.2** (`1c712014`): cada campo do `Snapshot` tem um
+  lado (19 da sala, 14 medidos, 3 contados), e um campo novo reprova até
+  alguém decidir.
+- **O guarda da hospedagem** (`935ea588`) lê `.sala` e `.toques` com fronteira
+  de palavra. A marca de fim de linha deixava passar calada a leitura numa
+  linha só (provado pela injeção).
+- **A fronteira da identidade com a F8**, fechada pela orquestradora e escrita
+  durante a pausa:
+  - `identidadeDaPagina()`;
+  - o `{ ok: true, resposta, persistencia }` (achado da F8);
+  - `conhecidos()`, `entrarNoConhecido` com `link-vencido`, e `lembrarONome`;
+  - o guarda da credencial com as linhas novas, e nenhum outro script tocando
+    no link da carga;
+  - a bancada com a página inteira sem casca injetada (pedido da orquestradora
+    na décima segunda), os servidores do aparelho e a identidade da página.

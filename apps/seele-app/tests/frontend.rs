@@ -10778,7 +10778,25 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "identidade-web.js",
             "const credencial = tentativa.conhecido ? null : segredos.credencial;",
         ),
-        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        (
+            "identidade-web.js",
+            "resposta = await conectar(alvo, apelido, credencial);",
+        ),
+        // O `conectar` da identidade da página: o `connect` da ponte, que na
+        // 2.6 é a sessão pelo navegador. A credencial vai ao `connect`, e a
+        // nenhum outro lugar.
+        (
+            "identidade-web.js",
+            "function conectarPelaPonte(alvo, apelido, credencial) {",
+        ),
+        (
+            "identidade-web.js",
+            "return invocarNaPonte(\"connect\", { alvo, nickname: apelido, joinSecret: credencial });",
+        ),
+        // Quem toma o link da carga: a função e a identidade da página, e
+        // ninguém mais (a casca nunca toca no token do fragmento).
+        ("identidade-web.js", "function tomarOLinkDaCarga() {"),
+        ("identidade-web.js", "const daCarga = tomarOLinkDaCarga();"),
         // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
         // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
         ("identidade-web.js", "if (!segredos.link) return false;"),
@@ -10819,6 +10837,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 "recusaDoApelido",
                 "segredos",
                 "linkDaCarga",
+                "tomarOLinkDaCarga",
             ]
             .iter()
             .any(|nome| names(linha, nome))
@@ -10861,7 +10880,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    // 2b. **E nenhum outro script toca no link da carga** (decidido pela
+    // orquestradora em 10/10): quem o toma é a identidade da página, e a casca
+    // nunca vê o token que veio no fragmento.
+    for nome in ui_files(".js") {
+        if nome == "identidade-web.js" {
+            continue;
+        }
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for segredo in ["tomarOLinkDaCarga", "linkDaCarga"] {
+            assert!(
+                !names(&texto, segredo),
+                "`{nome}` toca em `{segredo}`: o link da carga leva o token do convite, e só \
+                 a identidade da página o toma (`identidadeDaPagina`)"
+            );
+        }
+    }
+
+    // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
