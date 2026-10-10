@@ -362,6 +362,8 @@ async function osNeutros() {
     // A sala viva da F7 (décima segunda integração): o navegador não tem sala.
     estado_da_sala: null,
     toques_agora: [],
+    // As tarefas 19 e 20 da F7: o navegador não hospeda.
+    meu_servidor: null,
   };
   for (const casca of [{ toque: true }, { largura: 1280 }]) {
     const p = pagina(casca);

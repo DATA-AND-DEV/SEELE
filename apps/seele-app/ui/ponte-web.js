@@ -271,6 +271,12 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
     "toques_agora",
     { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },
   ],
+  // As tarefas 19 e 20 da F7: `null` diz «não há servidor no ar», e o bloco do
+  // VOLTAR AO MEU SERVIDOR fica escondido.
+  [
+    "meu_servidor",
+    { resposta: null, motivo: "o navegador não hospeda; chamado sem gesto quando a entrada aparece (camada-hospedagem.js)" },
+  ],
 ]);
 
 const TAREFA_26 = "2.6 (a sessão pelo navegador)";

@@ -75,7 +75,7 @@ async function desenharToque() {
     frase = SALA_PESSOAL.ligando(tocando);
     if (tocando.com_som === false) comNota ??= SALA_PESSOAL.semSom;
     // «Atender sai de Y»: quem está num servidor sai dele para entrar na sala.
-    // O próprio servidor continua no ar (`ejetar(true)`).
+    // O próprio servidor continua no ar: sair não derruba nada (`ejetar`).
     const onde = await invoke("onde_estou").catch(() => null);
     if (onde === "Guardado" || onde === "Outro") {
       rotuloDoAtender = SALA_PESSOAL.atenderSaiDe(nomeDesteServidor());
@@ -132,7 +132,8 @@ async function encerrarALigacao() {
 
 /**
  * Entra na sala depois de atender (spec, «Atender, nesta ordem», 3): espera um
- * `conectar` em voo, encerra os MODs e desmonta **só** o cliente, entra na sala
+ * `conectar` em voo, encerra os MODs e desmonta **só** o cliente (o `ejetar`,
+ * que desde a tarefa 19 da F7 nunca derruba hospedagem nenhuma), entra na sala
  * pelo `conectar` de sempre (o Rust confere a sala pelo código desta máquina) e
  * senta na sala de voz. Quem responde se entrou é o `onde_estou`, e não a tela.
  */
@@ -141,7 +142,7 @@ async function entrarNaSalaAoAtender(alvo, tentativa) {
   await desenharToque();
   try {
     await esperarOConectarEmVoo();
-    if (!$("tela-sessao").hidden) await ejetar(true);
+    if (!$("tela-sessao").hidden) await ejetar();
     await conectar(alvo);
     const onde = await invoke("onde_estou").catch(() => null);
     if (onde === "Pessoal") {

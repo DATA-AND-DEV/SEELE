@@ -584,9 +584,10 @@ fn every_command_the_frontend_calls_is_registered() {
 // voltou ao estado de repouso, que é vazia.
 //
 // `meu_servidor` e `parar_de_hospedar` entraram com as tarefas 19 e 20 da F7
-// (sair não derruba mais o servidor), e saem quando a entrada e a trilha os
-// chamarem, nos commits seguintes.
-const AGUARDANDO_TELA: &[&str] = &["meu_servidor", "parar_de_hospedar"];
+// (sair não derruba mais o servidor). O `meu_servidor` saiu quando a trilha
+// passou a chamá-lo; o `parar_de_hospedar` sai com o PARAR DE HOSPEDAR da
+// entrada, no commit seguinte.
+const AGUARDANDO_TELA: &[&str] = &["parar_de_hospedar"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -3895,22 +3896,37 @@ fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
          to happen without saying to what: {frase}"
     );
 
-    // The channel that only a host sees, and the only one that changes the answer:
-    // for them, switching is not leaving a conversation, it is closing
-    // everybody's.
+    // The sentence that only somebody on their own server sees. Since the F7's
+    // task 19 leaving does not take the server down: the sentence says it
+    // **stays** up, and how to come back, and never that it falls with you.
     assert!(
-        frase.contains("hospedando"),
-        "the consequence is the same whether or not this computer is the one \
-         hosting the server being left — and for the host it is not: {frase}"
+        frase.contains("noMeuServidor") && frase.contains("oMeuServidorContinua("),
+        "the consequence is the same whether or not the session is on this \
+         computer's own server — and for its host it is not: {frase}"
     );
-    // The call itself, and not the name: the `console.warn` in the same body
-    // says `estado_da_porta` too, so a check on the word alone stays green with
-    // the question deleted and only the failure branch left behind.
-    let hospeda = js_function(&sessao, "async function hospedandoAqui(");
+    let continua = js_function(&sessao, "function oMeuServidorContinua(");
     assert!(
-        hospeda.contains("invoke(\"estado_da_porta\")"),
-        "the screen decides on its own whether this window is hosting, instead \
-         of asking the side that knows: {hospeda}"
+        continua.contains("continua no ar") && continua.contains("VOLTAR AO MEU SERVIDOR"),
+        "the sentence for leaving one's own server no longer says it stays up, and \
+         how to come back: {continua}"
+    );
+    for frase_toda in [&frase, &continua] {
+        assert!(
+            !frase_toda.contains("cai junto"),
+            "the sentence still promises the server falls with you, and leaving does \
+             not take anything down any more: {frase_toda}"
+        );
+    }
+    // The call itself, and not the name: the `console.warn` in the same body
+    // says `onde_estou` too, so a check on the word alone stays green with the
+    // question deleted and only the failure branch left behind. `onde_estou` is
+    // the one answer to «am I on my server?» (Plan 2), by key since the F5's
+    // batch X.
+    let hospeda = js_function(&sessao, "async function estouNoMeuServidor(");
+    assert!(
+        hospeda.contains("invoke(\"onde_estou\")") && hospeda.contains("\"Guardado\""),
+        "the screen decides on its own whether the session is on this window's \
+         server, instead of asking the side that knows: {hospeda}"
     );
 }
 
@@ -19122,7 +19138,7 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
     // servidor ao atender.
     let entrar = js_function(&toque, "async function entrarNaSalaAoAtender(");
     assert!(
-        entrar.contains("ejetar(true)") && !entrar.contains("\"disconnect\""),
+        entrar.contains("ejetar()") && !entrar.contains("parar_de_hospedar"),
         "o ATENDER não desmonta só o cliente:\n{entrar}"
     );
 }
