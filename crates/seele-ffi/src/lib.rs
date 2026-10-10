@@ -311,7 +311,9 @@ const TICK: Duration = Duration::from_millis(250);
 const HISTORY_PAGE: u16 = 50;
 
 /// What a shell needs to connect.
-#[derive(Debug, Clone)]
+///
+/// O `Debug` é escrito à mão, logo abaixo, para não imprimir o `join_secret`.
+#[derive(Clone)]
 pub struct ConnectConfig {
     /// `host` or `host:port`.
     pub server: String,
@@ -371,6 +373,36 @@ pub struct ConnectConfig {
     /// and independently of it: a headset left in another room must not cost
     /// somebody the microphone they chose.
     pub playback_device: Option<String>,
+}
+
+/// **O `join_secret` não sai pelo `Debug`** (lote R da F5, rodada 1).
+///
+/// Ele é o convite de uso único ou a senha do servidor, e um
+/// `tracing::info!(?config)` no `connect` do app o levaria ao `seele.log`. Aqui
+/// ele sai como `Some(<oculto>)` ou `None`: quem investiga uma recusa sabe se a
+/// entrada levou um, e não qual. O resto sai como o `derive` o escrevia.
+impl std::fmt::Debug for ConnectConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        /// O lugar do segredo, sem ele.
+        struct Oculto;
+        impl std::fmt::Debug for Oculto {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("<oculto>")
+            }
+        }
+        f.debug_struct("ConnectConfig")
+            .field("server", &self.server)
+            .field("alternate_servers", &self.alternate_servers)
+            .field("nickname", &self.nickname)
+            .field("home", &self.home)
+            .field("join_secret", &self.join_secret.as_ref().map(|_| Oculto))
+            .field("expected_fingerprint", &self.expected_fingerprint)
+            .field("bilhete", &self.bilhete)
+            .field("audio", &self.audio)
+            .field("capture_device", &self.capture_device)
+            .field("playback_device", &self.playback_device)
+            .finish()
+    }
 }
 
 /// Uma etapa de uma chegada, do jeito que uma casca a recebe.
@@ -9385,6 +9417,102 @@ mod trilha_no_log {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
+    /// **Um segundo despachante, vivo o processo inteiro, que não escreve
+    /// nada.** A cópia deste crate do auxiliar do app
+    /// (`apps/seele-app/src/main.rs`, `rastro_de_teste`), chamada antes de o
+    /// [`Espiao`] ouvir (pendência 56).
+    ///
+    /// O `tracing` decide uma vez só, na primeira passagem de qualquer thread,
+    /// se uma linha que escreve (o *callsite*) tem quem a ouça, e guarda a
+    /// resposta. Se, no último registro de despachante, só havia um vivo, a
+    /// pergunta vai só ao despachante da **thread que passou** (`tracing-core`
+    /// 0.1.36, `callsite.rs`: `Dispatchers::rebuilder` devolve
+    /// `Rebuilder::JustOne`). Um teste sem captura que passasse primeiro por
+    /// uma linha, com o espião como único despachante de pé, a deixava marcada
+    /// como «nunca» — e a mesma linha não chegava ao espião. Com dois vivos, a
+    /// pergunta vai a todos, e cada evento pergunta de novo à thread em que
+    /// acontece.
+    fn segundo_despachante() {
+        static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+        SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+    }
+
+    /// Marca o processo filho da prova abaixo: com ela, a prova roda a
+    /// [`ordem_forcada`] em vez de chamar a si mesma.
+    const PROVA_NO_FILHO: &str = "PROVA56_FILHO";
+
+    /// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+    /// ainda chega ao espião.** A prova de ordem forçada da pendência 56, a do
+    /// app, para a cópia de [`segundo_despachante`] deste crate, rodada num
+    /// processo filho.
+    ///
+    /// **Por que num processo filho.** A ordem forçada só decide quando o
+    /// espião dela é o único despachante vivo: é aí que o `tracing` pergunta só
+    /// à thread que passou. Rodada junto com o teste do log da trilha, cujo
+    /// espião fica de pé ao mesmo tempo, ela passava mesmo sem o auxiliar (5 em
+    /// 5 rodadas deste módulo, em 09/10). O filho roda só ela (`--exact`,
+    /// `--test-threads=1`), e ali o espião é o único. O pai exige `1 passed`,
+    /// porque um `--exact` que não acha o teste sai com sucesso e `0 passed`, e
+    /// a prova passaria sem ter rodado.
+    #[test]
+    fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+        if std::env::var_os(PROVA_NO_FILHO).is_some() {
+            return ordem_forcada();
+        }
+        let saida =
+            std::process::Command::new(std::env::current_exe().expect("o binário destes testes"))
+                .args([
+                    "--exact",
+                    "trilha_no_log::uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada",
+                    "--test-threads=1",
+                ])
+                .env(PROVA_NO_FILHO, "1")
+                .output()
+                .expect("o processo filho da prova não subiu");
+        let fala = String::from_utf8_lossy(&saida.stdout);
+        assert!(
+            saida.status.success() && fala.contains("ok. 1 passed;"),
+            "a ordem forçada reprovou no processo filho, onde o espião é o único despachante \
+             vivo, ou o filtro não achou a prova e ela não rodou: {fala}{}",
+            String::from_utf8_lossy(&saida.stderr)
+        );
+    }
+
+    /// A outra thread toca a linha primeiro, com o espião já de pé, e a linha
+    /// ainda chega ao espião. E a linha da outra thread continua fora: o
+    /// espião segue sendo só da thread corrente.
+    ///
+    /// Só decide com o espião dela como único despachante vivo, e por isso
+    /// roda no processo filho da prova acima.
+    fn ordem_forcada() {
+        fn diz() {
+            tracing::warn!("linha tocada primeiro fora da captura");
+        }
+        segundo_despachante();
+        let espiao = Espiao::default();
+        tracing::subscriber::with_default(espiao.clone(), || {
+            std::thread::spawn(diz)
+                .join()
+                .expect("a outra thread terminou");
+            diz();
+        });
+
+        let escrito = espiao.escrito();
+        assert!(
+            escrito
+                .iter()
+                .any(|linha| linha.contains("linha tocada primeiro fora da captura")),
+            "uma linha que outra thread tocou primeiro sumiu do espião, e o guarda do log da \
+             trilha passa ou falha conforme a ordem das threads: {escrito:?}"
+        );
+        assert_eq!(
+            escrito.len(),
+            1,
+            "a linha da outra thread chegou a este espião, e um teste passaria a ler o que \
+             outro teste escreveu: {escrito:?}"
+        );
+    }
+
     #[test]
     fn a_escolha_da_pessoa_vira_degrau_arredondando_para_baixo() {
         // §5: o que se escolhe é o **máximo**. Arredondar para cima seria a
@@ -9534,6 +9662,9 @@ mod trilha_no_log {
             },
         ];
 
+        // Sem ele, uma linha da trilha pode sumir quando a bateria roda em
+        // paralelo (pendência 56): ver `segundo_despachante`.
+        segundo_despachante();
         let espiao = Espiao::default();
         tracing::subscriber::with_default(espiao.clone(), || registrar_trilha(&trilha));
 
@@ -12163,6 +12294,58 @@ mod onde_um_anexo_grava {
                 folder: pasta(),
             },
             "um anexo fora do histórico não foi recusado com motivo próprio"
+        );
+    }
+}
+
+#[cfg(test)]
+mod o_debug_da_configuracao {
+    use super::ConnectConfig;
+
+    /// O `join_secret` é o convite de uso único ou a senha do servidor, e o
+    /// `Debug` é por onde um `tracing::info!(?config)` no `connect` do app o
+    /// levaria ao `seele.log` (o filtro padrão, `seele_app=info`, escreve lá).
+    /// Lote R da F5, rodada 1.
+    #[test]
+    fn o_debug_da_configuracao_esconde_o_segredo_e_mostra_o_resto() {
+        let segredo = "segredo-do-teste-do-debug-da-configuracao";
+        let config = ConnectConfig {
+            server: "a.exemplo:8384".into(),
+            alternate_servers: Vec::new(),
+            nickname: "bia".into(),
+            home: "/tmp/casa-de-teste".into(),
+            join_secret: Some(segredo.to_owned()),
+            expected_fingerprint: None,
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        };
+        for impresso in [format!("{config:?}"), format!("{config:#?}")] {
+            assert!(
+                !impresso.contains(segredo),
+                "o `Debug` de `ConnectConfig` imprime o `join_secret` — o convite de uso \
+                 único ou a senha do servidor —, e um `tracing::info!(?config)` o levaria \
+                 ao `seele.log`:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("<oculto>"),
+                "o `Debug` de `ConnectConfig` não diz que há segredo, e quem investiga \
+                 uma recusa não sabe se a entrada levou um:\n{impresso}"
+            );
+            assert!(
+                impresso.contains("a.exemplo:8384") && impresso.contains("bia"),
+                "o `Debug` de `ConnectConfig` escondeu mais que o segredo:\n{impresso}"
+            );
+        }
+        let sem = ConnectConfig {
+            join_secret: None,
+            ..config
+        };
+        let impresso = format!("{sem:?}");
+        assert!(
+            impresso.contains("join_secret: None"),
+            "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
         );
     }
 }

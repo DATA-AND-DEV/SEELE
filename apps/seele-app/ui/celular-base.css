@@ -27,6 +27,10 @@
   --cel-abas: 56px;
   --cel-coluna: 480px;       /* o teto da coluna numa tela grande */
   --cel-escala: 1;           /* o texto dinâmico do sistema (Tarefa 12) */
+  /* A letra de um campo: nunca abaixo de 16, e com o texto do sistema maior ela
+     cresce com o corpo. Escrever a 16 ao lado de mensagens no dobro era ler uma
+     letra e escrever outra (medido no Safari do Simulador). */
+  --cel-letra-de-campo: max(var(--cel-campo), calc(var(--seele-t-corpo) * var(--cel-escala)));
   --cel-seguro-topo: env(safe-area-inset-top, 0px);
   --cel-seguro-pe: env(safe-area-inset-bottom, 0px);
   --cel-seguro-esq: env(safe-area-inset-left, 0px);
@@ -96,6 +100,6 @@
 /* A letra de campo de 16: abaixo disso o Safari do iOS amplia a página inteira ao
    focar o campo, e não a devolve. */
 :root[data-casca="celular"] :is(input, textarea, select) {
-  font-size: var(--cel-campo);
+  font-size: var(--cel-letra-de-campo);
   font-family: var(--seele-mono);
 }

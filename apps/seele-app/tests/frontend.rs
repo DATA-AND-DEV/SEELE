@@ -10560,6 +10560,302 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
     );
 }
 
+/// **A credencial da tentativa só vai ao `connect`, e morre com a pergunta.**
+///
+/// Lote R da F5. A batida que para na pergunta dos MODs entrega o segredo com
+/// que chegou — o token do convite, ou a senha do servidor, que viajam no mesmo
+/// `join_secret` — à pergunta, que o guarda em `aceitePendente` enquanto está
+/// aberta e o devolve à volta que aceita. É a única credencial que esta janela
+/// guarda entre duas chamadas, e ela tem guarda próprio, em cinco partes:
+///
+/// 1. **Cada linha que a toca está na lista.** Toda linha de `tela-boot.js` e
+///    `camada-mods.js` que nomeia `credencial` ou `aceitePendente`, e a cópia
+///    `pergunta` de `aceitarOsMods`. Um caminho novo — um `localStorage`, um
+///    `console.warn` com o objeto da pergunta, um `invoke` que a grave em
+///    arquivo — é uma linha nova, e reprova aqui até alguém olhar para ela.
+/// 2. **Nenhum outro script lê a pergunta.** Um segundo leitor de
+///    `aceitePendente` seria um segundo lugar por onde ela sai.
+/// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
+///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
+///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
+///    reconexão que a levasse gastaria de novo o convite que a entrada gastou.
+/// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
+///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
+///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
+///    sobreviver ao fechar, e precisa ser esquecida nele.
+/// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
+///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
+///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+#[test]
+fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
+    const CAMINHO: &[(&str, &str)] = &[
+        ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
+        ("tela-boot.js", "joinSecret: credencial ?? null,"),
+        // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
+        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
+        (
+            "tela-boot.js",
+            "if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
+        ),
+        ("camada-mods.js", "let aceitePendente = null;"),
+        (
+            "camada-mods.js",
+            "async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {",
+        ),
+        (
+            "camada-mods.js",
+            "aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };",
+        ),
+        // O campo antes da referência: a cópia `pergunta` de `aceitarOsMods`
+        // não pode seguir alcançando a credencial (rodada 1, M1).
+        (
+            "camada-mods.js",
+            "if (aceitePendente) aceitePendente.credencial = null;",
+        ),
+        ("camada-mods.js", "aceitePendente = null;"),
+        ("camada-mods.js", "const pergunta = aceitePendente;"),
+        ("camada-mods.js", "if (!pergunta) return;"),
+        ("camada-mods.js", "const { alvo, conjunto, mods } = pergunta;"),
+        ("camada-mods.js", "if (aceitePendente !== pergunta) return;"),
+        (
+            "camada-mods.js",
+            "const credencial = aceitePendente?.credencial ?? null;",
+        ),
+        ("camada-mods.js", "await conectar(alvo, null, credencial);"),
+        (
+            "camada-mods.js",
+            "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
+        ),
+        (
+            "camada-mods.js",
+            "abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? \"\", credencial).catch((falha) =>",
+        ),
+    ];
+
+    // 1. Cada linha que a toca.
+    let mut vistas: Vec<(&str, String)> = Vec::new();
+    let mut conferir = |arquivo: &'static str, linha: &str| {
+        assert!(
+            CAMINHO
+                .iter()
+                .any(|(dono, conhecida)| *dono == arquivo && *conhecida == linha),
+            "a credencial da tentativa ganhou um caminho novo em `{arquivo}`:\n  {linha}\n\
+             Ela é o convite de uso único ou a senha do servidor, e só pode ir ao \
+             `connect`. Confira que este caminho não a leva a `localStorage`, a \
+             arquivo, ao console nem ao log, e acrescente a linha à lista deste guarda."
+        );
+        vistas.push((arquivo, linha.to_owned()));
+    };
+    for arquivo in ["tela-boot.js", "camada-mods.js"] {
+        let texto = without_comments(&read(&format!("ui/{arquivo}")));
+        for linha in texto.lines().map(str::trim) {
+            if names(linha, "credencial") || names(linha, "aceitePendente") {
+                conferir(arquivo, linha);
+            }
+        }
+    }
+    let aceitar = js_function(&read("ui/camada-mods.js"), "async function aceitarOsMods(");
+    for linha in aceitar.lines().map(str::trim) {
+        if names(linha, "pergunta") && !names(linha, "aceitePendente") {
+            conferir("camada-mods.js", linha);
+        }
+    }
+    for (arquivo, linha) in CAMINHO {
+        assert!(
+            vistas
+                .iter()
+                .any(|(dono, vista)| dono == arquivo && vista == linha),
+            "a lista deste guarda tem uma linha que `{arquivo}` não tem mais:\n  {linha}\n\
+             Tire-a, ou o caminho da credencial mudou sem que este guarda soubesse."
+        );
+    }
+
+    // 2. Nenhum outro script lê a pergunta.
+    for nome in ui_files(".js") {
+        if nome == "camada-mods.js" {
+            continue;
+        }
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        assert!(
+            !names(&texto, "aceitePendente"),
+            "`{nome}` lê `aceitePendente`, que guarda a credencial da tentativa: um \
+             segundo leitor é um segundo lugar por onde ela sai"
+        );
+    }
+
+    // 3. Só três chamadas de `conectar` levam credencial.
+    const LEVAM: &[(&str, &str)] = &[
+        ("camada-servidores.js", "alvo, apelido || undefined, token"),
+        ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
+        ("camada-mods.js", "alvo, null, credencial"),
+    ];
+    let mut levam: Vec<(String, String)> = Vec::new();
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        let mut resto = texto.as_str();
+        while let Some(onde) = resto.find("conectar(") {
+            let antes = &resto[..onde];
+            let depois = &resto[onde + "conectar(".len()..];
+            resto = depois;
+            // `reconectar(`, `desconectar(` e a declaração não são chamadas dela.
+            if antes.ends_with(|c: char| c.is_alphanumeric() || c == '_')
+                || antes.ends_with("function ")
+            {
+                continue;
+            }
+            let mut fundo = 1_i32;
+            let mut virgulas = 0;
+            let mut fim = depois.len();
+            for (i, c) in depois.char_indices() {
+                match c {
+                    '(' | '[' | '{' => fundo += 1,
+                    ')' | ']' | '}' => {
+                        fundo -= 1;
+                        if fundo == 0 {
+                            fim = i;
+                            break;
+                        }
+                    }
+                    ',' if fundo == 1 => virgulas += 1,
+                    _ => {}
+                }
+            }
+            if virgulas >= 2 {
+                levam.push((nome.clone(), depois[..fim].trim().to_owned()));
+            }
+        }
+    }
+    for (nome, argumentos) in &levam {
+        assert!(
+            LEVAM
+                .iter()
+                .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
+            "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
+             Só o link colado, o link do lançador e a volta que aceita os MODs levam \
+             uma; uma reconexão que a levasse gastaria de novo o convite que a \
+             entrada gastou."
+        );
+    }
+    assert_eq!(
+        levam.len(),
+        LEVAM.len(),
+        "as chamadas de `conectar` com credencial não são as três conhecidas: {levam:?}"
+    );
+    let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
+    assert!(
+        reconectar.contains("await conectar();"),
+        "o RECONECTAR deixou de voltar com `conectar()` sem argumento, e pode levar \
+         a credencial de uma entrada que já a gastou:\n{reconectar}"
+    );
+
+    // 4. Fechar a janela encerra o processo, e a memória da página vai junto.
+    let main = without_comments(&read("src/main.rs"));
+    for segura in ["prevent_exit", "prevent_close", "CloseRequested"] {
+        assert!(
+            !main.contains(segura),
+            "o `main.rs` passou a usar `{segura}`: fechar a janela pode não encerrar \
+             mais o processo, e a credencial da tentativa, que só existe na memória \
+             da página, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+        );
+    }
+    // **E a página também não segura o fechar** (rodada 1, M2). O Tauri deixa
+    // a janela vetar o próprio fechamento (`onCloseRequested` com
+    // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois
+    // mantêm a página viva com a credencial dentro, sem que o `main.rs` diga
+    // nada. Hoje nenhum script os usa.
+    //
+    // E um terceiro, achado na re-revisão: um ouvinte do evento
+    // `tauri://close-requested` com alvo de janela (`getCurrentWindow().listen`)
+    // também veta, porque o Tauri chama `prevent_close` sempre que há ouvinte
+    // JS desse evento com alvo da janela (`on_window_event`, em
+    // `src/manager/window.rs` do crate `tauri` 2.11.5, linhas 171 e 172). O
+    // `onCloseRequested` é um embrulho dele; o nome do evento pega os dois.
+    //
+    // O `beforeunload` tem uma saída, e só uma: o navegador (a casca larga da
+    // D-web-3) pergunta antes de sair com a sessão aberta. Ele passa se o
+    // ouvinte esquecer a credencial (`fecharAceiteDeMods()`) antes de segurar
+    // (`preventDefault`). Os dois do Tauri continuam proibidos sem saída.
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for segura in ["onCloseRequested", "close-requested"] {
+            assert!(
+                !texto.contains(segura),
+                "`{nome}` passou a usar `{segura}`: a página pode vetar o próprio \
+                 fechamento, e a credencial da tentativa, que só existe na memória \
+                 dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+            );
+        }
+        for (em, _) in texto.match_indices("\"beforeunload\"") {
+            let ouvinte = &texto[em..];
+            let ouvinte = &ouvinte[..ouvinte.find("});").unwrap_or(ouvinte.len())];
+            let esquece = ouvinte.find("fecharAceiteDeMods()");
+            let segura = ouvinte.find("preventDefault");
+            assert!(
+                matches!((esquece, segura), (Some(e), Some(s)) if e < s) || segura.is_none(),
+                "`{nome}` segura o `beforeunload` sem esquecer antes a credencial da \
+                 tentativa: a página pode vetar o próprio fechamento, e a credencial, \
+                 que só existe na memória dela, sobreviveria ao fechar. Chame \
+                 `fecharAceiteDeMods()` antes do `preventDefault`:\n{ouvinte}"
+            );
+        }
+        assert!(
+            texto.matches("beforeunload").count() == texto.matches("\"beforeunload\"").count(),
+            "`{nome}` cita `beforeunload` de um jeito que o guarda não lê \
+             (`onbeforeunload`?): use `addEventListener(\"beforeunload\", …)`"
+        );
+    }
+
+    // 5. Do outro lado da ponte: nem log, nem retrato.
+    let nomeiam: Vec<&str> = main
+        .lines()
+        .map(str::trim)
+        .filter(|linha| names(linha, "join_secret"))
+        .collect();
+    assert_eq!(
+        nomeiam,
+        [
+            "join_secret: Option<String>,",
+            "join_secret: join_secret.filter(|s| !s.trim().is_empty()),",
+        ],
+        "o `main.rs` passou a nomear o `join_secret` fora do parâmetro do `connect` \
+         e do campo da configuração; confira que ele não vai a `tracing`, a arquivo \
+         nem a resposta nenhuma da ponte"
+    );
+    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    let Some((_, depois)) = tipos.split_once("pub struct Snapshot {") else {
+        panic!("o `Snapshot` da FFI mudou de forma, e este guarda ficou cego");
+    };
+    let retrato = depois.split("\n}\n").next().unwrap_or_default();
+    let campos: Vec<&str> = retrato
+        .lines()
+        .map(str::trim)
+        .filter_map(|linha| linha.strip_prefix("pub "))
+        .map(|campo| campo.split(':').next().unwrap_or_default())
+        .collect();
+    assert!(
+        campos.len() >= 30 && campos.contains(&"ended"),
+        "li só {} campos do `Snapshot` da FFI ({campos:?}): a forma dele mudou, e esta \
+         parte do guarda ficou cega",
+        campos.len()
+    );
+    for campo in campos {
+        for segredo in [
+            "secret",
+            "segredo",
+            "token",
+            "senha",
+            "convite",
+            "credencial",
+        ] {
+            assert!(
+                !campo.contains(segredo),
+                "o `Snapshot` da FFI ganhou o campo `{campo}`: o retrato vai à janela \
+                 duas vezes por segundo e não pode carregar segredo nenhum"
+            );
+        }
+    }
+}
+
 #[test]
 fn the_decoder_profile_is_read_from_the_stream_and_never_spelled_out() {
     // **This guard exists because the bug already happened, in the field.**
@@ -13482,6 +13778,21 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
              quando a sessão sai"
         );
     }
+    // **A raiz só é lida, e por um caminho só** (tarefa 17e): os tons que o
+    // produto deriva partem da cor do produto, que só a raiz guarda com um tema
+    // de pé. O caminho até ela é `corDaRaiz`, e ele não escreve.
+    let raiz = js_function(&base, "function corDaRaiz(");
+    assert!(
+        escrever.contains("corDaRaiz")
+            && raiz.contains("getComputedStyle(document.documentElement)"),
+        "a cor do produto deixou de ser lida da raiz pelo caminho nomeado: {escrever}"
+    );
+    for escrita in [".style", "setProperty", "setAttribute", "classList"] {
+        assert!(
+            !raiz.contains(escrita),
+            "o caminho que lê a raiz passou a escrever nela (`{escrita}`): {raiz}"
+        );
+    }
 
     // Só cor, e só `#rrggbb`: um valor livre numa propriedade de cor é a porta
     // por onde um MOD escreveria o que quisesse.
@@ -13536,7 +13847,7 @@ fn o_tema_de_um_mod_fica_dentro_da_sessao() {
 fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
     let base = without_comments(&read("ui/base.js"));
     let aplicar = js_function(&base, "function aplicarOTemaDoMod(");
-    let mede = js_function(&base, "function oTextoAlcancaOFundo(");
+    let mede = js_function(&base, "function oTemaAlcancaOsPisos(");
 
     assert!(
         aplicar.contains("já é do MOD"),
@@ -13547,16 +13858,206 @@ fn o_tema_recusa_pelo_nome_em_vez_de_escolher_sozinho() {
         aplicar.contains("throw new Error(legivel)"),
         "um tema ilegível deixou de ser recusado: {aplicar}"
     );
+    // Os pisos moram na tabela dos pares (rascunho da API 6, §9), e a medida
+    // passa por ela: o texto sobre o fundo continua em 4,5:1.
+    let pares = base
+        .split("const PARES_DO_TEMA")
+        .nth(1)
+        .and_then(|resto| resto.split("]);").next())
+        .unwrap_or_default();
     assert!(
-        mede.contains("4.5"),
-        "a medida de contraste saiu, ou deixou de ser 4,5:1 — que é o que \
-         `tokens.css` afirma linha a linha: {mede}"
+        pares.contains(r#"["texto", "fundo", 4.5]"#) && mede.contains("tonsDoTema("),
+        "a medida de contraste saiu, ou o texto sobre o fundo deixou de ser \
+         4,5:1 — que é o que `tokens.css` afirma linha a linha: {mede}"
     );
     // Lido da raiz: é o único lugar onde a cor do produto continua sendo a do
     // produto com um tema de pé. Medir na sessão mediria o próprio tema.
     assert!(
-        mede.contains("getComputedStyle(document.documentElement)"),
+        mede.contains("corDaRaiz")
+            && js_function(&base, "function corDaRaiz(")
+                .contains("getComputedStyle(document.documentElement)"),
         "a cor do produto passou a ser lida de onde o tema já escreveu: {mede}"
+    );
+}
+
+/// **As chaves do tema são as mesmas na casca e no servidor** (rascunho da API
+/// 6, §9; tarefa 17j), com a mesma forma de valor, nos dois sentidos.
+///
+/// O `mundo.tema` aceitava qualquer chave, e o MOD lia `ok` para um tema que a
+/// casca ia recusar. Agora o servidor confere por `CHAVES_DO_TEMA`
+/// (seele-proto), e a casca pelas quatro tabelas de `base.js`; uma chave
+/// somada a um lado só volta o defeito pela metade — o servidor recusando o que
+/// a casca aplicaria, ou o contrário. O vetor `chaves-do-tema.json` confere
+/// caso a caso; este confere que nenhuma chave ficou fora dele.
+#[test]
+fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
+    use std::collections::BTreeMap;
+
+    /// O texto dentro do primeiro `{ … }` depois de `inicio`, com as chaves e
+    /// os colchetes contados fora das strings.
+    fn objeto_js<'a>(fonte: &'a str, inicio: &str) -> &'a str {
+        let (_, resto) = fonte
+            .split_once(inicio)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de base.js"));
+        let abre = resto.find('{').expect("o objeto");
+        let mut fundo = 0_i32;
+        let mut aspa: Option<char> = None;
+        let mut escapado = false;
+        for (i, c) in resto[abre..].char_indices() {
+            if let Some(q) = aspa {
+                if escapado {
+                    escapado = false;
+                } else if c == '\\' {
+                    escapado = true;
+                } else if c == q {
+                    aspa = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' | '`' => aspa = Some(c),
+                '{' | '[' | '(' => fundo += 1,
+                '}' | ']' | ')' => {
+                    fundo -= 1;
+                    if fundo == 0 {
+                        return &resto[abre + 1..abre + i];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("`{inicio}` sem o fim do objeto");
+    }
+    /// As entradas `nome: valor` do primeiro nível de um objeto literal.
+    fn entradas_js(corpo: &str) -> Vec<(String, String)> {
+        let mut entradas = Vec::new();
+        let mut fundo = 0_i32;
+        let mut aspa: Option<char> = None;
+        let mut escapado = false;
+        let mut atual = String::new();
+        for c in corpo.chars().chain(std::iter::once(',')) {
+            if let Some(q) = aspa {
+                atual.push(c);
+                if escapado {
+                    escapado = false;
+                } else if c == '\\' {
+                    escapado = true;
+                } else if c == q {
+                    aspa = None;
+                }
+                continue;
+            }
+            match c {
+                '"' | '\'' | '`' => aspa = Some(c),
+                '{' | '[' | '(' => fundo += 1,
+                '}' | ']' | ')' => fundo -= 1,
+                ',' if fundo == 0 => {
+                    if let Some((nome, valor)) = atual.split_once(':') {
+                        let nome = nome.trim().trim_matches(|q| q == '"' || q == '\'');
+                        entradas.push((nome.to_owned(), valor.trim().to_owned()));
+                    }
+                    atual.clear();
+                    continue;
+                }
+                _ => {}
+            }
+            atual.push(c);
+        }
+        entradas
+    }
+    fn numero(entradas: &[(String, String)], nome: &str) -> String {
+        entradas
+            .iter()
+            .find(|(chave, _)| chave == nome)
+            .map(|(_, valor)| valor.clone())
+            .unwrap_or_else(|| panic!("o número do tema sem `{nome}`"))
+    }
+
+    let casca = without_comments(&read("ui/base.js"));
+    let mut da_casca: BTreeMap<String, String> = BTreeMap::new();
+    let mut juntar = |nome: String, forma: String| {
+        assert!(
+            da_casca.insert(nome.clone(), forma).is_none(),
+            "«{nome}» está em duas tabelas do tema na casca"
+        );
+    };
+    for (nome, _) in entradas_js(objeto_js(&casca, "const TEMA_DA_API = Object.freeze(")) {
+        juntar(nome, "cor".to_owned());
+    }
+    for (nome, regra) in entradas_js(objeto_js(&casca, "const NUMEROS_DA_API = Object.freeze(")) {
+        let regra = entradas_js(objeto_js(&regra, ""));
+        let forma = format!(
+            "inteiro {}..{}",
+            numero(&regra, "minimo"),
+            numero(&regra, "maximo")
+        );
+        juntar(nome, forma);
+    }
+    for (nome, _) in entradas_js(objeto_js(&casca, "const BANDEIRAS_DA_API = Object.freeze(")) {
+        juntar(nome, "bandeira".to_owned());
+    }
+    for (nome, escolhas) in entradas_js(objeto_js(&casca, "const MEDIDAS_DA_API = Object.freeze("))
+    {
+        let mut nomes: Vec<String> = entradas_js(objeto_js(&escolhas, ""))
+            .into_iter()
+            .map(|(escolha, _)| escolha)
+            .collect();
+        nomes.sort();
+        juntar(nome, format!("escolha {}", nomes.join("|")));
+    }
+
+    let rust = read("../../crates/seele-proto/src/mods.rs");
+    let tabela: String = rust
+        .split_once("pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[")
+        .and_then(|(_, resto)| resto.split_once("\n];"))
+        .map(|(corpo, _)| corpo.chars().filter(|c| !c.is_whitespace()).collect())
+        .expect("`CHAVES_DO_TEMA` mudou de forma em seele-proto");
+    // `("nome",FormaDoValorDoTema::Forma…),`, sem espaço nenhum.
+    let mut do_servidor: BTreeMap<String, String> = BTreeMap::new();
+    for entrada in tabela.split("(\"").skip(1) {
+        let (nome, forma) = entrada
+            .split_once("\",FormaDoValorDoTema::")
+            .unwrap_or_else(|| panic!("uma entrada de `CHAVES_DO_TEMA` sem forma: {entrada}"));
+        let forma = if forma.starts_with("Cor") {
+            "cor".to_owned()
+        } else if forma.starts_with("Bandeira") {
+            "bandeira".to_owned()
+        } else if let Some(campos) = forma.strip_prefix("Inteiro{") {
+            let campo = |qual: &str| {
+                campos
+                    .split(',')
+                    .find_map(|par| par.strip_prefix(&format!("{qual}:")))
+                    .unwrap_or_else(|| panic!("`{qual}` sumiu do inteiro de «{nome}»"))
+                    .to_owned()
+            };
+            format!("inteiro {}..{}", campo("minimo"), campo("maximo"))
+        } else if let Some(lista) = forma.strip_prefix("Escolha(&[") {
+            let mut nomes: Vec<String> = lista
+                .split(']')
+                .next()
+                .unwrap_or_default()
+                .split(',')
+                .map(|escolha| escolha.trim_matches('"').to_owned())
+                .filter(|escolha| !escolha.is_empty())
+                .collect();
+            nomes.sort();
+            format!("escolha {}", nomes.join("|"))
+        } else {
+            panic!("uma forma de `CHAVES_DO_TEMA` que este guarda não conhece: {forma}");
+        };
+        do_servidor.insert(nome.to_owned(), forma);
+    }
+
+    assert!(
+        do_servidor.len() >= 10,
+        "só {} chaves lidas de `CHAVES_DO_TEMA`: o guarda não conferiria nada",
+        do_servidor.len()
+    );
+    assert_eq!(
+        do_servidor, da_casca,
+        "as chaves do tema divergem entre `CHAVES_DO_TEMA` (seele-proto, à esquerda) e as \
+         tabelas da casca (base.js, à direita): uma chave somada a um lado só é um tema \
+         que um lado recusa e o outro aplica"
     );
 }
 
@@ -15052,9 +15553,16 @@ fn o_aceite_obtem_o_conjunto_antes_de_entrar() {
     let obtem = corpo
         .find("obterOConjunto")
         .expect("aceitar tem de obter o conjunto que acabou de autorizar");
-    let entra = corpo
-        .find("conectar()")
-        .expect("aceitar continua entrando no servidor");
+    // `await conectar(`: desde o lote R da F5 a volta leva a credencial da
+    // tentativa, e a chamada tem argumentos. Com o `await` na frente, e não só
+    // `conectar(`, que também casa com `reconectar(` e `desconectar(` (rodada
+    // 1, M5): um aceite que chamasse um dos dois passava por entrar.
+    let Some(entra) = corpo.find("await conectar(") else {
+        panic!(
+            "`aceitarOsMods` não chama mais `await conectar(`: a pessoa aceita os MODs e \
+             fica parada na entrada, sem a volta que entra no servidor:\n{corpo}"
+        );
+    };
     assert!(
         obtem < entra,
         "o aceite entra antes de obter os pacotes: o convidado chega à sessão \

@@ -162,6 +162,20 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
   evento.preventDefault();
   const escrito = $("servidores-endereco").value.trim();
   if (escrito === "") return;
+  // **O campo é zerado quando o link segue para uma tentativa** (lote R da F5,
+  // rodada 1). Um `seele://` colado aqui carrega o convite de uso único, e o
+  // campo só era zerado ao reabrir o diálogo: quem colava, entrava ou desistia
+  // deixava o token escrito num campo da página até a próxima vez. Por isso as
+  // duas saídas que levam o link adiante — `entrarPelaLinha` e
+  // `irParaOServidor`, logo abaixo — o zeram antes; dali em diante ele vive só
+  // em `escrito`, e segue o caminho da credencial da tentativa.
+  //
+  // O link que `analisar_convite` recusa **fica**: ele não inicia tentativa
+  // nenhuma e nada sai com ele, e mantê-lo deixa a pessoa corrigir o erro de
+  // digitação em vez de colar tudo de novo.
+  const consumirOCampo = () => {
+    $("servidores-endereco").value = "";
+  };
   $("servidores-erro").hidden = true;
 
   let alvo = escrito;
@@ -184,6 +198,7 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
       // mesmo, com a frase das conversas antes de abrir.
       const ir = convite.para_entrar;
       if (ir && typeof ir === "object") {
+        consumirOCampo();
         entrarPelaLinha(ir, escrito);
         return;
       }
@@ -193,6 +208,7 @@ $("servidores-forma").addEventListener("submit", async (evento) => {
       return;
     }
   }
+  consumirOCampo();
   fecharServidores();
   irParaOServidor(alvo, null, token);
 });

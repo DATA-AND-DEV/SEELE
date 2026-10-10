@@ -320,3 +320,94 @@ começar.
 - **A 3.5 passou para a F8** (aviso de 09/10). A marca `data-casca`, que a F8
   quer antes da primeira pintura, fica a combinar com ela, e a orquestradora
   recomenda que saia da `ponte-web.js`.
+
+### 09/10, a tela no celular (D-celular-2) e o enquadramento no proto
+
+- **D-celular-2:** o celular assiste à tela compartilhada, com som. Ficou como
+  Tarefa 3.9 do plano (`a66005a3`), com o caminho testado de quando o aparelho
+  não decodifica: o cartão diz «esta tela não abre neste aparelho», e a página
+  deixa de receber a transmissão.
+- **O lugar do enquadramento:** um módulo no `seele_proto::screen`, e não um
+  crate novo. Aprovado pela orquestradora e pela F1, que pediu três correções:
+  - o `Enquadramento` vai junto;
+  - os dois leitores leem o cabeçalho por uma função só;
+  - os nomes são `LidoDaTela` e `ErroDeQuadro`.
+- **O teto, medido** (`94d4dfd8`, `medidas/idr-no-teto.md`): com conteúdo
+  realista a 1080p, um quadro passa de 512 KiB a partir de 12,4 Mbps, e chega
+  a 973 KiB a 100 Mbps. A orquestradora decidiu congelar em 4 MiB (D-fio-9),
+  acima do I420 cru de 1080p.
+- **`354cf7c8`, o módulo:**
+  - o `Enquadramento` (portado do `seele-core` com os oito testes), o
+    `LeitorDeTela` e a `ler_cabecalho_de_quadro`;
+  - o guarda da ordem pelo `maior_reserva()`. O alocador contador não coube: o
+    `forbid(unsafe_code)` do workspace não se afrouxa nem num teste;
+  - os dois guardas do teto: no proto e em
+    `seele-core/tests/teto_do_quadro_de_tela.rs`;
+  - os bytes-ouro `fluxo:quadro-de-tela:*` e o teste que os lê de volta;
+  - **as reversões:** sem a conferência do teto, as duas leituras reprovam;
+    reservando antes de conferir, o guarda da ordem reprova; sem a regra do
+    cabeçalho partido, os dois testes dela reprovam; com o teto em 512 KiB, os
+    dois guardas reprovam.
+- **Pendente de envio** (as mensagens entre sessões pararam até o usuário
+  escrever de novo nesta sessão):
+  - **à F1, o pedido de revisão do `354cf7c8`.** Ele explica a troca do
+    alocador contador pelo `maior_reserva`. Ele também leva os dois pontos da
+    orquestradora para a troca das cópias, sobre o descarte `GrandeDemais` do
+    lado que envia (`seele-core/src/tela.rs:1347`, `:1447`): o descarte é dito
+    no log e no diagnóstico, e depois dele o próximo quadro é um quadro-chave.
+    Primeiro o teste que mostra como é hoje. As constantes do core e do
+    servidor sobem para 4 MiB na troca;
+  - **à orquestradora, o aviso de que o módulo está pronto** para a revisão da
+    F1.
+
+### 09/10, a D-web-3: o web app também no PC, com a casca de desktop
+
+- **`b727691b`, o plano e a revisão das recusas.** As 68 recusas da matriz da
+  F8 (51 com nome e 17 com frase) foram revistas para o PC em
+  `F4/ponte-no-pc.md`. O lado de cada comando foi decidido pelo `main.rs`: o
+  que vai por `session.connection` é protocolo, e o que mexe na `hospedagem`
+  local só existe para quem hospeda.
+  - **Passam a ser atendidas:** a moderação **e a administração pela conexão**
+    (canais, salas, nome e ícone do servidor), a tecla de falar com a página em
+    foco, a tela cheia, a supressão de ruído, a saída de som e o
+    compartilhamento de tela (3.10).
+  - **Ficam recusadas:** hospedar e a portaria local, instalar e habilitar
+    MODs, as versões, o atualizador e o que é do sistema.
+  - A marca ganha dois valores, a Tarefa 3.10 entra, e a emenda D-web-3 do ADR
+    fica marcada para quando o plano fechar.
+- **`1e540682`, a medida da 3.10** (`spikes/tela-do-navegador/`): o Baseline
+  restrito 4.0 em Annex-B (`avc1.42E028`) sai no Chromium 151 e no Safari
+  27.0.1 do Mac, e o OpenH264 do desktop lê 60 de 60. **O `isConfigSupported`
+  do Safari mente:** em quatro dos seis perfis que ele diz aceitar, sai zero
+  pedaço e o `flush` não volta, sem erro. O botão só se oferece depois de uma
+  prova com prazo. O Chrome, o Edge, o Firefox e o som do `getDisplayMedia`
+  estão nos passos do dono.
+- **Pendente de envio**, com as mensagens entre sessões pausadas:
+  - **à orquestradora:**
+    - o resumo acima;
+    - um pedido de confirmação: estendi a «moderação» à administração pela
+      conexão, que é da mesma natureza (protocolo com papel);
+    - o achado do Safari;
+  - **à F8:**
+    - o critério da marca de dois valores;
+    - o teste do microfone fora da sala (fica ou não na casca de desktop);
+    - o `descrever_arquivo`, que no navegador recebe um `File`, e não um
+      caminho;
+  - **à F1**, o pedido de revisão do `354cf7c8` (registrado acima).
+- **A Etapa A da F8, aprovada em 09/10.** Os valores finais da marca estão no
+  plano (3.1), conferidos no §9.2 do spec dela (`0.16/celular`, `04c0f1a8`).
+  O servidor que a Tarefa 19 dela pede para os 28 roteiros é um `seeled` com
+  `h3` (as minhas 2.4 e 2.6), e não o servidor de mentira da 3.4. **Pendente
+  de envio à orquestradora e à F8:** essa dependência, e que a F4 entrega o
+  como subir e o link quando a 2.4 e a 2.6 existirem.
+
+- **A oitava integração (`f7fb8ab9`), trazida em `36e3d307`.** O `0.16/web` não
+  entrou nela, porque o módulo de quadros espera a revisão da F1, **que a
+  orquestradora pediu**: esse item sai da lista do que falta mandar. Na `ui/`
+  que entrou, a ponte só põe a marca (o `CELULAR` é da F8), e atende o
+  `volumes_locais` novo do I-b da F5. As duas coisas estão no plano (3.1).
+- **As mensagens pendentes foram mandadas** quando o envio entre sessões
+  voltou: à orquestradora, o resumo da D-web-3, a confirmação pedida sobre a
+  administração, o achado do Safari e o servidor dos roteiros; à F8, a marca,
+  o PC e os três pontos a combinar (o teste do microfone, o
+  `descrever_arquivo` e o servidor da Tarefa 19 dela).

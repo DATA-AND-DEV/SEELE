@@ -94,6 +94,9 @@ motivo:ChamadaRecusada	090b14
 motivo:ModsDeOutraApi	090b158001
 datagrama:voz	01deadbeef123400096000fcff
 fluxo:abertura-de-tela	0100000005000007800438
+fluxo:quadro-de-tela:comum	00000000050000000141
+fluxo:quadro-de-tela:chave	01000000050000000165
+fluxo:quadro-de-tela:som	0200000002fcff
 fluxo:tipo:anexo	01
 fluxo:tipo:tela	02
 fluxo:tipo:volume-de-mod	03

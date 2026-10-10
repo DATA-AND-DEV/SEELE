@@ -120,6 +120,24 @@ Cada linha tem a coluna **PC (navegador)**, com o mesmo critério. O padrão é
   aparelhos de áudio, o executor de MODs, e o compartilhar a tela, que passa a ser
   pelo `getDisplayMedia`.
 - **Moderar e compartilhar a tela entram** no PC. No celular, continuam fora.
+- **Quando compartilhar não dá no PC.** A ponte da F4 só oferece o botão depois
+  de uma prova com prazo (no Safari, o `isConfigSupported` aceita perfis que não
+  produzem nada), e devolve `{ erro: "compartilhar-indisponivel", motivo }`. As
+  frases, no lugar do COMPARTILHAR, vão para o `frases.js` com o P10:
+
+  | `motivo` | frase |
+  |---|---|
+  | `sem-captura` (não há `getDisplayMedia`) | «Este navegador não compartilha a tela. O app do SEELE compartilha.» |
+  | `sem-codificador` (não há `VideoEncoder`, ou ele recusa o perfil) | «Este navegador não codifica vídeo do jeito que a sala recebe. O app do SEELE compartilha.» |
+  | `codificador-mudo` (aceita, e não devolve pedaço no prazo) | «Este navegador disse que codificava a tela, e nenhum quadro saiu no prazo. Daqui não dá para compartilhar; o app do SEELE compartilha.» |
+  | `captura-negada` (a pessoa recusou na caixa do navegador) | «O navegador não recebeu a permissão. Para compartilhar, toque em COMPARTILHAR de novo e escolha a tela ou a janela.» |
+
+  As três primeiras levam o link BAIXAR O APP DO SEELE (`PAGINA_DO_APP`); a
+  quarta não, porque o caminho é tentar de novo.
+- **O arquivo, no PC e no celular, vai por uma alça** (combinado com a F4, 09/10):
+  a ponte guarda o `File` do arraste, do seletor ou do colar sob uma alça opaca
+  (`web-arquivo:N`), emite o mesmo `tauri://drag-drop` com ela, e o
+  `descrever_arquivo` e o envio leem dela. O `tela-sessao.js` não muda.
 
 A coluna foi gerada por regra, pelos `invoke` e pelo texto de cada linha. Depois
 foi revisada linha a linha onde não deu «igual», e nas linhas que ficam fora no
@@ -762,7 +780,7 @@ o celular não desenha.
 | E-49 | ação | «COMO O MICROFONE ABRE»: TECLA / VOZ / ABERTO | ui/index.html:2640-2658; ui/tela-server.js:387-394, 722-731; src/main.rs:7579-7603 · `set_voice_mode`, `modo_de_voz_escolhido` | adaptado | ÁUDIO › COMO O MICROFONE ABRE, um botão abaixo do outro. O primeiro é «VOZ — abre quando você fala», o padrão. Depois vêm «SEGURAR PARA FALAR — abre só enquanto o dedo está no botão da faixa» (o `PushToTalk` de sempre) e «ABERTO — fica aberto o tempo todo». Embaixo, a nota «Com a tela bloqueada, só o VOZ funciona.» | igual |
 | E-50 | ação | «REDUÇÃO DE RUÍDO» — «reduzir ruído de fundo do microfone» | ui/index.html:2677-2692; ui/tela-server.js:574-581; src/main.rs:7626 · `ajustar_reducao_de_ruido` | adaptado (proposta) | ÁUDIO › TRATAMENTO DO MICROFONE, só informativo e sem interruptor: «O navegador trata o microfone deste aparelho: cancela o eco, reduz o ruído de fundo e ajusta o ganho. Vale sempre aqui.» O motivo: o ADR 0057 (:193-195) parte da configuração inteira do navegador, porque tirar uma peça não foi medido, e o filtro F02 do produto (Rust) não entra na página na 0.16. `controles_da_voz` responde `supressao: 1`. | igual |
 | E-51, E-52 | ação | «SENSIBILIDADE DA VOZ» (régua, valor «… dBFS · padrão») e «USAR O PADRÃO» | ui/index.html:2713-2728; ui/tela-server.js:517-548, 586-605; src/main.rs:7662, 7689 · `ajustar_sensibilidade_da_voz`, `controles_da_voz` | adaptado | A mesma régua em ÁUDIO, valendo para o portão do modo VOZ da ponte (`voz-web.js`). A frase passa a ser «Mais sensível abre com fala baixa e também com mais ruído. Escolher um valor aqui o deixa fixo. Só vale no modo VOZ.»: sai a parte do corte que acompanha a sala e do teste abaixo. A régua tem 44 pt de alvo. | igual |
-| E-53…E-56 | ação, estado | «TESTAR O MICROFONE»: COMEÇAR/PARAR O TESTE, barra com corte e frase «… dBFS · TRANSMITINDO · N aberturas», «OUVIR-ME»/«PARAR DE OUVIR», teste que fecha ao sair | ui/index.html:2742-2761; ui/tela-server.js:607-701, 923; src/main.rs:7728-7786 · `abrir_teste_de_microfone`, `estado_do_teste_de_microfone`, `fechar_teste_de_microfone`, `monitorar_o_microfone` | fora na 0.16 | Pela D-52, o microfone só abre na sala. No lugar do bloco, em ÁUDIO: «O microfone só abre numa sala de voz. Entre numa para ver o nível da sua voz no medidor acima.» Em NO COMPUTADOR: «Testar o microfone fora de uma sala e ouvir a própria voz é no computador.» | adaptado: os aparelhos que o navegador lista; a saída só onde ele deixa escolher |
+| E-53…E-56 | ação, estado | «TESTAR O MICROFONE»: COMEÇAR/PARAR O TESTE, barra com corte e frase «… dBFS · TRANSMITINDO · N aberturas», «OUVIR-ME»/«PARAR DE OUVIR», teste que fecha ao sair | ui/index.html:2742-2761; ui/tela-server.js:607-701, 923; src/main.rs:7728-7786 · `abrir_teste_de_microfone`, `estado_do_teste_de_microfone`, `fechar_teste_de_microfone`, `monitorar_o_microfone` | fora na 0.16 | Pela D-52, o microfone só abre na sala. No lugar do bloco, em ÁUDIO: «O microfone só abre numa sala de voz. Entre numa para ver o nível da sua voz no medidor acima.» Em NO COMPUTADOR: «Testar o microfone fora de uma sala e ouvir a própria voz é no computador.» | o bloco do desktop, sem frase; a ponte atende pelo `getUserMedia`, e abrir e fechar o teste não deixa faixa viva (decisão da orquestradora, 09/10; caso `casca-larga`) |
 | E-57 | estado | «FONE»: «USE FONE. O SEELE ainda não cancela eco: sem fone, quem fala com você se ouve de volta.» | ui/index.html:2796-2799; ui/frases.js:285-286 · — | adaptado | ÁUDIO › FONE, com a frase do celular: «O navegador deste aparelho cancela o eco. Com fone, o som do alto-falante não volta para o microfone.» A do desktop seria falsa aqui (achado 6). | igual |
 | E-58, E-59 | ação, estado | «DISPOSITIVO DE SAÍDA» (lista, marcas, nota «fixa ele», `<details>` «E quando o sistema troca de aparelho padrão?») | ui/index.html:2783-2822; ui/tela-server.js:84-90; src/main.rs:8376-8420 · `saidas`, `saida_escolhida`, `escolher_saida` | fora na 0.16 | No lugar da lista, em ÁUDIO › SAÍDA DE SOM: «O SOM SAI POR ONDE O CELULAR MANDAR.» e a nota «O navegador não escolhe a saída. Troque entre fone, Bluetooth e alto-falante pela Central de Controle do iPhone ou pelo controle de som do Android.» Em NO COMPUTADOR: «Escolher a saída de som é no computador.» | adaptado: os aparelhos que o navegador lista; a saída só onde ele deixa escolher |
 | E-60 | tela | «ATALHOS» — «Teclas para agir sem tirar a mão do teclado» | ui/index.html:2253-2262, 2839-2971 · — | adaptado | Não há seção. Cada atalho tem um controle visível (E-61, E-62), e a ajuda lista os gestos (§4). | igual |
@@ -1210,7 +1228,7 @@ Gerada das sete seções, com os conflitos entre elas resolvidos na junção. **
 | `abrir_ajustes_de_acessibilidade` | tela-server.js | adaptado | recusa nomeada | — | nunca chamado com o botão escondido | como no celular |
 | `abrir_ajustes_do_microfone` | tela-server.js | adaptado | recusa com frase | — | a página não abre ajustes; a frase da nota diz o caminho | como no celular |
 | `abrir_no_navegador` | base.js, tela-sessao.js | adaptado | atende | — | Abre numa aba nova (`noopener`, `noreferrer`) depois da mesma conferência de `endereco_que_pode_sair` (main.rs:2096). A tela chama dentro do toque em ABRIR. | como no celular |
-| `abrir_teste_de_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | como no celular |
+| `abrir_teste_de_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | atende pelo `getUserMedia` (decisão da orquestradora, 09/10: a D-52 é do áudio da sessão, e o teste a pessoa abre de propósito) |
 | `abrir_versao` | camada-versoes.js, tela-boot.js | fora | recusa nomeada | — | Não há lançador nem outra janela | recusa nomeada (só no app) |
 | `aceitar_mods` | camada-mods.js | adaptado | atende | — | Grava ali. A falha aparece com frase (A-10). | como no celular |
 | `aceite_de_mods` | base.js, camada-mods.js | adaptado | atende | — | Lê o sim no armazenamento da origem (F4), com a mesma chave do pin. | como no celular |
@@ -1279,11 +1297,11 @@ Gerada das sete seções, com os conflitos entre elas resolvidos na junção. **
 | `estado_da_porta` | camada-portaria.js, tela-sessao.js | fora | atende | sessão | Chamado sozinho a cada poucos segundos na sessão: responde «não hospeda», e nada de portaria aparece. | como no celular |
 | `estado_da_primeira_abertura` | camada-versoes.js | fora | atende | carga | É chamado em toda carga (camada-versoes.js:358). Responde sem dados, e a nota da 0.15 não aparece | atende, vazio (só no app) |
 | `estado_da_sessao` | camada-mods.js | adaptado | atende | — | os contadores, sem `mods_nativos`; com as instâncias do executor do navegador | como no celular |
-| `estado_do_teste_de_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | como no celular |
+| `estado_do_teste_de_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | atende pelo `getUserMedia` (decisão da orquestradora, 09/10: a D-52 é do áudio da sessão, e o teste a pessoa abre de propósito) |
 | `estou_hospedando` | camada-mods.js | igual | atende | — | `false` sempre: a página nunca hospeda | recusa nomeada (só no app) |
 | `exclusao_do_som_da_captura` | camada-compartilhar.js | fora na 0.16 | recusa nomeada | — | Inalcançável. `SemCaptura` seria a resposta verdadeira, se for preciso responder. | atende, pelo `getDisplayMedia` (F4, com medida) |
 | `expulsar_pessoa` | camada-moderar.js | fora | recusa nomeada | — | Moderação. | atende (o PC administra) |
-| `fechar_teste_de_microfone` | tela-server.js | fora | atende | — | sem efeito: `pararOTesteDeMicrofone` o chama a cada saída de ÁUDIO (ui/tela-server.js:150, 684), e uma recusa sujaria o console a cada troca | como no celular |
+| `fechar_teste_de_microfone` | tela-server.js | fora | atende | — | sem efeito: `pararOTesteDeMicrofone` o chama a cada saída de ÁUDIO (ui/tela-server.js:150, 684), e uma recusa sujaria o console a cada troca | atende, e solta o aparelho de verdade: as faixas do `getUserMedia` param |
 | `fontes_de_tela` | camada-compartilhar.js | fora na 0.16 | recusa nomeada | — | Inalcançável. | atende, pelo `getDisplayMedia` (F4, com medida) |
 | `guardar_colado` | tela-sessao.js | adaptado | atende | — | **Hoje grava um arquivo temporário e devolve o caminho dele.** A ponte precisaria receber o **`Blob` colado (os bytes) e o tipo**, sem base64 e sem disco, e devolver o mesmo formato com a referência no lugar do caminho. O teto de 25 MiB existia por causa da travessia em base64. | como no celular |
 | `ha_ajustes_de_acessibilidade` | tela-server.js | adaptado | atende | carga | responde `false`; o código de hoje esconde o botão | como no celular |
@@ -1314,7 +1332,7 @@ Gerada das sete seções, com os conflitos entre elas resolvidos na junção. **
 | `modo_de_voz_escolhido` | tela-server.js | igual | atende | — | sem escolha gravada, responde `VoiceActivated` | como no celular |
 | `mods_instalados` | base.js, camada-mods.js | adaptado | atende | sessão | É usado pelo aceite para conferir id e hash. O que «instalado» significa no celular é da F4 e da área de MODs. | como no celular |
 | `modulo_de_video_a_baixar` | camada-compartilhar.js | fora na 0.16 | recusa nomeada | — | Inalcançável; assistir não exige o módulo. | atende, pelo `getDisplayMedia` (F4, com medida) |
-| `monitorar_o_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | como no celular |
+| `monitorar_o_microfone` | tela-server.js | fora | recusa com frase | — | D-52 | atende pelo `getUserMedia` (decisão da orquestradora, 09/10: a D-52 é do áudio da sessão, e o teste a pessoa abre de propósito) |
 | `mover_pessoa` | camada-moderar.js | fora | recusa nomeada | — | Moderação (administração). | atende (o PC administra) |
 | `ocupacao_do_deposito` | camada-versoes.js | fora | recusa nomeada | — | Não há depósito | recusa nomeada (só no app) |
 | `open_channel` | tela-auth.js, tela-sessao.js | igual | atende | — | — | como no celular |

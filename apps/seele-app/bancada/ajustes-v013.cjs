@@ -60,6 +60,395 @@ function tintasDoTitulo() {
   return { tintas, folga, lineHeight: estilo.lineHeight };
 }
 
+// --------------------------------------------------------------------------
+// Lote R da F5: a volta que aceita os MODs leva a credencial da tentativa
+// --------------------------------------------------------------------------
+//
+// **O caso.** Um servidor fechado por convite, com a portaria desligada e um
+// MOD exigido. A primeira batida para na pergunta dos MODs; a pessoa aceita, e a
+// volta saía sem o convite — o servidor respondia CREDENCIAL RECUSADA. O lado do
+// servidor a F1 consertou em `d0b98b9c`: recusar os MODs deixa o convite
+// intacto. Esta cena prova o lado do app.
+//
+// **O servidor de mentira responde como o de verdade, na mesma ordem.** O
+// segredo é conferido antes de tudo (`Politica::avaliar`, sem memória com a
+// portaria desligada), depois vêm os MODs, e o convite é gasto só quando a
+// pessoa entra. A volta sem o convite recebe `CredentialRejected` aqui pelo
+// mesmo motivo que recebe lá.
+//
+// **A credencial é gerada aqui** e não é de servidor nenhum. Ela é procurada no
+// fim em todo lugar onde não pode estar: no armazenamento da página, no DOM, no
+// console e em qualquer comando que não seja o `connect`.
+
+/** O convite desta cena: um texto qualquer, que só esta bancada conhece. */
+const CONVITE_R = `convite-da-bancada-${process.pid}-${Date.now()}`;
+const ALVO_R = '192.0.2.7:8384';
+const MOD_R = {
+  id: 'fulano/exemplo', version: '1.0.0', hash: 'ab'.repeat(32),
+  repo: 'https://github.com/seele/exemplo', reach: ['ler'], no_servidor: false,
+};
+
+/** Os `connect` que a página mandou até agora, com os argumentos. */
+function conectsFeitos(page) {
+  return page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').map(c => c.args));
+}
+
+/**
+ * A credencial que a pergunta dos MODs guarda agora, ou `null`.
+ *
+ * `aceitePendente` é o único lugar onde ela mora entre a batida e a volta
+ * (`camada-mods.js`). Lida pelo nome porque «esquecida» quer dizer isto: o
+ * lugar que a guardava não a guarda mais.
+ */
+function credencialGuardada(page) {
+  return page.evaluate(() => aceitePendente?.credencial ?? null);
+}
+
+/** Um ponto do véu da pergunta que não é a caixa: onde clicar fora. */
+function pontoDoVeu(page) {
+  return page.evaluate(() => {
+    const veu = document.getElementById('mods-aceite');
+    const caixa = veu.getBoundingClientRect();
+    for (const [x, y] of [[caixa.left + 4, caixa.bottom - 4], [caixa.right - 4, caixa.bottom - 4], [caixa.left + 4, caixa.top + 40]]) {
+      if (document.elementFromPoint(x, y) === veu) return { x, y };
+    }
+    return null;
+  });
+}
+
+/**
+ * O link que a pessoa cola, com o convite dentro.
+ *
+ * A forma é a de um `seele://`; quem o lê aqui é o `analisar_convite` de
+ * mentira, que devolve o alvo e o token como o Rust devolveria.
+ */
+const LINK_R = `seele://${ALVO_R}?token=${CONVITE_R}`;
+
+/** O que o campo do diálogo de servidores diz agora. */
+function campoDoLink(page) {
+  return page.evaluate(() => document.getElementById('servidores-endereco').value);
+}
+
+/**
+ * Uma batida nova, a partir da tela de entrada, **pelo campo**: o diálogo de
+ * servidores, o link colado e Enter — o caminho de quem recebe um convite.
+ */
+async function baterComOConvite(page) {
+  await page.evaluate(() => {
+    window.testServidor = { aceitou: false, gasto: false };
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_R);
+  await page.press('#servidores-endereco', 'Enter');
+  try {
+    await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 });
+  } catch {
+    const naEntrada = await page.evaluate(() => document.getElementById('boot-erro').textContent);
+    assert.fail(`a batida com o convite não chegou à pergunta dos MODs — a entrada diz «${naEntrada}»`);
+  }
+}
+
+async function aVoltaDoAceiteLevaACredencial(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, convite, mod, snapshot }) => {
+    window.testTable = table; window.testCalls = []; window.testAtraso = {};
+    window.testServidor = { aceitou: false, gasto: false };
+    // O console inteiro, com os argumentos serializados: um objeto passado ao
+    // `console.warn` chega ao Playwright como «Object», e a credencial dentro
+    // dele passaria sem ser vista.
+    window.testConsole = [];
+    for (const nivel of ['log', 'info', 'warn', 'error', 'debug']) {
+      const original = console[nivel].bind(console);
+      console[nivel] = (...args) => {
+        try { window.testConsole.push(JSON.stringify(args)); } catch { window.testConsole.push(String(args)); }
+        original(...args);
+      };
+    }
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        window.testCalls.push({ cmd, args });
+        if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
+        if (cmd === 'aceitar_mods') window.testServidor.aceitou = true;
+        // Um link com erro de digitação: o `analisar_convite` de verdade
+        // responde com o nome da falha, e nenhuma tentativa começa.
+        if (cmd === 'analisar_convite' && String(args?.link).includes('erro-de-digitacao')) throw 'TokenInvalido';
+        // Um link de um servidor de outra linha: o Rust devolve o
+        // `versoes::ParaEntrar`, e a entrada segue por `entrarPelaLinha`.
+        if (cmd === 'analisar_convite' && String(args?.link).includes('outra-linha')) {
+          return {
+            alvo: '192.0.2.9:8384', token: 'convite-de-outra-linha',
+            para_entrar: { Abrir: { servidor: '0.15', linha: '0.15', perde_conversas: false } },
+          };
+        }
+        if (cmd === 'instalar_mod_do_catalogo') window.testTable.mods_instalados = [{ id: mod.id, hash: mod.hash }];
+        if (cmd === 'connect') {
+          const servidor = window.testServidor;
+          const recusa = (error) => { throw { error, trail: [] }; };
+          // A forma é a de `ConnectionError::Refused` da FFI, que a tela lê
+          // como CREDENCIAL RECUSADA (`fraseDeErro`).
+          // `testOutroConvite` é o segredo de uma segunda batida, para a cena em
+          // que uma pergunta substitui outra (5b).
+          const aceita = args.joinSecret === convite || (window.testOutroConvite && args.joinSecret === window.testOutroConvite);
+          if (!aceita || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
+          if (!servidor.aceitou) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-r' } });
+          servidor.gasto = true;
+          return {
+            snapshot,
+            veredito: { FirstContactVerified: { fingerprint: 'cd'.repeat(32) } },
+            geracao: window.testCalls.length,
+          };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      mods_instalados: [{ id: MOD_R.id, hash: MOD_R.hash }],
+      analisar_convite: { alvo: ALVO_R, token: CONVITE_R, para_entrar: null },
+    }),
+    convite: CONVITE_R, mod: MOD_R, snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  // ---- 1. A volta que aceita os MODs leva a credencial, e entra.
+  await baterComOConvite(page);
+  assert.equal((await conectsFeitos(page))[0]?.joinSecret, CONVITE_R,
+    'a primeira batida não levou o convite do link, e esta cena não mede nada');
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= 2, null, { timeout: 3000 });
+  const volta = (await conectsFeitos(page))[1];
+  assert.equal(volta.joinSecret, CONVITE_R,
+    `a volta que aceita os MODs saiu sem a credencial da tentativa (joinSecret ${JSON.stringify(volta.joinSecret)}): ` +
+    'num servidor fechado por convite ela recebe CREDENCIAL RECUSADA, e o convite que o servidor guardou intacto não serve para nada');
+  await page.waitForFunction(() => !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
+    .catch(async () => assert.fail(`a volta com a credencial não entrou — a entrada diz «${await page.evaluate(() => $('boot-erro').textContent)}»`));
+
+  // ---- 2. Ela é esquecida ao entrar — e o link colado também.
+  assert.equal(await page.evaluate(() => aceitePendente?.credencial ?? null), null,
+    'a credencial da tentativa continuou guardada depois de a pessoa entrar: um convite de uso único já gasto ficou na memória da janela');
+  assert.equal(await campoDoLink(page), '',
+    'o link colado, com o convite dentro, ficou no campo do diálogo de servidores depois de a pessoa entrar');
+
+  // ---- 3. A reconexão depois de uma sessão que entrou vai sem ela.
+  await page.evaluate(() => mostrarFim('Kicked'));
+  await page.click('#botao-voltar');
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= 3, null, { timeout: 3000 });
+  const reconexao = (await conectsFeitos(page))[2];
+  assert.equal(reconexao.joinSecret ?? null, null,
+    'o RECONECTAR de uma sessão que entrou levou o convite: reenviá-lo é gastar de novo o que já foi gasto');
+
+  // ---- 4. Desistir esquece, por qualquer das três portas da pergunta.
+  const desistencias = [
+    ['RECUSAR E VOLTAR', () => page.click('#mods-recusar')],
+    ['Escape', () => page.keyboard.press('Escape')],
+    ['clicar fora', async () => {
+      const ponto = await pontoDoVeu(page);
+      assert.ok(ponto, 'não achei um ponto do véu da pergunta fora da caixa, e clicar fora não foi medido');
+      await page.mouse.click(ponto.x, ponto.y);
+    }],
+  ];
+  for (const [porta, desistir] of desistencias) {
+    await baterComOConvite(page);
+    assert.equal(await credencialGuardada(page), CONVITE_R,
+      `com a pergunta aberta, a credencial não está guardada nela, e desistir por ${porta} não mede nada`);
+    await desistir();
+    await page.waitForFunction(() => document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+      .catch(() => assert.fail(`desistir por ${porta} não fechou a pergunta dos MODs`));
+    assert.equal(await credencialGuardada(page), null,
+      `desistir por ${porta} fechou a pergunta e deixou a credencial da tentativa na memória da janela`);
+    assert.equal(await campoDoLink(page), '',
+      `desistir por ${porta} deixou o link colado, com o convite dentro, no campo do diálogo de servidores`);
+  }
+
+  // ---- 4b. Um link que o `analisar_convite` recusa fica no campo.
+  //
+  // Ele não inicia tentativa nenhuma e nada sai com ele; mantê-lo deixa a
+  // pessoa corrigir o erro de digitação em vez de colar tudo de novo. O que o
+  // campo não guarda é o link que **seguiu** para uma tentativa: os casos de
+  // entrar e de desistir, acima, continuam conferindo o campo vazio.
+  const LINK_QUEBRADO = `seele://${ALVO_R}?token=erro-de-digitacao`;
+  const conectsAntesDoQuebrado = (await conectsFeitos(page)).length;
+  await page.evaluate(() => {
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_QUEBRADO);
+  await page.press('#servidores-endereco', 'Enter');
+  await page.waitForFunction(() => !document.getElementById('servidores-erro').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('o link com erro de digitação não foi recusado no diálogo, e este caso não mede nada'));
+  assert.equal(await campoDoLink(page), LINK_QUEBRADO,
+    'o link que o analisar_convite recusou sumiu do campo: ele não iniciou tentativa nenhuma, e a pessoa tem de colar tudo de novo em vez de corrigir o erro de digitação');
+  assert.equal((await conectsFeitos(page)).length, conectsAntesDoQuebrado,
+    'o link recusado pelo analisar_convite chegou a um connect');
+  await page.evaluate(() => fecharServidores());
+
+  // ---- 4c. Um link de outra linha segue para a tentativa dela, e o campo
+  // fica vazio.
+  //
+  // É a outra saída que leva o link adiante: `entrarPelaLinha` abre o SEELE
+  // daquela linha com o link (`abrir_versao`), e o convite dentro dele não
+  // pode ficar escrito no campo desta janela, que continua aberta.
+  const LINK_DE_OUTRA_LINHA = 'seele://192.0.2.9:8384?token=convite-de-outra-linha&v=outra-linha';
+  const conectsAntesDaOutraLinha = (await conectsFeitos(page)).length;
+  await page.evaluate(() => {
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    return abrirServidores();
+  });
+  await page.fill('#servidores-endereco', LINK_DE_OUTRA_LINHA);
+  await page.press('#servidores-endereco', 'Enter');
+  await page.waitForFunction(() => !document.getElementById('versoes-confirmar').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('o link de outra linha não chegou à pergunta de abrir a outra versão, e este caso não mede nada'));
+  await page.click('#versoes-confirmar-sim');
+  await page.waitForFunction(() => testCalls.some(c => c.cmd === 'abrir_versao'), null, { timeout: 3000 })
+    .catch(() => assert.fail('o link de outra linha não chegou ao abrir_versao'));
+  assert.equal(await page.evaluate(() => testCalls.filter(c => c.cmd === 'abrir_versao').at(-1).args.link), LINK_DE_OUTRA_LINHA,
+    'o abrir_versao não recebeu o link colado, e este caso não mede o caminho de verdade');
+  assert.equal(await campoDoLink(page), '',
+    'o link de outra linha seguiu para o SEELE daquela linha e ficou escrito no campo do diálogo de servidores desta janela, com o convite dentro');
+  assert.equal((await conectsFeitos(page)).length, conectsAntesDaOutraLinha,
+    'o link de outra linha chegou a um connect desta janela');
+  await page.evaluate(() => { $('versoes-confirmar').hidden = true; fecharServidores(); });
+
+  // ---- 5. Desistir enquanto o MOD chega também esquece, e não entra.
+  //
+  // A obtenção leva tempo, e a pergunta continua aberta durante ela: RECUSAR,
+  // Escape e clicar fora seguem à mão. Quem desiste nesse meio não pode ver a
+  // janela entrar sozinha quando o pacote termina de chegar — «sair da
+  // pergunta não entra em lugar nenhum» — e muito menos com a credencial que
+  // desistir esqueceu.
+  await page.evaluate(() => { testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 600; });
+  await baterComOConvite(page);
+  const antesDoAceite = (await conectsFeitos(page)).length;
+  const conferenciasAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'mods_instalados').length);
+  // A cópia que `aceitarOsMods` guarda da pergunta (`pergunta`) enquanto o
+  // catálogo responde: a bancada guarda a mesma referência, para ver o que ela
+  // ainda alcança depois de a pessoa desistir.
+  await page.evaluate(() => { window.testPergunta = aceitePendente; });
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(() => testCalls.some(c => c.cmd === 'instalar_mod_do_catalogo'), null, { timeout: 3000 });
+  await page.click('#mods-recusar');
+  // Ainda durante a obtenção: o catálogo não respondeu, e a cópia continua viva.
+  assert.equal(await page.evaluate(() => window.testPergunta?.credencial ?? null), null,
+    'desistir enquanto o catálogo responde soltou a pergunta, mas a cópia que `aceitarOsMods` guarda dela continua com a credencial — alcançável enquanto o catálogo trava');
+  // A obtenção termina e confere o que chegou (a segunda leitura da lista); o
+  // que viria depois dela é a volta.
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'mods_instalados').length >= antes + 2,
+    conferenciasAntes, { timeout: 3000 },
+  );
+  await page.waitForTimeout(400);
+  const depoisDoAceite = await conectsFeitos(page);
+  assert.equal(depoisDoAceite.length, antesDoAceite,
+    'a pessoa fechou a pergunta enquanto o MOD chegava, e a janela entrou mesmo assim' +
+    (depoisDoAceite.at(-1)?.joinSecret === CONVITE_R ? ', com a credencial que desistir devia ter esquecido' : ''));
+  assert.equal(await credencialGuardada(page), null,
+    'desistir enquanto o MOD chegava deixou a credencial da tentativa na memória da janela');
+  await page.evaluate((m) => { testAtraso = {}; testTable.mods_instalados = [{ id: m.id, hash: m.hash }]; }, MOD_R);
+
+  // ---- 5b. Uma pergunta nova que substitui a antiga durante a obtenção.
+  //
+  // A revisão da rodada 1 mediu (`troca-r.cjs`): com uma batida nova enquanto
+  // o MOD da antiga chega, `abrirAceiteDeMods` troca `aceitePendente`, e a
+  // cópia que a obtenção antiga guarda (`pergunta`) ainda alcança a credencial
+  // de A até a obtenção acabar.
+  const CONVITE_B = `${CONVITE_R}-da-segunda-batida`;
+  await page.evaluate(() => { testTable.mods_instalados = []; testAtraso.instalar_mod_do_catalogo = 800; });
+  await baterComOConvite(page);
+  await page.evaluate(() => { window.testPergunta = aceitePendente; });
+  const obtencoesAntes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'instalar_mod_do_catalogo').length);
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'instalar_mod_do_catalogo').length > antes,
+    obtencoesAntes, { timeout: 3000 },
+  );
+  // A segunda batida, a outro servidor, com outro segredo, durante a obtenção.
+  await page.evaluate((convite) => {
+    window.testOutroConvite = convite;
+    window.testServidor = { aceitou: false, gasto: false };
+    irParaOServidor('192.0.2.8:8384', null, convite);
+  }, CONVITE_B);
+  await page.waitForFunction(() => aceitePendente && aceitePendente !== window.testPergunta, null, { timeout: 3000 })
+    .catch(() => assert.fail('a segunda batida não abriu uma pergunta nova, e a troca não foi medida'));
+  assert.equal(await credencialGuardada(page), CONVITE_B,
+    'a pergunta nova não guardou a credencial da segunda batida, e esta cena não mede nada');
+  assert.equal(await page.evaluate(() => window.testPergunta?.credencial ?? null), null,
+    'uma pergunta nova substituiu a antiga, e a cópia que a obtenção antiga guarda ainda alcança a credencial da primeira batida');
+  // A obtenção antiga termina sem voltar (a pergunta dela já não é a aberta), e
+  // a nova é recusada: a página volta ao estado de antes.
+  await page.waitForTimeout(1000);
+  await page.click('#mods-recusar');
+  await page.evaluate((m) => {
+    testAtraso = {}; window.testOutroConvite = null;
+    testTable.mods_instalados = [{ id: m.id, hash: m.hash }];
+  }, MOD_R);
+
+  // ---- 6. A credencial fica presa ao alvo da batida, e não ao último alvo da
+  // janela.
+  //
+  // `hospedar()` reescreve o `ultimoAlvo`, e HOSPEDAR AQUI não fica apagado
+  // enquanto um `connect` anda. A revisão mediu (`corrida-r.cjs`, rodada 1):
+  // com o `ultimoAlvo` trocado no meio do `connect` de A, a pergunta guardava o
+  // alvo novo, e a volta levava o convite de A a outro servidor. Aqui o
+  // `connect` demora 400 ms, e a troca acontece aos 100.
+  await page.evaluate(([alvo, convite]) => {
+    window.testServidor = { aceitou: false, gasto: false };
+    testAtraso.connect = 400;
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    irParaOServidor(alvo, null, convite);
+    // O que `hospedar()` faz no meio: `ultimoAlvo = anfitriao.aqui`.
+    setTimeout(() => { ultimoAlvo = '127.0.0.1:9999'; }, 100);
+  }, [ALVO_R, CONVITE_R]);
+  await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('a batida da corrida não chegou à pergunta dos MODs, e a corrida não foi medida'));
+  await page.evaluate(() => { testAtraso = {}; });
+  const antesDaCorrida = (await conectsFeitos(page)).length;
+  await page.click('#mods-aceitar');
+  await page.waitForFunction((n) => testCalls.filter(c => c.cmd === 'connect').length > n, antesDaCorrida, { timeout: 3000 });
+  const voltaDaCorrida = (await conectsFeitos(page)).at(-1);
+  assert.equal(voltaDaCorrida.server, ALVO_R,
+    `com o último alvo da janela trocado no meio da batida, a volta que aceita os MODs foi a ${voltaDaCorrida.server}` +
+    (voltaDaCorrida.joinSecret === CONVITE_R ? `, levando o convite de ${ALVO_R}` : '') +
+    ': a pergunta amarrou a credencial ao alvo da janela, e não ao da batida');
+  const simGravado = await page.evaluate(() => testCalls.filter(c => c.cmd === 'aceitar_mods').at(-1)?.args?.alvo);
+  assert.equal(simGravado, ALVO_R,
+    `o sim dos MODs foi gravado para ${simGravado}, e não para o servidor que perguntou`);
+
+  // ---- 7. Depois de tudo isso, a credencial não está em lugar nenhum além do
+  // `connect`: nem no armazenamento da página, nem no DOM, nem no console, nem
+  // em outro comando — que é por onde ela chegaria a um arquivo.
+  const vazou = await page.evaluate((convite) => {
+    const onde = [];
+    const guardado = (loja) => Object.keys(loja).map((k) => `${k}=${loja.getItem(k)}`).join('\n');
+    if (guardado(localStorage).includes(convite)) onde.push('localStorage');
+    if (guardado(sessionStorage).includes(convite)) onde.push('sessionStorage');
+    if (document.documentElement.outerHTML.includes(convite)) onde.push('o DOM');
+    if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
+    if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
+    // O `connect` a leva de propósito, e o `analisar_convite` recebe o link de
+    // onde ela sai: é a leitura dele, e não um caminho dela.
+    for (const chamada of testCalls) {
+      if (chamada.cmd === 'connect' || chamada.cmd === 'analisar_convite') continue;
+      if (JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
+    }
+    return onde;
+  }, CONVITE_R);
+  assert.deepEqual(vazou, [],
+    `a credencial da tentativa apareceu fora do connect: ${vazou.join(', ')}. Ela é um convite de uso único ou a senha do servidor, e só vive na memória da pergunta dos MODs`);
+
+  assert.deepEqual(erros, [], 'a cena do lote R lançou erro na página');
+  await page.close();
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -266,7 +655,13 @@ function tintasDoTitulo() {
       'a entrada por link lançou erro na página: o que está nesta lista quebrou sem ninguém ver, e a janela de verdade não diz nada a quem a usa');
     await link.close();
 
+    await aVoltaDoAceiteLevaACredencial(browser, server.address().port);
+
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
+    console.log('lote R: a volta que aceita os MODs leva a credencial da tentativa e entra, e o RECONECTAR de uma sessão que entrou vai sem ela');
+    console.log('lote R: desistir da pergunta (RECUSAR, Escape, clicar fora, ou no meio da obtenção) esquece a credencial e não entra');
+    console.log('lote R: com o último alvo trocado no meio da batida, a volta e o sim vão ao servidor que perguntou');
+    console.log('lote R: a credencial não aparece no armazenamento, no DOM, no console nem em comando nenhum além do connect');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -1,0 +1,130 @@
+//! Medida temporária da F4 (09/10/2026), fora da árvore: o maior quadro-chave a
+//! 1080p em cada teto, para decidir se o `MAX_QUADRO_LEN` de 512 KiB congela.
+//!
+//!     cargo run --release -p seele-video --example idr_no_teto -- <libopenh264.dylib>
+
+use std::path::PathBuf;
+
+use seele_video::codec::{
+    bytes_de_croma, bytes_de_luma, Cadencia, Codificador, ConfigDoCodificador, QuadroI420,
+    Resolucao,
+};
+use seele_video::modulo::BibliotecaDeVideo;
+
+const L: usize = 1920;
+const A: usize = 1080;
+
+/// Um gerador simples e determinístico.
+struct Xorshift(u64);
+impl Xorshift {
+    fn proximo(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+}
+
+/// O conteúdo: `texto` (traços pretos em células de 8×14 sobre branco, a
+/// borda mais cara para uma DCT), `ruido` (cada pixel ao acaso, uma foto
+/// difícil) ou `metade` (texto em cima, ruído embaixo).
+fn quadro(conteudo: &str, semente: u64) -> QuadroI420 {
+    let mut r = Xorshift(semente | 1);
+    let mut y = vec![255_u8; bytes_de_luma(L, A)];
+    let mut u = vec![128_u8; bytes_de_croma(L, A)];
+    let mut v = vec![128_u8; bytes_de_croma(L, A)];
+    let texto = |y: &mut Vec<u8>, r: &mut Xorshift, de: usize, ate: usize| {
+        for linha in (de..ate).step_by(14) {
+            for coluna in (0..L).step_by(8) {
+                let bits = r.proximo();
+                for dy in 0..11 {
+                    for dx in 0..6 {
+                        if (bits >> ((dy * 6 + dx) % 64)) & 1 == 1 && linha + dy < ate {
+                            y[(linha + dy) * L + coluna + dx] = 0;
+                        }
+                    }
+                }
+            }
+        }
+    };
+    let ruido = |y: &mut Vec<u8>, u: &mut Vec<u8>, v: &mut Vec<u8>, r: &mut Xorshift, de: usize, ate: usize| {
+        for linha in de..ate {
+            for coluna in 0..L {
+                y[linha * L + coluna] = r.proximo() as u8;
+            }
+        }
+        for linha in de / 2..ate / 2 {
+            for coluna in 0..L / 2 {
+                u[linha * (L / 2) + coluna] = r.proximo() as u8;
+                v[linha * (L / 2) + coluna] = r.proximo() as u8;
+            }
+        }
+    };
+    match conteudo {
+        "texto" => texto(&mut y, &mut r, 0, A),
+        "ruido" => ruido(&mut y, &mut u, &mut v, &mut r, 0, A),
+        _ => {
+            texto(&mut y, &mut r, 0, A / 2);
+            ruido(&mut y, &mut u, &mut v, &mut r, A / 2, A);
+        }
+    }
+    QuadroI420::novo(L, A, y, u, v).expect("o quadro")
+}
+
+/// Um quadro de 1080p recortado de uma tela alta em I420 (`yuv`), na linha
+/// `topo`: o conteúdo rola como no spike `tela-no-codec`.
+fn recorte(yuv: &[u8], altura: usize, topo: usize) -> QuadroI420 {
+    let (y, resto) = yuv.split_at(L * altura);
+    let (u, v) = resto.split_at((L / 2) * (altura / 2));
+    let y: Vec<u8> = y[topo * L..(topo + A) * L].to_vec();
+    let c = topo / 2;
+    let u: Vec<u8> = u[c * (L / 2)..(c + A / 2) * (L / 2)].to_vec();
+    let v: Vec<u8> = v[c * (L / 2)..(c + A / 2) * (L / 2)].to_vec();
+    QuadroI420::novo(L, A, y, u, v).expect("o recorte")
+}
+
+fn main() -> Result<(), String> {
+    let mut args = std::env::args().skip(1);
+    let caminho = PathBuf::from(args.next().ok_or("o caminho do libopenh264")?);
+    let biblioteca = BibliotecaDeVideo::carregar(&caminho).map_err(|e| format!("carregar: {e}"))?;
+    let telas: Vec<(String, Vec<u8>)> = args
+        .map(|t| (t.clone(), std::fs::read(&t).expect("a tela")))
+        .collect();
+    let altura = 1080 + 600;
+    println!("tela                 teto_mbps  idr_fria_kib  idr_regime_max_kib  maior_comum_kib  quadros");
+    for (nome, yuv) in &telas {
+        for teto_mbps in [1.2_f64, 6.2, 12.4, 25.0, 50.0, 100.0] {
+            let config = ConfigDoCodificador {
+                resolucao: Resolucao::P1080,
+                cadencia: Cadencia::Q30,
+                teto_bps: (teto_mbps * 1_000_000.0) as u32,
+            };
+            let mut codificador =
+                Codificador::novo(&biblioteca, config).map_err(|e| format!("codificador: {e}"))?;
+            let (mut fria, mut regime, mut comum, mut quadros) = (0, 0, 0, 0);
+            for n in 0..300_usize {
+                let q = recorte(yuv, altura, (n * 3) % 600 / 2 * 2);
+                // A partida é um IDR; depois, um forçado a cada 2 s (60 quadros).
+                let pedir = n == 0 || (n >= 30 && n % 60 == 0);
+                if let Ok(Some(c)) = codificador.codificar(&q, pedir) {
+                    quadros += 1;
+                    if c.chave && n == 0 {
+                        fria = c.bytes.len();
+                    } else if c.chave && n >= 30 {
+                        regime = regime.max(c.bytes.len());
+                    } else if !c.chave {
+                        comum = comum.max(c.bytes.len());
+                    }
+                }
+            }
+            println!(
+                "{:20} {teto_mbps:9.1}  {:12.1}  {:18.1}  {:15.1}  {quadros:7}",
+                std::path::Path::new(nome).file_name().unwrap().to_string_lossy(),
+                fria as f64 / 1024.0,
+                regime as f64 / 1024.0,
+                comum as f64 / 1024.0
+            );
+        }
+    }
+    Ok(())
+}

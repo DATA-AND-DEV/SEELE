@@ -13,6 +13,24 @@ marcas. Ninguém vai à rede de verdade: as canárias são servidores locais que
 contam cada pedido (HTTP em 127.0.0.1:8096, UDP em 8097/8098/8099). Descartável.
 """
 import base64, hashlib, http.server, json, pathlib, re, socket, subprocess, sys, tempfile, threading, time
+import os
+
+
+def simulador():
+    """O Simulador onde a página abre: `SEELE_SIMULADOR` (o UDID), ou o único ligado.
+
+    Com dois ligados, `booted` é ambíguo, e a medida iria para o aparelho de
+    outra frente (a F8 usa o iPhone 17; a F4, o iPhone 18 Pro). Recusar e dizer
+    é melhor que medir no aparelho errado.
+    """
+    escolhido = os.environ.get("SEELE_SIMULADOR")
+    if escolhido:
+        return escolhido
+    ligados = [l.strip() for l in subprocess.run(["xcrun", "simctl", "list", "devices", "booted"],
+                                                 capture_output=True, text=True).stdout.splitlines() if "(Booted)" in l]
+    if len(ligados) != 1:
+        sys.exit(f"há {len(ligados)} Simuladores ligados ({'; '.join(ligados)}): diga qual com SEELE_SIMULADOR=<UDID>")
+    return "booted"
 
 AQUI = pathlib.Path(__file__).resolve().parent
 PAGINA = AQUI / "pagina"
@@ -184,10 +202,10 @@ def rodar_chromium():
 def rodar_safari_sim():
     fases = {}
     for fase in (1, 2):
-        subprocess.run(["xcrun", "simctl", "openurl", "booted", f"http://localhost:{PORTA}/?nav=safari-sim&fase={fase}&t={int(time.time())}"], check=True)
+        subprocess.run(["xcrun", "simctl", "openurl", simulador(), f"http://localhost:{PORTA}/?nav=safari-sim&fase={fase}&t={int(time.time())}"], check=True)
         fases[fase] = esperar("safari-sim", fase)
         # O Safari é encerrado: a fase 2 é outra execução do app.
-        subprocess.run(["xcrun", "simctl", "terminate", "booted", "com.apple.mobilesafari"], capture_output=True)
+        subprocess.run(["xcrun", "simctl", "terminate", simulador(), "com.apple.mobilesafari"], capture_output=True)
         time.sleep(2)
     return fases
 
