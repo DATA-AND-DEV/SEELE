@@ -127,9 +127,22 @@ function numeroNoIntervalo(valor, intervalo) {
   return Math.min(Math.max(n, intervalo.minimo), intervalo.maximo);
 }
 
-/** Uma cor que passou pelo formato, ou `null`. */
+/**
+ * Uma cor que passou pelo formato, ou `null`.
+ *
+ * **Ou a citação de uma cor do tema** (rascunho da API 6, §9, B8; tarefa 17h):
+ * `{ tema: 'acento' }` vira o token do produto que o tema escreve
+ * (`var(--seele-laranja-nerv)`), e a cor acompanha o tema em vigor. A tabela é
+ * a da casca, `TEMA_DA_API` (`base.js`), e não uma segunda cópia; um nome que
+ * não está nela é recusado como qualquer cor que não serve.
+ */
 function corDeMod(valor) {
-  return typeof valor === "string" && COR_DE_MOD.test(valor) ? valor : null;
+  if (typeof valor === "string") return COR_DE_MOD.test(valor) ? valor : null;
+  const citado = valor && typeof valor === "object" ? valor.tema : undefined;
+  if (typeof citado !== "string" || typeof TEMA_DA_API !== "object" || !Object.hasOwn(TEMA_DA_API, citado)) {
+    return null;
+  }
+  return `var(${TEMA_DA_API[citado]})`;
 }
 
 /** Uma palavra de uma tabela, traduzida no valor do produto, ou `null`. */

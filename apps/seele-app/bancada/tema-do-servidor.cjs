@@ -29,6 +29,10 @@
 //    publicada», e o evento `tema` volta com `previa: true`; `null` a tira sem
 //    fechar a superfície, e fechar a superfície a tira; uma prévia sem
 //    contraste é recusada com os pares, e não fica.
+// 8. **A herança e a citação** (tarefa 17h; rascunho §9, B8): a `folha` e o
+//    `dialogo` pintam com o tema em vigor, e um estilo que cita um token —
+//    `cor: { tema: 'acento' }` — tem a cor do tema, e muda quando ele muda; um
+//    nome que não é do tema é recusado como qualquer cor que não serve.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -223,6 +227,44 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a prévia recusada pintou a sessão');
     assert.equal(await selo(), false, 'a prévia recusada mostrou o selo');
 
+    // 8. A herança e a citação.
+    const rgb = (hex) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`;
+    await page.evaluate(async () => {
+      await pedirComoOMod({ tipo: 'superficie-criar', descricao: { id: 'citacao', tipo: 'dialogo', modal: false, titulo: 'Citação' } });
+      await pedirComoOMod({ tipo: 'superficie-montar', superficie: 'citacao', arvore: [
+        { forma: 'texto', chave: 'citado', dentro: 'no acento do tema', estilo: { cor: { tema: 'acento' }, fundo: { tema: 'painel' } } },
+        { forma: 'texto', chave: 'sem-tema', dentro: 'um nome que não é do tema', estilo: { cor: { tema: 'nao-existe' } } },
+      ] });
+      await pedirComoOMod({ tipo: 'superficie-criar', descricao: { id: 'lateral', tipo: 'folha', titulo: 'Folha' } });
+    });
+    const cores = () => page.evaluate(() => {
+      const no = (chave) => document.querySelector(`[data-superficie="citacao"] [data-chave-do-mod="${chave}"]`);
+      const caixa = (seletor) => getComputedStyle(document.querySelector(seletor)).backgroundColor;
+      return {
+        citado: getComputedStyle(no('citado')).color,
+        citadoFundo: getComputedStyle(no('citado')).backgroundColor,
+        semTema: no('sem-tema')?.style.color ?? null,
+        dialogo: caixa('.dialogo-de-mod[data-superficie="citacao"]'),
+        folha: caixa('.folha-de-mod[data-superficie="lateral"]'),
+      };
+    });
+    await desenharCom(comoVeio);
+    const comClaro = await cores();
+    assert.deepEqual(
+      { citado: comClaro.citado, citadoFundo: comClaro.citadoFundo, dialogo: comClaro.dialogo, folha: comClaro.folha },
+      { citado: rgb(CLARO.acento), citadoFundo: rgb(CLARO.painel), dialogo: rgb(CLARO.painel), folha: rgb(CLARO.painel) },
+      `sob o tema claro, a citação ou a herança não tem a cor do tema: ${JSON.stringify(comClaro)}`,
+    );
+    assert.equal(comClaro.semTema, '', `um nome que não é do tema pintou o nó: ${JSON.stringify(comClaro)}`);
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify(PAPEL) });
+    const comPapel = await cores();
+    assert.deepEqual(
+      { citado: comPapel.citado, dialogo: comPapel.dialogo, folha: comPapel.folha },
+      { citado: rgb(PAPEL.acento), dialogo: rgb(PAPEL.painel), folha: rgb(PAPEL.painel) },
+      `trocado o tema, a citação ou a herança não acompanhou: ${JSON.stringify(comPapel)}`,
+    );
+    await desenharCom(comoVeio);
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -234,7 +276,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

@@ -1262,7 +1262,12 @@ acompanhavam a cor derivada.
 - **`folha` e `dialogo` herdam o tema da sessão**, e um estilo de MOD pode
   citar um token (`cor: { tema: 'acento' }`), resolvido pelo produto (ESTILO
   A16). Cada peça ganha um teste no produto antes de o ESTILO depender dela
-  (B8).
+  (B8). [c, tarefa 17h: medida, a herança já valia — os palcos moram em
+  `#tela-sessao`, onde o tema escreve —; a citação é um `var()` do token da
+  tabela `TEMA_DA_API`, em toda cor de estilo (`cor`, `fundo`, borda, sombra,
+  gradiente), e acompanha o tema trocado; um nome fora da tabela é recusado
+  como qualquer cor que não serve. Vale também para as APIs 4 e 5: é API
+  somada]
 
 ### A ampliação: o que entra na 6 e o que espera a API 7 (B5)
 
