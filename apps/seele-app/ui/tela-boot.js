@@ -441,10 +441,13 @@ async function conectar(alvo, apelido, credencial) {
     // veredito ou o erro, e não o último candidato tentado.
     //
     // **Esta linha ainda é de qualquer tentativa**, e a da velha apaga a etapa
-    // da nova enquanto ela anda. Ela fica: a linha é escrita pelos eventos
-    // `ConnectStageChanged`, que não dizem de qual tentativa são, e calar a
-    // velha aqui deixaria a etapa dela na tela quando ela termina depois da
-    // nova. Ver o relatório do lote W2.
+    // da nova enquanto ela anda (lido no código; a bancada não emite etapas).
+    // Ficou fora do lote W2. Os eventos `ConnectStageChanged` não dizem de qual
+    // tentativa são; quem os separa é a geração, no Rust (`Bridge`, no
+    // `main.rs`), que descarta os da velha a partir do `connect` da nova. Antes
+    // dele — o apelido, a pergunta do nome, o `conferir_esta_versao` — as
+    // etapas da velha ainda chegam, e calar a velha aqui deixaria a última
+    // delas na tela até a nova dizer a primeira. Ver o relatório do lote W2.
     mostrarEtapa(null);
   }
 }
