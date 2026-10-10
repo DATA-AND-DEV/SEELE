@@ -10606,8 +10606,8 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    arquivo — é uma linha nova, e reprova aqui até alguém olhar para ela.
 /// 2. **Nenhum outro script lê a pergunta.** Um segundo leitor de
 ///    `aceitePendente` seria um segundo lugar por onde ela sai.
-/// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
-///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
+/// 3. **Só quatro chamadas de `conectar` levam credencial**: o link colado, o
+///    link do lançador, a volta que aceita os MODs e a entrada pelo navegador. O RECONECTAR, a batida da
 ///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
 ///    reconexão que a levasse gastaria de novo o convite que a entrada gastou.
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
@@ -10617,6 +10617,12 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
 ///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+///
+/// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
+/// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
+/// em `segredos`, na memória da tentativa. Cada linha dela que nomeia
+/// `credencial`, `segredos` ou `linkDaCarga` está na lista, e a chamada de
+/// `conectar` dela é a quarta que leva credencial.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
@@ -10653,6 +10659,33 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "const credencial = aceitePendente?.credencial ?? null;",
         ),
         ("camada-mods.js", "await conectar(alvo, null, credencial);"),
+        // A entrada pelo navegador (3.4). O link lido do fragmento na carga,
+        // entregue uma vez e esquecido.
+        ("identidade-web.js", "let linkDaCarga = lerEApagarOFragmento();"),
+        ("identidade-web.js", "const link = linkDaCarga;"),
+        ("identidade-web.js", "linkDaCarga = null;"),
+        // O token e o link só em `segredos`, e esquecidos juntos.
+        (
+            "identidade-web.js",
+            "const segredos = { credencial: null, link: null };",
+        ),
+        ("identidade-web.js", "segredos.credencial = null;"),
+        ("identidade-web.js", "segredos.link = null;"),
+        ("identidade-web.js", "segredos.credencial = convite ?? null;"),
+        ("identidade-web.js", "segredos.link = texto;"),
+        // Quem já é conhecido entra pela chave, e não gasta o convite.
+        (
+            "identidade-web.js",
+            "const credencial = tentativa.conhecido ? null : segredos.credencial;",
+        ),
+        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
+        // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
+        ("identidade-web.js", "if (!segredos.link) return false;"),
+        (
+            "identidade-web.js",
+            "await navigator.clipboard.writeText(segredos.link);",
+        ),
         (
             "camada-mods.js",
             "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
@@ -10677,10 +10710,13 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
         vistas.push((arquivo, linha.to_owned()));
     };
-    for arquivo in ["tela-boot.js", "camada-mods.js"] {
+    for arquivo in ["tela-boot.js", "camada-mods.js", "identidade-web.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial") || names(linha, "aceitePendente") {
+            if ["credencial", "aceitePendente", "segredos", "linkDaCarga"]
+                .iter()
+                .any(|nome| names(linha, nome))
+            {
                 conferir(arquivo, linha);
             }
         }
@@ -10719,6 +10755,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
+        // A entrada pelo navegador (3.4): o link da página, com o token da
+        // tentativa. Só quem não é conhecido o leva.
+        ("identidade-web.js", "alvo, apelido, credencial"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -10762,7 +10801,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 .iter()
                 .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
             "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
-             Só o link colado, o link do lançador e a volta que aceita os MODs levam \
+             Só o link colado, o link do lançador, a volta que aceita os MODs e a \
+             entrada pelo navegador levam \
              uma; uma reconexão que a levasse gastaria de novo o convite que a \
              entrada gastou."
         );
@@ -10770,7 +10810,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     assert_eq!(
         levam.len(),
         LEVAM.len(),
-        "as chamadas de `conectar` com credencial não são as três conhecidas: {levam:?}"
+        "as chamadas de `conectar` com credencial não são as quatro conhecidas: {levam:?}"
     );
     let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
     assert!(

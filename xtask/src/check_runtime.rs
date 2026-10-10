@@ -437,7 +437,7 @@ mod tests {
 
     /// **As bancadas de navegador com `.wasm` leem o que o job acabou de
     /// compilar.** Cada uma recebe o `.wasm` pelo caminho: a do executor, o
-    /// motor; a da voz, o `seele-web`. Num passo antes do `cargo xtask web`,
+    /// motor; a da voz e a da identidade, o `seele-web`. Num passo antes do `cargo xtask web`,
     /// ou com outro caminho, ela mediria um `.wasm` velho do cache, ou nenhum.
     #[test]
     fn a_bancada_do_executor_no_navegador_roda_depois_do_motor_compilado() {
@@ -453,6 +453,10 @@ mod tests {
             ),
             (
                 "voz-no-navegador.cjs",
+                "target/wasm32-unknown-unknown/release/seele_web.wasm",
+            ),
+            (
+                "identidade-no-navegador.cjs",
                 "target/wasm32-unknown-unknown/release/seele_web.wasm",
             ),
         ] {

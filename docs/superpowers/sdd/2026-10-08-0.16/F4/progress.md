@@ -764,3 +764,26 @@ começar.
   bancada; o teste fora da ativação por voz e sem a régua reprovam os nativos.
 - **A sala viva da F7**: os comandos e os canais novos, com o lado proposto,
   em `F4/ponte-no-pc.md`. Decididos quando a casca os chamar.
+
+## 10/10: a 3.4 no que não depende do domínio (a identidade do navegador)
+
+- **Pedida pela orquestradora** depois do passo 4 da 3.3, sem tocar no
+  `tela-boot.js` e seguindo o contrato do guarda da credencial do lote R.
+- **A `ui/identidade-web.js`** entrega à tela da F8 o objeto de leitura e as
+  ações: `entrar`, `aceitarOsMods`, `agoraNao`, `copiarLink` e `instalar`. O
+  fragmento é lido e apagado na carga. O token e o link vivem só em
+  `segredos`, na memória da tentativa. A chave Ed25519 nasce no primeiro
+  `entrar`, depois do `persist()`, e o servidor é guardado no IndexedDB pela
+  impressão só quando a entrada dá certo. Quem já é conhecido entra pela
+  chave, sem gastar o convite.
+- **Quem conecta é passado na criação**: o `connect` da ponte é da 2.6.
+- **O servidor responde `CredentialRejected` igual para todo convite que não
+  vale** (spec 08, `admissao.rs`). `convite-gasto` e `convite-vencido` se
+  separam pela validade do link.
+- **A bancada `identidade-no-navegador.cjs`** (no job `bancadas-de-mod`,
+  depois do `cargo xtask web`): os três casos do plano, os estados, o que segue
+  e o que encerra a tentativa, a ordem do `persist()`, o fragmento e o
+  servidor já conhecido.
+- **O guarda da credencial** passa a ler a `identidade-web.js` (cada linha que
+  nomeia `credencial`, `segredos` ou `linkDaCarga`). A chamada de `conectar`
+  dela é a quarta que leva credencial, com o porquê.

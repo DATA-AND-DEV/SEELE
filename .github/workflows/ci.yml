@@ -414,6 +414,12 @@ jobs:
       - run: node apps/seele-app/bancada/voz-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # A identidade do navegador (Tarefa 3.4 da F4): o link lido pelo `.wasm` com
+      # a `prova` que o mesmo passo compilou, e o token da tentativa contra um
+      # servidor de mentira. O mesmo teste de ordem segura esta.
+      - run: node apps/seele-app/bancada/identidade-no-navegador.cjs target/wasm32-unknown-unknown/release/seele_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # O `cargo deny` sobre o `deny.toml`, que nenhum job daqui rodava.
   #
