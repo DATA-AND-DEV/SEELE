@@ -19,6 +19,10 @@
 //    máquina, e o MOD que o declarou recebe `tema` com `estado: 'nativo'`;
 //    voltar ao automático o devolve, com `aplicado`; um tema recusado manda
 //    `recusado` com os pares (`frente`, `fundo`, `razao`, `piso`).
+// 6. **A janela que sobe depois do tema também sabe**: o `TemaMudou` chega
+//    logo depois do `Session`, antes de a janela do MOD estar de pé; o
+//    desfecho fica guardado, e o `montarOMod` de verdade o entrega quando o
+//    código do MOD termina de rodar.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -117,6 +121,36 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
       && recusado.pares.some((p) => p.frente === 'acento' && p.fundo === 'fundo'),
     `a recusa não trouxe os pares: ${JSON.stringify(recusado)}`);
     await desenharCom(comoVeio);
+
+    // 6. A janela que sobe depois: sem instância, o tema chega; depois o MOD
+    //    sobe pelo `montarOMod` de verdade, com um executor falso, e recebe o
+    //    desfecho guardado.
+    const tardio = await page.evaluate(async (valores) => {
+      modsCarregados.delete('seele/estilo');
+      testTable.snapshot = { ...testTable.snapshot, tema_do_servidor: null };
+      desenhar(testTable.snapshot);
+      testTable.snapshot = { ...testTable.snapshot, tema_do_servidor: { mod_id: 'seele/estilo', valores } };
+      desenhar(testTable.snapshot);
+      const recebidos = [];
+      const executorDeAntes = window.executorDoMod;
+      window.executorDoMod = () => ({
+        nome: 'falso',
+        async iniciar() {},
+        entregar(m) { recebidos.push(JSON.parse(JSON.stringify(m))); },
+        pedirEncerramento() {},
+        async encerrou() { return true; },
+      });
+      testTable.codigo_do_mod = 'seele.postar("{}")';
+      modsCarregados.set('seele/estilo', { geracao: geracaoDaSessao, admite: () => true, encerrar: async () => {} });
+      try {
+        await montarOMod({ id: 'seele/estilo', hash: 'h', api: 6 });
+      } finally {
+        window.executorDoMod = executorDeAntes;
+      }
+      return recebidos.filter((m) => m.tipo === 'evento' && m.nome === 'tema');
+    }, JSON.stringify(CLARO));
+    assert.deepEqual(tardio, [{ tipo: 'evento', nome: 'tema', estado: 'aplicado', previa: false }],
+      `a janela do MOD que subiu depois do tema não soube dele: ${JSON.stringify(tardio)}`);
 
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);

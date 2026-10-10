@@ -756,6 +756,9 @@ async function montarOMod(mod) {
     instancia.encerrar().catch(() => {});
     return;
   }
+  // **O tema do servidor que chegou antes da janela** (tarefa 17f): o código
+  // do MOD já rodou, os ouvintes dele estão de pé, e ele sabe do desfecho.
+  entregarODesfechoDoTema(mod.id);
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
   // disso é ele, e prometer o contrário seria inventar.
@@ -2395,14 +2398,14 @@ function aplicarOTemaDoServidor(tema) {
   const { mod_id: modId } = temaDoServidorEmVigor;
   if (nativo) {
     if (tirou) escreverOTemaDaSessao();
-    dizerOTemaAoMod(modId, { estado: "nativo" });
+    dizerODesfechoDoTema({ estado: "nativo" });
     return;
   }
   let valores = null;
   try {
     valores = JSON.parse(temaDoServidorEmVigor.valores);
     aplicarOTemaDoMod(modId, valores);
-    dizerOTemaAoMod(modId, { estado: "aplicado" });
+    dizerODesfechoDoTema({ estado: "aplicado" });
   } catch (falha) {
     if (tirou) escreverOTemaDaSessao();
     const motivo = typeof motivoDaFalha === "function" ? motivoDaFalha(falha) : String(falha?.message ?? falha);
@@ -2417,7 +2420,26 @@ function aplicarOTemaDoServidor(tema) {
     const pares = valores && typeof valores === "object" && COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))
       ? tonsDoTema(valores, corDaRaiz).pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso }))
       : [];
-    dizerOTemaAoMod(modId, { estado: "recusado", pares });
+    dizerODesfechoDoTema({ estado: "recusado", pares });
+  }
+}
+
+/**
+ * O desfecho do tema do servidor em vigor, **guardado e dito**: o `TemaMudou`
+ * chega logo depois do `Session`, e a janela do MOD pode ainda não estar de
+ * pé — `montarOMod` entrega o guardado quando ela sobe
+ * (`entregarODesfechoDoTema`).
+ */
+function dizerODesfechoDoTema(desfecho) {
+  if (!temaDoServidorEmVigor) return;
+  temaDoServidorEmVigor.desfecho = desfecho;
+  dizerOTemaAoMod(temaDoServidorEmVigor.mod_id, desfecho);
+}
+
+/** A janela de `modId` subiu: se o tema em vigor é dele, ela sabe do desfecho. */
+function entregarODesfechoDoTema(modId) {
+  if (temaDoServidorEmVigor?.mod_id === modId && temaDoServidorEmVigor.desfecho) {
+    dizerOTemaAoMod(modId, temaDoServidorEmVigor.desfecho);
   }
 }
 
