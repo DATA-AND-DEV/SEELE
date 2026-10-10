@@ -61,3 +61,11 @@ O que espera essa integração, e o commit da F3 de que cada coisa depende:
 - [ ] tirar do `celular-base.css` os cinco `--nucleo-*` que o desktop passou a declarar com os mesmos nomes e valores (`e26e9edc`, ainda fora da versao/0.16), e ver a medida do núcleo continuar igual sob os quatro temas;
 - [x] (`ebd50055`) a Tarefa 13: as cores de estado sob o tema pela `tonsDoTema` da 17e (`bf8d8fb6`), e o tema claro de volta ao caso `aba-servidor`.
 | (o texto-maior intermitente) | na bancada inteira, 2 rodadas em 4 reprovavam o texto-maior numa seção de AJUSTES, com nós que já viam a escala 2 e devolviam o tamanho de antes; sozinho, 0 em 19. O diagnóstico (`c3c4de9a`) mostrou que era a leitura da bancada, e não a página. Com a leitura depois de um recálculo inteiro (`645b0bf0`), 4 rodadas da bancada inteira em 4 passam, com 85 casos cada | `c3c4de9a`, `645b0bf0` |
+
+### Quando a sala pessoal da F7 chegar à `versao/0.16`
+
+Proposto à F7 em 10/10: todo elemento da sala na casca do desktop leva `data-sala-pessoal`, e as duas cascas do navegador o escondem por uma regra.
+
+- [ ] a regra `[data-sala-pessoal] { display: none }` sob as duas marcas;
+- [ ] a frase da sala na lista O QUE … NÃO FAZ (grupo SÓ NO APP DO SEELE), com o nome que a F7 der;
+- [ ] o caso nas duas cascas: pelo menos um `[data-sala-pessoal]` na página, e nenhum à vista; sem a regra, reprova.
