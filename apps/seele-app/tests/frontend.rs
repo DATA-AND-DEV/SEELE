@@ -160,7 +160,16 @@ fn command_parameters(source: &str) -> std::collections::BTreeMap<String, BTreeS
         let Some(abre) = resto.find('(') else {
             continue;
         };
-        let nome = resto[..abre].trim().to_owned();
+        // **Sem os genéricos.** Desde o lote E54 o `connect` é
+        // `connect<R: tauri::Runtime>(`, para um teste chamá-lo pelo runtime
+        // falso do Tauri; lido até o `(`, o nome virava `connect<R: …>`, e o
+        // guarda dos argumentos deixava de achar o `connect` e o pulava calado.
+        let nome = resto[..abre]
+            .split('<')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
         let Some(fecha) = resto[abre..].find(')') else {
             continue;
         };
@@ -458,6 +467,17 @@ fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
     let mut erros: Vec<String> = Vec::new();
     for (comando, _, chave) in invoked_with_arguments(&script) {
         let Some(parametros) = comandos.get(&comando) else {
+            // **Definido aqui e não lido é cegueira, e não ausência** (lote
+            // E54): o `connect` genérico saiu da leitura de cima com outro
+            // nome, e este guarda o pulava sem dizer nada.
+            if source.contains(&format!("fn {comando}("))
+                || source.contains(&format!("fn {comando}<"))
+            {
+                erros.push(format!(
+                    "`{comando}` está em main.rs, e este guarda não leu os parâmetros dele: \
+                     o que o frontend manda a ele deixou de ser conferido"
+                ));
+            }
             continue; // o guarda de baixo cuida de comando inexistente
         };
         let esperados: BTreeSet<String> =
