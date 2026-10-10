@@ -451,3 +451,41 @@ começar.
   pedindo o nativo pelo nome; a escolha invertida; o ouvinte de volta ao topo;
   a bancada antes do motor; a bancada sem `!cancelled()`; a bancada fora do CI.
 
+## 09/10, noite: a ponte, lote A (3.1)
+
+- **A moldura da ponte** (`9e895748`, `52338c4f`): `ui/ponte-web.js`, o
+  primeiro script do `<head>`. O `base.js:36-37` não precisou mudar.
+- **Achado ao escrever: o duble.** As bancadas de `bancada/` e as ferramentas
+  da F8 (`tools/carga-da-casca.py`, `tools/bancada-do-celular.py`) põem um
+  `window.__TAURI__` antes do primeiro `<script src=`, que passou a ser a
+  ponte. A ponte trocaria o duble e a marca escolhida pela bancada. Regra: **um
+  `__TAURI__` sem o `__TAURI_INTERNALS__` é um duble**, e a ponte não faz
+  nada. O `executorDoMod` passou a ler a decisão da ponte, e não o Tauri.
+- **Os 160 comandos**: 89 atendidos nas duas cascas, 33 só no PC, 34
+  recusados, 3 neutros e o `disconnect`. 24 com corpo; 99 em `AINDA_A_FAZER`,
+  com a tarefa ao lado.
+- **Medido no Chromium, sem duble e sem toque**: a casca chama sozinha 18
+  comandos nas duas cascas (os 17 da F8 mais o `estado_da_porta`), e nenhum
+  volta recusado.
+- **Achado na integração, que não é da F4:** na `versao/0.16` de `ffd8e4fb`,
+  os `celular-*.js` usam o `CASCA` que a F8 declara no `base.js:112` do
+  `0.16/celular`, e esse ponto ainda não entrou. Sem a ponte, nada punha a
+  marca num navegador de verdade, e ninguém via. Com a ponte, a casca do
+  celular estoura cinco vezes na carga (`CASCA is not defined`), e a
+  `ponte-sem-gesto.cjs` reprova no `0.16/web` sozinho. **Junto com o
+  `0.16/celular`, o `0.16/api-6` e o `0.16/lotes`** (numa árvore temporária,
+  fora do branch), a cobertura fecha nos 160, e as três bancadas passam.
+- **Dois guardas do `frontend.rs`** ganharam a ponte como
+  exceção, com o porquê: a ordem de carga (ela é lida pelo `base.js`, e não o
+  contrário) e os tipos de imagem escritos (a cópia dela é conferida contra o
+  `seele_ffi` em `tests/web.rs`).
+- **Um conflito evitado:** a F3 acrescenta bancadas no fim do job `bancadas`
+  do `ci.yml`, no mesmo ponto; a `ponte-sem-gesto.cjs` foi para o começo.
+- **Doze reversões**, cada uma reprovando o seu guarda ou bancada.
+- **Na árvore junta, os guardas de Rust**: `web.rs` 10, `frontend.rs` 284,
+  `tokens.rs` e `fontes.rs` passam. O `celular.rs` reprova um,
+  `o_texto_do_sistema_alcanca_todo_tamanho_do_desktop`: o `celular-texto.css`
+  gerado da F8 fica atrás dos quatro CSS do desktop que o `0.16/api-6` muda.
+  É do encontro da F3 com a F8 (o `0.16/web` não muda CSS nenhum), e a F8 o
+  regera com `SEELE_REGERAR_TEXTO=1`. Avisado à orquestradora.
+
