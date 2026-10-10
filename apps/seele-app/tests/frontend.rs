@@ -11246,6 +11246,17 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
         hospedar.contains("nossoServidorEm = anfitriao.aqui"),
         "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
     );
+    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). O Rust
+    // reconhece a sessão no servidor daqui pelo `aqui` e pelos endereços do
+    // convite (`a_sessao_e_com_o_servidor_daqui`). Por qualquer outro endereço,
+    // o SALVAR e a atualização pela gestão deixam de gravar o sim de quem
+    // hospeda, e a volta pergunta de novo.
+    assert!(
+        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
+        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: o sim \
+         de quem hospeda deixa de ser gravado, e a dispensa de conferir a chave não casa \
+         com o alvo: {hospedar}"
+    );
 
     // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
     // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
