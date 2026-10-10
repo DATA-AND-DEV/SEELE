@@ -191,6 +191,35 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
   aviso: { host: "avisos-de-mod", foco: false, camada: false },
 });
 
+/**
+ * **O tipo que a superfície vai ter, ou a recusa dele** (rascunho da API 6, §3
+ * e §7.1; tarefa 7, Step 1).
+ *
+ * Um tipo desconhecido virava `dialogo` em silêncio: o MOD que escreveu
+ * `janela` via um diálogo e não tinha como saber por quê. Na 6, ele é recusado
+ * pelo nome — `tipo-desconhecido`, com o tipo pedido (`tipoPedido`) e os que
+ * existem (`tipos`) —, e o
+ * roteador põe a linha no `seele.log`. Até a 5, que é o que os MODs publicados
+ * recebem, a superfície abre como `dialogo`, como abria, e a linha vai ao
+ * `seele.log` pelo dono. Sem tipo, `dialogo`, nas duas.
+ *
+ * A versão vem do dono: `recusaParaOMod` devolve `null` até a 5.
+ */
+function tipoDaSuperficie(descricao, dono) {
+  const pedido = descricao?.tipo;
+  if (pedido === undefined || pedido === null) return "dialogo";
+  if (Object.hasOwn(TIPOS_DE_SUPERFICIE, pedido)) return pedido;
+  const tipo = String(pedido).slice(0, 64);
+  const tipos = Object.keys(TIPOS_DE_SUPERFICIE);
+  const recusa = new Error(`o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}`);
+  recusa.recusa = "tipo-desconhecido";
+  // `tipoPedido`, e não `tipo`: `tipo` é o da mensagem da ponte («resposta»).
+  recusa.camposDaRecusa = { tipoPedido: tipo, tipos };
+  if (dono?.recusaParaOMod?.(recusa)) throw recusa;
+  dono?.anotarRecusa?.(`${recusa.message}; até a API 5, ela abre como dialogo`);
+  return "dialogo";
+}
+
 // O destino central pertence ao host, mesmo quando as páginas têm donos distintos.
 // WeakMap não prolonga a vida do palco; fechar/descartar solta a página ativa.
 const paginaAtivaPorPalco = new WeakMap();
@@ -718,10 +747,13 @@ class SuperficiesDoMod {
       existente.mostrar();
       return { superficie: chave, reaproveitada: true };
     }
+    // O tipo antes do teto: uma descrição que não serve é recusada por ela
+    // mesma, e não porque as outras ocupam o lugar.
+    const tipo = tipoDaSuperficie(descricao, this.dono);
     if (this.porChave.size >= TETO_DE_SUPERFICIES) {
       throw new Error(`um MOD mantém até ${TETO_DE_SUPERFICIES} superfícies de pé`);
     }
-    const superficie = new SuperficieDeMod(this.id, this.dono, descricao, this.palcos);
+    const superficie = new SuperficieDeMod(this.id, this.dono, { ...descricao, tipo }, this.palcos);
     superficie.aoPalcoMudar = () => this.arrumarPalcos();
     this.porChave.set(chave, superficie);
     superficie.abrir();

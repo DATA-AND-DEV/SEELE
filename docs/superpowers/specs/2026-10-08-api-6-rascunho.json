@@ -423,7 +423,7 @@
       "aviso",
       "folha"
     ],
-    "desconhecido": "recusado pelo nome (hoje vira dialogo em silêncio, mods-superficies.js:225)",
+    "desconhecido": "recusado pelo nome, tipo-desconhecido, com tipoPedido e tipos (tarefa 7, Step 1); até a 5 abre como dialogo, com a linha no seele.log; sem tipo, dialogo",
     "garantias-do-produto": [
       "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
       "o cabeçalho diz de qual MOD é a superfície",
@@ -677,6 +677,9 @@
       "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
+    "superficies": [
+      "tipo-desconhecido (o tipo pedido não existe; leva tipoPedido e tipos — não tipo, que é o da mensagem da ponte; tarefa 7)"
+    ],
     "contribuicoes": [
       "ponto-desconhecido (o ponto não está na tabela)",
       "modo-recusado (o ponto não aceita o modo; inclusive decorar)",

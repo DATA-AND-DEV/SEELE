@@ -331,11 +331,14 @@ fechada da lista.
 E o achado do agrupamento das mensagens: **pela chave, nesta tarefa, com
 guarda** (o 6 acima), e a reversão — agrupar pelo apelido — reprova.
 
-**Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Hoje
-um tipo desconhecido vira `dialogo` em silêncio
-(`mods-superficies.js:225` [c]). Na 6, a recusa diz o nome e a lista do que
-existe, e o `seele.log` ganha a linha (o «produto sabe e não conta» do
-`CLAUDE.md`).
+**Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Um
+tipo desconhecido virava `dialogo` em silêncio (`mods-superficies.js:225`).
+Na 6, a recusa diz o nome e a lista do que existe, e o `seele.log` ganha a
+linha (o «produto sabe e não conta» do `CLAUDE.md`) [c, tarefa 7, Step 1:
+`tipo-desconhecido`, com `tipoPedido` e `tipos`, abaixo]. **Até a 5, a superfície
+continua abrindo como `dialogo`** — é o que os MODs publicados recebem, e
+nenhum dos três pede um tipo que não exista —, e o `seele.log` ganha a linha
+também. Sem tipo, `dialogo`, nas duas.
 
 ## 4. `pessoa.capa`
 
@@ -717,6 +720,13 @@ nome; a frase vai ao `seele.log`):
 | `teto-de-alvos` | o MOD já alcança 256 alvos neste ponto (§12) |
 | `contribuicao-ja-existe` | o MOD já tem uma contribuição para este alvo, neste ponto e neste modo: use `atualizar` |
 | `contribuicao-de-outro-mod` | o `handle` de `atualizar` ou `revogar` é de outro MOD, ou de outra instância dele |
+
+**As recusas das superfícies** [c, tarefa 7, Step 1] — na resposta de
+`superficies.criar`:
+
+| nome | quando |
+|---|---|
+| `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície; leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
 
 **Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
 (`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
@@ -1418,7 +1428,7 @@ bolsos contam bytes decodificados, e o MOD lê o teto para dizê-lo no seletor.
 | **os 13 verbos de `actions` e as 19 leituras de `reads` da v1 não são expostos à metade de servidor** | nenhum dos nomes aparece no código fora de `api/` | a v6 nomeia o que o runtime expõe (§8) |
 | **os nomes de `own` da v1 não são os que o MOD escreve** (`guardar`, `lerArquivo` contra `dados`, `arquivos.ler`) | `mods/mod.rs:505-637` | idem |
 | **a forma `midia` numa superfície conta contra o teto da região (10 MiB)**, e não contra os 24 MiB que a v5 promete | `mods-regiao.js:2159-2161`, `:2226` | a 6 diz o que é entregue, e um teste prova |
-| um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome |
+| um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome, `tipo-desconhecido` [c, tarefa 7] |
 | o retrato era o `Snapshot` inteiro, com `link_state` e os aparelhos | `base.js:2126-2133` | lista branca (§6) |
 | o guarda de capacidades citado em `base.js:1963-1965` nunca existiu | `git log -S` | criado |
 | **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). **Defeito**: conserto do exemplo e do guia na fase de código (tarefa 15 do plano), com o teste que instala pelo caminho do exemplo |

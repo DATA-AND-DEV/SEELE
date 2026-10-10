@@ -208,7 +208,7 @@ const contexto = vm.createContext({
 });
 vm.runInContext(
   `${ler("mods-runtime.js")}\n${ler("mods-contribuicoes.js")}\n${ler("mods-superficies.js")}\n`
-  + "this.R = RegistroDeContribuicoes; this.S = SuperficieDeMod;"
+  + "this.R = RegistroDeContribuicoes; this.S = SuperficieDeMod; this.SS = SuperficiesDoMod;"
   + "this.I = InstanciaDeMod; this.PONTOS = PONTOS_DE_CONTRIBUICAO;"
   + "this.NATIVO = NATIVO; this.ESTADOS_DE_MOD = ESTADOS_DE_MOD;",
   contexto,
@@ -2311,6 +2311,100 @@ function anotando(...anotadas) {
       confere("Step 7b · a frase segue na 4", String(respostas.at(-1)?.erro ?? "").includes("128"),
         `o MOD da API 4 deixou de receber a frase: ${JSON.stringify(respostas.at(-1))}`);
       contexto.modsCarregados.delete("mod/c");
+    }
+
+    // **Um tipo de superfície desconhecido é recusado pelo nome na 6** (tarefa
+    // 7, Step 1; rascunho §3 e §7.1). Ele virava `dialogo` em silêncio: o MOD
+    // que escreveu `janela` via um diálogo e não sabia por quê, e o produto
+    // sabia e não contava. Na 6, `tipo-desconhecido`, com o tipo pedido e os
+    // que existem, e a linha no `seele.log`; até a 5 — o que os publicados
+    // recebem —, o diálogo de antes, e a linha também. Sem tipo, `dialogo`.
+    //
+    // Pelo roteador de verdade vai a recusa, com o conjunto de verdade
+    // (`SuperficiesDoMod`) e o dono nas duas peças que ela usa:
+    // `recusaParaOMod`, a de `base.js` no recorte, e `anotarRecusa`, cuja
+    // linha no `seele.log` «o elo» confere. A recusa sai antes de montar; os
+    // casos que montam — sem tipo, e a API 4 — precisam de um DOM que o desta
+    // bancada não tem, e conferem a decisão em `tipoDaSuperficie`, que o
+    // `criar` usa.
+    {
+      const anotadasDoDono = [];
+      const donoDe = (mod, instancia) => ({
+        ...contexto.donoDaRegiao(mod, instancia),
+        recusaParaOMod: (falha) => contexto.recusaParaOMod(mod, falha),
+        anotarRecusa: (oQue) => anotadasDoDono.push(`${mod.id}: ${oQue}`),
+      });
+      const conjunto = new contexto.SS("mod/b", donoDe({ id: "mod/b", api: 6 }, b), { camadas });
+      const superficiesDeAntes = contexto.superficiesDoMod;
+      contexto.superficiesDoMod = () => conjunto;
+
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "superficie-criar", n: 51, descricao: { id: "x", tipo: "janela" },
+      });
+      const recusa = respostas.at(-1);
+      // **A resposta continua sendo uma resposta.** O campo do tipo pedido
+      // chamava-se `tipo`, e `responder` espalha a recusa sobre `{ tipo:
+      // "resposta", n, ok }`: a mensagem saía com `tipo: "janela"`, o executor
+      // não a reconhecia, e o pedido do MOD esperava para sempre. Este caso
+      // passava, porque só olhava o campo (medido na tarefa 7, Step 1).
+      confere("Step 1 · a resposta é resposta", recusa?.tipo === "resposta" && recusa?.n === 51,
+        `a recusa trocou o tipo ou o número da mensagem da ponte: ${JSON.stringify(recusa)}`);
+      confere(
+        "Step 1 · o tipo desconhecido, na 6",
+        recusa?.ok === false && recusa?.erro === "tipo-desconhecido" && recusa?.tipoPedido === "janela"
+          && Array.isArray(recusa?.tipos) && recusa.tipos.includes("dialogo") && !recusa.tipos.includes("janela"),
+        `um tipo desconhecido não chegou ao MOD da 6 como \`tipo-desconhecido\`, com \`tipoPedido\` e \`tipos\` — virou dialogo em silêncio, ou perdeu os campos: ${JSON.stringify(recusa)}`,
+      );
+      confere("Step 1 · o tipo desconhecido, na 6", conjunto.de("x") === null,
+        "a superfície recusada ficou de pé");
+      confere("Step 1 · o tipo desconhecido no registro", dita("«superficie-criar»", "janela"),
+        `a recusa do tipo foi dita só ao MOD: ${JSON.stringify(anotadasDoRoteador.slice(-2))}`);
+
+      // **E nenhuma carga troca o envelope** (`tipo`, `n` e `ok` são da ponte):
+      // uma recusa cujos campos tragam os três chega com os da ponte.
+      contexto.superficiesDoMod = () => ({
+        criar() {
+          const falha = new Error("x");
+          falha.recusa = "tipo-desconhecido";
+          falha.camposDaRecusa = { tipo: "janela", n: 999, ok: true };
+          throw falha;
+        },
+      });
+      await contexto.atenderOMod({ id: "mod/b", api: 6 }, b, {
+        tipo: "superficie-criar", n: 54, descricao: { id: "y" },
+      });
+      confere(
+        "Step 1 · o envelope é da ponte",
+        respostas.at(-1)?.tipo === "resposta" && respostas.at(-1)?.n === 54 && respostas.at(-1)?.ok === false,
+        `uma carga trocou o tipo, o número ou o ok da resposta: ${JSON.stringify(respostas.at(-1))}`,
+      );
+      contexto.superficiesDoMod = superficiesDeAntes;
+
+      // A decisão, caso a caso.
+      const decide = (api, descricao) => {
+        try {
+          return contexto.tipoDaSuperficie(descricao, donoDe({ id: "mod/b", api }, b));
+        } catch (falha) {
+          return { recusa: falha?.recusa ?? String(falha) };
+        }
+      };
+      for (const api of [4, 6]) {
+        confere(`Step 1 · sem tipo, dialogo (API ${api})`, decide(api, { id: "s" }) === "dialogo"
+          && decide(api, { id: "s", tipo: null }) === "dialogo", "uma descrição sem tipo deixou de abrir um dialogo");
+        confere(`Step 1 · um tipo que existe (API ${api})`, decide(api, { id: "p", tipo: "pagina" }) === "pagina",
+          "um tipo que existe deixou de ser o pedido");
+      }
+      confere("Step 1 · o tipo desconhecido, na 6", decide(6, { id: "x", tipo: "janela" })?.recusa === "tipo-desconhecido",
+        "`tipoDaSuperficie` não recusou o tipo desconhecido na 6");
+      anotadasDoDono.length = 0;
+      confere("Step 1 · até a 5, o de antes", decide(4, { id: "antiga", tipo: "janela" }) === "dialogo",
+        "um pacote de API 4 com um tipo desconhecido deixou de abrir o dialogo");
+      confere(
+        "Step 1 · até a 5, dito",
+        anotadasDoDono.length === 1 && anotadasDoDono[0].startsWith("mod/b: ")
+          && anotadasDoDono[0].includes("janela") && anotadasDoDono[0].includes("dialogo"),
+        `o dialogo de um tipo desconhecido, até a 5, não foi ao seele.log: ${JSON.stringify(anotadasDoDono)}`,
+      );
     }
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta

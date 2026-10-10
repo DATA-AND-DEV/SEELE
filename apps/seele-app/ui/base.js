@@ -3008,7 +3008,9 @@ function avisarOsModsDaTela(snapshot) {
  *   sufixo depois de `:` vira campo — `tipo-recusado:heic` é `erro:
  *   'tipo-recusado'` e `detectado: 'heic'`, `papel-nao-serve:imagem` é `papel:
  *   'imagem'`;
- * - um `Error` da casca que traga o nome em `recusa` chega com ele;
+ * - um `Error` da casca que traga o nome em `recusa` chega com ele, e com os
+ *   campos de `camposDaRecusa`, quando os tem (o `tipo-desconhecido` das
+ *   superfícies leva `tipoPedido` e `tipos`);
  * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
  */
 function recusaParaOMod(mod, falha) {
@@ -3018,6 +3020,8 @@ function recusaParaOMod(mod, falha) {
     ? falha.Recusado.motivo
     : typeof falha?.recusa === "string" ? falha.recusa : null;
   if (!nome) return { erro: "falhou" };
+  const campos = falha?.camposDaRecusa;
+  if (campos && typeof campos === "object") return { ...campos, erro: nome };
   const corte = nome.indexOf(":");
   const base = corte < 0 ? nome : nome.slice(0, corte);
   const campo = SUFIXOS[base];
@@ -3056,7 +3060,11 @@ async function atenderOMod(mod, instancia, m) {
     // deles. Mandar o **valor** para uma instância encerrada é falar com quem
     // já saiu.
     if (meu()) {
-      instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
+      // O envelope **por último**: `tipo`, `n` e `ok` são da ponte, e uma
+      // carga que trouxesse um deles trocaria a resposta por uma mensagem que
+      // o executor não reconhece — o pedido do MOD esperaria para sempre. Foi
+      // o que o `tipo` do tipo de superfície pedido fazia (tarefa 7, Step 1).
+      instancia.executor.entregar({ ...carga, tipo: "resposta", n: m.n, ok });
       return;
     }
     // **Mas calar não é a alternativa.** Um pedido sem resposta deixa o MOD
