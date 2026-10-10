@@ -495,15 +495,22 @@ const PEDACOS_DE_MIDIA = 256;
 const TETO_DE_MIDIA_BASE64 = 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128;
 
 /**
- * Escreve no registro de quem hospeda.
+ * Escreve no `seele.log` desta máquina, pelo processo nativo que hospeda esta
+ * janela (`registrar_da_janela`, no `main.rs`).
  *
  * **A janela não tinha como.** Todo o caminho de um pedido de MOD é observável
  * no Rust — o executor, a bomba, a ponte, o servidor —, e o pedaço que roda
  * aqui era um vão silencioso no meio dele. Um defeito que morasse nesse vão não
  * deixava rastro nenhum, e foi exatamente onde uma medição parou.
  *
- * Não vai para a tela: quem lê isto é quem hospeda, e quem usa não tem o que
- * fazer com a frase.
+ * Não vai para a tela. Quem lê é quem investiga esta máquina pelo `seele.log`
+ * dela, e não a pessoa no meio do que está fazendo: ela não tem o que fazer
+ * com a frase. As linhas de MOD são procuradas por quem hospeda a sala que os
+ * roda, ou por quem escreve o MOD. Desde o lote W2 da F5 há também uma que não
+ * é de MOD: a recusa de uma tentativa de entrada que outra já substituiu
+ * (`conectar`, em `tela-boot.js`), que a tela cala. Essa é lida por quem
+ * investiga uma entrada nesta máquina — quem usa, ou quem a ajuda com o
+ * registro dela.
  */
 function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // Nunca lança e nunca espera: um registro que derruba o caminho que ele
