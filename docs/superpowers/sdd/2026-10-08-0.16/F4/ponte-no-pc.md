@@ -127,6 +127,35 @@ as duas.
   abrir e fechar o teste na bancada não deixa faixa viva (`readyState` de cada
   faixa aberta passa a `ended`). Reversão: fechar sem parar as faixas reprova.
 
+**Feito em 10/10** (`832be563`): o teste é o portão do `Envio` na ativação por
+voz, com a régua dos controles. O monitor toca pela mistura do worklet, e fechar
+fora da sala para as faixas. A `bancada/voz-no-navegador.cjs` abre e fecha duas
+vezes pela ponte, na casca larga, e confere que toda faixa termina em `ended`.
+Reversão: fechar sem `track.stop()` reprova.
+
+## A sala viva da F7, por decidir quando a casca chamar
+
+A F7 avisou (10/10) os comandos e os canais da sala pessoal na
+`0.16/sala-viva`, ainda sem chamador na casca. O guarda da hospedagem já tem a
+marca `sala::` (`c6fca33e`). O lado de cada um, proposto aqui, é decidido no
+commit em que a casca o chamar, com a tela da F8 à vista:
+
+- **recusados** (o navegador não hospeda sala, nem toca campainha):
+  - `receber_ligacoes`, `atender`, `recusar` e `encerrar_a_ligacao`;
+  - `bloquear`, inteiro, porque a agenda mora no disco do PC;
+- **neutros, com «não há sala neste lugar», e nunca `Desligada`**:
+  - `estado_da_sala`;
+  - `toques_agora`.
+  Os dois leem `Session::sala` e `Session::toques`, que marca nenhuma pega, e
+  precisam de marca no guarda para serem neutros;
+- **da pasta de dados do PC** (a chave e a agenda): `meu_codigo`,
+  `contatos_da_agenda` e `dar_nome_na_agenda`. Recusados ou neutros, a decidir;
+- **os canais** `seele://sala` e `seele://toque` precisam de um lado no
+  `ouvirNaPonte`. Hoje um evento sem atendimento só não chega, e a tela
+  ficaria esperando;
+- o `connect` confere a sala desta máquina pelo código dela. No navegador não
+  há sala no ar, e nada muda.
+
 ## Como se prova
 
 **A paridade do desktop no navegador se prova pelos 28 roteiros de

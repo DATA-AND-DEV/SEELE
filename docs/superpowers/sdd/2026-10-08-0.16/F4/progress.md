@@ -756,3 +756,11 @@ começar.
 - **O guarda da hospedagem** (`c6fca33e`) aprende o `servidor_do_mod` da F3 e
   o `sala::` da F7, a pedido das duas. Provado por injeção, porque nesta
   branch nenhum corpo os usa ainda.
+- **Passo 4, o teste do microfone do PC pela ponte** (`832be563`): o portão do
+  `Envio` na ativação por voz, à parte da voz da sala. O monitor toca pela
+  mistura do worklet, e fechar fora da sala para as faixas. A bancada abre e
+  fecha duas vezes pela ponte de verdade, na casca larga. Reversões: fechar sem
+  `track.stop()`, o monitor calado e o fechar de antes da ponte reprovam a
+  bancada; o teste fora da ativação por voz e sem a régua reprovam os nativos.
+- **A sala viva da F7**: os comandos e os canais novos, com o lado proposto,
+  em `F4/ponte-no-pc.md`. Decididos quando a casca os chamar.
