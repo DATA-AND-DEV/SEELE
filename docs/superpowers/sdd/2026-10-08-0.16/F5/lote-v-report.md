@@ -13,6 +13,14 @@ release.
 | `321d8b36` | M-2 | o volume e o mudo do som da tela moram em `ControlesGuardados`, são gravados sem voz viva, vestidos ao abrir e levados por `carregar_controles` na troca de aparelho |
 | `bcfa2706` | M-4 | o fim de `drive` larga a voz antes da despedida sem esperar o cadeado dela; o comentário que dizia «nada» é corrigido |
 | `9023db98` | 4 (doc) | o doc de `a_sessao_acabou_aqui` diz o que vale hoje; o código da função não muda |
+| `4e8f6b69` | relatório | este arquivo, com a conformidade ainda pendente |
+| `b0fead12` | integração | merge do `0.16/lotes` em `baed898c` (a `versao/0.16` da nona integração, verde em `ffd8e4fb`), antes da conformidade |
+
+O merge saiu limpo: o `merge-tree` não acusou conflito, e só o
+`crates/seele-core/src/enlace.rs` foi mesclado automaticamente. A mudança que
+chegou nele é a da bomba da tela (`nascer_a_tela` passa o `PedidoDeChave`), longe
+do doc do item 4. O `seele-ffi/src/lib.rs` e o `seele-core/src/voice.rs` não
+mudaram do outro lado.
 
 **O que não mudou.** O fio: nada em `crates/seele-proto`, `crates/seele-server`,
 SEELE-ENC/1, `api/` ou nos arquivos da F6. Nada em `apps/`. Só três arquivos:
@@ -301,11 +309,25 @@ Tudo com `unset CARGO_TARGET_DIR`, no fim do lote:
   cache.
 - `cargo doc -p seele-core --no-deps`: nenhum aviso nas linhas do item 4.
 
+**Sobre o estado mesclado (`b0fead12`)**, depois da liberação da coordenação:
+- `cargo test -p seele-ffi --lib`: **175 passaram, 1 ignorado**.
+- `cargo test -p seele-core --lib`: **523 passaram**. São 6 a menos que antes do
+  merge porque o `tela.rs` que chegou perdeu testes (8 a menos, e ganhou um em
+  outro arquivo). Os dois testes do lote no núcleo,
+  `a_subida_do_silencio_digital_vai_ao_log_uma_vez_por_subida` e
+  `o_som_da_tela_atravessa_a_reabertura`, rodaram e passaram.
+- `cargo fmt --all -- --check` e `cargo clippy -p seele-core -p seele-ffi
+  --all-targets --all-features -- -D warnings`: limpos, com os arquivos tocados
+  antes do clippy.
+- **A conformidade**, um arquivo por vez, com `-- --test-threads=1` e nenhum
+  outro binário da conformidade rodando na máquina (conferido com `ps`):
+  - `voz_na_reconexao`: **1 passou**;
+  - `a_recusa_nao_tira_da_sala`: **5 passaram**;
+  - `saida_com_despedida`: **3 passaram**. Quem saiu pela FFI sumiu dos
+    presentes em 522 µs, e o filho que morreu na linha seguinte em 154 ms.
+
 ## O que não rodou
 
-- **A conformidade.** Está pausada pela coordenação. Quando for liberada, roda
-  por arquivo e com `-- --test-threads=1`: `voz_na_reconexao`,
-  `a_recusa_nao_tira_da_sala`, `saida_com_despedida`. *Pendente.*
 - `seele-app`, nem `--bin` nem `tests/frontend.rs`. O lote não toca `apps/`, e
   nenhuma assinatura pública do `seele-ffi` mudou. Os guardas de `frontend.rs`
   que leem `seele-ffi/src/lib.rs` como texto procuram `drain_transfers()`,
