@@ -82,6 +82,15 @@
 //!
 //! Em `xtask` ela é obrigatória e explícita: `cargo xtask check-runtime`
 //! reprova sem Node, porque quem chama esta ferramenta pediu por ela.
+//!
+//! # E os roteiros da casca
+//!
+//! Os `tools/roteiros/*.js` não são bancadas e não rodam por esta lista: eles
+//! rodam pela `tools/carga-da-casca.py`, num `chrome-headless-shell`, no job
+//! `bancadas` do `ci.yml` e na bateria do `publicar.sh` (lote RT da F5). O
+//! teste `todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`, abaixo, mora aqui
+//! porque é o mesmo molde do `toda_bancada_da_pasta_roda_em_algum_lugar`: ele
+//! exige cada arquivo da pasta nas duas chamadas da carga.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -479,6 +488,306 @@ mod tests {
             assert!(
                 ler("xtask/src/web.rs").contains(&format!("\"{wasm}\"")),
                 "o `cargo xtask web` deixou de compilar {wasm}, e a bancada do CI lê esse caminho"
+            );
+        }
+    }
+
+    /// O comando que roda os roteiros da casca, nos dois lugares que os rodam:
+    /// a carga, com um `--roteiro tools/roteiros/<nome>` por roteiro.
+    const CARGA_DA_CASCA: [&str; 2] = ["python3", "tools/carga-da-casca.py"];
+
+    /// Os roteiros de `tools/roteiros/`, pelo nome do arquivo, lidos da pasta e
+    /// não de um literal: é a pasta que diz quais existem.
+    fn roteiros_da_pasta() -> Vec<String> {
+        let mut nomes: Vec<String> = std::fs::read_dir(raiz().join("tools/roteiros"))
+            .expect("a pasta dos roteiros é legível")
+            .map(|entrada| {
+                entrada
+                    .expect("cada entrada da pasta dos roteiros é legível")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|nome| {
+                std::path::Path::new(nome)
+                    .extension()
+                    .is_some_and(|extensao| extensao == "js")
+            })
+            .collect();
+        nomes.sort();
+        nomes
+    }
+
+    /// Os roteiros que um comando roda, se ele é a carga: as palavras depois de
+    /// [`CARGA_DA_CASCA`] têm de ser pares `--roteiro tools/roteiros/<nome>`.
+    /// `None` quando o comando é outro. Uma palavra que não é um desses pares
+    /// reprova aqui: um guarda que pulasse o que não entende passaria a contar
+    /// um roteiro que a carga não roda, ou a perder um que roda.
+    fn roteiros_do_comando(palavras: &[String]) -> Option<Vec<String>> {
+        let (comando, resto) = palavras.split_at_checked(CARGA_DA_CASCA.len())?;
+        if comando != CARGA_DA_CASCA {
+            return None;
+        }
+        let pares = resto.chunks(2);
+        Some(
+            pares
+                .map(|par| match par {
+                    [opcao, caminho] if opcao == "--roteiro" => caminho
+                        .strip_prefix("tools/roteiros/")
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            panic!("a carga roda um roteiro de fora de tools/roteiros/: {caminho}")
+                        }),
+                    _ => panic!(
+                        "a chamada da carga tem {par:?}, que não é um `--roteiro \
+                         tools/roteiros/<nome>`, e este guarda não sabe o que ela roda: \
+                         {palavras:?}"
+                    ),
+                })
+                .collect(),
+        )
+    }
+
+    /// O texto do `run:` de um passo: o valor da linha, ou, num bloco (`>-`,
+    /// `|`), as linhas mais recuadas que a da chave, juntas por espaço — é
+    /// assim que o YAML dobra um `>-`, e as palavras são as mesmas num `|`.
+    fn run_do_passo(passo: &str) -> Option<String> {
+        let linhas: Vec<&str> = passo.lines().collect();
+        let (onde, linha) = linhas.iter().enumerate().find(|(_, linha)| {
+            let linha = linha.trim();
+            let linha = linha.strip_prefix("- ").unwrap_or(linha).trim_start();
+            linha.starts_with("run:")
+        })?;
+        let valor = chave_do_passo(linha, "run")?;
+        if !valor.starts_with(['>', '|']) {
+            return Some(valor.to_owned());
+        }
+        // O recuo da chave, e não o da linha: num `- run: >-` a chave começa
+        // depois do `- `.
+        let recuo_da_chave = linha.find("run:").unwrap_or_default();
+        Some(
+            linhas
+                .iter()
+                .skip(onde + 1)
+                .take_while(|linha| linha.trim().is_empty() || recuo(linha) > recuo_da_chave)
+                .map(|linha| linha.trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+    }
+
+    /// Os passos do job `bancadas` que rodam a carga, com os roteiros de cada
+    /// um, e a posição de cada passo no job.
+    fn passos_dos_roteiros_no_ci() -> Vec<(usize, String, Vec<String>)> {
+        passos_do_job("bancadas")
+            .into_iter()
+            .enumerate()
+            .filter_map(|(onde, passo)| {
+                let palavras: Vec<String> = run_do_passo(&passo)?
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect();
+                let roteiros = roteiros_do_comando(&palavras)?;
+                Some((onde, passo, roteiros))
+            })
+            .collect()
+    }
+
+    /// As palavras de uma linha de shell: o espaço separa, as aspas juntam, e a
+    /// barra invertida dentro de aspas duplas escapa o caractere seguinte. Basta
+    /// para as linhas que este guarda lê; não é um shell.
+    fn palavras_do_shell(linha: &str) -> Vec<String> {
+        let mut palavras = Vec::new();
+        let mut atual = String::new();
+        let mut tem_palavra = false;
+        let mut aspas: Option<char> = None;
+        let mut letras = linha.chars();
+        while let Some(letra) = letras.next() {
+            match aspas {
+                Some(fecha) if letra == fecha => aspas = None,
+                Some('"') if letra == '\\' => atual.extend(letras.next()),
+                Some(_) => atual.push(letra),
+                None if letra == '"' || letra == '\'' => {
+                    aspas = Some(letra);
+                    tem_palavra = true;
+                }
+                None if letra.is_whitespace() => {
+                    if tem_palavra {
+                        palavras.push(std::mem::take(&mut atual));
+                        tem_palavra = false;
+                    }
+                }
+                None => {
+                    atual.push(letra);
+                    tem_palavra = true;
+                }
+            }
+        }
+        if tem_palavra {
+            palavras.push(atual);
+        }
+        palavras
+    }
+
+    /// O corpo de uma função do `publicar.sh`, sem comentário: da linha
+    /// `<nome>() {` até a primeira `}` sozinha na margem, e com as linhas que
+    /// terminam em `\` juntas à seguinte, como o shell as lê.
+    fn comandos_da_funcao(nome: &str) -> Vec<String> {
+        let texto = ler("empacotar/publicar.sh");
+        let linhas = sem_comentario(&texto);
+        let abre = format!("{nome}() {{");
+        let inicio = linhas
+            .iter()
+            .position(|linha| linha.trim_end() == abre)
+            .unwrap_or_else(|| panic!("o `publicar.sh` não tem mais a função `{nome}`"));
+        let mut comandos = Vec::new();
+        let mut atual = String::new();
+        for linha in linhas
+            .iter()
+            .skip(inicio + 1)
+            .take_while(|linha| linha.trim_end() != "}")
+        {
+            match linha.trim_end().strip_suffix('\\') {
+                Some(continua) => {
+                    atual.push_str(continua);
+                    atual.push(' ');
+                }
+                None => {
+                    atual.push_str(linha);
+                    comandos.push(std::mem::take(&mut atual));
+                }
+            }
+        }
+        comandos
+    }
+
+    /// Os roteiros que a bateria do `publicar.sh` roda: a chamada de
+    /// `etapa_da_bateria` em `roteiros_da_casca` cujo comando — depois da
+    /// queixa e do conserto — é a carga. Exige também que a `bateria()` chame
+    /// a etapa, numa linha só dela: uma função que ninguém chama não roda.
+    fn roteiros_no_publicar() -> Vec<String> {
+        assert!(
+            comandos_da_funcao("bateria")
+                .iter()
+                .any(|comando| comando.trim() == "roteiros_da_casca"),
+            "a `bateria()` do `publicar.sh` não chama mais `roteiros_da_casca`, e uma versão \
+             volta a sair com um roteiro vermelho"
+        );
+        let chamadas: Vec<Vec<String>> = comandos_da_funcao("roteiros_da_casca")
+            .iter()
+            .map(|comando| palavras_do_shell(comando))
+            .filter(|palavras| {
+                palavras
+                    .first()
+                    .is_some_and(|primeira| primeira == "etapa_da_bateria")
+            })
+            .filter_map(|palavras| roteiros_do_comando(palavras.get(3..).unwrap_or_default()))
+            .collect();
+        assert_eq!(
+            chamadas.len(),
+            1,
+            "a `roteiros_da_casca` do `publicar.sh` tem de rodar a carga por uma \
+             `etapa_da_bateria` só, e roda por {}",
+            chamadas.len()
+        );
+        chamadas.into_iter().flatten().collect()
+    }
+
+    /// O que cada lista deixa de fora da pasta, e o que ela nomeia e a pasta
+    /// não tem.
+    fn diferenca(lista: &[String], pasta: &[String]) -> (Vec<String>, Vec<String>) {
+        let faltam = pasta
+            .iter()
+            .filter(|nome| !lista.contains(nome))
+            .cloned()
+            .collect();
+        let sobram = lista
+            .iter()
+            .filter(|nome| !pasta.contains(nome))
+            .cloned()
+            .collect();
+        (faltam, sobram)
+    }
+
+    /// **Todo roteiro da pasta roda no CI e na bateria do `publicar.sh`.**
+    ///
+    /// Os roteiros de `tools/roteiros/` só rodavam na bateria da
+    /// orquestradora, e assim apodreciam calados: o `aceite-de-mods.js` ficou
+    /// três semanas sem provar nada e quebrou duas vezes (lote W3 da F5). O
+    /// lote RT os pôs, por nome, no job `bancadas` do `ci.yml` e na bateria do
+    /// `publicar.sh`, por onde as versões saem. Este teste é a conta: cada `.js`
+    /// da pasta é um `--roteiro` da chamada da carga nos dois lugares, e
+    /// nenhuma das duas nomeia arquivo que a pasta não tem.
+    #[test]
+    fn todo_roteiro_da_pasta_roda_no_ci_e_no_publicar() {
+        let pasta = roteiros_da_pasta();
+        assert!(
+            !pasta.is_empty(),
+            "não achei roteiro nenhum em tools/roteiros/, e este guarda passaria sem medir nada"
+        );
+
+        let no_ci: Vec<String> = passos_dos_roteiros_no_ci()
+            .into_iter()
+            .flat_map(|(_, _, roteiros)| roteiros)
+            .collect();
+        let (faltam, sobram) = diferenca(&no_ci, &pasta);
+        assert!(
+            faltam.is_empty() && sobram.is_empty(),
+            "ci.yml: o job `bancadas` não roda estes roteiros da pasta: {faltam:?}; e nomeia \
+             estes, que a pasta não tem: {sobram:?}. Um roteiro que não roda fica verde para \
+             sempre: ele entra como `--roteiro tools/roteiros/<nome>` na chamada da \
+             `python3 tools/carga-da-casca.py` do passo «os roteiros da casca»"
+        );
+
+        let no_publicar = roteiros_no_publicar();
+        let (faltam, sobram) = diferenca(&no_publicar, &pasta);
+        assert!(
+            faltam.is_empty() && sobram.is_empty(),
+            "empacotar/publicar.sh: a bateria não roda estes roteiros da pasta: {faltam:?}; e \
+             nomeia estes, que a pasta não tem: {sobram:?}. Uma versão sai com um roteiro \
+             vermelho sem ninguém ver: ele entra como `--roteiro tools/roteiros/<nome>` na \
+             chamada da carga em `roteiros_da_casca`"
+        );
+    }
+
+    /// **O passo dos roteiros roda depois de uma vermelha, tem prazo, e vem
+    /// depois do navegador.** O `if` e o prazo pelas mesmas razões dos passos
+    /// de bancada (ver o teste acima deles). E o navegador: a carga procura o
+    /// `chrome-headless-shell` no cache do Playwright, e é o `npx playwright
+    /// install` do job que o põe lá; antes dele, a carga sai com 2 dizendo que
+    /// não achou navegador nenhum.
+    #[test]
+    fn o_passo_dos_roteiros_roda_depois_de_uma_vermelha_tem_prazo_e_vem_depois_do_navegador() {
+        let passos = passos_do_job("bancadas");
+        let instala = passos
+            .iter()
+            .position(|passo| {
+                chave_do_passo(passo, "run") == Some("npx playwright install --with-deps chromium")
+            })
+            .expect("o job `bancadas` instala o Chromium do Playwright");
+        let dos_roteiros = passos_dos_roteiros_no_ci();
+        assert_eq!(
+            dos_roteiros.len(),
+            1,
+            "ci.yml: o job `bancadas` tem de chamar a carga dos roteiros num passo só, e tem \
+             {}",
+            dos_roteiros.len()
+        );
+        for (onde, passo, _) in &dos_roteiros {
+            assert!(
+                instala < *onde,
+                "ci.yml: os roteiros rodam antes de o Chromium ser instalado:\n{passo}"
+            );
+            assert_eq!(
+                chave_do_passo(passo, "if"),
+                Some("${{ !cancelled() }}"),
+                "ci.yml: o passo dos roteiros não tem `if: ${{{{ !cancelled() }}}}`, e uma \
+                 bancada vermelha antes dele o pula:\n{passo}"
+            );
+            assert!(
+                chave_do_passo(passo, "timeout-minutes").is_some_and(|prazo| !prazo.is_empty()),
+                "ci.yml: o passo dos roteiros não tem prazo (`timeout-minutes`), e um roteiro \
+                 que pendura segura o job por seis horas:\n{passo}"
             );
         }
     }
