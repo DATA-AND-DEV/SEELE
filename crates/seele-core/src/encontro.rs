@@ -1709,29 +1709,32 @@ mod testes {
     /// o socket da batida é emprestado ao aperto de mão do QUIC depois do furo,
     /// e uma porta que um socket IPv4 da máquina segura entregaria a ele a
     /// resposta do servidor.
+    ///
+    /// Nos três sistemas, como o gêmeo: encena a colisão onde o sistema a
+    /// deixa acontecer, e onde recusa abre o socket com as portas presas de pé.
     #[test]
     fn o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4() {
-        let Some((ladrao, proposta)) = crate::client::testes_do_socket::proposta_que_colide()
-        else {
-            if cfg!(target_os = "macos") {
-                panic!(
-                    "o macOS não deu nenhuma porta de socket IPv4 a uma proposta de pilha \
-                     dupla: o teste não encenou a colisão"
-                );
+        use crate::client::testes_do_socket::{a_resposta_chega, encenar_a_colisao, Encenacao};
+
+        let (ladroes, encenada) = match encenar_a_colisao() {
+            Encenacao::Colisao { ladrao, proposta } => {
+                crate::client::PROPOSTA_DE_TESTE.with(|vaga| *vaga.borrow_mut() = Some(proposta));
+                (vec![ladrao], true)
             }
-            return;
+            Encenacao::Recusa { ladroes, .. } => (ladroes, false),
         };
-        crate::client::PROPOSTA_DE_TESTE.with(|vaga| *vaga.borrow_mut() = Some(proposta));
 
         let Some(socket) = abrir_socket_local() else {
             panic!("não abriu o socket local da batida");
         };
-        assert!(
-            crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
-            "o socket da batida não passou pela proposta guardada, e o teste não encenou a \
-             colisão"
-        );
-        crate::client::testes_do_socket::a_resposta_chega(&socket, &ladrao);
+        if encenada {
+            assert!(
+                crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
+                "o socket da batida não passou pela proposta guardada, e o teste não encenou \
+                 a colisão"
+            );
+        }
+        a_resposta_chega(&socket, &ladroes.iter().collect::<Vec<_>>());
     }
 
     #[tokio::test]

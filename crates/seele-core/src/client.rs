@@ -1932,7 +1932,7 @@ thread_local! {
     /// A próxima proposta de socket desta thread, no lugar da do sistema.
     ///
     /// Existe para um teste encenar o que o sistema faz por conta própria de
-    /// vez em quando — ver [`testes_do_socket::proposta_que_colide`] — no
+    /// vez em quando — ver [`testes_do_socket::encenar_a_colisao`] — no
     /// socket que `Motor::tentar` abre, que nenhum parâmetro alcança.
     pub(crate) static PROPOSTA_DE_TESTE: std::cell::RefCell<Option<socket2::Socket>> =
         const { std::cell::RefCell::new(None) };
@@ -2996,30 +2996,54 @@ pub(crate) mod testes_do_socket {
     /// cair na porta de um deles.
     const LADROES: usize = 64;
 
-    /// Quantas propostas de pilha dupla se pedem ao sistema, no máximo.
+    /// Quantas propostas de pilha dupla se pedem ao sistema, no máximo — o
+    /// teto do laço, que acaba aqui também onde a colisão nunca acontece.
     ///
-    /// Cada uma cai numa porta de ladrão com chance de `LADROES` em 16 384 (o
-    /// intervalo efêmero do macOS), e a espera é de 16 384 / 64 = 256. Com 8 192
-    /// propostas, a chance de nenhuma cair é de e^-32.
+    /// Onde o sistema deixa a colisão, cada proposta cai numa porta de ladrão
+    /// com chance de `LADROES` em 16 384 (o intervalo efêmero do macOS): a
+    /// espera é de 16 384 / 64 = 256, e a chance de nenhuma das 8 192 cair é de
+    /// e^-32. Por isso nenhuma em 8 192 é a medida de que o sistema recusa.
     const PROPOSTAS: usize = 8_192;
 
-    /// Uma proposta de pilha dupla que divide a porta com um socket IPv4 em
-    /// `127.0.0.1`: o que o macOS faz por conta própria, de vez em quando, a um
-    /// `[::]:0`.
+    /// O que o sistema fez com as propostas de pilha dupla, com `LADROES`
+    /// sockets IPv4 presos em `127.0.0.1`.
+    pub(crate) enum Encenacao {
+        /// Uma proposta caiu na porta de um ladrão: o sistema deixa os dois
+        /// conviverem, e o defeito pode acontecer aqui.
+        Colisao {
+            /// O socket IPv4 que fica com o que for mandado a `127.0.0.1`
+            /// naquela porta.
+            ladrao: UdpSocket,
+            /// A proposta, aberta exatamente como
+            /// [`super::proposta_do_sistema`] a abre, pelo sistema e não por
+            /// escolha do teste.
+            proposta: socket2::Socket,
+        },
+        /// Nenhuma das propostas caiu numa porta presa: a escolha de porta do
+        /// sistema confere as duas famílias, e o defeito não acontece aqui.
+        Recusa {
+            /// Os ladrões, ainda de pé.
+            ladroes: Vec<UdpSocket>,
+            /// Quantas propostas o sistema deu sem cair em nenhum.
+            propostas: usize,
+        },
+    }
+
+    /// Tenta encenar o que o macOS faz por conta própria, de vez em quando, a
+    /// um `[::]:0`: dar-lhe a porta de um socket IPv4 em `127.0.0.1`.
     ///
-    /// Devolve o socket IPv4 — o «ladrão», que fica com o que for mandado a
-    /// `127.0.0.1` naquela porta — e a proposta, aberta exatamente como
-    /// [`super::proposta_do_sistema`] a abre, pelo sistema e não por escolha
-    /// do teste. `None` onde o sistema não deixa os dois conviverem.
+    /// Acaba sempre, em no máximo [`PROPOSTAS`] pedidos: com a colisão onde o
+    /// sistema a deixa acontecer, e com a recusa medida onde não deixa.
     ///
-    /// # Por que o sistema deixa
+    /// # Onde o sistema deixa
     ///
     /// Medido no macOS (lote Y da F5): a escolha de porta para `[::]:0` de
     /// pilha dupla confere só os sockets IPv6. Com 4 000 sockets em
     /// `127.0.0.1:0` de pé, 992 de 4 000 `[::]:0` caíram numa porta deles; na
     /// ordem inversa, nenhum. E o datagrama para `127.0.0.1:X` vai ao mais
-    /// específico dos dois, o IPv4.
-    pub(crate) fn proposta_que_colide() -> Option<(UdpSocket, socket2::Socket)> {
+    /// específico dos dois, o IPv4. Linux e Windows não foram medidos: é o CI
+    /// deles que diz em qual braço caem.
+    pub(crate) fn encenar_a_colisao() -> Encenacao {
         let mut ladroes: Vec<UdpSocket> = (0..LADROES)
             .filter_map(|_| UdpSocket::bind("127.0.0.1:0").ok())
             .collect();
@@ -3027,14 +3051,36 @@ pub(crate) mod testes_do_socket {
             .iter()
             .filter_map(|ladrao| ladrao.local_addr().ok().map(|onde| onde.port()))
             .collect();
-        for _ in 0..PROPOSTAS {
-            let proposta = pilha_dupla(0).ok()?;
-            let porta = proposta.local_addr().ok()?.as_socket()?.port();
-            if let Some(qual) = portas.iter().position(|&dela| dela == porta) {
-                return Some((ladroes.swap_remove(qual), proposta));
+        let mut propostas = 0;
+        while propostas < PROPOSTAS {
+            let Ok(proposta) = pilha_dupla(0) else {
+                break;
+            };
+            propostas += 1;
+            let porta = proposta
+                .local_addr()
+                .ok()
+                .and_then(|onde| onde.as_socket())
+                .map(|onde| onde.port());
+            if let Some(qual) = portas.iter().position(|&dela| Some(dela) == porta) {
+                return Encenacao::Colisao {
+                    ladrao: ladroes.swap_remove(qual),
+                    proposta,
+                };
             }
         }
-        None
+        Encenacao::Recusa { ladroes, propostas }
+    }
+
+    /// Se a ligação **explícita** de pilha dupla na porta de `ladrao` é
+    /// recusada — a regra em que [`socket_conferido`] se apoia onde o sistema
+    /// deixa a colisão.
+    pub(crate) fn a_ligacao_explicita_e_recusada(ladrao: &UdpSocket) -> bool {
+        let porta = ladrao.local_addr().expect("porta do ladrão").port();
+        matches!(
+            pilha_dupla(porta),
+            Err(erro) if erro.kind() == std::io::ErrorKind::AddrInUse
+        )
     }
 
     /// O socket de quem conecta não divide a porta com um socket IPv4: o que o
@@ -3042,41 +3088,63 @@ pub(crate) mod testes_do_socket {
     ///
     /// A metade de baixo de
     /// `enlace::tests::a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo`,
-    /// sem o QUIC e sem os 20 s: a proposta que colide é a primeira que
-    /// [`socket_conferido`] recebe, e o datagrama do «servidor» diz para onde
-    /// a resposta iria.
+    /// sem o QUIC e sem os 20 s. Roda nos três sistemas, e mede alguma coisa
+    /// em cada um:
+    /// - onde o sistema deixa a colisão (o macOS), a proposta que colide é a
+    ///   primeira que [`socket_conferido`] recebe, e o datagrama do
+    ///   «servidor» diz para onde a resposta iria;
+    /// - onde o sistema recusa, a recusa fica medida ([`PROPOSTAS`] propostas
+    ///   sem cair numa porta presa), e o socket aberto pelo caminho do produto,
+    ///   com os ladrões de pé, recebe a resposta.
     #[test]
     fn o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4() {
-        let Some((ladrao, proposta)) = proposta_que_colide() else {
-            // Fora do macOS a escolha de porta confere as duas famílias, e não
-            // há colisão a encenar.
-            if cfg!(target_os = "macos") {
-                panic!(
-                    "o macOS não deu, em {PROPOSTAS} propostas, nenhuma porta que um dos \
-                     {LADROES} sockets IPv4 segura: o teste não encenou a colisão, e o \
-                     guarda abaixo não guarda nada"
+        match encenar_a_colisao() {
+            // Se este sistema também aceitasse a ligação explícita na porta
+            // presa, `socket_conferido` devolveria a mesma porta, e é a
+            // resposta que reprova abaixo.
+            Encenacao::Colisao { ladrao, proposta } => {
+                let mut propostas = vec![proposta];
+                let socket =
+                    socket_conferido(|| propostas.pop().map_or_else(|| pilha_dupla(0), Ok))
+                        .expect("o socket de quem conecta");
+                assert!(
+                    propostas.is_empty(),
+                    "a proposta que colide não foi usada, e o teste mediu outra coisa"
                 );
+                a_resposta_chega(&socket, &[&ladrao]);
             }
-            return;
-        };
-        let mut propostas = vec![proposta];
-
-        let socket = socket_conferido(|| propostas.pop().map_or_else(|| pilha_dupla(0), Ok))
-            .expect("o socket de quem conecta");
-        assert!(
-            propostas.is_empty(),
-            "a proposta que colide não foi usada, e o teste mediu outra coisa"
-        );
-        a_resposta_chega(&socket, &ladrao);
+            Encenacao::Recusa { ladroes, propostas } => {
+                assert!(
+                    propostas > 0,
+                    "o sistema não abriu nenhum socket de pilha dupla: o teste não mediu nada"
+                );
+                // A ligação explícita fica só dita: onde a escolha de porta já
+                // recusa, o produto está a salvo com ela ou sem ela, e reprovar
+                // por ela seria reprovar o sistema por estar certo.
+                let explicita = ladroes.first().map(a_ligacao_explicita_e_recusada);
+                println!(
+                    "a escolha de porta recusa a colisão: nenhuma de {propostas} propostas de \
+                     pilha dupla caiu numa das {} portas IPv4 presas (a ligação explícita numa \
+                     delas é recusada: {explicita:?})",
+                    ladroes.len()
+                );
+                let socket = super::socket_de_quem_conecta().expect("o socket de quem conecta");
+                a_resposta_chega(&socket, &ladroes.iter().collect::<Vec<_>>());
+            }
+        }
     }
 
     /// O que um «servidor» em `127.0.0.1` manda à porta de `socket` chega a
-    /// ele, e não a `ladrao`.
+    /// ele, e não a um dos `ladroes`.
     ///
-    /// Reprova dizendo as duas portas: quando o defeito volta, elas são iguais.
-    pub(crate) fn a_resposta_chega(socket: &UdpSocket, ladrao: &UdpSocket) {
+    /// Reprova dizendo as portas: quando o defeito volta, a de quem conecta é
+    /// a de um ladrão.
+    pub(crate) fn a_resposta_chega(socket: &UdpSocket, ladroes: &[&UdpSocket]) {
         let porta = socket.local_addr().expect("porta de quem conecta").port();
-        let do_ladrao = ladrao.local_addr().expect("porta do ladrão").port();
+        let do_ladrao = ladroes
+            .iter()
+            .filter_map(|ladrao| ladrao.local_addr().ok().map(|onde| onde.port()))
+            .find(|&dele| dele == porta);
         let servidor = UdpSocket::bind("127.0.0.1:0").expect("servidor");
         servidor
             .send_to(b"resposta", SocketAddr::from(([127, 0, 0, 1], porta)))
@@ -3093,8 +3161,8 @@ pub(crate) mod testes_do_socket {
             chegou.ok(),
             Some(b"resposta".len()),
             "a resposta mandada a 127.0.0.1:{porta} não chegou ao socket de quem conecta \
-             (a porta do socket IPv4 alheio é {do_ladrao}): o QUIC deste lado não ouve o \
-             aperto de mão e desiste pela ociosidade, 20 s depois"
+             (a porta de um socket IPv4 preso que é a mesma: {do_ladrao:?}): o QUIC deste \
+             lado não ouve o aperto de mão e desiste pela ociosidade, 20 s depois"
         );
     }
 }

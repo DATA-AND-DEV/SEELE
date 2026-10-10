@@ -8644,10 +8644,13 @@ mod tests {
     /// desistia pela ociosidade (`TimedOut`). O servidor de teste ficava no
     /// `entrada.await` daquela conexão.
     ///
-    /// A primeira volta encena isso de propósito: a proposta de socket que o
-    /// sistema daria colide com um socket IPv4 que o teste segura. Sem a
-    /// conferência de [`crate::client::socket_de_quem_conecta`], a volta reprova
-    /// sempre, com a mensagem de antes.
+    /// A primeira volta encena isso de propósito onde o sistema deixa (o
+    /// macOS): a proposta de socket que o sistema daria colide com um socket
+    /// IPv4 que o teste segura. Sem a conferência de
+    /// [`crate::client::socket_de_quem_conecta`], a volta reprova sempre, com a
+    /// mensagem de antes. Onde o sistema recusa a colisão, a volta corre com os
+    /// sockets IPv4 de pé, e a recusa fica medida em
+    /// `client::testes_do_socket`.
     #[tokio::test(flavor = "multi_thread")]
     async fn a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo() {
         let (endereco, impressao, _hellos) = servidor_que_conta_os_hellos();
@@ -8658,32 +8661,34 @@ mod tests {
             motor.avisos = avisos;
             motor.voice_room = sala;
 
-            // O ladrão fica de pé até a volta acabar: é ele que recebe a resposta
-            // do servidor se o socket de quem volta dividir a porta com ele.
-            let _ladrao = if sala.is_some() {
-                let colisao = crate::client::testes_do_socket::proposta_que_colide();
-                assert!(
-                    colisao.is_some() || !cfg!(target_os = "macos"),
-                    "o macOS não deu nenhuma porta de socket IPv4 a uma proposta de \
-                     pilha dupla: a volta não encenou a colisão"
-                );
-                colisao.map(|(ladrao, proposta)| {
-                    crate::client::PROPOSTA_DE_TESTE
-                        .with(|vaga| *vaga.borrow_mut() = Some(proposta));
-                    ladrao
-                })
+            // Os ladrões ficam de pé até a volta acabar: é um deles que recebe a
+            // resposta do servidor se o socket de quem volta dividir a porta com
+            // ele. Onde o sistema recusa a colisão, a volta corre com eles de pé,
+            // e não há proposta a encenar.
+            let (_ladroes, encenada) = if sala.is_some() {
+                use crate::client::testes_do_socket::{encenar_a_colisao, Encenacao};
+                match encenar_a_colisao() {
+                    Encenacao::Colisao { ladrao, proposta } => {
+                        crate::client::PROPOSTA_DE_TESTE
+                            .with(|vaga| *vaga.borrow_mut() = Some(proposta));
+                        (vec![ladrao], true)
+                    }
+                    Encenacao::Recusa { ladroes, .. } => (ladroes, false),
+                }
             } else {
-                None
+                (Vec::new(), false)
             };
 
             // `tentar` roda nesta thread — é o futuro do `block_on` do teste —, e
             // é nela que a proposta guardada vale.
             motor.tentar().await;
-            assert!(
-                crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
-                "a volta não abriu o socket pela proposta guardada, e o teste não \
-                 encenou a colisão"
-            );
+            if encenada {
+                assert!(
+                    crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
+                    "a volta não abriu o socket pela proposta guardada, e o teste não \
+                     encenou a colisão"
+                );
+            }
 
             let mut avisada = None;
             while let Ok(aviso) = avisos_rx.try_recv() {
