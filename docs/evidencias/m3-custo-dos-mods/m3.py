@@ -24,11 +24,23 @@ houver qualquer entrada durante ele. O arraste da MESA usa o tap de sessão,
 que não conta como entrada no `HIDIdleTime`.
 
 Uso:
-    python3 m3.py <cenario> [--segundos 60] [--ocioso 300] [--saida DIR]
+    python3 m3.py <cenario> [--segundos 60] [--ocioso 300] [--saida DIR] [--app SEELE.app]
 
 Cenários (ADR 0052:189-193, mais o 0/1/3 do plano da F3):
     sem-mod  1-mod  3-mods  3-mods-editor  3-mods-mesa
     e cada um com `+voz` (por exemplo `3-mods+voz`).
+
+**A campanha da API 6** (tarefa 11 do plano da F3; `campanha-api6.sh`), com
+`--app` apontando a build de medição de `preparar-api6.sh`:
+    3-mods-mesa-continuo   o arraste da MESA sem pausa, a janela inteira
+    carga-regioes  carga-capas  carga-folhas  carga-avisos  carga-palco
+    carga-tudo  carga-dialogo  carga-pagina
+o MOD de carga sintético (`m3-carga/`) em cada ponto da API 6 no teto
+declarado. Os cenários de carga sobem participantes calados (o `m3-falante
+--calado`): um posta 30 mensagens no canal 1; nas capas, a sala 1 fica com
+sete pessoas e a lista com vinte e sete. O jitter também é lido do
+`seele.log` (a linha que o remendo da cópia escreve a cada 2 s), porque com o
+diálogo e a página a barra fica inerte e a acessibilidade não a lê.
 """
 
 import argparse
@@ -53,6 +65,12 @@ PACOTES = {
     "mesa": RAIZ / "pacotes/seele-mesa-3.1.0",
     "estilo": RAIZ / "pacotes/seele-estilo-3.1.0",
 }
+# As variantes do MOD de carga da API 6 (`gerar-carga.py`), uma por cenário.
+CARGAS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo"]
+PACOTES.update({f"carga-{c}": RAIZ / f"pacotes/m3-carga-{c}" for c in CARGAS})
+# Os cenários de carga que precisam de quem usa dentro da sala: a capa anima no
+# cartão da chamada e na barra; o palco é da chamada.
+NA_SALA = {"carga-capas", "carga-tudo", "carga-palco"}
 PORTA = 8391  # nunca a 8383 (app) nem a 8384 (bateria de testes)
 # Os quadros são gravados nos primeiros 30 s da janela de 60: o trace de 60 s
 # com os instrumentos de engasgo passava de 500 MB e o xctrace levava mais de
@@ -207,13 +225,23 @@ def main():
     ap.add_argument("--segundos", type=int, default=60)
     ap.add_argument("--ocioso", type=int, default=300)
     ap.add_argument("--saida", default=str(RAIZ / "medidas"))
+    ap.add_argument("--app", default=str(APP))
     a = ap.parse_args()
+    app = pathlib.Path(a.app).resolve()
+    processo_do_app = f"{app}/Contents/MacOS/seele-app"
 
     base, _, extra = a.cenario.partition("+")
     voz = extra == "voz"
-    mods = {"sem-mod": [], "1-mod": ["perfis"]}.get(base, ["perfis", "mesa", "estilo"])
+    if base.startswith("carga-"):
+        mods = [base]
+    else:
+        mods = {"sem-mod": [], "1-mod": ["perfis"]}.get(base, ["perfis", "mesa", "estilo"])
     relato = {"cenario": a.cenario, "mods": mods, "voz": voz, "segundos": a.segundos,
-              "app": sh("defaults", "read", APP / "Contents/Info.plist", "CFBundleShortVersionString").stdout.strip()}
+              "app": sh("defaults", "read", app / "Contents/Info.plist", "CFBundleShortVersionString").stdout.strip()}
+    # A build de medição diz de que commit saiu (`preparar-api6.sh`).
+    commit = RAIZ / "fonte/COMMIT_DA_MEDICAO"
+    if app != APP and commit.exists():
+        relato["commit"] = commit.read_text().strip()
 
     carga = maquina_quieta()
     if carga is None:
@@ -231,6 +259,7 @@ def main():
     pasta.mkdir(parents=True)
 
     servidor = falante = None
+    participantes = []
     pid = None
     comeco = time.time()
     _sintetico["ultimo"] = comeco
@@ -252,11 +281,28 @@ def main():
         # aperta ACEITAR, como uma pessoa faria.
         if mods and (RAIZ / "cache/mod-packages").is_dir():
             shutil.copytree(RAIZ / "cache/mod-packages", casa / "mod-packages")
-        antes = set(int(x) for x in sh("pgrep", "-f", "SEELE.app/Contents/MacOS/seele-app").stdout.split())
-        sh("open", "-n", "-a", APP, "--env", f"SEELE_HOME={casa}", "--args", "--entrar",
+        # **Os participantes da carga**, antes do app: um posta 30 mensagens no
+        # canal 1 (a região da conversa); nas capas, a sala 1 fica com sete
+        # pessoas contando quem usa e o falante, e a lista com vinte e sete.
+        if base.startswith("carga-"):
+            duracao = str(a.segundos + 240)
+            endereco = f"127.0.0.1:{PORTA}"
+            def calado(apelido, sala, *extra_args):
+                participantes.append(subprocess.Popen(
+                    [str(FALANTE), endereco, str(sala), duracao, "--calado", "--apelido", apelido, *extra_args],
+                    stdout=open(pasta / f"{apelido}.out", "w"), stderr=subprocess.STDOUT))
+            calado("m3-mensagens", 0, "--mensagens", "30")
+            if base in ("carga-capas", "carga-tudo"):
+                for n in range(5 if voz else 6):
+                    calado(f"m3-sala-{n}", 1)
+                for n in range(20):
+                    calado(f"m3-lista-{n}", 0)
+            time.sleep(5)
+        antes = set(int(x) for x in sh("pgrep", "-f", processo_do_app).stdout.split())
+        sh("open", "-n", "-a", app, "--env", f"SEELE_HOME={casa}", "--args", "--entrar",
            f"seele://127.0.0.1:{PORTA}/?fp={fp}")
         def novo_pid():
-            agora = set(int(x) for x in sh("pgrep", "-f", "SEELE.app/Contents/MacOS/seele-app").stdout.split())
+            agora = set(int(x) for x in sh("pgrep", "-f", processo_do_app).stdout.split())
             return (agora - antes) or None
         assert esperar(novo_pid, 20), "o app não abriu"
         pid = novo_pid().pop()
@@ -274,12 +320,18 @@ def main():
             falante = subprocess.Popen([str(FALANTE), f"127.0.0.1:{PORTA}", "1", str(a.segundos + 120)],
                                        stdout=open(pasta / "falante.out", "w"), stderr=subprocess.STDOUT)
             time.sleep(3)
+        if voz or base in NA_SALA:
             ax("apertar", pid, "ENTRAR NA SALA")
             assert esperar(lambda: tem(pid, "SAIR DA SALA"), 20), "não entrou na sala"
+        if base in NA_SALA:
+            # A grade da chamada à vista: é nela que as capas animam, e é a
+            # barra dela que oferece VER O PALCO.
+            ax("apertar", pid, "VER A CHAMADA")
+            time.sleep(2)
         acao = ACOES.get(base)
         if acao:
             relato["acao"] = acao(pid, pasta)
-        if base == "3-mods-mesa":
+        if base.startswith("3-mods-mesa"):
             arrastar_na_mesa(pid)  # acha a peça antes da janela de medida
             relato["peca"] = _peca.get("xy")
         time.sleep(20)  # assentar: MODs desenhados, mídia carregada, voz estável
@@ -289,8 +341,12 @@ def main():
         # Sem isto, um MOD que ativa e não desenha (como com o pacote instalado
         # por identificador) mediria igual a um que desenha.
         relato["entradas_dos_mods"] = sorted(set(
-            l.split("|")[1].strip() for l in ax("textos", pid, "— de seele/").splitlines()
-            if l.startswith("AXButton")))
+            l.split("|")[1].strip() for l in ax("textos", pid, "— de ").splitlines()
+            if l.startswith("AXButton") and ("— de seele/" in l or "— de m3/" in l)))
+        if base.startswith("carga-"):
+            relato["carga_a_vista"] = carga_a_vista(pid, base)
+        registro = casa / "seele.log"
+        inicio_do_registro = registro.stat().st_size if registro.exists() else 0
         pids = {"seele-app": pid, **irmaos_webkit(pid)}
         relato["processos"] = pids
         trace = pasta / "quadros.trace"
@@ -313,7 +369,8 @@ def main():
                     jitters.append(j)
             if time.time() - t0 >= 15 * len(amostras_mem):  # 0, 15, 30, 45 s
                 amostras_mem.append(memoria(pids))
-            time.sleep(2)
+            if base not in SEM_PAUSA:
+                time.sleep(2)
         cpu1, t1 = cpu_s(pids), time.time()
         amostras_mem.append(memoria(pids))
         try:
@@ -341,10 +398,28 @@ def main():
                 "mediana": statistics.median(jitters) if jitters else None,
                 "max": max(jitters) if jitters else None,
             }
+        # O jitter do `seele.log`, da janela de medida (o remendo da cópia da
+        # API 6; o app publicado não o escreve, e aí não há amostras).
+        if registro.exists():
+            with open(registro, "rb") as arquivo:
+                arquivo.seek(inicio_do_registro)
+                janela = arquivo.read().decode("utf-8", "replace")
+            do_registro = [float(x) for x in re.findall(r"jitter_ms=([\d.]+)", janela)]
+            if voz or do_registro:
+                relato["jitter_do_registro_ms"] = {
+                    "amostras": len(do_registro),
+                    "mediana": statistics.median(do_registro) if do_registro else None,
+                    "max": max(do_registro) if do_registro else None,
+                }
+            # O que o MOD de carga tropeçou ou teve recusado, do começo ao fim.
+            if base.startswith("carga-"):
+                inteiro = registro.read_text(errors="replace").splitlines()
+                tropecos = [l for l in inteiro if "m3/carga" in l and ("recus" in l or "m3/carga:" in l)]
+                relato["tropecos_do_mod"] = {"linhas": len(tropecos), "primeiras": tropecos[:5]}
     finally:
         if pid:
             sh("kill", "-TERM", pid)
-        for proc in (falante, servidor):
+        for proc in (falante, *participantes, servidor):
             if proc:
                 proc.terminate()
         (pasta / "relato.json").write_text(json.dumps(relato, indent=2, ensure_ascii=False))
@@ -441,8 +516,50 @@ def arrastar_na_mesa(pid):
     _sintetico["ultimo"] = time.time()
 
 
-ACOES = {"3-mods-editor": abrir_editor_do_perfis, "3-mods-mesa": preparar_mesa}
-CONTINUAS = {"3-mods-mesa": arrastar_na_mesa}
+def arrastar_sem_pausa(pid):
+    """O arraste contínuo (tarefa 11, Step 2): na base, o arraste ocupava 1,5 s
+    de cada ~2 s, e os ~55 commits por segundo não separavam quadro perdido de
+    intervalo. Aqui a peça vai e volta em arrastes de 1,9 s seguidos, sem a
+    pausa do laço (`SEM_PAUSA`), pela janela inteira."""
+    if "xy" not in _peca:
+        arrastar_na_mesa(pid)
+    if not _peca.get("xy"):
+        return
+    x, y = _peca["xy"]
+    ida = _peca.get("ida", True)
+    de, para = ((x, y), (x + 240, y + 120)) if ida else ((x + 240, y + 120), (x, y))
+    sh(AX, "arrastar", *de, *para, 1900)
+    _peca["ida"] = not ida
+    _sintetico["ultimo"] = time.time()
+
+
+def carga_a_vista(pid, base):
+    """A prova de que o MOD de carga desenha, e não só carrega: o que cada
+    cenário põe na tela, lido pela acessibilidade antes da janela de medida."""
+    if base == "carga-palco":
+        ax("apertar", pid, "VER O PALCO")
+        time.sleep(2)
+    procurar = {
+        "carga-regioes": ["redes · linha 1", "operador.barra · linha 1", "compositor · linha 1",
+                          "status.barra · linha 1", "pessoas.lista · linha 1", "canal.cabecalho · linha 1",
+                          "conversa.mensagem · linha 1", "Carga M3"],
+        "carga-folhas": ["Carga M3 · folha 1", "Carga M3 · folha 3", "folha 3 · parte 19"],
+        "carga-avisos": [],
+        "carga-capas": [],
+        "carga-dialogo": ["Carga M3 · diálogo", "diálogo · parte 3"],
+        "carga-pagina": ["Carga M3 · página", "página · parte 3"],
+        "carga-palco": ["PALCO DE m3/carga"],
+        # O palco fica escondido no tudo: à frente, ele tiraria da vista a grade,
+        # onde as capas animam. Montado e escondido, ele custa e soa.
+        "carga-tudo": ["status.barra · linha 1", "Carga M3 · folha 3"],
+    }.get(base, [])
+    return {texto: tem(pid, texto) for texto in procurar}
+
+
+ACOES = {"3-mods-editor": abrir_editor_do_perfis, "3-mods-mesa": preparar_mesa,
+         "3-mods-mesa-continuo": preparar_mesa}
+CONTINUAS = {"3-mods-mesa": arrastar_na_mesa, "3-mods-mesa-continuo": arrastar_sem_pausa}
+SEM_PAUSA = {"3-mods-mesa-continuo"}
 
 if __name__ == "__main__":
     main()
