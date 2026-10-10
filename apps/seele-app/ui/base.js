@@ -841,6 +841,9 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
+    // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
+    api: Number(mod.api) || 0,
     // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
     imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
     /**

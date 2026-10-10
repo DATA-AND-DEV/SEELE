@@ -201,9 +201,13 @@
   padding: var(--mod-secao) var(--mod-margem);
 }
 
-/* --------------------------------------------------------------- o painel */
+/* ------------------------------------------------------ o painel e a folha */
 
-.painel-de-mod {
+/* A folha é parente do painel (rascunho da API 6, §5): a mesma coluna, e ela
+   empilha. Quando o painel sair, no corte da API 6 (tarefa 13), sai o seletor
+   dele de cada regra. */
+.painel-de-mod,
+.folha-de-mod {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -212,12 +216,14 @@
   background: var(--seele-negro-painel);
 }
 
-.painel-de-mod[data-lado="esquerda"] {
+.painel-de-mod[data-lado="esquerda"],
+.folha-de-mod[data-lado="esquerda"] {
   border-left: none;
   border-right: 1px solid var(--seele-linha-forte);
 }
 
-.painel-de-mod-cabecalho {
+.painel-de-mod-cabecalho,
+.folha-de-mod-cabecalho {
   display: flex;
   align-items: center;
   gap: var(--mod-respiro);
@@ -225,9 +231,11 @@
   border-bottom: 1px solid var(--seele-linha);
 }
 
-.painel-de-mod-titulo { font-size: 15px; }
+.painel-de-mod-titulo,
+.folha-de-mod-titulo { font-size: 15px; }
 
-.painel-de-mod-corpo {
+.painel-de-mod-corpo,
+.folha-de-mod-corpo {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -237,7 +245,12 @@
   padding: var(--mod-secao) var(--mod-margem);
 }
 
-.painel-de-mod[hidden] { display: none; }
+.painel-de-mod[hidden],
+.folha-de-mod[hidden] { display: none; }
+
+/* Só a folha de cima aparece; as de baixo voltam quando ela fecha
+   (`arrumarPalcos`, em `mods-superficies.js`). */
+.folha-de-mod[data-abaixo="sim"] { display: none; }
 
 /* -------------------------------------------------------------- o diálogo */
 

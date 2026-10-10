@@ -2093,6 +2093,14 @@ function anotando(...anotadas) {
     // frase dele, e não por um `TypeError` que derrubaria a bancada inteira.
     confere("o elo · anotarRecusa", typeof dono.anotarRecusa === "function",
       "o dono de `base.js` não tem `anotarRecusa`, e `mods-regiao.js` a chama em cada mídia recusada");
+    // **A API do pacote, no dono** (tarefa 7, Step 4): as superfícies que um
+    // MOD tem dependem dela, e sem ela todo MOD seria tratado como de API 0.
+    confere(
+      "o elo · a api",
+      elo.donoDaRegiao({ id: "mod/x", hash: "h", api: 6 }, instancia).api === 6
+        && elo.donoDaRegiao({ id: "mod/x", hash: "h", api: "5" }, instancia).api === 5,
+      "o dono de `base.js` não diz a API do pacote, e `tipoDaSuperficie` a lê para saber se há folha ou painel",
+    );
 
     // (1) A instância é a carregada e a sessão é a de pé: uma linha, inteira.
     elo.modsCarregados.set("mod/a", instancia);
@@ -2321,9 +2329,10 @@ function anotando(...anotadas) {
     // recebem —, o diálogo de antes, e a linha também. Sem tipo, `dialogo`.
     //
     // Pelo roteador de verdade vai a recusa, com o conjunto de verdade
-    // (`SuperficiesDoMod`) e o dono nas duas peças que ela usa:
-    // `recusaParaOMod`, a de `base.js` no recorte, e `anotarRecusa`, cuja
-    // linha no `seele.log` «o elo» confere. A recusa sai antes de montar; os
+    // (`SuperficiesDoMod`) e o dono nas duas peças que ela usa: a `api` do
+    // pacote e `anotarRecusa`. «O elo» confere as duas no dono de verdade — a
+    // `api` e a linha no `seele.log` —, e o roteador responde pela
+    // `recusaParaOMod` de `base.js`, no recorte. A recusa sai antes de montar; os
     // casos que montam — sem tipo, e a API 4 — precisam de um DOM que o desta
     // bancada não tem, e conferem a decisão em `tipoDaSuperficie`, que o
     // `criar` usa.
@@ -2331,7 +2340,7 @@ function anotando(...anotadas) {
       const anotadasDoDono = [];
       const donoDe = (mod, instancia) => ({
         ...contexto.donoDaRegiao(mod, instancia),
-        recusaParaOMod: (falha) => contexto.recusaParaOMod(mod, falha),
+        api: Number(mod.api) || 0,
         anotarRecusa: (oQue) => anotadasDoDono.push(`${mod.id}: ${oQue}`),
       });
       const conjunto = new contexto.SS("mod/b", donoDe({ id: "mod/b", api: 6 }, b), { camadas });

@@ -337,6 +337,12 @@ jobs:
       - run: node apps/seele-app/bancada/capa.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # As camadas da API 6 (tarefa 7 da F3): a folha que empilha três, com a
+      # saída e o `descartou` do produto, o painel recusado na 6, e os tetos
+      # das superfícies pelo nome.
+      - run: node apps/seele-app/bancada/camadas.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

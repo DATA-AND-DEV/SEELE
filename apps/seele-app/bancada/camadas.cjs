@@ -1,0 +1,176 @@
+// As camadas da API 6 (rascunho §5; tarefa 7 da F3), com o HTML, o CSS e o
+// roteador reais; só a ponte nativa é simulada. No molde de `capa.cjs`.
+//
+// # O que ela mede
+//
+// 1. **A `folha`** (Step 4), que substitui o `painel` na 6: mora em
+//    `#palco-de-paineis`, empilha até três por MOD — a quarta é recusada com o
+//    número, também ao reabrir —, só a de cima aparece, e a saída é do
+//    produto, com o `descartou` quando a pessoa aceita perder o rascunho.
+// 2. **O `painel` na 6 é recusado pelo nome**, com «use folha» no `seele.log`;
+//    até a 5 ele continua, e a `folha`, que a 5 não tem, abre como `dialogo`.
+// 3. **O teto de superfícies de pé chega à 6 pelo nome**, com o número: ele
+//    chegava como `falhou`.
+//
+// Rodar:  node apps/seele-app/bancada/camadas.cjs
+
+const assert = require('node:assert/strict');
+const { servir, respostas, retrato } = require('./telas.cjs');
+const { chromium } = require('./playwright.cjs');
+
+(async () => {
+  const server = servir();
+  await new Promise(ok => server.listen(0, '127.0.0.1', ok));
+  const browser = await chromium().launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+    const errors = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.addInitScript(table => {
+      window.testTable = table;
+      window.testCalls = [];
+      window.__TAURI__ = {
+        core: { invoke: async (cmd, args) => {
+          testCalls.push({ cmd, args });
+          return testTable[cmd] ?? null;
+        } },
+        event: { listen: async () => () => {} },
+        window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+      };
+    }, respostas({ snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [] }));
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.evaluate(r => {
+      testTable.snapshot = r;
+      $('tela-boot').hidden = true;
+      $('tela-sessao').hidden = false;
+      desenhar(r);
+      entrarNaGeracao(1);
+      // Um MOD de cada API, de pé, com o que a janela lhe entrega anotado.
+      window.entregues = [];
+      window.modDe = {};
+      for (const api of [5, 6]) {
+        const mod = { id: `teste/api${api}`, hash: `h${api}`, api };
+        const inst = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, {
+          pedirEncerramento() {}, async encerrou() { return true; },
+          entregar(m) { entregues.push({ mod: mod.id, ...JSON.parse(JSON.stringify(m)) }); },
+        });
+        inst.estado = ESTADOS_DE_MOD.ativa;
+        modsCarregados.set(mod.id, inst);
+        modDe[api] = { mod, inst };
+      }
+      let n = 0;
+      window.pedir = async (api, mensagem) => {
+        const { mod, inst } = modDe[api];
+        const numero = ++n;
+        await atenderOMod(mod, inst, { ...mensagem, n: numero });
+        return entregues.find(m => m.tipo === 'resposta' && m.n === numero && m.mod === mod.id) ?? null;
+      };
+      window.eventosDe = api => entregues.filter(m => m.mod === modDe[api].mod.id && m.tipo === 'evento');
+      window.linhasDoLog = () => testCalls.filter(c => c.cmd === 'registrar_da_janela').map(c => c.args);
+      window.folhasNoPalco = () => [...document.querySelectorAll('#palco-de-paineis > .folha-de-mod')]
+        .map(f => ({
+          chave: f.dataset.superficie,
+          aparece: f.getClientRects().length > 0 && getComputedStyle(f).display !== 'none',
+        }));
+    }, retrato());
+
+    // 1. Três folhas de pé; só a de cima aparece, no palco dos painéis.
+    for (const id of ['um', 'dois', 'tres']) {
+      const r = await page.evaluate(id => pedir(6, { tipo: 'superficie-criar', descricao: { id, tipo: 'folha', titulo: `Folha ${id}` } }), id);
+      assert.equal(r?.ok, true, `a folha «${id}» foi recusada: ${JSON.stringify(r)}`);
+    }
+    let pilha = await page.evaluate(() => folhasNoPalco());
+    assert.deepEqual(pilha.map(f => f.chave), ['um', 'dois', 'tres'], `as folhas não foram ao #palco-de-paineis: ${JSON.stringify(pilha)}`);
+    assert.deepEqual(pilha.filter(f => f.aparece).map(f => f.chave), ['tres'],
+      `na pilha, aparece mais de uma folha, ou não a de cima: ${JSON.stringify(pilha)}`);
+    assert.equal(await page.evaluate(() => $('palco-de-paineis').hidden), false, 'o palco dos painéis ficou escondido com folhas de pé');
+
+    // A quarta é recusada com o nome e o número.
+    const quarta = await page.evaluate(() => pedir(6, { tipo: 'superficie-criar', descricao: { id: 'quatro', tipo: 'folha' } }));
+    assert.equal(quarta?.ok, false, `a quarta folha foi aceita: ${JSON.stringify(quarta)}`);
+    assert.equal(quarta?.erro, 'teto-de-folhas', `a quarta folha não foi recusada pelo nome: ${JSON.stringify(quarta)}`);
+    assert.equal(quarta?.teto, 3, `a recusa da quarta folha não disse o número: ${JSON.stringify(quarta)}`);
+    assert.equal(quarta?.tipo, 'resposta', 'a recusa trocou o tipo da mensagem da ponte');
+
+    // A saída do produto fecha a de cima, e a de baixo volta a aparecer.
+    await page.click('#palco-de-paineis > .folha-de-mod[data-superficie="tres"] .superficie-de-mod-sair');
+    pilha = await page.evaluate(() => folhasNoPalco());
+    assert.deepEqual(pilha.filter(f => f.aparece).map(f => f.chave), ['dois'],
+      `fechar a de cima não devolveu a de baixo: ${JSON.stringify(pilha)}`);
+    const fechou = await page.evaluate(() => eventosDe(6).filter(e => e.nome === 'fechar').at(-1));
+    assert.equal(fechou?.superficie, 'tres', `o MOD não soube que a folha fechou: ${JSON.stringify(fechou)}`);
+    assert.equal(fechou?.porque, 'saida-do-produto', `o MOD não soube que foi a saída do produto: ${JSON.stringify(fechou)}`);
+
+    // **Reabrir também conta.** Com «tres» fechada, uma quarta cabe; e
+    // reabrir «tres» depois passaria a pilha de três.
+    const outra = await page.evaluate(() => pedir(6, { tipo: 'superficie-criar', descricao: { id: 'quatro', tipo: 'folha' } }));
+    assert.equal(outra?.ok, true, `com uma folha fechada, a terceira de pé foi recusada: ${JSON.stringify(outra)}`);
+    const reaberta = await page.evaluate(() => pedir(6, { tipo: 'superficie-mostrar', superficie: 'tres' }));
+    assert.equal(reaberta?.erro, 'teto-de-folhas', `reabrir uma folha passou da pilha de três: ${JSON.stringify(reaberta)}`);
+    const reabertaPorCriar = await page.evaluate(() => pedir(6, { tipo: 'superficie-criar', descricao: { id: 'tres', tipo: 'folha' } }));
+    assert.equal(reabertaPorCriar?.erro, 'teto-de-folhas', `reabrir pelo criar passou da pilha de três: ${JSON.stringify(reabertaPorCriar)}`);
+    assert.equal((await page.evaluate(() => folhasNoPalco())).length, 3, 'a folha recusada entrou no palco');
+
+    // Com rascunho sujo, a saída do produto pergunta; descartar diz ao MOD.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-descartar', superficie: 'quatro' });
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'rascunho', tipo: 'folha', titulo: 'Editar', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-suja', superficie: 'rascunho', suja: true });
+    });
+    await page.click('#palco-de-paineis > .folha-de-mod[data-superficie="rascunho"] .superficie-de-mod-sair');
+    assert.equal(await page.evaluate(() => $('moderar').hidden), false, 'fechar a folha com rascunho não perguntou');
+    assert.equal(await page.evaluate(() => folhasNoPalco().some(f => f.chave === 'rascunho' && f.aparece)), true,
+      'a folha com rascunho fechou antes da resposta');
+    await page.click('#moderar-confirmar');
+    const descartou = await page.evaluate(() => eventosDe(6).filter(e => e.nome === 'fechar').at(-1));
+    assert.equal(descartou?.superficie, 'rascunho', `o MOD não soube que a folha com rascunho fechou: ${JSON.stringify(descartou)}`);
+    assert.equal(descartou?.descartou, true, `o MOD não soube que o rascunho foi descartado: ${JSON.stringify(descartou)}`);
+
+    // **Mostrar a de baixo a traz para cima**: «mostre aquela» é para ela ser
+    // vista, e a de baixo não aparece.
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-mostrar', superficie: 'um' }));
+    pilha = await page.evaluate(() => folhasNoPalco());
+    assert.deepEqual(pilha.filter(f => f.aparece).map(f => f.chave), ['um'],
+      `mostrar a folha de baixo não a trouxe para cima: ${JSON.stringify(pilha)}`);
+
+    // 2. O `painel` na 6 é recusado pelo nome, com «use folha» no seele.log.
+    const painel = await page.evaluate(() => pedir(6, { tipo: 'superficie-criar', descricao: { id: 'p', tipo: 'painel' } }));
+    assert.equal(painel?.erro, 'tipo-desconhecido', `o painel abriu na API 6: ${JSON.stringify(painel)}`);
+    assert.equal(painel?.tipoPedido, 'painel', `a recusa do painel não disse o tipo pedido: ${JSON.stringify(painel)}`);
+    assert.ok(painel?.tipos?.includes('folha') && !painel.tipos.includes('painel'),
+      `os tipos da API 6 não são os dela: ${JSON.stringify(painel?.tipos)}`);
+    assert.ok(await page.evaluate(() => linhasDoLog().some(l => l.modId === 'teste/api6' && /painel/.test(l.oQue) && /use folha/.test(l.oQue))),
+      `o seele.log não disse «use folha»: ${JSON.stringify(await page.evaluate(() => linhasDoLog()))}`);
+
+    // 3. A décima terceira superfície de pé, na 6: o teto pelo nome.
+    const teto = await page.evaluate(async () => {
+      let ultima = null;
+      for (let i = 0; i < 13; i += 1) {
+        ultima = await pedir(6, { tipo: 'superficie-criar', descricao: { id: `pag-${i}`, tipo: 'pagina', visivel: false } });
+        if (ultima?.ok === false) break;
+      }
+      return ultima;
+    });
+    assert.equal(teto?.erro, 'teto-de-superficies', `o teto de superfícies não chegou à 6 pelo nome: ${JSON.stringify(teto)}`);
+    assert.equal(teto?.teto, 12, `o teto de superfícies não disse o número: ${JSON.stringify(teto)}`);
+
+    // Até a 5, o painel continua, e a folha — que a 5 não tem — abre como
+    // dialogo, com a linha no seele.log.
+    const painel5 = await page.evaluate(() => pedir(5, { tipo: 'superficie-criar', descricao: { id: 'p5', tipo: 'painel' } }));
+    assert.equal(painel5?.ok, true, `o painel deixou de abrir na API 5: ${JSON.stringify(painel5)}`);
+    assert.ok(await page.evaluate(() => Boolean(document.querySelector('#palco-de-paineis > .painel-de-mod[data-superficie="p5"]'))),
+      'o painel da API 5 não foi ao palco dos painéis');
+    const folha5 = await page.evaluate(() => pedir(5, { tipo: 'superficie-criar', descricao: { id: 'f5', tipo: 'folha' } }));
+    assert.equal(folha5?.ok, true, `a folha na API 5 foi recusada, e não aberta como antes: ${JSON.stringify(folha5)}`);
+    assert.ok(await page.evaluate(() => Boolean(document.querySelector('#palco-de-camadas .dialogo-de-mod[data-superficie="f5"]'))),
+      'a folha na API 5 não abriu como dialogo');
+    assert.ok(await page.evaluate(() => linhasDoLog().some(l => l.modId === 'teste/api5' && /folha/.test(l.oQue) && /dialogo/.test(l.oQue))),
+      'a folha da API 5, aberta como dialogo, não foi ao seele.log');
+
+    assert.deepEqual(errors, []);
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome.');
+  } finally {
+    await browser.close();
+    await new Promise(ok => server.close(ok));
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

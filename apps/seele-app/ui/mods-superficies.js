@@ -189,7 +189,30 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
   painel: { host: "palco-de-paineis", foco: false, camada: false },
   dialogo: { host: "palco-de-camadas", foco: true, camada: true },
   aviso: { host: "avisos-de-mod", foco: false, camada: false },
+  folha: { host: "palco-de-paineis", foco: false, camada: false },
 });
+
+/**
+ * **Os tipos que cada API tem** (rascunho da API 6, §5; decisão de 08/10): a
+ * `folha` substitui o `painel` na 6. O `painel` fica na tabela enquanto as
+ * constantes estiverem em 5 — os pacotes de laboratório das APIs 4 e 5 o usam
+ * —, e sai no corte (tarefa 13).
+ */
+function tiposDaApi(api) {
+  return Object.keys(TIPOS_DE_SUPERFICIE).filter((tipo) => (api >= 6 ? tipo !== "painel" : tipo !== "folha"));
+}
+
+/**
+ * Uma recusa das superfícies, com o nome de lista fechada (rascunho §7.1) e
+ * os campos que a 6 recebe. Até a 5, `recusaParaOMod` devolve `null`, e o MOD
+ * recebe a frase.
+ */
+function recusaDaSuperficie(nome, frase, campos) {
+  const recusa = new Error(frase);
+  recusa.recusa = nome;
+  recusa.camposDaRecusa = campos;
+  return recusa;
+}
 
 /**
  * **O tipo que a superfície vai ter, ou a recusa dele** (rascunho da API 6, §3
@@ -203,19 +226,25 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
  * recebem, a superfície abre como `dialogo`, como abria, e a linha vai ao
  * `seele.log` pelo dono. Sem tipo, `dialogo`, nas duas.
  *
- * A versão vem do dono: `recusaParaOMod` devolve `null` até a 5.
+ * Os tipos são os da API do pacote (`tiposDaApi`), que vem do dono: o
+ * `painel` na 6 é um tipo que ela não tem, e a frase diz «use folha»; a
+ * `folha` até a 5 também, e abre como `dialogo`.
  */
 function tipoDaSuperficie(descricao, dono) {
+  const api = Number(dono?.api) || 0;
+  const tipos = tiposDaApi(api);
   const pedido = descricao?.tipo;
   if (pedido === undefined || pedido === null) return "dialogo";
-  if (Object.hasOwn(TIPOS_DE_SUPERFICIE, pedido)) return pedido;
+  if (tipos.includes(pedido)) return pedido;
   const tipo = String(pedido).slice(0, 64);
-  const tipos = Object.keys(TIPOS_DE_SUPERFICIE);
-  const recusa = new Error(`o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}`);
-  recusa.recusa = "tipo-desconhecido";
+  const troca = api >= 6 && tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
   // `tipoPedido`, e não `tipo`: `tipo` é o da mensagem da ponte («resposta»).
-  recusa.camposDaRecusa = { tipoPedido: tipo, tipos };
-  if (dono?.recusaParaOMod?.(recusa)) throw recusa;
+  const recusa = recusaDaSuperficie(
+    "tipo-desconhecido",
+    `o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}${troca}`,
+    { tipoPedido: tipo, tipos },
+  );
+  if (api >= 6) throw recusa;
   dono?.anotarRecusa?.(`${recusa.message}; até a API 5, ela abre como dialogo`);
   return "dialogo";
 }
@@ -231,6 +260,11 @@ function mostrarDestinoNativo() {
 
 /** Quantas superfícies um MOD mantém de pé ao mesmo tempo. */
 const TETO_DE_SUPERFICIES = 12;
+/**
+ * Quantas folhas um MOD empilha à vista (rascunho da API 6, §5, **proposta**;
+ * a M3 confirma). Contam as que aparecem: uma fechada ou oculta saiu da pilha.
+ */
+const TETO_DE_FOLHAS = 3;
 /** Quantos avisos cabem na fila antes de os mais velhos saírem. */
 const TETO_DE_AVISOS = 4;
 
@@ -311,8 +345,10 @@ class SuperficieDeMod {
       this.raiz = elemento("section", "superficie-de-mod pagina-de-mod");
       this.raiz.setAttribute("role", "region");
       this.raiz.dataset.imersiva = this.imersiva ? "sim" : "nao";
-    } else if (this.tipo === "painel") {
-      this.raiz = elemento("aside", "superficie-de-mod painel-de-mod");
+    } else if (this.tipo === "painel" || this.tipo === "folha") {
+      // A folha é parente do painel (§5): a mesma coluna lateral, e ela
+      // empilha — só a de cima aparece (`arrumarPalcos`).
+      this.raiz = elemento("aside", `superficie-de-mod ${this.tipo}-de-mod`);
       this.raiz.dataset.lado = this.lado;
       const largura = Math.min(Math.max(Number(descricao?.tamanho?.largura) || 300, 200), 640);
       this.raiz.style.setProperty("flex", `0 0 ${largura}px`);
@@ -334,7 +370,7 @@ class SuperficieDeMod {
     }
 
     const prefixo = this.tipo === "pagina" ? "pagina-de-mod"
-      : this.tipo === "painel" ? "painel-de-mod" : "dialogo-de-mod";
+      : this.tipo === "painel" || this.tipo === "folha" ? `${this.tipo}-de-mod` : "dialogo-de-mod";
     const cabeca = elemento("header", `${prefixo}-cabecalho`);
     // **Duas classes, e a primeira é a que dá a tipografia.** O título de uma
     // superfície é cartela — Saira Condensed em caixa alta, como o da
@@ -342,7 +378,7 @@ class SuperficieDeMod {
     // diálogo é só o corpo da fonte. Escrever a tipografia três vezes foi o que
     // deixou a casca dos MODs parecendo de outro produto.
     const titulo = elemento(
-      this.tipo === "painel" ? "h3" : "h2",
+      this.tipo === "painel" || this.tipo === "folha" ? "h3" : "h2",
       `superficie-de-mod-titulo ${prefixo}-titulo`,
       nome,
     );
@@ -381,11 +417,12 @@ class SuperficieDeMod {
     if (this.solta) return;
     const alvo = this.tipo === "dialogo" ? this.palcos.camadas
       : this.tipo === "pagina" ? this.palcos.paginas
-        : this.tipo === "painel" ? this.palcos.paineis
+        : this.tipo === "painel" || this.tipo === "folha" ? this.palcos.paineis
           : this.palcos.avisos;
     if (!alvo) return;
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
-    if (no.parentNode !== alvo) alvo.append(no);
+    // A folha que abre vai para o topo da pilha, que é o fim do palco.
+    if (no.parentNode !== alvo || this.tipo === "folha") alvo.append(no);
     if (this.tipo === "pagina" && this.visivel) {
       const anterior = paginaAtivaPorPalco.get(alvo);
       if (anterior && anterior !== this) anterior.ocultar();
@@ -534,6 +571,8 @@ class SuperficieDeMod {
    */
   mostrar() {
     if (this.solta) throw new Error(`a superfície «${this.chave}» foi descartada`);
+    // O teto da pilha de folhas, que o conjunto confere: reabrir também conta.
+    this.antesDeMostrar?.();
     this.visivel = true;
     this.abrir();
   }
@@ -751,15 +790,35 @@ class SuperficiesDoMod {
     // mesma, e não porque as outras ocupam o lugar.
     const tipo = tipoDaSuperficie(descricao, this.dono);
     if (this.porChave.size >= TETO_DE_SUPERFICIES) {
-      throw new Error(`um MOD mantém até ${TETO_DE_SUPERFICIES} superfícies de pé`);
+      throw recusaDaSuperficie("teto-de-superficies",
+        `um MOD mantém até ${TETO_DE_SUPERFICIES} superfícies de pé`, { teto: TETO_DE_SUPERFICIES });
     }
+    if (tipo === "folha" && descricao?.visivel !== false) this.conferirAPilha(null);
     const superficie = new SuperficieDeMod(this.id, this.dono, { ...descricao, tipo }, this.palcos);
     superficie.aoPalcoMudar = () => this.arrumarPalcos();
+    superficie.antesDeMostrar = () => this.conferirAPilha(superficie);
     this.porChave.set(chave, superficie);
     superficie.abrir();
     this.arrumarPalcos();
     if (superficie.tipo === "aviso") this.enfileirarAviso(superficie);
     return { superficie: chave, reaproveitada: false };
+  }
+
+  /**
+   * **A pilha de folhas tem teto** (rascunho §5): uma folha a mais à vista é
+   * recusada pelo nome, com o número. `superficie` é a que vai aparecer, e não
+   * conta contra si mesma: mostrar a que já está à vista não muda a pilha.
+   */
+  conferirAPilha(superficie) {
+    if (superficie && superficie.tipo !== "folha") return;
+    let aVista = 0;
+    for (const outra of this.porChave.values()) {
+      if (outra !== superficie && outra.tipo === "folha" && !outra.solta && outra.visivel) aVista += 1;
+    }
+    if (aVista >= TETO_DE_FOLHAS) {
+      throw recusaDaSuperficie("teto-de-folhas",
+        `um MOD empilha até ${TETO_DE_FOLHAS} folhas à vista`, { teto: TETO_DE_FOLHAS });
+    }
   }
 
   /**
@@ -814,5 +873,13 @@ class SuperficiesDoMod {
       const vazio = !palco.querySelector(":scope > *:not([hidden])");
       if (palco.hidden !== vazio) palco.hidden = vazio;
     }
+    // **Só a folha de cima aparece**; as de baixo voltam quando ela fecha. A
+    // pilha é do palco, e não deste MOD: duas folhas de MODs diferentes
+    // também se empilham.
+    const folhas = this.palcos.paineis?.querySelectorAll(":scope > .folha-de-mod:not([hidden])") ?? [];
+    folhas.forEach((folha, i) => {
+      const abaixo = i < folhas.length - 1 ? "sim" : "nao";
+      if (folha.dataset.abaixo !== abaixo) folha.dataset.abaixo = abaixo;
+    });
   }
 }

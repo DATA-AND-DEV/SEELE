@@ -678,7 +678,9 @@
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
     "superficies": [
-      "tipo-desconhecido (o tipo pedido não existe; leva tipoPedido e tipos — não tipo, que é o da mensagem da ponte; tarefa 7)"
+      "tipo-desconhecido (o tipo pedido não é da API do pacote — na 6, o painel também; leva tipoPedido e tipos — não tipo, que é o da mensagem da ponte; tarefa 7)",
+      "teto-de-folhas (o MOD já tem 3 folhas à vista; leva teto; tarefa 7)",
+      "teto-de-superficies (o MOD já mantém 12 superfícies de pé; leva teto; tarefa 7)"
     ],
     "contribuicoes": [
       "ponto-desconhecido (o ponto não está na tabela)",

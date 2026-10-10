@@ -485,7 +485,12 @@ lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7).
 
 ### `folha`
 
-- Empilha **até 3** [proposta], cada uma com título e a saída do produto.
+- Empilha **até 3** [proposta], cada uma com título e a saída do produto
+  [c, tarefa 7, Step 4: por MOD, contando as que estão à vista — uma fechada
+  ou oculta saiu da pilha; a quarta, inclusive ao reabrir, é recusada com
+  `teto-de-folhas` e `teto: 3`; só a de cima aparece, e mostrar a de baixo a
+  traz para cima. Mora em `#palco-de-paineis`, o lugar do `painel`, com o
+  desenho dele, e `bancada/camadas.cjs` a mede].
 - Convive com `chamada.palco` e com uma `pagina` não imersiva. Sob uma página
   imersiva, a folha abre por cima dela.
 - `fechar` vai ao MOD como nas outras, com `descartou` quando a pessoa aceita
@@ -544,7 +549,11 @@ recomendava). A spec de 23/09 já desenhava a `folha` como «parente do painel»
 o porte é obrigatório de qualquer jeito (API-6-só), e um tipo a menos é uma
 superfície a menos para revisar e para descrever no celular. A `pagina` fica,
 porque a MESA imersiva e o diretório do PERFIS precisam da célula da conversa.
-O que os oficiais montam hoje num `painel` vai para a `folha` no porte.
+O que os oficiais montam hoje num `painel` vai para a `folha` no porte. **Na
+6, `painel` é um tipo que ela não tem**: `tipo-desconhecido`, com «use folha»
+no `seele.log`; até a 5 ele continua, e a `folha`, que a 5 não tem, abre como
+`dialogo`, com a linha [c, tarefa 7, Step 4; os tipos de cada API em
+`tiposDaApi`, `mods-superficies.js`].
 
 ## 6. O retrato projetado por lista branca
 
@@ -726,7 +735,9 @@ nome; a frase vai ao `seele.log`):
 
 | nome | quando |
 |---|---|
-| `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície; leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
+| `teto-de-folhas` | o MOD já tem 3 folhas à vista (§5); leva `teto` |
+| `teto-de-superficies` | o MOD já mantém 12 superfícies de pé; leva `teto`. Chegava à 6 como `falhou` |
+| `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície da API do pacote (na 6, o `painel` também); leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
 
 **Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
 (`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
