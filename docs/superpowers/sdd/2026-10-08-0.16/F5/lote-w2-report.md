@@ -19,7 +19,9 @@ local: sem push, tag nem release. Sem conformidade.
 | `525b1907` | rodada 2 da revisão, I1 | a tentativa substituída desiste antes de cada apagar do CONECTAR (depois do `apelido_local` e depois da pergunta do nome), e registra; o `finally` da pergunta do nome confere a tentativa; a cena `oConectarTemDono` (bloco próprio); o guarda `so_a_tentativa_mais_nova_mexe_no_conectar`, que substitui a parte 5 do guarda da rodada 1 |
 | `9a62a8f4` | rodada 2 da revisão, M1 | `batendoDaEspera` guarda o número da tentativa da batida, e só a falha da própria batida se cala em `levarParaAEspera`, indo ao `seele.log`; a cena `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio). Commitado como «em curso, não rodado» durante a pausa de medição de CPU; **verde depois dela**, sem mudar uma linha (ver 7) |
 | `4e6d2dac` | — | o relatório da rodada 2, com o que faltava rodar |
-| este | — | o relatório da rodada 2 rodada: o M1 verde, as reversões R6 a R11 |
+| `0face242` | — | o relatório da rodada 2 rodada: o M1 verde, as reversões R6 a R11 |
+| `8dd4a333` | rodada 3 da revisão, R2-M1 | o caso 3 de `aBatidaDaEsperaSoCalaASiMesma`: duas batidas sobrepostas, que prendem o `finally` de `baterDeNovo` (só zera a própria marca) |
+| este | — | o relatório da rodada 3 |
 
 **O que não mudou.** Nada em `crates/`, no fio
 (`crates/seele-proto/src/{control,version,media,screen}.rs` intocados), no
@@ -317,7 +319,18 @@ espera prometia; a entrada nova passa a falar.
    a batida, voltando depois, não reabre a espera nem tira a frase da linha, e
    deixa uma linha (e uma só) no registro;
 2. a batida sozinha: a pessoa sai da espera e não faz mais nada; a batida
-   volta calada na tela e deixa no registro uma linha de aviso com o motivo.
+   volta calada na tela e deixa no registro uma linha de aviso com o motivo;
+3. duas batidas sobrepostas (rodada 3, R2-M1 da revisão, `8dd4a333`): o
+   relógio da espera é religado pelo `visibilitychange` com uma batida no ar, e
+   uma segunda sai antes de a primeira voltar. No roteiro da sonda do revisor:
+   a primeira volta aos 600 ms, a segunda sai aos 300 e volta aos 1500, e a
+   pessoa sai da espera aos 800. A cena cobra que a espera não reabre, que a
+   linha vermelha fica calada, e que cada batida deixa a sua linha no
+   registro — a primeira como tentativa substituída (o ramo do W2), a segunda
+   como a batida largada. É o caso que prende o `finally` de `baterDeNovo`,
+   `if (batendoDaEspera === esta) batendoDaEspera = null;`: com ele zerando
+   sempre, a volta da primeira apagava a marca da segunda, e a segunda reabria
+   a espera por cima da entrada. O código já estava certo; faltava a prova.
 
 **O vermelho**, com o `tela-auth.js` e o `tela-boot.js` de `525b1907` no
 lugar (a reversão do commit; os dois voltaram idênticos aos de `9a62a8f4`,
@@ -518,8 +531,17 @@ e o `git status` ficou limpo depois de cada uma.
   «a batida que voltou depois de a pessoa sair da espera foi calada na tela
   sem deixar uma linha (e uma só) no seele.log: []».
 
+- **R12** (rodada 3, R2-M1: o `finally` de `baterDeNovo` zera a marca
+  sempre, `batendoDaEspera = null;`): a cena da batida reprova no caso 3 com
+  «com duas batidas sobrepostas, a primeira voltou e zerou a marca da segunda;
+  a segunda voltou depois de a pessoa sair da espera e falou na tela por cima
+  da entrada que ela escolheu: {"espera":true,"linha":null}». Antes do caso 3,
+  com o mesmo mutante, a `ajustes-v013` passava (medido pela revisão). Voltou
+  idêntico (`cmp`, arquivo tocado), com o script num diretório próprio do
+  scratchpad (`w2r3/`).
+
 O M1 não tem guarda em `tests/frontend.rs`: a revisão não o pediu, e a cena
-cobre as duas metades (quem é calado, e o registro).
+cobre as três metades (quem é calado, o registro, e a marca de cada batida).
 
 ## 7. O que rodou
 
@@ -550,6 +572,15 @@ limpo (o mesmo aviso do ligador); as bancadas `ajustes-v013` (com as quatro
 linhas do lote W2), `conversa-com-estado` e `telas`, verdes, na primeira
 rodada — nenhuma precisou ser repetida, apesar de o W3 rodar bancadas ao mesmo
 tempo. O M1 ficou verde sem mudar uma linha do que foi escrito na pausa.
+
+Na rodada 3 da revisão (`8dd4a333`): `--test frontend`, 288 de 288; `--bin`,
+312 de 312; `check-runtime`, verde; fmt, limpo; clippy `-D warnings`, limpo (o
+mesmo aviso do ligador); a `ajustes-v013`, verde, com o caso 3 novo, na
+primeira rodada.
+
+**Fora do lote, por decisão da revisão**: o R2-M2 (a tentativa velha que
+**entra** depois da nova e reabre a tela de entrada por cima da sessão, igual
+na base) vai à pendência 58, com a linha de etapa.
 
 ## Preocupações
 
