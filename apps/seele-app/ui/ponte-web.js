@@ -94,6 +94,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["criar_servidor", RECUSA_HOSPEDAR],
   ["decidir_pedido", RECUSA_PORTARIA],
   ["definir_senha_do_server", RECUSA_PORTARIA],
+  // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
+  // hospeda, e o navegador não hospeda.
+  ["escolher_o_tema_do_servidor", RECUSA_MODS],
   ["hospedar", RECUSA_HOSPEDAR],
   ["instalar_atualizacao", RECUSA_ATUALIZAR],
   ["instalar_mod", RECUSA_MODS],

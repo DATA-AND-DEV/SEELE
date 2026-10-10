@@ -529,6 +529,17 @@ function linhaDeModInstalado(mod, hospedando) {
       elemento("span", "mods-servidor", "roda na máquina de quem hospeda"),
     );
   }
+  // **A porta do tema, numa linha própria** (rascunho da API 6, §9): um MOD
+  // com ela pode pintar a aparência do servidor inteiro, e quem liga precisa
+  // ler isso antes. Com dois ligados, só um pinta — a pergunta de QUEM PINTA
+  // ESTE SERVIDOR, logo abaixo da lista.
+  if (mod.tema) {
+    texto.append(elemento(
+      "span",
+      "mods-servidor",
+      mod.pinta ? "pinta a aparência deste servidor" : "pode pintar a aparência do servidor",
+    ));
+  }
   caixa.append(texto);
 
   // **Para quem entrou, não há interruptor — há um fato.**
@@ -1506,6 +1517,15 @@ let baseDoConjunto = "";
 /** Impede o segundo envio enquanto o primeiro não voltou. */
 let salvando = false;
 
+/**
+ * Os pacotes com a porta do tema, pela chave: o SALVAR lê do rascunho quantos
+ * vão estar ligados, e avisa quando a escolha vai ser pedida.
+ */
+let pacotesComAPortaDoTema = new Set();
+
+/** Impede a segunda escolha de quem pinta enquanto a primeira não voltou. */
+let escolhendoQuemPinta = false;
+
 /** O que muda do conjunto de pé para o rascunho. */
 function pendencias() {
   // Os nomes que a pessoa lê são os identificadores; a chave é o par.
@@ -1566,10 +1586,22 @@ async function salvarAlteracoes() {
   const erro = $("mods-gestao-erro");
   erro.hidden = true;
 
+  // **Ligar o segundo MOD de tema pede a escolha** (D-api-5): dito antes de
+  // confirmar, e não descoberto depois, quando o MOD recém-ligado não pinta
+  // nada. A escolha em si só vale com os dois ligados no servidor.
+  const deTema = [...rascunho]
+    .filter((chave) => pacotesComAPortaDoTema.has(chave))
+    .map((chave) => chave.split("\u0000")[0]);
+  const ligaUmDeTema = [...rascunho]
+    .some((chave) => pacotesComAPortaDoTema.has(chave) && !conjuntoNoServidor.has(chave));
   const linhas = [
     "O conjunto que este servidor exige passa a ser outro.",
     ligar.length > 0 ? `Passa a exigir: ${ligar.join(", ")}.` : "",
     desligar.length > 0 ? `Deixa de exigir: ${desligar.join(", ")}.` : "",
+    deTema.length > 1 && ligaUmDeTema
+      ? `${deTema.join(" e ")} podem pintar a aparência deste servidor, e só um pinta: ` +
+        "depois de salvar, escolha qual em QUEM PINTA ESTE SERVIDOR."
+      : "",
     "Quem está dentro agora cai e precisa aceitar o conjunto novo, no aparelho " +
       "de cada um. Uma vez só, e não uma por MOD.",
     "Salvar também registra o seu sim nesta máquina para o conjunto resultante — " +
@@ -1616,6 +1648,96 @@ async function salvarAlteracoes() {
       await desenharMods();
     },
   );
+}
+
+/**
+ * A pergunta de quem pinta este servidor, sem desenhar nada (D-api-5; tarefa
+ * 17f.0 da F3).
+ *
+ * Um tema por servidor: com dois MODs com a porta ligados, só um pinta, e
+ * quem hospeda escolhe qual — como escolhe quem desenha cada parte da tela.
+ * Quem pinta é o que o servidor diz (`pinta`, de `mods_instalados`), e não uma
+ * conta desta tela: o escolhido é guardado no banco do servidor.
+ *
+ * @param {object[]} instalados A lista de `mods_instalados`.
+ * @param {boolean} hospedando Se esta janela hospeda: escolher é de quem
+ *   administra.
+ * @returns {{ pergunta: boolean, nota: string, linhas: { id: string, pinta: boolean }[] }}
+ */
+function aEscolhaDoTema(instalados, hospedando) {
+  const comAPorta = hospedando
+    ? instalados.filter((m) => m.enabled && m.tema && !m.refused)
+    : [];
+  if (comAPorta.length < 2) return { pergunta: false, nota: "", linhas: [] };
+  const quemPinta = comAPorta.find((m) => m.pinta === true)?.id ?? null;
+  const quantos = comAPorta.length === 2 ? "os dois" : `os ${comAPorta.length}`;
+  const nota = quemPinta
+    ? `${quemPinta} pinta a aparência deste servidor. Só um pinta; o tema que cada ` +
+      "um declarou fica guardado, e trocar vale na hora para quem está dentro."
+    : `Nenhum dos ${comAPorta.length === 2 ? "dois" : comAPorta.length} pinta ainda: ` +
+      `o primeiro que declarar um tema passa a pintar. Escolha entre ${quantos}.`;
+  return {
+    pergunta: true,
+    nota,
+    linhas: comAPorta.map((m) => ({ id: m.id, pinta: m.pinta === true })),
+  };
+}
+
+/** Desenha a pergunta de quem pinta este servidor, ou a esconde. */
+function desenharAEscolhaDoTema(instalados, hospedando) {
+  const secao = $("mods-aparencia-do-servidor");
+  const { pergunta, nota, linhas } = aEscolhaDoTema(instalados, hospedando);
+  secao.hidden = !pergunta;
+  $("mods-aparencia-nota").textContent = nota;
+  repovoar($("lista-aparencia-do-servidor"), linhas.map(({ id, pinta }) => {
+    const item = elemento("li", "server-dispositivo mods-linha-gestao");
+    const texto = elemento("div", "mods-linha-texto");
+    texto.append(elemento("span", "mods-id", id));
+    if (pinta) texto.append(elemento("span", "mods-estado", "PINTA ESTE SERVIDOR"));
+    item.append(texto);
+    // **Nenhum botão para o que já pinta**: um botão que não muda nada é uma
+    // pergunta sem resposta.
+    if (!pinta) {
+      const botao = elemento("button", "botao-fantasma", "PINTAR COM ESTE");
+      botao.type = "button";
+      botao.disabled = escolhendoQuemPinta;
+      botao.addEventListener("click", () => {
+        escolherQuemPinta(id).catch((falha) => console.warn("escolher quem pinta:", falha));
+      });
+      item.append(botao);
+    }
+    return item;
+  }));
+}
+
+/**
+ * Faz de `id` o MOD que pinta este servidor.
+ *
+ * Sem confirmação, ao contrário do SALVAR: o conjunto exigido não muda,
+ * ninguém cai, e o tema de quem está dentro troca na hora (`TemaMudou`).
+ * Desfazer é escolher o outro.
+ */
+async function escolherQuemPinta(id) {
+  if (escolhendoQuemPinta) return;
+  escolhendoQuemPinta = true;
+  const erro = $("mods-gestao-erro");
+  erro.hidden = true;
+  let recusa = null;
+  try {
+    await invoke("escolher_o_tema_do_servidor", { id });
+  } catch (falha) {
+    recusa = falha;
+  } finally {
+    escolhendoQuemPinta = false;
+  }
+  await desenharMods();
+  // **A recusa depois do redesenho**, e não antes: `desenharMods` escreve no
+  // mesmo lugar o que ele mesmo sabe (a lista que não veio, o catálogo do
+  // servidor que não respondeu), e a recusa desta escolha sumiria debaixo.
+  if (recusa) {
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(recusa);
+  }
 }
 
 /** Desenha as duas listas desta seção. */
@@ -1722,6 +1844,7 @@ async function desenharMods() {
   // que houve em vez de escolher sozinha qual das duas decisões vale.
   const tinhaPendencia = haRascunhoPorSalvar();
   conjuntoNoServidor = new Set(instalados.filter((m) => m.enabled).map(chaveDoPacote));
+  pacotesComAPortaDoTema = new Set(instalados.filter((m) => m.tema).map(chaveDoPacote));
   if (!tinhaPendencia) {
     rascunho.clear();
     for (const id of conjuntoNoServidor) rascunho.add(id);
@@ -1761,6 +1884,7 @@ async function desenharMods() {
   }
 
   desenharRascunho(hospedando);
+  desenharAEscolhaDoTema(instalados, hospedando);
   desenharApresentacoes();
   desenharQuemPinta();
   // **A frase da última instalação não sobrevive ao redesenho** — U11.
