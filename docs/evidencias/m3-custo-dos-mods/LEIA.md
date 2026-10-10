@@ -201,6 +201,19 @@ cenário desta campanha é lido contra o `sem-mod` (e o `sem-mod+voz`) **desta
 mesma campanha**; a comparação com a base fica só para o custo total de subir
 de versão, e é dita como tal.
 
+**O jitter desta campanha não vale como medida** (a orquestradora, 10/10). Os
+dois leitores, `jitter_ms` e `jitter_do_registro_ms`, dão **0 exato** em todo
+cenário com voz, e a base, com o mesmo falante, dava mediana de 1 ms. A voz
+chega ao processo (uns 4,8 KB/s) e custa a mesma CPU que na base: o suspeito é
+o número, e não a voz. Está com a F4 (o `seele-voz`). Até ela achar a causa, o
+jitter sob carga sai do §12 do rascunho e do `v6.json` como «não medido nesta
+campanha», e não como zero; CPU, memória e quadros valem.
+
+**A árvore de acessibilidade do WebKit, na 0.16, às vezes só se monta depois da
+primeira consulta** (a orquestradora, 10/10). O `esperar` do `m3.py` repete a
+consulta até o prazo, e por isso já cobre o caso; uma ferramenta que consulte
+uma vez só leria uma tela vazia.
+
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6
 sh /tmp/m3-6/roteiro/campanha-api6.sh        # os 24
