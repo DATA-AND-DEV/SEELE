@@ -193,6 +193,23 @@ function fecharAceiteDeMods() {
 }
 
 /**
+ * A frase de quando o «não» não pôde ser desfeito: o sim aos MODs de `alvo`
+ * ficou gravado, e a pessoa precisa saber disso e de onde desfazê-lo.
+ *
+ * Aqui, e não em `frases.js`: ela não é a frase de uma variante de erro — leva
+ * o alvo e a falha de desfazer dentro dela — e só existe nesta pergunta. É a
+ * razão de `camada-versoes.js` ter as próprias frases, e `frases.js` é editado
+ * por outra frente.
+ */
+function simQueFicouGravado(alvo, falha) {
+  return (
+    `O SIM AOS MODS DE ${alvo} FICOU GRAVADO.\n` +
+    `Você recusou, e não consegui desfazê-lo (${fraseDeErro(falha)}). ` +
+    "Desfaça em CONFIGURAÇÕES · MODS, na lista SERVIDORES A QUEM VOCÊ DISSE SIM."
+  );
+}
+
+/**
  * **Obtém o conjunto autorizado**, grava o sim, e tenta entrar de novo.
  *
  * **Por que a obtenção mora aqui, e não no laço que carrega os MODs.**
@@ -265,10 +282,19 @@ async function aceitarOsMods() {
   // durante ela: a ordem nova não fecha essa janela, então o sim que terminou
   // de ser gravado depois da desistência é desfeito aqui, pelo mesmo verbo da
   // seção MODS de CONFIGURAÇÕES.
+  //
+  // **E se desfazer falhar, a tela diz** (lote W, rodada 1). O sim fica
+  // gravado contra o «não», e a próxima entrada roda o MOD sem perguntar; a
+  // falha ia só ao console. A pergunta já fechou, e quem desistiu está na
+  // entrada: a frase vai à linha dela, com o lugar onde desfazer.
   if (aceitePendente !== pergunta) {
-    await invoke("esquecer_aceite_de_mods", { alvo }).catch((falha) =>
-      console.warn("esquecer o aceite de quem desistiu:", falha),
-    );
+    try {
+      await invoke("esquecer_aceite_de_mods", { alvo });
+    } catch (falha) {
+      const naEntrada = $("boot-erro");
+      naEntrada.hidden = false;
+      naEntrada.textContent = simQueFicouGravado(alvo, falha);
+    }
     return;
   }
 

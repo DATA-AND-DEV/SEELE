@@ -160,6 +160,8 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
     // (`seele_ffi::mods`): o `aceitar_mods` grava quando termina, e o
     // `esquecer_aceite_de_mods` apaga (lote W da F5).
     window.testAceites = {};
+    // Um comando que falha, por nome, com a forma que o Rust devolve.
+    window.testFalhas = {};
     // O console inteiro, com os argumentos serializados: um objeto passado ao
     // `console.warn` chega ao Playwright como «Object», e a credencial dentro
     // dele passaria sem ser vista.
@@ -175,6 +177,7 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
         if (window.testAtraso[cmd]) await new Promise(ok => setTimeout(ok, window.testAtraso[cmd]));
+        if (window.testFalhas[cmd]) throw window.testFalhas[cmd];
         if (cmd === 'aceitar_mods') { window.testServidor.aceitou = true; window.testAceites[args.alvo] = args.conjunto; }
         if (cmd === 'esquecer_aceite_de_mods') delete window.testAceites[args.alvo];
         // Um link com erro de digitação: o `analisar_convite` de verdade
@@ -394,6 +397,36 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
   assert.equal((await conectsFeitos(page)).length, antesDaGravacao,
     'a pessoa fechou a pergunta enquanto o sim era gravado, e a janela entrou mesmo assim');
   await page.evaluate(() => { testAtraso = {}; });
+
+  // ---- 5d. E se desfazer o sim falhar, a tela diz (rodada 1, M2).
+  //
+  // A sonda P2 da revisão: o mesmo caso da 5c, com o `esquecer_aceite_de_mods`
+  // falhando. O sim fica gravado contra o «não», e a falha ia só ao console.
+  // A tela tem de dizer que o sim ficou e onde desfazê-lo.
+  await page.evaluate((alvo) => {
+    delete testAceites[alvo];
+    testAtraso.aceitar_mods = 500;
+    testFalhas.esquecer_aceite_de_mods = { Recusado: { motivo: 'o-disco-recusou' } };
+  }, ALVO_R);
+  await baterComOConvite(page);
+  const gravacoesAntesDaFalha = await page.evaluate(() => testCalls.filter(c => c.cmd === 'aceitar_mods').length);
+  await page.click('#mods-aceitar');
+  await page.waitForFunction(
+    (antes) => testCalls.filter(c => c.cmd === 'aceitar_mods').length > antes,
+    gravacoesAntesDaFalha, { timeout: 3000 },
+  ).catch(() => assert.fail('ACEITAR não chegou a gravar o sim, e a falha de desfazê-lo não foi medida'));
+  await page.click('#mods-recusar');
+  await page.waitForTimeout(900);
+  assert.equal(await page.evaluate((alvo) => testAceites[alvo] ?? null, ALVO_R), 'conjunto-do-lote-r',
+    'o sim não ficou gravado, e a falha de desfazê-lo não foi medida');
+  const disse = await page.evaluate(() => {
+    const linha = document.getElementById('boot-erro');
+    return linha.hidden ? null : linha.textContent;
+  });
+  assert.ok(disse && disse.includes('FICOU GRAVADO') && disse.includes(ALVO_R) && disse.includes('SERVIDORES A QUEM VOCÊ DISSE SIM'),
+    'a pessoa recusou enquanto o sim dos MODs era gravado, desfazê-lo falhou, e a tela não disse que o sim ficou nem onde ' +
+    `desfazê-lo — a entrada diz ${JSON.stringify(disse)}: na próxima entrada o MOD roda contra o «não» dela, e ela não sabe`);
+  await page.evaluate((alvo) => { testAtraso = {}; testFalhas = {}; delete testAceites[alvo]; }, ALVO_R);
 
   // ---- 5b. Uma pergunta nova que substitui a antiga durante a obtenção.
   //
