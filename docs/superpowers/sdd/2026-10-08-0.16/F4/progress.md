@@ -659,3 +659,31 @@ começar.
   `PERMISSAO_DE_MICROFONE` da casca ainda não tem; até ela ter a frase, o
   bloco fica escondido.
 
+## 09/10, noite: a 3.3, o relógio de mídia e a tabela de quem fala no `seele-voz`
+
+- **Liberado pela orquestradora**: as duas metades da mídia saem do laço do
+  `voice.rs` para o `seele-voz`, como estruturas puras com o relógio passado
+  por argumento, e o desktop passa a usá-las.
+- **O laço não roda em teste** (um aparelho do cpal e uma conexão QUIC). Então
+  o «teste gravado antes» foi feito assim: uma tabela fixa de eventos com os
+  valores esperados escritos à mão, produzida por uma réplica das instruções
+  do laço; um segundo teste confere que cada instrução replicada está no
+  `pipeline` com o mesmo texto (mudar o laço reprova). Depois da extração, o
+  corpo do teste da sequência é idêntico (conferido por texto), quem produz é
+  a estrutura chamada sozinha, e o guarda passa a exigir que o laço a use e
+  não faça conta própria.
+- **A metade que manda** (`e3ce87aa`, `9c0d8f61`): o `RelogioDeMidia` (um
+  quadro passou, um pacote saiu, o salto) e o `carimbo_do_quadro`, movido com
+  a documentação. O `Voice::salto_do_relogio` ficou como atalho, e os testes
+  antigos não mudaram. Reversão: sem o salto de dois quadros, reprovam o teste
+  gravado e mais três testes antigos da reabertura.
+- **A metade que recebe** (`ae50d6f0`, `59c569e5`): a `TabelaDeFontes<T>` e a
+  `SILENCIO_ATE_ESQUECER_MS`, movida com a documentação. Reversão: o próprio
+  SSRC deixando de ser descartado reprova o teste gravado.
+- **Passam** o `seele-voz`, o `seele-audio`, o `seele-core` (452), o
+  `seele-ffi` (166), o clippy, a compilação para o navegador e a
+  `qualidade-da-voz.cjs`. **A conformidade de áudio por arquivo espera o aviso
+  da orquestradora** do fim da bateria da décima.
+- **A seguir, o lote A**: a fronteira da voz no `seele-web`, com o cabeçalho, o
+  relógio e a tabela (a alça opaca no lugar do SSRC) pelo `wasm`.
+
