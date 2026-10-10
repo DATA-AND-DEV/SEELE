@@ -226,7 +226,11 @@ async fn ficar_para_tras_mostra_a_faixa_e_a_volta_e_nao_o_fim() -> Result<()> {
         None,
         "a janela recebeu a tela de fim numa queda que o núcleo reconecta"
     );
-    assert_eq!(ana.snapshot().ended, None, "o retrato diz que a sessão acabou");
+    assert_eq!(
+        ana.snapshot().ended,
+        None,
+        "o retrato diz que a sessão acabou"
+    );
     assert_eq!(
         servidor.server().occupancy.lock().await.onde_esta(quem),
         Some(SALA),
@@ -287,7 +291,11 @@ async fn a_volta_traz_o_buraco_e_o_que_ficou_sem_resposta_uma_vez_cada() -> Resu
         .collect();
     esperar("o buraco e as seis dela aparecerem confirmadas", || {
         let mensagens = ana.messages();
-        mensagens.iter().filter(|m| m.body.starts_with("buraco-")).count() >= 450
+        mensagens
+            .iter()
+            .filter(|m| m.body.starts_with("buraco-"))
+            .count()
+            >= 450
             && dela.iter().all(|corpo| {
                 mensagens
                     .iter()
@@ -306,7 +314,10 @@ async fn a_volta_traz_o_buraco_e_o_que_ficou_sem_resposta_uma_vez_cada() -> Resu
     for numero in 1..=450 {
         let corpo = format!("buraco-{numero:03}");
         let vezes = mensagens.iter().filter(|m| m.body == corpo).count();
-        assert_eq!(vezes, 1, "«{corpo}», do buraco, aparece {vezes} vezes na tela");
+        assert_eq!(
+            vezes, 1,
+            "«{corpo}», do buraco, aparece {vezes} vezes na tela"
+        );
     }
     // Na ordem em que ela escreveu: o servidor numera na ordem em que grava.
     let ids: Vec<u64> = (1..=3)
@@ -341,13 +352,13 @@ async fn a_voz_fecha_no_fim_e_volta_na_queda() -> Result<()> {
     let _vaga = vaga::minha();
 
     // A queda: a voz volta e o servidor a ouve.
-    let (endereco, servidor) = servidor().await?;
+    let (endereco, daemon) = servidor().await?;
     let aparelho = "p61-voz-na-queda";
     let casa = tempfile::tempdir()?;
     let (ana_na_queda, gravador, quem) = ana(endereco, casa.path(), Some(aparelho)).await?;
     esperar("a voz abrir", || mentira::contagem(aparelho).abertos == 1).await?;
     let antes = mentira::contagem(aparelho).aberturas;
-    despedir(&servidor, quem, DisconnectReason::FellBehind);
+    despedir(&daemon, quem, DisconnectReason::FellBehind);
     esperar("a faixa da bateria aparecer", || na_bateria(&ana_na_queda)).await?;
     esperar("a voz reabrir na volta", || {
         !na_bateria(&ana_na_queda)
@@ -363,16 +374,16 @@ async fn a_voz_fecha_no_fim_e_volta_na_queda() -> Result<()> {
     assert_eq!(gravador.fim(), None);
     drop(ouvinte);
     ana_na_queda.disconnect();
-    servidor.shutdown();
+    daemon.shutdown();
 
     // O fim: a voz fecha, e não reabre.
-    let (endereco, servidor) = servidor().await?;
+    let (endereco, daemon) = servidor().await?;
     let aparelho = "p61-voz-no-fim";
     let casa = tempfile::tempdir()?;
     let (ana_no_fim, gravador, quem) = ana(endereco, casa.path(), Some(aparelho)).await?;
     esperar("a voz abrir", || mentira::contagem(aparelho).abertos == 1).await?;
     let aberturas = mentira::contagem(aparelho).aberturas;
-    despedir(&servidor, quem, DisconnectReason::Kicked);
+    despedir(&daemon, quem, DisconnectReason::Kicked);
     esperar("a tela de fim", || gravador.fim().is_some()).await?;
     esperar("a voz fechar", || mentira::contagem(aparelho).abertos == 0).await?;
     // Uma volta da bateria inteira, se houvesse uma: a primeira tentativa sai
@@ -388,6 +399,6 @@ async fn a_voz_fecha_no_fim_e_volta_na_queda() -> Result<()> {
         "a voz reabriu depois de uma despedida que acaba a sessão"
     );
     ana_no_fim.disconnect();
-    servidor.shutdown();
+    daemon.shutdown();
     Ok(())
 }

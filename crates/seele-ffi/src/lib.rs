@@ -4603,11 +4603,17 @@ async fn drive(
                         // A página do buraco que estava no ar acabou? Depois do
                         // `fold`: a mensagem já está no `Room` quando a busca
                         // decide. Ver `volta::Buraco`.
-                        if let Some(passo) = buraco.as_mut().and_then(|aberto| aberto.ouvir(&message)) {
+                        let passo = buraco.as_mut().and_then(|aberto| aberto.ouvir(&message));
+                        if let Some(passo) = passo {
                             match passo {
                                 volta::Passo::Pedir(pagina) => {
                                     let _ = client
-                                        .historico_com_cerca(pagina.canal, pagina.cursor, pagina.limite, pagina.carimbo)
+                                        .historico_com_cerca(
+                                            pagina.canal,
+                                            pagina.cursor,
+                                            pagina.limite,
+                                            pagina.carimbo,
+                                        )
                                         .await;
                                 }
                                 volta::Passo::Parou(parada) => {
@@ -4617,7 +4623,8 @@ async fn drive(
                                             tracing::warn!(
                                                 canal = fechado.canal().get(),
                                                 paginas = fechado.paginas(),
-                                                "o buraco da volta passou do teto de páginas; o resto fica no histórico"
+                                                "o buraco da volta passou do teto de páginas; \
+                                                 o resto fica no histórico"
                                             );
                                         } else {
                                             tracing::info!(
@@ -4798,7 +4805,12 @@ async fn drive(
                         });
                         if let Some(pagina) = pagina {
                             let _ = client
-                                .historico_com_cerca(pagina.canal, pagina.cursor, pagina.limite, pagina.carimbo)
+                                .historico_com_cerca(
+                                    pagina.canal,
+                                    pagina.cursor,
+                                    pagina.limite,
+                                    pagina.carimbo,
+                                )
                                 .await;
                         }
                         shared.notify(&Event::TelemetryChanged);

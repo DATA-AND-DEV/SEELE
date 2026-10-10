@@ -427,11 +427,7 @@ mod tests {
         loop {
             let mut chegam: Vec<ServerMessage> = Vec::new();
             if primeira {
-                chegam.extend(
-                    ao_vivo
-                        .iter()
-                        .map(|id| mensagem(*id, PersonId(9), None)),
-                );
+                chegam.extend(ao_vivo.iter().map(|id| mensagem(*id, PersonId(9), None)));
                 primeira = false;
             }
             chegam.extend(
@@ -529,10 +525,7 @@ mod tests {
 
         // Quem não conhecia nada do canal recebe a página mais nova e para.
         let mut room = self::room();
-        assert_eq!(
-            buscar(&mut room, &gravadas, &[]),
-            (Parada::SoAMaisNova, 1)
-        );
+        assert_eq!(buscar(&mut room, &gravadas, &[]), (Parada::SoAMaisNova, 1));
     }
 
     #[test]
@@ -547,7 +540,11 @@ mod tests {
             seele_core::assento::carimbo_da_entrada(3),
             MARCA_DO_PING_DO_BURACO | 39,
         ] {
-            assert_eq!(buraco.ouvir(&pong(outro)), None, "o carimbo {outro:#x} fechou a página");
+            assert_eq!(
+                buraco.ouvir(&pong(outro)),
+                None,
+                "o carimbo {outro:#x} fechou a página"
+            );
         }
         assert!(buraco.ouvir(&pong(pedido.carimbo)).is_some());
         assert_eq!(buraco.sequencia(), 41);
@@ -591,7 +588,11 @@ mod tests {
 
         assert_eq!(
             repeticao.vez(agora),
-            vec![ClientMessageId(30), ClientMessageId(20), ClientMessageId(40)],
+            vec![
+                ClientMessageId(30),
+                ClientMessageId(20),
+                ClientMessageId(40)
+            ],
             "fora da ordem em que foram escritas, ou repetindo uma que o servidor recusou"
         );
     }
@@ -616,7 +617,10 @@ mod tests {
         }
 
         assert_eq!(
-            saidas.iter().map(|(_, chave)| chave.get()).collect::<Vec<_>>(),
+            saidas
+                .iter()
+                .map(|(_, chave)| chave.get())
+                .collect::<Vec<_>>(),
             (1..=58).collect::<Vec<_>>(),
             "a ordem não é a da escrita"
         );
@@ -707,8 +711,15 @@ mod tests {
         let (original, id) = servidor.linhas[0];
         room.apply(&mensagem(id, EU, Some(original)));
 
-        assert_eq!(servidor.linhas.len(), 1, "a repetição gravou uma segunda linha");
-        assert_eq!(ids(&room).len(), 1, "o eco duplo duplicou a mensagem na tela");
-        assert!(room.pendentes.is_empty(), "a pendente não foi confirmada pelo eco");
+        assert_eq!(ids(&room).len(), 1, "a mensagem saiu duplicada na tela");
+        assert_eq!(
+            servidor.linhas.len(),
+            1,
+            "a repetição gravou uma segunda linha"
+        );
+        assert!(
+            room.pendentes.is_empty(),
+            "a pendente não foi confirmada pelo eco"
+        );
     }
 }
