@@ -501,3 +501,83 @@ própria chave (`nossoServidorEm === ultimoAlvo`) também deixaria de casar.
 
 A conformidade continua pausada. `aceite_dos_mods` e `volta_do_aceite` rodam
 quando a orquestradora liberar.
+
+## O merge da décima integração (`30057aa8`)
+
+`versao/0.16` em `e3970b14` entrou com dois conflitos.
+
+- **`docs/pendencias.md`.** Do nosso lado não havia nada, e a versão traz a 59
+  inteira. Fiquei com a da versão, byte a byte.
+- **`apps/seele-app/src/main.rs`.** A F7 trocou `hospedagem` e
+  `servidor_no_ar` de `Session` por `hospedagens: Mutex<Hospedagens>`, com
+  `guardado` e `pessoal: Option<Hospedado>`. O campo
+  `Session::enderecos_do_convite_daqui` da rodada 2 não tinha mais onde ficar.
+  - **Com autorização da coordenação**, os endereços passaram a morar em
+    `Hospedado::enderecos_do_convite`, preenchido no mesmo
+    `Some(Hospedado { … })` de `hospedar` com
+    `enderecos_do_convite(&anfitriao.convite)`.
+  - Eles morrem com a hospedagem, e o trecho do `disconnect` que os esquecia
+    saiu.
+  - No desenho da F7 mudou só isto: um campo a mais, e os dois `Hospedado` do
+    teste `a_saida_despede_as_hospedagens` o recebem vazio.
+
+**O que o desenho novo pediu no lote X:**
+- **`gravar_o_sim_de_quem_hospeda`** lê o endereço da sessão e os endereços
+  do convite do **guardado**, e passa os dois a
+  `gravar_o_sim_se_a_sessao_e_daqui`.
+- **O teste do próprio link** roda essa segunda função. Montar um `Hospedado`
+  pediria subir uma hospedagem, e o teste da F7 faz isso com `iniciar_sala`,
+  que sobe a escada de UPnP e PCP.
+- **O guarda de texto-fonte** deixou de cobrar o `disconnect`. Agora cobra
+  três coisas: que o `Hospedado` nasça com os endereços do convite, que o sim
+  os leia do guardado e não da sala, e que os passe na chamada exata.
+- **Quatro reversões no lugar novo**, todas vermelhas:
+  - o `Hospedado` sem os endereços;
+  - o sim lendo a sala;
+  - o sim sem passar os endereços;
+  - o portão só com o `aqui`.
+
+  A terceira passou verde na primeira versão do guarda, que só procurava o
+  nome da função. O guarda foi apertado para cobrar a chamada exata, e a
+  reversão passou a reprovar. O arquivo voltou idêntico (`cmp`) e foi tocado
+  antes de recompilar.
+
+**O que achei no desenho novo da F7:**
+- **Duas hospedagens podem estar de pé.** São o guardado, que a pessoa sobe
+  com HOSPEDAR, e a sala pessoal, que hoje ninguém sobe fora dos testes.
+  - «O servidor que esta janela hospeda», para o sim dos MODs, é o
+    **guardado**. É nele que moram os MODs (`persistence_do_mod` usa
+    `do_guardado`), e a sala é «em memória e sem MODs».
+  - Os dois gravadores só chegam ao sim depois de `persistence_do_mod`.
+- **O `aqui` continua sendo o endereço do guardado.** O guardado sobe na
+  `PORTA_PADRAO`, a 8383, a mesma do `aqui` (`127.0.0.1:{PORTA_PADRAO}`). A
+  sala sobe na `PORTA_DA_SALA`, a 8385. O portão não precisou mudar de
+  critério.
+- **Há agora duas respostas a «estou no meu servidor?».** A F7 trouxe
+  `onde_estou` e `onde_estou_em` e os chama de «a única resposta». O critério
+  deles:
+  - é a porta do guardado, num endereço de loopback escrito como `127.0.0.1`,
+    `localhost` ou `[::1]`;
+  - não reconhece os endereços do convite, então o próprio link dá `Outro`.
+
+  O portão do sim (`a_sessao_e_com_o_servidor_daqui`) reconhece o `aqui` e os
+  endereços do convite. Não reconhece `localhost:8383` nem `[::1]:8383`, que
+  `onde_estou` reconhece. Não unifiquei: seria mexer no critério da F7, ou dar
+  ao sim um critério que a rodada 2 não pediu. Fica para a orquestradora
+  decidir se o portão passa a ser `onde_estou_em(…) == Guardado` mais os
+  endereços do convite.
+
+**No estado mesclado:**
+
+| o quê | resultado |
+|---|---|
+| `--bin seele-app` | 307 de 307 |
+| `--test frontend` | 288 de 288 |
+| `check-runtime` | verde |
+| fmt e clippy do app | limpos |
+| `ajustes-v013.cjs` e `diagnostico-de-mods.cjs` | verdes |
+| conformidade `aceite_dos_mods` | 15 de 15 |
+| conformidade `volta_do_aceite` | 2 de 2 |
+
+A conformidade rodou um arquivo de cada vez, com `--test-threads=1`, depois da
+liberação.
