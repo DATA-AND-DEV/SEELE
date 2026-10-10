@@ -580,7 +580,9 @@ fn every_command_the_frontend_calls_is_registered() {
 // os chamarem, na vez da F8, dentro do mesmo conjunto da sala viva.
 // `toques_agora` entrou com a tarefa 24: a faixa `#toque` da tela que abre com
 // o toque já tocando. Sai com a faixa, na tarefa 26, com `atender`, `recusar` e
-// `encerrar_a_ligacao`, da tarefa 27.
+// `encerrar_a_ligacao`, da tarefa 27. `meu_codigo`, `contatos_da_agenda`,
+// `dar_nome_na_agenda` e `bloquear` (tarefa 29) saem com o SEU CÓDIGO e a agenda
+// do PERFIL, na vez da F8.
 const AGUARDANDO_TELA: &[&str] = &[
     "onde_estou",
     "estado_da_sala",
@@ -589,6 +591,10 @@ const AGUARDANDO_TELA: &[&str] = &[
     "atender",
     "recusar",
     "encerrar_a_ligacao",
+    "meu_codigo",
+    "contatos_da_agenda",
+    "dar_nome_na_agenda",
+    "bloquear",
 ];
 
 #[test]
@@ -18720,7 +18726,7 @@ fn o_toque_chama_a_atencao_e_nunca_toma_a_tela() {
         .filter(|c| !c.is_whitespace())
         .collect();
     let assina = subir_agora
-        .find("letcampainha=sala.recepcao().map(|recepcao|recepcao.assinar());")
+        .find("letcampainha=recepcao.map(|recepcao|recepcao.assinar());")
         .expect("a subida da sala não assina a campainha");
     let guarda = subir_agora
         .find("guardar_se_ainda_subindo(")

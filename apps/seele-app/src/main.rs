@@ -1638,6 +1638,62 @@ fn atender(
     atendido
 }
 
+/// SEU CÓDIGO (tarefa 29 da F7): o código desta máquina, o do dono da sala que
+/// ela sobe. Ao lado de `impressao_desta_maquina`, e da mesma chave.
+///
+/// # Errors
+///
+/// Nunca com motivo: a identidade que não abre é dita no `seele.log`, e a tela
+/// mostra o campo vazio.
+#[tauri::command]
+fn meu_codigo(app: AppHandle) -> Result<String, ()> {
+    sala::meu_codigo_em(&config_dir(&app)).ok_or(())
+}
+
+/// A agenda (tarefa 29 da F7): os códigos com quem esta máquina já falou.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda::NaoGravou`] quando a agenda não abre.
+#[tauri::command]
+fn contatos_da_agenda(app: AppHandle) -> Result<Vec<sala::ContatoNaTela>, sala::FalhaNaAgenda> {
+    sala::contatos_em(&config_dir(&app))
+}
+
+/// Dá um nome a uma pessoa da agenda (tarefa 29 da F7). Vazio tira o nome.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn dar_nome_na_agenda(
+    app: AppHandle,
+    codigo: String,
+    nome: String,
+) -> Result<(), sala::FalhaNaAgenda> {
+    sala::dar_nome_em(&config_dir(&app), &codigo, &nome)
+}
+
+/// Bloqueia ou desbloqueia um código (tarefa 29 da F7), **ao vivo**: quem
+/// estava tocando e passou a estar bloqueado para de tocar como recusado.
+///
+/// # Errors
+///
+/// [`sala::FalhaNaAgenda`]: o código não fecha, ou a agenda não gravou.
+#[tauri::command]
+fn bloquear(
+    app: AppHandle,
+    session: State<'_, Session>,
+    codigo: String,
+    bloqueado: bool,
+) -> Result<(), sala::FalhaNaAgenda> {
+    // A campainha mora em `session.hospedagens`: `sala::bloquear_em` leva a ela
+    // a lista nova, quando a sala está no ar.
+    let bloqueio = sala::bloquear_em(&session, &config_dir(&app), &codigo, bloqueado);
+    tracing::info!(?bloqueio, bloqueado, "bloqueio na agenda");
+    bloqueio
+}
+
 /// RECUSAR (tarefa 27 da F7).
 ///
 /// # Errors
@@ -10595,6 +10651,10 @@ fn main() {
             atender,
             recusar,
             encerrar_a_ligacao,
+            meu_codigo,
+            contatos_da_agenda,
+            dar_nome_na_agenda,
+            bloquear,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,

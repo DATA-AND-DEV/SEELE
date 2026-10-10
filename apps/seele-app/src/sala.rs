@@ -210,9 +210,16 @@ pub(crate) async fn subir_agora<R: Runtime>(app: AppHandle<R>, subida: Subida) {
         }
     };
     let registro = sala.registro_no_quarto();
+    let recepcao = sala.recepcao();
+    // **Os bloqueados da agenda, antes de tudo o mais.** A sala já aceita
+    // conexões quando `iniciar_sala` volta, e cada linha daqui até lá é uma
+    // janela em que quem foi bloqueado tocaria.
+    if let Some(recepcao) = &recepcao {
+        aplicar_os_bloqueados(recepcao, &subida.config);
+    }
     // Assinada **antes** de a sala ir para as hospedagens: um toque que chegue
     // no instante seguinte já tem quem o ouça.
-    let campainha = sala.recepcao().map(|recepcao| recepcao.assinar());
+    let campainha = recepcao.map(|recepcao| recepcao.assinar());
     if let Some(largada) = guardar_se_ainda_subindo(&app.state::<crate::Session>(), sala) {
         tracing::info!("a sala terminou de subir depois de desligada, e desce");
         largada.encerrar().await;
@@ -425,6 +432,112 @@ pub(crate) fn encerrar_a_ligacao_em(sessao: &crate::Session) -> Result<usize, Fa
     Ok(recepcao.desligar().len())
 }
 
+/// SEU CÓDIGO: o código desta máquina, o do dono da sala que ela sobe.
+pub(crate) fn meu_codigo_em(config: &str) -> Option<String> {
+    seele_ffi::codigo_desta_maquina(config)
+        .map(|codigo| codigo.to_string())
+        .map_err(|erro| tracing::warn!(?erro, "SEU CÓDIGO não saiu: a identidade não abriu"))
+        .ok()
+}
+
+/// Por que a agenda não mudou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub(crate) enum FalhaNaAgenda {
+    /// O texto não é um código: o verificador não fecha.
+    CodigoInvalido,
+    /// A agenda não abriu ou não gravou; o motivo vai ao `seele.log`.
+    NaoGravou,
+}
+
+/// Uma pessoa da agenda, do jeito que a tela a mostra.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct ContatoNaTela {
+    /// O código: a única coisa da linha que é prova.
+    pub(crate) codigo: String,
+    /// Como **eu** chamo esta pessoa.
+    pub(crate) nome: Option<String>,
+    /// O apelido que ela usou da última vez: o que **ela** diz.
+    pub(crate) apelido: Option<String>,
+    /// A última ligação, em segundos desde a época.
+    pub(crate) visto_em: Option<i64>,
+    /// `liguei`, `recebi` ou `perdida`.
+    pub(crate) direcao: Option<&'static str>,
+    /// Se as ligações dela são recusadas sem tocar.
+    pub(crate) bloqueado: bool,
+}
+
+fn agenda_em(config: &str) -> Result<seele_ffi::agenda::Agenda, FalhaNaAgenda> {
+    seele_ffi::agenda::Agenda::abrir(crate::toque::caminho_da_agenda(config)).map_err(|erro| {
+        tracing::warn!(erro = %format!("{erro:#}"), "a agenda não abriu");
+        FalhaNaAgenda::NaoGravou
+    })
+}
+
+fn codigo_lido(codigo: &str) -> Result<seele_ffi::Codigo, FalhaNaAgenda> {
+    seele_ffi::Codigo::ler(codigo).map_err(|_| FalhaNaAgenda::CodigoInvalido)
+}
+
+/// A agenda, para a tela.
+pub(crate) fn contatos_em(config: &str) -> Result<Vec<ContatoNaTela>, FalhaNaAgenda> {
+    use seele_ffi::agenda::Direcao;
+    Ok(agenda_em(config)?
+        .listar()
+        .iter()
+        .map(|contato| ContatoNaTela {
+            codigo: contato.codigo.to_string(),
+            nome: contato.nome.clone(),
+            apelido: contato.apelido.clone(),
+            visto_em: contato.visto_em,
+            direcao: contato.direcao.map(|direcao| match direcao {
+                Direcao::Liguei => "liguei",
+                Direcao::Recebi => "recebi",
+                Direcao::Perdida => "perdida",
+            }),
+            bloqueado: contato.bloqueado,
+        })
+        .collect())
+}
+
+/// Dá um nome a uma pessoa da agenda. Um nome vazio tira o nome.
+pub(crate) fn dar_nome_em(config: &str, codigo: &str, nome: &str) -> Result<(), FalhaNaAgenda> {
+    let codigo = codigo_lido(codigo)?;
+    agenda_em(config)?.dar_nome(codigo, nome).map_err(|erro| {
+        tracing::warn!(erro = %format!("{erro:#}"), "o nome não foi gravado na agenda");
+        FalhaNaAgenda::NaoGravou
+    })
+}
+
+/// Bloqueia ou desbloqueia, e leva a lista à campainha **ao vivo**: quem estava
+/// tocando e passou a estar bloqueado para de tocar como recusado.
+pub(crate) fn bloquear_em(
+    sessao: &crate::Session,
+    config: &str,
+    codigo: &str,
+    bloqueado: bool,
+) -> Result<(), FalhaNaAgenda> {
+    let codigo = codigo_lido(codigo)?;
+    let mut agenda = agenda_em(config)?;
+    agenda.bloquear(codigo, bloqueado).map_err(|erro| {
+        tracing::warn!(erro = %format!("{erro:#}"), "o bloqueio não foi gravado na agenda");
+        FalhaNaAgenda::NaoGravou
+    })?;
+    if let Ok((recepcao, _)) = campainha(sessao) {
+        recepcao.definir_bloqueados(agenda.bloqueados());
+    }
+    Ok(())
+}
+
+/// A lista de bloqueados da agenda, levada à campainha que acabou de subir.
+fn aplicar_os_bloqueados(recepcao: &seele_server::recepcao::Recepcao, config: &str) {
+    match agenda_em(config) {
+        Ok(agenda) => recepcao.definir_bloqueados(agenda.bloqueados()),
+        Err(_) => tracing::warn!(
+            "a sala subiu sem a lista de bloqueados: a agenda não abriu, e quem foi bloqueado \
+             toca"
+        ),
+    }
+}
+
 /// Guarda o estado, para quem perguntar depois, e o anuncia à casca.
 fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
     tracing::info!(?estado, "sala pessoal");
@@ -444,9 +557,10 @@ fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
 )]
 mod a_sala_pessoal {
     use super::{
-        atender_em, desligar, e_a_sala_daqui, encerrar_a_ligacao_em, guardar_se_ainda_subindo,
-        porta_da_sala, recusar_em, registro_de, subir, subir_em, Atendido, EstadoDaSala,
-        FalhaAoAtender, FalhaDaSala, Registro, Subida,
+        atender_em, bloquear_em, contatos_em, dar_nome_em, desligar, e_a_sala_daqui,
+        encerrar_a_ligacao_em, guardar_se_ainda_subindo, meu_codigo_em, porta_da_sala, recusar_em,
+        registro_de, subir, subir_em, Atendido, ContatoNaTela, EstadoDaSala, FalhaAoAtender,
+        FalhaDaSala, FalhaNaAgenda, Registro, Subida,
     };
     use tauri::Manager;
 
@@ -669,6 +783,18 @@ mod a_sala_pessoal {
         (recepcao, porta)
     }
 
+    /// A decisão que chegou a quem ligava, com prazo: uma regressão que deixe
+    /// o toque sem decisão reprova aqui, e não trava a suíte (nenhuma sessão
+    /// vence o toque num teste sem rede).
+    async fn decidido(
+        decisao: tokio::sync::oneshot::Receiver<seele_server::campainha::Desfecho>,
+    ) -> Option<seele_server::campainha::Desfecho> {
+        tokio::time::timeout(std::time::Duration::from_secs(2), decisao)
+            .await
+            .ok()
+            .and_then(Result::ok)
+    }
+
     /// Espera o toque chegar à faixa, e devolve quem toca.
     async fn quem_toca(app: &tauri::App<tauri::test::MockRuntime>) -> String {
         for _ in 0..200 {
@@ -708,7 +834,7 @@ mod a_sala_pessoal {
             })
         );
         assert_eq!(
-            decisao.await.ok(),
+            decidido(decisao).await,
             Some(seele_server::campainha::Desfecho::Atendida),
             "quem ligava não soube que foi atendido"
         );
@@ -734,7 +860,7 @@ mod a_sala_pessoal {
 
         assert_eq!(recusar_em(&app.state::<crate::Session>(), &quem), Ok(()));
         assert_eq!(
-            decisao.await.ok(),
+            decidido(decisao).await,
             Some(seele_server::campainha::Desfecho::Recusada)
         );
         assert_eq!(
@@ -826,6 +952,136 @@ mod a_sala_pessoal {
         .await
         .unwrap();
         desligar(app.handle()).await;
+    }
+
+    /// SEU CÓDIGO é o do dono da sala que esta máquina sobe: o número que toca
+    /// aqui.
+    #[tokio::test]
+    async fn seu_codigo_e_o_do_dono_da_sala_desta_maquina() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let sala = subir_em(config, 0, None).await.unwrap();
+        let dono = sala.recepcao().unwrap().sala().dono;
+        assert_eq!(
+            meu_codigo_em(config),
+            Some(seele_ffi::Codigo::da_chave(&dono).to_string()),
+            "SEU CÓDIGO não é o da sala: quem ligasse para ele não tocaria aqui"
+        );
+        sala.encerrar().await;
+    }
+
+    /// **Bloquear quem está tocando para o toque como recusado** (tarefa 29 da
+    /// F7): a lista vai à campainha ao vivo, e a próxima vez não toca.
+    #[tokio::test]
+    async fn bloquear_quem_esta_tocando_para_o_toque_e_a_proxima_nao_toca() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap().to_owned();
+        let app = app_de_teste();
+        let (recepcao, _) = sala_no_ar(&app, &casa).await;
+        let seele_server::recepcao::Entrada::Toca { decisao, .. } =
+            recepcao.chegou([2; 32], "rafa")
+        else {
+            panic!("a campainha não tocou");
+        };
+        quem_toca(&app).await;
+        let rafa = seele_ffi::Codigo::da_chave(&[2; 32]).to_string();
+
+        assert_eq!(
+            bloquear_em(&app.state::<crate::Session>(), &config, &rafa, true),
+            Ok(())
+        );
+
+        assert_eq!(
+            decidido(decisao).await,
+            Some(seele_server::campainha::Desfecho::Recusada),
+            "quem foi bloqueado enquanto tocava continuou tocando"
+        );
+        assert!(
+            matches!(
+                recepcao.chegou([2; 32], "rafa"),
+                seele_server::recepcao::Entrada::Recusada(_)
+            ),
+            "quem foi bloqueado tocou de novo"
+        );
+        assert_eq!(
+            bloquear_em(&app.state::<crate::Session>(), &config, &rafa, false),
+            Ok(())
+        );
+        assert!(
+            matches!(
+                recepcao.chegou([2; 32], "rafa"),
+                seele_server::recepcao::Entrada::Toca { .. }
+            ),
+            "quem foi desbloqueado não toca"
+        );
+        desligar(app.handle()).await;
+    }
+
+    /// **Quem foi bloqueado continua bloqueado quando o app reabre.** A agenda
+    /// guarda a lista, e a sala a aplica ao subir: sem isso, cada abertura do
+    /// app desbloquearia todo mundo sem dizer nada.
+    #[tokio::test]
+    async fn quem_foi_bloqueado_continua_bloqueado_quando_a_sala_sobe_de_novo() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap().to_owned();
+        seele_ffi::agenda::Agenda::abrir(crate::toque::caminho_da_agenda(&config))
+            .unwrap()
+            .bloquear(seele_ffi::Codigo::da_chave(&[2; 32]), true)
+            .unwrap();
+        let app = app_de_teste();
+
+        subir(app.handle().clone(), subida_de_teste(&casa)).await;
+
+        let (recepcao, _) = super::campainha(&app.state::<crate::Session>()).unwrap();
+        assert!(
+            matches!(
+                recepcao.chegou([2; 32], "rafa"),
+                seele_server::recepcao::Entrada::Recusada(_)
+            ),
+            "a sala subiu sem a lista de bloqueados da agenda"
+        );
+        desligar(app.handle()).await;
+    }
+
+    #[test]
+    fn a_agenda_chega_a_tela_com_o_nome_e_o_bloqueio() {
+        let casa = casa_com_a_chave(4);
+        let config = casa.path().to_str().unwrap();
+        let app = app_de_teste();
+        let rafa = seele_ffi::Codigo::da_chave(&[2; 32]).to_string();
+
+        assert_eq!(dar_nome_em(config, &rafa, "Rafa"), Ok(()));
+        assert_eq!(
+            bloquear_em(&app.state::<crate::Session>(), config, &rafa, true),
+            Ok(())
+        );
+
+        assert_eq!(
+            contatos_em(config),
+            Ok(vec![ContatoNaTela {
+                codigo: rafa,
+                nome: Some("Rafa".into()),
+                apelido: None,
+                visto_em: None,
+                direcao: None,
+                bloqueado: true,
+            }])
+        );
+    }
+
+    #[test]
+    fn um_codigo_que_nao_fecha_nao_entra_na_agenda() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        assert_eq!(
+            bloquear_em(
+                &app.state::<crate::Session>(),
+                casa.path().to_str().unwrap(),
+                "K9P2-CSM7-NBFR-AYQ4",
+                true
+            ),
+            Err(FalhaNaAgenda::CodigoInvalido)
+        );
     }
 
     /// O `connect` confere pelo código desta máquina só a sala desta máquina: um
