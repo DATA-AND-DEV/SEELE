@@ -513,7 +513,7 @@ começar.
 ## 09/10, noite: a ponte, lote C (o arquivo por alça)
 
 - **Três comandos ganham corpo**: `escolher_arquivo`, `guardar_colado` e
-  `descrever_arquivo` (este só no PC). O `enviar_anexo` passa da lote C para
+  `descrever_arquivo` (este só no PC). O `enviar_anexo` passa do lote C para
   a 2.6: ele lê o arquivo da alça e o sobe pela sessão. Ficam 91 a fazer.
 - **As quatro condições da `F4/ponte-no-pc.md`**, cada uma com prova:
   1. o mapa tem teto (16 alças, e 2 imagens coladas, que estão todas na
@@ -536,4 +536,22 @@ começar.
 - **Medido:** a `ponte-web.cjs` com 15 provas; `web.rs` 11. No Chromium, o PC
   carrega limpo com o arraste instalado. **Nove reversões**, cada uma
   reprovando a sua prova.
+
+## 09/10, noite: a ponte, lote D (a saída de som e a tela cheia)
+
+- **Quatro comandos ganham corpo**, só no PC: `saidas`, `saida_escolhida`,
+  `escolher_saida` e `tela_cheia`. Ficam 87 a fazer.
+- **A saída de som**: o `enumerateDevices`, sem os pseudo-aparelhos
+  (`default` e `communications` repetem um de verdade; o padrão é o do mesmo
+  grupo do `default`) e sem os ids vazios de antes da permissão do microfone.
+  Onde não há `setSinkId`, a lista é vazia. A escolha mora na origem; numa
+  sessão, a voz a aplica.
+- **A tela cheia** é a Fullscreen API, pedida dentro do clique; pedir duas
+  vezes não pede de novo, e um pedido recusado é dito sem lançar na casca.
+- **O teste do microfone foi para a 3.3**, porque é o mesmo portão da voz.
+- **A lacuna do Esc**, registrada no plano: ele sai da tela cheia do navegador
+  sem a casca saber, e o modo cinema dela fica ligado. É da casca (F8).
+- **Medido:** a `ponte-web.cjs` com 17 provas, só em Node: a lista de
+  aparelhos e a Fullscreen API não foram exercitadas num Chromium.
+  **Cinco reversões**, cada uma reprovando a sua prova.
 

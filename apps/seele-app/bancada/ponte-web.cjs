@@ -52,7 +52,11 @@ function pagina({
   hash = "",
   gravacaoFalha = false,
   seletor = () => null,
+  aparelhos = [],
+  temSetSinkId = true,
+  telaCheiaFalha = false,
 } = {}) {
+  const telaCheia = { pedidos: 0, saidas: 0, elemento: null };
   const ouvidos = [];
   // Quem a ponte pôs a ouvir no documento (o arraste), à parte dos da janela.
   const doDocumento = new Map();
@@ -75,8 +79,24 @@ function pagina({
     atob,
     innerWidth: largura,
     location: { hash, href: `https://seele.invalid/${hash}` },
+    navigator: { mediaDevices: { enumerateDevices: async () => aparelhos.map((a) => ({ ...a })) } },
+    HTMLMediaElement: temSetSinkId ? class { setSinkId() {} } : class {},
     document: {
-      documentElement: { dataset: {} },
+      get fullscreenElement() {
+        return telaCheia.elemento;
+      },
+      exitFullscreen: async () => {
+        telaCheia.saidas += 1;
+        telaCheia.elemento = null;
+      },
+      documentElement: {
+        dataset: {},
+        requestFullscreen: async () => {
+          telaCheia.pedidos += 1;
+          if (telaCheiaFalha) throw new Error("sem gesto");
+          telaCheia.elemento = janela.document.documentElement;
+        },
+      },
       body: {
         append: (no) => {
           no.naPagina = true;
@@ -161,6 +181,7 @@ function pagina({
     origem,
     doDocumento,
     seletores,
+    telaCheia,
     invoke(comando, args) {
       dentroDaChamada = true;
       try {
@@ -572,6 +593,59 @@ async function oArraste() {
   confere(caso, !textoSegurado, "arrastar texto foi segurado pela ponte, e deixaria de soltar num campo");
 }
 
+/// **A saída de som do PC**: a lista do `enumerateDevices`, sem os
+/// pseudo-aparelhos (`default`, `communications`) e sem os ids vazios que o
+/// navegador dá antes de o microfone ser permitido; o padrão marcado pelo
+/// grupo do `default`. Onde não há `setSinkId`, não há o que escolher, e a
+/// lista é vazia. A escolha mora na origem, como no desktop.
+async function aSaidaDeSom() {
+  const caso = "a saída de som";
+  const aparelhos = [
+    { kind: "audiooutput", deviceId: "default", groupId: "a", label: "Padrão - Alto-falantes" },
+    { kind: "audiooutput", deviceId: "communications", groupId: "b", label: "Comunicações - Fone" },
+    { kind: "audiooutput", deviceId: "falante", groupId: "a", label: "Alto-falantes" },
+    { kind: "audiooutput", deviceId: "fone", groupId: "b", label: "Fone" },
+    { kind: "audioinput", deviceId: "mic", groupId: "b", label: "Microfone" },
+  ];
+  const p = pagina({ aparelhos });
+  const lista = await desfecho(p.invoke("saidas"));
+  confere(caso, igual(lista.ok, [
+    { id: "falante", name: "Alto-falantes", default: true },
+    { id: "fone", name: "Fone", default: false },
+  ]), `a lista saiu ${util.inspect(lista)}`);
+  const semSink = await desfecho(pagina({ aparelhos, temSetSinkId: false }).invoke("saidas"));
+  confere(caso, igual(semSink.ok, []), `sem setSinkId a lista saiu ${util.inspect(semSink)}`);
+  const semPermissao = await desfecho(pagina({ aparelhos: [{ kind: "audiooutput", deviceId: "", groupId: "", label: "" }] }).invoke("saidas"));
+  confere(caso, igual(semPermissao.ok, []), `sem permissão a lista saiu ${util.inspect(semPermissao)}`);
+
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === null, "sem escolha, a saída escolhida não é nula");
+  await p.invoke("escolher_saida", { dispositivo: "fone" });
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === "fone", "a escolha não ficou");
+  await p.invoke("escolher_saida", { dispositivo: null });
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === null, "voltar ao padrão não apagou a escolha");
+  const r = await desfecho(pagina({ gravacaoFalha: true }).invoke("escolher_saida", { dispositivo: "fone" }));
+  confere(caso, r.erro === "NaoGravei", `sem gravar, escolher voltou ${util.inspect(r)}`);
+}
+
+/// **A tela cheia do PC é a do navegador** (a Fullscreen API), no lugar da
+/// janela. Pedida duas vezes não pede de novo; sair só sai se estiver nela; e
+/// um pedido recusado (sem gesto) é dito, e não lança na casca, como no
+/// desktop.
+async function aTelaCheia() {
+  const caso = "a tela cheia";
+  const p = pagina();
+  await p.invoke("tela_cheia", { ligada: true });
+  await p.invoke("tela_cheia", { ligada: true });
+  confere(caso, p.telaCheia.pedidos === 1, `pedir duas vezes pediu ${p.telaCheia.pedidos}`);
+  await p.invoke("tela_cheia", { ligada: false });
+  await p.invoke("tela_cheia", { ligada: false });
+  confere(caso, p.telaCheia.saidas === 1, `sair duas vezes saiu ${p.telaCheia.saidas}`);
+  const q = pagina({ telaCheiaFalha: true });
+  const r = await desfecho(q.invoke("tela_cheia", { ligada: true }));
+  confere(caso, r.ok === null, `um pedido recusado voltou ${util.inspect(r)}`);
+  confere(caso, q.avisos.some(([texto]) => String(texto).includes("tela cheia")), "o pedido recusado não foi dito");
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -589,6 +663,8 @@ async function oArraste() {
     oArquivoPorAlca,
     aImagemColada,
     oArraste,
+    aSaidaDeSom,
+    aTelaCheia,
   ];
   for (const prova of provas) {
     try {

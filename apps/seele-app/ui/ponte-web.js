@@ -237,16 +237,15 @@ const ATENDIDOS_APESAR_DA_HOSPEDAGEM = new Map([
 ]);
 
 const TAREFA_26 = "2.6 (a sessão pelo navegador)";
-const TAREFA_33 = "3.3 (a voz)";
+const TAREFA_33 = "3.3 (a voz, e o teste do microfone fora da sala, que usa o mesmo portão)";
 const TAREFA_34 = "3.4 (a identidade e a entrada)";
 const TAREFA_39 = "3.9 (assistir à tela)";
 const TAREFA_310 = "3.10 (compartilhar a tela pelo PC)";
-const TAREFA_D = "3.1, lote D (o microfone fora da sala, a saída de som e a tela cheia)";
 const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["abrir_teste_de_microfone", TAREFA_D],
+  ["abrir_teste_de_microfone", TAREFA_33],
   ["aceitar_mods", TAREFA_34],
   ["aceite_de_mods", TAREFA_34],
   ["aceites_de_mods", TAREFA_34],
@@ -281,12 +280,11 @@ const AINDA_A_FAZER = new Map([
   ["escolher_microfone", TAREFA_33],
   ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["escolher_saida", TAREFA_D],
   ["escolher_tecla_de_falar", TAREFA_33],
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
   ["estado_da_sessao", TAREFA_MODS],
-  ["estado_do_teste_de_microfone", TAREFA_D],
+  ["estado_do_teste_de_microfone", TAREFA_33],
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["expulsar_pessoa", TAREFA_26],
   ["fontes_de_tela", TAREFA_310],
@@ -304,7 +302,7 @@ const AINDA_A_FAZER = new Map([
   ["mod_request", TAREFA_26],
   ["modo_de_voz_escolhido", TAREFA_33],
   ["mods_instalados", TAREFA_MODS],
-  ["monitorar_o_microfone", TAREFA_D],
+  ["monitorar_o_microfone", TAREFA_33],
   ["mover_pessoa", TAREFA_26],
   ["open_channel", TAREFA_26],
   ["parar_de_compartilhar", TAREFA_310],
@@ -322,8 +320,6 @@ const AINDA_A_FAZER = new Map([
   ["renomear_linha", TAREFA_26],
   ["renomear_server", TAREFA_26],
   ["renomear_voice_room", TAREFA_26],
-  ["saida_escolhida", TAREFA_D],
-  ["saidas", TAREFA_D],
   ["salvar_anexo", TAREFA_26],
   ["send_message", TAREFA_26],
   ["set_muted", TAREFA_33],
@@ -334,7 +330,6 @@ const AINDA_A_FAZER = new Map([
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
-  ["tela_cheia", TAREFA_D],
   ["tirar_icone_do_server", TAREFA_26],
   ["tirar_minha_imagem", TAREFA_26]
 ]);
@@ -542,7 +537,30 @@ const CHAVES_DA_ORIGEM = Object.freeze({
   apelido: "seele.apelido",
   retrato: "seele.retrato",
   previas: "seele.previas",
+  saida: "seele.saida",
 });
+
+/**
+ * As saídas de som do PC, na forma do `PlaybackDevice` do desktop. Sem os
+ * pseudo-aparelhos do navegador (`default` e `communications` repetem um
+ * aparelho de verdade; o padrão é o do mesmo grupo do `default`) e sem os ids
+ * vazios que ele dá antes de o microfone ser permitido. **Onde não há
+ * `setSinkId`** não há como tocar noutra saída, e a lista é vazia: a casca diz
+ * que esta máquina não listou nada, e o som sai pela do sistema.
+ */
+async function saidasDeSom() {
+  if (!("setSinkId" in window.HTMLMediaElement.prototype)) return [];
+  const aparelhos = await navigator.mediaDevices.enumerateDevices();
+  const saidas = aparelhos.filter((aparelho) => aparelho.kind === "audiooutput");
+  const grupoDoPadrao = saidas.find((aparelho) => aparelho.deviceId === "default")?.groupId;
+  return saidas
+    .filter((aparelho) => aparelho.deviceId !== "" && !["default", "communications"].includes(aparelho.deviceId))
+    .map((aparelho, ordem) => ({
+      id: aparelho.deviceId,
+      name: aparelho.label || `SAÍDA ${ordem + 1}`,
+      default: grupoDoPadrao !== undefined && aparelho.groupId === grupoDoPadrao,
+    }));
+}
 
 /**
  * Sem tab nem quebra de linha: o `sanitise` das preferências do desktop
@@ -716,6 +734,26 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   // Uma alça que não está aqui é o caminho que não existe do desktop.
   descrever_arquivo: ({ caminho } = {}) => descreverAlca(String(caminho ?? "")) ?? Promise.reject("NotConnected"),
+  saidas: saidasDeSom,
+  saida_escolhida: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
+  // Grava; numa sessão, a voz (3.3) a aplica com `setSinkId`.
+  escolher_saida: ({ dispositivo } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.saida, dispositivo == null ? null : String(dispositivo))
+      ? null
+      : Promise.reject("NaoGravei"),
+  // **A tela cheia do navegador**, no lugar da janela. Pedida dentro do clique,
+  // sem `await` antes. Como no desktop, não trocar de modo não lança na casca;
+  // aqui ele é dito no console.
+  tela_cheia: async ({ ligada } = {}) => {
+    const dentro = document.fullscreenElement != null;
+    try {
+      if (ligada && !dentro) await document.documentElement.requestFullscreen();
+      if (!ligada && dentro) await document.exitFullscreen();
+    } catch (falha) {
+      console.warn("ponte: a tela cheia não trocou", falha);
+    }
+    return null;
+  },
   // **Numa aba nova, que não leva a página junto.** Sem `await` antes do
   // `open`: o navegador só abre a aba dentro do gesto de quem clicou.
   abrir_no_navegador: ({ url } = {}) => {
