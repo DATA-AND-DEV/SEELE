@@ -503,8 +503,15 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     o `midia` com ponto e alvo.
   - Step 4 `eaa994e6`: as placas na cor do fundo nativo; o guarda **medido**
     (contraste de cada texto contra uma capa branca e uma preta, calado e
-    falando), e não de texto; a capa de quem usa veste só a identidade, e o
-    MUDO, o fone e o SAIR nunca ficam sob ela (uma contradição do §4).
+    falando), e não de texto; a capa de quem usa vestia só a identidade, e o
+    MUDO, o fone e o SAIR nunca ficavam sob ela (uma contradição do §4).
+  - Step 4, refeito `85e58bc2`: a orquestradora recusou a identidade sozinha,
+    pelo pedido do dono (08/10). A capa pinta o fundo da barra do operador
+    inteira, e todo texto e controle dela fica sobre a placa do negro do
+    painel. A bancada mede a cor e a borda contra **três** capas: a branca, a
+    preta e a da cor da própria tinta — sem a terceira, a reversão do MUDO
+    passava, porque o cinza dele ganha contraste sobre as duas pontas (4,11 →
+    4,86 e 4,32). Reversões: MUDO e fone 4,11 → 1; SAIR 15,6 → 1,28.
   - Step 4b `2e1867bd`: a citação `daPessoa`, sem pedido novo e com zero
     bytes no bolso do cartão.
   - Step 5: a redução no Rust `97332b9c`; o uso e o bolso decodificado
