@@ -1101,6 +1101,11 @@ function quemPintaCadaPonto() {
       temaDoServidor: ponto === "servidor.aparencia"
         ? aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), preferencia)?.estado ?? null
         : null,
+      // As contagens da tarefa 5 (`base.js`): os identificadores que a lista
+      // substituída ignora agora, e a região que esta casca não tem.
+      ignorados: typeof identificadoresIgnorados === "undefined" ? 0 : identificadoresIgnorados.get(ponto) ?? 0,
+      semARegiao: typeof aCascaTemARegiao === "function" && !aCascaTemARegiao(ponto),
+      avisadasSemARegiao: typeof regioesAusentesAvisadas === "undefined" ? 0 : regioesAusentesAvisadas.get(ponto) ?? 0,
       midias: midiasDoPonto(ponto),
     };
   });
@@ -1241,6 +1246,21 @@ function frasesDeQuemPinta(linha) {
   const perderam = [...new Set([...linha.perderam, ...antigos.perdem])];
   if (perderam.length) frases.push(`pediram e não receberam: ${perderam.join(", ")}`);
   if (linha.substituivel) frases.push(fraseDaPreferencia(linha));
+  // **O que a casca deixou de fora, contado** (tarefa 5): sem isto, quem
+  // escreve o MOD via a lista dele com gente faltando, ou a contribuição
+  // sumida, e nenhuma palavra sobre o porquê.
+  if (linha.ignorados > 0) {
+    frases.push(
+      `a ordem que o MOD deu cita ${emQuantidade(linha.ignorados, "identificador", "identificadores")} ` +
+        `de quem não está aqui, ou repetido: ${linha.ignorados === 1 ? "ignorado" : "ignorados"}`,
+    );
+  }
+  if (linha.semARegiao) {
+    frases.push(
+      "esta casca não tem este lugar: o que os MODs registram aqui não aparece " +
+        `(regiao-ausente; ${emQuantidade(linha.avisadasSemARegiao, "contribuição avisada", "contribuições avisadas")} nesta sessão)`,
+    );
+  }
   const midia = fraseDaMidia(linha.midias);
   if (midia) frases.push(midia);
   return frases;

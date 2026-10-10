@@ -3037,9 +3037,20 @@ function aCascaTemARegiao(nome) {
 
 /**
  * Quantas contribuições já foram avisadas de que a região delas não existe
- * nesta casca, por ponto — para a aba DIAGNÓSTICO.
+ * nesta casca, por ponto — para a aba DIAGNÓSTICO. Desta sessão: o aviso
+ * mora na contribuição, que sai com ela, e `encerrarOAmbienteDosMods` o zera.
  */
 const regioesAusentesAvisadas = new Map();
+
+/**
+ * **Os identificadores de uma lista substituída que nenhuma linha usa**, por
+ * ponto — quem não está, ou repetido (rascunho §3; tarefa 5, Step 5). Escrito
+ * a cada desenho da lista (`quantosIgnorados`, em `tela-sessao.js`) e lido
+ * pela aba DIAGNÓSTICO. **A medida do agora, e não uma soma**: a lista se
+ * redesenha a cada retrato, e o mesmo identificador ignorado contaria de novo
+ * a cada um.
+ */
+const identificadoresIgnorados = new Map();
 
 /**
  * **Uma região que a casca não tem não some calada** (rascunho §11 e §7.1;
@@ -3837,6 +3848,9 @@ function encerrarOAmbienteDosMods() {
   temaDoServidorEmVigor = null;
   previasDoTema.clear();
   escreverOTemaDaSessao();
+  // As contagens da aba DIAGNÓSTICO são desta sessão, como o que elas contam.
+  regioesAusentesAvisadas.clear();
+  identificadoresIgnorados.clear();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância
   // solta os tocadores dela só quando o executor confirma que parou — e a
