@@ -39,8 +39,11 @@ use std::time::Duration;
 use anyhow::Result;
 use ed25519_dalek::{Signer, SigningKey};
 use seele_proto::control::{ClientMessage, DisconnectReason, ServerMessage};
-use seele_proto::ids::{ChannelId, ClientMessageId};
+use seele_proto::ids::{ChannelId, ClientMessageId, PersonId};
+use seele_server::persistence::channels::Channels;
+use seele_server::persistence::messages::{Messages, PendingMessage, MAX_PAGE};
 use seele_server::persistence::Location;
+use seele_server::server::Event;
 use seele_server::{frame, Daemon, ServerConfig};
 
 const LINE: u32 = 1;
@@ -135,6 +138,8 @@ struct Par {
     _conexao: quinn::Connection,
     envio: quinn::SendStream,
     recebe: quinn::RecvStream,
+    /// Quem o servidor disse, no `Session`, que este par é.
+    pessoa: PersonId,
 }
 
 /// Abre uma conexão e faz o aperto de mão à mão.
@@ -197,7 +202,8 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         },
     )
     .await?;
-    let ServerMessage::Session { .. } = frame::read::<ServerMessage>(&mut recebe).await? else {
+    let ServerMessage::Session { person, .. } = frame::read::<ServerMessage>(&mut recebe).await?
+    else {
         anyhow::bail!("o servidor não mandou Session");
     };
 
@@ -205,7 +211,133 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
         _conexao: conexao,
         envio,
         recebe,
+        pessoa: person,
     })
+}
+
+/// O prazo de segurança de cada espera do teste.
+///
+/// Só para o teste não travar se o servidor travar: nenhuma espera daqui tem
+/// prazo por leitura, cada uma acaba num sinal do servidor, e numa rodada verde
+/// nenhuma chega perto disto. Quem decide são as asserções.
+const SEGURANCA: Duration = Duration::from_secs(120);
+
+/// O carimbo do `Ping` que cada falante manda atrás da rajada.
+const FIM_DA_RAJADA: u64 = 0x5EE1E;
+
+/// O que o servidor fez com um falante depois da rajada.
+#[derive(Debug, PartialEq, Eq)]
+enum Desfecho {
+    /// O `Pong` do `Ping` de depois da rajada voltou: a sessão leu, e mandou
+    /// ao escritor, cada mensagem de antes dele. O fluxo de controle é lido em
+    /// ordem, e a sessão só lê o quadro seguinte depois de pôr o anterior na
+    /// fila de gravação.
+    LeuTudo,
+    /// A sessão se despediu, com este motivo. O que ela não leu ficou com
+    /// quem disse — é o `EstadoDoEnvio::SemResposta` do cliente de verdade, que
+    /// repete com a mesma chave.
+    Desligado(DisconnectReason),
+    /// O fluxo acabou sem despedida.
+    Caiu(String),
+}
+
+/// Manda o `Ping` atrás da rajada e lê o fluxo de volta até o `Pong` dele ou
+/// a despedida — sem prazo por leitura.
+///
+/// Devolve também as chaves que o servidor recusou com `MessageRejected`: a
+/// recusa é dita a quem escreveu, e a mensagem recusada falta com razão.
+async fn desfecho(falante: &mut Par) -> (Desfecho, Vec<u64>) {
+    // Se a sessão já se despediu, o fluxo de ida pode estar parado: a escrita
+    // falha, e a despedida está no fluxo de volta.
+    let _ = frame::write(
+        &mut falante.envio,
+        &ClientMessage::Ping {
+            timestamp: FIM_DA_RAJADA,
+        },
+    )
+    .await;
+    let mut recusadas = Vec::new();
+    loop {
+        match frame::read::<ServerMessage>(&mut falante.recebe).await {
+            Ok(ServerMessage::Pong { timestamp }) if timestamp == FIM_DA_RAJADA => {
+                return (Desfecho::LeuTudo, recusadas);
+            }
+            Ok(ServerMessage::Disconnecting { reason }) => {
+                return (Desfecho::Desligado(reason), recusadas);
+            }
+            Ok(ServerMessage::MessageRejected {
+                client_message_id, ..
+            }) => recusadas.push(client_message_id.0),
+            Ok(_) => {}
+            Err(erro) => return (Desfecho::Caiu(erro.to_string()), recusadas),
+        }
+    }
+}
+
+/// Espera o escritor gravar tudo o que está na fila dele agora.
+///
+/// O escritor é uma fila só, gravada em ordem, e anuncia no barramento cada
+/// mensagem depois do lote dela: o anúncio de uma testemunha posta agora, num
+/// canal só dela, sai depois de gravado tudo o que entrou antes. Sem prazo e
+/// sem contar com o relógio de 200 ms do lote.
+async fn esperar_o_escritor(servidor: &Daemon, autor: PersonId) -> Result<()> {
+    let mut barramento = servidor.server().events.subscribe();
+    let testemunha = {
+        let guarda = servidor.server().persistence.lock().await;
+        Channels::new(&guarda).create_channel("testemunha")?.id
+    };
+    servidor
+        .server()
+        .post(PendingMessage {
+            channel: testemunha,
+            author: autor,
+            author_nickname: "testemunha".into(),
+            body: "o escritor chegou até aqui".into(),
+            replies_to: None,
+            client_message_id: Some(ClientMessageId(u64::MAX)),
+        })
+        .await?;
+    loop {
+        match barramento.recv().await {
+            Ok(Event::MessagePosted(mensagem)) if mensagem.channel == testemunha => return Ok(()),
+            Ok(Event::MessageRejected { channel, .. }) if channel == testemunha => {
+                anyhow::bail!("o escritor recusou a testemunha")
+            }
+            // Ficar para trás aqui só pula anúncios mais velhos que a testemunha.
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                anyhow::bail!("o barramento fechou antes da testemunha")
+            }
+        }
+    }
+}
+
+/// O que PERSISTENCE gravou de cada falante: os números das mensagens dele.
+async fn gravadas_por_falante(servidor: &Daemon) -> Result<Vec<Vec<usize>>> {
+    let mut por_falante = vec![Vec::new(); FALANTES];
+    let mut guarda = servidor.server().persistence.lock().await;
+    let mensagens = Messages::new(&mut guarda);
+    let mut cursor = None;
+    loop {
+        let pagina = mensagens.history(ChannelId(LINE), cursor, MAX_PAGE)?;
+        let Some(ultima) = pagina.last() else {
+            break;
+        };
+        cursor = Some(ultima.id);
+        for mensagem in &pagina {
+            // O corpo começa com o falante e o número, dois dígitos cada.
+            let indice: usize = mensagem.body.get(0..2).expect("falante").parse()?;
+            let numero: usize = mensagem.body.get(2..4).expect("número").parse()?;
+            por_falante
+                .get_mut(indice)
+                .expect("um falante deste teste")
+                .push(numero);
+        }
+    }
+    for numeros in &mut por_falante {
+        numeros.sort_unstable();
+    }
+    Ok(por_falante)
 }
 
 /// Um par que para de ler não pode custar mensagem de quem falou.
@@ -214,6 +346,11 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
 /// certa é que ou ele lê todas, ou ele é desligado com um motivo. O que não
 /// pode acontecer é a terceira coisa — seguir conectado, calado, com um buraco
 /// no meio da conversa que ninguém dos dois lados consegue nomear.
+///
+/// A mesma regra vale para quem fala: tudo o que o servidor leu de um falante
+/// está gravado, em ordem, e o que ele não leu é de um falante que ele
+/// desligou dizendo `FellBehind`. Pedir as 1 160 gravadas sempre era pedir que
+/// nenhum falante ficasse para trás, e sob carga eles ficam (lote Y da F5).
 #[tokio::test(flavor = "multi_thread")]
 async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
     let (endereco, servidor) = server().await?;
@@ -227,6 +364,12 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
         },
     )
     .await?;
+    // O `Pong` diz que a sessão já pôs o ouvinte no canal: daqui em diante,
+    // tudo o que for gravado nele é dele também.
+    let (entrou, _) = tokio::time::timeout(SEGURANCA, desfecho(&mut ouvinte))
+        .await
+        .expect("o ouvinte não teve o Pong: o servidor travou");
+    assert_eq!(entrou, Desfecho::LeuTudo, "o ouvinte não entrou no canal");
 
     // E agora a sala inteira fala de uma vez.
     let mut falantes = Vec::new();
@@ -252,41 +395,117 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
 
     let ditas = FALANTES * CADA;
 
-    // Tempo de sobra para o lote gravar (200 ms por volta) e para o barramento
-    // rodar inteiro. É aqui que a sessão do ouvinte fica presa escrevendo.
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // **O que o servidor fez com cada falante**, por sinal dele e não por
+    // relógio. Era um `sleep` de 3 s e o contador lido uma vez, como se o que
+    // faltasse fosse o lote que ainda não tinha gravado. Medido (lote Y da
+    // F5): sob carga, o que falta nunca chega. O barramento passa à frente da
+    // sessão de um falante também — dois lotes seguidos anunciam mais de 1 024
+    // mensagens antes de ela voltar a ler o barramento —, ela se despede com
+    // `FellBehind`, e o resto do que o falante mandou fica sem ler. Em cinco
+    // rodadas reprovadas, toda mensagem faltando era a cauda de um falante
+    // desligado assim, e a contagem não subia mais em 15 s.
+    let desfechos = tokio::time::timeout(SEGURANCA, async {
+        let mut desfechos = Vec::new();
+        for falante in &mut falantes {
+            desfechos.push(desfecho(falante).await);
+        }
+        desfechos
+    })
+    .await
+    .expect("um falante não teve nem o Pong nem a despedida: o servidor travou");
 
-    // O ouvinte volta a ler. Conta o que chega até o fluxo secar.
-    let mut chegaram = 0_usize;
-    let mut desligado = None;
-    let prazo = tokio::time::Instant::now() + Duration::from_secs(20);
-    while chegaram < ditas && tokio::time::Instant::now() < prazo {
-        match tokio::time::timeout(
-            Duration::from_secs(2),
-            frame::read::<ServerMessage>(&mut ouvinte.recebe),
-        )
+    // E o escritor gravou tudo o que as sessões puseram na fila dele.
+    let autor = falantes.first().expect("há falantes").pessoa;
+    tokio::time::timeout(SEGURANCA, esperar_o_escritor(&servidor, autor))
         .await
-        {
-            Ok(Ok(ServerMessage::MessageReceived { body, .. })) if body.len() >= CORPO - 4 => {
-                chegaram += 1;
-            }
-            Ok(Ok(ServerMessage::Disconnecting { reason })) => {
-                desligado = Some(reason);
-                break;
-            }
-            Ok(Ok(_)) => {}
-            Ok(Err(erro)) => {
-                println!("o fluxo terminou com {chegaram}/{ditas}: {erro}");
-                break;
-            }
-            Err(_) => break,
+        .expect("o escritor não chegou à testemunha: o servidor travou")?;
+
+    // **Nada some calado.** Para cada falante: o que o servidor gravou é o
+    // começo do que ele disse, sem buraco no meio, sem repetir; quem teve o
+    // `Pong` teve tudo gravado; e quem ficou com mensagem sem gravar foi
+    // desligado dizendo por quê.
+    let gravadas_de = gravadas_por_falante(&servidor).await?;
+    for (indice, ((desfecho, recusadas), numeros)) in desfechos.iter().zip(&gravadas_de).enumerate()
+    {
+        let recusadas: Vec<usize> = recusadas
+            .iter()
+            .filter_map(|chave| usize::try_from(chave.checked_sub(1)?).ok())
+            .collect();
+        let mut sem_repetir = numeros.clone();
+        sem_repetir.dedup();
+        assert_eq!(
+            &sem_repetir, numeros,
+            "o falante {indice:02} teve mensagem gravada duas vezes: {numeros:?}"
+        );
+        let ate = numeros.last().map_or(0, |ultimo| ultimo + 1);
+        let buracos: Vec<usize> = (0..ate)
+            .filter(|numero| !numeros.contains(numero) && !recusadas.contains(numero))
+            .collect();
+        assert!(
+            buracos.is_empty(),
+            "o servidor pulou mensagens do falante {indice:02} e gravou as de depois: \
+             faltam {buracos:?} — perder do meio não tem despedida que explique"
+        );
+        let faltam: Vec<usize> = (0..CADA)
+            .filter(|numero| !numeros.contains(numero) && !recusadas.contains(numero))
+            .collect();
+        match desfecho {
+            Desfecho::LeuTudo => assert!(
+                faltam.is_empty(),
+                "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada: \
+                 a sessão do falante {indice:02} leu todas e faltam {faltam:?}"
+            ),
+            Desfecho::Desligado(DisconnectReason::FellBehind) => {}
+            outro => assert!(
+                faltam.is_empty(),
+                "o falante {indice:02} ficou sem {faltam:?} gravadas e o servidor não disse que \
+                 ficou para trás: {outro:?}"
+            ),
         }
     }
 
+    // A contagem de PERSISTENCE é a soma do que se leu acima.
+    let gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
+    let somadas: usize = gravadas_de.iter().map(Vec::len).sum();
+    assert_eq!(
+        gravadas, somadas as u64,
+        "a contagem do canal e as mensagens lidas dele discordam"
+    );
+
+    // O ouvinte volta a ler, até ter tudo o que foi gravado ou a despedida. Sem
+    // prazo por leitura: um silêncio não distingue «acabou» de «esta linha ficou
+    // fora de cena».
+    let mut chegaram = 0_usize;
+    let mut desligado = None;
+    tokio::time::timeout(SEGURANCA, async {
+        while chegaram < somadas {
+            match frame::read::<ServerMessage>(&mut ouvinte.recebe).await {
+                Ok(ServerMessage::MessageReceived { body, .. }) if body.len() >= CORPO - 4 => {
+                    chegaram += 1;
+                }
+                Ok(ServerMessage::Disconnecting { reason }) => {
+                    desligado = Some(reason);
+                    break;
+                }
+                Ok(_) => {}
+                Err(erro) => {
+                    println!("o fluxo terminou com {chegaram}/{somadas}: {erro}");
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .expect("o ouvinte não teve nem tudo nem a despedida: o servidor travou");
+
     let perdidos = servidor.server().atrasos.eventos();
+    let desligados = desfechos
+        .iter()
+        .filter(|(desfecho, _)| matches!(desfecho, Desfecho::Desligado(_)))
+        .count();
     println!(
-        "ditas {ditas}, chegaram {chegaram}, perdidos no barramento {perdidos}, \
-         desligado {desligado:?}"
+        "ditas {ditas}, gravadas {gravadas}, chegaram {chegaram}, perdidos no barramento \
+         {perdidos}, ouvinte desligado {desligado:?}, falantes desligados {desligados}"
     );
 
     // Uma das duas, e nunca a terceira: ou chegou tudo, ou o servidor disse, com
@@ -294,29 +513,20 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // a ler, seguir conectado, e faltar conversa no meio sem uma palavra de
     // nenhum dos dois lados.
     assert!(
-        chegaram == ditas || desligado == Some(DisconnectReason::FellBehind),
-        "pendência nº 1: {chegaram} de {ditas} chegaram e o servidor não disse nada — \
+        chegaram == somadas || desligado == Some(DisconnectReason::FellBehind),
+        "pendência nº 1: {chegaram} de {somadas} chegaram e o servidor não disse nada — \
          {perdidos} eventos morreram no barramento"
     );
 
     // E o que houve ficou contado. Desligamento sem número por trás seria a
     // mesma cegueira com outra roupa: ninguém sabe se aconteceu uma vez ou mil.
-    if desligado.is_some() {
+    if desligado.is_some() || desligados > 0 {
         assert!(
             perdidos > 0,
             "a sessão foi encerrada por ter ficado para trás e o contador marcou zero"
         );
         assert!(servidor.server().atrasos.sessoes() > 0);
     }
-
-    // O que se perdeu foi a **entrega**, e não a mensagem: tudo o que os
-    // falantes disseram está em PERSISTENCE, que é o que faz de reconectar um
-    // conserto e não um consolo.
-    let gravadas = servidor.quantas_mensagens(ChannelId(LINE)).await?;
-    assert_eq!(
-        gravadas, ditas as u64,
-        "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada"
-    );
 
     servidor.shutdown();
     Ok(())
