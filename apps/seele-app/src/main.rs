@@ -4252,15 +4252,24 @@ async fn mods_instalados(
                 .iter()
                 .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash);
             ModNaTela {
-                // O escolhido é um identificador, e a marca vai só no pacote
-                // ligado dele: o outro conteúdo do mesmo MOD não pinta nada.
-                pinta: enabled && quem_pinta.as_deref() == Some(instalado.id.as_str()),
+                pinta: pinta_o_servidor(enabled, quem_pinta.as_deref(), &instalado.id),
                 enabled,
                 exigencia_vale_na_rede,
                 instalado,
             }
         })
         .collect())
+}
+
+/// **Se este pacote é o que pinta o servidor desta janela** — o
+/// [`ModNaTela::pinta`] (D-api-5; tarefa 17f.0 da F3).
+///
+/// O escolhido que o servidor guarda é um identificador, e a marca vai só no
+/// pacote **ligado** dele: com dois conteúdos do mesmo MOD no disco, o outro
+/// não pinta nada. Uma função pura para o teste de unidade ver o lado do
+/// Rust: a bancada da gestão responde o `mods_instalados` por conta própria.
+fn pinta_o_servidor(ligado: bool, quem_pinta: Option<&str>, id: &str) -> bool {
+    ligado && quem_pinta == Some(id)
 }
 
 /// Um pacote guardado nesta máquina, como a manutenção local o desenha.
@@ -10838,7 +10847,7 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
 
 #[cfg(test)]
 mod a_tela_le_o_que_o_rust_manda {
-    use super::ModNaTela;
+    use super::{pinta_o_servidor, ModNaTela};
     use seele_ffi::mods::ModInstalado;
     use std::collections::BTreeSet;
 
@@ -10888,6 +10897,29 @@ mod a_tela_le_o_que_o_rust_manda {
     /// A regra é sobre a **forma** do defeito, e não sobre o nome `instalado`:
     /// ler `x.<meio>.<folha>` em que `<meio>` não é chave e `<folha>` é, é
     /// exatamente atravessar um invólucro que o `flatten` apagou.
+    /// **O `pinta` nos dois valores** (tarefa 17f.0 da F3): o pacote ligado do
+    /// escolhido pinta; o outro MOD ligado, o pacote desligado do mesmo MOD e
+    /// um servidor sem escolhido, não.
+    #[test]
+    fn so_o_pacote_ligado_do_escolhido_pinta_o_servidor() {
+        assert!(
+            pinta_o_servidor(true, Some("seele/estilo"), "seele/estilo"),
+            "o pacote ligado do escolhido tem de pintar"
+        );
+        assert!(
+            !pinta_o_servidor(true, Some("seele/estilo"), "seele/noite"),
+            "outro MOD ligado não pinta"
+        );
+        assert!(
+            !pinta_o_servidor(false, Some("seele/estilo"), "seele/estilo"),
+            "o outro conteúdo do mesmo MOD, desligado, não pinta"
+        );
+        assert!(
+            !pinta_o_servidor(true, None, "seele/estilo"),
+            "sem escolhido, ninguém pinta"
+        );
+    }
+
     #[test]
     fn a_pagina_nao_atravessa_um_involucro_que_o_flatten_apagou() {
         let chaves = chaves_serializadas();
