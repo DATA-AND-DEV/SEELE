@@ -1769,12 +1769,29 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// O app, com o runtime falso. Vazado: o `connect` corre numa tarefa
     /// própria, e o `State` que ele recebe empresta do app.
+    ///
+    /// **E sempre na casa temporária** (R1-I2 da re-revisão do E54). A casa
+    /// era montada por cada teste, e o teste do M1 esqueceu: rodado sozinho,
+    /// o `config_dir` dele caía em `$HOME/.config/seele`, e o `connect` lia a
+    /// identidade e o retrato de quem roda a bateria e gravava pinos de
+    /// `127.0.0.1` ao lado dos dela. Montada aqui, nenhum teste do módulo pode
+    /// esquecer; e a casa que o app vai usar é conferida antes de qualquer
+    /// `connect`, para um caminho novo do `config_dir` reprovar em vez de
+    /// escrever na casa de alguém.
     fn app() -> &'static AppHandle<MockRuntime> {
+        let casa = casa();
         let app = mock_builder()
             .manage(Session::default())
             .build(mock_context(noop_assets()))
             .expect("o app falso não montou");
         let handle = app.handle().clone();
+        let do_app = super::config_dir(&handle);
+        assert_eq!(
+            std::path::Path::new(&do_app),
+            casa,
+            "a casa do app falso não é a temporária deste módulo: um `connect` daqui escreveria \
+             a identidade e os pinos em {do_app}"
+        );
         Box::leak(Box::new(app));
         Box::leak(Box::new(handle))
     }
@@ -2344,6 +2361,10 @@ mod a_entrada_velha_que_chega_tarde {
     /// ficava no slot e presente no servidor deixado, e toda entrada seguinte
     /// recebia `AlreadyConnected` até o app fechar.
     async fn a_nova_falha_no_meio_da_velha() -> Vec<String> {
+        // O retrato é a prova de que a velha passou da primeira conferência
+        // (R1-I2 da re-revisão: sem ele, o teste dependia de outro do módulo
+        // tê-lo gravado antes).
+        guardar_um_retrato();
         let (velho, servidor_velho) = servidor("Velho").await;
         let (novo, _servidor_novo) = servidor("Novo").await;
         let app = app();
@@ -2384,18 +2405,56 @@ mod a_entrada_velha_que_chega_tarde {
         let _ = soltar_os_mods.send(());
         quem_segura.join().expect("quem segurava os MODs caiu");
         let da_nova = quando_terminar(nova, Duration::from_secs(10)).await;
-        assert!(da_nova.is_err(), "a nova a uma porta que não existe entrou");
         let da_velha = quando_terminar(velha, Duration::from_secs(10)).await;
 
-        // A janela larga a velha, se ela voltou entrando.
-        if let Ok(entrada) = &da_velha {
-            let _ = super::soltar_a_entrada_em(&sessao, entrada.geracao);
+        // **A ordem foi a forçada** (R1-M5 da re-revisão). A nova falha pela
+        // porta que não existe, e não por `AlreadyConnected`: chegando ao slot
+        // depois de a velha gravá-lo, a recusa seria essa, a janela soltaria a
+        // velha pela geração ainda de pé, e o teste passaria sem medir nada.
+        match &da_nova {
+            Ok(_) => vermelhos.push("a nova a uma porta que não existe entrou".to_owned()),
+            Err(falha) if falha.falha.error == super::ConnectionError::AlreadyConnected => {
+                vermelhos.push(
+                    "a nova recebeu `AlreadyConnected`: chegou ao slot depois de a velha gravá-lo, \
+                     e a ordem não foi a forçada"
+                        .to_owned(),
+                );
+            }
+            Err(_) => {}
         }
+        // A velha cai na segunda conferência dela, marcada como substituída.
+        match &da_velha {
+            Ok(entrada) => vermelhos.push(format!(
+                "a velha voltou como entrada (geração {}) com a geração da nova de pé",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da velha não vem marcada como substituída: {dita}"
+                    ));
+                }
+            }
+        }
+        // O slot fica vazio sem pedido nenhum da janela.
         if let Ok(conexao) = sessao.connection() {
             vermelhos.push(format!(
-                "a velha ficou órfã no slot ({}): a janela a largou e o Rust não a soltou",
+                "a velha ficou no slot ({}) sem a janela pedir nada",
                 conexao.snapshot().server
             ));
+        }
+        // E o que a janela faz em seguida, para o vermelho dizer a
+        // consequência: ela larga a velha que voltou entrando, pela geração
+        // dela, que já não é a de pé.
+        if let Ok(entrada) = &da_velha {
+            let _ = super::soltar_a_entrada_em(&sessao, entrada.geracao);
+            if let Ok(conexao) = sessao.connection() {
+                vermelhos.push(format!(
+                    "a velha ficou órfã no slot ({}): a janela a largou e o Rust não a soltou",
+                    conexao.snapshot().server
+                ));
+            }
         }
         let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
         if no_velho != 0 {
