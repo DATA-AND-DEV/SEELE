@@ -109,3 +109,5 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# O `test-util`, para o `#[tokio::test(start_paused = true)]` do teto do lote.
+tokio = { version = "1.53.1", features = ["test-util"] }
