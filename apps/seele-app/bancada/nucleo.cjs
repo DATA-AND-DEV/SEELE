@@ -218,6 +218,15 @@ const TEMAS = {
         sair: alcancado(document.getElementById('operador-sair')),
         porta: alcancado(porta),
         resto: alcancado(document.querySelector('#tela-sessao textarea')),
+        // **Coberto, e não só inerte**: um nó inerte não entra no teste de
+        // clique, então quem recebe o clique no centro dele precisa ser o
+        // modal — o véu ou a caixa —, e não o que estiver por baixo.
+        restoCoberto: ['#tela-sessao textarea', '#lista-linhas'].map((seletor) => {
+          const el = document.querySelector(seletor);
+          if (!el || !el.getClientRects().length) return null;
+          const r = el.getBoundingClientRect();
+          return Boolean(document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 20))?.closest('.camada-de-mod'));
+        }).filter((v) => v !== null),
         cruzaBarra: Boolean(caixa && barra?.getClientRects().length && cruza(caixa.getBoundingClientRect(), barra.getBoundingClientRect())),
         cruzaPorta: Boolean(caixa && porta?.getClientRects().length && cruza(caixa.getBoundingClientRect(), porta.getBoundingClientRect())),
         rola: Boolean(corpo && corpo.scrollHeight > corpo.clientHeight),
@@ -230,6 +239,7 @@ const TEMAS = {
     assert.deepEqual({ mudo: largo.mudo, fone: largo.fone, sair: largo.sair }, { mudo: 'sim', fone: 'sim', sair: 'sim' },
       `a 1400, com o modal aberto, a barra do operador não está alcançável: ${JSON.stringify(largo)}`);
     assert.equal(largo.resto, 'inerte', `a 1400, o resto da sessão escapou do modal: ${JSON.stringify(largo)}`);
+    assert.ok(largo.restoCoberto.length >= 2 && largo.restoCoberto.every(Boolean), `a 1400, o resto da sessão não ficou sob o modal: ${JSON.stringify(largo)}`);
     assert.deepEqual({ cruzaBarra: largo.cruzaBarra, rola: largo.rola, dentroDaJanela: largo.dentroDaJanela }, { cruzaBarra: false, rola: true, dentroDaJanela: true },
       `a 1400, o diálogo alto cruza a barra, não rola por dentro, ou sai da janela: ${JSON.stringify(largo)}`);
     // O Tab fica no diálogo, e o Esc o fecha.
@@ -250,6 +260,7 @@ const TEMAS = {
     const estreito = await medirOModal();
     assert.equal(estreito.porta, 'sim', `a 900, com o modal aberto, a porta da gaveta não está alcançável: ${JSON.stringify(estreito)}`);
     assert.equal(estreito.resto, 'inerte', `a 900, o resto da sessão escapou do modal: ${JSON.stringify(estreito)}`);
+    assert.ok(estreito.restoCoberto.length >= 1 && estreito.restoCoberto.every(Boolean), `a 900, o resto da sessão não ficou sob o modal: ${JSON.stringify(estreito)}`);
     assert.deepEqual({ cruzaPorta: estreito.cruzaPorta, rola: estreito.rola, dentroDaJanela: estreito.dentroDaJanela }, { cruzaPorta: false, rola: true, dentroDaJanela: true },
       `a 900, o diálogo cruza a porta da gaveta, não rola, ou sai da janela: ${JSON.stringify(estreito)}`);
     await page.click('#tela-sessao .linha-canais');
@@ -258,6 +269,7 @@ const TEMAS = {
     assert.deepEqual({ mudo: gavetaAberta.mudo, sair: gavetaAberta.sair }, { mudo: 'sim', sair: 'sim' },
       `a 900, com a gaveta aberta e o modal aberto, o MUDO ou o SAIR não está alcançável: ${JSON.stringify(gavetaAberta)}`);
     assert.equal(gavetaAberta.cruzaBarra, false, `a 900, o diálogo cruza a barra da gaveta aberta: ${JSON.stringify(gavetaAberta)}`);
+    assert.ok(gavetaAberta.restoCoberto.length >= 2 && gavetaAberta.restoCoberto.every(Boolean), `a 900, a gaveta aberta escapou do modal fora da barra: ${JSON.stringify(gavetaAberta)}`);
     await page.setViewportSize({ width: 1400, height: 900 });
 
     assert.deepEqual(errors, []);
