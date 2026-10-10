@@ -409,7 +409,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     for (indice, falante) in falantes.iter_mut().enumerate() {
         for numero in 0..CADA {
             let corpo = format!("{indice:02}{numero:02}").repeat(CORPO / 4);
-            frame::write(
+            let escrita = frame::write(
                 &mut falante.envio,
                 &ClientMessage::SendMessage {
                     channel: ChannelId(LINE),
@@ -418,7 +418,15 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
                     client_message_id: ClientMessageId(u64::try_from(numero).expect("cabe") + 1),
                 },
             )
-            .await?;
+            .await;
+            // A escrita que falha no meio da rajada é a de um falante que o
+            // servidor já desligou: o resto dele fica com ele, e é o desfecho,
+            // lido logo abaixo, que diz se houve despedida. Sair com o erro
+            // aqui reprovaria pelo transporte um desligamento que o teste aceita
+            // (M4 da revisão do lote Y).
+            if escrita.is_err() {
+                break;
+            }
         }
     }
 
