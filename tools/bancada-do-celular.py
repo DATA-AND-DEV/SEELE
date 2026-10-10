@@ -1340,6 +1340,70 @@ def superficies_de_mod(pg: Page) -> list[str]:
     return falhas
 
 
+def operador_barra(pg: Page) -> list[str]:
+    """A região `operador.barra` no alto de AJUSTES, abaixo de SEU PERFIL (F3,
+    tarefa 5, passo 8b; os critérios são dela). Tudo pelo roteador, como um MOD:
+    1. uma contribuição marcada aparece dentro de `#operador-mods`, e ela mora
+       em AJUSTES, abaixo de SEU PERFIL;
+    2. 16 linhas longas (dentro dos 64 nós de um cartão) deixam a região no teto,
+       rolando por dentro;
+    3. com elas, e com nós deslocados (`estilo.mover`, até ±512 px) do canto da
+       região até o centro de MODS DESTE SERVIDOR, a entrada da gestão fica
+       inteira na janela e recebe o toque."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(400)
+    pg.evaluate(MOD_DE_PE)
+    contribuir = """(conteudo) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'operador.barra', modo: 'adicionar', conteudo } })
+        .then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))"""
+    revogar = "(handle) => __pedirAoProduto({ tipo: 'revogar-contribuicao', handle })"
+    caixa = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const b = e.getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height }; }"""
+
+    marcada = pg.evaluate(contribuir, [{"forma": "texto", "chave": "marca", "dentro": "MARCA DA BANCADA"}])
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""(caixa) => { const c = new Function('s', 'return (' + caixa + ')(s)');
+        const o = document.getElementById('operador-mods');
+        return { dentro: o.textContent.includes('MARCA DA BANCADA'), naAjustes: !!o.closest('#tela-server'), regiao: c('#operador-mods'), perfil: c('.cel-perfil') }; }""", caixa)
+    if not visto["dentro"] or not visto["naAjustes"]:
+        falhas.append(f"a contribuição marcada não aparece em #operador-mods, dentro de AJUSTES: {visto}")
+    elif visto["regiao"] is None or visto["perfil"] is None or visto["regiao"]["top"] < visto["perfil"]["bottom"] - 1:
+        falhas.append(f"a região não fica abaixo de SEU PERFIL: {visto['regiao']} contra {visto['perfil']}")
+    pg.evaluate(revogar, marcada["valor"]["handle"])
+
+    linhas = "Array.from({ length: 16 }, (_, i) => ({ forma: 'texto', chave: `l${i}`, dentro: `linha ${i} `.repeat(24) }))"
+    grande = pg.evaluate(f"(contribuir) => (new Function('c', 'return (' + contribuir + ')(c)'))({linhas})", contribuir)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    canto, alvo = pg.evaluate(caixa, "#operador-mods"), pg.evaluate(caixa, "#secao-mods")
+    if canto is None or alvo is None:
+        return falhas + [f"sem a região ou sem a entrada da gestão à vista: {canto} {alvo}"]
+    limite = lambda n: max(-512, min(512, round(n)))
+    mirado = {"forma": "texto", "chave": "mirado", "dentro": "█" * 6,
+              "estilo": {"mover": {"x": limite(alvo["left"] + alvo["width"] / 2 - canto["left"] - 8),
+                                   "y": limite(alvo["top"] + alvo["height"] / 2 - canto["top"] - 8)}}}
+    pg.evaluate(revogar, grande["valor"]["handle"])
+    pg.evaluate(f"(contribuir) => (new Function('c', 'return (' + contribuir + ')(c)'))([{__import__('json').dumps(mirado)}, ...{linhas}])", contribuir)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => { const o = document.getElementById('operador-mods'); const g = document.getElementById('secao-mods'); const b = g.getBoundingClientRect();
+        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { altura: Math.round(o.getBoundingClientRect().height), rola: o.scrollHeight > o.clientHeight,
+                 gestao: [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)],
+                 inteira: b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth,
+                 acima: b.bottom <= document.querySelector('.voz-celular').getBoundingClientRect().top,
+                 toque: !!noCentro && g.contains(noCentro) }; }""")
+    if visto["altura"] != 96 or not visto["rola"]:
+        falhas.append(f"o conteúdo grande não deixou a região no teto de 96, rolando por dentro: {visto}")
+    if not visto["inteira"] or not visto["acima"]:
+        falhas.append(f"com o conteúdo grande, a entrada da gestão de MODs saiu da vista: {visto['gestao']}")
+    elif not visto["toque"]:
+        falhas.append("um nó do MOD, deslocado até o centro da gestão de MODs, a cobre")
+    return falhas
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1717,6 +1781,8 @@ CASOS: dict[str, Caso] = {
     "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
     # As superfícies de MOD acima da faixa e das abas (Tarefa 11; F3, 5d).
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
+    # A região operador.barra no alto de AJUSTES (F3, passo 8b).
+    "operador-barra": Caso(levar=operador_barra, medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
