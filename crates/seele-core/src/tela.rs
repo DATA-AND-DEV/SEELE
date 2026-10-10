@@ -2019,6 +2019,32 @@ pub(crate) mod tests {
     /// acrescentaria maneiras de o teste falhar que não têm a ver com a
     /// pergunta.
     pub(crate) async fn par() -> (quinn::Connection, quinn::Connection) {
+        montar_par(None).await
+    }
+
+    /// [`par`], com o prazo de ociosidade do QUIC escolhido por quem chama,
+    /// nas duas pontas.
+    ///
+    /// **O padrão do `quinn` é um prazo que ninguém escreveu**: 30 s sem
+    /// pacote nenhum e a conexão cai, e quem espera um fluxo lê «timed out».
+    /// Para quem manda logo depois do aperto, isso nunca aparece. Para quem
+    /// arma o codificador depois do aperto, aparece: ver
+    /// `crate::bomba::tests::par_paciente`.
+    pub(crate) async fn par_com_ociosidade(
+        ociosidade: Duration,
+    ) -> (quinn::Connection, quinn::Connection) {
+        let mut transporte = quinn::TransportConfig::default();
+        transporte.max_idle_timeout(Some(
+            ociosidade
+                .try_into()
+                .expect("uma ociosidade que o QUIC aceita"),
+        ));
+        montar_par(Some(Arc::new(transporte))).await
+    }
+
+    async fn montar_par(
+        transporte: Option<Arc<quinn::TransportConfig>>,
+    ) -> (quinn::Connection, quinn::Connection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         let certificado =
@@ -2034,9 +2060,12 @@ pub(crate) mod tests {
             .with_single_cert(cadeia.clone(), chave.into())
             .expect("config do servidor");
         tls_servidor.alpn_protocols = vec![b"seele-test".to_vec()];
-        let servidor = quinn::ServerConfig::with_crypto(Arc::new(
+        let mut servidor = quinn::ServerConfig::with_crypto(Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
         ));
+        if let Some(transporte) = &transporte {
+            servidor.transport_config(Arc::clone(transporte));
+        }
 
         let escuta = quinn::Endpoint::server(servidor, SocketAddr::from(([127, 0, 0, 1], 0)))
             .expect("escutar");
@@ -2051,9 +2080,13 @@ pub(crate) mod tests {
 
         let mut cliente =
             quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).expect("cliente");
-        cliente.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        let mut config_do_cliente = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls_cliente).expect("quic"),
-        )));
+        ));
+        if let Some(transporte) = transporte {
+            config_do_cliente.transport_config(transporte);
+        }
+        cliente.set_default_client_config(config_do_cliente);
 
         let aceitando = tokio::spawn(async move {
             let conexao = escuta

@@ -9216,7 +9216,10 @@ mod tests {
         let Some(biblioteca) = biblioteca_de_teste() else {
             return;
         };
-        let (saida, entrada) = crate::tela::tests::par().await;
+        // O par paciente, e não o `par`: a bomba arma depois do aperto, e o
+        // prazo de ociosidade do QUIC não pode ser menor que a paciência com
+        // ela. Ver `crate::bomba::tests::par_paciente`.
+        let (saida, entrada) = crate::bomba::tests::par_paciente().await;
         let escoadouro = crate::bomba::Escoadouro::nova(saida);
         let tela = ScreenId(0x00C0_FFEE);
 
@@ -9236,9 +9239,8 @@ mod tests {
         });
         let escoando = escoando.expect("quem escoa não foi chamado");
 
-        let mut recepcao = crate::tela::Recepcao::aceitar(&entrada)
-            .await
-            .expect("aceitar o fluxo da tela");
+        let mut recepcao =
+            crate::bomba::tests::aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
         assert_eq!(
             recepcao.cabecalho().screen,
             tela,
