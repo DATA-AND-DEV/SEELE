@@ -659,6 +659,25 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   migração apagando o `mod_data`, o quintal lido pelo hash, e a primeira
   abertura levando o banco em vez de copiá-lo. As migrações 1 a 13 de hoje são
   as da v0.15.1, no SQL e na descrição (comparadas uma a uma).
-- **Esperam:** a M3 (tarefa 11, o Step 4: o dono rodar a campanha), as
-  tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da tarefa 9 (a 7d) e
-  o Step 3 da tarefa 7 (a 11).
+- **O caso da pasta da 0.15.1 no Step 5b da tarefa 13** `b46ce9e7`, e a
+  conferência da D-api-4 aprovada pela orquestradora `28cd201a`: medido com a
+  pasta, a coluna `api` diz zero antes da subida do servidor (o
+  `preencher_as_apis` roda dentro do `Daemon::bind`), então a conferência lê a
+  API pelo pacote, numa regra só com o servidor (`api_do_pacote`).
+- **A `versao/0.16` (`c89399db`) trazida** `5ddef0a7`, sem conflito; as doze
+  bancadas de Node puro e as seis de navegador da F3 passam.
+- **Tarefa 16, o escopo de um pedido** `dcd6f287`: num canal, o pedido de MOD
+  confere a leitura e a escrita do canal (`pode_no_canal`). Medido antes, com
+  o mesmo teste, na 0.16 e numa cópia da `linha/0.15` em `40066a7c`: o defeito
+  estava nas duas, e nenhuma versão o alcançava — nada grava o papel mínimo de
+  um canal. A 0.15.2 não leva o conserto (pendência 62). Um guarda de texto
+  reprova o dia em que algo gravar. Quatro reversões; a conformidade da ponte
+  e do MOD de referência verde. O rascunho (§8) e o guia (`aoPedir`) dizem o
+  `write` por escopo.
+- **O 8b foi feito pela F8** (`1f09c7ba` e `d1773fd6`, no `0.16/celular`): do
+  lado da F3 falta o `aplicarARegiao` lendo a declaração dela e a bancada com o
+  guarda 11, depois que o `0.16/celular` integrar.
+- **Esperam:** a M3 (depois da décima segunda integração, o dono a roda da
+  `versao/0.16`), as tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da
+  tarefa 9 (a 7d), o Step 3 da tarefa 7 (a 11), e a 15 (liberada, depois da
+  16).

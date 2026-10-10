@@ -994,9 +994,9 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
    pedido de escopo de servidor, e o `aoPedir` o recebe com `channel: null`.
    Um dado que é do servidor (o perfil, o tema) é pedido com 0; um dado que é
    de um canal (a campanha da MESA), com o canal.
-2. **A permissão de escrita é definida por escopo** (hoje o `write` do
-   contexto é `may(person, WriteChannel)` global, qualquer que seja o canal,
-   `pedidos.rs:203-205` [c]):
+2. **A permissão de escrita é definida por escopo** (feito em 10/10, tarefa
+   16, `dcd6f287`; até ali o `write` do contexto era `may(person,
+   WriteChannel)` global, qualquer que fosse o canal):
    - **escopo de servidor:** `contexto.write` é a permissão global de escrever
      (`WriteChannel`), e `contexto.admin` é a de administrar o servidor
      (`AdministerServer`). É o que vale hoje, e passa a estar escrito. Uma
@@ -1007,11 +1007,16 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
      Escrita)` (`crates/seele-server/src/autorizacao.rs:104` [c]): a permissão
      global **e** o papel mínimo do canal;
    - **e o pedido num canal que a pessoa não lê é recusado**, com
-     `pode_no_canal(…, Leitura)`, como o histórico. Hoje só se confere que o
-     canal existe (`pedidos.rs:191-195` [c]).
-   Os dois últimos não mordem hoje — nada grava papel mínimo em canal nenhum
-   (`autorizacao.rs:40-44` [c]) —, mas mordem no dia em que um canal privado
-   existir, e a v6 congela antes disso.
+     `pode_no_canal(…, Leitura)`, como o histórico (`cannot read channel` no
+     registro; `bridge-refused` para a janela). Até a tarefa 16 só se conferia
+     que o canal existe.
+   Os dois últimos não mordem hoje: nada grava papel mínimo em canal nenhum,
+   em nenhuma versão (medido em 10/10 no v0.15.1, na linha 0.15 e na 0.16;
+   pendência 62). Eles passam a valer no dia em que um canal privado existir, e
+   a v6 congela antes disso. O guarda
+   `o_papel_minimo_de_um_canal_so_e_gravado_pela_migracao_e_pelos_testes`
+   reprova quando aparecer um caminho do produto que grave o papel mínimo, e
+   manda conferir esta regra.
 
 **Pedido da MESA (item 9):** o orçamento do quintal legível pela metade de
 servidor (`dados.uso()`, `dados.teto`), e a recusa por quintal cheio com código

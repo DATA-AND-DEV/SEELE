@@ -181,8 +181,12 @@ globalThis.aoAcontecer = (momento, carga) => {
 JSON, e a resposta volta como JSON em texto — `JSON.stringify`.
 
 - **`contexto` é o que o servidor sabe**: `person`, quem pediu; `channel`, o
-  canal, ou `null` quando a janela mandou `0`; `admin` e `write`, se essa pessoa
-  administra o servidor e se pode escrever nos canais. **A autorização sai
+  canal, ou `null` quando a janela mandou `0`; `admin`, se essa pessoa
+  administra o servidor; e `write`, se ela pode escrever **naquele canal** (a
+  permissão de escrever e o papel mínimo do canal, a mesma pergunta que o
+  produto faz para publicar ali) — ou, no pedido sem canal, se ela pode
+  escrever nos canais em geral. Um pedido num canal que a pessoa não lê nem
+  chega ao `aoPedir`. **A autorização sai
   daqui, e nunca do pedido**: um MOD que confiasse num campo do pedido deixaria
   quem escreve a chamada escolher a própria permissão.
 - **`pedido` é o que a janela mandou**, o terceiro argumento do `request`.
