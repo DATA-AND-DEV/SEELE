@@ -88,6 +88,7 @@ const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica �
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
 // A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
 const RECUSA_SALA = "a sala pessoal e as ligações moram no app do SEELE: o navegador não recebe ligação";
+const RECUSA_AGENDA = "o código e a agenda moram no app do SEELE, nesta máquina";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
@@ -101,11 +102,14 @@ const RECUSAS_NOMEADAS = new Map([
   ["atender", RECUSA_SALA],
   ["baixar_modulo_de_video", RECUSA_MODULO],
   ["baixar_versao", RECUSA_VERSOES],
+  ["bloquear", RECUSA_SALA],
   ["caminho_entre_pares", RECUSA_REDE],
   ["catalogo_de_mods", RECUSA_MODS],
   ["consentir_no_caminho_entre_pares", RECUSA_REDE],
+  ["contatos_da_agenda", RECUSA_AGENDA],
   ["criar_convite_do_server", RECUSA_PORTARIA],
   ["criar_servidor", RECUSA_HOSPEDAR],
+  ["dar_nome_na_agenda", RECUSA_AGENDA],
   ["decidir_pedido", RECUSA_PORTARIA],
   ["definir_senha_do_server", RECUSA_PORTARIA],
   ["encerrar_a_ligacao", RECUSA_SALA],
@@ -117,6 +121,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["instalar_mod", RECUSA_MODS],
   ["ligar_portaria", RECUSA_PORTARIA],
   ["linhas_para_hospedar", RECUSA_HOSPEDAR],
+  ["meu_codigo", RECUSA_AGENDA],
   ["mod_nativo_ativar", RECUSA_NATIVO],
   ["mod_nativo_colher", RECUSA_NATIVO],
   ["mod_nativo_encerrar", RECUSA_NATIVO],
@@ -127,6 +132,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["pacotes_no_cache", RECUSA_MODS],
   ["pedidos_da_portaria", RECUSA_PORTARIA],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
+  ["receber_ligacoes", RECUSA_SALA],
   ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
   ["revogar_admissao", RECUSA_PORTARIA],
@@ -251,7 +257,13 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
       motivo: "a P12 da F1: a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde o número (main.rs)",
     },
   ],
-  // A sala viva da F7: `[]` diz «não há sala neste lugar».
+  // A sala viva da F7: `null` e `[]` dizem «não há sala neste lugar», e nunca
+  // `Desligada`, que diria que existe uma e que alguém a desligou. A casca
+  // esconde a linha da sala com o `null` (`fraseDaSala`).
+  [
+    "estado_da_sala",
+    { resposta: null, motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-sala.js)" },
+  ],
   [
     "toques_agora",
     { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },

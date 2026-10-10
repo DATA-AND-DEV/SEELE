@@ -578,22 +578,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // commit isolado do `main.rs`, porque a F7 também mexe lá, e saiu quando a
 // gestão de MODs passou a chamá-lo com a pergunta dos dois MODs de tema.
 //
-// `estado_da_sala` entrou em 2026-10-10, com a tarefa 23 da F7 (a sala sobe no
-// `setup`, no ramo `0.16/sala-viva`): a tela que abre depois do anúncio por
-// `seele://sala` lê por ele. `receber_ligacoes` entrou junto: é o «Não receber
-// ligações» do PERFIL. `meu_codigo`, `contatos_da_agenda`, `dar_nome_na_agenda`
-// e `bloquear` (tarefa 29) são o SEU CÓDIGO e a agenda do PERFIL. Os seis saem
-// quando a linha da sala e o PERFIL os chamarem, no commit seguinte.
-// `toques_agora`, `atender`, `recusar` e `encerrar_a_ligacao` (tarefas 24 e 27)
-// estiveram aqui até a faixa `#toque` chamá-los, na tarefa 26.
-const AGUARDANDO_TELA: &[&str] = &[
-    "estado_da_sala",
-    "receber_ligacoes",
-    "meu_codigo",
-    "contatos_da_agenda",
-    "dar_nome_na_agenda",
-    "bloquear",
-];
+// Os onze comandos da sala viva da F7 (tarefas 23, 24, 27 e 29) estiveram aqui
+// em 2026-10-10, entre a metade do Rust e a da casca, no ramo `0.16/sala-viva`,
+// e saíram quando a faixa `#toque` e o PERFIL passaram a chamá-los. A lista
+// voltou ao estado de repouso, que é vazia.
+const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
