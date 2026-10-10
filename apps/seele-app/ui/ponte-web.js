@@ -215,7 +215,7 @@ const COMANDOS_DA_PONTE = new Set([
   "reenviar_mensagem", "registrar_da_janela", "regras_de_previa",
   "regras_do_icone_do_server", "remover_mensagem", "salvar_anexo",
   "send_message", "set_muted", "set_talking", "set_total_isolation",
-  "set_voice_mode", "set_volume", "snapshot", "soltar_escolhido",
+  "set_voice_mode", "set_volume", "snapshot", "soltar_a_entrada", "soltar_escolhido",
   "som_da_tela", "som_do_mod", "tecla_de_falar", "tirar_minha_imagem",
   "versoes_instaladas", "volumes_locais"
 ]);
@@ -359,6 +359,7 @@ const AINDA_A_FAZER = new Map([
   ["set_talking", TAREFA_33],
   ["set_total_isolation", TAREFA_33],
   ["set_volume", TAREFA_33],
+  ["soltar_a_entrada", TAREFA_34],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],

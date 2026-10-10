@@ -469,6 +469,11 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
         format!("\nfn {comando}("),
         format!("\nasync fn {comando}("),
         format!("\nconst fn {comando}("),
+        // Com genéricos: desde o lote E54 da F5 o `connect` é
+        // `async fn connect<R: tauri::Runtime>(`, e sem estas duas ele sumia
+        // deste guarda.
+        format!("\nfn {comando}<"),
+        format!("\nasync fn {comando}<"),
     ]
     .iter()
     .find_map(|assinatura| main.find(assinatura.as_str()))?;
