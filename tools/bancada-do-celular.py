@@ -37,7 +37,10 @@ com 1 se algo reprovar.
 """
 
 import argparse
+import contextlib
 import dataclasses
+import functools
+import http.server
 import importlib.util
 import json
 import pathlib
@@ -45,6 +48,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 from typing import Callable
 
 from PIL import Image, ImageChops
@@ -364,6 +368,370 @@ class Caso:
     marca: str = "celular"
     # Entrar na sessão antes do caso; um caso da entrada entra ele mesmo.
     entrar: bool = True
+    # Servir a cópia por HTTP, e não por `file://`. A página de verdade vem de
+    # uma origem https, e o `fetch` de um arquivo da `ui/` (o símbolo da marca,
+    # para o enlace) não funciona em `file://`: medido em 10/10, o Chromium e o
+    # WebKit recusam, com ou sem `--allow-file-access-from-files`.
+    http: bool = False
+
+
+@contextlib.contextmanager
+def servida(pasta: pathlib.Path):
+    """A cópia servida em 127.0.0.1, numa porta efêmera: nada disputa a 8384."""
+    class Calado(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
+    fio = threading.Thread(target=servidor.serve_forever, daemon=True)
+    fio.start()
+    try:
+        yield f"http://127.0.0.1:{servidor.server_address[1]}"
+    finally:
+        servidor.shutdown()
+        servidor.server_close()
+
+
+# ------------------------------------------------------------- a entrada
+#
+# A identidade de verdade (`criarIdentidadeDoNavegador`, da F4), com os dois
+# pontos que ela recebe na criação trocados pelo caso: `analisar` (no produto,
+# o `.wasm`) lê o estado pedido no fragmento, e `conectar` (no produto, a
+# sessão pela ponte, 2.6) anota cada entrada e responde o que estiver na fila.
+# Nada mais é duble: os estados, os desfechos, o token e o aceite são os dela.
+IDENTIDADE_DO_CASO = r"""() => {
+  const agora = Math.floor(Date.now() / 1000);
+  const link = (extra = {}) => ({ link: { alvo: "198.51.100.7:8383", impressao: "3cbcfb02".repeat(8), versao: "1.0",
+    ate: agora + 7 * 86400, hashes: ["sha-256:caso"], convite: "7K4MNPQRSTVWXYZ23456", ...extra } });
+  const LINKS = {
+    pronto: link(), vencido: link({ ate: agora - 60 }),
+    "servidor-0.15": { erro: "SemHashesDoNavegador" }, incompleto: { erro: "SemImpressao" }, "outra-origem": { erro: "OutraOrigem" },
+  };
+  window.__conexoes = [];
+  window.__respostas = [];
+  window.__identidade = criarIdentidadeDoNavegador({
+    analisar: (texto) => LINKS[texto.split("#")[1]] ?? { erro: "Desconhecido" },
+    conectar: async (alvo, apelido, credencial) => {
+      window.__conexoes.push({ endereco: alvo.endereco, apelido, credencial });
+      const resposta = window.__respostas.shift();
+      if (resposta === "espera") await new Promise((soltar) => { window.__soltarAConexao = soltar; });
+      else if (resposta) throw resposta;
+    },
+    instalado: () => window.__instalado ?? true,
+  });
+}"""
+
+ENTRADA_LIDA = r"""() => {
+  const corpo = document.querySelector(".cel-entrada-corpo");
+  const impressao = corpo.querySelector(".cel-entrada-impressao");
+  const b = impressao?.getBoundingClientRect();
+  return {
+    titulo: corpo.querySelector("#cel-entrada-titulo")?.textContent.replace(/\s+/g, " ").trim() ?? null,
+    avisos: [...corpo.querySelectorAll(".cel-entrada-aviso-titulo")].map((e) => e.textContent),
+    grupos: impressao ? [...impressao.children].map((e) => e.textContent) : [],
+    impressaoCabe: !impressao || b.right <= innerWidth,
+    vaza: document.documentElement.scrollWidth > innerWidth,
+    acoes: [...document.querySelectorAll(".cel-entrada-pe button")].map((e) => [e.textContent, Math.round(e.getBoundingClientRect().height)]),
+    campo: corpo.querySelector("#cel-entrada-apelido") ? { valor: corpo.querySelector("#cel-entrada-apelido").value,
+      invalido: corpo.querySelector("#cel-entrada-apelido").getAttribute("aria-invalid") } : null,
+    conexoes: window.__conexoes.length,
+  };
+}"""
+
+
+def usar_a_entrada(pg: Page, **opcoes) -> None:
+    pg.evaluate("""(o) => CELULAR.ajudante("entrada").usar(window.__identidade, {
+        link: o.link ?? null,
+        // Na forma do `conhecidos()` combinado com a F4: do mais recente ao mais
+        // antigo, com o `podeEntrar` (os hashes guardados vencem).
+        conhecidos: async () => [
+          { impressao: "aa".repeat(32), nome: "OFICINA", endereco: "192.168.0.14:8383", versao: "1.0", visto: Date.now(), podeEntrar: true },
+          { impressao: "bb".repeat(32), nome: null, endereco: "tq3.duckdns.org:8383", versao: "1.0", visto: Date.now() - 9 * 86400000, podeEntrar: false },
+        ] })""", opcoes)
+    pg.wait_for_timeout(300)
+
+
+def tocar_acao(pg: Page, texto: str) -> bool:
+    """Toca a ação do pé da entrada que diz `texto`."""
+    return tocar(pg, f".cel-entrada-pe button:text-is('{texto}')")
+
+
+def entrada(pg: Page) -> list[str]:
+    """A entrada (Tarefa 10; spec §2.1), da tela de início aos estados da
+    «ENTRAR EM», sobre a identidade de verdade da F4.
+
+    A tela de início lista os servidores deste aparelho com ENTRAR, tem COLAR UM
+    LINK e a frase do hospedar com o BAIXAR O APP DO SEELE apontando para a
+    `PAGINA_DO_APP`. Em cada estado: o título «ENTRAR EM <endereço>?», sem nome
+    de servidor; a impressão em dezesseis grupos de quatro, sem passar da tela;
+    o aviso do estado e as ações dele. **Nada conecta antes do toque em
+    ENTRAR.** Termina na «ENTRAR EM» pronta, para a foto."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    usar_a_entrada(pg)
+    inicio = pg.evaluate("""() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent,
+        servidores: [...document.querySelectorAll(".cel-entrada-servidor")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+        baixar: document.querySelector(".cel-entrada-fora a.cel-baixar")?.getAttribute("href"),
+        colar: [...document.querySelectorAll(".cel-entrada-pe button")].map((b) => b.textContent),
+        caixaDoDesktop: getComputedStyle(document.querySelector("#tela-boot > .boot-caixa")).display })""")
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada")
+    if inicio["titulo"] != f["inicio"]["titulo"]:
+        falhas.append(f"a tela de início diz «{inicio['titulo']}»")
+    # O que entra diz ENTRAR; o de hashes vencidos diz LINK VENCIDO, e o que não
+    # tem nome ainda (antes do primeiro retrato) mostra o endereço.
+    servidores = inicio["servidores"]
+    if (len(servidores) != 2 or not servidores[0][0].startswith("OFICINA") or not servidores[0][0].endswith(f["inicio"]["entrar"])
+            or not servidores[1][0].startswith("tq3.duckdns.org:8383") or not servidores[1][0].endswith(f["inicio"]["linkVencido"])
+            or any(alto < 44 for _, alto in servidores)):
+        falhas.append(f"os servidores deste aparelho saem {servidores}")
+    if inicio["baixar"] != pg.evaluate("PAGINA_DO_APP"):
+        falhas.append(f"o BAIXAR O APP DO SEELE aponta para {inicio['baixar']}")
+    if inicio["colar"] != [f["inicio"]["colar"]]:
+        falhas.append(f"o pé da tela de início tem {inicio['colar']}")
+    if inicio["caixaDoDesktop"] != "none":
+        falhas.append("a caixa de entrada do desktop continua à vista no celular")
+
+    e = f["estados"]
+    esperado = {
+        "pronto": (None, [f["entrarEm"]["entrar"], f["entrarEm"]["agoraNao"]]),
+        "numa-aba": (e["numa-aba"]["titulo"], [e["numa-aba"]["copiar"], f["entrarEm"]["agoraNao"]]),
+        "vencido": ("ESTE LINK VENCEU EM", [f["entrarEm"]["servidores"]]),
+        "servidor-0.15": (e["servidor-0.15"]["titulo"], [f["entrarEm"]["servidores"]]),
+        "incompleto": (e["incompleto"]["titulo"], [f["entrarEm"]["servidores"]]),
+        "outra-origem": (e["outra-origem"]["titulo"], [f["entrarEm"]["servidores"]]),
+    }
+    for estado, (aviso, acoes) in esperado.items():
+        pg.evaluate(f"window.__instalado = {'false' if estado == 'numa-aba' else 'true'}")
+        usar_a_entrada(pg, link=f"https://pagina.invalid/#{'pronto' if estado == 'numa-aba' else estado}")
+        lido = pg.evaluate(ENTRADA_LIDA)
+        com_endereco = estado in ("pronto", "numa-aba", "vencido")
+        if com_endereco and lido["titulo"] != "ENTRAR EM 198.51.100.7:8383?":
+            falhas.append(f"{estado}: o título diz «{lido['titulo']}», e não «ENTRAR EM 198.51.100.7:8383?»")
+        if com_endereco and (len(lido["grupos"]) != 16 or any(len(g) != 4 for g in lido["grupos"])):
+            falhas.append(f"{estado}: a impressão sai em {lido['grupos']}")
+        if not lido["impressaoCabe"] or lido["vaza"]:
+            falhas.append(f"{estado}: a impressão passa da tela, ou a página rola de lado")
+        if aviso and not any(a.startswith(aviso) for a in lido["avisos"]):
+            falhas.append(f"{estado}: o aviso diz {lido['avisos']}, e não «{aviso}…»")
+        if [t for t, _ in lido["acoes"]] != acoes:
+            falhas.append(f"{estado}: as ações são {lido['acoes']}, e não {acoes}")
+        if any(alto < 44 for _, alto in lido["acoes"]):
+            falhas.append(f"{estado}: uma ação tem menos de 44: {lido['acoes']}")
+        if lido["conexoes"]:
+            falhas.append(f"{estado}: a tela conectou antes do ENTRAR ({lido['conexoes']} entradas)")
+    pg.evaluate("window.__instalado = true")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    return falhas
+
+
+def entrada_desfechos(pg: Page) -> list[str]:
+    """Os desfechos do ENTRAR (Tarefa 10), sobre a identidade de verdade.
+
+    O apelido tomado devolve o campo vazio e marcado, e o convite gasto logo
+    depois dele diz que o convite acabou, e não que o apelido está tomado. Sem
+    rede, o ENTRAR continua. Os MODs a aceitar abrem o aceite do desktop, e o
+    ACEITAR entra de novo **com o mesmo token**; o RECUSAR encerra a tentativa.
+    Quem já entrou volta como conhecido, sem gastar o convite. Enquanto a
+    conexão abre, o enlace se desenha, parado sob movimento reduzido."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada")
+    entrar = f["entrarEm"]["entrar"]
+
+    def tentar(apelido: str, respostas: str) -> dict:
+        pg.evaluate(f"window.__respostas.push(...{respostas})")
+        pg.fill("#cel-entrada-apelido", apelido)
+        tocar_acao(pg, entrar)
+        pg.wait_for_timeout(500)
+        return pg.evaluate(ENTRADA_LIDA)
+
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    tomado = tentar("rafa", '[{ Refused: { reason: "NicknameTaken" } }]')
+    if tomado["campo"] != {"valor": "", "invalido": "true"} or f["desfechos"]["apelido-tomado"][0] not in tomado["avisos"]:
+        falhas.append(f"o apelido tomado não devolve o campo vazio e marcado: {tomado}")
+    gasto = tentar("rafa2", '["CredentialRejected"]')
+    if gasto["avisos"][:1] != [f["desfechos"]["convite-gasto"][0]] or [t for t, _ in gasto["acoes"]] != [f["entrarEm"]["servidores"]]:
+        falhas.append(f"o convite gasto depois do apelido tomado diz {gasto['avisos']}, com {gasto['acoes']}")
+    tokens = pg.evaluate("window.__conexoes.map((c) => c.credencial)")
+    if tokens != ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"]:
+        falhas.append(f"as duas entradas levaram {tokens}")
+
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    sem_rede = tentar("rafa", '["Unreachable"]')
+    if sem_rede["avisos"][:1] != [f["desfechos"]["sem-rede"][0]] or [t for t, _ in sem_rede["acoes"]][:1] != [entrar]:
+        falhas.append(f"sem rede, a tela diz {sem_rede['avisos']}, com {sem_rede['acoes']}")
+
+    # Os MODs: o aceite do desktop abre, e o ACEITAR entra de novo com o mesmo token.
+    pg.evaluate("window.__conexoes.length = 0")
+    mods = '[{ ModsNaoAceitos: { mods: [{ id: "seele/estilo", version: "4.0.0", hash: "ab".repeat(32), reach: ["servidor.aparencia"] }], conjunto: "c1" } }]'
+    tentar("rafa", mods)
+    if not pg.locator("#mods-aceite").is_visible():
+        falhas.append("os MODs a aceitar não abriram o aceite")
+    else:
+        tocar(pg, "#mods-aceitar")
+        pg.wait_for_timeout(500)
+        depois = pg.evaluate("""() => ({ tokens: window.__conexoes.map((c) => c.credencial),
+            aceite: JSON.parse(localStorage.getItem("seele.aceites-de-mods") ?? "{}")["3cbcfb02".repeat(8)] ?? null,
+            aberto: !document.getElementById("mods-aceite").hidden })""")
+        if depois != {"tokens": ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"], "aceite": "c1", "aberto": False}:
+            falhas.append(f"o ACEITAR não entrou de novo com o mesmo token e o sim gravado: {depois}")
+    # O RECUSAR encerra a tentativa e volta à tela de início.
+    usar_a_entrada(pg, link="https://pagina.invalid/#vencido")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    tentar("rafa", mods)
+    tocar(pg, "#mods-recusar")
+    pg.wait_for_timeout(400)
+    recusado = pg.evaluate("""() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent, tentativa: window.__identidade.ler() })""")
+    if recusado != {"titulo": f["inicio"]["titulo"], "tentativa": None}:
+        falhas.append(f"o RECUSAR não encerrou a tentativa: {recusado}")
+
+    # Conectando: o enlace, parado sob movimento reduzido e desenhado sem ele.
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    pg.evaluate('window.__respostas.push("espera")')
+    pg.fill("#cel-entrada-apelido", "rafa")
+    tocar_acao(pg, entrar)
+    pg.wait_for_timeout(400)
+    # Sem movimento reduzido, o enlace se desenha; com ele, fica parado e
+    # desenhado inteiro (o traço no fim, e não no começo, que é invisível).
+    enlace = "(() => { const p = document.querySelector('.cel-entrada-conectando svg path'); return p ? [getComputedStyle(p).animationName, getComputedStyle(p).strokeDashoffset] : null; })()"
+    parado = pg.evaluate(enlace)
+    pg.emulate_media(reduced_motion="no-preference")
+    andando = pg.evaluate(enlace)
+    pg.emulate_media(reduced_motion="reduce")
+    if parado != ["none", "0px"] or not andando or andando[0] != "cel-enlace":
+        falhas.append(f"o enlace da conexão está {andando!r} sem movimento reduzido e {parado!r} com ele")
+    if not pg.evaluate("typeof window.__soltarAConexao === 'function'"):
+        falhas.append("o ENTRAR não chegou à conexão que espera: a tela de conectar não foi medida")
+        return falhas
+    pg.evaluate("window.__soltarAConexao()")
+    pg.wait_for_timeout(500)
+    # Quem entrou volta como conhecido: o convite não é usado.
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    conhecido = pg.evaluate(ENTRADA_LIDA)
+    if f["estados"]["ja-conhecido"]["titulo"] not in conhecido["avisos"] or [t for t, _ in conhecido["acoes"]][:1] != [entrar]:
+        falhas.append(f"quem já entrou não volta como conhecido: {conhecido['avisos']}, {conhecido['acoes']}")
+    return falhas
+
+
+# ------------------------------------------------- a entrada direta (D-celular-3)
+
+CONFERIDA = '{ FirstContactVerified: { fingerprint: "3cbc fb02 3cbc fb02 3cbc fb02 3cbc fb02" } }'
+
+
+def entrar_com_veredito(pg: Page, veredito: str, antes: str = "") -> None:
+    """Entra pelo `conectar` do desktop com o veredito pedido, contando cada
+    vez que o aperto aparece sem a marca da entrada direta."""
+    pg.wait_for_function("typeof conectar === 'function'")
+    pg.wait_for_timeout(600)
+    pg.evaluate(f"""() => {{
+      SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {veredito} }};
+      {antes}
+      window.__apertos = 0;
+      const tela = document.getElementById('tela-auth');
+      new MutationObserver(() => {{
+        if (!tela.hidden && tela.dataset.modo === 'aperto' && !tela.hasAttribute('data-entrada-direta')) window.__apertos++;
+      }}).observe(tela, {{ attributes: true, attributeFilter: ['hidden', 'data-modo', 'data-entrada-direta'] }});
+    }}""")
+    pg.evaluate("conectar('127.0.0.1:8383', 'rafa', null)")
+    pg.wait_for_timeout(1500)
+
+
+ESTADO_DA_ENTRADA = r"""() => {
+  const tela = document.getElementById('tela-auth'), botao = document.getElementById('auth-botao');
+  const linhas = [...document.querySelectorAll('#auth-registro .registro-linha')];
+  // Num `<details>` fechado, o conteúdo some por `content-visibility`, e o
+  // `getBoundingClientRect` ainda o mede: quem diz se ele se vê é o
+  // `checkVisibility`, e o `<details>` aberto.
+  const visivel = (e) => !!e && e.checkVisibility() && !e.closest('details:not([open])') && e.getBoundingClientRect().height > 0;
+  return { sessao: !document.getElementById('tela-sessao').hidden, auth: !tela.hidden, modo: tela.dataset.modo ?? null,
+           direta: tela.hasAttribute('data-entrada-direta'), apertos: window.__apertos,
+           botao: [botao.textContent, botao.disabled, Math.round(botao.getBoundingClientRect().height)],
+           registro: linhas.map((l) => l.querySelector('.registro-texto')?.textContent ?? ''),
+           ultima: linhas.length ? [linhas.at(-1).querySelector('.registro-texto')?.textContent ?? '', visivel(linhas.at(-1))] : null,
+           vaza: document.documentElement.scrollWidth > innerWidth };
+}"""
+
+
+def entrada_direta(pg: Page) -> list[str]:
+    """D-celular-3: com a impressão conferida, o aperto da tela de entrada não
+    aparece no celular, e a sessão abre sem um toque. Pula-se a tela, e não o
+    passo: o registro diz a entrada direta, e o `inserirPlug` roda (P11)."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if not e["sessao"] or e["apertos"]:
+        falhas.append(f"com a impressão conferida, o aperto apareceu ou a sessão não abriu sem um toque: {e}")
+    if pg.evaluate("FRASES_DO_CELULAR.entrada.entradaDireta.registro") not in e["registro"]:
+        falhas.append(f"o registro não diz a entrada direta: {e['registro']}")
+    return falhas
+
+
+def entrada_com_aperto(pg: Page) -> list[str]:
+    """Um veredito diferente (o primeiro contato sem impressão conferida)
+    continua indo ao aperto, agora numa coluna: o botão com 44, nada passando
+    da tela, e o ENTRAR NO SERVIDOR entrando. Termina no aperto, para a foto."""
+    falhas = []
+    entrar_com_veredito(pg, '{ FirstContact: { fingerprint: "3cbc fb02 3cbc fb02" } }')
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if e["sessao"] or not e["auth"] or e["modo"] != "aperto" or e["direta"] or not e["apertos"]:
+        falhas.append(f"um veredito diferente não foi ao aperto: {e}")
+    if e["botao"][0] != "ENTRAR NO SERVIDOR" or e["botao"][1] or e["botao"][2] < 44:
+        falhas.append(f"o botão do aperto está {e['botao']}")
+    if e["vaza"]:
+        falhas.append("o aperto rola de lado no celular")
+    return falhas
+
+
+def entrada_direta_falha(pg: Page) -> list[str]:
+    """Na entrada direta, uma falha do `inserirPlug` tem tela e frase: o registro
+    aberto mostra a frase do erro, e ENTRAR NO SERVIDOR volta para tentar de
+    novo. O celular não fica parado sem dizer nada."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA, 'SEELE_RESPOSTAS.open_channel = { __recusa: "NotConnected" };')
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if e["sessao"] or not e["auth"]:
+        falhas.append(f"com a entrada falhando, a tela não ficou na entrada: {e}")
+    # A última linha do registro é a frase do erro, a mesma que o desktop
+    # escreve, e ela está à vista: o veredito conferido também escreve no tom de
+    # atenção, então o que se confere é a frase, e não o tom.
+    frase = pg.evaluate("fraseDeErro('NotConnected')")
+    if e["ultima"] != [frase, True]:
+        falhas.append(f"a falha da entrada não está à vista: a última linha é {e['ultima']}, e não «{frase}»")
+    if e["botao"][0] != "ENTRAR NO SERVIDOR" or e["botao"][1]:
+        falhas.append(f"depois da falha, o botão está {e['botao']}")
+    return falhas
+
+
+def entrada_espera(pg: Page) -> list[str]:
+    """A espera da portaria (`AdmissionPending`, ADR 0030) numa coluna, como a
+    D-celular-3 pede: a frase da espera à vista, a frase de que ela para com a
+    página fora da tela (spec §2.1), a saída com 44, e nada passando da tela.
+    Termina na espera, para a foto e as medidas."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA, 'SEELE_RESPOSTAS.connect = { __recusa: { Refused: { reason: "AdmissionPending" } } };')
+    e = pg.evaluate("""() => { const tela = document.getElementById('tela-auth'), saida = document.getElementById('auth-voltar');
+        const frase = document.getElementById('auth-espera-frase'), pausa = document.querySelector('.cel-espera-pausa');
+        return { auth: !tela.hidden, modo: tela.dataset.modo ?? null, frase: frase?.textContent.trim() ?? '',
+                 pausa: !!pausa && pausa.getBoundingClientRect().height > 0 && pausa.textContent === FRASES_DO_CELULAR.entrada.esperaPausa,
+                 fraseVisivel: !!frase && frase.getBoundingClientRect().height > 0,
+                 saida: [saida.textContent.trim(), Math.round(saida.getBoundingClientRect().height)],
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not e["auth"] or e["modo"] != "espera" or not e["fraseVisivel"] or not e["frase"]:
+        falhas.append(f"a espera da portaria não está numa tela própria, com a frase: {e}")
+    if not e["pausa"]:
+        falhas.append("a espera não diz que para com a página fora da tela")
+    if e["saida"][1] < 44:
+        falhas.append(f"a saída da espera tem {e['saida'][1]} de altura")
+    if e["vaza"]:
+        falhas.append("a espera rola de lado no celular")
+    return falhas
+
+
+def entrada_direta_na_larga(pg: Page) -> list[str]:
+    """A casca larga não muda (D-celular-3): com a mesma impressão conferida, o
+    aperto aparece como no desktop."""
+    entrar_com_veredito(pg, CONFERIDA)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    return [] if (not e["sessao"] and e["auth"] and not e["direta"] and e["apertos"]) else [f"na larga, a impressão conferida pulou o aperto: {e}"]
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -2242,6 +2610,15 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # A entrada do celular (Tarefa 10), sobre a identidade da F4.
+    "entrada": Caso(levar=entrada, entrar=False, raiz="#tela-boot"),
+    "entrada-desfechos": Caso(levar=entrada_desfechos, entrar=False, medir=False, http=True),
+    # D-celular-3: a impressão conferida dispensa o aperto, só no celular.
+    "entrada-direta": Caso(levar=entrada_direta, entrar=False, medir=False),
+    "entrada-com-aperto": Caso(levar=entrada_com_aperto, entrar=False, raiz="#tela-auth"),
+    "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
+    "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
+    "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
     "larga-tela-cheia": Caso(levar=larga_tela_cheia, marca="larga", aparelhos=("1440",), medir=False),
@@ -2280,7 +2657,12 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
-            pg.goto(f"file://{pagina}")
+            servindo = contextlib.ExitStack()
+            if caso.http:
+                origem = servindo.enter_context(servida(pagina.parent))
+                pg.goto(f"{origem}/{pagina.name}")
+            else:
+                pg.goto(f"file://{pagina}")
             if caso.entrar:
                 entrar(pg)
             pg.evaluate(
@@ -2324,6 +2706,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             if erros:
                 motivos.append(f"erros de script: {erros}")
             ctx.close()
+            servindo.close()
             print(f"{rotulo}: " + ("passa" if not motivos else "REPROVA"))
             falhas += [f"{rotulo}: {motivo}" for motivo in motivos]
     return falhas
