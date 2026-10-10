@@ -17771,3 +17771,201 @@ fn o_retrato_e_os_eventos_dos_mods_nao_levam_nada_da_ligacao() {
          deixou de olhar para eles"
     );
 }
+
+/// As chaves de topo de um objeto literal de JS, na ordem em que aparecem, e se
+/// a leitura chegou à `}` que o fecha.
+///
+/// `corpo` começa logo depois da `{` que abre o objeto. Cadeias, modelos (com
+/// `${…}` dentro), comentários e chaves aninhadas são pulados; uma chave é o
+/// nome, a cadeia ou o número que abre uma entrada de topo — depois da `{` ou
+/// de uma vírgula de topo. O `false` do fim diz que a leitura se perdeu antes
+/// de fechar o objeto, e quem chama reprova em vez de confiar numa lista curta.
+fn chaves_de_topo(corpo: &str) -> (Vec<String>, bool) {
+    let c: Vec<char> = corpo.chars().collect();
+    let fim_da_cadeia = |de: usize| {
+        let aspa = c[de];
+        let mut i = de + 1;
+        while i < c.len() && c[i] != aspa {
+            i += if c[i] == '\\' { 2 } else { 1 };
+        }
+        i
+    };
+    let nome = |ch: char| ch.is_alphanumeric() || ch == '_' || ch == '$';
+    let mut chaves = Vec::new();
+    // `{`, `[`, `(`, `` ` `` (dentro de um modelo) e `$` (dentro de um `${…}`).
+    let mut pilha: Vec<char> = Vec::new();
+    let mut espera_chave = true;
+    let mut i = 0;
+    while i < c.len() {
+        let ch = c[i];
+        if pilha.last() == Some(&'`') {
+            match ch {
+                '\\' => i += 2,
+                '`' => {
+                    pilha.pop();
+                    i += 1;
+                }
+                '$' if c.get(i + 1) == Some(&'{') => {
+                    pilha.push('$');
+                    i += 2;
+                }
+                _ => i += 1,
+            }
+            continue;
+        }
+        match ch {
+            '/' if c.get(i + 1) == Some(&'/') => {
+                while i < c.len() && c[i] != '\n' {
+                    i += 1;
+                }
+            }
+            '/' if c.get(i + 1) == Some(&'*') => {
+                i += 2;
+                while i + 1 < c.len() && !(c[i] == '*' && c[i + 1] == '/') {
+                    i += 1;
+                }
+                i += 2;
+            }
+            '"' | '\'' => {
+                let fim = fim_da_cadeia(i);
+                if pilha.is_empty() && espera_chave {
+                    chaves.push(c[i + 1..fim.min(c.len())].iter().collect());
+                    espera_chave = false;
+                }
+                i = fim + 1;
+            }
+            '`' | '{' | '[' | '(' => {
+                pilha.push(ch);
+                espera_chave = false;
+                i += 1;
+            }
+            '}' | ']' | ')' => {
+                if pilha.pop().is_none() {
+                    return (chaves, true);
+                }
+                i += 1;
+            }
+            ',' if pilha.is_empty() => {
+                espera_chave = true;
+                i += 1;
+            }
+            _ if pilha.is_empty() && espera_chave && nome(ch) => {
+                let inicio = i;
+                while i < c.len() && nome(c[i]) {
+                    i += 1;
+                }
+                chaves.push(c[inicio..i].iter().collect());
+                espera_chave = false;
+            }
+            _ => {
+                // Um `...` de topo espalha outro objeto: o nome que vem depois
+                // dele não é chave desta tabela.
+                if pilha.is_empty() && ch == '.' {
+                    espera_chave = false;
+                }
+                i += 1;
+            }
+        }
+    }
+    (chaves, false)
+}
+
+/// **Nenhuma tabela constante da `ui/` repete uma chave.**
+///
+/// Lote W da F5. Num objeto literal de JS, a segunda chave com o mesmo nome
+/// substitui a primeira **calada**: nem o navegador, nem o `node --check`, nem
+/// guarda nenhum desta suíte dizia nada. `GLIFOS` tinha `chave` e `aparencia`
+/// duas vezes cada, porque dois commits da 0.9.0 redesenharam glifos que já
+/// estavam na tabela; os desenhos eram iguais, e por isso a tela não mudou — no
+/// dia em que alguém corrigisse um dos dois, seria o de baixo que valeria, e o
+/// de cima ficaria mentindo sobre o que a tela mostra. Uma frase repetida em
+/// `FRASES` é a mesma armadilha com texto.
+///
+/// Cobra **toda** `const` de topo em caixa alta que abre um objeto literal,
+/// em todo script da `ui/`: as tabelas de frases e de glifos são escritas assim,
+/// e uma tabela nova nasce coberta. Os objetos de estado (`estadoDosContornos`,
+/// `escolhidoDe`…) são escritos em caixa baixa e mudam em tempo de execução, e
+/// ficam de fora.
+#[test]
+fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
+    let mut tabelas: Vec<(String, String, usize)> = Vec::new();
+    let mut repetidas: Vec<String> = Vec::new();
+    for arquivo in ui_files(".js") {
+        let texto = read(&format!("ui/{arquivo}"));
+        let mut onde = 0;
+        for linha in texto.split_inclusive('\n') {
+            let comeco = onde;
+            onde += linha.len();
+            let Some(resto) = linha.strip_prefix("const ") else {
+                continue;
+            };
+            let Some((nome, depois)) = resto.split_once(" = ") else {
+                continue;
+            };
+            let tabela = !nome.is_empty()
+                && nome
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if !tabela || depois.trim_end() != "{" {
+                continue;
+            }
+            let corpo = texto.get(comeco + linha.len()..).unwrap_or_default();
+            let (chaves, fechou) = chaves_de_topo(corpo);
+            assert!(
+                fechou && !chaves.is_empty(),
+                "este guarda se perdeu em `{nome}` (`{arquivo}`): leu {} chaves e {}. \
+                 A tabela ganhou uma forma que a leitura não conhece, e o guarda ficou \
+                 cego para ela",
+                chaves.len(),
+                if fechou {
+                    "chegou ao fim"
+                } else {
+                    "não achou a `}` que a fecha"
+                }
+            );
+            let mut vistas: Vec<&String> = Vec::new();
+            for chave in &chaves {
+                if vistas.contains(&chave) {
+                    let vezes = chaves.iter().filter(|outra| *outra == chave).count();
+                    let achado = format!("{arquivo}: {nome}.{chave} ({vezes} vezes)");
+                    if !repetidas.contains(&achado) {
+                        repetidas.push(achado);
+                    }
+                }
+                vistas.push(chave);
+            }
+            tabelas.push((arquivo.clone(), nome.to_owned(), chaves.len()));
+        }
+    }
+
+    // Contra a cegueira: as seis tabelas que o lote nomeou estão entre as
+    // lidas, e as duas maiores com um número de chaves que só a leitura inteira
+    // alcança.
+    for (dono, nome, minimo) in [
+        ("glifos.js", "GLIFOS", 20),
+        ("frases.js", "MOTIVOS", 5),
+        ("frases.js", "AVISOS", 3),
+        ("frases.js", "ETAPAS", 3),
+        ("frases.js", "MOTIVOS_DE_REVOGACAO", 1),
+        ("frases.js", "FRASES", 30),
+    ] {
+        assert!(
+            tabelas
+                .iter()
+                .any(|(arquivo, lida, quantas)| arquivo == dono
+                    && lida == nome
+                    && *quantas >= minimo),
+            "este guarda não leu `{nome}` em `{dono}` com pelo menos {minimo} chaves: a \
+             tabela mudou de forma ou de lugar, e ele deixou de olhar para ela. Lidas: \
+             {tabelas:?}"
+        );
+    }
+
+    assert!(
+        repetidas.is_empty(),
+        "uma tabela constante da `ui/` repete chave, e a segunda substitui a primeira \
+         calada — o que está escrito em cima não é o que a tela mostra:\n  {}\n\
+         Tire a repetida; se as duas dizem coisas diferentes, decida qual vale.",
+        repetidas.join("\n  ")
+    );
+}
