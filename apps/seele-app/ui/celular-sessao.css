@@ -1031,6 +1031,26 @@
   display: none;
 }
 
+/* A região `operador.barra`, abaixo de SEU PERFIL (F3, passo 8b): fechada e
+   com teto de altura, para um MOD não empurrar a gestão de MODs para fora do
+   alcance. 96 até a medida do iPhone (M3) dar a altura certa. */
+:root[data-casca="celular"] #tela-server #operador-mods {
+  /* A coluna de AJUSTES é flex: sem isto, ela espremia a região até o padding
+     (medido: 16 px, com o conteúdo inteiro rolando lá dentro). */
+  flex-shrink: 0;
+  box-sizing: border-box;
+  max-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+  border-bottom: 1px solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] #tela-server #operador-mods[hidden] {
+  display: none;
+}
+
 :root[data-casca="celular"] .cel-perfil {
   display: grid;
   gap: 8px;
@@ -1233,4 +1253,10 @@
     flex: 1 1 auto;
     min-height: 0;
   }
+}
+
+/* O botão que abre os ajustes do microfone do sistema: uma página não os abre,
+   e a ponte recusa o pedido. A nota do bloco diz onde a permissão fica. */
+:root[data-casca="celular"] #boot-microfone-ajustes {
+  display: none;
 }

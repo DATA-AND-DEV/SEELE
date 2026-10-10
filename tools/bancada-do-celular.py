@@ -1143,10 +1143,25 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
          || (/^(INPUT|TEXTAREA)$/.test(e.tagName) && e.type !== 'range'))
         && !e.closest(seletorDoTeto) && visivel(e));
     const antes = raiz.style.getPropertyValue('--cel-escala');
+    // A leitura depois de um recálculo inteiro (o `offsetHeight` da raiz força
+    // estilo e layout), e não só o do nó: medido em 10/10, uma rodada a cada
+    // dez da bancada inteira, nós que já viam `--cel-escala` 2 devolviam o
+    // tamanho de antes numa leitura logo depois da troca.
+    const ler = () => { void raiz.offsetHeight; return nos.map((e) => parseFloat(getComputedStyle(e).fontSize)); };
     raiz.style.setProperty('--cel-escala', '1');
-    const a1 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    const a1 = ler();
     raiz.style.setProperty('--cel-escala', '2');
-    const a2 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    const a2 = ler();
+    // Para quando um nó não cresce, o porquê vem junto, inclusive o tamanho
+    // relido depois: se ele mudar, era a leitura, e não a página.
+    const primeiro = nos.find((e, i) => a2[i] < a1[i] * 1.3);
+    const porque = primeiro ? {
+        relido: parseFloat(getComputedStyle(primeiro).fontSize),
+        escalaNoNo: getComputedStyle(primeiro).getPropertyValue('--cel-escala').trim(),
+        escalaNaRaiz: raiz.style.getPropertyValue('--cel-escala'),
+        folha: ((l) => !l ? 'ausente' : l.disabled ? 'desligada' : 'ligada')(document.querySelector('link[href="celular-texto.css"]')),
+        adotadas: document.adoptedStyleSheets.length,
+    } : null;
     if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
     const parados = {};
     nos.forEach((e, i) => {
@@ -1154,7 +1169,7 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
         const nome = e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
         parados[nome] = `${a1[i]} → ${a2[i]} px, «${(e.textContent || e.placeholder || '').trim().slice(0, 20)}»`;
     });
-    return { nos: nos.length, parados };
+    return { nos: nos.length, parados, porque };
 }"""
 
 
@@ -1194,6 +1209,8 @@ def texto_maior(pg: Page) -> list[str]:
             falhas.append(f"{estado}: só {visto['nos']} textos à vista, e o caso não mediu nada")
         for nome, medida in sorted(visto["parados"].items()):
             falhas.append(f"{estado}: {nome} não cresce ({medida})")
+        if visto["parados"]:
+            falhas.append(f"{estado}: o que o primeiro nó parado via: {visto['porque']}")
         # E cabe: a 2, nada rola de lado nem passa da caixa. Os casos a 150 %
         # não viam a cabeça de PESSOAS cortando o «VOZ» (medido no Safari).
         pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
@@ -1280,6 +1297,7 @@ SUPERFICIES_DE_MOD = [
     ("a página imersiva", {"id": "pi", "tipo": "pagina", "titulo": "IMERSIVA", "imersiva": True}, ".pagina-de-mod"),
     ("o diálogo", {"id": "d", "tipo": "dialogo", "titulo": "DIÁLOGO DE TESTE"}, ".dialogo-de-mod"),
     ("o aviso", {"id": "a", "tipo": "aviso", "titulo": "AVISO DE TESTE"}, "#avisos-de-mod > *"),
+    ("a folha", {"id": "f", "tipo": "folha", "titulo": "FOLHA DE TESTE"}, "#palco-de-paineis > .folha-de-mod"),
 ]
 
 
@@ -1320,11 +1338,152 @@ def superficies_de_mod(pg: Page) -> list[str]:
             falhas.append(f"{nome} cobre a faixa ou as abas: {visto['superficie']}, e o pé começa em {visto['pe']}")
         if visto["sair"] is not None and visto["sair"] < 44:
             falhas.append(f"a saída de {nome} tem {visto['sair']} de altura, e não 44")
-        if descricao["tipo"] == "aviso" or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
+        if visto["superficie"] is not None and descricao["tipo"] == "folha" and visto["superficie"][2] - visto["superficie"][0] < pg.evaluate("innerWidth") - 1:
+            falhas.append(f"a folha não ocupa a largura toda: {visto['superficie']}")
+        if descricao["tipo"] in ("aviso", "folha") or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
             if not visto["mudo"] or not visto["ajustes"]:
                 falhas.append(f"com {nome} aberta, o MUDO ou AJUSTES não recebe o toque: {visto}")
         pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-fechar', superficie: id })", descricao["id"])
         pg.wait_for_timeout(200)
+    # Uma pilha de folhas: só a de cima aparece, e ela continua acima do pé.
+    for id_ in ("f1", "f2"):
+        pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: { id, tipo: 'folha', titulo: 'FOLHA ' + id } })", id_)
+    pg.wait_for_timeout(300)
+    pilha = pg.evaluate("""() => [...document.querySelectorAll('#palco-de-paineis > .folha-de-mod')]
+        .filter((f) => f.getClientRects().length > 0 && getComputedStyle(f).display !== 'none').map((f) => f.dataset.superficie)""")
+    if pilha != ["f2"]:
+        falhas.append(f"numa pilha de duas folhas, aparecem {pilha}, e não só a de cima")
+    return falhas
+
+
+def operador_barra(pg: Page) -> list[str]:
+    """A região `operador.barra` no alto de AJUSTES, abaixo de SEU PERFIL (F3,
+    tarefa 5, passo 8b; os critérios são dela). Tudo pelo roteador, como um MOD:
+    1. uma contribuição marcada aparece dentro de `#operador-mods`, e ela mora
+       em AJUSTES, abaixo de SEU PERFIL;
+    2. 16 linhas longas (dentro dos 64 nós de um cartão) deixam a região no teto,
+       rolando por dentro;
+    3. com elas, e com nós deslocados (`estilo.mover`, até ±512 px) do canto da
+       região até o centro de MODS DESTE SERVIDOR, a entrada da gestão fica
+       inteira na janela e recebe o toque."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.wait_for_timeout(400)
+    pg.evaluate(MOD_DE_PE)
+    contribuir = """(conteudo) => __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'operador.barra', modo: 'adicionar', conteudo } })
+        .then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))"""
+    revogar = "(handle) => __pedirAoProduto({ tipo: 'revogar-contribuicao', handle })"
+    caixa = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const b = e.getBoundingClientRect(); return { left: b.left, top: b.top, right: b.right, bottom: b.bottom, width: b.width, height: b.height }; }"""
+
+    marcada = pg.evaluate(contribuir, [{"forma": "texto", "chave": "marca", "dentro": "MARCA DA BANCADA"}])
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""(caixa) => { const c = new Function('s', 'return (' + caixa + ')(s)');
+        const o = document.getElementById('operador-mods');
+        return { dentro: o.textContent.includes('MARCA DA BANCADA'), naAjustes: !!o.closest('#tela-server'), regiao: c('#operador-mods'), perfil: c('.cel-perfil') }; }""", caixa)
+    if not visto["dentro"] or not visto["naAjustes"]:
+        falhas.append(f"a contribuição marcada não aparece em #operador-mods, dentro de AJUSTES: {visto}")
+    elif visto["regiao"] is None or visto["perfil"] is None or visto["regiao"]["top"] < visto["perfil"]["bottom"] - 1:
+        falhas.append(f"a região não fica abaixo de SEU PERFIL: {visto['regiao']} contra {visto['perfil']}")
+    pg.evaluate(revogar, marcada["valor"]["handle"])
+
+    linhas = "Array.from({ length: 16 }, (_, i) => ({ forma: 'texto', chave: `l${i}`, dentro: `linha ${i} `.repeat(24) }))"
+    grande = pg.evaluate(f"(contribuir) => (new Function('c', 'return (' + contribuir + ')(c)'))({linhas})", contribuir)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    canto, alvo = pg.evaluate(caixa, "#operador-mods"), pg.evaluate(caixa, "#secao-mods")
+    if canto is None or alvo is None:
+        return falhas + [f"sem a região ou sem a entrada da gestão à vista: {canto} {alvo}"]
+    limite = lambda n: max(-512, min(512, round(n)))
+    mirado = {"forma": "texto", "chave": "mirado", "dentro": "█" * 6,
+              "estilo": {"mover": {"x": limite(alvo["left"] + alvo["width"] / 2 - canto["left"] - 8),
+                                   "y": limite(alvo["top"] + alvo["height"] / 2 - canto["top"] - 8)}}}
+    pg.evaluate(revogar, grande["valor"]["handle"])
+    pg.evaluate(f"(contribuir) => (new Function('c', 'return (' + contribuir + ')(c)'))([{__import__('json').dumps(mirado)}, ...{linhas}])", contribuir)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    visto = pg.evaluate("""() => { const o = document.getElementById('operador-mods'); const g = document.getElementById('secao-mods'); const b = g.getBoundingClientRect();
+        const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { altura: Math.round(o.getBoundingClientRect().height), rola: o.scrollHeight > o.clientHeight,
+                 gestao: [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)],
+                 inteira: b.top >= 0 && b.left >= 0 && b.bottom <= innerHeight && b.right <= innerWidth,
+                 acima: b.bottom <= document.querySelector('.voz-celular').getBoundingClientRect().top,
+                 toque: !!noCentro && g.contains(noCentro) }; }""")
+    if visto["altura"] != 96 or not visto["rola"]:
+        falhas.append(f"o conteúdo grande não deixou a região no teto de 96, rolando por dentro: {visto}")
+    if not visto["inteira"] or not visto["acima"]:
+        falhas.append(f"com o conteúdo grande, a entrada da gestão de MODs saiu da vista: {visto['gestao']}")
+    elif not visto["toque"]:
+        falhas.append("um nó do MOD, deslocado até o centro da gestão de MODs, a cobre")
+    return falhas
+
+
+# As regiões que a casca do celular declara (CELULAR.regioes): a aba onde moram,
+# e o que a contribuição de cada uma leva além do ponto e do modo — o alvo de
+# quem tem alvo (o canal aberto, uma mensagem), e o rótulo da navegação, que é
+# uma entrada na lista de canais e não um cartão. A conversa só redesenha as
+# mensagens a cada revisão, e a bancada a redesenha como a F3 faz.
+REGIOES_DO_CELULAR = [
+    ("redes", "servidor", "", False),
+    ("servidor.navegacao", "servidor", "rotulo: 'SONDA SERVIDOR.NAVEGACAO', ", False),
+    ("operador.barra", "ajustes", "", False),
+    ("canal.cabecalho", "conversa", "alvo: String(linhaAberta), ", False),
+    ("conversa.mensagem", "conversa", "alvo: String(mensagens.at(-1).id), ", True),
+    ("compositor", "conversa", "", False),
+    ("pessoas.lista", "pessoas", "", False),
+]
+
+
+def regioes_do_celular(pg: Page) -> list[str]:
+    """As regiões de MOD do celular (rascunho da API 6, §11; decidido em 09/10):
+    toda região que a casca declara em `CELULAR.regioes` tem caixa à vista na
+    aba dela, e uma que ela não declara (`status.barra`) recebe `regiao-ausente`
+    e sai das `regioes` do retrato, em vez de desenhar num nó escondido.
+
+    É o que impede a lista de envelhecer calada: uma região declarada que a
+    casca esconde, ou uma escondida que ela declara, reprova aqui."""
+    falhas = []
+    declaradas = pg.evaluate("CELULAR.regioes instanceof Set ? [...CELULAR.regioes].sort() : null")
+    if declaradas != sorted(r for r, *_ in REGIOES_DO_CELULAR):
+        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as sete do celular")
+    # Cada uma, como um MOD a usaria: uma contribuição pelo roteador, e o texto
+    # dela à vista na aba, recebendo o toque.
+    pg.evaluate(MOD_DE_PE)
+    for regiao, aba, extra, redesenhar in REGIOES_DO_CELULAR:
+        if not ir_para_aba(pg, aba, falhas):
+            continue
+        pg.wait_for_timeout(250)
+        marca = f"SONDA {regiao}".upper()
+        pedido = f"{{ ponto: '{regiao}', modo: 'adicionar', {extra}conteudo: [{{ forma: 'texto', chave: 's', dentro: '{marca}' }}] }}"
+        resposta = pg.evaluate(f"__pedirAoProduto({{ tipo: 'contribuir', pedido: {pedido} }}).then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))")
+        esperar_quadro(pg)
+        if redesenhar:
+            pg.evaluate("desenharMensagens()")
+        pg.wait_for_timeout(300)
+        visto = pg.evaluate("""(marca) => {
+            const d = [...document.querySelectorAll('#tela-sessao *, #tela-server *')].find((e) => e.children.length === 0 && e.textContent.trim() === marca);
+            if (!d) return 'o texto da contribuição não está na página';
+            d.scrollIntoView({ block: 'center' });
+            for (let n = d; n; n = n.parentElement) { const st = getComputedStyle(n); if (st.display === 'none' || st.visibility === 'hidden' || n.hidden) return 'escondido por ' + (n.id || n.className); }
+            const b = d.getBoundingClientRect();
+            if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return `fora da janela, em ${Math.round(b.top)}`;
+            const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            return d.contains(noCentro) || noCentro?.contains(d) ? 'à vista' : 'coberto por ' + (noCentro?.id || noCentro?.className);
+        }""", marca)
+        if visto != "à vista":
+            falhas.append(f"a região {regiao} não tem casa na aba {aba.upper()}: {visto} (resposta {resposta})")
+    # A que a casca não tem: o MOD fica sabendo, e o retrato não a lista.
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'status.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 'x', dentro: 'MEDIDA' }] } })")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    avisado = pg.evaluate("(window.__entregues ?? []).some((m) => m.motivo === 'regiao-ausente' && m.ponto === 'status.barra')")
+    if not avisado:
+        falhas.append("uma contribuição no status.barra não recebeu regiao-ausente")
+    regioes = pg.evaluate("cascaDoRetrato().regioes")
+    if "status.barra" in regioes or any(r not in regioes for r, *_ in REGIOES_DO_CELULAR):
+        falhas.append(f"o retrato diz as regiões {regioes}")
     return falhas
 
 
@@ -1587,6 +1746,31 @@ def larga_tela_cheia(pg: Page) -> list[str]:
     return falhas
 
 
+def microfone_negado(pg: Page) -> list[str]:
+    """Com o microfone negado pelo navegador, a seção ÁUDIO diz isso e onde se
+    libera (matriz, achado 3; a ponte da F4 devolve a `NegadaPeloNavegador`).
+    Sem a frase, o bloco ficava escondido justamente nesse caso. O botão dos
+    ajustes do sistema não aparece: a página não os abre."""
+    falhas = []
+    pg.evaluate("window.__SEELE_PERMISSAO_DO_MICROFONE = 'NegadaPeloNavegador'")
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    else:
+        exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(500)
+    if not exigir_toque(pg, "#secao-audio", falhas):
+        return falhas
+    pg.wait_for_timeout(800)
+    visto = pg.evaluate("""(() => { const v = (id) => { const e = document.getElementById(id); return !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; };
+        return { bloco: v('boot-microfone'), diz: document.getElementById('boot-microfone-diz').textContent, botao: v('boot-microfone-ajustes') }; })()""")
+    if not visto["bloco"] or "NAVEGADOR" not in visto["diz"]:
+        falhas.append(f"com o microfone negado pelo navegador, ÁUDIO não diz nada: {visto}")
+    if visto["botao"]:
+        falhas.append("o botão dos ajustes do sistema aparece, e a página não os abre")
+    return falhas
+
+
 def escolha_da_casca(pg: Page) -> list[str]:
     """A escolha da casca à mão (Tarefa 18): ela grava a preferência, diz que
     vale na próxima abertura, e não troca nada ao vivo."""
@@ -1649,16 +1833,16 @@ CASOS: dict[str, Caso] = {
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
     "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
-    # O claro entra com a Tarefa 13: o azul da sala ocupada e o fósforo de
-    # quem fala são cores de estado, e a derivação delas a partir do tema é a
-    # função 17e da F3. Até lá, o claro reprova o «VOCÊ ESTÁ AQUI» a 2,6:1.
-    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "hostil"),
+    # O claro voltou com a Tarefa 13: o azul da sala ocupada e o fósforo de quem
+    # fala são cores de estado, derivadas do tema pela `tonsDoTema` da F3 (17e).
+    # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
+    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
-    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "hostil"),
+    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
-    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
+    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),
                         raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
-    "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
+    "chamada": Caso(levar=chamada, temas=("papel", "claro", "hostil"),
                     raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-medida": Caso(levar=ajustes_medida, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
     # Termina fora do servidor (SAIR DO SERVIDOR): as medidas do aparelho
@@ -1680,6 +1864,10 @@ CASOS: dict[str, Caso] = {
     "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
     # As superfícies de MOD acima da faixa e das abas (Tarefa 11; F3, 5d).
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
+    # As regiões de MOD que o celular declara, e a que ele não tem.
+    "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
+    # A região operador.barra no alto de AJUSTES (F3, passo 8b).
+    "operador-barra": Caso(levar=operador_barra, medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
@@ -1691,6 +1879,9 @@ CASOS: dict[str, Caso] = {
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
     "larga-tela-cheia": Caso(levar=larga_tela_cheia, marca="larga", aparelhos=("1440",), medir=False),
+    # O microfone negado pelo navegador, nas duas cascas (achado 3).
+    "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
+    "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
     "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
