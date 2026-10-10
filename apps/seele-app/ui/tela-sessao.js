@@ -4355,8 +4355,13 @@ window.addEventListener("paste", (evento) => {
 // `isComposing`: quem digita com IME — japonês, coreano, chinês — usa Enter
 // para confirmar a palavra que está montando. Mandar ali cortaria a frase no
 // meio, e a tecla que confirma viraria a tecla que erra.
+//
+// `CASCA.enterEnvia` (P8, em `base.js`): no celular o Return quebra a fileira, e
+// só o ENVIAR envia. O teclado do aparelho não tem Shift+Enter, e uma mensagem
+// de duas fileiras não teria como ser escrita.
 $("campo-mensagem").addEventListener("keydown", (evento) => {
   if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;
+  if (!CASCA.enterEnvia) return;
   evento.preventDefault();
   enviar(evento);
 });

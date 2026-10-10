@@ -81,17 +81,9 @@ class Ponto:
     troca: bool = False
 
 
-PONTOS_INJETADOS = [
-    # O Return do celular quebra a fileira (P8): o teclado do aparelho não tem
-    # Shift+Enter, e uma mensagem de duas fileiras não teria como ser escrita.
-    Ponto(
-        "P8",
-        "tela-sessao.js",
-        '  if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;\n',
-        "  if (!CASCA.enterEnvia) return;\n",
-        "CASCA.enterEnvia",
-    ),
-]
+# Vazia desde a nona integração: o P1 e o P5 a P8 entraram no produto, e o P9 e
+# o P10 já entram nele direto. Fica para o próximo ponto que precisar esperar.
+PONTOS_INJETADOS: list[Ponto] = []
 
 # As áreas seguras de um iPhone em retrato (a ilha em cima, a barra de gestos
 # embaixo) e de um Android comum, com a barra de navegação por gestos.
