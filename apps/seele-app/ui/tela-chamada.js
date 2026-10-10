@@ -172,6 +172,70 @@ function desenharOPalcoDosMods(snapshot) {
   palco.hidden = !aFrente;
   $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
   $("palco-de-mods-ver-o-palco").hidden = !(tem && palcoDosModsEscondido);
+
+  // Quem está no palco, e onde: a substituição no miolo, os acréscimos na
+  // faixa. Um MOD que faz os dois mede pelo miolo.
+  modsDoPalco.clear();
+  for (const no of acrescimos) modsDoPalco.set(no.dataset.mod, "palco-de-mods-acrescimos");
+  if (desenho) modsDoPalco.set(escolhida.mod, "palco-de-mods-miolo");
+  // Só a quem chegou, ou mudou de lugar: o tamanho que muda é do observador.
+  dizerOTamanhoDoPalco(true);
+}
+
+/** Os MODs do palco agora, cada um com o contêiner que é dele. */
+const modsDoPalco = new Map();
+
+/** O que cada MOD do palco já ouviu: `contêiner:largura×altura`. */
+const tamanhoDoPalcoDito = new Map();
+
+/**
+ * **O tamanho do palco, a cada MOD dele** (rascunho da API 6, §5 e §7.2): o
+ * `lugar` com a largura e a altura que ele tem ali — a substituição, o miolo;
+ * o acréscimo, a faixa — e `regiao: 'chamada.palco'`, para o MOD saber de que
+ * lugar é o tamanho. Escondido, 0 × 0. Só quando muda, e para quem a API tem
+ * os eventos da tela; quem chega ao palco ouve o tamanho de agora.
+ *
+ * **Dois caminhos, um dono cada.** O desenho chama com `soQuemChegou`: só o
+ * MOD que entrou no palco, ou trocou de lugar nele, ouve o tamanho de agora.
+ * O tamanho que muda — a janela, a coluna, VER O PALCO e VER A GRADE — é do
+ * `ResizeObserver`. Medir a cada desenho cobriria o observador: o laço da
+ * chamada passa a cada meio segundo, e a bancada não veria o observador
+ * faltar (medido).
+ */
+function dizerOTamanhoDoPalco(soQuemChegou = false) {
+  for (const id of [...tamanhoDoPalcoDito.keys()]) {
+    if (!modsDoPalco.has(id)) tamanhoDoPalcoDito.delete(id);
+  }
+  if (modsDoPalco.size === 0) return;
+  const casca = cascaDoRetrato();
+  for (const [id, onde] of modsDoPalco) {
+    const caixa = $(onde);
+    const largura = Math.round(caixa?.clientWidth ?? 0);
+    const altura = Math.round(caixa?.clientHeight ?? 0);
+    const chave = `${onde}:${largura}×${altura}`;
+    const dito = tamanhoDoPalcoDito.get(id);
+    if (dito === chave) continue;
+    if (soQuemChegou && dito?.startsWith(`${onde}:`)) continue;
+    const instancia = modsCarregados.get(id);
+    if (!instancia?.admite?.(geracaoDaSessao)) continue;
+    if (!(CAPACIDADES_POR_API[Number(instancia.api)] ?? []).includes("eventos-da-tela")) continue;
+    tamanhoDoPalcoDito.set(id, chave);
+    donoDaRegiao({ id, hash: instancia.hash }, instancia).falar({
+      nome: "lugar",
+      onde: casca.onde,
+      regioes: casca.regioes,
+      largura,
+      altura,
+      regiao: "chamada.palco",
+    });
+  }
+}
+
+// O tamanho muda sem retrato novo: a janela, a coluna, VER O PALCO.
+if (typeof ResizeObserver === "function") {
+  const observador = new ResizeObserver(() => dizerOTamanhoDoPalco());
+  observador.observe($("palco-de-mods-miolo"));
+  observador.observe($("palco-de-mods-acrescimos"));
 }
 
 // **A saída é do produto**: ver a grade esconde o palco sem desmontá-lo, e a

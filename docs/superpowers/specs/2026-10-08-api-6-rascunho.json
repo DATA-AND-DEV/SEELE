@@ -153,7 +153,7 @@
     "sala": "{ sala | null } — quem usa entrou numa sala de voz ou saiu",
     "pessoas": "{ entrou?, saiu? } — alguém entrou no servidor ou saiu",
     "fala": "{ falando: [id] } — no máximo 4 por segundo",
-    "lugar": "{ onde, regioes, largura, altura } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma",
+    "lugar": "{ onde, regioes, largura, altura, regiao? } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma; com regiao, o tamanho é o do lugar do MOD nela (o chamada.palco: o miolo ou a faixa, 0 × 0 escondido); sem, o da sessão",
     "servidor": "{ carga } — o aviso da metade de servidor (mundo.avisar)",
     "nunca": "nenhum evento carrega toque, chamada, código ou agenda",
     "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', pares?: [{ par, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia"
@@ -480,7 +480,9 @@
       "contexto": "o pedido feito do palco leva contexto.sala",
       "de-quem": "por pessoa: cada janela monta o que o MOD dela declarar",
       "toque": "recebe toque e clique",
-      "tamanho": "o MOD recebe largura e altura, e o evento lugar quando mudam",
+      "tamanho": "o MOD recebe largura e altura no evento lugar, com regiao: 'chamada.palco', ao chegar e a cada mudança: a substituição, o miolo; o acréscimo, a faixa; escondido, 0 × 0",
+      "vista": "alternativa à grade, e começa escondido: VER O PALCO, na barra da chamada, o traz à frente; VER A GRADE o devolve, sem desmontar (o som continua); sair da sala o desmonta",
+      "modos-no-palco": "a substituição escolhida no miolo; os acréscimos numa faixa abaixo dele",
       "celular": "vista alternativa à grade (MESA · CHAMADA), com quem fala numa tira no alto"
     }
   },

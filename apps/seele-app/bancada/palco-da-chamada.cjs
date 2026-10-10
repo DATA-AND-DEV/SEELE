@@ -28,6 +28,10 @@
 //    `pausada` e a fonte segue; sair da sala manda, e a fonte para. Com o
 //    WebAudio de verdade, como `oSomQueSaiDaTelaPara`, em
 //    `diagnostico-de-mods.cjs`.
+// 9. **O tamanho** (rascunho §5 e §7.2): cada MOD do palco ouve o `lugar` com
+//    a largura e a altura que tem ali — a substituição, o miolo; o acréscimo,
+//    a faixa — e `regiao: 'chamada.palco'`. Escondido, 0 × 0. Mudar o tamanho
+//    da janela diz o novo; redesenhar sem mudar não repete.
 //
 // Rodar:  node apps/seele-app/bancada/palco-da-chamada.cjs
 
@@ -281,8 +285,56 @@ function wavDeTeste(segundos) {
     // logo depois, e o `ended` de uma fonte num contexto suspenso não chega.
     assert.equal(await page.evaluate(() => window.paradas), 1, 'saiu da sala, e a fonte da trilha não foi parada');
 
+    // 9. O tamanho do palco, a cada MOD dele.
+    await page.evaluate(async () => {
+      const r = testTable.snapshot;
+      testTable.snapshot = { ...r, voice_rooms: r.voice_rooms.map((s) => ({ ...s, occupied_by_us: s.id === 1 })) };
+      eventos.length = 0;
+      await abrirChamada();
+    });
+    await registrar('mod/dados', {
+      ponto: 'chamada.palco', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 'd', dentro: 'os dados rolados' }],
+    });
+    await redesenhar();
+    const lugares = (mod) => page.evaluate((mod) => eventos
+      .filter((e) => e.mod === mod && e.nome === 'lugar' && e.regiao === 'chamada.palco')
+      .map(({ largura, altura, onde, regioes }) => ({ largura, altura, onde, temRegioes: Array.isArray(regioes) })), mod);
+    const ultimo = async (mod) => (await lugares(mod)).at(-1) ?? null;
+    assert.deepEqual(await ultimo('mod/mesa'), { largura: 0, altura: 0, onde: 'computador', temRegioes: true },
+      'o palco escondido não disse 0 × 0 a quem substitui');
+    assert.deepEqual(await ultimo('mod/dados'), { largura: 0, altura: 0, onde: 'computador', temRegioes: true },
+      'o palco escondido não disse 0 × 0 a quem acrescenta');
+    await page.click('#palco-de-mods-ver-o-palco');
+    const medidas = () => page.evaluate(() => ({
+      miolo: [$('palco-de-mods-miolo').clientWidth, $('palco-de-mods-miolo').clientHeight],
+      faixa: [$('palco-de-mods-acrescimos').clientWidth, $('palco-de-mods-acrescimos').clientHeight],
+    }));
+    const esperarOTamanho = async (mod, [largura, altura], oQue) => {
+      await page.waitForFunction(([mod, largura, altura]) => eventos.some((e) => e.mod === mod && e.nome === 'lugar'
+        && e.regiao === 'chamada.palco' && e.largura === largura && e.altura === altura), [mod, largura, altura], { timeout: 5000 })
+        .catch(async () => assert.fail(`${oQue}: esperava ${largura} × ${altura}, e ouviu ${JSON.stringify(await lugares(mod))}`));
+    };
+    let medida = await medidas();
+    assert.ok(medida.miolo[0] > 0 && medida.miolo[1] > 0 && medida.faixa[1] > 0, `o palco aberto não tem tamanho: ${JSON.stringify(medida)}`);
+    await esperarOTamanho('mod/mesa', medida.miolo, 'aberto o palco, quem substitui não ouviu o tamanho do miolo');
+    await esperarOTamanho('mod/dados', medida.faixa, 'aberto o palco, quem acrescenta não ouviu o tamanho da faixa');
+    // Redesenhar sem mudar não repete.
+    const quantos = (await lugares('mod/mesa')).length;
+    await redesenhar();
+    await redesenhar();
+    await page.waitForTimeout(200);
+    assert.equal((await lugares('mod/mesa')).length, quantos, 'redesenhar sem mudar o tamanho repetiu o `lugar`');
+    // A janela muda de tamanho, e o MOD sabe.
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await page.waitForTimeout(100);
+    medida = await medidas();
+    await esperarOTamanho('mod/mesa', medida.miolo, 'a janela mudou de tamanho, e quem substitui não ouviu');
+    // Escondido de novo, 0 × 0.
+    await page.click('#palco-de-mods-ver-a-grade');
+    await esperarOTamanho('mod/mesa', [0, 0], 'o palco escondido não disse 0 × 0');
+
     assert.deepEqual(errors, []);
-    console.log('palco da chamada: monta sobre a grade, que continua no DOM; o clique chega ao MOD; a saída é do produto e não desmonta; os acréscimos têm faixa própria; revogar devolve a grade; sair da sala desmonta, mesmo com a conversa à frente; e o palco escondido continua soando, até sair da sala.');
+    console.log('palco da chamada: monta sobre a grade, que continua no DOM; o clique chega ao MOD; a saída é do produto e não desmonta; os acréscimos têm faixa própria; revogar devolve a grade; sair da sala desmonta, mesmo com a conversa à frente; e o palco escondido continua soando, até sair da sala; e cada MOD do palco ouve o tamanho dele.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

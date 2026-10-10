@@ -466,12 +466,27 @@ contrato, **com os números em aberto para a M3** (§12):
 - **De quem.** O palco é **por pessoa**: cada janela monta o que o MOD dela
   declarar. Quem mestra vê peças ocultas e notas; quem joga não (MESA, 5c). Um
   palco compartilhado seria estado de servidor, e o MOD já o tem.
-- **Tamanho.** O MOD recebe a largura e a altura que tem ali, e um evento
-  quando elas mudam (§7.2); as `classes` com `consultas: [{ ateLargura }]`
-  valem dentro do palco.
-- **Saída.** Como toda superfície: a saída é do produto, e a grade de vídeo
-  continua de pé por baixo. A faixa de toque e a de batida ficam fora, por
-  construção (§10).
+- **Os dois modos** (decidido em 10/10), como nos outros pontos: a
+  substituição escolhida — pela preferência de quem vê, ou pela prioridade —
+  é o miolo do palco; os acréscimos moram numa faixa abaixo dele. O palco
+  aparece quando há pelo menos um dos dois, e só dentro de uma sala. [c,
+  `desenharOPalcoDosMods`]
+- **Vista alternativa à grade, e começa escondido** (decidido em 10/10). O
+  palco chega montado atrás da grade, e a barra da chamada oferece VER O
+  PALCO: quem o traz à frente é a pessoa. A grade é onde moram as capas de
+  quem fala (§4, D-capa-1), e um MOD que registra o palco não a tira da vista
+  de ninguém sem a pessoa pedir. Com o palco à frente, a grade sai da vista e
+  continua no DOM, repintada a cada retrato. [c, `palco-da-chamada.cjs`]
+- **Tamanho.** O MOD recebe a largura e a altura que tem ali — a
+  substituição, o miolo; o acréscimo, a faixa — no evento `lugar`, com
+  `regiao: 'chamada.palco'` (§7.2), quando chega ao palco e a cada mudança;
+  escondido, 0 × 0. As `classes` com `consultas: [{ ateLargura }]` valem
+  dentro do palco. [c]
+- **Saída.** Como toda superfície: a saída é do produto — VER A GRADE, na
+  barra do palco, que diz de quem ele é —, e esconder não desmonta: o som do
+  palco escondido continua (§11). A grade de vídeo continua de pé por baixo.
+  Sair da sala desmonta o palco. A faixa de toque e a de batida ficam fora,
+  por construção (§10).
 
 ### A mídia do servidor, em todo lugar, pelo mesmo caminho
 
@@ -839,7 +854,7 @@ contrato (MESA, item 3).
 | `sala` | quem usa entrou numa sala de voz ou saiu dela | `{ sala | null }` |
 | `pessoas` | alguém entrou no servidor ou saiu | `{ entrou?: id, saiu?: id }` |
 | `fala` | o conjunto de quem fala mudou | `{ falando: [id] }`, no máximo 4 por segundo |
-| `lugar` | a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma | `{ onde, regioes, largura, altura }` |
+| `lugar` | a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma | `{ onde, regioes, largura, altura, regiao? }` |
 
 **Nunca carregam a ligação.** O MOD do servidor em que a pessoa está não fica
 sabendo que ela recebe uma ligação, de quem, nem qual é o código de ninguém.
@@ -852,6 +867,12 @@ tem `eventos-da-tela` os recebem. A fala sai no máximo a cada 250 ms, e o
 conjunto mais novo sempre chega (`criarRitmoDaFala`). O `lugar` sai quando
 `onde` ou as `regioes` mudam, com a largura e a altura da sessão; o tamanho de
 cada região, e o `lugar` quando ele muda, são da tarefa 5.
+
+**`regiao` diz de que lugar é o tamanho** (decidido em 10/10): sem ela, o
+tamanho é o da sessão; com ela, é o do lugar que o MOD tem naquela região ou
+camada. O primeiro a levá-la é o `chamada.palco` (§5): o MOD que substitui
+ouve o tamanho do miolo, o que acrescenta, o da faixa, quando chega ao palco
+e a cada mudança, e 0 × 0 com o palco escondido. [c, `dizerOTamanhoDoPalco`]
 
 ### 7.3 O aviso da metade de servidor às janelas (novo)
 
