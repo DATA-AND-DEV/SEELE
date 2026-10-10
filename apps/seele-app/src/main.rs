@@ -1118,7 +1118,7 @@ async fn connect(
     // não serve a ela. «Ele salva apenas o endereço LAN, o que não faz sentido
     // algum para pessoas que se conversam pela internet.»
     let veio_de_link = !alternativos.is_empty() || bilhete.is_some();
-    let (mut alternativos, bilhete, impressao_guardada) = if veio_de_link {
+    let (alternativos, bilhete, impressao_guardada) = if veio_de_link {
         (alternativos, bilhete, None)
     } else {
         match seele_ffi::conhecidos::Conhecidos::abrir(
@@ -1174,58 +1174,27 @@ async fn connect(
     let origem_da_impressao =
         OrigemDaImpressao::da_conferida(esperada.as_deref(), impressao_guardada.as_deref());
 
-    // **O quarto: onde este servidor mora hoje.**
+    // **O quarto, onde este servidor mora hoje, é perguntado na ponte, e junto
+    // com a corrida** (a pendência 55, tarefa 14b da F7).
     //
-    // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível
-    // — o mapeamento nasce quando um pacote sai, e o roteador dá outro na
-    // abertura seguinte. Foi relatado assim: «o ip que fica salvo na lista de
-    // servidores ainda dá problema de reconexão, possivelmente porque a porta
-    // muda quando abre e fecha o server. Se não, a lista de servidores fica
-    // inútil.»
+    // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível:
+    // o mapeamento nasce quando um pacote sai, e o roteador dá outro na
+    // abertura seguinte. A impressão digital não envelhece, e é dela que sai a
+    // marca com que o quarto é perguntado. Esta função perguntava aqui, antes de
+    // chamar a ponte, e quem estava na mesma casa pagava até 1,5 s de prazo do
+    // quarto com o ponto ou o DNS mudos. Agora a `Chegada` da FFI pergunta
+    // enquanto a corrida anda, com a impressão conferida e o bilhete guardado:
+    // o endereço de hoje entra quando chega, e a escuta de hoje vira o aviso do
+    // `LEVE` só pela regra de `bilhete_desta_volta`.
     //
-    // A impressão digital não envelhece, e é dela que sai a marca. Duas
-    // perguntas porque são dois sockets atrás do mesmo IP público: o do
-    // servidor, para onde se conecta, e o da escuta de avisos, para onde vai o
-    // pedido de furo. Nenhuma das duas se deriva da outra.
-    //
-    // As respostas entram **na frente** dos endereços guardados, e não no lugar
-    // deles: um ponto que não responda (ou um antigo, sem o verbo) deixa tudo
-    // como estava, e o guardado ainda serve a quem está na mesma casa.
-    //
-    // **E valem só para esta volta.** O bilhete que vai para a lista de
-    // conhecidos é tomado aqui, antes da pergunta: o do link desta sessão, ou o
-    // que a própria lista já guardava. A escuta que o quarto devolve troca o
-    // aviso do `LEVE` desta volta e não vai para a lista. Ia, e quem ocupasse a
-    // marca da escuta ficava gravado: as voltas seguintes sem escuta fresca (o
-    // anfitrião fora do ar, o ponto reiniciado, um anfitrião 0.15.0, que não
-    // registra essa marca) mandavam a ele o `LEVE`, que sai antes do TLS e leva
-    // o endereço de quem chega. O endereço do servidor que o quarto dá também
-    // fica de fora da lista, por outra razão (`caminhos_a_guardar`, abaixo).
+    // **Nada do que o quarto dá volta para cá**, e é isso que mantém a lista de
+    // conhecidos limpa. O bilhete que ela grava é o guardado (o do link desta
+    // sessão, ou o que a lista já tinha), e não o desta volta: quem ocupasse a
+    // marca da escuta ficaria gravado, e as voltas seguintes sem escuta fresca
+    // mandariam a ele o `LEVE`, com o endereço de quem chega. E o endereço de
+    // hoje também não entra na escada da lista (`caminhos_a_guardar`, abaixo):
+    // ele é perguntado de novo a cada conexão.
     let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
-    let mut do_quarto: Option<String> = None;
-    let bilhete = match (conferida.as_deref(), &bilhete) {
-        (Some(impressao), Some(bilhete_guardado)) => {
-            let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
-            let fresco_do_server = no_quarto.servidor();
-            // Uma resposta que já é candidata, o alvo ou um alternativo, não
-            // entra de novo: seriam dois apertos de mão e dois `Hello` para o
-            // mesmo servidor. A regra compara pela chave de pino.
-            do_quarto = fresco_do_server
-                .map(|endereco| endereco.to_string())
-                .filter(|texto| !seele_ffi::ja_esta_na_corrida(texto, &server, &alternativos));
-            if let Some(texto) = &do_quarto {
-                alternativos.insert(0, texto.clone());
-            }
-            // **A escuta do quarto só vira o aviso do `LEVE` quando o servidor
-            // da mesma resposta mora no mesmo IP.** O servidor é conferido no
-            // TLS; o `LEVE` sai antes dele, e leva a quem estiver no aviso o
-            // endereço de quem chega. A marca da escuta está em todo link, e
-            // um anfitrião 0.15.0 nunca a registra. A regra é da FFI, e diz no
-            // `seele.log` a escuta que deixou de lado.
-            Some(seele_ffi::bilhete_desta_volta(bilhete_guardado, &no_quarto))
-        }
-        _ => bilhete,
-    };
 
     let home = config_dir(&app);
     // **Sem nome escolhido, um nome desta máquina** — e não uma constante que
@@ -1260,9 +1229,10 @@ async fn connect(
     let alvo = server.clone();
     let apelido = nickname.clone();
     let casa = home.clone();
-    // A escada, para a mesma lista, sem o endereço que o quarto pôs na frente:
-    // ele é perguntado de novo a cada conexão (ver `caminhos_a_guardar`).
-    let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, do_quarto.as_deref());
+    // A escada, para a mesma lista. O endereço de hoje não está nela: o quarto
+    // é perguntado na ponte, e ele não volta para cá (ver o começo desta
+    // função e `caminhos_a_guardar`).
+    let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
