@@ -1,17 +1,24 @@
-//! `cargo xtask web`: os dois crates do celular, dentro do `.wasm`.
+//! `cargo xtask web`: os crates do celular, dentro do `.wasm`.
 //!
 //! O que os testes nativos não provam, porque só existe no `wasm`:
 //!
 //! 1. o `seele-web` compila para `wasm32-unknown-unknown`, e os bytes-ouro da
 //!    F1 cruzam a fronteira de verdade com os mesmos bytes, com o JSON passando
 //!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
-//!    da F1 passam pela fronteira (`xtask/web/links.mjs`);
-//! 2. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
+//!    da F1 passam pela fronteira (`xtask/web/links.mjs`); e a voz pela fronteira
+//!    manda os pacotes e separa as fontes das sequências fixas que o desktop
+//!    grava (`xtask/web/voz.mjs`);
+//! 2. o `seele-sessao` (o `Room` que o navegador dobra, Tarefa 2.2) compila
+//!    para `wasm32-unknown-unknown`: uma dependência nova dele que não compile
+//!    no navegador para aqui, e não no dia em que o `seele-web` a usar;
+//!    O mesmo vale para o `seele-voz` (o portão, o jitter e o mixer da voz,
+//!    Tarefa 3.3);
+//! 3. **sem `WASI_SDK`, o build do motor para, e não baixa nada**: o
 //!    `.cargo/config.toml` aponta a variável para uma pasta que não existe;
-//! 3. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
-//! 4. o clippy passa no `wasm32-wasip1`, que é o único alvo onde a
+//! 4. o wasi-sdk vem conferido ([`crate::wasi_sdk`]), e o motor compila com ele;
+//! 5. o clippy passa no `wasm32-wasip1`, que é o único alvo onde a
 //!    `fronteira.rs` do motor existe, e com ela o `// SAFETY:` cobrado;
-//! 5. o motor, dentro do `.wasm`, só importa as funções da lista, fala a API do
+//! 6. o motor, dentro do `.wasm`, só importa as funções da lista, fala a API do
 //!    desktop e **passa a tabela da volta do `seele-motor`**
 //!    (`crates/seele-motor/tests/casos.json`), a mesma que o nativo passa: o
 //!    laço cortado, as rejeições, o balde do `console`, os temporizadores, a
@@ -199,6 +206,28 @@ pub(crate) fn run() -> ExitCode {
         ]))),
     ));
     passos.push((
+        "seele-sessao para wasm32-unknown-unknown (o Room que o navegador dobra)",
+        deu_certo(rodar(cargo().args([
+            "build",
+            "--release",
+            "-p",
+            "seele-sessao",
+            "--target",
+            "wasm32-unknown-unknown",
+        ]))),
+    ));
+    passos.push((
+        "seele-voz para wasm32-unknown-unknown (o portão, o jitter e o mixer da voz)",
+        deu_certo(rodar(cargo().args([
+            "build",
+            "--release",
+            "-p",
+            "seele-voz",
+            "--target",
+            "wasm32-unknown-unknown",
+        ]))),
+    ));
+    passos.push((
         "os bytes-ouro dentro do .wasm (xtask/web/ouro.mjs)",
         deu_certo(rodar(
             Command::new("node")
@@ -215,6 +244,13 @@ pub(crate) fn run() -> ExitCode {
                 .arg("xtask/web/links.mjs")
                 .arg(&web)
                 .arg("crates/seele-web/tests/links-da-f1.json"),
+        )),
+    ));
+
+    passos.push((
+        "a voz do desktop pela fronteira, dentro do .wasm (xtask/web/voz.mjs)",
+        deu_certo(rodar(
+            Command::new("node").arg("xtask/web/voz.mjs").arg(&web),
         )),
     ));
 

@@ -1118,7 +1118,7 @@ async fn connect(
     // não serve a ela. «Ele salva apenas o endereço LAN, o que não faz sentido
     // algum para pessoas que se conversam pela internet.»
     let veio_de_link = !alternativos.is_empty() || bilhete.is_some();
-    let (mut alternativos, bilhete, impressao_guardada) = if veio_de_link {
+    let (alternativos, bilhete, impressao_guardada) = if veio_de_link {
         (alternativos, bilhete, None)
     } else {
         match seele_ffi::conhecidos::Conhecidos::abrir(
@@ -1174,58 +1174,27 @@ async fn connect(
     let origem_da_impressao =
         OrigemDaImpressao::da_conferida(esperada.as_deref(), impressao_guardada.as_deref());
 
-    // **O quarto: onde este servidor mora hoje.**
+    // **O quarto, onde este servidor mora hoje, é perguntado na ponte, e junto
+    // com a corrida** (a pendência 55, tarefa 14b da F7).
     //
-    // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível
-    // — o mapeamento nasce quando um pacote sai, e o roteador dá outro na
-    // abertura seguinte. Foi relatado assim: «o ip que fica salvo na lista de
-    // servidores ainda dá problema de reconexão, possivelmente porque a porta
-    // muda quando abre e fecha o server. Se não, a lista de servidores fica
-    // inútil.»
+    // Tudo o que a lista guarda é endereço, e endereço atrás de NAT é perecível:
+    // o mapeamento nasce quando um pacote sai, e o roteador dá outro na
+    // abertura seguinte. A impressão digital não envelhece, e é dela que sai a
+    // marca com que o quarto é perguntado. Esta função perguntava aqui, antes de
+    // chamar a ponte, e quem estava na mesma casa pagava até 1,5 s de prazo do
+    // quarto com o ponto ou o DNS mudos. Agora a `Chegada` da FFI pergunta
+    // enquanto a corrida anda, com a impressão conferida e o bilhete guardado:
+    // o endereço de hoje entra quando chega, e a escuta de hoje vira o aviso do
+    // `LEVE` só pela regra de `bilhete_desta_volta`.
     //
-    // A impressão digital não envelhece, e é dela que sai a marca. Duas
-    // perguntas porque são dois sockets atrás do mesmo IP público: o do
-    // servidor, para onde se conecta, e o da escuta de avisos, para onde vai o
-    // pedido de furo. Nenhuma das duas se deriva da outra.
-    //
-    // As respostas entram **na frente** dos endereços guardados, e não no lugar
-    // deles: um ponto que não responda (ou um antigo, sem o verbo) deixa tudo
-    // como estava, e o guardado ainda serve a quem está na mesma casa.
-    //
-    // **E valem só para esta volta.** O bilhete que vai para a lista de
-    // conhecidos é tomado aqui, antes da pergunta: o do link desta sessão, ou o
-    // que a própria lista já guardava. A escuta que o quarto devolve troca o
-    // aviso do `LEVE` desta volta e não vai para a lista. Ia, e quem ocupasse a
-    // marca da escuta ficava gravado: as voltas seguintes sem escuta fresca (o
-    // anfitrião fora do ar, o ponto reiniciado, um anfitrião 0.15.0, que não
-    // registra essa marca) mandavam a ele o `LEVE`, que sai antes do TLS e leva
-    // o endereço de quem chega. O endereço do servidor que o quarto dá também
-    // fica de fora da lista, por outra razão (`caminhos_a_guardar`, abaixo).
+    // **Nada do que o quarto dá volta para cá**, e é isso que mantém a lista de
+    // conhecidos limpa. O bilhete que ela grava é o guardado (o do link desta
+    // sessão, ou o que a lista já tinha), e não o desta volta: quem ocupasse a
+    // marca da escuta ficaria gravado, e as voltas seguintes sem escuta fresca
+    // mandariam a ele o `LEVE`, com o endereço de quem chega. E o endereço de
+    // hoje também não entra na escada da lista (`caminhos_a_guardar`, abaixo):
+    // ele é perguntado de novo a cada conexão.
     let bilhete_texto = bilhete.as_ref().map(ToString::to_string);
-    let mut do_quarto: Option<String> = None;
-    let bilhete = match (conferida.as_deref(), &bilhete) {
-        (Some(impressao), Some(bilhete_guardado)) => {
-            let no_quarto = seele_ffi::onde_mora_hoje(&bilhete_guardado.ponto, impressao).await;
-            let fresco_do_server = no_quarto.servidor();
-            // Uma resposta que já é candidata, o alvo ou um alternativo, não
-            // entra de novo: seriam dois apertos de mão e dois `Hello` para o
-            // mesmo servidor. A regra compara pela chave de pino.
-            do_quarto = fresco_do_server
-                .map(|endereco| endereco.to_string())
-                .filter(|texto| !seele_ffi::ja_esta_na_corrida(texto, &server, &alternativos));
-            if let Some(texto) = &do_quarto {
-                alternativos.insert(0, texto.clone());
-            }
-            // **A escuta do quarto só vira o aviso do `LEVE` quando o servidor
-            // da mesma resposta mora no mesmo IP.** O servidor é conferido no
-            // TLS; o `LEVE` sai antes dele, e leva a quem estiver no aviso o
-            // endereço de quem chega. A marca da escuta está em todo link, e
-            // um anfitrião 0.15.0 nunca a registra. A regra é da FFI, e diz no
-            // `seele.log` a escuta que deixou de lado.
-            Some(seele_ffi::bilhete_desta_volta(bilhete_guardado, &no_quarto))
-        }
-        _ => bilhete,
-    };
 
     let home = config_dir(&app);
     // **Sem nome escolhido, um nome desta máquina** — e não uma constante que
@@ -1260,9 +1229,10 @@ async fn connect(
     let alvo = server.clone();
     let apelido = nickname.clone();
     let casa = home.clone();
-    // A escada, para a mesma lista, sem o endereço que o quarto pôs na frente:
-    // ele é perguntado de novo a cada conexão (ver `caminhos_a_guardar`).
-    let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, do_quarto.as_deref());
+    // A escada, para a mesma lista. O endereço de hoje não está nela: o quarto
+    // é perguntado na ponte, e ele não volta para cá (ver o começo desta
+    // função e `caminhos_a_guardar`).
+    let caminhos = seele_ffi::conhecidos::caminhos_a_guardar(&alternativos, None);
     let config = ConnectConfig {
         server,
         alternate_servers: alternativos,
@@ -1276,6 +1246,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
+        codigo_esperado: None,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não
@@ -4208,6 +4179,11 @@ struct ModNaTela {
     instalado: seele_ffi::mods::ModInstalado,
     /// Se o servidor desta janela o exige agora.
     enabled: bool,
+    /// **Se é este MOD que pinta o servidor desta janela** (D-api-5; tarefa
+    /// 17f.0 da F3): ligado, com a porta do tema, e o escolhido. Com dois MODs
+    /// com a porta ligados, a gestão pergunta qual, e este é o que está
+    /// marcado; a escolha vai por [`escolher_o_tema_do_servidor`].
+    pinta: bool,
     /// Se, com essa exigência, quem não aceita já é barrado pela rede.
     ///
     /// **A metade que `enabled` sozinho não conta.** `enabled` responde só o
@@ -4234,19 +4210,26 @@ async fn mods_instalados(
     session: State<'_, Session>,
 ) -> Result<Vec<ModNaTela>, FalhaNoMod> {
     let ligados = mods_ligados(&session).await?;
+    let quem_pinta = quem_pinta_o_servidor(&session).await?;
     let pasta = config_dir(&app);
 
     let exigencia_vale_na_rede = seele_server::mods::anuncio::exigencia_vale_na_rede();
     Ok(seele_ffi::mods::listar_por_conteudo(&pasta)
         .into_iter()
-        .map(|instalado| ModNaTela {
+        .map(|instalado| {
             // Ligado é **este pacote**, e não este MOD: dois conteúdos do mesmo
             // MOD podem estar no disco, e só um é o que o servidor exige.
-            enabled: ligados
+            let enabled = ligados
                 .iter()
-                .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash),
-            exigencia_vale_na_rede,
-            instalado,
+                .any(|(id, hash)| *id == instalado.id && *hash == instalado.hash);
+            ModNaTela {
+                // O escolhido é um identificador, e a marca vai só no pacote
+                // ligado dele: o outro conteúdo do mesmo MOD não pinta nada.
+                pinta: enabled && quem_pinta.as_deref() == Some(instalado.id.as_str()),
+                enabled,
+                exigencia_vale_na_rede,
+                instalado,
+            }
         })
         .collect())
 }
@@ -7672,6 +7655,37 @@ async fn aplicar_conjunto_de_mods(
     Ok(identidade)
 }
 
+/// **A escolha de quem administra** (rascunho da API 6, §9; D-api-5; tarefa
+/// 17f.0 da F3): qual MOD pinta o servidor desta janela.
+///
+/// Com dois MODs com a porta do tema ligados, um só pinta, e quem hospeda
+/// decide qual — como já decide quem desenha cada parte da tela. O tema que
+/// cada um declarou fica guardado, e é o do escolhido que passa a valer, ou
+/// nenhum se ele ainda não declarou. Quem está dentro recebe o `TemaMudou`
+/// na hora, sem reconexão: o conjunto exigido não muda.
+///
+/// # Errors
+///
+/// [`FalhaNoMod::NaoEstaHospedando`] sem servidor nesta janela;
+/// [`FalhaNoMod::Recusado`] com `mod-desligado` ou `sem-porta-de-tema`, e nada
+/// muda; [`FalhaNoMod::BancoNaoRespondeu`].
+#[tauri::command]
+async fn escolher_o_tema_do_servidor(
+    session: State<'_, Session>,
+    id: String,
+) -> Result<(), FalhaNoMod> {
+    let servidor = servidor_do_mod(&session)?;
+    match seele_server::mods::tema::escolher(&servidor, &id)
+        .await
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?
+    {
+        seele_server::mods::tema::Escolha::Feita => Ok(()),
+        seele_server::mods::tema::Escolha::Recusada(motivo) => Err(FalhaNoMod::Recusado {
+            motivo: motivo.to_owned(),
+        }),
+    }
+}
+
 // --------------------------------------------- o aceite de quem entra
 //
 // Os três acima são de quem **hospeda** — decidem o que a sala exige. Os três
@@ -7948,6 +7962,32 @@ fn persistence_do_mod(
         .do_guardado()
         .ok_or(FalhaNoMod::NaoEstaHospedando)?;
     Ok(server.persistence())
+}
+
+/// O servidor hospedado inteiro, para o que grava **e** avisa as sessões, ou a
+/// recusa. Clonado para fora do `Mutex` pela razão de [`persistence_do_mod`].
+fn servidor_do_mod(
+    session: &State<'_, Session>,
+) -> Result<Arc<seele_server::server::Server>, FalhaNoMod> {
+    let hospedagens = session
+        .hospedagens
+        .lock()
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
+    let server = hospedagens
+        .do_guardado()
+        .ok_or(FalhaNoMod::NaoEstaHospedando)?;
+    Ok(server.servidor())
+}
+
+/// O MOD que pinta o servidor desta janela, ou nenhum — e nenhum quando esta
+/// janela não hospeda, pela razão de [`mods_ligados`].
+async fn quem_pinta_o_servidor(session: &State<'_, Session>) -> Result<Option<String>, FalhaNoMod> {
+    let Ok(persistence) = persistence_do_mod(session) else {
+        return Ok(None);
+    };
+    let persistence = persistence.lock().await;
+    seele_server::persistence::tema::escolhido_ligado(&persistence)
+        .map_err(|_| FalhaNoMod::BancoNaoRespondeu)
 }
 
 /// Abre o seletor e põe a imagem escolhida como **a sua**.
@@ -10246,7 +10286,8 @@ fn main() {
     let filtro = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         "seele_app=info,seele_ffi=info,seele_core=info,\
          seele_video=info,seele_audio=info,seele_server=info,seele_proto=info,\
-         seele_encontro=info,seele_lancador=info,seele_motor=info"
+         seele_encontro=info,seele_lancador=info,seele_motor=info,\
+         seele_sessao=info,seele_voz=info"
             .into()
     });
     match arquivo_de_log() {
@@ -10435,6 +10476,7 @@ fn main() {
             dominios_de_gif,
             apis_de_mod_aceitas,
             aplicar_conjunto_de_mods,
+            escolher_o_tema_do_servidor,
             codigo_do_mod,
             midia_do_mod,
             midia_em_bytes,
@@ -10785,9 +10827,11 @@ mod a_tela_le_o_que_o_rust_manda {
                 repo: "https://exemplo".to_owned(),
                 reach: vec!["dom".to_owned()],
                 server: true,
+                tema: true,
                 refused: None,
             },
             enabled: false,
+            pinta: false,
             exigencia_vale_na_rede: true,
         };
         let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(amostra) else {

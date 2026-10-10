@@ -338,6 +338,16 @@ pub const PRELUDIO: &str = r#"
       return Object.freeze({
         id,
         montar: (arvore) => pedir('superficie-montar', { superficie: id, arvore }),
+        // **A montagem por partes** (rascunho da API 6, §12): troca o nó de
+        // `chave` e o que está sob ele, numa mensagem própria. Uma ficha que
+        // não cabe nos 12 KiB de uma mensagem se monta num esqueleto e numa
+        // parte por vez; o teto que vale é o de nós da superfície.
+        atualizar: (chave, arvore) => pedir('superficie-atualizar', { superficie: id, chave, arvore }),
+        // **A recusa do servidor de volta aos campos** (rascunho da API 6,
+        // §5): `{ chave: frase }`, um campo ou vários de uma vez; `{}` limpa.
+        formulario: Object.freeze({
+          erros: (mapa) => pedir('formulario-erros', { superficie: id, erros: mapa }),
+        }),
         classes: (mapa) => pedir('superficie-classes', { superficie: id, classes: mapa }),
         mostrar: () => pedir('superficie-mostrar', { superficie: id }),
         ocultar: () => pedir('superficie-ocultar', { superficie: id }),
@@ -368,7 +378,13 @@ pub const PRELUDIO: &str = r#"
     // como `superficies` falta do da 3: ausentes, e não montados para a
     // janela recusar depois. As APIs 3 a 5 têm os dois.
     ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
-    tema: (valores) => pedir('tema', { valores }),
+    // Na 6, a janela só faz prévia (rascunho §9, B4): `{ previa: true,
+    // superficie }`. Até a 5, o tema vai como sempre, e a janela ignora os dois.
+    tema: (valores, opcoes) => pedir('tema', {
+      valores,
+      previa: Boolean(opcoes && opcoes.previa === true),
+      superficie: opcoes && opcoes.superficie,
+    }),
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),

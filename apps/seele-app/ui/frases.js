@@ -600,6 +600,10 @@ function fraseDeErro(erro, apelido, deOnde) {
         "arquivo-ilegivel": "Não foi possível ler o arquivo escolhido.",
         "formato-desconhecido": "Use uma imagem PNG, JPEG, WebP ou GIF.",
         "exigido-por-este-servidor": "Desligue o MOD e salve antes de apagar.",
+        // A escolha de quem pinta o servidor (tarefa 17f.0 da F3): o servidor
+        // confere de novo o que a tela mostrou, e nada mudou.
+        "mod-desligado": "Este MOD não está ligado neste servidor: ligue-o e salve antes de escolhê-lo.",
+        "sem-porta-de-tema": "Este MOD não declara a porta do tema, e não pode pintar a aparência do servidor.",
       }[motivo] ?? motivo;
     }
     // ADR 0046: esta versão foi revogada. A frase diz o defeito e o conserto,

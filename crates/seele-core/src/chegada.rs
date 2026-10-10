@@ -882,9 +882,10 @@ impl Chegada {
     /// O que o quarto disse, para a corrida: o endereço de hoje como candidato,
     /// quando ele não é nenhum dos que já correm, e o bilhete desta volta.
     ///
-    /// «Já corre» é pela chave de pino, a regra de `seele_ffi::ja_esta_na_corrida`:
-    /// o mesmo servidor com dois candidatos receberia dois apertos de mão e dois
-    /// `Hello`, e um perdedor poderia desfazer o pin que o vencedor fixou.
+    /// «Já corre» é pela chave de pino, que quem monta os candidatos escreve na
+    /// forma canônica (na FFI, `chave_do_servidor`): o mesmo servidor com dois
+    /// candidatos receberia dois apertos de mão e dois `Hello`, e um perdedor
+    /// poderia desfazer o pin que o vencedor fixou.
     fn do_quarto(&self, no_quarto: &crate::encontro::OndeMora, ja_correm: &[String]) -> DoQuarto {
         let Some(quarto) = &self.quarto else {
             return DoQuarto::default();
@@ -1578,6 +1579,90 @@ mod tests {
             .map(|passo| passo.etapa.nome())
             .collect();
         assert_eq!(etapas, ["Parada", "Desistiu"]);
+    }
+
+    /// Uma volta a um servidor guardado em `alvo`, com o quarto, e o bilhete
+    /// guardado com o aviso `198.51.100.4:41000`.
+    fn volta_com_o_quarto(alvo: &str) -> Chegada {
+        let destino = |servidor: SocketAddr| Destino {
+            servidor,
+            nome_tls: "localhost".into(),
+            chave_do_pin: servidor.to_string(),
+            apelido: "pessoa".into(),
+            segredo: None,
+            esperada: Some(Esperada::Certificado(
+                "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9".into(),
+            )),
+            o_pino_prova_o_servidor: false,
+            aceito: None,
+        };
+        let Ok(guardado) = Bilhete::novo("encontro.exemplo:8384", "198.51.100.4:41000") else {
+            panic!("o bilhete de teste deixou de ser um bilhete");
+        };
+        Chegada::nova(vec![destino(endereco(alvo))], Some(guardado)).com_o_quarto(Quarto::novo(
+            "3cbcfb0212da738f89c156de86eb280adee30fd6b907523b898fedcb2b1de5b9",
+            destino,
+        ))
+    }
+
+    #[test]
+    fn o_endereco_de_hoje_que_ja_corre_nao_entra_de_novo() {
+        // A regra que o `connect` do app fazia com `ja_esta_na_corrida`, e que
+        // mora aqui desde a 14b: o mesmo servidor com dois candidatos recebe
+        // dois apertos de mão e dois `Hello`, e um perdedor pode desfazer o pin
+        // que o vencedor fixou.
+        let chegada = volta_com_o_quarto("203.0.113.7:8383");
+        let ja_correm = vec!["203.0.113.7:8383".to_owned()];
+
+        let mesmo = crate::encontro::OndeMora::Achado {
+            servidor: Some(endereco("203.0.113.7:8383")),
+            escuta: None,
+        };
+        assert!(chegada.do_quarto(&mesmo, &ja_correm).candidato.is_none());
+
+        let outro = crate::encontro::OndeMora::Achado {
+            servidor: Some(endereco("203.0.113.9:8383")),
+            escuta: None,
+        };
+        assert_eq!(
+            chegada
+                .do_quarto(&outro, &ja_correm)
+                .candidato
+                .map(|destino| destino.servidor),
+            Some(endereco("203.0.113.9:8383"))
+        );
+    }
+
+    #[test]
+    fn a_escuta_de_hoje_so_vira_aviso_no_ip_do_servidor_da_mesma_resposta() {
+        // O I1 da revisão final do Plano 1, que o `connect` do app fazia com
+        // `bilhete_desta_volta` e que mora aqui desde a 14b. A marca da escuta
+        // está em todo link, e um anfitrião 0.15.0 nunca a registra: quem a
+        // ocupar de outro IP não pode receber o `LEVE`, que leva o endereço de
+        // quem chega.
+        let chegada = volta_com_o_quarto("203.0.113.7:8383");
+        let aviso = |no_quarto: &crate::encontro::OndeMora| {
+            chegada
+                .do_quarto(no_quarto, &[])
+                .bilhete
+                .and_then(|bilhete| bilhete.aviso().ok())
+        };
+
+        let do_anfitriao = crate::encontro::OndeMora::Achado {
+            servidor: Some(endereco("203.0.113.9:8383")),
+            escuta: Some(endereco("203.0.113.9:41000")),
+        };
+        assert_eq!(aviso(&do_anfitriao), Some(endereco("203.0.113.9:41000")));
+
+        let de_outro_ip = crate::encontro::OndeMora::Achado {
+            servidor: Some(endereco("203.0.113.9:8383")),
+            escuta: Some(endereco("198.51.100.66:41000")),
+        };
+        assert_eq!(
+            aviso(&de_outro_ip),
+            Some(endereco("198.51.100.4:41000")),
+            "a escuta de outro IP virou o aviso do LEVE"
+        );
     }
 
     #[tokio::test]

@@ -16,7 +16,13 @@
 //! knee, so ordinary conversation is untouched, and bends smoothly toward full
 //! scale beyond it.
 
-use std::collections::HashMap;
+// **`BTreeMap`, e não `HashMap`**, porque a chave é o SSRC, e quem dá o SSRC é
+// o servidor. No navegador (`wasm32-unknown-unknown`) as chaves do hash são
+// fixas (medido em 09/10/2026, `spikes/snapshot-no-wasm/`), e um servidor
+// hostil poderia mandar SSRCs que colidem. No desktop, medido com o exemplo
+// `um_quadro_do_mixer`, o quadro de oito fontes não ficou mais lento (ver o
+// commit desta troca).
+use std::collections::BTreeMap;
 
 /// Level below which the soft clipper is exactly transparent.
 ///
@@ -63,7 +69,7 @@ pub struct MixMetrics {
 /// Sums per-source audio into one stream, with listener-side gain.
 #[derive(Debug, Default)]
 pub struct Mixer {
-    gains: HashMap<u32, f32>,
+    gains: BTreeMap<u32, f32>,
     master: f32,
     metrics: MixMetrics,
 }
@@ -73,7 +79,7 @@ impl Mixer {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            gains: HashMap::new(),
+            gains: BTreeMap::new(),
             master: UNITY,
             metrics: MixMetrics::default(),
         }

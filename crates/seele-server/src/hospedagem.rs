@@ -519,6 +519,17 @@ impl Hospedagem {
         Arc::clone(&self.server.server().persistence)
     }
 
+    /// O servidor montado, para o que precisa do banco **e** do barramento —
+    /// a escolha do tema por quem administra ([`crate::mods::tema::escolher`])
+    /// grava e avisa as sessões no mesmo ato.
+    ///
+    /// Um `Arc`, pela razão de [`Self::persistence`]: quem chama segura o
+    /// `Mutex` das hospedagens, e o `await` vem depois de soltá-lo.
+    #[must_use]
+    pub fn servidor(&self) -> Arc<crate::server::Server> {
+        Arc::clone(self.server.server())
+    }
+
     /// O link para mandar a uma pessoa, com um convite de uso único dentro.
     ///
     /// Igual ao [`Self::convite`] em tudo — os mesmos endereços, na mesma ordem,
