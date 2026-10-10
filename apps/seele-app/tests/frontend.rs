@@ -11153,6 +11153,26 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          deixá-la para a próxima, e o convite de um servidor acaba mandado a \
          outro ou gasto duas vezes.\n{conectar}"
     );
+    // **O único jeito de outro script a esquecer sem nomeá-la** (a 21 da F7: o
+    // fechar da janela que segura a página até o sim). O corpo só esquece. Uma
+    // função com esse nome que lesse a credencial seria um caminho dela para
+    // fora de `tela-boot.js`, com o nome de quem a apaga.
+    let esquecer = without_comments(&js_function(
+        &read("ui/tela-boot.js"),
+        "function esquecerARecusaDoApelido(",
+    ));
+    let corpo: Vec<&str> = esquecer
+        .lines()
+        .map(str::trim)
+        .filter(|linha| !linha.is_empty())
+        .collect();
+    assert_eq!(
+        corpo,
+        ["{", "recusaDoApelido = null;", "}"],
+        "`esquecerARecusaDoApelido` deixou de só esquecer a credencial do apelido \
+         tomado: ela é chamada de fora de `tela-boot.js`, e um corpo que a lesse \
+         levaria o convite para quem só devia apagá-lo.\n{esquecer}"
+    );
     // **E a recusa de uma tentativa mais velha não a guarda** (rodada 1, M1).
     // Uma tentativa lenta recusada pelo apelido depois que outra começou — o
     // `hospedar()` entrando no servidor daqui no meio dela — guardava a
