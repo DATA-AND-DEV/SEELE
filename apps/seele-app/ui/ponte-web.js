@@ -86,6 +86,8 @@ const RECUSA_ATUALIZAR = "a versão é a desta página: não há o que instalar"
 const RECUSA_SISTEMA = "a página não abre os ajustes do sistema";
 const RECUSA_MODULO = "o navegador não baixa módulo de vídeo: quem codifica é ele";
 const RECUSA_NATIVO = "no navegador os MODs rodam no executorNoNavegador, e estes comandos são do executor nativo do desktop";
+// A sala viva da F7 (`F4/ponte-no-pc.md`, «A sala viva da F7»).
+const RECUSA_SALA = "a sala pessoal e as ligações moram no app do SEELE: o navegador não recebe ligação";
 
 /** Recusados nas duas cascas: o comando e a frase. */
 const RECUSAS_NOMEADAS = new Map([
@@ -96,6 +98,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["apagar_pacote_do_cache", RECUSA_MODS],
   ["apagar_servidor", RECUSA_HOSPEDAR],
   ["aplicar_conjunto_de_mods", RECUSA_MODS],
+  ["atender", RECUSA_SALA],
   ["baixar_modulo_de_video", RECUSA_MODULO],
   ["baixar_versao", RECUSA_VERSOES],
   ["caminho_entre_pares", RECUSA_REDE],
@@ -105,6 +108,7 @@ const RECUSAS_NOMEADAS = new Map([
   ["criar_servidor", RECUSA_HOSPEDAR],
   ["decidir_pedido", RECUSA_PORTARIA],
   ["definir_senha_do_server", RECUSA_PORTARIA],
+  ["encerrar_a_ligacao", RECUSA_SALA],
   // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
   // hospeda, e o navegador não hospeda.
   ["escolher_o_tema_do_servidor", RECUSA_MODS],
@@ -119,9 +123,11 @@ const RECUSAS_NOMEADAS = new Map([
   ["mod_nativo_entregar", RECUSA_NATIVO],
   ["mod_nativo_reservar", RECUSA_NATIVO],
   ["ocupacao_do_deposito", RECUSA_VERSOES],
+  ["onde_estou", RECUSA_SALA],
   ["pacotes_no_cache", RECUSA_MODS],
   ["pedidos_da_portaria", RECUSA_PORTARIA],
   ["procurar_atualizacao", RECUSA_ATUALIZAR],
+  ["recusar", RECUSA_SALA],
   ["remover_versao", RECUSA_VERSOES],
   ["revogar_admissao", RECUSA_PORTARIA],
   ["servidor_hospedado", RECUSA_HOSPEDAR],
@@ -244,6 +250,11 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
       resposta: { hospedando: false, mensagens_desconhecidas: 0, sessoes_com_desconhecidas: 0 },
       motivo: "a P12 da F1: a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde o número (main.rs)",
     },
+  ],
+  // A sala viva da F7: `[]` diz «não há sala neste lugar».
+  [
+    "toques_agora",
+    { resposta: [], motivo: "o navegador não tem sala; chamado sem gesto na carga (camada-toque.js)" },
   ],
 ]);
 

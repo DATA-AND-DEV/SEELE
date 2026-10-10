@@ -1,0 +1,39 @@
+/* SEELE — a faixa do toque: quem está ligando para a sua sala (tarefas 24 e 26
+   da F7).
+
+   A irmã da faixa de quem bate à porta (`camada-portaria.css`), com a mesma
+   moldura laranja e o mesmo painel: as duas são a mesma espécie de aviso, que
+   chama e não toma a tela. Mora **em cima**, e não embaixo como a dela: as duas
+   podem estar acesas juntas (alguém batendo no servidor guardado enquanto alguém
+   liga para a sala), e uma não cobre a outra.
+
+   Sem vermelho, como a dela: `tokens.css` o reserva a alerta e queda, e alguém
+   ligando não é nem uma nem outra. */
+
+.toque {
+  position: fixed;
+  left: 50%;
+  top: var(--seele-e6);
+  transform: translateX(-50%);
+  z-index: 19;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--seele-e2);
+  max-width: calc(100vw - var(--seele-e4));
+  padding: var(--seele-e1) var(--seele-e2);
+  background: var(--seele-negro-painel);
+  border: var(--seele-b-forte) solid var(--seele-laranja-nerv);
+}
+
+.toque-texto {
+  margin: 0;
+  color: var(--seele-osso);
+  letter-spacing: 0.08em;
+}
+
+.toque-nota {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--seele-laranja-nerv);
+}

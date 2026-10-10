@@ -49,6 +49,7 @@
 <link rel="stylesheet" href="camada-alerta.css">
 <link rel="stylesheet" href="camada-bateria.css">
 <link rel="stylesheet" href="camada-portaria.css">
+<link rel="stylesheet" href="camada-toque.css">
 <link rel="stylesheet" href="camada-moderar.css">
 <link rel="stylesheet" href="camada-ajuda.css">
 <link rel="stylesheet" href="camada-nomear.css">
@@ -212,6 +213,24 @@
   <p id="portaria-batendo-texto" class="portaria-batendo-texto"></p>
   <button id="portaria-batendo-ver" class="botao-fantasma" type="button">VER QUEM É</button>
   <button id="portaria-batendo-depois" class="botao-fantasma" type="button">DEPOIS</button>
+</div>
+
+<!--
+  A faixa do toque (tarefas 24 e 26 da F7; spec de 23/09, «O toque»): quem está
+  ligando para a sua sala, com o apelido entre aspas (é o que a pessoa diz) e o
+  código (a prova), e ATENDER e RECUSAR. O contrato é o da faixa de cima: fora
+  das telas, sem `role=alert` e sem `autofocus`, e o script nunca toma o
+  teclado. Fora das telas também é o que a deixa fora de toda região de MOD
+  (núcleo de confiança, Parte II da spec).
+
+  `data-sala-pessoal`: o navegador não tem sala, e as duas cascas dele escondem
+  toda peça com esta marca (F8).
+-->
+<div id="toque" class="toque" data-sala-pessoal hidden>
+  <p id="toque-texto" class="toque-texto"></p>
+  <button id="toque-atender" class="botao" type="button">ATENDER</button>
+  <button id="toque-recusar" class="botao-fantasma" type="button">RECUSAR</button>
+  <p id="toque-nota" class="toque-nota" hidden></p>
 </div>
 
 <!--
@@ -4510,6 +4529,7 @@
   precise pensar nisso.
 -->
 <script src="camada-portaria.js"></script>
+<script src="camada-toque.js"></script>
 <script src="camada-ajuda.js"></script>
 <script src="camada-nomear.js"></script>
 <script src="camada-mods.js"></script>

@@ -517,12 +517,16 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
         // `hospedagens` desde a tarefa 18 da F7 (décima integração): o servidor
         // guardado e a sala pessoal moram em `Session::hospedagens`, e um comando
         // que só lia `.hospedagem` passou a ler `.hospedagens`.
+        // `.toques` pela sala viva da F7: o `toques_agora` lê `Session::toques`,
+        // e é neutro («não há sala neste lugar»). Na grafia do corpo, que o
+        // `rustfmt` quebra em uma linha por elo da cadeia.
         let toca = [
             "hospedagem",
             "hospedagens",
             "persistence_hospedada",
             "portaria::",
             "persistence_do_mod",
+            ".toques\n",
         ]
         .iter()
         .any(|marca| corpo.contains(marca));

@@ -566,12 +566,12 @@ fn every_command_the_frontend_calls_is_registered() {
 // `bytesDoSom` em `base.js`, e a lista voltou ao estado de repouso, que é
 // vazia.
 //
-// `onde_estou` entrou em 2026-10-09, com a metade do `main.rs` da tarefa 18 da
-// F7 (Plano 2): é a única resposta a «estou no meu servidor?», e quem pergunta
-// hoje são o `estado_da_porta().hospedando` da `tela-sessao.js` e o
-// `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
-// outras frentes quando o comando nasceu. Sai quando eles passarem a
-// perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+// `onde_estou` esteve aqui de 2026-10-09 a 2026-10-10: entrou com a metade do
+// `main.rs` da tarefa 18 da F7 (Plano 2), e saiu quando a faixa `#toque` passou
+// a perguntá-lo (tarefa 26). **A metade da casca da 18 continua por fazer**: o
+// `estado_da_porta().hospedando` da `tela-sessao.js` e o `nossoServidorEm` da
+// `tela-boot.js` ainda respondem «estou no meu servidor?» pelo critério deles.
+// Está no andamento da F7, porque este guarda já não a cobra.
 //
 // `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
 // 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
@@ -581,21 +581,14 @@ fn every_command_the_frontend_calls_is_registered() {
 // `estado_da_sala` entrou em 2026-10-10, com a tarefa 23 da F7 (a sala sobe no
 // `setup`, no ramo `0.16/sala-viva`): a tela que abre depois do anúncio por
 // `seele://sala` lê por ele. `receber_ligacoes` entrou junto: é o «Não receber
-// ligações» do PERFIL. Os dois saem quando a linha de estado da sala e o PERFIL
-// os chamarem, na vez da F8, dentro do mesmo conjunto da sala viva.
-// `toques_agora` entrou com a tarefa 24: a faixa `#toque` da tela que abre com
-// o toque já tocando. Sai com a faixa, na tarefa 26, com `atender`, `recusar` e
-// `encerrar_a_ligacao`, da tarefa 27. `meu_codigo`, `contatos_da_agenda`,
-// `dar_nome_na_agenda` e `bloquear` (tarefa 29) saem com o SEU CÓDIGO e a agenda
-// do PERFIL, na vez da F8.
+// ligações» do PERFIL. `meu_codigo`, `contatos_da_agenda`, `dar_nome_na_agenda`
+// e `bloquear` (tarefa 29) são o SEU CÓDIGO e a agenda do PERFIL. Os seis saem
+// quando a linha da sala e o PERFIL os chamarem, no commit seguinte.
+// `toques_agora`, `atender`, `recusar` e `encerrar_a_ligacao` (tarefas 24 e 27)
+// estiveram aqui até a faixa `#toque` chamá-los, na tarefa 26.
 const AGUARDANDO_TELA: &[&str] = &[
-    "onde_estou",
     "estado_da_sala",
     "receber_ligacoes",
-    "toques_agora",
-    "atender",
-    "recusar",
-    "encerrar_a_ligacao",
     "meu_codigo",
     "contatos_da_agenda",
     "dar_nome_na_agenda",
@@ -18841,5 +18834,72 @@ fn toda_variante_da_sala_pessoal_tem_frase() {
     assert!(
         !bloco.to_lowercase().contains("linha"),
         "o texto da sala diz «linha», que a tela nunca diz (ADR 0033)"
+    );
+}
+
+/// **A faixa do toque chama e não toma a tela, e é núcleo de confiança**
+/// (tarefas 24 e 26 da F7; spec de 23/09, «O toque», «Testes» 8 e 11).
+///
+/// O contrato é o da faixa de quem bate à porta, que os dois guardas logo acima
+/// provam: fora de toda tela (e por isso fora de toda região de MOD), sem
+/// `role=alert`, sem `aria-modal`, sem `autofocus`, e o script nunca toma o
+/// teclado. A frase sai uma vez por aparição, pela transição para a vista. E os
+/// eventos de MOD nunca ficam sabendo dela: a faixa não fala com MOD nenhum.
+/// O comportamento (o anúncio, o RECUSAR, o ATENDER que desmonta só o cliente e
+/// a falha dupla) é provado num navegador, em `tools/roteiros/toque.js`.
+#[test]
+fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
+    let page = without_comments(&read("ui/index.html"));
+    let Some(faixa) = page.find("id=\"toque\"") else {
+        panic!("a página não tem mais a faixa do toque");
+    };
+    let Some(primeira) = page.find("<section id=\"tela-") else {
+        panic!("index.html no longer draws screens");
+    };
+    assert!(
+        faixa < primeira,
+        "a faixa do toque entrou numa tela: um `hidden` nela a tira junto, e uma região \
+         de MOD pode cobri-la"
+    );
+    let tag = tag_with_id(&read("ui/index.html"), "toque");
+    for roubo in ["role=\"alert\"", "aria-modal", "autofocus"] {
+        assert!(
+            !tag.contains(roubo),
+            "a faixa do toque leva `{roubo}`, que interrompe quem está lendo ou falando: <{tag}>"
+        );
+    }
+    assert!(
+        tag.contains("data-sala-pessoal"),
+        "a faixa do toque não leva `data-sala-pessoal`, e as cascas do navegador, que não \
+         têm sala, a mostrariam: <{tag}>"
+    );
+
+    let toque = without_comments(&read("ui/camada-toque.js"));
+    for roubo in [".focus(", "abrirTela(", "avisarOsModsDaTela", "postMessage"] {
+        assert!(
+            !toque.contains(roubo),
+            "a faixa do toque usa `{roubo}`: ela toma o teclado, ou conta a um MOD quem está \
+             ligando"
+        );
+    }
+    let desenhar = js_function(&toque, "async function desenharToque(");
+    let Some(fala) = desenhar.find("if (faixa.hidden) anunciar(") else {
+        panic!("a faixa do toque não diz a frase na transição para a vista:\n{desenhar}");
+    };
+    let Some(mostra) = desenhar.find("faixa.hidden = false") else {
+        panic!("nada mostra a faixa do toque:\n{desenhar}");
+    };
+    assert!(
+        fala < mostra,
+        "a frase é dita depois de a faixa aparecer, e a pergunta «estava escondida?» já \
+         responde não:\n{desenhar}"
+    );
+
+    // O ATENDER desmonta só o cliente: quem hospeda não derruba o próprio
+    // servidor ao atender.
+    let entrar = js_function(&toque, "async function entrarNaSalaAoAtender(");
+    assert!(
+        entrar.contains("ejetar(true)") && !entrar.contains("\"disconnect\""),
+        "o ATENDER não desmonta só o cliente:\n{entrar}"
     );
 }
