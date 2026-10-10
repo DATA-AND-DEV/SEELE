@@ -19,7 +19,7 @@
 //! - **Uma porta 8385 ocupada é dita**, e não engolida: [`FalhaDaSala::PortaOcupada`]
 //!   vira a frase «NINGUÉM CONSEGUE TE LIGAR AGORA».
 
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 /// O canal por onde o estado da sala chega à casca.
 ///
@@ -35,6 +35,9 @@ pub(crate) enum EstadoDaSala {
     /// Subindo: a escada leva até ~4 s. É também o estado antes de a tarefa
     /// do `setup` começar.
     Subindo,
+    /// Desligada pela pessoa: «Não receber ligações», no PERFIL. Ninguém
+    /// consegue ligar, e é escolha, e não falha.
+    Desligada,
     /// No ar, atendendo na porta da sala.
     NoAr {
         /// Se o código está achável pelo ponto de encontro, e por que não.
@@ -158,18 +161,48 @@ pub(crate) async fn subir_em(
         })
 }
 
-/// Sobe a sala no ar de verdade: a porta da sala, o ponto da produção, e o
-/// estado anunciado a cada mudança. Roda numa tarefa própria, chamada pelo
-/// `setup`.
-pub(crate) async fn subir(app: AppHandle) {
-    anunciar(&app, EstadoDaSala::Subindo);
-    let subida = subir_em(
-        &crate::config_dir(&app),
-        seele_server::hospedagem::PORTA_DA_SALA,
-        seele_ffi::ponto_de_encontro(),
+/// Onde e como a sala sobe. A janela de verdade usa [`Subida::da_producao`];
+/// os testes sobem com porta zero e sem ponto.
+pub(crate) struct Subida {
+    /// A pasta de dados: a identidade, o apelido e a escolha de receber.
+    pub(crate) config: String,
+    /// A porta da sala.
+    pub(crate) porta: u16,
+    /// O ponto de encontro em que a sala se registra.
+    pub(crate) ponto: Option<String>,
+}
+
+impl Subida {
+    /// A da janela: a pasta de dados do app, a porta da sala (8385), e o ponto
+    /// de quem liga, que é a leitura única do ambiente.
+    pub(crate) fn da_producao(app: &AppHandle) -> Self {
+        Self {
+            config: crate::config_dir(app),
+            porta: seele_server::hospedagem::PORTA_DA_SALA,
+            ponto: seele_ffi::ponto_de_encontro(),
+        }
+    }
+}
+
+/// A subida do `setup`: respeita «Não receber ligações». Roda numa tarefa
+/// própria.
+pub(crate) async fn subir<R: Runtime>(app: AppHandle<R>, subida: Subida) {
+    let receber = seele_ffi::preferences::Preferences::open(
+        std::path::Path::new(&subida.config).join("preferences"),
     )
-    .await;
-    let sala = match subida {
+    .map_or(true, |preferencias| preferencias.receber_ligacoes());
+    if !receber {
+        anunciar(&app, EstadoDaSala::Desligada);
+        return;
+    }
+    subir_agora(app, subida).await;
+}
+
+/// Sobe a sala, guarda-a nas hospedagens e anuncia cada mudança do registro
+/// até ela cair.
+pub(crate) async fn subir_agora<R: Runtime>(app: AppHandle<R>, subida: Subida) {
+    anunciar(&app, EstadoDaSala::Subindo);
+    let sala = match subir_em(&subida.config, subida.porta, subida.ponto).await {
         Ok(sala) => sala,
         Err(motivo) => {
             anunciar(&app, EstadoDaSala::Falhou { motivo });
@@ -177,29 +210,16 @@ pub(crate) async fn subir(app: AppHandle) {
         }
     };
     let registro = sala.registro_no_quarto();
+    if let Some(largada) = guardar_se_ainda_subindo(&app.state::<crate::Session>(), sala) {
+        tracing::info!("a sala terminou de subir depois de desligada, e desce");
+        largada.encerrar().await;
+        return;
+    }
     let firewall_nao_cobre = crate::firewall_nao_cobre_este_executavel();
     let no_ar = |registro| EstadoDaSala::NoAr {
         registro,
         firewall_nao_cobre: firewall_nao_cobre.clone(),
     };
-    {
-        let sessao = app.state::<crate::Session>();
-        let Ok(mut hospedagens) = sessao.hospedagens.lock() else {
-            tracing::error!("a sala subiu e não há onde guardá-la: as hospedagens envenenaram");
-            sala.encerrar().await;
-            anunciar(
-                &app,
-                EstadoDaSala::Falhou {
-                    motivo: FalhaDaSala::NaoSubiu,
-                },
-            );
-            return;
-        };
-        hospedagens.pessoal = Some(crate::Hospedado {
-            hospedagem: sala,
-            servidor: None,
-        });
-    }
     let Some(mut registro) = registro else {
         anunciar(&app, no_ar(Registro::SemPonto));
         return;
@@ -213,8 +233,57 @@ pub(crate) async fn subir(app: AppHandle) {
     }
 }
 
+/// Guarda nas hospedagens a sala que acabou de subir, **se ninguém a desligou
+/// enquanto ela subia**: a escada leva segundos, e a pessoa pode desligar no
+/// meio dela. Devolve a sala a quem chamou, para descer, quando o estado já
+/// não é [`EstadoDaSala::Subindo`]; `None` é a sala guardada.
+pub(crate) fn guardar_se_ainda_subindo(
+    sessao: &crate::Session,
+    sala: seele_server::hospedagem::Hospedagem,
+) -> Option<seele_server::hospedagem::Hospedagem> {
+    let Ok(mut hospedagens) = sessao.hospedagens.lock() else {
+        tracing::error!("a sala subiu e não há onde guardá-la: as hospedagens envenenaram");
+        return Some(sala);
+    };
+    let subindo = sessao
+        .sala
+        .lock()
+        .is_ok_and(|estado| *estado == EstadoDaSala::Subindo);
+    if !subindo {
+        return Some(sala);
+    }
+    hospedagens.pessoal = Some(crate::Hospedado {
+        hospedagem: sala,
+        servidor: None,
+    });
+    None
+}
+
+/// Desliga a sala: «Não receber ligações». Quem estiver nela, ou tocando,
+/// ouve «chamada encerrada».
+///
+/// O estado vira [`EstadoDaSala::Desligada`] **antes** da despedida: uma
+/// subida em curso confere o estado ao terminar
+/// ([`guardar_se_ainda_subindo`]), e desce sozinha.
+///
+/// `encerrar`, e não o `despedir` da saída do app: os dois avisam quem está
+/// dentro, e só o `encerrar` espera a porta voltar ao sistema. O app continua
+/// aberto, e religar em seguida tem de achar a 8385 livre.
+pub(crate) async fn desligar<R: Runtime>(app: &AppHandle<R>) {
+    let sala = app
+        .state::<crate::Session>()
+        .hospedagens
+        .lock()
+        .ok()
+        .and_then(|mut hospedagens| hospedagens.pessoal.take());
+    anunciar(app, EstadoDaSala::Desligada);
+    if let Some(sala) = sala {
+        sala.hospedagem.encerrar().await;
+    }
+}
+
 /// Guarda o estado, para quem perguntar depois, e o anuncia à casca.
-fn anunciar(app: &AppHandle, estado: EstadoDaSala) {
+fn anunciar<R: Runtime>(app: &AppHandle<R>, estado: EstadoDaSala) {
     tracing::info!(?estado, "sala pessoal");
     if let Ok(mut guardado) = app.state::<crate::Session>().sala.lock() {
         guardado.clone_from(&estado);
@@ -231,7 +300,11 @@ fn anunciar(app: &AppHandle, estado: EstadoDaSala) {
     reason = "num teste, o pânico é o relatório"
 )]
 mod a_sala_pessoal {
-    use super::{registro_de, subir_em, EstadoDaSala, FalhaDaSala, Registro};
+    use super::{
+        desligar, guardar_se_ainda_subindo, registro_de, subir, subir_em, EstadoDaSala,
+        FalhaDaSala, Registro, Subida,
+    };
+    use tauri::Manager;
 
     /// Uma pasta de dados com a chave desta «máquina» dentro.
     fn casa_com_a_chave(semente: u8) -> tempfile::TempDir {
@@ -321,24 +394,151 @@ mod a_sala_pessoal {
         );
     }
 
+    /// O app de verdade não sobe sem janela; o runtime falso do Tauri sobe, com a
+    /// mesma `Session` que o `main` gerencia.
+    fn app_de_teste() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .manage(crate::Session::default())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("o app de teste não montou")
+    }
+
+    /// A subida de um teste: porta zero e sem ponto de encontro.
+    fn subida_de_teste(casa: &tempfile::TempDir) -> Subida {
+        Subida {
+            config: casa.path().to_str().unwrap().to_owned(),
+            porta: 0,
+            ponto: None,
+        }
+    }
+
+    fn estado(app: &tauri::App<tauri::test::MockRuntime>) -> EstadoDaSala {
+        app.state::<crate::Session>().sala.lock().unwrap().clone()
+    }
+
+    fn no_ar(app: &tauri::App<tauri::test::MockRuntime>) -> bool {
+        app.state::<crate::Session>()
+            .hospedagens
+            .lock()
+            .unwrap()
+            .pessoal
+            .is_some()
+    }
+
+    #[tokio::test]
+    async fn quem_escolheu_nao_receber_ligacoes_abre_o_app_sem_sala() {
+        let casa = casa_com_a_chave(4);
+        seele_ffi::preferences::Preferences::open(casa.path().join("preferences"))
+            .unwrap()
+            .set_receber_ligacoes(false)
+            .unwrap();
+        let app = app_de_teste();
+
+        subir(app.handle().clone(), subida_de_teste(&casa)).await;
+
+        assert_eq!(estado(&app), EstadoDaSala::Desligada);
+        assert!(
+            !no_ar(&app),
+            "a sala subiu para quem escolheu «Não receber ligações»"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sala_que_sobe_fica_nas_hospedagens_e_desligar_a_despede() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+
+        subir(app.handle().clone(), subida_de_teste(&casa)).await;
+        assert_eq!(
+            estado(&app),
+            EstadoDaSala::NoAr {
+                registro: Registro::SemPonto,
+                firewall_nao_cobre: crate::firewall_nao_cobre_este_executavel(),
+            }
+        );
+        assert!(no_ar(&app), "a sala subiu e não ficou nas hospedagens");
+        let porta = app
+            .state::<crate::Session>()
+            .hospedagens
+            .lock()
+            .unwrap()
+            .portas()
+            .1;
+
+        desligar(app.handle()).await;
+
+        assert_eq!(estado(&app), EstadoDaSala::Desligada);
+        assert!(!no_ar(&app), "a sala desligada ficou nas hospedagens");
+        // A porta voltou: a sala foi despedida, e não só esquecida.
+        let porta = porta.expect("a sala atendia numa porta");
+        assert!(
+            std::net::UdpSocket::bind(("::", porta)).is_ok(),
+            "a sala desligada continua segurando a porta {porta}"
+        );
+    }
+
+    /// **A sala que termina de subir depois de desligada desce.** A escada
+    /// leva segundos, e a pessoa pode desligar no meio dela: sem esta conferência,
+    /// a sala ficaria no ar com o PERFIL dizendo que ela está desligada.
+    #[tokio::test]
+    async fn a_sala_que_termina_de_subir_depois_do_desligar_nao_fica() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let sessao = app.state::<crate::Session>();
+
+        *sessao.sala.lock().unwrap() = EstadoDaSala::Desligada;
+        let sala = subir_em(casa.path().to_str().unwrap(), 0, None)
+            .await
+            .unwrap();
+        let Some(largada) = guardar_se_ainda_subindo(&sessao, sala) else {
+            panic!("a sala que terminou de subir depois do desligar ficou nas hospedagens");
+        };
+        largada.encerrar().await;
+        assert!(!no_ar(&app));
+
+        *sessao.sala.lock().unwrap() = EstadoDaSala::Subindo;
+        let sala = subir_em(casa.path().to_str().unwrap(), 0, None)
+            .await
+            .unwrap();
+        assert!(
+            guardar_se_ainda_subindo(&sessao, sala).is_none(),
+            "a sala que subiu sem ninguém desligar não foi guardada"
+        );
+        desligar(app.handle()).await;
+    }
+
     /// **Produção sobe na porta da sala, com o ponto de quem liga.** Os testes
     /// sobem com porta zero e sem ponto, e só este texto prova o que a janela
-    /// de verdade faz.
+    /// de verdade faz: a subida dela é a [`Subida::da_producao`], e toda subida
+    /// do `main.rs` passa por ela.
     #[test]
     fn a_janela_sobe_a_sala_na_porta_dela_com_o_ponto_de_quem_liga() {
+        let compacto =
+            |texto: &str| -> String { texto.chars().filter(|c| !c.is_whitespace()).collect() };
         let fonte = include_str!("sala.rs");
-        let corpo = fonte
-            .split("pub(crate) async fn subir(app: AppHandle)")
+        let da_producao = fonte
+            .split("pub(crate) fn da_producao(app: &AppHandle) -> Self {")
             .nth(1)
-            .and_then(|depois| depois.split("\n}\n").next())
+            .and_then(|depois| depois.split("\n    }\n").next())
             .unwrap();
-        let compacto: String = corpo.chars().filter(|c| !c.is_whitespace()).collect();
         assert!(
-            compacto.contains(
-                "subir_em(&crate::config_dir(&app),seele_server::hospedagem::PORTA_DA_SALA,seele_ffi::ponto_de_encontro(),)"
+            compacto(da_producao).contains(
+                "config:crate::config_dir(app),porta:seele_server::hospedagem::PORTA_DA_SALA,ponto:seele_ffi::ponto_de_encontro(),"
             ),
             "a janela não sobe a sala na 8385 com o ponto de quem liga: quem liga pelo código \
              pergunta num ponto em que esta sala não se registrou"
+        );
+        let main = compacto(include_str!("main.rs"));
+        let subidas =
+            main.matches("sala::subir(").count() + main.matches("sala::subir_agora(").count();
+        assert!(
+            subidas >= 2,
+            "o `main.rs` não sobe a sala no `setup` e no religar"
+        );
+        assert_eq!(
+            main.matches("sala::Subida::da_producao(").count(),
+            subidas,
+            "uma subida do `main.rs` não passa pela `Subida::da_producao`"
         );
     }
 }

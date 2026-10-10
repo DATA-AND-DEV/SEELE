@@ -575,9 +575,10 @@ fn every_command_the_frontend_calls_is_registered() {
 //
 // `estado_da_sala` entrou em 2026-10-10, com a tarefa 23 da F7 (a sala sobe no
 // `setup`, no ramo `0.16/sala-viva`): a tela que abre depois do anúncio por
-// `seele://sala` lê por ele. Sai quando a linha de estado da sala e o PERFIL
-// perguntarem, na vez da F8, dentro do mesmo conjunto da sala viva.
-const AGUARDANDO_TELA: &[&str] = &["onde_estou", "estado_da_sala"];
+// `seele://sala` lê por ele. `receber_ligacoes` entrou junto: é o «Não receber
+// ligações» do PERFIL. Os dois saem quando a linha de estado da sala e o PERFIL
+// os chamarem, na vez da F8, dentro do mesmo conjunto da sala viva.
+const AGUARDANDO_TELA: &[&str] = &["onde_estou", "estado_da_sala", "receber_ligacoes"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {

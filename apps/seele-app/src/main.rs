@@ -1601,6 +1601,57 @@ fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
         .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
 }
 
+/// «Não receber ligações», no PERFIL: desliga a sala inteira, ou a religa
+/// (tarefa 23 da F7). A escolha atravessa o processo.
+///
+/// Desligar despede a sala: quem estiver nela, ou tocando, ouve «chamada
+/// encerrada». Religar sobe a sala de novo, a menos que ela já esteja no ar ou
+/// subindo. O que aconteceu chega pelo [`sala::CANAL_DA_SALA`], como na subida
+/// do `setup`.
+///
+/// # Errors
+///
+/// Nunca: uma escolha que não foi guardada vale até o app fechar, e o
+/// `seele.log` diz.
+#[tauri::command]
+async fn receber_ligacoes(
+    app: AppHandle,
+    session: State<'_, Session>,
+    receber: bool,
+) -> Result<(), ()> {
+    match preferencias(&app).map(|mut preferencias| preferencias.set_receber_ligacoes(receber)) {
+        Some(Ok(())) => {}
+        Some(Err(erro)) => tracing::warn!(
+            %erro,
+            receber,
+            "a escolha de receber ligações não foi guardada: vale até o app fechar"
+        ),
+        None => tracing::warn!(
+            receber,
+            "as preferências não abriram: a escolha de receber ligações vale até o app fechar"
+        ),
+    }
+    if !receber {
+        sala::desligar(&app).await;
+        return Ok(());
+    }
+    let no_ar = session
+        .hospedagens
+        .lock()
+        .is_ok_and(|hospedagens| hospedagens.pessoal.is_some());
+    let subindo = session
+        .sala
+        .lock()
+        .is_ok_and(|estado| *estado == sala::EstadoDaSala::Subindo);
+    if !no_ar && !subindo {
+        tauri::async_runtime::spawn(sala::subir_agora(
+            app.clone(),
+            sala::Subida::da_producao(&app),
+        ));
+    }
+    Ok(())
+}
+
 /// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
 /// guardado e a sala atendem quando estão no ar.
 fn onde_estou_em(
@@ -10417,7 +10468,10 @@ fn main() {
             // **A sala pessoal sobe sozinha, em segundo plano** (tarefa 23 da
             // F7): a escada custa até ~4 s, e a janela não espera por ela. O
             // estado chega à casca por `sala::CANAL_DA_SALA`.
-            tauri::async_runtime::spawn(sala::subir(app.handle().clone()));
+            tauri::async_runtime::spawn(sala::subir(
+                app.handle().clone(),
+                sala::Subida::da_producao(app.handle()),
+            ));
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })
@@ -10462,6 +10516,7 @@ fn main() {
             servidor_hospedado,
             onde_estou,
             estado_da_sala,
+            receber_ligacoes,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
