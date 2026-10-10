@@ -9453,3 +9453,14 @@ avisada, e o registro é da frente dona; aqui fica só o apontamento:
 
 **Quando fecha.** Item por item, quando a revisão final da 0.16 decidir cada
 um: conserto, plano, ou «fica como está», escrito aqui com o motivo.
+
+## 58b · O COPIAR DIAGNÓSTICO não existe, e os contadores que ele leria vão ao `seele.log`
+
+**Aberta em 2026-10-09**, levantada pela F7 da 0.16 na tarefa 31 (os contadores da
+campainha da sala pessoal). A análise de 22/09 já dizia que o botão falta, e a spec
+o põe na Fase 1. **Não é defeito: é um lugar de leitura que não existe.**
+
+Decisão da orquestradora: na 0.16, os contadores da campainha vão ao `seele.log`,
+uma linha por toque com o desfecho e uma de resumo ao fechar a sala, sem o código
+inteiro de quem ligou. Quando o COPIAR DIAGNÓSTICO existir, ele os lê de lá ou da
+contagem que os escreve. Fica fora da 0.16.
