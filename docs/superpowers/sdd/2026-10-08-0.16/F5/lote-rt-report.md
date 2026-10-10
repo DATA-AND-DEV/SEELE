@@ -18,8 +18,12 @@ aspa cortava, e o `--no-sandbox`.
 | (este)     | este relatório |
 
 **A pausa da orquestradora** (medida de CPU) chegou depois do `6362d926`.
-Tudo o que está nas seções abaixo foi rodado **antes** dela. Este relatório foi
+Tudo o que está nas seções 1 a 8 foi rodado **antes** dela. Este relatório foi
 escrito e commitado durante a pausa, sem rodar nada.
+
+**Rodada 1 (em curso, não rodado):** as decisões da orquestradora sobre as
+preocupações do §8 estão escritas e commitadas, e nada delas rodou ainda. A
+pausa de CPU continua. Ver o §9.
 
 ## 1. Os roteiros rodados aqui, e o que cada um prova hoje
 
@@ -359,3 +363,163 @@ repositório de mentira, com `curl` dublê, como sempre rodou dentro do
 7. **O W3 subestimou o corte da aspa.** O relatório dele diz que se perdia «só
    o resto de uma frase já reprovada», e o caso medido aqui é uma reprovação
    inteira que some.
+
+## 9. Rodada 1: as decisões da orquestradora (em curso, não rodado)
+
+**Escrita durante a pausa de CPU. Nada desta seção rodou**: nem os roteiros,
+nem o `cargo test`, nem as reversões. Uma conferência foi feita, só de texto:
+cada trecho que uma reversão vai trocar aparece exatamente uma vez no arquivo.
+As reversões estão escritas, e a ordem de cada uma é o vermelho de antes e
+depois uma por exigência. Rodam quando a orquestradora avisar.
+
+### 9.1 Os três roteiros podres entram no lote
+
+**`trocar-de-janela.js`.** O retrato agora é o de hoje:
+`minha_transmissao` com o `TelaEmCurso` de `seele-ffi` (`tela`, `de`,
+`e_minha`, `espectadores`, `parada`, `pedido`), e `tela` para a transmissão
+de outra pessoa. São seis exigências, nos estados que o cabeçalho diz:
+
+| | estado | exige |
+|---|---|---|
+| T1 | nada escolhido | `COMPARTILHAR (apagado) · modo=comecar` |
+| T2 | fonte escolhida, nada no ar | `COMPARTILHAR · modo=comecar` |
+| T3 | transmitindo a fonte armada | `TROCAR (apagado) · modo=trocar`, title «é esta que já está no ar…» (recusa recomeçar a mesma) |
+| T4 | transmitindo, outra fonte escolhida | `TROCAR · modo=trocar`, title «a transmissão de agora para…» |
+| T5 | a transmissão é de outra pessoa | `COMPARTILHAR · modo=comecar`, aceso |
+| T6 | a minha acabou por fora | `fonteEmCurso === null` |
+
+O cabeçalho dizia que a de outra pessoa ficava «recusado, com a frase de
+sempre». Isso deixou de valer com o R18 da revisão da v15: o servidor guarda
+várias transmissões por sala. O T5 exige o que o produto faz hoje, e o
+comentário diz por quê.
+
+Reversões preparadas:
+- **T0**, o vermelho de antes: o roteiro novo com o retrato velho
+  (`tela: { e_minha: true }`) no T3.
+- **T1–T6**, uma por exigência, cada uma uma mudança de uma linha em
+  `camada-compartilhar.js`:
+  - T1: sem o `fonteArmada === null` no `disabled`;
+  - T2: `disabled` por `!minha`;
+  - T3: `mesmaFonte = false`;
+  - T4: o title de trocar vazio;
+  - T5: `minha_transmissao ?? tela`;
+  - T6: sem o `fonteEmCurso = null` de quando a minha acaba.
+
+**`versao-do-servidor.js`.** O `analisar_convite` responde agora o
+`ConviteLido` de hoje (`alvo`, `token`, `versao`, `para_entrar`):
+
+- primeiro, `para_entrar: { Abrir: { linha: "0.15", servidor: "0.15",
+  versao: "0.15.2", perde_conversas: false } }`;
+- depois, `para_entrar: "Aqui"`, como o `serde` serializa as variantes
+  unitárias.
+
+O roteiro aperta o ABRIR da pergunta (`versoes-confirmar-sim`), que antes não
+existia para ele. São sete exigências:
+
+| | exige |
+|---|---|
+| V1 | o link de outra linha abre a pergunta (`versoes-confirmar` VISIVEL), e a frase diz «Servidor 0.15» |
+| V2 | antes do ABRIR, nem `abrir_versao` nem `connect` |
+| V3 | o ABRIR chama `abrir_versao` com `linha: "0.15"` |
+| V4 | com o link inteiro (`link === LINK`) |
+| V5 | com `hospedar: false` |
+| V6 | e esta janela não conecta depois |
+| V7 | com `para_entrar: "Aqui"`, conecta aqui e não abre outra |
+
+Reversões preparadas:
+- **V0**, o vermelho de antes: o roteiro novo com a resposta velha
+  (`pode_abrir_naquela_versao`).
+- **V1–V7**, uma por exigência:
+  - V1: a pergunta pulada (`if (false)`);
+  - V2: sem o `return` depois do `entrarPelaLinha`, e a janela conecta
+    junto;
+  - V3: `linha: null`;
+  - V4: `link: null`;
+  - V5: `hospedar: true`;
+  - V6: um `irParaOServidor` depois do `abrir_versao`;
+  - V7: `if (ir)` no lugar de `if (ir && typeof ir === "object")`.
+
+**`compartilhar.js`: o roteiro estava desatualizado, e o produto está certo.**
+A história:
+
+- O roteiro é de `1e485bfc` (01/09/2026), quando a caixa passou a perguntar
+  «uma coisa só», e ele espera ver fora a prioridade, a altura, os quadros e
+  a banda.
+- Os quadros voltaram em `c048f752` (21/09), de propósito, como escolha de
+  teto de 30 ou 60. `Q8` e `Q15` ficaram de fora como piso automático. O
+  commit diz isso, e `limitesEscolhidos()` lê `compartilhar-quadros`.
+- O INCLUIR SOM entrou pelo R21.
+
+O roteiro novo diz o que a caixa pergunta hoje e exige quatro coisas:
+
+| | exige |
+|---|---|
+| C1 | o botão do rodapé abre a caixa |
+| C2 | os controles de escolha da caixa (`select`, `input`, `textarea`) são exatamente `compartilhar-quadros`, `compartilhar-resolucao` e `compartilhar-som`: «e mais nada» |
+| C3 | a prioridade, a altura e a banda continuam fora, em qualquer forma |
+| C4 | os quadros oferecem 30 e 60, e só |
+
+Reversões preparadas:
+- **C0**, o vermelho de antes: os quadros de volta à lista dos que saíram,
+  que é o que o roteiro velho esperava.
+- **C1–C4**, uma por exigência:
+  - C1: a caixa que não se mostra;
+  - C2: um `<input>` a mais na caixa;
+  - C3: um `<p id="compartilhar-altura">`, que não é controle e por isso só a
+    C3 pega;
+  - C4: uma opção de 15 quadros.
+
+### 9.2 A frase de prazo vencido da etapa dos roteiros
+
+A `etapa_da_bateria` não aceitava a frase. Ela agora aceita um
+`--prazo <função>` opcional, antes da queixa, e as outras onze chamadas
+continuam iguais.
+
+- Quando o prazo vence, a função é chamada depois de o comando ser
+  interrompido e morre dizendo o que travou. Sem `--prazo`, vale a frase de
+  sempre, a do `seele-video`.
+- A etapa dos roteiros passa `--prazo prazo_dos_roteiros`. Essa função lê no
+  registro o último `roteiro: rodando <caminho>`, que a carga diz antes de
+  cada um, e escreve «O roteiro que travou: <caminho>.», o comando para
+  rodá-lo sozinho com `--tudo`, e as 20 últimas linhas.
+- O guarda passou a pular o `--prazo <função>` antes da queixa.
+- O teste `a_bateria_tem_prazo_e_nao_espera_para_sempre` continua lendo o
+  `kill -9` no corpo da `etapa_da_bateria`, que não mudou de lugar.
+
+Na bancada do `publicar.sh`, o dublê da carga ganha
+`FALSO_ROTEIROS=pendura`: ele diz dois roteiros e trava no segundo,
+`toque.js`. O teste novo
+`um_roteiro_que_trava_e_nomeado_quando_o_prazo_da_etapa_vence` roda com
+`SEELE_PRAZO_DA_ETAPA_S=5` e exige:
+- a publicação parada;
+- «O roteiro que travou: tools/roteiros/toque.js.»;
+- nenhum `seele-video`;
+- nada empacotado.
+
+Reversão preparada: **P1**, sem o `--prazo`.
+
+### 9.3 A linha positiva do release
+
+Agora ela diz: «Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros
+da casca).», e com o Windows, «… e no Windows (testes).». O teste
+`a_linha_da_bateria_diz_o_que_rodou_e_onde` fixa o texto novo nas duas
+asserções. Reversão preparada: **L1**, o texto de antes.
+
+### 9.4 Fora deste lote, para o relatório
+
+- **O `console.error` não reprova na carga.** O brief supunha que sim. A
+  carga reprova em `Uncaught …Error` (inclusive `(in promise)`), em
+  `REPROVADO`, em `ROTEIRO ESTOUROU` e no roteiro que não chega ao fim. A
+  carga não muda.
+- **Os 13 que só provam que a sessão abre** (o `exigir` do `entrarNaSessao`),
+  para a pendência 58. Eram 13: estes 11, mais `trocar-de-janela` e
+  `compartilhar`, que ganham `exigir` próprio na rodada 1. Ficam **11**:
+  `avatar-na-chamada`, `barra-mac`, `clique-nos-glifos`, `icone-do-server`,
+  `icone-na-trilha`, `medidas`, `palco`, `perfil-salva-sessao`,
+  `perfil-sessao`, `rodape-do-operador`, `tela-de-outra-versao`.
+- **Os 7 sem `exigir` nenhum**, também para a pendência 58. Depois da rodada
+  1, que dá `exigir` a `versao-do-servidor` (o sétimo), são **6**: `atualizacao`,
+  `botoes-da-entrada`, `dispositivos`, `perfil-entrada`, `perfil-salva`,
+  `renomear-canal`.
+- **O `--no-sandbox` e o caminho do navegador no Linux**: só o primeiro
+  disparo do `ci.yml` no Actions vai dizer.
