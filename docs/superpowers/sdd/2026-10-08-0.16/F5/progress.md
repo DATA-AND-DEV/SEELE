@@ -343,3 +343,39 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
 - **A onda 6 foi despachada sobre `2112c38`.** Os dois lotes rodam em paralelo:
   - o K4;
   - o R, a credencial da tentativa, com o conserto do convite da F1 (`24e7e249`) na base.
+- **A oitava integração foi verde em `f7fb8ab`** e trouxe a onda 5 inteira e o conserto do convite da F1. O merge de volta é o `cd2227c`.
+- **O plano mudou na onda 6:**
+  - **o lote R entrou**, por pedido da orquestradora (`b55e8f1`);
+  - **o Z se dividiu em dois:** o Z1 é o item 7, código de teste, e rodou em paralelo com a onda 6; o Z2 são os documentos, feitos depois dela.
+- **K4 → integrado** (`2112c38..85f6c65`, merge `87a8779`), em 1 rodada, mais um ajuste de doc.
+  - **P49-7b** (`e8a485c`): o som do pacote atravessa a ponte uma vez só. O `MidiaDoMod.uri` virou `Option` e é omitido só no som do pacote.
+  - **P49-7a** (`9b43de1`, `f9ef3d2`, `a9a47a8` e `0b9029e`): um som que, decodificado, passa de 64 MiB é recusado no Rust antes de servir.
+    - **O piso:** é lido à mão do cabeçalho WAV, Ogg ou MP3, e as três margens que fazem dele um piso têm teste.
+    - **Contra o `decodeAudioData` real:** o piso fica abaixo do real no Chromium e no WebKit, e 300 mil entradas mutadas passaram sem pânico.
+    - **Os consumidores só de imagem** continuam dizendo ao MOD o que diziam antes (`29b58ef`).
+- **Z1 → integrado** (`f60a130..67a7c53`, merge `e8cc4fb`), em 1 rodada. É a pendência 56.
+  - **O conserto:** o segundo despachante entrou no core (`a4fcd99`), no server (`cefb5c5`) e no ffi (`12bb176`).
+  - **As provas** rodam em processo filho e decidem na bateria inteira (`f4cba99`).
+  - **O guarda novo** está no xtask (`3230eb9`).
+  - **A prova de que o defeito era real:** a revisão achou uma segunda vítima. No core, com 4 threads e sem o conserto, um teste reprova 12 em 12.
+- **R → integrado** (`2112c38..1b1ed32`, merge `7544630`), em 1 rodada, mais as sobras. É o achado 4 da F8.
+  - **A credencial volta** (`211ed15`): a volta que aceita os MODs reenvia a credencial da tentativa.
+    - Ela fica só na memória da pergunta e presa ao alvo dela (`9b1c247`).
+    - Ela é esquecida ao entrar, ao desistir e ao fechar (`21471bf` e `6b23b69`).
+  - **O link colado** sai do campo quando é usado (`d521b41` e `789729d`).
+  - **O `Debug`** de `ConnectConfig` e de `Destino` esconde o segredo (`a910b2e`).
+  - **A prova:** `volta_do_aceite` passou 2 de 2. Com o conserto da F1 revertido, o teste do convite cai no passo certo.
+- **Onda 6 fechada no código, no `7544630`.** A conferência combinada passou nos 45 passos, todos com saída 0:
+  - fmt e clippy;
+  - app 627, core 527, ffi 166, audio 254, motor 7, server 687 e xtask 212;
+  - `check-runtime` e as oito bancadas;
+  - a conformidade, com 158 testes em 26 arquivos.
+  
+  A orquestradora levou o `7544630` na nona integração e liberou a `ui/` para as outras frentes. O `main.rs` e a `ui/` passaram a ter outros donos.
+- **Z2 → integrado** (`cd2227c..2f2c6a8`, merge `000612f`), em 1 rodada. Ele entra na décima integração.
+  - **As pendências fechadas:**
+    - a 49, a 50 e a 51, item a item, com os commits que fecham;
+    - a 52 a 56, com os commits delas.
+  - **O índice da 1.0** foi atualizado.
+  - **A pendência 58**, «O que a F5 da 0.16 deixou», tem 51 itens.
+  - **O que a revisão mudou:** tirou uma atribuição sem prova, a do «panicked» do 51-15, e acertou a medida da 50 para o teste de hoje.

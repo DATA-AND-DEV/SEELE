@@ -18,34 +18,13 @@
   const sessao = document.getElementById("tela-sessao");
   const doDesktop = (id) => document.getElementById(id);
 
-  // As palavras da moldura. Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o
-  // P10 (Tarefa 14); até lá moram aqui, num lugar só.
-  const PALAVRAS = Object.freeze({
-    abas: { servidor: "SERVIDOR", conversa: "CONVERSA", pessoas: "PESSOAS", ajustes: "AJUSTES" },
-    secoes: "seções",
-    mic: "MIC",
-    mudo: "MUDO",
-    som: "SOM",
-    surdo: "SURDO",
-    sair: "SAIR",
-    salaDeVoz: (nome) => `Sala de voz ${nome}`,
-    abrirChamada: (nome) => `${nome}: abrir a chamada`,
-    sairDaSala: "Sair da sala de voz",
-    micAberto: "Microfone aberto. Tocar fecha.",
-    micFechado: "Microfone fechado. Tocar abre.",
-    somLigado: "Som ligado. Tocar desliga.",
-    somDesligado: "Som desligado. Tocar liga.",
-    segure: "SEGURE",
-    noAr: "NO AR",
-    segurarParaFalar: "Segurar para falar",
-    fala: (quem) => `${quem} fala`,
-    naSala: (n) => `${n} na sala`,
-    sinal: (n) => `sinal ${n}`,
-    recolher: "RECOLHER",
-    recolherChamada: "Recolher a chamada e voltar à sessão",
-    telemetria: "telemetria da chamada",
-    medidas: [["ATRASO", "tel-rtt"], ["JITTER", "tel-jit"], ["PERDA", "tel-loss"], ["CODEC", "tel-codec"]],
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.voz;
+
+  // O aviso de fone diz a verdade do navegador (P9): o eco dele vem ligado, e o
+  // «o SEELE ainda não cancela eco» do desktop seria falso aqui.
+  CASCA.avisoDeFone = () => AVISO_DE_FONE_CELULAR;
 
   // ------------------------------------------------------------- as abas
 

@@ -193,7 +193,24 @@ function fecharAceiteDeMods() {
 }
 
 /**
- * Grava o sim, **obtém o conjunto autorizado**, e tenta entrar de novo.
+ * A frase de quando o «não» não pôde ser desfeito: o sim aos MODs de `alvo`
+ * ficou gravado, e a pessoa precisa saber disso e de onde desfazê-lo.
+ *
+ * Aqui, e não em `frases.js`: ela não é a frase de uma variante de erro — leva
+ * o alvo e a falha de desfazer dentro dela — e só existe nesta pergunta. É a
+ * razão de `camada-versoes.js` ter as próprias frases, e `frases.js` é editado
+ * por outra frente.
+ */
+function simQueFicouGravado(alvo, falha) {
+  return (
+    `O SIM AOS MODS DE ${alvo} FICOU GRAVADO.\n` +
+    `Você recusou, e não consegui desfazê-lo (${fraseDeErro(falha)}). ` +
+    "Desfaça em CONFIGURAÇÕES · MODS, na lista SERVIDORES A QUEM VOCÊ DISSE SIM."
+  );
+}
+
+/**
+ * **Obtém o conjunto autorizado**, grava o sim, e tenta entrar de novo.
  *
  * **Por que a obtenção mora aqui, e não no laço que carrega os MODs.**
  *
@@ -218,17 +235,6 @@ async function aceitarOsMods() {
   const erro = $("mods-erro");
   botao.disabled = true;
   erro.hidden = true;
-  try {
-    await invoke("aceitar_mods", { alvo, conjunto });
-  } catch (falha) {
-    // O sim não foi gravado. **Não tenta entrar**: entrar agora falharia de
-    // novo pelo mesmo motivo, e a pessoa leria a mesma pergunta duas vezes sem
-    // saber que o problema foi gravar.
-    botao.disabled = false;
-    erro.hidden = false;
-    erro.textContent = fraseDeErro(falha);
-    return;
-  }
 
   if (!(await obterOConjunto(mods ?? []))) {
     // **Não entra.** Entrar sem os pacotes é chegar à sessão sem o que o
@@ -251,7 +257,46 @@ async function aceitarOsMods() {
   //
   // Pela identidade, e não por «há uma pergunta aberta»: uma pergunta nova,
   // de outra batida, não é a que este sim respondeu.
+  //
+  // **E o sim não é gravado** (lote W da F5, ADR 0045). Ele era gravado antes
+  // da obtenção: a volta não saía, mas na entrada seguinte neste servidor o
+  // aceite batia, ninguém perguntava e o MOD rodava — contra o «não» que a
+  // pessoa deu por último. `instalar_mod_do_catalogo` não lê o aceite, e por
+  // isso a ordem pôde mudar: obter primeiro, gravar só depois desta conferência.
   if (aceitePendente !== pergunta) return;
+
+  try {
+    await invoke("aceitar_mods", { alvo, conjunto });
+  } catch (falha) {
+    // O sim não foi gravado. **Não tenta entrar**: entrar agora falharia de
+    // novo pelo mesmo motivo, e a pessoa leria a mesma pergunta duas vezes sem
+    // saber que o problema foi gravar.
+    botao.disabled = false;
+    erro.hidden = false;
+    erro.textContent = fraseDeErro(falha);
+    return;
+  }
+
+  // **Quem desistiu enquanto o sim era gravado tem o «não» de volta.** A
+  // gravação também espera, e RECUSAR, Escape e clicar fora seguem à mão
+  // durante ela: a ordem nova não fecha essa janela, então o sim que terminou
+  // de ser gravado depois da desistência é desfeito aqui, pelo mesmo verbo da
+  // seção MODS de CONFIGURAÇÕES.
+  //
+  // **E se desfazer falhar, a tela diz** (lote W, rodada 1). O sim fica
+  // gravado contra o «não», e a próxima entrada roda o MOD sem perguntar; a
+  // falha ia só ao console. A pergunta já fechou, e quem desistiu está na
+  // entrada: a frase vai à linha dela, com o lugar onde desfazer.
+  if (aceitePendente !== pergunta) {
+    try {
+      await invoke("esquecer_aceite_de_mods", { alvo });
+    } catch (falha) {
+      const naEntrada = $("boot-erro");
+      naEntrada.hidden = false;
+      naEntrada.textContent = simQueFicouGravado(alvo, falha);
+    }
+    return;
+  }
 
   // **A credencial da tentativa vai junto, para o mesmo alvo** — lote R da F5.
   //
@@ -699,8 +744,8 @@ function esquecerPreferenciasLidas() {
 /**
  * A preferência que a tela **de fato** consulta para um ponto.
  *
- * `pessoa.avatar` não tem linha própria em QUEM DESENHA O QUE, e herda a de
- * `pessoa.cartao` quando não há escolha dele. `avatarContribuido`, em
+ * `pessoa.avatar` e `pessoa.capa` não têm linha própria em QUEM DESENHA O QUE,
+ * e herdam a de `pessoa.cartao` quando não há escolha deles (rascunho §4). `avatarContribuido`, em
  * `base.js`, decide por esta função, e «quem pinta cada lugar» a lê: uma
  * regra, e não duas cópias dela.
  *
@@ -708,8 +753,8 @@ function esquecerPreferenciasLidas() {
  *   de um MOD.
  */
 function preferenciaConsultadaPara(ponto) {
-  if (ponto === "pessoa.avatar") {
-    return modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao");
+  if (ponto === "pessoa.avatar" || ponto === "pessoa.capa") {
+    return modPreferidoPara(ponto) || modPreferidoPara("pessoa.cartao");
   }
   return modPreferidoPara(ponto);
 }
@@ -915,6 +960,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": "Como as pessoas aparecem",
   "pessoa.cartao": "O cartão de cada pessoa",
   "pessoa.avatar": "As imagens de cada pessoa no servidor",
+  "pessoa.capa": "A capa de cada pessoa",
   "pessoa.detalhes": "O perfil detalhado de uma pessoa",
   "pessoa.acoes": "Ações sobre uma pessoa",
   "canal.item": "Como os canais aparecem na lista",
@@ -923,6 +969,12 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "sala.acoes": "Ações dentro de uma sala de voz",
   "servidor.navegacao": "Entradas na navegação",
   "servidor.aparencia": "A aparência da sessão",
+  "redes": "A coluna de servidores",
+  "operador.barra": "A barra de quem está conectado",
+  "compositor": "A caixa de escrever",
+  "status.barra": "A barra de baixo",
+  "pessoas.lista": "A lista de pessoas",
+  "conversa.mensagem": "Cada mensagem da conversa",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1185,6 +1237,7 @@ function quemPintaEstaAVista() {
 const CONTEINERES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": ".pessoa-identidade",
   "pessoa.avatar": "[data-pessoa-do-avatar]",
+  "pessoa.capa": "[data-pessoa-da-capa]",
   "pessoa.cartao": "li.pessoa",
   "pessoa.detalhes": ".pessoa-nativo",
   "pessoa.acoes": ".pessoa-rodape",
@@ -1194,6 +1247,12 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "sala.acoes": ".roster-sala",
   "servidor.navegacao": "#lista-mods-navegacao",
   "servidor.aparencia": "#tela-sessao",
+  "redes": "#trilha-mods",
+  "operador.barra": "#operador-mods",
+  "compositor": "#compositor-mods",
+  "status.barra": "#telemetria-mods",
+  "pessoas.lista": "#roster-mods",
+  "conversa.mensagem": ".mensagem-miolo",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

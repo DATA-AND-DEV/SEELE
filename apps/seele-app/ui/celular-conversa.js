@@ -20,14 +20,9 @@
   const { h } = CELULAR;
   const doDesktop = (id) => document.getElementById(id);
 
-  // Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o P10 (Tarefa 14).
-  const PALAVRAS = Object.freeze({
-    escrever: (canal) => `escrever em #${canal}`,
-    anexar: "Anexar uma foto, um vídeo ou um arquivo",
-    renomearTitulo: "RENOMEAR O CANAL",
-    salasECanais: "SALAS E CANAIS",
-    foraSalas: "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador.",
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.conversa;
 
   CASCA.enterEnvia = false;
 

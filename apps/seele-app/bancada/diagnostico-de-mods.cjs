@@ -408,7 +408,22 @@ async function quemPintaCadaLugar(navegador, servidor) {
   await pagina.click("#mods-aba-diagnostico");
   const linha = (ponto) => pagina.textContent(`#lista-quem-pinta li[data-ponto="${ponto}"]`);
 
-  assert.equal(await pagina.locator("#lista-quem-pinta > li").count(), 11, "a aba não mostra os onze lugares");
+  // Um lugar por ponto da API, lido da tabela: as regiões da API 6 (tarefa 5)
+  // somam pontos, e um número fixo aqui mediria a tabela de ontem.
+  const pontos = await pagina.evaluate(() => Object.keys(PONTOS_DE_CONTRIBUICAO));
+  assert.ok(pontos.length >= 12, `a tabela de pontos encolheu para ${pontos.length}: a leitura quebrou`);
+  assert.equal(
+    await pagina.locator("#lista-quem-pinta > li").count(),
+    pontos.length,
+    "a aba não mostra um lugar para cada ponto da API",
+  );
+  for (const ponto of pontos) {
+    assert.equal(
+      await pagina.locator(`#lista-quem-pinta > li[data-ponto="${ponto}"]`).count(),
+      1,
+      `a aba não mostra «${ponto}»`,
+    );
+  }
 
   let cartao = await linha("pessoa.cartao");
   assert.match(cartao, /desenhado por mod\/a/, `sem preferência, quem vale é o de maior prioridade: ${cartao}`);
@@ -594,7 +609,7 @@ async function quemPintaCadaLugar(navegador, servidor) {
 
 /**
  * **A região e as páginas de cada MOD aparecem na aba** (pendência 49, item 5).
- * `desenharQuemPinta` desenha, logo abaixo dos onze lugares, o bloco que soma a
+ * `desenharQuemPinta` desenha, logo abaixo dos lugares, o bloco que soma a
  * mídia da faixa e das páginas de cada MOD (`desenharAMidiaDosMods`). A bancada
  * de node mede a soma e as frases; esta mede que a aba as desenha, com uma
  * recusa da região e uma da página do mesmo MOD.
@@ -618,7 +633,7 @@ async function aRegiaoEAsPaginasDeCadaModAparecemNaAba(navegador, servidor) {
     pagina,
     () => /a região e as páginas de mod\/x: 2 recusadas — img\/regiao\.png não está no pacote; img\/pagina\.png não está no pacote/
       .test(document.querySelector('#lista-quem-pinta + ul[data-midia-dos-mods="sim"]')?.textContent ?? ""),
-    "a aba DIAGNÓSTICO não desenhou, abaixo dos onze lugares, o bloco da região e das páginas de mod/x com as duas "
+    "a aba DIAGNÓSTICO não desenhou, abaixo dos lugares, o bloco da região e das páginas de mod/x com as duas "
       + "recusas e os motivos: a mídia recusada da faixa e da página de um MOD chega ao seele.log e ao MOD, e não à aba",
     bloco,
   );

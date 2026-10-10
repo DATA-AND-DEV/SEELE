@@ -29,11 +29,13 @@ name: CI
 # que pulou: no terminal de quem publica e no corpo do release.
 #
 # **As bancadas de navegador são a exceção nos dois caminhos.** Elas só rodam
-# aqui, no job `bancadas`, e uma release pode sair com uma delas vermelha se
-# ninguém disparar este workflow antes. Quem diz quais são é o teste
-# `toda_bancada_da_pasta_roda_em_algum_lugar` (`xtask/src/check_runtime.rs`):
-# toda bancada da pasta está num `run:` daquele job ou na lista das de Node
-# puro, e a que não está reprova o teste.
+# aqui, no job `bancadas` (e a do executor de MODs no navegador, que precisa do
+# `.wasm`, no `bancadas-de-mod`), e uma release pode sair com uma delas
+# vermelha se ninguém disparar este workflow antes. Quem diz quais são é o
+# teste `toda_bancada_da_pasta_roda_em_algum_lugar`
+# (`xtask/src/check_runtime.rs`): toda bancada da pasta está num `run:` de um
+# daqueles dois jobs ou na lista das de Node puro, e a que não está reprova o
+# teste.
 #
 # Voltar ao automático é devolver as duas linhas:
 #
@@ -287,6 +289,11 @@ jobs:
       # segundos (de 0 a 5 s, medido no macOS em 01/10/2026). O teste
       # `todo_passo_de_bancada_do_job_de_navegador_roda_depois_de_uma_vermelha_e_tem_prazo`,
       # no mesmo `check_runtime.rs`, exige os dois em todo passo de bancada.
+      # O que a casca chama sozinha no navegador, com a ponte de verdade e sem
+      # duble (F4, Tarefa 3.1): nada volta recusado, nas duas cascas.
+      - run: node apps/seele-app/bancada/ponte-sem-gesto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/compartilhar-por-identidade.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -324,6 +331,23 @@ jobs:
       # computa (09/10/2026): a cor resolvida acima de `#tela-sessao` deixava o
       # corpo das mensagens a 1,09:1 com um tema que a validação aceitava.
       - run: node apps/seele-app/bancada/tema-claro-legivel.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # As regiões da API 6 no `index.html` real (tarefa 5 da F3): o nó de um MOD
+      # aparece no contêiner da região, o que é do produto continua lá, e
+      # revogar devolve a região ao que era.
+      - run: node apps/seele-app/bancada/regioes-do-produto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A capa de uma pessoa (tarefa 6 da F3): o cartão pintado, o texto por
+      # cima, o quadro estático com movimento reduzido e a recusa dita.
+      - run: node apps/seele-app/bancada/capa.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # As camadas da API 6 (tarefa 7 da F3): a folha que empilha três, com a
+      # saída e o `descartou` do produto, o painel recusado na 6, e os tetos
+      # das superfícies pelo nome.
+      - run: node apps/seele-app/bancada/camadas.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 
@@ -377,10 +401,29 @@ jobs:
       # cortado e o teto de memória, que só se prova no `wasm32-wasip1`. O
       # wasi-sdk vem conferido pelo `cargo xtask wasi-sdk`, com o hash fixado de
       # `x86_64-linux`; sem ele, o build do motor para em vez de baixar.
+      #
+      # Com `!cancelled()`, como os passos de baixo: uma bancada de Node
+      # vermelha acima não pode pular o motor nem a bancada que o lê.
       - run: rustup target add wasm32-unknown-unknown wasm32-wasip1
+        if: ${{ !cancelled() }}
       - name: os crates do celular no wasm
+        if: ${{ !cancelled() }}
         timeout-minutes: 15
         run: cargo xtask web
+      # O executor de MODs no navegador (ADR 0057), num Chromium e com o motor
+      # que o passo acima acabou de compilar. O isolamento (nem a rede, nem a
+      # origem da página, nem um armazenamento que sobreviva) só se prova num
+      # navegador de verdade, e o `.wasm` só existe neste job: por isso esta
+      # bancada de navegador mora aqui, e não no `bancadas`. O teste
+      # `a_bancada_do_executor_no_navegador_roda_depois_do_motor_compilado`, em
+      # `xtask/src/check_runtime.rs`, segura a ordem e o caminho.
+      - run: npm install --no-save playwright
+        if: ${{ !cancelled() }}
+      - run: npx playwright install --with-deps chromium
+        if: ${{ !cancelled() }}
+      - run: node apps/seele-app/bancada/executor-no-navegador.cjs target/wasm32-wasip1/release/seele_motor_web.wasm
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # O `cargo deny` sobre o `deny.toml`, que nenhum job daqui rodava.
   #

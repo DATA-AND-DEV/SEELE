@@ -76,19 +76,44 @@
 const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "pessoa.identidade": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.avatar": { modos: ["substituir"], perfil: null, porAlvo: true },
+  // **A capa** (rascunho da API 6, §4; tarefa 6): uma origem de imagem por
+  // pessoa, como o avatar, e com as mesmas exigências.
+  "pessoa.capa": { modos: ["substituir"], perfil: null, porAlvo: true },
   "pessoa.cartao": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.detalhes": { modos: ["adicionar"], perfil: "superficie", porAlvo: true },
   "pessoa.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "canal.item": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
-  "canal.cabecalho": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
+  "canal.cabecalho": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "compositor.ferramentas": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "sala.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
-  "servidor.navegacao": { modos: ["adicionar"], perfil: null, porAlvo: false },
+  "servidor.navegacao": { modos: ["substituir", "adicionar"], perfil: null, porAlvo: false },
   "servidor.aparencia": { modos: ["substituir"], perfil: null, porAlvo: false },
+  // **As regiões da API 6** (rascunho §3, tarefa 5), no orçamento do cartão
+  // (64 nós) até a M3 medir, no desktop e no iPhone: o número delas sai da
+  // medida, e não do plano (decisão da orquestradora, 09/10).
+  "redes": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "operador.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "compositor": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
+  "pessoas.lista": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: false },
+  "conversa.mensagem": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
 });
 
-/** Quantas contribuições um MOD registra ao mesmo tempo. */
+/**
+ * Quantas contribuições **sem alvo** um MOD registra ao mesmo tempo — as
+ * regiões, as entradas de navegação, as ferramentas do compositor. As por alvo
+ * têm o teto delas, abaixo (rascunho da API 6, §12).
+ */
 const TETO_DE_CONTRIBUICOES = 128;
+
+/**
+ * **Quantos alvos um MOD alcança num ponto por alvo** (rascunho da API 6, §12;
+ * tarefa 5, Step 7). Uma sala vai a 250 pessoas (`control.rs:77`), e o cartão,
+ * o avatar e a capa de cada uma eram três contribuições do mesmo teto de 128 —
+ * 42 pessoas. Agora cada ponto por alvo tem o seu, maior que a sala. O número
+ * é a partida do rascunho, e sai da M3.
+ */
+const TETO_DE_ALVOS_POR_PONTO = 256;
 
 /**
  * A escolha que quer dizer «o SEELE desenha, e nenhum MOD».
@@ -102,6 +127,94 @@ const TETO_DE_CONTRIBUICOES = 128;
  * colide com nenhum.
  */
 const NATIVO = ":nativo";
+
+/**
+ * **Os nomes das recusas do registro** (rascunho da API 6, §7.1; tarefa 5,
+ * Step 7b). O MOD da 6 recebe o nome, de lista fechada, e a frase vai ao
+ * `seele.log`; até a API 5, o MOD recebe a frase, como os publicados recebem.
+ * Até o Step 7b, toda recusa daqui chegava ao MOD da 6 como `falhou`.
+ */
+const RECUSAS_DAS_CONTRIBUICOES = Object.freeze([
+  "ponto-desconhecido",
+  "modo-recusado",
+  "sem-alvo",
+  "conteudo-invalido",
+  "teto-de-contribuicoes",
+  "teto-de-alvos",
+  "contribuicao-ja-existe",
+  "contribuicao-de-outro-mod",
+]);
+
+/** Uma recusa do registro: a frase, e o nome em `recusa`, da lista fechada. */
+function recusaNomeada(nome, frase) {
+  if (!RECUSAS_DAS_CONTRIBUICOES.includes(nome)) {
+    throw new TypeError(`«${nome}» não está na lista das recusas das contribuições`);
+  }
+  const recusa = new Error(frase);
+  recusa.recusa = nome;
+  return recusa;
+}
+
+/**
+ * **A forma que cada ponto exige do conteúdo**, no registro e no `atualizar` —
+ * a mesma conferência nos dois, para um MOD não trocar por `atualizar` o que o
+ * registro recusaria. Lança com o nome do ponto; não devolve nada.
+ */
+function conferirOConteudo(ponto, modo, alvo, conteudo) {
+  // Um avatar — e uma capa — é só uma origem de imagem, nunca uma árvore sobre
+  // os controles.
+  const imagemDePessoa = ponto === "pessoa.avatar" || ponto === "pessoa.capa";
+  if (imagemDePessoa && (alvo === undefined || alvo === null || String(alvo) === "")) {
+    throw recusaNomeada("sem-alvo", `${ponto} exige alvo e conteudo.doServidor`);
+  }
+  if (imagemDePessoa && (
+    !conteudo?.doServidor
+    || typeof conteudo.doServidor !== "object"
+    || Array.isArray(conteudo.doServidor)
+  )) {
+    throw recusaNomeada("conteudo-invalido", `${ponto} exige alvo e conteudo.doServidor`);
+  }
+  // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
+  // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
+  // A linha de cada sala e de cada canal continua do produto. Outra forma é
+  // recusada pelo nome, e não desenhada como se fosse esta.
+  const comGrupos = (parte) => Boolean(
+    parte && typeof parte === "object" && Array.isArray(parte.grupos)
+    && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids)),
+  );
+  // E a lista de pessoas substituída, a mesma ideia: `{ grupos }`, que valem
+  // dentro de cada sala — as salas são do produto (decisão da orquestradora,
+  // 09/10).
+  if (ponto === "pessoas.lista" && modo === "substituir" && !comGrupos(conteudo)) {
+    throw recusaNomeada(
+      "conteudo-invalido",
+      "pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }",
+    );
+  }
+  if (ponto === "servidor.navegacao" && modo === "substituir") {
+    const lista = (parte) => parte === undefined || comGrupos(parte);
+    if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
+      || (conteudo.salas === undefined && conteudo.canais === undefined)
+      || !lista(conteudo.salas) || !lista(conteudo.canais)) {
+      throw recusaNomeada(
+        "conteudo-invalido",
+        "servidor.navegacao/substituir declara a ordem das listas: "
+        + "{ salas?, canais? }, cada um com grupos: [{ titulo, ids }]",
+      );
+    }
+  }
+}
+
+/**
+ * **A contribuição é deste dono?** Três perguntas, e as três precisam ser
+ * feitas: o identificador sozinho não basta — um MOD recarregado dentro da
+ * mesma sessão é outra instância, e a contribuição da anterior não é dele.
+ */
+function eDoDono(contribuicao, dono) {
+  return contribuicao.mod === dono.id
+    && contribuicao.instancia === dono.instancia
+    && contribuicao.geracao === (dono.instancia?.geracao ?? -1);
+}
 
 /**
  * O registro vivo de contribuições desta janela.
@@ -140,7 +253,8 @@ class RegistroDeContribuicoes {
     // **Recusado e nomeado.** Um ponto que não existe não pode virar silêncio:
     // o MOD ficaria esperando para sempre uma contribuição que nunca aparece.
     if (!regra) {
-      throw new Error(
+      throw recusaNomeada(
+        "ponto-desconhecido",
         `a API de MODs não conhece o ponto «${ponto}»; os que existem são `
         + Object.keys(PONTOS_DE_CONTRIBUICAO).join(", "),
       );
@@ -152,37 +266,64 @@ class RegistroDeContribuicoes {
       // decorar» e concluiria que errou o ponto. Ele não errou: o modo existe
       // no plano, e não existe nesta versão.
       if (modo === "decorar") {
-        throw new Error(
+        throw recusaNomeada(
+          "modo-recusado",
           "«decorar» não está na API 4: ele mudaria a apresentação de um nó do "
           + "SEELE, e o subconjunto de estilo que impede um MOD de encobrir o "
           + `nome que abre a moderação ainda não existe. Em «${ponto}», use `
           + "«adicionar» — o conteúdo entra ao lado do nativo, sem cobri-lo",
         );
       }
-      throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
+      throw recusaNomeada("modo-recusado", `«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
     }
-    // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
-    if (ponto === "pessoa.avatar" && (
-      pedido?.alvo === undefined || pedido?.alvo === null || String(pedido.alvo) === ""
-      || !pedido?.conteudo?.doServidor
-      || typeof pedido.conteudo.doServidor !== "object"
-      || Array.isArray(pedido.conteudo.doServidor)
-    )) {
-      throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
-    }
-    const quantas = this.porMod.get(mod.id) ?? 0;
-    if (quantas >= TETO_DE_CONTRIBUICOES) {
-      throw new Error(`um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições de pé`);
-    }
-
+    conferirOConteudo(ponto, modo, pedido?.alvo, pedido?.conteudo);
     const alvo = regra.porAlvo && pedido?.alvo !== undefined && pedido?.alvo !== null
       ? String(pedido.alvo)
       : "";
+    // **Por alvo, fora do teto agregado** (rascunho §12; tarefa 5, Step 7).
+    // Cada alvo aceita uma contribuição deste MOD em cada modo — registrar de
+    // novo é `atualizar`, e não uma segunda —, até um teto de alvos por ponto.
+    // Sem alvo, o agregado de sempre.
+    const noAgregado = alvo === "";
+    if (noAgregado) {
+      const quantas = this.porMod.get(mod.id) ?? 0;
+      if (quantas >= TETO_DE_CONTRIBUICOES) {
+        throw recusaNomeada(
+          "teto-de-contribuicoes",
+          `um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições sem alvo de pé`,
+        );
+      }
+    } else {
+      const doPonto = this.porPonto.get(ponto);
+      const minhas = (lista) => (lista ?? []).filter((c) => c.mod === mod.id && c.instancia === instancia);
+      const nesteAlvo = minhas(doPonto?.get(alvo));
+      if (nesteAlvo.some((c) => c.modo === modo)) {
+        throw recusaNomeada(
+          "contribuicao-ja-existe",
+          `«${ponto}» já tem uma contribuição de ${mod.id} para «${alvo}» em «${modo}»; `
+          + "use atualizar para trocar o conteúdo dela",
+        );
+      }
+      if (nesteAlvo.length === 0) {
+        let alvos = 0;
+        for (const [outro, lista] of doPonto ?? []) {
+          if (outro !== "" && minhas(lista).length > 0) alvos += 1;
+        }
+        if (alvos >= TETO_DE_ALVOS_POR_PONTO) {
+          throw recusaNomeada(
+            "teto-de-alvos",
+            `um MOD contribui para até ${TETO_DE_ALVOS_POR_PONTO} alvos em «${ponto}»`,
+          );
+        }
+      }
+    }
     const contribuicao = {
       handle: `c${(this.serie += 1)}`,
       mod: mod.id,
       instancia,
       geracao: instancia?.geracao ?? 0,
+      // Se ela conta no teto agregado — e é o que `tirar` desconta.
+      noAgregado,
       ponto,
       modo,
       alvo,
@@ -211,7 +352,7 @@ class RegistroDeContribuicoes {
     porAlvo.set(alvo, lista);
     this.porPonto.set(ponto, porAlvo);
     this.porHandle.set(contribuicao.handle, contribuicao);
-    this.porMod.set(mod.id, quantas + 1);
+    if (noAgregado) this.porMod.set(mod.id, (this.porMod.get(mod.id) ?? 0) + 1);
 
     // **Registrada como recurso na criação.** Uma contribuição que a saída não
     // encontra é uma faixa de perfil que sobrevive à troca de servidor.
@@ -227,6 +368,41 @@ class RegistroDeContribuicoes {
     );
     this.avisar();
     return { handle: contribuicao.handle };
+  }
+
+  /**
+   * **Troca o conteúdo de uma contribuição sem revogá-la** (R7 do PERFIS;
+   * tarefa 5 da F3, Step 6).
+   *
+   * Revogar e registrar de novo era o único caminho, e ele passava pelo nativo:
+   * entre os dois, a linha de quem tinha cartão voltava à do produto, e o
+   * avatar, às iniciais. Aqui o conteúdo muda **no mesmo nó** — quem montou a
+   * contribuição a reaplica (`aoAtualizar`) — e o avatar troca de foto só
+   * quando a nova está decodificada.
+   *
+   * Só o dono atualiza, pelas mesmas três perguntas do `revogar`; e o conteúdo
+   * novo passa pela mesma conferência de forma do registro.
+   *
+   * @param {string} handle O que `registrar` devolveu.
+   * @param {object} dono `{ id, instancia }`.
+   * @param {*} conteudo O conteúdo novo, na forma que o ponto exige.
+   * @returns {boolean} Se havia o que trocar.
+   */
+  atualizar(handle, dono, conteudo) {
+    const contribuicao = this.porHandle.get(handle);
+    if (!contribuicao) return false;
+    if (!dono || !eDoDono(contribuicao, dono)) {
+      throw recusaNomeada(
+        "contribuicao-de-outro-mod",
+        `a contribuição «${handle}» não é de ${dono?.id ?? "ninguém"}: um MOD atualiza o que `
+        + "ele registrou",
+      );
+    }
+    conferirOConteudo(contribuicao.ponto, contribuicao.modo, contribuicao.alvo || undefined, conteudo);
+    contribuicao.conteudo = conteudo ?? null;
+    if (contribuicao.aoAtualizar) contribuicao.aoAtualizar();
+    this.avisar();
+    return true;
   }
 
   /**
@@ -253,19 +429,12 @@ class RegistroDeContribuicoes {
   revogar(handle, dono = null) {
     const contribuicao = this.porHandle.get(handle);
     if (!contribuicao) return false;
-    if (dono) {
-      // **Três perguntas, e as três precisam ser feitas.** O identificador
-      // sozinho não basta: um MOD recarregado dentro da mesma sessão é outra
-      // instância, e a contribuição da anterior não é dele.
-      const meu = contribuicao.mod === dono.id
-        && contribuicao.instancia === dono.instancia
-        && contribuicao.geracao === (dono.instancia?.geracao ?? -1);
-      if (!meu) {
-        throw new Error(
-          `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
-          + "ele registrou, e a saída da sessão limpa o resto",
-        );
-      }
+    if (dono && !eDoDono(contribuicao, dono)) {
+      throw recusaNomeada(
+        "contribuicao-de-outro-mod",
+        `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
+        + "ele registrou, e a saída da sessão limpa o resto",
+      );
     }
     // Pelo descartador que a instância devolveu: é ele que tira a entrada da
     // lista de recursos **e** chama `tirar`. Chamar `tirar` direto deixaria o
@@ -293,9 +462,11 @@ class RegistroDeContribuicoes {
       if (!lista.length) porAlvo.delete(contribuicao.alvo);
     }
     if (porAlvo && !porAlvo.size) this.porPonto.delete(contribuicao.ponto);
-    const quantas = this.porMod.get(contribuicao.mod) ?? 0;
-    if (quantas <= 1) this.porMod.delete(contribuicao.mod);
-    else this.porMod.set(contribuicao.mod, quantas - 1);
+    if (contribuicao.noAgregado) {
+      const quantas = this.porMod.get(contribuicao.mod) ?? 0;
+      if (quantas <= 1) this.porMod.delete(contribuicao.mod);
+      else this.porMod.set(contribuicao.mod, quantas - 1);
+    }
     // **E o que foi montado a partir dela sai junto.**
     //
     // Quem monta é a janela — `montarContribuicao` em `base.js` —, e ela deixa

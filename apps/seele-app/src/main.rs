@@ -45,6 +45,7 @@ mod catalogo;
 mod executor;
 mod icone;
 mod mods;
+mod reducao;
 mod servidores;
 mod versoes;
 
@@ -6019,6 +6020,11 @@ struct MidiaDoMod {
     papel: &'static str,
     /// Quantos bytes o arquivo tem, para a contabilidade de recursos da janela.
     bytes: usize,
+    /// **Quanto a imagem pesa decodificada** — largura × altura × 4 × quadros —,
+    /// quando ela foi reduzida a um uso (`reducao`; rascunho da API 6, §4). É o
+    /// que o bolso da capa conta: o custo na janela é o quadro, e não o arquivo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decodificados: Option<u64>,
 }
 
 /// O nome de uma recusa de MOD, como o registro o escreve.
@@ -6225,6 +6231,7 @@ fn midia_declarada_do_mod(
                     uri: None,
                     papel: tipo.papel,
                     bytes: bytes.len(),
+                    decodificados: None,
                 });
             }
             let lida = seele_ffi::mods::ler_midia(&bytes).ok_or_else(desconhecido)?;
@@ -6232,6 +6239,7 @@ fn midia_declarada_do_mod(
                 uri: Some(lida.uri),
                 papel: lida.papel,
                 bytes: lida.bytes,
+                decodificados: None,
             })
         })
         .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, caminho, falha))
@@ -6952,12 +6960,18 @@ mod cabecalho_de_som {
 ///
 /// [`FalhaNoMod`] quando a geração já acabou, quando o texto não é base64,
 /// quando passa do teto, ou quando os bytes não são de um formato conhecido.
-#[tauri::command]
+///
+/// **`uso`** nomeia o lugar em que a imagem vai aparecer (`"capa"`), e ela
+/// chega reduzida a ele (`reducao`; tarefa 6, Step 5). Fora da thread da
+/// janela (`async`): reduzir uma animação de 60 quadros leva tempo, e um
+/// comando síncrono do Tauri roda na thread principal.
+#[tauri::command(async)]
 fn midia_em_bytes(
     session: State<'_, Session>,
     geracao: u64,
     id: String,
     base64: String,
+    uso: Option<String>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
     let midia = midia_do_servidor_dita(
@@ -6965,6 +6979,7 @@ fn midia_em_bytes(
         std::time::Instant::now(),
         &id,
         &base64,
+        uso.as_deref().and_then(reducao::teto_do_uso).as_ref(),
     )?;
     midia_vinda_do_servidor_dita(
         &session.baldes_do_registro,
@@ -7028,12 +7043,16 @@ fn midia_do_servidor_dita(
     agora: std::time::Instant,
     id: &str,
     base64: &str,
+    teto: Option<&reducao::Teto>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
-    ler_midia_do_servidor(base64)
+    ler_midia_do_servidor(base64, teto)
         .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, "servidor", falha))
 }
 
-fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
+fn ler_midia_do_servidor(
+    base64: &str,
+    teto: Option<&reducao::Teto>,
+) -> Result<MidiaDoMod, FalhaNoMod> {
     // Conferido **antes** de decodificar: o texto cresce um terço sobre os
     // bytes, então o teto do texto é o teto dos bytes com folga, e recusar aqui
     // é recusar sem alocar.
@@ -7070,6 +7089,7 @@ fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
     if seele_ffi::mods::ler_tipo(&bytes).is_some_and(|tipo| tipo.papel == "som") {
         som_cabe_decodificado(&bytes)?;
     }
+    let (bytes, decodificados) = reduzir_ao_uso(bytes, teto)?;
     let lida = seele_ffi::mods::ler_midia(&bytes).ok_or(FalhaNoMod::Recusado {
         motivo: "formato-desconhecido".to_owned(),
     })?;
@@ -7077,7 +7097,30 @@ fn ler_midia_do_servidor(base64: &str) -> Result<MidiaDoMod, FalhaNoMod> {
         uri: Some(lida.uri),
         papel: lida.papel,
         bytes: lida.bytes,
+        decodificados,
     })
+}
+
+/// **Uma imagem reduzida ao uso que a janela nomeou** (`reducao`; rascunho da
+/// API 6, §4; tarefa 6, Step 5), e quanto ela pesa decodificada. Sem uso, ou
+/// para um som, os bytes seguem como vieram.
+///
+/// # Errors
+///
+/// `formato-desconhecido`, quando a imagem não decodifica.
+fn reduzir_ao_uso(
+    bytes: Vec<u8>,
+    teto: Option<&reducao::Teto>,
+) -> Result<(Vec<u8>, Option<u64>), FalhaNoMod> {
+    let Some(teto) = teto else {
+        return Ok((bytes, None));
+    };
+    if !seele_ffi::mods::ler_tipo(&bytes).is_some_and(|tipo| tipo.papel == "imagem") {
+        return Ok((bytes, None));
+    }
+    let reduzida =
+        reducao::reduzir(&bytes, teto).map_err(|motivo| FalhaNoMod::Recusado { motivo })?;
+    Ok((reduzida.bytes, Some(reduzida.decodificados)))
 }
 
 /// Os bytes escolhidos seguem direto da memória nativa para um fluxo autenticado.
@@ -7142,6 +7185,7 @@ async fn ler_imagem_mod(
     id: String,
     channel: u32,
     payload: String,
+    uso: Option<String>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     session.recusar_se_morta(geracao)?;
     // **Dita, e não contada.** A geração foi conferida logo acima: uma conexão
@@ -7171,11 +7215,13 @@ async fn ler_imagem_mod(
     // O relógio é lido quando a linha é escrita, e não antes do `await`: a
     // leitura por volume pode levar segundos, e o balde contaria a recarga
     // desde um instante que já passou.
+    // Reduzida ao `uso`, quando a janela o nomeia (`reducao`; tarefa 6, Step 5).
     imagem_lida_dita(
         &session.baldes_do_registro,
         std::time::Instant::now(),
         &id,
         lida,
+        uso.as_deref().and_then(reducao::teto_do_uso).as_ref(),
     )
 }
 
@@ -7203,6 +7249,7 @@ fn imagem_lida_dita(
     agora: std::time::Instant,
     id: &str,
     lida: Result<Vec<u8>, String>,
+    teto: Option<&reducao::Teto>,
 ) -> Result<MidiaDoMod, FalhaNoMod> {
     let bytes = lida.map_err(|motivo| {
         recusa_de_midia_dita(baldes, agora, id, "volume", FalhaNoMod::Recusado { motivo })
@@ -7211,6 +7258,8 @@ fn imagem_lida_dita(
         som_cabe_decodificado(&bytes)
             .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, "volume", falha))?;
     }
+    let (bytes, decodificados) = reduzir_ao_uso(bytes, teto)
+        .map_err(|falha| recusa_de_midia_dita(baldes, agora, id, "volume", falha))?;
     let midia = seele_ffi::mods::ler_midia(&bytes).ok_or_else(|| {
         recusa_de_midia_dita(
             baldes,
@@ -7226,6 +7275,7 @@ fn imagem_lida_dita(
         uri: Some(midia.uri),
         papel: midia.papel,
         bytes: midia.bytes,
+        decodificados,
     })
 }
 
@@ -9305,6 +9355,98 @@ fn persistence_hospedada(
     Ok(server.persistence())
 }
 
+/// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
+/// quem hospeda (a P12 do plano F1b).
+///
+/// Hoje, as mensagens de controle de um vocabulário mais novo que o servidor
+/// pulou: quem usa um SEELE mais novo está mandando o que esta versão não
+/// entende, e atualizar o SEELE daqui resolve. Sem isto, o servidor sabia e só
+/// dizia no `seele.log`. **Uma janela que não hospeda responde
+/// `hospedando: false`**, e a tela não desenha a linha: não há servidor de que
+/// falar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+struct EstadoDoServidor {
+    /// Se há um servidor no ar nesta janela.
+    hospedando: bool,
+    /// Quantas mensagens de um vocabulário mais novo o servidor pulou.
+    mensagens_desconhecidas: u64,
+    /// Em quantas sessões isso aconteceu.
+    sessoes_com_desconhecidas: u64,
+}
+
+/// O estado de uma hospedagem, ou o de quem não hospeda.
+fn estado_do_servidor_de(
+    estado: Option<seele_server::hospedagem::EstadoDoServidor>,
+) -> EstadoDoServidor {
+    estado.map_or_else(EstadoDoServidor::default, |estado| EstadoDoServidor {
+        hospedando: true,
+        mensagens_desconhecidas: estado.mensagens_desconhecidas,
+        sessoes_com_desconhecidas: estado.sessoes_com_desconhecidas,
+    })
+}
+
+/// O estado do servidor que esta janela hospeda. Ver [`EstadoDoServidor`].
+///
+/// Lido do servidor embutido, em memória: barato o bastante para a tela de
+/// configurações perguntar a cada volta do laço dela.
+#[tauri::command]
+fn estado_do_servidor(session: State<'_, Session>) -> Result<EstadoDoServidor, &'static str> {
+    // O servidor guardado, que é o da seção ESTE SERVIDOR; a sala pessoal não
+    // tem configurações e não entra aqui.
+    let hospedagens = session
+        .hospedagens
+        .lock()
+        .map_err(|_| "HospedagemIndisponivel")?;
+    Ok(estado_do_servidor_de(
+        hospedagens
+            .do_guardado()
+            .map(seele_server::hospedagem::Hospedagem::estado),
+    ))
+}
+
+#[cfg(test)]
+mod o_estado_do_servidor {
+    use super::*;
+
+    #[test]
+    fn quem_nao_hospeda_diz_que_nao_hospeda_e_nada_mais() {
+        assert_eq!(
+            estado_do_servidor_de(None),
+            EstadoDoServidor {
+                hospedando: false,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn quem_hospeda_diz_os_numeros_do_servidor_e_o_zero_tambem() {
+        let numeros = |mensagens, sessoes| {
+            estado_do_servidor_de(Some(seele_server::hospedagem::EstadoDoServidor {
+                mensagens_desconhecidas: mensagens,
+                sessoes_com_desconhecidas: sessoes,
+            }))
+        };
+        assert_eq!(
+            numeros(0, 0),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+        assert_eq!(
+            numeros(3, 1),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 3,
+                sessoes_com_desconhecidas: 1,
+            }
+        );
+    }
+}
+
 /// O estado das três camadas da porta.
 #[tauri::command]
 async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
@@ -9987,34 +10129,6 @@ fn arquivo_de_log() -> Option<std::fs::File> {
 /// duas vezes.
 const TETO_DO_LOG: u64 = 8 * 1024 * 1024;
 
-/// Troca o rastro por um novo quando o atual passa do teto. R15.
-///
-/// # Por que ele precisa girar
-///
-/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
-/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
-/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
-/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
-///
-/// # Duas gerações, e não dez
-///
-/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
-/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
-/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
-/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
-/// para responder uma pergunta que ninguém faz.
-///
-/// # Na abertura, e não por relógio
-///
-/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
-/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
-/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
-/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
-/// gira na próxima abertura.
-///
-/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
-/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
-/// era o que uma interrogação aqui causaria.
 /// Um pânico, em qualquer thread, deixa uma linha no `seele.log`. F1-audio-panico.
 ///
 /// # Por que existe
@@ -10054,6 +10168,34 @@ fn instalar_gancho_de_panico() {
     });
 }
 
+/// Troca o rastro por um novo quando o atual passa do teto. R15.
+///
+/// # Por que ele precisa girar
+///
+/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
+/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
+/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
+/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
+///
+/// # Duas gerações, e não dez
+///
+/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
+/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
+/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
+/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
+/// para responder uma pergunta que ninguém faz.
+///
+/// # Na abertura, e não por relógio
+///
+/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
+/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
+/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
+/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
+/// gira na próxima abertura.
+///
+/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
+/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
+/// era o que uma interrogação aqui causaria.
 fn girar_o_log(arquivo: &std::path::Path) {
     let Ok(dados) = std::fs::metadata(arquivo) else {
         // Não existe ainda, que é o caso da primeira abertura.
@@ -10443,6 +10585,7 @@ fn main() {
             regras_de_previa,
             pasta_de_downloads,
             estado_da_porta,
+            estado_do_servidor,
             definir_senha_do_server,
             criar_convite_do_server,
             ligar_portaria,
@@ -12254,6 +12397,45 @@ mod a_supervisao_dos_mods_nativos {
         );
     }
 
+    /// **A imagem com um uso chega reduzida a ele, e diz quanto pesa
+    /// decodificada** (`reducao`; tarefa 6 da F3, Step 5), pelos dois caminhos
+    /// da mídia do servidor: o texto em base64 e a leitura por volume. Sem uso,
+    /// ela segue como veio.
+    #[test]
+    fn a_imagem_com_uso_chega_reduzida_e_diz_quanto_pesa_decodificada() {
+        use image::ImageEncoder as _;
+        let foto = image::RgbaImage::from_pixel(2000, 700, image::Rgba([40, 200, 120, 255]));
+        let mut grande = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut grande)
+            .write_image(&foto, 2000, 700, image::ExtendedColorType::Rgba8)
+            .expect("gravar a foto de teste");
+        let base64 = seele_ffi::base64_de(&grande);
+        let teto = crate::reducao::TETO_DA_CAPA;
+        // 2000 × 700 cabe em 960 × 320 como 914 × 320.
+        let esperado = Some(914 * 320 * 4);
+
+        let sem_uso = super::ler_midia_do_servidor(&base64, None).expect("imagem aceita");
+        assert_eq!((sem_uso.bytes, sem_uso.decodificados), (grande.len(), None));
+
+        let com_uso = super::ler_midia_do_servidor(&base64, Some(&teto)).expect("imagem reduzida");
+        assert!(
+            com_uso.bytes < grande.len(),
+            "a imagem não encolheu: {} bytes",
+            com_uso.bytes
+        );
+        assert_eq!(com_uso.decodificados, esperado);
+
+        let lida = super::imagem_lida_dita(
+            &super::BaldesDoRegistro::default(),
+            std::time::Instant::now(),
+            "seele/perfis",
+            Ok(grande.clone()),
+            Some(&teto),
+        )
+        .expect("imagem reduzida pelo volume");
+        assert_eq!(lida.decodificados, esperado);
+    }
+
     #[test]
     fn imagem_do_perfis_em_data_uri_chega_ao_decodificador() {
         for (mime, bytes) in [
@@ -12263,7 +12445,7 @@ mod a_supervisao_dos_mods_nativos {
         ] {
             let base64 = seele_ffi::base64_de(bytes);
             for entrada in [base64.clone(), format!("data:{mime};base64,{base64}")] {
-                let midia = super::ler_midia_do_servidor(&entrada).expect("imagem aceita");
+                let midia = super::ler_midia_do_servidor(&entrada, None).expect("imagem aceita");
                 assert_eq!(midia.bytes, bytes.len());
                 assert_eq!(
                     midia.uri,
@@ -12280,7 +12462,7 @@ mod a_supervisao_dos_mods_nativos {
         let png = b"\x89PNG\r\n\x1a\n";
         let alegada = format!("data:image/jpeg;base64,{}", seele_ffi::base64_de(png));
         assert!(
-            super::ler_midia_do_servidor(&alegada)
+            super::ler_midia_do_servidor(&alegada, None)
                 .unwrap()
                 .uri
                 .is_some_and(|uri| uri.starts_with("data:image/png;")),
@@ -12293,7 +12475,7 @@ mod a_supervisao_dos_mods_nativos {
             "data:image/png;base64,%%%",
             "https://example.com/a.png",
         ] {
-            assert!(super::ler_midia_do_servidor(invalida).is_err());
+            assert!(super::ler_midia_do_servidor(invalida, None).is_err());
         }
         let mut bytes = vec![0; seele_ffi::mods::TETO_DE_MIDIA];
         // `get_mut` e não um fatiamento: `indexing_slicing` é `warn` no
@@ -12306,12 +12488,12 @@ mod a_supervisao_dos_mods_nativos {
             .copy_from_slice(png);
         let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
         assert_eq!(
-            super::ler_midia_do_servidor(&uri).unwrap().bytes,
+            super::ler_midia_do_servidor(&uri, None).unwrap().bytes,
             bytes.len()
         );
         bytes.push(0);
         let uri = format!("data:image/png;base64,{}", seele_ffi::base64_de(&bytes));
-        assert!(super::ler_midia_do_servidor(&uri).is_err());
+        assert!(super::ler_midia_do_servidor(&uri, None).is_err());
     }
 
     /// **Um arquivo escolhido não sobrevive à sessão que o escolheu.**
@@ -15391,6 +15573,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 origem(),
                 "seele/perfis",
                 "data:image/png;base64,%%%",
+                None,
             )
         });
         let falha = resultado.err().expect("base64 inválido virou mídia");
@@ -15427,6 +15610,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 origem(),
                 ID,
                 Err(motivo.to_owned()),
+                None,
             )
         });
         (
@@ -15504,6 +15688,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 origem(),
                 ID,
                 Err("Prazo esgotado".to_owned()),
+                None,
             )
         });
         let falha = resultado.err().expect("a recusa do servidor virou imagem");
@@ -15542,6 +15727,7 @@ mod a_midia_recusada_e_dita_no_registro {
                 origem(),
                 ID,
                 Ok(TEXTO.to_vec()),
+                None,
             )
         });
         let falha = resultado.err().expect("texto lido por volume virou imagem");
@@ -15573,7 +15759,13 @@ mod a_midia_recusada_e_dita_no_registro {
     #[test]
     fn a_imagem_lida_aceita_nao_escreve_linha() {
         let (resultado, rastro) = capturar(|| {
-            imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(PNG.to_vec()))
+            imagem_lida_dita(
+                &BaldesDoRegistro::default(),
+                origem(),
+                ID,
+                Ok(PNG.to_vec()),
+                None,
+            )
         });
         let midia = resultado.expect("um PNG lido por volume foi recusado");
         assert_eq!(
@@ -16555,13 +16747,14 @@ mod o_som_grande_demais_decodificado_e_recusado_antes {
     #[test]
     fn o_som_do_servidor_que_passa_do_teto_decodificado_e_recusado_antes_de_servir() {
         let grande = wav(1, 8_000, 8, TETO_DE_MIDIA - 44);
-        let falha = ler_midia_do_servidor(&seele_ffi::base64_de(&grande))
+        let falha = ler_midia_do_servidor(&seele_ffi::base64_de(&grande), None)
             .err()
             .expect("o som do servidor que passa do teto decodificado foi servido no `data:`");
         recusado_pelo_teto("o som do servidor", &falha);
 
-        let (resultado, rastro) =
-            capturar(|| imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(grande)));
+        let (resultado, rastro) = capturar(|| {
+            imagem_lida_dita(&BaldesDoRegistro::default(), origem(), ID, Ok(grande), None)
+        });
         let falha = resultado
             .err()
             .expect("o som lido por volume que passa do teto decodificado foi servido");
@@ -16573,7 +16766,7 @@ mod o_som_grande_demais_decodificado_e_recusado_antes {
             "a recusa do som lido por volume não chegou ao registro: {rastro}"
         );
 
-        let curto = ler_midia_do_servidor(&seele_ffi::base64_de(&wav(1, 8_000, 8, 8_000)));
+        let curto = ler_midia_do_servidor(&seele_ffi::base64_de(&wav(1, 8_000, 8, 8_000)), None);
         assert!(
             curto.is_ok_and(|midia| midia.papel == "som" && midia.uri.is_some()),
             "o som curto do servidor deixou de sair com o `data:`, que é o único caminho dele \
