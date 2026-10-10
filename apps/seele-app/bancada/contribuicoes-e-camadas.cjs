@@ -1914,6 +1914,19 @@ function anotando(...anotadas) {
   confere("Step 7 · outro modo, o mesmo alvo",
     recusa({ ponto: "pessoa.cartao", modo: "adicionar", alvo: "1" }) === "",
     "acrescentar à linha de quem o MOD já apresenta foi recusado como se fosse a mesma contribuição");
+  // **Dois por alvo, e não três** (decisão da orquestradora, 09/10): com o
+  // cartão substituído e a linha acrescida, uma terceira, num modo que já está
+  // de pé, é recusada pelo nome.
+  {
+    let nome = "";
+    try {
+      registro.registrar({ id: "mod/perfis" }, dono, { ponto: "pessoa.cartao", modo: "adicionar", alvo: "1" });
+    } catch (falha) {
+      nome = falha.recusa ?? `(sem nome: ${falha.message})`;
+    }
+    confere("Step 7 · o terceiro no mesmo alvo", nome === "contribuicao-ja-existe",
+      `a terceira contribuição para o mesmo alvo, num modo já de pé, veio com ${nome || "(aceita)"}`);
+  }
 
   for (let id = 251; id <= 256; id += 1) recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(id) });
   const alem = recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" });
