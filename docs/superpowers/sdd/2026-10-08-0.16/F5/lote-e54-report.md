@@ -538,7 +538,9 @@ a entrada seguinte não entrou: {"error":"AlreadyConnected","trail":[],…}
 cadeado do slot tomado, na mesma ordem de cadeados de `soltar_a_entrada_em` (o
 do slot, e dentro dele os de `Session::revogar`). Ou a velha grava antes e a
 nova recusa, ou a nova revoga antes e a velha é largada na conferência dela.
-Verde: o módulo do E54, 5 de 5.
+Verde: o módulo do E54, 5 de 5 — **numa rodada só, e por sorte de ordem**: o
+teste do M1 não montava a casa nem gravava o retrato, e só passava quando
+outro teste do módulo o gravava antes (ver 11, R1-I2).
 
 **A reversão R11** (o começo do `connect` da base): o teste do M1 reprova com
 os três pontos acima, e volta idêntica. E **R1**, rodada de novo com os testes
@@ -592,7 +594,10 @@ já existia na base, com «visitar X, sair, hospedar».
 
 No HEAD `bbb62528`:
 - `cargo test -p seele-app` (todos os alvos, sem `--workspace`): `--bin` 344
-  de 344 (339 na base, mais os cinco do módulo do E54); `frontend` 294,
+  de 344 (339 na base, mais os cinco do módulo do E54) **numa rodada, e esse
+  número não se reproduzia**: a re-revisão mediu 343/344 em 5 de 6 rodadas,
+  pela ordem dos testes (ver 11, R1-I2), e as minhas rodadas desta seção
+  foram com a HOME de verdade; `frontend` 294,
   `web` 12, `celular` 8, `empacotamento` 22, `encerramento` 3, `fontes` 5,
   `manifesto_hibrido` 11, `marca` 9, `permissoes` 4, `tokens` 3;
 - `cargo xtask check-runtime`: saída 0;
@@ -605,3 +610,129 @@ No HEAD `bbb62528`:
 Nada falhou por tempo. Nenhuma conformidade, nenhum `--workspace`. Os commits
 desta rodada foram feitos verdes, cada um depois de rodado; o vermelho do M1 e
 os das reversões estão acima.
+
+## 11. A re-revisão da rodada 1
+
+Dois achados, os dois no teste novo do M1. O I1 e o M1 estão fechados no
+código. Conserto em `b5809c33`.
+
+### R1-I2 (Importante) · o teste do M1 não montava a casa nem gravava o retrato
+
+`a_nova_falha_no_meio_da_velha` não chamava `casa()` nem
+`guardar_um_retrato()`, e os outros testes de comportamento do módulo chamam.
+Duas consequências:
+
+- **O `--bin` dependia da ordem.** O teste usa o retrato para saber que a
+  velha passou da primeira conferência. Sem gravá-lo, ele só passava quando
+  outro teste do módulo o gravava antes: a re-revisão mediu 343/344 em 5 de 6
+  rodadas, com «o retrato da velha não chegou ao servidor velho». O «5 de 5» e
+  o «344 de 344» da seção 10 eram uma rodada de sorte.
+- **Rodado sozinho, ou antes de qualquer teste do módulo que montasse a casa,
+  ele usava a casa de quem roda a bateria.** Sem `SEELE_HOME`, o `config_dir`
+  cai em `$HOME/.config/seele`.
+
+**O conserto:**
+- `app()` chama `casa()`, e nenhum teste do módulo pode esquecer;
+- `app()` confere, antes de qualquer `connect`, que o `config_dir` do app
+  falso é a casa temporária, e reprova se não for;
+- o teste do M1 grava o retrato.
+
+### R1-M5 (Menor) · o teste do M1 não conferia que a ordem foi a forçada
+
+`da_nova.is_err()` aceitava `AlreadyConnected`. Se a nova chegasse ao slot
+depois de a velha gravá-lo, a janela soltaria a velha pela geração ainda de pé,
+e a R11 passaria calada. Agora o teste cobra, nesta ordem:
+- a nova falha, e **não** por `AlreadyConnected`;
+- a velha volta recusada como substituída (`substituida: true`);
+- o slot fica vazio sem pedido nenhum da janela;
+- a velha some do servidor velho;
+- a entrada seguinte entra.
+
+A imitação da janela (soltar a velha que voltou entrando) fica só para o
+vermelho dizer a consequência. São as asserções que o revisor descreveu para
+o porte (ver 9), e valem igual na 0.15.
+
+### A HOME de verdade: quais rodadas minhas a usaram
+
+**Sim, houve rodadas minhas com a HOME de verdade.** O teste do M1 nasceu por
+volta das 20:25, depois de `e26cb67b` (20:24:38). Desde então, toda rodada
+minha em que ele rodou antes de algum teste que monta a casa usou
+`$HOME/.config/seele`. Os horários saem dos commits e das datas dos meus
+arquivos no scratchpad:
+
+1. **~20:25, certa.** O vermelho do M1, com o teste sozinho
+   (`cargo test -p seele-app --bin seele-app a_nova_que_falha_no_meio_da_velha`).
+   Ninguém chamou `casa()` nesse processo. Ele reprovou pela velha órfã, e
+   não por falta de retrato: o `retrato.png` da casa real foi lido e mandado ao
+   servidor de teste. Isso é inferência minha, porque não li a pasta.
+2. **~20:26, provável.** O módulo inteiro depois do conserto do M1
+   (`a_entrada_velha_que_chega_tarde`, 5 testes), e o `cargo test -p seele-app`
+   que veio logo em seguida, antes de `msg-m1.txt` (20:27:06) e do commit
+   `bbb62528` (20:27:09). Em cada um, o teste do M1 usou a HOME real se pegou
+   o `vez()` antes de um teste que monta a casa. O `mtime` 20:26:36 do `pins`
+   real bate com um destes dois.
+3. **20:27–20:28, R11 e R1** (o módulo inteiro). Poderiam ter usado, mas o
+   `mtime` do `pins` é anterior a elas. Pela data, não escreveram nada.
+
+Antes das 20:25 nenhum teste meu deixava de montar a casa. Desde `b5809c33`,
+toda rodada minha passa por `e54/cargo-falso.sh`: uma HOME nova por chamada,
+sem `SEELE_HOME` nem `XDG_CONFIG_HOME`.
+
+**O que essas rodadas fizeram na pasta real**, pela leitura do código e sem
+ler os arquivos:
+- `identity.key`: lida (`identity::load_or_create` só cria se não existir);
+- `pins`: ganhou entradas TOFU de `127.0.0.1:<porta efêmera>`. São duas por
+  rodada do teste do M1: o servidor velho e o novo, da entrada seguinte. A
+  tentativa à porta 99999 falha no `resolve`, antes da identidade e dos pinos.
+  As quatro entradas que o revisor contou batem com duas rodadas;
+- `retrato.png`: lido e mandado ao servidor de teste, em `127.0.0.1`;
+- `preferences` e `conhecidos`: só lidos (`open` e `abrir` criam a pasta, e
+  não o arquivo), e o `connect` não grava a lista para endereço desta
+  máquina;
+- nada saiu de `127.0.0.1`. As contas «velha» e «seguinte», com a chave real,
+  ficaram em servidores em memória que morreram com o teste.
+
+Não li nem toquei `~/.config/seele`.
+
+### As provas
+
+Todas com HOME falsa:
+- o `--bin` seis vezes: 344 de 344 nas seis;
+- o teste do M1 sozinho (`--exact`) três vezes: verde nas três;
+- nenhuma das HOMEs falsas ganhou `.config/seele`.
+
+### As reversões
+
+O mesmo script (cópia, mutante, toque, prova, devolução, toque, `cmp` contra
+a cópia e contra `git show HEAD:`, `git status`). Todas voltaram idênticas, e
+todas rodaram com HOME falsa.
+
+- **R11** (o começo do `connect` da base): o teste do M1 reprova com «a velha
+  voltou como entrada (geração 1) com a geração da nova de pé», «a velha ficou
+  no slot (Velho) sem a janela pedir nada», «a velha ficou órfã no slot (Velho):
+  a janela a largou e o Rust não a soltou», «a velha continua presente no
+  servidor que a pessoa deixou (1)», «a entrada seguinte não entrou:
+  AlreadyConnected». **Sem** «a nova recebeu `AlreadyConnected`»: a ordem foi a
+  forçada. Os outros quatro passam.
+- **R11b** (o mutante do revisor, que confere com o cadeado e o solta antes de
+  revogar): reprova igual, e também sem a linha do `AlreadyConnected` da nova.
+  O teste prova que a revogação tem de ficar dentro do cadeado.
+- **R12** (a guarda da casa: `casa()` deixa de pôr o `SEELE_HOME`): os quatro
+  testes que usam `app()` reprovam na conferência da casa, antes de qualquer
+  `connect`, com «a casa do app falso não é a temporária deste módulo: um
+  `connect` daqui escreveria a identidade e os pinos em
+  …/home-falsa.…/.config/seele». A HOME falsa dessa rodada ficou vazia.
+
+### O que rodou
+
+No HEAD `b5809c33`, com HOME falsa:
+- `cargo test -p seele-app` (todos os alvos, sem `--workspace`): `--bin` 344
+  (339 na base, mais os cinco do módulo do E54), `frontend` 294, `web` 12,
+  `celular` 8, `empacotamento` 22, `encerramento` 3, `fontes` 5,
+  `manifesto_hibrido` 11, `marca` 9, `permissoes` 4, `tokens` 3;
+- `cargo fmt --all -- --check`: limpo;
+- `cargo clippy -p seele-app --all-targets -- -D warnings`: limpo (só o aviso
+  do ligador, da base).
+
+Esta rodada só mexeu nos testes do `main.rs`. Não rodei `check-runtime` nem as
+bancadas, e nenhuma conformidade.
