@@ -235,7 +235,8 @@ enum Desfecho {
     LeuTudo,
     /// A sessão se despediu, com este motivo. O que ela não leu ficou com
     /// quem disse — é o `EstadoDoEnvio::SemResposta` do cliente de verdade, que
-    /// repete com a mesma chave.
+    /// pode repetir com a mesma chave quando a casca chama
+    /// `reenviar_mensagem`; sozinho, ele não repete.
     Desligado(DisconnectReason),
     /// O fluxo acabou sem despedida.
     Caiu(String),

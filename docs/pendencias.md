@@ -5266,7 +5266,9 @@ ninguém precise adivinhar depois.
   atrás da fila do escritor, diz que o lote gravou; e a asserção passa a ser a
   que o servidor de fato promete — o que ele leu de cada falante está gravado,
   em ordem, sem buraco, e quem ficou com mensagem sem gravar foi desligado
-  dizendo por quê (o `SemResposta` do cliente, que repete com a mesma chave).
+  dizendo por quê (o `SemResposta` do cliente, que **pode** repetir com a mesma
+  chave: o cliente não repete sozinho, repete quando a casca chama
+  `reenviar_mensagem`, a pedido de quem escreveu).
   As reversões e as rodadas estão em
   `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-y-report.md`.
 - **`crates/seele-conformance/tests/anexos.rs`.** Esta foi a reprovação da rodada
