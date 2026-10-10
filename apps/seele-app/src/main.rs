@@ -1580,11 +1580,6 @@ struct Hospedado {
     /// O identificador do servidor guardado. `None` no legado (a máquina que
     /// hospedava antes de haver lista, com o banco de sempre) e na sala.
     servidor: Option<String>,
-    /// Os endereços que o convite desta hospedagem anuncia (lote X da F5,
-    /// rodada 2): é por eles, e pelo `aqui`, que
-    /// [`a_sessao_e_com_o_servidor_daqui`] reconhece uma sessão aberta pelo
-    /// próprio link. Morrem com a hospedagem.
-    enderecos_do_convite: Vec<String>,
 }
 
 /// Onde a sessão desta janela está, em relação às hospedagens deste app.
@@ -2139,7 +2134,7 @@ async fn hospedar(
 
     let alcance = server.alcance();
     let anfitriao = Anfitriao {
-        aqui: endereco_do_servidor_daqui(),
+        aqui: format!("127.0.0.1:{PORTA_PADRAO}"),
         convite: server.convite_com_nome(nome_publico.as_deref()),
         alcance: alcance.map_or("SoRedeLocal", |alcance| alcance.degrau().nome()),
         porta_recusada: alcance.and_then(|alcance| alcance.porta_recusada().map(str::to_owned)),
@@ -2159,9 +2154,6 @@ async fn hospedar(
         .guardado = Some(Hospedado {
         hospedagem: server,
         servidor,
-        // O convite que esta hospedagem anuncia, o mesmo que volta à tela: quem
-        // cola o próprio link entra por um destes endereços (lote X, rodada 2).
-        enderecos_do_convite: enderecos_do_convite(&anfitriao.convite),
     });
 
     Ok(anfitriao)
@@ -5292,60 +5284,8 @@ async fn aplicar_mod(
     Ok(identidade)
 }
 
-/// Onde esta janela entra no servidor que ela mesma hospeda: o `aqui` que
-/// [`hospedar`] devolve, e que a tela usa como alvo da entrada seguinte.
-fn endereco_do_servidor_daqui() -> String {
-    format!("127.0.0.1:{PORTA_PADRAO}")
-}
-
-/// Se a sessão desta janela é com o servidor que ela mesma hospeda.
-///
-/// **Lote X da F5, rodada 1.** Fazer esta pergunta é necessário porque o sim
-/// de quem hospeda vai a `endereco_da_sessao`, e a janela pode estar de pé
-/// hospedando e, ao mesmo tempo, na sessão de **outro** servidor. Isso acontece
-/// quando a entrada no próprio servidor falha ou é recusada e a pessoa entra
-/// noutro.
-///
-/// A comparação é **pelo `aqui` de [`hospedar`]**, na chave em que o aceite é
-/// guardado ([`seele_ffi::chave_do_servidor`]). Não serve
-/// [`hospedado_aqui`], porque o prefixo de loopback diz só «nesta máquina»: o
-/// HOSPEDAR COM ESTA da F6 põe o servidor de outra versão em `127.0.0.1`. Nem a
-/// impressão digital, porque a conexão não a entrega à casca (o `Trust::Known`
-/// não a traz).
-///
-/// Só quem já sabe que esta janela hospeda chama esta função
-/// (`persistence_do_mod`). Duas hospedagens não seguram a mesma porta, então o
-/// `aqui` é o servidor desta janela.
-///
-/// **E os endereços do convite da hospedagem** (rodada 2), em `do_convite`:
-/// são os que ela anuncia ([`enderecos_do_convite`]). Quem cola o próprio link
-/// no CONECTAR entra pelo primeiro deles, normalmente o da rede local, e a
-/// lista de conhecidos o guarda para o VOLTAR. Comparar só com o `aqui`
-/// deixava esse caminho sem o sim de quem hospeda, e a volta perguntava de
-/// novo (o A04).
-fn a_sessao_e_com_o_servidor_daqui(endereco_da_sessao: &str, do_convite: &[String]) -> bool {
-    let Some(chave) = seele_ffi::chave_do_servidor(endereco_da_sessao) else {
-        return false;
-    };
-    std::iter::once(endereco_do_servidor_daqui())
-        .chain(do_convite.iter().cloned())
-        .any(|daqui| seele_ffi::chave_do_servidor(&daqui).as_ref() == Some(&chave))
-}
-
-/// Os endereços que um convite anuncia: o alvo e os alternativos, na ordem do
-/// link. Um link que não se lê não anuncia nada.
-fn enderecos_do_convite(convite: &str) -> Vec<String> {
-    seele_ffi::uri::analisar(convite)
-        .map(|lido| {
-            std::iter::once(lido.alvo)
-                .chain(lido.alternativos)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// Grava o sim de quem hospeda ao conjunto que acabou de aplicar, **só** quando
-/// a sessão é com o servidor daqui.
+/// a sessão é com o servidor guardado que esta janela hospeda.
 ///
 /// Há dois gravadores: [`aplicar_mod`] (a atualização pela gestão, QA-01) e
 /// [`aplicar_conjunto_de_mods`] (o SALVAR). Os dois gravavam
@@ -5358,11 +5298,11 @@ fn enderecos_do_convite(convite: &str) -> Vec<String> {
 ///   ADR 0045;
 /// - a lista de aceites mostrava um sim a S que ninguém deu.
 ///
-/// Fora do servidor daqui, nada é gravado: o sim de quem hospeda é ao
-/// conjunto que ele acabou de decidir, e não ao de outro servidor.
-///
-/// O servidor daqui é o **guardado** ([`Hospedagens::guardado`]): é nele que
-/// moram os MODs ([`persistence_do_mod`]), e a sala pessoal não tem nenhum.
+/// **O portão é [`onde_estou_na`]**, a única resposta a «estou no meu
+/// servidor?», e ela é pela chave: o sim vai ao endereço da sessão quando a
+/// impressão que ela conferiu é a do guardado, entre por onde ela entrar.
+/// Fora dele nada é gravado, nem na sala, que não tem MODs, nem sem guardado
+/// de pé.
 fn gravar_o_sim_de_quem_hospeda(
     config: &str,
     session: &Session,
@@ -5373,48 +5313,39 @@ fn gravar_o_sim_de_quem_hospeda(
         .lock()
         .ok()
         .and_then(|a| a.clone());
-    let do_convite = session
-        .hospedagens
-        .lock()
-        .ok()
-        .and_then(|hospedagens| {
-            hospedagens
-                .guardado
-                .as_ref()
-                .map(|guardado| guardado.enderecos_do_convite.clone())
-        })
-        .unwrap_or_default();
-    gravar_o_sim_se_a_sessao_e_daqui(config, alvo.as_deref(), &do_convite, identidade)
+    gravar_o_sim_se_for_o_guardado(config, alvo.as_deref(), onde_estou_na(session), identidade)
 }
 
-/// [`gravar_o_sim_de_quem_hospeda`] sem a sessão: o endereço dela, e os
-/// endereços do convite do servidor guardado. Separada para que os testes a
-/// rodem sem subir uma hospedagem, que abriria UPnP e PCP no roteador.
-fn gravar_o_sim_se_a_sessao_e_daqui(
+/// [`gravar_o_sim_de_quem_hospeda`] sem a sessão: o endereço dela e a
+/// resposta de [`onde_estou_na`]. Separada para os testes, que não sobem
+/// hospedagem nem conexão.
+fn gravar_o_sim_se_for_o_guardado(
     config: &str,
     endereco_da_sessao: Option<&str>,
-    do_convite: &[String],
+    onde: OndeEstou,
     identidade: &str,
 ) -> Result<(), String> {
     match endereco_da_sessao {
-        Some(alvo) if a_sessao_e_com_o_servidor_daqui(alvo, do_convite) => {
+        Some(alvo) if onde == OndeEstou::Guardado => {
             seele_ffi::mods::aceitar(config, alvo, identidade)
         }
         _ => Ok(()),
     }
 }
 
-/// **O sim de quem hospeda vai só ao servidor daqui** — lote X da F5, rodada 1,
+/// **O sim de quem hospeda vai só ao servidor guardado** — lote X da F5,
 /// ADR 0045. Ver [`gravar_o_sim_de_quem_hospeda`].
 ///
 /// Os dois gravadores têm `AppHandle` e pedem uma hospedagem de pé, que num
-/// teste abriria UPnP e PCP no roteador. Por isso o que roda aqui é:
-/// - a identidade que cada um calcula, sobre o banco de verdade do servidor
-///   hospedado, em memória;
-/// - a gravação que os dois fazem, sobre o arquivo de aceites de verdade, numa
-///   pasta de passagem.
+/// teste abriria UPnP e PCP no roteador, e a impressão da sessão pede uma
+/// conexão. Por isso o que roda aqui é:
+/// - a resposta de [`onde_estou_em`], a função pura sobre impressões que o
+///   portão usa;
+/// - a identidade que cada gravador calcula, sobre o banco de verdade do
+///   servidor hospedado, em memória;
+/// - a gravação, sobre o arquivo de aceites de verdade, numa pasta de passagem.
 ///
-/// O guarda de texto-fonte prende os dois gravadores a essa gravação.
+/// O guarda de texto-fonte prende os dois gravadores ao `onde_estou`.
 #[cfg(test)]
 mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
     use seele_server::mods::anuncio::conjunto_exigido;
@@ -5422,12 +5353,14 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
     use seele_server::persistence::{Location, Persistence};
 
     use super::{
-        corpo_de, endereco_do_servidor_daqui, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
-        gravar_o_sim_se_a_sessao_e_daqui, Session,
+        corpo_de, fonte_sem_comentarios, gravar_o_sim_de_quem_hospeda,
+        gravar_o_sim_se_for_o_guardado, onde_estou_em, Session,
     };
 
-    /// Outro servidor, onde a sessão está.
-    const S: &str = "198.51.100.7:8383";
+    /// A chave do guardado, a da sala e a de outro servidor S.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
 
     fn versao(numero: &str, byte: char) -> EnabledMod {
         EnabledMod {
@@ -5449,13 +5382,6 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             .unwrap()
     }
 
-    /// Uma janela cuja sessão está em `onde`.
-    fn sessao_em(onde: &str) -> Session {
-        let sessao = Session::default();
-        *sessao.endereco_da_sessao.lock().unwrap() = Some(onde.to_owned());
-        sessao
-    }
-
     /// A identidade que cada gravador grava, calculada como ele a calcula.
     fn identidades_dos_gravadores() -> [(&'static str, String); 2] {
         let salvar = Persistence::open(&Location::Memory).unwrap();
@@ -5475,130 +5401,143 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
         ]
     }
 
-    /// A medida da rodada: a sessão em S, a janela hospedando, e cada gravador
-    /// gravando o sim do conjunto daqui. Os dois gravadores são medidos antes
-    /// de o teste reprovar, e a frase diz quais trocaram o sim de S.
-    #[test]
-    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
-        let de_s = "5".repeat(64);
-        let mut trocaram = Vec::new();
-        let mut criaram = Vec::new();
-        for (quem, daqui) in identidades_dos_gravadores() {
-            let config = pasta("outro");
-            let config = config.path().to_str().unwrap();
-            seele_ffi::mods::aceitar(config, S, &de_s).unwrap();
-            gravar_o_sim_de_quem_hospeda(config, &sessao_em(S), &daqui).unwrap();
-            if seele_ffi::mods::aceite_de(config, S).as_deref() != Some(de_s.as_str()) {
-                trocaram.push(quem);
-            }
-
-            // Sem sim nenhum a S, o gravador não cria um: com o conjunto de S
-            // igual ao daqui, a entrada em S deixaria de perguntar.
-            let config = pasta("sem-sim");
-            let config = config.path().to_str().unwrap();
-            gravar_o_sim_de_quem_hospeda(config, &sessao_em(S), &daqui).unwrap();
-            if seele_ffi::mods::aceite_de(config, S).is_some() {
-                criaram.push(quem);
-            }
-        }
-        assert!(
-            trocaram.is_empty() && criaram.is_empty(),
-            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui. \
-             Trocaram o sim que a pessoa tinha dado: {trocaram:?}, e ele pergunta de novo. \
-             Criaram um sim que ela nunca deu: {criaram:?}, e a lista de aceites mente; com \
-             os conjuntos iguais, a entrada nele não pergunta (ADR 0045)"
-        );
+    /// Um caso do portão: por onde a sessão entrou, a chave que ela conferiu, e
+    /// as das hospedagens no ar.
+    struct Caso {
+        nome: &'static str,
+        endereco: &'static str,
+        impressao: &'static str,
+        guardado: Option<&'static str>,
+        grava: bool,
     }
 
-    /// O A04 continua: na sessão do servidor daqui, o sim de quem hospeda é
-    /// gravado. E um outro servidor nesta máquina, noutra porta de loopback,
-    /// não é o daqui.
-    #[test]
-    fn na_sessao_do_servidor_daqui_o_sim_continua_gravado() {
+    /// O que o portão grava, para cada caso e cada gravador: a lista do que
+    /// saiu diferente do esperado.
+    fn o_portao_nos(casos: &[Caso]) -> Vec<String> {
+        let mut errados = Vec::new();
         for (quem, daqui) in identidades_dos_gravadores() {
-            let config = pasta("daqui");
-            let config = config.path().to_str().unwrap();
-            let aqui = endereco_do_servidor_daqui();
-            gravar_o_sim_de_quem_hospeda(config, &sessao_em(&aqui), &daqui).unwrap();
-            assert_eq!(
-                seele_ffi::mods::aceite_de(config, &aqui).as_deref(),
-                Some(daqui.as_str()),
-                "{quem}, na sessão do servidor daqui, deixou de gravar o sim de quem hospeda: \
-                 quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
-            );
-
-            let vizinho = "127.0.0.1:8384";
-            gravar_o_sim_de_quem_hospeda(config, &sessao_em(vizinho), &daqui).unwrap();
-            assert_eq!(
-                seele_ffi::mods::aceite_de(config, vizinho),
-                None,
-                "{quem} tomou por servidor daqui um servidor em outra porta desta máquina: \
-                 o loopback diz «nesta máquina», e não «nesta janela»"
-            );
-        }
-    }
-
-    /// **Rodada 2: o caminho do próprio link.** A janela está na entrada com a
-    /// hospedagem de pé, e a pessoa cola o próprio link no CONECTAR. A sessão
-    /// fica no endereço da rede local que o convite anuncia, e a lista de
-    /// conhecidos o guarda para o VOLTAR. Ali, o sim de quem hospeda é gravado.
-    /// O endereço de S continua sem gravar, com o mesmo convite à mão.
-    #[test]
-    fn pelo_proprio_link_o_sim_de_quem_hospeda_continua_gravado() {
-        // Montado como `Hospedagem::convite` monta: a rede de casa primeiro, o
-        // endereço global depois, e a impressão digital.
-        let convite = seele_ffi::uri::Convite::novo("192.168.1.20:8383")
-            .com_alternativos(["203.0.113.9:8383"])
-            .com_impressao_digital("ab".repeat(32))
-            .to_string();
-        let anunciados = super::enderecos_do_convite(&convite);
-        assert_eq!(
-            anunciados,
-            ["192.168.1.20:8383", "203.0.113.9:8383"],
-            "os endereços do convite não saíram do link que a hospedagem anuncia"
-        );
-
-        // Sem a sessão: os endereços do convite moram no `Hospedado` do servidor
-        // guardado, e montar um pediria subir uma hospedagem. O que lê os dois
-        // da sessão é `gravar_o_sim_de_quem_hospeda`, preso pelo guarda de
-        // texto-fonte abaixo.
-        let gravar = |config: &str, onde: &str, daqui: &str| {
-            gravar_o_sim_se_a_sessao_e_daqui(config, Some(onde), &anunciados, daqui).unwrap();
-        };
-        let mut sem_sim = Vec::new();
-        let mut em_s = Vec::new();
-        for (quem, daqui) in identidades_dos_gravadores() {
-            let config = pasta("link");
-            let config = config.path().to_str().unwrap();
-            for onde in &anunciados {
-                gravar(config, onde, &daqui);
-                if seele_ffi::mods::aceite_de(config, onde).as_deref() != Some(daqui.as_str()) {
-                    sem_sim.push(format!("{quem} em {onde}"));
+            for caso in casos {
+                let config = pasta("portao");
+                let config = config.path().to_str().unwrap();
+                let antes = "5".repeat(64);
+                seele_ffi::mods::aceitar(config, caso.endereco, &antes).unwrap();
+                let onde = onde_estou_em(
+                    Some(caso.endereco),
+                    Some(caso.impressao),
+                    caso.guardado,
+                    Some(SALA),
+                );
+                gravar_o_sim_se_for_o_guardado(config, Some(caso.endereco), onde, &daqui).unwrap();
+                let esperado = if caso.grava { &daqui } else { &antes };
+                if seele_ffi::mods::aceite_de(config, caso.endereco).as_deref()
+                    != Some(esperado.as_str())
+                {
+                    errados.push(format!("{quem}, {}", caso.nome));
                 }
             }
-            gravar(config, S, &daqui);
-            if seele_ffi::mods::aceite_de(config, S).is_some() {
-                em_s.push(quem);
-            }
         }
+        errados
+    }
+
+    /// A medida: a sessão em S, a janela hospedando, e o sim de S fica como
+    /// estava. Pela chave, também com S no mesmo endereço do guardado.
+    #[test]
+    fn com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sessão em S, noutro endereço",
+                endereco: "198.51.100.7:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "a sessão em S, no mesmo endereço do guardado",
+                endereco: "127.0.0.1:8383",
+                impressao: DE_S,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+        ]);
         assert!(
-            sem_sim.is_empty(),
-            "com a sessão aberta pelo próprio link, num endereço que o convite da hospedagem \
-             anuncia, o sim de quem hospeda não foi gravado: {sem_sim:?}. A volta pelo VOLTAR \
-             pergunta de novo o que ele acabou de decidir (A04)"
+            errados.is_empty(),
+            "com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui: \
+             {errados:?}. Ele pergunta de novo, ou, com os conjuntos iguais, não pergunta, e a \
+             lista de aceites mostra um sim que a pessoa não deu (ADR 0045)"
         );
+    }
+
+    /// O A04 e o próprio link: com a chave do guardado, o sim de quem hospeda é
+    /// gravado, entre a sessão pelo `aqui` ou pelo endereço da rede local que o
+    /// convite anuncia.
+    #[test]
+    fn na_sessao_do_guardado_o_sim_e_gravado_entre_por_onde_entrar() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "o `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+            Caso {
+                nome: "o próprio link, pela rede local",
+                endereco: "192.168.1.20:8383",
+                impressao: GUARDADO,
+                guardado: Some(GUARDADO),
+                grava: true,
+            },
+        ]);
         assert!(
-            em_s.is_empty(),
-            "com o convite da hospedagem à mão, {em_s:?} gravou o sim de quem hospeda num \
-             endereço que o convite não anuncia (ADR 0045)"
+            errados.is_empty(),
+            "na sessão do servidor guardado, o sim de quem hospeda não foi gravado: \
+             {errados:?}. Quem acabou de decidir o conjunto é perguntado de novo na volta (A04)"
+        );
+    }
+
+    /// A sala pessoal não tem MODs, e sem guardado de pé não há servidor daqui:
+    /// nos dois, nada é gravado.
+    #[test]
+    fn na_sala_e_sem_guardado_nada_e_gravado() {
+        let errados = o_portao_nos(&[
+            Caso {
+                nome: "a sala pessoal",
+                endereco: "127.0.0.1:8385",
+                impressao: SALA,
+                guardado: Some(GUARDADO),
+                grava: false,
+            },
+            Caso {
+                nome: "sem guardado de pé, no `aqui`",
+                endereco: "127.0.0.1:8383",
+                impressao: GUARDADO,
+                guardado: None,
+                grava: false,
+            },
+        ]);
+        assert!(
+            errados.is_empty(),
+            "o sim de quem hospeda foi gravado fora do servidor guardado: {errados:?} (ADR 0045)"
+        );
+
+        // E pela sessão de verdade: sem conexão nem hospedagem, nada.
+        let sessao = Session::default();
+        *sessao.endereco_da_sessao.lock().unwrap() = Some("127.0.0.1:8383".to_owned());
+        let config = pasta("sem-guardado");
+        let config = config.path().to_str().unwrap();
+        gravar_o_sim_de_quem_hospeda(config, &sessao, &"6".repeat(64)).unwrap();
+        assert_eq!(
+            seele_ffi::mods::aceite_de(config, "127.0.0.1:8383"),
+            None,
+            "sem conexão nem hospedagem, o sim de quem hospeda foi gravado no endereço da sessão"
         );
     }
 
     /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
-    /// e `hospedar` devolve o `aqui` com que ela compara.
+    /// e ela só pela resposta de `onde_estou`.
     ///
     /// As agulhas são montadas por `concat!`, para que este guarda não case com
-    /// o próprio texto.
+    /// o próprio texto, e a fonte é lida sem as linhas de comentário.
     #[test]
     fn os_dois_gravadores_passam_pelo_sim_de_quem_hospeda() {
         let fonte = fonte_sem_comentarios();
@@ -5623,30 +5562,18 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             "{fora:?} grava o sim sem passar por `gravar_o_sim_de_quem_hospeda`: com a sessão \
              em outro servidor, o sim dele vira a identidade do servidor daqui (ADR 0045)"
         );
-        let hospedar = corpo_de(&fonte, concat!("async fn hospedar", "("));
-        assert!(
-            hospedar.contains(concat!("aqui: endereco_do_servidor_daqui", "()")),
-            "`hospedar` devolve um `aqui` que não é o de `endereco_do_servidor_daqui`: a \
-             tela entra num endereço, o sim de quem hospeda compara com outro, e nunca é gravado"
-        );
 
-        // Rodada 2: o `Hospedado` do servidor guardado nasce com os endereços do
-        // convite que `hospedar` devolve, e morre com eles. E o sim lê os
-        // endereços do guardado, onde moram os MODs.
         let grava = corpo_de(&fonte, concat!("fn gravar_o_sim_de_quem_hospeda", "("));
+        let se_for = corpo_de(&fonte, concat!("fn gravar_o_sim_se_for_o_guardado", "("));
+        let comando = corpo_de(&fonte, concat!("fn onde_estou", "(session"));
         assert!(
-            hospedar.contains(concat!(
-                "enderecos_do_convite: enderecos_do_convite(&anfitriao",
-                ".convite)"
-            )) && !grava.contains(concat!(".pes", "soal"))
-                && grava.contains(concat!("guardado.enderecos_do", "_convite"))
-                && grava.contains(concat!(
-                    "gravar_o_sim_se_a_sessao_e_daqui",
-                    "(config, alvo.as_deref(), &do_convite, identidade)"
-                )),
-            "o `Hospedado` do servidor guardado deixou de nascer com os endereços do convite \
-             que `hospedar` devolve, ou o sim de quem hospeda deixou de lê-los dali: quem \
-             entra pelo próprio link volta a ser perguntado de novo (A04)"
+            grava.contains(concat!("onde_estou_na", "(session)"))
+                && grava.contains(concat!("gravar_o_sim_se_for_o", "_guardado("))
+                && se_for.contains(concat!("onde == OndeEstou::", "Guardado"))
+                && comando.contains(concat!("onde_estou_na", "(&session)")),
+            "o sim de quem hospeda deixou de passar pela resposta de `onde_estou`, ou o comando \
+             deixou de dar a mesma: são duas respostas a «estou no meu servidor?», e o sim vai \
+             a um servidor que não é o guardado (ADR 0045):\n{grava}\n{se_for}\n{comando}"
         );
     }
 }
@@ -17520,12 +17447,10 @@ mod a_saida_despede_as_hospedagens {
             hospedagens.guardado = Some(Hospedado {
                 hospedagem: guardado,
                 servidor: None,
-                enderecos_do_convite: Vec::new(),
             });
             hospedagens.pessoal = Some(Hospedado {
                 hospedagem: sala,
                 servidor: None,
-                enderecos_do_convite: Vec::new(),
             });
         }
 
