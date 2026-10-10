@@ -467,6 +467,10 @@ function mostrarVeredito(veredito, deOnde = null) {
 function desenhar(snapshot) {
   if (!snapshot) return;
 
+  // **O tema do servidor antes de tudo** (tarefa 17d da F3): a sessão — e a
+  // tela do fim — já se desenham com ele, ou sem ele.
+  aplicarOTemaDoServidor(snapshot.tema_do_servidor ?? null);
+
   if (snapshot.ended) {
     mostrarFim(snapshot.ended);
     return;

@@ -428,6 +428,11 @@ pub struct Room {
     pub chave_pedida: Option<ChavePedida>,
     /// Set once the session is over.
     pub ended: Option<Ended>,
+    /// **O tema do servidor**, o que o último `TemaMudou` disse (a API 6 de
+    /// MODs, rascunho §9; tarefa 17d da F3): o MOD que o declarou e o JSON dos
+    /// valores, opaco aqui — quem os confere e aplica é a casca, antes de
+    /// desenhar a sessão. `None` é sem tema.
+    pub tema: Option<seele_proto::control::TemaDoServidor>,
 }
 
 /// Uma transmissão de tela acontecendo numa sala de voz.
@@ -1692,11 +1697,18 @@ impl Room {
             ServerMessage::HashesDoNavegador { .. } => {}
 
             // A API 6 de MODs (rascunho da F3, §14): o aviso da metade de
-            // servidor às janelas e o tema como dado do servidor. O tipo e o
-            // fio existem desde o Servidor 1.0, e nenhum servidor os manda
-            // ainda; entregá-los às janelas e aplicar o tema antes de desenhar
-            // a sessão é da casca da API 6.
-            ServerMessage::ModAviso { .. } | ServerMessage::TemaMudou { .. } => {}
+            // servidor às janelas é entregue pela ponte (`seele-ffi`), e não
+            // mora aqui.
+            ServerMessage::ModAviso { .. } => {}
+
+            // **O tema do servidor** (rascunho da API 6, §9; tarefa 17d da F3):
+            // guardado como veio, inclusive o `None`, que o tira. A casca o
+            // aplica antes de desenhar a sessão — o `server` é a flag dela: o
+            // tema é a cara do servidor, como o nome e o ícone.
+            ServerMessage::TemaMudou { tema } => {
+                self.tema.clone_from(tema);
+                changed.server = true;
+            }
 
             // Decisão da Task 8, e não mais andaime: nada, de propósito.
             //
@@ -2710,6 +2722,31 @@ mod tests {
             !again.channels,
             "a repeat told the shell to redraw a list that did not change"
         );
+    }
+
+    /// **O tema do servidor chega, e `None` o tira** (tarefa 17d da F3): o
+    /// `TemaMudou` era ignorado, e a casca nunca sabia do tema que a metade de
+    /// servidor declarou. Os dois lados, como o do ícone: um `Option` guardado
+    /// só quando é `Some` é o tema que nunca sai.
+    #[test]
+    fn o_tema_do_servidor_chega_e_none_o_tira() {
+        let mut room = Room::new();
+        room.apply(&session());
+        assert_eq!(room.tema, None, "uma sessão nasce sem tema");
+
+        let tema = seele_proto::control::TemaDoServidor {
+            mod_id: "seele/estilo".into(),
+            valores: r##"{"acento":"#c9a227"}"##.into(),
+        };
+        let changed = room.apply(&ServerMessage::TemaMudou {
+            tema: Some(tema.clone()),
+        });
+        assert_eq!(room.tema, Some(tema), "o tema do servidor não foi guardado");
+        assert!(changed.server, "a casca não foi avisada do tema novo");
+
+        let changed = room.apply(&ServerMessage::TemaMudou { tema: None });
+        assert_eq!(room.tema, None, "o `None` do servidor não tirou o tema");
+        assert!(changed.server, "a casca não foi avisada de que o tema saiu");
     }
 
     #[test]

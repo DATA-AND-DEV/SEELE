@@ -56,7 +56,7 @@ pub use types::{
     LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason,
     PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview, PreviewRefusal,
     PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot, SomDaTela,
-    TelaEmCurso, Telemetry, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom,
+    TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom,
     VoiceRoomSync, VolumeRefusal,
 };
 
@@ -3006,6 +3006,7 @@ impl Connection {
             minha_transmissao: Option<TelaEmCurso>,
             transmissoes: Vec<TransmissaoNaSala>,
             ended: Option<EndReason>,
+            tema: Option<TemaDaSessao>,
         }
 
         let foto = match self.shared.room.lock() {
@@ -3034,6 +3035,10 @@ impl Connection {
                 minha_transmissao: minha_tela_de(&room, self.shared.pedido_da_tela()),
                 transmissoes: transmissoes_de(&room, self.shared.tela_escolhida().tela()),
                 ended: room.ended.map(|end| end.reason.into()),
+                tema: room.tema.as_ref().map(|tema| TemaDaSessao {
+                    mod_id: tema.mod_id.clone(),
+                    valores: tema.valores.clone(),
+                }),
             },
             // Um cadeado envenenado é uma sessão que já não tem estado. A foto
             // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
@@ -3054,6 +3059,7 @@ impl Connection {
                     minha_transmissao: None,
                     transmissoes: Vec::new(),
                     ended: None,
+                    tema: None,
                 }
             }
         };
@@ -3149,6 +3155,7 @@ impl Connection {
             minha_transmissao: foto.minha_transmissao,
             transmissoes: foto.transmissoes,
             ended: foto.ended,
+            tema_do_servidor: foto.tema,
         }
     }
 
@@ -8285,6 +8292,65 @@ mod tests {
     /// The three properties a screen depends on and no type can state: the name
     /// arrives whole, the picture does not, and the two do not move each
     /// other\u{2019}s counter.
+    /// **O tema do servidor vai no retrato, e `None` o tira** (tarefa 17d da
+    /// F3): o núcleo guarda o `TemaMudou`, e a casca só o aplica se o retrato
+    /// o levar. Os dois lados, como o do ícone.
+    #[test]
+    fn o_tema_do_servidor_vai_no_retrato_e_none_o_tira() {
+        use seele_core::{ServerMessage, SessionId, Ssrc, TemaDoServidor};
+
+        let shared = bare_shared();
+        let (commands, _queue) = tokio::sync::mpsc::unbounded_channel();
+        let connection = Connection {
+            commands,
+            shared: Arc::clone(&shared),
+            encerrada: Mutex::new(None),
+        };
+        fold(
+            &shared,
+            &ServerMessage::Session {
+                id: SessionId(1),
+                person: seele_core::PersonId(7),
+                ssrc: Ssrc(700),
+                server: "Casa".into(),
+                voice_rooms: Vec::new(),
+                channels: Vec::new(),
+                roles: Vec::new(),
+                permissions: Vec::new(),
+            },
+        );
+        assert_eq!(
+            connection.snapshot().tema_do_servidor,
+            None,
+            "a sessão nasce sem tema"
+        );
+
+        fold(
+            &shared,
+            &ServerMessage::TemaMudou {
+                tema: Some(TemaDoServidor {
+                    mod_id: "seele/estilo".into(),
+                    valores: r##"{"acento":"#c9a227"}"##.into(),
+                }),
+            },
+        );
+        assert_eq!(
+            connection.snapshot().tema_do_servidor,
+            Some(TemaDaSessao {
+                mod_id: "seele/estilo".into(),
+                valores: r##"{"acento":"#c9a227"}"##.into(),
+            }),
+            "o tema guardado no núcleo não foi ao retrato"
+        );
+
+        fold(&shared, &ServerMessage::TemaMudou { tema: None });
+        assert_eq!(
+            connection.snapshot().tema_do_servidor,
+            None,
+            "o `None` do servidor não tirou o tema do retrato"
+        );
+    }
+
     #[test]
     fn the_server_name_rides_the_snapshot_and_the_picture_rides_a_revision() {
         use seele_core::{Permission, ServerMessage, SessionId, Ssrc};

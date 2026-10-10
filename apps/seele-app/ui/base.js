@@ -2359,6 +2359,50 @@ function aplicarOTemaDoMod(id, valores) {
 }
 
 /**
+ * O tema do servidor em vigor, como o retrato o trouxe (`tema_do_servidor`):
+ * `{ mod_id, valores, chave }`, ou `null`. A `chave` é o que foi aplicado, para
+ * cada retrato não reaplicar o mesmo tema.
+ */
+let temaDoServidorEmVigor = null;
+
+/**
+ * **O tema do servidor, aplicado antes de desenhar a sessão** (rascunho da API
+ * 6, §9; tarefa 17d da F3). A metade de servidor de um MOD o declara
+ * (`mundo.tema`), o servidor o manda a todos no `TemaMudou`, o núcleo o guarda
+ * e o retrato o traz; aqui ele entra pelo mesmo caminho do tema de um MOD
+ * (`aplicarOTemaDoMod`), com o id do MOD que o declarou — as mesmas tabelas
+ * (17j), os mesmos pisos (17e) e a escolha de quem usa (17f).
+ *
+ * `null` o tira por inteiro. Um tema que a janela recusa não fica, nem o de
+ * antes — o servidor disse que aquele não vale mais —, e o motivo vai ao
+ * `seele.log`. Na API 6 a janela não aplica tema sem prévia (17g), então a
+ * entrada do MOD em `temaDosMods` é só deste tema.
+ */
+function aplicarOTemaDoServidor(tema) {
+  const chave = tema ? `${tema.mod_id}\u0000${tema.valores}` : "";
+  if (chave === (temaDoServidorEmVigor?.chave ?? "")) return;
+  const antes = temaDoServidorEmVigor;
+  temaDoServidorEmVigor = tema ? { mod_id: String(tema.mod_id), valores: String(tema.valores), chave } : null;
+  const tirou = Boolean(antes) && temaDosMods.delete(antes.mod_id);
+  if (!temaDoServidorEmVigor) {
+    if (tirou) escreverOTemaDaSessao();
+    return;
+  }
+  try {
+    aplicarOTemaDoMod(temaDoServidorEmVigor.mod_id, JSON.parse(temaDoServidorEmVigor.valores));
+  } catch (falha) {
+    if (tirou) escreverOTemaDaSessao();
+    const motivo = typeof motivoDaFalha === "function" ? motivoDaFalha(falha) : String(falha?.message ?? falha);
+    registrarNoAnfitriao(
+      "tema-do-servidor",
+      `${temaDoServidorEmVigor.mod_id}: o tema do servidor não foi aplicado — ${motivo}`,
+      "aviso",
+      temaDoServidorEmVigor.mod_id,
+    );
+  }
+}
+
+/**
  * **Os pares que o tema do MOD responde**, com o piso de cada um (rascunho da
  * API 6, §9). São as cores que o MOD escolhe; um par abaixo do piso recusa o
  * tema, dizendo o par.
@@ -3594,6 +3638,8 @@ function encerrarOAmbienteDosMods() {
   // um MOD sair sozinho no meio da sessão.
   temaDosMods.clear();
   donoDoTema.clear();
+  // E o do servidor, que o próximo retrato de outra sessão traz de novo.
+  temaDoServidorEmVigor = null;
   escreverOTemaDaSessao();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância

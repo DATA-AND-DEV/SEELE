@@ -355,6 +355,11 @@ jobs:
       - run: node apps/seele-app/bancada/nucleo.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O tema do servidor na casca (tarefa 17d da F3): chega pelo retrato e é
+      # aplicado antes de desenhar a sessão, e o None o tira.
+      - run: node apps/seele-app/bancada/tema-do-servidor.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

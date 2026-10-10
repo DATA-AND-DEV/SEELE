@@ -1036,6 +1036,12 @@ grupo 17 do plano da F3.
   `TemaMudou` logo depois do `Session` e do `Instancia` leva o tema guardado: a metade de servidor só roda dentro de `aoPedir` e de
   `aoAcontecer`, sem gancho de carga, e um tema que dependesse dela sumiria no
   reinício.
+- **A casca o aplica antes de desenhar a sessão** [c, tarefa 17d]: o núcleo
+  guarda o `TemaMudou` (`Room.tema`), o retrato o leva (`tema_do_servidor`,
+  com o MOD e o JSON), e a casca o confere pelo mesmo caminho do tema de um
+  MOD — as tabelas da 17j, os pares da 17e — no começo de cada desenho. `None`
+  o tira por inteiro; um tema que a casca recusa não fica, nem o de antes, e o
+  motivo vai ao `seele.log`; ele sai com a sessão.
 - **A porta do lado do servidor é o manifesto.** Só um MOD cujo `mod.json`
   declara `"tema": true` pode chamar `mundo.tema`. A tela de aceite mostra isso
   numa linha própria («este MOD muda a aparência do servidor»), como o

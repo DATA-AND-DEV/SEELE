@@ -1594,6 +1594,22 @@ pub struct Snapshot {
     pub transmissoes: Vec<TransmissaoNaSala>,
     /// Set once the session is over.
     pub ended: Option<EndReason>,
+    /// **O tema do servidor**, o que a metade de servidor de um MOD declarou e
+    /// o servidor mandou no `TemaMudou` (API 6 de MODs, rascunho §9; tarefa
+    /// 17d da F3). A casca o confere e o aplica antes de desenhar a sessão;
+    /// `None` é sem tema, e tira o que havia.
+    pub tema_do_servidor: Option<TemaDaSessao>,
+}
+
+/// O tema do servidor, como a casca o recebe: quem o declarou e o JSON dos
+/// valores, opaco até a casca, que o confere com as mesmas tabelas do
+/// `mundo.tema` (tarefa 17j) e mede os pares (17e).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TemaDaSessao {
+    /// O MOD que declarou o tema.
+    pub mod_id: String,
+    /// O JSON do tema.
+    pub valores: String,
 }
 
 /// Uma transmissão em curso, do ponto de vista de quem pode assisti-la.
