@@ -1607,6 +1607,29 @@ async fn connect<R: tauri::Runtime>(
     })
 }
 
+/// **Solta a entrada que a janela não adotou** (pendência 58, item 54; lote
+/// E54 da F5).
+///
+/// O par de [`largar_a_substituida`], do lado da janela. O `connect` só sabe
+/// que uma tentativa foi substituída quando a nova chega a ele e revoga a
+/// geração. Entre a nova começar na janela (`++tentativas`, em `conectar`) e o
+/// `connect` dela, a velha pode terminar e entrar com a geração ainda de pé; a
+/// janela, que já não a quer, não a mostra, e pede aqui que ela seja solta.
+/// Sem isto a conexão dela ficava no slot sem tela nenhuma: a nova recebia
+/// `AlreadyConnected`, toda entrada seguinte também, e os eventos da velha
+/// continuavam chegando à janela.
+///
+/// Devolve se soltou.
+#[tauri::command]
+fn soltar_a_entrada(session: State<'_, Session>, geracao: u64) -> bool {
+    soltar_a_entrada_em(&session, geracao)
+}
+
+/// O corpo de [`soltar_a_entrada`], sem o `State`, para o teste.
+fn soltar_a_entrada_em(_session: &Session, _geracao: u64) -> bool {
+    false
+}
+
 /// **A entrada velha que chega tarde** (pendência 58, item 54; lote E54 da F5).
 ///
 /// Duas tentativas passam pelo `AlreadyConnected` do começo de [`connect`] antes
@@ -1646,6 +1669,23 @@ mod a_entrada_velha_que_chega_tarde {
             .path();
         std::env::set_var("SEELE_HOME", pasta);
         pasta
+    }
+
+    /// Um teste deste módulo por vez: a casa é uma só, e a identidade e os
+    /// pinos dela são arquivos que dois `connect` de testes diferentes
+    /// escreveriam ao mesmo tempo.
+    fn vez() -> std::sync::MutexGuard<'static, ()> {
+        static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        VEZ.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
+    /// `seele.log` capturado ver o que o `connect` escreve.
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("o runtime do teste não subiu")
     }
 
     /// Um servidor de verdade, em porta zero e banco em memória.
@@ -1899,10 +1939,8 @@ mod a_entrada_velha_que_chega_tarde {
     /// sai na thread do teste, que é a do runtime em que o `connect` corre.
     #[test]
     fn a_velha_que_entra_depois_da_nova_nao_toma_a_conexao() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("o runtime do teste não subiu");
+        let _vez = vez();
+        let runtime = runtime();
         let (mut vermelhos, rastro) =
             crate::rastro_de_teste::capturar(|| runtime.block_on(a_velha_termina_depois_da_nova()));
         let linha = rastro
@@ -1918,6 +1956,165 @@ mod a_entrada_velha_que_chega_tarde {
         assert!(
             vermelhos.is_empty(),
             "a entrada velha que chegou tarde tomou a sessão nova:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
+    /// **A outra ordem**: a velha entra no Rust antes de a nova chegar a ele.
+    ///
+    /// A nova já começou na janela (`++tentativas`), e ainda não chamou o
+    /// `connect` — está no `conferir_esta_versao`, por exemplo. A geração da
+    /// velha ainda é a de pé, e ela entra. A janela não a quer, e a solta pela
+    /// geração dela. O que se cobra: a velha sai do slot e do servidor dela, a
+    /// nova entra em vez de receber `AlreadyConnected`, a mensagem vai à nova,
+    /// e um pedido com uma geração que já não é a de pé não derruba ninguém.
+    async fn a_janela_larga_a_velha_antes_de_a_nova_chegar() -> Vec<String> {
+        casa();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let velha = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                velho.to_string(),
+                "velha".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa velha não voltou")
+        .map_err(|falha| format!("{falha:?}"))
+        .expect("a tentativa velha não entrou");
+        assert_eq!(presentes(&servidor_velho, 1, Duration::from_secs(2)).await, 1);
+
+        // A janela larga a velha pela geração dela.
+        if !super::soltar_a_entrada_em(&sessao, velha.geracao) {
+            vermelhos.push(format!(
+                "pedir para soltar a entrada da geração {} — a de pé — não soltou nada",
+                velha.geracao
+            ));
+        }
+        if sessao.connection().is_ok() {
+            vermelhos.push("a conexão da velha continua no slot depois de a janela largá-la".into());
+        }
+        if sessao.geracao_vale(velha.geracao) {
+            vermelhos.push(format!(
+                "a geração da velha ({}) continua de pé depois de a janela largá-la: um comando \
+                 dela ainda seria atendido",
+                velha.geracao
+            ));
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a conexão largada continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.is_some() {
+            vermelhos.push(format!(
+                "o endereço da sessão continua {onde:?} depois de a janela largar a entrada"
+            ));
+        }
+
+        // A nova chega ao `connect` e entra.
+        let nova = tokio::time::timeout(
+            Duration::from_secs(10),
+            connect(
+                app.clone(),
+                app.state::<Session>(),
+                novo.to_string(),
+                "nova".to_owned(),
+                false,
+                None,
+            ),
+        )
+        .await
+        .expect("a tentativa nova não voltou");
+        let nova = match nova {
+            Ok(entrada) => entrada,
+            Err(falha) => {
+                vermelhos.push(format!(
+                    "a tentativa nova não entrou depois de a janela largar a velha: {}",
+                    serde_json::to_string(&falha).unwrap_or_default()
+                ));
+                return vermelhos;
+            }
+        };
+        let canal = nova
+            .snapshot
+            .channels
+            .first()
+            .map(|canal| canal.id)
+            .expect("o servidor novo não tem canal nenhum");
+
+        // Um pedido com a geração da velha, que já não é a de pé, não derruba
+        // a nova.
+        if super::soltar_a_entrada_em(&sessao, velha.geracao) {
+            vermelhos.push(
+                "um pedido com a geração da velha, que já não era a de pé, soltou a entrada nova"
+                    .into(),
+            );
+        }
+        if !sessao.geracao_vale(nova.geracao) {
+            vermelhos.push("o pedido com a geração velha revogou a geração da nova".into());
+        }
+        let mut ouvidos = [
+            (
+                "o servidor velho",
+                servidor_velho.server().events.subscribe(),
+            ),
+            ("o servidor novo", servidor_novo.server().events.subscribe()),
+        ];
+        let corpo = "e agora, para onde?";
+        if let Err(erro) = send_message(app.state::<Session>(), canal, corpo.to_owned()) {
+            vermelhos.push(format!("a mensagem não saiu: {erro:?}"));
+        }
+        let receberam = quem_recebeu(&mut ouvidos, corpo, Duration::from_secs(2)).await;
+        if receberam != ["o servidor novo"] {
+            vermelhos.push(format!(
+                "a mensagem mandada depois chegou a {receberam:?}, e não só ao servidor novo"
+            ));
+        }
+        let no_novo = presentes(&servidor_novo, 1, Duration::from_secs(2)).await;
+        if no_novo != 1 {
+            vermelhos.push(format!(
+                "a pessoa não está presente no servidor novo ({no_novo})"
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_entrada_que_a_janela_larga_e_solta_pela_geracao_dela() {
+        let _vez = vez();
+        let runtime = runtime();
+        let (mut vermelhos, rastro) = crate::rastro_de_teste::capturar(|| {
+            runtime.block_on(a_janela_larga_a_velha_antes_de_a_nova_chegar())
+        });
+        let linhas = rastro
+            .lines()
+            .filter(|linha| linha.contains("a janela largou") && linha.contains(" WARN "))
+            .count();
+        if linhas != 1 {
+            vermelhos.push(format!(
+                "o seele.log tem {linhas} linha(s) WARN de entrada que a janela largou, e não uma: \
+                 a que soltou diz, a que não soltou não diz como se tivesse soltado"
+            ));
+        }
+        assert!(
+            vermelhos.is_empty(),
+            "a entrada que a janela largou não foi solta como devia:\n  {}",
             vermelhos.join("\n  ")
         );
     }
@@ -11624,6 +11821,7 @@ fn main() {
             apagar_pacote_do_cache,
             conjunto_exigido_agora,
             connect,
+            soltar_a_entrada,
             hospedar,
             caminho_entre_pares,
             consentir_no_caminho_entre_pares,
