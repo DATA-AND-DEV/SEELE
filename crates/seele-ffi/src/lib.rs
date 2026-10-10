@@ -4482,13 +4482,16 @@ async fn drive(
         .link_state
         .store(link_state_byte(LinkTrust::Offline), Ordering::Relaxed);
     // Dropping the voice stops the audio thread with the session. A abertura
-    // em curso vai junto, e a voz que ela trouxer cai na thread que a abria:
-    // nada dela segura a despedida abaixo nem o `drop` do runtime.
+    // em curso vai junto, e a voz que ela trouxer cai na thread que a abria.
+    //
+    // **A voz viva cai antes da despedida, e sem esperar por ela** (M-4 do lote
+    // V). Este comentário dizia que nada segurava a despedida abaixo, e o
+    // cadeado da voz segurava: uma troca de aparelho presa no driver o prende,
+    // e o fim da sessão esperava junto até o teto da casca. Ver
+    // `largar_sem_segurar`.
     drop(porta);
     shared.voice.marcar(AberturaDoAudio::ForaDeSala);
-    if let Ok(mut voice) = shared.voice.lock() {
-        *voice = None;
-    }
+    largar_sem_segurar(&shared, |shared| &shared.voice);
     // E o canal com ela: um `set_capture_device` que chegasse depois abriria um
     // caminho de voz sobre uma conexão morta, e ele ficaria de pé sem sessão
     // nenhuma por trás.
@@ -4504,6 +4507,47 @@ async fn drive(
         pending.clear();
     }
     client.sair().await;
+}
+
+/// Larga a voz da sessão sem segurar quem chama. M-4 do lote V.
+///
+/// O fim de [`drive`] larga a voz antes da despedida, para o microfone fechar
+/// antes de o servidor saber da saída. O `drop` da [`Voice`] não espera nada —
+/// só marca o `stop` da thread de áudio —, mas o **cadeado** dela pode estar
+/// preso: [`Connection::switch_device`] o segura enquanto o driver abre o
+/// aparelho novo. Preso ali, ele segurava a despedida até o teto da casca, que
+/// dizia «a despedida não terminou» sem dizer por quê.
+///
+/// Com o cadeado livre, larga na hora. Preso, larga numa thread própria, que
+/// espera a vez e larga a voz que estiver lá — a que a troca acabou de pôr,
+/// inclusive —, e o log diz por quê. Uma thread que não sobe larga aqui, como
+/// era: a despedida atrasada é melhor que um microfone aberto sem sessão.
+fn largar_sem_segurar<D, V>(dona: &Arc<D>, voz: fn(&D) -> &VozDaSala<V>)
+where
+    D: Send + Sync + 'static,
+    V: VozViva + Send + 'static,
+{
+    match voz(dona).viva.try_lock() {
+        Ok(mut viva) => *viva = None,
+        Err(std::sync::TryLockError::Poisoned(envenenado)) => *envenenado.into_inner() = None,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            tracing::warn!(
+                "o cadeado da voz está preso, com uma troca de aparelho esperando o driver: a \
+                 voz cai numa thread à parte, e a despedida sai sem esperar por ela"
+            );
+            let dela = Arc::clone(dona);
+            let subiu = std::thread::Builder::new()
+                .name("seele-larga-a-voz".into())
+                .spawn(move || voz(&dela).largar());
+            if let Err(erro) = subiu {
+                tracing::error!(
+                    %erro,
+                    "a thread que larga a voz não subiu; a despedida espera o driver soltar"
+                );
+                voz(dona).largar();
+            }
+        }
+    }
 }
 
 /// Quanto a abertura do áudio pode levar antes de a sala seguir sem voz.
@@ -9466,10 +9510,10 @@ mod trilha_no_log {
     /// nome dos campos de um `event!`, e trazer um crate inteiro para lê-los
     /// custaria mais do que as vinte linhas abaixo.
     #[derive(Clone, Default)]
-    struct Espiao(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    pub(super) struct Espiao(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
 
     impl Espiao {
-        fn escrito(&self) -> Vec<String> {
+        pub(super) fn escrito(&self) -> Vec<String> {
             self.0
                 .lock()
                 .map(|linhas| linhas.clone())
@@ -9527,7 +9571,7 @@ mod trilha_no_log {
     /// como «nunca» — e a mesma linha não chegava ao espião. Com dois vivos, a
     /// pergunta vai a todos, e cada evento pergunta de novo à thread em que
     /// acontece.
-    fn segundo_despachante() {
+    pub(super) fn segundo_despachante() {
         static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
         SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
     }
@@ -12291,6 +12335,108 @@ mod o_audio_segue_a_sala {
             resto_da_volta.contains("shared.voice.seguir_os_volumes(&shared.room)"),
             "o fim da volta de `drive` não segue mais os volumes: a voz que abre fica \
              com todo mundo a 100, e quem volta com outro `ssrc` perde o volume dele"
+        );
+    }
+
+    /// M-4 do lote V: o fim da sessão larga a voz sem esperar o cadeado dela.
+    ///
+    /// `switch_device` segura o cadeado da voz enquanto o driver abre o aparelho
+    /// novo. Preso ali, ele segurava o fim de `drive` — e com ele a despedida —
+    /// até o teto da casca, que dizia «a despedida não terminou» sem dizer por
+    /// quê. A troca é uma thread que segura o cadeado e só solta quando o
+    /// teste manda, depois de medir quanto o fim levou.
+    #[test]
+    fn o_fim_da_sessao_larga_a_voz_sem_esperar_a_troca_de_aparelho() {
+        use std::sync::Arc;
+        let voz: Arc<VozDaSala<Voz>> = Arc::new(VozDaSala::nova(true, DeviceChoice::default()));
+
+        *voz.lock().expect("a voz") = Some(voz_de(700));
+        super::largar_sem_segurar(&voz, |voz| voz);
+        assert!(
+            !ha_voz(&voz),
+            "com o cadeado livre, o fim da sessão não largou a voz: o microfone fica \
+             aberto depois da despedida"
+        );
+
+        *voz.lock().expect("a voz") = Some(voz_de(701));
+        let (preso, prendeu) = std::sync::mpsc::channel();
+        let (solta, soltar) = std::sync::mpsc::channel::<()>();
+        let troca = {
+            let voz = Arc::clone(&voz);
+            std::thread::spawn(move || {
+                let mut viva = voz.lock().expect("a voz");
+                preso.send(()).expect("a troca avisa que prendeu");
+                // O driver demora, e a troca põe a voz nova antes de soltar.
+                let _ = soltar.recv_timeout(Duration::from_secs(2));
+                *viva = Some(voz_de(702));
+            })
+        };
+        prendeu.recv().expect("a troca prendeu o cadeado");
+        super::trilha_no_log::segundo_despachante();
+        let espiao = super::trilha_no_log::Espiao::default();
+        let antes = std::time::Instant::now();
+        tracing::subscriber::with_default(espiao.clone(), || {
+            super::largar_sem_segurar(&voz, |voz| voz);
+        });
+        let levou = antes.elapsed();
+        let _ = solta.send(());
+        troca.join().expect("a troca terminou");
+        assert!(
+            levou < Duration::from_millis(500),
+            "o fim da sessão esperou {levou:?} pelo cadeado da voz, preso por uma troca de \
+             aparelho no driver: a despedida sai depois do teto da casca, e quem ficou só \
+             vê a saída pelo prazo de ociosidade"
+        );
+
+        let ate = std::time::Instant::now() + Duration::from_secs(5);
+        while ha_voz(&voz) && std::time::Instant::now() < ate {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !ha_voz(&voz),
+            "a troca de aparelho soltou o cadeado e a voz que ela pôs ficou de pé depois \
+             do fim da sessão: o microfone fica aberto sem sessão nenhuma"
+        );
+        let escrito = espiao.escrito();
+        assert!(
+            escrito
+                .iter()
+                .any(|linha| linha.contains("o cadeado da voz está preso")),
+            "o fim da sessão largou a voz por fora e o log não diz por quê: quem lê o \
+             `seele.log` de uma saída lenta não acha a troca de aparelho presa. Escrito: \
+             {escrito:?}"
+        );
+    }
+
+    /// M-4 do lote V: o fim de `drive` larga a voz pelo caminho que não espera,
+    /// e antes da despedida.
+    ///
+    /// O teste acima prova o caminho; este prende que `drive` o usa. Antes da
+    /// despedida, para o microfone fechar antes de o servidor saber da saída.
+    #[test]
+    fn o_fim_de_drive_larga_a_voz_antes_da_despedida_e_sem_esperar() {
+        let (corpo, _, _, _) = pedacos_de_drive();
+        let Some((_, fim)) = corpo.rsplit_once("shared.running.store(false") else {
+            panic!("o fim de `drive` mudou de forma, e este guarda tem de mudar com ele");
+        };
+        let Some(larga) = fim.find("largar_sem_segurar(&shared,") else {
+            panic!(
+                "o fim de `drive` não larga mais a voz pelo caminho que não espera: uma \
+                 troca de aparelho presa no driver segura a despedida até o teto da casca"
+            );
+        };
+        let Some(sai) = fim.find("client.sair().await") else {
+            panic!("a despedida sumiu do fim de `drive`");
+        };
+        assert!(
+            larga < sai,
+            "o fim de `drive` larga a voz depois da despedida: o microfone continua aberto \
+             enquanto o servidor ainda ouve"
+        );
+        assert!(
+            !fim.contains("shared.voice.lock()"),
+            "o fim de `drive` voltou a esperar o cadeado da voz, que uma troca de aparelho \
+             no driver segura até o teto da casca"
         );
     }
 
