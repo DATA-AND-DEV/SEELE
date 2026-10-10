@@ -8,7 +8,9 @@
 //!   conexão da FFI que confere `seele_ffi::codigo_desta_maquina`
 //!   (`ConnectConfig::codigo_esperado`): as duas leituras são da mesma chave;
 //! - a mesma conexão, diante de uma sala de outra chave, cai dentro do TLS com
-//!   «o código não bate», e não entra: o campo confere, e não só existe.
+//!   «o código não bate», e não entra: o campo confere, e não só existe;
+//! - a casca fica sabendo que o código conferiu: o primeiro contato com a
+//!   própria sala chega como conferido, e não como um primeiro contato cego.
 //!
 //! Nenhum ponto de encontro: a sala sobe sem registro (`None`), como nos outros
 //! testes da sala.
@@ -22,7 +24,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use seele_ffi::{ConnectConfig, Connection, ConnectionError};
+use seele_ffi::{ConnectConfig, Connection, ConnectionError, Trust};
 use seele_server::hospedagem::Hospedagem;
 
 mod vaga;
@@ -72,21 +74,33 @@ async fn quem_recebe_atende_a_propria_sala_pela_ponte_conferindo_o_proprio_codig
         .expect("a sala não subiu");
     drop(semente);
 
-    let config = atender(&casa, local(&sala));
-    let entrada = tokio::task::spawn_blocking(move || Connection::connect(config))
-        .await
-        .expect("a linha da conexão caiu");
-    let (conexao, _) = entrada.unwrap_or_else(|erro| {
-        panic!(
-            "quem recebe não atendeu a própria sala pela ponte: {erro:?}. A semente e o código \
-             saíram de chaves diferentes, ou a ponte não confere o código"
-        )
-    });
-    let despediu =
-        tokio::task::spawn_blocking(move || conexao.encerrar_e_esperar(Duration::from_secs(5)))
+    // Duas vezes: a primeira é o primeiro contato com a própria sala, e a
+    // segunda já tem a chave inteira pinada sob `@CÓDIGO`.
+    for (vez, esperado) in [(1, "conferido"), (2, "conhecido")] {
+        let config = atender(&casa, local(&sala));
+        let entrada = tokio::task::spawn_blocking(move || Connection::connect(config))
             .await
-            .expect("a linha da despedida caiu");
-    assert!(despediu, "a conexão que atendeu não se despediu em 5 s");
+            .expect("a linha da conexão caiu");
+        let (conexao, confianca) = entrada.unwrap_or_else(|erro| {
+            panic!(
+                "quem recebe não atendeu a própria sala pela ponte ({vez}ª vez): {erro:?}. A \
+                 semente e o código saíram de chaves diferentes, ou a ponte não confere o código"
+            )
+        });
+        // **O código conferiu, e a casca fica sabendo.** Um `FirstContact` aqui
+        // faria a tela perguntar «confia nesta chave?» na própria sala.
+        let como = match confianca {
+            Trust::FirstContactVerified { .. } => "conferido",
+            Trust::Known => "conhecido",
+            outro => panic!("a {vez}ª entrada na própria sala chegou à casca como {outro:?}"),
+        };
+        assert_eq!(como, esperado, "a {vez}ª entrada na própria sala");
+        let despediu =
+            tokio::task::spawn_blocking(move || conexao.encerrar_e_esperar(Duration::from_secs(5)))
+                .await
+                .expect("a linha da despedida caiu");
+        assert!(despediu, "a conexão que atendeu não se despediu em 5 s");
+    }
     sala.encerrar().await;
 }
 
