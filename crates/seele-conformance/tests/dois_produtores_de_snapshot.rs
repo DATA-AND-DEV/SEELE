@@ -188,3 +188,85 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
         "o aviso ou o fim não chegaram"
     );
 }
+
+/// O que cada ponta mede: não vem de mensagem nenhuma, e o navegador o mede do
+/// lado dele (o WebTransport, o `voz-web.js`).
+const MEDIDOS_POR_CADA_PONTA: &[(&str, &str)] = &[
+    ("caminho", "o caminho de subida que a sonda desta ponta mediu"),
+    ("link", "o enlace desta ponta"),
+    ("link_state", "o estado do enlace desta ponta"),
+    (
+        "telemetry",
+        "o rtt, o jitter e o áudio medidos aqui; a perda que o servidor contou vai junto, lida do `Room` pela `FotoDaSala`",
+    ),
+    ("muted", "o microfone desta ponta"),
+    ("total_isolation", "a saída desta ponta"),
+    ("speaking", "o portão desta ponta"),
+    ("voice_mode", "o modo desta ponta"),
+    ("audio_available", "o áudio desta ponta"),
+    ("abertura_do_audio", "o áudio desta ponta"),
+    ("capture", "o microfone desta ponta"),
+    ("playback", "a saída desta ponta"),
+    ("aparelho", "os aparelhos desta ponta"),
+    ("trocas_de_aparelho", "os aparelhos desta ponta"),
+];
+
+/// As revisões que quem dobra conta, para a casca saber quando rebuscar uma
+/// imagem ou a conversa. Saem das mensagens, mas como contadores do `fold` e
+/// não do `Room`: o navegador as conta na ponte da sessão (Tarefa 2.6), pelas
+/// mesmas mensagens.
+const CONTADOS_POR_QUEM_DOBRA: &[(&str, &str)] = &[
+    ("icon_revision", "sobe no `ServerIconChanged`"),
+    ("person_icons_revision", "sobe no `PersonIconChanged`"),
+    ("messages_revision", "sobe quando a conversa muda"),
+];
+
+/// **Cada campo do `Snapshot` tem um lado**, e um campo novo reprova até
+/// alguém decidir qual: o que sai do `Room` entra no `RetratoDaSala` (e ganha
+/// um passo no teste acima); o que cada ponta mede, ou conta ao dobrar, entra
+/// numa das listas de cima, com o porquê. Pedido da orquestradora ao fechar a
+/// fase 2 da 2.2: «os campos novos do `Snapshot` no lado certo».
+#[test]
+fn cada_campo_do_snapshot_tem_um_lado() {
+    let desktop = serde_json::to_value(&seele_ffi::sem_rede::retratos(&sessao(), APELIDO, &[])[0])
+        .expect("o retrato do desktop em JSON");
+    let da_sala = serde_json::to_value(Sessao::adotar(&sessao(), APELIDO).retrato())
+        .expect("o retrato da sala em JSON");
+    let do_snapshot: Vec<&String> = desktop.as_object().expect("um objeto").keys().collect();
+    let da_sala: Vec<&String> = da_sala.as_object().expect("um objeto").keys().collect();
+    let medidos: Vec<&str> = MEDIDOS_POR_CADA_PONTA
+        .iter()
+        .map(|(campo, _)| *campo)
+        .collect();
+    let contados: Vec<&str> = CONTADOS_POR_QUEM_DOBRA
+        .iter()
+        .map(|(campo, _)| *campo)
+        .collect();
+
+    for campo in &do_snapshot {
+        let lados = [
+            da_sala.iter().any(|c| c == campo),
+            medidos.contains(&campo.as_str()),
+            contados.contains(&campo.as_str()),
+        ];
+        assert_eq!(
+            lados.iter().filter(|lado| **lado).count(),
+            1,
+            "o campo `{campo}` do `Snapshot` não tem um lado só (da sala, medido, contado: \
+             {lados:?}). O que sai do `Room` entra no `RetratoDaSala`, com um passo no teste \
+             dos dois produtores; o que cada ponta mede ou conta entra numa lista deste \
+             arquivo, com o porquê"
+        );
+    }
+    for campo in medidos.iter().chain(&contados) {
+        assert!(
+            do_snapshot.iter().any(|c| c == campo),
+            "`{campo}` está numa lista deste arquivo e não é mais campo do `Snapshot`: tire-o"
+        );
+    }
+    assert_eq!(
+        do_snapshot.len(),
+        da_sala.len() + medidos.len() + contados.len(),
+        "a conta dos lados não fecha"
+    );
+}
