@@ -43,7 +43,10 @@ const CATALOGO = {
           hash: "4b71",
           nivel: "verificado",
           notas: [],
-          alcanca: [],
+          // **Cada versão declara o seu alcance, e os dois são diferentes**: a
+          // linha mostra o da versão exibida, e uma que mostrasse o da antiga
+          // (ou nenhum) só reprova se os dois dizem coisas diferentes.
+          alcanca: ["mensagens do servidor"],
           arquivos: ["mod.json", "cliente/main.js"],
         },
       ],
@@ -97,6 +100,14 @@ relatar(`selo da versão exibida: ${selo ?? "—"}`);
 exigir(selo === seloEsperado,
   `o selo desenhado é «${selo ?? "nenhum"}», e devia ser «${seloEsperado}»: ` +
     `a versão exibida é a ${ultima.versao}, verificada, e o MOD é «${MOD.nivel}»`);
+// E o alcance também é o da versão exibida (lote W3, rodada 1): é o que a
+// pessoa lê antes de instalar. A 1.0.0 declara outro.
+const alcanceDesenhado = [...linhas[0].querySelectorAll(".mods-etiqueta")].map((el) => el.textContent);
+const alcanceEsperado = ultima.alcanca;
+relatar(`alcance da versão exibida: ${alcanceDesenhado.join(" · ") || "nenhum"}`);
+exigir(alcanceDesenhado.join(" · ") === alcanceEsperado.join(" · "),
+  `o alcance desenhado é [${alcanceDesenhado.join(" · ")}], e o da versão exibida (${ultima.versao}) é ` +
+    `[${alcanceEsperado.join(" · ")}]; o da ${MOD.versoes[0].versao} é [${MOD.versoes[0].alcanca.join(" · ")}]`);
 
 window.__SEELE_CHAMADAS.length = 0;
 delete window.__SEELE_ARGS.instalar_mod_do_catalogo;

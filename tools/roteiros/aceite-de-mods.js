@@ -56,6 +56,9 @@ const ANUNCIO = {
   },
 };
 const { conjunto: CONJUNTO, mods: ANUNCIADOS } = ANUNCIO.ModsNaoAceitos;
+// Uma lista sem aspas duplas: o aparelho lê o relato até a primeira, e uma frase
+// de reprovação com `"` dentro sai cortada ali.
+const lista = (textos) => `[${textos.join(" · ")}]`;
 
 // O servidor recusa a entrada com a lista na mão.
 SEELE_RESPOSTAS.connect = { __recusa: ANUNCIO };
@@ -90,26 +93,48 @@ const itens = [...document.querySelectorAll("#mods-lista .mods-item")];
 relatar(`itens desenhados: ${itens.length}`);
 exigir(itens.length === ANUNCIADOS.length,
   `os itens desenhados não são os do anúncio: o diálogo desenhou ${itens.length}, e o anúncio trouxe ${ANUNCIADOS.length}`);
+// **Item por item, na ordem do anúncio, e tudo o que a pessoa lê para decidir**
+// (lote W3, rodada 1): quem é, de onde veio, o que alcança, e se roda na máquina
+// de quem hospeda. Uma contagem não diz em qual item cada coisa está — a linha
+// de «roda na máquina de quem hospeda» no MOD errado tem a mesma contagem.
 ANUNCIADOS.forEach((mod, i) => {
+  const item = itens[i];
+  const nome = `o item ${i + 1} (${mod.id})`;
   const desenhado = {
-    id: itens[i].querySelector(".mods-id")?.textContent,
-    versao: itens[i].querySelector(".mods-versao")?.textContent,
-    hash: itens[i].querySelector(".mods-hash")?.title,
+    id: item.querySelector(".mods-id")?.textContent,
+    versao: item.querySelector(".mods-versao")?.textContent,
+    hash: item.querySelector(".mods-hash")?.title,
   };
   exigir(desenhado.id === mod.id && desenhado.versao === `versão ${mod.version}` && desenhado.hash === mod.hash,
     `o item ${i + 1} do diálogo é «${desenhado.id} · ${desenhado.versao} · ${desenhado.hash}», ` +
       `e o anúncio trouxe «${mod.id} · versão ${mod.version} · ${mod.hash}»`);
+
+  // O repositório: o segundo `span` de `.mods-repo` (o primeiro é o rótulo).
+  const repo = item.querySelector(".mods-repo span:not(.rotulo)")?.textContent;
+  relatar(`${nome}: repositório ${repo}`);
+  exigir(repo === mod.repo,
+    `${nome} mostra o repositório «${repo}», e o anúncio trouxe «${mod.repo}»`);
+
+  // O alcance, que o ADR 0045 manda a pessoa ler antes de aceitar: etiqueta por
+  // etiqueta, na ordem do anúncio. Sem alcance a tela escreve «nada declarado»,
+  // que parece uma resposta — e é por isso que ele é lido aqui.
+  const alcance = [...item.querySelectorAll(".mods-alcances .mods-etiqueta")].map((el) => el.textContent);
+  relatar(`${nome}: alcance ${lista(alcance)}`);
+  exigir(JSON.stringify(alcance) === JSON.stringify(mod.reach),
+    `${nome} mostra o alcance ${lista(alcance)}, e o anúncio trouxe ${lista(mod.reach)}`);
+
+  // «Roda na máquina de quem hospeda», **no item certo**: só no que tem
+  // `no_servidor`, e não nos outros.
+  const naMaquina = item.querySelectorAll(".mods-servidor").length;
+  relatar(`${nome}: linhas de «roda na máquina de quem hospeda» ${naMaquina}`);
+  exigir(naMaquina === (mod.no_servidor ? 1 : 0),
+    `${nome} ${naMaquina > 0 ? "traz" : "não traz"} a linha «roda na máquina de quem hospeda», ` +
+      `e o anúncio ${mod.no_servidor ? "marca" : "não marca"} no_servidor nele`);
 });
 const contagem = document.getElementById("mods-contagem").textContent;
 relatar(`contagem: ${contagem}`);
 exigir(contagem === `${ANUNCIADOS.length} MODS`,
   `a contagem do diálogo diz «${contagem}», e o anúncio trouxe ${ANUNCIADOS.length}`);
-const noServidor = document.querySelectorAll("#mods-lista .mods-servidor").length;
-const rodamLa = ANUNCIADOS.filter((m) => m.no_servidor).length;
-relatar(`a linha do que roda no servidor: ${noServidor}`);
-exigir(noServidor === rodamLa,
-  `as linhas de «roda na máquina de quem hospeda» não são as do anúncio: ` +
-    `o diálogo desenhou ${noServidor}, e o anúncio marca ${rodamLa} (no_servidor)`);
 relatar(`aviso de lista mudada: ${visivel("mods-mudou")}`);
 exigir(visivel("mods-mudou") === "VISIVEL",
   "esta máquina já tinha dito sim a outra lista deste servidor, e o diálogo não avisou que a lista mudou");
@@ -153,8 +178,11 @@ exigir(iGravou >= 0 && iGravou < corte,
     `que recusou a tentativa anterior (a sequência foi: ${sequencia})`);
 const volta = window.__SEELE_ARGS.connect;
 relatar(`a volta: servidor=${volta.server} convite=${volta.joinSecret ?? "nenhum"}`);
+exigir(volta.server === ALVO,
+  `a volta foi a ${volta.server}, e a tentativa que o servidor recusou era a ${ALVO}: ` +
+    "aceitar os MODs de um servidor e entrar em outro");
 exigir(volta.joinSecret === CONVITE,
-  `a volta que aceita saiu sem a credencial da tentativa (joinSecret=${JSON.stringify(volta.joinSecret ?? null)}): ` +
+  `a volta que aceita saiu sem a credencial da tentativa (joinSecret=${String(volta.joinSecret ?? null)}): ` +
     "num servidor fechado por convite isso é CREDENCIAL RECUSADA sobre um convite que a recusa dos MODs não gastou");
 
 relatar(`diálogo depois: ${visivel("mods-aceite")}`);

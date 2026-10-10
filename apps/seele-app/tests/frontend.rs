@@ -10715,12 +10715,22 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // o alvo e mais nada.
         ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
         // A falha que `aceitarOsMods` não pegou por dentro (lote W3): só compara
-        // a identidade da pergunta para decidir se a tela fala. O registro leva
-        // o alvo e o motivo, e `aceiteFalhou` não nomeia a credencial em linha
-        // nenhuma — esta é a única do corpo dela que toca `aceitePendente`.
+        // a identidade da pergunta para decidir se a tela fala, e lê o alvo dela.
+        // O registro leva o alvo e o motivo, e `aceiteFalhou` não nomeia a
+        // credencial em linha nenhuma — a leitura do corpo dela (parte 1,
+        // abaixo) reprova qualquer linha nova que nomeie `pergunta`.
+        ("camada-mods.js", "const alvo = pergunta?.alvo ?? \"\";"),
         (
             "camada-mods.js",
             "if (!pergunta || aceitePendente !== pergunta) return;",
+        ),
+        // A pergunta que não abriu (lote W3): fecha, e só ela, a que ficou na
+        // memória com a credencial e sem diálogo. `perguntaNaoAbriu` não nomeia
+        // a credencial; esta é a única linha do corpo dela que toca
+        // `aceitePendente`.
+        (
+            "camada-mods.js",
+            "if (aceitePendente === pergunta) fecharAceiteDeMods();",
         ),
         (
             "camada-mods.js",
@@ -10731,9 +10741,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "camada-mods.js",
             "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
         ),
+        // A abertura guarda a referência da pergunta que gravou (lote W3), para
+        // a falha de abrir fechar essa, e não a que veio depois.
         (
             "camada-mods.js",
-            "abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? \"\", credencial).catch((falha) =>",
+            "const abrindo = abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? \"\", credencial);",
         ),
     ];
 
@@ -10762,10 +10774,21 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             }
         }
     }
-    let aceitar = js_function(&read("ui/camada-mods.js"), "async function aceitarOsMods(");
-    for linha in aceitar.lines().map(str::trim) {
-        if names(linha, "pergunta") && !names(linha, "aceitePendente") {
-            conferir("camada-mods.js", linha);
+    // `pergunta` é o objeto que carrega a credencial, e as três funções que o
+    // recebem têm as linhas que o nomeiam conferidas (lote W3): a do aceite, a
+    // da falha de dentro dele e a da pergunta que não abriu. Antes só a primeira
+    // era lida, e um `JSON.stringify(pergunta)` no registro da falha não
+    // nomeava `credencial` nem `aceitePendente` e passava.
+    for assinatura in [
+        "async function aceitarOsMods(",
+        "function aceiteFalhou(",
+        "function perguntaNaoAbriu(",
+    ] {
+        let corpo = js_function(&read("ui/camada-mods.js"), assinatura);
+        for linha in corpo.lines().map(str::trim) {
+            if names(linha, "pergunta") && !names(linha, "aceitePendente") {
+                conferir("camada-mods.js", linha);
+            }
         }
     }
     for (arquivo, linha) in CAMINHO {

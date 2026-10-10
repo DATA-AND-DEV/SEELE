@@ -13,12 +13,18 @@ local: sem push, tag nem release. Sem conformidade. Nada no fio.
 | `b91d2641` | `catalogo-de-mods.js` passa a exigir o que o cabeçalho diz provar (§6) |
 | `5bc3c84e` | **produto**: a rejeição de `aceitarOsMods` vira frase no diálogo, o ACEITAR volta e o motivo vai ao `seele.log`; o roteiro novo `aceite-de-mods-que-falha.js` (§7) |
 | `9a53cc13` | `aceite-de-mods.js` exige o sim gravado antes do `connect` da volta (§3, E14) |
-| este | o relatório atualizado |
+| `142505db` | o relatório com as medidas e o que falta rodar |
+| a rodada 1 | **em curso, não rodado**: I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
 
 **O que mudou fora de `tools/roteiros/`.** Em `apps/seele-app/ui/camada-mods.js`,
 uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
 `apps/seele-app/tests/frontend.rs`, uma linha na lista do guarda da credencial
-(§7). Nada em `crates/`, no fio, em `tools/carga-da-casca.py`, em `main.rs`. Os
+(§7). **Na rodada 1 (§11, não rodada):** em `camada-mods.js`,
+`levarParaOAceiteDeMods` e duas funções novas (`perguntaNaoAbriu`,
+`motivoEmTexto`), e a frase de `aceiteFalhou`; em `camada-mods.css`, o
+`pre-line` de `#mods-erro`; em `frontend.rs`, três linhas na lista do guarda da
+credencial e a leitura de `pergunta` nas três funções. Nada em `crates/`, no
+fio, em `tools/carga-da-casca.py`, em `main.rs`, em `tela-boot.js`. Os
 outros roteiros que usam `exigir` não foram rodados de novo: o aparelho que os
 roda não mudou.
 
@@ -329,7 +335,7 @@ separar os que relatam o que dizem provar.
 
 ## 10. Preocupações
 
-1. **Nenhum roteiro roda em CI.** `grep -rn "roteiros\|carga-da-casca"` em
+1. **Nenhum roteiro roda no Actions** (*corrigido na rodada 1: eles rodam na bateria da integração, a 12ª etapa, que não é o CI; ver o §11, M3*). `grep -rn "roteiros\|carga-da-casca"` em
    `.github/` e em `xtask/` não acha nada: a única menção é a tabela do
    `README.md`. Tudo o que este lote fez reprovar só reprova quando alguém roda
    `python3 tools/carga-da-casca.py --roteiro …` à mão — foi assim que o
@@ -338,7 +344,7 @@ separar os que relatam o que dizem provar.
    exigência do `console.warn` (F1) mora num roteiro, como pediu a decisão;
    uma cena na `ajustes-v013.cjs` a faria valer em CI. Não fiz: é outro
    escopo, e a decisão é sua.
-2. **O gêmeo do `.catch`, 7 linhas acima.** `levarParaOAceiteDeMods` faz
+2. **O gêmeo do `.catch`, 7 linhas acima** (*tratado na rodada 1: §11, I2*). `levarParaOAceiteDeMods` faz
    `abrirAceiteDeMods(…).catch(console.warn("abrir aceite"))`, e retorna
    `true`: se abrir a pergunta rejeitar, não há diálogo **nem** linha vermelha,
    e o CONECTAR volta aceso sem uma palavra. Mesma forma, mesma inalcançabilidade
@@ -349,3 +355,169 @@ separar os que relatam o que dizem provar.
 4. **O catálogo do roteiro mudou de dado** (§6, o `nivel` do topo): quem
    comparar a saída antiga com a nova do `catalogo-de-mods.js` vê o selo do MOD
    diferente. É de propósito.
+
+## 11. Rodada 1: a revisão (EM CURSO, NÃO RODADO)
+
+**Estado.** Escrito, commitado e **não rodado**: a pausa da orquestradora (CPU
+e quadros) proíbe `cargo`, roteiros, bancadas e `check-runtime`. Nem um
+`node --check` foi feito. Tudo abaixo é leitura; o que é afirmação sobre
+comportamento está marcado **a medir**, e não vale como achado até o aviso. A
+revisão do W3 (`.superpowers/sdd/lotes/lote-w3-review-report.md`) deu Crítico 0,
+Importante 2, Menor 5.
+
+### I1 — a lista do diálogo era conferida pela metade
+
+`aceite-de-mods.js` agora confere, **por item e na ordem do anúncio**, o `id`, a
+`versão` e o hash (como antes), mais:
+
+- **o repositório** (`.mods-repo`, o `span` que não é o rótulo);
+- **o alcance** (`reach`), etiqueta por etiqueta e na ordem, que o ADR 0045 manda
+  a pessoa ler antes de aceitar;
+- **a linha «roda na máquina de quem hospeda» no item certo**: `.mods-servidor`
+  dentro do item, uma no que tem `no_servidor` e nenhuma nos outros. A exigência
+  antiga, que só contava as linhas da lista inteira, saiu: a nova a subsume.
+
+Reversões **a rodar** (cada uma tem de dar `REPROVADO` com a frase do item):
+
+| # | a reversão | a frase esperada |
+|---|---|---|
+| R5 (muda de frase) | `if (false && mod.no_servidor)` | `o item 2 (ponte/retransmissor) não traz a linha «roda na máquina de quem hospeda», e o anúncio marca no_servidor nele` |
+| R13 | `if (!mod.no_servidor)` — a linha no MOD errado, com a mesma contagem | `o item 1 (seele/placar) traz a linha «roda na máquina de quem hospeda», e o anúncio não marca no_servidor nele` |
+| R14 | `Array.isArray(mod.reach) && mod.reach.length > 0` → `false` | `o item 1 (seele/placar) mostra o alcance [nada declarado], e o anúncio trouxe [dom · mensagens do servidor]` |
+| R15 | `mod.repo \|\| "não declarado"` → `"não declarado"` | `o item 1 (seele/placar) mostra o repositório «não declarado», e o anúncio trouxe «https://example.invalid/placar»` |
+
+### I2 — o gêmeo do `.catch` entra
+
+**A medida (leitura).** `levarParaOAceiteDeMods` devolvia `true` e deixava
+`abrirAceiteDeMods(…).catch(console.warn)`. `abrirAceiteDeMods` grava
+`aceitePendente` — com a credencial — **antes** do primeiro `await`, e abre o
+diálogo quase no fim: rejeitando no meio, a credencial ficava na memória com uma
+pergunta invisível, que nenhuma porta fecha, e a pessoa via o CONECTAR aceso e
+nenhuma palavra. O `true` é o que impedia a linha vermelha de falar.
+
+**Por que não devolvo `false`, como a revisão propôs.** A abertura é assíncrona:
+quando ela rejeita, `levarParaOAceiteDeMods` já devolveu `true` há tempo. Devolver
+`false` pediria `await` na linha de `conectar` que o guarda da credencial e os
+guardas da tentativa substituída leem, e seguraria o CONECTAR apagado enquanto a
+pergunta abre. Fiz o equivalente sem tocar `conectar` nem `tela-boot.js`:
+`perguntaNaoAbriu` escreve a linha vermelha da entrada ela mesma, com a mesma
+conferência.
+
+**O conserto (`camada-mods.js`).**
+- `levarParaOAceiteDeMods` guarda `desta = tentativas` (a tentativa mais nova, a
+  única que `conectar` deixa chegar ali: o ramo `esta !== tentativas` vem antes)
+  e a referência da pergunta que a abertura gravou, e passa a falha a
+  `perguntaNaoAbriu`.
+- `perguntaNaoAbriu`: (1) vai ao `seele.log` com o alvo e o motivo, sem a
+  credencial; (2) **fecha a pergunta, e só ela** (`aceitePendente === pergunta`),
+  o que esquece a credencial — se outra a substituiu ou a pessoa a fechou, não há
+  o que fechar, e fechar mataria a pergunta nova; (3) **só se a tentativa ainda é
+  a mais nova** (`desta === tentativas`, a regra do W2), escreve `#boot-erro` com
+  `fraseDeErro(motivo)` — a frase de sempre da recusa por MODs, que lista a lista
+  e manda «entrar de novo neste servidor», o ramo que o W2 deixou «para o caminho
+  que um dia chegar»; (4) se a frase da recusa também não se monta (a mesma lista
+  malformada), diz a falha de abrir, e não cala.
+- `motivoEmTexto` tira de `aceiteFalhou` o texto da falha para o registro, e
+  `perguntaNaoAbriu` o reusa.
+
+**Guarda.** A linha de `abrirAceiteDeMods` que o guarda da credencial lia mudou
+(agora `const abrindo = abrirAceiteDeMods(…)`), e a lista dele trocou uma linha
+por outra, mais a de `if (aceitePendente === pergunta) fecharAceiteDeMods();`.
+Conferi que nenhuma delas leva a credencial a lugar nenhum. `tela-boot.js` e as
+linhas de `conectar` ficaram intactas.
+
+**A prova: `tools/roteiros/aceite-de-mods-que-nao-abre.js`**, um roteiro novo
+(a conta, sem rodar: as cenas atuais do `aceite-de-mods-que-falha.js` somam cerca
+de 2,3 s virtuais do orçamento de 5 s do aparelho, e as quatro novas, cerca de
+1,9 s; juntas sobrariam menos de 1 s de folga, sem medida. Separado, este fica
+em cerca de 2,7 s). A
+lista malformada é um `hash` que não é texto (`linhaDeMod` estoura nele, e a
+frase da recusa não toca o hash). Quatro cenas e catorze `exigir`, duas delas
+precondição de cena (sem reversão própria):
+
+1. **a pergunta que não abriu fala**: o diálogo fechado, a linha vermelha com a
+   recusa («entre de novo»), nenhuma pergunta pendente (`aceitePendente`
+   `null`, lido do próprio escopo da página), um registro `aceite-de-mods` de
+   nível `aviso` com o alvo e o `TypeError`, e o convite fora de todo registro;
+2. **a tentativa que outra substituiu não fala**: a abertura espera uma leitura
+   pendente, outra tentativa entra, a leitura chega malformada — a linha
+   vermelha continua fechada, a pergunta foi esquecida e o registro foi escrito;
+3. **a falha da pergunta antiga não fecha a nova**: a outra tentativa abre a
+   própria pergunta, e a falha da antiga a deixa aberta e sem erro;
+4. **a frase da recusa também não se monta** (`mods` nem é lista): a linha
+   vermelha diz o `TypeError`.
+
+Reversões **a rodar**: G1 o `console.warn` de volta · G2 sem fechar a pergunta
+que não abriu · G3 sem o registro · G4 sem a conferência `desta !== tentativas` ·
+G5 sem a frase de reserva · G6 `fecharAceiteDeMods()` incondicional.
+**E o vermelho antes**: o roteiro novo contra o `ui/` de `9a53cc13`
+(`--casca` com o `git archive` dele), que deve reprovar na cena 1.
+
+### M1 — o motivo na frase, e em linhas
+
+`aceiteFalhou` escreve a frase em três partes — «não consegui concluir o aceite
+dos MODs de <alvo>.», o motivo (`fraseDeErro(falha)`) e «Tente de novo, ou
+recuse a entrada.» —, e `camada-mods.css` ganha `#mods-erro { white-space:
+pre-line; }`. (A frase já levava o motivo; o que faltava era **exigi-lo**.)
+`aceite-de-mods-que-falha.js` exige que a frase traga o `TypeError` e que o
+`white-space` calculado seja `pre-line`. Reversões **a rodar**: F11 sem o motivo
+na frase · F12 sem o `pre-line`.
+
+### M2 — o guarda lia só o `aceitarOsMods`
+
+A parte 1 do guarda da credencial passa a ler as linhas que nomeiam `pergunta`
+nas **três** funções que a recebem: `aceitarOsMods`, `aceiteFalhou` e
+`perguntaNaoAbriu`. Uma linha nova que nomeie `pergunta` ali (um
+`JSON.stringify(pergunta)` no registro) reprova até alguém conferi-la. Entrou na
+lista só `const alvo = pergunta?.alvo ?? "";`. **A sonda a rodar**:
+`JSON.stringify(pergunta)` no registro de `aceiteFalhou` e de `perguntaNaoAbriu`
+contra `cargo test -p seele-app --test frontend` — esperado: reprovar com «a
+credencial da tentativa ganhou um caminho novo». Se passar, o guarda ainda tem
+buraco e o conserto dele é a próxima rodada.
+
+### M3 — os roteiros fora do Actions (lote RT, não deste)
+
+Correção aceita: os roteiros rodam na bateria da integração (a 12ª etapa de
+`integracao.md`), e a preocupação 1 do §10 estava incompleta. O que fazê-los
+valer a cada PR vai ao lote RT, que vem depois.
+
+### M4 — o servidor da volta
+
+`aceite-de-mods.js` exige `volta.server === ALVO` (era um `relatar` solto).
+Reversão **a rodar**: R16, a volta a outro endereço.
+
+### M5 — o alcance da versão exibida, no catálogo
+
+O fixture do catálogo dá à 1.1.0 um alcance próprio (`mensagens do servidor`; a
+1.0.0 declara «falar com um serviço de fora»), e `catalogo-de-mods.js` exige que
+as etiquetas desenhadas sejam as da versão exibida. Com `alcanca: []` na 1.1.0 a
+exigência passaria também sem etiqueta nenhuma. Reversões **a rodar**: K7, o
+alcance da 1.0.0 · K8, nenhum alcance.
+
+### Uma correção minha nos roteiros
+
+O aparelho lê o relato até a primeira aspa dupla (`SEELE-RELATO ([^"]*)`), e uma
+frase de reprovação com `"` dentro sai cortada ali. Tirei os `JSON.stringify` das
+frases dos três roteiros (alcance, registros, `joinSecret`) e escrevi os dois
+roteiros novos sem eles. Hoje o que se perdia era só o resto de uma frase já
+reprovada.
+
+### Observação, sem conserto
+
+`abrirAceiteDeMods` não confere, depois do `await` do aceite anterior, que a
+pergunta ainda é a dela. Uma abertura **antiga** que termine depois de outra
+nova repovoa a lista e reabre o diálogo por cima, com `aceitePendente` já sendo
+o da nova: a pessoa leria a lista de uma e aceitaria o conjunto da outra. É
+anterior a este lote, exige duas recusas por MODs dentro da latência de um
+`invoke` local, e eu a vi lendo, não medindo. Fica para decisão.
+
+### O que falta rodar (depois do aviso)
+
+Nesta ordem: (1) o vermelho do roteiro novo contra o `ui/` de `9a53cc13`;
+(2) as reversões novas — R5, R13 a R16, F11, F12, G1 a G6, K7, K8 — e a sonda
+do M2; (3) as 37 anteriores, de novo, porque os três roteiros mudaram (o script
+`reverter.sh` do scratchpad as tem todas); (4) os **quatro** roteiros, limpos;
+(5) `--test frontend` (a lista do guarda mudou duas vezes), `--bin seele-app`,
+`check-runtime`, fmt e clippy do app; (6) `ajustes-v013`, `diagnostico-de-mods`
+e `contribuicoes-e-camadas`. Tudo isto está **por rodar**: o relatório não diz
+«verde» para nada desta rodada.

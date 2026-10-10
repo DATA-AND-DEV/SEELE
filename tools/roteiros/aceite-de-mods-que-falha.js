@@ -24,6 +24,8 @@
 //      andava, e já está diante de outra pergunta, não lê o erro da antiga na
 //      tela nova. O registro continua a ser escrito.
 //
+// A pergunta que nem chega a abrir é de `aceite-de-mods-que-nao-abre.js`.
+//
 // As reversões de cada exigência estão no relatório do lote W3
 // (`docs/superpowers/sdd/2026-10-08-0.16/F5/lote-w3-report.md`).
 
@@ -45,6 +47,9 @@ const ANUNCIO = {
   },
 };
 const EXATOS = ANUNCIO.ModsNaoAceitos.mods.map(({ id, hash }) => ({ id, hash }));
+// Sem aspas duplas: o aparelho lê o relato até a primeira, e uma frase de
+// reprovação com `"` dentro sai cortada ali.
+const resumo = (linhas) => linhas.map(([, a]) => `${a.nivel}: ${a.oQue}`).join(" ¦ ") || "nenhum";
 const registros = () =>
   window.__SEELE_HISTORICO.filter(([cmd, args]) => cmd === "registrar_da_janela" && args.onde === "aceite-de-mods");
 
@@ -71,6 +76,14 @@ relatar(`mods-erro: ${visivel("mods-erro")} «${erro.textContent.slice(0, 70)}�
 exigir(visivel("mods-erro") === "VISIVEL" && erro.textContent.includes(ALVO) && erro.textContent.includes("Tente de novo"),
   "ACEITAR rejeitou por dentro e a tela não disse o que falhou, com o alvo e o caminho de volta " +
     `(mods-erro=${visivel("mods-erro")}, a sequência foi: ${sequencia})`);
+// **O motivo, e em linhas** (lote W3, rodada 1): a frase dizia que falhou e,
+// sem o motivo, a pessoa não tinha o que relatar; com ele, mas sem `pre-line`,
+// as três linhas de uma falha que a casca não sabe nomear saíam emendadas.
+exigir(erro.textContent.includes("TypeError"),
+  `a frase da falha não traz o motivo (o TypeError que a casca viu): «${erro.textContent}»`);
+exigir(getComputedStyle(erro).whiteSpace === "pre-line",
+  `o motivo da falha sai emendado: #mods-erro tem white-space «${getComputedStyle(erro).whiteSpace}», ` +
+    "e a frase tem uma linha por parte");
 relatar(`ACEITAR: ${document.getElementById("mods-aceitar").disabled ? "apagado" : "aceso"}, diálogo ${visivel("mods-aceite")}`);
 exigir(!document.getElementById("mods-aceitar").disabled && visivel("mods-aceite") === "VISIVEL",
   "ACEITAR rejeitou por dentro e o botão ACEITAR ficou apagado: a pessoa não tem como tentar de novo");
@@ -80,7 +93,7 @@ relatar(`registros no seele.log: ${dos_registros.length}`);
 exigir(dos_registros.length === 1 && dos_registros[0][1].nivel === "aviso"
     && dos_registros[0][1].oQue.includes(ALVO) && dos_registros[0][1].oQue.includes("TypeError"),
   "ACEITAR rejeitou por dentro e o motivo não foi ao seele.log com o alvo, o erro e o nível aviso " +
-    `(registros de «aceite-de-mods»: ${JSON.stringify(dos_registros.map(([, a]) => a))})`);
+    `(registros de «aceite-de-mods»: ${resumo(dos_registros)})`);
 exigir(!JSON.stringify(window.__SEELE_HISTORICO.filter(([cmd]) => cmd === "registrar_da_janela")).includes(CONVITE),
   "o registro do aceite que falhou levou o convite da tentativa, que só pode ir ao connect");
 
@@ -100,7 +113,7 @@ exigir(window.__SEELE_ARGS.aceitar_mods?.alvo === ALVO && window.__SEELE_CHAMADA
   "depois da falha, o mesmo ACEITAR com a resposta certa não gravou o sim e entrou " +
     `(a sequência foi: ${window.__SEELE_CHAMADAS.join(" → ") || "nenhuma"})`);
 exigir(volta.joinSecret === CONVITE,
-  `a falha comeu a credencial da tentativa: a volta saiu com joinSecret=${JSON.stringify(volta.joinSecret ?? null)}`);
+  `a falha comeu a credencial da tentativa: a volta saiu com joinSecret=${String(volta.joinSecret ?? null)}`);
 exigir(visivel("mods-aceite") === "escondida" && visivel("mods-erro") === "escondida",
   "a segunda tentativa entrou, e o diálogo ou a frase da falha continuou na tela " +
     `(diálogo=${visivel("mods-aceite")}, mods-erro=${visivel("mods-erro")})`);
