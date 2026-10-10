@@ -51,9 +51,10 @@ Liberada pela revisão de 09/10. Da Tarefa 3 em diante, a bancada injeta numa c�
 
 O que espera essa integração, e o commit da F3 de que cada coisa depende:
 
-- [ ] trazer a `versao/0.16` e rodar o `tests/celular.rs`: o `celular-texto.css` é regerado se o CSS da API 6 mudou tamanho de letra;
-- [ ] `CELULAR.regioes` com as sete regiões, sem o `status.barra` (decidido em 09/10), e o caso que confere que toda região declarada tem caixa à vista em alguma aba e que uma não declarada recebe `regiao-ausente` (`aCascaTemARegiao`, `fb13e65e`, `7f5b45f0`);
-- [ ] o `#operador-mods` (`operador.barra`) no alto de AJUSTES, abaixo de SEU PERFIL, com os quatro critérios da F3 e o vermelho sem o `max-height` mandado a ela (Tarefa 9);
-- [ ] no caso `superficies-de-mod`: o toque no SEGURE, no SOM, no SAIR e em AJUSTES com o diálogo modal e a imersiva abertos, e o Tab contido (a inércia, `682f39ba`, validada numa cópia em 09/10); e a `folha` (`0f10718b`), com só a de cima à vista;
-- [ ] tirar do `celular-base.css` os cinco `--nucleo-*` que o desktop passou a declarar com os mesmos nomes e valores (`e26e9edc`), e ver a medida do núcleo continuar igual sob os quatro temas;
-- [ ] a Tarefa 13: as cores de estado sob o tema pela `tonsDoTema` da 17e (`bf8d8fb6`), e o tema claro de volta ao caso `aba-servidor`.
+- [x] trazer a `versao/0.16` e rodar o `tests/celular.rs` (`e926813d`, a décima integração): o `celular-texto.css` já veio regerado pela orquestradora;
+- [x] (`d1773fd6`) `CELULAR.regioes` com as sete regiões, sem o `status.barra` (decidido em 09/10), e o caso que confere que toda região declarada tem caixa à vista em alguma aba e que uma não declarada recebe `regiao-ausente` (`aCascaTemARegiao`, `fb13e65e`, `7f5b45f0`);
+- [x] (`1f09c7ba`) o `#operador-mods` (`operador.barra`) no alto de AJUSTES, abaixo de SEU PERFIL, com os quatro critérios da F3 e o vermelho sem o `max-height` mandado a ela (Tarefa 9);
+- [x] a `folha` no caso `superficies-de-mod` (`37a4ce74`), que entrou na décima integração;
+- [ ] no caso `superficies-de-mod`: o toque no SEGURE, no SOM, no SAIR e em AJUSTES com o diálogo modal e a imersiva abertos, e o Tab contido (a inércia, `682f39ba`, validada numa cópia em 09/10; ainda fora da versao/0.16);
+- [ ] tirar do `celular-base.css` os cinco `--nucleo-*` que o desktop passou a declarar com os mesmos nomes e valores (`e26e9edc`, ainda fora da versao/0.16), e ver a medida do núcleo continuar igual sob os quatro temas;
+- [x] (`ebd50055`) a Tarefa 13: as cores de estado sob o tema pela `tonsDoTema` da 17e (`bf8d8fb6`), e o tema claro de volta ao caso `aba-servidor`.
