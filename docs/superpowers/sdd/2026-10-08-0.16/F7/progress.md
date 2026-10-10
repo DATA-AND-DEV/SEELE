@@ -650,3 +650,22 @@ orquestradora, não rodo conformidade.
   da segurança;
 - **depois do encontro com o lote X da F5:** o teste da sala com
   `codigo_esperado` provando `onde_estou_na == Pessoal` pela chave.
+
+## A sala viva na décima segunda (10/10)
+
+- A sala viva entrou na `versao/0.16` (`6e845e0d`), com o lote X da F5 integrado
+  antes. Trazida para o `0.16/sala-viva` em `9f170f3f`, sem conflito.
+- **O encontro com o X, provado** (`daf25ba9`):
+  `a_sessao_na_propria_sala_e_pessoal_pela_chave_e_nao_pelo_endereco`. Quem
+  recebe entra na própria sala pela ponte, com `codigo_esperado`. A impressão
+  gravada é a da sala, e o `onde_estou_na` diz `Pessoal` com o endereço
+  `127.0.0.1` e também com um nome de fora. Reprovam: o `onde_estou_na` sem a
+  impressão da conexão, e a ponte sem `gravar_impressao`.
+- **Dois ajustes da integração me tocaram:**
+  - a tabela dos neutros da bancada `ponte-web.cjs` não tinha o `estado_da_sala`
+    nem o `toques_agora` que eu pus na ponte (`8e7fcd37`). Eu rodei a
+    `ponte-sem-gesto.cjs` e não a `ponte-web.cjs`, que confere a resposta de cada
+    neutro. **Quem põe um neutro na ponte roda as duas;**
+  - o `connect` passou a ler a hospedagem para conferir a sala, e a marca
+    `sala::` da F4 o pegou. Ele entrou em `leem_e_seguem_a_lista` (`f7d53427`).
+- A VPS foi reimplantada com o ENC/2: a sala pessoal acha o ponto de produção.
