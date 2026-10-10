@@ -26,6 +26,24 @@ ainda não estão no produto (spec, §9.4) são injetados só na cópia, pela ta
 `PONTOS_INJETADOS`. Quando um deles entra no produto, a bancada reprova até a
 injeção dele sair da tabela, no mesmo commit.
 
+**O que já se mediu, e não se tenta de novo.**
+
+- **O `fetch` não lê arquivo em `file://`** (medido em 10/10). O Chromium e o
+  WebKit recusam, com ou sem `--allow-file-access-from-files`; o
+  `XMLHttpRequest` só passa no Chromium com a bandeira. A casca usa o `fetch`
+  porque a página de verdade vem de https: um caso que dependa dele (o enlace da
+  entrada lê o `marca-simbolo.svg`) pede `Caso(http=True)`, e a cópia é servida
+  em 127.0.0.1 numa porta efêmera, que não disputa a 8384. Trocar o `fetch` da
+  casca para caber na bancada seria provar outra coisa.
+- **Visível é o que o `checkVisibility()` diz** (regra da bancada desde 10/10).
+  Num `<details>` fechado o conteúdo some por `content-visibility`, e o
+  `getBoundingClientRect` ainda o mede com altura: uma conferência só pela caixa
+  dava como à vista a falha escrita num registro fechado, e a reversão passava.
+  Toda conferência nova de «está à vista» usa o `checkVisibility()`, e não só a
+  caixa.
+- **O Ed25519 e o IndexedDB funcionam em `file://`** no Chromium da bancada
+  (medido em 10/10, com a identidade de verdade da F4).
+
 Uso:
     python3 tools/bancada-do-celular.py /tmp/bancada
     python3 tools/bancada-do-celular.py /tmp/bancada --so sessao-entrou
