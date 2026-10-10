@@ -76,6 +76,26 @@ nada dependa da memória de uma conversa.
   provedor, não tinha base e foi retirada. Na VPS: o serviço ouve em `[::]:8384`, e o `ufw`
   libera 8384/udp nas duas famílias. Falta rodar o `sondar --exige-enc2` de uma máquina
   com IPv6.
+- ~~**A M3 da API 6, no Mac**~~: **feita em 10/10 pela orquestradora, a pedido do dono**, na
+  build de medição do `6e845e0d` (`preparar-api6.sh`, em `/tmp/m3-6`). **24 de 24 cenários
+  válidos**: nenhum interrompido, nenhum com compilação na janela, nenhum commit acima de um
+  quadro. Os números vão à F3 (tarefa 12, o `v6.json`), lidos contra o `sem-mod` da própria
+  campanha, porque a 0.16 sobe a sala pessoal ao abrir e a base não subia. Três consertos do
+  roteiro no caminho, todos levados à evidência pela F3:
+  1. a casa nova da 0.16 pergunta o apelido antes de seguir o `--entrar` (CANCELAR);
+  2. **o falante sintético mandava a voz com o byte de versão errado** (o `PROTOCOL_VERSION`,
+     9, no lugar do `MEDIA_HEADER_VERSION`, 1, separados no `f3aaf9ce`, que a 0.15.1 não
+     tem). Quem ouvia jogava fora todo datagrama, calado, e o JITTER ficava em 0 exato. A
+     F4 achou a causa, e os 12 cenários com voz foram refeitos com o falante consertado
+     (jitter de 1,2 a 2,4 ms);
+  3. o diálogo e a página do MOD de carga abrem só com quem usa numa sala, e a superfície à
+     vista prova a entrada.
+
+  **O que a M3 achou no produto:** o laço de voz descarta, sem contar e sem dizer, um
+  datagrama cujo cabeçalho ele recusa, e o `MediaHeader::encode` grava o `version` de quem
+  chama, embora o doc diga que sai sempre o `MEDIA_HEADER_VERSION`. Os dois consertos estão
+  com a F4, com a revisão da F1, para a 13ª integração. A M3 no Windows e no iPhone
+  continua com o dono.
 - **O indexador, antes dos pacotes da API 6** (conferido pelo ESTILO em `SEELE-MODS-INDEXER/ferramentas/manifesto.py`); do dono, no `SEELE-MODS-INDEXER`:
   1. a chave `tema` em `CHAVES` e em `TIPOS`, como booleana (`:49-50`; hoje uma chave desconhecida sai `malformed`, `:144-146`), e levada ao catálogo para o site dizer «muda a aparência do servidor»;
   2. `VERSAO_DA_API` de 5 para 6 (`:20`; hoje a 4.0.0 sai `api-too-new`, `:186-187`);
