@@ -27,7 +27,7 @@
 pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
-pub mod assento;
+pub use seele_sessao::assento;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;
@@ -48,7 +48,7 @@ pub mod preview;
 mod rastro_de_teste;
 pub mod search;
 pub mod som_que_segue;
-pub mod state;
+pub use seele_sessao::state;
 pub mod tela;
 pub mod teste_de_microfone;
 pub mod tofu;
@@ -178,6 +178,9 @@ pub use seele_proto::control::{
     Subsystem,
     SubsystemHealth,
     Telemetry,
+    // Reexportado porque o `seele-ffi` leva o tema do servidor ao retrato da
+    // casca (tarefa 17d da F3), e o ADR 0002 não o deixa ver `seele-proto`.
+    TemaDoServidor,
     VoiceRoomInfo,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.

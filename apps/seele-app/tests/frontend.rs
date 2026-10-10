@@ -573,6 +573,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // outras frentes quando o comando nasceu. Sai quando eles passarem a
 // perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
 //
+// `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
+// 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
+// commit isolado do `main.rs`, porque a F7 também mexe lá, e saiu quando a
+// gestão de MODs passou a chamá-lo com a pergunta dos dois MODs de tema.
+//
 // `estado_da_sala` entrou em 2026-10-10, com a tarefa 23 da F7 (a sala sobe no
 // `setup`, no ramo `0.16/sala-viva`): a tela que abre depois do anúncio por
 // `seele://sala` lê por ele. `receber_ligacoes` entrou junto: é o «Não receber
@@ -8186,10 +8191,13 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // The exception is held to exactly that shape below, rather than trusted.
     //
     // **And the bridge of the browser** (`ponte-web.js`, ADR 0057) answers
-    // `regras_de_previa` itself there, where no Rust is on the other side. Its
-    // copy is held to `seele_ffi::Connection::preview_rules()` by
-    // `as_constantes_da_ponte_sao_as_do_desktop` in `tests/web.rs`, so the two
-    // cannot drift: the copy this test exists to forbid is one nobody checks.
+    // `regras_de_previa` and the type a file's extension claims itself there,
+    // where no Rust is on the other side. Its copies are held to
+    // `seele_ffi::Connection::preview_rules()` and to `tipo_alegado` and
+    // `guardar_colado` in `main.rs` by `as_constantes_da_ponte_sao_as_do_desktop`
+    // and `as_regras_do_arquivo_da_ponte_sao_as_do_desktop` in `tests/web.rs`,
+    // so they cannot drift: the copy this test exists to forbid is one nobody
+    // checks.
     let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {

@@ -457,6 +457,55 @@ impl TetoDeVideo {
     }
 }
 
+/// **O teto do vídeo de uma sala, com o que o fio contou.**
+///
+/// Era o `Room::teto_de_video`, e ficou aqui quando o `Room` foi para o
+/// `seele-sessao` (Tarefa 2.2 da F4): é a única parte dele que depende do
+/// vídeo, e o navegador não a usa. Um trait, para quem chama
+/// `room.teto_de_video(…)` continuar chamando igual.
+pub trait TetoDaSala {
+    /// O teto do vídeo com o que o fio já contou, pronto para a bomba.
+    ///
+    /// **É aqui que as três pernas do §5.1 se encontram**, e cada uma vem de um
+    /// lugar diferente pelo motivo que aquela seção dá: a de quem hospeda vem do
+    /// `HostUplink`, o N vem do `ScreenViewers`, e a escolha da pessoa vem da
+    /// interface — sempre teto, nunca piso (§5).
+    ///
+    /// A perna de quem compartilha **entra por argumento**, e a `Room` não a
+    /// guarda. Não é omissão: aquela perna é a única das três que vem de uma
+    /// **medida em curso** — a [`crate::caminho::Sonda`] a tira do que o
+    /// transporte contou enquanto a tela enchia o cano —, e esta estrutura é
+    /// uma dobra de mensagens do fio. Guardá-la aqui poria um relógio dentro de
+    /// uma coisa que não tem nenhum, e faria duas cópias dela: a do
+    /// `crate::enlace`, que é quem mede, e esta, que estaria sempre um pouco
+    /// atrás. Quem chama passa `crate::caminho::Sonda::estimativa`, e quem não
+    /// mede nada passa [`crate::tela::CAMINHO_DA_PROVA_BPS`] — a suposição do
+    /// §8, que continua sendo por onde se começa.
+    ///
+    /// Era a pergunta 2 do §8, e ela deixou de estar aberta: ver o cabeçalho de
+    /// [`crate::caminho`].
+    ///
+    /// Ausência de medida do anfitrião **não** é zero: quando o `HostUplink`
+    /// não chegou, ou chegou dizendo zero, a perna dele fica no cano das provas
+    /// em vez de zerar o teto — ver [`crate::state::Room::caminho_de_quem_hospeda_bps`]. E é
+    /// essa perna, e não esta, que trava o teto em 1200 kbps num servidor que não
+    /// declarou a própria subida, por mais que esta ponta meça: o `min` do §5.1
+    /// é o menor dos três.
+    #[must_use]
+    fn teto_de_video(&self, caminho_bps: u32, escolha_bps: Option<u32>) -> TetoDeVideo;
+}
+
+impl TetoDaSala for crate::state::Room {
+    fn teto_de_video(&self, caminho_bps: u32, escolha_bps: Option<u32>) -> TetoDeVideo {
+        let mut teto = TetoDeVideo::com_caminho(caminho_bps);
+        if let Some(medido) = self.caminho_de_quem_hospeda_bps {
+            teto = teto.com_caminho_de_quem_hospeda(medido);
+        }
+        teto.com_espectadores(self.minha_tela().map_or(0, |tela| tela.espectadores))
+            .com_escolha(escolha_bps)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // A resolução, que acompanha o teto e não a contagem de gente
 // ---------------------------------------------------------------------------
@@ -2019,6 +2068,32 @@ pub(crate) mod tests {
     /// acrescentaria maneiras de o teste falhar que não têm a ver com a
     /// pergunta.
     pub(crate) async fn par() -> (quinn::Connection, quinn::Connection) {
+        montar_par(None).await
+    }
+
+    /// [`par`], com o prazo de ociosidade do QUIC escolhido por quem chama,
+    /// nas duas pontas.
+    ///
+    /// **O padrão do `quinn` é um prazo que ninguém escreveu**: 30 s sem
+    /// pacote nenhum e a conexão cai, e quem espera um fluxo lê «timed out».
+    /// Para quem manda logo depois do aperto, isso nunca aparece. Para quem
+    /// arma o codificador depois do aperto, aparece: ver
+    /// `crate::bomba::tests::par_paciente`.
+    pub(crate) async fn par_com_ociosidade(
+        ociosidade: Duration,
+    ) -> (quinn::Connection, quinn::Connection) {
+        let mut transporte = quinn::TransportConfig::default();
+        transporte.max_idle_timeout(Some(
+            ociosidade
+                .try_into()
+                .expect("uma ociosidade que o QUIC aceita"),
+        ));
+        montar_par(Some(Arc::new(transporte))).await
+    }
+
+    async fn montar_par(
+        transporte: Option<Arc<quinn::TransportConfig>>,
+    ) -> (quinn::Connection, quinn::Connection) {
         let _ = rustls::crypto::ring::default_provider().install_default();
 
         let certificado =
@@ -2034,9 +2109,12 @@ pub(crate) mod tests {
             .with_single_cert(cadeia.clone(), chave.into())
             .expect("config do servidor");
         tls_servidor.alpn_protocols = vec![b"seele-test".to_vec()];
-        let servidor = quinn::ServerConfig::with_crypto(Arc::new(
+        let mut servidor = quinn::ServerConfig::with_crypto(Arc::new(
             quinn::crypto::rustls::QuicServerConfig::try_from(tls_servidor).expect("quic"),
         ));
+        if let Some(transporte) = &transporte {
+            servidor.transport_config(Arc::clone(transporte));
+        }
 
         let escuta = quinn::Endpoint::server(servidor, SocketAddr::from(([127, 0, 0, 1], 0)))
             .expect("escutar");
@@ -2051,9 +2129,13 @@ pub(crate) mod tests {
 
         let mut cliente =
             quinn::Endpoint::client(SocketAddr::from(([127, 0, 0, 1], 0))).expect("cliente");
-        cliente.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        let mut config_do_cliente = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls_cliente).expect("quic"),
-        )));
+        ));
+        if let Some(transporte) = transporte {
+            config_do_cliente.transport_config(transporte);
+        }
+        cliente.set_default_client_config(config_do_cliente);
 
         let aceitando = tokio::spawn(async move {
             let conexao = escuta
@@ -3065,5 +3147,179 @@ mod medida_do_anfitriao {
             super::Resolucao::P1080,
             "a mesma máquina, no mesmo instante, com a medida de ontem na mão"
         );
+    }
+}
+
+/// Os testes do `teto_de_video`, que moravam no `state.rs` e vieram com ele
+/// (Tarefa 2.2 da F4). O corpo de cada um é o de antes; as fixturas são as do
+/// `state.rs`, copiadas, porque as de lá ficaram no `seele-sessao`.
+#[cfg(test)]
+mod teto_da_sala {
+    use super::TetoDaSala as _;
+    use crate::state::Room;
+    use seele_proto::control::{ChannelInfo, ServerMessage, VoiceRoomInfo};
+    use seele_proto::ids::{ChannelId, PersonId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+    use seele_proto::signal::SignalBand;
+
+    const VOICE_ROOM: VoiceRoomId = VoiceRoomId(1);
+    const CHANNEL: ChannelId = ChannelId(1);
+
+    fn session() -> ServerMessage {
+        ServerMessage::Session {
+            id: SessionId(1),
+            person: PersonId(7),
+            ssrc: Ssrc(700),
+            server: "Casa".into(),
+            voice_rooms: vec![VoiceRoomInfo {
+                id: VOICE_ROOM,
+                name: "SALA-01 CENTRAL".into(),
+                limit: 20,
+                password_required: false,
+                channel: Some(CHANNEL),
+            }],
+            channels: vec![ChannelInfo {
+                id: CHANNEL,
+                name: "geral".into(),
+            }],
+            roles: Vec::new(),
+            permissions: Vec::new(),
+        }
+    }
+
+    fn room() -> Room {
+        let mut room = Room::new();
+        room.apply(&session());
+        room.enter_voice_room(VOICE_ROOM);
+        room.open_channel(CHANNEL);
+        room
+    }
+
+    /// **`HostUplink { bps: 0 }` é ausência, e nunca zero bits por segundo.**
+    ///
+    /// É o contrato escrito na própria mensagem, e o custo de errá-lo é grande e
+    /// silencioso: um zero lido como medida vira um teto de zero, que é
+    /// [`crate::tela::MotivoDeParada::AbaixoDoPiso`] — o compartilhamento
+    /// parando **porque o servidor não mediu**, com uma frase na tela que
+    /// culpa a conexão de quem está olhando para ela. É o mesmo contrato do
+    /// `——` que o resto do produto usa onde não houve medida.
+    ///
+    /// Confira por mutação: troque `(*bps != 0).then_some(*bps)` por
+    /// `Some(*bps)` e a primeira asserção fica vermelha.
+    #[test]
+    fn a_subida_de_quem_hospeda_com_zero_e_ausencia_e_nao_um_teto_de_zero() {
+        let mut room = room();
+
+        // Sem notícia nenhuma: a perna do anfitrião fica no cano das provas, que
+        // é a única suposição com número atrás — e é ela, e não a de quem
+        // compartilha, que continua sendo suposta neste ponto do §5.1.
+        assert_eq!(room.caminho_de_quem_hospeda_bps, None);
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SignalBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000)
+        );
+
+        // O servidor dizendo «não medi». O teto não pode se mexer.
+        let changed = room.apply(&ServerMessage::HostUplink { bps: 0 });
+        assert!(
+            !changed.telas,
+            "um zero que não muda nada não redesenha nada"
+        );
+        assert_eq!(room.caminho_de_quem_hospeda_bps, None);
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SignalBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000),
+            "o zero de «não medi» virou um teto de zero"
+        );
+
+        // E uma medida de verdade entra inteira.
+        let changed = room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
+        assert!(changed.telas);
+        assert_eq!(room.caminho_de_quem_hospeda_bps, Some(6_000_000));
+    }
+
+    /// §5.1: **o N chega pelo fio e entra no teto pela perna de quem hospeda.**
+    ///
+    /// Antes desta mensagem quem compartilhava aplicava um `min(...)` com uma
+    /// perna inventada, que é o defeito que aquela seção chama de o mais caro
+    /// dela. A escada aqui é a mesma do `crate::video`: entra gente, a subida do
+    /// anfitrião é dividida por mais um, e o degrau que o orçamento compra cai
+    /// junto — sem que a contagem toque na resolução diretamente, que é o
+    /// gatilho que o §5.1 recusa.
+    #[test]
+    fn os_espectadores_do_fio_apertam_o_teto_e_nao_a_voz() {
+        let mut room = room();
+        room.me = Some(PersonId(7));
+        room.apply(&ServerMessage::HostUplink { bps: 6_000_000 });
+        room.apply(&ServerMessage::ScreenShareStarted {
+            voice_room: VOICE_ROOM,
+            person: PersonId(7),
+            screen: ScreenId(1),
+        });
+
+        // Sozinho: a subida do anfitrião dá 6 Mbps × 60% = 3,6, e quem manda é
+        // a **outra** perna — a de quem compartilha, 2 Mbps × 60% = 1,2. Aqui
+        // ela vale o cano das provas porque é o que a `crate::caminho::Sonda`
+        // devolve antes da primeira janela cheia; numa sessão em curso é ela
+        // que põe o número, e o resto desta conta não muda.
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SignalBand::Nominal),
+            crate::tela::Teto::Bps(1_200_000)
+        );
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .perna_que_aperta(SignalBand::Nominal),
+            crate::tela::PernaQueAperta::QuemCompartilha
+        );
+
+        // Entram quatro: 3,6 ÷ 4 = 900 kbps, e agora quem aperta é a máquina
+        // que sobe as quatro cópias. É a linha nova do §5.1, e sem o
+        // `ScreenViewers` no fio ela não existiria.
+        let changed = room.apply(&ServerMessage::ScreenViewers {
+            tela: ScreenId(1),
+            quantos: 4,
+        });
+        assert!(changed.telas, "a contagem mudou e o painel não soube");
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .teto(SignalBand::Nominal),
+            crate::tela::Teto::Bps(900_000),
+            "as quatro cópias que o servidor sobe não foram divididas"
+        );
+        // E a razão é dizível, que é o que a tela escreve ao lado do degrau:
+        // `720p · 4 pessoas assistindo`, e não `720p · sua conexão`.
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .perna_que_aperta(SignalBand::Nominal),
+            crate::tela::PernaQueAperta::QuemHospeda
+        );
+        // E a voz da máquina de quem compartilha nunca cedeu: os 40% do caminho
+        // dela continuam de pé em toda a escada.
+        assert_eq!(
+            room.teto_de_video(crate::tela::CAMINHO_DA_PROVA_BPS, None)
+                .reserva_da_voz(),
+            800_000
+        );
+
+        // O reenvio de `ScreenShareStarted` — o servidor manda um a cada pessoa
+        // que entra numa sala que já transmite — não pode zerar a contagem, ou
+        // o teto subiria justamente no instante em que a sala cresceu.
+        room.apply(&ServerMessage::ScreenShareStarted {
+            voice_room: VOICE_ROOM,
+            person: PersonId(7),
+            screen: ScreenId(1),
+        });
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
+
+        // Um `ScreenViewers` de uma transmissão que não é esta não mexe nesta.
+        let changed = room.apply(&ServerMessage::ScreenViewers {
+            tela: ScreenId(404),
+            quantos: 99,
+        });
+        assert!(!changed.telas);
+        assert_eq!(room.minha_tela().map(|tela| tela.espectadores), Some(4));
     }
 }

@@ -22,8 +22,8 @@
   // arquivo não escreve nenhuma.
   const PALAVRAS = FRASES_DO_CELULAR.voz;
 
-  // O aviso de fone diz a verdade do navegador (P9): o eco dele vem ligado, e o
-  // «o SEELE ainda não cancela eco» do desktop seria falso aqui.
+  // O aviso de fone do navegador (P9): a frase do desktop fala do SEELE, e aqui
+  // quem trata o microfone é o navegador. A frase e o porquê estão no frases.js.
   CASCA.avisoDeFone = () => AVISO_DE_FONE_CELULAR;
 
   // ------------------------------------------------------------- as abas

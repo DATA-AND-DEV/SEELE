@@ -785,3 +785,101 @@ fn nenhum_html_cru_na_casca() {
         }
     }
 }
+
+/// Os pares `"a" => "b"` de um trecho de `match` do Rust, com as várias
+/// chaves de um braço (`Some("jpg" | "jpeg")`) e o `_ =>` como chave vazia.
+fn bracos_do_match(corpo: &str) -> BTreeMap<String, String> {
+    let mut pares = BTreeMap::new();
+    for linha in corpo.lines() {
+        let Some((esquerda, direita)) = linha.split_once("=>") else {
+            continue;
+        };
+        let Some(valor) = direita.split('"').nth(1) else {
+            continue;
+        };
+        let chaves: Vec<&str> = esquerda.split('"').skip(1).step_by(2).collect();
+        if chaves.is_empty() && esquerda.trim() == "_" {
+            pares.insert(String::new(), valor.to_owned());
+        }
+        for chave in chaves {
+            pares.insert(chave.to_owned(), valor.to_owned());
+        }
+    }
+    pares
+}
+
+/// **O arquivo por alça segue as regras do desktop** (`F4/ponte-no-pc.md`, «O
+/// arquivo sem caminho»). O tipo de um arquivo escolhido sai da extensão pela
+/// tabela do `tipo_alegado`, e não do `File.type`; uma imagem colada ganha a
+/// extensão do `guardar_colado` e o mesmo teto. Na ponte isso é uma cópia, e
+/// este guarda a prende ao `main.rs`.
+#[test]
+fn as_regras_do_arquivo_da_ponte_sao_as_do_desktop() {
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    let json = ponte
+        .split_once("const REGRAS_DO_ARQUIVO = Object.freeze(")
+        .expect("a ponte declara `REGRAS_DO_ARQUIVO`")
+        .1
+        .split_once(");")
+        .expect("`REGRAS_DO_ARQUIVO` fecha")
+        .0;
+    let da_ponte: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|erro| panic!("`REGRAS_DO_ARQUIVO` tem de ser JSON estrito: {erro}"));
+    let main = ler("src/main.rs");
+    let tipos =
+        bracos_do_match(&corpo_do_comando(&main, "tipo_alegado").expect("o `tipo_alegado`"));
+    let colagem: BTreeMap<String, String> =
+        bracos_do_match(&corpo_do_comando(&main, "guardar_colado").expect("o `guardar_colado`"))
+            .into_iter()
+            .filter(|(tipo, _)| tipo.starts_with("image/"))
+            .collect();
+    let mut por_extensao = tipos.clone();
+    let desconhecido = por_extensao
+        .remove("")
+        .expect("o `tipo_alegado` tem `_ =>`");
+    let do_desktop = serde_json::json!({
+        "tipos_por_extensao": por_extensao,
+        "tipo_desconhecido": desconhecido,
+        "extensao_da_colagem": colagem,
+        "maior_colagem_bytes": inteiro_do_main(&main, "MAIOR_COLAGEM_BYTES"),
+    });
+    assert!(
+        por_extensao.len() >= 10 && colagem.len() >= 4,
+        "a leitura do `main.rs` achou {} extensões e {} tipos de colagem: ela quebrou",
+        por_extensao.len(),
+        colagem.len()
+    );
+    assert_eq!(
+        numeros_como_f64(da_ponte),
+        numeros_como_f64(do_desktop.clone()),
+        "as `REGRAS_DO_ARQUIVO` da ponte discordam do `main.rs`. As de hoje são:\n{}",
+        serde_json::to_string_pretty(&do_desktop).expect("JSON")
+    );
+}
+
+/// **A regra da voz sem sessão é a do desktop.** Sem redução de ruído, o
+/// `controles_da_voz` do desktop abre o portão em
+/// `ABERTURA_SEM_SUPRESSAO_DBFS`, e não na abertura de com supressão. A ponte a
+/// aplica com uma cópia, e este guarda a prende ao `seele_ffi`.
+#[test]
+fn as_regras_da_voz_da_ponte_sao_as_do_desktop() {
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    let json = ponte
+        .split_once("const REGRAS_DA_VOZ = Object.freeze(")
+        .expect("a ponte declara `REGRAS_DA_VOZ`")
+        .1
+        .split_once(");")
+        .expect("`REGRAS_DA_VOZ` fecha")
+        .0;
+    let da_ponte: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|erro| panic!("`REGRAS_DA_VOZ` tem de ser JSON estrito: {erro}"));
+    let do_desktop = serde_json::json!({
+        "abertura_sem_supressao_dbfs": seele_ffi::ABERTURA_SEM_SUPRESSAO_DBFS,
+    });
+    assert_eq!(
+        numeros_como_f64(da_ponte),
+        numeros_como_f64(do_desktop.clone()),
+        "as `REGRAS_DA_VOZ` da ponte discordam do `seele_ffi`. As de hoje são:\n{}",
+        serde_json::to_string_pretty(&do_desktop).expect("JSON")
+    );
+}

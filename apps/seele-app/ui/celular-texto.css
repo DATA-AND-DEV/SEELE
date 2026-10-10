@@ -68,6 +68,7 @@
 :where(:root[data-casca="celular"]) .linha-renomear { font-size: inherit; }
 :where(:root[data-casca="celular"]) .barra { font-size: var(--seele-t-rotulo); }
 :where(:root[data-casca="celular"]) .linha { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .selo-da-previa { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-rotulo { font-size: calc(var(--seele-t-micro) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-nome { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .operador-config { font-size: calc(15px * var(--cel-escala)); }
@@ -236,6 +237,7 @@
 :where(:root[data-casca="celular"]) button.regiao-de-mod-parte[data-forma="arquivo"][data-exigencia]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-area { font-size: inherit; }
 :where(:root[data-casca="celular"]) label.regiao-de-mod-parte[data-mensagem-de-erro]::after { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
+:where(:root[data-casca="celular"]) .regiao-de-mod-contador { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) form.regiao-de-mod-parte[data-erro]::before { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) .regiao-de-mod-tira { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }
 :where(:root[data-casca="celular"]) span.regiao-de-mod-parte[data-forma="retrato"] { font-size: calc(var(--seele-t-dado) * var(--cel-escala)); }

@@ -340,8 +340,12 @@ const REGIOES = [
       const registrar = (conteudo) => contribuicoesDosMods.registrar({ id: "mod/linha" }, instancia, {
         ponto: "pessoa.cartao", modo: "substituir", alvo: String(lia.id), conteudo,
       }).handle;
-      // O cartão escreve outro nome: o núcleo continua dizendo quem é.
-      const cartao = [{ forma: "texto", chave: "nome", dentro: "alice" }];
+      // **O cartão escreve o nome de outra pessoa da sessão** (tarefa 9, Step
+      // 4): é a personificação, e o núcleo continua dizendo quem é.
+      const outra = [...r.voice_rooms.flatMap((sala) => sala.people), ...(r.presentes ?? [])]
+        .find((p) => !p.is_self && p.id !== lia.id && p.nickname && p.nickname !== lia.nickname);
+      const nomeFalso = outra?.nickname ?? "alice";
+      const cartao = [{ forma: "texto", chave: "nome", dentro: nomeFalso }];
       let handle = registrar(cartao);
       desenhar(r);
       await quadro();
@@ -376,7 +380,10 @@ const REGIOES = [
         naVista: Boolean(caixa && caixa.width > 0 && caixa.height > 0 && caixa.top >= 0 && caixa.bottom <= innerHeight),
         descoberto: Boolean(noCentro && apelido?.contains(noCentro)),
         moderar: Boolean(moderar && !moderar.closest("details:not([open])")),
-        cartaoNoMiolo: Boolean(li?.querySelector(".pessoa-miolo")?.textContent.includes("alice")),
+        cartaoNoMiolo: Boolean(li?.querySelector(".pessoa-miolo")?.textContent.includes(nomeFalso)),
+        // O apelido verdadeiro é um nó do produto, fora da raiz do MOD.
+        foraDoMiolo: Boolean(apelido && !apelido.closest(".pessoa-miolo") && !apelido.closest("[data-escopo-de-mod]")),
+        nomeDeOutraPessoa: Boolean(outra),
       };
       contribuicoesDosMods.revogar(handle, { id: "mod/linha", instancia });
       modsCarregados.delete("mod/linha");
@@ -394,6 +401,8 @@ const REGIOES = [
       if (!linha.descoberto) falhas.push("pessoa.cartao: o desenho do MOD ficou por cima do apelido verificado");
       if (!linha.moderar) falhas.push("pessoa.cartao: a moderação não está a um clique, fora do «⋯»");
       if (!linha.cartaoNoMiolo) falhas.push("pessoa.cartao: o cartão do MOD não está no miolo");
+      if (!linha.nomeDeOutraPessoa) falhas.push("pessoa.cartao: o retrato não tem outra pessoa, e o caso não mede a personificação");
+      if (!linha.foraDoMiolo) falhas.push("pessoa.cartao: o apelido verificado está dentro da raiz do MOD");
     }
 
     // ------------------------------------- a lista de pessoas, substituída

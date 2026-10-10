@@ -43,20 +43,124 @@ const igual = (a, b) => util.isDeepStrictEqual(emJson(a), emJson(b));
  * nada, `Error` para um armazenamento que lança). `tauri` põe o
  * `__TAURI_INTERNALS__`; `duble` põe um `__TAURI__` antes da ponte.
  */
-function pagina({ guardado, toque = false, largura = 1280, tauri = false, duble = null, hash = "" } = {}) {
+function pagina({
+  guardado,
+  toque = false,
+  largura = 1280,
+  tauri = false,
+  duble = null,
+  hash = "",
+  gravacaoFalha = false,
+  seletor = () => null,
+  aparelhos = [],
+  temSetSinkId = true,
+  telaCheiaFalha = false,
+  permissao = "prompt",
+} = {}) {
+  const telaCheia = { pedidos: 0, saidas: 0, elemento: null };
   const ouvidos = [];
+  // Quem a ponte pôs a ouvir no documento (o arraste), à parte dos da janela.
+  const doDocumento = new Map();
+  // O seletor de arquivos: cada `<input type=file>` que a ponte criou, se ele
+  // foi clicado **dentro** da chamada (sem `await` antes) e se ainda está na
+  // página.
+  const seletores = [];
+  let dentroDaChamada = false;
   const avisos = [];
   const linhas = [];
+  const abertos = [];
+  // O resto da origem, que o lote B grava. O `seele.casca` continua vindo de
+  // `guardado`.
+  const origem = new Map();
   const janela = {
     structuredClone,
+    TextEncoder,
+    Blob,
+    File,
+    atob,
     innerWidth: largura,
     location: { hash, href: `https://seele.invalid/${hash}` },
-    document: { documentElement: { dataset: {} } },
+    navigator: {
+      mediaDevices: { enumerateDevices: async () => aparelhos.map((a) => ({ ...a })) },
+      permissions:
+        permissao === null
+          ? undefined
+          : {
+              query: async ({ name }) => {
+                if (name !== "microphone") throw new TypeError(name);
+                if (permissao instanceof Error) throw permissao;
+                return { state: permissao };
+              },
+            },
+    },
+    HTMLMediaElement: temSetSinkId ? class { setSinkId() {} } : class {},
+    document: {
+      get fullscreenElement() {
+        return telaCheia.elemento;
+      },
+      exitFullscreen: async () => {
+        telaCheia.saidas += 1;
+        telaCheia.elemento = null;
+      },
+      documentElement: {
+        dataset: {},
+        requestFullscreen: async () => {
+          telaCheia.pedidos += 1;
+          if (telaCheiaFalha) throw new Error("sem gesto");
+          telaCheia.elemento = janela.document.documentElement;
+        },
+      },
+      body: {
+        append: (no) => {
+          no.naPagina = true;
+        },
+      },
+      addEventListener: (evento, ouvinte) => doDocumento.set(evento, ouvinte),
+      createElement(tag) {
+        const ouvintes = new Map();
+        const no = {
+          tag,
+          files: null,
+          naPagina: false,
+          addEventListener: (evento, ouvinte) => ouvintes.set(evento, ouvinte),
+          remove() {
+            no.naPagina = false;
+          },
+          click() {
+            seletores.push({ no, dentroDaChamada });
+            // A pessoa escolhe (ou desiste) depois, como no navegador.
+            setImmediate(() => {
+              const escolhido = seletor();
+              if (escolhido) {
+                no.files = [escolhido];
+                ouvintes.get("change")?.({});
+              } else {
+                ouvintes.get("cancel")?.({});
+              }
+            });
+          },
+        };
+        return no;
+      },
+    },
     localStorage: {
       getItem(chave) {
         if (guardado instanceof Error) throw guardado;
-        return chave === "seele.casca" && guardado !== undefined ? guardado : null;
+        if (chave === "seele.casca") return guardado !== undefined ? guardado : null;
+        return origem.has(chave) ? origem.get(chave) : null;
       },
+      setItem(chave, valor) {
+        if (gravacaoFalha) throw new Error("QuotaExceededError");
+        origem.set(chave, String(valor));
+      },
+      removeItem(chave) {
+        if (gravacaoFalha) throw new Error("QuotaExceededError");
+        origem.delete(chave);
+      },
+    },
+    open: (...argumentos) => {
+      abertos.push(argumentos);
+      return null;
     },
     matchMedia(consulta) {
       return {
@@ -86,7 +190,19 @@ function pagina({ guardado, toque = false, largura = 1280, tauri = false, duble 
     ouvidos,
     avisos,
     linhas,
-    invoke: (comando, args) => janela.__TAURI__.core.invoke(comando, args),
+    abertos,
+    origem,
+    doDocumento,
+    seletores,
+    telaCheia,
+    invoke(comando, args) {
+      dentroDaChamada = true;
+      try {
+        return janela.__TAURI__.core.invoke(comando, args);
+      } finally {
+        dentroDaChamada = false;
+      }
+    },
   };
 }
 
@@ -312,6 +428,327 @@ async function oListenEORegistro() {
   confere(caso, linha !== undefined, `o registro da janela não chegou ao console: ${util.inspect(p.avisos)}`);
 }
 
+/// **O apelido de entrada mora na origem**, com as regras do desktop
+/// (`escolher_apelido_local`, `Preferences::set_nickname`): aparado, sem as
+/// quebras que o formato do arquivo não aceita, e vazio apaga. Não conseguir
+/// gravar volta `NaoGravei`, e não um silêncio.
+async function oApelidoLocal() {
+  const caso = "o apelido local";
+  const p = pagina();
+  for (const [escrito, guardado] of [
+    ["  Ana  ", "Ana"],
+    ["Bea\tTriz\n", "BeaTriz"],
+    ["", null],
+    ["   ", null],
+  ]) {
+    const r = await desfecho(p.invoke("escolher_apelido_local", { apelido: escrito }));
+    confere(caso, r.ok === null, `escolher «${escrito}» voltou ${util.inspect(r)}`);
+    const lido = await desfecho(p.invoke("apelido_local"));
+    confere(caso, lido.ok === guardado, `depois de «${escrito}», o apelido lido é ${util.inspect(lido)}, e não ${guardado}`);
+  }
+  const sem = pagina({ gravacaoFalha: true });
+  const r = await desfecho(sem.invoke("escolher_apelido_local", { apelido: "Ana" }));
+  confere(caso, r.erro === "NaoGravei", `sem gravar, o apelido voltou ${util.inspect(r)}`);
+}
+
+/// **As prévias consentidas** (ADR 0053), com as regras do desktop
+/// (`Preferences::consentir_previa`): o domínio em minúsculas, uma palavra só,
+/// e um subdomínio de um liberado já está liberado.
+async function asPreviasConsentidas() {
+  const caso = "as prévias consentidas";
+  const p = pagina();
+  const lista = async () => (await desfecho(p.invoke("previas_consentidas"))).ok;
+  confere(caso, igual(await lista(), []), "sem nada consentido, a lista não é vazia");
+  await p.invoke("consentir_previa", { dominio: "Exemplo.COM" });
+  await p.invoke("consentir_previa", { dominio: "fotos.exemplo.com" });
+  await p.invoke("consentir_previa", { dominio: "dois dominios" });
+  await p.invoke("consentir_previa", { dominio: "" });
+  await p.invoke("consentir_previa", { dominio: "outro.net" });
+  confere(caso, igual(await lista(), ["exemplo.com", "outro.net"]),
+    `a lista saiu ${util.inspect(await lista())}`);
+  await p.invoke("esquecer_previa", { dominio: "EXEMPLO.com" });
+  confere(caso, igual(await lista(), ["outro.net"]), `esquecer deixou ${util.inspect(await lista())}`);
+  const sem = pagina({ gravacaoFalha: true });
+  const r = await desfecho(sem.invoke("consentir_previa", { dominio: "exemplo.com" }));
+  confere(caso, typeof r.erro === "string" && r.erro.includes("não consegui gravar"),
+    `sem gravar, consentir voltou ${util.inspect(r)}`);
+}
+
+/// **Abrir um endereço é abrir uma aba nova, e só `http` e `https`**, com a
+/// conferência do desktop (`endereco_que_pode_sair`). A aba nova não leva a
+/// página junto (`noopener`, `noreferrer`).
+async function abrirNoNavegador() {
+  const caso = "abrir no navegador";
+  const p = pagina();
+  const r = await desfecho(p.invoke("abrir_no_navegador", { url: "  https://exemplo.com/a?b=c  " }));
+  confere(caso, r.ok === null, `um endereço bom voltou ${util.inspect(r)}`);
+  confere(caso, igual(p.abertos, [["https://exemplo.com/a?b=c", "_blank", "noopener,noreferrer"]]),
+    `a aba aberta foi ${util.inspect(p.abertos)}`);
+  for (const ruim of [
+    "javascript:alert(1)",
+    "data:text/html,oi",
+    "file:///etc/passwd",
+    "seele://x",
+    "https://exemplo.com/a b",
+    "https://exemplo.com/\u0007",
+    "http://",
+    `https://exemplo.com/${"a".repeat(2048)}`,
+    "",
+  ]) {
+    const q = pagina();
+    const s = await desfecho(q.invoke("abrir_no_navegador", { url: ruim }));
+    confere(caso, typeof s.erro === "string" && q.abertos.length === 0,
+      `«${ruim.slice(0, 40)}» voltou ${util.inspect(s)} e abriu ${q.abertos.length}`);
+  }
+}
+
+/// **O arquivo por alça** (`F4/ponte-no-pc.md`, as quatro condições):
+/// 1. o mapa tem teto e solta o que guarda (no teto e no fim da sessão);
+/// 2. uma alça desconhecida, ou já solta, é recusada;
+/// 3. o seletor abre sem `await` antes do `click()`, dentro do gesto;
+/// 4. desistir devolve `null`, e não deixa a promessa pendurada.
+async function oArquivoPorAlca() {
+  const caso = "o arquivo por alça";
+  let proximo = null;
+  const p = pagina({ seletor: () => proximo });
+
+  proximo = new File(["abc"], "Foto.JPG");
+  const escolhido = await desfecho(p.invoke("escolher_arquivo"));
+  confere(caso, p.seletores.at(-1)?.dentroDaChamada === true,
+    "o seletor não abriu dentro da chamada: um `await` antes do `click()` gasta o gesto");
+  confere(caso, p.seletores.at(-1)?.no.naPagina === false, "o `<input>` do seletor ficou na página");
+  const alca = escolhido.ok?.caminho;
+  confere(caso, typeof alca === "string" && alca.startsWith("web-arquivo:"), `a alça saiu ${util.inspect(escolhido)}`);
+  confere(caso, igual(escolhido.ok, { caminho: alca, nome: "Foto.JPG", tamanho: 3, tipo: "image/jpeg" }),
+    `o escolhido saiu ${util.inspect(escolhido)}; o tipo é o da extensão, e não o do navegador`);
+
+  proximo = null;
+  const desistiu = await desfecho(p.invoke("escolher_arquivo"));
+  confere(caso, desistiu.ok === null, `desistir do seletor voltou ${util.inspect(desistiu)}`);
+
+  const descrito = await desfecho(p.invoke("descrever_arquivo", { caminho: alca }));
+  confere(caso, igual(descrito.ok, escolhido.ok), `descrever a alça voltou ${util.inspect(descrito)}`);
+  for (const estranha of ["web-arquivo:999", "/Users/alguem/segredo.txt", ""]) {
+    const r = await desfecho(p.invoke("descrever_arquivo", { caminho: estranha }));
+    confere(caso, r.erro === "NotConnected", `a alça «${estranha}» voltou ${util.inspect(r)}`);
+  }
+
+  // O teto: as mais velhas saem, e a mais nova fica.
+  const teto = p.ler("TETO_DE_ALCAS");
+  const alcas = [];
+  for (let i = 0; i < teto + 2; i++) {
+    proximo = new File([`${i}`], `a${i}.txt`);
+    alcas.push((await p.invoke("escolher_arquivo")).caminho);
+  }
+  confere(caso, p.ler("ALCAS_DA_PONTE").size === teto, `o mapa guarda ${p.ler("ALCAS_DA_PONTE").size}, e o teto é ${teto}`);
+  const velha = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas[0] }));
+  confere(caso, velha.erro === "NotConnected", "a alça mais velha não saiu no teto");
+  const nova = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas.at(-1) }));
+  confere(caso, nova.ok?.nome === `a${teto + 1}.txt`, `a alça mais nova saiu ${util.inspect(nova)}`);
+
+  // O fim da sessão solta tudo.
+  await p.invoke("disconnect");
+  confere(caso, p.ler("ALCAS_DA_PONTE").size === 0, "sair da sessão não soltou as alças");
+  const depois = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas.at(-1) }));
+  confere(caso, depois.erro === "NotConnected", "uma alça solta ainda descreve");
+}
+
+/// **A imagem colada** vira uma alça com as regras do `guardar_colado` do
+/// desktop: o teto, a recusa do que não é base64 ou está vazio, e o nome com a
+/// extensão do tipo.
+async function aImagemColada() {
+  const caso = "a imagem colada";
+  const p = pagina();
+  const r = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64: Buffer.from("png!").toString("base64") }));
+  confere(caso, /^colado-\d+\.png$/.test(r.ok?.nome ?? "") && r.ok?.tamanho === 4 && r.ok?.tipo === "image/png",
+    `colar voltou ${util.inspect(r)}`);
+  const sem = await desfecho(p.invoke("guardar_colado", { tipo: "image/x", base64: Buffer.from("x").toString("base64") }));
+  confere(caso, /^colado-\d+$/.test(sem.ok?.nome ?? "") && sem.ok?.tipo === "application/octet-stream",
+    `um tipo sem extensão voltou ${util.inspect(sem)}`);
+  for (const [base64, falha] of [["", "NaoEImagem"], ["não é base64!", "NaoEImagem"]]) {
+    const q = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64 }));
+    confere(caso, q.erro === falha, `«${base64}» voltou ${util.inspect(q)}, e não ${falha}`);
+  }
+  // Das coladas, que estão todas na memória, só ficam as mais novas.
+  for (let i = 0; i < 4; i++) await p.invoke("guardar_colado", { tipo: "image/png", base64: "AAAA" });
+  const coladas = [...p.ler("ALCAS_DA_PONTE").values()].filter((guardado) => guardado.colado).length;
+  confere(caso, coladas === p.ler("TETO_DE_COLADOS"), `ficaram ${coladas} imagens coladas na memória`);
+  const teto = p.ler("REGRAS_DO_ARQUIVO").maior_colagem_bytes;
+  const grande = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64: "A".repeat(Math.ceil(teto / 3) * 4 + 4) }));
+  confere(caso, grande.erro === "GrandeDemais", `uma colagem acima do teto voltou ${util.inspect(grande)}`);
+}
+
+/// **O arraste, só no PC**: a ponte ouve o `drop` do documento, guarda cada
+/// arquivo sob uma alça e emite o mesmo `tauri://drag-drop` que a casca já
+/// ouve. No celular não há arraste, e ela não ouve nada.
+async function oArraste() {
+  const caso = "o arraste";
+  const celular = pagina({ toque: true });
+  confere(caso, celular.doDocumento.size === 0, `no celular a ponte ouve ${[...celular.doDocumento.keys()]}`);
+
+  const p = pagina({ largura: 1280 });
+  const recebidos = [];
+  await p.janela.__TAURI__.event.listen("tauri://drag-drop", (evento) => recebidos.push(evento.payload));
+  let permitiu = false;
+  p.doDocumento.get("dragover")?.({ dataTransfer: { types: ["Files"] }, preventDefault: () => { permitiu = true; } });
+  confere(caso, permitiu, "o `dragover` com arquivos não foi permitido, e o navegador não deixaria soltar");
+  let soltou = false;
+  p.doDocumento.get("drop")?.({
+    dataTransfer: { types: ["Files"], files: [new File(["1"], "um.pdf"), new File(["22"], "dois.txt")] },
+    preventDefault: () => { soltou = true; },
+  });
+  confere(caso, soltou, "o `drop` não foi segurado, e o navegador abriria o arquivo no lugar da página");
+  confere(caso, recebidos.length === 1 && recebidos[0].paths?.length === 2, `o evento saiu ${util.inspect(recebidos)}`);
+  const descrito = await desfecho(p.invoke("descrever_arquivo", { caminho: recebidos[0]?.paths?.[0] }));
+  confere(caso, descrito.ok?.nome === "um.pdf" && descrito.ok?.tipo === "application/pdf",
+    `o arquivo arrastado descreveu ${util.inspect(descrito)}`);
+  let textoSegurado = false;
+  p.doDocumento.get("dragover")?.({ dataTransfer: { types: ["text/plain"] }, preventDefault: () => { textoSegurado = true; } });
+  confere(caso, !textoSegurado, "arrastar texto foi segurado pela ponte, e deixaria de soltar num campo");
+}
+
+/// **A saída de som do PC**: a lista do `enumerateDevices`, sem os
+/// pseudo-aparelhos (`default`, `communications`) e sem os ids vazios que o
+/// navegador dá antes de o microfone ser permitido; o padrão marcado pelo
+/// grupo do `default`. Onde não há `setSinkId`, não há o que escolher, e a
+/// lista é vazia. A escolha mora na origem, como no desktop.
+async function aSaidaDeSom() {
+  const caso = "a saída de som";
+  const aparelhos = [
+    { kind: "audiooutput", deviceId: "default", groupId: "a", label: "Padrão - Alto-falantes" },
+    { kind: "audiooutput", deviceId: "communications", groupId: "b", label: "Comunicações - Fone" },
+    { kind: "audiooutput", deviceId: "falante", groupId: "a", label: "Alto-falantes" },
+    { kind: "audiooutput", deviceId: "fone", groupId: "b", label: "Fone" },
+    { kind: "audioinput", deviceId: "mic", groupId: "b", label: "Microfone" },
+  ];
+  const p = pagina({ aparelhos });
+  const lista = await desfecho(p.invoke("saidas"));
+  confere(caso, igual(lista.ok, [
+    { id: "falante", name: "Alto-falantes", default: true },
+    { id: "fone", name: "Fone", default: false },
+  ]), `a lista saiu ${util.inspect(lista)}`);
+  const semSink = await desfecho(pagina({ aparelhos, temSetSinkId: false }).invoke("saidas"));
+  confere(caso, igual(semSink.ok, []), `sem setSinkId a lista saiu ${util.inspect(semSink)}`);
+  const semPermissao = await desfecho(pagina({ aparelhos: [{ kind: "audiooutput", deviceId: "", groupId: "", label: "" }] }).invoke("saidas"));
+  confere(caso, igual(semPermissao.ok, []), `sem permissão a lista saiu ${util.inspect(semPermissao)}`);
+
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === null, "sem escolha, a saída escolhida não é nula");
+  await p.invoke("escolher_saida", { dispositivo: "fone" });
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === "fone", "a escolha não ficou");
+  await p.invoke("escolher_saida", { dispositivo: null });
+  confere(caso, (await desfecho(p.invoke("saida_escolhida"))).ok === null, "voltar ao padrão não apagou a escolha");
+  const r = await desfecho(pagina({ gravacaoFalha: true }).invoke("escolher_saida", { dispositivo: "fone" }));
+  confere(caso, r.erro === "NaoGravei", `sem gravar, escolher voltou ${util.inspect(r)}`);
+}
+
+/// **A tela cheia do PC é a do navegador** (a Fullscreen API), no lugar da
+/// janela. Pedida duas vezes não pede de novo; sair só sai se estiver nela; e
+/// um pedido recusado (sem gesto) é dito, e não lança na casca, como no
+/// desktop.
+async function aTelaCheia() {
+  const caso = "a tela cheia";
+  const p = pagina();
+  await p.invoke("tela_cheia", { ligada: true });
+  await p.invoke("tela_cheia", { ligada: true });
+  confere(caso, p.telaCheia.pedidos === 1, `pedir duas vezes pediu ${p.telaCheia.pedidos}`);
+  await p.invoke("tela_cheia", { ligada: false });
+  await p.invoke("tela_cheia", { ligada: false });
+  confere(caso, p.telaCheia.saidas === 1, `sair duas vezes saiu ${p.telaCheia.saidas}`);
+  const q = pagina({ telaCheiaFalha: true });
+  const r = await desfecho(q.invoke("tela_cheia", { ligada: true }));
+  confere(caso, r.ok === null, `um pedido recusado voltou ${util.inspect(r)}`);
+  confere(caso, q.avisos.some(([texto]) => String(texto).includes("tela cheia")), "o pedido recusado não foi dito");
+}
+
+/// **As preferências da voz moram na origem**, com as regras do desktop
+/// (`set_voice_mode`, `escolher_microfone`, `ajustar_sensibilidade_da_voz`,
+/// `ajustar_reducao_de_ruido`) e os controles derivados delas pela regra do
+/// `controles_da_voz` sem sessão. Sem escolha, o modo é `VoiceActivated` (a
+/// matriz da F8). A tecla de falar é só do PC.
+async function asPreferenciasDaVoz() {
+  const caso = "as preferências da voz";
+  const p = pagina({ largura: 1280 });
+  const ler = async (comando) => (await desfecho(p.invoke(comando))).ok;
+  confere(caso, (await ler("modo_de_voz_escolhido")) === "VoiceActivated", "sem escolha, o modo não é VoiceActivated");
+  await p.invoke("set_voice_mode", { mode: "PushToTalk" });
+  confere(caso, (await ler("modo_de_voz_escolhido")) === "PushToTalk", "o modo escolhido não ficou");
+  const estranho = await desfecho(p.invoke("set_voice_mode", { mode: "Grito" }));
+  confere(caso, typeof estranho.erro === "string" && (await ler("modo_de_voz_escolhido")) === "PushToTalk",
+    `um modo desconhecido voltou ${util.inspect(estranho)} ou trocou o guardado`);
+
+  confere(caso, (await ler("microfone_escolhido")) === null, "sem escolha, o microfone escolhido não é nulo");
+  await p.invoke("escolher_microfone", { dispositivo: "mic-usb" });
+  confere(caso, (await ler("microfone_escolhido")) === "mic-usb", "o microfone escolhido não ficou");
+  await p.invoke("escolher_microfone", { dispositivo: null });
+  confere(caso, (await ler("microfone_escolhido")) === null, "voltar ao padrão não apagou o microfone");
+
+  const padrao = await ler("controles_da_voz");
+  await p.invoke("ajustar_sensibilidade_da_voz", { dbfs: -50 });
+  const sensivel = await ler("controles_da_voz");
+  confere(caso, sensivel.abertura_dbfs === -50 && sensivel.abertura_escolhida === true,
+    `a sensibilidade escolhida não chegou aos controles: ${util.inspect(sensivel)}`);
+  await p.invoke("ajustar_sensibilidade_da_voz", { dbfs: null });
+  confere(caso, igual(await ler("controles_da_voz"), padrao), "voltar ao padrão não devolveu os controles de antes");
+  await p.invoke("ajustar_reducao_de_ruido", { forca: 0 });
+  const semReducao = await ler("controles_da_voz");
+  confere(caso, semReducao.supressao === 0 && semReducao.abertura_dbfs === p.ler("REGRAS_DA_VOZ").abertura_sem_supressao_dbfs,
+    `sem redução de ruído, a abertura padrão não é a sem supressão: ${util.inspect(semReducao)}`);
+  await p.invoke("ajustar_reducao_de_ruido", { forca: 7 });
+  confere(caso, (await ler("controles_da_voz")).supressao === 1, "a força da redução não foi fixada entre 0 e 1");
+
+  confere(caso, (await ler("tecla_de_falar")) === null, "sem escolha, a tecla de falar não é nula");
+  await p.invoke("escolher_tecla_de_falar", { tecla: "KeyT" });
+  confere(caso, (await ler("tecla_de_falar")) === "KeyT", "a tecla escolhida não ficou");
+  // Uma tecla guardada (de uma visita no PC, no mesmo aparelho) não vale no
+  // celular: ele não tem tecla de falar.
+  const celular = pagina({ toque: true });
+  celular.origem.set("seele.tecla-de-falar", "KeyT");
+  confere(caso, (await desfecho(celular.invoke("tecla_de_falar"))).ok === null, "no celular a tecla de falar não é nula");
+
+  const sem = pagina({ gravacaoFalha: true });
+  for (const [comando, args] of [["set_voice_mode", { mode: "Open" }], ["escolher_microfone", { dispositivo: "x" }]]) {
+    const r = await desfecho(sem.invoke(comando, args));
+    confere(caso, r.erro === "NaoGravei", `sem gravar, ${comando} voltou ${util.inspect(r)}`);
+  }
+}
+
+/// **Os microfones do aparelho**, na forma do `CaptureDevice` do desktop: o
+/// `enumerateDevices` sem os pseudo-aparelhos e sem os ids vazios de antes da
+/// permissão, com o padrão marcado pelo grupo do `default`.
+async function osMicrofones() {
+  const caso = "os microfones";
+  const aparelhos = [
+    { kind: "audioinput", deviceId: "default", groupId: "a", label: "Padrão - Interno" },
+    { kind: "audioinput", deviceId: "interno", groupId: "a", label: "Microfone interno" },
+    { kind: "audioinput", deviceId: "usb", groupId: "b", label: "" },
+    { kind: "audiooutput", deviceId: "falante", groupId: "a", label: "Alto-falantes" },
+  ];
+  const r = await desfecho(pagina({ aparelhos }).invoke("microfones"));
+  confere(caso, igual(r.ok, [
+    { id: "interno", name: "Microfone interno", default: true },
+    { id: "usb", name: "MICROFONE 2", default: false },
+  ]), `a lista saiu ${util.inspect(r)}`);
+  const semPermissao = await desfecho(pagina({ aparelhos: [{ kind: "audioinput", deviceId: "", groupId: "", label: "" }] }).invoke("microfones"));
+  confere(caso, igual(semPermissao.ok, []), `sem permissão a lista saiu ${util.inspect(semPermissao)}`);
+}
+
+/// **A permissão do microfone, pela Permissions API**: concedida é
+/// `Permitida`, negada é `NegadaPeloNavegador` (o achado 3 da matriz da F8), e o
+/// resto, inclusive a API que não pergunta pelo microfone, é `NaoSeSabe`.
+async function aPermissaoDoMicrofone() {
+  const caso = "a permissão do microfone";
+  for (const [estado, esperada] of [
+    ["granted", "Permitida"],
+    ["denied", "NegadaPeloNavegador"],
+    ["prompt", "NaoSeSabe"],
+    [new TypeError("microphone"), "NaoSeSabe"],
+    [null, "NaoSeSabe"],
+  ]) {
+    const r = await desfecho(pagina({ permissao: estado }).invoke("permissao_de_microfone"));
+    confere(caso, r.ok === esperada, `com «${estado}», voltou ${util.inspect(r)}, e não ${esperada}`);
+  }
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -323,6 +760,17 @@ async function oListenEORegistro() {
     semSessao,
     aAberturaNuncaEntra,
     oListenEORegistro,
+    oApelidoLocal,
+    asPreviasConsentidas,
+    abrirNoNavegador,
+    oArquivoPorAlca,
+    aImagemColada,
+    oArraste,
+    aSaidaDeSom,
+    aTelaCheia,
+    asPreferenciasDaVoz,
+    osMicrofones,
+    aPermissaoDoMicrofone,
   ];
   for (const prova of provas) {
     try {

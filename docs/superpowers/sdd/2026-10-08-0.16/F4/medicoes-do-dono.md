@@ -435,6 +435,42 @@ do navegador). Em cada navegador, numa página qualquer, cole no console:
 Escolha uma aba que esteja tocando som, depois a tela inteira, e anote o número
 que aparece. Zero quer dizer que aquele navegador não dá o som daquela fonte.
 
+## O eco no navegador: o PC e o iPhone (Tarefa 3.3, pedido da F8)
+
+**Por quê.** O aviso de fone das duas cascas depende de uma pergunta: o
+cancelador de eco do navegador cancela o som que a voz do SEELE toca? Até a
+medida, as duas cascas pedem o fone sem afirmar o que o navegador faz. Uma
+frase que afirmasse o cancelamento sem medida convenceria a tirar o fone
+justamente quem faz o outro lado se ouvir. O protocolo está em
+`spikes/eco-no-navegador/README.md`.
+
+**O que precisa:** sem fone, num lugar quieto, com o volume do aparelho em uns
+dois terços. A página toca um tom de 1 kHz por uns 25 s.
+
+**Passos no Mac**, para o Chrome, o Safari e o Firefox, um de cada vez:
+1. Na raiz do repositório:
+
+       python3 spikes/eco-no-navegador/servir.py mac
+
+2. Abra o endereço que ele imprime, aperte MEDIR, permita o microfone e fique
+   em silêncio até a página dizer «o resultado foi para o Mac».
+3. O veredito sai no terminal e na página. Se sair «sem laço», suba o volume e
+   meça de novo: essa medida não diz nada.
+
+**Passos no iPhone**, na mesma rede do Mac:
+1. `python3 spikes/eco-no-navegador/servir.py iphone`
+2. Abra no Safari do iPhone o endereço `https://…:8443/` que ele imprime. O
+   Safari avisa do certificado uma vez: «Mostrar detalhes → visitar este site».
+3. Aperte MEDIR, permita o microfone, e espere o resultado, como no Mac.
+   **Não vale no Simulador**: ele usa o áudio do Mac.
+
+| navegador | veredito | retorno sem (dB) | retorno com (dB) |
+|---|---|---|---|
+| Chrome (Mac) | | | |
+| Safari (Mac) | | | |
+| Firefox (Mac) | | | |
+| Safari (iPhone) | | | |
+
 ## Depois
 
 Mande as tabelas preenchidas, e os arquivos de resultado se quiser, à

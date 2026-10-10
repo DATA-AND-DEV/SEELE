@@ -446,7 +446,8 @@ button.regiao-de-mod-parte[data-forma="link"] {
    `data-mensagem-de-erro`, escrita pelo renderer a partir do que o MOD mandou.
    U04 pede medir contraste e alvo; a mensagem existe para quem não vê a cor. */
 label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-caixa,
-label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area {
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-area,
+label.regiao-de-mod-parte[data-invalido="sim"] .regiao-de-mod-escolha {
   border-color: var(--seele-vermelho-alerta);
 }
 
@@ -458,6 +459,19 @@ label.regiao-de-mod-parte[data-mensagem-de-erro]::after {
   font-size: var(--seele-t-dado);
 }
 
+/* O contador do `tamanhoMaximo` (rascunho da API 6, §5): do produto, ao pé do
+   campo, e vermelho quando passa — a frase do envio diz o resto. */
+.regiao-de-mod-contador {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-rotulo-painel);
+  text-align: right;
+}
+
+.regiao-de-mod-contador[data-passou="sim"] { color: var(--seele-vermelho-alerta); }
+
 /* --------------------------------------------------- formulário */
 
 form.regiao-de-mod-parte {
@@ -465,6 +479,16 @@ form.regiao-de-mod-parte {
   flex-direction: column;
   gap: var(--seele-celula-x);
   min-width: 0;
+}
+
+/* Os botões primário e secundário do formulário são do produto (rascunho da
+   API 6, §5): na ponta de baixo, à direita, na ordem da confirmação do
+   produto — o secundário antes, o primário na ponta. */
+.regiao-de-mod-acoes-do-formulario {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--seele-celula-x);
 }
 
 form.regiao-de-mod-parte[data-erro]::before {

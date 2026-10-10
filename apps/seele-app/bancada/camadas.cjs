@@ -14,6 +14,52 @@
 // 4. **A 300 px, nenhum título de folha, painel ou diálogo quebra dentro de
 //    uma palavra**; uma palavra maior que a coluna é a única exceção. O título
 //    quebrava «EDITA / R / PERFIL» (achado da tarefa 7, Step 4).
+// 5. **A mídia do servidor por `volume`, em todo lugar** (Step 5b; rascunho
+//    §5, a pergunta da MESA): o `fundo` de uma `tela`, a `midia`, o
+//    `fundoDeMidia` de uma caixa, o `retrato` e a `pessoa.capa`, com
+//    `pedido.transporte = 'volume'`, leem pelo fluxo do ADR 0048 — o
+//    `ler_imagem_mod` —, e nenhum pelo controle (`mod_request`).
+// 6. **A montagem por partes** (Step 5c; rascunho §12): uma ficha que inteira
+//    passa dos 12 KiB de uma mensagem se monta num esqueleto e quatro
+//    `superficie-atualizar` de ~9 KiB, e aparece inteira; trocar uma parte
+//    não remonta as outras; uma chave que não existe é recusada pelo nome, e
+//    uma parte que leva a superfície além de 4096 nós, com os números — e a
+//    superfície fica como estava.
+// 7. **Os formulários validam o que declaram** (Step 6a; rascunho §5): uma
+//    regra violada — `obrigatorio`, `tamanhoMaximo`, `minimo`/`maximo`,
+//    `inteiro` — impede o `submeter` sem ida ao MOD, marca o campo com a frase
+//    do produto e leva o foco a ele; corrigido, o envio chega.
+// 8. **A pilha de inércia deixa acordado o que a casca pede** (Step 5d, o
+//    lado da F3): com um modal de MOD aberto, o que `CELULAR.acordadosNoModal()`
+//    devolve — no celular, a faixa de voz e as abas — continua alcançável, e o
+//    resto da sessão dorme. `inert` desce, então a pilha desce também: não
+//    adormece o ancestral que os contém. O desenho e a medida no aparelho são
+//    da F8 (a cena `superficies-de-mod`); aqui, um dublê do `CELULAR` no desktop.
+// 9. **A recusa do servidor volta aos campos** (Step 6b; rascunho §5, o B7 do
+//    ESTILO): `formulario.erros({ texto, fundo })` marca os dois campos de
+//    uma vez, com a frase, e leva o foco ao primeiro; mexer num campo apaga só
+//    a marca dele; uma chave que não existe é recusada pelo nome, sem marcar
+//    nada; e um mapa vazio limpa.
+// 10. **O `sujo` é derivado** (Step 6c; rascunho §5, o bloqueio D do
+//    PERFIS): um campo declarado com `valor` (o rascunho) e `inicial` (o
+//    gravado) nasce sujo, e fechar pergunta; voltar ao gravado o limpa, e
+//    fechar não pergunta; e mexer num campo sem `inicial` suja, sem o MOD
+//    chamar `suja`.
+// 11. **A ação destrutiva é confirmada pelo produto** (Step 6d; rascunho §5,
+//    o A13 e o B7 do ESTILO): um `botao` com `confirmar` abre a confirmação
+//    do produto, alcançável com o modal aberto, e o evento `botao` só chega
+//    ao MOD depois do sim; cancelar não manda nada; um botão sem `confirmar`
+//    manda na hora.
+// 12. **O `erro` vale em toda forma de entrada** (Step 6e; rascunho §5, o
+//    ESTILO §4): a `escolha` e a `cor` mostram o `erro` do MOD como o campo,
+//    recebem o `formulario.erros` e sujam a superfície; o hexadecimal
+//    incompleto continua marcado enquanto se digita, sem frase.
+// 13. **Os botões primário e secundário são do produto** (Step 6f; rascunho
+//    §5): o MOD dá o texto (`primario`, `secundario`) e o produto, o
+//    comportamento — o primário envia o formulário pela validação, com todos
+//    os valores; o secundário sai pela saída do produto, que pergunta quando
+//    há alteração; `emProgresso` trava o segundo envio. Os botões sobrevivem
+//    ao redesenho.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -222,8 +268,388 @@ const { chromium } = require('./playwright.cjs');
     }, TITULOS);
     assert.deepEqual(quebras, [], 'um título de superfície quebrou dentro de uma palavra que cabia na coluna, ou a saída saiu do lugar');
 
+    // 5. A mídia do servidor por volume, nos cinco lugares.
+    const lugares = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 128, uri: canvas.toDataURL() };
+      const doVolume = (lugar) => ({ canal: 1, campo: 'image', pedido: { transporte: 'volume', path: `volume:${lugar}` } });
+      const antes = testCalls.length;
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'midias', tipo: 'pagina', titulo: 'Mídias' } });
+      const montou = await pedir(6, { tipo: 'superficie-montar', superficie: 'midias', arvore: [
+        { forma: 'tela', chave: 'mapa', largura: 64, altura: 64, fundo: { doServidor: doVolume('fundo-da-tela') } },
+        { forma: 'midia', chave: 'foto', doServidor: doVolume('midia') },
+        { forma: 'caixa', chave: 'cartaz', fundoDeMidia: { doServidor: doVolume('fundo-de-midia') }, dentro: [{ forma: 'texto', chave: 't', texto: 'x' }] },
+        { forma: 'retrato', chave: 'rosto', doServidor: doVolume('retrato') },
+      ] });
+      contribuicoesDosMods.registrar(modDe[6].mod, modDe[6].inst, {
+        ponto: 'pessoa.capa', modo: 'substituir', alvo: String(testTable.snapshot.me),
+        conteudo: { doServidor: doVolume('capa') },
+      });
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 600));
+      const chamadas = testCalls.slice(antes);
+      const caminhoDe = (c) => { try { return JSON.parse(c.args?.payload ?? '{}').path ?? ''; } catch { return ''; } };
+      return {
+        montou,
+        peloVolume: chamadas.filter(c => c.cmd === 'ler_imagem_mod').map(caminhoDe),
+        peloControle: chamadas.filter(c => c.cmd === 'mod_request').map(caminhoDe).filter(Boolean),
+      };
+    });
+    assert.equal(lugares.montou?.ok, true, `a árvore com as mídias não montou: ${JSON.stringify(lugares.montou)}`);
+    for (const lugar of ['fundo-da-tela', 'midia', 'fundo-de-midia', 'retrato', 'capa']) {
+      assert.ok(lugares.peloVolume.includes(`volume:${lugar}`),
+        `${lugar}: a mídia com transporte 'volume' não foi lida pelo ler_imagem_mod: ${JSON.stringify(lugares)}`);
+    }
+    assert.deepEqual(lugares.peloControle, [], `uma mídia com transporte 'volume' foi pedida pelo controle: ${JSON.stringify(lugares)}`);
+
+    // 6. A montagem por partes.
+    const partes = await page.evaluate(async () => {
+      const SECOES = ['inventario', 'pericias', 'notas', 'historia'];
+      const parte = (secao, quantos, prefixo = secao) => ({
+        forma: 'caixa', chave: secao,
+        dentro: Array.from({ length: quantos }, (_, i) => ({
+          forma: 'texto', chave: `${prefixo}-${i}`,
+          dentro: `${prefixo} ${i}: uma linha da ficha, com o que a seção guarda`,
+        })),
+      });
+      const esqueleto = [{ forma: 'titulo', chave: 'nome', dentro: 'Ficha' }, ...SECOES.map((secao) => ({ forma: 'caixa', chave: secao, dentro: [] }))];
+      const cheias = SECOES.map((secao) => parte(secao, 90));
+      const tamanho = (valor) => new TextEncoder().encode(JSON.stringify(valor)).length;
+      const medidas = {
+        inteira: tamanho({ tipo: 'superficie-montar', superficie: 'ficha', arvore: [esqueleto[0], ...cheias] }),
+        cadaParte: cheias.map((arvore) => tamanho({ tipo: 'superficie-atualizar', superficie: 'ficha', chave: arvore.chave, arvore })),
+      };
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha', tipo: 'pagina', titulo: 'Ficha' } });
+      const montou = await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha', arvore: esqueleto });
+      const respostas = [];
+      for (const arvore of cheias) {
+        respostas.push(await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: arvore.chave, arvore }));
+      }
+      const raiz = document.querySelector('[data-superficie="ficha"]');
+      const texto = raiz?.textContent ?? '';
+      const aparecem = SECOES.map((secao) => texto.includes(`${secao} 0:`) && texto.includes(`${secao} 89:`));
+      // Trocar uma parte não remonta as outras: o elemento de uma linha do
+      // inventário é o mesmo depois de trocar as perícias.
+      const linhaDoInventario = [...raiz.querySelectorAll('*')].find((e) => e.childElementCount === 0 && e.textContent.startsWith('inventario 0:'));
+      const trocou = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'pericias', arvore: parte('pericias', 3, 'pericias-nova') });
+      const mesmoNo = linhaDoInventario?.isConnected === true;
+      const textoDepois = raiz.textContent;
+      const semChave = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'nao-existe', arvore: parte('nao-existe', 1) });
+      const grandeDemais = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'notas', arvore: parte('notas', 4100, 'notas-demais') });
+      const notasNaTela = raiz.textContent.includes('notas 89:') && !raiz.textContent.includes('notas-demais 0:');
+      // **E a recusa não estraga a declaração**: a parte seguinte desenha a
+      // ficha com as notas de antes, e não com as recusadas.
+      await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'historia', arvore: parte('historia', 2, 'historia-nova') });
+      return {
+        medidas, montou, respostas, aparecem, trocou, mesmoNo,
+        pericias: { novas: textoDepois.includes('pericias-nova 2:'), velhas: textoDepois.includes('pericias 89:') },
+        semChave, grandeDemais,
+        notasFicaram: notasNaTela,
+        notasDepoisDaProxima: raiz.textContent.includes('notas 89:') && !raiz.textContent.includes('notas-demais 0:')
+          && raiz.textContent.includes('historia-nova 1:'),
+      };
+    });
+    assert.ok(partes.medidas.inteira > 12 * 1024, `a ficha inteira não passa dos 12 KiB, e o caso não mede o que diz: ${JSON.stringify(partes.medidas)}`);
+    assert.ok(partes.medidas.cadaParte.every((n) => n > 8 * 1024 && n < 12 * 1024), `cada parte não tem ~9 KiB: ${JSON.stringify(partes.medidas)}`);
+    assert.equal(partes.montou?.ok, true, `o esqueleto não montou: ${JSON.stringify(partes.montou)}`);
+    assert.ok(partes.respostas.every((r) => r?.ok === true), `uma parte foi recusada: ${JSON.stringify(partes.respostas)}`);
+    assert.deepEqual(partes.aparecem, [true, true, true, true], 'a ficha montada por partes não aparece inteira');
+    assert.equal(partes.trocou?.ok, true, `trocar uma parte foi recusado: ${JSON.stringify(partes.trocou)}`);
+    assert.deepEqual(partes.pericias, { novas: true, velhas: false }, 'trocar as perícias não trocou o que estava sob a chave');
+    assert.equal(partes.mesmoNo, true, 'trocar as perícias remontou o inventário');
+    assert.equal(partes.semChave?.erro, 'chave-desconhecida', `uma chave que não existe não foi recusada pelo nome: ${JSON.stringify(partes.semChave)}`);
+    assert.equal(partes.semChave?.chave, 'nao-existe', `a recusa da chave não disse qual: ${JSON.stringify(partes.semChave)}`);
+    assert.equal(partes.grandeDemais?.erro, 'orcamento', `a parte grande demais não foi recusada pelo orçamento: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.grandeDemais?.teto, 4096, `a recusa do orçamento não disse o teto: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.ok(partes.grandeDemais?.tamanho > 4096, `a recusa do orçamento não disse o tamanho: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.grandeDemais?.perfil, 'superficie', `a recusa do orçamento não disse o perfil: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.notasFicaram, true, 'a parte recusada trocou as notas assim mesmo');
+    assert.equal(partes.notasDepoisDaProxima, true, 'a parte recusada ficou na declaração, e a parte seguinte a desenhou');
+
+    // 7. As regras declaradas dos formulários.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'perfil', tipo: 'dialogo', modal: false, titulo: 'Perfil' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'perfil', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'nome', rotulo: 'Nome', obrigatorio: true },
+          { forma: 'campo', chave: 'lema', rotulo: 'Lema', tamanhoMaximo: 10 },
+          { forma: 'numero', chave: 'nivel', rotulo: 'Nível', minimo: 1, maximo: 20 },
+          { forma: 'numero', chave: 'peso', rotulo: 'Peso', inteiro: true },
+        ],
+      }] });
+    });
+    const campo = (chave) => `[data-superficie="perfil"] [data-chave-do-mod="${chave}"] :is(input, textarea)`;
+    const preencher = async (valores) => { for (const [chave, valor] of Object.entries(valores)) await page.fill(campo(chave), valor); };
+    const enviar = () => page.evaluate(() => {
+      const antes = eventosDe(6).filter((e) => e.nome === 'submeter').length;
+      document.querySelector('[data-superficie="perfil"] form').requestSubmit();
+      const marcados = [...document.querySelectorAll('[data-superficie="perfil"] [data-chave-do-mod][data-invalido="sim"]')]
+        .map((e) => ({ chave: e.dataset.chaveDoMod, frase: e.dataset.mensagemDeErro ?? '', aria: e.querySelector('input,textarea')?.getAttribute('aria-invalid') }));
+      return {
+        foi: eventosDe(6).filter((e) => e.nome === 'submeter').length > antes,
+        marcados,
+        foco: document.activeElement?.closest('[data-chave-do-mod]')?.dataset.chaveDoMod ?? null,
+      };
+    });
+    const VALIDOS = { nome: 'Alex', lema: 'curto', nivel: '5', peso: '70' };
+    const CASOS = [
+      ['obrigatorio', { nome: '' }, 'nome'],
+      ['tamanhoMaximo', { lema: 'longo demais!' }, 'lema'],
+      ['minimo/maximo', { nivel: '25' }, 'nivel'],
+      ['inteiro', { peso: '70.5' }, 'peso'],
+    ];
+    for (const [regra, quebra, chave] of CASOS) {
+      await preencher({ ...VALIDOS, ...quebra });
+      const r = await enviar();
+      assert.equal(r.foi, false, `${regra}: o submeter foi ao MOD com a regra violada`);
+      assert.deepEqual(r.marcados.map((m) => m.chave), [chave], `${regra}: o campo marcado não é o da regra: ${JSON.stringify(r)}`);
+      assert.ok(r.marcados[0].frase.length > 0 && r.marcados[0].aria === 'true', `${regra}: a marca não tem frase ou aria-invalid: ${JSON.stringify(r)}`);
+      assert.equal(r.foco, chave, `${regra}: o foco não foi ao campo inválido: ${JSON.stringify(r)}`);
+      // **Corrigir apaga a frase antes do envio**: quem conserta o campo não
+      // fica lendo o erro que já resolveu.
+      await page.fill(campo(chave), VALIDOS[chave]);
+      const aindaMarcado = await page.evaluate((chave) => document.querySelector(`[data-superficie="perfil"] [data-chave-do-mod="${chave}"]`)?.dataset.invalido ?? null, chave);
+      assert.equal(aindaMarcado, null, `${regra}: corrigir o campo não apagou a frase do produto`);
+      await preencher({ ...VALIDOS, ...quebra });
+      if (regra === 'tamanhoMaximo') {
+        const contador = await page.evaluate(() => {
+          const c = document.querySelector('[data-superficie="perfil"] [data-chave-do-mod="lema"] .regiao-de-mod-contador');
+          return c ? { texto: c.textContent, passou: c.dataset.passou } : null;
+        });
+        assert.deepEqual(contador, { texto: '13/10', passou: 'sim' }, `o contador do tamanho não diz o que passou: ${JSON.stringify(contador)}`);
+      }
+    }
+    await preencher(VALIDOS);
+    const certo = await enviar();
+    assert.equal(certo.foi, true, `com tudo certo, o submeter não chegou: ${JSON.stringify(certo)}`);
+    assert.deepEqual(certo.marcados, [], `com tudo certo, um campo ficou marcado: ${JSON.stringify(certo)}`);
+    const valores = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter').at(-1)?.valores);
+    assert.deepEqual(valores, { nome: 'Alex', lema: 'curto', nivel: 5, peso: 70 }, 'o submeter não levou os valores');
+
+    // 8. A inércia com o que a casca pede acordado.
+    const inercia = await page.evaluate(async () => {
+      // Sem nenhuma superfície de pé: a folha da API 5, na seção 2, abriu como
+      // diálogo modal, e um modal que sobra deixa a sessão inerte por ele.
+      for (const api of [5, 6]) superficiesDoMod(modDe[api].mod, modDe[api].inst).soltarTudo();
+      const mudo = document.getElementById('botao-mudo');
+      const sair = document.getElementById('operador-sair');
+      const outro = document.querySelector('#tela-sessao textarea');
+      const inerte = (e) => Boolean(e?.closest('[inert]'));
+      globalThis.CELULAR = { acordadosNoModal: () => [mudo, sair] };
+      try {
+        await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'modal', tipo: 'dialogo', titulo: 'Modal' } });
+        const durante = {
+          mudo: inerte(mudo), sair: inerte(sair), outro: inerte(outro),
+          dialogo: inerte(document.querySelector('[data-superficie="modal"]')),
+          noMesmoRamo: outro?.closest('#tela-sessao') === mudo?.closest('#tela-sessao'),
+        };
+        await pedir(6, { tipo: 'superficie-descartar', superficie: 'modal' });
+        return { durante, depois: { mudo: inerte(mudo), sair: inerte(sair), outro: inerte(outro) } };
+      } finally {
+        delete globalThis.CELULAR;
+      }
+    });
+    assert.equal(inercia.durante.noMesmoRamo, true, `o caso não mede o que diz: o outro controle não está no ramo do MUDO: ${JSON.stringify(inercia)}`);
+    assert.deepEqual(inercia.durante, { mudo: false, sair: false, outro: true, dialogo: false, noMesmoRamo: true },
+      `com o modal aberto, o que a casca pede não ficou acordado, ou o resto não dormiu: ${JSON.stringify(inercia)}`);
+    assert.deepEqual(inercia.depois, { mudo: false, sair: false, outro: false }, `fechar o modal não devolveu a sessão: ${JSON.stringify(inercia)}`);
+
+    // 9. A recusa do servidor de volta aos campos.
+    const marcadosEm = (superficie) => page.evaluate((superficie) => [...document.querySelectorAll(`[data-superficie="${superficie}"] [data-chave-do-mod][data-invalido="sim"]`)]
+      .map((e) => `${e.dataset.chaveDoMod}: ${e.dataset.mensagemDeErro ?? ''}`), superficie);
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'estilo', tipo: 'dialogo', modal: false, titulo: 'Estilo' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'estilo', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'texto', rotulo: 'Texto', valor: '#ffffff' },
+          { forma: 'campo', chave: 'fundo', rotulo: 'Fundo', valor: '#fefefe' },
+          { forma: 'campo', chave: 'acento', rotulo: 'Acento', valor: '#ff6a00' },
+        ],
+      }] });
+    });
+    const doisDeUmaVez = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: { texto: 'contraste 1,01 contra o fundo', fundo: 'contraste 1,01 contra o texto' } }));
+    assert.equal(doisDeUmaVez?.ok, true, `formulario.erros foi recusado: ${JSON.stringify(doisDeUmaVez)}`);
+    assert.deepEqual(await marcadosEm('estilo'), ['texto: contraste 1,01 contra o fundo', 'fundo: contraste 1,01 contra o texto'],
+      'formulario.erros não marcou os dois campos com as frases');
+    assert.equal(await page.evaluate(() => document.activeElement?.closest('[data-chave-do-mod]')?.dataset.chaveDoMod ?? null), 'texto',
+      'o foco não foi ao primeiro campo marcado');
+    await page.fill('[data-superficie="estilo"] [data-chave-do-mod="texto"] input', '#000000');
+    assert.deepEqual(await marcadosEm('estilo'), ['fundo: contraste 1,01 contra o texto'], 'mexer num campo não apagou só a marca dele');
+    const semChave = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: { acento: 'x', 'nao-existe': 'y' } }));
+    assert.equal(semChave?.erro, 'chave-desconhecida', `uma chave que não existe não foi recusada pelo nome: ${JSON.stringify(semChave)}`);
+    assert.equal(semChave?.chave, 'nao-existe', `a recusa não disse qual chave: ${JSON.stringify(semChave)}`);
+    assert.deepEqual(await marcadosEm('estilo'), ['fundo: contraste 1,01 contra o texto'], 'o pedido recusado marcou um campo assim mesmo');
+    await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'estilo', erros: {} }));
+    assert.deepEqual(await marcadosEm('estilo'), [], 'um mapa vazio não limpou as marcas');
+
+    // 10. O sujo derivado.
+    const fecharPelaSaida = async () => {
+      await page.click('[data-superficie="editor"] .superficie-de-mod-sair');
+      return page.evaluate(() => ({
+        perguntou: !$('moderar').hidden,
+        aberta: Boolean(document.querySelector('[data-superficie="editor"]')?.isConnected),
+      }));
+    };
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'editor', tipo: 'dialogo', modal: false, titulo: 'Editor', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'editor', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'bio', rotulo: 'Bio', valor: 'o rascunho guardado', inicial: 'o gravado' },
+          { forma: 'campo', chave: 'nome', rotulo: 'Nome', valor: 'Alex' },
+        ],
+      }] });
+    });
+    const comRascunho = await fecharPelaSaida();
+    assert.deepEqual(comRascunho, { perguntou: true, aberta: true }, `o editor que reabre com rascunho não nasceu sujo: ${JSON.stringify(comRascunho)}`);
+    await page.click('#moderar-cancelar');
+    await page.fill('[data-superficie="editor"] [data-chave-do-mod="bio"] input', 'o gravado');
+    const deVoltaAoGravado = await fecharPelaSaida();
+    assert.deepEqual(deVoltaAoGravado, { perguntou: false, aberta: false }, `voltar ao gravado não limpou o sujo: ${JSON.stringify(deVoltaAoGravado)}`);
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-mostrar', superficie: 'editor' }));
+    await page.fill('[data-superficie="editor"] [data-chave-do-mod="nome"] input', 'Outro nome');
+    const mexido = await fecharPelaSaida();
+    assert.deepEqual(mexido, { perguntou: true, aberta: true }, `mexer num campo não sujou sem o MOD chamar suja: ${JSON.stringify(mexido)}`);
+    await page.click('#moderar-confirmar');
+    const descartado = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'editor').at(-1));
+    assert.equal(descartado?.descartou, true, `descartar o editor sujo não disse descartou: ${JSON.stringify(descartado)}`);
+
+    // 11. O botão que pede confirmação.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'aparencia', tipo: 'dialogo', titulo: 'Aparência' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'aparencia', arvore: [
+        { forma: 'botao', chave: 'salvar', dentro: 'SALVAR' },
+        { forma: 'botao', chave: 'restaurar', dentro: 'RESTAURAR PADRÃO', variante: 'perigo', confirmar: 'isto muda a aparência para todo mundo neste servidor' },
+      ] });
+    });
+    const botoesDe = (chave) => page.evaluate((chave) => eventosDe(6).filter((e) => e.nome === 'botao' && e.chave === chave).length, chave);
+    const botaoDaAparencia = (chave) => `[data-superficie="aparencia"] button[data-chave-do-mod="${chave}"]`;
+    await page.click(botaoDaAparencia('salvar'));
+    assert.equal(await botoesDe('salvar'), 1, 'um botão sem confirmar não mandou o evento na hora');
+    await page.click(botaoDaAparencia('restaurar'));
+    const pergunta = await page.evaluate(() => ({ aberta: !$('moderar').hidden, alcancavel: !$('moderar').closest('[inert]'), texto: $('moderar').textContent }));
+    assert.equal(pergunta.aberta, true, 'o botão com confirmar não abriu a confirmação do produto');
+    assert.equal(pergunta.alcancavel, true, 'a confirmação abriu inerte, atrás do diálogo modal');
+    assert.ok(pergunta.texto.includes('isto muda a aparência para todo mundo neste servidor'), `a confirmação não diz a consequência que o MOD escreveu: ${pergunta.texto.slice(0, 200)}`);
+    assert.equal(await botoesDe('restaurar'), 0, 'o evento do botão chegou antes do sim');
+    await page.click('#moderar-cancelar');
+    assert.equal(await botoesDe('restaurar'), 0, 'cancelar a confirmação mandou o evento do botão');
+    await page.click(botaoDaAparencia('restaurar'));
+    await page.click('#moderar-confirmar', { timeout: 3000 });
+    assert.equal(await botoesDe('restaurar'), 1, 'o sim na confirmação não mandou o evento do botão, uma vez');
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-descartar', superficie: 'aparencia' }));
+
+    // 12. O erro na escolha e na cor.
+    const marcaDe = (chave) => page.evaluate((chave) => {
+      const parte = document.querySelector(`[data-superficie="cores"] [data-chave-do-mod="${chave}"]`);
+      const caixa = parte?.querySelector('select, input.regiao-de-mod-hexa');
+      return { invalido: parte?.dataset.invalido ?? null, frase: parte?.dataset.mensagemDeErro ?? null, aria: caixa?.getAttribute('aria-invalid') ?? null };
+    }, chave);
+    const arvoreDasCores = (comErro) => [{
+      forma: 'formulario', chave: 'f', dentro: [
+        { forma: 'escolha', chave: 'paleta', rotulo: 'Paleta', valor: 'noite', opcoes: [{ valor: 'noite' }, { valor: 'dia' }], ...(comErro ? { erro: 'esta paleta não combina com o tema' } : {}) },
+        { forma: 'cor', chave: 'acento', rotulo: 'Acento', valor: '#ff6a00', ...(comErro ? { erro: 'contraste 1,2 contra o fundo' } : {}) },
+      ],
+    }];
+    await page.evaluate(async (arvore) => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'cores', tipo: 'dialogo', modal: false, titulo: 'Cores', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'cores', arvore });
+    }, arvoreDasCores(true));
+    assert.deepEqual(await marcaDe('paleta'), { invalido: 'sim', frase: 'esta paleta não combina com o tema', aria: 'true' }, 'a escolha não mostrou o erro do MOD');
+    assert.deepEqual(await marcaDe('acento'), { invalido: 'sim', frase: 'contraste 1,2 contra o fundo', aria: 'true' }, 'a cor não mostrou o erro do MOD');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'cores', arvore }), arvoreDasCores(false));
+    assert.deepEqual([await marcaDe('paleta'), await marcaDe('acento')], [{ invalido: null, frase: null, aria: null }, { invalido: null, frase: null, aria: null }],
+      'o erro redeclarado como nenhum não saiu da escolha e da cor');
+    const pelasChaves = await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'cores', erros: { paleta: 'recusada pelo servidor', acento: 'recusada pelo servidor' } }));
+    assert.equal(pelasChaves?.ok, true, `formulario.erros não alcança a escolha e a cor: ${JSON.stringify(pelasChaves)}`);
+    assert.deepEqual([(await marcaDe('paleta')).frase, (await marcaDe('acento')).frase], ['recusada pelo servidor', 'recusada pelo servidor'], 'formulario.erros não marcou a escolha e a cor');
+    await page.evaluate(() => pedir(6, { tipo: 'formulario-erros', superficie: 'cores', erros: {} }));
+    // O hexadecimal incompleto: marcado, sem frase; completo, desmarcado.
+    await page.fill('[data-superficie="cores"] [data-chave-do-mod="acento"] .regiao-de-mod-hexa', '#f2');
+    assert.deepEqual(await marcaDe('acento'), { invalido: 'sim', frase: null, aria: 'true' }, 'o hexadecimal incompleto deixou de ficar marcado');
+    await page.fill('[data-superficie="cores"] [data-chave-do-mod="acento"] .regiao-de-mod-hexa', '#ff6a00');
+    assert.deepEqual(await marcaDe('acento'), { invalido: null, frase: null, aria: null }, 'o hexadecimal completo continuou marcado');
+    // E a escolha mexida suja a superfície.
+    await page.selectOption('[data-superficie="cores"] [data-chave-do-mod="paleta"] select', 'dia');
+    await page.click('[data-superficie="cores"] .superficie-de-mod-sair');
+    assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'trocar a escolha não sujou a superfície');
+    await page.click('#moderar-confirmar');
+
+    // 13. Os botões do produto no formulário.
+    const arvoreDaFicha = (extra = {}) => [{
+      forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
+        { forma: 'campo', chave: 'nome', rotulo: 'Nome', valor: 'Alex', obrigatorio: true },
+        { forma: 'campo', chave: 'lema', rotulo: 'Lema', valor: 'x' },
+      ],
+    }];
+    const acoesDaFicha = () => page.evaluate(() => {
+      const acoes = document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario');
+      const primario = acoes?.querySelector('button[type="submit"]');
+      return {
+        textos: acoes ? [...acoes.querySelectorAll('button')].map((b) => `${b.type}:${b.textContent}`) : null,
+        doMod: acoes ? acoes.querySelectorAll('[data-chave-do-mod]').length : null,
+        travado: primario ? { desligado: primario.disabled, ocupado: primario.getAttribute('aria-busy') } : null,
+      };
+    });
+    const submetidos = () => page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter' && e.chave === 'f').length);
+    await page.evaluate(async (arvore) => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha2', tipo: 'dialogo', modal: false, titulo: 'Ficha', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore });
+      window.botaoAntes = document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button');
+    }, arvoreDaFicha());
+    const acoes = await acoesDaFicha();
+    // Na ordem da confirmação do produto: o secundário antes, o primário na ponta.
+    assert.deepEqual(acoes.textos, ['button:CANCELAR', 'submit:SALVAR'], `o formulário não ganhou os botões do produto: ${JSON.stringify(acoes.textos)}`);
+    assert.equal(acoes.doMod, 0, 'os botões do produto ficaram com chave de MOD');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha());
+    assert.equal(await page.evaluate(() => window.botaoAntes?.isConnected === true
+      && document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button') === window.botaoAntes), true,
+    'o redesenho tirou ou refez os botões do produto');
+    const primario = '[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button[type="submit"]';
+    const secundario = '[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button[type="button"]';
+    const antes = await submetidos();
+    await page.click(primario);
+    assert.equal(await submetidos(), antes + 1, 'o primário não enviou o formulário');
+    assert.deepEqual(await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter' && e.chave === 'f').at(-1)?.valores), { nome: 'Alex', lema: 'x' },
+      'o primário não mandou todos os valores juntos');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="nome"] input', '');
+    await page.click(primario);
+    assert.equal(await submetidos(), antes + 1, 'o primário passou por cima da validação');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="nome"] input', 'Alex');
+    // Em progresso: o primário travado, e nem o Enter envia.
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha({ emProgresso: true }));
+    assert.deepEqual((await acoesDaFicha()).travado, { desligado: true, ocupado: 'true' }, 'o primário em progresso não ficou travado');
+    await page.press('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'Enter');
+    assert.equal(await submetidos(), antes + 1, 'o Enter enviou um formulário em progresso');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha());
+    // O secundário, pela saída do produto: com alteração, pergunta.
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'outro');
+    await page.click(secundario);
+    assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'o secundário com alteração não perguntou');
+    await page.click('#moderar-cancelar');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'x');
+    await page.click(secundario);
+    const saiu = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'ficha2').at(-1));
+    assert.equal(saiu?.porque, 'saida-do-produto', `o secundário não saiu pela saída do produto: ${JSON.stringify(saiu)}`);
+    // Sem `primario` nem `secundario`, nenhum botão do produto.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-mostrar', superficie: 'ficha2' });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore: [{ forma: 'formulario', chave: 'f', dentro: [{ forma: 'campo', chave: 'nome', valor: 'Alex' }] }] });
+    });
+    assert.equal((await acoesDaFicha()).textos, null, 'sem primario nem secundario, o produto montou botões');
+    // **A trava vale sem o primário**: num formulário de um campo só, o Enter
+    // envia sozinho; em progresso, não.
+    const campoUnico = '[data-superficie="ficha2"] [data-chave-do-mod="nome"] input';
+    const antesDoEnter = await submetidos();
+    await page.press(campoUnico, 'Enter');
+    assert.equal(await submetidos(), antesDoEnter + 1, 'o caso não mede o que diz: o Enter num campo só não enviou');
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore: [{ forma: 'formulario', chave: 'f', emProgresso: true, dentro: [{ forma: 'campo', chave: 'nome', valor: 'Alex' }] }] }));
+    await page.press(campoUnico, 'Enter');
+    assert.equal(await submetidos(), antesDoEnter + 1, 'o Enter enviou um formulário em progresso, sem primário');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor; e os botões do formulário são do produto.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
