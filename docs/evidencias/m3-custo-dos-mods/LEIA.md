@@ -234,10 +234,8 @@ mesmo `m3-falante.rs` continua compilando para a base, onde a constante nova
 não existe. Conferido à mão pela orquestradora: com ele, o JITTER foi a 1 ms, e
 o do registro a 1,06–1,58 ms, como na base. Os sete cenários com voz feitos
 antes do conserto estão em `medidas/descartados/falante-com-versao-9/` (com o
-`carga-capas` interrompido), e são refeitos. **Até os refeitos saírem
-válidos, o jitter sob carga fica no §12 do rascunho e no `v6.json` como «não
-medido nesta campanha»**, e não como zero; CPU, memória e quadros dos cenários
-sem voz valem.
+`carga-capas` interrompido), e foram refeitos com o falante consertado: **os
+doze cenários com voz da campanha mediram o jitter**, e ele vale neles.
 
 **A árvore de acessibilidade do WebKit, na 0.16, às vezes só se monta depois da
 primeira consulta** (a orquestradora, 10/10). O `esperar` do `m3.py` repete a

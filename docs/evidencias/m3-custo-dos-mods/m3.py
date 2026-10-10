@@ -71,6 +71,11 @@ PACOTES.update({f"carga-{c}": RAIZ / f"pacotes/m3-carga-{c}" for c in CARGAS})
 # Os cenários de carga que precisam de quem usa dentro da sala: a capa anima no
 # cartão da chamada e na barra; o palco é da chamada.
 NA_SALA = {"carga-capas", "carga-tudo", "carga-palco"}
+# O diálogo modal e a página imersiva abrem quando quem usa entra na sala
+# (`quandoNaSala`, no molde), e deixam o SAIR DA SALA inerte antes de o roteiro
+# o achar (medido em 10/10). Neles, a superfície à vista prova a entrada: ela só
+# abre com quem usa numa sala.
+ABRE_NA_SALA = {"carga-dialogo": "Carga M3 · diálogo", "carga-pagina": "Carga M3 · página"}
 PORTA = 8391  # nunca a 8383 (app) nem a 8384 (bateria de testes)
 # Os quadros são gravados nos primeiros 30 s da janela de 60: o trace de 60 s
 # com os instrumentos de engasgo passava de 500 MB e o xctrace levava mais de
@@ -330,7 +335,8 @@ def main():
             time.sleep(3)
         if voz or base in NA_SALA:
             ax("apertar", pid, "ENTRAR NA SALA")
-            assert esperar(lambda: tem(pid, "SAIR DA SALA"), 20), "não entrou na sala"
+            assert esperar(lambda: tem(pid, "SAIR DA SALA")
+                           or (base in ABRE_NA_SALA and tem(pid, ABRE_NA_SALA[base])), 20), "não entrou na sala"
         if base in NA_SALA:
             # A grade da chamada à vista: é nela que as capas animam, e é a
             # barra dela que oferece VER O PALCO.

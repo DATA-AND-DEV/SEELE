@@ -1577,9 +1577,10 @@ retrato, e pelo evento `lugar` quando o aparelho deita.
 F3). **Cada número da campanha da API 6 é lido contra o `sem-mod` da própria
 campanha**, e não contra a base da 0.15.1: a 0.16 sobe a sala pessoal ao abrir,
 e o `sem-mod` dela já carrega esse custo (`docs/evidencias/m3-custo-dos-mods/
-LEIA.md`). **O jitter dela não vale** (0 exato em todo cenário com voz, contra a
-mediana de 1 ms da base; com a F4): onde um critério pediria o jitter, ele sai
-como «não medido nesta campanha», e não como zero. A medição de base da v0.15.1 está no ADR 0056 (§15). **Cada número vale
+LEIA.md`). **O jitter vale só nos cenários com voz**: sem falante, o registro
+fica no zero inicial, e esse zero não é medida. (Nos sete primeiros cenários
+com voz, o falante mandava a voz com o número de antes do `f3aaf9ce`, e a 0.16
+a jogava fora; foram descartados e refeitos.) A medição de base da v0.15.1 está no ADR 0056 (§15). **Cada número vale
 igual no desktop e no navegador**, porque o motor é o mesmo (§16). Os valores
 de hoje, lidos no código:
 
