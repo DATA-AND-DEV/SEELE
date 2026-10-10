@@ -441,3 +441,132 @@ esquece só a dos MODs no `beforeunload`, e cobre a do apelido pelo estado da
 tela. Se um dia ela precisar segurar fora da sessão, o aperto reprova, e o
 conserto natural é uma função de `tela-boot.js` que esqueça as duas, chamada
 pela casca larga. Esse conserto mexe num arquivo da F8.
+
+## Rodada 1
+
+FIX_BASE `e0329141`. A revisão aprovou o lote — conforme, sem Crítico nem
+Importante, sem vazamento da credencial nas sondas, e o consentimento só falha
+para o lado conservador — e deixou seis Menores. Esta rodada fecha cinco; o M3
+(o `esquecer` atrasado que apaga um sim dado de propósito a uma pergunta mais
+nova, conservador) e a ressalva de `instalar_mod_do_catalogo` no `main.rs`
+ficaram fora, por decisão da coordenação.
+
+| commit | item | o que muda |
+|---|---|---|
+| `1efff430` | M1 | `conectar` conta as tentativas (`tentativas`), e a recusa por apelido só guarda a credencial se a dela ainda é a mais nova; o passo 5b da cena W; a parte 6 do guarda cobra a contagem e a conferência |
+| `c30a6ef7` | M2 | a falha do `esquecer` de quem desistiu vai a `#boot-erro`, dizendo que o sim ficou gravado e onde desfazê-lo; a cena 5d |
+| `114e1c7a` | M4 | o guarda das tabelas lê também `Object.freeze({`, e o doc dele diz o que fica de fora |
+| `0c66a3ad` | M5 | docs: o comentário da parte 3 do guarda do R |
+| `383718ed` | M5, acréscimo | docs: os comentários de `baterDeNovo` (`tela-auth.js`) e de `reconectar` (`tela-fim.js`), autorizados pela orquestradora |
+| `98b7eacf` | M6 | o passo 3b da cena W prova o `??=`, e o passo 5 mede o que diz |
+
+### M1 — a recusa de uma tentativa mais velha não guarda a credencial (`1efff430`)
+
+A sonda P1 da revisão virou o passo 5b da cena W. Uma tentativa ao servidor da
+cena, com o convite, leva 600 ms e volta com `NicknameTaken`; aos 100 ms,
+`hospedar()` entra no servidor daqui. O servidor de mentira ganhou um `connect`
+lento por alvo e o servidor daqui, que aceita a entrada. A cena confere que a
+corrida foi a esperada (o convite ao alvo, depois o servidor daqui sem nada) e
+que o `hospedar` entrou, para não medir à toa.
+
+- **Vermelho** em `e0329141`: «uma tentativa a 192.0.2.17:8384, recusada pelo
+  apelido depois que o hospedar já tinha entrado no servidor daqui, deixou a
+  credencial guardada para uma «tentativa seguinte» que já tinha acontecido…».
+- **O conserto**: `let tentativas = 0;` em `tela-boot.js`; `const esta =
+  ++tentativas;` em `conectar`, junto do esquecimento e antes da primeira
+  espera; e a guarda passa a ser `if (credencial != null && esta ===
+  tentativas)`. É a mesma ideia da identidade da pergunta em `aceitarOsMods`.
+  Só a guarda da credencial depende da conferência; o esquecimento do
+  `ultimoApelido` na mesma recusa continua incondicional, porque reler o perfil
+  depois de uma recusa atrasada não custa nada.
+- **Guarda**: a linha da guarda muda na lista da parte 1, e a parte 6 cobra
+  `const esta = ++tentativas;` antes da primeira espera e `esta === tentativas`
+  na linha que guarda.
+- **Reversão** (a conferência tirada da guarda): a bancada reprova com a frase
+  do vermelho; o guarda, pela lista da parte 1 («…ganhou um caminho novo…»).
+  **Reversão da posição** (a contagem descida para depois da primeira espera,
+  que a parte 1 não segue): a bancada e o roteiro ficam verdes, porque são
+  sequenciais, e a parte 6 reprova com «`conectar` deixou de contar a tentativa
+  antes da primeira espera…». Arquivo devolvido e conferido com `cmp` nas duas.
+
+### M2 — a falha de desfazer o sim é dita na tela (`c30a6ef7`)
+
+A sonda P2 virou a cena 5d da cena do R: o servidor de mentira passou a poder
+falhar um comando por nome (`testFalhas`). O `aceitar_mods` leva 500 ms, a
+pessoa recusa durante a gravação, e o `esquecer_aceite_de_mods` falha com
+`{ Recusado: { motivo: "o-disco-recusou" } }`. A cena confere que o sim de fato
+ficou, e que a tela o diz.
+
+- **Vermelho** em `1efff430`: «…desfazê-lo falhou, e a tela não disse que o sim
+  ficou nem onde desfazê-lo — a entrada diz null…».
+- **O conserto**: a falha vai a `#boot-erro`. A pergunta já fechou, e quem
+  desistiu está na entrada, sob ela. A frase é «O SIM AOS MODS DE <alvo> FICOU
+  GRAVADO.», seguida da falha e de «Desfaça em CONFIGURAÇÕES · MODS, na lista
+  SERVIDORES A QUEM VOCÊ DISSE SIM.», que são os nomes da seção e do bloco no
+  `index.html`. Ela mora em `camada-mods.js` (`simQueFicouGravado`), e não em
+  `frases.js`, por três razões. Não é a frase de uma variante de erro: leva o
+  alvo e a falha dentro dela, e nenhuma tabela de `frases.js` tem essa forma.
+  Só existe nesta pergunta, pela razão que deu frases próprias a
+  `camada-versoes.js`. E `frases.js` é de outra frente.
+- **Reversão** (o `camada-mods.js` de antes do M2): a bancada reprova com a
+  frase do vermelho. O guarda de texto não cobre o M2; a prova pedida é a cena.
+  Arquivo devolvido e conferido com `cmp`.
+
+### M4 — o guarda das tabelas lê as congeladas (`114e1c7a`)
+
+- **Vermelho antes**: com um `6:` repetido posto em `CAPACIDADES_POR_API`
+  (`base.js`, por um instante), o guarda de `e0329141` **passava**: ele só lia a
+  linha terminada em `= {`.
+- **O conserto**: o filtro aceita `{` e `Object.freeze({`. O guarda passa a ler
+  **45 tabelas** (as 23 de antes e 22 congeladas, como a revisão mediu), nenhuma
+  repetida e nenhuma leitura perdida; as chaves das 45 foram conferidas contra a
+  contagem independente por indentação, que também passou a ler as congeladas.
+  `CAPACIDADES_POR_API` entrou na lista contra a cegueira. O doc diz o que fica
+  de fora: as chaves dentro de entradas aninhadas, a tabela numa linha só ou que
+  não abre um objeto na linha da `const` (`Object.freeze([`, ou montada por
+  outra expressão), e os objetos de estado em caixa baixa.
+- **Prova**: com o `6:` repetido, reprova com «base.js: CAPACIDADES_POR_API.6 (2
+  vezes)». **Reversão** (o filtro antigo de volta, sem duplicata): reprova por
+  cegueira, «este guarda não leu `CAPACIDADES_POR_API`…». `base.js` e
+  `frontend.rs` devolvidos e conferidos com `cmp`.
+
+### M5 — os comentários que o I-4 tornou falsos (`0c66a3ad`, `383718ed`)
+
+- A parte 3 do guarda do R (doc e comentário do corpo) diz agora que três
+  chamadas **passam** credencial por argumento, que `conectar` anexa sozinho a
+  do apelido tomado quando o alvo é o mesmo — inclusive nas chamadas sem
+  argumento —, e por que ela nunca é um convite gasto.
+- Com a autorização da orquestradora, o comentário de `baterDeNovo`
+  (`tela-auth.js`) deixou de dizer que `conectar()` «não lembra segredo» e que a
+  credencial «só é guardada pela pergunta dos MODs», e o de `reconectar`
+  (`tela-fim.js`) deixou de dizer que o token «não fica guardado em lugar
+  nenhum». Os dois dizem os dois lugares e por que nenhum chega ali com um
+  convite gasto. Só comentário: os dois arquivos sem as linhas de comentário são
+  idênticos aos de antes.
+
+### M6 — o `??=` e o passo 5 (`98b7eacf`)
+
+- **O `??=`**: o passo 3b novo da cena W. Depois de uma recusa pelo apelido, a
+  pessoa cola um link novo ao mesmo servidor (o servidor de mentira passou a
+  aceitar um segundo convite, e o `analisar_convite` a devolver o token do link
+  novo), e a tentativa tem de levar o convite do link. Verde com o produto, que
+  já estava certo; com o mutante `credencial =`, reprova com «…a credencial que
+  a recusa anterior deixou passou por cima da que a pessoa acabou de colar» (o
+  roteiro continua verde com ele, e o guarda reprova pela lista da parte 1).
+- **O passo 5**: a credencial muda de lugar — a tentativa a tira do lugar do
+  apelido tomado ao começar, e a entrega à pergunta dos MODs; RECUSAR a esquece
+  de lá. O lugar do apelido passou a ser conferido logo depois da tentativa, e
+  não depois do RECUSAR, que não mexe nele; a frase diz isso. Com um mutante que
+  guarda a credencial também na recusa pelos MODs, o guarda e o roteiro ficam
+  verdes, e o passo 5 reprova com «a tentativa que parou na pergunta dos MODs
+  deixou a credencial também no lugar do apelido tomado…».
+
+### O que rodou na rodada
+
+Depois de cada item, e no fim (`98b7eacf`): `cargo fmt --all -- --check`;
+`cargo clippy -p seele-app --all-targets --all-features -- -D warnings`;
+`cargo test -p seele-app --test frontend`, 283 de 283; `cargo xtask
+check-runtime`; a `ajustes-v013.cjs`, verde; e os 28 roteiros, verdes. A
+conformidade não foi necessária. Nada em `crates/` nem em
+`ui/camada-versoes.js`. `base.js` só foi mexido dentro das provas do M4, e
+voltou idêntico; de `tela-auth.js` e `tela-fim.js`, só os dois comentários.
