@@ -72,6 +72,15 @@ pub async fn executar(
                 // `id_seguro` que impede quem pediu de escrever uma linha.
                 tracing::warn!(mod_id = %legivel, %error, "MOD request refused");
             }
+            // **O quintal cheio, pelo nome** (pedido da MESA, item 9; rascunho
+            // da API 6, §8): o MOD recebe por que a gravação não aconteceu, e
+            // não a recusa genérica de qualquer outra falha.
+            if matches!(
+                error.downcast_ref::<super::Falha>(),
+                Some(super::Falha::QuintalCheio)
+            ) {
+                return r#"{"ok":false,"error":"quintal-cheio"}"#.into();
+            }
             r#"{"ok":false,"error":"bridge-refused"}"#.into()
         }
     }
@@ -753,6 +762,17 @@ mod tests {
         std::sync::Arc<crate::server::Server>,
         seele_proto::ids::PersonId,
     ) {
+        servidor_com_o_mod(pasta, ECO).await
+    }
+
+    /// O mesmo servidor, com outra metade de servidor no `prova/eco`.
+    async fn servidor_com_o_mod(
+        pasta: &std::path::Path,
+        fonte: &str,
+    ) -> (
+        std::sync::Arc<crate::server::Server>,
+        seele_proto::ids::PersonId,
+    ) {
         let obras = pasta.join("em-obras");
         std::fs::create_dir_all(obras.join("servidor")).expect("a pasta do pacote");
         let manifesto = serde_json::json!({
@@ -767,7 +787,7 @@ mod tests {
         .to_string();
         let mut arquivos = vec![
             ("mod.json".to_owned(), manifesto.into_bytes()),
-            ("servidor/main.js".to_owned(), ECO.as_bytes().to_vec()),
+            ("servidor/main.js".to_owned(), fonte.as_bytes().to_vec()),
         ];
         for (caminho, bytes) in &arquivos {
             std::fs::write(obras.join(caminho), bytes).expect("o arquivo do pacote");
@@ -1029,6 +1049,25 @@ mod tests {
              `o_write_que_o_mod_recebe_e_o_do_canal` cobrem o recurso novo; então ponha o lugar \
              novo como permitido neste guarda.",
             achados.join("\n")
+        );
+    }
+
+    /// **O quintal cheio chega ao MOD pelo nome** (pedido da MESA, item 9;
+    /// rascunho da API 6, §8). Medido em 10/10: o `aoPedir` termina, a gravação
+    /// recusa (`Falha::QuintalCheio`), e a janela recebia a recusa genérica,
+    /// `bridge-refused`, a mesma de qualquer outra falha.
+    #[tokio::test(flavor = "current_thread")]
+    async fn o_quintal_cheio_chega_ao_mod_pelo_nome() {
+        let pasta = tempfile::tempdir().expect("a pasta");
+        let fonte = format!(
+            "globalThis.aoPedir = () => {{ dados.grande = 'a'.repeat({}); return '{{}}'; }};",
+            crate::mods::Anfitriao::TETO_DO_QUINTAL + 1
+        );
+        let (servidor, pessoa) = servidor_com_o_mod(pasta.path(), &fonte).await;
+        let resposta = pedir(&servidor, pessoa, 0).await;
+        assert_eq!(
+            resposta["error"], "quintal-cheio",
+            "o quintal cheio não chegou ao MOD pelo nome: {resposta}"
         );
     }
 }
