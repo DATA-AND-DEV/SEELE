@@ -483,8 +483,13 @@ contrato, **com os números em aberto para a M3** (§12):
   escondido, 0 × 0. As `classes` com `consultas: [{ ateLargura }]` valem
   dentro do palco. [c]
 - **Saída.** Como toda superfície: a saída é do produto — VER A GRADE, na
-  barra do palco, que diz de quem ele é —, e esconder não desmonta: o som do
-  palco escondido continua (§11). A grade de vídeo continua de pé por baixo.
+  barra do palco, que diz de quem ele é —, e esconder não desmonta.
+- **O palco escondido soa** (decidido em 10/10). Inclusive o que a pessoa
+  ainda não abriu: ele está montado atrás da grade, e a regra «fora da tela,
+  a declaração não liga o som» vale para o lugar desmontado (§11). O som
+  ambiente da MESA é o caso de uso, e ele vem de um MOD que a pessoa aceitou,
+  numa sala em que ela entrou. Quem escreve o MOD que não quer tocar
+  escondido lê o `lugar` do palco (0 × 0 escondido) e pausa. A grade de vídeo continua de pé por baixo.
   Sair da sala desmonta o palco. A faixa de toque e a de batida ficam fora,
   por construção (§10).
 
@@ -1101,8 +1106,8 @@ grupo 17 do plano da F3.
 
 **O MOD escreve nomes do contrato, e nunca nomes de CSS.** O tema é um objeto
 cujas chaves são os nomes do §9 (`fundo`, `texto`, `acento`, `borda`, `painel`,
-`apagado`, os números e as bandeiras, e o que a ampliação somar: `modo`, a
-densidade, os tokens por região). O produto traduz cada nome por uma **tabela
+`apagado`, os números e as bandeiras, `densidade`, `fonte` e `modo`, e o que a
+ampliação somar: os tokens por região). O produto traduz cada nome por uma **tabela
 fechada** para o token `--seele-*` que ele redefine, como a casca já faz hoje
 (`TEMA_DA_API`, `base.js:1844` [c]): uma chave fora da tabela é recusada pelo
 nome (`base.js:2038` [c]), e um valor fora da forma (`#rrggbb`, o intervalo do
@@ -1299,11 +1304,25 @@ Com a recomendação do ESTILO, que adoto:
 | item | onde |
 |---|---|
 | `modo: 'claro' \| 'escuro'` | **6** [c, 17i, item 2: escreve o `color-scheme` da sessão; recusado como `valor-invalido`, com a `chave`, quando discorda do fundo — claro de 0,18 de luminância relativa para cima, escuro abaixo; sem `fundo` no tema, o do produto, que é escuro; nas duas pontas, pelo vetor `chaves-do-tema.json`, com os vizinhos do limiar, 0,1778 e 0,1811] |
-| a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **6** |
+| a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **7**, com «tokens além de cor» (decidido em 10/10, depois da medida abaixo) |
 | tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x |
 | fundo da sessão por mídia | **6 se a M3 com a API 6 o medir no iPhone antes do congelamento** (tarefa 11); senão, **7** |
 | tipo dos títulos e dos dados, e escala por escolha | **7**: não medidos |
 | família de tipo livre | fora, sempre |
+
+**A densidade, medida antes de implementar** (17i, item 1; 10/10). O CSS da
+sessão é feito de px literais, e os estilos de MOD de números: escrever os
+`--seele-e*` compactos em `#tela-sessao` mudava **16 de 343** nós, e todos da
+PORTARIA — uma tela de decisão de quem hospeda, que um tema nem deveria
+apertar. Um `aplicado` que não aplica nada, e por isso a escala inteira vai
+para a 7, quando o CSS da sessão passar a ler os tokens.
+
+**O que `densidade` alcança hoje, e é o que a 6 promete:** o espaçamento do
+que o MOD declara — `--seele-celula-x/y` na raiz da região, entre as partes,
+no recuo das listas, nos botões, nas escolhas, nos formulários e nas tiras —
+e o recheio do `aviso`. **Nada do produto**: medido, com `compacta`, zero dos
+343 nós da sessão mudam; com um palco de MOD aberto, mudam dois, e os dois do
+MOD. [c, a medida de 10/10]
 
 ### Os dados do tema ao subir de linha (B9)
 

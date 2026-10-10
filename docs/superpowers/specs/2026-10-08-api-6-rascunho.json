@@ -481,7 +481,8 @@
       "de-quem": "por pessoa: cada janela monta o que o MOD dela declarar",
       "toque": "recebe toque e clique",
       "tamanho": "o MOD recebe largura e altura no evento lugar, com regiao: 'chamada.palco', ao chegar e a cada mudança: a substituição, o miolo; o acréscimo, a faixa; escondido, 0 × 0",
-      "vista": "alternativa à grade, e começa escondido: VER O PALCO, na barra da chamada, o traz à frente; VER A GRADE o devolve, sem desmontar (o som continua); sair da sala o desmonta",
+      "vista": "alternativa à grade, e começa escondido: VER O PALCO, na barra da chamada, o traz à frente; VER A GRADE o devolve, sem desmontar; sair da sala o desmonta",
+      "som": "o palco escondido soa, inclusive o que a pessoa ainda não abriu (está montado; §11); o MOD que não quer lê o lugar, 0 × 0 escondido, e pausa",
       "modos-no-palco": "a substituição escolhida no miolo; os acréscimos numa faixa abaixo dele",
       "celular": "vista alternativa à grade (MESA · CHAMADA), com quem fala numa tira no alto"
     }
@@ -574,15 +575,16 @@
       "acento/acentoFraco": "4,5:1, garantido pela derivação e não recusado: o acentoFraco é do produto",
       "estado": "pisos de partida; os números finais saem da tarefa 17-B3"
     },
+    "densidade": "compacta | confortavel: o espaçamento do que o MOD declara (--seele-celula-x/y: a raiz da região, as partes, as listas, os botões, as escolhas, os formulários, as tiras) e o recheio do aviso; nada do produto (medido em 10/10: 0 de 343 nós da sessão)",
     "na-6": [
       "modo: 'claro' | 'escuro' (feito)",
-      "a densidade cobrindo a escala --seele-e*",
       "tokens por região, com o destino de cada região no celular"
     ],
     "na-6-se-medido": [
       "fundo da sessão por mídia (se a M3 com a API 6 o medir no iPhone antes do congelamento)"
     ],
     "na-7": [
+      "a densidade cobrindo a escala --seele-e* (medido em 10/10: o CSS da sessão não lê os tokens, e escrevê-los mudava só a portaria)",
       "tipo dos títulos e dos dados",
       "escala por escolha"
     ],
