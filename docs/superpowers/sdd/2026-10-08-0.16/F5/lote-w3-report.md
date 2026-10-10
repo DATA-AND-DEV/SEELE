@@ -6,13 +6,19 @@ local: sem push, tag nem release. Sem conformidade. Nada no fio.
 
 | commit | o que muda |
 |---|---|
-| `a5451bb2` | `tools/roteiros/aceite-de-mods.js` responde a `mods_instalados` e passa a exigir o que o cabeçalho dizia provar (14 `exigir`) |
+| `a5451bb2` | `aceite-de-mods.js` responde a `mods_instalados` e passa a exigir o que o cabeçalho dizia provar |
 | `beafc181` | as frases de reprovação dos itens, sem plural a errar |
 | `c27d84cb` | o cabeçalho do roteiro diz onde estão as reversões |
-| este | o relatório |
+| `7b5e53fd` | a primeira versão deste relatório |
+| `b91d2641` | `catalogo-de-mods.js` passa a exigir o que o cabeçalho diz provar (§6) |
+| `5bc3c84e` | **produto**: a rejeição de `aceitarOsMods` vira frase no diálogo, o ACEITAR volta e o motivo vai ao `seele.log`; o roteiro novo `aceite-de-mods-que-falha.js` (§7) |
+| `9a53cc13` | `aceite-de-mods.js` exige o sim gravado antes do `connect` da volta (§3, E14) |
+| este | o relatório atualizado |
 
-**O que não mudou.** Nada em `apps/seele-app/ui/`, em `crates/`, em
-`tools/carga-da-casca.py`. A única alteração de código é o roteiro. Por isso os
+**O que mudou fora de `tools/roteiros/`.** Em `apps/seele-app/ui/camada-mods.js`,
+uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
+`apps/seele-app/tests/frontend.rs`, uma linha na lista do guarda da credencial
+(§7). Nada em `crates/`, no fio, em `tools/carga-da-casca.py`, em `main.rs`. Os
 outros roteiros que usam `exigir` não foram rodados de novo: o aparelho que os
 roda não mudou.
 
@@ -52,7 +58,8 @@ um comando que não foi chamado), e `connect` nunca é chamado de novo.
 `Result<Vec<ModNaTela>, FalhaNoMod>` (`main.rs`, `mods_instalados`), e
 `mods_ligados` e `quem_pinta_o_servidor` devolvem vazio quando a janela não
 hospeda: no momento do ACEITAR, com a entrada recusada, o comando responde uma
-lista. O `null` só existe no duble.
+lista. O `null` só existe no duble. (O que o produto fazia com um `null` quando
+ele viesse é o §7.)
 
 **A prova de quando começou**, com o mesmo roteiro antigo contra a casca de
 cada época (`--casca` aponta o `ui/` exportado do histórico):
@@ -68,7 +75,7 @@ conferência de `mods_instalados` antes da volta, e a volta deixou de ser
 tentada no roteiro; o sim ainda era gravado antes da conferência, e por isso
 `alvo` ainda saía certo. O lote W (I-3) moveu a gravação para depois da
 conferência (o «não» de quem desiste não pode ser desmentido), e aí o sim
-também sumiu do roteiro. São 1347 commits entre a `ea75ac5d` e esta base, e o
+também sumiu do roteiro. São 1347 commits entre a `ea75ac5d` e a base, e o
 roteiro leu «carga limpa» em todos.
 
 ## 2. O que faltava
@@ -88,7 +95,7 @@ cobrar o que relatava.
 O argumento `aceitar_mods` não mudou de nome (`{ alvo, conjunto }`), e nenhum
 comando novo precisou de resposta além de `mods_instalados`.
 
-## 3. As exigências
+## 3. As exigências de `aceite-de-mods.js`
 
 A sequência depois de ACEITAR agora é `mods_instalados → aceitar_mods →
 conferir_esta_versao → connect`, e o roteiro a relata. O primeiro `connect` do
@@ -111,19 +118,19 @@ credencial a devolver.
 | E11 | a volta chamou `connect` | R9 |
 | E12 | a volta leva a credencial da tentativa (`joinSecret`) | R10 |
 | E13 | o diálogo está fechado depois | R11 |
+| E14 | **`aceitar_mods` vem antes do `connect` da volta** | R12 |
 
-As reprovações de E8 e E11 dizem a sequência de comandos que o roteiro viu, até
-o `connect` da volta, e é o que teria dito a causa do `alvo=undefined` no dia em
-que ela nasceu.
+As reprovações de E8, E11 e E14 dizem a sequência de comandos que o roteiro
+viu, até o `connect` da volta, e é o que teria dito a causa do `alvo=undefined`
+no dia em que ela nasceu.
 
-## 4. As reversões
+## 4. As reversões de `aceite-de-mods.js`
 
 Uma por exigência, e não só as três do pedido. Cada uma é uma linha editada no
 produto (ou no duble, para R0 e R0b), o roteiro rodado, o arquivo restaurado e
 conferido com `cmp` contra a cópia (`cmp` igual em todas), e o `git status`
-limpo no fim. A edição de cada uma foi conferida: o script de reversão acusa se
-a substituição não mudou nada. Todas saem com `exit=1` e `REPROVADO` com a
-frase da exigência.
+limpo no fim. O script de reversão acusa se a substituição não mudou nada.
+Todas saem com `exit=1` e `REPROVADO` com a frase da exigência.
 
 | # | a reversão | arquivo | a frase que o roteiro escreve |
 |---|---|---|---|
@@ -141,6 +148,7 @@ frase da exigência.
 | R9 | **a volta que não tenta**: a linha `await conectar(alvo, null, credencial)` comentada | `camada-mods.js` | `ACEITAR gravou o sim e não tentou entrar de novo: connect não foi chamado (a sequência foi: mods_instalados → aceitar_mods)` |
 | R10 | a volta sem a credencial: `conectar(alvo, null)` | `camada-mods.js` | `a volta que aceita saiu sem a credencial da tentativa (joinSecret=null): num servidor fechado por convite isso é CREDENCIAL RECUSADA sobre um convite que a recusa dos MODs não gastou` |
 | R11 | o diálogo que não fecha: `fecharAceiteDeMods()` antes da volta comentada | `camada-mods.js` | `o diálogo de aceite continuou aberto depois de ACEITAR (diálogo=VISIVEL)` |
+| R12 | **a volta antes do sim**: o `await conectar(...)` movido para antes do `try` do `aceitar_mods` | `camada-mods.js` | `a volta tentou entrar antes de o sim ser gravado, e sem o aceite em disco ela bate de novo no ponto que recusou a tentativa anterior (a sequência foi: mods_instalados → conferir_esta_versao → connect)` |
 
 E o roteiro, sem reversão nenhuma, sai com `carga limpa` e `exit=0`.
 
@@ -161,79 +169,183 @@ vai ao `seele.log`.
 
 E ele diz o que **não** cobre: a obtenção de um pacote que falta
 (`instalar_mod_do_catalogo`) e a desistência no meio dela, que a
-`ajustes-v013.cjs` prova. Neste roteiro os pacotes do anúncio já estão na
+`ajustes-v013.cjs` prova; o aceite que rejeita por dentro é de
+`aceite-de-mods-que-falha.js`. Neste roteiro os pacotes do anúncio já estão na
 máquina.
 
-## 6. Os outros roteiros da área
+## 6. `catalogo-de-mods.js` entra no lote
 
 O `grep` por aceite e MODs (`mods`, `MOD`, `aceit`, `ModsNaoAceitos`,
-`mods-aceite`, `aceitar_mods`) acha só dois roteiros em `tools/roteiros/`: este
-e `catalogo-de-mods.js`. O resto do que cita o aceite é Rust, `ui/`, a
-bancada e documentos.
+`mods-aceite`, `aceitar_mods`) acha só dois roteiros em `tools/roteiros/`:
+`aceite-de-mods.js` e `catalogo-de-mods.js`. O resto do que cita o aceite é
+Rust, `ui/`, a bancada e documentos.
 
-**`catalogo-de-mods.js` só relata o que diz provar.** O cabeçalho promete três
-coisas (BUSCAR desenha o que o catálogo devolveu, INSTALAR pede aquele MOD
-naquela versão, e a assinatura que não confere vira frase, e não lista
-vazia). Tem um único `exigir`: a seção MODS abriu. As três promessas são
-`relatar`. Rodado hoje, **os valores estão certos** (não é a mesma quebra):
+O catálogo tinha o mesmo defeito: o cabeçalho prometia três coisas (BUSCAR
+desenha o que o catálogo devolveu, INSTALAR pede aquele MOD naquela versão, e a
+assinatura que não confere vira frase, e não lista vazia), e o único `exigir`
+era a seção abrir. Medido antes, **os valores estavam certos** (não era a mesma
+quebra: era o mesmo risco). Agora são dez `exigir`, e doze reversões:
 
-```
-buscou ao abrir: false          linhas no catálogo: 1
-selo da versão exibida: versão 1.1.0 · VERIFICADO
-pediu instalação: id=alguem/rpg versao=1.1.0
-recusa vira frase: O CATÁLOGO NÃO É O NOSSO.      marcada como erro: true
-```
+| # | exigência | reversão | a frase que o roteiro escreve |
+|---|---|---|---|
+| K0 | a seção MODS abriu (já existia) | `$("secao-mods").hidden = true` (`tela-server.js`) | `a seção MODS não abriu` |
+| K1 | abrir a seção não vai à rede (ADR 0026) | `desenharApresentacoes()` chama `catalogo_de_mods` | `abrir a seção MODS foi à rede buscar o catálogo sem ninguém apertar BUSCAR (ADR 0026)` |
+| K2a | uma linha por MOD do catálogo | `.slice(0, 0)` na lista | `BUSCAR não desenhou o que o catálogo devolveu: 0 linhas desenhadas, e o catálogo trouxe 1` |
+| K2b | a linha é a do MOD (título e id) | o título trocado por «MOD» | `a linha desenhada não é a do MOD do catálogo («Salas de RPG», alguem/rpg): «MODalguem/rpg…»` |
+| K2c | o estado diz «1 no catálogo.» | `mods.length + 1` | `o estado da busca diz «2 no catálogo.», e o catálogo trouxe 1` |
+| K3a | o selo é o da versão exibida, e não o do MOD | `NIVEIS[mod.nivel]` no lugar de `NIVEIS[ultima.nivel]` | `o selo desenhado é «versão 1.1.0 · OFICIAL», e devia ser «versão 1.1.0 · VERIFICADO»: a versão exibida é a 1.1.0, verificada, e o MOD é «oficial»` |
+| K3b | a versão exibida é a última, a 1.1.0 | `mod.versoes[0]` | `o selo desenhado é «versão 1.0.0 · PUBLICADO COM NOTAS», e devia ser «versão 1.1.0 · VERIFICADO»…` |
+| K4a | INSTALAR pede a versão exibida | `mod.versoes[0].versao` | `INSTALAR pediu «alguem/rpg 1.0.0», e a linha desenhada era a alguem/rpg 1.1.0` |
+| K4b | INSTALAR pede o `id`, e não o título | `mod.titulo` | `INSTALAR pediu «Salas de RPG 1.1.0», e a linha desenhada era a alguem/rpg 1.1.0` |
+| K4c | INSTALAR chama `instalar_mod_do_catalogo` | a chamada trocada por `Promise.resolve()` | `INSTALAR não pediu nada: instalar_mod_do_catalogo nunca foi chamado (a sequência foi: snapshot → volumes_locais → snapshot → estado_do_servidor)` |
+| K5 | a recusa de assinatura vira a frase que manda parar | o `catch` escreve «o catálogo está no ar e ainda não lista nenhum MOD.» | `a assinatura do catálogo que não confere não virou a frase que manda parar: o estado diz «o catálogo está no ar e ainda não lista nenhum MOD.»` |
+| K6 | a recusa é marcada como erro (`mods-recusado`) | a marca tirada do `catch` | `a recusa de assinatura foi escrita como um estado qualquer, e não marcada como erro (mods-recusado)` |
 
-Não consertei. São seis exigências (`buscou ao abrir` falso, uma linha, o selo
-da 1.1.0, o pedido com id e versão, a frase não vazia, a marca de erro), e
-cada uma pede a sua reversão para valer: não é trivial, é um lote pequeno
-igual a este. Fica a lista para quem o pegar.
+Todas com `exit=1` e `cmp` igual depois de restaurar.
+
+**Uma mudança no catálogo do roteiro, que o selo exige.** O MOD tinha `nivel:
+"verificado"` no topo e a 1.1.0 também era `"verificado"`: uma linha que lesse o
+selo do MOD no lugar do da versão desenharia o mesmo texto e passaria. O topo
+passou a `"oficial"`. Sem isso K3a não reprovava; é o tipo de exigência que
+existe e não funciona.
+
+## 7. A rejeição de `aceitarOsMods` (produto)
+
+### A medida: qual `invoke` rejeita de verdade
+
+Nenhum rejeita para fora. Medido com um roteiro de rascunho (apagado), nove
+cenas, cada uma com um `invoke` de dentro de `aceitarOsMods` simulado:
+
+| cena | o que a tela faz |
+|---|---|
+| tudo certo | `mods_instalados → aceitar_mods → conferir_esta_versao → connect`, diálogo fecha |
+| `mods_instalados` recusa (`Err`) | frase «não consegui ler o que está instalado aqui…», ACEITAR aceso |
+| a obtenção (`instalar_mod_do_catalogo`) recusa | frase «não consegui obter seele/placar 1.4.0…», ACEITAR aceso |
+| a segunda `mods_instalados` (a conferência) recusa | frase «não consegui conferir o que chegou…», ACEITAR aceso |
+| `aceitar_mods` recusa (`Err`) | a frase da recusa, ACEITAR aceso, não entra |
+| a volta (`connect`) recusa | o `conectar` escreve a linha vermelha da entrada («CREDENCIAL RECUSADA») |
+| **`mods_instalados` devolve `null`, `{}` ou `[null]`** | **nada: o diálogo fica, o ACEITAR fica apagado, sem frase** |
+
+Os cinco `invoke` do aceite estão dentro de um `try` que escreve uma frase, e a
+volta é do `conectar`. O que escapa é a **resposta de forma errada**, que
+estoura em `.some`/`.filter` fora de qualquer `try`. O produto não a manda
+hoje: `mods_instalados` devolve `Vec`, e o anúncio (`mods`, `conjunto`) é
+decodificado no Rust antes de chegar à casca. O defeito é real e hoje
+inalcançável; o conserto é local (uma função e uma linha), e não pediu parar.
+
+### O conserto
+
+`camada-mods.js`: o clique em ACEITAR guarda a pergunta a que responde e passa
+a falha de `aceitarOsMods` a `aceiteFalhou(pergunta, falha)`, no lugar do
+`console.warn`.
+
+- **Sempre** vai ao `seele.log`, por `registrarNoAnfitriao("aceite-de-mods",
+  …, "aviso")`, com o alvo e o motivo. Nunca a credencial: `aceiteFalhou` não a
+  nomeia em linha alguma, e o guarda da credencial confere.
+- **Se a pergunta que falhou ainda é a da tela**, a frase vai a `#mods-erro`
+  («não consegui concluir o aceite dos MODs de <alvo>: <o motivo>. Tente de novo,
+  ou recuse a entrada.», a mesma forma da obtenção) e o ACEITAR volta.
+- **Se a pergunta largou** (a pessoa desistiu, ou há uma pergunta nova), a tela
+  não fala: o erro de uma pergunta que ela deixou não aparece na seguinte. É a
+  regra da recusa da tentativa substituída (W2). Fica só o registro.
+
+O guarda `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`
+reprovou na primeira rodada, como devia: `if (!pergunta || aceitePendente !==
+pergunta) return;` é uma linha nova que toca `aceitePendente`. Conferi que ela
+só compara identidade e não leva a credencial a lugar nenhum, e a acrescentei à
+lista dele, com o comentário. O `aceitarOsMods` ficou intacto (o guarda
+`o_aceite_obtem_o_conjunto_antes_de_entrar` lê o corpo dele).
+
+### A prova: `tools/roteiros/aceite-de-mods-que-falha.js`
+
+Um roteiro novo, com 11 `exigir`, que simula a única resposta que rejeita
+(`mods_instalados` → `null`), em duas cenas.
+
+1. **A pergunta que falhou fala.** A frase no diálogo com o alvo e o «Tente de
+   novo», o ACEITAR aceso e o diálogo aberto, um registro `aceite-de-mods` de
+   nível `aviso` com o alvo e o `TypeError`, **sem o convite**; e o mesmo ACEITAR,
+   com a resposta certa, grava o sim e entra levando o convite que a falha não
+   comeu, com o diálogo e a frase fechados.
+2. **A pergunta que largou não fala.** O aceite da pergunta 1 espera uma leitura
+   pendente; a pessoa recusa; vem a pergunta 2; a leitura chega com a resposta
+   errada. A pergunta 2 não mostra o erro da 1, e o registro foi escrito.
+
+| # | a reversão | a frase que o roteiro escreve |
+|---|---|---|
+| F1 | **o `console.warn` de volta** no `.catch` do clique | `ACEITAR rejeitou por dentro e a tela não disse o que falhou, com o alvo e o caminho de volta (mods-erro=escondida, a sequência foi: mods_instalados)` |
+| F2 | o ACEITAR não volta (a linha `disabled = false` tirada) | `ACEITAR rejeitou por dentro e o botão ACEITAR ficou apagado: a pessoa não tem como tentar de novo` |
+| F3 | o motivo não vai ao `seele.log` | `ACEITAR rejeitou por dentro e o motivo não foi ao seele.log com o alvo, o erro e o nível aviso (registros de «aceite-de-mods»: [])` |
+| F4 | o registro leva a credencial da tentativa | `o registro do aceite que falhou levou o convite da tentativa, que só pode ir ao connect` |
+| F5 | a frase sem o alvo | `ACEITAR rejeitou por dentro e a tela não disse o que falhou, com o alvo e o caminho de volta (mods-erro=VISIVEL, …)` |
+| F6 | a falha come a credencial (`pergunta.credencial = null`) | `a falha comeu a credencial da tentativa: a volta saiu com joinSecret=null` |
+| F7 | a pergunta que largou também fala (a conferência de identidade tirada) | `o erro de uma pergunta que a pessoa largou apareceu na pergunta nova: «não consegui concluir o aceite dos MODs de 203.0.113.9:8383: ALGO FALHOU…»` |
+| F8 | a pergunta que largou não vai ao `seele.log` (o `return` sobe para antes do registro) | `o aceite de uma pergunta que largou rejeitou e não foi ao seele.log (0 registros em vez de 1)` |
+| F9 | a frase da falha sobrevive à segunda tentativa (`erro.hidden = true` tirado de `aceitarOsMods`) | `a segunda tentativa entrou, e o diálogo ou a frase da falha continuou na tela (diálogo=escondida, mods-erro=VISIVEL)` |
+| F10 | a falha deixa a pergunta sem dono (`aceitePendente = null`) | `depois da falha, o mesmo ACEITAR com a resposta certa não gravou o sim e entrou (a sequência foi: nenhuma)` |
+
+Duas exigências são precondição da cena («a recusa por MODs não abriu o
+diálogo» na cena 1, «a segunda recusa… não abriu a pergunta nova» na cena 2) e
+não têm reversão própria.
+
+## 8. Os outros roteiros, fora da área
 
 Fora da área, só lendo: 20 dos outros 28 roteiros de `tools/roteiros/` não têm
-nenhum `exigir` (`barra-mac`, `avatar-na-chamada`, `atualizacao`,
-`dispositivos`, `clique-nos-glifos`, `icone-na-trilha`, `perfil-entrada`,
-`compartilhar`, `renomear-canal`, `icone-do-server`, `medidas`, `perfil-salva`,
+nenhum `exigir`, e ficam como estão:
+
+`barra-mac`, `avatar-na-chamada`, `atualizacao`, `dispositivos`,
+`clique-nos-glifos`, `icone-na-trilha`, `perfil-entrada`, `compartilhar`,
+`renomear-canal`, `icone-do-server`, `medidas`, `perfil-salva`,
 `tela-de-outra-versao`, `palco`, `perfil-sessao`, `perfil-salva-sessao`,
 `rodape-do-operador`, `versao-do-servidor`, `trocar-de-janela`,
-`botoes-da-entrada`). Alguns são medidas de propósito (`medidas`, `palco`); não
-li cada um para separar os que relatam o que dizem provar.
+`botoes-da-entrada`.
 
-## 7. O que rodou
+Alguns são medidas de propósito (`medidas`, `palco`); não li cada um para
+separar os que relatam o que dizem provar.
 
-- `python3 tools/carga-da-casca.py --roteiro tools/roteiros/aceite-de-mods.js`:
-  `carga limpa`, exit 0; as 14 reversões, exit 1 com a frase certa; as duas
-  cascas antigas, na tabela do §1. Os outros roteiros com `exigir` não foram
-  rodados de novo: o aparelho não mudou.
-- `cargo test -p seele-app --test frontend`: 287 passed. O lote não mexe em
-  `ui/`; foi rodado para confirmar. As reversões tocaram `camada-mods.js` e
-  `tela-boot.js` e as restauraram byte a byte (`cmp`).
+## 9. O que rodou
+
+- Os três roteiros: `carga limpa`, exit 0; as 15 + 12 + 10 reversões, exit 1
+  com a frase certa e `cmp` igual depois de restaurar; as duas cascas antigas,
+  na tabela do §1. Os outros roteiros com `exigir` não foram rodados de novo:
+  o aparelho não mudou.
+- `cargo test -p seele-app --test frontend`: 287 passed (depois da linha nova
+  no guarda da credencial).
 - `cargo test -p seele-app --bin seele-app`: 312 passed.
 - `cargo xtask check-runtime`: exit 0, 12 bancadas.
 - `cargo fmt --all -- --check`: limpo.
-- `ajustes-v013.cjs` (`PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright`):
-  exit 0, todas as cenas, incluindo as do lote R, W e W2 sobre o aceite.
+- `cargo clippy -p seele-app --all-targets --all-features -- -D warnings`: limpo.
+- `ajustes-v013.cjs`, `diagnostico-de-mods.cjs` e
+  `contribuicoes-e-camadas.cjs` (`PLAYWRIGHT=/Users/dev-alexandre/SEELE-MOD-PERFIS/node_modules/playwright`):
+  exit 0 nas três, **sobre `5bc3c84e`** (o commit do produto). A `ajustes-v013.cjs`
+  tem a cena que procura a credencial em todo comando que não seja o `connect`,
+  e continua verde com o registro novo.
+- **Falta rodar, por causa da pausa da orquestradora (CPU e quadros):** as três
+  bancadas de novo sobre a ponta (`9a53cc13`). Desde `5bc3c84e` o produto não
+  mudou — só `aceite-de-mods.js` (uma exigência e uma linha de cabeçalho) e este
+  relatório —, então não se espera diferença; mas não foi medido. Tudo o mais
+  deste item foi rodado sobre `9a53cc13`: os três roteiros, `frontend` (287),
+  `--bin` (312), `check-runtime`, fmt e clippy.
 - Não rodados: `cargo test --workspace`, conformidade.
 
-## 8. Preocupações
+## 10. Preocupações
 
-1. **O `.catch` de `camada-mods.js:415` é o «o produto sabe e não conta» de
-   uma rejeição que hoje não acontece.** `aceitarOsMods().catch(console.warn)`
-   deixa o ACEITAR apagado e a tela sem frase nenhuma se `aceitarOsMods`
-   rejeitar. É o que o roteiro mediu com o duble ruim. No produto, o único
-   `await` fora de `try` que poderia rejeitar é o `.some` sobre uma resposta
-   que não seja lista, e `mods_instalados` devolve `Vec`; por isso não é
-   defeito alcançável. Não consertei (mexeria em `ui/`, e o pedido foi parar se
-   fosse do produto): fica para decisão, e a frase do roteiro agora mostra a
-   sequência que o `console.warn` esconderia.
-2. **Existir não era funcionar, por três semanas.** A `ea75ac5d` e o lote W
-   quebraram o roteiro sem que nada reprovasse; quem o notou foi a medida do
-   W2, lendo as linhas à mão. A `ajustes-v013.cjs` cobre o mesmo caminho em
-   profundidade e não quebrou, e é por isso que o produto nunca ficou sem
-   prova; o roteiro é a cobertura leve que ficou muda.
-3. **O que o roteiro não cobre** (dito no cabeçalho): a obtenção de pacote que
-   falta e a desistência no meio dela, que a `ajustes-v013.cjs` cobre (junto
-   com o sim que não fica gravado quando se desiste). A ordem «`aceitar_mods`
-   antes do `connect`» aparece na sequência que a reprovação imprime, mas
-   nenhuma exigência a cobra por si.
-4. **`catalogo-de-mods.js`** (§6): a mesma forma de risco, com os valores
-   certos hoje.
+1. **Nenhum roteiro roda em CI.** `grep -rn "roteiros\|carga-da-casca"` em
+   `.github/` e em `xtask/` não acha nada: a única menção é a tabela do
+   `README.md`. Tudo o que este lote fez reprovar só reprova quando alguém roda
+   `python3 tools/carga-da-casca.py --roteiro …` à mão — foi assim que o
+   `aceite-de-mods.js` ficou três semanas calado, e é por isso que a
+   `ajustes-v013.cjs`, que roda no job `bancadas`, nunca ficou sem prova. A
+   exigência do `console.warn` (F1) mora num roteiro, como pediu a decisão;
+   uma cena na `ajustes-v013.cjs` a faria valer em CI. Não fiz: é outro
+   escopo, e a decisão é sua.
+2. **O gêmeo do `.catch`, 7 linhas acima.** `levarParaOAceiteDeMods` faz
+   `abrirAceiteDeMods(…).catch(console.warn("abrir aceite"))`, e retorna
+   `true`: se abrir a pergunta rejeitar, não há diálogo **nem** linha vermelha,
+   e o CONECTAR volta aceso sem uma palavra. Mesma forma, mesma inalcançabilidade
+   hoje (o anúncio vem decodificado do Rust; o `invoke` de dentro está num
+   `try`). O pedido nomeou só o `:415`, e não mexi.
+3. **O que `aceite-de-mods.js` não cobre** (dito no cabeçalho): a obtenção de
+   pacote que falta e a desistência no meio dela, que a `ajustes-v013.cjs` cobre.
+4. **O catálogo do roteiro mudou de dado** (§6, o `nivel` do topo): quem
+   comparar a saída antiga com a nova do `catalogo-de-mods.js` vê o selo do MOD
+   diferente. É de propósito.
