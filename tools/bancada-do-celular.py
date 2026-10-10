@@ -26,6 +26,24 @@ ainda não estão no produto (spec, §9.4) são injetados só na cópia, pela ta
 `PONTOS_INJETADOS`. Quando um deles entra no produto, a bancada reprova até a
 injeção dele sair da tabela, no mesmo commit.
 
+**O que já se mediu, e não se tenta de novo.**
+
+- **O `fetch` não lê arquivo em `file://`** (medido em 10/10). O Chromium e o
+  WebKit recusam, com ou sem `--allow-file-access-from-files`; o
+  `XMLHttpRequest` só passa no Chromium com a bandeira. A casca usa o `fetch`
+  porque a página de verdade vem de https: um caso que dependa dele (o enlace da
+  entrada lê o `marca-simbolo.svg`) pede `Caso(http=True)`, e a cópia é servida
+  em 127.0.0.1 numa porta efêmera, que não disputa a 8384. Trocar o `fetch` da
+  casca para caber na bancada seria provar outra coisa.
+- **Visível é o que o `checkVisibility()` diz** (regra da bancada desde 10/10).
+  Num `<details>` fechado o conteúdo some por `content-visibility`, e o
+  `getBoundingClientRect` ainda o mede com altura: uma conferência só pela caixa
+  dava como à vista a falha escrita num registro fechado, e a reversão passava.
+  Toda conferência nova de «está à vista» usa o `checkVisibility()`, e não só a
+  caixa.
+- **O Ed25519 e o IndexedDB funcionam em `file://`** no Chromium da bancada
+  (medido em 10/10, com a identidade de verdade da F4).
+
 Uso:
     python3 tools/bancada-do-celular.py /tmp/bancada
     python3 tools/bancada-do-celular.py /tmp/bancada --so sessao-entrou
@@ -37,7 +55,10 @@ com 1 se algo reprovar.
 """
 
 import argparse
+import contextlib
 import dataclasses
+import functools
+import http.server
 import importlib.util
 import json
 import pathlib
@@ -45,6 +66,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 from typing import Callable
 
 from PIL import Image, ImageChops
@@ -364,6 +386,374 @@ class Caso:
     marca: str = "celular"
     # Entrar na sessão antes do caso; um caso da entrada entra ele mesmo.
     entrar: bool = True
+    # Servir a cópia por HTTP, e não por `file://`. A página de verdade vem de
+    # uma origem https, e o `fetch` de um arquivo da `ui/` (o símbolo da marca,
+    # para o enlace) não funciona em `file://`: medido em 10/10, o Chromium e o
+    # WebKit recusam, com ou sem `--allow-file-access-from-files`.
+    http: bool = False
+
+
+@contextlib.contextmanager
+def servida(pasta: pathlib.Path):
+    """A cópia servida em 127.0.0.1, numa porta efêmera: nada disputa a 8384."""
+    class Calado(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Calado, directory=str(pasta)))
+    fio = threading.Thread(target=servidor.serve_forever, daemon=True)
+    fio.start()
+    try:
+        yield f"http://127.0.0.1:{servidor.server_address[1]}"
+    finally:
+        servidor.shutdown()
+        servidor.server_close()
+
+
+# ------------------------------------------------------------- a entrada
+#
+# A identidade de verdade (`criarIdentidadeDoNavegador`, da F4), com os dois
+# pontos que ela recebe na criação trocados pelo caso: `analisar` (no produto,
+# o `.wasm`) lê o estado pedido no fragmento, e `conectar` (no produto, a
+# sessão pela ponte, 2.6) anota cada entrada e responde o que estiver na fila.
+# Nada mais é duble: os estados, os desfechos, o token e o aceite são os dela.
+IDENTIDADE_DO_CASO = r"""() => {
+  const agora = Math.floor(Date.now() / 1000);
+  const link = (extra = {}) => ({ link: { alvo: "198.51.100.7:8383", impressao: "3cbcfb02".repeat(8), versao: "1.0",
+    ate: agora + 7 * 86400, hashes: ["sha-256:caso"], convite: "7K4MNPQRSTVWXYZ23456", ...extra } });
+  const LINKS = {
+    pronto: link(), vencido: link({ ate: agora - 60 }),
+    "servidor-0.15": { erro: "SemHashesDoNavegador" }, incompleto: { erro: "SemImpressao" }, "outra-origem": { erro: "OutraOrigem" },
+  };
+  window.__conexoes = [];
+  window.__respostas = [];
+  window.__identidade = criarIdentidadeDoNavegador({
+    analisar: (texto) => LINKS[texto.split("#")[1]] ?? { erro: "Desconhecido" },
+    conectar: async (alvo, apelido, credencial) => {
+      window.__conexoes.push({ endereco: alvo.endereco, apelido, credencial });
+      const resposta = window.__respostas.shift();
+      if (resposta === "espera") await new Promise((soltar) => { window.__soltarAConexao = soltar; });
+      else if (resposta) throw resposta;
+    },
+    instalado: () => window.__instalado ?? true,
+  });
+}"""
+
+ENTRADA_LIDA = r"""() => {
+  const corpo = document.querySelector(".cel-entrada-corpo");
+  const impressao = corpo.querySelector(".cel-entrada-impressao");
+  const b = impressao?.getBoundingClientRect();
+  return {
+    titulo: corpo.querySelector("#cel-entrada-titulo")?.textContent.replace(/\s+/g, " ").trim() ?? null,
+    avisos: [...corpo.querySelectorAll(".cel-entrada-aviso-titulo")].map((e) => e.textContent),
+    grupos: impressao ? [...impressao.children].map((e) => e.textContent) : [],
+    impressaoCabe: !impressao || b.right <= innerWidth,
+    vaza: document.documentElement.scrollWidth > innerWidth,
+    acoes: [...document.querySelectorAll(".cel-entrada-pe button")].map((e) => [e.textContent, Math.round(e.getBoundingClientRect().height)]),
+    campo: corpo.querySelector("#cel-entrada-apelido") ? { valor: corpo.querySelector("#cel-entrada-apelido").value,
+      invalido: corpo.querySelector("#cel-entrada-apelido").getAttribute("aria-invalid") } : null,
+    conexoes: window.__conexoes.length,
+  };
+}"""
+
+
+def usar_a_entrada(pg: Page, **opcoes) -> None:
+    pg.evaluate("""(o) => CELULAR.ajudante("entrada").usar(window.__identidade, {
+        link: o.link ?? null,
+        // Na forma do `conhecidos()` combinado com a F4: do mais recente ao mais
+        // antigo, com o `podeEntrar` (os hashes guardados vencem).
+        conhecidos: async () => [
+          { impressao: "aa".repeat(32), nome: "OFICINA", endereco: "192.168.0.14:8383", versaoDoServidor: "1.0", visto: Date.now(), podeEntrar: true },
+          { impressao: "bb".repeat(32), nome: null, endereco: "tq3.duckdns.org:8383", versaoDoServidor: "1.0", visto: Date.now() - 9 * 86400000, podeEntrar: false },
+        ] })""", opcoes)
+    pg.wait_for_timeout(300)
+
+
+def tocar_acao(pg: Page, texto: str) -> bool:
+    """Toca a ação do pé da entrada que diz `texto`."""
+    return tocar(pg, f".cel-entrada-pe button:text-is('{texto}')")
+
+
+def entrada(pg: Page) -> list[str]:
+    """A entrada (Tarefa 10; spec §2.1), da tela de início aos estados da
+    «ENTRAR EM», sobre a identidade de verdade da F4.
+
+    A tela de início lista os servidores deste aparelho com ENTRAR, tem COLAR UM
+    LINK e a frase do hospedar com o BAIXAR O APP DO SEELE apontando para a
+    `PAGINA_DO_APP`. Em cada estado: o título «ENTRAR EM <endereço>?», sem nome
+    de servidor; a impressão em dezesseis grupos de quatro, sem passar da tela;
+    o aviso do estado e as ações dele. **Nada conecta antes do toque em
+    ENTRAR.** Termina na «ENTRAR EM» pronta, para a foto."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    usar_a_entrada(pg)
+    inicio = pg.evaluate("""() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent,
+        servidores: [...document.querySelectorAll(".cel-entrada-servidor")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+        baixar: document.querySelector(".cel-entrada-fora a.cel-baixar")?.getAttribute("href"),
+        colar: [...document.querySelectorAll(".cel-entrada-pe button")].map((b) => b.textContent),
+        caixaDoDesktop: getComputedStyle(document.querySelector("#tela-boot > .boot-caixa")).display })""")
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada")
+    if inicio["titulo"] != f["inicio"]["titulo"]:
+        falhas.append(f"a tela de início diz «{inicio['titulo']}»")
+    # O que entra diz ENTRAR; o de hashes vencidos diz LINK VENCIDO, e o que não
+    # tem nome ainda (antes do primeiro retrato) mostra o endereço.
+    servidores = inicio["servidores"]
+    versao = pg.evaluate("FRASES_DO_CELULAR.entrada.inicio.servidor('1.0')")
+    if any(versao not in texto for texto, _ in servidores):
+        falhas.append(f"um servidor deste aparelho não diz a versão dele: {servidores}")
+    if (len(servidores) != 2 or not servidores[0][0].startswith("OFICINA") or not servidores[0][0].endswith(f["inicio"]["entrar"])
+            or not servidores[1][0].startswith("tq3.duckdns.org:8383") or servidores[1][0].count("tq3.duckdns.org:8383") != 1
+            or not servidores[1][0].endswith(f["inicio"]["linkVencido"])
+            or any(alto < 44 for _, alto in servidores)):
+        falhas.append(f"os servidores deste aparelho saem {servidores}")
+    if inicio["baixar"] != pg.evaluate("PAGINA_DO_APP"):
+        falhas.append(f"o BAIXAR O APP DO SEELE aponta para {inicio['baixar']}")
+    if inicio["colar"] != [f["inicio"]["colar"]]:
+        falhas.append(f"o pé da tela de início tem {inicio['colar']}")
+    if inicio["caixaDoDesktop"] != "none":
+        falhas.append("a caixa de entrada do desktop continua à vista no celular")
+
+    e = f["estados"]
+    esperado = {
+        "pronto": (None, [f["entrarEm"]["entrar"], f["entrarEm"]["agoraNao"]]),
+        "numa-aba": (e["numa-aba"]["titulo"], [e["numa-aba"]["copiar"], f["entrarEm"]["agoraNao"]]),
+        "vencido": ("ESTE LINK VENCEU EM", [f["entrarEm"]["servidores"]]),
+        "servidor-0.15": (e["servidor-0.15"]["titulo"], [f["entrarEm"]["servidores"]]),
+        "incompleto": (e["incompleto"]["titulo"], [f["entrarEm"]["servidores"]]),
+        "outra-origem": (e["outra-origem"]["titulo"], [f["entrarEm"]["servidores"]]),
+    }
+    for estado, (aviso, acoes) in esperado.items():
+        pg.evaluate(f"window.__instalado = {'false' if estado == 'numa-aba' else 'true'}")
+        usar_a_entrada(pg, link=f"https://pagina.invalid/#{'pronto' if estado == 'numa-aba' else estado}")
+        lido = pg.evaluate(ENTRADA_LIDA)
+        com_endereco = estado in ("pronto", "numa-aba", "vencido")
+        if com_endereco and lido["titulo"] != "ENTRAR EM 198.51.100.7:8383?":
+            falhas.append(f"{estado}: o título diz «{lido['titulo']}», e não «ENTRAR EM 198.51.100.7:8383?»")
+        if com_endereco and (len(lido["grupos"]) != 16 or any(len(g) != 4 for g in lido["grupos"])):
+            falhas.append(f"{estado}: a impressão sai em {lido['grupos']}")
+        if not lido["impressaoCabe"] or lido["vaza"]:
+            falhas.append(f"{estado}: a impressão passa da tela, ou a página rola de lado")
+        if aviso and not any(a.startswith(aviso) for a in lido["avisos"]):
+            falhas.append(f"{estado}: o aviso diz {lido['avisos']}, e não «{aviso}…»")
+        if [t for t, _ in lido["acoes"]] != acoes:
+            falhas.append(f"{estado}: as ações são {lido['acoes']}, e não {acoes}")
+        if any(alto < 44 for _, alto in lido["acoes"]):
+            falhas.append(f"{estado}: uma ação tem menos de 44: {lido['acoes']}")
+        if lido["conexoes"]:
+            falhas.append(f"{estado}: a tela conectou antes do ENTRAR ({lido['conexoes']} entradas)")
+    pg.evaluate("window.__instalado = true")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    return falhas
+
+
+def entrada_desfechos(pg: Page) -> list[str]:
+    """Os desfechos do ENTRAR (Tarefa 10), sobre a identidade de verdade.
+
+    O apelido tomado devolve o campo vazio e marcado, e o convite gasto logo
+    depois dele diz que o convite acabou, e não que o apelido está tomado. Sem
+    rede, o ENTRAR continua. Os MODs a aceitar abrem o aceite do desktop, e o
+    ACEITAR entra de novo **com o mesmo token**; o RECUSAR encerra a tentativa.
+    Quem já entrou volta como conhecido, sem gastar o convite. Enquanto a
+    conexão abre, o enlace se desenha, parado sob movimento reduzido."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    f = pg.evaluate("FRASES_DO_CELULAR.entrada")
+    entrar = f["entrarEm"]["entrar"]
+
+    def tentar(apelido: str, respostas: str) -> dict:
+        pg.evaluate(f"window.__respostas.push(...{respostas})")
+        pg.fill("#cel-entrada-apelido", apelido)
+        tocar_acao(pg, entrar)
+        pg.wait_for_timeout(500)
+        return pg.evaluate(ENTRADA_LIDA)
+
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    tomado = tentar("rafa", '[{ Refused: { reason: "NicknameTaken" } }]')
+    if tomado["campo"] != {"valor": "", "invalido": "true"} or f["desfechos"]["apelido-tomado"][0] not in tomado["avisos"]:
+        falhas.append(f"o apelido tomado não devolve o campo vazio e marcado: {tomado}")
+    gasto = tentar("rafa2", '["CredentialRejected"]')
+    if gasto["avisos"][:1] != [f["desfechos"]["convite-gasto"][0]] or [t for t, _ in gasto["acoes"]] != [f["entrarEm"]["servidores"]]:
+        falhas.append(f"o convite gasto depois do apelido tomado diz {gasto['avisos']}, com {gasto['acoes']}")
+    tokens = pg.evaluate("window.__conexoes.map((c) => c.credencial)")
+    if tokens != ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"]:
+        falhas.append(f"as duas entradas levaram {tokens}")
+
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    sem_rede = tentar("rafa", '["Unreachable"]')
+    if sem_rede["avisos"][:1] != [f["desfechos"]["sem-rede"][0]] or [t for t, _ in sem_rede["acoes"]][:1] != [entrar]:
+        falhas.append(f"sem rede, a tela diz {sem_rede['avisos']}, com {sem_rede['acoes']}")
+
+    # Os MODs: o aceite do desktop abre, e o ACEITAR entra de novo com o mesmo token.
+    pg.evaluate("window.__conexoes.length = 0")
+    mods = '[{ ModsNaoAceitos: { mods: [{ id: "seele/estilo", version: "4.0.0", hash: "ab".repeat(32), reach: ["servidor.aparencia"] }], conjunto: "c1" } }]'
+    tentar("rafa", mods)
+    if not pg.locator("#mods-aceite").is_visible():
+        falhas.append("os MODs a aceitar não abriram o aceite")
+    else:
+        tocar(pg, "#mods-aceitar")
+        pg.wait_for_timeout(500)
+        depois = pg.evaluate("""() => ({ tokens: window.__conexoes.map((c) => c.credencial),
+            aceite: JSON.parse(localStorage.getItem("seele.aceites-de-mods") ?? "{}")["3cbcfb02".repeat(8)] ?? null,
+            aberto: !document.getElementById("mods-aceite").hidden })""")
+        if depois != {"tokens": ["7K4MNPQRSTVWXYZ23456", "7K4MNPQRSTVWXYZ23456"], "aceite": "c1", "aberto": False}:
+            falhas.append(f"o ACEITAR não entrou de novo com o mesmo token e o sim gravado: {depois}")
+    # O RECUSAR encerra a tentativa e volta à tela de início.
+    usar_a_entrada(pg, link="https://pagina.invalid/#vencido")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    tentar("rafa", mods)
+    tocar(pg, "#mods-recusar")
+    pg.wait_for_timeout(400)
+    recusado = pg.evaluate("""() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent, tentativa: window.__identidade.ler() })""")
+    if recusado != {"titulo": f["inicio"]["titulo"], "tentativa": None}:
+        falhas.append(f"o RECUSAR não encerrou a tentativa: {recusado}")
+
+    # Conectando: o enlace, parado sob movimento reduzido e desenhado sem ele.
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    pg.evaluate('window.__respostas.push("espera")')
+    pg.fill("#cel-entrada-apelido", "rafa")
+    tocar_acao(pg, entrar)
+    pg.wait_for_timeout(400)
+    # Sem movimento reduzido, o enlace se desenha; com ele, fica parado e
+    # desenhado inteiro (o traço no fim, e não no começo, que é invisível).
+    enlace = "(() => { const p = document.querySelector('.cel-entrada-conectando svg path'); return p ? [getComputedStyle(p).animationName, getComputedStyle(p).strokeDashoffset] : null; })()"
+    parado = pg.evaluate(enlace)
+    pg.emulate_media(reduced_motion="no-preference")
+    andando = pg.evaluate(enlace)
+    pg.emulate_media(reduced_motion="reduce")
+    if parado != ["none", "0px"] or not andando or andando[0] != "cel-enlace":
+        falhas.append(f"o enlace da conexão está {andando!r} sem movimento reduzido e {parado!r} com ele")
+    if not pg.evaluate("typeof window.__soltarAConexao === 'function'"):
+        falhas.append("o ENTRAR não chegou à conexão que espera: a tela de conectar não foi medida")
+        return falhas
+    pg.evaluate("window.__soltarAConexao()")
+    pg.wait_for_timeout(500)
+    # Quem entrou volta como conhecido: o convite não é usado.
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    conhecido = pg.evaluate(ENTRADA_LIDA)
+    if f["estados"]["ja-conhecido"]["titulo"] not in conhecido["avisos"] or [t for t, _ in conhecido["acoes"]][:1] != [entrar]:
+        falhas.append(f"quem já entrou não volta como conhecido: {conhecido['avisos']}, {conhecido['acoes']}")
+    return falhas
+
+
+# ------------------------------------------------- a entrada direta (D-celular-3)
+
+CONFERIDA = '{ FirstContactVerified: { fingerprint: "3cbc fb02 3cbc fb02 3cbc fb02 3cbc fb02" } }'
+
+
+def entrar_com_veredito(pg: Page, veredito: str, antes: str = "") -> None:
+    """Entra pelo `conectar` do desktop com o veredito pedido, contando cada
+    vez que o aperto aparece sem a marca da entrada direta."""
+    pg.wait_for_function("typeof conectar === 'function'")
+    pg.wait_for_timeout(600)
+    pg.evaluate(f"""() => {{
+      SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {veredito} }};
+      {antes}
+      window.__apertos = 0;
+      const tela = document.getElementById('tela-auth');
+      new MutationObserver(() => {{
+        if (!tela.hidden && tela.dataset.modo === 'aperto' && !tela.hasAttribute('data-entrada-direta')) window.__apertos++;
+      }}).observe(tela, {{ attributes: true, attributeFilter: ['hidden', 'data-modo', 'data-entrada-direta'] }});
+    }}""")
+    pg.evaluate("conectar('127.0.0.1:8383', 'rafa', null)")
+    pg.wait_for_timeout(1500)
+
+
+ESTADO_DA_ENTRADA = r"""() => {
+  const tela = document.getElementById('tela-auth'), botao = document.getElementById('auth-botao');
+  const linhas = [...document.querySelectorAll('#auth-registro .registro-linha')];
+  // Num `<details>` fechado, o conteúdo some por `content-visibility`, e o
+  // `getBoundingClientRect` ainda o mede: quem diz se ele se vê é o
+  // `checkVisibility`, e o `<details>` aberto.
+  const visivel = (e) => !!e && e.checkVisibility() && !e.closest('details:not([open])') && e.getBoundingClientRect().height > 0;
+  return { sessao: !document.getElementById('tela-sessao').hidden, auth: !tela.hidden, modo: tela.dataset.modo ?? null,
+           direta: tela.hasAttribute('data-entrada-direta'), apertos: window.__apertos,
+           botao: [botao.textContent, botao.disabled, Math.round(botao.getBoundingClientRect().height)],
+           registro: linhas.map((l) => l.querySelector('.registro-texto')?.textContent ?? ''),
+           ultima: linhas.length ? [linhas.at(-1).querySelector('.registro-texto')?.textContent ?? '', visivel(linhas.at(-1))] : null,
+           vaza: document.documentElement.scrollWidth > innerWidth };
+}"""
+
+
+def entrada_direta(pg: Page) -> list[str]:
+    """D-celular-3: com a impressão conferida, o aperto da tela de entrada não
+    aparece no celular, e a sessão abre sem um toque. Pula-se a tela, e não o
+    passo: o registro diz a entrada direta, e o `inserirPlug` roda (P11)."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if not e["sessao"] or e["apertos"]:
+        falhas.append(f"com a impressão conferida, o aperto apareceu ou a sessão não abriu sem um toque: {e}")
+    if pg.evaluate("FRASES_DO_CELULAR.entrada.entradaDireta.registro") not in e["registro"]:
+        falhas.append(f"o registro não diz a entrada direta: {e['registro']}")
+    return falhas
+
+
+def entrada_com_aperto(pg: Page) -> list[str]:
+    """Um veredito diferente (o primeiro contato sem impressão conferida)
+    continua indo ao aperto, agora numa coluna: o botão com 44, nada passando
+    da tela, e o ENTRAR NO SERVIDOR entrando. Termina no aperto, para a foto."""
+    falhas = []
+    entrar_com_veredito(pg, '{ FirstContact: { fingerprint: "3cbc fb02 3cbc fb02" } }')
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if e["sessao"] or not e["auth"] or e["modo"] != "aperto" or e["direta"] or not e["apertos"]:
+        falhas.append(f"um veredito diferente não foi ao aperto: {e}")
+    if e["botao"][0] != "ENTRAR NO SERVIDOR" or e["botao"][1] or e["botao"][2] < 44:
+        falhas.append(f"o botão do aperto está {e['botao']}")
+    if e["vaza"]:
+        falhas.append("o aperto rola de lado no celular")
+    return falhas
+
+
+def entrada_direta_falha(pg: Page) -> list[str]:
+    """Na entrada direta, uma falha do `inserirPlug` tem tela e frase: o registro
+    aberto mostra a frase do erro, e ENTRAR NO SERVIDOR volta para tentar de
+    novo. O celular não fica parado sem dizer nada."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA, 'SEELE_RESPOSTAS.open_channel = { __recusa: "NotConnected" };')
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if e["sessao"] or not e["auth"]:
+        falhas.append(f"com a entrada falhando, a tela não ficou na entrada: {e}")
+    # A última linha do registro é a frase do erro, a mesma que o desktop
+    # escreve, e ela está à vista: o veredito conferido também escreve no tom de
+    # atenção, então o que se confere é a frase, e não o tom.
+    frase = pg.evaluate("fraseDeErro('NotConnected')")
+    if e["ultima"] != [frase, True]:
+        falhas.append(f"a falha da entrada não está à vista: a última linha é {e['ultima']}, e não «{frase}»")
+    if e["botao"][0] != "ENTRAR NO SERVIDOR" or e["botao"][1]:
+        falhas.append(f"depois da falha, o botão está {e['botao']}")
+    return falhas
+
+
+def entrada_espera(pg: Page) -> list[str]:
+    """A espera da portaria (`AdmissionPending`, ADR 0030) numa coluna, como a
+    D-celular-3 pede: a frase da espera à vista, a frase de que ela para com a
+    página fora da tela (spec §2.1), a saída com 44, e nada passando da tela.
+    Termina na espera, para a foto e as medidas."""
+    falhas = []
+    entrar_com_veredito(pg, CONFERIDA, 'SEELE_RESPOSTAS.connect = { __recusa: { Refused: { reason: "AdmissionPending" } } };')
+    e = pg.evaluate("""() => { const tela = document.getElementById('tela-auth'), saida = document.getElementById('auth-voltar');
+        const frase = document.getElementById('auth-espera-frase'), pausa = document.querySelector('.cel-espera-pausa');
+        return { auth: !tela.hidden, modo: tela.dataset.modo ?? null, frase: frase?.textContent.trim() ?? '',
+                 pausa: !!pausa && pausa.getBoundingClientRect().height > 0 && pausa.textContent === FRASES_DO_CELULAR.entrada.esperaPausa,
+                 fraseVisivel: !!frase && frase.getBoundingClientRect().height > 0,
+                 saida: [saida.textContent.trim(), Math.round(saida.getBoundingClientRect().height)],
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not e["auth"] or e["modo"] != "espera" or not e["fraseVisivel"] or not e["frase"]:
+        falhas.append(f"a espera da portaria não está numa tela própria, com a frase: {e}")
+    if not e["pausa"]:
+        falhas.append("a espera não diz que para com a página fora da tela")
+    if e["saida"][1] < 44:
+        falhas.append(f"a saída da espera tem {e['saida'][1]} de altura")
+    if e["vaza"]:
+        falhas.append("a espera rola de lado no celular")
+    return falhas
+
+
+def entrada_direta_na_larga(pg: Page) -> list[str]:
+    """A casca larga não muda (D-celular-3): com a mesma impressão conferida, o
+    aperto aparece como no desktop."""
+    entrar_com_veredito(pg, CONFERIDA)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    return [] if (not e["sessao"] and e["auth"] and not e["direta"] and e["apertos"]) else [f"na larga, a impressão conferida pulou o aperto: {e}"]
 
 
 def sessao_entrou(pg: Page) -> list[str]:
@@ -987,6 +1377,139 @@ def chamada(pg: Page) -> list[str]:
     return falhas
 
 
+def capa_na_chamada(pg: Page) -> list[str]:
+    """A capa de uma pessoa no cartão dela na CHAMADA do celular (D-capa-1:
+    animada também aqui, até o mesmo teto do desktop). O cartão é o do
+    desktop (`pintarCartao` e o `vestirCapa` da F3); a casca só o põe em duas
+    colunas. Confere que a capa veste o cartão inteiro e está entre as que
+    animam, e que todo texto fica acima de 4,5:1 com o mesmo contraste contra
+    uma capa branca, uma preta e uma da cor da tinta: nenhum texto encosta na
+    capa, todos ficam sobre as placas do desktop.
+
+    O contraste não é o de sem capa, como a F3 exige no desktop: sem capa, o
+    cartão do celular é do painel, falando ou calado; com capa, a placa de
+    quem fala é a laranja do desktop (`--fundo-da-placa`). O nome cai de 5,71
+    a 5,12 e SINAL de 5,52 a 4,94 (medido em 10/10), iguais aos do desktop
+    com capa."""
+    falhas = []
+    juli = pg.evaluate("String(SEELE_QUADRO.voice_rooms.flatMap((s) => s.people).find((p) => p.nickname === 'juli')?.id)")
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    cartao = f"#chamada-grade .chamada-cartao[data-pessoa-da-capa='{juli}']"
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""(alvo) => { const c = document.createElement('canvas'); c.width = 96; c.height = 32;
+        const x = c.getContext('2d'); x.fillStyle = '#32e6a2'; x.fillRect(0, 0, 96, 32);
+        SEELE_RESPOSTAS.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: c.toDataURL('image/jpeg') };
+        return __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.capa', modo: 'substituir', alvo,
+            conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:juli' } } } } }); }""", juli)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    vestido = pg.evaluate("""(s) => { const p = document.querySelector(s); const c = p?.querySelector(':scope > .capa-camada');
+        const b = c?.getBoundingClientRect();
+        return { vestido: p?.dataset.comCapa === 'sim', animada: p?.dataset.capaAnimada === 'sim',
+                 imagem: c ? getComputedStyle(c).backgroundImage.startsWith('url(') : false,
+                 cobre: !!b && b.width > 0 && Math.abs(b.width - p.clientWidth) < 1 && Math.abs(b.height - p.clientHeight) < 1 }; }""", cartao)
+    if vestido != {"vestido": True, "animada": True, "imagem": True, "cobre": True}:
+        falhas.append(f"a capa de juli não veste o cartão dela na CHAMADA, ou não está entre as que animam: {vestido}")
+        return falhas
+    medidas = {nome: pg.evaluate(CONTRASTE_EM, [cartao, cor]) or {} for nome, cor in CAPAS_DE_PROVA}
+    for nome, medida in medidas.items():
+        baixos = {k: v for k, v in medida.items() if v < 4.5}
+        if baixos:
+            falhas.append(f"sobre uma capa {nome}, texto do cartão abaixo de 4,5:1: {baixos}")
+    if len({tuple(sorted(m.items())) for m in medidas.values()}) != 1:
+        falhas.append(f"um texto do cartão encosta na capa: o contraste muda com ela {medidas}")
+    return falhas
+
+
+def palco_de_mods(pg: Page) -> list[str]:
+    """O palco dos MODs na CHAMADA (`chamada.palco`, c7c64814 da F3): a vista
+    alternativa à grade, que começa atrás. Um MOD o contribui pelo roteador;
+    VER O PALCO aparece na barra da chamada, com 44 de alvo, e o traz à
+    frente. O palco toma a CHAMADA do que vem antes dele (a barra, e o palco
+    da transmissão, que é o aviso de quem compartilha e fica como no desktop)
+    até a faixa, sem a grade, com
+    o que o MOD desenhou à vista e recebendo o toque, e o MOD ouve o `lugar`
+    com o tamanho do miolo. VER A GRADE, também com 44, devolve a grade sem
+    desmontar o palco. Termina com o palco à frente, para a foto."""
+    falhas = []
+    # O `lugar` só vai a um MOD de uma geração de pé, e o duble não entra em
+    # nenhuma (a mesma entrada da `bancada/palco-da-chamada.cjs` da F3).
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'chamada.palco', modo: 'substituir',
+        conteudo: [{ forma: 'texto', chave: 't', dentro: 'SONDA DO PALCO' }, { forma: 'botao', chave: 'b', dentro: 'APERTE' }] } })
+        .then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))""")
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    alvo = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const b = e.getBoundingClientRect(); const c = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { altura: Math.round(b.height), noAlto: !!c && (e.contains(c) || c.contains(e)) }; }"""
+    ver = pg.evaluate(alvo, "#palco-de-mods-ver-o-palco")
+    if not ver or not ver["noAlto"] or ver["altura"] < 44:
+        falhas.append(f"com um palco de MOD na sala, VER O PALCO não está ao alcance: {ver}")
+        return falhas
+    pg.evaluate("window.__entregues.length = 0")
+    tocar(pg, "#palco-de-mods-ver-o-palco")
+    pg.wait_for_timeout(400)
+    visto = pg.evaluate("""() => {
+        const r = (s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+            const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width), Math.round(b.height)]; };
+        const sonda = [...document.querySelectorAll('#palco-de-mods-miolo *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA DO PALCO');
+        const sb = sonda?.getBoundingClientRect();
+        const noCentro = sb && document.elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2);
+        const lugar = (window.__entregues ?? []).filter((m) => m.nome === 'lugar' && m.regiao === 'chamada.palco').at(-1);
+        const miolo = document.getElementById('palco-de-mods-miolo');
+        const antes = document.getElementById('palco-de-mods').previousElementSibling;
+        let anterior = antes;
+        while (anterior && (anterior.hidden || getComputedStyle(anterior).display === 'none')) anterior = anterior.previousElementSibling;
+        return { palco: r('#palco-de-mods'), anterior: anterior ? [anterior.id || anterior.className, Math.round(anterior.getBoundingClientRect().bottom)] : null,
+                 grade: r('#chamada-grade'), voz: r('#voz'),
+                 vista: r('#vista-chamada'), miolo: [miolo.clientWidth, miolo.clientHeight],
+                 sonda: !!noCentro && (sonda.contains(noCentro) || noCentro.contains(sonda)),
+                 lugar: lugar ? [lugar.largura, lugar.altura] : null,
+                 quem: document.getElementById('palco-de-mods-quem').textContent,
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not visto["palco"]:
+        falhas.append("VER O PALCO não trouxe o palco à frente")
+        return falhas
+    if visto["grade"]:
+        falhas.append(f"com o palco à frente, a grade continua à vista: {visto['grade']}")
+    p, a, z, v = visto["palco"], visto["anterior"], visto["voz"], visto["vista"]
+    if a and abs(p[0] - a[1]) > 1:
+        falhas.append(f"o palco não começa logo abaixo de {a[0]}: palco {p}, {a[0]} termina em {a[1]}")
+    if abs(p[1] - v[1]) > 1 or p[1] > z[0] + 1:
+        falhas.append(f"o palco não vai até a faixa, ou passa dela: palco {p}, vista {v}, faixa {z}")
+    if visto["miolo"][1] < 200:
+        falhas.append(f"o miolo do palco tem {visto['miolo'][1]} de altura")
+    if not visto["sonda"]:
+        falhas.append("o que o MOD desenhou no palco não está à vista ou não recebe o toque")
+    if visto["lugar"] != visto["miolo"]:
+        falhas.append(f"o MOD ouviu o lugar {visto['lugar']}, e o miolo tem {visto['miolo']}")
+    if "teste/bancada" not in visto["quem"]:
+        falhas.append(f"a barra do palco não diz de quem ele é: «{visto['quem']}»")
+    if visto["vaza"]:
+        falhas.append("com o palco à frente, a página rola de lado")
+    grade = pg.evaluate(alvo, "#palco-de-mods-ver-a-grade")
+    if not grade or not grade["noAlto"] or grade["altura"] < 44:
+        falhas.append(f"VER A GRADE não está ao alcance: {grade}")
+    else:
+        tocar(pg, "#palco-de-mods-ver-a-grade")
+        pg.wait_for_timeout(400)
+        depois = pg.evaluate("""() => ({ palco: !document.getElementById('palco-de-mods').hidden,
+            montado: document.getElementById('palco-de-mods-miolo').childElementCount > 0,
+            grade: getComputedStyle(document.getElementById('chamada-grade')).display !== 'none',
+            volta: !document.getElementById('palco-de-mods-ver-o-palco').hidden })""")
+        if depois != {"palco": False, "montado": True, "grade": True, "volta": True}:
+            falhas.append(f"VER A GRADE não devolveu a grade com o palco montado e a volta à vista: {depois}")
+        tocar(pg, "#palco-de-mods-ver-o-palco")
+        pg.wait_for_timeout(300)
+    return falhas
+
+
 def ajustes_medida(pg: Page) -> list[str]:
     """A medida da Tarefa 9: as seções de `#tela-server` viram páginas da aba
     AJUSTES só com o CSS e o celular-ajustes.js, sem mudar o tela-server.js?"""
@@ -1082,7 +1605,7 @@ def aba_ajustes(pg: Page) -> list[str]:
         fora = pg.evaluate("""(() => [...document.querySelectorAll('#cel-painel-fora .cel-fora-grupo')].map((g) => ({
             grupo: g.querySelector('.rotulo').textContent, itens: g.querySelectorAll('li').length,
             link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
-        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [7, 6]:
+        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [8, 6]:
             falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
         elif fora[0]["link"] != "https://seele.app.br/#baixar":
             falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
@@ -1287,10 +1810,64 @@ MOD_DE_PE = """() => {
     pedirEncerramento() {}, async encerrou() { return true; },
     entregar(m) { (window.__entregues ??= []).push(JSON.parse(JSON.stringify(m))); } });
   inst.estado = ESTADOS_DE_MOD.ativa;
+  // Como o carregador faz (`base.js`): sem a API na instância, tudo o que
+  // pergunta pelas capacidades dela (o `lugar` do palco, os eventos da tela)
+  // a via sem nenhuma.
+  inst.api = Number(mod.api) || 0;
   modsCarregados.set(mod.id, inst);
   let n = 0;
   window.__pedirAoProduto = (m) => atenderOMod(mod, inst, { ...m, n: ++n });
 }"""
+
+def modal_deixa_a_faixa(pg: Page, nome: str, seletor: str) -> list[str]:
+    """Com um modal de MOD aberto (o diálogo, a página imersiva), a faixa e as
+    abas continuam acordadas: a pilha de inércia da F3 (682f39ba) pergunta ao
+    `CELULAR.acordadosNoModal()`. O SEGURE fala, o SOM troca, AJUSTES abre, e o
+    SAIR recebe o toque; o Tab fica dentro da superfície. O SAIR não é
+    apertado: sair da sala tiraria a faixa das superfícies seguintes."""
+    falhas = []
+    estado = pg.evaluate("""() => { const centro = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); };
+        return { faixa: !document.querySelector('.voz-celular').closest('[inert]'), abas: !document.querySelector('.cel-abas').closest('[inert]'),
+                 conversa: !!document.getElementById('lista-mensagens').closest('[inert]'),
+                 sair: !!centro('voz-sair')?.closest('#voz-sair') }; }""")
+    if not estado["faixa"] or not estado["abas"]:
+        falhas.append(f"com {nome} na tela, a faixa ou as abas ficam inertes: {estado}")
+    if not estado["conversa"]:
+        falhas.append(f"com {nome} na tela, a conversa por trás não fica inerte")
+    if not estado["sair"]:
+        falhas.append(f"com {nome} na tela, o SAIR da faixa não recebe o toque")
+    pg.evaluate("window.__SEELE_HISTORICO.length = 0")
+    centro = pg.evaluate("(() => { const b = document.getElementById('voz-mudo').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; })()")
+    pg.mouse.move(*centro)
+    pg.mouse.down()
+    pg.wait_for_timeout(250)
+    pg.mouse.up()
+    pg.wait_for_timeout(150)
+    tocar(pg, "#voz-surdo")
+    pg.wait_for_timeout(150)
+    tocar(pg, "#voz-surdo")
+    pg.wait_for_timeout(150)
+    feitos = pg.evaluate("window.__SEELE_HISTORICO.map(([c]) => c)")
+    if "set_talking" not in feitos:
+        falhas.append(f"com {nome} na tela, segurar o SEGURE não fala: {feitos}")
+    if feitos.count("set_total_isolation") < 2:
+        falhas.append(f"com {nome} na tela, o SOM da faixa não troca: {feitos}")
+    # O Tab, a partir de dentro: seis vezes, e o foco não sai da superfície.
+    pg.evaluate("(s) => [...document.querySelectorAll(s)].at(-1)?.querySelector('button, [tabindex]')?.focus()", seletor)
+    fora = []
+    for _ in range(6):
+        pg.keyboard.press("Tab")
+        if not pg.evaluate("(s) => !![...document.querySelectorAll(s)].at(-1)?.contains(document.activeElement)", seletor):
+            fora.append(pg.evaluate("document.activeElement?.id || document.activeElement?.className || document.activeElement?.tagName"))
+    if fora:
+        falhas.append(f"com {nome} na tela, o Tab sai da superfície: {fora}")
+    tocar(pg, "#cel-aba-ajustes")
+    pg.wait_for_timeout(300)
+    if pg.evaluate("document.getElementById('tela-sessao').dataset.aba") != "ajustes":
+        falhas.append(f"com {nome} na tela, AJUSTES não abre")
+    ir_para_aba(pg, "conversa", falhas)
+    return falhas
+
 
 SUPERFICIES_DE_MOD = [
     ("a página", {"id": "p", "tipo": "pagina", "titulo": "PÁGINA DE TESTE"}, ".pagina-de-mod"),
@@ -1343,6 +1920,8 @@ def superficies_de_mod(pg: Page) -> list[str]:
         if descricao["tipo"] in ("aviso", "folha") or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
             if not visto["mudo"] or not visto["ajustes"]:
                 falhas.append(f"com {nome} aberta, o MUDO ou AJUSTES não recebe o toque: {visto}")
+        else:
+            falhas += modal_deixa_a_faixa(pg, nome, seletor)
         pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-fechar', superficie: id })", descricao["id"])
         pg.wait_for_timeout(200)
     # Uma pilha de folhas: só a de cima aparece, e ela continua acima do pé.
@@ -1433,6 +2012,9 @@ REGIOES_DO_CELULAR = [
     ("conversa.mensagem", "conversa", "alvo: String(mensagens.at(-1).id), ", True),
     ("compositor", "conversa", "", False),
     ("pessoas.lista", "pessoas", "", False),
+    # O palco começa atrás da grade, e é o caso `palco-de-mods` que o traz à
+    # frente e confere a casa dele; aqui ele entra na lista declarada.
+    ("chamada.palco", None, "", False),
 ]
 
 
@@ -1447,11 +2029,13 @@ def regioes_do_celular(pg: Page) -> list[str]:
     falhas = []
     declaradas = pg.evaluate("CELULAR.regioes instanceof Set ? [...CELULAR.regioes].sort() : null")
     if declaradas != sorted(r for r, *_ in REGIOES_DO_CELULAR):
-        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as sete do celular")
+        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as {len(REGIOES_DO_CELULAR)} do celular")
     # Cada uma, como um MOD a usaria: uma contribuição pelo roteador, e o texto
     # dela à vista na aba, recebendo o toque.
     pg.evaluate(MOD_DE_PE)
     for regiao, aba, extra, redesenhar in REGIOES_DO_CELULAR:
+        if aba is None:
+            continue
         if not ir_para_aba(pg, aba, falhas):
             continue
         pg.wait_for_timeout(250)
@@ -1484,6 +2068,138 @@ def regioes_do_celular(pg: Page) -> list[str]:
     regioes = pg.evaluate("cascaDoRetrato().regioes")
     if "status.barra" in regioes or any(r not in regioes for r, *_ in REGIOES_DO_CELULAR):
         falhas.append(f"o retrato diz as regiões {regioes}")
+    return falhas
+
+
+# O contraste de cada texto de um quadro contra o fundo dele: a primeira cor
+# opaca entre o texto e o quadro. Com uma capa, chegar ao quadro é chegar à
+# capa (ela é a primeira camada dele, por cima do fundo próprio), e 'tinta' é
+# a capa da cor do próprio texto, a pior que existe para ele. O método da
+# `apps/seele-app/bancada/capa.cjs` da F3, com que ela mede a barra do desktop.
+CONTRASTE_EM = r"""([seletor, capa]) => {
+  const quadro = document.querySelector(seletor);
+  if (!quadro) return null;
+  const rgb = (t) => (t.match(/[\d.]+/g) || []).map(Number);
+  const luz = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const razao = (a, b) => { const [x, y] = [luz(a), luz(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+  const fundo = (el, tinta) => {
+    for (let n = el; n; n = n.parentElement) {
+      if (n === quadro && capa) return capa === "tinta" ? tinta : capa;
+      const c = rgb(getComputedStyle(n).backgroundColor);
+      if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c.slice(0, 3);
+    }
+    return [0, 0, 0];
+  };
+  const out = {};
+  for (const e of quadro.querySelectorAll("*")) {
+    if (!e.getClientRects().length || ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+    const tinta = rgb(getComputedStyle(e).color).slice(0, 3);
+    out[`${e.className || e.tagName} «${e.textContent.trim().slice(0, 24)}»`] = Number(razao(tinta, fundo(e, tinta)).toFixed(2));
+  }
+  return out;
+}"""
+
+# Uma região clara sobre o produto escuro: o pior caso para um contêiner que
+# recebe a tinta da região sem pintar o painel dela atrás.
+REGIAO_CLARA = {"fundo": "#f2ece0", "texto": "#12100e", "apagado": "#574e43", "acento": "#a83a10", "borda": "#b8ad9a"}
+
+
+def regiao_do_operador(pg: Page) -> list[str]:
+    """O tema por região no `operador.barra` (17i da F3, item 3; f09e7540). No
+    celular a região mora em AJUSTES, fora da sessão, e a casca declara os
+    contêineres dela em `CELULAR.conteineresDasRegioes`: a placa de SEU
+    PERFIL, que é a barra do operador do desktop (o retrato e o apelido), e a
+    própria região. Com o tema publicado do servidor pondo uma região clara
+    (no quadro, como o servidor o manda, e de pé depois de dois redesenhos),
+    o texto de uma contribuição e o apelido tomam a tinta da região, cada
+    contêiner pinta o painel dela atrás, e todo texto dos dois fica acima de
+    4,5:1. O tema que sai limpa os dois; o rótulo SEU PERFIL e EDITAR PERFIL,
+    fora dos contêineres, não mudam."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'operador.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 's', dentro: 'SONDA DA REGIÃO' }] } })")
+    esperar_quadro(pg)
+    ler = """() => {
+        const sonda = [...document.querySelectorAll('#operador-mods *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA DA REGIÃO');
+        const cor = (el, p) => (el ? getComputedStyle(el)[p] : null);
+        const regiao = document.getElementById('operador-mods'), placa = document.querySelector('.cel-perfil-placa');
+        return { sonda: cor(sonda, 'color'), fundoDaRegiao: cor(regiao, 'backgroundColor'),
+                 apelido: cor(document.querySelector('.cel-perfil-apelido'), 'color'), fundoDaPlaca: cor(placa, 'backgroundColor'),
+                 rotulo: cor(document.querySelector('.cel-perfil > .rotulo'), 'color'),
+                 escritoNaRegiao: regiao.style.getPropertyValue('--seele-negro-painel').trim(),
+                 escritoNaPlaca: placa.style.getPropertyValue('--seele-negro-painel').trim() }; }"""
+    antes = pg.evaluate(ler)
+    aplicar = "(cores) => { SEELE_QUADRO.tema_do_servidor = { mod_id: 'seele/estilo', valores: JSON.stringify({ regioes: { 'operador.barra': cores } }) }; }"
+    pg.evaluate(aplicar, REGIAO_CLARA)
+    esperar_quadro(pg)
+    esperar_quadro(pg)
+    com = pg.evaluate(ler)
+    tinta = "rgb(18, 16, 14)"
+    if com["sonda"] != tinta or com["apelido"] != tinta:
+        falhas.append(f"com a região clara, a contribuição e o apelido não tomam a tinta dela: {com}")
+    if not com["escritoNaRegiao"] or not com["escritoNaPlaca"]:
+        falhas.append(f"a região não chegou aos contêineres da casca: {com}")
+    if com["fundoDaRegiao"] == antes["fundoDaRegiao"] or com["fundoDaPlaca"] == antes["fundoDaPlaca"]:
+        falhas.append(f"um contêiner não pinta o painel da região atrás: {antes['fundoDaRegiao']} → {com['fundoDaRegiao']}, placa {antes['fundoDaPlaca']} → {com['fundoDaPlaca']}")
+    if com["rotulo"] != antes["rotulo"]:
+        falhas.append(f"o rótulo SEU PERFIL, fora dos contêineres, mudou com a região: {antes['rotulo']} → {com['rotulo']}")
+    for seletor in (".cel-perfil-placa", "#operador-mods"):
+        baixos = {k: v for k, v in (pg.evaluate(CONTRASTE_EM, [seletor, None]) or {}).items() if v < 4.5}
+        if baixos:
+            falhas.append(f"com a região clara, texto abaixo de 4,5:1 em {seletor}: {baixos}")
+    pg.evaluate("SEELE_QUADRO.tema_do_servidor = null")
+    esperar_quadro(pg)
+    depois = pg.evaluate(ler)
+    if depois != antes:
+        falhas.append(f"o tema saiu, e a região ficou: {antes} → {depois}")
+    # A foto, com a região.
+    pg.evaluate(aplicar, REGIAO_CLARA)
+    esperar_quadro(pg)
+    return falhas
+
+
+CAPAS_DE_PROVA = (("branca", [255, 255, 255]), ("preta", [0, 0, 0]), ("da cor da tinta", "tinta"))
+
+
+def capa_do_operador(pg: Page) -> list[str]:
+    """A capa de quem usa (`pessoa.capa`; D-capa-1) na placa de SEU PERFIL,
+    que é a barra do operador do desktop. A casca a veste com o `vestirCapa`
+    da F3 a cada quadro; a camada cobre a placa inteira, e o retrato e o
+    apelido ficam sobre placas opacas do painel. Medido como a F3 mede a barra
+    (`bancada/capa.cjs`): cada texto mantém o contraste que tinha sem capa,
+    contra uma capa branca, uma preta e uma da cor da própria tinta."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    sem = pg.evaluate(CONTRASTE_EM, [".cel-perfil-placa", None])
+    # A mídia de um MOD só vem numa geração de pé, e o duble não entra em
+    # nenhuma: a mesma entrada que a `bancada/capa.cjs` da F3 faz.
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""() => {
+        const c = document.createElement('canvas'); c.width = 96; c.height = 32;
+        const x = c.getContext('2d'); x.fillStyle = '#32e6a2'; x.fillRect(0, 0, 96, 32);
+        SEELE_RESPOSTAS.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: c.toDataURL('image/jpeg') };
+        return __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.capa', modo: 'substituir', alvo: String(SEELE_QUADRO.me),
+            conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:eu' } } } } }); }""")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    vestida = pg.evaluate("""() => { const p = document.querySelector('.cel-perfil-placa'); const c = p?.querySelector(':scope > .capa-camada');
+        const b = c?.getBoundingClientRect();
+        return { vestida: p?.dataset.comCapa === 'sim', imagem: c ? getComputedStyle(c).backgroundImage.startsWith('url(') : false,
+                 cobre: !!b && Math.abs(b.width - p.clientWidth) < 1 && Math.abs(b.height - p.clientHeight) < 1,
+                 midia: (window.__entregues ?? []).filter((m) => m.nome === 'midia') }; }""")
+    if not (vestida["vestida"] and vestida["imagem"] and vestida["cobre"]):
+        falhas.append(f"a capa de quem usa não veste a placa de SEU PERFIL inteira: {vestida}")
+        return falhas
+    for nome, cor in CAPAS_DE_PROVA:
+        com = pg.evaluate(CONTRASTE_EM, [".cel-perfil-placa", cor]) or {}
+        pioras = {k: f"{v} → {com.get(k)}" for k, v in sem.items() if (com.get(k) or 0) < v - 0.01}
+        if pioras:
+            falhas.append(f"sobre uma capa {nome}, um texto de SEU PERFIL perde contraste: {pioras}")
     return falhas
 
 
@@ -1709,7 +2425,7 @@ def casca_larga(pg: Page) -> list[str]:
         fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
             return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
                      link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
-        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 7 or fora["link"] != "https://seele.app.br/#baixar":
+        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://seele.app.br/#baixar":
             falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
     return falhas
 
@@ -1768,6 +2484,42 @@ def microfone_negado(pg: Page) -> list[str]:
         falhas.append(f"com o microfone negado pelo navegador, ÁUDIO não diz nada: {visto}")
     if visto["botao"]:
         falhas.append("o botão dos ajustes do sistema aparece, e a página não os abre")
+    return falhas
+
+
+# As peças da sala pessoal da F7 (a53c1349, 086082d0): a faixa do toque, a
+# linha da sala na entrada e na sessão, e o SEU CÓDIGO no perfil.
+PECAS_DA_SALA_PESSOAL = ("toque", "boot-sala-estado", "sala-estado", "perfil-sala")
+
+
+def sala_pessoal(pg: Page) -> list[str]:
+    """O navegador não tem sala pessoal: as duas cascas dele escondem toda peça
+    com `data-sala-pessoal` (o contrato que a F7 escreveu no `index.html`), e o
+    SÓ NO APP DO SEELE diz que receber ligações pelo código é do app.
+
+    As peças nascem `hidden`, e no navegador a ponte responde neutro: «nenhuma
+    à vista» passaria sem regra nenhuma. O caso as mostra como o desktop as
+    mostraria (tira o `hidden` e põe texto) e exige que a casca as esconda."""
+    falhas = []
+    achadas = pg.evaluate("[...document.querySelectorAll('[data-sala-pessoal]')].map((e) => e.id)")
+    faltam = [i for i in PECAS_DA_SALA_PESSOAL if i not in achadas]
+    if faltam:
+        falhas.append(f"as peças da sala pessoal mudaram: faltam {faltam}, e há {achadas}")
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    vistas = pg.evaluate("""() => [...document.querySelectorAll('[data-sala-pessoal]')].map((e) => {
+        e.hidden = false;
+        if (!e.textContent.trim()) e.textContent = 'a sala pessoal diria algo aqui';
+        for (let n = e.parentElement; n; n = n.parentElement) n.hidden = false;
+        const b = e.getBoundingClientRect();
+        return getComputedStyle(e).display !== 'none' && b.width > 0 && b.height > 0 ? e.id : null;
+    }).filter(Boolean)""")
+    if vistas:
+        falhas.append(f"a casca do navegador deixa a sala pessoal à vista: {vistas}")
+    diz = pg.evaluate("[...document.querySelectorAll('.cel-fora-grupo, .larga-fora-grupo')].some((g) => g.textContent.includes('RECEBER LIGAÇÕES PELO SEU CÓDIGO'))")
+    if not diz:
+        falhas.append("o SÓ NO APP DO SEELE não diz que receber ligações pelo código é do app")
     return falhas
 
 
@@ -1868,6 +2620,10 @@ CASOS: dict[str, Caso] = {
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
     "operador-barra": Caso(levar=operador_barra, medir=False),
+    # O tema de região do operador.barra nos contêineres que a casca declara.
+    "regiao-do-operador": Caso(levar=regiao_do_operador, medir=False),
+    # A capa de quem usa em SEU PERFIL (D-capa-1).
+    "capa-do-operador": Caso(levar=capa_do_operador, medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
@@ -1876,12 +2632,28 @@ CASOS: dict[str, Caso] = {
     "deitado": Caso(levar=deitado, aparelhos=("deitado",), raiz="#palco, #voz"),
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
+    # A entrada do celular (Tarefa 10), sobre a identidade da F4.
+    "entrada": Caso(levar=entrada, entrar=False, raiz="#tela-boot"),
+    "entrada-desfechos": Caso(levar=entrada_desfechos, entrar=False, medir=False, http=True),
+    # D-celular-3: a impressão conferida dispensa o aperto, só no celular.
+    "entrada-direta": Caso(levar=entrada_direta, entrar=False, medir=False),
+    "entrada-com-aperto": Caso(levar=entrada_com_aperto, entrar=False, raiz="#tela-auth"),
+    "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
+    "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
+    "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
     "larga-tela-cheia": Caso(levar=larga_tela_cheia, marca="larga", aparelhos=("1440",), medir=False),
     # O microfone negado pelo navegador, nas duas cascas (achado 3).
     "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
     "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
+    # A capa de uma pessoa no cartão da CHAMADA (D-capa-1).
+    "capa-na-chamada": Caso(levar=capa_na_chamada, medir=False),
+    # O palco dos MODs na CHAMADA (chamada.palco, c7c64814 da F3).
+    "palco-de-mods": Caso(levar=palco_de_mods, raiz="#vista-chamada"),
+    # A sala pessoal da F7, que o navegador não tem, nas duas cascas.
+    "sala-pessoal": Caso(levar=sala_pessoal, aparelhos=("390",), medir=False),
+    "sala-pessoal-larga": Caso(levar=sala_pessoal, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
     "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
@@ -1907,7 +2679,12 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             pg.set_default_timeout(5000)
             erros = []
             pg.on("pageerror", lambda e: erros.append(str(e)[:200]))
-            pg.goto(f"file://{pagina}")
+            servindo = contextlib.ExitStack()
+            if caso.http:
+                origem = servindo.enter_context(servida(pagina.parent))
+                pg.goto(f"{origem}/{pagina.name}")
+            else:
+                pg.goto(f"file://{pagina}")
             if caso.entrar:
                 entrar(pg)
             pg.evaluate(
@@ -1951,6 +2728,7 @@ def rodar_caso(navegador, temporaria: pathlib.Path, saida: pathlib.Path, nome: s
             if erros:
                 motivos.append(f"erros de script: {erros}")
             ctx.close()
+            servindo.close()
             print(f"{rotulo}: " + ("passa" if not motivos else "REPROVA"))
             falhas += [f"{rotulo}: {motivo}" for motivo in motivos]
     return falhas

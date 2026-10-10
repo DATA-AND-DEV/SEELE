@@ -928,6 +928,26 @@
   accent-color: var(--seele-laranja-nerv);
 }
 
+/* **O palco dos MODs** (`chamada.palco`, F3): com ele à frente, a grade sai,
+   como no desktop. A regra do desktop perde para a grade em duas colunas
+   desta casca, que vem depois com a mesma especificidade. O palco da
+   transmissão fica: é o aviso de quem compartilha e a escolha das telas. */
+:root[data-casca="celular"] #vista-chamada[data-palco-de-mods] > #chamada-grade {
+  display: none;
+}
+
+/* A barra do palco quebra fileira (o «PALCO DE …» com dois MODs, o texto do
+   sistema maior) e respeita as bordas do aparelho. */
+:root[data-casca="celular"] .palco-de-mods-barra {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding: 4px calc(16px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .palco-de-mods-quem {
+  flex: 1 1 12ch;
+}
+
 /* A grade em duas colunas, cada cartão numa placa opaca. O volume das dez
    celas do desktop sai do cartão: ele mora na folha da pessoa. */
 :root[data-casca="celular"] #chamada-grade {
@@ -1045,6 +1065,13 @@
   contain: paint;
   padding: 8px calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
   border-bottom: 1px solid var(--seele-linha);
+  /* O fundo e a tinta da coluna, que sem tema não mudam nada. Com o tema da
+     região, são os dela: o painel atrás, e a tinta resolvida aqui, onde a
+     região escreve os tokens. Uma caixa que não declara cor herda a cor já
+     resolvida acima, e a contribuição de um MOD ficava com a tinta do produto
+     sobre o painel da região (medido: 1,09:1 com uma região clara). */
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
 }
 
 :root[data-casca="celular"] #tela-server #operador-mods[hidden] {
@@ -1065,6 +1092,13 @@
   padding: 10px 12px;
   background: var(--seele-negro-painel);
   border: 1px solid var(--seele-linha-forte);
+}
+
+/* Sobre a capa de quem usa, o retrato e o apelido ficam numa placa opaca do
+   painel: o contraste é o de sem capa, contra qualquer capa (medido na
+   bancada, `capa-do-operador`, como a F3 mede a barra do desktop). */
+:root[data-casca="celular"] .cel-perfil-placa[data-com-capa] :where(.cel-perfil-retrato, .cel-perfil-apelido) {
+  background-color: var(--seele-negro-painel);
 }
 
 :root[data-casca="celular"] .cel-perfil-retrato {

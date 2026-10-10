@@ -41,12 +41,9 @@
      `--nucleo-*` herdado ali continua sendo a cor do produto. É isso que
      garante o MUDO, o SURDO e o SAIR qualquer que seja o tema (spec, §6). O
      tema não escreve `--nucleo-*` nenhum: as tabelas dele são fechadas, e o G7
-     confere. */
-  --nucleo-fundo: var(--seele-negro-absoluto);
-  --nucleo-painel: var(--seele-negro-painel);
-  --nucleo-texto: var(--seele-osso);
-  --nucleo-acento: var(--seele-laranja-nerv);
-  --nucleo-borda: var(--seele-linha-forte);
+     confere. O fundo, o painel, o texto, o acento e a borda o desktop declara
+     com os mesmos nomes e valores (`tela-sessao.css`, `e26e9edc`); aqui ficam
+     só os que a casca lê e ele não. */
   --nucleo-rotulo: var(--seele-rotulo-claro);
   --nucleo-seguro: var(--seele-padrao-azul);
   --nucleo-alerta: var(--seele-vermelho-alerta);
@@ -71,6 +68,14 @@
   font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
   line-height: 1.45;
   overflow: hidden;
+}
+
+/* **A sala pessoal** (F7): a faixa do toque, a linha da sala na entrada e na
+   sessão, e o SEU CÓDIGO com a agenda no perfil. O navegador não tem sala que
+   atenda, e toda peça com `data-sala-pessoal` fica fora, mesmo que o script
+   dela a mostre; o SÓ NO APP DO SEELE diz onde receber ligações. */
+:root[data-casca="celular"] [data-sala-pessoal] {
+  display: none;
 }
 
 /* A altura que o navegador mostra, e não a de trás da barra dele: `100vh` num
