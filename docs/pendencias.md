@@ -9501,3 +9501,27 @@ um sim a S que ela nunca deu. **Consertado no mesmo lote X** (o sim vai ao servi
 que esta janela hospeda, reconhecido pelo endereço do `hospedar` ou pela
 impressão, e não pelo prefixo de loopback). Na linha 0.15, fica como está, pela
 mesma razão do resto desta pendência.
+
+## 60 · No macOS, o socket de pilha dupla do cliente pode pegar uma porta que um socket IPv4 já segura
+
+**Aberta em 2026-10-10**, achada pelo lote Y da F5 da 0.16 ao medir um teste
+intermitente da volta. **Existe na v0.15.1 publicada** (`54f542f94`):
+`client::local_endpoint` (`[::]:0`) e o socket da `Batida`
+(`encontro::abrir_socket_local`, `[::]:0` com `set_only_v6(false)`), por onde
+passam a entrada e a volta.
+
+**O mecanismo (medido no macOS pelo Y):** a escolha de porta de `[::]:0` só
+confere os sockets IPv6. Com N sockets UDP IPv4 ligados ao endereço por onde a
+resposta volta, na faixa efêmera, a chance de colisão é cerca de N/16384 (992 em
+4000 com 4000 presos). A resposta do servidor vai para o socket IPv4, e a
+tentativa espera os 20 s da ociosidade do QUIC por nada.
+
+**O custo:** uma entrada que falha depois de 20 s, ou uma tentativa de volta
+perdida; a seguinte pega outra porta e funciona. Sem perda de dado nem de
+segurança. Na máquina medida, ~1 em 2700 tentativas; com uma chamada de vídeo no
+navegador, ~1 em 300 a 1 em 1000. Windows e Linux não foram medidos.
+
+**Na 0.16:** consertado no lote Y (`6061e38c`, `client::socket_de_quem_conecta`).
+**Na linha 0.15:** fica como está. A 0.15.2 sai com o que é de segurança ou de
+leitura, e este é tempo, raro, e se resolve tentando de novo; se a linha ganhar
+uma 0.15.3, o conserto do Y entra nela.
