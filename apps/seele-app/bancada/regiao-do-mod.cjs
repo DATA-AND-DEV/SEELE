@@ -3971,6 +3971,53 @@ async function oSomQueTerminouVoltaComOTocandoDeclarado() {
 }
 
 // ---------------------------------------------------------------------------
+// 15b. `repetir: true`: o som toca em laço, sem redesenho e sem «terminou».
+// ---------------------------------------------------------------------------
+
+/**
+ * **A repetição explícita da API 6** (rascunho §5; tarefa 10 da F3): com
+ * `repetir: true`, a fonte de buffer toca em laço (`loop`), e o fim do som
+ * não acontece — nem o «terminou» ao MOD, nem fonte nova por redesenho. O
+ * WebAudio de verdade não dispara `ended` numa fonte em laço; o fim simulado
+ * aqui respeita isso. Desligado o `repetir` num redesenho, com o som tocando,
+ * a fonte de pé sai do laço, e o próximo fim é dito.
+ */
+async function oSomComRepetirTocaEmLaco() {
+  const caso = "o som com repetir toca em laço";
+  const midiaDeSom = () => Promise.resolve({ uri: "data:audio/wav;base64,AA", papel: "som", bytes: 12 });
+  const trilha = (repetir) => [{ forma: "midia", chave: "trilha", fonte: "som/trilha.wav", tocando: true, repetir }];
+  const terminou = (d) => d.ditos.filter((e) => e.nome === "midia" && e.estado === "terminou").length;
+  // O fim do buffer, como o WebAudio o dá: uma fonte em laço não termina.
+  const fimDoBuffer = (fonte) => { if (fonte && !fonte.loop) fonte.onended?.(); };
+
+  const Audio = audioDeMentira();
+  const b = bancada({ audio: Audio });
+  const d = dono(b, midiaDeSom);
+  const regiao = new b.RegiaoDeMod("a/b", d.api, b.raiz());
+  regiao.aplicar(trilha(true));
+  await assentar();
+  const contexto = Audio.ultimo;
+  const fonte = contexto?.fontes[0];
+  confere(caso, fonte?.tocando === true && fonte.loop === true, `a trilha com repetir não tocou em laço: loop ${fonte?.loop}`);
+  if (!fonte) return;
+  fimDoBuffer(fonte);
+  await assentar();
+  confere(
+    caso,
+    terminou(d) === 0 && fonte.tocando === true && contexto.fontes.length === 1,
+    `a trilha com repetir terminou, ou precisou de fonte nova: «terminou» ${terminou(d)} vez(es), ${contexto.fontes.length} fonte(s)`,
+  );
+
+  // Sem `repetir`, num redesenho, a fonte de pé sai do laço, e o fim é dito.
+  regiao.aplicar(trilha(false));
+  await assentar();
+  confere(caso, fonte.loop === false, "o redesenho sem repetir deixou a fonte em laço");
+  fimDoBuffer(fonte);
+  await assentar();
+  confere(caso, terminou(d) === 1, `sem repetir, o fim da trilha não foi dito: «terminou» ${terminou(d)} vez(es)`);
+}
+
+// ---------------------------------------------------------------------------
 // 16. O som que sai da tela para, como o `<audio>` parava.
 // ---------------------------------------------------------------------------
 
@@ -5727,6 +5774,7 @@ async function quemSoMostraImagemOuveOQueOuviaDoSomRecusado() {
     osBytesDoSomChegamPelosDoisCaminhosDoIpc,
     asProtecoesDoTocadorEDaMontagemDoSom,
     oSomQueTerminouVoltaComOTocandoDeclarado,
+    oSomComRepetirTocaEmLaco,
     oSomQueSaiDaTelaParaComoOAudioParava,
     oSomDaContribuicaoSoDecodificaQuandoOModMandaTocar,
     oSomDaContribuicaoMudaDeDestino,

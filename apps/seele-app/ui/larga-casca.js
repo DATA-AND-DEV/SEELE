@@ -13,40 +13,9 @@
 (() => {
   if (document.documentElement.dataset.casca !== "larga") return;
 
-  // Para onde vai quem quer o app do SEELE (decisão da orquestradora, 09/10).
-  // Vai para o `frases.js` com o P10, ao lado das frases.
-  const PAGINA_DO_APP = "https://seele.app.br/#baixar";
-
-  // Vão para o `frases.js`, com o P10 (Tarefa 14). As do grupo SÓ NO APP DO
-  // SEELE são as da lista canônica da matriz, as mesmas que o celular diz.
-  const PALAVRAS = Object.freeze({
-    proposito: "Voz, vídeo e texto entre pessoas, sem servidor de ninguém no meio. Entre no servidor de alguém pelo link que a pessoa mandou.",
-    hospedar: "Hospedar um servidor é pelo app do SEELE. ",
-    baixar: "BAIXAR O APP DO SEELE",
-    atualizacao: "A página vem da origem: uma versão nova chega ao abrir a página de novo.",
-    versoes: "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE.",
-    malha: "No navegador, a tela de quem transmite vem sempre pelo servidor, e este computador não a repassa a ninguém.",
-    tecla: "No navegador, a tecla de falar só vale com esta página em foco: o navegador não tem atalho para o computador inteiro.",
-    comoAbre: "COMO ESTA PÁGINA ABRE",
-    comoAbreSub: "Como computador ou como celular, na próxima vez que ela abrir.",
-    abriuComoComputador: "Esta página abriu como computador.",
-    abrirComoCelular: "ABRIR COMO CELULAR",
-    pelaTela: "PELO TAMANHO DA TELA",
-    valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
-    naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
-    foraTitulo: "O QUE O NAVEGADOR NÃO FAZ",
-    foraSub: "O que fica no app do SEELE, instalado num computador.",
-    grupo: "SÓ NO APP DO SEELE",
-    itens: [
-      ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador.", true],
-      ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
-      ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
-      ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
-      ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
-      ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
-      ["A TELA ENTRE PESSOAS", "No navegador, a tela de quem transmite vem sempre pelo servidor, e este computador não a repassa a ninguém."],
-    ],
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DA_LARGA;
 
   /** Um elemento por `createElement`; texto sempre por `textContent`. */
   function h(tag, props = {}, ...filhos) {
@@ -88,7 +57,7 @@
   const painel = h("section", { id: "larga-painel-fora", class: "server-painel-secao", hidden: true },
     h("section", { class: "larga-fora-grupo" },
       h("h3", { class: "rotulo", text: PALAVRAS.grupo }),
-      h("ul", {}, PALAVRAS.itens.map(([nome, texto, comLink]) => h("li", {},
+      h("ul", {}, Object.values(PALAVRAS.itens).map(([nome, texto, comLink]) => h("li", {},
         h("strong", { text: nome }), h("p", { text: texto }), comLink && linkDoApp())))));
   document.getElementById("tela-server").querySelector(".server-painel").append(painel);
   const botao = h("button", {
@@ -149,6 +118,16 @@
     h("span", { class: "server-secao-texto" }, h("span", { class: "server-secao-nome", text: PALAVRAS.comoAbre })))));
 
   // ------------------------------------------------------- sair da página
+
+  // A tela cheia do navegador sai pelo Esc sem a página receber a tecla (achado
+  // da F4): o ouvinte de Escape do `palco-imagem.js` não roda, e o cinema ficava
+  // ligado numa janela que já não está em tela cheia. Quando o documento sai da
+  // tela cheia por fora, o cinema sai junto, pelo caminho do desktop. A saída
+  // pelo botão apaga o cinema antes, e não passa por aqui duas vezes.
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement || document.body.dataset.cinema !== "sim") return;
+    trocarCinema(false).catch((falha) => console.warn("trocarCinema:", falha));
+  });
 
   // O app bloqueia o F5; o navegador não deixa, e recarregar derruba a sessão.
   // Com a sessão aberta, a página pergunta antes de sair.

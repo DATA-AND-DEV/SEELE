@@ -23,28 +23,9 @@
   const { h } = CELULAR;
   const sessao = document.getElementById("tela-sessao");
 
-  // Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o P10 (Tarefa 14).
-  const PALAVRAS = Object.freeze({
-    senhaDaSala: "SENHA DA SALA",
-    pedeSenha: (sala) => `${sala} pede senha para entrar.`,
-    senha: "SENHA",
-    entrar: "ENTRAR",
-    agoraNao: "AGORA NÃO",
-    fechar: "FECHAR",
-    mensagemDe: (quem, hora) => `${quem} · ${hora}`,
-    copiar: "COPIAR O TEXTO",
-    apagarMinha: "APAGAR A MINHA MENSAGEM",
-    remover: "REMOVER",
-    foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
-    sinal: "SINAL",
-    volume: (n) => `VOLUME DESTA PESSOA · ${n}%`,
-    volumeDe: (quem) => `volume de ${quem}`,
-    moderar: "MODERAR",
-    foraModerar: "Expulsar, banir e mover pessoas é pelo SEELE no computador.",
-    anexar: "ANEXAR",
-    midia: "FOTO OU VÍDEO",
-    arquivo: "ARQUIVO",
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.folhas;
 
   let fecharAberta = null;
   // Uma entrada no voltar do aparelho para a folha aberta. Uma folha que toma o
@@ -250,6 +231,32 @@
     folhaDeAcoes(id, titulo, [h("p", { class: "cel-fora" }, h("span", { class: "rotulo", text: rotulo }), frase)],
       [{ texto: PALAVRAS.fechar, fazer: () => {} }]);
   }
+
+  // ------------------------------------------------ o pé da moldura (§7)
+
+  // As superfícies de MOD moram acima do pé da sessão: os avisos do produto, a
+  // faixa de voz e as abas. `--cel-pe` é a distância do fim da sessão ao alto do
+  // primeiro deles que aparece, e o `celular-folhas.css` posiciona os palcos por
+  // ela. Medida, e não somada das alturas: a faixa só existe numa sala, os avisos
+  // vão e vêm, e o teclado põe a faixa no alto.
+  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .voz-celular, .cel-abas, .cel-telemetria)";
+  function medirOPe() {
+    const fim = sessao.getBoundingClientRect().bottom;
+    const altos = [...sessao.querySelectorAll(PE)]
+      .filter((e) => !e.hidden && getComputedStyle(e).display !== "none")
+      .map((e) => e.getBoundingClientRect().top);
+    sessao.style.setProperty("--cel-pe", `${Math.max(0, fim - Math.min(fim, ...altos))}px`);
+  }
+  // Pela caixa de borda, e não pela de conteúdo, que é o padrão: as abas crescem
+  // pela área segura de baixo como `padding` (com `box-sizing: border-box`), e a
+  // caixa de conteúdo delas não muda. Medido na bancada: pela de conteúdo, o
+  // observador às vezes não via a área segura chegar, e o diálogo terminava
+  // 34 px abaixo do alto da faixa.
+  const observador = new ResizeObserver(medirOPe);
+  observador.observe(sessao, { box: "border-box" });
+  for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  window.addEventListener("resize", medirOPe);
+  medirOPe();
 
   CELULAR.registrar("folhaDaMensagem", folhaDaMensagem);
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);

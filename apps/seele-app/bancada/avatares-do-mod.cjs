@@ -81,6 +81,49 @@ const { chromium } = require('./playwright.cjs');
     await page.waitForFunction(() => [...document.querySelectorAll('[data-pessoa-do-avatar="1"]')]
       .every(e => e.style.backgroundImage.includes(doMod)));
 
+    // **`atualizar` troca a foto sem passar pelo nativo** (R7 do PERFIS; tarefa 5
+    // da F3, Step 6). Revogar e registrar de novo deixava a imagem nativa — ou
+    // as iniciais — entre as duas fotos. Com `atualizar`, a velha fica até a nova
+    // estar decodificada, e nenhum quadro mostra outra coisa.
+    await page.evaluate(() => {
+      window.quadros = [];
+      window.vigia = new MutationObserver(() => {
+        for (const e of document.querySelectorAll('[data-pessoa-do-avatar="1"]')) quadros.push(e.style.backgroundImage || e.textContent);
+      });
+      vigia.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      window.anterior = doMod;
+      // A resposta da mídia acompanha `doMod`, como nos passos de cima: os de
+      // baixo contam com as duas iguais.
+      window.doMod = foto('#e6c832');
+      testTable.ler_imagem_mod.uri = doMod;
+      window.concluirAvatar = undefined;
+      window.adiarAvatar = true;
+      contribuicoesDosMods.atualizar(handleAvatar, { id: 'teste/perfis', instancia: instanciaTeste },
+        { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:nova' } } });
+    });
+    await page.waitForFunction(() => typeof concluirAvatar === 'function');
+    assert.ok(await page.locator(todos).evaluateAll(es => es.every(e => e.style.backgroundImage.includes(window.anterior))),
+      'atualizar tirou a foto velha antes de a nova chegar');
+    await page.evaluate(() => {
+      window.adiarAvatar = false;
+      concluirAvatar(testTable.ler_imagem_mod);
+    });
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-pessoa-do-avatar="1"]')]
+      .every(e => e.style.backgroundImage.includes(doMod)));
+    const quadros = await page.evaluate(() => { vigia.disconnect(); return quadros; });
+    const [anterior, nova] = await page.evaluate(() => [window.anterior, window.doMod]);
+    const intrusas = quadros.filter(q => !q.includes(anterior) && !q.includes(nova));
+    assert.deepEqual(intrusas, [], 'um quadro, entre a foto velha e a nova, mostrou outra coisa');
+    // Um handle de outro MOD é recusado como no revogar.
+    const recusa = await page.evaluate(() => {
+      try {
+        contribuicoesDosMods.atualizar(handleAvatar, { id: 'outro/mod', instancia: instanciaTeste },
+          { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:x' } } });
+        return '';
+      } catch (erro) { return erro.message; }
+    });
+    assert.match(recusa, /não é de outro\/mod/, `o handle de outro MOD não foi recusado: ${recusa}`);
+
     await page.evaluate(() => {
       $('vista-conversa').hidden = true;
       $('vista-chamada').hidden = false;
@@ -117,7 +160,7 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(await page.locator(todos).evaluateAll(es => es.every(e => !e.style.backgroundImage && e.textContent.trim())));
     assert.equal(await page.evaluate(() => instanciaTeste.recursos.length), 0);
     assert.deepEqual(errors, []);
-    console.log('avatares: chamada, operador e mensagens; cache, troca, preferência, remoção e carga tardia conferidos.');
+    console.log('avatares: chamada, operador e mensagens; cache, troca, atualizar sem o nativo, preferência, remoção e carga tardia conferidos.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

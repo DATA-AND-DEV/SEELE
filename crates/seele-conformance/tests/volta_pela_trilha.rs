@@ -189,6 +189,7 @@ fn config(
         home: casa.display().to_string(),
         join_secret: None,
         expected_fingerprint: esperada,
+        codigo_esperado: None,
         bilhete,
         // Não há placa de som numa máquina de integração contínua.
         audio: false,

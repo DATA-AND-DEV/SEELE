@@ -83,14 +83,14 @@
     "superficie-titulo": "SuperficiesDoMod::de",
     "superficie-fechar": "SuperficiesDoMod::fechar",
     "superficie-descartar": "SuperficiesDoMod::descartar",
-    "formulario-erros": "novo: a recusa do servidor de volta ao campo",
+    "formulario-erros": "novo: a recusa do servidor de volta ao campo — s.formulario.erros({ chave: frase }), um campo ou vários; {} limpa; chave que não é de um campo: chave-desconhecida (tarefa 7, Step 6b)",
     "contribuir": "RegistroDeContribuicoes::registrar",
     "atualizar-contribuicao": "novo: RegistroDeContribuicoes::atualizar (PERFIS R7)",
     "revogar-contribuicao": "RegistroDeContribuicoes::revogar",
     "abrir-endereco": "abrir_no_navegador",
     "enviar-imagem": "enviar_imagem_mod",
     "ler-imagem": "ler_imagem_mod",
-    "superficie-atualizar": "novo: superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem"
+    "superficie-atualizar": "novo na 6: superficie.atualizar(chave, subarvore) — troca o nó de chave e o que está sob ele, numa mensagem própria; o teto da superfície é o de nós (4096) e o de mídia, e não o da mensagem. No contrato, existe desde a 6; na casca, mora na capacidade superficies, e as APIs 4 e 5 também o veem (API somada; ruling aceito em 09/10)"
   },
   "own": {
     "dados": "recolher_quintal",
@@ -146,7 +146,7 @@
   "eventos-mudam": {
     "midia": "passa a levar ponto e alvo (PERFIS R9); e o retrato que não decodifica manda midia/falhou (K2)",
     "traco": "ganha a fase cancelou (MESA M14)",
-    "contribuicao": "ganha o motivo regiao-ausente (celular)"
+    "contribuicao": "ganha o motivo regiao-ausente (celular) e o motivo orcamento: { ponto, destino, recusados, motivo: 'orcamento', perfil, teto, tamanho } quando a declaração passa do teto do ponto (tarefa 5); o orçamento é o perfil do ponto — pessoa.detalhes 4096 nós, as regiões 64 até a M3"
   },
   "eventos-da-tela": {
     "canal": "{ canal } — o canal aberto mudou",
@@ -326,8 +326,8 @@
         "codec"
       ],
       "celular": {
-        "existe": "só na chamada",
-        "forma": "mínimo de 40 px"
+        "existe": false,
+        "forma": "não existe no celular (decidido com a F8, 09/10): a casca tira o rodapé da telemetria; o MOD que contribui recebe regiao-ausente. No PC no navegador, existe como no desktop"
       }
     }
   },
@@ -399,13 +399,13 @@
     "marcacao": "data-pessoa-da-capa (nunca data-faixa)",
     "onde": {
       "chamada": "o cartão da pessoa (pintarCartao), animada até o teto, no desktop e no celular (D-capa-1)",
-      "operador": "o fundo de .operador com a capa de quem usa; não no celular",
+      "operador": "o fundo de .operador inteira com a capa de quem usa, e o núcleo (MUDO, fone, SAIR) sobre placas opacas; não no celular",
       "perfil": "os dois cabeçalhos: a página do PERFIS (por citação) e o «SEU PERFIL» nativo (por aplicador do produto)",
       "lista": "parada, se o MOD a citar no cartão"
     },
     "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2)",
     "preferencia": "herda a de pessoa.cartao: «o SEELE desenha» não recebe capa",
-    "legibilidade": "o texto do produto fica em placas opacas; todo texto do produto sobre a capa mantém o contraste que tem sem capa, contra um quadro branco e um preto; MUDO, fone e SAIR nunca ficam sobre a capa",
+    "legibilidade": "o texto e os controles do produto ficam em placas opacas da cor do fundo nativo; todo texto e controle sobre a capa mantém o contraste que tem sem capa, a cor e a borda, contra um quadro branco, um preto e um da cor da própria tinta; MUDO, fone e SAIR ficam sobre placas do núcleo, nunca sobre a capa sem placa",
     "quem-fala": "o halo e a pastilha FALANDO ficam acima da capa; o véu passa a --seele-laranja-carga",
     "estados": "sem capa, carregando e recusada: fundo liso, como hoje; a recusada vai ao seele.log e ao MOD com ponto e alvo",
     "movimento-reduzido": "um quadro estático por capa, usado com prefers-reduced-motion, com o movimento reduzido do SEELE, com a janela oculta, fora da vista e acima do teto",
@@ -423,7 +423,7 @@
       "aviso",
       "folha"
     ],
-    "desconhecido": "recusado pelo nome (hoje vira dialogo em silêncio, mods-superficies.js:225)",
+    "desconhecido": "recusado pelo nome, tipo-desconhecido, com tipoPedido e tipos (tarefa 7, Step 1); até a 5 abre como dialogo, com a linha no seele.log; sem tipo, dialogo",
     "garantias-do-produto": [
       "a saída é montada pelo produto, com o texto do produto, ligada a um comando do produto",
       "o cabeçalho diz de qual MOD é a superfície",
@@ -609,8 +609,15 @@
     "guarda": "o guarda 11: para cada item, fora de toda região, sem contribuição que o cubra, sem tema que o alcance; #portaria-batendo agora e #toque depois da 7d da sala pessoal; no celular, com pagina imersiva, dialogo, folha expandida e aviso abertos, o retângulo de cada um termina acima da faixa de voz, e o toque no MUDO e em AJUSTES chega ao produto; no desktop, mede se um dialogo aberto deixa o MUDO e o SAIR à vista e clicáveis"
   },
   "som": {
-    "tocando": "vale quando muda; a exceção é o som que terminou, que toca de novo do começo quando um redesenho o declara tocando: true (contrato da 0.15.1, api/README.md)",
-    "repetir": "repetir: true por contrato (decisão de 08/10): o som volta ao começo no fim sem redesenho, e o MOD recebe terminou só de um som sem repetir",
+    "de-onde": "o contrato de tocando do api/README.md da 0.15.1 (P49-6), palavra por palavra, e a linha nova de repetir (tarefa 10)",
+    "tocando": [
+      "tocando vale quando muda: um som que a pessoa pausou não volta sozinho no redesenho seguinte que o declare tocando: true",
+      "a exceção é o som que terminou: tocando: true sobre um som cujo último aviso foi terminou toca de novo, do começo, como o <audio> fazia até a 0.15.0",
+      "no fim, o MOD recebe só terminou",
+      "o botão é do produto: um TOCAR/PAUSAR ao lado do som (num cartão, nenhum)",
+      "fora da tela, a declaração não liga o som: recusada, com o motivo, e um som que tocava ali é pausado"
+    ],
+    "repetir": "repetir: true toca em laço (AudioBufferSourceNode.loop): volta ao começo no fim sem redesenho, e o MOD não recebe terminou dele; desligado num redesenho, a fonte de pé sai do laço e o próximo fim é dito; pausado e retomado, continua de onde parou dentro da volta (tarefa 10)",
     "celular": "som de MOD só com a tela acesa, até a medida da F4",
     "palco": "o palco escondido pela vista alternada (celular) continua montado, e o som dele continua; a regra «fora da tela» vale para o lugar desmontado"
   },
@@ -639,7 +646,7 @@
   "celular": {
     "regra": "toda região e camada diz se existe na casca de uma mão (≤ 600 px), com que tamanho, e o que acontece com uma contribuição para onde ela não existe",
     "onde-o-mod-sabe": "retrato.onde, retrato.regioes e o evento lugar",
-    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta. Na 0.16, com o desenho da F8 (D-celular-1), nenhuma das oito regiões fica sem casa no celular; a regra fica para a casca que não tiver uma região (uma região da API 7 numa casca 1.0, ou o executor do navegador)",
+    "ausente": "contribuição recusada com motivo regiao-ausente; a aba DIAGNÓSTICO conta. Na 0.16 o celular tem sete das oito: o status.barra não existe nele (decidido com a F8, 09/10), a casca declara as sete em CELULAR.regioes, e o MOD que contribui no status.barra recebe regiao-ausente. A regra vale também para a casca futura que não tiver uma região (uma região da API 7 numa casca 1.0, ou o executor do navegador)",
     "executor": "o mesmo rquickjs 0.12.2 do desktop em wasm32-wasip1, num Worker criado de dentro de um iframe de origem opaca, com o prelúdio extraído do executor.rs (spike da F4, spec-mestre 00935dac): um contrato e um motor só; nada depende de o MOD rodar fora de uma volta do anfitrião; os limites valem igual nos dois, e o teto de memória no web exige o RustAllocator; capacidades por plataforma; as globais do contexto são as mesmas nos dois alvos: a API 6 tira o Atomics também do desktop (decidido em 09/10), e a sonda de crates/seele-motor/tests/casos.json fica sem diferença declarada",
     "toque-na-tela": "um dedo sobre figura com chave arrasta, um dedo no vazio rola, pinça amplia dentro da tela, área de acerto mínima, toque longo opcional por figura (MESA item 15); os números sobem da medida",
     "desenho": "da F8 (D-celular-1, spec-mestre fd4d298f): o contrato fixa o nome de cada região e o que ela faz com uma contribuição; o lugar na casca é da F8. A primeira aba se chama SERVIDOR (rótulo de tela)"
@@ -676,7 +683,27 @@
       "valor-invalido (leva a chave; a forma de cada valor está na mesma tabela: cor #rrggbb, inteiro com intervalo, bandeira, escolha; tarefa 17j)",
       "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }])"
     ],
-    "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão"
+    "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
+    "superficies": [
+      "tipo-desconhecido (o tipo pedido não é da API do pacote — na 6, o painel também; leva tipoPedido e tipos — não tipo, que é o da mensagem da ponte; tarefa 7)",
+      "chave-desconhecida (superficie.atualizar pediu uma chave que a superfície não tem, ou formulario.erros uma que não é de um campo; leva chave; tarefa 7)",
+      "orcamento (superficie.atualizar levaria a superfície além do teto de nós; leva perfil, teto e tamanho; tarefa 7)",
+      "superficie-desconhecida (a mensagem nomeia uma superfície que não está de pé; leva superficie; tarefa 17g)",
+      "sem-previa (SeeleUI.tema sem { previa: true }: na 6, o tema publicado é o da metade de servidor; tarefa 17g)",
+      "contraste (a prévia do tema tem um par abaixo do piso; leva pares; tarefa 17g)",
+      "teto-de-folhas (o MOD já tem 3 folhas à vista; leva teto; tarefa 7)",
+      "teto-de-superficies (o MOD já mantém 12 superfícies de pé; leva teto; tarefa 7)"
+    ],
+    "contribuicoes": [
+      "ponto-desconhecido (o ponto não está na tabela)",
+      "modo-recusado (o ponto não aceita o modo; inclusive decorar)",
+      "sem-alvo (o ponto exige alvo, o pessoa.avatar)",
+      "conteudo-invalido (o conteúdo não tem a forma que o ponto exige)",
+      "teto-de-contribuicoes (128 contribuições sem alvo de pé)",
+      "teto-de-alvos (256 alvos num ponto)",
+      "contribuicao-ja-existe (já há uma deste MOD para o alvo, o ponto e o modo: use atualizar)",
+      "contribuicao-de-outro-mod (o handle de atualizar ou revogar é de outro MOD)"
+    ]
   },
   "decisoes-do-dono-de-09-10": {
     "tema": "um tema por servidor, o escolhido por quem administra (D-api-5)",

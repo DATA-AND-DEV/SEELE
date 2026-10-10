@@ -105,6 +105,9 @@ const RECUSAS_NOMEADAS = new Map([
   ["criar_servidor", RECUSA_HOSPEDAR],
   ["decidir_pedido", RECUSA_PORTARIA],
   ["definir_senha_do_server", RECUSA_PORTARIA],
+  // Quem pinta o servidor hospedado (tarefa 17f.0 da F3): escolher é de quem
+  // hospeda, e o navegador não hospeda.
+  ["escolher_o_tema_do_servidor", RECUSA_MODS],
   ["hospedar", RECUSA_HOSPEDAR],
   ["instalar_atualizacao", RECUSA_ATUALIZAR],
   ["instalar_mod", RECUSA_MODS],
@@ -234,6 +237,13 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
   [
     "conjunto_exigido_agora",
     { resposta: "", motivo: "o desktop responde assim a quem não hospeda (main.rs)" },
+  ],
+  [
+    "estado_do_servidor",
+    {
+      resposta: { hospedando: false, mensagens_desconhecidas: 0, sessoes_com_desconhecidas: 0 },
+      motivo: "a P12 da F1: a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde o número (main.rs)",
+    },
   ],
 ]);
 

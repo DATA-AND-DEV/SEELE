@@ -36,6 +36,7 @@ fn config_de_teste(server: String, casa: &std::path::Path) -> ConnectConfig {
         home: casa.display().to_string(),
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         // Não há placa de som numa máquina de integração contínua.
         audio: false,
@@ -320,6 +321,7 @@ fn a_trilha_de_uma_chegada_que_falhou_atravessa_ate_a_casca() {
         home: casa.path().display().to_string(),
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         // Não há placa de som numa máquina de integração contínua.
         audio: false,

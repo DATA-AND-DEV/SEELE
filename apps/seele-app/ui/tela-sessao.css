@@ -217,14 +217,15 @@
    `pre-line` porque a impressão digital vai em linha própria: são 64
    caracteres para comparar com outro canal, e reflui-los no meio de uma frase
    é a única forma em que ninguém consegue compará-los. */
+/* O veredito é do núcleo: as cores são `--nucleo-*` (tarefa 9). */
 .veredito {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--seele-laranja-fraco);
-  border-bottom: 1px solid var(--seele-laranja-nerv);
-  color: var(--seele-laranja-nerv);
+  background: var(--nucleo-acento-fraco);
+  border-bottom: 1px solid var(--nucleo-acento);
+  color: var(--nucleo-acento);
   flex: 0 0 auto;
 }
 
@@ -354,6 +355,30 @@
   height: 100%;
   padding: 8px;
   object-fit: contain;
+}
+
+/* **As regiões da API 6 são caixas fechadas** (rascunho §3, tarefa 5) — esta, a
+   da barra do operador, a do compositor, a da barra de baixo e o miolo do
+   cabeçalho do canal. Um MOD desloca o próprio desenho até ±512 px
+   (`estilo.mover`), e é assim que ele o poria por cima do que é do produto ao
+   lado. **O `overflow` e o `contain: paint` cortam esse desenho, cada um
+   sozinho**; sem os dois, ele cobria o servidor atual, o microfone, o fone e o
+   nome do canal (medido em `regioes-do-produto.cjs`, mirando o centro de cada
+   um). As duas travas ficam: o `overflow` existe também pelo teto de altura, e
+   o `contain` segura se ele um dia mudar.
+
+   A região `redes`: o que os MODs acrescentam à trilha, com teto de altura de
+   três itens da trilha — sem ele, um conteúdo alto empurrava o `+` para fora
+   da vista (medido). O que passar rola por dentro. */
+.trilha-mods {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  border-bottom: 1px solid var(--seele-linha);
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
 }
 
 /* O `+` de 48px, que hoje faz alguma coisa: leva à entrada para conectar a um
@@ -849,6 +874,109 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
 }
 
+/* **A capa de uma pessoa** (`pessoa.capa`; rascunho da API 6, §4; tarefa 6):
+   a primeira camada de quem a veste — o cartão da chamada, a barra do
+   operador —, atrás de todo o conteúdo. O véu e o halo de quem fala moram no
+   `::after` da camada, por cima da imagem e por baixo do texto: um `box-shadow`
+   inset do próprio cartão seria pintado com o fundo dele, **abaixo** da capa.
+   Seletores de atributo, e não de classe: quem veste é de outra tela. */
+[data-com-capa] {
+  position: relative;
+  isolation: isolate;
+}
+
+.capa-camada {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-size: cover;
+  background-position: center;
+}
+
+.capa-camada::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--seele-negro-painel) 55%, transparent);
+}
+
+[data-fala="sim"] > .capa-camada::after {
+  background: color-mix(in srgb, var(--seele-laranja-carga) 75%, transparent);
+  box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
+}
+
+/* A região `operador.barra` (rascunho da API 6, §3): fechada como as outras, e
+   com teto de altura — o que passar rola por dentro, e o SAIR e o microfone,
+   embaixo dela, continuam onde estão. */
+.operador-mods {
+  max-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
+/* **As placas da barra do operador sobre a capa** (rascunho da API 6, §4 e
+   §10; tarefa 6). A capa de quem usa pinta o fundo da barra inteira, e cada
+   texto e cada controle fica sobre uma placa opaca da cor do fundo nativo da
+   barra, o negro do painel: o contraste é o de sem capa, medido em `capa.cjs`
+   com a cor e a borda, contra uma capa branca, uma preta e uma da cor da
+   tinta. O MUDO, o fone, o «no ar» e o SAIR, que são do núcleo, não estão
+   aqui: a placa deles é a do núcleo, sempre (abaixo, tarefa 9). */
+.operador[data-com-capa] :where(
+  .operador-inicial, .operador-rotulo, .operador-nome, #botao-server-sessao, #operador-vista
+) {
+  background-color: var(--seele-negro-painel);
+}
+
+/* **O núcleo de confiança, nas cores do produto** (rascunho da API 6, §10;
+   tarefa 9 da F3). O tema do servidor escreve os `--seele-*` em
+   `#tela-sessao`; os `--nucleo-*`, declarados na raiz a partir dos tokens,
+   chegam a todo filho já resolvidos, e o tema não os alcança. O MUDO, o fone,
+   o «no ar», o SAIR e o veredito os leem, sobre uma placa opaca do núcleo:
+   com e sem tema eles têm as mesmas cores — inclusive sob um tema de acento
+   igual ao fundo, que a API 6 recusa pelos pares (medido em
+   `bancada/nucleo.cjs`). Os nomes são os da casca do celular
+   (`celular-base.css`), que declara os mesmos sob a marca dela. */
+:root {
+  --nucleo-fundo: var(--seele-negro-absoluto);
+  --nucleo-painel: var(--seele-negro-painel);
+  --nucleo-texto: var(--seele-osso);
+  --nucleo-apagado: var(--seele-osso-apagado);
+  --nucleo-acento: var(--seele-laranja-nerv);
+  --nucleo-acento-fraco: var(--seele-laranja-fraco);
+  --nucleo-borda: var(--seele-linha-forte);
+}
+
+#voz-estado {
+  color: var(--nucleo-apagado);
+  background-color: var(--nucleo-painel);
+}
+
+/* **O selo da prévia do tema** (rascunho da API 6, §9, B4; tarefa 17g): «prévia
+   não publicada», do produto, nas cores do núcleo — o tema em prévia não o
+   alcança —, no alto e acima do véu de um modal (z 60), sem pegar clique. */
+.selo-da-previa {
+  position: fixed;
+  top: calc(var(--seele-barra-janela, 32px) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  padding: 4px 12px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.12em;
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  pointer-events: none;
+}
+
+.selo-da-previa[hidden] { display: none; }
+
+#operador-sair {
+  color: var(--nucleo-texto);
+  background-color: var(--nucleo-painel);
+}
+
 .operador-topo { display: flex; align-items: center; gap: 8px; }
 
 .operador-rotulo {
@@ -896,6 +1024,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
  * `width: 34px` daqui, e um `font-size` de rótulo que deixava o glifo em 12px.
  * O resultado em campo foram duas caixas largas e aparentemente vazias no meio
  * da coluna — «os botões estão completamente estranhos». */
+/* O MUDO e o fone são do núcleo: as cores e a placa são `--nucleo-*` (acima). */
 .operador-glifo {
   width: 34px;
   height: 34px;
@@ -904,9 +1033,9 @@ button.voice_room-nome:hover { text-decoration: underline; }
   align-items: center;
   justify-content: center;
   font: inherit;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--nucleo-apagado);
+  background: var(--nucleo-painel);
+  border: 1px solid var(--nucleo-borda);
   padding: 0;
   cursor: pointer;
 }
@@ -914,15 +1043,15 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .operador-glifo .glifo { width: 1.15em; height: 1.15em; }
 
 .operador-glifo:hover {
-  color: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--nucleo-acento);
+  border-color: var(--nucleo-acento);
 }
 
 /* Desligado é laranja cheio, como todo estado ligado desta casca. */
 .operador-glifo[data-ativo="sim"] {
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-acento);
 }
 
 /* ---------- coluna 3: o canal aberto ---------- */
@@ -940,6 +1069,39 @@ button.voice_room-nome:hover { text-decoration: underline; }
   border-bottom: 1px solid var(--seele-linha);
   flex: 0 0 auto;
 }
+
+/* O título de um grupo da navegação substituída (rascunho da API 6, §3): o texto
+   é do MOD, e o desenho é o dos títulos do produto — miúdo, espaçado, apagado —,
+   para ele ler como divisão da lista, e não como uma linha que se aperta. */
+.canais-grupo {
+  list-style: none;
+  padding: 10px 16px 4px;
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  color: var(--seele-rotulo-painel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* `canal.cabecalho` substituído (rascunho da API 6, §3): o miolo da barra, no
+   lugar do espaço, fechado — o nome do canal e a lupa, dos dois lados, são do
+   produto, e nada do MOD passa por cima deles. **A base é zero**, como a do
+   espaço: o miolo cresce no que sobra e nunca tira largura do nome. Com
+   `auto`, a base era o conteúdo do MOD, e um conteúdo largo espremia o nome do
+   canal de 43 px para 7 (medido em `regioes-do-produto.cjs`). **E com teto de
+   altura**: sem ele, um miolo alto fazia a barra crescer até 1 149 px e
+   empurrava a conversa para fora da janela (medido); o que passar rola por
+   dentro. */
+.canal-cabecalho-miolo {
+  flex: 1 1 0;
+  max-height: 96px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
+.linha-barra:has(> .canal-cabecalho-miolo:not([hidden])) > .espaco { display: none; }
 
 .linha-barra-cerquilha {
   font-size: 16px;
@@ -1208,6 +1370,18 @@ button.linha-nome:hover { text-decoration: underline; }
 
 /* O compositor do v3: o campo numa moldura própria, e `ENVIAR` com rótulo ao
    lado dela. 44px de altura nos dois, que é o que o comp escreve. */
+/* A região `compositor` (rascunho da API 6, §3): acima da fileira de escrever,
+   fechada como as outras, e com teto de altura — a caixa de escrever não sai da
+   vista por causa dela. */
+.compositor-mods {
+  flex: 0 0 auto;
+  max-height: 96px;
+  padding: 0 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
 .compor {
   display: flex;
   align-items: center;
@@ -1662,6 +1836,45 @@ button.linha-nome:hover { text-decoration: underline; }
   padding: 0;
 }
 
+/* A região `pessoas.lista` (rascunho da API 6, §3): acima da lista, fechada e
+   com teto de altura, como as outras regiões. */
+.roster-mods {
+  flex: 0 0 auto;
+  max-height: 96px;
+  padding: 0 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  contain: paint;
+}
+
+/* O corpo de uma mensagem desenhado por um MOD (`conversa.mensagem`, rascunho da
+   API 6, §3): fechado como as regiões — a cabeça acima, com o apelido
+   verificado, e o anexo e o selo abaixo são do produto. */
+.mensagem-miolo {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  contain: paint;
+}
+
+/* O subtítulo de um grupo do MOD **dentro** de uma sala: o texto é do MOD, e a
+   forma é do produto — recuado e com um filete à esquerda, que o cabeçalho de
+   uma sala não tem. Sem isso, um MOD que intitulasse um grupo «Sala principal
+   2/8» imitaria uma seção, que é a verdade que as seções guardam: quem está na
+   sala de quem ouve você. */
+.roster-subgrupo {
+  list-style: none;
+  margin: 8px 14px 2px;
+  padding: 0 0 0 8px;
+  border-left: 1px solid var(--seele-linha-forte);
+  font-size: var(--seele-t-micro);
+  letter-spacing: 0.18em;
+  color: var(--seele-rotulo-painel);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .roster .pessoa {
   border-bottom: 1px solid var(--seele-linha);
   border-left: 2px solid transparent;
@@ -1885,6 +2098,20 @@ button.linha-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
+}
+
+/* A região `status.barra` (rascunho da API 6, §3), na altura da barra, que é
+   fixa. **Ela encolhe primeiro**: num item flex, `overflow: hidden` zera a
+   largura mínima automática, e as métricas, em `nowrap`, não encolhem abaixo do
+   texto delas. Sem o `overflow`, um MOD largo empurrava o aviso de falha local
+   para fora da janela (medido em `regioes-do-produto.cjs`). */
+.telemetria-mods {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  padding: 0 12px;
+  overflow: hidden;
+  contain: paint;
 }
 
 .metrica {

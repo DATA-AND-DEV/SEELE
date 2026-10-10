@@ -93,6 +93,33 @@ function elemento(tag, classe, texto) {
   return nodo;
 }
 
+// ------------------------------------------------- a casca do navegador (P5)
+//
+// O que a casca do celular troca no desktop, e só isto (spec da F8, §9.4). Cada
+// campo nasce com o comportamento de hoje, e o desktop, que nunca os troca, não
+// muda: `celular-*.js` só roda com a marca dele na raiz.
+//
+//   - `depoisDeDesenhar`: quem redesenha o que é do celular depois de cada
+//     quadro (P6, no fim de `desenhar`);
+//   - `pedirSenhaDaSala`: a pergunta da senha de uma sala, que devolve a senha
+//     ou `null` quando a pessoa desiste (P7);
+//   - `enterEnvia`: o Enter do compositor envia; no celular o Return quebra a
+//     fileira, e só o ENVIAR envia (P8);
+//   - `avisoDeFone`: a frase do aviso de fone (P9);
+//   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
+//     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
+//     a frase, com o nome da tecla, continua no `tela-server.js`.
+//
+// Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
+// campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
+const CASCA = Object.seal({
+  depoisDeDesenhar: [],
+  pedirSenhaDaSala: async () => window.prompt("Senha da sala"),
+  enterEnvia: true,
+  avisoDeFone: () => AVISO_DE_FONE,
+  fraseDoModo: (_modo, doDesktop) => doDesktop,
+});
+
 // --------------------------------------------------------------- o snapshot
 
 async function atualizar() {
@@ -729,6 +756,9 @@ async function montarOMod(mod) {
     instancia.encerrar().catch(() => {});
     return;
   }
+  // **O tema do servidor que chegou antes da janela** (tarefa 17f): o código
+  // do MOD já rodou, os ouvintes dele estão de pé, e ele sabe do desfecho.
+  entregarODesfechoDoTema(mod.id);
   // **`carregado` diz que os bytes executaram, e só isso.** Se o MOD estourou
   // dentro da própria inicialização, o worker subiu do mesmo jeito — quem sabe
   // disso é ele, e prometer o contrário seria inventar.
@@ -841,6 +871,13 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    // Uma superfície deste MOD fechou: a prévia do tema que era dela sai (17g).
+    aoFecharASuperficie: (chave) => aoFecharASuperficieDaPrevia(mod.id, chave),
+    // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
+    // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
+    api: Number(mod.api) || 0,
+    // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
+    imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
     /**
      * Um evento da janela para o MOD.
      *
@@ -880,11 +917,13 @@ function donoDaRegiao(mod, instancia) {
      * cabe numa declaração de região, e o MOD não precisa carregá-la na fila
      * dele para mostrá-la.
      */
-    carregarMidiaDoServidor: async (canal, pedido, campo) => {
+    // `uso` nomeia o lugar em que a imagem vai aparecer (`"capa"`), e o Rust a
+    // reduz a ele e diz quanto ela pesa decodificada (tarefa 6, Step 5).
+    carregarMidiaDoServidor: async (canal, pedido, campo, uso) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
       if (pedido?.transporte === "volume") {
-        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido) });
+        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido), uso });
         if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
         return midia;
       }
@@ -914,7 +953,7 @@ function donoDaRegiao(mod, instancia) {
         if (voltas === PEDACOS_DE_MIDIA - 1) throw new Error("Envio de imagem incompleto.");
         pedidoAtual = { ...pedido, ...resposta.proximo };
       }
-      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64 });
+      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64, uso });
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },
@@ -1218,7 +1257,11 @@ function superficiesDoMod(mod, instancia) {
  */
 function superficieDoMod(mod, instancia, chave) {
   const superficie = superficiesDoMod(mod, instancia).de(chave);
-  if (!superficie) throw new Error(`a superfície «${chave}» não está de pé`);
+  // Pelo nome na 6 (`superficie-desconhecida`, com a chave); até a 5, a frase.
+  if (!superficie) {
+    throw recusaDaSuperficie("superficie-desconhecida", `a superfície «${chave}» não está de pé`,
+      { superficie: String(chave ?? "").slice(0, 64) });
+  }
   return superficie;
 }
 
@@ -1235,6 +1278,7 @@ contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
+  if (typeof redesenharCapas === "function") redesenharCapas();
 });
 
 /**
@@ -1248,23 +1292,132 @@ contribuicoesDosMods.aoMudar(() => {
  * `preferenciaConsultadaPara`, a mesma que a gestão de MODs lê.
  */
 function avatarContribuido(pessoaId) {
+  return imagemContribuida("pessoa.avatar", pessoaId)?.uri ?? null;
+}
+
+/**
+ * **A capa de uma pessoa, contribuída por um MOD** (`pessoa.capa`; rascunho da
+ * API 6, §4; tarefa 6). A mesma regra do avatar — a mesma carga, o mesmo
+ * cache, a mesma preferência herdada de `pessoa.cartao` —, com o quadro
+ * estático que o movimento reduzido usa.
+ *
+ * @returns {{ url: string, estatico: string|null } | null}
+ */
+function capaContribuida(pessoaId) {
+  const estado = imagemContribuida("pessoa.capa", pessoaId);
+  return estado?.uri ? { url: estado.uri, estatico: estado.estatico ?? null } : null;
+}
+
+/**
+ * **O bolso das capas de um MOD, em bytes decodificados** (rascunho da API 6,
+ * §4 e §12; tarefa 6, Step 5b): largura × altura × 4 × quadros, como o Rust os
+ * conta depois de reduzir a capa ao lugar dela. 128 MiB é a partida — umas cem
+ * capas paradas, ou uma animada inteira e umas quarenta paradas —, e a M3 mede.
+ */
+const LIMITES_DA_CAPA = Object.freeze({ bytesDecodificados: 128 * 1024 * 1024 });
+
+/**
+ * O que cada imagem de pessoa diz no `midia`, quem a redesenha, e o bolso dela:
+ * o uso que ela nomeia ao Rust, o teto, e o que ela custa nele. **O avatar não
+ * nomeia uso** e conta o arquivo; a capa é reduzida ao lugar dela e conta o
+ * quadro decodificado. Bolsos separados: uma capa não gasta o dos avatares.
+ */
+const IMAGENS_DE_PESSOA = Object.freeze({
+  "pessoa.avatar": {
+    chave: "avatar",
+    uso: undefined,
+    teto: () => LIMITES_DO_CARTAO.bytesDeMidia,
+    custo: (midia) => midia.bytes,
+    redesenhar: () => redesenharAvatares(),
+  },
+  "pessoa.capa": {
+    chave: "capa",
+    uso: "capa",
+    teto: () => LIMITES_DA_CAPA.bytesDecodificados,
+    custo: (midia) => midia.decodificados ?? midia.bytes,
+    redesenhar: () => {
+      if (typeof redesenharCapas === "function") redesenharCapas();
+    },
+  },
+});
+
+/**
+ * **O primeiro quadro de uma imagem**, parado: o que a capa mostra com o
+ * movimento reduzido (rascunho §4). `animation: none` não para um GIF; um
+ * quadro desenhado num `canvas` para. `null` quando o `canvas` não pôde ser lido.
+ */
+function quadroEstatico(imagem) {
+  try {
+    const tela = document.createElement("canvas");
+    tela.width = imagem.naturalWidth;
+    tela.height = imagem.naturalHeight;
+    tela.getContext("2d").drawImage(imagem, 0, 0);
+    // Sem tipo escrito: o padrão do `canvas` é PNG, e o que sai daqui são os
+    // pixels recodificados, e não bytes de alguém com um tipo juntado a eles.
+    return tela.toDataURL();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **A imagem de pessoa que um MOD contribui** — o avatar ou a capa —, com a
+ * carga, o cache por contribuição e a troca do `atualizar`. Devolve o estado
+ * da carga (`{ uri, estatico, situacao, … }`), ou `null` enquanto não há
+ * contribuição ou ela ainda não começou.
+ */
+/**
+ * **A imagem de uma pessoa, citada** por um cartão (`daPessoa`; rascunho da API
+ * 6, §4; tarefa 6, Step 4b; o bloqueio A do PERFIS). A que a contribuição dela
+ * já carregou, decodificou e contou no bolso — por isso `bytes: 0` aqui —, sem
+ * pedido novo. `null` sem contribuição, ou quando ela não carregou. A capa,
+ * com o movimento reduzido, é o quadro parado.
+ *
+ * @returns {Promise<{ papel: string, bytes: number, uri: string } | null>}
+ */
+function imagemCitada(qual, pessoaId) {
+  const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
+  if (!ponto || pessoaId === "" || pessoaId == null) return Promise.resolve(null);
+  // A primeira consulta começa a carga, quando há contribuição; a segunda
+  // devolve o estado dela.
+  const estado = imagemContribuida(ponto, pessoaId) ?? imagemContribuida(ponto, pessoaId);
+  if (!estado) return Promise.resolve(null);
+  const comoMidia = () => {
+    const parada = ponto === "pessoa.capa" && typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const uri = parada ? estado.estatico : estado.uri;
+    return uri ? { papel: "imagem", bytes: 0, uri } : null;
+  };
+  if (estado.situacao !== "carregando") return Promise.resolve(comoMidia());
+  return new Promise((resolve) => {
+    (estado.aoTerminar ??= []).push(() => resolve(comoMidia()));
+  });
+}
+
+function imagemContribuida(ponto, pessoaId) {
+  const imagem = IMAGENS_DE_PESSOA[ponto];
   const preferido = typeof preferenciaConsultadaPara === "function"
-    ? preferenciaConsultadaPara("pessoa.avatar")
+    ? preferenciaConsultadaPara(ponto)
     : "";
   const contribuicao = contribuicoesDosMods.escolherSubstituicao(
-    "pessoa.avatar", String(pessoaId), preferido,
+    ponto, String(pessoaId), preferido,
   ).escolhida;
   if (!contribuicao) return null;
   const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
   if (!dono.podeFalar()) return null;
-  if (contribuicao.retrato) return contribuicao.retrato.uri;
-  const estado = { uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" };
-  contribuicao.retrato = estado;
+  if (contribuicao.retrato) return contribuicao.retrato;
+  const novoRetrato = () => ({ uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" });
+  const estadoInicial = novoRetrato();
+  contribuicao.retrato = estadoInicial;
   contribuicao.soltarMontagem = () => {
-    estado.cancelado = true;
-    estado.uri = null;
-    estado.bytes = 0;
+    for (const um of [contribuicao.retrato, contribuicao.retratoPendente]) {
+      if (!um) continue;
+      um.cancelado = true;
+      um.uri = null;
+      um.bytes = 0;
+    }
     contribuicao.retrato = null;
+    contribuicao.retratoPendente = null;
     avisarQueAMidiaMudou();
   };
   avisarQueAMidiaMudou();
@@ -1274,70 +1427,174 @@ function avatarContribuido(pessoaId) {
   // o `uri` ainda posto: o `.catch` do fim leva o tropeço ao `console` e ao
   // `seele.log`, pelo `dono.anotarRecusa`, e o estado fica o que a tela mostra
   // (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
-  const aplicar = (midia) => {
-    if (!midia || estado.cancelado) return;
-    if (!dono.podeFalar()) {
+  // **A carga de um retrato**, para o primeiro e para cada `atualizar`. Os
+  // ganchos: `aoPronto` roda quando a imagem está decodificada, antes do
+  // redesenho; `aoFalhar`, quando ela é recusada; e `substituindo` tira o
+  // retrato que esta contribuição já mostra da conta do teto de mídia — ele
+  // sai quando o novo entra.
+  const carregar = (estado, ganchos = {}) => {
+    const substituindo = ganchos.substituindo === true;
+    const aplicar = (midia) => {
+      if (!midia || estado.cancelado) return;
+      if (!dono.podeFalar()) {
+        estado.bytes = 0;
+        return;
+      }
+      estado.uri = midia.uri;
+      estado.estatico = midia.estatico ?? null;
+      estado.situacao = "pronta";
+      ganchos.aoPronto?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
+      avisarQueAMidiaMudou();
+      imagem.redesenhar();
+    };
+    const recusar = (falha) => {
+      // A reserva volta antes de qualquer pergunta: um avatar recusado não
+      // ocupa o teto de quem vier depois, nem numa sessão que acabou.
       estado.bytes = 0;
-      return;
-    }
-    estado.uri = midia.uri;
-    estado.situacao = "pronta";
-    avisarQueAMidiaMudou();
-    redesenharAvatares();
-  };
-  const recusar = (falha) => {
-    // A reserva volta antes de qualquer pergunta: um avatar recusado não
-    // ocupa o teto de quem vier depois, nem numa sessão que acabou.
-    estado.bytes = 0;
-    if (estado.cancelado || !dono.podeFalar()) return;
-    const porque = motivoDaFalha(falha);
-    estado.situacao = "recusada";
-    estado.motivo = porque;
-    avisarQueAMidiaMudou();
-    dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
-    // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
-    // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-    dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
-  };
-  const fonte = contribuicao.conteudo.doServidor;
-  // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
-  // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
-  soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
-    .then((midia) => {
+      ganchos.aoFalhar?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
       if (estado.cancelado || !dono.podeFalar()) return;
-      let ocupados = 0;
-      for (const outra of contribuicoesDosMods.porHandle.values()) {
-        if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
-      }
-      if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
-        || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
-        throw new Error("o avatar não é imagem ou excede o limite de mídia");
-      }
-      // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
-      // cima soma os `bytes` dos outros retratos desta instância, e dois
-      // avatares decodificando juntos passariam os dois por ela se a reserva
-      // esperasse. A imagem que não abre os devolve, em `recusar`.
-      estado.bytes = midia.bytes;
-      return provarImagem(midia.uri).then(() => midia);
-    })
-    .then(aplicar, recusar)
-    .catch((falha) => {
-      console.warn(
-        `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
-        falha,
-      );
-      // **E ao `seele.log`**, pela porta das outras linhas do avatar
-      // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
-      // dono que lança aqui terminaria numa promessa que ninguém pega.
-      try {
-        dono.anotarRecusa(
-          `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+      const porque = motivoDaFalha(falha);
+      estado.situacao = "recusada";
+      estado.motivo = porque;
+      avisarQueAMidiaMudou();
+      // **Com o ponto e o alvo** (rascunho §7.1): o MOD diz a quem enviou que a
+      // imagem não vai aparecer, e para isso precisa saber de quem ela era.
+      dono.falar({
+        nome: "midia", chave: imagem.chave, ponto, alvo: String(pessoaId), estado: "falhou", porque,
+      });
+      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+      dono.anotarRecusa(`${imagem.chave} da pessoa ${pessoaId} não montou — ${porque}`);
+    };
+    const fonte = contribuicao.conteudo.doServidor;
+    // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
+    // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
+    soImagem(dono.carregarMidiaDoServidor(
+      Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes", imagem.uso,
+    ))
+      .then((midia) => {
+        if (estado.cancelado || !dono.podeFalar()) return;
+        // O bolso deste ponto, nesta instância: os avatares somam os avatares,
+        // e as capas, as capas.
+        let ocupados = 0;
+        for (const outra of contribuicoesDosMods.porHandle.values()) {
+          if (substituindo && outra === contribuicao) continue;
+          if (outra.instancia === contribuicao.instancia && outra.ponto === ponto) {
+            ocupados += outra.retrato?.bytes ?? 0;
+          }
+        }
+        const custo = midia?.papel === "imagem" ? imagem.custo(midia) : NaN;
+        if (!Number.isFinite(custo) || custo < 0 || ocupados + custo > imagem.teto()) {
+          throw new Error(`o ${imagem.chave} não é imagem ou excede o limite de mídia`);
+        }
+        // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
+        // cima soma os `bytes` dos outros retratos desta instância, e dois
+        // avatares decodificando juntos passariam os dois por ela se a reserva
+        // esperasse. A imagem que não abre os devolve, em `recusar`.
+        estado.bytes = custo;
+        return provarImagem(midia.uri).then((decodificada) => {
+          // A capa guarda o quadro parado, para o movimento reduzido (§4).
+          if (ponto === "pessoa.capa") midia.estatico = quadroEstatico(decodificada);
+          return midia;
+        });
+      })
+      .then(aplicar, recusar)
+      .catch((falha) => {
+        console.warn(
+          `MOD ${contribuicao.mod}: o ${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+          falha,
         );
-      } catch (tropeco) {
-        console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
-      }
+        // **E ao `seele.log`**, pela porta das outras linhas do avatar
+        // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
+        // dono que lança aqui terminaria numa promessa que ninguém pega.
+        try {
+          dono.anotarRecusa(
+            `${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+          );
+        } catch (tropeco) {
+          console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
+        }
+      });
+  };
+
+  // **Atualizar troca a foto sem passar pelo nativo** (R7 do PERFIS; tarefa 5,
+  // Step 6). A nova carrega ao lado; a velha continua na tela até a nova estar
+  // decodificada, e só então as duas trocam de lugar. Se a nova falhar, a velha
+  // fica — e o MOD sabe, pelo `midia` de sempre.
+  contribuicao.aoAtualizar = () => {
+    if (contribuicao.retratoPendente) contribuicao.retratoPendente.cancelado = true;
+    const nova = novoRetrato();
+    contribuicao.retratoPendente = nova;
+    carregar(nova, {
+      substituindo: true,
+      aoPronto: () => {
+        const velha = contribuicao.retrato;
+        if (velha && velha !== nova) {
+          velha.cancelado = true;
+          velha.bytes = 0;
+        }
+        contribuicao.retrato = nova;
+        contribuicao.retratoPendente = null;
+      },
+      aoFalhar: () => {
+        if (contribuicao.retratoPendente === nova) contribuicao.retratoPendente = null;
+      },
     });
+  };
+
+  carregar(estadoInicial);
   return null;
+}
+
+/**
+ * **Aplica o conteúdo de uma contribuição num destino, e diz o que não coube.**
+ * Na primeira montagem e em cada `atualizar`. Devolve `false` quando a
+ * aplicação lançou — e aí quem chamou solta a montagem.
+ */
+function aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia) {
+  try {
+    const recusados = renderer.aplicar(contribuicao.conteudo);
+    if (recusados > 0) {
+      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
+      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
+      //
+      // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
+      // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
+      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      if (renderer.foraDoTeto > 0) {
+        Object.assign(aviso, {
+          motivo: "orcamento",
+          perfil: orcamento.nome,
+          teto: orcamento.nos,
+          tamanho: nosDaDeclaracao(contribuicao.conteudo),
+        });
+      }
+      donoDaRegiao(mod, instancia).falar(aviso);
+      registrarNoAnfitriao(
+        "recusa-de-mod",
+        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
+          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`
+          + (aviso.motivo
+            ? ` — a declaração tem ${aviso.tamanho}, e o teto de «${aviso.perfil}» é ${aviso.teto}`
+            : ""),
+        "aviso",
+        contribuicao.mod,
+      );
+    }
+  } catch (falha) {
+    // **No registro, e não no console da janela**: num app empacotado o
+    // console não é lugar nenhum, e foi lá que esta falha morava.
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1391,6 +1648,22 @@ function montarContribuicao(contribuicao, destino = "") {
 
   const instancia = contribuicao.instancia;
   if (!instancia || !instancia.admite(geracaoDaSessao)) return null;
+  // **O orçamento é o do ponto** (`perfil`, na tabela de pontos). Era sempre o
+  // do cartão, e o `superficie` de `pessoa.detalhes` nunca valeu (achado da
+  // tarefa 5, decidido pela orquestradora em 09/10). Um ponto sem perfil não
+  // monta declaração: é recusado pelo nome, e não montado com um orçamento
+  // que ninguém escolheu.
+  const perfil = PONTOS_DE_CONTRIBUICAO[contribuicao.ponto]?.perfil;
+  const orcamento = Object.hasOwn(PERFIS_DE_RENDER, perfil ?? "") ? PERFIS_DE_RENDER[perfil] : null;
+  if (!orcamento) {
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não monta declaração`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return null;
+  }
   // **O hash é o da instância.** O registro guarda só o id do MOD, e o dono
   // pede a mídia com os dois: sem o hash, `midia_do_mod` e `som_do_mod`
   // recusam o pedido antes de ler um byte, e nenhuma mídia de contribuição
@@ -1405,8 +1678,11 @@ function montarContribuicao(contribuicao, destino = "") {
     contribuicao.mod,
     donoDaRegiao(mod, instancia),
     raiz,
-    PERFIS_DE_RENDER.cartao,
+    orcamento,
   );
+  // De quem é este destino, quando ele é uma pessoa: é o que a citação
+  // `daPessoa` cita (Step 4b). Num canal, nada.
+  renderer.pessoaDoDestino = contribuicao.ponto.startsWith("pessoa.") ? chave : "";
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
@@ -1439,34 +1715,18 @@ function montarContribuicao(contribuicao, destino = "") {
     montadas.clear();
   };
 
-  try {
-    const recusados = renderer.aplicar(contribuicao.conteudo);
-    if (recusados > 0) {
-      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
-      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
-      donoDaRegiao(mod, instancia).falar({
-        nome: "contribuicao",
-        ponto: contribuicao.ponto,
-        destino: chave,
-        recusados,
-      });
-      registrarNoAnfitriao(
-        "recusa-de-mod",
-        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
-          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`,
-        "aviso",
-        contribuicao.mod,
-      );
+  // **Atualizar reaplica no mesmo nó** (R7 do PERFIS; tarefa 5, Step 6): cada
+  // destino montado recebe o conteúdo novo pelo mesmo renderer, que reconcilia
+  // por chave — sem desmontar, e sem a apresentação nativa entre os dois.
+  contribuicao.aoAtualizar = () => {
+    for (const [destino, montagem] of Array.from(montadas.entries())) {
+      if (!aplicarAContribuicao(contribuicao, destino, montagem.renderer, orcamento, mod, instancia)) {
+        montagem.soltar();
+      }
     }
-  } catch (falha) {
-    // **No registro, e não no console da janela**: num app empacotado o
-    // console não é lugar nenhum, e foi lá que esta falha morava.
-    registrarNoAnfitriao(
-      "recusa-de-mod",
-      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
-      "aviso",
-      contribuicao.mod,
-    );
+  };
+
+  if (!aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia)) {
     soltar();
     return null;
   }
@@ -1829,6 +2089,14 @@ function limparARegiaoDoMod(id, instancia) {
 const temaDosMods = new Map();
 
 /**
+ * **As prévias do tema** (rascunho da API 6, §9, B4; tarefa 17g): por MOD, os
+ * valores e a superfície dona. Valem só nesta máquina, por cima do tema
+ * publicado, com o selo «prévia não publicada», e saem quando a superfície
+ * fecha, com `SeeleUI.tema(null, { previa: true })`, ou com a sessão.
+ */
+const previasDoTema = new Map();
+
+/**
  * Qual instância de MOD é dona do tema de cada id.
  *
  * **O tema não tinha dono, e sobrevivia à sessão.** A única limpeza dele morava
@@ -1979,7 +2247,11 @@ const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
  *   de cada cor do produto; um tema que o derruba transforma aquelas linhas em
  *   promessa vencida, e quem paga é quem está lendo a conversa.
  */
-function aplicarOTemaDoMod(id, valores) {
+function aplicarOTemaDoMod(id, valores, opcoes) {
+  // `previa`: a prévia da 17g, `{ superficie }`, ou nada. Sem valor padrão na
+  // assinatura: os guardas de `frontend.rs` leem o corpo a partir da primeira
+  // chave depois dela.
+  const previa = opcoes?.previa ?? null;
   // **`servidor.aparencia`, e a escolha de quem usa** — R3 da revisão de
   // 20/09/2026.
   //
@@ -2003,7 +2275,9 @@ function aplicarOTemaDoMod(id, valores) {
     : null;
   // Só quando alguém registrou o ponto: sem registro nenhum, o caminho é o de
   // sempre — a posse de token —, e um MOD de API 3 continua aplicando tema.
-  if (escolha?.escolhida || escolha?.nativa) {
+  // **A prévia não passa por aqui** (17g): ela é de quem edita, nesta
+  // máquina, e não disputa a aparência com ninguém.
+  if (!previa && (escolha?.escolhida || escolha?.nativa)) {
     if (escolha.nativa) {
       throw new Error(
         "a aparência deste servidor está no desenho do SEELE por escolha de quem "
@@ -2076,7 +2350,7 @@ function aplicarOTemaDoMod(id, valores) {
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
       throw new Error(`«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`);
     }
-    for (const [outro, seus] of temaDosMods) {
+    for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
         throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
       }
@@ -2089,11 +2363,29 @@ function aplicarOTemaDoMod(id, valores) {
   // pedindo o acento, e escolher calado é escolher errado metade das vezes.
   for (const nome of pedido.keys()) {
     if (!(nome in NUMEROS_DA_API) && !(nome in BANDEIRAS_DA_API)) continue;
-    for (const [outro, seus] of temaDosMods) {
+    for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
         throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
       }
     }
+  }
+
+  // **A prévia, por cima do publicado**, com a mesma conferência dos pares: a
+  // recusa leva os pares, na forma da de `mundo.tema` (17e), e a de antes fica.
+  if (previa) {
+    const antesDaPrevia = previasDoTema.get(id);
+    previasDoTema.set(id, { valores: Object.fromEntries(pedido), superficie: String(previa.superficie ?? "") });
+    const abaixo = paresDoTemaAbaixoDoPiso();
+    if (abaixo.length) {
+      if (antesDaPrevia) previasDoTema.set(id, antesDaPrevia);
+      else previasDoTema.delete(id);
+      const recusa = new Error(`a prévia não alcança os pisos: ${fraseDoPar(abaixo[0])}`);
+      recusa.recusa = "contraste";
+      recusa.camposDaRecusa = { pares: abaixo };
+      throw recusa;
+    }
+    escreverOTemaDaSessao();
+    return;
   }
 
   const antes = temaDosMods.get(id);
@@ -2105,6 +2397,102 @@ function aplicarOTemaDoMod(id, valores) {
     throw new Error(legivel);
   }
   escreverOTemaDaSessao();
+}
+
+/**
+ * O tema do servidor em vigor, como o retrato o trouxe (`tema_do_servidor`):
+ * `{ mod_id, valores, chave }`, ou `null`. A `chave` é o que foi aplicado, para
+ * cada retrato não reaplicar o mesmo tema.
+ */
+let temaDoServidorEmVigor = null;
+
+/**
+ * **O tema do servidor, aplicado antes de desenhar a sessão** (rascunho da API
+ * 6, §9; tarefa 17d da F3). A metade de servidor de um MOD o declara
+ * (`mundo.tema`), o servidor o manda a todos no `TemaMudou`, o núcleo o guarda
+ * e o retrato o traz; aqui ele entra pelo mesmo caminho do tema de um MOD
+ * (`aplicarOTemaDoMod`), com o id do MOD que o declarou — as mesmas tabelas
+ * (17j), os mesmos pisos (17e) e a escolha de quem usa (17f).
+ *
+ * `null` o tira por inteiro. Um tema que a janela recusa não fica, nem o de
+ * antes — o servidor disse que aquele não vale mais —, e o motivo vai ao
+ * `seele.log`. Na API 6 a janela não aplica tema sem prévia (17g), então a
+ * entrada do MOD em `temaDosMods` é só deste tema.
+ */
+function aplicarOTemaDoServidor(tema) {
+  // **A escolha de quem vê** (tarefa 17f; rascunho §9): «o SEELE desenha» para
+  // a aparência tira o tema deste servidor nesta máquina. Ela entra na chave:
+  // trocá-la reavalia o tema no próximo desenho, mesmo com o tema igual.
+  const nativo = typeof modPreferidoPara === "function" && modPreferidoPara("servidor.aparencia") === NATIVO;
+  const chave = tema ? `${tema.mod_id}\u0000${tema.valores}\u0000${nativo ? "nativo" : ""}` : "";
+  if (chave === (temaDoServidorEmVigor?.chave ?? "")) return;
+  const antes = temaDoServidorEmVigor;
+  temaDoServidorEmVigor = tema ? { mod_id: String(tema.mod_id), valores: String(tema.valores), chave } : null;
+  const tirou = Boolean(antes) && temaDosMods.delete(antes.mod_id);
+  if (!temaDoServidorEmVigor) {
+    if (tirou) escreverOTemaDaSessao();
+    return;
+  }
+  const { mod_id: modId } = temaDoServidorEmVigor;
+  if (nativo) {
+    if (tirou) escreverOTemaDaSessao();
+    dizerODesfechoDoTema({ estado: "nativo" });
+    return;
+  }
+  let valores = null;
+  try {
+    valores = JSON.parse(temaDoServidorEmVigor.valores);
+    aplicarOTemaDoMod(modId, valores);
+    dizerODesfechoDoTema({ estado: "aplicado" });
+  } catch (falha) {
+    if (tirou) escreverOTemaDaSessao();
+    const motivo = typeof motivoDaFalha === "function" ? motivoDaFalha(falha) : String(falha?.message ?? falha);
+    registrarNoAnfitriao(
+      "tema-do-servidor",
+      `${modId}: o tema do servidor não foi aplicado — ${motivo}`,
+      "aviso",
+      modId,
+    );
+    // Os pares, na forma da recusa de `mundo.tema` (17e): o que a casca mediu
+    // com este tema sozinho. Uma recusa que não é de par vai sem eles.
+    const pares = valores && typeof valores === "object" && COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))
+      ? tonsDoTema(valores, corDaRaiz).pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso }))
+      : [];
+    dizerODesfechoDoTema({ estado: "recusado", pares });
+  }
+}
+
+/**
+ * O desfecho do tema do servidor em vigor, **guardado e dito**: o `TemaMudou`
+ * chega logo depois do `Session`, e a janela do MOD pode ainda não estar de
+ * pé — `montarOMod` entrega o guardado quando ela sobe
+ * (`entregarODesfechoDoTema`).
+ */
+function dizerODesfechoDoTema(desfecho) {
+  if (!temaDoServidorEmVigor) return;
+  temaDoServidorEmVigor.desfecho = desfecho;
+  dizerOTemaAoMod(temaDoServidorEmVigor.mod_id, desfecho);
+}
+
+/** A janela de `modId` subiu: se o tema em vigor é dele, ela sabe do desfecho. */
+function entregarODesfechoDoTema(modId) {
+  if (temaDoServidorEmVigor?.mod_id === modId && temaDoServidorEmVigor.desfecho) {
+    dizerOTemaAoMod(modId, temaDoServidorEmVigor.desfecho);
+  }
+}
+
+/**
+ * **O evento `tema`, à janela do MOD que declarou o tema** (rascunho da API 6,
+ * §9, B2; tarefa 17f): `aplicado`, `recusado` com os pares, ou `nativo` —
+ * quem vê escolheu «o SEELE desenha». Só à instância daquele MOD, e só se a
+ * API dela tem o tema; `previa` é falso aqui (a prévia é a 17g).
+ */
+function dizerOTemaAoMod(modId, dados) {
+  const instancia = modsCarregados.get(modId);
+  if (!instancia) return;
+  const mod = { id: modId, api: instancia.api };
+  if (!(CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("tema")) return;
+  donoDaRegiao(mod, instancia).falar({ nome: "tema", previa: false, ...dados });
 }
 
 /**
@@ -2313,10 +2701,8 @@ function tonsDoTema(emVigor, daRaiz) {
 function escreverOTemaDaSessao() {
   const sessao = $("tela-sessao");
   if (!sessao) return;
-  const emVigor = new Map();
-  for (const seus of temaDosMods.values()) {
-    for (const [nome, valor] of Object.entries(seus)) emVigor.set(nome, valor);
-  }
+  const emVigor = new Map(Object.entries(oTemaEmVigor()));
+  pintarOSeloDaPrevia();
   for (const [nome, token] of Object.entries(TEMA_DA_API)) {
     const valor = emVigor.get(nome);
     // Removida, e não reposta com a cor do produto: o recuo já está escrito em
@@ -2386,15 +2772,55 @@ function corDaRaiz(token) {
  * luminosidade serve. O que o MOD não pediu é lido da raiz (`corDaRaiz`): ler
  * dali evita uma segunda cópia da palheta aqui dentro, que envelheceria sozinha.
  */
-function oTemaAlcancaOsPisos() {
-  const emVigor = {};
-  for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
+function oTemaAlcancaOsPisos(abaixo = []) {
   // Uma folha que não carregou não vira recusa: sem cor medida não há medida, e
   // inventar uma seria recusar um tema por um motivo que não aconteceu.
   if (!COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))) return true;
-  const { pares } = tonsDoTema(emVigor, corDaRaiz);
-  if (pares.length === 0) return true;
-  const { frente, fundo, razao, piso } = pares[0];
+  const { pares } = tonsDoTema(oTemaEmVigor(), corDaRaiz);
+  // Os pares abaixo do piso, para quem os quer inteiros (a prévia, 17g).
+  abaixo.push(...pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso })));
+  return pares.length === 0 ? true : fraseDoPar(pares[0]);
+}
+
+/**
+ * **O selo da prévia** (rascunho da API 6, §9, B4): «prévia não publicada»,
+ * enquanto alguma prévia vale nesta máquina. Do produto, nas cores do núcleo
+ * (`--nucleo-*`, que o tema não alcança), e fora da sessão: quem olha a tela
+ * sabe que o que vê não é o tema do servidor.
+ */
+function pintarOSeloDaPrevia() {
+  const existente = document.getElementById?.("selo-da-previa") ?? null;
+  if (!previasDoTema.size && !existente) return;
+  const selo = existente ?? elemento("div", "selo-da-previa", "PRÉVIA NÃO PUBLICADA");
+  if (!existente) {
+    selo.id = "selo-da-previa";
+    selo.setAttribute("role", "status");
+    document.body.append(selo);
+  }
+  selo.hidden = previasDoTema.size === 0;
+}
+
+/** Tira a prévia de `modId`, se houver: o tema publicado volta, e o selo sai. */
+function tirarAPreviaDoTema(modId) {
+  if (previasDoTema.delete(modId)) escreverOTemaDaSessao();
+}
+
+/** O tema em vigor nesta sessão: o publicado, e as prévias por cima (17g). */
+function oTemaEmVigor() {
+  const emVigor = {};
+  for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
+  for (const { valores } of previasDoTema.values()) Object.assign(emVigor, valores);
+  return emVigor;
+}
+
+/** Os pares do tema em vigor abaixo do piso, `[{ frente, fundo, razao, piso }]`. */
+function paresDoTemaAbaixoDoPiso() {
+  const abaixo = [];
+  oTemaAlcancaOsPisos(abaixo);
+  return abaixo;
+}
+
+function fraseDoPar({ frente, fundo, razao, piso }) {
   return `«${frente}» sobre «${fundo}» dá ${String(razao).replace(".", ",")}:1, `
     + `e o piso é ${String(piso).replace(".", ",")}:1`;
 }
@@ -2459,6 +2885,8 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "soltar-arquivo": "arquivo",
   "superficie-criar": "superficies",
   "superficie-montar": "superficies",
+  "superficie-atualizar": "superficies",
+  "formulario-erros": "superficies",
   "superficie-classes": "superficies",
   "superficie-mostrar": "superficies",
   "superficie-ocultar": "superficies",
@@ -2468,6 +2896,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-descartar": "superficies",
   contribuir: "contribuicoes",
   "revogar-contribuicao": "contribuicoes",
+  "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
 });
 
@@ -2575,8 +3004,59 @@ function cascaDoRetrato() {
   return {
     onde: typeof CELULAR === "object" && CELULAR !== null ? "celular" : "computador",
     regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
-      Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
+      (Object.hasOwn(pontos, nome) && aCascaTemARegiao(nome)) || Object.hasOwn(tipos, nome)),
   };
+}
+
+/**
+ * **As regiões que esta casca tem** (rascunho da API 6, §11; tarefa 5, Step 8).
+ * No computador, todas. No celular, as que a casca dele declarar em
+ * `CELULAR.regioes`, e todas quando ela não declara. Na 0.16 a casca do
+ * celular declara sete: o `status.barra` não existe nela, porque ela tira o
+ * rodapé da telemetria (medido e decidido com a F8, 09/10). Uma casca futura
+ * declara do mesmo jeito: uma região da API 7 numa casca 1.0, ou um executor
+ * que não desenhe alguma.
+ */
+function aCascaTemARegiao(nome) {
+  const declaradas = typeof CELULAR === "object" && CELULAR !== null && CELULAR.regioes instanceof Set
+    ? CELULAR.regioes
+    : null;
+  return !declaradas || declaradas.has(nome);
+}
+
+/**
+ * Quantas contribuições já foram avisadas de que a região delas não existe
+ * nesta casca, por ponto — para a aba DIAGNÓSTICO.
+ */
+const regioesAusentesAvisadas = new Map();
+
+/**
+ * **Uma região que a casca não tem não some calada** (rascunho §11 e §7.1;
+ * tarefa 5, Step 8). Devolve `true` quando a casca não tem a região — e quem
+ * desenha não desenha —, avisando cada contribuição dela uma vez: o MOD recebe
+ * o evento `contribuicao` com `motivo: 'regiao-ausente'`, e o `seele.log` a
+ * linha. A contribuição continua registrada, e desenha se a região existir.
+ */
+function regiaoAusente(ponto) {
+  if (aCascaTemARegiao(ponto)) return false;
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    if (contribuicao.ponto !== ponto || contribuicao.avisadaAusente) continue;
+    contribuicao.avisadaAusente = true;
+    regioesAusentesAvisadas.set(ponto, (regioesAusentesAvisadas.get(ponto) ?? 0) + 1);
+    const instancia = contribuicao.instancia;
+    if (instancia?.admite?.(geracaoDaSessao)) {
+      donoDaRegiao({ id: contribuicao.mod, hash: instancia.hash }, instancia).falar({
+        nome: "contribuicao", ponto, destino: contribuicao.alvo, motivo: "regiao-ausente",
+      });
+    }
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${ponto}» não existe nesta casca, e a contribuição não aparece`,
+      "aviso",
+      contribuicao.mod,
+    );
+  }
+  return true;
 }
 
 /**
@@ -2735,7 +3215,9 @@ function avisarOsModsDaTela(snapshot) {
  *   sufixo depois de `:` vira campo — `tipo-recusado:heic` é `erro:
  *   'tipo-recusado'` e `detectado: 'heic'`, `papel-nao-serve:imagem` é `papel:
  *   'imagem'`;
- * - um `Error` da casca que traga o nome em `recusa` chega com ele;
+ * - um `Error` da casca que traga o nome em `recusa` chega com ele, e com os
+ *   campos de `camposDaRecusa`, quando os tem (o `tipo-desconhecido` das
+ *   superfícies leva `tipoPedido` e `tipos`);
  * - o resto é `falhou`, e o motivo vai ao registro, que quem chama já escreve.
  */
 function recusaParaOMod(mod, falha) {
@@ -2745,11 +3227,58 @@ function recusaParaOMod(mod, falha) {
     ? falha.Recusado.motivo
     : typeof falha?.recusa === "string" ? falha.recusa : null;
   if (!nome) return { erro: "falhou" };
+  const campos = falha?.camposDaRecusa;
+  if (campos && typeof campos === "object") return { ...campos, erro: nome };
   const corte = nome.indexOf(":");
   const base = corte < 0 ? nome : nome.slice(0, corte);
   const campo = SUFIXOS[base];
   if (corte < 0 || !campo) return { erro: nome };
   return { erro: base, [campo]: nome.slice(corte + 1) };
+}
+
+/**
+ * **A prévia do tema, pela janela de um MOD da 6** (rascunho §9, B4; tarefa
+ * 17g). Sem `previa`, a recusa é `sem-previa`; com `valores: null`, a prévia
+ * sai sem fechar a superfície; com valores, ela pertence à superfície
+ * `superficie` (que tem de existir) e passa pelas mesmas tabelas e pisos. O
+ * evento `tema` volta com `previa: true`, aplicado ou recusado com os pares.
+ */
+function aplicarAPreviaDoTema(mod, instancia, m) {
+  if (m.previa !== true) {
+    throw recusaDaSuperficie("sem-previa",
+      "na API 6, o tema publicado é o que a metade de servidor declara (mundo.tema); "
+      + "na janela, só a prévia: SeeleUI.tema(valores, { previa: true, superficie })", {});
+  }
+  if (m.valores === null || m.valores === undefined) {
+    tirarAPreviaDoTema(mod.id);
+    return;
+  }
+  const superficie = superficieDoMod(mod, instancia, m.superficie);
+  // Uma vez por instância: a prévia sai com o MOD, como o tema dele.
+  if (!previasComDono.has(instancia)) {
+    previasComDono.add(instancia);
+    instancia.registrar(`${mod.id}: a prévia do tema`, () => tirarAPreviaDoTema(mod.id));
+  }
+  try {
+    aplicarOTemaDoMod(mod.id, m.valores, { previa: { superficie: superficie.chave } });
+  } catch (falha) {
+    if (falha?.recusa === "contraste") {
+      dizerOTemaAoMod(mod.id, { estado: "recusado", pares: falha.camposDaRecusa?.pares ?? [], previa: true });
+    }
+    throw falha;
+  }
+  dizerOTemaAoMod(mod.id, { estado: "aplicado", previa: true });
+}
+
+/** As instâncias cuja saída já tira a prévia delas. */
+const previasComDono = new WeakSet();
+
+/**
+ * Uma superfície fechou ou foi descartada: a prévia que era dela sai
+ * (tarefa 17g). Chamada por `SuperficieDeMod`, pelo dono.
+ */
+function aoFecharASuperficieDaPrevia(modId, chave) {
+  if (previasDoTema.get(modId)?.superficie === String(chave)) tirarAPreviaDoTema(modId);
 }
 
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
@@ -2783,7 +3312,11 @@ async function atenderOMod(mod, instancia, m) {
     // deles. Mandar o **valor** para uma instância encerrada é falar com quem
     // já saiu.
     if (meu()) {
-      instancia.executor.entregar({ tipo: "resposta", n: m.n, ok, ...carga });
+      // O envelope **por último**: `tipo`, `n` e `ok` são da ponte, e uma
+      // carga que trouxesse um deles trocaria a resposta por uma mensagem que
+      // o executor não reconhece — o pedido do MOD esperaria para sempre. Foi
+      // o que o `tipo` do tipo de superfície pedido fazia (tarefa 7, Step 1).
+      instancia.executor.entregar({ ...carga, tipo: "resposta", n: m.n, ok });
       return;
     }
     // **Mas calar não é a alternativa.** Um pedido sem resposta deixa o MOD
@@ -2873,6 +3406,13 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       case "tema":
+        // **Na 6, a janela só faz prévia** (rascunho §9, B4; tarefa 17g): o
+        // tema publicado é o que a metade de servidor declara (`mundo.tema`).
+        if (Number(mod.api) >= 6) {
+          aplicarAPreviaDoTema(mod, instancia, m);
+          responder(true, { valor: null });
+          break;
+        }
         aplicarOTemaDoMod(mod.id, m.valores);
         darDonoAoTema(mod.id, instancia);
         responder(true, { valor: null });
@@ -2919,6 +3459,25 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       }
+      case "superficie-atualizar": {
+        // **Uma parte da superfície** (rascunho da API 6, §12; tarefa 7, Step
+        // 5c). A chave que não existe e a parte que passa do orçamento são
+        // recusadas pelo nome, antes de mexer na tela; o que não coube por
+        // forma é dito como no `montar`.
+        const recusados = superficieDoMod(mod, instancia, m.superficie).atualizar(m.chave, m.arvore);
+        if (recusados > 0) {
+          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
+        }
+        responder(true, { valor: null });
+        break;
+      }
+      case "formulario-erros":
+        // A recusa do servidor de volta aos campos (rascunho da API 6, §5;
+        // tarefa 7, Step 6b): uma chave que não existe recusa o pedido
+        // inteiro, antes de marcar qualquer campo.
+        superficieDoMod(mod, instancia, m.superficie).marcarErros(m.erros);
+        responder(true, { valor: null });
+        break;
       case "superficie-classes": {
         const recusados = superficieDoMod(mod, instancia, m.superficie)
           .declararClasses(m.classes);
@@ -2970,6 +3529,13 @@ async function atenderOMod(mod, instancia, m) {
         // contribuição de outro. A revisão de 20/09/2026 reproduziu.
         responder(true, {
           valor: contribuicoesDosMods.revogar(m.handle, { id: mod.id, instancia }),
+        });
+        break;
+      case "atualizar-contribuicao":
+        // O dono vem daqui, como no `revogar`: um MOD não troca o conteúdo da
+        // contribuição de outro (R7 do PERFIS; tarefa 5, Step 6).
+        responder(true, {
+          valor: contribuicoesDosMods.atualizar(m.handle, { id: mod.id, instancia }, m.conteudo),
         });
         break;
       default:
@@ -3255,6 +3821,10 @@ function encerrarOAmbienteDosMods() {
   // um MOD sair sozinho no meio da sessão.
   temaDosMods.clear();
   donoDoTema.clear();
+  // E o do servidor, que o próximo retrato de outra sessão traz de novo, e as
+  // prévias, que são desta sessão.
+  temaDoServidorEmVigor = null;
+  previasDoTema.clear();
   escreverOTemaDaSessao();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância

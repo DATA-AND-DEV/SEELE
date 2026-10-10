@@ -132,3 +132,58 @@
   min-height: var(--cel-alvo);
   accent-color: var(--seele-laranja-nerv);
 }
+
+/* ------------------------------------------- as superfícies de MOD (§7)
+ *
+ * Nenhuma superfície de MOD cobre a faixa de voz nem as abas: o MUDO, o SAIR e
+ * AJUSTES, que é o único caminho para desligar um MOD no celular, ficam sempre à
+ * mão. Achado no protótipo: o diálogo do ESTILO em tela cheia cobria os três. Os
+ * palcos moram na sessão, do alto até o pé dela (`--cel-pe`, medido pelo
+ * celular-folhas.js); no desktop eles são `fixed` sobre a janela inteira. */
+
+/* A página imersiva cobre o conteúdo, e não o pé nem o topo. O palco das
+   páginas mora no `main.paineis`, que no celular já é `relative` e já termina
+   acima do pé: o `inset: 0` é o painel inteiro. */
+:root[data-casca="celular"] #tela-sessao .palco-de-paginas:has(> [data-imersiva="sim"]:not([hidden])) {
+  position: absolute;
+  inset: 0;
+}
+
+:root[data-casca="celular"] #tela-sessao .palco-de-paginas > .pagina-de-mod[data-imersiva="sim"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* O diálogo: tela cheia acima do pé, com as ações embaixo. */
+:root[data-casca="celular"] #tela-sessao .camada-de-mod {
+  position: absolute;
+  inset: 0 0 var(--cel-pe, 0px) 0;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 0;
+}
+
+:root[data-casca="celular"] #tela-sessao .camada-de-mod[data-modal="nao"] {
+  align-items: flex-end;
+}
+
+:root[data-casca="celular"] #tela-sessao .dialogo-de-mod {
+  max-width: none;
+  max-height: none;
+  width: 100%;
+  padding-top: var(--cel-seguro-topo);
+}
+
+:root[data-casca="celular"] #tela-sessao .camada-de-mod[data-modal="nao"] .dialogo-de-mod {
+  max-height: 85%;
+  padding-top: 0;
+}
+
+/* Os avisos, numa fila na faixa de baixo, acima do pé. */
+:root[data-casca="celular"] #tela-sessao .avisos-de-mod {
+  position: absolute;
+  left: calc(8px + var(--cel-seguro-esq));
+  right: calc(8px + var(--cel-seguro-dir));
+  bottom: calc(var(--cel-pe, 0px) + 8px);
+  max-width: none;
+}

@@ -515,8 +515,12 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
         let Some(corpo) = corpo_do_comando(&main, &comando) else {
             continue;
         };
+        // `hospedagens` desde a tarefa 18 da F7 (décima integração): o servidor
+        // guardado e a sala pessoal moram em `Session::hospedagens`, e um comando
+        // que só lia `.hospedagem` passou a ler `.hospedagens`.
         let toca = [
             "hospedagem",
+            "hospedagens",
             "persistence_hospedada",
             "portaria::",
             "persistence_do_mod",
@@ -540,9 +544,35 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
          leitura do `main.rs` quebrou",
         mexem.len()
     );
+    // **Os que leem a hospedagem só para acertar o que é local, e seguem a lista
+    // deles** (décima integração). O `renomear_server` troca o nome pela
+    // conexão, que é do navegador também (D-web-3), e só depois, se esta
+    // máquina hospeda, acerta o nome no registro local de servidores: no
+    // navegador não há registro, e essa parte não acontece. A decisão fica
+    // escrita aqui, com o motivo, e o comando continua conferido: ele tem de
+    // estar numa lista que o atende.
+    let leem_e_seguem_a_lista: &[(&str, &str)] = &[(
+        "renomear_server",
+        "o nome vai pela conexão; o registro local só existe para quem hospeda",
+    )];
+    for (comando, _motivo) in leem_e_seguem_a_lista {
+        assert!(
+            mexem.contains(*comando),
+            "`{comando}` está entre os que leem a hospedagem, e o corpo dele não a lê mais: \
+             tire-o da lista"
+        );
+        assert!(
+            l.atendidos.contains(*comando) || l.so_na_larga.contains(*comando),
+            "`{comando}` lê a hospedagem só para o que é local, e tem de ser atendido pela \
+             ponte numa das listas dela"
+        );
+    }
     for comando in &mexem {
         assert!(
-            l.recusados.contains(comando)
+            leem_e_seguem_a_lista
+                .iter()
+                .any(|(nome, _)| nome == comando)
+                || l.recusados.contains(comando)
                 || l.neutros.contains(comando)
                 || l.apesar_da_hospedagem.contains(comando),
             "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS`, \

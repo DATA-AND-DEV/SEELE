@@ -59,10 +59,19 @@
  * confirmação de descarte do produto por cima — se desfazem em qualquer ordem
  * sem um acordar o que o outro adormeceu.
  *
+ * # O que a casca pede acordado
+ *
+ * `acordados` são nós do produto que continuam alcançáveis com o modal aberto
+ * — no celular, a faixa de voz e as abas (rascunho da API 6, §10; Step 5d,
+ * com a F8). Como `inert` desce, um irmão que contém um deles não é
+ * adormecido inteiro: a pilha desce nele e adormece só os filhos que não os
+ * contêm (`inertarMenos`).
+ *
  * @param {Element} dentro O nó que continua alcançável.
+ * @param {Element[]} acordados Os que a casca pede acordados.
  * @returns {Element[]} O que **esta** chamada tornou inerte.
  */
-function inertarFora(dentro) {
+function inertarFora(dentro, acordados = []) {
   const mudados = [];
   if (!dentro) return mudados;
   let ramo = dentro;
@@ -72,12 +81,68 @@ function inertarFora(dentro) {
       // O ramo ativo nunca: tornar o próprio ancestral inerte é tornar o
       // diálogo inerte, porque `inert` desce.
       if (irmao === ramo || irmao.inert) continue;
+      if (acordados.some((no) => irmao === no || irmao.contains(no))) {
+        inertarMenos(irmao, acordados, mudados);
+        continue;
+      }
       irmao.inert = true;
       mudados.push(irmao);
     }
     ramo = pai;
   }
   return mudados;
+}
+
+/**
+ * Adormece o que está sob `no`, menos os `acordados` e os ramos que levam a
+ * eles. Um acordado em si fica como está, com tudo o que tem dentro.
+ */
+function inertarMenos(no, acordados, mudados) {
+  if (acordados.includes(no)) return;
+  for (const filho of Array.from(no.children ?? [])) {
+    if (filho.inert) continue;
+    if (acordados.some((acordado) => filho === acordado || filho.contains(acordado))) {
+      inertarMenos(filho, acordados, mudados);
+      continue;
+    }
+    filho.inert = true;
+    mudados.push(filho);
+  }
+}
+
+/**
+ * **O que um modal de MOD não cobre nem adormece** (rascunho da API 6, §10):
+ * os controles de voz e a saída, que quem transmite precisa alcançar agora, e
+ * não «a um Esc de distância».
+ *
+ * - No celular, a faixa de voz e as abas, pelo ajudante da casca dela
+ *   (`CELULAR.acordadosNoModal`, da F8; tarefa 7, Step 5d).
+ * - No desktop (tarefa 9, Step 4b; decisão da orquestradora, 09/10: o
+ *   recorte), o MUDO, o fone e o SAIR da barra do operador ficam acordados, e
+ *   o véu ganha um furo no retângulo da barra; abaixo de 900 px a barra mora
+ *   na gaveta, e a porta dela entra nos dois.
+ *
+ * `acordados` são os nós que a pilha de inércia deixa acordados; `recortes`,
+ * os retângulos que o véu não cobre. Perguntado a cada recálculo, porque a
+ * sessão monta e desmonta a faixa e a gaveta. Só elementos de verdade.
+ */
+function foraDoModal() {
+  const deVerdade = (no) => typeof Element !== "undefined" && no instanceof Element;
+  const daCasca = globalThis.CELULAR?.acordadosNoModal?.();
+  if (Array.isArray(daCasca)) {
+    const nos = daCasca.filter(deVerdade);
+    return { acordados: nos, recortes: nos };
+  }
+  const achar = (seletor) => document.querySelector?.(seletor) ?? null;
+  const porta = achar("#tela-sessao .linha-canais");
+  return {
+    acordados: [achar("#botao-mudo"), achar("#botao-surdo"), achar("#operador-sair"), porta].filter(deVerdade),
+    recortes: [achar("#tela-sessao .operador"), porta].filter(deVerdade),
+  };
+}
+
+function acordadosNoModal() {
+  return foraDoModal().acordados;
 }
 
 /**
@@ -132,7 +197,7 @@ function recalcularAInercia() {
   adormecidosPelaPilha = [];
   const topo = pilhaDeCamadas[pilhaDeCamadas.length - 1];
   if (!topo) return;
-  adormecidosPelaPilha = inertarFora(topo);
+  adormecidosPelaPilha = inertarFora(topo, acordadosNoModal());
   // Anotados como nossos — para serem devolvidos no fim — e mantidos
   // acordados enquanto alguém tiver pedido isso.
   for (const no of adormecidosPelaPilha) {
@@ -189,7 +254,84 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
   painel: { host: "palco-de-paineis", foco: false, camada: false },
   dialogo: { host: "palco-de-camadas", foco: true, camada: true },
   aviso: { host: "avisos-de-mod", foco: false, camada: false },
+  folha: { host: "palco-de-paineis", foco: false, camada: false },
 });
+
+/**
+ * **Os tipos que cada API tem** (rascunho da API 6, §5; decisão de 08/10): a
+ * `folha` substitui o `painel` na 6. O `painel` fica na tabela enquanto as
+ * constantes estiverem em 5 — os pacotes de laboratório das APIs 4 e 5 o usam
+ * —, e sai no corte (tarefa 13).
+ */
+function tiposDaApi(api) {
+  return Object.keys(TIPOS_DE_SUPERFICIE).filter((tipo) => (api >= 6 ? tipo !== "painel" : tipo !== "folha"));
+}
+
+/**
+ * Uma recusa das superfícies, com o nome de lista fechada (rascunho §7.1) e
+ * os campos que a 6 recebe. Até a 5, `recusaParaOMod` devolve `null`, e o MOD
+ * recebe a frase.
+ */
+function recusaDaSuperficie(nome, frase, campos) {
+  const recusa = new Error(frase);
+  recusa.recusa = nome;
+  recusa.camposDaRecusa = campos;
+  return recusa;
+}
+
+/**
+ * **O tipo que a superfície vai ter, ou a recusa dele** (rascunho da API 6, §3
+ * e §7.1; tarefa 7, Step 1).
+ *
+ * Um tipo desconhecido virava `dialogo` em silêncio: o MOD que escreveu
+ * `janela` via um diálogo e não tinha como saber por quê. Na 6, ele é recusado
+ * pelo nome — `tipo-desconhecido`, com o tipo pedido (`tipoPedido`) e os que
+ * existem (`tipos`) —, e o
+ * roteador põe a linha no `seele.log`. Até a 5, que é o que os MODs publicados
+ * recebem, a superfície abre como `dialogo`, como abria, e a linha vai ao
+ * `seele.log` pelo dono. Sem tipo, `dialogo`, nas duas.
+ *
+ * Os tipos são os da API do pacote (`tiposDaApi`), que vem do dono: o
+ * `painel` na 6 é um tipo que ela não tem, e a frase diz «use folha»; a
+ * `folha` até a 5 também, e abre como `dialogo`.
+ */
+function tipoDaSuperficie(descricao, dono) {
+  const api = Number(dono?.api) || 0;
+  const tipos = tiposDaApi(api);
+  const pedido = descricao?.tipo;
+  if (pedido === undefined || pedido === null) return "dialogo";
+  if (tipos.includes(pedido)) return pedido;
+  const tipo = String(pedido).slice(0, 64);
+  const troca = api >= 6 && tipo === "painel" ? "; o painel saiu na API 6: use folha" : "";
+  // `tipoPedido`, e não `tipo`: `tipo` é o da mensagem da ponte («resposta»).
+  const recusa = recusaDaSuperficie(
+    "tipo-desconhecido",
+    `o tipo de superfície «${tipo}» não existe; os tipos são ${tipos.join(", ")}${troca}`,
+    { tipoPedido: tipo, tipos },
+  );
+  if (api >= 6) throw recusa;
+  dono?.anotarRecusa?.(`${recusa.message}; até a API 5, ela abre como dialogo`);
+  return "dialogo";
+}
+
+/**
+ * Onde está o nó de `chave` numa declaração: o pai e o campo dele, para a
+ * troca. Os filhos moram em `dentro` (uma lista, um nó só ou um texto), como
+ * `planejar` os lê; o primeiro achado, em profundidade, é o que vale.
+ */
+function lugarDaChave(pai, campo, chave) {
+  const no = pai[campo];
+  if (Array.isArray(no)) {
+    for (let i = 0; i < no.length; i += 1) {
+      const achado = lugarDaChave(no, i, chave);
+      if (achado) return achado;
+    }
+    return null;
+  }
+  if (no === null || typeof no !== "object") return null;
+  if (no.chave !== undefined && no.chave !== null && String(no.chave) === chave) return { pai, campo };
+  return no.dentro === undefined ? null : lugarDaChave(no, "dentro", chave);
+}
 
 // O destino central pertence ao host, mesmo quando as páginas têm donos distintos.
 // WeakMap não prolonga a vida do palco; fechar/descartar solta a página ativa.
@@ -202,6 +344,11 @@ function mostrarDestinoNativo() {
 
 /** Quantas superfícies um MOD mantém de pé ao mesmo tempo. */
 const TETO_DE_SUPERFICIES = 12;
+/**
+ * Quantas folhas um MOD empilha à vista (rascunho da API 6, §5, **proposta**;
+ * a M3 confirma). Contam as que aparecem: uma fechada ou oculta saiu da pilha.
+ */
+const TETO_DE_FOLHAS = 3;
 /** Quantos avisos cabem na fila antes de os mais velhos saírem. */
 const TETO_DE_AVISOS = 4;
 
@@ -241,6 +388,8 @@ class SuperficieDeMod {
 
     this.montarCasca(descricao);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
+    // O secundário de um formulário sai pela saída do produto (Step 6f).
+    this.renderer.aoCancelar = () => this.pedirFechamento("saida-do-produto");
     this.renderer.rodape = this.rodape ?? null;
     if (this.rodape) this.rodape.dataset.escopoDeMod = this.renderer.escopo;
     // Registrada **na criação**: uma superfície criada e não registrada é uma
@@ -282,8 +431,10 @@ class SuperficieDeMod {
       this.raiz = elemento("section", "superficie-de-mod pagina-de-mod");
       this.raiz.setAttribute("role", "region");
       this.raiz.dataset.imersiva = this.imersiva ? "sim" : "nao";
-    } else if (this.tipo === "painel") {
-      this.raiz = elemento("aside", "superficie-de-mod painel-de-mod");
+    } else if (this.tipo === "painel" || this.tipo === "folha") {
+      // A folha é parente do painel (§5): a mesma coluna lateral, e ela
+      // empilha — só a de cima aparece (`arrumarPalcos`).
+      this.raiz = elemento("aside", `superficie-de-mod ${this.tipo}-de-mod`);
       this.raiz.dataset.lado = this.lado;
       const largura = Math.min(Math.max(Number(descricao?.tamanho?.largura) || 300, 200), 640);
       this.raiz.style.setProperty("flex", `0 0 ${largura}px`);
@@ -305,7 +456,7 @@ class SuperficieDeMod {
     }
 
     const prefixo = this.tipo === "pagina" ? "pagina-de-mod"
-      : this.tipo === "painel" ? "painel-de-mod" : "dialogo-de-mod";
+      : this.tipo === "painel" || this.tipo === "folha" ? `${this.tipo}-de-mod` : "dialogo-de-mod";
     const cabeca = elemento("header", `${prefixo}-cabecalho`);
     // **Duas classes, e a primeira é a que dá a tipografia.** O título de uma
     // superfície é cartela — Saira Condensed em caixa alta, como o da
@@ -313,7 +464,7 @@ class SuperficieDeMod {
     // diálogo é só o corpo da fonte. Escrever a tipografia três vezes foi o que
     // deixou a casca dos MODs parecendo de outro produto.
     const titulo = elemento(
-      this.tipo === "painel" ? "h3" : "h2",
+      this.tipo === "painel" || this.tipo === "folha" ? "h3" : "h2",
       `superficie-de-mod-titulo ${prefixo}-titulo`,
       nome,
     );
@@ -352,11 +503,12 @@ class SuperficieDeMod {
     if (this.solta) return;
     const alvo = this.tipo === "dialogo" ? this.palcos.camadas
       : this.tipo === "pagina" ? this.palcos.paginas
-        : this.tipo === "painel" ? this.palcos.paineis
+        : this.tipo === "painel" || this.tipo === "folha" ? this.palcos.paineis
           : this.palcos.avisos;
     if (!alvo) return;
     const no = this.tipo === "dialogo" ? this.camada : this.raiz;
-    if (no.parentNode !== alvo) alvo.append(no);
+    // A folha que abre vai para o topo da pilha, que é o fim do palco.
+    if (no.parentNode !== alvo || this.tipo === "folha") alvo.append(no);
     if (this.tipo === "pagina" && this.visivel) {
       const anterior = paginaAtivaPorPalco.get(alvo);
       if (anterior && anterior !== this) anterior.ocultar();
@@ -422,7 +574,65 @@ class SuperficieDeMod {
     // No WebKit, clicar num botão pode deixar o foco no documento. O teclado
     // pertence à camada do topo, mesmo sem um descendente focado.
     document.addEventListener("keydown", this.aoTeclar);
+    this.vigiarORecorte();
     this.focarPrimeiro();
+  }
+
+  /**
+   * **O furo do véu** (rascunho da API 6, §10; tarefa 9, Step 4b): num modal,
+   * o véu não pinta nem recebe clique no retângulo do que `foraDoModal`
+   * recorta, e a caixa do diálogo nunca o cruza — a área dela começa à
+   * direita do que fica à esquerda, e acaba acima do que fica embaixo. O
+   * recorte segue a janela e a gaveta: um `ResizeObserver` nos recortados e o
+   * `resize` da janela o refazem.
+   */
+  vigiarORecorte() {
+    if (this.tipo !== "dialogo" || !this.modal || !this.camada || this.pararORecorte) return;
+    const refazer = () => this.recortarOVeu();
+    const recortados = foraDoModal().recortes;
+    const observador = typeof ResizeObserver === "function" ? new ResizeObserver(refazer) : null;
+    for (const no of recortados) observador?.observe(no);
+    window.addEventListener("resize", refazer);
+    this.pararORecorte = () => {
+      observador?.disconnect();
+      window.removeEventListener("resize", refazer);
+      this.pararORecorte = null;
+    };
+    this.recortarOVeu();
+  }
+
+  recortarOVeu() {
+    const camada = this.camada;
+    if (!camada || this.solta) return;
+    const caixa = camada.getBoundingClientRect();
+    const furos = foraDoModal().recortes
+      .filter((no) => no.getClientRects().length)
+      .map((no) => no.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0 && r.right > caixa.left && r.left < caixa.right
+        && r.bottom > caixa.top && r.top < caixa.bottom);
+    const px = (n) => `${Math.round(n)}px`;
+    if (!furos.length) {
+      camada.style.removeProperty("clip-path");
+      camada.style.removeProperty("--recorte-esquerda");
+      camada.style.removeProperty("--recorte-baixo");
+      return;
+    }
+    // A camada inteira, e cada furo como um retângulo dentro dela: com a
+    // regra par-ímpar, o que está dentro de um furo fica de fora do véu.
+    const caminho = ["0 0", "100% 0", "100% 100%", "0 100%", "0 0"];
+    for (const r of furos) {
+      const [x1, y1, x2, y2] = [r.left - caixa.left, r.top - caixa.top, r.right - caixa.left, r.bottom - caixa.top].map(px);
+      caminho.push(`${x1} ${y1}`, `${x1} ${y2}`, `${x2} ${y2}`, `${x2} ${y1}`, `${x1} ${y1}`, "0 0");
+    }
+    camada.style.clipPath = `polygon(evenodd, ${caminho.join(", ")})`;
+    // A área do diálogo: à direita dos furos da metade esquerda, e acima dos
+    // da metade de baixo que não estão à esquerda.
+    const meioX = caixa.left + caixa.width / 2;
+    const meioY = caixa.top + caixa.height / 2;
+    const aEsquerda = furos.filter((r) => r.right <= meioX);
+    const embaixo = furos.filter((r) => r.right > meioX && r.top >= meioY);
+    camada.style.setProperty("--recorte-esquerda", px(Math.max(0, ...aEsquerda.map((r) => r.right - caixa.left))));
+    camada.style.setProperty("--recorte-baixo", px(Math.max(0, ...embaixo.map((r) => caixa.bottom - r.top))));
   }
 
   /** O que dá para focar aqui dentro, na ordem em que aparece. */
@@ -458,6 +668,8 @@ class SuperficieDeMod {
   /** O que o MOD declarou, montado aqui dentro. */
   montar(conteudo) {
     if (this.solta) return 0;
+    // A declaração inteira, para a montagem por partes trocar um nó dela.
+    this.declaracao = conteudo;
     const tinhaFoco = this.raiz.contains?.(document.activeElement);
     const recusados = this.renderer.aplicar(conteudo);
     // Salvar pode desabilitar o botão focado. O navegador então deixa o foco
@@ -465,6 +677,55 @@ class SuperficieDeMod {
     if (tinhaFoco && (!this.raiz.contains(document.activeElement)
       || document.activeElement?.disabled)) this.focarPrimeiro();
     return recusados;
+  }
+
+  /**
+   * **A montagem por partes** (rascunho da API 6, §12; tarefa 7, Step 5c):
+   * troca o nó de `chave` e o que está sob ele, e remonta pela reconciliação,
+   * que mantém pela chave o que não mudou.
+   *
+   * O teto que vale é o de nós da superfície, e não o de 12 KiB da mensagem:
+   * uma ficha cheia se monta num esqueleto e numa parte por vez. **As duas
+   * recusas vêm antes de mexer na tela**: a chave que não existe, pelo nome; a
+   * parte que leva a superfície além do orçamento, com o perfil, o teto e o
+   * tamanho — e a superfície fica como estava.
+   */
+  atualizar(chave, subarvore) {
+    if (this.solta) return 0;
+    const alvo = String(chave ?? "").slice(0, 64);
+    const raiz = { declaracao: this.declaracao };
+    const lugar = lugarDaChave(raiz, "declaracao", alvo);
+    if (!lugar) {
+      throw recusaDaSuperficie("chave-desconhecida",
+        `a superfície «${this.chave}» não tem um nó com a chave «${alvo}»`, { chave: alvo });
+    }
+    const perfil = this.renderer.perfil;
+    const tamanho = nosDaDeclaracao(this.declaracao)
+      - nosDaDeclaracao(lugar.pai[lugar.campo]) + nosDaDeclaracao(subarvore);
+    if (tamanho > perfil.nos) {
+      throw recusaDaSuperficie("orcamento",
+        `a superfície «${this.chave}» passaria de ${perfil.nos} nós: teria ${tamanho}`,
+        { perfil: perfil.nome, teto: perfil.nos, tamanho });
+    }
+    lugar.pai[lugar.campo] = subarvore;
+    return this.montar(raiz.declaracao);
+  }
+
+  /**
+   * **A recusa do servidor de volta aos campos** (rascunho da API 6, §5;
+   * tarefa 7, Step 6b): `{ chave: frase }` marca cada campo pela chave, e o
+   * foco vai ao primeiro; `{}` limpa. Uma chave que a superfície não tem
+   * recusa o pedido inteiro pelo nome, antes de marcar qualquer campo.
+   */
+  marcarErros(mapa) {
+    if (this.solta) return;
+    const erros = mapa && typeof mapa === "object" ? mapa : {};
+    const falta = this.renderer.chaveQueNaoEhCampo(Object.keys(erros));
+    if (falta !== null) {
+      throw recusaDaSuperficie("chave-desconhecida",
+        `a superfície «${this.chave}» não tem um campo com a chave «${falta}»`, { chave: falta });
+    }
+    this.renderer.marcarErrosDoServidor(erros)?.focus();
   }
 
   /** As classes que esta superfície oferece aos nós dela. */
@@ -505,6 +766,8 @@ class SuperficieDeMod {
    */
   mostrar() {
     if (this.solta) throw new Error(`a superfície «${this.chave}» foi descartada`);
+    // O teto da pilha de folhas, que o conjunto confere: reabrir também conta.
+    this.antesDeMostrar?.();
     this.visivel = true;
     this.abrir();
   }
@@ -542,7 +805,11 @@ class SuperficieDeMod {
    */
   pedirFechamento(porque) {
     if (this.solta) return;
-    if (this.suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
+    // **Suja é o que o MOD disse ou o que os campos mostram** (rascunho da API
+    // 6, §5; Step 6c): um campo que difere do inicial suja a superfície sem o
+    // MOD chamar `suja`, e voltar ao gravado a limpa.
+    const suja = this.suja || this.renderer.temAlteracoes?.() === true;
+    if (suja && this.aoFecharComAlteracoes === "confirmar" && porque !== "confirmado") {
       this.dono.falar({
         nome: "fechar-pedido",
         superficie: this.chave,
@@ -615,6 +882,8 @@ class SuperficieDeMod {
    */
   fechar() {
     if (this.solta) return;
+    // A prévia do tema que era desta superfície sai com ela (tarefa 17g).
+    this.dono.aoFecharASuperficie?.(this.chave);
     this.visivel = false;
     this.liberarDestino();
     this.soltarFoco();
@@ -644,6 +913,7 @@ class SuperficieDeMod {
     // abre por cima, e A fecha primeiro porque o MOD dela respondeu. A pilha
     // tira A do meio e recalcula para B, que continua aberta.
     desempilharCamada(this.camada ?? this.raiz);
+    this.pararORecorte?.();
     if (this.aoTeclar) {
       document.removeEventListener("keydown", this.aoTeclar);
       this.aoTeclar = null;
@@ -668,6 +938,7 @@ class SuperficieDeMod {
   descartar() {
     if (this.solta) return;
     this.solta = true;
+    this.dono.aoFecharASuperficie?.(this.chave);
     clearTimeout(this.expiracao);
     this.liberarDestino();
     // **Esquecida, e não descartada de novo.** Quem está descartando somos
@@ -718,16 +989,39 @@ class SuperficiesDoMod {
       existente.mostrar();
       return { superficie: chave, reaproveitada: true };
     }
+    // O tipo antes do teto: uma descrição que não serve é recusada por ela
+    // mesma, e não porque as outras ocupam o lugar.
+    const tipo = tipoDaSuperficie(descricao, this.dono);
     if (this.porChave.size >= TETO_DE_SUPERFICIES) {
-      throw new Error(`um MOD mantém até ${TETO_DE_SUPERFICIES} superfícies de pé`);
+      throw recusaDaSuperficie("teto-de-superficies",
+        `um MOD mantém até ${TETO_DE_SUPERFICIES} superfícies de pé`, { teto: TETO_DE_SUPERFICIES });
     }
-    const superficie = new SuperficieDeMod(this.id, this.dono, descricao, this.palcos);
+    if (tipo === "folha" && descricao?.visivel !== false) this.conferirAPilha(null);
+    const superficie = new SuperficieDeMod(this.id, this.dono, { ...descricao, tipo }, this.palcos);
     superficie.aoPalcoMudar = () => this.arrumarPalcos();
+    superficie.antesDeMostrar = () => this.conferirAPilha(superficie);
     this.porChave.set(chave, superficie);
     superficie.abrir();
     this.arrumarPalcos();
     if (superficie.tipo === "aviso") this.enfileirarAviso(superficie);
     return { superficie: chave, reaproveitada: false };
+  }
+
+  /**
+   * **A pilha de folhas tem teto** (rascunho §5): uma folha a mais à vista é
+   * recusada pelo nome, com o número. `superficie` é a que vai aparecer, e não
+   * conta contra si mesma: mostrar a que já está à vista não muda a pilha.
+   */
+  conferirAPilha(superficie) {
+    if (superficie && superficie.tipo !== "folha") return;
+    let aVista = 0;
+    for (const outra of this.porChave.values()) {
+      if (outra !== superficie && outra.tipo === "folha" && !outra.solta && outra.visivel) aVista += 1;
+    }
+    if (aVista >= TETO_DE_FOLHAS) {
+      throw recusaDaSuperficie("teto-de-folhas",
+        `um MOD empilha até ${TETO_DE_FOLHAS} folhas à vista`, { teto: TETO_DE_FOLHAS });
+    }
   }
 
   /**
@@ -782,5 +1076,13 @@ class SuperficiesDoMod {
       const vazio = !palco.querySelector(":scope > *:not([hidden])");
       if (palco.hidden !== vazio) palco.hidden = vazio;
     }
+    // **Só a folha de cima aparece**; as de baixo voltam quando ela fecha. A
+    // pilha é do palco, e não deste MOD: duas folhas de MODs diferentes
+    // também se empilham.
+    const folhas = this.palcos.paineis?.querySelectorAll(":scope > .folha-de-mod:not([hidden])") ?? [];
+    folhas.forEach((folha, i) => {
+      const abaixo = i < folhas.length - 1 ? "sim" : "nao";
+      if (folha.dataset.abaixo !== abaixo) folha.dataset.abaixo = abaixo;
+    });
   }
 }

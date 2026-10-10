@@ -13,7 +13,7 @@ const fonte = fs.readFileSync(
   "utf8",
 );
 const corpo = fonte
-  .split("carregarMidiaDoServidor: async (canal, pedido, campo) => {")[1]
+  .split("carregarMidiaDoServidor: async (canal, pedido, campo, uso) => {")[1]
   .split("\n    },")[0];
 
 const falhas = [];
@@ -59,7 +59,9 @@ function rodar({ respostas, campo = "bytes" }) {
       return { uri: "data:", papel: "imagem", bytes: args.base64.length, base64: args.base64 };
     },
   });
-  const fn = vm.runInContext(`(async (canal, pedido, campo) => {${corpo}})`, contexto);
+  // `uso` desde a tarefa 6 da F3 (a redução da capa no Rust): o laço o
+  // repassa, e aqui ele vai vazio.
+  const fn = vm.runInContext(`(async (canal, pedido, campo, uso) => {${corpo}})`, contexto);
   return { pedidos, invocacoes, resultado: fn(1, { op: "asset", slot: "avatar" }, campo) };
 }
 

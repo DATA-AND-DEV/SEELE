@@ -81,6 +81,13 @@ pub struct ModInstalado {
     /// MOD só de aparência é a diferença entre repintar uma janela e abrir
     /// conexões a partir da casa de alguém.
     pub server: bool,
+    /// **A porta do tema** (rascunho da API 6, §9): o manifesto declara
+    /// `"tema": true`, e a metade de servidor pode pintar a aparência do
+    /// servidor inteiro.
+    ///
+    /// A gestão de MODs a lê para a escolha de quem administra (D-api-5): com
+    /// dois MODs com a porta ligados, um só pinta, e é ela que pergunta qual.
+    pub tema: bool,
     /// O nome da recusa, de uma lista fechada, quando houve uma.
     pub refused: Option<String>,
 }
@@ -135,6 +142,7 @@ pub fn ler_por_hash(pasta: &str, hash: &str) -> Result<ModInstalado, String> {
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
+            tema: instalado.manifest.tema,
             refused: None,
         }),
         // O conteúdo não é o que o nome promete. Servir assim mesmo seria
@@ -175,6 +183,7 @@ pub fn ler_um(pasta: &str, id: &str) -> Result<ModInstalado, String> {
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
+            tema: instalado.manifest.tema,
             refused: None,
         }),
         Err(why) => Err(refusal_name(&why).to_owned()),
@@ -206,6 +215,7 @@ pub fn ler_pasta(caminho: &str) -> Result<ModInstalado, String> {
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
+            tema: instalado.manifest.tema,
             refused: None,
         }),
         Err(why) => Err(refusal_name(&why).to_owned()),
@@ -240,6 +250,7 @@ fn achatar(found: Found) -> ModInstalado {
             repo: instalado.manifest.repo,
             reach: instalado.manifest.reach,
             server: instalado.manifest.server.is_some(),
+            tema: instalado.manifest.tema,
             refused: None,
         },
         // **O que ele diz ser, quando dá para ler** — U10.
@@ -265,6 +276,7 @@ fn achatar(found: Found) -> ModInstalado {
             repo: String::new(),
             reach: Vec::new(),
             server: false,
+            tema: false,
             refused: Some(refusal_name(&why).to_owned()),
         },
     }
@@ -407,6 +419,70 @@ mod tests_do_aceite {
 
         esquecer_aceite(&home, "casa:8383").expect("esquecer");
         assert_eq!(aceite_de(&home, "casa:8383"), None);
+    }
+}
+
+#[cfg(test)]
+mod tests_da_porta_do_tema {
+    use super::*;
+
+    /// Um pacote numa pasta temporária, com a porta do tema ou sem ela.
+    fn pacote(nome: &str, tema: bool) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static QUAL: AtomicUsize = AtomicUsize::new(0);
+        let n = QUAL.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "seele-ffi-porta-do-tema-{nome}-{}-{n}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("servidor")).expect("temporário");
+        std::fs::write(
+            dir.join("mod.json"),
+            format!(
+                r#"{{"schema":1,"id":"seele/{nome}","version":"1.0.0","api":{MOD_API_VERSION},"repo":"https://github.com/seele/{nome}","reach":[],"server":"servidor/main.js","tema":{tema}}}"#
+            ),
+        )
+        .expect("manifesto");
+        std::fs::write(
+            dir.join("servidor/main.js"),
+            "globalThis.aoPedir = () => '';",
+        )
+        .expect("metade de servidor");
+        dir
+    }
+
+    /// **A gestão sabe quem tem a porta do tema** (tarefa 17f.0 da F3): é com
+    /// isto que ela pergunta qual MOD pinta o servidor quando dois com a porta
+    /// estão ligados. Pelos três caminhos que a casca usa — a pasta escolhida,
+    /// o pacote por hash e a lista do cache —, e fechada sem a chave.
+    #[test]
+    fn a_porta_do_tema_chega_a_quem_administra_e_fica_fechada_sem_a_chave() {
+        let home = std::env::temp_dir().join(format!(
+            "seele-ffi-porta-do-tema-home-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&home);
+        let home_texto = home.to_string_lossy().into_owned();
+
+        for (nome, tema) in [("estilo", true), ("perfis", false)] {
+            let dir = pacote(nome, tema);
+            let lido = ler_pasta(&dir.to_string_lossy()).expect("pacote válido recusado");
+            assert_eq!(lido.tema, tema, "{nome}: a pasta escolhida");
+
+            let guardado = home.join(PACOTES).join(&lido.hash);
+            std::fs::create_dir_all(guardado.join("servidor")).expect("cache");
+            for arquivo in ["mod.json", "servidor/main.js"] {
+                std::fs::copy(dir.join(arquivo), guardado.join(arquivo)).expect("copiar");
+            }
+            let por_hash = ler_por_hash(&home_texto, &lido.hash).expect("pacote por hash");
+            assert_eq!(por_hash.tema, tema, "{nome}: o pacote por hash");
+        }
+
+        let lista = listar_por_conteudo(&home_texto);
+        let porta = |id: &str| lista.iter().find(|m| m.id == id).map(|m| m.tema);
+        assert_eq!(porta("seele/estilo"), Some(true), "a lista do cache");
+        assert_eq!(porta("seele/perfis"), Some(false), "a lista do cache");
     }
 }
 

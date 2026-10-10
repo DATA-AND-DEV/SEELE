@@ -208,6 +208,68 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *   tem a área de uma aplicação. O teto dela é o que uma ficha de RPG e um
  *   tabuleiro exigem — e continua sendo teto.
  */
+/**
+ * **As regras que um campo declara** (rascunho da API 6, §5; tarefa 7, Step
+ * 6a). Um número que não é número não é regra: some, em vez de virar zero.
+ */
+function regrasDeclaradas(no) {
+  const numero = (valor) => {
+    if (valor === null || valor === undefined || valor === "") return null;
+    const n = Number(valor);
+    return Number.isFinite(n) ? n : null;
+  };
+  const tamanho = numero(no.tamanhoMaximo);
+  return {
+    obrigatorio: no.obrigatorio === true,
+    tamanhoMaximo: tamanho !== null && Number.isInteger(tamanho) && tamanho > 0 ? tamanho : null,
+    minimo: numero(no.minimo),
+    maximo: numero(no.maximo),
+    inteiro: no.inteiro === true,
+  };
+}
+
+/**
+ * A frase do produto para a primeira regra que a caixa viola, ou `""`. A
+ * ordem é a de quem preenche: vazio, depois a forma do número, o intervalo,
+ * e o tamanho.
+ */
+function fraseDaRegraViolada(regras, caixa) {
+  const texto = caixa.value;
+  if (regras.obrigatorio && texto.trim() === "") {
+    return caixa.tagName === "SELECT" ? "Escolha uma opção." : "Preencha este campo.";
+  }
+  const emPortugues = (n) => n.toLocaleString("pt-BR");
+  if (caixa.type === "number" && texto !== "") {
+    const n = Number(texto);
+    if (regras.inteiro && !Number.isInteger(n)) return "Use um número inteiro.";
+    const { minimo, maximo } = regras;
+    if ((minimo !== null && n < minimo) || (maximo !== null && n > maximo)) {
+      if (minimo !== null && maximo !== null) return `Use um número de ${emPortugues(minimo)} a ${emPortugues(maximo)}.`;
+      return minimo !== null ? `Use um número a partir de ${emPortugues(minimo)}.` : `Use um número até ${emPortugues(maximo)}.`;
+    }
+  }
+  const tamanho = [...texto].length;
+  if (regras.tamanhoMaximo !== null && tamanho > regras.tamanhoMaximo) {
+    return `Use até ${regras.tamanhoMaximo} caracteres; este tem ${tamanho}.`;
+  }
+  return "";
+}
+
+/**
+ * **Quantos nós uma declaração pede**, contados como `planejar` os conta: um
+ * texto é um nó, uma forma é um nó mais os de dentro, e uma lista é a soma.
+ *
+ * Para o aviso de «não coube» dizer o tamanho: o renderer para de contar quando
+ * o orçamento acaba — uma forma recusada leva os filhos junto sem contá-los —,
+ * e «recusados: 8» não diz a quem escreveu quanto a declaração tem.
+ */
+function nosDaDeclaracao(no) {
+  if (Array.isArray(no)) return no.reduce((soma, um) => soma + nosDaDeclaracao(um), 0);
+  if (typeof no === "string") return 1;
+  if (no === null || typeof no !== "object") return 0;
+  return 1 + nosDaDeclaracao(no.dentro);
+}
+
 const PERFIS_DE_RENDER = Object.freeze({
   regiao: Object.freeze({
     nome: "regiao",
@@ -604,6 +666,10 @@ class RegiaoDeMod {
    *   `dizerRecusaDeMidia`).
    * - `midiaMudou()`: o aviso, para o diagnóstico, de que o estado de alguma
    *   mídia mudou.
+   * - `imagemDaPessoa(qual, pessoaId)`: a imagem já carregada de uma pessoa
+   *   (`'avatar'` ou `'capa'`), para a citação `daPessoa` (rascunho da API 6,
+   *   §4; tarefa 6, Step 4b) — uma promessa de `{ papel, bytes: 0, uri }`, ou de
+   *   `null`. Sem ela, a citação fica sem imagem, sem erro.
    *
    * O do produto também leva `geracao`, que a região não lê: quem confere a
    * geração é `podeFalar`.
@@ -637,6 +703,30 @@ class RegiaoDeMod {
     this.fontesDeMidia = new WeakMap();
     /** Quantos de cada forma com teto estão de pé. */
     this.contagem = { campos: 0, telas: 0, midias: 0, midiasDeCartao: 0 };
+    // **As regras declaradas dos campos** (rascunho da API 6, §5; tarefa 7,
+    // Step 6a): o que cada campo declara, a frase do produto quando uma regra
+    // é violada no envio, e o `erro` que o MOD declarou — os dois erros
+    // convivem, e o do produto vale até a pessoa mexer no campo.
+    this.regrasDoCampo = new WeakMap();
+    this.errosDoProduto = new WeakMap();
+    this.errosDoMod = new WeakMap();
+    // E a recusa do servidor de volta ao campo (Step 6b), que também vale até
+    // a pessoa mexer nele.
+    this.errosDoServidor = new WeakMap();
+    // O valor inicial de cada campo, para o `sujo` derivado (Step 6c): o
+    // `inicial` declarado — o gravado —, ou o valor da montagem.
+    this.iniciais = new WeakMap();
+    // A consequência que um botão destrutivo declara em `confirmar` (Step 6d).
+    this.confirmacoes = new WeakMap();
+    // A caixa que vale por cada campo — o `input`, o `textarea`, o `select`, o
+    // hexadecimal da cor —, e as cores com o hexadecimal pela metade (Step 6e).
+    this.caixasDoCampo = new WeakMap();
+    this.coresIncompletas = new WeakSet();
+    // Os formulários em progresso, que não enviam de novo (Step 6f), e quem
+    // sai pela saída do produto quando o secundário é apertado: a superfície
+    // dá o gancho (`aoCancelar`); sem ele, não há secundário.
+    this.formulariosEmProgresso = new WeakSet();
+    this.aoCancelar = null;
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -733,6 +823,9 @@ class RegiaoDeMod {
   aplicar(conteudo) {
     if (this.solta) return 0;
     this.recusados = 0;
+    // Os recusados **por teto**, à parte dos recusados por forma: é o que
+    // separa «não coube» de «não entra aqui» no aviso ao MOD.
+    this.foraDoTeto = 0;
     const orcamento = { nos: this.perfil.nos };
     const planos = this.planejar(conteudo, 0, orcamento, this.perfil.formas);
     const fixas = [];
@@ -855,7 +948,7 @@ class RegiaoDeMod {
       ));
     }
     if (typeof no === "string") {
-      if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+      if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
       orcamento.nos -= 1;
       return [{ texto: no.slice(0, LIMITES_DA_REGIAO.texto) }];
     }
@@ -873,7 +966,7 @@ class RegiaoDeMod {
       if (permitidas) this.recusados += 1;
       return [];
     }
-    if (orcamento.nos <= 0) { this.recusados += 1; return []; }
+    if (orcamento.nos <= 0) { this.recusados += 1; this.foraDoTeto += 1; return []; }
     orcamento.nos -= 1;
 
     // A chave é o que faz a atualização ser incremental. Sem uma, a posição
@@ -952,12 +1045,17 @@ class RegiaoDeMod {
       anterior = no;
     }
 
-    // O que sobrou depois do último plano sai, e solta o que segurava.
-    for (;;) {
-      const sobra = anterior ? anterior.nextSibling : pai.firstChild;
-      if (!sobra) break;
-      this.soltarSubarvore(sobra);
-      sobra.remove();
+    // O que sobrou depois do último plano sai, e solta o que segurava —
+    // menos o que é do produto (`data-do-produto`), como os botões do
+    // formulário (Step 6f): eles moram no fim, e os nós do MOD entram antes.
+    let sobra = anterior ? anterior.nextSibling : pai.firstChild;
+    while (sobra) {
+      const seguinte = sobra.nextSibling;
+      if (sobra.nodeType !== Node.ELEMENT_NODE || sobra.dataset.doProduto !== "sim") {
+        this.soltarSubarvore(sobra);
+        sobra.remove();
+      }
+      sobra = seguinte;
     }
   }
 
@@ -1092,6 +1190,9 @@ class RegiaoDeMod {
   /** O botão, com a variante que o MOD pediu e o estado de ação em curso. */
   atualizarBotao(elem, plano) {
     elem.disabled = plano.no.desligado === true || plano.no.emProgresso === true;
+    const consequencia = typeof plano.no.confirmar === "string" ? plano.no.confirmar.trim().slice(0, 300) : "";
+    if (consequencia) this.confirmacoes.set(elem, consequencia);
+    else this.confirmacoes.delete(elem);
     const variantes = ["primaria", "secundaria", "perigo", "discreta"];
     const variante = variantes.includes(plano.no.variante) ? plano.no.variante : "secundaria";
     if (elem.dataset.variante !== variante) elem.dataset.variante = variante;
@@ -1130,6 +1231,7 @@ class RegiaoDeMod {
     caixa.maxLength = LIMITES_DA_REGIAO.valorDoCampo;
     elem.append(rotulo, caixa);
     const aoDigitar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "campo",
         chave: plano.no.chave ?? "",
@@ -1158,11 +1260,15 @@ class RegiaoDeMod {
     const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
     this.marcarValidade(elem, caixa, plano);
+    this.pintarContador(elem, caixa);
     if (document.activeElement === caixa) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, LIMITES_DA_REGIAO.valorDoCampo)
       : "";
-    if (caixa.value !== valor) caixa.value = valor;
+    if (caixa.value !== valor) {
+      caixa.value = valor;
+      this.pintarContador(elem, caixa);
+    }
   }
 
   // ------------------------------------------------------------ escolha
@@ -1180,6 +1286,7 @@ class RegiaoDeMod {
     const caixa = elemento("select", "regiao-de-mod-escolha");
     elem.append(rotulo, caixa);
     const aoTrocar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "escolha",
         chave: plano.no.chave ?? "",
@@ -1205,6 +1312,8 @@ class RegiaoDeMod {
     if (!rotulo || !caixa) return;
     const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
+    // O `erro` da escolha, como o do campo (Step 6e).
+    this.marcarValidade(elem, caixa, plano);
     if (document.activeElement === caixa) return;
 
     const opcoes = (Array.isArray(plano.no.opcoes) ? plano.no.opcoes : [])
@@ -1234,12 +1343,39 @@ class RegiaoDeMod {
   montarBotao(elem, plano) {
     elem.type = "button";
     const aoApertar = () => {
-      this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+      const falar = () => this.dono.falar({ nome: "botao", chave: plano.no.chave ?? "" });
+      const consequencia = this.confirmacoes.get(elem);
+      if (consequencia) this.confirmarAntes(elem, consequencia, falar);
+      else falar();
     };
     elem.addEventListener("click", aoApertar);
     this.guardar(elem, `botao ${plano.chave}`, () => {
       elem.removeEventListener("click", aoApertar);
     });
+  }
+
+  /**
+   * **A ação destrutiva é confirmada pelo produto** (rascunho da API 6, §5;
+   * tarefa 7, Step 6d; o A13 e o B7 do ESTILO): a caixa de confirmação da
+   * moderação — a mesma do «FECHAR SEM GRAVAR?» —, com o nome do botão, a
+   * consequência que o MOD escreveu e as palavras do produto. O evento só
+   * sai no sim; cancelar não manda nada.
+   *
+   * A caixa é acordada da pilha de inércia enquanto pergunta, como no
+   * descarte: com um diálogo modal aberto, ela é irmã do ramo adormecido. Sem
+   * a camada de confirmação carregada, a ação **não** sai: uma ação que pede
+   * um sim não acontece sem ele.
+   */
+  confirmarAntes(botao, consequencia, executar) {
+    if (typeof abrirConfirmacao !== "function") return;
+    const confirmacao = document.getElementById("moderar");
+    const readormecer = typeof acordarDaPilha === "function" ? acordarDaPilha(confirmacao) : () => {};
+    const nome = (botao.textContent ?? "").trim().slice(0, 60) || "CONFIRMAR";
+    abrirConfirmacao(`${nome.toUpperCase()}?`, `${consequencia} (pedido por ${this.id})`, nome.toUpperCase(), () => {
+      readormecer();
+      if (this.solta) return;
+      executar();
+    }, readormecer);
   }
 
   // ------------------------------------------------------------ arquivo
@@ -1376,6 +1512,7 @@ class RegiaoDeMod {
     caixa.maxLength = LIMITES_DA_REGIAO.valorDoCampo * 8;
     elem.append(rotulo, caixa);
     const aoDigitar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "campo",
         chave: plano.no.chave ?? "",
@@ -1402,11 +1539,15 @@ class RegiaoDeMod {
       : "";
     if (caixa.placeholder !== sugestao) caixa.placeholder = sugestao;
     this.marcarValidade(elem, caixa, plano);
+    this.pintarContador(elem, caixa);
     if (document.activeElement === caixa) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, caixa.maxLength)
       : "";
-    if (caixa.value !== valor) caixa.value = valor;
+    if (caixa.value !== valor) {
+      caixa.value = valor;
+      this.pintarContador(elem, caixa);
+    }
   }
 
   /** Um número, com os limites que o MOD declarou e o produto confere. */
@@ -1419,6 +1560,7 @@ class RegiaoDeMod {
       // **Vazio é vazio, e não zero.** Um campo apagado no meio da edição não
       // pode virar `0` a caminho do MOD: o MOD gravaria zero.
       const bruto = caixa.value;
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "numero",
         chave: plano.no.chave ?? "",
@@ -1558,18 +1700,23 @@ class RegiaoDeMod {
     };
     const aoEscolher = () => {
       hexa.value = seletor.value;
+      this.coresIncompletas.delete(elem);
+      this.aoMexerNoCampo(elem, hexa);
       dizer(seletor.value);
     };
     const aoDigitar = () => {
       const escrito = hexa.value.trim();
       // Um hexadecimal incompleto — `#f2` no meio da digitação — não vira
-      // pedido: ele viraria uma cor recusada a cada tecla.
-      if (/^#[0-9a-f]{6}$/i.test(escrito)) {
+      // pedido: ele viraria uma cor recusada a cada tecla. Ele fica marcado,
+      // sem frase, até completar (`pintarValidade`).
+      const completo = /^#[0-9a-f]{6}$/i.test(escrito);
+      if (completo || !escrito) this.coresIncompletas.delete(elem);
+      else this.coresIncompletas.add(elem);
+      this.aoMexerNoCampo(elem, hexa);
+      this.pintarValidade(elem, hexa);
+      if (completo) {
         seletor.value = escrito;
-        elem.dataset.invalido = "nao";
         dizer(escrito);
-      } else {
-        elem.dataset.invalido = escrito ? "sim" : "nao";
       }
     };
     seletor.addEventListener("input", aoEscolher);
@@ -1593,6 +1740,8 @@ class RegiaoDeMod {
       : "#000000";
     if (document.activeElement !== seletor && seletor.value !== valor) seletor.value = valor;
     if (document.activeElement !== hexa && hexa.value !== valor) hexa.value = valor;
+    // O `erro` da cor, no hexadecimal, como o do campo (Step 6e).
+    this.marcarValidade(elem, hexa, plano);
   }
 
   /**
@@ -1690,10 +1839,13 @@ class RegiaoDeMod {
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     const fonte = plano.no.fundoDeMidia;
     // O fundo só mostra imagem: o som recusado pelo teto chega como o som que
-    // era (`soImagem`).
-    const vindo = soImagem(fonte.doServidor
-      ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
-      : this.dono.carregarMidia(fonte.fonte));
+    // era (`soImagem`). **A citação `daPessoa`** (Step 4b) usa a imagem que a
+    // pessoa do destino já tem, sem pedido novo; sem ela, nada.
+    const vindo = soImagem(fonte.daPessoa
+      ? this.imagemCitada(fonte.daPessoa)
+      : fonte.doServidor
+        ? this.dono.carregarMidiaDoServidor(Number(fonte.doServidor.canal) || 0, fonte.doServidor.pedido ?? {}, fonte.doServidor.campo || "bytes")
+        : this.dono.carregarMidia(fonte.fonte));
     // A reserva de quem não chegou a pintar volta à conta. `bytes` fica em
     // zero depois, e o descarte (`guardar`, acima) não a devolve duas vezes.
     const devolver = () => { this[bolso.conta] -= bytes; bytes = 0; };
@@ -1717,6 +1869,9 @@ class RegiaoDeMod {
     };
     vindo.then(midia => {
       if (cancelado || this.solta || !this.dono.podeFalar()) return;
+      // A citação de uma imagem que a pessoa não tem: o fundo fica liso, e
+      // isso não é recusa.
+      if (!midia) { this.esquecerMidia(elem); return; }
       // **As duas recusas são anotadas, além de ditas ao registro.** A linha
       // do `seele.log` é de quem investiga; a anotação é o que «quem pinta
       // cada lugar» soma — sem ela, o fundo que não veio seria só uma caixa
@@ -1809,20 +1964,25 @@ class RegiaoDeMod {
     const caminho = typeof plano.no.fonte === "string" ? plano.no.fonte : "";
     // O retrato só mostra imagem: o som recusado pelo teto chega como o som
     // que era (`soImagem`).
-    const vindo = soImagem(doServidor
-      ? this.dono.carregarMidiaDoServidor(
-          Number(doServidor.canal) || 0,
-          doServidor.pedido ?? {},
-          typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
-        )
-      : caminho
-        ? this.dono.carregarMidia(caminho)
-        : null);
+    const vindo = soImagem(plano.no.daPessoa
+      ? this.imagemCitada(plano.no.daPessoa)
+      : doServidor
+        ? this.dono.carregarMidiaDoServidor(
+            Number(doServidor.canal) || 0,
+            doServidor.pedido ?? {},
+            typeof doServidor.campo === "string" && doServidor.campo ? doServidor.campo : "bytes",
+          )
+        : caminho
+          ? this.dono.carregarMidia(caminho)
+          : null);
     // Sem origem não há mídia: a inicial é o estado natural, e não uma recusa.
     if (!vindo) return;
     this.anotarMidia(elem, "carregando", "", Boolean(plano.cartao));
     vindo.then((midia) => {
       if (estado.cancelado || this.solta || !this.dono.podeFalar()) return;
+      // A citação de uma imagem que a pessoa não tem: a inicial fica, e isso
+      // não é recusa.
+      if (!midia) { this.esquecerMidia(elem); return; }
       if (midia.papel !== "imagem") {
         this.anotarMidia(elem, "recusada", `o retrato precisa ser imagem, e os bytes são ${midia.papel}`);
         this.dizerRecusaDeMidia(plano.no.chave ?? "", `recusada no retrato: o arquivo é ${midia.papel}, e retrato só mostra imagem`);
@@ -1847,6 +2007,19 @@ class RegiaoDeMod {
       const porque = motivoDaFalha(falha);
       recusar(porque, porque);
     }).catch((falha) => this.dizerTropecoDaMidia("o retrato", plano.no.chave, falha));
+  }
+
+  /**
+   * **A imagem que a pessoa deste destino já tem** (`daPessoa`; rascunho da API
+   * 6, §4; tarefa 6, Step 4b): `'avatar'` ou `'capa'`. Só num destino que é uma
+   * pessoa (`pessoaDoDestino`, que a montagem de uma contribuição de pessoa
+   * põe): num canal, «a pessoa 3» seria outra pessoa. Uma promessa de `null`
+   * quando não há o que citar.
+   */
+  imagemCitada(qual) {
+    const pessoa = this.pessoaDoDestino ?? "";
+    if (!pessoa || typeof this.dono.imagemDaPessoa !== "function") return Promise.resolve(null);
+    return this.dono.imagemDaPessoa(String(qual), pessoa);
   }
 
   atualizarRetrato(elem, plano) {
@@ -1905,8 +2078,19 @@ class RegiaoDeMod {
    * WebView, deixá-lo seguir recarrega a aplicação inteira.
    */
   montarFormulario(elem, plano) {
+    // **A validação é do produto, com as palavras dele** (Step 6a): a nativa
+    // barrava um número fora de `min`/`max` com a bolha do navegador, e não
+    // conhecia as outras regras.
+    elem.noValidate = true;
     const aoEnviar = (evento) => {
       evento.preventDefault();
+      // Em progresso, o segundo envio não sai — nem pelo Enter (Step 6f).
+      if (this.formulariosEmProgresso.has(elem)) return;
+      const invalido = this.conferirOFormulario(elem);
+      if (invalido) {
+        invalido.focus();
+        return;
+      }
       this.dono.falar({
         nome: "submeter",
         chave: plano.no.chave ?? "",
@@ -1925,6 +2109,55 @@ class RegiaoDeMod {
       if (erro) elem.dataset.erro = erro;
       else delete elem.dataset.erro;
     }
+    if (plano.no.emProgresso === true) this.formulariosEmProgresso.add(elem);
+    else this.formulariosEmProgresso.delete(elem);
+    this.pintarAcoesDoFormulario(elem, plano);
+  }
+
+  /**
+   * **Os botões primário e secundário são do produto** (rascunho da API 6,
+   * §5; tarefa 7, Step 6f). O MOD dá o texto — `primario`, `secundario` — e o
+   * produto, o comportamento: o primário é o `submit` do formulário, e passa
+   * pela validação com todos os valores juntos; o secundário pede a saída do
+   * produto, que pergunta quando há alteração. Só numa superfície, que é quem
+   * dá a saída (`aoCancelar`). `emProgresso` trava o primário.
+   *
+   * Moram no fim do formulário, marcados `data-do-produto`, e a reconciliação
+   * os deixa lá: os nós do MOD entram antes deles.
+   */
+  pintarAcoesDoFormulario(elem, plano) {
+    const texto = (valor) => (typeof valor === "string" ? valor.trim().slice(0, 40) : "");
+    const primario = texto(plano.no.primario);
+    const secundario = this.aoCancelar ? texto(plano.no.secundario) : "";
+    let acoes = elem.querySelector(":scope > .regiao-de-mod-acoes-do-formulario");
+    if (!primario && !secundario) {
+      acoes?.remove();
+      return;
+    }
+    if (!acoes) {
+      acoes = elemento("div", "regiao-de-mod-acoes-do-formulario");
+      acoes.dataset.doProduto = "sim";
+      const botaoPrimario = elemento("button", "botao");
+      botaoPrimario.type = "submit";
+      const botaoSecundario = elemento("button", "botao-fantasma");
+      botaoSecundario.type = "button";
+      const aoCancelar = () => this.aoCancelar?.();
+      botaoSecundario.addEventListener("click", aoCancelar);
+      this.guardar(acoes, "as ações do formulário", () => {
+        botaoSecundario.removeEventListener("click", aoCancelar);
+      });
+      acoes.append(botaoSecundario, botaoPrimario);
+      elem.append(acoes);
+    }
+    const [botaoSecundario, botaoPrimario] = acoes.children;
+    for (const [botao, rotulo] of [[botaoPrimario, primario], [botaoSecundario, secundario]]) {
+      if (botao.textContent !== rotulo) botao.textContent = rotulo;
+      botao.hidden = !rotulo;
+    }
+    const ocupado = this.formulariosEmProgresso.has(elem);
+    botaoPrimario.disabled = ocupado;
+    if (ocupado) botaoPrimario.setAttribute("aria-busy", "true");
+    else botaoPrimario.removeAttribute("aria-busy");
   }
 
   /**
@@ -1954,9 +2187,134 @@ class RegiaoDeMod {
     return valores;
   }
 
-  /** Marca um controle como inválido, para a folha de classes poder pintá-lo. */
+  /**
+   * **As regras declaradas, no envio** (rascunho da API 6, §5; tarefa 7, Step
+   * 6a): cada campo do formulário é conferido pelo que declarou, e o violado
+   * ganha a frase do produto. Devolve a caixa do primeiro inválido, para o
+   * foco ir a ela, ou `null`.
+   */
+  conferirOFormulario(raiz) {
+    let primeiro = null;
+    for (const campo of raiz.querySelectorAll("[data-chave-do-mod]")) {
+      const regras = this.regrasDoCampo.get(campo);
+      const caixa = regras && this.caixasDoCampo.get(campo);
+      if (!caixa) continue;
+      const frase = fraseDaRegraViolada(regras, caixa);
+      if (frase) this.errosDoProduto.set(campo, frase);
+      else this.errosDoProduto.delete(campo);
+      this.pintarValidade(campo, caixa);
+      if (frase && !primeiro) primeiro = caixa;
+    }
+    return primeiro;
+  }
+
+  /** A pessoa mexeu no campo: a frase do produto e a do servidor saem, e o contador anda. */
+  aoMexerNoCampo(elem, caixa) {
+    const tinhaDoProduto = this.errosDoProduto.delete(elem);
+    const tinhaDoServidor = this.errosDoServidor.delete(elem);
+    if (tinhaDoProduto || tinhaDoServidor) this.pintarValidade(elem, caixa);
+    this.pintarContador(elem, caixa);
+  }
+
+  /**
+   * **Algum campo difere do inicial?** O `sujo` derivado (Step 6c): a
+   * pergunta ao fechar não depende de o MOD chamar `suja`, e voltar ao valor
+   * gravado limpa.
+   */
+  temAlteracoes() {
+    for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
+      if (!this.iniciais.has(parte)) continue;
+      const caixa = this.caixasDoCampo.get(parte);
+      if (caixa && caixa.value !== this.iniciais.get(parte)) return true;
+    }
+    return false;
+  }
+
+  /** Os campos desta raiz, pela chave: o nó da parte e a caixa dele. */
+  camposPorChave() {
+    const campos = new Map();
+    for (const parte of this.raiz?.querySelectorAll("[data-chave-do-mod]") ?? []) {
+      const caixa = this.caixasDoCampo.get(parte);
+      if (caixa && !campos.has(parte.dataset.chaveDoMod)) campos.set(parte.dataset.chaveDoMod, { parte, caixa });
+    }
+    return campos;
+  }
+
+  /** A primeira chave que não é de um campo desta raiz, ou `null`. */
+  chaveQueNaoEhCampo(chaves) {
+    const campos = this.camposPorChave();
+    const falta = chaves.find((chave) => !campos.has(chave));
+    return falta === undefined ? null : String(falta).slice(0, 64);
+  }
+
+  /**
+   * Põe as frases do servidor nos campos, e tira as que o mapa não traz.
+   * Devolve a caixa do primeiro marcado, na ordem da declaração, ou `null`.
+   */
+  marcarErrosDoServidor(erros) {
+    let primeira = null;
+    for (const [chave, { parte, caixa }] of this.camposPorChave()) {
+      const frase = typeof erros[chave] === "string" ? erros[chave].slice(0, 200) : "";
+      if (frase) this.errosDoServidor.set(parte, frase);
+      else this.errosDoServidor.delete(parte);
+      this.pintarValidade(parte, caixa);
+      if (frase && !primeira) primeira = caixa;
+    }
+    return primeira;
+  }
+
+  /**
+   * O contador do `tamanhoMaximo`, do produto: quantos caracteres há e quantos
+   * cabem, e `data-passou` quando passa. Sem a regra, ele sai.
+   */
+  pintarContador(elem, caixa) {
+    const teto = this.regrasDoCampo.get(elem)?.tamanhoMaximo ?? null;
+    let contador = elem.querySelector(":scope > .regiao-de-mod-contador");
+    if (teto === null) {
+      contador?.remove();
+      return;
+    }
+    if (!contador) {
+      contador = elemento("span", "regiao-de-mod-contador");
+      contador.setAttribute("aria-live", "polite");
+      elem.append(contador);
+    }
+    const tamanho = [...caixa.value].length;
+    const texto = `${tamanho}/${teto}`;
+    if (contador.textContent !== texto) contador.textContent = texto;
+    const passou = tamanho > teto ? "sim" : "nao";
+    if (contador.dataset.passou !== passou) contador.dataset.passou = passou;
+  }
+
+  /**
+   * Marca um controle como inválido, para a folha de classes poder pintá-lo:
+   * o `erro` que o MOD declarou e as regras do campo ficam guardados, e a
+   * pintura junta o erro do MOD ao do produto.
+   */
   marcarValidade(elem, caixa, plano) {
-    const erro = typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "";
+    // **O inicial, para o sujo derivado** (rascunho da API 6, §5; Step 6c): o
+    // MOD que declara `inicial` (o gravado) ao lado de `valor` (o rascunho)
+    // tem um campo que nasce sujo; sem `inicial`, vale o valor da montagem.
+    const comoTexto = (valor) => (valor === null || valor === undefined ? "" : String(valor));
+    if (Object.hasOwn(plano.no, "inicial")) this.iniciais.set(elem, comoTexto(plano.no.inicial));
+    else if (!this.iniciais.has(elem)) this.iniciais.set(elem, comoTexto(plano.no.valor));
+    this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");
+    this.regrasDoCampo.set(elem, regrasDeclaradas(plano.no));
+    this.caixasDoCampo.set(elem, caixa);
+    this.pintarValidade(elem, caixa);
+  }
+
+  pintarValidade(elem, caixa) {
+    const erro = this.errosDoProduto.get(elem) || this.errosDoServidor.get(elem)
+      || this.errosDoMod.get(elem) || "";
+    // A cor com o hexadecimal pela metade é inválida sem frase: quem digita
+    // vê a borda, e não um erro a cada tecla.
+    if (!erro && this.coresIncompletas.has(elem)) {
+      elem.dataset.invalido = "sim";
+      caixa.setAttribute("aria-invalid", "true");
+      delete elem.dataset.mensagemDeErro;
+      return;
+    }
     if (erro) {
       elem.dataset.invalido = "sim";
       caixa.setAttribute("aria-invalid", "true");
@@ -2960,6 +3318,8 @@ class RegiaoDeMod {
     // `catch` é o pedido que rejeita em vez de avisar — a fonte que o WebAudio
     // não abre —, e ele não podia ficar só na anotação.
     entrada.tocador = tocador;
+    // A declaração mais nova de `repetir`, que pode ter chegado antes do som.
+    tocador.definirRepetir(entrada.repetir ?? plano.no.repetir === true);
     entrada.tocar = (comGesto) => tocador.tocar(comGesto).catch((falha) => {
       if (estado.cancelado || this.solta) return;
       recusou(motivoDaFalha(falha));
@@ -3158,6 +3518,8 @@ class RegiaoDeMod {
   atualizarMidia(elem, plano) {
     const som = this.somDaMidia.get(elem);
     if (!som) return;
+    som.repetir = plano.no.repetir === true;
+    som.tocador?.definirRepetir(som.repetir);
     som.quer = plano.no.tocando === true;
     this.aplicarTocando(elem);
   }
@@ -4018,12 +4380,24 @@ class TocadorDeSomDeMod {
     /** O pedido que espera o áudio da janela ligar, enquanto espera; 0 quando nenhum. */
     this.pedidoEsperando = 0;
     this.solto = false;
+    /** Em laço (`repetir: true`, a API 6): a fonte não termina. */
+    this.repetir = false;
     tocadoresDeSomDeMod.add(this);
   }
 
   /** Está tocando agora? */
   get tocando() {
     return this.fonte !== null;
+  }
+
+  /**
+   * **`repetir: true`** (rascunho da API 6, §5; tarefa 10 da F3): a fonte de
+   * buffer toca em laço (`loop`), e o fim natural não acontece. Vale também
+   * para a fonte de pé, quando o MOD muda a declaração com o som tocando.
+   */
+  definirRepetir(sim) {
+    this.repetir = sim === true;
+    if (this.fonte) this.fonte.loop = this.repetir;
   }
 
   /**
@@ -4105,6 +4479,7 @@ class TocadorDeSomDeMod {
       }
       fonte = contexto.createBufferSource();
       fonte.buffer = this.som;
+      fonte.loop = this.repetir;
       fonte.connect(this.ganho);
       fonte.start(0, de);
     } catch (falha) {
@@ -4134,7 +4509,9 @@ class TocadorDeSomDeMod {
     const fonte = this.fonte;
     if (!fonte) return;
     this.fonte = null;
-    this.deslocamento = Math.max(0, this.contexto.currentTime - this.comecou);
+    // Em laço, o tempo tocado passa da duração: onde parou é o resto dele.
+    const tocado = Math.max(0, this.contexto.currentTime - this.comecou);
+    this.deslocamento = this.repetir && this.som.duration > 0 ? tocado % this.som.duration : tocado;
     fonte.onended = null;
     fonte.stop();
     fonte.disconnect();

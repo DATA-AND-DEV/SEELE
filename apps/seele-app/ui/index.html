@@ -2,6 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<!--
+  A meta de viewport é do navegador do celular (P1): sem ela, ele desenha a
+  página a 980 px e a encolhe. No app ela é inerte: o desktop sai igual pixel a
+  pixel com e sem ela no Chromium, no WebKit e no WKWebView do app de verdade
+  (medido na F8; docs/evidencias/f8-tarefa-16/).
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEELE</title>
 <!--
   A ponte do navegador, antes de tudo e síncrona (ADR 0057, F4). No app ela só
@@ -1000,6 +1007,13 @@
       -->
       <ul id="trilha-outros" class="trilha-outros"></ul>
       <!--
+        A região `redes` da API 6 (rascunho §3, tarefa 5): o que um MOD
+        acrescenta à trilha. Entre o histórico e o `+`, e nunca no lugar deles —
+        o servidor atual e «conectar a outro» são do produto. Escondida enquanto
+        nenhum MOD acrescenta nada.
+      -->
+      <div id="trilha-mods" class="trilha-mods" hidden></div>
+      <!--
         O `+`, e com **um** significado — que é a correção do comp v3.
 
         No v2 ele acumulava «entrar noutro Server» e «sair deste», e um teste
@@ -1113,6 +1127,15 @@
         agora, se ele está cortado, e se você ouve.
       -->
       <div class="operador">
+        <!--
+          A região `operador.barra` da API 6 (rascunho §3, tarefa 5): o que um
+          MOD acrescenta à barra de quem está conectado. A primeira faixa do
+          bloco, e nunca entre a pessoa e os controles dela: o microfone, o
+          fone, o «no ar» e o SAIR são do núcleo (§10) e ficam fora daqui. A
+          altura é limitada, e o que passar rola por dentro — conteúdo grande
+          não empurra o SAIR para fora da vista.
+        -->
+        <div id="operador-mods" class="operador-mods" hidden></div>
         <div class="operador-topo">
           <!--
             O bloco do operador vira botão na 0.9.0, e abre o perfil. A comp o
@@ -1472,6 +1495,13 @@
             `desenharCabecalhoDoCanal` em `tela-sessao.js`; vazio nao ocupa
             largura nenhuma.
           -->
+          <!--
+            `canal.cabecalho` substituído (API 6, rascunho §3, tarefa 5): o MOD
+            desenha o miolo da barra, entre o nome e a lupa, que continuam do
+            produto — o nome é também o botão de renomear. Ocupa o lugar do
+            espaço; escondido quando ninguém substitui.
+          -->
+          <span id="canal-cabecalho-miolo" class="canal-cabecalho-miolo" hidden></span>
           <span id="canal-cabecalho-mods" class="canal-cabecalho-mods"></span>
           <span class="espaco"></span>
           <!--
@@ -1532,6 +1562,13 @@
           e quem não está olhando para cá é justamente quem precisa ser avisado de
           que a coisa caiu.
         -->
+        <!--
+          A região `compositor` da API 6 (rascunho §3, tarefa 5): o que um MOD
+          acrescenta à caixa de escrever, numa faixa acima dela. Nunca entre o
+          campo e o ENVIAR: quem envia é a pessoa, e o anexo e o ENVIAR são do
+          produto. Os botões de MOD dentro da fileira são `compositor.ferramentas`.
+        -->
+        <div id="compositor-mods" class="compositor-mods" hidden></div>
         <div id="anexo-pendente" class="anexo-pendente" hidden aria-live="polite">
           <span class="anexo-linha">
             <span id="anexo-nome" class="anexo-nome"></span>
@@ -1718,6 +1755,12 @@
         SALA`. Uma frase que descreve o que está desenhado logo abaixo dela é uma
         frase que se lê uma vez e se pula para sempre.
       -->
+      <!--
+        A região `pessoas.lista` da API 6 (rascunho §3, tarefa 5): o que um MOD
+        acrescenta acima da lista. Substituída, ela é a ordem e os grupos dentro
+        de cada sala — as seções das salas são do produto.
+      -->
+      <div id="roster-mods" class="roster-mods" hidden></div>
       <ul id="lista-roster" class="roster"></ul>
     </section>
 
@@ -1846,6 +1889,14 @@
     -->
     <span class="metrica"><b class="rotulo">CAMINHO</b> <span id="tel-caminho">·</span></span>
     <span class="espaco"></span>
+    <!--
+      A região `status.barra` da API 6 (rascunho §3, tarefa 5): o que um MOD
+      acrescenta à barra de baixo. Depois das métricas e antes dos avisos de
+      falha local, que são do produto; com largura máxima, e ela encolhe antes
+      de qualquer métrica — atraso, jitter, distúrbio e codec são o que a pessoa
+      lê para saber se a voz está chegando.
+    -->
+    <span id="telemetria-mods" class="telemetria-mods" hidden></span>
     <span id="tel-local" class="falha-local" hidden title="a máquina, não a rede">
       ÁUDIO LOCAL FALHANDO
     </span>
@@ -3244,6 +3295,21 @@
                   </div>
                 </div>
                 <p id="mods-gestao-erro" class="erro" role="alert" hidden></p>
+
+                <!--
+                  Quem pinta este servidor, quando dois MODs com a porta do tema
+                  estão ligados (D-api-5; tarefa 17f.0 da F3). Um tema por
+                  servidor: só um pinta, e quem hospeda escolhe qual. Escondida
+                  com um MOD de tema só, ou nenhum, que é o caso comum, e para
+                  quem não hospeda: escolher é de quem administra.
+                -->
+                <section id="mods-aparencia-do-servidor" class="server-bloco" hidden>
+                  <div class="server-bloco-topo">
+                    <h3 class="server-bloco-nome">QUEM PINTA ESTE SERVIDOR</h3>
+                  </div>
+                  <p id="mods-aparencia-nota" class="nota"></p>
+                  <ul id="lista-aparencia-do-servidor" class="server-dispositivos"></ul>
+                </section>
 
                 <!--
                   Quem apresenta o que, quando mais de um MOD pede o mesmo lugar

@@ -444,8 +444,18 @@ pub enum Motivo {
 /// [`DisconnectReason::NinguemAtendeu`] e [`DisconnectReason::ChamadaRecusada`]
 /// — são terminais pela spec de 23/09/2026 («Protocolo»): reconectar abriria a
 /// sala de quem acabou de desligar, ou tocaria de novo para quem não atendeu.
-/// Nenhum servidor as manda ainda; elas entram aqui com o fio, para a sala não
-/// nascer com uma bateria tocando de novo.
+///
+/// `ChamadaEncerrada` é a que chega aqui: quem recebe desliga, e
+/// `Recepcao::desligar` (`seele-server`, `recepcao.rs`, desde `9890e4eb`) a
+/// manda a cada convidado lá dentro, no meio da sessão, pelo mesmo
+/// `Event::ServidorEncerrando` com que quem hospeda fecha avisando. Sem ela
+/// aqui, a bateria ligaria de novo para a sala de quem acabou de desligar.
+///
+/// As outras duas o servidor manda na fase do toque, antes de a sessão
+/// existir (`tocar` e `recusar_o_aperto`, em `session.rs`): chegam como recusa
+/// do aperto de mão, [`ConnectError::Refused`], e não por aqui. Ficam na lista
+/// porque são terminais pela mesma spec, e uma despedida com elas no meio de
+/// uma sessão não pode começar uma bateria que toca de novo.
 ///
 /// [`DisconnectReason::ServerShuttingDown`] é **quem hospeda fechando o
 /// servidor**, e o servidor o manda a cada sessão antes de cair
@@ -9206,7 +9216,10 @@ mod tests {
         let Some(biblioteca) = biblioteca_de_teste() else {
             return;
         };
-        let (saida, entrada) = crate::tela::tests::par().await;
+        // O par paciente, e não o `par`: a bomba arma depois do aperto, e o
+        // prazo de ociosidade do QUIC não pode ser menor que a paciência com
+        // ela. Ver `crate::bomba::tests::par_paciente`.
+        let (saida, entrada) = crate::bomba::tests::par_paciente().await;
         let escoadouro = crate::bomba::Escoadouro::nova(saida);
         let tela = ScreenId(0x00C0_FFEE);
 
@@ -9226,9 +9239,8 @@ mod tests {
         });
         let escoando = escoando.expect("quem escoa não foi chamado");
 
-        let mut recepcao = crate::tela::Recepcao::aceitar(&entrada)
-            .await
-            .expect("aceitar o fluxo da tela");
+        let mut recepcao =
+            crate::bomba::tests::aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
         assert_eq!(
             recepcao.cabecalho().screen,
             tela,

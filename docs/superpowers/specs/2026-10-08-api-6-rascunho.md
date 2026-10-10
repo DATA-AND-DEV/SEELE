@@ -215,13 +215,22 @@ SeeleUI.contribuicoes.registrar({
 });
 ```
 
-- **Ninguém some da lista.** Quem está no servidor e não está em grupo nenhum
-  vai para um grupo do produto, no fim, com o título do produto (OUTRAS
-  PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
+- **As salas de voz continuam seções do produto** (decisão da orquestradora,
+  09/10). Quem está na sala de quem ouve você é verdade de confiança, do mesmo
+  tipo do apelido verificado, e um MOD não a reorganiza: os grupos do MOD
+  valem **dentro de cada sala** (e dentro de FORA DE SALA e de NO SERVIDOR,
+  FORA DAS SALAS), como subtítulos, na ordem dele. Um MOD que põe pessoas de
+  duas salas no mesmo grupo vê cada uma na sua sala. Grupos que cruzam salas
+  ficam para a API 7, se alguém pedir. O FORA DO AR é seção do produto, no
+  fim, e o MOD nem sabe dele: o retrato da 6 não leva os membros fora do ar
+  (§6).
+- **Ninguém some da lista.** Quem está na sala e não está em grupo nenhum do
+  MOD fica no fim da sala, sob um subtítulo do produto (OUTRAS PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
   dois grupos fica no primeiro; os dois contam na aba DIAGNÓSTICO. Nenhum dos
   dois é recusado: a lista muda mais depressa do que o MOD a reescreve.
 - **A linha tem três faixas**, numa grade do produto: `[núcleo] [miolo] [⋯]`.
-  - **o núcleo**, à esquerda: o apelido verificado, lido do retrato **pela
+  - **o núcleo**, à esquerda [c, tarefa 5, também sob `pessoa.cartao`]: o
+    apelido verificado, lido do retrato **pela
     chave da linha**, e nunca do que o MOD escreveu. Quando esta sessão tem
     verbo sobre a pessoa, ele **é** o botão de moderação, o mesmo elemento da
     linha nativa (`.pessoa-nome-porta`): a moderação sai do «⋯» e fica a um
@@ -245,6 +254,30 @@ SeeleUI.contribuicoes.registrar({
   pode agrupar a lista e outro desenhar as linhas, e a escolha de quem
   administra vale ponto a ponto, como hoje.
 
+**`servidor.navegacao`, substituída** (tarefa 5; a mesma regra, aplicada por
+mim e levada à orquestradora): o MOD toma **a ordem e os grupos de cada
+lista**, salas e canais, separadamente:
+
+```js
+SeeleUI.contribuicoes.registrar({
+  ponto: 'servidor.navegacao', modo: 'substituir',
+  conteudo: {
+    salas: { grupos: [{ titulo: 'MESA 1', ids: [1] }] },
+    canais: { grupos: [{ titulo: 'MESA 1', ids: [2] }] },
+  },
+});
+```
+
+A linha de cada sala e de cada canal continua do produto — ENTRAR, renomear,
+apagar, e os `canal.item` e `sala.acoes` dos provedores deles —, e os `+` de
+criar ficam nos cabeçalhos do produto. Quem não está em grupo vai para OUTRAS
+SALAS / OUTROS CANAIS; um grupo sem ninguém presente não aparece; outra forma
+de declaração é recusada pelo nome no registro. Uma substituição não vira
+entrada «DOS MODS», que continuam sendo os `adicionar`. **Grupos mistos** —
+uma sala e um canal no mesmo grupo — **ficam para a API 7**: as duas listas
+têm verbos diferentes (entrar numa sala, abrir um canal), e misturá-las é
+desenho de tela, e não só ordem. [c, `regioes-do-produto.cjs`]
+
 **`conversa.mensagem`, substituída** (por mensagem, `alvo` sendo a mensagem).
 O MOD desenha **o corpo**. O produto mantém, na ordem: a calha do avatar (com
 `pessoa.avatar`), a cabeça (o apelido verificado do autor, lido pela chave, a
@@ -264,6 +297,11 @@ fechada da lista.
 - **A busca vence.** Enquanto a busca marca uma mensagem substituída, ela volta
   ao corpo nativo: o realce é o que a pessoa procura, e o produto não marca
   dentro do desenho de um MOD. Saindo da busca, o miolo volta.
+- **Uma mensagem pendente não recebe o desenho de um MOD** [c, tarefa 5]: ela
+  tem `id` zero (o servidor ainda não a gravou), todas as pendentes dividiriam
+  esse alvo, e uma substituição sem alvo vale para todas as mensagens. O texto
+  dela e o selo do envio são do produto até ela ser gravada. [c, toda esta
+  seção de `conversa.mensagem`: `regioes-do-produto.cjs`]
 
 **Os guardas** (Steps 2 a 5, e o guarda 11):
 
@@ -293,11 +331,14 @@ fechada da lista.
 E o achado do agrupamento das mensagens: **pela chave, nesta tarefa, com
 guarda** (o 6 acima), e a reversão — agrupar pelo apelido — reprova.
 
-**Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Hoje
-um tipo desconhecido vira `dialogo` em silêncio
-(`mods-superficies.js:225` [c]). Na 6, a recusa diz o nome e a lista do que
-existe, e o `seele.log` ganha a linha (o «produto sabe e não conta» do
-`CLAUDE.md`).
+**Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Um
+tipo desconhecido virava `dialogo` em silêncio (`mods-superficies.js:225`).
+Na 6, a recusa diz o nome e a lista do que existe, e o `seele.log` ganha a
+linha (o «produto sabe e não conta» do `CLAUDE.md`) [c, tarefa 7, Step 1:
+`tipo-desconhecido`, com `tipoPedido` e `tipos`, abaixo]. **Até a 5, a superfície
+continua abrindo como `dialogo`** — é o que os MODs publicados recebem, e
+nenhum dos três pede um tipo que não exista —, e o `seele.log` ganha a linha
+também. Sem tipo, `dialogo`, nas duas.
 
 ## 4. `pessoa.capa`
 
@@ -327,7 +368,7 @@ SeeleUI.contribuicoes.registrar({
 | lugar | desktop | celular |
 |---|---|---|
 | o cartão da pessoa na chamada (`pintarCartao`, `tela-chamada.js:453` [c]) | sim, animada até o teto | **sim, animada até o mesmo teto** (D-capa-1) |
-| o fundo da barra do operador (`.operador`, com `snapshot.me`) | sim | **não há barra na vista**: o `operador.barra` mora em AJUSTES (§11), e a capa do operador pinta o cabeçalho SEU PERFIL logo acima dele (a linha de baixo); a faixa de voz é do núcleo e não recebe capa |
+| **o fundo da barra do operador inteira** (`.operador`, com `snapshot.me`; o pedido do dono, reafirmado em 08/10): o MUDO, o fone e o SAIR são do núcleo (§10) e ficam, como todo texto e controle da barra, sobre placas opacas da cor do fundo nativo [c, tarefa 6] | sim | **não há barra na vista**: o `operador.barra` mora em AJUSTES (§11), e a capa do operador pinta o cabeçalho SEU PERFIL logo acima dele (a linha de baixo); a faixa de voz é do núcleo e não recebe capa |
 | o cabeçalho do perfil do PERFIS | sim, por citação (abaixo) | sim |
 | o «SEU PERFIL» nativo (`index.html:3816`) | sim, por um aplicador do produto | sim |
 | a linha da lista de pessoas | parada, se o MOD a citar no cartão | parada |
@@ -349,11 +390,21 @@ sinal, e do volume. O PERFIS calculou o contraste dos tokens reais sobre o pior
 quadro com um véu uniforme (R1, tabela): só um véu de 0,9 segura o laranja e o
 vermelho perto do nativo, e aí a capa quase não se vê. O contrato:
 
-- **o texto do produto fica em placas opacas** do negro do painel, ou num véu
-  opaco onde há texto. A capa aparece no resto;
-- **todo texto do produto sobre a capa mantém pelo menos o contraste que tem
-  sem capa**, conferido contra um quadro branco e um quadro preto, com guarda;
-- **MUDO, fone e SAIR nunca ficam sobre a capa** (núcleo, §10).
+- **o texto do produto fica em placas opacas** da cor do fundo que ele teria
+  sem a capa — o negro do painel, e o laranja de carga de quem fala —, ou num
+  véu opaco onde há texto. A capa aparece no resto [c, tarefa 6];
+- **todo texto e todo controle do produto sobre a capa mantém pelo menos o
+  contraste que tem sem capa** — a cor e a borda —, conferido contra um quadro
+  branco, um preto e um **da cor da própria tinta**, com guarda [c, `capa.cjs`:
+  cada texto, botão e glifo do cartão e da barra do operador, calado e
+  falando; sem a placa, o nome cai de 15,99:1 para 1,28:1 sobre a capa
+  branca]. O quadro da cor da tinta é o pior para cada um, e é ele que pega o
+  cinza: o MUDO sem placa **ganha** contraste sobre o branco (4,11 → 4,86) e
+  sobre o preto (→ 4,32), e só sobre a cor dele mostra que some (→ 1);
+- **o MUDO, o fone e o SAIR ficam sobre placas opacas do núcleo** (§10), com a
+  cor do fundo nativo da barra: a capa passa por trás deles, e nunca por trás
+  deles sem placa [c, tarefa 6: sem a placa do MUDO ou do fone, 4,11 → 1 sobre
+  a cor da tinta; sem a do SAIR, 15,6 → 1,28 sobre o branco].
 
 **Quem fala.** O halo `inset` e a pastilha FALANDO ficam acima da capa, e
 quando a pessoa fala o véu passa a `--seele-laranja-carga`, para o
@@ -378,12 +429,15 @@ bolsos somam `midia.bytes` (`base.js:1209` [c]). Uma capa de 960 × 320 tem
 contrato, **com os números em aberto para a M3** (§12):
 
 - o Rust **reduz** a capa ao maior tamanho em que ela aparece antes de
-  entregá-la à janela, e limita quadros e duração (proposta: 60 quadros, 10 s);
-- o bolso da capa conta **bytes decodificados**;
+  entregá-la à janela, e limita quadros e duração (proposta: 960 × 320, 60
+  quadros, 10 s) [c, tarefa 6, Step 5a: a janela nomeia o uso `"capa"`, de
+  lista fechada no Rust, e nunca um tamanho; `reducao.rs`];
+- o bolso da capa conta **bytes decodificados** [c, Step 5b: 128 MiB por MOD,
+  a partida, separado do bolso dos avatares, que segue contando o arquivo];
 - **no máximo N capas animadas ao mesmo tempo** (proposta: 6, contando a do
   operador), escolhidas pela vista: as visíveis, e entre elas quem falou por
   último. O teto não depende do tamanho da sala (até 250 pessoas,
-  `control.rs:77` [c]).
+  `control.rs:77` [c]). [c, Step 5c; as outras mostram o quadro parado]
 
 ## 5. Camadas e superfícies
 
@@ -427,11 +481,44 @@ contrato, **com os números em aberto para a M3** (§12):
 mesmo `doServidor: { canal, pedido, campo }` da v5, com `pedido.transporte =
 'volume'` levando a leitura ao fluxo do ADR 0048, e não ao controle. A v5 só o
 dizia da mídia em geral (`api/v5.json`, `volume.leitura`); a 6 o diz de cada
-lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7).
+lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7). [c, tarefa 7, Step
+5b: **medido, já levava** — todos os lugares passam pelo mesmo
+`carregarMidiaDoServidor` do dono, que decide pelo `transporte`;
+`bancada/camadas.cjs` prova os cinco, cada um com o seu caminho de volume,
+lidos pelo `ler_imagem_mod` e nenhum pelo `mod_request`]
+
+### O contrato do som: `tocando` e `repetir`
+
+O de `tocando` é o do `api/README.md` da 0.15.1 (P49-6, `563bc37`), palavra
+por palavra, e a linha de `repetir` é a nova da 6 [c, tarefa 10]:
+
+- **`tocando` vale quando muda.** Um som que a pessoa pausou não volta
+  sozinho no redesenho seguinte que o declare `tocando: true`.
+- **A exceção é o som que terminou:** `tocando: true` sobre um som cujo
+  último aviso foi `terminou` toca de novo, do começo, como o `<audio>`
+  fazia até a 0.15.0.
+- **`repetir: true` toca em laço** (`AudioBufferSourceNode.loop`): o som
+  volta ao começo no fim sem redesenho, e o MOD não recebe `terminou` dele.
+  Desligar o `repetir` num redesenho, com o som tocando, o tira do laço, e o
+  próximo fim é dito. Pausado e retomado, ele continua de onde parou dentro
+  da volta.
+- **No fim, o MOD recebe só `terminou`.** O `<audio>` dizia `pausada`
+  antes dele.
+- **O botão é do produto.** No lugar dos controles do `<audio>`, o produto
+  desenha um TOCAR/PAUSAR ao lado do som (num cartão, nenhum).
+- **Fora da tela, a declaração não liga o som.** Um `tocando: true` num som
+  cujo lugar saiu da tela — uma página fechada, um cartão que o SEELE não
+  desenha agora — é recusado (`recusada`, com o motivo «o lugar deste som
+  saiu da tela…»), e um som que tocava ali é pausado (`pausada`).
 
 ### `folha`
 
-- Empilha **até 3** [proposta], cada uma com título e a saída do produto.
+- Empilha **até 3** [proposta], cada uma com título e a saída do produto
+  [c, tarefa 7, Step 4: por MOD, contando as que estão à vista — uma fechada
+  ou oculta saiu da pilha; a quarta, inclusive ao reabrir, é recusada com
+  `teto-de-folhas` e `teto: 3`; só a de cima aparece, e mostrar a de baixo a
+  traz para cima. Mora em `#palco-de-paineis`, o lugar do `painel`, com o
+  desenho dele, e `bancada/camadas.cjs` a mede].
 - Convive com `chamada.palco` e com uma `pagina` não imersiva. Sob uma página
   imersiva, a folha abre por cima dela.
 - `fechar` vai ao MOD como nas outras, com `descartou` quando a pessoa aceita
@@ -448,27 +535,50 @@ campo. A API 6 acrescenta:
 
 - **validação declarada por campo**: `obrigatorio`, `minimo`/`maximo` (número),
   `tamanhoMaximo` com contador e frase do produto, `inteiro`. Uma regra
-  violada impede o envio e marca o campo, sem ida ao MOD;
+  violada impede o envio e marca o campo, sem ida ao MOD [c, tarefa 7, Step
+  6a: no `campo`, no `textoLongo` e no `numero`; o formulário passa a
+  `noValidate`, porque a validação nativa barrava o número fora de
+  `min`/`max` com a bolha do navegador; o foco vai ao primeiro inválido, a
+  frase do produto convive com o `erro` do MOD e sai quando a pessoa mexe no
+  campo; o contador diz `13/10` e fica vermelho ao passar];
 - **`erro` em toda forma de entrada**, inclusive `cor` e `escolha`
-  (hoje só `campo`, `textoLongo`, `numero` e `formulario`, ESTILO §4);
+  (hoje só `campo`, `textoLongo`, `numero` e `formulario`, ESTILO §4) [c,
+  tarefa 7, Step 6e: as duas mostram o `erro`, recebem o `formulario.erros`
+  e entram no sujo derivado; na `cor`, a frase fica no hexadecimal, e o
+  hexadecimal incompleto continua marcado, sem frase, enquanto se digita];
 - **botões primário e secundário montados pelo produto**: o primário envia o
   formulário com **todos os valores juntos** no `submeter`; o secundário
-  cancela pela saída do produto. O MOD dá o texto, não o comportamento;
+  cancela pela saída do produto. O MOD dá o texto, não o comportamento [c,
+  tarefa 7, Step 6f: `{ forma: 'formulario', primario: 'SALVAR', secundario:
+  'CANCELAR' }`; o primário é o `submit`, e passa pela validação; o
+  secundário pede a saída do produto, que pergunta quando há alteração, e só
+  existe numa superfície; na ordem da confirmação do produto, o secundário
+  antes; `emProgresso` no formulário trava o primário e o envio, inclusive
+  pelo Enter de um campo só];
 - **a recusa do servidor volta ao campo que a causou**:
-  `formulario.erros({ chave: 'motivo' })`;
+  `formulario.erros({ chave: 'motivo' })` [c, tarefa 7, Step 6b: no punho da
+  superfície, `s.formulario.erros(mapa)`; o foco vai ao primeiro marcado, a
+  frase sai quando a pessoa mexe no campo, `{}` limpa, e uma chave que não é
+  de um campo recusa o pedido inteiro com `chave-desconhecida`];
 - **`sujo` derivado**: o produto compara o valor atual de cada campo com o
   inicial, e a pergunta ao fechar não depende de o MOD chamar `suja`. **O MOD
   pode declarar os dois** (pedido do PERFIS, 09/10): `{ forma: 'campo', chave,
   valor: <o rascunho guardado>, inicial: <o gravado> }`. Assim o editor que
   reabre com um rascunho já nasce sujo, e voltar ao gravado o limpa. Sem
-  `inicial`, o inicial é o `valor` da montagem;
+  `inicial`, o inicial é o `valor` da montagem [c, tarefa 7, Step 6c: no
+  `campo`, no `textoLongo` e no `numero`; suja é o que o MOD disse com
+  `suja` **ou** o que os campos mostram; depois de gravar, o MOD redeclara
+  `inicial` com o valor novo];
 - **confirmação declarada para ação destrutiva**, com as palavras do produto:
   `{ confirmar: 'isto muda a aparência para todo mundo neste servidor' }`
   (ESTILO A13). **Ela se declara em qualquer `botao`**, e não só no primário
   (pergunta do ESTILO, B7): RESTAURAR PADRÃO é um terceiro botão, destrutivo,
   ao lado do primário e da saída. O produto mostra a confirmação com as
   palavras dele por cima do diálogo, e o evento `botao` só chega ao MOD
-  depois do sim;
+  depois do sim [c, tarefa 7, Step 6d: a caixa da moderação, a mesma do
+  «FECHAR SEM GRAVAR?», com o nome do botão como título e ato, a consequência
+  do MOD e quem pede; acordada da pilha de inércia enquanto pergunta; sem a
+  caixa, a ação não sai];
 - **um erro do servidor que fala de dois campos** vai a
   `formulario.erros({ text: motivo, background: motivo })`: o produto marca
   cada campo pela chave. O que a metade de servidor responde é protocolo do
@@ -490,7 +600,11 @@ recomendava). A spec de 23/09 já desenhava a `folha` como «parente do painel»
 o porte é obrigatório de qualquer jeito (API-6-só), e um tipo a menos é uma
 superfície a menos para revisar e para descrever no celular. A `pagina` fica,
 porque a MESA imersiva e o diretório do PERFIS precisam da célula da conversa.
-O que os oficiais montam hoje num `painel` vai para a `folha` no porte.
+O que os oficiais montam hoje num `painel` vai para a `folha` no porte. **Na
+6, `painel` é um tipo que ela não tem**: `tipo-desconhecido`, com «use folha»
+no `seele.log`; até a 5 ele continua, e a `folha`, que a 5 não tem, abre como
+`dialogo`, com a linha [c, tarefa 7, Step 4; os tipos de cada API em
+`tiposDaApi`, `mods-superficies.js`].
 
 ## 6. O retrato projetado por lista branca
 
@@ -613,13 +727,22 @@ que o `check-api` usa acha exatamente esses 17 na HEAD [c].
 Mudam, na 6:
 
 - **`midia`** passa a dizer **o ponto e o alvo** (`{ ponto: 'pessoa.capa', alvo:
-  12, estado: 'recusada', porque }`), para o MOD dizer a quem enviou que a capa
-  não vai aparecer (PERFIS M5, R9). E o retrato que não decodifica manda
+  '12', estado: 'falhou', porque }`), para o MOD dizer a quem enviou que a capa
+  não vai aparecer (PERFIS M5, R9). [c, tarefa 6, para o avatar e a capa; o
+  `estado` é o `'falhou'` que o avatar já mandava, e o `alvo` vai como texto,
+  como os alvos das contribuições] E o retrato que não decodifica manda
   `midia`/`falhou` (nota do K2 da F5).
 - **`traco`** ganha a fase `cancelou`. Hoje `pointercancel` chega como
   `terminou` (`mods-regiao.js:1898` [c]) e um gesto cancelado move a peça
   (MESA M14). No celular é comum.
-- **`contribuicao`** ganha o motivo `regiao-ausente` (§11).
+- **`contribuicao`** ganha o motivo `regiao-ausente` (§11), e o motivo
+  **`orcamento`**: uma declaração que passa do teto do ponto é montada até o
+  teto, e o MOD recebe `{ nome: 'contribuicao', ponto, destino, recusados,
+  motivo: 'orcamento', perfil, teto, tamanho }` — o orçamento do ponto, quantos
+  nós cabem nele e quantos a declaração tem [c, tarefa 5]. Até a tarefa 5 ele
+  recebia só `recusados`, que não diz a quem escreveu quanto cabe nem quanto
+  pediu. As recusas por forma (uma forma que o ponto não aceita) continuam sem
+  `motivo`.
 
 **Os nomes das recusas que o MOD recebe** (o K1-m3 da F5: o `erro` que chega ao
 MOD é um nome de lista fechada, e a frase fica na tela). No envio e na leitura
@@ -643,6 +766,35 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 | `banco-indisponivel` | a tabela dos arquivos escolhidos não respondeu |
 | `falhou` | uma falha sem nome; o motivo vai ao `seele.log`, com o `mod_id=` |
 
+**As recusas das contribuições** [c, tarefa 5, Step 7b] — no registro, no
+`atualizar` e no `revogar`, com a mesma forma (`e.message` e `e.erro` são o
+nome; a frase vai ao `seele.log`):
+
+| nome | quando |
+|---|---|
+| `ponto-desconhecido` | o ponto não está na tabela de pontos |
+| `modo-recusado` | o ponto não aceita o modo pedido — inclusive `decorar`, que não está na 6 |
+| `sem-alvo` | o ponto exige alvo (o `pessoa.avatar`) e o pedido não trouxe |
+| `conteudo-invalido` | o conteúdo não tem a forma que o ponto exige (o `doServidor` do avatar; a ordem de `pessoas.lista` e de `servidor.navegacao` substituídas) |
+| `teto-de-contribuicoes` | o MOD já tem 128 contribuições **sem alvo** de pé (§12) |
+| `teto-de-alvos` | o MOD já alcança 256 alvos neste ponto (§12) |
+| `contribuicao-ja-existe` | o MOD já tem uma contribuição para este alvo, neste ponto e neste modo: use `atualizar` |
+| `contribuicao-de-outro-mod` | o `handle` de `atualizar` ou `revogar` é de outro MOD, ou de outra instância dele |
+
+**As recusas das superfícies** [c, tarefa 7, Step 1] — na resposta de
+`superficies.criar`:
+
+| nome | quando |
+|---|---|
+| `chave-desconhecida` | `superficie.atualizar` pediu uma chave que a superfície não tem, ou `formulario.erros` uma que não é de um campo; leva `chave` |
+| `orcamento` | `superficie.atualizar` levaria a superfície além do teto de nós; leva `perfil`, `teto` e `tamanho`, e a superfície fica como estava |
+| `superficie-desconhecida` | a mensagem nomeia uma superfície que não está de pé; leva `superficie` |
+| `sem-previa` | `SeeleUI.tema` sem `{ previa: true }`: na 6, o tema publicado é o da metade de servidor (§9, B4) |
+| `contraste` | a prévia do tema tem um par abaixo do piso; leva `pares`, como a recusa de `mundo.tema` |
+| `teto-de-folhas` | o MOD já tem 3 folhas à vista (§5); leva `teto` |
+| `teto-de-superficies` | o MOD já mantém 12 superfícies de pé; leva `teto`. Chegava à 6 como `falhou` |
+| `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície da API do pacote (na 6, o `painel` também); leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
+
 **Como o nome chega** [c, tarefa 4 passo 5b]: o Rust recusa com um nome
 (`FalhaNoMod::Recusado { motivo }`), e um sufixo depois de `:` vira campo —
 `tipo-recusado:heic` chega como `erro: 'tipo-recusado'` e `detectado: 'heic'`,
@@ -650,8 +802,9 @@ de imagens por `volume`, a lista, com os nomes que o fio e o app já usam
 Ele chega pelos dois caminhos: a resposta de um pedido (o `Error` do prelúdio,
 com os campos) e o evento `arquivo` de um seletor que recusou (`resultado:
 'falhou'`, com `erro` e `detectado`). Um `Error` da casca pode trazer o nome em
-`recusa`; as recusas das contribuições e das superfícies ganham nome nas tarefas
-5 e 7, e até lá chegam como `falhou`, com o motivo no registro. **Até a API 5,
+`recusa`; as recusas das contribuições ganharam nome na tarefa 5 (a tabela
+acima), e as das superfícies ganham na 7 — até lá chegam como `falhou`, com o
+motivo no registro. **Até a API 5,
 nada muda**: o MOD recebe a frase de tela, como os publicados recebem (o K1-m3
 da F5).
 
@@ -886,6 +1039,12 @@ grupo 17 do plano da F3.
   `TemaMudou` logo depois do `Session` e do `Instancia` leva o tema guardado: a metade de servidor só roda dentro de `aoPedir` e de
   `aoAcontecer`, sem gancho de carga, e um tema que dependesse dela sumiria no
   reinício.
+- **A casca o aplica antes de desenhar a sessão** [c, tarefa 17d]: o núcleo
+  guarda o `TemaMudou` (`Room.tema`), o retrato o leva (`tema_do_servidor`,
+  com o MOD e o JSON), e a casca o confere pelo mesmo caminho do tema de um
+  MOD — as tabelas da 17j, os pares da 17e — no começo de cada desenho. `None`
+  o tira por inteiro; um tema que a casca recusa não fica, nem o de antes, e o
+  motivo vai ao `seele.log`; ele sai com a sessão.
 - **A porta do lado do servidor é o manifesto.** Só um MOD cujo `mod.json`
   declara `"tema": true` pode chamar `mundo.tema`. A tela de aceite mostra isso
   numa linha própria («este MOD muda a aparência do servidor»), como o
@@ -970,6 +1129,9 @@ pares?: [{ frente, fundo, razao, piso }], previa: boolean }`, com os pares na
 mesma forma da recusa de `mundo.tema`. `recusado` traz os pares e
 os números; `nativo` diz que quem vê escolheu «o SEELE desenha». É o que deixa
 o ESTILO dizer na tela o que aconteceu, e não o que ele supõe (o U24 dele).
+[c, tarefa 17f, para o `TemaMudou`: a escolha de `servidor.aparencia` lida
+pela casca a cada desenho, e o evento só à janela do MOD que declarou o tema;
+a linha da escolha em QUEM DESENHA O QUE e a prévia (17g) vêm depois.]
 
 ### Os pares e os tons derivados, em números (B3)
 
@@ -1083,6 +1245,12 @@ acompanhavam a cor derivada.
   razão.
 - No celular, «ver na sessão» recolhe o diálogo e mantém o selo (D-estilo-1).
 - A prévia também passa pelos pares, e o evento `tema` volta com `previa: true`.
+- [c, tarefa 17g] Na janela: sem `previa`, `sem-previa`; uma superfície que
+  não existe, `superficie-desconhecida` (com `superficie`); uma prévia abaixo
+  de um piso, `contraste` (com `pares`), e ela não fica. A prévia passa pelas
+  mesmas tabelas do tema, sem a disputa de tokens entre MODs — ela é de quem
+  edita —, vale por cima do publicado, e sai também quando o MOD sai ou a
+  sessão acaba. O selo é do produto, nas cores do núcleo, acima do véu.
 
 ### O resto do que entra na 6
 
@@ -1094,7 +1262,12 @@ acompanhavam a cor derivada.
 - **`folha` e `dialogo` herdam o tema da sessão**, e um estilo de MOD pode
   citar um token (`cor: { tema: 'acento' }`), resolvido pelo produto (ESTILO
   A16). Cada peça ganha um teste no produto antes de o ESTILO depender dela
-  (B8).
+  (B8). [c, tarefa 17h: medida, a herança já valia — os palcos moram em
+  `#tela-sessao`, onde o tema escreve —; a citação é um `var()` do token da
+  tabela `TEMA_DA_API`, em toda cor de estilo (`cor`, `fundo`, borda, sombra,
+  gradiente), e acompanha o tema trocado; um nome fora da tabela é recusado
+  como qualquer cor que não serve. Vale também para as APIs 4 e 5: é API
+  somada]
 
 ### A ampliação: o que entra na 6 e o que espera a API 7 (B5)
 
@@ -1176,7 +1349,12 @@ pelo tema.** Fora deles, a tela é do MOD.
 
 - **os controles** — MUDO, SURDO, SAIR, AJUSTES, o veredito — ficam sobre
   superfícies que os pares do tema não conferem, e por isso **leem as cores do
-  produto** (`--nucleo-*`, a placa), que o tema não alcança;
+  produto** (`--nucleo-*`, a placa), que o tema não alcança [c, tarefa 9,
+  Steps 1 e 2, no desktop: o MUDO, o fone, o «no ar», o SAIR e o veredito,
+  com os `--nucleo-*` na raiz de `tela-sessao.css` — os nomes do celular —, e
+  a mesma cor, o mesmo fundo efetivo e a mesma borda com e sem tema, inclusive
+  o hostil, aplicado por baixo da validação; antes, sob ele, o MUDO ligado
+  caía a 1,00:1];
 - **o apelido verificado nas linhas** (`pessoas.lista`, `pessoa.cartao`,
   `conversa.mensagem`) lê o `texto` e o `painel` do tema, que os pares garantem
   a 4,5:1. O que o protege é **a estrutura**: o lugar reservado à esquerda da
@@ -1189,13 +1367,31 @@ MODS DESTE SERVIDOR leem `--nucleo-*`, e não o tema, como CONFIGURAÇÕES no
 desktop: quem escolheu um tema ruim sempre consegue sair dele (desenho da F8).
 
 **O guarda 11** prova, para cada item, que ele não está dentro de nenhuma
-região, que nenhuma contribuição o cobre e que o tema não o alcança. **No
+região, que nenhuma contribuição o cobre e que o tema não o alcança [c,
+tarefa 9, Step 3, no desktop, em `bancada/nucleo.cjs`: a portaria, o MUDO, o
+fone, o «no ar», o SAIR, o veredito, a moderação, o aceite, e a atribuição e
+a saída de uma superfície aberta; fora de todo contêiner de ponto que monta
+nós de MOD — os dois que só pintam, `servidor.aparencia` (o tema) e
+`pessoa.capa` (atrás das placas), ficam de fora com o motivo —, e, com a
+capa e um desenho de `operador.barra` mirando cada item com `estilo.mover`,
+nenhum coberto]. **No
 celular, prova também que nenhuma superfície aberta cobre a faixa de voz nem
 as abas**: com uma `pagina` imersiva, um `dialogo`, uma `folha` expandida e um
 `aviso` abertos, o retângulo de cada um termina acima da faixa, e um toque no
 MUDO e em AJUSTES chega ao produto. **No desktop, o guarda mede antes de
 concluir**: se um `dialogo` aberto deixa o MUDO e o SAIR da barra do operador
-à vista e clicáveis. Se não deixar, é o mesmo conserto, e a mesma regra. Agora
+à vista e clicáveis. Se não deixar, é o mesmo conserto, e a mesma regra.
+**Medido em 09/10: não deixava** — com um diálogo modal, o MUDO, o fone e o
+SAIR ficavam inertes e sob o véu, a 1400 e a 1024. **A regra, decidida pela
+orquestradora em 09/10: o modal de MOD não cobre a barra do operador, no
+desktop e no celular.** No desktop, o véu ganha um furo no retângulo da barra
+(e, abaixo de 900 px, onde a barra mora na gaveta, também no da porta dela),
+o MUDO, o fone e o SAIR ficam acordados, e a caixa do diálogo nunca cruza o
+furo — a área dela começa à direita da barra, e o que não couber rola dentro
+dela. No resto, o modal continua modal: o Tab preso no diálogo, o Esc o
+fechando, e a sessão inerte e coberta [c, tarefa 9, Step 4b;
+`mods-superficies.js`, `foraDoModal` e `recortarOVeu`; `bancada/nucleo.cjs`,
+seção 3]. Agora
 para o que existe (a portaria, `#portaria-batendo`, `index.html:192` [c]); o
 item «a ligação» (`#toque`) fecha depois da 7d da sala pessoal. **É isso que
 põe o congelamento no fim do pacote** (spec-mestre, F7).
@@ -1217,7 +1413,7 @@ estreita» (`celular.css:1-18`).
 | `conversa.mensagem` | existe | — | aplicada |
 | `compositor` | existe; campos de 16 px | botões de 44 × 44 | aplicada |
 | `pessoas.lista` | gaveta PESSOAS, célula inteira (`:397-407`) | cartão de 44 px | aplicada; a capa da linha fica parada |
-| `status.barra` | **só na chamada** (`#tela-sessao:has(#vista-chamada[hidden]) .telemetria{display:none}`) | mínimo de 40 px | aplicada, visível só na chamada |
+| `status.barra` | **não existe** (decidido com a F8, 09/10): a casca do celular tira o rodapé da telemetria, e as medidas dele foram para a fileira da CHAMADA — que tem a altura exata das abas — e para AJUSTES › CONEXÃO | — | **`regiao-ausente`**: a casca declara as sete outras em `CELULAR.regioes`, e o MOD que contribui aqui recebe o motivo, e a aba DIAGNÓSTICO conta |
 | `chamada.palco` | **vista alternativa** à grade, que vira uma coluna de cartões de 160 px (`:531-541`) | largura da tela; o MOD recebe o tamanho (§7.2) | aplicada |
 | `pagina` | célula inteira; a imersiva **não cobre a faixa de voz nem as abas** | — | [inf] hoje cobre: é `fixed; inset: …; z-index: 30` sem área segura de baixo (`mods-superficies.css:142-146`). Conserto na tarefa 7 |
 | `folha` | folha de baixo, acima da faixa e das abas | até a altura do polegar, expansível até o alto, sem cobrir a faixa nem as abas | — |
@@ -1234,10 +1430,16 @@ não muda o contrato.
 
 **Uma contribuição para uma região que a casca não tem é recusada com motivo
 nomeado** (`contribuicao` com `motivo: 'regiao-ausente'`), e não some calada.
-A aba DIAGNÓSTICO conta. **Na 0.16, com o desenho da F8, nenhuma das oito
-regiões fica sem casa no celular.** A regra continua no contrato para a casca
-que não tiver uma região: uma região da API 7 numa casca 1.0, ou o executor do
-navegador da F4 se ele não desenhar alguma. O MOD sabe onde está pelo `onde` e pelas `regioes` do
+A aba DIAGNÓSTICO conta. **Na 0.16, o celular tem sete das oito regiões: o
+`status.barra` não existe nele** (medido e decidido com a F8, 09/10: a casca
+do celular tira o rodapé da telemetria, e uma barra de estado escondida a dois
+toques em AJUSTES › CONEXÃO prometeria o que não cumpre). A casca do celular
+declara as sete em `CELULAR.regioes`, e um MOD que contribui no `status.barra`
+recebe `regiao-ausente` — sabe antes de escrever, pela tabela acima e pelas
+`regioes` do retrato. No PC no navegador (a casca larga), as oito valem, como
+no desktop. A regra vale também para a casca futura que não tiver uma região:
+uma região da API 7 numa casca 1.0, ou o executor do navegador da F4 se ele
+não desenhar alguma. [c, tarefa 5, Step 8; a declaração das sete é da F8] O MOD sabe onde está pelo `onde` e pelas `regioes` do
 retrato, e pelo evento `lugar` quando o aparelho deita.
 
 **Pontos ainda não medidos, que a F4 e a M3 no iPhone respondem:**
@@ -1275,6 +1477,7 @@ de hoje, lidos no código:
 |---|---|---|---|
 | mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **fica 12 KiB por mensagem**, e a superfície ganha a montagem por partes (abaixo) |
 | contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **muda de modelo** (abaixo): os pontos por pessoa deixam de gastar o teto agregado |
+| nós de uma contribuição | 64, para **todo** ponto: `montarContribuicao` montava com o orçamento do cartão, e o `perfil` da tabela de pontos não era lido [c, até a tarefa 5] | `base.js`, `PERFIS_DE_RENDER` em `mods-regiao.js` | **o `perfil` de cada ponto vale** (decidido pela orquestradora, 09/10): `pessoa.detalhes` monta com o de superfície (**4096 nós**: um painel de uma pessoa por vez, aberto sob demanda); **as regiões ficam no do cartão (64) até a M3 medir**, no desktop e no iPhone. Um guarda reprova um `perfil` que `montarContribuicao` não lê |
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
@@ -1294,9 +1497,10 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
 - **os pontos por alvo** (`pessoa.cartao`, `pessoa.avatar`, `pessoa.capa`,
   `pessoa.identidade`, `pessoa.detalhes`, `pessoa.acoes`, `canal.item`,
   `sala.acoes`) **não contam no teto agregado**. Cada um aceita **uma
-  contribuição por alvo e por MOD** (registrar de novo para o mesmo alvo é
-  `atualizar`, e não uma segunda), e até um teto de alvos por ponto, maior que
-  a sala (partida: 256);
+  contribuição por alvo, por MOD e por modo** (registrar de novo para o mesmo
+  alvo é `atualizar`, e não uma segunda; o mesmo MOD pode substituir o cartão
+  de uma pessoa e acrescentar à linha dela, que são duas coisas), e até um teto
+  de alvos por ponto, maior que a sala (partida: 256) [c, tarefa 5, Step 7];
 - **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
   as entradas de navegação, as ferramentas do compositor;
 - **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128
@@ -1316,7 +1520,16 @@ que não existe é recusada pelo nome; uma subárvore que leva a superfície al�
 dos 4096 nós é recusada com os números. A montagem inteira (`montar`)
 continua, e substitui tudo. É também o que tira a remontagem da prévia do
 editor do PERFIS a cada tecla (o bloqueio F dele): a prévia é um nó com chave,
-atualizado sozinho.
+atualizado sozinho. [c, tarefa 7, Step 5c: `atualizar` no punho da
+superfície, `superficie-atualizar` na janela; a chave é procurada em
+profundidade pelo `dentro`, e a primeira achada vale; as duas recusas vêm
+antes de mexer na tela, e a recusada não fica na declaração; o que não muda é
+mantido pela reconciliação. `bancada/camadas.cjs` monta uma ficha de 40.002
+bytes em quatro partes de 9.552 a 10.462 bytes. **Está na capacidade `superficies`**, como o
+`atualizar` das contribuições: as APIs 4 e 5 também o veem]. **No contrato, o
+método existe desde a 6** (ruling aceito em 09/10): a v6 o publica, e a v4 e
+a v5 não. É API somada, e um pacote da 4 ou da 5 que o chame funciona, mas
+quem escreve para a 4 ou a 5 não deve contar com ele.
 
 **Bolsos de mídia por bytes decodificados** (PERFIS R3, M6): hoje uma foto de
 10 MiB gasta metade do bolso de todos os avatares do servidor. Na 6, a mídia de
@@ -1334,7 +1547,7 @@ bolsos contam bytes decodificados, e o MOD lê o teto para dizê-lo no seletor.
 | **os 13 verbos de `actions` e as 19 leituras de `reads` da v1 não são expostos à metade de servidor** | nenhum dos nomes aparece no código fora de `api/` | a v6 nomeia o que o runtime expõe (§8) |
 | **os nomes de `own` da v1 não são os que o MOD escreve** (`guardar`, `lerArquivo` contra `dados`, `arquivos.ler`) | `mods/mod.rs:505-637` | idem |
 | **a forma `midia` numa superfície conta contra o teto da região (10 MiB)**, e não contra os 24 MiB que a v5 promete | `mods-regiao.js:2159-2161`, `:2226` | a 6 diz o que é entregue, e um teste prova |
-| um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome |
+| um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome, `tipo-desconhecido` [c, tarefa 7] |
 | o retrato era o `Snapshot` inteiro, com `link_state` e os aparelhos | `base.js:2126-2133` | lista branca (§6) |
 | o guarda de capacidades citado em `base.js:1963-1965` nunca existiu | `git log -S` | criado |
 | **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). **Defeito**: conserto do exemplo e do guia na fase de código (tarefa 15 do plano), com o teste que instala pelo caminho do exemplo |
@@ -1466,7 +1679,8 @@ no catálogo.
 | R4 | eventos da tela, retrato projetado, aviso do servidor | **entrou** (§6, §7); o aviso vai no fio da 1.0 (§14) | — |
 | R5 | pedidos endereçados ao servidor | **entrou como regra da v6, sem mudar o fio** (§8): o escopo de servidor (`ChannelId(0)`) já existe e passa a estar no contrato, e a permissão de escrita de cada escopo fica definida | medido: o servidor e o PERFIS servem o pedido sem canal; quem não manda o 0 é a casca comum dos MODs oficiais, e o conserto é do porte |
 | R6 | formulários no diálogo | **entrou** (§5) | — |
-| R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** | só fachada; evita o redesenho nativo entre revogar e registrar |
+| R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** [c, tarefa 5, Step 6]: o conteúdo muda no mesmo nó (o renderer reconcilia por chave), a linha com cartão nunca volta à nativa no meio, e o avatar troca de foto só quando a nova está decodificada — se ela falhar, a velha fica e o MOD recebe o `midia` de sempre. Só o dono atualiza (as três perguntas do `revogar`), e o conteúdo novo passa pela conferência de forma do registro | evita o redesenho nativo entre revogar e registrar |
+| — | o orçamento de `pessoa.detalhes` (achado da tarefa 5) | **muda na 6**: o `pessoa.detalhes` do PERFIS passa a montar com **4096 nós** (o perfil de superfície, que a tabela prometia e não valia), e uma declaração que passa do teto chega como `contribuicao` com `motivo: 'orcamento'`, o perfil, o teto e o tamanho (§7.1). As regiões ficam em 64 até a M3. Na 0.15.x nada muda | §12 |
 | R8 | montagem parcial nas superfícies | **em aberto** com o teto de 12 KiB (§12) | a MESA pede o mesmo (item 1); a forma (atualizar por chave ou montar em partes) é a primeira decisão de desenho da tarefa 7 |
 | R9 | a falha dita a quem pode agir | **entrou**: `midia` com ponto e alvo (§7.1); a recusa `mensagem-grande` vai ao `seele.log` | — |
 | R10 | o apelido verificado à vista | **entrou** no núcleo (§10); e **muda a linha do PERFIS**: com `pessoa.cartao` substituído, o apelido verificado sai do «⋯» e fica à esquerda do cartão, à vista, com o botão de moderação (§3, tarefa 5). Quem porta a 4.0.0 desenha o cartão sabendo que o apelido verdadeiro está ao lado, e não precisa repeti-lo | D-nucleo-1 |

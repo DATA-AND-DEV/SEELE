@@ -148,6 +148,7 @@ fn config(casa: &std::path::Path, endereco: SocketAddr, apelido: &str) -> Connec
         home: casa.display().to_string(),
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         audio: false,
         capture_device: None,

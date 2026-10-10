@@ -23,11 +23,14 @@
 //
 //   SeeleUI.superficies.criar(descricao) — uma janela, página, painel ou aviso
 //   punho.titulo / classes / montar      — o nome, a folha e o conteúdo dela
+//   punho.atualizar(chave, arvore)       — uma parte dela, numa mensagem própria
+//   punho.formulario.erros(mapa)         — a recusa do servidor de volta ao campo
 //   punho.mostrar / ocultar / suja       — visibilidade e alterações não gravadas
 //   punho.fechar / descartar             — tirar do palco, e acabar com ela
 //   SeeleUI.superficies.avisar(texto)    — a superfície de vida curta
 //   SeeleUI.contribuicoes.registrar(p)   — entrar num ponto da interface do SEELE
 //   SeeleUI.contribuicoes.revogar(h)     — e sair dele
+//   SeeleUI.contribuicoes.atualizar(h, c) — trocar o conteúdo sem sair
 //
 // Não há `document`, `window` nem o global do Tauri aqui dentro: um worker não
 // os tem, e é isso que faz `terminate()` ser garantia em vez de pedido.
@@ -372,6 +375,18 @@ async function exercitarASuperficie() {
     ] },
   ]), null);
 
+  // **Uma parte, e não a janela inteira** (rascunho da API 6, §12): a nota
+  // troca sozinha, numa mensagem própria. O teto que vale é o de nós da
+  // superfície, e não o de 12 KiB da mensagem.
+  await tentar("atualizar uma parte", () => janela.atualizar("nota",
+    { forma: "texto", chave: "nota", classe: "aviso", dentro: "a casca é do produto; o miolo é do MOD, por partes" }), null);
+
+  // **A recusa do servidor volta ao campo que a causou** (rascunho da API 6,
+  // §5): o campo ganha a frase, e `{}` limpa. Um vetor da API 5 a vê também,
+  // porque é API somada na capacidade `superficies`.
+  await tentar("erros do formulário", () => janela.formulario.erros({ rascunho: "o servidor recusou a anotação" }), null);
+  await tentar("limpar os erros", () => janela.formulario.erros({}), null);
+
   // Mostrar e ocultar são o par que a revisão encontrou quebrado: `ocultar`
   // mantém a janela montada, e `mostrar` a traz de volta ao documento mesmo
   // depois de `fechar`.
@@ -406,6 +421,14 @@ async function exercitarAsContribuicoes(retrato) {
       conteudo: [{ forma: "texto", chave: "c", dentro: "·ref" }],
     }), null);
     if (handle) estado.contribuicoes.push({ ponto: alvo.ponto, handle: handle.handle ?? handle });
+  }
+
+  // **E a troca sem revogar.** O conteúdo muda no mesmo nó, e a linha não
+  // volta à nativa no meio (tarefa 5 da F3, Step 6).
+  const primeira = estado.contribuicoes[0];
+  if (primeira) {
+    await tentar("atualizar", () => SeeleUI.contribuicoes.atualizar(primeira.handle,
+      [{ forma: "texto", chave: "c", dentro: "·ref·2" }]), null);
   }
 
   // **E a volta.** Revogar precisa devolver a apresentação nativa — recalculada
