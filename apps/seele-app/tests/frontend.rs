@@ -16804,7 +16804,7 @@ fn decorar_nao_volta_a_tabela_sem_quem_o_aplique() {
     if !tabela.contains("\"decorar\"") {
         // O estado de hoje: suspenso, e recusado pelo nome.
         assert!(
-            registro.contains("«decorar» não está na API 4"),
+            registro.contains("«decorar» não está nesta API"),
             "`decorar` saiu da tabela e a recusa deixou de dizer o nome dele: um \
              MOD que o peça lê «aceita adicionar, e veio decorar» e conclui que \
              errou o ponto, que não foi o que ele fez"

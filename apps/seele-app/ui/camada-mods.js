@@ -835,10 +835,11 @@ function desenharApresentacoes() {
     Object.keys(PONTOS_DE_CONTRIBUICAO).map((ponto) => [ponto, modPreferidoPara(ponto)]),
   );
   const linhas = contribuicoesDosMods.resumo(preferidos, (id) => modsCarregados.has(id));
-  // **A aparência pintada pelo tema do servidor** (tarefa 17f): na API 6 o
-  // tema é do servidor, e a janela não registra o ponto — a linha dele não sai
-  // do registro. Só quando nenhum MOD registrou a aparência: com registro, a
-  // linha do registro é a que diz quem vale.
+  // **A aparência pintada pelo tema do servidor** (tarefa 17f): o tema do
+  // servidor não passa pelo registro de contribuições, e a linha dele não sai
+  // de lá. Só quando nenhum MOD registrou a aparência — um MOD de janela ainda
+  // a registra (D-api-2) —: com registro, a linha do registro é a que diz quem
+  // vale.
   const doServidor = linhas.some((linha) => linha.ponto === "servidor.aparencia")
     ? null
     : aLinhaDoTemaDoServidor(oTemaDoServidorAqui(), modPreferidoPara("servidor.aparencia"));
@@ -984,8 +985,9 @@ function oTemaDoServidorAqui() {
  *
  * Na API 6 a metade de servidor de um MOD declara o tema, e quem vê ainda
  * pode preferir o desenho do SEELE nesta máquina. A escolha é a mesma
- * preferência de `servidor.aparencia` que a linha de um MOD da API 4 ou 5
- * grava; só a lista de onde a linha sai é outra.
+ * preferência de `servidor.aparencia` que a linha de um MOD que registra o
+ * ponto grava (ele continua registrável, D-api-2); só a lista de onde a linha
+ * sai é outra.
  *
  * @param {{ mod_id: string, desfecho?: { estado: string } } | null} tema O
  *   tema em vigor, ou nenhum.
@@ -1009,8 +1011,9 @@ function aLinhaDoTemaDoServidor(tema, escolha) {
   const botoes = nativa
     ? [{ rotulo: "USAR O TEMA DO SERVIDOR", escolha: "" }]
     : [{ rotulo: "USAR APRESENTAÇÃO DO SEELE", escolha: APRESENTACAO_NATIVA }];
-  // Uma escolha de MOD gravada de antes — de quando um MOD da API 4 ou 5
-  // registrava a aparência — não muda nada aqui, e desfazê-la é uma escolha.
+  // Uma escolha de MOD gravada — de um MOD que registra a aparência, e que
+  // não está registrando agora — não muda nada aqui, e desfazê-la é uma
+  // escolha.
   if (escolha && !nativa) botoes.push({ rotulo: "DECIDIR AUTOMATICAMENTE", escolha: "" });
   return { ponto: "servidor.aparencia", estado, nota, botoes };
 }
