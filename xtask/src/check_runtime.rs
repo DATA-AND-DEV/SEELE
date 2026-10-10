@@ -1,7 +1,7 @@
 //! Roda as bancadas de MOD que precisam só de Node.
 //!
-//! Seis, e as seis carregam o arquivo de verdade em vez de uma cópia, num
-//! contexto de VM, com o resto de mentira:
+//! Todas carregam o arquivo de verdade em vez de uma cópia, num contexto de
+//! VM, com o resto de mentira. Entre elas:
 //!
 //! - `ciclo-do-executor.cjs` põe `ui/mods-runtime.js` num contexto de VM e
 //!   controla a **ordem dos eventos** — que é a única coisa que separa um
@@ -29,18 +29,26 @@
 //!   servidor: dois envios de 10 MiB ao mesmo tempo, com o resto do tráfego,
 //!   cabem no balde, e um pedido da sessão anterior não atravessa;
 //! - `imagens-por-volume.cjs` roda a ponte de `ui/base.js` e o prelúdio de
-//!   `src/executor.rs`: o envio de imagem é recusado nas APIs 3 e 4, vai com o
-//!   id e a geração de quem hospeda e não com os que o MOD manda, só confirma
+//!   `crates/seele-motor/src/preludio.rs`: o envio de imagem é recusado nas
+//!   APIs 3 e 4, vai com o id e a geração de quem hospeda e não com os que o
+//!   MOD manda, só confirma
 //!   depois de gravar, responde `sessao-encerrada` quando o MOD deixa de valer
-//!   no meio da gravação, e só existe no SDK com a capacidade `volume`.
+//!   no meio da gravação, e só existe no SDK com a capacidade `volume`;
+//! - `ponte-web.cjs` põe `ui/ponte-web.js` numa janela de mentira e confere o
+//!   que a ponte do navegador responde: o lugar (o Tauri, um duble e o
+//!   navegador), a marca da casca, as recusas de cada casca, os neutros de
+//!   quem não hospeda, o `disconnect` que sai e a abertura que nunca entra.
 //!
 //! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium,
 //! e quem as roda, por nome, é o job `bancadas` do `ci.yml`, que só roda
 //! quando alguém o dispara — nem o `validar` do `release.yml` nem a bateria do
-//! `publicar.sh` as rodam. Quantas são e onde cada uma roda não está escrito
-//! em comentário nenhum: o teste `toda_bancada_da_pasta_roda_em_algum_lugar`,
-//! abaixo, exige que todo `.cjs` da pasta esteja nesta lista ou num `run:`
-//! daquele job. Ficam de fora só o `playwright.cjs`, que carrega o Playwright,
+//! `publicar.sh` as rodam. A exceção é a do executor de MODs no navegador
+//! (`executor-no-navegador.cjs`), que precisa do `.wasm` do motor: ela roda no
+//! job `bancadas-de-mod`, depois do `cargo xtask web` que o compila. Quantas
+//! são e onde cada uma roda não está escrito em comentário nenhum: o teste
+//! `toda_bancada_da_pasta_roda_em_algum_lugar`, abaixo, exige que todo `.cjs`
+//! da pasta esteja nesta lista ou num `run:` de um daqueles dois jobs. Ficam
+//! de fora só o `playwright.cjs`, que carrega o Playwright,
 //! e o `telas.cjs`, que é o servidor que as de navegador usam e, rodado
 //! sozinho, uma ferramenta de retrato: tira a foto de uma cena e não julga o
 //! que vê.
@@ -81,8 +89,9 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 11] = [
+const BANCADAS: [&str; 12] = [
     "ciclo-do-executor.cjs",
+    "ponte-web.cjs",
     "regiao-do-mod.cjs",
     "continuacao-de-midia.cjs",
     "contribuicoes-e-camadas.cjs",
@@ -271,17 +280,22 @@ mod tests {
     /// esquecimento.
     const SEM_LUGAR: [&str; 0] = [];
 
-    /// Os passos do job `bancadas` do `ci.yml`, cada um inteiro e sem
-    /// comentário: o job vai da linha `  bancadas:` até o próximo job, que é a
-    /// próxima linha com o recuo de um job, e cada passo vai da linha `- ` que o
-    /// abre até a próxima `- ` com o mesmo recuo.
-    fn passos_do_job_de_navegador() -> Vec<String> {
+    /// Os jobs do `ci.yml` que rodam bancadas de navegador: o `bancadas`, de
+    /// todas elas, e o `bancadas-de-mod`, da que precisa do `.wasm` do motor
+    /// que o `cargo xtask web` dele compila.
+    const JOBS_COM_BANCADA_DE_NAVEGADOR: [&str; 2] = ["bancadas", "bancadas-de-mod"];
+
+    /// Os passos de um job do `ci.yml`, cada um inteiro e sem comentário: o
+    /// job vai da linha `  <job>:` até o próximo job, que é a próxima linha com
+    /// o recuo de um job, e cada passo vai da linha `- ` que o abre até a
+    /// próxima `- ` com o mesmo recuo.
+    fn passos_do_job(job: &str) -> Vec<String> {
         let texto = ler(".github/workflows/ci.yml");
         let linhas = sem_comentario(&texto);
         let inicio = linhas
             .iter()
-            .position(|linha| linha.trim_end() == "  bancadas:")
-            .expect("o `ci.yml` tem o job `bancadas`, o das bancadas de navegador");
+            .position(|linha| linha.trim_end() == format!("  {job}:"))
+            .unwrap_or_else(|| panic!("o `ci.yml` tem o job `{job}`"));
         let mut passos: Vec<Vec<&str>> = Vec::new();
         let mut recuo_dos_passos = None;
         for linha in linhas
@@ -311,19 +325,23 @@ mod tests {
         })
     }
 
-    /// A bancada que o passo roda, pelo `run: node apps/seele-app/bancada/<nome>`.
+    /// A bancada que o passo roda, pelo `run: node apps/seele-app/bancada/<nome>`,
+    /// com ou sem argumentos depois do nome.
     fn bancada_do_passo(passo: &str) -> Option<String> {
         chave_do_passo(passo, "run")?
-            .strip_prefix("node apps/seele-app/bancada/")
-            .map(|nome| nome.trim().to_owned())
+            .strip_prefix("node apps/seele-app/bancada/")?
+            .split_whitespace()
+            .next()
+            .map(str::to_owned)
     }
 
-    /// As bancadas que o job `bancadas` do `ci.yml` roda, pelo `run:` de cada
-    /// uma.
-    fn bancadas_do_job_de_navegador() -> Vec<String> {
-        passos_do_job_de_navegador()
+    /// As bancadas que os jobs de navegador do `ci.yml` rodam, pelo `run:` de
+    /// cada uma.
+    fn bancadas_dos_jobs_de_navegador() -> Vec<String> {
+        JOBS_COM_BANCADA_DE_NAVEGADOR
             .iter()
-            .filter_map(|passo| bancada_do_passo(passo))
+            .flat_map(|job| passos_do_job(job))
+            .filter_map(|passo| bancada_do_passo(&passo))
             .collect()
     }
 
@@ -334,11 +352,12 @@ mod tests {
     /// 21/09/2026 a 01/10/2026 sem rodar em lugar nenhum, e quem dizia quais
     /// rodavam era um comentário, que nada mantinha verdadeiro. Este teste é a
     /// lista: cada `.cjs` de `bancada/` está em [`BANCADAS`] (Node puro), num
-    /// `run: node apps/seele-app/bancada/<nome>` do job `bancadas` do `ci.yml`
-    /// (navegador), ou em [`SEM_LUGAR`], que é vazia.
+    /// `run: node apps/seele-app/bancada/<nome>` do job `bancadas` ou do
+    /// `bancadas-de-mod` do `ci.yml` (navegador), ou em [`SEM_LUGAR`], que é
+    /// vazia.
     #[test]
     fn toda_bancada_da_pasta_roda_em_algum_lugar() {
-        let do_job = bancadas_do_job_de_navegador();
+        let do_job = bancadas_dos_jobs_de_navegador();
         let pasta = raiz().join("apps/seele-app/bancada");
         let mut sem_lugar: Vec<String> = std::fs::read_dir(&pasta)
             .expect("a pasta das bancadas é legível")
@@ -367,8 +386,9 @@ mod tests {
             "bancada que não roda em lugar nenhum: {sem_lugar:?}. Uma prova que ninguém roda \
              fica verde para sempre: a de Node puro entra em `BANCADAS` (xtask/src/\
              check_runtime.rs), a de navegador num `run: node apps/seele-app/bancada/<nome>` do \
-             job `bancadas` do `ci.yml`, e a que não deve rodar entra, por nome e com o porquê, \
-             em `SEM_LUGAR` deste teste. O job hoje roda: {do_job:?}"
+             job `bancadas` do `ci.yml` (ou do `bancadas-de-mod`, se ela precisa do `.wasm`), e a \
+             que não deve rodar entra, por nome e com o porquê, em `SEM_LUGAR` deste teste. Os \
+             jobs hoje rodam: {do_job:?}"
         );
     }
 
@@ -383,33 +403,74 @@ mod tests {
     /// rodavam. Com `if: ${{ !cancelled() }}` cada passo roda mesmo depois de
     /// uma vermelha, e com `timeout-minutes` uma bancada que pendura não segura
     /// o job até o teto de 360 minutos, que pularia as seguintes do mesmo jeito.
+    /// Vale nos dois jobs de navegador.
     #[test]
     fn todo_passo_de_bancada_do_job_de_navegador_roda_depois_de_uma_vermelha_e_tem_prazo() {
-        let passos: Vec<(String, String)> = passos_do_job_de_navegador()
-            .into_iter()
-            .filter_map(|passo| Some((bancada_do_passo(&passo)?, passo)))
-            .collect();
-        assert!(
-            !passos.is_empty(),
-            "o job `bancadas` do `ci.yml` não tem passo de bancada nenhum que este guarda \
-             reconheça, e ele passaria sem medir nada"
-        );
-        for (nome, passo) in &passos {
-            assert_eq!(
-                chave_do_passo(passo, "if"),
-                Some("${{ !cancelled() }}"),
-                "ci.yml: o passo de {nome}, no job `bancadas`, não tem `if: ${{{{ !cancelled() \
-                 }}}}`: quando uma bancada antes dele reprova, o Actions o pula, ele não fica nem \
-                 verde nem vermelho, e `toda_bancada_da_pasta_roda_em_algum_lugar` continua \
-                 dizendo que ele roda:\n{passo}"
-            );
+        for job in JOBS_COM_BANCADA_DE_NAVEGADOR {
+            let passos: Vec<(String, String)> = passos_do_job(job)
+                .into_iter()
+                .filter_map(|passo| Some((bancada_do_passo(&passo)?, passo)))
+                .collect();
             assert!(
-                chave_do_passo(passo, "timeout-minutes").is_some_and(|prazo| !prazo.is_empty()),
-                "ci.yml: o passo de {nome}, no job `bancadas`, não tem prazo \
-                 (`timeout-minutes`): uma bancada que pendura segura o job por seis horas, e \
-                 as seguintes não rodam:\n{passo}"
+                !passos.is_empty(),
+                "o job `{job}` do `ci.yml` não tem passo de bancada nenhum que este guarda \
+                 reconheça, e ele passaria sem medir nada"
             );
+            for (nome, passo) in &passos {
+                assert_eq!(
+                    chave_do_passo(passo, "if"),
+                    Some("${{ !cancelled() }}"),
+                    "ci.yml: o passo de {nome}, no job `{job}`, não tem `if: ${{{{ !cancelled() \
+                     }}}}`: quando um passo antes dele reprova, o Actions o pula, ele não fica nem \
+                     verde nem vermelho, e `toda_bancada_da_pasta_roda_em_algum_lugar` continua \
+                     dizendo que ele roda:\n{passo}"
+                );
+                assert!(
+                    chave_do_passo(passo, "timeout-minutes").is_some_and(|prazo| !prazo.is_empty()),
+                    "ci.yml: o passo de {nome}, no job `{job}`, não tem prazo \
+                     (`timeout-minutes`): uma bancada que pendura segura o job por seis horas, e \
+                     as seguintes não rodam:\n{passo}"
+                );
+            }
         }
+    }
+
+    /// **A bancada do executor no navegador lê o motor que o job acabou de
+    /// compilar.** Ela recebe o `.wasm` pelo caminho; num passo antes do
+    /// `cargo xtask web`, ou com outro caminho, ela mediria um motor velho do
+    /// cache, ou nenhum.
+    #[test]
+    fn a_bancada_do_executor_no_navegador_roda_depois_do_motor_compilado() {
+        const MOTOR: &str = "target/wasm32-wasip1/release/seele_motor_web.wasm";
+        let passos = passos_do_job("bancadas-de-mod");
+        let compila = passos
+            .iter()
+            .position(|passo| chave_do_passo(passo, "run") == Some("cargo xtask web"))
+            .expect("o job `bancadas-de-mod` roda `cargo xtask web`");
+        let roda = passos
+            .iter()
+            .position(|passo| {
+                bancada_do_passo(passo).as_deref() == Some("executor-no-navegador.cjs")
+            })
+            .expect("o job `bancadas-de-mod` roda a `executor-no-navegador.cjs`");
+        assert!(
+            compila < roda,
+            "ci.yml: a `executor-no-navegador.cjs` roda antes do `cargo xtask web`, e mede o \
+             motor que estiver no cache"
+        );
+        assert_eq!(
+            passos
+                .get(roda)
+                .and_then(|passo| chave_do_passo(passo, "run")),
+            Some(format!("node apps/seele-app/bancada/executor-no-navegador.cjs {MOTOR}").as_str()),
+            "ci.yml: a `executor-no-navegador.cjs` tem de receber o `.wasm` que o \
+             `cargo xtask web` compila"
+        );
+        assert!(
+            ler("xtask/src/web.rs").contains(&format!("\"{MOTOR}\"")),
+            "o `cargo xtask web` deixou de compilar o motor em {MOTOR}, e a bancada do CI lê \
+             esse caminho"
+        );
     }
 
     /// O que a lista escreve, num diário que o `node` de mentira também usa:

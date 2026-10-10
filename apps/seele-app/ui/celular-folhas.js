@@ -23,28 +23,9 @@
   const { h } = CELULAR;
   const sessao = document.getElementById("tela-sessao");
 
-  // Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o P10 (Tarefa 14).
-  const PALAVRAS = Object.freeze({
-    senhaDaSala: "SENHA DA SALA",
-    pedeSenha: (sala) => `${sala} pede senha para entrar.`,
-    senha: "SENHA",
-    entrar: "ENTRAR",
-    agoraNao: "AGORA NÃO",
-    fechar: "FECHAR",
-    mensagemDe: (quem, hora) => `${quem} · ${hora}`,
-    copiar: "COPIAR O TEXTO",
-    apagarMinha: "APAGAR A MINHA MENSAGEM",
-    remover: "REMOVER",
-    foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
-    sinal: "SINAL",
-    volume: (n) => `VOLUME DESTA PESSOA · ${n}%`,
-    volumeDe: (quem) => `volume de ${quem}`,
-    moderar: "MODERAR",
-    foraModerar: "Expulsar, banir e mover pessoas é pelo SEELE no computador.",
-    anexar: "ANEXAR",
-    midia: "FOTO OU VÍDEO",
-    arquivo: "ARQUIVO",
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.folhas;
 
   let fecharAberta = null;
   // Uma entrada no voltar do aparelho para a folha aberta. Uma folha que toma o

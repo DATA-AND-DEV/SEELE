@@ -33,9 +33,10 @@ fn main_rs() -> String {
 /// despedir_da_sessao(...)` em cima de um `disconnect()` — deixava os dois
 /// guardas verdes com o app de volta ao defeito (medido na revisão do lote F).
 fn corpo(fonte: &str, nome: &str) -> String {
-    let assinatura = format!("\nfn {nome}(");
-    let comeco = fonte
-        .find(&assinatura)
+    // Síncrona ou `async`: a saída do app tem das duas.
+    let comeco = [format!("\nfn {nome}("), format!("\nasync fn {nome}(")]
+        .iter()
+        .find_map(|assinatura| fonte.find(assinatura.as_str()))
         .unwrap_or_else(|| panic!("a função `{nome}` sumiu do main.rs"));
     let resto = fonte.get(comeco..).expect("o começo é de um `find`");
     let fim = resto
@@ -252,13 +253,15 @@ fn fechar_a_janela_avisa_o_servidor() {
              pessoa sentada na sala até o tempo limite de ociosidade."
         )
     });
-    // O braço é o bloco do `if` que confere o `ExitRequested`. O padrão
-    // `{ .. }` do `matches!` fecha antes do `)` dele, e o bloco vem depois.
+    // O braço é o bloco do `if let` que confere o `ExitRequested`. O padrão
+    // `{ code: None, api, .. }` tem chaves próprias, então o bloco é o que vem
+    // depois do `= &evento` que fecha o padrão (era um `matches!`, e o braço
+    // vinha depois do `)` dele, até a tarefa 21 da F7).
     let fim_do_padrao = fecho
         .get(gancho..)
-        .and_then(|resto| resto.find(')'))
+        .and_then(|resto| resto.find("&evento"))
         .map(|onde| gancho + onde)
-        .expect("o `matches!` do `ExitRequested` não fecha");
+        .expect("o `if let` do `ExitRequested` não confere o `evento`");
     let braco = bloco(&fecho, fim_do_padrao).expect("o `ExitRequested` não tem braço entre chaves");
     assert!(
         braco.contains("despedir_se(handle)"),
@@ -327,4 +330,60 @@ fn teto_da_espera(corpo: &str) -> Option<u64> {
         .filter(|letra| *letra != '_')
         .collect();
     digitos.parse::<u64>().ok()?.checked_mul(escala)
+}
+
+#[test]
+fn fechar_o_app_despede_as_duas_hospedagens() {
+    // Tarefa 21 da F7 (P2d). Fechar a janela despedia a sessão e mais nada:
+    // quem estava dentro de um servidor desta máquina, guardado ou sala, só
+    // descobria pelo tempo de ociosidade. Agora a saída é segurada, as duas
+    // hospedagens se despedem, e só então o app sai.
+    //
+    // Segurada **só com `code: None`**: a pessoa fechou a última janela, e ela
+    // já foi destruída. Segurar uma saída pedida com a janela aberta manteria a
+    // página viva, e com ela a credencial da tentativa (o guarda
+    // `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`).
+    let fonte = main_rs();
+    // Sem os espaços: o `rustfmt` quebra `sessao.saindo.swap(…)` em linhas, e o
+    // guarda lê o código, e não a forma que o formatador lhe dá.
+    let fecho: String = fecho_do_app_run(&fonte).split_whitespace().collect();
+    for agulha in [
+        "prevent_exit()",
+        "ExitRequested{code:None,",
+        "despedir_das_hospedagens(",
+        ".exit(0)",
+        "despedir_se(handle)",
+    ] {
+        assert!(
+            fecho.contains(agulha),
+            "a saída do app deixou de fazer `{agulha}`:\n{fecho}"
+        );
+    }
+    // O `exit` vem **depois** da despedida, dentro da mesma tarefa: antes dela,
+    // o processo morreria com as despedidas na fila.
+    let (Some(despede), Some(sai)) = (
+        fecho.find("despedir_das_hospedagens("),
+        fecho.find(".exit(0)"),
+    ) else {
+        panic!("a saída perdeu a despedida ou o `exit`");
+    };
+    assert!(
+        despede < sai,
+        "o app sai antes de as hospedagens se despedirem"
+    );
+
+    let despedida: String = corpo(&fonte, "despedir_das_hospedagens")
+        .split_whitespace()
+        .collect();
+    for agulha in [
+        "guardado.take()",
+        "pessoal.take()",
+        ".despedir(teto)",
+        "tokio::join!",
+    ] {
+        assert!(
+            despedida.contains(agulha),
+            "a despedida das hospedagens deixou de fazer `{agulha}`:\n{despedida}"
+        );
+    }
 }

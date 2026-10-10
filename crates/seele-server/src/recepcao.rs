@@ -20,6 +20,12 @@
 //! símbolos. O código inteiro, nunca: o `seele.log` vai no COPIAR DIAGNÓSTICO, e
 //! um código inteiro ali seria o número de telefone de quem ligou na mão de quem
 //! lê o diagnóstico.
+//!
+//! **Os contadores moram no log** (tarefa 31 da F7, decidido em 09/10): cada
+//! toque que para diz o desfecho numa palavra, e a sala que fecha diz quantos
+//! tocaram, como acabaram e quantos foram recusados sem tocar
+//! ([`Recepcao::resumir`]). É onde se lê hoje; o COPIAR DIAGNÓSTICO, quando
+//! existir, lê os mesmos números.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
@@ -106,6 +112,65 @@ pub enum Entrada {
 struct Estado {
     campainha: Campainha,
     esperando: HashMap<IdDoToque, oneshot::Sender<Desfecho>>,
+    contagem: Contagem,
+}
+
+/// O que a campainha desta sala viu desde que subiu, para o resumo do log.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Contagem {
+    /// Toques que começaram, contando a mesma pessoa de novo por outro
+    /// candidato só uma vez.
+    tocaram: u32,
+    atendidas: u32,
+    recusadas: u32,
+    ninguem_atendeu: u32,
+    cairam_antes: u32,
+    cheias: u32,
+    /// Recusados sem tocar, por excesso: recusou há pouco, ou já há três
+    /// tocando.
+    recusados_por_taxa: u32,
+    /// Recusados sem tocar, por estarem bloqueados na agenda.
+    bloqueados: u32,
+    /// Recusados sem tocar, com a ligação cheia.
+    cheia_sem_tocar: u32,
+}
+
+impl Contagem {
+    fn parou(&mut self, desfecho: Desfecho) {
+        let contador = match desfecho {
+            Desfecho::Atendida => &mut self.atendidas,
+            Desfecho::Recusada => &mut self.recusadas,
+            Desfecho::NaoAtendida => &mut self.ninguem_atendeu,
+            Desfecho::Cancelada => &mut self.cairam_antes,
+            Desfecho::Cheia => &mut self.cheias,
+        };
+        *contador = contador.saturating_add(1);
+    }
+
+    fn recusou_sem_tocar(&mut self, recusa: crate::campainha::Recusa) {
+        use crate::campainha::Recusa;
+        let contador = match recusa {
+            Recusa::AcabouDeRecusar | Recusa::MuitosTocando => &mut self.recusados_por_taxa,
+            Recusa::Bloqueado => &mut self.bloqueados,
+            Recusa::Cheia => &mut self.cheia_sem_tocar,
+        };
+        *contador = contador.saturating_add(1);
+    }
+}
+
+/// O desfecho de um toque numa palavra só, a que o log escreve.
+///
+/// Estável, e não o `Debug` do tipo: quem procura no `seele.log` os toques que
+/// ninguém atendeu procura uma palavra, e ela não pode mudar com o nome de uma
+/// variante.
+fn palavra(desfecho: Desfecho) -> &'static str {
+    match desfecho {
+        Desfecho::Atendida => "atendida",
+        Desfecho::Recusada => "recusada",
+        Desfecho::NaoAtendida => "ninguem_atendeu",
+        Desfecho::Cancelada => "caiu_antes",
+        Desfecho::Cheia => "cheia",
+    }
 }
 
 /// A campainha de uma sala, viva.
@@ -137,6 +202,7 @@ impl Recepcao {
             estado: Mutex::new(Estado {
                 campainha: Campainha::nova(sala.dono).com_prazo(sala.prazo_do_toque),
                 esperando: HashMap::new(),
+                contagem: Contagem::default(),
             }),
             avisos,
             eventos,
@@ -168,6 +234,7 @@ impl Recepcao {
         match estado.campainha.chegou(chave, apelido, agora) {
             Chegada::Entra => Entrada::Entra,
             Chegada::Recusada(recusa) => {
+                estado.contagem.recusou_sem_tocar(recusa);
                 tracing::info!(
                     codigo = %prefixo(&codigo),
                     ?recusa,
@@ -180,6 +247,8 @@ impl Recepcao {
                 // pessoa continua tocando por esta.
                 if let Some(velho) = substituiu {
                     estado.esperando.remove(&velho);
+                } else {
+                    estado.contagem.tocaram = estado.contagem.tocaram.saturating_add(1);
                 }
                 let (envia, decisao) = oneshot::channel();
                 estado.esperando.insert(toque, envia);
@@ -261,6 +330,29 @@ impl Recepcao {
         dentro
     }
 
+    /// A linha de resumo da sala que fecha: quantos tocaram, como acabaram, e
+    /// quantos foram recusados sem tocar. Sem identidade nenhuma: os números
+    /// são da sala, e quem tocou já está nas linhas de cada toque, pelo
+    /// prefixo.
+    ///
+    /// Quem chama é a hospedagem, ao fechar a sala (`Hospedagem::encerrar` e
+    /// `Hospedagem::despedir`).
+    pub fn resumir(&self) {
+        let contagem = self.estado().contagem;
+        tracing::info!(
+            tocaram = contagem.tocaram,
+            atendidas = contagem.atendidas,
+            recusadas = contagem.recusadas,
+            ninguem_atendeu = contagem.ninguem_atendeu,
+            cairam_antes = contagem.cairam_antes,
+            cheias = contagem.cheias,
+            recusados_por_taxa = contagem.recusados_por_taxa,
+            bloqueados = contagem.bloqueados,
+            cheia_sem_tocar = contagem.cheia_sem_tocar,
+            "campainha: a sala fechou"
+        );
+    }
+
     fn estado(&self) -> std::sync::MutexGuard<'_, Estado> {
         // Um pânico com a trava na mão não deixa a campainha num estado pela
         // metade: cada método muda a campainha numa chamada só.
@@ -272,13 +364,17 @@ impl Recepcao {
     fn anunciar(&self, parados: Vec<ParouDeTocar>) -> bool {
         let algum = !parados.is_empty();
         for parou in parados {
-            if let Some(envia) = self.estado().esperando.remove(&parou.toque) {
-                let _ = envia.send(parou.desfecho);
+            {
+                let mut estado = self.estado();
+                estado.contagem.parou(parou.desfecho);
+                if let Some(envia) = estado.esperando.remove(&parou.toque) {
+                    let _ = envia.send(parou.desfecho);
+                }
             }
             tracing::info!(
                 codigo = %prefixo(&Codigo::da_chave(&parou.chave)),
                 toque = ?parou.toque,
-                desfecho = ?parou.desfecho,
+                desfecho = %palavra(parou.desfecho),
                 "campainha: parou de tocar"
             );
             let _ = self.avisos.send(Aviso::ParouDeTocar {
@@ -505,5 +601,133 @@ mod tests {
             !log.contains(&codigo.to_string()) && !log.contains(&codigo.dado()),
             "o log tem o código inteiro de quem ligou: {log}"
         );
+    }
+
+    /// O que `fazer` escreveu no log, com o segundo despachante vivo (ver o
+    /// teste de cima, e o `rastro_de_teste` do crate).
+    fn capturar(fazer: impl FnOnce()) -> String {
+        use std::io::Write;
+        use std::sync::Arc;
+
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = Buffer::default();
+        let capturado = buffer.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || capturado.clone())
+            .without_time()
+            .with_ansi(false)
+            .finish();
+        crate::rastro_de_teste::segundo_despachante();
+        tracing::subscriber::with_default(assinante, fazer);
+        let log = buffer.0.lock().unwrap().clone();
+        String::from_utf8(log).unwrap()
+    }
+
+    #[test]
+    fn cada_toque_que_para_diz_o_desfecho_numa_palavra() {
+        // Tarefa 31: o produto sabe como cada toque acabou, e conta onde se lê
+        // hoje. Uma palavra estável, e não o `Debug` do tipo, para quem procura
+        // no `seele.log` os toques que ninguém atendeu.
+        let (recepcao, _) = recepcao();
+        let log = capturar(|| {
+            let (atendido, _a) = toca(recepcao.chegou(chave(2), "a"));
+            recepcao.atender(atendido);
+            let (recusado, _b) = toca(recepcao.chegou(chave(3), "b"));
+            recepcao.recusar(recusado);
+            let (caiu, _c) = toca(recepcao.chegou(chave(4), "c"));
+            recepcao.desistiu(caiu);
+            let (_, _d) = toca(recepcao.chegou(chave(5), "d"));
+            recepcao.vencer_em(Instant::now() + PRAZO_DO_TOQUE + std::time::Duration::from_secs(1));
+        });
+
+        let pararam: Vec<&str> = log
+            .lines()
+            .filter(|linha| linha.contains("campainha: parou de tocar"))
+            .collect();
+        assert_eq!(pararam.len(), 4, "{log}");
+        for (codigo, palavra) in [
+            (chave(2), "desfecho=atendida"),
+            (chave(3), "desfecho=recusada"),
+            (chave(4), "desfecho=caiu_antes"),
+            (chave(5), "desfecho=ninguem_atendeu"),
+        ] {
+            let quem = prefixo(&Codigo::da_chave(&codigo));
+            assert!(
+                pararam
+                    .iter()
+                    .any(|linha| linha.contains(&quem) && linha.contains(palavra)),
+                "o toque de {quem} não disse `{palavra}`: {log}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sala_que_fecha_diz_quantos_tocaram_e_como_acabaram() {
+        // A linha de resumo, com cada contador, e sem identidade nenhuma.
+        let (recepcao, _) = recepcao();
+        recepcao.definir_bloqueados(vec![Codigo::da_chave(&chave(7))]);
+        let log = capturar(|| {
+            let (a, _a) = toca(recepcao.chegou(chave(2), "a"));
+            recepcao.atender(a);
+            let (b, _b) = toca(recepcao.chegou(chave(3), "b"));
+            recepcao.recusar(b);
+            // Recusado há pouco: recusado de novo sem tocar, por excesso.
+            assert!(matches!(
+                recepcao.chegou(chave(3), "b"),
+                Entrada::Recusada(_)
+            ));
+            let (c, _c) = toca(recepcao.chegou(chave(4), "c"));
+            recepcao.desistiu(c);
+            // A mesma pessoa por dois candidatos é um toque só.
+            let (_, _d1) = toca(recepcao.chegou(chave(5), "d"));
+            let (_, _d2) = toca(recepcao.chegou(chave(5), "d"));
+            recepcao.vencer_em(Instant::now() + PRAZO_DO_TOQUE + std::time::Duration::from_secs(1));
+            // Bloqueado: recusado sem tocar.
+            assert!(matches!(
+                recepcao.chegou(chave(7), "e"),
+                Entrada::Recusada(_)
+            ));
+            recepcao.resumir();
+        });
+
+        let resumo: Vec<&str> = log
+            .lines()
+            .filter(|linha| linha.contains("campainha: a sala fechou"))
+            .collect();
+        assert_eq!(resumo.len(), 1, "o resumo não saiu uma vez só: {log}");
+        let resumo = resumo.first().copied().unwrap_or_default();
+        for campo in [
+            "tocaram=4",
+            "atendidas=1",
+            "recusadas=1",
+            "ninguem_atendeu=1",
+            "cairam_antes=1",
+            "cheias=0",
+            "recusados_por_taxa=1",
+            "bloqueados=1",
+            "cheia_sem_tocar=0",
+        ] {
+            assert!(
+                resumo.contains(campo),
+                "o resumo não diz `{campo}`: {resumo}"
+            );
+        }
+        for chave in [2, 3, 4, 5, 7].map(chave) {
+            assert!(
+                !resumo.contains(&prefixo(&Codigo::da_chave(&chave))),
+                "o resumo diz quem tocou, e ele é da sala: {resumo}"
+            );
+        }
     }
 }

@@ -748,8 +748,8 @@ function esquecerPreferenciasLidas() {
 /**
  * A preferência que a tela **de fato** consulta para um ponto.
  *
- * `pessoa.avatar` não tem linha própria em QUEM DESENHA O QUE, e herda a de
- * `pessoa.cartao` quando não há escolha dele. `avatarContribuido`, em
+ * `pessoa.avatar` e `pessoa.capa` não têm linha própria em QUEM DESENHA O QUE,
+ * e herdam a de `pessoa.cartao` quando não há escolha deles (rascunho §4). `avatarContribuido`, em
  * `base.js`, decide por esta função, e «quem pinta cada lugar» a lê: uma
  * regra, e não duas cópias dela.
  *
@@ -757,8 +757,8 @@ function esquecerPreferenciasLidas() {
  *   de um MOD.
  */
 function preferenciaConsultadaPara(ponto) {
-  if (ponto === "pessoa.avatar") {
-    return modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao");
+  if (ponto === "pessoa.avatar" || ponto === "pessoa.capa") {
+    return modPreferidoPara(ponto) || modPreferidoPara("pessoa.cartao");
   }
   return modPreferidoPara(ponto);
 }
@@ -964,6 +964,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": "Como as pessoas aparecem",
   "pessoa.cartao": "O cartão de cada pessoa",
   "pessoa.avatar": "As imagens de cada pessoa no servidor",
+  "pessoa.capa": "A capa de cada pessoa",
   "pessoa.detalhes": "O perfil detalhado de uma pessoa",
   "pessoa.acoes": "Ações sobre uma pessoa",
   "canal.item": "Como os canais aparecem na lista",
@@ -972,6 +973,12 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "sala.acoes": "Ações dentro de uma sala de voz",
   "servidor.navegacao": "Entradas na navegação",
   "servidor.aparencia": "A aparência da sessão",
+  "redes": "A coluna de servidores",
+  "operador.barra": "A barra de quem está conectado",
+  "compositor": "A caixa de escrever",
+  "status.barra": "A barra de baixo",
+  "pessoas.lista": "A lista de pessoas",
+  "conversa.mensagem": "Cada mensagem da conversa",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1234,6 +1241,7 @@ function quemPintaEstaAVista() {
 const CONTEINERES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": ".pessoa-identidade",
   "pessoa.avatar": "[data-pessoa-do-avatar]",
+  "pessoa.capa": "[data-pessoa-da-capa]",
   "pessoa.cartao": "li.pessoa",
   "pessoa.detalhes": ".pessoa-nativo",
   "pessoa.acoes": ".pessoa-rodape",
@@ -1243,6 +1251,12 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "sala.acoes": ".roster-sala",
   "servidor.navegacao": "#lista-mods-navegacao",
   "servidor.aparencia": "#tela-sessao",
+  "redes": "#trilha-mods",
+  "operador.barra": "#operador-mods",
+  "compositor": "#compositor-mods",
+  "status.barra": "#telemetria-mods",
+  "pessoas.lista": "#roster-mods",
+  "conversa.mensagem": ".mensagem-miolo",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */
