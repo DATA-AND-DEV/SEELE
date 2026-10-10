@@ -915,6 +915,12 @@ fn carregar_controles(de: &Controls, para: &Controls) {
         de.abertura_dbfs_milesimos.load(Ordering::Relaxed),
         Ordering::Relaxed,
     );
+    // O som da tela também ficava de fora: ver
+    // `o_som_da_tela_atravessa_a_reabertura` (M-2 do lote V).
+    para.volume_da_tela
+        .store(de.volume_da_tela.load(Ordering::Relaxed), Ordering::Relaxed);
+    para.tela_calada
+        .store(de.tela_calada.load(Ordering::Relaxed), Ordering::Relaxed);
     // O relógio de mídia **não** vai daqui: ele é entregue ao caminho novo na
     // criação (`Voice::around`), antes de a thread nascer. Gravado aqui, depois
     // do `spawn`, ele chegava tarde quando a thread ganhava a corrida.
@@ -1168,7 +1174,8 @@ impl Voice {
     /// # What has to survive, and why it is decided here
     ///
     /// mudo, Isolamento total, the mode, the held key, every per-talker volume,
-    /// and the noise suppression and gate sensitivity of F01 and F02. Left to a shell, this list would be written once per shell and
+    /// the noise suppression and gate sensitivity of F01 and F02, and the volume
+    /// and mute of a shared screen's sound. Left to a shell, this list would be written once per shell and
     /// each copy would forget a different item — and the item that hurts is
     /// mudo: a switch that quietly unmutes a microphone is a switch that
     /// puts a room on the air.
@@ -3073,6 +3080,32 @@ mod controles_na_reabertura {
             -42_000,
             "a reabertura devolveu a sensibilidade ao padrão: quem calibrou o \
              portão de F01 volta abrindo com o ventilador"
+        );
+    }
+
+    /// O volume e o mudo do som da tela atravessam a reabertura. M-2 do lote V.
+    ///
+    /// Ficavam de fora da lista: trocar de microfone ou de saída no meio de uma
+    /// transmissão devolvia o som dela a 100 e audível a quem o tinha calado.
+    #[test]
+    fn o_som_da_tela_atravessa_a_reabertura() {
+        let velho = Controls::novos();
+        velho.volume_da_tela.store(300, Ordering::Relaxed);
+        velho.tela_calada.store(true, Ordering::Relaxed);
+
+        let novo = Controls::novos();
+        carregar_controles(&velho, &novo);
+
+        assert_eq!(
+            novo.volume_da_tela.load(Ordering::Relaxed),
+            300,
+            "a troca de aparelho devolveu o som da transmissão a 100 a quem o tinha \
+             baixado"
+        );
+        assert!(
+            novo.tela_calada.load(Ordering::Relaxed),
+            "a troca de aparelho devolveu audível o som da transmissão que a pessoa tinha \
+             calado"
         );
     }
 

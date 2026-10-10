@@ -2382,34 +2382,29 @@ impl Connection {
     /// isolamento total continua calando a mistura inteira, porque é isso que
     /// ele diz que faz.
     ///
+    /// Guardado na conexão, e posto em cada voz que abrir: sair da sala e
+    /// entrar de novo não o devolve a 100. Sem voz viva, só grava. M-2 do lote V.
+    ///
     /// # Errors
     ///
-    /// [`ConnectionError::NotConnected`] sem voz aberta.
+    /// [`ConnectionError::NotConnected`] numa sessão sem áudio.
     pub fn ajustar_volume_da_tela(&self, volume: f32) -> Result<(), ConnectionError> {
-        let voice = self
-            .shared
+        self.shared
             .voice
-            .lock()
-            .map_err(|_| ConnectionError::NotConnected)?;
-        let voice = voice.as_ref().ok_or(ConnectionError::NotConnected)?;
-        voice.set_volume_da_tela(volume);
-        Ok(())
+            .escolher_o_som_da_tela(|escolhida| escolhida.volume_da_tela = volume.clamp(0.0, 4.0))
     }
 
     /// Cala ou devolve o som da transmissão, sem mexer no volume dela.
     ///
+    /// Guardado como o volume dela: ver [`Self::ajustar_volume_da_tela`].
+    ///
     /// # Errors
     ///
-    /// [`ConnectionError::NotConnected`] sem voz aberta.
+    /// [`ConnectionError::NotConnected`] numa sessão sem áudio.
     pub fn calar_a_tela(&self, calada: bool) -> Result<(), ConnectionError> {
-        let voice = self
-            .shared
+        self.shared
             .voice
-            .lock()
-            .map_err(|_| ConnectionError::NotConnected)?;
-        let voice = voice.as_ref().ok_or(ConnectionError::NotConnected)?;
-        voice.set_tela_calada(calada);
-        Ok(())
+            .escolher_o_som_da_tela(|escolhida| escolhida.tela_calada = calada)
     }
 
     /// O que esta máquina faz com o **próprio** áudio ao capturar uma tela.
@@ -4652,6 +4647,10 @@ struct ControlesGuardados {
     /// a voz nova entrava com a tecla da velha (`Voice::reopen` a carrega) e
     /// transmitia até a próxima pressão, com o roster dizendo que a pessoa fala.
     tecla_segura: bool,
+    /// O volume do som da transmissão, de zero a quatro. M-2 do lote V.
+    volume_da_tela: f32,
+    /// Se o som da transmissão está calado, sem mexer no volume. M-2 do lote V.
+    tela_calada: bool,
 }
 
 impl ControlesGuardados {
@@ -4669,6 +4668,8 @@ impl ControlesGuardados {
             abertura_dbfs: None,
             aparelhos,
             tecla_segura: false,
+            volume_da_tela: 1.0,
+            tela_calada: false,
         }
     }
 }
@@ -4703,6 +4704,8 @@ impl VozViva for Voice {
         self.set_mode(escolhida.modo);
         self.set_supressao(escolhida.supressao);
         self.set_abertura_dbfs(escolhida.abertura_dbfs);
+        self.set_volume_da_tela(escolhida.volume_da_tela);
+        self.set_tela_calada(escolhida.tela_calada);
     }
 
     fn segurar(&self, segura: bool) {
@@ -4949,6 +4952,24 @@ impl<V: VozViva> VozDaSala<V> {
     /// não tinha onde cair, e a janela não a manda de novo.
     fn segurar_a_tecla(&self, segura: bool) {
         self.escolher(|escolhida| escolhida.tecla_segura = segura);
+    }
+
+    /// O volume e o mudo do som da tela: gravados, e postos na voz viva se há
+    /// uma. M-2 do lote V.
+    ///
+    /// Eram postos só na voz viva, e recusados sem ela: com a pendência 52 a
+    /// voz nasce a cada entrada numa sala, e o som da transmissão voltava a 100
+    /// e audível a cada uma. `NotConnected` só numa sessão sem áudio, que nunca
+    /// terá voz a vestir.
+    fn escolher_o_som_da_tela(
+        &self,
+        mudar: impl FnOnce(&mut ControlesGuardados),
+    ) -> Result<(), ConnectionError> {
+        if !self.quer_audio {
+            return Err(ConnectionError::NotConnected);
+        }
+        self.escolher(mudar);
+        Ok(())
     }
 
     /// Grava uma escolha e a aplica na voz viva, se há uma.
@@ -11192,6 +11213,97 @@ mod o_audio_segue_a_sala {
             voz.contains("self.set_key_held(segura)"),
             "a voz de verdade não segura a tecla de falar que a porta manda: a tecla \
              guardada nunca chega ao microfone"
+        );
+    }
+
+    /// M-2 do lote V: o volume e o mudo do som da tela atravessam a saída e a
+    /// entrada na sala.
+    ///
+    /// Moravam só na voz, e com a pendência 52 a voz nasce a cada entrada: sair
+    /// e entrar de novo devolvia o som da transmissão a 100 e audível a quem o
+    /// tinha calado. `escolher_o_som_da_tela` é o que
+    /// `Connection::ajustar_volume_da_tela` e `Connection::calar_a_tela` chamam.
+    #[tokio::test]
+    async fn o_som_da_tela_atravessa_a_saida_e_a_entrada_na_sala() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+
+        voz.escolher_o_som_da_tela(|escolhida| escolhida.volume_da_tela = 0.3)
+            .expect("o volume da tela, com a voz de pé");
+        voz.escolher_o_som_da_tela(|escolhida| escolhida.tela_calada = true)
+            .expect("o mudo da tela, com a voz de pé");
+
+        room.leave_voice_room();
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        assert!(!ha_voz(&voz), "sair da sala não fechou a voz");
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 701).await;
+
+        let vestida = voz
+            .lock()
+            .expect("a voz")
+            .as_ref()
+            .and_then(|viva| viva.vestida.lock().expect("o que a voz vestiu").clone());
+        let Some(vestida) = vestida else {
+            panic!("a voz da sala não abriu, e este teste mediu outra coisa");
+        };
+        assert!(
+            (vestida.volume_da_tela - 0.3).abs() < f32::EPSILON,
+            "saiu da sala e entrou de novo, e o som da transmissão voltou a {} com a \
+             pessoa o tendo deixado em 0.3",
+            vestida.volume_da_tela
+        );
+        assert!(
+            vestida.tela_calada,
+            "saiu da sala e entrou de novo, e o som da transmissão voltou audível a quem o \
+             tinha calado"
+        );
+    }
+
+    /// M-2 do lote V, pela conexão: sem voz viva — a volta reabrindo, a sala
+    /// abrindo —, o som da tela é guardado, e só a sessão sem áudio o recusa.
+    #[test]
+    fn sem_voz_viva_a_conexao_guarda_o_som_da_tela() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+        assert_eq!(
+            connection.ajustar_volume_da_tela(0.3),
+            Ok(()),
+            "sem voz viva, o volume da tela foi recusado e jogado fora: arrastado durante \
+             a volta, ele se perde"
+        );
+        assert_eq!(
+            connection.calar_a_tela(true),
+            Ok(()),
+            "sem voz viva, o mudo da tela foi recusado e jogado fora"
+        );
+        let escolhida = connection.shared.voice.escolhida();
+        assert!(
+            (escolhida.volume_da_tela - 0.3).abs() < f32::EPSILON && escolhida.tela_calada,
+            "o som da tela aceito sem voz viva não ficou guardado: a voz que abrir toca a \
+             transmissão a 100 e audível"
+        );
+
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let sem_audio = super::Connection {
+            commands,
+            shared: compartilhado(false),
+            encerrada: Mutex::new(None),
+        };
+        assert_eq!(
+            sem_audio.ajustar_volume_da_tela(0.3),
+            Err(crate::ConnectionError::NotConnected),
+            "numa sessão sem áudio o volume da tela foi aceito, e nenhuma voz vai tocá-lo"
         );
     }
 
