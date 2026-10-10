@@ -987,6 +987,53 @@ def chamada(pg: Page) -> list[str]:
     return falhas
 
 
+def capa_na_chamada(pg: Page) -> list[str]:
+    """A capa de uma pessoa no cartão dela na CHAMADA do celular (D-capa-1:
+    animada também aqui, até o mesmo teto do desktop). O cartão é o do
+    desktop (`pintarCartao` e o `vestirCapa` da F3); a casca só o põe em duas
+    colunas. Confere que a capa veste o cartão inteiro e está entre as que
+    animam, e que todo texto fica acima de 4,5:1 com o mesmo contraste contra
+    uma capa branca, uma preta e uma da cor da tinta: nenhum texto encosta na
+    capa, todos ficam sobre as placas do desktop.
+
+    O contraste não é o de sem capa, como a F3 exige no desktop: sem capa, o
+    cartão do celular é do painel, falando ou calado; com capa, a placa de
+    quem fala é a laranja do desktop (`--fundo-da-placa`). O nome cai de 5,71
+    a 5,12 e SINAL de 5,52 a 4,94 (medido em 10/10), iguais aos do desktop
+    com capa."""
+    falhas = []
+    juli = pg.evaluate("String(SEELE_QUADRO.voice_rooms.flatMap((s) => s.people).find((p) => p.nickname === 'juli')?.id)")
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    cartao = f"#chamada-grade .chamada-cartao[data-pessoa-da-capa='{juli}']"
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""(alvo) => { const c = document.createElement('canvas'); c.width = 96; c.height = 32;
+        const x = c.getContext('2d'); x.fillStyle = '#32e6a2'; x.fillRect(0, 0, 96, 32);
+        SEELE_RESPOSTAS.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: c.toDataURL('image/jpeg') };
+        return __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.capa', modo: 'substituir', alvo,
+            conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:juli' } } } } }); }""", juli)
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    vestido = pg.evaluate("""(s) => { const p = document.querySelector(s); const c = p?.querySelector(':scope > .capa-camada');
+        const b = c?.getBoundingClientRect();
+        return { vestido: p?.dataset.comCapa === 'sim', animada: p?.dataset.capaAnimada === 'sim',
+                 imagem: c ? getComputedStyle(c).backgroundImage.startsWith('url(') : false,
+                 cobre: !!b && b.width > 0 && Math.abs(b.width - p.clientWidth) < 1 && Math.abs(b.height - p.clientHeight) < 1 }; }""", cartao)
+    if vestido != {"vestido": True, "animada": True, "imagem": True, "cobre": True}:
+        falhas.append(f"a capa de juli não veste o cartão dela na CHAMADA, ou não está entre as que animam: {vestido}")
+        return falhas
+    medidas = {nome: pg.evaluate(CONTRASTE_EM, [cartao, cor]) or {} for nome, cor in CAPAS_DE_PROVA}
+    for nome, medida in medidas.items():
+        baixos = {k: v for k, v in medida.items() if v < 4.5}
+        if baixos:
+            falhas.append(f"sobre uma capa {nome}, texto do cartão abaixo de 4,5:1: {baixos}")
+    if len({tuple(sorted(m.items())) for m in medidas.values()}) != 1:
+        falhas.append(f"um texto do cartão encosta na capa: o contraste muda com ela {medidas}")
+    return falhas
+
+
 def palco_de_mods(pg: Page) -> list[str]:
     """O palco dos MODs na CHAMADA (`chamada.palco`, c7c64814 da F3): a vista
     alternativa à grade, que começa atrás. Um MOD o contribui pelo roteador;
@@ -2201,6 +2248,8 @@ CASOS: dict[str, Caso] = {
     # O microfone negado pelo navegador, nas duas cascas (achado 3).
     "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
     "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
+    # A capa de uma pessoa no cartão da CHAMADA (D-capa-1).
+    "capa-na-chamada": Caso(levar=capa_na_chamada, medir=False),
     # O palco dos MODs na CHAMADA (chamada.palco, c7c64814 da F3).
     "palco-de-mods": Caso(levar=palco_de_mods, raiz="#vista-chamada"),
     # A sala pessoal da F7, que o navegador não tem, nas duas cascas.
