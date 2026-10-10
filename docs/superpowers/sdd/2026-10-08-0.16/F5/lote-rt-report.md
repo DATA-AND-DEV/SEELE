@@ -21,9 +21,11 @@ aspa cortava, e o `--no-sandbox`.
 Tudo o que está nas seções 1 a 8 foi rodado **antes** dela. Este relatório foi
 escrito e commitado durante a pausa, sem rodar nada.
 
-**Rodada 1 (em curso, não rodado):** as decisões da orquestradora sobre as
-preocupações do §8 estão escritas e commitadas, e nada delas rodou ainda. A
-pausa de CPU continua. Ver o §9.
+**Rodada 1 (verde):** as decisões da orquestradora sobre as preocupações do
+§8. Elas foram escritas durante a pausa de CPU e rodaram depois do aviso. Os 34
+roteiros passam, e os três que estavam podres exigem agora o que dizem. A etapa
+dos roteiros tem a sua frase de prazo, e a linha do release cita os roteiros.
+Todas as reversões saíram vermelhas onde deviam. Ver o §9.
 
 ## 1. Os roteiros rodados aqui, e o que cada um prova hoje
 
@@ -364,13 +366,11 @@ repositório de mentira, com `curl` dublê, como sempre rodou dentro do
    o resto de uma frase já reprovada», e o caso medido aqui é uma reprovação
    inteira que some.
 
-## 9. Rodada 1: as decisões da orquestradora (em curso, não rodado)
+## 9. Rodada 1: as decisões da orquestradora (verde)
 
-**Escrita durante a pausa de CPU. Nada desta seção rodou**: nem os roteiros,
-nem o `cargo test`, nem as reversões. Uma conferência foi feita, só de texto:
-cada trecho que uma reversão vai trocar aparece exatamente uma vez no arquivo.
-As reversões estão escritas, e a ordem de cada uma é o vermelho de antes e
-depois uma por exigência. Rodam quando a orquestradora avisar.
+Escrita durante a pausa de CPU e commitada como «em curso, não rodado»
+(`ebe6e79a`, `8a634e07`, `8b8a682a`). Ela rodou depois do aviso da
+orquestradora, e o resultado está no §9.5.
 
 ### 9.1 Os três roteiros podres entram no lote
 
@@ -523,3 +523,60 @@ asserções. Reversão preparada: **L1**, o texto de antes.
   `renomear-canal`.
 - **O `--no-sandbox` e o caminho do navegador no Linux**: só o primeiro
   disparo do `ci.yml` no Actions vai dizer.
+
+### 9.5 O que rodou na rodada 1
+
+Tudo depois do aviso do fim da pausa:
+
+- **Os 34 roteiros**, um a um: todos 0. Os três novos relatam o que exigem.
+  - `trocar-de-janela.js`: COMPARTILHAR apagado, COMPARTILHAR aceso, TROCAR
+    apagado («é esta que já está no ar…»), TROCAR aceso («a transmissão de
+    agora para…»), COMPARTILHAR aceso, `fonteEmCurso=null`.
+  - `versao-do-servidor.js`: a pergunta VISIVEL com «Servidor 0.15»; nada
+    aberto nem conectado antes do ABRIR; depois, `abrir_versao` com a linha
+    0.15, o link inteiro e `hospedar: false`, e sem `connect`; a mesma linha
+    conecta aqui.
+  - `compartilhar.js`: a caixa VISIVEL; ela pergunta `compartilhar-quadros`,
+    `compartilhar-resolucao` e `compartilhar-som`; nenhum dos que saíram
+    voltou; quadros 30 e 60.
+- **O passo do CI**, rodado como o Actions roda (`bash -e`): «roteiros: os 34
+  passaram.», 0. **A etapa do `publicar.sh` sozinha:** 0.
+- **`cargo test -p xtask`: 221 passaram, 0 falharam** (79 no `xtask`, 121 em
+  `empacotamento` com o teste novo do prazo, 21 nos outros alvos).
+  `cargo xtask check-runtime`: 0. `cargo clippy -p xtask --all-targets -- -D
+  warnings`: limpo. `sh -n empacotar/publicar.sh`: ok.
+- `cargo fmt -p xtask` reformatou uma asserção do teste da linha, e isso entra
+  no commit desta seção.
+
+**As reversões.** Cada uma mudou um arquivo, rodou a carga ou o teste e
+devolveu o arquivo **idêntico (`cmp`) e tocado**. Todas saíram vermelhas na
+exigência que deviam derrubar, e só nela:
+
+| | mudança | o que reprovou |
+|---|---|---|
+| T0 | o retrato velho (`tela.e_minha`) no T3 | «transmitindo a fonte armada, o botão não recusa recomeçar para a mesma: COMPARTILHAR · modo=comecar» |
+| T1 | `disabled` sem `fonteArmada === null` | «sem fonte escolhida, o botão não está apagado» |
+| T2 | `disabled` por `!minha` | «com uma fonte escolhida e nada no ar, o botão não é COMPARTILHAR aceso: COMPARTILHAR (apagado)» |
+| T3 | `mesmaFonte = false` | «… não recusa recomeçar para a mesma: TROCAR · modo=trocar» |
+| T4 | o title de trocar vazio | «… não oferece TROCAR: TROCAR · modo=trocar · title «»» |
+| T5 | `minha_transmissao ?? tela` | «com a transmissão de outra pessoa na tela, o botão não é COMPARTILHAR aceso: TROCAR» |
+| T6 | sem o `fonteEmCurso = null` | «a transmissão acabou por fora e a fonte em curso não foi esquecida: 8» |
+| V0 | a resposta velha do `analisar_convite` | «o link de outra linha não perguntou antes de abrir: versoes-confirmar escondida» |
+| V1 | a pergunta pulada | a mesma frase do V0 |
+| V2 | sem o `return` depois do `entrarPelaLinha` | «antes da resposta da pessoa já houve … connect …» |
+| V3 | `linha: null` | «o ABRIR não abriu o SEELE da linha do servidor: abrir_versao true, linha null» |
+| V4 | `link: null` | «… não recebeu o link inteiro …: null» |
+| V5 | `hospedar: true` | «entrar num servidor de outra linha pediu para hospedar: true» |
+| V6 | `irParaOServidor` depois do `abrir_versao` | «depois de abrir o SEELE da outra linha, esta janela também conectou» |
+| V7 | `if (ir)` | «um servidor da linha deste app não conectou aqui: abrir_versao false, connect false» |
+| C0 | os quadros entre os que saíram (o roteiro velho) | «voltou à caixa o que tinha saído: compartilhar-quadros» |
+| C1 | a caixa que não se mostra | «o botão do rodapé não abriu a caixa de compartilhar: escondida» |
+| C2 | um `<input>` a mais | «a caixa pergunta outra coisa além da resolução, dos quadros e do som: compartilhar-prioridade-nova …» |
+| C3 | um `<p id="compartilhar-altura">` | «voltou à caixa o que tinha saído: compartilhar-altura» (a C2 passou: um `<p>` não é controle) |
+| C4 | uma opção de 15 quadros | «os quadros oferecem outra coisa que 30 e 60: 15 30 60» |
+| P1 | a etapa dos roteiros sem `--prazo` | `um_roteiro_que_trava_…`: «o prazo dos roteiros venceu e a frase não diz qual travou». A saída mostra a frase velha, «O caso conhecido é o `seele-video`…», com «roteiro: rodando tools/roteiros/toque.js» só nas últimas linhas |
+| L1 | a linha do release de antes | `a_linha_da_bateria_diz_o_que_rodou_e_onde`: «a linha não diz que a bateria rodou, nem o que ela rodou» |
+
+Nenhum roteiro reprovou contra o produto. Nada reprovou por tempo, e nada
+precisou rodar de novo. Não rodei conformidade e não rodei o `publicar.sh` de
+ponta a ponta.

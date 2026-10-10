@@ -4504,7 +4504,8 @@ fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
 
     let (_, com_windows) = linha_da_bateria("macos windows linux", false);
     assert!(
-        com_windows.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)")
+        com_windows
+            .contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)")
             && com_windows.contains("e no Windows"),
         "com o Windows pedido, a bateria roda lá também, e a linha não diz:\n{com_windows}"
     );
