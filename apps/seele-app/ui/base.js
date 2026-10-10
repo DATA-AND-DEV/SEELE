@@ -1258,13 +1258,18 @@ function avatarContribuido(pessoaId) {
   const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
   if (!dono.podeFalar()) return null;
   if (contribuicao.retrato) return contribuicao.retrato.uri;
-  const estado = { uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" };
-  contribuicao.retrato = estado;
+  const novoRetrato = () => ({ uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" });
+  const estadoInicial = novoRetrato();
+  contribuicao.retrato = estadoInicial;
   contribuicao.soltarMontagem = () => {
-    estado.cancelado = true;
-    estado.uri = null;
-    estado.bytes = 0;
+    for (const um of [contribuicao.retrato, contribuicao.retratoPendente]) {
+      if (!um) continue;
+      um.cancelado = true;
+      um.uri = null;
+      um.bytes = 0;
+    }
     contribuicao.retrato = null;
+    contribuicao.retratoPendente = null;
     avisarQueAMidiaMudou();
   };
   avisarQueAMidiaMudou();
@@ -1274,70 +1279,157 @@ function avatarContribuido(pessoaId) {
   // o `uri` ainda posto: o `.catch` do fim leva o tropeço ao `console` e ao
   // `seele.log`, pelo `dono.anotarRecusa`, e o estado fica o que a tela mostra
   // (ver `RegiaoDeMod#dizerTropecoDaMidia`, em `mods-regiao.js`).
-  const aplicar = (midia) => {
-    if (!midia || estado.cancelado) return;
-    if (!dono.podeFalar()) {
+  // **A carga de um retrato**, para o primeiro e para cada `atualizar`. Os
+  // ganchos: `aoPronto` roda quando a imagem está decodificada, antes do
+  // redesenho; `aoFalhar`, quando ela é recusada; e `substituindo` tira o
+  // retrato que esta contribuição já mostra da conta do teto de mídia — ele
+  // sai quando o novo entra.
+  const carregar = (estado, ganchos = {}) => {
+    const substituindo = ganchos.substituindo === true;
+    const aplicar = (midia) => {
+      if (!midia || estado.cancelado) return;
+      if (!dono.podeFalar()) {
+        estado.bytes = 0;
+        return;
+      }
+      estado.uri = midia.uri;
+      estado.situacao = "pronta";
+      ganchos.aoPronto?.();
+      avisarQueAMidiaMudou();
+      redesenharAvatares();
+    };
+    const recusar = (falha) => {
+      // A reserva volta antes de qualquer pergunta: um avatar recusado não
+      // ocupa o teto de quem vier depois, nem numa sessão que acabou.
       estado.bytes = 0;
-      return;
-    }
-    estado.uri = midia.uri;
-    estado.situacao = "pronta";
-    avisarQueAMidiaMudou();
-    redesenharAvatares();
-  };
-  const recusar = (falha) => {
-    // A reserva volta antes de qualquer pergunta: um avatar recusado não
-    // ocupa o teto de quem vier depois, nem numa sessão que acabou.
-    estado.bytes = 0;
-    if (estado.cancelado || !dono.podeFalar()) return;
-    const porque = motivoDaFalha(falha);
-    estado.situacao = "recusada";
-    estado.motivo = porque;
-    avisarQueAMidiaMudou();
-    dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
-    // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
-    // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-    dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
-  };
-  const fonte = contribuicao.conteudo.doServidor;
-  // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
-  // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
-  soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
-    .then((midia) => {
+      ganchos.aoFalhar?.();
       if (estado.cancelado || !dono.podeFalar()) return;
-      let ocupados = 0;
-      for (const outra of contribuicoesDosMods.porHandle.values()) {
-        if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
-      }
-      if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
-        || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
-        throw new Error("o avatar não é imagem ou excede o limite de mídia");
-      }
-      // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
-      // cima soma os `bytes` dos outros retratos desta instância, e dois
-      // avatares decodificando juntos passariam os dois por ela se a reserva
-      // esperasse. A imagem que não abre os devolve, em `recusar`.
-      estado.bytes = midia.bytes;
-      return provarImagem(midia.uri).then(() => midia);
-    })
-    .then(aplicar, recusar)
-    .catch((falha) => {
-      console.warn(
-        `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
-        falha,
-      );
-      // **E ao `seele.log`**, pela porta das outras linhas do avatar
-      // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
-      // dono que lança aqui terminaria numa promessa que ninguém pega.
-      try {
-        dono.anotarRecusa(
-          `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+      const porque = motivoDaFalha(falha);
+      estado.situacao = "recusada";
+      estado.motivo = porque;
+      avisarQueAMidiaMudou();
+      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
+      // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
+      // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
+      dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+    };
+    const fonte = contribuicao.conteudo.doServidor;
+    // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
+    // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
+    soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
+      .then((midia) => {
+        if (estado.cancelado || !dono.podeFalar()) return;
+        let ocupados = 0;
+        for (const outra of contribuicoesDosMods.porHandle.values()) {
+          if (substituindo && outra === contribuicao) continue;
+          if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
+        }
+        if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
+          || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
+          throw new Error("o avatar não é imagem ou excede o limite de mídia");
+        }
+        // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
+        // cima soma os `bytes` dos outros retratos desta instância, e dois
+        // avatares decodificando juntos passariam os dois por ela se a reserva
+        // esperasse. A imagem que não abre os devolve, em `recusar`.
+        estado.bytes = midia.bytes;
+        return provarImagem(midia.uri).then(() => midia);
+      })
+      .then(aplicar, recusar)
+      .catch((falha) => {
+        console.warn(
+          `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+          falha,
         );
-      } catch (tropeco) {
-        console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
-      }
+        // **E ao `seele.log`**, pela porta das outras linhas do avatar
+        // (`dono.anotarRecusa`): o `console` ninguém lê. Num `try`, porque um
+        // dono que lança aqui terminaria numa promessa que ninguém pega.
+        try {
+          dono.anotarRecusa(
+            `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+          );
+        } catch (tropeco) {
+          console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);
+        }
+      });
+  };
+
+  // **Atualizar troca a foto sem passar pelo nativo** (R7 do PERFIS; tarefa 5,
+  // Step 6). A nova carrega ao lado; a velha continua na tela até a nova estar
+  // decodificada, e só então as duas trocam de lugar. Se a nova falhar, a velha
+  // fica — e o MOD sabe, pelo `midia` de sempre.
+  contribuicao.aoAtualizar = () => {
+    if (contribuicao.retratoPendente) contribuicao.retratoPendente.cancelado = true;
+    const nova = novoRetrato();
+    contribuicao.retratoPendente = nova;
+    carregar(nova, {
+      substituindo: true,
+      aoPronto: () => {
+        const velha = contribuicao.retrato;
+        if (velha && velha !== nova) {
+          velha.cancelado = true;
+          velha.bytes = 0;
+        }
+        contribuicao.retrato = nova;
+        contribuicao.retratoPendente = null;
+      },
+      aoFalhar: () => {
+        if (contribuicao.retratoPendente === nova) contribuicao.retratoPendente = null;
+      },
     });
+  };
+
+  carregar(estadoInicial);
   return null;
+}
+
+/**
+ * **Aplica o conteúdo de uma contribuição num destino, e diz o que não coube.**
+ * Na primeira montagem e em cada `atualizar`. Devolve `false` quando a
+ * aplicação lançou — e aí quem chamou solta a montagem.
+ */
+function aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia) {
+  try {
+    const recusados = renderer.aplicar(contribuicao.conteudo);
+    if (recusados > 0) {
+      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
+      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
+      //
+      // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
+      // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
+      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
+      if (renderer.foraDoTeto > 0) {
+        Object.assign(aviso, {
+          motivo: "orcamento",
+          perfil: orcamento.nome,
+          teto: orcamento.nos,
+          tamanho: nosDaDeclaracao(contribuicao.conteudo),
+        });
+      }
+      donoDaRegiao(mod, instancia).falar(aviso);
+      registrarNoAnfitriao(
+        "recusa-de-mod",
+        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
+          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`
+          + (aviso.motivo
+            ? ` — a declaração tem ${aviso.tamanho}, e o teto de «${aviso.perfil}» é ${aviso.teto}`
+            : ""),
+        "aviso",
+        contribuicao.mod,
+      );
+    }
+  } catch (falha) {
+    // **No registro, e não no console da janela**: num app empacotado o
+    // console não é lugar nenhum, e foi lá que esta falha morava.
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
+      "aviso",
+      contribuicao.mod,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -1455,44 +1547,18 @@ function montarContribuicao(contribuicao, destino = "") {
     montadas.clear();
   };
 
-  try {
-    const recusados = renderer.aplicar(contribuicao.conteudo);
-    if (recusados > 0) {
-      // Dito ao MOD, e não engolido: ele precisa saber que a declaração dele
-      // não coube onde ele a pôs. E dito a quem hospeda, que é quem investiga.
-      //
-      // **Com o perfil, o teto e o tamanho**, quando foi o teto: «8 recusados»
-      // não diz a quem escreveu quanto a declaração tem nem quanto cabe ali.
-      const aviso = { nome: "contribuicao", ponto: contribuicao.ponto, destino: chave, recusados };
-      if (renderer.foraDoTeto > 0) {
-        Object.assign(aviso, {
-          motivo: "orcamento",
-          perfil: orcamento.nome,
-          teto: orcamento.nos,
-          tamanho: nosDaDeclaracao(contribuicao.conteudo),
-        });
+  // **Atualizar reaplica no mesmo nó** (R7 do PERFIS; tarefa 5, Step 6): cada
+  // destino montado recebe o conteúdo novo pelo mesmo renderer, que reconcilia
+  // por chave — sem desmontar, e sem a apresentação nativa entre os dois.
+  contribuicao.aoAtualizar = () => {
+    for (const [destino, montagem] of Array.from(montadas.entries())) {
+      if (!aplicarAContribuicao(contribuicao, destino, montagem.renderer, orcamento, mod, instancia)) {
+        montagem.soltar();
       }
-      donoDaRegiao(mod, instancia).falar(aviso);
-      registrarNoAnfitriao(
-        "recusa-de-mod",
-        `${contribuicao.mod}: ${recusados} nó(s) de «${contribuicao.ponto}»`
-          + `${chave ? ` para ${chave}` : ""} não couberam nos limites da contribuição`
-          + (aviso.motivo
-            ? ` — a declaração tem ${aviso.tamanho}, e o teto de «${aviso.perfil}» é ${aviso.teto}`
-            : ""),
-        "aviso",
-        contribuicao.mod,
-      );
     }
-  } catch (falha) {
-    // **No registro, e não no console da janela**: num app empacotado o
-    // console não é lugar nenhum, e foi lá que esta falha morava.
-    registrarNoAnfitriao(
-      "recusa-de-mod",
-      `${contribuicao.mod}: «${contribuicao.ponto}» não montou — ${String(falha?.message ?? falha)}`,
-      "aviso",
-      contribuicao.mod,
-    );
+  };
+
+  if (!aplicarAContribuicao(contribuicao, chave, renderer, orcamento, mod, instancia)) {
     soltar();
     return null;
   }
@@ -2494,6 +2560,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "superficie-descartar": "superficies",
   contribuir: "contribuicoes",
   "revogar-contribuicao": "contribuicoes",
+  "atualizar-contribuicao": "contribuicoes",
   retrato: "retrato",
 });
 
@@ -2996,6 +3063,13 @@ async function atenderOMod(mod, instancia, m) {
         // contribuição de outro. A revisão de 20/09/2026 reproduziu.
         responder(true, {
           valor: contribuicoesDosMods.revogar(m.handle, { id: mod.id, instancia }),
+        });
+        break;
+      case "atualizar-contribuicao":
+        // O dono vem daqui, como no `revogar`: um MOD não troca o conteúdo da
+        // contribuição de outro (R7 do PERFIS; tarefa 5, Step 6).
+        responder(true, {
+          valor: contribuicoesDosMods.atualizar(m.handle, { id: mod.id, instancia }, m.conteudo),
         });
         break;
       default:

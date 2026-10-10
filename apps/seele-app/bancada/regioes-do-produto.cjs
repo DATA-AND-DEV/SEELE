@@ -550,6 +550,83 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- atualizar, sem revogar
+    //
+    // `contribuicoes.atualizar(handle, conteudo)` (R7 do PERFIS; tarefa 5,
+    // Step 6): troca o conteúdo **no mesmo nó** — o que o MOD segura dentro
+    // dele (foco, rolagem) não se perde —, e a linha de uma pessoa com o
+    // cartão atualizado nunca volta à nativa no meio. Revogar e registrar de
+    // novo era o único caminho, e passava pelo nativo.
+    const atualizar = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const instancia = new InstanciaDeMod("mod/atualiza", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; }, entregar() {},
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/atualiza", instancia);
+      const dono = { id: "mod/atualiza", instancia };
+      const texto = (dentro) => [{ forma: "texto", chave: "t", dentro }];
+
+      const naRegiao = contribuicoesDosMods.registrar(dono, instancia, { ponto: "operador.barra", conteudo: texto("versão 1") }).handle;
+      desenhar(r);
+      await quadro();
+      const antes = $("operador-mods").querySelector(".contribuicao-de-mod");
+      contribuicoesDosMods.atualizar(naRegiao, dono, texto("versão 2"));
+      desenhar(r);
+      await quadro();
+      const depois = $("operador-mods").querySelector(".contribuicao-de-mod");
+      const regiao = { mesmoNo: Boolean(antes) && antes === depois && antes.isConnected, texto: depois?.textContent ?? null };
+
+      const lia = r.voice_rooms.flatMap((sala) => sala.people).find((p) => !p.is_self);
+      const cartao = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "pessoa.cartao", modo: "substituir", alvo: String(lia.id), conteudo: texto("cartão 1"),
+      }).handle;
+      desenhar(r);
+      await quadro();
+      const nativas = [];
+      const vigia = new MutationObserver((registros) => {
+        for (const registro of registros) {
+          for (const no of registro.addedNodes) {
+            if (no.nodeType === 1 && no.matches("li.pessoa") && !no.classList.contains("pessoa-apresentada")
+              && no.textContent.includes(lia.nickname)) nativas.push(no.textContent.slice(0, 40));
+          }
+        }
+      });
+      vigia.observe($("lista-roster"), { childList: true, subtree: true });
+      contribuicoesDosMods.atualizar(cartao, dono, texto("cartão 2"));
+      desenhar(r);
+      await quadro();
+      vigia.disconnect();
+      const linhaDaLia = document.querySelector('li.pessoa-apresentada[data-apresentada-por="mod/atualiza"]');
+      const linha = { nativas, cartao: linhaDaLia?.querySelector(".pessoa-miolo")?.textContent ?? null };
+
+      let recusa = "";
+      try {
+        contribuicoesDosMods.atualizar(cartao, { id: "outro/mod", instancia }, texto("x"));
+      } catch (erro) {
+        recusa = erro.message;
+      }
+      contribuicoesDosMods.revogar(naRegiao, dono);
+      contribuicoesDosMods.revogar(cartao, dono);
+      modsCarregados.delete("mod/atualiza");
+      desenhar(r);
+      await quadro();
+      return { regiao, linha, recusa };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (atualizar.erro) falhas.push(`atualizar: ${atualizar.erro}`);
+    else {
+      if (!atualizar.regiao.mesmoNo || atualizar.regiao.texto !== "versão 2") {
+        falhas.push(`atualizar: a região não trocou o conteúdo no mesmo nó (${JSON.stringify(atualizar.regiao)})`);
+      }
+      if (atualizar.linha.nativas.length || atualizar.linha.cartao !== "cartão 2") {
+        falhas.push(`atualizar: a linha passou pela nativa, ou não trocou o cartão (${JSON.stringify(atualizar.linha)})`);
+      }
+      if (!atualizar.recusa.includes("não é de outro/mod")) {
+        falhas.push(`atualizar: o handle de outro MOD não foi recusado (${atualizar.recusa || "aceito"})`);
+      }
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):

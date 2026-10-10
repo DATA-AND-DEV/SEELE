@@ -769,9 +769,14 @@ contexto.cartoesDosMods = new Map();
 
 {
   const base = ler("base.js");
-  const inicio = base.indexOf("function montarContribuicao(");
+  // Desde `aplicarAContribuicao`, que `montarContribuicao` chama e que vem logo
+  // antes dela (tarefa 5, Step 6: a mesma aplicação na montagem e no
+  // `atualizar`).
+  const inicio = base.indexOf("function aplicarAContribuicao(");
   const fim = base.indexOf("/**\n * As ações que os MODs acrescentaram", inicio);
-  confere("R4b · o recorte", inicio >= 0 && fim > inicio, "`montarContribuicao` mudou de forma e o recorte não a achou");
+  confere("R4b · o recorte", inicio >= 0 && fim > inicio
+    && base.slice(inicio, fim).includes("function montarContribuicao("),
+  "`montarContribuicao` mudou de forma e o recorte não a achou");
   vm.runInContext(base.slice(inicio, fim), contexto);
 
   const tela = ler("tela-sessao.js");
@@ -2147,6 +2152,27 @@ function anotando(...anotadas) {
       pedido: { ponto: "servidor.navegacao", rotulo: "API 4" },
     });
     confere("R2 · a versão", respostas.at(-1)?.ok === true, `a API 4 foi recusada: ${respostas.at(-1)?.erro}`);
+
+    // **`atualizar`, pelo roteador** (R7 do PERFIS; tarefa 5, Step 6): B não
+    // troca o conteúdo do que é de A, e A troca o dele — com o dono vindo do
+    // roteador, e não do corpo da mensagem, como no `revogar`.
+    await contexto.atenderOMod({ id: "mod/b", api: 4 }, b, {
+      tipo: "atualizar-contribuicao", n: 31, handle, conteudo: [{ forma: "texto", dentro: "de B" }],
+    });
+    confere("R2 · atualizar, o dono", respostas.at(-1)?.ok === false, "mod/b atualizou a contribuição de mod/a");
+    await contexto.atenderOMod({ id: "mod/a", api: 4 }, a, {
+      tipo: "atualizar-contribuicao", n: 32, handle, conteudo: [{ forma: "texto", dentro: "de A, de novo" }],
+    });
+    confere(
+      "R2 · atualizar",
+      respostas.at(-1)?.ok === true && respostas.at(-1)?.valor === true,
+      `mod/a não atualizou a própria contribuição: ${respostas.at(-1)?.erro}`,
+    );
+    confere(
+      "R2 · atualizar",
+      registro.porHandle.get(handle)?.conteudo?.[0]?.dentro === "de A, de novo",
+      "o roteador respondeu, e o conteúdo da contribuição não mudou",
+    );
 
     // **E A revoga o que é de A.** Sem esta metade, a correção seria uma porta
     // fechada para todo mundo — e uma porta fechada passa no teste de

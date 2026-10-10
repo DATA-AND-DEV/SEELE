@@ -113,6 +113,59 @@ const TETO_DE_CONTRIBUICOES = 128;
 const NATIVO = ":nativo";
 
 /**
+ * **A forma que cada ponto exige do conteúdo**, no registro e no `atualizar` —
+ * a mesma conferência nos dois, para um MOD não trocar por `atualizar` o que o
+ * registro recusaria. Lança com o nome do ponto; não devolve nada.
+ */
+function conferirOConteudo(ponto, modo, alvo, conteudo) {
+  // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
+  if (ponto === "pessoa.avatar" && (
+    alvo === undefined || alvo === null || String(alvo) === ""
+    || !conteudo?.doServidor
+    || typeof conteudo.doServidor !== "object"
+    || Array.isArray(conteudo.doServidor)
+  )) {
+    throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
+  }
+  // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
+  // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
+  // A linha de cada sala e de cada canal continua do produto. Outra forma é
+  // recusada pelo nome, e não desenhada como se fosse esta.
+  const comGrupos = (parte) => Boolean(
+    parte && typeof parte === "object" && Array.isArray(parte.grupos)
+    && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids)),
+  );
+  // E a lista de pessoas substituída, a mesma ideia: `{ grupos }`, que valem
+  // dentro de cada sala — as salas são do produto (decisão da orquestradora,
+  // 09/10).
+  if (ponto === "pessoas.lista" && modo === "substituir" && !comGrupos(conteudo)) {
+    throw new Error("pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }");
+  }
+  if (ponto === "servidor.navegacao" && modo === "substituir") {
+    const lista = (parte) => parte === undefined || comGrupos(parte);
+    if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
+      || (conteudo.salas === undefined && conteudo.canais === undefined)
+      || !lista(conteudo.salas) || !lista(conteudo.canais)) {
+      throw new Error(
+        "servidor.navegacao/substituir declara a ordem das listas: "
+        + "{ salas?, canais? }, cada um com grupos: [{ titulo, ids }]",
+      );
+    }
+  }
+}
+
+/**
+ * **A contribuição é deste dono?** Três perguntas, e as três precisam ser
+ * feitas: o identificador sozinho não basta — um MOD recarregado dentro da
+ * mesma sessão é outra instância, e a contribuição da anterior não é dele.
+ */
+function eDoDono(contribuicao, dono) {
+  return contribuicao.mod === dono.id
+    && contribuicao.instancia === dono.instancia
+    && contribuicao.geracao === (dono.instancia?.geracao ?? -1);
+}
+
+/**
  * O registro vivo de contribuições desta janela.
  *
  * Chaveado por `(ponto, alvo)` porque é assim que a consulta acontece: a lista
@@ -170,41 +223,7 @@ class RegistroDeContribuicoes {
       }
       throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
     }
-    // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
-    if (ponto === "pessoa.avatar" && (
-      pedido?.alvo === undefined || pedido?.alvo === null || String(pedido.alvo) === ""
-      || !pedido?.conteudo?.doServidor
-      || typeof pedido.conteudo.doServidor !== "object"
-      || Array.isArray(pedido.conteudo.doServidor)
-    )) {
-      throw new Error("pessoa.avatar exige alvo e conteudo.doServidor");
-    }
-    // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
-    // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.
-    // A linha de cada sala e de cada canal continua do produto. Outra forma é
-    // recusada pelo nome, e não desenhada como se fosse esta.
-    const comGrupos = (parte) => Boolean(
-      parte && typeof parte === "object" && Array.isArray(parte.grupos)
-      && parte.grupos.every((grupo) => grupo && typeof grupo === "object" && Array.isArray(grupo.ids)),
-    );
-    // E a lista de pessoas substituída, a mesma ideia: `{ grupos }`, que valem
-    // dentro de cada sala — as salas são do produto (decisão da orquestradora,
-    // 09/10).
-    if (ponto === "pessoas.lista" && modo === "substituir" && !comGrupos(pedido?.conteudo)) {
-      throw new Error("pessoas.lista/substituir declara a ordem da lista: { grupos: [{ titulo, ids }] }");
-    }
-    if (ponto === "servidor.navegacao" && modo === "substituir") {
-      const conteudo = pedido?.conteudo;
-      const lista = (parte) => parte === undefined || comGrupos(parte);
-      if (!conteudo || typeof conteudo !== "object" || Array.isArray(conteudo)
-        || (conteudo.salas === undefined && conteudo.canais === undefined)
-        || !lista(conteudo.salas) || !lista(conteudo.canais)) {
-        throw new Error(
-          "servidor.navegacao/substituir declara a ordem das listas: "
-          + "{ salas?, canais? }, cada um com grupos: [{ titulo, ids }]",
-        );
-      }
-    }
+    conferirOConteudo(ponto, modo, pedido?.alvo, pedido?.conteudo);
     const quantas = this.porMod.get(mod.id) ?? 0;
     if (quantas >= TETO_DE_CONTRIBUICOES) {
       throw new Error(`um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições de pé`);
@@ -265,6 +284,40 @@ class RegistroDeContribuicoes {
   }
 
   /**
+   * **Troca o conteúdo de uma contribuição sem revogá-la** (R7 do PERFIS;
+   * tarefa 5 da F3, Step 6).
+   *
+   * Revogar e registrar de novo era o único caminho, e ele passava pelo nativo:
+   * entre os dois, a linha de quem tinha cartão voltava à do produto, e o
+   * avatar, às iniciais. Aqui o conteúdo muda **no mesmo nó** — quem montou a
+   * contribuição a reaplica (`aoAtualizar`) — e o avatar troca de foto só
+   * quando a nova está decodificada.
+   *
+   * Só o dono atualiza, pelas mesmas três perguntas do `revogar`; e o conteúdo
+   * novo passa pela mesma conferência de forma do registro.
+   *
+   * @param {string} handle O que `registrar` devolveu.
+   * @param {object} dono `{ id, instancia }`.
+   * @param {*} conteudo O conteúdo novo, na forma que o ponto exige.
+   * @returns {boolean} Se havia o que trocar.
+   */
+  atualizar(handle, dono, conteudo) {
+    const contribuicao = this.porHandle.get(handle);
+    if (!contribuicao) return false;
+    if (!dono || !eDoDono(contribuicao, dono)) {
+      throw new Error(
+        `a contribuição «${handle}» não é de ${dono?.id ?? "ninguém"}: um MOD atualiza o que `
+        + "ele registrou",
+      );
+    }
+    conferirOConteudo(contribuicao.ponto, contribuicao.modo, contribuicao.alvo || undefined, conteudo);
+    contribuicao.conteudo = conteudo ?? null;
+    if (contribuicao.aoAtualizar) contribuicao.aoAtualizar();
+    this.avisar();
+    return true;
+  }
+
+  /**
    * Tira uma contribuição **de quem a registrou**.
    *
    * # Por que o dono é conferido aqui
@@ -288,19 +341,11 @@ class RegistroDeContribuicoes {
   revogar(handle, dono = null) {
     const contribuicao = this.porHandle.get(handle);
     if (!contribuicao) return false;
-    if (dono) {
-      // **Três perguntas, e as três precisam ser feitas.** O identificador
-      // sozinho não basta: um MOD recarregado dentro da mesma sessão é outra
-      // instância, e a contribuição da anterior não é dele.
-      const meu = contribuicao.mod === dono.id
-        && contribuicao.instancia === dono.instancia
-        && contribuicao.geracao === (dono.instancia?.geracao ?? -1);
-      if (!meu) {
-        throw new Error(
-          `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
-          + "ele registrou, e a saída da sessão limpa o resto",
-        );
-      }
+    if (dono && !eDoDono(contribuicao, dono)) {
+      throw new Error(
+        `a contribuição «${handle}» não é de ${dono.id}: um MOD revoga o que `
+        + "ele registrou, e a saída da sessão limpa o resto",
+      );
     }
     // Pelo descartador que a instância devolveu: é ele que tira a entrada da
     // lista de recursos **e** chama `tirar`. Chamar `tirar` direto deixaria o
