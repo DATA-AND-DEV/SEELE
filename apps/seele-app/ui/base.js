@@ -2463,6 +2463,17 @@ function aplicarOTemaDoServidor(tema) {
 }
 
 /**
+ * **O tema do servidor de novo, na hora** (tarefa 17f): a escolha de quem vê
+ * para `servidor.aparencia` mudou em QUEM DESENHA O QUE, e ela está na chave
+ * do tema em vigor. Sem isto, a troca só valia no retrato seguinte.
+ */
+function reaplicarOTemaDoServidor() {
+  if (!temaDoServidorEmVigor) return;
+  const { mod_id: modId, valores } = temaDoServidorEmVigor;
+  aplicarOTemaDoServidor({ mod_id: modId, valores });
+}
+
+/**
  * O desfecho do tema do servidor em vigor, **guardado e dito**: o `TemaMudou`
  * chega logo depois do `Session`, e a janela do MOD pode ainda não estar de
  * pé — `montarOMod` entrega o guardado quando ela sobe

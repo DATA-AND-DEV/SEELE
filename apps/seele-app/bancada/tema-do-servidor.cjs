@@ -33,6 +33,11 @@
 //    `dialogo` pintam com o tema em vigor, e um estilo que cita um token —
 //    `cor: { tema: 'acento' }` — tem a cor do tema, e muda quando ele muda; um
 //    nome que não é do tema é recusado como qualquer cor que não serve.
+// 9. **A linha da aparência em QUEM DESENHA O QUE** (tarefa 17f): na API 6 o
+//    tema é do servidor e a janela não registra o ponto, então a linha não sai
+//    do registro; ela diz quem pinta, oferece «o SEELE desenha» e a volta, e a
+//    troca vale **na hora**, sem outro retrato. O recusado é dito, e o
+//    DIAGNÓSTICO chama o tema do servidor pelo nome, e não de tema da API 3.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -265,6 +270,57 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     );
     await desenharCom(comoVeio);
 
+    // 9. QUEM DESENHA O QUE tem a linha da aparência com o tema do servidor, a
+    //    troca reaplica na hora, e o DIAGNÓSTICO o chama pelo nome.
+    const aparencia = () => page.evaluate(() => {
+      desenharApresentacoes();
+      const item = $('lista-apresentacoes').querySelector('li[data-ponto="servidor.aparencia"]');
+      return {
+        secao: !$('mods-apresentacao').hidden,
+        texto: item?.querySelector('.mods-linha-texto')?.textContent ?? null,
+        botoes: item ? [...item.querySelectorAll('button')].map((b) => b.textContent) : [],
+      };
+    });
+    const apertar = (rotulo) => page.evaluate((rotulo) => {
+      [...$('lista-apresentacoes').querySelectorAll('li[data-ponto="servidor.aparencia"] button')]
+        .find((b) => b.textContent === rotulo).click();
+    }, rotulo);
+    // A instância de pé desde a seção 7 guarda os eventos em `eventosDoTema`.
+    const diagnostico = () => page.evaluate(() =>
+      frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === 'servidor.aparencia')));
+    await desenharCom(comoVeio);
+    let linhaDaAparencia = await aparencia();
+    assert.ok(linhaDaAparencia.secao && linhaDaAparencia.texto,
+      `QUEM DESENHA O QUE não tem a linha da aparência com o tema do servidor: ${JSON.stringify(linhaDaAparencia)}`);
+    assert.match(linhaDaAparencia.texto, /pintada pelo tema deste servidor, de seele\/estilo/);
+    assert.deepEqual(linhaDaAparencia.botoes, ['USAR APRESENTAÇÃO DO SEELE']);
+    const frasesComOTema = await diagnostico();
+    assert.ok(frasesComOTema.some((f) => /tema deste servidor, de seele\/estilo/.test(f)),
+      `o DIAGNÓSTICO não diz que o tema do servidor pinta a aparência: ${JSON.stringify(frasesComOTema)}`);
+    assert.ok(!frasesComOTema.some((f) => /API 3/.test(f)),
+      `o DIAGNÓSTICO chama o tema do servidor de tema da API 3: ${JSON.stringify(frasesComOTema)}`);
+    assert.ok(!frasesComOTema.some((f) => /tema pedido por/.test(f)),
+      `o DIAGNÓSTICO conta o tema do servidor de novo como pedido do caminho antigo: ${JSON.stringify(frasesComOTema)}`);
+    // A troca pelo botão vale **na hora**, sem outro retrato.
+    await apertar('USAR APRESENTAÇÃO DO SEELE');
+    assert.deepEqual(await tokens(), {}, '«o SEELE desenha» só tirou o tema do servidor no retrato seguinte');
+    assert.equal((await ultimoEvento())?.estado, 'nativo', 'o MOD não soube, na hora, que quem vê escolheu o SEELE');
+    linhaDaAparencia = await aparencia();
+    assert.match(linhaDaAparencia.texto, /o SEELE desenha, por escolha desta máquina/);
+    assert.deepEqual(linhaDaAparencia.botoes, ['USAR O TEMA DO SERVIDOR']);
+    await apertar('USAR O TEMA DO SERVIDOR');
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'voltar ao tema do servidor só valeu no retrato seguinte');
+    assert.equal((await ultimoEvento())?.estado, 'aplicado', 'o MOD não soube, na hora, que o tema voltou');
+    // O recusado é dito, e não dado como aplicado.
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, acento: CLARO.fundo }) });
+    linhaDaAparencia = await aparencia();
+    assert.match(linhaDaAparencia.texto, /tema deste servidor, de seele\/estilo, foi recusado nesta máquina/,
+      `um tema recusado aparece como se pintasse: ${linhaDaAparencia.texto}`);
+    // Sem tema do servidor, sem a linha.
+    await desenharCom(null);
+    assert.equal((await aparencia()).texto, null, 'sem tema do servidor, a linha da aparência ficou');
+    await desenharCom(comoVeio);
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -276,7 +332,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
