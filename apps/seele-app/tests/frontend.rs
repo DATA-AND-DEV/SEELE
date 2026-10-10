@@ -702,8 +702,23 @@ fn the_page_loads_only_files_that_are_shipped() {
         );
     }
 
+    // **O worklet da voz é a exceção**, e ela é conferida em vez de só
+    // declarada: ele roda na thread de áudio, sem `window`, e quem o carrega é
+    // a `voz-web.js`, com `audioWorklet.addModule`. Carregado pela página, ele
+    // estouraria no `AudioWorkletProcessor`, que a janela não tem. Os outros
+    // guardas desta suíte continuam lendo o arquivo, porque `ui_files` o lista.
+    let voz = read("ui/voz-web.js");
+    assert!(
+        voz.contains("worklet: \"voz-worklet.js\"")
+            && voz.contains("audioWorklet.addModule(cfg.worklet)"),
+        "a voz-web.js deixou de carregar o voz-worklet.js, e a exceção abaixo \
+         passou a esconder um arquivo que ninguém carrega"
+    );
     for (extension, loaded) in [(".css", &stylesheets), (".js", &sources)] {
         for shipped in ui_files(extension) {
+            if shipped == "voz-worklet.js" {
+                continue;
+            }
             assert!(
                 loaded.contains(&shipped),
                 "ui/ ships {shipped}, and index.html never loads it — so it is a \
@@ -10645,15 +10660,16 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
 ///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
 ///    ela sai.
-/// 3. **Só três chamadas de `conectar` passam credencial por argumento**: o
-///    link colado, o link do lançador e a volta que aceita os MODs. O
-///    RECONECTAR, a batida da espera, o hospedar e a troca de servidor não
-///    passam nenhuma — uma reconexão que a passasse gastaria de novo o convite
-///    que a entrada gastou. Desde o lote W, `conectar` anexa por conta própria
-///    a credencial que um apelido tomado deixou (`recusaDoApelido`), quando o
-///    alvo é o mesmo; essas chamadas sem argumento também a recebem nesse caso.
-///    Ela nunca é um convite gasto: só fica guardada depois de uma recusa que
-///    não gastou nada, e toda tentativa a esquece ao começar (parte 6).
+/// 3. **Só quatro chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador, a volta que aceita os MODs e a entrada
+///    pelo navegador. O RECONECTAR, a batida da espera, o hospedar e a troca de
+///    servidor não passam nenhuma — uma reconexão que a passasse gastaria de
+///    novo o convite que a entrada gastou. Desde o lote W, `conectar` anexa por
+///    conta própria a credencial que um apelido tomado deixou
+///    (`recusaDoApelido`), quando o alvo é o mesmo; essas chamadas sem
+///    argumento também a recebem nesse caso. Ela nunca é um convite gasto: só
+///    fica guardada depois de uma recusa que não gastou nada, e toda tentativa
+///    a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
 ///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
 ///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
@@ -10668,6 +10684,14 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    próxima, nem mesmo quando a recusa de uma mais velha chega depois. A
 ///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
 ///    nova a abre com a credencial dela.
+///
+/// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
+/// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
+/// em `segredos`, na memória da tentativa. Cada linha dela que nomeia
+/// `credencial`, `segredos` ou `linkDaCarga` está na lista, e a chamada de
+/// `conectar` dela é a quarta que passa credencial. Ela não tem o lugar do
+/// apelido tomado: a própria tentativa guarda o token até um desfecho que a
+/// encerre, e o `apelido-tomado` não a encerra.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
@@ -10721,6 +10745,33 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "const credencial = aceitePendente?.credencial ?? null;",
         ),
         ("camada-mods.js", "await conectar(alvo, null, credencial);"),
+        // A entrada pelo navegador (3.4). O link lido do fragmento na carga,
+        // entregue uma vez e esquecido.
+        ("identidade-web.js", "let linkDaCarga = lerEApagarOFragmento();"),
+        ("identidade-web.js", "const link = linkDaCarga;"),
+        ("identidade-web.js", "linkDaCarga = null;"),
+        // O token e o link só em `segredos`, e esquecidos juntos.
+        (
+            "identidade-web.js",
+            "const segredos = { credencial: null, link: null };",
+        ),
+        ("identidade-web.js", "segredos.credencial = null;"),
+        ("identidade-web.js", "segredos.link = null;"),
+        ("identidade-web.js", "segredos.credencial = convite ?? null;"),
+        ("identidade-web.js", "segredos.link = texto;"),
+        // Quem já é conhecido entra pela chave, e não gasta o convite.
+        (
+            "identidade-web.js",
+            "const credencial = tentativa.conhecido ? null : segredos.credencial;",
+        ),
+        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
+        // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
+        ("identidade-web.js", "if (!segredos.link) return false;"),
+        (
+            "identidade-web.js",
+            "await navigator.clipboard.writeText(segredos.link);",
+        ),
         (
             "camada-mods.js",
             "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
@@ -10745,12 +10796,18 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
         vistas.push((arquivo, linha.to_owned()));
     };
-    for arquivo in ["tela-boot.js", "camada-mods.js"] {
+    for arquivo in ["tela-boot.js", "camada-mods.js", "identidade-web.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial")
-                || names(linha, "aceitePendente")
-                || names(linha, "recusaDoApelido")
+            if [
+                "credencial",
+                "aceitePendente",
+                "recusaDoApelido",
+                "segredos",
+                "linkDaCarga",
+            ]
+            .iter()
+            .any(|nome| names(linha, nome))
             {
                 conferir(arquivo, linha);
             }
@@ -10796,6 +10853,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
+        // A entrada pelo navegador (3.4): o link da página, com o token da
+        // tentativa. Só quem não é conhecido o leva.
+        ("identidade-web.js", "alvo, apelido, credencial"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -10839,7 +10899,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 .iter()
                 .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
             "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
-             Só o link colado, o link do lançador e a volta que aceita os MODs levam \
+             Só o link colado, o link do lançador, a volta que aceita os MODs e a \
+             entrada pelo navegador levam \
              uma; uma reconexão que a levasse gastaria de novo o convite que a \
              entrada gastou."
         );
@@ -10847,7 +10908,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     assert_eq!(
         levam.len(),
         LEVAM.len(),
-        "as chamadas de `conectar` com credencial não são as três conhecidas: {levam:?}"
+        "as chamadas de `conectar` com credencial não são as quatro conhecidas: {levam:?}"
     );
     let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
     assert!(
@@ -11732,6 +11793,15 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "ImageData",
         "OffscreenCanvas",
         "MediaStream",
+        // A voz do navegador (Tarefa 3.3 da F4): o WebCodecs de áudio e o
+        // `AudioWorklet`. O `registerProcessor` é do escopo do worklet, que é
+        // onde o `voz-worklet.js` roda.
+        "AudioData",
+        "AudioDecoder",
+        "AudioEncoder",
+        "AudioWorkletNode",
+        "EncodedAudioChunk",
+        "registerProcessor",
         "parseInt",
         "parseFloat",
         "isNaN",
@@ -17141,9 +17211,25 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
              parou de achá-lo, este guarda passa por não olhar onde a montagem de MOD mora"
         );
     }
+    // **A voz do navegador é a exceção, conferida.** Ela toca pela tag
+    // `<audio>` porque foi o que manteve a voz com a tela bloqueada no iPhone
+    // (a rodada 5 do `spikes/voz-no-navegador/`, fixada pelo ADR 0057), e o
+    // que a tag toca é um `MediaStream` do próprio grafo, por `srcObject`:
+    // nada passa por `src`, nem por `media-src`, nem por `data:`.
+    let voz = without_comments(&read("ui/voz-web.js"));
+    assert!(
+        voz.contains("elemento.srcObject = destino.stream;") && !voz.contains(".src ="),
+        "a tag de áudio da voz deixou de tocar só o `MediaStream` do grafo: com um `src`, \
+         ela cai na política de `media-src` que este guarda existe para lembrar"
+    );
     for nome in &da_janela {
         let fonte = without_comments(&read(&format!("ui/{nome}")));
-        for agulha in ["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"] {
+        let agulhas: &[&str] = if nome == "voz-web.js" {
+            &["new Audio(", "<audio"]
+        } else {
+            &["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"]
+        };
+        for agulha in agulhas {
             assert!(
                 !fonte.contains(agulha),
                 "`{nome}` voltou a criar um elemento de áudio (`{agulha}`): ele toca o \
