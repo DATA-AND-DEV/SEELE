@@ -9489,6 +9489,15 @@ tem endereço fixo e a hospedagem abre UPnP).
 leitura, e este exige uma sequência rara e não expõe ninguém; se a linha ganhar
 uma 0.15.3, o conserto do X entra nela.
 
-**Vizinho, em aberto:** a atualização pela gestão, com a janela numa sessão com
-outro servidor e hospedando ao mesmo tempo, grava o sim do outro servidor com a
-identidade do servidor daqui (QA-01). A revisão do X diz se é alcançável.
+**Vizinho, medido pela revisão do X: alcançável, e também na v0.15.1.** Hospedar,
+falhar ou recusar a entrada no próprio servidor, entrar noutro servidor S, e em
+CONFIGURAÇÕES → MODS usar SALVAR ou atualizar um MOD exigido. Dois gravadores
+(`aplicar_mod`, do QA-01, e `aplicar_conjunto_de_mods`, do SALVAR; na v0.15.1 em
+`:6122`) gravam o sim de S com a identidade do servidor daqui. Quase sempre falha
+fechado: o sim dado a S se perde, e S pergunta de novo. Falha aberto quando o
+conjunto de S é idêntico ao daqui: a entrada em S não pergunta, contra o ADR 0045,
+mas roda só os bytes que a pessoa hospeda e escolheu. E a lista de aceites mostra
+um sim a S que ela nunca deu. **Consertado no mesmo lote X** (o sim vai ao servidor
+que esta janela hospeda, reconhecido pelo endereço do `hospedar` ou pela
+impressão, e não pelo prefixo de loopback). Na linha 0.15, fica como está, pela
+mesma razão do resto desta pendência.
