@@ -84,6 +84,17 @@
   overflow-wrap: anywhere;
 }
 
+/* **O cabeçalho quebra a linha, e não a palavra** (achado da tarefa 7 da F3,
+   medido em `bancada/camadas.cjs`). Numa coluna de 300 px — a folha, o painel,
+   um diálogo estreito —, o título dividia a linha com a origem e a saída, que
+   não encolhem, e o `min-width: 0` o deixava ficar mais estreito que uma
+   palavra: «EDITA / R / PERFIL». Trocar o `anywhere` por `break-word` não
+   mudava nada (medido: as onze quebras continuavam), e dar ao título a largura
+   da maior palavra empurrava o FECHAR para fora da coluna. Quebrando a linha,
+   a origem e a saída descem quando não cabem, e o título fica com a coluna
+   inteira; o `anywhere` continua para a palavra maior que ela. O
+   `flex-wrap: wrap` está no cabeçalho de cada superfície. */
+
 /* De quem é a janela. Discreto, e sempre presente: uma tela de MOD
    indistinguível das do SEELE é o que tornaria uma tela de confiança
    falsificável. */
@@ -176,6 +187,7 @@
 
 .pagina-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 16px var(--mod-margem);
@@ -225,6 +237,7 @@
 .painel-de-mod-cabecalho,
 .folha-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 14px var(--mod-margem);
@@ -315,6 +328,7 @@
    saída não podem sair de vista. */
 .dialogo-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 16px var(--mod-margem);
@@ -357,6 +371,8 @@
    permissões reais e sair do servidor.» */
 .superficie-de-mod-sair {
   flex: 0 0 auto;
+  /* Na borda direita, também quando desce para a linha de baixo. */
+  margin-left: auto;
   min-height: 28px;
   padding: 2px 10px;
   border: 1px solid var(--seele-linha-forte);

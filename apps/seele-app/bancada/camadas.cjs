@@ -11,6 +11,9 @@
 //    até a 5 ele continua, e a `folha`, que a 5 não tem, abre como `dialogo`.
 // 3. **O teto de superfícies de pé chega à 6 pelo nome**, com o número: ele
 //    chegava como `falhou`.
+// 4. **A 300 px, nenhum título de folha, painel ou diálogo quebra dentro de
+//    uma palavra**; uma palavra maior que a coluna é a única exceção. O título
+//    quebrava «EDITA / R / PERFIL» (achado da tarefa 7, Step 4).
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -167,8 +170,60 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(await page.evaluate(() => linhasDoLog().some(l => l.modId === 'teste/api5' && /folha/.test(l.oQue) && /dialogo/.test(l.oQue))),
       'a folha da API 5, aberta como dialogo, não foi ao seele.log');
 
+    // 4. Os títulos a 300 px. Cada palavra é medida pelo `Range` dela: mais de
+    // uma linha é quebra dentro da palavra, e só vale para a palavra que, sem
+    // quebrar, passa da largura da coluna (o cabeçalho, sem o preenchimento).
+    const TITULOS = ['Editar perfil', 'Configurações do servidor de voz', 'Ficha', 'Mapa ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKL da mesa'];
+    const quebras = await page.evaluate(async (titulos) => {
+      // O MOD da 6 está no teto de doze, pela seção 3: começa do zero.
+      superficiesDoMod(modDe[6].mod, modDe[6].inst).soltarTudo();
+      const achadas = [];
+      const medir = (raiz, onde) => {
+        const titulo = raiz.querySelector('.superficie-de-mod-titulo');
+        const cabeca = titulo.parentElement;
+        const estilo = getComputedStyle(cabeca);
+        const coluna = cabeca.clientWidth - parseFloat(estilo.paddingLeft) - parseFloat(estilo.paddingRight);
+        const texto = titulo.firstChild;
+        for (const palavra of texto.textContent.matchAll(/\S+/g)) {
+          const faixa = document.createRange();
+          faixa.setStart(texto, palavra.index);
+          faixa.setEnd(texto, palavra.index + palavra[0].length);
+          const linhas = new Set([...faixa.getClientRects()].filter(r => r.width > 0).map(r => Math.round(r.top)));
+          if (linhas.size < 2) continue;
+          const inteira = document.createElement('span');
+          inteira.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap';
+          inteira.textContent = palavra[0];
+          titulo.append(inteira);
+          const largura = inteira.getBoundingClientRect().width;
+          inteira.remove();
+          if (largura <= coluna) achadas.push(`${onde}: «${palavra[0]}» em ${linhas.size} linhas (${Math.round(largura)} px numa coluna de ${Math.round(coluna)} px)`);
+        }
+        // **E a saída fica na coluna, na borda direita**: dar ao título a
+        // largura da maior palavra empurrava o FECHAR para fora (medido).
+        const sair = raiz.querySelector('.superficie-de-mod-sair').getBoundingClientRect();
+        const caixa = cabeca.getBoundingClientRect();
+        const direita = caixa.right - parseFloat(estilo.paddingRight);
+        if (sair.left < caixa.left || sair.right > direita + 0.5) achadas.push(`${onde}: o FECHAR saiu da coluna (${Math.round(sair.left)}–${Math.round(sair.right)} contra ${Math.round(caixa.left)}–${Math.round(direita)})`);
+        else if (direita - sair.right > 0.5) achadas.push(`${onde}: o FECHAR não está na borda direita (${Math.round(direita - sair.right)} px antes dela)`);
+      };
+      let i = 0;
+      for (const titulo of titulos) {
+        i += 1;
+        for (const [api, tipo, extra] of [[6, 'folha', {}], [5, 'painel', {}], [6, 'dialogo', { modal: false, tamanho: { largura: 300 } }]]) {
+          const id = `titulo-${tipo}-${i}`;
+          const r = await pedir(api, { tipo: 'superficie-criar', descricao: { id, tipo, titulo, ...extra } });
+          if (!r?.ok) { achadas.push(`${tipo} «${titulo}» não abriu: ${JSON.stringify(r)}`); continue; }
+          const raiz = document.querySelector(`[data-superficie="${id}"]`);
+          medir(raiz, `${tipo} (${Math.round(raiz.getBoundingClientRect().width)} px) «${titulo}»`);
+          await pedir(api, { tipo: 'superficie-descartar', superficie: id });
+        }
+      }
+      return achadas;
+    }, TITULOS);
+    assert.deepEqual(quebras, [], 'um título de superfície quebrou dentro de uma palavra que cabia na coluna, ou a saída saiu do lugar');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
