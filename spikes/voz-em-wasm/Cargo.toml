@@ -1,0 +1,20 @@
+[package]
+name = "voz-em-wasm"
+description = "Spike da Tarefa 3.3 da F4: o portão, o buffer de jitter e o mixer do seele-audio em wasm32-unknown-unknown, dentro de um AudioWorklet. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Fora do workspace. O `gate.rs`, o `jitter.rs` e o `mixer.rs` são os do
+# `seele-audio`, lidos pelo caminho: o resto daquele crate puxa o cpal e a
+# libopus em C, e não compila para o navegador.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
