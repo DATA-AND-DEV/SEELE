@@ -55,7 +55,7 @@ const RULES: &[(&str, &[&str])] = &[
     // parte da conversa — que é o degrau 5, e o ADR 0022 o deixou de fora por
     // decisão. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-encontro", &["seele-proto"]),
-    ("seele-audio", &["seele-proto"]),
+    ("seele-audio", &["seele-proto", "seele-voz"]),
     // Compartilhamento de tela: captura e codec, ao lado de `seele-audio` e com
     // exatamente a mesma vizinhança. Não é um degrau novo no grafo, é a segunda
     // folha de mídia.
@@ -67,11 +67,25 @@ const RULES: &[(&str, &[&str])] = &[
     // decisão do outro lado, pendurada no sinal da voz que `seele-core` já
     // calcula. A tabela é onde essa mudança teria de ser argumentada.
     ("seele-video", &["seele-proto"]),
-    ("seele-core", &["seele-proto", "seele-audio", "seele-video"]),
+    // A sessão como o servidor a conta (Tarefa 2.2 da F4): o `Room`, a porta do
+    // assento e o `SessionInfo`, que saíram do `seele-core` para o navegador
+    // montar o mesmo retrato que o desktop. Só o protocolo: o `cargo xtask web`
+    // o compila para o `wasm32-unknown-unknown` a cada vez, e é ali que uma
+    // aresta nova daqui teria de compilar.
+    ("seele-sessao", &["seele-proto"]),
+    // O caminho da voz que não toca em nada (Tarefa 3.3 da F4): o portão, o
+    // buffer de jitter, o mixer e o simulador de rede, que saíram do
+    // `seele-audio` para o navegador tocar a mesma voz. Sem dependência
+    // nenhuma: o `cargo xtask web` o compila para o `wasm32-unknown-unknown`.
+    ("seele-voz", &[]),
+    (
+        "seele-core",
+        &["seele-proto", "seele-sessao", "seele-audio", "seele-video"],
+    ),
     // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
-    ("seele-web", &["seele-proto"]),
+    ("seele-web", &["seele-proto", "seele-voz"]),
     // A volta de um MOD da janela: o QuickJS do cliente, sem thread e sem E/S.
     // Folha: não conhece o protocolo nem o manifesto, e as capacidades de uma
     // API entram como lista. O desktop e o celular a embrulham, cada um com a
@@ -280,7 +294,10 @@ mod tests {
     #[test]
     fn o_cliente_web_depende_so_do_protocolo() {
         assert!(evaluate("seele-web", &[edge("seele-proto")]).is_empty());
+        // E das peças sem E/S que saíram do desktop para ele: a voz (3.3).
+        assert!(evaluate("seele-web", &[edge("seele-voz")]).is_empty());
         assert_eq!(evaluate("seele-web", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-web", &[edge("seele-audio")]).len(), 1);
         assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
     }
 
@@ -292,6 +309,28 @@ mod tests {
         assert!(evaluate("seele-motor-web", &[edge("seele-motor")]).is_empty());
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-web")]).len(), 1);
         assert_eq!(evaluate("seele-motor-web", &[edge("seele-proto")]).len(), 1);
+    }
+
+    /// A sessão vê o protocolo e mais nada: é o que deixa o navegador
+    /// compilá-la. Uma aresta para o `seele-core` traria o quinn e o OpenH264
+    /// junto, e o `seele-core` é quem depende dela, e não o contrário.
+    #[test]
+    fn a_sessao_so_ve_o_protocolo() {
+        assert!(evaluate("seele-sessao", &[edge("seele-proto")]).is_empty());
+        assert_eq!(evaluate("seele-sessao", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-sessao", &[edge("seele-audio")]).len(), 1);
+        assert!(evaluate("seele-core", &[edge("seele-sessao")]).is_empty());
+    }
+
+    /// O caminho da voz é uma folha: o navegador o compila, e uma aresta para
+    /// o `seele-audio` traria o cpal e a libopus junto. O `seele-audio` é quem
+    /// depende dele, e não o contrário.
+    #[test]
+    fn o_caminho_da_voz_nao_depende_de_ninguem() {
+        assert!(evaluate("seele-voz", &[]).is_empty());
+        assert_eq!(evaluate("seele-voz", &[edge("seele-audio")]).len(), 1);
+        assert_eq!(evaluate("seele-voz", &[edge("seele-proto")]).len(), 1);
+        assert!(evaluate("seele-audio", &[edge("seele-voz")]).is_empty());
     }
 
     /// A volta é uma folha: o QuickJS e mais nada. Ela não conhece o manifesto

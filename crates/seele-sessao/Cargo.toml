@@ -1,0 +1,15 @@
+[package]
+name = "seele-sessao"
+description = "A sessão como o servidor a conta: o Room, a porta do assento e o SessionInfo, sem E/S, para o desktop e o navegador."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Só o protocolo (a linha dele em `xtask/src/check_deps.rs`): é o que deixa o
+# navegador compilá-lo, e o `cargo xtask web` confere a cada vez.
+[dependencies]
+seele-proto = { path = "../seele-proto" }
+
+[lints]
+workspace = true

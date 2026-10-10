@@ -8,10 +8,12 @@ publish.workspace = true
 
 # ADR 0057: nenhuma linha do protocolo é escrita em JavaScript. Este crate é
 # onde o `postcard` mora no celular; a casca fala JSON com ele, e só move bytes
-# opacos. Ele depende do `seele-proto` e de nada mais do workspace (a linha dele
-# em `xtask/src/check_deps.rs`).
+# opacos. Ele depende do `seele-proto` e das peças sem E/S que saíram do
+# desktop para ele (a linha dele em `xtask/src/check_deps.rs`).
 [dependencies]
 seele-proto = { path = "../seele-proto" }
+# O relógio de mídia e a tabela de quem fala da voz do desktop (Tarefa 3.3).
+seele-voz = { path = "../seele-voz" }
 # A fronteira com a casca. A mesma versão do `seele-proto`, que já o usa para
 # o manifesto de MOD.
 serde_json = "1.0.151"
