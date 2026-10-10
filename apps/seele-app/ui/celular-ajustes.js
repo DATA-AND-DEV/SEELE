@@ -17,57 +17,9 @@
   const sessao = document.getElementById("tela-sessao");
   const camada = document.getElementById("tela-server");
 
-  // Para onde vai quem quer o app do SEELE (decisão da orquestradora, 09/10).
-  // Vai para o `frases.js` com o P10, ao lado das frases.
-  const PAGINA_DO_APP = "https://seele.app.br/#baixar";
-
-  // Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o P10 (Tarefa 14).
-  const PALAVRAS = Object.freeze({
-    ajustes: "AJUSTES",
-    voltarAosAjustes: "Voltar à lista de AJUSTES",
-    seuPerfil: "SEU PERFIL",
-    editarPerfil: "EDITAR PERFIL",
-    audio: "ÁUDIO",
-    esteServidor: "ESTE SERVIDOR",
-    modsDesteServidor: "MODS DESTE SERVIDOR",
-    conexao: "CONEXÃO",
-    conexaoSub: "As medidas do enlace com este servidor, também fora de sala.",
-    medidas: [["ATRASO", "tel-rtt"], ["JITTER", "tel-jit"], ["PERDA", "tel-loss"], ["CODEC", "tel-codec"],
-      ["CAMINHO", "tel-caminho"], ["UPTIME", "tel-uptime"], ["SINAL DA SALA", "tel-sinal-valor"]],
-    foraDoCelular: "O QUE O CELULAR NÃO FAZ",
-    foraDoCelularSub: "O que fica no app do SEELE, e o que é pelo SEELE no computador.",
-    baixar: "BAIXAR O APP DO SEELE",
-    grupos: [
-      ["SÓ NO APP DO SEELE", [
-        ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador.", true],
-        ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
-        ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
-        ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
-        ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
-        ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
-        ["A TELA ENTRE PESSOAS", "No navegador, a tela de quem transmite vem sempre pelo servidor, e este aparelho não a repassa a ninguém."],
-      ]],
-      ["NO COMPUTADOR", [
-        ["MODERAR", "Expulsar, banir, mover pessoas e remover mensagens de outros é pelo SEELE no computador."],
-        ["SALAS E CANAIS", "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador."],
-        ["NOME E IMAGEM DO SERVIDOR", "Pelo SEELE no computador. A aparência do servidor se edita aqui, em ESTE SERVIDOR."],
-        ["COMPARTILHAR A TELA", "O navegador do celular não grava a tela. Compartilhar é pelo SEELE no computador, e a tela de quem compartilhar aparece na chamada."],
-        ["TESTAR O MICROFONE FORA DE SALA", "O microfone do celular só abre numa sala de voz. Testar e ouvir a própria voz fora de sala é pelo SEELE no computador."],
-        ["ESCOLHER A SAÍDA DE SOM", "O navegador do celular não escolhe a saída: troque entre fone, Bluetooth e alto-falante pelo controle de som do celular."],
-      ]],
-    ],
-    comoAbre: "COMO ESTA PÁGINA ABRE",
-    comoAbreSub: "Como celular ou como computador, na próxima vez que ela abrir.",
-    abriuComoCelular: "Esta página abriu como celular.",
-    abrirComoComputador: "ABRIR COMO COMPUTADOR",
-    pelaTela: "PELO TAMANHO DA TELA",
-    valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
-    naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
-    sobre: "SOBRE",
-    sairDoServidor: "SAIR DO SERVIDOR",
-    segurarParaFalar: "SEGURAR PARA FALAR",
-    segurarNota: "fala só enquanto o dedo está no SEGURE",
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.ajustes;
 
   // A camada mora entre o topo e o que estiver embaixo (os avisos, a faixa e as
   // abas): as medidas vêm da moldura, e acompanham quando ela muda.
@@ -175,7 +127,7 @@
     return h("li", {}, botao);
   }
 
-  const valores = PALAVRAS.medidas.map(([rotulo, id]) => [id, rotulo, h("span", { class: "cel-medida-valor" })]);
+  const valores = Object.entries(PALAVRAS.medidas).map(([id, rotulo]) => [id, rotulo, h("span", { class: "cel-medida-valor" })]);
   const conexao = secaoNova("cel-secao-conexao", PALAVRAS.conexao, PALAVRAS.conexaoSub, "linhas",
     h("dl", { class: "cel-medidas" }, valores.map(([, rotulo, valor]) =>
       h("div", { class: "cel-medida" }, h("dt", { class: "rotulo", text: rotulo }), h("dd", {}, valor)))));
@@ -183,7 +135,7 @@
   const fora = secaoNova("cel-secao-fora", PALAVRAS.foraDoCelular, PALAVRAS.foraDoCelularSub, "desligar",
     PALAVRAS.grupos.map(([grupo, itens]) => h("section", { class: "cel-fora-grupo" },
       h("h3", { class: "rotulo", text: grupo }),
-      h("ul", {}, itens.map(([nome, frase, comLink]) => h("li", {},
+      h("ul", {}, Object.values(itens).map(([nome, frase, comLink]) => h("li", {},
         h("strong", { text: nome }),
         h("p", { text: frase }),
         comLink && h("a", { class: "cel-baixar", href: PAGINA_DO_APP, target: "_blank", rel: "noopener", text: PALAVRAS.baixar })))))));

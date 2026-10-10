@@ -682,3 +682,99 @@ fn o_texto_do_sistema_alcanca_todo_tamanho_do_desktop() {
         }
     }
 }
+
+// ---------------------------------------------------------------- as frases
+
+/// Os literais de texto de um código JS sem comentários, nas três aspas. Num
+/// literal de crase, cada `${…}` vira um espaço: o que se lê é o texto em volta.
+fn literais_js(codigo: &str) -> Vec<String> {
+    let mut saida = Vec::new();
+    let mut letras = codigo.chars().peekable();
+    while let Some(c) = letras.next() {
+        if !matches!(c, '"' | '\'' | '`') {
+            continue;
+        }
+        let mut literal = String::new();
+        let mut chaves = 0usize;
+        while let Some(d) = letras.next() {
+            match d {
+                '\\' => {
+                    if let Some(e) = letras.next() {
+                        literal.push(e);
+                    }
+                }
+                '$' if c == '`' && chaves == 0 && letras.peek() == Some(&'{') => {
+                    letras.next();
+                    chaves = 1;
+                    literal.push(' ');
+                }
+                '{' if chaves > 0 => chaves += 1,
+                '}' if chaves > 0 => chaves -= 1,
+                _ if chaves > 0 => {}
+                _ if d == c => break,
+                _ => literal.push(d),
+            }
+        }
+        saida.push(literal);
+    }
+    saida
+}
+
+/// Se um literal é uma frase de tela, e não um seletor, um nome de classe ou de
+/// evento: um rótulo em caixa alta (uma palavra de quatro letras ou mais, toda
+/// maiúscula), uma letra acentuada, ou uma das palavras curtas do português
+/// entre espaços. Os nomes de etiqueta do DOM que o código compara são caixa
+/// alta e não são frase.
+fn e_frase(literal: &str) -> bool {
+    const ETIQUETAS: &[&str] = &["INPUT", "TEXTAREA", "BUTTON", "SELECT"];
+    const CURTAS: &[&str] = &[
+        "de", "da", "do", "das", "dos", "o", "a", "os", "as", "é", "e", "em", "no", "na", "nos",
+        "nas", "um", "uma", "para", "pelo", "pela", "com", "que", "se", "não", "ao",
+    ];
+    if ETIQUETAS.contains(&literal) {
+        return false;
+    }
+    let palavras: Vec<&str> = literal
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let rotulo = palavras
+        .iter()
+        .any(|p| p.chars().count() >= 4 && p.chars().all(char::is_uppercase));
+    let acento = literal
+        .chars()
+        .any(|c| "áéíóúâêôãõçàÁÉÍÓÚÂÊÔÃÕÇÀ".contains(c));
+    let portugues = literal.contains(' ')
+        && literal
+            .split_whitespace()
+            .any(|p| CURTAS.contains(&p.to_lowercase().as_str()));
+    rotulo || acento || portugues
+}
+
+/// As frases das cascas do navegador moram no `frases.js` (P10): nenhum script
+/// delas escreve uma frase de tela. É a fronteira de sempre do produto (o
+/// cabeçalho do `frases.js`): uma tela nova que precise dizer algo acrescenta a
+/// frase lá, e não um dicionário próprio.
+#[test]
+fn nenhum_script_das_cascas_do_navegador_escreve_frase_de_tela() {
+    let mut escritas = Vec::new();
+    let mut lidos = 0;
+    for (nome, js) in das_cascas(".js") {
+        for literal in literais_js(&sem_comentarios_js(&js)) {
+            lidos += 1;
+            if e_frase(&literal) {
+                escritas.push(format!("{nome}: «{literal}»"));
+            }
+        }
+    }
+    assert!(
+        lidos >= 100,
+        "o guarda leu {lidos} literais: a leitura dos scripts quebrou"
+    );
+    assert!(
+        escritas.is_empty(),
+        "estas frases estão escritas nos scripts das cascas, e vão para FRASES_DO_CELULAR \
+         ou FRASES_DA_LARGA, no frases.js:\n{}",
+        escritas.join("\n")
+    );
+}
