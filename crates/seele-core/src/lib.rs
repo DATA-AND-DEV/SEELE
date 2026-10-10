@@ -176,6 +176,9 @@ pub use seele_proto::control::{
     Subsystem,
     SubsystemHealth,
     Telemetry,
+    // Reexportado porque o `seele-ffi` leva o tema do servidor ao retrato da
+    // casca (tarefa 17d da F3), e o ADR 0002 não o deixa ver `seele-proto`.
+    TemaDoServidor,
     VoiceRoomInfo,
 };
 /// A impressão digital de uma chave pública, no formato que o produto mostra.

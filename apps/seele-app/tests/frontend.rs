@@ -572,6 +572,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
 // outras frentes quando o comando nasceu. Sai quando eles passarem a
 // perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+//
+// `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
+// 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
+// commit isolado do `main.rs`, porque a F7 também mexe lá, e saiu quando a
+// gestão de MODs passou a chamá-lo com a pergunta dos dois MODs de tema.
 const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
 
 #[test]

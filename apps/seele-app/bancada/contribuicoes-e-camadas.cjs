@@ -236,6 +236,11 @@ function dialogoDeTeste() {
     camada,
     raiz: new No("div", ""),
     focarPrimeiro() {},
+    // O furo do véu (tarefa 9, Step 4b) mede retângulos, que este DOM não tem;
+    // a bancada `nucleo.cjs` o mede no navegador.
+    vigiarORecorte() {},
+    // O dono, que `fechar` e `descartar` avisam (a prévia do tema, 17g).
+    dono: {},
     solta: false,
   };
 }
@@ -469,6 +474,8 @@ function acordarTudo(no) {
     },
     soltou: false,
     calouNoDocumento: [],
+    // O dono, que `fechar` e `descartar` avisam (a prévia do tema, 17g).
+    dono: {},
   });
 
   superficie.abrir();
