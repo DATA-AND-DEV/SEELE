@@ -19,18 +19,9 @@
   const sessao = document.getElementById("tela-sessao");
   const doDesktop = (id) => document.getElementById(id);
 
-  // Vão para `FRASES_DO_CELULAR`, no `frases.js`, com o P10 (Tarefa 14).
-  const PALAVRAS = Object.freeze({
-    ajustes: "AJUSTES",
-    aqui: "VOCÊ ESTÁ AQUI",
-    comSenha: "COM SENHA",
-    lotada: "LOTADA",
-    mudo: "MUDO",
-    entrarMudo: (sala) => `Entrar mudo em ${sala}`,
-    salasECanais: "SALAS E CANAIS",
-    foraSalas: "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador.",
-    mudoNaoRespondeu: "O MUDO não respondeu, e a entrada na sala não foi feita.",
-  });
+  // As frases são do `frases.js` (P10): o `tests/celular.rs` confere que este
+  // arquivo não escreve nenhuma.
+  const PALAVRAS = FRASES_DO_CELULAR.servidor;
 
   // -------------------------------------------------------------- o topo
 

@@ -881,11 +881,14 @@ function desenharContextoDaSessao() {
   // `atualizarServer` a redesenha ao abrir e a cada 500 ms, e é o único que a
   // desenha. Escrita só ao abrir, ela dizia ESPAÇO ao lado do botão que já dizia
   // F, e o modo de antes depois de uma troca de modo (revisões do lote J).
-  const comoAbre = {
+  //
+  // A frase passa pela casca (`CASCA.fraseDoModo`, em `base.js`): o desktop a diz
+  // como está aqui, e o celular, que não tem tecla, diz o botão que se segura.
+  const comoAbre = CASCA.fraseDoModo(retrato.voice_mode, {
     PushToTalk: `microfone abre enquanto segura ${nomeDaTecla(teclaDeFalar)}`,
     VoiceActivated: "microfone abre por voz",
     Open: "microfone aberto",
-  }[retrato.voice_mode] ?? "microfone aberto";
+  }[retrato.voice_mode] ?? "microfone aberto");
   const partes = [
     sala ? `Na sala ${sala.name}` : "Fora de sala",
     retrato.muted ? "microfone mudo" : comoAbre,

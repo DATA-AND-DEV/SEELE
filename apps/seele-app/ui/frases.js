@@ -1427,3 +1427,175 @@ function fraseDasMensagensDeAppsMaisNovos(mensagens, sessoes) {
   );
 }
 
+// ---------------------------------------------- as cascas do navegador (P10)
+//
+// As frases da casca do celular e da casca larga (F8; o spec da F8, §13, e a
+// matriz de paridade). Os scripts delas não escrevem frase nenhuma: o
+// `tests/celular.rs` confere. O desktop não lê nada daqui.
+
+/** Para onde vai quem quer o app do SEELE (decisão da orquestradora, 09/10). */
+const PAGINA_DO_APP = "https://seele.app.br/#baixar";
+
+/**
+ * O aviso de fone no navegador (P9; matriz, achado E-6).
+ *
+ * O do desktop diz que o SEELE não cancela eco, e no navegador isso é falso: o
+ * eco do navegador vem ligado. O fone continua valendo pelo que o eco do
+ * navegador não pega, e a frase diz isso sem prometer o que não é do SEELE.
+ */
+const AVISO_DE_FONE_CELULAR =
+  "O navegador deste aparelho cancela o eco. Com fone, o som do alto-falante não volta para o microfone.";
+
+/**
+ * O que só o app do SEELE faz, a lista canônica da matriz: a mesma nas duas
+ * cascas, e só o aparelho que não repassa a tela muda de nome. O terceiro campo
+ * põe o link para baixar o app ao lado da frase.
+ */
+const SO_NO_APP_DO_SEELE = (aparelho) => Object.freeze({
+  hospedar: ["HOSPEDAR UM SERVIDOR", "Pôr um servidor no ar, o link de convite, a porta e o firewall ficam no app do SEELE, instalado num computador.", true],
+  portaria: ["A PORTARIA DO SEU SERVIDOR", "Aprovar quem bate, a senha e os convites ficam no app do SEELE que hospeda o servidor."],
+  mods: ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
+  pacotes: ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
+  codigo: ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
+  versoes: ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
+  telaEntrePessoas: ["A TELA ENTRE PESSOAS", `No navegador, a tela de quem transmite vem sempre pelo servidor, e ${aparelho} não a repassa a ninguém.`],
+});
+
+/** O que é pelo SEELE no computador: a outra metade da lista do celular. */
+const NO_COMPUTADOR = Object.freeze({
+  moderar: ["MODERAR", "Expulsar, banir, mover pessoas e remover mensagens de outros é pelo SEELE no computador."],
+  salasECanais: ["SALAS E CANAIS", "Criar, renomear e apagar salas de voz e canais é pelo SEELE no computador."],
+  nomeEImagem: ["NOME E IMAGEM DO SERVIDOR", "Pelo SEELE no computador. A aparência do servidor se edita aqui, em ESTE SERVIDOR."],
+  compartilhar: ["COMPARTILHAR A TELA", "O navegador do celular não grava a tela. Compartilhar é pelo SEELE no computador, e a tela de quem compartilhar aparece na chamada."],
+  testeDoMicrofone: ["TESTAR O MICROFONE FORA DE SALA", "O microfone do celular só abre numa sala de voz. Testar e ouvir a própria voz fora de sala é pelo SEELE no computador."],
+  saidaDeSom: ["ESCOLHER A SAÍDA DE SOM", "O navegador do celular não escolhe a saída: troque entre fone, Bluetooth e alto-falante pelo controle de som do celular."],
+});
+
+const FRASES_DO_CELULAR = Object.freeze({
+  voz: Object.freeze({
+    abas: { servidor: "SERVIDOR", conversa: "CONVERSA", pessoas: "PESSOAS", ajustes: "AJUSTES" },
+    secoes: "seções",
+    mic: "MIC",
+    mudo: "MUDO",
+    som: "SOM",
+    surdo: "SURDO",
+    sair: "SAIR",
+    salaDeVoz: (nome) => `Sala de voz ${nome}`,
+    abrirChamada: (nome) => `${nome}: abrir a chamada`,
+    sairDaSala: "Sair da sala de voz",
+    micAberto: "Microfone aberto. Tocar fecha.",
+    micFechado: "Microfone fechado. Tocar abre.",
+    somLigado: "Som ligado. Tocar desliga.",
+    somDesligado: "Som desligado. Tocar liga.",
+    segure: "SEGURE",
+    noAr: "NO AR",
+    segurarParaFalar: "Segurar para falar",
+    fala: (quem) => `${quem} fala`,
+    naSala: (n) => `${n} na sala`,
+    sinal: (n) => `sinal ${n}`,
+    recolher: "RECOLHER",
+    recolherChamada: "Recolher a chamada e voltar à sessão",
+    telemetria: "telemetria da chamada",
+    medidas: [["ATRASO", "tel-rtt"], ["JITTER", "tel-jit"], ["PERDA", "tel-loss"], ["CODEC", "tel-codec"]],
+  }),
+  servidor: Object.freeze({
+    ajustes: "AJUSTES",
+    aqui: "VOCÊ ESTÁ AQUI",
+    comSenha: "COM SENHA",
+    lotada: "LOTADA",
+    mudo: "MUDO",
+    entrarMudo: (sala) => `Entrar mudo em ${sala}`,
+    salasECanais: NO_COMPUTADOR.salasECanais[0],
+    foraSalas: NO_COMPUTADOR.salasECanais[1],
+    mudoNaoRespondeu: "O MUDO não respondeu, e a entrada na sala não foi feita.",
+  }),
+  conversa: Object.freeze({
+    escrever: (canal) => `escrever em #${canal}`,
+    anexar: "Anexar uma foto, um vídeo ou um arquivo",
+    renomearTitulo: "RENOMEAR O CANAL",
+    salasECanais: NO_COMPUTADOR.salasECanais[0],
+    foraSalas: NO_COMPUTADOR.salasECanais[1],
+  }),
+  folhas: Object.freeze({
+    senhaDaSala: "SENHA DA SALA",
+    pedeSenha: (sala) => `${sala} pede senha para entrar.`,
+    senha: "SENHA",
+    entrar: "ENTRAR",
+    agoraNao: "AGORA NÃO",
+    fechar: "FECHAR",
+    mensagemDe: (quem, hora) => `${quem} · ${hora}`,
+    copiar: "COPIAR O TEXTO",
+    apagarMinha: "APAGAR A MINHA MENSAGEM",
+    remover: "REMOVER",
+    foraRemover: "Remover a mensagem de outra pessoa é pelo SEELE no computador.",
+    sinal: "SINAL",
+    volume: (n) => `VOLUME DESTA PESSOA · ${n}%`,
+    volumeDe: (quem) => `volume de ${quem}`,
+    moderar: "MODERAR",
+    foraModerar: "Expulsar, banir e mover pessoas é pelo SEELE no computador.",
+    anexar: "ANEXAR",
+    midia: "FOTO OU VÍDEO",
+    arquivo: "ARQUIVO",
+  }),
+  ajustes: Object.freeze({
+    ajustes: "AJUSTES",
+    voltarAosAjustes: "Voltar à lista de AJUSTES",
+    seuPerfil: "SEU PERFIL",
+    editarPerfil: "EDITAR PERFIL",
+    audio: "ÁUDIO",
+    esteServidor: "ESTE SERVIDOR",
+    modsDesteServidor: "MODS DESTE SERVIDOR",
+    conexao: "CONEXÃO",
+    conexaoSub: "As medidas do enlace com este servidor, também fora de sala.",
+    medidas: Object.freeze({
+      "tel-rtt": "ATRASO",
+      "tel-jit": "JITTER",
+      "tel-loss": "PERDA",
+      "tel-codec": "CODEC",
+      "tel-caminho": "CAMINHO",
+      "tel-uptime": "UPTIME",
+      "tel-sinal-valor": "SINAL DA SALA",
+    }),
+    foraDoCelular: "O QUE O CELULAR NÃO FAZ",
+    foraDoCelularSub: "O que fica no app do SEELE, e o que é pelo SEELE no computador.",
+    baixar: "BAIXAR O APP DO SEELE",
+    grupos: Object.freeze([["SÓ NO APP DO SEELE", SO_NO_APP_DO_SEELE("este aparelho")], ["NO COMPUTADOR", NO_COMPUTADOR]]),
+    comoAbre: "COMO ESTA PÁGINA ABRE",
+    comoAbreSub: "Como celular ou como computador, na próxima vez que ela abrir.",
+    abriuComoCelular: "Esta página abriu como celular.",
+    abrirComoComputador: "ABRIR COMO COMPUTADOR",
+    pelaTela: "PELO TAMANHO DA TELA",
+    valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
+    naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
+    sobre: "SOBRE",
+    sairDoServidor: "SAIR DO SERVIDOR",
+    segurarParaFalar: "SEGURAR PARA FALAR",
+    segurarNota: "fala só enquanto o dedo está no SEGURE",
+    // Na faixa de contexto de CONFIGURAÇÕES, no lugar do «segura ESPAÇO».
+    modoSegurar: "microfone abre só enquanto o dedo está no SEGURE",
+  }),
+});
+
+const FRASES_DA_LARGA = (() => {
+  const soNoApp = SO_NO_APP_DO_SEELE("este computador");
+  return Object.freeze({
+      proposito: "Voz, vídeo e texto entre pessoas, sem servidor de ninguém no meio. Entre no servidor de alguém pelo link que a pessoa mandou.",
+      hospedar: "Hospedar um servidor é pelo app do SEELE. ",
+      baixar: "BAIXAR O APP DO SEELE",
+      atualizacao: "A página vem da origem: uma versão nova chega ao abrir a página de novo.",
+      versoes: soNoApp.versoes[1],
+      malha: soNoApp.telaEntrePessoas[1],
+      tecla: "No navegador, a tecla de falar só vale com esta página em foco: o navegador não tem atalho para o computador inteiro.",
+      comoAbre: "COMO ESTA PÁGINA ABRE",
+      comoAbreSub: "Como computador ou como celular, na próxima vez que ela abrir.",
+      abriuComoComputador: "Esta página abriu como computador.",
+      abrirComoCelular: "ABRIR COMO CELULAR",
+      pelaTela: "PELO TAMANHO DA TELA",
+      valeNaProxima: "Vale na próxima vez que a página abrir. Abrir de novo agora sai da sessão.",
+      naoGuardou: "Este navegador não deixou guardar a escolha: a página continua abrindo pelo tamanho da tela.",
+      foraTitulo: "O QUE O NAVEGADOR NÃO FAZ",
+      foraSub: "O que fica no app do SEELE, instalado num computador.",
+      grupo: "SÓ NO APP DO SEELE",
+      itens: soNoApp,
+  });
+})();

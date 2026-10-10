@@ -93,6 +93,33 @@ function elemento(tag, classe, texto) {
   return nodo;
 }
 
+// ------------------------------------------------- a casca do navegador (P5)
+//
+// O que a casca do celular troca no desktop, e só isto (spec da F8, §9.4). Cada
+// campo nasce com o comportamento de hoje, e o desktop, que nunca os troca, não
+// muda: `celular-*.js` só roda com a marca dele na raiz.
+//
+//   - `depoisDeDesenhar`: quem redesenha o que é do celular depois de cada
+//     quadro (P6, no fim de `desenhar`);
+//   - `pedirSenhaDaSala`: a pergunta da senha de uma sala, que devolve a senha
+//     ou `null` quando a pessoa desiste (P7);
+//   - `enterEnvia`: o Enter do compositor envia; no celular o Return quebra a
+//     fileira, e só o ENVIAR envia (P8);
+//   - `avisoDeFone`: a frase do aviso de fone (P9);
+//   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
+//     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
+//     a frase, com o nome da tecla, continua no `tela-server.js`.
+//
+// Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
+// campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
+const CASCA = Object.seal({
+  depoisDeDesenhar: [],
+  pedirSenhaDaSala: async () => window.prompt("Senha da sala"),
+  enterEnvia: true,
+  avisoDeFone: () => AVISO_DE_FONE,
+  fraseDoModo: (_modo, doDesktop) => doDesktop,
+});
+
 // --------------------------------------------------------------- o snapshot
 
 async function atualizar() {

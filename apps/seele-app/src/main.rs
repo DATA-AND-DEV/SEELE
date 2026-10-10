@@ -9391,13 +9391,15 @@ fn estado_do_servidor_de(
 /// configurações perguntar a cada volta do laço dela.
 #[tauri::command]
 fn estado_do_servidor(session: State<'_, Session>) -> Result<EstadoDoServidor, &'static str> {
-    let aberto = session
-        .hospedagem
+    // O servidor guardado, que é o da seção ESTE SERVIDOR; a sala pessoal não
+    // tem configurações e não entra aqui.
+    let hospedagens = session
+        .hospedagens
         .lock()
         .map_err(|_| "HospedagemIndisponivel")?;
     Ok(estado_do_servidor_de(
-        aberto
-            .as_ref()
+        hospedagens
+            .do_guardado()
             .map(seele_server::hospedagem::Hospedagem::estado),
     ))
 }

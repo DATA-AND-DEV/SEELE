@@ -406,7 +406,9 @@ function desenharAvisoDeFone(snapshot) {
   foneJaAvisado = true;
   geracaoDoAvisoDeFone = geracaoDaSessao;
   $("aviso-fone").hidden = false;
-  $("aviso-fone-texto").textContent = AVISO_DE_FONE;
+  // A frase é da casca (P9, `CASCA` em `base.js`): no desktop, a `AVISO_DE_FONE`;
+  // no navegador, onde o eco do navegador vem ligado, a dele.
+  $("aviso-fone-texto").textContent = CASCA.avisoDeFone();
 }
 
 /**
@@ -526,6 +528,9 @@ function desenhar(snapshot) {
   // saiu da sala, o canal que sumiu — para, como o `<audio>` parava. Ver
   // `calarOsSonsQueSairamDaTela`, em `base.js`.
   calarOsSonsQueSairamDaTela();
+  // Por último, o que a casca do navegador redesenha por cima deste quadro (P6,
+  // `CASCA` em `base.js`). No desktop a lista está vazia.
+  for (const f of CASCA.depoisDeDesenhar) f(snapshot);
 }
 
 /**
@@ -3811,8 +3816,17 @@ async function alternarCanal(evento) {
         // não confirma a entrada (`admissao::voice_room_liberado`), então uma
         // senha errada só se descobre pela recusa que chega depois, em
         // `desenharAviso`.
-        const senha =
-          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;
+        //
+        // A pergunta é da casca (P7, `CASCA` em `base.js`): no desktop, o mesmo
+        // `window.prompt`; no celular, uma folha com o nome da sala. E desistir
+        // da senha desiste de entrar. Antes, o «cancelar» do `prompt` ainda
+        // mandava o pedido sem senha, e a resposta ao cancelar era a recusa do
+        // servidor (achado da F8, 09/10).
+        const pedeSenha = item.dataset.senha_necessaria === "sim";
+        const senha = pedeSenha
+          ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? "")
+          : null;
+        if (pedeSenha && senha === null) return;
         await invoke("enter_voice_room", { voiceRoom: voice_room, senha });
         entrou = true;
       }
@@ -4541,8 +4555,13 @@ window.addEventListener("paste", (evento) => {
 // `isComposing`: quem digita com IME — japonês, coreano, chinês — usa Enter
 // para confirmar a palavra que está montando. Mandar ali cortaria a frase no
 // meio, e a tecla que confirma viraria a tecla que erra.
+//
+// `CASCA.enterEnvia` (P8, em `base.js`): no celular o Return quebra a fileira, e
+// só o ENVIAR envia. O teclado do aparelho não tem Shift+Enter, e uma mensagem
+// de duas fileiras não teria como ser escrita.
 $("campo-mensagem").addEventListener("keydown", (evento) => {
   if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;
+  if (!CASCA.enterEnvia) return;
   evento.preventDefault();
   enviar(evento);
 });

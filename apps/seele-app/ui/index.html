@@ -2,6 +2,13 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<!--
+  A meta de viewport é do navegador do celular (P1): sem ela, ele desenha a
+  página a 980 px e a encolhe. No app ela é inerte: o desktop sai igual pixel a
+  pixel com e sem ela no Chromium, no WebKit e no WKWebView do app de verdade
+  (medido na F8; docs/evidencias/f8-tarefa-16/).
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEELE</title>
 <!--
   Favicon é a forma muda: o símbolo sozinho, redesenhado para a faixa de 16px —
