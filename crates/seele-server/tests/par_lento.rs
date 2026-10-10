@@ -275,18 +275,50 @@ async fn desfecho(falante: &mut Par) -> (Desfecho, Vec<u64>) {
     }
 }
 
+/// O canal só da testemunha, criado antes da rajada para o ouvinte poder
+/// assiná-lo.
+async fn criar_testemunha(servidor: &Daemon) -> Result<ChannelId> {
+    let guarda = servidor.server().persistence.lock().await;
+    Ok(Channels::new(&guarda).create_channel("testemunha")?.id)
+}
+
+/// Põe o ouvinte nos `canais` e espera o `Pong` de um `Ping` atrás dos
+/// pedidos: a sessão lê em ordem, então o `Pong` diz que ela já o pôs em cada
+/// um, ou que recusou algum.
+async fn entrar(ouvinte: &mut Par, canais: &[ChannelId]) -> Result<()> {
+    for &channel in canais {
+        frame::write(&mut ouvinte.envio, &ClientMessage::JoinChannel { channel }).await?;
+    }
+    frame::write(
+        &mut ouvinte.envio,
+        &ClientMessage::Ping {
+            timestamp: FIM_DA_RAJADA,
+        },
+    )
+    .await?;
+    loop {
+        match frame::read::<ServerMessage>(&mut ouvinte.recebe).await? {
+            ServerMessage::Pong { timestamp } if timestamp == FIM_DA_RAJADA => return Ok(()),
+            ServerMessage::Alert { reason, .. } => {
+                anyhow::bail!("o ouvinte não entrou num dos canais {canais:?}: {reason:?}")
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Espera o escritor gravar tudo o que está na fila dele agora.
 ///
 /// O escritor é uma fila só, gravada em ordem, e anuncia no barramento cada
-/// mensagem depois do lote dela: o anúncio de uma testemunha posta agora, num
+/// mensagem depois do lote dela: o anúncio de uma testemunha posta agora, no
 /// canal só dela, sai depois de gravado tudo o que entrou antes. Sem prazo e
 /// sem contar com o relógio de 200 ms do lote.
-async fn esperar_o_escritor(servidor: &Daemon, autor: PersonId) -> Result<()> {
+async fn esperar_o_escritor(
+    servidor: &Daemon,
+    autor: PersonId,
+    testemunha: ChannelId,
+) -> Result<()> {
     let mut barramento = servidor.server().events.subscribe();
-    let testemunha = {
-        let guarda = servidor.server().persistence.lock().await;
-        Channels::new(&guarda).create_channel("testemunha")?.id
-    };
     servidor
         .server()
         .post(PendingMessage {
@@ -355,22 +387,18 @@ async fn gravadas_por_falante(servidor: &Daemon) -> Result<Vec<Vec<usize>>> {
 #[tokio::test(flavor = "multi_thread")]
 async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
     let (endereco, servidor) = server().await?;
+    let testemunha = criar_testemunha(&servidor).await?;
 
     // O ouvinte anuncia uma janela pequena e para de ler no instante seguinte.
+    // Ele assina a LINE e o canal da testemunha: a testemunha é o último evento
+    // do barramento, e é até ela — ou até a despedida — que ele lê depois.
     let mut ouvinte = abrir(endereco, 1, 16 * 1024).await?;
-    frame::write(
-        &mut ouvinte.envio,
-        &ClientMessage::JoinChannel {
-            channel: ChannelId(LINE),
-        },
+    tokio::time::timeout(
+        SEGURANCA,
+        entrar(&mut ouvinte, &[ChannelId(LINE), testemunha]),
     )
-    .await?;
-    // O `Pong` diz que a sessão já pôs o ouvinte no canal: daqui em diante,
-    // tudo o que for gravado nele é dele também.
-    let (entrou, _) = tokio::time::timeout(SEGURANCA, desfecho(&mut ouvinte))
-        .await
-        .expect("o ouvinte não teve o Pong: o servidor travou");
-    assert_eq!(entrou, Desfecho::LeuTudo, "o ouvinte não entrou no canal");
+    .await
+    .expect("o ouvinte não teve o Pong: o servidor travou")?;
 
     // E agora a sala inteira fala de uma vez.
     let mut falantes = Vec::new();
@@ -417,7 +445,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
 
     // E o escritor gravou tudo o que as sessões puseram na fila dele.
     let autor = falantes.first().expect("há falantes").pessoa;
-    tokio::time::timeout(SEGURANCA, esperar_o_escritor(&servidor, autor))
+    tokio::time::timeout(SEGURANCA, esperar_o_escritor(&servidor, autor, testemunha))
         .await
         .expect("o escritor não chegou à testemunha: o servidor travou")?;
 
@@ -479,31 +507,43 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
         "a contagem do canal e as mensagens lidas dele discordam"
     );
 
-    // O ouvinte volta a ler, até ter tudo o que foi gravado ou a despedida. Sem
-    // prazo por leitura: um silêncio não distingue «acabou» de «esta linha ficou
-    // fora de cena».
+    // O ouvinte volta a ler, até a testemunha ou a despedida. Sem prazo por
+    // leitura: um silêncio não distingue «acabou» de «esta linha ficou fora de
+    // cena». E sem esperar «tudo»: a sessão escreve na ordem do barramento, e a
+    // testemunha é o evento mais novo dele, então ela chegar sem a despedida
+    // quer dizer que o que faltou da LINE não vem mais. Era assim que a
+    // despedida calada só reprovava pelo prazo de segurança, em 120 s e sem
+    // número (achado da revisão do lote Y).
     let mut chegaram = 0_usize;
     let mut desligado = None;
+    let mut fim = None;
     tokio::time::timeout(SEGURANCA, async {
-        while chegaram < somadas {
+        loop {
             match frame::read::<ServerMessage>(&mut ouvinte.recebe).await {
-                Ok(ServerMessage::MessageReceived { body, .. }) if body.len() >= CORPO - 4 => {
+                Ok(ServerMessage::MessageReceived { channel, .. }) if channel == testemunha => {
+                    fim = Some("a testemunha".to_owned());
+                    break;
+                }
+                Ok(ServerMessage::MessageReceived { channel, body, .. })
+                    if channel == ChannelId(LINE) && body.len() >= CORPO - 4 =>
+                {
                     chegaram += 1;
                 }
                 Ok(ServerMessage::Disconnecting { reason }) => {
                     desligado = Some(reason);
+                    fim = Some("a despedida".to_owned());
                     break;
                 }
                 Ok(_) => {}
                 Err(erro) => {
-                    println!("o fluxo terminou com {chegaram}/{somadas}: {erro}");
+                    fim = Some(format!("o fluxo terminou: {erro}"));
                     break;
                 }
             }
         }
     })
     .await
-    .expect("o ouvinte não teve nem tudo nem a despedida: o servidor travou");
+    .expect("o ouvinte não teve nem a testemunha nem a despedida: o servidor travou");
 
     let perdidos = servidor.server().atrasos.eventos();
     let desligados = desfechos
@@ -512,7 +552,8 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
         .count();
     println!(
         "ditas {ditas}, gravadas {gravadas}, chegaram {chegaram}, perdidos no barramento \
-         {perdidos}, ouvinte desligado {desligado:?}, falantes desligados {desligados}"
+         {perdidos}, ouvinte desligado {desligado:?}, falantes desligados {desligados}, \
+         a leitura do ouvinte acabou em {fim:?}"
     );
 
     // Uma das duas, e nunca a terceira: ou chegou tudo, ou o servidor disse, com
@@ -522,7 +563,7 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     assert!(
         chegaram == somadas || desligado == Some(DisconnectReason::FellBehind),
         "pendência nº 1: {chegaram} de {somadas} chegaram e o servidor não disse nada — \
-         {perdidos} eventos morreram no barramento"
+         {perdidos} eventos morreram no barramento (a leitura acabou em {fim:?})"
     );
 
     // E o que houve ficou contado. Desligamento sem número por trás seria a
