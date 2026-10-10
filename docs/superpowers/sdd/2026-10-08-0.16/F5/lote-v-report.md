@@ -241,7 +241,14 @@ O conserto:
   terminou» sem dizer por quê.
 
 **O conserto: `largar_sem_segurar`, chamado no lugar do `lock()`, ainda antes da
-despedida.** O microfone continua fechando antes de o servidor saber da saída.
+despedida.** São duas situações (corrigido na rodada 1, achado 5: esta frase
+dizia que o microfone sempre fechava antes da despedida):
+- **com o cadeado livre**, que é o caso comum, a voz cai antes da despedida, e o
+  microfone fecha antes de o servidor saber da saída;
+- **com o cadeado ocupado**, a despedida sai primeiro, e o microfone segue aberto
+  até o cadeado soltar.
+
+Em detalhe:
 - **Cadeado livre:** larga na hora, pelo `try_lock`. Envenenado, larga também.
 - **Cadeado preso:** escreve um `warn!` que diz por quê, e larga numa thread com
   nome (`seele-larga-a-voz`, não `spawn_blocking`).
@@ -350,6 +357,9 @@ Tudo com `unset CARGO_TARGET_DIR`, no fim do lote:
    - Fechar de vez pediria soltar a tecla da velha ao tirá-la do lugar em
      `na_volta` (`segurar(false)` antes de `reabrir`). Não foi feito, para
      manter o diff no que o brief pede. Fica como sugestão.
+   - **Feito na rodada 1** (achado 1, `1ff46c85`), e mais largo do que esta nota
+     media. A velha não vive só até o `instalar`: vive até o `reopen` voltar, e
+     manda pelo canal velho, vivo até o prazo de ociosidade.
 3. **No caso preso do M-4, a voz pode viver um pouco além do fim de `drive`:**
    até o driver soltar a troca. O microfone fica aberto nesse intervalo, sem
    sessão, e o log diz por quê. É a troca que o brief ofereceu («largue a voz
@@ -363,3 +373,181 @@ Tudo com `unset CARGO_TARGET_DIR`, no fim do lote:
      rodava na máquina ao mesmo tempo, de outro worktree. Ninguém mexeu nele.
 5. O traço `VozViva` ganhou `segurar`. As duas vozes de mentira do arquivo o
    implementam, e a de `a_voz_quando_o_enlace_volta` não faz nada com ele.
+
+## Rodada 1 de conserto
+
+FIX_BASE `b26b6902`. A revisão deu o lote como conforme, sem Crítico nem
+Importante, e pediu os Menores que mexem com o microfone, os baratos, e, por
+ordem da orquestradora, o achado 6.
+- Um commit por item, todos em `crates/seele-ffi/src/lib.rs`.
+- O `tela-chamada.js` foi liberado para o achado 6, e não precisou mudar (ver
+  abaixo). Nada mais em `apps/`, nada no núcleo nem no fio.
+- As reversões seguem o mesmo método: o trecho trocado por um script que exige
+  uma ocorrência só, o teste rodado, o arquivo devolvido da cópia, e `cmp`
+  idêntico em todas.
+
+| commit | achado | o que muda |
+|---|---|---|
+| `1ff46c85` | 1 | na volta, a voz velha sai do lugar calada e com a tecla solta |
+| `329ea269` | 2 | a tecla guardada volta a solta quando a voz fecha porque a pessoa saiu da sala |
+| `f9eff4cb` | 3 | o aviso do fim da sessão com o cadeado ocupado fica neutro |
+| `d2ccb6e6` | 4 | `largar` trata o cadeado envenenado, e com ela a thread do M-4 |
+| `d43d19d2` | 5 (docs) | o fim da sessão, `largar_sem_segurar` e `seguir_os_volumes` dizem o que vale hoje |
+| `c344f04f` | 7 | as asserções sem mensagem ganham a frase do que quebra |
+| `2dfe418f` | 6 | sem voz viva, `som_da_tela` mostra o som da tela guardado |
+
+### Achado 1: a voz velha durante a reabertura (`1ff46c85`)
+
+Em `na_volta`, sob o cadeado da voz e antes de `reabrir_voz_na_reconexao`, a velha
+é vestida com o guardado, mas com `mudo = true` e `tecla_segura = false`
+(`vestir_inteira`).
+- A velha segue viva até o `reopen` voltar, na thread `seele-abre-audio` (a vez
+  do driver, e depois a abertura do aparelho). Enquanto isso, ela manda pelo
+  `MediaChannel` da conexão que caiu.
+- A falha fica do lado fechado. A reaberta herda isso por `carregar_controles`,
+  e `instalar` a veste com o guardado.
+
+**A metade do mudo saiu barata, do mesmo jeito**, e entrou junto. Um mudo pedido
+durante a reabertura não alcança a velha, fora do lugar, e calá-la ao sair cobre
+isso. Cobre também a ativação por voz e o modo aberto, que transmitem sem tecla
+nenhuma.
+
+**A prova:** `na_volta_a_voz_velha_sai_do_lugar_calada_e_com_a_tecla_solta`, no
+estilo do c6.
+- A velha que vai para a reabertura fica guardada no teste.
+- Durante a reabertura, a pessoa solta a tecla e pede o mudo.
+- Depois, nem a velha nem a reaberta (olhada antes de `chegou`) podem estar com a
+  tecla segura, e a velha tem de estar calada.
+- Vermelho: «a voz velha seguiu com a tecla segura durante a reabertura: ela
+  transmite pela conexão que caiu depois de a pessoa soltar a tecla».
+
+| reversão | reprovou |
+|---|---|
+| sem o bloco que cala a velha | «a voz velha seguiu com a tecla segura durante a reabertura…» |
+| só sem `calada.mudo = true` | «a voz velha seguiu sem mudo durante a reabertura: quem se mutou enquanto ela reabria continua no ar pela conexão que caiu» |
+
+### Achado 2: a tecla que atravessa a saída da sala (`329ea269`)
+
+No `Fechar` da porta (D-52), antes de largar a voz, `segurar_a_tecla(false)`:
+a tecla guardada volta a solta, e a voz que fecha também a solta.
+
+**A prova:** `a_tecla_segura_nao_atravessa_a_saida_da_sala`, que é o c7.
+- Com a tecla segura, sair da sala e entrar de novo abre a voz com a tecla
+  solta.
+- E uma pressão no «ABRINDO» da entrada seguinte vale.
+- O c2 (`apertar_a_tecla_durante_a_primeira_abertura_vale_quando_a_voz_chega`)
+  segue verde.
+- Vermelho: «a soltura que a janela perdeu numa sala entrou na seguinte: o
+  microfone abre transmitindo, sem a pessoa ter apertado nada nesta sala».
+
+| reversão | reprovou |
+|---|---|
+| sem a linha no `Fechar` | o c7, com a frase acima |
+| o conserto no lugar errado: a tecla zerada em `instalar` | os dois do «ABRINDO»: o c2 («…no «ABRINDO» e a voz abriu com ela solta…») e a segunda metade do c7 («a tecla apertada no «ABRINDO» da sala seguinte foi esquecida…») |
+
+**Consequência.** Quem segura a tecla durante um reinício do servidor perde a
+fala: ali o `olhar` fecha a voz, e a que abre do zero vem com a tecla solta.
+Para falar, a pessoa solta e aperta de novo. É o lado fechado, o mesmo de antes
+do lote.
+
+### Achado 3: o aviso do M-4 neutro (`f9eff4cb`)
+
+O aviso dizia «troca de aparelho esperando o driver» sempre que o `try_lock`
+falhava. Agora diz:
+
+> «o cadeado da voz estava ocupado no fim da sessão: a voz cai numa thread à
+> parte assim que ele soltar, e até lá o microfone segue aberto; a despedida sai
+> sem esperar por ela»
+
+O teste do M-4 passou a exigir essa frase e a recusar «troca de aparelho» nela.
+- Vermelho, contra o aviso de antes: «o fim da sessão largou a voz por fora e o
+  log não diz…».
+- Reversão (a causa posta de volta na frase nova): «o aviso do fim da sessão diz
+  que uma troca de aparelho prendia a voz sem saber quem a prendia…».
+
+### Achado 4: o veneno na thread do M-4 (`d2ccb6e6`)
+
+`VozDaSala::largar` recupera o cadeado envenenado, como o ramo do `try_lock` já
+fazia. Vale também para o `Fechar` da porta, que usa o mesmo `largar`.
+
+**A prova:** `a_voz_cai_mesmo_com_o_cadeado_envenenado_na_thread_que_a_larga`.
+- Quem segura o cadeado entra em pânico com ele na mão, depois de
+  `largar_sem_segurar` ter caído no caminho da thread.
+- Vermelho: «com o cadeado envenenado, a thread que larga a voz desistiu: a voz
+  ficou de pé depois do fim da sessão, com o microfone aberto».
+- Reversão (`largar` de volta ao `if let Ok`): a mesma frase.
+
+### Achado 5: os docs (`d43d19d2`)
+
+- O comentário do fim de `drive` e o doc de `largar_sem_segurar` dizem as duas
+  situações:
+  - com o cadeado livre, a voz cai antes da despedida;
+  - com ele ocupado, a despedida sai primeiro, e o microfone segue aberto até
+    ele soltar.
+- O doc de `seguir_os_volumes` diz o que vale hoje:
+  - `instalar` zera os aplicados só na voz aberta do zero, e a reaberta os
+    mantém;
+  - o reinício do servidor deixou de ser o motivo, porque ali a voz abre do
+    zero. O caso é a volta com resgate em que o número muda de dono, que o fio
+    não proíbe.
+- O relatório, seção M-4, foi corrigido.
+
+### Achado 7: as mensagens (`c344f04f`)
+
+As duas asserções apontadas ganham a frase do que quebra:
+- o `ssrc` 701 no teste da soltura;
+- o «ABRINDO» no c2.
+
+O mesmo vale para a do «ABRINDO» que o c7 desta rodada acrescentou.
+
+### Achado 6: o botão do som da tela sem voz (`2dfe418f`)
+
+**Na FFI.** Sem voz viva, `Connection::som_da_tela` devolve o guardado, por
+`VozDaSala::som_da_tela_escolhido`. É o mesmo desenho de `controles_da_voz`, e a
+sessão sem áudio continua `None`.
+
+**Na janela, nada mudou.** `desenharSomDoPalco` (`tela-chamada.js`) já desenha o
+que lê, e só para quando lê `null`. O clique em SILENCIAR chama `calar_a_tela` e
+depois redesenha. O `input` do volume, quando desfaz o mudo, também redesenha.
+Com o guardado chegando, o botão segue a escolha sem uma linha nova na janela.
+As bancadas que dão `som_da_tela` (`conversa-com-estado`, `tema-claro-legivel`,
+`compartilhar-por-identidade`) dão valores fixos, e não dependem do `None`. Sem
+mudança na janela, `--test frontend` e `check-runtime` não foram rodados.
+
+**As provas.**
+- `sem_voz_viva_o_som_da_tela_mostra_o_que_ficou_guardado` (pela `Connection`).
+  - SILENCIAR sem voz dá `Some { volume: 1.0, calada: true }`, e o volume
+    segue o mesmo caminho.
+  - A sessão sem áudio dá `None`.
+  - Vermelho: «SILENCIAR sem voz viva gravou o mudo da tela, e o botão relê
+    nada…», `left: None`.
+- `o_botao_sem_voz_e_a_voz_que_abre_dizem_o_mesmo_som_da_tela` (a `Voz` de
+  mentira).
+  - O que o botão lê fora de sala é igual ao que a voz veste ao abrir.
+  - Vermelho: «o botão que a janela desenha sem voz e a voz que abre depois
+    discordam do som da tela…», `left: None`.
+
+| reversão | reprovou |
+|---|---|
+| `som_da_tela()` de volta a `None` sem voz | «SILENCIAR sem voz viva gravou o mudo da tela, e o botão relê nada…» |
+| a sessão sem áudio também respondendo | «numa sessão sem áudio o som da tela aparece para ajustar, e nenhuma voz vai tocá-lo» |
+
+### O que rodou na rodada 1
+
+- `cargo test -p seele-ffi --lib`: **180 passaram, 1 ignorado** (5 novos).
+- `cargo test -p seele-core --lib`: **523 passaram**.
+- `cargo test -p xtask --test log_com_segundo_despachante`: **10 passaram**.
+- `cargo fmt --all -- --check` e `cargo clippy -p seele-core -p seele-ffi
+  --all-targets --all-features -- -D warnings`: limpos, com os arquivos tocados
+  antes do clippy.
+- **A conformidade**, um arquivo por vez, com `-- --test-threads=1` e nenhum
+  outro binário dela rodando:
+  - `voz_na_reconexao`: **1 passou**;
+  - `a_recusa_nao_tira_da_sala`: **5 passaram**;
+  - `saida_com_despedida`: **3 passaram**.
+
+### Fora desta rodada
+
+A ressalva do cadeado de ganhos envenenado fica registrada como a revisão
+pediu. Com o cadeado de `aplicados` envenenado, os aplicados preservados de uma
+reaberta podem mentir.
