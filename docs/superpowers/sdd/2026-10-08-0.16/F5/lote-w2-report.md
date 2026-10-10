@@ -17,8 +17,9 @@ local: sem push, tag nem release. Sem conformidade.
 | `7cd7d98c` | rodada da revisão, 2 | só comentário: o da linha de etapa no `finally` corrige o motivo de ela ter ficado fora (ver 2, «A linha de etapa») |
 | `b4dcf282` | — | o relatório da rodada 1 da revisão |
 | `525b1907` | rodada 2 da revisão, I1 | a tentativa substituída desiste antes de cada apagar do CONECTAR (depois do `apelido_local` e depois da pergunta do nome), e registra; o `finally` da pergunta do nome confere a tentativa; a cena `oConectarTemDono` (bloco próprio); o guarda `so_a_tentativa_mais_nova_mexe_no_conectar`, que substitui a parte 5 do guarda da rodada 1 |
-| `9a62a8f4` | rodada 2 da revisão, M1 — **EM CURSO, NÃO RODADO** | `batendoDaEspera` guarda o número da tentativa da batida, e só a falha da própria batida se cala em `levarParaAEspera`, indo ao `seele.log`; a cena `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio). Escrito durante a pausa de medição de CPU: nada compilado, nada rodado |
-| este | — | o relatório da rodada 2, com o que falta rodar |
+| `9a62a8f4` | rodada 2 da revisão, M1 | `batendoDaEspera` guarda o número da tentativa da batida, e só a falha da própria batida se cala em `levarParaAEspera`, indo ao `seele.log`; a cena `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio). Commitado como «em curso, não rodado» durante a pausa de medição de CPU; **verde depois dela**, sem mudar uma linha (ver 7) |
+| `4e6d2dac` | — | o relatório da rodada 2, com o que faltava rodar |
+| este | — | o relatório da rodada 2 rodada: o M1 verde, as reversões R6 a R11 |
 
 **O que não mudou.** Nada em `crates/`, no fio
 (`crates/seele-proto/src/{control,version,media,screen}.rs` intocados), no
@@ -280,10 +281,9 @@ meio, nada mais roda entre a conferência e o apagar); há ao menos dois de cada
 e o `finally` do `connect` devolve o botão.
 
 **Verde** em `525b1907`: a `ajustes-v013` inteira (com os três casos) e
-`--test frontend`, 288 de 288. As reversões R6 a R9 estão escritas e **ainda
-não rodaram** (ver 6).
+`--test frontend`, 288 de 288. As reversões R6 a R9 estão em 6.
 
-### A batida da espera (rodada 2 da revisão, M1, `9a62a8f4`, EM CURSO, NÃO RODADO)
+### A batida da espera (rodada 2 da revisão, M1, `9a62a8f4`)
 
 **O defeito, anterior ao W2** (medido pela revisão, igual na base). A espera
 bate de novo sozinha (`baterDeNovo`). Quem sai dela pela porta com uma batida
@@ -293,7 +293,8 @@ falha que chegasse com a batida no ar. Quem saía e apertava HOSPEDAR AQUI
 tinha a recusa da entrada nova calada, sem tela e sem registro. Depois do W2,
 só a tentativa mais nova chega a esse ramo, e era justamente ela que sumia.
 
-**O conserto escrito** (sem rodar):
+**O conserto** (escrito durante a pausa, rodado depois dela sem mudar uma
+linha):
 - `batendoDaEspera` guarda o número da tentativa da batida (ou `null`).
   `baterDeNovo` o lê de `tentativas` logo depois de chamar `conectar`, que
   conta a tentativa antes da primeira espera (o guarda da credencial cobra
@@ -308,7 +309,7 @@ só a tentativa mais nova chega a esse ramo, e era justamente ela que sumia.
 muda quem é calado. A batida largada continua calada na tela, que é o que a
 espera prometia; a entrada nova passa a falar.
 
-**A cena escrita** `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio):
+**A cena** `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio):
 1. a sonda do revisor: a espera aberta por `AdmissionPending` em
    `192.0.2.19:8384`; `baterDeNovo()` com o servidor lento (1,5 s); aos
    100 ms `voltarParaAEntrada()`; aos 200 ms `hospedar()`, com o servidor daqui
@@ -318,10 +319,19 @@ espera prometia; a entrada nova passa a falar.
 2. a batida sozinha: a pessoa sai da espera e não faz mais nada; a batida
    volta calada na tela e deixa no registro uma linha de aviso com o motivo.
 
-**O que se espera e falta medir**: na ponta `525b1907`, a cena reprova no
-caso 1 (a linha vermelha calada); com o código de `9a62a8f4`, fica verde. As
-reversões R10 (a bandeira volta a ser um sim) e R11 (o ramo cala sem
-registrar) estão planejadas e não rodaram.
+**O vermelho**, com o `tela-auth.js` e o `tela-boot.js` de `525b1907` no
+lugar (a reversão do commit; os dois voltaram idênticos aos de `9a62a8f4`,
+conferidos com `cmp` contra a cópia e contra `git show HEAD:`, e tocados): a
+`ajustes-v013` reprova no caso 1 com «a pessoa saiu da espera com uma batida
+no ar e apertou HOSPEDAR AQUI; a entrada nova foi recusada («SERVIDOR
+LOTADO») e a linha vermelha ficou calada: a batida no ar calou a falha de
+outra tentativa, sem tela e sem registro». Numa cópia da cena que não parava
+(apagada depois), o caso 2 também reprova lá: «a batida que voltou depois de a
+pessoa sair da espera foi calada na tela sem deixar uma linha (e uma só) no
+seele.log: []».
+
+**Verde** com os de `9a62a8f4`: a cena sozinha e a `ajustes-v013` inteira.
+As reversões R10 e R11 estão em 6.
 
 ### A linha de etapa: o que foi medido e o que falta (fora do lote)
 
@@ -473,33 +483,43 @@ cada uma.
   com «o `finally` do `connect` deixou de devolver o botão que a entrada
   apaga…».
 
-### O que falta rodar (rodada 2, depois da pausa de medição de CPU)
+### As reversões da rodada 2 da revisão
 
-Escrito durante a pausa, sem compilar nem rodar nada:
+Rodadas depois da pausa de medição de CPU, com um script próprio num diretório
+próprio do scratchpad (o `reverter.sh` da primeira rodada tinha sido trocado
+por outro agente que usa o mesmo scratchpad: a primeira tentativa de rodar R6
+a R9, antes da pausa, não aplicou mutante nenhum, e o `git status` ficou
+limpo). Cada uma: o mutante aplicado, o arquivo tocado, as provas, o arquivo
+devolvido da cópia, tocado e conferido com `cmp`. **Todas voltaram idênticas**,
+e o `git status` ficou limpo depois de cada uma.
 
-1. **R6 a R9**, as reversões do I1, já escritas no scratchpad, cada uma
-   contra a `ajustes-v013` e o guarda `so_a_tentativa_mais_nova_mexe_no_conectar`,
-   com `cmp` e o arquivo tocado:
-   - **R6**: sem a desistência depois da pergunta do nome (esperado: o caso 1
-     reprova pelo botão; o guarda, pelo apagar sem conferência);
-   - **R7**: sem a desistência antes da pergunta (esperado: o caso 2 reprova
-     pela caixa por cima da sessão; o guarda, pelo apagar da pergunta);
-   - **R8**: o `finally` da pergunta volta a reacender sempre (esperado: o
-     caso 3 reprova; o guarda, pelo acender sem conferência);
-   - **R9**: as desistências sem o registro (esperado: a cena reprova pela
-     linha que falta no `seele.log`; o guarda, pelo bloco sem
-     `registrarNoAnfitriao(`).
-2. **O vermelho do M1 antes do conserto**: a cena
-   `aBatidaDaEsperaSoCalaASiMesma` com o `tela-auth.js` e o `tela-boot.js` de
-   `525b1907` no lugar (a reversão do commit), e depois verde com os de
-   `9a62a8f4`.
-3. **R10 e R11**, as reversões do M1.
-4. **A rodada inteira**: `--test frontend`, `--bin`, `check-runtime`, fmt,
-   clippy do app, e as bancadas `ajustes-v013`, `conversa-com-estado` e
-   `telas`.
-5. Com tudo verde, o `9a62a8f4` deixa de ser «em curso» (um commit novo que o
-   diga, sem reescrever o histórico), e este relatório ganha os resultados,
-   nos dois lugares.
+- **R6** (`tela-boot.js`, sem a desistência depois da pergunta do nome): a cena
+  reprova no caso 1 com «a pergunta do nome fechou depois que o hospedar já
+  tinha entrado, e a tentativa velha apagou o CONECTAR que a mais nova tinha
+  devolvido…»; o guarda, com «`conectar` apaga um botão
+  ("botao.disabled = true;") sem conferir antes, depois da última espera…»,
+  mostrando `await perguntarONome();` como a última espera.
+- **R7** (sem a desistência antes da pergunta): a cena reprova no caso 2 com
+  «a pergunta do nome está aberta por cima da sessão: foi a tentativa velha
+  que a abriu…»; o guarda, pelo apagar da pergunta
+  (`$("botao-conectar").disabled = true;`), depois do `apelido_local`.
+- **R8** (o `finally` da pergunta volta a reacender sempre): a cena reprova no
+  caso 3 com «a pergunta do nome da tentativa velha fechou com a mais nova
+  ainda andando, e o `finally` dela reacendeu o CONECTAR…»; o guarda, com
+  «`conectar` reacende um botão sem conferir que a tentativa ainda é a mais
+  nova ("$(\"botao-conectar\").disabled = false;")…».
+- **R9** (as duas desistências ficam, sem o registro): a cena reprova no caso 1
+  com «…desistiu sem deixar uma linha (e uma só) no seele.log como aviso: []»;
+  o guarda, pelo bloco da conferência sem `registrarNoAnfitriao(`.
+- **R10** (`tela-auth.js`, a bandeira volta a calar qualquer falha com uma
+  batida no ar: `batendoDaEspera !== null`, sem comparar a tentativa): a cena
+  da batida reprova no caso 1 com a frase do vermelho do M1.
+- **R11** (o ramo da batida cala sem registrar): a cena reprova no caso 2 com
+  «a batida que voltou depois de a pessoa sair da espera foi calada na tela
+  sem deixar uma linha (e uma só) no seele.log: []».
+
+O M1 não tem guarda em `tests/frontend.rs`: a revisão não o pediu, e a cena
+cobre as duas metades (quem é calado, e o registro).
 
 ## 7. O que rodou
 
@@ -522,6 +542,14 @@ Na rodada da revisão (`8f4f4724`, e de novo depois de `7cd7d98c`, que é só
 comentário): `--test frontend`, 287 de 287; `--bin`, 312 de 312;
 `check-runtime`, verde; fmt, limpo; clippy `-D warnings`, limpo (o mesmo aviso
 do ligador); a `ajustes-v013`, verde.
+
+Na rodada 2 da revisão, depois da pausa, sobre `4e6d2dac` (o código de
+`9a62a8f4`): `--test frontend`, 288 de 288 (o guarda novo do CONECTAR);
+`--bin`, 312 de 312; `check-runtime`, verde; fmt, limpo; clippy `-D warnings`,
+limpo (o mesmo aviso do ligador); as bancadas `ajustes-v013` (com as quatro
+linhas do lote W2), `conversa-com-estado` e `telas`, verdes, na primeira
+rodada — nenhuma precisou ser repetida, apesar de o W3 rodar bancadas ao mesmo
+tempo. O M1 ficou verde sem mudar uma linha do que foi escrito na pausa.
 
 ## Preocupações
 
