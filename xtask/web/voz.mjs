@@ -156,6 +156,22 @@ function contasDoPortao() {
   confere("portão", torto === 0xffff_ffff, `um quadro que não é de f32 voltou ${torto}`);
 }
 
+// ------------------------------------- o teste do microfone (lote C)
+// O portão da voz na ativação por voz, à parte da voz da sala: o silêncio não
+// abre, a fala abre com os retidos, e o estado tem o corte da régua.
+{
+  e.voz_teste_abrir(0, 1);
+  const quadro = (pcm) => comBytes(bytesDe(pcm), (p, n) => e.voz_teste_quadro(p, n)) >>> 0;
+  confere("teste", quadro(CALADO) === 0 && quadro(CALADO) === 0, "o silêncio abriu o portão do teste");
+  confere("teste", quadro(FALA) === 3, "a abertura do teste não levou os retidos");
+  confere("teste", e.voz_teste_estado() === 0, "o estado do teste falhou");
+  const estado = JSON.parse(new TextDecoder().decode(saida()));
+  confere("teste", estado.aberto && estado.aberturas === 1 && estado.quadros_retidos === 2, `o estado não contou a abertura: ${JSON.stringify(estado)}`);
+  confere("teste", Math.abs(estado.corte_dbfs + 60) < 0.01, `o corte não é o da régua com supressão: ${JSON.stringify(estado)}`);
+  e.voz_teste_fechar();
+  confere("teste", e.voz_teste_estado() === 1, "fechado, o teste continua contando");
+}
+
 // ---------------------------------------------- a reprodução (lote C)
 // O que o worklet chama: um quadro decodificado por chegada e a mistura a cada
 // 20 ms do relógio de áudio. O quadro 4 se perde, e a saída tem de descer a
@@ -205,4 +221,4 @@ if (falhas.length) {
   for (const f of falhas) console.error(`FALHOU — ${f}`);
   process.exit(1);
 }
-console.log("voz: o envio, o portão, a recepção e a reprodução passam pela fronteira, dentro do .wasm");
+console.log("voz: o envio, o portão, o teste do microfone, a recepção e a reprodução passam pela fronteira, dentro do .wasm");

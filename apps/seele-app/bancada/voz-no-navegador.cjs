@@ -21,7 +21,11 @@
 //    outro SSRC. Os ganhos são por alça e recomeçam com a recepção; o ganho
 //    por pessoa chega com a sessão (2.6);
 // 4. **o `messageerror` do worklet é dito**: um `WebAssembly.Module` mandado à
-//    porta, que o Chromium recusa, volta como falha, e não como silêncio.
+//    porta, que o Chromium recusa, volta como falha, e não como silêncio;
+// 5. **o teste do microfone do PC, pela ponte de verdade** (`ponte-web.js`, na
+//    casca larga): abre, mede com o portão da voz, toca o monitor pela mistura,
+//    e **fechar solta o microfone**: toda faixa que o `getUserMedia` abriu
+//    termina em `ended` (`F4/ponte-no-pc.md`).
 //
 // E mede quanto o `.wasm` leva para compilar dentro do worklet.
 //
@@ -56,7 +60,7 @@ const confere = (caso, condicao, detalhe) => {
 // **Uma cópia**, e não a `ui/`: um arquivo de bancada esquecido lá iria para o
 // instalador (`tools/carga-da-casca.py` diz o mesmo).
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "voz-no-navegador-"));
-for (const nome of ["voz-web.js", "voz-worklet.js"]) {
+for (const nome of ["voz-web.js", "voz-worklet.js", "ponte-web.js"]) {
   fs.copyFileSync(path.join(raiz, "ui", nome), path.join(pasta, nome));
 }
 fs.copyFileSync(caminhoDoWasm, path.join(pasta, "seele_web.wasm"));
@@ -132,6 +136,34 @@ window.bancada.provarOMessageerror = async () => {
   await ctx.close();
   return texto;
 };
+`,
+);
+
+// A página do teste do microfone: a ponte primeiro, como na `index.html`, e
+// cada faixa que o `getUserMedia` abrir anotada, para conferir que fechar a
+// soltou.
+fs.writeFileSync(
+  path.join(pasta, "teste.html"),
+  `<!doctype html><meta charset="utf-8"><title>teste</title>
+<script src="ponte-web.js"></script>
+<button id="testar" type="button">testar</button>
+<script src="voz-web.js"></script>
+<script src="teste.js"></script>`,
+);
+fs.writeFileSync(
+  path.join(pasta, "teste.js"),
+  `"use strict";
+window.faixas = [];
+const doNavegador = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+navigator.mediaDevices.getUserMedia = async (pedido) => {
+  const fonte = await doNavegador(pedido);
+  window.faixas.push(...fonte.getTracks());
+  return fonte;
+};
+window.invocar = (comando, args) => window.__TAURI__.core.invoke(comando, args);
+document.getElementById("testar").addEventListener("click", () => {
+  window.aberto = window.invocar("abrir_teste_de_microfone").then(() => "ok", (e) => "recusado: " + JSON.stringify(e));
+});
 `,
 );
 
@@ -259,6 +291,39 @@ async function principal() {
     // 4. O messageerror é dito.
     const dito = await aba.evaluate(() => window.bancada.provarOMessageerror());
     confere("messageerror", typeof dito === "string" && dito.includes("messageerror"), `o worklet ficou calado diante de um Module na porta: ${dito}`);
+
+    // 5. O teste do microfone pela ponte, na casca larga.
+    const teste = await navegador.newPage();
+    teste.on("pageerror", (erro) => doConsole.push(`teste: pageerror: ${erro.message}`));
+    teste.on("console", (m) => m.type() === "error" && doConsole.push(`teste: ${m.text()}`));
+    await teste.addInitScript(() => localStorage.setItem("seele.casca", "larga"));
+    await teste.goto(`${endereco}teste.html`);
+    const invocar = (comando, args) => teste.evaluate(([c, a]) => window.invocar(c, a), [comando, args ?? {}]);
+    for (const volta of [1, 2]) {
+      await teste.click("#testar");
+      const aberto = await teste.evaluate(() => window.aberto);
+      confere("teste do microfone", aberto === "ok", `a volta ${volta} não abriu: ${aberto}`);
+      await esperar(2000);
+      const estado = await invocar("estado_do_teste_de_microfone");
+      confere("teste do microfone", estado && Number.isFinite(estado.nivel_dbfs), `sem estado na volta ${volta}: ${JSON.stringify(estado)}`);
+      confere("teste do microfone", estado && estado.aberturas >= 1, `o bipe do microfone falso não abriu o portão: ${JSON.stringify(estado)}`);
+      confere("teste do microfone", estado && estado.corte_dbfs >= -60.01, `o corte ficou abaixo do alvo da régua: ${JSON.stringify(estado)}`);
+      confere("teste do microfone", estado && estado.falha === null && estado.monitorando === false, `o teste começou monitorando ou com falha: ${JSON.stringify(estado)}`);
+
+      await invocar("monitorar_o_microfone", { ligado: true });
+      await esperar(1500);
+      const ouvido = await teste.evaluate(() => vozDaPonte.atual.contas());
+      const monitor = ouvido.reproducao && ouvido.reproducao.contas.fontes["0"];
+      confere("teste do microfone", monitor && monitor.recebidos > 0, `o monitor não chegou à mistura: ${JSON.stringify(ouvido.reproducao)}`);
+
+      await invocar("fechar_teste_de_microfone");
+      await invocar("fechar_teste_de_microfone");
+      const faixas = await teste.evaluate(() => window.faixas.map((f) => f.readyState));
+      confere("teste do microfone", faixas.length === volta, `${faixas.length} faixas abertas em ${volta} voltas`);
+      confere("teste do microfone", faixas.every((f) => f === "ended"), `fechar não soltou o microfone: ${JSON.stringify(faixas)}`);
+      confere("teste do microfone", (await invocar("estado_do_teste_de_microfone")) === null, "fechado, o teste continua contando");
+    }
+    await teste.close();
 
     confere("console", doConsole.length === 0, doConsole.join(" | "));
     const final = await contas();

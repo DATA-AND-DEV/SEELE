@@ -75,6 +75,36 @@ const CONFIGURACAO_DA_VOZ = Object.freeze({
   sessaoDeAudio: "play-and-record",
 });
 
+/** O `.wasm` do `seele-web`, ao lado da página. */
+const ARQUIVO_DO_WASM_DA_PAGINA = "seele_web.wasm";
+
+let wasmDaPagina = null;
+
+/**
+ * O `.wasm` da página e os bytes dele, carregados uma vez, no primeiro uso.
+ * Uma carga que falhou não fica guardada: o uso seguinte tenta de novo.
+ */
+function carregarOWasmDaPagina() {
+  if (!wasmDaPagina) {
+    wasmDaPagina = fetch(ARQUIVO_DO_WASM_DA_PAGINA)
+      .then((resposta) => {
+        if (!resposta.ok) throw new Error(`${ARQUIVO_DO_WASM_DA_PAGINA}: ${resposta.status}`);
+        return resposta.arrayBuffer();
+      })
+      .then(async (bytes) => ({ bytes, instancia: (await WebAssembly.instantiate(bytes, {})).instance }));
+    wasmDaPagina.catch(() => {
+      wasmDaPagina = null;
+    });
+  }
+  return wasmDaPagina;
+}
+
+/**
+ * A alça do monitor do teste do microfone na mistura. A recepção dá alças a
+ * partir de 1, e voltar ao zero pediria quatro bilhões de fontes.
+ */
+const ALCA_DO_MONITOR = 0;
+
 /**
  * A voz do navegador, em volta das exportações do `.wasm` do `seele-web`.
  *
@@ -141,6 +171,11 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     dentro: false,
     falando: false,
     reproducaoPronta: null,
+    /** O teste do microfone (F01), fora ou dentro da sala. */
+    testando: false,
+    monitorando: false,
+    falhaDoTeste: null,
+    seqDoMonitor: 0,
   };
 
   // ------------------------------------------------------------ o .wasm
@@ -234,9 +269,41 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     }
   }
 
+  /**
+   * Um quadro de 20 ms para o teste do microfone: o portão do teste, e o que
+   * ele soltar vai ao monitor, se ligado, pela mesma mistura da voz.
+   */
+  function testou(pcm) {
+    const quantos = comBytes(bytesDe(pcm), (p, n) => w.voz_teste_quadro(p, n)) >>> 0;
+    if (quantos === 0xffff_ffff) {
+      falha("teste do microfone", saidaEmTexto());
+      return;
+    }
+    if (!vivo.monitorando || quantos === 0) return;
+    const bytes = saida();
+    const vista = new DataView(bytes.buffer);
+    const passo = 4 + 4 * cfg.quadro;
+    for (let i = 0; i < quantos; i++) {
+      const quadro = new Float32Array(bytes.buffer.slice(i * passo + 4, (i + 1) * passo));
+      vivo.seqDoMonitor = (vivo.seqDoMonitor + 1) & 0xffff;
+      mandarAReproducao(
+        {
+          tipo: "chegou",
+          alca: ALCA_DO_MONITOR,
+          seq: vivo.seqDoMonitor,
+          carimbo: vista.getUint32(i * passo, true),
+          chegada: performance.now(),
+          pcm: quadro,
+        },
+        [quadro.buffer],
+      );
+    }
+  }
+
   /** Um quadro de 20 ms do worklet de captura: o portão, e o que ele soltar. */
   function capturou(pcm) {
     contas.capturados++;
+    if (vivo.testando) testou(pcm);
     if (!vivo.dentro) return;
     contas.noPortao++;
     const quantos = comBytes(bytesDe(pcm), (p, n) => w.voz_capturou(p, n, controles.mudo ? 1 : 0)) >>> 0;
@@ -421,8 +488,19 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
    * `microfone` e `saida` são os aparelhos pedidos; o que abriu é lido de volta
    * e dito em `contas()`.
    */
-  async function ligar({ microfone = null, saida: aparelhoDeSaida = null } = {}) {
+  async function ligar(pedido = {}) {
     if (vivo.ctx) return;
+    try {
+      await abrirOAudio(pedido);
+    } catch (erro) {
+      // Uma abertura pela metade (o microfone recusado, a saída que não
+      // tocou) não deixa contexto nem tag de áudio para trás.
+      await desligar();
+      throw erro;
+    }
+  }
+
+  async function abrirOAudio({ microfone = null, saida: aparelhoDeSaida = null }) {
     if (navigator.audioSession) navigator.audioSession.type = cfg.sessaoDeAudio;
     const ctx = new AudioContext({ sampleRate: cfg.taxa, latencyHint: "interactive" });
     vivo.ctx = ctx;
@@ -470,7 +548,13 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     vivo.supressaoAplicada = typeof aplicado.noiseSuppression === "boolean" ? aplicado.noiseSuppression : null;
     faixa.onmute = () => aoAcontecer({ tipo: "captura", estado: "muda" });
     faixa.onunmute = () => aoAcontecer({ tipo: "captura", estado: "voltou" });
-    faixa.onended = () => aoAcontecer({ tipo: "captura", estado: "encerrada" });
+    faixa.onended = () => {
+      if (vivo.testando) {
+        vivo.falhaDoTeste =
+          "o microfone parou durante o teste: o aparelho saiu, ou o navegador o tomou de volta. Tente de novo ou escolha outro microfone.";
+      }
+      aoAcontecer({ tipo: "captura", estado: "encerrada" });
+    };
 
     const captura = new AudioWorkletNode(ctx, "seele-captura-da-voz", { numberOfOutputs: 1 });
     vivo.captura = captura;
@@ -572,6 +656,45 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     if (ctx) await ctx.close();
   }
 
+  /**
+   * Abre o teste do microfone (F01): o áudio, se ainda não está aberto, e o
+   * portão do teste com a régua dos controles. **Dentro do gesto**, como o
+   * `ligar`. Pedir de novo fora da sala fecha o anterior e abre outro, que é o
+   * que trocar de aparelho no meio do teste precisa, como no desktop.
+   */
+  async function abrirTeste({ microfone = null, saida: aparelhoDeSaida = null, supressao = true, abertura = 0 } = {}) {
+    if (vivo.testando && !vivo.dentro) await fecharTeste();
+    if (!vivo.ctx) {
+      controles.supressao = supressao;
+      await ligar({ microfone, saida: aparelhoDeSaida });
+    }
+    const comSupressao = vivo.supressaoAplicada ?? supressao;
+    w.voz_teste_abrir(abertura, comSupressao ? 1 : 0);
+    Object.assign(vivo, { testando: true, monitorando: false, falhaDoTeste: null });
+  }
+
+  /**
+   * Fecha o teste. Fora da sala, **solta o microfone de verdade**: as faixas
+   * param (`track.stop()`) e o navegador apaga o indicador. Idempotente.
+   */
+  async function fecharTeste() {
+    if (!vivo.testando) return;
+    Object.assign(vivo, { testando: false, monitorando: false });
+    w.voz_teste_fechar();
+    mandarAReproducao({ tipo: "esquecer", alca: ALCA_DO_MONITOR });
+    if (!vivo.dentro) await desligar();
+  }
+
+  /** O que o teste tem a contar, na forma do desktop, ou `null` sem teste. */
+  function estadoDoTeste() {
+    if (!vivo.testando) return null;
+    if (w.voz_teste_estado() !== 0) {
+      falha("teste do microfone", saidaEmTexto());
+      return null;
+    }
+    return { ...JSON.parse(saidaEmTexto()), monitorando: vivo.monitorando, falha: vivo.falhaDoTeste };
+  }
+
   /** As contas desta página, do portão e da mistura. */
   async function lerContas() {
     let portao = null;
@@ -609,6 +732,13 @@ function criarVozDoNavegador({ wasm, bytesDoWasm, aoAcontecer = () => {} }) {
     contas: lerContas,
     /** A promessa do `.wasm` compilado no worklet (`false` se falhou). */
     reproducaoPronta: () => vivo.reproducaoPronta,
+    abrirTeste,
+    fecharTeste,
+    estadoDoTeste,
+    /** Ouvir o próprio microfone no teste. Começa desligado: realimenta. */
+    monitorar(ligado) {
+      vivo.monitorando = Boolean(ligado) && vivo.testando;
+    },
     mudo(sim) {
       controles.mudo = Boolean(sim);
     },

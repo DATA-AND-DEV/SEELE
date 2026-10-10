@@ -278,6 +278,70 @@ impl Recepcao {
     }
 }
 
+/// O que o teste do microfone tem a contar, como o `EstadoDoTesteDeMicrofone`
+/// do desktop (`seele_ffi`), menos o monitor e a falha, que são da página.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EstadoDoTeste {
+    /// O nível do quadro que o portão viu por último, em dBFS.
+    pub nivel_dbfs: f32,
+    /// Se a transmissão estaria aberta agora.
+    pub aberto: bool,
+    /// Quantas vezes o portão abriu desde que o teste começou.
+    pub aberturas: u64,
+    /// Quantos quadros anteriores a uma abertura saíram junto com ela.
+    pub quadros_retidos: u64,
+    /// Onde o corte está, em dBFS: no padrão ele sobe com o ruído medido.
+    pub corte_dbfs: f32,
+}
+
+/// O teste do microfone do PC, fora da sala (F01), com **o mesmo portão** da
+/// voz: o do [`Envio`], na ativação por voz, como o `teste_de_microfone.rs` do
+/// desktop o abre, e com a régua dos controles.
+///
+/// O caminho é o da conversa menos o codec e a rede, como no desktop. O que
+/// fica de fora aqui também é a supressão e o ganho do desktop: no navegador
+/// eles são os da plataforma, aplicados antes de o quadro chegar.
+#[derive(Debug)]
+pub struct TesteDoMicrofone {
+    envio: Envio,
+    aberto: bool,
+}
+
+impl TesteDoMicrofone {
+    /// Um teste com a régua dos controles guardados.
+    #[must_use]
+    pub fn abrir(abertura_dbfs_milesimos: i32, com_supressao: bool) -> Self {
+        let mut envio = Envio::novo(0);
+        envio.regua(abertura_dbfs_milesimos, com_supressao);
+        envio.modo(GateMode::VoiceActivated);
+        Self {
+            envio,
+            aberto: false,
+        }
+    }
+
+    /// Um quadro de 20 ms do microfone: os que o portão solta, que são o que
+    /// o monitor toca (o que os outros ouviriam).
+    pub fn quadro(&mut self, quadro: &[f32]) -> Vec<(u32, Vec<f32>)> {
+        let saem = self.envio.capturou(quadro, false);
+        self.aberto = !saem.is_empty();
+        saem
+    }
+
+    /// O que o teste tem a contar agora.
+    #[must_use]
+    pub fn estado(&self) -> EstadoDoTeste {
+        let m = self.envio.portao();
+        EstadoDoTeste {
+            nivel_dbfs: seele_voz::gate::dbfs_de_rms(m.input_rms),
+            aberto: self.aberto,
+            aberturas: m.openings,
+            quadros_retidos: m.quadros_retidos_entregues,
+            corte_dbfs: m.abertura_efetiva_dbfs,
+        }
+    }
+}
+
 /// Quantas amostras o fade leva para sair do som e para voltar a ele: 2,5 ms.
 ///
 /// O bastante para tirar o estalo de um degrau no meio de uma onda, e pouco
@@ -675,6 +739,49 @@ mod testes {
             1,
             "o modo aberto não atravessou o reabrir"
         );
+    }
+
+    // ------------------------------------------------ o teste do microfone
+
+    /// **O teste é o portão da voz na ativação por voz**: o silêncio não abre,
+    /// a fala abre com os retidos, e o estado diz o nível, a abertura, as
+    /// contas e o corte, como o do desktop.
+    #[test]
+    fn o_teste_do_microfone_conta_o_que_o_portao_da_voz_decide() {
+        let mut teste = TesteDoMicrofone::abrir(0, true);
+        assert!(teste.quadro(&CALADO).is_empty());
+        assert!(teste.quadro(&CALADO).is_empty());
+        let parado = teste.estado();
+        assert!(!parado.aberto);
+        assert_eq!(parado.aberturas, 0, "o silêncio abriu o portão do teste");
+
+        let saem = teste.quadro(&FALA);
+        assert_eq!(saem.len(), 3, "a abertura do teste não levou os retidos");
+        let falando = teste.estado();
+        assert!(falando.aberto);
+        assert_eq!(falando.aberturas, 1);
+        assert_eq!(falando.quadros_retidos, 2);
+        assert!(
+            (falando.nivel_dbfs - seele_voz::gate::dbfs_de_rms(0.3)).abs() < 0.01,
+            "o nível não é o do quadro que o portão viu: {falando:?}"
+        );
+        assert!(
+            (falando.corte_dbfs - seele_voz::gate::ABERTURA_COM_SUPRESSAO_DBFS).abs() < 0.01,
+            "o corte não é o da régua com supressão: {falando:?}"
+        );
+    }
+
+    /// A régua escolhida vale no teste como vale na conversa: fixa.
+    #[test]
+    fn o_teste_usa_a_regua_escolhida() {
+        let mut teste = TesteDoMicrofone::abrir(-30_000, false);
+        let _ = teste.quadro(&[0.01; FRAME_SAMPLES]);
+        assert!(
+            (teste.estado().corte_dbfs - (-30.0)).abs() < 0.01,
+            "{:?}",
+            teste.estado()
+        );
+        assert!(!teste.estado().aberto, "−40 dBFS abriu um corte em −30");
     }
 
     // ---------------------------------------------------- a reprodução

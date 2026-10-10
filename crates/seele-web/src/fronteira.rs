@@ -39,6 +39,18 @@
 //! | | 1 | `{"erro": …}` |
 //! | `voz_esquecer(agora_ms)` | quantas alças | cada alça esquecida, u32 em little-endian |
 //!
+//! **O teste do microfone do PC** (lote C), na instância da página, à parte da
+//! voz da sala:
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `voz_teste_abrir(abertura_milesimos, com_supressao)` | — | — |
+//! | `voz_teste_quadro(pcm)` | quantos quadros o portão soltou | como no `voz_capturou` |
+//! | | `u32::MAX` | `{"erro": …}` |
+//! | `voz_teste_estado()` | 0 | `{"nivel_dbfs", "aberto", "aberturas", "quadros_retidos", "corte_dbfs"}` |
+//! | | 1 | `{"erro": …}` |
+//! | `voz_teste_fechar()` | — | — |
+//!
 //! **A voz que toca** (lote C), na instância do `AudioWorklet`. O mesmo
 //! `.wasm`, compilado lá dentro a partir dos bytes: o Chromium recusa um
 //! `WebAssembly.Module` mandado pela porta (`spikes/voz-em-wasm/`).
@@ -70,7 +82,7 @@ use std::cell::RefCell;
 use seele_proto::control::ControlError;
 use seele_voz::gate::GateMode;
 
-use crate::voz::{Envio, Recepcao, Reproducao};
+use crate::voz::{Envio, Recepcao, Reproducao, TesteDoMicrofone};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
 
 thread_local! {
@@ -78,6 +90,7 @@ thread_local! {
     static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
     static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
     static REPRODUCAO: RefCell<Option<Reproducao>> = const { RefCell::new(None) };
+    static TESTE: RefCell<Option<TesteDoMicrofone>> = const { RefCell::new(None) };
 }
 
 fn dizer(bytes: Vec<u8>, codigo: u32) -> u32 {
@@ -304,16 +317,20 @@ pub unsafe extern "C" fn voz_capturou(ptr: *const u8, len: usize, mudo: u32) -> 
         let Some(envio) = envio.as_mut() else {
             return falhou("a voz não tem envio");
         };
-        let saem = envio.capturou(&quadro, mudo != 0);
-        let mut saida = Vec::with_capacity(saem.len() * (4 + 4 * quadro.len()));
-        for (carimbo, pcm) in &saem {
-            saida.extend_from_slice(&carimbo.to_le_bytes());
-            for amostra in pcm {
-                saida.extend_from_slice(&amostra.to_le_bytes());
-            }
-        }
-        dizer(saida, u32::try_from(saem.len()).unwrap_or(u32::MAX))
+        dizer_os_quadros(&envio.capturou(&quadro, mudo != 0))
     })
+}
+
+/// Os quadros soltos pelo portão na saída: o carimbo e as amostras de cada um.
+fn dizer_os_quadros(saem: &[(u32, Vec<f32>)]) -> u32 {
+    let mut saida = Vec::new();
+    for (carimbo, pcm) in saem {
+        saida.extend_from_slice(&carimbo.to_le_bytes());
+        for amostra in pcm {
+            saida.extend_from_slice(&amostra.to_le_bytes());
+        }
+    }
+    dizer(saida, u32::try_from(saem.len()).unwrap_or(u32::MAX))
 }
 
 /// O que o portão decidiu por último, para o medidor.
@@ -422,6 +439,72 @@ pub extern "C" fn voz_esquecer(agora_ms: f64) -> u32 {
         alcas.iter().flat_map(|alca| alca.to_le_bytes()).collect(),
         quantas,
     )
+}
+
+// ------------------------------------------------- o teste do microfone
+
+/// Abre o teste do microfone com a régua dos controles guardados. Um teste
+/// aberto antes é trocado, como no desktop.
+#[no_mangle]
+pub extern "C" fn voz_teste_abrir(abertura_milesimos: i32, com_supressao: u32) {
+    TESTE.with(|t| {
+        *t.borrow_mut() = Some(TesteDoMicrofone::abrir(
+            abertura_milesimos,
+            com_supressao != 0,
+        ));
+    });
+}
+
+/// Um quadro de 20 ms do microfone para o teste: quantos quadros o portão
+/// soltou, que são os que o monitor toca.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_teste_quadro(ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let bytes = unsafe { entrada(ptr, len) };
+    let Some(quadro) = amostras(bytes) else {
+        erro_da_voz("o quadro não é de f32");
+        return u32::MAX;
+    };
+    TESTE.with(|t| match t.borrow_mut().as_mut() {
+        Some(teste) => dizer_os_quadros(&teste.quadro(&quadro)),
+        None => {
+            erro_da_voz("não há teste do microfone aberto");
+            u32::MAX
+        }
+    })
+}
+
+/// O que o teste do microfone tem a contar.
+#[no_mangle]
+pub extern "C" fn voz_teste_estado() -> u32 {
+    TESTE.with(|t| match t.borrow().as_ref() {
+        Some(teste) => {
+            let e = teste.estado();
+            dizer(
+                serde_json::json!({
+                    "nivel_dbfs": e.nivel_dbfs,
+                    "aberto": e.aberto,
+                    "aberturas": e.aberturas,
+                    "quadros_retidos": e.quadros_retidos,
+                    "corte_dbfs": e.corte_dbfs,
+                })
+                .to_string()
+                .into_bytes(),
+                0,
+            )
+        }
+        None => erro_da_voz("não há teste do microfone aberto"),
+    })
+}
+
+/// Fecha o teste do microfone. Idempotente.
+#[no_mangle]
+pub extern "C" fn voz_teste_fechar() {
+    TESTE.with(|t| *t.borrow_mut() = None);
 }
 
 // ------------------------------------------------------- a voz que toca
