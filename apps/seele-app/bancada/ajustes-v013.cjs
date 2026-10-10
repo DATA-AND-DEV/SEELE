@@ -964,6 +964,17 @@ async function aTentativaSubstituidaNaoFala(browser, porta) {
     `com a tentativa a ${OUTRO_ALVO_W} ainda andando, a recusa pelos MODs da anterior, a ${ALVO_W}, apareceu na linha ` +
     `vermelha da entrada: «${enquantoANovaAnda}»`);
   await dizONoRegistro(ALVO_W, 'ModsNaoAceitos');
+  // **E o CONECTAR continua apagado** (lote W2, rodada da revisão). A nova o
+  // apagou ao começar; o `finally` da velha, que terminou primeiro, o
+  // reacendia, e um clique ali abria uma terceira entrada por baixo da nova.
+  const estado = await page.evaluate((alvo) => ({
+    velhaVoltou: testCalls.slice(testCorrida.antes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    apagado: $('botao-conectar').disabled,
+  }), ALVO_W);
+  assert.equal(estado.velhaVoltou, true, 'a tentativa velha ainda não tinha voltado, e o botão não foi medido depois dela');
+  assert.equal(estado.apagado, true,
+    `com a tentativa a ${OUTRO_ALVO_W} ainda andando, a anterior, a ${ALVO_W}, terminou e reacendeu o CONECTAR que a ` +
+    'nova tinha apagado: um clique ali abre uma terceira entrada por baixo da que está em curso');
   await page.waitForFunction((alvo) => testCalls.slice(testCorrida.antes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
     OUTRO_ALVO_W, { timeout: 3000 })
     .catch(() => assert.fail(`a tentativa a ${OUTRO_ALVO_W} não voltou, e esta cena não mede quem fala`));
@@ -975,6 +986,8 @@ async function aTentativaSubstituidaNaoFala(browser, porta) {
   }), [SEM_CREDENCIAL]);
   assert.ok(daNova.escrita.startsWith(daNova.titulo),
     `a linha vermelha não diz a recusa da tentativa mais nova («${daNova.titulo}»), e sim «${daNova.escrita}»`);
+  assert.equal(await page.evaluate(() => $('botao-conectar').disabled), false,
+    'a tentativa mais nova terminou e o CONECTAR ficou apagado: quem devolve o botão é ela');
 
   // ---- 3. A nova parou na espera da portaria, e a velha volta recusada pelos
   // MODs: a espera continua dizendo a espera.

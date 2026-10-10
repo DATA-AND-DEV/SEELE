@@ -431,9 +431,20 @@ async function conectar(alvo, apelido, credencial) {
       erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
     }
   } finally {
-    botao.disabled = false;
+    // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
+    // outra já substituiu terminava e o reacendia com a nova ainda andando, e
+    // um clique ali abria uma terceira entrada por baixo dela. A mais nova
+    // sempre chega aqui — ou ao `finally` da pergunta do nome, que também o
+    // devolve —, então o botão nunca fica apagado sem dono.
+    if (esta === tentativas) botao.disabled = false;
     // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
     // veredito ou o erro, e não o último candidato tentado.
+    //
+    // **Esta linha ainda é de qualquer tentativa**, e a da velha apaga a etapa
+    // da nova enquanto ela anda. Ela fica: a linha é escrita pelos eventos
+    // `ConnectStageChanged`, que não dizem de qual tentativa são, e calar a
+    // velha aqui deixaria a etapa dela na tela quando ela termina depois da
+    // nova. Ver o relatório do lote W2.
     mostrarEtapa(null);
   }
 }

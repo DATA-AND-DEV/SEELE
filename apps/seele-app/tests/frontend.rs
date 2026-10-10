@@ -11144,7 +11144,11 @@ fn ramo_da_tentativa_substituida(conectar: &str) -> (String, std::ops::Range<usi
 /// 4. dentro dele a recusa vai ao registro por `registrarNoAnfitriao`, com o
 ///    alvo e o motivo, e como `"aviso"`: qualquer outro texto sai em DEBUG,
 ///    que o filtro de produção não escreve (ver
-///    `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`).
+///    `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`);
+/// 5. no `finally` do `connect`, todo botão reacendido o é só pela tentativa
+///    mais nova: o da velha reacendia o CONECTAR que a nova tinha apagado, com
+///    ela ainda andando. E algum é reacendido — sem isso, o botão ficaria
+///    apagado para sempre depois da primeira entrada.
 #[test]
 fn a_tentativa_que_outra_substituiu_nao_fala_na_tela() {
     let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
@@ -11221,6 +11225,59 @@ fn a_tentativa_que_outra_substituiu_nao_fala_na_tela() {
         "a linha da tentativa substituída no registro não diz o alvo e o motivo \
          ({argumentos:?}): sem os dois, quem investiga não sabe qual servidor recusou nem \
          por quê"
+    );
+
+    // 5. O `finally` que segue o `catch`: o bloco dele, casado contando.
+    let Some(finally) = conectar
+        .find(&decisao)
+        .map(|inicio| inicio + decisao.len())
+        .filter(|fim| conectar[*fim..].starts_with("} finally {"))
+    else {
+        panic!("o `catch` do `connect` deixou de terminar num `finally`: {conectar}");
+    };
+    let chave = finally + "} finally ".len();
+    let mut profundidade = 0_i32;
+    let mut fim = None;
+    for (indice, caractere) in conectar[chave..].char_indices() {
+        match caractere {
+            '{' => profundidade += 1,
+            '}' => {
+                profundidade -= 1;
+                if profundidade == 0 {
+                    fim = Some(chave + indice + 1);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(fim) = fim else {
+        panic!("o `finally` do `connect` não fecha: {conectar}");
+    };
+    let bloco = &conectar[chave..fim];
+    let reacende: Vec<&str> = bloco
+        .lines()
+        .map(str::trim)
+        .filter(|linha| linha.contains(".disabled = false"))
+        .collect();
+    assert!(
+        !reacende.is_empty(),
+        "o `finally` do `connect` deixou de devolver o botão que a entrada apaga: depois \
+         da primeira tentativa, ele fica apagado para sempre.\n{bloco}"
+    );
+    let sem_conferir: Vec<&&str> = reacende
+        .iter()
+        .filter(|linha| {
+            !["if (esta === tentativas)", "if (tentativas === esta)"]
+                .iter()
+                .any(|conferencia| linha.starts_with(conferencia))
+        })
+        .collect();
+    assert!(
+        sem_conferir.is_empty(),
+        "o `finally` do `connect` reacende um botão sem conferir que a tentativa ainda é a \
+         mais nova ({sem_conferir:?}): a que outra já substituiu termina e o reacende com a \
+         nova ainda andando, e um clique ali abre uma terceira entrada por baixo dela"
     );
 }
 
