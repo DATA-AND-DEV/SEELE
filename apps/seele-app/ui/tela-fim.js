@@ -116,13 +116,15 @@ function desenharSaidas() {
  *
  * **Sem credencial nenhuma, e de propósito** (lote R da F5). Este comentário
  * dizia que o convite colado seguia junto, e não seguia desde a 0.9.0: o token
- * viaja como argumento de `conectar` e não fica guardado em lugar nenhum. A
- * credencial da tentativa — a que a pergunta dos MODs guarda para a volta que
- * aceita — também não chega aqui: esta tela só existe depois de uma sessão que
- * **entrou**, e entrar gastou o convite e esqueceu a credencial. Reenviá-la
- * seria gastar de novo o que já foi gasto. Quem volta a um servidor fechado
- * por convite sem portaria precisa de convite novo; com portaria, a decisão de
- * quem hospeda é a credencial que dura (`portaria::ja_admitido`, no servidor).
+ * viaja como argumento de `conectar`, e só fica guardado em dois lugares, os
+ * dois antes de uma entrada — a pergunta dos MODs o guarda para a volta que
+ * aceita (lote R), e uma recusa por apelido tomado o deixa para a tentativa
+ * seguinte ao mesmo alvo (`recusaDoApelido`, em `tela-boot.js`, lote W). Nenhum
+ * dos dois chega aqui: esta tela só existe depois de uma sessão que **entrou**,
+ * e entrar gastou o convite e esqueceu os dois. Reenviá-lo seria gastar de novo
+ * o que já foi gasto. Quem volta a um servidor fechado por convite sem portaria
+ * precisa de convite novo; com portaria, a decisão de quem hospeda é a
+ * credencial que dura (`portaria::ja_admitido`, no servidor).
  */
 async function reconectar() {
   const botao = $("botao-voltar");

@@ -735,12 +735,14 @@ function alguemOlhando() {
  * para a sessão; ainda não, `levarParaAEspera` a reescreve como espera e
  * recomeça a contagem.
  *
- * **Sem credencial nenhuma.** Este comentário dizia «mesmo convite», e a batida
- * nunca o levou: `conectar()` sem argumento não lembra segredo, e a credencial
- * da tentativa só é guardada pela pergunta dos MODs (lote R da F5). Quem está
- * na fila não precisa dela: o servidor perdoa o segredo ausente de uma chave
- * que já espera decisão (`portaria::pedido_pendente`) ou que já foi admitida
- * (`portaria::ja_admitido`).
+ * **Sem credencial própria.** Este comentário dizia «mesmo convite», e a batida
+ * nunca o levou: ela não passa credencial a `conectar()`. A única que
+ * `conectar` anexa sozinho é a que uma recusa por apelido tomado deixou para a
+ * tentativa seguinte ao mesmo alvo (`recusaDoApelido`, em `tela-boot.js`, lote
+ * W da F5), que nunca é um convite gasto; a da pergunta dos MODs (lote R) só
+ * vai à volta que aceita. Quem está na fila não precisa de nenhuma: o servidor
+ * perdoa o segredo ausente de uma chave que já espera decisão
+ * (`portaria::pedido_pendente`) ou que já foi admitida (`portaria::ja_admitido`).
  *
  * Uma batida por vez: quem a chama já parou o relógio, e só as duas saídas
  * acima o religam.
