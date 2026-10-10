@@ -26,7 +26,8 @@
 //
 // **O que ele não cobre**: a obtenção de um pacote que falta
 // (`instalar_mod_do_catalogo`) e a desistência no meio dela. Aqui os pacotes do
-// anúncio já estão na máquina, e quem prova o resto é a `ajustes-v013.cjs`.
+// anúncio já estão na máquina, e quem prova o resto é a `ajustes-v013.cjs`. O
+// aceite que rejeita por dentro é de `aceite-de-mods-que-falha.js`.
 
 const ALVO = "203.0.113.9:8383";
 const CONVITE = "convite-do-roteiro";
@@ -142,6 +143,14 @@ const voltou = window.__SEELE_CHAMADAS.includes("connect");
 relatar(`tentou entrar de novo: ${voltou}`);
 exigir(voltou,
   `ACEITAR gravou o sim e não tentou entrar de novo: connect não foi chamado (a sequência foi: ${sequencia})`);
+// **O sim já está em disco quando a volta tenta entrar.** A volta passa pelo
+// mesmo ponto que recusou a tentativa anterior, e só passa por ele se o aceite
+// já foi gravado: um `connect` antes do `aceitar_mods` bate de novo na pergunta.
+const iGravou = chamadas.indexOf("aceitar_mods");
+relatar(`o sim antes da volta: aceitar_mods na posição ${iGravou}, connect na ${corte}`);
+exigir(iGravou >= 0 && iGravou < corte,
+  "a volta tentou entrar antes de o sim ser gravado, e sem o aceite em disco ela bate de novo no ponto " +
+    `que recusou a tentativa anterior (a sequência foi: ${sequencia})`);
 const volta = window.__SEELE_ARGS.connect;
 relatar(`a volta: servidor=${volta.server} convite=${volta.joinSecret ?? "nenhum"}`);
 exigir(volta.joinSecret === CONVITE,
