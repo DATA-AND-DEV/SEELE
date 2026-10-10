@@ -10,6 +10,9 @@ publish.workspace = true
 # navegador compilá-lo, e o `cargo xtask web` confere a cada vez.
 [dependencies]
 seele-proto = { path = "../seele-proto" }
+# Os tipos de vista do retrato (`retrato`) vão à casca em JSON, como iam do
+# `seele-ffi`. A mesma versão do `seele-proto`.
+serde = { version = "1.0.229", features = ["derive"] }
 
 [lints]
 workspace = true

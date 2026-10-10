@@ -5207,6 +5207,7 @@ name = "seele-sessao"
 version = "0.0.0"
 dependencies = [
  "seele-proto",
+ "serde",
 ]
 
 [[package]]

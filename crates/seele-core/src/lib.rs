@@ -28,6 +28,9 @@ pub mod aceites;
 pub mod agenda;
 pub mod anexo_no_disco;
 pub use seele_sessao::assento;
+/// O retrato da sala: os tipos de vista do `Snapshot` e a projeção que os
+/// monta a partir do `Room`, para o desktop e o navegador (Tarefa 2.2 da F4).
+pub use seele_sessao::retrato;
 pub mod battery;
 pub mod bomba;
 pub mod caminho;
