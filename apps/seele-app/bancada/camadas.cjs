@@ -34,7 +34,7 @@
 //    devolve — no celular, a faixa de voz e as abas — continua alcançável, e o
 //    resto da sessão dorme. `inert` desce, então a pilha desce também: não
 //    adormece o ancestral que os contém. O desenho e a medida no aparelho são
-//    da F8 (a cena `folhas-e-mods`); aqui, um dublê do `CELULAR` no desktop.
+//    da F8 (a cena `superficies-de-mod`); aqui, um dublê do `CELULAR` no desktop.
 // 9. **A recusa do servidor volta aos campos** (Step 6b; rascunho §5, o B7 do
 //    ESTILO): `formulario.erros({ texto, fundo })` marca os dois campos de
 //    uma vez, com a frase, e leva o foco ao primeiro; mexer num campo apaga só
