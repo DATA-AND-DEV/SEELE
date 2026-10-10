@@ -464,6 +464,8 @@ function pintarCartao(cartao, pessoa, temAudio) {
   const avatar = cartao.querySelector(".chamada-avatar");
   avatar.textContent = iniciaisDoCartao(pessoa.nickname);
   vestirAvatar(avatar, pessoa.id);
+  // A capa da pessoa, quando um MOD a dá (rascunho da API 6, §4; tarefa 6).
+  vestirCapa(cartao, pessoa.id);
   cartao.querySelector(".chamada-cartao-nome").textContent =
     pessoa.nickname + (pessoa.is_self ? " (você)" : "");
   // O estado em frase, ao lado do estado em palavra, e sempre visível: é o dado

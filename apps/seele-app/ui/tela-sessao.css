@@ -873,6 +873,37 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background: var(--seele-negro-painel);
 }
 
+/* **A capa de uma pessoa** (`pessoa.capa`; rascunho da API 6, §4; tarefa 6):
+   a primeira camada de quem a veste — o cartão da chamada, a barra do
+   operador —, atrás de todo o conteúdo. O véu e o halo de quem fala moram no
+   `::after` da camada, por cima da imagem e por baixo do texto: um `box-shadow`
+   inset do próprio cartão seria pintado com o fundo dele, **abaixo** da capa.
+   Seletores de atributo, e não de classe: quem veste é de outra tela. */
+[data-com-capa] {
+  position: relative;
+  isolation: isolate;
+}
+
+.capa-camada {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-size: cover;
+  background-position: center;
+}
+
+.capa-camada::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--seele-negro-painel) 55%, transparent);
+}
+
+[data-fala="sim"] > .capa-camada::after {
+  background: color-mix(in srgb, var(--seele-laranja-carga) 75%, transparent);
+  box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
+}
+
 /* A região `operador.barra` (rascunho da API 6, §3): fechada como as outras, e
    com teto de altura — o que passar rola por dentro, e o SAIR e o microfone,
    embaixo dela, continuam onde estão. */

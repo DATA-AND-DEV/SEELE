@@ -629,8 +629,8 @@ function esquecerPreferenciasLidas() {
 /**
  * A preferência que a tela **de fato** consulta para um ponto.
  *
- * `pessoa.avatar` não tem linha própria em QUEM DESENHA O QUE, e herda a de
- * `pessoa.cartao` quando não há escolha dele. `avatarContribuido`, em
+ * `pessoa.avatar` e `pessoa.capa` não têm linha própria em QUEM DESENHA O QUE,
+ * e herdam a de `pessoa.cartao` quando não há escolha deles (rascunho §4). `avatarContribuido`, em
  * `base.js`, decide por esta função, e «quem pinta cada lugar» a lê: uma
  * regra, e não duas cópias dela.
  *
@@ -638,8 +638,8 @@ function esquecerPreferenciasLidas() {
  *   de um MOD.
  */
 function preferenciaConsultadaPara(ponto) {
-  if (ponto === "pessoa.avatar") {
-    return modPreferidoPara("pessoa.avatar") || modPreferidoPara("pessoa.cartao");
+  if (ponto === "pessoa.avatar" || ponto === "pessoa.capa") {
+    return modPreferidoPara(ponto) || modPreferidoPara("pessoa.cartao");
   }
   return modPreferidoPara(ponto);
 }
@@ -845,6 +845,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": "Como as pessoas aparecem",
   "pessoa.cartao": "O cartão de cada pessoa",
   "pessoa.avatar": "As imagens de cada pessoa no servidor",
+  "pessoa.capa": "A capa de cada pessoa",
   "pessoa.detalhes": "O perfil detalhado de uma pessoa",
   "pessoa.acoes": "Ações sobre uma pessoa",
   "canal.item": "Como os canais aparecem na lista",
@@ -1121,6 +1122,7 @@ function quemPintaEstaAVista() {
 const CONTEINERES_DOS_PONTOS = Object.freeze({
   "pessoa.identidade": ".pessoa-identidade",
   "pessoa.avatar": "[data-pessoa-do-avatar]",
+  "pessoa.capa": "[data-pessoa-da-capa]",
   "pessoa.cartao": "li.pessoa",
   "pessoa.detalhes": ".pessoa-nativo",
   "pessoa.acoes": ".pessoa-rodape",

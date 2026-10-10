@@ -1850,7 +1850,9 @@ function anotando(...anotadas) {
       try {
         registro.registrar({ id: "mod/a" }, dono, {
           ponto, modo, alvo: "1",
-          ...(ponto === "pessoa.avatar" ? { conteudo: { doServidor: { canal: 1, pedido: {} } } } : {}),
+          ...(ponto === "pessoa.avatar" || ponto === "pessoa.capa"
+            ? { conteudo: { doServidor: { canal: 1, pedido: {} } } }
+            : {}),
           // A navegação substituída é uma ordem das listas, e tem forma
           // própria, como o avatar (rascunho §3, tarefa 5).
           ...(ponto === "servidor.navegacao" && modo === "substituir"
@@ -2508,8 +2510,10 @@ function anotando(...anotadas) {
       // começo do R2. `provarImagem` e o teto do cartão moram no mesmo
       // `mods-regiao.js`, e entram aqui: o avatar chama as duas antes de dar a
       // imagem por pronta.
+      // Até o fim de `imagemContribuida`, que o avatar chama desde a tarefa 6
+      // (a mesma carga para o avatar e a capa).
       const inicioDoAvatar = base.indexOf("function avatarContribuido(");
-      const fimDoAvatar = base.indexOf("\n}\n", inicioDoAvatar) + 3;
+      const fimDoAvatar = base.indexOf("\n}\n", base.indexOf("function imagemContribuida(", inicioDoAvatar)) + 3;
       confere("R4e · o recorte", inicioDoAvatar >= 0,
         "`avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);

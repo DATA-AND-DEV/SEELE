@@ -1128,6 +1128,9 @@ function desenharOperador(snapshot) {
   // coisa sobre a mesma pessoa.
   $("operador-inicial").textContent = (snapshot.nickname || "?").trim().charAt(0).toUpperCase();
   vestirAvatar($("operador-inicial"), snapshot.me);
+  // E a capa de quem usa, no fundo da barra do operador (rascunho §4).
+  const barraDoOperador = document.querySelector("#tela-sessao .operador");
+  if (barraDoOperador) vestirCapa(barraDoOperador, snapshot.me);
 
   // **SAIR DA SALA ou SAIR DO SERVIDOR, a cada quadro.** O rótulo só era
   // reescrito pelo desenho da chamada, e só com a chamada na frente: quem saía
@@ -5002,6 +5005,50 @@ function vestirAvatar(quadrado, pessoaId) {
   quadrado.dataset.pessoaDoAvatar = pessoaId == null ? "" : String(pessoaId);
   quadrado.dataset.iniciaisDoAvatar = quadrado.textContent;
   return aplicarAvatar(quadrado);
+}
+
+/**
+ * **Veste um elemento com a capa de uma pessoa** (`pessoa.capa`; rascunho da
+ * API 6, §4; tarefa 6): o cartão dela na chamada, a barra do operador. O
+ * elemento ganha `data-pessoa-da-capa` — nunca `data-faixa`, que é a faixa de
+ * sincronia (PERFIS R1) — e a capa entra como a primeira camada dele, atrás de
+ * todo o conteúdo: o halo de quem fala, as pastilhas e o texto ficam por cima.
+ */
+function vestirCapa(quadro, pessoaId) {
+  quadro.dataset.pessoaDaCapa = pessoaId == null ? "" : String(pessoaId);
+  return aplicarCapa(quadro);
+}
+
+/** Atualiza só as capas: a chegada da mídia não remonta a chamada. */
+function redesenharCapas() {
+  document.querySelectorAll("[data-pessoa-da-capa]").forEach(aplicarCapa);
+}
+
+/**
+ * Põe ou tira a camada da capa. **Com o movimento reduzido, o quadro parado**:
+ * `animation: none` não para um GIF, e a capa guarda o primeiro quadro para
+ * isso (`quadroEstatico`, em `base.js`). Sem o quadro parado, nada — uma capa
+ * que se move para quem pediu que nada se movesse é pior que nenhuma.
+ */
+function aplicarCapa(quadro) {
+  const id = quadro.dataset.pessoaDaCapa;
+  const capa = id ? capaContribuida(id) : null;
+  const parada = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const url = capa ? (parada ? capa.estatico : capa.url) : null;
+  let camada = quadro.querySelector(":scope > .capa-camada");
+  if (!url) {
+    camada?.remove();
+    delete quadro.dataset.comCapa;
+    return quadro;
+  }
+  if (!camada) {
+    camada = elemento("span", "capa-camada");
+    camada.setAttribute("aria-hidden", "true");
+    quadro.prepend(camada);
+  }
+  camada.style.backgroundImage = `url(${url})`;
+  quadro.dataset.comCapa = "sim";
+  return quadro;
 }
 
 /** Atualiza só as imagens: a chegada da mídia não remonta a chamada. */

@@ -76,6 +76,9 @@
 const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "pessoa.identidade": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.avatar": { modos: ["substituir"], perfil: null, porAlvo: true },
+  // **A capa** (rascunho da API 6, §4; tarefa 6): uma origem de imagem por
+  // pessoa, como o avatar, e com as mesmas exigências.
+  "pessoa.capa": { modos: ["substituir"], perfil: null, porAlvo: true },
   "pessoa.cartao": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
   "pessoa.detalhes": { modos: ["adicionar"], perfil: "superficie", porAlvo: true },
   "pessoa.acoes": { modos: ["adicionar"], perfil: "cartao", porAlvo: true },
@@ -158,16 +161,18 @@ function recusaNomeada(nome, frase) {
  * registro recusaria. Lança com o nome do ponto; não devolve nada.
  */
 function conferirOConteudo(ponto, modo, alvo, conteudo) {
-  // Um avatar é só uma origem de imagem, nunca uma árvore sobre os controles.
-  if (ponto === "pessoa.avatar" && (alvo === undefined || alvo === null || String(alvo) === "")) {
-    throw recusaNomeada("sem-alvo", "pessoa.avatar exige alvo e conteudo.doServidor");
+  // Um avatar — e uma capa — é só uma origem de imagem, nunca uma árvore sobre
+  // os controles.
+  const imagemDePessoa = ponto === "pessoa.avatar" || ponto === "pessoa.capa";
+  if (imagemDePessoa && (alvo === undefined || alvo === null || String(alvo) === "")) {
+    throw recusaNomeada("sem-alvo", `${ponto} exige alvo e conteudo.doServidor`);
   }
-  if (ponto === "pessoa.avatar" && (
+  if (imagemDePessoa && (
     !conteudo?.doServidor
     || typeof conteudo.doServidor !== "object"
     || Array.isArray(conteudo.doServidor)
   )) {
-    throw recusaNomeada("conteudo-invalido", "pessoa.avatar exige alvo e conteudo.doServidor");
+    throw recusaNomeada("conteudo-invalido", `${ponto} exige alvo e conteudo.doServidor`);
   }
   // **A navegação substituída é uma ordem, e não um desenho** (rascunho §3,
   // tarefa 5): `{ salas?, canais? }`, cada um com `grupos: [{ titulo, ids }]`.

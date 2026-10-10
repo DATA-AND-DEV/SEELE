@@ -651,8 +651,10 @@ que o `check-api` usa acha exatamente esses 17 na HEAD [c].
 Mudam, na 6:
 
 - **`midia`** passa a dizer **o ponto e o alvo** (`{ ponto: 'pessoa.capa', alvo:
-  12, estado: 'recusada', porque }`), para o MOD dizer a quem enviou que a capa
-  não vai aparecer (PERFIS M5, R9). E o retrato que não decodifica manda
+  '12', estado: 'falhou', porque }`), para o MOD dizer a quem enviou que a capa
+  não vai aparecer (PERFIS M5, R9). [c, tarefa 6, para o avatar e a capa; o
+  `estado` é o `'falhou'` que o avatar já mandava, e o `alvo` vai como texto,
+  como os alvos das contribuições] E o retrato que não decodifica manda
   `midia`/`falhou` (nota do K2 da F5).
 - **`traco`** ganha a fase `cancelou`. Hoje `pointercancel` chega como
   `terminou` (`mods-regiao.js:1898` [c]) e um gesto cancelado move a peça

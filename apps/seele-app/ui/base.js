@@ -1235,6 +1235,7 @@ contribuicoesDosMods.aoMudar(() => {
   if (typeof redesenharAsPessoas === "function") redesenharAsPessoas();
   if (typeof redesenharAsEntradasDeMod === "function") redesenharAsEntradasDeMod();
   if (typeof redesenharAvatares === "function") redesenharAvatares();
+  if (typeof redesenharCapas === "function") redesenharCapas();
 });
 
 /**
@@ -1248,16 +1249,70 @@ contribuicoesDosMods.aoMudar(() => {
  * `preferenciaConsultadaPara`, a mesma que a gestão de MODs lê.
  */
 function avatarContribuido(pessoaId) {
+  return imagemContribuida("pessoa.avatar", pessoaId)?.uri ?? null;
+}
+
+/**
+ * **A capa de uma pessoa, contribuída por um MOD** (`pessoa.capa`; rascunho da
+ * API 6, §4; tarefa 6). A mesma regra do avatar — a mesma carga, o mesmo
+ * cache, a mesma preferência herdada de `pessoa.cartao` —, com o quadro
+ * estático que o movimento reduzido usa.
+ *
+ * @returns {{ url: string, estatico: string|null } | null}
+ */
+function capaContribuida(pessoaId) {
+  const estado = imagemContribuida("pessoa.capa", pessoaId);
+  return estado?.uri ? { url: estado.uri, estatico: estado.estatico ?? null } : null;
+}
+
+/** O que cada imagem de pessoa diz no `midia` e quem a redesenha. */
+const IMAGENS_DE_PESSOA = Object.freeze({
+  "pessoa.avatar": { chave: "avatar", redesenhar: () => redesenharAvatares() },
+  "pessoa.capa": {
+    chave: "capa",
+    redesenhar: () => {
+      if (typeof redesenharCapas === "function") redesenharCapas();
+    },
+  },
+});
+
+/**
+ * **O primeiro quadro de uma imagem**, parado: o que a capa mostra com o
+ * movimento reduzido (rascunho §4). `animation: none` não para um GIF; um
+ * quadro desenhado num `canvas` para. `null` quando o `canvas` não pôde ser lido.
+ */
+function quadroEstatico(imagem) {
+  try {
+    const tela = document.createElement("canvas");
+    tela.width = imagem.naturalWidth;
+    tela.height = imagem.naturalHeight;
+    tela.getContext("2d").drawImage(imagem, 0, 0);
+    // Sem tipo escrito: o padrão do `canvas` é PNG, e o que sai daqui são os
+    // pixels recodificados, e não bytes de alguém com um tipo juntado a eles.
+    return tela.toDataURL();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * **A imagem de pessoa que um MOD contribui** — o avatar ou a capa —, com a
+ * carga, o cache por contribuição e a troca do `atualizar`. Devolve o estado
+ * da carga (`{ uri, estatico, situacao, … }`), ou `null` enquanto não há
+ * contribuição ou ela ainda não começou.
+ */
+function imagemContribuida(ponto, pessoaId) {
+  const imagem = IMAGENS_DE_PESSOA[ponto];
   const preferido = typeof preferenciaConsultadaPara === "function"
-    ? preferenciaConsultadaPara("pessoa.avatar")
+    ? preferenciaConsultadaPara(ponto)
     : "";
   const contribuicao = contribuicoesDosMods.escolherSubstituicao(
-    "pessoa.avatar", String(pessoaId), preferido,
+    ponto, String(pessoaId), preferido,
   ).escolhida;
   if (!contribuicao) return null;
   const dono = donoDaRegiao({ id: contribuicao.mod }, contribuicao.instancia);
   if (!dono.podeFalar()) return null;
-  if (contribuicao.retrato) return contribuicao.retrato.uri;
+  if (contribuicao.retrato) return contribuicao.retrato;
   const novoRetrato = () => ({ uri: null, bytes: 0, cancelado: false, situacao: "carregando", motivo: "" });
   const estadoInicial = novoRetrato();
   contribuicao.retrato = estadoInicial;
@@ -1293,10 +1348,11 @@ function avatarContribuido(pessoaId) {
         return;
       }
       estado.uri = midia.uri;
+      estado.estatico = midia.estatico ?? null;
       estado.situacao = "pronta";
       ganchos.aoPronto?.();
       avisarQueAMidiaMudou();
-      redesenharAvatares();
+      imagem.redesenhar();
     };
     const recusar = (falha) => {
       // A reserva volta antes de qualquer pergunta: um avatar recusado não
@@ -1308,10 +1364,14 @@ function avatarContribuido(pessoaId) {
       estado.situacao = "recusada";
       estado.motivo = porque;
       avisarQueAMidiaMudou();
-      dono.falar({ nome: "midia", chave: "avatar", estado: "falhou", porque });
+      // **Com o ponto e o alvo** (rascunho §7.1): o MOD diz a quem enviou que a
+      // imagem não vai aparecer, e para isso precisa saber de quem ela era.
+      dono.falar({
+        nome: "midia", chave: imagem.chave, ponto, alvo: String(pessoaId), estado: "falhou", porque,
+      });
       // **Dito a quem hospeda.** Era este o caminho do avatar do PERFIS em
       // 23/09: a janela sabia por que ele não aparecia e não contava a ninguém.
-      dono.anotarRecusa(`avatar da pessoa ${pessoaId} não montou — ${porque}`);
+      dono.anotarRecusa(`${imagem.chave} da pessoa ${pessoaId} não montou — ${porque}`);
     };
     const fonte = contribuicao.conteudo.doServidor;
     // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
@@ -1326,19 +1386,23 @@ function avatarContribuido(pessoaId) {
         }
         if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
           || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
-          throw new Error("o avatar não é imagem ou excede o limite de mídia");
+          throw new Error(`o ${imagem.chave} não é imagem ou excede o limite de mídia`);
         }
         // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
         // cima soma os `bytes` dos outros retratos desta instância, e dois
         // avatares decodificando juntos passariam os dois por ela se a reserva
         // esperasse. A imagem que não abre os devolve, em `recusar`.
         estado.bytes = midia.bytes;
-        return provarImagem(midia.uri).then(() => midia);
+        return provarImagem(midia.uri).then((decodificada) => {
+          // A capa guarda o quadro parado, para o movimento reduzido (§4).
+          if (ponto === "pessoa.capa") midia.estatico = quadroEstatico(decodificada);
+          return midia;
+        });
       })
       .then(aplicar, recusar)
       .catch((falha) => {
         console.warn(
-          `MOD ${contribuicao.mod}: o avatar da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
+          `MOD ${contribuicao.mod}: o ${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e o tropeço não foi dito como recusa`,
           falha,
         );
         // **E ao `seele.log`**, pela porta das outras linhas do avatar
@@ -1346,7 +1410,7 @@ function avatarContribuido(pessoaId) {
         // dono que lança aqui terminaria numa promessa que ninguém pega.
         try {
           dono.anotarRecusa(
-            `avatar da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
+            `${imagem.chave} da pessoa ${pessoaId} tropeçou depois da busca, e não foi uma recusa — ${motivoDaFalha(falha)}`,
           );
         } catch (tropeco) {
           console.warn(`MOD ${contribuicao.mod}: o tropeço do avatar não chegou ao registro`, tropeco);

@@ -16114,11 +16114,19 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
     // Ele só conta se o corpo dele de fato consulta `escolherSubstituicao` — sem
     // isto, a navegação passava por proximidade, porque o nome dela ficava a
     // menos de 400 caracteres da chamada dentro de `arranjoDe` (medido).
-    let intermediario =
-        js_function(&telas, "function arranjoDe(").contains("escolherSubstituicao(");
+    // E `imagemContribuida("ponto", …)`, que pergunta pelas imagens de pessoa —
+    // o avatar e a capa (tarefa 6) —, pela mesma regra.
+    let intermediarios: Vec<&str> = ["arranjoDe", "imagemContribuida"]
+        .into_iter()
+        .filter(|nome| {
+            js_function(&telas, &format!("function {nome}(")).contains("escolherSubstituicao(")
+        })
+        .collect();
     for ponto in &substituiveis {
-        let pelo_intermediario =
-            intermediario && telas.contains(&format!("arranjoDe(\"{ponto}\")"));
+        let pelo_intermediario = intermediarios.iter().any(|nome| {
+            telas.contains(&format!("{nome}(\"{ponto}\")"))
+                || telas.contains(&format!("{nome}(\"{ponto}\","))
+        });
         let citado = pelo_intermediario
             || telas
                 .match_indices(&format!("\"{ponto}\""))
