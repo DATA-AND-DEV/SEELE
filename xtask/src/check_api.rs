@@ -483,10 +483,16 @@ fn tetos_da_casca(
     for (nome, fonte, constante) in [
         ("contribuicoes.teto", contribuicoes, "TETO_DE_CONTRIBUICOES"),
         (
+            "contribuicoes.alvos-por-ponto",
+            contribuicoes,
+            "TETO_DE_ALVOS_POR_PONTO",
+        ),
+        (
             "superficies.limites.superficies",
             superficies,
             "TETO_DE_SUPERFICIES",
         ),
+        ("superficies.limites.folhas", superficies, "TETO_DE_FOLHAS"),
         ("superficies.limites.avisos", superficies, "TETO_DE_AVISOS"),
     ] {
         if let Some(valor) = constante_da_casca(fonte, constante) {
@@ -664,8 +670,10 @@ fn tetos_declarados(versao: u64, descritor: &serde_json::Value, casca: &Casca) -
         return Vec::new();
     }
     let mut declarados: Vec<(String, &serde_json::Value)> = Vec::new();
-    if let Some(teto) = descritor.pointer("/contribuicoes/teto") {
-        declarados.push(("contribuicoes.teto".to_owned(), teto));
+    for nome in ["teto", "alvos-por-ponto"] {
+        if let Some(teto) = descritor.pointer(&format!("/contribuicoes/{nome}")) {
+            declarados.push((format!("contribuicoes.{nome}"), teto));
+        }
     }
     if let Some(limites) = descritor
         .pointer("/superficies/limites")
@@ -698,11 +706,49 @@ fn tetos_declarados(versao: u64, descritor: &serde_json::Value, casca: &Casca) -
     violacoes
 }
 
+/// Um símbolo do código: `nome` ou `Tipo::membro`, sem espaço e sem prosa.
+fn e_simbolo(texto: &str) -> bool {
+    texto.split("::").all(|parte| {
+        parte
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+            && parte.chars().all(|c| c.is_alphanumeric() || c == '_')
+    })
+}
+
+/// **A partir da 6, todo apontador de `reads`, `actions`, `own` e `world` é um
+/// símbolo** (tarefa 12 da F3). O [`evaluate`] confere só o texto depois do
+/// último `::`, e uma prosa que contenha `::` passava por qualquer sufixo que
+/// existisse nas fontes; o `servidor.dados.uso` do rascunho apontava para uma
+/// frase, sem código por trás. A prosa vai para o bloco `sentido`.
+fn apontadores_sao_simbolos(versao: u64, descritor: &serde_json::Value) -> Vec<Violation> {
+    if versao < PRIMEIRA_API_COBRADA {
+        return Vec::new();
+    }
+    let mut violacoes = Vec::new();
+    for bloco in ["reads", "actions", "own", "world"] {
+        let Some(obj) = descritor.get(bloco).and_then(serde_json::Value::as_object) else {
+            continue;
+        };
+        for (nome, interior) in obj {
+            if !interior.as_str().is_some_and(e_simbolo) {
+                violacoes.push(format!(
+                    "a API {versao} aponta `{bloco}.{nome}` para `{interior}`, que não é um símbolo \
+                     do código (`nome` ou `Tipo::membro`): a prosa vai para o bloco `sentido`"
+                ));
+            }
+        }
+    }
+    violacoes
+}
+
 /// As regras da v6, juntas, para [`conferir_arquivo`].
 fn regras_da_v6(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Vec<Violation> {
     let mut violacoes = pontos_e_tipos(versao, descritor, casca);
     violacoes.extend(nomes_de_servidor(versao, descritor, casca));
     violacoes.extend(tetos_declarados(versao, descritor, casca));
+    violacoes.extend(apontadores_sao_simbolos(versao, descritor));
     violacoes
 }
 
@@ -2008,6 +2054,7 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
 
 /** Quantas contribuições um MOD registra ao mesmo tempo. */
 const TETO_DE_CONTRIBUICOES = 128;
+const TETO_DE_ALVOS_POR_PONTO = 256;
 "#;
 
     /// `TIPOS_DE_SUPERFICIE` e os dois tetos de `mods-superficies.js`.
@@ -2017,6 +2064,7 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
   dialogo: { host: "palco-de-camadas", foco: true, camada: true },
 });
 const TETO_DE_SUPERFICIES = 12;
+const TETO_DE_FOLHAS = 3;
 const TETO_DE_AVISOS = 4;
 "#;
 
@@ -2094,7 +2142,9 @@ const PERFIS_DE_RENDER = Object.freeze({
         }
         for (nome, valor) in [
             ("contribuicoes.teto", 128),
+            ("contribuicoes.alvos-por-ponto", 256),
             ("superficies.limites.superficies", 12),
+            ("superficies.limites.folhas", 3),
             ("superficies.limites.avisos", 4),
             ("superficies.limites.nos", 4096),
             ("superficies.limites.fundura", 16),
@@ -2299,6 +2349,71 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
         assert!(
             violacoes.iter().any(|v| v.contains("mandarMensagem")),
             "{violacoes:?}"
+        );
+    }
+
+    /// **Os alvos por ponto e as folhas também são conferidos** (tarefa 12 da
+    /// F3): o modelo de teto da 6 tem dois números de contribuição — o das sem
+    /// alvo e o de alvos por ponto —, e as folhas empilhadas têm teto próprio.
+    /// Declarados no `v6.json` e não conferidos, eles podiam divergir do produto
+    /// sem ninguém olhar.
+    #[test]
+    fn os_alvos_por_ponto_e_as_folhas_declarados_sao_conferidos() {
+        let casca = casca_de_fixture();
+        let errado = serde_json::json!({
+            "contribuicoes": { "teto": 128, "alvos-por-ponto": 257 },
+            "superficies": { "limites": { "folhas": 4 } },
+        });
+        let violacoes = regras_da_v6(6, &errado, &casca);
+        assert!(
+            violacoes
+                .iter()
+                .any(|v| v.contains("alvos-por-ponto") && v.contains("257") && v.contains("256")),
+            "{violacoes:?}"
+        );
+        assert!(
+            violacoes
+                .iter()
+                .any(|v| v.contains("folhas") && v.contains('4') && v.contains('3')),
+            "{violacoes:?}"
+        );
+        let certo = serde_json::json!({
+            "contribuicoes": { "teto": 128, "alvos-por-ponto": 256 },
+            "superficies": { "limites": { "folhas": 3 } },
+        });
+        assert!(tetos_declarados(6, &certo, &casca).is_empty());
+    }
+
+    /// **Um apontador da 6 é um símbolo, e não prosa** (tarefa 12 da F3). O
+    /// `evaluate` confere só o texto depois do último `::`: «novo: Retrato::eu
+    /// (de Snapshot::me)» passava pelo `me)`, que está em toda parte, e o
+    /// `servidor.dados.uso` do rascunho apontava para um texto, sem código
+    /// nenhum por trás. A prosa vai para o bloco `sentido`.
+    #[test]
+    fn um_apontador_da_6_que_nao_e_simbolo_reprova() {
+        let casca = casca_de_fixture();
+        let v6 = serde_json::json!({
+            "reads": {
+                "retrato.eu": "novo: Retrato::eu (de Snapshot::me)",
+                "capacidades": "capacidades_da_api",
+            },
+            "actions": { "superficie-criar": "SuperficiesDoMod::criar" },
+            "world": { "mundo.agora": "mundo::agora" },
+        });
+        let violacoes = regras_da_v6(6, &v6, &casca);
+        assert!(
+            violacoes.iter().any(|v| v.contains("retrato.eu")),
+            "{violacoes:?}"
+        );
+        assert!(
+            !violacoes
+                .iter()
+                .any(|v| v.contains("capacidades") || v.contains("superficie-criar")),
+            "um símbolo foi tomado por prosa: {violacoes:?}"
+        );
+        assert!(
+            regras_da_v6(5, &v6, &casca).is_empty(),
+            "a v5 está congelada, e não é cobrada"
         );
     }
 
