@@ -61,9 +61,18 @@ nada dependa da memória de uma conversa.
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
 - **A parte 2 da tarefa 17 da F6**, com tela, no Mac e no Windows, com o dono.
-- **O ponto em produção fala o ENC/2**: `sondar --exige-enc2 encontro.seele.app.br`, de
-  outra máquina, depois de o dono reimplantar a VPS (`docs/ponto-de-encontro.md`).
-  A VPS vai antes do app (spec-mestre, §4).
+- ~~**O ponto em produção fala o ENC/2**~~: **feito em 10/10, com o sim do dono.** O
+  `seele-encontro` da `versao/0.16` em `330f3ab4` (a décima primeira, verde; o crate não
+  mudou depois dela), compilado para Linux x86_64 num contêiner `rust:1-bookworm` com o
+  toolchain 1.97.1, sha256 `9aff3ac24c34a57c3f86399c47664899abf9e75257202894af2e4c4f1fe55278`,
+  foi para `/opt/seele/seele-encontro`, com o anterior guardado em
+  `seele-encontro.2026-09-16.bak`. Antes: o `sondar --exige-enc2` dizia «ENC/2 mudo». Depois:
+  «fala o ENC/2 em toda família que respondeu», com o relógio do ponto a 0 s do daqui.
+  **O `--barulhento` saiu**, também com o sim do dono: ele gravava no journal quem
+  encontrava quem; o drop-in foi movido para `/opt/seele/barulhento.conf.2026-10-10.bak`.
+  **Fica uma coisa para o dono:** o IPv6 do ponto (`[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384`)
+  não responde de fora, antes e depois da troca, com o `ufw` liberando 8384/udp nas duas
+  famílias e o serviço ouvindo em `[::]:8384`. A suspeita é o firewall do provedor.
 - **O indexador, antes dos pacotes da API 6** (conferido pelo ESTILO em `SEELE-MODS-INDEXER/ferramentas/manifesto.py`); do dono, no `SEELE-MODS-INDEXER`:
   1. a chave `tema` em `CHAVES` e em `TIPOS`, como booleana (`:49-50`; hoje uma chave desconhecida sai `malformed`, `:144-146`), e levada ao catálogo para o site dizer «muda a aparência do servidor»;
   2. `VERSAO_DA_API` de 5 para 6 (`:20`; hoje a 4.0.0 sai `api-too-new`, `:186-187`);
