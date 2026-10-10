@@ -555,3 +555,24 @@ começar.
   aparelhos e a Fullscreen API não foram exercitadas num Chromium.
   **Cinco reversões**, cada uma reprovando a sua prova.
 
+## 09/10, noite: o eco no navegador (pedido da F8)
+
+- **A F8 perguntou** se a voz do PC liga o `echoCancellation`, para o aviso de
+  fone da casca larga. A resposta: a voz-web ainda não existe, e pedir o
+  cancelador não é cancelar (a nossa voz toca pelo Web Audio, e não por um
+  `RTCPeerConnection`). A larga fica com «USE FONE» até a medida; a F8 também
+  tirou do celular a afirmação do P9, que não tinha medida (`63089fe7`, no
+  `0.16/celular`).
+- **A página da medida** (`spikes/eco-no-navegador/`): um tom de 1 kHz pelo
+  Web Audio e o nível dele no microfone, com e sem o cancelador, em quatro
+  rodadas alternadas; o veredito diz «sem laço» quando o tom não chega ao
+  microfone, em vez de inventar um número. Conferida no Chromium mudo e com
+  microfone falso: quatro rodadas, o cancelador aplicado igual ao pedido, e
+  «sem laço».
+- **A medida de verdade é do dono** (alto-falante e microfone de verdade), nos
+  três navegadores do Mac e no iPhone: os passos estão em
+  `F4/medicoes-do-dono.md`. O Simulador não serve: ele usa o áudio do Mac.
+- **Também neste trecho:** a regra do duble ficou escrita na ponte com o
+  porquê; os 28 roteiros e o G3 da F8 (o desktop igual pixel a pixel no
+  Chromium e no WebKit) passaram no `0.16/web` em `792dc2a4`.
+
