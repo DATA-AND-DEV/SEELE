@@ -1251,7 +1251,18 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
 ///
 /// `\n}\n` terminates: every brace inside a body is indented.
 fn body_of(source: &str, signature: &str) -> String {
-    let Some(after) = source.split(signature).nth(1) else {
+    // **Com ou sem genéricos** (lote E54 da F5). O `connect` passou a ser
+    // `async fn connect<R: tauri::Runtime>(`, para um teste do `main.rs`
+    // chamá-lo pelo runtime falso do Tauri; procurado só por
+    // `async fn connect(`, ele seria dado como sumido. Sem achar a assinatura
+    // como foi escrita, o `(` do fim vira `<` e procura de novo — e, sem achar
+    // nenhuma das duas, reprova como antes.
+    let generica = signature.strip_suffix('(').map(|nome| format!("{nome}<"));
+    let Some(after) = source.split(signature).nth(1).or_else(|| {
+        generica
+            .as_deref()
+            .and_then(|generica| source.split(generica).nth(1))
+    }) else {
         panic!("main.rs no longer has `{signature}`");
     };
     let Some(body) = after.split("\n}\n").next() else {
@@ -15663,7 +15674,9 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
 
     // E a ponte de eventos não fala em nome de uma sessão morta.
     let ponte = rust
-        .split_once("impl EventListener for Bridge")
+        // Sem o começo do `impl`: desde o lote E54 ele é genérico sobre o
+        // runtime (`impl<R: tauri::Runtime> EventListener for Bridge<R>`).
+        .split_once("EventListener for Bridge")
         .expect("a ponte de eventos")
         .1;
     let ponte = ponte.split_once("\n}\n").map_or(ponte, |(a, _)| a);

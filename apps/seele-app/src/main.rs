@@ -1360,7 +1360,11 @@ async fn connect<R: tauri::Runtime>(
     // desta. Conferido aqui, antes de qualquer efeito: as escolhas gravadas, o
     // retrato e o consentimento de par não vão ao servidor que a pessoa
     // deixou. E de novo ao gravar o slot, logo abaixo.
-    if !session.geracao_vale(geracao) {
+    //
+    // Por `confere_geracao`, como todo comando de uma geração morta: ela conta
+    // em `comandos_de_geracao_morta` e diz em DEBUG, e a velha que chega tarde
+    // é uma coisa da sessão anterior falando depois da hora.
+    if session.confere_geracao(geracao).is_err() {
         return Err(largar_a_substituida(
             &connection,
             geracao,
@@ -1460,7 +1464,7 @@ async fn connect<R: tauri::Runtime>(
     // abaixo — o endereço da sessão, o alvo, a lista de visitados — vale para
     // ela. Gravar sem conferir punha a conexão da velha no lugar da nova.
     let substituida = match session.connection.lock() {
-        Ok(mut slot) if session.geracao_vale(geracao) => {
+        Ok(mut slot) if session.confere_geracao(geracao).is_ok() => {
             *slot = Some(connection);
             None
         }
@@ -1638,7 +1642,7 @@ fn soltar_a_entrada(session: State<'_, Session>, geracao: u64) -> bool {
 /// apaga com a sessão que ele abriu.
 fn soltar_a_entrada_em(session: &Session, geracao: u64) -> bool {
     let solta = match session.connection.lock() {
-        Ok(mut slot) if slot.is_some() && session.geracao_vale(geracao) => {
+        Ok(mut slot) if session.confere_geracao(geracao).is_ok() && slot.is_some() => {
             session.revogar();
             slot.take()
         }
@@ -1712,7 +1716,8 @@ mod a_entrada_velha_que_chega_tarde {
     /// escreveriam ao mesmo tempo.
     fn vez() -> std::sync::MutexGuard<'static, ()> {
         static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        VEZ.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        VEZ.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
@@ -2030,7 +2035,10 @@ mod a_entrada_velha_que_chega_tarde {
         .expect("a tentativa velha não voltou")
         .map_err(|falha| format!("{falha:?}"))
         .expect("a tentativa velha não entrou");
-        assert_eq!(presentes(&servidor_velho, 1, Duration::from_secs(2)).await, 1);
+        assert_eq!(
+            presentes(&servidor_velho, 1, Duration::from_secs(2)).await,
+            1
+        );
 
         // A janela larga a velha pela geração dela.
         if !super::soltar_a_entrada_em(&sessao, velha.geracao) {
@@ -2040,7 +2048,8 @@ mod a_entrada_velha_que_chega_tarde {
             ));
         }
         if sessao.connection().is_ok() {
-            vermelhos.push("a conexão da velha continua no slot depois de a janela largá-la".into());
+            vermelhos
+                .push("a conexão da velha continua no slot depois de a janela largá-la".into());
         }
         if sessao.geracao_vale(velha.geracao) {
             vermelhos.push(format!(
@@ -2105,7 +2114,7 @@ mod a_entrada_velha_que_chega_tarde {
                     .into(),
             );
         }
-        if !sessao.geracao_vale(nova.geracao) {
+        if sessao.geracao() != nova.geracao {
             vermelhos.push("o pedido com a geração velha revogou a geração da nova".into());
         }
         let mut ouvidos = [
@@ -2167,7 +2176,7 @@ mod a_entrada_velha_que_chega_tarde {
         };
         let antes_dos_efeitos = &corpo[volta..primeiro_efeito];
         assert!(
-            antes_dos_efeitos.contains("if !session.geracao_vale(geracao)")
+            antes_dos_efeitos.contains("session.confere_geracao(geracao).is_err()")
                 && antes_dos_efeitos.contains("largar_a_substituida("),
             "o `connect` aplica os efeitos de entrada sem conferir antes se a geração dele \
              ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
@@ -2181,7 +2190,8 @@ mod a_entrada_velha_que_chega_tarde {
         };
         let ao_gravar = &corpo[cadeado..gravar];
         assert!(
-            ao_gravar.contains("session.geracao_vale(geracao)") && !ao_gravar.contains(".await"),
+            ao_gravar.contains("session.confere_geracao(geracao).is_ok()")
+                && !ao_gravar.contains(".await"),
             "o `connect` grava o slot sem conferir a geração com o cadeado na mão: a tentativa \
              que outra substituiu no meio dos efeitos de entrada grava a conexão dela por cima \
              da nova.\n{ao_gravar}"
@@ -2190,7 +2200,9 @@ mod a_entrada_velha_que_chega_tarde {
         let largada = depois.find("largar_a_substituida(");
         let endereco = depois.find("endereco_da_sessao");
         assert!(
-            largada.zip(endereco).is_some_and(|(largada, endereco)| largada < endereco),
+            largada
+                .zip(endereco)
+                .is_some_and(|(largada, endereco)| largada < endereco),
             "depois de gravar o slot, a tentativa que não gravou não é largada antes de o \
              endereço da sessão ser escrito: o endereço, o alvo e a lista de visitados \
              passariam a ser os dela.\n{depois}"
