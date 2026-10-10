@@ -444,8 +444,18 @@ pub enum Motivo {
 /// [`DisconnectReason::NinguemAtendeu`] e [`DisconnectReason::ChamadaRecusada`]
 /// — são terminais pela spec de 23/09/2026 («Protocolo»): reconectar abriria a
 /// sala de quem acabou de desligar, ou tocaria de novo para quem não atendeu.
-/// Nenhum servidor as manda ainda; elas entram aqui com o fio, para a sala não
-/// nascer com uma bateria tocando de novo.
+///
+/// `ChamadaEncerrada` é a que chega aqui: quem recebe desliga, e
+/// `Recepcao::desligar` (`seele-server`, `recepcao.rs`, desde `9890e4eb`) a
+/// manda a cada convidado lá dentro, no meio da sessão, pelo mesmo
+/// `Event::ServidorEncerrando` com que quem hospeda fecha avisando. Sem ela
+/// aqui, a bateria ligaria de novo para a sala de quem acabou de desligar.
+///
+/// As outras duas o servidor manda na fase do toque, antes de a sessão
+/// existir (`tocar` e `recusar_o_aperto`, em `session.rs`): chegam como recusa
+/// do aperto de mão, [`ConnectError::Refused`], e não por aqui. Ficam na lista
+/// porque são terminais pela mesma spec, e uma despedida com elas no meio de
+/// uma sessão não pode começar uma bateria que toca de novo.
 ///
 /// [`DisconnectReason::ServerShuttingDown`] é **quem hospeda fechando o
 /// servidor**, e o servidor o manda a cada sessão antes de cair
