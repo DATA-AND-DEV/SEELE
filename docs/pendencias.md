@@ -5248,6 +5248,29 @@ ninguém precise adivinhar depois.
   passou 3 de 3 sozinho, 3 de 3 com vinte processos comendo CPU e 6 de 6 em
   paralelo consigo mesmo — a reprovação só apareceu sob a suíte inteira, que é o
   retrato da pendência **29** noutro crate.
+
+  **Acréscimo de 2026-10-10 (lote Y da F5).** Este conserto não está mais no
+  arquivo: entrou em `4770dca1` (14/09) e foi desfeito no dia seguinte por
+  `becb0257` («as duas tolerâncias de `seele-server` [...] voltam ao
+  commit-base»), e o teste voltou a ler o contador uma vez só, três segundos
+  depois da rajada. Reprovou de novo em `d9124cea` com a máquina carregada
+  (1.118 de 1.160). E a leitura de 14/09 estava errada: medido agora, **não é o
+  lote que ainda não gravou**. Em cinco rodadas reprovadas a contagem parou
+  (1.074, 1.113, 1.120, 1.120, 1.137) e não subiu mais em 15 s; cada mensagem
+  faltando era a cauda de um falante que o servidor desligou com `FellBehind` —
+  o barramento passou à frente da sessão dele também, e o resto do que ele
+  mandou ficou sem ler. A soma das caudas fecha as 1.160 nas cinco. Reperguntar
+  por cinco segundos não teria consertado nada. O conserto novo é `de04ab26`:
+  sem relógio, cada falante manda um `Ping` atrás da rajada e o teste lê até o
+  `Pong` (a sessão leu tudo) ou a despedida; uma testemunha num canal próprio,
+  atrás da fila do escritor, diz que o lote gravou; e a asserção passa a ser a
+  que o servidor de fato promete — o que ele leu de cada falante está gravado,
+  em ordem, sem buraco, e quem ficou com mensagem sem gravar foi desligado
+  dizendo por quê (o `SemResposta` do cliente, que **pode** repetir com a mesma
+  chave: o cliente não repete sozinho, repete quando a casca chama
+  `reenviar_mensagem`, a pedido de quem escreveu).
+  As reversões e as rodadas estão em
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-y-report.md`.
 - **`crates/seele-conformance/tests/anexos.rs`.** Esta foi a reprovação da rodada
   de validação seguinte, também com saída 101, e é a que menos parece ter a ver
   com som: `Error: SemResposta` em
@@ -5606,6 +5629,12 @@ de até cinco segundos não afrouxa a asserção, que é a mesma e continua exig
 todas as mensagens. Em `vetores_de_hash.rs` só há `fmt` e `clippy`. Desfazê-los
 devolveria a reprovação por tempo à bateria desta tarefa, que é o que a validação
 pede para não acontecer.
+
+*Acréscimo de 2026-10-10:* a tolerância de `par_lento.rs` descrita aqui saiu em
+`becb0257`, logo abaixo, e não voltou. O conserto que está no arquivo hoje é
+outro, `de04ab26` (lote Y da F5), porque a medida desmentiu a causa: o que
+faltava não era o lote atrasado, era a cauda de falantes desligados com
+`FellBehind`. Ver o acréscimo na entrada de `par_lento.rs`, acima.
 
 **A bateria, refeita inteira depois disso, em 2026-09-15.** `cargo test` no
 workspace terminou com **código de saída 0** e **1742 testes passados, nenhuma
