@@ -12,6 +12,16 @@
 //    celular (`tools/bancada-do-celular.py`), para ver que o núcleo aguenta
 //    mesmo assim. O fundo efetivo é o primeiro opaco atrás da peça: um MUDO
 //    transparente sobre a barra mostraria o fundo do tema.
+// 2. **O guarda 11** (Step 3), um por item: a portaria, o MUDO, o fone, o «no
+//    ar», o SAIR, o veredito, a moderação, o aceite, e a atribuição e a saída
+//    de uma superfície aberta. (a) Nenhum mora dentro do contêiner de um ponto
+//    que monta nós de MOD (`CONTEINERES_DOS_PONTOS`); os dois que só pintam
+//    ficam de fora, com o motivo: `servidor.aparencia` é o tema, medido no 1,
+//    e `pessoa.capa` é uma imagem atrás das placas (tarefa 6). (b) Com a capa
+//    de quem usa e uma contribuição em `operador.barra` montadas, nada cobre
+//    os que estão à vista: no centro de cada um, quem recebe o clique é ele.
+//    Numa bancada, e não em texto no `frontend.rs`: os contêineres são
+//    seletores sobre o DOM, e alguns só existem desenhados.
 //
 // Rodar:  node apps/seele-app/bancada/nucleo.cjs
 
@@ -102,8 +112,76 @@ const TEMAS = {
     }
     assert.deepEqual(diferencas, [], 'o tema alcançou um controle do núcleo');
 
+    // 2. O guarda 11.
+    const guarda = await page.evaluate(async () => {
+      // A capa de quem usa e uma contribuição alta na barra do operador, e uma
+      // superfície aberta, por um MOD de API 6 de pé.
+      entrarNaGeracao(1);
+      const mod = { id: 'teste/nucleo', hash: 'h', api: 6 };
+      const inst = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, { pedirEncerramento() {}, async encerrou() { return true; }, entregar() {} });
+      inst.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set(mod.id, inst);
+      const tela = document.createElement('canvas');
+      tela.width = 64; tela.height = 32;
+      tela.getContext('2d').fillRect(0, 0, 64, 32);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: tela.toDataURL() };
+      contribuicoesDosMods.registrar(mod, inst, { ponto: 'pessoa.capa', modo: 'substituir', alvo: String(testTable.snapshot.me),
+        conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:capa' } } } });
+      const linha = { forma: 'texto', chave: 't', dentro: 'uma linha do MOD na barra, longa o bastante para empurrar o que vier depois' };
+      const primeira = contribuicoesDosMods.registrar(mod, inst, { ponto: 'operador.barra', modo: 'adicionar', conteudo: [linha] });
+      await atenderOMod(mod, inst, { tipo: 'superficie-criar', n: 1, descricao: { id: 's', tipo: 'dialogo', modal: false, titulo: 'Superfície' } });
+      desenhar(testTable.snapshot);
+      await new Promise((ok) => setTimeout(ok, 300));
+      // **O desenho do MOD mira cada item** (o molde de `regioes-do-produto.cjs`):
+      // `estilo.mover` vai a ±512 px, e um nó vai do canto da região até o
+      // centro de cada item à vista.
+      const canto = document.getElementById('operador-mods').getBoundingClientRect();
+      const limite = (n) => Math.max(-512, Math.min(512, Math.round(n)));
+      const mirados = ['#botao-mudo', '#botao-surdo', '#voz-estado', '#operador-sair', '#veredito'].map((seletor, i) => {
+        const centro = document.querySelector(seletor).getBoundingClientRect();
+        return { forma: 'texto', chave: `mirado${i}`, dentro: '█'.repeat(6), estilo: { mover: {
+          x: limite(centro.left + centro.width / 2 - canto.left - 8), y: limite(centro.top + centro.height / 2 - canto.top - 8) } } };
+      });
+      contribuicoesDosMods.revogar(primeira.handle, { id: mod.id, instancia: inst });
+      contribuicoesDosMods.registrar(mod, inst, { ponto: 'operador.barra', modo: 'adicionar', conteudo: [...mirados, linha] });
+      desenhar(testTable.snapshot);
+      await new Promise((ok) => setTimeout(ok, 300));
+
+      // Os que só pintam: o tema e a capa (ver o cabeçalho).
+      const SO_PINTAM = new Set(['servidor.aparencia', 'pessoa.capa']);
+      const conteineres = Object.entries(CONTEINERES_DOS_PONTOS).filter(([ponto]) => !SO_PINTAM.has(ponto));
+      const ITENS = {
+        portaria: '#portaria-batendo', mudo: '#botao-mudo', fone: '#botao-surdo', noAr: '#voz-estado',
+        sair: '#operador-sair', veredito: '#veredito', moderacao: '#moderar', aceite: '#mods-aceite',
+        atribuicao: '[data-superficie="s"] .superficie-de-mod-origem', saidaDaSuperficie: '[data-superficie="s"] .superficie-de-mod-sair',
+      };
+      const dentro = [];
+      const cobertos = [];
+      const ausentes = [];
+      for (const [item, seletor] of Object.entries(ITENS)) {
+        const el = document.querySelector(seletor);
+        if (!el) { ausentes.push(item); continue; }
+        for (const [ponto, conteiner] of conteineres) {
+          if (el.matches(conteiner) || el.closest(conteiner)) dentro.push(`${item} dentro de ${ponto} (${conteiner})`);
+        }
+        if (el.closest('[hidden]') || !el.getClientRects().length) continue;
+        const r = el.getBoundingClientRect();
+        const alvo = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (!alvo || !(alvo === el || el.contains(alvo))) cobertos.push(`${item} coberto por <${alvo?.tagName?.toLowerCase()}${alvo?.id ? `#${alvo.id}` : ''}${alvo?.className ? `.${String(alvo.className).split(' ')[0]}` : ''}>`);
+      }
+      return {
+        dentro, cobertos, ausentes,
+        comCapa: Boolean(document.querySelector('#tela-sessao .operador[data-com-capa]')),
+        barraComMod: Boolean(document.querySelector('#operador-mods')?.textContent.includes('uma linha do MOD')),
+      };
+    });
+    assert.ok(guarda.comCapa && guarda.barraComMod, `o guarda não mede o que diz: a capa ou a barra do MOD não montou: ${JSON.stringify(guarda)}`);
+    assert.deepEqual(guarda.ausentes, [], 'um item do núcleo sumiu do DOM, e o guarda não o mede');
+    assert.deepEqual(guarda.dentro, [], 'um item do núcleo mora dentro do contêiner de um ponto de contribuição');
+    assert.deepEqual(guarda.cobertos, [], 'uma contribuição cobre um item do núcleo');
+
     assert.deepEqual(errors, []);
-    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil.');
+    console.log('núcleo: o MUDO, o fone, o SAIR, o «no ar» e o veredito têm as cores do produto sob o papel, o claro e o hostil; e o guarda 11 vale para os dez itens, com a capa e a barra do MOD montadas.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

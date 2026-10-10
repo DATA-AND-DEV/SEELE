@@ -1320,7 +1320,14 @@ MODS DESTE SERVIDOR leem `--nucleo-*`, e não o tema, como CONFIGURAÇÕES no
 desktop: quem escolheu um tema ruim sempre consegue sair dele (desenho da F8).
 
 **O guarda 11** prova, para cada item, que ele não está dentro de nenhuma
-região, que nenhuma contribuição o cobre e que o tema não o alcança. **No
+região, que nenhuma contribuição o cobre e que o tema não o alcança [c,
+tarefa 9, Step 3, no desktop, em `bancada/nucleo.cjs`: a portaria, o MUDO, o
+fone, o «no ar», o SAIR, o veredito, a moderação, o aceite, e a atribuição e
+a saída de uma superfície aberta; fora de todo contêiner de ponto que monta
+nós de MOD — os dois que só pintam, `servidor.aparencia` (o tema) e
+`pessoa.capa` (atrás das placas), ficam de fora com o motivo —, e, com a
+capa e um desenho de `operador.barra` mirando cada item com `estilo.mover`,
+nenhum coberto]. **No
 celular, prova também que nenhuma superfície aberta cobre a faixa de voz nem
 as abas**: com uma `pagina` imersiva, um `dialogo`, uma `folha` expandida e um
 `aviso` abertos, o retângulo de cada um termina acima da faixa, e um toque no
