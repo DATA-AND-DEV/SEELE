@@ -156,7 +156,7 @@
     "lugar": "{ onde, regioes, largura, altura, regiao? } — a região ou camada do MOD mudou de tamanho, ou a casca mudou de forma; com regiao, o tamanho é o do lugar do MOD nela (o chamada.palco: o miolo ou a faixa, 0 × 0 escondido); sem, o da sessão",
     "servidor": "{ carga } — o aviso da metade de servidor (mundo.avisar)",
     "nunca": "nenhum evento carrega toque, chamada, código ou agenda",
-    "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', pares?: [{ par, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia"
+    "tema": "{ estado: 'aplicado' | 'recusado' | 'nativo', regiao?, pares?: [{ frente, fundo, razao, piso }], previa: boolean } — cada vez que a casca aplica um TemaMudou ou uma prévia; regiao quando quem recusou foi uma região"
   },
   "formas": [
     "titulo",
@@ -543,7 +543,7 @@
       "modo",
       "regioes"
     ],
-    "regioes": "{ '<região>': { fundo, texto, apagado, acento, borda } } — as oito regiões do §3, nenhuma camada; recusas: regiao-desconhecida (chave: 'regioes', regiao), chave-desconhecida e valor-invalido (a cor em chave, e a regiao), valor-invalido (chave: 'regioes') para o que não é objeto; na ordem alfabética das regiões e das cores",
+    "regioes": "{ '<região>': { fundo, texto, apagado, acento, borda } } — as oito regiões do §3, nenhuma camada; pintadas no contêiner do produto de cada uma (o fundo vale também de painel, com os tons derivados), conferidas por região (contraste com regiao e pares); recusas: regiao-desconhecida (chave: 'regioes', regiao), chave-desconhecida e valor-invalido (a cor em chave, e a regiao), valor-invalido (chave: 'regioes') para o que não é objeto; na ordem alfabética das regiões e das cores",
     "modo": "'claro' | 'escuro': o color-scheme da sessão; tem de concordar com o fundo (claro de 0,18 de luminância relativa para cima; sem fundo no tema, o do produto, escuro), senão valor-invalido com a chave",
     "derivados-pelo-produto": {
       "nomes": [
@@ -580,7 +580,7 @@
     "densidade": "compacta | confortavel: o espaçamento do que o MOD declara (--seele-celula-x/y: a raiz da região, as partes, as listas, os botões, as escolhas, os formulários, as tiras) e o recheio do aviso; nada do produto (medido em 10/10: 0 de 343 nós da sessão)",
     "na-6": [
       "modo: 'claro' | 'escuro' (feito)",
-      "tokens por região, com o destino de cada região no celular"
+      "tokens por região, com o destino de cada região no celular (feito; os contêineres do celular são da F8)"
     ],
     "na-6-se-medido": [
       "fundo da sessão por mídia (se a M3 com a API 6 o medir no iPhone antes do congelamento)"

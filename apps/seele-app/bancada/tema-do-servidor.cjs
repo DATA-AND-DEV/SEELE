@@ -42,6 +42,11 @@
 //    `color-scheme` da sessão, e sai com o tema; o que discorda do fundo é
 //    recusado, e o tema não fica. (A conferência, caso a caso, é do vetor
 //    `chaves-do-tema.json`, nas duas pontas.)
+// 11. **Os tokens por região** (tarefa 17i, item 3): as cores de uma região
+//    vão ao contêiner dela — a lista de pessoas escura numa sessão clara —, o
+//    resto da sessão fica com o tema da sessão, e os itens do núcleo com as
+//    cores do produto; uma região abaixo do piso recusa o tema inteiro, e o MOD
+//    ouve `recusado` com a `regiao` e os pares; o tema sem regiões as tira.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -339,6 +344,56 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal(await esquema(), 'normal', 'o modo recusado escreveu o color-scheme');
     await desenharCom(comoVeio);
 
+    // 11. Os tokens por região.
+    const ESCURA = { fundo: '#0e0b08', texto: '#eae3cf', apagado: '#9a907f', acento: '#f2a65a', borda: '#3a332b' };
+    const pintura = () => page.evaluate(() => {
+      const cor = (seletor, propriedade) => {
+        const no = document.querySelector(seletor);
+        return no ? getComputedStyle(no)[propriedade] : null;
+      };
+      return {
+        pessoas: cor('.painel-pessoas', 'backgroundColor'),
+        nomeDaPessoa: cor('.painel-pessoas .pessoa-nome', 'color'),
+        canais: cor('.painel-canais', 'backgroundColor'),
+        fracoDaRegiao: document.querySelector('.painel-pessoas').style.getPropertyValue('--seele-laranja-fraco'),
+        sair: cor('#operador-sair', 'color'),
+      };
+    });
+    const semRegiao = await pintura();
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, regioes: { 'pessoas.lista': ESCURA, 'operador.barra': ESCURA } }) });
+    const comRegiao = await pintura();
+    assert.equal(comRegiao.pessoas, rgb(ESCURA.fundo), `a lista de pessoas não ficou com o fundo da região: ${JSON.stringify(comRegiao)}`);
+    assert.equal(comRegiao.nomeDaPessoa, rgb(ESCURA.texto), `o nome na lista não ficou com o texto da região: ${JSON.stringify(comRegiao)}`);
+    assert.equal(comRegiao.canais, rgb(CLARO.painel), `a região vazou para a coluna de canais: ${JSON.stringify(comRegiao)}`);
+    assert.match(comRegiao.fracoDaRegiao, /^#[0-9a-f]{6}$/i, 'o preenchimento do acento não foi derivado para a região');
+    assert.equal(comRegiao.sair, semRegiao.sair, `o SAIR, do núcleo, mudou de cor com a região: ${JSON.stringify(comRegiao)}`);
+    // Uma região abaixo do piso recusa o tema inteiro, e o MOD sabe qual.
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, regioes: { 'pessoas.lista': { fundo: '#0e0b08', texto: '#1a1a1a' } } }) });
+    assert.deepEqual(await tokens(), {}, 'um tema com uma região abaixo do piso foi aplicado');
+    const daRegiao = await ultimoEvento();
+    assert.equal(daRegiao?.estado, 'recusado', `o MOD não soube da recusa pela região: ${JSON.stringify(daRegiao)}`);
+    assert.equal(daRegiao.regiao, 'pessoas.lista', `a recusa não disse a região: ${JSON.stringify(daRegiao)}`);
+    assert.ok(daRegiao.pares?.some((p) => p.frente === 'texto' && p.fundo === 'fundo'),
+      `a recusa da região não trouxe o par: ${JSON.stringify(daRegiao)}`);
+    // E a prévia, pelo mesmo caminho: recusada pelo nome, com a região e os
+    // pares, na resposta e no evento.
+    await desenharCom(comoVeio);
+    const previaDaRegiao = await pedir({
+      tipo: 'tema', previa: true, superficie: 'editor',
+      valores: { ...CLARO, regioes: { 'pessoas.lista': { fundo: '#0e0b08', texto: '#1a1a1a' } } },
+    });
+    assert.equal(previaDaRegiao?.erro, 'contraste', `a prévia com uma região abaixo do piso não foi recusada pelo nome: ${JSON.stringify(previaDaRegiao)}`);
+    assert.equal(previaDaRegiao.regiao, 'pessoas.lista', `a recusa da prévia não disse a região: ${JSON.stringify(previaDaRegiao)}`);
+    assert.ok(previaDaRegiao.pares?.length, `a recusa da prévia não trouxe os pares da região: ${JSON.stringify(previaDaRegiao)}`);
+    const eventoDaPrevia = await ultimoEvento();
+    assert.ok(eventoDaPrevia?.previa === true && eventoDaPrevia.regiao === 'pessoas.lista',
+      `o evento da prévia recusada não disse a região: ${JSON.stringify(eventoDaPrevia)}`);
+    // O tema sem regiões as tira do contêiner.
+    await desenharCom(comoVeio);
+    const depois = await pintura();
+    assert.equal(depois.pessoas, rgb(CLARO.painel), `sem regiões, a lista de pessoas ficou com a cor da região: ${JSON.stringify(depois)}`);
+    assert.equal(depois.fracoDaRegiao, '', 'sem regiões, o preenchimento da região ficou no contêiner');
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -350,7 +405,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora; e o modo escreve o color-scheme.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície; e a folha, o diálogo e a citação seguem o tema; e QUEM DESENHA O QUE tem a linha da aparência, que troca na hora; e o modo escreve o color-scheme; e cada região pinta o contêiner dela, com os pares conferidos por região.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

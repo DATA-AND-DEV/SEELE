@@ -1133,6 +1133,22 @@ objeto. [c, `seele_proto::mods::recusa_das_regioes` e `recusaDasRegioes`, nas
 duas pontas pelo vetor `chaves-do-tema.json`; o `mundo.tema` responde
 `{ ok: false, erro, chave, regiao }`]
 
+**Onde a região pinta.** No contêiner do produto que a abriga — a coluna de
+canais, a barra do canal, a lista de pessoas, a barra de baixo —, e não na
+faixa do MOD dentro dela: as cores da região, o `fundo` valendo também como
+`painel`, e os tons que o produto deriva delas (o preenchimento do acento,
+as cores de estado). O resto da sessão fica com o tema da sessão, e os itens
+do núcleo com as cores do produto (eles leem os `--nucleo-*`, resolvidos na
+raiz). No celular, a casca pode dar outros contêineres
+(`CELULAR.conteineresDasRegioes`), e uma região que ela não tem não é pintada.
+
+**Os pares por região.** Cada região é conferida com o tema da sessão e as
+cores dela por cima, pela mesma tabela de pares. Uma região abaixo do piso
+recusa o tema inteiro: `contraste`, com a `regiao` e os `pares`, na resposta
+da prévia e no evento `tema` (`{ estado: 'recusado', regiao, pares }`). [c,
+`escreverAsRegioesDoTema` e `aRegiaoAbaixoDoPiso`; seção 11 da
+`tema-do-servidor.cjs`]
+
 **Nenhum nome da tabela leva a `--nucleo-*`.** No celular, o MUDO, o SURDO e o
 SAIR leem variáveis `--nucleo-*`, declaradas na raiz a partir dos tokens do
 produto; é isso que garante o contraste deles sob qualquer tema, e a garantia
@@ -1325,7 +1341,7 @@ Com a recomendação do ESTILO, que adoto:
 |---|---|
 | `modo: 'claro' \| 'escuro'` | **6** [c, 17i, item 2: escreve o `color-scheme` da sessão; recusado como `valor-invalido`, com a `chave`, quando discorda do fundo — claro de 0,18 de luminância relativa para cima, escuro abaixo; sem `fundo` no tema, o do produto, que é escuro; nas duas pontas, pelo vetor `chaves-do-tema.json`, com os vizinhos do limiar, 0,1778 e 0,1811] |
 | a densidade cobrindo a escala `--seele-e*`, sem mudar o nome das duas densidades | **7**, com «tokens além de cor» (decidido em 10/10, depois da medida abaixo) |
-| tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x |
+| tokens por região, com o destino de cada região no celular (§11) | **6**, no contrato; o ESTILO os usa numa 4.x [c, 17i, item 3: a forma, as recusas com a `regiao`, a pintura no contêiner de cada região e os pares por região; os contêineres do celular são da F8] |
 | fundo da sessão por mídia | **6 se a M3 com a API 6 o medir no iPhone antes do congelamento** (tarefa 11); senão, **7** |
 | tipo dos títulos e dos dados, e escala por escolha | **7**: não medidos |
 | família de tipo livre | fora, sempre |
