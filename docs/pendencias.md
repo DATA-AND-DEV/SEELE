@@ -9488,6 +9488,45 @@ pendência. A revisão dele deixou:
     sem isso. A causa do `alvo=undefined` é medida no lote. *Fonte:* relatório
     do W2; o ledger.
 
+    **Consertado em 10/10/2026, no lote W3** (integrado em `353859c2`). A causa
+    era o duble, e não o produto: ele respondia `null` a `mods_instalados`, e
+    `obterOConjunto` estourava antes de gravar o sim e de voltar. O roteiro
+    quebrou duas vezes, em `ea75ac5d` (18/09), que tirou a volta, e no lote W,
+    que tirou o sim. Agora ele exige o sim no alvo, a volta com a credencial, a
+    ordem dos dois, e a lista item por item. O `catalogo-de-mods.js` passou a
+    exigir o que diz. De passagem, o W3 achou e consertou três defeitos de
+    produto, todos com prova:
+    - a falha por dentro do ACEITAR ficava sem frase;
+    - a pergunta que não abria deixava a credencial na memória sem diálogo;
+    - uma corrida em `abrirAceiteDeMods`, em que a pessoa lia a lista de um
+      pedido e aceitava o conjunto de outro (ADR 0045).
+
+    **O que fica:** nenhum roteiro roda no CI nem no `publicar.sh`. Isso vai
+    para o lote RT. *Fonte:* `F5/lote-w3-report.md`.
+
+54. **W2 · Uma tentativa de entrada velha que entra depois da nova toma a tela
+    dela, e talvez a conexão.** Isso é anterior ao W2: a base é igual.
+    - **Na janela.** No caminho de sucesso de `conectar` (`tela-boot.js`), o
+      `entrarNaGeracao`, o `desenhar` e o `entrarNaAutenticacao` não conferem
+      `esta === tentativas`. A revisão do W2 mediu isto: uma velha lenta, que
+      entra 1,2 s depois de o `hospedar()` ter entrado, reabre `#tela-auth` em
+      `aperto` com o endereço dela por cima da sessão da nova, e a
+      `geracaoDaSessao` volta para a da velha.
+    - **No Rust, lido e não medido.** O `connect` do `main.rs` revoga a geração
+      ao começar. A `Bridge` descarta os eventos da velha, mas no fim o
+      `connect` grava `*slot = Some(connection)` sem conferir nada, o que
+      trocaria a conexão da nova pela da velha. A pessoa ficaria ligada ao
+      servidor que deixou, com a tela mostrando o outro.
+    - **Família:** a mesma da cena 5c do lote W, que mede a velha recusada.
+      HOSPEDAR AQUI fica aceso enquanto um `connect` anda, então basta a velha
+      ser lenta e entrar, em vez de ser recusada. A batida da espera que entra
+      depois de a pessoa sair da espera tem o mesmo jeito.
+    - **Falta:** medir o lado do Rust. Depois, a entrada que volta já
+      substituída não entra na tela e vai ao registro, e o `connect` velho larga
+      a conexão quando a geração dele já não está de pé.
+    *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
+    pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
+
 ### Fora da F5, só como referência
 
 Achados das rodadas da F5 que são de outra frente. A orquestradora já foi
