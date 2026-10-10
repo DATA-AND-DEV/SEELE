@@ -1852,7 +1852,13 @@ struct SilencioDigital {
 impl SilencioDigital {
     /// Olha um quadro cru e diz se o microfone já entrega zero exato há três
     /// segundos.
+    ///
+    /// **A subida vai ao `seele.log`**, uma vez (M-1 do lote V). A telemetria
+    /// só chega à tela, e a frase da tela só existe no macOS: no Windows e no
+    /// Linux, quem fala para ninguém não deixava rastro no log que a pessoa
+    /// manda pelo COPIAR DIAGNÓSTICO.
     fn observar(&mut self, bruto: &[f32], mudo: bool) -> bool {
+        let antes = self.marcado();
         // `== 0.0` vale para +0 e −0, que são os dois zeros exatos. Nenhum
         // limiar: um limiar transformaria isto num medidor de «baixo», e baixo
         // não é bloqueio.
@@ -1862,7 +1868,16 @@ impl SilencioDigital {
         } else {
             self.seguidos.saturating_add(1)
         };
-        self.marcado()
+        let agora = self.marcado();
+        if agora && !antes {
+            tracing::warn!(
+                "o microfone entrega silêncio digital há 3 s, aberto e sem mudo: zero exato \
+                 em toda amostra, e a sala não ouve nada. O sistema pode estar bloqueando o \
+                 microfone (no macOS, Ajustes → Privacidade e Segurança → Microfone), ou o \
+                 ganho da interface está no mínimo"
+            );
+        }
+        agora
     }
 
     /// O que a última olhada concluiu.
@@ -3386,6 +3401,53 @@ mod silencio_digital {
                  o detector mede «quase zero», e não o zero exato do bloqueio"
             );
         }
+    }
+
+    /// M-1 do lote V: a subida do silêncio digital vai ao `seele.log`, uma vez
+    /// por subida.
+    ///
+    /// Ela só alimentava a telemetria, e a frase da tela só existe no macOS: no
+    /// Windows e no Linux, quem falava para ninguém não deixava rastro no log
+    /// que manda pelo COPIAR DIAGNÓSTICO. Uma linha por quadro, por outro lado,
+    /// seriam cinquenta por segundo.
+    #[test]
+    fn a_subida_do_silencio_digital_vai_ao_log_uma_vez_por_subida() {
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let avisos = || {
+            rastro
+                .linhas()
+                .iter()
+                .filter(|linha| linha.starts_with("WARN") && linha.contains("silêncio digital"))
+                .count()
+        };
+
+        let mut detector = SilencioDigital::default();
+        for _ in 0..TRES_SEGUNDOS * 2 {
+            detector.observar(&zeros(), false);
+        }
+        assert_eq!(
+            avisos(),
+            1,
+            "seis segundos de zero exato deixaram {} linhas no `seele.log`, e eram uma: \
+             sem ela, quem fala para ninguém no Windows e no Linux não deixa rastro; com \
+             uma por quadro, o log se enche. Rastro: {:?}",
+            avisos(),
+            rastro.linhas()
+        );
+
+        // O sinal volta, e o zero exato volta depois: é outra subida.
+        detector.observar(&ruido_a_menos_90_dbfs(0), false);
+        for _ in 0..TRES_SEGUNDOS {
+            detector.observar(&zeros(), false);
+        }
+        assert_eq!(
+            avisos(),
+            2,
+            "a segunda subida do silêncio digital não foi ao `seele.log`: o log diz só a \
+             primeira vez que o microfone parou. Rastro: {:?}",
+            rastro.linhas()
+        );
     }
 
     #[test]
