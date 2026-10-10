@@ -56,7 +56,16 @@ nada dependa da memória de uma conversa.
   publicar, e no terminal de quem publica esse teste travaria a 0.15.2. Consertado em `40066a7c`,
   com o guarda de texto, e conferido pelo `xtask` inteiro em `C.UTF-8` (153 de 153), fmt e clippy;
   pôr o defeito de volta reprova os dois testes. Entre `bb1d5e78` e `40066a7c` só mudaram essa
-  frase e o guarda. **A `linha/0.15` pronta para publicar é `40066a7c`.**
+  frase e o guarda. ~~A `linha/0.15` pronta para publicar é `40066a7c`.~~ **Em 10/10 a
+  pendência 61 entrou na linha** (`6702b944`, da F1, por fast-forward sobre `40066a7c`): o
+  teto do lote e a contrapressão, com o `rajada_de_muitos.rs` sem `#[ignore]`, a reversão por
+  metade medida na própria linha, e o `Cargo.lock` sem mudança. A F1 rodou fmt, clippy
+  `-D warnings`, o `xtask` em `C.UTF-8` (153/153), os `check-*`, o `deny` duas vezes e o
+  `seele-server` inteiro (571); a orquestradora rodou o `cargo test --workspace` serial com o
+  codec, com a conformidade dentro (2734 passaram, 0 falharam, 5 ignorados). **A `linha/0.15`
+  pronta para publicar é `6702b944`.** O E54 da F5 (o `connect` velho que grava o `slot` por
+  cima do novo e manda o que a pessoa escreve ao servidor que ela deixou, presente na v0.15.1)
+  também entra na 0.15.2, depois de revisado na 0.16; a linha ganha mais um commit.
 - **As medidas de campo do protocolo nas duas direções**, com o dono: o app
   0.15.1 publicado contra o `seeled` novo, e o app novo contra o `seeled` 0.15.1
   (plano F1b, P1 e P8).
