@@ -10732,6 +10732,18 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "camada-mods.js",
             "if (aceitePendente === pergunta) fecharAceiteDeMods();",
         ),
+        // As duas linhas que passam a pergunta adiante, e só ela: a falha de
+        // abrir (`levarParaOAceiteDeMods`) e a de aceitar (o ouvinte do clique)
+        // a entregam a `perguntaNaoAbriu` e a `aceiteFalhou`, que o guarda lê
+        // logo abaixo. Nenhuma das duas nomeia a credencial.
+        (
+            "camada-mods.js",
+            "abrindo.catch((falha) => perguntaNaoAbriu(motivo, alvo, desta, pergunta, falha));",
+        ),
+        (
+            "camada-mods.js",
+            "aceitarOsMods().catch((falha) => aceiteFalhou(pergunta, falha));",
+        ),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",
@@ -10774,15 +10786,22 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             }
         }
     }
-    // `pergunta` é o objeto que carrega a credencial, e as três funções que o
-    // recebem têm as linhas que o nomeiam conferidas (lote W3): a do aceite, a
-    // da falha de dentro dele e a da pergunta que não abriu. Antes só a primeira
-    // era lida, e um `JSON.stringify(pergunta)` no registro da falha não
-    // nomeava `credencial` nem `aceitePendente` e passava.
+    // `pergunta` é o objeto que carrega a credencial, e **toda função que o
+    // recebe ou o copia de `aceitePendente`** tem as linhas que o nomeiam
+    // conferidas (lote W3, rodadas 1 e 3): a do aceite, a da falha de dentro
+    // dele, a da pergunta que não abriu — que o recebem — e as três que têm o
+    // alias `const pergunta = aceitePendente;`: a abertura, o levar à pergunta e
+    // o ouvinte do clique em ACEITAR. Antes só a primeira era lida, e um
+    // `JSON.stringify(pergunta)` em qualquer das outras não nomeava `credencial`
+    // nem `aceitePendente` e passava. O ouvinte não tem nome: é achado pelo
+    // início dele.
     for assinatura in [
         "async function aceitarOsMods(",
+        "async function abrirAceiteDeMods(",
+        "function levarParaOAceiteDeMods(",
         "function aceiteFalhou(",
         "function perguntaNaoAbriu(",
+        "$(\"mods-aceitar\").addEventListener(\"click\", () =>",
     ] {
         let corpo = js_function(&read("ui/camada-mods.js"), assinatura);
         for linha in corpo.lines().map(str::trim) {
