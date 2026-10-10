@@ -406,7 +406,9 @@ function desenharAvisoDeFone(snapshot) {
   foneJaAvisado = true;
   geracaoDoAvisoDeFone = geracaoDaSessao;
   $("aviso-fone").hidden = false;
-  $("aviso-fone-texto").textContent = AVISO_DE_FONE;
+  // A frase é da casca (P9, `CASCA` em `base.js`): no desktop, a `AVISO_DE_FONE`;
+  // no navegador, onde o eco do navegador vem ligado, a dele.
+  $("aviso-fone-texto").textContent = CASCA.avisoDeFone();
 }
 
 /**

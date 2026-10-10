@@ -9876,10 +9876,18 @@ fn ha_um_aviso_de_fone_em_algum_lugar_que_a_pessoa_le() {
         "o aviso de fone não espera a entrada numa sala de voz: ele aparece \
          para quem só lê um canal, e já se apagou quando a voz começa:\n{aviso}"
     );
+    // A frase passa pela casca (P9 da F8): o desktop escreve a `AVISO_DE_FONE`
+    // pelo padrão do `CASCA`, e só a casca do navegador troca. As duas metades
+    // são conferidas, para a faixa e a ajuda não poderem discordar no desktop.
     assert!(
-        aviso.contains("$(\"aviso-fone-texto\").textContent = AVISO_DE_FONE"),
-        "a faixa de fone não escreve a frase de `frases.js`, e ela e a ajuda \
+        aviso.contains("$(\"aviso-fone-texto\").textContent = CASCA.avisoDeFone()"),
+        "a faixa de fone não escreve a frase que a casca dá, e ela e a ajuda \
          passam a poder discordar:\n{aviso}"
+    );
+    assert!(
+        without_comments(&read("ui/base.js")).contains("avisoDeFone: () => AVISO_DE_FONE,"),
+        "o `CASCA` do `base.js` não dá a `AVISO_DE_FONE` como padrão: no desktop, a \
+         faixa de fone deixa de dizer a frase de `frases.js`"
     );
     // Por execução: zerada ao trocar de servidor, a faixa voltaria a cada
     // sessão, e um aviso repetido é um aviso que se aprende a fechar sem ler.
