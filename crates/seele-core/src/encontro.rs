@@ -3125,12 +3125,22 @@ mod testes {
     /// Um ponto que limita como o de verdade: responde ao `ONDE`, e a um
     /// `QUEM2` só com a `RECUSA taxa`, uma vez por segundo, calando o resto.
     /// A última recusa acabou de ser dita a um vizinho.
+    ///
+    /// **«Acabou de» é antes de a consulta começar, e é marcado aqui**, antes
+    /// da tarefa nascer. Marcado dentro dela, o relógio do ponto começava
+    /// quando o runtime de uma linha só a punha para rodar, que é depois de a
+    /// consulta mandar a primeira volta. A terceira volta sai a 1 s do começo
+    /// da consulta, e chegava ao ponto 1,1 ms depois do segundo dele, no
+    /// pior de 60 rodadas: a folga era o atraso do timer, e um soluço de 10 ms
+    /// no começo da tarefa a calava 5 vezes em 5 (`Enc2Calado` no lugar de
+    /// `PontoRecusou`, a intermitente de 10/10). Marcado aqui, a terceira volta
+    /// sai sempre mais de 1 s depois da última recusa, com soluço ou sem.
     async fn ponto_que_limita() -> SocketAddr {
         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let onde = socket.local_addr().unwrap();
+        let mut ultima_recusa = tokio::time::Instant::now();
         tokio::spawn(async move {
             let mut balde = [0_u8; encontro::TAMANHO2 + 1];
-            let mut ultima_recusa = tokio::time::Instant::now();
             while let Ok((lidos, de)) = socket.recv_from(&mut balde).await {
                 let dados = balde.get(..lidos).unwrap_or_default();
                 if let Some(encontro::Pedido::Onde { marca }) = encontro::analisar(dados) {
@@ -3159,9 +3169,15 @@ mod testes {
         // menos uma recusa por segundo, o `ONDE` responde, e a consulta
         // concluía que o ponto era anterior ao ENC/2. Ela pergunta de novo
         // dentro do prazo, depois da janela da recusa.
+        //
+        // As marcas antes do ponto: entre a última recusa e a primeira volta
+        // não fica nada além do socket da consulta. Com mais de 1 s ali, a
+        // primeira volta já ouviria a recusa, e o teste passaria com uma
+        // consulta que não pergunta de novo.
+        let marcas = marcas_da_sala();
         let ponto = ponto_que_limita().await;
         assert_eq!(
-            localizar(&ponto.to_string(), &marcas_da_sala(), PRAZO_DO_QUARTO).await,
+            localizar(&ponto.to_string(), &marcas, PRAZO_DO_QUARTO).await,
             Localizacao::PontoRecusou
         );
     }
