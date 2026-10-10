@@ -115,8 +115,10 @@
           disabled: fontes.entrarNoConhecido ? null : true,
         },
         h("span", { class: "cel-entrada-servidor-texto" },
+          // Sem nome ainda (ele chega no primeiro retrato), o endereço é o
+          // título, e não se repete embaixo.
           h("span", { class: "cel-entrada-servidor-nome", text: s.nome || s.endereco }),
-          h("span", { class: "cel-entrada-nota", text: [s.endereco, s.versao && f.servidor(s.versao), s.visto && dia(s.visto / 1000)].filter(Boolean).join(" · ") })),
+          h("span", { class: "cel-entrada-nota", text: [s.nome && s.endereco, s.versaoDoServidor && f.servidor(s.versaoDoServidor), s.visto && dia(s.visto / 1000)].filter(Boolean).join(" · ") })),
         // Com os hashes guardados vencidos, o toque diz por que não entra.
         h("span", { class: "rotulo", text: s.podeEntrar === false ? f.linkVencido : f.entrar })))))
       : h("p", { class: "cel-entrada-nota", text: f.vazio });

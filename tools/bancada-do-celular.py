@@ -462,8 +462,8 @@ def usar_a_entrada(pg: Page, **opcoes) -> None:
         // Na forma do `conhecidos()` combinado com a F4: do mais recente ao mais
         // antigo, com o `podeEntrar` (os hashes guardados vencem).
         conhecidos: async () => [
-          { impressao: "aa".repeat(32), nome: "OFICINA", endereco: "192.168.0.14:8383", versao: "1.0", visto: Date.now(), podeEntrar: true },
-          { impressao: "bb".repeat(32), nome: null, endereco: "tq3.duckdns.org:8383", versao: "1.0", visto: Date.now() - 9 * 86400000, podeEntrar: false },
+          { impressao: "aa".repeat(32), nome: "OFICINA", endereco: "192.168.0.14:8383", versaoDoServidor: "1.0", visto: Date.now(), podeEntrar: true },
+          { impressao: "bb".repeat(32), nome: null, endereco: "tq3.duckdns.org:8383", versaoDoServidor: "1.0", visto: Date.now() - 9 * 86400000, podeEntrar: false },
         ] })""", opcoes)
     pg.wait_for_timeout(300)
 
@@ -497,8 +497,12 @@ def entrada(pg: Page) -> list[str]:
     # O que entra diz ENTRAR; o de hashes vencidos diz LINK VENCIDO, e o que não
     # tem nome ainda (antes do primeiro retrato) mostra o endereço.
     servidores = inicio["servidores"]
+    versao = pg.evaluate("FRASES_DO_CELULAR.entrada.inicio.servidor('1.0')")
+    if any(versao not in texto for texto, _ in servidores):
+        falhas.append(f"um servidor deste aparelho não diz a versão dele: {servidores}")
     if (len(servidores) != 2 or not servidores[0][0].startswith("OFICINA") or not servidores[0][0].endswith(f["inicio"]["entrar"])
-            or not servidores[1][0].startswith("tq3.duckdns.org:8383") or not servidores[1][0].endswith(f["inicio"]["linkVencido"])
+            or not servidores[1][0].startswith("tq3.duckdns.org:8383") or servidores[1][0].count("tq3.duckdns.org:8383") != 1
+            or not servidores[1][0].endswith(f["inicio"]["linkVencido"])
             or any(alto < 44 for _, alto in servidores)):
         falhas.append(f"os servidores deste aparelho saem {servidores}")
     if inicio["baixar"] != pg.evaluate("PAGINA_DO_APP"):
