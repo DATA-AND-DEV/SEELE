@@ -635,13 +635,24 @@ mod tests {
             .into_iter()
             .enumerate()
             .filter_map(|(onde, passo)| {
-                let das_cargas: Vec<Vec<String>> = comandos_do_shell(&run_do_passo(&passo)?)
+                let comandos = comandos_do_shell(&run_do_passo(&passo)?);
+                let das_cargas: Vec<Vec<String>> = comandos
                     .iter()
                     .filter_map(|comando| roteiros_do_comando(comando))
                     .collect();
                 if das_cargas.is_empty() {
                     return None;
                 }
+                // **A carga, e nada antes nem depois dela.** Um `exit 0` numa
+                // linha própria antes da chamada deixava o guarda verde e o
+                // Actions sem roteiro nenhum (R2-M1 da revisão do lote RT).
+                assert_eq!(
+                    comandos.len(),
+                    1,
+                    "ci.yml: o `run:` do passo dos roteiros tem de ser só a chamada da carga, e \
+                     tem {} comandos: {comandos:?}",
+                    comandos.len()
+                );
                 Some((onde, passo, das_cargas.into_iter().flatten().collect()))
             })
             .collect()
@@ -757,7 +768,18 @@ mod tests {
             "a `bateria()` do `publicar.sh` não chama mais `roteiros_da_casca`, e uma versão \
              volta a sair com um roteiro vermelho"
         );
-        let chamadas: Vec<Vec<String>> = comandos_da_funcao("roteiros_da_casca")
+        // **A etapa, e nada antes nem depois dela**, como no passo do CI: um
+        // `return 0` antes da chamada deixava este guarda verde (R2-M1; a
+        // bancada do `publicar.sh` também o pega, por comportamento).
+        let comandos = comandos_da_funcao("roteiros_da_casca");
+        assert_eq!(
+            comandos.len(),
+            1,
+            "a `roteiros_da_casca` do `publicar.sh` tem de ser só a chamada da etapa, e tem {} \
+             comandos: {comandos:?}",
+            comandos.len()
+        );
+        let chamadas: Vec<Vec<String>> = comandos
             .into_iter()
             .filter(|palavras| {
                 palavras
