@@ -105,6 +105,7 @@ async fn conectar(
         home: casa.display().to_string(),
         join_secret: segredo.map(str::to_owned),
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         audio: false,
         capture_device: None,

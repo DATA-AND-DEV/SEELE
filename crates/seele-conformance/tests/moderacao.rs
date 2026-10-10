@@ -100,6 +100,7 @@ fn conectar(endereco: SocketAddr, apelido: &str) -> Result<Arc<Connection>, Conn
         home: casa(apelido),
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         // Não há placa de som numa máquina de integração contínua, e nada aqui
         // depende de áudio.

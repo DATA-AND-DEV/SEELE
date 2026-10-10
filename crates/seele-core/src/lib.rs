@@ -98,6 +98,10 @@ pub use video::{
 };
 
 pub use seele_audio::device::{consentimento_do_microfone, ConsentimentoDoMicrofone};
+/// O toque da sala pessoal: abre só a saída, numa linha própria, e para quando
+/// cai. Reexportado porque a casca toca quando a campainha toca, e o ADR 0002
+/// não a deixa ver `seele-audio`.
+pub use seele_audio::device::{DeviceError, Tocador};
 pub use seele_audio::gate::{
     ABERTURA_COM_SUPRESSAO_DBFS, ABERTURA_SEM_SUPRESSAO_DBFS, FAIXA_DE_ABERTURA_DBFS,
 };
@@ -137,6 +141,12 @@ pub use voice::{
 /// shell needs the value or the decision behind it — usually it is the decision,
 /// and that belongs in the core.
 pub use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
+/// O código de uma pessoa: o «número de telefone» da sala pessoal (ADR 0060).
+///
+/// Reexportado porque a casca o mostra em SEU CÓDIGO, o confere no ATENDER, o
+/// guarda na agenda e o passa à campainha da sala, e o ADR 0002 não a deixa ver
+/// `seele-proto`. Tipado até a borda: lido uma vez só, por [`Codigo::ler`].
+pub use seele_proto::codigo::{Codigo, CodigoInvalido};
 pub use seele_proto::control::{
     // Reexportados porque a casca escreve a frase de um
     // `AlertReason::PedidoRecusado` pelo nome do pedido e pela causa, e o ADR
