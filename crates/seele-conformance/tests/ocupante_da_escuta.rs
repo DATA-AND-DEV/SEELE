@@ -8,18 +8,20 @@
 //! registra: a marca dele está sempre livre. A revisão mediu um ocupante
 //! recebendo o endereço de quem voltava pela lista em 0,36 s.
 //!
-//! A regra que fecha o caso barato é `seele_ffi::bilhete_desta_volta`: a escuta
-//! só troca o aviso quando mora no IP do servidor que a mesma resposta do
-//! quarto deu. A escuta e o servidor de um anfitrião moram na mesma máquina e
-//! saem pelo mesmo IP público.
+//! A regra que fecha o caso barato é `bilhete_desta_volta`: a escuta só troca o
+//! aviso quando mora no IP do servidor que a mesma resposta do quarto deu. A
+//! escuta e o servidor de um anfitrião moram na mesma máquina e saem pelo mesmo
+//! IP público.
 //!
-//! # O que estes testes compõem
+//! # O caminho que estes testes percorrem
 //!
-//! Exatamente o que o `connect` do app faz com o quarto: `onde_mora_hoje` →
-//! `bilhete_desta_volta` com o bilhete do link → `Connection::connect`. O
-//! `connect` é um comando Tauri e não roda sem casca; que ele use a regra é
-//! guardado por texto-fonte em `apps/seele-app/tests/frontend.rs`
-//! (`a_escuta_do_quarto_so_vira_aviso_pela_regra_da_ffi`).
+//! O de verdade: `Connection::connect` com o bilhete guardado (o do link) e a
+//! impressão conferida. Desde a tarefa 14b da F7 é a `Chegada` da ponte que
+//! pergunta ao quarto, junto com a corrida, e aplica a regra
+//! (`Chegada::com_o_quarto`). Antes, o `connect` do app perguntava e montava o
+//! bilhete desta volta, e este arquivo copiava os três passos à mão. A
+//! pergunta crua ao quarto que sobra aqui é só para conferir que o cenário
+//! está montado.
 //!
 //! O anfitrião X é o de um 0.15.0: o servidor dele se registra com a marca
 //! `fp16s`, pelo próprio socket do QUIC (o espelho, como `registrar` faz), e a
@@ -194,8 +196,8 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         .expect("o MORO do servidor de X sai pelo espelho");
     esperar_o_quarto(&quarto, 2, "do servidor de X").await;
 
-    // A volta, composta como o `connect` do app compõe. O bilhete guardado é o
-    // do link, que é também o que a lista guarda dele.
+    // O cenário, conferido por uma pergunta crua ao quarto: o ocupante na
+    // escuta, e o servidor de X no IP em que ele se registrou.
     let achado = seele_ffi::onde_mora_hoje(&ponto.to_string(), &fp).await;
     assert_eq!(
         achado.escuta(),
@@ -216,7 +218,6 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         "o quarto não deu o servidor de X no IP em que ele se registrou ({achado:?}): este \
          teste não mede a regra"
     );
-    let bilhete = seele_ffi::bilhete_desta_volta(&do_link, &achado);
 
     let casa = tempfile::tempdir().unwrap();
     let config = ConnectConfig {
@@ -226,7 +227,9 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         home: casa.path().display().to_string(),
         join_secret: None,
         expected_fingerprint: Some(fp.clone()),
-        bilhete: Some(bilhete),
+        // O bilhete guardado, e não o desta volta: quem pergunta ao quarto e
+        // aplica a regra é a ponte, junto com a corrida.
+        bilhete: Some(do_link.clone()),
         audio: false,
         capture_device: None,
         playback_device: None,

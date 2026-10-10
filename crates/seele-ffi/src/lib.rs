@@ -4074,6 +4074,28 @@ pub fn chave_do_servidor(alvo: &str) -> Option<String> {
 /// `impressao_esperada` could only be checked by a live handshake — which is
 /// exactly the gap `every_expected_fingerprint_reaches_the_destino_it_promised`
 /// below closes.
+/// O endereço de hoje que o quarto deu, como candidato desta chegada.
+///
+/// Montado como os outros, por [`resolve`] e [`build_destino`], e é isso que faz
+/// a `Chegada` reconhecer um endereço que já corre: ela compara pela chave de
+/// pino, e a chave de pino sai daqui pela mesma [`chave_do_servidor`] que deu a
+/// do alvo e a dos alternativos. `192.168.50.30` e `192.168.50.30:8383` têm a
+/// mesma.
+///
+/// A chave dele não é a do alvo (a chave do aceite), então o pino dele não
+/// prova o servidor: é a regra para um candidato que ninguém escolheu.
+fn candidato_do_quarto(
+    config: &ConnectConfig,
+    endereco: SocketAddr,
+    chave_do_aceite: &str,
+) -> seele_core::enlace::Destino {
+    // Um endereço já resolvido sempre resolve; a reserva só existe para o tipo,
+    // e escreve o endereço como a chave.
+    let (address, server_name, pin_key) = resolve(&endereco.to_string())
+        .unwrap_or_else(|_| (endereco, "localhost".to_owned(), endereco.to_string()));
+    build_destino(config, address, &server_name, &pin_key, chave_do_aceite)
+}
+
 fn build_destino(
     config: &ConnectConfig,
     address: SocketAddr,
@@ -4183,6 +4205,28 @@ async fn drive(
     // entra avisa o ponto de encontro por candidato que precisa de furo, que é
     // o degrau 4 do ADR 0022. Sem bilhete os dois caminhos são o mesmo.
     let chegada = seele_core::chegada::Chegada::nova(destinos, config.bilhete.clone());
+    // **O quarto corre junto com a corrida** (a pendência 55, tarefa 14b da F7).
+    // Era o `connect` do app que perguntava, antes de chamar esta ponte, e quem
+    // estava na mesma casa pagava até 1,5 s de prazo do quarto com o ponto ou o
+    // DNS mudos. Agora a `Chegada` pergunta enquanto corre: quem não precisa de
+    // furo começa na hora, e o endereço de hoje entra quando chega.
+    //
+    // Com a impressão conferida, e o bilhete guardado (a `Chegada` só pergunta
+    // com bilhete): é a mesma condição em que o `connect` perguntava. O endereço
+    // de hoje é montado como os outros candidatos, por `resolve` e
+    // `build_destino`: a chave de pino dele não é a do alvo, então o pino não
+    // prova o servidor, que é a regra para o endereço que o quarto devolveu.
+    let chegada = match config.expected_fingerprint.clone() {
+        Some(impressao) => {
+            let config_do_quarto = config.clone();
+            let aceite = chave_do_aceite.clone();
+            chegada.com_o_quarto(seele_core::chegada::Quarto::novo(
+                impressao,
+                move |endereco| candidato_do_quarto(&config_do_quarto, endereco, &aceite),
+            ))
+        }
+        None => chegada,
+    };
 
     // O ouvinte entra **antes** do bloqueio, que é a coisa inteira: o `watch` da
     // chegada existe desde a tarefa 8 e não tinha um só leitor em produção,
@@ -10103,13 +10147,12 @@ mod conferir_a_troca {
     }
 }
 
-// O que o quarto disse sobre onde um servidor mora hoje, reexportado para a
-// casca ler a resposta sem nomear o `seele-core`, que o ADR 0002 não a deixa
-// alcançar. E a regra que monta com ela o bilhete do `LEVE` desta volta: a
-// escuta do quarto só troca o aviso quando mora no IP do servidor que a mesma
-// resposta deu (o I1 da revisão final do Plano 1). A casca usa a regra, e não
-// `OndeMora::escuta`, que é a resposta crua.
-pub use seele_core::encontro::{bilhete_desta_volta, OndeMora};
+// O que o quarto disse sobre onde um servidor mora hoje, reexportado para quem
+// lê a resposta de [`onde_mora_hoje`] sem nomear o `seele-core`, que o ADR 0002
+// não deixa a casca alcançar. A regra que monta o bilhete desta volta
+// (`bilhete_desta_volta`) não sai mais daqui: desde a tarefa 14b da F7 quem a
+// aplica é a `Chegada`, junto com a corrida.
+pub use seele_core::encontro::OndeMora;
 
 /// Onde este servidor mora hoje: o socket dele, e a escuta de avisos dele.
 ///
@@ -10126,11 +10169,17 @@ pub use seele_core::encontro::{bilhete_desta_volta, OndeMora};
 ///
 /// Um [`OndeMora`], e não um par de `Option`: «o ponto não respondeu» e «o
 /// ponto respondeu e ninguém mora lá» apontam para lugares diferentes, e a
-/// consulta registra no log qual foi. A casca lê [`OndeMora::servidor`], que é
-/// `None` quando o quarto não o deu, e monta o bilhete desta volta com
-/// [`bilhete_desta_volta`], que só usa a escuta que o servidor da mesma
-/// resposta confirma. [`OndeMora::escuta`] é a resposta crua, e quem ocupou a
-/// marca da escuta também aparece nela.
+/// consulta registra no log qual foi. [`OndeMora::escuta`] é a resposta crua,
+/// e quem ocupou a marca da escuta também aparece nela.
+///
+/// # Não é o caminho da conexão
+///
+/// Desde a tarefa 14b da F7, quem volta a um servidor guardado pergunta ao
+/// quarto pela `Chegada` (`Chegada::com_o_quarto`, que [`Connection::connect`]
+/// liga quando há impressão e bilhete), junto com a corrida, e é lá que a regra
+/// da escuta (`bilhete_desta_volta`) é aplicada. Isto fica para a pergunta
+/// avulsa: os testes do link (`quarto_pelo_link.rs`) e a conferência de um
+/// cenário (`ocupante_da_escuta.rs`).
 pub async fn onde_mora_hoje(ponto: &str, impressao: &str) -> OndeMora {
     let Some(marcas) = seele_core::encontro::Marcas::do_servidor(impressao) else {
         tracing::info!(
@@ -10462,74 +10511,82 @@ mod a_lista_guarda_a_impressao_aceita {
     }
 }
 
-/// Se `endereco` já é um candidato desta conexão: o alvo ou um dos
-/// alternativos.
-///
-/// É a pergunta que o `connect` do app faz antes de pôr na frente da corrida o
-/// endereço que o quarto devolveu. Ela só olhava os alternativos, e não o
-/// alvo: quando o quarto devolvia o próprio endereço da entrada, a corrida
-/// tinha dois candidatos com a mesma chave de pino, e o mesmo servidor
-/// recebia dois apertos de mão e dois `Hello`. É o caso em que um candidato
-/// perdedor pode desfazer o pin que o vencedor acabou de fixar
-/// (`seele_core::enlace`, `desfazer_o_pin_deste_aperto`), e ele deixava de
-/// precisar de dois endereços no convite para acontecer.
-///
-/// A comparação é pela chave de pino ([`chave_do_servidor`]) dos dois lados,
-/// e não pelo texto: é ela que diz se dois candidatos são o mesmo endereço, e
-/// `192.168.50.30` e `192.168.50.30:8383` são. Um `endereco` sem chave nunca
-/// seria candidato (a conexão descarta o alternativo que não resolve), e
-/// devolve `false`.
-#[must_use]
-pub fn ja_esta_na_corrida(endereco: &str, alvo: &str, alternativos: &[String]) -> bool {
-    let Some(chave) = chave_do_servidor(endereco) else {
-        return false;
-    };
-    std::iter::once(alvo)
-        .chain(alternativos.iter().map(String::as_str))
-        .any(|candidato| chave_do_servidor(candidato).as_deref() == Some(chave.as_str()))
-}
-
 #[cfg(test)]
-mod a_resposta_do_quarto_nao_repete_um_candidato {
-    use super::ja_esta_na_corrida;
+mod o_candidato_do_quarto {
+    //! O endereço de hoje entra na corrida com a chave de pino que os outros
+    //! candidatos teriam. Era o que `ja_esta_na_corrida` garantia, quando o
+    //! `connect` do app comparava os textos antes de chamar a ponte. Desde a
+    //! tarefa 14b da F7, quem compara é a `Chegada`, pela chave de pino, e a
+    //! chave sai daqui.
+
+    use super::{candidato_do_quarto, resolve, ConnectConfig};
+
+    fn config() -> ConnectConfig {
+        ConnectConfig {
+            server: "casa.exemplo:8383".into(),
+            alternate_servers: Vec::new(),
+            nickname: "pessoa".into(),
+            home: String::new(),
+            join_secret: None,
+            expected_fingerprint: Some("ab".repeat(32)),
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        }
+    }
+
+    fn chave_de(escrito: &str) -> String {
+        resolve(escrito).expect("um endereço escrito resolve").2
+    }
 
     #[test]
-    fn o_proprio_alvo_ja_esta_na_corrida() {
-        assert!(
-            ja_esta_na_corrida("187.255.97.152:9368", "187.255.97.152:9368", &[]),
-            "o endereço que o quarto devolveu é o próprio alvo e entrou de novo na corrida: \
-             dois candidatos com a mesma chave de pino, e dois `Hello` para o mesmo servidor"
+    fn o_proprio_alvo_tem_a_mesma_chave() {
+        let alvo = "187.255.97.152:9368";
+        let de_hoje = candidato_do_quarto(&config(), alvo.parse().unwrap(), &chave_de(alvo));
+        assert_eq!(
+            de_hoje.chave_do_pin,
+            chave_de(alvo),
+            "o endereço que o quarto devolveu é o próprio alvo e ganhou outra chave: a \
+             `Chegada` o poria de novo na corrida, com dois `Hello` para o mesmo servidor"
         );
     }
 
     #[test]
-    fn a_comparacao_e_pela_chave_de_pino_e_nao_pelo_texto() {
-        assert!(
-            ja_esta_na_corrida("192.168.50.30:8383", "192.168.50.30", &[]),
-            "o alvo escrito sem a porta padrão não foi reconhecido no endereço que o quarto \
-             devolveu: a chave de pino dos dois é a mesma"
-        );
-        assert!(
-            ja_esta_na_corrida(
-                "[2001:db8::1]:8383",
-                "casa.exemplo:8383",
-                &["[2001:db8::1]".to_owned()]
-            ),
-            "um alternativo escrito sem a porta padrão não foi reconhecido no endereço que o \
-             quarto devolveu: a chave de pino dos dois é a mesma"
-        );
+    fn a_chave_e_a_canonica_e_nao_o_texto() {
+        // O alvo escrito sem a porta padrão, e um IPv6 também sem ela.
+        for (escrito, de_hoje) in [
+            ("192.168.50.30", "192.168.50.30:8383"),
+            ("[2001:db8::1]", "[2001:db8::1]:8383"),
+        ] {
+            let candidato =
+                candidato_do_quarto(&config(), de_hoje.parse().unwrap(), &chave_de(escrito));
+            assert_eq!(
+                candidato.chave_do_pin,
+                chave_de(escrito),
+                "`{escrito}` e o `{de_hoje}` que o quarto deu têm a mesma chave de pino"
+            );
+        }
     }
 
     #[test]
-    fn um_endereco_novo_entra_na_corrida() {
+    fn a_porta_nova_e_outra_chave_e_o_pino_dela_nao_prova_o_servidor() {
+        let alvo = "187.255.97.152:9368";
+        let de_hoje = candidato_do_quarto(
+            &config(),
+            "187.255.97.152:9400".parse().unwrap(),
+            &chave_de(alvo),
+        );
+        assert_ne!(
+            de_hoje.chave_do_pin,
+            chave_de(alvo),
+            "a porta nova que o NAT deu ao servidor ficou com a chave do alvo, e a resposta do \
+             quarto não entraria na corrida"
+        );
         assert!(
-            !ja_esta_na_corrida(
-                "187.255.97.152:9400",
-                "187.255.97.152:9368",
-                &["192.168.50.30:8383".to_owned()]
-            ),
-            "a porta nova que o NAT deu ao servidor foi tratada como candidato repetido, e a \
-             resposta do quarto não entra na corrida"
+            !de_hoje.o_pino_prova_o_servidor,
+            "o pino do endereço que o quarto deu passou a provar o servidor: o quarto pode \
+             apontar para outro servidor que esta máquina já fixou ali"
         );
     }
 }
