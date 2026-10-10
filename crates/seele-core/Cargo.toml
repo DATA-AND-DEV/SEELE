@@ -10,6 +10,8 @@ publish.workspace = true
 # never the other way round. Enforced by `cargo xtask check-deps`.
 [dependencies]
 seele-proto = { path = "../seele-proto" }
+# O `Room`, a porta do assento e o `SessionInfo`, sem E/S (Tarefa 2.2 da F4).
+seele-sessao = { path = "../seele-sessao" }
 seele-audio = { path = "../seele-audio" }
 # A segunda folha de mídia, ao lado de `seele-audio` e com a mesma vizinhança —
 # a aresta que o ADR 0002 já permitia e que ninguém tinha usado.

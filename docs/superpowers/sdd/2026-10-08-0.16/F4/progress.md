@@ -489,3 +489,201 @@ começar.
   É do encontro da F3 com a F8 (o `0.16/web` não muda CSS nenhum), e a F8 o
   regera com `SEELE_REGERAR_TEXTO=1`. Avisado à orquestradora.
 
+## 09/10, noite: a ponte, lote B (o que mora na origem)
+
+- **Cinco comandos saem de `AINDA_A_FAZER`**: `escolher_apelido_local`,
+  `consentir_previa`, `esquecer_previa`, `previas_consentidas` e
+  `abrir_no_navegador`. Ficam 94.
+- **As regras são as do desktop**, lidas do código e não da matriz:
+  - o apelido aparado e sem tab nem quebra (`Preferences::set_nickname`), e
+    vazio apaga;
+  - o domínio em minúsculas ASCII, uma palavra só, e um subdomínio de um
+    liberado já está liberado (`consentir_previa`, `previa_consentida`);
+  - só `http` e `https`, até 2048 bytes, sem espaço nem controle
+    (`endereco_que_pode_sair`), numa aba nova com `noopener,noreferrer` e sem
+    `await` antes do `open`.
+- **Gravar que falha é dito**: `NaoGravei` no apelido, como o desktop, e a
+  frase no consentimento. Sem armazenamento (navegação privada, cota), a
+  escolha não fica, e quem chama sabe.
+- **Medido:** a `ponte-web.cjs` com 12 provas; `web.rs` 10, `frontend.rs` 282
+  e `celular.rs` passam. **Cinco reversões**, cada uma reprovando o seu caso:
+  abrir sem conferir, abrir levando a página junto, o apelido sem aparar, o
+  subdomínio consentido de novo e a gravação que falha em silêncio.
+
+## 09/10, noite: a ponte, lote C (o arquivo por alça)
+
+- **Três comandos ganham corpo**: `escolher_arquivo`, `guardar_colado` e
+  `descrever_arquivo` (este só no PC). O `enviar_anexo` passa do lote C para
+  a 2.6: ele lê o arquivo da alça e o sobe pela sessão. Ficam 91 a fazer.
+- **As quatro condições da `F4/ponte-no-pc.md`**, cada uma com prova:
+  1. o mapa tem teto (16 alças, e 2 imagens coladas, que estão todas na
+     memória) e solta tudo no fim da sessão. A casca não avisa quando desiste
+     de um anexo (`tirarAnexo` não chama a ponte), e por isso o teto solta as
+     mais velhas;
+  2. uma alça desconhecida ou solta volta `NotConnected`, como o caminho que
+     não existe no desktop; a casca diz «NÃO CONSEGUI LER ESSE ARQUIVO»;
+  3. o seletor abre dentro da chamada, sem `await` antes do `click()`;
+  4. desistir devolve `null` pelo `cancel`, e a reversão que tira o `cancel`
+     reprova a bancada pela promessa pendurada.
+- **O arraste é só do PC**: a ponte ouve o `drop` do documento quando o que se
+  arrasta são arquivos, guarda cada um sob uma alça (até o teto, para a do
+  primeiro não sair no meio) e emite o `tauri://drag-drop` que a casca ouve.
+  Arrastar texto para um campo continua sendo do navegador.
+- **As regras do desktop presas por guarda**: a tabela do `tipo_alegado`, a
+  extensão da colagem e o teto de 25 MiB do `guardar_colado`
+  (`as_regras_do_arquivo_da_ponte_sao_as_do_desktop`). O tipo sai da extensão,
+  e não do `File.type`.
+- **Medido:** a `ponte-web.cjs` com 15 provas; `web.rs` 11. No Chromium, o PC
+  carrega limpo com o arraste instalado. **Nove reversões**, cada uma
+  reprovando a sua prova.
+
+## 09/10, noite: a ponte, lote D (a saída de som e a tela cheia)
+
+- **Quatro comandos ganham corpo**, só no PC: `saidas`, `saida_escolhida`,
+  `escolher_saida` e `tela_cheia`. Ficam 87 a fazer.
+- **A saída de som**: o `enumerateDevices`, sem os pseudo-aparelhos
+  (`default` e `communications` repetem um de verdade; o padrão é o do mesmo
+  grupo do `default`) e sem os ids vazios de antes da permissão do microfone.
+  Onde não há `setSinkId`, a lista é vazia. A escolha mora na origem; numa
+  sessão, a voz a aplica.
+- **A tela cheia** é a Fullscreen API, pedida dentro do clique; pedir duas
+  vezes não pede de novo, e um pedido recusado é dito sem lançar na casca.
+- **O teste do microfone foi para a 3.3**, porque é o mesmo portão da voz.
+- **A lacuna do Esc**, registrada no plano: ele sai da tela cheia do navegador
+  sem a casca saber, e o modo cinema dela fica ligado. É da casca (F8).
+- **Medido:** a `ponte-web.cjs` com 17 provas, só em Node: a lista de
+  aparelhos e a Fullscreen API não foram exercitadas num Chromium.
+  **Cinco reversões**, cada uma reprovando a sua prova.
+
+## 09/10, noite: o eco no navegador (pedido da F8)
+
+- **A F8 perguntou** se a voz do PC liga o `echoCancellation`, para o aviso de
+  fone da casca larga. A resposta: a voz-web ainda não existe, e pedir o
+  cancelador não é cancelar (a nossa voz toca pelo Web Audio, e não por um
+  `RTCPeerConnection`). A larga fica com «USE FONE» até a medida; a F8 também
+  tirou do celular a afirmação do P9, que não tinha medida (`63089fe7`, no
+  `0.16/celular`).
+- **A página da medida** (`spikes/eco-no-navegador/`): um tom de 1 kHz pelo
+  Web Audio e o nível dele no microfone, com e sem o cancelador, em quatro
+  rodadas alternadas; o veredito diz «sem laço» quando o tom não chega ao
+  microfone, em vez de inventar um número. Conferida no Chromium mudo e com
+  microfone falso: quatro rodadas, o cancelador aplicado igual ao pedido, e
+  «sem laço».
+- **A medida de verdade é do dono** (alto-falante e microfone de verdade), nos
+  três navegadores do Mac e no iPhone: os passos estão em
+  `F4/medicoes-do-dono.md`. O Simulador não serve: ele usa o áudio do Mac.
+- **Também neste trecho:** a regra do duble ficou escrita na ponte com o
+  porquê; os 28 roteiros e o G3 da F8 (o desktop igual pixel a pixel no
+  Chromium e no WebKit) passaram no `0.16/web` em `792dc2a4`.
+
+## 09/10, noite: a 2.2 liberada, e a medida do retrato
+
+- **A orquestradora liberou a 2.2 e a 3.3**, nesta ordem. Os lotes B, C e D da
+  ponte entram na décima primeira integração; o `index.html` não precisa de
+  commits isolados.
+- **Mapeado** (por um agente de leitura): o `Room` é puro fora de três peças
+  (o `SessionInfo`, num arquivo com o quinn; o `assento.rs`, puro; e o
+  `teto_de_video`, que só os testes chamam). A projeção do `Snapshot` e os
+  tipos dele moram no `seele-ffi` (`lib.rs` e `types.rs`), os arquivos mais
+  disputados com a F5.
+- **Medido no spike** (`3e733d3e`): os números estão no plano (2.2). Uma sala
+  cheia custa 0,11 ms no Chromium e 0,17 ms no Safari do Simulador; o produtor
+  não pesa.
+- **Achado: as chaves do `HashMap` são fixas no navegador**, conferido por um
+  hash de prova igual em duas instâncias do módulo e nos dois motores. Com ids
+  escolhidos pelo servidor, isso é uma porta para deixar a aba quadrática; a
+  proposta é `BTreeMap` nos seis mapas do `Room`.
+- **A proposta de corte foi à orquestradora**, em duas fases (o `seele-core`
+  primeiro; o `seele-ffi` numa janela dela). Esperando a resposta.
+
+## 09/10, noite: a 2.2, fase 1 (o `seele-sessao`)
+
+- **A orquestradora liberou a fase 1** e os seis mapas em `BTreeMap` também no
+  desktop; a fase 2 espera a sala viva da F7. A saída do `ScreenFrame` saiu do
+  plano, porque o produtor não pesa.
+- **O corte** (`4e1139fc`): o `crates/seele-sessao`, só com o `seele-proto`.
+  O `state.rs` e o `assento.rs` foram para lá, e o `SessionInfo` saiu do
+  `client.rs` sem tocar no aperto de mão, onde a P8 parou. O `seele-core` os
+  reexporta, e nenhum outro arquivo do workspace mudou. No texto movido,
+  mudaram só o `use` do `SessionInfo`, dois links para o vídeo, que viraram
+  texto, e o `teto_de_video`, que ficou no `tela.rs` como o trait
+  `TetoDaSala`, com os dois testes dele de texto igual. O `assento.rs` é byte a
+  byte o mesmo.
+  - **conferido:** 58 testes no `state.rs` mais 2 no `tela.rs` são os 60 de
+    antes, e o `assento.rs` tem os mesmos 15; o `seele-core` inteiro passa; o
+    `cargo xtask web` compila o `seele-sessao` para o navegador; o
+    `check_deps.rs` o prende ao protocolo (teste novo);
+  - **reversões:** o `seele-audio` pendurado nele reprova o `check-deps` e a
+    compilação para o navegador; o teto sem a perna dos espectadores reprova o
+    teste movido.
+- **Os seis mapas em `BTreeMap`**, num commit à parte: o `seele-sessao`, o
+  `seele-core` inteiro e o `seele-ffi` (166 testes, com os do retrato) passam.
+  Um guarda novo (`tests/sem_hash_nos_ids_do_servidor.rs`) reprova um
+  `HashMap`, um `HashSet` ou um `RandomState` no crate, e a reversão (o mapa
+  das telas de volta ao `HashMap`) o reprova. No spike, o retrato ficou igual
+  ou mais rápido (250 pessoas: 0,107 ms no Chromium, 0,117 ms no Safari do
+  Simulador), e o `.wasm` foi de 147 KB para 204 KB.
+- **Três comentários citam o caminho velho do `state.rs`**, e não são da F4:
+  `ui/base.css:160`, `ui/tela-sessao.js:35` e
+  `crates/seele-conformance/tests/sincronia.rs:34`. Ficam para a fila da
+  orquestradora.
+
+## 09/10, noite: a 3.3, lote B (o `seele-voz`) e as preferências da voz na ponte
+
+- **O corte do `seele-voz`** (`a4330b2d`): o `gate.rs`, o `jitter.rs`, o
+  `mixer.rs` e o `netsim.rs` movidos byte a byte do `seele-audio`, com as três
+  constantes e o teste delas; o `seele-audio` os reexporta. Passam o
+  `seele-voz` (77), o `seele-audio` e o `seele-core` inteiros e a
+  `qualidade-da-voz.cjs`. Reversões: o `seele-proto` pendurado reprova o
+  `check-deps`; a libopus pendurada reprova a compilação para o navegador.
+- **O mixer em `BTreeMap`** (`1c915683`), medido no nativo como a orquestradora
+  pediu: 765 a 792 ns por quadro de oito fontes, contra 788 a 877 com o
+  `HashMap`, em rodadas alternadas. Um guarda contra mapas de hash no crate
+  pegou um `HashSet` nos testes do `netsim.rs`.
+- **A emenda do ADR 0057** (`beb1e851`): a exceção em JavaScript não foi
+  preciso, com os números.
+- **O relógio de mídia e a tabela de fontes moram dentro do laço do
+  `voice.rs`.** Escrevê-los no `seele-web` seria uma segunda implementação. A
+  extração deles para o `seele-voz` foi perguntada à orquestradora, e o lote A
+  espera a resposta.
+- **As preferências da voz na ponte**, enquanto isso: o modo (sem escolha, o
+  VOZ), o microfone escolhido e a lista de microfones, a sensibilidade e a
+  redução de ruído (em milésimos, como o desktop) com os controles da voz
+  derivados pela regra do desktop sem sessão, a tecla de falar do PC e a
+  permissão do microfone pela Permissions API. Um guarda prende a abertura
+  sem supressão ao `seele_ffi`. Seis reversões; a da tecla no celular não
+  reprovava de primeira, porque a bancada começava sem tecla guardada, e a
+  bancada foi corrigida. Ficam 78 a fazer na ponte.
+- **Para a F8:** a permissão negada pelo navegador volta
+  `NegadaPeloNavegador` (o achado 3 da matriz), que a tabela
+  `PERMISSAO_DE_MICROFONE` da casca ainda não tem; até ela ter a frase, o
+  bloco fica escondido.
+
+## 09/10, noite: a 3.3, o relógio de mídia e a tabela de quem fala no `seele-voz`
+
+- **Liberado pela orquestradora**: as duas metades da mídia saem do laço do
+  `voice.rs` para o `seele-voz`, como estruturas puras com o relógio passado
+  por argumento, e o desktop passa a usá-las.
+- **O laço não roda em teste** (um aparelho do cpal e uma conexão QUIC). Então
+  o «teste gravado antes» foi feito assim: uma tabela fixa de eventos com os
+  valores esperados escritos à mão, produzida por uma réplica das instruções
+  do laço; um segundo teste confere que cada instrução replicada está no
+  `pipeline` com o mesmo texto (mudar o laço reprova). Depois da extração, o
+  corpo do teste da sequência é idêntico (conferido por texto), quem produz é
+  a estrutura chamada sozinha, e o guarda passa a exigir que o laço a use e
+  não faça conta própria.
+- **A metade que manda** (`e3ce87aa`, `9c0d8f61`): o `RelogioDeMidia` (um
+  quadro passou, um pacote saiu, o salto) e o `carimbo_do_quadro`, movido com
+  a documentação. O `Voice::salto_do_relogio` ficou como atalho, e os testes
+  antigos não mudaram. Reversão: sem o salto de dois quadros, reprovam o teste
+  gravado e mais três testes antigos da reabertura.
+- **A metade que recebe** (`ae50d6f0`, `59c569e5`): a `TabelaDeFontes<T>` e a
+  `SILENCIO_ATE_ESQUECER_MS`, movida com a documentação. Reversão: o próprio
+  SSRC deixando de ser descartado reprova o teste gravado.
+- **Passam** o `seele-voz`, o `seele-audio`, o `seele-core` (452), o
+  `seele-ffi` (166), o clippy, a compilação para o navegador e a
+  `qualidade-da-voz.cjs`. **A conformidade de áudio por arquivo espera o aviso
+  da orquestradora** do fim da bateria da décima.
+- **A seguir, o lote A**: a fronteira da voz no `seele-web`, com o cabeçalho, o
+  relógio e a tabela (a alça opaca no lugar do SSRC) pelo `wasm`.
+

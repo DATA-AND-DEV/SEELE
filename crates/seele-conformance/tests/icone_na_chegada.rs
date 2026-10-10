@@ -99,6 +99,7 @@ fn conectar(endereco: SocketAddr, casa: &str) -> Result<Arc<Connection>, Connect
         home: casa.to_owned(),
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         audio: false,
         capture_device: None,

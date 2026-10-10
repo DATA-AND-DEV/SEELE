@@ -27,11 +27,13 @@ use anyhow::Result;
 use seele_audio::codec::{VoiceDecoder, VoiceEncoder, DEFAULT_BITRATE_BPS};
 use seele_audio::device::{self, AudioIo};
 use seele_audio::drift::DriftTracker;
+use seele_audio::fontes::TabelaDeFontes;
 use seele_audio::gate::{GateConfig, GateMode, VoiceGate};
 use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
 use seele_audio::pacing::RingPacer;
 use seele_audio::playout::PlayoutClock;
+use seele_audio::relogio::{carimbo_do_quadro, RelogioDeMidia};
 use seele_audio::resample::RateConverter;
 use seele_audio::supervisor::{AvisoDeAparelho, CicloDoAparelho, DeviceState, Reabertura};
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
@@ -725,33 +727,6 @@ fn configuracao_do_portao(controls: &Controls) -> GateConfig {
     GateConfig::automatico(dbfs)
 }
 
-/// O carimbo de tempo de um quadro numa entrega de vários. F01.
-///
-/// `carimbo` é o do quadro de **agora**, `quantos` é o tamanho da entrega e
-/// `indice` a posição dentro dela. O último quadro fica com `carimbo`; cada um
-/// antes dele recua um quadro de amostras.
-///
-/// # Por que não bastava carimbar todos igual
-///
-/// Porque um carimbo é *quando aquele áudio aconteceu*, e os quadros retidos da
-/// primeira sílaba aconteceram **antes**. Carimbados todos com o mesmo instante,
-/// quem recebe vê três quadros no mesmo tempo: o `playout` trata carimbo repetido
-/// como um salto do relógio e ressincroniza, e uma ressincronização no primeiro
-/// quadro de cada fala é exatamente onde ela mais se ouve — é o começo da palavra
-/// que F01 foi recuperar.
-///
-/// Auditoria de 22/09/2026, A05. Recuar é a conta certa e não uma aproximação: o
-/// quadro retido *é* de 20 ms antes.
-///
-/// `wrapping_sub` porque o carimbo é um contador de 32 bits que dá a volta, e uma
-/// volta no meio de uma abertura não é um erro — é a mesma aritmética que o resto
-/// deste laço usa para andar para a frente.
-fn carimbo_do_quadro(carimbo: u32, quantos: usize, indice: usize) -> u32 {
-    let atras = quantos.saturating_sub(indice + 1);
-    let amostras = u32::try_from(atras.saturating_mul(FRAME_SAMPLES)).unwrap_or(0);
-    carimbo.wrapping_sub(amostras)
-}
-
 /// Põe um pacote de som de tela na fila, trocando de tela se for outra. R17.
 ///
 /// **Função livre sobre os controles**, e não um corpo de método, para ser
@@ -1290,32 +1265,12 @@ impl Voice {
         carregar_controles(&self.controls, &fresh.controls);
     }
 
-    /// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
-    ///
-    /// # Dois quadros, e a sequência junto
-    ///
-    /// Os dois caminhos existem ao mesmo tempo por um instante: o novo nasce
-    /// **antes** de o velho ser largado, de propósito — um microfone que sumiu
-    /// deixa a pessoa falando pelo antigo em vez de muda. Depois de o relógio ser
-    /// lido, o velho ainda pode mandar um quadro antes de parar. Começar dois
-    /// quadros à frente passa por cima dele sem repetir número.
-    ///
-    /// **Até a 0.15.0 o pulo era de um segundo, e foi o defeito.** A ideia era
-    /// que abrir um aparelho leva esse tempo e o buffer de jitter de quem ouve
-    /// leria o pulo como pausa e reacertaria. Não reacertava: com a sequência
-    /// andando um e o carimbo cinquenta quadros, quem ouve agendava ~900 ms de
-    /// silêncio enquanto a voz nova já chegava, e o atraso ficava — cada troca
-    /// de microfone somava outro (relato de 05/10/2026, medido 50 → 950 → 1850
-    /// ms). O relógio agora é lido **depois** de o aparelho novo abrir, então o
-    /// tempo de abrir já está nele, e o pulo só cobre o quadro em voo.
-    ///
-    /// A sequência anda o mesmo que o carimbo, em quadros: quem recebe usa a
-    /// diferença entre os dois para separar silêncio de perda (M1.9), e o vão
-    /// de dois quadros chega como um quadro perdido — que o Opus esconde — e
-    /// não como pausa de quem fala.
+    /// Onde o relógio de mídia recomeça depois de trocar de dispositivo: dois
+    /// quadros à frente, a sequência junto. Ver
+    /// [`seele_audio::relogio::RelogioDeMidia::salto`], que é onde a conta mora.
     fn salto_do_relogio(seq: u16, carimbo: u32) -> (u16, u32) {
-        let quadro = u32::try_from(FRAME_SAMPLES).unwrap_or(960);
-        (seq.wrapping_add(2), carimbo.wrapping_add(2 * quadro))
+        let salto = RelogioDeMidia::de(seq, carimbo).salto();
+        (salto.seq(), salto.carimbo())
     }
 
     /// Mutes the microphone — mudo.
@@ -1559,39 +1514,13 @@ impl Drop for Voice {
     }
 }
 
-/// One talker being decoded.
+/// One talker being decoded. Quem é (o SSRC) e quando chegou o último quadro
+/// dele moram na [`TabelaDeFontes`], que é quem o cria e o esquece.
 struct Source {
-    ssrc: u32,
     buffer: JitterBuffer<Vec<u8>>,
     drift: DriftTracker,
     decoder: VoiceDecoder,
-    /// Quando chegou o último quadro desta pessoa, no relógio deste laço.
-    ///
-    /// Serve para esquecê-la depois de [`SILENCIO_ATE_ESQUECER_MS`]. Ver ali
-    /// por que esquecer é o certo.
-    ultimo_ms: f64,
 }
-
-/// Quanto silêncio faz uma pessoa ser esquecida por quem escuta.
-///
-/// # Por que esquecer alguém é bom
-///
-/// A tabela de quem fala era um `Vec` que só crescia: uma pessoa que entrou,
-/// falou e saiu ficava lá com um decodificador e um buffer inteiros até a
-/// sessão acabar. Isso era só desperdício.
-///
-/// O que **não** era desperdício é a segunda metade: um buffer velho guarda até
-/// onde aquela pessoa já tocou, e recusa qualquer carimbo anterior a isso. Se o
-/// relógio dela recomeçar por qualquer motivo — o conserto de
-/// `Controls::relogio_seq` cobre o motivo conhecido, e nada garante que era o
-/// único —, a pessoa some para sempre e nem sair e voltar resolve. Esquecê-la
-/// depois de meio minuto calado transforma «para sempre» em «meio minuto».
-///
-/// Meio minuto e não cinco segundos porque o silêncio aqui é normal: o DTX não
-/// manda nada enquanto ninguém fala, então uma pessoa quieta numa reunião fica
-/// sem mandar um quadro por minutos a fio. O preço de esquecer é o buffer
-/// encher de novo na primeira palavra — algumas dezenas de milissegundos.
-const SILENCIO_ATE_ESQUECER_MS: f64 = 30_000.0;
 
 /// Quem reabre os aparelhos por conta do laço.
 ///
@@ -1954,7 +1883,7 @@ async fn pipeline(
     let mut a_transmitir: Vec<Vec<f32>> = Vec::new();
     let mut supressao_avisada = false;
     let mut mixer = Mixer::new();
-    let mut sources: Vec<Source> = Vec::new();
+    let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(ssrc.get());
     // O decodificador do som da tela, à parte dos das pessoas.
     //
     // À parte porque a fonte é outra: a voz de cada um chega por datagrama, com
@@ -1978,7 +1907,7 @@ async fn pipeline(
     let mut for_device = Vec::new();
 
     // De onde o caminho anterior parou, e não de zero. Ver `Controls::relogio_seq`.
-    let (mut seq, mut timestamp) = (
+    let mut relogio = RelogioDeMidia::de(
         controls.relogio_seq.load(Ordering::Relaxed) as u16,
         controls.relogio_carimbo.load(Ordering::Relaxed),
     );
@@ -2035,39 +1964,28 @@ async fn pipeline(
             let Ok((header, payload)) = MediaHeader::decode(&bytes) else {
                 continue;
             };
-            // Our own audio coming back is not something to play.
-            if header.ssrc == ssrc.get() {
+            // A própria voz voltando não é de ninguém para tocar, e uma fonte
+            // nova só entra se o decodificador dela abrir: ver
+            // `TabelaDeFontes::chegou`.
+            let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {
+                VoiceDecoder::new().ok().map(|decoder| Source {
+                    buffer: JitterBuffer::new(JitterConfig::default()),
+                    drift: DriftTracker::new(),
+                    decoder,
+                })
+            }) else {
                 continue;
-            }
-            let index = match sources.iter().position(|s| s.ssrc == header.ssrc) {
-                Some(index) => index,
-                None => {
-                    let Ok(decoder) = VoiceDecoder::new() else {
-                        continue;
-                    };
-                    sources.push(Source {
-                        ssrc: header.ssrc,
-                        buffer: JitterBuffer::new(JitterConfig::default()),
-                        drift: DriftTracker::new(),
-                        decoder,
-                        ultimo_ms: arrival_ms,
-                    });
-                    sources.len() - 1
-                }
             };
-            if let Some(source) = sources.get_mut(index) {
-                source.ultimo_ms = arrival_ms;
-                let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
-                source.drift.observe(arrival_ms - sent_ms, arrival_ms);
-                source
-                    .buffer
-                    .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
-            }
+            let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
+            source.drift.observe(arrival_ms - sent_ms, arrival_ms);
+            source
+                .buffer
+                .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
         }
 
         // Quem calou faz meio minuto é esquecido. Ver `SILENCIO_ATE_ESQUECER_MS`.
         let agora_ms = started.elapsed().as_secs_f64() * 1000.0;
-        sources.retain(|fonte| agora_ms - fonte.ultimo_ms < SILENCIO_ATE_ESQUECER_MS);
+        sources.esquecer_caladas(agora_ms);
 
         // ---- capture, encode, send ----
         gate.set_mode(VoiceMode::from_byte(controls.mode.load(Ordering::Relaxed)).to_gate());
@@ -2121,8 +2039,7 @@ async fn pipeline(
             if limpo.is_empty() {
                 // Ainda dentro do atraso de um salto. O relógio anda mesmo assim:
                 // ele conta amostras que passaram, e elas passaram.
-                timestamp =
-                    timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                let timestamp = relogio.quadro_passou();
                 controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
                 continue;
             }
@@ -2152,7 +2069,7 @@ async fn pipeline(
             // The timestamp counts elapsed samples whether or not anything goes
             // out; the sequence counts only what does. That difference is what
             // lets the receiver tell DTX silence from real loss — M1.9.
-            timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+            let timestamp = relogio.quadro_passou();
             controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
             if !speaking {
                 continue;
@@ -2199,7 +2116,7 @@ async fn pipeline(
                 if payload.is_empty() {
                     continue;
                 }
-                seq = seq.wrapping_add(1);
+                let seq = relogio.pacote_saiu();
                 controls
                     .relogio_seq
                     .store(u32::from(seq), Ordering::Relaxed);
@@ -2301,14 +2218,14 @@ async fn pipeline(
 
             for _ in 0..vencidos {
                 let mut decoded: Vec<(u32, Vec<f32>)> = Vec::new();
-                for source in &mut sources {
+                for (de_quem, source) in sources.iter_mut() {
                     let samples = match source.buffer.tick() {
                         Decision::Play(payload) => source.decoder.decode(&payload).ok(),
                         Decision::Conceal => source.decoder.conceal().ok(),
                         Decision::Silence | Decision::Comfort | Decision::Starved => None,
                     };
                     if let Some(samples) = samples {
-                        decoded.push((source.ssrc, samples));
+                        decoded.push((de_quem, samples));
                     }
                 }
                 // O som da tela, como mais uma fonte da mistura.
@@ -2409,7 +2326,9 @@ async fn pipeline(
                 .with_silencio_digital(silencio.marcado()),
                 sources: sources
                     .iter()
-                    .map(|source| SourceTelemetry::assemble(source.ssrc, source.buffer.metrics()))
+                    .map(|(de_quem, source)| {
+                        SourceTelemetry::assemble(de_quem, source.buffer.metrics())
+                    })
                     .collect(),
             };
             if let Ok(mut slot) = telemetry.lock() {
@@ -2494,6 +2413,295 @@ mod relogio_de_midia {
         // E dá a volta sem estourar, que é o caso de uma conversa longa.
         let (volta, _) = Voice::salto_do_relogio(u16::MAX, 0);
         assert_eq!(volta, 1);
+    }
+}
+
+#[cfg(test)]
+mod relogio_gravado {
+    //! **O relógio de mídia numa sequência fixa, gravado antes de sair do laço**
+    //! (Tarefa 3.3 da F4, combinado com a orquestradora em 09/10/2026).
+    //!
+    //! O relógio (a sequência e o carimbo de cada pacote que sai) mora dentro
+    //! do `pipeline`, que só roda com um aparelho de áudio e uma conexão QUIC.
+    //! Este teste grava o que ele produz numa sequência fixa de quadros, com os
+    //! valores escritos à mão: quadros calados, o atraso da supressão, o portão
+    //! soltando os retidos, um quadro de DTX, o mudo e uma reabertura, a partir
+    //! de perto da volta da sequência.
+    //!
+    //! **Quem produz** é [`produzir`], que repete as instruções do relógio do
+    //! laço; [`a_replica_e_o_laco_de_hoje`] confere que cada uma delas está no
+    //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando o
+    //! relógio sair do laço: muda só quem produz.
+
+    use super::{carimbo_do_quadro, RelogioDeMidia};
+
+    /// Um quadro de 20 ms do laço, pelo que ele faz com o relógio.
+    enum Evento {
+        /// A supressão ainda no atraso dela: nada sai, e o tempo passa.
+        Atrasado,
+        /// O portão fechado.
+        Calado,
+        /// O portão aberto e o microfone mudo.
+        Mudo,
+        /// O portão soltou `quantos` quadros (os retidos e o de agora); os de
+        /// `vazios` o codificador devolveu vazios (DTX).
+        Abre {
+            quantos: usize,
+            vazios: &'static [usize],
+        },
+        /// O caminho foi trocado (outro aparelho, ou a reconexão).
+        Reabre,
+    }
+
+    /// Os pacotes que saem, `(sequência, carimbo)`, e o relógio no fim.
+    ///
+    /// O [`RelogioDeMidia`] sozinho, chamado como o `pipeline` o chama.
+    fn produzir(inicio: (u16, u32), eventos: &[Evento]) -> (Vec<(u16, u32)>, (u16, u32)) {
+        let mut relogio = RelogioDeMidia::de(inicio.0, inicio.1);
+        let mut pacotes = Vec::new();
+        for evento in eventos {
+            match evento {
+                Evento::Atrasado | Evento::Calado | Evento::Mudo => {
+                    relogio.quadro_passou();
+                }
+                Evento::Abre { quantos, vazios } => {
+                    let timestamp = relogio.quadro_passou();
+                    let quantos = *quantos;
+                    for indice in 0..quantos {
+                        let carimbo = carimbo_do_quadro(timestamp, quantos, indice);
+                        if vazios.contains(&indice) {
+                            continue;
+                        }
+                        pacotes.push((relogio.pacote_saiu(), carimbo));
+                    }
+                }
+                Evento::Reabre => relogio = relogio.salto(),
+            }
+        }
+        (pacotes, (relogio.seq(), relogio.carimbo()))
+    }
+
+    /// **A sequência fixa, e o que sai dela.** Cinco minutos de conversa, com a
+    /// sequência a dois pacotes da volta.
+    #[test]
+    fn o_relogio_de_midia_numa_sequencia_fixa() {
+        let (pacotes, fim) = produzir(
+            (65_534, 14_400_000),
+            &[
+                // Um quadro calado: o carimbo anda, a sequência não.
+                Evento::Calado,
+                // O atraso da supressão: o carimbo anda mesmo assim.
+                Evento::Atrasado,
+                // O portão abre e solta os dois retidos e o de agora, cada um
+                // com o instante dele; a sequência dá a volta no meio.
+                Evento::Abre {
+                    quantos: 3,
+                    vazios: &[],
+                },
+                // Um quadro que o codificador devolveu vazio (DTX).
+                Evento::Abre {
+                    quantos: 1,
+                    vazios: &[0],
+                },
+                Evento::Mudo,
+                Evento::Abre {
+                    quantos: 1,
+                    vazios: &[],
+                },
+                // Outro aparelho: dois quadros à frente, a sequência junto.
+                Evento::Reabre,
+                // Dois soltos, o primeiro vazio.
+                Evento::Abre {
+                    quantos: 2,
+                    vazios: &[0],
+                },
+            ],
+        );
+        assert_eq!(
+            pacotes,
+            [
+                (65_535, 14_400_960),
+                (0, 14_401_920),
+                (1, 14_402_880),
+                (2, 14_405_760),
+                (5, 14_408_640),
+            ],
+            "os pacotes da sequência fixa mudaram"
+        );
+        assert_eq!(fim, (5, 14_408_640), "o relógio terminou noutro lugar");
+    }
+
+    /// **O laço usa o relógio, e não faz conta própria.** O `pipeline` anda o
+    /// relógio pelo [`RelogioDeMidia`], e nenhuma conta de sequência ou de
+    /// carimbo sobrou nele: uma conta que voltasse ao laço seria a segunda
+    /// implementação que o ADR 0057 proíbe (o navegador usa a mesma estrutura).
+    #[test]
+    fn o_laco_usa_o_relogio_e_nao_faz_conta_propria() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        for exigido in [
+            "let mut relogio = RelogioDeMidia::de(",
+            "let timestamp = relogio.quadro_passou();",
+            "let carimbo = carimbo_do_quadro(timestamp, quantos, indice);",
+            "let seq = relogio.pacote_saiu();",
+            "timestamp: carimbo,",
+        ] {
+            assert!(
+                laco.contains(exigido),
+                "o `pipeline` não tem mais `{exigido}`"
+            );
+        }
+        assert_eq!(
+            laco.matches("relogio.quadro_passou()").count(),
+            2,
+            "o relógio anda em dois lugares do laço: no atraso da supressão e a cada quadro"
+        );
+        for proibido in [
+            "seq.wrapping_add",
+            "timestamp.wrapping_add",
+            "FRAME_SAMPLES).unwrap_or",
+        ] {
+            assert!(
+                !laco.contains(proibido),
+                "o `pipeline` voltou a fazer conta de relógio: `{proibido}`"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod fontes_gravadas {
+    //! **A tabela de quem fala numa sequência fixa de chegadas, gravada antes de
+    //! sair do laço** (Tarefa 3.3 da F4, combinado com a orquestradora em
+    //! 09/10/2026).
+    //!
+    //! O `pipeline` separa o que chega por fonte: uma por SSRC, criada na
+    //! primeira chegada (se o decodificador abre), o próprio SSRC jogado fora,
+    //! e quem calou 30 s esquecido. Este teste grava o que ele faz numa
+    //! sequência fixa, com o relógio passado por argumento: sem esperar 30 s
+    //! de parede.
+    //!
+    //! **Quem produz** é [`produzir`], que repete as instruções da tabela do
+    //! laço; [`a_replica_e_o_laco_de_hoje`] confere que cada uma está no
+    //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando a
+    //! tabela sair do laço: muda só quem produz.
+
+    use super::TabelaDeFontes;
+
+    const EU: u32 = 5;
+    const ANA: u32 = 7;
+    const BIA: u32 = 9;
+    const SEM_DECODIFICADOR: u32 = 13;
+
+    /// O que acontece com a tabela.
+    enum Evento {
+        /// Um quadro de `ssrc` chegou em `ms`.
+        Chega(u32, f64),
+        /// O laço passa pela limpeza em `ms`.
+        Limpa(f64),
+    }
+
+    /// Depois de cada evento, quem está na tabela, em ordem; e, no fim, quem
+    /// foi criado, em ordem.
+    ///
+    /// A [`TabelaDeFontes`] sozinha, chamada como o `pipeline` a chama. O
+    /// decodificador de `SEM_DECODIFICADOR` não abre.
+    fn produzir(eventos: &[Evento]) -> (Vec<Vec<u32>>, Vec<u32>) {
+        let mut tabela: TabelaDeFontes<()> = TabelaDeFontes::nova(EU);
+        let mut criadas = Vec::new();
+        let mut depois = Vec::new();
+        for evento in eventos {
+            match *evento {
+                Evento::Chega(chegou, arrival_ms) => {
+                    let _ = tabela.chegou(chegou, arrival_ms, || {
+                        (chegou != SEM_DECODIFICADOR).then(|| criadas.push(chegou))
+                    });
+                }
+                Evento::Limpa(agora_ms) => tabela.esquecer_caladas(agora_ms),
+            }
+            depois.push(tabela.iter().map(|(ssrc, ())| ssrc).collect());
+        }
+        (depois, criadas)
+    }
+
+    /// **A sequência fixa de chegadas, e a tabela depois de cada uma.**
+    #[test]
+    fn a_tabela_de_quem_fala_numa_sequencia_fixa() {
+        let (depois, criadas) = produzir(&[
+            Evento::Chega(ANA, 0.0),
+            Evento::Chega(BIA, 10.0),
+            // A própria voz voltando: não é de ninguém para tocar.
+            Evento::Chega(EU, 20.0),
+            Evento::Chega(ANA, 1_000.0),
+            // A Bia calou 29 995 ms: ainda fica.
+            Evento::Limpa(30_005.0),
+            // Calou 30 010 ms: é esquecida. A Ana, que falou depois, fica.
+            Evento::Limpa(30_020.0),
+            // A Bia volta, e é criada de novo.
+            Evento::Chega(BIA, 30_030.0),
+            // Um decodificador que não abre não cria fonte nenhuma.
+            Evento::Chega(SEM_DECODIFICADOR, 30_040.0),
+            // A Ana calou 30 005 ms.
+            Evento::Limpa(31_005.0),
+        ]);
+        assert_eq!(
+            depois,
+            [
+                vec![ANA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![ANA],
+                vec![ANA, BIA],
+                vec![ANA, BIA],
+                vec![BIA],
+            ],
+            "a tabela de quem fala mudou na sequência fixa"
+        );
+        assert_eq!(criadas, [ANA, BIA, BIA], "as fontes criadas mudaram");
+    }
+
+    /// **O laço usa a tabela, e não faz conta própria.** Uma conta de quem fala
+    /// que voltasse ao `pipeline` seria a segunda implementação que o ADR 0057
+    /// proíbe (o navegador usa a mesma tabela).
+    #[test]
+    fn o_laco_usa_a_tabela_e_nao_faz_conta_propria() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        for exigido in [
+            "let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(ssrc.get());",
+            "let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {",
+            "sources.esquecer_caladas(agora_ms);",
+        ] {
+            assert!(
+                laco.contains(exigido),
+                "o `pipeline` não tem mais `{exigido}`"
+            );
+        }
+        for proibido in [
+            "header.ssrc == ssrc.get()",
+            ".position(|s| s.ssrc",
+            "sources.retain(",
+            "ultimo_ms",
+        ] {
+            assert!(
+                !laco.contains(proibido),
+                "o `pipeline` voltou a fazer conta de quem fala: `{proibido}`"
+            );
+        }
     }
 }
 

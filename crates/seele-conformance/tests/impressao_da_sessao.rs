@@ -36,6 +36,7 @@ fn conectar(alvo: String, casa: String) -> Result<Arc<Connection>, ConnectionErr
         home: casa,
         join_secret: None,
         expected_fingerprint: None,
+        codigo_esperado: None,
         bilhete: None,
         audio: false,
         capture_device: None,

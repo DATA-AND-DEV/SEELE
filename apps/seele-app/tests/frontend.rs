@@ -572,6 +572,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
 // outras frentes quando o comando nasceu. Sai quando eles passarem a
 // perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+//
+// `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
+// 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
+// commit isolado do `main.rs`, porque a F7 também mexe lá, e saiu quando a
+// gestão de MODs passou a chamá-lo com a pergunta dos dois MODs de tema.
 const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
 
 #[test]
@@ -1971,11 +1976,30 @@ fn a_volta_pela_lista_confere_pela_impressao_guardada() {
         "o `ConnectConfig` não recebe a impressão decidida: a guardada volta a \
          servir só de marca para o quarto, e a conexão entra sem conferir"
     );
+    // **A pergunta ao quarto e a conferência usam a mesma impressão.** Desde a
+    // 14b o quarto é perguntado na ponte, e as duas saem da mesma decisão,
+    // `esperada_de`: o `Quarto` é feito da impressão que ela dá, e cada
+    // candidato confere a esperada que ela dá (`build_destino`). Com impressões
+    // diferentes, o quarto apontaria para o servidor de uma chave e o TLS
+    // recusaria o de outra; e com o código valendo (o ATENDER), o quarto seria
+    // perguntado por uma impressão que ninguém confere.
+    let ffi = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/lib.rs"))
+        .unwrap_or_else(|erro| panic!("o `seele-ffi` tem de ser legível: {erro}"));
+    let sem_espacos =
+        |corpo: &str| -> String { corpo.chars().filter(|c| !c.is_whitespace()).collect() };
+    let drive = sem_espacos(&body_of(&ffi, "async fn drive("));
+    let quarto = sem_espacos(&body_of(&ffi, "fn quarto_de("));
+    let destino = sem_espacos(&body_of(&ffi, "fn build_destino("));
     assert!(
-        connect.contains("match(conferida.as_deref(),&bilhete)"),
-        "a pergunta ao quarto e a conferência usam impressões diferentes: o \
-         quarto apontaria para o servidor de uma chave e o TLS recusaria o de \
-         outra"
+        drive.contains(
+            "matchquarto_de(&config,&chave_do_aceite){Some(quarto)=>chegada.com_o_quarto(quarto),"
+        ) && quarto.contains(
+            "matchesperada_de(config){Some(seele_core::enlace::Esperada::Certificado(impressao))=>"
+        ) && quarto.contains("Quarto::novo(impressao,")
+            && destino.contains("esperada:esperada_de(config),"),
+        "a pergunta ao quarto deixou de usar a impressão que a conexão confere (a de \
+         `esperada_de`): o quarto apontaria para o servidor de uma chave e o TLS recusaria \
+         o de outra"
     );
 }
 
@@ -8144,10 +8168,13 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // The exception is held to exactly that shape below, rather than trusted.
     //
     // **And the bridge of the browser** (`ponte-web.js`, ADR 0057) answers
-    // `regras_de_previa` itself there, where no Rust is on the other side. Its
-    // copy is held to `seele_ffi::Connection::preview_rules()` by
-    // `as_constantes_da_ponte_sao_as_do_desktop` in `tests/web.rs`, so the two
-    // cannot drift: the copy this test exists to forbid is one nobody checks.
+    // `regras_de_previa` and the type a file's extension claims itself there,
+    // where no Rust is on the other side. Its copies are held to
+    // `seele_ffi::Connection::preview_rules()` and to `tipo_alegado` and
+    // `guardar_colado` in `main.rs` by `as_constantes_da_ponte_sao_as_do_desktop`
+    // and `as_regras_do_arquivo_da_ponte_sao_as_do_desktop` in `tests/web.rs`,
+    // so they cannot drift: the copy this test exists to forbid is one nobody
+    // checks.
     let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {
@@ -16986,127 +17013,86 @@ fn nenhum_script_cria_um_style_que_a_csp_desta_janela_descarta() {
     }
 }
 
+/// **O quarto é da ponte, e nada do que ele dá volta para o `connect`** (a
+/// pendência 55, tarefa 14b da F7).
+///
+/// Eram três guardas sobre o `connect` daqui, que perguntava ao quarto antes de
+/// chamar a ponte, com o prazo inteiro do quarto pago por quem estava na mesma
+/// casa: o endereço de hoje fora da lista de conhecidos, a resposta que não
+/// repete um candidato, e a escuta que só vira aviso pela regra da FFI. Desde a
+/// 14b o quarto é perguntado pela `Chegada` da FFI, junto com a corrida, e as
+/// duas regras moram no núcleo, provadas por comportamento
+/// (`o_endereco_de_hoje_que_ja_corre_nao_entra_de_novo` e
+/// `a_escuta_de_hoje_so_vira_aviso_no_ip_do_servidor_da_mesma_resposta`, em
+/// `seele_core::chegada`) e de ponta a ponta em
+/// `crates/seele-conformance/tests/ocupante_da_escuta.rs`.
+///
+/// O que só se vê aqui:
+/// - o `connect` não pergunta ao quarto, nem lê nada do que ele dá: é isso que
+///   mantém a lista de conhecidos sem o endereço de hoje e sem a escuta de quem
+///   ocupou a marca. Quem ocupasse a marca da escuta e ficasse gravado na lista
+///   receberia o `LEVE`, com o endereço de quem chega, em toda volta seguinte
+///   sem escuta fresca (o I1 da revisão final do Plano 1);
+/// - a lista grava o bilhete guardado, tomado uma vez, e a escada sem endereço
+///   do quarto;
+/// - a ponte liga o quarto à `Chegada`, com o endereço de hoje montado como os
+///   outros candidatos.
+///
+/// Os espaços saem da comparação para o guarda não depender de onde o `rustfmt`
+/// quebra a linha.
 #[test]
-fn o_endereco_que_o_quarto_deu_nao_vai_para_a_lista_de_conhecidos() {
-    // As duas colunas que o quarto alcança: a dos caminhos e a do bilhete.
-    //
-    // **Os caminhos.** O quarto põe o endereço de hoje na frente da escada, e a
-    // escada inteira ia para a lista. Com um NAT que troca de porta a cada
-    // abertura do anfitrião, a lista ganhava um endereço morto por reabertura,
-    // e todos entravam na corrida. A regra do que se grava é
-    // `seele_ffi::conhecidos::caminhos_a_guardar`, provada lá.
-    //
-    // **O bilhete.** A escuta que o quarto dá troca o aviso do bilhete desta
-    // volta, e o bilhete trocado ia para a lista. Quem ocupasse a marca da
-    // escuta (fp16 + `e`) ficava gravado, e as voltas seguintes sem escuta
-    // fresca (o anfitrião fora do ar, o ponto reiniciado, um anfitrião 0.15.0)
-    // mandavam a ele o `LEVE`, que sai antes do TLS e leva o endereço de quem
-    // chega (o I1 da revisão final do Plano 1). O que se guarda é o bilhete do
-    // link ou o da lista, tomado antes da pergunta ao quarto.
-    //
-    // O que só se vê aqui é o `connect` fazer as duas coisas, porque `connect`
-    // é um comando Tauri e não roda sem casca. Os espaços saem da comparação
-    // para o guarda não depender de onde o `rustfmt` quebra a linha.
-    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+fn o_quarto_e_da_ponte_e_nada_do_que_ele_da_volta_ao_connect() {
+    let compacto =
+        |texto: String| -> String { texto.chars().filter(|c| !c.is_whitespace()).collect() };
+    let connect = compacto(body_of(&read("src/main.rs"), "async fn connect("));
 
-    assert!(
-        connect.contains("do_quarto=fresco_do_server"),
-        "`connect` deixou de lembrar qual endereço veio do quarto, e a lista não tem mais como \
-         deixá-lo de fora"
-    );
-    assert!(
-        connect.contains(
-            "letcaminhos=seele_ffi::conhecidos::caminhos_a_guardar(&alternativos,do_quarto.as_deref());"
-        ),
-        "`connect` grava a escada crua na lista de conhecidos: o endereço que o quarto deu vai \
-         junto, e a lista ganha um endereço morto a cada reabertura do anfitrião"
-    );
-
-    let pergunta = connect.find("seele_ffi::onde_mora_hoje(");
-    assert!(
-        pergunta.is_some(),
-        "`connect` deixou de perguntar ao quarto por `seele_ffi::onde_mora_hoje`, e a ordem \
-         que este guarda confere abaixo não mede mais nada: ache a pergunta nova e acerte o guarda"
-    );
+    for nao in [
+        "onde_mora_hoje(",
+        "bilhete_desta_volta(",
+        "ja_esta_na_corrida(",
+        ".escuta()",
+    ] {
+        assert!(
+            !connect.contains(nao),
+            "o `connect` voltou a fazer `{nao}`: o quarto é perguntado na ponte, junto com a \
+             corrida, e o que ele dá não pode chegar à lista de conhecidos"
+        );
+    }
     assert_eq!(
         connect.matches("letbilhete_texto=").count(),
         1,
-        "`connect` dá valor a `bilhete_texto` mais de uma vez (ou nenhuma): um segundo `let` \
-         depois da pergunta ao quarto troca, em silêncio, o bilhete que vai para a lista pelo \
-         que o quarto montou"
+        "`connect` dá valor a `bilhete_texto` mais de uma vez (ou nenhuma): o bilhete que vai \
+         para a lista tem de ser o guardado"
     );
-    let tomado = connect.find("letbilhete_texto=bilhete.as_ref().map(ToString::to_string);");
-    assert!(
-        tomado
-            .zip(pergunta)
-            .is_some_and(|(tomado, pergunta)| tomado < pergunta),
-        "`connect` toma o bilhete que vai para a lista depois de perguntar ao quarto: a escuta \
-         que o quarto deu vai para a lista de conhecidos, e quem ocupou a marca da escuta recebe \
-         o `LEVE`, com o endereço de quem chega, em toda volta seguinte sem escuta fresca"
-    );
-    assert!(
-        connect.contains("lista.anotar_caminhos(&alvo,&caminhos,bilhete_texto.as_deref(),"),
-        "a lista de conhecidos deixou de receber `bilhete_texto`, o bilhete do link ou da lista \
-         tomado antes do quarto: o que ela grava agora pode ser o bilhete que o quarto montou"
-    );
-}
+    for agulha in [
+        "letbilhete_texto=bilhete.as_ref().map(ToString::to_string);",
+        "caminhos_a_guardar(&alternativos,None)",
+        "lista.anotar_caminhos(&alvo,&caminhos,bilhete_texto.as_deref(),",
+    ] {
+        assert!(
+            connect.contains(agulha),
+            "a lista de conhecidos deixou de gravar o que o `connect` tinha antes da corrida: \
+             falta `{agulha}`"
+        );
+    }
 
-#[test]
-fn a_resposta_do_quarto_nao_repete_um_candidato() {
-    // O quarto põe o endereço de hoje na frente da corrida, e só ficava de fora
-    // o que já estava entre os alternativos, e não o próprio alvo. Quando o
-    // quarto devolvia o endereço da entrada, o mesmo servidor recebia dois
-    // apertos de mão e dois `Hello`. A regra é `seele_ffi::ja_esta_na_corrida`,
-    // provada lá: pela chave de pino, contra o alvo e contra os alternativos. O
-    // que só se vê aqui é o `connect` usá-la, e dando-lhe o alvo. Os espaços
-    // saem da comparação para o guarda não depender de onde o `rustfmt` quebra
-    // a linha.
-    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-
-    assert!(
-        connect.contains(
-            ".filter(|texto|!seele_ffi::ja_esta_na_corrida(texto,&server,&alternativos))"
-        ),
-        "`connect` deixou de perguntar à regra da FFI se a resposta do quarto já está na \
-         corrida, ou não lhe dá o alvo: quando o quarto devolve o próprio endereço da entrada, \
-         o mesmo servidor recebe dois apertos de mão e dois `Hello`"
-    );
-}
-
-#[test]
-fn a_escuta_do_quarto_so_vira_aviso_pela_regra_da_ffi() {
-    // A escuta que o quarto dá vira o aviso do `LEVE`, que sai antes do TLS e
-    // leva o endereço de quem chega. A marca dela (fp16 + `e`) está em todo
-    // link, e um anfitrião 0.15.0 nunca a registra: qualquer um com o link a
-    // toma (o I1 da revisão final do Plano 1). A regra que só a aceita no IP do
-    // servidor da mesma resposta é `seele_ffi::bilhete_desta_volta`, provada no
-    // `seele-core` e, de ponta a ponta, em
-    // `crates/seele-conformance/tests/ocupante_da_escuta.rs`. O que só se vê
-    // aqui é o `connect` usá-la com o bilhete guardado e a resposta inteira, e
-    // não ler a escuta crua. Os espaços saem da comparação para o guarda não
-    // depender de onde o `rustfmt` quebra a linha.
-    let connect: String = body_of(&read("src/main.rs"), "async fn connect(")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
-
-    assert!(
-        connect.contains("Some(seele_ffi::bilhete_desta_volta(bilhete_guardado,&no_quarto))"),
-        "`connect` deixou de montar o bilhete desta volta pela regra da FFI, com o bilhete \
-         guardado e a resposta inteira do quarto: a escuta que quem ocupou a marca registrou de \
-         outro IP volta a receber o `LEVE`, com o endereço de quem chega"
-    );
-    assert!(
-        !connect.contains(".escuta()"),
-        "`connect` lê a escuta crua do quarto (`.escuta()`): quem ocupou a marca da escuta \
-         também aparece nela, e só `bilhete_desta_volta` sabe quando ela é do anfitrião"
-    );
+    let ffi = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/lib.rs"))
+        .unwrap_or_else(|erro| panic!("o `seele-ffi` tem de ser legível: {erro}"));
+    // O quarto é montado em `quarto_de`, e o `drive` o liga à chegada.
+    let drive = compacto(body_of(&ffi, "async fn drive("));
+    let quarto = compacto(body_of(&ffi, "fn quarto_de("));
+    for (corpo, agulha) in [
+        (&drive, "quarto_de(&config,"),
+        (&drive, ".com_o_quarto("),
+        (&quarto, "Quarto::novo("),
+        (&quarto, "candidato_do_quarto(&config_do_quarto,"),
+    ] {
+        assert!(
+            corpo.contains(agulha),
+            "a ponte deixou de ligar o quarto à chegada (falta `{agulha}`): quem volta a um \
+             servidor guardado deixa de achar o endereço de hoje"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

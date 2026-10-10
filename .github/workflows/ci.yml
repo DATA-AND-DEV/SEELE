@@ -350,6 +350,22 @@ jobs:
       - run: node apps/seele-app/bancada/camadas.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O núcleo de confiança no desktop (tarefa 9 da F3): o MUDO, o fone, o
+      # SAIR, o «no ar» e o veredito nas cores do produto, sob qualquer tema.
+      - run: node apps/seele-app/bancada/nucleo.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # O tema do servidor na casca (tarefa 17d da F3): chega pelo retrato e é
+      # aplicado antes de desenhar a sessão, e o None o tira.
+      - run: node apps/seele-app/bancada/tema-do-servidor.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+      # A escolha de quem pinta o servidor (tarefa 17f.0 da F3): com dois MODs
+      # de tema ligados, a gestão pergunta qual, marca o que pinta e avisa no
+      # SALVAR.
+      - run: node apps/seele-app/bancada/gestao-do-tema.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as

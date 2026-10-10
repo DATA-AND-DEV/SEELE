@@ -3297,6 +3297,21 @@
                 <p id="mods-gestao-erro" class="erro" role="alert" hidden></p>
 
                 <!--
+                  Quem pinta este servidor, quando dois MODs com a porta do tema
+                  estão ligados (D-api-5; tarefa 17f.0 da F3). Um tema por
+                  servidor: só um pinta, e quem hospeda escolhe qual. Escondida
+                  com um MOD de tema só, ou nenhum, que é o caso comum, e para
+                  quem não hospeda: escolher é de quem administra.
+                -->
+                <section id="mods-aparencia-do-servidor" class="server-bloco" hidden>
+                  <div class="server-bloco-topo">
+                    <h3 class="server-bloco-nome">QUEM PINTA ESTE SERVIDOR</h3>
+                  </div>
+                  <p id="mods-aparencia-nota" class="nota"></p>
+                  <ul id="lista-aparencia-do-servidor" class="server-dispositivos"></ul>
+                </section>
+
+                <!--
                   Quem apresenta o que, quando mais de um MOD pede o mesmo lugar
                   - ADR 0052, section 6 do plano da API 4.
 

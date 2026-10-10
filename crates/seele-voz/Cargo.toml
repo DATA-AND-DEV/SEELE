@@ -1,0 +1,14 @@
+[package]
+name = "seele-voz"
+description = "O caminho da voz que não toca em nada: o portão, o buffer de jitter, o mixer e o simulador de rede, para o desktop e o navegador."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Sem dependência nenhuma (a linha dele em `xtask/src/check_deps.rs`): é o que
+# deixa o navegador compilá-lo, e o `cargo xtask web` confere a cada vez.
+[dependencies]
+
+[lints]
+workspace = true

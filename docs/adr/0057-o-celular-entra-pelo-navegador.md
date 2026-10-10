@@ -775,6 +775,48 @@ dizendo o que se sabia em 07/10.
   `Atomics`, que o QuickJS do `wasm32-wasip1` não expõe e que a tabela
   declara.
 
+### O núcleo que vai para o `wasm`: a exceção em JavaScript não foi preciso
+
+O EM ABERTO de «O cliente web» («quanto do núcleo vai para `wasm` além do
+`seele-proto`») se decidiu por extração, e não pela exceção em JavaScript, que
+o ADR só aceitava com data para sair. **Uma sessão só e uma voz só**, nos dois
+alvos. Decidido pela orquestradora em 09/10, sobre estas medidas da F4:
+
+- **O estado da sessão** (`spikes/snapshot-no-wasm/`). O `Room`, a porta do
+  assento e o `SessionInfo` foram para o `crates/seele-sessao`, que depende só
+  do `seele-proto` (`4e1139fc`). O `seele-core` os reexporta, e o
+  `teto_de_video`, a única parte do `Room` que puxava o vídeo, ficou nele. Um
+  retrato de sala cheia (250 pessoas, 41 KB), montado no `wasm` e lido pelo
+  `JSON.parse`, custa 0,107 ms no Chromium 151 e 0,117 ms no Safari do
+  Simulador iOS 27; mil pessoas, 0,40 e 0,43 ms. A 30 retratos por segundo, o
+  produtor não pesa.
+- **A voz** (`spikes/voz-em-wasm/`). O portão, o buffer de jitter, o mixer e o
+  simulador de rede foram para o `crates/seele-voz`, sem dependência nenhuma
+  (`a4330b2d`), e o `seele-audio` os reexporta. Dentro de um `AudioWorklet`, um
+  quadro de 20 ms com o portão, oito buffers de jitter e o mixer de oito fontes
+  custa cerca de 9 µs, no Chromium e no Safari do Simulador. **O Chromium
+  recusa um `WebAssembly.Module` mandado à porta do worklet**, com um
+  `messageerror` que sem ouvinte é silencioso; os bytes, compilados lá dentro,
+  servem aos dois.
+- **No navegador, as chaves do hash são fixas.** O `RandomState` do
+  `wasm32-unknown-unknown` não tem de onde tirar aleatoriedade: o mesmo valor
+  dá o mesmo hash em duas instâncias do módulo e nos dois motores. Os mapas
+  por id do servidor (os seis do `Room` e os ganhos do mixer, por SSRC)
+  viraram `BTreeMap`, nos dois alvos (`f8880a80`, `1c915683`), e um guarda em
+  cada crate reprova um mapa de hash novo. No desktop o mixer não ficou mais
+  lento: 765 a 792 ns por quadro de oito fontes, contra 788 a 877 com o
+  `HashMap`.
+- O `cargo xtask web` compila os dois crates para o `wasm32-unknown-unknown` a
+  cada vez, e o `check_deps.rs` prende o `seele-sessao` ao protocolo e o
+  `seele-voz` a nada.
+
+**O que ainda falta deste item:** a projeção do retrato (os tipos de vista e
+as funções que o montam a partir do `Room`), que mora no `seele-ffi` e vai para
+o `seele-sessao` depois da sala viva da F7; e o relógio de mídia (a sequência e
+o carimbo de cada quadro), que mora dentro do laço do `voice.rs` e vai para o
+`seele-voz` se a orquestradora aprovar. O critério 2 do EM ABERTO, o teste dos
+dois produtores do retrato, sai com a projeção.
+
 ### O celular não liga pelo código na 0.16
 
 Spec-mestre da 0.16, §2 F4. A sala pessoal por código (F7) não tem entrada

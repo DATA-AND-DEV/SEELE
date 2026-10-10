@@ -294,6 +294,12 @@
   align-items: center;
   justify-content: center;
   padding: max(24px, env(safe-area-inset-top)) 16px;
+  /* **O furo do véu** (rascunho da API 6, §10; tarefa 9): a área do diálogo
+     começa depois da barra do operador, e o `clip-path` que
+     `mods-superficies.js` escreve deixa a barra fora do véu. Sem recorte, as
+     duas variáveis são zero. */
+  padding-left: calc(16px + var(--recorte-esquerda, 0px));
+  padding-bottom: calc(max(24px, env(safe-area-inset-top)) + var(--recorte-baixo, 0px));
   background: color-mix(in srgb, var(--seele-negro-absoluto) 78%, transparent);
 }
 
@@ -315,8 +321,10 @@
   /* **O host mantém as dimensões dentro da área útil.** §3 do plano: «um valor
      grande não torna o fechamento inalcançável». Um MOD pode pedir 2000 px de
      largura; ele recebe o que couber. */
-  max-width: min(var(--largura-pedida, 560px), calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  /* A área útil é a da camada, sem o recorte (`100%` da caixa de conteúdo
+     dela), e não a janela inteira. */
+  max-width: min(var(--largura-pedida, 560px), 100%);
+  max-height: 100%;
   width: 100%;
   background: var(--seele-negro-painel);
   border: 1px solid var(--seele-linha-forte);

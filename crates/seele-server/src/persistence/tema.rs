@@ -135,6 +135,35 @@ pub fn declarar(
     Ok(Declaracao::Aceita)
 }
 
+/// **A escolha de quem administra** (rascunho da API 6, §9; D-api-5; tarefa
+/// 17f.0 da F3): com dois MODs com a porta ligados, quem administra decide qual
+/// pinta o servidor. Grava o escolhido na mesma coluna de [`declarar`] — o
+/// índice parcial `um_tema_por_servidor` impede dois —, guardando o tema que
+/// cada um já tinha, e devolve o tema em vigor depois da troca: o do novo
+/// escolhido, se ele tiver um guardado, ou `None`. Quem chama manda esse valor
+/// no `TemaMudou`.
+///
+/// # Errors
+///
+/// Falha se o banco não responder.
+pub fn escolher(persistence: &Persistence, mod_id: &str) -> Result<Option<TemaDoServidor>> {
+    // Numa transação, pela razão de [`declarar`]: tirar a marca do antigo e pôr
+    // no novo são uma decisão só, e entre as duas o índice parcial recusaria.
+    let transacao = persistence.connection().unchecked_transaction()?;
+    transacao.execute(
+        "UPDATE temas_dos_mods SET escolhido = 0 WHERE escolhido = 1 AND mod_id <> ?1",
+        [mod_id],
+    )?;
+    // O tema que o novo escolhido já tinha fica: escolher não é declarar.
+    transacao.execute(
+        "INSERT INTO temas_dos_mods (mod_id, valores, escolhido) VALUES (?1, NULL, 1)
+         ON CONFLICT(mod_id) DO UPDATE SET escolhido = 1",
+        [mod_id],
+    )?;
+    transacao.commit()?;
+    em_vigor(persistence)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +283,72 @@ mod tests {
         assert_eq!(
             em_vigor(&persistence).unwrap().unwrap().mod_id,
             "outro/tema"
+        );
+    }
+
+    /// **A troca do escolhido é de quem administra** (tarefa 17f.0): escolher
+    /// o segundo MOD tira o tema do primeiro de vigor — guardado, e não
+    /// apagado —, e o servidor fica sem tema até o segundo declarar o dele;
+    /// escolher de volta o primeiro devolve o guardado. Em nenhum momento há
+    /// dois escolhidos.
+    #[test]
+    fn quem_administra_troca_o_escolhido_e_cada_tema_guardado_volta_com_o_seu_mod() {
+        let persistence = banco();
+        ligar(&persistence, "seele/estilo");
+        ligar(&persistence, "outro/tema");
+        declarar(&persistence, "seele/estilo", Some(CLARO)).expect("declarar");
+        let escolhidos = |persistence: &Persistence| -> i64 {
+            persistence
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM temas_dos_mods WHERE escolhido = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("contar")
+        };
+
+        // O segundo escolhido, sem tema guardado: o servidor fica sem tema.
+        assert_eq!(
+            escolher(&persistence, "outro/tema").expect("escolher"),
+            None
+        );
+        assert_eq!(em_vigor(&persistence).expect("ler"), None);
+        assert_eq!(
+            escolhido_ligado(&persistence).expect("ler"),
+            Some("outro/tema".to_owned())
+        );
+        assert_eq!(escolhidos(&persistence), 1, "dois escolhidos de uma vez");
+
+        // Ele declara, e pinta; o primeiro, agora, é que recebe a recusa.
+        assert_eq!(
+            declarar(&persistence, "outro/tema", Some(ESCURO)).expect("declarar"),
+            Declaracao::Aceita
+        );
+        assert_eq!(
+            declarar(&persistence, "seele/estilo", Some(CLARO)).expect("declarar"),
+            Declaracao::DeOutroMod {
+                escolhido: "outro/tema".to_owned()
+            }
+        );
+
+        // Escolher de volta o primeiro devolve o tema que ele tinha guardado.
+        let devolvido = escolher(&persistence, "seele/estilo").expect("escolher");
+        assert_eq!(
+            devolvido
+                .as_ref()
+                .map(|t| (t.mod_id.as_str(), t.valores.as_str())),
+            Some(("seele/estilo", CLARO))
+        );
+        assert_eq!(em_vigor(&persistence).expect("ler"), devolvido);
+        assert_eq!(escolhidos(&persistence), 1, "dois escolhidos de uma vez");
+
+        // E o do segundo continua guardado, para quando voltar a ser escolhido.
+        assert_eq!(
+            escolher(&persistence, "outro/tema")
+                .expect("escolher")
+                .map(|t| t.valores),
+            Some(ESCURO.to_owned())
         );
     }
 
