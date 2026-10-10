@@ -2131,6 +2131,69 @@ mod a_entrada_velha_que_chega_tarde {
         vermelhos
     }
 
+    /// **As duas conferências do `connect`, pela forma.**
+    ///
+    /// O cenário de cima prova o comportamento quando a velha termina depois de
+    /// a nova ter entrado, e a primeira conferência basta para ele. A segunda
+    /// fecha a corrida entre a primeira e a gravação do slot — a nova começando
+    /// no meio dos efeitos de entrada —, e nenhum teste daqui consegue parar o
+    /// `connect` ali. Então este guarda prende a forma, sem ler comentário:
+    ///
+    /// 1. entre o `connect_watching` voltar e o primeiro efeito de entrada há a
+    ///    conferência da geração, que larga a substituída;
+    /// 2. o slot só é gravado com o cadeado dele tomado e a geração conferida
+    ///    ali, sem espera no meio;
+    /// 3. quem não gravou é largado antes de o endereço da sessão ser escrito.
+    #[test]
+    fn o_connect_confere_a_geracao_antes_dos_efeitos_e_ao_gravar_o_slot() {
+        let fonte = super::fonte_sem_comentarios();
+        let corpo = super::corpo_de(&fonte, "async fn connect<");
+        let Some(volta) = corpo.find("let (connection, veredito) = resultado") else {
+            panic!("o `connect` não recebe mais a conexão do `connect_watching`: {corpo}");
+        };
+        let Some(primeiro_efeito) = [
+            "connection.subscribe(",
+            "vestir_as_escolhas_gravadas(",
+            "set_person_icon(",
+            "consentir_no_caminho_entre_pares(",
+        ]
+        .iter()
+        .filter_map(|efeito| corpo[volta..].find(efeito).map(|n| volta + n))
+        .min() else {
+            panic!("o `connect` não tem mais efeitos de entrada que este guarda conheça: {corpo}");
+        };
+        let antes_dos_efeitos = &corpo[volta..primeiro_efeito];
+        assert!(
+            antes_dos_efeitos.contains("if !session.geracao_vale(geracao)")
+                && antes_dos_efeitos.contains("largar_a_substituida("),
+            "o `connect` aplica os efeitos de entrada sem conferir antes se a geração dele \
+             ainda é a de pé: a tentativa que outra substituiu manda o retrato e o \
+             consentimento ao servidor que a pessoa deixou.\n{antes_dos_efeitos}"
+        );
+        let Some(gravar) = corpo.find("*slot = Some(connection)") else {
+            panic!("o `connect` não grava mais o slot: {corpo}");
+        };
+        let Some(cadeado) = corpo[..gravar].rfind("session.connection.lock()") else {
+            panic!("o `connect` grava o slot sem tomar o cadeado dele: {corpo}");
+        };
+        let ao_gravar = &corpo[cadeado..gravar];
+        assert!(
+            ao_gravar.contains("session.geracao_vale(geracao)") && !ao_gravar.contains(".await"),
+            "o `connect` grava o slot sem conferir a geração com o cadeado na mão: a tentativa \
+             que outra substituiu no meio dos efeitos de entrada grava a conexão dela por cima \
+             da nova.\n{ao_gravar}"
+        );
+        let depois = &corpo[gravar..];
+        let largada = depois.find("largar_a_substituida(");
+        let endereco = depois.find("endereco_da_sessao");
+        assert!(
+            largada.zip(endereco).is_some_and(|(largada, endereco)| largada < endereco),
+            "depois de gravar o slot, a tentativa que não gravou não é largada antes de o \
+             endereço da sessão ser escrito: o endereço, o alvo e a lista de visitados \
+             passariam a ser os dela.\n{depois}"
+        );
+    }
+
     #[test]
     fn a_entrada_que_a_janela_larga_e_solta_pela_geracao_dela() {
         let _vez = vez();
