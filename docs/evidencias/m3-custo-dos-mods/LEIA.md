@@ -201,13 +201,26 @@ cenário desta campanha é lido contra o `sem-mod` (e o `sem-mod+voz`) **desta
 mesma campanha**; a comparação com a base fica só para o custo total de subir
 de versão, e é dita como tal.
 
-**O jitter desta campanha não vale como medida** (a orquestradora, 10/10). Os
-dois leitores, `jitter_ms` e `jitter_do_registro_ms`, dão **0 exato** em todo
-cenário com voz, e a base, com o mesmo falante, dava mediana de 1 ms. A voz
-chega ao processo (uns 4,8 KB/s) e custa a mesma CPU que na base: o suspeito é
-o número, e não a voz. Está com a F4 (o `seele-voz`). Até ela achar a causa, o
-jitter sob carga sai do §12 do rascunho e do `v6.json` como «não medido nesta
-campanha», e não como zero; CPU, memória e quadros valem.
+**O falante mandava voz que a 0.16 jogava fora** (achado da F4 e medido pela
+orquestradora, 10/10). Os dois leitores do jitter, `jitter_ms` e
+`jitter_do_registro_ms`, davam **0 exato** em todo cenário com voz, e a base,
+com o mesmo falante, dava mediana de 1 ms. A causa: o `m3-falante.rs` grava no
+cabeçalho de mídia o `PROTOCOL_VERSION` (9), que era o número da voz na v0.15.1;
+desde o `f3aaf9ce`, a voz tem número próprio, o `MEDIA_HEADER_VERSION` (1), e o
+`decode` recusa outro. **Nos sete primeiros cenários com voz, quem ouve jogou
+fora todo datagrama do falante**: nada foi decodificado nem misturado, e os
++4,6 pontos de CPU eram só a captura e a supressão. A base mediu certo, porque
+lá o número era o mesmo nas duas pontas.
+
+O conserto é o item 4 do `remendar-api6.py`, e não uma troca no arquivo: o
+mesmo `m3-falante.rs` continua compilando para a base, onde a constante nova
+não existe. Conferido à mão pela orquestradora: com ele, o JITTER foi a 1 ms, e
+o do registro a 1,06–1,58 ms, como na base. Os sete cenários com voz feitos
+antes do conserto estão em `medidas/descartados/falante-com-versao-9/` (com o
+`carga-capas` interrompido), e são refeitos. **Até os refeitos saírem
+válidos, o jitter sob carga fica no §12 do rascunho e no `v6.json` como «não
+medido nesta campanha»**, e não como zero; CPU, memória e quadros dos cenários
+sem voz valem.
 
 **A árvore de acessibilidade do WebKit, na 0.16, às vezes só se monta depois da
 primeira consulta** (a orquestradora, 10/10). O `esperar` do `m3.py` repete a

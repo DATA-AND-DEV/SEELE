@@ -106,6 +106,11 @@ async fn main() -> Result<()> {
         let opus = codificador.encode(&amostras)?;
         seq = seq.wrapping_add(1);
         let cabecalho = MediaHeader {
+            // O número da voz da v0.15.1, onde ele é o do protocolo. Na 0.16 a
+            // voz tem número próprio (`MEDIA_HEADER_VERSION`, desde o
+            // `f3aaf9ce`), e a campanha da API 6 o troca na cópia
+            // (`remendar-api6.py`, item 4): com o daqui, quem ouve na 0.16
+            // jogava fora todo datagrama.
             version: seele_proto::PROTOCOL_VERSION,
             ssrc,
             seq,
