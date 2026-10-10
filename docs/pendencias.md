@@ -9464,3 +9464,31 @@ Decisão da orquestradora: na 0.16, os contadores da campainha vão ao `seele.lo
 uma linha por toque com o desfecho e uma de resumo ao fechar a sala, sem o código
 inteiro de quem ligou. Quando o COPIAR DIAGNÓSTICO existir, ele os lê de lá ou da
 contagem que os escreve. Fica fora da 0.16.
+
+## 59 · Obter um MOD para outro servidor troca a versão que o servidor hospedado exige
+
+**Aberta em 2026-10-09**, achada na revisão final da F5 da 0.16 e medida no lote X.
+**Existe na v0.15.1 publicada** (`54f542f94`) e na linha 0.15: o comando
+`instalar_mod_do_catalogo` reaplica o MOD no servidor hospedado sempre que ele já
+o exige (`if ja_exigido { aplicar_mod }`), sem saber se a chamada é a atualização
+pela gestão ou a obtenção para entrar em outro servidor.
+
+**Quando acontece:** com a hospedagem de pé e a janela na entrada, depois de a
+entrada no próprio servidor falhar, de a pessoa recusar a pergunta dos MODs dele,
+ou de o VOLTAR reconectar sem parar de hospedar e falhar. Se a janela for então a
+outro servidor que exige o mesmo MOD em outra versão, a versão exigida pelo
+servidor hospedado é trocada, e a identidade do anúncio muda junto. Na v0.15.1 é
+pior: ela grava o sim antes de obter. Medido numa árvore com a decisão da
+v0.15.1 (o banco foi de 1.0.0 a 2.0.0); não rodado no app de verdade (o catálogo
+tem endereço fixo e a hospedagem abre UPnP).
+
+**Na 0.16:** consertado no lote X da F5. O comando ganha um `uso` obrigatório
+(`"atualizar"` ou `"obter"`), e só a atualização pela gestão reaplica.
+
+**Na linha 0.15:** fica como está. A 0.15.2 sai com o que é de segurança ou de
+leitura, e este exige uma sequência rara e não expõe ninguém; se a linha ganhar
+uma 0.15.3, o conserto do X entra nela.
+
+**Vizinho, em aberto:** a atualização pela gestão, com a janela numa sessão com
+outro servidor e hospedando ao mesmo tempo, grava o sim do outro servidor com a
+identidade do servidor daqui (QA-01). A revisão do X diz se é alcançável.
