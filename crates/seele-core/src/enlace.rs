@@ -452,6 +452,14 @@ enum Comando {
         linha: ChannelId,
         limite: u16,
     },
+    /// Uma página atrás de `cursor`, e logo atrás o `Ping` com `carimbo`. Ver
+    /// [`Enlace::historico_com_cerca`].
+    HistoricoComCerca {
+        linha: ChannelId,
+        cursor: Option<MessageId>,
+        limite: u16,
+        carimbo: u64,
+    },
     Muted(bool),
     Isolamento(bool),
     CriarVoiceRoom {
@@ -2005,6 +2013,37 @@ impl Enlace {
         self.mandar(Comando::Historico { linha, limite }).await
     }
 
+    /// Pede uma página de histórico **atrás de `cursor`**, e logo atrás um
+    /// `Ping` com `carimbo`, que serve de cerca: o `Pong` dele chega depois da
+    /// página inteira (ver [`Client::send_ping_marcado`]).
+    ///
+    /// É o que deixa quem chama saber quando uma página acabou, e pedir a
+    /// seguinte. O fio só pagina para trás, e as mensagens da página chegam
+    /// como `MessageReceived`, sem marca nenhuma de começo ou fim. Lote P61: a
+    /// FFI fecha assim o buraco que a queda deixou no canal aberto.
+    ///
+    /// Não é lembrado para a volta: a página é de uma conexão, e a busca
+    /// recomeça na conexão seguinte a partir do que já chegou.
+    ///
+    /// # Errors
+    ///
+    /// Falha se a sessão já tiver acabado.
+    pub async fn historico_com_cerca(
+        &self,
+        linha: ChannelId,
+        cursor: Option<MessageId>,
+        limite: u16,
+        carimbo: u64,
+    ) -> Result<(), Fechado> {
+        self.mandar(Comando::HistoricoComCerca {
+            linha,
+            cursor,
+            limite,
+            carimbo,
+        })
+        .await
+    }
+
     /// Liga ou desliga o mudo. Restaurado depois de uma reconexão.
     ///
     /// # Errors
@@ -3501,6 +3540,15 @@ impl Motor {
             Comando::Historico { linha, limite } => {
                 cliente.fetch_history(linha, None, limite).await
             }
+            Comando::HistoricoComCerca {
+                linha,
+                cursor,
+                limite,
+                carimbo,
+            } => match cliente.fetch_history(linha, cursor, limite).await {
+                Ok(()) => cliente.send_ping_marcado(carimbo).await,
+                Err(erro) => Err(erro),
+            },
             Comando::Muted(ligado) => cliente.set_muted(ligado).await,
             Comando::Isolamento(ligado) => cliente.set_total_isolation(ligado).await,
             Comando::CriarVoiceRoom {

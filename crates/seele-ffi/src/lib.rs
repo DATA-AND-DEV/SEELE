@@ -35,6 +35,7 @@
 
 pub mod mods;
 pub mod types;
+mod volta;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -1929,13 +1930,12 @@ impl Connection {
         // **O teto é conferido aqui**, e não descoberto quando o quadro se
         // recusa a ser codificado. Ver [`Self::limite_da_mensagem`]: o caminho
         // antigo encerrava a sessão.
-        if corpo.len() > seele_core::MAX_BODY_LEN {
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "o teto é 4 KiB e cabe folgado num u32"
-            )]
-            let limite = seele_core::MAX_BODY_LEN as u32;
-            self.recusar_pendente(id, seele_core::MessageRefusal::TooLong { limit: limite });
+        //
+        // Pela mesma conferência que a repetição da volta usa
+        // (`volta::grande_demais`): uma pendente grande demais que chegasse lá
+        // derrubaria o enlace a cada volta, para sempre.
+        if let Some(recusa) = volta::grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
             return Ok(id.get().to_string());
         }
 
@@ -4560,6 +4560,12 @@ async fn drive(
     let mut sync = Signal::new();
     let mut next_tick = Instant::now() + TICK;
 
+    // **A volta do enlace** (lote P61): a busca do buraco do canal aberto, e o
+    // que ficou sem resposta saindo de novo com a mesma chave. Ver `volta`.
+    let mut buraco: Option<volta::Buraco> = None;
+    let mut carimbos_do_buraco: u64 = 1;
+    let mut repeticao = volta::Repeticao::default();
+
     while shared.running.load(Ordering::Relaxed) {
         tokio::select! {
             command = commands.recv() => {
@@ -4593,6 +4599,37 @@ async fn drive(
                         // não pode apagar o motivo da primeira.
                         for aviso in shared.drain_transfers() {
                             shared.notify(&Event::TransferChanged { transfer: aviso });
+                        }
+                        // A página do buraco que estava no ar acabou? Depois do
+                        // `fold`: a mensagem já está no `Room` quando a busca
+                        // decide. Ver `volta::Buraco`.
+                        if let Some(passo) = buraco.as_mut().and_then(|aberto| aberto.ouvir(&message)) {
+                            match passo {
+                                volta::Passo::Pedir(pagina) => {
+                                    let _ = client
+                                        .historico_com_cerca(pagina.canal, pagina.cursor, pagina.limite, pagina.carimbo)
+                                        .await;
+                                }
+                                volta::Passo::Parou(parada) => {
+                                    if let Some(fechado) = buraco.take() {
+                                        carimbos_do_buraco = fechado.sequencia();
+                                        if parada == volta::Parada::Teto {
+                                            tracing::warn!(
+                                                canal = fechado.canal().get(),
+                                                paginas = fechado.paginas(),
+                                                "o buraco da volta passou do teto de páginas; o resto fica no histórico"
+                                            );
+                                        } else {
+                                            tracing::info!(
+                                                canal = fechado.canal().get(),
+                                                paginas = fechado.paginas(),
+                                                ?parada,
+                                                "o buraco da volta fechou"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     seele_core::enlace::Aviso::Transferencia(estado) => {
@@ -4672,6 +4709,12 @@ async fn drive(
                             if mexeu {
                                 shared.messages_changed();
                             }
+                            // A busca e a repetição eram da conexão que caiu: a
+                            // próxima volta as refaz a partir do `Room`.
+                            if let Some(largado) = buraco.take() {
+                                carimbos_do_buraco = largado.sequencia();
+                            }
+                            repeticao.esquecer();
                         }
                     }
                     seele_core::enlace::Aviso::Reconectado { media, sessao, voice_room } => {
@@ -4731,6 +4774,33 @@ async fn drive(
                             },
                             |pedidos| abrir_a_voz(&shared, pedidos),
                         );
+                        // **O buraco e o que ficou sem resposta** (lote P61,
+                        // pendência 61). O núcleo só reassina o canal; o que
+                        // passou nele durante a queda, e o que esta máquina
+                        // mandava no instante, não voltavam sozinhos. A busca
+                        // pede o canal aberto de trás para a frente até a última
+                        // mensagem conhecida, e a repetição manda de novo, com a
+                        // **mesma chave**, cada pendente que ficou sem resposta,
+                        // na ordem em que foi escrita. Ver `volta`.
+                        if let Some(velho) = buraco.take() {
+                            carimbos_do_buraco = velho.sequencia();
+                        }
+                        let pagina = match shared.room.lock() {
+                            Ok(room) => {
+                                repeticao.na_volta(&room, Instant::now());
+                                volta::Buraco::abrir(&room, carimbos_do_buraco)
+                            }
+                            Err(_) => None,
+                        }
+                        .map(|(aberto, pagina)| {
+                            buraco = Some(aberto);
+                            pagina
+                        });
+                        if let Some(pagina) = pagina {
+                            let _ = client
+                                .historico_com_cerca(pagina.canal, pagina.cursor, pagina.limite, pagina.carimbo)
+                                .await;
+                        }
                         shared.notify(&Event::TelemetryChanged);
                     }
                     seele_core::enlace::Aviso::Encerrado(motivo) => {
@@ -4739,6 +4809,33 @@ async fn drive(
                         });
                         break;
                     }
+                }
+            }
+
+            // **A vez da repetição da volta** (lote P61): o que ficou sem
+            // resposta sai de novo, com a mesma chave, no compasso que o balde
+            // do servidor deixa — acima dele, o servidor descarta calado.
+            () = volta::esperar_ate(repeticao.quando()), if repeticao.quando().is_some() => {
+                let mut mexeu = false;
+                for chave in repeticao.vez(Instant::now()) {
+                    let repetir = shared
+                        .room
+                        .lock()
+                        .map(|mut room| volta::repetir(&mut room, chave, agora_em_segundos()))
+                        .unwrap_or(volta::Repetir::Nada);
+                    match repetir {
+                        volta::Repetir::Mandar { canal, corpo, chave } => {
+                            mexeu = true;
+                            if client.dizer(canal, corpo, chave).await.is_err() {
+                                break;
+                            }
+                        }
+                        volta::Repetir::Recusada => mexeu = true,
+                        volta::Repetir::Nada => {}
+                    }
+                }
+                if mexeu {
+                    shared.messages_changed();
                 }
             }
 
