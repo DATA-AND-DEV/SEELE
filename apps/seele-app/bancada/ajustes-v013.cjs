@@ -541,6 +541,9 @@ const ALVO_W = '192.0.2.17:8384';
 const OUTRO_ALVO_W = '192.0.2.18:8384';
 /** O servidor que esta janela levanta ao hospedar. */
 const AQUI_W = '127.0.0.1:8383';
+/** Um convite novo ao mesmo servidor, num link novo, que quem hospeda mandou depois. */
+const CONVITE_NOVO_W = `${CONVITE_W}-novo`;
+const LINK_NOVO_W = `seele://${ALVO_W}?token=${CONVITE_NOVO_W}`;
 const LINK_W = `seele://${ALVO_W}?token=${CONVITE_W}`;
 
 /**
@@ -593,7 +596,7 @@ async function trocarOApelido(page, novo) {
 async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const erros = []; page.on('pageerror', e => erros.push(e.message));
-  await page.addInitScript(({ table, convite, alvo, aqui, mod, snapshot }) => {
+  await page.addInitScript(({ table, convite, novo, alvo, aqui, mod, snapshot }) => {
     window.testTable = table; window.testCalls = [];
     window.testServidor = { gasto: false, tomados: ['Bia'], exigeMods: false };
     // Um `connect` lento por alvo, para as corridas: o do servidor daqui, que
@@ -612,6 +615,8 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
         if (cmd === 'escolher_apelido_local') window.testTable.apelido_local = args.apelido;
+        // O link novo: o `analisar_convite` devolve o token dele.
+        if (cmd === 'analisar_convite' && String(args?.link).includes(novo)) return { alvo, token: novo, para_entrar: null };
         if (cmd === 'connect') {
           const servidor = window.testServidor;
           const recusa = (error) => { throw { error, trail: [] }; };
@@ -622,7 +627,7 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
           // Outro servidor, também fechado, para o qual esta máquina não tem
           // convite nenhum.
           if (args.server !== alvo) recusa({ Refused: { reason: 'CredentialRejected' } });
-          if (args.joinSecret !== convite || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
+          if (![convite, novo].includes(args.joinSecret) || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
           if (servidor.tomados.includes(args.nickname)) recusa({ Refused: { reason: 'NicknameTaken' } });
           if (servidor.exigeMods) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-w' } });
           servidor.gasto = true;
@@ -647,7 +652,7 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
         porta_recusada: null, encontro_recusado: null,
       },
     }),
-    convite: CONVITE_W, alvo: ALVO_W, aqui: AQUI_W, mod: MOD_R, snapshot: retrato(),
+    convite: CONVITE_W, novo: CONVITE_NOVO_W, alvo: ALVO_W, aqui: AQUI_W, mod: MOD_R, snapshot: retrato(),
   });
   await page.goto(`http://127.0.0.1:${porta}`);
   await page.waitForTimeout(500);
@@ -678,6 +683,22 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   assert.equal(await credencialDoApelido(page), null,
     'a credencial que o apelido tomado deixou continuou guardada depois de a pessoa entrar: um convite de uso único já gasto ficou na memória da janela');
 
+  // ---- 3b. Uma tentativa ao mesmo servidor com credencial própria leva a
+  // dela, e não a guardada (rodada 1, M6).
+  //
+  // Depois da recusa, quem hospeda manda um link novo, e a pessoa o cola: o
+  // convite que vale é o do link, e não o que a recusa anterior deixou. É o
+  // `??=` de `conectar` — com `=`, a guardada passava por cima da do link.
+  await page.evaluate(() => { testServidor.gasto = false; testServidor.tomados = [testTable.apelido_local]; });
+  await tentarPeloCampo(page, LINK_W);
+  assert.equal(await credencialDoApelido(page), CONVITE_W,
+    'recusada pelo apelido, a tentativa não deixou a credencial, e este caso não mede nada');
+  const comLinkNovo = await tentarPeloCampo(page, LINK_NOVO_W);
+  assert.equal(comLinkNovo.server, ALVO_W, 'o link novo não foi ao mesmo servidor, e este caso não mede nada');
+  assert.equal(comLinkNovo.joinSecret ?? null, CONVITE_NOVO_W,
+    `uma tentativa ao mesmo servidor com um link novo levou ${JSON.stringify(comLinkNovo.joinSecret ?? null)}, e não o convite ` +
+    'do link: a credencial que a recusa anterior deixou passou por cima da que a pessoa acabou de colar');
+
   // ---- 4. Uma tentativa a outro servidor não a leva, e a esquece.
   await page.evaluate(() => { testServidor.gasto = false; testServidor.tomados = ['Bia2']; });
   await tentarPeloCampo(page, LINK_W);
@@ -693,9 +714,13 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
 
   // ---- 5. A tentativa seguinte para na pergunta dos MODs, e a pessoa desiste.
   //
-  // A credencial passa à pergunta (lote R) e morre com ela: depois de RECUSAR
-  // E VOLTAR ela não está nem na pergunta nem no lugar do apelido tomado, e a
-  // próxima tentativa vai sem ela.
+  // A credencial **muda de lugar**: a tentativa a tira do lugar do apelido
+  // tomado ao começar (parte 6 do guarda) e, parando na pergunta dos MODs, a
+  // entrega à pergunta (lote R); RECUSAR E VOLTAR a esquece de lá. Cada
+  // asserção mede o passo onde ele acontece (rodada 1, M6): a do lugar do
+  // apelido logo depois da tentativa — o RECUSAR não mexe nele, e conferi-lo
+  // depois do RECUSAR atribuía a ele o que a tentativa fez —, e a da pergunta
+  // depois do RECUSAR.
   await tentarPeloCampo(page, LINK_W);
   assert.equal(await credencialDoApelido(page), CONVITE_W,
     'recusada pelo apelido outra vez, a tentativa não deixou a credencial, e a desistência não foi medida');
@@ -707,15 +732,17 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     'a tentativa seguinte não parou na pergunta dos MODs, e a desistência não foi medida');
   assert.equal(await credencialGuardada(page), CONVITE_W,
     'a pergunta dos MODs não recebeu a credencial que a tentativa levou: aceitar voltaria sem ela');
+  assert.equal(await credencialDoApelido(page), null,
+    'a tentativa que parou na pergunta dos MODs deixou a credencial também no lugar do apelido tomado: ela passa à ' +
+    'pergunta, e não fica em dois lugares — desistir da pergunta não a esqueceria do outro');
   await page.click('#mods-recusar');
   await page.waitForFunction(() => document.getElementById('mods-aceite').hidden, null, { timeout: 3000 });
   assert.equal(await credencialGuardada(page), null, 'desistir da pergunta dos MODs deixou a credencial guardada nela');
-  assert.equal(await credencialDoApelido(page), null,
-    'desistir da pergunta dos MODs deixou guardada a credencial que o apelido tomado tinha deixado');
   await page.evaluate(() => { testServidor.exigeMods = false; });
   const depoisDeDesistir = await tentarPeloCampo(page, ALVO_W);
   assert.equal(depoisDeDesistir.joinSecret ?? null, null,
-    'depois de a pessoa desistir, a tentativa seguinte ainda levou o convite');
+    'depois de a pessoa desistir da pergunta dos MODs, a tentativa seguinte ainda levou o convite: ele voltou a um ' +
+    'dos dois lugares, que desistir devia ter deixado vazios');
 
   // ---- 5b. Uma tentativa mais velha, recusada pelo apelido depois que outra
   // entrou, não deixa a credencial (rodada 1, M1).
