@@ -718,10 +718,10 @@ linha_da_bateria() {
     fi
     case " $2 " in
         *" windows "*)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny) e no Windows (testes)."
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca) e no Windows (testes)."
             ;;
         *)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny)."
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)."
             ;;
     esac
 }
@@ -1067,7 +1067,18 @@ conferir_ferramentas() {
 # se pode fazer alguma coisa.
 PRAZO_DA_ETAPA_S="${SEELE_PRAZO_DA_ETAPA_S:-2400}"
 
+#   etapa_da_bateria [--prazo <função>] <queixa> <conserto> <comando…>
+#
+# A frase de quando o prazo vence fala do `seele-video`, que é o caso conhecido
+# da etapa dos testes. Uma etapa que trava por outro motivo diz o seu com
+# `--prazo`: a função é chamada depois de o comando ser interrompido, com o
+# registro dele em `$TEMPORARIO/bateria.log`, e morre dizendo o que travou.
 etapa_da_bateria() {
+    eb_prazo=""
+    if [ "${1:-}" = "--prazo" ]; then
+        eb_prazo="$2"
+        shift 2
+    fi
     eb_queixa="$1"
     eb_conserto="$2"
     shift 2
@@ -1082,6 +1093,7 @@ etapa_da_bateria() {
         if [ "$eb_gasto" -ge "$PRAZO_DA_ETAPA_S" ]; then
             kill -9 "$eb_filho" 2>/dev/null || true
             wait "$eb_filho" 2>/dev/null || true
+            [ -z "$eb_prazo" ] || "$eb_prazo"
             morrer "a bateria passou de $PRAZO_DA_ETAPA_S segundos e foi interrompida." \
                 "Isto não é lentidão: com tudo compilado ela leva uns cinco minutos." \
                 "" \
@@ -1107,6 +1119,88 @@ etapa_da_bateria() {
             "queixa acima, que é um palpite:" \
             "$(tail -n 20 "$TEMPORARIO/bateria.log")"
     fi
+}
+
+# Os roteiros da casca, uma etapa da bateria (lote RT da F5).
+#
+# Cada `tools/roteiros/*.js` pela `tools/carga-da-casca.py`, que carrega a
+# casca de verdade num `chrome-headless-shell` com um duble do Tauri, e reprova
+# num erro de JS que ninguém pegou, num `exigir` do roteiro ou num roteiro que
+# não chega ao fim. Até aqui eles só rodavam na bateria da orquestradora, e
+# apodreciam calados: o `aceite-de-mods.js` ficou três semanas sem provar nada.
+#
+# Numa função à parte para poder ser chamada sozinha, sem o resto do script:
+# com `RAIZ` e `TEMPORARIO` postos e `morrer` e `etapa_da_bateria` definidas,
+# ela roda a etapa e mais nada. Precisa do Python, que este script já exige, e
+# do navegador que o Playwright instala: a carga o procura no cache dele, e sem
+# ele sai dizendo que não achou e como instalar.
+#
+# Todos numa chamada, e por nome: a carga roda todos mesmo depois de um
+# vermelho, e o fim da saída diz qual roteiro reprovou e com que frase — e é o
+# fim que `etapa_da_bateria` mostra. A lista é a mesma do job `bancadas` do
+# `ci.yml`, e o teste `todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`
+# (`xtask/src/check_runtime.rs`) exige cada arquivo da pasta nas duas.
+#
+# **Com o prazo dela.** A frase de sempre do prazo vencido fala do
+# `seele-video`, que é o caso da etapa dos testes; a desta diz o roteiro que
+# travou (`prazo_dos_roteiros`, logo abaixo).
+roteiros_da_casca() {
+    etapa_da_bateria --prazo prazo_dos_roteiros \
+        "um roteiro da casca reprovou, ou falta nesta máquina o navegador que a carga usa." \
+        "Leia o fim da saída: ele diz qual roteiro reprovou e com que frase. Sem o navegador, «npx playwright install chromium» o instala." \
+        python3 tools/carga-da-casca.py \
+        --roteiro tools/roteiros/aceite-de-mods-em-corrida.js \
+        --roteiro tools/roteiros/aceite-de-mods-que-falha.js \
+        --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js \
+        --roteiro tools/roteiros/aceite-de-mods.js \
+        --roteiro tools/roteiros/apelido-recusado.js \
+        --roteiro tools/roteiros/apps-mais-novos.js \
+        --roteiro tools/roteiros/atualizacao.js \
+        --roteiro tools/roteiros/avatar-na-chamada.js \
+        --roteiro tools/roteiros/barra-mac.js \
+        --roteiro tools/roteiros/botoes-da-entrada.js \
+        --roteiro tools/roteiros/catalogo-de-mods.js \
+        --roteiro tools/roteiros/clique-nos-glifos.js \
+        --roteiro tools/roteiros/compartilhar.js \
+        --roteiro tools/roteiros/dispositivos.js \
+        --roteiro tools/roteiros/escolher-transmissao.js \
+        --roteiro tools/roteiros/hospedar.js \
+        --roteiro tools/roteiros/icone-do-server.js \
+        --roteiro tools/roteiros/icone-na-trilha.js \
+        --roteiro tools/roteiros/medidas.js \
+        --roteiro tools/roteiros/nome-ao-hospedar.js \
+        --roteiro tools/roteiros/palco.js \
+        --roteiro tools/roteiros/perfil-entrada.js \
+        --roteiro tools/roteiros/perfil-salva-sessao.js \
+        --roteiro tools/roteiros/perfil-salva.js \
+        --roteiro tools/roteiros/perfil-sessao.js \
+        --roteiro tools/roteiros/renomear-canal.js \
+        --roteiro tools/roteiros/rodape-do-operador.js \
+        --roteiro tools/roteiros/sair-da-sala.js \
+        --roteiro tools/roteiros/sala.js \
+        --roteiro tools/roteiros/sessao.js \
+        --roteiro tools/roteiros/tela-de-outra-versao.js \
+        --roteiro tools/roteiros/toque.js \
+        --roteiro tools/roteiros/trocar-de-janela.js \
+        --roteiro tools/roteiros/versao-do-servidor.js
+}
+
+# O prazo vencido da etapa dos roteiros: diz qual roteiro travou.
+#
+# A carga diz cada roteiro **antes** de rodá-lo (`roteiro: rodando <caminho>`)
+# e escreve linha a linha, então o último dito no registro é o que rodava
+# quando o prazo venceu. Juntos, os roteiros levam segundos: um que trava é um
+# navegador que não terminou, e não lentidão.
+prazo_dos_roteiros() {
+    pr_travado=$(LC_ALL=C sed -n 's/^roteiro: rodando //p' "$TEMPORARIO/bateria.log" | tail -n 1)
+    morrer "os roteiros da casca passaram de $PRAZO_DA_ETAPA_S segundos e foram interrompidos." \
+        "O roteiro que travou: ${pr_travado:-nenhum; a carga travou antes de dizer o primeiro}." \
+        "Juntos, eles levam segundos: isto é um navegador que não terminou, e não lentidão." \
+        "Rode-o sozinho, com tudo o que a página disse:" \
+        "  python3 tools/carga-da-casca.py --tudo --roteiro ${pr_travado:-<roteiro>}" \
+        "" \
+        "As últimas linhas antes de ela parar:" \
+        "$(tail -n 20 "$TEMPORARIO/bateria.log")"
 }
 
 bateria() {
@@ -1177,6 +1271,10 @@ bateria() {
     etapa_da_bateria "uma bancada de MOD reprovou, ou não há Node nesta máquina." \
         "Rode «cargo xtask check-runtime» e leia: ele diz qual bancada caiu." \
         cargo xtask check-runtime
+    # **Os roteiros da casca, que esta bateria não rodava** (lote RT da F5).
+    # Logo depois das bancadas de MOD, pela mesma razão: não compilam nada, e
+    # os de hoje levaram 9 s neste Mac (10/10/2026).
+    roteiros_da_casca
     # **Os crates do celular dentro do `.wasm`** (ADR 0057, emenda de
     # 08/10/2026), que esta bateria não rodava. O `cargo test` prova o núcleo no
     # nativo, e não o que só existe no `wasm`: os bytes-ouro da linha 1 pela

@@ -372,6 +372,64 @@ jobs:
       - run: node apps/seele-app/bancada/palco-da-chamada.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # **Os roteiros da casca** (lote RT da F5), que até 10/10/2026 só rodavam
+      # na bateria da orquestradora. Nem este workflow nem a bateria do
+      # `empacotar/publicar.sh` os rodavam, e assim eles apodreciam calados: o
+      # `aceite-de-mods.js` ficou três semanas sem provar nada (lote W3).
+      #
+      # Cada um pela `tools/carga-da-casca.py`, que carrega a casca de verdade
+      # num `chrome-headless-shell`, com um duble do Tauri, e reprova num erro de
+      # JS que ninguém pegou, num `exigir` do roteiro ou num roteiro que não
+      # chega ao fim. A carga **não usa o Playwright**: ela procura o navegador
+      # no cache dele, que é o que o `npx playwright install --with-deps
+      # chromium` de cima enche, e o Python é o do runner.
+      #
+      # Todos numa chamada, e por nome: a carga roda todos mesmo depois de um
+      # vermelho, e o fim diz qual roteiro reprovou e com que frase. Por nome, e
+      # não um laço sobre a pasta, pela razão das bancadas acima; e esquecer um
+      # é vermelho: o teste `todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`, em
+      # `xtask/src/check_runtime.rs`, exige cada arquivo da pasta nesta chamada
+      # e na da bateria do `publicar.sh`. Juntos, levaram 9 s no macOS
+      # (10/10/2026).
+      - name: os roteiros da casca
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: >-
+          python3 tools/carga-da-casca.py
+          --roteiro tools/roteiros/aceite-de-mods-em-corrida.js
+          --roteiro tools/roteiros/aceite-de-mods-que-falha.js
+          --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js
+          --roteiro tools/roteiros/aceite-de-mods.js
+          --roteiro tools/roteiros/apelido-recusado.js
+          --roteiro tools/roteiros/apps-mais-novos.js
+          --roteiro tools/roteiros/atualizacao.js
+          --roteiro tools/roteiros/avatar-na-chamada.js
+          --roteiro tools/roteiros/barra-mac.js
+          --roteiro tools/roteiros/botoes-da-entrada.js
+          --roteiro tools/roteiros/catalogo-de-mods.js
+          --roteiro tools/roteiros/clique-nos-glifos.js
+          --roteiro tools/roteiros/compartilhar.js
+          --roteiro tools/roteiros/dispositivos.js
+          --roteiro tools/roteiros/escolher-transmissao.js
+          --roteiro tools/roteiros/hospedar.js
+          --roteiro tools/roteiros/icone-do-server.js
+          --roteiro tools/roteiros/icone-na-trilha.js
+          --roteiro tools/roteiros/medidas.js
+          --roteiro tools/roteiros/nome-ao-hospedar.js
+          --roteiro tools/roteiros/palco.js
+          --roteiro tools/roteiros/perfil-entrada.js
+          --roteiro tools/roteiros/perfil-salva-sessao.js
+          --roteiro tools/roteiros/perfil-salva.js
+          --roteiro tools/roteiros/perfil-sessao.js
+          --roteiro tools/roteiros/renomear-canal.js
+          --roteiro tools/roteiros/rodape-do-operador.js
+          --roteiro tools/roteiros/sair-da-sala.js
+          --roteiro tools/roteiros/sala.js
+          --roteiro tools/roteiros/sessao.js
+          --roteiro tools/roteiros/tela-de-outra-versao.js
+          --roteiro tools/roteiros/toque.js
+          --roteiro tools/roteiros/trocar-de-janela.js
+          --roteiro tools/roteiros/versao-do-servidor.js
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as
