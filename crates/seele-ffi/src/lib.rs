@@ -4484,11 +4484,16 @@ async fn drive(
     // Dropping the voice stops the audio thread with the session. A abertura
     // em curso vai junto, e a voz que ela trouxer cai na thread que a abria.
     //
-    // **A voz viva cai antes da despedida, e sem esperar por ela** (M-4 do lote
-    // V). Este comentário dizia que nada segurava a despedida abaixo, e o
-    // cadeado da voz segurava: uma troca de aparelho presa no driver o prende,
-    // e o fim da sessão esperava junto até o teto da casca. Ver
-    // `largar_sem_segurar`.
+    // **A despedida não espera a voz** (M-4 do lote V). Este comentário dizia
+    // que nada segurava a despedida abaixo, e o cadeado da voz segurava: uma
+    // troca de aparelho presa no driver o prende, e o fim da sessão esperava
+    // junto até o teto da casca. Agora são duas situações, e
+    // `largar_sem_segurar` diz quais:
+    //
+    // - com o cadeado livre, que é o caso comum, a voz cai **antes** da
+    //   despedida, e o microfone fecha antes de o servidor saber da saída;
+    // - com o cadeado ocupado, a despedida sai primeiro, e a voz cai numa
+    //   thread à parte quando ele soltar — até lá, o microfone segue aberto.
     drop(porta);
     shared.voice.marcar(AberturaDoAudio::ForaDeSala);
     largar_sem_segurar(&shared, |shared| &shared.voice);
@@ -4511,17 +4516,23 @@ async fn drive(
 
 /// Larga a voz da sessão sem segurar quem chama. M-4 do lote V.
 ///
-/// O fim de [`drive`] larga a voz antes da despedida, para o microfone fechar
-/// antes de o servidor saber da saída. O `drop` da [`Voice`] não espera nada —
-/// só marca o `stop` da thread de áudio —, mas o **cadeado** dela pode estar
-/// preso: [`Connection::switch_device`] o segura enquanto o driver abre o
-/// aparelho novo. Preso ali, ele segurava a despedida até o teto da casca, que
-/// dizia «a despedida não terminou» sem dizer por quê.
+/// O fim de [`drive`] chama isto antes da despedida. O `drop` da [`Voice`] não
+/// espera nada — só marca o `stop` da thread de áudio —, mas o **cadeado** dela
+/// pode estar ocupado: [`Connection::switch_device`] o segura enquanto o driver
+/// abre o aparelho novo, por segundos se o driver prender, e quem só lê a voz
+/// o segura por um instante. Esperado ali, ele segurava a despedida até o teto
+/// da casca, que dizia «a despedida não terminou» sem dizer por quê.
 ///
-/// Com o cadeado livre, larga na hora. Preso, larga numa thread própria, que
-/// espera a vez e larga a voz que estiver lá — a que a troca acabou de pôr,
-/// inclusive —, e o log diz por quê. Uma thread que não sobe larga aqui, como
-/// era: a despedida atrasada é melhor que um microfone aberto sem sessão.
+/// São duas situações:
+/// - **com o cadeado livre**, larga na hora, e a voz cai antes da despedida:
+///   o microfone fecha antes de o servidor saber da saída;
+/// - **com o cadeado ocupado**, larga numa thread própria, que espera a vez e
+///   larga a voz que estiver lá — a que uma troca acabou de pôr, inclusive. A
+///   despedida sai primeiro, o microfone segue aberto até o cadeado soltar, e o
+///   log diz isso.
+///
+/// Uma thread que não sobe larga aqui, como era: a despedida atrasada é melhor
+/// que um microfone aberto sem sessão.
 fn largar_sem_segurar<D, V>(dona: &Arc<D>, voz: fn(&D) -> &VozDaSala<V>)
 where
     D: Send + Sync + 'static,
@@ -5108,14 +5119,20 @@ impl<V: VozViva> VozDaSala<V> {
     ///
     /// `drive` chama isto no fim de cada volta do laço, e é o que cobre os dois
     /// momentos em que o ganho tem de ser refeito: **a voz que acabou de abrir**
-    /// ([`Self::instalar`] zera os aplicados, e a voz nova os recebe todos) e
-    /// **o número que mudou** (uma mensagem dobrada no `Room` muda a resposta de
-    /// [`ganhos_a_aplicar`]). É a mesma forma do gatilho da pendência 52: o
-    /// antes contra o agora, e não a lista das mensagens que mudam um `ssrc`,
-    /// que seria mais um lugar para esquecer uma. Sem mudança, não toca na voz.
+    /// e **o número que mudou** (uma mensagem dobrada no `Room` muda a resposta
+    /// de [`ganhos_a_aplicar`]). Na voz aberta do zero, [`Self::instalar`] zera
+    /// os aplicados, e ela recebe todos; na reaberta da volta, que traz os
+    /// ganhos da velha, os aplicados ficam, e ela recebe só o que mudou (item 2
+    /// do lote V). É a mesma forma do gatilho da pendência 52: o antes contra o
+    /// agora, e não a lista das mensagens que mudam um `ssrc`, que seria mais
+    /// um lugar para esquecer uma. Sem mudança, não toca na voz.
     ///
     /// O número que deixou de ser de alguém com volume volta a 1.0: o volume é
-    /// da pessoa, e um servidor que reinicia recomeça a contar os números.
+    /// da pessoa, e o número pode passar a outra. O `seele-server` de hoje só
+    /// conta os números para a frente num mesmo processo, e depois de um
+    /// reinício não há resgate de assento, e a voz abre do zero. Mas o fio não
+    /// promete que um número não volte, e uma volta com resgate em que o número
+    /// de alguém muda de dono é o caso que a reaberta guarda.
     ///
     /// # A ordem dos cadeados
     ///
