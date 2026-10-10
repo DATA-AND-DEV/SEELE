@@ -1,5 +1,6 @@
 //! O caminho da voz que não toca em nada: o portão, o buffer de jitter, o
-//! mixer e o simulador de rede dos testes, com as três constantes do quadro.
+//! mixer, o relógio de mídia e o simulador de rede dos testes, com as três
+//! constantes do quadro.
 //!
 //! # Por que um crate à parte
 //!
@@ -19,6 +20,7 @@ pub mod gate;
 pub mod jitter;
 pub mod mixer;
 pub mod netsim;
+pub mod relogio;
 
 /// Sample rate used everywhere inside the pipeline, in hertz.
 ///

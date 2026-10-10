@@ -32,6 +32,7 @@ use seele_audio::jitter::{Decision, JitterBuffer, JitterConfig};
 use seele_audio::mixer::Mixer;
 use seele_audio::pacing::RingPacer;
 use seele_audio::playout::PlayoutClock;
+use seele_audio::relogio::{carimbo_do_quadro, RelogioDeMidia};
 use seele_audio::resample::RateConverter;
 use seele_audio::supervisor::{AvisoDeAparelho, CicloDoAparelho, DeviceState, Reabertura};
 use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
@@ -725,33 +726,6 @@ fn configuracao_do_portao(controls: &Controls) -> GateConfig {
     GateConfig::automatico(dbfs)
 }
 
-/// O carimbo de tempo de um quadro numa entrega de vários. F01.
-///
-/// `carimbo` é o do quadro de **agora**, `quantos` é o tamanho da entrega e
-/// `indice` a posição dentro dela. O último quadro fica com `carimbo`; cada um
-/// antes dele recua um quadro de amostras.
-///
-/// # Por que não bastava carimbar todos igual
-///
-/// Porque um carimbo é *quando aquele áudio aconteceu*, e os quadros retidos da
-/// primeira sílaba aconteceram **antes**. Carimbados todos com o mesmo instante,
-/// quem recebe vê três quadros no mesmo tempo: o `playout` trata carimbo repetido
-/// como um salto do relógio e ressincroniza, e uma ressincronização no primeiro
-/// quadro de cada fala é exatamente onde ela mais se ouve — é o começo da palavra
-/// que F01 foi recuperar.
-///
-/// Auditoria de 22/09/2026, A05. Recuar é a conta certa e não uma aproximação: o
-/// quadro retido *é* de 20 ms antes.
-///
-/// `wrapping_sub` porque o carimbo é um contador de 32 bits que dá a volta, e uma
-/// volta no meio de uma abertura não é um erro — é a mesma aritmética que o resto
-/// deste laço usa para andar para a frente.
-fn carimbo_do_quadro(carimbo: u32, quantos: usize, indice: usize) -> u32 {
-    let atras = quantos.saturating_sub(indice + 1);
-    let amostras = u32::try_from(atras.saturating_mul(FRAME_SAMPLES)).unwrap_or(0);
-    carimbo.wrapping_sub(amostras)
-}
-
 /// Põe um pacote de som de tela na fila, trocando de tela se for outra. R17.
 ///
 /// **Função livre sobre os controles**, e não um corpo de método, para ser
@@ -1283,32 +1257,12 @@ impl Voice {
         carregar_controles(&self.controls, &fresh.controls);
     }
 
-    /// Onde o relógio de mídia recomeça depois de trocar de dispositivo.
-    ///
-    /// # Dois quadros, e a sequência junto
-    ///
-    /// Os dois caminhos existem ao mesmo tempo por um instante: o novo nasce
-    /// **antes** de o velho ser largado, de propósito — um microfone que sumiu
-    /// deixa a pessoa falando pelo antigo em vez de muda. Depois de o relógio ser
-    /// lido, o velho ainda pode mandar um quadro antes de parar. Começar dois
-    /// quadros à frente passa por cima dele sem repetir número.
-    ///
-    /// **Até a 0.15.0 o pulo era de um segundo, e foi o defeito.** A ideia era
-    /// que abrir um aparelho leva esse tempo e o buffer de jitter de quem ouve
-    /// leria o pulo como pausa e reacertaria. Não reacertava: com a sequência
-    /// andando um e o carimbo cinquenta quadros, quem ouve agendava ~900 ms de
-    /// silêncio enquanto a voz nova já chegava, e o atraso ficava — cada troca
-    /// de microfone somava outro (relato de 05/10/2026, medido 50 → 950 → 1850
-    /// ms). O relógio agora é lido **depois** de o aparelho novo abrir, então o
-    /// tempo de abrir já está nele, e o pulo só cobre o quadro em voo.
-    ///
-    /// A sequência anda o mesmo que o carimbo, em quadros: quem recebe usa a
-    /// diferença entre os dois para separar silêncio de perda (M1.9), e o vão
-    /// de dois quadros chega como um quadro perdido — que o Opus esconde — e
-    /// não como pausa de quem fala.
+    /// Onde o relógio de mídia recomeça depois de trocar de dispositivo: dois
+    /// quadros à frente, a sequência junto. Ver
+    /// [`seele_audio::relogio::RelogioDeMidia::salto`], que é onde a conta mora.
     fn salto_do_relogio(seq: u16, carimbo: u32) -> (u16, u32) {
-        let quadro = u32::try_from(FRAME_SAMPLES).unwrap_or(960);
-        (seq.wrapping_add(2), carimbo.wrapping_add(2 * quadro))
+        let salto = RelogioDeMidia::de(seq, carimbo).salto();
+        (salto.seq(), salto.carimbo())
     }
 
     /// Mutes the microphone — mudo.
@@ -1956,7 +1910,7 @@ async fn pipeline(
     let mut for_device = Vec::new();
 
     // De onde o caminho anterior parou, e não de zero. Ver `Controls::relogio_seq`.
-    let (mut seq, mut timestamp) = (
+    let mut relogio = RelogioDeMidia::de(
         controls.relogio_seq.load(Ordering::Relaxed) as u16,
         controls.relogio_carimbo.load(Ordering::Relaxed),
     );
@@ -2099,8 +2053,7 @@ async fn pipeline(
             if limpo.is_empty() {
                 // Ainda dentro do atraso de um salto. O relógio anda mesmo assim:
                 // ele conta amostras que passaram, e elas passaram.
-                timestamp =
-                    timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                let timestamp = relogio.quadro_passou();
                 controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
                 continue;
             }
@@ -2130,7 +2083,7 @@ async fn pipeline(
             // The timestamp counts elapsed samples whether or not anything goes
             // out; the sequence counts only what does. That difference is what
             // lets the receiver tell DTX silence from real loss — M1.9.
-            timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+            let timestamp = relogio.quadro_passou();
             controls.relogio_carimbo.store(timestamp, Ordering::Relaxed);
             if !speaking {
                 continue;
@@ -2177,7 +2130,7 @@ async fn pipeline(
                 if payload.is_empty() {
                     continue;
                 }
-                seq = seq.wrapping_add(1);
+                let seq = relogio.pacote_saiu();
                 controls
                     .relogio_seq
                     .store(u32::from(seq), Ordering::Relaxed);
@@ -2492,7 +2445,7 @@ mod relogio_gravado {
     //! `pipeline`, com o mesmo texto. O teste da sequência não muda quando o
     //! relógio sair do laço: muda só quem produz.
 
-    use super::{carimbo_do_quadro, Voice, FRAME_MS, FRAME_SAMPLES};
+    use super::{carimbo_do_quadro, RelogioDeMidia};
 
     /// Um quadro de 20 ms do laço, pelo que ele faz com o relógio.
     enum Evento {
@@ -2514,33 +2467,30 @@ mod relogio_gravado {
 
     /// Os pacotes que saem, `(sequência, carimbo)`, e o relógio no fim.
     ///
-    /// As instruções do relógio do `pipeline`, na ordem dele.
+    /// O [`RelogioDeMidia`] sozinho, chamado como o `pipeline` o chama.
     fn produzir(inicio: (u16, u32), eventos: &[Evento]) -> (Vec<(u16, u32)>, (u16, u32)) {
-        let (mut seq, mut timestamp) = inicio;
+        let mut relogio = RelogioDeMidia::de(inicio.0, inicio.1);
         let mut pacotes = Vec::new();
         for evento in eventos {
             match evento {
                 Evento::Atrasado | Evento::Calado | Evento::Mudo => {
-                    timestamp =
-                        timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                    relogio.quadro_passou();
                 }
                 Evento::Abre { quantos, vazios } => {
-                    timestamp =
-                        timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));
+                    let timestamp = relogio.quadro_passou();
                     let quantos = *quantos;
                     for indice in 0..quantos {
                         let carimbo = carimbo_do_quadro(timestamp, quantos, indice);
                         if vazios.contains(&indice) {
                             continue;
                         }
-                        seq = seq.wrapping_add(1);
-                        pacotes.push((seq, carimbo));
+                        pacotes.push((relogio.pacote_saiu(), carimbo));
                     }
                 }
-                Evento::Reabre => (seq, timestamp) = Voice::salto_do_relogio(seq, timestamp),
+                Evento::Reabre => relogio = relogio.salto(),
             }
         }
-        (pacotes, (seq, timestamp))
+        (pacotes, (relogio.seq(), relogio.carimbo()))
     }
 
     /// **A sequência fixa, e o que sai dela.** Cinco minutos de conversa, com a
@@ -2593,10 +2543,12 @@ mod relogio_gravado {
         assert_eq!(fim, (5, 14_408_640), "o relógio terminou noutro lugar");
     }
 
-    /// **A réplica é o laço de hoje.** Cada instrução do relógio que
-    /// [`produzir`] repete está no `pipeline`, com o mesmo texto.
+    /// **O laço usa o relógio, e não faz conta própria.** O `pipeline` anda o
+    /// relógio pelo [`RelogioDeMidia`], e nenhuma conta de sequência ou de
+    /// carimbo sobrou nele: uma conta que voltasse ao laço seria a segunda
+    /// implementação que o ADR 0057 proíbe (o navegador usa a mesma estrutura).
     #[test]
-    fn a_replica_e_o_laco_de_hoje() {
+    fn o_laco_usa_o_relogio_e_nao_faz_conta_propria() {
         let fonte = include_str!("voice.rs");
         let laco = fonte
             .split_once("\nasync fn pipeline(")
@@ -2605,16 +2557,32 @@ mod relogio_gravado {
             .split_once("\n}\n")
             .expect("o fim do `pipeline`")
             .0;
-        for instrucao in [
-            "controls.relogio_seq.load(Ordering::Relaxed) as u16,",
-            "controls.relogio_carimbo.load(Ordering::Relaxed),",
-            "timestamp =\n                    timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));",
-            "timestamp = timestamp.wrapping_add(u32::try_from(FRAME_SAMPLES).unwrap_or(FRAME_MS));",
+        for exigido in [
+            "let mut relogio = RelogioDeMidia::de(",
+            "let timestamp = relogio.quadro_passou();",
             "let carimbo = carimbo_do_quadro(timestamp, quantos, indice);",
-            "seq = seq.wrapping_add(1);",
+            "let seq = relogio.pacote_saiu();",
             "timestamp: carimbo,",
         ] {
-            assert!(laco.contains(instrucao), "o `pipeline` não tem mais `{instrucao}`");
+            assert!(
+                laco.contains(exigido),
+                "o `pipeline` não tem mais `{exigido}`"
+            );
+        }
+        assert_eq!(
+            laco.matches("relogio.quadro_passou()").count(),
+            2,
+            "o relógio anda em dois lugares do laço: no atraso da supressão e a cada quadro"
+        );
+        for proibido in [
+            "seq.wrapping_add",
+            "timestamp.wrapping_add",
+            "FRAME_SAMPLES).unwrap_or",
+        ] {
+            assert!(
+                !laco.contains(proibido),
+                "o `pipeline` voltou a fazer conta de relógio: `{proibido}`"
+            );
         }
     }
 }

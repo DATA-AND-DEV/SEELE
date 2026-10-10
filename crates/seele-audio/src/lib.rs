@@ -45,4 +45,6 @@ pub mod toque;
 /// constantes do quadro, moram no `seele-voz` (Tarefa 3.3 da F4): são puros, e
 /// lá o navegador os compila. Reexportados aqui, quem os chamava pelo
 /// `seele_audio` não mudou.
-pub use seele_voz::{gate, jitter, mixer, netsim, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
+pub use seele_voz::{
+    gate, jitter, mixer, netsim, relogio, FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ,
+};
