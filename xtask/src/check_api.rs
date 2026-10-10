@@ -33,6 +33,8 @@ use std::collections::BTreeSet;
 use std::io::Write;
 use std::process::ExitCode;
 
+mod definicoes;
+
 /// One MOD-facing name that no longer resolves.
 type Violation = String;
 
@@ -326,6 +328,9 @@ struct Casca {
     /// (`crates/seele-server/src/mods/mod.rs`), como o MOD o escreve:
     /// `arquivos.ler`, `mundo.buscar`, `dados`.
     expostos: BTreeSet<String>,
+    /// Onde cada símbolo das fontes está definido, para resolver os apontadores
+    /// da 6 pela definição ([`apontadores_resolvem`]).
+    definicoes: definicoes::Definicoes,
 }
 
 /// O corpo de uma tabela `const NOME = Object.freeze({ … });` da casca, ou
@@ -726,21 +731,78 @@ fn apontadores_sao_simbolos(versao: u64, descritor: &serde_json::Value) -> Vec<V
     if versao < PRIMEIRA_API_COBRADA {
         return Vec::new();
     }
-    let mut violacoes = Vec::new();
-    for bloco in ["reads", "actions", "own", "world"] {
-        let Some(obj) = descritor.get(bloco).and_then(serde_json::Value::as_object) else {
-            continue;
-        };
-        for (nome, interior) in obj {
-            if !interior.as_str().is_some_and(e_simbolo) {
-                violacoes.push(format!(
-                    "a API {versao} aponta `{bloco}.{nome}` para `{interior}`, que não é um símbolo \
-                     do código (`nome` ou `Tipo::membro`): a prosa vai para o bloco `sentido`"
-                ));
+    apontadores(descritor)
+        .into_iter()
+        .filter(|(_, _, interior)| !interior.as_str().is_some_and(e_simbolo))
+        .map(|(bloco, nome, interior)| {
+            format!(
+                "a API {versao} aponta `{bloco}.{nome}` para `{interior}`, que não é um símbolo \
+                 do código (`nome` ou `Tipo::membro`): a prosa vai para o bloco `sentido`"
+            )
+        })
+        .collect()
+}
+
+/// **Todo apontador de `reads`, `actions`, `own` e `world`, inclusive os
+/// aninhados**, com o nome de pontos (`servidor.dados.uso`). Antes, só o
+/// primeiro nível era conferido, e um objeto aninhado passava sem ninguém
+/// olhar (a orquestradora, 10/10).
+fn apontadores(descritor: &serde_json::Value) -> Vec<(&'static str, String, &serde_json::Value)> {
+    fn achatar<'a>(
+        bloco: &'static str,
+        prefixo: &str,
+        valor: &'a serde_json::Value,
+        saida: &mut Vec<(&'static str, String, &'a serde_json::Value)>,
+    ) {
+        match valor.as_object() {
+            Some(obj) => {
+                for (nome, interior) in obj {
+                    let nome = if prefixo.is_empty() {
+                        nome.clone()
+                    } else {
+                        format!("{prefixo}.{nome}")
+                    };
+                    achatar(bloco, &nome, interior, saida);
+                }
             }
+            None => saida.push((bloco, prefixo.to_owned(), valor)),
         }
     }
-    violacoes
+    let mut saida = Vec::new();
+    for bloco in ["reads", "actions", "own", "world"] {
+        if let Some(valor) = descritor.get(bloco) {
+            achatar(bloco, "", valor, &mut saida);
+        }
+    }
+    saida
+}
+
+/// **A partir da 6, todo apontador resolve pela definição** (a orquestradora,
+/// 10/10): o `nome` definido em algum lugar, ou o `membro` definido no `Tipo`
+/// ([`definicoes::Definicoes`]). O texto depois do último `::` aparecer nas
+/// fontes não basta: «Retrato::eu» passaria por qualquer `eu`, e um membro que
+/// só existe num comentário, também.
+fn apontadores_resolvem(
+    versao: u64,
+    descritor: &serde_json::Value,
+    casca: &Casca,
+) -> Vec<Violation> {
+    if versao < PRIMEIRA_API_COBRADA {
+        return Vec::new();
+    }
+    apontadores(descritor)
+        .into_iter()
+        .filter_map(|(bloco, nome, interior)| {
+            let simbolo = interior.as_str().filter(|s| e_simbolo(s))?;
+            (!casca.definicoes.resolve(simbolo)).then(|| {
+                format!(
+                    "a API {versao} aponta `{bloco}.{nome}` para `{simbolo}`, que não está definido \
+                     no código: um `nome` tem de ser uma definição, e um `Tipo::membro`, um membro \
+                     definido no tipo — ocorrer no texto, ou num comentário, não basta"
+                )
+            })
+        })
+        .collect()
 }
 
 /// As regras da v6, juntas, para [`conferir_arquivo`].
@@ -749,6 +811,7 @@ fn regras_da_v6(versao: u64, descritor: &serde_json::Value, casca: &Casca) -> Ve
     violacoes.extend(nomes_de_servidor(versao, descritor, casca));
     violacoes.extend(tetos_declarados(versao, descritor, casca));
     violacoes.extend(apontadores_sao_simbolos(versao, descritor));
+    violacoes.extend(apontadores_resolvem(versao, descritor, casca));
     violacoes
 }
 
@@ -780,16 +843,11 @@ fn conferir_arquivo(
     promessas: &[Promessa<'_>; 2],
     casca: &Casca,
 ) -> (Vec<Violation>, bool) {
-    let mut mapa: Vec<(&str, &str)> = Vec::new();
-    for bloco in ["reads", "actions", "own", "world"] {
-        if let Some(obj) = json.get(bloco).and_then(serde_json::Value::as_object) {
-            for (nome, interior) in obj {
-                if let Some(interior) = interior.as_str() {
-                    mapa.push((nome.as_str(), interior));
-                }
-            }
-        }
-    }
+    let todos = apontadores(json);
+    let mapa: Vec<(&str, &str)> = todos
+        .iter()
+        .filter_map(|(_, nome, interior)| Some((nome.as_str(), interior.as_str()?)))
+        .collect();
     let mut violacoes = evaluate(&mapa, fonte);
     let cobranca = cobrar(caminho, json, promessas);
     let cobrada = cobranca.is_some();
@@ -934,10 +992,15 @@ pub(crate) fn run() -> ExitCode {
         }
     };
 
-    let mut fonte = String::new();
+    let mut arquivos = Vec::new();
     for pasta in ["crates", "apps"] {
-        colher(&raiz.join(pasta), &mut fonte);
+        colher_por_arquivo(&raiz.join(pasta), &mut arquivos);
     }
+    let fonte = arquivos
+        .iter()
+        .map(|(_, texto)| texto.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
 
     // Quem entrega os momentos. Lido mesmo sem API 6 para cobrar, de propósito:
     // um extrator que deixou de achar a função tem de ficar vermelho hoje, e não
@@ -992,6 +1055,7 @@ pub(crate) fn run() -> ExitCode {
         tipos: tipos_da_casca(ler(superficies)),
         tetos: tetos_da_casca(ler(contribuicoes), ler(superficies), ler(regiao)),
         expostos: nomes_do_runtime(ler(runtime)),
+        definicoes: definicoes::Definicoes::de(&arquivos),
     };
     for (vazio, o_que) in [
         (
@@ -1048,6 +1112,31 @@ pub(crate) fn run() -> ExitCode {
 /// Só `apps/seele-app/ui/` entra: é onde a janela do produto mora, e varrer
 /// `node_modules` de um repositório vizinho seria fazer a fachada resolver
 /// contra código que não é nosso.
+/// Os `.rs` e `.js` de uma pasta, cada um com o caminho dele: o índice de
+/// definições lê o módulo pelo nome do arquivo.
+fn colher_por_arquivo(dir: &std::path::Path, arquivos: &mut Vec<(String, String)>) {
+    let Ok(entradas) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entrada in entradas.flatten() {
+        let caminho = entrada.path();
+        if caminho.is_dir() {
+            let nome = caminho.file_name().and_then(|n| n.to_str());
+            if nome == Some("target") || nome == Some("node_modules") {
+                continue;
+            }
+            colher_por_arquivo(&caminho, arquivos);
+        } else if matches!(
+            caminho.extension().and_then(|e| e.to_str()),
+            Some("rs" | "js")
+        ) {
+            if let Ok(texto) = std::fs::read_to_string(&caminho) {
+                arquivos.push((caminho.to_string_lossy().into_owned(), texto));
+            }
+        }
+    }
+}
+
 fn colher(dir: &std::path::Path, destino: &mut String) {
     let Ok(entradas) = std::fs::read_dir(dir) else {
         return;
@@ -2111,8 +2200,37 @@ const PERFIS_DE_RENDER = Object.freeze({
                 REGIAO_DE_FIXTURE,
             ),
             expostos: nomes_do_runtime(RUNTIME_DE_FIXTURE),
+            definicoes: definicoes::Definicoes::de(
+                &DEFINICOES_DE_FIXTURE
+                    .iter()
+                    .map(|(caminho, texto)| ((*caminho).to_owned(), (*texto).to_owned()))
+                    .collect::<Vec<_>>(),
+            ),
         }
     }
+
+    /// As definições que os apontadores dos testes usam, na forma do código.
+    const DEFINICOES_DE_FIXTURE: &[(&str, &str)] = &[
+        ("crates/seele-server/src/mods/mundo.rs", "pub fn agora() -> i64 { 0 }\n"),
+        ("crates/seele-server/src/mods/arquivos.rs", "pub fn ler() {}\n"),
+        (
+            "crates/seele-server/src/mods/mod.rs",
+            "impl Anfitriao {\n    fn recolher_quintal(&self) {}\n}\npub fn capacidades_da_api() {}\n",
+        ),
+        (
+            "crates/seele-server/src/permissions.rs",
+            "/// `Person::sombra` só aparece aqui, num comentário.\n\
+             pub struct Person {\n    pub nick: String,\n}\n// fn sombra() {}\n",
+        ),
+        (
+            "apps/seele-app/ui/mods-superficies.js",
+            "class SuperficiesDoMod {\n  criar(descricao) {}\n}\n",
+        ),
+        (
+            "crates/seele-proto/src/control.rs",
+            "pub enum ClientMessage {\n    SendMessage { texto: String },\n}\n",
+        ),
+    ];
 
     #[test]
     fn os_extratores_leem_a_casca_e_o_runtime_na_forma_do_codigo() {
@@ -2414,6 +2532,51 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
         assert!(
             regras_da_v6(5, &v6, &casca).is_empty(),
             "a v5 está congelada, e não é cobrada"
+        );
+    }
+
+    /// **Um apontador da 6 resolve pela definição** (a orquestradora, 10/10):
+    /// o `Tipo` existe e o `membro` está definido nele. Um inventado reprova; um
+    /// que só aparece num comentário, também — o guarda não casa com o próprio
+    /// comentário.
+    #[test]
+    fn um_apontador_que_nao_esta_definido_reprova_na_6() {
+        let casca = casca_de_fixture();
+        let v6 = serde_json::json!({
+            "reads": {
+                "pessoa.apelido": "Person::nick",
+                "pessoa.inventada": "Person::nao_existe",
+                "pessoa.sombra": "Person::sombra",
+            },
+        });
+        let violacoes = regras_da_v6(6, &v6, &casca);
+        for nome in ["pessoa.inventada", "pessoa.sombra"] {
+            assert!(
+                violacoes
+                    .iter()
+                    .any(|v| v.contains(nome) && v.contains("não está definido")),
+                "`{nome}` passou: {violacoes:?}"
+            );
+        }
+        assert!(
+            !violacoes.iter().any(|v| v.contains("pessoa.apelido")),
+            "um membro definido foi recusado: {violacoes:?}"
+        );
+    }
+
+    /// **Os apontadores aninhados são conferidos**, com o nome inteiro: antes,
+    /// um objeto dentro de `reads` passava sem ninguém olhar.
+    #[test]
+    fn um_apontador_aninhado_e_conferido() {
+        let v6 = serde_json::json!({
+            "reads": { "servidor": { "dados.uso": "Person::nada" } },
+        });
+        let violacoes = regras_da_v6(6, &v6, &casca_de_fixture());
+        assert!(
+            violacoes
+                .iter()
+                .any(|v| v.contains("reads.servidor.dados.uso")),
+            "o apontador aninhado passou sem conferência: {violacoes:?}"
         );
     }
 
