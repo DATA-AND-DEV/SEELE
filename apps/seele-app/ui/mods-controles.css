@@ -481,6 +481,16 @@ form.regiao-de-mod-parte {
   min-width: 0;
 }
 
+/* Os botões primário e secundário do formulário são do produto (rascunho da
+   API 6, §5): na ponta de baixo, à direita, na ordem da confirmação do
+   produto — o secundário antes, o primário na ponta. */
+.regiao-de-mod-acoes-do-formulario {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--seele-celula-x);
+}
+
 form.regiao-de-mod-parte[data-erro]::before {
   content: attr(data-erro);
   display: block;

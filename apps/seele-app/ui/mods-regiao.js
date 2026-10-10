@@ -722,6 +722,11 @@ class RegiaoDeMod {
     // hexadecimal da cor —, e as cores com o hexadecimal pela metade (Step 6e).
     this.caixasDoCampo = new WeakMap();
     this.coresIncompletas = new WeakSet();
+    // Os formulários em progresso, que não enviam de novo (Step 6f), e quem
+    // sai pela saída do produto quando o secundário é apertado: a superfície
+    // dá o gancho (`aoCancelar`); sem ele, não há secundário.
+    this.formulariosEmProgresso = new WeakSet();
+    this.aoCancelar = null;
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -1040,12 +1045,17 @@ class RegiaoDeMod {
       anterior = no;
     }
 
-    // O que sobrou depois do último plano sai, e solta o que segurava.
-    for (;;) {
-      const sobra = anterior ? anterior.nextSibling : pai.firstChild;
-      if (!sobra) break;
-      this.soltarSubarvore(sobra);
-      sobra.remove();
+    // O que sobrou depois do último plano sai, e solta o que segurava —
+    // menos o que é do produto (`data-do-produto`), como os botões do
+    // formulário (Step 6f): eles moram no fim, e os nós do MOD entram antes.
+    let sobra = anterior ? anterior.nextSibling : pai.firstChild;
+    while (sobra) {
+      const seguinte = sobra.nextSibling;
+      if (sobra.nodeType !== Node.ELEMENT_NODE || sobra.dataset.doProduto !== "sim") {
+        this.soltarSubarvore(sobra);
+        sobra.remove();
+      }
+      sobra = seguinte;
     }
   }
 
@@ -2074,6 +2084,8 @@ class RegiaoDeMod {
     elem.noValidate = true;
     const aoEnviar = (evento) => {
       evento.preventDefault();
+      // Em progresso, o segundo envio não sai — nem pelo Enter (Step 6f).
+      if (this.formulariosEmProgresso.has(elem)) return;
       const invalido = this.conferirOFormulario(elem);
       if (invalido) {
         invalido.focus();
@@ -2097,6 +2109,55 @@ class RegiaoDeMod {
       if (erro) elem.dataset.erro = erro;
       else delete elem.dataset.erro;
     }
+    if (plano.no.emProgresso === true) this.formulariosEmProgresso.add(elem);
+    else this.formulariosEmProgresso.delete(elem);
+    this.pintarAcoesDoFormulario(elem, plano);
+  }
+
+  /**
+   * **Os botões primário e secundário são do produto** (rascunho da API 6,
+   * §5; tarefa 7, Step 6f). O MOD dá o texto — `primario`, `secundario` — e o
+   * produto, o comportamento: o primário é o `submit` do formulário, e passa
+   * pela validação com todos os valores juntos; o secundário pede a saída do
+   * produto, que pergunta quando há alteração. Só numa superfície, que é quem
+   * dá a saída (`aoCancelar`). `emProgresso` trava o primário.
+   *
+   * Moram no fim do formulário, marcados `data-do-produto`, e a reconciliação
+   * os deixa lá: os nós do MOD entram antes deles.
+   */
+  pintarAcoesDoFormulario(elem, plano) {
+    const texto = (valor) => (typeof valor === "string" ? valor.trim().slice(0, 40) : "");
+    const primario = texto(plano.no.primario);
+    const secundario = this.aoCancelar ? texto(plano.no.secundario) : "";
+    let acoes = elem.querySelector(":scope > .regiao-de-mod-acoes-do-formulario");
+    if (!primario && !secundario) {
+      acoes?.remove();
+      return;
+    }
+    if (!acoes) {
+      acoes = elemento("div", "regiao-de-mod-acoes-do-formulario");
+      acoes.dataset.doProduto = "sim";
+      const botaoPrimario = elemento("button", "botao");
+      botaoPrimario.type = "submit";
+      const botaoSecundario = elemento("button", "botao-fantasma");
+      botaoSecundario.type = "button";
+      const aoCancelar = () => this.aoCancelar?.();
+      botaoSecundario.addEventListener("click", aoCancelar);
+      this.guardar(acoes, "as ações do formulário", () => {
+        botaoSecundario.removeEventListener("click", aoCancelar);
+      });
+      acoes.append(botaoSecundario, botaoPrimario);
+      elem.append(acoes);
+    }
+    const [botaoSecundario, botaoPrimario] = acoes.children;
+    for (const [botao, rotulo] of [[botaoPrimario, primario], [botaoSecundario, secundario]]) {
+      if (botao.textContent !== rotulo) botao.textContent = rotulo;
+      botao.hidden = !rotulo;
+    }
+    const ocupado = this.formulariosEmProgresso.has(elem);
+    botaoPrimario.disabled = ocupado;
+    if (ocupado) botaoPrimario.setAttribute("aria-busy", "true");
+    else botaoPrimario.removeAttribute("aria-busy");
   }
 
   /**

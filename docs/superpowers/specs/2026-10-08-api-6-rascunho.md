@@ -524,7 +524,13 @@ campo. A API 6 acrescenta:
   hexadecimal incompleto continua marcado, sem frase, enquanto se digita];
 - **botões primário e secundário montados pelo produto**: o primário envia o
   formulário com **todos os valores juntos** no `submeter`; o secundário
-  cancela pela saída do produto. O MOD dá o texto, não o comportamento;
+  cancela pela saída do produto. O MOD dá o texto, não o comportamento [c,
+  tarefa 7, Step 6f: `{ forma: 'formulario', primario: 'SALVAR', secundario:
+  'CANCELAR' }`; o primário é o `submit`, e passa pela validação; o
+  secundário pede a saída do produto, que pergunta quando há alteração, e só
+  existe numa superfície; na ordem da confirmação do produto, o secundário
+  antes; `emProgresso` no formulário trava o primário e o envio, inclusive
+  pelo Enter de um campo só];
 - **a recusa do servidor volta ao campo que a causou**:
   `formulario.erros({ chave: 'motivo' })` [c, tarefa 7, Step 6b: no punho da
   superfície, `s.formulario.erros(mapa)`; o foco vai ao primeiro marcado, a

@@ -364,6 +364,8 @@ class SuperficieDeMod {
 
     this.montarCasca(descricao);
     this.renderer = new RegiaoDeMod(id, dono, this.corpo, PERFIS_DE_RENDER.superficie);
+    // O secundário de um formulário sai pela saída do produto (Step 6f).
+    this.renderer.aoCancelar = () => this.pedirFechamento("saida-do-produto");
     this.renderer.rodape = this.rodape ?? null;
     if (this.rodape) this.rodape.dataset.escopoDeMod = this.renderer.escopo;
     // Registrada **na criação**: uma superfície criada e não registrada é uma

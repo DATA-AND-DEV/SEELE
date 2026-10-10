@@ -54,6 +54,12 @@
 //    ESTILO §4): a `escolha` e a `cor` mostram o `erro` do MOD como o campo,
 //    recebem o `formulario.erros` e sujam a superfície; o hexadecimal
 //    incompleto continua marcado enquanto se digita, sem frase.
+// 13. **Os botões primário e secundário são do produto** (Step 6f; rascunho
+//    §5): o MOD dá o texto (`primario`, `secundario`) e o produto, o
+//    comportamento — o primário envia o formulário pela validação, com todos
+//    os valores; o secundário sai pela saída do produto, que pergunta quando
+//    há alteração; `emProgresso` trava o segundo envio. Os botões sobrevivem
+//    ao redesenho.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -570,8 +576,80 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'trocar a escolha não sujou a superfície');
     await page.click('#moderar-confirmar');
 
+    // 13. Os botões do produto no formulário.
+    const arvoreDaFicha = (extra = {}) => [{
+      forma: 'formulario', chave: 'f', primario: 'SALVAR', secundario: 'CANCELAR', ...extra, dentro: [
+        { forma: 'campo', chave: 'nome', rotulo: 'Nome', valor: 'Alex', obrigatorio: true },
+        { forma: 'campo', chave: 'lema', rotulo: 'Lema', valor: 'x' },
+      ],
+    }];
+    const acoesDaFicha = () => page.evaluate(() => {
+      const acoes = document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario');
+      const primario = acoes?.querySelector('button[type="submit"]');
+      return {
+        textos: acoes ? [...acoes.querySelectorAll('button')].map((b) => `${b.type}:${b.textContent}`) : null,
+        doMod: acoes ? acoes.querySelectorAll('[data-chave-do-mod]').length : null,
+        travado: primario ? { desligado: primario.disabled, ocupado: primario.getAttribute('aria-busy') } : null,
+      };
+    });
+    const submetidos = () => page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter' && e.chave === 'f').length);
+    await page.evaluate(async (arvore) => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha2', tipo: 'dialogo', modal: false, titulo: 'Ficha', fecharComAlteracoes: 'confirmar' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore });
+      window.botaoAntes = document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button');
+    }, arvoreDaFicha());
+    const acoes = await acoesDaFicha();
+    // Na ordem da confirmação do produto: o secundário antes, o primário na ponta.
+    assert.deepEqual(acoes.textos, ['button:CANCELAR', 'submit:SALVAR'], `o formulário não ganhou os botões do produto: ${JSON.stringify(acoes.textos)}`);
+    assert.equal(acoes.doMod, 0, 'os botões do produto ficaram com chave de MOD');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha());
+    assert.equal(await page.evaluate(() => window.botaoAntes?.isConnected === true
+      && document.querySelector('[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button') === window.botaoAntes), true,
+    'o redesenho tirou ou refez os botões do produto');
+    const primario = '[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button[type="submit"]';
+    const secundario = '[data-superficie="ficha2"] form > .regiao-de-mod-acoes-do-formulario button[type="button"]';
+    const antes = await submetidos();
+    await page.click(primario);
+    assert.equal(await submetidos(), antes + 1, 'o primário não enviou o formulário');
+    assert.deepEqual(await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter' && e.chave === 'f').at(-1)?.valores), { nome: 'Alex', lema: 'x' },
+      'o primário não mandou todos os valores juntos');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="nome"] input', '');
+    await page.click(primario);
+    assert.equal(await submetidos(), antes + 1, 'o primário passou por cima da validação');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="nome"] input', 'Alex');
+    // Em progresso: o primário travado, e nem o Enter envia.
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha({ emProgresso: true }));
+    assert.deepEqual((await acoesDaFicha()).travado, { desligado: true, ocupado: 'true' }, 'o primário em progresso não ficou travado');
+    await page.press('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'Enter');
+    assert.equal(await submetidos(), antes + 1, 'o Enter enviou um formulário em progresso');
+    await page.evaluate((arvore) => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore }), arvoreDaFicha());
+    // O secundário, pela saída do produto: com alteração, pergunta.
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'outro');
+    await page.click(secundario);
+    assert.equal(await page.evaluate(() => !$('moderar').hidden), true, 'o secundário com alteração não perguntou');
+    await page.click('#moderar-cancelar');
+    await page.fill('[data-superficie="ficha2"] [data-chave-do-mod="lema"] input', 'x');
+    await page.click(secundario);
+    const saiu = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'fechar' && e.superficie === 'ficha2').at(-1));
+    assert.equal(saiu?.porque, 'saida-do-produto', `o secundário não saiu pela saída do produto: ${JSON.stringify(saiu)}`);
+    // Sem `primario` nem `secundario`, nenhum botão do produto.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-mostrar', superficie: 'ficha2' });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore: [{ forma: 'formulario', chave: 'f', dentro: [{ forma: 'campo', chave: 'nome', valor: 'Alex' }] }] });
+    });
+    assert.equal((await acoesDaFicha()).textos, null, 'sem primario nem secundario, o produto montou botões');
+    // **A trava vale sem o primário**: num formulário de um campo só, o Enter
+    // envia sozinho; em progresso, não.
+    const campoUnico = '[data-superficie="ficha2"] [data-chave-do-mod="nome"] input';
+    const antesDoEnter = await submetidos();
+    await page.press(campoUnico, 'Enter');
+    assert.equal(await submetidos(), antesDoEnter + 1, 'o caso não mede o que diz: o Enter num campo só não enviou');
+    await page.evaluate(() => pedir(6, { tipo: 'superficie-montar', superficie: 'ficha2', arvore: [{ forma: 'formulario', chave: 'f', emProgresso: true, dentro: [{ forma: 'campo', chave: 'nome', valor: 'Alex' }] }] }));
+    await page.press(campoUnico, 'Enter');
+    assert.equal(await submetidos(), antesDoEnter + 1, 'o Enter enviou um formulário em progresso, sem primário');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede; e a recusa do servidor volta aos campos; e o sujo é derivado do inicial; e a ação destrutiva só chega ao MOD depois do sim; e o erro vale na escolha e na cor; e os botões do formulário são do produto.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
