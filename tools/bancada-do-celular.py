@@ -1404,6 +1404,73 @@ def operador_barra(pg: Page) -> list[str]:
     return falhas
 
 
+# As regiões que a casca do celular declara (CELULAR.regioes): a aba onde moram,
+# e o que a contribuição de cada uma leva além do ponto e do modo — o alvo de
+# quem tem alvo (o canal aberto, uma mensagem), e o rótulo da navegação, que é
+# uma entrada na lista de canais e não um cartão. A conversa só redesenha as
+# mensagens a cada revisão, e a bancada a redesenha como a F3 faz.
+REGIOES_DO_CELULAR = [
+    ("redes", "servidor", "", False),
+    ("servidor.navegacao", "servidor", "rotulo: 'SONDA SERVIDOR.NAVEGACAO', ", False),
+    ("operador.barra", "ajustes", "", False),
+    ("canal.cabecalho", "conversa", "alvo: String(linhaAberta), ", False),
+    ("conversa.mensagem", "conversa", "alvo: String(mensagens.at(-1).id), ", True),
+    ("compositor", "conversa", "", False),
+    ("pessoas.lista", "pessoas", "", False),
+]
+
+
+def regioes_do_celular(pg: Page) -> list[str]:
+    """As regiões de MOD do celular (rascunho da API 6, §11; decidido em 09/10):
+    toda região que a casca declara em `CELULAR.regioes` tem caixa à vista na
+    aba dela, e uma que ela não declara (`status.barra`) recebe `regiao-ausente`
+    e sai das `regioes` do retrato, em vez de desenhar num nó escondido.
+
+    É o que impede a lista de envelhecer calada: uma região declarada que a
+    casca esconde, ou uma escondida que ela declara, reprova aqui."""
+    falhas = []
+    declaradas = pg.evaluate("CELULAR.regioes instanceof Set ? [...CELULAR.regioes].sort() : null")
+    if declaradas != sorted(r for r, *_ in REGIOES_DO_CELULAR):
+        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as sete do celular")
+    # Cada uma, como um MOD a usaria: uma contribuição pelo roteador, e o texto
+    # dela à vista na aba, recebendo o toque.
+    pg.evaluate(MOD_DE_PE)
+    for regiao, aba, extra, redesenhar in REGIOES_DO_CELULAR:
+        if not ir_para_aba(pg, aba, falhas):
+            continue
+        pg.wait_for_timeout(250)
+        marca = f"SONDA {regiao}".upper()
+        pedido = f"{{ ponto: '{regiao}', modo: 'adicionar', {extra}conteudo: [{{ forma: 'texto', chave: 's', dentro: '{marca}' }}] }}"
+        resposta = pg.evaluate(f"__pedirAoProduto({{ tipo: 'contribuir', pedido: {pedido} }}).then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))")
+        esperar_quadro(pg)
+        if redesenhar:
+            pg.evaluate("desenharMensagens()")
+        pg.wait_for_timeout(300)
+        visto = pg.evaluate("""(marca) => {
+            const d = [...document.querySelectorAll('#tela-sessao *, #tela-server *')].find((e) => e.children.length === 0 && e.textContent.trim() === marca);
+            if (!d) return 'o texto da contribuição não está na página';
+            d.scrollIntoView({ block: 'center' });
+            for (let n = d; n; n = n.parentElement) { const st = getComputedStyle(n); if (st.display === 'none' || st.visibility === 'hidden' || n.hidden) return 'escondido por ' + (n.id || n.className); }
+            const b = d.getBoundingClientRect();
+            if (b.height === 0 || b.top < 0 || b.bottom > innerHeight) return `fora da janela, em ${Math.round(b.top)}`;
+            const noCentro = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+            return d.contains(noCentro) || noCentro?.contains(d) ? 'à vista' : 'coberto por ' + (noCentro?.id || noCentro?.className);
+        }""", marca)
+        if visto != "à vista":
+            falhas.append(f"a região {regiao} não tem casa na aba {aba.upper()}: {visto} (resposta {resposta})")
+    # A que a casca não tem: o MOD fica sabendo, e o retrato não a lista.
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'status.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 'x', dentro: 'MEDIDA' }] } })")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    avisado = pg.evaluate("(window.__entregues ?? []).some((m) => m.motivo === 'regiao-ausente' && m.ponto === 'status.barra')")
+    if not avisado:
+        falhas.append("uma contribuição no status.barra não recebeu regiao-ausente")
+    regioes = pg.evaluate("cascaDoRetrato().regioes")
+    if "status.barra" in regioes or any(r not in regioes for r, *_ in REGIOES_DO_CELULAR):
+        falhas.append(f"o retrato diz as regiões {regioes}")
+    return falhas
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1781,6 +1848,8 @@ CASOS: dict[str, Caso] = {
     "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
     # As superfícies de MOD acima da faixa e das abas (Tarefa 11; F3, 5d).
     "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
+    # As regiões de MOD que o celular declara, e a que ele não tem.
+    "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
     "operador-barra": Caso(levar=operador_barra, medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
