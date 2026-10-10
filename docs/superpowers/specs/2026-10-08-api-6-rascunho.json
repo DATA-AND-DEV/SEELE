@@ -688,6 +688,9 @@
       "tipo-desconhecido (o tipo pedido não é da API do pacote — na 6, o painel também; leva tipoPedido e tipos — não tipo, que é o da mensagem da ponte; tarefa 7)",
       "chave-desconhecida (superficie.atualizar pediu uma chave que a superfície não tem, ou formulario.erros uma que não é de um campo; leva chave; tarefa 7)",
       "orcamento (superficie.atualizar levaria a superfície além do teto de nós; leva perfil, teto e tamanho; tarefa 7)",
+      "superficie-desconhecida (a mensagem nomeia uma superfície que não está de pé; leva superficie; tarefa 17g)",
+      "sem-previa (SeeleUI.tema sem { previa: true }: na 6, o tema publicado é o da metade de servidor; tarefa 17g)",
+      "contraste (a prévia do tema tem um par abaixo do piso; leva pares; tarefa 17g)",
       "teto-de-folhas (o MOD já tem 3 folhas à vista; leva teto; tarefa 7)",
       "teto-de-superficies (o MOD já mantém 12 superfícies de pé; leva teto; tarefa 7)"
     ],

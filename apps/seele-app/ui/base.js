@@ -871,6 +871,8 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    // Uma superfície deste MOD fechou: a prévia do tema que era dela sai (17g).
+    aoFecharASuperficie: (chave) => aoFecharASuperficieDaPrevia(mod.id, chave),
     // A API do pacote: as superfícies que ele tem dependem dela — a `folha` na
     // 6, o `painel` até a 5 (rascunho da API 6, §5; tarefa 7, Step 4).
     api: Number(mod.api) || 0,
@@ -1255,7 +1257,11 @@ function superficiesDoMod(mod, instancia) {
  */
 function superficieDoMod(mod, instancia, chave) {
   const superficie = superficiesDoMod(mod, instancia).de(chave);
-  if (!superficie) throw new Error(`a superfície «${chave}» não está de pé`);
+  // Pelo nome na 6 (`superficie-desconhecida`, com a chave); até a 5, a frase.
+  if (!superficie) {
+    throw recusaDaSuperficie("superficie-desconhecida", `a superfície «${chave}» não está de pé`,
+      { superficie: String(chave ?? "").slice(0, 64) });
+  }
   return superficie;
 }
 
@@ -2083,6 +2089,14 @@ function limparARegiaoDoMod(id, instancia) {
 const temaDosMods = new Map();
 
 /**
+ * **As prévias do tema** (rascunho da API 6, §9, B4; tarefa 17g): por MOD, os
+ * valores e a superfície dona. Valem só nesta máquina, por cima do tema
+ * publicado, com o selo «prévia não publicada», e saem quando a superfície
+ * fecha, com `SeeleUI.tema(null, { previa: true })`, ou com a sessão.
+ */
+const previasDoTema = new Map();
+
+/**
  * Qual instância de MOD é dona do tema de cada id.
  *
  * **O tema não tinha dono, e sobrevivia à sessão.** A única limpeza dele morava
@@ -2233,7 +2247,11 @@ const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
  *   de cada cor do produto; um tema que o derruba transforma aquelas linhas em
  *   promessa vencida, e quem paga é quem está lendo a conversa.
  */
-function aplicarOTemaDoMod(id, valores) {
+function aplicarOTemaDoMod(id, valores, opcoes) {
+  // `previa`: a prévia da 17g, `{ superficie }`, ou nada. Sem valor padrão na
+  // assinatura: os guardas de `frontend.rs` leem o corpo a partir da primeira
+  // chave depois dela.
+  const previa = opcoes?.previa ?? null;
   // **`servidor.aparencia`, e a escolha de quem usa** — R3 da revisão de
   // 20/09/2026.
   //
@@ -2257,7 +2275,9 @@ function aplicarOTemaDoMod(id, valores) {
     : null;
   // Só quando alguém registrou o ponto: sem registro nenhum, o caminho é o de
   // sempre — a posse de token —, e um MOD de API 3 continua aplicando tema.
-  if (escolha?.escolhida || escolha?.nativa) {
+  // **A prévia não passa por aqui** (17g): ela é de quem edita, nesta
+  // máquina, e não disputa a aparência com ninguém.
+  if (!previa && (escolha?.escolhida || escolha?.nativa)) {
     if (escolha.nativa) {
       throw new Error(
         "a aparência deste servidor está no desenho do SEELE por escolha de quem "
@@ -2330,7 +2350,7 @@ function aplicarOTemaDoMod(id, valores) {
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
       throw new Error(`«${nome}» precisa ser uma cor #rrggbb, e veio «${valor}»`);
     }
-    for (const [outro, seus] of temaDosMods) {
+    for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
         throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
       }
@@ -2343,11 +2363,29 @@ function aplicarOTemaDoMod(id, valores) {
   // pedindo o acento, e escolher calado é escolher errado metade das vezes.
   for (const nome of pedido.keys()) {
     if (!(nome in NUMEROS_DA_API) && !(nome in BANDEIRAS_DA_API)) continue;
-    for (const [outro, seus] of temaDosMods) {
+    for (const [outro, seus] of previa ? [] : temaDosMods) {
       if (outro !== id && nome in seus) {
         throw new Error(`«${nome}» já é do MOD «${outro}» nesta sessão`);
       }
     }
+  }
+
+  // **A prévia, por cima do publicado**, com a mesma conferência dos pares: a
+  // recusa leva os pares, na forma da de `mundo.tema` (17e), e a de antes fica.
+  if (previa) {
+    const antesDaPrevia = previasDoTema.get(id);
+    previasDoTema.set(id, { valores: Object.fromEntries(pedido), superficie: String(previa.superficie ?? "") });
+    const abaixo = paresDoTemaAbaixoDoPiso();
+    if (abaixo.length) {
+      if (antesDaPrevia) previasDoTema.set(id, antesDaPrevia);
+      else previasDoTema.delete(id);
+      const recusa = new Error(`a prévia não alcança os pisos: ${fraseDoPar(abaixo[0])}`);
+      recusa.recusa = "contraste";
+      recusa.camposDaRecusa = { pares: abaixo };
+      throw recusa;
+    }
+    escreverOTemaDaSessao();
+    return;
   }
 
   const antes = temaDosMods.get(id);
@@ -2454,7 +2492,7 @@ function dizerOTemaAoMod(modId, dados) {
   if (!instancia) return;
   const mod = { id: modId, api: instancia.api };
   if (!(CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("tema")) return;
-  donoDaRegiao(mod, instancia).falar({ nome: "tema", ...dados, previa: false });
+  donoDaRegiao(mod, instancia).falar({ nome: "tema", previa: false, ...dados });
 }
 
 /**
@@ -2663,10 +2701,8 @@ function tonsDoTema(emVigor, daRaiz) {
 function escreverOTemaDaSessao() {
   const sessao = $("tela-sessao");
   if (!sessao) return;
-  const emVigor = new Map();
-  for (const seus of temaDosMods.values()) {
-    for (const [nome, valor] of Object.entries(seus)) emVigor.set(nome, valor);
-  }
+  const emVigor = new Map(Object.entries(oTemaEmVigor()));
+  pintarOSeloDaPrevia();
   for (const [nome, token] of Object.entries(TEMA_DA_API)) {
     const valor = emVigor.get(nome);
     // Removida, e não reposta com a cor do produto: o recuo já está escrito em
@@ -2736,15 +2772,55 @@ function corDaRaiz(token) {
  * luminosidade serve. O que o MOD não pediu é lido da raiz (`corDaRaiz`): ler
  * dali evita uma segunda cópia da palheta aqui dentro, que envelheceria sozinha.
  */
-function oTemaAlcancaOsPisos() {
-  const emVigor = {};
-  for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
+function oTemaAlcancaOsPisos(abaixo = []) {
   // Uma folha que não carregou não vira recusa: sem cor medida não há medida, e
   // inventar uma seria recusar um tema por um motivo que não aconteceu.
   if (!COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))) return true;
-  const { pares } = tonsDoTema(emVigor, corDaRaiz);
-  if (pares.length === 0) return true;
-  const { frente, fundo, razao, piso } = pares[0];
+  const { pares } = tonsDoTema(oTemaEmVigor(), corDaRaiz);
+  // Os pares abaixo do piso, para quem os quer inteiros (a prévia, 17g).
+  abaixo.push(...pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso })));
+  return pares.length === 0 ? true : fraseDoPar(pares[0]);
+}
+
+/**
+ * **O selo da prévia** (rascunho da API 6, §9, B4): «prévia não publicada»,
+ * enquanto alguma prévia vale nesta máquina. Do produto, nas cores do núcleo
+ * (`--nucleo-*`, que o tema não alcança), e fora da sessão: quem olha a tela
+ * sabe que o que vê não é o tema do servidor.
+ */
+function pintarOSeloDaPrevia() {
+  const existente = document.getElementById?.("selo-da-previa") ?? null;
+  if (!previasDoTema.size && !existente) return;
+  const selo = existente ?? elemento("div", "selo-da-previa", "PRÉVIA NÃO PUBLICADA");
+  if (!existente) {
+    selo.id = "selo-da-previa";
+    selo.setAttribute("role", "status");
+    document.body.append(selo);
+  }
+  selo.hidden = previasDoTema.size === 0;
+}
+
+/** Tira a prévia de `modId`, se houver: o tema publicado volta, e o selo sai. */
+function tirarAPreviaDoTema(modId) {
+  if (previasDoTema.delete(modId)) escreverOTemaDaSessao();
+}
+
+/** O tema em vigor nesta sessão: o publicado, e as prévias por cima (17g). */
+function oTemaEmVigor() {
+  const emVigor = {};
+  for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
+  for (const { valores } of previasDoTema.values()) Object.assign(emVigor, valores);
+  return emVigor;
+}
+
+/** Os pares do tema em vigor abaixo do piso, `[{ frente, fundo, razao, piso }]`. */
+function paresDoTemaAbaixoDoPiso() {
+  const abaixo = [];
+  oTemaAlcancaOsPisos(abaixo);
+  return abaixo;
+}
+
+function fraseDoPar({ frente, fundo, razao, piso }) {
   return `«${frente}» sobre «${fundo}» dá ${String(razao).replace(".", ",")}:1, `
     + `e o piso é ${String(piso).replace(".", ",")}:1`;
 }
@@ -3160,6 +3236,51 @@ function recusaParaOMod(mod, falha) {
   return { erro: base, [campo]: nome.slice(corte + 1) };
 }
 
+/**
+ * **A prévia do tema, pela janela de um MOD da 6** (rascunho §9, B4; tarefa
+ * 17g). Sem `previa`, a recusa é `sem-previa`; com `valores: null`, a prévia
+ * sai sem fechar a superfície; com valores, ela pertence à superfície
+ * `superficie` (que tem de existir) e passa pelas mesmas tabelas e pisos. O
+ * evento `tema` volta com `previa: true`, aplicado ou recusado com os pares.
+ */
+function aplicarAPreviaDoTema(mod, instancia, m) {
+  if (m.previa !== true) {
+    throw recusaDaSuperficie("sem-previa",
+      "na API 6, o tema publicado é o que a metade de servidor declara (mundo.tema); "
+      + "na janela, só a prévia: SeeleUI.tema(valores, { previa: true, superficie })", {});
+  }
+  if (m.valores === null || m.valores === undefined) {
+    tirarAPreviaDoTema(mod.id);
+    return;
+  }
+  const superficie = superficieDoMod(mod, instancia, m.superficie);
+  // Uma vez por instância: a prévia sai com o MOD, como o tema dele.
+  if (!previasComDono.has(instancia)) {
+    previasComDono.add(instancia);
+    instancia.registrar(`${mod.id}: a prévia do tema`, () => tirarAPreviaDoTema(mod.id));
+  }
+  try {
+    aplicarOTemaDoMod(mod.id, m.valores, { previa: { superficie: superficie.chave } });
+  } catch (falha) {
+    if (falha?.recusa === "contraste") {
+      dizerOTemaAoMod(mod.id, { estado: "recusado", pares: falha.camposDaRecusa?.pares ?? [], previa: true });
+    }
+    throw falha;
+  }
+  dizerOTemaAoMod(mod.id, { estado: "aplicado", previa: true });
+}
+
+/** As instâncias cuja saída já tira a prévia delas. */
+const previasComDono = new WeakSet();
+
+/**
+ * Uma superfície fechou ou foi descartada: a prévia que era dela sai
+ * (tarefa 17g). Chamada por `SuperficieDeMod`, pelo dono.
+ */
+function aoFecharASuperficieDaPrevia(modId, chave) {
+  if (previasDoTema.get(modId)?.superficie === String(chave)) tirarAPreviaDoTema(modId);
+}
+
 /** Responde a uma mensagem de um MOD, e só ao que a API dele oferece. */
 async function atenderOMod(mod, instancia, m) {
   if (!m || typeof m.n !== "number") return;
@@ -3285,6 +3406,13 @@ async function atenderOMod(mod, instancia, m) {
         responder(true, { valor: null });
         break;
       case "tema":
+        // **Na 6, a janela só faz prévia** (rascunho §9, B4; tarefa 17g): o
+        // tema publicado é o que a metade de servidor declara (`mundo.tema`).
+        if (Number(mod.api) >= 6) {
+          aplicarAPreviaDoTema(mod, instancia, m);
+          responder(true, { valor: null });
+          break;
+        }
         aplicarOTemaDoMod(mod.id, m.valores);
         darDonoAoTema(mod.id, instancia);
         responder(true, { valor: null });
@@ -3693,8 +3821,10 @@ function encerrarOAmbienteDosMods() {
   // um MOD sair sozinho no meio da sessão.
   temaDosMods.clear();
   donoDoTema.clear();
-  // E o do servidor, que o próximo retrato de outra sessão traz de novo.
+  // E o do servidor, que o próximo retrato de outra sessão traz de novo, e as
+  // prévias, que são desta sessão.
   temaDoServidorEmVigor = null;
+  previasDoTema.clear();
   escreverOTemaDaSessao();
 
   // **O som para agora, e a saída de som do sistema fecha.** Cada instância

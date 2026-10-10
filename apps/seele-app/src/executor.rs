@@ -622,6 +622,37 @@ mod testes {
         );
     }
 
+    /// **A prévia do tema sai da janela com a superfície dona** (rascunho da
+    /// API 6, §9, B4; tarefa 17g da F3): `SeeleUI.tema(valores, { previa: true,
+    /// superficie })` manda `previa` e `superficie` no pedido `tema`.
+    #[test]
+    fn a_previa_do_tema_vai_com_a_superficie_dona() {
+        let executor = executor();
+        executor
+            .iniciar_com_api(
+                "SeeleUI.tema({ acento: '#c9a227' }, { previa: true, superficie: 'editor' });",
+                6,
+            )
+            .expect("código");
+        let pedido: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        assert_eq!(
+            (
+                campo(&pedido, "tipo"),
+                campo(&pedido, "previa"),
+                campo(&pedido, "superficie"),
+                campo(&pedido, "valores"),
+            ),
+            (
+                &serde_json::json!("tema"),
+                &serde_json::json!(true),
+                &serde_json::json!("editor"),
+                &serde_json::json!({ "acento": "#c9a227" }),
+            ),
+            "a prévia não saiu com a superfície dona: {pedido}"
+        );
+    }
+
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**
     ///
     /// O executor nativo não definia `console`, e o `console.warn` que o autor

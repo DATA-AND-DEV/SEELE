@@ -378,7 +378,13 @@ pub const PRELUDIO: &str = r#"
     // como `superficies` falta do da 3: ausentes, e não montados para a
     // janela recusar depois. As APIs 3 a 5 têm os dois.
     ...(capacidades.has('regiao') ? { regiao: (conteudo) => pedir('regiao', { conteudo }) } : {}),
-    tema: (valores) => pedir('tema', { valores }),
+    // Na 6, a janela só faz prévia (rascunho §9, B4): `{ previa: true,
+    // superficie }`. Até a 5, o tema vai como sempre, e a janela ignora os dois.
+    tema: (valores, opcoes) => pedir('tema', {
+      valores,
+      previa: Boolean(opcoes && opcoes.previa === true),
+      superficie: opcoes && opcoes.superficie,
+    }),
     ...(capacidades.has('retrato') ? { retrato: () => pedir('retrato', {}) } : {}),
     ...(superficies ? { superficies } : {}),
     ...(contribuicoes ? { contribuicoes } : {}),

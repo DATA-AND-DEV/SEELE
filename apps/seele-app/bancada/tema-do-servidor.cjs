@@ -23,6 +23,12 @@
 //    logo depois do `Session`, antes de a janela do MOD estar de pé; o
 //    desfecho fica guardado, e o `montarOMod` de verdade o entrega quando o
 //    código do MOD termina de rodar.
+// 7. **A prévia** (tarefa 17g; rascunho §9, B4): na 6, `SeeleUI.tema` sem
+//    `previa` é recusado pelo nome; com `{ previa: true, superficie }`, ela
+//    vale só nesta máquina, por cima do tema publicado, com o selo «prévia não
+//    publicada», e o evento `tema` volta com `previa: true`; `null` a tira sem
+//    fechar a superfície, e fechar a superfície a tira; uma prévia sem
+//    contraste é recusada com os pares, e não fica.
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -152,6 +158,71 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.deepEqual(tardio, [{ tipo: 'evento', nome: 'tema', estado: 'aplicado', previa: false }],
       `a janela do MOD que subiu depois do tema não soube dele: ${JSON.stringify(tardio)}`);
 
+    // 7. A prévia.
+    const PAPEL = { fundo: '#12100e', painel: '#1b1815', texto: '#f2ece0', apagado: '#a2988a', acento: '#c9a227', borda: '#4a423a' };
+    await page.evaluate(async () => {
+      window.eventosDoTema = [];
+      window.respostasDoMod = [];
+      const inst = new InstanciaDeMod('seele/estilo', 'h', geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; },
+        entregar(m) {
+          const copia = JSON.parse(JSON.stringify(m));
+          if (copia.tipo === 'evento' && copia.nome === 'tema') eventosDoTema.push(copia);
+          if (copia.tipo === 'resposta') respostasDoMod.push(copia);
+        },
+      });
+      inst.estado = ESTADOS_DE_MOD.ativa;
+      inst.api = 6;
+      modsCarregados.set('seele/estilo', inst);
+      let n = 100;
+      window.pedirComoOMod = async (m) => {
+        const numero = ++n;
+        await atenderOMod({ id: 'seele/estilo', hash: 'h', api: 6 }, modsCarregados.get('seele/estilo'), { ...m, n: numero });
+        return respostasDoMod.find((r) => r.n === numero) ?? null;
+      };
+      await pedirComoOMod({ tipo: 'superficie-criar', descricao: { id: 'editor', tipo: 'dialogo', modal: false, titulo: 'Editor de tema' } });
+    });
+    const selo = () => page.evaluate(() => {
+      const el = document.getElementById('selo-da-previa');
+      return Boolean(el && !el.hidden && el.getClientRects().length);
+    });
+    const ultimoEvento = () => page.evaluate(() => eventosDoTema.at(-1) ?? null);
+    const pedir = (m) => page.evaluate((m) => pedirComoOMod(m), m);
+
+    const semPrevia = await pedir({ tipo: 'tema', valores: PAPEL });
+    assert.equal(semPrevia?.erro, 'sem-previa', `na 6, o tema sem prévia não foi recusado pelo nome: ${JSON.stringify(semPrevia)}`);
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema sem prévia mexeu no tema publicado');
+
+    const comPrevia = await pedir({ tipo: 'tema', valores: PAPEL, previa: true, superficie: 'editor' });
+    assert.equal(comPrevia?.ok, true, `a prévia foi recusada: ${JSON.stringify(comPrevia)}`);
+    assert.equal((await tokens()).fundo, PAPEL.fundo, 'a prévia não pintou a sessão por cima do tema publicado');
+    assert.equal(await selo(), true, 'a prévia não mostrou o selo «prévia não publicada»');
+    assert.deepEqual(await ultimoEvento(), { tipo: 'evento', nome: 'tema', estado: 'aplicado', previa: true }, 'o MOD não soube que a prévia foi aplicada');
+
+    const semSuperficie = await pedir({ tipo: 'tema', valores: PAPEL, previa: true, superficie: 'nao-existe' });
+    assert.equal(semSuperficie?.erro, 'superficie-desconhecida', `a prévia de uma superfície que não existe não foi recusada pelo nome: ${JSON.stringify(semSuperficie)}`);
+
+    const tirada = await pedir({ tipo: 'tema', valores: null, previa: true });
+    assert.equal(tirada?.ok, true, `tirar a prévia foi recusado: ${JSON.stringify(tirada)}`);
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'tirar a prévia não devolveu o tema publicado');
+    assert.equal(await selo(), false, 'o selo ficou depois de tirar a prévia');
+    assert.equal(await page.evaluate(() => Boolean(document.querySelector('[data-superficie="editor"]')?.isConnected)), true, 'tirar a prévia fechou a superfície');
+
+    await pedir({ tipo: 'tema', valores: PAPEL, previa: true, superficie: 'editor' });
+    await pedir({ tipo: 'superficie-fechar', superficie: 'editor' });
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'fechar a superfície não tirou a prévia');
+    assert.equal(await selo(), false, 'o selo ficou depois de fechar a superfície da prévia');
+
+    await pedir({ tipo: 'superficie-mostrar', superficie: 'editor' });
+    const semContraste = await pedir({ tipo: 'tema', valores: { ...PAPEL, acento: PAPEL.fundo }, previa: true, superficie: 'editor' });
+    assert.equal(semContraste?.erro, 'contraste', `a prévia sem contraste não foi recusada pelo nome: ${JSON.stringify(semContraste)}`);
+    assert.ok(semContraste.pares?.some((p) => p.frente === 'acento' && p.fundo === 'fundo'), `a recusa da prévia não trouxe os pares: ${JSON.stringify(semContraste)}`);
+    const eventoRecusado = await ultimoEvento();
+    assert.ok(eventoRecusado?.estado === 'recusado' && eventoRecusado.previa === true && eventoRecusado.pares?.length,
+      `o evento da prévia recusada não veio com os pares: ${JSON.stringify(eventoRecusado)}`);
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'a prévia recusada pintou a sessão');
+    assert.equal(await selo(), false, 'a prévia recusada mostrou o selo');
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -163,7 +234,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho; e a prévia vale só nesta máquina, com o selo, e sai com a superfície.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

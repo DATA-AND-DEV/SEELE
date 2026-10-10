@@ -788,6 +788,9 @@ nome; a frase vai ao `seele.log`):
 |---|---|
 | `chave-desconhecida` | `superficie.atualizar` pediu uma chave que a superfície não tem, ou `formulario.erros` uma que não é de um campo; leva `chave` |
 | `orcamento` | `superficie.atualizar` levaria a superfície além do teto de nós; leva `perfil`, `teto` e `tamanho`, e a superfície fica como estava |
+| `superficie-desconhecida` | a mensagem nomeia uma superfície que não está de pé; leva `superficie` |
+| `sem-previa` | `SeeleUI.tema` sem `{ previa: true }`: na 6, o tema publicado é o da metade de servidor (§9, B4) |
+| `contraste` | a prévia do tema tem um par abaixo do piso; leva `pares`, como a recusa de `mundo.tema` |
 | `teto-de-folhas` | o MOD já tem 3 folhas à vista (§5); leva `teto` |
 | `teto-de-superficies` | o MOD já mantém 12 superfícies de pé; leva `teto`. Chegava à 6 como `falhou` |
 | `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície da API do pacote (na 6, o `painel` também); leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
@@ -1242,6 +1245,12 @@ acompanhavam a cor derivada.
   razão.
 - No celular, «ver na sessão» recolhe o diálogo e mantém o selo (D-estilo-1).
 - A prévia também passa pelos pares, e o evento `tema` volta com `previa: true`.
+- [c, tarefa 17g] Na janela: sem `previa`, `sem-previa`; uma superfície que
+  não existe, `superficie-desconhecida` (com `superficie`); uma prévia abaixo
+  de um piso, `contraste` (com `pares`), e ela não fica. A prévia passa pelas
+  mesmas tabelas do tema, sem a disputa de tokens entre MODs — ela é de quem
+  edita —, vale por cima do publicado, e sai também quando o MOD sai ou a
+  sessão acaba. O selo é do produto, nas cores do núcleo, acima do véu.
 
 ### O resto do que entra na 6
 

@@ -882,6 +882,8 @@ class SuperficieDeMod {
    */
   fechar() {
     if (this.solta) return;
+    // A prévia do tema que era desta superfície sai com ela (tarefa 17g).
+    this.dono.aoFecharASuperficie?.(this.chave);
     this.visivel = false;
     this.liberarDestino();
     this.soltarFoco();
@@ -936,6 +938,7 @@ class SuperficieDeMod {
   descartar() {
     if (this.solta) return;
     this.solta = true;
+    this.dono.aoFecharASuperficie?.(this.chave);
     clearTimeout(this.expiracao);
     this.liberarDestino();
     // **Esquecida, e não descartada de novo.** Quem está descartando somos

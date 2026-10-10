@@ -952,6 +952,26 @@ button.voice_room-nome:hover { text-decoration: underline; }
   background-color: var(--nucleo-painel);
 }
 
+/* **O selo da prévia do tema** (rascunho da API 6, §9, B4; tarefa 17g): «prévia
+   não publicada», do produto, nas cores do núcleo — o tema em prévia não o
+   alcança —, no alto e acima do véu de um modal (z 60), sem pegar clique. */
+.selo-da-previa {
+  position: fixed;
+  top: calc(var(--seele-barra-janela, 32px) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 70;
+  padding: 4px 12px;
+  font-family: var(--seele-mono);
+  font-size: var(--seele-t-dado);
+  letter-spacing: 0.12em;
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  pointer-events: none;
+}
+
+.selo-da-previa[hidden] { display: none; }
+
 #operador-sair {
   color: var(--nucleo-texto);
   background-color: var(--nucleo-painel);
