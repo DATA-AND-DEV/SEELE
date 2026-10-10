@@ -114,6 +114,8 @@ testes).
 | `m3-falante.rs` | o falante sintético |
 | `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |
 | `medidas.json` | os relatos da campanha de base de 08/10 |
+| `medidas-api6.json` | os 24 relatos da campanha da API 6, de 10/10 (commit `6e845e0d`) |
+| `resumir-api6.py` | a tabela da campanha da API 6, contra o `sem-mod` dela, depois de conferir o commit, a interrupção e a compilação |
 | `preparar-api6.sh` | monta a pasta de trabalho da campanha da API 6 |
 | `remendar-api6.py` | os remendos da cópia da medição |
 | `campanha-api6.sh` | os 24 cenários da campanha da API 6 |
