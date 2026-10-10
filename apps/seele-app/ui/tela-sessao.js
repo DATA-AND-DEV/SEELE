@@ -3620,8 +3620,17 @@ async function alternarCanal(evento) {
         // não confirma a entrada (`admissao::voice_room_liberado`), então uma
         // senha errada só se descobre pela recusa que chega depois, em
         // `desenharAviso`.
-        const senha =
-          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;
+        //
+        // A pergunta é da casca (P7, `CASCA` em `base.js`): no desktop, o mesmo
+        // `window.prompt`; no celular, uma folha com o nome da sala. E desistir
+        // da senha desiste de entrar. Antes, o «cancelar» do `prompt` ainda
+        // mandava o pedido sem senha, e a resposta ao cancelar era a recusa do
+        // servidor (achado da F8, 09/10).
+        const pedeSenha = item.dataset.senha_necessaria === "sim";
+        const senha = pedeSenha
+          ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? "")
+          : null;
+        if (pedeSenha && senha === null) return;
         await invoke("enter_voice_room", { voiceRoom: voice_room, senha });
         entrou = true;
       }

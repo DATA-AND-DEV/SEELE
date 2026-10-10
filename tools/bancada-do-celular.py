@@ -82,20 +82,6 @@ class Ponto:
 
 
 PONTOS_INJETADOS = [
-    # A senha da sala sai do `window.prompt` (P7). E cancelar cancela: o
-    # desktop, com o `prompt`, tentava entrar sem senha quando a pessoa
-    # desistia, e a recusa do servidor era a resposta ao «cancelar».
-    Ponto(
-        "P7",
-        "tela-sessao.js",
-        '          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;\n',
-        '          item.dataset.senha_necessaria === "sim"\n'
-        "            ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? \"\")\n"
-        "            : null;\n"
-        '        if (item.dataset.senha_necessaria === "sim" && senha === null) return;\n',
-        "CASCA.pedirSenhaDaSala",
-        troca=True,
-    ),
     # O Return do celular quebra a fileira (P8): o teclado do aparelho não tem
     # Shift+Enter, e uma mensagem de duas fileiras não teria como ser escrita.
     Ponto(
