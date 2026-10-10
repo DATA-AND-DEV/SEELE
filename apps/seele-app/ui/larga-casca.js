@@ -119,6 +119,16 @@
 
   // ------------------------------------------------------- sair da página
 
+  // A tela cheia do navegador sai pelo Esc sem a página receber a tecla (achado
+  // da F4): o ouvinte de Escape do `palco-imagem.js` não roda, e o cinema ficava
+  // ligado numa janela que já não está em tela cheia. Quando o documento sai da
+  // tela cheia por fora, o cinema sai junto, pelo caminho do desktop. A saída
+  // pelo botão apaga o cinema antes, e não passa por aqui duas vezes.
+  document.addEventListener("fullscreenchange", () => {
+    if (document.fullscreenElement || document.body.dataset.cinema !== "sim") return;
+    trocarCinema(false).catch((falha) => console.warn("trocarCinema:", falha));
+  });
+
   // O app bloqueia o F5; o navegador não deixa, e recarregar derruba a sessão.
   // Com a sessão aberta, a página pergunta antes de sair.
   window.addEventListener("beforeunload", (evento) => {
