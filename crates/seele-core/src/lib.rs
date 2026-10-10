@@ -35,6 +35,7 @@ pub mod chegada;
 pub mod client;
 pub mod confere_codigo;
 pub mod conhecidos;
+pub use seele_sessao::despedida;
 pub mod encontro;
 pub mod enlace;
 pub mod entrada;
