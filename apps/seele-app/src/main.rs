@@ -1103,10 +1103,21 @@ async fn connect<R: tauri::Runtime>(
     audio: bool,
     join_secret: Option<String>,
 ) -> Result<Entrada, FalhaDaEntrada> {
-    if session.connection().is_ok() {
-        return Err(ConnectionError::AlreadyConnected.into());
-    }
-
+    // **Conferir que não há sessão e revogar, com o slot na mão** (M1 da
+    // revisão do lote E54). Eram duas linhas soltas — `connection().is_ok()`
+    // aqui e `revogar()` logo abaixo —, e uma tentativa velha podia gravar o
+    // slot entre elas. Esta passava pelo `AlreadyConnected` com o slot vazio e
+    // revogava depois de a velha já ter entrado; se falhasse, a velha ficava
+    // no slot sem tela (a janela a larga, e o pedido de soltá-la chega com uma
+    // geração que já não é a de pé), e toda entrada seguinte recebia
+    // `AlreadyConnected` até o app fechar. Com o cadeado: ou a velha grava
+    // antes e esta recusa, ou esta revoga antes e a velha é largada na
+    // conferência dela. A ordem dos cadeados é a de `soltar_a_entrada_em`: o
+    // do slot, e dentro dele os de `Session::revogar`.
+    //
+    // Sem o cadeado não há sessão a recusar, como antes
+    // (`Session::connection` devolve `NotConnected`): revoga e segue.
+    //
     // **A geração nasce com a tentativa, e não com o sucesso.** O roteiro da
     // etapa E2 é explícito: «capturar a geração desde a tentativa de conexão».
     //
@@ -1119,7 +1130,15 @@ async fn connect<R: tauri::Runtime>(
     // E uma tentativa que falha também gasta um número, de propósito: ela pode
     // ter deixado tarefas pelo caminho, e as respostas delas não podem ser
     // admitidas pela tentativa seguinte.
-    let geracao = session.revogar();
+    let geracao = {
+        let slot = session.connection.lock();
+        if slot.as_ref().is_ok_and(|slot| slot.is_some()) {
+            return Err(ConnectionError::AlreadyConnected.into());
+        }
+        let geracao = session.revogar();
+        drop(slot);
+        geracao
+    };
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
@@ -2308,6 +2327,103 @@ mod a_entrada_velha_que_chega_tarde {
         assert!(
             vermelhos.is_empty(),
             "a velha substituída entre as duas conferências do `connect` tomou a sessão:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
+    /// **A nova que falha não deixa a velha órfã no slot** (M1 da revisão do
+    /// E54, a sonda P53).
+    ///
+    /// A ordem forçada: a nova passa pelo `AlreadyConnected` com o slot vazio
+    /// e para antes de revogar (o teste segura `mods_nativos`, que a revogação
+    /// toma antes de somar); a velha passa as duas conferências com a geração
+    /// dela ainda de pé; a nova revoga e falha (a porta 99999 não existe, e a
+    /// recusa sai sem rede nenhuma). A janela larga a velha, porque a nova é a
+    /// mais nova, e pede para soltá-la pela geração dela — que já não é a de
+    /// pé. Sem conferir o slot e revogar com o cadeado dele na mão, a velha
+    /// ficava no slot e presente no servidor deixado, e toda entrada seguinte
+    /// recebia `AlreadyConnected` até o app fechar.
+    async fn a_nova_falha_no_meio_da_velha() -> Vec<String> {
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let (novo, _servidor_novo) = servidor("Novo").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // A nova começa e para antes de revogar.
+        let (soltar_os_mods, quem_segura) =
+            segurar(move || app.state::<Session>().inner().mods_nativos.lock());
+        let nova = connect_noutra_thread(app, "127.0.0.1:99999".to_owned(), "nova");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert_eq!(
+            sessao.geracao(),
+            1,
+            "a nova revogou sem esperar os MODs, e a ordem não foi a forçada"
+        );
+
+        // A velha termina o aperto de mão e passa a primeira conferência.
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        assert!(
+            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
+            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
+             conferência, e a ordem não foi a forçada"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // A nova revoga e falha.
+        let _ = soltar_os_mods.send(());
+        quem_segura.join().expect("quem segurava os MODs caiu");
+        let da_nova = quando_terminar(nova, Duration::from_secs(10)).await;
+        assert!(da_nova.is_err(), "a nova a uma porta que não existe entrou");
+        let da_velha = quando_terminar(velha, Duration::from_secs(10)).await;
+
+        // A janela larga a velha, se ela voltou entrando.
+        if let Ok(entrada) = &da_velha {
+            let _ = super::soltar_a_entrada_em(&sessao, entrada.geracao);
+        }
+        if let Ok(conexao) = sessao.connection() {
+            vermelhos.push(format!(
+                "a velha ficou órfã no slot ({}): a janela a largou e o Rust não a soltou",
+                conexao.snapshot().server
+            ));
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a velha continua presente no servidor que a pessoa deixou ({no_velho})"
+            ));
+        }
+        let seguinte = quando_terminar(
+            connect_noutra_thread(app, novo.to_string(), "seguinte"),
+            Duration::from_secs(10),
+        )
+        .await;
+        if let Err(falha) = seguinte {
+            vermelhos.push(format!(
+                "a entrada seguinte não entrou: {}",
+                serde_json::to_string(&falha).unwrap_or_default()
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_nova_que_falha_no_meio_da_velha_nao_a_deixa_orfa_no_slot() {
+        let _vez = vez();
+        let vermelhos = runtime().block_on(a_nova_falha_no_meio_da_velha());
+        assert!(
+            vermelhos.is_empty(),
+            "a nova falhou no meio da velha, e a velha ficou com a sessão sem tela:\n  {}",
             vermelhos.join("\n  ")
         );
     }
