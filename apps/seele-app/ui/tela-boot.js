@@ -91,6 +91,18 @@ let ultimoApelido = null;
 let recusaDoApelido = null;
 
 /**
+ * Esquece a credencial que um apelido tomado deixou. É para quem segura o
+ * fechar da janela (a 21 da F7, `camada-hospedagem.js`): a página fica viva até
+ * o sim, e a credencial não pode ficar com ela. Este é o único jeito de outro
+ * script a esquecer sem nomeá-la, e por isso o guarda
+ * `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta` exige
+ * que o corpo só esqueça.
+ */
+function esquecerARecusaDoApelido() {
+  recusaDoApelido = null;
+}
+
+/**
  * **Quantas tentativas esta janela já começou** (lote W, rodada 1).
  *
  * Uma recusa por apelido só guarda a credencial se a tentativa dela ainda for
