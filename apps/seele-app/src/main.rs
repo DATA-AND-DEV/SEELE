@@ -17464,7 +17464,11 @@ mod a_saida_despede_as_hospedagens {
 
 #[cfg(test)]
 mod a_resposta_a_estou_no_meu_servidor {
-    use super::{endereco_desta_maquina, onde_estou_em, porta_desta_maquina, OndeEstou};
+    use super::{
+        corpo_de, endereco_desta_maquina, fonte_sem_comentarios, onde_estou_em,
+        porta_desta_maquina, Hospedado, Hospedagens, OndeEstou,
+    };
+    use seele_server::hospedagem::Hospedagem;
 
     /// A chave do guardado, a da sala e a de um servidor S qualquer.
     const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
@@ -17575,5 +17579,96 @@ mod a_resposta_a_estou_no_meu_servidor {
         for de_fora in ["192.168.0.7:8383", "casa.exemplo:8383", "203.0.113.7"] {
             assert!(!endereco_desta_maquina(de_fora), "{de_fora:?}");
         }
+    }
+
+    /// **As impressões das duas hospedagens, cada uma no seu lugar** (lote X da
+    /// F5, a impressão, commit D). `onde_estou_em` recebe a do guardado em
+    /// terceiro e a da sala em quarto; o par trocado diria `Guardado` na sala e
+    /// gravaria nela o sim de quem hospeda.
+    ///
+    /// Duas salas, e não um servidor guardado e uma sala, pela razão que
+    /// `a_saida_despede_as_hospedagens` escreve: este arquivo só sobe
+    /// hospedagem pelo ponto padrão. Sementes diferentes, chaves diferentes.
+    #[tokio::test]
+    async fn as_impressoes_saem_na_ordem_do_guardado_e_da_sala() {
+        let guardado = Hospedagem::iniciar_sala(0, &[3; 32], "casa", None)
+            .await
+            .expect("o guardado não subiu");
+        let sala = Hospedagem::iniciar_sala(0, &[4; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        let do_guardado = guardado.impressao_digital().to_owned();
+        let da_sala = sala.impressao_digital().to_owned();
+        assert_ne!(
+            do_guardado, da_sala,
+            "as duas hospedagens saíram com a mesma chave, e este teste não mede a ordem"
+        );
+
+        let mut hospedagens = Hospedagens {
+            guardado: Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            }),
+            pessoal: Some(Hospedado {
+                hospedagem: sala,
+                servidor: None,
+            }),
+        };
+        assert_eq!(
+            hospedagens.impressoes(),
+            (Some(do_guardado), Some(da_sala)),
+            "`Hospedagens::impressoes` não devolve a chave do guardado primeiro e a da sala \
+             depois: a sessão na sala passa por guardado, e o sim de quem hospeda vai a ela \
+             (ADR 0045)"
+        );
+
+        for hospedado in [hospedagens.guardado.take(), hospedagens.pessoal.take()]
+            .into_iter()
+            .flatten()
+        {
+            hospedado.hospedagem.encerrar().await;
+        }
+    }
+
+    /// **A ligação de `onde_estou_na`** (commit D). Os testes acima são puros:
+    /// recebem as impressões prontas. Este prende o que a função da sessão
+    /// passa a eles: a chave que a **conexão** conferiu em segundo, e as das
+    /// hospedagens, na ordem de `impressoes()`, em terceiro e quarto. Trocar a
+    /// chave da sessão pela do guardado diria `Guardado` em qualquer sessão
+    /// com o guardado de pé, e o sim de quem hospeda iria a S.
+    ///
+    /// Olha a chamada e as ligações que a alimentam, sem espaço e sem as
+    /// linhas de comentário, com as agulhas montadas por `concat!`.
+    #[test]
+    fn onde_estou_na_passa_a_chave_da_conexao_e_as_das_hospedagens() {
+        let fonte = fonte_sem_comentarios();
+        let corpo: String = corpo_de(&fonte, concat!("fn onde_estou_na", "(session"))
+            .chars()
+            .filter(|letra| !letra.is_whitespace())
+            .collect::<String>()
+            // A vírgula final que o rustfmt põe numa chamada partida em linhas.
+            .replace(",)", ")");
+        let ligacao = |nome: &str| {
+            corpo
+                .split_once(nome)
+                .and_then(|(_, depois)| depois.split_once(';'))
+                .map(|(ligacao, _)| ligacao.to_owned())
+                .unwrap_or_default()
+        };
+        let da_sessao = ligacao(concat!("let", "impressao="));
+        let das_hospedagens = ligacao(concat!("let(guardado,", "pessoal)="));
+        assert!(
+            da_sessao.starts_with(concat!("session.connection", "()"))
+                && da_sessao.contains(concat!(".impressao_do_", "servidor()"))
+                && das_hospedagens.contains(concat!(".impressoes", "()"))
+                && corpo.contains(concat!(
+                    "onde_estou_em(endereco.as_deref(),",
+                    "impressao.as_deref(),guardado.as_deref(),pessoal.as_deref())"
+                )),
+            "`onde_estou_na` deixou de passar a `onde_estou_em` a chave que a conexão conferiu \
+             em segundo e as das hospedagens, na ordem de `impressoes()`, em terceiro e \
+             quarto: a sessão em S ou na sala passa por guardado, e o sim de quem hospeda vai \
+             a ela (ADR 0045):\n{corpo}"
+        );
     }
 }
