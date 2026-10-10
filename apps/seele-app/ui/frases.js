@@ -1610,6 +1610,7 @@ const SO_NO_APP_DO_SEELE = (aparelho) => Object.freeze({
   mods: ["INSTALAR E LIGAR MODS", "Os MODs deste servidor rodam aqui. Instalar, ligar, desligar e aplicar MODs no servidor é de quem hospeda, pelo app do SEELE."],
   pacotes: ["PACOTES DE MOD", "O espaço que os pacotes ocupam, as revisões guardadas e o APAGAR ficam no app do SEELE."],
   codigo: ["LIGAR PELO CÓDIGO", "Ligar pelo código é pelo app do SEELE: o navegador não abre o caminho que a ligação usa."],
+  receber: ["RECEBER LIGAÇÕES PELO SEU CÓDIGO", "Receber ligações pelo SEU CÓDIGO é pelo app do SEELE: quem recebe a ligação a hospeda, e o navegador não hospeda."],
   versoes: ["VERSÕES LADO A LADO", "O navegador abre a página da versão do servidor que o link pede. Guardar e abrir outras versões é do app do SEELE."],
   telaEntrePessoas: ["A TELA ENTRE PESSOAS", `No navegador, a tela de quem transmite vem sempre pelo servidor, e ${aparelho} não a repassa a ninguém.`],
 });

@@ -1082,7 +1082,7 @@ def aba_ajustes(pg: Page) -> list[str]:
         fora = pg.evaluate("""(() => [...document.querySelectorAll('#cel-painel-fora .cel-fora-grupo')].map((g) => ({
             grupo: g.querySelector('.rotulo').textContent, itens: g.querySelectorAll('li').length,
             link: g.querySelector('a.cel-baixar')?.href ?? null })))()""")
-        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [7, 6]:
+        if [g["grupo"] for g in fora] != ["SÓ NO APP DO SEELE", "NO COMPUTADOR"] or [g["itens"] for g in fora] != [8, 6]:
             falhas.append(f"O QUE O CELULAR NÃO FAZ mostra {fora}")
         elif fora[0]["link"] != "https://seele.app.br/#baixar":
             falhas.append(f"HOSPEDAR UM SERVIDOR não leva a quem baixa o app: {fora[0]['link']}")
@@ -1893,7 +1893,7 @@ def casca_larga(pg: Page) -> list[str]:
         fora = pg.evaluate("""(() => { const p = document.getElementById('larga-painel-fora');
             return { grupos: [...p.querySelectorAll('.rotulo')].map((r) => r.textContent), itens: p.querySelectorAll('li').length,
                      link: p.querySelector('a')?.getAttribute('href') ?? null }; })()""")
-        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 7 or fora["link"] != "https://seele.app.br/#baixar":
+        if fora["grupos"] != ["SÓ NO APP DO SEELE"] or fora["itens"] != 8 or fora["link"] != "https://seele.app.br/#baixar":
             falhas.append(f"O QUE O NAVEGADOR NÃO FAZ mostra {fora}")
     return falhas
 
@@ -1952,6 +1952,42 @@ def microfone_negado(pg: Page) -> list[str]:
         falhas.append(f"com o microfone negado pelo navegador, ÁUDIO não diz nada: {visto}")
     if visto["botao"]:
         falhas.append("o botão dos ajustes do sistema aparece, e a página não os abre")
+    return falhas
+
+
+# As peças da sala pessoal da F7 (a53c1349, 086082d0): a faixa do toque, a
+# linha da sala na entrada e na sessão, e o SEU CÓDIGO no perfil.
+PECAS_DA_SALA_PESSOAL = ("toque", "boot-sala-estado", "sala-estado", "perfil-sala")
+
+
+def sala_pessoal(pg: Page) -> list[str]:
+    """O navegador não tem sala pessoal: as duas cascas dele escondem toda peça
+    com `data-sala-pessoal` (o contrato que a F7 escreveu no `index.html`), e o
+    SÓ NO APP DO SEELE diz que receber ligações pelo código é do app.
+
+    As peças nascem `hidden`, e no navegador a ponte responde neutro: «nenhuma
+    à vista» passaria sem regra nenhuma. O caso as mostra como o desktop as
+    mostraria (tira o `hidden` e põe texto) e exige que a casca as esconda."""
+    falhas = []
+    achadas = pg.evaluate("[...document.querySelectorAll('[data-sala-pessoal]')].map((e) => e.id)")
+    faltam = [i for i in PECAS_DA_SALA_PESSOAL if i not in achadas]
+    if faltam:
+        falhas.append(f"as peças da sala pessoal mudaram: faltam {faltam}, e há {achadas}")
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    vistas = pg.evaluate("""() => [...document.querySelectorAll('[data-sala-pessoal]')].map((e) => {
+        e.hidden = false;
+        if (!e.textContent.trim()) e.textContent = 'a sala pessoal diria algo aqui';
+        for (let n = e.parentElement; n; n = n.parentElement) n.hidden = false;
+        const b = e.getBoundingClientRect();
+        return getComputedStyle(e).display !== 'none' && b.width > 0 && b.height > 0 ? e.id : null;
+    }).filter(Boolean)""")
+    if vistas:
+        falhas.append(f"a casca do navegador deixa a sala pessoal à vista: {vistas}")
+    diz = pg.evaluate("[...document.querySelectorAll('.cel-fora-grupo, .larga-fora-grupo')].some((g) => g.textContent.includes('RECEBER LIGAÇÕES PELO SEU CÓDIGO'))")
+    if not diz:
+        falhas.append("o SÓ NO APP DO SEELE não diz que receber ligações pelo código é do app")
     return falhas
 
 
@@ -2070,6 +2106,9 @@ CASOS: dict[str, Caso] = {
     # O microfone negado pelo navegador, nas duas cascas (achado 3).
     "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
     "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
+    # A sala pessoal da F7, que o navegador não tem, nas duas cascas.
+    "sala-pessoal": Caso(levar=sala_pessoal, aparelhos=("390",), medir=False),
+    "sala-pessoal-larga": Caso(levar=sala_pessoal, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
     "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
