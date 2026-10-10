@@ -52,6 +52,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import urllib.parse
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
@@ -339,7 +340,11 @@ window.__TAURI__ = {
 
 CABECA_DO_ROTEIRO = """<script>
 window.__SEELE_RELATO = [];
-const relatar = (linha) => window.__SEELE_RELATO.push(linha);
+// **Sempre texto.** O relato viaja em JSON (ver `PE_DO_ROTEIRO`), que guarda o
+// tipo: um `relatar(n)` com um número chegava ao aparelho como número, e um
+// `relatar(undefined)` como `null`, e os dois o derrubavam. Antes do JSON, o
+// `join` convertia tudo em texto, e é isso que volta a valer.
+const relatar = (linha) => window.__SEELE_RELATO.push(String(linha));
 const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 const visivel = (id) => {
   const el = document.getElementById(id);
@@ -441,7 +446,26 @@ def main() -> int:
                          "cada um cobriria a do anterior.")
     if len(roteiros) > 1:
         return varios(opcoes, roteiros)
-    return 1 if carregar(opcoes, roteiros[0] if roteiros else None) else 0
+    return 1 if carregar_sem_cair(opcoes, roteiros[0] if roteiros else None) else 0
+
+
+def carregar_sem_cair(opcoes: argparse.Namespace, roteiro: pathlib.Path | None) -> list[str]:
+    """`carregar`, e um defeito do aparelho num roteiro vira motivo daquele
+    roteiro, e não uma lista parada no meio.
+
+    **A carga nunca pode cair.** Um traceback no meio de `varios` parava a
+    lista ali: os roteiros seguintes não rodavam, e o resumo que diz quem
+    reprovou não saía (M1 da revisão do lote RT). O traceback continua sendo
+    escrito, porque é o diagnóstico. A falta do navegador não passa por aqui:
+    ela é `SystemExit`, e para tudo de propósito.
+    """
+    try:
+        return carregar(opcoes, roteiro)
+    except Exception as erro:  # noqa: BLE001 — qualquer defeito vira motivo
+        traceback.print_exc(file=sys.stdout)
+        motivo = f"a carga caiu neste roteiro: {type(erro).__name__}: {erro}"
+        print(motivo)
+        return [motivo]
 
 
 def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
@@ -462,7 +486,7 @@ def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
     for roteiro in roteiros:
         print(f"roteiro: rodando {roteiro}")
         if roteiro.is_file():
-            motivos = carregar(opcoes, roteiro)
+            motivos = carregar_sem_cair(opcoes, roteiro)
         else:
             motivos = ["o arquivo do roteiro não existe"]
             print(motivos[0])
