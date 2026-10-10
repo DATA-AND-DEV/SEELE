@@ -39,6 +39,11 @@
     h,
     registrar: (nome, fn) => ajudantes.set(nome, fn),
     ajudante: (nome) => ajudantes.get(nome),
+    // O que um diálogo modal de MOD não deixa inerte (spec, §7): a faixa de voz
+    // e as abas, com o MUDO, o SAIR e AJUSTES, que é o caminho para desligar um
+    // MOD. O foco do teclado continua preso no diálogo. Quem pergunta é a pilha
+    // de inércia do `mods-superficies.js` (F3), que não lê a marca.
+    acordadosNoModal: () => [...document.querySelectorAll("#tela-sessao > .voz-celular, #tela-sessao > .cel-abas")],
   });
 
   const raiz = document.documentElement;

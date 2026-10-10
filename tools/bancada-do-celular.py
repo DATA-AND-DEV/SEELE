@@ -1261,6 +1261,73 @@ def retrato_da_casca(onde: str) -> Callable[[Page], list[str]]:
     return levar
 
 
+# Um MOD da API 6 de pé, pelo caminho de verdade: a instância ativa em
+# `modsCarregados`, e cada pedido pelo `atenderOMod`, o roteador que um MOD usa.
+# O mesmo da `apps/seele-app/bancada/camadas.cjs` da F3.
+MOD_DE_PE = """() => {
+  const mod = { id: 'teste/bancada', hash: 'h6', api: 6 };
+  const inst = new InstanciaDeMod(mod.id, mod.hash, geracaoDaSessao, {
+    pedirEncerramento() {}, async encerrou() { return true; },
+    entregar(m) { (window.__entregues ??= []).push(JSON.parse(JSON.stringify(m))); } });
+  inst.estado = ESTADOS_DE_MOD.ativa;
+  modsCarregados.set(mod.id, inst);
+  let n = 0;
+  window.__pedirAoProduto = (m) => atenderOMod(mod, inst, { ...m, n: ++n });
+}"""
+
+SUPERFICIES_DE_MOD = [
+    ("a página", {"id": "p", "tipo": "pagina", "titulo": "PÁGINA DE TESTE"}, ".pagina-de-mod"),
+    ("a página imersiva", {"id": "pi", "tipo": "pagina", "titulo": "IMERSIVA", "imersiva": True}, ".pagina-de-mod"),
+    ("o diálogo", {"id": "d", "tipo": "dialogo", "titulo": "DIÁLOGO DE TESTE"}, ".dialogo-de-mod"),
+    ("o aviso", {"id": "a", "tipo": "aviso", "titulo": "AVISO DE TESTE"}, "#avisos-de-mod > *"),
+]
+
+
+def superficies_de_mod(pg: Page) -> list[str]:
+    """Nenhuma superfície de MOD cobre a faixa de voz nem as abas (spec, §7; F3,
+    tarefa 7, passo 5d). Achado no protótipo: o diálogo do ESTILO em tela cheia
+    cobria o MUDO e AJUSTES, o único caminho para desligar um MOD no celular.
+
+    Cada superfície, aberta pelo roteador de verdade, termina acima da faixa e
+    das abas, e a saída dela tem 44. Com a página e o aviso, o MUDO e AJUSTES
+    recebem o toque. Com o diálogo modal e a página imersiva, o MUDO não está
+    coberto, mas ainda está inerte: deixá-lo acordado é a pilha de inércia da
+    F3 perguntando o `CELULAR.acordadosNoModal()`, e o caso passa a conferir o
+    toque quando ela entrar."""
+    falhas = []
+    ir_para_aba(pg, "conversa", falhas)
+    pg.evaluate(MOD_DE_PE)
+    medir = """(seletor) => {
+        const caixa = (e) => { const b = e.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.right), Math.round(b.bottom)]; };
+        const sup = [...document.querySelectorAll(seletor)].filter((e) => getComputedStyle(e).display !== 'none').at(-1);
+        const pe = [...document.querySelectorAll('#tela-sessao > .voz-celular, #tela-sessao > .cel-abas')].map((e) => e.getBoundingClientRect().top);
+        const centro = (id) => { const b = document.getElementById(id).getBoundingClientRect(); return document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); };
+        const sair = sup?.querySelector('.superficie-de-mod-sair');
+        return { superficie: sup ? caixa(sup) : null, pe: Math.min(...pe),
+                 mudo: centro('voz-mudo')?.closest('#voz-mudo') !== null, ajustes: centro('cel-aba-ajustes')?.closest('#cel-aba-ajustes') !== null,
+                 sair: sair ? Math.round(sair.getBoundingClientRect().height) : null };
+    }"""
+    for nome, descricao, seletor in SUPERFICIES_DE_MOD:
+        resposta = pg.evaluate("(d) => __pedirAoProduto({ tipo: 'superficie-criar', descricao: d }).then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))", descricao)
+        pg.wait_for_timeout(300)
+        if not resposta or not resposta.get("ok"):
+            falhas.append(f"o produto não abriu {nome}: {resposta}")
+            continue
+        visto = pg.evaluate(medir, seletor)
+        if visto["superficie"] is None:
+            falhas.append(f"{nome} abriu e não aparece")
+        elif visto["superficie"][3] > visto["pe"] or visto["superficie"][1] < 0:
+            falhas.append(f"{nome} cobre a faixa ou as abas: {visto['superficie']}, e o pé começa em {visto['pe']}")
+        if visto["sair"] is not None and visto["sair"] < 44:
+            falhas.append(f"a saída de {nome} tem {visto['sair']} de altura, e não 44")
+        if descricao["tipo"] == "aviso" or not descricao.get("imersiva") and descricao["tipo"] == "pagina":
+            if not visto["mudo"] or not visto["ajustes"]:
+                falhas.append(f"com {nome} aberta, o MUDO ou AJUSTES não recebe o toque: {visto}")
+        pg.evaluate("(id) => __pedirAoProduto({ tipo: 'superficie-fechar', superficie: id })", descricao["id"])
+        pg.wait_for_timeout(200)
+    return falhas
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1579,6 +1646,8 @@ CASOS: dict[str, Caso] = {
     "retrato-no-celular": Caso(levar=retrato_da_casca("celular"), aparelhos=("390",), medir=False),
     "retrato-na-larga": Caso(levar=retrato_da_casca("computador"), marca="larga", aparelhos=("1440",), medir=False),
     "retrato-no-desktop": Caso(levar=retrato_da_casca("computador"), marca="", aparelhos=("1440",), medir=False),
+    # As superfícies de MOD acima da faixa e das abas (Tarefa 11; F3, 5d).
+    "superficies-de-mod": Caso(levar=superficies_de_mod, raiz=".cel-topo, #voz, .cel-abas, #avisos-de-mod"),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),

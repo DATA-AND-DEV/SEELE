@@ -232,6 +232,32 @@
       [{ texto: PALAVRAS.fechar, fazer: () => {} }]);
   }
 
+  // ------------------------------------------------ o pé da moldura (§7)
+
+  // As superfícies de MOD moram acima do pé da sessão: os avisos do produto, a
+  // faixa de voz e as abas. `--cel-pe` é a distância do fim da sessão ao alto do
+  // primeiro deles que aparece, e o `celular-folhas.css` posiciona os palcos por
+  // ela. Medida, e não somada das alturas: a faixa só existe numa sala, os avisos
+  // vão e vêm, e o teclado põe a faixa no alto.
+  const PE = ":scope > :is(#veredito, #aviso-fone, #aviso-audio, .voz-celular, .cel-abas, .cel-telemetria)";
+  function medirOPe() {
+    const fim = sessao.getBoundingClientRect().bottom;
+    const altos = [...sessao.querySelectorAll(PE)]
+      .filter((e) => !e.hidden && getComputedStyle(e).display !== "none")
+      .map((e) => e.getBoundingClientRect().top);
+    sessao.style.setProperty("--cel-pe", `${Math.max(0, fim - Math.min(fim, ...altos))}px`);
+  }
+  // Pela caixa de borda, e não pela de conteúdo, que é o padrão: as abas crescem
+  // pela área segura de baixo como `padding` (com `box-sizing: border-box`), e a
+  // caixa de conteúdo delas não muda. Medido na bancada: pela de conteúdo, o
+  // observador às vezes não via a área segura chegar, e o diálogo terminava
+  // 34 px abaixo do alto da faixa.
+  const observador = new ResizeObserver(medirOPe);
+  observador.observe(sessao, { box: "border-box" });
+  for (const parte of sessao.querySelectorAll(PE)) observador.observe(parte, { box: "border-box" });
+  window.addEventListener("resize", medirOPe);
+  medirOPe();
+
   CELULAR.registrar("folhaDaMensagem", folhaDaMensagem);
   CELULAR.registrar("folhaDeAnexar", folhaDeAnexar);
   CELULAR.registrar("folhaDaPessoa", folhaDaPessoa);
