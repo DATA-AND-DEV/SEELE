@@ -1728,6 +1728,116 @@ const FRASES_DO_CELULAR = Object.freeze({
     // Na faixa de contexto de CONFIGURAÇÕES, no lugar do «segura ESPAÇO».
     modoSegurar: "microfone abre só enquanto o dedo está no SEGURE",
   }),
+  // A entrada (Tarefa 10; spec §2.1): a tela de início, a «ENTRAR EM», a de
+  // conectar e os desfechos. Os estados e os desfechos são os nomes da
+  // `identidade-web.js` (F4); as frases vêm do protótipo aprovado e, no que ele
+  // não cobria, da matriz (N-10, N-11, N-12 e a PA-53).
+  entrada: Object.freeze({
+    inicio: Object.freeze({
+      titulo: "SERVIDORES DESTE APARELHO",
+      vazio: "Nenhum servidor ainda. Abra um link de convite, ou cole um aqui.",
+      entrar: "ENTRAR",
+      servidor: (versao) => `Servidor ${versao}`,
+      // No lugar do ENTRAR, quando os hashes guardados do servidor venceram.
+      linkVencido: "LINK VENCIDO",
+      colar: "COLAR UM LINK",
+      campoDoLink: "O LINK QUE ALGUÉM TE MANDOU",
+      continuar: "CONTINUAR",
+      identidade: "Sua identidade mora neste navegador, neste aparelho.",
+      hospedarRotulo: "HOSPEDAR",
+      hospedar: "Hospedar um servidor é pelo app do SEELE, instalado num computador.",
+    }),
+    // O que o COLAR UM LINK recusa antes de abrir a «ENTRAR EM».
+    colado: Object.freeze({
+      soEndereco: Object.freeze(["UM ENDEREÇO SOZINHO NÃO ABRE CONEXÃO NO NAVEGADOR",
+        "O link traz a chave do servidor, e sem ela o navegador não conecta. Peça o link a quem hospeda."]),
+      doApp: Object.freeze(["ESTE LINK É PARA O APP DO SEELE",
+        "No navegador ele não traz o que confere o servidor. Peça a quem hospeda o link para o celular."]),
+    }),
+    entrarEm: Object.freeze({
+      titulo: "ENTRAR EM",
+      sobre: "Nada saiu deste aparelho ainda: a conexão só abre quando você tocar em ENTRAR.",
+      endereco: "ENDEREÇO",
+      impressao: "IMPRESSÃO DO SERVIDOR",
+      impressaoNota: "É a mesma que o SEELE de quem hospeda mostra. Quem atender com outra é recusado.",
+      versao: "VERSÃO",
+      vale: "O LINK VALE ATÉ",
+      apelido: "COMO OS OUTROS VÃO TE CHAMAR",
+      primeiraEntrada: "Ao entrar, este aparelho cria a identidade dele. Ela fica neste navegador: sem cópia e sem troca de aparelho.",
+      entrar: "ENTRAR",
+      agoraNao: "AGORA NÃO",
+      servidores: "SERVIDORES DESTE APARELHO",
+    }),
+    // A resposta do `navigator.storage.persist()` (ADR 0057), dita.
+    persistencia: Object.freeze({
+      concedida: "Este navegador guarda a sua identidade neste aparelho.",
+      negada: "Este navegador pode apagar a sua identidade se faltar espaço. Instalado na Tela de Início, ele guarda.",
+      "sem-suporte": "Este navegador não diz se guarda a sua identidade neste aparelho.",
+    }),
+    // Os estados da tentativa, antes do ENTRAR: [título, corpo].
+    estados: Object.freeze({
+      "numa-aba": Object.freeze({
+        titulo: "INSTALE ANTES DE ENTRAR",
+        corpo: "Você está numa aba do navegador. A identidade nasce onde você entra, e a aba e o ícone da Tela de Início não se enxergam: quem entra pela aba e depois instala vira outra pessoa, já sem convite.",
+        passos: Object.freeze(["Toque em Compartilhar.", "Toque em Adicionar à Tela de Início.", "Abra o SEELE pelo ícone e cole este link."]),
+        copiar: "COPIAR O LINK",
+        copiado: "LINK COPIADO. Cole na tela de início do SEELE instalado.",
+        naoCopiou: "O navegador não deixou copiar. Copie o link da mensagem em que ele chegou.",
+        instalar: "INSTALAR",
+      }),
+      vencido: Object.freeze({
+        titulo: (data) => `ESTE LINK VENCEU EM ${data}`,
+        corpo: "O navegador só abre a conexão com o certificado que o link anuncia, e ele expirou. Peça um link novo a quem hospeda.",
+      }),
+      "servidor-0.15": Object.freeze({
+        titulo: "ESTE LINK É DE UM SERVIDOR 0.15",
+        corpo: "O celular entra só no Servidor 1.0. Abra o link no app do SEELE, ou peça a quem hospeda o Servidor 1.0.",
+      }),
+      incompleto: Object.freeze({
+        titulo: "LINK INCOMPLETO",
+        corpo: "Falta a impressão do servidor ou o certificado do navegador. Sem os dois não há como conferir quem responde, e o navegador não abre a conexão. Peça o link de novo, copiado inteiro.",
+      }),
+      "outra-origem": Object.freeze({
+        titulo: "ESTE LINK É DE OUTRA PÁGINA DO SEELE",
+        corpo: "A sua identidade mora nesta página. Entrar pela outra cria outra pessoa, sem o que você tem aqui.",
+      }),
+      "ja-conhecido": Object.freeze({
+        titulo: "ESTE APARELHO JÁ ENTRA NESTE SERVIDOR",
+        corpo: "Você entra com a identidade que já tem aqui, e o convite não é usado.",
+      }),
+    }),
+    // Os desfechos do ENTRAR que não abrem a sessão: [título, corpo].
+    desfechos: Object.freeze({
+      "apelido-tomado": Object.freeze(["ESTE APELIDO JÁ É DE OUTRA CHAVE NESTE SERVIDOR",
+        "Se for outra pessoa, escolha outro. Se for você, este aparelho perdeu a identidade, e quem hospeda libera o nome. O convite continua valendo."]),
+      "convite-gasto": Object.freeze(["ESTE CONVITE JÁ FOI USADO",
+        "Cada convite entra uma vez. Peça um link novo a quem hospeda."]),
+      "convite-vencido": Object.freeze(["ESTE CONVITE VENCEU",
+        "Peça um link novo a quem hospeda."]),
+      // A PA-53: o navegador não separa servidor fora do ar de chave trocada.
+      "sem-rede": Object.freeze(["O SERVIDOR NÃO ABRIU A CONEXÃO",
+        "Ele pode estar fora do ar, ou este link não é mais dele. O convite continua valendo: tente de novo."]),
+      recusado: Object.freeze(["O SERVIDOR RECUSOU A ENTRADA", "O motivo que ele deu:"]),
+      // Os hashes guardados de um servidor deste aparelho venceram (os
+      // certificados do navegador são curtos), e a sessão não trouxe novos.
+      "link-vencido": Object.freeze(["O LINK DESTE SERVIDOR VENCEU",
+        "Este aparelho só entra com um link em dia. Peça um link novo a quem hospeda, e cole aqui."]),
+      "sem-tentativa": Object.freeze(["ESTE LINK NÃO ESTÁ MAIS ABERTO",
+        "Abra o link de novo, ou cole-o na tela de início."]),
+      // Enquanto a página não cria a identidade dela (a 3.4 e a 2.6 da F4), um
+      // link colado não tem onde abrir.
+      "sem-identidade": Object.freeze(["ESTA PÁGINA AINDA NÃO ENTRA EM SERVIDOR",
+        "A entrada pelo navegador ainda não está pronta nesta versão. Use o app do SEELE."]),
+    }),
+    conectando: "CONECTANDO A",
+    // Na espera da portaria, o que o celular faz com ela (spec §2.1).
+    esperaPausa: "Com esta página fora da tela, em outro app ou com a tela apagada, a verificação para, e volta quando você volta a ela.",
+    // O registro e o anúncio da entrada sem o aperto (D-celular-3, P11).
+    entradaDireta: Object.freeze({
+      registro: "IMPRESSÃO CONFERIDA NA ENTRADA — ENTRANDO",
+      anuncio: "Impressão conferida. Entrando no servidor.",
+    }),
+  }),
 });
 
 const FRASES_DA_LARGA = (() => {
