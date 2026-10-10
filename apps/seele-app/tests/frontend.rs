@@ -11319,6 +11319,16 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
         hospedar.contains("nossoServidorEm = anfitriao.aqui"),
         "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
     );
+    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). A dispensa
+    // é `nossoServidorEm === ultimoAlvo`: entrando por outro endereço, quem
+    // hospeda volta a ser mandado conferir a própria chave. O sim de quem
+    // hospeda não depende mais disto: desde a impressão, o Rust reconhece o
+    // servidor daqui pela chave (`onde_estou_em`), entre por onde entrar.
+    assert!(
+        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
+        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: a \
+         dispensa de conferir a própria chave não casa com o alvo: {hospedar}"
+    );
 
     // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
     // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
@@ -14439,6 +14449,65 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
     }
 }
 
+/// **Só a atualização pela gestão reaplica o MOD no servidor que esta janela
+/// hospeda** — lote X da F5, ADR 0045.
+///
+/// `instalar_mod_do_catalogo` serve a dois usos, e o `main.rs` decide pelo que
+/// a janela diz (`UsoDoCatalogo`). Obter o que outro servidor exige reaplicava
+/// no servidor hospedado aqui e trocava a versão que ele exige pela do outro:
+/// na pergunta dos MODs, também depois de a pessoa desistir dela, e na sessão
+/// que já aceitou. Cada chamada da janela diz o seu uso, e o uso certo.
+#[test]
+fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
+    let camada = read("ui/camada-mods.js");
+    let base = read("ui/base.js");
+    let chamadas = [
+        (
+            js_function(&camada, "async function obterOConjunto("),
+            "obter",
+            "a obtenção da pergunta dos MODs de outro servidor",
+        ),
+        (
+            js_function(&base, "async function buscarOQueFaltaSeJaFoiAceito("),
+            "obter",
+            "a obtenção da sessão que já aceitou",
+        ),
+        (
+            js_function(&camada, "async function instalarDoCatalogo("),
+            "atualizar",
+            "a atualização pela gestão (QA-01)",
+        ),
+    ];
+    for (corpo, uso, quem) in &chamadas {
+        assert!(
+            corpo.contains("invoke(\"instalar_mod_do_catalogo\"")
+                && corpo.contains(&format!("uso: \"{uso}\"")),
+            "{quem} não diz `uso: \"{uso}\"` ao `instalar_mod_do_catalogo`: a obtenção para \
+             outro servidor troca o MOD do servidor hospedado aqui, ou a atualização pela \
+             gestão deixa o servidor exigindo a versão antiga:\n{corpo}"
+        );
+    }
+
+    // E nenhuma outra chamada, nem uma sem uso: o comando recusa a que não diz,
+    // e uma chamada nova tem de entrar aqui com o uso dela.
+    let todas = without_comments(&scripts());
+    let usos: Vec<bool> = todas
+        .split("invoke(\"instalar_mod_do_catalogo\"")
+        .skip(1)
+        .map(|depois| {
+            depois
+                .split_once(')')
+                .is_some_and(|(argumentos, _)| argumentos.contains("uso: \""))
+        })
+        .collect();
+    assert_eq!(
+        usos, [true; 3],
+        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+         sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
+         reaplicar no servidor hospedado aqui sem ninguém ter decidido"
+    );
+}
+
 /// **Nada da sessão anterior é admitido na seguinte** — etapa E2.
 ///
 /// O contrato de API própria, §5: «revogar a geração: a partir desse ponto,
@@ -15589,19 +15658,24 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 /// Um campo servindo a duas perguntas responde mal a uma delas. São dois
 /// campos, e este guarda cobra as duas metades: que `aplicar_mod` leia o certo,
 /// e que o certo seja preenchido antes de qualquer condição sobre o endereço.
+///
+/// Desde a rodada 1 do lote X da F5, `aplicar_mod` grava o sim por
+/// `gravar_o_sim_de_quem_hospeda`, que só o grava quando a sessão é com o
+/// servidor daqui. É ali que o endereço desta sessão é lido.
 #[test]
 fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let fonte = read("src/main.rs");
 
     let aplicar = body_of(&fonte, "async fn aplicar_mod");
+    let grava = body_of(&fonte, "fn gravar_o_sim_de_quem_hospeda");
     assert!(
-        aplicar.contains("endereco_da_sessao"),
-        "`aplicar_mod` não lê o endereço desta sessão: {aplicar}"
+        aplicar.contains("gravar_o_sim_de_quem_hospeda(") && grava.contains("endereco_da_sessao"),
+        "`aplicar_mod` não grava o sim pelo endereço desta sessão: {aplicar}\n{grava}"
     );
     assert!(
-        !aplicar.contains("session.alvo"),
+        !aplicar.contains("session.alvo") && !grava.contains("session.alvo"),
         "`aplicar_mod` lê `alvo`, que é «onde voltar» e está vazio justamente \
-         quando quem liga o MOD é quem hospeda:\n{aplicar}"
+         quando quem liga o MOD é quem hospeda:\n{aplicar}\n{grava}"
     );
 
     // E o preenchimento vem antes da condição que exclui o servidor local.
