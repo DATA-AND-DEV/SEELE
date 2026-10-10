@@ -490,13 +490,26 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
     None
 }
 
+/// Se o corpo lê o campo `.nome`, em qualquer grafia: no fim da linha (o
+/// `rustfmt` quebra a cadeia em um elo por linha), antes de `.lock()` ou de um
+/// `)`. Com fronteira de palavra: `.salas` e `.sala_x` não contam.
+fn le_o_campo(corpo: &str, nome: &str) -> bool {
+    let agulha = format!(".{nome}");
+    corpo.match_indices(&agulha).any(|(onde, _)| {
+        corpo[onde + agulha.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })
+}
+
 /// **O critério da hospedagem, comando a comando** (`F4/ponte-no-pc.md`, o
 /// último item; pedido pela orquestradora em 09/10).
 ///
 /// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
 /// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
-/// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`) está numa
-/// de três listas, e nunca solto
+/// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`, e a leitura
+/// dos campos `.sala` e `.toques`) está numa de três listas, e nunca solto
 /// entre os atendidos:
 /// 1. `RECUSAS_NOMEADAS`;
 /// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
@@ -520,26 +533,28 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
         // que só lia `.hospedagem` passou a ler `.hospedagens`.
         // `.sala` e `.toques` pela sala viva da F7: o `estado_da_sala` e o
         // `toques_agora` leem `Session::sala` e `Session::toques`, e são neutros
-        // («não há sala neste lugar»). Na grafia do corpo, que o `rustfmt` quebra
-        // em uma linha por elo da cadeia.
-        let toca = [
-            "hospedagem",
-            "hospedagens",
-            "persistence_hospedada",
-            "portaria::",
-            "persistence_do_mod",
-            // O ajudante da F3 que acha o servidor de um MOD pelas hospedagens
-            // (`38421122`, na 0.16/api-6), e a sala pessoal da F7, que mexe nas
-            // hospedagens de dentro do `sala.rs` (`sala::subir`,
-            // `sala::desligar`, na 0.16/sala-viva). Um comando que só chame um
-            // deles mexe na hospedagem sem escrever a palavra no corpo.
-            "servidor_do_mod",
-            "sala::",
-            ".sala\n",
-            ".toques\n",
-        ]
-        .iter()
-        .any(|marca| corpo.contains(marca));
+        // («não há sala neste lugar»). Pela leitura do campo com fronteira de
+        // palavra (`le_o_campo`), e não pela grafia de uma linha: a marca
+        // `".sala\n"` só pegava o campo no fim da linha, e um comando que o lesse
+        // numa linha só (`session.sala.lock()`) escapava calado.
+        let toca = le_o_campo(&corpo, "sala")
+            || le_o_campo(&corpo, "toques")
+            || [
+                "hospedagem",
+                "hospedagens",
+                "persistence_hospedada",
+                "portaria::",
+                "persistence_do_mod",
+                // O ajudante da F3 que acha o servidor de um MOD pelas hospedagens
+                // (`38421122`, na 0.16/api-6), e a sala pessoal da F7, que mexe nas
+                // hospedagens de dentro do `sala.rs` (`sala::subir`,
+                // `sala::desligar`, na 0.16/sala-viva). Um comando que só chame um
+                // deles mexe na hospedagem sem escrever a palavra no corpo.
+                "servidor_do_mod",
+                "sala::",
+            ]
+            .iter()
+            .any(|marca| corpo.contains(marca));
         if toca {
             mexem.insert(comando);
         }
