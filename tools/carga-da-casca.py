@@ -46,9 +46,11 @@ rodam, cada um com a lista inteira da pasta (o teste
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -424,6 +426,38 @@ def navegador() -> str:
     raise SystemExit(2)
 
 
+def rodar_navegador(comando: list[str], prazo_s: float) -> tuple[str, bool]:
+    """Roda o navegador e devolve o que ele escreveu e se o prazo venceu.
+
+    **Num grupo de processos só dele, e o prazo mata o grupo inteiro.** Um
+    roteiro que gira para sempre (`for (;;) {}`) prende o renderer, e o
+    navegador nunca sai, nem com o orçamento de tempo virtual. Sem prazo aqui,
+    quem parava a carga era o prazo de quem chamou, e o `kill -9` da etapa do
+    `publicar.sh` atinge só o subshell: o Python da carga e o
+    `chrome-headless-shell` ficavam órfãos, com o renderer a 100% de CPU, depois
+    de 40 minutos de espera (M2 da revisão do lote RT, medido de novo aqui).
+
+    O grupo, e não só o processo principal: o renderer, o da GPU e o
+    utilitário são filhos dele. No macOS, matar só o principal bastou (medido:
+    nenhum filho vivo 3 s depois); no Linux do CI não foi medido, e o grupo
+    cobre os dois sem depender de como cada sistema trata os filhos.
+    """
+    processo = subprocess.Popen(
+        comando,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        saida, erro = processo.communicate(timeout=prazo_s)
+        return saida + erro, False
+    except subprocess.TimeoutExpired:
+        os.killpg(processo.pid, signal.SIGKILL)
+        saida, erro = processo.communicate()
+        return (saida or "") + (erro or ""), True
+
+
 def main() -> int:
     argumentos = argparse.ArgumentParser(description=__doc__)
     # Repetível. Antes, o segundo `--roteiro` tomava o lugar do primeiro em
@@ -439,6 +473,12 @@ def main() -> int:
     # Todo `console.*` da página, e não só os estouros: quando a casca falha em
     # silêncio, o `console.warn` é o que ela tinha para dizer.
     argumentos.add_argument("--tudo", action="store_true")
+    # Quanto um roteiro pode levar, em segundos de verdade, antes de a carga
+    # matar o navegador e reprová-lo. O orçamento de tempo virtual é de 5 s, e
+    # cada roteiro de hoje leva menos de um segundo neste Mac; 60 é folga para
+    # um runner lento, e não para um roteiro que gira para sempre (ver
+    # `rodar_navegador`).
+    argumentos.add_argument("--prazo-por-roteiro", type=float, default=60.0)
     opcoes = argumentos.parse_args()
     roteiros = opcoes.roteiro or []
     if len(roteiros) > 1 and opcoes.foto:
@@ -523,7 +563,7 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
         )
         pagina.write_text(texto[:corte] + duble + texto[corte:] + roteiro)
 
-        saida = subprocess.run(
+        tudo, venceu = rodar_navegador(
             [
                 navegador(),
                 "--headless",
@@ -542,14 +582,12 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
                 "--screenshot=" + str(pasta / "foto.png"),
                 f"file://{pagina}",
             ],
-            capture_output=True,
-            text=True,
+            opcoes.prazo_por_roteiro,
         )
 
-        if opcoes.foto:
+        if opcoes.foto and (pasta / "foto.png").exists():
             shutil.copy(pasta / "foto.png", opcoes.foto)
 
-    tudo = saida.stdout + saida.stderr
     # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
     # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
     estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
@@ -565,7 +603,10 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
     # dentro do orçamento de tempo não é uma carga limpa — e as três coisas
     # terminavam com «carga limpa» antes.
     falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
-    if roteiro_pedido and not relatos:
+    if venceu:
+        falhas.append(f"o roteiro não terminou em {opcoes.prazo_por_roteiro:g} s, e o "
+                      "navegador que a carga abriu foi morto com os filhos dele")
+    elif roteiro_pedido and not relatos:
         falhas.append("o roteiro não chegou ao fim: nenhum relato saiu da página")
 
     if opcoes.tudo:
