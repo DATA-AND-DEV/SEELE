@@ -70,9 +70,12 @@ nada dependa da memória de uma conversa.
   «fala o ENC/2 em toda família que respondeu», com o relógio do ponto a 0 s do daqui.
   **O `--barulhento` saiu**, também com o sim do dono: ele gravava no journal quem
   encontrava quem; o drop-in foi movido para `/opt/seele/barulhento.conf.2026-10-10.bak`.
-  **Fica uma coisa para o dono:** o IPv6 do ponto (`[2001:19f0:b800:1bf5:5400:6ff:fe97:3c3b]:8384`)
-  não responde de fora, antes e depois da troca, com o `ufw` liberando 8384/udp nas duas
-  famílias e o serviço ouvindo em `[::]:8384`. A suspeita é o firewall do provedor.
+  **O IPv6 do ponto não foi conferido de fora.** A máquina da orquestradora não tem rota
+  IPv6 (o `ssh -6` e o `ping6` à VPS dão «No route to host»), então o silêncio do IPv6 no
+  `sondar` era dela, e não do ponto. Uma suspeita registrada antes, a do firewall do
+  provedor, não tinha base e foi retirada. Na VPS: o serviço ouve em `[::]:8384`, e o `ufw`
+  libera 8384/udp nas duas famílias. Falta rodar o `sondar --exige-enc2` de uma máquina
+  com IPv6.
 - **O indexador, antes dos pacotes da API 6** (conferido pelo ESTILO em `SEELE-MODS-INDEXER/ferramentas/manifesto.py`); do dono, no `SEELE-MODS-INDEXER`:
   1. a chave `tema` em `CHAVES` e em `TIPOS`, como booleana (`:49-50`; hoje uma chave desconhecida sai `malformed`, `:144-146`), e levada ao catálogo para o site dizer «muda a aparência do servidor»;
   2. `VERSAO_DA_API` de 5 para 6 (`:20`; hoje a 4.0.0 sai `api-too-new`, `:186-187`);
