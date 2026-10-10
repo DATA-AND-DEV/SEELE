@@ -987,6 +987,92 @@ def chamada(pg: Page) -> list[str]:
     return falhas
 
 
+def palco_de_mods(pg: Page) -> list[str]:
+    """O palco dos MODs na CHAMADA (`chamada.palco`, c7c64814 da F3): a vista
+    alternativa à grade, que começa atrás. Um MOD o contribui pelo roteador;
+    VER O PALCO aparece na barra da chamada, com 44 de alvo, e o traz à
+    frente. O palco toma a CHAMADA do que vem antes dele (a barra, e o palco
+    da transmissão, que é o aviso de quem compartilha e fica como no desktop)
+    até a faixa, sem a grade, com
+    o que o MOD desenhou à vista e recebendo o toque, e o MOD ouve o `lugar`
+    com o tamanho do miolo. VER A GRADE, também com 44, devolve a grade sem
+    desmontar o palco. Termina com o palco à frente, para a foto."""
+    falhas = []
+    # O `lugar` só vai a um MOD de uma geração de pé, e o duble não entra em
+    # nenhuma (a mesma entrada da `bancada/palco-da-chamada.cjs` da F3).
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'chamada.palco', modo: 'substituir',
+        conteudo: [{ forma: 'texto', chave: 't', dentro: 'SONDA DO PALCO' }, { forma: 'botao', chave: 'b', dentro: 'APERTE' }] } })
+        .then(() => (window.__entregues ?? []).filter((m) => m.tipo === 'resposta').at(-1))""")
+    if not tocar(pg, "#voz .voz-sala"):
+        return ["não há como abrir a CHAMADA pela faixa"]
+    esperar_quadro(pg)
+    alvo = """(s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+        const b = e.getBoundingClientRect(); const c = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { altura: Math.round(b.height), noAlto: !!c && (e.contains(c) || c.contains(e)) }; }"""
+    ver = pg.evaluate(alvo, "#palco-de-mods-ver-o-palco")
+    if not ver or not ver["noAlto"] or ver["altura"] < 44:
+        falhas.append(f"com um palco de MOD na sala, VER O PALCO não está ao alcance: {ver}")
+        return falhas
+    pg.evaluate("window.__entregues.length = 0")
+    tocar(pg, "#palco-de-mods-ver-o-palco")
+    pg.wait_for_timeout(400)
+    visto = pg.evaluate("""() => {
+        const r = (s) => { const e = document.querySelector(s); if (!e || e.closest('[hidden]') || getComputedStyle(e).display === 'none') return null;
+            const b = e.getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width), Math.round(b.height)]; };
+        const sonda = [...document.querySelectorAll('#palco-de-mods-miolo *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA DO PALCO');
+        const sb = sonda?.getBoundingClientRect();
+        const noCentro = sb && document.elementFromPoint(sb.left + sb.width / 2, sb.top + sb.height / 2);
+        const lugar = (window.__entregues ?? []).filter((m) => m.nome === 'lugar' && m.regiao === 'chamada.palco').at(-1);
+        const miolo = document.getElementById('palco-de-mods-miolo');
+        const antes = document.getElementById('palco-de-mods').previousElementSibling;
+        let anterior = antes;
+        while (anterior && (anterior.hidden || getComputedStyle(anterior).display === 'none')) anterior = anterior.previousElementSibling;
+        return { palco: r('#palco-de-mods'), anterior: anterior ? [anterior.id || anterior.className, Math.round(anterior.getBoundingClientRect().bottom)] : null,
+                 grade: r('#chamada-grade'), voz: r('#voz'),
+                 vista: r('#vista-chamada'), miolo: [miolo.clientWidth, miolo.clientHeight],
+                 sonda: !!noCentro && (sonda.contains(noCentro) || noCentro.contains(sonda)),
+                 lugar: lugar ? [lugar.largura, lugar.altura] : null,
+                 quem: document.getElementById('palco-de-mods-quem').textContent,
+                 vaza: document.documentElement.scrollWidth > innerWidth }; }""")
+    if not visto["palco"]:
+        falhas.append("VER O PALCO não trouxe o palco à frente")
+        return falhas
+    if visto["grade"]:
+        falhas.append(f"com o palco à frente, a grade continua à vista: {visto['grade']}")
+    p, a, z, v = visto["palco"], visto["anterior"], visto["voz"], visto["vista"]
+    if a and abs(p[0] - a[1]) > 1:
+        falhas.append(f"o palco não começa logo abaixo de {a[0]}: palco {p}, {a[0]} termina em {a[1]}")
+    if abs(p[1] - v[1]) > 1 or p[1] > z[0] + 1:
+        falhas.append(f"o palco não vai até a faixa, ou passa dela: palco {p}, vista {v}, faixa {z}")
+    if visto["miolo"][1] < 200:
+        falhas.append(f"o miolo do palco tem {visto['miolo'][1]} de altura")
+    if not visto["sonda"]:
+        falhas.append("o que o MOD desenhou no palco não está à vista ou não recebe o toque")
+    if visto["lugar"] != visto["miolo"]:
+        falhas.append(f"o MOD ouviu o lugar {visto['lugar']}, e o miolo tem {visto['miolo']}")
+    if "teste/bancada" not in visto["quem"]:
+        falhas.append(f"a barra do palco não diz de quem ele é: «{visto['quem']}»")
+    if visto["vaza"]:
+        falhas.append("com o palco à frente, a página rola de lado")
+    grade = pg.evaluate(alvo, "#palco-de-mods-ver-a-grade")
+    if not grade or not grade["noAlto"] or grade["altura"] < 44:
+        falhas.append(f"VER A GRADE não está ao alcance: {grade}")
+    else:
+        tocar(pg, "#palco-de-mods-ver-a-grade")
+        pg.wait_for_timeout(400)
+        depois = pg.evaluate("""() => ({ palco: !document.getElementById('palco-de-mods').hidden,
+            montado: document.getElementById('palco-de-mods-miolo').childElementCount > 0,
+            grade: getComputedStyle(document.getElementById('chamada-grade')).display !== 'none',
+            volta: !document.getElementById('palco-de-mods-ver-o-palco').hidden })""")
+        if depois != {"palco": False, "montado": True, "grade": True, "volta": True}:
+            falhas.append(f"VER A GRADE não devolveu a grade com o palco montado e a volta à vista: {depois}")
+        tocar(pg, "#palco-de-mods-ver-o-palco")
+        pg.wait_for_timeout(300)
+    return falhas
+
+
 def ajustes_medida(pg: Page) -> list[str]:
     """A medida da Tarefa 9: as seções de `#tela-server` viram páginas da aba
     AJUSTES só com o CSS e o celular-ajustes.js, sem mudar o tela-server.js?"""
@@ -1287,6 +1373,10 @@ MOD_DE_PE = """() => {
     pedirEncerramento() {}, async encerrou() { return true; },
     entregar(m) { (window.__entregues ??= []).push(JSON.parse(JSON.stringify(m))); } });
   inst.estado = ESTADOS_DE_MOD.ativa;
+  // Como o carregador faz (`base.js`): sem a API na instância, tudo o que
+  // pergunta pelas capacidades dela (o `lugar` do palco, os eventos da tela)
+  // a via sem nenhuma.
+  inst.api = Number(mod.api) || 0;
   modsCarregados.set(mod.id, inst);
   let n = 0;
   window.__pedirAoProduto = (m) => atenderOMod(mod, inst, { ...m, n: ++n });
@@ -1485,6 +1575,9 @@ REGIOES_DO_CELULAR = [
     ("conversa.mensagem", "conversa", "alvo: String(mensagens.at(-1).id), ", True),
     ("compositor", "conversa", "", False),
     ("pessoas.lista", "pessoas", "", False),
+    # O palco começa atrás da grade, e é o caso `palco-de-mods` que o traz à
+    # frente e confere a casa dele; aqui ele entra na lista declarada.
+    ("chamada.palco", None, "", False),
 ]
 
 
@@ -1499,11 +1592,13 @@ def regioes_do_celular(pg: Page) -> list[str]:
     falhas = []
     declaradas = pg.evaluate("CELULAR.regioes instanceof Set ? [...CELULAR.regioes].sort() : null")
     if declaradas != sorted(r for r, *_ in REGIOES_DO_CELULAR):
-        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as sete do celular")
+        falhas.append(f"o CELULAR.regioes declara {declaradas}, e não as {len(REGIOES_DO_CELULAR)} do celular")
     # Cada uma, como um MOD a usaria: uma contribuição pelo roteador, e o texto
     # dela à vista na aba, recebendo o toque.
     pg.evaluate(MOD_DE_PE)
     for regiao, aba, extra, redesenhar in REGIOES_DO_CELULAR:
+        if aba is None:
+            continue
         if not ir_para_aba(pg, aba, falhas):
             continue
         pg.wait_for_timeout(250)
@@ -2106,6 +2201,8 @@ CASOS: dict[str, Caso] = {
     # O microfone negado pelo navegador, nas duas cascas (achado 3).
     "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
     "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
+    # O palco dos MODs na CHAMADA (chamada.palco, c7c64814 da F3).
+    "palco-de-mods": Caso(levar=palco_de_mods, raiz="#vista-chamada"),
     # A sala pessoal da F7, que o navegador não tem, nas duas cascas.
     "sala-pessoal": Caso(levar=sala_pessoal, aparelhos=("390",), medir=False),
     "sala-pessoal-larga": Caso(levar=sala_pessoal, marca="larga", aparelhos=("1440",), medir=False),

@@ -49,10 +49,12 @@
     // casca, e a fileira da CHAMADA tem a altura das abas e as quatro medidas.
     // Uma contribuição nele recebe `regiao-ausente`, em vez de desenhar num nó
     // escondido sem o MOD saber. Quem pergunta é o `aCascaTemARegiao`, no
-    // `base.js`, e a bancada confere que cada uma tem caixa à vista.
+    // `base.js`, e a bancada confere que cada uma tem caixa à vista. O palco
+    // dos MODs (`chamada.palco`) mora na CHAMADA, no lugar da grade, e começa
+    // atrás dela: o caso `palco-de-mods` o traz à frente e mede a casa dele.
     regioes: new Set([
       "redes", "servidor.navegacao", "operador.barra", "canal.cabecalho",
-      "conversa.mensagem", "compositor", "pessoas.lista",
+      "conversa.mensagem", "compositor", "pessoas.lista", "chamada.palco",
     ]),
     // Onde o tema de uma região pinta, quando não é o contêiner do desktop
     // (17i da F3, item 3; o `escreverAsRegioesDoTema` os procura no documento

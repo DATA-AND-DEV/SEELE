@@ -928,6 +928,26 @@
   accent-color: var(--seele-laranja-nerv);
 }
 
+/* **O palco dos MODs** (`chamada.palco`, F3): com ele à frente, a grade sai,
+   como no desktop. A regra do desktop perde para a grade em duas colunas
+   desta casca, que vem depois com a mesma especificidade. O palco da
+   transmissão fica: é o aviso de quem compartilha e a escolha das telas. */
+:root[data-casca="celular"] #vista-chamada[data-palco-de-mods] > #chamada-grade {
+  display: none;
+}
+
+/* A barra do palco quebra fileira (o «PALCO DE …» com dois MODs, o texto do
+   sistema maior) e respeita as bordas do aparelho. */
+:root[data-casca="celular"] .palco-de-mods-barra {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  padding: 4px calc(16px + var(--cel-seguro-dir)) 4px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .palco-de-mods-quem {
+  flex: 1 1 12ch;
+}
+
 /* A grade em duas colunas, cada cartão numa placa opaca. O volume das dez
    celas do desktop sai do cartão: ele mora na folha da pessoa. */
 :root[data-casca="celular"] #chamada-grade {
