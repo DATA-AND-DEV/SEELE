@@ -8017,9 +8017,13 @@ async fn escolher_o_tema_do_servidor(
 // de gravar o sim a pergunta não teria resposta possível — a pessoa leria a
 // lista e não teria o que fazer com ela.
 //
-// **A tela que mostra a lista e tem o botão ainda não existe**, e está fora
-// desta etapa. O que existe é a superfície: os mesmos três verbos que a tela
-// vai chamar, no mesmo lugar em que `habilitar_mod` já espera a dela.
+// **A tela que mostra a lista e tem o botão é `ui/camada-mods.js`**, desde
+// 17/09/2026 (`65ad0653`). Ela abre a pergunta com o que chegou no
+// `ModsNaoAceitos`, pergunta a `aceite_de_mods` se a lista mudou desde o
+// último sim, e chama `aceitar_mods` quando a pessoa aceita. O
+// `esquecer_aceite_de_mods` é chamado por ela, para desfazer o sim de quem
+// desistiu enquanto ele era gravado, e pela seção MODS de CONFIGURAÇÕES, no
+// mesmo arquivo.
 
 /// O conjunto de MODs que esta máquina já aceitou para este servidor, se algum.
 ///
