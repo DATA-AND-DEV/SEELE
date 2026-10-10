@@ -526,6 +526,9 @@ function desenhar(snapshot) {
   desenharAviso(snapshot);
   desenharAvisoDeFone(snapshot);
   desenharAberturaDoAudio(snapshot);
+  // O palco dos MODs sobre a chamada, também com a chamada escondida: sair da
+  // sala o desmonta, e é este desenho que vê a sala mudar (`tela-chamada.js`).
+  if (typeof desenharOPalcoDosMods === "function") desenharOPalcoDosMods(snapshot);
 
   desenhado = snapshot;
   // Com os nós de MOD já recolocados: o som do que saiu da tela — a pessoa que

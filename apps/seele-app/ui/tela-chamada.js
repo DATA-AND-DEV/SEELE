@@ -108,7 +108,77 @@ function desenharChamada(snapshot) {
   desenharBarraDaChamada(snapshot, voice_room);
   desenharPalco(snapshot, voice_room);
   desenharCartoes(snapshot, voice_room);
+  desenharOPalcoDosMods(snapshot);
 }
+
+// ------------------------------------------------------- o palco dos MODs
+
+/**
+ * Se a pessoa escolheu ver a grade com um palco de pé (VER A GRADE). Volta a
+ * falso quando o palco sai: o palco seguinte chega à frente.
+ */
+let palcoDosModsEscondido = false;
+
+/**
+ * **`chamada.palco`** (rascunho da API 6, §5; tarefa 7, Step 5): o palco dos
+ * MODs, como vista alternativa à grade.
+ *
+ * A substituição escolhida — pela preferência desta máquina, ou pela
+ * prioridade — é o miolo; os acréscimos moram numa faixa abaixo dele, na
+ * ordem do registro. Só dentro de uma sala: o palco é da chamada.
+ *
+ * **Chamado também pelo desenho da sessão**, e não só pelo desta tela: a
+ * chamada só se redesenha com a vista dela à frente, e quem sai da sala com a
+ * conversa à frente deixaria o palco montado — e o som dele seguiria. Sair da
+ * sala o desmonta, e `calarOsSonsQueSairamDaTela` cala o que ele tocava; o
+ * palco escondido por VER A GRADE continua montado, e o som dele continua
+ * (rascunho §11).
+ */
+function desenharOPalcoDosMods(snapshot) {
+  const palco = $("palco-de-mods");
+  if (!palco) return;
+  const sala = snapshot?.voice_rooms?.find((s) => s.occupied_by_us) ?? null;
+  // A região que a casca não tem fica vazia, e quem contribui sabe
+  // (`regiaoAusente`, em `base.js`).
+  const naCasca = Boolean(sala) && !regiaoAusente("chamada.palco");
+  const escolhida = naCasca
+    ? contribuicoesDosMods.escolherSubstituicao(
+      "chamada.palco",
+      "",
+      typeof modPreferidoPara === "function" ? modPreferidoPara("chamada.palco") : "",
+    ).escolhida
+    : null;
+  const desenho = escolhida ? montarContribuicao(escolhida, "") : null;
+  const acrescimos = naCasca ? conteudoDasContribuicoes("chamada.palco") : [];
+  repovoar($("palco-de-mods-miolo"), desenho ? [desenho] : []);
+  repovoar($("palco-de-mods-acrescimos"), acrescimos);
+  $("palco-de-mods-acrescimos").hidden = acrescimos.length === 0;
+
+  const tem = Boolean(desenho) || acrescimos.length > 0;
+  if (!tem) palcoDosModsEscondido = false;
+  // **De quem é o palco**, escrito pelo produto, e não pelo MOD.
+  const quem = [...new Set([
+    ...(desenho ? [escolhida.mod] : []),
+    ...acrescimos.map((no) => no.dataset.mod),
+  ])];
+  $("palco-de-mods-quem").textContent = tem ? `PALCO DE ${quem.join(" E ")}` : "";
+  const aFrente = tem && !palcoDosModsEscondido;
+  palco.hidden = !aFrente;
+  $("vista-chamada").toggleAttribute("data-palco-de-mods", aFrente);
+  $("palco-de-mods-ver-o-palco").hidden = !(tem && palcoDosModsEscondido);
+}
+
+// **A saída é do produto**: ver a grade esconde o palco sem desmontá-lo, e a
+// volta é do mesmo lado. Registrados uma vez, como os controles do palco da
+// transmissão.
+$("palco-de-mods-ver-a-grade").addEventListener("click", () => {
+  palcoDosModsEscondido = true;
+  desenharOPalcoDosMods(desenhado);
+});
+$("palco-de-mods-ver-o-palco").addEventListener("click", () => {
+  palcoDosModsEscondido = false;
+  desenharOPalcoDosMods(desenhado);
+});
 
 /**
  * O palco: a transmissão de tela desta sala, ou o que a tela diz sem nenhuma.

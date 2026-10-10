@@ -1044,6 +1044,7 @@ const NOMES_DOS_PONTOS = Object.freeze({
   "status.barra": "A barra de baixo",
   "pessoas.lista": "A lista de pessoas",
   "conversa.mensagem": "Cada mensagem da conversa",
+  "chamada.palco": "O palco sobre a chamada",
 });
 
 // ------------------------------------------------ quem pinta cada lugar
@@ -1359,6 +1360,7 @@ const CONTEINERES_DOS_PONTOS = Object.freeze({
   "status.barra": "#telemetria-mods",
   "pessoas.lista": "#roster-mods",
   "conversa.mensagem": ".mensagem-miolo",
+  "chamada.palco": "#palco-de-mods",
 });
 
 /** A chave desta preferência no armazenamento desta máquina. */

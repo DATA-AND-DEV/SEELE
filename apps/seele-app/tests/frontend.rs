@@ -16712,8 +16712,18 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
                 .any(|(onde, _)| {
                     // A chamada e o nome do ponto na mesma vizinhança: a consulta é
                     // escrita em várias linhas, com o alvo e o preferido entre elas.
-                    let inicio = onde.saturating_sub(400);
-                    let fim = (onde + 400).min(telas.len());
+                    // **Na fronteira de um caractere**: os 400 bytes caem no
+                    // meio de um «ç» tão bem quanto num espaço, e o fatiamento
+                    // por byte entrava em pânico (o comentário do palco, em
+                    // `mods-contribuicoes.js`, achou).
+                    let mut inicio = onde.saturating_sub(400);
+                    while !telas.is_char_boundary(inicio) {
+                        inicio -= 1;
+                    }
+                    let mut fim = (onde + 400).min(telas.len());
+                    while !telas.is_char_boundary(fim) {
+                        fim += 1;
+                    }
                     telas[inicio..fim].contains("escolherSubstituicao")
                 });
         assert!(

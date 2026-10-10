@@ -97,6 +97,11 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "status.barra": { modos: ["adicionar"], perfil: "cartao", porAlvo: false },
   "pessoas.lista": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: false },
   "conversa.mensagem": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
+  // **O palco sobre a chamada** (rascunho da API 6, §5; tarefa 7, Step 5): o
+  // orçamento de uma superfície, com a gramática inteira — a `tela` com traço
+  // e arraste, os campos, o toque e o clique. A substituição escolhida é o
+  // palco; os acréscimos moram numa faixa dele. Ver `desenharOPalcoDosMods`.
+  "chamada.palco": { modos: ["substituir", "adicionar"], perfil: "superficie", porAlvo: false },
 });
 
 /**

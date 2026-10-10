@@ -1286,6 +1286,8 @@
           <span class="chamada-placa">SALA DE VOZ</span>
           <span id="chamada-nome" class="chamada-nome">—</span>
           <span class="espaco"></span>
+          <!-- A volta ao palco dos MODs, quando a pessoa escolheu ver a grade. -->
+          <button id="palco-de-mods-ver-o-palco" class="botao-fantasma" type="button" hidden>VER O PALCO</button>
           <span id="chamada-enlace" class="chamada-enlace">
             <span class="chamada-enlace-marca" aria-hidden="true"></span>
             <span id="chamada-conexao">NO AR</span>
@@ -1479,6 +1481,25 @@
           o quinto é a única forma de esta vista mentir sobre quem está na sala.
         -->
         <ol id="chamada-grade" class="chamada-grade" aria-label="pessoas na sala de voz"></ol>
+
+        <!--
+          **O palco dos MODs** (`chamada.palco`; rascunho da API 6, §5; tarefa
+          7, Step 5): uma vista alternativa à grade, com a gramática inteira de
+          uma superfície. A grade continua no DOM, repintada a cada retrato, e
+          volta com VER A GRADE. A barra é do produto: diz de quem é o palco, e
+          a saída é dela. Esconder o palco não o desmonta, e o som dele segue
+          enquanto a pessoa estiver na sala; sair da sala o desmonta.
+        -->
+        <section id="palco-de-mods" class="palco-de-mods" hidden
+                 aria-labelledby="palco-de-mods-quem">
+          <div class="palco-de-mods-barra">
+            <span id="palco-de-mods-quem" class="palco-de-mods-quem"></span>
+            <span class="espaco"></span>
+            <button id="palco-de-mods-ver-a-grade" class="botao-fantasma" type="button">VER A GRADE</button>
+          </div>
+          <div id="palco-de-mods-miolo" class="palco-de-mods-miolo"></div>
+          <div id="palco-de-mods-acrescimos" class="palco-de-mods-acrescimos" hidden></div>
+        </section>
       </div>
 
 
