@@ -289,6 +289,11 @@ jobs:
       # segundos (de 0 a 5 s, medido no macOS em 01/10/2026). O teste
       # `todo_passo_de_bancada_do_job_de_navegador_roda_depois_de_uma_vermelha_e_tem_prazo`,
       # no mesmo `check_runtime.rs`, exige os dois em todo passo de bancada.
+      # O que a casca chama sozinha no navegador, com a ponte de verdade e sem
+      # duble (F4, Tarefa 3.1): nada volta recusado, nas duas cascas.
+      - run: node apps/seele-app/bancada/ponte-sem-gesto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       - run: node apps/seele-app/bancada/compartilhar-por-identidade.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
@@ -326,11 +331,6 @@ jobs:
       # computa (09/10/2026): a cor resolvida acima de `#tela-sessao` deixava o
       # corpo das mensagens a 1,09:1 com um tema que a validação aceitava.
       - run: node apps/seele-app/bancada/tema-claro-legivel.cjs
-        if: ${{ !cancelled() }}
-        timeout-minutes: 5
-      # O que a casca chama sozinha no navegador, com a ponte de verdade e sem
-      # duble (F4, Tarefa 3.1): nada volta recusado, nas duas cascas.
-      - run: node apps/seele-app/bancada/ponte-sem-gesto.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
 
