@@ -18152,11 +18152,21 @@ fn chaves_de_topo(corpo: &str) -> (Vec<String>, bool) {
 /// de cima ficaria mentindo sobre o que a tela mostra. Uma frase repetida em
 /// `FRASES` é a mesma armadilha com texto.
 ///
-/// Cobra **toda** `const` de topo em caixa alta que abre um objeto literal,
-/// em todo script da `ui/`: as tabelas de frases e de glifos são escritas assim,
-/// e uma tabela nova nasce coberta. Os objetos de estado (`estadoDosContornos`,
-/// `escolhidoDe`…) são escritos em caixa baixa e mudam em tempo de execução, e
-/// ficam de fora.
+/// Cobra **toda** `const` de topo em caixa alta cuja linha termina abrindo um
+/// objeto literal — `= {` ou `= Object.freeze({` (rodada 1, M4: as congeladas,
+/// como `CAPACIDADES_POR_API`, ficavam de fora) —, em todo script da `ui/`: as
+/// tabelas de frases e de glifos são escritas assim, e uma tabela nova nasce
+/// coberta.
+///
+/// **O que fica de fora**, dito para o guarda não prometer mais do que cobre:
+///
+/// - as chaves **dentro** de uma entrada aninhada: só as de topo de cada tabela
+///   são comparadas entre si;
+/// - a tabela escrita numa linha só (`const X = { a: 1 };`), e a que não abre
+///   um objeto literal na linha da `const` — uma lista (`Object.freeze([`), ou
+///   uma tabela montada por outra expressão;
+/// - os objetos de estado (`estadoDosContornos`, `escolhidoDe`…), escritos em
+///   caixa baixa e mudados em tempo de execução.
 #[test]
 fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
     let mut tabelas: Vec<(String, String, usize)> = Vec::new();
@@ -18177,7 +18187,7 @@ fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
                 && nome
                     .chars()
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-            if !tabela || depois.trim_end() != "{" {
+            if !tabela || !["{", "Object.freeze({"].contains(&depois.trim_end()) {
                 continue;
             }
             let corpo = texto.get(comeco + linha.len()..).unwrap_or_default();
@@ -18211,8 +18221,9 @@ fn nenhuma_tabela_constante_da_ui_repete_uma_chave() {
 
     // Contra a cegueira: as seis tabelas que o lote nomeou estão entre as
     // lidas, e as duas maiores com um número de chaves que só a leitura inteira
-    // alcança.
+    // alcança. E uma congelada, para a forma `Object.freeze({` não sumir calada.
     for (dono, nome, minimo) in [
+        ("base.js", "CAPACIDADES_POR_API", 4),
         ("glifos.js", "GLIFOS", 20),
         ("frases.js", "MOTIVOS", 5),
         ("frases.js", "AVISOS", 3),
