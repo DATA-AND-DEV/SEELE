@@ -35,6 +35,7 @@ Uso:
     python3 tools/carga-da-casca.py            # só a carga
     python3 tools/carga-da-casca.py --roteiro tools/roteiros/hospedar.js
     python3 tools/carga-da-casca.py --roteiro tools/roteiros/a.js --roteiro tools/roteiros/b.js
+    python3 tools/carga-da-casca.py --autoteste   # os consertos da carga, sem navegador
 
 Com mais de um `--roteiro`, cada um roda com a sua carga, todos rodam mesmo
 depois de um vermelho, e o fim diz quais reprovaram e com que frase. É assim
@@ -458,7 +459,9 @@ def rodar_navegador(comando: list[str], prazo_s: float) -> tuple[str, bool]:
         return (saida or "") + (erro or ""), True
 
 
-def main() -> int:
+def argumentos_da_carga() -> argparse.ArgumentParser:
+    """Os argumentos da carga, num lugar só: `main` os lê, e o autoteste
+    confere a leitura deles sem abrir navegador nenhum."""
     argumentos = argparse.ArgumentParser(description=__doc__)
     # Repetível. Antes, o segundo `--roteiro` tomava o lugar do primeiro em
     # silêncio, e um vermelho na frente da lista sumia sem ter rodado.
@@ -479,7 +482,17 @@ def main() -> int:
     # um runner lento, e não para um roteiro que gira para sempre (ver
     # `rodar_navegador`).
     argumentos.add_argument("--prazo-por-roteiro", type=float, default=60.0)
+    # Sem navegador: confere os consertos da carga contra o código dela (ver
+    # `autoteste`). O `cargo test -p xtask` o roda.
+    argumentos.add_argument("--autoteste", action="store_true")
+    return argumentos
+
+
+def main() -> int:
+    argumentos = argumentos_da_carga()
     opcoes = argumentos.parse_args()
+    if opcoes.autoteste:
+        return autoteste()
     roteiros = opcoes.roteiro or []
     if len(roteiros) > 1 and opcoes.foto:
         argumentos.error("--foto guarda a foto de um roteiro só; com vários, "
@@ -508,7 +521,8 @@ def carregar_sem_cair(opcoes: argparse.Namespace, roteiro: pathlib.Path | None) 
         return [motivo]
 
 
-def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
+def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path],
+           carregar_um=None) -> int:
     """Todos os roteiros, cada um com a sua carga, e no fim quais reprovaram.
 
     **Todos, e não até o primeiro vermelho**: saber que dois quebraram é outra
@@ -521,12 +535,16 @@ def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
     # CI, `PRAZO_DA_ETAPA_S` no `publicar.sh`), e a última linha escrita tem de
     # ser o nome dele. Com a saída num arquivo ou num cano, o Python guardaria
     # essa linha no buffer, e o `kill -9` do prazo a levaria junto.
-    sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    # Quem carrega cada roteiro: a carga de verdade, ou a de mentira do
+    # autoteste, que mede a lista sem abrir navegador.
+    carregar_um = carregar_um or carregar_sem_cair
     reprovados = []
     for roteiro in roteiros:
         print(f"roteiro: rodando {roteiro}")
         if roteiro.is_file():
-            motivos = carregar_sem_cair(opcoes, roteiro)
+            motivos = carregar_um(opcoes, roteiro)
         else:
             motivos = ["o arquivo do roteiro não existe"]
             print(motivos[0])
@@ -541,6 +559,153 @@ def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path]) -> int:
         for motivo in motivos:
             print(f"  {roteiro}: {motivo}")
     return 1
+
+
+def ler_saida(tudo: str) -> tuple[list[list[str]], list[str], list[str], list[str]]:
+    """O que a página disse ao navegador: os relatos, as partes deles, os
+    estouros e as falhas do roteiro (um REPROVADO, ou um roteiro que estourou).
+
+    Uma função à parte para o autoteste ler, sem navegador, uma linha do console
+    no formato do Chromium pelo mesmo código que lê a de verdade.
+    """
+    # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
+    # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
+    estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
+    # Cada relato é a lista que o roteiro relatou, em JSON e codificada para URL
+    # (ver `PE_DO_ROTEIRO`): o código não tem aspa nem espaço, e o que o roteiro
+    # escreveu volta inteiro, com aspas, quebras e « | » dentro.
+    relatos = [json.loads(urllib.parse.unquote(codigo))
+               for codigo in re.findall(r"SEELE-RELATO ([^\s\"]*)", tudo)]
+    partes = [parte for relato in relatos for parte in relato]
+    falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
+    return relatos, partes, estouros, falhas
+
+
+def autoteste() -> int:
+    """Os consertos da carga, conferidos contra o código dela e sem navegador.
+
+    M3 da revisão do lote RT: o relato que atravessa a aspa e os vários
+    `--roteiro` numa chamada só se provavam por reversão à mão, e o segundo,
+    revertido, deixaria o CI verde rodando um roteiro só. Cada caso abaixo
+    reprova se o seu conserto for revertido (as reversões estão no relatório do
+    lote). O `cargo test -p xtask` roda isto
+    (`a_carga_da_casca_passa_no_proprio_autoteste`, em
+    `xtask/src/check_runtime.rs`).
+    """
+    import contextlib
+    import io
+    import time
+
+    roteiro_a = RAIZ / "tools" / "roteiros" / "perfil-entrada.js"
+    roteiro_b = RAIZ / "tools" / "roteiros" / "perfil-sessao.js"
+
+    def a_aspa() -> str | None:
+        # A linha como o Chromium a escreve: entre aspas, sem escapar as de
+        # dentro. O código é o que `PE_DO_ROTEIRO` produz: `JSON.stringify` e
+        # `encodeURIComponent` (que deixa de fora `-_.!~*'()`).
+        dito = ['com "aspas" aqui', "REPROVADO: depois da aspa"]
+        codigo = urllib.parse.quote(json.dumps(dito, ensure_ascii=False, separators=(",", ":")),
+                                    safe="-_.!~*'()")
+        linha = (f'[1010/200000.000000:INFO:CONSOLE(4938)] "SEELE-RELATO {codigo}", '
+                 "source: file:///tmp/x/ui/index.html (4938)")
+        _, partes, _, falhas = ler_saida(linha)
+        if partes != dito:
+            return f"o relato voltou como {partes!r}, e não como {dito!r}"
+        if falhas != ["REPROVADO: depois da aspa"]:
+            return f"o REPROVADO depois da aspa não virou falha: {falhas!r}"
+        return None
+
+    def os_argumentos() -> str | None:
+        opcoes = argumentos_da_carga().parse_args(
+            ["--roteiro", str(roteiro_a), "--roteiro", str(roteiro_b)])
+        if opcoes.roteiro != [roteiro_a, roteiro_b]:
+            return f"dois --roteiro viraram {opcoes.roteiro!r}"
+        return None
+
+    def a_lista() -> str | None:
+        rodados = []
+
+        def de_mentira(_opcoes, roteiro):
+            rodados.append(roteiro)
+            return ["REPROVADO: o primeiro"] if roteiro == roteiro_a else []
+
+        dito = io.StringIO()
+        with contextlib.redirect_stdout(dito):
+            codigo = varios(argparse.Namespace(), [roteiro_a, roteiro_b], de_mentira)
+        if rodados != [roteiro_a, roteiro_b]:
+            return f"a lista rodou {rodados!r}, e não os dois"
+        if codigo != 1:
+            return f"um roteiro reprovou e a lista saiu com {codigo}"
+        if f"  {roteiro_a}: REPROVADO: o primeiro" not in dito.getvalue():
+            return "o fim da lista não diz o roteiro que reprovou e a frase"
+        return None
+
+    def nao_cai() -> str | None:
+        global carregar
+        de_verdade = carregar
+
+        def que_cai(_opcoes, _roteiro):
+            raise RuntimeError("um defeito do aparelho")
+
+        carregar = que_cai
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                motivos = carregar_sem_cair(argparse.Namespace(), roteiro_a)
+        except Exception as erro:  # noqa: BLE001 — é o que se mede
+            return f"a carga caiu: {type(erro).__name__}: {erro}"
+        finally:
+            carregar = de_verdade
+        if motivos != ["a carga caiu neste roteiro: RuntimeError: um defeito do aparelho"]:
+            return f"o defeito virou {motivos!r}"
+        return None
+
+    def o_prazo() -> str | None:
+        # Um «navegador» que abre um filho, diz o número dele e dorme: o prazo
+        # tem de matar os dois, como mata o renderer do de verdade.
+        falso = ("import subprocess, sys, time; "
+                 "filho = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                 "print(filho.pid, flush=True); time.sleep(30)")
+        comeco = time.monotonic()
+        saida, venceu = rodar_navegador([sys.executable, "-c", falso], 1.0)
+        gasto = time.monotonic() - comeco
+        if not venceu:
+            return f"o prazo de 1 s não venceu, e o «navegador» rodou {gasto:.1f} s"
+        if gasto > 10:
+            return (f"o prazo venceu, mas a carga esperou {gasto:.1f} s: um filho do "
+                    "«navegador» continuou vivo e segurou a saída")
+        filho = int(saida.split()[0])
+        for _ in range(30):
+            try:
+                os.kill(filho, 0)
+            except ProcessLookupError:
+                return None
+            time.sleep(0.1)
+        os.kill(filho, signal.SIGKILL)
+        return f"o filho do navegador ({filho}) continuou vivo depois do prazo"
+
+    casos = [
+        ("o relato atravessa a aspa", a_aspa),
+        ("vários --roteiro numa chamada", os_argumentos),
+        ("a lista roda todos e diz quem reprovou", a_lista),
+        ("a carga não cai", nao_cai),
+        ("o prazo mata o navegador e os filhos", o_prazo),
+    ]
+    falharam = 0
+    for nome, caso in casos:
+        try:
+            falha = caso()
+        except Exception as erro:  # noqa: BLE001 — o caso que estoura reprova
+            falha = f"estourou: {type(erro).__name__}: {erro}"
+        if falha:
+            falharam += 1
+            print(f"autoteste: {nome}: FALHOU — {falha}")
+        else:
+            print(f"autoteste: {nome}: ok")
+    if falharam:
+        print(f"autoteste: {falharam} de {len(casos)} falharam")
+        return 1
+    print(f"autoteste: os {len(casos)} passaram")
+    return 0
 
 
 def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) -> list[str]:
@@ -588,21 +753,12 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
         if opcoes.foto and (pasta / "foto.png").exists():
             shutil.copy(pasta / "foto.png", opcoes.foto)
 
-    # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
-    # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
-    estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
-    # Cada relato é a lista que o roteiro relatou, em JSON e codificada para URL
-    # (ver `PE_DO_ROTEIRO`): o código não tem aspa nem espaço, e o que o roteiro
-    # escreveu volta inteiro, com aspas, quebras e « | » dentro.
-    relatos = [json.loads(urllib.parse.unquote(codigo))
-               for codigo in re.findall(r"SEELE-RELATO ([^\s\"]*)", tudo)]
-    partes = [parte for relato in relatos for parte in relato]
+    relatos, partes, estouros, falhas = ler_saida(tudo)
     sem_resposta = sorted({c for linha in re.findall(r"SEELE-SEM-RESPOSTA ([^\"]*)", tudo)
                            for c in linha.split()})
     # Um roteiro que reprovou, que estourou no meio, ou que nem chegou ao fim
     # dentro do orçamento de tempo não é uma carga limpa — e as três coisas
     # terminavam com «carga limpa» antes.
-    falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
     if venceu:
         falhas.append(f"o roteiro não terminou em {opcoes.prazo_por_roteiro:g} s, e o "
                       "navegador que a carga abriu foi morto com os filhos dele")

@@ -882,6 +882,55 @@ mod tests {
         }
     }
 
+    /// **Os consertos da carga da casca têm guarda que roda em todo `cargo
+    /// test`, sem navegador** (M3 da revisão do lote RT).
+    ///
+    /// Os dois consertos da carga — o relato que atravessa a aspa e os vários
+    /// `--roteiro` numa chamada — só se provavam por reversão à mão. Revertido o
+    /// segundo, o CI voltaria a rodar só o último roteiro, verde. O autoteste da
+    /// carga (`--autoteste`) exercita, sem abrir navegador, o mesmo código que a
+    /// carga usa: a leitura do relato sobre uma linha do console no formato do
+    /// Chromium, a leitura dos argumentos, a lista que roda todos e diz quem
+    /// reprovou, a carga que não cai e o prazo que mata o grupo do navegador.
+    ///
+    /// Aqui, e não num passo do job de navegador: o `cargo test` roda em todo
+    /// disparo do CI, no `validar` do `release.yml` e na bateria do
+    /// `publicar.sh`, e o autoteste leva cerca de um segundo. Só em Unix, que é
+    /// onde a carga roda (o `chrome-headless-shell` que ela procura mora nos
+    /// caches do Playwright do macOS e do Linux), e o prazo dela mata um grupo
+    /// de processos, que é coisa de Unix.
+    #[cfg(unix)]
+    #[test]
+    fn a_carga_da_casca_passa_no_proprio_autoteste() {
+        let saida = match std::process::Command::new("python3")
+            .arg(raiz().join("tools/carga-da-casca.py"))
+            .arg("--autoteste")
+            .output()
+        {
+            Ok(saida) => saida,
+            Err(erro) => {
+                eprintln!(
+                    "PARCIAL: o python3 não executa aqui ({erro}), e o autoteste da carga da \
+                     casca não rodou"
+                );
+                return;
+            }
+        };
+        let dito = format!(
+            "{}{}",
+            String::from_utf8_lossy(&saida.stdout),
+            String::from_utf8_lossy(&saida.stderr)
+        );
+        assert!(
+            saida.status.success(),
+            "o autoteste da carga da casca reprovou, e um dos consertos dela voltou atrás:\n{dito}"
+        );
+        assert!(
+            dito.contains("autoteste: os 5 passaram"),
+            "o autoteste da carga saiu com 0 sem dizer que os cinco passaram:\n{dito}"
+        );
+    }
+
     /// **O leitor de shell do guarda lê como o `sh` leu.** Os casos são os que o
     /// `sh` do macOS respondeu numa sonda (lote RT, rodada 2): uma nota depois
     /// de `\ ` e um espaço depois da `\` não continuam a linha, e a `\` no fim
