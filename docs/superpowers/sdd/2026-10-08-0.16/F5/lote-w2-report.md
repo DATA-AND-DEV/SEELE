@@ -11,14 +11,18 @@ local: sem push, tag nem release. Sem conformidade.
 | `4fd9aaa7` | 3 | a última linha da frase do `ModsNaoAceitos` passa a «Para aceitar ou recusar esta lista, entre de novo neste servidor.»; o passo 5 da cena; os comentários de `frases.js` e `camada-mods.js:10` |
 | `e110014e` | 4 | só o comentário do `main.rs` (perto de :8020), isolado |
 | `866d46a8` | 2 (comentários) | o doc de `levarParaAEspera` (`tela-auth.js`) e o comentário da espera no `catch` de `conectar` dizem que só a falha da tentativa mais nova chega à espera; só comentário |
-| este | — | o relatório final |
+| `c46a62d0` | — | o relatório da primeira entrega |
+| `6af0bedd` | rodada da revisão, 1 | o `finally` de `conectar` só reacende o CONECTAR quando `esta === tentativas`; o passo 2 da cena cobra o botão apagado depois que a velha termina e aceso depois que a nova termina; a parte 5 do guarda |
+| `8f4f4724` | rodada da revisão, 3 | só comentário: o histórico da `AGUARDANDO_TELA` em `tests/frontend.rs` (perto de :543) passa ao passado, e o doc de `registrarNoAnfitriao` (`base.js`) diz quem lê |
+| `7cd7d98c` | rodada da revisão, 2 | só comentário: o da linha de etapa no `finally` corrige o motivo de ela ter ficado fora (ver 2, «A linha de etapa») |
+| este | — | o relatório atualizado |
 
 **O que não mudou.** Nada em `crates/`, no fio
 (`crates/seele-proto/src/{control,version,media,screen}.rs` intocados), no
-servidor, em `base.js`, na CSP, em `api/`. Nenhuma dependência nova. Nenhum
-`.cjs` novo: a cena entrou na `ajustes-v013.cjs`, que já está no job
-`bancadas`. Em `main.rs`, só as linhas de comentário: o arquivo sem as linhas
-`//` é idêntico ao da base. Em `tela-auth.js`, idem.
+servidor, na CSP, em `api/`. Nenhuma dependência nova. Nenhum `.cjs` novo: a
+cena entrou na `ajustes-v013.cjs`, que já está no job `bancadas`. Em
+`main.rs`, `tela-auth.js` e `base.js`, só linhas de comentário: cada um, sem
+as linhas de comentário, é idêntico ao da base.
 
 ## 1. A medida do caminho
 
@@ -48,7 +52,9 @@ parar (apagada logo depois):
 2. **Outra escolha na lista substitui a velha**, e a nova é lenta (1,4 s). Com
    a nova ainda andando, a mesma frase aparece na linha vermelha da entrada,
    **visível**, até a nova voltar e escrever por cima. Enquanto isso, o
-   CONECTAR, que a nova apagou, está aceso: o `finally` da velha o reacende.
+   CONECTAR, que a nova apagou, está aceso: o `finally` da velha o reacende
+   (medido na mesma cópia: `disabled` é `false` aos 900 ms, com a nova
+   andando).
 3. **A nova parou na espera da portaria** (`AdmissionPending`), e a velha volta
    pelos MODs: `levarParaAEspera` trata «qualquer falha com a espera na
    frente», e a frase dos MODs toma o lugar da frase da espera, e o botão passa
@@ -118,7 +124,7 @@ precise ver: a nova está em curso (e fala quando voltar) ou já entrou.
 **O que fica igual.** O bloco do `NicknameTaken`, antes do ramo, continua
 valendo para todas (esquecer `ultimoApelido`; a credencial só é guardada pela
 mais nova, regra do lote W). A trilha continua indo ao console para todas. O
-`finally` não mudou (ver «Preocupações»).
+`finally` mudou na rodada da revisão (ver «O CONECTAR», abaixo).
 
 **O registro.** A janela tem um caminho para o `seele.log`, e é o usado no
 caso parecido de «a janela sabe e a tela não mostra»: `registrarNoAnfitriao`
@@ -190,6 +196,73 @@ a conferência da pergunta como `esta === tentativas &&` na mesma linha do
 passou a cobrar pelo mesmo ajudante (`ramo_da_tentativa_substituida`) que a
 pergunta só é aberta depois do ramo. A linha da lista dele foi trocada pela
 nova.
+
+### O CONECTAR (rodada da revisão, `6af0bedd`)
+
+O `finally` de `conectar` reacendia o botão para toda tentativa. Medido no
+passo 2 da cena: a velha terminava aos 600 ms e reacendia o CONECTAR que a
+nova tinha apagado, com a nova ainda andando, e um clique ali abria uma
+terceira entrada por baixo dela. Agora:
+
+```js
+if (esta === tentativas) botao.disabled = false;
+```
+
+A mais nova sempre chega ao próprio `finally` (entre o `botao.disabled =
+true` e o `try` só há duas linhas que não falham), ou ao `finally` da pergunta do nome,
+que também devolve o botão; e o único `return` antes de contar a tentativa
+(`!ultimoAlvo`) não apaga nada. Então o botão não fica apagado sem dono.
+
+- **A cena**, passo 2: depois que a velha voltou (conferido pela chamada
+  respondida) e com a nova andando, o CONECTAR está apagado; depois que a nova
+  volta, está aceso. Vermelho antes do conserto com «com a tentativa a
+  192.0.2.18:8384 ainda andando, a anterior, a 192.0.2.17:8384, terminou e
+  reacendeu o CONECTAR que a nova tinha apagado: um clique ali abre uma
+  terceira entrada por baixo da que está em curso».
+- **O guarda**, parte 5 de `a_tentativa_que_outra_substituiu_nao_fala_na_tela`:
+  no `finally` que segue o `catch` do `connect` (achado pelo fim do `catch`, e
+  o bloco casado contando), toda linha com `.disabled = false` começa com
+  `if (esta === tentativas)`, e há ao menos uma.
+
+### A linha de etapa: o que foi medido e o que falta (fora do lote)
+
+O mesmo `finally` chama `mostrarEtapa(null)` para toda tentativa, e o da velha
+apaga a linha de etapa da nova enquanto ela anda. **Isso foi lido no código, e
+não medido**: a bancada não emite eventos de etapa (o `listen` dela é vazio).
+
+Na primeira entrega eu disse que calar a velha ali deixaria a etapa dela na
+tela quando ela termina depois da nova. Lendo o `main.rs` para escrever esta
+seção, isso é verdade só em parte:
+
+- os eventos `ConnectStageChanged` não dizem de qual tentativa são;
+- mas o `connect` do `main.rs` revoga a geração anterior ao começar
+  (`let geracao = session.revogar();`), e a `Bridge` de cada tentativa
+  descarta todo evento cuja geração não é mais a de pé (`Bridge::on_event`,
+  contado em `eventos_de_geracao_morta`). Então, **a partir do `connect` da
+  nova**, as etapas da velha não chegam mais à janela;
+- o que sobra é o trecho entre o começo da nova em `conectar`
+  (`++tentativas`) e o `invoke("connect")` dela: o `apelido_local`, a pergunta
+  do nome e o `conferir_esta_versao`. Nesse trecho a geração ainda é a da
+  velha, e as etapas dela ainda chegam.
+
+**A forma de consertar que sugiro**, nesta ordem:
+
+1. gatear também o `mostrarEtapa(null)` com `esta === tentativas`; o preço é
+   que, se a velha terminar dentro daquele trecho, a última etapa dela fica na
+   linha até a nova dizer a primeira (o `connect` da nova começa a emitir logo,
+   e o `finally` da nova apaga de qualquer jeito);
+2. para fechar o trecho, a janela apagar a linha e passar a ignorar etapas
+   assim que a nova começa, até o `connect` dela: por exemplo, uma bandeira
+   «a etapa é de `esta`» posta em `++tentativas` e só reaberta logo antes do
+   `invoke("connect")`, com o ouvinte de `ConnectStageChanged` (`tela-boot.js`,
+   perto de :439) descartando o que chegar com ela fechada. Não toca no fio
+   nem na FFI;
+3. a alternativa no Rust é a geração ser revogada mais cedo — um comando para
+   «começou uma tentativa» chamado em `++tentativas` —, que muda a ponte e
+   pede outro lote.
+
+O comentário do `finally` dizia o motivo antigo; `7cd7d98c` o corrige (só
+comentário).
 
 ## 3. A frase nova
 
@@ -289,10 +362,21 @@ cada uma.
 - **R4** (a frase velha de volta em `frases.js`): a cena reprova no passo 5
   com «a frase dos MODs ainda diz que a tela de aceitar não existe, e ela
   existe: «ESTE SERVIDOR EXIGE MODS…»».
+- **R5** (rodada da revisão: o `finally` volta a reacender o CONECTAR para
+  toda tentativa): a cena reprova no passo 2 com «com a tentativa a
+  192.0.2.18:8384 ainda andando, a anterior, a 192.0.2.17:8384, terminou e
+  reacendeu o CONECTAR…»; o guarda reprova com «o `finally` do `connect`
+  reacende um botão sem conferir que a tentativa ainda é a mais nova
+  (["botao.disabled = false;"])…».
+- **R5b** (o `finally` não devolve o botão a ninguém, para provar que a
+  outra metade também é cobrada): a cena reprova com «a tentativa mais nova
+  terminou e o CONECTAR ficou apagado: quem devolve o botão é ela»; o guarda,
+  com «o `finally` do `connect` deixou de devolver o botão que a entrada
+  apaga…».
 
 ## 7. O que rodou
 
-No fim (`866d46a8`): `cargo test -p seele-app --bin seele-app`, 312 de 312;
+Na primeira entrega (`866d46a8`): `cargo test -p seele-app --bin seele-app`, 312 de 312;
 `cargo test -p seele-app --test frontend`, 287 de 287 (286 na base, mais o
 guarda novo; o da credencial mudou por dentro); `cargo xtask check-runtime`,
 verde; `cargo fmt --all -- --check`, limpo; `cargo clippy -p seele-app
@@ -307,32 +391,35 @@ com os três arquivos da `ui/` da base no lugar). Os roteiros
 carga limpa, e o relato do primeiro idêntico ao da base. Nenhuma conformidade,
 nenhum `cargo test --workspace`.
 
+Na rodada da revisão (`8f4f4724`, e de novo depois de `7cd7d98c`, que é só
+comentário): `--test frontend`, 287 de 287; `--bin`, 312 de 312;
+`check-runtime`, verde; fmt, limpo; clippy `-D warnings`, limpo (o mesmo aviso
+do ligador); a `ajustes-v013`, verde.
+
 ## Preocupações
 
-1. **O `finally` da tentativa velha ainda mexe no que é da nova.** Medido no
-   passo 2 (cópia temporária da bancada): com a nova andando, o `finally` da
-   velha reacende o CONECTAR que a nova apagou — o que abre uma terceira
-   entrada por baixo dela —, e apaga a linha de etapa (`mostrarEtapa(null)`).
-   Não consertei: o botão se conserta com `if (esta === tentativas)` em volta
-   do `botao.disabled = false`, mas a linha de etapa é escrita pelos eventos
-   `ConnectStageChanged` das duas tentativas, sem dizer de qual são, e calar o
-   `mostrarEtapa(null)` da velha deixaria a etapa dela na tela quando ela
-   termina depois da nova. Fica para quem decidir o escopo.
-2. **O roteiro `tools/roteiros/aceite-de-mods.js` relata que o aceite não
-   grava nem entra, e não reprova.** Na base e aqui, ele imprime
-   `gravou o sim: alvo=undefined conjunto=undefined` e
-   `tentou entrar de novo: false` (o lote W passou a obter o conjunto antes de
-   gravar, e o duble do roteiro não tem o MOD instalado), e não tem `exigir`:
-   «existir não é funcionar». Não mexi; está fora do lote.
-3. **Comentários que ainda contam a tela como futura**, fora da lista do
-   brief: `tests/frontend.rs` perto de :543 («o que falta é a tela com o botão
-   de aceitar, que é de um plano posterior»), num parágrafo que logo abaixo diz
-   que a lista ficou vazia em 17/09 — lido como história, mas com o verbo no
-   presente. Não mexi.
-4. **`registrarNoAnfitriao` ganhou o primeiro chamador que não é de MOD.** O
-   doc dele (`base.js`) diz «quem lê isto é quem hospeda»; para a recusa de uma
-   entrada, quem lê é quem investiga o `seele.log` desta máquina. Não mexi em
-   `base.js`.
-5. **O worktree.** As edições a este worktree vindas da sessão do controlador
+1. **A linha de etapa** fica fora, por decisão da revisão: o que foi medido, o
+   que falta e a forma sugerida estão em 2, «A linha de etapa». A razão que eu
+   tinha dado para deixá-la de fora era mais forte do que a leitura sustenta
+   (a `Bridge` já corta as etapas da velha a partir do `connect` da nova), e
+   está corrigida no comentário e aqui.
+2. **O roteiro `tools/roteiros/aceite-de-mods.js` não exige nada**, e fica
+   fora do lote, por decisão da revisão. O que vi, na base e aqui, rodando
+   `python3 tools/carga-da-casca.py --roteiro tools/roteiros/aceite-de-mods.js`:
+   `diálogo: VISIVEL`, `linha vermelha da entrada: escondida`,
+   `gravou o sim: alvo=undefined conjunto=undefined`,
+   `tentou entrar de novo: false`, `diálogo depois: VISIVEL`, e «carga limpa».
+   O roteiro só chama `relatar`, nunca `exigir`, então ele nunca reprova — e o
+   que ele relata é que ACEITAR não gravou o sim nem tentou entrar. A causa não
+   medi; a suspeita é a ordem nova do lote W (`aceitarOsMods` obtém o conjunto
+   antes de gravar, e o duble do roteiro não tem o MOD instalado nem o
+   catálogo), o que deixaria a pergunta em TENTAR DE NOVO.
+3. **O worktree.** As edições a este worktree vindas da sessão do controlador
    eram recusadas por um gancho («belongs to a different worktree»); entrei
    nele com `EnterWorktree` (só este agente), e foi daqui que tudo foi escrito.
+   A cópia do relatório no worktree do controlador foi feita entrando nele do
+   mesmo jeito.
+
+Os comentários velhos (o de `tests/frontend.rs` perto de :543 e o doc de
+`registrarNoAnfitriao`) e o CONECTAR, que eram preocupações da primeira
+entrega, entraram nesta rodada.
