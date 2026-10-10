@@ -270,6 +270,57 @@ const { chromium } = require('./playwright.cjs');
     assert.ok(bolso.pesadaRecusada, `a capa de 200 MiB decodificados não foi recusada e dita: ${JSON.stringify(bolso)}`);
     assert.equal(bolso.avatarSemUso, null, `o avatar nomeou um uso: ${JSON.stringify(bolso)}`);
 
+    // 7. **No máximo seis capas animadas ao mesmo tempo** (rascunho §4; tarefa
+    //    6, Step 5c): escolhidas pela vista — as visíveis, e entre elas quem
+    //    falou por último. As outras mostram o quadro parado. Oito pessoas na
+    //    sala e a capa de quem usa: nove capas; a última da grade é quem falou.
+    const animadas = await page.evaluate(async () => {
+      window.recusarCapa = false;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      const r = testTable.snapshot;
+      const sala = r.voice_rooms[0];
+      const modelo = sala.people.find(p => !p.is_self);
+      const deAntes = sala.people.slice();
+      for (let id = 10; id < 17; id += 1) sala.people.push({ ...modelo, id, nickname: `p${id}`, speaking: false });
+      const ids = sala.people.map(p => String(p.id));
+      // A de quem usa já está de pé (a seção do núcleo a registrou), e uma
+      // segunda seria `contribuicao-ja-existe`.
+      const handles = ids.filter(id => id !== String(r.me)).map(id => registrarCapa(id, `volume:capa-${id}`));
+      desenhar(r);
+      desenharChamada(r);
+      await new Promise(ok => setTimeout(ok, 600));
+      // Quem fala agora é a última da grade.
+      sala.people.at(-1).speaking = true;
+      desenharChamada(r);
+      await new Promise(ok => setTimeout(ok, 300));
+      sala.people.at(-1).speaking = false;
+      desenharChamada(r);
+      await new Promise(ok => setTimeout(ok, 300));
+      const capas = [...document.querySelectorAll('[data-com-capa]')];
+      const visiveis = capas.filter(e => {
+        const c = e.getBoundingClientRect();
+        return c.width > 0 && c.height > 0 && c.bottom > 0 && c.top < innerHeight;
+      });
+      const usaOriginal = e => e.querySelector(':scope > .capa-camada')?.style.backgroundImage.includes(daCapa);
+      const ultima = document.querySelector(`.chamada-cartao[data-pessoa-da-capa="${ids.at(-1)}"]`);
+      const resultado = {
+        capas: capas.length,
+        visiveis: visiveis.length,
+        animadas: capas.filter(usaOriginal).length,
+        animadasFora: capas.filter(e => !visiveis.includes(e) && usaOriginal(e)).length,
+        quemFalouAnima: Boolean(ultima && usaOriginal(ultima)),
+      };
+      for (const h of handles) contribuicoesDosMods.revogar(h);
+      sala.people.splice(0, sala.people.length, ...deAntes);
+      desenhar(r);
+      desenharChamada(r);
+      return resultado;
+    });
+    assert.ok(animadas.capas >= 9, `só ${animadas.capas} capas na tela: o cenário não se montou`);
+    assert.equal(animadas.animadas, Math.min(6, animadas.visiveis), `animam ${JSON.stringify(animadas)}`);
+    assert.equal(animadas.animadasFora, 0, `uma capa fora da vista anima: ${JSON.stringify(animadas)}`);
+    assert.ok(animadas.quemFalouAnima, `quem falou por último não anima: ${JSON.stringify(animadas)}`);
+
     // 5. **A citação `daPessoa`** (rascunho §4; tarefa 6, Step 4b; o bloqueio A
     //    do PERFIS): um cartão que cita a capa da pessoa usa a imagem já
     //    carregada — nenhum pedido de mídia novo, e os bytes contam uma vez, na

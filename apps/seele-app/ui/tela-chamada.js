@@ -464,7 +464,9 @@ function pintarCartao(cartao, pessoa, temAudio) {
   const avatar = cartao.querySelector(".chamada-avatar");
   avatar.textContent = iniciaisDoCartao(pessoa.nickname);
   vestirAvatar(avatar, pessoa.id);
-  // A capa da pessoa, quando um MOD a dá (rascunho da API 6, §4; tarefa 6).
+  // A capa da pessoa, quando um MOD a dá (rascunho da API 6, §4; tarefa 6). Quem
+  // fala vai à frente na escolha das capas que animam.
+  if (pessoa.speaking) anotarQuemFala(pessoa.id);
   vestirCapa(cartao, pessoa.id);
   cartao.querySelector(".chamada-cartao-nome").textContent =
     pessoa.nickname + (pessoa.is_self ? " (você)" : "");

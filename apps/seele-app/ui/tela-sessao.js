@@ -1131,6 +1131,7 @@ function desenharOperador(snapshot) {
   // E a capa de quem usa, atrás da identidade dela na barra do operador
   // (rascunho §4) — e **só** atrás da identidade: o microfone, o fone e o SAIR
   // são do núcleo, e nunca ficam sobre a capa (§10).
+  if (snapshot.speaking) anotarQuemFala(snapshot.me);
   vestirCapa($("operador-quem"), snapshot.me);
 
   // **SAIR DA SALA ou SAIR DO SERVIDOR, a cada quadro.** O rótulo só era
@@ -4117,6 +4118,10 @@ async function sairDoServidorParaAEntrada() {
  * escrito.
  */
 function esquecerOEstadoDaSessao() {
+  // Quem falou por último é de um servidor (a escolha das capas animadas); a
+  // marca do quadro agendado volta junto.
+  falouPorUltimo.clear();
+  capasAgendadas = false;
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
@@ -5017,11 +5022,59 @@ function vestirAvatar(quadrado, pessoaId) {
  */
 function vestirCapa(quadro, pessoaId) {
   quadro.dataset.pessoaDaCapa = pessoaId == null ? "" : String(pessoaId);
+  agendarAsCapas();
   return aplicarCapa(quadro);
+}
+
+/**
+ * **Quantas capas animam ao mesmo tempo** (rascunho da API 6, §4; tarefa 6,
+ * Step 5c), contando a de quem usa. As outras mostram o quadro parado. O teto
+ * não depende do tamanho da sala — uma sala vai a 250 pessoas. 6 é a partida
+ * do rascunho, e a M3 mede.
+ */
+const TETO_DE_CAPAS_ANIMADAS = 6;
+
+/** Quando cada pessoa foi vista falando por último: a ordem da escolha. */
+const falouPorUltimo = new Map();
+
+/** Anota que a pessoa está falando agora (o cartão dela, a barra de quem usa). */
+function anotarQuemFala(pessoaId) {
+  if (pessoaId != null) falouPorUltimo.set(String(pessoaId), performance.now());
+}
+
+/**
+ * **Escolhe as capas que animam**: as visíveis, e entre elas quem falou por
+ * último; no empate, a ordem da tela. Marca cada quadro com `data-capa-animada`,
+ * que `aplicarCapa` lê.
+ */
+function escolherAsCapasAnimadas() {
+  const quadros = [...document.querySelectorAll("[data-pessoa-da-capa]")];
+  const naVista = quadros.filter((quadro) => {
+    const caixa = quadro.getBoundingClientRect();
+    return caixa.width > 0 && caixa.height > 0 && caixa.bottom > 0 && caixa.top < innerHeight
+      && caixa.right > 0 && caixa.left < innerWidth
+      && Boolean(quadro.dataset.pessoaDaCapa && capaContribuida(quadro.dataset.pessoaDaCapa));
+  });
+  const falou = (quadro) => falouPorUltimo.get(quadro.dataset.pessoaDaCapa) ?? 0;
+  // `sort` é estável: no empate, fica a ordem da tela.
+  const escolhidos = new Set(naVista.sort((a, b) => falou(b) - falou(a)).slice(0, TETO_DE_CAPAS_ANIMADAS));
+  for (const quadro of quadros) quadro.dataset.capaAnimada = escolhidos.has(quadro) ? "sim" : "nao";
+}
+
+/** Uma escolha por quadro de animação, por mais capas que se vistam nele. */
+let capasAgendadas = false;
+function agendarAsCapas() {
+  if (capasAgendadas) return;
+  capasAgendadas = true;
+  requestAnimationFrame(() => {
+    capasAgendadas = false;
+    redesenharCapas();
+  });
 }
 
 /** Atualiza só as capas: a chegada da mídia não remonta a chamada. */
 function redesenharCapas() {
+  escolherAsCapasAnimadas();
   document.querySelectorAll("[data-pessoa-da-capa]").forEach(aplicarCapa);
 }
 
@@ -5034,7 +5087,9 @@ function redesenharCapas() {
 function aplicarCapa(quadro) {
   const id = quadro.dataset.pessoaDaCapa;
   const capa = id ? capaContribuida(id) : null;
-  const parada = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Parada com o movimento reduzido, e fora das capas escolhidas para animar.
+  const parada = quadro.dataset.capaAnimada !== "sim"
+    || (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   const url = capa ? (parada ? capa.estatico : capa.url) : null;
   let camada = quadro.querySelector(":scope > .capa-camada");
   if (!url) {

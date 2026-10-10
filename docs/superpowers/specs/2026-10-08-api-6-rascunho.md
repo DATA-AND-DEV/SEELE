@@ -419,12 +419,15 @@ bolsos somam `midia.bytes` (`base.js:1209` [c]). Uma capa de 960 × 320 tem
 contrato, **com os números em aberto para a M3** (§12):
 
 - o Rust **reduz** a capa ao maior tamanho em que ela aparece antes de
-  entregá-la à janela, e limita quadros e duração (proposta: 60 quadros, 10 s);
-- o bolso da capa conta **bytes decodificados**;
+  entregá-la à janela, e limita quadros e duração (proposta: 960 × 320, 60
+  quadros, 10 s) [c, tarefa 6, Step 5a: a janela nomeia o uso `"capa"`, de
+  lista fechada no Rust, e nunca um tamanho; `reducao.rs`];
+- o bolso da capa conta **bytes decodificados** [c, Step 5b: 128 MiB por MOD,
+  a partida, separado do bolso dos avatares, que segue contando o arquivo];
 - **no máximo N capas animadas ao mesmo tempo** (proposta: 6, contando a do
   operador), escolhidas pela vista: as visíveis, e entre elas quem falou por
   último. O teto não depende do tamanho da sala (até 250 pessoas,
-  `control.rs:77` [c]).
+  `control.rs:77` [c]). [c, Step 5c; as outras mostram o quadro parado]
 
 ## 5. Camadas e superfícies
 
