@@ -22,8 +22,34 @@
 //! `#[tokio::test]` de thread única roda nela toda tarefa que o teste
 //! dispara, e é o que faz o rastro das tarefas chegar aqui; numa runtime
 //! `multi_thread`, uma tarefa que caia noutra thread some deste rastro.
+//!
+//! O que um rastro vê não depende de outro teste ter passado antes pela mesma
+//! linha sem captura: [`Rastro::a_partir_de`] põe de pé o
+//! [`segundo_despachante`] (pendência 56).
 
 use std::sync::{Arc, Mutex};
+
+/// **Um segundo despachante, vivo o processo inteiro, que não escreve nada.**
+/// É ele que tira do [`Rastro`] a dependência da ordem das threads. O mesmo
+/// auxiliar do app (`apps/seele-app/src/main.rs`, `rastro_de_teste`).
+///
+/// O `tracing` decide uma vez só, na primeira passagem de qualquer thread, se
+/// uma linha que escreve (o *callsite*) tem quem a ouça, e guarda a resposta.
+/// Se, no último registro de despachante, só havia um vivo, a pergunta vai só
+/// ao despachante da **thread que passou** (`tracing-core` 0.1.36,
+/// `callsite.rs`: `Dispatchers::rebuilder` devolve `Rebuilder::JustOne`, e ele
+/// consulta `dispatcher::get_default`). Um teste sem captura que passasse
+/// primeiro por uma linha, com o rastro de outro teste como único despachante
+/// de pé, a deixava marcada como «nunca» — e a mesma linha, no teste que a
+/// captura, não escrevia nada.
+///
+/// Com dois vivos, a pergunta vai a todos, e uma linha que o rastro ouve fica
+/// em «às vezes»: cada evento pergunta de novo, à thread em que acontece. O
+/// que um rastro vê não muda — só o que a thread dele escreveu.
+pub(crate) fn segundo_despachante() {
+    static SEMPRE: std::sync::OnceLock<tracing::Dispatch> = std::sync::OnceLock::new();
+    SEMPRE.get_or_init(|| tracing::Dispatch::new(tracing::subscriber::NoSubscriber::new()));
+}
 
 /// Guarda cada evento de um nível para cima como uma linha
 /// `NÍVEL: mensagem campo=valor …`.
@@ -42,7 +68,12 @@ impl Rastro {
     /// (o nível que o `seele.log` grava) quer o que a pessoa leria no arquivo;
     /// um que só procura um `WARN` não quer as centenas de linhas do aperto de
     /// mão do `quinn` na mensagem da asserção que falhar.
+    ///
+    /// Põe de pé o [`segundo_despachante`] antes de o rastro existir: todo
+    /// teste de log deste crate passa por aqui, e é aqui que ele deixa de
+    /// depender da ordem das threads.
     pub(crate) fn a_partir_de(nivel: tracing::Level) -> Arc<Self> {
+        segundo_despachante();
         Arc::new(Self {
             nivel,
             linhas: Mutex::new(Vec::new()),
@@ -92,4 +123,83 @@ impl tracing::Subscriber for Rastro {
     fn enter(&self, _span: &tracing::span::Id) {}
 
     fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+/// Marca o processo filho da prova abaixo: com ela, a prova roda a
+/// [`ordem_forcada`] em vez de chamar a si mesma.
+const PROVA_NO_FILHO: &str = "PROVA56_FILHO";
+
+/// **Uma linha que outra thread tocou primeiro, fora de qualquer captura,
+/// ainda é capturada.** A prova de ordem forçada da pendência 56, a do app
+/// (`apps/seele-app/src/main.rs`, `rastro_de_teste`), feita pelo [`Rastro`] e
+/// rodada num processo filho.
+///
+/// É a ordem que fazia um teste deste crate passar ou falhar por sorte: um
+/// teste sem captura passava por uma linha antes do teste que a captura, e a
+/// linha sumia do rastro deste. A [`ordem_forcada`] põe a outra thread na
+/// linha primeiro, com o rastro já de pé.
+///
+/// **Por que num processo filho.** A ordem forçada só decide quando o rastro
+/// dela é o único despachante vivo: é aí que o `tracing` pergunta só à thread
+/// que passou. No binário inteiro, os rastros dos testes vizinhos ficam de pé
+/// ao mesmo tempo, e com eles ela passava mesmo sem o conserto (medido em
+/// 09/10, com as threads padrão e com 4). O filho roda só ela (`--exact`,
+/// `--test-threads=1`), e ali o rastro é o único. O pai exige `1 passed`,
+/// porque um `--exact` que não acha o teste sai com sucesso e `0 passed`, e a
+/// prova passaria sem ter rodado.
+#[test]
+fn uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada() {
+    if std::env::var_os(PROVA_NO_FILHO).is_some() {
+        return ordem_forcada();
+    }
+    let saida =
+        std::process::Command::new(std::env::current_exe().expect("o binário destes testes"))
+            .args([
+                "--exact",
+                "rastro_de_teste::uma_linha_que_outra_thread_tocou_primeiro_ainda_e_capturada",
+                "--test-threads=1",
+            ])
+            .env(PROVA_NO_FILHO, "1")
+            .output()
+            .expect("o processo filho da prova não subiu");
+    let fala = String::from_utf8_lossy(&saida.stdout);
+    assert!(
+        saida.status.success() && fala.contains("ok. 1 passed;"),
+        "a ordem forçada reprovou no processo filho, onde o rastro é o único despachante \
+         vivo, ou o filtro não achou a prova e ela não rodou: {fala}{}",
+        String::from_utf8_lossy(&saida.stderr)
+    );
+}
+
+/// A outra thread toca a linha primeiro, com o rastro já de pé, e a linha
+/// ainda chega ao rastro. E a linha da outra thread continua fora: o rastro
+/// segue sendo só da thread corrente.
+///
+/// Só decide com o rastro dela como único despachante vivo, e por isso roda no
+/// processo filho da prova acima.
+fn ordem_forcada() {
+    fn diz() {
+        tracing::warn!("linha tocada primeiro fora da captura");
+    }
+    let rastro = Rastro::a_partir_de(tracing::Level::WARN);
+    let _guarda = tracing::subscriber::set_default(rastro.clone());
+    std::thread::spawn(diz)
+        .join()
+        .expect("a outra thread terminou");
+    diz();
+
+    let linhas = rastro.linhas();
+    assert!(
+        linhas
+            .iter()
+            .any(|linha| linha.contains("linha tocada primeiro fora da captura")),
+        "uma linha que outra thread tocou primeiro sumiu do rastro, e um guarda que a capture \
+         passa ou falha conforme a ordem das threads: {linhas:?}"
+    );
+    assert_eq!(
+        linhas.len(),
+        1,
+        "a linha da outra thread entrou neste rastro, e um teste passaria a ler o que outro \
+         teste escreveu: {linhas:?}"
+    );
 }

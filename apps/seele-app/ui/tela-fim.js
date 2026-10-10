@@ -114,9 +114,15 @@ function desenharSaidas() {
  * entrada, com o endereço no campo —, e é ele quem decide para onde isto vai:
  * a autenticação, se der certo; a própria entrada, com a linha de erro, se não.
  *
- * O convite colado **não** é limpo aqui, ao contrário da saída: o token vale
- * para este servidor, que é exatamente para onde se está voltando. Sem ele, uma
- * reconexão a um servidor com portaria bateria sem credencial.
+ * **Sem credencial nenhuma, e de propósito** (lote R da F5). Este comentário
+ * dizia que o convite colado seguia junto, e não seguia desde a 0.9.0: o token
+ * viaja como argumento de `conectar` e não fica guardado em lugar nenhum. A
+ * credencial da tentativa — a que a pergunta dos MODs guarda para a volta que
+ * aceita — também não chega aqui: esta tela só existe depois de uma sessão que
+ * **entrou**, e entrar gastou o convite e esqueceu a credencial. Reenviá-la
+ * seria gastar de novo o que já foi gasto. Quem volta a um servidor fechado
+ * por convite sem portaria precisa de convite novo; com portaria, a decisão de
+ * quem hospeda é a credencial que dura (`portaria::ja_admitido`, no servidor).
  */
 async function reconectar() {
   const botao = $("botao-voltar");

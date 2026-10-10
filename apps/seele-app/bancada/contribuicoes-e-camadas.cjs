@@ -2344,9 +2344,15 @@ function anotando(...anotadas) {
       confere("R4e · o recorte", inicioDoAvatar >= 0,
         "`avatarContribuido` mudou de forma e o recorte não a achou");
       vm.runInContext(base.slice(inicioDoAvatar, fimDoAvatar), contexto);
+      // E `soImagem`, com o que ela chama (M5 da revisão do K4): o avatar só
+      // mostra imagem, e o som que o Rust recusa pelo teto chega a ele como o
+      // som que era.
       for (const [de, ate, quem] of [
         ["function provarImagem(", "\n}\n", "`provarImagem`"],
         ["const LIMITES_DO_CARTAO = Object.freeze({", "\n});\n", "`LIMITES_DO_CARTAO`"],
+        ["const SOM_GRANDE_DEMAIS_DECODIFICADO = ", ";\n", "`SOM_GRANDE_DEMAIS_DECODIFICADO`"],
+        ["function recusaDoSomGrandeDemais(", "\n}\n", "`recusaDoSomGrandeDemais`"],
+        ["function soImagem(", "\n}\n", "`soImagem`"],
       ]) {
         const inicio = regiaoFonte.indexOf(de);
         confere("R4e · o recorte da imagem", inicio >= 0,
@@ -2376,6 +2382,12 @@ function anotando(...anotadas) {
         [12, () => Promise.resolve({ uri: "x:", papel: "som", bytes: 2 }), "não é imagem"],
         [13, () => Promise.reject({ Recusado: { motivo: "fora do teto" } }), "fora do teto"],
         [14, () => Promise.resolve({ uri: URI_QUE_NAO_DECODIFICA, papel: "imagem", bytes: 2 }), "não decodificou"],
+        // O som que o Rust recusou pelo teto do som: para o avatar, que só
+        // mostra imagem, o MOD ouve o «não é imagem» de antes (M5 da revisão
+        // do K4), e não a recusa do som.
+        [15, () => Promise.reject({
+          Recusado: { motivo: "som-grande-demais-decodificado: decodificado a 48000 Hz, o som ocupa ao menos 251657180 bytes, acima do teto de 67108864 bytes de som" },
+        }), "não é imagem"],
       ]) {
         const ditas = [];
         const faladas = [];

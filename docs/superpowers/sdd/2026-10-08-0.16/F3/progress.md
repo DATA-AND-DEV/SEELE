@@ -357,3 +357,87 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
   - Visto no caminho: `alcance::encontro::testes::a_janela_fecha_dentro_do_atender_e_nao_so_no_auxiliar`
     reprovou uma vez na rodada paralela do `seele-server` e passou 3 de 3
     sozinho (7,8 s cada). Não é desta frente; dito à orquestradora.
+- **O tema claro no desktop** (achado da F8, decisão D-linha-3): medido nas
+  três versões com a interface real no Chromium, e o defeito estava na v0.15.1
+  publicada também — o corpo das mensagens a 1,09:1, o SAIR DA SALA a 1,04:1.
+  A causa: o `body` resolve a cor com o token da raiz, e o tema o redefine em
+  `#tela-sessao`, abaixo dele. Conserto: `#tela-sessao { color:
+  var(--seele-osso) }`.
+  - 0.16: `6ae45d1`, com a bancada `tema-claro-legivel.cjs` (reprova sem a
+    regra, passa com ela) e a evidência em
+    `docs/evidencias/tema-claro-2026-10-09/`. Sem tema, as capturas são iguais
+    byte a byte em 1280 e 900 px.
+  - 0.15.2: o ramo `conserto/tema-claro-0.15` (`43b5899`, `b46032e`), com o
+    mesmo conserto, a mesma bancada e a nota; o merge é da orquestradora.
+  - O que sobra abaixo de 3:1 é da 17e: as cores de estado e os tons
+    derivados.
+  - Ruling: a varredura mede todo texto visível da sessão, e não três
+    seletores — custo se errado: nenhum, a bancada que fica no CI confere os
+    três lugares que a orquestradora pediu.
+- **As conformidades das tarefas 4 e 8** (liberadas depois das duas baterias,
+  em cima de `c992a03`, com o conserto da orquestradora no `cascaDoRetrato`):
+  - `aviso_do_servidor.rs`: 3 de 3 verdes, e três reversões, todas compiladas e
+    reprovando — os pedidos sem entregar o aviso (dois casos), a sessão sem o
+    filtro de leitura do canal, o contexto sem a sala.
+  - `mod_de_referencia`: 4 de 4 verdes.
+  - O aviso que cai com o quintal tem a reversão no runtime («a falha não
+    esquece os avisos»); na integração, o `?` da chamada sai antes de tomar os
+    avisos, e uma reversão ali teria de quebrar duas coisas juntas.
+  - Nota da orquestradora (`12ed17d1`): o `onde` deixou de ler `dataset.casca`,
+    que o guarda G2 da F8 proíbe ao desktop, e passou a perguntar se o
+    `CELULAR` existe. O retrato segue a regra da casca, e não uma marca minha.
+- **17e, as cores de estado derivadas do tema** (`bf8d8fb6`, sobre o K4 em
+  `cd2227c5`). Sob um tema, o fósforo, o azul, o vermelho e os preenchimentos
+  saem das superfícies dele, em OKLCH, com 4,5:1 sobre o `fundo` e o `painel`;
+  sem tema, nada é derivado.
+  - `tons-do-tema.cjs` (check-runtime): padrão → cores de estado iguais, fills a
+    ΔE2000 3,2–4,2; tema claro → tudo ≥ 4,5:1; cinza-médio → recusado pelo
+    fósforo; cor da raiz que não carregou → nem recusa nem tom.
+  - `tema-claro-legivel.cjs` (navegador): sincronia e nome de quem usa a
+    4,52:1; sem a derivação, 1,05:1.
+  - Sem tema: capturas iguais byte a byte ao HEAD anterior, 1280 e 900.
+  - frontend 280/280, check-runtime limpo, tokens e xtask verdes.
+  - Ruling: o ΔE ≤ 2 prometido não se cumpre e o contrato fica em ≤ 4,5 para
+    os preenchimentos — custo se errado: sob um tema com as cores do padrão,
+    um `-fraco` um pouco diferente do token, e só ali; sem tema, nada muda.
+  - Ruling: o `acento` sobre o `acentoFraco` sai da lista de recusa e passa a
+    ser garantido pela derivação — custo se errado: nenhum tema é recusado
+    por esse par, e o par continua em 4,5:1.
+  - Ruling: `bordaForte` não é derivado — custo se errado: num tema claro, a
+    régua forte sai escura, visível, talvez pesada.
+  - Ruling: a leitura da raiz ganhou um nome (`corDaRaiz`) em vez de afrouxar o
+    guarda do ADR 0049, e o guarda confere que ela só lê.
+- **17j, as chaves do tema fechadas no servidor** (`f9050574`). O `mundo.tema`
+  confere por `seele_proto::mods::CHAVES_DO_TEMA` e responde
+  `chave-desconhecida` ou `valor-invalido`, com a `chave`.
+  - Vetor comum `crates/seele-proto/tests/vetores/chaves-do-tema.json` (37
+    casos), lido pelo servidor e pela casca (`chaves-do-tema.cjs`, no
+    check-runtime). Achou a casca conferindo com `in`: `fonte: "toString"`
+    aplicado, `constructor` recusado como medida. Consertado (`Object.hasOwn`).
+  - Espelho em `frontend.rs` nos dois sentidos; cobertura do vetor sobre a
+    tabela; dois testes de runtime, um por recusa.
+  - Sete reversões, todas reprovando por asserção (conferido: nenhuma por
+    compilação).
+  - frontend 281/281, `mods::` do servidor 125/125, seele-proto verde,
+    conformidade `tema_do_servidor` 3/3 (sem bateria rodando), check-runtime
+    limpo, clippy limpo.
+  - Ruling: feita antes da 17i, com a tabela de hoje — custo se errado:
+    nenhum; a 17g–i soma `modo` numa linha de cada tabela e um caso no vetor,
+    e o espelho reprova se faltar um dos três.
+  - Ruling: um vetor comum além do espelho pelo texto — custo se errado: um
+    arquivo a mais para manter; foi ele, e não o espelho, que achou o `in`.
+  - Com mais de uma chave errada, o servidor nomeia a primeira **em ordem
+    alfabética** (o `serde_json::Map` é um `BTreeMap`, sem `preserve_order`).
+    Eu tinha escrito «na ordem do objeto»; medido antes de avisar, corrigido,
+    e fixado num teste. A orquestradora pediu as duas pontas iguais: a casca
+    passou a ordenar por ponto de código (a ordem dos bytes UTF-8), com dois
+    casos novos no vetor (39) e as reversões (sem ordenar; ordenando por
+    unidade UTF-16) reprovando.
+- **O atalho da 17e** (pedido da orquestradora): com o `fundo` e o `painel`
+  exatos do produto, os preenchimentos são os tokens (ΔE 0); um acento
+  diferente ganha o dele derivado. `tons-do-tema.cjs` lê os tokens do
+  `tokens.css`. Sem o atalho, 7 falhas; sem conferir a cor, o acento azul
+  recebe `#331704` e reprova. A um passo das superfícies, a derivação e o
+  ΔE2000 ≤ 4,5 continuam medidos.
+  - Próximo: as tarefas que esperavam o K4, na ordem do plano: 5, 6, 7, 9, 10,
+    17d, 17f.0, 17f, 17g, 17h, 17i.
