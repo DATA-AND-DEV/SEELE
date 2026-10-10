@@ -1880,6 +1880,60 @@ function anotando(...anotadas) {
   }
 }
 
+// ------------------- o teto por alvo (tarefa 5 da F3, Step 7; rascunho §12)
+//
+// O bloqueio C do PERFIS: com cartão, avatar e capa por pessoa, as 128
+// contribuições de um MOD davam 42 pessoas, e uma sala vai a 250. Os pontos
+// por alvo saem do teto agregado; cada alvo aceita uma contribuição por MOD
+// (e por modo) — registrar de novo é `atualizar` —, até um teto de alvos por
+// ponto; o agregado fica para os pontos sem alvo.
+
+{
+  const registro = new R();
+  const dono = new I("mod/perfis", "p", 7, {});
+  const recusa = (pedido) => {
+    try {
+      registro.registrar({ id: "mod/perfis" }, dono, pedido);
+      return "";
+    } catch (falha) {
+      return falha.message;
+    }
+  };
+  let recusadas = 0;
+  for (let id = 1; id <= 250; id += 1) {
+    if (recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(id) })) recusadas += 1;
+    if (recusa({ ponto: "pessoa.avatar", modo: "substituir", alvo: String(id), conteudo: { doServidor: { canal: 1 } } })) {
+      recusadas += 1;
+    }
+  }
+  confere("Step 7 · 250 pessoas", recusadas === 0, `${recusadas} das 500 contribuições por pessoa foram recusadas`);
+
+  const segunda = recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "1" });
+  confere("Step 7 · a segunda para o mesmo alvo", segunda.includes("atualizar") && segunda.includes("pessoa.cartao"),
+    `uma segunda contribuição para o mesmo alvo não foi recusada com «use atualizar»: ${segunda || "aceita"}`);
+  confere("Step 7 · outro modo, o mesmo alvo",
+    recusa({ ponto: "pessoa.cartao", modo: "adicionar", alvo: "1" }) === "",
+    "acrescentar à linha de quem o MOD já apresenta foi recusado como se fosse a mesma contribuição");
+
+  for (let id = 251; id <= 256; id += 1) recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: String(id) });
+  const alem = recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "257" });
+  confere("Step 7 · o teto de alvos", alem.includes("256") && alem.includes("pessoa.cartao"),
+    `o 257º alvo de «pessoa.cartao» não foi recusado com o número: ${alem || "aceito"}`);
+
+  let entradas = 0;
+  for (let i = 0; i < 128; i += 1) if (!recusa({ ponto: "servidor.navegacao", rotulo: `entrada ${i}` })) entradas += 1;
+  confere("Step 7 · o agregado é dos pontos sem alvo", entradas === 128,
+    `só ${entradas} entradas de navegação couberam: as contribuições por pessoa ainda gastam o teto agregado`);
+  const a129 = recusa({ ponto: "servidor.navegacao", rotulo: "entrada 128" });
+  confere("Step 7 · a 129ª entrada", a129.includes("128"), `a 129ª entrada não foi recusada com o número: ${a129 || "aceita"}`);
+
+  // Revogar devolve o alvo: o mesmo alvo aceita de novo.
+  const umAlvo = [...registro.porHandle.values()].find((c) => c.ponto === "pessoa.cartao" && c.alvo === "2" && c.modo === "substituir");
+  registro.revogar(umAlvo.handle, { id: "mod/perfis", instancia: dono });
+  confere("Step 7 · revogar devolve o alvo", recusa({ ponto: "pessoa.cartao", modo: "substituir", alvo: "2" }) === "",
+    "revogada a contribuição de um alvo, o alvo continuou ocupado");
+}
+
 // V14: duas instâncias compartilham o destino central e conservam o rascunho.
 {
   const montar = S.prototype.montarCasca;

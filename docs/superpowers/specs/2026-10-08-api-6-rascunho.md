@@ -1340,9 +1340,10 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
 - **os pontos por alvo** (`pessoa.cartao`, `pessoa.avatar`, `pessoa.capa`,
   `pessoa.identidade`, `pessoa.detalhes`, `pessoa.acoes`, `canal.item`,
   `sala.acoes`) **não contam no teto agregado**. Cada um aceita **uma
-  contribuição por alvo e por MOD** (registrar de novo para o mesmo alvo é
-  `atualizar`, e não uma segunda), e até um teto de alvos por ponto, maior que
-  a sala (partida: 256);
+  contribuição por alvo, por MOD e por modo** (registrar de novo para o mesmo
+  alvo é `atualizar`, e não uma segunda; o mesmo MOD pode substituir o cartão
+  de uma pessoa e acrescentar à linha dela, que são duas coisas), e até um teto
+  de alvos por ponto, maior que a sala (partida: 256) [c, tarefa 5, Step 7];
 - **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
   as entradas de navegação, as ferramentas do compositor;
 - **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128

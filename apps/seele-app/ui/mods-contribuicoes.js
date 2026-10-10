@@ -96,8 +96,21 @@ const PONTOS_DE_CONTRIBUICAO = Object.freeze({
   "conversa.mensagem": { modos: ["substituir", "adicionar"], perfil: "cartao", porAlvo: true },
 });
 
-/** Quantas contribuições um MOD registra ao mesmo tempo. */
+/**
+ * Quantas contribuições **sem alvo** um MOD registra ao mesmo tempo — as
+ * regiões, as entradas de navegação, as ferramentas do compositor. As por alvo
+ * têm o teto delas, abaixo (rascunho da API 6, §12).
+ */
 const TETO_DE_CONTRIBUICOES = 128;
+
+/**
+ * **Quantos alvos um MOD alcança num ponto por alvo** (rascunho da API 6, §12;
+ * tarefa 5, Step 7). Uma sala vai a 250 pessoas (`control.rs:77`), e o cartão,
+ * o avatar e a capa de cada uma eram três contribuições do mesmo teto de 128 —
+ * 42 pessoas. Agora cada ponto por alvo tem o seu, maior que a sala. O número
+ * é a partida do rascunho, e sai da M3.
+ */
+const TETO_DE_ALVOS_POR_PONTO = 256;
 
 /**
  * A escolha que quer dizer «o SEELE desenha, e nenhum MOD».
@@ -224,19 +237,46 @@ class RegistroDeContribuicoes {
       throw new Error(`«${ponto}» aceita ${regra.modos.join(" ou ")}, e veio «${modo}»`);
     }
     conferirOConteudo(ponto, modo, pedido?.alvo, pedido?.conteudo);
-    const quantas = this.porMod.get(mod.id) ?? 0;
-    if (quantas >= TETO_DE_CONTRIBUICOES) {
-      throw new Error(`um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições de pé`);
-    }
-
     const alvo = regra.porAlvo && pedido?.alvo !== undefined && pedido?.alvo !== null
       ? String(pedido.alvo)
       : "";
+    // **Por alvo, fora do teto agregado** (rascunho §12; tarefa 5, Step 7).
+    // Cada alvo aceita uma contribuição deste MOD em cada modo — registrar de
+    // novo é `atualizar`, e não uma segunda —, até um teto de alvos por ponto.
+    // Sem alvo, o agregado de sempre.
+    const noAgregado = alvo === "";
+    if (noAgregado) {
+      const quantas = this.porMod.get(mod.id) ?? 0;
+      if (quantas >= TETO_DE_CONTRIBUICOES) {
+        throw new Error(`um MOD mantém até ${TETO_DE_CONTRIBUICOES} contribuições sem alvo de pé`);
+      }
+    } else {
+      const doPonto = this.porPonto.get(ponto);
+      const minhas = (lista) => (lista ?? []).filter((c) => c.mod === mod.id && c.instancia === instancia);
+      const nesteAlvo = minhas(doPonto?.get(alvo));
+      if (nesteAlvo.some((c) => c.modo === modo)) {
+        throw new Error(
+          `«${ponto}» já tem uma contribuição de ${mod.id} para «${alvo}» em «${modo}»; `
+          + "use atualizar para trocar o conteúdo dela",
+        );
+      }
+      if (nesteAlvo.length === 0) {
+        let alvos = 0;
+        for (const [outro, lista] of doPonto ?? []) {
+          if (outro !== "" && minhas(lista).length > 0) alvos += 1;
+        }
+        if (alvos >= TETO_DE_ALVOS_POR_PONTO) {
+          throw new Error(`um MOD contribui para até ${TETO_DE_ALVOS_POR_PONTO} alvos em «${ponto}»`);
+        }
+      }
+    }
     const contribuicao = {
       handle: `c${(this.serie += 1)}`,
       mod: mod.id,
       instancia,
       geracao: instancia?.geracao ?? 0,
+      // Se ela conta no teto agregado — e é o que `tirar` desconta.
+      noAgregado,
       ponto,
       modo,
       alvo,
@@ -265,7 +305,7 @@ class RegistroDeContribuicoes {
     porAlvo.set(alvo, lista);
     this.porPonto.set(ponto, porAlvo);
     this.porHandle.set(contribuicao.handle, contribuicao);
-    this.porMod.set(mod.id, quantas + 1);
+    if (noAgregado) this.porMod.set(mod.id, (this.porMod.get(mod.id) ?? 0) + 1);
 
     // **Registrada como recurso na criação.** Uma contribuição que a saída não
     // encontra é uma faixa de perfil que sobrevive à troca de servidor.
@@ -373,9 +413,11 @@ class RegistroDeContribuicoes {
       if (!lista.length) porAlvo.delete(contribuicao.alvo);
     }
     if (porAlvo && !porAlvo.size) this.porPonto.delete(contribuicao.ponto);
-    const quantas = this.porMod.get(contribuicao.mod) ?? 0;
-    if (quantas <= 1) this.porMod.delete(contribuicao.mod);
-    else this.porMod.set(contribuicao.mod, quantas - 1);
+    if (contribuicao.noAgregado) {
+      const quantas = this.porMod.get(contribuicao.mod) ?? 0;
+      if (quantas <= 1) this.porMod.delete(contribuicao.mod);
+      else this.porMod.set(contribuicao.mod, quantas - 1);
+    }
     // **E o que foi montado a partir dela sai junto.**
     //
     // Quem monta é a janela — `montarContribuicao` em `base.js` —, e ela deixa
