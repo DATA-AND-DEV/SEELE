@@ -11179,7 +11179,9 @@ mod o_audio_segue_a_sala {
 
         assert_eq!(
             voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
-            Some(701)
+            Some(701),
+            "a voz reaberta na conexão nova não entrou no lugar: quem caiu e voltou fica \
+             sem voz, e a tecla abaixo é medida noutra"
         );
         assert_eq!(
             tecla_de(&voz),
@@ -11340,7 +11342,11 @@ mod o_audio_segue_a_sala {
         porta.olhar(&voz, sala_do_audio(&room), |_| {
             entregue(Ok(Ok(voz_de(702))))
         });
-        assert_eq!(voz.abertura(), AberturaDoAudio::Abrindo);
+        assert_eq!(
+            voz.abertura(),
+            AberturaDoAudio::Abrindo,
+            "entrar de novo na sala não começou a abrir o áudio: a pessoa volta sem voz"
+        );
         voz.segurar_a_tecla(true);
         let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
             .await
@@ -11361,7 +11367,12 @@ mod o_audio_segue_a_sala {
         let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
         let mut porta = PortaDaVoz::nova();
         porta.olhar(&voz, Some(SALA), |_| entregue(Ok(Ok(voz_de(700)))));
-        assert_eq!(voz.abertura(), AberturaDoAudio::Abrindo);
+        assert_eq!(
+            voz.abertura(),
+            AberturaDoAudio::Abrindo,
+            "entrar na sala não começou a abrir o áudio, e a pressão abaixo não cai no \
+             «ABRINDO»"
+        );
 
         voz.segurar_a_tecla(true);
         let aberta = porta.chegada().await;
