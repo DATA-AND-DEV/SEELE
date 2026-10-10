@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "id": "seele/estilo",
+  "version": "3.1.0",
+  "api": 4,
+  "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+  "reach": [
+    "tema do servidor"
+  ],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js"
+}
