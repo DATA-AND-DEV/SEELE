@@ -1126,6 +1126,9 @@ pares?: [{ frente, fundo, razao, piso }], previa: boolean }`, com os pares na
 mesma forma da recusa de `mundo.tema`. `recusado` traz os pares e
 os números; `nativo` diz que quem vê escolheu «o SEELE desenha». É o que deixa
 o ESTILO dizer na tela o que aconteceu, e não o que ele supõe (o U24 dele).
+[c, tarefa 17f, para o `TemaMudou`: a escolha de `servidor.aparencia` lida
+pela casca a cada desenho, e o evento só à janela do MOD que declarou o tema;
+a linha da escolha em QUEM DESENHA O QUE e a prévia (17g) vêm depois.]
 
 ### Os pares e os tons derivados, em números (B3)
 

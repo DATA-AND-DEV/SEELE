@@ -2379,7 +2379,11 @@ let temaDoServidorEmVigor = null;
  * entrada do MOD em `temaDosMods` é só deste tema.
  */
 function aplicarOTemaDoServidor(tema) {
-  const chave = tema ? `${tema.mod_id}\u0000${tema.valores}` : "";
+  // **A escolha de quem vê** (tarefa 17f; rascunho §9): «o SEELE desenha» para
+  // a aparência tira o tema deste servidor nesta máquina. Ela entra na chave:
+  // trocá-la reavalia o tema no próximo desenho, mesmo com o tema igual.
+  const nativo = typeof modPreferidoPara === "function" && modPreferidoPara("servidor.aparencia") === NATIVO;
+  const chave = tema ? `${tema.mod_id}\u0000${tema.valores}\u0000${nativo ? "nativo" : ""}` : "";
   if (chave === (temaDoServidorEmVigor?.chave ?? "")) return;
   const antes = temaDoServidorEmVigor;
   temaDoServidorEmVigor = tema ? { mod_id: String(tema.mod_id), valores: String(tema.valores), chave } : null;
@@ -2388,18 +2392,47 @@ function aplicarOTemaDoServidor(tema) {
     if (tirou) escreverOTemaDaSessao();
     return;
   }
+  const { mod_id: modId } = temaDoServidorEmVigor;
+  if (nativo) {
+    if (tirou) escreverOTemaDaSessao();
+    dizerOTemaAoMod(modId, { estado: "nativo" });
+    return;
+  }
+  let valores = null;
   try {
-    aplicarOTemaDoMod(temaDoServidorEmVigor.mod_id, JSON.parse(temaDoServidorEmVigor.valores));
+    valores = JSON.parse(temaDoServidorEmVigor.valores);
+    aplicarOTemaDoMod(modId, valores);
+    dizerOTemaAoMod(modId, { estado: "aplicado" });
   } catch (falha) {
     if (tirou) escreverOTemaDaSessao();
     const motivo = typeof motivoDaFalha === "function" ? motivoDaFalha(falha) : String(falha?.message ?? falha);
     registrarNoAnfitriao(
       "tema-do-servidor",
-      `${temaDoServidorEmVigor.mod_id}: o tema do servidor não foi aplicado — ${motivo}`,
+      `${modId}: o tema do servidor não foi aplicado — ${motivo}`,
       "aviso",
-      temaDoServidorEmVigor.mod_id,
+      modId,
     );
+    // Os pares, na forma da recusa de `mundo.tema` (17e): o que a casca mediu
+    // com este tema sozinho. Uma recusa que não é de par vai sem eles.
+    const pares = valores && typeof valores === "object" && COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))
+      ? tonsDoTema(valores, corDaRaiz).pares.map(({ frente, fundo, razao, piso }) => ({ frente, fundo, razao, piso }))
+      : [];
+    dizerOTemaAoMod(modId, { estado: "recusado", pares });
   }
+}
+
+/**
+ * **O evento `tema`, à janela do MOD que declarou o tema** (rascunho da API 6,
+ * §9, B2; tarefa 17f): `aplicado`, `recusado` com os pares, ou `nativo` —
+ * quem vê escolheu «o SEELE desenha». Só à instância daquele MOD, e só se a
+ * API dela tem o tema; `previa` é falso aqui (a prévia é a 17g).
+ */
+function dizerOTemaAoMod(modId, dados) {
+  const instancia = modsCarregados.get(modId);
+  if (!instancia) return;
+  const mod = { id: modId, api: instancia.api };
+  if (!(CAPACIDADES_POR_API[Number(mod.api)] ?? []).includes("tema")) return;
+  donoDaRegiao(mod, instancia).falar({ nome: "tema", ...dados, previa: false });
 }
 
 /**

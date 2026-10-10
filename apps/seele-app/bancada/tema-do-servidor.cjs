@@ -14,6 +14,11 @@
 // 3. **Um tema que a janela recusa não fica** — nem o de antes —, e o motivo
 //    vai ao `seele.log`.
 // 4. **Sair da sessão o tira**, como o tema de um MOD.
+// 5. **A escolha de quem vê e o evento `tema`** (tarefa 17f; rascunho §9, B2):
+//    «o SEELE desenha» para a aparência tira o tema daquele servidor nesta
+//    máquina, e o MOD que o declarou recebe `tema` com `estado: 'nativo'`;
+//    voltar ao automático o devolve, com `aplicado`; um tema recusado manda
+//    `recusado` com os pares (`frente`, `fundo`, `razao`, `piso`).
 //
 // Rodar:  node apps/seele-app/bancada/tema-do-servidor.cjs
 
@@ -80,6 +85,39 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     const linha = await page.evaluate((de) => testCalls.slice(de).find((c) => c.cmd === 'registrar_da_janela')?.args, antesDoLog);
     assert.ok(linha && linha.modId === 'seele/estilo' && /tema/.test(linha.oQue), `o tema recusado não foi ao seele.log: ${JSON.stringify(linha)}`);
 
+    // 5. A escolha de quem vê e o evento `tema`, à janela do MOD que o
+    //    declarou.
+    await page.evaluate(() => {
+      entrarNaGeracao(1);
+      window.temas = [];
+      const inst = new InstanciaDeMod('seele/estilo', 'h', geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; },
+        entregar(m) { if (m.tipo === 'evento' && m.nome === 'tema') temas.push(JSON.parse(JSON.stringify(m))); },
+      });
+      inst.estado = ESTADOS_DE_MOD.ativa;
+      inst.api = 6;
+      modsCarregados.set('seele/estilo', inst);
+    });
+    const ultimoTema = () => page.evaluate(() => temas.at(-1) ?? null);
+    await desenharCom(null);
+    await desenharCom(comoVeio);
+    assert.deepEqual(await ultimoTema(), { tipo: 'evento', nome: 'tema', estado: 'aplicado', previa: false }, 'o MOD não soube que o tema foi aplicado');
+    await page.evaluate(() => escolherApresentacao('servidor.aparencia', NATIVO));
+    await desenharCom(comoVeio);
+    assert.deepEqual(await tokens(), {}, '«o SEELE desenha» não tirou o tema do servidor desta máquina');
+    assert.deepEqual(await ultimoTema(), { tipo: 'evento', nome: 'tema', estado: 'nativo', previa: false }, 'o MOD não soube que quem vê escolheu o SEELE');
+    await page.evaluate(() => escolherApresentacao('servidor.aparencia', ''));
+    await desenharCom(comoVeio);
+    assert.equal((await tokens()).fundo, CLARO.fundo, 'voltar ao automático não devolveu o tema');
+    assert.equal((await ultimoTema())?.estado, 'aplicado', 'o MOD não soube que o tema voltou');
+    await desenharCom({ mod_id: 'seele/estilo', valores: JSON.stringify({ ...CLARO, acento: CLARO.fundo }) });
+    const recusado = await ultimoTema();
+    assert.equal(recusado?.estado, 'recusado', `o MOD não soube que o tema foi recusado: ${JSON.stringify(recusado)}`);
+    assert.ok(recusado.pares?.length && recusado.pares.every((p) => p.frente && p.fundo && p.razao > 0 && p.piso > 0)
+      && recusado.pares.some((p) => p.frente === 'acento' && p.fundo === 'fundo'),
+    `a recusa não trouxe os pares: ${JSON.stringify(recusado)}`);
+    await desenharCom(comoVeio);
+
     // 4. Sair da sessão o tira.
     await desenharCom(comoVeio);
     assert.equal((await tokens()).fundo, CLARO.fundo, 'o tema não voltou depois da recusa');
@@ -91,7 +129,7 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     assert.equal((await tokens()).fundo, CLARO.fundo, 'a sessão seguinte, com o mesmo tema, ficou sem ele');
 
     assert.deepEqual(errors, []);
-    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão.');
+    console.log('tema do servidor: chega pelo retrato e é aplicado, o None o tira, o recusado não fica e vai ao seele.log, e sai com a sessão; «o SEELE desenha» o tira desta máquina, e o MOD sabe de cada desfecho.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
