@@ -576,3 +576,22 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     com `cargo test -p seele-app --tests`, todos os alvos.
   - Esperam: o Step 3 (a tarefa 11) e o Step 5 (`chamada.palco`, o
     `camada-mods.js` livre depois da bateria da décima).
+  - 6e `d4a63221` (o `erro` na `escolha` e na `cor`) e 6f `d289e750` (os
+    botões primário e secundário do produto), pedidos pela orquestradora: o
+    que o §5 promete tem de existir antes de o `v6.json` congelar.
+- **Tarefa 9, o núcleo de confiança** (09/10).
+  - Steps 1–2 `e26e9edc`: medido, a 17e recusa o tema só de acento escuro;
+    mas o §10 manda os controles lerem o produto. `nucleo.cjs` (no CI) aplica
+    os temas da F8, o hostil por baixo da validação, e exige as mesmas cores
+    com e sem tema: reprovava em 29 medidas (o MUDO ligado a 1,00:1 sob o
+    hostil). Os `--nucleo-*` na raiz, os nomes da F8.
+  - Step 3 `475f83d5`: o guarda 11, dez itens, com os dois pontos que só
+    pintam fora e o motivo escrito (aceito).
+  - Step 4 `0266f95e`: o apelido verificado, já da tarefa 5, reforçado com o
+    nome de outra pessoa da sessão e fora da raiz do MOD.
+  - Step 4b `3e89971a` e `97e47473`: medido, o modal cobria a barra; a
+    orquestradora decidiu o recorte, no desktop e no celular. O véu ganha um
+    furo na barra (e na porta da gaveta, abaixo de 900), o MUDO, o fone e o
+    SAIR acordados, o diálogo fora do furo e rolando por dentro; o resto
+    inerte e coberto. Seis reversões.
+  - Espera: o Step 5 (a 7d da sala pessoal).
