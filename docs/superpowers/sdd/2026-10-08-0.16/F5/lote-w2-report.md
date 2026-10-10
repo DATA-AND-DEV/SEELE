@@ -15,14 +15,20 @@ local: sem push, tag nem release. Sem conformidade.
 | `6af0bedd` | rodada da revisão, 1 | o `finally` de `conectar` só reacende o CONECTAR quando `esta === tentativas`; o passo 2 da cena cobra o botão apagado depois que a velha termina e aceso depois que a nova termina; a parte 5 do guarda |
 | `8f4f4724` | rodada da revisão, 3 | só comentário: o histórico da `AGUARDANDO_TELA` em `tests/frontend.rs` (perto de :543) passa ao passado, e o doc de `registrarNoAnfitriao` (`base.js`) diz quem lê |
 | `7cd7d98c` | rodada da revisão, 2 | só comentário: o da linha de etapa no `finally` corrige o motivo de ela ter ficado fora (ver 2, «A linha de etapa») |
-| este | — | o relatório atualizado |
+| `b4dcf282` | — | o relatório da rodada 1 da revisão |
+| `525b1907` | rodada 2 da revisão, I1 | a tentativa substituída desiste antes de cada apagar do CONECTAR (depois do `apelido_local` e depois da pergunta do nome), e registra; o `finally` da pergunta do nome confere a tentativa; a cena `oConectarTemDono` (bloco próprio); o guarda `so_a_tentativa_mais_nova_mexe_no_conectar`, que substitui a parte 5 do guarda da rodada 1 |
+| `9a62a8f4` | rodada 2 da revisão, M1 — **EM CURSO, NÃO RODADO** | `batendoDaEspera` guarda o número da tentativa da batida, e só a falha da própria batida se cala em `levarParaAEspera`, indo ao `seele.log`; a cena `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio). Escrito durante a pausa de medição de CPU: nada compilado, nada rodado |
+| este | — | o relatório da rodada 2, com o que falta rodar |
 
 **O que não mudou.** Nada em `crates/`, no fio
 (`crates/seele-proto/src/{control,version,media,screen}.rs` intocados), no
-servidor, na CSP, em `api/`. Nenhuma dependência nova. Nenhum `.cjs` novo: a
-cena entrou na `ajustes-v013.cjs`, que já está no job `bancadas`. Em
-`main.rs`, `tela-auth.js` e `base.js`, só linhas de comentário: cada um, sem
-as linhas de comentário, é idêntico ao da base.
+servidor, na CSP, em `api/`, em `camada-mods.js` depois da primeira entrega.
+Nenhuma dependência nova. Nenhum `.cjs` novo: as cenas entraram na
+`ajustes-v013.cjs`, que já está no job `bancadas`; as duas da rodada 2, cada
+uma num bloco próprio no fim, para o merge com o W3. Em `main.rs` e `base.js`,
+só linhas de comentário: cada um, sem as linhas de comentário, é idêntico ao
+da base. `tela-auth.js` só tinha comentário até a rodada 2; o M1 mexe no
+código dele (`9a62a8f4`).
 
 ## 1. A medida do caminho
 
@@ -81,7 +87,7 @@ decide tudo. Então a frase só é alcançável por quem recebe o erro dentro de
 |---|---|---|
 | `conectar`, tentativa velha, espera fora da frente → `#boot-erro` | **alcançável** | passos 1 e 2 acima |
 | `conectar`, tentativa velha, espera na frente → `levarParaAEspera` → `fraseDeErro` em `tela-auth.js` (`#auth-espera-frase` e o registro da tela) | **alcançável** | passo 3 acima |
-| `conectar`, tentativa velha, espera largada com batida no ar (`tela.hidden && batendoDaEspera`) | não | `levarParaAEspera` devolve `true` e cala |
+| `conectar`, espera largada com batida no ar (`tela.hidden && batendoDaEspera`, em `levarParaAEspera`) | não leva à frase | Corrigido na rodada 2 (M1 da revisão). Antes do W2, qualquer tentativa chegava ali; depois do ramo da tentativa substituída, **só a mais nova** chega, e era calada sem tela e sem registro sempre que uma batida da espera estava no ar — inclusive uma entrada nova que não era a batida (medido pela revisão: VOLTAR e HOSPEDAR AQUI, igual na base). Desde `9a62a8f4` (em curso, não rodado), só a falha da própria batida se cala ali, e vai ao `seele.log`; a de outra tentativa segue para a linha vermelha. Ver 2, «A batida da espera» |
 | `conectar`, tentativa mais nova | **não** | `levarParaOAceiteDeMods` só devolve `false` quando `motivo?.ModsNaoAceitos` é falso; com ele, abre a pergunta e devolve `true`, sempre — inclusive com a espera na frente, porque a pergunta vem antes da espera |
 | a volta do aceite (`aceitarOsMods` → `conectar(alvo, null, credencial)`) | não | é uma tentativa nova: um `ModsNaoAceitos` nela (o conjunto mudou entre a pergunta e a volta) reabre a pergunta |
 | `camada-mods.js`: `simQueFicouGravado`, o `catch` de `aceitar_mods`, `obterOConjunto` (`mods_instalados`, `instalar_mod_do_catalogo`) | não | as falhas são de `FalhaNoMod` e do catálogo, nunca do `connect` |
@@ -219,10 +225,103 @@ que também devolve o botão; e o único `return` antes de contar a tentativa
   192.0.2.18:8384 ainda andando, a anterior, a 192.0.2.17:8384, terminou e
   reacendeu o CONECTAR que a nova tinha apagado: um clique ali abre uma
   terceira entrada por baixo da que está em curso».
-- **O guarda**, parte 5 de `a_tentativa_que_outra_substituiu_nao_fala_na_tela`:
-  no `finally` que segue o `catch` do `connect` (achado pelo fim do `catch`, e
-  o bloco casado contando), toda linha com `.disabled = false` começa com
-  `if (esta === tentativas)`, e há ao menos uma.
+- **O guarda**, na rodada 1, era a parte 5 de
+  `a_tentativa_que_outra_substituiu_nao_fala_na_tela`, e só olhava o `finally`
+  do `connect`. Na rodada 2 ele virou `so_a_tentativa_mais_nova_mexe_no_conectar`,
+  que cobre todo apagar e todo acender de `conectar` (ver abaixo).
+
+### O CONECTAR, de novo (rodada 2 da revisão, I1, `525b1907`)
+
+**O defeito, regressão do `6af0bedd`** (medido pela revisão). A velha podia
+ficar suspensa **antes** de apagar o botão — na pergunta do nome, a primeira
+entrada sem nome desta execução — enquanto a mais nova começava e terminava
+pelo HOSPEDAR AQUI, alcançável por Tab por baixo da caixa. Fechada a caixa, a
+velha seguia: apagava o CONECTAR depois de a nova o ter devolvido, chamava o
+`connect` (que volta `AlreadyConnected` com a nova dentro, ou revogaria a
+geração da nova se ela ainda andasse), e o `finally` dela não devolvia o
+botão. Quem saía da sessão achava o CONECTAR apagado e a lista de servidores
+sem abrir. O comentário «o botão nunca fica apagado sem dono» era falso.
+
+**O vermelho na ponta `b4dcf282`**, pela cena nova `oConectarTemDono`
+(bloco próprio na `ajustes-v013.cjs`), numa cópia que não parava:
+- caso 1 (a sequência do revisor: a velha na pergunta do nome, `hospedar()`,
+  a caixa fecha, a pessoa sai da sessão): «a pergunta do nome fechou depois que
+  o hospedar já tinha entrado, e a tentativa velha apagou o CONECTAR que a mais
+  nova tinha devolvido…»; a velha chamou o `connect` a `192.0.2.17:8384`; de
+  volta à entrada, o CONECTAR apagado e o clique sem abrir a lista;
+- caso 2 (as duas esperando 500 ms pelo `apelido_local`, a velha volta
+  primeiro): «a pergunta do nome está aberta por cima da sessão: foi a
+  tentativa velha que a abriu…»; a velha chamou o `connect`; o CONECTAR
+  apagado no fim;
+- caso 3 (a velha na pergunta do nome, a nova ainda andando quando a caixa
+  fecha): verde na ponta, porque ali a velha reacendia e logo apagava de novo.
+  Ele ficou vermelho no estado intermediário — com as duas desistências e sem
+  conferir o `finally` da pergunta —, com «a pergunta do nome da tentativa
+  velha fechou com a mais nova ainda andando, e o `finally` dela reacendeu o
+  CONECTAR…». É ele que prova a conferência do `finally` da pergunta.
+
+**O conserto** (`tela-boot.js`):
+- depois do `apelido_local` e depois da pergunta do nome — as duas esperas que
+  vêm antes dos dois apagares —, a tentativa que já não é a mais nova desiste:
+  `if (esta !== tentativas) { registrarNoAnfitriao("entrada", …, "aviso");
+  return; }`. Ela não apaga o botão, não pergunta o nome por cima da nova e
+  não chama o `connect`;
+- o `finally` da pergunta do nome passa a `if (esta === tentativas)
+  $("botao-conectar").disabled = false;`;
+- o comentário do `finally` do `connect` diz o que vale agora: só a mais nova
+  apaga e só a mais nova devolve, e a última a começar sempre termina por um
+  caminho que devolve.
+
+**O guarda** `so_a_tentativa_mais_nova_mexe_no_conectar`: em `conectar` sem
+comentários, todo `.disabled = false` começa com `if (esta === tentativas)`;
+todo `.disabled = true` tem, entre a última espera (`await`) antes dele e ele,
+um `if (esta !== tentativas) {` cujo bloco registra e volta (sem espera no
+meio, nada mais roda entre a conferência e o apagar); há ao menos dois de cada;
+e o `finally` do `connect` devolve o botão.
+
+**Verde** em `525b1907`: a `ajustes-v013` inteira (com os três casos) e
+`--test frontend`, 288 de 288. As reversões R6 a R9 estão escritas e **ainda
+não rodaram** (ver 6).
+
+### A batida da espera (rodada 2 da revisão, M1, `9a62a8f4`, EM CURSO, NÃO RODADO)
+
+**O defeito, anterior ao W2** (medido pela revisão, igual na base). A espera
+bate de novo sozinha (`baterDeNovo`). Quem sai dela pela porta com uma batida
+no ar deixa essa batida calada quando ela volta — de propósito: a espera foi
+largada. Mas a bandeira `batendoDaEspera` era um sim, e calava **qualquer**
+falha que chegasse com a batida no ar. Quem saía e apertava HOSPEDAR AQUI
+tinha a recusa da entrada nova calada, sem tela e sem registro. Depois do W2,
+só a tentativa mais nova chega a esse ramo, e era justamente ela que sumia.
+
+**O conserto escrito** (sem rodar):
+- `batendoDaEspera` guarda o número da tentativa da batida (ou `null`).
+  `baterDeNovo` o lê de `tentativas` logo depois de chamar `conectar`, que
+  conta a tentativa antes da primeira espera (o guarda da credencial cobra
+  isso); sem alvo, `conectar` volta sem contar, e a bandeira fica `null`;
+- `conectar` passa `esta` a `levarParaAEspera`, que só cala quando a falha é
+  da própria batida (`batendoDaEspera === tentativa`), e então a registra com
+  `registrarNoAnfitriao("espera", …, "aviso")`, com o endereço e o motivo;
+- a falha de outra tentativa segue o caminho de sempre: a linha vermelha, ou a
+  espera dela se for `AdmissionPending`.
+
+**Mostrar na tela**: feito, porque é o mesmo número que o W2 já usa, e só
+muda quem é calado. A batida largada continua calada na tela, que é o que a
+espera prometia; a entrada nova passa a falar.
+
+**A cena escrita** `aBatidaDaEsperaSoCalaASiMesma` (bloco próprio):
+1. a sonda do revisor: a espera aberta por `AdmissionPending` em
+   `192.0.2.19:8384`; `baterDeNovo()` com o servidor lento (1,5 s); aos
+   100 ms `voltarParaAEntrada()`; aos 200 ms `hospedar()`, com o servidor daqui
+   recusando `ServerFull`. Cobra que a linha vermelha diz SERVIDOR LOTADO; que
+   a batida, voltando depois, não reabre a espera nem tira a frase da linha, e
+   deixa uma linha (e uma só) no registro;
+2. a batida sozinha: a pessoa sai da espera e não faz mais nada; a batida
+   volta calada na tela e deixa no registro uma linha de aviso com o motivo.
+
+**O que se espera e falta medir**: na ponta `525b1907`, a cena reprova no
+caso 1 (a linha vermelha calada); com o código de `9a62a8f4`, fica verde. As
+reversões R10 (a bandeira volta a ser um sim) e R11 (o ramo cala sem
+registrar) estão planejadas e não rodaram.
 
 ### A linha de etapa: o que foi medido e o que falta (fora do lote)
 
@@ -373,6 +472,34 @@ cada uma.
   terminou e o CONECTAR ficou apagado: quem devolve o botão é ela»; o guarda,
   com «o `finally` do `connect` deixou de devolver o botão que a entrada
   apaga…».
+
+### O que falta rodar (rodada 2, depois da pausa de medição de CPU)
+
+Escrito durante a pausa, sem compilar nem rodar nada:
+
+1. **R6 a R9**, as reversões do I1, já escritas no scratchpad, cada uma
+   contra a `ajustes-v013` e o guarda `so_a_tentativa_mais_nova_mexe_no_conectar`,
+   com `cmp` e o arquivo tocado:
+   - **R6**: sem a desistência depois da pergunta do nome (esperado: o caso 1
+     reprova pelo botão; o guarda, pelo apagar sem conferência);
+   - **R7**: sem a desistência antes da pergunta (esperado: o caso 2 reprova
+     pela caixa por cima da sessão; o guarda, pelo apagar da pergunta);
+   - **R8**: o `finally` da pergunta volta a reacender sempre (esperado: o
+     caso 3 reprova; o guarda, pelo acender sem conferência);
+   - **R9**: as desistências sem o registro (esperado: a cena reprova pela
+     linha que falta no `seele.log`; o guarda, pelo bloco sem
+     `registrarNoAnfitriao(`).
+2. **O vermelho do M1 antes do conserto**: a cena
+   `aBatidaDaEsperaSoCalaASiMesma` com o `tela-auth.js` e o `tela-boot.js` de
+   `525b1907` no lugar (a reversão do commit), e depois verde com os de
+   `9a62a8f4`.
+3. **R10 e R11**, as reversões do M1.
+4. **A rodada inteira**: `--test frontend`, `--bin`, `check-runtime`, fmt,
+   clippy do app, e as bancadas `ajustes-v013`, `conversa-com-estado` e
+   `telas`.
+5. Com tudo verde, o `9a62a8f4` deixa de ser «em curso» (um commit novo que o
+   diga, sem reescrever o histórico), e este relatório ganha os resultados,
+   nos dois lugares.
 
 ## 7. O que rodou
 
