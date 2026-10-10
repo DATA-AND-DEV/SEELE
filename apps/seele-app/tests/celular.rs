@@ -243,13 +243,6 @@ fn codigo_de(nome: &str, texto: &str) -> String {
     }
 }
 
-/// Os arquivos da F4 que tratam da marca: a ponte a escreve, e a identidade do
-/// navegador a lê para saber em que casca a tela «ENTRAR EM» nasce (o
-/// `cascaDaPagina`, que só o `criarIdentidadeDoNavegador` chama, e que o
-/// desktop nunca chama). Os outros dois da F4, `voz-web.js` e
-/// `mods-no-navegador.js`, não a leem, e ficam sob o guarda.
-const DA_F4_COM_A_MARCA: [&str; 2] = ["ponte-web.js", "identidade-web.js"];
-
 /// G2. A marca é do celular e da ponte da F4, e de mais ninguém: um arquivo do
 /// desktop que a lesse passaria a mudar com ela. Lê o código sem os comentários,
 /// e em toda forma de ler a marca: na oitava integração, o `cascaDoRetrato` da F3
@@ -265,7 +258,7 @@ fn nenhum_arquivo_do_desktop_cita_a_marca() {
         let do_desktop = !CASCAS
             .iter()
             .any(|(prefixo, _, _)| nome.starts_with(prefixo))
-            && !DA_F4_COM_A_MARCA.contains(&nome.as_str());
+            && nome != "ponte-web.js";
         let de_texto = [".css", ".js", ".html"].iter().any(|e| nome.ends_with(e));
         if !(do_desktop && de_texto) {
             continue;
