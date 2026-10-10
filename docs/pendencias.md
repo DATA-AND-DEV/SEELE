@@ -5248,6 +5248,29 @@ ninguém precise adivinhar depois.
   passou 3 de 3 sozinho, 3 de 3 com vinte processos comendo CPU e 6 de 6 em
   paralelo consigo mesmo — a reprovação só apareceu sob a suíte inteira, que é o
   retrato da pendência **29** noutro crate.
+
+  **Acréscimo de 2026-10-10 (lote Y da F5).** Este conserto não está mais no
+  arquivo: entrou em `4770dca1` (14/09) e foi desfeito no dia seguinte por
+  `becb0257` («as duas tolerâncias de `seele-server` [...] voltam ao
+  commit-base»), e o teste voltou a ler o contador uma vez só, três segundos
+  depois da rajada. Reprovou de novo em `d9124cea` com a máquina carregada
+  (1.118 de 1.160). E a leitura de 14/09 estava errada: medido agora, **não é o
+  lote que ainda não gravou**. Em cinco rodadas reprovadas a contagem parou
+  (1.074, 1.113, 1.120, 1.120, 1.137) e não subiu mais em 15 s; cada mensagem
+  faltando era a cauda de um falante que o servidor desligou com `FellBehind` —
+  o barramento passou à frente da sessão dele também, e o resto do que ele
+  mandou ficou sem ler. A soma das caudas fecha as 1.160 nas cinco. Reperguntar
+  por cinco segundos não teria consertado nada. O conserto novo é `de04ab26`:
+  sem relógio, cada falante manda um `Ping` atrás da rajada e o teste lê até o
+  `Pong` (a sessão leu tudo) ou a despedida; uma testemunha num canal próprio,
+  atrás da fila do escritor, diz que o lote gravou; e a asserção passa a ser a
+  que o servidor de fato promete — o que ele leu de cada falante está gravado,
+  em ordem, sem buraco, e quem ficou com mensagem sem gravar foi desligado
+  dizendo por quê (o `SemResposta` do cliente, que **pode** repetir com a mesma
+  chave: o cliente não repete sozinho, repete quando a casca chama
+  `reenviar_mensagem`, a pedido de quem escreveu).
+  As reversões e as rodadas estão em
+  `docs/superpowers/sdd/2026-10-08-0.16/F5/lote-y-report.md`.
 - **`crates/seele-conformance/tests/anexos.rs`.** Esta foi a reprovação da rodada
   de validação seguinte, também com saída 101, e é a que menos parece ter a ver
   com som: `Error: SemResposta` em
@@ -5606,6 +5629,12 @@ de até cinco segundos não afrouxa a asserção, que é a mesma e continua exig
 todas as mensagens. Em `vetores_de_hash.rs` só há `fmt` e `clippy`. Desfazê-los
 devolveria a reprovação por tempo à bateria desta tarefa, que é o que a validação
 pede para não acontecer.
+
+*Acréscimo de 2026-10-10:* a tolerância de `par_lento.rs` descrita aqui saiu em
+`becb0257`, logo abaixo, e não voltou. O conserto que está no arquivo hoje é
+outro, `de04ab26` (lote Y da F5), porque a medida desmentiu a causa: o que
+faltava não era o lote atrasado, era a cauda de falantes desligados com
+`FellBehind`. Ver o acréscimo na entrada de `par_lento.rs`, acima.
 
 **A bateria, refeita inteira depois disso, em 2026-09-15.** `cargo test` no
 workspace terminou com **código de saída 0** e **1742 testes passados, nenhuma
@@ -9428,6 +9457,75 @@ pendência. A revisão dele deixou:
     cegueira delas é coberta só pelas contagens (duas linhas exatas de
     `join_secret`, e pelo menos 30 campos do `Snapshot` lidos). É um guarda que
     prova menos do que parece. *Fonte:* relatório do R, «3. O guarda».
+
+52. **W2 · A tentativa substituída ainda apaga a linha de etapa da nova.** Em
+    `apps/seele-app/ui/tela-boot.js`, o `finally` de `conectar` chama
+    `mostrarEtapa(null)` sem conferir `esta === tentativas`. Depois do W2, a
+    velha não fala mais na linha vermelha nem reacende o CONECTAR (`6af0bedd`),
+    mas a etapa ela ainda apaga. O W2 leu no código, e não mediu (a bancada
+    não emite etapas), que o `connect` do `main.rs` revoga a geração ao
+    começar, e a `Bridge` descarta os eventos de uma geração revogada. Assim as
+    etapas da velha só escapam no trecho entre o `++tentativas` da nova e o
+    `invoke("connect")` dela: o apelido, a pergunta do nome e
+    `conferir_esta_versao`. **O conserto sugerido**, em três passos:
+    - condicionar o `mostrarEtapa(null)` do `finally` a `esta === tentativas`;
+    - fechar aquele trecho na janela com uma bandeira, posta no `++tentativas`
+      e reaberta logo antes do `connect`. Enquanto ela está posta, o ouvinte de
+      etapas descarta o que chega. Isso não toca no fio nem na FFI;
+    - ou, no Rust, revogar a geração mais cedo, o que pede outro lote.
+
+    O que falta, em qualquer forma, é a identidade da tentativa nos eventos de
+    etapa. *Fonte:* relatório do W2 (`lote-w2-report.md`), a rodada da
+    revisão.
+
+53. **W2 · O roteiro `tools/roteiros/aceite-de-mods.js` não prova o aceite.**
+    Na base e no W2, ele relata `gravou o sim: alvo=undefined conjunto=undefined`,
+    `tentou entrar de novo: false` e `diálogo depois: VISIVEL`, e nunca reprova,
+    porque só usa `relatar` e não tem `exigir`. O cabeçalho dele diz que prova
+    «que ACEITAR grava o sim com a identidade certa e tenta entrar de novo».
+    **Em conserto na 0.16**, a pedido da orquestradora, no lote W3: o roteiro
+    passa a exigir o sim gravado no alvo e a volta tentando entrar, e reprova
+    sem isso. A causa do `alvo=undefined` é medida no lote. *Fonte:* relatório
+    do W2; o ledger.
+
+    **Consertado em 10/10/2026, no lote W3** (integrado em `353859c2`). A causa
+    era o duble, e não o produto: ele respondia `null` a `mods_instalados`, e
+    `obterOConjunto` estourava antes de gravar o sim e de voltar. O roteiro
+    quebrou duas vezes, em `ea75ac5d` (18/09), que tirou a volta, e no lote W,
+    que tirou o sim. Agora ele exige o sim no alvo, a volta com a credencial, a
+    ordem dos dois, e a lista item por item. O `catalogo-de-mods.js` passou a
+    exigir o que diz. De passagem, o W3 achou e consertou três defeitos de
+    produto, todos com prova:
+    - a falha por dentro do ACEITAR ficava sem frase;
+    - a pergunta que não abria deixava a credencial na memória sem diálogo;
+    - uma corrida em `abrirAceiteDeMods`, em que a pessoa lia a lista de um
+      pedido e aceitava o conjunto de outro (ADR 0045).
+
+    **O que fica:** nenhum roteiro roda no CI nem no `publicar.sh`. Isso vai
+    para o lote RT. *Fonte:* `F5/lote-w3-report.md`.
+
+54. **W2 · Uma tentativa de entrada velha que entra depois da nova toma a tela
+    dela, e talvez a conexão.** Isso é anterior ao W2: a base é igual.
+    - **Na janela.** No caminho de sucesso de `conectar` (`tela-boot.js`), o
+      `entrarNaGeracao`, o `desenhar` e o `entrarNaAutenticacao` não conferem
+      `esta === tentativas`. A revisão do W2 mediu isto: uma velha lenta, que
+      entra 1,2 s depois de o `hospedar()` ter entrado, reabre `#tela-auth` em
+      `aperto` com o endereço dela por cima da sessão da nova, e a
+      `geracaoDaSessao` volta para a da velha.
+    - **No Rust, lido e não medido.** O `connect` do `main.rs` revoga a geração
+      ao começar. A `Bridge` descarta os eventos da velha, mas no fim o
+      `connect` grava `*slot = Some(connection)` sem conferir nada, o que
+      trocaria a conexão da nova pela da velha. A pessoa ficaria ligada ao
+      servidor que deixou, com a tela mostrando o outro.
+    - **Família:** a mesma da cena 5c do lote W, que mede a velha recusada.
+      HOSPEDAR AQUI fica aceso enquanto um `connect` anda, então basta a velha
+      ser lenta e entrar, em vez de ser recusada. A batida da espera que entra
+      depois de a pessoa sair da espera tem o mesmo jeito.
+    - **Falta:** medir o lado do Rust. Depois, a entrada que volta já
+      substituída não entra na tela e vai ao registro, e o `connect` velho larga
+      a conexão quando a geração dele já não está de pé.
+    *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
+    pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
 ### Fora da F5, só como referência
 

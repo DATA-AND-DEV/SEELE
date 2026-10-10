@@ -99,6 +99,10 @@ let recusaDoApelido = null;
  * revisão — guardava a credencial para uma «tentativa seguinte» que já tinha
  * acontecido, e ela ficava na memória da janela durante a sessão inteira. A
  * mesma ideia da identidade da pergunta, em `aceitarOsMods`.
+ *
+ * E a recusa de uma tentativa que já não é a mais nova não vai à tela (lote
+ * W2): nem à pergunta dos MODs, nem à espera da portaria, nem à linha
+ * vermelha. Vai ao `seele.log`. Ver o `catch` de `conectar`.
  */
 let tentativas = 0;
 
@@ -221,6 +225,24 @@ async function conectar(alvo, apelido, credencial) {
       console.warn("apelido_local:", falha);
     }
   }
+  // **Uma tentativa que outra já substituiu desiste aqui, antes de mexer no
+  // CONECTAR** (lote W2, rodada 2 da revisão). Daqui até o `connect` a entrada
+  // apaga o botão duas vezes — para a pergunta do nome e para a travessia —,
+  // e só a tentativa mais nova o devolve. Uma velha que apagasse o botão
+  // depois de a nova o ter devolvido o deixava apagado para sempre (medido
+  // pela revisão: a velha parada na pergunta do nome, a nova entrando pelo
+  // HOSPEDAR AQUI). E ela não pergunta o nome por cima da nova, nem chama um
+  // `connect` que voltaria `AlreadyConnected` ou revogaria a geração da nova.
+  // A conferência vem depois de cada espera e antes de cada apagar: entre as
+  // duas, nada mais roda. Vai ao `seele.log`, como a recusa dela no `catch`.
+  if (esta !== tentativas) {
+    registrarNoAnfitriao(
+      "entrada",
+      `a tentativa a ${alvo} desistiu antes da pergunta do nome: outra começou enquanto ela lia o apelido desta máquina`,
+      "aviso",
+    );
+    return;
+  }
   // **Sem nome nenhum, a primeira entrada desta execução pergunta antes.**
   //
   // Quem nunca se nomeou entrava calado com o nome tirado da chave, e só o
@@ -237,15 +259,28 @@ async function conectar(alvo, apelido, credencial) {
   // segunda entrada por baixo da caixa — que já não perguntava, porque a marca
   // estava posta, e entrava com o nome vazio. Volta a valer no `finally`, e logo
   // abaixo, sem `await` no meio, a entrada o apaga de novo até o `connect`
-  // responder.
+  // responder. **Só se esta tentativa ainda é a mais nova** (lote W2, rodada 2
+  // da revisão): o HOSPEDAR AQUI continua alcançável por baixo da caixa, e uma
+  // nova que começou com ela aberta e ainda anda é a dona do botão — reacendê-lo
+  // aqui seria abrir uma terceira entrada por baixo dela.
   if (apelido === "" && !jaPergunteiONome) {
     jaPergunteiONome = true;
     $("botao-conectar").disabled = true;
     try {
       apelido = await perguntarONome();
     } finally {
-      $("botao-conectar").disabled = false;
+      if (esta === tentativas) $("botao-conectar").disabled = false;
     }
+  }
+  // A mesma conferência depois da pergunta do nome: a caixa espera a pessoa,
+  // e a nova pode ter começado e terminado enquanto ela estava aberta.
+  if (esta !== tentativas) {
+    registrarNoAnfitriao(
+      "entrada",
+      `a tentativa a ${alvo} desistiu depois da pergunta do nome: outra começou enquanto a caixa estava aberta`,
+      "aviso",
+    );
+    return;
   }
   // **Lembrado só quando é escolha de alguém**, e esta ordem é o conserto de
   // um defeito de campo que não tinha saída.
@@ -366,14 +401,18 @@ async function conectar(alvo, apelido, credencial) {
       if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };
     }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
-    // uma falha que chega enquanto essa tela está na frente pertence a ela:
-    // `#boot-erro` estaria escondido atrás. `levarParaAEspera` responde se
-    // tratou a falha, e só o que sobra vira a linha vermelha daqui.
+    // uma falha da tentativa mais nova que chega enquanto essa tela está na
+    // frente pertence a ela: `#boot-erro` estaria escondido atrás.
+    // `levarParaAEspera` responde se tratou a falha, e só o que sobra vira a
+    // linha vermelha daqui. A de uma tentativa que outra já substituiu não vai
+    // a nenhuma das duas: ver o ramo dela, logo abaixo.
     // A pergunta dos MODs tem tela própria — ADR 0045 —, e ela é uma pergunta
     // e não uma falha: a lista chega inteira no erro, e o que falta é a pessoa
     // ler e responder. Antes desta linha o que acontecia era uma frase
     // vermelha terminando em «a tela ainda não existe neste app», e o servidor
-    // ficava inentrável.
+    // ficava inentrável. A frase sobreviveu à tela e só deixou de mentir no
+    // lote W2 da F5; hoje nenhuma recusa da tentativa mais nova chega a ela,
+    // porque toda `ModsNaoAceitos` dela vem para cá. Ver `fraseDeErro`.
     //
     // A credencial desta tentativa vai junto, e é o único lugar para onde ela
     // vai: a pergunta a guarda enquanto está aberta e a esquece ao fechar.
@@ -389,11 +428,33 @@ async function conectar(alvo, apelido, credencial) {
     // servidor daqui enquanto ela andava — abria a pergunta por cima da sessão,
     // com o convite deste servidor dentro, e aceitar o mandaria a um servidor
     // que a pessoa já deixou. Abrir sem a credencial seria o mesmo modal por
-    // cima da sessão, para um sim que não entra. A recusa dela cai na linha
-    // vermelha da entrada, como a de toda tentativa velha. Ver `tentativas`.
-    if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
+    // cima da sessão, para um sim que não entra.
+    //
+    // **E a tentativa que outra substituiu não fala em lugar nenhum da tela**
+    // (lote W2 da F5). A mais nova está em curso, ou já entrou, e é ela que
+    // fala. A recusa da velha caía na linha vermelha da entrada — a pelos MODs
+    // com a frase que dizia que a tela de aceite não existe, visível enquanto
+    // a nova andava, e lida por quem desconectava da sessão em que a nova
+    // entrou — e, com a espera da portaria na frente, tomava o lugar da frase
+    // dela. A pela portaria abria a espera por cima da sessão. Vale para toda
+    // recusa, e não só para a dos MODs: nenhuma é sobre o lugar em que a
+    // pessoa está agora.
+    //
+    // **E ela não some sem rastro**: vai ao `seele.log`, com o alvo e o
+    // motivo, pela mesma porta que a janela usa para o que ela sabe e a tela
+    // não mostra (`registrarNoAnfitriao`, em `base.js`). Como aviso, que é o
+    // nível que o filtro de produção escreve. O motivo é o erro como a ponte o
+    // mandou: o `connect` nunca devolve a credencial nele.
+    if (esta !== tentativas) {
+      const dito = motivo instanceof Error ? String(motivo) : JSON.stringify(motivo);
+      registrarNoAnfitriao(
+        "entrada",
+        `a tentativa a ${alvo} voltou recusada depois que outra a substituiu, e a tela não a mostra: ${dito}`,
+        "aviso",
+      );
+    } else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
-    } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
+    } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "", esta)) {
       erro.hidden = false;
       // O apelido que esta tentativa mandou, para a recusa por nome tomado
       // poder dizer **qual** nome foi recusado, e de onde veio a impressão,
@@ -401,9 +462,29 @@ async function conectar(alvo, apelido, credencial) {
       erro.textContent = fraseDeErro(motivo, apelido, deOndeVeio(falha));
     }
   } finally {
-    botao.disabled = false;
+    // **Só a tentativa mais nova devolve o CONECTAR** (lote W2 da F5). A que
+    // outra já substituiu terminava e o reacendia com a nova ainda andando, e
+    // um clique ali abria uma terceira entrada por baixo dela.
+    //
+    // **E só a mais nova o apaga** (rodada 2 da revisão): a velha desiste
+    // antes de cada apagar, logo depois de cada espera. Com as duas regras, o
+    // botão só fica apagado enquanto a tentativa mais nova anda, e a última a
+    // começar sempre termina por um caminho que o devolve — este `finally`, ou
+    // o da pergunta do nome quando ela falha ali. Até a primeira rodada, a
+    // velha ainda o apagava depois de a nova o ter devolvido, e ele ficava
+    // apagado sem dono: a revisão mediu, com a velha parada na pergunta do nome.
+    if (esta === tentativas) botao.disabled = false;
     // A travessia acabou, de um jeito ou de outro. O que sobra na tela é o
     // veredito ou o erro, e não o último candidato tentado.
+    //
+    // **Esta linha ainda é de qualquer tentativa**, e a da velha apaga a etapa
+    // da nova enquanto ela anda (lido no código; a bancada não emite etapas).
+    // Ficou fora do lote W2. Os eventos `ConnectStageChanged` não dizem de qual
+    // tentativa são; quem os separa é a geração, no Rust (`Bridge`, no
+    // `main.rs`), que descarta os da velha a partir do `connect` da nova. Antes
+    // dele — o apelido, a pergunta do nome, o `conferir_esta_versao` — as
+    // etapas da velha ainda chegam, e calar a velha aqui deixaria a última
+    // delas na tela até a nova dizer a primeira. Ver o relatório do lote W2.
     mostrarEtapa(null);
   }
 }

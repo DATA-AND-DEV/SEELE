@@ -3691,13 +3691,22 @@ async fn run_session(
                     Ok(event) => event,
                     // O barramento passou à frente desta sessão.
                     //
-                    // Acontece quando as escritas para este par bloqueiam — o
-                    // par parou de ler, a janela do QUIC fechou — e enquanto
-                    // elas estão bloqueadas ninguém tira evento do barramento.
-                    // Passado o anel, o `broadcast` descarta o mais antigo:
-                    // `quantos` eventos que existiram e não existem mais **para
-                    // esta conexão**, mensagens já gravadas em PERSISTENCE entre
-                    // eles.
+                    // Acontece quando esta sessão fica tempo demais sem voltar
+                    // aqui, e há dois jeitos medidos de isso acontecer:
+                    // - as escritas para este par bloqueiam — o par parou de
+                    //   ler, a janela do QUIC fechou;
+                    // - **o par lê, e escreve em rajada**: cada `SendMessage`
+                    //   dele passa pelo cadeado de PERSISTENCE e pela fila do
+                    //   escritor, e enquanto esta sessão espera ali, os lotes
+                    //   dos outros anunciam mais de um anel inteiro. Medido no
+                    //   lote Y da F5 (`tests/par_lento.rs`): sob carga, falantes
+                    //   que nem assinam o canal foram desligados assim, com o
+                    //   resto da rajada sem ler — no cliente, `SemResposta`.
+                    // Enquanto isso, ninguém tira evento do barramento para esta
+                    // conexão. Passado o anel, o `broadcast` descarta o mais
+                    // antigo: `quantos` eventos que existiram e não existem mais
+                    // **para esta conexão**, mensagens já gravadas em
+                    // PERSISTENCE entre eles.
                     //
                     // Aqui havia um `let Ok(event) = event else { continue }`, e
                     // era a pendência nº 1 inteira: a sessão seguia, calada, com

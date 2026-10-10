@@ -186,6 +186,13 @@
   color: var(--seele-laranja-nerv);
 }
 
+/* O que falhou no aceite, em linhas: `fraseDeErro` de uma falha que a casca não
+ * sabe nomear tem três («ALGO FALHOU…», «Se for relatar, copie…», o texto), e
+ * sem `pre-line` elas se emendam numa só, com «abaixo» apontando para nada. */
+#mods-erro {
+  white-space: pre-line;
+}
+
 .mods-acoes {
   display: flex;
   justify-content: flex-end;

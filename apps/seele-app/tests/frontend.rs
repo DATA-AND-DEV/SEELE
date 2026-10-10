@@ -532,22 +532,24 @@ fn every_command_the_frontend_calls_is_registered() {
 // `assistir` esteve aqui por dois commits — o servidor e o núcleo prontos, a
 // tela não — e saiu quando `palco-imagem.js` passou a desenhar a escolha entre
 // transmissões. A lista voltou ao estado de repouso, que é vazia.
-// `habilitar_mod` e `desabilitar_mod` entraram com o ADR 0045: o núcleo, o
-// FFI e o banco estão prontos, e a tela que liga e desliga MOD é de um plano
-// posterior. `mods_instalados` **não** está aqui — o `base.js` já o chama para
-// carregar os MODs habilitados, que é a metade que existe hoje.
-// `aceite_de_mods`, `aceitar_mods` e `esquecer_aceite_de_mods` entram pelo outro
-// lado do mesmo ADR 0045: os três de cima são de quem hospeda e decidem o que a
-// sala exige; estes três são de quem entra e registram o que esta máquina
-// respondeu. O protocolo, o servidor, o núcleo e o FFI estão prontos — a lista
-// já chega à janela pelo `ConnectionError::ModsNaoAceitos`, e o `frases.js` a
-// desenha —, e o que falta é a tela com o botão de aceitar, que é de um plano
-// posterior junto com o download dos bytes.
+// `habilitar_mod` e `desabilitar_mod` entraram com o ADR 0045, quando o
+// núcleo, o FFI e o banco estavam prontos e a tela que liga e desliga MOD era
+// de um plano posterior. `mods_instalados` **não** esteve aqui — o `base.js` já
+// o chamava para carregar os MODs habilitados, a metade que existia então.
+// `aceite_de_mods`, `aceitar_mods` e `esquecer_aceite_de_mods` entraram pelo
+// outro lado do mesmo ADR 0045: os verbos de cima são de quem hospeda e
+// decidem o que a sala exige; estes três são de quem entra e registram o que
+// esta máquina respondeu. O protocolo, o servidor, o núcleo e o FFI estavam prontos
+// — a lista já chegava à janela pelo `ConnectionError::ModsNaoAceitos`, e o
+// `frases.js` a desenhava —, e o que faltava era a tela com o botão de
+// aceitar, junto com o download dos bytes. As duas telas chegaram em
+// 2026-09-17 (logo abaixo), e a frase do `frases.js` que dizia que a de aceite
+// não existia só foi corrigida no lote W2 da F5, em 2026-10-10.
 //
-// **Por que registrá-los antes da tela**, em vez de esperar por ela: sem eles a
-// pergunta que a janela já mostra não tem resposta possível. A pessoa lê o que o
-// servidor exige e não tem o que fazer com a leitura — que é meia funcionalidade
-// entregue como se fosse uma.
+// **Por que foram registrados antes da tela**, em vez de esperar por ela: sem
+// eles a pergunta que a janela já mostrava não teria resposta possível. A
+// pessoa leria o que o servidor exige e não teria o que fazer com a leitura —
+// que é meia funcionalidade entregue como se fosse uma.
 // **A lista voltou a ser vazia em 2026-09-17.** As cinco entradas que estavam
 // aqui saíram juntas, com as duas telas que faltavam: a camada de aceite
 // (`camada-mods.js`), que é de quem entra, e a seção MODS de CONFIGURAÇÕES, que
@@ -10711,10 +10713,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ),
         // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
         // `hospedar()` reescreve no meio de uma batida (rodada 1, I3); e só se
-        // esta tentativa ainda é a mais nova (lote W, re-revisão da rodada 1).
+        // esta tentativa ainda é a mais nova (lote W, re-revisão da rodada 1):
+        // desde o lote W2, no `else` do ramo que cala a tentativa substituída.
         (
             "tela-boot.js",
-            "if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
+            "} else if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
         ),
         ("camada-mods.js", "let aceitePendente = null;"),
         (
@@ -10740,6 +10743,36 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         // (lote W da F5): o corpo só chama `esquecer_aceite_de_mods`, que leva
         // o alvo e mais nada.
         ("camada-mods.js", "if (aceitePendente !== pergunta) {"),
+        // A falha que `aceitarOsMods` não pegou por dentro (lote W3): só compara
+        // a identidade da pergunta para decidir se a tela fala, e lê o alvo dela.
+        // O registro leva o alvo e o motivo, e `aceiteFalhou` não nomeia a
+        // credencial em linha nenhuma — a leitura do corpo dela (parte 1,
+        // abaixo) reprova qualquer linha nova que nomeie `pergunta`.
+        ("camada-mods.js", "const alvo = pergunta?.alvo ?? \"\";"),
+        (
+            "camada-mods.js",
+            "if (!pergunta || aceitePendente !== pergunta) return;",
+        ),
+        // A pergunta que não abriu (lote W3): fecha, e só ela, a que ficou na
+        // memória com a credencial e sem diálogo. `perguntaNaoAbriu` não nomeia
+        // a credencial; esta é a única linha do corpo dela que toca
+        // `aceitePendente`.
+        (
+            "camada-mods.js",
+            "if (aceitePendente === pergunta) fecharAceiteDeMods();",
+        ),
+        // As duas linhas que passam a pergunta adiante, e só ela: a falha de
+        // abrir (`levarParaOAceiteDeMods`) e a de aceitar (o ouvinte do clique)
+        // a entregam a `perguntaNaoAbriu` e a `aceiteFalhou`, que o guarda lê
+        // logo abaixo. Nenhuma das duas nomeia a credencial.
+        (
+            "camada-mods.js",
+            "abrindo.catch((falha) => perguntaNaoAbriu(motivo, alvo, desta, pergunta, falha));",
+        ),
+        (
+            "camada-mods.js",
+            "aceitarOsMods().catch((falha) => aceiteFalhou(pergunta, falha));",
+        ),
         (
             "camada-mods.js",
             "const credencial = aceitePendente?.credencial ?? null;",
@@ -10776,9 +10809,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "camada-mods.js",
             "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
         ),
+        // A abertura guarda a referência da pergunta que gravou (lote W3), para
+        // a falha de abrir fechar essa, e não a que veio depois.
         (
             "camada-mods.js",
-            "abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? \"\", credencial).catch((falha) =>",
+            "const abrindo = abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? \"\", credencial);",
         ),
     ];
 
@@ -10813,10 +10848,28 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             }
         }
     }
-    let aceitar = js_function(&read("ui/camada-mods.js"), "async function aceitarOsMods(");
-    for linha in aceitar.lines().map(str::trim) {
-        if names(linha, "pergunta") && !names(linha, "aceitePendente") {
-            conferir("camada-mods.js", linha);
+    // `pergunta` é o objeto que carrega a credencial, e **toda função que o
+    // recebe ou o copia de `aceitePendente`** tem as linhas que o nomeiam
+    // conferidas (lote W3, rodadas 1 e 3): a do aceite, a da falha de dentro
+    // dele, a da pergunta que não abriu — que o recebem — e as três que têm o
+    // alias `const pergunta = aceitePendente;`: a abertura, o levar à pergunta e
+    // o ouvinte do clique em ACEITAR. Antes só a primeira era lida, e um
+    // `JSON.stringify(pergunta)` em qualquer das outras não nomeava `credencial`
+    // nem `aceitePendente` e passava. O ouvinte não tem nome: é achado pelo
+    // início dele.
+    for assinatura in [
+        "async function aceitarOsMods(",
+        "async function abrirAceiteDeMods(",
+        "function levarParaOAceiteDeMods(",
+        "function aceiteFalhou(",
+        "function perguntaNaoAbriu(",
+        "$(\"mods-aceitar\").addEventListener(\"click\", () =>",
+    ] {
+        let corpo = js_function(&read("ui/camada-mods.js"), assinatura);
+        for linha in corpo.lines().map(str::trim) {
+            if names(linha, "pergunta") && !names(linha, "aceitePendente") {
+                conferir("camada-mods.js", linha);
+            }
         }
     }
     for (arquivo, linha) in CAMINHO {
@@ -11124,21 +11177,278 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     );
     // **Nem abre a pergunta dos MODs com ela** (re-revisão da rodada 1, sonda
     // P6). A mesma corrida, com a tentativa velha voltando `ModsNaoAceitos`:
-    // a pergunta abria por cima da sessão, com o convite dentro.
-    let pergunta = conectar
-        .lines()
-        .find(|linha| linha.contains("levarParaOAceiteDeMods("));
-    let conferida = pergunta.and_then(|linha| {
-        linha
-            .find("esta === tentativas")
-            .zip(linha.find("levarParaOAceiteDeMods("))
-    });
+    // a pergunta abria por cima da sessão, com o convite dentro. Desde o lote
+    // W2 a conferência é o ramo que cala a tentativa substituída, e a pergunta
+    // só é aberta depois dele, no `else`. O ramo inteiro é cobrado em
+    // `a_tentativa_que_outra_substituiu_nao_fala_na_tela`.
+    let (decisao, ramo) = ramo_da_tentativa_substituida(&conectar);
+    let pergunta = decisao.find("levarParaOAceiteDeMods(");
     assert!(
-        conferida.is_some_and(|(confere, abre)| confere < abre),
-        "`conectar` leva a recusa pelos MODs à pergunta sem conferir antes que a \
-         tentativa ainda é a mais nova ({pergunta:?}): uma tentativa lenta, voltando \
-         depois que outra entrou, abre a pergunta por cima da sessão com o convite \
-         dentro"
+        pergunta.is_some_and(|abre| abre > ramo.end),
+        "`conectar` leva a recusa pelos MODs à pergunta sem antes calar a tentativa \
+         que outra já substituiu: uma tentativa lenta, voltando depois que outra \
+         entrou, abre a pergunta por cima da sessão com o convite dentro.\n{decisao}"
+    );
+}
+
+/// O `catch` do `connect` em `conectar`, sem comentários, e onde nele está o
+/// ramo que cala a tentativa que outra já substituiu (lote W2 da F5): o `if`
+/// que compara `esta` com `tentativas` e o bloco dele, até a chave que o fecha.
+///
+/// O `catch` é o primeiro depois do `invoke("connect"`: `conectar` tem outros
+/// antes dele (o do `apelido_local`). A chave é casada contando, como em
+/// `js_function`: o texto já vem sem comentários, e o ramo não tem cadeia com
+/// chave solta.
+fn ramo_da_tentativa_substituida(conectar: &str) -> (String, std::ops::Range<usize>) {
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(inicio) = conectar[connect..]
+        .find("} catch (falha) {")
+        .map(|depois| connect + depois)
+    else {
+        panic!("`conectar` perdeu o `catch` que decide o que a recusa diz: {conectar}");
+    };
+    let Some(fim) = conectar[inicio..].find("} finally {") else {
+        panic!("`conectar` perdeu o `finally` depois do `catch`: {conectar}");
+    };
+    let decisao = conectar[inicio..inicio + fim].to_owned();
+    let Some((abre, abertura)) = ["if (esta !== tentativas) {", "if (tentativas !== esta) {"]
+        .iter()
+        .find_map(|abertura| decisao.find(abertura).map(|abre| (abre, *abertura)))
+    else {
+        panic!(
+            "o `catch` de `conectar` não tem mais o ramo da tentativa que outra já \
+             substituiu (`if (esta !== tentativas) {{`): a recusa dela volta a falar na \
+             tela da mais nova — a linha vermelha, a espera da portaria, a pergunta dos \
+             MODs.\n{decisao}"
+        );
+    };
+    let mut profundidade = 0_i32;
+    let chave = abre + abertura.len() - 1;
+    for (indice, caractere) in decisao[chave..].char_indices() {
+        match caractere {
+            '{' => profundidade += 1,
+            '}' => {
+                profundidade -= 1;
+                if profundidade == 0 {
+                    return (decisao.clone(), abre..chave + indice + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("o ramo da tentativa substituída não fecha: {decisao}");
+}
+
+/// **A tentativa que outra já substituiu não fala na tela, e vai ao
+/// `seele.log`** (lote W2 da F5).
+///
+/// Uma tentativa lenta que volta recusada depois que outra começou — o
+/// `hospedar()` entrando no servidor daqui, outra escolha na lista — falava na
+/// tela da mais nova. A recusa pelos MODs caía na linha vermelha da entrada,
+/// com a frase que dizia que a tela de aceite não existia; com a espera da
+/// portaria na frente, tomava o lugar da frase dela; e a recusa pela portaria
+/// abria a espera por cima da sessão. Medido na `ajustes-v013.cjs`
+/// (`aTentativaSubstituidaNaoFala`), que é quem prova o comportamento; este
+/// guarda prende a forma que o produz, para um caminho novo no `catch` não
+/// nascer antes da conferência:
+///
+/// 1. o ramo que compara `esta` com `tentativas` vem **antes** de tudo o que
+///    fala na tela — a pergunta, a espera, a linha vermelha, a frase;
+/// 2. nada disso está **dentro** dele;
+/// 3. o que fala está no `else` dele (ou o ramo volta), e continua lá — um
+///    guarda que não acha o que cobra passa sem olhar nada;
+/// 4. dentro dele a recusa vai ao registro por `registrarNoAnfitriao`, com o
+///    alvo e o motivo, e como `"aviso"`: qualquer outro texto sai em DEBUG,
+///    que o filtro de produção não escreve (ver
+///    `toda_recusa_de_mod_que_a_janela_registra_leva_o_id_em_campo_proprio`).
+///
+/// O botão da entrada tem guarda próprio:
+/// `so_a_tentativa_mais_nova_mexe_no_conectar`.
+#[test]
+fn a_tentativa_que_outra_substituiu_nao_fala_na_tela() {
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    let (decisao, ramo) = ramo_da_tentativa_substituida(&conectar);
+    let antes = &decisao[..ramo.start];
+    let dentro = &decisao[ramo.clone()];
+    let depois = &decisao[ramo.end..];
+    // O que fala na tela, no `catch`: abrir a pergunta, levar à espera, a
+    // frase de erro, e escrever ou acender um elemento.
+    const FALA: &[&str] = &[
+        "levarParaOAceiteDeMods(",
+        "levarParaAEspera(",
+        "fraseDeErro(",
+        ".textContent",
+        ".hidden = false",
+    ];
+    for fala in FALA {
+        assert!(
+            !antes.contains(fala),
+            "o `catch` de `conectar` fala na tela (`{fala}`) antes de conferir se a \
+             tentativa ainda é a mais nova: a recusa de uma que outra já substituiu \
+             chega à tela de quem está em outro lugar.\n{decisao}"
+        );
+        assert!(
+            !dentro.contains(fala),
+            "o ramo da tentativa que outra já substituiu fala na tela (`{fala}`): a \
+             mais nova está em curso, ou já entrou, e é ela que fala.\n{dentro}"
+        );
+    }
+    for fala in [
+        "levarParaOAceiteDeMods(",
+        "levarParaAEspera(",
+        "fraseDeErro(",
+    ] {
+        assert!(
+            depois.contains(fala),
+            "`{fala}` saiu do `catch` de `conectar`, depois do ramo da tentativa \
+             substituída: ou a recusa da mais nova perdeu um caminho, ou ele mudou de \
+             lugar sem este guarda ver.\n{decisao}"
+        );
+    }
+    let resto = depois.trim_start();
+    assert!(
+        resto.starts_with("else") || dentro.contains("return"),
+        "o ramo da tentativa substituída não separa a velha do resto do `catch`: sem \
+         `else` depois dele e sem `return` dentro, a velha segue para a pergunta, a \
+         espera e a linha vermelha.\n{decisao}"
+    );
+    let chamadas: Vec<Vec<String>> = dentro
+        .match_indices("registrarNoAnfitriao(")
+        .map(|(posicao, _)| {
+            argumentos_da_chamada(&dentro[posicao + "registrarNoAnfitriao".len()..])
+                .iter()
+                .map(|argumento| argumento.trim().to_owned())
+                .collect()
+        })
+        .collect();
+    assert!(
+        chamadas.len() == 1,
+        "o ramo da tentativa substituída não escreve a recusa no registro, uma vez, por \
+         `registrarNoAnfitriao` ({} chamada(s)): calada na tela e fora do seele.log, ela \
+         some sem rastro — o produto sabe e não conta.\n{dentro}",
+        chamadas.len()
+    );
+    let argumentos = &chamadas[0];
+    assert!(
+        argumentos.get(2).map(String::as_str) == Some("\"aviso\""),
+        "a recusa da tentativa substituída vai ao registro sem `\"aviso\"` como nível \
+         ({argumentos:?}): com outro texto ela sai em DEBUG, e o filtro de produção não a \
+         escreve"
+    );
+    assert!(
+        argumentos.get(1).is_some_and(|frase| names(frase, "alvo")) && names(dentro, "motivo"),
+        "a linha da tentativa substituída no registro não diz o alvo e o motivo \
+         ({argumentos:?}): sem os dois, quem investiga não sabe qual servidor recusou nem \
+         por quê"
+    );
+}
+
+/// O fim do bloco que abre na chave em `chave`, casado contando, como em
+/// `js_function`.
+fn fim_do_bloco(texto: &str, chave: usize) -> Option<usize> {
+    let mut profundidade = 0_i32;
+    for (indice, caractere) in texto[chave..].char_indices() {
+        match caractere {
+            '{' => profundidade += 1,
+            '}' => {
+                profundidade -= 1;
+                if profundidade == 0 {
+                    return Some(chave + indice + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// **Só a tentativa mais nova mexe no CONECTAR** (lote W2 da F5, rodadas 1 e
+/// 2 da revisão).
+///
+/// `conectar` apaga o botão duas vezes — para a pergunta do nome e para a
+/// travessia — e o devolve duas — no `finally` da pergunta e no do `connect`.
+/// Uma tentativa que outra já substituiu mexia nele como se ainda fosse dona:
+/// o `finally` dela o reacendia com a nova andando (rodada 1), e, parada na
+/// pergunta do nome enquanto a nova começava e terminava, ela o apagava
+/// depois de a nova o ter devolvido, e ninguém mais o devolvia (rodada 2,
+/// medido pela revisão). A `ajustes-v013.cjs` (`oConectarTemDono` e o passo
+/// 2 de `aTentativaSubstituidaNaoFala`) prova o comportamento; este guarda
+/// prende a forma, sem ler comentário:
+///
+/// 1. todo `.disabled = false` de `conectar` começa com a conferência de que a
+///    tentativa ainda é a mais nova;
+/// 2. todo `.disabled = true` tem, entre a última espera (`await`) antes dele
+///    e ele, um `if (esta !== tentativas) {` que registra e volta — sem espera
+///    no meio, nada mais roda entre a conferência e o apagar;
+/// 3. há os dois apagares e o `finally` do `connect` devolve o botão: sem
+///    isso, o guarda passaria por não achar o que cobra, e o botão ficaria
+///    apagado para sempre depois da primeira entrada.
+#[test]
+fn so_a_tentativa_mais_nova_mexe_no_conectar() {
+    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    let mut acende = 0;
+    let mut apaga = 0;
+    for (posicao, _) in conectar.match_indices(".disabled = ") {
+        let inicio_da_linha = conectar[..posicao].rfind('\n').map_or(0, |n| n + 1);
+        let fim_da_linha = conectar[posicao..]
+            .find('\n')
+            .map_or(conectar.len(), |n| posicao + n);
+        let linha = conectar[inicio_da_linha..fim_da_linha].trim();
+        if linha.contains(".disabled = false") {
+            acende += 1;
+            assert!(
+                ["if (esta === tentativas)", "if (tentativas === esta)"]
+                    .iter()
+                    .any(|conferencia| linha.starts_with(conferencia)),
+                "`conectar` reacende um botão sem conferir que a tentativa ainda é a mais nova \
+                 ({linha:?}): a que outra já substituiu termina e o reacende com a nova ainda \
+                 andando, e um clique ali abre uma terceira entrada por baixo dela"
+            );
+        } else if linha.contains(".disabled = true") {
+            apaga += 1;
+            let espera = conectar[..posicao].rfind("await ").unwrap_or(0);
+            let entre = &conectar[espera..posicao];
+            let conferida = entre.find("if (esta !== tentativas) {").and_then(|abre| {
+                let chave = abre + "if (esta !== tentativas) ".len();
+                fim_do_bloco(entre, chave).map(|fim| &entre[chave..fim])
+            });
+            assert!(
+                conferida.is_some_and(|bloco| {
+                    bloco.contains("return") && bloco.contains("registrarNoAnfitriao(")
+                }),
+                "`conectar` apaga um botão ({linha:?}) sem conferir antes, depois da última \
+                 espera, que a tentativa ainda é a mais nova, e sem desistir e registrar se \
+                 não for: uma velha que volta da espera depois de a nova ter devolvido o \
+                 botão o apaga, e ninguém mais o devolve.\n{entre}"
+            );
+        }
+    }
+    assert!(
+        apaga >= 2 && acende >= 2,
+        "`conectar` apaga o botão {apaga} vez(es) e o devolve {acende}: eram duas e duas (a \
+         pergunta do nome e a travessia). Se a forma mudou, este guarda precisa mudar junto, \
+         e não passar por não achar o que cobra.\n{conectar}"
+    );
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(finally) = conectar[connect..]
+        .find("} finally {")
+        .map(|depois| connect + depois)
+    else {
+        panic!("o `connect` deixou de ter um `finally`: {conectar}");
+    };
+    let chave = finally + "} finally ".len();
+    let Some(fim) = fim_do_bloco(&conectar, chave) else {
+        panic!("o `finally` do `connect` não fecha: {conectar}");
+    };
+    let bloco = &conectar[chave..fim];
+    assert!(
+        bloco.contains(".disabled = false"),
+        "o `finally` do `connect` deixou de devolver o botão que a entrada apaga: depois \
+         da primeira tentativa, ele fica apagado para sempre.\n{bloco}"
     );
 }
 
