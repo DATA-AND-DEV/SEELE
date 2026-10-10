@@ -481,7 +481,11 @@ contrato, **com os números em aberto para a M3** (§12):
 mesmo `doServidor: { canal, pedido, campo }` da v5, com `pedido.transporte =
 'volume'` levando a leitura ao fluxo do ADR 0048, e não ao controle. A v5 só o
 dizia da mídia em geral (`api/v5.json`, `volume.leitura`); a 6 o diz de cada
-lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7).
+lugar, e uma bancada prova o `fundo` da `tela` (tarefa 7). [c, tarefa 7, Step
+5b: **medido, já levava** — todos os lugares passam pelo mesmo
+`carregarMidiaDoServidor` do dono, que decide pelo `transporte`;
+`bancada/camadas.cjs` prova os cinco, cada um com o seu caminho de volume,
+lidos pelo `ler_imagem_mod` e nenhum pelo `mod_request`]
 
 ### `folha`
 

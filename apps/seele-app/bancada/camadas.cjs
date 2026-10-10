@@ -14,6 +14,11 @@
 // 4. **A 300 px, nenhum título de folha, painel ou diálogo quebra dentro de
 //    uma palavra**; uma palavra maior que a coluna é a única exceção. O título
 //    quebrava «EDITA / R / PERFIL» (achado da tarefa 7, Step 4).
+// 5. **A mídia do servidor por `volume`, em todo lugar** (Step 5b; rascunho
+//    §5, a pergunta da MESA): o `fundo` de uma `tela`, a `midia`, o
+//    `fundoDeMidia` de uma caixa, o `retrato` e a `pessoa.capa`, com
+//    `pedido.transporte = 'volume'`, leem pelo fluxo do ADR 0048 — o
+//    `ler_imagem_mod` —, e nenhum pelo controle (`mod_request`).
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -222,8 +227,44 @@ const { chromium } = require('./playwright.cjs');
     }, TITULOS);
     assert.deepEqual(quebras, [], 'um título de superfície quebrou dentro de uma palavra que cabia na coluna, ou a saída saiu do lugar');
 
+    // 5. A mídia do servidor por volume, nos cinco lugares.
+    const lugares = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 8; canvas.height = 8;
+      canvas.getContext('2d').fillRect(0, 0, 8, 8);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 128, uri: canvas.toDataURL() };
+      const doVolume = (lugar) => ({ canal: 1, campo: 'image', pedido: { transporte: 'volume', path: `volume:${lugar}` } });
+      const antes = testCalls.length;
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'midias', tipo: 'pagina', titulo: 'Mídias' } });
+      const montou = await pedir(6, { tipo: 'superficie-montar', superficie: 'midias', arvore: [
+        { forma: 'tela', chave: 'mapa', largura: 64, altura: 64, fundo: { doServidor: doVolume('fundo-da-tela') } },
+        { forma: 'midia', chave: 'foto', doServidor: doVolume('midia') },
+        { forma: 'caixa', chave: 'cartaz', fundoDeMidia: { doServidor: doVolume('fundo-de-midia') }, dentro: [{ forma: 'texto', chave: 't', texto: 'x' }] },
+        { forma: 'retrato', chave: 'rosto', doServidor: doVolume('retrato') },
+      ] });
+      contribuicoesDosMods.registrar(modDe[6].mod, modDe[6].inst, {
+        ponto: 'pessoa.capa', modo: 'substituir', alvo: String(testTable.snapshot.me),
+        conteudo: { doServidor: doVolume('capa') },
+      });
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 600));
+      const chamadas = testCalls.slice(antes);
+      const caminhoDe = (c) => { try { return JSON.parse(c.args?.payload ?? '{}').path ?? ''; } catch { return ''; } };
+      return {
+        montou,
+        peloVolume: chamadas.filter(c => c.cmd === 'ler_imagem_mod').map(caminhoDe),
+        peloControle: chamadas.filter(c => c.cmd === 'mod_request').map(caminhoDe).filter(Boolean),
+      };
+    });
+    assert.equal(lugares.montou?.ok, true, `a árvore com as mídias não montou: ${JSON.stringify(lugares.montou)}`);
+    for (const lugar of ['fundo-da-tela', 'midia', 'fundo-de-midia', 'retrato', 'capa']) {
+      assert.ok(lugares.peloVolume.includes(`volume:${lugar}`),
+        `${lugar}: a mídia com transporte 'volume' não foi lida pelo ler_imagem_mod: ${JSON.stringify(lugares)}`);
+    }
+    assert.deepEqual(lugares.peloControle, [], `uma mídia com transporte 'volume' foi pedida pelo controle: ${JSON.stringify(lugares)}`);
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));
