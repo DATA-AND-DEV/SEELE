@@ -8,7 +8,11 @@ no navegador? A casca pede um a cada evento da sessão; com uma tela assistida a
 
 ## O que este spike roda
 
-**O texto de verdade, sem cópia à mão.** O `build.rs` lê do `seele-core`:
+**Desde o corte (2.2, fase 1, `4e1139fc`), o spike usa o `seele-sessao`**, o
+crate para onde o `Room` foi, e não precisa mais recortar nada. O que segue é
+como ele rodou antes do corte, e é o que recomendou fazê-lo.
+
+**O texto de verdade, sem cópia à mão.** O `build.rs` (até `4e1139fc`) lia do `seele-core`:
 - o `state.rs` inteiro, **menos o `teto_de_video`** (o único método que puxa o
   vídeo, e que só os testes dele chamam) **e os testes**;
 - o `SessionInfo`, recortado do `client.rs` (o resto do arquivo puxa o quinn e o
@@ -58,6 +62,18 @@ retrato enquanto só chegaram quadros) não é necessária por causa dele.
   esse custo é do DOM, e não do produtor. Se 30 retratos por segundo pesarem,
   é ali que pesam, e a saída exata do `ScreenFrame` continua sendo a resposta
   (ela poupa o redesenho também).
+
+**Depois do corte, com os seis mapas do `Room` em `BTreeMap`** (achado 2,
+abaixo), medido de novo em 09/10:
+
+| pessoas | Chromium 151 | Safari do Simulador | Node (V8) |
+|---|---|---|---|
+| 250: uma sala cheia | 0,107 ms | 0,117 ms | 0,224 ms |
+| 1000 | 0,402 ms | 0,430 ms | 0,829 ms |
+
+Igual ou mais rápido que com o `HashMap`. O custo da árvore é de tamanho: o
+`.wasm` do spike foi de 147 KB para 204 KB, das cópias genéricas dela para os
+seis tipos de chave.
 
 ## Os achados
 

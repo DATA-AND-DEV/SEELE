@@ -25,7 +25,16 @@
 //! Ordering for display, truncation, colour, and anything involving a clock or
 //! a locale. This module has no opinion about what time it is.
 
-use std::collections::HashMap;
+// **`BTreeMap`, e não `HashMap`, em todo mapa por id do servidor.** No
+// navegador (`wasm32-unknown-unknown`) o `RandomState` não tem de onde tirar
+// aleatoriedade, e as chaves do hash são fixas: medido em 09/10/2026, o mesmo
+// valor dá o mesmo hash em duas instâncias do módulo e no Chromium e no Safari
+// (`spikes/snapshot-no-wasm/`). Estes mapas são indexados por ids que **o
+// servidor escolhe**, e com chaves fixas um servidor hostil poderia mandar ids
+// que colidem e deixar a aba quadrática. A árvore não tem hash para colidir, é
+// a mesma nos dois alvos (um `Room` só), e a ordem dela não muda o retrato: a
+// projeção ordena o que mostra.
+use std::collections::BTreeMap;
 
 use seele_proto::control::{ChannelInfo, Permission, PersonState, VoiceRoomInfo};
 use seele_proto::ids::{
@@ -297,7 +306,7 @@ pub struct Room {
     ///
     /// Quem não tem imagem não aparece aqui — ausência é a resposta, e não um
     /// `None` guardado.
-    pub person_icons: std::collections::HashMap<PersonId, Vec<u8>>,
+    pub person_icons: BTreeMap<PersonId, Vec<u8>>,
     /// Voice channels visible to this person.
     pub voice_rooms: Vec<VoiceRoomInfo>,
     /// Text channels visible to this person.
@@ -321,9 +330,9 @@ pub struct Room {
     /// The Channel being read.
     pub current_channel: Option<ChannelId>,
     /// Everybody this client has heard of, by id.
-    pub people: HashMap<PersonId, Person>,
+    pub people: BTreeMap<PersonId, Person>,
     /// Who is seated in which voice room, in arrival order.
-    pub seats: HashMap<VoiceRoomId, Vec<PersonId>>,
+    pub seats: BTreeMap<VoiceRoomId, Vec<PersonId>>,
     /// Quem está conectado neste servidor, esteja ou não numa sala.
     ///
     /// # Por que não dá para deduzir de [`Self::seats`]
@@ -357,7 +366,7 @@ pub struct Room {
     /// Ausência é lista vazia, e é o certo: um canal de que nunca se pediu
     /// histórico não é um canal sem mensagens, é um canal sobre o qual não se
     /// sabe nada — e as duas coisas desenham igual, nada.
-    pub mensagens: HashMap<ChannelId, Vec<Message>>,
+    pub mensagens: BTreeMap<ChannelId, Vec<Message>>,
     /// Até qual mensagem cada canal foi lido.
     ///
     /// Só desta sessão, e de propósito: uma marca persistida é um arquivo a mais
@@ -365,7 +374,7 @@ pub struct Room {
     /// desenhada. O que existe aqui é o suficiente para a projeção por canal
     /// responder «quantas chegaram enquanto eu estava noutro canal», que é a
     /// pergunta que o R02 deixa possível pela primeira vez.
-    pub lidas_ate: HashMap<ChannelId, MessageId>,
+    pub lidas_ate: BTreeMap<ChannelId, MessageId>,
     /// O que **esta** máquina escreveu e o servidor ainda não confirmou.
     ///
     /// Uma lista só, e não um mapa por canal: são poucas — o que cabe entre um
@@ -404,7 +413,7 @@ pub struct Room {
     /// a transmissão lá — ele reenvia `ScreenShareStarted` a quem entra numa
     /// sala que já tem uma —, e um campo que só o reenvio preenche seria um
     /// campo mentindo no aperto de mão.
-    pub telas: HashMap<ScreenId, Tela>,
+    pub telas: BTreeMap<ScreenId, Tela>,
     /// A subida que o servidor mediu da própria máquina, em bits por segundo.
     ///
     /// A primeira linha do teto do §5.1 — `caminho de quem HOSPEDA × 60% ÷ N` —

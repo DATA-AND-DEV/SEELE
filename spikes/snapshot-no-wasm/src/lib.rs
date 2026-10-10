@@ -3,20 +3,13 @@
 //! Spike da Tarefa 2.2 da F4 (ADR 0057, «quanto do núcleo vai para `wasm`»).
 //! Ver o `README.md`.
 
-#[path = "../../../crates/seele-core/src/assento.rs"]
-#[allow(dead_code, unused_imports, rustdoc::broken_intra_doc_links)]
-pub mod assento;
+/// O `Room` e o `SessionInfo` do `seele-sessao` (até `4e1139fc`, o texto do
+/// `seele-core`, recortado pelo `build.rs`).
+pub use seele_sessao::{state, SessionInfo};
 
-/// O `SessionInfo` do `client.rs`, recortado pelo `build.rs`.
+/// O nome de antes do corte, para o `sala.rs` não mudar.
 pub mod client {
-    use seele_proto::ids::{PersonId, SessionId, Ssrc};
-    include!(concat!(env!("OUT_DIR"), "/sessao.rs"));
-}
-
-/// O `state.rs` do `seele-core`, sem o `teto_de_video` e sem os testes.
-#[allow(dead_code, unused_imports, rustdoc::broken_intra_doc_links, clippy::all)]
-pub mod state {
-    include!(concat!(env!("OUT_DIR"), "/state.rs"));
+    pub use seele_sessao::SessionInfo;
 }
 
 pub mod retrato;

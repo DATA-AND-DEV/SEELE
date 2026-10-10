@@ -5,9 +5,10 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Fora do workspace. O `state.rs` e o `assento.rs` são os do `seele-core`, lidos
-# pelo caminho (o `build.rs` tira do `state.rs` só o `teto_de_video`, que depende
-# do vídeo, e os testes), e o `SessionInfo` é o do `client.rs`, recortado.
+# Fora do workspace. Até `4e1139fc` o `build.rs` lia o `state.rs` e o
+# `assento.rs` do `seele-core` pelo caminho e recortava o `SessionInfo` do
+# `client.rs`; desde o corte (2.2, fase 1) o spike usa o `seele-sessao`, que é
+# o mesmo texto num crate que compila no navegador.
 [workspace]
 
 [lib]
@@ -15,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 seele-proto = { path = "../../crates/seele-proto" }
+seele-sessao = { path = "../../crates/seele-sessao" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 

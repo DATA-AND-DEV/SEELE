@@ -149,6 +149,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-sessao"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -207,6 +214,7 @@ name = "snapshot-no-wasm"
 version = "0.0.0"
 dependencies = [
  "seele-proto",
+ "seele-sessao",
  "serde",
  "serde_json",
 ]

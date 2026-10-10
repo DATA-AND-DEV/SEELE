@@ -596,3 +596,35 @@ começar.
 - **A proposta de corte foi à orquestradora**, em duas fases (o `seele-core`
   primeiro; o `seele-ffi` numa janela dela). Esperando a resposta.
 
+## 09/10, noite: a 2.2, fase 1 (o `seele-sessao`)
+
+- **A orquestradora liberou a fase 1** e os seis mapas em `BTreeMap` também no
+  desktop; a fase 2 espera a sala viva da F7. A saída do `ScreenFrame` saiu do
+  plano, porque o produtor não pesa.
+- **O corte** (`4e1139fc`): o `crates/seele-sessao`, só com o `seele-proto`.
+  O `state.rs` e o `assento.rs` foram para lá, e o `SessionInfo` saiu do
+  `client.rs` sem tocar no aperto de mão, onde a P8 parou. O `seele-core` os
+  reexporta, e nenhum outro arquivo do workspace mudou. No texto movido,
+  mudaram só o `use` do `SessionInfo`, dois links para o vídeo, que viraram
+  texto, e o `teto_de_video`, que ficou no `tela.rs` como o trait
+  `TetoDaSala`, com os dois testes dele de texto igual. O `assento.rs` é byte a
+  byte o mesmo.
+  - **conferido:** 58 testes no `state.rs` mais 2 no `tela.rs` são os 60 de
+    antes, e o `assento.rs` tem os mesmos 15; o `seele-core` inteiro passa; o
+    `cargo xtask web` compila o `seele-sessao` para o navegador; o
+    `check_deps.rs` o prende ao protocolo (teste novo);
+  - **reversões:** o `seele-audio` pendurado nele reprova o `check-deps` e a
+    compilação para o navegador; o teto sem a perna dos espectadores reprova o
+    teste movido.
+- **Os seis mapas em `BTreeMap`**, num commit à parte: o `seele-sessao`, o
+  `seele-core` inteiro e o `seele-ffi` (166 testes, com os do retrato) passam.
+  Um guarda novo (`tests/sem_hash_nos_ids_do_servidor.rs`) reprova um
+  `HashMap`, um `HashSet` ou um `RandomState` no crate, e a reversão (o mapa
+  das telas de volta ao `HashMap`) o reprova. No spike, o retrato ficou igual
+  ou mais rápido (250 pessoas: 0,107 ms no Chromium, 0,117 ms no Safari do
+  Simulador), e o `.wasm` foi de 147 KB para 204 KB.
+- **Três comentários citam o caminho velho do `state.rs`**, e não são da F4:
+  `ui/base.css:160`, `ui/tela-sessao.js:35` e
+  `crates/seele-conformance/tests/sincronia.rs:34`. Ficam para a fila da
+  orquestradora.
+
