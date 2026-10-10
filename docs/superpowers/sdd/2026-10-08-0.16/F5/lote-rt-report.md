@@ -31,6 +31,9 @@ Todas as reversões saíram vermelhas onde deviam. Ver o §9.
 cada, com o vermelho antes de cada conserto. Ver o §10. **Um incidente:** numa
 das sondas desta rodada eu matei os navegadores de outro agente (§10.5).
 
+**Rodada 3 (verde):** os dois menores da re-revisão (R2-M1 e R2-M2), um commit
+cada. Ver o §11.
+
 ## 1. Os roteiros rodados aqui, e o que cada um prova hoje
 
 A pasta tem **34** roteiros, e não os 31 do brief. Cada um rodou sozinho pela
@@ -773,3 +776,97 @@ passou nas duas. É mais um para a pendência 58.
 
 Não rodei conformidade, não rodei o `publicar.sh` de ponta a ponta e não fiz
 push.
+
+## 11. Rodada 3: os dois menores da re-revisão
+
+A re-revisão aprovou o RT e deixou dois menores novos. Os dois vieram dos
+consertos da rodada 2:
+
+| commit | achado |
+|---|---|
+| `c0cbb30c` | R2-M1: o passo dos roteiros e a etapa do `publicar.sh` têm de ser só a chamada da carga |
+| `cbbc88eb` | R2-M2: o Ctrl+C e o SIGTERM numa carga que trava matam o grupo do navegador |
+
+### 11.1 R2-M1: um comando a mais no `run` passava
+
+O leitor de shell da rodada 2 descartava, sem dizer, todo comando do `run` que
+não fosse a carga.
+
+**Medido antes do conserto**, com o guarda verde nos três casos:
+- **P5**, a sonda do revisor: `exit 0` e uma linha em branco antes da carga, no
+  `run` do CI. No Actions, isso não roda roteiro nenhum.
+- **P6**, um `true` numa linha própria depois da carga.
+- **P7**, um `return 0` antes da etapa, dentro de `roteiros_da_casca`.
+
+No `publicar.sh` vale o mesmo, e o conserto foi feito lá também. A bancada do
+`publicar.sh` já pegava o P7 por comportamento («a bateria de quem publica não
+rodou os roteiros da casca»), mas o guarda não pegava.
+
+**O conserto.** O `run` do passo tem de dar um comando só, e a
+`roteiros_da_casca` também. Um `assert` mostra os comandos que achou.
+
+**Depois do conserto**, os três ficam vermelhos:
+- P5: «tem 2 comandos: [["exit", "0"], ["python3", …]]»;
+- P6: o mesmo, com o `["true"]` no fim;
+- P7: «[["return", "0"], ["etapa_da_bateria", …]]».
+
+G1–G3 e R1–R6b continuam vermelhos.
+
+### 11.2 R2-M2: o Ctrl+C deixava o navegador órfão
+
+O grupo próprio do navegador, que o prazo da rodada 2 usa, o pôs fora do
+alcance do Ctrl+C. O terminal manda SIGINT só ao grupo da frente.
+
+**Medido antes do conserto** com a `sinal.py`. Ela conta e mata **só** os
+grupos que a carga abriu: um `chrome-headless-shell` com
+`--virtual-time-budget` que não existia antes.
+- **SIGINT** ao grupo da carga, como o terminal faz: a carga sai com -2. Três
+  segundos depois, 5 processos seguem vivos no grupo do navegador, com o
+  renderer a 99,1%.
+- **SIGTERM** à carga: ela sai com -15, e os mesmos 5 seguem vivos.
+
+**O conserto:**
+- `rodar_navegador` mata o grupo em qualquer saída antecipada
+  (`except BaseException`, e re-levanta);
+- `main` transforma o SIGTERM em `SystemExit`, para ele passar pelo mesmo
+  caminho;
+- `matar_o_grupo` colhe o principal, que ficaria zumbi até a carga sair. Foi o
+  autoteste que achou isso: na primeira versão, ele viu o principal «vivo».
+
+**Depois do conserto**, SIGINT e SIGTERM deixam 0 processos, e a carga sai com
+-2 e 143.
+
+O autoteste ganhou o **sexto caso**, «um SIGTERM no meio mata o navegador e os
+filhos». A carga manda um SIGTERM a si mesma 0,5 s depois de abrir um
+«navegador» de mentira com um filho, e confere que os dois morreram. O teste do
+`xtask` agora exige «os 6 passaram».
+
+### 11.3 As reversões da rodada 3
+
+Todas voltaram idênticas (`cmp`) e foram tocadas.
+
+| | mudança | resultado |
+|---|---|---|
+| P5, P6, P7 | um comando antes ou depois da carga, ou da etapa | verdes antes do conserto; vermelhos depois |
+| S1 | o `except BaseException` desligado | 5 órfãos com SIGINT, 5 com SIGTERM; o autoteste falha no caso 6 |
+| S2 | sem o tratador do SIGTERM | 5 órfãos com SIGTERM; o autoteste morre pelo sinal, e o teste do `xtask` fica vermelho |
+| A1–A4 | as de antes | cada uma vermelha só no caso dela |
+| A5 | matar só o principal | agora vermelha nos casos 5 e 6 |
+
+### 11.4 O que rodou na rodada 3
+
+- **Os 34 roteiros**, um a um: todos com 0, e a saída igual à da rodada 2.
+- **O passo do CI** com `bash -e`: «os 34 passaram», 0.
+- **`--autoteste`**: «os 6 passaram».
+- **`cargo test -p xtask`**: 223 passaram, 0 falharam.
+- **`cargo xtask check-runtime`**: 0.
+- `sh -n`, fmt e clippy: limpos.
+
+Não rodei conformidade, não rodei o `publicar.sh` de ponta a ponta e não fiz
+push. Nesta rodada, toda sonda que matou processo matou só os grupos que a
+carga abriu.
+
+**O que fica das observações da re-revisão, sem achado:** o segundo
+`communicate()` depois do `killpg` continua sem prazo. Um filho que chamasse
+`setsid` seguraria a carga, e no macOS isso não acontece (medido). Os prazos de
+fora continuam valendo como rede.
