@@ -557,10 +557,19 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
     // navegador não há registro, e essa parte não acontece. A decisão fica
     // escrita aqui, com o motivo, e o comando continua conferido: ele tem de
     // estar numa lista que o atende.
-    let leem_e_seguem_a_lista: &[(&str, &str)] = &[(
-        "renomear_server",
-        "o nome vai pela conexão; o registro local só existe para quem hospeda",
-    )];
+    let leem_e_seguem_a_lista: &[(&str, &str)] = &[
+        (
+            "renomear_server",
+            "o nome vai pela conexão; o registro local só existe para quem hospeda",
+        ),
+        // Desde a sala viva da F7 (décima segunda integração): o `connect`
+        // pergunta se o alvo é a sala desta máquina, para conferi-la pelo
+        // código. No navegador não há sala, e a conexão é a da 2.6.
+        (
+            "connect",
+            "só pergunta se o alvo é a sala desta máquina; no navegador não há sala",
+        ),
+    ];
     for (comando, _motivo) in leem_e_seguem_a_lista {
         assert!(
             mexem.contains(*comando),
