@@ -1810,6 +1810,78 @@ mod a_entrada_velha_que_chega_tarde {
             .expect("o retrato de teste não gravou");
     }
 
+    /// Um `connect` numa thread só dele, com um runtime próprio.
+    ///
+    /// Para os testes que seguram um cadeado da sessão e precisam que o
+    /// `connect` pare nele: no runtime de uma thread só em que os servidores
+    /// andam, um `connect` parado num cadeado pararia os servidores junto.
+    fn connect_noutra_thread(
+        app: &'static AppHandle<MockRuntime>,
+        servidor: String,
+        apelido: &str,
+    ) -> std::thread::JoinHandle<Result<super::Entrada, super::FalhaDaEntrada>> {
+        let apelido = apelido.to_owned();
+        std::thread::spawn(move || {
+            runtime().block_on(connect(
+                app.clone(),
+                app.state::<Session>(),
+                servidor,
+                apelido,
+                false,
+                None,
+            ))
+        })
+    }
+
+    /// Espera uma thread terminar sem parar o runtime do teste, até `prazo`.
+    async fn quando_terminar<T>(thread: std::thread::JoinHandle<T>, prazo: Duration) -> T {
+        let fim = tokio::time::Instant::now() + prazo;
+        while !thread.is_finished() {
+            assert!(
+                tokio::time::Instant::now() < fim,
+                "a thread não terminou no prazo"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        thread.join().expect("a thread caiu")
+    }
+
+    /// Segura, numa thread própria, a guarda que `tomar` devolve — um cadeado
+    /// da sessão —, até o `Sender` devolvido ser usado ou cair. Numa thread, e
+    /// não no teste, para nenhuma guarda atravessar um `await`.
+    fn segurar<G>(
+        tomar: impl FnOnce() -> G + Send + 'static,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let (tomado, foi_tomado) = std::sync::mpsc::channel();
+        let (soltar, quando_soltar) = std::sync::mpsc::channel::<()>();
+        let thread = std::thread::spawn(move || {
+            let guarda = tomar();
+            let _ = tomado.send(());
+            let _ = quando_soltar.recv();
+            drop(guarda);
+        });
+        foi_tomado.recv().expect("o cadeado não foi tomado");
+        (soltar, thread)
+    }
+
+    /// Espera o servidor anunciar um retrato novo, até `prazo`.
+    async fn um_retrato_chegou(
+        ouvido: &mut tokio::sync::broadcast::Receiver<seele_server::server::Event>,
+        prazo: Duration,
+    ) -> bool {
+        tokio::time::timeout(prazo, async {
+            loop {
+                match ouvido.recv().await {
+                    Ok(seele_server::server::Event::PersonIconChanged { .. }) => break true,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(_) => break false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false)
+    }
+
     /// O cenário inteiro, do começo da velha à mensagem: o que ficou errado.
     async fn a_velha_termina_depois_da_nova() -> Vec<String> {
         guardar_um_retrato();
@@ -2141,6 +2213,103 @@ mod a_entrada_velha_que_chega_tarde {
             ));
         }
         vermelhos
+    }
+
+    /// **A nova começa entre as duas conferências da velha** (I1 da revisão
+    /// do E54).
+    ///
+    /// A velha passa a primeira conferência e aplica os efeitos de entrada; a
+    /// nova começa e revoga a geração antes de a velha gravar o slot. O teste
+    /// para a velha no cadeado do slot, que ele segura: solta o banco do
+    /// servidor velho, espera o retrato da velha chegar a ele (ela passou da
+    /// primeira conferência), revoga a geração como o `connect` da nova faz ao
+    /// começar, e só então solta o slot. A velha tem de ser largada ali.
+    async fn a_nova_comeca_entre_as_duas_conferencias() -> Vec<String> {
+        guardar_um_retrato();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+
+        // O slot, seguro: a velha para nele, na segunda conferência.
+        let (soltar_o_slot, quem_segura) =
+            segurar(move || app.state::<Session>().inner().connection.lock());
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        assert!(
+            um_retrato_chegou(&mut do_velho, Duration::from_secs(8)).await,
+            "o retrato da velha não chegou ao servidor velho: ela não passou da primeira \
+             conferência, e este teste não mede a segunda"
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !velha.is_finished(),
+            "a velha terminou sem esperar o slot, e este teste não mede a segunda conferência"
+        );
+
+        // A nova começa, e revoga a geração da velha.
+        sessao.revogar();
+        let _ = soltar_o_slot.send(());
+        quem_segura.join().expect("quem segurava o slot caiu");
+
+        match quando_terminar(velha, Duration::from_secs(10)).await {
+            Ok(entrada) => vermelhos.push(format!(
+                "a velha voltou como entrada (geração {}) depois de a nova revogar a geração dela \
+                 no meio dos efeitos de entrada",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(&falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da velha substituída entre as duas conferências não vem marcada: \
+                         {dita}"
+                    ));
+                }
+            }
+        }
+        if let Ok(conexao) = sessao.connection() {
+            vermelhos.push(format!(
+                "o slot ficou com a conexão da velha ({})",
+                conexao.snapshot().server
+            ));
+        }
+        let onde = sessao
+            .endereco_da_sessao
+            .lock()
+            .ok()
+            .and_then(|onde| onde.clone());
+        if onde.is_some() {
+            vermelhos.push(format!(
+                "o endereço da sessão ficou {onde:?}, o do servidor que a pessoa deixou"
+            ));
+        }
+        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        if no_velho != 0 {
+            vermelhos.push(format!(
+                "a velha continua presente no servidor velho ({no_velho})"
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot() {
+        let _vez = vez();
+        let vermelhos = runtime().block_on(a_nova_comeca_entre_as_duas_conferencias());
+        assert!(
+            vermelhos.is_empty(),
+            "a velha substituída entre as duas conferências do `connect` tomou a sessão:\n  {}",
+            vermelhos.join("\n  ")
+        );
     }
 
     /// **As duas conferências do `connect`, pela forma.**
