@@ -137,6 +137,18 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
   // alcançável até a obtenção acabar. A mesma limpeza de `fecharAceiteDeMods`.
   if (aceitePendente) aceitePendente.credencial = null;
   aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };
+  // A pergunta que esta abertura gravou, para conferir depois do `await` que
+  // ainda é a da tela.
+  const pergunta = aceitePendente;
+  // **O diálogo que já estava aberto não responde pela pergunta nova** (lote W3
+  // da F5, rodada 3). `aceitePendente` acabou de trocar, e a lista, o servidor e o
+  // texto do ACEITAR só são desenhados depois do `await` abaixo: até lá o
+  // diálogo da pergunta antiga seguia na tela com o ACEITAR aceso, e o clique
+  // gravava o sim da nova — consentimento trocado, a metade da corrida que a
+  // conferência de depois do `await` não alcança. O desenho acende o botão de
+  // novo; uma abertura que perdeu a vez não o toca, e quem tomou o lugar dela
+  // o acende.
+  $("mods-aceitar").disabled = true;
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**
@@ -153,6 +165,29 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
     // Não saber se houve um sim antes não impede de perguntar agora. O aviso
     // some e o resto da tela vale.
     console.warn("aceite anterior:", falha);
+  }
+
+  // **Uma abertura que perdeu a vez não desenha** (lote W3 da F5, rodada 2).
+  //
+  // Daqui para baixo a função escreve no diálogo — a lista, a contagem, o
+  // servidor, o aviso, o botão — e o abre. Se outra pergunta tomou o lugar
+  // enquanto o aceite anterior era lido (duas recusas por MODs dentro da latência
+  // de um `invoke`), esta abertura, a velha, terminava depois e repovoava a lista
+  // por cima da nova, com `aceitePendente` já sendo a da nova: a pessoa lia a
+  // lista de um pedido e ACEITAR gravava o conjunto do outro — consentimento
+  // trocado, que é o que o ADR 0045 existe para não deixar acontecer.
+  //
+  // Pela referência, e não por «há uma pergunta aberta»: a nova também é uma. E
+  // a pergunta que largou (fechada, ou esquecida por quem falhou ao abrir) também
+  // não abre aqui. Vai só ao registro, como a recusa de uma tentativa que outra
+  // substituiu (lote W2), e não falha: não houve erro, houve outra pergunta.
+  if (aceitePendente !== pergunta) {
+    registrarNoAnfitriao(
+      "aceite-de-mods",
+      `a abertura do diálogo de aceite dos MODs de ${alvo} perdeu a vez para outra e não desenhou`,
+      "aviso",
+    );
+    return;
   }
   const mudou = Boolean(anterior) && anterior !== conjunto;
   $("mods-mudou").hidden = !mudou;
@@ -399,20 +434,139 @@ async function obterOConjunto(mods) {
  *
  * `credencial` é o segredo com que esta batida chegou, e a pergunta o guarda
  * para a volta que aceita. Ver `aceitePendente`.
+ *
+ * **E se a pergunta não abrir, a falha não some** (lote W3 da F5). Devolver
+ * `true` e deixar o `.catch` ao console era o mesmo defeito do clique em
+ * ACEITAR: nem diálogo, nem linha vermelha — porque `conectar` entende o `true`
+ * como «a pergunta tratou» —, e a credencial ficava na memória com uma pergunta
+ * que ninguém vê e nenhuma porta fecha. Ver `perguntaNaoAbriu`.
  */
 function levarParaOAceiteDeMods(motivo, alvo, credencial) {
   const pedido = motivo?.ModsNaoAceitos;
   if (!pedido) return false;
-  abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "", credencial).catch((falha) =>
-    console.warn("abrir aceite:", falha),
-  );
+  // A tentativa de que esta recusa veio: `conectar` só chega aqui com a mais
+  // nova (lote W2). Se outra começar antes de a pergunta falhar, a falha não
+  // fala na tela.
+  const desta = tentativas;
+  const abrindo = abrirAceiteDeMods(alvo, pedido.mods ?? [], pedido.conjunto ?? "", credencial);
+  // `abrirAceiteDeMods` grava a pergunta antes do primeiro `await`, então é
+  // esta, e é por esta referência que a falha a fecha: uma pergunta que veio
+  // depois dela não é a que falhou.
+  const pergunta = aceitePendente;
+  abrindo.catch((falha) => perguntaNaoAbriu(motivo, alvo, desta, pergunta, falha));
   return true;
+}
+
+/**
+ * **A pergunta dos MODs que não abriu** — lote W3 da F5.
+ *
+ * Inalcançável hoje: `mods` e `conjunto` vêm decodificados do Rust, e o único
+ * `invoke` de `abrirAceiteDeMods` está num `try`. Mas o que acontecia quando um
+ * `mods` que não é lista chegasse era um `console.warn` e mais nada, e o pior
+ * não era a tela calada: `abrirAceiteDeMods` grava `aceitePendente` — com a
+ * credencial da tentativa — antes de rejeitar, e a pergunta ficava na memória
+ * da janela sem diálogo, sem botão, sem Escape, sem clicar fora: a credencial
+ * só saía na próxima pergunta.
+ *
+ * - **Vai ao `seele.log`**, com o alvo e o motivo, e nunca a credencial.
+ * - **Fecha a pergunta que não abriu**, e só ela: `fecharAceiteDeMods` esquece
+ *   a credencial. Se outra pergunta já a substituiu (que esquece a credencial
+ *   da antiga ao abrir) ou a pessoa já a fechou, não há o que fechar, e fechar
+ *   mataria a pergunta nova.
+ * - **A linha vermelha da entrada fala**, com a frase de sempre da recusa por
+ *   MODs: ela lista a lista e manda entrar de novo neste servidor, que é o que
+ *   a pessoa pode fazer. É o ramo de `fraseDeErro` que o lote W2 deixou «para o
+ *   caminho que um dia chegar».
+ * - **Só se a tentativa ainda é a mais nova** (lote W2): a que outra
+ *   substituiu não fala em lugar nenhum da tela, e fica no registro.
+ * - **Se a frase da recusa também não se monta** — a mesma lista malformada
+ *   que impediu a pergunta —, a linha vermelha diz a falha de abrir, que
+ *   `fraseDeErro` sabe dizer de qualquer forma. Calar nesse ponto seria o
+ *   defeito de novo.
+ */
+function perguntaNaoAbriu(motivo, alvo, desta, pergunta, falha) {
+  registrarNoAnfitriao(
+    "aceite-de-mods",
+    `o diálogo de aceite dos MODs de ${alvo} não abriu: ${motivoEmTexto(falha)}`,
+    "aviso",
+  );
+  if (aceitePendente === pergunta) fecharAceiteDeMods();
+  if (desta !== tentativas) return;
+  let frase;
+  try {
+    frase = fraseDeErro(motivo);
+  } catch {
+    frase = fraseDeErro(falha);
+  }
+  const naEntrada = $("boot-erro");
+  naEntrada.hidden = false;
+  naEntrada.textContent = frase;
+}
+
+/**
+ * A falha como texto para o `seele.log`: o `Error` pelo nome e pela mensagem
+ * (o `JSON.stringify` de um `Error` é `{}`), o resto pelo `JSON`, e o tipo se o
+ * `JSON` não couber (ciclo, `BigInt`). Nunca lança.
+ */
+function motivoEmTexto(falha) {
+  try {
+    return falha instanceof Error ? String(falha) : JSON.stringify(falha);
+  } catch {
+    return Object.prototype.toString.call(falha);
+  }
+}
+
+/**
+ * **O que `aceitarOsMods` não pegou por dentro** — lote W3 da F5.
+ *
+ * Todo `invoke` de `aceitarOsMods` está dentro de um `try` que escreve uma
+ * frase (medido no W3: `mods_instalados` nas duas leituras, a obtenção e o
+ * `aceitar_mods` voltando `Err` acendem o ACEITAR de novo, com o motivo), e a
+ * volta é do `conectar`, que escreve a linha vermelha da entrada. O que
+ * escapa é a **resposta de forma errada** (a lista de instalados que não é
+ * lista, ou que tem um `null` dentro), que estoura em `.some` fora de qualquer
+ * `try`. O produto não a manda hoje (`mods_instalados` devolve um `Vec`, e o
+ * anúncio é decodificado no Rust), mas o que acontecia quando ela viesse era um
+ * `console.warn`, o ACEITAR apagado e a tela sem uma palavra: «o produto sabe e
+ * não conta». A medida do roteiro `aceite-de-mods.js` foi exatamente essa.
+ *
+ * Agora a tela diz, o ACEITAR volta, e o motivo vai ao `seele.log`.
+ *
+ * **Só a pergunta que falhou fala na tela**, a mesma regra da recusa de uma
+ * tentativa substituída (lote W2): quem desistiu enquanto o aceite andava, ou
+ * já está diante de outra pergunta, não lê o erro de uma que largou. Esse caso
+ * vai só ao registro.
+ *
+ * **O registro leva o alvo e o motivo, e nunca a credencial** — nem o convite,
+ * nem a senha. O motivo é o erro como a ponte o mandou, ou o `TypeError` da
+ * casca; nenhum dos dois carrega o segredo da tentativa.
+ */
+function aceiteFalhou(pergunta, falha) {
+  const alvo = pergunta?.alvo ?? "";
+  registrarNoAnfitriao(
+    "aceite-de-mods",
+    `o aceite dos MODs de ${alvo} rejeitou por dentro: ${motivoEmTexto(falha)}`,
+    "aviso",
+  );
+  if (!pergunta || aceitePendente !== pergunta) return;
+  const erro = $("mods-erro");
+  erro.hidden = false;
+  // O motivo em linhas próprias: `fraseDeErro` de uma falha que a casca não
+  // sabe nomear tem três, e `#mods-erro` as mantém separadas (`pre-line`).
+  erro.textContent =
+    `não consegui concluir o aceite dos MODs de ${alvo}.\n` +
+    `${fraseDeErro(falha)}\n` +
+    "Tente de novo, ou recuse a entrada.";
+  $("mods-aceitar").disabled = false;
 }
 
 // ------------------------------------------------------------------- ligação
 
 $("mods-aceitar").addEventListener("click", () => {
-  aceitarOsMods().catch((falha) => console.warn("aceitar mods:", falha));
+  // A pergunta que este clique responde, para a falha de dentro dela saber se
+  // ainda é a que está na tela. Ver `aceiteFalhou`.
+  const pergunta = aceitePendente;
+  aceitarOsMods().catch((falha) => aceiteFalhou(pergunta, falha));
 });
 $("mods-recusar").addEventListener("click", fecharAceiteDeMods);
 
