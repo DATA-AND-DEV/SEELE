@@ -1562,14 +1562,15 @@ impl Hospedagens {
         self.guardado.as_ref().map(|guardado| &guardado.hospedagem)
     }
 
-    /// As portas em que as duas atendem, para [`onde_estou_em`].
-    fn portas(&self) -> (Option<u16>, Option<u16>) {
-        let porta = |hospedado: &Option<Hospedado>| {
+    /// As impressões das duas, para [`onde_estou_em`]: é pela chave que uma
+    /// sessão é de uma delas, e não pelo endereço por onde entrou.
+    fn impressoes(&self) -> (Option<String>, Option<String>) {
+        let impressao = |hospedado: &Option<Hospedado>| {
             hospedado
                 .as_ref()
-                .map(|hospedado| hospedado.hospedagem.endereco().port())
+                .map(|hospedado| hospedado.hospedagem.impressao_digital().to_owned())
         };
-        (porta(&self.guardado), porta(&self.pessoal))
+        (impressao(&self.guardado), impressao(&self.pessoal))
     }
 }
 
@@ -1606,32 +1607,69 @@ enum OndeEstou {
 /// hospedagens, nenhum dos três dizia em qual das duas a sessão está.
 #[tauri::command]
 fn onde_estou(session: State<'_, Session>) -> OndeEstou {
+    onde_estou_na(&session)
+}
+
+/// [`onde_estou`] sobre a sessão, para quem não é comando: o sim de quem
+/// hospeda ([`gravar_o_sim_de_quem_hospeda`]) pergunta a mesma coisa, e tem de
+/// ouvir a mesma resposta.
+fn onde_estou_na(session: &Session) -> OndeEstou {
     let endereco = session
         .endereco_da_sessao
         .lock()
         .ok()
         .and_then(|onde| onde.clone());
+    // A chave que o aperto de mão conferiu (`Connection::impressao_do_servidor`),
+    // em toda conexão que subiu, e não só nas que o veredito conta.
+    let impressao = session
+        .connection()
+        .ok()
+        .and_then(|connection| connection.impressao_do_servidor());
     let (guardado, pessoal) = session
         .hospedagens
         .lock()
-        .map_or((None, None), |hospedagens| hospedagens.portas());
-    onde_estou_em(endereco.as_deref(), guardado, pessoal)
+        .map_or((None, None), |hospedagens| hospedagens.impressoes());
+    onde_estou_em(
+        endereco.as_deref(),
+        impressao.as_deref(),
+        guardado.as_deref(),
+        pessoal.as_deref(),
+    )
 }
 
-/// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
-/// guardado e a sala atendem quando estão no ar.
+/// [`onde_estou`] sem estado: o endereço da sessão, a impressão que ela
+/// conferiu, e as impressões do guardado e da sala quando estão no ar.
+///
+/// **Pela chave, e não pelo endereço** (lote X da F5, decisão da orquestradora).
+/// `127.0.0.1`, `localhost`, `[::1]`, o endereço da rede local, o público e o
+/// nome são a mesma hospedagem, porque a chave é a mesma; um endereço velho
+/// que hoje é de outra máquina tem outra chave, e é `Outro`. Comparar pela
+/// porta de loopback errava os dois: o próprio link não era o guardado, e o
+/// servidor de outra versão que o HOSPEDAR COM ESTA da F6 põe em `127.0.0.1`
+/// passava por ele.
+///
+/// O endereço só diz se há sessão. Com sessão e sem impressão (uma conexão
+/// sem aperto de mão), é `Outro`: falha fechado.
 fn onde_estou_em(
     endereco: Option<&str>,
-    porta_do_guardado: Option<u16>,
-    porta_da_sala: Option<u16>,
+    impressao: Option<&str>,
+    do_guardado: Option<&str>,
+    da_sala: Option<&str>,
 ) -> OndeEstou {
-    let Some(endereco) = endereco else {
+    if endereco.is_none() {
         return OndeEstou::Nenhum;
+    }
+    let e_a_chave_de = |hospedada: Option<&str>| {
+        impressao
+            .zip(hospedada)
+            .is_some_and(|(da_sessao, hospedada)| da_sessao.eq_ignore_ascii_case(hospedada))
     };
-    match porta_desta_maquina(endereco) {
-        Some(porta) if Some(porta) == porta_do_guardado => OndeEstou::Guardado,
-        Some(porta) if Some(porta) == porta_da_sala => OndeEstou::Pessoal,
-        Some(_) | None => OndeEstou::Outro,
+    if e_a_chave_de(do_guardado) {
+        OndeEstou::Guardado
+    } else if e_a_chave_de(da_sala) {
+        OndeEstou::Pessoal
+    } else {
+        OndeEstou::Outro
     }
 }
 
@@ -17503,45 +17541,84 @@ mod a_saida_despede_as_hospedagens {
 mod a_resposta_a_estou_no_meu_servidor {
     use super::{endereco_desta_maquina, onde_estou_em, porta_desta_maquina, OndeEstou};
 
+    /// A chave do guardado, a da sala e a de um servidor S qualquer.
+    const GUARDADO: &str = "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11";
+    const SALA: &str = "bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22bb22";
+    const DE_S: &str = "cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33cc33";
+
     #[test]
-    fn onde_estou_nas_quatro_situacoes() {
-        // A tela perguntava isto de três jeitos, e com duas hospedagens nenhum
-        // dizia em qual delas a sessão está.
+    fn onde_estou_pela_chave_e_nao_pelo_endereco() {
         assert_eq!(
-            onde_estou_em(None, Some(8383), Some(8385)),
-            OndeEstou::Nenhum
+            onde_estou_em(None, None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Nenhum,
+            "sem sessão, não há onde estar"
+        );
+        // Os cinco endereços por onde se entra na mesma hospedagem: a chave é
+        // a mesma, e a resposta também. A impressão chega da conexão em
+        // maiúsculas aqui de propósito: a comparação não as diferencia.
+        let fora: Vec<&str> = [
+            "127.0.0.1:8383",
+            "localhost:8383",
+            "[::1]:8383",
+            "192.168.1.20:8383",
+            "casa.exemplo:8383",
+        ]
+        .into_iter()
+        .filter(|endereco| {
+            onde_estou_em(
+                Some(endereco),
+                Some(&GUARDADO.to_ascii_uppercase()),
+                Some(GUARDADO),
+                Some(SALA),
+            ) != OndeEstou::Guardado
+        })
+        .collect();
+        assert!(
+            fora.is_empty(),
+            "a sessão com a chave do guardado, aberta por {fora:?}, não foi dita no guardado: \
+             o próprio link e os outros nomes da mesma máquina deixam de ser o servidor daqui"
         );
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), Some(8383), Some(8385)),
-            OndeEstou::Guardado
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), Some(8385)),
-            OndeEstou::Pessoal
-        );
-        assert_eq!(
-            onde_estou_em(Some("casa.exemplo:8383"), Some(8383), Some(8385)),
-            OndeEstou::Outro
+            onde_estou_em(
+                Some("127.0.0.1:8385"),
+                Some(SALA),
+                Some(GUARDADO),
+                Some(SALA)
+            ),
+            OndeEstou::Pessoal,
+            "a sessão com a chave da sala não foi dita na sala"
         );
     }
 
     #[test]
-    fn um_servidor_desta_maquina_que_este_app_nao_hospeda_e_outro_lugar() {
-        // Um `seeled` à parte na mesma máquina, ou a porta da sala com a sala
-        // fora do ar: o endereço é desta máquina, e a sessão não está em
-        // nenhuma das hospedagens deste app.
+    fn o_mesmo_endereco_com_outra_chave_e_outro_lugar() {
+        // Um servidor S no mesmo endereço do guardado, com outra chave: o
+        // HOSPEDAR COM ESTA da F6 pondo outra versão em 127.0.0.1, ou um
+        // endereço da rede local que hoje é de outra máquina.
+        for endereco in ["127.0.0.1:8383", "192.168.1.20:8383", "127.0.0.1:8385"] {
+            assert_eq!(
+                onde_estou_em(Some(endereco), Some(DE_S), Some(GUARDADO), Some(SALA)),
+                OndeEstou::Outro,
+                "um servidor com outra chave em {endereco} passou por uma das hospedagens desta \
+                 janela: o sim de quem hospeda iria a ele (ADR 0045)"
+            );
+        }
+        // Sem a hospedagem no ar, a chave dela não é de ninguém aqui.
         assert_eq!(
-            onde_estou_em(Some("127.0.0.1:9000"), Some(8383), Some(8385)),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), None),
-            OndeEstou::Outro
-        );
-        assert_eq!(
-            onde_estou_em(Some("127.0.0.1:8383"), None, Some(8385)),
+            onde_estou_em(Some("127.0.0.1:8383"), Some(GUARDADO), None, Some(SALA)),
             OndeEstou::Outro,
-            "sem guardado no ar, a porta dele é de outro servidor"
+            "sem guardado no ar, a sessão foi dita no guardado"
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8385"), Some(SALA), Some(GUARDADO), None),
+            OndeEstou::Outro,
+            "sem sala no ar, a sessão foi dita na sala"
+        );
+        // Com sessão e sem impressão, falha fechado.
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8383"), None, Some(GUARDADO), Some(SALA)),
+            OndeEstou::Outro,
+            "uma sessão sem a chave conferida foi dita numa hospedagem desta janela"
         );
     }
 
