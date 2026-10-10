@@ -12852,14 +12852,15 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
 }
 
 #[test]
-fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
-    // A regra está escrita em `pedirTrocaDeServidor`, e este guarda a estende
-    // para o rodapé: uma caixa que repete o rótulo do botão é a caixa que treina
-    // a apertar duas vezes sem ler. `SAIR DO SERVIDOR` diz o que faz.
+fn sair_do_servidor_nao_pergunta_porque_nada_cai() {
+    // **A tarefa 19 da F7 virou este guarda do avesso.** Ele cobrava que o
+    // SAIR DO SERVIDOR perguntasse antes de sair, porque um servidor hospedado
+    // neste computador caía junto, com todo mundo dentro — a parte que o rótulo
+    // não dizia. Sair não derruba mais nada: o rótulo conta tudo, e uma caixa
+    // que o repete é a caixa que treina a apertar duas vezes sem ler.
     //
-    // O que ele **não** diz é que um servidor hospedado neste computador cai
-    // junto, e todo mundo que estiver dentro sai. Essa é a parte que a caixa
-    // existe para escrever — e é a única que a justifica aqui.
+    // O que ele cobra agora: fora de uma sala, o botão sai direto, sem caixa e
+    // sem derrubar o servidor; dentro de uma sala, ele larga a sala.
     let chamada = without_comments(&read("ui/tela-chamada.js"));
     let saida = chamada
         .split("$(\"operador-sair\").addEventListener")
@@ -12869,16 +12870,16 @@ fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
         .to_owned();
 
     assert!(
-        saida.contains("hospedandoAqui"),
-        "a saída do servidor não pergunta se este computador hospeda, então ela \
-         derruba o servidor de todo mundo sem avisar:\n{saida}"
+        saida.contains("sairDoServidorParaAEntrada()"),
+        "o SAIR DO SERVIDOR não sai mais do servidor:\n{saida}"
     );
-    let pergunta = saida.find("hospedandoAqui").unwrap_or(usize::MAX);
-    let caixa = saida.find("abrirConfirmacao").unwrap_or(usize::MAX);
-    assert!(
-        pergunta < caixa,
-        "a caixa abre antes de saber se há o que avisar:\n{saida}"
-    );
+    for ruido in ["abrirConfirmacao", "parar_de_hospedar", "hospedandoAqui"] {
+        assert!(
+            !saida.contains(ruido),
+            "o SAIR DO SERVIDOR voltou a `{ruido}`: ou pergunta o que o rótulo já diz, ou \
+             derruba o servidor de quem estiver nele:\n{saida}"
+        );
+    }
     assert!(
         saida.contains("leave_voice_room"),
         "o mesmo botão dentro de uma sala tem que largar a sala, e não o \
