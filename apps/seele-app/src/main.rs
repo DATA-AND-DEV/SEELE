@@ -7915,10 +7915,14 @@ mod so_a_gestao_reaplica_no_servidor_hospedado {
     /// O comando reaplica pela decisão que lê o uso, e por nenhum outro
     /// caminho. Sem isto, a decisão acima podia estar certa e o comando voltar
     /// a reaplicar por `mod_exigido_aqui` sozinho.
+    ///
+    /// A agulha do cabeçalho é montada por `concat!` (rodada 1): escrita
+    /// inteira, ela casava com este mesmo teste quando o comando mudava de
+    /// nome ou de cabeçalho, e o guarda conferia a si mesmo.
     #[test]
     fn o_comando_reaplica_pela_decisao_que_le_o_uso() {
         let fonte = fonte_sem_comentarios();
-        let corpo = corpo_de(&fonte, "async fn instalar_mod_do_catalogo(");
+        let corpo = corpo_de(&fonte, concat!("async fn instalar_mod_do_catalogo", "("));
         let decide = corpo.find("reaplica_no_hospedado(uso,");
         let aplica = corpo.find("if reaplicar {");
         assert!(
