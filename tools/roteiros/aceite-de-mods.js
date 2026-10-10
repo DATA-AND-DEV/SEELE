@@ -87,7 +87,7 @@ exigir(visivel("boot-erro") === "escondida",
 const itens = [...document.querySelectorAll("#mods-lista .mods-item")];
 relatar(`itens desenhados: ${itens.length}`);
 exigir(itens.length === ANUNCIADOS.length,
-  `o diálogo desenhou ${itens.length} itens e o anúncio trouxe ${ANUNCIADOS.length}`);
+  `os itens desenhados não são os do anúncio: o diálogo desenhou ${itens.length}, e o anúncio trouxe ${ANUNCIADOS.length}`);
 ANUNCIADOS.forEach((mod, i) => {
   const desenhado = {
     id: itens[i].querySelector(".mods-id")?.textContent,
@@ -101,12 +101,13 @@ ANUNCIADOS.forEach((mod, i) => {
 const contagem = document.getElementById("mods-contagem").textContent;
 relatar(`contagem: ${contagem}`);
 exigir(contagem === `${ANUNCIADOS.length} MODS`,
-  `a contagem do diálogo diz «${contagem}», e o anúncio trouxe ${ANUNCIADOS.length} MODs`);
+  `a contagem do diálogo diz «${contagem}», e o anúncio trouxe ${ANUNCIADOS.length}`);
 const noServidor = document.querySelectorAll("#mods-lista .mods-servidor").length;
+const rodamLa = ANUNCIADOS.filter((m) => m.no_servidor).length;
 relatar(`a linha do que roda no servidor: ${noServidor}`);
-exigir(noServidor === ANUNCIADOS.filter((m) => m.no_servidor).length,
-  `o diálogo desenhou ${noServidor} linhas de «roda na máquina de quem hospeda», ` +
-    `e o anúncio traz ${ANUNCIADOS.filter((m) => m.no_servidor).length} MODs que rodam lá`);
+exigir(noServidor === rodamLa,
+  `as linhas de «roda na máquina de quem hospeda» não são as do anúncio: ` +
+    `o diálogo desenhou ${noServidor}, e o anúncio marca ${rodamLa} (no_servidor)`);
 relatar(`aviso de lista mudada: ${visivel("mods-mudou")}`);
 exigir(visivel("mods-mudou") === "VISIVEL",
   "esta máquina já tinha dito sim a outra lista deste servidor, e o diálogo não avisou que a lista mudou");
