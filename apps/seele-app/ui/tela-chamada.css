@@ -421,7 +421,7 @@
 .chamada-cartao[data-com-capa][data-fala="sim"] { --fundo-da-placa: var(--seele-laranja-carga); }
 
 .chamada-cartao[data-com-capa] :where(
-  .chamada-cartao-nome, .nota, .rotulo, .chamada-cartao-marca, .chamada-cartao-valor,
+  .chamada-avatar, .chamada-cartao-nome, .nota, .rotulo, .chamada-cartao-marca, .chamada-cartao-valor,
   .chamada-cartao-barra, .chamada-vol-passo, .chamada-vol-valor,
   .chamada-pastilha:not([data-estado="fala"])
 ) {

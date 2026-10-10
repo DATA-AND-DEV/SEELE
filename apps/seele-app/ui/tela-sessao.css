@@ -904,13 +904,6 @@ button.voice_room-nome:hover { text-decoration: underline; }
   box-shadow: inset 0 0 0 var(--seele-b-forte) var(--seele-laranja-nerv);
 }
 
-/* As placas da identidade de quem usa sobre a capa: o fundo nativo da barra do
-   operador é o negro do painel, e cada texto fica numa placa dele (§4; medido
-   em `capa.cjs`). */
-#operador-quem[data-com-capa] :where(.operador-rotulo, .operador-nome, .operador-inicial) {
-  background-color: var(--seele-negro-painel);
-}
-
 /* A região `operador.barra` (rascunho da API 6, §3): fechada como as outras, e
    com teto de altura — o que passar rola por dentro, e o SAIR e o microfone,
    embaixo dela, continuam onde estão. */
@@ -919,6 +912,20 @@ button.voice_room-nome:hover { text-decoration: underline; }
   overflow-x: hidden;
   overflow-y: auto;
   contain: paint;
+}
+
+/* **As placas da barra do operador sobre a capa** (rascunho da API 6, §4 e
+   §10; tarefa 6). A capa de quem usa pinta o fundo da barra inteira, e cada
+   texto e cada controle — o MUDO, o fone, a engrenagem, o «no ar» e o SAIR, que
+   são do núcleo — fica sobre uma placa opaca da cor do fundo nativo da barra,
+   o negro do painel: o contraste é o de sem capa, medido em `capa.cjs` com a
+   cor e a borda, contra uma capa branca e uma preta. Antes das regras de
+   estado dos botões: no empate, a de estado vem depois e vence. */
+.operador[data-com-capa] :where(
+  .operador-inicial, .operador-rotulo, .operador-nome,
+  #botao-mudo, #botao-surdo, #botao-server-sessao, #voz-estado, #operador-sair, #operador-vista
+) {
+  background-color: var(--seele-negro-painel);
 }
 
 .operador-topo { display: flex; align-items: center; gap: 8px; }

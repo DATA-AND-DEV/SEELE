@@ -399,13 +399,13 @@
     "marcacao": "data-pessoa-da-capa (nunca data-faixa)",
     "onde": {
       "chamada": "o cartão da pessoa (pintarCartao), animada até o teto, no desktop e no celular (D-capa-1)",
-      "operador": "o fundo de .operador com a capa de quem usa; não no celular",
+      "operador": "o fundo de .operador inteira com a capa de quem usa, e o núcleo (MUDO, fone, SAIR) sobre placas opacas; não no celular",
       "perfil": "os dois cabeçalhos: a página do PERFIS (por citação) e o «SEU PERFIL» nativo (por aplicador do produto)",
       "lista": "parada, se o MOD a citar no cartão"
     },
     "citacao": "fundoDeMidia: { daPessoa: 'capa' } e retrato({ daPessoa: 'avatar' }): carregada e contada uma vez (PERFIS R2)",
     "preferencia": "herda a de pessoa.cartao: «o SEELE desenha» não recebe capa",
-    "legibilidade": "o texto do produto fica em placas opacas; todo texto do produto sobre a capa mantém o contraste que tem sem capa, contra um quadro branco e um preto; MUDO, fone e SAIR nunca ficam sobre a capa",
+    "legibilidade": "o texto e os controles do produto ficam em placas opacas da cor do fundo nativo; todo texto e controle sobre a capa mantém o contraste que tem sem capa, a cor e a borda, contra um quadro branco, um preto e um da cor da própria tinta; MUDO, fone e SAIR ficam sobre placas do núcleo, nunca sobre a capa sem placa",
     "quem-fala": "o halo e a pastilha FALANDO ficam acima da capa; o véu passa a --seele-laranja-carga",
     "estados": "sem capa, carregando e recusada: fundo liso, como hoje; a recusada vai ao seele.log e ao MOD com ponto e alvo",
     "movimento-reduzido": "um quadro estático por capa, usado com prefers-reduced-motion, com o movimento reduzido do SEELE, com a janela oculta, fora da vista e acima do teto",
