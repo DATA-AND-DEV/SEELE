@@ -225,8 +225,55 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(recusada.aviso?.ponto, 'pessoa.capa', `o midia não disse o ponto: ${JSON.stringify(recusada.aviso)}`);
     assert.equal(String(recusada.aviso?.alvo), alvo, `o midia não disse o alvo: ${JSON.stringify(recusada.aviso)}`);
 
+    // 5. **A citação `daPessoa`** (rascunho §4; tarefa 6, Step 4b; o bloqueio A
+    //    do PERFIS): um cartão que cita a capa da pessoa usa a imagem já
+    //    carregada — nenhum pedido de mídia novo, e os bytes contam uma vez, na
+    //    contribuição da capa. Sem contribuição para a imagem citada, nada: o
+    //    retrato fica na inicial, sem erro.
+    const citacao = await page.evaluate(async (alvo) => {
+      window.recusarCapa = false;
+      contribuicoesDosMods.revogar(handleCapa);
+      window.handleCapa = registrarCapa(alvo, 'volume:citada');
+      desenharChamada(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      const pedidosAntes = testCalls.filter(c => c.cmd === 'ler_imagem_mod').length;
+      const ditos = [];
+      const registrarDeAntes = registrarNoAnfitriao;
+      registrarNoAnfitriao = (...argumentos) => { ditos.push(String(argumentos[1])); return registrarDeAntes(...argumentos); };
+      const cartao = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.cartao', modo: 'substituir', alvo,
+        conteudo: [{
+          forma: 'caixa', chave: 'faixa', fundoDeMidia: { daPessoa: 'capa' },
+          dentro: [{ forma: 'texto', chave: 't', dentro: 'cartão' }, { forma: 'retrato', chave: 'r', daPessoa: 'avatar' }],
+        }],
+      }).handle;
+      desenhar(testTable.snapshot);
+      await new Promise(ok => setTimeout(ok, 400));
+      registrarNoAnfitriao = registrarDeAntes;
+      const linha = document.querySelector('li.pessoa-apresentada[data-apresentada-por="teste/perfis"]');
+      const comFundo = [...(linha?.querySelectorAll('.pessoa-miolo *') ?? [])].some(e => e.style.backgroundImage.includes(window.daCapa));
+      const retrato = linha?.querySelector('.pessoa-miolo [data-estado-do-retrato]');
+      const montagem = contribuicoesDosMods.porHandle.get(cartao)?.montadas?.get(alvo);
+      const bytesNoCartao = montagem
+        ? Object.entries(montagem.renderer).filter(([k, v]) => /^bytes/.test(k) && typeof v === 'number').reduce((a, [, v]) => a + v, 0)
+        : null;
+      contribuicoesDosMods.revogar(cartao);
+      return {
+        comFundo,
+        pedidosNovos: testCalls.filter(c => c.cmd === 'ler_imagem_mod').length - pedidosAntes,
+        bytesNoCartao,
+        retrato: retrato?.dataset.estadoDoRetrato ?? null,
+        recusas: ditos.filter(d => /retrato|fundo/.test(d)),
+      };
+    }, alvo);
+    assert.ok(citacao.comFundo, `o cartão que cita a capa não a mostrou: ${JSON.stringify(citacao)}`);
+    assert.equal(citacao.pedidosNovos, 0, `citar a capa abriu ${citacao.pedidosNovos} pedido(s) de mídia novo(s)`);
+    assert.equal(citacao.bytesNoCartao, 0, `a capa citada contou ${citacao.bytesNoCartao} bytes de novo no cartão`);
+    assert.equal(citacao.retrato, 'inicial', `o retrato que cita um avatar que não existe saiu ${citacao.retrato}`);
+    assert.deepEqual(citacao.recusas, [], 'citar uma imagem que a pessoa não tem virou recusa');
+
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, a pastilha e o nome por cima, o quadro estático com movimento reduzido, e a recusa dita com o ponto e o alvo.');
+    console.log('capa: o cartão pintado, o texto legível e por cima, o núcleo fora dela, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

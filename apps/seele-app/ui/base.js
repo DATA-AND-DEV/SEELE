@@ -841,6 +841,8 @@ function donoDaRegiao(mod, instancia) {
     podeFalar: meu,
     /** A recusa como o MOD a recebe, ou `null` até a API 5 (`recusaParaOMod`). */
     recusaParaOMod: (falha) => recusaParaOMod(mod, falha),
+    // A imagem que uma pessoa já tem, para a citação `daPessoa` (Step 4b).
+    imagemDaPessoa: (qual, pessoaId) => imagemCitada(qual, pessoaId),
     /**
      * Um evento da janela para o MOD.
      *
@@ -1301,6 +1303,34 @@ function quadroEstatico(imagem) {
  * da carga (`{ uri, estatico, situacao, … }`), ou `null` enquanto não há
  * contribuição ou ela ainda não começou.
  */
+/**
+ * **A imagem de uma pessoa, citada** por um cartão (`daPessoa`; rascunho da API
+ * 6, §4; tarefa 6, Step 4b; o bloqueio A do PERFIS). A que a contribuição dela
+ * já carregou, decodificou e contou no bolso — por isso `bytes: 0` aqui —, sem
+ * pedido novo. `null` sem contribuição, ou quando ela não carregou. A capa,
+ * com o movimento reduzido, é o quadro parado.
+ *
+ * @returns {Promise<{ papel: string, bytes: number, uri: string } | null>}
+ */
+function imagemCitada(qual, pessoaId) {
+  const ponto = qual === "capa" ? "pessoa.capa" : qual === "avatar" ? "pessoa.avatar" : "";
+  if (!ponto || pessoaId === "" || pessoaId == null) return Promise.resolve(null);
+  // A primeira consulta começa a carga, quando há contribuição; a segunda
+  // devolve o estado dela.
+  const estado = imagemContribuida(ponto, pessoaId) ?? imagemContribuida(ponto, pessoaId);
+  if (!estado) return Promise.resolve(null);
+  const comoMidia = () => {
+    const parada = ponto === "pessoa.capa" && typeof matchMedia === "function"
+      && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const uri = parada ? estado.estatico : estado.uri;
+    return uri ? { papel: "imagem", bytes: 0, uri } : null;
+  };
+  if (estado.situacao !== "carregando") return Promise.resolve(comoMidia());
+  return new Promise((resolve) => {
+    (estado.aoTerminar ??= []).push(() => resolve(comoMidia()));
+  });
+}
+
 function imagemContribuida(ponto, pessoaId) {
   const imagem = IMAGENS_DE_PESSOA[ponto];
   const preferido = typeof preferenciaConsultadaPara === "function"
@@ -1351,6 +1381,7 @@ function imagemContribuida(ponto, pessoaId) {
       estado.estatico = midia.estatico ?? null;
       estado.situacao = "pronta";
       ganchos.aoPronto?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
       avisarQueAMidiaMudou();
       imagem.redesenhar();
     };
@@ -1359,6 +1390,7 @@ function imagemContribuida(ponto, pessoaId) {
       // ocupa o teto de quem vier depois, nem numa sessão que acabou.
       estado.bytes = 0;
       ganchos.aoFalhar?.();
+      for (const terminou of estado.aoTerminar?.splice(0) ?? []) terminou();
       if (estado.cancelado || !dono.podeFalar()) return;
       const porque = motivoDaFalha(falha);
       estado.situacao = "recusada";
@@ -1579,6 +1611,9 @@ function montarContribuicao(contribuicao, destino = "") {
     raiz,
     orcamento,
   );
+  // De quem é este destino, quando ele é uma pessoa: é o que a citação
+  // `daPessoa` cita (Step 4b). Num canal, nada.
+  renderer.pessoaDoDestino = contribuicao.ponto.startsWith("pessoa.") ? chave : "";
   // **Os sons da contribuição moram num destino só.** Cada destino tem o seu
   // renderer, e cada renderer pedia os bytes, decodificava e segurava a sua
   // cópia de cada som — e tocava, todos juntos. A marca de quem tomou os sons
