@@ -383,7 +383,15 @@ async function conectar(alvo, apelido, credencial) {
     // AQUI não fica apagado enquanto este `connect` anda. A revisão mediu a
     // troca no meio da batida: a pergunta guardava o alvo novo, e a volta
     // levava o convite deste servidor a outro.
-    if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
+    //
+    // **E só a tentativa mais nova abre a pergunta** (lote W, re-revisão da
+    // rodada 1). Uma que outra já substituiu — o `hospedar()` entrando no
+    // servidor daqui enquanto ela andava — abria a pergunta por cima da sessão,
+    // com o convite deste servidor dentro, e aceitar o mandaria a um servidor
+    // que a pessoa já deixou. Abrir sem a credencial seria o mesmo modal por
+    // cima da sessão, para um sim que não entra. A recusa dela cai na linha
+    // vermelha da entrada, como a de toda tentativa velha. Ver `tentativas`.
+    if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {
       // Nada de linha vermelha: quem manda agora é o diálogo.
     } else if (!levarParaAEspera(motivo, ultimoAlvo ?? "")) {
       erro.hidden = false;

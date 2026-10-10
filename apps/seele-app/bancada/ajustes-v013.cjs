@@ -775,6 +775,41 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     'credencial guardada para uma «tentativa seguinte» que já tinha acontecido: o convite fica na memória da janela durante a sessão inteira');
   await page.evaluate((alvo) => { delete testAtrasoPorAlvo[alvo]; }, ALVO_W);
 
+  // ---- 5c. A mesma corrida, com a tentativa velha voltando com a pergunta dos
+  // MODs (re-revisão da rodada 1, sonda P6).
+  //
+  // A tentativa a este servidor volta `ModsNaoAceitos` depois que o `hospedar`
+  // já entrou no servidor daqui. A pergunta abria por cima da sessão, com o
+  // convite deste servidor guardado nela. Uma tentativa que já não é a mais
+  // nova não abre a pergunta: a recusa dela vai à linha vermelha da entrada,
+  // como toda recusa de uma tentativa velha.
+  await page.evaluate(([alvo, convite]) => {
+    testServidor.gasto = false; testServidor.tomados = []; testServidor.exigeMods = true;
+    testAtrasoPorAlvo[alvo] = 600;
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    window.testCorrida = { antes: testCalls.filter(c => c.cmd === 'connect').length };
+    irParaOServidor(alvo, null, convite);
+    setTimeout(() => { window.testCorrida.hospedou = hospedar(); }, 100);
+  }, [ALVO_W, CONVITE_W]);
+  await page.waitForFunction(() => testCalls.filter(c => c.cmd === 'connect').length >= testCorrida.antes + 2, null, { timeout: 3000 })
+    .catch(() => assert.fail('a corrida com a pergunta dos MODs não chegou aos dois connect, e não foi medida'));
+  await page.evaluate(() => testCorrida.hospedou);
+  await page.waitForTimeout(800);
+  const naCorridaDosMods = await page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').slice(testCorrida.antes).map(c => [c.args.server, c.args.joinSecret ?? null]));
+  assert.deepEqual(naCorridaDosMods, [[ALVO_W, CONVITE_W], [AQUI_W, null]],
+    `a corrida com a pergunta dos MODs não foi a esperada: ${JSON.stringify(naCorridaDosMods)}`);
+  assert.equal(await page.evaluate(() => document.getElementById('tela-sessao').hidden && document.getElementById('tela-auth').hidden), false,
+    'o hospedar do meio da corrida não entrou, e a corrida com a pergunta dos MODs não foi medida');
+  assert.equal(await credencialGuardada(page), null,
+    `uma tentativa a ${ALVO_W}, que voltou com a pergunta dos MODs depois que o hospedar já tinha entrado no servidor daqui, ` +
+    'guardou o convite na pergunta: ele fica na memória da janela durante a sessão, e aceitar o mandaria a um servidor que a pessoa já deixou');
+  assert.equal(await page.evaluate(() => document.getElementById('mods-aceite').hidden), true,
+    'a pergunta dos MODs de uma tentativa que outra já substituiu abriu por cima da tela de quem já entrou em outro servidor');
+  assert.equal(await credencialDoApelido(page), null,
+    'a corrida com a pergunta dos MODs deixou a credencial no lugar do apelido tomado');
+  await page.evaluate((alvo) => { delete testAtrasoPorAlvo[alvo]; testServidor.exigeMods = false; }, ALVO_W);
+
   // ---- 6. A credencial não está em lugar nenhum além do `connect`.
   const vazou = await page.evaluate((convite) => {
     const onde = [];

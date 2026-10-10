@@ -561,6 +561,19 @@ ficou, e que a tela o diz.
   verdes, e o passo 5 reprova com «a tentativa que parou na pergunta dos MODs
   deixou a credencial também no lugar do apelido tomado…».
 
+### Re-revisão — a mesma corrida pela pergunta dos MODs (sonda P6)
+
+Uma tentativa velha que volta `ModsNaoAceitos` depois que o `hospedar` entrou
+**não abre a pergunta**: `if (esta === tentativas && levarParaOAceiteDeMods(…))`
+em `conectar`, e a recusa dela cai na linha vermelha da entrada, como a de toda
+tentativa velha. Não abrir sem credencial, porque isso seria o mesmo modal por
+cima da sessão, para um sim que não entra. É coerente com o R: a pergunta é da
+batida, e só de uma que ainda vale. Provas:
+- O passo 5c da cena W ficou vermelho antes do conserto: «…guardou o convite na pergunta…».
+- Com o conserto, ficou verde.
+- Com a conferência tirada, a bancada e o guarda reprovam.
+- A parte 6 do guarda passou a cobrar a conferência também nesta chamada.
+
 ### O que rodou na rodada
 
 Depois de cada item, e no fim (`98b7eacf`): `cargo fmt --all -- --check`;

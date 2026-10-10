@@ -10600,7 +10600,9 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    `conectar` a esquece e conta a tentativa antes da primeira espera, e a
 ///    recusa só a guarda se a tentativa dela ainda é a mais nova: uma
 ///    tentativa a outro alvo, ou uma que entra, não pode deixá-la para a
-///    próxima, nem mesmo quando a recusa de uma mais velha chega depois.
+///    próxima, nem mesmo quando a recusa de uma mais velha chega depois. A
+///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
+///    nova a abre com a credencial dela.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
@@ -10619,10 +10621,11 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "if (credencial != null && esta === tentativas) recusaDoApelido = { alvo, credencial };",
         ),
         // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
-        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
+        // `hospedar()` reescreve no meio de uma batida (rodada 1, I3); e só se
+        // esta tentativa ainda é a mais nova (lote W, re-revisão da rodada 1).
         (
             "tela-boot.js",
-            "if (levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
+            "if (esta === tentativas && levarParaOAceiteDeMods(motivo, alvo, credencial ?? null)) {",
         ),
         ("camada-mods.js", "let aceitePendente = null;"),
         (
@@ -10952,6 +10955,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          ainda é a mais nova ({guarda:?}): a recusa de uma tentativa lenta, chegando \
          depois que outra entrou, deixa o convite na memória da janela durante a \
          sessão inteira"
+    );
+    // **Nem abre a pergunta dos MODs com ela** (re-revisão da rodada 1, sonda
+    // P6). A mesma corrida, com a tentativa velha voltando `ModsNaoAceitos`:
+    // a pergunta abria por cima da sessão, com o convite dentro.
+    let pergunta = conectar
+        .lines()
+        .find(|linha| linha.contains("levarParaOAceiteDeMods("));
+    let conferida = pergunta.and_then(|linha| {
+        linha
+            .find("esta === tentativas")
+            .zip(linha.find("levarParaOAceiteDeMods("))
+    });
+    assert!(
+        conferida.is_some_and(|(confere, abre)| confere < abre),
+        "`conectar` leva a recusa pelos MODs à pergunta sem conferir antes que a \
+         tentativa ainda é a mais nova ({pergunta:?}): uma tentativa lenta, voltando \
+         depois que outra entrou, abre a pergunta por cima da sessão com o convite \
+         dentro"
     );
 }
 
