@@ -5304,10 +5304,22 @@ impl<V: VozViva> PortaDaVoz<V> {
         }
         voz.marcar(AberturaDoAudio::Abrindo);
         let pedidos = voz.escolhida().aparelhos;
-        let reaberta = voz
-            .lock()
-            .ok()
-            .and_then(|mut viva| reabrir_voz_na_reconexao(&mut viva, reabrir));
+        let reaberta = voz.lock().ok().and_then(|mut viva| {
+            // **A velha sai do lugar calada e com a tecla solta** (rodada 1 do
+            // lote V). Ela segue viva até a reabertura voltar, mandando pelo
+            // canal da conexão que caiu — que ninguém fecha, e que fica de pé
+            // até o prazo de ociosidade —, e fora do lugar nenhuma escolha a
+            // alcança: a soltura e o mudo pedidos agora vão só para a guardada.
+            // A falha fica do lado fechado. A reaberta herda isso, e `instalar`
+            // a veste com o que está guardado.
+            if let Some(velha) = viva.as_ref() {
+                let mut calada = voz.escolhida();
+                calada.mudo = true;
+                calada.tecla_segura = false;
+                vestir_inteira(velha, &calada);
+            }
+            reabrir_voz_na_reconexao(&mut viva, reabrir)
+        });
         match reaberta {
             Some(futuro) => {
                 self.em_curso = Some(EmCurso {
@@ -11162,6 +11174,95 @@ mod o_audio_segue_a_sala {
             Some(true),
             "quem segurava a tecla pela volta inteira voltou calado: a voz nova soltou \
              uma tecla que a pessoa não soltou"
+        );
+    }
+
+    /// Rodada 1 do lote V, achado 1: na volta, a voz velha sai do lugar calada e
+    /// com a tecla solta.
+    ///
+    /// Ela segue viva até a reabertura voltar — a vez do driver e a abertura do
+    /// aparelho —, mandando pelo canal da conexão que caiu, que ninguém fecha e
+    /// que fica de pé até o prazo de ociosidade. Fora do lugar, nenhuma
+    /// escolha a alcança: a soltura e o mudo pedidos durante a reabertura vão
+    /// só para a guardada. É a medida do c6 da revisão: a reaberta chegava a
+    /// `instalar` com a tecla segura, carregada da velha.
+    #[tokio::test]
+    async fn na_volta_a_voz_velha_sai_do_lugar_calada_e_com_a_tecla_solta() {
+        use std::sync::Arc;
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+        voz.segurar_a_tecla(true);
+
+        // A volta: a velha vai para a reabertura, e o teste a guarda para olhar.
+        let velha_aqui: Arc<Mutex<Option<Voz>>> = Arc::default();
+        let guardar = Arc::clone(&velha_aqui);
+        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
+        porta.na_volta(
+            &voz,
+            move |velha| {
+                let nova = reaberta(&velha, 701);
+                *guardar.lock().expect("a velha") = Some(velha);
+                entregue(Ok(Ok(nova)))
+            },
+            nada_abre,
+        );
+
+        // Durante a reabertura, a pessoa solta a tecla e pede o mudo.
+        voz.segurar_a_tecla(false);
+        voz.escolher(|escolhida| escolhida.mudo = true);
+
+        let velha = velha_aqui.lock().expect("a velha").take();
+        let Some(velha) = velha else {
+            panic!("a volta não entregou a velha à reabertura, e o teste mediu outra coisa");
+        };
+        assert!(
+            !*velha.tecla.lock().expect("a tecla da velha"),
+            "a voz velha seguiu com a tecla segura durante a reabertura: ela transmite pela \
+             conexão que caiu depois de a pessoa soltar a tecla"
+        );
+        assert!(
+            velha
+                .vestida
+                .lock()
+                .expect("o que a velha vestiu")
+                .as_ref()
+                .is_some_and(|vestida| vestida.mudo),
+            "a voz velha seguiu sem mudo durante a reabertura: quem se mutou enquanto ela \
+             reabria continua no ar pela conexão que caiu"
+        );
+
+        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+            .await
+            .expect("a reabertura não chegou");
+        if let Ok(Ok(nova)) = &aberta {
+            assert!(
+                !*nova.tecla.lock().expect("a tecla da reaberta"),
+                "a reaberta chegou a `instalar` com a tecla segura, carregada da velha (c6 \
+                 da revisão)"
+            );
+        }
+        porta.chegou(&voz, aberta, nada_abre);
+        assert_eq!(
+            tecla_de(&voz),
+            Some(false),
+            "a voz que entrou no lugar está com a tecla segura que a pessoa soltou"
+        );
+        let mudo = voz.lock().expect("a voz").as_ref().and_then(|viva| {
+            viva.vestida
+                .lock()
+                .expect("o que a voz vestiu")
+                .as_ref()
+                .map(|vestida| vestida.mudo)
+        });
+        assert_eq!(
+            mudo,
+            Some(true),
+            "o mudo pedido durante a reabertura não chegou à voz que entrou no lugar"
         );
     }
 
