@@ -672,10 +672,19 @@ function fraseDeErro(erro, apelido, deOnde) {
     }
     // **O servidor exige MODs que esta máquina não aceitou.** ADR 0045.
     //
-    // Não é uma falha: é uma pergunta que ainda não tem tela. Enquanto ela não
-    // existe, a lista é lida **aqui** — porque a alternativa é a frase genérica
-    // do fim desta função, e «o produto sabe e não conta» é o defeito que mais
-    // caro custou neste repositório.
+    // Não é uma falha: é uma pergunta, e ela tem tela (`camada-mods.js`). O
+    // `catch` de `conectar` leva à pergunta toda recusa destas da tentativa
+    // mais nova, e cala a de uma tentativa que outra já substituiu, que vai ao
+    // `seele.log` (lote W2 da F5). Medido no lote W2, nenhum caminho de hoje
+    // chega aqui. O ramo fica para o caminho que um dia chegar: sem ele, a
+    // lista viraria a frase genérica do fim desta função, e «o produto sabe e
+    // não conta» é o defeito que mais caro custou neste repositório.
+    //
+    // **A última linha diz o que esta versão faz**, e não o que faltava nela.
+    // Ela dizia «A tela para ler e aceitar esta lista ainda não existe neste
+    // app.», escrita antes da tela e falsa desde que ela existe. Entrar de novo
+    // é uma tentativa nova, e a tentativa mais nova abre a pergunta: é o que a
+    // pessoa pode fazer, e a `ajustes-v013.cjs` confere que funciona.
     //
     // Cada MOD sai com o que o ADR 0045 manda mostrar antes de qualquer byte
     // ser baixado: quem é, de onde veio, e o que alcança. A linha de `world` é
@@ -699,7 +708,7 @@ function fraseDeErro(erro, apelido, deOnde) {
       return (
         "ESTE SERVIDOR EXIGE MODS QUE VOCÊ AINDA NÃO ACEITOU.\n" +
         lista +
-        "\nA tela para ler e aceitar esta lista ainda não existe neste app."
+        "\nPara aceitar ou recusar esta lista, entre de novo neste servidor."
       );
     }
     // **O nome público que não pode virar link**, e cada recusa com o conserto

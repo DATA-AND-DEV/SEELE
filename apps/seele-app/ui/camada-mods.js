@@ -7,7 +7,10 @@
 // (`aceite_de_mods`, `aceitar_mods`, `esquecer_aceite_de_mods`) estavam
 // registrados no `main.rs` — **chamados por ninguém**. O que a pessoa lia era
 // uma frase no `frases.js` terminando em «A tela para ler e aceitar esta lista
-// ainda não existe neste app.»
+// ainda não existe neste app.» A frase sobreviveu a esta tela, e uma tentativa
+// que outra já tinha substituído ainda a levava à linha vermelha; desde o lote
+// W2 da F5 essa recusa vai ao `seele.log`, e a frase manda entrar de novo, que
+// é o que abre esta pergunta.
 //
 // Na prática: **um servidor com MOD habilitado não tinha como ser entrado pelo
 // aplicativo.** O motor inteiro estava pronto e o produto não tinha a porta.

@@ -1005,7 +1005,26 @@ async function aTentativaSubstituidaNaoFala(browser, porta) {
   await dizONoRegistro(PORTARIA_W2, 'AdmissionPending');
   await page.evaluate(() => ejetar());
 
-  // ---- 5. O convite da tentativa velha não chega ao registro.
+  // ---- 5. A frase dos MODs diz o que esta versão faz, e o que ela manda
+  // fazer funciona.
+  const frase = await page.evaluate(([recusa]) => fraseDeErro(recusa), [PELOS_MODS]);
+  assert.ok(frase.includes(`${MOD_R.id} ${MOD_R.version}`), `a frase dos MODs deixou de mostrar a lista: «${frase}»`);
+  assert.ok(!/não existe/.test(frase),
+    `a frase dos MODs ainda diz que a tela de aceitar não existe, e ela existe: «${frase}»`);
+  assert.ok(/entre de novo/i.test(frase),
+    `a frase dos MODs não diz o que a pessoa pode fazer com esta versão — entrar de novo, que abre a pergunta: «${frase}»`);
+  await page.evaluate(([alvo, recusa]) => {
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = { [alvo]: recusa };
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    irParaOServidor(alvo, null, null);
+  }, [ALVO_W, PELOS_MODS]);
+  await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('entrar de novo no servidor não abriu a pergunta dos MODs, e a frase promete o que esta versão não faz'));
+  await page.evaluate(() => fecharAceiteDeMods());
+
+  // ---- 6. O convite da tentativa velha não chega ao registro.
   const noLog = await page.evaluate((convite) => testCalls
     .filter(c => c.cmd === 'registrar_da_janela' && JSON.stringify(c.args ?? null).includes(convite)).length, CONVITE_W2);
   assert.equal(noLog, 0, 'o convite da tentativa velha foi escrito no seele.log junto com a recusa dela');
@@ -1234,5 +1253,6 @@ async function aTentativaSubstituidaNaoFala(browser, porta) {
     console.log('lote W: depois do apelido tomado, a tentativa seguinte ao mesmo servidor leva o apelido novo e o convite, e entra; a outro servidor, não leva nada');
     console.log('lote W: entrar, trocar de alvo e desistir da pergunta dos MODs esquecem a credencial, e ela não aparece fora do connect');
     console.log('lote W2: a recusa de uma tentativa que outra substituiu não fala na entrada nem na espera, e vai ao seele.log');
+    console.log('lote W2: a frase dos MODs manda entrar de novo, e entrar de novo abre a pergunta');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
