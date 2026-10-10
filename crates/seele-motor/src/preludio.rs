@@ -357,6 +357,9 @@ pub const PRELUDIO: &str = r#"
   const contribuicoes = comCapacidade('contribuicoes', Object.freeze({
     registrar: (pedido) => pedir('contribuir', { pedido }),
     revogar: (handle) => pedir('revogar-contribuicao', { handle }),
+    // Troca o conteúdo sem revogar: o produto não redesenha o nativo no meio
+    // (R7 do PERFIS; tarefa 5 da F3, Step 6).
+    atualizar: (handle, conteudo) => pedir('atualizar-contribuicao', { handle, conteudo }),
   }));
 
   globalThis.SeeleUI = Object.freeze({

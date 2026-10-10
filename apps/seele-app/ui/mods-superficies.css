@@ -84,6 +84,17 @@
   overflow-wrap: anywhere;
 }
 
+/* **O cabeçalho quebra a linha, e não a palavra** (achado da tarefa 7 da F3,
+   medido em `bancada/camadas.cjs`). Numa coluna de 300 px — a folha, o painel,
+   um diálogo estreito —, o título dividia a linha com a origem e a saída, que
+   não encolhem, e o `min-width: 0` o deixava ficar mais estreito que uma
+   palavra: «EDITA / R / PERFIL». Trocar o `anywhere` por `break-word` não
+   mudava nada (medido: as onze quebras continuavam), e dar ao título a largura
+   da maior palavra empurrava o FECHAR para fora da coluna. Quebrando a linha,
+   a origem e a saída descem quando não cabem, e o título fica com a coluna
+   inteira; o `anywhere` continua para a palavra maior que ela. O
+   `flex-wrap: wrap` está no cabeçalho de cada superfície. */
+
 /* De quem é a janela. Discreto, e sempre presente: uma tela de MOD
    indistinguível das do SEELE é o que tornaria uma tela de confiança
    falsificável. */
@@ -176,6 +187,7 @@
 
 .pagina-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 16px var(--mod-margem);
@@ -201,9 +213,13 @@
   padding: var(--mod-secao) var(--mod-margem);
 }
 
-/* --------------------------------------------------------------- o painel */
+/* ------------------------------------------------------ o painel e a folha */
 
-.painel-de-mod {
+/* A folha é parente do painel (rascunho da API 6, §5): a mesma coluna, e ela
+   empilha. Quando o painel sair, no corte da API 6 (tarefa 13), sai o seletor
+   dele de cada regra. */
+.painel-de-mod,
+.folha-de-mod {
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -212,22 +228,27 @@
   background: var(--seele-negro-painel);
 }
 
-.painel-de-mod[data-lado="esquerda"] {
+.painel-de-mod[data-lado="esquerda"],
+.folha-de-mod[data-lado="esquerda"] {
   border-left: none;
   border-right: 1px solid var(--seele-linha-forte);
 }
 
-.painel-de-mod-cabecalho {
+.painel-de-mod-cabecalho,
+.folha-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 14px var(--mod-margem);
   border-bottom: 1px solid var(--seele-linha);
 }
 
-.painel-de-mod-titulo { font-size: 15px; }
+.painel-de-mod-titulo,
+.folha-de-mod-titulo { font-size: 15px; }
 
-.painel-de-mod-corpo {
+.painel-de-mod-corpo,
+.folha-de-mod-corpo {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -237,7 +258,12 @@
   padding: var(--mod-secao) var(--mod-margem);
 }
 
-.painel-de-mod[hidden] { display: none; }
+.painel-de-mod[hidden],
+.folha-de-mod[hidden] { display: none; }
+
+/* Só a folha de cima aparece; as de baixo voltam quando ela fecha
+   (`arrumarPalcos`, em `mods-superficies.js`). */
+.folha-de-mod[data-abaixo="sim"] { display: none; }
 
 /* -------------------------------------------------------------- o diálogo */
 
@@ -302,6 +328,7 @@
    saída não podem sair de vista. */
 .dialogo-de-mod-cabecalho {
   display: flex;
+  flex-wrap: wrap; /* a linha, e não a palavra: ver o título */
   align-items: center;
   gap: var(--mod-respiro);
   padding: 16px var(--mod-margem);
@@ -344,6 +371,8 @@
    permissões reais e sair do servidor.» */
 .superficie-de-mod-sair {
   flex: 0 0 auto;
+  /* Na borda direita, também quando desce para a linha de baixo. */
+  margin-left: auto;
   min-height: 28px;
   padding: 2px 10px;
   border: 1px solid var(--seele-linha-forte);

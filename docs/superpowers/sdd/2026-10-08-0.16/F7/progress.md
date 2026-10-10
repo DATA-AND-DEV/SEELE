@@ -69,6 +69,9 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | os testes da corrida de volta (tirados por engano em `b4f5ef94`) | feito | `b6280079` |
 | 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita**; ligar na FFI e no `main.rs` espera a casca | `2b2bf744` |
 | — | o teste da janela de furos que caía sob carga (pendência 29, causa 3), pedido pela orquestradora | consertado | `7b2bbb96` |
+| — | merges da `versao/0.16` (`f7fb8ab9`, `ffd8e4fb`): a oitava e a nona integração, com a `ui/` e o `main.rs` liberados | feitos | `23aed9df`, `72089800` |
+| 18 | P2a, as hospedagens e o `onde_estou`: a metade do `main.rs` | **feita**; a da casca espera a vez na `tela-sessao.js` e na `tela-boot.js` | `eb3f1be1` |
+| 21 | P2d, a saída do app | **feita**, menos a confirmação ao fechar, que é de tela | `76af8287`, `2205fc46` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -516,4 +519,26 @@ Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxilia
   minutos, com a carga média em ~77, durante a bateria da oitava integração.
   Foram mortos (`pkill -x yes`, eram exatamente os 120). Dito à orquestradora.
   Da próxima vez, cada processo de carga se mata sozinho com prazo.
+
+## A casca liberada: as tarefas 18 e 21 (09/10)
+
+- **Tarefa 18, a metade do `main.rs`** (`eb3f1be1`):
+  - `Session.hospedagens { guardado, pessoal }` no lugar de `hospedagem` e de
+    `servidor_no_ar`;
+  - o comando `onde_estou()`, que fica em `AGUARDANDO_TELA` até a
+    `tela-sessao.js` e a `tela-boot.js` perguntarem a ele;
+  - o `hospedado_aqui` saiu. A pergunta da lista de visitados virou
+    `endereco_desta_maquina`, com a mesma leitura do endereço.
+- **Tarefa 21** (`76af8287`, `2205fc46`):
+  - a sala que fecha diz `ChamadaEncerrada`, e o guardado continua dizendo
+    `ServerShuttingDown`, mudança localizada no `hospedagem.rs`;
+  - fechar o app segura a saída, despede as duas hospedagens ao mesmo tempo
+    (1 s de teto) e sai. A saída é segurada **só com `code: None`**: o runtime
+    manda esse evento do `Destroyed` da última janela, com a página já fora.
+    Medido no `tauri-runtime-wry` 2.11.4.
+  - **Um guarda da F5 mudou**: o `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`
+    (lote R) proibia todo `prevent_exit`. Passou a permitir só essa forma, e
+    continua proibindo `prevent_close` e `CloseRequested`. A reversão «segurar
+    qualquer saída» reprova nele.
+  - Fica para a tela: a confirmação ao fechar, que vale só para o guardado.
 

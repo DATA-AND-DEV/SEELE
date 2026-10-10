@@ -58,7 +58,6 @@ _spec = importlib.util.spec_from_file_location("carga", RAIZ / "tools" / "carga-
 carga = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(carga)
 
-VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
 # A marca, como a ponte da F4 a escreve na carga (spec, §9.2): a escolha
 # guardada à mão primeiro (`localStorage["seele.casca"]`, num `try`), e o
 # critério do aparelho depois, que aqui é a casca que o caso pede.
@@ -82,53 +81,9 @@ class Ponto:
     troca: bool = False
 
 
-PONTOS_INJETADOS = [
-    # Sem a meta de viewport, o celular desenha a página a 980 px e a encolhe
-    # (medido na prova da Etapa A).
-    Ponto("P1", "index.html", '<meta charset="utf-8">\n', VIEWPORT, 'name="viewport"'),
-    Ponto(
-        "P5",
-        "base.js",
-        None,
-        "\nconst CASCA = Object.seal({ depoisDeDesenhar: [], "
-        'pedirSenhaDaSala: async () => window.prompt("Senha da sala"), '
-        "enterEnvia: true, avisoDeFone: () => AVISO_DE_FONE });\n",
-        "const CASCA",
-    ),
-    # No produto, o P6 é a última linha de `desenhar`. Aqui ele entra no começo,
-    # adiado para depois dela por um microtask: o efeito é o mesmo, e a âncora é
-    # estável.
-    Ponto(
-        "P6",
-        "tela-sessao.js",
-        "function desenhar(snapshot) {\n  if (!snapshot) return;\n",
-        "  queueMicrotask(() => CASCA.depoisDeDesenhar.forEach((f) => f(snapshot)));\n",
-        "CASCA.depoisDeDesenhar",
-    ),
-    # A senha da sala sai do `window.prompt` (P7). E cancelar cancela: o
-    # desktop, com o `prompt`, tentava entrar sem senha quando a pessoa
-    # desistia, e a recusa do servidor era a resposta ao «cancelar».
-    Ponto(
-        "P7",
-        "tela-sessao.js",
-        '          item.dataset.senha_necessaria === "sim" ? window.prompt("Senha da sala") : null;\n',
-        '          item.dataset.senha_necessaria === "sim"\n'
-        "            ? await CASCA.pedirSenhaDaSala(desenhado?.voice_rooms.find((s) => s.id === voice_room)?.name ?? \"\")\n"
-        "            : null;\n"
-        '        if (item.dataset.senha_necessaria === "sim" && senha === null) return;\n',
-        "CASCA.pedirSenhaDaSala",
-        troca=True,
-    ),
-    # O Return do celular quebra a fileira (P8): o teclado do aparelho não tem
-    # Shift+Enter, e uma mensagem de duas fileiras não teria como ser escrita.
-    Ponto(
-        "P8",
-        "tela-sessao.js",
-        '  if (evento.key !== "Enter" || evento.shiftKey || evento.isComposing) return;\n',
-        "  if (!CASCA.enterEnvia) return;\n",
-        "CASCA.enterEnvia",
-    ),
-]
+# Vazia desde a nona integração: o P1 e o P5 a P8 entraram no produto, e o P9 e
+# o P10 já entram nele direto. Fica para o próximo ponto que precisar esperar.
+PONTOS_INJETADOS: list[Ponto] = []
 
 # As áreas seguras de um iPhone em retrato (a ilha em cima, a barra de gestos
 # embaixo) e de um Android comum, com a barra de navegação por gestos.
@@ -430,6 +385,12 @@ def sessao_entrou(pg: Page) -> list[str]:
         falhas.append("puxar a página para baixo a recarrega, e recarregar derruba a sessão")
     if estado["barra"] != "0px":
         falhas.append(f"a barra da janela mede {estado['barra']!r}, e no celular ela não existe")
+    # O aviso de fone diz a verdade do navegador (P9): a frase do desktop, «o
+    # SEELE ainda não cancela eco», é falsa onde o eco do navegador vem ligado.
+    # A `entrar` o dispensa, e o texto continua escrito na faixa.
+    fone = pg.evaluate("[document.getElementById('aviso-fone-texto').textContent, AVISO_DE_FONE_CELULAR]")
+    if fone[0] != fone[1]:
+        falhas.append(f"o aviso de fone do celular diz «{fone[0]}», e não a frase do navegador")
     return falhas
 
 
@@ -1057,6 +1018,13 @@ def ajustes_medida(pg: Page) -> list[str]:
         voltar: !!document.querySelector('#tela-server .cel-ajustes-voltar')?.offsetParent }))()""")
     if secao["coluna"] != "none" or secao["corpo"] == "none" or secao["paineis"] != ["painel-audio"] or not secao["voltar"]:
         falhas.append(f"a seção ÁUDIO não abriu sozinha, numa coluna, com «‹ AJUSTES»: {secao}")
+    # A faixa de contexto diz como o microfone abre (CASCA.fraseDoModo): no
+    # celular, o botão que se segura, e não a tecla que ele não tem. Achado na
+    # foto do Safari: «microfone abre enquanto segura ESPAÇO».
+    pg.wait_for_timeout(600)
+    contexto = pg.evaluate("document.getElementById('server-contexto').textContent")
+    if "SEGURE" not in contexto or "ESPAÇO" in contexto:
+        falhas.append(f"a faixa de contexto de ÁUDIO diz «{contexto}», e não o SEGURE")
     exigir_toque(pg, "#tela-server .cel-ajustes-voltar", falhas)
     if pg.evaluate("document.getElementById('tela-server').getAttribute('data-cel-pagina')") != "lista":
         falhas.append("«‹ AJUSTES» não voltou à lista")
@@ -1460,6 +1428,10 @@ def casca_larga(pg: Page) -> list[str]:
         falhas.append("sem sessão, sair da página pergunta antes (não há o que perder)")
 
     entrar(pg)
+    # A larga ainda diz a frase do desktop no aviso de fone: o P9 só a troca no
+    # celular, e a do navegador espera a F4 confirmar o eco ligado na voz do PC.
+    if pg.evaluate("document.getElementById('aviso-fone-texto').textContent !== AVISO_DE_FONE"):
+        falhas.append("o aviso de fone da larga mudou de frase sem a F4 confirmar o eco do navegador")
     sessao = pg.evaluate("""(() => { const r = document.getElementById('tela-sessao').getBoundingClientRect();
         const e = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(e);
         return { topo: Math.round(r.top), altura: Math.round(r.height), pergunta: e.defaultPrevented }; })()""")
@@ -1490,6 +1462,12 @@ def casca_larga(pg: Page) -> list[str]:
     versoes = secao("secao-versoes", "painel-versoes")
     if versoes and ("app do SEELE" not in versoes["frase"] or versoes["blocos"]):
         falhas.append(f"VERSÕES não diz que guardar versões é do app: {versoes}")
+    # No computador há tecla, e a faixa de contexto continua a nomeá-la (o padrão
+    # do CASCA.fraseDoModo é a frase do desktop).
+    pg.wait_for_timeout(600)
+    contexto = pg.evaluate("document.getElementById('server-contexto').textContent")
+    if "ESPAÇO" not in contexto:
+        falhas.append(f"a faixa de contexto da larga não nomeia a tecla de falar: «{contexto}»")
     atalhos = secao("secao-atalhos", "painel-atalhos")
     if atalhos and "foco" not in atalhos["frase"]:
         falhas.append(f"a tecla de falar não diz que só vale com a página em foco: {atalhos}")

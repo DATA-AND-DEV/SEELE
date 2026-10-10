@@ -28,6 +28,7 @@
 //   SeeleUI.superficies.avisar(texto)    — a superfície de vida curta
 //   SeeleUI.contribuicoes.registrar(p)   — entrar num ponto da interface do SEELE
 //   SeeleUI.contribuicoes.revogar(h)     — e sair dele
+//   SeeleUI.contribuicoes.atualizar(h, c) — trocar o conteúdo sem sair
 //
 // Não há `document`, `window` nem o global do Tauri aqui dentro: um worker não
 // os tem, e é isso que faz `terminate()` ser garantia em vez de pedido.
@@ -406,6 +407,14 @@ async function exercitarAsContribuicoes(retrato) {
       conteudo: [{ forma: "texto", chave: "c", dentro: "·ref" }],
     }), null);
     if (handle) estado.contribuicoes.push({ ponto: alvo.ponto, handle: handle.handle ?? handle });
+  }
+
+  // **E a troca sem revogar.** O conteúdo muda no mesmo nó, e a linha não
+  // volta à nativa no meio (tarefa 5 da F3, Step 6).
+  const primeira = estado.contribuicoes[0];
+  if (primeira) {
+    await tentar("atualizar", () => SeeleUI.contribuicoes.atualizar(primeira.handle,
+      [{ forma: "texto", chave: "c", dentro: "·ref·2" }]), null);
   }
 
   // **E a volta.** Revogar precisa devolver a apresentação nativa — recalculada
