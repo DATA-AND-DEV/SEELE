@@ -1555,6 +1555,38 @@ def casca_larga(pg: Page) -> list[str]:
     return falhas
 
 
+def larga_tela_cheia(pg: Page) -> list[str]:
+    """A tela cheia da larga sai junto com a do navegador (achado da F4). No
+    navegador o Esc sai da tela cheia sem a página receber a tecla, e o cinema
+    do desktop ficava ligado: a imagem esticada numa janela que não está mais
+    em tela cheia, e o botão dizendo SAIR DA TELA CHEIA.
+
+    O cinema entra pelo `trocarCinema` do desktop, a tela cheia de verdade por um
+    clique (o navegador só a dá com gesto), e a saída pelo `exitFullscreen`, que
+    dispara o mesmo `fullscreenchange` que o Esc do navegador."""
+    falhas = []
+    pg.evaluate("""() => { const b = document.createElement('button'); b.id = 'bancada-tela-cheia'; b.textContent = 'tela cheia';
+        b.style.cssText = 'position:fixed;left:0;top:0;z-index:9999;width:60px;height:40px';
+        b.addEventListener('click', () => document.documentElement.requestFullscreen()); document.body.append(b); }""")
+    # A tela cheia antes do cinema: o cinema esconde tudo o que fica fora do
+    # caminho da imagem, e o botão da bancada junto.
+    pg.click("#bancada-tela-cheia")
+    pg.wait_for_timeout(300)
+    pg.evaluate("trocarCinema(true)")
+    pg.wait_for_timeout(200)
+    entrou = pg.evaluate("[!!document.fullscreenElement, document.body.dataset.cinema ?? null]")
+    if entrou != [True, "sim"]:
+        return falhas + [f"a bancada não pôs a página em tela cheia com o cinema ligado: {entrou}"]
+    pg.evaluate("document.exitFullscreen()")
+    pg.wait_for_timeout(400)
+    saiu = pg.evaluate("[!!document.fullscreenElement, document.body.dataset.cinema ?? null, document.getElementById('palco-cheia').textContent.trim()]")
+    if saiu[0]:
+        falhas.append("o navegador não saiu da tela cheia")
+    if saiu[1] is not None or saiu[2] != "TELA CHEIA":
+        falhas.append(f"o navegador saiu da tela cheia e o cinema ficou ligado: data-cinema {saiu[1]!r}, o botão diz «{saiu[2]}»")
+    return falhas
+
+
 def escolha_da_casca(pg: Page) -> list[str]:
     """A escolha da casca à mão (Tarefa 18): ela grava a preferência, diz que
     vale na próxima abertura, e não troca nada ao vivo."""
@@ -1657,6 +1689,8 @@ CASOS: dict[str, Caso] = {
     # A casca larga (Tarefa 17): o computador, com a marca larga.
     "casca-larga": Caso(levar=casca_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
+    # A tela cheia da larga sai junto com a do navegador (achado da F4).
+    "larga-tela-cheia": Caso(levar=larga_tela_cheia, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
     "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
