@@ -5043,6 +5043,7 @@ dependencies = [
  "rtrb",
  "rubato",
  "seele-proto",
+ "seele-voz",
  "shiguredo_opus",
  "thiserror 2.0.19",
  "tracing",
@@ -5086,6 +5087,7 @@ dependencies = [
  "rustls",
  "seele-audio",
  "seele-proto",
+ "seele-sessao",
  "seele-video",
  "serde",
  "socket2",
@@ -5201,6 +5203,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-sessao"
+version = "0.0.0"
+dependencies = [
+ "seele-proto",
+]
+
+[[package]]
 name = "seele-video"
 version = "0.0.0"
 dependencies = [
@@ -5221,10 +5230,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "seele-voz"
+version = "0.0.0"
+
+[[package]]
 name = "seele-web"
 version = "0.0.0"
 dependencies = [
  "seele-proto",
+ "seele-voz",
  "serde_json",
 ]
 

@@ -16,6 +16,23 @@
 //! | `decodificar(quadro)` | 0 | `{"mensagem": …}` ou `{"desconhecida": N}` |
 //! | | 1 | `{"erro": …, "texto": …, "versao": N}`, com `versao` quando o carimbo é de outra versão |
 //!
+//! **A voz** (Tarefa 3.3, lote A; [`crate::voz`]), uma de cada lado por página:
+//!
+//! | função | devolve | na saída |
+//! |---|---|---|
+//! | `voz_envio(ssrc)` | — | — |
+//! | `voz_quadro_passou()` | o carimbo de agora | — |
+//! | `voz_carimbo_do_quadro(quantos, indice)` | o carimbo do quadro | — |
+//! | `voz_datagrama(carimbo, opus)` | 0 | o datagrama |
+//! | | 2 | nada: o DTX não sai |
+//! | | 1 | `{"erro": …}` |
+//! | `voz_reabrir(ssrc)` | — | — |
+//! | `voz_recepcao(ssrc)` | — | — |
+//! | `voz_chegou(datagrama, agora_ms)` | 0 | a alça (u32), a sequência (u16) e o carimbo (u32), em little-endian, e o Opus |
+//! | | 2 | nada: a própria voz |
+//! | | 1 | `{"erro": …}` |
+//! | `voz_esquecer(agora_ms)` | quantas alças | cada alça esquecida, u32 em little-endian |
+//!
 //! Uma chamada sobrescreve a saída da anterior, e o `.wasm` é de uma thread só.
 
 #![allow(unsafe_code)]
@@ -25,10 +42,13 @@ use std::cell::RefCell;
 
 use seele_proto::control::ControlError;
 
+use crate::voz::{Envio, Recepcao};
 use crate::{codificar_do_cliente, decodificar_do_servidor, DoServidor, ErroDaPonte};
 
 thread_local! {
     static SAIDA: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static ENVIO: RefCell<Option<Envio>> = const { RefCell::new(None) };
+    static RECEPCAO: RefCell<Option<Recepcao>> = const { RefCell::new(None) };
 }
 
 fn dizer(bytes: Vec<u8>, codigo: u32) -> u32 {
@@ -163,6 +183,122 @@ pub unsafe extern "C" fn analisar_link(ptr: *const u8, len: usize) -> u32 {
         texto,
         seele_proto::uri::ORIGEM_DO_NAVEGADOR,
     ))
+}
+
+// ------------------------------------------------------------------- a voz
+
+fn erro_da_voz(texto: &str) -> u32 {
+    dizer(
+        serde_json::json!({ "erro": texto })
+            .to_string()
+            .into_bytes(),
+        1,
+    )
+}
+
+/// O envio de quem o servidor chamou de `ssrc`, com o relógio em zero.
+#[no_mangle]
+pub extern "C" fn voz_envio(ssrc: u32) {
+    ENVIO.with(|e| *e.borrow_mut() = Some(Envio::novo(ssrc)));
+}
+
+/// Um quadro de 20 ms passou: o carimbo de agora (0 sem envio).
+#[no_mangle]
+pub extern "C" fn voz_quadro_passou() -> u32 {
+    ENVIO.with(|e| e.borrow_mut().as_mut().map_or(0, Envio::quadro_passou))
+}
+
+/// O carimbo do quadro `indice` de `quantos` que o portão soltou.
+#[no_mangle]
+pub extern "C" fn voz_carimbo_do_quadro(quantos: u32, indice: u32) -> u32 {
+    ENVIO.with(|e| {
+        e.borrow().as_ref().map_or(0, |envio| {
+            envio.carimbo_do_quadro(quantos as usize, indice as usize)
+        })
+    })
+}
+
+/// O datagrama de um quadro de Opus com o carimbo dele.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_datagrama(carimbo: u32, ptr: *const u8, len: usize) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let opus = unsafe { entrada(ptr, len) };
+    ENVIO.with(|e| {
+        let mut envio = e.borrow_mut();
+        let Some(envio) = envio.as_mut() else {
+            return erro_da_voz("a voz não tem envio");
+        };
+        match envio.datagrama(carimbo, opus) {
+            Ok(datagrama) => dizer(datagrama, 0),
+            Err(seele_proto::media::MediaError::EmptyPayload) => dizer(Vec::new(), 2),
+            Err(falha) => erro_da_voz(&falha.to_string()),
+        }
+    })
+}
+
+/// Outro caminho (outro microfone, ou a reconexão com outro `ssrc`).
+#[no_mangle]
+pub extern "C" fn voz_reabrir(ssrc: u32) {
+    ENVIO.with(|e| {
+        if let Some(envio) = e.borrow_mut().as_mut() {
+            envio.reabrir(ssrc);
+        }
+    });
+}
+
+/// A recepção de quem fala com o `ssrc` próprio.
+#[no_mangle]
+pub extern "C" fn voz_recepcao(ssrc: u32) {
+    RECEPCAO.with(|r| *r.borrow_mut() = Some(Recepcao::nova(ssrc)));
+}
+
+/// Um datagrama que chegou em `agora_ms`.
+///
+/// # Safety
+///
+/// `ptr` e `len` como em [`entrada`].
+#[no_mangle]
+pub unsafe extern "C" fn voz_chegou(ptr: *const u8, len: usize, agora_ms: f64) -> u32 {
+    // SAFETY: repassa o contrato desta função ao de `entrada`.
+    let datagrama = unsafe { entrada(ptr, len) };
+    RECEPCAO.with(|r| {
+        let mut recepcao = r.borrow_mut();
+        let Some(recepcao) = recepcao.as_mut() else {
+            return erro_da_voz("a voz não tem recepção");
+        };
+        match recepcao.chegou(datagrama, agora_ms) {
+            Ok(Some(chegado)) => {
+                let mut saida = Vec::with_capacity(10 + chegado.opus.len());
+                saida.extend_from_slice(&chegado.alca.to_le_bytes());
+                saida.extend_from_slice(&chegado.seq.to_le_bytes());
+                saida.extend_from_slice(&chegado.carimbo.to_le_bytes());
+                saida.extend_from_slice(chegado.opus);
+                dizer(saida, 0)
+            }
+            Ok(None) => dizer(Vec::new(), 2),
+            Err(falha) => erro_da_voz(&falha.to_string()),
+        }
+    })
+}
+
+/// Esquece quem calou até `agora_ms`: quantas alças, e cada uma na saída.
+#[no_mangle]
+pub extern "C" fn voz_esquecer(agora_ms: f64) -> u32 {
+    let alcas = RECEPCAO.with(|r| {
+        r.borrow_mut()
+            .as_mut()
+            .map(|recepcao| recepcao.esquecer_caladas(agora_ms))
+            .unwrap_or_default()
+    });
+    let quantas = u32::try_from(alcas.len()).unwrap_or(u32::MAX);
+    dizer(
+        alcas.iter().flat_map(|alca| alca.to_le_bytes()).collect(),
+        quantas,
+    )
 }
 
 /// As duas funções só de teste: o `cargo xtask web` confere com elas os

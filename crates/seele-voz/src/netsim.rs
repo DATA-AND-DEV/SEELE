@@ -527,7 +527,7 @@ mod tests {
 
     /// Longest run of consecutive missing sequence numbers in a delivery.
     fn longest_gap(arrivals: &[ArrivedFrame], sent: usize) -> usize {
-        let delivered: std::collections::HashSet<u16> =
+        let delivered: std::collections::BTreeSet<u16> =
             arrivals.iter().map(|frame| frame.seq).collect();
         let mut longest = 0;
         let mut current = 0;

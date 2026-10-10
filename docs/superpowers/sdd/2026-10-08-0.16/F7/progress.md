@@ -67,11 +67,14 @@ Os quatro estão no plano, na seção «Achados desta leitura»:
 | — | merge da `versao/0.16` (`c8b3cd47`), a sétima integração | feito; a árvore é a mesma da `c8b3cd47` | `52d015f4` |
 | 22 | 4b, a identidade por máquina: a metade da FFI | **feita** (porte do `9ff9b73c` da 0.15); a semente da sala e o SEU CÓDIGO esperam a casca | `58552de8` |
 | — | os testes da corrida de volta (tirados por engano em `b4f5ef94`) | feito | `b6280079` |
-| 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita**; ligar na FFI e no `main.rs` espera a casca | `2b2bf744` |
+| 14b | a pendência 55: a metade de núcleo (o quarto junto com a corrida) | **feita** | `2b2bf744` |
 | — | o teste da janela de furos que caía sob carga (pendência 29, causa 3), pedido pela orquestradora | consertado | `7b2bbb96` |
 | — | merges da `versao/0.16` (`f7fb8ab9`, `ffd8e4fb`): a oitava e a nona integração, com a `ui/` e o `main.rs` liberados | feitos | `23aed9df`, `72089800` |
 | 18 | P2a, as hospedagens e o `onde_estou`: a metade do `main.rs` | **feita**; a da casca espera a vez na `tela-sessao.js` e na `tela-boot.js` | `eb3f1be1` |
 | 21 | P2d, a saída do app | **feita**, menos a confirmação ao fechar, que é de tela | `76af8287`, `2205fc46` |
+| 31 | os contadores da campainha no `seele.log` | **feita** | `a87ba4f9` |
+| — | merge da `versao/0.16` (`e3970b14`), a décima, com o lote V da F5 na FFI | feito | `e2267f6c` |
+| 14b | a pendência 55 inteira: a ponte pergunta ao quarto, e o `connect` deixa de perguntar antes | **feita** | `80ac45d2` |
 
 ## Tarefa 1 — a janela do Comandante (08/10)
 
@@ -541,4 +544,26 @@ Pedido pela orquestradora: `a_janela_fecha_dentro_do_atender_e_nao_so_no_auxilia
     continua proibindo `prevent_close` e `CloseRequested`. A reversão «segurar
     qualquer saída» reprova nele.
   - Fica para a tela: a confirmação ao fechar, que vale só para o guardado.
+
+## A 14b inteira (10/10)
+
+- **A ponte liga o quarto à `Chegada`** quando há impressão conferida
+  (`com_o_quarto`, que só pergunta com bilhete). O endereço de hoje sai de
+  `candidato_do_quarto`, montado como os outros.
+- **O `connect` do app deixa de perguntar.** Nada do que o quarto dá volta para
+  ele, e é isso que mantém a lista de conhecidos limpa.
+- As regras que eram do `connect` moram na `Chegada` (a resposta que já corre,
+  a escuta só no IP do servidor) e na ponte (a chave canônica do endereço de
+  hoje), com testes de comportamento. Os casos do `ja_esta_na_corrida` foram
+  para os testes de `candidato_do_quarto`. O `ja_esta_na_corrida` e a
+  reexportação de `bilhete_desta_volta` saíram: eram segunda cópia.
+- Os três guardas da casca sobre o quarto viraram um. O
+  `ocupante_da_escuta.rs` passou a percorrer o caminho de verdade, e o
+  controle dele reprova com a ponte sem o quarto.
+- **A conformidade de quem passa pelo enlace**: 16 de 17 numa rodada, arquivo
+  por arquivo. O `acceptance_m3` reprovou um teste,
+  `a_restarted_server_keeps_its_accounts`, com `SemResposta` em 24 s. É a
+  assinatura registrada da pendência 29, com a receita na 43: carga, e um teste
+  que usa o `Client::connect` direto, que a 14b não tocou. Sozinho, o arquivo
+  deu 3 de 3, 8 de 8 cada, em 4 s.
 

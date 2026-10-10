@@ -17,11 +17,22 @@
 //
 // O Tauri sempre injeta o `__TAURI_INTERNALS__` (o `__TAURI__` depende do
 // `withGlobalTauri`). **Um `__TAURI__` que já existe sem ele é o duble de uma
-// bancada** (`bancada/*.cjs`, `tools/carga-da-casca.py`), escrito antes deste
-// script: a ponte não o troca, e a marca fica com quem a pôs. Quem mais
-// precisa saber onde está lê `PONTE_NO_LUGAR_DO_TAURI` (o `executorDoMod`, em
-// `mods-runtime.js`). `tests/web.rs` segura que ninguém mais lê o Tauri para
-// isso.
+// bancada** (`bancada/*.cjs`, `tools/carga-da-casca.py`,
+// `tools/bancada-do-celular.py`), escrito antes deste script: a ponte não o
+// troca, e a marca fica com quem a pôs.
+//
+// **Por quê:** o duble faz o papel do desktop. Se a ponte o trocasse, a
+// bancada passaria a medir a ponte no lugar da casca do desktop que ela finge,
+// e os roteiros de `tools/roteiros/` e o G3 da F8 (o desktop igual pixel a
+// pixel) deixariam de provar o que dizem. E a marca que a
+// `bancada-do-celular.py` escolhe seria trocada pelo critério da ponte. Achado
+// ao escrever o lote A: essas ferramentas põem o duble antes do primeiro
+// `<script src=`, que passou a ser este.
+//
+// Quem mais precisa saber onde está lê `PONTE_NO_LUGAR_DO_TAURI` (o
+// `executorDoMod`, em `mods-runtime.js`: sob um duble, o executor é o nativo,
+// como no desktop que ele finge). `tests/web.rs` segura que ninguém mais lê o
+// Tauri para isso, e a bancada `ponte-web.cjs` prova a regra nos três lugares.
 //
 // # As listas
 //
@@ -247,25 +258,19 @@ const ATENDIDOS_APESAR_DA_HOSPEDAGEM = new Map([
 ]);
 
 const TAREFA_26 = "2.6 (a sessão pelo navegador)";
-const TAREFA_33 = "3.3 (a voz)";
+const TAREFA_33 = "3.3 (a voz, e o teste do microfone fora da sala, que usa o mesmo portão)";
 const TAREFA_34 = "3.4 (a identidade e a entrada)";
 const TAREFA_39 = "3.9 (assistir à tela)";
 const TAREFA_310 = "3.10 (compartilhar a tela pelo PC)";
-const TAREFA_B = "3.1, lote B (o que mora na origem)";
-const TAREFA_C = "3.1, lote C (o arquivo por alça)";
-const TAREFA_D = "3.1, lote D (o microfone fora da sala, a saída de som e a tela cheia)";
 const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
 /** Atendidos que ainda não têm corpo, com a tarefa do plano que os traz. */
 const AINDA_A_FAZER = new Map([
-  ["abrir_no_navegador", TAREFA_B],
-  ["abrir_teste_de_microfone", TAREFA_D],
+  ["abrir_teste_de_microfone", TAREFA_33],
   ["aceitar_mods", TAREFA_34],
   ["aceite_de_mods", TAREFA_34],
   ["aceites_de_mods", TAREFA_34],
   ["ajustar_limites_da_tela", TAREFA_310],
-  ["ajustar_reducao_de_ruido", TAREFA_33],
-  ["ajustar_sensibilidade_da_voz", TAREFA_33],
   ["ajustar_volume_da_tela", TAREFA_39],
   ["analisar_convite", TAREFA_34],
   ["apagar_linha", TAREFA_26],
@@ -281,34 +286,25 @@ const AINDA_A_FAZER = new Map([
   ["compartilhar_tela", TAREFA_310],
   ["conhecidos", TAREFA_34],
   ["connect", TAREFA_34],
-  ["consentir_previa", TAREFA_B],
   ["criar_linha", TAREFA_26],
   ["criar_voice_room", TAREFA_26],
   ["descartar_mensagem", TAREFA_26],
-  ["descrever_arquivo", TAREFA_C],
   ["destino_do_anexo", TAREFA_26],
   ["dispensar_aviso", TAREFA_26],
   ["enter_voice_room", TAREFA_33],
-  ["enviar_anexo", TAREFA_C],
+  ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_apelido", TAREFA_26],
-  ["escolher_apelido_local", TAREFA_B],
-  ["escolher_arquivo", TAREFA_C],
   ["escolher_icone_do_server", TAREFA_26],
-  ["escolher_microfone", TAREFA_33],
   ["escolher_minha_imagem", TAREFA_26],
   ["escolher_para_o_mod", TAREFA_MODS],
-  ["escolher_saida", TAREFA_D],
-  ["escolher_tecla_de_falar", TAREFA_33],
   ["esquecer", TAREFA_34],
   ["esquecer_aceite_de_mods", TAREFA_34],
-  ["esquecer_previa", TAREFA_B],
   ["estado_da_sessao", TAREFA_MODS],
-  ["estado_do_teste_de_microfone", TAREFA_D],
+  ["estado_do_teste_de_microfone", TAREFA_33],
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["expulsar_pessoa", TAREFA_26],
   ["fontes_de_tela", TAREFA_310],
-  ["guardar_colado", TAREFA_C],
   ["icone_do_server", TAREFA_26],
   ["imagem_da_pessoa", TAREFA_26],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
@@ -316,45 +312,36 @@ const AINDA_A_FAZER = new Map([
   ["lembrar_aparencia_do_servidor", TAREFA_26],
   ["ler_imagem_mod", TAREFA_MODS],
   ["messages", TAREFA_26],
-  ["microfone_escolhido", TAREFA_33],
-  ["microfones", TAREFA_33],
   ["midia_do_mod", TAREFA_MODS],
   ["midia_em_bytes", TAREFA_MODS],
   ["mod_request", TAREFA_26],
-  ["modo_de_voz_escolhido", TAREFA_33],
   ["mods_instalados", TAREFA_MODS],
-  ["monitorar_o_microfone", TAREFA_D],
+  ["monitorar_o_microfone", TAREFA_33],
   ["mover_pessoa", TAREFA_26],
   ["open_channel", TAREFA_26],
   ["parar_de_compartilhar", TAREFA_310],
   ["pedaco_do_escolhido", TAREFA_MODS],
   ["pedir_permissao_de_tela", TAREFA_310],
   ["pedir_quadro_chave", TAREFA_39],
-  ["permissao_de_microfone", TAREFA_33],
   ["permissao_de_tela", TAREFA_310],
   ["peso_da_linha", TAREFA_26],
   ["preparar_icone_do_server", TAREFA_26],
   ["prever_anexo", TAREFA_26],
   ["previa_de_link", TAREFA_26],
-  ["previas_consentidas", TAREFA_B],
   ["reenviar_mensagem", TAREFA_26],
   ["remover_mensagem", TAREFA_26],
   ["renomear_linha", TAREFA_26],
   ["renomear_server", TAREFA_26],
   ["renomear_voice_room", TAREFA_26],
-  ["saida_escolhida", TAREFA_D],
-  ["saidas", TAREFA_D],
   ["salvar_anexo", TAREFA_26],
   ["send_message", TAREFA_26],
   ["set_muted", TAREFA_33],
   ["set_talking", TAREFA_33],
   ["set_total_isolation", TAREFA_33],
-  ["set_voice_mode", TAREFA_33],
   ["set_volume", TAREFA_33],
   ["soltar_escolhido", TAREFA_MODS],
   ["som_da_tela", TAREFA_39],
   ["som_do_mod", TAREFA_MODS],
-  ["tela_cheia", TAREFA_D],
   ["tirar_icone_do_server", TAREFA_26],
   ["tirar_minha_imagem", TAREFA_26]
 ]);
@@ -417,12 +404,121 @@ function comASessao(fazer) {
   return fazer(sessao);
 }
 
-/** Sai da sessão desta página, se houver uma. */
+/** Sai da sessão desta página, se houver uma, e solta os arquivos guardados. */
 async function sairDaSessaoDaPonte() {
   const sessao = sessaoDaPonte.atual;
   sessaoDaPonte.atual = null;
+  ALCAS_DA_PONTE.clear();
   await sessao?.encerrar?.();
   return null;
+}
+
+// ------------------------------------------------------------ o arquivo por alça
+
+/**
+ * As regras do desktop para um arquivo, **JSON estrito**: `tests/web.rs` as
+ * confere contra o `main.rs`. O tipo de um arquivo sai da extensão, pela
+ * tabela do `tipo_alegado`, e não do `File.type`; uma imagem colada ganha a
+ * extensão e o teto do `guardar_colado`.
+ */
+const REGRAS_DO_ARQUIVO = Object.freeze({
+  "tipos_por_extensao": {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "pdf": "application/pdf",
+    "txt": "text/plain",
+    "md": "text/plain",
+    "opus": "audio/opus",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "mp4": "video/mp4"
+  },
+  "tipo_desconhecido": "application/octet-stream",
+  "extensao_da_colagem": {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp"
+  },
+  "maior_colagem_bytes": 26214400
+});
+
+/**
+ * **No navegador não há caminho de disco** (`F4/ponte-no-pc.md`, «O arquivo
+ * sem caminho»). A forma das chamadas não muda: o «caminho» é uma alça opaca
+ * (`web-arquivo:N`), e o `File` ou o `Blob` mora aqui, sob ela. Uma alça que
+ * não está aqui (desconhecida, ou já solta) é recusada como o desktop recusa
+ * um caminho que não existe.
+ */
+const ALCAS_DA_PONTE = new Map();
+
+/**
+ * O teto do mapa. A casca guarda um anexo pendente por vez; o resto é o que
+ * ela trocou ou desistiu de mandar, e ela não avisa quando desiste
+ * (`tirarAnexo` não chama a ponte). As mais velhas saem primeiro.
+ */
+const TETO_DE_ALCAS = 16;
+
+/**
+ * Um `Blob` colado está **todo na memória**, e um `File` escolhido não. Das
+ * coladas, ficam só as mais novas.
+ */
+const TETO_DE_COLADOS = 2;
+
+let ultimaAlcaDaPonte = 0;
+
+/** Guarda um arquivo sob uma alça nova, e solta o que passou do teto. */
+function guardarSobAlca(arquivo, nome, colado = false) {
+  ultimaAlcaDaPonte += 1;
+  const alca = `web-arquivo:${ultimaAlcaDaPonte}`;
+  ALCAS_DA_PONTE.set(alca, { arquivo, nome, colado });
+  const colados = [...ALCAS_DA_PONTE].filter(([, guardado]) => guardado.colado);
+  for (const [velha] of colados.slice(0, -TETO_DE_COLADOS)) ALCAS_DA_PONTE.delete(velha);
+  for (const velha of [...ALCAS_DA_PONTE.keys()].slice(0, -TETO_DE_ALCAS)) ALCAS_DA_PONTE.delete(velha);
+  return alca;
+}
+
+/** O tipo que o nome alega, pela extensão: o `tipo_alegado` do desktop. */
+function tipoAlegado(nome) {
+  const ponto = nome.lastIndexOf(".");
+  const extensao = ponto === -1 ? null : minusculasAscii(nome.slice(ponto + 1));
+  return extensao !== null && Object.hasOwn(REGRAS_DO_ARQUIVO.tipos_por_extensao, extensao)
+    ? REGRAS_DO_ARQUIVO.tipos_por_extensao[extensao]
+    : REGRAS_DO_ARQUIVO.tipo_desconhecido;
+}
+
+/** O `ArquivoEscolhido` do desktop, com a alça no lugar do caminho. */
+function descreverAlca(alca) {
+  const guardado = ALCAS_DA_PONTE.get(alca);
+  if (!guardado) return null;
+  return { caminho: alca, nome: guardado.nome, tamanho: guardado.arquivo.size, tipo: tipoAlegado(guardado.nome) };
+}
+
+/**
+ * **O arraste, só no PC.** A ponte ouve o `drop` do documento, guarda cada
+ * arquivo sob uma alça e emite o mesmo `tauri://drag-drop` que a casca já ouve
+ * (`tela-sessao.js`). Só quando o que se arrasta são arquivos: arrastar texto
+ * para um campo continua sendo do navegador. E não mais que o teto, para a
+ * alça do primeiro, que é a que a casca usa, não sair no meio.
+ */
+function ouvirOArraste() {
+  const temArquivos = (evento) => Array.from(evento.dataTransfer?.types ?? []).includes("Files");
+  document.addEventListener("dragover", (evento) => {
+    if (temArquivos(evento)) evento.preventDefault();
+  });
+  document.addEventListener("drop", (evento) => {
+    if (!temArquivos(evento)) return;
+    evento.preventDefault();
+    const arquivos = Array.from(evento.dataTransfer.files ?? []).slice(0, TETO_DE_ALCAS);
+    if (arquivos.length === 0) return;
+    emitirNaPonte("tauri://drag-drop", {
+      paths: arquivos.map((arquivo) => guardarSobAlca(arquivo, arquivo.name)),
+      position: { x: evento.clientX ?? 0, y: evento.clientY ?? 0 },
+    });
+  });
 }
 
 /** O que a origem guarda, ou `null` quando ela não guarda ou não deixa ler. */
@@ -434,11 +530,146 @@ function guardadoNaOrigem(chave) {
   }
 }
 
-/** As chaves da origem. Quem escreve nelas é o lote B da 3.1. */
+/**
+ * Grava na origem (`null` apaga), e diz se conseguiu. Sem armazenamento
+ * (navegação privada, cota), a escolha não fica: quem chama diz isso.
+ */
+function gravarNaOrigem(chave, valor) {
+  try {
+    if (valor === null) localStorage.removeItem(chave);
+    else localStorage.setItem(chave, valor);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** As chaves da origem: as preferências deste aparelho. */
 const CHAVES_DA_ORIGEM = Object.freeze({
   apelido: "seele.apelido",
   retrato: "seele.retrato",
+  previas: "seele.previas",
+  saida: "seele.saida",
+  modo: "seele.modo-de-voz",
+  microfone: "seele.microfone",
+  sensibilidade: "seele.sensibilidade-da-voz",
+  reducao: "seele.reducao-de-ruido",
+  tecla: "seele.tecla-de-falar",
 });
+
+/**
+ * A regra da voz que o desktop aplica sem sessão, **JSON estrito**:
+ * `tests/web.rs` a confere contra o `seele_ffi`. Sem redução de ruído, a
+ * abertura padrão do portão é esta, e não a de com supressão.
+ */
+const REGRAS_DA_VOZ = Object.freeze({
+  "abertura_sem_supressao_dbfs": -42
+});
+
+/** Os modos de voz do desktop (`VoiceMode`). */
+const MODOS_DE_VOZ = Object.freeze(["PushToTalk", "VoiceActivated", "Open"]);
+
+/** Um número guardado em milésimos, como as preferências do desktop o guardam. */
+function milesimosGuardados(chave) {
+  const texto = guardadoNaOrigem(chave);
+  const milesimos = texto === null ? NaN : Number(texto);
+  return Number.isInteger(milesimos) ? milesimos / 1000 : null;
+}
+
+/**
+ * Os controles da voz sem sessão, pela regra do `controles_da_voz` do desktop:
+ * a força guardada (ou a padrão), a abertura escolhida (ou a padrão daquela
+ * força) e os extremos do portão.
+ */
+function controlesDaVozGuardados() {
+  const padrao = CONSTANTES_DO_DESKTOP.controles_da_voz;
+  const supressao = milesimosGuardados(CHAVES_DA_ORIGEM.reducao) ?? padrao.supressao;
+  const escolhida = milesimosGuardados(CHAVES_DA_ORIGEM.sensibilidade);
+  return {
+    supressao,
+    abertura_dbfs:
+      escolhida ?? (supressao > 0 ? padrao.abertura_dbfs : REGRAS_DA_VOZ.abertura_sem_supressao_dbfs),
+    abertura_escolhida: escolhida !== null,
+    abertura_minima_dbfs: padrao.abertura_minima_dbfs,
+    abertura_maxima_dbfs: padrao.abertura_maxima_dbfs,
+  };
+}
+
+/**
+ * As saídas de som do PC, na forma do `PlaybackDevice` do desktop. Sem os
+ * pseudo-aparelhos do navegador (`default` e `communications` repetem um
+ * aparelho de verdade; o padrão é o do mesmo grupo do `default`) e sem os ids
+ * vazios que ele dá antes de o microfone ser permitido. **Onde não há
+ * `setSinkId`** não há como tocar noutra saída, e a lista é vazia: a casca diz
+ * que esta máquina não listou nada, e o som sai pela do sistema.
+ */
+async function saidasDeSom() {
+  if (!("setSinkId" in window.HTMLMediaElement.prototype)) return [];
+  return aparelhosDoTipo("audiooutput", "SAÍDA");
+}
+
+/**
+ * Os aparelhos de um tipo, como o desktop os lista (`CaptureDevice`,
+ * `PlaybackDevice`): sem os pseudo-aparelhos, sem os ids vazios, e com o
+ * padrão pelo grupo do `default`. Um aparelho sem nome (o navegador só os
+ * nomeia depois da permissão) leva o número dele.
+ */
+async function aparelhosDoTipo(tipo, semNome) {
+  const aparelhos = (await navigator.mediaDevices.enumerateDevices()).filter((aparelho) => aparelho.kind === tipo);
+  const grupoDoPadrao = aparelhos.find((aparelho) => aparelho.deviceId === "default")?.groupId;
+  return aparelhos
+    .filter((aparelho) => aparelho.deviceId !== "" && !["default", "communications"].includes(aparelho.deviceId))
+    .map((aparelho, ordem) => ({
+      id: aparelho.deviceId,
+      name: aparelho.label || `${semNome} ${ordem + 1}`,
+      default: grupoDoPadrao !== undefined && aparelho.groupId === grupoDoPadrao,
+    }));
+}
+
+/**
+ * Sem tab nem quebra de linha: o `sanitise` das preferências do desktop
+ * (`seele-core/src/preferences.rs`). Lá é o formato do arquivo; aqui, que um
+ * apelido ou um domínio guardado não ganhe uma quebra que o de lá não teria.
+ */
+const semQuebras = (texto) => texto.replace(/[\t\n\r]/g, "");
+
+/** Minúsculas só no ASCII, como o `to_ascii_lowercase` do Rust. */
+const minusculasAscii = (texto) => texto.replace(/[A-Z]/g, (letra) => letra.toLowerCase());
+
+/** Os domínios com a prévia liberada neste aparelho (ADR 0053). */
+function previasConsentidas() {
+  try {
+    const lista = JSON.parse(guardadoNaOrigem(CHAVES_DA_ORIGEM.previas) ?? "[]");
+    return Array.isArray(lista) ? lista.filter((dominio) => typeof dominio === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** O `previa_consentida` do desktop: o domínio, ou um subdomínio dele. */
+const previaConsentida = (lista, alvo) =>
+  lista.some((liberado) => alvo === liberado || alvo.endsWith(`.${liberado}`));
+
+/**
+ * O endereço que pode sair para uma aba nova, ou a recusa: o
+ * `endereco_que_pode_sair` do desktop (`main.rs`). Só `http` e `https`: o resto
+ * (`javascript:`, `data:`, `file:` e os esquemas que abrem programas) é alguém
+ * de fora escolhendo o que roda aqui.
+ */
+function enderecoQuePodeSair(bruto) {
+  const url = bruto.trim();
+  if (new TextEncoder().encode(url).length > 2048) return { recusa: "endereço longo demais" };
+  const minusculo = minusculasAscii(url);
+  if (!minusculo.startsWith("http://") && !minusculo.startsWith("https://")) {
+    return {
+      recusa:
+        "só abro endereços `http` e `https`: qualquer outro esquema é um programa que alguém de fora escolheu iniciar nesta máquina",
+    };
+  }
+  if (/[\s\p{Cc}]/u.test(url)) return { recusa: "endereço com espaço ou caractere de controle" };
+  if (url.length <= "https://".length) return { recusa: "endereço vazio" };
+  return { alvo: url };
+}
 
 // ------------------------------------------------------------------- os corpos
 
@@ -460,14 +691,16 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   pasta_de_downloads: () => "",
   versoes_instaladas: () => [],
   estado_da_primeira_abertura: () => null,
-  // Sem tecla escolhida. A tecla de falar do PC chega com a voz (3.3).
-  tecla_de_falar: () => null,
+  // **Opaca**, como no desktop: um `KeyboardEvent.code`, que quem lê o teclado
+  // (a casca) nomeia. No celular não há tecla: falar apertando é o SEGURAR
+  // PARA FALAR da faixa de voz.
+  tecla_de_falar: () => (CASCA_DA_PONTE === "larga" ? guardadoNaOrigem(CHAVES_DA_ORIGEM.tecla) : null),
   limite_da_mensagem: () => structuredClone(CONSTANTES_DO_DESKTOP.limite_da_mensagem),
   regras_de_previa: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_de_previa),
   regras_do_icone_do_server: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_do_icone_do_server),
   apis_de_mod_aceitas: () => structuredClone(CONSTANTES_DO_DESKTOP.apis_de_mod_aceitas),
   dominios_de_gif: () => structuredClone(CONSTANTES_DO_DESKTOP.dominios_de_gif),
-  controles_da_voz: () => structuredClone(CONSTANTES_DO_DESKTOP.controles_da_voz),
+  controles_da_voz: controlesDaVozGuardados,
   // Sem sessão, o mapa vazio, como o `unwrap_or_default` do desktop.
   volumes_locais: () => sessaoDaPonte.atual?.volumesLocais?.() ?? {},
   snapshot: () => comASessao((sessao) => sessao.snapshot()),
@@ -490,6 +723,152 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   },
   apelido_local: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.apelido),
   meu_retrato: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.retrato),
+  // Aparado e sem quebras; vazio apaga (`Preferences::set_nickname`).
+  escolher_apelido_local: ({ apelido } = {}) => {
+    const limpo = semQuebras(String(apelido ?? "").trim());
+    const valor = limpo.trim() === "" ? null : limpo;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.apelido, valor)) return Promise.reject("NaoGravei");
+    return null;
+  },
+  // **É o clique que consente**, para o domínio (ADR 0053). Uma palavra só, em
+  // minúsculas; um subdomínio de um liberado já está liberado.
+  consentir_previa: ({ dominio } = {}) => {
+    const alvo = minusculasAscii(semQuebras(String(dominio ?? ""))).trim();
+    if (alvo === "" || /\s/.test(alvo)) return null;
+    const lista = previasConsentidas();
+    if (previaConsentida(lista, alvo)) return null;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.previas, JSON.stringify([...lista, alvo]))) {
+      return Promise.reject("não consegui gravar a escolha");
+    }
+    return null;
+  },
+  esquecer_previa: ({ dominio } = {}) => {
+    const alvo = minusculasAscii(String(dominio ?? ""));
+    const lista = previasConsentidas();
+    const restam = lista.filter((liberado) => liberado !== alvo);
+    if (restam.length === lista.length) return null;
+    if (!gravarNaOrigem(CHAVES_DA_ORIGEM.previas, JSON.stringify(restam))) {
+      return Promise.reject("não consegui gravar a escolha");
+    }
+    return null;
+  },
+  previas_consentidas: () => previasConsentidas(),
+  // **O seletor, dentro do gesto.** Nenhum `await` antes do `click()`: o
+  // navegador só abre o seletor na ativação de quem clicou, e o executor da
+  // promessa roda na hora. Desistir é o `cancel`, e devolve `null`, como no
+  // desktop, sem deixar a promessa pendurada.
+  escolher_arquivo: () =>
+    new Promise((responder) => {
+      const entrada = document.createElement("input");
+      entrada.type = "file";
+      entrada.hidden = true;
+      let respondido = false;
+      const fim = (valor) => {
+        if (respondido) return;
+        respondido = true;
+        entrada.remove();
+        responder(valor);
+      };
+      entrada.addEventListener("change", () => {
+        const arquivo = entrada.files?.[0];
+        fim(arquivo ? descreverAlca(guardarSobAlca(arquivo, arquivo.name)) : null);
+      });
+      entrada.addEventListener("cancel", () => fim(null));
+      document.body.append(entrada);
+      entrada.click();
+    }),
+  // As regras e as recusas do `guardar_colado` do desktop; o `Blob` fica na
+  // memória, sob uma alça, e não num arquivo temporário.
+  guardar_colado: ({ tipo, base64 } = {}) => {
+    const texto = String(base64 ?? "");
+    const teto = REGRAS_DO_ARQUIVO.maior_colagem_bytes;
+    if (texto.length > Math.floor(teto / 3) * 4) return Promise.reject("GrandeDemais");
+    let binario;
+    try {
+      binario = atob(texto);
+    } catch {
+      return Promise.reject("NaoEImagem");
+    }
+    if (binario.length > teto) return Promise.reject("GrandeDemais");
+    if (binario.length === 0) return Promise.reject("NaoEImagem");
+    const bytes = Uint8Array.from(binario, (letra) => letra.charCodeAt(0));
+    const extensao = Object.hasOwn(REGRAS_DO_ARQUIVO.extensao_da_colagem, String(tipo))
+      ? REGRAS_DO_ARQUIVO.extensao_da_colagem[String(tipo)]
+      : "";
+    const nome = extensao ? `colado-${Date.now()}.${extensao}` : `colado-${Date.now()}`;
+    return descreverAlca(guardarSobAlca(new Blob([bytes]), nome, true));
+  },
+  // Uma alça que não está aqui é o caminho que não existe do desktop.
+  descrever_arquivo: ({ caminho } = {}) => descreverAlca(String(caminho ?? "")) ?? Promise.reject("NotConnected"),
+  saidas: saidasDeSom,
+  microfones: () => aparelhosDoTipo("audioinput", "MICROFONE"),
+  microfone_escolhido: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.microfone),
+  // Grava; numa sala, a voz (3.3, lote C) reabre a captura com ele.
+  escolher_microfone: ({ dispositivo } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.microfone, dispositivo == null ? null : String(dispositivo))
+      ? null
+      : Promise.reject("NaoGravei"),
+  // Sem escolha, o VOZ, que é o que funciona com a tela travada (matriz da F8).
+  modo_de_voz_escolhido: () => {
+    const guardado = guardadoNaOrigem(CHAVES_DA_ORIGEM.modo);
+    return MODOS_DE_VOZ.includes(guardado) ? guardado : "VoiceActivated";
+  },
+  set_voice_mode: ({ mode } = {}) => {
+    if (!MODOS_DE_VOZ.includes(mode)) return Promise.reject(`modo de voz desconhecido: ${String(mode)}`);
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.modo, mode) ? null : Promise.reject("NaoGravei");
+  },
+  // Em milésimos, como as preferências do desktop; `null` volta ao padrão.
+  ajustar_sensibilidade_da_voz: ({ dbfs } = {}) => {
+    if (dbfs != null && !Number.isFinite(dbfs)) return Promise.reject("a sensibilidade tem de ser um número");
+    const valor = dbfs == null ? null : String(Math.trunc(dbfs * 1000));
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.sensibilidade, valor) ? null : Promise.reject("não consegui gravar a escolha");
+  },
+  // A força entre 0 e 1, como o desktop; o navegador só liga ou desliga o
+  // `noiseSuppression`, e a voz (3.3, lote C) o liga com qualquer força acima de 0.
+  ajustar_reducao_de_ruido: ({ forca } = {}) => {
+    if (forca != null && !Number.isFinite(forca)) return Promise.reject("a força tem de ser um número");
+    const valor = forca == null ? null : String(Math.trunc(Math.min(1, Math.max(0, forca)) * 1000));
+    return gravarNaOrigem(CHAVES_DA_ORIGEM.reducao, valor) ? null : Promise.reject("não consegui gravar a escolha");
+  },
+  escolher_tecla_de_falar: ({ tecla } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.tecla, tecla == null ? null : String(tecla)) ? null : Promise.reject("NaoGravei"),
+  // A Permissions API: concedida, negada pelo navegador (achado 3 da matriz da
+  // F8), ou não se sabe, inclusive onde ela não pergunta pelo microfone.
+  permissao_de_microfone: async () => {
+    try {
+      const { state } = await navigator.permissions.query({ name: "microphone" });
+      return { granted: "Permitida", denied: "NegadaPeloNavegador" }[state] ?? "NaoSeSabe";
+    } catch {
+      return "NaoSeSabe";
+    }
+  },
+  saida_escolhida: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
+  // Grava; numa sessão, a voz (3.3) a aplica com `setSinkId`.
+  escolher_saida: ({ dispositivo } = {}) =>
+    gravarNaOrigem(CHAVES_DA_ORIGEM.saida, dispositivo == null ? null : String(dispositivo))
+      ? null
+      : Promise.reject("NaoGravei"),
+  // **A tela cheia do navegador**, no lugar da janela. Pedida dentro do clique,
+  // sem `await` antes. Como no desktop, não trocar de modo não lança na casca;
+  // aqui ele é dito no console.
+  tela_cheia: async ({ ligada } = {}) => {
+    const dentro = document.fullscreenElement != null;
+    try {
+      if (ligada && !dentro) await document.documentElement.requestFullscreen();
+      if (!ligada && dentro) await document.exitFullscreen();
+    } catch (falha) {
+      console.warn("ponte: a tela cheia não trocou", falha);
+    }
+    return null;
+  },
+  // **Numa aba nova, que não leva a página junto.** Sem `await` antes do
+  // `open`: o navegador só abre a aba dentro do gesto de quem clicou.
+  abrir_no_navegador: ({ url } = {}) => {
+    const { alvo, recusa } = enderecoQuePodeSair(String(url ?? ""));
+    if (recusa) return Promise.reject(recusa);
+    window.open(alvo, "_blank", "noopener,noreferrer");
+    return null;
+  },
 });
 
 // ------------------------------------------------------------------- os verbos
@@ -547,8 +926,14 @@ function ouvirNaPonte(evento, aoOuvir) {
   });
 }
 
+/** Emite um evento para quem o ouve, como o `emit` do Rust. */
+function emitirNaPonte(evento, payload) {
+  for (const ouvinte of [...(OUVINTES_DA_PONTE.get(evento) ?? [])]) ouvinte(payload);
+}
+
 if (PONTE_NO_LUGAR_DO_TAURI) {
   document.documentElement.dataset.casca = CASCA_DA_PONTE;
+  if (CASCA_DA_PONTE === "larga") ouvirOArraste();
   window.__TAURI__ = Object.freeze({
     core: Object.freeze({ invoke: invocarNaPonte }),
     event: Object.freeze({ listen: ouvirNaPonte }),

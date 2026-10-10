@@ -1244,7 +1244,7 @@ fn somar(contagem: &mut Contagem, transmissao: &Transmissao) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Mutex;
@@ -1294,7 +1294,55 @@ mod tests {
     /// O que este número não pode virar é generoso a ponto de deixar de pegar
     /// uma bomba travada, que é a razão de ele existir. Sessenta são três vezes
     /// o pior caso medido.
-    const PACIENCIA: Duration = Duration::from_secs(60);
+    pub(crate) const PACIENCIA: Duration = Duration::from_secs(60);
+
+    /// A ociosidade do QUIC nos testes que armam a bomba **depois** do aperto.
+    ///
+    /// Maior que [`PACIENCIA`], e é só isso que ela precisa ser: com ela menor,
+    /// o prazo que vale é o dela, que ninguém mediu, e a mensagem que sai é um
+    /// «timed out» que não diz quem parou.
+    const OCIOSIDADE: Duration = Duration::from_secs(2 * PACIENCIA.as_secs());
+
+    /// O par QUIC de quem arma a bomba depois do aperto. Ver [`OCIOSIDADE`].
+    ///
+    /// **A intermitente da décima integração** (10/10): «aceitar o fluxo:
+    /// Fluxo("timed out")», uma vez na bateria, e verde sozinho. Com o
+    /// [`crate::tela::tests::par`], a conexão cai com o padrão do `quinn`,
+    /// 30 s sem pacote nenhum, e esses 30 s correm enquanto `Laco::armar`
+    /// espera a primeira sessão de codificação do processo — a que custou
+    /// 19 s medidos (ver [`PACIENCIA`]). Na bateria, em série, o teste que
+    /// atravessa a conexão é o primeiro do processo a armar o codificador, e
+    /// é ele que paga essa sessão.
+    ///
+    /// O que foi medido: a mensagem só sai com 30 s de silêncio entre o aperto
+    /// e o primeiro byte do fluxo (parar quem recebe dá outra), e a thread da
+    /// bomba parada 35 s antes de armar a dá palavra por palavra. Que a
+    /// primeira sessão passou de 30 s na máquina carregada é a única causa
+    /// dessa ordem nessa janela, e não foi vista acontecer.
+    pub(crate) async fn par_paciente() -> (quinn::Connection, quinn::Connection) {
+        crate::tela::tests::par_com_ociosidade(OCIOSIDADE).await
+    }
+
+    /// O fluxo da tela, esperado com a [`PACIENCIA`] deste módulo.
+    ///
+    /// Se ela acabar, diz quem parou: a tarefa que escoa terminou (com erro,
+    /// sem abrir fluxo) ou continua esperando a bomba armar.
+    pub(crate) async fn aceitar_com_paciencia(
+        entrada: &quinn::Connection,
+        escoou: impl Fn() -> bool,
+    ) -> Recepcao {
+        match tokio::time::timeout(PACIENCIA, Recepcao::aceitar(entrada)).await {
+            Ok(recepcao) => recepcao.expect("aceitar o fluxo"),
+            Err(_) => panic!(
+                "nenhum fluxo de tela chegou em {PACIENCIA:?}: {}",
+                if escoou() {
+                    "a tarefa que escoa já terminou, sem abrir fluxo"
+                } else {
+                    "a tarefa que escoa ainda espera a bomba armar"
+                }
+            ),
+        }
+    }
 
     // -----------------------------------------------------------------------
     // As mentiras
@@ -1996,7 +2044,7 @@ mod tests {
         let Some(biblioteca) = biblioteca() else {
             return;
         };
-        let (saida, entrada) = crate::tela::tests::par().await;
+        let (saida, entrada) = par_paciente().await;
 
         let captura = CapturaDeMentira::default();
         // Quem escolheu 1080p num cano de 2 Mbps recebe 720p, e é o caso para o
@@ -2027,7 +2075,7 @@ mod tests {
             .await
         });
 
-        let mut recepcao = Recepcao::aceitar(&entrada).await.expect("aceitar o fluxo");
+        let mut recepcao = aceitar_com_paciencia(&entrada, || escoando.is_finished()).await;
         assert_eq!(recepcao.cabecalho().width, 1280);
         assert_eq!(recepcao.cabecalho().height, 720);
         assert_eq!(recepcao.cabecalho().screen, ScreenId(0x00C0_FFEE));
