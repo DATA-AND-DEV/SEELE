@@ -505,12 +505,26 @@ async function aVoltaDoAceiteLevaACredencial(browser, porta) {
 
 const CONVITE_W = `convite-do-lote-w-${process.pid}-${Date.now()}`;
 const ALVO_W = '192.0.2.17:8384';
+const OUTRO_ALVO_W = '192.0.2.18:8384';
 const LINK_W = `seele://${ALVO_W}?token=${CONVITE_W}`;
 
 /**
+ * A credencial que o apelido tomado deixou para a tentativa seguinte, ou
+ * `null`.
+ *
+ * `recusaDoApelido` (`tela-boot.js`) é o único lugar onde ela mora entre a
+ * recusa e a tentativa seguinte. Lida pelo nome, como `credencialGuardada` lê
+ * a pergunta dos MODs; antes do lote W o lugar não existia, e a resposta é
+ * `null`.
+ */
+function credencialDoApelido(page) {
+  return page.evaluate(() => (typeof recusaDoApelido === 'undefined' ? null : recusaDoApelido?.credencial ?? null));
+}
+
+/**
  * Uma tentativa pelo campo do diálogo de servidores — o link colado ou o
- * endereço digitado —, esperando a resposta dela: a linha vermelha da entrada
- * ou a `#tela-auth`.
+ * endereço digitado —, esperando a resposta dela: a linha vermelha da entrada,
+ * a `#tela-auth` ou a pergunta dos MODs.
  */
 async function tentarPeloCampo(page, escrito) {
   const antes = await page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').length);
@@ -523,7 +537,8 @@ async function tentarPeloCampo(page, escrito) {
   await page.press('#servidores-endereco', 'Enter');
   await page.waitForFunction(
     (n) => testCalls.filter(c => c.cmd === 'connect').length > n
-      && (!document.getElementById('boot-erro').hidden || !document.getElementById('tela-auth').hidden),
+      && (!document.getElementById('boot-erro').hidden || !document.getElementById('tela-auth').hidden
+        || !document.getElementById('mods-aceite').hidden),
     antes, { timeout: 3000 },
   ).catch(() => assert.fail(`a tentativa por «${escrito}» não chegou a uma resposta`));
   return page.evaluate(() => testCalls.filter(c => c.cmd === 'connect').at(-1).args);
@@ -543,9 +558,18 @@ async function trocarOApelido(page, novo) {
 async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   const erros = []; page.on('pageerror', e => erros.push(e.message));
-  await page.addInitScript(({ table, convite, alvo, snapshot }) => {
+  await page.addInitScript(({ table, convite, alvo, mod, snapshot }) => {
     window.testTable = table; window.testCalls = [];
-    window.testServidor = { gasto: false, tomados: ['Bia'] };
+    window.testServidor = { gasto: false, tomados: ['Bia'], exigeMods: false };
+    // O console inteiro, com os argumentos serializados, como na cena do R.
+    window.testConsole = [];
+    for (const nivel of ['log', 'info', 'warn', 'error', 'debug']) {
+      const original = console[nivel].bind(console);
+      console[nivel] = (...args) => {
+        try { window.testConsole.push(JSON.stringify(args)); } catch { window.testConsole.push(String(args)); }
+        original(...args);
+      };
+    }
     window.__TAURI__ = {
       core: { invoke: async (cmd, args) => {
         window.testCalls.push({ cmd, args });
@@ -558,6 +582,7 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
           if (args.server !== alvo) recusa({ Refused: { reason: 'CredentialRejected' } });
           if (args.joinSecret !== convite || servidor.gasto) recusa({ Refused: { reason: 'CredentialRejected' } });
           if (servidor.tomados.includes(args.nickname)) recusa({ Refused: { reason: 'NicknameTaken' } });
+          if (servidor.exigeMods) recusa({ ModsNaoAceitos: { mods: [mod], conjunto: 'conjunto-do-lote-w' } });
           servidor.gasto = true;
           return {
             snapshot,
@@ -575,7 +600,7 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
       apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
       analisar_convite: { alvo: ALVO_W, token: CONVITE_W, para_entrar: null },
     }),
-    convite: CONVITE_W, alvo: ALVO_W, snapshot: retrato(),
+    convite: CONVITE_W, alvo: ALVO_W, mod: MOD_R, snapshot: retrato(),
   });
   await page.goto(`http://127.0.0.1:${porta}`);
   await page.waitForTimeout(500);
@@ -590,10 +615,78 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   await trocarOApelido(page, 'Bia2');
 
   // ---- 3. A tentativa seguinte, ao mesmo servidor, sem colar o link de novo.
+  //
+  // O link já não está em lugar nenhum da página — o campo é zerado quando ele
+  // segue para uma tentativa (lote R) —, e a pessoa digita o endereço. O
+  // convite que o apelido tomado não gastou vai junto (I-4, lote W).
   const segunda = await tentarPeloCampo(page, ALVO_W);
   assert.equal(segunda.nickname, 'Bia2',
     `a pessoa trocou o apelido no perfil e a tentativa seguinte mandou «${segunda.nickname}»: o apelido recusado ficou ` +
     'lembrado, o perfil não foi lido, e a frase que manda escolher outro apelido e entrar de novo não tem como ser cumprida');
+  assert.equal(segunda.joinSecret ?? null, CONVITE_W,
+    `a tentativa seguinte ao mesmo servidor saiu sem o convite (joinSecret ${JSON.stringify(segunda.joinSecret ?? null)}): ` +
+    'o servidor o guardou intacto e a frase diz que não é o convite, e a tela acaba dizendo CREDENCIAL RECUSADA sobre um convite válido');
+  await page.waitForFunction(() => !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
+    .catch(async () => assert.fail(`com o apelido novo e o convite, a tentativa seguinte não entrou — a entrada diz «${await page.evaluate(() => $('boot-erro').textContent)}»`));
+  assert.equal(await credencialDoApelido(page), null,
+    'a credencial que o apelido tomado deixou continuou guardada depois de a pessoa entrar: um convite de uso único já gasto ficou na memória da janela');
+
+  // ---- 4. Uma tentativa a outro servidor não a leva, e a esquece.
+  await page.evaluate(() => { testServidor.gasto = false; testServidor.tomados = ['Bia2']; });
+  await tentarPeloCampo(page, LINK_W);
+  assert.equal(await credencialDoApelido(page), CONVITE_W,
+    'recusada pelo apelido, a tentativa não deixou a credencial para a seguinte, e este caso não mede nada');
+  const outro = await tentarPeloCampo(page, OUTRO_ALVO_W);
+  assert.equal(outro.server, OUTRO_ALVO_W, 'a tentativa ao outro servidor não foi a ele, e este caso não mede nada');
+  assert.equal(outro.joinSecret ?? null, null,
+    `uma tentativa a ${OUTRO_ALVO_W} levou o convite de ${ALVO_W}: a credencial que o apelido tomado deixou é daquele servidor, e foi mandada a quem não a emitiu`);
+  const deVolta = await tentarPeloCampo(page, ALVO_W);
+  assert.equal(deVolta.joinSecret ?? null, null,
+    'depois de uma tentativa a outro servidor, a volta a este levou o convite: trocar de alvo devia tê-lo esquecido');
+
+  // ---- 5. A tentativa seguinte para na pergunta dos MODs, e a pessoa desiste.
+  //
+  // A credencial passa à pergunta (lote R) e morre com ela: depois de RECUSAR
+  // E VOLTAR ela não está nem na pergunta nem no lugar do apelido tomado, e a
+  // próxima tentativa vai sem ela.
+  await tentarPeloCampo(page, LINK_W);
+  assert.equal(await credencialDoApelido(page), CONVITE_W,
+    'recusada pelo apelido outra vez, a tentativa não deixou a credencial, e a desistência não foi medida');
+  await trocarOApelido(page, 'Bia3');
+  await page.evaluate(() => { testServidor.exigeMods = true; });
+  const comMods = await tentarPeloCampo(page, ALVO_W);
+  assert.equal(comMods.joinSecret ?? null, CONVITE_W, 'a tentativa seguinte não levou o convite, e a desistência não foi medida');
+  assert.equal(await page.evaluate(() => document.getElementById('mods-aceite').hidden), false,
+    'a tentativa seguinte não parou na pergunta dos MODs, e a desistência não foi medida');
+  assert.equal(await credencialGuardada(page), CONVITE_W,
+    'a pergunta dos MODs não recebeu a credencial que a tentativa levou: aceitar voltaria sem ela');
+  await page.click('#mods-recusar');
+  await page.waitForFunction(() => document.getElementById('mods-aceite').hidden, null, { timeout: 3000 });
+  assert.equal(await credencialGuardada(page), null, 'desistir da pergunta dos MODs deixou a credencial guardada nela');
+  assert.equal(await credencialDoApelido(page), null,
+    'desistir da pergunta dos MODs deixou guardada a credencial que o apelido tomado tinha deixado');
+  await page.evaluate(() => { testServidor.exigeMods = false; });
+  const depoisDeDesistir = await tentarPeloCampo(page, ALVO_W);
+  assert.equal(depoisDeDesistir.joinSecret ?? null, null,
+    'depois de a pessoa desistir, a tentativa seguinte ainda levou o convite');
+
+  // ---- 6. A credencial não está em lugar nenhum além do `connect`.
+  const vazou = await page.evaluate((convite) => {
+    const onde = [];
+    const guardado = (loja) => Object.keys(loja).map((k) => `${k}=${loja.getItem(k)}`).join('\n');
+    if (guardado(localStorage).includes(convite)) onde.push('localStorage');
+    if (guardado(sessionStorage).includes(convite)) onde.push('sessionStorage');
+    if (document.documentElement.outerHTML.includes(convite)) onde.push('o DOM');
+    if ([...document.querySelectorAll('input, textarea')].some((campo) => campo.value.includes(convite))) onde.push('um campo');
+    if (testConsole.some((linha) => linha.includes(convite))) onde.push('o console');
+    for (const chamada of testCalls) {
+      if (chamada.cmd === 'connect' || chamada.cmd === 'analisar_convite') continue;
+      if (JSON.stringify(chamada.args ?? null).includes(convite)) onde.push(`o comando ${chamada.cmd}`);
+    }
+    return onde;
+  }, CONVITE_W);
+  assert.deepEqual(vazou, [],
+    `a credencial que o apelido tomado deixou apareceu fora do connect: ${vazou.join(', ')}. Ela é um convite de uso único ou a senha do servidor, e só vive na memória da janela`);
 
   assert.deepEqual(erros, [], 'a cena do lote W lançou erro na página');
   await page.close();
@@ -815,5 +908,7 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     console.log('lote R: com o último alvo trocado no meio da batida, a volta e o sim vão ao servidor que perguntou');
     console.log('lote R: a credencial não aparece no armazenamento, no DOM, no console nem em comando nenhum além do connect');
     console.log('lote W: desistir no meio da obtenção ou da gravação não deixa o sim dos MODs valendo');
+    console.log('lote W: depois do apelido tomado, a tentativa seguinte ao mesmo servidor leva o apelido novo e o convite, e entra; a outro servidor, não leva nada');
+    console.log('lote W: entrar, trocar de alvo e desistir da pergunta dos MODs esquecem a credencial, e ela não aparece fora do connect');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -32,10 +32,12 @@
  * Agora o token viaja como argumento de `conectar`, dentro da mesma chamada em
  * que foi lido. Não há o que sobreviver a nada.
  *
- * **Com uma exceção, e ela não troca de servidor** (lote R da F5): a batida que
- * para na pergunta dos MODs entrega a credencial à pergunta, que a guarda só
- * na memória enquanto está aberta e a devolve à volta que aceita — para o
- * mesmo alvo. Ver `aceitePendente`, em `camada-mods.js`. */
+ * **Com duas exceções, e nenhuma troca de servidor.** A batida que para na
+ * pergunta dos MODs entrega a credencial à pergunta, que a guarda só na
+ * memória enquanto está aberta e a devolve à volta que aceita — para o mesmo
+ * alvo (lote R da F5; ver `aceitePendente`, em `camada-mods.js`). E a recusa
+ * por apelido tomado a deixa para a tentativa seguinte ao mesmo alvo (lote W;
+ * ver `recusaDoApelido`, logo abaixo). */
 
 /* `desenharVisitados` saiu com o formulário da entrada.
  *
@@ -60,6 +62,33 @@
  */
 let ultimoAlvo = null;
 let ultimoApelido = null;
+
+/**
+ * **A credencial de uma tentativa recusada pelo apelido, e o alvo dela** — lote
+ * W da F5. `{ alvo, credencial }`, ou `null`.
+ *
+ * `NicknameTaken` vem antes de o servidor gastar o convite («o convite ficou
+ * intacto», em `seele-server/src/session.rs`), e a frase manda escolher outro
+ * apelido e entrar de novo. A tentativa seguinte ia sem ele: num servidor
+ * fechado por convite e sem portaria, a tela dizia CREDENCIAL RECUSADA sobre um
+ * convite válido, e a pessoa tinha de colar o link outra vez.
+ *
+ * Vive da recusa até a tentativa seguinte, **qualquer que seja**: `conectar` a
+ * lê e a esquece na primeira linha que sabe o alvo, e só a leva quando o alvo é
+ * o mesmo e a tentativa não trouxe credencial própria. Entrar, ser recusado de
+ * novo por outro motivo, tentar outro servidor e hospedar aqui (quando o
+ * servidor daqui sobe) passam todos por ali, e é isso que a esquece ao entrar,
+ * ao desistir e ao trocar de alvo. Não há pergunta aberta a fechar: o que fica
+ * na tela é a linha vermelha da entrada. Se a tentativa seguinte para na
+ * pergunta dos MODs, a credencial passa à pergunta e morre com ela (lote R).
+ * Ao fechar, vai junto com a memória da página.
+ *
+ * Só memória: nunca disco, nunca `localStorage`, nunca o console. O guarda
+ * `a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta` confere
+ * cada linha que a toca, e a `ajustes-v013.cjs` a procura onde ela não pode
+ * estar.
+ */
+let recusaDoApelido = null;
 
 /**
  * Se a entrada já perguntou o nome nesta execução.
@@ -154,6 +183,11 @@ async function conectar(alvo, apelido, credencial) {
     return;
   }
   alvo = ultimoAlvo;
+  // **A credencial que um apelido tomado deixou** (lote W da F5): só a uma
+  // tentativa ao mesmo alvo e sem credencial própria, e esquecida aqui, antes
+  // de qualquer espera, para toda tentativa. Ver `recusaDoApelido`.
+  if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;
+  recusaDoApelido = null;
   // **O apelido desta máquina, quando esta chamada não trouxe um.**
   //
   // Ele era `ultimoApelido ?? ""`, e o `ultimoApelido` só existe depois de
@@ -312,6 +346,10 @@ async function conectar(alvo, apelido, credencial) {
     // relato do `d084cfb4`, agora com um nome que alguém escolheu.
     if (motivo?.Refused?.reason === "NicknameTaken") {
       ultimoApelido = null;
+      // E a credencial desta tentativa fica para a seguinte a este alvo — o
+      // `alvo` desta chamada, e não o `ultimoAlvo`, pela razão do lote R logo
+      // abaixo. Ver `recusaDoApelido`.
+      if (credencial != null) recusaDoApelido = { alvo, credencial };
     }
     // Uma batida que ficou pendente na portaria tem tela própria (ADR 0030), e
     // uma falha que chega enquanto essa tela está na frente pertence a ela:

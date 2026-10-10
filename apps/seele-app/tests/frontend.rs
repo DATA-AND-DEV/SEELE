@@ -10565,16 +10565,21 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// Lote R da F5. A batida que para na pergunta dos MODs entrega o segredo com
 /// que chegou — o token do convite, ou a senha do servidor, que viajam no mesmo
 /// `join_secret` — à pergunta, que o guarda em `aceitePendente` enquanto está
-/// aberta e o devolve à volta que aceita. É a única credencial que esta janela
-/// guarda entre duas chamadas, e ela tem guarda próprio, em cinco partes:
+/// aberta e o devolve à volta que aceita. O lote W acrescentou o segundo e
+/// último lugar: a recusa por apelido tomado, que vem antes do gasto, a deixa
+/// em `recusaDoApelido` (`tela-boot.js`) para a tentativa seguinte ao mesmo
+/// alvo. São as duas únicas credenciais que esta janela guarda entre duas
+/// chamadas, e elas têm guarda próprio, em seis partes:
 ///
 /// 1. **Cada linha que a toca está na lista.** Toda linha de `tela-boot.js` e
-///    `camada-mods.js` que nomeia `credencial` ou `aceitePendente`, e a cópia
-///    `pergunta` de `aceitarOsMods`. Um caminho novo — um `localStorage`, um
-///    `console.warn` com o objeto da pergunta, um `invoke` que a grave em
-///    arquivo — é uma linha nova, e reprova aqui até alguém olhar para ela.
-/// 2. **Nenhum outro script lê a pergunta.** Um segundo leitor de
-///    `aceitePendente` seria um segundo lugar por onde ela sai.
+///    `camada-mods.js` que nomeia `credencial`, `aceitePendente` ou
+///    `recusaDoApelido`, e a cópia `pergunta` de `aceitarOsMods`. Um caminho
+///    novo — um `localStorage`, um `console.warn` com o objeto da pergunta, um
+///    `invoke` que a grave em arquivo — é uma linha nova, e reprova aqui até
+///    alguém olhar para ela.
+/// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
+///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
+///    ela sai.
 /// 3. **Só três chamadas de `conectar` levam credencial**: o link colado, o
 ///    link do lançador e a volta que aceita os MODs. O RECONECTAR, a batida da
 ///    espera, o hospedar e a troca de servidor não levam nenhuma — uma
@@ -10586,11 +10591,26 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 5. **Do outro lado da ponte, ela não vira log nem retrato.** O `main.rs`
 ///    nomeia o `join_secret` só no parâmetro do `connect` e no campo da
 ///    configuração, e o `Snapshot` da FFI não tem campo de segredo.
+/// 6. **A do apelido tomado morre na tentativa seguinte, qualquer que seja.**
+///    `conectar` a esquece antes da primeira espera: uma tentativa a outro
+///    alvo, ou uma que entra, não pode deixá-la para a próxima.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
         ("tela-boot.js", "async function conectar(alvo, apelido, credencial) {"),
         ("tela-boot.js", "joinSecret: credencial ?? null,"),
+        // O apelido tomado (lote W): o lugar, a leitura presa ao alvo e o
+        // esquecimento no começo de toda tentativa, e a guarda na recusa.
+        ("tela-boot.js", "let recusaDoApelido = null;"),
+        (
+            "tela-boot.js",
+            "if (recusaDoApelido?.alvo === alvo) credencial ??= recusaDoApelido.credencial;",
+        ),
+        ("tela-boot.js", "recusaDoApelido = null;"),
+        (
+            "tela-boot.js",
+            "if (credencial != null) recusaDoApelido = { alvo, credencial };",
+        ),
         // Com o `alvo` desta chamada, e não com o `ultimoAlvo` da janela, que
         // `hospedar()` reescreve no meio de uma batida (rodada 1, I3).
         (
@@ -10653,7 +10673,10 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     for arquivo in ["tela-boot.js", "camada-mods.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial") || names(linha, "aceitePendente") {
+            if names(linha, "credencial")
+                || names(linha, "aceitePendente")
+                || names(linha, "recusaDoApelido")
+            {
                 conferir(arquivo, linha);
             }
         }
@@ -10674,17 +10697,22 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
     }
 
-    // 2. Nenhum outro script lê a pergunta.
-    for nome in ui_files(".js") {
-        if nome == "camada-mods.js" {
-            continue;
+    // 2. Nenhum outro script lê os dois lugares.
+    for (lugar, dono) in [
+        ("aceitePendente", "camada-mods.js"),
+        ("recusaDoApelido", "tela-boot.js"),
+    ] {
+        for nome in ui_files(".js") {
+            if nome == dono {
+                continue;
+            }
+            let texto = without_comments(&read(&format!("ui/{nome}")));
+            assert!(
+                !names(&texto, lugar),
+                "`{nome}` lê `{lugar}`, que guarda a credencial da tentativa: um \
+                 segundo leitor é um segundo lugar por onde ela sai"
+            );
         }
-        let texto = without_comments(&read(&format!("ui/{nome}")));
-        assert!(
-            !names(&texto, "aceitePendente"),
-            "`{nome}` lê `aceitePendente`, que guarda a credencial da tentativa: um \
-             segundo leitor é um segundo lugar por onde ela sai"
-        );
     }
 
     // 3. Só três chamadas de `conectar` levam credencial.
@@ -10835,6 +10863,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             );
         }
     }
+
+    // 6. A do apelido tomado morre na tentativa seguinte, antes da primeira
+    //    espera (lote W). A lista da parte 1 prende as linhas, e não a ordem.
+    let conectar = without_comments(&js_function(
+        &read("ui/tela-boot.js"),
+        "async function conectar(",
+    ));
+    let esquece = conectar.find("recusaDoApelido = null;");
+    let espera = conectar.find("await ");
+    assert!(
+        esquece
+            .zip(espera)
+            .is_some_and(|(esquece, espera)| esquece < espera),
+        "`conectar` deixou de esquecer a credencial do apelido tomado antes da \
+         primeira espera: uma tentativa que entra, ou que vai a outro alvo, pode \
+         deixá-la para a próxima, e o convite de um servidor acaba mandado a \
+         outro ou gasto duas vezes.\n{conectar}"
+    );
 }
 
 #[test]
