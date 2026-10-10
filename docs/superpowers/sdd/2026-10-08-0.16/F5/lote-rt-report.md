@@ -27,6 +27,10 @@ roteiros passam, e os três que estavam podres exigem agora o que dizem. A etapa
 dos roteiros tem a sua frase de prazo, e a linha do release cita os roteiros.
 Todas as reversões saíram vermelhas onde deviam. Ver o §9.
 
+**Rodada 2 (verde):** os quatro achados da revisão (I1, M1, M2, M3), um commit
+cada, com o vermelho antes de cada conserto. Ver o §10. **Um incidente:** numa
+das sondas desta rodada eu matei os navegadores de outro agente (§10.5).
+
 ## 1. Os roteiros rodados aqui, e o que cada um prova hoje
 
 A pasta tem **34** roteiros, e não os 31 do brief. Cada um rodou sozinho pela
@@ -580,3 +584,192 @@ exigência que deviam derrubar, e só nela:
 Nenhum roteiro reprovou contra o produto. Nada reprovou por tempo, e nada
 precisou rodar de novo. Não rodei conformidade e não rodei o `publicar.sh` de
 ponta a ponta.
+
+## 10. Rodada 2: os achados da revisão
+
+A revisão (`lote-rt-review-report.md`) pediu conserto, com 0 crítico, 1
+importante e 3 menores. Cada achado é um commit:
+
+| commit | achado |
+|---|---|
+| `e5426c91` | I1: o guarda lê o `run` do CI e o `publicar.sh` como o shell lê |
+| `25a06d5f` | M1: um relato que não é texto não derruba a carga, e um defeito do aparelho vira motivo |
+| `392aa439` | M2: um prazo por roteiro dentro da carga, que mata o navegador que ela abriu |
+| `a5a1886d` | M3: um autoteste da carga, sem navegador, que o `cargo test` roda |
+
+### 10.1 I1: o guarda casava com uma nota dentro do bloco `>-`
+
+No bloco `>-` do YAML, o `#` é conteúdo. O guarda o tirava linha a linha antes
+de dobrar. O Actions, depois de dobrar, o lê como comentário de shell e corta o
+resto da chamada.
+
+**Medido antes do conserto**, com o guarda verde nos três casos:
+- **G1**, a sonda do revisor: `--roteiro tools/roteiros/toque.js  # F7: só faz
+  sentido no desktop` no CI.
+- **G2**, `--roteiro tools/roteiros/sala.js \  # nota` no `publicar.sh`.
+- **G3**, `--roteiro tools/roteiros/sala.js \ ` (barra e espaço) no
+  `publicar.sh`.
+
+**O `publicar.sh` tinha a mesma brecha por outro caminho.** O guarda cortava o
+comentário e o espaço do fim antes de juntar as continuações. Medido com o
+`sh` do macOS: depois de `\  # nota` e depois de `\ `, a linha **não**
+continua, e o resto da chamada vira outro comando («b: command not found»).
+
+**O conserto.**
+- O passo do CI é lido com o texto que o YAML entrega: com o `#`, e dobrado
+  como o YAML dobra. Uma linha com outro recuo dentro do bloco reprova.
+- As funções do `publicar.sh` são lidas sobre o texto com os comentários.
+- Os dois passam por um só leitor, `comandos_do_shell`:
+  - a continuação só vale com a `\` no fim da linha;
+  - `\ ` é um espaço escapado, e não continuação;
+  - o `#` comenta só no começo de uma palavra, fora de aspas;
+  - a quebra de linha separa comandos.
+- O teste `o_leitor_de_shell_do_guarda_le_como_o_sh` fixa os casos que o `sh`
+  respondeu.
+
+**Depois do conserto:**
+- G1 sai vermelho: «o job `bancadas` não roda estes roteiros da pasta:
+  ["trocar-de-janela.js", "versao-do-servidor.js"]», os mesmos dois que o
+  revisor mediu.
+- G2 e G3 saem vermelhos: «a chamada da carga tem [" "], que não é um
+  `--roteiro …`».
+- R1–R6b continuam vermelhos. O R2, a linha inteira comentada, agora reprova
+  pelo motivo certo: ela corta tudo o que vem depois («toque.js,
+  trocar-de-janela.js, versao-do-servidor.js»).
+
+### 10.2 M1: um relato que não é texto derrubava a carga
+
+Medido antes do conserto: `relatar(42)` dá `AttributeError: 'int' object has
+no attribute 'startswith'`, e `relatar(undefined)` dá o mesmo com `NoneType`.
+Numa lista, o traceback parava tudo ali.
+
+O conserto tem duas camadas, cada uma com a sua prova:
+
+- **`relatar` empurra `String(linha)`.** As sondas passam e relatam «42» e
+  «undefined».
+  - Reversão M1a, sem o `String`: o roteiro reprova com «a carga caiu neste
+    roteiro: AttributeError». A camada de baixo pega o erro, e a lista segue.
+- **`carregar_sem_cair` envolve cada carga.** Um defeito do aparelho vira
+  motivo daquele roteiro, com o traceback escrito.
+  - Sonda: um `SEELE-RELATO %E0%A4%A` que não se lê. O roteiro reprova com
+    «a carga caiu neste roteiro: JSONDecodeError», o seguinte roda e o resumo
+    sai.
+  - Reversão M1b, a lista chamando `carregar` direto: o traceback para a lista.
+
+A falta do navegador continua parando tudo, de propósito: ela é `SystemExit`.
+
+### 10.3 M2: um roteiro que trava deixava órfãos
+
+Medido antes do conserto com a sonda `for (;;) {}`. A `trava.py` dá um prazo
+de fora de 25 s e mata só a carga, como o `kill -9` da etapa. A carga não
+terminou. Três segundos depois, sobravam 5 `chrome-headless-shell` dela, com o
+renderer a 99,8% de CPU.
+
+O conserto é `rodar_navegador`: o navegador abre num grupo de processos só
+dele, com `communicate(timeout=…)`.
+- O prazo vem de `--prazo-por-roteiro`, com 60 s por padrão.
+- Quando ele vence, a carga mata o grupo e o roteiro reprova com «o roteiro não
+  terminou em N s, e o navegador que a carga abriu foi morto com os filhos
+  dele». A lista segue.
+- O prazo da etapa no `publicar.sh` continua como rede de segurança.
+
+Com `--prazo-por-roteiro 10`, a carga sai sozinha em 10,4 s, com 1. O
+`perfil-entrada.js` seguinte passa, o resumo nomeia a sonda, e não sobra
+navegador.
+
+Reversões:
+- **M2b**, sem o `timeout`: vermelho. A carga não termina em 40 s, e sobram 5
+  navegadores dela, com um renderer a 100%.
+- **M2a**, matar só o processo principal: **verde no macOS**. Com o
+  `chrome-headless-shell`, matar o principal bastou. A necessidade do grupo vem
+  do autoteste (§10.4, A5): um navegador de mentira com um filho segura a saída
+  por 30 s quando só o principal morre. No Linux do CI não foi medido.
+
+### 10.4 M3: o autoteste da carga, no `cargo test`
+
+`python3 tools/carga-da-casca.py --autoteste` roda cinco casos sem abrir
+navegador, sobre o mesmo código que a carga usa:
+- **o relato atravessa a aspa:** uma linha do console no formato do Chromium,
+  com uma aspa antes do REPROVADO, lida por `ler_saida`, que é a leitura de
+  verdade;
+- **vários `--roteiro` numa chamada:** pelo `argumentos_da_carga`;
+- **a lista roda todos e diz quem reprovou:** `varios` com uma carga de
+  mentira;
+- **a carga não cai;**
+- **o prazo mata o navegador e os filhos:** um «navegador» de mentira que abre
+  um filho e dorme.
+
+O autoteste leva cerca de 1 s. Quem o roda é o teste
+`a_carga_da_casca_passa_no_proprio_autoteste`, em `check_runtime.rs`. Antes do
+autoteste existir, esse teste saiu vermelho («unrecognized arguments:
+--autoteste»).
+
+**Por que este, e não roteiros-sonda no passo do CI.** É o mais barato que é
+de verdade:
+- não precisa de navegador;
+- roda em todo `cargo test`, isto é, no CI, no `validar` do `release.yml` e na
+  bateria do `publicar.sh`;
+- os roteiros-sonda só rodariam no job de navegador, que é manual, e pediriam
+  um modo de «esperar o vermelho».
+
+O teste é só Unix: é onde a carga roda e onde o prazo mata um grupo. A metade
+do JS do relato, o `encodeURIComponent`, só roda num navegador. Revertida, todo
+roteiro reprova alto: medido no J1, com «a carga caiu neste roteiro:
+JSONDecodeError».
+
+Reversões, cada uma vermelha só no caso dela, todas pelo `cargo test`:
+
+| | reversão | o caso que falhou |
+|---|---|---|
+| A1 | a leitura de antes (`[^"]*` e o `split`) | «o relato atravessa a aspa: o relato voltou como ['%5B%22com…'], e não como ['com "aspas" aqui', …]» |
+| A2 | sem o `action="append"` | «vários --roteiro numa chamada: dois --roteiro viraram PosixPath(…perfil-sessao.js)» |
+| A3 | a lista para no primeiro vermelho | «a lista roda todos e diz quem reprovou: a lista rodou [perfil-entrada.js], e não os dois» |
+| A4 | sem a rede de `carregar_sem_cair` | «a carga não cai: a carga caiu: RuntimeError: um defeito do aparelho» |
+| A5 | matar só o processo principal | «o prazo mata o navegador e os filhos: o prazo venceu, mas a carga esperou 30.0 s: um filho do «navegador» continuou vivo e segurou a saída» |
+
+### 10.5 Incidente: matei os navegadores de outro agente
+
+A primeira versão da `trava.py`, no scratchpad deste lote, listava **todos** os
+`chrome-headless-shell` da máquina. Na limpeza, ela matava os que tinham
+aparecido durante a sonda.
+
+Na reversão M2b, entre cerca de 20:03 e 20:05 de 10/10/2026, isso matou um
+grupo de navegador do Playwright que **não era meu**:
+- os PIDs 99743 a 99746 e 252;
+- o grupo vinha com `--disable-field-trial-config`, que é flag do Playwright,
+  e a carga não a usa;
+- logo depois vi outro agente rodando `rev.py R6b … -- node
+  apps/seele-app/bancada/ajustes-v013.cjs`. É provável que fosse dele.
+
+**Uma bancada desse agente pode ter saído vermelha por isso, e não pelo
+código.** Se a reversão de alguém deu um vermelho inesperado nesse intervalo,
+vale rodar de novo.
+
+A `trava.py` agora só olha o grupo de um navegador aberto com
+`--virtual-time-budget`, que só a carga passa. Na M2b, rodada de novo, ela
+achou e matou só os 5 da carga, e os navegadores dos grupos 1631 e 2255, de
+outros, ficaram vivos.
+
+### 10.6 O que rodou na rodada 2
+
+- **Os 34 roteiros**, um a um: todos com 0.
+  - O passo do CI, rodado como o Actions roda (`bash -e`): «os 34 passaram»,
+    0.
+  - A etapa do `publicar.sh` rodada sozinha: 0.
+- **`cargo test -p xtask`: 223 passaram, 0 falharam**: 81 no `xtask`, com o
+  leitor de shell e o autoteste; 121 em `empacotamento`; 21 nos outros alvos.
+- `cargo xtask check-runtime` saiu 0. `cargo clippy -p xtask --all-targets --
+  -D warnings`, `cargo fmt -p xtask --check` e `sh -n empacotar/publicar.sh`
+  passaram limpos.
+- Todas as reversões voltaram idênticas (`cmp`) e foram tocadas: G1–G3,
+  R1–R6b, M1a, M1b, M2a, M2b, A1–A5 e J1. O roteiro novo do R3 foi apagado, e
+  o `git status` ficou vazio.
+
+**O `palco.js` é sensível ao tempo, e nada o exige.** Em 1 das 8 rodadas que
+guardei, a da rodada 1, logo depois da pausa de CPU, ele relatou «canvas:
+ESCONDIDO 0x0», com a fila do decodificador em 5. Nas outras 7, relatou
+«visivel 960x540». Ele é um dos 11 que só provam que a sessão abre (§9.4), e
+passou nas duas. É mais um para a pendência 58.
+
+Não rodei conformidade, não rodei o `publicar.sh` de ponta a ponta e não fiz
+push.
