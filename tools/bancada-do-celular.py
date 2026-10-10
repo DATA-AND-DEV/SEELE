@@ -58,7 +58,6 @@ _spec = importlib.util.spec_from_file_location("carga", RAIZ / "tools" / "carga-
 carga = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(carga)
 
-VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
 # A marca, como a ponte da F4 a escreve na carga (spec, §9.2): a escolha
 # guardada à mão primeiro (`localStorage["seele.casca"]`, num `try`), e o
 # critério do aparelho depois, que aqui é a casca que o caso pede.
@@ -83,9 +82,6 @@ class Ponto:
 
 
 PONTOS_INJETADOS = [
-    # Sem a meta de viewport, o celular desenha a página a 980 px e a encolhe
-    # (medido na prova da Etapa A).
-    Ponto("P1", "index.html", '<meta charset="utf-8">\n', VIEWPORT, 'name="viewport"'),
     Ponto(
         "P5",
         "base.js",
