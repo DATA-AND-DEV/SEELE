@@ -1972,23 +1972,29 @@ fn a_volta_pela_lista_confere_pela_impressao_guardada() {
          servir só de marca para o quarto, e a conexão entra sem conferir"
     );
     // **A pergunta ao quarto e a conferência usam a mesma impressão.** Desde a
-    // 14b o quarto é perguntado na ponte, e as duas saem do mesmo campo do
-    // `ConnectConfig`: o `Quarto` é feito do `expected_fingerprint`, que é o
-    // mesmo que vira o `Esperada::Certificado` de cada candidato
-    // (`build_destino`). Com impressões diferentes, o quarto apontaria para o
-    // servidor de uma chave e o TLS recusaria o de outra.
+    // 14b o quarto é perguntado na ponte, e as duas saem da mesma decisão,
+    // `esperada_de`: o `Quarto` é feito da impressão que ela dá, e cada
+    // candidato confere a esperada que ela dá (`build_destino`). Com impressões
+    // diferentes, o quarto apontaria para o servidor de uma chave e o TLS
+    // recusaria o de outra; e com o código valendo (o ATENDER), o quarto seria
+    // perguntado por uma impressão que ninguém confere.
     let ffi = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/lib.rs"))
         .unwrap_or_else(|erro| panic!("o `seele-ffi` tem de ser legível: {erro}"));
-    let drive: String = body_of(&ffi, "async fn drive(")
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .collect();
+    let sem_espacos =
+        |corpo: &str| -> String { corpo.chars().filter(|c| !c.is_whitespace()).collect() };
+    let drive = sem_espacos(&body_of(&ffi, "async fn drive("));
+    let quarto = sem_espacos(&body_of(&ffi, "fn quarto_de("));
+    let destino = sem_espacos(&body_of(&ffi, "fn build_destino("));
     assert!(
-        drive.contains("matchconfig.expected_fingerprint.clone(){Some(impressao)=>")
-            && drive.contains("Quarto::novo(impressao,"),
-        "a pergunta ao quarto deixou de usar a impressão que a conexão confere (o \
-         `expected_fingerprint`): o quarto apontaria para o servidor de uma chave e o TLS \
-         recusaria o de outra"
+        drive.contains(
+            "matchquarto_de(&config,&chave_do_aceite){Some(quarto)=>chegada.com_o_quarto(quarto),"
+        ) && quarto.contains(
+            "matchesperada_de(config){Some(seele_core::enlace::Esperada::Certificado(impressao))=>"
+        ) && quarto.contains("Quarto::novo(impressao,")
+            && destino.contains("esperada:esperada_de(config),"),
+        "a pergunta ao quarto deixou de usar a impressão que a conexão confere (a de \
+         `esperada_de`): o quarto apontaria para o servidor de uma chave e o TLS recusaria \
+         o de outra"
     );
 }
 
@@ -16990,14 +16996,17 @@ fn o_quarto_e_da_ponte_e_nada_do_que_ele_da_volta_ao_connect() {
 
     let ffi = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/lib.rs"))
         .unwrap_or_else(|erro| panic!("o `seele-ffi` tem de ser legível: {erro}"));
+    // O quarto é montado em `quarto_de`, e o `drive` o liga à chegada.
     let drive = compacto(body_of(&ffi, "async fn drive("));
-    for agulha in [
-        ".com_o_quarto(",
-        "Quarto::novo(",
-        "candidato_do_quarto(&config_do_quarto,",
+    let quarto = compacto(body_of(&ffi, "fn quarto_de("));
+    for (corpo, agulha) in [
+        (&drive, "quarto_de(&config,"),
+        (&drive, ".com_o_quarto("),
+        (&quarto, "Quarto::novo("),
+        (&quarto, "candidato_do_quarto(&config_do_quarto,"),
     ] {
         assert!(
-            drive.contains(agulha),
+            corpo.contains(agulha),
             "a ponte deixou de ligar o quarto à chegada (falta `{agulha}`): quem volta a um \
              servidor guardado deixa de achar o endereço de hoje"
         );

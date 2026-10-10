@@ -83,6 +83,19 @@ pub use types::{
 /// em que uma mudasse.
 pub use seele_core::{conhecidos, preferences, preview, search, uri};
 
+/// A agenda, a leitura de um texto colado e o código de uma pessoa, para a sala
+/// pessoal (a F7).
+///
+/// A agenda é a lista de conhecidos dos códigos, e vale o mesmo raciocínio da
+/// lista de servidores: o app precisa do valor, e a regra de onde cada linha
+/// mora e de como se lê é do núcleo. `entrada` é a «função só, no núcleo» da
+/// spec de 23/09: a casca manda todo texto colado a ela.
+///
+/// O [`Codigo`] atravessa como o [`uri::Bilhete`] atravessa: tipado, e lido uma
+/// vez só, na borda. Um código em `String` seria lido de novo em cada lugar que
+/// o usa, e cada leitura é um lugar para errar o verificador.
+pub use seele_core::{agenda, entrada, Codigo};
+
 /// O número do fio, a versão de servidor e a linha de cada número, para quem
 /// confere o manifesto do launcher contra esta build. Pelo `seele-core`, e não
 /// direto do `seele-proto`: o ADR 0002 deixa este crate ver só o núcleo.
@@ -205,6 +218,68 @@ impl TesteDeMicrofone {
     }
 }
 
+/// O toque da sala pessoal tocando (tarefas 24 e 25 da F7). Largar a alça
+/// para o som.
+///
+/// Livre, como o [`TesteDeMicrofone`]: toca sem sessão nenhuma, porque quem
+/// recebe uma ligação pode não estar em servidor algum. **Abre só a saída**, e
+/// o microfone nunca é tocado (`seele_audio::device::Tocador`).
+#[derive(Debug)]
+pub struct Toque {
+    tocador: seele_core::Tocador,
+}
+
+impl Toque {
+    /// Começa a tocar em laço, na saída de id `saida` ([`playback_devices`]),
+    /// ou na padrão.
+    ///
+    /// **Uma saída escolhida que sumiu toca na padrão**, como a voz faz
+    /// (`abrir_a_voz`): um fone desligado não pode custar uma ligação. A troca
+    /// vai ao `seele.log`, e [`Toque::saida`] diz onde de fato tocou.
+    ///
+    /// # Errors
+    ///
+    /// [`ConnectionError::NoAudioDevice`] quando nem a padrão abre; o motivo vai
+    /// ao `seele.log`.
+    pub fn tocar(saida: Option<String>, volume: f32) -> Result<Self, ConnectionError> {
+        tocar_com(saida, |saida| seele_core::Tocador::tocar(saida, volume))
+            .map(|tocador| Self { tocador })
+    }
+
+    /// A saída que de fato abriu, quando ela se descreve.
+    #[must_use]
+    pub fn saida(&self) -> Option<PlaybackDevice> {
+        self.tocador.saida().map(|aparelho| PlaybackDevice {
+            id: aparelho.id.clone(),
+            name: aparelho.name.clone(),
+            default: aparelho.default,
+        })
+    }
+}
+
+/// A decisão de [`Toque::tocar`], com quem abre a saída dito por quem chama:
+/// a escolhida, e a padrão se a escolhida não abrir.
+fn tocar_com<T>(
+    saida: Option<String>,
+    mut abrir: impl FnMut(Option<String>) -> Result<T, seele_core::DeviceError>,
+) -> Result<T, ConnectionError> {
+    let escolhida = saida.is_some();
+    match abrir(saida) {
+        Ok(tocando) => return Ok(tocando),
+        Err(erro) if escolhida => {
+            tracing::warn!(%erro, "o toque não abriu na saída escolhida; toca na padrão");
+        }
+        Err(erro) => {
+            tracing::warn!(%erro, "o toque não abriu: a ligação toca sem som");
+            return Err(ConnectionError::NoAudioDevice);
+        }
+    }
+    abrir(None).map_err(|erro| {
+        tracing::warn!(%erro, "o toque não abriu nem na saída padrão: a ligação toca sem som");
+        ConnectionError::NoAudioDevice
+    })
+}
+
 /// Every place this machine will play sound, right now.
 ///
 /// The twin of [`capture_devices`], a free function for the same reason, and
@@ -258,14 +333,83 @@ pub fn impressao_desta_maquina(home: &str) -> Result<String, ConnectionError> {
 /// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama. Separado
 /// para o teste não mexer no ambiente do processo, que os outros testes leem.
 fn impressao_com(home: &str, variavel: Option<&str>) -> Result<String, ConnectionError> {
-    let arquivo = arquivo_da_identidade_com(Path::new(home), variavel);
-    let chave = identity::load_or_create(&arquivo).map_err(|error| {
-        tracing::warn!(%error, "identity unavailable");
-        ConnectionError::IdentityUnavailable
-    })?;
+    let chave = chave_com(home, variavel)?;
     Ok(seele_core::key_fingerprint(
         chave.verifying_key().as_bytes(),
     ))
+}
+
+/// A chave desta máquina, da pasta da identidade, criada se ainda não existe.
+/// A impressão, o código e a semente saem todos daqui: três leituras de uma
+/// chave só, e nenhuma delas pode achar outra.
+fn chave_com(
+    home: &str,
+    variavel: Option<&str>,
+) -> Result<seele_core::SigningKey, ConnectionError> {
+    let arquivo = arquivo_da_identidade_com(Path::new(home), variavel);
+    identity::load_or_create(&arquivo).map_err(|error| {
+        tracing::warn!(%error, "identity unavailable");
+        ConnectionError::IdentityUnavailable
+    })
+}
+
+/// O código desta máquina: o «número de telefone» da sala pessoal (ADR 0060),
+/// o que SEU CÓDIGO mostra e o que o ATENDER confere
+/// ([`ConnectConfig::codigo_esperado`]).
+///
+/// Da mesma chave que [`impressao_desta_maquina`], pela mesma pasta da
+/// identidade (ADR 0061). A sala sobe com essa chave ([`semente_da_sala`]), e
+/// um código lido de outra seria um número que não toca aqui.
+///
+/// # Errors
+///
+/// Falha se a identidade não puder ser lida nem criada.
+pub fn codigo_desta_maquina(home: &str) -> Result<Codigo, ConnectionError> {
+    codigo_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
+}
+
+/// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama.
+fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionError> {
+    let chave = chave_com(home, variavel)?;
+    Ok(Codigo::da_chave(chave.verifying_key().as_bytes()))
+}
+
+/// A semente da sala pessoal: a chave desta máquina, de onde saem o
+/// certificado da sala e a assinatura do registro dela no ponto de encontro
+/// (`seele_server::hospedagem::Hospedagem::iniciar_sala`, tarefa 23 da F7).
+///
+/// **Nunca atravessa a webview.** É a chave privada da pessoa: quem a tem
+/// entra em qualquer servidor como ela e atende a sala dela. Por isso este tipo
+/// não é `Serialize` nem `Clone`, o `Debug` não a imprime, e os bytes só saem
+/// emprestados, por [`SementeDaSala::bytes`], para quem sobe a sala.
+pub struct SementeDaSala(seele_core::SigningKey);
+
+impl SementeDaSala {
+    /// Os 32 bytes da semente, emprestados para `iniciar_sala`.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+impl std::fmt::Debug for SementeDaSala {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SementeDaSala(<oculta>)")
+    }
+}
+
+/// A semente da sala pessoal desta máquina, da pasta da identidade.
+///
+/// # Errors
+///
+/// Falha se a identidade não puder ser lida nem criada.
+pub fn semente_da_sala(home: &str) -> Result<SementeDaSala, ConnectionError> {
+    semente_com(home, std::env::var(VARIAVEL_DA_IDENTIDADE).ok().as_deref())
+}
+
+/// O mesmo, com o valor de `SEELE_IDENTIDADE` dito por quem chama.
+fn semente_com(home: &str, variavel: Option<&str>) -> Result<SementeDaSala, ConnectionError> {
+    chave_com(home, variavel).map(SementeDaSala)
 }
 
 /// A variável que diz onde mora a identidade desta máquina. ADR 0061.
@@ -345,6 +489,16 @@ pub struct ConnectConfig {
     /// discordava do pin. Quem decide qual das duas vale é
     /// [`impressao_a_conferir`], e o `connect` do app a usa.
     pub expected_fingerprint: Option<String>,
+    /// O código da sala pessoal que esta conexão confere (ADR 0060), no lugar
+    /// da impressão: quem atende tem de ser a sala dessa pessoa, e quem confere
+    /// é o `ConfereCodigo` do núcleo, dentro do TLS.
+    ///
+    /// É o ATENDER (tarefa 27 da F7): a casca entra na própria sala conferindo
+    /// o próprio código ([`codigo_desta_maquina`]), e não um certificado que
+    /// lista nenhuma guardou. `None` em toda outra conexão. Com os dois, vale o
+    /// código, e o `seele.log` diz que a impressão ficou de fora
+    /// ([`esperada_de`]).
+    pub codigo_esperado: Option<Codigo>,
     /// O bilhete de encontro do link, quando ele trouxe um.
     ///
     /// Degrau 4 do ADR 0022: com ele, quem entra bate no ponto de encontro antes
@@ -397,6 +551,7 @@ impl std::fmt::Debug for ConnectConfig {
             .field("home", &self.home)
             .field("join_secret", &self.join_secret.as_ref().map(|_| Oculto))
             .field("expected_fingerprint", &self.expected_fingerprint)
+            .field("codigo_esperado", &self.codigo_esperado)
             .field("bilhete", &self.bilhete)
             .field("audio", &self.audio)
             .field("capture_device", &self.capture_device)
@@ -1404,6 +1559,11 @@ impl Connection {
         olhos: Option<Arc<dyn EventListener>>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
         let (address, server_name, pin_key) = resolve(&config.server)?;
+        if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
+            tracing::warn!(
+                "a conexão trouxe código e impressão: vale o código, e a impressão não é conferida"
+            );
+        }
         // The invite's other addresses, resolved here so the driver thread gets
         // values. An alternative that does not resolve is dropped: the first
         // address is the one the person is most likely on the same network as,
@@ -4096,6 +4256,39 @@ fn candidato_do_quarto(
     build_destino(config, address, &server_name, &pin_key, chave_do_aceite)
 }
 
+/// O que cada destino desta conexão confere de quem atende: o código, quando
+/// há; senão a impressão; senão nada. **A decisão mora aqui**, e
+/// [`build_destino`] e [`quarto_de`] a leem: o quarto é perguntado pela mesma
+/// impressão que o TLS confere, e por nenhuma quando o que vale é o código.
+fn esperada_de(config: &ConnectConfig) -> Option<seele_core::enlace::Esperada> {
+    match (config.codigo_esperado, &config.expected_fingerprint) {
+        (Some(codigo), _) => Some(seele_core::enlace::Esperada::Codigo(codigo)),
+        (None, Some(impressao)) => {
+            Some(seele_core::enlace::Esperada::Certificado(impressao.clone()))
+        }
+        (None, None) => None,
+    }
+}
+
+/// O quarto desta volta, quando a conexão confere uma impressão.
+///
+/// O endereço de hoje é montado como os outros candidatos, por
+/// [`candidato_do_quarto`]: a chave de pino dele não é a do alvo, então o pino
+/// não prova o servidor, que é a regra para o endereço que o quarto devolveu.
+fn quarto_de(config: &ConnectConfig, chave_do_aceite: &str) -> Option<seele_core::chegada::Quarto> {
+    match esperada_de(config) {
+        Some(seele_core::enlace::Esperada::Certificado(impressao)) => {
+            let config_do_quarto = config.clone();
+            let aceite = chave_do_aceite.to_owned();
+            Some(seele_core::chegada::Quarto::novo(
+                impressao,
+                move |endereco| candidato_do_quarto(&config_do_quarto, endereco, &aceite),
+            ))
+        }
+        Some(seele_core::enlace::Esperada::Codigo(_)) | None => None,
+    }
+}
+
 fn build_destino(
     config: &ConnectConfig,
     address: SocketAddr,
@@ -4109,10 +4302,7 @@ fn build_destino(
         chave_do_pin: pin_key.to_owned(),
         apelido: config.nickname.clone(),
         segredo: config.join_secret.clone(),
-        esperada: config
-            .expected_fingerprint
-            .clone()
-            .map(seele_core::enlace::Esperada::Certificado),
+        esperada: esperada_de(config),
         // **O pino deste destino prova o servidor só no alvo, e só num alvo de
         // escopo público.** A regra mora aqui, e em nenhum outro lugar: ver
         // `seele_core::enlace::Destino::o_pino_prova_o_servidor`.
@@ -4212,19 +4402,10 @@ async fn drive(
     // furo começa na hora, e o endereço de hoje entra quando chega.
     //
     // Com a impressão conferida, e o bilhete guardado (a `Chegada` só pergunta
-    // com bilhete): é a mesma condição em que o `connect` perguntava. O endereço
-    // de hoje é montado como os outros candidatos, por `resolve` e
-    // `build_destino`: a chave de pino dele não é a do alvo, então o pino não
-    // prova o servidor, que é a regra para o endereço que o quarto devolveu.
-    let chegada = match config.expected_fingerprint.clone() {
-        Some(impressao) => {
-            let config_do_quarto = config.clone();
-            let aceite = chave_do_aceite.clone();
-            chegada.com_o_quarto(seele_core::chegada::Quarto::novo(
-                impressao,
-                move |endereco| candidato_do_quarto(&config_do_quarto, endereco, &aceite),
-            ))
-        }
+    // com bilhete): é a mesma condição em que o `connect` perguntava. Ver
+    // `quarto_de`.
+    let chegada = match quarto_de(&config, &chave_do_aceite) {
+        Some(quarto) => chegada.com_o_quarto(quarto),
         None => chegada,
     };
 
@@ -6716,7 +6897,7 @@ mod a_volta_recusada_diz_o_motivo {
 mod a_identidade_e_uma_por_maquina {
     use std::path::{Path, PathBuf};
 
-    use super::{impressao_com, pasta_da_identidade};
+    use super::{codigo_com, impressao_com, pasta_da_identidade, semente_com};
 
     fn pasta(nome: &str) -> PathBuf {
         let caminho = std::env::temp_dir().join(format!(
@@ -6799,6 +6980,88 @@ mod a_identidade_e_uma_por_maquina {
             esperada
         );
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// **SEU CÓDIGO é o da chave da máquina** (tarefa 22 da F7, o terceiro
+    /// teste): com `SEELE_HOME=a` e `SEELE_IDENTIDADE=b`, o código é o da
+    /// chave de `b`. Um código lido de `a` seria um número que não toca aqui,
+    /// porque a sala sobe com a chave de `b`.
+    #[test]
+    fn com_a_variavel_o_codigo_e_o_da_chave_da_maquina() {
+        let maquina = pasta("maquina-do-codigo");
+        let dados_da_linha = pasta("dados-do-codigo");
+        std::fs::write(maquina.join("identity.key"), [5_u8; 32]).unwrap();
+        let chave = super::identity::load_or_create(&maquina.join("identity.key")).unwrap();
+        let esperado = seele_core::Codigo::da_chave(chave.verifying_key().as_bytes());
+
+        let lido = codigo_com(
+            dados_da_linha.to_str().unwrap(),
+            Some(maquina.to_str().unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(lido, esperado);
+        assert!(
+            !dados_da_linha.join("identity.key").exists(),
+            "uma chave nova nasceu na pasta de dados: SEU CÓDIGO seria o de outra pessoa"
+        );
+        let _ = std::fs::remove_dir_all(&maquina);
+        let _ = std::fs::remove_dir_all(&dados_da_linha);
+    }
+
+    /// **A sala sobe com a chave cujo código a pessoa mostra.** A semente é a
+    /// da pasta da identidade, e a chave que ela dá tem o código desta máquina:
+    /// uma sala de outra semente atenderia por outro número.
+    #[test]
+    fn a_semente_da_sala_e_a_da_chave_da_maquina_e_da_o_mesmo_codigo() {
+        let maquina = pasta("maquina-da-semente");
+        let dados_da_linha = pasta("dados-da-semente");
+        std::fs::write(maquina.join("identity.key"), [9_u8; 32]).unwrap();
+        let (home, variavel) = (
+            dados_da_linha.to_str().unwrap(),
+            Some(maquina.to_str().unwrap()),
+        );
+
+        let semente = semente_com(home, variavel).unwrap();
+
+        assert_eq!(
+            semente.bytes(),
+            super::identity::load_or_create(&maquina.join("identity.key"))
+                .unwrap()
+                .as_bytes(),
+            "a semente da sala não é a chave da pasta da identidade"
+        );
+        let da_sala = seele_core::SigningKey::from_bytes(semente.bytes());
+        assert_eq!(
+            seele_core::Codigo::da_chave(da_sala.verifying_key().as_bytes()),
+            codigo_com(home, variavel).unwrap(),
+            "a sala subiria com uma chave cujo código não é o que SEU CÓDIGO mostra"
+        );
+        let _ = std::fs::remove_dir_all(&maquina);
+        let _ = std::fs::remove_dir_all(&dados_da_linha);
+    }
+
+    /// **A semente não sai pelo `Debug`.** Ela é a chave privada da pessoa, e
+    /// um `tracing::info!(?semente)` a levaria ao `seele.log`.
+    #[test]
+    fn a_semente_nao_sai_pelo_debug() {
+        let maquina = pasta("maquina-do-debug");
+        std::fs::write(maquina.join("identity.key"), [0xA7_u8; 32]).unwrap();
+        let semente = semente_com(maquina.to_str().unwrap(), None).unwrap();
+
+        for impresso in [format!("{semente:?}"), format!("{semente:#?}")] {
+            for vazamento in ["167", "a7", "A7"] {
+                assert!(
+                    !impresso.contains(vazamento),
+                    "o `Debug` da semente imprime os bytes da chave:\n{impresso}"
+                );
+            }
+            assert!(
+                impresso.contains("oculta"),
+                "o `Debug` da semente não diz que ela está ali:\n{impresso}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&maquina);
     }
 
     /// O código de produção de `lib.rs`: o arquivo sem os módulos
@@ -6926,6 +7189,7 @@ mod tests {
             home: "/tmp/does-not-matter".into(),
             join_secret: None,
             expected_fingerprint: Some("aaaa1111".into()),
+            codigo_esperado: None,
             bilhete: None,
             audio: false,
             capture_device: None,
@@ -6952,6 +7216,7 @@ mod tests {
             home: "/tmp/does-not-matter".into(),
             join_secret: None,
             expected_fingerprint: Some(ESPERADA_DO_LINK.into()),
+            codigo_esperado: None,
             bilhete: None,
             audio: false,
             capture_device: None,
@@ -7204,6 +7469,7 @@ mod tests {
             nickname: "alguem".into(),
             join_secret: None,
             expected_fingerprint: None,
+            codigo_esperado: None,
             bilhete: None,
             audio: false,
             capture_device: None,
@@ -7308,6 +7574,7 @@ mod tests {
                 home: casa.clone(),
                 join_secret: None,
                 expected_fingerprint: None,
+                codigo_esperado: None,
                 bilhete: None,
                 audio: false,
                 capture_device: None,
@@ -10529,6 +10796,7 @@ mod o_candidato_do_quarto {
             home: String::new(),
             join_secret: None,
             expected_fingerprint: Some("ab".repeat(32)),
+            codigo_esperado: None,
             bilhete: None,
             audio: false,
             capture_device: None,
@@ -13375,6 +13643,7 @@ mod o_debug_da_configuracao {
             home: "/tmp/casa-de-teste".into(),
             join_secret: Some(segredo.to_owned()),
             expected_fingerprint: None,
+            codigo_esperado: None,
             bilhete: None,
             audio: false,
             capture_device: None,
@@ -13406,5 +13675,153 @@ mod o_debug_da_configuracao {
             impresso.contains("join_secret: None"),
             "sem segredo, o `Debug` de `ConnectConfig` não diz `None`:\n{impresso}"
         );
+    }
+}
+
+#[cfg(test)]
+mod o_codigo_esperado {
+    //! O ATENDER (tarefa 27 da F7) entra na própria sala conferindo o próprio
+    //! código, e não uma impressão: a conferência é a do `ConfereCodigo` do
+    //! núcleo, e é este campo do `ConnectConfig` que a escolhe.
+
+    use super::{build_destino, quarto_de, ConnectConfig};
+    use seele_core::enlace::Esperada;
+    use seele_core::Codigo;
+
+    fn codigo() -> Codigo {
+        Codigo::da_chave(&[7; 32])
+    }
+
+    fn config(impressao: Option<String>, codigo: Option<Codigo>) -> ConnectConfig {
+        ConnectConfig {
+            server: "127.0.0.1:8385".into(),
+            alternate_servers: Vec::new(),
+            nickname: "pessoa".into(),
+            home: String::new(),
+            join_secret: None,
+            expected_fingerprint: impressao,
+            codigo_esperado: codigo,
+            bilhete: None,
+            audio: false,
+            capture_device: None,
+            playback_device: None,
+        }
+    }
+
+    fn esperada(config: &ConnectConfig) -> Option<Esperada> {
+        build_destino(
+            config,
+            "127.0.0.1:8385".parse().unwrap(),
+            "localhost",
+            "127.0.0.1:8385",
+            "127.0.0.1:8385",
+        )
+        .esperada
+    }
+
+    #[test]
+    fn o_codigo_esperado_vira_a_esperada_de_cada_destino() {
+        assert_eq!(
+            esperada(&config(None, Some(codigo()))),
+            Some(Esperada::Codigo(codigo())),
+            "o ATENDER entraria na própria sala sem conferir quem atende"
+        );
+    }
+
+    #[test]
+    fn com_o_codigo_e_a_impressao_vale_o_codigo() {
+        assert_eq!(
+            esperada(&config(Some("ab".repeat(32)), Some(codigo()))),
+            Some(Esperada::Codigo(codigo()))
+        );
+    }
+
+    #[test]
+    fn sem_o_codigo_a_impressao_segue_como_era() {
+        assert_eq!(
+            esperada(&config(Some("ab".repeat(32)), None)),
+            Some(Esperada::Certificado("ab".repeat(32)))
+        );
+        assert_eq!(esperada(&config(None, None)), None);
+    }
+
+    /// O quarto é perguntado pela impressão que a conexão confere. Com o
+    /// código valendo, não há impressão conferida, e um quarto perguntado por
+    /// ela apontaria um servidor que o TLS não aceita.
+    #[test]
+    fn o_quarto_so_e_perguntado_pela_impressao_que_a_conexao_confere() {
+        assert!(quarto_de(&config(Some("ab".repeat(32)), None), "127.0.0.1:8385").is_some());
+        assert!(
+            quarto_de(
+                &config(Some("ab".repeat(32)), Some(codigo())),
+                "127.0.0.1:8385"
+            )
+            .is_none(),
+            "com o código valendo, o quarto seria perguntado por uma impressão que ninguém confere"
+        );
+        assert!(quarto_de(&config(None, None), "127.0.0.1:8385").is_none());
+    }
+
+    /// O `Debug` é escrito à mão: um campo novo que ele esquecesse sumiria do
+    /// `seele.log` de quem investiga uma recusa.
+    #[test]
+    fn o_debug_mostra_o_codigo_esperado() {
+        let impresso = format!("{:?}", config(None, Some(codigo())));
+        assert!(
+            impresso.contains(&format!("codigo_esperado: Some({:?})", codigo())),
+            "o `Debug` de `ConnectConfig` não mostra o código esperado:\n{impresso}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod o_toque {
+    //! O toque da sala pessoal na saída escolhida, e na padrão quando a
+    //! escolhida sumiu: um fone desligado não pode custar uma ligação. Provado
+    //! sem abrir aparelho nenhum, pelo `tocar_com` que recebe quem abre.
+
+    use super::{tocar_com, ConnectionError};
+    use seele_core::DeviceError;
+
+    #[test]
+    fn a_saida_escolhida_toca_quando_abre() {
+        let mut pedidas = Vec::new();
+        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
+            pedidas.push(saida.clone());
+            Ok::<_, DeviceError>(saida)
+        });
+        assert_eq!(tocado, Ok(Some("fone".to_owned())));
+        assert_eq!(pedidas, vec![Some("fone".to_owned())]);
+    }
+
+    #[test]
+    fn a_saida_escolhida_que_sumiu_cai_na_padrao() {
+        let mut pedidas = Vec::new();
+        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
+            pedidas.push(saida.clone());
+            match saida {
+                Some(id) => Err(DeviceError::PlaybackDeviceGone { id }),
+                None => Ok("padrão"),
+            }
+        });
+        assert_eq!(
+            tocado,
+            Ok("padrão"),
+            "um fone desligado calou o toque: a ligação seria perdida sem som"
+        );
+        assert_eq!(pedidas, vec![Some("fone".to_owned()), None]);
+    }
+
+    #[test]
+    fn sem_saida_nenhuma_o_toque_diz_que_nao_abriu() {
+        let tocado = tocar_com(None, |_| Err::<(), _>(DeviceError::NoOutputDevice));
+        assert_eq!(tocado, Err(ConnectionError::NoAudioDevice));
+        let tocado = tocar_com(Some("fone".to_owned()), |saida| {
+            Err::<(), _>(match saida {
+                Some(id) => DeviceError::PlaybackDeviceGone { id },
+                None => DeviceError::NoOutputDevice,
+            })
+        });
+        assert_eq!(tocado, Err(ConnectionError::NoAudioDevice));
     }
 }

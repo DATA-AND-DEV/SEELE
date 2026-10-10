@@ -795,6 +795,7 @@ async fn recebedor(
             home,
             join_secret: None,
             expected_fingerprint: None,
+            codigo_esperado: None,
             bilhete: None,
             // Não há placa de som numa máquina de integração contínua.
             audio: false,

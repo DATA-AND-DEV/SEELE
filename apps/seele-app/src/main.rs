@@ -1246,6 +1246,7 @@ async fn connect(
         // embaixo, onde elas e o veredito decidem o que se guarda
         // (`impressao_a_guardar`).
         expected_fingerprint: conferida,
+        codigo_esperado: None,
         bilhete,
         // O microfone escolhido no Terminal servidor, lido do disco a cada
         // conexão em vez de guardado em memória: quem escolheu ontem não

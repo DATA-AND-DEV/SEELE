@@ -227,6 +227,7 @@ async fn voltar_com_o_ocupante(servidor_pelo_ipv6: bool) -> Recebido {
         home: casa.path().display().to_string(),
         join_secret: None,
         expected_fingerprint: Some(fp.clone()),
+        codigo_esperado: None,
         // O bilhete guardado, e não o desta volta: quem pergunta ao quarto e
         // aplica a regra é a ponte, junto com a corrida.
         bilhete: Some(do_link.clone()),
