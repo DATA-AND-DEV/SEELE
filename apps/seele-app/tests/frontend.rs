@@ -14219,8 +14219,52 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
         nomes.sort();
         juntar(nome, format!("escolha {}", nomes.join("|")));
     }
+    // **Os tokens por região** (17i, item 3): as regiões pelos nomes, e as
+    // cores que uma região redefine.
+    let lista_js = |inicio: &str| -> Vec<String> {
+        let (_, resto) = casca
+            .split_once(inicio)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de base.js"));
+        let mut nomes: Vec<String> = resto
+            .split(']')
+            .next()
+            .unwrap_or_default()
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes
+    };
+    let mut regioes_da_casca: Vec<String> =
+        entradas_js(objeto_js(&casca, "const REGIOES_DO_TEMA = Object.freeze("))
+            .into_iter()
+            .map(|(nome, _)| nome)
+            .collect();
+    regioes_da_casca.sort();
+    juntar(
+        "regioes".to_owned(),
+        format!(
+            "regioes {}; {}",
+            regioes_da_casca.join("|"),
+            lista_js("const CORES_DA_REGIAO = Object.freeze([").join("|")
+        ),
+    );
 
     let rust = read("../../crates/seele-proto/src/mods.rs");
+    let lista_rust = |inicio: &str| -> String {
+        let mut nomes: Vec<String> = rust
+            .split_once(inicio)
+            .and_then(|(_, resto)| resto.split_once("];"))
+            .map(|(corpo, _)| corpo)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de seele-proto"))
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes.join("|")
+    };
     let tabela: String = rust
         .split_once("pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[")
         .and_then(|(_, resto)| resto.split_once("\n];"))
@@ -14256,6 +14300,12 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
                 .collect();
             nomes.sort();
             format!("escolha {}", nomes.join("|"))
+        } else if forma.starts_with("Regioes") {
+            format!(
+                "regioes {}; {}",
+                lista_rust("pub const REGIOES_DO_TEMA: &[&str] = &["),
+                lista_rust("pub const CORES_DA_REGIAO: &[&str] = &[")
+            )
         } else {
             panic!("uma forma de `CHAVES_DO_TEMA` que este guarda não conhece: {forma}");
         };

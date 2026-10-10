@@ -2230,6 +2230,97 @@ const MEDIDAS_DA_API = Object.freeze({
 
 const COR_DO_TEMA = /^#[0-9a-f]{6}$/i;
 
+/**
+ * **Os tokens por região** (rascunho da API 6, §9; tarefa 17i, item 3): as oito
+ * regiões que o tema alcança, cada uma com os contêineres do produto em que as
+ * cores dela são escritas. Espelho de `seele_proto::mods::REGIOES_DO_TEMA`,
+ * conferido pelo espelho de `frontend.rs` e caso a caso pelo vetor.
+ *
+ * O contêiner é **o nó do produto que abriga a região**, e não a faixa do MOD
+ * dentro dela: o tema por região pinta a coluna de canais, a barra do canal,
+ * a lista de pessoas. Os itens do núcleo continuam nas cores do produto: eles
+ * leem os `--nucleo-*`, resolvidos na raiz.
+ */
+const REGIOES_DO_TEMA = Object.freeze({
+  "canal.cabecalho": Object.freeze([".linha-barra"]),
+  "compositor": Object.freeze(["#compositor-mods", "#form-mensagem"]),
+  "conversa.mensagem": Object.freeze(["#lista-mensagens"]),
+  "operador.barra": Object.freeze([".operador"]),
+  "pessoas.lista": Object.freeze([".painel-pessoas"]),
+  "redes": Object.freeze([".trilha"]),
+  "servidor.navegacao": Object.freeze([".painel-canais"]),
+  "status.barra": Object.freeze(["footer.telemetria"]),
+});
+
+/**
+ * As cores que uma região redefine: as do contrato, menos o `painel` — uma
+ * região é um painel, e o `fundo` dela é o dele. Espelho de
+ * `seele_proto::mods::CORES_DA_REGIAO`.
+ */
+const CORES_DA_REGIAO = Object.freeze(["acento", "apagado", "borda", "fundo", "texto"]);
+
+/**
+ * **A ordem dos pontos de código**: com mais de um nome errado, a casca e o
+ * servidor nomeiam o mesmo — o servidor lê o objeto num `BTreeMap`, que ordena
+ * pelos bytes UTF-8, e o `<` do JavaScript compara unidades UTF-16, que
+ * discordam dele acima de U+FFFF.
+ */
+function porPontoDeCodigo(a, b) {
+  const [x, y] = [Array.from(a), Array.from(b)];
+  for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+    const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
+    if (diferenca !== 0) return diferenca;
+  }
+  return x.length - y.length;
+}
+
+/**
+ * **Por que as `regioes` de um tema não passam**, ou `null` — a mesma regra de
+ * `seele_proto::mods::recusa_das_regioes`, na mesma ordem. A recusa leva o
+ * nome e os campos para o MOD da 6 (`recusa`, `camposDaRecusa`), e a frase diz
+ * a chave e a região.
+ */
+function recusaDasRegioes(valor) {
+  const recusa = (nome, frase, chave, regiao) => {
+    const erro = new Error(frase);
+    erro.recusa = nome;
+    erro.camposDaRecusa = regiao === undefined ? { chave } : { chave, regiao };
+    return erro;
+  };
+  if (valor === null || typeof valor !== "object" || Array.isArray(valor)) {
+    return recusa("valor-invalido", "«regioes» é um objeto de regiões", "regioes");
+  }
+  for (const regiao of Object.keys(valor).sort(porPontoDeCodigo)) {
+    if (!Object.hasOwn(REGIOES_DO_TEMA, regiao)) {
+      return recusa("regiao-desconhecida", `«regioes» não tem a região «${regiao}»`, "regioes", regiao);
+    }
+    const cores = valor[regiao];
+    if (cores === null || typeof cores !== "object" || Array.isArray(cores)) {
+      return recusa("valor-invalido", `«regioes»: a região «${regiao}» é um objeto de cores`, "regioes", regiao);
+    }
+    for (const chave of Object.keys(cores).sort(porPontoDeCodigo)) {
+      if (!CORES_DA_REGIAO.includes(chave)) {
+        return recusa(
+          "chave-desconhecida",
+          `a API de tema não conhece «${chave}» na região «${regiao}»`,
+          chave,
+          regiao,
+        );
+      }
+      const cor = cores[chave];
+      if (typeof cor !== "string" || !COR_DO_TEMA.test(cor)) {
+        return recusa(
+          "valor-invalido",
+          `«${chave}» da região «${regiao}» precisa ser uma cor #rrggbb, e veio «${cor}»`,
+          chave,
+          regiao,
+        );
+      }
+    }
+  }
+  return null;
+}
+
 /** WCAG 2.1: a luminância relativa de uma cor `#rrggbb`, de 0 a 1. */
 function luminanciaRelativa(cor) {
   const canais = [1, 3, 5].map((i) => {
@@ -2327,19 +2418,20 @@ function aplicarOTemaDoMod(id, valores, opcoes) {
   // tabela é a do servidor (`seele_proto::mods::CHAVES_DO_TEMA`), e as duas
   // respondem igual a cada caso de `chaves-do-tema.json` (tarefa 17j).
   const daTabela = (tabela, nome) => Object.hasOwn(tabela, nome);
-  // **Em ordem alfabética, e a dos pontos de código**: com mais de uma chave
-  // errada, a casca e o servidor nomeiam a mesma — o servidor lê o objeto num
-  // `BTreeMap`, que ordena pelos bytes UTF-8, e o `<` do JavaScript compara
-  // unidades UTF-16, que discordam dele acima de U+FFFF.
-  const porPontoDeCodigo = ([a], [b]) => {
-    const [x, y] = [Array.from(a), Array.from(b)];
-    for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
-      const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
-      if (diferenca !== 0) return diferenca;
+  // **Em ordem alfabética, e a dos pontos de código** (`porPontoDeCodigo`).
+  for (const [nome, valor] of Object.entries(valores ?? {}).sort(([a], [b]) => porPontoDeCodigo(a, b))) {
+    // **As regiões** (17i, item 3), cada uma com o nome e a cor que falhou.
+    if (nome === "regioes") {
+      const recusa = recusaDasRegioes(valor);
+      if (recusa) throw recusa;
+      for (const [outro, seus] of previa ? [] : temaDosMods) {
+        if (outro !== id && Object.hasOwn(seus, "regioes")) {
+          throw new Error(`«regioes» já é do MOD «${outro}» nesta sessão`);
+        }
+      }
+      pedido.set(nome, valor);
+      continue;
     }
-    return x.length - y.length;
-  };
-  for (const [nome, valor] of Object.entries(valores ?? {}).sort(porPontoDeCodigo)) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
     // recusaria o nome delas antes de alguém olhar.
     if (daTabela(MEDIDAS_DA_API, nome)) {

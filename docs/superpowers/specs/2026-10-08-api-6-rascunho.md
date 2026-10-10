@@ -1113,6 +1113,26 @@ fechada** para o token `--seele-*` que ele redefine, como a casca já faz hoje
 nome (`base.js:2038` [c]), e um valor fora da forma (`#rrggbb`, o intervalo do
 número, o booleano) também.
 
+**Os tokens por região** (tarefa 17i, item 3; aprovado em 10/10). A chave
+`regioes` leva um objeto cujas chaves são as oito regiões do §3 (`redes`,
+`servidor.navegacao`, `operador.barra`, `canal.cabecalho`,
+`conversa.mensagem`, `compositor`, `pessoas.lista`, `status.barra`; nenhuma
+camada) e cujos valores são objetos de `fundo`, `texto`, `apagado`, `acento`
+e `borda` — o `painel` não, porque uma região é um painel, e o fundo dela é o
+dele:
+
+```js
+mundo.tema({ fundo: '#050403', regioes: { 'pessoas.lista': { fundo: '#0e0b08', acento: '#c86b1f' } } });
+```
+
+As recusas, na ordem alfabética das regiões e, dentro de cada uma, das cores
+(a mesma das chaves de fora): `regiao-desconhecida`, com `chave: 'regioes'` e
+a `regiao`; `chave-desconhecida` e `valor-invalido`, com a cor em `chave` e a
+`regiao`; e `valor-invalido` com `chave: 'regioes'` quando o valor não é um
+objeto. [c, `seele_proto::mods::recusa_das_regioes` e `recusaDasRegioes`, nas
+duas pontas pelo vetor `chaves-do-tema.json`; o `mundo.tema` responde
+`{ ok: false, erro, chave, regiao }`]
+
 **Nenhum nome da tabela leva a `--nucleo-*`.** No celular, o MUDO, o SURDO e o
 SAIR leem variáveis `--nucleo-*`, declaradas na raiz a partir dos tokens do
 produto; é isso que garante o contraste deles sob qualquer tema, e a garantia

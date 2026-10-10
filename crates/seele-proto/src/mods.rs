@@ -148,6 +148,10 @@ pub enum FormaDoValorDoTema {
     Bandeira,
     /// Um destes nomes, e o produto fornece o que cada um vale.
     Escolha(&'static [&'static str]),
+    /// **Os tokens por região** (tarefa 17i, item 3): um objeto cujas chaves
+    /// são nomes de [`REGIOES_DO_TEMA`] e cujos valores são objetos de
+    /// [`CORES_DA_REGIAO`], cada uma `#rrggbb`. Ver [`recusa_das_regioes`].
+    Regioes,
 }
 
 impl FormaDoValorDoTema {
@@ -165,8 +169,66 @@ impl FormaDoValorDoTema {
                 .is_some_and(|n| (minimo..=maximo).contains(&n)),
             Self::Bandeira => valor.is_boolean(),
             Self::Escolha(nomes) => valor.as_str().is_some_and(|nome| nomes.contains(&nome)),
+            Self::Regioes => recusa_das_regioes(valor).is_none(),
         }
     }
+}
+
+/// **As regiões que o tema alcança** (rascunho da API 6, §3 e §9; tarefa 17i,
+/// item 3): as oito regiões da API 6, e nenhuma camada. Cada uma é pintada no
+/// contêiner dela, na casca.
+pub const REGIOES_DO_TEMA: &[&str] = &[
+    "canal.cabecalho",
+    "compositor",
+    "conversa.mensagem",
+    "operador.barra",
+    "pessoas.lista",
+    "redes",
+    "servidor.navegacao",
+    "status.barra",
+];
+
+/// **As cores que uma região redefine**: as do contrato, menos o `painel` —
+/// uma região é um painel, e o `fundo` dela é o dele.
+pub const CORES_DA_REGIAO: &[&str] = &["acento", "apagado", "borda", "fundo", "texto"];
+
+/// **Por que as `regioes` de um tema não passam**, ou `None` (tarefa 17i,
+/// item 3). Na ordem alfabética das regiões e, dentro de cada uma, das cores
+/// — a do `BTreeMap`, como a das chaves de fora:
+///
+/// - `regiao-desconhecida`, com a chave `regioes` e a região: o nome não está
+///   em [`REGIOES_DO_TEMA`];
+/// - `chave-desconhecida`, com a cor e a região: o nome não está em
+///   [`CORES_DA_REGIAO`];
+/// - `valor-invalido`, com a cor e a região: não é `#rrggbb`; ou com a chave
+///   `regioes` (e a região, quando é dela) quando o valor não é um objeto.
+#[must_use]
+pub fn recusa_das_regioes(valor: &serde_json::Value) -> Option<RecusaDasChavesDoTema> {
+    let recusa = |erro: &'static str, chave: &str, regiao: Option<&str>| RecusaDasChavesDoTema {
+        erro,
+        chave: chave.to_owned(),
+        regiao: regiao.map(str::to_owned),
+    };
+    let Some(regioes) = valor.as_object() else {
+        return Some(recusa("valor-invalido", "regioes", None));
+    };
+    for (regiao, cores) in regioes {
+        if !REGIOES_DO_TEMA.contains(&regiao.as_str()) {
+            return Some(recusa("regiao-desconhecida", "regioes", Some(regiao)));
+        }
+        let Some(cores) = cores.as_object() else {
+            return Some(recusa("valor-invalido", "regioes", Some(regiao)));
+        };
+        for (chave, cor) in cores {
+            if !CORES_DA_REGIAO.contains(&chave.as_str()) {
+                return Some(recusa("chave-desconhecida", chave, Some(regiao)));
+            }
+            if !FormaDoValorDoTema::Cor.aceita(cor) {
+                return Some(recusa("valor-invalido", chave, Some(regiao)));
+            }
+        }
+    }
+    None
 }
 
 /// **As chaves do tema: uma lista fechada** (rascunho da API 6, §9; tarefa
@@ -201,6 +263,8 @@ pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[
     // **O modo** (tarefa 17i, item 2): o `color-scheme` da sessão, que tem de
     // concordar com o fundo — ver [`modo_do_fundo`].
     ("modo", FormaDoValorDoTema::Escolha(&["claro", "escuro"])),
+    // **Os tokens por região** (tarefa 17i, item 3).
+    ("regioes", FormaDoValorDoTema::Regioes),
 ];
 
 /// **A luminância a partir da qual um fundo é claro** (rascunho da API 6, §9;
@@ -237,6 +301,18 @@ pub fn modo_do_fundo(fundo: Option<&str>) -> Option<&'static str> {
     })
 }
 
+/// Uma recusa da tabela das chaves do tema: o nome, de lista fechada, a chave,
+/// e a região quando a chave é de uma (`regioes`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecusaDasChavesDoTema {
+    /// `chave-desconhecida`, `valor-invalido` ou `regiao-desconhecida`.
+    pub erro: &'static str,
+    /// A chave que causou a recusa (`regioes`, numa região que não existe).
+    pub chave: String,
+    /// A região, quando a chave é de dentro de uma.
+    pub regiao: Option<String>,
+}
+
 /// **Por que um tema não passa pela tabela**, com a chave, ou `None`.
 ///
 /// `chave-desconhecida`: o nome não está em `CHAVES_DO_TEMA`.
@@ -249,12 +325,23 @@ pub fn modo_do_fundo(fundo: Option<&str>) -> Option<&'static str> {
 #[must_use]
 pub fn recusa_das_chaves_do_tema(
     tema: &serde_json::Map<String, serde_json::Value>,
-) -> Option<(&'static str, String)> {
+) -> Option<RecusaDasChavesDoTema> {
+    let recusa = |erro: &'static str, chave: &str| RecusaDasChavesDoTema {
+        erro,
+        chave: chave.to_owned(),
+        regiao: None,
+    };
     for (chave, valor) in tema {
         match CHAVES_DO_TEMA.iter().find(|(nome, _)| nome == chave) {
-            None => return Some(("chave-desconhecida", chave.clone())),
+            None => return Some(recusa("chave-desconhecida", chave)),
+            // As regiões dizem qual, e qual cor dentro dela.
+            Some((_, FormaDoValorDoTema::Regioes)) => {
+                if let Some(da_regiao) = recusa_das_regioes(valor) {
+                    return Some(da_regiao);
+                }
+            }
             Some((_, forma)) if !forma.aceita(valor) => {
-                return Some(("valor-invalido", chave.clone()));
+                return Some(recusa("valor-invalido", chave));
             }
             // O modo que discorda do fundo, na vez dele: o fundo, se errado,
             // já foi recusado, porque vem antes na ordem alfabética.
@@ -263,7 +350,7 @@ pub fn recusa_das_chaves_do_tema(
                     && valor.as_str()
                         != modo_do_fundo(tema.get("fundo").and_then(serde_json::Value::as_str)) =>
             {
-                return Some(("valor-invalido", chave.clone()));
+                return Some(recusa("valor-invalido", chave));
             }
             Some(_) => {}
         }

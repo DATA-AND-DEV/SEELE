@@ -540,8 +540,10 @@
       "borda",
       "densidade",
       "fonte",
-      "modo"
+      "modo",
+      "regioes"
     ],
+    "regioes": "{ '<região>': { fundo, texto, apagado, acento, borda } } — as oito regiões do §3, nenhuma camada; recusas: regiao-desconhecida (chave: 'regioes', regiao), chave-desconhecida e valor-invalido (a cor em chave, e a regiao), valor-invalido (chave: 'regioes') para o que não é objeto; na ordem alfabética das regiões e das cores",
     "modo": "'claro' | 'escuro': o color-scheme da sessão; tem de concordar com o fundo (claro de 0,18 de luminância relativa para cima; sem fundo no tema, o do produto, escuro), senão valor-invalido com a chave",
     "derivados-pelo-produto": {
       "nomes": [

@@ -748,6 +748,9 @@ impl Anfitriao {
                             if let Some(chave) = recusa.chave {
                                 resposta.set("chave", chave)?;
                             }
+                            if let Some(regiao) = recusa.regiao {
+                                resposta.set("regiao", regiao)?;
+                            }
                         }
                         Ok(tema) => {
                             if let Ok(mut guardado) = declarado.lock() {
@@ -2278,6 +2281,31 @@ mod tests {
         assert_eq!(
             pedir_tema(&mut anfitriao, "seele/estilo", r#"{"arredondamento":25}"#),
             r#"{"ok":false,"erro":"valor-invalido","chave":"arredondamento"}"#
+        );
+        assert_eq!(anfitriao.tomar_tema_declarado(), None);
+    }
+
+    /// **As regiões dizem qual** (tarefa 17i, item 3): uma região que não
+    /// existe volta pelo nome, com a chave `regioes` e a região; uma cor
+    /// errada dentro de uma, com a cor e a região. Nada fica declarado.
+    #[test]
+    fn uma_regiao_errada_e_recusada_com_a_regiao() {
+        let mut anfitriao = com_a_porta("seele/estilo", DECLARA_O_QUE_PEDIREM);
+        assert_eq!(
+            pedir_tema(
+                &mut anfitriao,
+                "seele/estilo",
+                r##"{"regioes":{"sala.inteira":{"fundo":"#050403"}}}"##
+            ),
+            r#"{"ok":false,"erro":"regiao-desconhecida","chave":"regioes","regiao":"sala.inteira"}"#
+        );
+        assert_eq!(
+            pedir_tema(
+                &mut anfitriao,
+                "seele/estilo",
+                r##"{"regioes":{"redes":{"fundo":"050403"}}}"##
+            ),
+            r#"{"ok":false,"erro":"valor-invalido","chave":"fundo","regiao":"redes"}"#
         );
         assert_eq!(anfitriao.tomar_tema_declarado(), None);
     }
