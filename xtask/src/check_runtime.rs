@@ -1,7 +1,7 @@
 //! Roda as bancadas de MOD que precisam só de Node.
 //!
-//! Seis, e as seis carregam o arquivo de verdade em vez de uma cópia, num
-//! contexto de VM, com o resto de mentira:
+//! Todas carregam o arquivo de verdade em vez de uma cópia, num contexto de
+//! VM, com o resto de mentira. Entre elas:
 //!
 //! - `ciclo-do-executor.cjs` põe `ui/mods-runtime.js` num contexto de VM e
 //!   controla a **ordem dos eventos** — que é a única coisa que separa um
@@ -29,10 +29,15 @@
 //!   servidor: dois envios de 10 MiB ao mesmo tempo, com o resto do tráfego,
 //!   cabem no balde, e um pedido da sessão anterior não atravessa;
 //! - `imagens-por-volume.cjs` roda a ponte de `ui/base.js` e o prelúdio de
-//!   `src/executor.rs`: o envio de imagem é recusado nas APIs 3 e 4, vai com o
-//!   id e a geração de quem hospeda e não com os que o MOD manda, só confirma
+//!   `crates/seele-motor/src/preludio.rs`: o envio de imagem é recusado nas
+//!   APIs 3 e 4, vai com o id e a geração de quem hospeda e não com os que o
+//!   MOD manda, só confirma
 //!   depois de gravar, responde `sessao-encerrada` quando o MOD deixa de valer
-//!   no meio da gravação, e só existe no SDK com a capacidade `volume`.
+//!   no meio da gravação, e só existe no SDK com a capacidade `volume`;
+//! - `ponte-web.cjs` põe `ui/ponte-web.js` numa janela de mentira e confere o
+//!   que a ponte do navegador responde: o lugar (o Tauri, um duble e o
+//!   navegador), a marca da casca, as recusas de cada casca, os neutros de
+//!   quem não hospeda, o `disconnect` que sai e a abertura que nunca entra.
 //!
 //! As de navegador (Playwright) não estão aqui: elas precisam de um Chromium,
 //! e quem as roda, por nome, é o job `bancadas` do `ci.yml`, que só roda
@@ -84,8 +89,9 @@ use std::process::ExitCode;
 /// As bancadas, por nome e não por um laço sobre a pasta: um rascunho guardado
 /// em `bancada/` não pode passar a reprovar os três lugares que a chamam, e as
 /// de navegador moram na mesma pasta.
-const BANCADAS: [&str; 11] = [
+const BANCADAS: [&str; 12] = [
     "ciclo-do-executor.cjs",
+    "ponte-web.cjs",
     "regiao-do-mod.cjs",
     "continuacao-de-midia.cjs",
     "contribuicoes-e-camadas.cjs",

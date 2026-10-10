@@ -289,22 +289,24 @@ async function avisoDuranteColheitaVaziaNaoSePerde() {
   confere(caso, colheitas === antes, "a colheita passou a consultar em laço ocioso");
 }
 
-/// **O executor é o do lugar.** O Tauri sempre injeta `__TAURI_INTERNALS__`, e
-/// com ele o `executorDoMod` dá o nativo; sem ele, o do navegador
-/// (`mods-no-navegador.js`), que roda o mesmo motor num `iframe` opaco. Os dois
-/// arquivos rodam juntos aqui, como na página, e sem `addEventListener` nem
-/// `document`: carregar o do navegador no desktop não pode fazer nada.
+/// **O executor é o do lugar.** A ponte (`ponte-web.js`) decide na carga se
+/// está no lugar do Tauri (`PONTE_NO_LUGAR_DO_TAURI`), e com isso o
+/// `executorDoMod` dá o do navegador (`mods-no-navegador.js`), que roda o mesmo
+/// motor num `iframe` opaco; senão, o nativo. Os arquivos rodam juntos aqui,
+/// como na página, e sem `addEventListener` nem `document`: carregar o do
+/// navegador no desktop não pode fazer nada. Como a ponte decide se prova na
+/// `ponte-web.cjs`.
 async function oExecutorEODoLugar() {
   const caso = "o executor do lugar";
   const noNavegador = fs.readFileSync(path.join(raiz, "ui/mods-no-navegador.js"), "utf8");
-  for (const [lugar, comTauri, esperado] of [
-    ["desktop", true, "nativo"],
-    ["navegador", false, "navegador"],
+  for (const [lugar, ponte, esperado] of [
+    ["desktop", false, "nativo"],
+    ["navegador", true, "navegador"],
   ]) {
     const contexto = vm.createContext({ console });
-    if (comTauri) contexto.__TAURI_INTERNALS__ = {};
     vm.runInContext(
-      `${fonte}\n${noNavegador}\nglobalThis.escolhido = executorDoMod("autor/mod", 1, "hash").nome;`,
+      `const PONTE_NO_LUGAR_DO_TAURI = ${ponte};\n${fonte}\n${noNavegador}\n` +
+        `globalThis.escolhido = executorDoMod("autor/mod", 1, "hash").nome;`,
       contexto,
     );
     confere(caso, contexto.escolhido === esperado,

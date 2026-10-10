@@ -1,7 +1,14 @@
-//! A `ui/` no navegador (F4 da 0.16, ADR 0057): o executor de MODs dele.
+//! A `ui/` no navegador (F4 da 0.16, ADR 0057): a ponte web e o executor de
+//! MODs dele.
 //!
-//! O executor (`ui/mods-no-navegador.js` e `ui/executor-de-mod.html`) se prova
-//! por comportamento na bancada `bancada/executor-no-navegador.cjs`, num
+//! **A ponte** (`ui/ponte-web.js`) põe no lugar do `window.__TAURI__` o que o
+//! navegador sabe fazer, e recusa com nome o resto. Estes guardas seguram as
+//! listas dela contra o que a casca chama e contra o `main.rs`; o
+//! comportamento se prova nas bancadas `bancada/ponte-web.cjs` (Node) e
+//! `bancada/ponte-sem-gesto.cjs` (Chromium).
+//!
+//! **O executor** (`ui/mods-no-navegador.js` e `ui/executor-de-mod.html`) se
+//! prova por comportamento na bancada `bancada/executor-no-navegador.cjs`, num
 //! Chromium e com o motor de verdade. Estes guardas seguram o que a bancada de
 //! um dia não vê mudar no dia seguinte: o texto das duas paredes. Um
 //! `allow-same-origin` acrescentado, um `connect-src` na CSP do `iframe` ou um
@@ -204,8 +211,8 @@ fn o_iframe_dos_executores_nunca_tem_a_origem_da_pagina() {
 ///
 /// No desktop, o QuickJS nativo, do outro lado da ponte do Tauri. No navegador,
 /// o mesmo motor num Worker do `iframe` opaco. A `base.js` pede o executor sem
-/// saber qual vem, e a escolha é pela presença do `__TAURI_INTERNALS__`, que o
-/// Tauri sempre injeta (o `__TAURI__` depende do `withGlobalTauri`). A escolha
+/// saber qual vem, e a escolha é a decisão que a ponte tomou na carga
+/// (`PONTE_NO_LUGAR_DO_TAURI`): o lugar se decide num arquivo só. A escolha
 /// funcionando se prova na bancada `ciclo-do-executor.cjs`; este guarda segura
 /// que a `base.js` não volta a pedir um dos dois pelo nome.
 #[test]
@@ -230,7 +237,7 @@ fn a_base_pede_o_executor_do_lugar_sem_saber_qual() {
         .expect("o `executorDoMod` fecha")
         .0;
     for exigido in [
-        "\"__TAURI_INTERNALS__\" in globalThis",
+        "PONTE_NO_LUGAR_DO_TAURI",
         "executorNativo(id, geracao, hash)",
         "executorNoNavegador(id, geracao, hash)",
     ] {
@@ -238,5 +245,513 @@ fn a_base_pede_o_executor_do_lugar_sem_saber_qual() {
             escolha.contains(exigido),
             "o `executorDoMod` deixou de ter `{exigido}`: {escolha}"
         );
+    }
+}
+
+// ------------------------------------------------------------------- a ponte
+
+/// Cada `ui/*.js`, com o nome, para o guarda dizer onde.
+fn scripts_por_arquivo() -> Vec<(String, String)> {
+    let mut todos: Vec<(String, String)> = std::fs::read_dir(app_dir().join("ui"))
+        .expect("ui/")
+        .filter_map(Result::ok)
+        .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+        .filter(|nome| nome.ends_with(".js"))
+        .map(|nome| {
+            let texto = ler(&format!("ui/{nome}"));
+            (nome, texto)
+        })
+        .collect();
+    todos.sort();
+    assert!(
+        todos.len() >= 30,
+        "a `ui/` tem {} scripts: a leitura quebrou",
+        todos.len()
+    );
+    todos
+}
+
+/// Todo `invoke("nome")` da casca, sem os comentários: a regra do
+/// `invoked_commands` de `tests/frontend.rs`.
+fn comandos_que_a_casca_chama() -> BTreeSet<String> {
+    let mut achados = BTreeSet::new();
+    for (_, fonte) in scripts_por_arquivo() {
+        let codigo = sem_comentarios(&fonte);
+        for pedaco in codigo.split("invoke(\"").skip(1) {
+            if let Some(nome) = pedaco.split('"').next() {
+                achados.insert(nome.to_owned());
+            }
+        }
+    }
+    assert!(
+        achados.len() >= 100,
+        "a casca chama {} comandos: a leitura quebrou",
+        achados.len()
+    );
+    achados
+}
+
+fn e_nome_de_comando(nome: &str) -> bool {
+    !nome.is_empty() && nome.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+}
+
+/// Os nomes que uma lista da ponte declara, na forma em que ela as declara:
+/// - `const X = new Set([ "a", "b" ]);`: todo nome entre aspas;
+/// - `const X = new Map([ ["a", …], ["b", …] ]);`: o primeiro de cada entrada.
+fn lista_da_ponte(ponte: &str, lista: &str) -> BTreeSet<String> {
+    let codigo = sem_comentarios(ponte);
+    let depois = codigo
+        .split_once(&format!("const {lista} = new "))
+        .unwrap_or_else(|| panic!("a ponte não declara `{lista}`"))
+        .1;
+    let (tipo, corpo) = depois.split_at(3);
+    let corpo = corpo
+        .strip_prefix("([")
+        .unwrap_or_else(|| panic!("`{lista}` não abre com `new {tipo}([`"))
+        .split_once("]);")
+        .unwrap_or_else(|| panic!("`{lista}` não fecha com `]);`"))
+        .0;
+    let nomes: BTreeSet<String> = match tipo {
+        "Set" => corpo
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|nome| e_nome_de_comando(nome))
+            .map(str::to_owned)
+            .collect(),
+        "Map" => primeiros_das_entradas(corpo),
+        outro => {
+            panic!("`{lista}` é um `{outro}`, e a ponte declara as listas como `Set` ou `Map`")
+        }
+    };
+    for nome in &nomes {
+        assert!(
+            e_nome_de_comando(nome),
+            "`{lista}` tem `{nome}`, que não é nome de comando"
+        );
+    }
+    nomes
+}
+
+/// O primeiro texto de cada entrada `[…]` de um `new Map([ … ])`, contando a
+/// fundura e pulando o que está dentro de aspas: uma entrada escrita em várias
+/// linhas, ou um valor com `[` dentro, não confunde a leitura.
+fn primeiros_das_entradas(corpo: &str) -> BTreeSet<String> {
+    let mut nomes = BTreeSet::new();
+    let mut fundura = 0usize;
+    let mut abriu_entrada = false;
+    let mut aspas: Option<char> = None;
+    let mut texto = String::new();
+    let mut escapado = false;
+    for c in corpo.chars() {
+        if let Some(fecha) = aspas {
+            if escapado {
+                escapado = false;
+                texto.push(c);
+            } else if c == '\\' {
+                escapado = true;
+            } else if c == fecha {
+                aspas = None;
+                if abriu_entrada {
+                    nomes.insert(std::mem::take(&mut texto));
+                    abriu_entrada = false;
+                }
+                texto.clear();
+            } else {
+                texto.push(c);
+            }
+            continue;
+        }
+        match c {
+            '"' | '\'' | '`' => aspas = Some(c),
+            '[' | '{' | '(' => {
+                abriu_entrada = fundura == 0 && c == '[';
+                fundura += 1;
+            }
+            ']' | '}' | ')' => fundura = fundura.saturating_sub(1),
+            c if c.is_whitespace() => {}
+            _ => abriu_entrada = false,
+        }
+    }
+    nomes
+}
+
+/// As seis listas da ponte.
+struct Listas {
+    atendidos: BTreeSet<String>,
+    so_na_larga: BTreeSet<String>,
+    recusados: BTreeSet<String>,
+    neutros: BTreeSet<String>,
+    apesar_da_hospedagem: BTreeSet<String>,
+    a_fazer: BTreeSet<String>,
+}
+
+fn listas_da_ponte() -> Listas {
+    let ponte = ler("ui/ponte-web.js");
+    Listas {
+        atendidos: lista_da_ponte(&ponte, "COMANDOS_DA_PONTE"),
+        so_na_larga: lista_da_ponte(&ponte, "SO_NA_CASCA_LARGA"),
+        recusados: lista_da_ponte(&ponte, "RECUSAS_NOMEADAS"),
+        neutros: lista_da_ponte(&ponte, "NEUTROS_DE_QUEM_NAO_HOSPEDA"),
+        apesar_da_hospedagem: lista_da_ponte(&ponte, "ATENDIDOS_APESAR_DA_HOSPEDAGEM"),
+        a_fazer: lista_da_ponte(&ponte, "AINDA_A_FAZER"),
+    }
+}
+
+/// **Todo comando que a casca chama está na ponte, nas duas cascas.**
+///
+/// No navegador, um `invoke` que a ponte não conhece é um botão que não faz
+/// nada e não diz por quê. Cada comando cai numa lista, e numa só:
+/// - `COMANDOS_DA_PONTE`: atendido nas duas cascas;
+/// - `SO_NA_CASCA_LARGA`: atendido no PC (D-web-3) e recusado com a frase no
+///   celular;
+/// - `RECUSAS_NOMEADAS`: recusado com a frase nas duas;
+/// - `NEUTROS_DE_QUEM_NAO_HOSPEDA` e `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: os que
+///   mexem na hospedagem e não são recusados (o guarda abaixo).
+///
+/// Então no celular atende-se `COMANDOS_DA_PONTE` mais os dois da hospedagem,
+/// e recusa-se o resto; no PC, também os `SO_NA_CASCA_LARGA`. **E a lista não
+/// guarda o que a casca não chama mais**: um nome velho é uma porta que
+/// ninguém confere.
+#[test]
+fn todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas() {
+    let chamados = comandos_que_a_casca_chama();
+    let l = listas_da_ponte();
+    let nomeadas = [
+        ("COMANDOS_DA_PONTE", &l.atendidos),
+        ("SO_NA_CASCA_LARGA", &l.so_na_larga),
+        ("RECUSAS_NOMEADAS", &l.recusados),
+        ("NEUTROS_DE_QUEM_NAO_HOSPEDA", &l.neutros),
+        ("ATENDIDOS_APESAR_DA_HOSPEDAGEM", &l.apesar_da_hospedagem),
+    ];
+    for (i, (nome_a, a)) in nomeadas.iter().enumerate() {
+        for (nome_b, b) in nomeadas.iter().skip(i + 1) {
+            let nas_duas: Vec<_> = a.intersection(b).collect();
+            assert!(
+                nas_duas.is_empty(),
+                "{nas_duas:?} estão em `{nome_a}` e em `{nome_b}`: cada comando cai numa lista só"
+            );
+        }
+    }
+    let todos: BTreeSet<String> = nomeadas
+        .iter()
+        .flat_map(|(_, lista)| lista.iter().cloned())
+        .collect();
+    let sem_dono: Vec<_> = chamados.difference(&todos).collect();
+    assert!(
+        sem_dono.is_empty(),
+        "a casca chama no navegador o que a ponte não atende nem recusa, em nenhuma das duas \
+         cascas: {sem_dono:?}"
+    );
+    let velhos: Vec<_> = todos.difference(&chamados).collect();
+    assert!(
+        velhos.is_empty(),
+        "a ponte lista o que a casca não chama mais: {velhos:?}. Tire-os da lista"
+    );
+    let a_fazer_fora: Vec<_> = l
+        .a_fazer
+        .iter()
+        .filter(|nome| {
+            !l.atendidos.contains(*nome)
+                && !l.so_na_larga.contains(*nome)
+                && !l.apesar_da_hospedagem.contains(*nome)
+        })
+        .collect();
+    assert!(
+        a_fazer_fora.is_empty(),
+        "`AINDA_A_FAZER` só guarda o que a ponte atende e ainda não tem corpo: {a_fazer_fora:?}"
+    );
+}
+
+/// O corpo da função de um comando no `main.rs`, sem os comentários.
+fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
+    let inicio = [
+        format!("\nfn {comando}("),
+        format!("\nasync fn {comando}("),
+        format!("\nconst fn {comando}("),
+    ]
+    .iter()
+    .find_map(|assinatura| main.find(assinatura.as_str()))?;
+    let resto = &main[inicio..];
+    let abre = resto.find('{')?;
+    let mut fundura = 0usize;
+    for (onde, c) in resto[abre..].char_indices() {
+        match c {
+            '{' => fundura += 1,
+            '}' => {
+                fundura -= 1;
+                if fundura == 0 {
+                    return Some(sem_comentarios(&resto[abre..=abre + onde]));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// **O critério da hospedagem, comando a comando** (`F4/ponte-no-pc.md`, o
+/// último item; pedido pela orquestradora em 09/10).
+///
+/// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
+/// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
+/// `portaria::`, `persistence_do_mod`) está numa de três listas, e nunca solto
+/// entre os atendidos:
+/// 1. `RECUSAS_NOMEADAS`;
+/// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
+///    confere cada uma);
+/// 3. `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (o `disconnect`).
+///
+/// Um comando novo que mexa na hospedagem reprova até alguém decidir de que
+/// lado ele fica. E o contrário também: um neutro que não mexe na hospedagem
+/// está na lista errada.
+#[test]
+fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo() {
+    let main = ler("src/main.rs");
+    let l = listas_da_ponte();
+    let mut mexem = BTreeSet::new();
+    for comando in comandos_que_a_casca_chama() {
+        let Some(corpo) = corpo_do_comando(&main, &comando) else {
+            continue;
+        };
+        let toca = [
+            "hospedagem",
+            "persistence_hospedada",
+            "portaria::",
+            "persistence_do_mod",
+        ]
+        .iter()
+        .any(|marca| corpo.contains(marca));
+        if toca {
+            mexem.insert(comando);
+        }
+    }
+    assert!(
+        mexem.len() >= 10,
+        "o guarda achou {} comandos que mexem na hospedagem ({mexem:?}); em 09/10 eram 13, e a \
+         leitura do `main.rs` quebrou",
+        mexem.len()
+    );
+    for comando in &mexem {
+        assert!(
+            l.recusados.contains(comando)
+                || l.neutros.contains(comando)
+                || l.apesar_da_hospedagem.contains(comando),
+            "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS`, \
+             `NEUTROS_DE_QUEM_NAO_HOSPEDA` nem `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: decida de que \
+             lado ele fica (F4/ponte-no-pc.md)"
+        );
+    }
+    for comando in l.neutros.iter().chain(&l.apesar_da_hospedagem) {
+        assert!(
+            mexem.contains(comando),
+            "`{comando}` está entre os da hospedagem na ponte, e o corpo dele no `main.rs` não \
+             mexe nela: ele é um atendido comum"
+        );
+    }
+}
+
+/// Os números de um valor JSON como `f64`: `-60` da ponte e `-60.0` do Rust
+/// são o mesmo número.
+fn numeros_como_f64(valor: serde_json::Value) -> serde_json::Value {
+    match valor {
+        serde_json::Value::Number(n) => serde_json::json!(n.as_f64().expect("um número")),
+        serde_json::Value::Array(itens) => {
+            serde_json::Value::Array(itens.into_iter().map(numeros_como_f64).collect())
+        }
+        serde_json::Value::Object(campos) => serde_json::Value::Object(
+            campos
+                .into_iter()
+                .map(|(chave, valor)| (chave, numeros_como_f64(valor)))
+                .collect(),
+        ),
+        outro => outro,
+    }
+}
+
+/// Uma constante `const NOME: T = <expressão>;` do `main.rs`, com a expressão
+/// feita de inteiros multiplicados (`8 * 1024`).
+fn inteiro_do_main(main: &str, nome: &str) -> u64 {
+    let expressao = main
+        .split_once(&format!("const {nome}: "))
+        .unwrap_or_else(|| panic!("o `main.rs` não declara `{nome}`"))
+        .1
+        .split_once('=')
+        .expect("a constante tem valor")
+        .1
+        .split_once(';')
+        .expect("a constante fecha")
+        .0;
+    expressao
+        .split('*')
+        .map(|fator| {
+            fator
+                .trim()
+                .replace('_', "")
+                .parse::<u64>()
+                .expect("um inteiro")
+        })
+        .product()
+}
+
+/// **O que a ponte responde sem perguntar a ninguém é o que o desktop
+/// responde.** As constantes da casca (o teto da mensagem, as regras da
+/// prévia e do ícone, as APIs de MOD aceitas, os domínios de GIF e os
+/// controles da voz sem ajuste guardado) moram no Rust. Na ponte elas são uma
+/// cópia, e este guarda é o que impede a cópia de discordar: quando o Rust
+/// muda, ele reprova e diz o valor novo.
+#[test]
+fn as_constantes_da_ponte_sao_as_do_desktop() {
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    let json = ponte
+        .split_once("const CONSTANTES_DO_DESKTOP = Object.freeze(")
+        .expect("a ponte declara `CONSTANTES_DO_DESKTOP`")
+        .1
+        .split_once(");")
+        .expect("`CONSTANTES_DO_DESKTOP` fecha")
+        .0;
+    let da_ponte: serde_json::Value = serde_json::from_str(json)
+        .unwrap_or_else(|erro| panic!("`CONSTANTES_DO_DESKTOP` tem de ser JSON estrito: {erro}"));
+    let main = ler("src/main.rs");
+    let dominios: Vec<String> = main
+        .split_once("const DOMINIOS_DE_GIF: &[&str] = &[")
+        .expect("o `main.rs` declara `DOMINIOS_DE_GIF`")
+        .1
+        .split_once("];")
+        .expect("`DOMINIOS_DE_GIF` fecha")
+        .0
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect();
+    let do_desktop = serde_json::json!({
+        "limite_da_mensagem": seele_ffi::Connection::limite_da_mensagem(),
+        "regras_de_previa": seele_ffi::Connection::preview_rules(),
+        "regras_do_icone_do_server": {
+            "limite_bytes": inteiro_do_main(&main, "TETO_DO_ICONE"),
+            "lado": inteiro_do_main(&main, "LADO_DO_ICONE"),
+        },
+        "apis_de_mod_aceitas": seele_ffi::mods::APIS_ACEITAS,
+        "dominios_de_gif": dominios,
+        // O `controles_da_voz` do desktop sem sessão e sem ajuste guardado
+        // (main.rs): a supressão em 1 e a abertura padrão dela.
+        "controles_da_voz": seele_ffi::ControlesDaVoz {
+            supressao: 1.0,
+            abertura_dbfs: seele_ffi::ABERTURA_COM_SUPRESSAO_DBFS,
+            abertura_escolhida: false,
+            abertura_minima_dbfs: seele_ffi::ABERTURA_MINIMA_DBFS,
+            abertura_maxima_dbfs: seele_ffi::ABERTURA_MAXIMA_DBFS,
+        },
+    });
+    assert_eq!(
+        numeros_como_f64(da_ponte),
+        numeros_como_f64(do_desktop.clone()),
+        "as `CONSTANTES_DO_DESKTOP` da ponte discordam do Rust. Os valores de hoje são:\n{}",
+        serde_json::to_string_pretty(&do_desktop).expect("JSON")
+    );
+}
+
+/// **A ponte é o primeiro script do `<head>`, e síncrono.**
+///
+/// A F8 escolhe a casca pela marca `data-casca` na raiz, antes da primeira
+/// pintura (§9.2 do spec dela): o `invoke("plataforma")` é assíncrono, e a CSP
+/// do pacote não deixa script inline. Então a marca sai da ponte, e a ponte
+/// roda antes de tudo. E ela lê a escolha **uma vez**: girar ou redimensionar
+/// não troca a casca no meio da sessão, então ela não ouve nada que mude.
+#[test]
+fn a_ponte_e_o_primeiro_script_do_head_e_le_a_casca_uma_vez() {
+    let pagina = sem_comentarios(&ler("ui/index.html"));
+    let cabeca = pagina
+        .split_once("</head>")
+        .expect("o `index.html` tem `</head>`")
+        .0;
+    let primeiro = pagina
+        .split("<script")
+        .nth(1)
+        .and_then(|resto| resto.split_once('>'))
+        .expect("a página tem script")
+        .0;
+    assert_eq!(
+        primeiro.trim(),
+        "src=\"ponte-web.js\"",
+        "o primeiro script da página tem de ser a ponte, sem `async`, `defer` nem `type`: a \
+         marca da casca tem de existir antes da primeira pintura"
+    );
+    assert!(
+        cabeca.contains("<script src=\"ponte-web.js\"></script>"),
+        "a ponte tem de carregar dentro do `<head>`"
+    );
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    for exigido in [
+        "localStorage.getItem(\"seele.casca\")",
+        "matchMedia(\"(pointer: coarse)\").matches",
+        "innerWidth < 900",
+        "document.documentElement.dataset.casca = ",
+        "\"web\"",
+    ] {
+        assert!(ponte.contains(exigido), "a ponte deixou de ter `{exigido}`");
+    }
+    for proibido in [
+        "\"resize\"",
+        "\"orientationchange\"",
+        ".onchange",
+        "addListener(",
+    ] {
+        assert!(
+            !ponte.contains(proibido),
+            "a ponte ouve `{proibido}`: a casca é lida uma vez, na carga, e não troca no meio da \
+             sessão"
+        );
+    }
+}
+
+/// **O lugar se decide num arquivo só.** O Tauri sempre injeta o
+/// `__TAURI_INTERNALS__`, e só a ponte o lê; quem mais precisa saber onde
+/// está (o `executorDoMod`) lê a decisão dela, o `PONTE_NO_LUGAR_DO_TAURI`.
+/// Dois critérios discordariam no primeiro duble de bancada.
+#[test]
+fn so_a_ponte_le_o_tauri_para_saber_o_lugar() {
+    for (nome, fonte) in scripts_por_arquivo() {
+        if nome == "ponte-web.js" {
+            continue;
+        }
+        let codigo = sem_comentarios(&fonte);
+        assert!(
+            !codigo.contains("__TAURI_INTERNALS__"),
+            "ui/{nome} decide o lugar pelo `__TAURI_INTERNALS__`; leia o `PONTE_NO_LUGAR_DO_TAURI`"
+        );
+    }
+    let ponte = sem_comentarios(&ler("ui/ponte-web.js"));
+    assert!(
+        ponte.contains("const PONTE_NO_LUGAR_DO_TAURI ="),
+        "a ponte não declara `PONTE_NO_LUGAR_DO_TAURI`"
+    );
+}
+
+/// **Nenhum HTML cru na casca.** No navegador, um XSS alcança a chave da
+/// pessoa, que mora no armazenamento da origem. A casca monta por
+/// `createElement` e `textContent`, e este guarda vale para toda a `ui/`, e não
+/// só para a região de MOD.
+#[test]
+fn nenhum_html_cru_na_casca() {
+    let proibidos = [
+        "innerHTML",
+        "outerHTML",
+        "insertAdjacentHTML",
+        "createContextualFragment",
+        "document.write",
+    ];
+    for (nome, fonte) in scripts_por_arquivo() {
+        for (n, linha) in sem_comentarios(&fonte).lines().enumerate() {
+            for proibido in proibidos {
+                assert!(
+                    !linha.contains(proibido),
+                    "ui/{nome}:{} escreve HTML cru (`{proibido}`); no navegador um XSS alcança a \
+                     chave da pessoa",
+                    n + 1
+                );
+            }
+        }
     }
 }

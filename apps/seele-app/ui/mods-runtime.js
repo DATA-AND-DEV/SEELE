@@ -224,14 +224,14 @@ function executorNativo(id, geracao, hash) {
  * era criado pela página e herdava a origem dela; este nasce num `iframe` sem
  * `allow-same-origin`, e a página não tem o que emprestar a ele.
  *
- * O lugar é dito pelo `__TAURI_INTERNALS__`, que o Tauri sempre injeta; o
- * `__TAURI__` depende do `withGlobalTauri`, e no navegador é a ponte
- * (`ponte-web.js`) que o põe.
+ * O lugar é o que a ponte decidiu na carga (`PONTE_NO_LUGAR_DO_TAURI`, em
+ * `ponte-web.js`): o lugar se decide num arquivo só. Um duble de bancada fica
+ * no lugar do desktop, e com ele o executor nativo.
  */
 function executorDoMod(id, geracao, hash) {
-  return "__TAURI_INTERNALS__" in globalThis
-    ? executorNativo(id, geracao, hash)
-    : executorNoNavegador(id, geracao, hash);
+  return PONTE_NO_LUGAR_DO_TAURI
+    ? executorNoNavegador(id, geracao, hash)
+    : executorNativo(id, geracao, hash);
 }
 
 /**

@@ -784,7 +784,14 @@ fn the_shared_layer_loads_before_the_screens_and_accessibility_loads_last() {
         //
         // Entre eles a ordem também importa, e está logo abaixo: o renderer usa
         // `aplicarEstiloDeMod`, e as superfícies constroem `RegiaoDeMod`.
+        //
+        // A ponte do navegador (`ponte-web.js`) é a outra exceção, e pelo
+        // motivo oposto: ela não chama nada de `base.js`, ela é o que `base.js`
+        // lê na primeira linha (`window.__TAURI__`), e põe a marca da casca
+        // antes da primeira pintura. `tests/web.rs` exige que ela seja o
+        // primeiro script da página.
         if !source.ends_with(".js")
+            || source == "ponte-web.js"
             || source == "base.js"
             || source == "mods-runtime.js"
             || source == "mods-estilos.js"
@@ -8123,10 +8130,16 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // so the choice was this channel or a second base64 encoder in `main.rs`.
     //
     // The exception is held to exactly that shape below, rather than trusted.
+    //
+    // **And the bridge of the browser** (`ponte-web.js`, ADR 0057) answers
+    // `regras_de_previa` itself there, where no Rust is on the other side. Its
+    // copy is held to `seele_ffi::Connection::preview_rules()` by
+    // `as_constantes_da_ponte_sao_as_do_desktop` in `tests/web.rs`, so the two
+    // cannot drift: the copy this test exists to forbid is one nobody checks.
     let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {
-        if name == excecao {
+        if name == excecao || name == "ponte-web.js" {
             continue;
         }
         fonte.push_str(&without_comments(&read(&format!("ui/{name}"))));

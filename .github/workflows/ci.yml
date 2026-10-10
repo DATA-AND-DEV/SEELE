@@ -328,6 +328,11 @@ jobs:
       - run: node apps/seele-app/bancada/tema-claro-legivel.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # O que a casca chama sozinha no navegador, com a ponte de verdade e sem
+      # duble (F4, Tarefa 3.1): nada volta recusado, nas duas cascas.
+      - run: node apps/seele-app/bancada/ponte-sem-gesto.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
 
   # As bancadas de MOD que não precisam de navegador: rodam no `node` puro, com
   # o código de verdade num contexto de VM e o resto de mentira, e guardam as
