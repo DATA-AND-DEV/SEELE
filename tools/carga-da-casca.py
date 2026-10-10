@@ -504,6 +504,15 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
                 navegador(),
                 "--headless",
                 "--disable-gpu",
+                # **Como o Playwright o abre.** As bancadas do mesmo job do CI
+                # rodam o Chromium pelo Playwright, que passa `--no-sandbox`
+                # sempre que não se pede o contrário (`chromiumSandbox !== true`
+                # no `playwright-core`). Este aparelho abre o navegador direto,
+                # e o Ubuntu 24.04 restringe por AppArmor os espaços de nome
+                # sem privilégio de que a caixa de areia do Chromium precisa: se
+                # o runner do Actions mantém essa restrição não foi medido, e o
+                # que a página carrega é uma cópia da casca deste repositório.
+                "--no-sandbox",
                 f"--window-size={opcoes.janela}",
                 "--virtual-time-budget=5000",
                 "--screenshot=" + str(pasta / "foto.png"),
