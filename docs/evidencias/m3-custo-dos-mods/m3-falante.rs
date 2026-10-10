@@ -14,27 +14,34 @@
 //!
 //! ```text
 //! cargo run --release -p seele-conformance --example m3-falante -- \
-//!     <endereco> <sala> <segundos>
+//!     <endereco> <sala> <segundos> [--calado] [--apelido <nome>] [--mensagens <n>]
 //! ```
+//!
+//! **As opções da campanha da API 6** (tarefa 11 do plano da F3), sem mudar o
+//! uso de antes: `--calado` entra e não fala (enche a sala e a lista no
+//! cenário das capas); `--apelido` dá um nome por participante (o servidor
+//! recusa o mesmo apelido com outra chave); `--mensagens <n>` posta `n`
+//! mensagens no canal 1 ao entrar (a região `conversa.mensagem` precisa de
+//! mensagens); a sala 0 é «não entrar em sala».
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::cast_precision_loss,
          clippy::cast_possible_truncation, clippy::indexing_slicing)]
 
 use anyhow::{Context, Result};
 use ed25519_dalek::SigningKey;
 use seele_core::{client::ConnectError, Client, MemoryPinStore};
-use seele_proto::ids::VoiceRoomId;
+use seele_proto::ids::{ChannelId, ClientMessageId, VoiceRoomId};
 use seele_proto::MediaHeader;
 use std::{net::SocketAddr, sync::Arc, time::{Duration, Instant}};
 
 const QUADRO: usize = 960; // 20 ms a 48 kHz, mono
 
-async fn entrar(endereco: SocketAddr, chave: &SigningKey) -> Result<Client> {
+async fn entrar(endereco: SocketAddr, chave: &SigningKey, apelido: &str) -> Result<Client> {
     let pins = Arc::new(MemoryPinStore::new());
-    match Client::connect(endereco, "localhost", &endereco.to_string(), "falante-m3", chave,
+    match Client::connect(endereco, "localhost", &endereco.to_string(), apelido, chave,
                           pins.clone(), None, None).await {
         Ok(cliente) => Ok(cliente),
         Err(ConnectError::ModsNaoAceitos { conjunto, .. }) => Ok(Client::connect(
-            endereco, "localhost", &endereco.to_string(), "falante-m3", chave, pins,
+            endereco, "localhost", &endereco.to_string(), apelido, chave, pins,
             None, Some(&conjunto)).await?),
         Err(outro) => Err(outro.into()),
     }
@@ -46,9 +53,33 @@ async fn main() -> Result<()> {
     let endereco: SocketAddr = args.next().context("uso: <endereco> <sala> <segundos>")?.parse()?;
     let sala: u32 = args.next().context("falta a sala")?.parse()?;
     let segundos: u64 = args.next().context("faltam os segundos")?.parse()?;
+    let (mut calado, mut apelido, mut mensagens) = (false, "falante-m3".to_owned(), 0_u64);
+    while let Some(opcao) = args.next() {
+        match opcao.as_str() {
+            "--calado" => calado = true,
+            "--apelido" => apelido = args.next().context("falta o apelido")?,
+            "--mensagens" => mensagens = args.next().context("falta o número")?.parse()?,
+            outra => anyhow::bail!("opção desconhecida: {outra}"),
+        }
+    }
     let chave = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-    let mut cliente = entrar(endereco, &chave).await?;
-    cliente.enter_voice_room(VoiceRoomId(sala), None).await?;
+    let mut cliente = entrar(endereco, &chave, &apelido).await?;
+    for n in 0..mensagens {
+        cliente.send_message(ChannelId(1), &format!("mensagem {n} da carga M3"), ClientMessageId(n + 1)).await?;
+    }
+    if sala != 0 {
+        cliente.enter_voice_room(VoiceRoomId(sala), None).await?;
+    }
+    if calado {
+        // Presente, e quieto: lê o que chega para o servidor não o achar morto.
+        println!("M3 calado apelido={apelido} sala={sala}");
+        let comeco = Instant::now();
+        while comeco.elapsed() < Duration::from_secs(segundos) {
+            while let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(200), cliente.next_event()).await {}
+            while let Ok(Ok(_)) = tokio::time::timeout(Duration::ZERO, cliente.next_media()).await {}
+        }
+        return Ok(());
+    }
     let ssrc = cliente.session().ssrc.get();
     let mut codificador = seele_audio::codec::VoiceEncoder::new(32_000)?;
     let mut amostras = vec![0.0_f32; QUADRO];

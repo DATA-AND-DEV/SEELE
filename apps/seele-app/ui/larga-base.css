@@ -76,3 +76,9 @@
   margin: 4px 0 0;
   line-height: 1.5;
 }
+
+/* O botão que abre os ajustes do microfone do sistema: uma página não os abre,
+   e a ponte recusa o pedido. A nota do bloco diz onde a permissão fica. */
+:root[data-casca="larga"] #boot-microfone-ajustes {
+  display: none;
+}

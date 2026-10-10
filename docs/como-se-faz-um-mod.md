@@ -181,8 +181,12 @@ globalThis.aoAcontecer = (momento, carga) => {
 JSON, e a resposta volta como JSON em texto — `JSON.stringify`.
 
 - **`contexto` é o que o servidor sabe**: `person`, quem pediu; `channel`, o
-  canal, ou `null` quando a janela mandou `0`; `admin` e `write`, se essa pessoa
-  administra o servidor e se pode escrever nos canais. **A autorização sai
+  canal, ou `null` quando a janela mandou `0`; `admin`, se essa pessoa
+  administra o servidor; e `write`, se ela pode escrever **naquele canal** (a
+  permissão de escrever e o papel mínimo do canal, a mesma pergunta que o
+  produto faz para publicar ali) — ou, no pedido sem canal, se ela pode
+  escrever nos canais em geral. Um pedido num canal que a pessoa não lê nem
+  chega ao `aoPedir`. **A autorização sai
   daqui, e nunca do pedido**: um MOD que confiasse num campo do pedido deixaria
   quem escreve a chamada escolher a própria permissão.
 - **`pedido` é o que a janela mandou**, o terceiro argumento do `request`.
@@ -314,13 +318,30 @@ O pacote instalado mora numa pasta com o hash do conteúdo
 arquivos lá dentro não funciona**: um pacote mexido depois de instalado é
 recusado, e nomeado. Mudou o MOD, instale de novo.
 
+**A metade de servidor, sem hospedar pelo app.** Com este repositório, um
+servidor local sobe com o seu MOD já ligado:
+
+```sh
+cargo run -p seele-server --example servidor-com-mod -- /caminho/absoluto/do/mod /caminho/absoluto/de/um/mundo-novo
+```
+
+O exemplo instala o pacote pelo hash, no mesmo lugar em que o servidor o
+procura, liga o MOD antes de subir (é a subida que entrega os momentos do
+`aoAcontecer`), e escuta em `127.0.0.1`, na porta 8390. Uma terceira palavra
+escolhe outra porta, menos a 8384, que é a da bateria de testes do repositório.
+Ele imprime o endereço e a impressão digital, e o app entra por eles: é assim
+que a metade de janela aparece. O que o MOD não conseguiu carregar sai no
+terminal. **O que ele não faz:** não abre janela, não acompanha as suas edições
+(mudou o MOD, rode de novo num mundo novo; a pasta do mundo não pode existir,
+para um mundo nunca ser reaberto com outro código) e não fala com o indexador.
+
 **Erros do seu MOD aparecem no `seele.log`**
 (`~/.config/seele/seele.log`), com o seu `id` num campo próprio, `mod_id=`: os
 da metade de servidor no de quem hospeda, e os da metade de janela no de cada
 máquina que roda o MOD. A seção seguinte diz como lê-los.
 
 > **O que falta, e é honesto dizer:** não há `seele mod new`, não há definições
-> de tipo para o seu editor, e não há como rodar um MOD sem hospedar um servidor.
+> de tipo para o seu editor, e a metade de janela só roda dentro do app.
 > O ADR 0045 promete as definições de tipo e elas ainda não existem. Enquanto
 > não existirem, o retorno que você tem é o log e a aba DIAGNÓSTICO.
 

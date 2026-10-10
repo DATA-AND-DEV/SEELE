@@ -98,8 +98,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # um comando `async`, isto é, um trabalhador do runtime parado pelo tempo que o
 # resolvedor de DNS de outra pessoa quiser levar.
 # `macros` pelo `tokio::join!` da saída do app (`despedir_das_hospedagens`):
-# as duas hospedagens se despedem ao mesmo tempo.
-tokio = { version = "1.53.1", features = ["net", "rt", "macros"] }
+# as duas hospedagens se despedem ao mesmo tempo. `sync` e `time` pelo toque da
+# sala pessoal (`toque.rs`): os avisos da campainha chegam por um `broadcast`, e
+# o lembrete de atenção do macOS é um relógio.
+tokio = { version = "1.53.1", features = ["net", "rt", "macros", "sync", "time"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }

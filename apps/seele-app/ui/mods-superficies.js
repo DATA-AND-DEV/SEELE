@@ -251,10 +251,10 @@ function acordarDaPilha(no) {
 /** Os tipos de superfície, e o que cada um exige do host. */
 const TIPOS_DE_SUPERFICIE = Object.freeze({
   pagina: { host: "palco-de-paginas", foco: false, camada: false },
-  painel: { host: "palco-de-paineis", foco: false, camada: false },
+  painel: { host: "palco-de-paineis", foco: false, camada: false, ate: 5 },
   dialogo: { host: "palco-de-camadas", foco: true, camada: true },
   aviso: { host: "avisos-de-mod", foco: false, camada: false },
-  folha: { host: "palco-de-paineis", foco: false, camada: false },
+  folha: { host: "palco-de-paineis", foco: false, camada: false, desde: 6 },
 });
 
 /**
@@ -262,9 +262,16 @@ const TIPOS_DE_SUPERFICIE = Object.freeze({
  * `folha` substitui o `painel` na 6. O `painel` fica na tabela enquanto as
  * constantes estiverem em 5 — os pacotes de laboratório das APIs 4 e 5 o usam
  * —, e sai no corte (tarefa 13).
+ *
+ * **A regra é dado da tabela** (`desde` e `ate`, os dois inclusive), e não
+ * código: o `check-api` a lê dos mesmos campos para conferir a publicação de
+ * cada versão (a revisão do rascunho contra a casca, 10/10).
  */
 function tiposDaApi(api) {
-  return Object.keys(TIPOS_DE_SUPERFICIE).filter((tipo) => (api >= 6 ? tipo !== "painel" : tipo !== "folha"));
+  return Object.keys(TIPOS_DE_SUPERFICIE).filter((tipo) => {
+    const { desde = 0, ate = Infinity } = TIPOS_DE_SUPERFICIE[tipo];
+    return desde <= api && api <= ate;
+  });
 }
 
 /**

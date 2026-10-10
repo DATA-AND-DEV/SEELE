@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "m3/carga",
+  "version": "6.0.0-__CENARIO__",
+  "api": 6,
+  "repo": "https://github.com/DATA-AND-DEV/SEELE",
+  "reach": [
+    "regiao",
+    "pedido",
+    "evento",
+    "midia",
+    "superficie",
+    "contribuicao"
+  ],
+  "client": "cliente/main.js",
+  "server": "servidor/main.js"
+}
