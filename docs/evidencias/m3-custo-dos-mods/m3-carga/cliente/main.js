@@ -158,6 +158,31 @@ async function abrirAPagina() {
   await tentar("mostrar a página", () => pagina.mostrar());
 }
 
+// O diálogo modal e a página imersiva deixam inerte o resto da janela, e o
+// roteiro ainda precisa do ENTRAR NA SALA depois de o MOD carregar (os dois
+// cenários são com voz). Abertos na carga, o roteiro não achava o botão
+// (medido em 10/10, «não entrou na sala»). Por isso abrem quando quem usa já
+// está numa sala, pelo retrato e pelo evento `sala`.
+async function quandoNaSala(abrir) {
+  let estado = "esperando";
+  let deNovo = false;
+  const olhar = async () => {
+    if (estado === "aberto") return;
+    if (estado === "olhando") { deNovo = true; return; }
+    estado = "olhando";
+    const retrato = await tentar("retrato", () => SeeleUI.retrato());
+    if (retrato?.salas?.some((s) => s.minha)) {
+      estado = "aberto";
+      await abrir();
+      return;
+    }
+    estado = "esperando";
+    if (deNovo) { deNovo = false; await olhar(); }
+  };
+  SeeleUI.aoEvento((evento) => { if (evento?.nome === "sala") olhar(); });
+  await olhar();
+}
+
 // --------------------------------------------------------------- o palco
 async function montarOPalco() {
   // **O teto é o da mensagem, e não o das figuras.** O teto de figuras é 256,
@@ -191,6 +216,6 @@ async function montarOPalco() {
   if (quer("folhas")) await empilharAsFolhas();
   if (quer("avisos")) avisarNoTeto();
   if (quer("palco")) await montarOPalco();
-  if (CENARIO === "dialogo") await abrirODialogo();
-  if (CENARIO === "pagina") await abrirAPagina();
+  if (CENARIO === "dialogo") await quandoNaSala(abrirODialogo);
+  if (CENARIO === "pagina") await quandoNaSala(abrirAPagina);
 })();

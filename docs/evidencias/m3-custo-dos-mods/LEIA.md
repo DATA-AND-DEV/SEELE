@@ -201,6 +201,23 @@ cenário desta campanha é lido contra o `sem-mod` (e o `sem-mod+voz`) **desta
 mesma campanha**; a comparação com a base fica só para o custo total de subir
 de versão, e é dita como tal.
 
+**O diálogo e a página abrem quando quem usa já está numa sala** (a
+orquestradora, 10/10). Abertos na carga do MOD, o diálogo modal e a página
+imersiva deixavam inerte o resto da janela, e o roteiro não achava mais o
+ENTRAR NA SALA: o `carga-dialogo+voz` e o `carga-pagina+voz` falharam com «não
+entrou na sala» (em `medidas/descartados/dialogo-aberto-na-carga/`). O molde
+ganhou `quandoNaSala(abrir)`, que abre quando o `SeeleUI.retrato()` mostra
+uma sala `minha`, olhando de novo a cada evento `sala`. **A função entra em
+toda variante, e por isso muda o hash de todas**, mas só as duas a chamam: as
+outras seis (`regioes`, `capas`, `folhas`, `avisos`, `palco`, `tudo`) foram
+medidas com o molde anterior, e o comportamento delas é o mesmo. As novas, na
+campanha: o `dialogo` como `c005c3fb…`, e a `pagina` como `dd585396…`; as
+antigas ficaram em `/tmp/m3-6/pacotes-antigos/`.
+
+**O jitter se lê só nos cenários com voz.** Sem falante não há fonte, e o
+`jitter_do_registro_ms` fica no zero inicial: nos cenários sem voz, o zero não
+é medida.
+
 **O falante mandava voz que a 0.16 jogava fora** (achado da F4 e medido pela
 orquestradora, 10/10). Os dois leitores do jitter, `jitter_ms` e
 `jitter_do_registro_ms`, davam **0 exato** em todo cenário com voz, e a base,
