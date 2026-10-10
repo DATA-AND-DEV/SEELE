@@ -4531,9 +4531,13 @@ where
         Ok(mut viva) => *viva = None,
         Err(std::sync::TryLockError::Poisoned(envenenado)) => *envenenado.into_inner() = None,
         Err(std::sync::TryLockError::WouldBlock) => {
+            // Neutro de propósito (rodada 1, achado 3): quem prende o cadeado
+            // pode ser uma troca de aparelho no driver, por segundos, ou alguém
+            // que só lê a voz, por um instante, e daqui não se sabe qual.
             tracing::warn!(
-                "o cadeado da voz está preso, com uma troca de aparelho esperando o driver: a \
-                 voz cai numa thread à parte, e a despedida sai sem esperar por ela"
+                "o cadeado da voz estava ocupado no fim da sessão: a voz cai numa thread à \
+                 parte assim que ele soltar, e até lá o microfone segue aberto; a despedida \
+                 sai sem esperar por ela"
             );
             let dela = Arc::clone(dona);
             let subiu = std::thread::Builder::new()
@@ -12561,13 +12565,24 @@ mod o_audio_segue_a_sala {
              do fim da sessão: o microfone fica aberto sem sessão nenhuma"
         );
         let escrito = espiao.escrito();
+        let Some(linha) = escrito
+            .iter()
+            .find(|linha| linha.contains("o cadeado da voz estava ocupado no fim da sessão"))
+        else {
+            panic!(
+                "o fim da sessão largou a voz por fora e o log não diz: quem lê o `seele.log` \
+                 de uma saída lenta não acha o microfone que ficou aberto. Escrito: \
+                 {escrito:?}"
+            );
+        };
+        // Rodada 1, achado 3: o cadeado também fica preso por um instante quando
+        // alguém só lê a voz — o retrato, o som da tela, os controles —, e a
+        // linha não pode afirmar uma causa que ela não sabe.
         assert!(
-            escrito
-                .iter()
-                .any(|linha| linha.contains("o cadeado da voz está preso")),
-            "o fim da sessão largou a voz por fora e o log não diz por quê: quem lê o \
-             `seele.log` de uma saída lenta não acha a troca de aparelho presa. Escrito: \
-             {escrito:?}"
+            !linha.contains("troca de aparelho"),
+            "o aviso do fim da sessão diz que uma troca de aparelho prendia a voz sem \
+             saber quem a prendia: quem lê o log vai procurar um driver preso que não \
+             houve. Linha: {linha}"
         );
     }
 
