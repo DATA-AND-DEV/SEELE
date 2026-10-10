@@ -5238,6 +5238,7 @@ name = "seele-web"
 version = "0.0.0"
 dependencies = [
  "seele-proto",
+ "seele-voz",
  "serde_json",
 ]
 

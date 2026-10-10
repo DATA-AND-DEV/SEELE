@@ -85,7 +85,7 @@ const RULES: &[(&str, &[&str])] = &[
     // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
-    ("seele-web", &["seele-proto"]),
+    ("seele-web", &["seele-proto", "seele-voz"]),
     // A volta de um MOD da janela: o QuickJS do cliente, sem thread e sem E/S.
     // Folha: não conhece o protocolo nem o manifesto, e as capacidades de uma
     // API entram como lista. O desktop e o celular a embrulham, cada um com a
@@ -294,7 +294,10 @@ mod tests {
     #[test]
     fn o_cliente_web_depende_so_do_protocolo() {
         assert!(evaluate("seele-web", &[edge("seele-proto")]).is_empty());
+        // E das peças sem E/S que saíram do desktop para ele: a voz (3.3).
+        assert!(evaluate("seele-web", &[edge("seele-voz")]).is_empty());
         assert_eq!(evaluate("seele-web", &[edge("seele-core")]).len(), 1);
+        assert_eq!(evaluate("seele-web", &[edge("seele-audio")]).len(), 1);
         assert_eq!(evaluate("seele-web", &[edge("seele-server")]).len(), 1);
     }
 

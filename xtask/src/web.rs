@@ -5,7 +5,9 @@
 //! 1. o `seele-web` compila para `wasm32-unknown-unknown`, e os bytes-ouro da
 //!    F1 cruzam a fronteira de verdade com os mesmos bytes, com o JSON passando
 //!    pelo JavaScript (`xtask/web/ouro.mjs`); e os casos do link do navegador
-//!    da F1 passam pela fronteira (`xtask/web/links.mjs`);
+//!    da F1 passam pela fronteira (`xtask/web/links.mjs`); e a voz pela fronteira
+//!    manda os pacotes e separa as fontes das sequências fixas que o desktop
+//!    grava (`xtask/web/voz.mjs`);
 //! 2. o `seele-sessao` (o `Room` que o navegador dobra, Tarefa 2.2) compila
 //!    para `wasm32-unknown-unknown`: uma dependência nova dele que não compile
 //!    no navegador para aqui, e não no dia em que o `seele-web` a usar;
@@ -242,6 +244,13 @@ pub(crate) fn run() -> ExitCode {
                 .arg("xtask/web/links.mjs")
                 .arg(&web)
                 .arg("crates/seele-web/tests/links-da-f1.json"),
+        )),
+    ));
+
+    passos.push((
+        "a voz do desktop pela fronteira, dentro do .wasm (xtask/web/voz.mjs)",
+        deu_certo(rodar(
+            Command::new("node").arg("xtask/web/voz.mjs").arg(&web),
         )),
     ));
 
