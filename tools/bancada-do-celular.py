@@ -1147,6 +1147,16 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
     const a1 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
     raiz.style.setProperty('--cel-escala', '2');
     const a2 = nos.map((e) => parseFloat(getComputedStyle(e).fontSize));
+    // Para quando um nó não cresce, o porquê vem junto: medido uma vez em 21
+    // rodadas da bancada inteira (10/10), na seção MODS DESTE SERVIDOR, sem se
+    // repetir sozinho nem com carga. Na próxima, a reprovação diz o que o nó via.
+    const primeiro = nos.find((e, i) => a2[i] < a1[i] * 1.3);
+    const porque = primeiro ? {
+        escalaNoNo: getComputedStyle(primeiro).getPropertyValue('--cel-escala').trim(),
+        escalaNaRaiz: raiz.style.getPropertyValue('--cel-escala'),
+        folha: ((l) => !l ? 'ausente' : l.disabled ? 'desligada' : 'ligada')(document.querySelector('link[href="celular-texto.css"]')),
+        adotadas: document.adoptedStyleSheets.length,
+    } : null;
     if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
     const parados = {};
     nos.forEach((e, i) => {
@@ -1154,7 +1164,7 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
         const nome = e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
         parados[nome] = `${a1[i]} → ${a2[i]} px, «${(e.textContent || e.placeholder || '').trim().slice(0, 20)}»`;
     });
-    return { nos: nos.length, parados };
+    return { nos: nos.length, parados, porque };
 }"""
 
 
@@ -1194,6 +1204,8 @@ def texto_maior(pg: Page) -> list[str]:
             falhas.append(f"{estado}: só {visto['nos']} textos à vista, e o caso não mediu nada")
         for nome, medida in sorted(visto["parados"].items()):
             falhas.append(f"{estado}: {nome} não cresce ({medida})")
+        if visto["parados"]:
+            falhas.append(f"{estado}: o que o primeiro nó parado via: {visto['porque']}")
         # E cabe: a 2, nada rola de lado nem passa da caixa. Os casos a 150 %
         # não viam a cabeça de PESSOAS cortando o «VOZ» (medido no Safari).
         pg.evaluate("document.documentElement.style.setProperty('--cel-escala', '2')")
