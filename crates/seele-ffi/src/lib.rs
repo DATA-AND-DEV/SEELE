@@ -5088,10 +5088,15 @@ impl<V: VozViva> VozDaSala<V> {
     }
 
     /// Larga a voz viva, se há uma. O `drop` fecha o aparelho.
+    ///
+    /// **Também com o cadeado envenenado** (rodada 1 do lote V, achado 4):
+    /// alguém entrou em pânico com ele na mão, e a voz que ficou lá dentro
+    /// continua com o microfone aberto. Desistir dela era deixá-lo assim.
     fn largar(&self) {
-        if let Ok(mut viva) = self.viva.lock() {
-            *viva = None;
-        }
+        *self
+            .viva
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
     fn tem_voz(&self) -> bool {
@@ -12583,6 +12588,54 @@ mod o_audio_segue_a_sala {
             "o aviso do fim da sessão diz que uma troca de aparelho prendia a voz sem \
              saber quem a prendia: quem lê o log vai procurar um driver preso que não \
              houve. Linha: {linha}"
+        );
+    }
+
+    /// Rodada 1 do lote V, achado 4: a thread que larga a voz também larga com
+    /// o cadeado envenenado.
+    ///
+    /// Quem segurava o cadeado entrou em pânico com ele na mão. O `try_lock` já
+    /// tratava o veneno; a thread de `largar_sem_segurar` não, e a voz ficava de
+    /// pé depois do fim da sessão, com o microfone aberto.
+    #[test]
+    fn a_voz_cai_mesmo_com_o_cadeado_envenenado_na_thread_que_a_larga() {
+        use std::sync::Arc;
+        let voz: Arc<VozDaSala<Voz>> = Arc::new(VozDaSala::nova(true, DeviceChoice::default()));
+        *voz.lock().expect("a voz") = Some(voz_de(700));
+
+        let (preso, prendeu) = std::sync::mpsc::channel();
+        let (solta, soltar) = std::sync::mpsc::channel::<()>();
+        let quem_segura = {
+            let voz = Arc::clone(&voz);
+            std::thread::spawn(move || {
+                let _viva = voz.lock().expect("a voz");
+                preso.send(()).expect("avisa que prendeu");
+                let _ = soltar.recv_timeout(Duration::from_secs(2));
+                panic!("pânico com o cadeado da voz na mão, de propósito");
+            })
+        };
+        prendeu.recv().expect("o cadeado foi preso");
+        super::largar_sem_segurar(&voz, |voz| voz);
+        let _ = solta.send(());
+        assert!(
+            quem_segura.join().is_err(),
+            "quem segurava o cadeado não entrou em pânico, e o teste mediu outra coisa"
+        );
+
+        let de_pe = || {
+            voz.viva
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+        };
+        let ate = std::time::Instant::now() + Duration::from_secs(2);
+        while de_pe() && std::time::Instant::now() < ate {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !de_pe(),
+            "com o cadeado envenenado, a thread que larga a voz desistiu: a voz ficou de pé \
+             depois do fim da sessão, com o microfone aberto"
         );
     }
 
