@@ -188,7 +188,110 @@ moderação e o apelido verificado de cada linha (§10). [inf] Isto é o que
 mantém duas garantias juntas: a de identidade (o menu age pela chave) e a de
 leitura (D-nucleo-1). **A forma exata de uma região substituída que ainda
 carrega os itens do núcleo é a primeira coisa a desenhar na tarefa 5 do
-plano.**
+plano** — desenhada abaixo, para revisão.
+
+### A região substituída que ainda carrega o núcleo (tarefa 5, Step 1; aprovado em 09/10)
+
+**Substituir uma região é desenhar o miolo de cada linha, e não a moldura.** A
+moldura é do produto: o `<ul>` e cada `<li>` (o leitor de tela conta «3 de
+12»), a faixa do núcleo de cada linha, e o que a linha diz sobre a verdade da
+conversa. O MOD desenha o que está entre eles. Medido no código de hoje
+(`linhaSubstituida`, `tela-sessao.js` [c]): com `pessoa.cartao` substituído, o
+apelido real e o menu de moderação descem para um `<details>` recolhido («⋯»).
+O menu continua alcançável, mas **o apelido não fica à vista**, que é o que a
+D-nucleo-1 pede. A forma abaixo vale também para `pessoa.cartao`, e conserta
+isso.
+
+**`pessoas.lista`, substituída.** O MOD toma **a lista**: a ordem, os grupos e
+os títulos deles. A linha de cada pessoa continua vindo de `pessoa.cartao` —
+dele ou de quem for o escolhido para esse ponto —, e é por isso que a
+declaração cabe no fio com 250 pessoas (os identificadores, ~1 KiB, e não 250
+cartões):
+
+```js
+SeeleUI.contribuicoes.registrar({
+  ponto: 'pessoas.lista', modo: 'substituir',
+  conteudo: { grupos: [{ titulo: 'MESA 1', pessoas: [12, 7] }, { titulo: 'PLATEIA', pessoas: [3] }] },
+});
+```
+
+- **Ninguém some da lista.** Quem está no servidor e não está em grupo nenhum
+  vai para um grupo do produto, no fim, com o título do produto (OUTRAS
+  PESSOAS). Um identificador de quem não está é ignorado, e um que aparece em
+  dois grupos fica no primeiro; os dois contam na aba DIAGNÓSTICO. Nenhum dos
+  dois é recusado: a lista muda mais depressa do que o MOD a reescreve.
+- **A linha tem três faixas**, numa grade do produto: `[núcleo] [miolo] [⋯]`.
+  - **o núcleo**, à esquerda: o apelido verificado, lido do retrato **pela
+    chave da linha**, e nunca do que o MOD escreveu. Quando esta sessão tem
+    verbo sobre a pessoa, ele **é** o botão de moderação, o mesmo elemento da
+    linha nativa (`.pessoa-nome-porta`): a moderação sai do «⋯» e fica a um
+    clique. O halo e a pastilha de quem fala também são dele. **Lê o `texto`
+    e o `painel` do tema** (decisão da orquestradora, 09/10), que os pares já
+    garantem a 4,5:1: o que protege o apelido é a estrutura — o lugar
+    reservado à esquerda, o miolo fechado ao lado, o nome lido da chave —, e
+    não a cor (§10, «O que protege cada item»). O apelido longo é cortado com
+    reticências, com o nome inteiro no `title` e no nome acessível;
+  - **o miolo**: o cartão de `pessoa.cartao` quando ele tem conteúdo, e senão o
+    resto da linha nativa (o número e a barra de sinal, o microfone). A capa e
+    o avatar entram aqui por citação (`fundoDeMidia: { daPessoa: 'capa' }`,
+    `retrato({ daPessoa: 'avatar' })`, §4), com o carregamento do produto. O
+    miolo é uma caixa com `overflow: hidden` e `contain: paint`: nada que o MOD
+    desenhe — posição absoluta, transformação, margem negativa — sai dela, e a
+    faixa do núcleo é **irmã** dele, nunca filha;
+  - **o «⋯»**, à direita: o diagnóstico nativo, `pessoa.detalhes` e
+    `pessoa.acoes`, como hoje.
+- **Os pontos de dentro ficam com os provedores deles.** Quem substitui a lista
+  não fica dono de `pessoa.cartao`, `pessoa.avatar` nem `pessoa.capa`: um MOD
+  pode agrupar a lista e outro desenhar as linhas, e a escolha de quem
+  administra vale ponto a ponto, como hoje.
+
+**`conversa.mensagem`, substituída** (por mensagem, `alvo` sendo a mensagem).
+O MOD desenha **o corpo**. O produto mantém, na ordem: a calha do avatar (com
+`pessoa.avatar`), a cabeça (o apelido verificado do autor, lido pela chave, a
+hora, «editada» e o REMOVER), o miolo do MOD no lugar de `.corpo`, as
+contribuições `adicionar`, o bloco do anexo (ADR 0027, com o consentimento das
+prévias) e o selo do envio (pendente ou recusada). O miolo tem a mesma caixa
+fechada da lista.
+
+- **O agrupamento passa a ser pela chave do autor** (`author`), e a cabeça
+  aparece na primeira mensagem de cada grupo. Hoje ele é pelo apelido
+  (`anterior.author_nickname === mensagem.author_nickname`,
+  `tela-sessao.js:1605` [c]): se o servidor admitir dois apelidos iguais, a
+  mensagem da segunda pessoa sai sem cabeça, debaixo da primeira — e com o
+  corpo desenhado por um MOD, a cabeça é a única autoria à vista. A troca é
+  desta tarefa, com o guarda; um nome que o MOD escreva no corpo nunca ocupa o
+  lugar dela.
+- **A busca vence.** Enquanto a busca marca uma mensagem substituída, ela volta
+  ao corpo nativo: o realce é o que a pessoa procura, e o produto não marca
+  dentro do desenho de um MOD. Saindo da busca, o miolo volta.
+
+**Os guardas** (Steps 2 a 5, e o guarda 11):
+
+1. o apelido da faixa do núcleo é o do retrato: um cartão que escreve «alice»
+   na linha de bob deixa «bob» no núcleo;
+2. um miolo com um elemento em posição absoluta por cima do núcleo:
+   `elementFromPoint` no centro do apelido devolve o elemento do produto;
+3. um grupo que omite uma pessoa presente: ela aparece em OUTRAS PESSOAS;
+4. o botão de moderação é alcançável sem abrir o «⋯» (Tab e clique);
+5. uma mensagem substituída mantém a cabeça, o anexo e o selo; com a busca
+   marcando, o corpo nativo e o realce voltam;
+6. duas mensagens seguidas de pessoas diferentes com o mesmo apelido: cada uma
+   tem a sua cabeça.
+
+**As três escolhas, decididas pela orquestradora em 09/10:**
+
+- **o apelido nas linhas lê as cores do tema**, e não a placa do produto: uma
+  placa escura em cada linha de um tema claro pesaria a lista inteira, e um
+  MOD que desenhe um apelido falso no miolo o desenha **ao lado** do
+  verdadeiro, e não no lugar dele (§10);
+- **o apelido sai do «⋯» também sob `pessoa.cartao`**: é a D-nucleo-1. A linha
+  de quem usa o PERFIS muda, e é para mudar (§17, PERFIS R10). Guarda: com
+  `pessoa.cartao` substituído, o apelido está à vista, fora de todo
+  `<details>`;
+- **o MOD ordena e agrupa, e não esconde** quem está presente.
+
+E o achado do agrupamento das mensagens: **pela chave, nesta tarefa, com
+guarda** (o 6 acima), e a reversão — agrupar pelo apelido — reprova.
 
 **Um tipo de superfície ou um ponto desconhecido é recusado pelo nome.** Hoje
 um tipo desconhecido vira `dialogo` em silêncio
@@ -831,13 +934,33 @@ produto; é isso que garante o contraste deles sob qualquer tema, e a garantia
 só vale porque o MOD não escreve nomes livres. A F8 põe o guarda de que nenhum
 valor da tabela começa com `--nucleo-`.
 
-**O que falta: o `mundo.tema` ainda aceita qualquer objeto** [c, 17a a 17c]. Ele
-confere a forma (objeto ou `null`) e o tamanho, mas não as chaves, e um MOD lê
-`ok` para um tema que a casca vai recusar — o produto sabendo e não contando.
-**A tarefa 17j** fecha isso antes do congelamento: o `mundo.tema` confere chaves
-e valores pela mesma tabela da casca, com as recusas `chave-desconhecida` e
-`valor-invalido` (as duas com a `chave`), e um teste espelho prova que a lista
-do servidor e a da casca são a mesma.
+**O `mundo.tema` confere as chaves pela mesma tabela** [c, tarefa 17j]. Até a
+17j ele conferia só a forma (objeto ou `null`) e o tamanho, e um MOD lia `ok`
+para um tema que a casca ia recusar — o produto sabendo e não contando. Agora a
+tabela é `seele_proto::mods::CHAVES_DO_TEMA`, com a forma de cada valor (cor
+`#rrggbb`, inteiro com intervalo, bandeira, escolha), e a recusa volta na
+própria chamada:
+
+```js
+mundo.tema({ acento: "#331704", "--nucleo-mudo": "#ffffff" })
+// → { ok: false, erro: "chave-desconhecida", chave: "--nucleo-mudo" }
+mundo.tema({ arredondamento: 25 })
+// → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
+```
+
+Com mais de uma chave errada, **as duas pontas nomeiam a primeira em ordem
+alfabética** — a dos pontos de código, que é a dos bytes UTF-8: o servidor lê o
+objeto num `BTreeMap`, e a casca ordena do mesmo jeito antes de conferir (o
+`<` do JavaScript compara unidades UTF-16, que discordam acima de U+FFFF). A
+primeira chave errada não depende de quem respondeu. **«A mesma
+tabela» quer dizer a mesma resposta**: o vetor
+`crates/seele-proto/tests/vetores/chaves-do-tema.json` (39 casos) é lido pelo
+servidor e pela casca, e os dois têm de aceitar e recusar igual, pela mesma
+chave e pelo mesmo motivo; um teste espelho em `frontend.rs` confere que as
+duas tabelas têm as mesmas chaves e formas, e outro, que o vetor usa cada chave
+e cada escolha da tabela. O vetor achou um defeito da casca: ela conferia com
+`in`, que enxerga o protótipo — `fonte: "toString"` era aplicado, e
+`constructor` caía nas medidas. Agora é `Object.hasOwn`.
 
 ### O que o produto faz com ele, dito ao MOD (B2)
 
@@ -859,15 +982,50 @@ WCAG e pelos tokens que o produto já cumpre (`apps/seele-app/tests/tokens.rs`):
 |---|---|
 | `texto` sobre `fundo`; `texto` sobre `painel` | 4,5:1 |
 | `apagado` sobre `fundo`; `apagado` sobre `painel` | 3:1 |
-| `acento` sobre `fundo`; `acento` sobre `painel`; `acento` sobre `acentoFraco` | 4,5:1 |
+| `acento` sobre `fundo`; `acento` sobre `painel` | 4,5:1 |
+
+**A lista só recusa o que o MOD escolheu.** O `acento` sobre o `acentoFraco`
+estava nela, e saiu (tarefa 17e, 09/10): o `acentoFraco` é do produto, que o
+deriva, e o derivado **se ajusta** até o acento alcançar 4,5:1 sobre ele.
+Recusar um tema por uma cor que o produto mesmo escolheu seria recusá-lo por um
+motivo que o MOD não tem como consertar. O par continua garantido — pela
+derivação, e não pela recusa.
 
 Os itens do núcleo (o MUDO, o SAIR, o veredito) não entram na lista: eles leem
-os tokens do produto, que o tema não alcança (§10). **Os tons derivados**
-(`acentoFraco`, `bordaForte`, o segundo `apagado`) saem de uma fórmula que
-**reproduz os tokens do produto a partir dos dez do tema padrão**, com erro de
-no máximo ΔE 2 (por exemplo, o `acentoFraco` do padrão tem de dar o
-`--seele-laranja-fraco`, `#331704`). Os números finais saem da tarefa 17-B3, e
-o guia publica a mesma função em JavaScript, que a casca usa.
+os tokens do produto, que o tema não alcança (§10).
+
+**Os tons derivados** (tarefa 17e, medido em 09/10). Só existem sob um tema:
+**sem nenhuma cor de tema, nada é derivado**, e a sessão sai igual pixel a pixel
+à de antes (capturada a 1280 e a 900 de largura, contra o commit anterior).
+Sob um tema, em OKLCH:
+
+- **o preenchimento de uma cor** (`acentoFraco` e os `-fraco` das cores de
+  estado) tem o matiz da cor, 0,23 do croma dela, e a luminosidade do `fundo`
+  um passo de 0,122 na direção da cor; o passo **encolhe** até a cor alcançar
+  4,5:1 sobre o preenchimento;
+- **o segundo `apagado`** (`--seele-osso-apagado`, que nenhum tema escreve) é
+  mantido se já alcança 3:1 sobre o `fundo` e o `painel`, e senão tem a
+  luminosidade movida até alcançar, com o matiz;
+- **`bordaForte` não é derivado.** A régua do produto (`--seele-linha-forte`,
+  `#3a322a`) é escura e continua visível sobre um fundo claro; borda não tem
+  piso de contraste aqui, e derivar fica para quando um tema medido mostrar a
+  régua sumindo.
+
+**Com as superfícies exatas do produto, os tokens do produto (ΔE 0).** Os
+quatro `-fraco` do produto foram escolhidos à mão sobre o `fundo` e o `painel`
+dele, e nenhuma fórmula de uma regra só os reproduz: derivados, saíam a
+**ΔE2000 de 3,2 a 4,2** (`acentoFraco` `#2f140c` contra `#331704`, a 4,18 —
+medido na 17e). Por isso a fórmula tem um atalho: com o `fundo` e o `painel`
+iguais aos do produto, o preenchimento de uma cor do produto é o token dela, e
+só o que depende de uma cor que o MOD mudou é derivado (um acento azul sobre as
+superfícies do padrão ganha o preenchimento dele; as cores de estado continuam
+as do produto). **Fora delas, a derivação vale, com ΔE2000 ≤ 4,5** dos tokens
+para os preenchimentos e igualdade para as cores de estado que já alcançam —
+medido com um `fundo` a um passo do padrão. A promessa de ΔE ≤ 2 em todo lugar
+não se cumpre; o contrato é este, na bancada
+`apps/seele-app/bancada/tons-do-tema.cjs`, que lê os tokens do `tokens.css`.
+O guia publica a mesma função em JavaScript, que a casca usa (`tonsDoTema` em
+`ui/base.js`).
 
 ### As cores de estado (achado da F8, 09/10)
 
@@ -883,23 +1041,35 @@ superfícies do tema**, garantindo o piso:
 
 - mantém o matiz da cor do produto e move a luminosidade até a cor alcançar
   **4,5:1 sobre `fundo` e sobre `painel`** (o estado aparece como texto: «juli
-  fala»), e o `-fraco` sai da cor derivada misturada à superfície, com a cor
+  fala»), indo para longe das superfícies, até o ponto mais perto da cor do
+  produto que alcança; o croma recua só o que for preciso para caber no sRGB.
+  O `-fraco` sai da cor derivada pela regra dos preenchimentos acima, com a cor
   sobre o próprio `-fraco` também em 4,5:1;
-- com o tema padrão, a derivação **reproduz os tokens do produto** (ΔE ≤ 2),
-  a mesma regra dos tons derivados acima;
+- com as superfícies exatas do padrão, a derivação **devolve as cores e os
+  preenchimentos do produto** (ΔE 0); perto delas, as cores do produto e os
+  preenchimentos a ΔE2000 ≤ 4,5, como acima;
 - se nenhuma luminosidade servir às duas superfícies, o tema é recusado com o
   par, na mesma forma da recusa de contraste (`{ frente: 'fosforo', fundo:
   'painel', razao, piso }`). Como os pares já pedem `texto` em 4,5:1 sobre as
-  duas, isso só acontece num tema que já está no limite;
+  duas, isso só acontece num tema que já está no limite — medido: um tema de
+  superfícies cinza-médias, que o `texto` já não alcança, é o caso;
+- uma cor do produto que não pôde ser lida (uma folha que não carregou) não
+  vira recusa nem tom: sem cor medida não há medida;
 - **o MOD continua sem escrever nenhuma delas**: o `--seele-vermelho-alerta`
   segue fora de todo caminho de tema, e o produto o deriva só para o que está
   dentro do escopo do tema. Os itens do núcleo leem `--nucleo-*` (§10), e o
   veredito «QUEM ATENDEU NÃO É O DONO DESTE CÓDIGO» não muda de cor com tema
   nenhum.
 
-A função é a mesma dos tons derivados, publicada no guia, e entra na tarefa
-17e com teste nos dois sentidos: o padrão reproduz os tokens, e um tema claro
-dá ao fósforo derivado 4,5:1 sobre o `painel`.
+A função é a mesma dos tons derivados, publicada no guia. **Feito na 17e**,
+com teste nos dois sentidos: as cores do padrão devolvem as do produto, e um
+tema claro dá ao fósforo, ao azul e ao vermelho derivados 4,5:1 sobre o
+`fundo`, o `painel` e o próprio `-fraco` (`tons-do-tema.cjs`); no navegador, o
+número da sincronia (fósforo) e o nome de quem usa (azul) saem a 4,52:1 sob o
+tema claro, e sem a derivação o fósforo do produto sai a 1,05:1
+(`tema-claro-legivel.cjs`). Os apelidos `--seele-sync-*` passaram a ser
+redefinidos em `#tela-sessao`: definidos com `var()` na raiz, resolviam lá e não
+acompanhavam a cor derivada.
 
 ### A prévia (B4)
 
@@ -1000,6 +1170,19 @@ pelo tema.** Fora deles, a tela é do MOD.
   ganha, no celular, a exceção da faixa de voz e das abas. O foco do teclado
   continua contido no diálogo; o toque no MUDO, no SAIR e em AJUSTES chega ao
   produto.
+
+**O que protege cada item: a cor ou a estrutura** (decisão da orquestradora,
+09/10). São duas proteções, e cada item tem a sua:
+
+- **os controles** — MUDO, SURDO, SAIR, AJUSTES, o veredito — ficam sobre
+  superfícies que os pares do tema não conferem, e por isso **leem as cores do
+  produto** (`--nucleo-*`, a placa), que o tema não alcança;
+- **o apelido verificado nas linhas** (`pessoas.lista`, `pessoa.cartao`,
+  `conversa.mensagem`) lê o `texto` e o `painel` do tema, que os pares garantem
+  a 4,5:1. O que o protege é **a estrutura**: o lugar reservado à esquerda da
+  linha, o miolo do MOD numa caixa fechada que é irmã dele e nunca mãe, e o
+  nome lido da chave pelo produto (§3). Um apelido falso desenhado por um MOD
+  fica ao lado do verdadeiro, e não no lugar dele.
 
 **A saída de um tema ruim é do produto.** No celular, a aba AJUSTES e a página
 MODS DESTE SERVIDOR leem `--nucleo-*`, e não o tema, como CONFIGURAÇÕES no
@@ -1286,7 +1469,7 @@ no catálogo.
 | R7 | `contribuicoes.atualizar(handle, conteudo)` | **entrou** | só fachada; evita o redesenho nativo entre revogar e registrar |
 | R8 | montagem parcial nas superfícies | **em aberto** com o teto de 12 KiB (§12) | a MESA pede o mesmo (item 1); a forma (atualizar por chave ou montar em partes) é a primeira decisão de desenho da tarefa 7 |
 | R9 | a falha dita a quem pode agir | **entrou**: `midia` com ponto e alvo (§7.1); a recusa `mensagem-grande` vai ao `seele.log` | — |
-| R10 | o apelido verificado à vista | **entrou** no núcleo (§10) | D-nucleo-1 |
+| R10 | o apelido verificado à vista | **entrou** no núcleo (§10); e **muda a linha do PERFIS**: com `pessoa.cartao` substituído, o apelido verificado sai do «⋯» e fica à esquerda do cartão, à vista, com o botão de moderação (§3, tarefa 5). Quem porta a 4.0.0 desenha o cartão sabendo que o apelido verdadeiro está ao lado, e não precisa repeti-lo | D-nucleo-1 |
 | R11 | presets de animação para moldura de retrato e capa; movimento reduzido em toda região | **entrou** a regra de movimento em toda região; **não entrou** o preset novo | a moldura é desenho do MOD, com o vocabulário de estilos que já existe; um preset novo é decisão de estética (`specs/07`), e não de API |
 | R12 | `folha` para o perfil | **entrou** (§5) | — |
 | R13 | capacidades verdadeiras por plataforma | **entrou** (§2) | — |
@@ -1363,7 +1546,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 |---|---|---|---|
 | B1 | como a metade de servidor declara o tema; quem o guarda; desligar; quem tem a porta; dois MODs | `mundo.tema(valores \| null)`; o servidor o guarda no banco; desligar manda `None`; a porta é o manifesto (`"tema": true`); um tema por servidor, o escolhido (decidido em 09/10); **feito no servidor** (17a a 17c) | §9 |
 | B2 | o resultado da aplicação | o evento `tema`, com `aplicado`, `recusado` (com os pares) ou `nativo` | §9 |
-| B3 | os pares e a fórmula dos derivados | a lista com os pisos de partida; a fórmula reproduz os tokens do produto com ΔE ≤ 2 | §9 |
+| B3 | os pares e a fórmula dos derivados | a lista só com o que o MOD escolhe; a fórmula, em OKLCH: com as superfícies exatas do padrão, os tokens do produto (ΔE 0); fora delas, as cores de estado do produto e os preenchimentos a ΔE2000 ≤ 4,5 — o ΔE ≤ 2 em todo lugar não se cumpre, medido (17e) | §9 |
 | B4 | a prévia | `{ previa: true, superficie: id }`; sai com a superfície ou com `tema(null, { previa: true })`; sem `previa`, não existe | §9 |
 | B5 | a ampliação | na 6: `modo`, a densidade completa e os tokens por região; o fundo por mídia se medido a tempo; tipo e escala na API 7 | §9 |
 | B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |
@@ -1409,10 +1592,10 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | pergunta | resposta | onde |
 |---|---|---|
 | o `operador.barra` no celular, que o rascunho recusava com `regiao-ausente` | **aceita a proposta da F8**: ele mora no alto da aba AJUSTES, abaixo de SEU PERFIL, com os tamanhos das outras regiões do celular e altura limitada, para a gestão de MODs continuar à vista; a capa do operador vai no cabeçalho SEU PERFIL | §11; plano, 5 passos 8 e 8b |
-| a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` ainda aceita qualquer chave, e fechar isso é a tarefa 17j, antes do congelamento | §9; plano, 17j |
+| a regra das chaves do tema, para o `--nucleo-*` ficar fora do alcance | **lista fechada de nomes do contrato**, traduzidos por uma tabela fechada para `--seele-*`, como a casca já faz; o `mundo.tema` confere pela mesma tabela (`CHAVES_DO_TEMA`), com `chave-desconhecida` e `valor-invalido`; **feito na 17j** | §9; plano, 17j |
 | o rótulo da primeira aba | SERVIDOR, e não SALAS; rótulo de tela, sem mudar o contrato | §11 |
 | uma superfície de MOD cobria a faixa de voz e as abas (medido no protótipo) | **nenhuma superfície as cobre**: «tela cheia», no celular, é a tela acima delas; regra do núcleo e do guarda 11; no desktop, o guarda mede o MUDO e o SAIR com um `dialogo` aberto | §5, §10, §11; plano, 7 e 9 |
-| as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve | §9; plano, 17e |
+| as cores de estado fora dos pares (o «juli fala» some num `painel` claro) | **derivadas das superfícies do tema**, com o matiz do produto e 4,5:1 sobre `fundo` e `painel`; o padrão reproduz os tokens; o MOD não as escreve; **feito** | §9; plano, 17e |
 
 ## 18. Em aberto
 

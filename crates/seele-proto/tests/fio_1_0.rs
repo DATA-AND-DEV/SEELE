@@ -47,7 +47,10 @@ use seele_proto::ids::{
     Ssrc, VoiceRoomId,
 };
 use seele_proto::mods::ModAnunciado;
-use seele_proto::screen::{ScreenCodec, ScreenHeader, ScreenSource, SCREEN_HEADER_VERSION};
+use seele_proto::screen::{
+    cabecalho_de_quadro, LeitorDeTela, LidoDaTela, ScreenCodec, ScreenHeader, ScreenSource,
+    TipoDeQuadro, SCREEN_HEADER_VERSION,
+};
 use seele_proto::stream::StreamType;
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
 use seele_proto::{MediaHeader, FAIXA, MEDIA_HEADER_VERSION};
@@ -729,6 +732,19 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
     .unwrap();
     todos.push(("fluxo:abertura-de-tela".to_owned(), tela.to_vec()));
 
+    // Os quadros que seguem a abertura, um de cada tipo: o cabeçalho de cinco
+    // bytes e um corpo curto (o começo de uma NAL H.264, ou dois bytes de
+    // Opus). É o que o servidor, o desktop e o celular leem igual.
+    for (nome, tipo, corpo) in [
+        ("comum", TipoDeQuadro::Comum, &[0, 0, 0, 1, 0x41][..]),
+        ("chave", TipoDeQuadro::Chave, &[0, 0, 0, 1, 0x65][..]),
+        ("som", TipoDeQuadro::Som, &[0xFC, 0xFF][..]),
+    ] {
+        let mut quadro = cabecalho_de_quadro(tipo, u32::try_from(corpo.len()).unwrap()).to_vec();
+        quadro.extend_from_slice(corpo);
+        todos.push((format!("fluxo:quadro-de-tela:{nome}"), quadro));
+    }
+
     for (nome, tipo) in [
         ("anexo", StreamType::Attachment),
         ("tela", StreamType::Screen),
@@ -1125,4 +1141,50 @@ fn os_codigos_de_um_byte_nao_mudam() {
     assert_eq!(StreamType::Attachment.byte(), 1);
     assert_eq!(StreamType::Screen.byte(), 2);
     assert_eq!(StreamType::ModVolume.byte(), 3);
+    assert_eq!(TipoDeQuadro::Comum.byte(), 0);
+    assert_eq!(TipoDeQuadro::Chave.byte(), 1);
+    assert_eq!(TipoDeQuadro::Som.byte(), 2);
+}
+
+/// **Os quadros de tela do ouro voltam inteiros pelo leitor.** O teste de cima
+/// prende o que se escreve; este prende o que se lê, com os bytes do arquivo:
+/// a abertura e os três quadros, emendados como num fluxo, saem na ordem e com
+/// o corpo de cada um.
+#[test]
+fn os_quadros_de_tela_do_ouro_voltam_pelo_leitor() {
+    let caminho = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(ARQUIVO);
+    let lido = std::fs::read_to_string(&caminho).unwrap();
+    let de = |nome: &str| -> Vec<u8> {
+        let hex = lido
+            .lines()
+            .find_map(|linha| linha.strip_prefix(&format!("{nome}\t")))
+            .unwrap_or_else(|| panic!("o ouro não tem {nome}"));
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect()
+    };
+    let mut fluxo = de("fluxo:abertura-de-tela");
+    for nome in ["comum", "chave", "som"] {
+        fluxo.extend(de(&format!("fluxo:quadro-de-tela:{nome}")));
+    }
+    let mut leitor = LeitorDeTela::novo();
+    leitor.empurrar(&fluxo).unwrap();
+    let saiu: Vec<LidoDaTela> = std::iter::from_fn(|| leitor.proximo()).collect();
+    assert!(matches!(saiu.first(), Some(LidoDaTela::Abertura(_))));
+    let quadros: Vec<(TipoDeQuadro, Vec<u8>)> = saiu
+        .into_iter()
+        .filter_map(|l| match l {
+            LidoDaTela::Quadro { tipo, bytes } => Some((tipo, bytes)),
+            LidoDaTela::Abertura(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        quadros,
+        vec![
+            (TipoDeQuadro::Comum, vec![0, 0, 0, 1, 0x41]),
+            (TipoDeQuadro::Chave, vec![0, 0, 0, 1, 0x65]),
+            (TipoDeQuadro::Som, vec![0xFC, 0xFF]),
+        ]
+    );
 }

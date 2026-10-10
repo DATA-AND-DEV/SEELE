@@ -2019,11 +2019,28 @@ function aplicarOTemaDoMod(id, valores) {
   }
 
   const pedido = new Map();
-  for (const [nome, valor] of Object.entries(valores ?? {})) {
+  // **`Object.hasOwn`, e nunca `in`**: `in` enxerga o protótipo, e com ele
+  // `fonte: "toString"` era aplicado e `constructor` caía nas medidas. A
+  // tabela é a do servidor (`seele_proto::mods::CHAVES_DO_TEMA`), e as duas
+  // respondem igual a cada caso de `chaves-do-tema.json` (tarefa 17j).
+  const daTabela = (tabela, nome) => Object.hasOwn(tabela, nome);
+  // **Em ordem alfabética, e a dos pontos de código**: com mais de uma chave
+  // errada, a casca e o servidor nomeiam a mesma — o servidor lê o objeto num
+  // `BTreeMap`, que ordena pelos bytes UTF-8, e o `<` do JavaScript compara
+  // unidades UTF-16, que discordam dele acima de U+FFFF.
+  const porPontoDeCodigo = ([a], [b]) => {
+    const [x, y] = [Array.from(a), Array.from(b)];
+    for (let i = 0; i < Math.min(x.length, y.length); i += 1) {
+      const diferenca = x[i].codePointAt(0) - y[i].codePointAt(0);
+      if (diferenca !== 0) return diferenca;
+    }
+    return x.length - y.length;
+  };
+  for (const [nome, valor] of Object.entries(valores ?? {}).sort(porPontoDeCodigo)) {
     // **As medidas primeiro**, porque elas não são cor e a conferência de cor
     // recusaria o nome delas antes de alguém olhar.
-    if (nome in MEDIDAS_DA_API) {
-      if (!(valor in MEDIDAS_DA_API[nome])) {
+    if (daTabela(MEDIDAS_DA_API, nome)) {
+      if (typeof valor !== "string" || !daTabela(MEDIDAS_DA_API[nome], valor)) {
         const conhecidas = Object.keys(MEDIDAS_DA_API[nome]).join(", ");
         throw new Error(`«${nome}» só aceita ${conhecidas}, e veio «${valor}»`);
       }
@@ -2033,7 +2050,7 @@ function aplicarOTemaDoMod(id, valores) {
     // **Os números, com o intervalo conferido aqui.** Fora dele é recusa com o
     // intervalo escrito: quem pediu 40 precisa saber que o teto é 24, e não
     // que «não deu».
-    if (nome in NUMEROS_DA_API) {
+    if (daTabela(NUMEROS_DA_API, nome)) {
       const regra = NUMEROS_DA_API[nome];
       if (!Number.isInteger(valor) || valor < regra.minimo || valor > regra.maximo) {
         throw new Error(
@@ -2046,14 +2063,14 @@ function aplicarOTemaDoMod(id, valores) {
     // **As bandeiras, que são sim ou não.** Um `"sim"` em texto não passa: o
     // valor é booleano, e aceitar as duas formas faria o produto adivinhar o
     // que `"false"` quer dizer.
-    if (nome in BANDEIRAS_DA_API) {
+    if (daTabela(BANDEIRAS_DA_API, nome)) {
       if (typeof valor !== "boolean") {
         throw new Error(`«${nome}» é sim ou não, e veio «${valor}»`);
       }
       pedido.set(nome, valor);
       continue;
     }
-    if (!(nome in TEMA_DA_API)) {
+    if (!daTabela(TEMA_DA_API, nome)) {
       throw new Error(`a API de tema não conhece «${nome}»`);
     }
     if (typeof valor !== "string" || !COR_DO_TEMA.test(valor)) {
@@ -2081,13 +2098,207 @@ function aplicarOTemaDoMod(id, valores) {
 
   const antes = temaDosMods.get(id);
   temaDosMods.set(id, Object.fromEntries(pedido));
-  const legivel = oTextoAlcancaOFundo();
+  const legivel = oTemaAlcancaOsPisos();
   if (legivel !== true) {
     if (antes) temaDosMods.set(id, antes);
     else temaDosMods.delete(id);
     throw new Error(legivel);
   }
   escreverOTemaDaSessao();
+}
+
+/**
+ * **Os pares que o tema do MOD responde**, com o piso de cada um (rascunho da
+ * API 6, §9). São as cores que o MOD escolhe; um par abaixo do piso recusa o
+ * tema, dizendo o par.
+ */
+const PARES_DO_TEMA = Object.freeze([
+  ["texto", "fundo", 4.5],
+  ["texto", "painel", 4.5],
+  ["apagado", "fundo", 3],
+  ["apagado", "painel", 3],
+  ["acento", "fundo", 4.5],
+  ["acento", "painel", 4.5],
+]);
+
+/**
+ * **As cores de estado do produto**, e o preenchimento de cada uma. O MOD não
+ * as escolhe; sob um tema, o produto as deriva das superfícies dele (achado da
+ * F8, 09/10: o fósforo de «juli fala» sumia sobre um painel claro).
+ */
+const CORES_DE_ESTADO = Object.freeze([
+  { nome: "fosforo", token: "--seele-fosforo", fraco: "--seele-fosforo-fraco" },
+  { nome: "azul", token: "--seele-padrao-azul", fraco: "--seele-azul-fraco" },
+  { nome: "vermelho", token: "--seele-vermelho-alerta", fraco: "--seele-vermelho-fraco" },
+]);
+
+/** O quanto um preenchimento se afasta do fundo, e quanto do croma da cor ele leva. */
+const PASSO_DO_PREENCHIMENTO = 0.122;
+const CROMA_DO_PREENCHIMENTO = 0.23;
+
+/** Uma cor `#rrggbb` em OKLab `[L, a, b]`. */
+function oklabDe(hex) {
+  const [r, g, b] = [1, 3, 5].map((i) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+/** OKLab para luz linear `[r, g, b]`, sem recortar. */
+function luzDeOklab(L, a, b) {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+}
+
+/**
+ * A cor de luminosidade `L`, croma `C` e matiz `h` (OKLCH), como `#rrggbb`. O
+ * croma **recua** até a cor caber no sRGB, e a luminosidade e o matiz ficam.
+ */
+function hexDeOklch(L, C, h) {
+  const cabe = (c) => luzDeOklab(L, c * Math.cos(h), c * Math.sin(h)).every((v) => v >= -1e-6 && v <= 1 + 1e-6);
+  let croma = C;
+  if (!cabe(C)) {
+    let baixo = 0;
+    let alto = C;
+    for (let i = 0; i < 30; i += 1) {
+      const meio = (baixo + alto) / 2;
+      if (cabe(meio)) baixo = meio;
+      else alto = meio;
+    }
+    croma = baixo;
+  }
+  return "#" + luzDeOklab(L, croma * Math.cos(h), croma * Math.sin(h))
+    .map((v) => {
+      const x = Math.min(1, Math.max(0, v));
+      const c = x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+      return Math.round(c * 255).toString(16).padStart(2, "0");
+    })
+    .join("");
+}
+
+/**
+ * **O preenchimento de uma cor sobre um fundo**: o matiz da cor, uma parte do
+ * croma dela, e a luminosidade do fundo um passo na direção da cor. O passo
+ * **encolhe** até a cor alcançar `piso` sobre o preenchimento — num tema claro,
+ * um preenchimento escuro demais faria o texto da cor sumir nele.
+ */
+function preenchimentoDe(cor, fundo, piso = 4.5) {
+  const [L, a, b] = oklabDe(cor);
+  const [L0] = oklabDe(fundo);
+  const C = Math.hypot(a, b);
+  const h = Math.atan2(b, a);
+  const sentido = L >= L0 ? 1 : -1;
+  for (let passo = PASSO_DO_PREENCHIMENTO; passo > 0; passo -= 0.004) {
+    const candidato = hexDeOklch(L0 + sentido * passo, C * CROMA_DO_PREENCHIMENTO, h);
+    if (contrasteEntre(cor, candidato) >= piso) return candidato;
+  }
+  return hexDeOklch(L0, C * CROMA_DO_PREENCHIMENTO, h);
+}
+
+/**
+ * **Uma cor do produto sob as superfícies de um tema**, ou `null` quando
+ * nenhuma luminosidade serve. Mantida, se já alcança `piso` sobre o fundo e o
+ * painel; senão, o matiz fica e a luminosidade se move para longe das
+ * superfícies, até o ponto mais próximo da cor do produto que alcança. A cor
+ * sobre o próprio preenchimento não é conferida aqui: é o preenchimento que se
+ * aproxima do fundo até ela alcançar (`preenchimentoDe`).
+ */
+function corDeEstadoPara(cor, fundo, painel, piso = 4.5) {
+  const alcanca = (c) => contrasteEntre(c, fundo) >= piso && contrasteEntre(c, painel) >= piso;
+  if (alcanca(cor)) return cor;
+  const [L, a, b] = oklabDe(cor);
+  const C = Math.hypot(a, b);
+  const h = Math.atan2(b, a);
+  const claras = (oklabDe(fundo)[0] + oklabDe(painel)[0]) / 2 > 0.6;
+  let perto = L;
+  let longe = claras ? 0 : 1;
+  let achada = null;
+  for (let i = 0; i < 40; i += 1) {
+    const meio = (perto + longe) / 2;
+    const candidata = hexDeOklch(meio, C, h);
+    if (alcanca(candidata)) {
+      achada = candidata;
+      longe = meio;
+    } else {
+      perto = meio;
+    }
+  }
+  return achada;
+}
+
+/**
+ * **Os tons que o produto deriva do tema em vigor, e os pares que reprovam**
+ * (rascunho da API 6, §9; tarefa 17e). `emVigor` é o tema dos MODs; o que ele
+ * não define vem de `daRaiz`, a cor do produto. Sem nenhuma cor no tema, nada é
+ * derivado: o produto fica como é.
+ *
+ * Devolve `{ tons: { token: cor }, pares: [{ frente, fundo, razao, piso }] }`,
+ * com os pares que não alcançam o piso — os do MOD e, quando nenhuma
+ * luminosidade serve, os das cores de estado.
+ */
+function tonsDoTema(emVigor, daRaiz) {
+  const cores = ["fundo", "painel", "texto", "apagado", "acento"];
+  if (!cores.some((nome) => typeof emVigor[nome] === "string")) return { tons: {}, pares: [] };
+  const c = {};
+  for (const nome of cores) c[nome] = String(emVigor[nome] ?? daRaiz(TEMA_DA_API[nome])).toLowerCase();
+  const pares = [];
+  for (const [frente, fundo, piso] of PARES_DO_TEMA) {
+    const razao = contrasteEntre(c[frente], c[fundo]);
+    if (razao < piso) pares.push({ frente, fundo, razao: Number(razao.toFixed(2)), piso });
+  }
+  // Uma cor que não carregou não vira recusa, nem tom: sem cor medida não há
+  // medida, e derivar dela seria escrever na sessão um valor que não é cor.
+  const medida = (...cs) => cs.every((cor) => COR_DO_TEMA.test(cor));
+  const raiz = (token) => String(daRaiz(token)).toLowerCase();
+  // **As superfícies exatas do produto recebem os tons do produto.** Os
+  // `-fraco` foram escolhidos à mão sobre elas, e nenhuma fórmula os reproduz
+  // (ΔE2000 de 3,2 a 4,2, medido na 17e): com o fundo e o painel do produto, o
+  // preenchimento de uma cor do produto é o token dela, ΔE 0. Só o que depende
+  // de uma cor que o MOD mudou é derivado.
+  const doProduto = c.fundo === raiz(TEMA_DA_API.fundo) && c.painel === raiz(TEMA_DA_API.painel);
+  const preenchimento = (cor, corDoProduto, tokenDoProduto) =>
+    doProduto && cor === corDoProduto && medida(raiz(tokenDoProduto))
+      ? raiz(tokenDoProduto)
+      : preenchimentoDe(cor, c.fundo);
+  const tons = {};
+  if (medida(c.acento, c.fundo)) {
+    tons["--seele-laranja-fraco"] = preenchimento(c.acento, raiz(TEMA_DA_API.acento), "--seele-laranja-fraco");
+  }
+  const superficies = medida(c.fundo, c.painel);
+  for (const estado of CORES_DE_ESTADO) {
+    const cor = raiz(estado.token);
+    if (!superficies || !medida(cor)) continue;
+    const derivada = corDeEstadoPara(cor, c.fundo, c.painel);
+    if (!derivada) {
+      pares.push({ frente: estado.nome, fundo: "painel", razao: Number(contrasteEntre(cor, c.painel).toFixed(2)), piso: 4.5 });
+      continue;
+    }
+    tons[estado.token] = derivada;
+    tons[estado.fraco] = preenchimento(derivada, cor, estado.fraco);
+  }
+  // **O segundo apagado do produto** (`--seele-osso-apagado`), que nenhum tema
+  // escreve: no piso dos apagados, 3:1 sobre o fundo e o painel.
+  const apagado = raiz("--seele-osso-apagado");
+  if (superficies && medida(apagado)) {
+    const segundo = corDeEstadoPara(apagado, c.fundo, c.painel, 3);
+    if (segundo) tons["--seele-osso-apagado"] = segundo;
+    else pares.push({ frente: "apagado-secundario", fundo: "painel", razao: Number(contrasteEntre(apagado, c.painel).toFixed(2)), piso: 3 });
+  }
+  return { tons, pares };
 }
 
 /**
@@ -2112,6 +2323,20 @@ function escreverOTemaDaSessao() {
     // `tela-sessao.css`, e repor aqui fixaria um valor por cima de quem, um dia,
     // escolher outro.
     if (valor) sessao.style.setProperty(token, valor);
+    else sessao.style.removeProperty(token);
+  }
+  // **Os tons que o produto deriva do tema** (rascunho da API 6, §9): o
+  // preenchimento do acento e as cores de estado, com o preenchimento de cada
+  // uma, alcançando os pisos sobre as superfícies do tema. Sem tema, nada é
+  // derivado, e os tokens do produto ficam.
+  const { tons } = tonsDoTema(Object.fromEntries(emVigor), corDaRaiz);
+  const derivaveis = [
+    "--seele-laranja-fraco",
+    "--seele-osso-apagado",
+    ...CORES_DE_ESTADO.flatMap((estado) => [estado.token, estado.fraco]),
+  ];
+  for (const token of derivaveis) {
+    if (tons[token]) sessao.style.setProperty(token, tons[token]);
     else sessao.style.removeProperty(token);
   }
   // Os números viram medida com unidade **aqui**, e não no MOD: o que
@@ -2144,30 +2369,34 @@ function escreverOTemaDaSessao() {
 }
 
 /**
- * O par texto/fundo que ficaria em vigor alcança 4,5:1?
- *
- * Devolve `true`, ou a frase da recusa. O que o MOD não pediu é lido **da
- * raiz** do documento, e não da sessão: a raiz é o único lugar onde a cor do
- * produto continua sendo a cor do produto com um tema de pé, e ler dali evita
- * uma segunda cópia da palheta aqui dentro, que envelheceria sozinha.
+ * **A cor do produto num token, lida da raiz** do documento, e não da sessão: a
+ * raiz é o único lugar onde a cor do produto continua sendo a do produto com um
+ * tema de pé. Lê e não escreve — o tema de um MOD não alcança a raiz (ADR 0049).
  */
-function oTextoAlcancaOFundo() {
+function corDaRaiz(token) {
+  return getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+}
+
+/**
+ * **O tema que ficaria em vigor alcança os pisos?** Devolve `true`, ou a frase
+ * da recusa, com o par (rascunho da API 6, §9).
+ *
+ * Os pares são os de `PARES_DO_TEMA` — o texto, o apagado e o acento sobre o
+ * fundo e o painel —, e as cores de estado que o produto deriva, quando nenhuma
+ * luminosidade serve. O que o MOD não pediu é lido da raiz (`corDaRaiz`): ler
+ * dali evita uma segunda cópia da palheta aqui dentro, que envelheceria sozinha.
+ */
+function oTemaAlcancaOsPisos() {
   const emVigor = {};
   for (const seus of temaDosMods.values()) Object.assign(emVigor, seus);
-  if (!("texto" in emVigor) && !("fundo" in emVigor)) return true;
-
-  const medido = getComputedStyle(document.documentElement);
-  const daRaiz = (token) => medido.getPropertyValue(token).trim();
-  const texto = emVigor.texto ?? daRaiz(TEMA_DA_API.texto);
-  const fundo = emVigor.fundo ?? daRaiz(TEMA_DA_API.fundo);
   // Uma folha que não carregou não vira recusa: sem cor medida não há medida, e
   // inventar uma seria recusar um tema por um motivo que não aconteceu.
-  if (!COR_DO_TEMA.test(texto) || !COR_DO_TEMA.test(fundo)) return true;
-
-  const razao = contrasteEntre(texto, fundo);
-  if (razao >= 4.5) return true;
-  return `o texto «${texto}» sobre o fundo «${fundo}» dá ${razao.toFixed(2)}:1, `
-    + "e a conversa precisa de 4,5:1 para ser lida";
+  if (!COR_DO_TEMA.test(corDaRaiz(TEMA_DA_API.fundo))) return true;
+  const { pares } = tonsDoTema(emVigor, corDaRaiz);
+  if (pares.length === 0) return true;
+  const { frente, fundo, razao, piso } = pares[0];
+  return `«${frente}» sobre «${fundo}» dá ${String(razao).replace(".", ",")}:1, `
+    + `e o piso é ${String(piso).replace(".", ",")}:1`;
 }
 
 /** WCAG 2.1: a razão de contraste entre duas cores `#rrggbb`. */

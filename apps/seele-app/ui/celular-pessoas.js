@@ -24,7 +24,10 @@
     if (!doNome && evento.target.closest("a, button, input, select, textarea")) return;
     evento.stopPropagation();
     evento.preventDefault();
+    abrirFolhaDaLinha(linha);
+  }, true);
 
+  function abrirFolhaDaLinha(linha) {
     const deslizante = linha.querySelector("input.volume");
     const apelido = deslizante?.getAttribute("data-pessoa") ?? null;
     CELULAR.ajudante("folhaDaPessoa")({
@@ -43,5 +46,14 @@
       // quem usa o aparelho (`quemPodeSerModerado`): a regra é dele.
       podeModerar: !!linha.querySelector("button[data-moderar-pessoa]"),
     });
-  }, true);
+  }
+
+  // Pelo apelido, para quem abre a folha de fora da lista (a grade da CHAMADA).
+  // A linha de quem usa o aparelho não tem deslizante, e é achada pelo nome.
+  CELULAR.registrar("abrirPessoa", (apelido) => {
+    const linhas = [...lista.querySelectorAll("li.pessoa")];
+    const linha = linhas.find((l) => l.querySelector("input.volume")?.getAttribute("data-pessoa") === apelido)
+      ?? linhas.find((l) => !l.querySelector("input.volume") && l.querySelector(".pessoa-nome")?.textContent.startsWith(apelido));
+    if (linha) abrirFolhaDaLinha(linha);
+  });
 })();
