@@ -224,6 +224,13 @@ const NEUTROS_DE_QUEM_NAO_HOSPEDA = new Map([
     "conjunto_exigido_agora",
     { resposta: "", motivo: "o desktop responde assim a quem não hospeda (main.rs)" },
   ],
+  [
+    "estado_do_servidor",
+    {
+      resposta: { hospedando: false, mensagens_desconhecidas: 0, sessoes_com_desconhecidas: 0 },
+      motivo: "a P12 da F1: a seção ESTE SERVIDOR pergunta a cada volta, e a janela que não hospeda esconde a linha (main.rs)",
+    },
+  ],
 ]);
 
 /**

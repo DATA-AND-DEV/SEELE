@@ -243,6 +243,7 @@ async function osNeutros() {
     },
     estou_hospedando: false,
     conjunto_exigido_agora: "",
+    estado_do_servidor: { hospedando: false, mensagens_desconhecidas: 0, sessoes_com_desconhecidas: 0 },
   };
   for (const casca of [{ toque: true }, { largura: 1280 }]) {
     const p = pagina(casca);
