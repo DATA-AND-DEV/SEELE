@@ -82,16 +82,6 @@ class Ponto:
 
 
 PONTOS_INJETADOS = [
-    # No produto, o P6 é a última linha de `desenhar`. Aqui ele entra no começo,
-    # adiado para depois dela por um microtask: o efeito é o mesmo, e a âncora é
-    # estável.
-    Ponto(
-        "P6",
-        "tela-sessao.js",
-        "function desenhar(snapshot) {\n  if (!snapshot) return;\n",
-        "  queueMicrotask(() => CASCA.depoisDeDesenhar.forEach((f) => f(snapshot)));\n",
-        "CASCA.depoisDeDesenhar",
-    ),
     # A senha da sala sai do `window.prompt` (P7). E cancelar cancela: o
     # desktop, com o `prompt`, tentava entrar sem senha quando a pessoa
     # desistia, e a recusa do servidor era a resposta ao «cancelar».

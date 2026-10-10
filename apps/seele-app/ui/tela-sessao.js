@@ -526,6 +526,9 @@ function desenhar(snapshot) {
   // saiu da sala, o canal que sumiu — para, como o `<audio>` parava. Ver
   // `calarOsSonsQueSairamDaTela`, em `base.js`.
   calarOsSonsQueSairamDaTela();
+  // Por último, o que a casca do navegador redesenha por cima deste quadro (P6,
+  // `CASCA` em `base.js`). No desktop a lista está vazia.
+  for (const f of CASCA.depoisDeDesenhar) f(snapshot);
 }
 
 /**
