@@ -97,7 +97,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Resolver pelo `std::net::ToSocketAddrs` seria uma chamada bloqueante dentro de
 # um comando `async`, isto é, um trabalhador do runtime parado pelo tempo que o
 # resolvedor de DNS de outra pessoa quiser levar.
-tokio = { version = "1.53.1", features = ["net", "rt"] }
+# `macros` pelo `tokio::join!` da saída do app (`despedir_das_hospedagens`):
+# as duas hospedagens se despedem ao mesmo tempo.
+tokio = { version = "1.53.1", features = ["net", "rt", "macros"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }

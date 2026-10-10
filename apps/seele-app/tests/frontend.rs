@@ -10755,16 +10755,33 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          a credencial de uma entrada que já a gastou:\n{reconectar}"
     );
 
-    // 4. Fechar a janela encerra o processo, e a memória da página vai junto.
+    // 4. Fechar a janela leva a memória da página junto.
+    //
+    // **Desde a tarefa 21 da F7, a saída do processo é segurada**, e só de um
+    // jeito: no `ExitRequested` com `code: None`, para as hospedagens se
+    // despedirem. O runtime manda esse evento do `Destroyed` da última janela,
+    // com ela já fora da lista (`tauri-runtime-wry` 2.11.4, `TaoWindowEvent::
+    // Destroyed`): a página já foi, e a credencial com ela. O que continua
+    // proibido é segurar a **janela** (`prevent_close`, `CloseRequested`), e
+    // segurar a saída de outro jeito, com a janela ainda aberta.
     let main = without_comments(&read("src/main.rs"));
-    for segura in ["prevent_exit", "prevent_close", "CloseRequested"] {
+    for segura in ["prevent_close", "CloseRequested"] {
         assert!(
             !main.contains(segura),
             "o `main.rs` passou a usar `{segura}`: fechar a janela pode não encerrar \
-             mais o processo, e a credencial da tentativa, que só existe na memória \
-             da página, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+             mais a página, e a credencial da tentativa, que só existe na memória \
+             dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
         );
     }
+    let compacto: String = main.split_whitespace().collect();
+    assert!(
+        compacto.matches("prevent_exit").count() <= 1
+            && (!compacto.contains("prevent_exit")
+                || compacto.contains("ExitRequested{code:None,api,..}=&evento{api.prevent_exit()")),
+        "o `main.rs` segura a saída de um jeito que não é o `ExitRequested` com `code: None`: \
+         uma saída pedida com a janela aberta, segurada, manteria a página viva, e a \
+         credencial da tentativa sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+    );
     // **E a página também não segura o fechar** (rodada 1, M2). O Tauri deixa
     // a janela vetar o próprio fechamento (`onCloseRequested` com
     // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois

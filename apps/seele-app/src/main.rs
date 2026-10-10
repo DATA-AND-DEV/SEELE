@@ -10466,7 +10466,33 @@ fn main() {
             // `ExitRequested` e não `Exit`: o primeiro chega quando a última
             // janela fecha e ainda há tempo de o quadro sair pelo fio; o segundo
             // chega com o processo já indo embora.
-            if matches!(evento, tauri::RunEvent::ExitRequested { .. }) {
+            //
+            // **E as hospedagens, que também têm quem esteja dentro** (tarefa 21
+            // da F7). A saída é segurada, as duas se despedem dentro de
+            // `TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS`, ao mesmo tempo que a sessão,
+            // e só então o app sai.
+            //
+            // **Só com `code: None`**, que é a pessoa fechando a última janela.
+            // O runtime o manda do `Destroyed` dela, com a janela já fora da
+            // lista (`tauri-runtime-wry` 2.11.4): a página, e a credencial que
+            // só mora na memória dela, já foram. Segurar aqui não segura janela
+            // nenhuma. O `exit(0)` do fim vem com `Some(0)` e passa; o
+            // `restart` do atualizador não é segurado pelo Tauri.
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &evento
+            {
+                api.prevent_exit();
+                let saida = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager as _;
+                    despedir_das_hospedagens(
+                        &saida.state::<Session>(),
+                        TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS,
+                    )
+                    .await;
+                    saida.exit(0);
+                });
                 despedir_se(handle);
             }
         }),
@@ -10492,6 +10518,40 @@ fn despedir_se(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
     despedir_da_sessao(&handle.state::<Session>(), ESPERA_DOS_MODS_NA_SAIDA);
+}
+
+/// Quanto cada hospedagem tem para se despedir na saída do app.
+///
+/// Um segundo, repartido por [`seele_server::hospedagem::Hospedagem::despedir`]:
+/// metade para o aviso, que é o mesmo meio segundo do SAIR
+/// (`PRAZO_DO_AVISO`), um quarto para o fechamento sair, um quarto para a porta
+/// do roteador. As duas hospedagens se despedem ao mesmo tempo, e junto com a
+/// sessão ([`despedir_se`]), então a saída não soma os tetos.
+const TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A saída do app, para as hospedagens: o servidor guardado e a sala se
+/// despedem de quem está dentro, ao mesmo tempo, cada uma dentro de `teto`.
+///
+/// Quem estava num servidor guardado lê `ServerShuttingDown`, e quem estava
+/// numa ligação lê `ChamadaEncerrada`: quem escolhe é a hospedagem
+/// (`Hospedagem::despedir`). Antes, fechar a janela só despedia a sessão, e
+/// quem estava dentro de um servidor desta máquina descobria pelo tempo de
+/// ociosidade, 20 s depois.
+///
+/// As duas saem do `Mutex` **antes** de qualquer espera, e a sessão fica sem
+/// hospedagem nenhuma: o que vem depois desta função é o processo saindo.
+async fn despedir_das_hospedagens(sessao: &Session, teto: std::time::Duration) {
+    let (guardado, pessoal) = sessao
+        .hospedagens
+        .lock()
+        .map(|mut hospedagens| (hospedagens.guardado.take(), hospedagens.pessoal.take()))
+        .unwrap_or((None, None));
+    let despedir = |hospedado: Option<Hospedado>| async move {
+        if let Some(hospedado) = hospedado {
+            hospedado.hospedagem.despedir(teto).await;
+        }
+    };
+    tokio::join!(despedir(guardado), despedir(pessoal));
 }
 
 /// Quanto a saída do app espera os MODs nativos confirmarem a parada.
@@ -16650,6 +16710,47 @@ mod o_tipo_do_arquivo_escolhido {
         let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
         let lido = tipo_do_escolhido(&png).expect("o PNG foi recusado");
         assert_eq!(lido.media_type, "image/png");
+    }
+}
+
+#[cfg(test)]
+mod a_saida_despede_as_hospedagens {
+    use super::{despedir_das_hospedagens, Hospedado, Session};
+    use seele_server::hospedagem::Hospedagem;
+
+    #[tokio::test]
+    async fn as_duas_saem_da_sessao_e_se_despedem() {
+        // O comportamento de cada despedida é da hospedagem (`quem_hospeda_fecha.rs`
+        // e `sala_pessoal.rs`, no `seele-conformance`). O que é deste arquivo:
+        // a saída leva as duas, e não só a que existia antes do Plano 2.
+        let sessao = Session::default();
+        // Duas salas, e não um servidor guardado e uma sala: este arquivo só
+        // sobe hospedagem pelo ponto padrão (o guarda
+        // `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS
+        // de produção. O que se prova aqui é o lugar de cada uma na sessão.
+        let guardado = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
+            .await
+            .expect("a primeira não subiu");
+        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        {
+            let mut hospedagens = sessao.hospedagens.lock().expect("o cadeado");
+            hospedagens.guardado = Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            });
+            hospedagens.pessoal = Some(Hospedado {
+                hospedagem: sala,
+                servidor: None,
+            });
+        }
+
+        despedir_das_hospedagens(&sessao, std::time::Duration::from_millis(400)).await;
+
+        let hospedagens = sessao.hospedagens.lock().expect("o cadeado");
+        assert!(hospedagens.guardado.is_none(), "o guardado ficou para trás");
+        assert!(hospedagens.pessoal.is_none(), "a sala ficou para trás");
     }
 }
 
