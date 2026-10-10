@@ -4,6 +4,12 @@
 // catálogo devolveu, que INSTALAR pede **aquele** MOD naquela versão, e que um
 // catálogo cuja assinatura não confere vira uma frase que manda parar — e não
 // uma lista vazia, que é como uma recusa de segurança some de vista.
+//
+// **E reprova quando não prova** (lote W3 da F5). Até então só a seção abrir era
+// `exigir`; o resto era `relatar`, e uma linha a menos, o selo trocado ou a
+// recusa de assinatura calada saíam com a carga limpa. As reversões de cada
+// exigência estão no relatório do lote W3
+// (`docs/superpowers/sdd/2026-10-08-0.16/F5/lote-w3-report.md`).
 
 // `api` é a que este build aceita, lida do Rust pelo aparelho: um número fixo
 // aqui envelheceu (era 1) e o build de verdade teria escondido as duas versões.
@@ -16,7 +22,11 @@ const CATALOGO = {
       titulo: "Salas de RPG",
       resumo: "Fichas, dados e salas por mesa.",
       repo: "https://example.invalid/rpg",
-      nivel: "verificado",
+      // **O selo do MOD é diferente do da versão exibida, de propósito**: o `nivel`
+      // do topo é a avaliação mais recente e serve para listar, e quem carimba um
+      // número de versão é o `nivel` de dentro dela. Com os dois iguais, uma linha
+      // que lesse o selo errado desenharia o mesmo texto e passaria.
+      nivel: "oficial",
       versoes: [
         {
           versao: "1.0.0",
@@ -57,22 +67,47 @@ await espera(200);
 relatar(`painel MODS: ${visivel("painel-mods")}`);
 exigir(visivel("painel-mods") === "VISIVEL", "a seção MODS não abriu");
 // Nada foi buscado ao abrir — ADR 0026.
-relatar(`buscou ao abrir: ${window.__SEELE_CHAMADAS.includes("catalogo_de_mods")}`);
+const buscouAoAbrir = window.__SEELE_CHAMADAS.includes("catalogo_de_mods");
+relatar(`buscou ao abrir: ${buscouAoAbrir}`);
+exigir(!buscouAoAbrir,
+  "abrir a seção MODS foi à rede buscar o catálogo sem ninguém apertar BUSCAR (ADR 0026)");
 
 document.getElementById("catalogo-buscar").click();
 await espera(300);
-relatar(`linhas no catálogo: ${document.querySelectorAll("#lista-catalogo li").length}`);
-relatar(`estado: ${document.getElementById("catalogo-estado").textContent}`);
-// O selo tem de ser o da versão exibida — a 1.1.0, verificada — e não o do MOD.
-relatar(
-  `selo da versão exibida: ${document.querySelector("#lista-catalogo .mods-versao:last-of-type")?.textContent ?? "—"}`,
-);
+const MOD = CATALOGO.mods[0];
+const linhas = [...document.querySelectorAll("#lista-catalogo li")];
+relatar(`linhas no catálogo: ${linhas.length}`);
+exigir(linhas.length === CATALOGO.mods.length,
+  `BUSCAR não desenhou o que o catálogo devolveu: ${linhas.length} linhas desenhadas, ` +
+    `e o catálogo trouxe ${CATALOGO.mods.length}`);
+exigir(linhas[0].textContent.includes(MOD.titulo) && linhas[0].textContent.includes(MOD.id),
+  `a linha desenhada não é a do MOD do catálogo («${MOD.titulo}», ${MOD.id}): «${linhas[0].textContent}»`);
+const estadoDaBusca = document.getElementById("catalogo-estado").textContent;
+relatar(`estado: ${estadoDaBusca}`);
+exigir(estadoDaBusca === `${CATALOGO.mods.length} no catálogo.`,
+  `o estado da busca diz «${estadoDaBusca}», e o catálogo trouxe ${CATALOGO.mods.length}`);
+// O selo tem de ser o da versão exibida — a 1.1.0, verificada — e não o do MOD,
+// que no catálogo deste roteiro é outro.
+const ultima = MOD.versoes[MOD.versoes.length - 1];
+const seloEsperado = `versão ${ultima.versao} · VERIFICADO`;
+const selo = [...document.querySelectorAll("#lista-catalogo .mods-versao")]
+  .map((el) => el.textContent)
+  .find((texto) => texto.startsWith("versão "));
+relatar(`selo da versão exibida: ${selo ?? "—"}`);
+exigir(selo === seloEsperado,
+  `o selo desenhado é «${selo ?? "nenhum"}», e devia ser «${seloEsperado}»: ` +
+    `a versão exibida é a ${ultima.versao}, verificada, e o MOD é «${MOD.nivel}»`);
 
 window.__SEELE_CHAMADAS.length = 0;
+delete window.__SEELE_ARGS.instalar_mod_do_catalogo;
 document.querySelector("#lista-catalogo button").click();
 await espera(300);
-const pedido = window.__SEELE_ARGS.instalar_mod_do_catalogo ?? {};
-relatar(`pediu instalação: id=${pedido.id} versao=${pedido.versao}`);
+const pedido = window.__SEELE_ARGS.instalar_mod_do_catalogo;
+relatar(`pediu instalação: id=${pedido?.id} versao=${pedido?.versao}`);
+exigir(pedido !== undefined,
+  `INSTALAR não pediu nada: instalar_mod_do_catalogo nunca foi chamado (a sequência foi: ${window.__SEELE_CHAMADAS.join(" → ") || "nenhuma"})`);
+exigir(pedido.id === MOD.id && pedido.versao === ultima.versao,
+  `INSTALAR pediu «${pedido.id} ${pedido.versao}», e a linha desenhada era a ${MOD.id} ${ultima.versao}`);
 
 // E a recusa de assinatura: tem de virar frase, e não lista vazia.
 SEELE_RESPOSTAS.catalogo_de_mods = { __recusa: "AssinaturaDoCatalogoRecusada" };
@@ -80,4 +115,9 @@ document.getElementById("catalogo-buscar").click();
 await espera(300);
 const estado = document.getElementById("catalogo-estado");
 relatar(`recusa vira frase: ${estado.textContent.split("\n")[0]}`);
+exigir(estado.textContent.startsWith("O CATÁLOGO NÃO É O NOSSO.") && estado.textContent.includes("Não tente de novo"),
+  "a assinatura do catálogo que não confere não virou a frase que manda parar: " +
+    `o estado diz «${estado.textContent.split("\n")[0]}»`);
 relatar(`marcada como erro: ${estado.classList.contains("mods-recusado")}`);
+exigir(estado.classList.contains("mods-recusado"),
+  "a recusa de assinatura foi escrita como um estado qualquer, e não marcada como erro (mods-recusado)");
