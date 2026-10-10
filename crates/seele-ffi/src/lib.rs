@@ -2259,12 +2259,11 @@ impl Connection {
     /// Not a command: it has to take effect on the next 20 ms frame, and a
     /// round trip through the driver thread would put a queue between a key and
     /// a microphone.
+    ///
+    /// Sem voz viva — a volta reabrindo, a sala abrindo —, a tecla é guardada e
+    /// vale na voz que entrar no lugar. Item 1 do lote V.
     pub fn set_talking(&self, talking: bool) {
-        if let Ok(voice) = self.shared.voice.lock() {
-            if let Some(voice) = voice.as_ref() {
-                voice.set_key_held(talking);
-            }
-        }
+        self.shared.voice.segurar_a_tecla(talking);
     }
 
     /// Switches this session to another microphone.
@@ -4644,6 +4643,15 @@ struct ControlesGuardados {
     abertura_dbfs: Option<f32>,
     /// Os aparelhos pedidos — o pedido, e não o que abriu.
     aparelhos: seele_core::DeviceChoice,
+    /// A tecla de falar, como a janela a mandou por último. Item 1 do lote V.
+    ///
+    /// **Não é escolha, e mora aqui assim mesmo.** A janela manda a pressão e a
+    /// soltura uma vez cada (`segurarFala` deduplica). Sem voz viva — a volta a
+    /// tira do lugar enquanto ela reabre, e a primeira abertura fica no
+    /// «ABRINDO» —, `set_talking` não tinha onde pôr a soltura, e ela se perdia:
+    /// a voz nova entrava com a tecla da velha (`Voice::reopen` a carrega) e
+    /// transmitia até a próxima pressão, com o roster dizendo que a pessoa fala.
+    tecla_segura: bool,
 }
 
 impl ControlesGuardados {
@@ -4660,6 +4668,7 @@ impl ControlesGuardados {
             supressao: 1.0,
             abertura_dbfs: None,
             aparelhos,
+            tecla_segura: false,
         }
     }
 }
@@ -4672,6 +4681,13 @@ impl ControlesGuardados {
 trait VozViva {
     /// Aplica tudo o que a pessoa escolheu.
     fn vestir(&self, escolhida: &ControlesGuardados);
+
+    /// Segura ou solta a tecla de falar. Item 1 do lote V.
+    ///
+    /// À parte de [`Self::vestir`] porque a tecla não é escolha: é o que a
+    /// pessoa está fazendo agora. Em que voz ela vale quem decide é a
+    /// [`VozDaSala`] — na viva, a cada pressão, e na que entra no lugar.
+    fn segurar(&self, segura: bool);
 
     /// Põe o ganho de quem fala por este `ssrc`. `1.0` é o de origem.
     ///
@@ -4689,9 +4705,26 @@ impl VozViva for Voice {
         self.set_abertura_dbfs(escolhida.abertura_dbfs);
     }
 
+    fn segurar(&self, segura: bool) {
+        self.set_key_held(segura);
+    }
+
     fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
         self.set_gain(ssrc.get(), ganho);
     }
+}
+
+/// Veste uma voz com tudo o que está guardado: o que a pessoa escolheu, e a
+/// tecla de falar como a janela a mandou por último.
+///
+/// Uma função para os dois lugares que vestem — a escolha nova na voz viva
+/// ([`VozDaSala::escolher`]) e a voz que entra no lugar
+/// ([`VozDaSala::instalar`]) —, para a tecla não ficar de fora de um deles. Na
+/// que entra, a guardada vale **por cima** da que `Voice::reopen` carregou da
+/// velha (item 1 do lote V).
+fn vestir_inteira<V: VozViva>(voz: &V, guardados: &ControlesGuardados) {
+    voz.vestir(guardados);
+    voz.segurar(guardados.tecla_segura);
 }
 
 /// Veste a voz desta sessão com o que está gravado em disco: o modo, a
@@ -4908,6 +4941,15 @@ impl<V> VozDaSala<V> {
 }
 
 impl<V: VozViva> VozDaSala<V> {
+    /// A tecla de falar, segura ou solta. Item 1 do lote V.
+    ///
+    /// **Gravada sempre**, com voz viva ou sem, e posta na viva se há uma. Era
+    /// posta só na viva: durante a reabertura da volta e no «ABRINDO» a tecla
+    /// não tinha onde cair, e a janela não a manda de novo.
+    fn segurar_a_tecla(&self, segura: bool) {
+        self.escolher(|escolhida| escolhida.tecla_segura = segura);
+    }
+
     /// Grava uma escolha e a aplica na voz viva, se há uma.
     fn escolher(&self, mudar: impl FnOnce(&mut ControlesGuardados)) {
         mudar(
@@ -4918,7 +4960,7 @@ impl<V: VozViva> VozDaSala<V> {
         );
         if let Ok(viva) = self.viva.lock() {
             if let Some(viva) = viva.as_ref() {
-                viva.vestir(&self.escolhida());
+                vestir_inteira(viva, &self.escolhida());
             }
         }
     }
@@ -4946,7 +4988,7 @@ impl<V: VozViva> VozDaSala<V> {
                 if escolhida.aparelhos != *pedidos {
                     return Err(nova);
                 }
-                nova.vestir(&escolhida);
+                vestir_inteira(&nova, &escolhida);
                 *viva = Some(nova);
                 // Uma voz nova nasce com todo mundo a 1.0, e os volumes ainda
                 // não estão nela: zerar os aplicados é o que faz o fim desta
@@ -10559,18 +10601,24 @@ mod o_audio_segue_a_sala {
 
     const SALA: VoiceRoomId = VoiceRoomId(1);
 
-    /// Uma voz de mentira, que lembra o que vestiu ao abrir e o ganho que cada
-    /// número recebeu.
+    /// Uma voz de mentira, que lembra o que vestiu ao abrir, a tecla de falar e
+    /// o ganho que cada número recebeu.
     #[derive(Debug, Default)]
     struct Voz {
         ssrc: u32,
         vestida: Mutex<Option<ControlesGuardados>>,
+        /// A tecla de falar, como o átomo `key_held` dos controles do núcleo.
+        tecla: Mutex<bool>,
         ganhos: Mutex<HashMap<u32, f32>>,
     }
 
     impl VozViva for Voz {
         fn vestir(&self, escolhida: &ControlesGuardados) {
             *self.vestida.lock().expect("o que a voz vestiu") = Some(escolhida.clone());
+        }
+
+        fn segurar(&self, segura: bool) {
+            *self.tecla.lock().expect("a tecla da voz") = segura;
         }
 
         fn ganhar(&self, ssrc: Ssrc, ganho: f32) {
@@ -10585,8 +10633,29 @@ mod o_audio_segue_a_sala {
         Voz {
             ssrc,
             vestida: Mutex::new(None),
+            tecla: Mutex::new(false),
             ganhos: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// A voz que `Voice::reopen` devolve na volta: nova, no `ssrc` de agora, e
+    /// com os controles da velha — o que ela vestiu, a tecla e os ganhos por
+    /// número —, como `carregar_controles` os leva no núcleo.
+    fn reaberta(velha: &Voz, ssrc: u32) -> Voz {
+        Voz {
+            ssrc,
+            vestida: Mutex::new(velha.vestida.lock().expect("o que a velha vestiu").clone()),
+            tecla: Mutex::new(*velha.tecla.lock().expect("a tecla da velha")),
+            ganhos: Mutex::new(velha.ganhos.lock().expect("os ganhos da velha").clone()),
+        }
+    }
+
+    /// A tecla de falar da voz viva, se há uma.
+    fn tecla_de(voz: &VozDaSala<Voz>) -> Option<bool> {
+        voz.lock()
+            .expect("a voz")
+            .as_ref()
+            .map(|viva| *viva.tecla.lock().expect("a tecla da voz"))
     }
 
     fn entregue(aberta: Aberta<Voz>) -> Futuro<Voz> {
@@ -10920,6 +10989,178 @@ mod o_audio_segue_a_sala {
         );
         assert!(!ha_voz(&voz));
         assert_eq!(voz.abertura(), AberturaDoAudio::ForaDeSala);
+    }
+
+    /// Item 1 do lote V: soltar a tecla de falar durante a reabertura da volta
+    /// fecha a fala na voz nova.
+    ///
+    /// A volta tira a voz do lugar enquanto ela reabre (`PortaDaVoz::na_volta`,
+    /// até o prazo do áudio), e `Voice::reopen` carrega a tecla da velha. A
+    /// janela manda a soltura uma vez só: perdida ali, a voz nova entrava com a
+    /// tecla segura e transmitia até a próxima pressão. `segurar_a_tecla` é o
+    /// que `Connection::set_talking` chama.
+    #[tokio::test]
+    async fn soltar_a_tecla_durante_a_reabertura_da_volta_fecha_a_fala() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        let mut room = Room::new();
+        room.adopt(&sessao(700), "marcela");
+        room.enter_voice_room(SALA);
+        decidida(&mut room);
+        olhar_e_esperar(&mut porta, &voz, &room, 700).await;
+
+        // Ela fala segurando a tecla.
+        voz.segurar_a_tecla(true);
+        assert_eq!(
+            tecla_de(&voz),
+            Some(true),
+            "a tecla apertada com a voz viva não chegou a ela: a pessoa segura a tecla \
+             de falar e ninguém a ouve"
+        );
+
+        // A rede cai e volta: a voz sai do lugar e reabre na conexão nova.
+        readotar_na_volta(&mut room, &sessao_numero(700, 701), "marcela", Some(SALA));
+        porta.na_volta(
+            &voz,
+            |velha| entregue(Ok(Ok(reaberta(&velha, 701)))),
+            nada_abre,
+        );
+        assert!(
+            !ha_voz(&voz),
+            "a voz não saiu do lugar durante a reabertura, e o teste mediu outra coisa"
+        );
+
+        // E solta a tecla no meio da reabertura.
+        voz.segurar_a_tecla(false);
+        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+            .await
+            .expect("a reabertura não chegou");
+        porta.chegou(&voz, aberta, nada_abre);
+
+        assert_eq!(
+            voz.lock().expect("a voz").as_ref().map(|viva| viva.ssrc),
+            Some(701)
+        );
+        assert_eq!(
+            tecla_de(&voz),
+            Some(false),
+            "a pessoa soltou a tecla de falar durante a reabertura da volta e a voz nova \
+             entrou com ela segura: o microfone transmite até a próxima pressão, com o \
+             roster dizendo que ela fala"
+        );
+
+        // Quem segura a tecla pela volta inteira continua falando na voz nova.
+        voz.segurar_a_tecla(true);
+        porta.na_volta(
+            &voz,
+            |velha| entregue(Ok(Ok(reaberta(&velha, 702)))),
+            nada_abre,
+        );
+        let aberta = tokio::time::timeout(Duration::from_secs(5), porta.chegada())
+            .await
+            .expect("a segunda reabertura não chegou");
+        porta.chegou(&voz, aberta, nada_abre);
+        assert_eq!(
+            tecla_de(&voz),
+            Some(true),
+            "quem segurava a tecla pela volta inteira voltou calado: a voz nova soltou \
+             uma tecla que a pessoa não soltou"
+        );
+    }
+
+    /// Item 1 do lote V, a variante: apertar a tecla de falar enquanto a
+    /// primeira abertura está no «ABRINDO» vale quando a voz chega.
+    #[tokio::test]
+    async fn apertar_a_tecla_durante_a_primeira_abertura_vale_quando_a_voz_chega() {
+        let voz: VozDaSala<Voz> = VozDaSala::nova(true, DeviceChoice::default());
+        let mut porta = PortaDaVoz::nova();
+        porta.olhar(&voz, Some(SALA), |_| entregue(Ok(Ok(voz_de(700)))));
+        assert_eq!(voz.abertura(), AberturaDoAudio::Abrindo);
+
+        voz.segurar_a_tecla(true);
+        let aberta = porta.chegada().await;
+        porta.chegou(&voz, aberta, nada_abre);
+
+        assert_eq!(
+            tecla_de(&voz),
+            Some(true),
+            "a pessoa apertou a tecla de falar no «ABRINDO» e a voz abriu com ela solta: \
+             ela segura a tecla e ninguém a ouve até soltar e apertar de novo"
+        );
+    }
+
+    /// Item 1 do lote V, pela conexão: sem voz viva, `set_talking` guarda a
+    /// tecla em vez de jogá-la fora.
+    #[test]
+    fn sem_voz_viva_a_conexao_guarda_a_tecla_de_falar() {
+        let (commands, _fila) = tokio::sync::mpsc::unbounded_channel();
+        let connection = super::Connection {
+            commands,
+            shared: compartilhado(true),
+            encerrada: Mutex::new(None),
+        };
+
+        connection.set_talking(true);
+        assert!(
+            connection.shared.voice.escolhida().tecla_segura,
+            "`set_talking(true)` sem voz viva foi jogado fora: quem aperta a tecla \
+             enquanto a voz abre fala para ninguém"
+        );
+        connection.set_talking(false);
+        assert!(
+            !connection.shared.voice.escolhida().tecla_segura,
+            "`set_talking(false)` sem voz viva foi jogado fora: a voz que abrir \
+             transmite com a tecla solta"
+        );
+    }
+
+    /// A voz de verdade veste cada controle guardado, e segura a tecla de falar.
+    ///
+    /// Os testes acima provam, com a voz de mentira, **quando** a voz veste; o
+    /// que ela veste mora em `impl VozViva for Voice`, que pede placa de som.
+    /// Lido do fonte, campo por campo de `ControlesGuardados`: um campo que o
+    /// `vestir` de verdade esquecesse seria guardado, mostrado na tela e nunca
+    /// posto na voz. Os aparelhos ficam de fora, porque valem ao abrir e não ao
+    /// vestir.
+    #[test]
+    fn a_voz_de_verdade_veste_cada_controle_guardado() {
+        let fonte = include_str!("lib.rs");
+        let programa = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
+        let bloco = |abertura: &str| {
+            programa
+                .split(abertura)
+                .nth(1)
+                .and_then(|resto| resto.split("\n}\n").next())
+                .unwrap_or_else(|| panic!("`{abertura}` sumiu de `lib.rs`"))
+                .to_owned()
+        };
+        let campos: Vec<String> = bloco("struct ControlesGuardados {")
+            .lines()
+            .map(str::trim)
+            .filter(|linha| !linha.starts_with("//"))
+            .filter_map(|linha| linha.split_once(':').map(|(nome, _)| nome.to_owned()))
+            .collect();
+        assert!(
+            campos.len() >= 6,
+            "o guarda não achou os campos de `ControlesGuardados`, e um verde dele não diz \
+             nada: {campos:?}"
+        );
+        let voz = bloco("impl VozViva for Voice {");
+        for campo in campos
+            .iter()
+            .filter(|campo| !["aparelhos", "tecla_segura"].contains(&campo.as_str()))
+        {
+            assert!(
+                voz.contains(&format!("escolhida.{campo}")),
+                "a voz de verdade não veste `{campo}`: a escolha é guardada, a tela a \
+                 mostra, e a voz que abre fica no padrão"
+            );
+        }
+        assert!(
+            voz.contains("self.set_key_held(segura)"),
+            "a voz de verdade não segura a tecla de falar que a porta manda: a tecla \
+             guardada nunca chega ao microfone"
+        );
     }
 
     /// Uma abertura em curso na hora da volta abria sobre a conexão que caiu, e
@@ -11990,6 +12231,7 @@ mod a_voz_quando_o_enlace_volta {
 
     impl VozViva for Voz {
         fn vestir(&self, _: &ControlesGuardados) {}
+        fn segurar(&self, _: bool) {}
         fn ganhar(&self, _: seele_core::Ssrc, _: f32) {}
     }
 
