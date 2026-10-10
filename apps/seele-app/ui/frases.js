@@ -294,6 +294,20 @@ const PERMISSAO_DE_MICROFONE = {
       "O microfone está ligado, e o interruptor separado dos aplicativos de " +
       "área de trabalho não — ele fica no fim da mesma página, depois da lista.",
   },
+  // **Só no navegador**, e não do Rust: a ponte da F4 a devolve quando a
+  // Permissions API diz que o navegador negou o microfone a esta página (matriz
+  // da F8, achado 3). Sem ela, o bloco ficava escondido justamente quando a
+  // página não pode usar o microfone. Não há botão: uma página não abre os
+  // ajustes do sistema, e as duas cascas do navegador o tiram. A nota serve às
+  // duas, porque a tabela é uma só.
+  NegadaPeloNavegador: {
+    diz: "O NAVEGADOR NÃO DEIXA ESTA PÁGINA USAR O MICROFONE.",
+    nota:
+      "Libere o microfone para esta página nos ajustes do navegador: no " +
+      "computador, no ícone ao lado do endereço da página; no iPhone, em " +
+      "Ajustes › Apps › Safari › Microfone; no Android, em Configurações do " +
+      "site › Microfone. Depois, entre de novo na sala de voz.",
+  },
 };
 
 /**

@@ -1234,3 +1234,9 @@
     min-height: 0;
   }
 }
+
+/* O botão que abre os ajustes do microfone do sistema: uma página não os abre,
+   e a ponte recusa o pedido. A nota do bloco diz onde a permissão fica. */
+:root[data-casca="celular"] #boot-microfone-ajustes {
+  display: none;
+}

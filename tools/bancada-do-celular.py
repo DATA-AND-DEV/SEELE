@@ -1587,6 +1587,31 @@ def larga_tela_cheia(pg: Page) -> list[str]:
     return falhas
 
 
+def microfone_negado(pg: Page) -> list[str]:
+    """Com o microfone negado pelo navegador, a seção ÁUDIO diz isso e onde se
+    libera (matriz, achado 3; a ponte da F4 devolve a `NegadaPeloNavegador`).
+    Sem a frase, o bloco ficava escondido justamente nesse caso. O botão dos
+    ajustes do sistema não aparece: a página não os abre."""
+    falhas = []
+    pg.evaluate("window.__SEELE_PERMISSAO_DO_MICROFONE = 'NegadaPeloNavegador'")
+    marca = pg.evaluate("document.documentElement.dataset.casca")
+    if marca == "celular":
+        ir_para_aba(pg, "ajustes", falhas)
+    else:
+        exigir_toque(pg, "#botao-server-sessao", falhas)
+    pg.wait_for_timeout(500)
+    if not exigir_toque(pg, "#secao-audio", falhas):
+        return falhas
+    pg.wait_for_timeout(800)
+    visto = pg.evaluate("""(() => { const v = (id) => { const e = document.getElementById(id); return !!e && !e.closest('[hidden]') && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().height > 0; };
+        return { bloco: v('boot-microfone'), diz: document.getElementById('boot-microfone-diz').textContent, botao: v('boot-microfone-ajustes') }; })()""")
+    if not visto["bloco"] or "NAVEGADOR" not in visto["diz"]:
+        falhas.append(f"com o microfone negado pelo navegador, ÁUDIO não diz nada: {visto}")
+    if visto["botao"]:
+        falhas.append("o botão dos ajustes do sistema aparece, e a página não os abre")
+    return falhas
+
+
 def escolha_da_casca(pg: Page) -> list[str]:
     """A escolha da casca à mão (Tarefa 18): ela grava a preferência, diz que
     vale na próxima abertura, e não troca nada ao vivo."""
@@ -1691,6 +1716,9 @@ CASOS: dict[str, Caso] = {
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
     "larga-tela-cheia": Caso(levar=larga_tela_cheia, marca="larga", aparelhos=("1440",), medir=False),
+    # O microfone negado pelo navegador, nas duas cascas (achado 3).
+    "microfone-negado": Caso(levar=microfone_negado, aparelhos=("390",), medir=False),
+    "microfone-negado-larga": Caso(levar=microfone_negado, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-no-celular": Caso(levar=escolha_da_casca, aparelhos=("390",), medir=False),
     "escolha-no-computador": Caso(levar=escolha_da_casca, marca="larga", aparelhos=("1440",), medir=False),
     "escolha-sem-armazenamento": Caso(levar=escolha_sem_armazenamento, aparelhos=("390",), medir=False),
