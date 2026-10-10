@@ -266,12 +266,141 @@ mudança. `obter.contains("versao: m.version")` ainda casa.
    `https://mods.seele.app.br`, fixo, e não sobe em teste. A hospedagem também
    não sobe num teste de unidade, porque `Hospedagem::iniciar` abre UPnP e PCP
    para o roteador.
-2. **A mesma confusão de endereço continua no QA-01.** Esta janela pode estar
-   na sessão de S com o servidor daqui de pé, pelos caminhos da seção 1. Se a
-   gestão atualizar um MOD exigido aqui nessa hora, `aplicar_mod` grava o sim
-   de S com a identidade do servidor daqui (o efeito 2). É o QA-01, que este
-   lote não podia tocar. Fica para a orquestradora.
+2. **A mesma confusão de endereço continuava em dois gravadores da gestão.**
+   Esta janela pode estar na sessão de S com o servidor daqui de pé, pelos
+   caminhos da seção 1. Nessa hora, dois gestos da gestão gravavam o sim de S
+   com a identidade do servidor daqui (o efeito 2):
+   - atualizar um MOD exigido aqui (`aplicar_mod`, o QA-01);
+   - o SALVAR (`aplicar_conjunto_de_mods`).
+
+   A primeira versão deste relatório citava só o QA-01. **Consertado na
+   rodada 1**, item 1: ver a seção «Rodada 1».
 3. **O teste de Rust replica duas linhas do comando.** São a leitura de
    `mod_exigido_aqui` e a gravação de `aplicar_mod`, porque o comando tem
    `AppHandle` e rede. O que amarra a réplica ao comando é o guarda de
    texto-fonte `o_comando_reaplica_pela_decisao_que_le_o_uso`.
+   Esse guarda casava com o próprio literal até a rodada 1 (item 2).
+
+## Rodada 1 (FIX_BASE `bcb7333d`)
+
+A revisão aprovou o lote e deixou três itens: um Importante, que é o efeito 2
+deste relatório, medido como alcançável por um fluxo comum, e dois Menores.
+
+| commit | item | o que muda |
+|---|---|---|
+| `384d6a62` | 2 (Menor) | a agulha de `o_comando_reaplica_pela_decisao_que_le_o_uso` sai de `concat!` |
+| `48a5f51a` | 1 (Importante) | o sim de quem hospeda passa por `gravar_o_sim_de_quem_hospeda` nos dois gravadores, e só é gravado na sessão do servidor daqui |
+| este | 3 (Menor) | o relatório cita o SALVAR, e ganha esta seção |
+
+### Item 1: o sim do servidor S gravado com a identidade daqui
+
+**A medida.** Os dois gravadores, `aplicar_mod` (o QA-01) e
+`aplicar_conjunto_de_mods` (o SALVAR), têm `AppHandle` e pedem uma hospedagem
+de pé. Num teste, a hospedagem abriria UPnP e PCP no roteador. Por isso o
+teste `com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava` roda a
+gravação que os dois fazem, extraída para `gravar_o_sim_de_quem_hospeda`.
+
+O cenário:
+- o arquivo de aceites é o de verdade, numa pasta de passagem;
+- a sessão está em `198.51.100.7:8383`;
+- a identidade é a que cada gravador calcula, sobre o banco de verdade do
+  servidor hospedado: `definir_conjunto` para o SALVAR, `enable` em cima de
+  `enable` para o QA-01.
+
+O teste mede os dois gravadores antes de reprovar. Com o auxiliar no
+comportamento da base (sempre grava), ele ficou vermelho:
+
+```
+com a sessão em outro servidor, o sim dele virou a identidade do servidor daqui.
+Trocaram o sim que a pessoa tinha dado: ["o SALVAR da gestão (`aplicar_conjunto_de_mods`)", "a atualização pela gestão (`aplicar_mod`, QA-01)"], e ele pergunta de novo.
+Criaram um sim que ela nunca deu: [os mesmos dois], e a lista de aceites mente; com os conjuntos iguais, a entrada nele não pergunta (ADR 0045)
+```
+
+Na base de verdade, o guarda de texto-fonte também reprovou os dois:
+`["aplicar_mod", "aplicar_conjunto_de_mods"] grava o sim sem passar por
+gravar_o_sim_de_quem_hospeda`.
+
+**O conserto.**
+- `endereco_do_servidor_daqui()` é o `aqui` de `hospedar`, que agora o usa:
+  `127.0.0.1:{PORTA_PADRAO}`.
+- `a_sessao_e_com_o_servidor_daqui(endereco)` compara as duas chaves de
+  `seele_ffi::chave_do_servidor`, que é a chave em que o aceite é guardado.
+  Assim `127.0.0.1` e `127.0.0.1:8383` são o mesmo servidor.
+- `gravar_o_sim_de_quem_hospeda(config, session, identidade)` lê
+  `endereco_da_sessao` e só grava quando o auxiliar diz que sim.
+- Os dois gravadores passam por ele. O QA-01 continua reaplicando: muda só para
+  onde vai o sim.
+
+**Por que o `aqui`, e não as outras duas comparações:**
+- **A impressão digital** exigiria a chave do servidor da sessão. A conexão
+  não a entrega à casca, porque `Trust::Known` não a traz. Pegá-la seria mexer
+  no `seele-ffi`, e a rodada é só no `main.rs`.
+- **O prefixo de loopback** (`hospedado_aqui`) diz «nesta máquina», e o
+  HOSPEDAR COM ESTA da F6 põe outra versão em `127.0.0.1`.
+- **O `aqui`** é exatamente o endereço com que a tela entra no próprio
+  servidor: `ultimoAlvo = anfitriao.aqui`, e o VOLTAR copia o alvo da sessão.
+  Quem chama já sabe que esta janela hospeda (`persistence_do_mod`), e duas
+  hospedagens não seguram a mesma porta.
+
+**O limite, e para que lado ele erra.** Se quem hospeda entrar no próprio
+servidor por outro endereço, como o IP da rede local ou o link, o sim não é
+gravado. A próxima volta pergunta de novo. É o lado seguro, e nenhum caminho
+da tela entra assim hoje.
+
+**Os guardas:**
+- `com_a_sessao_em_outro_servidor_o_sim_dele_fica_como_estava`: a medida, que
+  cobre o sim trocado e o sim criado onde não havia.
+- `na_sessao_do_servidor_daqui_o_sim_continua_gravado`: o A04, na sessão do
+  `aqui` o sim é gravado; e `127.0.0.1:8384` não é o servidor daqui.
+- `os_dois_gravadores_passam_pelo_sim_de_quem_hospeda`: o guarda de
+  texto-fonte, com agulhas de `concat!`. Cada gravador chama o auxiliar e não
+  tem `seele_ffi::mods::aceitar(` nem `endereco_da_sessao` no corpo, e
+  `hospedar` devolve `aqui: endereco_do_servidor_daqui()`.
+- O guarda do QA-02 no `frontend.rs`
+  (`o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta`) ficou
+  vermelho com o conserto, porque procurava `endereco_da_sessao` no corpo de
+  `aplicar_mod`. Ele passou a seguir a delegação: `aplicar_mod` chama o
+  auxiliar, e o auxiliar lê `endereco_da_sessao`, não `session.alvo`. A
+  intenção dele não mudou.
+
+**As reversões.** Todas por script, com o arquivo devolvido de uma cópia,
+conferido com `cmp` e tocado antes de recompilar. Todas ficaram vermelhas com a
+frase do guarda.
+
+| reversão | o que ficou vermelho |
+|---|---|
+| auxiliar → sempre `true` (a base) | a medida (os dois gravadores) e o vizinho de loopback |
+| auxiliar → `hospedado_aqui` | o vizinho de loopback: «tomou por servidor daqui um servidor em outra porta desta máquina» |
+| `aplicar_mod` grava direto em `endereco_da_sessao` | o guarda de texto-fonte, `["aplicar_mod"]`, e o do QA-02 |
+| `aplicar_conjunto_de_mods` grava direto | o guarda de texto-fonte, `["aplicar_conjunto_de_mods"]` |
+| `hospedar` volta ao `format!` à mão | o guarda de texto-fonte, na parte do `aqui` |
+| o auxiliar lê `session.alvo` | o guarda do QA-02 |
+
+**A v0.15.1.** Confirmado: os dois gravadores gravam em `endereco_da_sessao`,
+`aplicar_mod` em `:4506-4515` e `aplicar_conjunto_de_mods` em `:6181-6186`.
+
+### Item 2: o guarda que casava com o próprio literal
+
+Reproduzi a sonda C em `bcb7333d`: o comando renomeado para
+`instalar_mod_pelo_catalogo`, o registro junto e o corpo de volta à decisão da
+base. O guarda ficou verde, 4 de 4. Com a agulha de `concat!`, a mesma sonda
+reprova com «`async fn instalar_mod_do_catalogo(` não está mais neste arquivo».
+O arquivo voltou idêntico, conferido com `cmp`. Os guardas novos do item 1
+nasceram com o mesmo cuidado.
+
+### Item 3
+
+A preocupação 2 passou a citar o SALVAR, e diz que foi consertada aqui.
+
+### Os testes da rodada
+
+| o quê | resultado |
+|---|---|
+| `--bin seele-app` | 291 de 291 |
+| `--test frontend` | 284 de 284 |
+| `check-runtime` | verde |
+| fmt e clippy do app | limpos |
+
+A `ui/` e as bancadas não mudaram nesta rodada. A conformidade está pausada
+pela orquestradora: `aceite_dos_mods` e `volta_do_aceite` rodam depois do
+aviso. Nenhum dos dois toca os gravadores do app.
