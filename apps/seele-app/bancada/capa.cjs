@@ -225,6 +225,51 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(recusada.aviso?.ponto, 'pessoa.capa', `o midia não disse o ponto: ${JSON.stringify(recusada.aviso)}`);
     assert.equal(String(recusada.aviso?.alvo), alvo, `o midia não disse o alvo: ${JSON.stringify(recusada.aviso)}`);
 
+    // 6. **O uso e o bolso** (rascunho §4 e §12; tarefa 6, Step 5b): a capa pede
+    //    ao Rust o uso `"capa"`, que a reduz ao lugar dela, e o bolso da capa
+    //    conta os bytes **decodificados** que ele devolve — o custo na janela é o
+    //    quadro, e não o arquivo. O avatar não nomeia uso.
+    const bolso = await page.evaluate(async (alvo) => {
+      window.recusarCapa = false;
+      const esperar = () => new Promise(ok => setTimeout(ok, 400));
+      const ultimoPedido = () => testCalls.filter(c => c.cmd === 'ler_imagem_mod').at(-1)?.args ?? {};
+      contribuicoesDosMods.revogar(handleCapa);
+      entregues.length = 0;
+      // Um arquivo grande que decodifica pouco: aceita.
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 20 * 1024 * 1024, uri: daCapa, decodificados: 1024 * 1024 };
+      window.handleCapa = registrarCapa(alvo, 'volume:leve');
+      desenharChamada(testTable.snapshot);
+      await esperar();
+      const pediuOUso = ultimoPedido().uso;
+      const leveAceita = Boolean(document.querySelector(`[data-pessoa-da-capa="${alvo}"][data-com-capa]`));
+      // Um arquivo pequeno que decodifica 200 MiB: recusada, e dita.
+      contribuicoesDosMods.revogar(handleCapa);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa, decodificados: 200 * 1024 * 1024 };
+      window.handleCapa = registrarCapa(alvo, 'volume:pesada');
+      desenharChamada(testTable.snapshot);
+      await esperar();
+      const pesadaRecusada = !document.querySelector(`[data-pessoa-da-capa="${alvo}"][data-com-capa]`)
+        && entregues.some(m => m.nome === 'midia' && m.ponto === 'pessoa.capa');
+      // O avatar não nomeia uso.
+      const avatar = contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
+        ponto: 'pessoa.avatar', modo: 'substituir', alvo,
+        conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:avatar' } } },
+      }).handle;
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      desenhar(testTable.snapshot);
+      await esperar();
+      const avatarSemUso = ultimoPedido().uso;
+      // Revogados os dois: a seção seguinte cita um avatar que a pessoa não tem.
+      contribuicoesDosMods.revogar(avatar);
+      contribuicoesDosMods.revogar(handleCapa);
+      testTable.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: daCapa };
+      return { pediuOUso, leveAceita, pesadaRecusada, avatarSemUso: avatarSemUso ?? null };
+    }, alvo);
+    assert.equal(bolso.pediuOUso, 'capa', `a capa não pediu o uso ao Rust: ${JSON.stringify(bolso)}`);
+    assert.ok(bolso.leveAceita, `a capa de arquivo grande e pouco decodificada foi recusada: ${JSON.stringify(bolso)}`);
+    assert.ok(bolso.pesadaRecusada, `a capa de 200 MiB decodificados não foi recusada e dita: ${JSON.stringify(bolso)}`);
+    assert.equal(bolso.avatarSemUso, null, `o avatar nomeou um uso: ${JSON.stringify(bolso)}`);
+
     // 5. **A citação `daPessoa`** (rascunho §4; tarefa 6, Step 4b; o bloqueio A
     //    do PERFIS): um cartão que cita a capa da pessoa usa a imagem já
     //    carregada — nenhum pedido de mídia novo, e os bytes contam uma vez, na

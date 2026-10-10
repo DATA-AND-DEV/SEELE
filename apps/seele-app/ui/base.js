@@ -882,11 +882,13 @@ function donoDaRegiao(mod, instancia) {
      * cabe numa declaração de região, e o MOD não precisa carregá-la na fila
      * dele para mostrá-la.
      */
-    carregarMidiaDoServidor: async (canal, pedido, campo) => {
+    // `uso` nomeia o lugar em que a imagem vai aparecer (`"capa"`), e o Rust a
+    // reduz a ele e diz quanto ela pesa decodificada (tarefa 6, Step 5).
+    carregarMidiaDoServidor: async (canal, pedido, campo, uso) => {
       const geracao = geracaoDaSessao;
       if (!meu()) throw new Error("disconnected");
       if (pedido?.transporte === "volume") {
-        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido) });
+        const midia = await invoke("ler_imagem_mod", { geracao, id: mod.id, channel: canal, payload: JSON.stringify(pedido), uso });
         if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
         return midia;
       }
@@ -916,7 +918,7 @@ function donoDaRegiao(mod, instancia) {
         if (voltas === PEDACOS_DE_MIDIA - 1) throw new Error("Envio de imagem incompleto.");
         pedidoAtual = { ...pedido, ...resposta.proximo };
       }
-      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64 });
+      const midia = await invoke("midia_em_bytes", { geracao, id: mod.id, base64, uso });
       if (!daGeracaoDePe(geracao) || !meu()) throw new Error("disconnected");
       return midia;
     },
@@ -1267,11 +1269,33 @@ function capaContribuida(pessoaId) {
   return estado?.uri ? { url: estado.uri, estatico: estado.estatico ?? null } : null;
 }
 
-/** O que cada imagem de pessoa diz no `midia` e quem a redesenha. */
+/**
+ * **O bolso das capas de um MOD, em bytes decodificados** (rascunho da API 6,
+ * §4 e §12; tarefa 6, Step 5b): largura × altura × 4 × quadros, como o Rust os
+ * conta depois de reduzir a capa ao lugar dela. 128 MiB é a partida — umas cem
+ * capas paradas, ou uma animada inteira e umas quarenta paradas —, e a M3 mede.
+ */
+const LIMITES_DA_CAPA = Object.freeze({ bytesDecodificados: 128 * 1024 * 1024 });
+
+/**
+ * O que cada imagem de pessoa diz no `midia`, quem a redesenha, e o bolso dela:
+ * o uso que ela nomeia ao Rust, o teto, e o que ela custa nele. **O avatar não
+ * nomeia uso** e conta o arquivo; a capa é reduzida ao lugar dela e conta o
+ * quadro decodificado. Bolsos separados: uma capa não gasta o dos avatares.
+ */
 const IMAGENS_DE_PESSOA = Object.freeze({
-  "pessoa.avatar": { chave: "avatar", redesenhar: () => redesenharAvatares() },
+  "pessoa.avatar": {
+    chave: "avatar",
+    uso: undefined,
+    teto: () => LIMITES_DO_CARTAO.bytesDeMidia,
+    custo: (midia) => midia.bytes,
+    redesenhar: () => redesenharAvatares(),
+  },
   "pessoa.capa": {
     chave: "capa",
+    uso: "capa",
+    teto: () => LIMITES_DA_CAPA.bytesDecodificados,
+    custo: (midia) => midia.decodificados ?? midia.bytes,
     redesenhar: () => {
       if (typeof redesenharCapas === "function") redesenharCapas();
     },
@@ -1408,23 +1432,29 @@ function imagemContribuida(ponto, pessoaId) {
     const fonte = contribuicao.conteudo.doServidor;
     // O avatar só mostra imagem: o som recusado pelo teto chega como o som que
     // era, e o «não é imagem» vem antes (`soImagem`, em `mods-regiao.js`).
-    soImagem(dono.carregarMidiaDoServidor(Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes"))
+    soImagem(dono.carregarMidiaDoServidor(
+      Number(fonte.canal) || 0, fonte.pedido ?? {}, fonte.campo || "bytes", imagem.uso,
+    ))
       .then((midia) => {
         if (estado.cancelado || !dono.podeFalar()) return;
+        // O bolso deste ponto, nesta instância: os avatares somam os avatares,
+        // e as capas, as capas.
         let ocupados = 0;
         for (const outra of contribuicoesDosMods.porHandle.values()) {
           if (substituindo && outra === contribuicao) continue;
-          if (outra.instancia === contribuicao.instancia) ocupados += outra.retrato?.bytes ?? 0;
+          if (outra.instancia === contribuicao.instancia && outra.ponto === ponto) {
+            ocupados += outra.retrato?.bytes ?? 0;
+          }
         }
-        if (midia.papel !== "imagem" || !Number.isFinite(midia.bytes) || midia.bytes < 0
-          || ocupados + midia.bytes > LIMITES_DO_CARTAO.bytesDeMidia) {
+        const custo = midia?.papel === "imagem" ? imagem.custo(midia) : NaN;
+        if (!Number.isFinite(custo) || custo < 0 || ocupados + custo > imagem.teto()) {
           throw new Error(`o ${imagem.chave} não é imagem ou excede o limite de mídia`);
         }
         // **Reservados antes do `decode()`** (pendência 51, item 7): a conta de
         // cima soma os `bytes` dos outros retratos desta instância, e dois
         // avatares decodificando juntos passariam os dois por ela se a reserva
         // esperasse. A imagem que não abre os devolve, em `recusar`.
-        estado.bytes = midia.bytes;
+        estado.bytes = custo;
         return provarImagem(midia.uri).then((decodificada) => {
           // A capa guarda o quadro parado, para o movimento reduzido (§4).
           if (ponto === "pessoa.capa") midia.estatico = quadroEstatico(decodificada);
