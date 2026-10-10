@@ -627,6 +627,59 @@ const REGIOES = [
       }
     }
 
+    // ------------------------------------- a região que a casca não tem
+    //
+    // `regiao-ausente` (rascunho §11 e §7.1; tarefa 5, Step 8): uma
+    // contribuição para uma região que a casca não tem não some calada. O MOD
+    // recebe o evento `contribuicao` com `motivo: 'regiao-ausente'`, uma vez; o
+    // retrato tira a região das `regioes`; e a contribuição continua
+    // registrada, e desenha quando a região existe. Na 0.16 nenhuma das oito
+    // fica sem casa no celular (o desenho da F8), então a bancada simula uma
+    // casca que declara as regiões dela sem a barra de baixo.
+    const ausente = await page.evaluate(async () => {
+      const r = window.testTable.snapshot;
+      const quadro = () => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)));
+      const entregues = [];
+      const instancia = new InstanciaDeMod("mod/ausente", "h", geracaoDaSessao, {
+        pedirEncerramento() {}, async encerrou() { return true; },
+        entregar(mensagem) { entregues.push(mensagem); },
+      });
+      instancia.estado = ESTADOS_DE_MOD.ativa;
+      modsCarregados.set("mod/ausente", instancia);
+      const dono = { id: "mod/ausente", instancia };
+      const todas = cascaDoRetrato().regioes;
+      globalThis.CELULAR = Object.freeze({ regioes: new Set(todas.filter((nome) => nome !== "status.barra")) });
+      const { handle } = contribuicoesDosMods.registrar(dono, instancia, {
+        ponto: "status.barra", conteudo: [{ forma: "texto", chave: "t", dentro: "da barra de baixo" }],
+      });
+      desenhar(r);
+      await quadro();
+      desenhar(r);
+      await quadro();
+      const semARegiao = {
+        desenhada: $("telemetria-mods").textContent.includes("da barra de baixo"),
+        avisos: entregues.filter((m) => m.nome === "contribuicao" && m.motivo === "regiao-ausente" && m.ponto === "status.barra").length,
+        noRetrato: cascaDoRetrato().regioes.includes("status.barra"),
+      };
+      delete globalThis.CELULAR;
+      desenhar(r);
+      await quadro();
+      const comARegiao = $("telemetria-mods").textContent.includes("da barra de baixo");
+      contribuicoesDosMods.revogar(handle, dono);
+      modsCarregados.delete("mod/ausente");
+      desenhar(r);
+      await quadro();
+      return { semARegiao, comARegiao };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (ausente.erro) falhas.push(`regiao-ausente: ${ausente.erro}`);
+    else {
+      const s = ausente.semARegiao;
+      if (s.desenhada) falhas.push("regiao-ausente: a casca não tem a região, e a contribuição foi desenhada assim mesmo");
+      if (s.avisos !== 1) falhas.push(`regiao-ausente: o MOD recebeu ${s.avisos} aviso(s) de região ausente, e o certo é um`);
+      if (s.noRetrato) falhas.push("regiao-ausente: o retrato diz que a casca tem a região que ela não tem");
+      if (!ausente.comARegiao) falhas.push("regiao-ausente: a região voltou, e a contribuição registrada não desenhou");
+    }
+
     // ------------------------------------- a navegação, substituída
     //
     // `servidor.navegacao` substituído (rascunho §3, a regra aprovada em 09/10):

@@ -2668,8 +2668,57 @@ function cascaDoRetrato() {
   return {
     onde: typeof CELULAR === "object" && CELULAR !== null ? "celular" : "computador",
     regioes: REGIOES_E_CAMADAS_DA_API.filter((nome) =>
-      Object.hasOwn(pontos, nome) || Object.hasOwn(tipos, nome)),
+      (Object.hasOwn(pontos, nome) && aCascaTemARegiao(nome)) || Object.hasOwn(tipos, nome)),
   };
+}
+
+/**
+ * **As regiões que esta casca tem** (rascunho da API 6, §11; tarefa 5, Step 8).
+ * No computador, todas. No celular, as que a casca dele declarar em
+ * `CELULAR.regioes`, e todas quando ela não declara — na 0.16 o desenho da F8
+ * dá casa às oito. Quem declara menos é uma casca futura: uma região da API 7
+ * numa casca 1.0, ou um executor que não desenhe alguma.
+ */
+function aCascaTemARegiao(nome) {
+  const declaradas = typeof CELULAR === "object" && CELULAR !== null && CELULAR.regioes instanceof Set
+    ? CELULAR.regioes
+    : null;
+  return !declaradas || declaradas.has(nome);
+}
+
+/**
+ * Quantas contribuições já foram avisadas de que a região delas não existe
+ * nesta casca, por ponto — para a aba DIAGNÓSTICO.
+ */
+const regioesAusentesAvisadas = new Map();
+
+/**
+ * **Uma região que a casca não tem não some calada** (rascunho §11 e §7.1;
+ * tarefa 5, Step 8). Devolve `true` quando a casca não tem a região — e quem
+ * desenha não desenha —, avisando cada contribuição dela uma vez: o MOD recebe
+ * o evento `contribuicao` com `motivo: 'regiao-ausente'`, e o `seele.log` a
+ * linha. A contribuição continua registrada, e desenha se a região existir.
+ */
+function regiaoAusente(ponto) {
+  if (aCascaTemARegiao(ponto)) return false;
+  for (const contribuicao of contribuicoesDosMods.porHandle.values()) {
+    if (contribuicao.ponto !== ponto || contribuicao.avisadaAusente) continue;
+    contribuicao.avisadaAusente = true;
+    regioesAusentesAvisadas.set(ponto, (regioesAusentesAvisadas.get(ponto) ?? 0) + 1);
+    const instancia = contribuicao.instancia;
+    if (instancia?.admite?.(geracaoDaSessao)) {
+      donoDaRegiao({ id: contribuicao.mod, hash: instancia.hash }, instancia).falar({
+        nome: "contribuicao", ponto, destino: contribuicao.alvo, motivo: "regiao-ausente",
+      });
+    }
+    registrarNoAnfitriao(
+      "recusa-de-mod",
+      `${contribuicao.mod}: «${ponto}» não existe nesta casca, e a contribuição não aparece`,
+      "aviso",
+      contribuicao.mod,
+    );
+  }
+  return true;
 }
 
 /**

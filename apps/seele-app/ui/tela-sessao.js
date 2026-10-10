@@ -666,7 +666,9 @@ async function recarregarTrilha() {
  */
 function aplicarARegiao(ponto, conteiner, alvo = "", contexto = {}) {
   if (!conteiner) return;
-  const nos = contexto === null ? [] : [
+  // A região que a casca não tem fica vazia, e quem contribui para ela sabe
+  // (`regiaoAusente`, em `base.js`; tarefa 5, Step 8).
+  const nos = contexto === null || regiaoAusente(ponto) ? [] : [
     ...conteudoDasContribuicoes(ponto, alvo),
     ...acoesDasContribuicoes(ponto, alvo, contexto),
   ];
@@ -846,6 +848,7 @@ function arranjoDaNavegacao() {
 
 /** A ordem que o MOD escolhido dá a um ponto de lista, ou `null`. */
 function arranjoDe(ponto) {
+  if (regiaoAusente(ponto)) return null;
   const escolhida = contribuicoesDosMods.escolherSubstituicao(
     ponto,
     "",
@@ -1256,8 +1259,9 @@ function desenharLinha(snapshot) {
   // nome é também o botão de renomear. Os acréscimos de outros MODs seguem ao
   // lado, em `#canal-cabecalho-mods`.
   const miolo = $("canal-cabecalho-miolo");
+  const cabecalhoNaCasca = !regiaoAusente("canal.cabecalho");
   if (miolo) {
-    const escolhida = aberta
+    const escolhida = aberta && cabecalhoNaCasca
       ? contribuicoesDosMods.escolherSubstituicao(
         "canal.cabecalho",
         String(aberta.id),
@@ -1273,7 +1277,7 @@ function desenharLinha(snapshot) {
   if (noCabecalho) {
     repovoar(
       noCabecalho,
-      aberta
+      aberta && cabecalhoNaCasca
         ? [
           ...conteudoDasContribuicoes("canal.cabecalho", String(aberta.id)),
           ...acoesDasContribuicoes("canal.cabecalho", String(aberta.id), { canal: aberta.id }),
@@ -1575,7 +1579,8 @@ function itemDeMensagem(mensagem, indice, segue) {
   //
   // **A busca vence**: marcada, a mensagem volta ao corpo nativo — o realce é o
   // que a pessoa procura, e o produto não marca dentro do desenho de um MOD.
-  const alvoDaMensagem = mensagem.id ? String(mensagem.id) : "";
+  // Na casca que não tem a região, a mensagem é a nativa (Step 8).
+  const alvoDaMensagem = mensagem.id && !regiaoAusente("conversa.mensagem") ? String(mensagem.id) : "";
   const marcada = (casamentosPorMensagem.get(indice)?.length ?? 0) > 0;
   const substituta = alvoDaMensagem && !marcada
     ? contribuicoesDosMods.escolherSubstituicao(
@@ -2753,7 +2758,7 @@ function redesenharAsEntradasDeMod() {
 
   // Só os acréscimos: uma substituição da navegação é a ordem das listas, e
   // não uma entrada «DOS MODS».
-  const entradas = contribuicoesDosMods.para("servidor.navegacao")
+  const entradas = regiaoAusente("servidor.navegacao") ? [] : contribuicoesDosMods.para("servidor.navegacao")
     .filter(entrada => entrada.modo === "adicionar" && entrada.listarNaBarra !== false);
   const vazia = entradas.length === 0;
   lista.hidden = vazia;
