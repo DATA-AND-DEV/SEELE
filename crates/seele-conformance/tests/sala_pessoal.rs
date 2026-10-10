@@ -388,3 +388,34 @@ async fn a_sala_se_registra_assinada_e_quem_liga_a_acha_pelo_codigo() {
     );
     sala.encerrar().await;
 }
+
+#[tokio::test]
+async fn a_sala_que_fecha_diz_chamada_encerrada_e_nao_servidor_encerrando() {
+    // O app que fecha se despede das duas hospedagens (tarefa 21). Para quem
+    // está num servidor guardado, o servidor está encerrando; para quem está
+    // numa ligação, a ligação acabou. A frase de cada um é outra, e a razão que
+    // chega é o que a escolhe.
+    let _vaga = vaga::minha();
+    let sala = subir_a_sala(None).await;
+    let mut dono = par_cru(local(&sala), DONO).await;
+    let entrou = o_que_chega(&mut dono, Duration::from_millis(800)).await;
+    assert!(
+        entrou
+            .iter()
+            .any(|quadro| matches!(quadro, ServerMessage::Session { .. })),
+        "quem recebe não entrou: {entrou:?}"
+    );
+
+    sala.despedir(Duration::from_secs(2)).await;
+
+    let depois = o_que_chega(&mut dono, Duration::from_millis(800)).await;
+    assert!(
+        depois.iter().any(|quadro| matches!(
+            quadro,
+            ServerMessage::Disconnecting {
+                reason: seele_proto::control::DisconnectReason::ChamadaEncerrada
+            }
+        )),
+        "a sala se despediu sem dizer que a ligação acabou: {depois:?}"
+    );
+}

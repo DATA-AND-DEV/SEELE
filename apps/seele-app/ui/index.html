@@ -2,7 +2,20 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<!--
+  A meta de viewport é do navegador do celular (P1): sem ela, ele desenha a
+  página a 980 px e a encolhe. No app ela é inerte: o desktop sai igual pixel a
+  pixel com e sem ela no Chromium, no WebKit e no WKWebView do app de verdade
+  (medido na F8; docs/evidencias/f8-tarefa-16/).
+-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>SEELE</title>
+<!--
+  A ponte do navegador, antes de tudo e síncrona (ADR 0057, F4). No app ela só
+  declara; no navegador ela põe a marca da casca (`data-casca`) antes da
+  primeira pintura e o `window.__TAURI__` que o `base.js` lê.
+-->
+<script src="ponte-web.js"></script>
 <!--
   Favicon é a forma muda: o símbolo sozinho, redesenhado para a faixa de 16px —
   traço mais grosso e furo maior, senão o nó vazio fecha e os dois nós viram a
@@ -4455,6 +4468,13 @@
 <script src="mods-superficies.js"></script>
 <script src="mods-contribuicoes.js"></script>
 <script src="base.js"></script>
+<!--
+  O executor dos MODs no navegador (ADR 0057): o mesmo motor do desktop, num
+  Worker de um `iframe` opaco. Na carga ele só declara, nas duas cascas: o
+  `iframe` nasce na primeira subida de um MOD pelo `executorNoNavegador`, que o
+  `executorDoMod` só escolhe sem o Tauri.
+-->
+<script src="mods-no-navegador.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>

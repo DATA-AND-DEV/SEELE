@@ -1,8 +1,9 @@
 // SEELE — os glifos que a face de dados não tem.
 //
-// Eram seis quando este arquivo nasceu, e o cabeçalho dizia o número. São 24, e
-// o número saiu daqui: uma contagem escrita à mão numa lista que cresce é uma
-// frase que envelhece calada, e ela já estava errada por dezoito.
+// Eram seis quando este arquivo nasceu, e o cabeçalho dizia o número. O número
+// saiu daqui: uma contagem escrita à mão numa lista que cresce é uma frase que
+// envelhece calada, e ela já estava errada por dezoito. (A última que ficou
+// aqui dizia 24, e contava duas entradas repetidas.)
 //
 // A IBM Plex Mono embarcada (`fontes/ibm-plex-mono-400.woff2`) traz 1049
 // entradas de cmap e **um** glifo em toda a faixa U+25A0–U+25CF. Ou seja: ▸ ◂
@@ -125,36 +126,6 @@ const GLIFOS = {
       "path",
       { d: "M2.6 2.6L13.4 13.4", fill: "none", stroke: "currentColor", "stroke-width": "1.6" },
     ],
-  ],
-
-  // A chave, da comp da 0.9.0: o anel à esquerda e a haste com dois dentes
-  // descendo à direita. É o desenho de «quem passa por aqui», e ele nomeia
-  // tanto a seção A PORTA quanto a identidade — as duas são sobre credencial.
-  chave: [
-    [
-      "circle",
-      { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" },
-    ],
-    [
-      "path",
-      {
-        d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6",
-        fill: "none", stroke: "currentColor", "stroke-width": "1.3",
-      },
-    ],
-  ],
-
-  // Aparência: um quadrado com a metade esquerda cheia, que é o desenho
-  // universal de contraste. Da comp da 0.9.0.
-  aparencia: [
-    [
-      "rect",
-      {
-        x: "2.5", y: "2.5", width: "11", height: "11",
-        fill: "none", stroke: "currentColor", "stroke-width": "1.3",
-      },
-    ],
-    ["rect", { x: "3.2", y: "3.2", width: "4.8", height: "9.6" }],
   ],
 
   // O botão de desligar: arco aberto em cima com uma haste subindo por dentro
@@ -336,7 +307,8 @@ const GLIFOS = {
 
   // ⚿ — a seção de identidade. Chave de palhetão quadrado: anel, haste e dois
   // dentes. É a chave Ed25519 do ADR 0004, e não um cadeado — o produto não
-  // tranca nada aqui, ele prova quem é.
+  // tranca nada aqui, ele prova quem é. Desde a 0.9.0 ela nomeia também a seção
+  // A PORTA: as duas são sobre credencial.
   chave: [
     ["circle", { cx: "5.2", cy: "5.2", r: "2.6", fill: "none", stroke: "currentColor", "stroke-width": "1.3" }],
     ["path", { d: "M7 7l5.4 5.4M10.2 10.2l-1.6 1.6M12.4 12.4l-1.6 1.6", stroke: "currentColor", "stroke-width": "1.3", fill: "none" }],

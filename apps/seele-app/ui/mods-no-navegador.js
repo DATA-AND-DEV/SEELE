@@ -1,5 +1,5 @@
-// Os MODs no navegador do celular: o motor do desktop, num lugar sem a origem
-// da página.
+// Os MODs no navegador (o celular e o PC, D-web-3): o motor do desktop, num
+// lugar sem a origem da página.
 //
 // ADR 0057, emenda de 08/10/2026 (D-web-1), na forma que o spike
 // `spikes/mods-no-navegador/` recomendou e a orquestradora aceitou: **AB**. O
@@ -23,7 +23,13 @@
 // # A forma é a do `executorNativo`
 //
 // Quatro verbos. O `entregar` devolve a recusa, e o `encerrou` tem prazo e
-// conclusão tardia. Quem chama não sabe qual dos dois está do outro lado.
+// conclusão tardia. Quem chama não sabe qual dos dois está do outro lado: o
+// `executorDoMod`, em `mods-runtime.js`, escolhe pelo lugar.
+//
+// # No desktop, nada
+//
+// Este arquivo é carregado nas duas cascas, e no desktop só declara. O ouvinte
+// de `message` e o `iframe` nascem na primeira subida de um MOD por aqui.
 //
 // # O que atravessa
 //
@@ -61,6 +67,7 @@ const PRAZO_DA_PARADA_MS = 2000;
 const executoresDoNavegador = {
   iframe: null,
   pronto: null,
+  ouvindo: false,
   /** número da instância → quem ouve o que ela diz */
   ouvintes: new Map(),
   proximo: 0,
@@ -88,6 +95,10 @@ function prepararOsExecutoresDoNavegador() {
       return resposta[como]();
     };
     const motor = await baixar(ARQUIVOS_DOS_EXECUTORES.motor, "arrayBuffer");
+    if (!executoresDoNavegador.ouvindo) {
+      window.addEventListener("message", ouvirOsExecutores);
+      executoresDoNavegador.ouvindo = true;
+    }
     const iframe = document.createElement("iframe");
     // **Sem `allow-same-origin`, nunca.** Com ele, o `iframe` volta a ter a
     // origem da página, e a segunda parede deixa de existir.
@@ -121,7 +132,8 @@ function prepararOsExecutoresDoNavegador() {
   return pronto;
 }
 
-addEventListener("message", (evento) => {
+/** O que o `iframe` dos executores diz à página. */
+function ouvirOsExecutores(evento) {
   const iframe = executoresDoNavegador.iframe;
   // **Só o `iframe` fala aqui.** A origem dele é `null`, e por isso a conferência
   // é pela janela, e não pela origem.
@@ -137,7 +149,7 @@ addEventListener("message", (evento) => {
     return;
   }
   executoresDoNavegador.ouvintes.get(m.n)?.(m);
-});
+}
 
 /**
  * O executor dos MODs no navegador, com a forma do `executorNativo`.

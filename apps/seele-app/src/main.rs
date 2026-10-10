@@ -151,11 +151,12 @@ struct Session {
     arquivos_escolhidos: Mutex<ArquivosEscolhidos>,
 
     connection: Mutex<Option<Arc<Connection>>>,
-    /// O servidor que este app está hospedando, quando está.
+    /// As hospedagens deste app: o servidor guardado e a sala pessoal (Plano 2).
     ///
-    /// Vive aqui e não numa variável local porque tem que sobreviver ao comando
-    /// que o criou: o servidor fica de pé enquanto a janela estiver aberta.
-    hospedagem: Mutex<Option<seele_server::hospedagem::Hospedagem>>,
+    /// Vivem aqui e não numa variável local porque têm que sobreviver ao
+    /// comando que as criou: cada uma fica de pé enquanto a janela estiver
+    /// aberta, e independente da sessão. Ver [`Hospedagens`].
+    hospedagens: Mutex<Hospedagens>,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -167,13 +168,6 @@ struct Session {
     /// `None` com hospedagem de pé é o legado: a máquina que hospedava antes de
     /// haver lista, e cujo banco é o de sempre.
     servidor_hospedado: Mutex<Option<String>>,
-    /// Qual servidor guardado esta janela levantou, quando levantou um.
-    ///
-    /// Existe para que renomear em CONFIGURAÇÕES não deixe a lista de
-    /// servidores mentindo: sem isto, ela continuaria mostrando o nome do dia
-    /// da criação, e escolher entre dois servidores pelo nome errado é pior do
-    /// que escolher por um identificador cru.
-    servidor_no_ar: Mutex<Option<String>>,
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
@@ -1372,7 +1366,8 @@ async fn connect(
     // megabits de subida do anfitrião, o primeiro segundo ainda é **540p**.
     //
     // A semente por servidor existe e é chamada, mas **dentro** do ramo
-    // `if !hospedado_aqui(&alvo)` — o mesmo ramo que já tinha causado o QA-02.
+    // `if !endereco_desta_maquina(&alvo)` — o mesmo ramo que já tinha causado o
+    // QA-02.
     // Quem hospeda nunca a recebia, e os vinte e cinco segundos de subida se
     // repetiam em toda transmissão, na mesma máquina, para sempre.
     //
@@ -1433,7 +1428,7 @@ async fn connect(
     }
     // Falso até a lista gravar, lá embaixo, a impressão que a conexão aceitou.
     let mut a_lista_guardou = false;
-    if !hospedado_aqui(&alvo) {
+    if !endereco_desta_maquina(&alvo) {
         if let Ok(mut guardado) = session.alvo.lock() {
             *guardado = Some(alvo.clone());
         }
@@ -1546,14 +1541,121 @@ async fn connect(
     })
 }
 
+/// As hospedagens deste app (Plano 2, spec de 23/09, «Hospedagens»): o
+/// servidor guardado, que a pessoa sobe com HOSPEDAR, e a sala pessoal.
+///
+/// **Duas, e independentes.** Entrar e sair de uma não mexe na outra. Onde a
+/// sessão desta janela está em relação a elas é [`onde_estou`], e é a única
+/// resposta a «estou no meu servidor?».
+#[derive(Default)]
+struct Hospedagens {
+    /// O servidor guardado no ar, quando está.
+    guardado: Option<Hospedado>,
+    /// A sala pessoal no ar, quando está. Ela sobe sozinha a partir da tarefa
+    /// 23 do plano da F7; até lá, ninguém a sobe.
+    pessoal: Option<Hospedado>,
+}
+
+impl Hospedagens {
+    /// O servidor guardado, que é o alvo da portaria, dos MODs e do convite.
+    fn do_guardado(&self) -> Option<&seele_server::hospedagem::Hospedagem> {
+        self.guardado.as_ref().map(|guardado| &guardado.hospedagem)
+    }
+
+    /// As portas em que as duas atendem, para [`onde_estou_em`].
+    fn portas(&self) -> (Option<u16>, Option<u16>) {
+        let porta = |hospedado: &Option<Hospedado>| {
+            hospedado
+                .as_ref()
+                .map(|hospedado| hospedado.hospedagem.endereco().port())
+        };
+        (porta(&self.guardado), porta(&self.pessoal))
+    }
+}
+
+/// Uma hospedagem de pé, e qual servidor guardado ela é.
+struct Hospedado {
+    hospedagem: seele_server::hospedagem::Hospedagem,
+    /// O identificador do servidor guardado. `None` no legado (a máquina que
+    /// hospedava antes de haver lista, com o banco de sempre) e na sala.
+    servidor: Option<String>,
+}
+
+/// Onde a sessão desta janela está, em relação às hospedagens deste app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+enum OndeEstou {
+    /// Não há sessão.
+    Nenhum,
+    /// No servidor guardado que esta janela hospeda.
+    Guardado,
+    /// Na sala pessoal desta máquina.
+    Pessoal,
+    /// Em qualquer outro lugar, inclusive num servidor desta máquina que este
+    /// app não hospeda (um `seeled` à parte, por exemplo).
+    Outro,
+}
+
+/// **A única resposta a «estou no meu servidor?»** (Plano 2). Eram três, cada
+/// uma com o seu critério: o `hospedado_aqui` deste arquivo, o `hospedando` do
+/// `estado_da_porta` e o `nossoServidorEm` da tela de entrada. Com duas
+/// hospedagens, nenhum dos três dizia em qual das duas a sessão está.
+#[tauri::command]
+fn onde_estou(session: State<'_, Session>) -> OndeEstou {
+    let endereco = session
+        .endereco_da_sessao
+        .lock()
+        .ok()
+        .and_then(|onde| onde.clone());
+    let (guardado, pessoal) = session
+        .hospedagens
+        .lock()
+        .map_or((None, None), |hospedagens| hospedagens.portas());
+    onde_estou_em(endereco.as_deref(), guardado, pessoal)
+}
+
+/// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
+/// guardado e a sala atendem quando estão no ar.
+fn onde_estou_em(
+    endereco: Option<&str>,
+    porta_do_guardado: Option<u16>,
+    porta_da_sala: Option<u16>,
+) -> OndeEstou {
+    let Some(endereco) = endereco else {
+        return OndeEstou::Nenhum;
+    };
+    match porta_desta_maquina(endereco) {
+        Some(porta) if Some(porta) == porta_do_guardado => OndeEstou::Guardado,
+        Some(porta) if Some(porta) == porta_da_sala => OndeEstou::Pessoal,
+        Some(_) | None => OndeEstou::Outro,
+    }
+}
+
+/// A porta de um endereço desta máquina, como a pessoa o escreveu:
+/// `127.0.0.1`, `localhost` ou `[::1]`, com a porta ou sem ela (aí é a
+/// [`PORTA_PADRAO`], como na conexão). `None` para qualquer outro endereço.
+///
+/// Só o texto, e não uma resolução de nome: a pergunta é sobre o que a pessoa
+/// escolheu, não sobre para onde o pacote foi.
+fn porta_desta_maquina(endereco: &str) -> Option<u16> {
+    let endereco = endereco.trim();
+    if let Ok(socket) = endereco.parse::<std::net::SocketAddr>() {
+        return socket.ip().is_loopback().then_some(socket.port());
+    }
+    let (maquina, porta) = match endereco.rsplit_once(':') {
+        Some((maquina, porta)) if !maquina.ends_with(':') => (maquina, porta.parse::<u16>().ok()?),
+        _ => (endereco, PORTA_PADRAO),
+    };
+    matches!(maquina, "127.0.0.1" | "localhost" | "[::1]" | "::1").then_some(porta)
+}
+
 /// Este endereço é a própria máquina?
 ///
-/// Só o começo do texto, e não uma resolução de nome: a pergunta é sobre o que
-/// a pessoa escolheu, não sobre para onde o pacote foi. `127.0.0.1:8383` é o que
-/// o botão HOSPEDAR escreve no campo, e é exatamente esse caso que não pertence
-/// a uma lista de lugares aonde se volta.
-fn hospedado_aqui(alvo: &str) -> bool {
-    alvo.starts_with("127.0.0.1") || alvo.starts_with("localhost") || alvo.starts_with("[::1]")
+/// **A pergunta da lista de visitados, e não a de «estou no meu servidor?»**,
+/// que é de [`onde_estou`]. `127.0.0.1:8383` é o que o botão HOSPEDAR escreve
+/// no campo, e um endereço desta máquina não pertence a uma lista de lugares
+/// aonde se volta: ele volta pelo VOLTAR AO MEU SERVIDOR.
+fn endereco_desta_maquina(alvo: &str) -> bool {
+    porta_desta_maquina(alvo).is_some()
 }
 
 /// O que o app precisa saber depois de virar anfitrião.
@@ -1694,11 +1796,11 @@ fn servidores_guardados(app: AppHandle) -> Vec<servidores::Servidor> {
 /// Apaga somente com a hospedagem parada nesta janela.
 #[tauri::command]
 fn apagar_servidor(app: AppHandle, session: State<'_, Session>, id: String) -> Result<(), String> {
-    let hospedagem = session
-        .hospedagem
+    let hospedagens = session
+        .hospedagens
         .lock()
         .map_err(|_| "Hospedagem indisponível.")?;
-    if hospedagem.is_some() {
+    if hospedagens.guardado.is_some() {
         return Err("Encerre a hospedagem antes de apagar um servidor.".into());
     }
     servidores::apagar(&config_dir(&app), &id)
@@ -1904,11 +2006,11 @@ async fn hospedar(
         None => None,
     };
     {
-        let aberto = session
-            .hospedagem
+        let hospedagens = session
+            .hospedagens
             .lock()
             .map_err(|_| FalhaAoHospedar::NaoSubiu)?;
-        if aberto.is_some() {
+        if hospedagens.guardado.is_some() {
             return Err(FalhaAoHospedar::JaHospedando);
         }
     }
@@ -2005,16 +2107,16 @@ async fn hospedar(
             .and_then(|alcance| alcance.porta_nao_canonica().map(str::to_owned)),
     };
 
+    // Qual servidor guardado é, anotado junto do servidor de pé: uma janela que
+    // não hospeda não pode dizer que hospeda um servidor guardado.
     session
-        .hospedagem
+        .hospedagens
         .lock()
         .map_err(|_| FalhaAoHospedar::NaoSubiu)?
-        .replace(server);
-    // Anotado depois de o servidor estar de pé: uma janela que não hospeda não
-    // pode dizer que hospeda um servidor guardado.
-    if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
-        *no_ar = servidor;
-    }
+        .guardado = Some(Hospedado {
+        hospedagem: server,
+        servidor,
+    });
 
     Ok(anfitriao)
 }
@@ -2446,19 +2548,17 @@ async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Resul
     // Quem hospedava para de hospedar ao sair, e quem estava dentro é
     // derrubado. É o comportamento certo: o anfitrião fechou. `encerrar`
     // espera a porta voltar, para hospedar de novo em seguida funcionar.
-    let server = session
-        .hospedagem
-        .lock()
-        .ok()
-        .and_then(|mut slot| slot.take());
-    if let Some(server) = server {
-        server.encerrar().await;
-    }
-    // E esta janela deixa de hospedar um servidor guardado. Sem isto, um
+    //
+    // Com o servidor sai também qual guardado ele era: sem isto, um
     // `renomear_server` depois de entrar em **outro** servidor acertaria o nome
     // do que ficou para trás.
-    if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
-        *no_ar = None;
+    let guardado = session
+        .hospedagens
+        .lock()
+        .ok()
+        .and_then(|mut hospedagens| hospedagens.guardado.take());
+    if let Some(guardado) = guardado {
+        guardado.hospedagem.encerrar().await;
     }
     Ok(())
 }
@@ -3807,8 +3907,12 @@ fn renomear_server(
     // um e outro sem abrir os dois. Sem esta linha ele ficaria congelado no dia
     // da criação, e escolher pelo nome errado é pior que escolher por um
     // identificador cru.
-    if let Ok(no_ar) = session.servidor_no_ar.lock() {
-        if let Some(id) = no_ar.as_deref() {
+    if let Ok(hospedagens) = session.hospedagens.lock() {
+        if let Some(id) = hospedagens
+            .guardado
+            .as_ref()
+            .and_then(|guardado| guardado.servidor.as_deref())
+        {
             servidores::renomear(&config_dir(&app), id, &name);
         }
     }
@@ -7697,9 +7801,9 @@ async fn baixar_versao(
 #[tauri::command]
 fn estou_hospedando(session: State<'_, Session>) -> bool {
     session
-        .hospedagem
+        .hospedagens
         .lock()
-        .is_ok_and(|aberto| aberto.is_some())
+        .is_ok_and(|hospedagens| hospedagens.guardado.is_some())
 }
 
 /// **Qual** servidor guardado esta janela hospeda, quando hospeda um.
@@ -7836,11 +7940,13 @@ async fn mods_ligados(session: &State<'_, Session>) -> Result<Vec<(String, Strin
 fn persistence_do_mod(
     session: &State<'_, Session>,
 ) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNoMod> {
-    let aberto = session
-        .hospedagem
+    let hospedagens = session
+        .hospedagens
         .lock()
         .map_err(|_| FalhaNoMod::BancoNaoRespondeu)?;
-    let server = aberto.as_ref().ok_or(FalhaNoMod::NaoEstaHospedando)?;
+    let server = hospedagens
+        .do_guardado()
+        .ok_or(FalhaNoMod::NaoEstaHospedando)?;
     Ok(server.persistence())
 }
 
@@ -9239,23 +9345,117 @@ struct PedidoNaTela {
 fn persistence_hospedada(
     session: &State<'_, Session>,
 ) -> Result<seele_server::hospedagem::PersistenceCompartilhada, FalhaNaPortaria> {
-    let aberto = session
-        .hospedagem
+    let hospedagens = session
+        .hospedagens
         .lock()
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    let server = hospedagens
+        .do_guardado()
+        .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
     Ok(server.persistence())
+}
+
+/// O que o servidor que esta janela hospeda tem a dizer de si, para a tela de
+/// quem hospeda (a P12 do plano F1b).
+///
+/// Hoje, as mensagens de controle de um vocabulário mais novo que o servidor
+/// pulou: quem usa um SEELE mais novo está mandando o que esta versão não
+/// entende, e atualizar o SEELE daqui resolve. Sem isto, o servidor sabia e só
+/// dizia no `seele.log`. **Uma janela que não hospeda responde
+/// `hospedando: false`**, e a tela não desenha a linha: não há servidor de que
+/// falar.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+struct EstadoDoServidor {
+    /// Se há um servidor no ar nesta janela.
+    hospedando: bool,
+    /// Quantas mensagens de um vocabulário mais novo o servidor pulou.
+    mensagens_desconhecidas: u64,
+    /// Em quantas sessões isso aconteceu.
+    sessoes_com_desconhecidas: u64,
+}
+
+/// O estado de uma hospedagem, ou o de quem não hospeda.
+fn estado_do_servidor_de(
+    estado: Option<seele_server::hospedagem::EstadoDoServidor>,
+) -> EstadoDoServidor {
+    estado.map_or_else(EstadoDoServidor::default, |estado| EstadoDoServidor {
+        hospedando: true,
+        mensagens_desconhecidas: estado.mensagens_desconhecidas,
+        sessoes_com_desconhecidas: estado.sessoes_com_desconhecidas,
+    })
+}
+
+/// O estado do servidor que esta janela hospeda. Ver [`EstadoDoServidor`].
+///
+/// Lido do servidor embutido, em memória: barato o bastante para a tela de
+/// configurações perguntar a cada volta do laço dela.
+#[tauri::command]
+fn estado_do_servidor(session: State<'_, Session>) -> Result<EstadoDoServidor, &'static str> {
+    // O servidor guardado, que é o da seção ESTE SERVIDOR; a sala pessoal não
+    // tem configurações e não entra aqui.
+    let hospedagens = session
+        .hospedagens
+        .lock()
+        .map_err(|_| "HospedagemIndisponivel")?;
+    Ok(estado_do_servidor_de(
+        hospedagens
+            .do_guardado()
+            .map(seele_server::hospedagem::Hospedagem::estado),
+    ))
+}
+
+#[cfg(test)]
+mod o_estado_do_servidor {
+    use super::*;
+
+    #[test]
+    fn quem_nao_hospeda_diz_que_nao_hospeda_e_nada_mais() {
+        assert_eq!(
+            estado_do_servidor_de(None),
+            EstadoDoServidor {
+                hospedando: false,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn quem_hospeda_diz_os_numeros_do_servidor_e_o_zero_tambem() {
+        let numeros = |mensagens, sessoes| {
+            estado_do_servidor_de(Some(seele_server::hospedagem::EstadoDoServidor {
+                mensagens_desconhecidas: mensagens,
+                sessoes_com_desconhecidas: sessoes,
+            }))
+        };
+        assert_eq!(
+            numeros(0, 0),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 0,
+                sessoes_com_desconhecidas: 0,
+            }
+        );
+        assert_eq!(
+            numeros(3, 1),
+            EstadoDoServidor {
+                hospedando: true,
+                mensagens_desconhecidas: 3,
+                sessoes_com_desconhecidas: 1,
+            }
+        );
+    }
 }
 
 /// O estado das três camadas da porta.
 #[tauri::command]
 async fn estado_da_porta(session: State<'_, Session>) -> Result<EstadoDaPorta, FalhaNaPortaria> {
     let (persistence, alcance) = {
-        let aberto = session
-            .hospedagem
+        let hospedagens = session
+            .hospedagens
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-        let Some(server) = aberto.as_ref() else {
+        let Some(server) = hospedagens.do_guardado() else {
             // Não hospedar não é falha: é a resposta, e a tela desenha a partir
             // dela em vez de mostrar um erro a quem não pediu nada.
             return Ok(EstadoDaPorta {
@@ -9315,11 +9515,13 @@ async fn criar_convite_do_server(
     observacao: String,
 ) -> Result<String, FalhaNaPortaria> {
     let (persistence, ..) = {
-        let aberto = session
-            .hospedagem
+        let hospedagens = session
+            .hospedagens
             .lock()
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-        let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+        let server = hospedagens
+            .do_guardado()
+            .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
         (server.persistence(), ())
     };
 
@@ -9329,11 +9531,13 @@ async fn criar_convite_do_server(
             .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?
     };
 
-    let aberto = session
-        .hospedagem
+    let hospedagens = session
+        .hospedagens
         .lock()
         .map_err(|_| FalhaNaPortaria::BancoNaoRespondeu)?;
-    let server = aberto.as_ref().ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
+    let server = hospedagens
+        .do_guardado()
+        .ok_or(FalhaNaPortaria::NaoEstaHospedando)?;
     Ok(server.convite_com_token(&token))
 }
 
@@ -9925,34 +10129,6 @@ fn arquivo_de_log() -> Option<std::fs::File> {
 /// duas vezes.
 const TETO_DO_LOG: u64 = 8 * 1024 * 1024;
 
-/// Troca o rastro por um novo quando o atual passa do teto. R15.
-///
-/// # Por que ele precisa girar
-///
-/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
-/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
-/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
-/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
-///
-/// # Duas gerações, e não dez
-///
-/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
-/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
-/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
-/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
-/// para responder uma pergunta que ninguém faz.
-///
-/// # Na abertura, e não por relógio
-///
-/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
-/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
-/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
-/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
-/// gira na próxima abertura.
-///
-/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
-/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
-/// era o que uma interrogação aqui causaria.
 /// Um pânico, em qualquer thread, deixa uma linha no `seele.log`. F1-audio-panico.
 ///
 /// # Por que existe
@@ -9992,6 +10168,34 @@ fn instalar_gancho_de_panico() {
     });
 }
 
+/// Troca o rastro por um novo quando o atual passa do teto. R15.
+///
+/// # Por que ele precisa girar
+///
+/// Porque ele abria em `append` e mais nada: o arquivo crescia enquanto o
+/// aplicativo fosse usado, para sempre. Num servidor hospedado dentro do app,
+/// que fica de pé por semanas, isso é o disco de quem hospeda enchendo sem
+/// ninguém pedir — R15 da revisão da v15 nomeia esta linha.
+///
+/// # Duas gerações, e não dez
+///
+/// `seele.log` e `seele.log.1`, e a mais velha é substituída. Duas porque a
+/// pergunta que o rastro responde é «o que aconteceu agora» e, quando a sessão
+/// acabou de reiniciar, «o que aconteceu antes de reiniciar» — a segunda é o
+/// motivo de haver uma anterior. Dez gerações seriam dez vezes o teto em disco
+/// para responder uma pergunta que ninguém faz.
+///
+/// # Na abertura, e não por relógio
+///
+/// Girar no meio de um processo pediria trocar o destino do `tracing` com ele
+/// rodando, que é maquinaria para um ganho pequeno: o rastro passa do teto
+/// depois de dias, e o aplicativo é reaberto muito mais que isso. O custo desta
+/// escolha, dito: uma sessão que fique aberta tempo bastante passa do teto e só
+/// gira na próxima abertura.
+///
+/// Toda falha é engolida de propósito — `let _` e `ok()`. Não conseguir girar não
+/// pode impedir o log de abrir: log grande é um problema, log nenhum é pior, e
+/// era o que uma interrogação aqui causaria.
 fn girar_o_log(arquivo: &std::path::Path) {
     let Ok(dados) = std::fs::metadata(arquivo) else {
         // Não existe ainda, que é o caso da primeira abertura.
@@ -10264,6 +10468,7 @@ fn main() {
             aceites_de_mods,
             estou_hospedando,
             servidor_hospedado,
+            onde_estou,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
@@ -10380,6 +10585,7 @@ fn main() {
             regras_de_previa,
             pasta_de_downloads,
             estado_da_porta,
+            estado_do_servidor,
             definir_senha_do_server,
             criar_convite_do_server,
             ligar_portaria,
@@ -10403,7 +10609,33 @@ fn main() {
             // `ExitRequested` e não `Exit`: o primeiro chega quando a última
             // janela fecha e ainda há tempo de o quadro sair pelo fio; o segundo
             // chega com o processo já indo embora.
-            if matches!(evento, tauri::RunEvent::ExitRequested { .. }) {
+            //
+            // **E as hospedagens, que também têm quem esteja dentro** (tarefa 21
+            // da F7). A saída é segurada, as duas se despedem dentro de
+            // `TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS`, ao mesmo tempo que a sessão,
+            // e só então o app sai.
+            //
+            // **Só com `code: None`**, que é a pessoa fechando a última janela.
+            // O runtime o manda do `Destroyed` dela, com a janela já fora da
+            // lista (`tauri-runtime-wry` 2.11.4): a página, e a credencial que
+            // só mora na memória dela, já foram. Segurar aqui não segura janela
+            // nenhuma. O `exit(0)` do fim vem com `Some(0)` e passa; o
+            // `restart` do atualizador não é segurado pelo Tauri.
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = &evento
+            {
+                api.prevent_exit();
+                let saida = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager as _;
+                    despedir_das_hospedagens(
+                        &saida.state::<Session>(),
+                        TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS,
+                    )
+                    .await;
+                    saida.exit(0);
+                });
                 despedir_se(handle);
             }
         }),
@@ -10429,6 +10661,40 @@ fn despedir_se(handle: &tauri::AppHandle) {
     use tauri::Manager as _;
 
     despedir_da_sessao(&handle.state::<Session>(), ESPERA_DOS_MODS_NA_SAIDA);
+}
+
+/// Quanto cada hospedagem tem para se despedir na saída do app.
+///
+/// Um segundo, repartido por [`seele_server::hospedagem::Hospedagem::despedir`]:
+/// metade para o aviso, que é o mesmo meio segundo do SAIR
+/// (`PRAZO_DO_AVISO`), um quarto para o fechamento sair, um quarto para a porta
+/// do roteador. As duas hospedagens se despedem ao mesmo tempo, e junto com a
+/// sessão ([`despedir_se`]), então a saída não soma os tetos.
+const TETO_DA_DESPEDIDA_DAS_HOSPEDAGENS: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A saída do app, para as hospedagens: o servidor guardado e a sala se
+/// despedem de quem está dentro, ao mesmo tempo, cada uma dentro de `teto`.
+///
+/// Quem estava num servidor guardado lê `ServerShuttingDown`, e quem estava
+/// numa ligação lê `ChamadaEncerrada`: quem escolhe é a hospedagem
+/// (`Hospedagem::despedir`). Antes, fechar a janela só despedia a sessão, e
+/// quem estava dentro de um servidor desta máquina descobria pelo tempo de
+/// ociosidade, 20 s depois.
+///
+/// As duas saem do `Mutex` **antes** de qualquer espera, e a sessão fica sem
+/// hospedagem nenhuma: o que vem depois desta função é o processo saindo.
+async fn despedir_das_hospedagens(sessao: &Session, teto: std::time::Duration) {
+    let (guardado, pessoal) = sessao
+        .hospedagens
+        .lock()
+        .map(|mut hospedagens| (hospedagens.guardado.take(), hospedagens.pessoal.take()))
+        .unwrap_or((None, None));
+    let despedir = |hospedado: Option<Hospedado>| async move {
+        if let Some(hospedado) = hospedado {
+            hospedado.hospedagem.despedir(teto).await;
+        }
+    };
+    tokio::join!(despedir(guardado), despedir(pessoal));
 }
 
 /// Quanto a saída do app espera os MODs nativos confirmarem a parada.
@@ -16637,5 +16903,123 @@ mod o_tipo_do_arquivo_escolhido {
         let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0];
         let lido = tipo_do_escolhido(&png).expect("o PNG foi recusado");
         assert_eq!(lido.media_type, "image/png");
+    }
+}
+
+#[cfg(test)]
+mod a_saida_despede_as_hospedagens {
+    use super::{despedir_das_hospedagens, Hospedado, Session};
+    use seele_server::hospedagem::Hospedagem;
+
+    #[tokio::test]
+    async fn as_duas_saem_da_sessao_e_se_despedem() {
+        // O comportamento de cada despedida é da hospedagem (`quem_hospeda_fecha.rs`
+        // e `sala_pessoal.rs`, no `seele-conformance`). O que é deste arquivo:
+        // a saída leva as duas, e não só a que existia antes do Plano 2.
+        let sessao = Session::default();
+        // Duas salas, e não um servidor guardado e uma sala: este arquivo só
+        // sobe hospedagem pelo ponto padrão (o guarda
+        // `o_ponto_de_encontro_de_quem_hospeda`), e um teste não pergunta à VPS
+        // de produção. O que se prova aqui é o lugar de cada uma na sessão.
+        let guardado = Hospedagem::iniciar_sala(0, &[2; 32], "casa", None)
+            .await
+            .expect("a primeira não subiu");
+        let sala = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
+            .await
+            .expect("a sala não subiu");
+        {
+            let mut hospedagens = sessao.hospedagens.lock().expect("o cadeado");
+            hospedagens.guardado = Some(Hospedado {
+                hospedagem: guardado,
+                servidor: None,
+            });
+            hospedagens.pessoal = Some(Hospedado {
+                hospedagem: sala,
+                servidor: None,
+            });
+        }
+
+        despedir_das_hospedagens(&sessao, std::time::Duration::from_millis(400)).await;
+
+        let hospedagens = sessao.hospedagens.lock().expect("o cadeado");
+        assert!(hospedagens.guardado.is_none(), "o guardado ficou para trás");
+        assert!(hospedagens.pessoal.is_none(), "a sala ficou para trás");
+    }
+}
+
+#[cfg(test)]
+mod a_resposta_a_estou_no_meu_servidor {
+    use super::{endereco_desta_maquina, onde_estou_em, porta_desta_maquina, OndeEstou};
+
+    #[test]
+    fn onde_estou_nas_quatro_situacoes() {
+        // A tela perguntava isto de três jeitos, e com duas hospedagens nenhum
+        // dizia em qual delas a sessão está.
+        assert_eq!(
+            onde_estou_em(None, Some(8383), Some(8385)),
+            OndeEstou::Nenhum
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8383"), Some(8383), Some(8385)),
+            OndeEstou::Guardado
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), Some(8385)),
+            OndeEstou::Pessoal
+        );
+        assert_eq!(
+            onde_estou_em(Some("casa.exemplo:8383"), Some(8383), Some(8385)),
+            OndeEstou::Outro
+        );
+    }
+
+    #[test]
+    fn um_servidor_desta_maquina_que_este_app_nao_hospeda_e_outro_lugar() {
+        // Um `seeled` à parte na mesma máquina, ou a porta da sala com a sala
+        // fora do ar: o endereço é desta máquina, e a sessão não está em
+        // nenhuma das hospedagens deste app.
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:9000"), Some(8383), Some(8385)),
+            OndeEstou::Outro
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8385"), Some(8383), None),
+            OndeEstou::Outro
+        );
+        assert_eq!(
+            onde_estou_em(Some("127.0.0.1:8383"), None, Some(8385)),
+            OndeEstou::Outro,
+            "sem guardado no ar, a porta dele é de outro servidor"
+        );
+    }
+
+    #[test]
+    fn um_endereco_desta_maquina_como_a_pessoa_o_escreve() {
+        for (escrito, porta) in [
+            ("127.0.0.1:8383", Some(8383)),
+            ("127.0.0.1", Some(8383)),
+            ("localhost:8385", Some(8385)),
+            ("localhost", Some(8383)),
+            ("[::1]:8385", Some(8385)),
+            ("[::1]", Some(8383)),
+            ("  127.0.0.1:8383 ", Some(8383)),
+            ("192.168.0.7:8383", None),
+            ("casa.exemplo", None),
+            ("127.0.0.1.casa.exemplo:8383", None),
+        ] {
+            assert_eq!(porta_desta_maquina(escrito), porta, "{escrito:?}");
+        }
+    }
+
+    #[test]
+    fn a_lista_de_visitados_continua_sem_os_enderecos_desta_maquina() {
+        // A regra da lista é outra pergunta, e ela não mudou: um endereço desta
+        // máquina não é lugar aonde se volta (o `hospedado_aqui` de antes).
+        for desta in ["127.0.0.1:8383", "localhost", "[::1]:8385", "127.0.0.1"] {
+            assert!(endereco_desta_maquina(desta), "{desta:?}");
+        }
+        for de_fora in ["192.168.0.7:8383", "casa.exemplo:8383", "203.0.113.7"] {
+            assert!(!endereco_desta_maquina(de_fora), "{de_fora:?}");
+        }
     }
 }

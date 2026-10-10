@@ -2,7 +2,11 @@
 // verdade (ui/mods-no-navegador.js, ui/executor-de-mod.html e o `.wasm` do
 // `seele-motor-web`).
 //
-//     node bancada/executor-no-navegador.cjs <seele_motor_web.wasm>
+//     node apps/seele-app/bancada/executor-no-navegador.cjs \
+//       target/wasm32-wasip1/release/seele_motor_web.wasm
+//
+// O `.wasm` vem do `cargo xtask web`, e por isso ela roda no job
+// `bancadas-de-mod` do `ci.yml`, depois dele, e não no `bancadas`.
 //
 // O que só se prova aqui é o isolamento: que o MOD não alcança a origem da
 // página, nem a rede, nem um armazenamento que sobreviva; e que, se ele um dia
@@ -18,23 +22,12 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
-// A raiz do repositório, achada pelo `Cargo.lock`: a bancada roda de
-// `apps/seele-app/bancada/` e, enquanto a `ui/` não a recebe, de
-// `spikes/mods-no-navegador/executor/`.
-let repo = __dirname;
-while (!fs.existsSync(path.join(repo, "Cargo.lock"))) {
-  const acima = path.dirname(repo);
-  if (acima === repo) throw new Error("a bancada não achou a raiz do repositório");
-  repo = acima;
-}
 const raiz = path.resolve(__dirname, "..");
-const { chromium } = require(path.join(repo, "apps/seele-app/bancada/playwright.cjs"));
-// Cada arquivo da página vem da `ui/` ao lado da bancada, se estiver lá, ou da
-// do produto.
-const daUi = (nome) => [path.join(raiz, "ui", nome), path.join(repo, "apps/seele-app/ui", nome)].find((c) => fs.existsSync(c));
+const { chromium } = require("./playwright.cjs");
+const daUi = (nome) => path.join(raiz, "ui", nome);
 const [caminhoDoMotor] = process.argv.slice(2);
 if (!caminhoDoMotor || !fs.existsSync(caminhoDoMotor)) {
-  console.error("uso: node bancada/executor-no-navegador.cjs <seele_motor_web.wasm>  (o `cargo xtask web` o compila)");
+  console.error("uso: node apps/seele-app/bancada/executor-no-navegador.cjs <seele_motor_web.wasm>  (o `cargo xtask web` o compila)");
   process.exit(2);
 }
 
@@ -149,7 +142,7 @@ const servidor = http.createServer((pedido, resposta) => {
 
 // ---------------------------------------------------------------- os casos
 
-const MOD_COMUM = fs.readFileSync(path.join(repo, "crates/seele-motor-web/tests/mod-comum.js"), "utf8");
+const MOD_COMUM = fs.readFileSync(path.resolve(raiz, "../../crates/seele-motor-web/tests/mod-comum.js"), "utf8");
 
 /** Sobe um MOD com o executor e uma janela de mentira que responde como a casca. */
 const NA_PAGINA = `

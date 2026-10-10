@@ -411,3 +411,81 @@ começar.
   administração, o achado do Safari e o servidor dos roteiros; à F8, a marca,
   o PC e os três pontos a combinar (o teste do microfone, o
   `descrever_arquivo` e o servidor da Tarefa 19 dela).
+- **Aviso de fila da orquestradora:** o lote W da F5 (I-4) mexe no
+  `tela-boot.js` antes da 3.4, e prende a credencial ao alvo depois do
+  `NicknameTaken`. A F4 não mexe nesse arquivo até lá, e confere o contrato
+  quando o W entrar (no plano, 3.4).
+
+## 09/10, noite: a `ui/` liberada, e o executor entra nela (3.2, passo 6)
+
+- **A nona integração (`ffd8e4fb`) trazida em `4755c08a`**, sem conflito. A
+  orquestradora liberou a `ui/` para a ponte (3.1) e para o passo 6 da 3.2,
+  com um dono por arquivo: `base.js:36-37` e o `mods-runtime.js` são da F4; o
+  `tela-boot.js` espera o lote W da F5.
+- **O executor está na `ui/`**: `mods-no-navegador.js` e `executor-de-mod.html`
+  em `apps/seele-app/ui/`, a bancada em `apps/seele-app/bancada/`.
+  - **a escolha pelo lugar** é o `executorDoMod`, em `mods-runtime.js`. A
+    `base.js` mudou **uma linha fora do 36-37**, a da chamada (`:678`), porque
+    ela nomeava o `executorNativo`; o guarda do `frontend.rs` que exigia esse
+    nome passou a exigir o `executorDoMod`. A F8 não toca esse trecho
+    (conferido no `0.16/celular`);
+  - **na carga, nada**: o ouvinte de `message` saiu do topo do arquivo e nasce
+    com o `iframe`. A bancada de Node carrega os dois arquivos sem `window`, e
+    um ouvinte de volta ao topo a reprova;
+  - **o `<script>` vai depois do `base.js`**: o guarda de ordem do
+    `frontend.rs` reprovou a primeira posição (antes dele), e o guarda das
+    funções sem declaração reprovou o `addEventListener` solto. Os dois
+    pegaram coisas reais, e mudou o código, não o guarda.
+- **A bancada no CI**: no job `bancadas-de-mod`, depois do `cargo xtask web`,
+  com o Playwright instalado ali. O `check_runtime.rs` lia só o job
+  `bancadas`; passou a ler os dois, e um teste novo segura que a bancada vem
+  depois do motor compilado e com o caminho que o `xtask web` usa. O
+  `cargo xtask web` e o `rustup target add` ganharam `!cancelled()`, para uma
+  bancada de Node vermelha não pular o motor.
+- **Medido:** a bancada passa no Chromium no lugar novo (nove casos, motor
+  recompilado: o `.wasm` local era de antes da última mudança do motor); a de
+  Node, seis corridas; `tests/web.rs` 4, `frontend.rs` 282, `celular.rs` 22;
+  clippy `-D warnings` limpo em `seele-app` e `xtask`.
+- **As nove reversões**, cada uma reprovando o seu guarda: `allow-same-origin`;
+  `connect-src` na CSP; o script do `iframe` mudado sem o hash; a `base.js`
+  pedindo o nativo pelo nome; a escolha invertida; o ouvinte de volta ao topo;
+  a bancada antes do motor; a bancada sem `!cancelled()`; a bancada fora do CI.
+
+## 09/10, noite: a ponte, lote A (3.1)
+
+- **A moldura da ponte** (`9e895748`, `52338c4f`): `ui/ponte-web.js`, o
+  primeiro script do `<head>`. O `base.js:36-37` não precisou mudar.
+- **Achado ao escrever: o duble.** As bancadas de `bancada/` e as ferramentas
+  da F8 (`tools/carga-da-casca.py`, `tools/bancada-do-celular.py`) põem um
+  `window.__TAURI__` antes do primeiro `<script src=`, que passou a ser a
+  ponte. A ponte trocaria o duble e a marca escolhida pela bancada. Regra: **um
+  `__TAURI__` sem o `__TAURI_INTERNALS__` é um duble**, e a ponte não faz
+  nada. O `executorDoMod` passou a ler a decisão da ponte, e não o Tauri.
+- **Os 160 comandos**: 89 atendidos nas duas cascas, 33 só no PC, 34
+  recusados, 3 neutros e o `disconnect`. 24 com corpo; 99 em `AINDA_A_FAZER`,
+  com a tarefa ao lado.
+- **Medido no Chromium, sem duble e sem toque**: a casca chama sozinha 18
+  comandos nas duas cascas (os 17 da F8 mais o `estado_da_porta`), e nenhum
+  volta recusado.
+- **Achado na integração, que não é da F4:** na `versao/0.16` de `ffd8e4fb`,
+  os `celular-*.js` usam o `CASCA` que a F8 declara no `base.js:112` do
+  `0.16/celular`, e esse ponto ainda não entrou. Sem a ponte, nada punha a
+  marca num navegador de verdade, e ninguém via. Com a ponte, a casca do
+  celular estoura cinco vezes na carga (`CASCA is not defined`), e a
+  `ponte-sem-gesto.cjs` reprova no `0.16/web` sozinho. **Junto com o
+  `0.16/celular`, o `0.16/api-6` e o `0.16/lotes`** (numa árvore temporária,
+  fora do branch), a cobertura fecha nos 160, e as três bancadas passam.
+- **Dois guardas do `frontend.rs`** ganharam a ponte como
+  exceção, com o porquê: a ordem de carga (ela é lida pelo `base.js`, e não o
+  contrário) e os tipos de imagem escritos (a cópia dela é conferida contra o
+  `seele_ffi` em `tests/web.rs`).
+- **Um conflito evitado:** a F3 acrescenta bancadas no fim do job `bancadas`
+  do `ci.yml`, no mesmo ponto; a `ponte-sem-gesto.cjs` foi para o começo.
+- **Doze reversões**, cada uma reprovando o seu guarda ou bancada.
+- **Na árvore junta, os guardas de Rust**: `web.rs` 10, `frontend.rs` 284,
+  `tokens.rs` e `fontes.rs` passam. O `celular.rs` reprova um,
+  `o_texto_do_sistema_alcanca_todo_tamanho_do_desktop`: o `celular-texto.css`
+  gerado da F8 fica atrás dos quatro CSS do desktop que o `0.16/api-6` muda.
+  É do encontro da F3 com a F8 (o `0.16/web` não muda CSS nenhum), e a F8 o
+  regera com `SEELE_REGERAR_TEXTO=1`. Avisado à orquestradora.
+

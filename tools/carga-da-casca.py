@@ -158,6 +158,14 @@ window.__SEELE_ARGS = {};
 window.__SEELE_HISTORICO = [];
 window.__SEELE_VOLUMES = {};
 window.__SEELE_EM_SESSAO = false;
+// **Hospedar não é estar em sessão.** `connect` entra no servidor de outro e
+// não hospeda nada, e o `estado_do_servidor` do produto só diz `hospedando:
+// true` com uma `Hospedagem` aberta nesta janela. `disconnect` a derruba, como
+// no Rust.
+window.__SEELE_HOSPEDANDO = false;
+// As mensagens de apps mais novos que o servidor hospedado pulou. Um roteiro
+// troca os dois números para ver a linha de ESTE SERVIDOR com cada um.
+window.__SEELE_APPS_MAIS_NOVOS = { mensagens: 0, sessoes: 0 };
 // **Uma máquina que já escolheu o nome**, o mesmo do quadro. Desde a `acbc1c29`
 // a primeira entrada de uma máquina sem nome abre «COMO OS OUTROS VÃO TE
 // CHAMAR?» antes do `connect` e espera a resposta; com `""` aqui, todo roteiro
@@ -198,6 +206,8 @@ window.__TAURI__ = {
       // sobre isso não prova nada sobre ele.
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
+      if (cmd === "hospedar") window.__SEELE_HOSPEDANDO = true;
+      if (cmd === "disconnect") window.__SEELE_HOSPEDANDO = false;
       if (cmd === "snapshot" && !window.__SEELE_EM_SESSAO) throw "NotConnected";
       // **Um comando pode recusar.** Sem isto o duble só sabia responder, e
       // metade da casca — toda tela que existe por causa de uma recusa — não
@@ -254,6 +264,15 @@ window.__TAURI__ = {
       // Os bytes do retrato do servidor, que o roteiro pode trocar para provar
       // que a tela acompanha uma mudança.
       if (cmd === "icone_do_server") return window.__SEELE_ICONE_DO_SERVER ?? null;
+      // O formato do `EstadoDoServidor` de `main.rs`. Quem não hospeda recebe
+      // os zeros, como o `Default` de lá: não há servidor de que falar.
+      if (cmd === "estado_do_servidor") {
+        const hospedando = window.__SEELE_HOSPEDANDO;
+        const { mensagens, sessoes } = window.__SEELE_APPS_MAIS_NOVOS;
+        return { hospedando,
+                 mensagens_desconhecidas: hospedando ? mensagens : 0,
+                 sessoes_com_desconhecidas: hospedando ? sessoes : 0 };
+      }
       // O apelido desta máquina, como as preferências o guardam. O roteiro
       // pode trocá-lo por `window.__SEELE_APELIDO`.
       if (cmd === "apelido_local") return window.__SEELE_APELIDO ?? "";
