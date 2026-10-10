@@ -510,3 +510,30 @@ começar.
   abrir sem conferir, abrir levando a página junto, o apelido sem aparar, o
   subdomínio consentido de novo e a gravação que falha em silêncio.
 
+## 09/10, noite: a ponte, lote C (o arquivo por alça)
+
+- **Três comandos ganham corpo**: `escolher_arquivo`, `guardar_colado` e
+  `descrever_arquivo` (este só no PC). O `enviar_anexo` passa da lote C para
+  a 2.6: ele lê o arquivo da alça e o sobe pela sessão. Ficam 91 a fazer.
+- **As quatro condições da `F4/ponte-no-pc.md`**, cada uma com prova:
+  1. o mapa tem teto (16 alças, e 2 imagens coladas, que estão todas na
+     memória) e solta tudo no fim da sessão. A casca não avisa quando desiste
+     de um anexo (`tirarAnexo` não chama a ponte), e por isso o teto solta as
+     mais velhas;
+  2. uma alça desconhecida ou solta volta `NotConnected`, como o caminho que
+     não existe no desktop; a casca diz «NÃO CONSEGUI LER ESSE ARQUIVO»;
+  3. o seletor abre dentro da chamada, sem `await` antes do `click()`;
+  4. desistir devolve `null` pelo `cancel`, e a reversão que tira o `cancel`
+     reprova a bancada pela promessa pendurada.
+- **O arraste é só do PC**: a ponte ouve o `drop` do documento quando o que se
+  arrasta são arquivos, guarda cada um sob uma alça (até o teto, para a do
+  primeiro não sair no meio) e emite o `tauri://drag-drop` que a casca ouve.
+  Arrastar texto para um campo continua sendo do navegador.
+- **As regras do desktop presas por guarda**: a tabela do `tipo_alegado`, a
+  extensão da colagem e o teto de 25 MiB do `guardar_colado`
+  (`as_regras_do_arquivo_da_ponte_sao_as_do_desktop`). O tipo sai da extensão,
+  e não do `File.type`.
+- **Medido:** a `ponte-web.cjs` com 15 provas; `web.rs` 11. No Chromium, o PC
+  carrega limpo com o arraste instalado. **Nove reversões**, cada uma
+  reprovando a sua prova.
+

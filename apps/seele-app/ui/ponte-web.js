@@ -241,7 +241,6 @@ const TAREFA_33 = "3.3 (a voz)";
 const TAREFA_34 = "3.4 (a identidade e a entrada)";
 const TAREFA_39 = "3.9 (assistir à tela)";
 const TAREFA_310 = "3.10 (compartilhar a tela pelo PC)";
-const TAREFA_C = "3.1, lote C (o arquivo por alça)";
 const TAREFA_D = "3.1, lote D (o microfone fora da sala, a saída de som e a tela cheia)";
 const TAREFA_MODS = "2.6 e 3.4 (os MODs da sessão)";
 
@@ -272,14 +271,12 @@ const AINDA_A_FAZER = new Map([
   ["criar_linha", TAREFA_26],
   ["criar_voice_room", TAREFA_26],
   ["descartar_mensagem", TAREFA_26],
-  ["descrever_arquivo", TAREFA_C],
   ["destino_do_anexo", TAREFA_26],
   ["dispensar_aviso", TAREFA_26],
   ["enter_voice_room", TAREFA_33],
-  ["enviar_anexo", TAREFA_C],
+  ["enviar_anexo", TAREFA_26],
   ["enviar_imagem_mod", TAREFA_MODS],
   ["escolher_apelido", TAREFA_26],
-  ["escolher_arquivo", TAREFA_C],
   ["escolher_icone_do_server", TAREFA_26],
   ["escolher_microfone", TAREFA_33],
   ["escolher_minha_imagem", TAREFA_26],
@@ -293,7 +290,6 @@ const AINDA_A_FAZER = new Map([
   ["exclusao_do_som_da_captura", TAREFA_310],
   ["expulsar_pessoa", TAREFA_26],
   ["fontes_de_tela", TAREFA_310],
-  ["guardar_colado", TAREFA_C],
   ["icone_do_server", TAREFA_26],
   ["imagem_da_pessoa", TAREFA_26],
   ["instalar_mod_do_catalogo", TAREFA_MODS],
@@ -401,12 +397,121 @@ function comASessao(fazer) {
   return fazer(sessao);
 }
 
-/** Sai da sessão desta página, se houver uma. */
+/** Sai da sessão desta página, se houver uma, e solta os arquivos guardados. */
 async function sairDaSessaoDaPonte() {
   const sessao = sessaoDaPonte.atual;
   sessaoDaPonte.atual = null;
+  ALCAS_DA_PONTE.clear();
   await sessao?.encerrar?.();
   return null;
+}
+
+// ------------------------------------------------------------ o arquivo por alça
+
+/**
+ * As regras do desktop para um arquivo, **JSON estrito**: `tests/web.rs` as
+ * confere contra o `main.rs`. O tipo de um arquivo sai da extensão, pela
+ * tabela do `tipo_alegado`, e não do `File.type`; uma imagem colada ganha a
+ * extensão e o teto do `guardar_colado`.
+ */
+const REGRAS_DO_ARQUIVO = Object.freeze({
+  "tipos_por_extensao": {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+    "pdf": "application/pdf",
+    "txt": "text/plain",
+    "md": "text/plain",
+    "opus": "audio/opus",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "mp4": "video/mp4"
+  },
+  "tipo_desconhecido": "application/octet-stream",
+  "extensao_da_colagem": {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp"
+  },
+  "maior_colagem_bytes": 26214400
+});
+
+/**
+ * **No navegador não há caminho de disco** (`F4/ponte-no-pc.md`, «O arquivo
+ * sem caminho»). A forma das chamadas não muda: o «caminho» é uma alça opaca
+ * (`web-arquivo:N`), e o `File` ou o `Blob` mora aqui, sob ela. Uma alça que
+ * não está aqui (desconhecida, ou já solta) é recusada como o desktop recusa
+ * um caminho que não existe.
+ */
+const ALCAS_DA_PONTE = new Map();
+
+/**
+ * O teto do mapa. A casca guarda um anexo pendente por vez; o resto é o que
+ * ela trocou ou desistiu de mandar, e ela não avisa quando desiste
+ * (`tirarAnexo` não chama a ponte). As mais velhas saem primeiro.
+ */
+const TETO_DE_ALCAS = 16;
+
+/**
+ * Um `Blob` colado está **todo na memória**, e um `File` escolhido não. Das
+ * coladas, ficam só as mais novas.
+ */
+const TETO_DE_COLADOS = 2;
+
+let ultimaAlcaDaPonte = 0;
+
+/** Guarda um arquivo sob uma alça nova, e solta o que passou do teto. */
+function guardarSobAlca(arquivo, nome, colado = false) {
+  ultimaAlcaDaPonte += 1;
+  const alca = `web-arquivo:${ultimaAlcaDaPonte}`;
+  ALCAS_DA_PONTE.set(alca, { arquivo, nome, colado });
+  const colados = [...ALCAS_DA_PONTE].filter(([, guardado]) => guardado.colado);
+  for (const [velha] of colados.slice(0, -TETO_DE_COLADOS)) ALCAS_DA_PONTE.delete(velha);
+  for (const velha of [...ALCAS_DA_PONTE.keys()].slice(0, -TETO_DE_ALCAS)) ALCAS_DA_PONTE.delete(velha);
+  return alca;
+}
+
+/** O tipo que o nome alega, pela extensão: o `tipo_alegado` do desktop. */
+function tipoAlegado(nome) {
+  const ponto = nome.lastIndexOf(".");
+  const extensao = ponto === -1 ? null : minusculasAscii(nome.slice(ponto + 1));
+  return extensao !== null && Object.hasOwn(REGRAS_DO_ARQUIVO.tipos_por_extensao, extensao)
+    ? REGRAS_DO_ARQUIVO.tipos_por_extensao[extensao]
+    : REGRAS_DO_ARQUIVO.tipo_desconhecido;
+}
+
+/** O `ArquivoEscolhido` do desktop, com a alça no lugar do caminho. */
+function descreverAlca(alca) {
+  const guardado = ALCAS_DA_PONTE.get(alca);
+  if (!guardado) return null;
+  return { caminho: alca, nome: guardado.nome, tamanho: guardado.arquivo.size, tipo: tipoAlegado(guardado.nome) };
+}
+
+/**
+ * **O arraste, só no PC.** A ponte ouve o `drop` do documento, guarda cada
+ * arquivo sob uma alça e emite o mesmo `tauri://drag-drop` que a casca já ouve
+ * (`tela-sessao.js`). Só quando o que se arrasta são arquivos: arrastar texto
+ * para um campo continua sendo do navegador. E não mais que o teto, para a
+ * alça do primeiro, que é a que a casca usa, não sair no meio.
+ */
+function ouvirOArraste() {
+  const temArquivos = (evento) => Array.from(evento.dataTransfer?.types ?? []).includes("Files");
+  document.addEventListener("dragover", (evento) => {
+    if (temArquivos(evento)) evento.preventDefault();
+  });
+  document.addEventListener("drop", (evento) => {
+    if (!temArquivos(evento)) return;
+    evento.preventDefault();
+    const arquivos = Array.from(evento.dataTransfer.files ?? []).slice(0, TETO_DE_ALCAS);
+    if (arquivos.length === 0) return;
+    emitirNaPonte("tauri://drag-drop", {
+      paths: arquivos.map((arquivo) => guardarSobAlca(arquivo, arquivo.name)),
+      position: { x: evento.clientX ?? 0, y: evento.clientY ?? 0 },
+    });
+  });
 }
 
 /** O que a origem guarda, ou `null` quando ela não guarda ou não deixa ler. */
@@ -564,6 +669,53 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
     return null;
   },
   previas_consentidas: () => previasConsentidas(),
+  // **O seletor, dentro do gesto.** Nenhum `await` antes do `click()`: o
+  // navegador só abre o seletor na ativação de quem clicou, e o executor da
+  // promessa roda na hora. Desistir é o `cancel`, e devolve `null`, como no
+  // desktop, sem deixar a promessa pendurada.
+  escolher_arquivo: () =>
+    new Promise((responder) => {
+      const entrada = document.createElement("input");
+      entrada.type = "file";
+      entrada.hidden = true;
+      let respondido = false;
+      const fim = (valor) => {
+        if (respondido) return;
+        respondido = true;
+        entrada.remove();
+        responder(valor);
+      };
+      entrada.addEventListener("change", () => {
+        const arquivo = entrada.files?.[0];
+        fim(arquivo ? descreverAlca(guardarSobAlca(arquivo, arquivo.name)) : null);
+      });
+      entrada.addEventListener("cancel", () => fim(null));
+      document.body.append(entrada);
+      entrada.click();
+    }),
+  // As regras e as recusas do `guardar_colado` do desktop; o `Blob` fica na
+  // memória, sob uma alça, e não num arquivo temporário.
+  guardar_colado: ({ tipo, base64 } = {}) => {
+    const texto = String(base64 ?? "");
+    const teto = REGRAS_DO_ARQUIVO.maior_colagem_bytes;
+    if (texto.length > Math.floor(teto / 3) * 4) return Promise.reject("GrandeDemais");
+    let binario;
+    try {
+      binario = atob(texto);
+    } catch {
+      return Promise.reject("NaoEImagem");
+    }
+    if (binario.length > teto) return Promise.reject("GrandeDemais");
+    if (binario.length === 0) return Promise.reject("NaoEImagem");
+    const bytes = Uint8Array.from(binario, (letra) => letra.charCodeAt(0));
+    const extensao = Object.hasOwn(REGRAS_DO_ARQUIVO.extensao_da_colagem, String(tipo))
+      ? REGRAS_DO_ARQUIVO.extensao_da_colagem[String(tipo)]
+      : "";
+    const nome = extensao ? `colado-${Date.now()}.${extensao}` : `colado-${Date.now()}`;
+    return descreverAlca(guardarSobAlca(new Blob([bytes]), nome, true));
+  },
+  // Uma alça que não está aqui é o caminho que não existe do desktop.
+  descrever_arquivo: ({ caminho } = {}) => descreverAlca(String(caminho ?? "")) ?? Promise.reject("NotConnected"),
   // **Numa aba nova, que não leva a página junto.** Sem `await` antes do
   // `open`: o navegador só abre a aba dentro do gesto de quem clicou.
   abrir_no_navegador: ({ url } = {}) => {
@@ -629,8 +781,14 @@ function ouvirNaPonte(evento, aoOuvir) {
   });
 }
 
+/** Emite um evento para quem o ouve, como o `emit` do Rust. */
+function emitirNaPonte(evento, payload) {
+  for (const ouvinte of [...(OUVINTES_DA_PONTE.get(evento) ?? [])]) ouvinte(payload);
+}
+
 if (PONTE_NO_LUGAR_DO_TAURI) {
   document.documentElement.dataset.casca = CASCA_DA_PONTE;
+  if (CASCA_DA_PONTE === "larga") ouvirOArraste();
   window.__TAURI__ = Object.freeze({
     core: Object.freeze({ invoke: invocarNaPonte }),
     event: Object.freeze({ listen: ouvirNaPonte }),

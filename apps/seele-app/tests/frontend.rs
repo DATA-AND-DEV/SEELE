@@ -8132,10 +8132,13 @@ fn the_page_never_composes_the_media_type_a_picture_is_decoded_with() {
     // The exception is held to exactly that shape below, rather than trusted.
     //
     // **And the bridge of the browser** (`ponte-web.js`, ADR 0057) answers
-    // `regras_de_previa` itself there, where no Rust is on the other side. Its
-    // copy is held to `seele_ffi::Connection::preview_rules()` by
-    // `as_constantes_da_ponte_sao_as_do_desktop` in `tests/web.rs`, so the two
-    // cannot drift: the copy this test exists to forbid is one nobody checks.
+    // `regras_de_previa` and the type a file's extension claims itself there,
+    // where no Rust is on the other side. Its copies are held to
+    // `seele_ffi::Connection::preview_rules()` and to `tipo_alegado` and
+    // `guardar_colado` in `main.rs` by `as_constantes_da_ponte_sao_as_do_desktop`
+    // and `as_regras_do_arquivo_da_ponte_sao_as_do_desktop` in `tests/web.rs`,
+    // so they cannot drift: the copy this test exists to forbid is one nobody
+    // checks.
     let excecao = "tela-server.js";
     let mut fonte = String::new();
     for name in ui_files(".js") {

@@ -51,8 +51,16 @@ function pagina({
   duble = null,
   hash = "",
   gravacaoFalha = false,
+  seletor = () => null,
 } = {}) {
   const ouvidos = [];
+  // Quem a ponte pôs a ouvir no documento (o arraste), à parte dos da janela.
+  const doDocumento = new Map();
+  // O seletor de arquivos: cada `<input type=file>` que a ponte criou, se ele
+  // foi clicado **dentro** da chamada (sem `await` antes) e se ainda está na
+  // página.
+  const seletores = [];
+  let dentroDaChamada = false;
   const avisos = [];
   const linhas = [];
   const abertos = [];
@@ -62,9 +70,46 @@ function pagina({
   const janela = {
     structuredClone,
     TextEncoder,
+    Blob,
+    File,
+    atob,
     innerWidth: largura,
     location: { hash, href: `https://seele.invalid/${hash}` },
-    document: { documentElement: { dataset: {} } },
+    document: {
+      documentElement: { dataset: {} },
+      body: {
+        append: (no) => {
+          no.naPagina = true;
+        },
+      },
+      addEventListener: (evento, ouvinte) => doDocumento.set(evento, ouvinte),
+      createElement(tag) {
+        const ouvintes = new Map();
+        const no = {
+          tag,
+          files: null,
+          naPagina: false,
+          addEventListener: (evento, ouvinte) => ouvintes.set(evento, ouvinte),
+          remove() {
+            no.naPagina = false;
+          },
+          click() {
+            seletores.push({ no, dentroDaChamada });
+            // A pessoa escolhe (ou desiste) depois, como no navegador.
+            setImmediate(() => {
+              const escolhido = seletor();
+              if (escolhido) {
+                no.files = [escolhido];
+                ouvintes.get("change")?.({});
+              } else {
+                ouvintes.get("cancel")?.({});
+              }
+            });
+          },
+        };
+        return no;
+      },
+    },
     localStorage: {
       getItem(chave) {
         if (guardado instanceof Error) throw guardado;
@@ -114,7 +159,16 @@ function pagina({
     linhas,
     abertos,
     origem,
-    invoke: (comando, args) => janela.__TAURI__.core.invoke(comando, args),
+    doDocumento,
+    seletores,
+    invoke(comando, args) {
+      dentroDaChamada = true;
+      try {
+        return janela.__TAURI__.core.invoke(comando, args);
+      } finally {
+        dentroDaChamada = false;
+      }
+    },
   };
 }
 
@@ -413,6 +467,111 @@ async function abrirNoNavegador() {
   }
 }
 
+/// **O arquivo por alça** (`F4/ponte-no-pc.md`, as quatro condições):
+/// 1. o mapa tem teto e solta o que guarda (no teto e no fim da sessão);
+/// 2. uma alça desconhecida, ou já solta, é recusada;
+/// 3. o seletor abre sem `await` antes do `click()`, dentro do gesto;
+/// 4. desistir devolve `null`, e não deixa a promessa pendurada.
+async function oArquivoPorAlca() {
+  const caso = "o arquivo por alça";
+  let proximo = null;
+  const p = pagina({ seletor: () => proximo });
+
+  proximo = new File(["abc"], "Foto.JPG");
+  const escolhido = await desfecho(p.invoke("escolher_arquivo"));
+  confere(caso, p.seletores.at(-1)?.dentroDaChamada === true,
+    "o seletor não abriu dentro da chamada: um `await` antes do `click()` gasta o gesto");
+  confere(caso, p.seletores.at(-1)?.no.naPagina === false, "o `<input>` do seletor ficou na página");
+  const alca = escolhido.ok?.caminho;
+  confere(caso, typeof alca === "string" && alca.startsWith("web-arquivo:"), `a alça saiu ${util.inspect(escolhido)}`);
+  confere(caso, igual(escolhido.ok, { caminho: alca, nome: "Foto.JPG", tamanho: 3, tipo: "image/jpeg" }),
+    `o escolhido saiu ${util.inspect(escolhido)}; o tipo é o da extensão, e não o do navegador`);
+
+  proximo = null;
+  const desistiu = await desfecho(p.invoke("escolher_arquivo"));
+  confere(caso, desistiu.ok === null, `desistir do seletor voltou ${util.inspect(desistiu)}`);
+
+  const descrito = await desfecho(p.invoke("descrever_arquivo", { caminho: alca }));
+  confere(caso, igual(descrito.ok, escolhido.ok), `descrever a alça voltou ${util.inspect(descrito)}`);
+  for (const estranha of ["web-arquivo:999", "/Users/alguem/segredo.txt", ""]) {
+    const r = await desfecho(p.invoke("descrever_arquivo", { caminho: estranha }));
+    confere(caso, r.erro === "NotConnected", `a alça «${estranha}» voltou ${util.inspect(r)}`);
+  }
+
+  // O teto: as mais velhas saem, e a mais nova fica.
+  const teto = p.ler("TETO_DE_ALCAS");
+  const alcas = [];
+  for (let i = 0; i < teto + 2; i++) {
+    proximo = new File([`${i}`], `a${i}.txt`);
+    alcas.push((await p.invoke("escolher_arquivo")).caminho);
+  }
+  confere(caso, p.ler("ALCAS_DA_PONTE").size === teto, `o mapa guarda ${p.ler("ALCAS_DA_PONTE").size}, e o teto é ${teto}`);
+  const velha = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas[0] }));
+  confere(caso, velha.erro === "NotConnected", "a alça mais velha não saiu no teto");
+  const nova = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas.at(-1) }));
+  confere(caso, nova.ok?.nome === `a${teto + 1}.txt`, `a alça mais nova saiu ${util.inspect(nova)}`);
+
+  // O fim da sessão solta tudo.
+  await p.invoke("disconnect");
+  confere(caso, p.ler("ALCAS_DA_PONTE").size === 0, "sair da sessão não soltou as alças");
+  const depois = await desfecho(p.invoke("descrever_arquivo", { caminho: alcas.at(-1) }));
+  confere(caso, depois.erro === "NotConnected", "uma alça solta ainda descreve");
+}
+
+/// **A imagem colada** vira uma alça com as regras do `guardar_colado` do
+/// desktop: o teto, a recusa do que não é base64 ou está vazio, e o nome com a
+/// extensão do tipo.
+async function aImagemColada() {
+  const caso = "a imagem colada";
+  const p = pagina();
+  const r = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64: Buffer.from("png!").toString("base64") }));
+  confere(caso, /^colado-\d+\.png$/.test(r.ok?.nome ?? "") && r.ok?.tamanho === 4 && r.ok?.tipo === "image/png",
+    `colar voltou ${util.inspect(r)}`);
+  const sem = await desfecho(p.invoke("guardar_colado", { tipo: "image/x", base64: Buffer.from("x").toString("base64") }));
+  confere(caso, /^colado-\d+$/.test(sem.ok?.nome ?? "") && sem.ok?.tipo === "application/octet-stream",
+    `um tipo sem extensão voltou ${util.inspect(sem)}`);
+  for (const [base64, falha] of [["", "NaoEImagem"], ["não é base64!", "NaoEImagem"]]) {
+    const q = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64 }));
+    confere(caso, q.erro === falha, `«${base64}» voltou ${util.inspect(q)}, e não ${falha}`);
+  }
+  // Das coladas, que estão todas na memória, só ficam as mais novas.
+  for (let i = 0; i < 4; i++) await p.invoke("guardar_colado", { tipo: "image/png", base64: "AAAA" });
+  const coladas = [...p.ler("ALCAS_DA_PONTE").values()].filter((guardado) => guardado.colado).length;
+  confere(caso, coladas === p.ler("TETO_DE_COLADOS"), `ficaram ${coladas} imagens coladas na memória`);
+  const teto = p.ler("REGRAS_DO_ARQUIVO").maior_colagem_bytes;
+  const grande = await desfecho(p.invoke("guardar_colado", { tipo: "image/png", base64: "A".repeat(Math.ceil(teto / 3) * 4 + 4) }));
+  confere(caso, grande.erro === "GrandeDemais", `uma colagem acima do teto voltou ${util.inspect(grande)}`);
+}
+
+/// **O arraste, só no PC**: a ponte ouve o `drop` do documento, guarda cada
+/// arquivo sob uma alça e emite o mesmo `tauri://drag-drop` que a casca já
+/// ouve. No celular não há arraste, e ela não ouve nada.
+async function oArraste() {
+  const caso = "o arraste";
+  const celular = pagina({ toque: true });
+  confere(caso, celular.doDocumento.size === 0, `no celular a ponte ouve ${[...celular.doDocumento.keys()]}`);
+
+  const p = pagina({ largura: 1280 });
+  const recebidos = [];
+  await p.janela.__TAURI__.event.listen("tauri://drag-drop", (evento) => recebidos.push(evento.payload));
+  let permitiu = false;
+  p.doDocumento.get("dragover")?.({ dataTransfer: { types: ["Files"] }, preventDefault: () => { permitiu = true; } });
+  confere(caso, permitiu, "o `dragover` com arquivos não foi permitido, e o navegador não deixaria soltar");
+  let soltou = false;
+  p.doDocumento.get("drop")?.({
+    dataTransfer: { types: ["Files"], files: [new File(["1"], "um.pdf"), new File(["22"], "dois.txt")] },
+    preventDefault: () => { soltou = true; },
+  });
+  confere(caso, soltou, "o `drop` não foi segurado, e o navegador abriria o arquivo no lugar da página");
+  confere(caso, recebidos.length === 1 && recebidos[0].paths?.length === 2, `o evento saiu ${util.inspect(recebidos)}`);
+  const descrito = await desfecho(p.invoke("descrever_arquivo", { caminho: recebidos[0]?.paths?.[0] }));
+  confere(caso, descrito.ok?.nome === "um.pdf" && descrito.ok?.tipo === "application/pdf",
+    `o arquivo arrastado descreveu ${util.inspect(descrito)}`);
+  let textoSegurado = false;
+  p.doDocumento.get("dragover")?.({ dataTransfer: { types: ["text/plain"] }, preventDefault: () => { textoSegurado = true; } });
+  confere(caso, !textoSegurado, "arrastar texto foi segurado pela ponte, e deixaria de soltar num campo");
+}
+
 (async () => {
   const provas = [
     oLugar,
@@ -427,6 +586,9 @@ async function abrirNoNavegador() {
     oApelidoLocal,
     asPreviasConsentidas,
     abrirNoNavegador,
+    oArquivoPorAlca,
+    aImagemColada,
+    oArraste,
   ];
   for (const prova of provas) {
     try {
