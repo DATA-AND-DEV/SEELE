@@ -535,6 +535,31 @@ impl Hospedagem {
         }
     }
 
+    /// Numa sala, a linha de resumo da campainha no log: quantos tocaram e
+    /// como acabaram (tarefa 31 da F7). Num servidor guardado não há campainha,
+    /// e nada a dizer.
+    fn resumir_a_sala(&self) {
+        if let Some(recepcao) = self.recepcao() {
+            recepcao.resumir();
+        }
+    }
+
+    /// O motivo com que quem está dentro é avisado de que esta hospedagem
+    /// fecha, em [`Self::encerrar`] e em [`Self::despedir`].
+    ///
+    /// Num servidor guardado, o servidor está encerrando. Numa sala pessoal, a
+    /// **ligação** acabou: `ChamadaEncerrada`, a mesma razão de quando quem
+    /// recebe desliga, e a frase que quem ligou lê é «ALICE ENCERROU A
+    /// LIGAÇÃO», e não a de um servidor que saiu do ar (spec de 23/09, «Erros e
+    /// frases»).
+    fn motivo_da_despedida(&self) -> seele_proto::control::DisconnectReason {
+        if self.recepcao().is_some() {
+            seele_proto::control::DisconnectReason::ChamadaEncerrada
+        } else {
+            seele_proto::control::DisconnectReason::ServerShuttingDown
+        }
+    }
+
     /// Encerra o servidor **avisando quem está dentro**, e devolve a porta.
     ///
     /// É o SAIR de quem hospeda: a casca chama isto pelo comando `disconnect`,
@@ -556,8 +581,9 @@ impl Hospedagem {
     /// Era `shutdown()` cru, e quem estava dentro lia uma queda de transporte:
     /// a tela dizia «não foi possível alcançar o servidor», e a bateria batia
     /// cinco minutos numa porta fechada. Agora cada sessão lê
-    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO») e acaba. Ver
-    /// [`Daemon::encerrar_avisando`].
+    /// `ServerShuttingDown` («O SERVIDOR ESTÁ ENCERRANDO»), ou
+    /// `ChamadaEncerrada` numa sala ([`Self::motivo_da_despedida`]), e acaba.
+    /// Ver [`Daemon::encerrar_avisando`].
     ///
     /// O roteador vem **antes** do aviso aqui, e depois em [`Self::despedir`]:
     /// no SAIR o processo continua vivo, e as duas esperas cabem; na saída do
@@ -568,11 +594,9 @@ impl Hospedagem {
         if let Some(escada) = self.escada.take() {
             escada.descer().await;
         }
+        self.resumir_a_sala();
         self.server
-            .encerrar_avisando(
-                seele_proto::control::DisconnectReason::ServerShuttingDown,
-                PRAZO_DO_AVISO,
-            )
+            .encerrar_avisando(self.motivo_da_despedida(), PRAZO_DO_AVISO)
             .await;
         self.server.wait_idle().await;
         if let Some(aceitando) = self.aceitando.take() {
@@ -612,11 +636,9 @@ impl Hospedagem {
     /// Não espera a porta UDP voltar ao sistema, ao contrário de
     /// [`Self::encerrar`]: o processo está saindo, e ninguém vai reabri-la.
     pub async fn despedir(mut self, teto: std::time::Duration) {
+        self.resumir_a_sala();
         self.server
-            .encerrar_avisando(
-                seele_proto::control::DisconnectReason::ServerShuttingDown,
-                teto / 2,
-            )
+            .encerrar_avisando(self.motivo_da_despedida(), teto / 2)
             .await;
         let _ = tokio::time::timeout(teto / 4, self.server.wait_idle()).await;
         if let Some(escada) = self.escada.take() {
@@ -678,6 +700,61 @@ pub fn endereco_de_rede() -> Option<std::net::IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A sala que fecha diz o resumo da campainha no log, pelas duas
+    /// despedidas, e um servidor guardado não diz nada (tarefa 31 da F7).
+    #[tokio::test]
+    async fn a_sala_que_fecha_resume_a_campainha_e_o_guardado_nao() {
+        use std::io::Write;
+
+        #[derive(Clone, Default)]
+        struct Buffer(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for Buffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("o rastro").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // Sem degrau 4, e com a trava: ver `crate::ambiente_de_teste`.
+        let _ambiente = crate::ambiente_de_teste::AmbienteDoEncontro::sem_degrau_4();
+        let buffer = Buffer::default();
+        let escreve = buffer.clone();
+        let assinante = tracing_subscriber::fmt()
+            .with_writer(move || escreve.clone())
+            .without_time()
+            .with_ansi(false)
+            .finish();
+        crate::rastro_de_teste::segundo_despachante();
+        let _captura = tracing::subscriber::set_default(assinante);
+
+        let despedida = Hospedagem::iniciar_sala(0, &[1; 32], "dona", None)
+            .await
+            .expect("a sala");
+        despedida
+            .despedir(std::time::Duration::from_millis(200))
+            .await;
+        let encerrada = Hospedagem::iniciar_sala(0, &[2; 32], "outra", None)
+            .await
+            .expect("a outra sala");
+        encerrada.encerrar().await;
+        let guardado = Hospedagem::iniciar(0, Location::Memory, "Casa", None, |_| Ok(()))
+            .await
+            .expect("o guardado");
+        guardado.encerrar().await;
+
+        let log = String::from_utf8(buffer.0.lock().expect("o rastro").clone()).expect("UTF-8");
+        assert_eq!(
+            log.lines()
+                .filter(|linha| linha.contains("campainha: a sala fechou"))
+                .count(),
+            2,
+            "uma linha de resumo por sala que fecha, e nenhuma do guardado: {log}"
+        );
+    }
 
     #[tokio::test]
     async fn um_server_hospedado_aceita_conexao() {

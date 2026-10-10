@@ -565,7 +565,14 @@ fn every_command_the_frontend_calls_is_registered() {
 // e o pedido entrou noutro. Saiu quando o dono da região passou a pedi-los,
 // `bytesDoSom` em `base.js`, e a lista voltou ao estado de repouso, que é
 // vazia.
-const AGUARDANDO_TELA: &[&str] = &[];
+//
+// `onde_estou` entrou em 2026-10-09, com a metade do `main.rs` da tarefa 18 da
+// F7 (Plano 2): é a única resposta a «estou no meu servidor?», e quem pergunta
+// hoje são o `estado_da_porta().hospedando` da `tela-sessao.js` e o
+// `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
+// outras frentes quando o comando nasceu. Sai quando eles passarem a
+// perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
+const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -1551,7 +1558,7 @@ fn a_faixa_de_um_pino_que_a_impressao_desmente_diz_de_onde_ela_veio() {
     //   (`a_lista_guardou`), e a faixa não promete o que não aconteceu.
     // - Da lista, sem gravar: dois motivos dão aqui, a gravação que falhou e o
     //   servidor desta máquina, que o `connect` não anota de propósito
-    //   (`hospedado_aqui`). «Não conseguiu» só vale para o primeiro; o que vale
+    //   (`endereco_desta_maquina`). «Não conseguiu» só vale para o primeiro; o que vale
     //   para os dois é que a lista continua com a impressão antiga.
     let corpo = body_of(&scripts(), "function fraseDoVeredito(");
     let Some(ramo) = corpo
@@ -1999,7 +2006,7 @@ fn a_lista_que_nao_abre_ou_nao_grava_diz_isso_no_log() {
     );
 
     let Some(visita) = connect
-        .split("if!hospedado_aqui(&alvo){")
+        .split("if!endereco_desta_maquina(&alvo){")
         .nth(1)
         .and_then(|resto| resto.split("lista.registrar(").next())
     else {
@@ -10791,16 +10798,56 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          a credencial de uma entrada que já a gastou:\n{reconectar}"
     );
 
-    // 4. Fechar a janela encerra o processo, e a memória da página vai junto.
+    // 4. Fechar a janela leva a memória da página junto.
+    //
+    // **Desde a tarefa 21 da F7, a saída do processo é segurada**, e só de um
+    // jeito: no `ExitRequested` com `code: None`, para as hospedagens se
+    // despedirem. O runtime manda esse evento do `Destroyed` da última janela,
+    // com ela já fora da lista (`tauri-runtime-wry` 2.11.4, `TaoWindowEvent::
+    // Destroyed`): a página já foi, e a credencial com ela. O que continua
+    // proibido é segurar a **janela** (`prevent_close`, `CloseRequested`), e
+    // segurar a saída de outro jeito, com a janela ainda aberta.
+    //
+    // **Para quem atualizar o Tauri:** a medida é do código do runtime, e não
+    // de documentação. Ela está em `tauri-runtime-wry/src/lib.rs`, no braço
+    // `TaoWindowEvent::Destroyed` do laço de eventos: a janela sai da lista e,
+    // com a lista vazia, sai o `RunEvent::ExitRequested { code: None }`. Com
+    // outra versão do `tauri-runtime-wry`, confira que o evento continua saindo
+    // dali, e só então troque a versão abaixo. Se ele passar a sair antes de a
+    // janela ser destruída, segurar a saída volta a manter a página viva.
+    const RUNTIME_MEDIDO: &str = "2.11.4";
+    let trava = std::fs::read_to_string(app_dir().join("../../Cargo.lock"))
+        .unwrap_or_else(|erro| panic!("o `Cargo.lock` tem de ser legível: {erro}"));
+    let runtime = trava
+        .split("name = \"tauri-runtime-wry\"\nversion = \"")
+        .nth(1)
+        .and_then(|resto| resto.split('"').next());
+    assert_eq!(
+        runtime,
+        Some(RUNTIME_MEDIDO),
+        "o `tauri-runtime-wry` mudou de versão, e a saída segurada com `code: None` foi \
+         medida na {RUNTIME_MEDIDO}. Reconfira no código do runtime que o `ExitRequested` \
+         com `code: None` ainda sai do `Destroyed` da última janela, com ela já fora da \
+         lista, e então troque `RUNTIME_MEDIDO`"
+    );
     let main = without_comments(&read("src/main.rs"));
-    for segura in ["prevent_exit", "prevent_close", "CloseRequested"] {
+    for segura in ["prevent_close", "CloseRequested"] {
         assert!(
             !main.contains(segura),
             "o `main.rs` passou a usar `{segura}`: fechar a janela pode não encerrar \
-             mais o processo, e a credencial da tentativa, que só existe na memória \
-             da página, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+             mais a página, e a credencial da tentativa, que só existe na memória \
+             dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
         );
     }
+    let compacto: String = main.split_whitespace().collect();
+    assert!(
+        compacto.matches("prevent_exit").count() <= 1
+            && (!compacto.contains("prevent_exit")
+                || compacto.contains("ExitRequested{code:None,api,..}=&evento{api.prevent_exit()")),
+        "o `main.rs` segura a saída de um jeito que não é o `ExitRequested` com `code: None`: \
+         uma saída pedida com a janela aberta, segurada, manteria a página viva, e a \
+         credencial da tentativa sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+    );
     // **E a página também não segura o fechar** (rodada 1, M2). O Tauri deixa
     // a janela vetar o próprio fechamento (`onCloseRequested` com
     // `preventDefault`), e o navegador por baixo dele, o `beforeunload`: os dois
@@ -15504,7 +15551,8 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 ///
 /// **QA-02 do reteste de 17/09, e o defeito era do conserto entregue no mesmo
 /// dia.** `aplicar_mod` prendia o consentimento a `session.alvo` — e `alvo` é
-/// «onde voltar», preenchido **dentro** de `if !hospedado_aqui`, porque
+/// «onde voltar», preenchido **dentro** de `if !endereco_desta_maquina` (o
+/// antigo `hospedado_aqui`), porque
 /// `127.0.0.1` não entra na lista de atalhos. Num servidor hospedado aqui,
 /// que é exatamente o caso de quem liga um MOD, o campo estava vazio: o aceite
 /// não era gravado, e o diálogo que tinha acabado de prometer «você não vai ser
@@ -15532,7 +15580,7 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let conectar = body_of(&fonte, "async fn connect");
     let (Some(onde), Some(condicao)) = (
         conectar.find("session.endereco_da_sessao"),
-        conectar.find("if !hospedado_aqui"),
+        conectar.find("if !endereco_desta_maquina"),
     ) else {
         panic!("`connect` deixou de preencher o endereço da sessão, ou de filtrar a lista de visitados");
     };
@@ -15541,6 +15589,40 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
         "o endereço da sessão é gravado **dentro** do filtro da lista de \
          visitados, então hospedar aqui volta a deixá-lo vazio — que é o \
          defeito inteiro"
+    );
+}
+
+/// **«Estou no meu servidor?» tem uma resposta só, e ela é o `onde_estou`**
+/// (Plano 2, spec de 23/09, «Hospedagens»).
+///
+/// Eram três critérios, cada um com a sua régua: o `hospedado_aqui` do
+/// `main.rs` (qualquer endereço desta máquina), o `hospedando` do
+/// `estado_da_porta` e o `nossoServidorEm` da tela de entrada. Com duas
+/// hospedagens no mesmo processo, o servidor guardado e a sala pessoal, nenhum
+/// dos três dizia em qual das duas a sessão está, e cada tela respondia do seu
+/// jeito.
+///
+/// Esta é a metade do `main.rs`. A da casca (`tela-sessao.js` e
+/// `tela-boot.js`) entra quando esses arquivos passarem a perguntar ao
+/// `onde_estou`, na vez da F7 neles.
+#[test]
+fn estou_no_meu_servidor_tem_uma_resposta_so() {
+    let app = without_comments(&read("src/main.rs"));
+    assert!(
+        !app.contains("hospedado_aqui"),
+        "o `hospedado_aqui` voltou ao `main.rs`: é a segunda resposta a «estou no \
+         meu servidor?», e ela não sabe qual das duas hospedagens é"
+    );
+    assert!(
+        app.contains("fn onde_estou(") && app.contains("onde_estou,"),
+        "o `onde_estou` sumiu, ou deixou de ser um comando da janela"
+    );
+    // A regra da lista de visitados é outra pergunta («este endereço é desta
+    // máquina?»), e ela usa a mesma leitura do endereço que o `onde_estou`.
+    let regra_da_lista = body_of(&app, "fn endereco_desta_maquina");
+    assert!(
+        regra_da_lista.contains("porta_desta_maquina("),
+        "a lista de visitados voltou a ler o endereço do jeito dela:\n{regra_da_lista}"
     );
 }
 
@@ -15618,7 +15700,8 @@ fn a_malha_tem_onde_ser_consentida_da_tela_ate_o_nucleo() {
 /// cano, é o que a sonda mediu, e ela parte de 2 Mbps enquanto não mediu nada.
 ///
 /// A semente por servidor existia e era chamada, mas **dentro** do ramo
-/// `if !hospedado_aqui(&alvo)` — o mesmo ramo que causou o QA-02. Quem hospeda
+/// `if !endereco_desta_maquina(&alvo)` (o antigo `hospedado_aqui`) — o mesmo
+/// ramo que causou o QA-02. Quem hospeda
 /// nunca a recebia, e os vinte e cinco segundos de subida que o comentário de
 /// `camada-compartilhar.js` mediu em campo se repetiam em toda transmissão.
 ///
@@ -15631,7 +15714,7 @@ fn a_sonda_e_semeada_fora_do_filtro_da_lista_de_visitados() {
 
     let (Some(semente), Some(filtro)) = (
         conectar.find("lembrar_o_caminho"),
-        conectar.find("if !hospedado_aqui"),
+        conectar.find("if !endereco_desta_maquina"),
     ) else {
         panic!("`connect` deixou de semear a sonda, ou de filtrar a lista de visitados");
     };
