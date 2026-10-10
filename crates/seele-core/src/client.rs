@@ -1906,11 +1906,18 @@ const PROPOSTAS_DE_PORTA: usize = 16;
 /// se ligue a `X` *num endereço* ali dentro faz o `[::]:X` voltar `AddrInUse`,
 /// e vem outra proposta. Um que se ligue ao *curinga* `0.0.0.0:X` ali dentro é
 /// aceito junto (revisão do lote Y), e a resposta daquela conexão vai a ele,
-/// como antes do conserto. A janela medida é de 4,1 µs na mediana (9,0 µs no
-/// p99, em 5 000); para cair nela, outro programa tem de ligar um IPv4 no
-/// curinga exatamente em `X` nesses microssegundos. Com `r` ligações dessas
-/// por segundo na máquina, a chance por conexão é ~`r` × 9 µs / 16 384 — com
-/// `r` = 100, uma em 18 milhões. `r` não foi medido.
+/// como antes do conserto. Para cair nela, outro programa tem de ligar um
+/// IPv4 no curinga exatamente em `X` dentro da janela. Ela foi medida duas
+/// vezes, 5 000 vezes cada, e a cauda cresce com a carga:
+/// - em Python, com carga ~10 (o implementador do lote Y): 4,1 µs na mediana,
+///   9,0 µs no p99;
+/// - em Rust, por este mesmo caminho, com carga 35 (a revisão do lote Y):
+///   7,7–8,0 µs na mediana, 46,6–325,8 µs no p99, e máximo de até 348 ms.
+///
+/// Com `r` ligações dessas por segundo na máquina, a chance por conexão é
+/// ~`r` × janela / 16 384: com `r` = 100, uma em ~18 milhões pelo p99 da
+/// primeira medida, e uma em ~500 mil pelo p99 de 326 µs da segunda.
+/// Desprezível nas duas. `r` não foi medido.
 ///
 /// # Errors
 ///

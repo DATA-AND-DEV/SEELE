@@ -233,10 +233,23 @@ enum Desfecho {
     /// ordem, e a sessão só lê o quadro seguinte depois de pôr o anterior na
     /// fila de gravação.
     LeuTudo,
-    /// A sessão se despediu, com este motivo. O que ela não leu ficou com
-    /// quem disse — é o `EstadoDoEnvio::SemResposta` do cliente de verdade, que
-    /// pode repetir com a mesma chave quando a casca chama
-    /// `reenviar_mensagem`; sozinho, ele não repete.
+    /// A sessão se despediu, com este motivo.
+    ///
+    /// **O que o teste perdoa aqui, com `FellBehind`: a cauda inteira do
+    /// falante, lida ou não, em qualquer ponto da rajada.** De fora não dá para
+    /// separar a mensagem que a sessão nunca leu da que ela leu e perdeu antes
+    /// de se despedir, e a revisão do lote Y mediu as duas passando: 16 lidas e
+    /// perdidas no meio da rajada, 19 no fim. Desde o M4 da revisão, a despedida
+    /// no meio da rajada também passa (antes reprovava por acidente, pelo erro
+    /// de transporte).
+    ///
+    /// Por que perdoar: é o contrato de hoje — o servidor diz `FellBehind` e
+    /// conta em `atrasos`, e o teste exige as duas coisas. O que o cliente de
+    /// verdade vê: nada some, cada mensagem que sobrou fica
+    /// `EstadoDoEnvio::SemResposta`, com «TENTAR DE NOVO», que repete com a
+    /// mesma chave quando a casca chama `reenviar_mensagem`; sozinho, ele não
+    /// repete. Se isso é contrato ou defeito é a mesma pergunta da pendência
+    /// 61: o falante que lê e escreve em rajada ser desligado com `FellBehind`.
     Desligado(DisconnectReason),
     /// O fluxo acabou sem despedida.
     Caiu(String),
@@ -381,10 +394,12 @@ async fn gravadas_por_falante(servidor: &Daemon) -> Result<Vec<Vec<usize>>> {
 /// pode acontecer é a terceira coisa — seguir conectado, calado, com um buraco
 /// no meio da conversa que ninguém dos dois lados consegue nomear.
 ///
-/// A mesma regra vale para quem fala: tudo o que o servidor leu de um falante
-/// está gravado, em ordem, e o que ele não leu é de um falante que ele
-/// desligou dizendo `FellBehind`. Pedir as 1 160 gravadas sempre era pedir que
-/// nenhum falante ficasse para trás, e sob carga eles ficam (lote Y da F5).
+/// A mesma regra vale para quem fala: o que o servidor gravou de um falante é
+/// o começo do que ele disse, em ordem e sem buraco; quem teve o `Pong` teve
+/// tudo gravado; e a cauda que faltar é de um falante que ele desligou dizendo
+/// `FellBehind` — inteira, lida ou não, ver [`Desfecho::Desligado`]. Pedir as
+/// 1 160 gravadas sempre era pedir que nenhum falante ficasse para trás, e sob
+/// carga eles ficam (lote Y da F5).
 #[tokio::test(flavor = "multi_thread")]
 async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
     let (endereco, servidor) = server().await?;
@@ -499,6 +514,8 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
                 "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada: \
                  a sessão do falante {indice:02} leu todas e faltam {faltam:?}"
             ),
+            // A cauda inteira, lida ou não: o contrato de hoje, e a pergunta da
+            // pendência 61. Ver `Desfecho::Desligado`.
             Desfecho::Desligado(DisconnectReason::FellBehind) => {}
             outro => assert!(
                 faltam.is_empty(),

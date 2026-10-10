@@ -13,7 +13,8 @@ Ramo `0.16/lotes-y`, a partir de `d9124cea`. Worktree:
 | `99142c72` | parte 1: o conserto também cobre o IPv4 no curinga `0.0.0.0:X`, que `6061e38c` deixava passar |
 | `06d0a208` | o relatório com a seção «v0.15.1», Linux e Windows |
 | `5b167586` … `866718cc` | rodada 2: I1, I2, M4, M3, M5, M1, M2 (ver «Rodada 2») |
-| este | o relatório com a rodada 2 |
+| `a29c1fb8`, `a2492429` | o relatório com a rodada 2 |
+| este | R2-M1 e R2-M2 da re-revisão: só texto e comentário (o que o `par_lento` perdoa, e as duas medidas da janela) |
 
 Nada fora de `crates/seele-core`, `crates/seele-server/tests/par_lento.rs` e
 `docs/`. Nenhum gancho em `crates/seele-server/src`. O `seele-sessao` não foi
@@ -347,15 +348,28 @@ perdesse e não se despedisse é pego; um que perdesse de um falante que teve o
 *(Corrigido na rodada 2: isto estava errado. A revisão achou mais dois casos
 em que o teste de `de04ab26` ficava mais fraco — o servidor que recusa tudo
 passava com zero gravadas (I1), e a despedida calada só reprovava pelo prazo
-de segurança (I2). Os dois estão consertados abaixo, em «Rodada 2». O caso
-estreito continua o único que sobra.)*
+de segurança (I2). Os dois estão consertados abaixo, em «Rodada 2».)*
+
+*(Corrigido de novo depois da re-revisão, R2-M1: o caso que sobra não é «uma
+mensagem». Para um falante desligado com `FellBehind`, o teste perdoa **a
+cauda inteira, lida ou não, em qualquer ponto da rajada**: de fora não dá para
+separar a mensagem que a sessão nunca leu da que ela leu e perdeu antes de se
+despedir. A re-revisão mediu 16 lidas e perdidas por falante no meio da
+rajada passando 3 de 3, e 19 no fim passando 2 de 2 — esta já valia em
+`de04ab26`. O M4 alargou o caso no tempo, não no tipo: a despedida no meio da
+rajada, que antes reprovava por acidente pelo erro de transporte, agora
+passa. Por que perdoar: é o contrato de hoje, e o teste exige que a despedida
+seja dita e contada em `atrasos` — fechar sem despedida reprova, e pular do
+meio e seguir lendo reprova. O que o cliente vê: nada some, o que sobrou fica
+`SemResposta`, com «TENTAR DE NOVO» (`reenviar_mensagem`, a pedido). Se isso é
+contrato ou defeito é a mesma pergunta da pendência 61.)*
 
 Fora desse caso o teste novo é mais forte que o antigo, e medido:
 - nas rodadas sem carga extra (6 de 6 pelo `cargo`), nenhum falante foi
   desligado: todos tiveram o `Pong`, e o teste exige as 1 160, como o antigo;
 - e o antigo, quando um falante era desligado, reprovava sempre — não
-  separava a perda da cauda não lida; só não passava. O caso estreito acima
-  também não era pego por ele: era uma reprovação que reprovaria do mesmo jeito
+  separava a perda da cauda não lida; só não passava. A cauda perdoada acima
+  também não era pega por ele: era uma reprovação que reprovaria do mesmo jeito
   sem a perda.
 
 As reversões que o provam (`session.rs` e o teste de volta conferidos com `cmp`
@@ -422,10 +436,18 @@ M1, M3 e M5 são só comentário e texto.
 Entre largar a sonda `0.0.0.0:X` e ligar `[::]:X`, um IPv4 que se ligue a
 `X` num endereço faz a ligação voltar `AddrInUse` (vem outra proposta), mas
 um que se ligue ao curinga é aceito junto, e a resposta daquela conexão vai a
-ele. Medido aqui (Python, 5 000 vezes, carga ~10): **4,1 µs na mediana, 9,0
-µs no p99, 82,7 µs no máximo**. A chance por conexão é ~`r` × 9 µs / 16 384,
-com `r` as ligações de IPv4 no curinga por segundo na máquina; com `r` = 100,
-uma em 18 milhões. `r` não foi medido. Dito na doc de `socket_conferido`.
+ele. A janela foi medida duas vezes, 5 000 vezes cada, e a cauda cresce com
+a carga *(a segunda medida entrou depois da re-revisão, R2-M2)*:
+- por mim, **em Python, com carga ~10**: 4,1 µs na mediana, 9,0 µs no p99,
+  82,7 µs no máximo;
+- pela revisão, **em Rust, pelo mesmo caminho de `socket_conferido`, com carga
+  35**: 7,7–8,0 µs na mediana, **46,6–325,8 µs no p99**, máximo de até 348 ms.
+
+A chance por conexão é ~`r` × janela / 16 384, com `r` as ligações de IPv4 no
+curinga por segundo na máquina. Com `r` = 100: uma em ~18 milhões pelo p99 da
+primeira, uma em ~500 mil pelo p99 de 326 µs da segunda. Desprezível nas
+duas; `r` não foi medido. A doc de `socket_conferido` diz as duas medidas,
+cada uma com a linguagem e a carga.
 
 De passagem, a mesma medida deu um número de campo para a conta de N da
 seção «v0.15.1»: das 5 006 propostas de `[::]:0`, **6** caíram numa porta que
@@ -481,9 +503,14 @@ comentário; a pendência de produto (61) fica com o controlador.
 8. A sonda IPv4 roda a cada socket de quem conecta: um `bind` a mais por
    tentativa de conexão, sem custo medido que pese.
 9. **A janela entre a sonda e a ligação continua aberta** para um IPv4 no
-   curinga (M1): 4,1 µs na mediana, a chance por conexão depende de `r`, que
-   não medi. Fechá-la exigiria segurar a sonda junto, o que funciona no macOS
-   e, pelo que espero do Linux, recusaria todo `[::]:X` lá.
-10. **O caso estreito do `par_lento` sobra:** uma mensagem lida, perdida, e a
-    despedida antes da seguinte do mesmo falante passam. Nem o teste antigo o
-    pegava.
+   curinga (M1). Medida em Python com carga ~10 (p99 9,0 µs) e, pela revisão,
+   em Rust com carga 35 (p99 46,6–325,8 µs, máximo até 348 ms); a chance por
+   conexão depende de `r`, que não medi, e com `r` = 100 fica entre uma em ~18
+   milhões e uma em ~500 mil. Fechá-la exigiria segurar a sonda junto, o que
+   funciona no macOS e, pelo que espero do Linux, recusaria todo `[::]:X` lá.
+10. **O `par_lento` perdoa a cauda inteira de um falante desligado com
+    `FellBehind`, lida ou não, em qualquer ponto da rajada** (R2-M1): 16 lidas
+    e perdidas no meio, 19 no fim, passam. É o contrato de hoje — despedida dita
+    e contada —, e no cliente o que sobrou fica `SemResposta`, com «TENTAR DE
+    NOVO». Contrato ou defeito é a mesma pergunta da pendência 61. Nem o teste
+    antigo pegava essa perda: reprovava sempre que um falante era desligado.
