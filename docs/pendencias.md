@@ -9537,8 +9537,18 @@ escreve e não lê é desligada com `FellBehind`, e a cauda do que ela mandou n�
 gravada. O que a sessão leu antes de desligar foi gravado, e o cliente de verdade
 repete o resto com a mesma chave. **A revisão do Y mostrou que também acontece com um cliente que lê**, quando ele
 escreve em rajada: o comentário do braço `Lagged` em `seele-server/src/session.rs`,
-que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Não consertado**: decidir na
-revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
+que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Medido pela F1 em 10/10** (`f5a4b51e`, `F1/pendencia-61-medida.md`): o lote do escritor
+não tem teto e é anunciado sem `await`; acima de 1024 mensagens num lote, ele passa à frente
+de **toda** sessão viva, e todas caem com `FellBehind`. Uma pessoa, uma colagem, um MOD ou
+uma sala não chegam lá; **18 conexões de um script chegam** (17 × 58 nunca derrubou; 18 × 58
+derrubou todo mundo nas 3 rodadas), e num servidor aberto não há teto de sessões. Quando
+acontece, a janela mostra a tela de fim enquanto o servidor a mantém sentada na sala; o que
+ela mandava no instante pode se perder sem aviso, e nada repete nem busca o buraco.
+
+**Decisão da orquestradora: defeito.** Desligar quem parou de ler é contrato; desligar todo
+mundo por um lote é uma porta de negação de serviço. Consertar na 0.16: no servidor, o teto
+do lote do escritor e a contrapressão por conexão; no cliente, só as razões de fim encerram,
+e na volta o histórico é buscado e o `SemResposta` repetido com a mesma chave.
 
 Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
 `becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
