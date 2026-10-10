@@ -82,15 +82,6 @@ class Ponto:
 
 
 PONTOS_INJETADOS = [
-    Ponto(
-        "P5",
-        "base.js",
-        None,
-        "\nconst CASCA = Object.seal({ depoisDeDesenhar: [], "
-        'pedirSenhaDaSala: async () => window.prompt("Senha da sala"), '
-        "enterEnvia: true, avisoDeFone: () => AVISO_DE_FONE });\n",
-        "const CASCA",
-    ),
     # No produto, o P6 é a última linha de `desenhar`. Aqui ele entra no começo,
     # adiado para depois dela por um microtask: o efeito é o mesmo, e a âncora é
     # estável.
