@@ -7686,12 +7686,51 @@ async fn catalogo_de_mods() -> Result<catalogo::Catalogo, catalogo::FalhaNoCatal
     catalogo::buscar_catalogo().await
 }
 
+/// Para que a janela chama [`instalar_mod_do_catalogo`]. São dois usos, e só
+/// um deles mexe no servidor que esta janela hospeda.
+///
+/// **Lote X da F5, ADR 0045.** Instalar, exigir num servidor e consentir são
+/// três decisões. O comando servia aos dois usos sem saber qual era cada um, e
+/// reaplicava no servidor hospedado aqui todo MOD que ele já exigia. Na
+/// obtenção para outro servidor, isso trocava a versão que o servidor daqui
+/// exige pela que o outro exige, e quem estava dentro dele caía. Acontecia
+/// também depois de a pessoa desistir da pergunta, porque a obtenção segue até
+/// o fim.
+///
+/// **Obrigatório, sem padrão.** Uma chamada que não diz o uso é recusada pela
+/// ponte do Tauri antes de baixar qualquer coisa, e a recusa chega à tela. Um
+/// padrão seria um defeito calado nos dois sentidos: reaplicar por omissão é o
+/// achado deste lote, e não reaplicar por omissão traz o QA-01 de volta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum UsoDoCatalogo {
+    /// A gestão de MODs atualiza um MOD pelo catálogo (`instalarDoCatalogo`,
+    /// em `camada-mods.js`). Se o servidor hospedado aqui já o exigia, a
+    /// exigência passa aos bytes novos: é o QA-01.
+    Atualizar,
+    /// A janela obtém o que um servidor exige para entrar nele
+    /// (`obterOConjunto`, em `camada-mods.js`, e
+    /// `buscarOQueFaltaSeJaFoiAceito`, em `base.js`). Só instala: o servidor
+    /// hospedado aqui continua exigindo o que exigia.
+    Obter,
+}
+
+/// Se este uso reaplica o MOD no servidor que esta janela hospeda: só a
+/// atualização pela gestão, e só de um MOD que ele já exigia. Ver
+/// [`UsoDoCatalogo`].
+fn reaplica_no_hospedado(uso: UsoDoCatalogo, ja_exigido: bool) -> bool {
+    ja_exigido && uso == UsoDoCatalogo::Atualizar
+}
+
 /// Baixa do catálogo uma versão de um MOD e a instala nesta máquina.
 ///
 /// Confere a assinatura do catálogo, a lista de revogações, e o **hash do
 /// conjunto** dos arquivos baixados — nesta ordem, e nada vai para o disco
 /// antes da última. Instala desligado, como toda instalação de MOD: ligar é
 /// outra decisão.
+///
+/// `uso` diz quem chama ([`UsoDoCatalogo`]), e a resposta diz se o MOD foi
+/// reaplicado no servidor que esta janela hospeda.
 ///
 /// # Errors
 ///
@@ -7702,8 +7741,9 @@ async fn instalar_mod_do_catalogo(
     session: State<'_, Session>,
     id: String,
     versao: String,
+    uso: UsoDoCatalogo,
 ) -> Result<bool, catalogo::FalhaNoCatalogo> {
-    let ja_exigido = mod_exigido_aqui(&session, &id).await;
+    let reaplicar = reaplica_no_hospedado(uso, mod_exigido_aqui(&session, &id).await);
     let hash = catalogo::instalar_do_catalogo(&config_dir(&app), &id, &versao).await?;
 
     // **QA-01: baixar não é aplicar.** Trocar os arquivos no disco não mexe na
@@ -7720,13 +7760,14 @@ async fn instalar_mod_do_catalogo(
     // sim, mesmo sendo a mesma decisão de segundos antes.
     //
     // Só para um MOD que **já estava exigido**: atualizar não é ligar, e um que
-    // estava desligado continua desligado.
-    if ja_exigido {
+    // estava desligado continua desligado. E só quando quem chama é a gestão:
+    // obter o que um servidor exige não decide nada sobre o servidor daqui.
+    if reaplicar {
         aplicar_mod(app, session, id, hash, true)
             .await
             .map_err(|erro| catalogo::FalhaNoCatalogo::NaoAplicou(format!("{erro:?}")))?;
     }
-    Ok(ja_exigido)
+    Ok(reaplicar)
 }
 
 /// Se este MOD está exigido pelo servidor que **esta janela** hospeda.
@@ -7740,6 +7781,156 @@ async fn mod_exigido_aqui(session: &State<'_, Session>, id: &str) -> bool {
     let persistence = persistence.lock().await;
     seele_server::persistence::mods::enabled(&persistence)
         .is_ok_and(|ligados| ligados.iter().any(|ligado| ligado.id == id))
+}
+
+/// **Só a atualização pela gestão reaplica no servidor hospedado** — lote X da
+/// F5, ADR 0045. Ver [`UsoDoCatalogo`].
+///
+/// O comando tem `AppHandle` e baixa da rede, e não roda num teste. O que roda
+/// é o banco de verdade do servidor hospedado (`Persistence`), em memória, com
+/// a decisão do comando ([`reaplica_no_hospedado`]) e o efeito de
+/// [`aplicar_mod`]: `habilitar_mod` grava a linha **por identificador**, então
+/// reaplicar troca a versão exigida e a identidade do conjunto — e, com a
+/// identidade nova, o servidor derruba quem estava dentro.
+#[cfg(test)]
+mod so_a_gestao_reaplica_no_servidor_hospedado {
+    use seele_server::mods::anuncio::conjunto_exigido;
+    use seele_server::persistence::mods::{enable, enabled, EnabledMod};
+    use seele_server::persistence::{Location, Persistence};
+
+    use super::{corpo_de, fonte_sem_comentarios, reaplica_no_hospedado, UsoDoCatalogo};
+
+    const ID: &str = "autor/rpg";
+
+    /// Uma versão do MOD, como o banco do servidor a guarda.
+    fn versao(numero: &str, byte: char) -> EnabledMod {
+        EnabledMod {
+            id: ID.to_owned(),
+            version: numero.to_owned(),
+            hash: byte.to_string().repeat(64),
+            repo: "https://example.invalid/rpg".to_owned(),
+            reach: vec!["dom".to_owned()],
+            server_half: false,
+            api: seele_ffi::mods::MOD_API_VERSION,
+        }
+    }
+
+    /// O servidor que esta janela hospeda, exigindo o MOD na 1.0.0.
+    fn hospedado() -> Persistence {
+        let banco = Persistence::open(&Location::Memory).unwrap();
+        enable(&banco, &versao("1.0.0", 'a')).unwrap();
+        banco
+    }
+
+    /// A versão que o servidor hospedado exige, e a identidade que ele anuncia.
+    fn exigido(banco: &Persistence) -> (String, String) {
+        let ligado = enabled(banco)
+            .unwrap()
+            .into_iter()
+            .find(|ligado| ligado.id == ID)
+            .unwrap();
+        (ligado.version, conjunto_exigido(banco).unwrap().identidade)
+    }
+
+    /// O que `instalar_mod_do_catalogo` faz no servidor hospedado depois de
+    /// baixar `chegou`: a decisão do comando, sobre o que `mod_exigido_aqui`
+    /// lê, e, se ela mandar, o que `aplicar_mod` grava.
+    fn depois_de_baixar(banco: &Persistence, uso: UsoDoCatalogo, chegou: &EnabledMod) -> bool {
+        let ja_exigido = enabled(banco).unwrap().iter().any(|ligado| ligado.id == ID);
+        let reaplicar = reaplica_no_hospedado(uso, ja_exigido);
+        if reaplicar {
+            enable(banco, chegou).unwrap();
+        }
+        reaplicar
+    }
+
+    /// A medida do lote: outro servidor exige o mesmo MOD na 2.0.0, e a janela
+    /// o obtém. É a mesma chamada na pergunta dos MODs, depois de a pessoa
+    /// desistir dela (a obtenção segue até o fim) e na sessão que já aceitou.
+    #[test]
+    fn obter_o_que_outro_servidor_exige_nao_troca_a_versao_do_servidor_hospedado() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Obter, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert_eq!(
+            depois, antes,
+            "obter o MOD que outro servidor exige trocou a versão exigida pelo servidor que \
+             esta janela hospeda, de {} para {}: quem estava dentro dele cai, e ele passa a \
+             exigir uma versão que quem hospeda não escolheu (ADR 0045)",
+            antes.0, depois.0
+        );
+        assert!(
+            !reaplicou,
+            "a obtenção para outro servidor respondeu que reaplicou no servidor hospedado aqui"
+        );
+    }
+
+    /// O QA-01 continua: atualizar pela gestão um MOD que o servidor daqui
+    /// exige passa a exigência aos bytes novos, e um que ele não exige fica
+    /// desligado.
+    #[test]
+    fn a_atualizacao_pela_gestao_continua_reaplicando() {
+        let banco = hospedado();
+        let antes = exigido(&banco);
+
+        let reaplicou = depois_de_baixar(&banco, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'));
+
+        let depois = exigido(&banco);
+        assert!(
+            reaplicou && depois.0 == "2.0.0" && depois.1 != antes.1,
+            "atualizar pela gestão um MOD exigido aqui deixou de reaplicar: o disco tem a \
+             versão nova e o servidor continua exigindo a antiga (QA-01) — {antes:?} → {depois:?}"
+        );
+
+        let vazio = Persistence::open(&Location::Memory).unwrap();
+        assert!(
+            !depois_de_baixar(&vazio, UsoDoCatalogo::Atualizar, &versao("2.0.0", 'b'))
+                && enabled(&vazio).unwrap().is_empty(),
+            "atualizar um MOD que o servidor daqui não exige o ligou: atualizar não é ligar"
+        );
+    }
+
+    /// A janela diz o uso com estas palavras (`camada-mods.js`, `base.js`), e
+    /// nenhuma outra passa.
+    #[test]
+    fn a_janela_diz_o_uso_com_as_palavras_que_o_comando_entende() {
+        let ler = |texto: &str| serde_json::from_str::<UsoDoCatalogo>(texto).ok();
+        assert_eq!(
+            (ler("\"obter\""), ler("\"atualizar\"")),
+            (Some(UsoDoCatalogo::Obter), Some(UsoDoCatalogo::Atualizar)),
+            "o comando deixou de entender a palavra que a janela manda: toda obtenção e \
+             toda atualização pelo catálogo são recusadas antes de baixar"
+        );
+        assert_eq!(
+            (ler("null"), ler("\"Atualizar\"")),
+            (None, None),
+            "o comando aceita um uso que a janela não escreve: uma chamada sem uso passaria \
+             a ter um padrão calado"
+        );
+    }
+
+    /// O comando reaplica pela decisão que lê o uso, e por nenhum outro
+    /// caminho. Sem isto, a decisão acima podia estar certa e o comando voltar
+    /// a reaplicar por `mod_exigido_aqui` sozinho.
+    #[test]
+    fn o_comando_reaplica_pela_decisao_que_le_o_uso() {
+        let fonte = fonte_sem_comentarios();
+        let corpo = corpo_de(&fonte, "async fn instalar_mod_do_catalogo(");
+        let decide = corpo.find("reaplica_no_hospedado(uso,");
+        let aplica = corpo.find("if reaplicar {");
+        assert!(
+            corpo.contains("uso: UsoDoCatalogo,")
+                && matches!((decide, aplica), (Some(decide), Some(aplica)) if decide < aplica)
+                && corpo.matches("aplicar_mod(").count() == 1
+                && corpo.contains("Ok(reaplicar)"),
+            "`instalar_mod_do_catalogo` deixou de reaplicar só pela decisão que lê o uso: a \
+             obtenção para outro servidor volta a trocar o MOD do servidor hospedado aqui \
+             (ADR 0045):\n{corpo}"
+        );
+    }
 }
 
 /// Todo sim que esta máquina já deu a um servidor.

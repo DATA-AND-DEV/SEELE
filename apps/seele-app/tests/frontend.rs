@@ -14366,6 +14366,65 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
     }
 }
 
+/// **Só a atualização pela gestão reaplica o MOD no servidor que esta janela
+/// hospeda** — lote X da F5, ADR 0045.
+///
+/// `instalar_mod_do_catalogo` serve a dois usos, e o `main.rs` decide pelo que
+/// a janela diz (`UsoDoCatalogo`). Obter o que outro servidor exige reaplicava
+/// no servidor hospedado aqui e trocava a versão que ele exige pela do outro:
+/// na pergunta dos MODs, também depois de a pessoa desistir dela, e na sessão
+/// que já aceitou. Cada chamada da janela diz o seu uso, e o uso certo.
+#[test]
+fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
+    let camada = read("ui/camada-mods.js");
+    let base = read("ui/base.js");
+    let chamadas = [
+        (
+            js_function(&camada, "async function obterOConjunto("),
+            "obter",
+            "a obtenção da pergunta dos MODs de outro servidor",
+        ),
+        (
+            js_function(&base, "async function buscarOQueFaltaSeJaFoiAceito("),
+            "obter",
+            "a obtenção da sessão que já aceitou",
+        ),
+        (
+            js_function(&camada, "async function instalarDoCatalogo("),
+            "atualizar",
+            "a atualização pela gestão (QA-01)",
+        ),
+    ];
+    for (corpo, uso, quem) in &chamadas {
+        assert!(
+            corpo.contains("invoke(\"instalar_mod_do_catalogo\"")
+                && corpo.contains(&format!("uso: \"{uso}\"")),
+            "{quem} não diz `uso: \"{uso}\"` ao `instalar_mod_do_catalogo`: a obtenção para \
+             outro servidor troca o MOD do servidor hospedado aqui, ou a atualização pela \
+             gestão deixa o servidor exigindo a versão antiga:\n{corpo}"
+        );
+    }
+
+    // E nenhuma outra chamada, nem uma sem uso: o comando recusa a que não diz,
+    // e uma chamada nova tem de entrar aqui com o uso dela.
+    let todas = without_comments(&scripts());
+    let usos: Vec<bool> = todas
+        .split("invoke(\"instalar_mod_do_catalogo\"")
+        .skip(1)
+        .map(|depois| {
+            depois
+                .split_once(')')
+                .is_some_and(|(argumentos, _)| argumentos.contains("uso: \""))
+        })
+        .collect();
+    assert_eq!(
+        usos, [true; 3],
+        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+         sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
+         reaplicar no servidor hospedado aqui sem ninguém ter decidido"
+    );
+}
+
 /// **Nada da sessão anterior é admitido na seguinte** — etapa E2.
 ///
 /// O contrato de API própria, §5: «revogar a geração: a partir desse ponto,
