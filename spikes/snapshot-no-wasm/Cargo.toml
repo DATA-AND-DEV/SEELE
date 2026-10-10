@@ -1,0 +1,25 @@
+[package]
+name = "snapshot-no-wasm"
+description = "Spike da Tarefa 2.2 da F4: o Room do seele-core em wasm32-unknown-unknown, e o custo de um retrato de sala cheia. DESCARTÁVEL."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Fora do workspace. O `state.rs` e o `assento.rs` são os do `seele-core`, lidos
+# pelo caminho (o `build.rs` tira do `state.rs` só o `teto_de_video`, que depende
+# do vídeo, e os testes), e o `SessionInfo` é o do `client.rs`, recortado.
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+seele-proto = { path = "../../crates/seele-proto" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.151"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
