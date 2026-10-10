@@ -29,6 +29,12 @@
 //    regra violada — `obrigatorio`, `tamanhoMaximo`, `minimo`/`maximo`,
 //    `inteiro` — impede o `submeter` sem ida ao MOD, marca o campo com a frase
 //    do produto e leva o foco a ele; corrigido, o envio chega.
+// 8. **A pilha de inércia deixa acordado o que a casca pede** (Step 5d, o
+//    lado da F3): com um modal de MOD aberto, o que `CELULAR.acordadosNoModal()`
+//    devolve — no celular, a faixa de voz e as abas — continua alcançável, e o
+//    resto da sessão dorme. `inert` desce, então a pilha desce também: não
+//    adormece o ancestral que os contém. O desenho e a medida no aparelho são
+//    da F8 (a cena `folhas-e-mods`); aqui, um dublê do `CELULAR` no desktop.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -397,8 +403,36 @@ const { chromium } = require('./playwright.cjs');
     const valores = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter').at(-1)?.valores);
     assert.deepEqual(valores, { nome: 'Alex', lema: 'curto', nivel: 5, peso: 70 }, 'o submeter não levou os valores');
 
+    // 8. A inércia com o que a casca pede acordado.
+    const inercia = await page.evaluate(async () => {
+      // Sem nenhuma superfície de pé: a folha da API 5, na seção 2, abriu como
+      // diálogo modal, e um modal que sobra deixa a sessão inerte por ele.
+      for (const api of [5, 6]) superficiesDoMod(modDe[api].mod, modDe[api].inst).soltarTudo();
+      const mudo = document.getElementById('botao-mudo');
+      const sair = document.getElementById('operador-sair');
+      const outro = document.querySelector('#tela-sessao textarea');
+      const inerte = (e) => Boolean(e?.closest('[inert]'));
+      globalThis.CELULAR = { acordadosNoModal: () => [mudo, sair] };
+      try {
+        await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'modal', tipo: 'dialogo', titulo: 'Modal' } });
+        const durante = {
+          mudo: inerte(mudo), sair: inerte(sair), outro: inerte(outro),
+          dialogo: inerte(document.querySelector('[data-superficie="modal"]')),
+          noMesmoRamo: outro?.closest('#tela-sessao') === mudo?.closest('#tela-sessao'),
+        };
+        await pedir(6, { tipo: 'superficie-descartar', superficie: 'modal' });
+        return { durante, depois: { mudo: inerte(mudo), sair: inerte(sair), outro: inerte(outro) } };
+      } finally {
+        delete globalThis.CELULAR;
+      }
+    });
+    assert.equal(inercia.durante.noMesmoRamo, true, `o caso não mede o que diz: o outro controle não está no ramo do MUDO: ${JSON.stringify(inercia)}`);
+    assert.deepEqual(inercia.durante, { mudo: false, sair: false, outro: true, dialogo: false, noMesmoRamo: true },
+      `com o modal aberto, o que a casca pede não ficou acordado, ou o resto não dormiu: ${JSON.stringify(inercia)}`);
+    assert.deepEqual(inercia.depois, { mudo: false, sair: false, outro: false }, `fechar o modal não devolveu a sessão: ${JSON.stringify(inercia)}`);
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada; e o modal deixa acordado o que a casca pede.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

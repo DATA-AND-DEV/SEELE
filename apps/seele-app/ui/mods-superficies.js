@@ -59,10 +59,19 @@
  * confirmação de descarte do produto por cima — se desfazem em qualquer ordem
  * sem um acordar o que o outro adormeceu.
  *
+ * # O que a casca pede acordado
+ *
+ * `acordados` são nós do produto que continuam alcançáveis com o modal aberto
+ * — no celular, a faixa de voz e as abas (rascunho da API 6, §10; Step 5d,
+ * com a F8). Como `inert` desce, um irmão que contém um deles não é
+ * adormecido inteiro: a pilha desce nele e adormece só os filhos que não os
+ * contêm (`inertarMenos`).
+ *
  * @param {Element} dentro O nó que continua alcançável.
+ * @param {Element[]} acordados Os que a casca pede acordados.
  * @returns {Element[]} O que **esta** chamada tornou inerte.
  */
-function inertarFora(dentro) {
+function inertarFora(dentro, acordados = []) {
   const mudados = [];
   if (!dentro) return mudados;
   let ramo = dentro;
@@ -72,12 +81,44 @@ function inertarFora(dentro) {
       // O ramo ativo nunca: tornar o próprio ancestral inerte é tornar o
       // diálogo inerte, porque `inert` desce.
       if (irmao === ramo || irmao.inert) continue;
+      if (acordados.some((no) => irmao === no || irmao.contains(no))) {
+        inertarMenos(irmao, acordados, mudados);
+        continue;
+      }
       irmao.inert = true;
       mudados.push(irmao);
     }
     ramo = pai;
   }
   return mudados;
+}
+
+/**
+ * Adormece o que está sob `no`, menos os `acordados` e os ramos que levam a
+ * eles. Um acordado em si fica como está, com tudo o que tem dentro.
+ */
+function inertarMenos(no, acordados, mudados) {
+  if (acordados.includes(no)) return;
+  for (const filho of Array.from(no.children ?? [])) {
+    if (filho.inert) continue;
+    if (acordados.some((acordado) => filho === acordado || filho.contains(acordado))) {
+      inertarMenos(filho, acordados, mudados);
+      continue;
+    }
+    filho.inert = true;
+    mudados.push(filho);
+  }
+}
+
+/**
+ * O que a casca pede acordado com um modal de MOD aberto: no celular, a faixa
+ * de voz e as abas, pelo ajudante dela (`CELULAR.acordadosNoModal`, da F8). No
+ * desktop não há `CELULAR`, e a lista é vazia. Perguntado a cada recálculo,
+ * porque a sessão monta e desmonta a faixa.
+ */
+function acordadosNoModal() {
+  const lista = globalThis.CELULAR?.acordadosNoModal?.();
+  return Array.isArray(lista) ? lista.filter((no) => no instanceof Element) : [];
 }
 
 /**
@@ -132,7 +173,7 @@ function recalcularAInercia() {
   adormecidosPelaPilha = [];
   const topo = pilhaDeCamadas[pilhaDeCamadas.length - 1];
   if (!topo) return;
-  adormecidosPelaPilha = inertarFora(topo);
+  adormecidosPelaPilha = inertarFora(topo, acordadosNoModal());
   // Anotados como nossos — para serem devolvidos no fim — e mantidos
   // acordados enquanto alguém tiver pedido isso.
   for (const no of adormecidosPelaPilha) {
