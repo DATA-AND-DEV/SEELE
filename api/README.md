@@ -124,6 +124,30 @@ fecha.
 adivinhação: a superfície cresce enquanto ninguém depende dela, e fecha antes de
 publicar em vez de antes de existir.
 
+## A API 6, em construção
+
+`api/v6.json` existe e está em construção: `MOD_API_VERSION` ainda é 5, e a
+linha dela em `congeladas.sha256` acompanha cada edição até o corte, quando
+`MOD_API_VERSION` e `APIS_ACEITAS` sobem para 6 e ela congela. O que muda na
+forma do arquivo:
+
+- **a v6 é escrita por inteiro**, sem `extends`: só a API 6 roda no app 0.16,
+  e herdar traria de volta o que as versões 1 a 5 prometeram e não entregaram;
+- **todo apontador é um símbolo do código** (`nome` ou `Tipo::membro`), e o
+  que ele quer dizer, quando precisa de frase, está no bloco **`sentido`**, sob
+  o mesmo nome. O `cargo xtask check-api` reprova, a partir da 6, o apontador
+  que é prosa: ele confere o texto depois do último `::`, e uma frase passava
+  por qualquer sufixo que existisse nas fontes;
+- **os tetos que o produto aplica são números**, conferidos contra as
+  constantes da casca: `contribuicoes.teto` (as contribuições sem alvo de pé,
+  por MOD), `contribuicoes.alvos-por-ponto` e cada `superficies.limites`.
+
+**O `ok` de `mundo.tema` quer dizer «a forma é válida e o tema foi publicado»,
+e não «aplicado».** O servidor confere a forma — as chaves, os valores, o
+`modo`, as regiões — e publica; os pares de contraste são de cada janela, que
+conhece a paleta do produto e as cores que deriva dela, e cada uma conta ao MOD
+pelo evento `tema`: `aplicado`, ou `recusado` com os pares e a região.
+
 ## Os quatro blocos
 
 - **`reads`** — o que um MOD lê do domínio.
