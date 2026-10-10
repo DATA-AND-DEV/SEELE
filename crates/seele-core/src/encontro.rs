@@ -352,19 +352,20 @@ fn escolher_ponto(achados: &[SocketAddr], aviso: SocketAddr) -> Option<SocketAdd
 /// socket IPv6 só manda para IPv4 com o `IPV6_V6ONLY` desligado — cujo padrão
 /// muda de sistema para sistema (o degrau 2 do ADR 0022 mediu isso e apanhou).
 ///
-/// A diferença é que aqui a opção é escrita à mão em vez de herdada do quinn,
-/// porque é este código que abre o socket. Uma máquina sem IPv6 cai para IPv4, e
+/// A diferença é que aqui a pilha dupla é condição, e não tentativa: sem ela, o
+/// aviso a um ponto IPv4 não sai. Uma máquina sem IPv6 cai para IPv4, e
 /// continua exatamente como estava.
+///
+/// **E a porta é a mesma conferida do QUIC** ([`crate::client::socket_de_quem_conecta`]):
+/// este socket é emprestado ao aperto de mão depois do furo, e uma porta que um
+/// socket IPv4 da máquina segura entregaria a ele a resposta do servidor.
 fn abrir_socket_local() -> Option<std::net::UdpSocket> {
-    use socket2::{Domain, Protocol, Socket, Type};
-
     let seis = || -> Option<std::net::UdpSocket> {
-        let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP)).ok()?;
-        socket.set_only_v6(false).ok()?;
-        socket
-            .bind(&SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0)).into())
-            .ok()?;
-        Some(socket.into())
+        let socket = crate::client::socket_de_quem_conecta().ok()?;
+        if socket2::SockRef::from(&socket).only_v6().ok()? {
+            return None;
+        }
+        Some(socket)
     };
     let quatro = || std::net::UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).ok();
 
@@ -1702,6 +1703,35 @@ mod testes {
             "a resposta do IP do ponto por outra porta foi recusada: um ponto atrás de um \
              balanceador deixaria de ser ouvido"
         );
+    }
+
+    /// O gêmeo de `client::testes_do_socket::o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4`:
+    /// o socket da batida é emprestado ao aperto de mão do QUIC depois do furo,
+    /// e uma porta que um socket IPv4 da máquina segura entregaria a ele a
+    /// resposta do servidor.
+    #[test]
+    fn o_socket_da_batida_nao_divide_a_porta_com_um_socket_ipv4() {
+        let Some((ladrao, proposta)) = crate::client::testes_do_socket::proposta_que_colide()
+        else {
+            if cfg!(target_os = "macos") {
+                panic!(
+                    "o macOS não deu nenhuma porta de socket IPv4 a uma proposta de pilha \
+                     dupla: o teste não encenou a colisão"
+                );
+            }
+            return;
+        };
+        crate::client::PROPOSTA_DE_TESTE.with(|vaga| *vaga.borrow_mut() = Some(proposta));
+
+        let Some(socket) = abrir_socket_local() else {
+            panic!("não abriu o socket local da batida");
+        };
+        assert!(
+            crate::client::PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow().is_none()),
+            "o socket da batida não passou pela proposta guardada, e o teste não encenou a \
+             colisão"
+        );
+        crate::client::testes_do_socket::a_resposta_chega(&socket, &ladrao);
     }
 
     #[tokio::test]

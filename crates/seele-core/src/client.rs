@@ -1744,12 +1744,18 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 /// server did — which is the other half of why step 2 of ADR 0022 had not
 /// started, and the half that no amount of work on the server would have fixed.
 ///
-/// An IPv6 socket with `IPV6_V6ONLY` cleared reaches both families, and quinn
-/// does both halves of that itself, which is why this is short: `client` clears
-/// the option when the address is IPv6, and `connect` rewrites an IPv4
-/// destination into its IPv4-mapped form (`::ffff:a.b.c.d`) before the socket
-/// sees it. Its own documentation calls `[::]:0` "a reasonable default to
-/// maximize the ability to connect".
+/// An IPv6 socket with `IPV6_V6ONLY` cleared reaches both families. quinn's
+/// `connect` rewrites an IPv4 destination into its IPv4-mapped form
+/// (`::ffff:a.b.c.d`) before the socket sees it, and its own documentation
+/// calls `[::]:0` "a reasonable default to maximize the ability to connect".
+///
+/// # Why the socket is no longer `Endpoint::client`'s
+///
+/// Because of the port. `Endpoint::client([::]:0)` takes the one the system
+/// picks, and on macOS that pick may be a port an IPv4 socket bound to a
+/// specific address already holds — and then the server's handshake reply goes
+/// to that socket instead. [`socket_de_quem_conecta`] opens the same dual-stack
+/// socket on a port it has checked; see [`socket_conferido`].
 ///
 /// # Why the fallback is not decoration
 ///
@@ -1761,11 +1767,12 @@ pub const INVITE_REFUSED: &[u8] = b"invite refused";
 ///
 /// The server reads `IPV6_V6ONLY` back after setting it (`alcance::abrir_escuta`
 /// in `seele-server`), because a server that silently stops answering half the
-/// internet is a bug nobody can diagnose from the outside. This side does not:
-/// quinn owns the socket and does not lend it out, and on the four targets
-/// `deny.toml` builds for — Linux, the two macOS, Windows — clearing the option
-/// works. A platform that refuses it would leave a client that reaches IPv6 and
-/// not IPv4, and that is the trade being taken knowingly rather than missed.
+/// internet is a bug nobody can diagnose from the outside. This side does not,
+/// as `Endpoint::client` did not: on the four targets `deny.toml` builds for —
+/// Linux, the two macOS, Windows — clearing the option works, and
+/// [`pilha_dupla`] only logs a refusal. A platform that refuses it would leave a
+/// client that reaches IPv6 and not IPv4, and that is the trade being taken
+/// knowingly rather than missed.
 pub(crate) fn local_endpoint(
     local: Option<std::net::UdpSocket>,
 ) -> Result<quinn::Endpoint, ConnectError> {
@@ -1783,12 +1790,26 @@ pub(crate) fn local_endpoint(
                 ConnectError::LocalEndpoint
             });
     }
-    match quinn::Endpoint::client(SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, 0))) {
-        Ok(endpoint) => Ok(endpoint),
+    match socket_de_quem_conecta() {
+        Ok(socket) => {
+            let runtime = quinn::default_runtime().ok_or_else(|| {
+                tracing::error!("não há runtime assíncrono para o QUIC");
+                ConnectError::LocalEndpoint
+            })?;
+            quinn::Endpoint::new(quinn::EndpointConfig::default(), None, socket, runtime).map_err(
+                |error| {
+                    tracing::error!(%error, "could not open a local QUIC endpoint");
+                    ConnectError::LocalEndpoint
+                },
+            )
+        }
+        // Uma máquina sem IPv6, ou — raro — sem porta que nenhum socket IPv4
+        // segure. O socket só IPv4 não tem o defeito de `socket_conferido`: a
+        // escolha de porta dele confere os outros sockets IPv4.
         Err(error) => {
             tracing::info!(
                 %error,
-                "no IPv6 on this machine: falling back to an IPv4-only local socket"
+                "no dual-stack local socket: falling back to an IPv4-only local socket"
             );
             quinn::Endpoint::client(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|error| {
                 tracing::error!(%error, "could not open a local QUIC endpoint");
@@ -1796,6 +1817,125 @@ pub(crate) fn local_endpoint(
             })
         }
     }
+}
+
+/// O socket de pilha dupla de quem conecta: o de [`local_endpoint`] e o da
+/// `Batida` de [`crate::encontro`], que o QUIC adota depois do furo.
+///
+/// # Errors
+///
+/// Os do sistema ao abrir ou ligar o socket IPv6 — numa máquina sem IPv6, por
+/// exemplo, e aí quem chama cai para um socket só IPv4.
+pub(crate) fn socket_de_quem_conecta() -> std::io::Result<std::net::UdpSocket> {
+    socket_conferido(proposta_do_sistema)
+}
+
+/// O socket que o sistema propõe: `[::]:0`, de pilha dupla, o mesmo que
+/// `quinn::Endpoint::client` abria.
+///
+/// Nos testes, a proposta guardada em [`PROPOSTA_DE_TESTE`] por esta thread
+/// passa na frente, uma vez.
+fn proposta_do_sistema() -> std::io::Result<socket2::Socket> {
+    #[cfg(test)]
+    if let Some(proposta) = PROPOSTA_DE_TESTE.with(|vaga| vaga.borrow_mut().take()) {
+        return Ok(proposta);
+    }
+    pilha_dupla(0)
+}
+
+/// Um socket IPv6 com o `IPV6_V6ONLY` desligado, ligado a `[::]:porta`.
+///
+/// O que `quinn::Endpoint::client` faz com um endereço IPv6, inclusive seguir
+/// só IPv6 quando o sistema recusa a pilha dupla.
+fn pilha_dupla(porta: u16) -> std::io::Result<socket2::Socket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+
+    let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
+    if let Err(erro) = socket.set_only_v6(false) {
+        tracing::debug!(%erro, "o socket local não ficou de pilha dupla");
+    }
+    socket.bind(&SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, porta)).into())?;
+    Ok(socket)
+}
+
+/// Quantas portas o sistema pode propor antes de [`socket_conferido`] desistir.
+///
+/// Uma proposta só é recusada quando um socket IPv4 desta máquina segura a
+/// porta dela, e eles ocupam uma fração mínima das 16 384 portas efêmeras:
+/// dezesseis recusas seguidas querem dizer uma máquina sem porta livre.
+const PROPOSTAS_DE_PORTA: usize = 16;
+
+/// O socket de pilha dupla numa porta que `propor` escolheu e que **nenhum
+/// socket IPv4 desta máquina segura**.
+///
+/// # Por que conferir a porta
+///
+/// Porque no macOS a porta que o sistema escolhe para `[::]:0` de pilha dupla
+/// pode ser a de um socket IPv4 ligado a um endereço — `127.0.0.1:X`, ou o da
+/// rede de casa. Medido no lote Y da F5: com 4 000 sockets em `127.0.0.1:0` de
+/// pé, 992 de 4 000 `[::]:0` caíram numa porta deles, e na ordem inversa
+/// nenhum. Os dois convivem, e o datagrama endereçado a `127.0.0.1:X` vai ao
+/// mais específico, o IPv4: a resposta do servidor ao aperto de mão chega ao
+/// socket alheio, o QUIC deste lado não ouve nada e desiste pela ociosidade,
+/// 20 s depois (`IDLE_TIMEOUT`), com `TimedOut`. Na bateria de testes, era a
+/// volta que não voltava; no produto, é a entrada ou a volta que de vez em
+/// quando espera 20 s por nada, quando outro programa segura um socket UDP
+/// ligado ao endereço por onde a resposta volta (medido com `127.0.0.1` e com
+/// o endereço da rede de casa).
+///
+/// # Por que ligar de novo, e não perguntar
+///
+/// A escolha de porta do sistema confere só a família do socket; a ligação
+/// **explícita** a `[::]:X` confere as duas, e recusa com `AddrInUse` a porta
+/// que um socket IPv4 segura, em qualquer endereço. Então a escolha do sistema
+/// vira proposta: larga-se o socket proposto e liga-se de novo, explícito, na
+/// mesma porta. Se a porta é de alguém, propõe-se outra. Ligado, o socket é
+/// dono da porta nas duas famílias: um IPv4 que viesse depois é recusado.
+///
+/// # Errors
+///
+/// Os de `propor`, os da ligação que não sejam `AddrInUse`, e `AddrInUse` se
+/// nenhuma das [`PROPOSTAS_DE_PORTA`] estiver livre.
+fn socket_conferido(
+    mut propor: impl FnMut() -> std::io::Result<socket2::Socket>,
+) -> std::io::Result<std::net::UdpSocket> {
+    let mut recusa = None;
+    for _ in 0..PROPOSTAS_DE_PORTA {
+        let proposta = propor()?;
+        let porta = proposta
+            .local_addr()?
+            .as_socket()
+            .map(|onde| onde.port())
+            .ok_or_else(|| std::io::Error::other("o socket proposto não tem porta IP"))?;
+        drop(proposta);
+        match pilha_dupla(porta) {
+            Ok(socket) => {
+                socket.set_nonblocking(true)?;
+                return Ok(socket.into());
+            }
+            Err(erro) if erro.kind() == std::io::ErrorKind::AddrInUse => {
+                tracing::debug!(
+                    porta,
+                    "a porta que o sistema propôs é de um socket IPv4 desta máquina, \
+                     que ficaria com a resposta do servidor; outra"
+                );
+                recusa = Some(erro);
+            }
+            Err(erro) => return Err(erro),
+        }
+    }
+    Err(recusa.unwrap_or_else(|| std::io::ErrorKind::AddrInUse.into()))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// A próxima proposta de socket desta thread, no lugar da do sistema.
+    ///
+    /// Existe para um teste encenar o que o sistema faz por conta própria de
+    /// vez em quando — ver [`testes_do_socket::proposta_que_colide`] — no
+    /// socket que `Motor::tentar` abre, que nenhum parâmetro alcança.
+    pub(crate) static PROPOSTA_DE_TESTE: std::cell::RefCell<Option<socket2::Socket>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A decisão do verificador, depois de um aperto de mão que terminou.
@@ -2843,4 +2983,118 @@ pub enum Previewed {
         /// What the server said it would have sent.
         byte_size: u64,
     },
+}
+
+#[cfg(test)]
+pub(crate) mod testes_do_socket {
+    use std::net::{SocketAddr, UdpSocket};
+    use std::time::Duration;
+
+    use super::{pilha_dupla, socket_conferido};
+
+    /// Quantos sockets IPv4 o teste põe de pé em `127.0.0.1` para o sistema
+    /// cair na porta de um deles.
+    const LADROES: usize = 64;
+
+    /// Quantas propostas de pilha dupla se pedem ao sistema, no máximo.
+    ///
+    /// Cada uma cai numa porta de ladrão com chance de `LADROES` em 16 384 (o
+    /// intervalo efêmero do macOS), e a espera é de 16 384 / 64 = 256. Com 8 192
+    /// propostas, a chance de nenhuma cair é de e^-32.
+    const PROPOSTAS: usize = 8_192;
+
+    /// Uma proposta de pilha dupla que divide a porta com um socket IPv4 em
+    /// `127.0.0.1`: o que o macOS faz por conta própria, de vez em quando, a um
+    /// `[::]:0`.
+    ///
+    /// Devolve o socket IPv4 — o «ladrão», que fica com o que for mandado a
+    /// `127.0.0.1` naquela porta — e a proposta, aberta exatamente como
+    /// [`super::proposta_do_sistema`] a abre, pelo sistema e não por escolha
+    /// do teste. `None` onde o sistema não deixa os dois conviverem.
+    ///
+    /// # Por que o sistema deixa
+    ///
+    /// Medido no macOS (lote Y da F5): a escolha de porta para `[::]:0` de
+    /// pilha dupla confere só os sockets IPv6. Com 4 000 sockets em
+    /// `127.0.0.1:0` de pé, 992 de 4 000 `[::]:0` caíram numa porta deles; na
+    /// ordem inversa, nenhum. E o datagrama para `127.0.0.1:X` vai ao mais
+    /// específico dos dois, o IPv4.
+    pub(crate) fn proposta_que_colide() -> Option<(UdpSocket, socket2::Socket)> {
+        let mut ladroes: Vec<UdpSocket> = (0..LADROES)
+            .filter_map(|_| UdpSocket::bind("127.0.0.1:0").ok())
+            .collect();
+        let portas: Vec<u16> = ladroes
+            .iter()
+            .filter_map(|ladrao| ladrao.local_addr().ok().map(|onde| onde.port()))
+            .collect();
+        for _ in 0..PROPOSTAS {
+            let proposta = pilha_dupla(0).ok()?;
+            let porta = proposta.local_addr().ok()?.as_socket()?.port();
+            if let Some(qual) = portas.iter().position(|&dela| dela == porta) {
+                return Some((ladroes.swap_remove(qual), proposta));
+            }
+        }
+        None
+    }
+
+    /// O socket de quem conecta não divide a porta com um socket IPv4: o que o
+    /// servidor manda a `127.0.0.1` naquela porta chega a ele.
+    ///
+    /// A metade de baixo de
+    /// `enlace::tests::a_volta_avisa_a_voice_room_em_que_o_motor_sentou_a_pessoa_de_novo`,
+    /// sem o QUIC e sem os 20 s: a proposta que colide é a primeira que
+    /// [`socket_conferido`] recebe, e o datagrama do «servidor» diz para onde
+    /// a resposta iria.
+    #[test]
+    fn o_socket_de_quem_conecta_nao_divide_a_porta_com_um_socket_ipv4() {
+        let Some((ladrao, proposta)) = proposta_que_colide() else {
+            // Fora do macOS a escolha de porta confere as duas famílias, e não
+            // há colisão a encenar.
+            if cfg!(target_os = "macos") {
+                panic!(
+                    "o macOS não deu, em {PROPOSTAS} propostas, nenhuma porta que um dos \
+                     {LADROES} sockets IPv4 segura: o teste não encenou a colisão, e o \
+                     guarda abaixo não guarda nada"
+                );
+            }
+            return;
+        };
+        let mut propostas = vec![proposta];
+
+        let socket = socket_conferido(|| propostas.pop().map_or_else(|| pilha_dupla(0), Ok))
+            .expect("o socket de quem conecta");
+        assert!(
+            propostas.is_empty(),
+            "a proposta que colide não foi usada, e o teste mediu outra coisa"
+        );
+        a_resposta_chega(&socket, &ladrao);
+    }
+
+    /// O que um «servidor» em `127.0.0.1` manda à porta de `socket` chega a
+    /// ele, e não a `ladrao`.
+    ///
+    /// Reprova dizendo as duas portas: quando o defeito volta, elas são iguais.
+    pub(crate) fn a_resposta_chega(socket: &UdpSocket, ladrao: &UdpSocket) {
+        let porta = socket.local_addr().expect("porta de quem conecta").port();
+        let do_ladrao = ladrao.local_addr().expect("porta do ladrão").port();
+        let servidor = UdpSocket::bind("127.0.0.1:0").expect("servidor");
+        servidor
+            .send_to(b"resposta", SocketAddr::from(([127, 0, 0, 1], porta)))
+            .expect("mandar a resposta");
+        // O prazo só pesa quando a resposta foi para outro lugar: no loopback,
+        // o datagrama que chega, chega na hora.
+        socket.set_nonblocking(false).expect("bloqueante");
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("prazo");
+        let mut buffer = [0_u8; 16];
+        let chegou = socket.recv_from(&mut buffer).map(|(lidos, _)| lidos);
+        assert_eq!(
+            chegou.ok(),
+            Some(b"resposta".len()),
+            "a resposta mandada a 127.0.0.1:{porta} não chegou ao socket de quem conecta \
+             (a porta do socket IPv4 alheio é {do_ladrao}): o QUIC deste lado não ouve o \
+             aperto de mão e desiste pela ociosidade, 20 s depois"
+        );
+    }
 }
