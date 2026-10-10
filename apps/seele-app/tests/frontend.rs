@@ -572,7 +572,12 @@ fn every_command_the_frontend_calls_is_registered() {
 // `nossoServidorEm` da `tela-boot.js`. Os dois arquivos estavam na fila de
 // outras frentes quando o comando nasceu. Sai quando eles passarem a
 // perguntar ao `onde_estou`, e o guarda de baixo cobra a saída.
-const AGUARDANDO_TELA: &[&str] = &["onde_estou"];
+//
+// `estado_da_sala` entrou em 2026-10-10, com a tarefa 23 da F7 (a sala sobe no
+// `setup`, no ramo `0.16/sala-viva`): a tela que abre depois do anúncio por
+// `seele://sala` lê por ele. Sai quando a linha de estado da sala e o PERFIL
+// perguntarem, na vez da F8, dentro do mesmo conjunto da sala viva.
+const AGUARDANDO_TELA: &[&str] = &["onde_estou", "estado_da_sala"];
 
 #[test]
 fn no_command_is_registered_and_never_called() {
@@ -18576,4 +18581,92 @@ fn quem_hospeda_ve_as_mensagens_de_apps_mais_novos_e_o_zero_tambem() {
         main.contains("fn estado_do_servidor(") && main.contains("estado_do_servidor,"),
         "o comando `estado_do_servidor` não existe ou não está registrado"
     );
+}
+
+/// O código de produção de um arquivo Rust do app: sem comentários, e sem os
+/// módulos `#[cfg(test)]`, que no `main.rs` ficam espalhados entre funções de
+/// produção. Cada módulo de teste é de primeiro nível e fecha numa linha `}`
+/// sozinha, que é onde a produção recomeça.
+fn producao_rust(fonte: &str) -> String {
+    let marca = "\n#[cfg(test)]\n";
+    let mut pedacos = fonte.split(marca);
+    let mut producao = pedacos.next().unwrap_or_default().to_owned();
+    for pedaco in pedacos {
+        if let Some(fim) = pedaco.find("\n}\n") {
+            producao.push_str(&pedaco[fim + 3..]);
+        }
+    }
+    without_comments(&producao)
+}
+
+/// **A semente da sala nunca atravessa a webview** (tarefa 23 da F7).
+///
+/// Ela é a chave privada da pessoa: quem a tem entra em qualquer servidor como
+/// ela e atende a sala dela. A FFI a entrega num tipo que não é `Serialize`
+/// (`seele_ffi::SementeDaSala`), e o que sobra para prender é o app: ela é
+/// pedida num lugar só, `sala::subir_em`, e vai direto a `iniciar_sala`; nenhum
+/// comando a toca; e o app nunca mexe na `identity.key`, que é da FFI. A cópia
+/// da primeira abertura a nomeia só para deixá-la de fora.
+#[test]
+fn a_semente_da_sala_nunca_atravessa_a_webview() {
+    let mut pedidas = Vec::new();
+    for entrada in std::fs::read_dir(app_dir().join("src")).expect("a pasta src") {
+        let caminho = entrada.expect("uma entrada de src").path();
+        if caminho.extension().is_none_or(|extensao| extensao != "rs") {
+            continue;
+        }
+        let nome = caminho
+            .file_name()
+            .and_then(|nome| nome.to_str())
+            .expect("um nome de arquivo")
+            .to_owned();
+        let producao = producao_rust(&read(&format!("src/{nome}")));
+        pedidas.extend(producao.matches("semente_da_sala(").map(|_| nome.clone()));
+        // A única menção legítima: a cópia da primeira abertura **deixa a chave
+        // de fora** (ADR 0061), e para isso a nomeia.
+        let mencoes: Vec<&str> = producao
+            .lines()
+            .filter(|linha| linha.contains("identity.key"))
+            .map(str::trim)
+            .filter(|linha| !linha.starts_with("const DEIXADOS_DE_FORA_DA_COPIA:"))
+            .collect();
+        assert!(
+            mencoes.is_empty(),
+            "`src/{nome}` mexe na `identity.key`: a chave é da FFI, e o app só recebe dela o \
+             que precisa (a impressão, o código, a semente para a sala). Linhas: {mencoes:?}"
+        );
+    }
+    assert_eq!(
+        pedidas,
+        ["sala.rs"],
+        "a semente da sala é pedida fora de `sala::subir_em`, ou em mais de um lugar: cada \
+         pedido a mais é um caminho para ela chegar a um comando"
+    );
+
+    let sala = producao_rust(&read("src/sala.rs"));
+    let subir_em: String = sala
+        .split("async fn subir_em(")
+        .nth(1)
+        .and_then(|depois| depois.split("\n}\n").next())
+        .expect("`sala::subir_em`")
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert!(
+        subir_em.contains("letsemente=seele_ffi::semente_da_sala(config)")
+            && subir_em.matches("semente.").count() == 1
+            && subir_em.contains("iniciar_sala(porta,semente.bytes(),"),
+        "a semente faz em `sala::subir_em` outra coisa além de ir a `iniciar_sala`"
+    );
+
+    let main = read("src/main.rs");
+    let comandos = main.split("#[tauri::command]").skip(1);
+    for comando in comandos {
+        let corpo = comando.split("\n}\n").next().unwrap_or_default();
+        assert!(
+            !corpo.contains("semente_da_sala") && !corpo.contains("SementeDaSala"),
+            "um comando toca a semente da sala, e o que um comando devolve chega à webview:\n{}",
+            corpo.lines().take(3).collect::<Vec<_>>().join("\n")
+        );
+    }
 }

@@ -374,6 +374,22 @@ fn codigo_com(home: &str, variavel: Option<&str>) -> Result<Codigo, ConnectionEr
     Ok(Codigo::da_chave(chave.verifying_key().as_bytes()))
 }
 
+/// O ponto de encontro desta máquina: o que `$SEELE_ENCONTRO` diz, e o do
+/// projeto sem ela; `None` quando a variável o desliga.
+///
+/// **O mesmo dos dois lados** da sala pessoal: a sala se registra nele (tarefa
+/// 23 da F7), e quem liga pelo código pergunta nele. É a leitura única do
+/// ambiente, a de `seele_core::encontro::ponto_de_quem_liga`: com
+/// `$SEELE_ENCONTRO`, uma leitura diferente aqui deixaria a sala registrada
+/// num ponto onde ninguém pergunta.
+///
+/// **Só a produção chama isto**, como o `iniciar_com_o_ponto_padrao` de quem
+/// hospeda: os testes sobem a sala com o ponto deles, ou sem ponto nenhum.
+#[must_use]
+pub fn ponto_de_encontro() -> Option<String> {
+    seele_core::encontro::ponto_de_quem_liga()
+}
+
 /// A semente da sala pessoal: a chave desta máquina, de onde saem o
 /// certificado da sala e a assinatura do registro dela no ponto de encontro
 /// (`seele_server::hospedagem::Hospedagem::iniciar_sala`, tarefa 23 da F7).

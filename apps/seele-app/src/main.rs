@@ -46,6 +46,7 @@ mod executor;
 mod icone;
 mod mods;
 mod reducao;
+mod sala;
 mod servidores;
 mod versoes;
 
@@ -157,6 +158,10 @@ struct Session {
     /// comando que as criou: cada uma fica de pé enquanto a janela estiver
     /// aberta, e independente da sessão. Ver [`Hospedagens`].
     hospedagens: Mutex<Hospedagens>,
+    /// Como está a sala pessoal: subindo, no ar (e se o código está achável),
+    /// ou por que não subiu. Guardado aqui para a tela que abre depois do
+    /// anúncio por [`sala::CANAL_DA_SALA`]; ver [`estado_da_sala`].
+    sala: Mutex<sala::EstadoDaSala>,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -1522,8 +1527,8 @@ async fn connect(
 struct Hospedagens {
     /// O servidor guardado no ar, quando está.
     guardado: Option<Hospedado>,
-    /// A sala pessoal no ar, quando está. Ela sobe sozinha a partir da tarefa
-    /// 23 do plano da F7; até lá, ninguém a sobe.
+    /// A sala pessoal no ar, quando está. Ela sobe sozinha, no `setup`
+    /// ([`sala::subir`]), e o estado dela é [`Session::sala`].
     pessoal: Option<Hospedado>,
 }
 
@@ -1582,6 +1587,18 @@ fn onde_estou(session: State<'_, Session>) -> OndeEstou {
         .lock()
         .map_or((None, None), |hospedagens| hospedagens.portas());
     onde_estou_em(endereco.as_deref(), guardado, pessoal)
+}
+
+/// Como está a sala pessoal desta máquina agora (tarefa 23 da F7).
+///
+/// O estado chega por [`sala::CANAL_DA_SALA`] a cada mudança; este comando é
+/// para a tela que abre depois do anúncio, e não o ouviu.
+#[tauri::command]
+fn estado_da_sala(session: State<'_, Session>) -> sala::EstadoDaSala {
+    session
+        .sala
+        .lock()
+        .map_or(sala::EstadoDaSala::Subindo, |estado| estado.clone())
 }
 
 /// [`onde_estou`] sem estado: o endereço da sessão, e as portas em que o
@@ -10397,6 +10414,10 @@ fn main() {
                     }
                 });
             }
+            // **A sala pessoal sobe sozinha, em segundo plano** (tarefa 23 da
+            // F7): a escada custa até ~4 s, e a janela não espera por ela. O
+            // estado chega à casca por `sala::CANAL_DA_SALA`.
+            tauri::async_runtime::spawn(sala::subir(app.handle().clone()));
             tracing::info!(millis = arranque.elapsed().as_millis(), "janela pronta");
             Ok(())
         })
@@ -10440,6 +10461,7 @@ fn main() {
             estou_hospedando,
             servidor_hospedado,
             onde_estou,
+            estado_da_sala,
             baixar_versao,
             conferir_esta_versao,
             estado_da_primeira_abertura,
