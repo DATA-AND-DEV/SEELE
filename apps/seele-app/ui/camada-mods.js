@@ -137,6 +137,9 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
   // alcançável até a obtenção acabar. A mesma limpeza de `fecharAceiteDeMods`.
   if (aceitePendente) aceitePendente.credencial = null;
   aceitePendente = { alvo, conjunto, mods, credencial: credencial ?? null };
+  // A pergunta que esta abertura gravou, para conferir depois do `await` que
+  // ainda é a da tela.
+  const pergunta = aceitePendente;
   focoAntesDoAceite = document.activeElement;
 
   // **Já houve um sim aqui, para outra lista?**
@@ -153,6 +156,29 @@ async function abrirAceiteDeMods(alvo, mods, conjunto, credencial) {
     // Não saber se houve um sim antes não impede de perguntar agora. O aviso
     // some e o resto da tela vale.
     console.warn("aceite anterior:", falha);
+  }
+
+  // **Uma abertura que perdeu a vez não desenha** (lote W3 da F5, rodada 2).
+  //
+  // Daqui para baixo a função escreve no diálogo — a lista, a contagem, o
+  // servidor, o aviso, o botão — e o abre. Se outra pergunta tomou o lugar
+  // enquanto o aceite anterior era lido (duas recusas por MODs dentro da latência
+  // de um `invoke`), esta abertura, a velha, terminava depois e repovoava a lista
+  // por cima da nova, com `aceitePendente` já sendo a da nova: a pessoa lia a
+  // lista de um pedido e ACEITAR gravava o conjunto do outro — consentimento
+  // trocado, que é o que o ADR 0045 existe para não deixar acontecer.
+  //
+  // Pela referência, e não por «há uma pergunta aberta»: a nova também é uma. E
+  // a pergunta que largou (fechada, ou esquecida por quem falhou ao abrir) também
+  // não abre aqui. Vai só ao registro, como a recusa de uma tentativa que outra
+  // substituiu (lote W2), e não falha: não houve erro, houve outra pergunta.
+  if (aceitePendente !== pergunta) {
+    registrarNoAnfitriao(
+      "aceite-de-mods",
+      `a abertura do diálogo de aceite dos MODs de ${alvo} perdeu a vez para outra e não desenhou`,
+      "aviso",
+    );
+    return;
   }
   const mudou = Boolean(anterior) && anterior !== conjunto;
   $("mods-mudou").hidden = !mudou;

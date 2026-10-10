@@ -14,7 +14,8 @@ local: sem push, tag nem release. Sem conformidade. Nada no fio.
 | `5bc3c84e` | **produto**: a rejeição de `aceitarOsMods` vira frase no diálogo, o ACEITAR volta e o motivo vai ao `seele.log`; o roteiro novo `aceite-de-mods-que-falha.js` (§7) |
 | `9a53cc13` | `aceite-de-mods.js` exige o sim gravado antes do `connect` da volta (§3, E14) |
 | `142505db` | o relatório com as medidas e o que falta rodar |
-| a rodada 1 | **em curso, não rodado**: I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
+| `ee11e9f9` | a rodada 1, **em curso, não rodada**: I1, I2 e os Menores M1, M2, M4 e M5 (§11) |
+| a rodada 2 | **em curso, não rodada**: a corrida de `abrirAceiteDeMods` (§12) |
 
 **O que mudou fora de `tools/roteiros/`.** Em `apps/seele-app/ui/camada-mods.js`,
 uma função nova (`aceiteFalhou`) e o `.catch` do clique em ACEITAR; em
@@ -502,7 +503,7 @@ frases dos três roteiros (alcance, registros, `joinSecret`) e escrevi os dois
 roteiros novos sem eles. Hoje o que se perdia era só o resto de uma frase já
 reprovada.
 
-### Observação, sem conserto
+### Observação (tratada na rodada 2: §12)
 
 `abrirAceiteDeMods` não confere, depois do `await` do aceite anterior, que a
 pergunta ainda é a dela. Uma abertura **antiga** que termine depois de outra
@@ -521,3 +522,86 @@ do M2; (3) as 37 anteriores, de novo, porque os três roteiros mudaram (o script
 `check-runtime`, fmt e clippy do app; (6) `ajustes-v013`, `diagnostico-de-mods`
 e `contribuicoes-e-camadas`. Tudo isto está **por rodar**: o relatório não diz
 «verde» para nada desta rodada.
+
+## 12. Rodada 2: a corrida de `abrirAceiteDeMods` (EM CURSO, NÃO RODADA)
+
+**Estado.** Escrito e commitado, **não rodado**: a pausa continua. A corrida
+abaixo é como eu a li. **Se a cena nova não ficar vermelha sem o conserto, a
+corrida não existe como li, e o conserto sai.**
+
+### A corrida, como eu a vi
+
+`abrirAceiteDeMods(alvo, mods, conjunto, credencial)` faz, em ordem:
+
+1. grava a pergunta em `aceitePendente` (e esquece a credencial da antiga);
+2. `await invoke("aceite_de_mods", { alvo })`, a leitura do sim anterior;
+3. **sem conferir nada**, escreve no diálogo — `mods-mudou`, `mods-contagem`,
+   `mods-alvo`, a lista (`repovoar`), o texto do ACEITAR, `mods-erro` escondido,
+   ACEITAR aceso — e o abre.
+
+Só o passo 2 espera. Se uma segunda recusa por MODs chega dentro dele (duas
+batidas, a servidores diferentes, dentro da latência de um `invoke` local), a
+segunda grava a **sua** pergunta em `aceitePendente`, abre e desenha a lista
+dela. A primeira, a velha, termina depois e repovoa tudo por cima: a lista e o
+servidor no cabeçalho são os dela; `aceitePendente`, a da segunda. ACEITAR lê
+`aceitePendente`: obtém o conjunto da segunda, grava o sim da segunda e entra na
+segunda. A pessoa leu um pedido e aceitou o outro. O `await` da leitura não
+trava a janela, e nada lá em cima impede duas aberturas ao mesmo tempo (a regra
+do W2 só impede que a tentativa velha **comece** uma pergunta).
+
+Duas coisas a mais, do mesmo defeito: a abertura velha também faz
+`mods-erro.hidden = true` e `mods-aceitar.disabled = false`, e assim apaga a
+mensagem de obtenção e acende o botão da pergunta nova.
+
+### O conserto (`camada-mods.js`)
+
+Depois do `await`, antes de qualquer escrita no diálogo: `if (aceitePendente
+!== pergunta)`, com `const pergunta = aceitePendente;` logo depois da gravação.
+Pela referência, e não por «há uma pergunta aberta»: a nova também é uma. A
+abertura que perdeu a vez **não falha** (não houve erro, houve outra pergunta):
+vai ao `seele.log` — `aceite-de-mods`, `aviso`, com o alvo dela — e volta. Vale
+também para a pergunta que largou (fechada, ou esquecida por `perguntaNaoAbriu`)
+antes de a leitura responder. As duas linhas novas que tocam `aceitePendente`
+têm o mesmo texto de linhas que o guarda da credencial já conhece
+(`const pergunta = aceitePendente;` e `if (aceitePendente !== pergunta) {`), e a
+função não nomeia a credencial.
+
+### A prova: `tools/roteiros/aceite-de-mods-em-corrida.js` (novo)
+
+Duas recusas por MODs em sequência, a servidores diferentes, com a leitura do
+aceite anterior da **primeira** pendente (uma `Promise` no duble) até a segunda
+ter aberto. Depois de a leitura responder, o roteiro exige:
+
+- **o que se lê é o que se aceita**: os itens desenhados são os de
+  `aceitePendente.mods`;
+- **a lista e o servidor desenhados são os da segunda** (`ponte/retransmissor`,
+  `198.51.100.4:8383`), e não os da primeira;
+- **a abertura velha foi ao `seele.log`**, uma linha, `aviso`, com o alvo dela;
+- **ACEITAR grava o sim da segunda** (alvo e conjunto) e a volta vai a ela.
+
+Duas precondições (a primeira não abriu ainda; a segunda abriu com a lista de B)
+dizem que a cena não mede nada se faltarem. A conta do orçamento, sem rodar:
+cerca de 1,6 s virtuais dos 5 s.
+
+### As reversões, e o vermelho, a rodar
+
+| # | a reversão | a frase esperada |
+|---|---|---|
+| **H1 = o vermelho** | sem a conferência: o bloco `if (aceitePendente !== pergunta) {…}` tirado (é o código de antes) | `o diálogo mostra [seele/placar] e o ACEITAR responde por [ponte/retransmissor]: a pessoa lê a lista de um pedido e aceita o conjunto do outro` |
+| H2 | a conferência fica, o registro sai | `a abertura que perdeu a vez não foi ao seele.log com o alvo e o nível aviso (registros de «aceite-de-mods»: nenhum)` |
+
+O vermelho tem duas formas, e vale rodar as duas: **H1** no worktree, e o
+roteiro contra o `ui/` de `ee11e9f9` (`git archive ee11e9f9:apps/seele-app/ui`,
+`--casca`), que não tem o conserto. As duas têm de reprovar na primeira
+exigência da cena 3.
+
+### O que falta rodar (depois do aviso)
+
+**Primeiro o vermelho**: o roteiro novo sem o conserto, nas duas formas acima.
+Se ele passar, a corrida não existe como li, o bloco sai de `camada-mods.js`, o
+roteiro vira só a prova de que ela não acontece, e este parágrafo é reescrito.
+Depois H2; o roteiro novo, limpo; e a verificação inteira da rodada 1 (§11) — os
+**cinco** roteiros, as reversões todas, `--test frontend`, `--bin`,
+`check-runtime`, fmt, clippy e as três bancadas. A `ajustes-v013.cjs` (cenas 5b
+e 6) é a que mais pode sentir a conferência nova: ela abre perguntas em
+sequência.
