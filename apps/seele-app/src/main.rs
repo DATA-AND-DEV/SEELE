@@ -1883,16 +1883,19 @@ mod a_entrada_velha_que_chega_tarde {
                 }
             }
         }
-        let qual = |impressao: Option<&str>| match impressao {
-            Some(i) if i == servidor_novo.fingerprint() => "o servidor novo",
-            Some(i) if i == servidor_velho.fingerprint() => "o servidor velho",
+        // Pelo nome que cada servidor dá a si mesmo no aperto de mão, e não
+        // pela impressão: a FFI da linha 0.15 não diz a impressão da conexão,
+        // e o teste é o mesmo nas duas linhas.
+        let qual = |nome: Option<&str>| match nome {
+            Some("Novo") => "o servidor novo",
+            Some("Velho") => "o servidor velho",
             Some(_) => "um servidor desconhecido",
             None => "nenhum",
         };
         let no_slot = sessao
             .connection()
             .ok()
-            .and_then(|conexao| conexao.impressao_do_servidor());
+            .map(|conexao| conexao.snapshot().server);
         if qual(no_slot.as_deref()) != "o servidor novo" {
             vermelhos.push(format!(
                 "o slot da sessão ficou com {}, e não com a conexão da nova",
