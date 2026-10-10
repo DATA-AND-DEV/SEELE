@@ -54,6 +54,16 @@
       "redes", "servidor.navegacao", "operador.barra", "canal.cabecalho",
       "conversa.mensagem", "compositor", "pessoas.lista",
     ]),
+    // Onde o tema de uma região pinta, quando não é o contêiner do desktop
+    // (17i da F3, item 3; o `escreverAsRegioesDoTema` os procura no documento
+    // todo, f09e7540). A `.operador` do desktop está escondida, e o
+    // `operador.barra` mora em AJUSTES: a placa de SEU PERFIL, que tem o
+    // retrato e o apelido como a barra do desktop tem a inicial e o nome, e a
+    // própria região. Os dois pintam o painel atrás (`celular-sessao.css`): a
+    // tinta da região nunca fica sobre o fundo do produto.
+    conteineresDasRegioes: Object.freeze({
+      "operador.barra": Object.freeze(["#tela-server .cel-perfil-placa", "#tela-server #operador-mods"]),
+    }),
   });
 
   const raiz = document.documentElement;

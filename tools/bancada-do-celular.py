@@ -1539,6 +1539,138 @@ def regioes_do_celular(pg: Page) -> list[str]:
     return falhas
 
 
+# O contraste de cada texto de um quadro contra o fundo dele: a primeira cor
+# opaca entre o texto e o quadro. Com uma capa, chegar ao quadro é chegar à
+# capa (ela é a primeira camada dele, por cima do fundo próprio), e 'tinta' é
+# a capa da cor do próprio texto, a pior que existe para ele. O método da
+# `apps/seele-app/bancada/capa.cjs` da F3, com que ela mede a barra do desktop.
+CONTRASTE_EM = r"""([seletor, capa]) => {
+  const quadro = document.querySelector(seletor);
+  if (!quadro) return null;
+  const rgb = (t) => (t.match(/[\d.]+/g) || []).map(Number);
+  const luz = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const razao = (a, b) => { const [x, y] = [luz(a), luz(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
+  const fundo = (el, tinta) => {
+    for (let n = el; n; n = n.parentElement) {
+      if (n === quadro && capa) return capa === "tinta" ? tinta : capa;
+      const c = rgb(getComputedStyle(n).backgroundColor);
+      if (c.length >= 3 && (c.length < 4 || c[3] >= 0.99)) return c.slice(0, 3);
+    }
+    return [0, 0, 0];
+  };
+  const out = {};
+  for (const e of quadro.querySelectorAll("*")) {
+    if (!e.getClientRects().length || ![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+    const tinta = rgb(getComputedStyle(e).color).slice(0, 3);
+    out[`${e.className || e.tagName} «${e.textContent.trim().slice(0, 24)}»`] = Number(razao(tinta, fundo(e, tinta)).toFixed(2));
+  }
+  return out;
+}"""
+
+# Uma região clara sobre o produto escuro: o pior caso para um contêiner que
+# recebe a tinta da região sem pintar o painel dela atrás.
+REGIAO_CLARA = {"fundo": "#f2ece0", "texto": "#12100e", "apagado": "#574e43", "acento": "#a83a10", "borda": "#b8ad9a"}
+
+
+def regiao_do_operador(pg: Page) -> list[str]:
+    """O tema por região no `operador.barra` (17i da F3, item 3; f09e7540). No
+    celular a região mora em AJUSTES, fora da sessão, e a casca declara os
+    contêineres dela em `CELULAR.conteineresDasRegioes`: a placa de SEU
+    PERFIL, que é a barra do operador do desktop (o retrato e o apelido), e a
+    própria região. Com o tema publicado do servidor pondo uma região clara
+    (no quadro, como o servidor o manda, e de pé depois de dois redesenhos),
+    o texto de uma contribuição e o apelido tomam a tinta da região, cada
+    contêiner pinta o painel dela atrás, e todo texto dos dois fica acima de
+    4,5:1. O tema que sai limpa os dois; o rótulo SEU PERFIL e EDITAR PERFIL,
+    fora dos contêineres, não mudam."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("__pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'operador.barra', modo: 'adicionar', conteudo: [{ forma: 'texto', chave: 's', dentro: 'SONDA DA REGIÃO' }] } })")
+    esperar_quadro(pg)
+    ler = """() => {
+        const sonda = [...document.querySelectorAll('#operador-mods *')].find((e) => e.children.length === 0 && e.textContent.trim() === 'SONDA DA REGIÃO');
+        const cor = (el, p) => (el ? getComputedStyle(el)[p] : null);
+        const regiao = document.getElementById('operador-mods'), placa = document.querySelector('.cel-perfil-placa');
+        return { sonda: cor(sonda, 'color'), fundoDaRegiao: cor(regiao, 'backgroundColor'),
+                 apelido: cor(document.querySelector('.cel-perfil-apelido'), 'color'), fundoDaPlaca: cor(placa, 'backgroundColor'),
+                 rotulo: cor(document.querySelector('.cel-perfil > .rotulo'), 'color'),
+                 escritoNaRegiao: regiao.style.getPropertyValue('--seele-negro-painel').trim(),
+                 escritoNaPlaca: placa.style.getPropertyValue('--seele-negro-painel').trim() }; }"""
+    antes = pg.evaluate(ler)
+    aplicar = "(cores) => { SEELE_QUADRO.tema_do_servidor = { mod_id: 'seele/estilo', valores: JSON.stringify({ regioes: { 'operador.barra': cores } }) }; }"
+    pg.evaluate(aplicar, REGIAO_CLARA)
+    esperar_quadro(pg)
+    esperar_quadro(pg)
+    com = pg.evaluate(ler)
+    tinta = "rgb(18, 16, 14)"
+    if com["sonda"] != tinta or com["apelido"] != tinta:
+        falhas.append(f"com a região clara, a contribuição e o apelido não tomam a tinta dela: {com}")
+    if not com["escritoNaRegiao"] or not com["escritoNaPlaca"]:
+        falhas.append(f"a região não chegou aos contêineres da casca: {com}")
+    if com["fundoDaRegiao"] == antes["fundoDaRegiao"] or com["fundoDaPlaca"] == antes["fundoDaPlaca"]:
+        falhas.append(f"um contêiner não pinta o painel da região atrás: {antes['fundoDaRegiao']} → {com['fundoDaRegiao']}, placa {antes['fundoDaPlaca']} → {com['fundoDaPlaca']}")
+    if com["rotulo"] != antes["rotulo"]:
+        falhas.append(f"o rótulo SEU PERFIL, fora dos contêineres, mudou com a região: {antes['rotulo']} → {com['rotulo']}")
+    for seletor in (".cel-perfil-placa", "#operador-mods"):
+        baixos = {k: v for k, v in (pg.evaluate(CONTRASTE_EM, [seletor, None]) or {}).items() if v < 4.5}
+        if baixos:
+            falhas.append(f"com a região clara, texto abaixo de 4,5:1 em {seletor}: {baixos}")
+    pg.evaluate("SEELE_QUADRO.tema_do_servidor = null")
+    esperar_quadro(pg)
+    depois = pg.evaluate(ler)
+    if depois != antes:
+        falhas.append(f"o tema saiu, e a região ficou: {antes} → {depois}")
+    # A foto, com a região.
+    pg.evaluate(aplicar, REGIAO_CLARA)
+    esperar_quadro(pg)
+    return falhas
+
+
+CAPAS_DE_PROVA = (("branca", [255, 255, 255]), ("preta", [0, 0, 0]), ("da cor da tinta", "tinta"))
+
+
+def capa_do_operador(pg: Page) -> list[str]:
+    """A capa de quem usa (`pessoa.capa`; D-capa-1) na placa de SEU PERFIL,
+    que é a barra do operador do desktop. A casca a veste com o `vestirCapa`
+    da F3 a cada quadro; a camada cobre a placa inteira, e o retrato e o
+    apelido ficam sobre placas opacas do painel. Medido como a F3 mede a barra
+    (`bancada/capa.cjs`): cada texto mantém o contraste que tinha sem capa,
+    contra uma capa branca, uma preta e uma da cor da própria tinta."""
+    falhas = []
+    if not ir_para_aba(pg, "ajustes", falhas):
+        return falhas
+    sem = pg.evaluate(CONTRASTE_EM, [".cel-perfil-placa", None])
+    # A mídia de um MOD só vem numa geração de pé, e o duble não entra em
+    # nenhuma: a mesma entrada que a `bancada/capa.cjs` da F3 faz.
+    pg.evaluate("entrarNaGeracao(1)")
+    pg.evaluate(MOD_DE_PE)
+    pg.evaluate("""() => {
+        const c = document.createElement('canvas'); c.width = 96; c.height = 32;
+        const x = c.getContext('2d'); x.fillStyle = '#32e6a2'; x.fillRect(0, 0, 96, 32);
+        SEELE_RESPOSTAS.ler_imagem_mod = { papel: 'imagem', bytes: 256, uri: c.toDataURL('image/jpeg') };
+        return __pedirAoProduto({ tipo: 'contribuir', pedido: { ponto: 'pessoa.capa', modo: 'substituir', alvo: String(SEELE_QUADRO.me),
+            conteudo: { doServidor: { canal: 1, campo: 'image', pedido: { transporte: 'volume', path: 'volume:eu' } } } } }); }""")
+    esperar_quadro(pg)
+    pg.wait_for_timeout(300)
+    vestida = pg.evaluate("""() => { const p = document.querySelector('.cel-perfil-placa'); const c = p?.querySelector(':scope > .capa-camada');
+        const b = c?.getBoundingClientRect();
+        return { vestida: p?.dataset.comCapa === 'sim', imagem: c ? getComputedStyle(c).backgroundImage.startsWith('url(') : false,
+                 cobre: !!b && Math.abs(b.width - p.clientWidth) < 1 && Math.abs(b.height - p.clientHeight) < 1,
+                 midia: (window.__entregues ?? []).filter((m) => m.nome === 'midia') }; }""")
+    if not (vestida["vestida"] and vestida["imagem"] and vestida["cobre"]):
+        falhas.append(f"a capa de quem usa não veste a placa de SEU PERFIL inteira: {vestida}")
+        return falhas
+    for nome, cor in CAPAS_DE_PROVA:
+        com = pg.evaluate(CONTRASTE_EM, [".cel-perfil-placa", cor]) or {}
+        pioras = {k: f"{v} → {com.get(k)}" for k, v in sem.items() if (com.get(k) or 0) < v - 0.01}
+        if pioras:
+            falhas.append(f"sobre uma capa {nome}, um texto de SEU PERFIL perde contraste: {pioras}")
+    return falhas
+
+
 def teclado(pg: Page) -> list[str]:
     """O teclado do sistema (Tarefa 12): o compositor colado a ele, as abas fora,
     e a faixa, com o MUDO, logo abaixo do topo."""
@@ -1920,6 +2052,10 @@ CASOS: dict[str, Caso] = {
     "regioes-do-celular": Caso(levar=regioes_do_celular, aparelhos=("390",), medir=False),
     # A região operador.barra no alto de AJUSTES (F3, passo 8b).
     "operador-barra": Caso(levar=operador_barra, medir=False),
+    # O tema de região do operador.barra nos contêineres que a casca declara.
+    "regiao-do-operador": Caso(levar=regiao_do_operador, medir=False),
+    # A capa de quem usa em SEU PERFIL (D-capa-1).
+    "capa-do-operador": Caso(levar=capa_do_operador, medir=False),
     # O texto do sistema no maior tamanho (Tarefa 15): tudo à vista cresce.
     "texto-maior": Caso(levar=texto_maior, medir=False),
     "teclado": Caso(levar=teclado, raiz=".cel-topo, #voz, #form-mensagem"),
