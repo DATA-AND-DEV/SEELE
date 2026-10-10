@@ -25,6 +25,12 @@ tracing = "0.1.44"
 # mudar. Já está na árvore via `seele-app`, então não acrescenta superfície.
 serde_json = "1.0.151"
 
+[features]
+# O retrato sem rede (`sem_rede::retratos`), para a conformidade dos dois
+# produtores de retrato (fase 2 da Tarefa 2.2 da F4). Só o `seele-conformance`
+# a liga: o produto não leva uma conexão de mentira.
+conformidade = []
+
 [lints]
 workspace = true
 

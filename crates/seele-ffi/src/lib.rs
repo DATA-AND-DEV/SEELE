@@ -34,6 +34,10 @@
 )]
 
 pub mod mods;
+/// Uma conexão que não existe, com o `fold` e o `snapshot` de uma que existe:
+/// para os testes daqui e para a conformidade dos dois produtores de retrato.
+#[cfg(any(test, feature = "conformidade"))]
+pub mod sem_rede;
 pub mod types;
 
 use std::collections::HashMap;
@@ -44,6 +48,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use seele_core::enlace::Enlace;
+use seele_core::retrato::{aviso_de, foto_da_sala, minha_tela_de, transmissoes_de};
 use seele_core::{
     identity, ChannelId, ClientMessageId, FilePinStore, MediaChannel, MessageId, PersonId, Room,
     Signal, SignalBand, Ssrc, SyncInputs, Voice, VoiceRoomId,
@@ -3195,92 +3200,25 @@ impl Connection {
     /// — `audio_state` toma o da voz — é chamado enquanto este está na mão.
     #[must_use]
     pub fn snapshot(&self) -> Snapshot {
-        struct Foto {
-            instancia_me: Option<seele_core::PersonId>,
-            nickname: Option<String>,
-            server: String,
-            voice_rooms: Vec<VoiceRoom>,
-            presentes: Vec<Person>,
-            channels: Vec<Channel>,
-            loss_fraction: f32,
-            notice: Option<Notice>,
-            permissions: Vec<seele_core::Permission>,
-            tela: Option<TelaEmCurso>,
-            minha_transmissao: Option<TelaEmCurso>,
-            transmissoes: Vec<TransmissaoNaSala>,
-            ended: Option<EndReason>,
-            tema: Option<TemaDaSessao>,
-        }
-
+        // As duas escolhas desta ponta, lidas **antes** do cadeado do `Room`:
+        // cada uma tem o seu, e nenhuma precisa dele. A foto do `Room` é a do
+        // `seele_core::retrato`, a mesma que o navegador monta (fase 2 da
+        // Tarefa 2.2 da F4).
+        let escolhida = self.shared.tela_escolhida().tela();
+        let pedido = self.shared.pedido_da_tela();
         let foto = match self.shared.room.lock() {
-            Ok(room) => Foto {
-                instancia_me: room.me,
-                nickname: room
-                    .me
-                    .and_then(|me| room.people.get(&me))
-                    .map(|person| person.nickname.clone()),
-                server: room.server.clone(),
-                voice_rooms: voice_rooms_of(&room),
-                presentes: presentes_de(&room),
-                channels: lines_of(&room),
-                loss_fraction: room.telemetry.as_ref().map_or(0.0, |t| t.loss_fraction),
-                notice: room.notice.as_ref().map(|notice| Notice {
-                    severity: notice.severity.into(),
-                    reason: notice.reason.into(),
-                    operator_text: notice.operator_text.clone(),
-                }),
-                permissions: room.permissions.clone(),
-                tela: self
-                    .shared
-                    .tela_escolhida()
-                    .tela()
-                    .and_then(|tela| tela_por_id(&room, tela, self.shared.pedido_da_tela())),
-                minha_transmissao: minha_tela_de(&room, self.shared.pedido_da_tela()),
-                transmissoes: transmissoes_de(&room, self.shared.tela_escolhida().tela()),
-                ended: room.ended.map(|end| end.reason.into()),
-                tema: room.tema.as_ref().map(|tema| TemaDaSessao {
-                    mod_id: tema.mod_id.clone(),
-                    valores: tema.valores.clone(),
-                }),
-            },
+            Ok(room) => foto_da_sala(&room, escolhida, pedido),
             // Um cadeado envenenado é uma sessão que já não tem estado. A foto
             // vazia é a resposta honesta, e é a mesma que o `Room::new()` de
             // antes dava.
-            Err(_) => {
-                let room = Room::new();
-                Foto {
-                    instancia_me: None,
-                    nickname: None,
-                    server: String::new(),
-                    voice_rooms: voice_rooms_of(&room),
-                    presentes: presentes_de(&room),
-                    channels: lines_of(&room),
-                    loss_fraction: 0.0,
-                    notice: None,
-                    permissions: Vec::new(),
-                    tela: None,
-                    minha_transmissao: None,
-                    transmissoes: Vec::new(),
-                    ended: None,
-                    tema: None,
-                }
-            }
+            Err(_) => foto_da_sala(&Room::new(), None, None),
         };
-        // **O nome vem do roster quando o roster nos conhece.**
-        //
-        // O `Mutex` local guarda o que se digitou ao conectar, e só isso: ele é
-        // escrito uma vez, na construção. Trocar de apelido manda um comando, o
-        // servidor confirma com `PersonRenamed`, o roster muda — e este número
-        // continuava lendo o nome antigo, para sempre. Quem trocasse via o
-        // próprio nome mudar na lista de gente e **não** no bloco do operador,
-        // que é onde ele está escrito ao lado do próprio retrato. Foi relatado
-        // assim: «nome do usuário não altera em tempo real».
-        //
-        // O `Mutex` continua sendo a resposta antes de o servidor apresentar
-        // esta conexão a si mesma — entre o `connect` e o `Welcome` não há
-        // roster, e um nome vazio ali seria a janela dizendo que ninguém está
-        // usando ela.
-        let nickname = foto.nickname.clone().unwrap_or_else(|| {
+        // A perda que o servidor contou vai na telemetria, e não na parte do
+        // `Room`: ela é lida antes de a foto virar o retrato da sala. O apelido
+        // e as permissões saem do retrato (`seele_core::retrato`), que é a
+        // mesma conta do navegador.
+        let loss_fraction = foto.loss_fraction;
+        let sala = foto.retrato(|| {
             self.shared
                 .nickname
                 .lock()
@@ -3301,14 +3239,14 @@ impl Connection {
             caminho: self.shared.caminho(),
             link: self.shared.enlace(),
             link_state: link_state_from_byte(self.shared.link_state.load(Ordering::Relaxed)),
-            server: foto.server.clone(),
+            server: sala.server,
             icon_revision: self.shared.icon_revision.load(Ordering::Relaxed),
             person_icons_revision: self.shared.person_icons_revision.load(Ordering::Relaxed),
-            me: foto.instancia_me.map(|person| person.0),
-            nickname,
-            voice_rooms: foto.voice_rooms,
-            presentes: foto.presentes,
-            channels: foto.channels,
+            me: sala.me,
+            nickname: sala.nickname,
+            voice_rooms: sala.voice_rooms,
+            presentes: sala.presentes,
+            channels: sala.channels,
             messages_revision: self.shared.messages_revision.load(Ordering::Relaxed),
             telemetry: Telemetry {
                 rtt_ms,
@@ -3317,7 +3255,7 @@ impl Connection {
                 // porque o servidor não tem como medir jitter. Ver
                 // [`Shared::jitter_de_chegada_micros`].
                 jitter_ms: self.shared.jitter_de_chegada_ms(),
-                loss_fraction: foto.loss_fraction,
+                loss_fraction,
                 bitrate_bps: audio.bitrate_bps,
                 signal,
                 sync_band: SignalBand::of(signal).into(),
@@ -3326,7 +3264,7 @@ impl Connection {
                 frames_refused: audio.frames_refused,
                 microfone_entrega_silencio_digital: audio.silencio_digital,
             },
-            notice: foto.notice,
+            notice: sala.notice,
             muted: audio.muted,
             total_isolation: audio.total_isolation,
             speaking: audio.speaking,
@@ -3337,28 +3275,18 @@ impl Connection {
             playback: audio.playback,
             aparelho: audio.aparelho,
             trocas_de_aparelho: audio.trocas_de_aparelho,
-            may_manage_voice_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::ManageVoiceRooms),
-            may_kick: foto.permissions.contains(&seele_core::Permission::Kick),
-            may_ban: foto.permissions.contains(&seele_core::Permission::Ban),
-            may_remove_message: foto
-                .permissions
-                .contains(&seele_core::Permission::RemoveMessage),
-            may_move_person: foto
-                .permissions
-                .contains(&seele_core::Permission::MovePerson),
-            may_customise_server: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            may_delete_rooms: foto
-                .permissions
-                .contains(&seele_core::Permission::AdministerServer),
-            tela: foto.tela,
-            minha_transmissao: foto.minha_transmissao,
-            transmissoes: foto.transmissoes,
-            ended: foto.ended,
-            tema_do_servidor: foto.tema,
+            may_manage_voice_rooms: sala.may_manage_voice_rooms,
+            may_kick: sala.may_kick,
+            may_ban: sala.may_ban,
+            may_remove_message: sala.may_remove_message,
+            may_move_person: sala.may_move_person,
+            may_customise_server: sala.may_customise_server,
+            may_delete_rooms: sala.may_delete_rooms,
+            tela: sala.tela,
+            minha_transmissao: sala.minha_transmissao,
+            transmissoes: sala.transmissoes,
+            ended: sala.ended,
+            tema_do_servidor: sala.tema_do_servidor,
         }
     }
 
@@ -3602,75 +3530,6 @@ impl Drop for Connection {
     fn drop(&mut self) {
         self.disconnect();
     }
-}
-
-/// Todo mundo que está conectado, em ordem de chegada.
-///
-/// Inclui quem está numa sala, e é de propósito: a casca precisa das duas
-/// listas para desenhar «no servidor, fora das salas» sem fazer conta de menos
-/// — subtrair uma da outra é trabalho de quem desenha, e ele é uma linha.
-///
-/// A própria pessoa entra aqui: o servidor não anuncia a chegada de volta para
-/// quem chegou, então quem monta esta lista soma o `me` que a sessão já tem.
-/// Sem isso, cada um seria o único ausente da própria lista de presentes.
-fn presentes_de(room: &Room) -> Vec<Person> {
-    room.presentes
-        .iter()
-        .chain(room.me.iter().filter(|eu| !room.presentes.contains(eu)))
-        .filter_map(|id| room.people.get(id))
-        .map(|person| Person {
-            id: person.id.0,
-            nickname: person.nickname.clone(),
-            speaking: person.speaking,
-            muted: person.muted,
-            total_isolation: person.total_isolation,
-            signal: person.signal,
-            sync_band: SignalBand::of(person.signal).into(),
-            is_self: room.me == Some(person.id),
-        })
-        .collect()
-}
-
-fn voice_rooms_of(room: &Room) -> Vec<VoiceRoom> {
-    room.voice_rooms
-        .iter()
-        .map(|voice_room| VoiceRoom {
-            id: voice_room.id.0,
-            name: voice_room.name.clone(),
-            limit: voice_room.limit,
-            password_required: voice_room.password_required,
-            occupied_by_us: room.current_voice_room == Some(voice_room.id),
-            channel: voice_room.channel.map(|channel| channel.0),
-            people: room
-                .roster(voice_room.id)
-                .map(|person| Person {
-                    id: person.id.0,
-                    nickname: person.nickname.clone(),
-                    speaking: person.speaking,
-                    muted: person.muted,
-                    total_isolation: person.total_isolation,
-                    signal: person.signal,
-                    sync_band: SignalBand::of(person.signal).into(),
-                    is_self: room.me == Some(person.id),
-                })
-                .collect(),
-            // Off the core, not folded here: the terminal draws the same number
-            // from the same method, and a mean computed in two shells is a mean
-            // two shells will one day round differently.
-            sync: room.voice_room_sync(voice_room.id).map(Into::into),
-        })
-        .collect()
-}
-
-fn lines_of(room: &Room) -> Vec<Channel> {
-    room.channels
-        .iter()
-        .map(|channel| Channel {
-            id: channel.id.0,
-            name: channel.name.clone(),
-            open: room.current_channel == Some(channel.id),
-        })
-        .collect()
 }
 
 /// A conversa do **canal aberto**, confirmadas e pendentes, na ordem de leitura.
@@ -4037,92 +3896,6 @@ pub fn motivos_de_parada_da_tela() -> Vec<&'static str> {
     .into_iter()
     .map(nome_da_parada)
     .collect()
-}
-
-/// A transmissão de tela da sala onde esta pessoa está, como a casca a vê.
-///
-/// Lê o `Room` e o que esta sessão pediu, e nada mais. Os três números do que
-/// está saindo — altura, quadros, kbps — ficam zerados com `medida: false`,
-/// porque **nada nesta ponte os mede**: quem compartilha não tem codificador
-/// daqui, e quem assiste não tem recepção aberta. Preenchê-los com o que foi
-/// pedido, ou com o degrau que o teto compraria, seria a ponte prometendo a
-/// escolha — o oposto exato da regra do §5.
-///
-/// `pedido` é a outra metade dessa mesma regra, e entra por parâmetro em vez de
-/// sair do `Room`: o `Room` é o que o servidor contou, e o que esta pessoa
-/// escolheu nunca passou por ele. Ele só sai daqui quando a transmissão é
-/// desta pessoa — ver [`TelaEmCurso::pedido`].
-/// Tudo o que está sendo transmitido na sala em que esta pessoa está.
-///
-/// **Só a sala dela.** O servidor só anuncia uma transmissão a quem está lá
-/// dentro, e listar outra aqui seria a casca contando algo que a sessão não viu.
-///
-/// Ordenada pelo nome da transmissão, que é crescente: sem ordem, um mapa
-/// devolveria as linhas em ordem diferente a cada desenho, e a lista piscaria
-/// de lugar duas vezes por segundo.
-fn transmissoes_de(room: &Room, assistida: Option<seele_core::ScreenId>) -> Vec<TransmissaoNaSala> {
-    let Some(voice_room) = room.current_voice_room else {
-        return Vec::new();
-    };
-    let mut lista: Vec<TransmissaoNaSala> = room
-        .telas
-        .values()
-        .filter(|tela| tela.voice_room == voice_room)
-        .map(|tela| TransmissaoNaSala {
-            tela: tela.screen.0,
-            de: tela.person.0,
-            e_minha: room.me == Some(tela.person),
-            assistida: assistida == Some(tela.screen),
-            espectadores: tela.espectadores,
-        })
-        .collect();
-    lista.sort_by_key(|transmissao| transmissao.tela);
-    lista
-}
-
-/// A transmissão de um `ScreenId`, se ela está acontecendo na sala desta pessoa.
-///
-/// **Por identidade, sempre.** A versão anterior pegava a primeira transmissão
-/// que encontrasse no mapa da sala — ver o doc de [`Snapshot::tela`] para o que
-/// isso custava. ADR 0054.
-fn tela_por_id(
-    room: &Room,
-    tela: seele_core::ScreenId,
-    pedido: Option<LimitesDeTela>,
-) -> Option<TelaEmCurso> {
-    let voice_room = room.current_voice_room?;
-    let encontrada = room
-        .telas
-        .values()
-        .find(|candidata| candidata.screen == tela && candidata.voice_room == voice_room)?;
-    let e_minha = room.me == Some(encontrada.person);
-    Some(TelaEmCurso {
-        tela: encontrada.screen.0,
-        de: encontrada.person.0,
-        e_minha,
-        // **O número do servidor**, que conta assinaturas de verdade. O de antes
-        // era o roster desta máquina menos quem compartilha, e incluía quem
-        // escolheu não assistir — duas contagens para a mesma pergunta.
-        espectadores: encontrada.espectadores,
-        parada: None,
-        // Só para quem compartilha, e a conferência é o campo inteiro: o teto é
-        // escolha de quem transmite e não viaja no fio, então o que esta
-        // máquina guardou só descreve a **própria** transmissão. Mostrá-lo ao
-        // lado da tela de outra pessoa seria a coluna «pedido» exibindo o que
-        // um terceiro pediu na vez passada.
-        pedido: if e_minha { pedido } else { None },
-    })
-}
-
-/// A transmissão que **esta** pessoa está mandando, se há uma.
-fn minha_tela_de(room: &Room, pedido: Option<LimitesDeTela>) -> Option<TelaEmCurso> {
-    let voice_room = room.current_voice_room?;
-    let eu = room.me?;
-    let minha = room
-        .telas
-        .values()
-        .find(|tela| tela.person == eu && tela.voice_room == voice_room)?;
-    tela_por_id(room, minha.screen, pedido)
 }
 
 /// Se o painel da tela precisa ser redesenhado.
@@ -5962,12 +5735,7 @@ fn fold(shared: &Arc<Shared>, message: &seele_core::ServerMessage) {
             .room
             .lock()
             .ok()
-            .and_then(|room| room.notice.clone())
-            .map(|notice| Notice {
-                severity: notice.severity.into(),
-                reason: notice.reason.into(),
-                operator_text: notice.operator_text,
-            });
+            .and_then(|room| room.notice.as_ref().map(aviso_de));
         if let Some(notice) = notice {
             shared.notify(&Event::NoticeRaised { notice });
         }
@@ -7202,6 +6970,9 @@ mod a_identidade_e_uma_por_maquina {
 
 #[cfg(test)]
 mod tests {
+    // As funções da projeção que estes testes chamam sozinhas moram no
+    // `seele_core::retrato` desde a fase 2 da Tarefa 2.2 da F4.
+    use seele_core::retrato::{lines_of, tela_por_id, voice_rooms_of};
     #[test]
     fn a_chave_de_mensagem_nao_comeca_num_valor_fixo() {
         // Pendência 19, a metade do app. Aqui o contador é do processo, e era
@@ -8025,33 +7796,10 @@ mod tests {
         );
     }
 
-    /// A `Shared` with nothing in it, for the folds below.
+    /// A `Shared` with nothing in it, for the folds below. O mesmo da
+    /// conformidade dos dois produtores (`crate::sem_rede`).
     fn bare_shared() -> Arc<Shared> {
-        Arc::new(Shared {
-            caminho_medido: std::sync::atomic::AtomicU32::new(0),
-            link_battery: AtomicBool::new(false),
-            link_seconds: std::sync::atomic::AtomicU64::new(0),
-            link_attempts: std::sync::atomic::AtomicU32::new(0),
-            messages_revision: std::sync::atomic::AtomicU64::new(0),
-            icon_revision: std::sync::atomic::AtomicU64::new(0),
-            person_icons_revision: std::sync::atomic::AtomicU64::new(0),
-            room: Mutex::new(Room::new()),
-            listeners: Mutex::new(Vec::new()),
-            voice: VozDaSala::nova(false, seele_core::DeviceChoice::default()),
-            media: Mutex::new(None),
-            nickname: Mutex::new("marcela".into()),
-            link_state: AtomicU8::new(0),
-            rtt_micros: std::sync::atomic::AtomicU64::new(0),
-            jitter_de_chegada_micros: std::sync::atomic::AtomicU64::new(0),
-            caminho: Mutex::new(None),
-            impressao_do_servidor: Mutex::new(None),
-            signal: AtomicU8::new(0),
-            running: AtomicBool::new(true),
-            pending_weights: Mutex::new(Vec::new()),
-            limites_da_tela: Mutex::new(None),
-            tela_escolhida: Mutex::new(EscolhaDeTela::NinguemEscolheu),
-            fontes_de_tela: Mutex::new(Vec::new()),
-        })
+        crate::sem_rede::shared("marcela")
     }
 
     #[test]
@@ -11208,9 +10956,10 @@ mod o_audio_segue_a_sala {
     //! [`Voice`]: seele_core::Voice
 
     use super::{
-        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, voice_rooms_of, Aberta,
-        AberturaDoAudio, ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
+        ganhos_a_aplicar, readotar_na_volta, sala_do_audio, Aberta, AberturaDoAudio,
+        ControlesGuardados, Futuro, Origem, PortaDaVoz, VozDaSala, VozViva,
     };
+    use seele_core::retrato::voice_rooms_of;
     use seele_core::{
         AlertReason, AlertSeverity, DeviceChoice, PersonId, PersonProfile, Room, ServerMessage,
         SessionId, SessionInfo, Ssrc, VoiceMode, VoiceRoomId, VoiceRoomInfo,

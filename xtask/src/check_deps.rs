@@ -85,7 +85,7 @@ const RULES: &[(&str, &[&str])] = &[
     // O cliente do celular, a parte em `wasm` (ADR 0057): o codec do protocolo
     // atrás de uma fronteira de JSON, e nada que faça E/S. As peças sem E/S que
     // um dia saírem do `seele-core` entram aqui por nome, cada uma argumentada.
-    ("seele-web", &["seele-proto", "seele-voz"]),
+    ("seele-web", &["seele-proto", "seele-voz", "seele-sessao"]),
     // A volta de um MOD da janela: o QuickJS do cliente, sem thread e sem E/S.
     // Folha: não conhece o protocolo nem o manifesto, e as capacidades de uma
     // API entram como lista. O desktop e o celular a embrulham, cada um com a
@@ -134,6 +134,10 @@ const RULES: &[(&str, &[&str])] = &[
             "seele-server",
             "seele-tui",
             "seele-ffi",
+            // **O navegador, pelo mesmo argumento das duas cascas** (Tarefa 2.2
+            // da F4, fase 2): o retrato dele e o do desktop só se comparam com
+            // os dois produtores ao mesmo tempo, e as mesmas mensagens.
+            "seele-web",
             // **O ponto de encontro, e é o mesmo argumento das duas cascas.**
             //
             // O quarto do ADR 0022 (emenda de 03/09/2026) só se prova com as

@@ -45,6 +45,22 @@ fn read(relative: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// Os tipos que atravessam a ponte, nos dois arquivos em que moram.
+///
+/// O `Snapshot` e o resto ficam em `seele-ffi/src/types.rs`. Os tipos de vista
+/// que saem do `Room` (os motivos de aviso e de fim, as salas, a tela, o
+/// pedido e a prioridade) foram para `seele-sessao/src/retrato.rs` na fase 2
+/// da Tarefa 2.2 da F4, porque o navegador monta o mesmo retrato; o
+/// `seele-ffi` os reexporta. Os guardas que liam o primeiro arquivo leem os
+/// dois juntos, que é o texto que o primeiro tinha antes.
+fn tipos_da_ponte() -> String {
+    format!(
+        "{}\n{}",
+        read("../../crates/seele-ffi/src/types.rs"),
+        read("../../crates/seele-sessao/src/retrato.rs")
+    )
+}
+
 /// Every file directly in `ui/` with this extension, by name.
 ///
 /// The frontend is six scripts and six stylesheets rather than one of each, so
@@ -6567,7 +6583,7 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
 
     // And it is a permission of its own on the bridge, rather than a second
     // reading of one that was already there.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("may_delete_rooms"),
         "the snapshot has no field for the permission that destroys rooms, so \
@@ -6609,7 +6625,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     );
 
     // Every one of the three has to be a reason the bridge can actually produce.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     for reason in ["VoiceRoomDeleted", "ChannelDeleted", "LastVoiceRoom"] {
         assert!(
             types.contains(reason),
@@ -6670,7 +6686,7 @@ fn o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela() {
     // E o campo existe do outro lado da ponte. Sem esta metade o `?? null` do
     // palco leria `undefined` para sempre e a coluna do pedido ficaria vazia
     // sem nada falhar.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("pub pedido: Option<LimitesDeTela>"),
         "`TelaEmCurso` não carrega o que foi pedido, e o palco lê um campo que \
@@ -6713,7 +6729,7 @@ fn a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le() {
          confusão pela qual esta razão existe:{frase}"
     );
 
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("ScreenShareOverHostUplink"),
         "`AVISOS` escreve uma frase para uma razão que `NoticeReason` não pode \
@@ -7226,7 +7242,7 @@ fn the_bridge_maps_every_refusal_the_wire_can_carry() {
     else {
         panic!("`AttachmentRefusal` is gone from the protocol");
     };
-    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let ponte = without_comments(&tipos_da_ponte());
     let Some(espelho) = ponte
         .split("pub enum AttachmentRefusal {")
         .nth(1)
@@ -7848,9 +7864,7 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     //
     // Read from the bridge's own source rather than from a list here, so the
     // next variant fails this on the run it is added.
-    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
-        .expect("the bridge's types must be readable")
-        .replace("\r\n", "\n");
+    let ponte = tipos_da_ponte();
 
     let script = without_comments(&scripts());
     let Some(motivos) = script.split("const MOTIVOS = {").nth(1) else {
@@ -9192,7 +9206,7 @@ fn um_anexo_que_nao_foi_salvo_diz_por_que() {
     // `Transfer::NotSaved` carrega o motivo, e um motivo que a ponte manda e a
     // tela não lê é o produto sabendo e não contando. «Tente de novo» para um
     // nome que vai ser recusado de novo é a frase errada, e é a que sobraria.
-    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let ponte = without_comments(&tipos_da_ponte());
     let Some(enumeracao) = ponte
         .split("pub enum NotSavedReason {")
         .nth(1)
@@ -10797,7 +10811,25 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "identidade-web.js",
             "const credencial = tentativa.conhecido ? null : segredos.credencial;",
         ),
-        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        (
+            "identidade-web.js",
+            "resposta = await conectar(alvo, apelido, credencial);",
+        ),
+        // O `conectar` da identidade da página: o `connect` da ponte, que na
+        // 2.6 é a sessão pelo navegador. A credencial vai ao `connect`, e a
+        // nenhum outro lugar.
+        (
+            "identidade-web.js",
+            "function conectarPelaPonte(alvo, apelido, credencial) {",
+        ),
+        (
+            "identidade-web.js",
+            "return invocarNaPonte(\"connect\", { alvo, nickname: apelido, joinSecret: credencial });",
+        ),
+        // Quem toma o link da carga: a função e a identidade da página, e
+        // ninguém mais (a casca nunca toca no token do fragmento).
+        ("identidade-web.js", "function tomarOLinkDaCarga() {"),
+        ("identidade-web.js", "const daCarga = tomarOLinkDaCarga();"),
         // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
         // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
         ("identidade-web.js", "if (!segredos.link) return false;"),
@@ -10840,6 +10872,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 "recusaDoApelido",
                 "segredos",
                 "linkDaCarga",
+                "tomarOLinkDaCarga",
             ]
             .iter()
             .any(|nome| names(linha, nome))
@@ -10900,7 +10933,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    // 2b. **E nenhum outro script toca no link da carga** (decidido pela
+    // orquestradora em 10/10): quem o toma é a identidade da página, e a casca
+    // nunca vê o token que veio no fragmento.
+    for nome in ui_files(".js") {
+        if nome == "identidade-web.js" {
+            continue;
+        }
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for segredo in ["tomarOLinkDaCarga", "linkDaCarga"] {
+            assert!(
+                !names(&texto, segredo),
+                "`{nome}` toca em `{segredo}`: o link da carga leva o token do convite, e só \
+                 a identidade da página o toma (`identidadeDaPagina`)"
+            );
+        }
+    }
+
+    // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
@@ -11102,7 +11152,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          e do campo da configuração; confira que ele não vai a `tracing`, a arquivo \
          nem a resposta nenhuma da ponte"
     );
-    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    let tipos = tipos_da_ponte();
     let Some((_, depois)) = tipos.split_once("pub struct Snapshot {") else {
         panic!("o `Snapshot` da FFI mudou de forma, e este guarda ficou cego");
     };
@@ -12457,22 +12507,12 @@ fn opening_a_stream_asks_for_a_key_frame() {
 /// de um arquivo de script não tem esse acidente — então tem este guarda.
 #[test]
 fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
-    let ffi = std::fs::read_to_string(
-        app_dir()
-            .join("..")
-            .join("..")
-            .join("crates")
-            .join("seele-ffi")
-            .join("src")
-            .join("types.rs"),
-    )
-    .expect("`seele-ffi/src/types.rs` é onde os tipos da ponte moram")
-    // O mesmo `\r\n` que `read` normaliza, e que este teste não usava por ler
-    // fora de `ui/`. No Windows ele reprovava aqui dizendo que `Prioridade`
-    // deixou de ser minúscula, num arquivo em que ela é — porque a comparação é
-    // um `ends_with` que termina em `\n`. Achado rodando a bateria numa máquina
-    // Windows de verdade.
-    .replace("\r\n", "\n");
+    // O mesmo `\r\n` que `read` normaliza: `tipos_da_ponte` lê por ele. Este
+    // teste lia à parte, sem a normalização, e no Windows reprovava aqui dizendo
+    // que `Prioridade` deixou de ser minúscula, num arquivo em que ela é —
+    // porque a comparação é um `ends_with` que termina em `\n`. Achado rodando a
+    // bateria numa máquina Windows de verdade.
+    let ffi = tipos_da_ponte();
 
     // As variantes de `Prioridade`, como o serde as escreve no fio.
     let Some(depois) = ffi.split("pub enum Prioridade {").nth(1) else {
@@ -18654,9 +18694,7 @@ fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     //
     // Lido da fonte da ponte, e não de uma lista daqui, para a próxima
     // variante reprovar na rodada em que entrar.
-    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
-        .expect("the bridge's types must be readable")
-        .replace("\r\n", "\n");
+    let ponte = tipos_da_ponte();
 
     let script = without_comments(&scripts());
     let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
