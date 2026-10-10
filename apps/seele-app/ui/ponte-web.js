@@ -592,6 +592,13 @@ function fraseDoMicrofoneQueNaoAbriu(erro) {
   return `O microfone não abriu (${nome ?? "erro"}: ${erro && erro.message ? erro.message : erro}).`;
 }
 
+/**
+ * A recusa do microfone que o `getUserMedia` deu nesta página
+ * (`NotAllowedError`). Só na memória: ela vale enquanto a página vive, que é o
+ * tempo em que o navegador a mantém sem perguntar de novo.
+ */
+const recusaDoMicrofone = { nestaPagina: false };
+
 /** O teste do microfone com o que está guardado nesta origem. */
 async function abrirOTesteNaPonte() {
   let voz;
@@ -610,8 +617,10 @@ async function abrirOTesteNaPonte() {
       abertura: escolhida === null ? 0 : Math.round(escolhida * 1000),
     });
   } catch (erro) {
+    if (erro && erro.name === "NotAllowedError") recusaDoMicrofone.nestaPagina = true;
     return Promise.reject(fraseDoMicrofoneQueNaoAbriu(erro));
   }
+  recusaDoMicrofone.nestaPagina = false;
   return null;
 }
 
@@ -888,14 +897,21 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   escolher_tecla_de_falar: ({ tecla } = {}) =>
     gravarNaOrigem(CHAVES_DA_ORIGEM.tecla, tecla == null ? null : String(tecla)) ? null : Promise.reject("NaoGravei"),
   // A Permissions API: concedida, negada pelo navegador (achado 3 da matriz da
-  // F8), ou não se sabe, inclusive onde ela não pergunta pelo microfone.
+  // F8), ou não se sabe. **E a recusa que esta página já viu**: o Safari nem
+  // sempre conta o microfone pela Permissions API, e depois de um «Não
+  // Permitir» de verdade ela pode dizer «perguntar» ou nem responder. Sem a
+  // lembrança, o aviso sumiria justo quando a sala ficou muda por isso
+  // (pergunta da F8, 10/10). Uma concessão posterior vence a lembrança.
   permissao_de_microfone: async () => {
+    let estado = null;
     try {
-      const { state } = await navigator.permissions.query({ name: "microphone" });
-      return { granted: "Permitida", denied: "NegadaPeloNavegador" }[state] ?? "NaoSeSabe";
+      ({ state: estado } = await navigator.permissions.query({ name: "microphone" }));
     } catch {
-      return "NaoSeSabe";
+      estado = null;
     }
+    if (estado === "granted") return "Permitida";
+    if (estado === "denied" || recusaDoMicrofone.nestaPagina) return "NegadaPeloNavegador";
+    return "NaoSeSabe";
   },
   saida_escolhida: () => guardadoNaOrigem(CHAVES_DA_ORIGEM.saida),
   // Grava; numa sessão, a voz (3.3) a aplica com `setSinkId`.

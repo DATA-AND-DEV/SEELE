@@ -25,7 +25,11 @@
 // 5. **o teste do microfone do PC, pela ponte de verdade** (`ponte-web.js`, na
 //    casca larga): abre, mede com o portão da voz, toca o monitor pela mistura,
 //    e **fechar solta o microfone**: toda faixa que o `getUserMedia` abriu
-//    termina em `ended` (`F4/ponte-no-pc.md`).
+//    termina em `ended` (`F4/ponte-no-pc.md`);
+// 6. **a recusa do microfone é lembrada**: depois de um `NotAllowedError` do
+//    `getUserMedia`, o `permissao_de_microfone` diz `NegadaPeloNavegador` mesmo
+//    onde a Permissions API não conta o microfone (o Safari), e a abertura pela
+//    metade não deixa contexto de áudio para trás (pergunta da F8, 10/10).
 //
 // E mede quanto o `.wasm` leva para compilar dentro do worklet.
 //
@@ -324,6 +328,30 @@ async function principal() {
       confere("teste do microfone", (await invocar("estado_do_teste_de_microfone")) === null, "fechado, o teste continua contando");
     }
     await teste.close();
+
+    // 6. A recusa do microfone, lembrada onde a Permissions API não conta.
+    for (const api of ["calada", "perguntar"]) {
+      const negada = await navegador.newPage();
+      negada.on("pageerror", (erro) => doConsole.push(`negada: pageerror: ${erro.message}`));
+      await negada.addInitScript((comoResponde) => {
+        localStorage.setItem("seele.casca", "larga");
+        navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("recusado na bancada", "NotAllowedError"));
+        navigator.permissions.query = () =>
+          comoResponde === "calada" ? Promise.reject(new TypeError("microphone não é um nome conhecido")) : Promise.resolve({ state: "prompt" });
+      }, api);
+      await negada.goto(`${endereco}teste.html`);
+      const permissao = () => negada.evaluate(() => window.invocar("permissao_de_microfone"));
+      const antes = await permissao();
+      await negada.click("#testar");
+      const aberto = await negada.evaluate(() => window.aberto);
+      const depois = await permissao();
+      const sobrou = await negada.evaluate(() => vozDaPonte.atual.contas().then((c) => c.contexto));
+      confere("recusa lembrada", antes === "NaoSeSabe", `com a API ${api}, antes da recusa: ${antes}`);
+      confere("recusa lembrada", aberto.startsWith("recusado:") && aberto.includes("não deu o microfone"), `com a API ${api}, a recusa veio sem a frase: ${aberto}`);
+      confere("recusa lembrada", depois === "NegadaPeloNavegador", `com a API ${api}, depois de um NotAllowedError a ponte diz ${depois}`);
+      confere("recusa lembrada", sobrou === null, `com a API ${api}, a abertura pela metade deixou o contexto ${sobrou}`);
+      await negada.close();
+    }
 
     confere("console", doConsole.length === 0, doConsole.join(" | "));
     const final = await contas();
