@@ -156,6 +156,23 @@ commit em que a casca o chamar, com a tela da F8 à vista:
 - o `connect` confere a sala desta máquina pelo código dela. No navegador não
   há sala no ar, e nada muda.
 
+**Decidido em 10/10**, quando a casca da sala chegou a chamar. A F7 escreve as
+linhas no ramo dela, num commit isolado, com isto:
+- **recusados** com `RECUSA_SALA`: `atender`, `recusar`, `encerrar_a_ligacao`,
+  `receber_ligacoes`, `bloquear` e `onde_estou`. O `onde_estou` só serve ao
+  toque, e um neutro `"Nenhum"` seria uma afirmação que a sessão ainda não fez;
+- **recusados** com `RECUSA_AGENDA`: `meu_codigo`, `contatos_da_agenda` e
+  `dar_nome_na_agenda`;
+- **neutros**: `estado_da_sala` com `null` («não há sala aqui», e nunca
+  `Desligada`; a casca esconde a linha) e `toques_agora` com `[]`, com as marcas
+  do que os corpos leem no guarda da hospedagem;
+- se a `ponte-sem-gesto.cjs` pegar um deles chamado sem toque, a casca deixa de
+  chamá-lo onde o bloco está escondido, ou ele vira neutro;
+- os canais não pedem nada: o `ouvirNaPonte` aceita qualquer nome, e no
+  navegador nada os emite;
+- o roteiro `tools/roteiros/toque.js` é só do desktop e fica fora da rodada da
+  casca larga.
+
 ## Como se prova
 
 **A paridade do desktop no navegador se prova pelos 28 roteiros de
