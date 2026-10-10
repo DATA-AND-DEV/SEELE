@@ -173,6 +173,13 @@ struct Session {
     /// da criação, e escolher entre dois servidores pelo nome errado é pior do
     /// que escolher por um identificador cru.
     servidor_no_ar: Mutex<Option<String>>,
+    /// Os endereços que o convite da hospedagem desta janela anuncia, quando
+    /// ela hospeda. Vazio quando não hospeda.
+    ///
+    /// Lote X da F5, rodada 2: é por eles, e pelo `aqui`, que
+    /// [`a_sessao_e_com_o_servidor_daqui`] reconhece uma sessão aberta pelo
+    /// próprio link. Gravado e esquecido junto com `hospedagem`.
+    enderecos_do_convite_daqui: Mutex<Vec<String>>,
     /// A busca corrente. O cursor é estado de sessão, e é o que impede a regra
     /// de dar-a-volta de ser reescrita em JavaScript.
     busca: Mutex<Option<seele_ffi::search::Search>>,
@@ -2014,6 +2021,11 @@ async fn hospedar(
     if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
         *no_ar = servidor;
     }
+    // O convite que esta hospedagem anuncia, o mesmo que volta à tela: quem
+    // cola o próprio link entra por um destes endereços (lote X, rodada 2).
+    if let Ok(mut daqui) = session.enderecos_do_convite_daqui.lock() {
+        *daqui = enderecos_do_convite(&anfitriao.convite);
+    }
 
     Ok(anfitriao)
 }
@@ -2458,6 +2470,10 @@ async fn disconnect(app: tauri::AppHandle, session: State<'_, Session>) -> Resul
     // do que ficou para trás.
     if let Ok(mut no_ar) = session.servidor_no_ar.lock() {
         *no_ar = None;
+    }
+    // E os endereços do convite morrem com ele (lote X, rodada 2).
+    if let Ok(mut daqui) = session.enderecos_do_convite_daqui.lock() {
+        daqui.clear();
     }
     Ok(())
 }
@@ -5165,10 +5181,32 @@ fn endereco_do_servidor_daqui() -> String {
 /// Só quem já sabe que esta janela hospeda chama esta função
 /// (`persistence_do_mod`). Duas hospedagens não seguram a mesma porta, então o
 /// `aqui` é o servidor desta janela.
-fn a_sessao_e_com_o_servidor_daqui(endereco_da_sessao: &str) -> bool {
-    seele_ffi::chave_do_servidor(endereco_da_sessao).is_some_and(|chave| {
-        seele_ffi::chave_do_servidor(&endereco_do_servidor_daqui()).as_ref() == Some(&chave)
-    })
+///
+/// **E os endereços do convite da hospedagem** (rodada 2), em `do_convite`:
+/// são os que ela anuncia ([`enderecos_do_convite`]). Quem cola o próprio link
+/// no CONECTAR entra pelo primeiro deles, normalmente o da rede local, e a
+/// lista de conhecidos o guarda para o VOLTAR. Comparar só com o `aqui`
+/// deixava esse caminho sem o sim de quem hospeda, e a volta perguntava de
+/// novo (o A04).
+fn a_sessao_e_com_o_servidor_daqui(endereco_da_sessao: &str, do_convite: &[String]) -> bool {
+    let Some(chave) = seele_ffi::chave_do_servidor(endereco_da_sessao) else {
+        return false;
+    };
+    std::iter::once(endereco_do_servidor_daqui())
+        .chain(do_convite.iter().cloned())
+        .any(|daqui| seele_ffi::chave_do_servidor(&daqui).as_ref() == Some(&chave))
+}
+
+/// Os endereços que um convite anuncia: o alvo e os alternativos, na ordem do
+/// link. Um link que não se lê não anuncia nada.
+fn enderecos_do_convite(convite: &str) -> Vec<String> {
+    seele_ffi::uri::analisar(convite)
+        .map(|lido| {
+            std::iter::once(lido.alvo)
+                .chain(lido.alternativos)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Grava o sim de quem hospeda ao conjunto que acabou de aplicar, **só** quando
@@ -5197,8 +5235,13 @@ fn gravar_o_sim_de_quem_hospeda(
         .lock()
         .ok()
         .and_then(|a| a.clone());
+    let do_convite = session
+        .enderecos_do_convite_daqui
+        .lock()
+        .map(|daqui| daqui.clone())
+        .unwrap_or_default();
     match alvo {
-        Some(alvo) if a_sessao_e_com_o_servidor_daqui(&alvo) => {
+        Some(alvo) if a_sessao_e_com_o_servidor_daqui(&alvo, &do_convite) => {
             seele_ffi::mods::aceitar(config, &alvo, identidade)
         }
         _ => Ok(()),
@@ -5339,6 +5382,60 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
         }
     }
 
+    /// **Rodada 2: o caminho do próprio link.** A janela está na entrada com a
+    /// hospedagem de pé, e a pessoa cola o próprio link no CONECTAR. A sessão
+    /// fica no endereço da rede local que o convite anuncia, e a lista de
+    /// conhecidos o guarda para o VOLTAR. Ali, o sim de quem hospeda é gravado.
+    /// O endereço de S continua sem gravar, com o mesmo convite à mão.
+    #[test]
+    fn pelo_proprio_link_o_sim_de_quem_hospeda_continua_gravado() {
+        // Montado como `Hospedagem::convite` monta: a rede de casa primeiro, o
+        // endereço global depois, e a impressão digital.
+        let convite = seele_ffi::uri::Convite::novo("192.168.1.20:8383")
+            .com_alternativos(["203.0.113.9:8383"])
+            .com_impressao_digital("ab".repeat(32))
+            .to_string();
+        let anunciados = super::enderecos_do_convite(&convite);
+        assert_eq!(
+            anunciados,
+            ["192.168.1.20:8383", "203.0.113.9:8383"],
+            "os endereços do convite não saíram do link que a hospedagem anuncia"
+        );
+
+        let em = |onde: &str| {
+            let sessao = sessao_em(onde);
+            *sessao.enderecos_do_convite_daqui.lock().unwrap() = anunciados.clone();
+            sessao
+        };
+        let mut sem_sim = Vec::new();
+        let mut em_s = Vec::new();
+        for (quem, daqui) in identidades_dos_gravadores() {
+            let config = pasta("link");
+            let config = config.path().to_str().unwrap();
+            for onde in &anunciados {
+                gravar_o_sim_de_quem_hospeda(config, &em(onde), &daqui).unwrap();
+                if seele_ffi::mods::aceite_de(config, onde).as_deref() != Some(daqui.as_str()) {
+                    sem_sim.push(format!("{quem} em {onde}"));
+                }
+            }
+            gravar_o_sim_de_quem_hospeda(config, &em(S), &daqui).unwrap();
+            if seele_ffi::mods::aceite_de(config, S).is_some() {
+                em_s.push(quem);
+            }
+        }
+        assert!(
+            sem_sim.is_empty(),
+            "com a sessão aberta pelo próprio link, num endereço que o convite da hospedagem \
+             anuncia, o sim de quem hospeda não foi gravado: {sem_sim:?}. A volta pelo VOLTAR \
+             pergunta de novo o que ele acabou de decidir (A04)"
+        );
+        assert!(
+            em_s.is_empty(),
+            "com o convite da hospedagem à mão, {em_s:?} gravou o sim de quem hospeda num \
+             endereço que o convite não anuncia (ADR 0045)"
+        );
+    }
+
     /// Os dois gravadores gravam o sim só por [`gravar_o_sim_de_quem_hospeda`],
     /// e `hospedar` devolve o `aqui` com que ela compara.
     ///
@@ -5373,6 +5470,17 @@ mod o_sim_de_quem_hospeda_vai_so_ao_servidor_daqui {
             hospedar.contains(concat!("aqui: endereco_do_servidor_daqui", "()")),
             "`hospedar` devolve um `aqui` que não é o de `endereco_do_servidor_daqui`: a \
              tela entra num endereço, o sim de quem hospeda compara com outro, e nunca é gravado"
+        );
+
+        // Rodada 2: o convite que `hospedar` devolve é o que ele guarda, e os
+        // endereços morrem com a hospedagem no `disconnect`.
+        let desconectar = corpo_de(&fonte, concat!("async fn disconnect", "("));
+        assert!(
+            hospedar.contains(concat!("enderecos_do_convite(&anfitriao", ".convite)"))
+                && desconectar.contains(concat!("enderecos_do_convite", "_daqui")),
+            "`hospedar` deixou de guardar os endereços do convite que ele mesmo devolve, ou \
+             o `disconnect` deixou de esquecê-los: quem entra pelo próprio link volta a ser \
+             perguntado de novo (A04)"
         );
     }
 }
