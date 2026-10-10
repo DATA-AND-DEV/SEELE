@@ -495,7 +495,8 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
 ///
 /// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
 /// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
-/// `portaria::`, `persistence_do_mod`) está numa de três listas, e nunca solto
+/// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`) está numa
+/// de três listas, e nunca solto
 /// entre os atendidos:
 /// 1. `RECUSAS_NOMEADAS`;
 /// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
@@ -527,6 +528,13 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
             "persistence_hospedada",
             "portaria::",
             "persistence_do_mod",
+            // O ajudante da F3 que acha o servidor de um MOD pelas hospedagens
+            // (`38421122`, na 0.16/api-6), e a sala pessoal da F7, que mexe nas
+            // hospedagens de dentro do `sala.rs` (`sala::subir`,
+            // `sala::desligar`, na 0.16/sala-viva). Um comando que só chame um
+            // deles mexe na hospedagem sem escrever a palavra no corpo.
+            "servidor_do_mod",
+            "sala::",
             ".sala\n",
             ".toques\n",
         ]
@@ -549,10 +557,19 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
     // navegador não há registro, e essa parte não acontece. A decisão fica
     // escrita aqui, com o motivo, e o comando continua conferido: ele tem de
     // estar numa lista que o atende.
-    let leem_e_seguem_a_lista: &[(&str, &str)] = &[(
-        "renomear_server",
-        "o nome vai pela conexão; o registro local só existe para quem hospeda",
-    )];
+    let leem_e_seguem_a_lista: &[(&str, &str)] = &[
+        (
+            "renomear_server",
+            "o nome vai pela conexão; o registro local só existe para quem hospeda",
+        ),
+        // Desde a sala viva da F7 (décima segunda integração): o `connect`
+        // pergunta se o alvo é a sala desta máquina, para conferi-la pelo
+        // código. No navegador não há sala, e a conexão é a da 2.6.
+        (
+            "connect",
+            "só pergunta se o alvo é a sala desta máquina; no navegador não há sala",
+        ),
+    ];
     for (comando, _motivo) in leem_e_seguem_a_lista {
         assert!(
             mexem.contains(*comando),

@@ -285,6 +285,10 @@ window.__TAURI__ = {
       // com ela, ninguém escolheu, e a faixa de FAIXA_DE_ABERTURA_DBFS. Com o
       // `null`, a seção ÁUDIO estourava ao abrir e desenhava a régua sem os
       // extremos.
+      // A permissão do microfone: o roteiro pode trocá-la por
+      // `window.__SEELE_PERMISSAO_DO_MICROFONE` (a ponte do navegador devolve
+      // também a `NegadaPeloNavegador`).
+      if (cmd === "permissao_de_microfone") return window.__SEELE_PERMISSAO_DO_MICROFONE ?? "Permitida";
       if (cmd === "controles_da_voz") {
         return { supressao: 1, abertura_dbfs: -60, abertura_escolhida: false,
                  abertura_minima_dbfs: -72, abertura_maxima_dbfs: -24 };

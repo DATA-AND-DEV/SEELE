@@ -2468,3 +2468,215 @@ mod o_launcher_ligado_ao_produto {
         }
     }
 }
+
+/// **O quintal de um MOD ao subir do Servidor 0.15 para o 1.0** (tarefa 18 da
+/// F3; o B9 do ESTILO; rascunho da API 6, §9).
+///
+/// A pasta é a de quem hospedou na 0.15.1 de verdade — escrita pelo código do
+/// `54f542f94`, e não imitada (`testes/pasta-da-0.15.1/`; o LEIA.md de lá diz
+/// como): o banco no esquema 13, a conta de quem hospeda, o `seele/estilo`
+/// 3.1.0 ligado, e o tema que a metade de servidor dele gravou no quintal pelo
+/// caminho de pedido daquela versão.
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    reason = "num teste, o pânico é o relatório; e indexar um serde_json::Value devolve Null em vez de entrar em pânico"
+)]
+mod o_quintal_sobe_da_0_15 {
+    use std::path::Path;
+
+    /// A pasta da 0.15.1, sem o banco em binário: `seele.sql` é o `.dump` dele.
+    const PASTA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/testes/pasta-da-0.15.1/pasta");
+
+    /// O hash do `seele/estilo` 3.1.0 que a 0.15.1 gravou em `mods`.
+    const HASH_DA_0_15: &str = "ca0b79565bbb41a79403ce69b500c62f908a080efbb9bcbd4e3486a302d21682";
+
+    fn copiar(de: &Path, para: &Path) {
+        std::fs::create_dir_all(para).unwrap();
+        for entrada in std::fs::read_dir(de).unwrap() {
+            let entrada = entrada.unwrap();
+            let destino = para.join(entrada.file_name());
+            if entrada.path().is_dir() {
+                copiar(&entrada.path(), &destino);
+            } else {
+                std::fs::copy(entrada.path(), destino).unwrap();
+            }
+        }
+    }
+
+    /// O `theme` do `seele/estilo` num banco, aberto **só para leitura**.
+    fn quintal_do_estilo(banco: &Path) -> Option<String> {
+        rusqlite::Connection::open_with_flags(banco, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?
+            .query_row(
+                "SELECT CAST(value AS TEXT) FROM mod_data WHERE mod_id = 'seele/estilo' AND key = 'theme'",
+                [],
+                |linha| linha.get(0),
+            )
+            .ok()
+    }
+
+    /// O `seele/estilo` 4.0.0: outro pacote, outro hash, na API deste build. A
+    /// metade de servidor devolve o `theme` do quintal como está, para o teste
+    /// comparar com o que a 3.1.0 gravou byte a byte.
+    fn estilo_4(origem: &Path) {
+        std::fs::create_dir_all(origem.join("servidor")).unwrap();
+        std::fs::create_dir_all(origem.join("cliente")).unwrap();
+        std::fs::write(
+            origem.join("mod.json"),
+            serde_json::json!({
+                "schema": 1,
+                "id": "seele/estilo",
+                "version": "4.0.0",
+                "api": seele_ffi::mods::MOD_API_VERSION,
+                "repo": "https://github.com/DATA-AND-DEV/ESTILO",
+                "reach": ["tema do servidor"],
+                "client": "cliente/main.js",
+                "server": "servidor/main.js",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        std::fs::write(
+            origem.join("servidor/main.js"),
+            "globalThis.aoPedir = () => JSON.stringify({ ok: true, versao: '4.0.0', theme: dados.theme ?? null });",
+        )
+        .unwrap();
+        std::fs::write(origem.join("cliente/main.js"), "/* sem interface */").unwrap();
+    }
+
+    /// Quem hospedou na 0.15.1 abre a 0.16 e hospeda de novo, e liga o 4.0.0:
+    /// a metade de servidor nova lê o tema que a velha gravou.
+    ///
+    /// Os passos do produto, na ordem do `setup` e do HOSPEDAR: a primeira
+    /// abertura (a cópia para a linha legada), a migração dos pacotes, o
+    /// servidor sobre o banco de sempre (`banco_do_cliente`, numa máquina sem
+    /// servidor guardado) e as raízes de MOD da janela, que migram o banco
+    /// para o esquema deste build; o 4.0.0 instalado e aplicado como a gestão
+    /// aplica (`aplicar_conjunto_de_mods`: o pacote lido por hash e o
+    /// `definir_conjunto`); e o pedido de quem hospeda, pelo caminho de pedido
+    /// do servidor.
+    ///
+    /// **O servidor é o `Daemon` com a configuração do HOSPEDAR**
+    /// (`hospedagem::config_guardada`), escutando em `127.0.0.1:0`: a
+    /// `Hospedagem` sobe também a escada do ADR 0022, que pediria ao roteador
+    /// de quem roda o teste um mapeamento de porta, e a escada não é o assunto.
+    #[tokio::test]
+    async fn o_quintal_de_um_mod_sobrevive_a_subir_da_0_15_e_a_versao_nova_o_le() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().to_string_lossy().into_owned();
+
+        // A pasta da 0.15.1.
+        rusqlite::Connection::open(dir.path().join("seele.db"))
+            .unwrap()
+            .execute_batch(&std::fs::read_to_string(format!("{PASTA}/seele.sql")).unwrap())
+            .unwrap();
+        let gravado_na_0_15 =
+            quintal_do_estilo(&dir.path().join("seele.db")).expect("o quintal da pasta da 0.15.1");
+        copiar(
+            &Path::new(PASTA).join("mod-packages"),
+            &dir.path().join("mod-packages"),
+        );
+
+        // O `setup`.
+        let feito = super::primeira_abertura(&config);
+        assert!(
+            matches!(feito, super::DadosDaLinhaLegada::Guardados { .. }),
+            "a primeira abertura não reconheceu a pasta da 0.15.1: {feito:?}"
+        );
+        crate::mods::levar_pacotes_antigos_para_o_cache(dir.path());
+        assert_eq!(
+            quintal_do_estilo(&dir.path().join("seele.db")).as_deref(),
+            Some(gravado_na_0_15.as_str()),
+            "a primeira abertura tirou o quintal da pasta que a 0.16 abre"
+        );
+
+        // O HOSPEDAR.
+        let banco = seele_server::persistence::banco_do_cliente(dir.path());
+        let servidor = seele_server::Daemon::bind(seele_server::ServerConfig {
+            name: "Casa".to_owned(),
+            mods_dir: Some(crate::servidores::raizes_dos_mods(&config, None)),
+            listen: std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, 0)),
+            database: seele_server::persistence::Location::File(banco),
+            ..seele_server::ServerConfig::default()
+        })
+        .await
+        .expect("o servidor subiu sobre o banco da 0.15.1");
+        let server = std::sync::Arc::clone(servidor.server());
+        {
+            let banco = server.persistence.lock().await;
+            assert_eq!(
+                seele_server::persistence::mods::ler_quintal(&banco, "seele/estilo")
+                    .unwrap()
+                    .get("theme"),
+                Some(&gravado_na_0_15),
+                "a migração do banco para este esquema perdeu o quintal"
+            );
+        }
+
+        // O 4.0.0, instalado e aplicado.
+        let origem = tempfile::tempdir().unwrap();
+        estilo_4(origem.path());
+        let publicado = crate::mods::instalar_de(dir.path(), origem.path()).unwrap();
+        assert_ne!(
+            publicado.hash, HASH_DA_0_15,
+            "o 4.0.0 tem de ser outro pacote"
+        );
+        let instalado = seele_ffi::mods::ler_por_hash(&config, &publicado.hash).unwrap();
+        let dono = {
+            let banco = server.persistence.lock().await;
+            seele_server::persistence::mods::definir_conjunto(
+                &banco,
+                &[seele_server::persistence::mods::EnabledMod {
+                    id: instalado.id,
+                    version: instalado.version,
+                    hash: instalado.hash,
+                    repo: instalado.repo,
+                    reach: instalado.reach,
+                    server_half: instalado.server,
+                    api: instalado.api,
+                }],
+            )
+            .unwrap();
+            // Quem hospeda volta com a chave de sempre, e é a conta de antes.
+            seele_server::permissions::Permissions::new(&banco)
+                .register_or_find(&[0x5e; 32], "dono")
+                .unwrap()
+        };
+
+        let resposta = seele_server::mods::pedidos::executar(
+            &server,
+            dono.id,
+            // O canal zero, «nenhum canal»: o pedido de escopo de servidor. Por
+            // `into`, porque a casca não nomeia o `seele-proto` (ADR 0002).
+            0_u32.into(),
+            "seele/estilo",
+            r#"{"op":"view"}"#,
+        )
+        .await;
+        let lido: serde_json::Value = serde_json::from_str(&resposta).unwrap();
+        assert_eq!(
+            lido["versao"], "4.0.0",
+            "o pedido não chegou ao 4.0.0: {resposta}"
+        );
+        assert_eq!(
+            lido["theme"].as_str(),
+            Some(gravado_na_0_15.as_str()),
+            "o 4.0.0 não leu o quintal que a 3.1.0 gravou na 0.15.1: {resposta}"
+        );
+
+        // E a volta: a linha 0.15 guardou o quintal dela.
+        let legada = seele_lancador::Deposito::em(super::raiz_do_deposito(&config))
+            .pasta_de_dados_da_linha(&super::linha_legada())
+            .join("seele.db");
+        assert_eq!(
+            quintal_do_estilo(&legada).as_deref(),
+            Some(gravado_na_0_15.as_str()),
+            "a linha 0.15 perdeu o quintal"
+        );
+
+        servidor.shutdown();
+    }
+}

@@ -441,11 +441,15 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const com = secoes();
+      // A aba DIAGNÓSTICO conta o identificador que ninguém usa (o 99).
+      const diagnostico = () => frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista"));
+      const diag = diagnostico();
       contribuicoesDosMods.revogar(handle, { id: "mod/lista", instancia });
       modsCarregados.delete("mod/lista");
       desenhar(r);
       await quadro();
-      return { recusa, com, voltou: $("lista-roster").innerHTML === antes };
+      const ignoradosDepois = quemPintaCadaPonto().find((l) => l.ponto === "pessoas.lista").ignorados;
+      return { recusa, com, voltou: $("lista-roster").innerHTML === antes, diag, ignoradosDepois };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (lista.erro) falhas.push(`pessoas.lista: ${lista.erro}`);
     else {
@@ -460,6 +464,12 @@ const REGIOES = [
         falhas.push(`pessoas.lista: as seções saíram ${JSON.stringify(lista.com)}, e o esperado é ${JSON.stringify(esperado)}`);
       }
       if (!lista.voltou) falhas.push("pessoas.lista: revogada, e a lista não voltou ao que era");
+      if (!lista.diag.some((f) => /cita 1 identificador de quem não está aqui, ou repetido: ignorado$/.test(f))) {
+        falhas.push(`pessoas.lista: o DIAGNÓSTICO não conta o identificador ignorado — diz ${JSON.stringify(lista.diag)}`);
+      }
+      if (lista.ignoradosDepois !== 0) {
+        falhas.push(`pessoas.lista: revogada, e o DIAGNÓSTICO ainda conta ${lista.ignoradosDepois} identificador(es) ignorado(s)`);
+      }
     }
 
     // ------------------------------------- a mensagem, substituída
@@ -669,16 +679,18 @@ const REGIOES = [
         desenhada: $("telemetria-mods").textContent.includes("da barra de baixo"),
         avisos: entregues.filter((m) => m.nome === "contribuicao" && m.motivo === "regiao-ausente" && m.ponto === "status.barra").length,
         noRetrato: cascaDoRetrato().regioes.includes("status.barra"),
+        diag: frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "status.barra")),
       };
       delete globalThis.CELULAR;
       desenhar(r);
       await quadro();
       const comARegiao = $("telemetria-mods").textContent.includes("da barra de baixo");
+      const diagComARegiao = frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "status.barra"));
       contribuicoesDosMods.revogar(handle, dono);
       modsCarregados.delete("mod/ausente");
       desenhar(r);
       await quadro();
-      return { semARegiao, comARegiao };
+      return { semARegiao, comARegiao, diagComARegiao };
     }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
     if (ausente.erro) falhas.push(`regiao-ausente: ${ausente.erro}`);
     else {
@@ -687,6 +699,12 @@ const REGIOES = [
       if (s.avisos !== 1) falhas.push(`regiao-ausente: o MOD recebeu ${s.avisos} aviso(s) de região ausente, e o certo é um`);
       if (s.noRetrato) falhas.push("regiao-ausente: o retrato diz que a casca tem a região que ela não tem");
       if (!ausente.comARegiao) falhas.push("regiao-ausente: a região voltou, e a contribuição registrada não desenhou");
+      if (!s.diag.some((f) => /^esta casca não tem este lugar: .*1 contribuição avisada nesta sessão\)$/.test(f))) {
+        falhas.push(`regiao-ausente: o DIAGNÓSTICO não diz que a casca não tem o lugar, com a contagem — diz ${JSON.stringify(s.diag)}`);
+      }
+      if (ausente.diagComARegiao.some((f) => /não tem este lugar/.test(f))) {
+        falhas.push("regiao-ausente: a região voltou, e o DIAGNÓSTICO ainda diz que a casca não a tem");
+      }
     }
 
     // ------------------------------------- a navegação, substituída
@@ -727,6 +745,7 @@ const REGIOES = [
       desenhar(r);
       await quadro();
       const com = {
+        diag: frasesDeQuemPinta(quemPintaCadaPonto().find((l) => l.ponto === "servidor.navegacao")),
         salas: textos("lista-voice_rooms"),
         canais: textos("lista-linhas"),
         canaisNaTela: $("lista-linhas").querySelectorAll("button[data-linha]").length,
@@ -759,6 +778,10 @@ const REGIOES = [
       if (navegacao.com.entrar !== 1) falhas.push("servidor.navegacao: a sala perdeu a linha do produto");
       if (navegacao.com.entradasDeMod) falhas.push("servidor.navegacao: a substituição apareceu como entrada «DOS MODS»");
       if (!navegacao.voltou) falhas.push("servidor.navegacao: revogada, e as listas não voltaram ao que eram");
+      // O 2 repetido, o 99 e o 98: três, somadas as duas listas.
+      if (!navegacao.com.diag.some((f) => /cita 3 identificadores de quem não está aqui, ou repetido: ignorados$/.test(f))) {
+        falhas.push(`servidor.navegacao: o DIAGNÓSTICO não conta os três identificadores ignorados — diz ${JSON.stringify(navegacao.com.diag)}`);
+      }
     }
 
     // ------------------------------------------- o orçamento de cada ponto
@@ -809,6 +832,25 @@ const REGIOES = [
     if (orcamento.nosDetalhes !== 40 || orcamento.avisoDosDetalhes !== null) {
       falhas.push(`orçamento: pessoa.detalhes (perfil «superficie», 4096 nós) montou ${orcamento.nosDetalhes} `
         + `de 40 linhas, com o aviso ${JSON.stringify(orcamento.avisoDosDetalhes)}`);
+    }
+
+    // ------------------------------------------- as contagens saem com a sessão
+    //
+    // O aviso de região ausente mora na contribuição, que sai com a sessão: a
+    // sessão seguinte avisa de novo, e um contador que não saísse junto
+    // contaria por cima. A medida dos identificadores ignorados também sai.
+    const contagens = await page.evaluate(() => {
+      const antes = regioesAusentesAvisadas.size;
+      encerrarOAmbienteDosMods();
+      return { antes, regioes: regioesAusentesAvisadas.size, ignorados: identificadoresIgnorados.size };
+    }).catch((erro) => ({ erro: erro.message.split("\n")[0] }));
+    if (contagens.erro) {
+      falhas.push(`contagens: ${contagens.erro}`);
+    } else {
+      if (contagens.antes === 0) falhas.push("contagens: a seção da região ausente não deixou contagem para a sessão tirar");
+      if (contagens.regioes !== 0 || contagens.ignorados !== 0) {
+        falhas.push(`contagens: a sessão acabou, e o DIAGNÓSTICO guardou ${JSON.stringify(contagens)}`);
+      }
     }
   } finally {
     await browser.close();

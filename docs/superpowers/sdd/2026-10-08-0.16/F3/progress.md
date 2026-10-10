@@ -595,3 +595,94 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     SAIR acordados, o diálogo fora do furo e rolando por dentro; o resto
     inerte e coberto. Seis reversões.
   - Espera: o Step 5 (a 7d da sala pessoal).
+
+## 10/10
+
+O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
+
+- **O tema do servidor na casca** (09/10).
+  - 17d `87b36aa9`: o núcleo guarda o `TemaMudou`, o retrato o leva
+    (`tema_do_servidor`), e a casca o aplica antes de desenhar a sessão.
+  - 17f.0, o servidor `747e81e6`: `persistence::tema::escolher`.
+  - 17f, a casca `7df2c421` e `78fdf546`: a escolha de quem vê, o evento
+    `tema` (`aplicado`, `recusado` com os pares, `nativo`), e a janela que
+    sobe depois sabendo do desfecho.
+  - 17g `68253601`: a prévia, só nesta máquina, com o selo, saindo com a
+    superfície dona.
+  - 17h `8485cacb`: `cor: { tema: 'acento' }`; medido, a folha e o diálogo já
+    herdavam o tema.
+  - Tarefa 10, Steps 1 a 3 `17c6890e`: `repetir: true`.
+  - `ee3f4e50`: o MOD de referência exercita o `atualizar` e o
+    `formulario.erros` do punho da superfície.
+- **17f.0 inteira** (10/10): `68244ced` o servidor confere a porta e manda o
+  `TemaMudou`; `38421122` o comando no `main.rs`, isolado; `fbd8a013` a
+  pergunta na gestão (QUEM PINTA ESTE SERVIDOR), com a linha em
+  `RECUSAS_NOMEADAS` da ponte (a F4 avisada, e da lacuna no guarda da
+  hospedagem, que não vê `servidor_do_mod`); `f1811d9f` o `pinta` com prova
+  do lado do Rust.
+- **17f, a linha em QUEM DESENHA O QUE** `b2129755`, e o DIAGNÓSTICO que
+  dizia «(API 3)» sobre o tema do servidor.
+- **Tarefa 5, as contagens do DIAGNÓSTICO** `2af9a35a`: os identificadores
+  ignorados (a medida do agora) e o lugar que a casca não tem; o contador de
+  avisos passou a sair com a sessão.
+- **Tarefa 7, Step 5, o `chamada.palco`** `c7c64814`, `23a5bccf`,
+  `9b7e826c`, com as duas decisões da orquestradora: os modos como nos outros
+  pontos, a vista alternativa que começa escondida, e o `lugar` com
+  `regiao`. **Tarefa 10, Step 4** no `23a5bccf`.
+- **Tropeços medidos no caminho**, todos por bancada ou reversão: a recusa
+  da escolha sumia debaixo da frase do catálogo (escrita depois do
+  redesenho); a reversão do filtro do DIAGNÓSTICO passou, e a seção ganhou o
+  caso da contagem dupla; o guarda de `substituir` fatiava por byte e caiu
+  num «ç»; a primeira medida do som contava o `ended`, que não chega com o
+  áudio suspenso; e a reversão sem o `ResizeObserver` passou, porque o laço
+  da chamada media a cada meio segundo — o desenho passou a dizer o tamanho
+  só a quem chega.
+- **A revisão do rascunho contra a casca** `e5ccf266`
+  (`revisao-rascunho-contra-casca.md`), com os consertos `3235ff33` e
+  `78edf0a7`, e as três decisões da orquestradora no rascunho `72ec3a5d`: o
+  `ok` de `mundo.tema` é «forma válida e publicada» (os pares são da casca), e
+  o `chamada.palco` e o `servidor.aparencia` ficam publicados na 6. O
+  `check-api` contra o rascunho fica com 13 achados, todos da tarefa 12.
+- **A revisão dos comentários desatualizados**, na área da F3, `67826a89`;
+  nela, um defeito de verdade: a recusa do `decorar` mandava o avatar e a capa
+  usarem `adicionar`, que eles recusam. Dois achados fora da área (a frase do
+  aceite em `frases.js:702`, que quem usa lê, e o comentário do `main.rs:7738`)
+  foram para a F5, pela orquestradora.
+- **Tarefa 18, o quintal ao subir do Servidor 0.15 para o 1.0** `bde1e972`
+  (liberada pela orquestradora: a primeira abertura da F6 está na
+  `versao/0.16` desde a primeira integração). **Passa.** A pasta é escrita pelo
+  código da v0.15.1 (`54f542f94`), com o quintal gravado pelo caminho de pedido
+  de lá; o teste `versoes::o_quintal_sobe_da_0_15` faz a primeira abertura, a
+  migração dos pacotes, o servidor sobre o banco de sempre (migrado para o 15)
+  e o 4.0.0 aplicado como a gestão aplica, e a metade de servidor nova lê o
+  `theme` byte a byte. Três reversões, cada uma no passo que quebra: a
+  migração apagando o `mod_data`, o quintal lido pelo hash, e a primeira
+  abertura levando o banco em vez de copiá-lo. As migrações 1 a 13 de hoje são
+  as da v0.15.1, no SQL e na descrição (comparadas uma a uma).
+- **O caso da pasta da 0.15.1 no Step 5b da tarefa 13** `b46ce9e7`, e a
+  conferência da D-api-4 aprovada pela orquestradora `28cd201a`: medido com a
+  pasta, a coluna `api` diz zero antes da subida do servidor (o
+  `preencher_as_apis` roda dentro do `Daemon::bind`), então a conferência lê a
+  API pelo pacote, numa regra só com o servidor (`api_do_pacote`).
+- **A `versao/0.16` (`c89399db`) trazida** `5ddef0a7`, sem conflito; as doze
+  bancadas de Node puro e as seis de navegador da F3 passam.
+- **Tarefa 16, o escopo de um pedido** `dcd6f287`: num canal, o pedido de MOD
+  confere a leitura e a escrita do canal (`pode_no_canal`). Medido antes, com
+  o mesmo teste, na 0.16 e numa cópia da `linha/0.15` em `40066a7c`: o defeito
+  estava nas duas, e nenhuma versão o alcançava — nada grava o papel mínimo de
+  um canal. A 0.15.2 não leva o conserto (pendência 62). Um guarda de texto
+  reprova o dia em que algo gravar. Quatro reversões; a conformidade da ponte
+  e do MOD de referência verde. O rascunho (§8) e o guia (`aoPedir`) dizem o
+  `write` por escopo.
+- **O 8b foi feito pela F8** (`1f09c7ba` e `d1773fd6`, no `0.16/celular`): do
+  lado da F3 falta o `aplicarARegiao` lendo a declaração dela e a bancada com o
+  guarda 11, depois que o `0.16/celular` integrar.
+- **Tarefa 15, o exemplo `servidor-com-mod.rs`** `18043d51`: instala por hash
+  (`seele_server::mods::instalar`), liga o MOD antes de subir, diz as queixas
+  da subida no terminal e escuta na 8390, recusando a 8384; o teste
+  `exemplo_com_mod.rs` reprovou com a instalação por identificador e passa por
+  hash (a reversão reprova); rodado de verdade numa porta à parte; o guia diz
+  como usá-lo. O Step 3 (a prova de janela) fica para a campanha do dono.
+- **Esperam:** a M3 (depois da décima segunda integração, o dono a roda da
+  `versao/0.16`), as tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da
+  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (a 11).

@@ -702,8 +702,23 @@ fn the_page_loads_only_files_that_are_shipped() {
         );
     }
 
+    // **O worklet da voz é a exceção**, e ela é conferida em vez de só
+    // declarada: ele roda na thread de áudio, sem `window`, e quem o carrega é
+    // a `voz-web.js`, com `audioWorklet.addModule`. Carregado pela página, ele
+    // estouraria no `AudioWorkletProcessor`, que a janela não tem. Os outros
+    // guardas desta suíte continuam lendo o arquivo, porque `ui_files` o lista.
+    let voz = read("ui/voz-web.js");
+    assert!(
+        voz.contains("worklet: \"voz-worklet.js\"")
+            && voz.contains("audioWorklet.addModule(cfg.worklet)"),
+        "a voz-web.js deixou de carregar o voz-worklet.js, e a exceção abaixo \
+         passou a esconder um arquivo que ninguém carrega"
+    );
     for (extension, loaded) in [(".css", &stylesheets), (".js", &sources)] {
         for shipped in ui_files(extension) {
+            if shipped == "voz-worklet.js" {
+                continue;
+            }
             assert!(
                 loaded.contains(&shipped),
                 "ui/ ships {shipped}, and index.html never loads it — so it is a \
@@ -10645,15 +10660,16 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 /// 2. **Nenhum outro script lê os dois lugares.** Um segundo leitor de
 ///    `aceitePendente` ou de `recusaDoApelido` seria um segundo lugar por onde
 ///    ela sai.
-/// 3. **Só três chamadas de `conectar` passam credencial por argumento**: o
-///    link colado, o link do lançador e a volta que aceita os MODs. O
-///    RECONECTAR, a batida da espera, o hospedar e a troca de servidor não
-///    passam nenhuma — uma reconexão que a passasse gastaria de novo o convite
-///    que a entrada gastou. Desde o lote W, `conectar` anexa por conta própria
-///    a credencial que um apelido tomado deixou (`recusaDoApelido`), quando o
-///    alvo é o mesmo; essas chamadas sem argumento também a recebem nesse caso.
-///    Ela nunca é um convite gasto: só fica guardada depois de uma recusa que
-///    não gastou nada, e toda tentativa a esquece ao começar (parte 6).
+/// 3. **Só quatro chamadas de `conectar` passam credencial por argumento**: o
+///    link colado, o link do lançador, a volta que aceita os MODs e a entrada
+///    pelo navegador. O RECONECTAR, a batida da espera, o hospedar e a troca de
+///    servidor não passam nenhuma — uma reconexão que a passasse gastaria de
+///    novo o convite que a entrada gastou. Desde o lote W, `conectar` anexa por
+///    conta própria a credencial que um apelido tomado deixou
+///    (`recusaDoApelido`), quando o alvo é o mesmo; essas chamadas sem
+///    argumento também a recebem nesse caso. Ela nunca é um convite gasto: só
+///    fica guardada depois de uma recusa que não gastou nada, e toda tentativa
+///    a esquece ao começar (parte 6).
 /// 4. **Fechar a janela a leva junto.** Ela só existe na memória da página, e
 ///    fechar a janela encerra o processo: nada no `main.rs` segura a saída nem
 ///    troca o fechar por esconder. Se um dia segurar, a credencial passa a
@@ -10668,6 +10684,14 @@ fn nenhum_convite_sobrevive_a_troca_de_servidor() {
 ///    próxima, nem mesmo quando a recusa de uma mais velha chega depois. A
 ///    mesma conferência vale para a pergunta dos MODs: só a tentativa mais
 ///    nova a abre com a credencial dela.
+///
+/// **A entrada pelo navegador segue o mesmo contrato** (Tarefa 3.4 da F4): a
+/// `identidade-web.js` guarda o token do link, e o link inteiro que o carrega,
+/// em `segredos`, na memória da tentativa. Cada linha dela que nomeia
+/// `credencial`, `segredos` ou `linkDaCarga` está na lista, e a chamada de
+/// `conectar` dela é a quarta que passa credencial. Ela não tem o lugar do
+/// apelido tomado: a própria tentativa guarda o token até um desfecho que a
+/// encerre, e o `apelido-tomado` não a encerra.
 #[test]
 fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     const CAMINHO: &[(&str, &str)] = &[
@@ -10721,6 +10745,33 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "const credencial = aceitePendente?.credencial ?? null;",
         ),
         ("camada-mods.js", "await conectar(alvo, null, credencial);"),
+        // A entrada pelo navegador (3.4). O link lido do fragmento na carga,
+        // entregue uma vez e esquecido.
+        ("identidade-web.js", "let linkDaCarga = lerEApagarOFragmento();"),
+        ("identidade-web.js", "const link = linkDaCarga;"),
+        ("identidade-web.js", "linkDaCarga = null;"),
+        // O token e o link só em `segredos`, e esquecidos juntos.
+        (
+            "identidade-web.js",
+            "const segredos = { credencial: null, link: null };",
+        ),
+        ("identidade-web.js", "segredos.credencial = null;"),
+        ("identidade-web.js", "segredos.link = null;"),
+        ("identidade-web.js", "segredos.credencial = convite ?? null;"),
+        ("identidade-web.js", "segredos.link = texto;"),
+        // Quem já é conhecido entra pela chave, e não gasta o convite.
+        (
+            "identidade-web.js",
+            "const credencial = tentativa.conhecido ? null : segredos.credencial;",
+        ),
+        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
+        // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
+        ("identidade-web.js", "if (!segredos.link) return false;"),
+        (
+            "identidade-web.js",
+            "await navigator.clipboard.writeText(segredos.link);",
+        ),
         (
             "camada-mods.js",
             "function levarParaOAceiteDeMods(motivo, alvo, credencial) {",
@@ -10745,12 +10796,18 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         );
         vistas.push((arquivo, linha.to_owned()));
     };
-    for arquivo in ["tela-boot.js", "camada-mods.js"] {
+    for arquivo in ["tela-boot.js", "camada-mods.js", "identidade-web.js"] {
         let texto = without_comments(&read(&format!("ui/{arquivo}")));
         for linha in texto.lines().map(str::trim) {
-            if names(linha, "credencial")
-                || names(linha, "aceitePendente")
-                || names(linha, "recusaDoApelido")
+            if [
+                "credencial",
+                "aceitePendente",
+                "recusaDoApelido",
+                "segredos",
+                "linkDaCarga",
+            ]
+            .iter()
+            .any(|nome| names(linha, nome))
             {
                 conferir(arquivo, linha);
             }
@@ -10796,6 +10853,9 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
         ("tela-boot.js", "convite.alvo, null, convite.token ?? null"),
         ("camada-mods.js", "alvo, null, credencial"),
+        // A entrada pelo navegador (3.4): o link da página, com o token da
+        // tentativa. Só quem não é conhecido o leva.
+        ("identidade-web.js", "alvo, apelido, credencial"),
     ];
     let mut levam: Vec<(String, String)> = Vec::new();
     for nome in ui_files(".js") {
@@ -10839,7 +10899,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 .iter()
                 .any(|(dono, conhecidos)| dono == nome && conhecidos == argumentos),
             "`conectar` passou a levar credencial em `{nome}`: conectar({argumentos}).\n\
-             Só o link colado, o link do lançador e a volta que aceita os MODs levam \
+             Só o link colado, o link do lançador, a volta que aceita os MODs e a \
+             entrada pelo navegador levam \
              uma; uma reconexão que a levasse gastaria de novo o convite que a \
              entrada gastou."
         );
@@ -10847,7 +10908,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     assert_eq!(
         levam.len(),
         LEVAM.len(),
-        "as chamadas de `conectar` com credencial não são as três conhecidas: {levam:?}"
+        "as chamadas de `conectar` com credencial não são as quatro conhecidas: {levam:?}"
     );
     let reconectar = js_function(&read("ui/tela-fim.js"), "async function reconectar(");
     assert!(
@@ -11351,6 +11412,16 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
         hospedar.contains("nossoServidorEm = anfitriao.aqui"),
         "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
     );
+    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). A dispensa
+    // é `nossoServidorEm === ultimoAlvo`: entrando por outro endereço, quem
+    // hospeda volta a ser mandado conferir a própria chave. O sim de quem
+    // hospeda não depende mais disto: desde a impressão, o Rust reconhece o
+    // servidor daqui pela chave (`onde_estou_em`), entre por onde entrar.
+    assert!(
+        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
+        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: a \
+         dispensa de conferir a própria chave não casa com o alvo: {hospedar}"
+    );
 
     // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
     // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
@@ -11722,6 +11793,15 @@ fn no_script_calls_a_function_that_no_script_declares() {
         "ImageData",
         "OffscreenCanvas",
         "MediaStream",
+        // A voz do navegador (Tarefa 3.3 da F4): o WebCodecs de áudio e o
+        // `AudioWorklet`. O `registerProcessor` é do escopo do worklet, que é
+        // onde o `voz-worklet.js` roda.
+        "AudioData",
+        "AudioDecoder",
+        "AudioEncoder",
+        "AudioWorkletNode",
+        "EncodedAudioChunk",
+        "registerProcessor",
         "parseInt",
         "parseFloat",
         "isNaN",
@@ -14246,8 +14326,52 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
         nomes.sort();
         juntar(nome, format!("escolha {}", nomes.join("|")));
     }
+    // **Os tokens por região** (17i, item 3): as regiões pelos nomes, e as
+    // cores que uma região redefine.
+    let lista_js = |inicio: &str| -> Vec<String> {
+        let (_, resto) = casca
+            .split_once(inicio)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de base.js"));
+        let mut nomes: Vec<String> = resto
+            .split(']')
+            .next()
+            .unwrap_or_default()
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes
+    };
+    let mut regioes_da_casca: Vec<String> =
+        entradas_js(objeto_js(&casca, "const REGIOES_DO_TEMA = Object.freeze("))
+            .into_iter()
+            .map(|(nome, _)| nome)
+            .collect();
+    regioes_da_casca.sort();
+    juntar(
+        "regioes".to_owned(),
+        format!(
+            "regioes {}; {}",
+            regioes_da_casca.join("|"),
+            lista_js("const CORES_DA_REGIAO = Object.freeze([").join("|")
+        ),
+    );
 
     let rust = read("../../crates/seele-proto/src/mods.rs");
+    let lista_rust = |inicio: &str| -> String {
+        let mut nomes: Vec<String> = rust
+            .split_once(inicio)
+            .and_then(|(_, resto)| resto.split_once("];"))
+            .map(|(corpo, _)| corpo)
+            .unwrap_or_else(|| panic!("`{inicio}` sumiu de seele-proto"))
+            .split(',')
+            .map(|nome| nome.trim().trim_matches('"').to_owned())
+            .filter(|nome| !nome.is_empty())
+            .collect();
+        nomes.sort();
+        nomes.join("|")
+    };
     let tabela: String = rust
         .split_once("pub const CHAVES_DO_TEMA: &[(&str, FormaDoValorDoTema)] = &[")
         .and_then(|(_, resto)| resto.split_once("\n];"))
@@ -14283,6 +14407,12 @@ fn as_chaves_do_tema_sao_as_mesmas_na_casca_e_no_servidor() {
                 .collect();
             nomes.sort();
             format!("escolha {}", nomes.join("|"))
+        } else if forma.starts_with("Regioes") {
+            format!(
+                "regioes {}; {}",
+                lista_rust("pub const REGIOES_DO_TEMA: &[&str] = &["),
+                lista_rust("pub const CORES_DA_REGIAO: &[&str] = &[")
+            )
         } else {
             panic!("uma forma de `CHAVES_DO_TEMA` que este guarda não conhece: {forma}");
         };
@@ -14469,6 +14599,65 @@ fn o_conjunto_ja_aceito_volta_ao_disco_e_nenhum_outro() {
             "a fase `{fase}` não tem frase no painel"
         );
     }
+}
+
+/// **Só a atualização pela gestão reaplica o MOD no servidor que esta janela
+/// hospeda** — lote X da F5, ADR 0045.
+///
+/// `instalar_mod_do_catalogo` serve a dois usos, e o `main.rs` decide pelo que
+/// a janela diz (`UsoDoCatalogo`). Obter o que outro servidor exige reaplicava
+/// no servidor hospedado aqui e trocava a versão que ele exige pela do outro:
+/// na pergunta dos MODs, também depois de a pessoa desistir dela, e na sessão
+/// que já aceitou. Cada chamada da janela diz o seu uso, e o uso certo.
+#[test]
+fn so_a_atualizacao_pela_gestao_reaplica_o_mod_no_servidor_hospedado() {
+    let camada = read("ui/camada-mods.js");
+    let base = read("ui/base.js");
+    let chamadas = [
+        (
+            js_function(&camada, "async function obterOConjunto("),
+            "obter",
+            "a obtenção da pergunta dos MODs de outro servidor",
+        ),
+        (
+            js_function(&base, "async function buscarOQueFaltaSeJaFoiAceito("),
+            "obter",
+            "a obtenção da sessão que já aceitou",
+        ),
+        (
+            js_function(&camada, "async function instalarDoCatalogo("),
+            "atualizar",
+            "a atualização pela gestão (QA-01)",
+        ),
+    ];
+    for (corpo, uso, quem) in &chamadas {
+        assert!(
+            corpo.contains("invoke(\"instalar_mod_do_catalogo\"")
+                && corpo.contains(&format!("uso: \"{uso}\"")),
+            "{quem} não diz `uso: \"{uso}\"` ao `instalar_mod_do_catalogo`: a obtenção para \
+             outro servidor troca o MOD do servidor hospedado aqui, ou a atualização pela \
+             gestão deixa o servidor exigindo a versão antiga:\n{corpo}"
+        );
+    }
+
+    // E nenhuma outra chamada, nem uma sem uso: o comando recusa a que não diz,
+    // e uma chamada nova tem de entrar aqui com o uso dela.
+    let todas = without_comments(&scripts());
+    let usos: Vec<bool> = todas
+        .split("invoke(\"instalar_mod_do_catalogo\"")
+        .skip(1)
+        .map(|depois| {
+            depois
+                .split_once(')')
+                .is_some_and(|(argumentos, _)| argumentos.contains("uso: \""))
+        })
+        .collect();
+    assert_eq!(
+        usos, [true; 3],
+        "a janela chama `instalar_mod_do_catalogo` fora das três chamadas deste guarda, ou \
+         sem dizer o uso: a chamada sem uso é recusada antes de baixar, e uma nova pode \
+         reaplicar no servidor hospedado aqui sem ninguém ter decidido"
+    );
 }
 
 /// **Nada da sessão anterior é admitido na seguinte** — etapa E2.
@@ -15621,19 +15810,24 @@ fn toda_referencia_de_acessibilidade_aponta_para_algo_que_existe() {
 /// Um campo servindo a duas perguntas responde mal a uma delas. São dois
 /// campos, e este guarda cobra as duas metades: que `aplicar_mod` leia o certo,
 /// e que o certo seja preenchido antes de qualquer condição sobre o endereço.
+///
+/// Desde a rodada 1 do lote X da F5, `aplicar_mod` grava o sim por
+/// `gravar_o_sim_de_quem_hospeda`, que só o grava quando a sessão é com o
+/// servidor daqui. É ali que o endereço desta sessão é lido.
 #[test]
 fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
     let fonte = read("src/main.rs");
 
     let aplicar = body_of(&fonte, "async fn aplicar_mod");
+    let grava = body_of(&fonte, "fn gravar_o_sim_de_quem_hospeda");
     assert!(
-        aplicar.contains("endereco_da_sessao"),
-        "`aplicar_mod` não lê o endereço desta sessão: {aplicar}"
+        aplicar.contains("gravar_o_sim_de_quem_hospeda(") && grava.contains("endereco_da_sessao"),
+        "`aplicar_mod` não grava o sim pelo endereço desta sessão: {aplicar}\n{grava}"
     );
     assert!(
-        !aplicar.contains("session.alvo"),
+        !aplicar.contains("session.alvo") && !grava.contains("session.alvo"),
         "`aplicar_mod` lê `alvo`, que é «onde voltar» e está vazio justamente \
-         quando quem liga o MOD é quem hospeda:\n{aplicar}"
+         quando quem liga o MOD é quem hospeda:\n{aplicar}\n{grava}"
     );
 
     // E o preenchimento vem antes da condição que exclui o servidor local.
@@ -16739,8 +16933,18 @@ fn todo_ponto_que_anuncia_substituir_e_consultado_por_escolher_substituicao() {
                 .any(|(onde, _)| {
                     // A chamada e o nome do ponto na mesma vizinhança: a consulta é
                     // escrita em várias linhas, com o alvo e o preferido entre elas.
-                    let inicio = onde.saturating_sub(400);
-                    let fim = (onde + 400).min(telas.len());
+                    // **Na fronteira de um caractere**: os 400 bytes caem no
+                    // meio de um «ç» tão bem quanto num espaço, e o fatiamento
+                    // por byte entrava em pânico (o comentário do palco, em
+                    // `mods-contribuicoes.js`, achou).
+                    let mut inicio = onde.saturating_sub(400);
+                    while !telas.is_char_boundary(inicio) {
+                        inicio -= 1;
+                    }
+                    let mut fim = (onde + 400).min(telas.len());
+                    while !telas.is_char_boundary(fim) {
+                        fim += 1;
+                    }
                     telas[inicio..fim].contains("escolherSubstituicao")
                 });
         assert!(
@@ -16771,7 +16975,7 @@ fn decorar_nao_volta_a_tabela_sem_quem_o_aplique() {
     if !tabela.contains("\"decorar\"") {
         // O estado de hoje: suspenso, e recusado pelo nome.
         assert!(
-            registro.contains("«decorar» não está na API 4"),
+            registro.contains("«decorar» não está nesta API"),
             "`decorar` saiu da tabela e a recusa deixou de dizer o nome dele: um \
              MOD que o peça lê «aceita adicionar, e veio decorar» e conclui que \
              errou o ponto, que não foi o que ele fez"
@@ -17067,9 +17271,25 @@ fn o_som_de_mod_toca_por_webaudio_e_nunca_por_um_elemento_de_audio() {
              parou de achá-lo, este guarda passa por não olhar onde a montagem de MOD mora"
         );
     }
+    // **A voz do navegador é a exceção, conferida.** Ela toca pela tag
+    // `<audio>` porque foi o que manteve a voz com a tela bloqueada no iPhone
+    // (a rodada 5 do `spikes/voz-no-navegador/`, fixada pelo ADR 0057), e o
+    // que a tag toca é um `MediaStream` do próprio grafo, por `srcObject`:
+    // nada passa por `src`, nem por `media-src`, nem por `data:`.
+    let voz = without_comments(&read("ui/voz-web.js"));
+    assert!(
+        voz.contains("elemento.srcObject = destino.stream;") && !voz.contains(".src ="),
+        "a tag de áudio da voz deixou de tocar só o `MediaStream` do grafo: com um `src`, \
+         ela cai na política de `media-src` que este guarda existe para lembrar"
+    );
     for nome in &da_janela {
         let fonte = without_comments(&read(&format!("ui/{nome}")));
-        for agulha in ["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"] {
+        let agulhas: &[&str] = if nome == "voz-web.js" {
+            &["new Audio(", "<audio"]
+        } else {
+            &["\"audio\"", "'audio'", "`audio`", "new Audio(", "<audio"]
+        };
+        for agulha in agulhas {
             assert!(
                 !fonte.contains(agulha),
                 "`{nome}` voltou a criar um elemento de áudio (`{agulha}`): ele toca o \
@@ -18768,10 +18988,16 @@ fn variantes_da_sala(nome: &str) -> Vec<String> {
                 .chars()
                 .take_while(char::is_ascii_alphanumeric)
                 .collect();
-            nome.chars().next().is_some_and(|c| c.is_ascii_uppercase()).then_some(nome)
+            nome.chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_uppercase())
+                .then_some(nome)
         })
         .collect();
-    assert!(!variantes.is_empty(), "a leitura do `enum {nome}` não achou variante nenhuma");
+    assert!(
+        !variantes.is_empty(),
+        "a leitura do `enum {nome}` não achou variante nenhuma"
+    );
     variantes
 }
 
@@ -18810,7 +19036,10 @@ fn toda_variante_da_sala_pessoal_tem_frase() {
         .filter_map(|resto| resto.split('"').next())
         .chain(["sala_fechou"])
         .collect();
-    assert!(palavras.len() >= 6, "a leitura dos desfechos quebrou: {palavras:?}");
+    assert!(
+        palavras.len() >= 6,
+        "a leitura dos desfechos quebrou: {palavras:?}"
+    );
     for palavra in palavras {
         if !bloco.contains(&format!("{palavra}:")) {
             faltam.push(format!("desfecho `{palavra}`"));

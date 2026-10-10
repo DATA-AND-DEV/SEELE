@@ -64,10 +64,12 @@ const falhas = [];
 for (const caso of vetor.casos) {
   temaDosMods.clear();
   let erro = null;
+  let lancado = null;
   try {
     aplicarOTemaDoMod("seele/estilo", caso.tema);
   } catch (e) {
     erro = e.message;
+    lancado = e;
   }
   if (caso.recusa === null) {
     if (erro !== null) falhas.push(`${caso.nome}: o vetor aceita, e a casca recusou — ${erro}`);
@@ -77,6 +79,18 @@ for (const caso of vetor.casos) {
     falhas.push(`${caso.nome}: a casca recusou sem dizer «${caso.recusa.chave}» — ${erro}`);
   } else if ((caso.recusa.erro === "chave-desconhecida") !== erro.includes("não conhece")) {
     falhas.push(`${caso.nome}: o vetor recusa com ${caso.recusa.erro}, e a casca disse outra coisa — ${erro}`);
+  } else if (caso.recusa.regiao !== undefined && !erro.includes(`«${caso.recusa.regiao}»`)) {
+    falhas.push(`${caso.nome}: a casca recusou sem dizer a região «${caso.recusa.regiao}» — ${erro}`);
+  } else if (lancado?.recusa !== undefined) {
+    // **O nome e os campos que o MOD da 6 recebe** (as regiões, 17i, item 3):
+    // os mesmos do vetor, e não só a frase.
+    const campos = { erro: lancado.recusa, ...lancado.camposDaRecusa };
+    const esperado = { ...caso.recusa };
+    if (JSON.stringify(campos) !== JSON.stringify(esperado)) {
+      falhas.push(`${caso.nome}: a casca recusa com ${JSON.stringify(campos)}, e o vetor com ${JSON.stringify(esperado)}`);
+    }
+  } else if (caso.recusa.regiao !== undefined) {
+    falhas.push(`${caso.nome}: uma recusa de região sem o nome e os campos para o MOD — ${erro}`);
   }
 }
 
