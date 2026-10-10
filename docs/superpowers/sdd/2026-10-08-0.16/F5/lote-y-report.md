@@ -447,7 +447,7 @@ comentário; a pendência de produto (61) fica com o controlador.
   `FellBehind` e a leitura acabando na despedida; 0,24–0,25 s de teste.
 - `cargo test -p seele-core --lib -- --test-threads=1` com o codec, uma vez
   (o core mudou em M1 e M2): 459 de 459, 24,88 s, carga 7,7.
-- `cargo test -p seele-server` inteiro, uma vez: rodando quando este commit saiu; o resultado vem no seguinte.
+- `cargo test -p seele-server` inteiro, uma vez (13:28–13:29, carga 8,2–9,8): saída 0, 18 alvos, **687 passados, 0 reprovados**, 66,1 s de relógio. As quatro linhas `panicked` da saída são de testes que esperam o pânico.
 - fmt limpo; clippy `-p seele-core -p seele-server --all-targets -D warnings`
   limpo.
 
