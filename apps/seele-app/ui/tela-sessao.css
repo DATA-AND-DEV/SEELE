@@ -217,14 +217,15 @@
    `pre-line` porque a impressão digital vai em linha própria: são 64
    caracteres para comparar com outro canal, e reflui-los no meio de uma frase
    é a única forma em que ninguém consegue compará-los. */
+/* O veredito é do núcleo: as cores são `--nucleo-*` (tarefa 9). */
 .veredito {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--seele-laranja-fraco);
-  border-bottom: 1px solid var(--seele-laranja-nerv);
-  color: var(--seele-laranja-nerv);
+  background: var(--nucleo-acento-fraco);
+  border-bottom: 1px solid var(--nucleo-acento);
+  color: var(--nucleo-acento);
   flex: 0 0 auto;
 }
 
@@ -916,16 +917,44 @@ button.voice_room-nome:hover { text-decoration: underline; }
 
 /* **As placas da barra do operador sobre a capa** (rascunho da API 6, §4 e
    §10; tarefa 6). A capa de quem usa pinta o fundo da barra inteira, e cada
-   texto e cada controle — o MUDO, o fone, a engrenagem, o «no ar» e o SAIR, que
-   são do núcleo — fica sobre uma placa opaca da cor do fundo nativo da barra,
-   o negro do painel: o contraste é o de sem capa, medido em `capa.cjs` com a
-   cor e a borda, contra uma capa branca e uma preta. Antes das regras de
-   estado dos botões: no empate, a de estado vem depois e vence. */
+   texto e cada controle fica sobre uma placa opaca da cor do fundo nativo da
+   barra, o negro do painel: o contraste é o de sem capa, medido em `capa.cjs`
+   com a cor e a borda, contra uma capa branca, uma preta e uma da cor da
+   tinta. O MUDO, o fone, o «no ar» e o SAIR, que são do núcleo, não estão
+   aqui: a placa deles é a do núcleo, sempre (abaixo, tarefa 9). */
 .operador[data-com-capa] :where(
-  .operador-inicial, .operador-rotulo, .operador-nome,
-  #botao-mudo, #botao-surdo, #botao-server-sessao, #voz-estado, #operador-sair, #operador-vista
+  .operador-inicial, .operador-rotulo, .operador-nome, #botao-server-sessao, #operador-vista
 ) {
   background-color: var(--seele-negro-painel);
+}
+
+/* **O núcleo de confiança, nas cores do produto** (rascunho da API 6, §10;
+   tarefa 9 da F3). O tema do servidor escreve os `--seele-*` em
+   `#tela-sessao`; os `--nucleo-*`, declarados na raiz a partir dos tokens,
+   chegam a todo filho já resolvidos, e o tema não os alcança. O MUDO, o fone,
+   o «no ar», o SAIR e o veredito os leem, sobre uma placa opaca do núcleo:
+   com e sem tema eles têm as mesmas cores — inclusive sob um tema de acento
+   igual ao fundo, que a API 6 recusa pelos pares (medido em
+   `bancada/nucleo.cjs`). Os nomes são os da casca do celular
+   (`celular-base.css`), que declara os mesmos sob a marca dela. */
+:root {
+  --nucleo-fundo: var(--seele-negro-absoluto);
+  --nucleo-painel: var(--seele-negro-painel);
+  --nucleo-texto: var(--seele-osso);
+  --nucleo-apagado: var(--seele-osso-apagado);
+  --nucleo-acento: var(--seele-laranja-nerv);
+  --nucleo-acento-fraco: var(--seele-laranja-fraco);
+  --nucleo-borda: var(--seele-linha-forte);
+}
+
+#voz-estado {
+  color: var(--nucleo-apagado);
+  background-color: var(--nucleo-painel);
+}
+
+#operador-sair {
+  color: var(--nucleo-texto);
+  background-color: var(--nucleo-painel);
 }
 
 .operador-topo { display: flex; align-items: center; gap: 8px; }
@@ -975,6 +1004,7 @@ button.voice_room-nome:hover { text-decoration: underline; }
  * `width: 34px` daqui, e um `font-size` de rótulo que deixava o glifo em 12px.
  * O resultado em campo foram duas caixas largas e aparentemente vazias no meio
  * da coluna — «os botões estão completamente estranhos». */
+/* O MUDO e o fone são do núcleo: as cores e a placa são `--nucleo-*` (acima). */
 .operador-glifo {
   width: 34px;
   height: 34px;
@@ -983,9 +1013,9 @@ button.voice_room-nome:hover { text-decoration: underline; }
   align-items: center;
   justify-content: center;
   font: inherit;
-  color: var(--seele-osso-apagado);
-  background: none;
-  border: 1px solid var(--seele-linha-forte);
+  color: var(--nucleo-apagado);
+  background: var(--nucleo-painel);
+  border: 1px solid var(--nucleo-borda);
   padding: 0;
   cursor: pointer;
 }
@@ -993,15 +1023,15 @@ button.voice_room-nome:hover { text-decoration: underline; }
 .operador-glifo .glifo { width: 1.15em; height: 1.15em; }
 
 .operador-glifo:hover {
-  color: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--nucleo-acento);
+  border-color: var(--nucleo-acento);
 }
 
 /* Desligado é laranja cheio, como todo estado ligado desta casca. */
 .operador-glifo[data-ativo="sim"] {
-  color: var(--seele-negro-absoluto);
-  background: var(--seele-laranja-nerv);
-  border-color: var(--seele-laranja-nerv);
+  color: var(--nucleo-fundo);
+  background: var(--nucleo-acento);
+  border-color: var(--nucleo-acento);
 }
 
 /* ---------- coluna 3: o canal aberto ---------- */

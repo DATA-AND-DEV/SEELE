@@ -1302,7 +1302,12 @@ pelo tema.** Fora deles, a tela é do MOD.
 
 - **os controles** — MUDO, SURDO, SAIR, AJUSTES, o veredito — ficam sobre
   superfícies que os pares do tema não conferem, e por isso **leem as cores do
-  produto** (`--nucleo-*`, a placa), que o tema não alcança;
+  produto** (`--nucleo-*`, a placa), que o tema não alcança [c, tarefa 9,
+  Steps 1 e 2, no desktop: o MUDO, o fone, o «no ar», o SAIR e o veredito,
+  com os `--nucleo-*` na raiz de `tela-sessao.css` — os nomes do celular —, e
+  a mesma cor, o mesmo fundo efetivo e a mesma borda com e sem tema, inclusive
+  o hostil, aplicado por baixo da validação; antes, sob ele, o MUDO ligado
+  caía a 1,00:1];
 - **o apelido verificado nas linhas** (`pessoas.lista`, `pessoa.cartao`,
   `conversa.mensagem`) lê o `texto` e o `painel` do tema, que os pares garantem
   a 4,5:1. O que o protege é **a estrutura**: o lugar reservado à esquerda da
