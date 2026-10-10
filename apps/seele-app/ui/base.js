@@ -108,7 +108,11 @@ function elemento(tag, classe, texto) {
 //   - `avisoDeFone`: a frase do aviso de fone (P9);
 //   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
 //     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
-//     a frase, com o nome da tecla, continua no `tela-server.js`.
+//     a frase, com o nome da tecla, continua no `tela-server.js`;
+//   - `entradaDireta`: se a casca dispensa o aperto da tela de entrada para
+//     este veredito (P11, em `entrarNaAutenticacao`; D-celular-3). Devolve
+//     `null`, e o aperto aparece como hoje, ou as frases do registro e do
+//     anúncio da entrada direta. O passo de entrar roda igual nos dois casos.
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -118,6 +122,7 @@ const CASCA = Object.seal({
   enterEnvia: true,
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
+  entradaDireta: (_veredito, _deOnde) => null,
 });
 
 // --------------------------------------------------------------- o snapshot

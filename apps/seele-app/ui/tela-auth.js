@@ -183,7 +183,13 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
   // `nossoServidor` — é o servidor que esta janela subiu. Não há chave alheia a
   // conferir, e a conferência é o assunto inteiro desta tela.
   const liberado = !tela.hidden && tela.dataset.modo === "espera";
-  const direto = liberado || nossoServidor;
+  // P11 (D-celular-3): a casca pode dispensar o aperto para um veredito que já
+  // foi conferido onde a pessoa decidiu entrar. Pula-se a tela, e não o passo:
+  // a entrada abaixo roda igual, e uma falha nela fica nesta tela, com a frase.
+  // No desktop o padrão devolve `null`, e nada muda.
+  const daCasca = liberado || nossoServidor ? null : CASCA.entradaDireta(veredito, deOnde);
+  const direto = liberado || nossoServidor || daCasca !== null;
+  tela.toggleAttribute("data-entrada-direta", daCasca !== null);
   esperando = false;
   pararDeBater();
 
@@ -225,8 +231,8 @@ function entrarNaAutenticacao(snapshot, veredito, endereco, nossoServidor = fals
     // alguém lê depois para entender por onde a janela andou, e um degrau
     // que não deixa rastro é um degrau que ninguém consegue investigar.
     if (!liberado) {
-      registrar("SERVIDOR DESTA MÁQUINA — ENTRANDO", "azul");
-      anunciar("Servidor desta máquina. Entrando.");
+      registrar(daCasca?.registro ?? "SERVIDOR DESTA MÁQUINA — ENTRANDO", "azul");
+      anunciar(daCasca?.anuncio ?? "Servidor desta máquina. Entrando.");
       entrarNoServidor().catch((falha) => console.warn("entrada:", falha));
       return;
     }
