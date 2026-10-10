@@ -637,8 +637,28 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   áudio suspenso; e a reversão sem o `ResizeObserver` passou, porque o laço
   da chamada media a cada meio segundo — o desenho passou a dizer o tamanho
   só a quem chega.
-- **Esperam:** a M3 (tarefa 11: a build de medição numa cópia e o MOD de
-  carga sintético da 6), a 17i (itens 1, 2 e 3, um commit cada), as tarefas
-  12, 13 e 18, o Step 5 da tarefa 9 (a 7d) e o Step 3 da tarefa 7 (a 11), e
-  as duas revisões aceitas (o rascunho contra a casca; os comentários
-  velhos).
+- **A revisão do rascunho contra a casca** `e5ccf266`
+  (`revisao-rascunho-contra-casca.md`), com os consertos `3235ff33` e
+  `78edf0a7`, e as três decisões da orquestradora no rascunho `72ec3a5d`: o
+  `ok` de `mundo.tema` é «forma válida e publicada» (os pares são da casca), e
+  o `chamada.palco` e o `servidor.aparencia` ficam publicados na 6. O
+  `check-api` contra o rascunho fica com 13 achados, todos da tarefa 12.
+- **A revisão dos comentários desatualizados**, na área da F3, `67826a89`;
+  nela, um defeito de verdade: a recusa do `decorar` mandava o avatar e a capa
+  usarem `adicionar`, que eles recusam. Dois achados fora da área (a frase do
+  aceite em `frases.js:702`, que quem usa lê, e o comentário do `main.rs:7738`)
+  foram para a F5, pela orquestradora.
+- **Tarefa 18, o quintal ao subir do Servidor 0.15 para o 1.0** `bde1e972`
+  (liberada pela orquestradora: a primeira abertura da F6 está na
+  `versao/0.16` desde a primeira integração). **Passa.** A pasta é escrita pelo
+  código da v0.15.1 (`54f542f94`), com o quintal gravado pelo caminho de pedido
+  de lá; o teste `versoes::o_quintal_sobe_da_0_15` faz a primeira abertura, a
+  migração dos pacotes, o servidor sobre o banco de sempre (migrado para o 15)
+  e o 4.0.0 aplicado como a gestão aplica, e a metade de servidor nova lê o
+  `theme` byte a byte. Três reversões, cada uma no passo que quebra: a
+  migração apagando o `mod_data`, o quintal lido pelo hash, e a primeira
+  abertura levando o banco em vez de copiá-lo. As migrações 1 a 13 de hoje são
+  as da v0.15.1, no SQL e na descrição (comparadas uma a uma).
+- **Esperam:** a M3 (tarefa 11, o Step 4: o dono rodar a campanha), as
+  tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da tarefa 9 (a 7d) e
+  o Step 3 da tarefa 7 (a 11).

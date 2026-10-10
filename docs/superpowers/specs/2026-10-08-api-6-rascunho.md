@@ -1384,9 +1384,15 @@ Quem hospeda e sobe do Servidor 0.15 para o 1.0 **mantém o quintal do MOD**:
 a 0.16 abre e migra a pasta de dados de sempre (a cópia para
 `dados/servidor-0.15` é da linha legada), e a tabela `mod_data` é endereçada
 pelo identificador do MOD, e não pelo hash do pacote, então o ESTILO 4.0.0
-herda o que o `seele/estilo` 3.x gravou. **Isso pede um teste com a F6**
-(tarefa 18 do plano): hospedar a 0.16 sobre uma pasta da 0.15 com dados do
-`seele/estilo` e ver o `mod_data` intacto depois da migração. **O tema
+herda o que o `seele/estilo` 3.x gravou. **Provado** (tarefa 18 do plano,
+`versoes::o_quintal_sobe_da_0_15` [c]): uma pasta escrita pelo código da
+v0.15.1, com o tema que a metade de servidor do 3.1.0 gravou em `dados.theme`,
+aberta pela 0.16 (a primeira abertura, o servidor sobre o banco de sempre,
+migrado), e o 4.0.0 — outro pacote, outro hash — lendo o `dados.theme` igual,
+byte a byte. A linha 0.15 guarda a cópia dela, com o mesmo quintal, para quem
+voltar a um Servidor 0.15. **Para as notas do ESTILO 4.0.0:** o `dados` da 4.0.0
+começa com tudo o que a 3.x gravou, nas mesmas chaves; nada é migrado pelo
+produto, e a forma dos valores é a que a 3.x escreveu. **O tema
 guardado pelo servidor (B1) é novo na 6**: ele começa vazio, e a primeira
 publicação do ESTILO 4.0.0 o preenche a partir do quintal.
 
@@ -1861,7 +1867,7 @@ tema não tinha tarefa), e virou o grupo 17 do plano da F3. Os outros:
 | B6 | `listarNaBarra` | continua; no celular, vale na aba SERVIDOR | §3 |
 | B7 | o terceiro botão e o erro de dois campos | `confirmar` em qualquer `botao`; `formulario.erros` com as duas chaves | §5 |
 | B8 | as peças só no texto | cada uma com teste no produto, na tarefa 17 | §9; plano, 17 |
-| B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | mantido pela leitura (o `mod_data` é por identificador); a prova é a tarefa 18, com a F6 | §9 |
+| B9 | o quintal ao subir do Servidor 0.15 para o 1.0 | **mantido, e provado** (tarefa 18): uma pasta escrita pela v0.15.1, aberta pela 0.16, e o 4.0.0 lendo o quintal do 3.1.0 | §9 |
 
 **PERFIS** (`docs/plano-api-6.md` dele):
 
