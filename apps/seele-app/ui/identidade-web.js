@@ -143,7 +143,10 @@ function relogioDaPagina() {
 }
 
 function cascaDaPagina() {
-  return document.documentElement.dataset.casca;
+  // Pela casca do celular de pé, e não pela marca: o `CELULAR` só existe quando
+  // o `celular-casca.js` achou a marca dele (o G2 de `tests/celular.rs`, e a
+  // mesma regra do `cascaDoRetrato` em `base.js`).
+  return typeof CELULAR === "object" && CELULAR !== null ? "celular" : "larga";
 }
 
 function estaInstalado() {

@@ -9535,8 +9535,9 @@ uma 0.15.3, o conserto do Y entra nela.
 os lotes do servidor passam do anel de 1024 do barramento, uma sessão que só
 escreve e não lê é desligada com `FellBehind`, e a cauda do que ela mandou não é
 gravada. O que a sessão leu antes de desligar foi gravado, e o cliente de verdade
-repete o resto com a mesma chave. Um cliente normal lê o que chega; o caso aparece
-com um cliente que só fala (um robô, um teste). **Não consertado**: decidir na
+repete o resto com a mesma chave. **A revisão do Y mostrou que também acontece com um cliente que lê**, quando ele
+escreve em rajada: o comentário do braço `Lagged` em `seele-server/src/session.rs`,
+que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Não consertado**: decidir na
 revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
 
 Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no

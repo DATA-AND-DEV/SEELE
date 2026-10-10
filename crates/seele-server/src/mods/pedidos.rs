@@ -14,7 +14,13 @@ use seele_proto::{
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
-fn package(root: &Path, dir: &Path, files: &mut Vec<(String, Vec<u8>)>) -> anyhow::Result<()> {
+/// Os arquivos de um pacote na ordem e na forma em que o hash dele é conferido:
+/// sem `dados/` na raiz, e sem atalho.
+pub(crate) fn package(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         if dir == root && entry.file_name() == "dados" {
