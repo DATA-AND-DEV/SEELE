@@ -114,10 +114,12 @@ function desenharChamada(snapshot) {
 // ------------------------------------------------------- o palco dos MODs
 
 /**
- * Se a pessoa escolheu ver a grade com um palco de pé (VER A GRADE). Volta a
- * falso quando o palco sai: o palco seguinte chega à frente.
+ * Se o palco está escondido atrás da grade. **Começa escondido**, e volta a
+ * escondido quando o palco sai: quem o traz à frente é a pessoa, com VER O
+ * PALCO. A grade é onde moram as capas de quem fala (D-capa-1), e um MOD que
+ * registra o palco não tira a grade da vista de ninguém sem ela pedir.
  */
-let palcoDosModsEscondido = false;
+let palcoDosModsEscondido = true;
 
 /**
  * **`chamada.palco`** (rascunho da API 6, §5; tarefa 7, Step 5): o palco dos
@@ -126,6 +128,10 @@ let palcoDosModsEscondido = false;
  * A substituição escolhida — pela preferência desta máquina, ou pela
  * prioridade — é o miolo; os acréscimos moram numa faixa abaixo dele, na
  * ordem do registro. Só dentro de uma sala: o palco é da chamada.
+ *
+ * **Começa escondido**: o palco que chega não toma a vista. VER O PALCO, na
+ * barra da chamada, aparece com ele e o traz à frente; VER A GRADE o devolve
+ * para trás.
  *
  * **Chamado também pelo desenho da sessão**, e não só pelo desta tela: a
  * chamada só se redesenha com a vista dela à frente, e quem sai da sala com a
@@ -155,7 +161,7 @@ function desenharOPalcoDosMods(snapshot) {
   $("palco-de-mods-acrescimos").hidden = acrescimos.length === 0;
 
   const tem = Boolean(desenho) || acrescimos.length > 0;
-  if (!tem) palcoDosModsEscondido = false;
+  if (!tem) palcoDosModsEscondido = true;
   // **De quem é o palco**, escrito pelo produto, e não pelo MOD.
   const quem = [...new Set([
     ...(desenho ? [escolhida.mod] : []),
