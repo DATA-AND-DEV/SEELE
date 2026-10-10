@@ -9511,9 +9511,12 @@ intermitente da volta. **Existe na v0.15.1 publicada** (`54f542f94`):
 passam a entrada e a volta.
 
 **O mecanismo (medido no macOS pelo Y):** a escolha de porta de `[::]:0` só
-confere os sockets IPv6. Com N sockets UDP IPv4 ligados ao endereço por onde a
-resposta volta, na faixa efêmera, a chance de colisão é cerca de N/16384 (992 em
-4000 com 4000 presos). A resposta do servidor vai para o socket IPv4, e a
+confere os sockets IPv6. Roubam a resposta os sockets UDP IPv4 **não
+conectados**, no endereço exato por onde ela volta **ou no curinga
+`0.0.0.0:X`**; os conectados não roubam (20 de 20). Com N desses na faixa
+efêmera, a chance de colisão é cerca de N/16384 (992 em 4000 com 4000 presos).
+A primeira estimativa de frequência abaixo contou sockets conectados e está
+acima do real: na máquina medida, N era 0. A resposta do servidor vai para o socket IPv4, e a
 tentativa espera os 20 s da ociosidade do QUIC por nada.
 
 **O custo:** uma entrada que falha depois de 20 s, ou uma tentativa de volta
@@ -9521,7 +9524,21 @@ perdida; a seguinte pega outra porta e funciona. Sem perda de dado nem de
 segurança. Na máquina medida, ~1 em 2700 tentativas; com uma chamada de vídeo no
 navegador, ~1 em 300 a 1 em 1000. Windows e Linux não foram medidos.
 
-**Na 0.16:** consertado no lote Y (`6061e38c`, `client::socket_de_quem_conecta`).
+**Na 0.16:** consertado no lote Y (`6061e38c`, `client::socket_de_quem_conecta`, e `99142c72` para o curinga, que o primeiro conserto não cobria). Os testes rodam nos três sistemas, encenando a colisão onde o sistema deixa e medindo a recusa onde não deixa; o CI diz em qual braço cada um cai.
 **Na linha 0.15:** fica como está. A 0.15.2 sai com o que é de segurança ou de
 leitura, e este é tempo, raro, e se resolve tentando de novo; se a linha ganhar
 uma 0.15.3, o conserto do Y entra nela.
+
+## 61 · Quem só escreve, sem ler, é desligado com `FellBehind`
+
+**Aberta em 2026-10-10**, achada pelo lote Y da F5 ao medir o `par_lento`. Quando
+os lotes do servidor passam do anel de 1024 do barramento, uma sessão que só
+escreve e não lê é desligada com `FellBehind`, e a cauda do que ela mandou não é
+gravada. O que a sessão leu antes de desligar foi gravado, e o cliente de verdade
+repete o resto com a mesma chave. Um cliente normal lê o que chega; o caso aparece
+com um cliente que só fala (um robô, um teste). **Não consertado**: decidir na
+revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
+
+Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
+`becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
+os testes esquecem de propósito continuam vazando (não roubam mais respostas).
