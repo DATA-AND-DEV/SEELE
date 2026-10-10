@@ -495,7 +495,8 @@ fn corpo_do_comando(main: &str, comando: &str) -> Option<String> {
 ///
 /// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
 /// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
-/// `portaria::`, `persistence_do_mod`) está numa de três listas, e nunca solto
+/// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`) está numa
+/// de três listas, e nunca solto
 /// entre os atendidos:
 /// 1. `RECUSAS_NOMEADAS`;
 /// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
@@ -519,6 +520,13 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
             "persistence_hospedada",
             "portaria::",
             "persistence_do_mod",
+            // O ajudante da F3 que acha o servidor de um MOD pelas hospedagens
+            // (`38421122`, na 0.16/api-6), e a sala pessoal da F7, que mexe nas
+            // hospedagens de dentro do `sala.rs` (`sala::subir`,
+            // `sala::desligar`, na 0.16/sala-viva). Um comando que só chame um
+            // deles mexe na hospedagem sem escrever a palavra no corpo.
+            "servidor_do_mod",
+            "sala::",
         ]
         .iter()
         .any(|marca| corpo.contains(marca));
