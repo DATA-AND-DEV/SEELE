@@ -9554,6 +9554,24 @@ Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
 `becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
 os testes esquecem de propósito continuam vazando (não roubam mais respostas).
 
+**O conserto do servidor, medido pela F1 em 10/10** (`1ebf85a4` na 0.16; relatório em
+`F1/pendencia-61-medida.md`, seção 5): o `TETO_DO_LOTE` (um quarto do anel) e a
+contrapressão `TETO_NO_AR` (8 mensagens no ar por conexão), com o `rajada_de_muitos.rs`
+sem `#[ignore]`. Cada metade foi medida sozinha, nas duas linhas: **só o teto do lote passa
+o 18 × 58 e reprova o 24 × 58 com 4 KiB** (3 de 3), porque segura um anúncio e não uma
+sequência deles; só a contrapressão passa os dois; as duas juntas passam, e o teto ainda
+segura o que a contrapressão não segura (mais de 128 conexões com mensagens no ar). **A
+linha 0.15 reproduz igual** (`40066a7c`, que no servidor só difere da v0.15.1 publicada no
+`assentar`): 19 de 19 e 25 de 25 sessões para trás sem conserto.
+
+**Decisão da orquestradora (10/10): entra na 0.15.2, com as duas metades.** Uma porta de
+negação de serviço que 18 conexões abrem não espera a 0.16. O porte é o
+`F1/pendencia-61-linha-0.15.patch` (5 arquivos, mais o `tokio` com `test-util` nas
+`dev-dependencies` do `seele-server`, que não entra no binário), num commit sobre
+`40066a7c`, com a bateria inteira da linha e a prova pela reversão. A 0.15.2 pronta passa a
+ser esse commit. A metade do cliente (só as razões de fim encerram; o histórico buscado na
+volta) fica na 0.16.
+
 ## 62 · O pedido de MOD ignora o papel mínimo do canal, e nada grava o papel mínimo
 
 **Aberta em 2026-10-10**, medida pela F3 da 0.16 na tarefa 16. Em `mods/pedidos.rs`,
