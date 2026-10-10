@@ -488,5 +488,33 @@ Branch da frente: `0.16/api-6`, a partir de `versao/0.16`.
     qualquer commit.
   - Pendente: os identificadores ignorados contarem na aba DIAGNÓSTICO
     (espera `camada-mods.js`, onde está o lote W da F5).
-  - Próximo: os Steps 6 (`atualizar`), 7 (o teto por alvo), 7b (as recusas
-    nomeadas), 8 (`regiao-ausente`) e 8b (o `operador.barra` no celular).
+  - Steps 6 a 8: `atualizar` `4409a271`; o teto por alvo `6317df2c` (por
+    alvo, MOD e modo, aceito; o caso dos dois modos `b1c9e4fd`); as recusas
+    nomeadas `577e899f`; `regiao-ausente` `fb13e65e` (declarado pelo
+    `CELULAR`, e não pela marca, aceito). O `status.barra` não existe no
+    celular (medido pela F8, decidido): `7f5b45f0`. O 8b é da F8, com os
+    meus critérios.
+  - Pendente: as duas contagens na aba DIAGNÓSTICO (espera `camada-mods.js`,
+    onde a F5 vai antes).
+- **Tarefa 6, `pessoa.capa`** (09/10).
+  - Steps 1–3 `439f05a4`: a carga do avatar virou `imagemContribuida`, a
+    mesma para o avatar e a capa; a capa é uma camada atrás do conteúdo, com o
+    véu e o halo no `::after` dela; o quadro parado para o movimento reduzido;
+    o `midia` com ponto e alvo.
+  - Step 4 `eaa994e6`: as placas na cor do fundo nativo; o guarda **medido**
+    (contraste de cada texto contra uma capa branca e uma preta, calado e
+    falando), e não de texto; a capa de quem usa veste só a identidade, e o
+    MUDO, o fone e o SAIR nunca ficam sob ela (uma contradição do §4).
+  - Step 4b `2e1867bd`: a citação `daPessoa`, sem pedido novo e com zero
+    bytes no bolso do cartão.
+  - Step 5: a redução no Rust `97332b9c`; o uso e o bolso decodificado
+    `7dbd5928`; seis capas animadas `b6fa329c`.
+  - Esperam a F8: o «SEU PERFIL» e a capa no celular.
+  - Um tropeço de processo: dois commits saíram com um guarda vermelho porque
+    eu encadeei a verificação e o commit num comando só. Os dois foram
+    emendados antes de qualquer integração; agora verifico e commito em
+    passos separados.
+  - Ruling: o teto do bolso das capas, 128 MiB decodificados por MOD — custo
+    se errado: um MOD com muitas capas animadas recusado antes da medida, ou
+    memória demais num celular; a M3 mede.
+  - Próximo: a tarefa 7.
