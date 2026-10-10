@@ -213,3 +213,6 @@ o executor os ativa (`MOD ativado no executor nativo`), e a metade de servidor
 recusa todo pedido com `MOD request refused … No such file or directory (os
 error 2)`. Na tela, nenhum MOD desenha nada, e a aba DIAGNÓSTICO diz «nenhum MOD
 usa este lugar agora» nos onze lugares. O `m3-servidor.rs` instala por hash.
+**Consertado no exemplo em 10/10** (tarefa 15 da F3, `18043d51`): ele instala
+por hash, pela mesma função que `crates/seele-server/tests/exemplo_com_mod.rs`
+usa, e escuta na 8390, nunca na 8384.

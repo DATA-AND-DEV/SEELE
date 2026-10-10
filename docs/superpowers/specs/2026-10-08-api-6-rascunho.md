@@ -1656,7 +1656,7 @@ bolsos contam bytes decodificados, e o MOD lê o teto para dizê-lo no seletor.
 | um tipo de superfície desconhecido vira `dialogo` em silêncio | `mods-superficies.js:225` | recusa pelo nome, `tipo-desconhecido` [c, tarefa 7] |
 | o retrato era o `Snapshot` inteiro, com `link_state` e os aparelhos | `base.js:2126-2133` | lista branca (§6) |
 | o guarda de capacidades citado em `base.js:1963-1965` nunca existiu | `git log -S` | criado |
-| **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). **Defeito**: conserto do exemplo e do guia na fase de código (tarefa 15 do plano), com o teste que instala pelo caminho do exemplo |
+| **o exemplo `servidor-com-mod.rs` instala o pacote por identificador, e o servidor o procura por hash**: a metade de servidor recusa todo pedido com «No such file or directory» | `crates/seele-server/examples/servidor-com-mod.rs`; `RaizesDosMods::pacote_de`, `lib.rs:137-138` | **[medido]** na M3 (ADR 0056). **Consertado** em 10/10 (tarefa 15, `18043d51`): o exemplo instala por hash (`seele_server::mods::instalar`), fora da 8384, e o guia o documenta; `tests/exemplo_com_mod.rs` instala pelo caminho do exemplo e pede ao MOD |
 
 ### As regras da v6 que vêm destes achados
 

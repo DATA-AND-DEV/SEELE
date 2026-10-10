@@ -677,7 +677,12 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
 - **O 8b foi feito pela F8** (`1f09c7ba` e `d1773fd6`, no `0.16/celular`): do
   lado da F3 falta o `aplicarARegiao` lendo a declaração dela e a bancada com o
   guarda 11, depois que o `0.16/celular` integrar.
+- **Tarefa 15, o exemplo `servidor-com-mod.rs`** `18043d51`: instala por hash
+  (`seele_server::mods::instalar`), liga o MOD antes de subir, diz as queixas
+  da subida no terminal e escuta na 8390, recusando a 8384; o teste
+  `exemplo_com_mod.rs` reprovou com a instalação por identificador e passa por
+  hash (a reversão reprova); rodado de verdade numa porta à parte; o guia diz
+  como usá-lo. O Step 3 (a prova de janela) fica para a campanha do dono.
 - **Esperam:** a M3 (depois da décima segunda integração, o dono a roda da
   `versao/0.16`), as tarefas 12 (os números da M3) e 13 (o corte), o Step 5 da
-  tarefa 9 (a 7d), o Step 3 da tarefa 7 (a 11), e a 15 (liberada, depois da
-  16).
+  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (a 11).
