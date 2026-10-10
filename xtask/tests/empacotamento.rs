@@ -629,13 +629,21 @@ pathlib.Path(entrega, "latest.json").write_text(
         // roteiros (`roteiros_da_casca`). O de verdade abre um navegador para
         // cada roteiro; este anota a chamada e, com `FALSO_ROTEIROS`, reprova
         // como o de verdade reprova: o fim da saída diz o roteiro e a frase.
+        // Com `FALSO_ROTEIROS=pendura`, ele diz dois roteiros antes de rodá-los,
+        // como o de verdade, e trava no segundo até o prazo da etapa vencer.
         escrever(
             &repo.join("tools/carga-da-casca.py"),
             r#"#!/usr/bin/env python3
-import os, sys
+import os, sys, time
 
 with open(os.environ["SEELE_TESTE_DIARIO"], "a", encoding="utf-8") as diario:
     diario.write("carga " + " ".join(sys.argv[1:]) + "\n")
+if os.environ.get("FALSO_ROTEIROS", "ok") == "pendura":
+    print("roteiro: rodando tools/roteiros/aceite-de-mods.js", flush=True)
+    print("carga limpa: nenhum script estourou.", flush=True)
+    print("roteiro: rodando tools/roteiros/toque.js", flush=True)
+    time.sleep(30)
+    sys.exit(0)
 if os.environ.get("FALSO_ROTEIROS", "ok") != "ok":
     print("roteiros: 1 de 2 reprovaram:")
     print("  tools/roteiros/aceite-de-mods.js: REPROVADO: o ACEITAR não gravou o sim")
@@ -4290,6 +4298,51 @@ fn um_roteiro_da_casca_vermelho_para_a_publicacao_antes_de_empacotar() {
 }
 
 #[test]
+fn um_roteiro_que_trava_e_nomeado_quando_o_prazo_da_etapa_vence() {
+    // **A frase de sempre do prazo vencido fala do `seele-video`**, que é o
+    // caso conhecido da etapa dos testes. Um roteiro que trava não tem nada
+    // com isso, e quem publica leria o conserto de outro defeito. A etapa dos
+    // roteiros passa `--prazo prazo_dos_roteiros`, que nomeia o último roteiro
+    // que a carga disse que rodava.
+    let Some(bancada) = Bancada::nova() else {
+        return;
+    };
+    let codec = codec_de_mentira(&bancada);
+    let saida = bancada.rodar(
+        &["1.2.3", "--pular", "windows"],
+        &[
+            ("SEELE_OPENH264", codec.as_str()),
+            ("FALSO_ROTEIROS", "pendura"),
+            ("SEELE_PRAZO_DA_ETAPA_S", "5"),
+        ],
+    );
+
+    assert_ne!(
+        saida.estado, 0,
+        "um roteiro travou até o prazo e a publicação seguiu:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida
+            .texto
+            .contains("O roteiro que travou: tools/roteiros/toque.js."),
+        "o prazo dos roteiros venceu e a frase não diz qual travou:\n{}",
+        saida.texto
+    );
+    assert!(
+        !saida.texto.contains("seele-video"),
+        "o prazo dos roteiros venceu e a frase fala do `seele-video`, que é o caso da etapa \
+         dos testes:\n{}",
+        saida.texto
+    );
+    assert!(
+        saida.nada_foi_empacotado(),
+        "um roteiro travou e mesmo assim algo foi empacotado:\n{}",
+        saida.diario
+    );
+}
+
+#[test]
 fn o_sem_bateria_pula_tambem_os_roteiros_da_casca() {
     // A saída de emergência pula a bateria inteira, e os roteiros não podem
     // virar uma etapa que roda mesmo assim. O grito é o mesmo da bateria
@@ -4434,10 +4487,13 @@ fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
     // esse terminal: a página da v0.15.0 não tem a palavra «bateria» (medido
     // em 04/10/2026). A linha diz o que rodou, e o Windows só quando ele foi
     // pedido — a bateria de lá só roda quando há pacote de lá.
+    //
+    // E os roteiros da casca, desde o lote RT da F5: a etapa existir e a
+    // página da versão não dizer é o produto saber e não contar.
     let (estado, aqui) = linha_da_bateria("macos linux", false);
     assert_eq!(estado, 0, "a linha da bateria não saiu:\n{aqui}");
     assert!(
-        aqui.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)"),
+        aqui.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)"),
         "a linha não diz que a bateria rodou, nem o que ela rodou:\n{aqui}"
     );
     assert!(
@@ -4448,7 +4504,7 @@ fn a_linha_da_bateria_diz_o_que_rodou_e_onde() {
 
     let (_, com_windows) = linha_da_bateria("macos windows linux", false);
     assert!(
-        com_windows.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny)")
+        com_windows.contains("Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)")
             && com_windows.contains("e no Windows"),
         "com o Windows pedido, a bateria roda lá também, e a linha não diz:\n{com_windows}"
     );

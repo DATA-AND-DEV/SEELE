@@ -662,9 +662,10 @@ mod tests {
     }
 
     /// Os roteiros que a bateria do `publicar.sh` roda: a chamada de
-    /// `etapa_da_bateria` em `roteiros_da_casca` cujo comando — depois da
-    /// queixa e do conserto — é a carga. Exige também que a `bateria()` chame
-    /// a etapa, numa linha só dela: uma função que ninguém chama não roda.
+    /// `etapa_da_bateria` em `roteiros_da_casca` cujo comando — depois do
+    /// `--prazo <função>`, que é opcional, da queixa e do conserto — é a carga.
+    /// Exige também que a `bateria()` chame a etapa, numa linha só dela: uma
+    /// função que ninguém chama não roda.
     fn roteiros_no_publicar() -> Vec<String> {
         assert!(
             comandos_da_funcao("bateria")
@@ -681,7 +682,14 @@ mod tests {
                     .first()
                     .is_some_and(|primeira| primeira == "etapa_da_bateria")
             })
-            .filter_map(|palavras| roteiros_do_comando(palavras.get(3..).unwrap_or_default()))
+            .filter_map(|palavras| {
+                let argumentos = palavras.get(1..).unwrap_or_default();
+                let argumentos = match argumentos {
+                    [opcao, _, resto @ ..] if opcao == "--prazo" => resto,
+                    _ => argumentos,
+                };
+                roteiros_do_comando(argumentos.get(2..).unwrap_or_default())
+            })
             .collect();
         assert_eq!(
             chamadas.len(),

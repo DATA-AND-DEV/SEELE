@@ -718,10 +718,10 @@ linha_da_bateria() {
     fi
     case " $2 " in
         *" windows "*)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny) e no Windows (testes)."
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca) e no Windows (testes)."
             ;;
         *)
-            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny)."
+            printf '%s\n' "Bateria: rodou aqui (fmt, clippy, testes, cargo deny, roteiros da casca)."
             ;;
     esac
 }
@@ -1067,7 +1067,18 @@ conferir_ferramentas() {
 # se pode fazer alguma coisa.
 PRAZO_DA_ETAPA_S="${SEELE_PRAZO_DA_ETAPA_S:-2400}"
 
+#   etapa_da_bateria [--prazo <função>] <queixa> <conserto> <comando…>
+#
+# A frase de quando o prazo vence fala do `seele-video`, que é o caso conhecido
+# da etapa dos testes. Uma etapa que trava por outro motivo diz o seu com
+# `--prazo`: a função é chamada depois de o comando ser interrompido, com o
+# registro dele em `$TEMPORARIO/bateria.log`, e morre dizendo o que travou.
 etapa_da_bateria() {
+    eb_prazo=""
+    if [ "${1:-}" = "--prazo" ]; then
+        eb_prazo="$2"
+        shift 2
+    fi
     eb_queixa="$1"
     eb_conserto="$2"
     shift 2
@@ -1082,6 +1093,7 @@ etapa_da_bateria() {
         if [ "$eb_gasto" -ge "$PRAZO_DA_ETAPA_S" ]; then
             kill -9 "$eb_filho" 2>/dev/null || true
             wait "$eb_filho" 2>/dev/null || true
+            [ -z "$eb_prazo" ] || "$eb_prazo"
             morrer "a bateria passou de $PRAZO_DA_ETAPA_S segundos e foi interrompida." \
                 "Isto não é lentidão: com tudo compilado ela leva uns cinco minutos." \
                 "" \
@@ -1128,8 +1140,13 @@ etapa_da_bateria() {
 # fim que `etapa_da_bateria` mostra. A lista é a mesma do job `bancadas` do
 # `ci.yml`, e o teste `todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`
 # (`xtask/src/check_runtime.rs`) exige cada arquivo da pasta nas duas.
+#
+# **Com o prazo dela.** A frase de sempre do prazo vencido fala do
+# `seele-video`, que é o caso da etapa dos testes; a desta diz o roteiro que
+# travou (`prazo_dos_roteiros`, logo abaixo).
 roteiros_da_casca() {
-    etapa_da_bateria "um roteiro da casca reprovou, ou falta nesta máquina o navegador que a carga usa." \
+    etapa_da_bateria --prazo prazo_dos_roteiros \
+        "um roteiro da casca reprovou, ou falta nesta máquina o navegador que a carga usa." \
         "Leia o fim da saída: ele diz qual roteiro reprovou e com que frase. Sem o navegador, «npx playwright install chromium» o instala." \
         python3 tools/carga-da-casca.py \
         --roteiro tools/roteiros/aceite-de-mods-em-corrida.js \
@@ -1166,6 +1183,24 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/toque.js \
         --roteiro tools/roteiros/trocar-de-janela.js \
         --roteiro tools/roteiros/versao-do-servidor.js
+}
+
+# O prazo vencido da etapa dos roteiros: diz qual roteiro travou.
+#
+# A carga diz cada roteiro **antes** de rodá-lo (`roteiro: rodando <caminho>`)
+# e escreve linha a linha, então o último dito no registro é o que rodava
+# quando o prazo venceu. Juntos, os roteiros levam segundos: um que trava é um
+# navegador que não terminou, e não lentidão.
+prazo_dos_roteiros() {
+    pr_travado=$(LC_ALL=C sed -n 's/^roteiro: rodando //p' "$TEMPORARIO/bateria.log" | tail -n 1)
+    morrer "os roteiros da casca passaram de $PRAZO_DA_ETAPA_S segundos e foram interrompidos." \
+        "O roteiro que travou: ${pr_travado:-nenhum; a carga travou antes de dizer o primeiro}." \
+        "Juntos, eles levam segundos: isto é um navegador que não terminou, e não lentidão." \
+        "Rode-o sozinho, com tudo o que a página disse:" \
+        "  python3 tools/carga-da-casca.py --tudo --roteiro ${pr_travado:-<roteiro>}" \
+        "" \
+        "As últimas linhas antes de ela parar:" \
+        "$(tail -n 20 "$TEMPORARIO/bateria.log")"
 }
 
 bateria() {
