@@ -1352,6 +1352,41 @@ async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
   assert.ok(daBatida[0][1].includes('AdmissionPending'),
     `a linha da batida calada não diz o motivo: ${JSON.stringify(daBatida)}`);
 
+  // ---- 3. Duas batidas sobrepostas (rodada 3 da revisão, R2-M1). O relógio
+  // da espera é religado pelo `visibilitychange` com uma batida no ar, e uma
+  // segunda sai antes de a primeira voltar. A primeira, voltando, não pode
+  // zerar a marca da segunda: com a marca zerada, a segunda volta pendente
+  // depois que a pessoa saiu e reabre a espera por cima da entrada que ela
+  // escolheu — o que a marca existe para evitar. É o `finally` de
+  // `baterDeNovo`, que só zera a própria marca.
+  await abrirAEspera();
+  await page.evaluate((alvo) => {
+    pararDeBater();
+    window.testAntes = testCalls.length;
+    window.testAtrasoPorAlvo[alvo] = 600;
+    window.testB1 = baterDeNovo();
+    setTimeout(() => { window.testAtrasoPorAlvo[alvo] = 1200; window.testB2 = baterDeNovo(); }, 300);
+    setTimeout(() => voltarParaAEntrada(), 800);
+  }, PORTARIA_W2);
+  await page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).filter(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida).length >= 2,
+    PORTARIA_W2, { timeout: 4000 },
+  ).catch(() => assert.fail('as duas batidas não voltaram, e este caso não mede nada'));
+  await page.evaluate(() => Promise.all([testB1, testB2]));
+  await page.waitForTimeout(100);
+  const depoisDasDuas = await page.evaluate(() => ({
+    espera: !document.getElementById('tela-auth').hidden,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+  }));
+  if (depoisDasDuas.espera) await page.evaluate(() => voltarParaAEntrada());
+  assert.deepEqual(depoisDasDuas, { espera: false, linha: null },
+    'com duas batidas sobrepostas, a primeira voltou e zerou a marca da segunda; a segunda voltou depois de a pessoa sair ' +
+    `da espera e falou na tela por cima da entrada que ela escolheu: ${JSON.stringify(depoisDasDuas)}`);
+  const dasDuas = (await noRegistro(PORTARIA_W2)).map(([nivel, frase]) => [nivel, frase.includes('batida da espera') ? 'batida' : 'substituída']);
+  assert.deepEqual(dasDuas, [['aviso', 'substituída'], ['aviso', 'batida']],
+    'cada uma das duas batidas sobrepostas devia deixar a sua linha no seele.log — a primeira como tentativa substituída, ' +
+    `a segunda como a batida largada: ${JSON.stringify(await noRegistro(PORTARIA_W2))}`);
+
   assert.deepEqual(erros, [], 'a cena da batida da espera do lote W2 lançou erro na página');
   await page.close();
 }
