@@ -320,10 +320,14 @@ window.__TAURI__ = {
     },
     emit: async () => {},
   },
+  // O ouvinte do fechar fica guardado, e o `close` é contado: um roteiro pode
+  // pedir o fechar da janela como o sistema pede, e ver se ela fechou.
   window: { getCurrentWindow: () => ({
-    minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {},
+    minimize: async () => {}, toggleMaximize: async () => {},
+    close: async () => { window.__SEELE_FECHAMENTOS = (window.__SEELE_FECHAMENTOS ?? 0) + 1; },
     isFullscreen: async () => false, setFullscreen: async () => {},
-    onCloseRequested: async () => () => {}, listen: async () => () => {},
+    onCloseRequested: async (ouvinte) => { window.__SEELE_AO_FECHAR = ouvinte; return () => {}; },
+    listen: async () => () => {},
   }) },
   webviewWindow: { getCurrentWebviewWindow: () => ({ listen: async () => () => {} }) },
   dialog: { open: async () => null, save: async () => null, message: async () => {} },

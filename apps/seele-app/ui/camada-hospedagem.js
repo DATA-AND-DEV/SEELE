@@ -84,3 +84,56 @@ new MutationObserver(() => {
 }).observe($("tela-boot"), { attributes: true, attributeFilter: ["hidden"] });
 
 desenharMeuServidor().catch(() => {});
+
+// ------------------------------------------------- a confirmação ao fechar (21)
+//
+// **Fechar o SEELE com o servidor guardado no ar tira todo mundo dele** (tarefa
+// 21 da F7; spec de 23/09: «a confirmação ao fechar vale só para o servidor
+// guardado»). A sala pessoal não pergunta: ela se despede sozinha, e quem estava
+// nela lê «chamada encerrada».
+//
+// **Um ouvinte só, para todo fechar da janela:** o botão da casca (`close()`
+// também pede o fechar), o botão vermelho do macOS e o Alt+F4 do Windows. O
+// Cmd+Q do macOS **não** passa por aqui (medido no runtime: o item Quit manda o
+// `terminate:`, e o `tao` vai direto ao `RunEvent::Exit`); ele é assunto do
+// `main.rs`.
+//
+// **É a exceção ao guarda da credencial** (lote R da F5, rodada 1, M2), decidida
+// pela orquestradora em 10/10 no molde da do `beforeunload`: segurar o fechar
+// mantém a página viva, e com ela o que estiver na memória. Por isso, antes de
+// qualquer veto, as duas credenciais da tentativa somem: a da pergunta dos MODs
+// (`fecharAceiteDeMods()`) e a que um apelido tomado deixou
+// (`esquecerARecusaDoApelido()`, de `tela-boot.js`, que é quem a guarda). E o
+// veto só acontece com o servidor guardado no ar.
+
+/** A pessoa disse sim: o pedido de fechar seguinte passa direto. */
+let fecharSemPerguntar = false;
+
+const janelaDoApp = window.__TAURI__?.window?.getCurrentWindow?.();
+janelaDoApp
+  ?.onCloseRequested(async (pedido) => {
+    if (fecharSemPerguntar) return;
+    fecharAceiteDeMods();
+    esquecerARecusaDoApelido();
+    let meu = null;
+    try {
+      meu = await invoke("meu_servidor");
+    } catch {
+      meu = null;
+    }
+    // Sem servidor no ar, fecha direto: não há o que perguntar.
+    if (!meu) return;
+    pedido.preventDefault();
+    const nome = meu.nome || "O SEU SERVIDOR";
+    abrirConfirmacao(
+      "FECHAR O SEELE",
+      `${nome} sai do ar quando o SEELE fecha, e todo mundo que estiver nele sai junto.\n` +
+        "Para sair sem derrubá-lo, saia do servidor e deixe o SEELE aberto.",
+      `FECHAR E TIRAR ${nome} DO AR`,
+      async () => {
+        fecharSemPerguntar = true;
+        await janelaDoApp.close();
+      },
+    );
+  })
+  .catch((falha) => console.warn("o pedido de fechar:", falha));
