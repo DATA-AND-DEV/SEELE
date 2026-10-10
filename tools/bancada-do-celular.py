@@ -1828,16 +1828,16 @@ CASOS: dict[str, Caso] = {
     "faixa-de-voz": Caso(levar=faixa_de_voz, temas=("papel", "profundo", "claro", "hostil"),
                          raiz="#voz, .cel-abas, #aviso-fone, #aviso-audio"),
     "segurar": Caso(levar=segurar, raiz="#voz, .cel-abas"),
-    # O claro entra com a Tarefa 13: o azul da sala ocupada e o fósforo de
-    # quem fala são cores de estado, e a derivação delas a partir do tema é a
-    # função 17e da F3. Até lá, o claro reprova o «VOCÊ ESTÁ AQUI» a 2,6:1.
-    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "hostil"),
+    # O claro voltou com a Tarefa 13: o azul da sala ocupada e o fósforo de quem
+    # fala são cores de estado, derivadas do tema pela `tonsDoTema` da F3 (17e).
+    # Sem ela, o claro reprovava o «VOCÊ ESTÁ AQUI» a 2,6:1.
+    "aba-servidor": Caso(levar=aba_servidor, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, .paineis > .trilha, .painel-canais, #voz, .cel-abas"),
-    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "hostil"),
+    "aba-conversa": Caso(levar=aba_conversa, temas=("papel", "claro", "hostil"),
                          raiz=".cel-topo, #vista-conversa, #voz, .cel-abas"),
-    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "hostil"),
+    "aba-pessoas": Caso(levar=aba_pessoas, temas=("papel", "claro", "hostil"),
                         raiz=".cel-topo, .painel-pessoas, #voz, .cel-abas"),
-    "chamada": Caso(levar=chamada, temas=("papel", "hostil"),
+    "chamada": Caso(levar=chamada, temas=("papel", "claro", "hostil"),
                     raiz=".cel-topo, #vista-chamada, #voz, .cel-telemetria"),
     "ajustes-medida": Caso(levar=ajustes_medida, raiz=".cel-topo, #tela-server .server-coluna, #voz, .cel-abas"),
     # Termina fora do servidor (SAIR DO SERVIDOR): as medidas do aparelho
