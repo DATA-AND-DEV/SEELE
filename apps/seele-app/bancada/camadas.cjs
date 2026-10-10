@@ -25,6 +25,10 @@
 //    não remonta as outras; uma chave que não existe é recusada pelo nome, e
 //    uma parte que leva a superfície além de 4096 nós, com os números — e a
 //    superfície fica como estava.
+// 7. **Os formulários validam o que declaram** (Step 6a; rascunho §5): uma
+//    regra violada — `obrigatorio`, `tamanhoMaximo`, `minimo`/`maximo`,
+//    `inteiro` — impede o `submeter` sem ida ao MOD, marca o campo com a frase
+//    do produto e leva o foco a ele; corrigido, o envio chega.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -333,8 +337,68 @@ const { chromium } = require('./playwright.cjs');
     assert.equal(partes.notasFicaram, true, 'a parte recusada trocou as notas assim mesmo');
     assert.equal(partes.notasDepoisDaProxima, true, 'a parte recusada ficou na declaração, e a parte seguinte a desenhou');
 
+    // 7. As regras declaradas dos formulários.
+    await page.evaluate(async () => {
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'perfil', tipo: 'dialogo', modal: false, titulo: 'Perfil' } });
+      await pedir(6, { tipo: 'superficie-montar', superficie: 'perfil', arvore: [{
+        forma: 'formulario', chave: 'f', dentro: [
+          { forma: 'campo', chave: 'nome', rotulo: 'Nome', obrigatorio: true },
+          { forma: 'campo', chave: 'lema', rotulo: 'Lema', tamanhoMaximo: 10 },
+          { forma: 'numero', chave: 'nivel', rotulo: 'Nível', minimo: 1, maximo: 20 },
+          { forma: 'numero', chave: 'peso', rotulo: 'Peso', inteiro: true },
+        ],
+      }] });
+    });
+    const campo = (chave) => `[data-superficie="perfil"] [data-chave-do-mod="${chave}"] :is(input, textarea)`;
+    const preencher = async (valores) => { for (const [chave, valor] of Object.entries(valores)) await page.fill(campo(chave), valor); };
+    const enviar = () => page.evaluate(() => {
+      const antes = eventosDe(6).filter((e) => e.nome === 'submeter').length;
+      document.querySelector('[data-superficie="perfil"] form').requestSubmit();
+      const marcados = [...document.querySelectorAll('[data-superficie="perfil"] [data-chave-do-mod][data-invalido="sim"]')]
+        .map((e) => ({ chave: e.dataset.chaveDoMod, frase: e.dataset.mensagemDeErro ?? '', aria: e.querySelector('input,textarea')?.getAttribute('aria-invalid') }));
+      return {
+        foi: eventosDe(6).filter((e) => e.nome === 'submeter').length > antes,
+        marcados,
+        foco: document.activeElement?.closest('[data-chave-do-mod]')?.dataset.chaveDoMod ?? null,
+      };
+    });
+    const VALIDOS = { nome: 'Alex', lema: 'curto', nivel: '5', peso: '70' };
+    const CASOS = [
+      ['obrigatorio', { nome: '' }, 'nome'],
+      ['tamanhoMaximo', { lema: 'longo demais!' }, 'lema'],
+      ['minimo/maximo', { nivel: '25' }, 'nivel'],
+      ['inteiro', { peso: '70.5' }, 'peso'],
+    ];
+    for (const [regra, quebra, chave] of CASOS) {
+      await preencher({ ...VALIDOS, ...quebra });
+      const r = await enviar();
+      assert.equal(r.foi, false, `${regra}: o submeter foi ao MOD com a regra violada`);
+      assert.deepEqual(r.marcados.map((m) => m.chave), [chave], `${regra}: o campo marcado não é o da regra: ${JSON.stringify(r)}`);
+      assert.ok(r.marcados[0].frase.length > 0 && r.marcados[0].aria === 'true', `${regra}: a marca não tem frase ou aria-invalid: ${JSON.stringify(r)}`);
+      assert.equal(r.foco, chave, `${regra}: o foco não foi ao campo inválido: ${JSON.stringify(r)}`);
+      // **Corrigir apaga a frase antes do envio**: quem conserta o campo não
+      // fica lendo o erro que já resolveu.
+      await page.fill(campo(chave), VALIDOS[chave]);
+      const aindaMarcado = await page.evaluate((chave) => document.querySelector(`[data-superficie="perfil"] [data-chave-do-mod="${chave}"]`)?.dataset.invalido ?? null, chave);
+      assert.equal(aindaMarcado, null, `${regra}: corrigir o campo não apagou a frase do produto`);
+      await preencher({ ...VALIDOS, ...quebra });
+      if (regra === 'tamanhoMaximo') {
+        const contador = await page.evaluate(() => {
+          const c = document.querySelector('[data-superficie="perfil"] [data-chave-do-mod="lema"] .regiao-de-mod-contador');
+          return c ? { texto: c.textContent, passou: c.dataset.passou } : null;
+        });
+        assert.deepEqual(contador, { texto: '13/10', passou: 'sim' }, `o contador do tamanho não diz o que passou: ${JSON.stringify(contador)}`);
+      }
+    }
+    await preencher(VALIDOS);
+    const certo = await enviar();
+    assert.equal(certo.foi, true, `com tudo certo, o submeter não chegou: ${JSON.stringify(certo)}`);
+    assert.deepEqual(certo.marcados, [], `com tudo certo, um campo ficou marcado: ${JSON.stringify(certo)}`);
+    const valores = await page.evaluate(() => eventosDe(6).filter((e) => e.nome === 'submeter').at(-1)?.valores);
+    assert.deepEqual(valores, { nome: 'Alex', lema: 'curto', nivel: 5, peso: 70 }, 'o submeter não levou os valores');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes; e o formulário barra o envio que viola uma regra declarada.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

@@ -458,6 +458,19 @@ label.regiao-de-mod-parte[data-mensagem-de-erro]::after {
   font-size: var(--seele-t-dado);
 }
 
+/* O contador do `tamanhoMaximo` (rascunho da API 6, §5): do produto, ao pé do
+   campo, e vermelho quando passa — a frase do envio diz o resto. */
+.regiao-de-mod-contador {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--seele-t-dado);
+  font-variant-numeric: tabular-nums;
+  color: var(--seele-rotulo-painel);
+  text-align: right;
+}
+
+.regiao-de-mod-contador[data-passou="sim"] { color: var(--seele-vermelho-alerta); }
+
 /* --------------------------------------------------- formulário */
 
 form.regiao-de-mod-parte {

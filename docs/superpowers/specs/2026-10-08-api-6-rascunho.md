@@ -511,7 +511,12 @@ campo. A API 6 acrescenta:
 
 - **validação declarada por campo**: `obrigatorio`, `minimo`/`maximo` (número),
   `tamanhoMaximo` com contador e frase do produto, `inteiro`. Uma regra
-  violada impede o envio e marca o campo, sem ida ao MOD;
+  violada impede o envio e marca o campo, sem ida ao MOD [c, tarefa 7, Step
+  6a: no `campo`, no `textoLongo` e no `numero`; o formulário passa a
+  `noValidate`, porque a validação nativa barrava o número fora de
+  `min`/`max` com a bolha do navegador; o foco vai ao primeiro inválido, a
+  frase do produto convive com o `erro` do MOD e sai quando a pessoa mexe no
+  campo; o contador diz `13/10` e fica vermelho ao passar];
 - **`erro` em toda forma de entrada**, inclusive `cor` e `escolha`
   (hoje só `campo`, `textoLongo`, `numero` e `formulario`, ESTILO §4);
 - **botões primário e secundário montados pelo produto**: o primário envia o

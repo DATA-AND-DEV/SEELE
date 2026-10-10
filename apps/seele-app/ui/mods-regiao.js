@@ -209,6 +209,51 @@ const LIMITES_DO_CARTAO = Object.freeze({
  *   tabuleiro exigem — e continua sendo teto.
  */
 /**
+ * **As regras que um campo declara** (rascunho da API 6, §5; tarefa 7, Step
+ * 6a). Um número que não é número não é regra: some, em vez de virar zero.
+ */
+function regrasDeclaradas(no) {
+  const numero = (valor) => {
+    if (valor === null || valor === undefined || valor === "") return null;
+    const n = Number(valor);
+    return Number.isFinite(n) ? n : null;
+  };
+  const tamanho = numero(no.tamanhoMaximo);
+  return {
+    obrigatorio: no.obrigatorio === true,
+    tamanhoMaximo: tamanho !== null && Number.isInteger(tamanho) && tamanho > 0 ? tamanho : null,
+    minimo: numero(no.minimo),
+    maximo: numero(no.maximo),
+    inteiro: no.inteiro === true,
+  };
+}
+
+/**
+ * A frase do produto para a primeira regra que a caixa viola, ou `""`. A
+ * ordem é a de quem preenche: vazio, depois a forma do número, o intervalo,
+ * e o tamanho.
+ */
+function fraseDaRegraViolada(regras, caixa) {
+  const texto = caixa.value;
+  if (regras.obrigatorio && texto.trim() === "") return "Preencha este campo.";
+  const emPortugues = (n) => n.toLocaleString("pt-BR");
+  if (caixa.type === "number" && texto !== "") {
+    const n = Number(texto);
+    if (regras.inteiro && !Number.isInteger(n)) return "Use um número inteiro.";
+    const { minimo, maximo } = regras;
+    if ((minimo !== null && n < minimo) || (maximo !== null && n > maximo)) {
+      if (minimo !== null && maximo !== null) return `Use um número de ${emPortugues(minimo)} a ${emPortugues(maximo)}.`;
+      return minimo !== null ? `Use um número a partir de ${emPortugues(minimo)}.` : `Use um número até ${emPortugues(maximo)}.`;
+    }
+  }
+  const tamanho = [...texto].length;
+  if (regras.tamanhoMaximo !== null && tamanho > regras.tamanhoMaximo) {
+    return `Use até ${regras.tamanhoMaximo} caracteres; este tem ${tamanho}.`;
+  }
+  return "";
+}
+
+/**
  * **Quantos nós uma declaração pede**, contados como `planejar` os conta: um
  * texto é um nó, uma forma é um nó mais os de dentro, e uma lista é a soma.
  *
@@ -656,6 +701,13 @@ class RegiaoDeMod {
     this.fontesDeMidia = new WeakMap();
     /** Quantos de cada forma com teto estão de pé. */
     this.contagem = { campos: 0, telas: 0, midias: 0, midiasDeCartao: 0 };
+    // **As regras declaradas dos campos** (rascunho da API 6, §5; tarefa 7,
+    // Step 6a): o que cada campo declara, a frase do produto quando uma regra
+    // é violada no envio, e o `erro` que o MOD declarou — os dois erros
+    // convivem, e o do produto vale até a pessoa mexer no campo.
+    this.regrasDoCampo = new WeakMap();
+    this.errosDoProduto = new WeakMap();
+    this.errosDoMod = new WeakMap();
     /** Bytes de mídia montados nesta região. */
     this.bytesDeMidia = 0;
     /** Bytes de mídia montados nos cartões, contados à parte. */
@@ -1152,6 +1204,7 @@ class RegiaoDeMod {
     caixa.maxLength = LIMITES_DA_REGIAO.valorDoCampo;
     elem.append(rotulo, caixa);
     const aoDigitar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "campo",
         chave: plano.no.chave ?? "",
@@ -1180,11 +1233,15 @@ class RegiaoDeMod {
     const texto = typeof plano.no.rotulo === "string" ? plano.no.rotulo : "";
     if (rotulo.textContent !== texto) rotulo.textContent = texto;
     this.marcarValidade(elem, caixa, plano);
+    this.pintarContador(elem, caixa);
     if (document.activeElement === caixa) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, LIMITES_DA_REGIAO.valorDoCampo)
       : "";
-    if (caixa.value !== valor) caixa.value = valor;
+    if (caixa.value !== valor) {
+      caixa.value = valor;
+      this.pintarContador(elem, caixa);
+    }
   }
 
   // ------------------------------------------------------------ escolha
@@ -1398,6 +1455,7 @@ class RegiaoDeMod {
     caixa.maxLength = LIMITES_DA_REGIAO.valorDoCampo * 8;
     elem.append(rotulo, caixa);
     const aoDigitar = () => {
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "campo",
         chave: plano.no.chave ?? "",
@@ -1424,11 +1482,15 @@ class RegiaoDeMod {
       : "";
     if (caixa.placeholder !== sugestao) caixa.placeholder = sugestao;
     this.marcarValidade(elem, caixa, plano);
+    this.pintarContador(elem, caixa);
     if (document.activeElement === caixa) return;
     const valor = typeof plano.no.valor === "string"
       ? plano.no.valor.slice(0, caixa.maxLength)
       : "";
-    if (caixa.value !== valor) caixa.value = valor;
+    if (caixa.value !== valor) {
+      caixa.value = valor;
+      this.pintarContador(elem, caixa);
+    }
   }
 
   /** Um número, com os limites que o MOD declarou e o produto confere. */
@@ -1441,6 +1503,7 @@ class RegiaoDeMod {
       // **Vazio é vazio, e não zero.** Um campo apagado no meio da edição não
       // pode virar `0` a caminho do MOD: o MOD gravaria zero.
       const bruto = caixa.value;
+      this.aoMexerNoCampo(elem, caixa);
       this.dono.falar({
         nome: "numero",
         chave: plano.no.chave ?? "",
@@ -1951,8 +2014,17 @@ class RegiaoDeMod {
    * WebView, deixá-lo seguir recarrega a aplicação inteira.
    */
   montarFormulario(elem, plano) {
+    // **A validação é do produto, com as palavras dele** (Step 6a): a nativa
+    // barrava um número fora de `min`/`max` com a bolha do navegador, e não
+    // conhecia as outras regras.
+    elem.noValidate = true;
     const aoEnviar = (evento) => {
       evento.preventDefault();
+      const invalido = this.conferirOFormulario(elem);
+      if (invalido) {
+        invalido.focus();
+        return;
+      }
       this.dono.falar({
         nome: "submeter",
         chave: plano.no.chave ?? "",
@@ -2000,9 +2072,69 @@ class RegiaoDeMod {
     return valores;
   }
 
-  /** Marca um controle como inválido, para a folha de classes poder pintá-lo. */
+  /**
+   * **As regras declaradas, no envio** (rascunho da API 6, §5; tarefa 7, Step
+   * 6a): cada campo do formulário é conferido pelo que declarou, e o violado
+   * ganha a frase do produto. Devolve a caixa do primeiro inválido, para o
+   * foco ir a ela, ou `null`.
+   */
+  conferirOFormulario(raiz) {
+    let primeiro = null;
+    for (const campo of raiz.querySelectorAll("[data-chave-do-mod]")) {
+      const regras = this.regrasDoCampo.get(campo);
+      const caixa = regras && campo.querySelector("input,textarea");
+      if (!caixa) continue;
+      const frase = fraseDaRegraViolada(regras, caixa);
+      if (frase) this.errosDoProduto.set(campo, frase);
+      else this.errosDoProduto.delete(campo);
+      this.pintarValidade(campo, caixa);
+      if (frase && !primeiro) primeiro = caixa;
+    }
+    return primeiro;
+  }
+
+  /** A pessoa mexeu no campo: a frase do produto sai, e o contador anda. */
+  aoMexerNoCampo(elem, caixa) {
+    if (this.errosDoProduto.delete(elem)) this.pintarValidade(elem, caixa);
+    this.pintarContador(elem, caixa);
+  }
+
+  /**
+   * O contador do `tamanhoMaximo`, do produto: quantos caracteres há e quantos
+   * cabem, e `data-passou` quando passa. Sem a regra, ele sai.
+   */
+  pintarContador(elem, caixa) {
+    const teto = this.regrasDoCampo.get(elem)?.tamanhoMaximo ?? null;
+    let contador = elem.querySelector(":scope > .regiao-de-mod-contador");
+    if (teto === null) {
+      contador?.remove();
+      return;
+    }
+    if (!contador) {
+      contador = elemento("span", "regiao-de-mod-contador");
+      contador.setAttribute("aria-live", "polite");
+      elem.append(contador);
+    }
+    const tamanho = [...caixa.value].length;
+    const texto = `${tamanho}/${teto}`;
+    if (contador.textContent !== texto) contador.textContent = texto;
+    const passou = tamanho > teto ? "sim" : "nao";
+    if (contador.dataset.passou !== passou) contador.dataset.passou = passou;
+  }
+
+  /**
+   * Marca um controle como inválido, para a folha de classes poder pintá-lo:
+   * o `erro` que o MOD declarou e as regras do campo ficam guardados, e a
+   * pintura junta o erro do MOD ao do produto.
+   */
   marcarValidade(elem, caixa, plano) {
-    const erro = typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "";
+    this.errosDoMod.set(elem, typeof plano.no.erro === "string" ? plano.no.erro.slice(0, 200) : "");
+    this.regrasDoCampo.set(elem, regrasDeclaradas(plano.no));
+    this.pintarValidade(elem, caixa);
+  }
+
+  pintarValidade(elem, caixa) {
+    const erro = this.errosDoProduto.get(elem) || this.errosDoMod.get(elem) || "";
     if (erro) {
       elem.dataset.invalido = "sim";
       caixa.setAttribute("aria-invalid", "true");
