@@ -388,6 +388,30 @@ const CLARO = { fundo: '#f2ece0', painel: '#e6dfd0', texto: '#12100e', apagado: 
     const eventoDaPrevia = await ultimoEvento();
     assert.ok(eventoDaPrevia?.previa === true && eventoDaPrevia.regiao === 'pessoas.lista',
       `o evento da prévia recusada não disse a região: ${JSON.stringify(eventoDaPrevia)}`);
+    // **Os contêineres que a casca declara valem no documento todo** (pedido
+    // da F8, 10/10): no celular, o `operador.barra` mora em AJUSTES
+    // (`#tela-server`), fora de `#tela-sessao`. Aqui, um nó do desktop fora da
+    // sessão faz o papel dele.
+    const naCasca = await page.evaluate((cores) => {
+      globalThis.CELULAR = {
+        regioes: new Set(REGIOES_E_CAMADAS_DA_API),
+        conteineresDasRegioes: { 'operador.barra': ['#tela-server .server-coluna'] },
+      };
+      try {
+        aplicarOTemaDoServidor({ mod_id: 'seele/estilo', valores: JSON.stringify({ regioes: { 'operador.barra': cores } }) });
+        return {
+          fora: document.querySelector('#tela-server .server-coluna').style.getPropertyValue('--seele-negro-painel'),
+          padrao: document.querySelector('.operador').style.getPropertyValue('--seele-negro-painel'),
+        };
+      } finally {
+        delete globalThis.CELULAR;
+        aplicarOTemaDoServidor(null);
+      }
+    }, ESCURA);
+    assert.equal(naCasca.fora, ESCURA.fundo, `o contêiner que a casca declarou, fora da sessão, não recebeu a região: ${JSON.stringify(naCasca)}`);
+    assert.equal(naCasca.padrao, '', `com o contêiner da casca, a região também pintou o do desktop: ${JSON.stringify(naCasca)}`);
+    assert.equal(await page.evaluate(() => document.querySelector('#tela-server .server-coluna').style.getPropertyValue('--seele-negro-painel')), '',
+      'o tema saiu, e o contêiner da casca ficou com a região');
     // O tema sem regiões as tira do contêiner.
     await desenharCom(comoVeio);
     const depois = await pintura();

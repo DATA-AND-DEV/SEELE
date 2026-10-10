@@ -2895,6 +2895,12 @@ const tokensDasRegioes = new Map();
  * anterior escreveu sai antes: uma região que deixou o tema volta a herdar o
  * da sessão. No celular, a casca pode dar outros contêineres
  * (`CELULAR.conteineresDasRegioes`), e uma região que ela não tem não é pintada.
+ *
+ * **Os contêineres padrão são procurados dentro da sessão; os que a casca
+ * declara, no documento todo** (pedido da F8, 10/10): no celular, o
+ * `operador.barra` mora em AJUSTES (`#tela-server`), irmão da sessão, e a
+ * casca o declara com o seletor completo. A saída é a mesma: a troca seguinte,
+ * e a do fim da sessão, tiram o que foi escrito.
  */
 function escreverAsRegioesDoTema(emVigor) {
   for (const [no, tokens] of tokensDasRegioes) {
@@ -2915,8 +2921,9 @@ function escreverAsRegioesDoTema(emVigor) {
     Object.assign(escrever, tonsDoTema(daRegiao, corDaRaiz).tons);
     const daCasca = typeof CELULAR === "object" ? CELULAR?.conteineresDasRegioes?.[regiao] : undefined;
     const seletores = Array.isArray(daCasca) ? daCasca : REGIOES_DO_TEMA[regiao];
+    const onde = Array.isArray(daCasca) ? document : sessao;
     for (const seletor of seletores) {
-      for (const no of sessao.querySelectorAll(seletor)) {
+      for (const no of onde.querySelectorAll(seletor)) {
         const tokens = tokensDasRegioes.get(no) ?? new Set();
         for (const [token, valor] of Object.entries(escrever)) {
           no.style.setProperty(token, valor);

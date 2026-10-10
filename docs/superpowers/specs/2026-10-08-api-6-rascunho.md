@@ -1140,7 +1140,9 @@ faixa do MOD dentro dela: as cores da região, o `fundo` valendo também como
 as cores de estado). O resto da sessão fica com o tema da sessão, e os itens
 do núcleo com as cores do produto (eles leem os `--nucleo-*`, resolvidos na
 raiz). No celular, a casca pode dar outros contêineres
-(`CELULAR.conteineresDasRegioes`), e uma região que ela não tem não é pintada.
+(`CELULAR.conteineresDasRegioes`), procurados no documento todo — o
+`operador.barra` mora em AJUSTES, fora da sessão —, e uma região que ela não
+tem não é pintada.
 
 **Os pares por região.** Cada região é conferida com o tema da sessão e as
 cores dela por cima, pela mesma tabela de pares. Uma região abaixo do piso
