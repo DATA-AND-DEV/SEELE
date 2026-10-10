@@ -1559,6 +1559,7 @@ de hoje, lidos no código:
 | superfícies | 12 | `mods-superficies.js:204` | M3 |
 | avisos | 4 | `mods-superficies.js:206` | fica |
 | nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
+| figuras numa `tela` | 256 | `mods-regiao.js:47` | **fica 256, e quem manda é a mensagem** (decidido em 10/10): com figuras completas, com `chave` e `cor` (71 bytes cada), cabem **155** numa mensagem de 12 KiB; as 256 só cabem sem `chave` e sem `cor` (45 bytes), figuras de enfeite, sem toque. Uma `tela` que passa dos 12 KiB é recusada pelo teto da mensagem (`mensagem-grande`, com o tamanho e o teto), e não pelo de figuras [c, medido pela conferência do MOD de carga da M3, `conferir-carga.rs`] |
 | bytes de mídia por superfície | 24 MiB declarados, **10 MiB na forma `midia`** | `mods-regiao.js:194`, `:2159-2161`, `:2226` | §13: a 6 diz o que é entregue |
 | região | 512 nós, 8 de fundura, 10 MiB | `mods-regiao.js:33-65` | sai com `regiao` (§2) |
 | cartões | 64 pessoas, 64 nós, 6 de fundura, 64 mídias, 20 MiB somados | `mods-regiao.js:104-131` | troca por `pessoa.cartao` com `alvo` (R2) |

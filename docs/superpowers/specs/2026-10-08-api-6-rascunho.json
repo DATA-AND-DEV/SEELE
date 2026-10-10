@@ -644,7 +644,8 @@
   },
   "limites": {
     "estado": "EM ABERTO: congelam com o v6.json, depois da M3 com as regiões da 6 (desktop, WebView2 e iPhone); cada número vale igual no desktop e no navegador, porque o motor é o mesmo",
-    "mensagem": "12 KiB hoje; em aberto montagem parcial ou teto por superfície maior (MESA item 1, PERFIS R8)",
+    "mensagem": "12 KiB por mensagem; a superfície se monta por partes (superficie.atualizar), com o teto de nós dela (4096)",
+    "figuras-por-tela": "256, e quem manda é a mensagem: com chave e cor (71 bytes cada) cabem 155 em 12 KiB; as 256 só sem chave e sem cor (45 bytes), figuras de enfeite, sem toque; uma tela acima de 12 KiB é recusada como mensagem-grande, com o tamanho e o teto",
     "aviso-do-servidor": "proposta de 1 KiB por aviso e 4 por segundo por MOD",
     "capas-animadas": "proposta de 6",
     "quadros-por-capa": "proposta de 60 quadros, 10 s",
