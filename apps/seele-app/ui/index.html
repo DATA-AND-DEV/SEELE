@@ -4411,6 +4411,13 @@
 <script src="mods-superficies.js"></script>
 <script src="mods-contribuicoes.js"></script>
 <script src="base.js"></script>
+<!--
+  O executor dos MODs no navegador (ADR 0057): o mesmo motor do desktop, num
+  Worker de um `iframe` opaco. Na carga ele só declara, nas duas cascas: o
+  `iframe` nasce na primeira subida de um MOD pelo `executorNoNavegador`, que o
+  `executorDoMod` só escolhe sem o Tauri.
+-->
+<script src="mods-no-navegador.js"></script>
 <script src="glifos.js"></script>
 <script src="frases.js"></script>
 <script src="tela-boot.js"></script>

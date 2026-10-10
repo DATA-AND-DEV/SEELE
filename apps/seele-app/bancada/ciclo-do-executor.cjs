@@ -289,6 +289,29 @@ async function avisoDuranteColheitaVaziaNaoSePerde() {
   confere(caso, colheitas === antes, "a colheita passou a consultar em laço ocioso");
 }
 
+/// **O executor é o do lugar.** O Tauri sempre injeta `__TAURI_INTERNALS__`, e
+/// com ele o `executorDoMod` dá o nativo; sem ele, o do navegador
+/// (`mods-no-navegador.js`), que roda o mesmo motor num `iframe` opaco. Os dois
+/// arquivos rodam juntos aqui, como na página, e sem `addEventListener` nem
+/// `document`: carregar o do navegador no desktop não pode fazer nada.
+async function oExecutorEODoLugar() {
+  const caso = "o executor do lugar";
+  const noNavegador = fs.readFileSync(path.join(raiz, "ui/mods-no-navegador.js"), "utf8");
+  for (const [lugar, comTauri, esperado] of [
+    ["desktop", true, "nativo"],
+    ["navegador", false, "navegador"],
+  ]) {
+    const contexto = vm.createContext({ console });
+    if (comTauri) contexto.__TAURI_INTERNALS__ = {};
+    vm.runInContext(
+      `${fonte}\n${noNavegador}\nglobalThis.escolhido = executorDoMod("autor/mod", 1, "hash").nome;`,
+      contexto,
+    );
+    confere(caso, contexto.escolhido === esperado,
+      `no ${lugar} o MOD subiu no executor ${contexto.escolhido}, e não no ${esperado}`);
+  }
+}
+
 (async () => {
   const provas = [
     falaAntigaNaoEntraDuranteASubida,
@@ -296,6 +319,7 @@ async function avisoDuranteColheitaVaziaNaoSePerde() {
     umaSegundaTentativaDeEncerrarValeDeNovo,
     aJanelaColheEmVezDeReceber,
     avisoDuranteColheitaVaziaNaoSePerde,
+    oExecutorEODoLugar,
   ];
   for (const prova of provas) {
     try {

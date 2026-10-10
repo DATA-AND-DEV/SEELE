@@ -47,9 +47,11 @@ const ESTADOS_DE_MOD = Object.freeze({
 });
 
 /**
- * O executor dos MODs: o motor QuickJS, do outro lado da ponte.
+ * O executor dos MODs no desktop: o motor QuickJS, do outro lado da ponte.
  *
- * **É o único.** O `Worker` de `blob:` que esteve aqui foi reprovado por
+ * **É o único do desktop**; no navegador quem roda o mesmo motor é o
+ * `executorNoNavegador`, e o `executorDoMod`, abaixo, escolhe entre os dois.
+ * O `Worker` de `blob:` que esteve aqui foi reprovado por
  * medição — ele herda a origem de quem o criou, e o que um MOD gravou em
  * `indexedDB` sobreviveu ao encerramento do aplicativo e reapareceu na entrada
  * seguinte. `terminate()` mata o contexto e não toca no armazenamento da
@@ -210,6 +212,26 @@ function executorNativo(id, geracao, hash) {
       return { colhendo };
     },
   };
+}
+
+/**
+ * O executor do lugar onde a casca roda, e **a escolha mora só aqui**.
+ *
+ * No desktop, o `executorNativo`. No navegador (ADR 0057, emenda de
+ * 08/10/2026), o `executorNoNavegador` (`mods-no-navegador.js`): **o mesmo
+ * motor**, a volta do `crates/seele-motor`, compilado para `.wasm` e rodando
+ * num Worker de um `iframe` opaco. Não é o Worker de `blob:` reprovado: aquele
+ * era criado pela página e herdava a origem dela; este nasce num `iframe` sem
+ * `allow-same-origin`, e a página não tem o que emprestar a ele.
+ *
+ * O lugar é dito pelo `__TAURI_INTERNALS__`, que o Tauri sempre injeta; o
+ * `__TAURI__` depende do `withGlobalTauri`, e no navegador é a ponte
+ * (`ponte-web.js`) que o põe.
+ */
+function executorDoMod(id, geracao, hash) {
+  return "__TAURI_INTERNALS__" in globalThis
+    ? executorNativo(id, geracao, hash)
+    : executorNoNavegador(id, geracao, hash);
 }
 
 /**

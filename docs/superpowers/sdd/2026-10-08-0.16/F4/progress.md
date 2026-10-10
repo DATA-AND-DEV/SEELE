@@ -415,3 +415,39 @@ começar.
   `tela-boot.js` antes da 3.4, e prende a credencial ao alvo depois do
   `NicknameTaken`. A F4 não mexe nesse arquivo até lá, e confere o contrato
   quando o W entrar (no plano, 3.4).
+
+## 09/10, noite: a `ui/` liberada, e o executor entra nela (3.2, passo 6)
+
+- **A nona integração (`ffd8e4fb`) trazida em `4755c08a`**, sem conflito. A
+  orquestradora liberou a `ui/` para a ponte (3.1) e para o passo 6 da 3.2,
+  com um dono por arquivo: `base.js:36-37` e o `mods-runtime.js` são da F4; o
+  `tela-boot.js` espera o lote W da F5.
+- **O executor está na `ui/`**: `mods-no-navegador.js` e `executor-de-mod.html`
+  em `apps/seele-app/ui/`, a bancada em `apps/seele-app/bancada/`.
+  - **a escolha pelo lugar** é o `executorDoMod`, em `mods-runtime.js`. A
+    `base.js` mudou **uma linha fora do 36-37**, a da chamada (`:678`), porque
+    ela nomeava o `executorNativo`; o guarda do `frontend.rs` que exigia esse
+    nome passou a exigir o `executorDoMod`. A F8 não toca esse trecho
+    (conferido no `0.16/celular`);
+  - **na carga, nada**: o ouvinte de `message` saiu do topo do arquivo e nasce
+    com o `iframe`. A bancada de Node carrega os dois arquivos sem `window`, e
+    um ouvinte de volta ao topo a reprova;
+  - **o `<script>` vai depois do `base.js`**: o guarda de ordem do
+    `frontend.rs` reprovou a primeira posição (antes dele), e o guarda das
+    funções sem declaração reprovou o `addEventListener` solto. Os dois
+    pegaram coisas reais, e mudou o código, não o guarda.
+- **A bancada no CI**: no job `bancadas-de-mod`, depois do `cargo xtask web`,
+  com o Playwright instalado ali. O `check_runtime.rs` lia só o job
+  `bancadas`; passou a ler os dois, e um teste novo segura que a bancada vem
+  depois do motor compilado e com o caminho que o `xtask web` usa. O
+  `cargo xtask web` e o `rustup target add` ganharam `!cancelled()`, para uma
+  bancada de Node vermelha não pular o motor.
+- **Medido:** a bancada passa no Chromium no lugar novo (nove casos, motor
+  recompilado: o `.wasm` local era de antes da última mudança do motor); a de
+  Node, seis corridas; `tests/web.rs` 4, `frontend.rs` 282, `celular.rs` 22;
+  clippy `-D warnings` limpo em `seele-app` e `xtask`.
+- **As nove reversões**, cada uma reprovando o seu guarda: `allow-same-origin`;
+  `connect-src` na CSP; o script do `iframe` mudado sem o hash; a `base.js`
+  pedindo o nativo pelo nome; a escolha invertida; o ouvinte de volta ao topo;
+  a bancada antes do motor; a bancada sem `!cancelled()`; a bancada fora do CI.
+

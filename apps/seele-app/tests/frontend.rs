@@ -14345,13 +14345,15 @@ fn o_ciclo_de_vida_de_um_mod_nao_conhece_o_executor() {
         "`base.js` voltou a construir um `Worker` direto, e o executor virou \
          dependência estrutural outra vez"
     );
-    // **E não há mais escolha para fazer.** O Worker de `blob:` foi reprovado
+    // **E a única escolha é a do lugar.** O Worker de `blob:` foi reprovado
     // por medição — ele herda a origem de quem o cria, e o que um MOD gravou
     // nela sobreviveu ao encerramento do aplicativo. Guardá-lo como reserva
-    // seria guardar, como reserva, exatamente o que não isola.
+    // seria guardar, como reserva, exatamente o que não isola. O
+    // `executorDoMod` escolhe entre o nativo (desktop) e o do navegador (o
+    // mesmo motor, num `iframe` opaco); `tests/web.rs` guarda a escolha.
     assert!(
-        base.contains("executorNativo(mod.id, geracao, mod.hash)"),
-        "`base.js` deixou de pedir o executor pelo nome: {base}"
+        base.contains("executorDoMod(mod.id, geracao, mod.hash)"),
+        "`base.js` deixou de pedir o executor ao `executorDoMod`: {base}"
     );
     for sumido in ["executorDeWorker", "PRELUDIO_DO_MOD", "executor_de_mods"] {
         assert!(
