@@ -64,7 +64,9 @@ O que espera essa integração, e o commit da F3 de que cada coisa depende:
 
 ### Quando a sala pessoal da F7 chegar à `versao/0.16`
 
-Proposto à F7 em 10/10: todo elemento da sala na casca do desktop leva `data-sala-pessoal`, e as duas cascas do navegador o escondem por uma regra.
+Combinado com a F7 em 10/10: todo elemento da sala na casca do desktop (a faixa `#toque`, o estado na linha de estado, o bloco do PERFIL com SEU CÓDIGO, «Não receber ligações» e a agenda) é um elemento inteiro com `data-sala-pessoal`, e as duas cascas do navegador o escondem por uma regra. Toda chamada da sala pega a recusa da ponte, e sem resposta a peça fica escondida. Os canais `seele://sala` e `seele://toque` não chegam ao navegador (a F4 decide no `ouvirNaPonte`).
+
+O nome que a pessoa lê é «RECEBER LIGAÇÕES PELO SEU CÓDIGO» (o termo da spec de 23/09). A frase proposta para SÓ NO APP DO SEELE: «Receber ligações pelo SEU CÓDIGO é pelo app do SEELE: quem recebe a ligação a hospeda, e o navegador não hospeda.» Ela entra junto com a faixa, para a lista não falar de algo que o app desta árvore ainda não tem. O LIGAR pelo código (tarefas 28 e 30 da F7) se combina com a F4 quando entrar.
 
 - [ ] a regra `[data-sala-pessoal] { display: none }` sob as duas marcas;
 - [ ] a frase da sala na lista O QUE … NÃO FAZ (grupo SÓ NO APP DO SEELE), com o nome que a F7 der;
