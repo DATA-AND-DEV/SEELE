@@ -338,6 +338,11 @@ pub const PRELUDIO: &str = r#"
       return Object.freeze({
         id,
         montar: (arvore) => pedir('superficie-montar', { superficie: id, arvore }),
+        // **A montagem por partes** (rascunho da API 6, §12): troca o nó de
+        // `chave` e o que está sob ele, numa mensagem própria. Uma ficha que
+        // não cabe nos 12 KiB de uma mensagem se monta num esqueleto e numa
+        // parte por vez; o teto que vale é o de nós da superfície.
+        atualizar: (chave, arvore) => pedir('superficie-atualizar', { superficie: id, chave, arvore }),
         classes: (mapa) => pedir('superficie-classes', { superficie: id, classes: mapa }),
         mostrar: () => pedir('superficie-mostrar', { superficie: id }),
         ocultar: () => pedir('superficie-ocultar', { superficie: id }),

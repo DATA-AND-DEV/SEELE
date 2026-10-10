@@ -19,6 +19,12 @@
 //    `fundoDeMidia` de uma caixa, o `retrato` e a `pessoa.capa`, com
 //    `pedido.transporte = 'volume'`, leem pelo fluxo do ADR 0048 — o
 //    `ler_imagem_mod` —, e nenhum pelo controle (`mod_request`).
+// 6. **A montagem por partes** (Step 5c; rascunho §12): uma ficha que inteira
+//    passa dos 12 KiB de uma mensagem se monta num esqueleto e quatro
+//    `superficie-atualizar` de ~9 KiB, e aparece inteira; trocar uma parte
+//    não remonta as outras; uma chave que não existe é recusada pelo nome, e
+//    uma parte que leva a superfície além de 4096 nós, com os números — e a
+//    superfície fica como estava.
 //
 // Rodar:  node apps/seele-app/bancada/camadas.cjs
 
@@ -263,8 +269,72 @@ const { chromium } = require('./playwright.cjs');
     }
     assert.deepEqual(lugares.peloControle, [], `uma mídia com transporte 'volume' foi pedida pelo controle: ${JSON.stringify(lugares)}`);
 
+    // 6. A montagem por partes.
+    const partes = await page.evaluate(async () => {
+      const SECOES = ['inventario', 'pericias', 'notas', 'historia'];
+      const parte = (secao, quantos, prefixo = secao) => ({
+        forma: 'caixa', chave: secao,
+        dentro: Array.from({ length: quantos }, (_, i) => ({
+          forma: 'texto', chave: `${prefixo}-${i}`,
+          dentro: `${prefixo} ${i}: uma linha da ficha, com o que a seção guarda`,
+        })),
+      });
+      const esqueleto = [{ forma: 'titulo', chave: 'nome', dentro: 'Ficha' }, ...SECOES.map((secao) => ({ forma: 'caixa', chave: secao, dentro: [] }))];
+      const cheias = SECOES.map((secao) => parte(secao, 90));
+      const tamanho = (valor) => new TextEncoder().encode(JSON.stringify(valor)).length;
+      const medidas = {
+        inteira: tamanho({ tipo: 'superficie-montar', superficie: 'ficha', arvore: [esqueleto[0], ...cheias] }),
+        cadaParte: cheias.map((arvore) => tamanho({ tipo: 'superficie-atualizar', superficie: 'ficha', chave: arvore.chave, arvore })),
+      };
+      await pedir(6, { tipo: 'superficie-criar', descricao: { id: 'ficha', tipo: 'pagina', titulo: 'Ficha' } });
+      const montou = await pedir(6, { tipo: 'superficie-montar', superficie: 'ficha', arvore: esqueleto });
+      const respostas = [];
+      for (const arvore of cheias) {
+        respostas.push(await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: arvore.chave, arvore }));
+      }
+      const raiz = document.querySelector('[data-superficie="ficha"]');
+      const texto = raiz?.textContent ?? '';
+      const aparecem = SECOES.map((secao) => texto.includes(`${secao} 0:`) && texto.includes(`${secao} 89:`));
+      // Trocar uma parte não remonta as outras: o elemento de uma linha do
+      // inventário é o mesmo depois de trocar as perícias.
+      const linhaDoInventario = [...raiz.querySelectorAll('*')].find((e) => e.childElementCount === 0 && e.textContent.startsWith('inventario 0:'));
+      const trocou = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'pericias', arvore: parte('pericias', 3, 'pericias-nova') });
+      const mesmoNo = linhaDoInventario?.isConnected === true;
+      const textoDepois = raiz.textContent;
+      const semChave = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'nao-existe', arvore: parte('nao-existe', 1) });
+      const grandeDemais = await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'notas', arvore: parte('notas', 4100, 'notas-demais') });
+      const notasNaTela = raiz.textContent.includes('notas 89:') && !raiz.textContent.includes('notas-demais 0:');
+      // **E a recusa não estraga a declaração**: a parte seguinte desenha a
+      // ficha com as notas de antes, e não com as recusadas.
+      await pedir(6, { tipo: 'superficie-atualizar', superficie: 'ficha', chave: 'historia', arvore: parte('historia', 2, 'historia-nova') });
+      return {
+        medidas, montou, respostas, aparecem, trocou, mesmoNo,
+        pericias: { novas: textoDepois.includes('pericias-nova 2:'), velhas: textoDepois.includes('pericias 89:') },
+        semChave, grandeDemais,
+        notasFicaram: notasNaTela,
+        notasDepoisDaProxima: raiz.textContent.includes('notas 89:') && !raiz.textContent.includes('notas-demais 0:')
+          && raiz.textContent.includes('historia-nova 1:'),
+      };
+    });
+    assert.ok(partes.medidas.inteira > 12 * 1024, `a ficha inteira não passa dos 12 KiB, e o caso não mede o que diz: ${JSON.stringify(partes.medidas)}`);
+    assert.ok(partes.medidas.cadaParte.every((n) => n > 8 * 1024 && n < 12 * 1024), `cada parte não tem ~9 KiB: ${JSON.stringify(partes.medidas)}`);
+    assert.equal(partes.montou?.ok, true, `o esqueleto não montou: ${JSON.stringify(partes.montou)}`);
+    assert.ok(partes.respostas.every((r) => r?.ok === true), `uma parte foi recusada: ${JSON.stringify(partes.respostas)}`);
+    assert.deepEqual(partes.aparecem, [true, true, true, true], 'a ficha montada por partes não aparece inteira');
+    assert.equal(partes.trocou?.ok, true, `trocar uma parte foi recusado: ${JSON.stringify(partes.trocou)}`);
+    assert.deepEqual(partes.pericias, { novas: true, velhas: false }, 'trocar as perícias não trocou o que estava sob a chave');
+    assert.equal(partes.mesmoNo, true, 'trocar as perícias remontou o inventário');
+    assert.equal(partes.semChave?.erro, 'chave-desconhecida', `uma chave que não existe não foi recusada pelo nome: ${JSON.stringify(partes.semChave)}`);
+    assert.equal(partes.semChave?.chave, 'nao-existe', `a recusa da chave não disse qual: ${JSON.stringify(partes.semChave)}`);
+    assert.equal(partes.grandeDemais?.erro, 'orcamento', `a parte grande demais não foi recusada pelo orçamento: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.grandeDemais?.teto, 4096, `a recusa do orçamento não disse o teto: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.ok(partes.grandeDemais?.tamanho > 4096, `a recusa do orçamento não disse o tamanho: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.grandeDemais?.perfil, 'superficie', `a recusa do orçamento não disse o perfil: ${JSON.stringify(partes.grandeDemais)}`);
+    assert.equal(partes.notasFicaram, true, 'a parte recusada trocou as notas assim mesmo');
+    assert.equal(partes.notasDepoisDaProxima, true, 'a parte recusada ficou na declaração, e a parte seguinte a desenhou');
+
     assert.deepEqual(errors, []);
-    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod.');
+    console.log('camadas: a folha empilha três, a de cima aparece, a quarta e a reaberta são recusadas com o número, a saída e o descartou são do produto; o painel na 6 é recusado com «use folha», e até a 5 continua; o teto de superfícies chega à 6 pelo nome; e nenhum título quebra dentro de uma palavra a 300 px; a mídia por volume, nos cinco lugares, lê pelo ler_imagem_mod; e a ficha que não cabe numa mensagem se monta por partes.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

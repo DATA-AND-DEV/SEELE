@@ -739,6 +739,8 @@ nome; a frase vai ao `seele.log`):
 
 | nome | quando |
 |---|---|
+| `chave-desconhecida` | `superficie.atualizar` pediu uma chave que a superfície não tem; leva `chave` |
+| `orcamento` | `superficie.atualizar` levaria a superfície além do teto de nós; leva `perfil`, `teto` e `tamanho`, e a superfície fica como estava |
 | `teto-de-folhas` | o MOD já tem 3 folhas à vista (§5); leva `teto` |
 | `teto-de-superficies` | o MOD já mantém 12 superfícies de pé; leva `teto`. Chegava à 6 como `falhou` |
 | `tipo-desconhecido` | o `tipo` pedido não é um dos tipos de superfície da API do pacote (na 6, o `painel` também); leva `tipoPedido` (o pedido) e `tipos` (os que existem). **`tipoPedido`, e não `tipo`**: `tipo` é o da mensagem da ponte, e o prelúdio o tira do `Error`. Até a 5, a superfície abre como `dialogo`, e a frase vai ao `seele.log` |
@@ -1425,7 +1427,13 @@ que não existe é recusada pelo nome; uma subárvore que leva a superfície al�
 dos 4096 nós é recusada com os números. A montagem inteira (`montar`)
 continua, e substitui tudo. É também o que tira a remontagem da prévia do
 editor do PERFIS a cada tecla (o bloqueio F dele): a prévia é um nó com chave,
-atualizado sozinho.
+atualizado sozinho. [c, tarefa 7, Step 5c: `atualizar` no punho da
+superfície, `superficie-atualizar` na janela; a chave é procurada em
+profundidade pelo `dentro`, e a primeira achada vale; as duas recusas vêm
+antes de mexer na tela, e a recusada não fica na declaração; o que não muda é
+mantido pela reconciliação. `bancada/camadas.cjs` monta uma ficha de 40.002
+bytes em quatro partes de 9.552 a 10.462 bytes. **Está na capacidade `superficies`**, como o
+`atualizar` das contribuições: as APIs 4 e 5 também o veem]
 
 **Bolsos de mídia por bytes decodificados** (PERFIS R3, M6): hoje uma foto de
 10 MiB gasta metade do bolso de todos os avatares do servidor. Na 6, a mídia de

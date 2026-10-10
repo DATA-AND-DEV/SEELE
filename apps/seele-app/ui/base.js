@@ -2683,6 +2683,7 @@ const CAPACIDADE_DA_MENSAGEM = Object.freeze({
   "soltar-arquivo": "arquivo",
   "superficie-criar": "superficies",
   "superficie-montar": "superficies",
+  "superficie-atualizar": "superficies",
   "superficie-classes": "superficies",
   "superficie-mostrar": "superficies",
   "superficie-ocultar": "superficies",
@@ -3197,6 +3198,18 @@ async function atenderOMod(mod, instancia, m) {
         // **Recusar em silêncio é o defeito que este repositório mais paga.**
         // A mesma regra da região, e pelo mesmo motivo: um MOD cuja árvore não
         // coube precisa saber disso onde ele a escreveu.
+        if (recusados > 0) {
+          throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
+        }
+        responder(true, { valor: null });
+        break;
+      }
+      case "superficie-atualizar": {
+        // **Uma parte da superfície** (rascunho da API 6, §12; tarefa 7, Step
+        // 5c). A chave que não existe e a parte que passa do orçamento são
+        // recusadas pelo nome, antes de mexer na tela; o que não coube por
+        // forma é dito como no `montar`.
+        const recusados = superficieDoMod(mod, instancia, m.superficie).atualizar(m.chave, m.arvore);
         if (recusados > 0) {
           throw new Error(`${recusados} nó(s) não couberam nos limites da superfície`);
         }

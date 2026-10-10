@@ -541,6 +541,49 @@ mod testes {
         );
     }
 
+    /// **A superfície se monta por partes** (rascunho da API 6, §12; tarefa 7
+    /// da F3, Step 5c): o punho que `criar` devolve tem `atualizar(chave,
+    /// arvore)`, que manda `superficie-atualizar` com a superfície, a chave e a
+    /// subárvore, numa mensagem própria — com o teto de 12 KiB de cada uma, e
+    /// não o da ficha inteira.
+    #[test]
+    fn a_superficie_se_monta_por_partes() {
+        let executor = executor();
+        executor
+            .iniciar_com_api(
+                "SeeleUI.superficies.criar({ id: 'ficha', tipo: 'pagina' })\
+                   .then((s) => s.atualizar('inventario', { forma: 'caixa', chave: 'inventario', dentro: ['x'] }));",
+                6,
+            )
+            .expect("código");
+        let criar: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        assert_eq!(campo(&criar, "tipo"), "superficie-criar", "{criar}");
+        let n = campo(&criar, "n").as_u64().expect("o pedido tem número");
+        executor
+            .entregar(&format!(
+                r#"{{"tipo":"resposta","n":{n},"ok":true,"valor":{{"superficie":"ficha","reaproveitada":false}}}}"#
+            ))
+            .expect("entregar");
+        let atualizar: serde_json::Value =
+            serde_json::from_str(&uma_mensagem(&executor)).expect("o pedido é JSON");
+        assert_eq!(
+            (
+                campo(&atualizar, "tipo"),
+                campo(&atualizar, "superficie"),
+                campo(&atualizar, "chave"),
+                campo(&atualizar, "arvore"),
+            ),
+            (
+                &serde_json::json!("superficie-atualizar"),
+                &serde_json::json!("ficha"),
+                &serde_json::json!("inventario"),
+                &serde_json::json!({ "forma": "caixa", "chave": "inventario", "dentro": ["x"] }),
+            ),
+            "o punho da superfície não manda a parte: {atualizar}"
+        );
+    }
+
     /// **Um MOD que chama `console.warn` não lança, e a linha sai do motor.**
     ///
     /// O executor nativo não definia `console`, e o `console.warn` que o autor

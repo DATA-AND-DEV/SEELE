@@ -249,6 +249,25 @@ function tipoDaSuperficie(descricao, dono) {
   return "dialogo";
 }
 
+/**
+ * Onde está o nó de `chave` numa declaração: o pai e o campo dele, para a
+ * troca. Os filhos moram em `dentro` (uma lista, um nó só ou um texto), como
+ * `planejar` os lê; o primeiro achado, em profundidade, é o que vale.
+ */
+function lugarDaChave(pai, campo, chave) {
+  const no = pai[campo];
+  if (Array.isArray(no)) {
+    for (let i = 0; i < no.length; i += 1) {
+      const achado = lugarDaChave(no, i, chave);
+      if (achado) return achado;
+    }
+    return null;
+  }
+  if (no === null || typeof no !== "object") return null;
+  if (no.chave !== undefined && no.chave !== null && String(no.chave) === chave) return { pai, campo };
+  return no.dentro === undefined ? null : lugarDaChave(no, "dentro", chave);
+}
+
 // O destino central pertence ao host, mesmo quando as páginas têm donos distintos.
 // WeakMap não prolonga a vida do palco; fechar/descartar solta a página ativa.
 const paginaAtivaPorPalco = new WeakMap();
@@ -524,6 +543,8 @@ class SuperficieDeMod {
   /** O que o MOD declarou, montado aqui dentro. */
   montar(conteudo) {
     if (this.solta) return 0;
+    // A declaração inteira, para a montagem por partes trocar um nó dela.
+    this.declaracao = conteudo;
     const tinhaFoco = this.raiz.contains?.(document.activeElement);
     const recusados = this.renderer.aplicar(conteudo);
     // Salvar pode desabilitar o botão focado. O navegador então deixa o foco
@@ -531,6 +552,38 @@ class SuperficieDeMod {
     if (tinhaFoco && (!this.raiz.contains(document.activeElement)
       || document.activeElement?.disabled)) this.focarPrimeiro();
     return recusados;
+  }
+
+  /**
+   * **A montagem por partes** (rascunho da API 6, §12; tarefa 7, Step 5c):
+   * troca o nó de `chave` e o que está sob ele, e remonta pela reconciliação,
+   * que mantém pela chave o que não mudou.
+   *
+   * O teto que vale é o de nós da superfície, e não o de 12 KiB da mensagem:
+   * uma ficha cheia se monta num esqueleto e numa parte por vez. **As duas
+   * recusas vêm antes de mexer na tela**: a chave que não existe, pelo nome; a
+   * parte que leva a superfície além do orçamento, com o perfil, o teto e o
+   * tamanho — e a superfície fica como estava.
+   */
+  atualizar(chave, subarvore) {
+    if (this.solta) return 0;
+    const alvo = String(chave ?? "").slice(0, 64);
+    const raiz = { declaracao: this.declaracao };
+    const lugar = lugarDaChave(raiz, "declaracao", alvo);
+    if (!lugar) {
+      throw recusaDaSuperficie("chave-desconhecida",
+        `a superfície «${this.chave}» não tem um nó com a chave «${alvo}»`, { chave: alvo });
+    }
+    const perfil = this.renderer.perfil;
+    const tamanho = nosDaDeclaracao(this.declaracao)
+      - nosDaDeclaracao(lugar.pai[lugar.campo]) + nosDaDeclaracao(subarvore);
+    if (tamanho > perfil.nos) {
+      throw recusaDaSuperficie("orcamento",
+        `a superfície «${this.chave}» passaria de ${perfil.nos} nós: teria ${tamanho}`,
+        { perfil: perfil.nome, teto: perfil.nos, tamanho });
+    }
+    lugar.pai[lugar.campo] = subarvore;
+    return this.montar(raiz.declaracao);
   }
 
   /** As classes que esta superfície oferece aos nós dela. */
