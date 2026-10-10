@@ -300,7 +300,21 @@ mod tests {
     /// próxima `- ` com o mesmo recuo.
     fn passos_do_job(job: &str) -> Vec<String> {
         let texto = ler(".github/workflows/ci.yml");
-        let linhas = sem_comentario(&texto);
+        passos_de(job, &sem_comentario(&texto))
+    }
+
+    /// Os mesmos passos, **com** o que vem depois de `#`: é o texto que o YAML
+    /// entrega. Dentro de um bloco escalar (`>-`, `|`) o `#` não é comentário
+    /// do YAML, é conteúdo — e chega ao shell, que o lê como comentário dele e
+    /// corta o resto da linha. Ler o `run:` sem ele é ler um comando que o
+    /// Actions não roda (I1 da revisão do lote RT).
+    fn passos_do_job_como_o_yaml_os_entrega(job: &str) -> Vec<String> {
+        let texto = ler(".github/workflows/ci.yml");
+        passos_de(job, &texto.lines().collect::<Vec<_>>())
+    }
+
+    /// Os passos do job `job` nas `linhas` do `ci.yml`.
+    fn passos_de(job: &str, linhas: &[&str]) -> Vec<String> {
         let inicio = linhas
             .iter()
             .position(|linha| linha.trim_end() == format!("  {job}:"))
@@ -548,9 +562,12 @@ mod tests {
         )
     }
 
-    /// O texto do `run:` de um passo: o valor da linha, ou, num bloco (`>-`,
-    /// `|`), as linhas mais recuadas que a da chave, juntas por espaço — é
-    /// assim que o YAML dobra um `>-`, e as palavras são as mesmas num `|`.
+    /// O texto que o shell recebe do `run:` de um passo, como o YAML o entrega:
+    /// o valor da linha, ou o bloco escalar. Num `>` ou `>-` o YAML dobra as
+    /// linhas do bloco numa só, juntas por espaço, e uma linha em branco vira
+    /// quebra; num `|` ele as entrega como estão. Uma linha do bloco com outro
+    /// recuo o YAML dobra de outro jeito (ela fica numa linha própria), e aqui
+    /// isso reprova em vez de adivinhar.
     fn run_do_passo(passo: &str) -> Option<String> {
         let linhas: Vec<&str> = passo.lines().collect();
         let (onde, linha) = linhas.iter().enumerate().find(|(_, linha)| {
@@ -565,118 +582,183 @@ mod tests {
         // O recuo da chave, e não o da linha: num `- run: >-` a chave começa
         // depois do `- `.
         let recuo_da_chave = linha.find("run:").unwrap_or_default();
-        Some(
-            linhas
-                .iter()
-                .skip(onde + 1)
-                .take_while(|linha| linha.trim().is_empty() || recuo(linha) > recuo_da_chave)
-                .map(|linha| linha.trim())
-                .collect::<Vec<_>>()
-                .join(" "),
-        )
+        let mut bloco: Vec<&str> = linhas
+            .iter()
+            .skip(onde + 1)
+            .take_while(|linha| linha.trim().is_empty() || recuo(linha) > recuo_da_chave)
+            .copied()
+            .collect();
+        while bloco.last().is_some_and(|linha| linha.trim().is_empty()) {
+            bloco.pop();
+        }
+        let recuos: std::collections::BTreeSet<usize> = bloco
+            .iter()
+            .filter(|linha| !linha.trim().is_empty())
+            .map(|linha| recuo(linha))
+            .collect();
+        assert!(
+            recuos.len() <= 1,
+            "ci.yml: o bloco do `run:` tem linhas com recuos {recuos:?}, e o YAML não dobra \
+             uma linha mais recuada junto com as outras:\n{passo}"
+        );
+        if valor.starts_with('|') {
+            return Some(
+                bloco
+                    .iter()
+                    .map(|linha| linha.trim())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+        }
+        let mut dobrado = String::new();
+        let mut depois_de_texto = false;
+        for linha in bloco {
+            if linha.trim().is_empty() {
+                dobrado.push('\n');
+                depois_de_texto = false;
+            } else {
+                if depois_de_texto {
+                    dobrado.push(' ');
+                }
+                dobrado.push_str(linha.trim());
+                depois_de_texto = true;
+            }
+        }
+        Some(dobrado)
     }
 
     /// Os passos do job `bancadas` que rodam a carga, com os roteiros de cada
-    /// um, e a posição de cada passo no job.
+    /// um, e a posição de cada passo no job. O `run:` é lido como o YAML o
+    /// entrega e como o shell o lê: o que um `#` corta não roda, e não conta.
     fn passos_dos_roteiros_no_ci() -> Vec<(usize, String, Vec<String>)> {
-        passos_do_job("bancadas")
+        passos_do_job_como_o_yaml_os_entrega("bancadas")
             .into_iter()
             .enumerate()
             .filter_map(|(onde, passo)| {
-                let palavras: Vec<String> = run_do_passo(&passo)?
-                    .split_whitespace()
-                    .map(str::to_owned)
+                let das_cargas: Vec<Vec<String>> = comandos_do_shell(&run_do_passo(&passo)?)
+                    .iter()
+                    .filter_map(|comando| roteiros_do_comando(comando))
                     .collect();
-                let roteiros = roteiros_do_comando(&palavras)?;
-                Some((onde, passo, roteiros))
+                if das_cargas.is_empty() {
+                    return None;
+                }
+                Some((onde, passo, das_cargas.into_iter().flatten().collect()))
             })
             .collect()
     }
 
-    /// As palavras de uma linha de shell: o espaço separa, as aspas juntam, e a
-    /// barra invertida dentro de aspas duplas escapa o caractere seguinte. Basta
-    /// para as linhas que este guarda lê; não é um shell.
-    fn palavras_do_shell(linha: &str) -> Vec<String> {
-        let mut palavras = Vec::new();
+    /// Os comandos de um texto de shell, cada um com as suas palavras, lidos
+    /// como o shell os lê no que importa a este guarda:
+    ///
+    /// - a quebra de linha separa comandos, menos logo depois de uma `\` (a
+    ///   continuação);
+    /// - fora de aspas, a `\` escapa o caractere seguinte: `\ ` é um espaço
+    ///   dentro de uma palavra, e **não** continuação, mesmo no fim da linha;
+    /// - um `#` no começo de uma palavra, fora de aspas, comenta até o fim da
+    ///   linha, inclusive uma `\` que venha depois dele;
+    /// - as aspas juntam, e dentro das duplas a `\` escapa o seguinte.
+    ///
+    /// `;`, `|` e `&` ficam como letras: uma chamada com `|| true` no fim ganha
+    /// palavras que a leitura da carga não aceita, e reprova. Não é um shell.
+    fn comandos_do_shell(texto: &str) -> Vec<Vec<String>> {
+        let mut comandos = Vec::new();
+        let mut palavras: Vec<String> = Vec::new();
         let mut atual = String::new();
         let mut tem_palavra = false;
         let mut aspas: Option<char> = None;
-        let mut letras = linha.chars();
+        let mut letras = texto.chars().peekable();
         while let Some(letra) = letras.next() {
             match aspas {
                 Some(fecha) if letra == fecha => aspas = None,
-                Some('"') if letra == '\\' => atual.extend(letras.next()),
+                Some('"') if letra == '\\' => match letras.next() {
+                    Some('\n') | None => {}
+                    Some(seguinte) => atual.push(seguinte),
+                },
                 Some(_) => atual.push(letra),
-                None if letra == '"' || letra == '\'' => {
-                    aspas = Some(letra);
-                    tem_palavra = true;
-                }
-                None if letra.is_whitespace() => {
-                    if tem_palavra {
-                        palavras.push(std::mem::take(&mut atual));
-                        tem_palavra = false;
+                None => match letra {
+                    '\\' => match letras.next() {
+                        Some('\n') | None => {}
+                        Some(seguinte) => {
+                            atual.push(seguinte);
+                            tem_palavra = true;
+                        }
+                    },
+                    '"' | '\'' => {
+                        aspas = Some(letra);
+                        tem_palavra = true;
                     }
-                }
-                None => {
-                    atual.push(letra);
-                    tem_palavra = true;
-                }
+                    '#' if !tem_palavra => {
+                        while letras.next_if(|seguinte| *seguinte != '\n').is_some() {}
+                    }
+                    '\n' => {
+                        if tem_palavra {
+                            palavras.push(std::mem::take(&mut atual));
+                            tem_palavra = false;
+                        }
+                        if !palavras.is_empty() {
+                            comandos.push(std::mem::take(&mut palavras));
+                        }
+                    }
+                    espaco if espaco.is_whitespace() => {
+                        if tem_palavra {
+                            palavras.push(std::mem::take(&mut atual));
+                            tem_palavra = false;
+                        }
+                    }
+                    outra => {
+                        atual.push(outra);
+                        tem_palavra = true;
+                    }
+                },
             }
         }
         if tem_palavra {
             palavras.push(atual);
         }
-        palavras
+        if !palavras.is_empty() {
+            comandos.push(palavras);
+        }
+        comandos
     }
 
-    /// O corpo de uma função do `publicar.sh`, sem comentário: da linha
-    /// `<nome>() {` até a primeira `}` sozinha na margem, e com as linhas que
-    /// terminam em `\` juntas à seguinte, como o shell as lê.
-    fn comandos_da_funcao(nome: &str) -> Vec<String> {
+    /// Os comandos do corpo de uma função do `publicar.sh`, lidos como o shell
+    /// os lê ([`comandos_do_shell`]) sobre o texto **com** os comentários: da
+    /// linha `<nome>() {` até a primeira `}` sozinha na margem. Tirar o
+    /// comentário linha a linha antes de juntar as continuações errava dois
+    /// casos que o shell não continua: `\  # nota` e um espaço depois da `\`
+    /// (I1 da revisão do lote RT, medido com `sh`).
+    fn comandos_da_funcao(nome: &str) -> Vec<Vec<String>> {
         let texto = ler("empacotar/publicar.sh");
-        let linhas = sem_comentario(&texto);
+        let linhas: Vec<&str> = texto.lines().collect();
         let abre = format!("{nome}() {{");
         let inicio = linhas
             .iter()
             .position(|linha| linha.trim_end() == abre)
             .unwrap_or_else(|| panic!("o `publicar.sh` não tem mais a função `{nome}`"));
-        let mut comandos = Vec::new();
-        let mut atual = String::new();
-        for linha in linhas
+        let corpo: Vec<&str> = linhas
             .iter()
             .skip(inicio + 1)
             .take_while(|linha| linha.trim_end() != "}")
-        {
-            match linha.trim_end().strip_suffix('\\') {
-                Some(continua) => {
-                    atual.push_str(continua);
-                    atual.push(' ');
-                }
-                None => {
-                    atual.push_str(linha);
-                    comandos.push(std::mem::take(&mut atual));
-                }
-            }
-        }
-        comandos
+            .copied()
+            .collect();
+        comandos_do_shell(&corpo.join("\n"))
     }
 
     /// Os roteiros que a bateria do `publicar.sh` roda: a chamada de
     /// `etapa_da_bateria` em `roteiros_da_casca` cujo comando — depois do
     /// `--prazo <função>`, que é opcional, da queixa e do conserto — é a carga.
-    /// Exige também que a `bateria()` chame a etapa, numa linha só dela: uma
+    /// Exige também que a `bateria()` chame a etapa, num comando só dela: uma
     /// função que ninguém chama não roda.
     fn roteiros_no_publicar() -> Vec<String> {
         assert!(
             comandos_da_funcao("bateria")
                 .iter()
-                .any(|comando| comando.trim() == "roteiros_da_casca"),
+                .any(|comando| comando.as_slice() == ["roteiros_da_casca"]),
             "a `bateria()` do `publicar.sh` não chama mais `roteiros_da_casca`, e uma versão \
              volta a sair com um roteiro vermelho"
         );
         let chamadas: Vec<Vec<String>> = comandos_da_funcao("roteiros_da_casca")
-            .iter()
-            .map(|comando| palavras_do_shell(comando))
+            .into_iter()
             .filter(|palavras| {
                 palavras
                     .first()
@@ -798,6 +880,50 @@ mod tests {
                  que pendura segura o job por seis horas:\n{passo}"
             );
         }
+    }
+
+    /// **O leitor de shell do guarda lê como o `sh` leu.** Os casos são os que o
+    /// `sh` do macOS respondeu numa sonda (lote RT, rodada 2): uma nota depois
+    /// de `\ ` e um espaço depois da `\` não continuam a linha, e a `\` no fim
+    /// continua. E um `#` só comenta no começo de uma palavra, fora de aspas.
+    #[test]
+    fn o_leitor_de_shell_do_guarda_le_como_o_sh() {
+        let de = |linhas: &[&[&str]]| -> Vec<Vec<String>> {
+            linhas
+                .iter()
+                .map(|comando| {
+                    comando
+                        .iter()
+                        .map(|palavra| (*palavra).to_owned())
+                        .collect()
+                })
+                .collect()
+        };
+        assert_eq!(
+            comandos_do_shell("f a \\  # nota\n  b c\n"),
+            de(&[&["f", "a", " "], &["b", "c"]]),
+            "uma nota depois de `\\ ` comenta, e a linha não continua"
+        );
+        assert_eq!(
+            comandos_do_shell("f a \\ \n  b c\n"),
+            de(&[&["f", "a", " "], &["b", "c"]]),
+            "um espaço depois da `\\` é escapado, e a linha não continua"
+        );
+        assert_eq!(
+            comandos_do_shell("f a \\\n  b c\n"),
+            de(&[&["f", "a", "b", "c"]]),
+            "a `\\` no fim da linha continua"
+        );
+        assert_eq!(
+            comandos_do_shell("f a # x \\\n b\n"),
+            de(&[&["f", "a"], &["b"]]),
+            "a `\\` dentro de um comentário não continua"
+        );
+        assert_eq!(
+            comandos_do_shell("f '#' a#b \"c # d\" --x  # nota --y\n"),
+            de(&[&["f", "#", "a#b", "c # d", "--x"]]),
+            "o `#` só comenta no começo de uma palavra e fora de aspas"
+        );
     }
 
     /// O que a lista escreve, num diário que o `node` de mentira também usa:
