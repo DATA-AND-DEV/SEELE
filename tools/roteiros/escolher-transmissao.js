@@ -8,7 +8,11 @@
 // verdade. Aqui ele é posto à mão porque o que se mede é o desenho, e abrir um
 // fluxo pediria um servidor.
 
-const roster = [
+// `presentes`, e não `roster`: é o campo que o `Snapshot` de `seele-ffi` tem
+// (`presentes: Vec<Person>`). Este roteiro usou `roster` enquanto o palco
+// também lia `roster`, e os dois concordavam num campo que o produto não manda:
+// a fileira dizia «VER —» para todo mundo, desde a 0.15, e o roteiro passava.
+const presentes = [
   { id: 10, nickname: "rafa" },
   { id: 20, nickname: "marcela" },
   { id: 30, nickname: "eu" },
@@ -18,14 +22,14 @@ const roster = [
 // sem esta chave todo retrato pareceria «fora de sala».
 const naSala = [{ id: 1, occupied_by_us: true }];
 
-const semNenhuma = { roster, voice_rooms: naSala, transmissoes: [] };
+const semNenhuma = { presentes, voice_rooms: naSala, transmissoes: [] };
 const soUma = {
-  roster,
+  presentes,
   voice_rooms: naSala,
   transmissoes: [{ tela: 7, de: 10, e_minha: false }],
 };
 const duas = {
-  roster,
+  presentes,
   voice_rooms: naSala,
   transmissoes: [
     { tela: 7, de: 10, e_minha: false },
@@ -33,7 +37,7 @@ const duas = {
   ],
 };
 const umaMinhaUmaAlheia = {
-  roster,
+  presentes,
   voice_rooms: naSala,
   transmissoes: [
     { tela: 7, de: 10, e_minha: false },
@@ -58,6 +62,12 @@ relatar("uma só: " + estado());
 telaEmCurso = 7;
 desenharTransmissoes(duas);
 relatar("duas, recebendo a 7: " + estado());
+// Cada botão diz de quem é a tela. Um travessão aqui é o palco sem achar o nome
+// de quem está nos presentes.
+exigir(
+  estado().includes("rafa") && estado().includes("marcela") && !estado().includes("—"),
+  "a escolha entre duas transmissões não diz de quem é cada tela: " + estado(),
+);
 
 telaEmCurso = 8;
 desenharTransmissoes(duas);
@@ -67,16 +77,16 @@ telaEmCurso = 7;
 desenharTransmissoes(umaMinhaUmaAlheia);
 relatar("a minha não entra na escolha: " + estado());
 
-// Um id que o roster não conhece ainda: travessão, e nunca o número cru.
+// Um id que os presentes não têm ainda: travessão, e nunca o número cru.
 desenharTransmissoes({
-  roster,
+  presentes,
   voice_rooms: naSala,
   transmissoes: [
     { tela: 7, de: 10, e_minha: false },
     { tela: 8, de: 99, e_minha: false },
   ],
 });
-relatar("quem o roster não tem: " + estado());
+relatar("quem os presentes não têm: " + estado());
 
 // ---- os três estados da escolha ----
 //
@@ -122,13 +132,13 @@ relatar("quando a imagem chega: " + estadoDetalhado());
 
 // E um retrato transitório, sem a lista de salas, não pode apagar a escolha.
 await pararDeVer();
-desenharTransmissoes({ roster, transmissoes: duas.transmissoes });
+desenharTransmissoes({ presentes, transmissoes: duas.transmissoes });
 relatar("retrato sem lista de salas: telaQuerida=" + telaQuerida);
 desenharTransmissoes(duas);
 relatar("e a fileira segue: " + estadoDetalhado());
 
 // Sair da sala, esse sim, esquece.
-desenharTransmissoes({ roster, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
+desenharTransmissoes({ presentes, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
 relatar("fora da sala: telaQuerida=" + telaQuerida);
 
 // ---- não querer ver ----
@@ -159,5 +169,5 @@ await trocarDeTransmissao(7);
 relatar("depois de escolher de novo: telaQuerida=" + telaQuerida);
 
 // E sair da sala esquece.
-desenharTransmissoes({ roster, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
+desenharTransmissoes({ presentes, voice_rooms: [{ id: 1, occupied_by_us: false }], transmissoes: [] });
 relatar("fora da sala: telaQuerida=" + telaQuerida + " · fileira " + estado());

@@ -402,6 +402,39 @@ também não tem como ser medida pela página no iPhone.
 
 ---
 
+## A tela pelo PC: o que o Chrome, o Edge e o Firefox codificam (Tarefa 3.10)
+
+**Por quê.** No PC, o web app compartilha a tela (D-web-3) com o
+`VideoEncoder` do navegador, e o desktop decodifica com o OpenH264. No Chromium
+e no Safari do Mac a medida já foi feita (`spikes/tela-do-navegador/README.md`):
+- o perfil que serve aos dois é o Baseline restrito 4.0, em Annex-B;
+- **o `isConfigSupported` do Safari mente**: ele diz que aceita perfis que não
+  produzem nada.
+
+Falta o Chrome, o Edge e o Firefox de verdade, porque o Chromium aberto não é o
+Chrome.
+
+**Passos, num Mac ou num PC com o navegador instalado:**
+1. Na raiz do repositório:
+
+       python3 spikes/tela-do-navegador/servir.py /tmp/tela-nav manual
+
+2. Abra o endereço que ele imprime em cada navegador, um de cada vez, e espere
+   o «feito» na página. O resultado sai no terminal, em JSON.
+3. Para cada navegador, anote **o que codificou, e não só o que o
+   `isConfigSupported` disse**: a lista `fluxos`, com as unidades e o `erro`.
+4. Os fluxos ficam em `/tmp/tela-nav/<navegador>-<perfil>.bin`. Mande a pasta:
+   o OpenH264 os lê com o exemplo de `spikes/tela-do-navegador/`.
+
+**O som do `getDisplayMedia`** (à mão, porque pede um gesto e a escolha na caixa
+do navegador). Em cada navegador, numa página qualquer, cole no console:
+
+    navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+      .then(s => console.log("som:", s.getAudioTracks().length))
+
+Escolha uma aba que esteja tocando som, depois a tela inteira, e anote o número
+que aparece. Zero quer dizer que aquele navegador não dá o som daquela fonte.
+
 ## Depois
 
 Mande as tabelas preenchidas, e os arquivos de resultado se quiser, à
