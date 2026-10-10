@@ -20,12 +20,12 @@ MODO = sys.argv[1] if len(sys.argv) > 1 else "mac"
 if MODO not in ("mac", "iphone", "chromium"):
     raise SystemExit("uso: python3 servir.py mac|iphone|chromium")
 
-PAGINA = (b'<!doctype html><meta charset="utf-8">'
-          b'<meta name="viewport" content="width=device-width, initial-scale=1">'
-          b'<title>eco no navegador</title>'
-          b'<p>Sem fone, com o volume em uns dois tercos. Aperte e fique em silencio por uns 25 s.</p>'
-          b'<button id="medir" type="button">MEDIR</button><div id="saida"></div>'
-          b'<script src="pagina.js"></script>')
+PAGINA = ('<!doctype html><meta charset="utf-8">'
+          '<meta name="viewport" content="width=device-width, initial-scale=1">'
+          '<title>eco no navegador</title>'
+          '<p>Sem fone, com o volume em uns dois terços. Aperte e fique em silêncio por uns 25 s.</p>'
+          '<button id="medir" type="button">MEDIR</button><div id="saida"></div>'
+          '<script src="pagina.js"></script>').encode()
 recebidos = []
 
 
