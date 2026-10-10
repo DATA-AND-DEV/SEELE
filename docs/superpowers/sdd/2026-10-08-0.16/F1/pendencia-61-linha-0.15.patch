@@ -1,0 +1,419 @@
+diff --git a/crates/seele-conformance/tests/rajada_de_muitos.rs b/crates/seele-conformance/tests/rajada_de_muitos.rs
+new file mode 100644
+index 00000000..77df9d7d
+--- /dev/null
++++ b/crates/seele-conformance/tests/rajada_de_muitos.rs
+@@ -0,0 +1,165 @@
++//! A pendência 61: **muitas pessoas escrevendo em rajada ao mesmo tempo não
++//! derrubam ninguém, e tudo é gravado.**
++//!
++//! O escritor do servidor gravava tudo o que chegasse em 200 ms num lote sem
++//! teto e o anunciava num laço sem `await`. Um lote maior que o anel do
++//! barramento (1 024) passava à frente de **toda** sessão viva de uma vez — de
++//! quem lia depressa e de quem nem estava no canal —, e cada uma se despedia com
++//! `FellBehind`. A cauda do que os falantes ainda mandavam não era gravada.
++//! Medido com o cliente de verdade (`tests/medida_do_barramento.rs`): 17 × 58
++//! (986) nunca, 18 × 58 (1 044) sempre, e 24 × 58 deixou até 182 sem gravar.
++//! Num servidor aberto, 18 conexões de um script derrubavam todo mundo.
++//!
++//! O conserto tem duas metades, e este teste olha as duas pela porta de fora:
++//! o lote do escritor com teto (`server::TETO_DO_LOTE`), e a contrapressão por
++//! conexão (`session::TETO_NO_AR`): com mensagens demais no ar, a sessão para de
++//! ler a entrada daquela conexão e o excesso espera no QUIC, do lado de quem
++//! mandou.
++
++#![allow(clippy::expect_used, reason = "num teste, o pânico é o relatório")]
++
++use std::net::SocketAddr;
++use std::sync::Arc;
++use std::time::{Duration, Instant};
++
++use anyhow::Result;
++use seele_core::{Client, MemoryPinStore};
++use seele_proto::control::{DisconnectReason, ServerMessage};
++use seele_proto::ids::{ChannelId, ClientMessageId};
++use seele_server::persistence::Location;
++use seele_server::{Daemon, ServerConfig};
++
++mod vaga;
++
++const LINHA: ChannelId = ChannelId(1);
++
++/// A rajada inteira que o balde de quadros deixa a uma conexão (60, menos o
++/// que a entrada gastou).
++const POR_FALANTE: usize = 58;
++
++/// Só para o teste não travar: cada espera acaba antes num sinal.
++const PRAZO: Duration = Duration::from_secs(60);
++
++async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
++    let config = ServerConfig {
++        name: "Casa".into(),
++        listen: SocketAddr::from(([127, 0, 0, 1], 0)),
++        database: Location::Memory,
++        ..ServerConfig::default()
++    };
++    let servidor = Arc::new(Daemon::bind(config).await?);
++    let endereco = servidor.local_addr()?;
++    let aceitando = Arc::clone(&servidor);
++    tokio::spawn(async move {
++        let _ = aceitando.run().await;
++    });
++    Ok((endereco, servidor))
++}
++
++async fn entrar(endereco: SocketAddr, numero: usize) -> Result<Client> {
++    let semente = u8::try_from(numero + 1).expect("cabe num byte");
++    let mut cliente = Client::connect(
++        endereco,
++        "localhost",
++        &endereco.to_string(),
++        &format!("pessoa{numero:02}"),
++        &ed25519_dalek::SigningKey::from_bytes(&[semente; 32]),
++        Arc::new(MemoryPinStore::new()),
++        None,
++        None,
++    )
++    .await?;
++    cliente.join_channel(LINHA).await?;
++    Ok(cliente)
++}
++
++/// O que uma ponta viu: quantas mensagens leu, e se o servidor se despediu
++/// dela com `FellBehind`.
++async fn ler(cliente: &mut Client, esperadas: usize) -> (usize, bool) {
++    let prazo = Instant::now() + PRAZO;
++    let mut lidas = 0;
++    while lidas < esperadas {
++        let resta = prazo.saturating_duration_since(Instant::now());
++        match tokio::time::timeout(resta, cliente.next_event()).await {
++            Ok(Ok(ServerMessage::MessageReceived { .. })) => lidas += 1,
++            Ok(Ok(ServerMessage::Disconnecting { reason })) => {
++                return (lidas, reason == DisconnectReason::FellBehind);
++            }
++            Ok(Ok(_)) => {}
++            Ok(Err(_)) | Err(_) => break,
++        }
++    }
++    (lidas, false)
++}
++
++/// `falantes` pessoas mandam a rajada inteira ao mesmo tempo, com um ouvinte no
++/// canal. Ninguém fica para trás, e tudo é gravado e lido.
++async fn rodada(falantes: usize, tamanho: usize) -> Result<()> {
++    let (endereco, servidor) = servidor().await?;
++    let mut ouvinte = entrar(endereco, 0).await?;
++    let mut clientes = Vec::new();
++    for numero in 1..=falantes {
++        clientes.push(entrar(endereco, numero).await?);
++    }
++    let total = falantes * POR_FALANTE;
++    let largada = Arc::new(tokio::sync::Barrier::new(falantes + 1));
++
++    let mut tarefas = Vec::new();
++    for (indice, mut cliente) in clientes.into_iter().enumerate() {
++        let largada = Arc::clone(&largada);
++        tarefas.push(tokio::spawn(async move {
++            largada.wait().await;
++            for chave in 1..=POR_FALANTE {
++                let corpo = format!("{indice:02}-{chave:04}-")
++                    .chars()
++                    .cycle()
++                    .take(tamanho)
++                    .collect::<String>();
++                let chave = ClientMessageId(u64::try_from(chave).expect("cabe"));
++                cliente.send_message(LINHA, &corpo, chave).await.expect("o enlace caiu no envio");
++            }
++            ler(&mut cliente, total).await
++        }));
++    }
++    largada.wait().await;
++    let (lidas_pelo_ouvinte, ouvinte_atras) = ler(&mut ouvinte, total).await;
++    let mut falantes_atras = 0;
++    for tarefa in tarefas {
++        let (_, atras) = tarefa.await?;
++        falantes_atras += usize::from(atras);
++    }
++
++    let caso = format!("{falantes} pessoas × {POR_FALANTE} mensagens de {tamanho} bytes");
++    assert_eq!(
++        servidor.server().atrasos.sessoes(),
++        0,
++        "{caso}: o barramento passou à frente de sessões que liam ({falantes_atras} falantes e \
++         o ouvinte={ouvinte_atras} se despediram com FellBehind)"
++    );
++    assert!(
++        !ouvinte_atras && falantes_atras == 0,
++        "{caso}: alguém foi desligado com FellBehind"
++    );
++    assert_eq!(
++        servidor.quantas_mensagens(LINHA).await?,
++        total as u64,
++        "{caso}: o servidor não gravou tudo o que leu da rajada"
++    );
++    assert_eq!(lidas_pelo_ouvinte, total, "{caso}: o ouvinte não leu tudo o que foi gravado");
++    servidor.shutdown();
++    Ok(())
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn dezoito_pessoas_em_rajada_nao_derrubam_ninguem_e_tudo_e_gravado() -> Result<()> {
++    let _vaga = vaga::minha();
++    // A primeira conta que passava do anel: 18 × 58 = 1 044.
++    rodada(18, 20).await
++}
++
++#[tokio::test(flavor = "multi_thread")]
++async fn vinte_e_quatro_pessoas_com_corpo_no_teto_nao_derrubam_ninguem() -> Result<()> {
++    let _vaga = vaga::minha();
++    // A que deixava a cauda sem gravar: 24 × 58 = 1 392, com corpos de 4 KiB.
++    rodada(24, 4000).await
++}
+diff --git a/crates/seele-server/Cargo.toml b/crates/seele-server/Cargo.toml
+index 5593fdca..d3198271 100644
+--- a/crates/seele-server/Cargo.toml
++++ b/crates/seele-server/Cargo.toml
+@@ -109,3 +109,5 @@ path = "src/main.rs"
+ 
+ [dev-dependencies]
+ tempfile = "3.27.0"
++# O `test-util`, para o `#[tokio::test(start_paused = true)]` do teto do lote.
++tokio = { version = "1.53.1", features = ["test-util"] }
+diff --git a/crates/seele-server/src/lib.rs b/crates/seele-server/src/lib.rs
+index 75a870f3..e2436069 100644
+--- a/crates/seele-server/src/lib.rs
++++ b/crates/seele-server/src/lib.rs
+@@ -601,7 +601,7 @@ impl Daemon {
+ 
+         let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
+ 
+-        let (events, _) = tokio::sync::broadcast::channel(1024);
++        let (events, _) = tokio::sync::broadcast::channel(server::ANEL_DO_BARRAMENTO);
+         let writes = server::spawn_writer(Arc::clone(&persistence), events.clone());
+         // **A retenção, quando quem hospeda a escolheu.** R15: `Messages::prune`
+         // existia e nada em produção a chamava, então um servidor
+diff --git a/crates/seele-server/src/server.rs b/crates/seele-server/src/server.rs
+index ec379317..5b3725fe 100644
+--- a/crates/seele-server/src/server.rs
++++ b/crates/seele-server/src/server.rs
+@@ -32,6 +32,35 @@ use crate::persistence::Persistence;
+ /// still feels sent immediately.
+ pub const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
+ 
++/// Quantos eventos o barramento guarda para a sessão mais atrasada.
++///
++/// Passado o anel, o `broadcast` descarta o mais antigo e a sessão que não o
++/// leu recebe `Lagged` — e se despede com `FellBehind` (ver o braço em
++/// `session.rs`). É o desenho certo para quem **parou de ler**, e só para ele.
++pub const ANEL_DO_BARRAMENTO: usize = 1024;
++
++/// O maior lote que o escritor grava e anuncia de uma vez.
++///
++/// **A pendência 61.** O lote não tinha teto: o escritor juntava tudo o que
++/// chegasse em [`FLUSH_INTERVAL`] e anunciava num laço sem `await`. Medido com
++/// o cliente de verdade (`seele-conformance/tests/rajada_de_muitos.rs`): 17
++/// pessoas × 58 mensagens (986) não passavam ninguém para trás, e 18 × 58
++/// (1 044) passavam **todas** as sessões vivas de uma vez, inclusive quem lia
++/// depressa e quem nem estava no canal. Num servidor aberto, 18 conexões de um
++/// script derrubavam todo mundo.
++///
++/// Um quarto do anel: um anúncio sozinho nunca o enche, e sobra lugar para o
++/// lote seguinte e para o resto do barramento (um `PersonState` por pessoa por
++/// segundo) antes de quem lê depressa voltar a ler.
++pub const TETO_DO_LOTE: usize = ANEL_DO_BARRAMENTO / 4;
++
++// O teto do lote é uma fração do anel, e a conta tem de continuar fechando se um
++// dos dois mudar.
++const _: () = assert!(
++    TETO_DO_LOTE * 4 <= ANEL_DO_BARRAMENTO,
++    "um lote do escritor pode encher mais de um quarto do anel do barramento"
++);
++
+ /// Events every connection may care about.
+ ///
+ /// Broadcast to all, filtered per connection. `specs/04-servidor-seele.md` sizes
+@@ -1467,7 +1496,16 @@ pub fn spawn_writer(
+             tokio::select! {
+                 request = rx.recv() => {
+                     match request {
+-                        Some(request) => pending.push(request.message),
++                        // **Com teto** ([`TETO_DO_LOTE`]): cheio, grava agora,
++                        // sem esperar o relógio. Sem isto um lote anunciava
++                        // mais do que o anel guarda, e o barramento passava à
++                        // frente de todo mundo de uma vez.
++                        Some(request) => {
++                            pending.push(request.message);
++                            if pending.len() >= TETO_DO_LOTE {
++                                flush(&persistence, &events, &mut pending).await;
++                            }
++                        }
+                         // The server is shutting down. Flush what is left rather
+                         // than dropping messages the clients believe are queued.
+                         None => {
+@@ -1569,6 +1607,65 @@ mod tests {
+         Instant::now()
+     }
+ 
++    /// `quantas` mensagens no escritor, e quanto o relógio andou até todas
++    /// serem anunciadas. Gravadas ou recusadas, tanto faz: cada uma vira um
++    /// evento só no barramento, e é o anúncio que se mede.
++    async fn anunciar(
++        writes: &mpsc::Sender<WriteRequest>,
++        ouvindo: &mut broadcast::Receiver<Event>,
++        quantas: usize,
++    ) -> Duration {
++        let comeco = tokio::time::Instant::now();
++        for numero in 0..quantas {
++            let message = PendingMessage {
++                channel: ChannelId(1),
++                author: PersonId(1),
++                author_nickname: "ana".into(),
++                body: format!("{numero}"),
++                replies_to: None,
++                client_message_id: Some(seele_proto::ids::ClientMessageId(numero as u64 + 1)),
++            };
++            writes.send(WriteRequest { message }).await.expect("o escritor está de pé");
++        }
++        for _ in 0..quantas {
++            ouvindo.recv().await.expect("o escritor anuncia cada uma");
++        }
++        comeco.elapsed()
++    }
++
++    /// **A pendência 61: o lote cheio é gravado sem esperar o relógio.**
++    ///
++    /// Sem o teto, o escritor juntava tudo o que chegasse em [`FLUSH_INTERVAL`]
++    /// e anunciava de uma vez, e um lote acima do anel passava à frente de toda
++    /// sessão viva. Pela porta de fora (`rajada_de_muitos.rs`) este teto
++    /// sozinho não aparece: a contrapressão por conexão segura antes, e passar
++    /// dela pede mais conexões do que um endereço consegue abrir. Aqui ele
++    /// aparece, no relógio de mentira do `tokio`: um lote a menos que o teto
++    /// espera o tique, e o lote no teto sai na hora.
++    #[tokio::test(start_paused = true)]
++    async fn o_lote_cheio_e_gravado_sem_esperar_o_relogio() {
++        let persistence = Arc::new(Mutex::new(
++            Persistence::open(&crate::persistence::Location::Memory).expect("banco em memória"),
++        ));
++        let (events, mut ouvindo) = broadcast::channel(ANEL_DO_BARRAMENTO);
++        let writes = spawn_writer(persistence, events);
++
++        // O controle: um a menos que o teto espera o tique. Sem ele, o teste
++        // não distinguiria «saiu na hora» de «o relógio não andou».
++        let abaixo = anunciar(&writes, &mut ouvindo, TETO_DO_LOTE - 1).await;
++        assert!(
++            abaixo > Duration::ZERO,
++            "um lote abaixo do teto saiu sem o tique ({abaixo:?}): o teste não mede o teto"
++        );
++
++        let no_teto = anunciar(&writes, &mut ouvindo, TETO_DO_LOTE).await;
++        assert!(
++            no_teto < FLUSH_INTERVAL,
++            "o lote de {TETO_DO_LOTE} esperou {no_teto:?} pelo relógio: o escritor não grava ao \
++             chegar ao teto, e um lote acima do anel passa à frente de todo mundo"
++        );
++    }
++
+     #[test]
+     fn a_seat_is_held_for_the_grace_period() {
+         // specs/02-protocolo.md: the server holds the slot for the same five
+diff --git a/crates/seele-server/src/session.rs b/crates/seele-server/src/session.rs
+index 72bc85e4..5c537f52 100644
+--- a/crates/seele-server/src/session.rs
++++ b/crates/seele-server/src/session.rs
+@@ -38,7 +38,9 @@ use seele_proto::control::{
+     MessageRefusal, MotivoDeFalhaDePar, Permission, PersonProfile, PersonState, Presence, Role,
+     ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate, VoiceRoomInfo,
+ };
+-use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
++use seele_proto::ids::{
++    ChannelId, ClientMessageId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId,
++};
+ use seele_proto::screen::SCREEN_HEADER_LEN;
+ use seele_proto::signal::{Signal, SyncInputs};
+ use seele_proto::transport::HANDSHAKE_TIMEOUT;
+@@ -66,6 +68,37 @@ const OUTBOUND_DEPTH: usize = 256;
+ /// desonesto encontra contrapressão em vez de memória do servidor para gastar.
+ const ENTRADA_DEPTH: usize = 64;
+ 
++/// Quantas mensagens desta conexão podem estar **no ar** — entregues ao
++/// escritor e ainda não anunciadas no barramento, gravadas ou recusadas — antes
++/// de a sessão parar de ler a entrada dela.
++///
++/// **A contrapressão da pendência 61.** Sem ela, quem escrevia em rajada
++/// enchia o lote do escritor, e o lote passava à frente do barramento de todo
++/// mundo. Com ela, o excesso espera onde é de quem o mandou: nos
++/// [`ENTRADA_DEPTH`] quadros da fila, e depois no controle de fluxo do QUIC, do
++/// lado do cliente. Nada se perde, e ninguém é desligado por escrever depressa.
++///
++/// Enquanto a sessão não lê a entrada, ela só faz o resto do laço — e o resto
++/// do laço é ler o barramento. É isso que tira dela o atraso que a F5 mediu sob
++/// carga: uma sessão ocupada com as próprias mensagens, no cadeado da
++/// `persistence`, deixava de ler o barramento enquanto ele andava.
++///
++/// Oito, o dobro do que o balde deixa uma pessoa mandar por lote no teto
++/// sustentado (20 por segundo, 200 ms): quem escreve no ritmo que o balde
++/// aceita nunca encosta nisto. Uma rajada de 58 grava em uns oito lotes.
++const TETO_NO_AR: usize = 8;
++
++// Quem escreve no teto sustentado do balde não pode ser freado por este teto:
++// a contrapressão é para a rajada, e não para o ritmo que o balde já aceita.
++// Em milésimos, e não em `f64`: a conta fecha no limite exato (8 contra
++// 2 × 20 × 0,2), e uma comparação de ponto flutuante no limite depende de como
++// o 0,2 arredonda.
++const _: () = assert!(
++    TETO_NO_AR as u128 * 1000
++        >= 2 * (crate::taxa::QUADROS_POR_SEGUNDO as u128) * crate::server::FLUSH_INTERVAL.as_millis(),
++    "o teto de mensagens no ar freia quem escreve no ritmo que o balde aceita"
++);
++
+ /// Quantas razões de transferência esperam para ir ao fluxo de controle.
+ ///
+ /// Uma por transferência viva, e transferência viva é coisa que se conta nos
+@@ -1582,6 +1615,7 @@ async fn run_session(
+     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
+     let mut events = server.events.subscribe();
+     let mut channels: Vec<ChannelId> = Vec::new();
++    let mut no_ar: std::collections::HashSet<ClientMessageId> = std::collections::HashSet::new();
+     let mut current_voice_room: Option<VoiceRoomId> = None;
+     // **Quais telas esta pessoa pediu para assistir e ainda não desistiu.**
+     //
+@@ -1890,7 +1924,7 @@ async fn run_session(
+         tokio::select! {
+             // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
+             // perde a corrida. É a propriedade que o `frame::read` não tem.
+-            incoming = entrada.recv() => {
++            incoming = entrada.recv(), if no_ar.len() < TETO_NO_AR => {
+                 let Some(message) = incoming else { break };
+ 
+                 // O balde de depois de autenticar. O ADR 0021 fechou a porta e
+@@ -2111,6 +2145,7 @@ async fn run_session(
+                         }
+                         // Queued, not confirmed. The broadcast after the commit
+                         // is what tells anybody it happened.
++                        no_ar.insert(client_message_id);
+                         server.post(PendingMessage {
+                             channel,
+                             author: session.person,
+@@ -3291,6 +3326,22 @@ async fn run_session(
+                     // sempre — `recv` volta na hora, com o mesmo erro.
+                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                 };
++                // O que desta conexão o escritor anunciou deixa de estar no ar,
++                // gravado ou recusado. Antes de qualquer filtro: a conta é do
++                // que esta conexão mandou, e não do que ela vê.
++                match &event {
++                    Event::MessagePosted(message) if message.author == session.person => {
++                        if let Some(chave) = message.client_message_id {
++                            no_ar.remove(&chave);
++                        }
++                    }
++                    Event::MessageRejected { author, client_message_id: Some(chave), .. }
++                        if *author == session.person =>
++                    {
++                        no_ar.remove(chave);
++                    }
++                    _ => {}
++                }
+ 
+                 // Two events are aimed at **this** connection rather than
+                 // forwarded by it. They are on the same bus as everything else
