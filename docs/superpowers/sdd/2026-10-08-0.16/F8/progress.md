@@ -56,5 +56,6 @@ O que espera essa integração, e o commit da F3 de que cada coisa depende:
 - [x] (`1f09c7ba`) o `#operador-mods` (`operador.barra`) no alto de AJUSTES, abaixo de SEU PERFIL, com os quatro critérios da F3 e o vermelho sem o `max-height` mandado a ela (Tarefa 9);
 - [x] a `folha` no caso `superficies-de-mod` (`37a4ce74`), que entrou na décima integração;
 - [ ] no caso `superficies-de-mod`: o toque no SEGURE, no SOM, no SAIR e em AJUSTES com o diálogo modal e a imersiva abertos, e o Tab contido (a inércia, `682f39ba`, validada numa cópia em 09/10; ainda fora da versao/0.16);
+- [ ] o `chamada.palco` (`c7c64814`): medir a casa dele na CHAMADA (a vista alternativa à grade, escondida e não tirada do documento, como o VER A GRADE) e declará-lo no `CELULAR.regioes`, com o caso das regiões;
 - [ ] tirar do `celular-base.css` os cinco `--nucleo-*` que o desktop passou a declarar com os mesmos nomes e valores (`e26e9edc`, ainda fora da versao/0.16), e ver a medida do núcleo continuar igual sob os quatro temas;
 - [x] (`ebd50055`) a Tarefa 13: as cores de estado sob o tema pela `tonsDoTema` da 17e (`bf8d8fb6`), e o tema claro de volta ao caso `aba-servidor`.
