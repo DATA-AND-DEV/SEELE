@@ -2919,6 +2919,21 @@ function escreverAsRegioesDoTema(emVigor) {
     }
     if (typeof regioes[regiao].fundo === "string") escrever[TEMA_DA_API.painel] = daRegiao.painel;
     Object.assign(escrever, tonsDoTema(daRegiao, corDaRaiz).tons);
+    // **A cor do texto, resolvida no contêiner** (achado da F8, 10/10): quem
+    // está dentro e não declara cor herda a de `#tela-sessao`, já resolvida com
+    // o token da sessão — numa região clara, um texto de contribuição saía a
+    // 1,09:1. Declarada aqui, ela lê o texto da região; e sai junto com os
+    // tokens, na troca seguinte. No contêiner que a casca declara também.
+    escrever.color = `var(${TEMA_DA_API.texto})`;
+    // **E o fundo, só quando a região o declara** (a orquestradora, 10/10).
+    // Quatro contêineres são transparentes (`.linha-barra`, `#compositor-mods`,
+    // `#form-mensagem`, `#lista-mensagens`), e o `fundo` de uma região neles
+    // nunca apareceu: o tema era dado como aplicado e a tela não mudava. Uma
+    // região que só muda o `texto` não escreve fundo nenhum, e cada contêiner
+    // fica com o de hoje.
+    if (typeof regioes[regiao].fundo === "string") {
+      escrever["background-color"] = `var(${TEMA_DA_API.fundo})`;
+    }
     const daCasca = typeof CELULAR === "object" ? CELULAR?.conteineresDasRegioes?.[regiao] : undefined;
     const seletores = Array.isArray(daCasca) ? daCasca : REGIOES_DO_TEMA[regiao];
     const onde = Array.isArray(daCasca) ? document : sessao;
