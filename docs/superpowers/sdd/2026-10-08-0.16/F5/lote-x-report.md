@@ -694,3 +694,59 @@ recompilar.
 
 A conformidade rodou um arquivo de cada vez, com `--test-threads=1`. A `ui/`
 não mudou nesta etapa, e por isso as bancadas não rodaram.
+
+## A impressão, commit D: a ligação de `onde_estou_na` (`86c00600`)
+
+A re-revisão (Importante) e a F7 acharam o mesmo buraco. Os testes de
+`onde_estou_em` são puros, e nada provava o que `onde_estou_na` passa a eles.
+
+**Duas regressões de uma linha passavam verdes**, com 307 no `--bin` e 288 no
+`--test frontend`. Reproduzi as duas em `682780eb`:
+- **M1:** a impressão do guardado no lugar da impressão da sessão. A
+  re-revisão mediu de ponta a ponta que, com ela, o sim é gravado para S;
+- **M2:** `Hospedagens::impressoes()` com o par trocado.
+
+**Um teste de ponta a ponta no `main.rs` não cabe:**
+- o guarda `o_ponto_de_encontro_de_quem_hospeda` proíbe `Hospedagem::iniciar(`
+  no arquivo;
+- uma `Connection` comum é recusada por `iniciar_sala`.
+
+A F7 escreve esse teste na sala depois que os ramos se encontrarem.
+
+**O conserto**, em `a_resposta_a_estou_no_meu_servidor`:
+- `as_impressoes_saem_na_ordem_do_guardado_e_da_sala`. São duas hospedagens
+  `iniciar_sala` com sementes diferentes, como em
+  `a_saida_despede_as_hospedagens`, uma no guardado e outra na sala.
+  `impressoes()` devolve a `impressao_digital()` do guardado primeiro e a da
+  sala depois.
+- `onde_estou_na_passa_a_chave_da_conexao_e_as_das_hospedagens`. É um guarda
+  de texto-fonte sobre o corpo de `onde_estou_na`, sem espaços e sem linhas de
+  comentário, com agulhas de `concat!`. Ele exige:
+  - na chamada, `onde_estou_em(endereco, impressao, guardado, pessoal)`;
+  - que `impressao` comece em `session.connection()` e passe por
+    `.impressao_do_servidor()`;
+  - que `(guardado, pessoal)` saia de `.impressoes()`.
+
+**As reversões.** Cada uma reprova exatamente um teste. Em todas, o arquivo
+voltou idêntico (`cmp`) e foi tocado antes de recompilar.
+
+| reversão | o que reprova |
+|---|---|
+| M1 | o guarda |
+| M2 | o teste de `impressoes` |
+| M1 com a chamada certa posta num comentário logo acima | o guarda |
+| a chamada intacta e a ligação trocada (`let impressao = guardado.clone()`) | o guarda |
+
+**O Menor.** O QA-02 só é pego pelo guarda do `frontend.rs`, e fica como está,
+por decisão da coordenação.
+
+**Os testes:**
+
+| o quê | resultado |
+|---|---|
+| `--bin seele-app` | 309 de 309 |
+| `--test frontend` | 288 de 288 |
+| fmt | limpo |
+| clippy do app | limpo |
+
+Nada fora do `main.rs` mudou, e por isso a conformidade não rodou.
