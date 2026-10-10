@@ -108,7 +108,7 @@
     "mundo.agora": "mundo::agora",
     "mundo.registrar": "mundo::registrar",
     "mundo.avisar": "a metade de servidor avisa as janelas do mesmo MOD ({ canal?, carga }); devolve { ok: true } ou { ok: false, erro } com aviso-invalido, aviso-grande-demais ou avisos-demais; a declaração só vale se a chamada terminar e o quintal gravar; dentro da chamada, o mais novo de cada canal; até 1 KiB por aviso, 4 por segundo por MOD em qualquer janela de um segundo, 16 canais por chamada (números da M3); o excedente fica, por canal, só o mais novo, e sai quando a janela abre; vai a quem pode ler o canal, inclusive a janela de quem pediu; a janela recebe o evento servidor, com canal e carga já lida",
-    "mundo.tema": "a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; devolve { ok: true } ou { ok: false, erro } — valor, nunca exceção por recusa — com erro em recusas.tema; a declaração só vale se aoPedir ou aoAcontecer terminar, e o TemaMudou sai depois do quintal e do tema gravados; o servidor não confere quem pediu (a porta é o manifesto; o MOD lê contexto.admin se quiser restringir); o servidor guarda o tema (migração 15, temas_dos_mods) e o manda em TemaMudou (ordinal 47) logo depois do Session e do Instancia, inclusive com None, e a todos a cada troca"
+    "mundo.tema": "a metade de servidor declara o tema do servidor (valores | null); só o MOD cujo mod.json declara \"tema\": true; devolve { ok: true } ou { ok: false, erro } — valor, nunca exceção por recusa — com erro em recusas.tema; ok quer dizer «a forma é válida e o tema foi publicado», e não «aplicado»: os pares de contraste são da casca, e cada janela conta pelo evento tema (aplicado, ou recusado com os pares e a regiao); a declaração só vale se aoPedir ou aoAcontecer terminar, e o TemaMudou sai depois do quintal e do tema gravados; o servidor não confere quem pediu (a porta é o manifesto; o MOD lê contexto.admin se quiser restringir); o servidor guarda o tema (migração 15, temas_dos_mods) e o manda em TemaMudou (ordinal 47) logo depois do Session e do Instancia, inclusive com None, e a todos a cada troca"
   },
   "moments": [
     "PersonJoined",
@@ -334,6 +334,13 @@
   "contribuicoes": {
     "o-que-e": "um registro de regiões e pontos semânticos da interface do SEELE, por nome e por modo — nunca um seletor de CSS, um nó do documento ou HTML de texto",
     "pontos": {
+      "chamada.palco": [
+        "substituir",
+        "adicionar"
+      ],
+      "servidor.aparencia": [
+        "substituir"
+      ],
       "pessoa.identidade": [
         "adicionar"
       ],
@@ -390,7 +397,7 @@
     ],
     "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (partida: 256); o agregado (partida: 128) é dos pontos sem alvo; o modelo está decidido (09/10), os números saem da M3",
     "descarte": "sai com a instância do MOD",
-    "servidor.aparencia": "sai dos pontos registráveis: é a porta de quem vê sobre o tema declarado pelo servidor («o SEELE desenha» tira o tema daquele servidor nesta máquina)",
+    "servidor.aparencia": "um ponto registrável na 6 (decidido em 10/10, D-api-2): o MOD de janela pinta a aparência por ele como na 5, e o tema do servidor (17d) se soma; é também a porta de quem vê («o SEELE desenha» tira o tema daquele servidor nesta máquina); se as duas portas brigarem na mesma sessão, a regra de quem vence vai ao §9",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
   },
   "capa": {
@@ -690,8 +697,7 @@
       "tema-grande-demais (o JSON passa de MAX_CARGA_DE_MOD, 12 KiB)",
       "chave-desconhecida (leva a chave; com mais de uma errada, a primeira em ordem de ponto de código, igual nas duas pontas; a tabela é seele_proto::mods::CHAVES_DO_TEMA, a mesma da casca, conferida caso a caso por crates/seele-proto/tests/vetores/chaves-do-tema.json; tarefa 17j)",
       "valor-invalido (leva a chave; a forma de cada valor está na mesma tabela: cor #rrggbb, inteiro com intervalo, bandeira, escolha; tarefa 17j)",
-      "regiao-desconhecida (leva chave: 'regioes' e a regiao; a região não está em seele_proto::mods::REGIOES_DO_TEMA; chave-desconhecida e valor-invalido de dentro de uma região levam a regiao também; tarefa 17i, item 3)",
-      "contraste (tarefa 17e; leva pares: [{ frente, fundo, razao, piso }], e a regiao quando quem recusou foi uma região)"
+      "regiao-desconhecida (leva chave: 'regioes' e a regiao; a região não está em seele_proto::mods::REGIOES_DO_TEMA; chave-desconhecida e valor-invalido de dentro de uma região levam a regiao também; tarefa 17i, item 3)"
     ],
     "como-chegam-a-janela": "o prelúdio rejeita com um Error cujo message e erro são o nome, e que leva os outros campos da resposta como propriedades (e.detectado = 'heic'), como a casca faz com os erros de um formulário; o ok e o número do pedido não vão",
     "superficies": [
@@ -713,6 +719,9 @@
       "teto-de-alvos (256 alvos num ponto)",
       "contribuicao-ja-existe (já há uma deste MOD para o alvo, o ponto e o modo: use atualizar)",
       "contribuicao-de-outro-mod (o handle de atualizar ou revogar é de outro MOD)"
+    ],
+    "tema-pela-janela": [
+      "contraste (no evento tema e na resposta da prévia, e não em mundo.tema; leva pares: [{ frente, fundo, razao, piso }], e a regiao quando quem recusou foi uma região; tarefa 17e)"
     ]
   },
   "decisoes-do-dono-de-09-10": {

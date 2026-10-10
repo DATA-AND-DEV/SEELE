@@ -170,8 +170,9 @@ O mecanismo é o de hoje: cada região vira uma linha de
 | `pessoas.lista` | a faixa de pessoas | substituir, adicionar | `pessoa.identidade`, `pessoa.cartao`, `pessoa.detalhes`, `pessoa.acoes`, `pessoa.avatar`, `pessoa.capa` | **o menu de moderação**, e o apelido verificado |
 | `status.barra` | a barra inferior (`footer.telemetria`, `index.html:1761`) | adicionar | — | **atraso, jitter, distúrbio e codec** |
 
-**Os pontos de hoje ficam com o mesmo nome**, menos `servidor.aparencia`, que
-deixa de ser registrado pela janela e passa a ser a porta de quem vê sobre o
+**Os pontos de hoje ficam com o mesmo nome**, e o `servidor.aparencia`
+continua registrável (decidido em 10/10, pela D-api-2: o tema «fica, ampliado,
+pela porta do `servidor.aparencia`»). Ele é também a porta de quem vê sobre o
 tema declarado pelo servidor (§9).
 
 **`listarNaBarra` continua** (pergunta do ESTILO, B6): a entrada que um MOD
@@ -1035,21 +1036,28 @@ grupo 17 do plano da F3.
 
 - **A metade de servidor declara com `mundo.tema(valores | null)`.** `valores`
   é o objeto do tema (os nomes do §9, abaixo); `null` tira o tema. A chamada
-  confere o tema como a janela confere (os pares, abaixo) e devolve a recusa
-  com o par e a razão, em vez de mandar a todos um tema que a casca recusaria.
+  confere **a forma** — as chaves, os valores, o `modo` e as regiões, pela
+  tabela de «As chaves do tema» — e devolve a recusa pelo nome. **`ok` quer
+  dizer «a forma é válida e o tema foi publicado», e não «aplicado»** (decidido
+  em 10/10): os pares de contraste são da casca, que conhece a palheta do
+  produto e as cores que ela deriva, e cada janela os confere e conta ao MOD
+  pelo evento `tema` — `aplicado`, ou `recusado` com os pares e, quando foi uma
+  região, a `regiao`. O servidor não tem uma segunda conta de contraste.
 - **A recusa é valor devolvido, e não exceção** (O1 do ESTILO). `mundo.tema`
   devolve `{ ok: true }` ou `{ ok: false, erro }`, com `erro` da lista fechada:
   `sem-porta-de-tema` (o manifesto não declara `"tema": true`),
   `tema-de-outro-mod` (outro MOD é o escolhido e está ligado), `tema-invalido`
   (não é objeto nem `null`: texto, número, lista), `tema-grande-demais` (o JSON
   passa dos 12 KiB do fio), `chave-desconhecida` e `valor-invalido` (com a
-  `chave`; tarefa 17j), `regiao-desconhecida` (com `chave: 'regioes'` e a
-  `regiao`; tarefa 17i) e, com a tarefa 17e, `contraste`, que leva
-  `pares: [{ frente, fundo, razao, piso }]` com **os dois nomes em campos
-  separados** (`frente: 'acento', fundo: 'acentoFraco'`), para o MOD pôr cada
-  lado no seu campo dos `erros`. Só lança o que o próprio MOD lançar ao ser
-  serializado (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a
-  17c; `contraste` na 17e]
+  `chave`; tarefa 17j) e `regiao-desconhecida` (com `chave: 'regioes'` e a
+  `regiao`; tarefa 17i). Só lança o que o próprio MOD lançar ao ser serializado
+  (um `toJSON` que lança, um objeto com ciclo). [c, tarefas 17a a 17c, 17i e
+  17j]
+- **`contraste` não é recusa de `mundo.tema`**: ele vem no evento `tema` e na
+  resposta da prévia (17g), com `pares: [{ frente, fundo, razao, piso }]` e
+  **os dois nomes em campos separados** (`frente: 'acento', fundo:
+  'acentoFraco'`), para o MOD pôr cada lado no seu campo dos `erros`. [c,
+  tarefa 17e, e a região na 17i]
 - **A declaração cai junto com o quintal** (O2). Ela só vale se o `aoPedir` ou
   o `aoAcontecer` terminar: um MOD que declara e lança depois não publica nada,
   e o `TemaMudou` só sai depois de o quintal e o tema gravados, na mesma
@@ -1079,14 +1087,16 @@ grupo 17 do plano da F3.
   alcance. Um MOD sem a declaração recebe a recusa pelo nome. A frase de
   `TemaDoServidor` («quem tem o ponto `servidor.aparencia`») muda para «quem o
   manifesto autoriza».
-- **`servidor.aparencia` passa a ser a porta de quem vê.** Ele deixa de ser um
-  ponto que a janela do MOD registra (o tema chega antes de qualquer janela) e
-  vira o lugar em que a escolha de cada pessoa vale: na gestão de MODs, «o SEELE
-  desenha» para a aparência **tira o tema daquele servidor nesta máquina**, e
-  a casca deixa de aplicar o `TemaMudou` dele até a escolha mudar. A aba
-  DIAGNÓSTICO diz qual MOD pinta a aparência pelo `mod_id` do tema. Ele sai de
-  `PONTOS_DE_CONTRIBUICAO` no corte, e a regra de pontos do `check-api` cobra a
-  saída nos dois sentidos.
+- **`servidor.aparencia` é também a porta de quem vê.** O tema do servidor
+  chega antes de qualquer janela, e o ponto é o lugar em que a escolha de cada
+  pessoa vale: na gestão de MODs, «o SEELE desenha» para a aparência **tira o
+  tema daquele servidor nesta máquina**, e a casca deixa de aplicar o
+  `TemaMudou` dele até a escolha mudar. A aba DIAGNÓSTICO diz qual MOD pinta a
+  aparência pelo `mod_id` do tema. **E ele continua um ponto registrável na 6**
+  (decidido em 10/10, D-api-2), publicado em `contribuicoes.pontos`: o MOD de
+  janela pinta por ele como na 5, e o tema do servidor da 17d se soma. Se a
+  medida mostrar que as duas portas brigam na mesma sessão, a regra de quem
+  vence vem para este parágrafo, e QUEM DESENHA O QUE (17f) é o lugar dela.
 - **Desligar ou desinstalar o MOD manda `TemaMudou { tema: None }`** a todos.
   O tema guardado fica, inativo, porque desligar preserva os dados (ADR 0045):
   religar o MOD o devolve.
@@ -1171,6 +1181,10 @@ mundo.tema({ acento: "#331704", "--nucleo-mudo": "#ffffff" })
 // → { ok: false, erro: "chave-desconhecida", chave: "--nucleo-mudo" }
 mundo.tema({ arredondamento: 25 })
 // → { ok: false, erro: "valor-invalido", chave: "arredondamento" }
+mundo.tema({ acento: "#331704" })
+// → { ok: true } — a forma vale e o tema foi publicado; **não quer dizer
+//   aplicado**: cada janela confere os pares e conta pelo evento `tema`
+//   ({ estado: "recusado", pares: [{ frente: "acento", fundo: "fundo", … }] })
 ```
 
 Com mais de uma chave errada, **as duas pontas nomeiam a primeira em ordem
