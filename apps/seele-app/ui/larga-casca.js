@@ -154,6 +154,12 @@
   // Com a sessão aberta, a página pergunta antes de sair.
   window.addEventListener("beforeunload", (evento) => {
     if (document.getElementById("tela-sessao").hidden) return;
+    // **Esquecer antes de segurar** (o guarda do lote R, em `tests/frontend.rs`).
+    // Pedir confirmação mantém a página viva se a pessoa ficar, e a credencial
+    // de uma tentativa, que só existe na memória da página, não pode sobreviver
+    // a um fechar que a pessoa começou. Com a sessão aberta ela já foi esquecida
+    // ao entrar; isto cobre o resto.
+    fecharAceiteDeMods();
     evento.preventDefault();
     evento.returnValue = "";
   });

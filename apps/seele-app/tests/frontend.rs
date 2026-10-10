@@ -10770,9 +10770,14 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // JS desse evento com alvo da janela (`on_window_event`, em
     // `src/manager/window.rs` do crate `tauri` 2.11.5, linhas 171 e 172). O
     // `onCloseRequested` é um embrulho dele; o nome do evento pega os dois.
+    //
+    // O `beforeunload` tem uma saída, e só uma: o navegador (a casca larga da
+    // D-web-3) pergunta antes de sair com a sessão aberta. Ele passa se o
+    // ouvinte esquecer a credencial (`fecharAceiteDeMods()`) antes de segurar
+    // (`preventDefault`). Os dois do Tauri continuam proibidos sem saída.
     for nome in ui_files(".js") {
         let texto = without_comments(&read(&format!("ui/{nome}")));
-        for segura in ["onCloseRequested", "beforeunload", "close-requested"] {
+        for segura in ["onCloseRequested", "close-requested"] {
             assert!(
                 !texto.contains(segura),
                 "`{nome}` passou a usar `{segura}`: a página pode vetar o próprio \
@@ -10780,6 +10785,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                  dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
             );
         }
+        for (em, _) in texto.match_indices("\"beforeunload\"") {
+            let ouvinte = &texto[em..];
+            let ouvinte = &ouvinte[..ouvinte.find("});").unwrap_or(ouvinte.len())];
+            let esquece = ouvinte.find("fecharAceiteDeMods()");
+            let segura = ouvinte.find("preventDefault");
+            assert!(
+                matches!((esquece, segura), (Some(e), Some(s)) if e < s) || segura.is_none(),
+                "`{nome}` segura o `beforeunload` sem esquecer antes a credencial da \
+                 tentativa: a página pode vetar o próprio fechamento, e a credencial, \
+                 que só existe na memória dela, sobreviveria ao fechar. Chame \
+                 `fecharAceiteDeMods()` antes do `preventDefault`:\n{ouvinte}"
+            );
+        }
+        assert!(
+            texto.matches("beforeunload").count() == texto.matches("\"beforeunload\"").count(),
+            "`{nome}` cita `beforeunload` de um jeito que o guarda não lê \
+             (`onbeforeunload`?): use `addEventListener(\"beforeunload\", …)`"
+        );
     }
 
     // 5. Do outro lado da ponte: nem log, nem retrato.
