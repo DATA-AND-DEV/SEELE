@@ -1164,6 +1164,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/compartilhar.js \
         --roteiro tools/roteiros/dispositivos.js \
         --roteiro tools/roteiros/escolher-transmissao.js \
+        --roteiro tools/roteiros/fechar.js \
         --roteiro tools/roteiros/hospedar.js \
         --roteiro tools/roteiros/icone-do-server.js \
         --roteiro tools/roteiros/icone-na-trilha.js \
@@ -1175,6 +1176,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/perfil-salva-sessao.js \
         --roteiro tools/roteiros/perfil-salva.js \
         --roteiro tools/roteiros/perfil-sessao.js \
+        --roteiro tools/roteiros/recusa-sem-dono.js \
         --roteiro tools/roteiros/renomear-canal.js \
         --roteiro tools/roteiros/rodape-do-operador.js \
         --roteiro tools/roteiros/sair-da-sala.js \
