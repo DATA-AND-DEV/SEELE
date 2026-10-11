@@ -984,6 +984,15 @@ struct FalhaDaEntrada {
     /// De onde veio a impressão que esta tentativa conferia.
     #[serde(flatten)]
     de_onde: DeOndeVeio,
+    /// **Esta tentativa entrou, e outra já a tinha substituído** (lote E54 da
+    /// 0.16, portado para a 0.15.2). A conexão dela foi fechada aqui, e a
+    /// sessão de pé é a de quem a substituiu: a janela não diz nada na tela
+    /// sobre ela. Ver [`largar_a_substituida`].
+    ///
+    /// Fora do JSON quando falso: toda outra recusa chega à janela como
+    /// chegava.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    substituida: bool,
 }
 
 impl From<ConnectionError> for FalhaDaEntrada {
@@ -992,7 +1001,42 @@ impl From<ConnectionError> for FalhaDaEntrada {
         Self {
             falha: ConnectFailure::from(error),
             de_onde: DeOndeVeio::default(),
+            substituida: false,
         }
+    }
+}
+
+/// **Fecha a conexão de uma tentativa que outra substituiu, e diz.**
+///
+/// O `connect` revoga a geração ao começar, e uma tentativa nova que começa
+/// enquanto outra anda tira a geração dela. A velha que termina depois não
+/// pode entrar: ela gravava o slot por cima da nova, e a pessoa passava a
+/// escrever num servidor que tinha deixado (medido em
+/// `a_entrada_velha_que_chega_tarde`, e publicado na v0.15.1). Aqui a conexão
+/// dela é fechada, uma linha vai ao `seele.log`, e a janela recebe a recusa
+/// marcada como substituída.
+fn largar_a_substituida(
+    connection: &Connection,
+    geracao: u64,
+    de_pe: u64,
+    alvo: &str,
+    origem_da_impressao: Option<OrigemDaImpressao>,
+) -> FalhaDaEntrada {
+    connection.disconnect();
+    tracing::warn!(
+        geracao,
+        de_pe,
+        alvo,
+        "a entrada a {alvo} foi substituída por outra antes de entrar: a conexão dela foi \
+         fechada, e a sessão de pé é a de quem a substituiu"
+    );
+    FalhaDaEntrada {
+        falha: ConnectFailure::from(ConnectionError::NotConnected),
+        de_onde: DeOndeVeio {
+            origem_da_impressao,
+            a_lista_guardou: false,
+        },
+        substituida: true,
     }
 }
 
@@ -1005,10 +1049,20 @@ async fn connect<R: tauri::Runtime>(
     audio: bool,
     join_secret: Option<String>,
 ) -> Result<Entrada, FalhaDaEntrada> {
-    if session.connection().is_ok() {
-        return Err(ConnectionError::AlreadyConnected.into());
-    }
-
+    // **Conferir que não há sessão e revogar, com o slot na mão** (M1 da
+    // revisão do lote E54 na 0.16). Eram duas linhas soltas —
+    // `connection().is_ok()` aqui e `revogar()` logo abaixo —, e uma tentativa
+    // velha podia gravar o slot entre elas: esta passava pelo
+    // `AlreadyConnected` com o slot vazio e revogava depois de a velha já ter
+    // entrado, e a velha ficava no slot com uma geração que já não era a de
+    // pé. Com o cadeado: ou a velha grava antes e esta recusa, ou esta revoga
+    // antes e a velha é largada na conferência dela. A ordem dos cadeados é a
+    // do slot, e dentro dele os de `Session::revogar`; nenhum caminho toma um
+    // destes e depois o do slot.
+    //
+    // Sem o cadeado não há sessão a recusar, como antes
+    // (`Session::connection` devolve `NotConnected`): revoga e segue.
+    //
     // **A geração nasce com a tentativa, e não com o sucesso.** O roteiro da
     // etapa E2 é explícito: «capturar a geração desde a tentativa de conexão».
     //
@@ -1021,7 +1075,15 @@ async fn connect<R: tauri::Runtime>(
     // E uma tentativa que falha também gasta um número, de propósito: ela pode
     // ter deixado tarefas pelo caminho, e as respostas delas não podem ser
     // admitidas pela tentativa seguinte.
-    let geracao = session.revogar();
+    let geracao = {
+        let slot = session.connection.lock();
+        if slot.as_ref().is_ok_and(|slot| slot.is_some()) {
+            return Err(ConnectionError::AlreadyConnected.into());
+        }
+        let geracao = session.revogar();
+        drop(slot);
+        geracao
+    };
 
     // O convite guardado vale para o servidor dele e para nenhum outro. Quem cola
     // um link e depois troca o endereço no campo deixaria para trás uma
@@ -1277,7 +1339,29 @@ async fn connect<R: tauri::Runtime>(
             origem_da_impressao,
             a_lista_guardou: false,
         },
+        substituida: false,
     })?;
+
+    // **A tentativa que outra substituiu não entra** (lote E54 da 0.16,
+    // portado para a 0.15.2). Duas tentativas passam pelo `AlreadyConnected`
+    // lá em cima antes de qualquer uma terminar, e a mais nova revogou a
+    // geração desta. Conferido aqui, antes de qualquer efeito: o modo de
+    // microfone, o retrato, a semente da sonda e o consentimento de par não
+    // vão ao servidor que a pessoa deixou. E de novo ao gravar o slot, logo
+    // abaixo.
+    //
+    // Por `confere_geracao`, como todo comando de uma geração morta: ela conta
+    // em `comandos_de_geracao_morta` e diz em DEBUG, e a velha que chega tarde
+    // é uma coisa da sessão anterior falando depois da hora.
+    if session.confere_geracao(geracao).is_err() {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
+    }
 
     connection.subscribe(ponte);
 
@@ -1355,8 +1439,28 @@ async fn connect<R: tauri::Runtime>(
 
     let snapshot = connection.snapshot();
 
-    if let Ok(mut slot) = session.connection.lock() {
-        *slot = Some(connection);
+    // **A mesma conferência, com o slot na mão.** Entre a de cima e esta há os
+    // efeitos de entrada, e uma tentativa nova pode ter começado no meio. Com o
+    // cadeado tomado não há espera entre conferir e gravar: ou a geração ainda
+    // é desta e o slot é dela, ou a conexão dela é fechada e nada do que vem
+    // abaixo — o endereço da sessão, o alvo, a lista de visitados — vale para
+    // ela. Gravar sem conferir punha a conexão da velha no lugar da nova.
+    let substituida = match session.connection.lock() {
+        Ok(mut slot) if session.confere_geracao(geracao).is_ok() => {
+            *slot = Some(connection);
+            None
+        }
+        Ok(_) => Some(connection),
+        Err(_) => None,
+    };
+    if let Some(connection) = substituida {
+        return Err(largar_a_substituida(
+            &connection,
+            geracao,
+            session.geracao(),
+            &alvo,
+            origem_da_impressao,
+        ));
     }
 
     // A metade invisível da lista de visitados: sem isto a seção da tela de
@@ -1502,6 +1606,11 @@ async fn connect<R: tauri::Runtime>(
 /// A velha fica lenta pelo banco do servidor dela: o aperto de mão do
 /// servidor pega o cadeado do banco antes de responder, e o teste o segura até
 /// a nova ter entrado. A ordem é a do cenário, e não a de um relógio.
+///
+/// **Medido na base desta linha** (`6702b944`, com o `connect` genérico de
+/// `b851c9d0`): a velha devolvia `Ok(Entrada { geracao: 1 })` com a geração
+/// de pé em 2, o slot ficava com o servidor velho, a mensagem ia a ele, e o
+/// retrato desta máquina também. É o defeito publicado na v0.15.1.
 #[cfg(test)]
 mod a_entrada_velha_que_chega_tarde {
     use super::{connect, send_message, Session};
@@ -1616,6 +1725,24 @@ mod a_entrada_velha_que_chega_tarde {
         }
         receberam
     }
+
+    /// Até quando esperar a conexão largada sumir dos presentes do servidor
+    /// dela.
+    ///
+    /// **Nesta linha, o prazo de ociosidade do QUIC, e não a despedida.** O
+    /// `disconnect` da FFI da 0.15 pede o fim, e a thread da conexão acaba sem
+    /// esperar o `CONNECTION_CLOSE` sair: o servidor só vê a saída pelo prazo
+    /// de ociosidade, 20 s (`seele_proto::transport::IDLE_TIMEOUT`, que o app
+    /// não enxerga). Medido no porte: a velha largada sumiu do servidor velho
+    /// 18 s depois de o teste começar a esperar (uns 20 s depois de largada),
+    /// e uma saída comum da nova, pelo mesmo `disconnect`, em 20 s. Na 0.16 o
+    /// P50-1 (`dde763b5`) fez o `Enlace::sair` esperar a despedida, e lá a
+    /// mesma prova espera 5 s.
+    ///
+    /// Esperar além do prazo é o que separa as duas coisas que se cobram:
+    /// a conexão fechada some nele, e a que ficou de pé — no slot, com o
+    /// `keep_alive` andando — não some nunca.
+    const SUMIR: Duration = Duration::from_secs(30);
 
     /// Quantos estão presentes no servidor, esperando até `prazo` pelo número
     /// que se espera.
@@ -1848,7 +1975,7 @@ mod a_entrada_velha_que_chega_tarde {
 
         // E a conexão da velha não fica pendurada no servidor que a pessoa
         // deixou, nem a da nova sai do servidor em que ela está.
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        let no_velho = presentes(&servidor_velho, 0, SUMIR).await;
         if no_velho != 0 {
             vermelhos.push(format!(
                 "a conexão da velha continua presente no servidor velho ({no_velho})"
@@ -1983,7 +2110,7 @@ mod a_entrada_velha_que_chega_tarde {
                 "o endereço da sessão ficou {onde:?}, o do servidor que a pessoa deixou"
             ));
         }
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        let no_velho = presentes(&servidor_velho, 0, SUMIR).await;
         if no_velho != 0 {
             vermelhos.push(format!(
                 "a velha continua presente no servidor velho ({no_velho})"
@@ -2104,7 +2231,7 @@ mod a_entrada_velha_que_chega_tarde {
                 conexao.snapshot().server
             ));
         }
-        let no_velho = presentes(&servidor_velho, 0, Duration::from_secs(5)).await;
+        let no_velho = presentes(&servidor_velho, 0, SUMIR).await;
         if no_velho != 0 {
             vermelhos.push(format!(
                 "a velha continua presente no servidor que a pessoa deixou ({no_velho})"
@@ -11257,10 +11384,17 @@ mod a_janela_sabe_de_onde_veio_a_impressao {
                 origem_da_impressao: Some(OrigemDaImpressao::Lista),
                 a_lista_guardou: false,
             },
+            substituida: false,
         };
         let Ok(serde_json::Value::Object(mapa)) = serde_json::to_value(&falha) else {
             panic!("a falha da entrada tem de serializar para objeto");
         };
+        // A marca da tentativa substituída (lote E54) só aparece quando é
+        // verdade: toda outra recusa chega à janela com a forma de antes.
+        assert!(
+            !mapa.contains_key("substituida"),
+            "uma recusa que não é de tentativa substituída chegou à janela com a marca: {mapa:?}"
+        );
         for chave in ["error", "trail", "origem_da_impressao", "a_lista_guardou"] {
             assert!(
                 mapa.contains_key(chave),
