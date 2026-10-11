@@ -620,6 +620,16 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 reason: MessageRefusal::NoSuchChannel,
             },
         ),
+        // A razão do rascunho da linha 1: a repetição de uma mensagem que a
+        // moderação apagou.
+        (
+            "MessageRejected.Apagada",
+            ServerMessage::MessageRejected {
+                channel: ChannelId(1),
+                client_message_id: ClientMessageId(4),
+                reason: MessageRefusal::Apagada,
+            },
+        ),
         ("Tocando", ServerMessage::Tocando { prazo_s: 45 }),
         (
             "Membros",
@@ -1034,6 +1044,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "NoSuchChannel",
                 "TooLong",
                 "StorageFailed",
+                "Apagada",
             ],
         ),
         (

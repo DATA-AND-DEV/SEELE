@@ -139,6 +139,25 @@ pub enum Gravacao {
         /// Por quê, no vocabulário que vai para o fio.
         motivo: seele_proto::control::MessageRefusal,
     },
+    /// A chave repetida é de uma mensagem que a moderação **apagou**.
+    ///
+    /// Não é gravação, e não pode ser anunciada. Até aqui a chave repetida
+    /// devolvia a linha apagada como [`Self::Feita`], e o escritor a anunciava a
+    /// todo o canal: um `MessagePosted` com o id apagado e o corpo vazio, que
+    /// cada janela, por não ter mais esse id na lista, punha de volta. Quem
+    /// estava olhando via a moderação desfeita, e quem repetiu via a mensagem
+    /// confirmada. Agora só quem repetiu fica sabendo, pela
+    /// `MessageRefusal::Apagada`.
+    Apagada {
+        /// O canal da linha apagada.
+        channel: ChannelId,
+        /// Quem escreveu.
+        author: PersonId,
+        /// A chave repetida.
+        client_message_id: Option<ClientMessageId>,
+        /// O id da linha apagada.
+        id: MessageId,
+    },
 }
 
 impl Gravacao {
@@ -152,7 +171,7 @@ impl Gravacao {
     pub const fn gravada(&self) -> Option<&StoredMessage> {
         match self {
             Self::Feita(stored) => Some(stored),
-            Self::Falhou { .. } => None,
+            Self::Falhou { .. } | Self::Apagada { .. } => None,
         }
     }
 }
@@ -205,7 +224,9 @@ pub enum MessageRefusal {
 ///
 /// **O canal entrou nesta tupla no conserto do R09.** Ele faltava, e a ausência
 /// dele era o defeito: o resultado da repetição saía com o canal do pedido novo.
-type StoredRow = (i64, i64, String, i64, Option<i64>, Option<i64>);
+/// **E o `deleted_at`, por último**: sem ele, a repetição de uma mensagem que a
+/// moderação apagou saía como gravação, e era anunciada de novo.
+type StoredRow = (i64, i64, String, i64, Option<i64>, Option<i64>, Option<i64>);
 
 /// Message storage, over PERSISTENCE.
 pub struct Messages<'a> {
@@ -270,7 +291,7 @@ impl<'a> Messages<'a> {
             if let Some(key) = message.client_message_id {
                 let existing: Option<StoredRow> = transaction
                     .query_row(
-                        "SELECT id, channel_id, body, created_at, edited_at, replies_to
+                        "SELECT id, channel_id, body, created_at, edited_at, replies_to, deleted_at
                          FROM messages
                          WHERE author_id = ?1 AND client_message_id = ?2",
                         params![message.author.get() as i64, key.get() as i64],
@@ -282,11 +303,25 @@ impl<'a> Messages<'a> {
                                 row.get(3)?,
                                 row.get(4)?,
                                 row.get(5)?,
+                                row.get::<_, Option<i64>>(6)?,
                             ))
                         },
                     )
                     .optional()?;
-                if let Some((id, channel, body, created_at, edited_at, replies_to)) = existing {
+                // **Apagada, e não gravada.** A chave é a de uma mensagem que a
+                // moderação tirou do canal: devolvê-la como gravação a fazia ser
+                // anunciada de novo a todo mundo. Ver [`Gravacao::Apagada`].
+                if let Some((id, channel, _, _, _, _, Some(_))) = existing {
+                    stored.push(Gravacao::Apagada {
+                        channel: ChannelId(channel as u32),
+                        author: message.author,
+                        client_message_id: message.client_message_id,
+                        id: MessageId(id as u64),
+                    });
+                    continue;
+                }
+                if let Some((id, channel, body, created_at, edited_at, replies_to, None)) = existing
+                {
                     stored.push(Gravacao::Feita(StoredMessage {
                         id: MessageId(id as u64),
                         // **O canal da linha original, e não o do pedido.**
