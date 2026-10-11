@@ -221,4 +221,39 @@ await caso("nome do servidor na configuração", async () => {
   await ate(() => visivel("tela-server") !== "VISIVEL", 600);
 });
 
+// ---------------------------------------------- o motivo de um banimento
+//
+// Com ideogramas, de três bytes cada: o campo contava até 200 caracteres, e
+// 171 ideogramas cabem nos 200 e passam dos 512 bytes do fio. Sem a
+// conferência, o ato arma, a confirmação manda, e o núcleo recusa o
+// banimento calado: quem baniu acha que baniu.
+await caso("motivo do banimento", async () => {
+  const ideogramas = (n) => "語".repeat(n);
+  await abrirModeracao(2);
+  exigir(visivel("moderar") === "VISIVEL", "a moderação não abriu");
+  const grande = ideogramas(Math.floor(TETOS.motivo_do_banimento / 3) + 1);
+  document.getElementById("moderar-motivo").value = grande;
+  document.getElementById("moderar-banir").click();
+  await ate(() => visivel("moderar-motivo-erro") === "VISIVEL" || visivel("moderar-confirmacao") === "VISIVEL", 600);
+  if (visivel("moderar-confirmacao") === "VISIVEL") {
+    document.getElementById("moderar-confirmar").click();
+    await ate(() => mandou("banir_pessoa").length > 0, 300);
+  }
+  exigir(!mandou("banir_pessoa").some((a) => a?.reason === grande),
+    `um motivo de ${grande.length} ideogramas e ${bytesDe(grande)} bytes saiu, e o núcleo recusa o banimento calado`);
+  exigir(visivel("moderar-motivo-erro") === "VISIVEL" &&
+      texto("moderar-motivo-erro").includes(`${TETOS.motivo_do_banimento} BYTES`),
+    `a recusa não diz o teto junto do motivo: «${texto("moderar-motivo-erro")}»`);
+  exigir(visivel("moderar-confirmacao") !== "VISIVEL", "o banimento armou com o motivo recusado");
+  const certo = ideogramas(Math.floor(TETOS.motivo_do_banimento / 3));
+  document.getElementById("moderar-motivo").value = certo;
+  document.getElementById("moderar-banir").click();
+  exigir(await ate(() => visivel("moderar-confirmacao") === "VISIVEL", 600),
+    `um motivo de ${bytesDe(certo)} bytes, dentro do teto, não armou o banimento`);
+  document.getElementById("moderar-confirmar").click();
+  exigir(await ate(() => mandou("banir_pessoa").some((a) => a?.reason === certo), 600),
+    `um motivo de ${bytesDe(certo)} bytes, dentro do teto, não saiu`);
+  await ate(() => visivel("moderar") !== "VISIVEL", 300);
+});
+
 relatar(`tempo virtual gasto: ${Math.round(performance.now())} ms`);

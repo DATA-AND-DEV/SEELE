@@ -4538,12 +4538,22 @@
                 <option value="30">30 dias</option>
               </select>
             </label>
+            <!--
+              **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele
+              dizia 200 e contava caracteres, e o fio leva 512 **bytes**: 200
+              ideogramas são 600. Quem confere agora é o BANIR
+              (`camada-moderar.js`), em bytes, com o teto lido do Rust
+              (`limites_dos_campos`), e a recusa diz o número logo abaixo, onde
+              se escreveu — o `#moderar-erro` mora na confirmação, que um
+              motivo recusado não chega a abrir.
+            -->
             <label class="moderar-campo">
               <span class="rotulo">MOTIVO</span>
-              <input id="moderar-motivo" name="motivo" maxlength="200"
+              <input id="moderar-motivo" name="motivo"
                      spellcheck="false" autocomplete="off"
                      placeholder="opcional, e só para o seu registro">
             </label>
+            <p id="moderar-motivo-erro" class="erro" role="alert" hidden></p>
             <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
             <span class="nota">Encerra a sessão e barra a volta. O motivo fica
               com quem hospeda e nunca chega a quem foi banido.</span>

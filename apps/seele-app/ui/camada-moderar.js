@@ -415,6 +415,7 @@ async function abrirModeracao(alvo) {
   $("moderar-escolha").hidden = false;
   $("moderar-erro").hidden = true;
   $("moderar-motivo").value = "";
+  $("moderar-motivo-erro").hidden = true;
   desenharModeracao(snapshot);
 
   $("moderar").hidden = false;
@@ -818,7 +819,21 @@ $("moderar-expulsar").addEventListener("click", () => {
   );
 });
 
-$("moderar-banir").addEventListener("click", () => {
+$("moderar-banir").addEventListener("click", async () => {
+  const motivo = $("moderar-motivo").value.trim();
+  // **O teto do fio, em bytes, antes de armar** (pendência 58, item 55; lote
+  // C55 da F5). Era um `maxlength="200"` no campo, que contava caracteres: 200
+  // ideogramas são 600 bytes, e o fio leva 512. O núcleo recusava o
+  // banimento sem mandar o quadro, e quem baniu achava que tinha banido. A
+  // recusa fica junto do motivo, e o ato não arma.
+  const grandeDemais = await passaDoTeto("motivo_do_banimento", motivo);
+  const aviso = $("moderar-motivo-erro");
+  aviso.hidden = !grandeDemais;
+  aviso.textContent = grandeDemais ?? "";
+  if (grandeDemais) {
+    $("moderar-motivo").focus();
+    return;
+  }
   const quem = quemEstaEscolhido();
   if (!quem) return;
   const dias = Number($("moderar-ate").value);
@@ -826,7 +841,6 @@ $("moderar-banir").addEventListener("click", () => {
   // janela tem é o desta máquina — a frase de consequência diz isso, porque um
   // computador adiantado barra por mais tempo do que quem apertou escolheu.
   const ate = dias > 0 ? Math.floor(Date.now() / 1000) + dias * SEGUNDOS_POR_DIA : null;
-  const motivo = $("moderar-motivo").value.trim();
   armarAto(`BANIR ${quem.nome}`, consequenciaDeBanir(quem, ate), () =>
     invoke("banir_pessoa", {
       person: quem.id,
