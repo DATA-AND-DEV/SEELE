@@ -9528,8 +9528,7 @@ pendência. A revisão dele deixou:
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
 55. **P61 · A recusa local de um campo grande demais não chega à janela.
-    Consertada em 11/10/2026 pelo lote C55, menos o apelido já gravado
-    grande demais, que espera uma decisão.**
+    Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado.**
     Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
     (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
     registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
@@ -9578,7 +9577,7 @@ pendência. A revisão dele deixou:
       codificação do `Hello` ter nome próprio em vez de virar `Unreachable`.
     *Fonte:* `F5/lote-p61-report.md`, rodadas 1 e 2, M2 e R1-M5.
     **Em 11/10/2026, o lote C55 da F5** (`F5/lote-c55-report.md`, commits
-    `20f1f331` a `95f9945a`, mais o do relatório):
+    `20f1f331` a `13fe85da`, mais os do relatório):
     - **Os tetos vêm de um lugar só.** O comando `limites_dos_campos`
       (`main.rs`), no molde de `limite_da_mensagem`, devolve
       `seele_ffi::Connection::limites_dos_campos`, que lê do `seele-proto` pelos
@@ -9601,27 +9600,31 @@ pendência. A revisão dele deixou:
       `ci.yml` e no `publicar.sh`, com um caso por caminho, e os guardas
       `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui` (`frontend.rs`) e
       `nenhuma_tela_le_um_teto_de_campo_que_nao_existe` (`main.rs`).
-    - **Continua aberto: o apelido gravado grande demais antes do lote.** A
-      conferência ao gravar impede um novo. Um que já está gravado ainda dá
-      «NADA RESPONDEU NESSE ENDEREÇO»: medido de novo pelo `connect` do app
-      (o instrumento `o_apelido_grande_demais_no_hello`, em `#[ignore]`), 40 B
-      voltam `Unreachable` em 5 ms, e o servidor não vê ninguém. E encurtar o
-      apelido no perfil não basta: a tentativa seguinte leva o apelido de
-      antes, guardado em `ultimoApelido` (`tela-boot.js`, `conectar`), e só
-      fechar o app o esquece (medido por um roteiro de medida, fora do
-      repositório). O conserto pede uma variante nova de `ConnectionError`, e
-      a orquestradora decide antes: o `connect` da FFI conferir o apelido
-      antes de abrir a conexão (a recomendação do lote), ou a falha de
-      codificação do `Hello` ganhar nome no núcleo e na FFI. Nos dois, o
-      `catch` de `conectar` esquece o `ultimoApelido` nessa recusa, como já
-      faz no `NicknameTaken`. Sem variante, só a janela conferindo em
-      `conectar`, antes do `connect`. As três mexem no `conectar`, que é da F8.
-    - **Achado fora do lote:** a recusa de gravar o apelido some do perfil.
-      Em `guardarOApelido` (`camada-nomear.js`), o `catch` escreve a frase em
-      `#perfil-erro` e chama `abrirPerfil()`, que a esconde e põe de volta no
-      campo o apelido gravado. Medido com `escolher_apelido_local` recusando
-      `NaoGravei`: o perfil fica aberto, sem frase, e o que se escreveu some.
-      A conferência de tamanho deste lote não passa por esse `catch`.
+    - **O apelido gravado grande demais antes do lote.** A conferência ao
+      gravar impede um novo. Um que já estava gravado dava «NADA RESPONDEU
+      NESSE ENDEREÇO»: 40 B voltavam `Unreachable` em 5 ms, e o servidor não
+      via ninguém. E encurtar o apelido no perfil não bastava: a tentativa
+      seguinte levava o de antes, guardado em `ultimoApelido` (`conectar`, em
+      `tela-boot.js`). A orquestradora escolheu a opção 1:
+      - **na FFI:** `Connection::abrir` confere o apelido antes de resolver,
+        discar ou ler o disco, e recusa com
+        `ConnectionError::ApelidoGrandeDemais { limite_bytes }`, uma variante
+        só da FFI;
+      - **na janela:** a frase «SEU APELIDO PASSA DE N BYTES.» manda abrir o
+        PERFIL e encurtar, e o `catch` de `conectar` trata a recusa como o
+        `NicknameTaken`: esquece o `ultimoApelido` e guarda a credencial.
+
+      As provas são o teste
+      `o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao`
+      (`main.rs`, com a trilha vazia) e o roteiro
+      `tools/roteiros/apelido-no-hello.js`.
+    - **A recusa de gravar o apelido sumia do perfil.** Era um achado do lote,
+      e o conserto entrou nele. O `catch` de `guardarOApelido` reabria o
+      perfil, e o `abrirPerfil` escondia a frase e trocava o que se escreveu
+      pelo apelido gravado. Agora o `catch` não reabre, e a cena está no mesmo
+      roteiro.
+    - **Fica para a F4:** o `connect` da ponte do navegador (tarefa 34) vai
+      ter de devolver a mesma recusa, com o mesmo nome, quando existir.
 
 ### Fora da F5, só como referência
 

@@ -9,9 +9,14 @@ um comando com um campo acima do teto do fio, e registra a recusa no
 `seele.log`; mas a janela não ficava sabendo, e o pedido sumia calado. A
 janela contava caracteres (`maxlength`), e o fio conta bytes.
 
-**Status: feito, menos o conserto do `Hello` para um apelido já gravado
-grande demais.** Esse pede uma variante nova de `ConnectionError`, e o pedido
-era avisar antes: está medido e descrito abaixo, à espera da decisão.
+**Status: feito.** A primeira entrega parou antes do conserto do `Hello`
+para um apelido já gravado grande demais, porque ele pedia uma variante nova
+de `ConnectionError`, e o pedido era avisar antes. A orquestradora decidiu:
+- os lugares da sala são ajustados, e não recusados;
+- o `Hello` segue a opção 1, com uma variante só da FFI;
+- o achado do perfil entra, por ser pequeno.
+
+A segunda rodada (passos 10 a 12) fez os três.
 
 ## Os commits
 
@@ -27,28 +32,45 @@ era avisar antes: está medido e descrito abaixo, à espera da decisão.
 | `788b3b0d` | passo 8: o motivo do banimento |
 | `c5f7e847` | passo 9: o guarda dos tetos escritos à mão na `ui/` |
 | `95f9945a` | o caso do nome em CONFIGURAÇÕES espera a tela abrir inteira (achado na reversão) |
-| este | o relatório e o item 55 da pendência 58 |
+| `0fe088d0` | o relatório e o item 55 da pendência 58, primeira entrega |
+| `b23fb430` | passo 10: o `connect` da FFI recusa o apelido grande demais com nome, antes de abrir a conexão; o instrumento vira teste |
+| `d85192bc` | passo 11: a janela diz a frase e esquece o `ultimoApelido`; o roteiro `apelido-no-hello.js` |
+| `13fe85da` | passo 12: a recusa de gravar o apelido fica no perfil |
+| este | o relatório e o item 55 com a segunda rodada |
 
 Os arquivos que o lote mexeu:
 - `crates/seele-core/src/lib.rs`: quatro reexports do `seele-proto`;
-- `crates/seele-ffi/src/types.rs` e `lib.rs`: `LimitesDosCampos` e
-  `Connection::limites_dos_campos`;
-- `apps/seele-app/src/main.rs`: o comando, o instrumento do `Hello` e o
-  guarda das chaves. Os ajudantes de teste do módulo do E54 passam a
-  `pub(super)`;
+- `crates/seele-ffi/src/types.rs` e `lib.rs`: `LimitesDosCampos`,
+  `Connection::limites_dos_campos`, a variante
+  `ConnectionError::ApelidoGrandeDemais` e a conferência do apelido em
+  `Connection::abrir`;
+- `apps/seele-app/src/main.rs`: o comando, o teste do `Hello` e o guarda das
+  chaves. Os ajudantes de teste do módulo do E54 passam a `pub(super)`;
 - `apps/seele-app/ui/`: `base.js`, `frases.js`, `camada-nomear.js`,
   `tela-sessao.js`, `tela-server.js`, `tela-boot.js`, `camada-moderar.js`,
   `ponte-web.js` e `index.html`;
 - `apps/seele-app/tests/web.rs` e `frontend.rs`;
-- `tools/carga-da-casca.py` (o duble), `tools/roteiros/tetos-dos-campos.js`
-  (novo), `.github/workflows/ci.yml` e `empacotar/publicar.sh`.
+- `tools/carga-da-casca.py` (o duble), os roteiros novos
+  `tools/roteiros/tetos-dos-campos.js` e `tools/roteiros/apelido-no-hello.js`,
+  `.github/workflows/ci.yml` e `empacotar/publicar.sh`.
 
-**O fio não mudou.** O `seele-proto` só foi lido.
+**O fio não mudou**, e o `ConnectError` do núcleo também não. O
+`seele-proto` só foi lido.
 
-**No `tela-boot.js`, só as linhas 1338 a 1347**, dentro de
-`confirmarPreparar`: a conferência do `#preparar-nome` antes do
-`criar_servidor`. Nada em `conectar`, em `abrirHospedagem` nem perto de onde a
-F8 vai pôr o `depoisDeConectar`.
+**No `tela-boot.js`, dois trechos:**
+- **linhas 453 a 455, no `catch` de `conectar`:** uma linha de comentário
+  emendada, uma nova, e a condição do ramo do `NicknameTaken`, que passa a
+  aceitar `|| motivo?.ApelidoGrandeDemais`;
+- **linhas 1339 a 1348, dentro de `confirmarPreparar`:** a conferência do
+  `#preparar-nome` antes do `criar_servidor`.
+
+Nada no caminho de sucesso de `conectar`, em `abrirHospedagem` nem onde a F8
+vai pôr o `depoisDeConectar`.
+
+**A ponte do navegador (F4) não mudou na segunda rodada.** O `connect` dela
+ainda é a tarefa 34 (`AINDA_A_FAZER`). Nenhuma das listas dela nem as
+`CONSTANTES_DO_DESKTOP` nomeiam variantes de `ConnectionError`, e o
+`seele-web` não as usa. A variante nova não pediu mapeamento.
 
 ---
 
@@ -183,14 +205,11 @@ fica registrada aqui.
 
 ## O `Hello`
 
-**A medida.** O instrumento é `o_apelido_grande_demais_no_hello`, em
-`main.rs` e em `#[ignore]`. Ele conecta pelo `connect` do app a um servidor
-de verdade nesta máquina, na casa temporária do módulo do E54, que é a única
-`SEELE_HOME` dos testes deste binário. Para refazer:
-
-```sh
-cargo test -p seele-app --bin seele-app -- o_apelido_grande_demais_no_hello --ignored --nocapture
-```
+**A medida, na base.** No passo 1, o instrumento
+`o_apelido_grande_demais_no_hello` (em `main.rs`, então em `#[ignore]`)
+conectava pelo `connect` do app a um servidor de verdade nesta máquina. Ele
+usava a casa temporária do módulo do E54, que é a única `SEELE_HOME` dos
+testes deste binário.
 
 Medido em `3b1f57c8`, com HOME falsa:
 - **16 `á` (32 B, no teto):** `Ok(geracao 1)` em 16 ms, e o servidor a vê;
@@ -207,31 +226,71 @@ guarda em `ultimoApelido` o apelido da tentativa anterior, e só fechar o app
 o esquece. Então «nenhuma tentativa de novo muda isso» vale mesmo depois de a
 pessoa fazer a coisa certa.
 
-**O mínimo, feito:** a janela confere o apelido antes de gravar (passo 3).
-Nenhum apelido grande demais novo entra no disco.
+**O mínimo, feito na primeira entrega:** a janela confere o apelido antes
+de gravar (passo 3). Nenhum apelido grande demais novo entra no disco.
 
-**O conserto do que já está gravado não foi feito.** Todos os caminhos pedem
-uma variante nova de `ConnectionError` ou mexem no `conectar`, e o pedido era
-avisar antes. As opções, pela medida:
-1. **A recomendada: o `connect` da FFI confere o apelido antes de abrir a
-   conexão.** A falha é toda local e conhecida antes da rede: o apelido está
-   na mão antes de resolver o endereço. O caminho de hoje abre o QUIC e o TLS
-   no servidor para falhar aqui e, pela leitura (cada candidato de um convite
-   manda o próprio `Hello`), numa corrida de candidatos falharia uma vez por
-   candidato. Isso pede uma variante nova só na FFI, por exemplo
-   `ConnectionError::ApelidoGrandeDemais { limite_bytes }`: nem o
-   `ConnectError` do núcleo nem o fio mudam. Pede também a frase em
-   `frases.js` e uma linha no `catch` de `conectar` que esqueça o
-   `ultimoApelido` nessa recusa, como o `NicknameTaken` já faz.
-2. **A falha de codificação do `Hello` ganha nome próprio**, em vez de virar
-   `Unreachable`. Pede uma variante no `ConnectError` do núcleo e outra na
-   FFI, e a mesma linha no `conectar`. O QUIC e o TLS continuam abrindo à toa.
-3. **Sem variante nenhuma:** a janela confere o apelido em `conectar`, antes
-   do `connect`, e diz a frase em `#boot-erro`. São umas dez linhas no
-   `conectar`, que a F8 vai mexer para criar o `depoisDeConectar`.
+**O conserto do que já está gravado: a opção 1, decidida pela orquestradora.**
+As três opções levadas a ela foram:
+1. o `connect` da FFI confere o apelido antes de abrir a conexão;
+2. a falha de codificação do `Hello` ganha nome no núcleo e na FFI;
+3. a janela confere em `conectar`, sem variante.
 
-As três mexem no `conectar`. Por isso o lote parou aqui. O instrumento já
-está pronto para virar o vermelho do conserto escolhido.
+A 1 ganhou pela medida. A falha é toda local, e o apelido está na mão antes
+de resolver o endereço. O caminho da base abria o QUIC e o TLS no servidor
+para falhar aqui, e, pela leitura, numa corrida falharia uma vez por
+candidato, porque cada candidato de um convite manda o próprio `Hello`.
+
+- **Na FFI (passo 10).** `Connection::abrir`, o corpo das três portas de
+  `connect`, confere `config.nickname.len()` contra `MAX_NICKNAME_LEN` antes
+  de resolver, discar ou ler o disco, e escreve um `warn` no `seele.log`. A
+  recusa é `ConnectionError::ApelidoGrandeDemais { limite_bytes }`, uma
+  variante só da FFI: o `ConnectError` do núcleo e o fio não mudam.
+- **Na janela (passo 11):**
+  - a frase está em `fraseDeErro` (`frases.js`): «SEU APELIDO PASSA DE 32
+    BYTES.», e na linha de baixo «Abra o PERFIL, encurte o apelido e entre de
+    novo», com o porquê dos acentos;
+  - no `catch` de `conectar`, a recusa entra no ramo do `NicknameTaken`. Ela
+    esquece o `ultimoApelido` e, como lá, guarda a credencial para a
+    tentativa seguinte ao mesmo alvo: a FFI recusa antes de discar, e um
+    convite de uso único não foi gasto;
+  - o guarda `the_shell_never_remembers_a_nickname_nobody_chose`
+    (`frontend.rs`) passa a exigir as duas recusas na condição.
+- **A prova em Rust.** O instrumento saiu do `#[ignore]` e é o teste
+  `o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao`:
+  - com 40 B, a recusa vem como
+    `{"ApelidoGrandeDemais":{"limite_bytes":32}}`, e a trilha vem vazia:
+    nenhum candidato foi discado;
+  - com 32 B, entra, e o servidor tem uma pessoa presente.
+
+  O vermelho, antes do conserto: «um apelido de 40 bytes não voltou recusado
+  com nome e teto», com `"error":"Unreachable"`, e «a conexão foi aberta para
+  um apelido que o `Hello` não leva», com a trilha `Parada`, `Tentando` em
+  127.0.0.1 e `Desistiu`.
+- **A prova na janela.** O roteiro novo `tools/roteiros/apelido-no-hello.js`
+  está nas duas listas. O duble da carga recusa o apelido que o fio não leva,
+  como a FFI. O caso:
+  1. grava 40 B e conecta;
+  2. exige a frase com o teto e o PERFIL na entrada;
+  3. encurta o apelido no perfil e conecta de novo;
+  4. exige que a tentativa leve o apelido encurtado e entre.
+
+  O vermelho, antes do conserto: «a entrada não diz o teto do apelido nem
+  manda ao perfil: ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ».
+
+## A recusa de gravar o apelido (passo 12)
+
+O achado da primeira entrega: o `catch` de `guardarOApelido`
+(`camada-nomear.js`) escrevia a frase no `#perfil-erro` e reabria o perfil.
+O `abrirPerfil` a escondia e punha de volta no campo o apelido gravado: a
+recusa sumia, e o que se escreveu também.
+
+O conserto cabe em quatro linhas. O `catch` não reabre mais: a frase fica, o
+campo guarda o que se escreveu e recebe o foco. Saiu também, do comentário de
+`abrirPerfil`, a recusa entre as reaberturas.
+
+A cena está no mesmo `apelido-no-hello.js`, com `escolher_apelido_local`
+recusando `NaoGravei`. O vermelho, antes: «a recusa de gravar o apelido sumiu
+do perfil: #perfil-erro está escondida».
 
 ## As reversões
 
@@ -270,6 +329,20 @@ a cena do seu campo, e só ela:
 - **G5**, a ponte com `"apelido": 33`: reprova
   `as_constantes_da_ponte_sao_as_do_desktop`.
 
+**A segunda rodada**, pelo mesmo script, com as mesmas conferências:
+- **R7, a conferência da FFI desligada** (`if false && …`): reprova o teste
+  do `Hello`, com «não voltou recusado com nome e teto» (`Unreachable`) e «a
+  conexão foi aberta», com a trilha;
+- **R8, a frase desligada:** reprova só «o apelido gravado grande demais», com
+  «ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ»;
+- **R9, o `catch` de `conectar` sem a recusa nova:** reprova só «o apelido
+  gravado grande demais», com «depois de encurtar o apelido no perfil, a
+  tentativa seguinte levou 40 bytes: o apelido recusado ficou guardado»;
+- **G6, a mesma mutação, pelo guarda:** reprova
+  `the_shell_never_remembers_a_nickname_nobody_chose`;
+- **R10, o `catch` do perfil reabrindo de novo:** reprova só «a recusa de
+  gravar o apelido».
+
 **O que a reversão achou no próprio roteiro.** Na primeira rodada, R2 e R3
 reprovaram também «nome do servidor na configuração» («o campo perdeu o nome
 recusado»). Não era o produto: o caso escrevia o nome antes de o
@@ -281,10 +354,10 @@ passou cinco vezes seguidas.
 
 ## O que rodou
 
-No `95f9945a`:
+No `13fe85da`, a ponta da segunda rodada:
 - **`cargo test -p seele-app`**, todos os alvos, com HOME falsa, pelo script
-  `testar.sh`, com o log de cada passo conferido não vazio. `--bin` deu 348
-  (mais o instrumento, em `#[ignore]`), `frontend` 296, `web` 12, `celular` 8,
+  `testar.sh`, com o log de cada passo conferido não vazio. `--bin` deu 349
+  (o teste do `Hello`, fora do `#[ignore]`), `frontend` 296, `web` 12, `celular` 8,
   `empacotamento` 22, `encerramento` 3, `fontes` 5, `manifesto_hibrido` 11,
   `marca` 9, `permissoes` 4 e `tokens` 3. A HOME falsa terminou vazia;
 - **`cargo test -p seele-ffi --lib`**, com HOME falsa: 210, mais um ignorado;
@@ -293,9 +366,10 @@ No `95f9945a`:
   **`cargo clippy -p seele-ffi -p seele-core --lib -- -D warnings`**: limpos;
 - **`cargo xtask check-runtime`** e **`cargo xtask check-deps`**: passam.
   `cargo test -p xtask` também, com `todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`;
-- **os roteiros**, todos numa chamada, como no CI: os 36 passaram. O
-  `tetos-dos-campos.js` passou cinco vezes seguidas, e gasta 1,7 s de tempo
-  virtual dos 5 s do orçamento;
+- **os roteiros**, todos numa chamada, como no CI: os 37 passaram. O
+  `tetos-dos-campos.js` e o `apelido-no-hello.js` passaram cinco vezes
+  seguidas cada um. O primeiro gasta 1,7 s de tempo virtual dos 5 s do
+  orçamento;
 - **as bancadas que leem estes campos:** `ajustes-v013.cjs` passa, pelo
   Playwright já instalado em `SEELE-MOD-ESTILO`, sem baixar nada.
   `ponte-web.cjs` passa as 20 provas. Nenhuma bancada foi mexida.
@@ -305,18 +379,11 @@ reexports. O microfone não foi aberto.
 
 ## O que ficou de fora
 
-- **O conserto do `Hello` para um apelido já gravado grande demais**,
-  descrito acima, à espera da decisão sobre a variante.
 - **A senha da sala**, como o pedido mandava: a FFI já a confere, e a janela
   mostra a entrada recusada.
 - **O nome de um contato da agenda** (`camada-sala.js`, `maxLength = 48`).
   Ele fica no disco desta máquina e não vai ao fio, e é a exceção nomeada no
   guarda.
-- **Um achado fora do lote: a recusa de gravar o apelido some do perfil.** Em
-  `guardarOApelido` (`camada-nomear.js`), o `catch` escreve a frase em
-  `#perfil-erro` e chama `abrirPerfil()`, que a esconde e põe de volta no
-  campo o apelido gravado. Medido com `escolher_apelido_local` recusando
-  `NaoGravei`: o perfil fica aberto, sem frase, com o apelido de antes no
-  lugar do que se escreveu. A conferência deste lote recusa antes desse
-  `catch` e não passa por ele. O conserto não foi feito, por ser outro
-  defeito. Está no item 55 da pendência 58.
+- **A recusa nova no navegador.** O `connect` da ponte ainda é a tarefa 34
+  (F4). Quando ele existir, vai ter de devolver a mesma recusa, com o mesmo
+  nome, para a `fraseDeErro` dizê-la.
