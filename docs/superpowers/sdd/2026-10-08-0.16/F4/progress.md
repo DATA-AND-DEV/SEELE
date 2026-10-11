@@ -859,3 +859,37 @@ começar.
     no link da carga;
   - a bancada com a página inteira sem casca injetada (pedido da orquestradora
     na décima segunda), os servidores do aparelho e a identidade da página.
+
+## 10/10, noite: a revisão do E54 da F5, e uma tentativa por vez na identidade
+
+- **A revisão do E54** (`e05e1681`, pedida pela orquestradora): as duas pontas
+  da F5 não conflitam com o que eu tenho.
+  - O `soltar_a_entrada` entra em `COMANDOS_DA_PONTE` e no `AINDA_A_FAZER` com
+    a 3.4.
+  - O `corpo_do_comando` de `tests/web.rs` passa a achar as formas genéricas.
+- **A mesma corrida, do lado do navegador**, achada lendo a minha `entrar`.
+  Ela atravessava quatro esperas lendo a tentativa de agora. Medida antes do
+  conserto, no caso 12 da bancada, com o link novo aberto no meio:
+  - durante o `persist()`, a velha entrava **no servidor do link novo**, com o
+    token dele e o apelido da velha;
+  - o aceite de MODs da velha entrava no servidor novo, sem apelido;
+  - a velha aceita ou recusada encerrava a nova, e a aceita guardava o servidor
+    dela com a chave da nova (nula);
+  - com o banco respondendo fora de ordem a dois links, o token do segundo ia
+    ao servidor do primeiro.
+- **O conserto:**
+  - a `vez` conta cada tentativa encerrada e é conferida depois de cada
+    espera;
+  - o `abrir` só põe os segredos depois de o banco responder;
+  - a velha aceita fica guardada com a chave dela e é solta (`soltar`, no
+    produto o `soltar_a_entrada` da ponte);
+  - o desfecho é o `sem-tentativa`, que a tela já tem.
+  Na tela da F8 de hoje a corrida não se alcança (a de conectar não tem
+  ação), mas o contrato é da identidade.
+- **Dez reversões**, cada conferência tirada sozinha, e as dez reprovam no
+  cenário dela. Duas passavam verdes na primeira rodada:
+  - sem a conferência do `persist()`, a velha fazia nascer a chave da nova;
+  - sem a da chave, ela chamava o `connect` do servidor novo com a chave nula,
+    e o servidor de mentira estourava antes de anotar.
+  A bancada passou a anotar a entrada sem chave e a conferir a ordem do
+  `persist()` e da chave, e as duas reprovam.
