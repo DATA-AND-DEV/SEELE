@@ -160,8 +160,8 @@ window.__SEELE_VOLUMES = {};
 window.__SEELE_EM_SESSAO = false;
 // **Hospedar não é estar em sessão.** `connect` entra no servidor de outro e
 // não hospeda nada, e o `estado_do_servidor` do produto só diz `hospedando:
-// true` com uma `Hospedagem` aberta nesta janela. `disconnect` a derruba, como
-// no Rust.
+// true` com uma `Hospedagem` aberta nesta janela. `parar_de_hospedar` a
+// derruba, como no Rust; o `disconnect` não, desde a tarefa 19 da F7.
 window.__SEELE_HOSPEDANDO = false;
 // As mensagens de apps mais novos que o servidor hospedado pulou. Um roteiro
 // troca os dois números para ver a linha de ESTE SERVIDOR com cada um.
@@ -207,7 +207,13 @@ window.__TAURI__ = {
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
       if (cmd === "hospedar") window.__SEELE_HOSPEDANDO = true;
-      if (cmd === "disconnect") window.__SEELE_HOSPEDANDO = false;
+      // Desde a tarefa 19 da F7, sair não derruba a hospedagem: quem derruba é
+      // o `parar_de_hospedar`, como no Rust.
+      if (cmd === "parar_de_hospedar") window.__SEELE_HOSPEDANDO = false;
+      // O servidor guardado no ar, no formato do `MeuServidor` de `main.rs`.
+      if (cmd === "meu_servidor") {
+        return window.__SEELE_HOSPEDANDO ? { alvo: "127.0.0.1:8383", nome: "Casa" } : null;
+      }
       if (cmd === "snapshot" && !window.__SEELE_EM_SESSAO) throw "NotConnected";
       // **Um comando pode recusar.** Sem isto o duble só sabia responder, e
       // metade da casca — toda tela que existe por causa de uma recusa — não

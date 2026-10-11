@@ -346,6 +346,13 @@
   color: var(--seele-osso);
 }
 
+/* O VOLTAR AO MEU SERVIDOR (tarefa 20 da F7): o mesmo item dos outros
+   servidores, com a marca de 2px da borda esquerda acesa em laranja, porque é o
+   único que esta janela sabe que está no ar. */
+.trilha-voltar {
+  border-left-color: var(--seele-laranja-nerv);
+}
+
 /* A imagem do servidor, quando ele tem uma, no lugar da sigla. `contain` e não
    `cover` pela mesma razão que no cabeçalho: recortar a imagem de alguém para
    caber num quadrado é decidir por quem a escolheu qual metade dela importa. */

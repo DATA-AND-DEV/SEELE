@@ -279,7 +279,6 @@ async function asListasEOsCorpos() {
   const atendidos = [
     ...p.ler("COMANDOS_DA_PONTE"),
     ...nomes("SO_NA_CASCA_LARGA"),
-    ...nomes("ATENDIDOS_APESAR_DA_HOSPEDAGEM"),
   ];
   const corpos = Object.keys(p.ler("ATENDIMENTOS_DA_PONTE"));
   const aFazer = new Set(nomes("AINDA_A_FAZER"));
@@ -363,6 +362,8 @@ async function osNeutros() {
     // A sala viva da F7 (décima segunda integração): o navegador não tem sala.
     estado_da_sala: null,
     toques_agora: [],
+    // As tarefas 19 e 20 da F7: o navegador não hospeda.
+    meu_servidor: null,
   };
   for (const casca of [{ toque: true }, { largura: 1280 }]) {
     const p = pagina(casca);
@@ -378,11 +379,12 @@ async function osNeutros() {
   }
 }
 
-/// **Sair da sessão sai.** O `disconnect` mexe na hospedagem no desktop, e
-/// mesmo assim é atendido aqui: como neutro, ele responderia sem sair.
+/// **Sair da sessão sai.** O `disconnect` é um atendido comum desde a tarefa 19
+/// da F7 (no desktop ele não derruba mais a hospedagem), e tem de encerrar a
+/// sessão da ponte.
 async function sairSai() {
   const caso = "sair sai";
-  for (const comando of ["disconnect", "desmontar_a_sessao"]) {
+  for (const comando of ["disconnect"]) {
     const p = pagina();
     let saiu = 0;
     p.ler("sessaoDaPonte").atual = { encerrar: async () => { saiu += 1; } };

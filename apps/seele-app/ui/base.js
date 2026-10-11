@@ -500,15 +500,22 @@ const PEDACOS_DE_MIDIA = 256;
 const TETO_DE_MIDIA_BASE64 = 4 * Math.ceil(10 * 1024 * 1024 / 3) + 128;
 
 /**
- * Escreve no registro de quem hospeda.
+ * Escreve no `seele.log` desta máquina, pelo processo nativo que hospeda esta
+ * janela (`registrar_da_janela`, no `main.rs`).
  *
  * **A janela não tinha como.** Todo o caminho de um pedido de MOD é observável
  * no Rust — o executor, a bomba, a ponte, o servidor —, e o pedaço que roda
  * aqui era um vão silencioso no meio dele. Um defeito que morasse nesse vão não
  * deixava rastro nenhum, e foi exatamente onde uma medição parou.
  *
- * Não vai para a tela: quem lê isto é quem hospeda, e quem usa não tem o que
- * fazer com a frase.
+ * Não vai para a tela. Quem lê é quem investiga esta máquina pelo `seele.log`
+ * dela, e não a pessoa no meio do que está fazendo: ela não tem o que fazer
+ * com a frase. As linhas de MOD são procuradas por quem hospeda a sala que os
+ * roda, ou por quem escreve o MOD. Desde o lote W2 da F5 há também uma que não
+ * é de MOD: a recusa de uma tentativa de entrada que outra já substituiu
+ * (`conectar`, em `tela-boot.js`), que a tela cala. Essa é lida por quem
+ * investiga uma entrada nesta máquina — quem usa, ou quem a ajuda com o
+ * registro dela.
  */
 function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   // Nunca lança e nunca espera: um registro que derruba o caminho que ele
@@ -2924,6 +2931,21 @@ function escreverAsRegioesDoTema(emVigor) {
     }
     if (typeof regioes[regiao].fundo === "string") escrever[TEMA_DA_API.painel] = daRegiao.painel;
     Object.assign(escrever, tonsDoTema(daRegiao, corDaRaiz).tons);
+    // **A cor do texto, resolvida no contêiner** (achado da F8, 10/10): quem
+    // está dentro e não declara cor herda a de `#tela-sessao`, já resolvida com
+    // o token da sessão — numa região clara, um texto de contribuição saía a
+    // 1,09:1. Declarada aqui, ela lê o texto da região; e sai junto com os
+    // tokens, na troca seguinte. No contêiner que a casca declara também.
+    escrever.color = `var(${TEMA_DA_API.texto})`;
+    // **E o fundo, só quando a região o declara** (a orquestradora, 10/10).
+    // Quatro contêineres são transparentes (`.linha-barra`, `#compositor-mods`,
+    // `#form-mensagem`, `#lista-mensagens`), e o `fundo` de uma região neles
+    // nunca apareceu: o tema era dado como aplicado e a tela não mudava. Uma
+    // região que só muda o `texto` não escreve fundo nenhum, e cada contêiner
+    // fica com o de hoje.
+    if (typeof regioes[regiao].fundo === "string") {
+      escrever["background-color"] = `var(${TEMA_DA_API.fundo})`;
+    }
     const daCasca = typeof CELULAR === "object" ? CELULAR?.conteineresDasRegioes?.[regiao] : undefined;
     const seletores = Array.isArray(daCasca) ? daCasca : REGIOES_DO_TEMA[regiao];
     const onde = Array.isArray(daCasca) ? document : sessao;
