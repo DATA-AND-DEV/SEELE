@@ -92,5 +92,129 @@ const chromium = abrirChromium();
     assert.equal(await page.evaluate(() => testSurfaces.porChave.size), 1, 'avisos expirados retidos');
     assert.deepEqual(errors, []);
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
+    await aRecusaSubstituidaChegaCalada(browser, server.address().port);
+    console.log('E54: a recusa da tentativa substituída chega calada, e a recusa comum ainda pinta a linha');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
+
+// --------------------------------------------------------------------------
+// Lote E54 da 0.16, portado para a 0.15.2: a recusa da tentativa substituída
+// chega calada
+// --------------------------------------------------------------------------
+//
+// **O caso.** Uma tentativa de entrada lenta (a velha, a 192.0.2.17) e, aos
+// 100 ms, outra (a nova, aqui). O `connect` do Rust larga a velha que termina
+// depois de a nova ter começado, e a devolve recusada com a marca
+// `substituida` (`largar_a_substituida`, no `main.rs`). A janela desta linha
+// não tem o contador de tentativas da 0.16: sem conferir a marca, a recusa da
+// velha pintava a linha vermelha da entrada com a frase de uma tentativa que a
+// pessoa tinha deixado. O guarda de forma é
+// `a_recusa_da_tentativa_substituida_chega_calada`, em `tests/frontend.rs`.
+
+const ALVO_E54 = '192.0.2.17:8384';
+const AQUI_E54 = '127.0.0.1:8383';
+/** O convite que a tentativa velha leva: ele não pode chegar ao registro. */
+const CONVITE_E54 = `convite-do-lote-e54-${process.pid}-${Date.now()}`;
+
+async function aRecusaSubstituidaChegaCalada(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.testGeracao = 0;
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        if (cmd === 'connect') {
+          // A geração do Rust: cada `connect` revoga a anterior ao começar, e
+          // o que termina com a dele já revogada volta como
+          // `largar_a_substituida` o devolve.
+          const geracao = ++window.testGeracao;
+          chamada.geracao = geracao;
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (recusa) throw { error: recusa, trail: [] };
+          if (geracao !== window.testGeracao) {
+            throw { error: 'NotConnected', trail: [], substituida: true };
+          }
+          return { snapshot, veredito: null, geracao };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({ apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [] }),
+    snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  /** O que a pessoa vê, e a geração em que a janela está. */
+  const aTela = () => page.evaluate(() => ({
+    entrada: !document.getElementById('tela-boot').hidden,
+    sessao: !document.getElementById('tela-sessao').hidden,
+    autenticacao: document.getElementById('tela-auth').hidden
+      ? null : `${$('tela-auth').dataset.modo} ${$('auth-endereco').textContent}`,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+    geracao: geracaoDaSessao,
+  }));
+  const respondida = (alvo) => page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    alvo, { timeout: 4000 },
+  ).catch(() => assert.fail(`a tentativa a ${alvo} não voltou, e este caso não mede nada`));
+  /** As linhas que a janela mandou ao `seele.log` desde o começo do caso. */
+  const noRegistro = () => page.evaluate(() => testCalls.slice(testAntes)
+    .filter(c => c.cmd === 'registrar_da_janela')
+    .map(c => [c.args.nivel, c.args.onde, c.args.oQue]));
+  /** Começa um caso na tela de entrada. */
+  const comecar = (atrasos, recusas) => page.evaluate(([atrasos, recusas]) => {
+    window.testAtrasoPorAlvo = atrasos;
+    window.testRecusaPorAlvo = recusas;
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    window.testAntes = testCalls.length;
+  }, [atrasos, recusas]);
+
+  // ---- 1. A velha leva 1,2 s; aos 100 ms a nova entra aqui. A velha volta
+  // recusada como substituída, e a tela da nova não muda.
+  await comecar({ [ALVO_E54]: 1200 }, {});
+  await page.evaluate(([velha, nova, convite]) => {
+    conectar(velha, 'Bia', convite);
+    setTimeout(() => conectar(nova, 'Bia', null), 100);
+  }, [ALVO_E54, AQUI_E54, CONVITE_E54]);
+  await respondida(AQUI_E54);
+  await page.waitForTimeout(300);
+  const comANova = await aTela();
+  assert.equal(comANova.entrada, false, 'a nova não entrou, e a corrida não foi medida');
+  await respondida(ALVO_E54);
+  await page.waitForTimeout(300);
+  const depoisDaVelha = await aTela();
+  assert.deepEqual(depoisDaVelha, comANova,
+    `a recusa da tentativa a ${ALVO_E54}, substituída pela entrada aqui, mudou a tela da sessão: ` +
+    `antes ${JSON.stringify(comANova)}, depois ${JSON.stringify(depoisDaVelha)}`);
+  const linhas = await noRegistro();
+  const daVelha = linhas.filter(([, , oQue]) => String(oQue).includes(ALVO_E54));
+  assert.equal(daVelha.length, 1,
+    `a recusa da tentativa substituída não deixou uma linha (e uma só) no seele.log: ${JSON.stringify(linhas)}`);
+  assert.deepEqual(daVelha[0].slice(0, 2), ['aviso', 'entrada'],
+    `a linha da tentativa substituída não foi como aviso da entrada: ${JSON.stringify(daVelha[0])}`);
+  assert.ok(!JSON.stringify(linhas).includes(CONVITE_E54), 'o convite da tentativa substituída foi ao seele.log');
+
+  // ---- 2. Uma recusa sem a marca ainda pinta a linha vermelha, como antes.
+  await comecar({}, { [ALVO_E54]: 'Unreachable' });
+  await page.evaluate((velha) => { conectar(velha, 'Bia', null); }, ALVO_E54);
+  await respondida(ALVO_E54);
+  await page.waitForTimeout(300);
+  const recusada = await aTela();
+  assert.ok(recusada.linha, `uma recusa sem a marca deixou de pintar a linha vermelha: ${JSON.stringify(recusada)}`);
+
+  assert.deepEqual(erros, [], `a página lançou: ${erros.join(' · ')}`);
+  await page.close();
+}
