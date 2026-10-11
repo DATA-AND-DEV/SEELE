@@ -728,8 +728,9 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   celular inteira e o G3. Depois do conserto, 251 com cartões: sem fila, mas
   a página a 99% — redesenhar só a linha que mudou ficou para depois. O
   remendo da cópia da campanha (`d74e085a`), para a orquestradora rodar a
-  `carga-cartoes` com 251, com as referências de novo. O «diz e segue»
-  aplicado (`94fee0c0`).
+  `carga-cartoes` com 251, contra a `lista-251` — os mesmos calados sem MOD,
+  a referência que o §12 usa (`36fbc79f`). O «diz e segue» aplicado
+  (`94fee0c0`).
 - **Esperam:** a `carga-cartoes` consertada (com ela, o teto de
   contribuições no §12 e no `v6.json`), a tarefa 13 (o corte), o Step 5 da
   tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
