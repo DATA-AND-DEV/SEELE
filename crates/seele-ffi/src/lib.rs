@@ -41,6 +41,15 @@ pub mod sem_rede;
 pub mod types;
 mod volta;
 
+/// Quantas mensagens cada página da busca do buraco pede, na volta de uma queda.
+///
+/// Pública só para a conformidade a prender ao `MAX_PAGE` do servidor
+/// (`queda_recuperavel::a_pagina_da_busca_e_a_pagina_do_servidor`): a busca
+/// mede cada página por este número, e um servidor que mandasse menos a faria
+/// parar cedo. O cliente não pode ver o servidor (ADR 0002); a conformidade vê
+/// os dois.
+pub use volta::PAGINA_DO_BURACO;
+
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};

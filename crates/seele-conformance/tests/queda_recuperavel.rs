@@ -495,6 +495,84 @@ async fn tentar_de_novo_uma_grande_demais_nao_derruba_o_enlace() -> Result<()> {
     Ok(())
 }
 
+/// **A página da busca é a página do servidor** (R1-M3 da revisão do P61).
+///
+/// A busca do buraco mede cada página por `seele_ffi::PAGINA_DO_BURACO`: as
+/// 200 maiores abaixo do cursor são a página, e um id antigo abaixo delas é um
+/// eco (I1). Isso só vale se o servidor manda exatamente esse tanto quando tem
+/// mais: um servidor que mandasse menos faria toda página parecer incompleta,
+/// e a busca pararia no «começo do canal» depois da primeira. O cliente não
+/// pode ver o `MAX_PAGE` do servidor (ADR 0002); esta casa vê os dois.
+///
+/// Pelas duas pontas: a constante e o comportamento. Com 250 mensagens no
+/// canal, a página pedida com o tamanho do cliente vem com exatamente esse
+/// tamanho, e são as mais novas.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pagina_da_busca_e_a_pagina_do_servidor() -> Result<()> {
+    assert_eq!(
+        seele_ffi::PAGINA_DO_BURACO,
+        seele_server::persistence::messages::MAX_PAGE,
+        "a página que a busca do buraco pede e o teto de página do servidor divergiram"
+    );
+
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let mut quem_le = bia(endereco).await?;
+    quem_le.join_channel(LINHA).await?;
+    let autor = quem_le.session().person;
+    let gravadas = {
+        let mut banco = servidor.server().persistence.lock().await;
+        let mut mensagens = Messages::new(&mut banco);
+        let todas: Vec<PendingMessage> = (1..=250)
+            .map(|numero| PendingMessage {
+                channel: LINHA,
+                author: autor,
+                author_nickname: "bia".into(),
+                body: format!("pagina-{numero:03}"),
+                replies_to: None,
+                client_message_id: None,
+            })
+            .collect();
+        mensagens.append_batch(&todas)?.len()
+    };
+    assert_eq!(gravadas, 250);
+
+    // O mesmo pedido que a busca faz: a página mais nova, e a cerca atrás.
+    const CERCA: u64 = 0x5EE1E;
+    quem_le
+        .fetch_history(LINHA, None, seele_ffi::PAGINA_DO_BURACO)
+        .await?;
+    quem_le.send_ping_marcado(CERCA).await?;
+    let mut corpos: Vec<String> = Vec::new();
+    loop {
+        match tokio::time::timeout(PRAZO, quem_le.next_event()).await?? {
+            ServerMessage::MessageReceived { channel, body, .. } if channel == LINHA => {
+                corpos.push(body);
+            }
+            ServerMessage::Pong { timestamp } if timestamp == CERCA => break,
+            _ => {}
+        }
+    }
+    assert_eq!(
+        corpos.len(),
+        usize::from(seele_ffi::PAGINA_DO_BURACO),
+        "com 250 no canal, a página veio com {} e a busca a mede por {}",
+        corpos.len(),
+        seele_ffi::PAGINA_DO_BURACO
+    );
+    assert_eq!(
+        (
+            corpos.first().map(String::as_str),
+            corpos.last().map(String::as_str)
+        ),
+        (Some("pagina-051"), Some("pagina-250")),
+        "a página não é a das mais novas, da mais antiga para a mais nova"
+    );
+    drop(quem_le);
+    servidor.shutdown();
+    Ok(())
+}
+
 /// **Um campo grande demais não derruba o enlace** (M2 da revisão do P61).
 ///
 /// O `encode` do `seele-proto` confere cada campo em bytes, e o núcleo tratava

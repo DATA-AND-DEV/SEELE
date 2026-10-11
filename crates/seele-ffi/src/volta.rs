@@ -43,7 +43,7 @@ pub(crate) const MARCA_DO_PING_DO_BURACO: u64 = 1 << 62;
 /// o que o servidor manda são as `PAGINA_DO_BURACO` maiores abaixo do cursor,
 /// e é por elas que a busca decide até onde a página chegou. Ver
 /// [`Buraco::ouvir`].
-pub(crate) const PAGINA_DO_BURACO: u16 = 200;
+pub const PAGINA_DO_BURACO: u16 = 200;
 
 /// Quantas páginas o buraco pede, no máximo: 2 000 mensagens.
 ///
@@ -422,7 +422,21 @@ pub(crate) async fn seguir(
                     "a busca do buraco desistiu: a cerca da mesma página não voltou duas vezes \
                      no prazo; o que é mais antigo que o cursor não volta nesta sessão"
                 ),
-                Parada::Fechou | Parada::Comeco | Parada::SoAMaisNova => {
+                // **O começo do canal sem a última conhecida** (R1-M3 da revisão
+                // do P61): ou ela foi apagada durante a queda, ou o servidor
+                // mandou páginas menores que `PAGINA_DO_BURACO` e a busca as
+                // leu como o começo. O segundo caso é o que a conformidade
+                // prende (`a_pagina_da_busca_e_a_pagina_do_servidor`); se um dia
+                // acontecer, é aqui que aparece.
+                Parada::Comeco => tracing::warn!(
+                    canal,
+                    paginas,
+                    cursor,
+                    "a busca do buraco chegou ao começo do canal sem achar a última mensagem que \
+                     esta sessão conhecia: ela foi apagada, ou o servidor mandou páginas menores \
+                     que as pedidas"
+                ),
+                Parada::Fechou | Parada::SoAMaisNova => {
                     tracing::info!(canal, paginas, ?parada, "o buraco da volta fechou");
                 }
             }
