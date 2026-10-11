@@ -1424,6 +1424,26 @@ impl Client {
         .await
     }
 
+    /// Um `Ping` com o carimbo que quem chama escolheu: uma **cerca**.
+    ///
+    /// O servidor lê o fluxo de controle em ordem e responde o `Ping` na mesma
+    /// volta em que o lê, devolvendo o carimbo inteiro sem lê-lo. O `Pong`
+    /// deste carimbo chega, então, depois de tudo o que o servidor escreveu em
+    /// resposta aos quadros mandados antes dele — uma página inteira de
+    /// histórico, por exemplo (lote P61, a busca do buraco na volta).
+    ///
+    /// Não mexe no `Ping` de rotina que mede o ida-e-volta, e o `Pong` dele não
+    /// é medido. Quem escolhe o carimbo escolhe também uma marca que não se
+    /// confunda com a do `Ping` de entrada (o bit 63) nem com o contador de
+    /// rotina.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the control stream is closed.
+    pub async fn send_ping_marcado(&mut self, carimbo: u64) -> Result<()> {
+        frame::write(&mut self.send, &ClientMessage::Ping { timestamp: carimbo }).await
+    }
+
     /// What the transport says about flow control on this connection.
     ///
     /// Read from `quinn`'s own frame counters rather than instrumented by hand:

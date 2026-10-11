@@ -1358,9 +1358,21 @@ impl Room {
                 changed.transfers = true;
             }
 
+            // **Só a regra acaba a sessão**, e é a mesma do motor do enlace:
+            // `crate::despedida`. Aqui era toda `Disconnecting`, e o motor
+            // reconectava por baixo de uma tela de fim (pendência 61).
+            //
+            // A despedida recuperável é uma queda com nome: o motor a repassa
+            // e começa a bateria, e a faixa de reconexão chega pelo estado do
+            // enlace, como numa queda de rede. O que cabe aqui é o mesmo que
+            // aquela queda faz com o que esta máquina esperava.
             ServerMessage::Disconnecting { reason } => {
-                self.ended = Some(Ended { reason: *reason });
-                changed.ended = true;
+                if crate::despedida::a_sessao_acabou_aqui(*reason) {
+                    self.ended = Some(Ended { reason: *reason });
+                    changed.ended = true;
+                } else if self.envios_sem_resposta() {
+                    changed.messages = true;
+                }
             }
 
             // A room somebody made while this client was already connected.
@@ -2452,6 +2464,106 @@ mod tests {
             room.ended.map(|end| end.reason),
             Some(DisconnectReason::Banned)
         );
+    }
+
+    /// Toda despedida do protocolo, uma vez cada.
+    const TODAS_AS_DESPEDIDAS: [DisconnectReason; 22] = [
+        DisconnectReason::Incompatible,
+        DisconnectReason::CredentialRejected,
+        DisconnectReason::HandshakeTimeout,
+        DisconnectReason::Kicked,
+        DisconnectReason::Banned,
+        DisconnectReason::ServerFull,
+        DisconnectReason::ScheduledMaintenance,
+        DisconnectReason::ServerShuttingDown,
+        DisconnectReason::Timeout,
+        DisconnectReason::ProtocolViolation,
+        DisconnectReason::RateLimited,
+        DisconnectReason::FellBehind,
+        DisconnectReason::AdmissionPending,
+        DisconnectReason::AdmissionDenied,
+        DisconnectReason::NicknameTaken,
+        DisconnectReason::ModsRecusados,
+        DisconnectReason::ModsMudaram,
+        DisconnectReason::ModsIndisponiveis,
+        DisconnectReason::ChamadaEncerrada,
+        DisconnectReason::NinguemAtendeu,
+        DisconnectReason::ChamadaRecusada,
+        DisconnectReason::ModsDeOutraApi { apis: 1 << 7 },
+    ];
+
+    /// **Só as despedidas que acabam a sessão marcam o fim** (lote P61,
+    /// pendência 61).
+    ///
+    /// O `Room` marcava fim para toda `Disconnecting`, e o motor do enlace
+    /// tratava `FellBehind` como queda: a janela mostrava a tela de fim, a FFI
+    /// emitia `Ended`, e a pessoa seguia sentada na sala por baixo, com o que
+    /// escrevia no instante em `SemResposta` debaixo da tela.
+    ///
+    /// A tabela é escrita aqui, à parte da regra (`crate::despedida`), uma
+    /// razão por vez: um teste que conferisse a regra contra ela mesma passaria
+    /// com qualquer regra. A recuperável faz o que a bateria faz numa queda de
+    /// rede: o que esta máquina esperava vira `SemResposta`, e repetir com a
+    /// mesma chave é seguro.
+    #[test]
+    fn so_as_despedidas_que_acabam_a_sessao_marcam_o_fim() {
+        for motivo in TODAS_AS_DESPEDIDAS {
+            let acaba = matches!(
+                motivo,
+                DisconnectReason::Kicked
+                    | DisconnectReason::Banned
+                    | DisconnectReason::ModsMudaram
+                    | DisconnectReason::ChamadaEncerrada
+                    | DisconnectReason::NinguemAtendeu
+                    | DisconnectReason::ChamadaRecusada
+                    | DisconnectReason::ServerShuttingDown
+            );
+            let mut room = room();
+            room.anotar_envio(CHANNEL, ClientMessageId(41), "no ar".into(), 0);
+            let changed = room.apply(&ServerMessage::Disconnecting { reason: motivo });
+
+            assert_eq!(
+                changed.ended, acaba,
+                "{motivo:?}: o aviso de fim não é o que a regra diz"
+            );
+            assert_eq!(
+                room.ended.map(|fim| fim.reason),
+                acaba.then_some(motivo),
+                "{motivo:?}: o fim guardado não é o que a regra diz"
+            );
+            if !acaba {
+                assert_eq!(
+                    room.pendentes.first().map(|pendente| pendente.estado),
+                    Some(EstadoDoEnvio::SemResposta),
+                    "{motivo:?} é queda: o que estava no ar fica sem resposta, como numa \
+                     queda de rede"
+                );
+                assert!(
+                    changed.messages,
+                    "{motivo:?}: a pendente mudou de estado e ninguém foi avisado"
+                );
+            }
+        }
+    }
+
+    /// **A lista do `Room` é a do motor do enlace.** Pela mesma função,
+    /// [`crate::despedida::a_sessao_acabou_aqui`], que o `seele_core::enlace`
+    /// chama para decidir entre acabar e reconectar. O par deste teste no
+    /// `enlace.rs` confere o lado do motor contra este `Room`.
+    #[test]
+    fn toda_despedida_acaba_onde_o_motor_acaba() {
+        for motivo in TODAS_AS_DESPEDIDAS {
+            let mut room = room();
+            let changed = room.apply(&ServerMessage::Disconnecting { reason: motivo });
+            assert_eq!(
+                (changed.ended, room.ended.is_some()),
+                (
+                    crate::despedida::a_sessao_acabou_aqui(motivo),
+                    crate::despedida::a_sessao_acabou_aqui(motivo)
+                ),
+                "{motivo:?}: o `Room` e o motor do enlace discordam sobre o fim"
+            );
+        }
     }
 
     #[test]

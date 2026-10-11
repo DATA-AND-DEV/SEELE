@@ -235,21 +235,18 @@ enum Desfecho {
     LeuTudo,
     /// A sessão se despediu, com este motivo.
     ///
-    /// **O que o teste perdoa aqui, com `FellBehind`: a cauda inteira do
-    /// falante, lida ou não, em qualquer ponto da rajada.** De fora não dá para
-    /// separar a mensagem que a sessão nunca leu da que ela leu e perdeu antes
-    /// de se despedir, e a revisão do lote Y mediu as duas passando: 16 lidas e
-    /// perdidas no meio da rajada, 19 no fim. Desde o M4 da revisão, a despedida
-    /// no meio da rajada também passa (antes reprovava por acidente, pelo erro
-    /// de transporte).
+    /// **Num falante, isto reprova** (lote P61 da F5, pendência 61). O teste
+    /// perdoava a cauda inteira de um falante desligado com `FellBehind`: sob
+    /// carga, dois lotes seguidos do escritor anunciavam mais de 1 024
+    /// mensagens antes de a sessão do falante voltar a ler o barramento, e ela
+    /// se despedia com a rajada pela metade (lote Y). O conserto da F1 no
+    /// servidor (`1ebf85a4`: o lote do escritor com teto, e a contrapressão por
+    /// conexão) tirou o caminho, e a medida tirou o perdão: com carga, 72 de 72
+    /// rodadas sem falante desligado e com as 1 160 gravadas; sem o conserto, 6
+    /// de 36 rodadas com falantes desligados (até 16) e 4 com cauda faltando.
     ///
-    /// Por que perdoar: é o contrato de hoje — o servidor diz `FellBehind` e
-    /// conta em `atrasos`, e o teste exige as duas coisas. O que o cliente de
-    /// verdade vê: nada some, cada mensagem que sobrou fica
-    /// `EstadoDoEnvio::SemResposta`, com «TENTAR DE NOVO», que repete com a
-    /// mesma chave quando a casca chama `reenviar_mensagem`; sozinho, ele não
-    /// repete. Se isso é contrato ou defeito é a mesma pergunta da pendência
-    /// 61: o falante que lê e escreve em rajada ser desligado com `FellBehind`.
+    /// O ouvinte que parou de ler continua desligado com `FellBehind`: é o
+    /// contrato, e é o caso para o qual o `Lagged` existe.
     Desligado(DisconnectReason),
     /// O fluxo acabou sem despedida.
     Caiu(String),
@@ -394,12 +391,10 @@ async fn gravadas_por_falante(servidor: &Daemon) -> Result<Vec<Vec<usize>>> {
 /// pode acontecer é a terceira coisa — seguir conectado, calado, com um buraco
 /// no meio da conversa que ninguém dos dois lados consegue nomear.
 ///
-/// A mesma regra vale para quem fala: o que o servidor gravou de um falante é
-/// o começo do que ele disse, em ordem e sem buraco; quem teve o `Pong` teve
-/// tudo gravado; e a cauda que faltar é de um falante que ele desligou dizendo
-/// `FellBehind` — inteira, lida ou não, ver [`Desfecho::Desligado`]. Pedir as
-/// 1 160 gravadas sempre era pedir que nenhum falante ficasse para trás, e sob
-/// carga eles ficam (lote Y da F5).
+/// Quem fala não perde nada: todo falante tem o `Pong` de depois da rajada, e
+/// tudo o que ele disse é gravado, em ordem, sem buraco e sem repetir — as
+/// 1 160. Um falante desligado com `FellBehind` reprova: ver
+/// [`Desfecho::Desligado`], e a pendência 61.
 #[tokio::test(flavor = "multi_thread")]
 async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Result<()> {
     let (endereco, servidor) = server().await?;
@@ -456,7 +451,9 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
     // mensagens antes de ela voltar a ler o barramento —, ela se despede com
     // `FellBehind`, e o resto do que o falante mandou fica sem ler. Em cinco
     // rodadas reprovadas, toda mensagem faltando era a cauda de um falante
-    // desligado assim, e a contagem não subia mais em 15 s.
+    // desligado assim, e a contagem não subia mais em 15 s. Desde o conserto
+    // da F1 (`1ebf85a4`), isso não acontece mais, e um falante desligado
+    // reprova logo abaixo.
     let desfechos = tokio::time::timeout(SEGURANCA, async {
         let mut desfechos = Vec::new();
         for falante in &mut falantes {
@@ -514,13 +511,12 @@ async fn o_server_nao_perde_mensagem_calado_quando_um_par_para_de_ler() -> Resul
                 "o servidor perdeu mensagem antes de gravar, e aí reconectar não repõe nada: \
                  a sessão do falante {indice:02} leu todas e faltam {faltam:?}"
             ),
-            // A cauda inteira, lida ou não: o contrato de hoje, e a pergunta da
-            // pendência 61. Ver `Desfecho::Desligado`.
-            Desfecho::Desligado(DisconnectReason::FellBehind) => {}
-            outro => assert!(
-                faltam.is_empty(),
-                "o falante {indice:02} ficou sem {faltam:?} gravadas e o servidor não disse que \
-                 ficou para trás: {outro:?}"
+            // Sem perdão desde o conserto da F1 (pendência 61): ver
+            // `Desfecho::Desligado`.
+            outro => panic!(
+                "o servidor desligou o falante {indice:02}, que lia e escrevia, com {outro:?}, \
+                 e faltam {faltam:?} gravadas: um lote passou à frente de quem lê depressa \
+                 (pendência 61)"
             ),
         }
     }

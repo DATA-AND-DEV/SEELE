@@ -9527,6 +9527,55 @@ pendência. A revisão dele deixou:
     *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
+55. **P61 · A recusa local de um campo grande demais não chega à janela.**
+    Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
+    (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
+    registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
+    `enlace.rs`) e segue. A entrada numa sala com senha grande demais é
+    desfeita como o servidor desfaz uma senha errada, e essa a janela mostra.
+    As outras recusas a pessoa não vê: o pedido some calado.
+    - **Falta:** a janela conferir o tamanho antes de mandar, em bytes, com os
+      limites do `seele-proto`, como o envio de mensagem já faz
+      (`tela-sessao.js`, ao redor de `limite_da_mensagem`). Os campos, e onde
+      cada um é escrito:
+      - apelido, 32 B (`MAX_NICKNAME_LEN`): `#perfil-apelido`, que manda
+        `escolher_apelido` (`camada-nomear.js`);
+      - nome de canal e de sala, 48 B (`MAX_CHANNEL_NAME_LEN`): `#nomear-valor`
+        (`maxlength="48"`, que conta caracteres), que manda `criar_linha` e
+        `criar_voice_room` (`tela-sessao.js`) e `renomear_linha` e
+        `renomear_voice_room` (`tela-sessao.js` e `camada-moderar.js`);
+      - limite da sala, 1 a 250 (`MAX_VOICE_ROOM_LIMIT`): o mesmo
+        `criar_voice_room`;
+      - nome do servidor, 64 B (`MAX_CLIENT_NAME_LEN`): `#server-nome-valor`
+        (`maxlength="64"`), que manda `renomear_server` (`tela-server.js`), e
+        `#preparar-nome` (`maxlength="64"`), que manda o mesmo
+        `renomear_server` ao hospedar (`tela-boot.js`);
+      - senha da sala, 32 B (`MAX_NICKNAME_LEN`): a caixa de senha antes de
+        `enter_voice_room` (`tela-sessao.js`);
+      - motivo do banimento, 512 B (`MAX_ALERT_TEXT_LEN`): `#moderar-motivo`
+        (`maxlength="200"`; 200 letras CJK dão 600 B), que manda `banir_pessoa`
+        (`camada-moderar.js`).
+    - **Não precisam:** a carga de MOD, já conferida em bytes no `base.js`;
+      os ícones, por `check_server_icon`. A senha da sala também não: desde a
+      rodada 2 do P61, a FFI a confere antes de pedir
+      (`Connection::enter_voice_room`), e a janela mostra a entrada recusada.
+    - **Um caminho de outra classe, anterior ao lote: o apelido gravado fora da
+      sessão.** `escolher_apelido_local` (`camada-nomear.js`, o mesmo
+      `#perfil-apelido` com `maxlength="32"` em caracteres) grava o apelido na
+      máquina, e ele vai no `Hello` da conexão seguinte. Medido pela revisão
+      do P61, pela FFI: `Connection::connect` com um apelido de 40 B (20 `á`)
+      devolve `Err("Unreachable")`. Pela leitura: o `encode` do `Hello` recusa
+      o apelido, e a escrita do `Hello` (`client.rs`, depois do QUIC e antes
+      do aperto do protocolo) traduz **qualquer** erro em
+      `ConnectError::Unreachable`, com `warn` «could not send Hello». A pessoa lê
+      «NADA RESPONDEU NESSE ENDEREÇO» (`frases.js`, `Unreachable`), num
+      servidor que está de pé, e nenhuma tentativa de novo muda isso. Não é
+      recusa de comando: é a conexão que não abre, com o motivo errado.
+      **Conserto provável:** o `connect` conferir o apelido antes de abrir a
+      conexão (o teto é `MAX_NICKNAME_LEN`, em bytes), ou a falha de
+      codificação do `Hello` ter nome próprio em vez de virar `Unreachable`.
+    *Fonte:* `F5/lote-p61-report.md`, rodadas 1 e 2, M2 e R1-M5.
+
 ### Fora da F5, só como referência
 
 Achados das rodadas da F5 que são de outra frente. A orquestradora já foi

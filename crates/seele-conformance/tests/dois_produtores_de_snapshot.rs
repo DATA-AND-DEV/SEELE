@@ -18,7 +18,8 @@
 //! A sequência passa pelo que a casca desenha: gente presente e na sala, a
 //! entrada desta pessoa, **o tema que chega e o que sai** (`TemaMudou`, a 17d
 //! da F3), uma transmissão alheia e a própria, os espectadores, um aviso, a
-//! troca do próprio apelido e o fim.
+//! troca do próprio apelido, a queda recuperável (`FellBehind`, que não é fim:
+//! pendência 61, lote P61 da F5) e o fim.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use seele_proto::control::{
@@ -106,6 +107,9 @@ fn mensagens() -> Vec<ServerMessage> {
         },
         ServerMessage::TemaMudou { tema: None },
         ServerMessage::Disconnecting {
+            reason: DisconnectReason::FellBehind,
+        },
+        ServerMessage::Disconnecting {
             reason: DisconnectReason::Kicked,
         },
     ]
@@ -165,6 +169,38 @@ fn os_dois_produtores_dao_o_mesmo_retrato_depois_de_cada_mensagem() {
         "o TemaMudou não chegou ao retrato"
     );
     assert!(tema(10).is_null(), "o TemaMudou sem tema não tirou o tema");
+    // **A queda recuperável não é fim, nos dois produtores** (lote P61, o
+    // pedido da F4). O `FellBehind` é a despedida que o núcleo trata como
+    // queda e reconecta pela bateria; o `Room` marcava fim para toda
+    // `Disconnecting`, e o desktop e o navegador mostravam a tela de fim por
+    // cima de uma sessão que voltava. A regra é uma só:
+    // `seele_sessao::despedida`.
+    let depois_da_queda = 11;
+    assert!(
+        matches!(
+            mensagens[depois_da_queda - 1],
+            ServerMessage::Disconnecting {
+                reason: DisconnectReason::FellBehind
+            }
+        ),
+        "o passo da queda saiu do lugar"
+    );
+    for (lado, retrato) in [
+        (
+            "desktop",
+            serde_json::to_value(&do_desktop[depois_da_queda]).unwrap(),
+        ),
+        (
+            "navegador",
+            serde_json::to_value(&do_navegador[depois_da_queda]).unwrap(),
+        ),
+    ] {
+        assert!(
+            retrato["ended"].is_null(),
+            "o {lado} marcou fim numa queda recuperável: {}",
+            retrato["ended"]
+        );
+    }
     let fim = &do_navegador[mensagens.len()];
     assert_eq!(
         fim.nickname, "marcela2",
