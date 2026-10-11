@@ -1285,6 +1285,20 @@ async function renomearServidor() {
     await atualizarServer();
     return;
   }
+  // **O teto do fio, em bytes, antes de mandar** (pendência 58, item 55; lote
+  // C55 da F5). Era um `maxlength="64"` no campo, que contava caracteres: um
+  // nome acentuado cabia nele e não no quadro, e o núcleo o recusava sem a
+  // janela saber. Sem o `atualizarServer` de baixo, e com o foco de volta: o
+  // redesenho põe o nome de agora no campo que não tem foco, e a pessoa
+  // perderia o que escreveu justo quando a frase manda encurtá-lo.
+  const grandeDemais = await passaDoTeto("nome_do_servidor", nome);
+  if (grandeDemais) {
+    const onde = $("server-servidor-erro");
+    onde.hidden = false;
+    onde.textContent = grandeDemais;
+    campo.focus();
+    return;
+  }
   try {
     await invoke("renomear_server", { name: nome });
   } catch (falha) {

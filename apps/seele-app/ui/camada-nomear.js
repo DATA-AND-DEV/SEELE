@@ -100,6 +100,16 @@ $("nomear-forma").addEventListener("submit", async (evento) => {
   const confirmar = $("nomear-confirmar");
   confirmar.disabled = true;
   try {
+    // **O teto do fio, em bytes, antes de mandar** (pendência 58, item 55;
+    // lote C55 da F5). Tudo o que passa por aqui é nome de canal ou de sala, e
+    // os dois têm o mesmo teto. Era um `maxlength="48"` no campo, que contava
+    // caracteres: um nome acentuado cabia nele e não no quadro, e o núcleo o
+    // recusava sem a janela saber. A recusa fica aqui, onde se escreveu.
+    const grandeDemais = await passaDoTeto("nome_de_canal", nome);
+    if (grandeDemais) {
+      recusarNome(grandeDemais);
+      return;
+    }
     await aoConfirmarNome(nome);
     fecharNomear();
   } catch (falha) {
@@ -173,8 +183,8 @@ async function desenharPrevia(apelido) {
  * `titulo` é opcional, e só a pergunta do nome antes da primeira entrada o
  * passa (`perguntarONome`). Sem ele, o diálogo é o SEU PERFIL de sempre.
  *
- * O diálogo se reabre de dentro — trocar a imagem, uma recusa ao gravar o
- * apelido —, e essas reaberturas não trazem título. Então um título só volta a
+ * O diálogo se reabre de dentro — trocar ou tirar a imagem —, e essas
+ * reaberturas não trazem título. Então um título só volta a
  * SEU PERFIL quando o diálogo está fechado: no meio da pergunta, reabrir para
  * mostrar a imagem nova não pode trocá-la por outra.
  */
@@ -406,6 +416,19 @@ async function guardarOApelido() {
   }
   $("perfil-erro").hidden = true;
 
+  // **O teto do fio, em bytes, antes de mandar e antes de gravar** (pendência
+  // 58, item 55; lote C55 da F5). As duas portas têm o mesmo teto: o
+  // `SetNickname` da sessão e o apelido gravado nesta máquina, que vai no
+  // `Hello` da conexão seguinte. O gravado grande demais fazia o `connect`
+  // voltar `Unreachable`, e a pessoa lia NADA RESPONDEU NESSE ENDEREÇO com o
+  // servidor de pé. A caixa fica aberta, com o que se escreveu, para encurtar.
+  const grandeDemais = await passaDoTeto("apelido", escolhido);
+  if (grandeDemais) {
+    recusarPerfil(grandeDemais);
+    $("perfil-apelido").focus();
+    return false;
+  }
+
   let naSessao = false;
   try {
     naSessao = (await invoke("snapshot")) !== null;
@@ -425,8 +448,10 @@ async function guardarOApelido() {
     return true;
   } catch (falha) {
     console.warn("escolher_apelido:", falha);
+    // Sem reabrir o perfil (lote C55): `abrirPerfil` esconde `#perfil-erro` e
+    // põe de volta o apelido gravado, e a recusa sumia com o que se escreveu.
     recusarPerfil(fraseDeErro(falha));
-    await abrirPerfil();
+    $("perfil-apelido").focus();
     return false;
   }
 }
