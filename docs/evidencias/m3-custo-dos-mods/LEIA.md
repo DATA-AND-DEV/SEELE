@@ -325,12 +325,21 @@ não o WebKit, e a ponte simulada por JSON — a de verdade custa mais):
 | 100 | só os cartões | 100%, 325 quadros | — | — |
 | 100 | sem | 42%, 600 quadros | — | — |
 
-(600 quadros em 5 s é a página livre.) A fila não esvazia enquanto os eventos
+(600 quadros em 5 s é a página livre.) **Depois do conserto** (`6717dc2c`: no
+máximo um `atualizar()` por quadro, na janela; guarda em
+`apps/seele-app/bancada/um-redesenho-por-quadro.cjs`), medido pelo ouvinte de
+verdade: com 251, os cartões e as 128, fila de 0,1 s e a página a 99%, 93
+quadros — o mesmo da coluna do meio. A fila não esvazia enquanto os eventos
 chegarem, e eles chegam enquanto houver sessão: é a CPU presa e a memória
 subindo da M3. Juntar os eventos por quadro tira a fila e não tira o custo —
 cada quadro ainda refaz a lista inteira. Que o cartão não tenha aparecido na
 M3 é coerente com isso (o registro do MOD esperando atrás da fila), mas não
 foi medido.
+
+**Para a `carga-cartoes` depois do conserto**: sem MOD nenhum, 251 pessoas
+ainda deixam a página a 98% — cada quadro refaz a lista inteira, e redesenhar
+só a linha que mudou ficou para depois (pendência 63). Contra o `sem-mod` de
+uma pessoa, a lista entraria na conta do MOD.
 
 **O teto de 256 alvos por ponto não congela sobre isto.** Com os cartões, a
 fila aparece a partir de 200 pessoas, abaixo do teto; e sem MOD nenhum, com

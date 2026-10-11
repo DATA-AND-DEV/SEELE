@@ -31,8 +31,13 @@
 //     com 251; só as 128 sem alvo, com 251: 98%, sem fila;
 //   sem MOD nenhum, 251, rajada: 99% e 232–377 quadros.
 //
+// Depois do conserto (`6717dc2c`, um `atualizar()` por quadro), pelo ouvinte
+// de verdade (`evento`): 251 com cartões + 128, fila de 0,1 s e a página a
+// 99% (93 quadros); só os cartões, 100% (138); sem MOD, 98% (558). A fila
+// acabou; o custo de refazer a lista inteira a cada quadro, não.
+//
 // Rodar:  node tools/lista-grande.cjs [pessoas:variante:modo ...]
-// (sem argumento, 11 e 251 pessoas × sem e com o MOD × os três modos; a
+// (sem argumento, 11 e 251 pessoas × sem e com o MOD × os quatro modos; a
 // variante é `sem`, `cartoes`, `agregado` ou `mod`, que é as duas juntas)
 
 // Em `tools/`, e não em `bancada/`: é uma medida, que imprime uma tabela e
@@ -91,7 +96,13 @@ async function medir(browser, porta, n, variante, modo) {
           return testTable[cmd] ?? null;
         },
       },
-      event: { listen: async () => () => {} },
+      // Os ouvintes de verdade, para o modo `evento` passar pelo da sessão.
+      event: {
+        listen: async (nome, fn) => {
+          (window.__ouvintes ??= {})[nome] = [...(window.__ouvintes[nome] ?? []), fn];
+          return () => {};
+        },
+      },
       window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
     };
   }, respostas({ snapshot: null, microfones: [], saidas: [], pacotes_no_cache: [], aceites_de_mods: [] }));
@@ -172,9 +183,10 @@ async function medir(browser, porta, n, variante, modo) {
     // atendido é a fila que a página tem pela frente.
     //
     // O tique: só o `setInterval` de 500 ms da sessão. A rajada: um
-    // `atualizar()` por evento, como `tela-sessao.js` faz hoje. A juntada: no
-    // máximo um por quadro, e os que chegam no meio só marcam que há o que
-    // pedir.
+    // `atualizar()` por evento, como `tela-sessao.js` fazia até a pendência 63.
+    // A juntada: no máximo um por quadro, e os que chegam no meio só marcam que
+    // há o que pedir. O evento: um `RosterChanged` pelos ouvintes de verdade —
+    // o que a janela faz com ele hoje, seja o que for.
     const agora = () => performance.timeOrigin + performance.now();
     const worker = modo === "tique" ? null : new Worker("/__rajada.js");
     let falhaDoWorker = null;
@@ -194,6 +206,10 @@ async function medir(browser, porta, n, variante, modo) {
         ultimoAtraso = agora() - data.saiu;
         atrasoMaximo = Math.max(atrasoMaximo, ultimoAtraso);
         if (modo === "rajada") { pedir(); return; }
+        if (modo === "evento") {
+          for (const fn of window.__ouvintes?.["seele://event"] ?? []) fn({ payload: "RosterChanged" });
+          return;
+        }
         if (pendente) return;
         pendente = true;
         requestAnimationFrame(() => { pendente = false; pedir(); });
@@ -264,14 +280,14 @@ async function medir(browser, porta, n, variante, modo) {
     if (casos.length === 0) {
       for (const n of [11, 251]) {
         for (const variante of ["sem", "mod"]) {
-          for (const modo of ["tique", "rajada", "juntada"]) casos.push(`${n}:${variante}:${modo}`);
+          for (const modo of ["tique", "rajada", "juntada", "evento"]) casos.push(`${n}:${variante}:${modo}`);
         }
       }
     }
     for (const caso of casos) {
       const [n, variante, modo] = caso.split(":");
-      if (!["sem", "cartoes", "agregado", "mod"].includes(variante) || !["tique", "rajada", "juntada"].includes(modo)) {
-        throw new Error(`caso desconhecido: ${caso} (pessoas:sem|cartoes|agregado|mod:tique|rajada|juntada)`);
+      if (!["sem", "cartoes", "agregado", "mod"].includes(variante) || !["tique", "rajada", "juntada", "evento"].includes(modo)) {
+        throw new Error(`caso desconhecido: ${caso} (pessoas:sem|cartoes|agregado|mod:tique|rajada|juntada|evento)`);
       }
       linhas.push(await medir(browser, porta, Number(n), variante, modo));
     }
