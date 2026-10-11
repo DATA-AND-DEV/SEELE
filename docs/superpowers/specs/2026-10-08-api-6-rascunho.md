@@ -1648,6 +1648,26 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
   opções, e não como constantes (o J do PERFIS): os mesmos números valem para
   o aviso do servidor (1 KiB, 4 por segundo) e para as capas animadas.
 
+**A lista de 251, e contra o que ela se lê** (10/10 e 11/10). A primeira
+`carga-cartoes` não chegou a medir: a página travou — o WebContent acima de
+100% de CPU por 4,5 min, a memória subindo, nenhum cartão à vista —, e a causa
+era do produto, e não do MOD (pendência 63). Cada pessoa manda um `PersonState`
+por segundo a todas as conexões, e a janela respondia a cada um com o retrato
+inteiro e a lista inteira: N redesenhos por segundo, cada um do tamanho de N.
+Na bancada (`tools/lista-grande.cjs`, no Chromium, com a ponte simulada), só os
+cartões já deixavam fila a partir de 200 pessoas, **abaixo do teto de 256
+alvos**. O conserto (`6717dc2c`: no máximo um `atualizar()` por quadro, na
+janela; guarda `apps/seele-app/bancada/um-redesenho-por-quadro.cjs`) acabou com
+a fila, e não com o custo de refazer a lista a cada quadro: sem MOD nenhum, 251
+pessoas deixam a página a 98% na mesma bancada, e redesenhar só a linha que
+mudou ficou para depois. **Por isso a `carga-cartoes` se lê contra a
+`lista-251`** — os mesmos 251, no mesmo ritmo, sem MOD (decisão da
+orquestradora, 11/10) —, e não contra o `sem-mod` de uma pessoa, contra o qual
+a lista entraria na conta do MOD; a `lista-251` contra o `sem-mod` diz, à
+parte, o custo da lista. Os 256 alvos e os 128 sem alvo esperam essa medida, na
+build da campanha remendada com o conserto
+(`docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh`).
+
 **A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
 pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha
 `superficie.atualizar(chave, subarvore)`, que troca o nó de `chave` e tudo o
