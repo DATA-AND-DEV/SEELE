@@ -196,8 +196,11 @@ await caso("lugares da sala nova", async () => {
 // `#server-nome-valor` manda ao sair do campo (`change`). A recusa fica no
 // `#server-servidor-erro`, e o campo continua com o que se escreveu.
 await caso("nome do servidor na configuração", async () => {
-  document.getElementById("botao-server-sessao").click();
-  exigir(await ate(() => visivel("tela-server") === "VISIVEL", 900), "CONFIGURAÇÕES não abriu");
+  // Pela função que a engrenagem chama, e esperada até o fim: ela termina
+  // levando o foco à tela (`abrirTela`), e um nome escrito antes disso perdia o
+  // foco para ela, e o redesenho de meio segundo o trocava pelo de agora.
+  await abrirServer("tela-sessao");
+  exigir(visivel("tela-server") === "VISIVEL", "CONFIGURAÇÕES não abriu");
   document.getElementById("secao-servidor").click();
   exigir(await ate(() => visivel("painel-servidor") === "VISIVEL", 900), "ESTE SERVIDOR não abriu");
   const campo = document.getElementById("server-nome-valor");
