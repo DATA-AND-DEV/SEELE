@@ -53,7 +53,7 @@ use seele_proto::screen::{
 };
 use seele_proto::stream::StreamType;
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
-use seele_proto::{MediaHeader, FAIXA, MEDIA_HEADER_VERSION};
+use seele_proto::{MediaHeader, FAIXA};
 
 /// Onde os bytes-ouro moram, a partir da raiz do crate.
 const ARQUIVO: &str = "tests/fio_1_0.txt";
@@ -620,6 +620,16 @@ fn servidores() -> Vec<(&'static str, ServerMessage)> {
                 reason: MessageRefusal::NoSuchChannel,
             },
         ),
+        // A razão do rascunho da linha 1: a repetição de uma mensagem que a
+        // moderação apagou.
+        (
+            "MessageRejected.Apagada",
+            ServerMessage::MessageRejected {
+                channel: ChannelId(1),
+                client_message_id: ClientMessageId(4),
+                reason: MessageRefusal::Apagada,
+            },
+        ),
         ("Tocando", ServerMessage::Tocando { prazo_s: 45 }),
         (
             "Membros",
@@ -710,7 +720,6 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
 
     let mut voz = [0_u8; seele_proto::HEADER_LEN + 2];
     let len = MediaHeader {
-        version: MEDIA_HEADER_VERSION,
         ssrc: 0xDEAD_BEEF,
         seq: 0x1234,
         timestamp: 0x0009_6000,
@@ -1035,6 +1044,7 @@ fn os_enums_aninhados_nao_mudam_de_ordem() {
                 "NoSuchChannel",
                 "TooLong",
                 "StorageFailed",
+                "Apagada",
             ],
         ),
         (

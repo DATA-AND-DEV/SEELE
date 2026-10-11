@@ -300,7 +300,14 @@
     }
     // A etapa volta para a caixa do desktop, que é de onde ela é escrita.
     if (etapa) boot.querySelector(".boot-caixa")?.append(etapa);
-    if (desfecho?.ok) return;
+    if (desfecho?.ok) {
+      // A sessão abre pelo mesmo caminho do desktop (`depoisDeConectar`, em
+      // tela-boot.js): a geração, o desenho e a tela de entrada, com a resposta
+      // do `connect` que a identidade devolveu. Sem resposta, o contrato da
+      // identidade quebrou, e a tela diz isso em vez de ficar conectando.
+      if (desfecho.resposta) return depoisDeConectar(desfecho.resposta, endereco);
+      desfecho = { erro: "recusado", razao: "sem-resposta" };
+    }
     if (desfecho?.erro === "mods-a-aceitar") return aceite(endereco, desfecho, lido);
     if (lido) return entrarEm(identidade.ler() ?? lido, desfecho);
     return inicio(conhecido && desfecho);

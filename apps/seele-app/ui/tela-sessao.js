@@ -1704,6 +1704,9 @@ const RECUSAS_DE_MENSAGEM = {
   PermissionDenied: "não pode escrever neste canal",
   NoSuchChannel: "este canal não existe mais",
   StorageFailed: "o servidor não conseguiu gravar",
+  // A moderação apagou a mensagem enquanto quem a escreveu estava fora, e a
+  // repetição não a traz de volta. Tentar de novo nunca passa: ver `seloDoEnvio`.
+  Apagada: "apagada pela moderação",
 };
 
 /**
@@ -1751,6 +1754,10 @@ function seloDoEnvio(mensagem) {
   // As duas que pedem decisão de quem escreveu: recusada e sem resposta. As
   // duas ganham os mesmos dois botões, e a frase é o que as separa — porque o
   // que se faz com elas é o mesmo, e o que se sabe sobre elas não é.
+  // **A apagada não volta**: a moderação tirou a mensagem do canal, e repetir
+  // recebe a mesma recusa. Ela fica com DESISTIR só, que devolve o texto ao
+  // campo e fecha a pendente.
+  let semVolta = false;
   if (estado === "SemResposta") {
     selo.dataset.envio = "sem-resposta";
     selo.append(
@@ -1764,6 +1771,7 @@ function seloDoEnvio(mensagem) {
     selo.dataset.envio = "falhou";
     const motivo = typeof estado === "object" ? estado.Recusada : null;
     selo.append(elemento("span", "envio-frase", `não foi gravada: ${fraseDaRecusa(motivo)}`));
+    semVolta = motivo === "Apagada";
   }
 
   if (chave) {
@@ -1778,7 +1786,8 @@ function seloDoEnvio(mensagem) {
     // «Desistir» devolve o texto ao compositor — ver `agirNaPendente`. O nome
     // diz o que a pessoa está decidindo, e não o que o programa faz com a lista.
     desistir.title = "devolve o texto ao campo de escrever";
-    selo.append(tentar, desistir);
+    if (semVolta) selo.append(desistir);
+    else selo.append(tentar, desistir);
   }
   return selo;
 }
@@ -4217,6 +4226,10 @@ function esquecerOEstadoDaSessao() {
   // marca do quadro agendado volta junto.
   falouPorUltimo.clear();
   capasAgendadas = false;
+  // O `atualizar()` que um evento deixou para o próximo quadro: ele pediria o
+  // retrato depois da saída. O quadro pendente também é recurso.
+  if (quadroDaAtualizacao) cancelAnimationFrame(quadroDaAtualizacao);
+  quadroDaAtualizacao = 0;
   rascunhos.clear();
   previas.clear();
   previasFechadas.clear();
@@ -5016,8 +5029,9 @@ window.addEventListener("blur", () => {
   segurarFala(false);
 });
 
-// O core diz o que mudou; isto só redesenha. Um snapshot por evento é barato e
-// evita que a tela e o estado discordem.
+// O core diz o que mudou; isto só redesenha, pelo snapshot, para a tela e o
+// estado não discordarem — e no máximo um por quadro (`atualizarNoProximoQuadro`):
+// um por evento era barato com dez pessoas e travava a página com 251.
 listen("seele://event", (evento) => {
   const payload = evento.payload;
   if (payload && typeof payload === "object" && payload.Ended) {
@@ -5049,8 +5063,34 @@ listen("seele://event", (evento) => {
     return;
   }
 
-  atualizar();
+  atualizarNoProximoQuadro();
 });
+
+/**
+ * **Um `atualizar()` por quadro, por mais eventos que cheguem nele**
+ * (pendência 63).
+ *
+ * Cada pessoa da sessão manda um `PersonState` por segundo a todas as
+ * conexões, e cada um chega aqui como um `RosterChanged`. Com um `atualizar()`
+ * por evento, N pessoas eram N retratos pela ponte e N listas inteiras
+ * redesenhadas por segundo, e o custo crescia com o quadrado: na M3 de 10/10,
+ * 251 pessoas com um cartão de MOD em cada travaram a página, com a fila
+ * crescendo enquanto houvesse sessão (`tools/lista-grande.cjs`: 4,9 s de
+ * atraso em 5 s). Um quadro não mostra mais que um desenho, e o retrato pedido
+ * no quadro é o mais novo, não um velho: os eventos que chegam no meio só
+ * dizem que há o que pedir.
+ *
+ * Com a janela escondida não há quadro, e o pedido espera por um: o tique de
+ * 500 ms continua puxando o retrato, como sempre puxou.
+ */
+let quadroDaAtualizacao = 0;
+function atualizarNoProximoQuadro() {
+  if (quadroDaAtualizacao) return;
+  quadroDaAtualizacao = requestAnimationFrame(() => {
+    quadroDaAtualizacao = 0;
+    atualizar();
+  });
+}
 
 // O relógio do topo é do relógio local, não do servidor.
 /* O relógio saiu daqui na 0.9.0: ele mora na barra da janela, que a comp pôs

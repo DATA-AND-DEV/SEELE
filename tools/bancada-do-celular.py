@@ -180,12 +180,9 @@ def montar(destino: pathlib.Path, *, celular: bool, marca: str | None) -> pathli
     if marca:
         texto = texto.replace("<head>", "<head>\n" + MARCA.format(marca), 1)
     corte = texto.index("<script src=")
-    duble = (
-        carga.DUBLE.replace("__APIS_ACEITAS__", carga.apis_aceitas())
-        .replace("__VERSAO_DO_SERVIDOR__", carga.versao_do_servidor())
-        .replace("__LINHA__", carga.linha_desta_janela())
-    )
-    pagina.write_text(texto[:corte] + duble + texto[corte:])
+    # O duble montado pela carga, com todo marcador preenchido e nenhum
+    # sobrando: a bancada não repete as trocas (ver `carga.duble_montado`).
+    pagina.write_text(texto[:corte] + carga.duble_montado() + texto[corte:])
     return pagina
 
 
@@ -431,10 +428,18 @@ IDENTIDADE_DO_CASO = r"""() => {
     conectar: async (alvo, apelido, credencial) => {
       window.__conexoes.push({ endereco: alvo.endereco, apelido, credencial });
       const resposta = window.__respostas.shift();
+      // «connect»: o connect do duble, como o da ponte fará na 2.6, com a
+      // resposta inteira do desktop (a sessão, o veredito).
+      if (resposta === "connect") {
+        return window.__TAURI__.core.invoke("connect", { server: alvo.endereco, nickname: apelido, audio: true, joinSecret: credencial });
+      }
       if (resposta === "espera") await new Promise((soltar) => { window.__soltarAConexao = soltar; });
       else if (resposta) throw resposta;
     },
     instalado: () => window.__instalado ?? true,
+    // O relógio da identidade: o caso o adianta para ver os hashes guardados
+    // vencerem (o LINK VENCIDO dos servidores deste aparelho).
+    agora: () => window.__agora ?? Date.now(),
   });
 }"""
 
@@ -456,15 +461,19 @@ ENTRADA_LIDA = r"""() => {
 }"""
 
 
+INICIO_LIDO = """() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent,
+    servidores: [...document.querySelectorAll(".cel-entrada-servidor")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
+    vazio: document.querySelector(".cel-entrada-corpo > .cel-entrada-nota")?.textContent ?? null,
+    baixar: document.querySelector(".cel-entrada-fora a.cel-baixar")?.getAttribute("href"),
+    colar: [...document.querySelectorAll(".cel-entrada-pe button")].map((b) => b.textContent),
+    caixaDoDesktop: getComputedStyle(document.querySelector("#tela-boot > .boot-caixa")).display })"""
+
+
 def usar_a_entrada(pg: Page, **opcoes) -> None:
-    pg.evaluate("""(o) => CELULAR.ajudante("entrada").usar(window.__identidade, {
-        link: o.link ?? null,
-        // Na forma do `conhecidos()` combinado com a F4: do mais recente ao mais
-        // antigo, com o `podeEntrar` (os hashes guardados vencem).
-        conhecidos: async () => [
-          { impressao: "aa".repeat(32), nome: "OFICINA", endereco: "192.168.0.14:8383", versaoDoServidor: "1.0", visto: Date.now(), podeEntrar: true },
-          { impressao: "bb".repeat(32), nome: null, endereco: "tq3.duckdns.org:8383", versaoDoServidor: "1.0", visto: Date.now() - 9 * 86400000, podeEntrar: false },
-        ] })""", opcoes)
+    """A tela com a identidade do caso. Os servidores deste aparelho são os da
+    identidade (`conhecidos()` e `entrarNoConhecido`, da F4), guardados no
+    IndexedDB pelas entradas que deram certo, e não uma lista do caso."""
+    pg.evaluate("""(o) => CELULAR.ajudante("entrada").usar(window.__identidade, { link: o.link ?? null })""", opcoes)
     pg.wait_for_timeout(300)
 
 
@@ -486,25 +495,12 @@ def entrada(pg: Page) -> list[str]:
     falhas = []
     pg.evaluate(IDENTIDADE_DO_CASO)
     usar_a_entrada(pg)
-    inicio = pg.evaluate("""() => ({ titulo: document.querySelector("#cel-entrada-titulo")?.textContent,
-        servidores: [...document.querySelectorAll(".cel-entrada-servidor")].map((b) => [b.textContent, Math.round(b.getBoundingClientRect().height)]),
-        baixar: document.querySelector(".cel-entrada-fora a.cel-baixar")?.getAttribute("href"),
-        colar: [...document.querySelectorAll(".cel-entrada-pe button")].map((b) => b.textContent),
-        caixaDoDesktop: getComputedStyle(document.querySelector("#tela-boot > .boot-caixa")).display })""")
+    inicio = pg.evaluate(INICIO_LIDO)
     f = pg.evaluate("FRASES_DO_CELULAR.entrada")
     if inicio["titulo"] != f["inicio"]["titulo"]:
         falhas.append(f"a tela de início diz «{inicio['titulo']}»")
-    # O que entra diz ENTRAR; o de hashes vencidos diz LINK VENCIDO, e o que não
-    # tem nome ainda (antes do primeiro retrato) mostra o endereço.
-    servidores = inicio["servidores"]
-    versao = pg.evaluate("FRASES_DO_CELULAR.entrada.inicio.servidor('1.0')")
-    if any(versao not in texto for texto, _ in servidores):
-        falhas.append(f"um servidor deste aparelho não diz a versão dele: {servidores}")
-    if (len(servidores) != 2 or not servidores[0][0].startswith("OFICINA") or not servidores[0][0].endswith(f["inicio"]["entrar"])
-            or not servidores[1][0].startswith("tq3.duckdns.org:8383") or servidores[1][0].count("tq3.duckdns.org:8383") != 1
-            or not servidores[1][0].endswith(f["inicio"]["linkVencido"])
-            or any(alto < 44 for _, alto in servidores)):
-        falhas.append(f"os servidores deste aparelho saem {servidores}")
+    if inicio["servidores"] or inicio["vazio"] != f["inicio"]["vazio"]:
+        falhas.append(f"sem servidor guardado, a tela de início mostra {inicio['servidores']} e diz «{inicio['vazio']}»")
     if inicio["baixar"] != pg.evaluate("PAGINA_DO_APP"):
         falhas.append(f"o BAIXAR O APP DO SEELE aponta para {inicio['baixar']}")
     if inicio["colar"] != [f["inicio"]["colar"]]:
@@ -541,7 +537,53 @@ def entrada(pg: Page) -> list[str]:
         if lido["conexoes"]:
             falhas.append(f"{estado}: a tela conectou antes do ENTRAR ({lido['conexoes']} entradas)")
     pg.evaluate("window.__instalado = true")
+    falhas += conhecidos_de_verdade(pg, f)
+    return falhas
+
+
+def conhecidos_de_verdade(pg: Page, f: dict) -> list[str]:
+    """SERVIDORES DESTE APARELHO pela identidade da F4: uma entrada que dá
+    certo guarda o servidor; o nome chega pelo `lembrarONome` (no produto, o
+    primeiro retrato); a lista mostra o nome, o endereço, a versão e o dia, com
+    ENTRAR, que entra pela chave e **sem o convite**; e com o relógio da
+    identidade oito dias adiante os hashes guardados vencem, a lista diz LINK
+    VENCIDO, e o toque recebe o `link-vencido`."""
+    falhas = []
     usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    pg.fill("#cel-entrada-apelido", "rafa")
+    tocar_acao(pg, f["entrarEm"]["entrar"])
+    pg.wait_for_timeout(600)
+    # Antes do primeiro retrato o servidor não tem nome: o endereço é o título,
+    # uma vez só.
+    usar_a_entrada(pg)
+    sem_nome = pg.evaluate(INICIO_LIDO)["servidores"]
+    if len(sem_nome) != 1 or sem_nome[0][0].count("198.51.100.7:8383") != 1:
+        falhas.append(f"o servidor guardado, ainda sem nome, sai como {sem_nome}")
+    pg.evaluate('window.__identidade.lembrarONome("3cbcfb02".repeat(8), "OFICINA")')
+    usar_a_entrada(pg)
+    inicio = pg.evaluate(INICIO_LIDO)
+    versao = pg.evaluate("FRASES_DO_CELULAR.entrada.inicio.servidor('1.0')")
+    servidores = inicio["servidores"]
+    if (len(servidores) != 1 or not servidores[0][0].startswith("OFICINA") or "198.51.100.7:8383" not in servidores[0][0]
+            or versao not in servidores[0][0] or not servidores[0][0].endswith(f["inicio"]["entrar"]) or servidores[0][1] < 44):
+        falhas.append(f"o servidor guardado sai na tela de início como {servidores}")
+    antes = pg.evaluate("window.__conexoes.length")
+    tocar(pg, ".cel-entrada-servidor")
+    pg.wait_for_timeout(600)
+    pelo_conhecido = pg.evaluate("window.__conexoes.slice(%d)" % antes)
+    if len(pelo_conhecido) != 1 or pelo_conhecido[0]["credencial"] is not None:
+        falhas.append(f"o ENTRAR da lista não entrou pela chave, sem o convite: {pelo_conhecido}")
+    # Oito dias depois, os hashes guardados (sete dias) venceram.
+    pg.evaluate("window.__agora = Date.now() + 8 * 86400000")
+    usar_a_entrada(pg)
+    vencido = pg.evaluate(INICIO_LIDO)
+    if len(vencido["servidores"]) != 1 or not vencido["servidores"][0][0].endswith(f["inicio"]["linkVencido"]):
+        falhas.append(f"com os hashes guardados vencidos, a lista diz {vencido['servidores']}")
+    tocar(pg, ".cel-entrada-servidor")
+    pg.wait_for_timeout(600)
+    aviso = pg.evaluate("[...document.querySelectorAll('.cel-entrada-aviso-titulo')].map((e) => e.textContent)")
+    if aviso != [f["desfechos"]["link-vencido"][0]]:
+        falhas.append(f"o toque num servidor de link vencido diz {aviso}")
     return falhas
 
 
@@ -745,6 +787,35 @@ def entrada_espera(pg: Page) -> list[str]:
         falhas.append(f"a saída da espera tem {e['saida'][1]} de altura")
     if e["vaza"]:
         falhas.append("a espera rola de lado no celular")
+    return falhas
+
+
+def entrada_abre_a_sessao(pg: Page) -> list[str]:
+    """A «ENTRAR EM» abre a sessão: o ENTRAR chama o `entrar` da identidade, o
+    `conectar` dela chega ao `connect` (aqui o do duble, como o da ponte fará na
+    2.6), e o `{ ok: true, resposta }` passa pelo `depoisDeConectar`, o mesmo do
+    desktop. Com a impressão conferida, o aperto não aparece (D-celular-3), e a
+    sessão abre sem outro toque."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    pg.evaluate(f"""() => {{
+      SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {CONFERIDA} }};
+      window.__respostas.push("connect");
+      window.__apertos = 0;
+      const tela = document.getElementById('tela-auth');
+      new MutationObserver(() => {{
+        if (!tela.hidden && tela.dataset.modo === 'aperto' && !tela.hasAttribute('data-entrada-direta')) window.__apertos++;
+      }}).observe(tela, {{ attributes: true, attributeFilter: ['hidden', 'data-modo', 'data-entrada-direta'] }});
+    }}""")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    pg.fill("#cel-entrada-apelido", "rafa")
+    tocar_acao(pg, pg.evaluate("FRASES_DO_CELULAR.entrada.entrarEm.entrar"))
+    pg.wait_for_timeout(1500)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if not e["sessao"] or e["apertos"]:
+        falhas.append(f"o ENTRAR da «ENTRAR EM» não abriu a sessão, ou parou no aperto: {e}")
+    if pg.evaluate("!document.getElementById('tela-boot').hidden"):
+        falhas.append("depois do ENTRAR, a tela de entrada continua à vista")
     return falhas
 
 
@@ -1682,7 +1753,9 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
         relido: parseFloat(getComputedStyle(primeiro).fontSize),
         escalaNoNo: getComputedStyle(primeiro).getPropertyValue('--cel-escala').trim(),
         escalaNaRaiz: raiz.style.getPropertyValue('--cel-escala'),
-        folha: ((l) => !l ? 'ausente' : l.disabled ? 'desligada' : 'ligada')(document.querySelector('link[href="celular-texto.css"]')),
+        // Se a folha está carregada, e não só se o `<link>` está ligado: um
+        // `<link>` religado diz «ligado» enquanto a folha ainda recarrega.
+        folha: ((l) => !l ? 'ausente' : !l.sheet ? 'sem folha (recarregando)' : l.sheet.disabled ? 'desligada' : 'carregada')(document.querySelector('link[href="celular-texto.css"]')),
         adotadas: document.adoptedStyleSheets.length,
     } : null;
     if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
@@ -1701,12 +1774,18 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
 # então o mesmo tamanho em todo nó é o mesmo pixel.
 A_UM_IGUAL = """() => {
     const folha = document.querySelector('link[href="celular-texto.css"]');
-    if (!folha) return ['a página não carrega o celular-texto.css'];
+    if (!folha?.sheet) return ['a página não carrega o celular-texto.css'];
     const nos = [...document.querySelectorAll('*')];
     const ligado = nos.map((e) => getComputedStyle(e).fontSize);
-    folha.disabled = true;
+    // Pela folha do CSSOM, e não pelo `<link>`. Desligar o `<link>` descarrega
+    // a folha, e religá-lo a recarrega depois, fora desta leitura (medido em
+    // 10/10, no Chromium: o `sheet` fica `null` e o texto no tamanho do
+    // desktop). Com a máquina ocupada, a medida seguinte a pegava ainda sem
+    // regras, e o texto-maior reprovava «não cresce» por defeito da bancada.
+    // A folha do CSSOM desliga e religa na hora, nos dois motores.
+    folha.sheet.disabled = true;
     const desligado = nos.map((e) => getComputedStyle(e).fontSize);
-    folha.disabled = false;
+    folha.sheet.disabled = false;
     const nome = (e) => e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
     return nos.flatMap((e, i) => ligado[i] === desligado[i] ? [] : [`${nome(e)}: ${desligado[i]} sem ele, ${ligado[i]} com ele`]);
 }"""
@@ -2640,6 +2719,7 @@ CASOS: dict[str, Caso] = {
     "entrada-com-aperto": Caso(levar=entrada_com_aperto, entrar=False, raiz="#tela-auth"),
     "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
     "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
+    "entrada-abre-a-sessao": Caso(levar=entrada_abre_a_sessao, entrar=False, medir=False),
     "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).

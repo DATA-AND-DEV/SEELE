@@ -267,7 +267,6 @@ fn pipeline(
             };
             seq = seq.wrapping_add(1);
             let header = MediaHeader {
-                version: seele_proto::PROTOCOL_VERSION,
                 ssrc: args.ssrc,
                 seq,
                 timestamp,

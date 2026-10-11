@@ -38,6 +38,15 @@
 // desenha a sessão é a tela, pelo `depoisDeConectar` do `tela-boot.js`: a
 // identidade não chama a casca, e roda sem ela.
 //
+// # Uma tentativa por vez
+//
+// Cada ação que espera (o banco, o `persist()`, a chave, o servidor) guarda a
+// `vez` em que começou e confere na volta. Outro link aberto no meio é outra
+// tentativa, e a continuação da velha não toca nela: nem na chave, nem no
+// token, nem no aceite de MODs, e resolve `sem-tentativa`. A entrada velha que
+// o servidor aceitou fica guardada com a chave dela (o servidor já a conhece) e
+// é solta pelo `soltar`, como o `largarAEntrada` do desktop (o E54 da F5).
+//
 // # No desktop, nada
 //
 // Carregado nas duas cascas, no desktop só declara: o fragmento não é lido, e
@@ -85,6 +94,15 @@ function tomarOLinkDaCarga() {
  */
 function conectarPelaPonte(alvo, apelido, credencial) {
   return invocarNaPonte("connect", { alvo, nickname: apelido, joinSecret: credencial });
+}
+
+/**
+ * Solta a sessão de uma entrada que outra tentativa substituiu: o
+ * `soltar_a_entrada` da ponte, pela geração que o `connect` devolveu, como o
+ * `largarAEntrada` do `tela-boot.js`.
+ */
+function soltarPelaPonte(resposta) {
+  return invocarNaPonte("soltar_a_entrada", { geracao: resposta?.geracao });
 }
 
 let identidadePrometida = null;
@@ -217,14 +235,17 @@ function nascerAChave() {
  * - `analisar(texto)`: o link lido (`analisadorDoWasm`);
  * - `conectar(alvo, apelido, credencial)`: a entrada, que recusa com o
  *   `ConnectionError` do desktop;
+ * - `soltar(resposta)`: solta a entrada que outra tentativa substituiu;
  * - `agora()`, `instalado()` e `casca()`: o relógio e o lugar, trocados na
  *   bancada.
  */
-function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagina, instalado = estaInstalado, casca = cascaDaPagina }) {
+function criarIdentidadeDoNavegador({ analisar, conectar, soltar = soltarPelaPonte, agora = relogioDaPagina, instalado = estaInstalado, casca = cascaDaPagina }) {
   /** O que é segredo nesta tentativa, e só aqui: o token e o link que o carrega. */
   const segredos = { credencial: null, link: null };
   /** A tentativa: o link sem o token, o servidor já conhecido e a chave. */
   let tentativa = null;
+  /** Quantas vezes a tentativa mudou: quem espera confere se ainda é a vez dele. */
+  let vez = 0;
 
   function esquecer() {
     segredos.credencial = null;
@@ -234,6 +255,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
   function encerrar() {
     esquecer();
     tentativa = null;
+    vez += 1;
   }
 
   const venceu = (lido) => lido.ate != null && lido.ate * 1000 <= agora();
@@ -265,6 +287,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
   /** Abre a tentativa de um link: o da carga, ou um colado. Nada conecta aqui. */
   async function abrir(texto) {
     encerrar();
+    const minha = vez;
     const resposta = analisar(texto);
     if (resposta.erro) {
       const estado =
@@ -273,14 +296,17 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
       return ler();
     }
     const { convite, ...lido } = resposta.link;
-    segredos.credencial = convite ?? null;
-    segredos.link = texto;
     let conhecido = null;
     try {
       conhecido = (await servidorConhecido(lido.impressao)) ?? null;
     } catch {
       conhecido = null;
     }
+    // Outro link aberto enquanto o banco respondia: a tentativa é a dele, e o
+    // token deste não vai a ela.
+    if (vez !== minha) return ler();
+    segredos.credencial = convite ?? null;
+    segredos.link = texto;
     tentativa = { lido, conhecido, chave: null, persistencia: null, apelido: null, motivo: null };
     tentativa.estado = estadoDaTentativa();
     return ler();
@@ -312,6 +338,8 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
   /** Entra no servidor do link com `apelido`. Só no `pronto` e no `ja-conhecido`. */
   async function entrar(apelido) {
     if (!tentativa || !tentativa.lido) return { erro: "sem-tentativa" };
+    const minha = vez;
+    const substituida = () => vez !== minha;
     if (venceu(tentativa.lido)) {
       encerrar();
       return { erro: "convite-vencido" };
@@ -321,15 +349,20 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
     }
     tentativa.apelido = apelido;
     if (tentativa.persistencia === null) tentativa.persistencia = await pedirPersistencia();
+    if (substituida()) return { erro: "sem-tentativa" };
     if (!tentativa.chave) {
       try {
         tentativa.chave = tentativa.conhecido ? tentativa.conhecido.chave : await nascerAChave();
       } catch (falha) {
+        if (substituida()) return { erro: "sem-tentativa" };
         encerrar();
         return { erro: "recusado", razao: `a chave não nasceu: ${falha && falha.message ? falha.message : falha}` };
       }
+      if (substituida()) return { erro: "sem-tentativa" };
     }
-    const { lido } = tentativa;
+    // Daqui em diante a tentativa pode mudar, e a entrada lê só a dela.
+    const esta = tentativa;
+    const { lido } = esta;
     const alvo = { endereco: lido.alvo, alternativos: lido.alternativos ?? [], impressao: lido.impressao, hashes: hashesQueValem(), chave: tentativa.chave };
     // Quem já é conhecido entra pela chave, e o convite não é gasto.
     const credencial = tentativa.conhecido ? null : segredos.credencial;
@@ -337,6 +370,7 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
     try {
       resposta = await conectar(alvo, apelido, credencial);
     } catch (erro) {
+      if (substituida()) return { erro: "sem-tentativa" };
       const { segue, ...resultado } = desfecho(erro);
       if (!segue) encerrar();
       else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
@@ -345,8 +379,9 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
     // O servidor fica guardado a cada entrada que dá certo, com o relógio dela
     // (`visto`, a ordem dos SERVIDORES DESTE APARELHO). Os hashes guardados são
     // os de validade mais longa entre o guardado e o link; o nome do servidor
-    // chega depois, no primeiro retrato (`lembrarONome`).
-    const { conhecido } = tentativa;
+    // chega depois, no primeiro retrato (`lembrarONome`). A entrada que outra
+    // tentativa substituiu também fica guardada: o servidor já conhece a chave.
+    const { conhecido } = esta;
     const doLink = !conhecido || (lido.ate ?? 0) > (conhecido.ate ?? 0);
     await guardarOServidor({
       impressao: lido.impressao,
@@ -355,16 +390,28 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
       hashes: doLink ? lido.hashes : conhecido.hashes,
       ate: doLink ? lido.ate ?? null : conhecido.ate ?? null,
       versao: lido.versao ?? null,
-      chave: tentativa.chave,
+      chave: esta.chave,
       nome: conhecido ? conhecido.nome ?? null : null,
       visto: agora(),
     });
+    if (substituida()) {
+      soltarASubstituida(lido, resposta);
+      return { erro: "sem-tentativa" };
+    }
     // A resposta do `persist()` vai junto: com a tentativa encerrada, o `ler()`
     // devolve `null`, e é justo agora que a tela tem de dizer se o navegador
     // vai guardar a chave (achado da F8, 10/10).
-    const { persistencia } = tentativa;
+    const { persistencia } = esta;
     encerrar();
     return { ok: true, resposta, persistencia };
+  }
+
+  /** A entrada que o servidor aceitou depois de outro link abrir: dita e solta. */
+  function soltarASubstituida(lido, resposta) {
+    console.warn(`identidade: a entrada em ${lido.alvo} deu certo depois de outro link abrir, e a sessão dela (geração ${resposta?.geracao}) é solta`);
+    Promise.resolve()
+      .then(() => soltar(resposta))
+      .catch((falha) => console.warn("identidade, soltar a entrada substituída:", falha));
   }
 
   /** Se os hashes guardados de um servidor ainda valem. */
@@ -397,12 +444,15 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
    * curtos, 2.5): a tela pede um link novo.
    */
   async function entrarNoConhecido(impressao, apelido) {
+    const minha = vez;
     let registro = null;
     try {
       registro = (await servidorConhecido(impressao)) ?? null;
     } catch {
       registro = null;
     }
+    // Outro link aberto enquanto o banco respondia: a vez é dele.
+    if (vez !== minha) return { erro: "sem-tentativa" };
     if (!registro) return { erro: "recusado", razao: "servidor-desconhecido" };
     if (!hashesValem(registro)) return { erro: "link-vencido" };
     encerrar();

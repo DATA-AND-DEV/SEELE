@@ -30,13 +30,18 @@ cp "$AQUI/m3.py" "$PASTA/roteiro/m3.py"
 
 FALANTE="$PASTA/fonte/crates/seele-core/examples/m3-falante.rs"
 cp "$AQUI/m3-falante.rs" "$FALANTE"
-python3 -I - "$FALANTE" <<'PY'
+# Com o campo `version` no `MediaHeader` da cópia, o número da voz no lugar do
+# do protocolo; sem ele (a 0.16 depois do `5c26377a`, da F1), a linha sai.
+python3 -I - "$FALANTE" "$PASTA/fonte/crates/seele-proto/src/media.rs" <<'PY'
 import sys
-caminho = sys.argv[1]
+caminho, media = sys.argv[1], sys.argv[2]
 texto = open(caminho).read()
-antes = "version: seele_proto::PROTOCOL_VERSION,"
+if "pub version: u8" in open(media).read():
+    antes, depois = "version: seele_proto::PROTOCOL_VERSION,", "version: seele_proto::MEDIA_HEADER_VERSION,"
+else:
+    antes, depois = "            version: seele_proto::PROTOCOL_VERSION,\n", ""
 assert texto.count(antes) == 1, "o remendo do número da voz não pegou"
-open(caminho, "w").write(texto.replace(antes, "version: seele_proto::MEDIA_HEADER_VERSION,"))
+open(caminho, "w").write(texto.replace(antes, depois))
 PY
 ( cd "$PASTA/fonte" && CARGO_TARGET_DIR="$PASTA/alvo" cargo build --release -p seele-core --example m3-falante )
 swiftc -O "$AQUI/ax.swift" -o "$PASTA/ax"

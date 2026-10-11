@@ -164,7 +164,6 @@ fn sementes() -> BTreeMap<&'static str, DoAlvo> {
 
     let mut midia = DoAlvo::new();
     let cabecalho = MediaHeader {
-        version: MEDIA_HEADER_VERSION,
         ssrc: 0x0102_0304,
         seq: 1,
         timestamp: 960,

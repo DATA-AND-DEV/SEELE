@@ -859,3 +859,62 @@ começar.
     no link da carga;
   - a bancada com a página inteira sem casca injetada (pedido da orquestradora
     na décima segunda), os servidores do aparelho e a identidade da página.
+
+## 10/10, noite: a revisão do E54 da F5, e uma tentativa por vez na identidade
+
+- **A revisão do E54** (`e05e1681`, pedida pela orquestradora): as duas pontas
+  da F5 não conflitam com o que eu tenho.
+  - O `soltar_a_entrada` entra em `COMANDOS_DA_PONTE` e no `AINDA_A_FAZER` com
+    a 3.4.
+  - O `corpo_do_comando` de `tests/web.rs` passa a achar as formas genéricas.
+- **A mesma corrida, do lado do navegador**, achada lendo a minha `entrar`.
+  Ela atravessava quatro esperas lendo a tentativa de agora. Medida antes do
+  conserto, no caso 12 da bancada, com o link novo aberto no meio:
+  - durante o `persist()`, a velha entrava **no servidor do link novo**, com o
+    token dele e o apelido da velha;
+  - o aceite de MODs da velha entrava no servidor novo, sem apelido;
+  - a velha aceita ou recusada encerrava a nova, e a aceita guardava o servidor
+    dela com a chave da nova (nula);
+  - com o banco respondendo fora de ordem a dois links, o token do segundo ia
+    ao servidor do primeiro.
+- **O conserto:**
+  - a `vez` conta cada tentativa encerrada e é conferida depois de cada
+    espera;
+  - o `abrir` só põe os segredos depois de o banco responder;
+  - a velha aceita fica guardada com a chave dela e é solta (`soltar`, no
+    produto o `soltar_a_entrada` da ponte);
+  - o desfecho é o `sem-tentativa`, que a tela já tem.
+  Na tela da F8 de hoje a corrida não se alcança (a de conectar não tem
+  ação), mas o contrato é da identidade.
+- **Dez reversões**, cada conferência tirada sozinha, e as dez reprovam no
+  cenário dela. Duas passavam verdes na primeira rodada:
+  - sem a conferência do `persist()`, a velha fazia nascer a chave da nova;
+  - sem a da chave, ela chamava o `connect` do servidor novo com a chave nula,
+    e o servidor de mentira estourava antes de anotar.
+  A bancada passou a anotar a entrada sem chave e a conferir a ordem do
+  `persist()` e da chave, e as duas reprovam.
+
+## 10/10, noite: o que ninguém pegou vai ao `seele.log` (pedido da orquestradora)
+
+- **O achado da F7:** o botão vermelho não fechava o app. O `destroy()` da
+  janela era recusado pela ACL do Tauri, a recusa caía numa promise sem ninguém
+  olhando, e nada ia ao `seele.log`: a página não tinha ouvinte global.
+- **O `base.js` ganha dois ouvintes**, o de `unhandledrejection` e o de
+  `error`. Eles mandam ao `registrar_da_janela` (`onde=sem-dono`, nível
+  `erro`) o motivo, com a pilha quando há e com o lugar quando o solto não é um
+  erro. A tela não muda, e o console segue dizendo o que já dizia.
+- **O teto:** dez linhas por minuto. As seguintes são contadas e ditas numa
+  linha só, no fim do minuto. É no JS também porque, no Rust, a linha da janela
+  sem MOD gasta do balde do catálogo, o dos outros avisos da janela.
+- **O roteiro** `tools/roteiros/recusa-sem-dono.js` reprova sem os ouvintes, e
+  cada peça foi provada por reversão (as seis reprovam).
+- **Os 35 roteiros que já existiam** seguem verdes, e nenhum deixa linha
+  `sem-dono`, lidos por uma cópia do aparelho que diz o que o duble recebeu.
+  Também verdes: `check-runtime`, `ponte-sem-gesto` (o `registrar_da_janela`
+  não está entre os comandos que a carga chama sozinha), a bancada da voz, a da
+  identidade e os guardas da janela (294), do celular (8) e da web (12).
+- **Achado latente no aparelho dos roteiros:** o `carga-da-casca.py` lê o
+  relato do console até a primeira aspa dupla. Um relato com aspas antes de um
+  `REPROVADO` esconde a reprovação, e o aparelho diz «carga limpa» com saída 0
+  (medido com um roteiro de duas linhas). Hoje não esconde nada: lidos até o
+  `", source:`, os 36 dão o mesmo resultado.

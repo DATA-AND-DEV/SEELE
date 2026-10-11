@@ -90,16 +90,27 @@ pub enum MediaError {
 }
 
 /// The fixed part of a media datagram.
+///
+/// **Sem campo de número.** O primeiro dos onze bytes é sempre
+/// [`MEDIA_HEADER_VERSION`]: o [`Self::encode`] o grava, e o [`Self::decode`]
+/// recusa qualquer outro. Havia um `version: u8` aqui, e ele só podia valer a
+/// constante: entrando, porque o `decode` recusava o resto; saindo, porque o
+/// `encode` passou a ignorá-lo (`67bfeee1`). Sobrava como convite a escolher
+/// outro número, e foi o que o falante de medição da M3 da API 6 fez
+/// (10/10/2026): gravou o do protocolo, e quem ouvia jogou fora toda a voz
+/// dele, calado. Sem o campo, esse erro não compila:
+///
+/// ```compile_fail,E0560
+/// let _ = seele_proto::MediaHeader { version: 9, ssrc: 1, seq: 1, timestamp: 960 };
+/// ```
+///
+/// E o cabeçalho se monta só com o que varia:
+///
+/// ```
+/// let _ = seele_proto::MediaHeader { ssrc: 1, seq: 1, timestamp: 960 };
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MediaHeader {
-    /// O número do layout, como o [`Self::decode`] o leu.
-    ///
-    /// **Na saída ele não manda**: o [`Self::encode`] grava sempre
-    /// [`MEDIA_HEADER_VERSION`], qualquer que seja este campo. Um layout que
-    /// só tem um número de saída não aceita outro de quem chama. Achado da M3
-    /// da API 6 (10/10/2026): o falante de medição gravava aqui o número do
-    /// protocolo, o `encode` o escrevia, e quem ouvia recusava toda a voz dele.
-    pub version: u8,
     /// Source identifier, assigned by the server on voice room entry.
     ///
     /// `specs/08-seguranca.md`: never accepted from the client. The server binds
@@ -131,7 +142,7 @@ impl MediaHeader {
         let (ssrc, rest) = rest.split_at_mut(4);
         let (seq, timestamp) = rest.split_at_mut(2);
 
-        // A constante, e não o campo: ver o doc de `version`.
+        // O único número que este layout tem: ver o doc de [`MediaHeader`].
         version.copy_from_slice(&[MEDIA_HEADER_VERSION]);
         ssrc.copy_from_slice(&self.ssrc.to_be_bytes());
         seq.copy_from_slice(&self.seq.to_be_bytes());
@@ -212,7 +223,6 @@ impl MediaHeader {
 
         Ok((
             Self {
-                version,
                 ssrc,
                 seq,
                 timestamp,
@@ -247,7 +257,6 @@ mod tests {
 
     fn header() -> MediaHeader {
         MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc: 0xDEAD_BEEF,
             seq: 0x1234,
             timestamp: 0x0009_6000,
@@ -265,7 +274,6 @@ mod tests {
     fn a_voz_carrega_o_numero_dos_onze_bytes_e_nao_o_do_protocolo() {
         let mut saida = [0_u8; HEADER_LEN + 1];
         let cabecalho = MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc: 1,
             seq: 2,
             timestamp: 3,
@@ -286,35 +294,6 @@ mod tests {
             ),
             "a voz passou a aceitar o número do protocolo, e cada subida voltaria a derrubá-la"
         );
-    }
-
-    /// **O `encode` grava o número do layout, e não o que quem chama pôs no
-    /// campo.** Um cabeçalho com o número do protocolo no campo sai com o
-    /// byte 1, e quem ouve o lê (achado da M3 da API 6, 10/10/2026).
-    #[test]
-    fn o_encode_grava_sempre_o_numero_do_layout() {
-        // O guarda só mede alguma coisa com um número que não é o do layout:
-        // no dia em que os dois coincidirem, ele passaria sem medir nada
-        // (nota da F1 na revisão).
-        assert_ne!(
-            crate::PROTOCOL_VERSION,
-            MEDIA_HEADER_VERSION,
-            "o guarda precisa de um número que não é o do layout"
-        );
-        let cabecalho = MediaHeader {
-            version: crate::PROTOCOL_VERSION,
-            ssrc: 7,
-            seq: 1,
-            timestamp: 960,
-        };
-        let mut saida = [0_u8; HEADER_LEN + 1];
-        cabecalho.encode_datagram(&[0xAB], &mut saida).unwrap();
-        assert_eq!(
-            saida[0], MEDIA_HEADER_VERSION,
-            "o `encode` escreveu o número que quem chama pôs no campo"
-        );
-        let (lido, _) = MediaHeader::decode(&saida).expect("quem ouve lê o que saiu");
-        assert_eq!(lido.version, MEDIA_HEADER_VERSION);
     }
 
     #[test]
@@ -445,7 +424,6 @@ mod tests {
         // Sequence wraps every 21 minutes and the timestamp every 24.8 hours,
         // so the ends of both ranges are ordinary values, not edge cases.
         let extremes = MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc: u32::MAX,
             seq: u16::MAX,
             timestamp: u32::MAX,

@@ -712,6 +712,26 @@ O que entrou depois do `1a401eb5`, nos dias 09 e 10, e não estava aqui.
   `quintal-cheio` nomeado (`3bfa9fd3`; medido antes: chegava `bridge-refused`).
   O guarda dos apontadores resolve pela definição (`2a29f62c`), e achou os
   quatro do `volume` (`e2ad334f`); da v1 à v5, tudo resolve.
-- **Esperam:** os números da `carga-cartoes`, a tarefa 13 (o corte), o Step 5
-  da tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
+- **A `carga-cartoes` travou a página** (rodada pela orquestradora, 10/10:
+  WebContent acima de 100% por 4,5 min, nenhum cartão na tela), e a causa é do
+  produto: o `PersonState` de cada pessoa, por segundo, vira um
+  `RosterChanged` sem junção e um `atualizar()` com a lista inteira. Medido em
+  `tools/lista-grande.cjs` (`df7f5efb`): com 251 e os cartões, a fila cresce
+  sem parar (4,9 s em 5 s); só os cartões, fila a partir de 200; sem MOD, 251
+  deixam a página a 99%. O teto de 256 alvos não congela sobre isto; o dono do
+  conserto está por definir (com a orquestradora).
+- **A pendência 63, consertada na janela** (decisão da orquestradora: dona a
+  F3, só a janela, fora da 0.15.2): no máximo um `atualizar()` por quadro
+  (`6717dc2c`, isolado), com a bancada `um-redesenho-por-quadro.cjs` no CI
+  (`e31a5648`; reprova revertida e com o pedido engolido). Conferidos: as 18
+  de navegador, as 12 de Node puro, os 29 roteiros iguais byte a byte, a do
+  celular inteira e o G3. Depois do conserto, 251 com cartões: sem fila, mas
+  a página a 99% — redesenhar só a linha que mudou ficou para depois. O
+  remendo da cópia da campanha (`d74e085a`), para a orquestradora rodar a
+  `carga-cartoes` com 251, contra a `lista-251` — os mesmos calados sem MOD,
+  a referência que o §12 usa (`36fbc79f`). O «diz e segue» aplicado
+  (`94fee0c0`).
+- **Esperam:** a `carga-cartoes` consertada (com ela, o teto de
+  contribuições no §12 e no `v6.json`), a tarefa 13 (o corte), o Step 5 da
+  tarefa 9 (a 7d) e o Step 3 da tarefa 7 (o teto da `midia`, que a M3 não
   mediu).
