@@ -26,7 +26,12 @@ O ramo é `0.16/lotes-p61`, criado a partir de `b101e385` (a ponta do
 | `0c636998` | rodada 1, I2: a medida pela FFI da página que o limitador descarta |
 | `1516ab14` | rodada 1, M3: o passo `FellBehind` nos dois produtores de retrato |
 | `6e6bdc13` | rodada 1, M2 (opção B): um campo grande demais é recusa, e não queda |
-| este | o relatório com a rodada 1 |
+| `6bdc4b14` | o relatório com a rodada 1 |
+| `2c5face2` | rodada 2, R1-M1: uma cerca perdida não conta como resposta vazia |
+| `9427de5c` | rodada 2, R1-M3: a página da busca presa à página do servidor; o começo sem a última conhecida vai ao registro |
+| `3850c538` | rodada 2, R1-M4: a recusa local desfaz a entrada que ela recusou, pelo número; a FFI não senta a pessoa numa entrada que não sai |
+| `ad457a80` | rodada 2, R1-M5: o item 55 da pendência 58 com os dois caminhos que faltavam |
+| este | o relatório com a rodada 2 |
 
 O lote mexeu nestes arquivos:
 - `crates/seele-audio` (o recurso de teste);
@@ -471,8 +476,24 @@ consertou está riscado com o commit.
   pendentes, a cauda da repetição sai a 8 por segundo, e uma mensagem nova
   escrita nesse meio-tempo é gravada antes das mais velhas que ainda esperam
   a vez. A ordem «em que foi escrita» vale entre as repetidas.
+- **Uma página que leva mais de 5 s faz a busca desistir** (R1-M2 da revisão,
+  **uma escolha, registrada**). O prazo conta do pedido, e não da última
+  mensagem da página que chegou; o `Pong` do pedido anterior é ignorado. Numa
+  rede lenta com mensagens grandes (200 corpos de 4 KiB são ~800 KB, ~6,5 s a
+  1 Mbps), a busca pede a página de novo no prazo e, no prazo do pedido de
+  novo, para em `SemResposta`, com `warn` no `seele.log` dizendo o canal e o
+  cursor. O que ficou de fora não volta nesta sessão. Fica assim de
+  propósito: um prazo que se renova a cada mensagem prende a busca a uma
+  página que chega aos pingos, e o caso é raro e dito.
 - **F1:** o perdão do `par_lento` saiu (`2cec3729`). Com o `1ebf85a4` no ramo
   desde o passo 0 da rodada 1, o teste sem o perdão passa 72 de 72 sob carga.
+- **F1, achado da revisão da rodada 1, não medido:** repetir uma mensagem que
+  um moderador apagou durante a queda a anuncia de novo a todo o canal. A
+  busca por duplicata em `Messages::append_batch` (a mesma chave da mesma
+  pessoa) não olha `deleted_at`, e devolve a linha apagada como `Gravacao::Feita`,
+  que vai ao barramento como `MessagePosted`. É do servidor e anterior ao lote,
+  mas a repetição automática da volta aumenta a exposição: toda pendente sem
+  resposta de quem caiu é repetida sozinha.
 
 ---
 
@@ -673,3 +694,115 @@ mentira. O resto do `seele-audio` continua sem rodar: um teste dele, sem
 
 Todas as reversões desta rodada voltaram idênticas, conferidas com `cmp`, e
 os arquivos foram tocados depois.
+
+---
+
+## Rodada 2 da revisão (a seção «Rodada 1» de `lote-p61-review-report.md`): aprovada, com 5 Menores
+
+### R1-M1: uma cerca perdida não conta como resposta vazia (`2c5face2`)
+
+As duas razões de pedir de novo dividiam um indicador só (`pedida_de_novo`).
+Com a cerca da página 2 perdida e o pedido de novo descartado em seguida, a
+página vazia que voltou era a **primeira** resposta vazia do servidor, e a
+busca a contava como a segunda: parava em «começo do canal», com 51 faltando.
+
+Agora são dois: `sem_cerca_de_novo` (a cerca não voltou, uma vez por página)
+e `vazias` (quantas vezes o servidor respondeu sem nada abaixo do cursor;
+duas são o começo). Os dois zeram quando a página anda.
+- vermelho antes, a sequência do revisor:
+  `uma_cerca_perdida_nao_conta_como_resposta_vazia` («(Comeco, 51)» contra
+  «(Fechou, 0)»);
+- reversão (a cerca perdida contando como vazia): reprova, e voltou idêntica.
+
+### R1-M2: a página que leva mais de 5 s
+
+Fica como está, e é uma escolha registrada: ver «O que fica», acima.
+
+### R1-M3: a página da busca presa à página do servidor (`9427de5c`)
+
+- `seele_ffi::PAGINA_DO_BURACO` passa a ser pública, só para a conformidade
+  (o cliente não pode ver o servidor, ADR 0002).
+- `queda_recuperavel::a_pagina_da_busca_e_a_pagina_do_servidor`: a constante
+  igual ao `MAX_PAGE` do servidor; e, com 250 mensagens no canal, a página
+  pedida com o tamanho do cliente vem com exatamente 200, as mais novas (51 a
+  250).
+- `Parada::Comeco` passa a `warn`: chegar ao começo sem achar a última
+  conhecida só acontece se ela foi apagada ou se a suposição falhou.
+- O guarda prende uma suposição que vale hoje; o vermelho dele é a reversão,
+  dos dois lados: o `MAX_PAGE` do servidor em 100, e a constante do cliente em
+  250. Os dois reprovam com «a página que a busca do buraco pede e o teto de
+  página do servidor divergiram», e voltaram idênticos.
+
+### R1-M4: a recusa local desfaz a entrada que ela recusou (`3850c538`)
+
+A recusa local da senha grande demais ia pela porta do servidor (o `Alert`
+sintético), que recusa o pedido mais antigo no ar. Com outra entrada no ar,
+era essa que se desfazia.
+- **A porta de quem pediu:** `seele_sessao::assento::EntradasPendentes::desfazer(numero)`.
+  A entrada que nunca saiu sai da fila; o assento volta ao de antes dela; o
+  pedido seguinte que partia da sala dela parte do que havia antes; e o
+  anterior ainda no ar volta a definir o assento. Não é o `state.rs`.
+- **O motor** desfaz pelo número da entrada recusada, e não manda mais nada à
+  casca.
+- **A FFI** (`Connection::enter_voice_room`) confere a senha contra o teto do
+  fio, em bytes, antes de pedir. O `Room` não senta a pessoa — não há entrada
+  no ar para desfazer —, e ela lê a mesma recusa que o servidor daria a uma
+  senha errada (`VoiceRoomEntryRefused`), com `warn`. O `seele-core`
+  reexporta `MAX_NICKNAME_LEN`, que é o teto da senha.
+- **Como ficou o `Room`:** na rodada 1, ele ficava sabendo pela recusa
+  sintética do motor, e aplicava a mesma regra «a mais antiga no ar» — o
+  mesmo defeito. Agora ele nunca precisa saber: a entrada que não sai não é
+  pedida.
+- **Provas:**
+  - vermelho antes, o caso do revisor no motor:
+    `a_recusa_local_desfaz_a_entrada_que_ela_recusou` («a recusa local não
+    devolveu o assento a A, ainda no ar»: (3, 1) contra (2, 1));
+  - novas: `desfazer_pelo_numero_desfaz_a_entrada_que_nao_saiu` (o caso na
+    porta, a recusa do servidor depois, e um número que não está no ar) e
+    `uma_senha_grande_demais_nao_pede_a_entrada`;
+  - a conformidade do M2 continua verde;
+  - reversões, voltadas idênticas: o motor desfazendo pela porta do servidor
+    reprova o teste do motor; sem a conferência da FFI, «a entrada com a senha
+    grande demais foi pedida ao enlace», e a conformidade do M2, «a entrada
+    recusada aqui não desfez o assento: a tela a põe noutra sala».
+
+### R1-M5: o item 55 da pendência 58 (`ad457a80`)
+
+- `#preparar-nome` (`maxlength="64"`) também manda `renomear_server`, ao
+  hospedar (`tela-boot.js`).
+- **O apelido gravado fora da sessão** (`escolher_apelido_local`) vai no
+  `Hello` da conexão seguinte. Medido pela revisão, pela FFI: 40 B dão
+  `Err("Unreachable")`, e a pessoa lê «NADA RESPONDEU NESSE ENDEREÇO»
+  (`frases.js`) num servidor de pé. Pela leitura, a escrita do `Hello`
+  (`client.rs`) traduz qualquer erro, o do `encode` também, em
+  `ConnectError::Unreachable`. Defeito anterior ao lote, de outra classe,
+  registrado com o conserto provável: o `connect` conferir o apelido antes,
+  ou a falha de codificação do `Hello` ter nome próprio.
+- A senha da sala sai da lista do que falta à janela: a FFI a confere desde
+  esta rodada.
+
+### O achado para a F1
+
+Repetir uma mensagem apagada por um moderador durante a queda a anuncia de
+novo: ver «O que fica», acima.
+
+### Os testes da rodada 2
+
+| alvo | resultado |
+|---|---|
+| `seele-sessao` | 78 + 1 passaram |
+| `seele-ffi --lib` | 210 passaram (1 ignorado) |
+| `seele-core --lib` (em série, com o codec) | 467 passaram |
+| `seele-audio --features aparelho-de-mentira`, só `device::mentira` | 2 passaram |
+| `seele-app --test frontend`, com `HOME` falsa | 295 passaram |
+| `check-deps`, e o `seele-sessao` para `wasm32-unknown-unknown` | passaram |
+
+**Conformidade**, um arquivo por vez, com `--test-threads=1`:
+`queda_recuperavel` 7 (com a nova), `dois_produtores_de_snapshot` 2,
+`bateria_interna` 7, `volta_pela_trilha` 6, `voz_na_reconexao` 1,
+`reconexao_fantasma` 1, `moderacao` 6, `quem_hospeda_fecha` 2,
+`acceptance_m5` 15, `a_recusa_nao_tira_da_sala` 5, `senha_da_sala` 2,
+`saida_com_despedida` 3, `estados` 10.
+
+fmt e clippy limpos nos crates tocados. Todas as reversões desta rodada
+voltaram idênticas, conferidas com `cmp`, e os arquivos foram tocados depois.
