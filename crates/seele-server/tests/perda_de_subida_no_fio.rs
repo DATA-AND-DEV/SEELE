@@ -195,7 +195,6 @@ async fn abrir(endereco: SocketAddr, semente: u8, janela: u32) -> Result<Par> {
 /// Um quadro de voz pronto para o fio, com o ssrc que o servidor atribuiu.
 fn quadro(ssrc: Ssrc, seq: u16) -> Vec<u8> {
     let cabecalho = MediaHeader {
-        version: seele_proto::MEDIA_HEADER_VERSION,
         ssrc: ssrc.get(),
         seq,
         // 20 ms a 48 kHz são 960 amostras. O servidor não lê isto; quem lê é o
