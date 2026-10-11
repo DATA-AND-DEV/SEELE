@@ -160,6 +160,39 @@ let jaPergunteiONome = false;
 let nossoServidorEm = null;
 
 /**
+ * **Os passos do sucesso de uma entrada**: a geração, o desenho e a tela de
+ * entrada, nesta ordem, com a resposta do `connect`.
+ *
+ * Um lugar só para os dois que entram: o `conectar` daqui e a «ENTRAR EM» do
+ * celular, que entra pela identidade do navegador (`identidade-web.js`, da F4)
+ * e recebe a resposta do mesmo `connect` em `{ ok: true, resposta }`. A
+ * identidade não chama a casca, e a casca não repete estes passos (fronteira
+ * fechada pela orquestradora em 10/10). **Quem chama decide se a entrada ainda
+ * vale**: a tentativa que outra substituiu fica no `conectar`, antes desta
+ * chamada, e aqui ela só entra.
+ *
+ * `nossoServidor` é do desktop: o servidor que esta janela subiu entra sem o
+ * aperto. A «ENTRAR EM» não hospeda, e não o passa.
+ */
+function depoisDeConectar(resposta, alvo, nossoServidor = false) {
+  const { snapshot, veredito, geracao } = resposta;
+  // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
+  // numa tela antes de se entrar em sala de voz nenhuma, e a entrada mudou de
+  // lugar junto com ele. Enquanto isso não acontece, a sessão continua
+  // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
+  // o primeiro tique do laço de snapshot.
+  // **Antes de desenhar qualquer coisa** — etapa E2. Daqui em diante todo
+  // trabalho desta janela carrega este número e é recusado se ele não for
+  // mais o de pé. Desenhar primeiro deixaria um instante em que a tela é da
+  // sessão nova e a geração ainda é a de ninguém.
+  entrarNaGeracao(geracao);
+  desenhar(snapshot);
+  // E de onde veio a impressão conferida, para a faixa do veredito dizer a
+  // frase da origem certa. Ver `deOndeVeio`.
+  entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta));
+}
+
+/**
  * De onde veio a impressão que o `connect` conferiu, e se a lista a guardou.
  *
  * O `connect` diz as duas coisas no topo da resposta, dê a entrada certo ou
@@ -356,23 +389,7 @@ async function conectar(alvo, apelido, credencial) {
       // quem confere.
       joinSecret: credencial ?? null,
     });
-    const { snapshot, veredito, geracao } = resposta;
-
-
-    // Daqui em diante quem manda é `#tela-auth`: o veredito da chave é lido
-    // numa tela antes de se entrar em sala de voz nenhuma, e a entrada mudou de
-    // lugar junto com ele. Enquanto isso não acontece, a sessão continua
-    // desenhada com o que o `connect` já devolveu — quem chegar nela não espera
-    // o primeiro tique do laço de snapshot.
-    // **Antes de desenhar qualquer coisa** — etapa E2. Daqui em diante todo
-    // trabalho desta janela carrega este número e é recusado se ele não for
-    // mais o de pé. Desenhar primeiro deixaria um instante em que a tela é da
-    // sessão nova e a geração ainda é a de ninguém.
-    entrarNaGeracao(geracao);
-    desenhar(snapshot);
-    // E de onde veio a impressão conferida, para a faixa do veredito dizer a
-    // frase da origem certa. Ver `deOndeVeio`.
-    entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta));
+    depoisDeConectar(resposta, alvo, nossoServidor);
   } catch (falha) {
     // `connect` responde por `FalhaDaEntrada` (em `main.rs`): o erro de sempre
     // **mais a trilha**, e mais de onde veio a impressão conferida. Quem escreve

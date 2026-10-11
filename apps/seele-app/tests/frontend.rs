@@ -1776,11 +1776,16 @@ fn a_origem_da_impressao_vai_do_connect_ate_as_frases() {
         assert!(connect.contains(elo), "{o_que_quebra}: `{elo}`");
     }
 
-    let conectar = js_function(&read("ui/tela-boot.js"), "async function conectar(");
+    // O sucesso passa pelo `depoisDeConectar`, o lugar único dos passos de uma
+    // entrada (o `conectar` daqui e a «ENTRAR EM» do celular): a origem tem de
+    // chegar até ele, e dele à tela de autenticação.
+    let boot = read("ui/tela-boot.js");
+    let conectar = js_function(&boot, "async function conectar(");
+    let depois = js_function(&boot, "function depoisDeConectar(");
     for (elo, o_que_quebra) in [
         (
-            "entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta))",
-            "a entrada não leva a origem à tela de autenticação e à faixa",
+            "depoisDeConectar(resposta, alvo, nossoServidor)",
+            "o sucesso da entrada não passa a resposta inteira adiante, e a origem se perde",
         ),
         (
             "fraseDeErro(motivo, apelido, deOndeVeio(falha))",
@@ -1789,6 +1794,12 @@ fn a_origem_da_impressao_vai_do_connect_ate_as_frases() {
     ] {
         assert!(conectar.contains(elo), "{o_que_quebra}:\n{conectar}");
     }
+    assert!(
+        depois.contains(
+            "entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta))"
+        ),
+        "a entrada não leva a origem à tela de autenticação e à faixa:\n{depois}"
+    );
 
     let auth = read("ui/tela-auth.js");
     let entrar = js_function(&auth, "function entrarNaAutenticacao(");
