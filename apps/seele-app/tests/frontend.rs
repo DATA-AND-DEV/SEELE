@@ -15728,7 +15728,15 @@ fn a_recusa_da_tentativa_substituida_chega_calada() {
     ];
     let fonte = read("ui/tela-boot.js");
     let conectar = js_function(&fonte, "async function conectar(");
-    let Some(catch) = conectar.find("} catch (falha) {") else {
+    // O `catch` do `connect`, e não o primeiro de `conectar`: o do
+    // `apelido_local` vem antes, com o mesmo `falha`.
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(catch) = conectar[connect..]
+        .find("} catch (falha) {")
+        .map(|n| connect + n)
+    else {
         panic!("`conectar` perdeu o `catch` do `connect`: {conectar}");
     };
     let depois = &conectar[catch + "} catch (falha) {".len()..];
