@@ -1,5 +1,5 @@
-// O apelido gravado que o `Hello` não leva (pendência 58, item 55; lote C55
-// da F5).
+// O apelido gravado que o `Hello` não leva, e a recusa de gravar um apelido
+// (pendência 58, item 55; lote C55 da F5).
 //
 // **O apelido gravado de antes.** O perfil contava caracteres até o lote C55,
 // então um apelido de 20 letras `á` (40 bytes, e o fio leva 32) pode estar
@@ -9,6 +9,10 @@
 // `ultimoApelido`. Agora a FFI o recusa com nome (`ApelidoGrandeDemais`), o
 // duble responde como ela, a entrada diz o teto e manda ao perfil, e a
 // tentativa seguinte lê o apelido encurtado e entra.
+//
+// **A recusa de gravar.** O `catch` de `guardarOApelido` escrevia a frase e
+// reabria o perfil, que a escondia e punha de volta o apelido gravado: a
+// recusa sumia, e o que se escreveu também.
 //
 // Cada caso roda por conta própria, como em `tetos-dos-campos.js`.
 
@@ -27,6 +31,27 @@ const caso = async (nome, corpo) => {
     if (!(erro && erro.reprovado)) relatar(`REPROVADO: ${nome}: estourou: ${erro}`);
   }
 };
+
+// ---------------------------------------- a recusa de gravar fica no perfil
+await caso("a recusa de gravar o apelido", async () => {
+  SEELE_RESPOSTAS.escolher_apelido_local = { __recusa: "NaoGravei" };
+  try {
+    document.getElementById("boot-perfil").click();
+    exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
+    document.getElementById("perfil-apelido").value = "novo";
+    document.getElementById("perfil-salvar").click();
+    await ate(() => mandou("escolher_apelido_local").length > 0, 600);
+    await espera(200);
+    exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(FRASES.NaoGravei.split("\n")[0]),
+      `a recusa de gravar o apelido sumiu do perfil: #perfil-erro está ${visivel("perfil-erro")}, «${texto("perfil-erro")}»`);
+    exigir(document.getElementById("perfil-apelido").value === "novo",
+      `o apelido que se escreveu sumiu do campo com a recusa: ele diz «${document.getElementById("perfil-apelido").value}»`);
+  } finally {
+    delete SEELE_RESPOSTAS.escolher_apelido_local;
+    document.getElementById("perfil-cancelar").click();
+    await ate(() => visivel("perfil") !== "VISIVEL", 300);
+  }
+});
 
 // ------------------------------------- o apelido gravado que o Hello não leva
 await caso("o apelido gravado grande demais", async () => {

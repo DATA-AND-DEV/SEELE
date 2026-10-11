@@ -183,8 +183,8 @@ async function desenharPrevia(apelido) {
  * `titulo` é opcional, e só a pergunta do nome antes da primeira entrada o
  * passa (`perguntarONome`). Sem ele, o diálogo é o SEU PERFIL de sempre.
  *
- * O diálogo se reabre de dentro — trocar a imagem, uma recusa ao gravar o
- * apelido —, e essas reaberturas não trazem título. Então um título só volta a
+ * O diálogo se reabre de dentro — trocar ou tirar a imagem —, e essas
+ * reaberturas não trazem título. Então um título só volta a
  * SEU PERFIL quando o diálogo está fechado: no meio da pergunta, reabrir para
  * mostrar a imagem nova não pode trocá-la por outra.
  */
@@ -448,8 +448,10 @@ async function guardarOApelido() {
     return true;
   } catch (falha) {
     console.warn("escolher_apelido:", falha);
+    // Sem reabrir o perfil (lote C55): `abrirPerfil` esconde `#perfil-erro` e
+    // põe de volta o apelido gravado, e a recusa sumia com o que se escreveu.
     recusarPerfil(fraseDeErro(falha));
-    await abrirPerfil();
+    $("perfil-apelido").focus();
     return false;
   }
 }
