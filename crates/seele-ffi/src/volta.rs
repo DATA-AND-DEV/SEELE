@@ -661,6 +661,52 @@ mod tests {
         assert_eq!(repeticao.quando(), None);
     }
 
+    /// **TENTAR DE NOVO numa recusada por tamanho não manda nada** (fase D).
+    ///
+    /// Medido na fase A: `reenviar_mensagem` mandava o corpo de 6 000 bytes ao
+    /// enlace, o quadro se recusava a ser codificado, o núcleo chamava `cair()`
+    /// e o enlace caía e voltava; a pendente passava de `Recusada(TooLong)` a
+    /// `SemResposta`, com a tela oferecendo de novo um reenvio que derruba a
+    /// conexão. Agora a conferência é a do envio, `grande_demais`, e a recusa
+    /// volta a ser frase.
+    #[test]
+    fn tentar_de_novo_uma_grande_demais_nao_manda_nada_ao_enlace() {
+        let shared = crate::tests::compartilhado_de_teste();
+        let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
+        let conexao = crate::Connection {
+            commands,
+            shared: std::sync::Arc::clone(&shared),
+            encerrada: std::sync::Mutex::new(None),
+        };
+        let chave = conexao
+            .send_message(CANAL.get(), "á".repeat(3_000))
+            .unwrap();
+        assert!(
+            fila.try_recv().is_err(),
+            "o envio mandou um corpo grande demais"
+        );
+
+        assert_eq!(conexao.reenviar_mensagem(&chave), Ok(true));
+        assert!(
+            fila.try_recv().is_err(),
+            "TENTAR DE NOVO mandou ao enlace um corpo que o derruba"
+        );
+        let estado = shared
+            .room
+            .lock()
+            .unwrap()
+            .pendentes
+            .first()
+            .map(|pendente| pendente.estado);
+        assert_eq!(
+            estado,
+            Some(EstadoDoEnvio::Falhou(seele_core::MessageRefusal::TooLong {
+                limit: 4096
+            })),
+            "a pendente deixou de dizer por que não sai"
+        );
+    }
+
     #[test]
     fn a_conferencia_do_tamanho_e_a_do_teto_do_fio() {
         assert_eq!(grande_demais(&"a".repeat(seele_core::MAX_BODY_LEN)), None);

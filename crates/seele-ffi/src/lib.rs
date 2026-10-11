@@ -1976,6 +1976,16 @@ impl Connection {
         }) else {
             return Ok(false);
         };
+        // **A mesma conferência do envio** (`volta::grande_demais`), e pelo
+        // mesmo motivo: um corpo acima do teto não é recusado pelo servidor, o
+        // quadro se recusa a ser codificado e o núcleo derruba o enlace.
+        // Medido na fase A do lote P61: TENTAR DE NOVO numa `Recusada(TooLong)`
+        // derrubava a conexão, e a pendente voltava como `SemResposta`, com a
+        // tela oferecendo como seguro um reenvio que derruba de novo.
+        if let Some(recusa) = volta::grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
+            return Ok(true);
+        }
         self.anotar_pendente(channel, id, corpo.clone());
         self.command(Command::Send {
             channel,

@@ -119,6 +119,17 @@ impl Gravador {
         self.enlaces.lock().map_or(0, |enlaces| enlaces.len())
     }
 
+    /// Se, desde `marca`, a janela leu a faixa da bateria alguma vez.
+    fn leu_a_bateria_desde(&self, marca: usize) -> bool {
+        self.enlaces.lock().is_ok_and(|enlaces| {
+            enlaces
+                .get(marca..)
+                .unwrap_or_default()
+                .iter()
+                .any(|na_bateria| *na_bateria)
+        })
+    }
+
     /// Se, desde `marca`, a janela leu a faixa da bateria e depois a volta.
     fn faixa_e_volta_desde(&self, marca: usize) -> bool {
         self.enlaces.lock().is_ok_and(|enlaces| {
@@ -434,5 +445,52 @@ async fn a_voz_fecha_no_fim_e_volta_na_queda() -> Result<()> {
     );
     ana_no_fim.disconnect();
     daemon.shutdown();
+    Ok(())
+}
+
+/// **Fase D**: TENTAR DE NOVO numa recusada por tamanho é frase, e não queda.
+///
+/// Medido na fase A: `reenviar_mensagem` mandava os 6 000 bytes ao enlace, o
+/// quadro se recusava a ser codificado e o núcleo derrubava a conexão; a
+/// pendente passava de `Recusada(TooLong)` a `SemResposta`.
+#[tokio::test(flavor = "multi_thread")]
+async fn tentar_de_novo_uma_grande_demais_nao_derruba_o_enlace() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let casa = tempfile::tempdir()?;
+    let (ana, gravador, quem) = ana(endereco, casa.path(), None).await?;
+
+    let chave = ana
+        .send_message(LINHA.0, "á".repeat(3_000))
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    let marca = gravador.marca();
+    assert_eq!(ana.reenviar_mensagem(&chave), Ok(true));
+    // A queda medida voltava em menos de 22 ms; dois segundos cobrem a queda e
+    // a volta com folga.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert!(
+        !gravador.leu_a_bateria_desde(marca),
+        "TENTAR DE NOVO numa mensagem grande demais derrubou o enlace"
+    );
+    let estado = ana
+        .messages()
+        .into_iter()
+        .find(|m| m.client_message_id.as_deref() == Some(chave.as_str()))
+        .map(|m| m.estado);
+    assert_eq!(
+        estado,
+        Some(EstadoDoEnvio::Recusada(
+            seele_ffi::types::MotivoDaRecusa::TooLong { limit: 4096 }
+        )),
+        "a pendente deixou de dizer por que não sai"
+    );
+    assert_eq!(servidor.quantas_mensagens(LINHA).await?, 1);
+    assert_eq!(
+        servidor.server().occupancy.lock().await.onde_esta(quem),
+        Some(SALA)
+    );
+    ana.disconnect();
+    servidor.shutdown();
     Ok(())
 }
