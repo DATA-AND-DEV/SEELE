@@ -1716,7 +1716,9 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
         relido: parseFloat(getComputedStyle(primeiro).fontSize),
         escalaNoNo: getComputedStyle(primeiro).getPropertyValue('--cel-escala').trim(),
         escalaNaRaiz: raiz.style.getPropertyValue('--cel-escala'),
-        folha: ((l) => !l ? 'ausente' : l.disabled ? 'desligada' : 'ligada')(document.querySelector('link[href="celular-texto.css"]')),
+        // Se a folha está carregada, e não só se o `<link>` está ligado: um
+        // `<link>` religado diz «ligado» enquanto a folha ainda recarrega.
+        folha: ((l) => !l ? 'ausente' : !l.sheet ? 'sem folha (recarregando)' : l.sheet.disabled ? 'desligada' : 'carregada')(document.querySelector('link[href="celular-texto.css"]')),
         adotadas: document.adoptedStyleSheets.length,
     } : null;
     if (antes) raiz.style.setProperty('--cel-escala', antes); else raiz.style.removeProperty('--cel-escala');
@@ -1735,12 +1737,18 @@ TAMANHOS_DO_TEXTO = """(seletorDoTeto) => {
 # então o mesmo tamanho em todo nó é o mesmo pixel.
 A_UM_IGUAL = """() => {
     const folha = document.querySelector('link[href="celular-texto.css"]');
-    if (!folha) return ['a página não carrega o celular-texto.css'];
+    if (!folha?.sheet) return ['a página não carrega o celular-texto.css'];
     const nos = [...document.querySelectorAll('*')];
     const ligado = nos.map((e) => getComputedStyle(e).fontSize);
-    folha.disabled = true;
+    // Pela folha do CSSOM, e não pelo `<link>`. Desligar o `<link>` descarrega
+    // a folha, e religá-lo a recarrega depois, fora desta leitura (medido em
+    // 10/10, no Chromium: o `sheet` fica `null` e o texto no tamanho do
+    // desktop). Com a máquina ocupada, a medida seguinte a pegava ainda sem
+    // regras, e o texto-maior reprovava «não cresce» por defeito da bancada.
+    // A folha do CSSOM desliga e religa na hora, nos dois motores.
+    folha.sheet.disabled = true;
     const desligado = nos.map((e) => getComputedStyle(e).fontSize);
-    folha.disabled = false;
+    folha.sheet.disabled = false;
     const nome = (e) => e.id ? '#' + e.id : e.tagName.toLowerCase() + [...e.classList].map((c) => '.' + c).join('');
     return nos.flatMap((e, i) => ligado[i] === desligado[i] ? [] : [`${nome(e)}: ${desligado[i]} sem ele, ${ligado[i]} com ele`]);
 }"""
