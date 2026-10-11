@@ -495,6 +495,73 @@ async fn tentar_de_novo_uma_grande_demais_nao_derruba_o_enlace() -> Result<()> {
     Ok(())
 }
 
+/// **Um campo grande demais não derruba o enlace** (M2 da revisão do P61).
+///
+/// O `encode` do `seele-proto` confere cada campo em bytes, e o núcleo tratava
+/// a recusa dele como enlace caído: medido pela revisão, o apelido, o nome de
+/// canal e a senha da sala derrubavam a sessão, a voz e o resto. Agora a
+/// recusa é daquele comando, vai ao `seele.log` (o `warn` é provado no crate,
+/// em `enlace::tests`), e o enlace segue. A entrada na sala com senha grande
+/// demais é desfeita como o servidor desfaz uma senha errada.
+#[tokio::test(flavor = "multi_thread")]
+async fn um_campo_grande_demais_nao_derruba_o_enlace() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let outra_sala = {
+        let banco = servidor.server().persistence.lock().await;
+        seele_server::persistence::channels::Channels::new(&banco)
+            .create_voice_room("outra", 0, None)?
+            .id
+    };
+    let casa = tempfile::tempdir()?;
+    let (ana, gravador, quem) = ana(endereco, casa.path(), None).await?;
+
+    let marca = gravador.marca();
+    // 30 `á` são 60 bytes, acima dos 48 do nome de canal; 20 `á` são 40,
+    // acima dos 32 do apelido; e uma senha de 40 bytes, acima dos 32.
+    ana.create_channel("á".repeat(30))
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    ana.set_nickname("á".repeat(20))
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    ana.enter_voice_room(outra_sala.0, Some("x".repeat(40)))
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    // A queda medida voltava em menos de 22 ms: dois segundos a cobrem.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert!(
+        !gravador.leu_a_bateria_desde(marca),
+        "um campo grande demais derrubou o enlace"
+    );
+    let retrato = ana.snapshot();
+    let ocupada = |sala: VoiceRoomId| {
+        retrato
+            .voice_rooms
+            .iter()
+            .any(|na_tela| na_tela.id == sala.0 && na_tela.occupied_by_us)
+    };
+    assert!(
+        ocupada(SALA) && !ocupada(outra_sala),
+        "a entrada recusada aqui não desfez o assento: a tela a põe noutra sala"
+    );
+    assert_eq!(
+        servidor.server().occupancy.lock().await.onde_esta(quem),
+        Some(SALA)
+    );
+    // E a sessão segue: o que ela escreve depois sai e é confirmado.
+    ana.send_message(LINHA.0, "depois".into())
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    esperar("a mensagem de depois ser confirmada", || {
+        ana.messages()
+            .iter()
+            .any(|m| m.body == "depois" && m.estado == EstadoDoEnvio::Confirmada)
+    })
+    .await?;
+    assert_eq!(gravador.fim(), None);
+    ana.disconnect();
+    servidor.shutdown();
+    Ok(())
+}
+
 /// **O eco de uma linha antiga no meio da busca não a fecha antes do buraco**
 /// (I1 da revisão do P61).
 ///

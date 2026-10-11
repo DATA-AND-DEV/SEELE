@@ -415,6 +415,17 @@ pub enum Motivo {
     Moderado(DisconnectReason),
 }
 
+/// Um erro de um comando que é **recusa local**, e não queda: o quadro dele
+/// não coube no fio (M2 da revisão do P61).
+///
+/// O `encode` do `seele-proto` confere cada campo contra o teto do contrato,
+/// em bytes, e devolve `ControlError` antes de escrever um byte. `frame::write`
+/// o passa adiante pelo `?`, e o `anyhow` o guarda inteiro. Qualquer outro
+/// erro de escrita é do transporte, e é queda.
+fn recusa_local(erro: &anyhow::Error) -> Option<&seele_proto::control::ControlError> {
+    erro.downcast_ref::<seele_proto::control::ControlError>()
+}
+
 /// O que a casca manda fazer.
 #[derive(Debug)]
 enum Comando {
@@ -599,6 +610,51 @@ enum Comando {
     /// [`Motor::consentimento`] e redito a cada reconexão.
     ConsentirNoCaminhoEntrePares(ConsentimentoDePar),
     Sair,
+}
+
+impl Comando {
+    /// O nome do comando, para o registro: **nunca** o que ele carrega.
+    const fn nome(&self) -> &'static str {
+        match self {
+            Self::ImagemDeMod { .. } => "ImagemDeMod",
+            Self::ModRequest { .. } => "ModRequest",
+            Self::LembrarCaminho(_) => "LembrarCaminho",
+            Self::EntrarNaVoiceRoom(..) => "EntrarNaVoiceRoom",
+            Self::SairDaVoiceRoom => "SairDaVoiceRoom",
+            Self::AbrirLinha(_) => "AbrirLinha",
+            Self::Dizer { .. } => "Dizer",
+            Self::Historico { .. } => "Historico",
+            Self::HistoricoComCerca { .. } => "HistoricoComCerca",
+            Self::Muted(_) => "Muted",
+            Self::Isolamento(_) => "Isolamento",
+            Self::CriarVoiceRoom { .. } => "CriarVoiceRoom",
+            Self::CriarLinha { .. } => "CriarLinha",
+            Self::RenomearVoiceRoom { .. } => "RenomearVoiceRoom",
+            Self::RenomearLinha { .. } => "RenomearLinha",
+            Self::RenomearServer { .. } => "RenomearServer",
+            Self::MeuApelido { .. } => "MeuApelido",
+            Self::MinhaImagem { .. } => "MinhaImagem",
+            Self::IconeDoServer { .. } => "IconeDoServer",
+            Self::Expulsar { .. } => "Expulsar",
+            Self::Banir { .. } => "Banir",
+            Self::RemoverMensagem { .. } => "RemoverMensagem",
+            Self::MoverPersono { .. } => "MoverPersono",
+            Self::ApagarVoiceRoom { .. } => "ApagarVoiceRoom",
+            Self::ApagarLinha { .. } => "ApagarLinha",
+            Self::PesarLinha { .. } => "PesarLinha",
+            Self::Anexar(_) => "Anexar",
+            Self::SalvarAnexo { .. } => "SalvarAnexo",
+            Self::PreverAnexo { .. } => "PreverAnexo",
+            Self::CompartilharTela { .. } => "CompartilharTela",
+            Self::AjustarLimitesDaTela { .. } => "AjustarLimitesDaTela",
+            Self::PararDeCompartilhar => "PararDeCompartilhar",
+            Self::Assistir { .. } => "Assistir",
+            Self::PedirQuadroChave { .. } => "PedirQuadroChave",
+            Self::DeclararIdentidadeDePar => "DeclararIdentidadeDePar",
+            Self::ConsentirNoCaminhoEntrePares(_) => "ConsentirNoCaminhoEntrePares",
+            Self::Sair => "Sair",
+        }
+    }
 }
 
 /// Quanto tempo se espera o servidor abrir o fluxo de um anexo pedido.
@@ -3497,6 +3553,11 @@ impl Motor {
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
+        // O nome, sem os valores, para a recusa local dizer qual foi; e se é
+        // uma entrada, que a recusa tem de desfazer. Lidos antes do `match`,
+        // que consome o comando.
+        let nome = comando.nome();
+        let e_entrada = matches!(comando, Comando::EntrarNaVoiceRoom(..));
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
@@ -3787,8 +3848,51 @@ impl Motor {
 
             Comando::Sair => return,
         };
-        if resultado.is_err() {
-            self.cair();
+        // **Recusa, e não queda** (M2 da revisão do P61). Um campo maior que o
+        // teto do fio — um apelido, um nome de canal, a senha de uma sala —
+        // fazia o `encode` falhar, e este braço tratava como enlace caído: a
+        // sessão, a voz e o resto iam junto, por um nome comprido.
+        if let Err(erro) = resultado {
+            match recusa_local(&erro) {
+                Some(recusa) => self.recusar_aqui(nome, recusa, e_entrada),
+                None => self.cair(),
+            }
+        }
+    }
+
+    /// Um comando que não saiu porque um campo dele não cabe no fio.
+    ///
+    /// Vai ao `seele.log` com o comando e o campo, **sem o valor** — pode ser a
+    /// senha de uma sala. A janela ainda não a mostra: a frase é de outro lote,
+    /// e o caminho mais barato é a casca conferir o tamanho antes de mandar,
+    /// como o envio de mensagem já faz.
+    ///
+    /// A entrada numa sala com senha grande demais é desfeita aqui, como o
+    /// servidor a desfaria: com a mesma recusa que ele manda a uma senha
+    /// errada (`VoiceRoomEntryRefused`, que nenhuma senha deste tamanho deixa
+    /// de merecer). Ela desfaz a entrada pendente do motor — sem isso, a volta
+    /// a refaria a cada queda — e vai à casca, cujo `Room` desfaz o assento
+    /// especulativo pela mesma porta (`seele_sessao::assento`) e mostra o aviso
+    /// que já existe para a entrada recusada.
+    fn recusar_aqui(
+        &mut self,
+        comando: &'static str,
+        recusa: &seele_proto::control::ControlError,
+        e_entrada: bool,
+    ) {
+        tracing::warn!(
+            comando,
+            %recusa,
+            "o comando não saiu: um campo dele não cabe no fio; a recusa é local, e o enlace segue"
+        );
+        if e_entrada {
+            let recusada = ServerMessage::Alert {
+                severity: seele_proto::control::AlertSeverity::Warning,
+                reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
+                operator_text: None,
+            };
+            self.ouvir_o_assento(&recusada);
+            let _ = self.avisos.send(Aviso::Mensagem(Box::new(recusada)));
         }
     }
 
@@ -6555,6 +6659,58 @@ mod tests {
 
         destino.esperada = None;
         assert_eq!(destino.marca_do_aviso(), None);
+    }
+
+    /// **Um campo grande demais é recusa daquele comando, e não queda** (M2 da
+    /// revisão do P61).
+    ///
+    /// A revisão mediu: o apelido, o nome de canal e a senha da sala acima do
+    /// teto do fio faziam o `encode` falhar, e `executar` chamava `cair()`. A
+    /// prova de ponta a ponta é `queda_recuperavel::um_campo_grande_demais_nao_derruba_o_enlace`;
+    /// esta prova as três peças dela: o que é recusa e o que é queda, o que vai
+    /// ao `seele.log` (o comando e o campo, **nunca o valor**), e a entrada
+    /// desfeita no motor.
+    #[test]
+    fn um_campo_grande_demais_e_recusa_local_e_nao_queda() {
+        use seele_proto::control::ControlError;
+        let grande = || ControlError::FieldTooLong {
+            field: "password",
+            len: 52,
+            limit: 32,
+        };
+        assert!(recusa_local(&anyhow::Error::from(grande())).is_some());
+        assert!(
+            recusa_local(&anyhow::Error::from(grande()).context("escrevendo o quadro")).is_some(),
+            "com um contexto em cima, a recusa virou queda"
+        );
+        assert!(
+            recusa_local(&anyhow::anyhow!("o fluxo de controle fechou")).is_none(),
+            "um erro de transporte virou recusa: o enlace caído não começaria a bateria"
+        );
+
+        let rastro = crate::rastro_de_teste::Rastro::a_partir_de(tracing::Level::WARN);
+        let _guarda = tracing::subscriber::set_default(rastro.clone());
+        let mut motor = motor_de_teste();
+        let senha = "segredo-que-nao-vai-ao-log".repeat(2);
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), Some(senha)));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
+        motor.recusar_aqui("EntrarNaVoiceRoom", &grande(), true);
+
+        assert_eq!(
+            motor.voice_room, None,
+            "a entrada recusada aqui ficou no motor, e a volta a refaria a cada queda"
+        );
+        let linhas = rastro.linhas();
+        assert!(
+            linhas
+                .iter()
+                .any(|linha| linha.contains("EntrarNaVoiceRoom") && linha.contains("password")),
+            "o `seele.log` não diz qual comando nem qual campo: {linhas:?}"
+        );
+        assert!(
+            !linhas.iter().any(|linha| linha.contains("segredo")),
+            "a senha foi ao `seele.log`: {linhas:?}"
+        );
     }
 
     /// **O motor acaba a sessão exatamente onde o `Room` acaba** (lote P61,
