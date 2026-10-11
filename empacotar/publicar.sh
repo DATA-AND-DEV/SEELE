@@ -1181,6 +1181,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/sala.js \
         --roteiro tools/roteiros/sessao.js \
         --roteiro tools/roteiros/tela-de-outra-versao.js \
+        --roteiro tools/roteiros/tetos-dos-campos.js \
         --roteiro tools/roteiros/toque.js \
         --roteiro tools/roteiros/trocar-de-janela.js \
         --roteiro tools/roteiros/versao-do-servidor.js

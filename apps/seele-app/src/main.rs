@@ -12936,6 +12936,75 @@ mod a_tela_le_os_limites_que_o_rust_manda {
              chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
         );
     }
+
+    /// Os tetos que cada tela lê de `limites_dos_campos`, por arquivo: os nomes
+    /// passados a `passaDoTeto("…"` e os lidos direto de `tetosDosCampos())?.…`.
+    fn tetos_lidos_pelas_telas() -> Vec<(String, String)> {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let mut lidos = Vec::new();
+        let mut arquivos: Vec<_> = std::fs::read_dir(&raiz)
+            .expect("ui/ tem de ser legível")
+            .filter_map(Result::ok)
+            .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+            .filter(|nome| nome.ends_with(".js"))
+            .collect();
+        arquivos.sort();
+        for arquivo in arquivos {
+            let script = std::fs::read_to_string(raiz.join(&arquivo))
+                .unwrap_or_else(|erro| panic!("{arquivo} tem de ser legível: {erro}"));
+            for pedaco in script.split("passaDoTeto(\"").skip(1) {
+                if let Some(campo) = pedaco.split('"').next() {
+                    lidos.push((arquivo.clone(), campo.to_owned()));
+                }
+            }
+            for pedaco in script.split("tetosDosCampos())?.").skip(1) {
+                // `?.[campo]` é o acesso por nome variável do próprio
+                // `passaDoTeto`, cujos nomes são os de quem o chama, lidos acima.
+                if pedaco.starts_with('[') {
+                    continue;
+                }
+                let campo: String = pedaco
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                lidos.push((arquivo.clone(), campo));
+            }
+        }
+        lidos
+    }
+
+    /// **E os tetos dos campos, pela mesma razão** (pendência 58, item 55; lote
+    /// C55 da F5).
+    ///
+    /// A janela pede cada teto pelo nome, e um nome que o Rust não serializa
+    /// não lança: chega `undefined`, `passaDoTeto` não confere nada, e o campo
+    /// volta a mandar calado o que o núcleo recusa. As chaves vêm de um
+    /// `LimitesDosCampos` serializado de verdade.
+    #[test]
+    fn nenhuma_tela_le_um_teto_de_campo_que_nao_existe() {
+        let Ok(serde_json::Value::Object(mapa)) =
+            serde_json::to_value(seele_ffi::Connection::limites_dos_campos())
+        else {
+            panic!("`LimitesDosCampos` tem de serializar para objeto");
+        };
+        let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
+        let lidos = tetos_lidos_pelas_telas();
+        assert!(
+            !lidos.is_empty(),
+            "nenhuma tela lê um teto de `limites_dos_campos`, ou a leitura deste guarda \
+             quebrou: ele passaria sem olhar nada"
+        );
+        let culpados: Vec<_> = lidos
+            .iter()
+            .filter(|(_, campo)| !chaves.contains(campo.as_str()))
+            .collect();
+        assert!(
+            culpados.is_empty(),
+            "estas telas leem um teto de campo que o Rust não serializa, e o que chega é \
+             `undefined`, que não confere nada: {culpados:?}. As chaves que existem são \
+             {chaves:?}"
+        );
+    }
 }
 
 /// O que sai desta janela por um link, e o que não sai.

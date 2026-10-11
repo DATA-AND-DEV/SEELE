@@ -406,6 +406,19 @@ async function guardarOApelido() {
   }
   $("perfil-erro").hidden = true;
 
+  // **O teto do fio, em bytes, antes de mandar e antes de gravar** (pendência
+  // 58, item 55; lote C55 da F5). As duas portas têm o mesmo teto: o
+  // `SetNickname` da sessão e o apelido gravado nesta máquina, que vai no
+  // `Hello` da conexão seguinte. O gravado grande demais fazia o `connect`
+  // voltar `Unreachable`, e a pessoa lia NADA RESPONDEU NESSE ENDEREÇO com o
+  // servidor de pé. A caixa fica aberta, com o que se escreveu, para encurtar.
+  const grandeDemais = await passaDoTeto("apelido", escolhido);
+  if (grandeDemais) {
+    recusarPerfil(grandeDemais);
+    $("perfil-apelido").focus();
+    return false;
+  }
+
   let naSessao = false;
   try {
     naSessao = (await invoke("snapshot")) !== null;

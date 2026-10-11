@@ -1,0 +1,89 @@
+// Cada campo que o fio carrega confere o tamanho **em bytes** antes de mandar,
+// e diz o teto (pendência 58, item 55; lote C55 da F5).
+//
+// Os campos contavam caracteres (`maxlength`) e o fio conta bytes. Desde o lote
+// P61 o núcleo recusa sem derrubar o enlace um comando com um campo grande
+// demais, e o registra no `seele.log`; mas a janela não ficava sabendo, e o
+// pedido sumia calado. Aqui cada caminho escreve um texto acentuado que cabe na
+// contagem de caracteres e passa na de bytes, e exige três coisas: o comando
+// não sai, a frase com o teto aparece onde se escreveu, e um texto que cabe no
+// teto ainda sai — sem este último, um campo que nunca manda nada passaria.
+//
+// Os tetos vêm do duble, que os lê do `seele-proto` (`limites_dos_campos`, em
+// `tools/carga-da-casca.py`), e não de um número escrito aqui.
+//
+// **Cada caso roda por conta própria**: um que reprova escreve REPROVADO e o
+// seguinte roda. A reversão de um campo reprova a cena daquele campo, e só ela.
+
+const TETOS = await invoke("limites_dos_campos");
+exigir(TETOS && typeof TETOS.apelido === "number",
+  "o duble não respondeu `limites_dos_campos`, e nenhum caso abaixo conferiria nada");
+
+/** `n` letras `á`: `n` caracteres e `2n` bytes. */
+const acentos = (n) => "á".repeat(n);
+/** O menor texto acentuado que passa de `teto` bytes, e o maior que cabe. */
+const passa = (teto) => acentos(Math.floor(teto / 2) + 1);
+const cabe = (teto) => acentos(Math.floor(teto / 2));
+/** Os argumentos de cada vez que a janela mandou `cmd`. */
+const mandou = (cmd) => window.__SEELE_HISTORICO.filter(([c]) => c === cmd).map(([, a]) => a);
+const texto = (id) => document.getElementById(id)?.textContent ?? "";
+const caso = async (nome, corpo) => {
+  try {
+    await corpo();
+    relatar(`${nome}: ok`);
+  } catch (erro) {
+    if (!(erro && erro.reprovado)) relatar(`REPROVADO: ${nome}: estourou: ${erro}`);
+  }
+};
+
+// ------------------------------------------------- o apelido gravado (Hello)
+//
+// Na tela de entrada, o SALVAR do perfil grava nesta máquina
+// (`escolher_apelido_local`), e o apelido gravado vai no `Hello` da conexão
+// seguinte. Grande demais, o `connect` voltava `Unreachable`, e a pessoa lia
+// NADA RESPONDEU NESSE ENDEREÇO com o servidor de pé.
+await caso("apelido gravado", async () => {
+  const antes = window.__SEELE_APELIDO;
+  document.getElementById("boot-perfil").click();
+  exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
+  const grande = passa(TETOS.apelido);
+  document.getElementById("perfil-apelido").value = grande;
+  document.getElementById("perfil-salvar").click();
+  await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
+  exigir(window.__SEELE_APELIDO === antes && !mandou("escolher_apelido_local").some((a) => a?.apelido === grande),
+    `um apelido de ${grande.length} letras e ${bytesDe(grande)} bytes foi gravado nesta máquina, e vai no Hello`);
+  exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
+    `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
+  exigir(visivel("perfil") === "VISIVEL", "o perfil fechou com o apelido recusado");
+  const certo = cabe(TETOS.apelido);
+  document.getElementById("perfil-apelido").value = certo;
+  document.getElementById("perfil-salvar").click();
+  exigir(await ate(() => window.__SEELE_APELIDO === certo, 600),
+    `um apelido de ${bytesDe(certo)} bytes, no teto, não foi gravado`);
+  await ate(() => visivel("perfil") !== "VISIVEL", 300);
+});
+
+// Com sessão, para os casos de dentro do servidor.
+if (visivel("tela-sessao") !== "VISIVEL") await entrarNaSessao();
+
+// --------------------------------------------------- o apelido na sessão
+await caso("apelido na sessão", async () => {
+  document.getElementById("operador-quem").click();
+  exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na sessão");
+  const grande = passa(TETOS.apelido);
+  document.getElementById("perfil-apelido").value = grande;
+  document.getElementById("perfil-salvar").click();
+  await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
+  exigir(!mandou("escolher_apelido").some((a) => a?.apelido === grande),
+    `um apelido de ${bytesDe(grande)} bytes saiu para o servidor, e o núcleo o recusa calado`);
+  exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
+    `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
+  const certo = cabe(TETOS.apelido);
+  document.getElementById("perfil-apelido").value = certo;
+  document.getElementById("perfil-salvar").click();
+  exigir(await ate(() => mandou("escolher_apelido").some((a) => a?.apelido === certo), 600),
+    `um apelido de ${bytesDe(certo)} bytes, no teto, não saiu`);
+  await ate(() => visivel("perfil") !== "VISIVEL", 300);
+});
+
+relatar(`tempo virtual gasto: ${Math.round(performance.now())} ms`);

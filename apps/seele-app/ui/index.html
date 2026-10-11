@@ -4062,11 +4062,17 @@
 
         A nota diz o que **não** muda, e ela importa: quem troca de nome pode
         esperar que o passado o acompanhe, e ele não acompanha.
+
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        32 e contava caracteres, e o fio conta 32 **bytes**: vinte letras `á`
+        cabiam aqui e não no `Hello`. Quem confere agora é `guardarOApelido`, em
+        bytes, com o teto lido do Rust (`limites_dos_campos`), e a recusa diz o
+        número em `#perfil-erro`.
       -->
       <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
         <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
-               name="apelido" maxlength="32"
+               name="apelido"
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
         <!--
