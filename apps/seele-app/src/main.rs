@@ -1732,8 +1732,10 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// Um teste deste módulo por vez: a casa é uma só, e a identidade e os
     /// pinos dela são arquivos que dois `connect` de testes diferentes
-    /// escreveriam ao mesmo tempo.
-    fn vez() -> std::sync::MutexGuard<'static, ()> {
+    /// escreveriam ao mesmo tempo. **E os do módulo vizinho que usa esta casa**
+    /// (`o_apelido_grande_demais_no_hello`, lote C55 da F5): a `SEELE_HOME` é
+    /// do processo, e uma segunda casa a trocaria por baixo destes testes.
+    pub(super) fn vez() -> std::sync::MutexGuard<'static, ()> {
         static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
         VEZ.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1741,7 +1743,7 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
     /// `seele.log` capturado ver o que o `connect` escreve.
-    fn runtime() -> tokio::runtime::Runtime {
+    pub(super) fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1749,7 +1751,7 @@ mod a_entrada_velha_que_chega_tarde {
     }
 
     /// Um servidor de verdade, em porta zero e banco em memória.
-    async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
+    pub(super) async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
         let config = ServerConfig {
             name: nome.into(),
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -1778,7 +1780,7 @@ mod a_entrada_velha_que_chega_tarde {
     /// esquecer; e a casa que o app vai usar é conferida antes de qualquer
     /// `connect`, para um caminho novo do `config_dir` reprovar em vez de
     /// escrever na casa de alguém.
-    fn app() -> &'static AppHandle<MockRuntime> {
+    pub(super) fn app() -> &'static AppHandle<MockRuntime> {
         let casa = casa();
         let app = mock_builder()
             .manage(Session::default())
@@ -2588,6 +2590,82 @@ mod a_entrada_velha_que_chega_tarde {
             "a entrada que a janela largou não foi solta como devia:\n  {}",
             vermelhos.join("\n  ")
         );
+    }
+}
+
+/// **A medida do `Hello` com um apelido grande demais** (pendência 58, item
+/// 55; lote C55 da F5).
+///
+/// O apelido gravado nesta máquina (`escolher_apelido_local`) vai no `Hello` da
+/// conexão seguinte, e o `seele-proto` o limita a `MAX_NICKNAME_LEN` **bytes**.
+/// O campo do perfil contava caracteres até este lote, então um apelido de 20
+/// letras `á` (40 bytes) podia estar gravado. Este instrumento mede o que o
+/// `connect` do app faz com ele, contra um servidor de verdade nesta máquina,
+/// pela casa temporária do módulo do E54 (`a_entrada_velha_que_chega_tarde`),
+/// que é a única `SEELE_HOME` dos testes deste binário.
+///
+/// Medido em 11/10/2026, no `3b1f57c8` (a base do lote), com a HOME falsa:
+/// - 16 `á` (32 B, no teto): `Ok(geracao 1)` em 16 ms, e o servidor a vê;
+/// - 20 `á` (40 B): `{"error":"Unreachable", …}` em 5 ms, com a trilha
+///   `Parada` → `Tentando` (127.0.0.1) → `Desistiu { Unreachable }` aos 3 ms,
+///   e ninguém presente no servidor. A janela lê «NADA RESPONDEU NESSE
+///   ENDEREÇO» (`frases.js`) com o servidor de pé, e tentar de novo dá o mesmo.
+///
+/// O caminho, pela leitura: o QUIC e o TLS abrem, o `encode` do `Hello` recusa
+/// o apelido, e a escrita do `Hello` (`seele-core/src/client.rs`, `handshake`)
+/// traduz qualquer erro em `ConnectError::Unreachable`, com o `warn` «could not
+/// send Hello» e o erro do `encode` dentro, no `seele.log`.
+///
+/// Para refazer:
+///
+/// ```sh
+/// cargo test -p seele-app --bin seele-app -- o_apelido_grande_demais_no_hello --ignored --nocapture
+/// ```
+#[cfg(test)]
+mod o_apelido_grande_demais_no_hello {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use super::{connect, Session};
+    use std::time::{Duration, Instant};
+    use tauri::Manager;
+
+    #[test]
+    #[ignore = "instrumento da medida"]
+    fn medida() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let (endereco, servidor) = servidor("Medida").await;
+            for apelido in ["á".repeat(16), "á".repeat(20)] {
+                let app = app();
+                let comeco = Instant::now();
+                let resultado = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    connect(
+                        app.clone(),
+                        app.state::<Session>(),
+                        endereco.to_string(),
+                        apelido.clone(),
+                        false,
+                        None,
+                    ),
+                )
+                .await
+                .expect("o connect não voltou");
+                let gasto = comeco.elapsed();
+                let dito = match &resultado {
+                    Ok(entrada) => format!("Ok(geracao {})", entrada.geracao),
+                    Err(falha) => serde_json::to_string(falha).unwrap_or_default(),
+                };
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let presentes = servidor.server().presentes.lock().await.todos().len();
+                eprintln!(
+                    "MEDIDA: apelido de {} B: {dito} em {gasto:?}; presentes no servidor: {presentes}",
+                    apelido.len()
+                );
+                if let Ok(sessao) = app.state::<Session>().connection() {
+                    sessao.disconnect();
+                }
+            }
+        });
     }
 }
 
