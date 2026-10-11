@@ -252,6 +252,14 @@ foram medidas, e o molde mudado não as alcança.
   aceito na primeira recusa vai na primeira tentativa de todo calado seguinte,
   e só o primeiro paga dois. Conferido por ela contra o `m3-servidor` **com** o
   `m3-carga-cartoes`: 40 em 25 s, nenhuma recusa.
+- **Um calado que não entra diz e segue** (decidido em 10/10, depois da
+  campanha): antes, o `Err` derrubava o processo e os 250 sumiam, e o roteiro
+  esperava 15 minutos por um «prontos» que não vinha. Agora ele vai ao `.out`
+  com o motivo, os outros ficam, e a linha final diz quantos entraram de quantos
+  (`prontos=<entraram> de <n>`); o roteiro não mede sem os 251 na lista, então a
+  medida continua protegida, e a falha diz quantos faltam. **A campanha que deu
+  números não usou o `--calados`**, e por isso o que ela mediu não muda; só a
+  `carga-cartoes` o usa, e a de 10/10 rodou a versão anterior, que aborta.
 - **O cenário só mede com a lista inteira**: o roteiro conta pela
   acessibilidade os cartões distintos (`cartão <apelido> · linha 1`) e só
   segue com os 251; o relato leva `cartoes_na_lista`. O `carga_a_vista` leva o
