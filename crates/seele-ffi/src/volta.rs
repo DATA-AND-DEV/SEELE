@@ -17,7 +17,7 @@
 //! espaçamento e a parada serem provados aqui, por teste de crate, e a prova de
 //! ponta a ponta ficar para a conformidade.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use seele_core::state::EstadoDoEnvio;
@@ -39,8 +39,10 @@ pub(crate) const MARCA_DO_PING_DO_BURACO: u64 = 1 << 62;
 /// Quantas mensagens cada página do buraco pede: o teto do servidor
 /// (`MAX_PAGE`, em `seele-server`).
 ///
-/// Um servidor que corte abaixo disto não engana a parada: ela não conta a
-/// página, olha se ela trouxe alguma mensagem mais antiga que o cursor.
+/// **É também o tamanho pelo qual a página é medida** (I1 da revisão do P61):
+/// o que o servidor manda são as `PAGINA_DO_BURACO` maiores abaixo do cursor,
+/// e é por elas que a busca decide até onde a página chegou. Ver
+/// [`Buraco::ouvir`].
 pub(crate) const PAGINA_DO_BURACO: u16 = 200;
 
 /// Quantas páginas o buraco pede, no máximo: 2 000 mensagens.
@@ -85,14 +87,39 @@ pub(crate) enum Passo {
 }
 
 /// A página que está no ar, e o que chegou dela até agora.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct NoAr {
     cursor: Option<MessageId>,
     carimbo: u64,
-    /// A mais antiga deste canal que chegou desde o pedido, mais antiga que o
-    /// cursor. As que chegam ao vivo no meio são mais novas que tudo da página,
-    /// e não a movem.
-    menor: Option<MessageId>,
+    /// Os ids deste canal, abaixo do cursor, que chegaram desde o pedido.
+    ///
+    /// **Todos, e não só o menor** (I1 da revisão do P61). Na janela de uma
+    /// página chega a página e chega o que é ao vivo — e o ao vivo inclui o
+    /// eco de uma linha **antiga**: quem repete uma mensagem que o servidor já
+    /// tinha gravado faz o servidor anunciar a linha original, com o id dela, ao
+    /// canal inteiro. Guardar só o menor o tomava pela «mais antiga da página»,
+    /// e a busca pulava para trás dele e fechava com o buraco pela metade.
+    ids: BTreeSet<MessageId>,
+}
+
+impl NoAr {
+    /// Até onde a página chegou: a menor das [`PAGINA_DO_BURACO`] maiores.
+    ///
+    /// O servidor manda as `PAGINA_DO_BURACO` maiores abaixo do cursor. Com a
+    /// página cheia, um id a mais na janela, abaixo delas, é um eco antigo e
+    /// fica de fora; com ela incompleta, o servidor chegou ao começo do canal e
+    /// mandou tudo o que havia abaixo do cursor — um eco antigo é uma delas.
+    /// Nos dois casos o resultado nunca é **mais antigo** que a página de
+    /// verdade, e um cursor mais novo que o devido só pede de novo o que já
+    /// chegou: o `Room` não duplica.
+    fn ate_onde(&self) -> Option<MessageId> {
+        self.ids
+            .iter()
+            .rev()
+            .nth(usize::from(PAGINA_DO_BURACO) - 1)
+            .or_else(|| self.ids.first())
+            .copied()
+    }
 }
 
 /// A busca do buraco de um canal, página por página, de trás para a frente.
@@ -130,7 +157,7 @@ impl Buraco {
             no_ar: NoAr {
                 cursor: None,
                 carimbo,
-                menor: None,
+                ids: BTreeSet::new(),
             },
             sequencia: sequencia + 1,
         };
@@ -162,11 +189,15 @@ impl Buraco {
 
     /// Uma mensagem do servidor chegou. Devolve o passo seguinte quando ela é
     /// o `Pong` da página no ar.
+    ///
+    /// Uma mensagem do canal abaixo do cursor entra na conta da página, venha
+    /// ela da página ou ao vivo: daqui não se distingue uma da outra. Quem
+    /// separa é [`NoAr::ate_onde`], pelo tamanho da página.
     pub(crate) fn ouvir(&mut self, mensagem: &ServerMessage) -> Option<Passo> {
         match *mensagem {
             ServerMessage::MessageReceived { channel, id, .. } if channel == self.canal => {
                 if self.no_ar.cursor.is_none_or(|cursor| id < cursor) {
-                    self.no_ar.menor = Some(self.no_ar.menor.map_or(id, |menor| menor.min(id)));
+                    self.no_ar.ids.insert(id);
                 }
                 None
             }
@@ -179,7 +210,7 @@ impl Buraco {
 
     /// A página no ar chegou inteira: fechou, ou pede a seguinte.
     fn decidir(&mut self) -> Passo {
-        let Some(menor) = self.no_ar.menor else {
+        let Some(menor) = self.no_ar.ate_onde() else {
             return Passo::Parou(Parada::Comeco);
         };
         let Some(conhecida) = self.conhecida else {
@@ -197,7 +228,7 @@ impl Buraco {
         self.no_ar = NoAr {
             cursor: Some(menor),
             carimbo,
-            menor: None,
+            ids: BTreeSet::new(),
         };
         Passo::Pedir(Pagina {
             canal: self.canal,
@@ -422,9 +453,24 @@ mod tests {
     /// Roda uma busca inteira contra o servidor de mentira, com `ao_vivo`
     /// chegando no meio da primeira página. Devolve a parada e as páginas.
     fn buscar(room: &mut Room, gravadas: &[u64], ao_vivo: &[u64]) -> (Parada, u32) {
+        buscar_com_ecos(room, gravadas, ao_vivo, &[])
+    }
+
+    /// [`buscar`], com `ecos`: `(página, id)` é um eco ao vivo de uma linha
+    /// **antiga** — a repetição de alguém, com a mesma chave, que o servidor
+    /// devolve com o id original a todo o canal — chegando na janela daquela
+    /// página (a primeira é a 1), depois do bloco dela e antes da cerca.
+    fn buscar_com_ecos(
+        room: &mut Room,
+        gravadas: &[u64],
+        ao_vivo: &[u64],
+        ecos: &[(u32, u64)],
+    ) -> (Parada, u32) {
         let (mut buraco, mut pedido) = Buraco::abrir(room, 1).expect("há canal aberto");
         let mut primeira = true;
+        let mut numero = 0_u32;
         loop {
+            numero += 1;
             let mut chegam: Vec<ServerMessage> = Vec::new();
             if primeira {
                 chegam.extend(ao_vivo.iter().map(|id| mensagem(*id, PersonId(9), None)));
@@ -434,6 +480,11 @@ mod tests {
                 pagina(gravadas, pedido.cursor, pedido.limite)
                     .into_iter()
                     .map(|id| mensagem(id, PersonId(9), None)),
+            );
+            chegam.extend(
+                ecos.iter()
+                    .filter(|(pagina, _)| *pagina == numero)
+                    .map(|(_, id)| mensagem(*id, PersonId(9), None)),
             );
             chegam.push(pong(pedido.carimbo));
             let mut passo = None;
@@ -484,6 +535,52 @@ mod tests {
             ids(&room),
             (1..=550).collect::<Vec<_>>(),
             "o buraco não fechou, ou o que já estava na tela duplicou"
+        );
+    }
+
+    /// **O eco de uma linha antiga no meio da busca não a fecha antes do
+    /// buraco** (I1 da revisão do P61).
+    ///
+    /// Quem repete uma mensagem que o servidor já tinha gravado recebe — e o
+    /// canal inteiro recebe — a linha original, com o **id antigo**. Esse eco
+    /// chega ao vivo, na janela de uma página, e era tomado pela «mais antiga
+    /// da página»: a busca pulava para trás dele e dizia que fechou. Medido
+    /// pela revisão: faltavam 50 aqui, e 300 de 1 500 pela FFI.
+    #[test]
+    fn o_eco_de_uma_linha_antiga_nao_fecha_a_busca_antes_do_buraco() {
+        // Ela conhecia até a 100; a dela foi gravada como 101 e o eco se
+        // perdeu; 450 de outra pessoa passaram durante a queda. O eco da
+        // repetição dela (id 101) chega na janela da segunda página.
+        let mut room = room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let gravadas: Vec<u64> = (1..=551).collect();
+        let (parada, _) = buscar_com_ecos(&mut room, &gravadas, &[], &[(2, 101)]);
+
+        assert_eq!(parada, Parada::Fechou);
+        let faltam: Vec<u64> = (51..=551).filter(|id| !ids(&room).contains(id)).collect();
+        assert!(
+            faltam.is_empty(),
+            "a busca disse que fechou e faltam {} do buraco: {:?}…",
+            faltam.len(),
+            faltam.iter().take(5).collect::<Vec<_>>()
+        );
+
+        // E um eco antigo na primeira página, abaixo da última conhecida —
+        // fecharia na hora.
+        let mut room = self::room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let (parada, _) = buscar_com_ecos(&mut room, &gravadas, &[], &[(1, 60)]);
+        assert_eq!(parada, Parada::Fechou);
+        let faltam: Vec<u64> = (51..=551).filter(|id| !ids(&room).contains(id)).collect();
+        assert!(
+            faltam.is_empty(),
+            "um eco de id abaixo da última conhecida fechou a busca na primeira página, \
+             e faltam {}",
+            faltam.len()
         );
     }
 

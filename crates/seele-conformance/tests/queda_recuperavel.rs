@@ -494,3 +494,116 @@ async fn tentar_de_novo_uma_grande_demais_nao_derruba_o_enlace() -> Result<()> {
     servidor.shutdown();
     Ok(())
 }
+
+/// **O eco de uma linha antiga no meio da busca não a fecha antes do buraco**
+/// (I1 da revisão do P61).
+///
+/// Quem repete uma mensagem que o servidor já tinha gravado — o TENTAR DE NOVO,
+/// ou a repetição automática da volta de qualquer cliente 0.16 — faz o servidor
+/// anunciar a linha **original**, com o id antigo, ao canal inteiro
+/// (`Gravacao::Feita` → `MessagePosted`). Esse eco chega ao vivo, na janela de
+/// uma página da busca, e era tomado pela «mais antiga da página». Medido pela
+/// revisão, com 30 ms entre as páginas: 1 200 de 1 500 na tela, e o
+/// `seele.log` dizendo «fechou».
+///
+/// A prova C não pega isto: o buraco dela é gravado antes das mensagens dela,
+/// então nenhum id antigo é mais velho que o cursor. Aqui o eco é o que o
+/// escritor anuncia para a chave repetida de outra pessoa, posto no barramento
+/// a cada 2 ms durante a volta: no loopback a busca anda rápido demais para
+/// cair por acaso na janela do lote de 200 ms do escritor.
+#[tokio::test(flavor = "multi_thread")]
+async fn o_eco_de_uma_linha_antiga_no_meio_da_busca_nao_a_fecha_antes_do_buraco() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let casa = tempfile::tempdir()?;
+    let (ana, gravador, quem) = ana(endereco, casa.path(), None).await?;
+
+    // Uma mensagem de outra pessoa que ela viu: a linha cujo eco vai voltar.
+    let mut outra = bia(endereco).await?;
+    outra.join_channel(LINHA).await?;
+    outra
+        .send_message(LINHA, "velha", seele_proto::ids::ClientMessageId(1))
+        .await?;
+    esperar("ela ver a mensagem velha", || {
+        ana.messages().iter().any(|m| m.body == "velha")
+    })
+    .await?;
+    let velha = ana
+        .messages()
+        .iter()
+        .find(|m| m.body == "velha")
+        .map(|m| seele_proto::ids::MessageId(m.id))
+        .expect("já conferida acima");
+    let linha_velha = {
+        let mut banco = servidor.server().persistence.lock().await;
+        Messages::new(&mut banco)
+            .one(velha)?
+            .expect("a linha velha está gravada")
+    };
+
+    // O buraco: 1 500 de outra pessoa, que ela nunca viu passar.
+    let autor = outra.session().person;
+    {
+        let mut banco = servidor.server().persistence.lock().await;
+        let mut mensagens = Messages::new(&mut banco);
+        let buraco: Vec<PendingMessage> = (1..=1_500)
+            .map(|numero| PendingMessage {
+                channel: LINHA,
+                author: autor,
+                author_nickname: "bia".into(),
+                body: format!("buraco-{numero:04}"),
+                replies_to: None,
+                client_message_id: None,
+            })
+            .collect();
+        mensagens.append_batch(&buraco)?;
+    }
+
+    // O eco da linha velha, no barramento, durante toda a volta.
+    let ecoando = {
+        let servidor = Arc::clone(&servidor);
+        tokio::spawn(async move {
+            loop {
+                let _ = servidor
+                    .server()
+                    .events
+                    .send(seele_server::server::Event::MessagePosted(
+                        linha_velha.clone(),
+                    ));
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+    };
+
+    let marca = gravador.marca();
+    despedir(&servidor, quem, DisconnectReason::FellBehind);
+    esperar("a janela ler a faixa da bateria e depois a volta", || {
+        gravador.faixa_e_volta_desde(marca)
+    })
+    .await?;
+    let resultado = esperar("o buraco inteiro aparecer", || {
+        ana.messages()
+            .iter()
+            .filter(|m| m.body.starts_with("buraco-"))
+            .count()
+            >= 1_500
+    })
+    .await;
+    ecoando.abort();
+    let na_tela = ana
+        .messages()
+        .iter()
+        .filter(|m| m.body.starts_with("buraco-"))
+        .count();
+    assert!(
+        resultado.is_ok(),
+        "a busca parou com {na_tela} de 1 500 do buraco na tela: o eco da linha velha \
+         (id {}) foi tomado pela mais antiga de uma página",
+        velha.get()
+    );
+    assert_eq!(gravador.fim(), None);
+    drop(outra);
+    ana.disconnect();
+    servidor.shutdown();
+    Ok(())
+}
