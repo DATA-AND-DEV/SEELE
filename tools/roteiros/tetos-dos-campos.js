@@ -48,25 +48,36 @@ const caso = async (nome, corpo) => {
 // (`escolher_apelido_local`), e o apelido gravado vai no `Hello` da conexão
 // seguinte. Grande demais, o `connect` voltava `Unreachable`, e a pessoa lia
 // NADA RESPONDEU NESSE ENDEREÇO com o servidor de pé.
+//
+// **Num `finally`, o apelido de antes volta e o perfil fecha** (M1 da revisão
+// do lote). Reprovada, a cena deixava os 34 B gravados, e desde o passo 11 o
+// duble os recusa no `connect`: a entrada na sessão caía, e as cinco cenas de
+// dentro dela nem rodavam, com a frase vermelha acusando o HOSPEDAR.
 await caso("apelido gravado", async () => {
   const antes = window.__SEELE_APELIDO;
-  document.getElementById("boot-perfil").click();
-  exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
-  const grande = passa(TETOS.apelido);
-  document.getElementById("perfil-apelido").value = grande;
-  document.getElementById("perfil-salvar").click();
-  await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
-  exigir(window.__SEELE_APELIDO === antes && !mandou("escolher_apelido_local").some((a) => a?.apelido === grande),
-    `um apelido de ${grande.length} letras e ${bytesDe(grande)} bytes foi gravado nesta máquina, e vai no Hello`);
-  exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
-    `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
-  exigir(visivel("perfil") === "VISIVEL", "o perfil fechou com o apelido recusado");
-  const certo = cabe(TETOS.apelido);
-  document.getElementById("perfil-apelido").value = certo;
-  document.getElementById("perfil-salvar").click();
-  exigir(await ate(() => window.__SEELE_APELIDO === certo, 600),
-    `um apelido de ${bytesDe(certo)} bytes, no teto, não foi gravado`);
-  await ate(() => visivel("perfil") !== "VISIVEL", 300);
+  try {
+    document.getElementById("boot-perfil").click();
+    exigir(await ate(() => visivel("perfil") === "VISIVEL", 900), "o perfil não abriu na entrada");
+    const grande = passa(TETOS.apelido);
+    document.getElementById("perfil-apelido").value = grande;
+    document.getElementById("perfil-salvar").click();
+    await ate(() => visivel("perfil-erro") === "VISIVEL", 600);
+    exigir(window.__SEELE_APELIDO === antes && !mandou("escolher_apelido_local").some((a) => a?.apelido === grande),
+      `um apelido de ${grande.length} letras e ${bytesDe(grande)} bytes foi gravado nesta máquina, e vai no Hello`);
+    exigir(visivel("perfil-erro") === "VISIVEL" && texto("perfil-erro").includes(`${TETOS.apelido} BYTES`),
+      `a recusa não diz o teto no perfil: «${texto("perfil-erro")}»`);
+    exigir(visivel("perfil") === "VISIVEL", "o perfil fechou com o apelido recusado");
+    const certo = cabe(TETOS.apelido);
+    document.getElementById("perfil-apelido").value = certo;
+    document.getElementById("perfil-salvar").click();
+    exigir(await ate(() => window.__SEELE_APELIDO === certo, 600),
+      `um apelido de ${bytesDe(certo)} bytes, no teto, não foi gravado`);
+    await ate(() => visivel("perfil") !== "VISIVEL", 300);
+  } finally {
+    window.__SEELE_APELIDO = antes;
+    if (visivel("perfil") === "VISIVEL") document.getElementById("perfil-cancelar").click();
+    await ate(() => visivel("perfil") !== "VISIVEL", 300);
+  }
 });
 
 // --------------------------------------- o nome do servidor, ao hospedar
