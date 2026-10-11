@@ -372,6 +372,12 @@ jobs:
       - run: node apps/seele-app/bancada/palco-da-chamada.cjs
         if: ${{ !cancelled() }}
         timeout-minutes: 5
+      # Um redesenho por quadro (pendência 63): 251 eventos num quadro pedem um
+      # retrato só, e 251 pessoas com um cartão de MOD em cada, sob 251 eventos
+      # por segundo, não deixam fila. A M3 de 10/10 travou a página sem isto.
+      - run: node apps/seele-app/bancada/um-redesenho-por-quadro.cjs
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
       # **Os roteiros da casca** (lote RT da F5), que até 10/10/2026 só rodavam
       # na bateria da orquestradora. Nem este workflow nem a bateria do
       # `empacotar/publicar.sh` os rodavam, e assim eles apodreciam calados: o
