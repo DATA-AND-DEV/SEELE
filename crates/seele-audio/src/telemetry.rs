@@ -136,6 +136,56 @@ pub struct LocalTelemetry {
     /// entrega zeros sem erro nenhum. Medido pelo laço de voz sobre o quadro
     /// cru, antes da supressão, e falso num caminho de áudio sem laço próprio.
     pub microfone_entrega_silencio_digital: bool,
+
+    /// Os datagramas de voz que o cabeçalho recusou, por motivo, desde que o
+    /// laço de voz começou. Ver [`CabecalhosRecusados`].
+    pub cabecalhos_recusados: CabecalhosRecusados,
+}
+
+/// Os datagramas de voz que o cabeçalho recusou, por motivo.
+///
+/// **Existe porque o laço os jogava fora calado.** Na M3 da API 6
+/// (10/10/2026), um falante que gravava o número do protocolo no lugar do
+/// número do cabeçalho teve toda a voz jogada fora por quem ouvia. Nada
+/// contava, e a única pista era o jitter de chegada parado em zero na barra,
+/// porque nenhuma fonte chegava a nascer. Aqui cada recusa é contada, e a
+/// primeira de cada laço vai ao log, com a versão achada e a esperada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CabecalhosRecusados {
+    /// De outra versão do cabeçalho (`MediaError::UnsupportedVersion`).
+    pub versao: u64,
+    /// Curtos demais para um cabeçalho (`MediaError::TooShort`).
+    pub curtos: u64,
+    /// Maiores que o teto do datagrama (`MediaError::TooLong`).
+    pub longos: u64,
+    /// Só o cabeçalho, sem a voz (`MediaError::EmptyPayload`).
+    pub vazios: u64,
+}
+
+impl CabecalhosRecusados {
+    /// Conta a recusa de um datagrama. Devolve `true` na primeira recusa
+    /// deste laço, para quem chama dizer no log: as seguintes, que chegam
+    /// cinquenta por segundo, só são contadas.
+    pub fn contar(&mut self, erro: &seele_proto::MediaError) -> bool {
+        let primeira = self.total() == 0;
+        let contador = match erro {
+            seele_proto::MediaError::UnsupportedVersion { .. } => &mut self.versao,
+            seele_proto::MediaError::TooShort { .. } => &mut self.curtos,
+            seele_proto::MediaError::TooLong { .. } => &mut self.longos,
+            seele_proto::MediaError::EmptyPayload => &mut self.vazios,
+        };
+        *contador = contador.saturating_add(1);
+        primeira
+    }
+
+    /// Todas as recusas, de todos os motivos.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.versao
+            .saturating_add(self.curtos)
+            .saturating_add(self.longos)
+            .saturating_add(self.vazios)
+    }
 }
 
 impl LocalTelemetry {
@@ -166,7 +216,20 @@ impl LocalTelemetry {
             pacing_clamps: 0,
             pacing_primes: 0,
             microfone_entrega_silencio_digital: false,
+            cabecalhos_recusados: CabecalhosRecusados {
+                versao: 0,
+                curtos: 0,
+                longos: 0,
+                vazios: 0,
+            },
         }
+    }
+
+    /// Anexa as recusas do cabeçalho que o laço de voz contou.
+    #[must_use]
+    pub const fn with_cabecalhos_recusados(mut self, recusados: CabecalhosRecusados) -> Self {
+        self.cabecalhos_recusados = recusados;
+        self
     }
 
     /// Anexa o que o laço de voz concluiu sobre o silêncio digital do
@@ -441,6 +504,39 @@ impl AudioTelemetry {
             .iter()
             .map(|source| source.jitter_ms)
             .reduce(f64::max)
+    }
+}
+
+#[cfg(test)]
+mod cabecalhos_recusados {
+    use super::CabecalhosRecusados;
+    use seele_proto::MediaError;
+
+    /// **Cada motivo no contador dele, e só a primeira recusa pede o log.**
+    #[test]
+    fn cada_motivo_conta_no_seu_e_so_a_primeira_vai_ao_log() {
+        let mut recusados = CabecalhosRecusados::default();
+        assert!(recusados.contar(&MediaError::UnsupportedVersion {
+            found: 9,
+            expected: 1
+        }));
+        assert!(!recusados.contar(&MediaError::UnsupportedVersion {
+            found: 9,
+            expected: 1
+        }));
+        assert!(!recusados.contar(&MediaError::TooShort { len: 3 }));
+        assert!(!recusados.contar(&MediaError::TooLong { len: 9_000 }));
+        assert!(!recusados.contar(&MediaError::EmptyPayload));
+        assert_eq!(
+            recusados,
+            CabecalhosRecusados {
+                versao: 2,
+                curtos: 1,
+                longos: 1,
+                vazios: 1,
+            }
+        );
+        assert_eq!(recusados.total(), 5);
     }
 }
 

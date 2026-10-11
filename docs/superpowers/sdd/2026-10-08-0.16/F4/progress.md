@@ -787,3 +787,75 @@ começar.
 - **O guarda da credencial** passa a ler a `identidade-web.js` (cada linha que
   nomeia `credencial`, `segredos` ou `linkDaCarga`). A chamada de `conectar`
   dela é a quarta que leva credencial, com o porquê.
+
+## 10/10: a décima primeira integração trazida, e a conformidade da voz
+
+- **A `versao/0.16` de `330f3ab4`** (a décima primeira, verde de primeira)
+  entrou em `a6af3539`. Teve um conflito só, no guarda da credencial do
+  `frontend.rs`, e os dois lados ficam: a `recusaDoApelido` e a parte 6 do lote
+  W da F5, e a identidade do navegador. Conferido no código que a identidade
+  segue o contrato do W. Na árvore integrada passam os guardas da janela, o
+  `tests/web.rs`, os crates da F4, o `empacotamento`, o `check-deps`, o
+  `cargo xtask web` e as bancadas da ponte, da voz e da identidade. A
+  `ponte-sem-gesto` ficou limpa nas duas cascas: o `CASCA is not defined` do
+  celular era a ordem da integração da F8.
+- **A conformidade que toca o laço da voz, liberada pela orquestradora, um
+  arquivo por vez**: passam o `voz_na_reconexao`, o `soak_audio`, o
+  `troca_de_aparelho`, o `som_da_tela_segue_o_aparelho`, o `acceptance_m2`, o
+  `ejetar`, o `desassentar` e o `sala_cheia_nao_se_escuta` (38 testes). É a
+  prova de que a régua do portão no `seele-voz` (`f1f5dfd5`), que veio depois do
+  que a bateria cobriu, não mudou a voz do desktop.
+
+## 10/10: a fase 2 da 2.2, o retrato comum
+
+- **Passo 1, a mudança de lugar** (`d0f72c7c`). Os tipos de vista, as
+  conversões e as seis funções da projeção saem do `seele-ffi` para
+  `seele-sessao/src/retrato.rs`, e o `seele-ffi` os reexporta pelo
+  `seele-core`. Os guardas de texto do `frontend.rs` que liam o `types.rs`
+  leem os dois arquivos juntos (`tipos_da_ponte`). Um `#[cfg(test)]` no topo do
+  `lib.rs` cortou o «programa» que quatro guardas de texto do `seele-ffi` leem,
+  e os quatro reprovaram; o import foi para dentro dos módulos de teste.
+- **Passo 2, os dois produtores** (`f087a500`). O `RetratoDaSala` com os nomes
+  de campo do `Snapshot`; a `Sessao` do `seele-web`, que entra pelo `adopt` e
+  dobra quadros; o `seele_ffi::sem_rede`, atrás da feature `conformidade`. O
+  `dois_produtores_de_snapshot.rs` compara os 19 campos depois de cada uma de
+  onze mensagens, com o `TemaMudou` que chega e o que sai. Três reversões no
+  navegador reprovaram, cada uma no campo e no passo certos.
+- O `.wasm` do `seele-web` com a `prova` ficou em 985 KB (era 885 antes da
+  voz e da sessão).
+- **A fechar** depois da décima segunda, como a orquestradora pediu: os campos
+  novos do `Snapshot` da sala viva, cada um com o seu lado.
+
+## 10/10, tarde: a décima segunda, o jitter zero da M3 e o fecho da fase 2
+
+- **A décima segunda trazida** (`bb1944bc`). O conflito foi o `bare_shared`:
+  fica o `sem_rede::shared`, com o `impressao_do_servidor` do lote X. Ela não
+  trouxe campo novo ao `Snapshot`.
+- **A pausa da M3** (cerca de duas horas sem compilar): o código foi escrito, e
+  rodado e commitado só depois dela.
+- **O jitter zero da M3**, achado lendo, sem rodar. O falante de medição
+  gravava `PROTOCOL_VERSION` (9) no cabeçalho de mídia, e desde o `f3aaf9ce`
+  (fora da v0.15.1) o primeiro byte da voz é 1. Quem ouvia jogava fora toda a
+  voz dele, e o jitter ficava no zero inicial. A orquestradora consertou o
+  falante e mediu de 1,06 a 1,58 ms. As duas pontas que ficavam no produto
+  mudam em `67bfeee1`:
+  - o laço de voz conta, por motivo, os datagramas que o cabeçalho recusa, e
+    diz o primeiro no log (`ler_o_datagrama`, `CabecalhosRecusados`);
+  - o `encode` do `MediaHeader` grava sempre o número do layout. A F1 revisa.
+  O teste da cadeia de recepção vai dos bytes à telemetria, e com o byte do
+  falante reprova como a M3 viu.
+- **O fecho da fase 2 da 2.2** (`1c712014`): cada campo do `Snapshot` tem um
+  lado (19 da sala, 14 medidos, 3 contados), e um campo novo reprova até
+  alguém decidir.
+- **O guarda da hospedagem** (`935ea588`) lê `.sala` e `.toques` com fronteira
+  de palavra. A marca de fim de linha deixava passar calada a leitura numa
+  linha só (provado pela injeção).
+- **A fronteira da identidade com a F8**, fechada pela orquestradora e escrita
+  durante a pausa:
+  - `identidadeDaPagina()`;
+  - o `{ ok: true, resposta, persistencia }` (achado da F8);
+  - `conhecidos()`, `entrarNoConhecido` com `link-vencido`, e `lembrarONome`;
+  - o guarda da credencial com as linhas novas, e nenhum outro script tocando
+    no link da carga;
+  - a bancada com a página inteira sem casca injetada (pedido da orquestradora
+    na décima segunda), os servidores do aparelho e a identidade da página.

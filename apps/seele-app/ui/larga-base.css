@@ -25,6 +25,14 @@
   display: none;
 }
 
+/* **A sala pessoal** (F7): a faixa do toque, a linha da sala na entrada e na
+   sessão, e o SEU CÓDIGO com a agenda no perfil. O navegador não tem sala que
+   atenda, e toda peça com `data-sala-pessoal` fica fora, mesmo que o script
+   dela a mostre; o SÓ NO APP DO SEELE diz onde receber ligações. */
+:root[data-casca="larga"] [data-sala-pessoal] {
+  display: none;
+}
+
 :root[data-casca="larga"] .larga-hospedar {
   margin: 4px 0 0;
 }

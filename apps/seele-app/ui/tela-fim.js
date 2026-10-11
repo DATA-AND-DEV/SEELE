@@ -129,10 +129,10 @@ function desenharSaidas() {
 async function reconectar() {
   const botao = $("botao-voltar");
   botao.disabled = true;
-  // **A hospedagem fica de pé.** Ver `limparSessaoEncerrada`: este botão
-  // promete voltar, e derrubar o próprio servidor no caminho — com quem estava
-  // dentro junto — é o contrário do que ele diz.
-  await limparSessaoEncerrada({ pararDeHospedar: false });
+  // **A hospedagem fica de pé**, como em toda saída desde a tarefa 19 da F7: este
+  // botão promete voltar, e derrubar o próprio servidor no caminho — com quem
+  // estava dentro junto — seria o contrário do que ele diz.
+  await limparSessaoEncerrada();
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
@@ -147,7 +147,7 @@ async function reconectar() {
 
 /** Fecha o assunto: entrada limpa, sem tentar de novo. */
 async function sairParaAEntrada() {
-  await limparSessaoEncerrada({ pararDeHospedar: true });
+  await limparSessaoEncerrada();
   $("tela-fim").hidden = true;
   $("tela-boot").hidden = false;
   esvaziarBarraDoServidor();
@@ -165,31 +165,14 @@ async function sairParaAEntrada() {
  * cada trecho de topo inteiro, e um `hidden = false` sem o `abrirTela` do mesmo
  * trecho é exatamente a transição que deixa o teclado no `<body>`.
  */
-async function limparSessaoEncerrada({ pararDeHospedar }) {
-  // **As duas saídas desmontam a sessão; só uma fecha o servidor.**
-  //
-  // A03 da auditoria de 17/09: RECONECTAR passava por `disconnect`, que também
-  // derruba a hospedagem, e logo depois tentava entrar no endereço que acabara
-  // de tirar do ar. Quem hospedava e teve a sessão encerrada por uma troca de
-  // MODs apertava um botão que promete voltar e desligava o próprio servidor,
-  // levando junto quem estava dentro.
-  // Dois nomes escritos por extenso, e não um montado no lugar: um `invoke`
-  // com nome dinâmico não é conferível por nenhum guarda, e é assim que um
-  // comando some do registro sem ninguém perceber.
-  if (pararDeHospedar) await invoke("disconnect");
-  else await invoke("desmontar_a_sessao");
-  // O link só some quando o servidor some com ele: enquanto a hospedagem está
-  // de pé, ele continua levando a algum lugar, e apagá-lo faria a configuração
-  // esconder um endereço que funciona.
-  //
-  // E com o servidor vai a dispensa de conferir a própria chave. Ela é presa ao
-  // endereço (`nossoServidorEm`), e um endereço de rede local volta a ser de
-  // outra máquina no dia seguinte: mantê-la depois de a hospedagem cair seria
-  // dispensar a conferência justamente onde ela passa a valer.
-  if (pararDeHospedar) {
-    esquecerOLinkDaPorta();
-    nossoServidorEm = null;
-  }
+async function limparSessaoEncerrada() {
+  // **As duas saídas desmontam só a sessão** (tarefa 19 da F7). Uma delas, o
+  // SAIR, fechava o servidor hospedado junto; o RECONECTAR já não fechava desde
+  // o A03 da auditoria de 17/09 (ele tirava do ar o endereço em que ia entrar em
+  // seguida). Agora sair não derruba nada, e as duas são a mesma: quem derruba é
+  // o PARAR DE HOSPEDAR, e com ele vão o link da porta e a dispensa de conferir
+  // a própria chave (`camada-hospedagem.js`).
+  await invoke("disconnect");
   mostrarVeredito(null);
   // Tudo o que a tela de sessão guardou daquela sessão — o snapshot desenhado,
   // a Linha aberta, a conversa e a revisão dela, os rascunhos, o arquivo

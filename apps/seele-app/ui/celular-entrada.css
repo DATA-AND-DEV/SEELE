@@ -1,0 +1,386 @@
+/* SEELE — a entrada do celular (F8, Tarefa 10).
+ *
+ * Spec: docs/superpowers/specs/2026-10-09-0.16-celular-design.md, §2.1.
+ *
+ * Uma coluna: a marca no alto (uma forma por tela, docs/marca.md), o que se
+ * confere no meio, e as ações embaixo, ao alcance do polegar. A caixa da
+ * entrada do desktop sai; a seção do celular (`celular-entrada.js`) entra no
+ * lugar dela, dentro de `#tela-boot`, e sai junto quando a sessão abre. */
+
+/* A tela não rola nem centraliza: quem rola é o corpo da entrada, entre a marca
+   e o pé, e o pé fica sempre ao alcance. */
+:root[data-casca="celular"] #tela-boot {
+  overflow: hidden;
+  justify-content: flex-start;
+  padding: 0;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] #tela-boot > .boot-caixa {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-entrada {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  color: var(--seele-osso);
+}
+
+:root[data-casca="celular"] .cel-entrada-marca {
+  padding: calc(var(--cel-seguro-topo) + 16px) calc(16px + var(--cel-seguro-dir)) 8px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-entrada-marca img {
+  display: block;
+  height: 40px;
+  width: auto;
+}
+
+:root[data-casca="celular"] .cel-entrada-corpo {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px calc(16px + var(--cel-seguro-dir)) 16px calc(16px + var(--cel-seguro-esq));
+}
+
+:root[data-casca="celular"] .cel-entrada-pe {
+  display: grid;
+  gap: 8px;
+  padding: 12px calc(16px + var(--cel-seguro-dir)) calc(12px + var(--cel-seguro-pe)) calc(16px + var(--cel-seguro-esq));
+  border-top: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-entrada-pe[hidden] {
+  display: none;
+}
+
+:root[data-casca="celular"] .cel-entrada-acao {
+  width: 100%;
+  min-height: var(--cel-alvo);
+}
+
+:root[data-casca="celular"] .cel-entrada-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-titulo) * var(--cel-escala));
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-titulo:focus {
+  outline: none;
+}
+
+/* O endereço é dado, e não título: mono, sem caixa alta, numa fileira própria. */
+:root[data-casca="celular"] .cel-entrada-endereco {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--seele-mono);
+  font-weight: 400;
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-casca="celular"] .cel-entrada-nota {
+  margin: 12px 0 0;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+  line-height: 1.45;
+}
+
+/* ------------------------------------------------- SERVIDORES DESTE APARELHO */
+
+:root[data-casca="celular"] .cel-entrada-servidores {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+:root[data-casca="celular"] .cel-entrada-servidor {
+  width: 100%;
+  min-height: var(--cel-alvo);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--seele-osso);
+  background: var(--seele-negro-painel);
+  border: var(--seele-b) solid var(--seele-linha);
+  cursor: pointer;
+}
+
+:root[data-casca="celular"] .cel-entrada-servidor-texto {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+}
+
+:root[data-casca="celular"] .cel-entrada-servidor .cel-entrada-nota {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-servidor-nome {
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+/* O que o celular não faz, dito onde o controle estaria: o hospedar. */
+:root[data-casca="celular"] .cel-entrada-fora {
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border: var(--seele-b) dashed var(--seele-linha-forte);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-entrada-fora .rotulo {
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* --------------------------------------------------------- os campos */
+
+:root[data-casca="celular"] .cel-entrada-campo {
+  display: block;
+  margin: 16px 0 6px;
+}
+
+/* A letra do campo nunca abaixo de 16: abaixo disso o iOS amplia a página ao
+   focar. Com o texto do sistema maior, ela cresce com o corpo. */
+:root[data-casca="celular"] .cel-entrada-campo-texto {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--cel-alvo);
+  padding: 8px 10px;
+  font-family: var(--seele-mono);
+  font-size: var(--cel-letra-de-campo);
+  color: var(--seele-osso);
+  background: var(--seele-negro-absoluto);
+  border: var(--seele-b) solid var(--seele-linha-forte);
+  border-radius: var(--seele-raio);
+}
+
+:root[data-casca="celular"] .cel-entrada-campo-texto[aria-invalid="true"] {
+  border-color: var(--seele-vermelho-alerta);
+}
+
+/* ------------------------------------------------------ o que se confere */
+
+/* O rótulo em cima do valor, e não ao lado: com o rótulo na coluna da esquerda,
+   a impressão ficava com 130 px e o quarto grupo de cada fileira saía da tela
+   (medido no protótipo, a 390). A impressão é o dado que se confere; ela tem a
+   largura toda. */
+:root[data-casca="celular"] .cel-entrada-ficha {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  margin: 16px 0 0;
+  padding: 12px;
+  border: var(--seele-b) solid var(--seele-linha);
+  background: var(--seele-negro-painel);
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt {
+  margin: 8px 0 0;
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dt:first-child {
+  margin-top: 0;
+}
+
+:root[data-casca="celular"] .cel-entrada-ficha dd {
+  margin: 0;
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  overflow-wrap: anywhere;
+}
+
+/* Dezesseis grupos de quatro, quatro por fileira. Com o texto do sistema maior
+   os quatro não cabem: cada grupo mantém a largura dele e quebra para a fileira
+   de baixo, e a impressão continua inteira, sem rolar de lado. */
+:root[data-casca="celular"] .cel-entrada-impressao {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  letter-spacing: 0.06em;
+}
+
+:root[data-casca="celular"] .cel-entrada-impressao > span {
+  flex: 0 0 calc((100% - 30px) / 4);
+  min-width: max-content;
+}
+
+/* ------------------------------------------------- os avisos e os desfechos */
+
+:root[data-casca="celular"] .cel-entrada-aviso {
+  margin: 16px 0 0;
+  padding: 12px;
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+  border-left-width: 3px;
+  background: var(--seele-laranja-fraco);
+}
+
+:root[data-casca="celular"] .cel-entrada-aviso[data-tipo="erro"] {
+  border-color: var(--seele-vermelho-alerta);
+  background: var(--seele-vermelho-fraco);
+}
+
+:root[data-casca="celular"] .cel-entrada-aviso-titulo {
+  margin: 0;
+  font-family: var(--seele-display);
+  font-weight: var(--seele-cartela);
+  font-size: calc(var(--seele-t-secao) * var(--cel-escala));
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-aviso .cel-entrada-nota {
+  margin-top: 6px;
+}
+
+:root[data-casca="celular"] .cel-entrada-razao {
+  margin: 6px 0 0;
+  font-family: var(--seele-mono);
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] .cel-entrada-passos {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+}
+
+:root[data-casca="celular"] .cel-entrada-copiado {
+  margin: 12px 0 0;
+  font-size: calc(var(--seele-t-corpo) * var(--cel-escala));
+}
+
+/* -------------------------------------------------------------- conectando
+ *
+ * A única animação da marca (docs/marca.md): o enlace se desenha do nó cheio ao
+ * vazio, e dura o tempo da conexão. Sob movimento reduzido, o símbolo fica
+ * inteiro e parado. */
+
+:root[data-casca="celular"] .cel-entrada-conectando {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 24px;
+  text-align: center;
+}
+
+:root[data-casca="celular"] .cel-entrada-conectando svg,
+:root[data-casca="celular"] .cel-entrada-simbolo-parado {
+  width: 96px;
+  height: 96px;
+}
+
+:root[data-casca="celular"] .cel-entrada-conectando svg path {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: cel-enlace 1200ms linear infinite;
+}
+
+@keyframes cel-enlace {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Sob movimento reduzido, quem para a animação é o `acessibilidade.css`, para
+   tudo. Esta regra é a outra metade: parado, o enlace fica desenhado inteiro, e
+   não no começo do traço, que é invisível. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-casca="celular"] .cel-entrada-conectando svg path {
+    stroke-dashoffset: 0;
+  }
+}
+
+:root[data-casca="celular"] .cel-entrada-conectando #boot-etapa {
+  max-width: 340px;
+  margin: 0;
+  font-size: calc(var(--seele-t-dado) * var(--cel-escala));
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------- a tela de entrada do desktop
+ *
+ * `#tela-auth` numa coluna (D-celular-3): o aperto de um veredito diferente, a
+ * espera da portaria e a entrada direta. As três colunas do desktop pedem uns
+ * 820 px; aqui a entrada vem primeiro, o registro embaixo dela e a ficha do
+ * servidor no fim, e a tela rola por dentro. */
+
+:root[data-casca="celular"] #tela-auth {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--seele-negro-absoluto);
+}
+
+:root[data-casca="celular"] #tela-auth .auth-grade {
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 1fr);
+  padding: calc(var(--cel-seguro-topo) + 8px) calc(16px + var(--cel-seguro-dir)) calc(16px + var(--cel-seguro-pe)) calc(16px + var(--cel-seguro-esq));
+  gap: 16px;
+}
+
+:root[data-casca="celular"] #tela-auth .auth-entrada {
+  padding: 0;
+  border-right: 0;
+  overflow: visible;
+}
+
+:root[data-casca="celular"] #tela-auth .auth-corpo {
+  gap: 16px;
+}
+
+:root[data-casca="celular"] #tela-auth .cartela-padrao {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 12px 16px;
+}
+
+:root[data-casca="celular"] #tela-auth .auth-valor {
+  overflow-wrap: anywhere;
+}
+
+:root[data-casca="celular"] #tela-auth :is(#auth-botao, #auth-voltar) {
+  width: 100%;
+  min-height: var(--cel-alvo);
+}
+
+:root[data-casca="celular"] #tela-auth .auth-aperto,
+:root[data-casca="celular"] #tela-auth .auth-server {
+  padding: 12px 0 0;
+  border: 0;
+  border-top: var(--seele-b) solid var(--seele-linha);
+}
+
+:root[data-casca="celular"] #tela-auth .auth-aperto summary {
+  min-height: var(--cel-alvo);
+  display: flex;
+  align-items: center;
+}
+
+:root[data-casca="celular"] #tela-auth .registro-linhas {
+  overflow-wrap: anywhere;
+}
+
+/* Os textos apagados da tela de entrada passam a 4,5:1 no celular (medidos no
+   caso `entrada-com-aperto` e no `entrada-espera`): a nota do estado, o tom
+   apagado do registro, o subtítulo da ficha e os fatos da espera ficavam entre
+   4,1 e 4,2, e a hora de cada linha do registro a 1,6. O desktop fica com as
+   cores dele. */
+:root[data-casca="celular"] #tela-auth :is(.auth-nota, .registro-hora, .registro-texto[data-tom="apagado"], .auth-server-sub, .auth-espera-fatos) {
+  color: var(--seele-rotulo-claro);
+}

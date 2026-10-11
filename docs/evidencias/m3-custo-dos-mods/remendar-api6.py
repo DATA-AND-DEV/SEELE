@@ -21,6 +21,15 @@ medida de outra coisa.
    ser o mesmo em todos.
 3. **O servidor da medição na 0.16**: `EnabledMod` ganhou `api` (migração 14),
    e o `m3-servidor.rs` da base é o da v0.15.1.
+4. **O falante com o número da voz da 0.16** (achado da F4 e da orquestradora,
+   10/10). Desde o `f3aaf9ce`, o primeiro byte do datagrama de voz é o
+   `MEDIA_HEADER_VERSION` (1), e não mais o `PROTOCOL_VERSION`, e o `decode`
+   recusa outro número. O `m3-falante.rs` da base grava o `PROTOCOL_VERSION`,
+   que é o certo na v0.15.1 (lá o número da voz era ele, e a constante nova não
+   existe), e na 0.16 quem ouve jogava fora todo datagrama do falante: nos sete
+   primeiros cenários com voz da campanha, nada foi decodificado, e o jitter
+   saía 0 exato. Remendo, e não troca no arquivo, para a base continuar
+   compilando com o mesmo `m3-falante.rs`.
 """
 
 import pathlib
@@ -62,6 +71,9 @@ def main():
     trocar(fonte, "crates/seele-server/examples/m3-servidor.rs",
            "server_half: manifesto.server.is_some(),",
            "server_half: manifesto.server.is_some(),\n                    api: manifesto.api,")
+    trocar(fonte, "crates/seele-core/examples/m3-falante.rs",
+           "version: seele_proto::PROTOCOL_VERSION,",
+           "version: seele_proto::MEDIA_HEADER_VERSION,")
 
 
 if __name__ == "__main__":

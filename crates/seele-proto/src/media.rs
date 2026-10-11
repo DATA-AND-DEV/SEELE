@@ -92,7 +92,13 @@ pub enum MediaError {
 /// The fixed part of a media datagram.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MediaHeader {
-    /// O número do layout. Sempre [`MEDIA_HEADER_VERSION`] na saída.
+    /// O número do layout, como o [`Self::decode`] o leu.
+    ///
+    /// **Na saída ele não manda**: o [`Self::encode`] grava sempre
+    /// [`MEDIA_HEADER_VERSION`], qualquer que seja este campo. Um layout que
+    /// só tem um número de saída não aceita outro de quem chama. Achado da M3
+    /// da API 6 (10/10/2026): o falante de medição gravava aqui o número do
+    /// protocolo, o `encode` o escrevia, e quem ouvia recusava toda a voz dele.
     pub version: u8,
     /// Source identifier, assigned by the server on voice room entry.
     ///
@@ -125,7 +131,8 @@ impl MediaHeader {
         let (ssrc, rest) = rest.split_at_mut(4);
         let (seq, timestamp) = rest.split_at_mut(2);
 
-        version.copy_from_slice(&[self.version]);
+        // A constante, e não o campo: ver o doc de `version`.
+        version.copy_from_slice(&[MEDIA_HEADER_VERSION]);
         ssrc.copy_from_slice(&self.ssrc.to_be_bytes());
         seq.copy_from_slice(&self.seq.to_be_bytes());
         timestamp.copy_from_slice(&self.timestamp.to_be_bytes());
@@ -279,6 +286,35 @@ mod tests {
             ),
             "a voz passou a aceitar o número do protocolo, e cada subida voltaria a derrubá-la"
         );
+    }
+
+    /// **O `encode` grava o número do layout, e não o que quem chama pôs no
+    /// campo.** Um cabeçalho com o número do protocolo no campo sai com o
+    /// byte 1, e quem ouve o lê (achado da M3 da API 6, 10/10/2026).
+    #[test]
+    fn o_encode_grava_sempre_o_numero_do_layout() {
+        // O guarda só mede alguma coisa com um número que não é o do layout:
+        // no dia em que os dois coincidirem, ele passaria sem medir nada
+        // (nota da F1 na revisão).
+        assert_ne!(
+            crate::PROTOCOL_VERSION,
+            MEDIA_HEADER_VERSION,
+            "o guarda precisa de um número que não é o do layout"
+        );
+        let cabecalho = MediaHeader {
+            version: crate::PROTOCOL_VERSION,
+            ssrc: 7,
+            seq: 1,
+            timestamp: 960,
+        };
+        let mut saida = [0_u8; HEADER_LEN + 1];
+        cabecalho.encode_datagram(&[0xAB], &mut saida).unwrap();
+        assert_eq!(
+            saida[0], MEDIA_HEADER_VERSION,
+            "o `encode` escreveu o número que quem chama pôs no campo"
+        );
+        let (lido, _) = MediaHeader::decode(&saida).expect("quem ouve lê o que saiu");
+        assert_eq!(lido.version, MEDIA_HEADER_VERSION);
     }
 
     #[test]

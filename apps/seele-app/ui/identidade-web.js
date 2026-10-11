@@ -24,12 +24,19 @@
 // gesto: o link não fica na barra, no histórico nem num favorito. Até a página
 // pedir, ele fica em `linkDaCarga`, que o entrega uma vez.
 //
-// # Quem conecta
+// # Quem conecta, e quem cria
 //
-// A sessão pelo navegador (Tarefa 2.6). Até ela existir, quem cria a
-// identidade passa o `conectar(alvo, apelido, credencial)`, que resolve como o
-// `connect` do desktop e recusa com o `ConnectionError` dele. A bancada passa
-// um servidor de mentira.
+// A sessão pelo navegador (Tarefa 2.6), pelo `connect` da ponte
+// (`conectarPelaPonte`). Quem cria a identidade passa o `conectar(alvo,
+// apelido, credencial)`, que resolve como o `connect` do desktop e recusa com o
+// `ConnectionError` dele; a bancada passa um servidor de mentira.
+//
+// **A página tem uma identidade só**, a de `identidadeDaPagina()` (decidido
+// pela orquestradora em 10/10). Ela mesma abre o link da carga, e a casca nunca
+// toca no token do fragmento: a casca lê o `ler()`, chama as ações e usa o
+// `abrir(texto)` no COLAR UM LINK. Depois do `{ ok: true, resposta }`, quem
+// desenha a sessão é a tela, pelo `depoisDeConectar` do `tela-boot.js`: a
+// identidade não chama a casca, e roda sem ela.
 //
 // # No desktop, nada
 //
@@ -69,6 +76,40 @@ function tomarOLinkDaCarga() {
   const link = linkDaCarga;
   linkDaCarga = null;
   return link;
+}
+
+/**
+ * A entrada pela sessão do navegador: o `connect` da ponte, com o alvo inteiro
+ * (o endereço, a impressão, os hashes e a chave). Até a 2.6, a ponte responde
+ * `AindaNaoNoNavegador`, e o `entrar` resolve `recusado` com essa razão.
+ */
+function conectarPelaPonte(alvo, apelido, credencial) {
+  return invocarNaPonte("connect", { alvo, nickname: apelido, joinSecret: credencial });
+}
+
+let identidadePrometida = null;
+
+/**
+ * A identidade desta página, uma só, com o link da carga já aberto. Uma carga
+ * que falhou não fica guardada: o pedido seguinte tenta de novo, e o link da
+ * carga só é tomado depois de o `.wasm` chegar.
+ */
+function identidadeDaPagina() {
+  if (!identidadePrometida) {
+    identidadePrometida = carregarOWasmDaPagina().then(async ({ instancia }) => {
+      const identidade = criarIdentidadeDoNavegador({
+        analisar: analisadorDoWasm(instancia.exports),
+        conectar: conectarPelaPonte,
+      });
+      const daCarga = tomarOLinkDaCarga();
+      if (daCarga !== null) await identidade.abrir(daCarga);
+      return identidade;
+    });
+    identidadePrometida.catch(() => {
+      identidadePrometida = null;
+    });
+  }
+  return identidadePrometida;
 }
 
 /** O link lido pelo `.wasm` com as regras da página (`analisar_link`). */
@@ -292,27 +333,109 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
     const alvo = { endereco: lido.alvo, alternativos: lido.alternativos ?? [], impressao: lido.impressao, hashes: hashesQueValem(), chave: tentativa.chave };
     // Quem já é conhecido entra pela chave, e o convite não é gasto.
     const credencial = tentativa.conhecido ? null : segredos.credencial;
+    let resposta;
     try {
-      await conectar(alvo, apelido, credencial);
+      resposta = await conectar(alvo, apelido, credencial);
     } catch (erro) {
       const { segue, ...resultado } = desfecho(erro);
       if (!segue) encerrar();
       else if (resultado.erro === "mods-a-aceitar") tentativa.aguardaMods = true;
       return resultado;
     }
-    if (!tentativa.conhecido) {
-      await guardarOServidor({
-        impressao: lido.impressao,
-        endereco: lido.alvo,
-        alternativos: lido.alternativos ?? [],
-        hashes: lido.hashes,
-        ate: lido.ate ?? null,
-        versao: lido.versao ?? null,
-        chave: tentativa.chave,
-      });
-    }
+    // O servidor fica guardado a cada entrada que dá certo, com o relógio dela
+    // (`visto`, a ordem dos SERVIDORES DESTE APARELHO). Os hashes guardados são
+    // os de validade mais longa entre o guardado e o link; o nome do servidor
+    // chega depois, no primeiro retrato (`lembrarONome`).
+    const { conhecido } = tentativa;
+    const doLink = !conhecido || (lido.ate ?? 0) > (conhecido.ate ?? 0);
+    await guardarOServidor({
+      impressao: lido.impressao,
+      endereco: lido.alvo,
+      alternativos: lido.alternativos ?? [],
+      hashes: doLink ? lido.hashes : conhecido.hashes,
+      ate: doLink ? lido.ate ?? null : conhecido.ate ?? null,
+      versao: lido.versao ?? null,
+      chave: tentativa.chave,
+      nome: conhecido ? conhecido.nome ?? null : null,
+      visto: agora(),
+    });
+    // A resposta do `persist()` vai junto: com a tentativa encerrada, o `ler()`
+    // devolve `null`, e é justo agora que a tela tem de dizer se o navegador
+    // vai guardar a chave (achado da F8, 10/10).
+    const { persistencia } = tentativa;
     encerrar();
-    return { ok: true };
+    return { ok: true, resposta, persistencia };
+  }
+
+  /** Se os hashes guardados de um servidor ainda valem. */
+  const hashesValem = (registro) => registro.ate == null || registro.ate * 1000 > agora();
+
+  /** Os SERVIDORES DESTE APARELHO, do mais recente ao mais antigo. */
+  async function conhecidos() {
+    let registros = [];
+    try {
+      registros = await noBanco("readonly", (servidores) => servidores.getAll());
+    } catch {
+      registros = [];
+    }
+    return registros
+      .map((registro) => ({
+        impressao: registro.impressao,
+        endereco: registro.endereco,
+        nome: registro.nome ?? null,
+        versaoDoServidor: registro.versao ?? null,
+        visto: registro.visto ?? null,
+        podeEntrar: hashesValem(registro),
+      }))
+      .sort((a, b) => (b.visto ?? 0) - (a.visto ?? 0));
+  }
+
+  /**
+   * Entra num servidor deste aparelho sem link: pela chave guardada, e sem
+   * convite. Resolve como o `entrar`, e com `link-vencido` quando os hashes
+   * guardados venceram sem a sessão ter trazido novos (os certificados são
+   * curtos, 2.5): a tela pede um link novo.
+   */
+  async function entrarNoConhecido(impressao, apelido) {
+    let registro = null;
+    try {
+      registro = (await servidorConhecido(impressao)) ?? null;
+    } catch {
+      registro = null;
+    }
+    if (!registro) return { erro: "recusado", razao: "servidor-desconhecido" };
+    if (!hashesValem(registro)) return { erro: "link-vencido" };
+    encerrar();
+    tentativa = {
+      lido: {
+        alvo: registro.endereco,
+        alternativos: registro.alternativos ?? [],
+        impressao: registro.impressao,
+        hashes: registro.hashes,
+        ate: registro.ate ?? null,
+        versao: registro.versao ?? null,
+      },
+      conhecido: registro,
+      chave: null,
+      persistencia: null,
+      apelido: null,
+      motivo: null,
+      estado: "ja-conhecido",
+    };
+    return entrar(apelido);
+  }
+
+  /** O nome do servidor, que chega no primeiro retrato depois de entrar. */
+  async function lembrarONome(impressao, nome) {
+    let registro = null;
+    try {
+      registro = (await servidorConhecido(impressao)) ?? null;
+    } catch {
+      registro = null;
+    }
+    if (!registro) return false;
+    await guardarOServidor({ ...registro, nome });
+    return true;
   }
 
   /**
@@ -349,5 +472,16 @@ function criarIdentidadeDoNavegador({ analisar, conectar, agora = relogioDaPagin
     return outcome === "accepted";
   }
 
-  return { ler, abrir, entrar, aceitarOsMods, agoraNao, copiarLink, instalar };
+  return {
+    ler,
+    abrir,
+    entrar,
+    aceitarOsMods,
+    agoraNao,
+    copiarLink,
+    instalar,
+    conhecidos,
+    entrarNoConhecido,
+    lembrarONome,
+  };
 }

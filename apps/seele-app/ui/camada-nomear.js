@@ -215,6 +215,13 @@ async function abrirPerfil(titulo) {
     }
   }
   $("perfil-apelido").value = apelido;
+  // **A capa de quem usa no cabeçalho** (D-capa-1, do dono; rascunho da API 6,
+  // §4, «o SEU PERFIL nativo, por um aplicador do produto»): dentro de uma
+  // sessão, a do `me`; antes de conectar não há pessoa, e a camada sai. O
+  // título e o FECHAR ficam sobre placas (`camada-nomear.css`).
+  if (typeof vestirCapa === "function") {
+    vestirCapa(document.querySelector("#perfil .perfil-cabeca"), snapshot?.me ?? null);
+  }
   // Antes de a caixa aparecer e de o foco chegar ao campo: o leitor de tela lê a
   // descrição do campo nesse instante, e ela tem de estar escrita.
   desenharNotasDoApelido();

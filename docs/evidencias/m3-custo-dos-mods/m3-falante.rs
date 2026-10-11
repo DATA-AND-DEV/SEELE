@@ -15,6 +15,7 @@
 //! ```text
 //! cargo run --release -p seele-conformance --example m3-falante -- \
 //!     <endereco> <sala> <segundos> [--calado] [--apelido <nome>] [--mensagens <n>]
+//!     [--calados <n>]
 //! ```
 //!
 //! **As opções da campanha da API 6** (tarefa 11 do plano da F3), sem mudar o
@@ -23,6 +24,14 @@
 //! recusa o mesmo apelido com outra chave); `--mensagens <n>` posta `n`
 //! mensagens no canal 1 ao entrar (a região `conversa.mensagem` precisa de
 //! mensagens); a sala 0 é «não entrar em sala».
+//!
+//! **`--calados <n>`** (a `carga-cartoes`, 10/10): `n` participantes calados num
+//! processo só, `<apelido>-000` em diante. Num processo por participante, os
+//! 250 da lista pesariam na máquina medida. Eles entram no ritmo da portaria
+//! (`taxa.rs`: 30 apertos de rajada por endereço, repostos a 30 por minuto; todos
+//! saem de 127.0.0.1, e o app também): 28 de uma vez, e depois um a cada 2,05 s,
+//! tentando de novo quando recusados. Cada um drena o que chega, e uma queda vai
+//! ao stderr com o motivo. Prontos, eles dizem `M3 calados prontos=<n>`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::cast_precision_loss,
          clippy::cast_possible_truncation, clippy::indexing_slicing)]
 
@@ -35,16 +44,72 @@ use std::{net::SocketAddr, sync::Arc, time::{Duration, Instant}};
 
 const QUADRO: usize = 960; // 20 ms a 48 kHz, mono
 
-async fn entrar(endereco: SocketAddr, chave: &SigningKey, apelido: &str) -> Result<Client> {
+/// Entra aceitando o conjunto de MODs que o servidor exigir. O conjunto aceito
+/// fica em `aceito` e vai já na primeira tentativa da entrada seguinte: sem
+/// isto, cada calado gastava dois apertos (a recusa e a volta com o sim), e a
+/// portaria recusava a partir do 15º (medido em 10/10, `RateLimited`).
+async fn entrar(endereco: SocketAddr, chave: &SigningKey, apelido: &str,
+                aceito: &mut Option<String>) -> Result<Client> {
     let pins = Arc::new(MemoryPinStore::new());
     match Client::connect(endereco, "localhost", &endereco.to_string(), apelido, chave,
-                          pins.clone(), None, None).await {
+                          pins.clone(), None, aceito.as_deref()).await {
         Ok(cliente) => Ok(cliente),
-        Err(ConnectError::ModsNaoAceitos { conjunto, .. }) => Ok(Client::connect(
-            endereco, "localhost", &endereco.to_string(), apelido, chave, pins,
-            None, Some(&conjunto)).await?),
+        Err(ConnectError::ModsNaoAceitos { conjunto, .. }) => {
+            let cliente = Client::connect(endereco, "localhost", &endereco.to_string(), apelido,
+                                          chave, pins, None, Some(&conjunto)).await?;
+            *aceito = Some(conjunto);
+            Ok(cliente)
+        }
         Err(outro) => Err(outro.into()),
     }
+}
+
+/// Os apertos que a portaria aceita de um endereço numa rajada (30), menos os
+/// do app, que sai do mesmo 127.0.0.1; e o ritmo em que ela os repõe (30 por
+/// minuto), com folga.
+const RAJADA: usize = 28;
+const RITMO: Duration = Duration::from_millis(2050);
+
+/// `n` calados num processo só: entram no ritmo da portaria, drenam o que chega
+/// até o prazo, e dizem quando estão todos dentro.
+async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos: u64) -> Result<()> {
+    let comeco = Instant::now();
+    let fim = comeco + Duration::from_secs(segundos);
+    let mut tarefas = Vec::with_capacity(n);
+    let mut aceito = None;
+    for i in 0..n {
+        if i >= RAJADA {
+            tokio::time::sleep(RITMO).await;
+        }
+        let apelido = format!("{prefixo}-{i:03}");
+        let chave = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
+        let mut tentativas = 0;
+        let mut cliente = loop {
+            match entrar(endereco, &chave, &apelido, &mut aceito).await {
+                Ok(cliente) => break cliente,
+                Err(erro) if tentativas < 30 => {
+                    tentativas += 1;
+                    eprintln!("M3 calado {apelido} recusado ({erro}); de novo em {} ms", RITMO.as_millis());
+                    tokio::time::sleep(RITMO).await;
+                }
+                Err(erro) => return Err(erro.context(format!("{apelido} não entrou"))),
+            }
+        };
+        tarefas.push(tokio::spawn(async move {
+            while Instant::now() < fim {
+                if let Ok(Err(erro)) = tokio::time::timeout(Duration::from_millis(500), cliente.next_event()).await {
+                    eprintln!("M3 calado {apelido} caiu: {erro}");
+                    return;
+                }
+                while let Ok(Ok(_)) = tokio::time::timeout(Duration::ZERO, cliente.next_media()).await {}
+            }
+        }));
+    }
+    println!("M3 calados prontos={n} em {:.0} s", comeco.elapsed().as_secs_f64());
+    for tarefa in tarefas {
+        let _ = tarefa.await;
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -54,16 +119,21 @@ async fn main() -> Result<()> {
     let sala: u32 = args.next().context("falta a sala")?.parse()?;
     let segundos: u64 = args.next().context("faltam os segundos")?.parse()?;
     let (mut calado, mut apelido, mut mensagens) = (false, "falante-m3".to_owned(), 0_u64);
+    let mut calados = 0_usize;
     while let Some(opcao) = args.next() {
         match opcao.as_str() {
             "--calado" => calado = true,
             "--apelido" => apelido = args.next().context("falta o apelido")?,
             "--mensagens" => mensagens = args.next().context("falta o número")?.parse()?,
+            "--calados" => calados = args.next().context("falta o número")?.parse()?,
             outra => anyhow::bail!("opção desconhecida: {outra}"),
         }
     }
+    if calados > 0 {
+        return muitos_calados(endereco, calados, &apelido, segundos).await;
+    }
     let chave = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-    let mut cliente = entrar(endereco, &chave, &apelido).await?;
+    let mut cliente = entrar(endereco, &chave, &apelido, &mut None).await?;
     for n in 0..mensagens {
         cliente.send_message(ChannelId(1), &format!("mensagem {n} da carga M3"), ClientMessageId(n + 1)).await?;
     }
@@ -106,6 +176,11 @@ async fn main() -> Result<()> {
         let opus = codificador.encode(&amostras)?;
         seq = seq.wrapping_add(1);
         let cabecalho = MediaHeader {
+            // O número da voz da v0.15.1, onde ele é o do protocolo. Na 0.16 a
+            // voz tem número próprio (`MEDIA_HEADER_VERSION`, desde o
+            // `f3aaf9ce`), e a campanha da API 6 o troca na cópia
+            // (`remendar-api6.py`, item 4): com o daqui, quem ouve na 0.16
+            // jogava fora todo datagrama.
             version: seele_proto::PROTOCOL_VERSION,
             ssrc,
             seq,

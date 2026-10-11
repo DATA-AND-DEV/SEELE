@@ -45,6 +45,22 @@ fn read(relative: &str) -> String {
         .replace("\r\n", "\n")
 }
 
+/// Os tipos que atravessam a ponte, nos dois arquivos em que moram.
+///
+/// O `Snapshot` e o resto ficam em `seele-ffi/src/types.rs`. Os tipos de vista
+/// que saem do `Room` (os motivos de aviso e de fim, as salas, a tela, o
+/// pedido e a prioridade) foram para `seele-sessao/src/retrato.rs` na fase 2
+/// da Tarefa 2.2 da F4, porque o navegador monta o mesmo retrato; o
+/// `seele-ffi` os reexporta. Os guardas que liam o primeiro arquivo leem os
+/// dois juntos, que é o texto que o primeiro tinha antes.
+fn tipos_da_ponte() -> String {
+    format!(
+        "{}\n{}",
+        read("../../crates/seele-ffi/src/types.rs"),
+        read("../../crates/seele-sessao/src/retrato.rs")
+    )
+}
+
 /// Every file directly in `ui/` with this extension, by name.
 ///
 /// The frontend is six scripts and six stylesheets rather than one of each, so
@@ -604,6 +620,11 @@ fn every_command_the_frontend_calls_is_registered() {
 // em 2026-10-10, entre a metade do Rust e a da casca, no ramo `0.16/sala-viva`,
 // e saíram quando a faixa `#toque` e o PERFIL passaram a chamá-los. A lista
 // voltou ao estado de repouso, que é vazia.
+//
+// `meu_servidor` e `parar_de_hospedar` (tarefas 19 e 20 da F7) estiveram aqui
+// entre o Rust e a tela: saíram quando a trilha e a entrada (o VOLTAR AO MEU
+// SERVIDOR e o PARAR DE HOSPEDAR) passaram a chamá-los. A lista voltou a ser
+// vazia.
 const AGUARDANDO_TELA: &[&str] = &[];
 
 #[test]
@@ -2128,10 +2149,10 @@ fn leaving_forgets_the_invite_that_let_us_in() {
     // that `connect` checks against comes from this slot. Left behind, the next
     // connection to a different server would be checked against the previous
     // link's promise and refused for a reason nobody could explain.
-    // A limpeza mudou de casa com o A03 da auditoria: `disconnect` e
-    // `desmontar_a_sessao` dividem `desmontar_o_cliente`, e é ele quem recolhe
-    // a conexão e o convite. Cobrar no auxiliar é cobrar nas duas saídas de uma
-    // vez — e o guarda continua falhando se alguém tirar a linha de lá.
+    // A limpeza mudou de casa com o A03 da auditoria: é `desmontar_o_cliente`
+    // quem recolhe a conexão e o convite. Desde a tarefa 19 da F7 a saída é uma
+    // só, o `disconnect` (o `desmontar_a_sessao` era o mesmo verbo e saiu), e o
+    // guarda continua falhando se alguém tirar a linha do auxiliar.
     let source = read("src/main.rs");
     let body = body_of(&source, "fn desmontar_o_cliente");
     assert!(
@@ -2139,14 +2160,12 @@ fn leaving_forgets_the_invite_that_let_us_in() {
         "quem desmonta a sessão larga a conexão mas guarda o convite, e a impressão \
          prometida por um link anterior sobrevive à sessão a que ela pertencia"
     );
-    // E as duas saídas passam por ele: uma delas que não passasse levaria o
-    // convite adiante sem nada dizer.
-    for saida in ["async fn disconnect", "async fn desmontar_a_sessao"] {
-        assert!(
-            body_of(&source, saida).contains("desmontar_o_cliente"),
-            "`{saida}` não desmonta a sessão de cliente"
-        );
-    }
+    // E a saída passa por ele: uma que não passasse levaria o convite adiante
+    // sem nada dizer.
+    assert!(
+        body_of(&source, "async fn disconnect").contains("desmontar_o_cliente"),
+        "`disconnect` não desmonta a sessão de cliente"
+    );
 }
 
 #[test]
@@ -3924,22 +3943,37 @@ fn entering_another_server_leaves_this_one_and_says_so_with_both_names() {
          to happen without saying to what: {frase}"
     );
 
-    // The channel that only a host sees, and the only one that changes the answer:
-    // for them, switching is not leaving a conversation, it is closing
-    // everybody's.
+    // The sentence that only somebody on their own server sees. Since the F7's
+    // task 19 leaving does not take the server down: the sentence says it
+    // **stays** up, and how to come back, and never that it falls with you.
     assert!(
-        frase.contains("hospedando"),
-        "the consequence is the same whether or not this computer is the one \
-         hosting the server being left — and for the host it is not: {frase}"
+        frase.contains("noMeuServidor") && frase.contains("oMeuServidorContinua("),
+        "the consequence is the same whether or not the session is on this \
+         computer's own server — and for its host it is not: {frase}"
     );
-    // The call itself, and not the name: the `console.warn` in the same body
-    // says `estado_da_porta` too, so a check on the word alone stays green with
-    // the question deleted and only the failure branch left behind.
-    let hospeda = js_function(&sessao, "async function hospedandoAqui(");
+    let continua = js_function(&sessao, "function oMeuServidorContinua(");
     assert!(
-        hospeda.contains("invoke(\"estado_da_porta\")"),
-        "the screen decides on its own whether this window is hosting, instead \
-         of asking the side that knows: {hospeda}"
+        continua.contains("continua no ar") && continua.contains("VOLTAR AO MEU SERVIDOR"),
+        "the sentence for leaving one's own server no longer says it stays up, and \
+         how to come back: {continua}"
+    );
+    for frase_toda in [&frase, &continua] {
+        assert!(
+            !frase_toda.contains("cai junto"),
+            "the sentence still promises the server falls with you, and leaving does \
+             not take anything down any more: {frase_toda}"
+        );
+    }
+    // The call itself, and not the name: the `console.warn` in the same body
+    // says `onde_estou` too, so a check on the word alone stays green with the
+    // question deleted and only the failure branch left behind. `onde_estou` is
+    // the one answer to «am I on my server?» (Plan 2), by key since the F5's
+    // batch X.
+    let hospeda = js_function(&sessao, "async function estouNoMeuServidor(");
+    assert!(
+        hospeda.contains("invoke(\"onde_estou\")") && hospeda.contains("\"Guardado\""),
+        "the screen decides on its own whether the session is on this window's \
+         server, instead of asking the side that knows: {hospeda}"
     );
 }
 
@@ -6598,7 +6632,7 @@ fn destroying_a_room_is_offered_by_the_permission_that_destroys_it() {
 
     // And it is a permission of its own on the bridge, rather than a second
     // reading of one that was already there.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("may_delete_rooms"),
         "the snapshot has no field for the permission that destroys rooms, so \
@@ -6640,7 +6674,7 @@ fn a_room_that_stopped_existing_has_a_sentence_and_not_a_shrug() {
     );
 
     // Every one of the three has to be a reason the bridge can actually produce.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     for reason in ["VoiceRoomDeleted", "ChannelDeleted", "LastVoiceRoom"] {
         assert!(
             types.contains(reason),
@@ -6701,7 +6735,7 @@ fn o_palco_le_o_que_foi_pedido_do_snapshot_e_nao_da_memoria_da_janela() {
     // E o campo existe do outro lado da ponte. Sem esta metade o `?? null` do
     // palco leria `undefined` para sempre e a coluna do pedido ficaria vazia
     // sem nada falhar.
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("pub pedido: Option<LimitesDeTela>"),
         "`TelaEmCurso` não carrega o que foi pedido, e o palco lê um campo que \
@@ -6744,7 +6778,7 @@ fn a_tela_parada_por_falta_de_subida_do_anfitriao_nao_acusa_quem_le() {
          confusão pela qual esta razão existe:{frase}"
     );
 
-    let types = read("../../crates/seele-ffi/src/types.rs");
+    let types = tipos_da_ponte();
     assert!(
         types.contains("ScreenShareOverHostUplink"),
         "`AVISOS` escreve uma frase para uma razão que `NoticeReason` não pode \
@@ -7257,7 +7291,7 @@ fn the_bridge_maps_every_refusal_the_wire_can_carry() {
     else {
         panic!("`AttachmentRefusal` is gone from the protocol");
     };
-    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let ponte = without_comments(&tipos_da_ponte());
     let Some(espelho) = ponte
         .split("pub enum AttachmentRefusal {")
         .nth(1)
@@ -7879,9 +7913,7 @@ fn every_reason_a_session_can_end_with_has_a_sentence_in_the_page() {
     //
     // Read from the bridge's own source rather than from a list here, so the
     // next variant fails this on the run it is added.
-    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
-        .expect("the bridge's types must be readable")
-        .replace("\r\n", "\n");
+    let ponte = tipos_da_ponte();
 
     let script = without_comments(&scripts());
     let Some(motivos) = script.split("const MOTIVOS = {").nth(1) else {
@@ -9223,7 +9255,7 @@ fn um_anexo_que_nao_foi_salvo_diz_por_que() {
     // `Transfer::NotSaved` carrega o motivo, e um motivo que a ponte manda e a
     // tela não lê é o produto sabendo e não contando. «Tente de novo» para um
     // nome que vai ser recusado de novo é a frase errada, e é a que sobraria.
-    let ponte = without_comments(&read("../../crates/seele-ffi/src/types.rs"));
+    let ponte = without_comments(&tipos_da_ponte());
     let Some(enumeracao) = ponte
         .split("pub enum NotSavedReason {")
         .nth(1)
@@ -10828,7 +10860,25 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
             "identidade-web.js",
             "const credencial = tentativa.conhecido ? null : segredos.credencial;",
         ),
-        ("identidade-web.js", "await conectar(alvo, apelido, credencial);"),
+        (
+            "identidade-web.js",
+            "resposta = await conectar(alvo, apelido, credencial);",
+        ),
+        // O `conectar` da identidade da página: o `connect` da ponte, que na
+        // 2.6 é a sessão pelo navegador. A credencial vai ao `connect`, e a
+        // nenhum outro lugar.
+        (
+            "identidade-web.js",
+            "function conectarPelaPonte(alvo, apelido, credencial) {",
+        ),
+        (
+            "identidade-web.js",
+            "return invocarNaPonte(\"connect\", { alvo, nickname: apelido, joinSecret: credencial });",
+        ),
+        // Quem toma o link da carga: a função e a identidade da página, e
+        // ninguém mais (a casca nunca toca no token do fragmento).
+        ("identidade-web.js", "function tomarOLinkDaCarga() {"),
+        ("identidade-web.js", "const daCarga = tomarOLinkDaCarga();"),
         // O COPIAR O LINK da tela «ENTRAR EM»: no iOS o link não atravessa a
         // instalação, e a pessoa o leva copiado (o plano da 3.4 e o da F8).
         ("identidade-web.js", "if (!segredos.link) return false;"),
@@ -10871,6 +10921,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 "recusaDoApelido",
                 "segredos",
                 "linkDaCarga",
+                "tomarOLinkDaCarga",
             ]
             .iter()
             .any(|nome| names(linha, nome))
@@ -10931,7 +10982,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
         }
     }
 
-    // 3. Só três chamadas de `conectar` passam credencial por argumento (a do
+    // 2b. **E nenhum outro script toca no link da carga** (decidido pela
+    // orquestradora em 10/10): quem o toma é a identidade da página, e a casca
+    // nunca vê o token que veio no fragmento.
+    for nome in ui_files(".js") {
+        if nome == "identidade-web.js" {
+            continue;
+        }
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for segredo in ["tomarOLinkDaCarga", "linkDaCarga"] {
+            assert!(
+                !names(&texto, segredo),
+                "`{nome}` toca em `{segredo}`: o link da carga leva o token do convite, e só \
+                 a identidade da página o toma (`identidadeDaPagina`)"
+            );
+        }
+    }
+
+    // 3. Só quatro chamadas de `conectar` passam credencial por argumento (a do
     //    apelido tomado, `conectar` anexa sozinho: ver a parte 6).
     const LEVAM: &[(&str, &str)] = &[
         ("camada-servidores.js", "alvo, apelido || undefined, token"),
@@ -11133,7 +11201,7 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
          e do campo da configuração; confira que ele não vai a `tracing`, a arquivo \
          nem a resposta nenhuma da ponte"
     );
-    let tipos = read("../../crates/seele-ffi/src/types.rs");
+    let tipos = tipos_da_ponte();
     let Some((_, depois)) = tipos.split_once("pub struct Snapshot {") else {
         panic!("o `Snapshot` da FFI mudou de forma, e este guarda ficou cego");
     };
@@ -11912,12 +11980,17 @@ fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after
 
     // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
     // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
-    // dispensar a conferência justamente onde ela passa a valer.
-    let fim = read("ui/tela-fim.js");
+    // dispensar a conferência justamente onde ela passa a valer. Desde a tarefa
+    // 19 da F7 quem derruba o servidor é o PARAR DE HOSPEDAR, e é ele que a zera
+    // (a tela de fim zerava quando o SAIR derrubava).
+    let parar = js_function(
+        &read("ui/camada-hospedagem.js"),
+        "async function pararDeHospedarOMeuServidor(",
+    );
     assert!(
-        fim.contains("nossoServidorEm = null"),
+        parar.contains("invoke(\"parar_de_hospedar\")") && parar.contains("nossoServidorEm = null"),
         "nada zera a dispensa quando a hospedagem cai, e o mesmo endereço na mão \
-         de outra máquina herdaria a dispensa"
+         de outra máquina herdaria a dispensa:\n{parar}"
     );
 
     // **E a bandeira tem de decidir alguma coisa do outro lado.**
@@ -12634,22 +12707,12 @@ fn opening_a_stream_asks_for_a_key_frame() {
 /// de um arquivo de script não tem esse acidente — então tem este guarda.
 #[test]
 fn the_variant_names_the_shell_sends_are_the_ones_the_wire_uses() {
-    let ffi = std::fs::read_to_string(
-        app_dir()
-            .join("..")
-            .join("..")
-            .join("crates")
-            .join("seele-ffi")
-            .join("src")
-            .join("types.rs"),
-    )
-    .expect("`seele-ffi/src/types.rs` é onde os tipos da ponte moram")
-    // O mesmo `\r\n` que `read` normaliza, e que este teste não usava por ler
-    // fora de `ui/`. No Windows ele reprovava aqui dizendo que `Prioridade`
-    // deixou de ser minúscula, num arquivo em que ela é — porque a comparação é
-    // um `ends_with` que termina em `\n`. Achado rodando a bateria numa máquina
-    // Windows de verdade.
-    .replace("\r\n", "\n");
+    // O mesmo `\r\n` que `read` normaliza: `tipos_da_ponte` lê por ele. Este
+    // teste lia à parte, sem a normalização, e no Windows reprovava aqui dizendo
+    // que `Prioridade` deixou de ser minúscula, num arquivo em que ela é —
+    // porque a comparação é um `ends_with` que termina em `\n`. Achado rodando a
+    // bateria numa máquina Windows de verdade.
+    let ffi = tipos_da_ponte();
 
     // As variantes de `Prioridade`, como o serde as escreve no fio.
     let Some(depois) = ffi.split("pub enum Prioridade {").nth(1) else {
@@ -13335,14 +13398,15 @@ fn o_rodape_do_operador_muda_de_oficio_com_a_sala() {
 }
 
 #[test]
-fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
-    // A regra está escrita em `pedirTrocaDeServidor`, e este guarda a estende
-    // para o rodapé: uma caixa que repete o rótulo do botão é a caixa que treina
-    // a apertar duas vezes sem ler. `SAIR DO SERVIDOR` diz o que faz.
+fn sair_do_servidor_nao_pergunta_porque_nada_cai() {
+    // **A tarefa 19 da F7 virou este guarda do avesso.** Ele cobrava que o
+    // SAIR DO SERVIDOR perguntasse antes de sair, porque um servidor hospedado
+    // neste computador caía junto, com todo mundo dentro — a parte que o rótulo
+    // não dizia. Sair não derruba mais nada: o rótulo conta tudo, e uma caixa
+    // que o repete é a caixa que treina a apertar duas vezes sem ler.
     //
-    // O que ele **não** diz é que um servidor hospedado neste computador cai
-    // junto, e todo mundo que estiver dentro sai. Essa é a parte que a caixa
-    // existe para escrever — e é a única que a justifica aqui.
+    // O que ele cobra agora: fora de uma sala, o botão sai direto, sem caixa e
+    // sem derrubar o servidor; dentro de uma sala, ele larga a sala.
     let chamada = without_comments(&read("ui/tela-chamada.js"));
     let saida = chamada
         .split("$(\"operador-sair\").addEventListener")
@@ -13352,16 +13416,16 @@ fn sair_do_servidor_so_pergunta_quando_o_rotulo_nao_conta_tudo() {
         .to_owned();
 
     assert!(
-        saida.contains("hospedandoAqui"),
-        "a saída do servidor não pergunta se este computador hospeda, então ela \
-         derruba o servidor de todo mundo sem avisar:\n{saida}"
+        saida.contains("sairDoServidorParaAEntrada()"),
+        "o SAIR DO SERVIDOR não sai mais do servidor:\n{saida}"
     );
-    let pergunta = saida.find("hospedandoAqui").unwrap_or(usize::MAX);
-    let caixa = saida.find("abrirConfirmacao").unwrap_or(usize::MAX);
-    assert!(
-        pergunta < caixa,
-        "a caixa abre antes de saber se há o que avisar:\n{saida}"
-    );
+    for ruido in ["abrirConfirmacao", "parar_de_hospedar", "hospedandoAqui"] {
+        assert!(
+            !saida.contains(ruido),
+            "o SAIR DO SERVIDOR voltou a `{ruido}`: ou pergunta o que o rótulo já diz, ou \
+             derruba o servidor de quem estiver nele:\n{saida}"
+        );
+    }
     assert!(
         saida.contains("leave_voice_room"),
         "o mesmo botão dentro de uma sala tem que largar a sala, e não o \
@@ -16062,74 +16126,39 @@ fn nenhum_id_aparece_duas_vezes_na_pagina() {
     );
 }
 
-/// RECONECTAR não passa pelo verbo que derruba a hospedagem.
+/// **Nenhuma saída da tela de fim derruba o servidor** (A03 da auditoria de
+/// 17/09, e a tarefa 19 da F7).
 ///
-/// **A03 da auditoria de 17/09.** `reconectar` chamava `limparSessaoEncerrada`,
-/// que chamava `disconnect` — e `disconnect` recolhe a conexão **e** a
-/// hospedagem, com `encerrar().await`. Em seguida ele tentava entrar no
-/// endereço que acabara de tirar do ar. Quem hospedava e teve a sessão local
-/// encerrada, inclusive por uma troca de MODs, apertava um botão que promete
-/// voltar e desligava o próprio servidor, levando junto quem estava dentro.
+/// O RECONECTAR passava pelo verbo que derrubava a hospedagem, e tirava do ar o
+/// endereço em que ia entrar em seguida: a cura de então foi um segundo verbo,
+/// e uma escolha em cada chamada (`pararDeHospedar`). Desde a 19, sair não
+/// derruba nada: as duas saídas desmontam só a sessão, pelo `disconnect`, e o
+/// verbo que derruba (`parar_de_hospedar`) não aparece nesta tela.
 ///
-/// **O que este guarda não prova.** A aceitação que a auditoria pede é de duas
-/// máquinas — anfitrião e convidado, encerrar só a sessão local, ver que a
-/// escuta continua e o convidado não cai. Isso precisa de campo. O que se cobra
-/// aqui é a única metade que um teste de texto alcança: que a intenção esteja
-/// escrita na chamada, e que ninguém possa chamar a limpeza sem escolher.
+/// **O que este guarda não prova.** A aceitação da auditoria é de duas
+/// máquinas: anfitrião e convidado, encerrar só a sessão local, ver que a
+/// escuta continua e o convidado não cai. Isso precisa de campo; o que se cobra
+/// aqui é a metade que um teste de texto alcança.
 #[test]
-fn reconectar_desmonta_a_sessao_sem_fechar_o_servidor() {
+fn nenhuma_saida_da_tela_de_fim_derruba_o_servidor() {
     let fonte = without_comments(&read("ui/tela-fim.js"));
-
-    let corpo = |nome: &str| -> String {
-        let Some(de) = fonte.find(&format!("function {nome}(")) else {
-            panic!("`{nome}` saiu de `tela-fim.js`; se foi de propósito, ajuste este guarda");
-        };
-        // Até a próxima declaração de topo, que é o fim prático do corpo. O
-        // `+1` pula o `f` do próprio `function`, para que a busca pela próxima
-        // não encontre esta — e a fatia começa em `de` para a mensagem de falha
-        // sair com o nome inteiro.
-        let resto = fonte.get(de..).unwrap_or("");
-        let busca = resto.get(1..).unwrap_or("");
-        let ate = busca
-            .find("\nasync function ")
-            .or_else(|| busca.find("\nfunction "))
-            .map(|n| n + 1);
-        resto
-            .get(..ate.unwrap_or(resto.len()))
-            .unwrap_or("")
-            .to_owned()
-    };
-
-    let reconectar = corpo("reconectar");
     assert!(
-        reconectar.contains("pararDeHospedar: false"),
-        "RECONECTAR tem de dizer que a hospedagem fica de pé: {reconectar}"
+        !fonte.contains("parar_de_hospedar") && !fonte.contains("pararDeHospedar"),
+        "a tela de fim voltou a escolher derrubar o servidor: quem RECONECTA ou SAI \
+         de uma sessão que acabou tiraria do ar o servidor de quem ficou"
     );
-
-    let sair = corpo("sairParaAEntrada");
+    let limpar = js_function(&fonte, "async function limparSessaoEncerrada(");
     assert!(
-        sair.contains("pararDeHospedar: true"),
-        "SAIR fecha o assunto, e o anfitrião fecha junto: {sair}"
+        limpar.contains("invoke(\"disconnect\")"),
+        "a tela de fim não desmonta mais a sessão que acabou:\n{limpar}"
     );
-
-    // E ninguém chama a limpeza sem escolher: um `limparSessaoEncerrada()` sem
-    // argumento estoura ao desestruturar, e um com o padrão errado seria o
-    // defeito de volta em silêncio.
-    for (at, _) in fonte.match_indices("limparSessaoEncerrada(") {
-        // A própria declaração casa com o mesmo texto, e ela é a que **recebe**
-        // o argumento em vez de passá-lo.
-        if fonte
-            .get(..at)
-            .is_some_and(|antes| antes.ends_with("function "))
-        {
-            continue;
-        }
-        let depois = fonte
-            .get(at + "limparSessaoEncerrada(".len()..)
-            .unwrap_or("");
+    for saida in [
+        "async function reconectar(",
+        "async function sairParaAEntrada(",
+    ] {
         assert!(
-            depois.starts_with("{ pararDeHospedar:"),
-            "esta chamada a `limparSessaoEncerrada` não diz o que fazer com a hospedagem"
+            js_function(&fonte, saida).contains("limparSessaoEncerrada()"),
+            "`{saida}` não passa pela limpeza da sessão que acabou"
         );
     }
 }
@@ -18833,9 +18862,7 @@ fn todo_motivo_de_aviso_tem_frase_na_pagina() {
     //
     // Lido da fonte da ponte, e não de uma lista daqui, para a próxima
     // variante reprovar na rodada em que entrar.
-    let ponte = std::fs::read_to_string(app_dir().join("../../crates/seele-ffi/src/types.rs"))
-        .expect("the bridge's types must be readable")
-        .replace("\r\n", "\n");
+    let ponte = tipos_da_ponte();
 
     let script = without_comments(&scripts());
     let Some(avisos) = script.split("const AVISOS = {").nth(1) else {
@@ -19606,7 +19633,37 @@ fn a_faixa_do_toque_chama_nao_toma_a_tela_e_nenhum_mod_sabe_dela() {
     // servidor ao atender.
     let entrar = js_function(&toque, "async function entrarNaSalaAoAtender(");
     assert!(
-        entrar.contains("ejetar(true)") && !entrar.contains("\"disconnect\""),
+        entrar.contains("ejetar()") && !entrar.contains("parar_de_hospedar"),
         "o ATENDER não desmonta só o cliente:\n{entrar}"
+    );
+}
+
+/// **Sair não derruba o servidor de ninguém** (tarefa 19 da F7, Plano 2).
+///
+/// O `disconnect` desmontava a sessão **e** o servidor que esta janela
+/// hospedava, e todo mundo que estava nele saía junto com quem só queria ir a
+/// outro lugar. Agora ele desmonta só o cliente, e quem derruba o guardado é o
+/// `parar_de_hospedar`, que a pessoa aperta sabendo o que faz. Este guarda fica
+/// vermelho se o corpo do `disconnect` voltar a tocar nas hospedagens.
+#[test]
+fn sair_nao_derruba_o_servidor_de_ninguem() {
+    let main = read("src/main.rs");
+    let sair = body_of(&main, "async fn disconnect(");
+    assert!(
+        sair.contains("desmontar_o_cliente"),
+        "o `disconnect` não desmonta mais a sessão de cliente:\n{sair}"
+    );
+    for derruba in ["hospedag", ".encerrar(", ".despedir(", "parar_de_hospedar"] {
+        assert!(
+            !sair.contains(derruba),
+            "o `disconnect` voltou a mexer nas hospedagens (`{derruba}`): sair de uma \
+             sessão derrubaria o servidor de quem estiver nele:\n{sair}"
+        );
+    }
+    let parar = body_of(&main, "async fn parar_de_hospedar_em(");
+    assert!(
+        parar.contains("guardado.take()") && !parar.contains("pessoal"),
+        "o `parar_de_hospedar` não derruba o guardado, ou mexe na sala, que desce pelo \
+         «receber ligações»:\n{parar}"
     );
 }

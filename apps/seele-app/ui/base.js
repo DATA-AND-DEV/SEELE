@@ -108,7 +108,11 @@ function elemento(tag, classe, texto) {
 //   - `avisoDeFone`: a frase do aviso de fone (P9);
 //   - `fraseDoModo`: como o microfone abre, na faixa de contexto de
 //     CONFIGURAÇÕES. Recebe o modo e a frase do desktop, e o padrão a devolve:
-//     a frase, com o nome da tecla, continua no `tela-server.js`.
+//     a frase, com o nome da tecla, continua no `tela-server.js`;
+//   - `entradaDireta`: se a casca dispensa o aperto da tela de entrada para
+//     este veredito (P11, em `entrarNaAutenticacao`; D-celular-3). Devolve
+//     `null`, e o aperto aparece como hoje, ou as frases do registro e do
+//     anúncio da entrada direta. O passo de entrar roda igual nos dois casos.
 //
 // Selado, e não congelado: a casca troca os valores, e ninguém acrescenta
 // campo. Um campo novo é um ponto novo, e entra aqui com o nome dele.
@@ -118,6 +122,7 @@ const CASCA = Object.seal({
   enterEnvia: true,
   avisoDeFone: () => AVISO_DE_FONE,
   fraseDoModo: (_modo, doDesktop) => doDesktop,
+  entradaDireta: (_veredito, _deOnde) => null,
 });
 
 // --------------------------------------------------------------- o snapshot
@@ -2926,6 +2931,21 @@ function escreverAsRegioesDoTema(emVigor) {
     }
     if (typeof regioes[regiao].fundo === "string") escrever[TEMA_DA_API.painel] = daRegiao.painel;
     Object.assign(escrever, tonsDoTema(daRegiao, corDaRaiz).tons);
+    // **A cor do texto, resolvida no contêiner** (achado da F8, 10/10): quem
+    // está dentro e não declara cor herda a de `#tela-sessao`, já resolvida com
+    // o token da sessão — numa região clara, um texto de contribuição saía a
+    // 1,09:1. Declarada aqui, ela lê o texto da região; e sai junto com os
+    // tokens, na troca seguinte. No contêiner que a casca declara também.
+    escrever.color = `var(${TEMA_DA_API.texto})`;
+    // **E o fundo, só quando a região o declara** (a orquestradora, 10/10).
+    // Quatro contêineres são transparentes (`.linha-barra`, `#compositor-mods`,
+    // `#form-mensagem`, `#lista-mensagens`), e o `fundo` de uma região neles
+    // nunca apareceu: o tema era dado como aplicado e a tela não mudava. Uma
+    // região que só muda o `texto` não escreve fundo nenhum, e cada contêiner
+    // fica com o de hoje.
+    if (typeof regioes[regiao].fundo === "string") {
+      escrever["background-color"] = `var(${TEMA_DA_API.fundo})`;
+    }
     const daCasca = typeof CELULAR === "object" ? CELULAR?.conteineresDasRegioes?.[regiao] : undefined;
     const seletores = Array.isArray(daCasca) ? daCasca : REGIOES_DO_TEMA[regiao];
     const onde = Array.isArray(daCasca) ? document : sessao;

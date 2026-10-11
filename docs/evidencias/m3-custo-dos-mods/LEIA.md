@@ -114,6 +114,9 @@ testes).
 | `m3-falante.rs` | o falante sintético |
 | `m3-pedido.rs` | a medida do R5 do PERFIS: um `view` e um `save` com o canal 0 (escopo de servidor) e com o canal 1, contra a metade de servidor publicada. Em 08/10, os quatro voltaram `ok: true` (rascunho da API 6, §8) |
 | `medidas.json` | os relatos da campanha de base de 08/10 |
+| `medidas-api6.json` | os 24 relatos da campanha da API 6, de 10/10 (commit `6e845e0d`) |
+| `preparar-cartoes.sh` | a `carga-cartoes` na pasta de uma campanha já preparada, sem recompilar o app |
+| `resumir-api6.py` | a tabela da campanha da API 6, contra o `sem-mod` dela, depois de conferir o commit, a interrupção e a compilação |
 | `preparar-api6.sh` | monta a pasta de trabalho da campanha da API 6 |
 | `remendar-api6.py` | os remendos da cópia da medição |
 | `campanha-api6.sh` | os 24 cenários da campanha da API 6 |
@@ -127,7 +130,8 @@ A mesma medição, com três diferenças. Os cenários da base continuam rodando
 como antes, com o app publicado.
 
 **O app é uma build de medição, e não o publicado.** `preparar-api6.sh` copia
-o código de um commit da `0.16/api-6` (o `HEAD` de quem chama, por padrão) por
+o código de um commit (o `HEAD` de quem chama, por padrão; a campanha de 10/10
+passou o da décima segunda integração, `6e845e0d`, explícito) por
 `git archive`, e `remendar-api6.py` muda **só a cópia**:
 
 - a API 6 passa a ser aceita (`MOD_API_VERSION = 6`, `APIS_ACEITAS = [6, 5, 4,
@@ -183,6 +187,108 @@ palco, mesmo sem voz.
 O jitter vai em `jitter_ms` (a barra, como na base) e em
 `jitter_do_registro_ms` (o `seele.log`), que é o que vale para o diálogo e a
 página.
+
+**A casa nova pergunta o nome.** Na 0.16, o app de uma pasta nova abre «COMO OS
+OUTROS VÃO TE CHAMAR?» antes de seguir o `--entrar` (medido pela orquestradora
+em 10/10, no primeiro cenário da campanha: «a entrada não apareceu»). O
+`m3.py` espera também esse diálogo, aperta CANCELAR — a chegada segue com o
+nome tirado da chave, como quem pula a pergunta — e o relato leva
+`"apelido": "pulado"`. Na base o diálogo não aparece, e nada muda nela.
+
+**Contra o que se lê o custo da API 6: o `sem-mod` da 0.16, e não a base.** Ao
+abrir, a 0.16 sobe a sala pessoal (um servidor em `[::]:8385`, a escada do
+alcance e o registro no ponto de encontro, ENC/2), e a 0.15.1 da base não tinha
+nada disso. O `sem-mod` da 0.16 já carrega esse custo, então comparar um
+cenário de MOD da 0.16 com a base mistura a API 6 com a sala pessoal. Cada
+cenário desta campanha é lido contra o `sem-mod` (e o `sem-mod+voz`) **desta
+mesma campanha**; a comparação com a base fica só para o custo total de subir
+de versão, e é dita como tal.
+
+**O diálogo e a página abrem quando quem usa já está numa sala** (a
+orquestradora, 10/10). Abertos na carga do MOD, o diálogo modal e a página
+imersiva deixavam inerte o resto da janela, e o roteiro não achava mais o
+ENTRAR NA SALA: o `carga-dialogo+voz` e o `carga-pagina+voz` falharam com «não
+entrou na sala» (em `medidas/descartados/dialogo-aberto-na-carga/`). O molde
+ganhou `quandoNaSala(abrir)`, que abre quando o `SeeleUI.retrato()` mostra
+uma sala `minha`, olhando de novo a cada evento `sala`. **A função entra em
+toda variante, e por isso muda o hash de todas**, mas só as duas a chamam: as
+outras seis (`regioes`, `capas`, `folhas`, `avisos`, `palco`, `tudo`) foram
+medidas com o molde anterior, e o comportamento delas é o mesmo. As novas, na
+campanha: o `dialogo` como `c005c3fb…`, e a `pagina` como `dd585396…`; as
+antigas ficaram em `/tmp/m3-6/pacotes-antigos/`.
+
+**A `carga-cartoes`, a lista de 251 cartões** (pedida pela orquestradora em
+10/10, depois da campanha: o teto de contribuições da 6 esperava a medida da
+lista, e nenhuma variante a fazia). A variante `cartoes` do molde registra um
+`pessoa.cartao` no teto do cartão (64 nós, `substituir`) para cada pessoa do
+retrato, de novo a cada evento `pessoas`, e as 128 contribuições sem alvo do
+teto agregado, cada uma no teto do cartão, em seis pontos. Conferida contra o
+prelúdio da 0.16 (`conferir-carga`): 155 contribuições com o retrato de 27 do
+conferente, maior mensagem de 2,3 KiB, nenhum tropeço. Ela roda **na mesma
+build e na mesma pasta** dos outros cenários, sem recompilar o app, para ser
+lida contra o mesmo `sem-mod`: `preparar-cartoes.sh` troca o roteiro (só se
+a cópia de trabalho for a da campanha), recompila só o exemplo do falante,
+refaz o `ax` e põe **só a variante nova** no cache — as outras ficam como
+foram medidas, e o molde mudado não as alcança.
+
+- **Como os 250 calados entram: no ritmo da portaria, e não com a taxa
+  folgada.** O `taxa.rs` guarda 30 apertos de rajada por endereço, repostos a
+  30 por minuto, e todos saem de 127.0.0.1, como o app. Folgar a taxa pedia
+  remendar o servidor da medição, e o servidor deixaria de ser o dos outros
+  cenários. O `m3-falante --calados <n>` sobe os `n` num processo só (num
+  processo por participante, 250 pesariam na máquina medida): 28 de rajada,
+  um a cada 2,05 s depois, tentando de novo quando recusado, cada um drenando o
+  que chega. São uns 7,6 minutos antes do app (medido com 40: 25 s, nenhuma
+  recusa, nenhuma queda, 40 pessoas no banco). Uma queda vai ao `.out` com o
+  motivo, e um `FellBehind` não passa calado.
+- **O primeiro `carga-cartoes` falhou, e o meu ensaio não tinha como pegar**
+  (medido pela orquestradora, 10/10; `medidas/descartados/cartoes-portaria/`).
+  Com o servidor exigindo o MOD de carga, cada calado gastava **dois apertos**:
+  a recusa `ModsNaoAceitos` e a volta com o sim. A rajada de 28 acabou no 15º,
+  o ritmo de 2,05 s não repunha dois por calado, e o `m3-cartao-015` esgotou as
+  tentativas. **O ensaio com 40 foi contra um `m3-servidor` sem MOD**, em que
+  cada calado gasta um aperto só: ele provou o ritmo, e não o ritmo com o
+  aceite, que é o caso da campanha. O conserto, da orquestradora: o conjunto
+  aceito na primeira recusa vai na primeira tentativa de todo calado seguinte,
+  e só o primeiro paga dois. Conferido por ela contra o `m3-servidor` **com** o
+  `m3-carga-cartoes`: 40 em 25 s, nenhuma recusa.
+- **O cenário só mede com a lista inteira**: o roteiro conta pela
+  acessibilidade os cartões distintos (`cartão <apelido> · linha 1`) e só
+  segue com os 251; o relato leva `cartoes_na_lista`. O `carga_a_vista` leva o
+  primeiro cartão, o último e a última das 128 sem alvo.
+- **A fundura da acessibilidade**: o `ax textos` passou a aceitar a fundura
+  (60, como sempre, quando não dita). A lista e a linha de uma contribuição
+  dentro de uma mensagem são procuradas a 200. No `carga-regioes`, o relato
+  ganha `conversa.mensagem · linha 1 (fundura 200)`, para «a região montou»
+  ser medida, e não lida do custo em MiB.
+
+**O jitter se lê só nos cenários com voz.** Sem falante não há fonte, e o
+`jitter_do_registro_ms` fica no zero inicial: nos cenários sem voz, o zero não
+é medida.
+
+**O falante mandava voz que a 0.16 jogava fora** (achado da F4 e medido pela
+orquestradora, 10/10). Os dois leitores do jitter, `jitter_ms` e
+`jitter_do_registro_ms`, davam **0 exato** em todo cenário com voz, e a base,
+com o mesmo falante, dava mediana de 1 ms. A causa: o `m3-falante.rs` grava no
+cabeçalho de mídia o `PROTOCOL_VERSION` (9), que era o número da voz na v0.15.1;
+desde o `f3aaf9ce`, a voz tem número próprio, o `MEDIA_HEADER_VERSION` (1), e o
+`decode` recusa outro. **Nos sete primeiros cenários com voz, quem ouve jogou
+fora todo datagrama do falante**: nada foi decodificado nem misturado, e os
++4,6 pontos de CPU eram só a captura e a supressão. A base mediu certo, porque
+lá o número era o mesmo nas duas pontas.
+
+O conserto é o item 4 do `remendar-api6.py`, e não uma troca no arquivo: o
+mesmo `m3-falante.rs` continua compilando para a base, onde a constante nova
+não existe. Conferido à mão pela orquestradora: com ele, o JITTER foi a 1 ms, e
+o do registro a 1,06–1,58 ms, como na base. Os sete cenários com voz feitos
+antes do conserto estão em `medidas/descartados/falante-com-versao-9/` (com o
+`carga-capas` interrompido), e foram refeitos com o falante consertado: **os
+doze cenários com voz da campanha mediram o jitter**, e ele vale neles.
+
+**A árvore de acessibilidade do WebKit, na 0.16, às vezes só se monta depois da
+primeira consulta** (a orquestradora, 10/10). O `esperar` do `m3.py` repete a
+consulta até o prazo, e por isso já cobre o caso; uma ferramenta que consulte
+uma vez só leria uma tela vazia.
 
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6
