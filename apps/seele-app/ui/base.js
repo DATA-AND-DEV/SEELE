@@ -546,6 +546,100 @@ function registrarNoAnfitriao(onde, o_que, nivel = "aviso", modId = null) {
   }
 }
 
+// --------------------------------------------------- o que ninguém pegou
+//
+// **Uma promise recusada sem `catch` some calada**, e um erro solto também. O
+// botão vermelho não fechava o app: o `destroy()` da janela era recusado pela
+// ACL do Tauri, a recusa caía numa promise que ninguém olhava, e nada chegava
+// ao `seele.log` (achado da F7). Os dois ouvintes abaixo levam o motivo e a
+// pilha ao registro, com `onde=sem-dono`. A tela não muda: é registro, e não
+// aviso à pessoa. O console do navegador segue dizendo o que já dizia, porque
+// nenhum deles chama `preventDefault`.
+//
+// **Com teto.** No Rust, a linha da janela sem MOD gasta do balde do catálogo,
+// o mesmo dos outros avisos da janela, e um laço que recusa a cada volta
+// calaria todos eles. Passam `SEM_DONO.porMinuto` linhas por minuto; as
+// seguintes são contadas, e a conta é dita numa linha só quando o minuto
+// acaba.
+//
+// Só pega o que acontece depois deste arquivo: o que estoura na carga de um
+// script anterior a ele (`ponte-web.js`, os `mods-*.js`) já foi notificado.
+// O roteiro é `tools/roteiros/recusa-sem-dono.js`.
+
+const SEM_DONO = Object.freeze({ porMinuto: 10, minuto: 60_000, quadrosDaPilha: 6 });
+
+/** O minuto corrente do teto: quando começou, quantas disse e quantas segurou. */
+const minutoSemDono = { desde: 0, ditas: 0, seguradas: 0 };
+
+/** O motivo numa linha: o nome e a mensagem, e a pilha quando houver. */
+function motivoSemDono(motivo) {
+  if (motivo && typeof motivo === "object" && typeof motivo.stack === "string") {
+    const cabeca = `${motivo.name ?? "Error"}: ${motivo.message ?? ""}`;
+    // Só os quadros: `at …` no V8, `função@lugar` no WebKit. O V8 repete a
+    // cabeça no alto da pilha, e o WebKit não.
+    const quadros = motivo.stack
+      .split("\n")
+      .map((linha) => linha.trim())
+      .filter((linha) => linha.startsWith("at ") || linha.includes("@"))
+      .slice(0, SEM_DONO.quadrosDaPilha);
+    return quadros.length > 0 ? `${cabeca} — pilha: ${quadros.join(" ← ")}` : cabeca;
+  }
+  if (typeof motivo === "string") return motivo;
+  try {
+    return JSON.stringify(motivo) ?? String(motivo);
+  } catch {
+    return String(motivo);
+  }
+}
+
+function registrarSemDono(oQue, motivo) {
+  // Nunca lança: um estouro aqui seria mais um para este mesmo ouvinte.
+  try {
+    const agora = Date.now();
+    if (agora - minutoSemDono.desde >= SEM_DONO.minuto) {
+      minutoSemDono.desde = agora;
+      minutoSemDono.ditas = 0;
+    }
+    if (minutoSemDono.ditas >= SEM_DONO.porMinuto) {
+      minutoSemDono.seguradas += 1;
+      if (minutoSemDono.seguradas === 1) {
+        setTimeout(dizerAsSeguradasSemDono, minutoSemDono.desde + SEM_DONO.minuto - agora);
+      }
+      return;
+    }
+    minutoSemDono.ditas += 1;
+    registrarNoAnfitriao("sem-dono", `${oQue}: ${motivoSemDono(motivo)}`, "erro");
+  } catch {
+    /* sem registro, e o caminho segue */
+  }
+}
+
+function dizerAsSeguradasSemDono() {
+  const { seguradas } = minutoSemDono;
+  minutoSemDono.seguradas = 0;
+  if (seguradas === 0) return;
+  registrarNoAnfitriao(
+    "sem-dono",
+    `${seguradas} outras seguradas pelo teto de ${SEM_DONO.porMinuto} por minuto`,
+    "erro",
+  );
+}
+
+window.addEventListener("unhandledrejection", (evento) =>
+  registrarSemDono("promise recusada sem catch", evento.reason),
+);
+
+window.addEventListener("error", (evento) => {
+  // Só os erros de script: o de um recurso que não carregou não sobe até a
+  // janela. O solto que não é um erro não tem pilha, e vai com o lugar.
+  const { error: erro, message, filename, lineno, colno } = evento;
+  const comPilha = erro && typeof erro === "object" && typeof erro.stack === "string";
+  registrarSemDono(
+    "erro solto",
+    comPilha ? erro : `${motivoSemDono(erro ?? message)} (${filename}:${lineno}:${colno})`,
+  );
+});
+
 // ------------------------------------------------------- a geração da sessão
 //
 // **Qual execução de sessão é esta** — etapa E2 do contrato de API própria.

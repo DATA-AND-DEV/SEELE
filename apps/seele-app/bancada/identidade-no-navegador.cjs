@@ -37,7 +37,14 @@
 //     `entrarNoConhecido` pela chave, sem convite, e com `link-vencido` quando
 //     os hashes guardados venceram, sem bater em servidor nenhum;
 // 11. **a identidade da página** (`identidadeDaPagina()`): uma só, que abre
-//     sozinha o link da carga, e a casca não vê o token.
+//     sozinha o link da carga, e a casca não vê o token;
+// 12. **outro link aberto no meio de uma entrada** (o E54 da F5, do lado do
+//     navegador): a continuação da entrada velha não toca na tentativa nova —
+//     nem na chave, nem no token, nem no aceite de MODs — e resolve
+//     `sem-tentativa`; a que o servidor aceitou fica guardada com a chave dela
+//     e é solta. E dois links abertos fora de ordem: o token do segundo não vai
+//     ao servidor do primeiro; nem o servidor deste aparelho, procurado no
+//     banco enquanto um link abre, entra no lugar dele.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -90,9 +97,38 @@ fs.writeFileSync(
   `"use strict";
 window.ordem = [];
 const persistDoNavegador = navigator.storage.persist.bind(navigator.storage);
-navigator.storage.persist = async () => { window.ordem.push("persist"); return persistDoNavegador(); };
+navigator.storage.persist = async () => {
+  window.ordem.push("persist");
+  // O que o caso 12 faz enquanto o navegador responde: outro link aberto no meio.
+  const durante = window.duranteOPersist;
+  window.duranteOPersist = null;
+  if (durante) await durante();
+  return persistDoNavegador();
+};
 const gerarDoNavegador = crypto.subtle.generateKey.bind(crypto.subtle);
-crypto.subtle.generateKey = async (...args) => { window.ordem.push("chave"); return gerarDoNavegador(...args); };
+crypto.subtle.generateKey = async (...args) => {
+  window.ordem.push("chave");
+  // O mesmo, enquanto a chave nasce; e o gancho que lança é a chave que não nasceu.
+  const durante = window.duranteAChave;
+  window.duranteAChave = null;
+  if (durante) await durante();
+  return gerarDoNavegador(...args);
+};
+
+// O banco que demora a responder (caso 12): o pedido seguinte de abri-lo só
+// entrega o sucesso a quem o pediu quando a promessa da fila resolver.
+window.atrasosDoBanco = [];
+const abrirOBancoDoNavegador = indexedDB.open.bind(indexedDB);
+indexedDB.open = (...args) => {
+  const pedido = abrirOBancoDoNavegador(...args);
+  const atraso = window.atrasosDoBanco.shift();
+  if (atraso) {
+    let aoAbrir = null;
+    Object.defineProperty(pedido, "onsuccess", { get: () => aoAbrir, set: (f) => { aoAbrir = f; } });
+    pedido.addEventListener("success", (evento) => atraso.then(() => aoAbrir && aoAbrir.call(pedido, evento)));
+  }
+  return pedido;
+};
 
 window.carregado = fetch("seele_web.wasm").then((r) => r.arrayBuffer()).then((b) => WebAssembly.instantiate(b, {})).then(({ instance }) => instance.exports);
 
@@ -114,17 +150,22 @@ function analisarEm(w, origem) {
 
 const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-/** O servidor de mentira: anota cada entrada e responde o roteiro, um por vez. */
-window.servidor = { entradas: [], roteiro: [] };
+/**
+ * O servidor de mentira: anota cada entrada e responde o roteiro, um por vez.
+ * A entrada aceita devolve a geração dela, e o \`soltar\` anota a que foi solta.
+ */
+window.servidor = { entradas: [], roteiro: [], soltas: [] };
 async function conectarNaMentira(alvo, apelido, credencial) {
-  const chave = hex(await crypto.subtle.exportKey("raw", alvo.chave.publicKey));
+  // Anotada mesmo sem chave: uma entrada que chega sem ela também chegou.
+  const chave = alvo.chave ? hex(await crypto.subtle.exportKey("raw", alvo.chave.publicKey)) : null;
   window.servidor.entradas.push({ endereco: alvo.endereco, impressao: alvo.impressao, hashes: alvo.hashes, apelido, token: credencial, chave });
   const proxima = window.servidor.roteiro.shift() ?? "ok";
   // Uma resposta pode ser uma função: ela roda no meio da entrada (o relógio
-  // que anda enquanto o servidor responde) e devolve a resposta.
-  const resposta = typeof proxima === "function" ? proxima() : proxima;
+  // que anda, ou outro link aberto, enquanto o servidor responde) e devolve a
+  // resposta.
+  const resposta = typeof proxima === "function" ? await proxima() : proxima;
   if (resposta !== "ok") throw resposta;
-  return {};
+  return { geracao: window.servidor.entradas.length };
 }
 
 window.criar = async ({ casca = "larga", instalado = false, agora = Date.now() } = {}) => {
@@ -132,6 +173,9 @@ window.criar = async ({ casca = "larga", instalado = false, agora = Date.now() }
   return criarIdentidadeDoNavegador({
     analisar: analisarEm(w, "origem.invalid"),
     conectar: conectarNaMentira,
+    soltar: (resposta) => {
+      window.servidor.soltas.push(resposta);
+    },
     agora: typeof agora === "function" ? agora : () => agora,
     instalado: () => instalado,
     casca: () => casca,
@@ -204,6 +248,7 @@ function servir() {
 const IMPRESSAO = "3cbcfb02".repeat(8);
 const HASH = "ab".repeat(32);
 const TOKEN = "7K4MNPQRSTVWXYZ23456";
+const TOKEN_B = "23456XYZWVTSRQPNMK47";
 const FUTURO = Math.floor(Date.now() / 1000) + 7 * 86400;
 const link = ({ origem = "origem.invalid", fp = IMPRESSAO, wh = HASH, ate = FUTURO, token = TOKEN } = {}) => {
   const partes = [];
@@ -390,6 +435,129 @@ async function principal() {
     }, [link({ fp: "33".repeat(32), ate }), ate]);
     confere("5", vencida.erro === "convite-vencido", `o convite que venceu na entrada: ${JSON.stringify(vencida)}`);
     await rodar(() => window.servidor.entradas.splice(0));
+
+    // 12. Outro link aberto no meio de uma entrada. Cada caso abre a tentativa
+    // velha, e o link novo é aberto enquanto quem a entrada espera responde.
+    const [VELHO, NOVO, MODS, PERSIST, FORA_A, FORA_B] = ["71", "72", "73", "74", "75", "76"].map((b) => b.repeat(32));
+    const caso12 = await rodar(async (l) => {
+      const novoNoMeio = (identidade, texto, resposta) => async () => {
+        await identidade.abrir(texto);
+        return resposta;
+      };
+      // a. O servidor aceita a entrada velha depois de o link novo abrir.
+      const aceita = await window.criar();
+      await aceita.abrir(l.velho);
+      window.servidor.roteiro = [novoNoMeio(aceita, l.novo, "ok")];
+      const velha = await aceita.entrar("ana");
+      const lidaDepois = aceita.ler();
+      const nova = await aceita.entrar("bia");
+      const soltas = window.servidor.soltas.splice(0);
+      const deVolta = await (await window.criar()).entrarNoConhecido(l.impressaoVelha, "ana");
+      // b. O servidor recusa a velha: a recusa dela não encerra a nova.
+      const recusada = await window.criar();
+      await recusada.abrir(l.velho2);
+      window.servidor.roteiro = [novoNoMeio(recusada, l.novo2, { Refused: { reason: "CredentialRejected" } })];
+      const recusa = await recusada.entrar("ana");
+      const lidaDepoisDaRecusa = recusada.ler();
+      // c. A velha para nos MODs: o aceite não é da nova.
+      const mods = await window.criar();
+      await mods.abrir(l.velho3);
+      window.servidor.roteiro = [novoNoMeio(mods, l.mods, { ModsNaoAceitos: { mods: [], conjunto: "c3" } })];
+      const paradaNosMods = await mods.entrar("ana");
+      const aceiteNaNova = await mods.aceitarOsMods("c3");
+      // d. O link novo abre enquanto o navegador responde ao persist(): a
+      // velha não conecta.
+      const noPersist = await window.criar();
+      await noPersist.abrir(l.velho4);
+      window.duranteOPersist = () => noPersist.abrir(l.persist);
+      window.ordem.splice(0);
+      const antesDeConectar = await noPersist.entrar("ana");
+      const lidaNoPersist = noPersist.ler();
+      const ordemNoPersist = window.ordem.splice(0);
+      // e. O mesmo enquanto a chave nasce, e com a chave que não nasce: a
+      // falha da velha não encerra a nova.
+      const naChave = await window.criar();
+      await naChave.abrir(l.velho5);
+      window.duranteAChave = () => naChave.abrir(l.chave);
+      const enquantoNasce = await naChave.entrar("ana");
+      const lidaNaChave = naChave.ler();
+      const semChave = await window.criar();
+      await semChave.abrir(l.velho6);
+      window.duranteAChave = async () => {
+        await semChave.abrir(l.semChave);
+        throw new Error("a chave da bancada não nasceu");
+      };
+      const naoNasceu = await semChave.entrar("ana");
+      const lidaSemChave = semChave.ler();
+      return { velha, lidaDepois, nova, soltas, deVolta, recusa, lidaDepoisDaRecusa, paradaNosMods, aceiteNaNova, antesDeConectar, lidaNoPersist, ordemNoPersist, enquantoNasce, lidaNaChave, naoNasceu, lidaSemChave };
+    }, {
+      velho: link({ fp: VELHO }),
+      impressaoVelha: VELHO,
+      novo: link({ fp: NOVO, token: TOKEN_B }),
+      velho2: link({ fp: "81".repeat(32) }),
+      novo2: link({ fp: "82".repeat(32), token: TOKEN_B }),
+      velho3: link({ fp: "83".repeat(32) }),
+      mods: link({ fp: MODS, token: TOKEN_B }),
+      velho4: link({ fp: "84".repeat(32) }),
+      persist: link({ fp: PERSIST, token: TOKEN_B }),
+      velho5: link({ fp: "85".repeat(32) }),
+      chave: link({ fp: "86".repeat(32), token: TOKEN_B }),
+      velho6: link({ fp: "87".repeat(32) }),
+      semChave: link({ fp: "88".repeat(32), token: TOKEN_B }),
+    });
+    const caso12Hellos = await rodar(() => window.servidor.entradas.splice(0));
+    const [daVelha, daNova, deVolta, daRecusada, daParada] = caso12Hellos;
+    // Só cinco entradas chegam a servidor: a velha aceita, a nova, a volta pela
+    // chave, a velha recusada e a parada nos MODs. Nenhuma entrada velha chega
+    // ao servidor do link aberto no meio dela.
+    const servidores12 = caso12Hellos.map((h) => h.impressao.slice(0, 2)).join(" ");
+    confere("12", servidores12 === "71 72 71 81 83", `as entradas do caso chegaram a ${servidores12}, e não a 71 72 71 81 83`);
+    confere("12", caso12.velha.erro === "sem-tentativa", `a entrada velha, aceita depois de o link novo abrir, resolveu ${JSON.stringify(caso12.velha)}`);
+    confere("12", caso12.lidaDepois && caso12.lidaDepois.impressao === NOVO && caso12.lidaDepois.estado === "pronto", `a entrada velha encerrou a tentativa nova: ${JSON.stringify(caso12.lidaDepois)}`);
+    confere("12", caso12.nova.ok === true && daNova && daNova.impressao === NOVO && daNova.token === TOKEN_B && daNova.chave !== daVelha.chave, `a tentativa nova não entrou com o token e a chave dela: ${JSON.stringify({ nova: caso12.nova, daVelha, daNova })}`);
+    confere("12", caso12.soltas.length === 1 && caso12.soltas[0].geracao === 1, `a entrada velha não foi solta, ou foi solta a errada: ${JSON.stringify(caso12.soltas)}`);
+    confere("12", caso12.deVolta.ok === true && deVolta && deVolta.impressao === VELHO && deVolta.chave === daVelha.chave, `o servidor que aceitou a velha não ficou guardado com a chave dela: ${JSON.stringify({ deVolta: caso12.deVolta, hello: deVolta })}`);
+    confere("12", caso12.recusa.erro === "sem-tentativa" && caso12.lidaDepoisDaRecusa && caso12.lidaDepoisDaRecusa.impressao === "82".repeat(32), `a recusa da velha encerrou a nova: ${JSON.stringify({ recusa: caso12.recusa, lida: caso12.lidaDepoisDaRecusa })}`);
+    confere("12", caso12.paradaNosMods.erro === "sem-tentativa" && caso12.aceiteNaNova.erro === "sem-tentativa" && caso12Hellos.length === 5, `o aceite de MODs da velha passou para a nova: ${JSON.stringify({ parada: caso12.paradaNosMods, aceite: caso12.aceiteNaNova, entradas: caso12Hellos.length })}`);
+    confere("12", caso12.antesDeConectar.erro === "sem-tentativa" && caso12.lidaNoPersist && caso12.lidaNoPersist.impressao === PERSIST && caso12.lidaNoPersist.persistencia === null, `a entrada velha, com o link novo aberto durante o persist(), seguiu: ${JSON.stringify({ entrou: caso12.antesDeConectar, lida: caso12.lidaNoPersist, entradas: caso12Hellos.map((h) => h.impressao.slice(0, 2)) })}`);
+    // A chave da tentativa nova nasce depois do persist() dela (o caso 6), e
+    // não na continuação da velha.
+    confere("12", JSON.stringify(caso12.ordemNoPersist) === '["persist"]', `a entrada velha, depois do persist() em que o link novo abriu, fez nascer uma chave: ${JSON.stringify(caso12.ordemNoPersist)}`);
+    confere("12", caso12.enquantoNasce.erro === "sem-tentativa" && caso12.lidaNaChave && caso12.lidaNaChave.impressao === "86".repeat(32) && caso12.lidaNaChave.persistencia === null, `a entrada velha, com o link novo aberto enquanto a chave nascia, seguiu: ${JSON.stringify({ entrou: caso12.enquantoNasce, lida: caso12.lidaNaChave })}`);
+    confere("12", caso12.naoNasceu.erro === "sem-tentativa" && caso12.lidaSemChave && caso12.lidaSemChave.impressao === "88".repeat(32), `a chave da velha que não nasceu encerrou a nova: ${JSON.stringify({ entrou: caso12.naoNasceu, lida: caso12.lidaSemChave })}`);
+    confere("12", !daRecusada || daRecusada.token === TOKEN, `a velha recusada levou outro token: ${JSON.stringify(daRecusada)}`);
+    confere("12", !daParada || daParada.token === TOKEN, `a velha parada nos MODs levou outro token: ${JSON.stringify(daParada)}`);
+    // e. Dois links abertos fora de ordem: o banco responde ao primeiro depois
+    // do segundo. A tentativa é a do segundo, e o token dele vai ao servidor
+    // dele, e só.
+    const foraDeOrdem = await rodar(async (l) => {
+      let responder;
+      window.atrasosDoBanco.push(new Promise((resolve) => (responder = resolve)));
+      const identidade = await window.criar();
+      const primeiro = identidade.abrir(l.a);
+      const segundo = await identidade.abrir(l.b);
+      responder();
+      const doPrimeiro = await primeiro;
+      const lida = identidade.ler();
+      return { segundo, doPrimeiro, lida, entrou: await identidade.entrar("ana") };
+    }, { a: link({ fp: FORA_A }), b: link({ fp: FORA_B, token: TOKEN_B }) });
+    const foraHellos = await rodar(() => window.servidor.entradas.splice(0));
+    confere("12", foraDeOrdem.lida && foraDeOrdem.lida.impressao === FORA_B, `com o banco fora de ordem, a tentativa ficou com o primeiro link: ${JSON.stringify(foraDeOrdem)}`);
+    confere("12", foraHellos.length === 1 && foraHellos[0].impressao === FORA_B && foraHellos[0].token === TOKEN_B, `com o banco fora de ordem, o token foi a outro servidor: ${JSON.stringify(foraHellos.map((h) => ({ impressao: h.impressao.slice(0, 2), token: h.token })))}`);
+    // f. Um link aberto enquanto o banco procura um servidor deste aparelho: a
+    // vez é do link, e o conhecido não entra nem o encerra.
+    const NO_MEIO = "77".repeat(32);
+    const conhecidoNoMeio = await rodar(async (l) => {
+      let responder;
+      window.atrasosDoBanco.push(new Promise((resolve) => (responder = resolve)));
+      const identidade = await window.criar();
+      const pelaChave = identidade.entrarNoConhecido(l.conhecida, "ana");
+      await identidade.abrir(l.link);
+      responder();
+      return { pelaChave: await pelaChave, depois: identidade.ler() };
+    }, { conhecida: VELHO, link: link({ fp: NO_MEIO, token: TOKEN_B }) });
+    const conhecidoHellos = await rodar(() => window.servidor.entradas.splice(0));
+    confere("12", conhecidoNoMeio.pelaChave.erro === "sem-tentativa" && conhecidoNoMeio.depois && conhecidoNoMeio.depois.impressao === NO_MEIO && conhecidoHellos.length === 0, `o servidor conhecido entrou, ou encerrou o link aberto no meio: ${JSON.stringify({ ...conhecidoNoMeio, entradas: conhecidoHellos.length })}`);
 
     // 11. A identidade da página: abre o link da carga sozinha, e a casca não
     // vê o token. O analisador do produto não tem origem até o D-web-2, então o
