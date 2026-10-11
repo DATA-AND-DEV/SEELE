@@ -832,3 +832,24 @@ teto de 1 s) e a (a) em `f835b52d` (o Sair nosso no menu do macOS). App
   As listas não existem no `0.16/sala-viva`: entram no encontro da 14ª;
 - a página sem ouvinte global de `unhandledrejection`, que deixou este defeito
   mudo, é do `base.js` e ficou com a orquestradora.
+
+## A 21 quebrou a bancada do celular na 14ª (11/10)
+
+**O que aconteceu.** O `1e0a2a8a` pôs no duble da `carga-da-casca.py` o
+marcador `__PERMISSOES_DA_JANELA__`. A `tools/bancada-do-celular.py` monta o
+mesmo duble por conta própria e só preenchia os marcadores antigos: a página
+morria no primeiro script («is not defined»), e 46 casos reprovaram na bateria
+da 14ª, inclusive o G3. A orquestradora achou por bisseção (verde em
+`538ce467`, vermelho em `d9e31226`) e consertou na integração (`5c5dc9e0`): o
+marcador preenchido, e a bancada recusa pelo nome qualquer marcador que sobrar.
+Reproduzido aqui em `d9e31226`; verde depois do avanço para a `versao/0.16`
+(`a400c4eb`).
+
+**O erro foi meu**: rodei a bancada do celular antes de mexer no duble, e não
+depois. A verificação que eu rodava (a carga, os roteiros e as duas bancadas
+da ponte) não a incluía.
+
+**A regra, da orquestradora, daqui em diante:** toda mexida no duble, na `ui/`
+ou na carga roda a bancada do celular antes da entrega, junto com os roteiros
+e as bancadas da ponte. Ela usa o duble da carga, então qualquer mudança nele a
+alcança. A minha verificação passou a rodá-la.
