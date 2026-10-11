@@ -5581,6 +5581,46 @@ mod tests {
         }
     }
 
+    /// **O motor acaba a sessão onde o `Room` acaba** (porte da pendência 61
+    /// da 0.16 para a 0.15.2).
+    ///
+    /// O `Room` marcava fim para toda `Disconnecting`, e este motor reconecta
+    /// em quase todas: a janela dizia «encerrado» e a voz voltava por baixo.
+    /// Aqui o nome que **este** motor chama para decidir entre acabar e
+    /// reconectar é conferido contra o `Room`, razão por razão. Uma lista
+    /// própria de um dos dois, que divergisse da do outro, reprova.
+    #[test]
+    fn o_motor_acaba_a_sessao_onde_o_room_acaba() {
+        for motivo in [
+            DisconnectReason::Incompatible,
+            DisconnectReason::CredentialRejected,
+            DisconnectReason::HandshakeTimeout,
+            DisconnectReason::Kicked,
+            DisconnectReason::Banned,
+            DisconnectReason::ServerFull,
+            DisconnectReason::ScheduledMaintenance,
+            DisconnectReason::ServerShuttingDown,
+            DisconnectReason::Timeout,
+            DisconnectReason::ProtocolViolation,
+            DisconnectReason::RateLimited,
+            DisconnectReason::FellBehind,
+            DisconnectReason::AdmissionPending,
+            DisconnectReason::AdmissionDenied,
+            DisconnectReason::NicknameTaken,
+            DisconnectReason::ModsRecusados,
+            DisconnectReason::ModsMudaram,
+            DisconnectReason::ModsIndisponiveis,
+        ] {
+            let mut room = crate::state::Room::new();
+            let changed = room.apply(&ServerMessage::Disconnecting { reason: motivo });
+            assert_eq!(
+                (changed.ended, room.ended.is_some()),
+                (a_sessao_acabou_aqui(motivo), a_sessao_acabou_aqui(motivo)),
+                "{motivo:?}: o motor e o `Room` discordam sobre o fim"
+            );
+        }
+    }
+
     #[test]
     fn so_quem_empresta_publica_os_enderecos_da_propria_maquina() {
         // **O guarda do achado de privacidade do fix round 3.** O round 2

@@ -2218,6 +2218,92 @@ mod tests {
         );
     }
 
+    /// **Só as despedidas que acabam a sessão marcam o fim** (porte da
+    /// pendência 61 da 0.16 para a 0.15.2).
+    ///
+    /// O `Room` marcava fim para toda `Disconnecting`, e o motor do enlace só
+    /// acaba a sessão em `Kicked`, `Banned` e `ModsMudaram`: nas outras ele
+    /// reconecta pela bateria. A janela dizia «encerrado», a FFI emitia
+    /// `Ended`, e a reconexão por baixo reabria a voz, que voltava a
+    /// transmitir sem a tela dizer.
+    ///
+    /// A tabela é escrita aqui, à parte da regra do motor, uma razão por vez:
+    /// um teste que conferisse a regra contra ela mesma passaria com qualquer
+    /// regra. A despedida recuperável faz o que a queda de rede faz com o que
+    /// esta máquina esperava: a pendente vira `SemResposta`, e repetir com a
+    /// mesma chave é seguro.
+    #[test]
+    fn so_as_despedidas_que_acabam_a_sessao_marcam_o_fim() {
+        // Escrito por extenso e sem `_`: uma razão nova no protocolo deixa o
+        // `match` vermelho, em vez de cair calada num lado.
+        for motivo in [
+            DisconnectReason::Incompatible,
+            DisconnectReason::CredentialRejected,
+            DisconnectReason::HandshakeTimeout,
+            DisconnectReason::Kicked,
+            DisconnectReason::Banned,
+            DisconnectReason::ServerFull,
+            DisconnectReason::ScheduledMaintenance,
+            DisconnectReason::ServerShuttingDown,
+            DisconnectReason::Timeout,
+            DisconnectReason::ProtocolViolation,
+            DisconnectReason::RateLimited,
+            DisconnectReason::FellBehind,
+            DisconnectReason::AdmissionPending,
+            DisconnectReason::AdmissionDenied,
+            DisconnectReason::NicknameTaken,
+            DisconnectReason::ModsRecusados,
+            DisconnectReason::ModsMudaram,
+            DisconnectReason::ModsIndisponiveis,
+        ] {
+            let acaba = match motivo {
+                DisconnectReason::Kicked
+                | DisconnectReason::Banned
+                | DisconnectReason::ModsMudaram => true,
+                DisconnectReason::Incompatible
+                | DisconnectReason::CredentialRejected
+                | DisconnectReason::HandshakeTimeout
+                | DisconnectReason::ServerFull
+                | DisconnectReason::ScheduledMaintenance
+                | DisconnectReason::ServerShuttingDown
+                | DisconnectReason::Timeout
+                | DisconnectReason::ProtocolViolation
+                | DisconnectReason::RateLimited
+                | DisconnectReason::FellBehind
+                | DisconnectReason::AdmissionPending
+                | DisconnectReason::AdmissionDenied
+                | DisconnectReason::NicknameTaken
+                | DisconnectReason::ModsRecusados
+                | DisconnectReason::ModsIndisponiveis => false,
+            };
+            let mut room = room();
+            room.anotar_envio(CHANNEL, ClientMessageId(41), "no ar".into(), 0);
+            let changed = room.apply(&ServerMessage::Disconnecting { reason: motivo });
+
+            assert_eq!(
+                changed.ended, acaba,
+                "{motivo:?}: o aviso de fim não é o que o motor do enlace faz"
+            );
+            assert_eq!(
+                room.ended.map(|fim| fim.reason),
+                acaba.then_some(motivo),
+                "{motivo:?}: o fim guardado não é o que o motor do enlace faz"
+            );
+            if !acaba {
+                assert_eq!(
+                    room.pendentes.first().map(|pendente| pendente.estado),
+                    Some(EstadoDoEnvio::SemResposta),
+                    "{motivo:?} é queda: o que estava no ar fica sem resposta, como numa \
+                     queda de rede"
+                );
+                assert!(
+                    changed.messages,
+                    "{motivo:?}: a pendente mudou de estado e ninguém foi avisado"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_handshake_message_changes_nothing_a_shell_would_redraw() {
         let mut room = room();
