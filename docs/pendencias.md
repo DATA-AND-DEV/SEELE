@@ -9866,3 +9866,17 @@ com a bancada da F3 como guarda, provada pela reversão. Atualizar só a linha q
 O lado do servidor (um `PersonState` de cada pessoa a todas as outras, por segundo: N² mensagens) é
 medido junto, antes de alguém prometer mais que 50 pessoas. **O teto de 256 alvos por ponto da API 6 não
 congela antes da medida com o conserto.**
+
+**O conserto mínimo entrou** (`6717dc2c`, da F3, na décima quarta): no máximo um `atualizar()` por quadro, com
+a bancada `um-redesenho-por-quadro.cjs` no CI. A fila acabou; o custo de refazer a lista não: com 251 pessoas a
+página fica a 99% com cartões de MOD e a 98% sem MOD (`tools/lista-grande.cjs`, modo `evento`, no Chromium).
+**O teto de 256 alvos e 128 sem alvo congelou no `v6.json`** (`78972cc0`) por essa medida: quem satura a página
+com 251 é a lista, e não o MOD.
+
+**(b), defeito de acessibilidade** (11/10, medido pela orquestradora no app, com 249 calados, sem MOD, na
+build da M3 com o `6717dc2c` e o `ax` com 60 s de prazo por consulta, a sessão desbloqueada): com a lista
+refeita inteira a cada quadro, a árvore de acessibilidade não assenta. O cabeçalho «PESSOAS · 251 NO SERVIDOR»
+aparece nela; os nomes da lista nunca entram, e o ENTRAR NA SALA sai dela (o `ax` não o acha, e quando o achou o
+aperto não pegou). **Quem usa leitor de tela não usa a lista nem a entrada na sala** com umas 250 pessoas. Com 50,
+o tamanho do `specs/04`: **a medir** pela F3 (10, 50 e 100 pessoas, com o Mac desbloqueado). Se assentar com 50,
+a (b) — atualizar só a linha que mudou — fica para a 0.17; se não, é da 0.16.
