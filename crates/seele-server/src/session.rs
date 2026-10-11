@@ -3341,6 +3341,13 @@ async fn run_session(
                     {
                         no_ar.remove(chave);
                     }
+                    // A repetição de uma apagada não é anunciada, e sai da
+                    // conta pelo evento interno dela.
+                    Event::ApagadaRepetida { author, client_message_id: Some(chave) }
+                        if *author == session.person =>
+                    {
+                        no_ar.remove(chave);
+                    }
                     _ => {}
                 }
 
@@ -4860,6 +4867,8 @@ fn translate(
             })
         }
         Event::MessageRejected { .. } => None,
+        // Interno, e nunca quadro: ver `Event::ApagadaRepetida`.
+        Event::ApagadaRepetida { .. } => None,
 
         Event::MessageEdited { channel, id, body } => {
             channels
