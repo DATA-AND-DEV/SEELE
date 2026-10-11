@@ -19,7 +19,14 @@ O ramo é `0.16/lotes-p61`, criado a partir de `b101e385` (a ponta do
 | `85d2946b` | fase B, a prova pela FFI |
 | `c5be8bb9` | fase D: o TENTAR DE NOVO confere o tamanho, e a voz fecha num fim de verdade |
 | `2cec3729` | `par_lento` sem o perdão (exige o `1ebf85a4`; entra na mesma integração) |
-| este | o relatório |
+| `eb840e60` | o relatório, primeira versão |
+| `3beac691` | rodada 1, passo 0: o merge `--no-ff` do `0.16/lotes` em `3a60f121` (a décima terceira, com o `1ebf85a4`) |
+| `cd619b4c` | rodada 1, I1: o eco de uma linha antiga não fecha a busca antes do buraco |
+| `60738c94` | rodada 1, I2 e M1: a cerca perdida tem prazo; a página vazia não é começo sozinha; o teto diz a verdade |
+| `0c636998` | rodada 1, I2: a medida pela FFI da página que o limitador descarta |
+| `1516ab14` | rodada 1, M3: o passo `FellBehind` nos dois produtores de retrato |
+| `6e6bdc13` | rodada 1, M2 (opção B): um campo grande demais é recusa, e não queda |
+| este | o relatório com a rodada 1 |
 
 O lote mexeu nestes arquivos:
 - `crates/seele-audio` (o recurso de teste);
@@ -27,12 +34,15 @@ O lote mexeu nestes arquivos:
   `state.rs`, com aviso prévio à F4);
 - `crates/seele-core` (`enlace.rs`, `client.rs`, `lib.rs`);
 - `crates/seele-ffi` (`volta.rs` novo e mudanças pontuais em `lib.rs`);
-- `crates/seele-conformance` (dois arquivos novos);
-- `crates/seele-server/tests/par_lento.rs`.
+- `crates/seele-conformance` (dois arquivos novos, e o passo da F4 em
+  `dois_produtores_de_snapshot.rs` na rodada 1);
+- `crates/seele-server/tests/par_lento.rs`;
+- na rodada 1, um comentário em `apps/seele-app/ui/index.html` e o item 55
+  da pendência 58 em `docs/pendencias.md`.
 
-O fio não mudou. O lote não mexeu em `seele-proto`, `ui/` ou `main.rs`. O
-caminho da tela é o mesmo de uma queda de rede, então não houve cena nova na
-bancada.
+O fio não mudou. O lote não mexeu em `seele-proto` nem em `main.rs`, e do
+`ui/` só o comentário. O caminho da tela é o mesmo de uma queda de rede,
+então não houve cena nova na bancada.
 
 ---
 
@@ -165,7 +175,8 @@ foram tocados depois.
   («ServerShuttingDown: o motor e o `Room` discordam»).
 - `FellBehind` posto na regra: reprovam o exaustivo e o da tabela.
 
-**O pedido da F4.** O passo `Disconnecting { FellBehind }` em
+**O pedido da F4.** Entrou na rodada 1 (M3, `1516ab14`), depois do merge
+que trouxe o arquivo. Na primeira versão, o passo `Disconnecting { FellBehind }` em
 `dois_produtores_de_snapshot.rs` **não entrou**. Esse arquivo e o
 `seele-sessao/src/retrato.rs` não estão na base `b101e385`. O passo fica para
 depois do encontro com o `0.16/web`.
@@ -333,11 +344,17 @@ Como está na v0.15.1:
   - As pendentes ficam `SemResposta` com TENTAR DE NOVO, sem repetição
     automática (essa é a C, que não vai junto).
   - O buraco do canal não é buscado, como numa queda de rede da 0.15.
+  - *(Corrigido pela revisão: a condição abaixo é falsa. O servidor 0.15 só
+    usa `ServerShuttingDown` como recusa do aperto de mão, nunca como
+    `Disconnecting` no meio da sessão, e o servidor 0.16 recusa o protocolo
+    8. No porte (a), ela não precisa entrar na lista; pôr não faz mal.)*
   - Atenção: com a lista da 0.15, `ServerShuttingDown` vira «reconectando»
     por até cinco minutos. A 0.16 o pôs na lista no lote G-servidor. Se o
     servidor 0.15 manda essa razão, ela entra na lista no porte.
   - Atenção também ao `TooLong`: a D (`reenviar_mensagem` conferindo o
-    tamanho) é independente, tem duas linhas e deve ir junto.
+    tamanho) é independente e deve ir junto. *(Corrigido pela revisão: na
+    0.15 não há `volta::grande_demais`; é a cópia das ~6 linhas do envio, e
+    não duas.)*
 
 **(b) A FFI não reabrindo a voz quando o `Room` já marcou fim.**
 - **A mudança:** no braço `Reconectado`, se `room.ended.is_some()`, a FFI
@@ -432,21 +449,227 @@ abre o microfone e uma saída de verdade numa máquina que os tem. A mudança al
 
 ## O que fica para a F1, para a F4 e para a pendência 61
 
-- **F4:** o passo `FellBehind` em `dois_produtores_de_snapshot.rs`, quando o
-  `0.16/web` encontrar este ramo. O navegador passa a ver a queda recuperável
-  como queda. A busca do buraco e a repetição estão na FFI e não chegam ao
-  navegador: lá a queda recuperável fica como uma queda de rede.
-- **Pendência 61, achado de passagem:** `Motor::executar` trata **qualquer**
-  erro de `frame::write` como enlace caído e chama `cair()`, inclusive o de
-  validação do `encode`. O `TooLong` era um caso. Outros comandos com campo
-  validado (nome de canal ou de sala, carga de pedido de MOD) podem derrubar o
-  enlace pelo mesmo caminho, se a casca não conferir antes. O conserto de fundo
-  é separar o erro de validação do erro de transporte. Não medi.
+Atualizado na rodada 1. O que a primeira versão listava aqui e a rodada 1
+consertou está riscado com o commit.
+
+- **F4:** ~~o passo `FellBehind` em `dois_produtores_de_snapshot.rs`~~ —
+  entrou (`1516ab14`). A busca do buraco e a repetição estão na FFI e não
+  chegam ao navegador: lá a queda recuperável fica como uma queda de rede.
+- **A janela não mostra a recusa local de um campo grande demais.** O enlace
+  não cai mais (`6e6bdc13`), mas a frase é de outro lote. A pendência 58
+  ganhou o item 55, com os campos e onde cada um é escrito na janela (ver a
+  rodada 1, M2, abaixo). *A primeira versão deste item listava «a carga de
+  pedido de MOD», e estava errado: ela já é conferida em bytes no `base.js`.*
 - **A busca só cobre o canal aberto.** O núcleo só reassina o último canal na
   volta, então as não lidas dos outros canais param de andar depois de uma
   queda. Isso já existia antes e é registrado aqui.
-- **A cerca pode se perder.** Se o limitador do servidor descartar o `Ping`
-  da cerca acima da rajada, a busca para calada naquela volta. A volta gasta
-  poucos quadros e a repetição fica abaixo do balde, então não aconteceu na
-  medida. Não há prazo que a recomece.
-- **F1:** o perdão do `par_lento` saiu. Ver acima, e o commit `2cec3729`.
+- ~~**A cerca pode se perder.**~~ — consertado (`60738c94`): prazo por
+  página, pedido de novo uma vez, e desistência dita no `seele.log`.
+- **O que passa do teto de páginas não volta nesta sessão**: a janela não tem
+  pedido de histórico mais antigo. O teto vai ao `seele.log` como aviso.
+- **A ordem da drenagem** (observação da revisão, sem achado): com mais de 20
+  pendentes, a cauda da repetição sai a 8 por segundo, e uma mensagem nova
+  escrita nesse meio-tempo é gravada antes das mais velhas que ainda esperam
+  a vez. A ordem «em que foi escrita» vale entre as repetidas.
+- **F1:** o perdão do `par_lento` saiu (`2cec3729`). Com o `1ebf85a4` no ramo
+  desde o passo 0 da rodada 1, o teste sem o perdão passa 72 de 72 sob carga.
+
+---
+
+## Rodada 1 da revisão (`lote-p61-review-report.md`): Crítico 0, Importante 2, Menor 3
+
+### Passo 0: o merge do `0.16/lotes` em `3a60f121`
+
+`git merge --no-ff` (`3beac691`). Um conflito só, trivial, em
+`seele-sessao/src/lib.rs`: ficam `pub mod despedida;` (deste lote) e
+`pub mod retrato;` (da F4). Testes de crate verdes depois do merge.
+
+### I1: o eco de uma linha antiga não fecha mais a busca antes do buraco (`cd619b4c`)
+
+**O defeito, medido pela revisão.** Quem repete uma mensagem que o servidor
+já gravou faz o servidor anunciar a linha original, com o id antigo, ao
+canal inteiro (`Gravacao::Feita` → `MessagePosted`). O eco caía na janela de
+uma página, `Buraco::ouvir` o tomava pela «mais antiga da página», e a busca
+pulava para trás dele e dizia «fechou». Pela FFI, com 30 ms entre as
+páginas, ficavam 1 200 de 1 500 na tela.
+
+**O conserto.** A página é medida pelo que o servidor manda: as
+`PAGINA_DO_BURACO` (200) maiores abaixo do cursor.
+- A busca guarda os ids do canal abaixo do cursor que chegaram na janela, e
+  a página vai até a menor das 200 maiores (`NoAr::ate_onde`).
+- Com a página cheia, um eco antigo abaixo delas fica de fora. Com ela
+  incompleta, o servidor chegou ao começo e mandou tudo abaixo do cursor, e o
+  eco é uma delas.
+- O cursor nunca fica mais antigo que a página de verdade. Um cursor mais
+  novo que o devido só pede de novo o que já chegou, e o `Room` não duplica.
+- Uma mensagem ao vivo nunca empurra o cursor para trás.
+- **A suposição, escrita:** o servidor manda 200 por página quando tem 200
+  (`MAX_PAGE`). Um servidor que cortasse abaixo disso faria toda página
+  parecer incompleta. Todo servidor que este cliente alcança é 0.16 ou mais
+  novo, com `MAX_PAGE = 200`.
+
+**Provas:**
+- vermelho antes, no crate, com o cenário da sonda da revisão:
+  `o_eco_de_uma_linha_antiga_nao_fecha_a_busca_antes_do_buraco` («faltam 50
+  do buraco: [102, 103, …]»);
+- vermelho antes, pela FFI:
+  `queda_recuperavel::o_eco_de_uma_linha_antiga_no_meio_da_busca_nao_a_fecha_antes_do_buraco`
+  («a busca parou com 400 de 1 500»). O eco é o `MessagePosted` da linha
+  velha de outra pessoa, posto no barramento a cada 2 ms durante a volta: no
+  loopback, a busca anda rápido demais para cair por acaso na janela do lote
+  de 200 ms do escritor. É o caso que a prova C não cobria;
+- **reversão** (a página até a menor de todas): os dois reprovam («200 de
+  1 500»).
+
+### I2: a cerca perdida (`60738c94`, medida em `0c636998`)
+
+**O conserto, em `volta::Buraco`:**
+- **Prazo por página** (`PRAZO_DA_PAGINA`, 5 s). Vencido, a busca pede a
+  mesma página de novo, uma vez, com `warn` no `seele.log` («não teve
+  resposta; pedindo de novo»). Se vence de novo, ela para em
+  `Parada::SemResposta`, com `warn`, o canal e o cursor.
+- **O começo do canal só vale quando o servidor responde.** Uma página
+  incompleta é resposta: o servidor não tinha mais. Uma página vazia sozinha
+  não é: ela é pedida de novo depois de `ESPERA_DA_PAGINA_VAZIA` (1 s, vinte
+  fichas do balde), e só vazia de novo vale como começo.
+- A busca não tem relógio próprio. `quando()` diz até quando dormir, `vez()`
+  diz o que fazer quando o instante chega, e o `drive` ganhou um braço do
+  `select!` que a acorda. `volta::seguir` faz o que a busca manda e registra a
+  parada, para os dois braços fazerem o mesmo.
+
+**O que acontece em cada descarte, medido:**
+- **O `Ping` da cerca descartado** — pela FFI (`a_pagina_que_o_limitador_descarta`,
+  `#[ignore]`). No instante em que a janela lê a volta, 80 `SetMuted` pela FFI
+  esgotam o balde de 60 da conexão nova. O `FetchHistory` e o `Ping` da
+  página 2 caem juntos no `Descarta` do `Vigia`. O buraco tinha 1 500.
+  - **Antes** (`cd619b4c`): 200 de 1 500 na tela, por 12 s. A busca ficou
+    aberta e calada.
+  - **Depois:** 200 aos 52 ms, nada até os 5 021 ms, quando vence o prazo e
+    a página sai de novo; 1 500 aos 5 075 ms.
+- **O `FetchHistory` descartado com o `Ping` passando** — não dá para
+  provocar pela FFI: com o balde vazio, os dois caem juntos. Medido no crate,
+  com um simulador que descarta por número de pedido e um relógio que anda
+  só quando a busca espera:
+  - **antes:** a busca lia «começo do canal» e parava, com o buraco de fora;
+  - **depois:** a página vazia é pedida de novo depois de 1 s, e o buraco
+    fecha inteiro (`o_pedido_descartado_e_pedido_de_novo_e_o_buraco_fecha_inteiro`).
+
+**Provas e reversões:**
+- vermelho antes: `uma_pagina_vazia_sozinha_nao_e_o_comeco_do_canal` («a busca
+  leu "começo do canal" numa página que o servidor não respondeu»);
+- novas: a cerca descartada tem prazo, e duas vezes a mesma dá `SemResposta`;
+  o começo numa divisa de página é dito duas vezes;
+- **reversões:** sem o prazo da cerca, «a busca não pediu, não parou e não
+  espera nada: ficou calada»; a vazia lida como começo na hora reprova três.
+
+### M1: o teto diz a verdade (`60738c94`)
+
+O doc de `TETO_DE_PAGINAS` prometia «o histórico, para quem rolar a
+conversa», e a janela não tem pedido de histórico mais antigo. Agora diz que
+o que passa do teto não volta nesta sessão, e o teto vai ao `seele.log` como
+`warn`, com o canal e o cursor de onde parou.
+
+### M2: um campo grande demais é recusa, e não queda (opção B, `6e6bdc13`)
+
+**O defeito, medido pela revisão:** o apelido, o nome de canal e a senha da
+sala acima do teto do fio (em bytes) faziam o `encode` falhar, e
+`Motor::executar` chamava `cair()`. Pela leitura, o nome do servidor e o
+motivo do banimento também.
+
+**O conserto, no núcleo:**
+- `recusa_local`: um erro de comando que é `ControlError` é recusa; qualquer
+  outro erro de escrita é do transporte, e é queda.
+- `Motor::recusar_aqui`: `warn` no `seele.log` com o comando (`Comando::nome`)
+  e a recusa (o campo, o tamanho e o teto), **nunca o valor**. O enlace segue.
+- **A entrada numa sala com senha grande demais** é desfeita como o servidor
+  desfaz uma senha errada: com a mesma recusa, `VoiceRoomEntryRefused`.
+  - Ela desfaz a entrada pendente do motor. Sem isso, a volta a refaria a
+    cada queda.
+  - **O `Room` precisa saber, e fica sabendo pela mesma porta.** Sem ela, a
+    tela punha a pessoa na sala pedida, pelo assento especulativo, enquanto o
+    servidor a tinha na de antes. A recusa vai à casca como a do servidor, e
+    o `Room` desfaz o assento por `seele_sessao::assento`, mostrando o aviso
+    que já existe para a entrada recusada.
+  - Sem tipo novo, sem mexer no `state.rs` nem na `NoticeReason`.
+- O comentário em `ui/index.html` (o campo do nome do servidor) dizia que a
+  recusa «é do servidor e chega como aviso». Agora diz a verdade de hoje e
+  aponta para a pendência 58.
+
+**Provas:**
+- vermelho antes, pela FFI: `queda_recuperavel::um_campo_grande_demais_nao_derruba_o_enlace`
+  (nome de canal de 60 B, apelido de 40 B e senha de 40 B): «um campo grande
+  demais derrubou o enlace». Depois: o enlace não cai em 2 s, ela segue
+  sentada na sala de antes, e uma mensagem depois sai e é confirmada;
+- no crate: `enlace::tests::um_campo_grande_demais_e_recusa_local_e_nao_queda`
+  (o que é recusa e o que é queda, também com contexto em cima; o `warn` com o
+  comando e o campo, e **sem a senha**; a entrada desfeita no motor). O `warn`
+  é provado aqui: a conformidade não tem como ler o registro de outro
+  processo de runtime;
+- **reversões:** voltar a chamar `cair()` — «um campo grande demais derrubou
+  o enlace»; sem desfazer a entrada — «a entrada recusada aqui não desfez o
+  assento: a tela a põe noutra sala».
+
+**A metade da janela, para o lote seguinte** (também na pendência 58, item
+55). A forma mais barata é a janela conferir o tamanho antes de mandar, em
+bytes, com os limites do `seele-proto`, como o envio de mensagem já faz em
+`tela-sessao.js` (`limiteDaMensagem` e `bytesDe`).
+
+| campo | teto | onde é escrito | o que manda |
+|---|---|---|---|
+| apelido | 32 B (`MAX_NICKNAME_LEN`) | `#perfil-apelido` (`camada-nomear.js`) | `escolher_apelido` |
+| nome de canal | 48 B (`MAX_CHANNEL_NAME_LEN`) | `#nomear-valor`, `maxlength="48"` em caracteres | `criar_linha` (`tela-sessao.js`), `renomear_linha` (`tela-sessao.js`, `camada-moderar.js`) |
+| nome de sala | 48 B (`MAX_CHANNEL_NAME_LEN`) | `#nomear-valor` | `criar_voice_room`, `renomear_voice_room` (`tela-sessao.js`) |
+| limite da sala | 1 a 250 (`MAX_VOICE_ROOM_LIMIT`) | o mesmo pedido | `criar_voice_room` |
+| nome do servidor | 64 B (`MAX_CLIENT_NAME_LEN`) | `#server-nome-valor`, `maxlength="64"` | `renomear_server` (`tela-server.js`, `tela-boot.js`) |
+| senha da sala | 32 B (`MAX_NICKNAME_LEN`) | a caixa de senha antes da entrada | `enter_voice_room` (`tela-sessao.js`) |
+| motivo do banimento | 512 B (`MAX_ALERT_TEXT_LEN`) | `#moderar-motivo`, `maxlength="200"` (200 letras CJK dão 600 B) | `banir_pessoa` (`camada-moderar.js`) |
+
+Não precisam: a carga de MOD, já conferida em bytes no `base.js`, e os
+ícones, por `check_server_icon`. A senha da sala grande demais a janela já
+mostra, como entrada recusada.
+
+### M3: o passo da F4 (`1516ab14`)
+
+`Disconnecting { FellBehind }` antes do `Kicked` em
+`dois_produtores_de_snapshot.rs`, com o `ended` nulo nos dois produtores
+depois dele. Verde 2/2. **Reversão** do `Room` (fim para toda
+`Disconnecting`): «o desktop marcou fim numa queda recuperável:
+"FellBehind"».
+
+### Os testes da rodada 1, uma vez só, depois do M2
+
+| alvo | resultado |
+|---|---|
+| `seele-sessao` | 77 + 1 passaram |
+| `seele-ffi --lib` | 208 passaram (1 ignorado) |
+| `seele-core --lib` (em série, com o codec) | 466 passaram |
+| `seele-audio --features aparelho-de-mentira`, só `device::mentira` | 2 passaram |
+| `seele-app --test frontend`, com `HOME` falsa | 295 passaram |
+| `xtask --test folha_de_lints`, `check-deps` | passaram |
+| `par_lento` sem o perdão, 12 processos × 6 rodadas, com o `1ebf85a4` | 72 de 72, 0 falante desligado, 1 160 de 1 160 |
+
+**Conformidade**, um arquivo por vez, com `--test-threads=1` (sem o
+`quarto_pelo_link`):
+
+| arquivo | resultado |
+|---|---|
+| `queda_recuperavel` | 6 passaram |
+| `dois_produtores_de_snapshot` | 2 passaram |
+| `bateria_interna` | 7 passaram |
+| `volta_pela_trilha` | 6 passaram |
+| `voz_na_reconexao` | 1 passou |
+| `reconexao_fantasma` | 1 passou |
+| `moderacao` | 6 passaram |
+| `quem_hospeda_fecha` | 2 passaram |
+| `acceptance_m5` | 15 passaram |
+| `a_recusa_nao_tira_da_sala` | 5 passaram |
+| `senha_da_sala` | 2 passaram |
+| `saida_com_despedida` | 3 passaram |
+| `estados` | 10 passaram |
+
+fmt e clippy limpos nos crates tocados, com e sem o recurso do aparelho de
+mentira. O resto do `seele-audio` continua sem rodar: um teste dele, sem
+`#[ignore]`, abre o microfone de verdade.
+
+Todas as reversões desta rodada voltaram idênticas, conferidas com `cmp`, e
+os arquivos foram tocados depois.
