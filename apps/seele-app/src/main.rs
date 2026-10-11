@@ -2033,6 +2033,99 @@ mod a_entrada_velha_que_chega_tarde {
         );
     }
 
+    /// **A nova começa antes da primeira conferência da velha** (porte para a
+    /// 0.15.2; sem par na 0.16).
+    ///
+    /// Na 0.16 o cenário de cima prova a primeira conferência pelo retrato que
+    /// não chega ao servidor velho. Nesta linha ele não prova sempre, e foi
+    /// medido: sem a primeira conferência (a reversão R2), o cenário passou
+    /// numa rodada e reprovou noutra. A segunda conferência larga a velha logo
+    /// depois dos efeitos, e o `disconnect` daqui acaba a thread da conexão sem
+    /// esperar a despedida: o retrato sai ou não conforme ela acaba antes ou
+    /// depois de mandá-lo. Na rodada em que passou, só o guarda de forma
+    /// reprovava.
+    ///
+    /// Aqui a nova revoga a geração com a velha ainda no aperto de mão, e o
+    /// teste segura o cadeado do slot: a velha que passasse da primeira
+    /// conferência pararia nele, com tempo de os efeitos dela chegarem ao
+    /// servidor velho. Cobra que ela volte antes do slot, sem retrato nenhum
+    /// no servidor que a pessoa deixou, e marcada como substituída.
+    async fn a_nova_comeca_antes_da_primeira_conferencia() -> Vec<String> {
+        guardar_um_retrato();
+        let (velho, servidor_velho) = servidor("Velho").await;
+        let app = app();
+        let sessao = app.state::<Session>();
+        let mut vermelhos = Vec::new();
+
+        let trava = servidor_velho.server().persistence.lock().await;
+        let velha = connect_noutra_thread(app, velho.to_string(), "velha");
+        let comeco = tokio::time::Instant::now();
+        while sessao.geracao() == 0 && comeco.elapsed() < Duration::from_secs(5) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(sessao.geracao(), 1, "a tentativa velha não começou");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // A nova começa e revoga a geração da velha, ainda no aperto de mão.
+        sessao.revogar();
+        // O slot, seguro: a velha que passasse da primeira conferência pararia
+        // aqui, com os efeitos de entrada já aplicados.
+        let (soltar_o_slot, quem_segura) =
+            segurar(move || app.state::<Session>().inner().connection.lock());
+        let mut do_velho = servidor_velho.server().events.subscribe();
+        drop(trava);
+        if um_retrato_chegou(&mut do_velho, Duration::from_secs(3)).await {
+            vermelhos.push(
+                "a velha, substituída antes de entrar, mandou o retrato ao servidor que a pessoa \
+                 deixou: os efeitos de entrada valeram para ela"
+                    .to_owned(),
+            );
+        }
+        if !velha.is_finished() {
+            vermelhos.push(
+                "a velha, substituída antes de entrar, esperou o cadeado do slot: passou da \
+                 primeira conferência e aplicou os efeitos de entrada"
+                    .to_owned(),
+            );
+        }
+        let _ = soltar_o_slot.send(());
+        quem_segura.join().expect("quem segurava o slot caiu");
+
+        match quando_terminar(velha, Duration::from_secs(10)).await {
+            Ok(entrada) => vermelhos.push(format!(
+                "a velha voltou como entrada (geração {}) depois de a nova revogar a geração dela \
+                 no aperto de mão",
+                entrada.geracao
+            )),
+            Err(falha) => {
+                let dita = serde_json::to_value(&falha).unwrap_or_default();
+                if dita.get("substituida") != Some(&serde_json::Value::Bool(true)) {
+                    vermelhos.push(format!(
+                        "a recusa da velha substituída no aperto de mão não vem marcada: {dita}"
+                    ));
+                }
+            }
+        }
+        if let Ok(conexao) = sessao.connection() {
+            vermelhos.push(format!(
+                "o slot ficou com a conexão da velha ({})",
+                conexao.snapshot().server
+            ));
+        }
+        vermelhos
+    }
+
+    #[test]
+    fn a_velha_substituida_antes_da_primeira_conferencia_nao_aplica_os_efeitos() {
+        let _vez = vez();
+        let vermelhos = runtime().block_on(a_nova_comeca_antes_da_primeira_conferencia());
+        assert!(
+            vermelhos.is_empty(),
+            "a velha substituída no aperto de mão aplicou os efeitos de entrada:\n  {}",
+            vermelhos.join("\n  ")
+        );
+    }
+
     /// **A nova começa entre as duas conferências da velha** (I1 da revisão
     /// do E54 na 0.16, a sonda P2).
     ///
@@ -2265,10 +2358,12 @@ mod a_entrada_velha_que_chega_tarde {
     /// **As duas conferências do `connect`, pela forma.**
     ///
     /// O comportamento das duas tem teste: a primeira em
-    /// `a_velha_que_entra_depois_da_nova_nao_toma_a_conexao`, e a segunda em
+    /// `a_velha_substituida_antes_da_primeira_conferencia_nao_aplica_os_efeitos`
+    /// (o cenário dos dois servidores não a vê nesta linha, e o doc do teste
+    /// dela diz por quê), e a segunda em
     /// `a_velha_que_a_nova_substitui_entre_as_duas_conferencias_nao_grava_o_slot`,
-    /// que para o `connect` no cadeado do slot. Este guarda prende a forma que
-    /// dá aquele comportamento, sem ler comentário:
+    /// os dois parando o `connect` no cadeado do slot. Este guarda prende a
+    /// forma que dá aquele comportamento, sem ler comentário:
     ///
     /// 1. entre o `connect_watching` voltar e o primeiro efeito de entrada há a
     ///    conferência da geração, e ela **volta** com a substituída largada;
