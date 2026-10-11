@@ -246,10 +246,14 @@ async function conectar(alvo, apelido, token) {
     // esta conferência, a recusa dela caía no ramo de baixo, e a linha
     // vermelha aparecia com a frase de uma tentativa que a pessoa já tinha
     // deixado. Vai ao `seele.log` como aviso, com o alvo e sem a credencial.
+    //
+    // A marca sai quando a geração caiu, e há duas causas: outra entrada que
+    // começou, ou o fim desta mesma sessão, que chega pelo `Ended` e abre a
+    // tela de fim. A frase diz as duas, e não promete «a nova».
     if (falha?.substituida === true) {
       registrarNoAnfitriao(
         "entrada",
-        `a tentativa a ${alvo} foi substituída por outra antes de entrar: a conexão dela foi fechada, e a tela segue com a nova`,
+        `a tentativa a ${alvo} não entrou: a geração dela já não está de pé — outra entrada começou, ou a sessão acabou —, e a conexão dela foi fechada`,
         "aviso",
       );
       return;

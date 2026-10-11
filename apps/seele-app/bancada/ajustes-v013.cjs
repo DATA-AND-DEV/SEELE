@@ -206,6 +206,12 @@ async function aRecusaSubstituidaChegaCalada(browser, porta) {
   assert.deepEqual(daVelha[0].slice(0, 2), ['aviso', 'entrada'],
     `a linha da tentativa substituída não foi como aviso da entrada: ${JSON.stringify(daVelha[0])}`);
   assert.ok(!JSON.stringify(linhas).includes(CONVITE_E54), 'o convite da tentativa substituída foi ao seele.log');
+  // A marca sai quando a geração caiu: por outra entrada, ou pelo fim da
+  // própria sessão. A linha diz as duas, e não promete «a nova» que pode não
+  // existir (M1 da revisão do porte).
+  assert.ok(String(daVelha[0][2]).includes('outra entrada começou, ou a sessão acabou')
+    && !String(daVelha[0][2]).includes('segue com a nova'),
+    `a linha da tentativa recusada atribui a queda da geração a uma causa só: ${daVelha[0][2]}`);
 
   // ---- 2. Uma recusa sem a marca ainda pinta a linha vermelha, como antes.
   await comecar({}, { [ALVO_E54]: 'Unreachable' });

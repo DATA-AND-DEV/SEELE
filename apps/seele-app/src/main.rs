@@ -1015,6 +1015,12 @@ impl From<ConnectionError> for FalhaDaEntrada {
 /// `a_entrada_velha_que_chega_tarde`, e publicado na v0.15.1). Aqui a conexão
 /// dela é fechada, uma linha vai ao `seele.log`, e a janela recebe a recusa
 /// marcada como substituída.
+///
+/// **A geração também cai pelo fim da própria sessão** (M1 da revisão do
+/// porte): o `Ended` desta tentativa, chegando entre o `subscribe` e o slot,
+/// faz a `Bridge` revogá-la. Aí não houve outra entrada, e a tela é a de fim,
+/// que o mesmo `Ended` abre. A linha do registro diz as duas causas, e não
+/// promete uma sessão de quem a substituiu que pode não existir.
 fn largar_a_substituida(
     connection: &Connection,
     geracao: u64,
@@ -1027,8 +1033,8 @@ fn largar_a_substituida(
         geracao,
         de_pe,
         alvo,
-        "a entrada a {alvo} foi substituída por outra antes de entrar: a conexão dela foi \
-         fechada, e a sessão de pé é a de quem a substituiu"
+        "a entrada a {alvo} não entrou: a geração dela já não está de pé — outra entrada \
+         começou, ou a sessão acabou —, e a conexão dela foi fechada"
     );
     FalhaDaEntrada {
         falha: ConnectFailure::from(ConnectionError::NotConnected),
@@ -2016,13 +2022,18 @@ mod a_entrada_velha_que_chega_tarde {
         let runtime = runtime();
         let (mut vermelhos, rastro) =
             crate::rastro_de_teste::capturar(|| runtime.block_on(a_velha_termina_depois_da_nova()));
-        let linha = rastro
-            .lines()
-            .find(|linha| linha.contains("substituída") && linha.contains(" WARN "));
+        // A frase diz as duas causas de a geração cair, e não só uma: outra
+        // entrada que começou, ou o fim da própria sessão, que a `Bridge`
+        // revoga entre o `subscribe` e o slot (M1 da revisão do porte).
+        let linha = rastro.lines().find(|linha| {
+            linha.contains(" WARN ")
+                && linha.contains("a geração dela já não está de pé")
+                && linha.contains("outra entrada começou, ou a sessão acabou")
+        });
         if linha.is_none() {
             vermelhos.push(
-                "o seele.log não tem uma linha WARN dizendo que a entrada substituída foi \
-                 descartada"
+                "o seele.log não tem uma linha WARN dizendo que a entrada largada não entrou \
+                 porque a geração dela caiu, pelas duas causas possíveis"
                     .to_owned(),
             );
         }
