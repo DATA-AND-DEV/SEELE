@@ -376,13 +376,14 @@ fn primeiros_das_entradas(corpo: &str) -> BTreeSet<String> {
     nomes
 }
 
-/// As seis listas da ponte.
+/// As cinco listas da ponte. A sexta, `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, saiu
+/// com a tarefa 19 da F7: o `disconnect`, o único dela, deixou de derrubar a
+/// hospedagem.
 struct Listas {
     atendidos: BTreeSet<String>,
     so_na_larga: BTreeSet<String>,
     recusados: BTreeSet<String>,
     neutros: BTreeSet<String>,
-    apesar_da_hospedagem: BTreeSet<String>,
     a_fazer: BTreeSet<String>,
 }
 
@@ -393,7 +394,6 @@ fn listas_da_ponte() -> Listas {
         so_na_larga: lista_da_ponte(&ponte, "SO_NA_CASCA_LARGA"),
         recusados: lista_da_ponte(&ponte, "RECUSAS_NOMEADAS"),
         neutros: lista_da_ponte(&ponte, "NEUTROS_DE_QUEM_NAO_HOSPEDA"),
-        apesar_da_hospedagem: lista_da_ponte(&ponte, "ATENDIDOS_APESAR_DA_HOSPEDAGEM"),
         a_fazer: lista_da_ponte(&ponte, "AINDA_A_FAZER"),
     }
 }
@@ -406,10 +406,10 @@ fn listas_da_ponte() -> Listas {
 /// - `SO_NA_CASCA_LARGA`: atendido no PC (D-web-3) e recusado com a frase no
 ///   celular;
 /// - `RECUSAS_NOMEADAS`: recusado com a frase nas duas;
-/// - `NEUTROS_DE_QUEM_NAO_HOSPEDA` e `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: os que
-///   mexem na hospedagem e não são recusados (o guarda abaixo).
+/// - `NEUTROS_DE_QUEM_NAO_HOSPEDA`: os que mexem na hospedagem e respondem o que
+///   o desktop responde a quem não hospeda (o guarda abaixo).
 ///
-/// Então no celular atende-se `COMANDOS_DA_PONTE` mais os dois da hospedagem,
+/// Então no celular atende-se `COMANDOS_DA_PONTE` mais os neutros,
 /// e recusa-se o resto; no PC, também os `SO_NA_CASCA_LARGA`. **E a lista não
 /// guarda o que a casca não chama mais**: um nome velho é uma porta que
 /// ninguém confere.
@@ -422,7 +422,6 @@ fn todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas() {
         ("SO_NA_CASCA_LARGA", &l.so_na_larga),
         ("RECUSAS_NOMEADAS", &l.recusados),
         ("NEUTROS_DE_QUEM_NAO_HOSPEDA", &l.neutros),
-        ("ATENDIDOS_APESAR_DA_HOSPEDAGEM", &l.apesar_da_hospedagem),
     ];
     for (i, (nome_a, a)) in nomeadas.iter().enumerate() {
         for (nome_b, b) in nomeadas.iter().skip(i + 1) {
@@ -451,11 +450,7 @@ fn todo_comando_que_a_casca_chama_esta_na_ponte_nas_duas_cascas() {
     let a_fazer_fora: Vec<_> = l
         .a_fazer
         .iter()
-        .filter(|nome| {
-            !l.atendidos.contains(*nome)
-                && !l.so_na_larga.contains(*nome)
-                && !l.apesar_da_hospedagem.contains(*nome)
-        })
+        .filter(|nome| !l.atendidos.contains(*nome) && !l.so_na_larga.contains(*nome))
         .collect();
     assert!(
         a_fazer_fora.is_empty(),
@@ -509,12 +504,15 @@ fn le_o_campo(corpo: &str, nome: &str) -> bool {
 /// O navegador não hospeda. Todo comando que a casca chama e cujo corpo, no
 /// `main.rs`, mexe na hospedagem local (`hospedagem`, `persistence_hospedada`,
 /// `portaria::`, `persistence_do_mod`, `servidor_do_mod`, `sala::`, e a leitura
-/// dos campos `.sala` e `.toques`) está numa de três listas, e nunca solto
+/// dos campos `.sala` e `.toques`) está numa de duas listas, e nunca solto
 /// entre os atendidos:
 /// 1. `RECUSAS_NOMEADAS`;
 /// 2. `NEUTROS_DE_QUEM_NAO_HOSPEDA`, com a resposta (a bancada `ponte-web.cjs`
-///    confere cada uma);
-/// 3. `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (o `disconnect`).
+///    confere cada uma).
+///
+/// Havia uma terceira, `ATENDIDOS_APESAR_DA_HOSPEDAGEM`, com o motivo (o
+/// `disconnect`). Desde a tarefa 19 da F7 o `disconnect` não toca nas
+/// hospedagens, e a lista saiu inteira.
 ///
 /// Um comando novo que mexa na hospedagem reprova até alguém decidir de que
 /// lado ele fica. E o contrário também: um neutro que não mexe na hospedagem
@@ -603,14 +601,13 @@ fn todo_comando_que_mexe_na_hospedagem_e_recusado_neutro_ou_atendido_com_motivo(
                 .iter()
                 .any(|(nome, _)| nome == comando)
                 || l.recusados.contains(comando)
-                || l.neutros.contains(comando)
-                || l.apesar_da_hospedagem.contains(comando),
-            "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS`, \
-             `NEUTROS_DE_QUEM_NAO_HOSPEDA` nem `ATENDIDOS_APESAR_DA_HOSPEDAGEM`: decida de que \
-             lado ele fica (F4/ponte-no-pc.md)"
+                || l.neutros.contains(comando),
+            "`{comando}` mexe na hospedagem local (main.rs) e não está em `RECUSAS_NOMEADAS` \
+             nem em `NEUTROS_DE_QUEM_NAO_HOSPEDA`: decida de que lado ele fica \
+             (F4/ponte-no-pc.md)"
         );
     }
-    for comando in l.neutros.iter().chain(&l.apesar_da_hospedagem) {
+    for comando in &l.neutros {
         assert!(
             mexem.contains(comando),
             "`{comando}` está entre os da hospedagem na ponte, e o corpo dele no `main.rs` não \

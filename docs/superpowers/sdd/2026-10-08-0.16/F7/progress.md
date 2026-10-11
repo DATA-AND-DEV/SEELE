@@ -650,3 +650,60 @@ orquestradora, não rodo conformidade.
   da segurança;
 - **depois do encontro com o lote X da F5:** o teste da sala com
   `codigo_esperado` provando `onde_estou_na == Pessoal` pela chave.
+
+## A sala viva na décima segunda (10/10)
+
+- A sala viva entrou na `versao/0.16` (`6e845e0d`), com o lote X da F5 integrado
+  antes. Trazida para o `0.16/sala-viva` em `9f170f3f`, sem conflito.
+- **O encontro com o X, provado** (`daf25ba9`):
+  `a_sessao_na_propria_sala_e_pessoal_pela_chave_e_nao_pelo_endereco`. Quem
+  recebe entra na própria sala pela ponte, com `codigo_esperado`. A impressão
+  gravada é a da sala, e o `onde_estou_na` diz `Pessoal` com o endereço
+  `127.0.0.1` e também com um nome de fora. Reprovam: o `onde_estou_na` sem a
+  impressão da conexão, e a ponte sem `gravar_impressao`.
+- **Dois ajustes da integração me tocaram:**
+  - a tabela dos neutros da bancada `ponte-web.cjs` não tinha o `estado_da_sala`
+    nem o `toques_agora` que eu pus na ponte (`8e7fcd37`). Eu rodei a
+    `ponte-sem-gesto.cjs` e não a `ponte-web.cjs`, que confere a resposta de cada
+    neutro. **Quem põe um neutro na ponte roda as duas;**
+  - o `connect` passou a ler a hospedagem para conferir a sala, e a marca
+    `sala::` da F4 o pegou. Ele entrou em `leem_e_seguem_a_lista` (`f7d53427`).
+- A VPS foi reimplantada com o ENC/2: a sala pessoal acha o ponto de produção.
+
+## As tarefas 19 e 20: sair não derruba o servidor (10/10)
+
+Desenhadas durante a pausa da M3, só lendo (`fecfa5d8`, `ceb2a490`), e
+compiladas depois dela. No `0.16/sala-viva`, cada etapa verde sozinha:
+
+| etapa | commit |
+|---|---|
+| o Rust e a ponte: o `disconnect` só da sessão, `parar_de_hospedar`, `meu_servidor`; a `ATENDIDOS_APESAR_DA_HOSPEDAGEM` sai com o ramo no guarda da F4; o guarda novo da 19 | `8b82f0eb` |
+| a `tela-chamada.js` (isolado): o SAIR sai sem caixa | `b200830a` |
+| a `tela-sessao.js`: as frases dizem que o servidor continua; o `ejetar()`; a pergunta ao `onde_estou` (a metade da `tela-sessao.js` da 18); o VOLTAR na trilha | `755e33ce` |
+| o VOLTAR AO MEU SERVIDOR e o PARAR DE HOSPEDAR na entrada (`camada-hospedagem.js`), com o roteiro `meu-servidor.js` | `620f1d8b` |
+| a `tela-fim.js`, e o `desmontar_a_sessao` que ninguém mais chama | `d46dcbb4` |
+
+**Medido no caminho:**
+- a ordem que eu tinha anotado quebrava o SAIR entre dois commits: a
+  `tela-chamada.js` chamava o `hospedandoAqui`, que a `tela-sessao.js` renomeia.
+  Ela entrou antes;
+- a `tela-fim.js` não pôde ficar isolada: sem ela, o `desmontar_a_sessao` ficou
+  sem chamador, e o guarda dos comandos sem chamador reprova. Ele saiu no mesmo
+  commit;
+- o guarda do estado de topo da sessão pegou o `meuServidorNaTrilha`, que eu não
+  tinha esquecido ao sair.
+
+**Como está:** app 711/711; 32/32 roteiros; as duas bancadas da ponte limpas; a
+bancada do celular passa (85, e o G3 igual nos dois motores). Cada guarda e cada
+passo do roteiro reprova na reversão.
+
+**O que ficou de fora:**
+- o teste de um MOD do guardado que continua respondendo enquanto o dono visita
+  outro servidor. Ele vale por construção (o servidor não cai mais), e ainda não
+  tem prova;
+- com o guardado no ar, o HOSPEDAR AQUI da entrada ainda responde «JÁ ESTOU
+  HOSPEDANDO NESTA JANELA». O bloco do VOLTAR fica logo acima dele. Fazer o
+  botão voltar é da `tela-boot.js`, na fila da F5, com a metade dela da 18;
+- **a confirmação ao fechar (21)** pede decisão da orquestradora: o guarda de
+  credencial da F5 proíbe vetar o fechamento da janela, e no macOS o botão do
+  sistema e o Cmd+Q passam sem pergunta.

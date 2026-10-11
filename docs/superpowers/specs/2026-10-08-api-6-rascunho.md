@@ -1020,7 +1020,16 @@ são de escopo de servidor; a mesa é de canal), e a API só precisa dizê-lo.
 
 **Pedido da MESA (item 9):** o orçamento do quintal legível pela metade de
 servidor (`dados.uso()`, `dados.teto`), e a recusa por quintal cheio com código
-próprio. Entra: é só fachada.
+próprio. Entra: é só fachada. **Feito em 10/10** (`3bfa9fd3`; achado montando o
+`v6.json`: a tarefa 8 o listava e não o fez, e a promessa só não foi acusada
+porque o `check-api` aceitava uma frase como apontador). `dados.uso()` dá os
+bytes do quintal, chave mais valor, em UTF-8, pela **mesma leitura da
+gravação** (`ler_o_quintal`), e `dados.teto` é o teto dela (262144); os dois
+moram no protótipo do `dados`, e não são gravados. **Medido antes:** com o
+quintal cheio, o `aoPedir` terminava, a gravação recusava, e a janela recebia a
+recusa genérica (`bridge-refused`), a de qualquer falha; agora o pedido volta
+com `{ ok: false, error: 'quintal-cheio' }`. A resposta acima de 1 MiB, que
+saía como quintal cheio, ganhou falha própria e continua `bridge-refused`.
 
 ## 9. O tema
 
@@ -1574,7 +1583,13 @@ retrato, e pelo evento `lugar` quando o aparelho deita.
 ## 12. Os limites
 
 **Os limites congelam com o `v6.json`, e por isso esperam a M3** (spec-mestre,
-F3). A medição de base da v0.15.1 está no ADR 0056 (§15). **Cada número vale
+F3). **Cada número da campanha da API 6 é lido contra o `sem-mod` da própria
+campanha**, e não contra a base da 0.15.1: a 0.16 sobe a sala pessoal ao abrir,
+e o `sem-mod` dela já carrega esse custo (`docs/evidencias/m3-custo-dos-mods/
+LEIA.md`). **O jitter vale só nos cenários com voz**: sem falante, o registro
+fica no zero inicial, e esse zero não é medida. (Nos sete primeiros cenários
+com voz, o falante mandava a voz com o número de antes do `f3aaf9ce`, e a 0.16
+a jogava fora; foram descartados e refeitos.) A medição de base da v0.15.1 está no ADR 0056 (§15). **Cada número vale
 igual no desktop e no navegador**, porque o motor é o mesmo (§16). Os valores
 de hoje, lidos no código:
 
@@ -1582,19 +1597,37 @@ de hoje, lidos no código:
 |---|---|---|---|
 | mensagem do MOD à janela | 12 KiB | `executor.rs:70`; `control.rs:2711`, `:2830`; `base.js:566` | **fica 12 KiB por mensagem**, e a superfície ganha a montagem por partes (abaixo) |
 | contribuições por MOD | 128 | `mods-contribuicoes.js:91` | **muda de modelo** (abaixo): os pontos por pessoa deixam de gastar o teto agregado |
-| nós de uma contribuição | 64, para **todo** ponto: `montarContribuicao` montava com o orçamento do cartão, e o `perfil` da tabela de pontos não era lido [c, até a tarefa 5] | `base.js`, `PERFIS_DE_RENDER` em `mods-regiao.js` | **o `perfil` de cada ponto vale** (decidido pela orquestradora, 09/10): `pessoa.detalhes` monta com o de superfície (**4096 nós**: um painel de uma pessoa por vez, aberto sob demanda); **as regiões ficam no do cartão (64) até a M3 medir**, no desktop e no iPhone. Um guarda reprova um `perfil` que `montarContribuicao` não lê |
-| superfícies | 12 | `mods-superficies.js:204` | M3 |
+| nós de uma contribuição | 64, para **todo** ponto: `montarContribuicao` montava com o orçamento do cartão, e o `perfil` da tabela de pontos não era lido [c, até a tarefa 5] | `base.js`, `PERFIS_DE_RENDER` em `mods-regiao.js` | **o `perfil` de cada ponto vale** (decidido pela orquestradora, 09/10): `pessoa.detalhes` monta com o de superfície (**4096 nós**: um painel de uma pessoa por vez, aberto sob demanda); **as regiões ficam no do cartão (64)**: medidas em 10/10 com as oito no teto, cada uma com 64 nós, e a `conversa.mensagem` em cada uma das 30 mensagens, custaram +4,4 pontos de CPU e +38 MiB, sem commit acima de um quadro (o iPhone falta). Um guarda reprova um `perfil` que `montarContribuicao` não lê |
+| superfícies | 12 | `mods-superficies.js:204` | **fica 12, não medido**: a campanha de 10/10 empilhou 3 folhas |
 | avisos | 4 | `mods-superficies.js:206` | fica |
-| nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | M3 |
+| nós por superfície / fundura / campos / telas / mídias | 4096 / 16 / 128 / 4 / 24 | `mods-regiao.js:193` | **os 4096 nós ficam, medidos**: três folhas empilhadas de 3980 nós cada, montadas em 20 partes, custaram +2,5 pontos de CPU e +75 MiB. A fundura, os campos, as telas e as mídias ficam, **sem medida própria** |
 | figuras numa `tela` | 256 | `mods-regiao.js:47` | **fica 256, e quem manda é a mensagem** (decidido em 10/10): com figuras completas, com `chave` e `cor` (71 bytes cada), cabem **155** numa mensagem de 12 KiB; as 256 só cabem sem `chave` e sem `cor` (45 bytes), figuras de enfeite, sem toque. Uma `tela` que passa dos 12 KiB é recusada pelo teto da mensagem (`mensagem-grande`, com o tamanho e o teto), e não pelo de figuras [c, medido pela conferência do MOD de carga da M3, `conferir-carga.rs`] |
 | bytes de mídia por superfície | 24 MiB declarados, **10 MiB na forma `midia`** | `mods-regiao.js:194`, `:2159-2161`, `:2226` | §13: a 6 diz o que é entregue |
 | região | 512 nós, 8 de fundura, 10 MiB | `mods-regiao.js:33-65` | sai com `regiao` (§2) |
 | cartões | 64 pessoas, 64 nós, 6 de fundura, 64 mídias, 20 MiB somados | `mods-regiao.js:104-131` | troca por `pessoa.cartao` com `alvo` (R2) |
-| som decodificado | 64 MiB por bolso | `mods-regiao.js:88`, `:148` | M3 e K5 |
+| som decodificado | 64 MiB por bolso | `mods-regiao.js:88`, `:148` | fica, **não medido** na campanha de 10/10 (com a K5) |
 | arquivos escolhidos | 4 de pé, 10 MiB cada | `main.rs:2438`, `:2444` | fica |
 | imagem por volume | 10 MiB | `midia_de_mod.rs:59` | fica; a redução no Rust (R3) entra |
-| pedidos em voo / fila da janela | 8 / 128 | `executor.rs:1505`; `base.js:535` | M3 |
-| **novos**: capas animadas, quadros por capa, aviso do servidor | — | — | M3 (§4, §7.3) |
+| pedidos em voo / fila da janela | 8 / 128 | `executor.rs:1505`; `base.js:535` | ficam, **não medidos**: a campanha de 10/10 pediu um a cada 250 ms (nos avisos), longe dos 8 em voo |
+| **novos**: capas animadas, quadros por capa, aviso do servidor | — | — | **ficam, medidos em 10/10** (§4, §7.3): **6 capas animadas** (60 quadros, 10 s) e 20 paradas, 121,6 MB decodificados, 91% do **bolso de 128 MiB**: +17,5 pontos de CPU e +151 MiB, o ponto mais caro (com voz, +15,7 e jitter +0,16 ms); o **aviso no teto, 4 por segundo de 1 KiB**: +9,4 pontos e +53 MiB |
+
+**A medida de 10/10, e o critério que ela fixa** (a campanha da API 6, 24
+cenários válidos no `6e845e0d`; `docs/evidencias/m3-custo-dos-mods/
+medidas-api6.json`, com o `resumir-api6.py`). Cada ponto foi posto no teto
+por um MOD de carga sintético, um de cada vez e todos juntos (`carga-tudo`), e
+lido contra o `sem-mod` da campanha. **O critério: com cada ponto no teto, e
+com todos juntos, nenhum commit de quadro passa de um quadro de 60 Hz, o p95 do
+commit fica abaixo de 1 ms, e o jitter da voz sobe no máximo meio
+milissegundo.** Medido: nenhum commit acima de um quadro em nenhum dos 24
+cenários; o p95 mais alto foi o do `carga-tudo+voz`, 0,78 ms; o jitter subiu
++0,32 ms no `carga-tudo+voz` (1,56 ms contra 1,24) e menos de +0,2 ms em cada
+ponto sozinho. O preço está na CPU e na memória: o `carga-tudo` custa +33,3
+pontos de CPU e +374 MiB, e as capas são quase metade disso. Para comparar, a
+MESA arrastando (API 5) sobe o jitter em +1,1 ms, mais que todos os pontos da 6
+juntos. **O que a campanha não mediu**: Windows e iPhone; o `carga-regioes+voz`
+mediu cinco regiões, e não oito, porque, com quem usa na sala, a chamada
+esconde a vista da conversa; e a lista de pessoas com 250 cartões, de que o teto
+de contribuições abaixo depende.
 
 **O teto de contribuições muda de modelo antes do congelamento** (o bloqueio C
 do PERFIS, 09/10). Com cartão, avatar e capa por pessoa, 128 por MOD dão **42

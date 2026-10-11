@@ -39,7 +39,9 @@ use seele_proto::control::{
     PersonState, Presence, Role, ServerMessage, Subsystem, SubsystemHealth, Telemetry, Validate,
     VoiceRoomInfo,
 };
-use seele_proto::ids::{ChannelId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId};
+use seele_proto::ids::{
+    ChannelId, ClientMessageId, PersonId, RoleId, ScreenId, SessionId, Ssrc, VoiceRoomId,
+};
 use seele_proto::screen::SCREEN_HEADER_LEN;
 use seele_proto::signal::{Signal, SyncInputs};
 use seele_proto::transport::HANDSHAKE_TIMEOUT;
@@ -66,6 +68,38 @@ const OUTBOUND_DEPTH: usize = 256;
 /// dizer uma frase — então um cliente honesto nunca chega perto disto; e um
 /// desonesto encontra contrapressão em vez de memória do servidor para gastar.
 const ENTRADA_DEPTH: usize = 64;
+
+/// Quantas mensagens desta conexão podem estar **no ar** — entregues ao
+/// escritor e ainda não anunciadas no barramento, gravadas ou recusadas — antes
+/// de a sessão parar de ler a entrada dela.
+///
+/// **A contrapressão da pendência 61.** Sem ela, quem escrevia em rajada
+/// enchia o lote do escritor, e o lote passava à frente do barramento de todo
+/// mundo. Com ela, o excesso espera onde é de quem o mandou: nos
+/// [`ENTRADA_DEPTH`] quadros da fila, e depois no controle de fluxo do QUIC, do
+/// lado do cliente. Nada se perde, e ninguém é desligado por escrever depressa.
+///
+/// Enquanto a sessão não lê a entrada, ela só faz o resto do laço — e o resto
+/// do laço é ler o barramento. É isso que tira dela o atraso que a F5 mediu sob
+/// carga: uma sessão ocupada com as próprias mensagens, no cadeado da
+/// `persistence`, deixava de ler o barramento enquanto ele andava.
+///
+/// Oito, o dobro do que o balde deixa uma pessoa mandar por lote no teto
+/// sustentado (20 por segundo, 200 ms): quem escreve no ritmo que o balde
+/// aceita nunca encosta nisto. Uma rajada de 58 grava em uns oito lotes.
+const TETO_NO_AR: usize = 8;
+
+// Quem escreve no teto sustentado do balde não pode ser freado por este teto:
+// a contrapressão é para a rajada, e não para o ritmo que o balde já aceita.
+// Em milésimos, e não em `f64`: a conta fecha no limite exato (8 contra
+// 2 × 20 × 0,2), e uma comparação de ponto flutuante no limite depende de como
+// o 0,2 arredonda.
+const _: () = assert!(
+    TETO_NO_AR as u128 * 1000
+        >= 2 * (crate::taxa::QUADROS_POR_SEGUNDO as u128)
+            * crate::server::FLUSH_INTERVAL.as_millis(),
+    "o teto de mensagens no ar freia quem escreve no ritmo que o balde aceita"
+);
 
 /// Quantas razões de transferência esperam para ir ao fluxo de controle.
 ///
@@ -1979,6 +2013,9 @@ async fn run_session(
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<Vec<u8>>(OUTBOUND_DEPTH);
     let mut events = server.events.subscribe();
     let mut channels: Vec<ChannelId> = Vec::new();
+    // As chaves desta conexão que o escritor ainda não anunciou. Ver
+    // [`TETO_NO_AR`].
+    let mut no_ar: std::collections::HashSet<ClientMessageId> = std::collections::HashSet::new();
     let mut current_voice_room: Option<VoiceRoomId> = None;
     // **Quais telas esta pessoa pediu para assistir e ainda não desistiu.**
     //
@@ -2330,7 +2367,10 @@ async fn run_session(
         tokio::select! {
             // `recv` num canal é cancel-safe: nada é consumido pelo ramo que
             // perde a corrida. É a propriedade que o `frame::read` não tem.
-            incoming = entrada.recv() => {
+            // **Com o teto de mensagens no ar** ([`TETO_NO_AR`]): cheio, o ramo
+            // fica de fora, e a volta do laço só lê o barramento até o escritor
+            // anunciar o que é desta conexão.
+            incoming = entrada.recv(), if no_ar.len() < TETO_NO_AR => {
                 let Some((pedido, message)) = incoming else { break };
 
                 // O balde de depois de autenticar. O ADR 0021 fechou a porta e
@@ -2551,6 +2591,10 @@ async fn run_session(
                         }
                         // Queued, not confirmed. The broadcast after the commit
                         // is what tells anybody it happened.
+                        // Contada antes de postar: o anúncio pode sair antes
+                        // de esta linha voltar, mas a sessão só o lê na volta
+                        // seguinte do laço.
+                        no_ar.insert(client_message_id);
                         server.post(PendingMessage {
                             channel,
                             author: session.person,
@@ -3691,13 +3735,22 @@ async fn run_session(
                     Ok(event) => event,
                     // O barramento passou à frente desta sessão.
                     //
-                    // Acontece quando as escritas para este par bloqueiam — o
-                    // par parou de ler, a janela do QUIC fechou — e enquanto
-                    // elas estão bloqueadas ninguém tira evento do barramento.
-                    // Passado o anel, o `broadcast` descarta o mais antigo:
-                    // `quantos` eventos que existiram e não existem mais **para
-                    // esta conexão**, mensagens já gravadas em PERSISTENCE entre
-                    // eles.
+                    // Acontece quando esta sessão fica tempo demais sem voltar
+                    // aqui, e há dois jeitos medidos de isso acontecer:
+                    // - as escritas para este par bloqueiam — o par parou de
+                    //   ler, a janela do QUIC fechou;
+                    // - **o par lê, e escreve em rajada**: cada `SendMessage`
+                    //   dele passa pelo cadeado de PERSISTENCE e pela fila do
+                    //   escritor, e enquanto esta sessão espera ali, os lotes
+                    //   dos outros anunciam mais de um anel inteiro. Medido no
+                    //   lote Y da F5 (`tests/par_lento.rs`): sob carga, falantes
+                    //   que nem assinam o canal foram desligados assim, com o
+                    //   resto da rajada sem ler — no cliente, `SemResposta`.
+                    // Enquanto isso, ninguém tira evento do barramento para esta
+                    // conexão. Passado o anel, o `broadcast` descarta o mais
+                    // antigo: `quantos` eventos que existiram e não existem mais
+                    // **para esta conexão**, mensagens já gravadas em
+                    // PERSISTENCE entre eles.
                     //
                     // Aqui havia um `let Ok(event) = event else { continue }`, e
                     // era a pendência nº 1 inteira: a sessão seguia, calada, com
@@ -3738,6 +3791,23 @@ async fn run_session(
                     // sempre — `recv` volta na hora, com o mesmo erro.
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
+
+                // O que desta conexão o escritor anunciou deixa de estar no ar,
+                // gravado ou recusado. Antes de qualquer filtro: a conta é do
+                // que esta conexão mandou, e não do que ela vê.
+                match &event {
+                    Event::MessagePosted(message) if message.author == session.person => {
+                        if let Some(chave) = message.client_message_id {
+                            no_ar.remove(&chave);
+                        }
+                    }
+                    Event::MessageRejected { author, client_message_id: Some(chave), .. }
+                        if *author == session.person =>
+                    {
+                        no_ar.remove(chave);
+                    }
+                    _ => {}
+                }
 
                 // Two events are aimed at **this** connection rather than
                 // forwarded by it. They are on the same bus as everything else

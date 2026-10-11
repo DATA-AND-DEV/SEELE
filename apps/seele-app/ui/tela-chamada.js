@@ -930,16 +930,12 @@ $("operador-sair").addEventListener("click", async () => {
     return;
   }
 
-  const daqui = nomeDesteServidor();
-  if (await hospedandoAqui()) {
-    abrirConfirmacao(
-      "SAIR DO SERVIDOR",
-      consequenciaDeIrParaAEntrada(daqui, true),
-      `SAIR DE ${daqui}`,
-      sairDoServidorParaAEntrada,
-    );
-    return;
-  }
+  // **SAIR DO SERVIDOR não pergunta** (tarefa 19 da F7). A caixa existia para
+  // dizer a parte que o rótulo não dizia — que o servidor hospedado neste
+  // computador caía junto, com todo mundo dentro. Sair não derruba mais nada:
+  // o rótulo conta tudo, e uma caixa que o repete treina a apertar duas vezes
+  // sem ler. Quem sai do próprio servidor encontra, na entrada, que ele
+  // continua no ar, com o VOLTAR AO MEU SERVIDOR (`camada-hospedagem.js`).
   await sairDoServidorParaAEntrada();
 });
 

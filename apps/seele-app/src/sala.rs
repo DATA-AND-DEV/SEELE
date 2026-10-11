@@ -903,18 +903,15 @@ mod a_sala_pessoal {
         desligar(app.handle()).await;
     }
 
-    /// **Quem já está na sala atende sem trocar de servidor.** A sessão é a de
-    /// quem recebe, conectada pela ponte à própria sala e conferida pelo
-    /// próprio código, como o ATENDER entra.
-    #[tokio::test]
-    async fn quem_ja_esta_na_sala_atende_sem_trocar_de_servidor() {
-        let casa = casa_com_a_chave(4);
-        let app = app_de_teste();
-        let (recepcao, porta) = sala_no_ar(&app, &casa).await;
+    /// Quem recebe, conectado pela ponte à própria sala, conferindo o próprio
+    /// código: como o ATENDER entra.
+    async fn conectar_o_dono(
+        casa: &tempfile::TempDir,
+        porta: u16,
+    ) -> std::sync::Arc<seele_ffi::Connection> {
         let home = casa.path().to_str().unwrap().to_owned();
-        let alvo = format!("127.0.0.1:{porta}");
         let config = seele_ffi::ConnectConfig {
-            server: alvo.clone(),
+            server: format!("127.0.0.1:{porta}"),
             alternate_servers: Vec::new(),
             nickname: "dona".into(),
             codigo_esperado: Some(seele_ffi::codigo_desta_maquina(&home).unwrap()),
@@ -931,6 +928,71 @@ mod a_sala_pessoal {
                 .await
                 .unwrap()
                 .expect("quem recebe não entrou na própria sala");
+        conexao
+    }
+
+    /// **A sessão na própria sala é `Pessoal` pela chave** (o encontro com o
+    /// lote X da F5). A conexão do ATENDER confere o código, e a impressão que
+    /// ela grava é a da sala: é por ela que o `onde_estou_na` responde. O
+    /// endereço da sessão não decide nada: escrito como um nome de fora desta
+    /// máquina, a resposta continua `Pessoal`.
+    #[tokio::test]
+    async fn a_sessao_na_propria_sala_e_pessoal_pela_chave_e_nao_pelo_endereco() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (_recepcao, porta) = sala_no_ar(&app, &casa).await;
+        let conexao = conectar_o_dono(&casa, porta).await;
+        let sessao = app.state::<crate::Session>();
+        let da_sala = sessao
+            .hospedagens
+            .lock()
+            .unwrap()
+            .pessoal
+            .as_ref()
+            .unwrap()
+            .hospedagem
+            .impressao_digital()
+            .to_owned();
+        let conferida = conexao.impressao_do_servidor();
+        assert!(
+            conferida
+                .as_deref()
+                .is_some_and(|impressao| impressao.eq_ignore_ascii_case(&da_sala)),
+            "a conexão que entrou pelo código gravou {conferida:?}, e a sala é {da_sala}"
+        );
+
+        *sessao.connection.lock().unwrap() = Some(std::sync::Arc::clone(&conexao));
+        for endereco in [
+            format!("127.0.0.1:{porta}"),
+            format!("casa.exemplo:{porta}"),
+        ] {
+            *sessao.endereco_da_sessao.lock().unwrap() = Some(endereco.clone());
+            assert_eq!(
+                crate::onde_estou_na(&sessao),
+                crate::OndeEstou::Pessoal,
+                "a sessão na própria sala, aberta por {endereco}, não foi dita na sala: o \
+                 ATENDER de dentro da sala trocaria de servidor para entrar onde já está"
+            );
+        }
+
+        tokio::task::spawn_blocking(move || {
+            conexao.encerrar_e_esperar(std::time::Duration::from_secs(5))
+        })
+        .await
+        .unwrap();
+        desligar(app.handle()).await;
+    }
+
+    /// **Quem já está na sala atende sem trocar de servidor.** A sessão é a de
+    /// quem recebe, conectada pela ponte à própria sala e conferida pelo
+    /// próprio código, como o ATENDER entra.
+    #[tokio::test]
+    async fn quem_ja_esta_na_sala_atende_sem_trocar_de_servidor() {
+        let casa = casa_com_a_chave(4);
+        let app = app_de_teste();
+        let (recepcao, porta) = sala_no_ar(&app, &casa).await;
+        let alvo = format!("127.0.0.1:{porta}");
+        let conexao = conectar_o_dono(&casa, porta).await;
         {
             let sessao = app.state::<crate::Session>();
             *sessao.connection.lock().unwrap() = Some(std::sync::Arc::clone(&conexao));

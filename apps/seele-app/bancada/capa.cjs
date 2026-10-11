@@ -12,6 +12,10 @@
 //    `midia` com o ponto e o alvo (rascunho §7.1).
 // 4. **Com movimento reduzido**, o cartão usa o quadro estático, e não a
 //    imagem que se move.
+// 5. **O cabeçalho SEU PERFIL do desktop veste a capa de quem usa** (D-capa-1,
+//    do dono; rascunho §4, «o SEU PERFIL nativo, por um aplicador do
+//    produto»; achado da F8, 10/10): o título e o FECHAR ficam sobre placas, e
+//    não perdem contraste sobre as três capas de prova.
 //
 // Rodar:  node apps/seele-app/bancada/capa.cjs
 
@@ -183,6 +187,10 @@ const { chromium } = require('./playwright.cjs');
     // E a capa de quem usa, na barra do operador: medida antes sem capa, para
     // a comparação de cada texto e controle.
     const barraSemCapa = await medirEm('#tela-sessao .operador', null);
+    // O cabeçalho do perfil, sem capa, para a mesma comparação (o caso 5).
+    await page.evaluate(() => abrirPerfil());
+    const perfilSemCapa = await medirEm('#perfil .perfil-cabeca', null);
+    await page.evaluate(() => fecharPerfil());
     const nucleo = await page.evaluate(() => {
       contribuicoesDosMods.registrar({ id: 'teste/perfis' }, instanciaTeste, {
         ponto: 'pessoa.capa', modo: 'substituir', alvo: String(testTable.snapshot.me),
@@ -213,6 +221,30 @@ const { chromium } = require('./playwright.cjs');
       }
     }
     assert.deepEqual(pioras, [], 'um texto ou controle da barra do operador perdeu contraste sobre a capa');
+
+    // 5. O cabeçalho SEU PERFIL, com a capa de quem usa já registrada.
+    await page.evaluate(() => abrirPerfil());
+    const perfil = await page.evaluate(() => new Promise(ok => setTimeout(() => {
+      const cabeca = document.querySelector('#perfil .perfil-cabeca');
+      const camada = cabeca?.querySelector(':scope > .capa-camada')?.getBoundingClientRect();
+      ok({
+        vestida: cabeca?.dataset.comCapa === 'sim',
+        daPessoa: cabeca?.dataset.pessoaDaCapa,
+        eu: String(testTable.snapshot.me),
+        cobre: Boolean(camada && cabeca && Math.abs(camada.width - cabeca.clientWidth) < 1
+          && Math.abs(camada.height - cabeca.clientHeight) < 1),
+      });
+    }, 300)));
+    assert.ok(perfil.vestida && perfil.cobre && perfil.daPessoa === perfil.eu,
+      `o cabeçalho SEU PERFIL não veste a capa de quem usa: ${JSON.stringify(perfil)}`);
+    for (const [nomeDaCapa, cor] of CAPAS_DE_PROVA) {
+      const com = await medirEm('#perfil .perfil-cabeca', cor);
+      for (const [medido, antes] of Object.entries(perfilSemCapa)) {
+        if ((com[medido] ?? 0) < antes - 0.01) pioras.push(`perfil ${medido} (capa ${nomeDaCapa}): ${antes} → ${com[medido]}`);
+      }
+    }
+    await page.evaluate(() => fecharPerfil());
+    assert.deepEqual(pioras, [], 'o título ou o FECHAR do SEU PERFIL perdeu contraste sobre a capa');
 
     // 2. A pastilha e o nome ficam acima da capa: no centro de cada um, o
     //    elemento que recebe o clique é ele (ou um filho dele).
@@ -407,7 +439,7 @@ const { chromium } = require('./playwright.cjs');
     assert.deepEqual(citacao.recusas, [], 'citar uma imagem que a pessoa não tem virou recusa');
 
     assert.deepEqual(errors, []);
-    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo.');
+    console.log('capa: o cartão pintado, o texto e o núcleo legíveis sobre as placas, o SEU PERFIL vestido, o quadro estático com movimento reduzido, a recusa dita com o ponto e o alvo, e a citação daPessoa sem pedido novo.');
   } finally {
     await browser.close();
     await new Promise(ok => server.close(ok));

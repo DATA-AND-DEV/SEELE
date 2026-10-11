@@ -1,0 +1,17 @@
+/* SEELE — o servidor que esta janela hospeda, visto da entrada (tarefas 19 e 20
+   da F7): ele continua no ar depois de a sessão sair dele, e o bloco diz isso
+   com VOLTAR AO MEU SERVIDOR e PARAR DE HOSPEDAR. */
+
+.boot-meu-servidor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seele-e1);
+  padding: var(--seele-e1) var(--seele-e2);
+  border: var(--seele-b) solid var(--seele-laranja-nerv);
+}
+
+.boot-meu-servidor .nota {
+  margin: 0;
+  color: var(--seele-osso);
+}
+

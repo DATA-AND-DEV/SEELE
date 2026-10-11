@@ -789,8 +789,9 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
   // A tentativa a este servidor volta `ModsNaoAceitos` depois que o `hospedar`
   // já entrou no servidor daqui. A pergunta abria por cima da sessão, com o
   // convite deste servidor guardado nela. Uma tentativa que já não é a mais
-  // nova não abre a pergunta: a recusa dela vai à linha vermelha da entrada,
-  // como toda recusa de uma tentativa velha.
+  // nova não abre a pergunta — e, desde o lote W2, também não escreve na linha
+  // vermelha da entrada: a recusa dela vai ao `seele.log`. Ver
+  // `aTentativaSubstituidaNaoFala`, abaixo.
   await page.evaluate(([alvo, convite]) => {
     testServidor.gasto = false; testServidor.tomados = []; testServidor.exigeMods = true;
     testAtrasoPorAlvo[alvo] = 600;
@@ -837,6 +838,556 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     `a credencial que o apelido tomado deixou apareceu fora do connect: ${vazou.join(', ')}. Ela é um convite de uso único ou a senha do servidor, e só vive na memória da janela`);
 
   assert.deepEqual(erros, [], 'a cena do lote W lançou erro na página');
+  await page.close();
+}
+
+// --------------------------------------------------------------------------
+// Lote W2 da F5: a tentativa que outra substituiu não fala
+// --------------------------------------------------------------------------
+//
+// **O caso.** Uma tentativa de entrada que outra já substituiu — o `hospedar()`
+// entrando no servidor daqui enquanto ela andava, ou a pessoa escolhendo outro
+// servidor na lista — volta recusada. A mais nova está em curso, ou já entrou,
+// e é ela que fala. A recusa da velha não vai à linha vermelha da entrada, nem
+// à espera da portaria; vai ao `seele.log`, com o motivo.
+//
+// **O que acontecia.** A recusa pelos MODs da velha caía na linha vermelha
+// terminando em «A tela para ler e aceitar esta lista ainda não existe neste
+// app.», falsa desde que a tela existe; com a espera na frente, a mesma frase
+// tomava o lugar da frase da espera; e a recusa da velha pela portaria abria a
+// espera por cima da sessão em que a pessoa já estava.
+
+/** Um servidor com portaria, onde a batida fica pendente. */
+const PORTARIA_W2 = '192.0.2.19:8384';
+/** O convite que a tentativa velha leva: ele não pode chegar ao registro. */
+const CONVITE_W2 = `convite-do-lote-w2-${process.pid}-${Date.now()}`;
+
+async function aTentativaSubstituidaNaoFala(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    // Por alvo: quanto o `connect` leva, e a recusa com que ele volta. Sem
+    // recusa, entra. Lidos quando a chamada chega, e não quando ela volta: uma
+    // tentativa lenta responde como o servidor dela respondia quando ela saiu.
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        if (cmd === 'connect') {
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          if (recusa) throw { error: recusa, trail: [] };
+          return { snapshot, veredito: null, geracao: window.testCalls.length };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
+    }),
+    snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  const PELOS_MODS = { ModsNaoAceitos: { mods: [MOD_R], conjunto: 'conjunto-do-lote-w2' } };
+  const NA_PORTARIA = { Refused: { reason: 'AdmissionPending' } };
+  const SEM_CREDENCIAL = { Refused: { reason: 'CredentialRejected' } };
+
+  /**
+   * A tentativa velha, com o convite, e aos 100 ms a que a substitui: o
+   * `hospedar()` ou outra escolha na lista de servidores. Espera 900 ms — a
+   * velha já voltou, e a nova, se é lenta, ainda anda.
+   */
+  async function correr(velha, nova) {
+    await page.evaluate(([velha, nova, convite]) => {
+      window.testAtrasoPorAlvo = {};
+      window.testRecusaPorAlvo = {};
+      for (const t of [velha, nova]) {
+        if (t.atraso) window.testAtrasoPorAlvo[t.alvo] = t.atraso;
+        if (t.recusa) window.testRecusaPorAlvo[t.alvo] = t.recusa;
+      }
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      window.testCorrida = { antes: testCalls.length };
+      irParaOServidor(velha.alvo, null, convite);
+      setTimeout(() => {
+        if (nova.via === 'hospedar') hospedar();
+        else irParaOServidor(nova.alvo, null, null);
+      }, 100);
+    }, [velha, nova, CONVITE_W2]);
+    await page.waitForTimeout(900);
+    const feitos = await page.evaluate(() => testCalls.slice(testCorrida.antes).filter(c => c.cmd === 'connect').map(c => c.args.server));
+    assert.deepEqual(feitos, [velha.alvo, nova.alvo],
+      `a corrida não foi a esperada (a velha a ${velha.alvo}, e a nova a ${nova.alvo}): ${JSON.stringify(feitos)}`);
+  }
+
+  /** As linhas que a recusa da velha deixou no `seele.log`, pelo nível. */
+  const noRegistro = (alvo, motivo) => page.evaluate(([alvo, motivo]) => testCalls.slice(testCorrida.antes)
+    .filter(c => c.cmd === 'registrar_da_janela' && String(c.args?.oQue).includes(alvo) && String(c.args?.oQue).includes(motivo))
+    .map(c => c.args.nivel), [alvo, motivo]);
+  const dizONoRegistro = async (alvo, motivo) => assert.deepEqual(await noRegistro(alvo, motivo), ['aviso'],
+    `a recusa por ${motivo} da tentativa a ${alvo}, que outra já tinha substituído, não chegou ao seele.log como aviso: ` +
+    'a tela não a mostra, e sem a linha ela some sem rastro — o produto sabe e não conta');
+
+  // ---- 1. A recusa pelos MODs de uma tentativa que o hospedar substituiu
+  // (a reprodução do achado).
+  await correr({ alvo: ALVO_W, atraso: 600, recusa: PELOS_MODS }, { via: 'hospedar', alvo: AQUI_W });
+  assert.equal(await page.evaluate(() => document.getElementById('tela-sessao').hidden && document.getElementById('tela-auth').hidden), false,
+    'o hospedar do meio da corrida não entrou, e a corrida não foi medida');
+  // A pessoa desconecta e volta à entrada: é ali que ela lê.
+  await page.evaluate(() => ejetar());
+  assert.equal(await page.isVisible('#tela-boot'), true, 'desconectar não voltou à entrada, e esta cena não mede o que se lê nela');
+  const naEntrada = await page.evaluate(() => ($('boot-erro').hidden ? null : $('boot-erro').textContent));
+  assert.equal(naEntrada, null,
+    `a recusa pelos MODs de uma tentativa a ${ALVO_W}, que o hospedar já tinha substituído, foi escrita na linha vermelha ` +
+    `da entrada, e quem desconecta lê ali, sobre um servidor que deixou: «${naEntrada}»`);
+  await dizONoRegistro(ALVO_W, 'ModsNaoAceitos');
+
+  // ---- 2. Duas tentativas pela lista: a velha volta enquanto a nova anda, e
+  // é a nova que fala.
+  await correr({ alvo: ALVO_W, atraso: 600, recusa: PELOS_MODS }, { via: 'lista', alvo: OUTRO_ALVO_W, atraso: 1400, recusa: SEM_CREDENCIAL });
+  const enquantoANovaAnda = await page.evaluate(() => ($('boot-erro').hidden ? null : $('boot-erro').textContent));
+  assert.equal(enquantoANovaAnda, null,
+    `com a tentativa a ${OUTRO_ALVO_W} ainda andando, a recusa pelos MODs da anterior, a ${ALVO_W}, apareceu na linha ` +
+    `vermelha da entrada: «${enquantoANovaAnda}»`);
+  await dizONoRegistro(ALVO_W, 'ModsNaoAceitos');
+  // **E o CONECTAR continua apagado** (lote W2, rodada da revisão). A nova o
+  // apagou ao começar; o `finally` da velha, que terminou primeiro, o
+  // reacendia, e um clique ali abria uma terceira entrada por baixo da nova.
+  const estado = await page.evaluate((alvo) => ({
+    velhaVoltou: testCalls.slice(testCorrida.antes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    apagado: $('botao-conectar').disabled,
+  }), ALVO_W);
+  assert.equal(estado.velhaVoltou, true, 'a tentativa velha ainda não tinha voltado, e o botão não foi medido depois dela');
+  assert.equal(estado.apagado, true,
+    `com a tentativa a ${OUTRO_ALVO_W} ainda andando, a anterior, a ${ALVO_W}, terminou e reacendeu o CONECTAR que a ` +
+    'nova tinha apagado: um clique ali abre uma terceira entrada por baixo da que está em curso');
+  await page.waitForFunction((alvo) => testCalls.slice(testCorrida.antes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    OUTRO_ALVO_W, { timeout: 3000 })
+    .catch(() => assert.fail(`a tentativa a ${OUTRO_ALVO_W} não voltou, e esta cena não mede quem fala`));
+  await page.waitForFunction(() => !document.getElementById('boot-erro').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail(`a tentativa a ${OUTRO_ALVO_W} foi recusada e a linha vermelha não disse nada`));
+  const daNova = await page.evaluate(([recusa]) => ({
+    escrita: $('boot-erro').textContent,
+    titulo: fraseDeErro(recusa).split('\n')[0],
+  }), [SEM_CREDENCIAL]);
+  assert.ok(daNova.escrita.startsWith(daNova.titulo),
+    `a linha vermelha não diz a recusa da tentativa mais nova («${daNova.titulo}»), e sim «${daNova.escrita}»`);
+  assert.equal(await page.evaluate(() => $('botao-conectar').disabled), false,
+    'a tentativa mais nova terminou e o CONECTAR ficou apagado: quem devolve o botão é ela');
+
+  // ---- 3. A nova parou na espera da portaria, e a velha volta recusada pelos
+  // MODs: a espera continua dizendo a espera.
+  await correr({ alvo: ALVO_W, atraso: 600, recusa: PELOS_MODS }, { via: 'lista', alvo: PORTARIA_W2, recusa: NA_PORTARIA });
+  const naEspera = await page.evaluate(([recusa]) => ({
+    aberta: !$('tela-auth').hidden && $('tela-auth').dataset.modo === 'espera',
+    frase: $('auth-espera-frase').textContent,
+    esperada: fraseDeErro(recusa),
+    botao: $('auth-botao').textContent,
+  }), [NA_PORTARIA]);
+  assert.equal(naEspera.aberta, true, 'a tentativa à portaria não parou na espera, e esta cena não mede nada');
+  assert.equal(naEspera.frase, naEspera.esperada,
+    `com a espera da portaria na frente, a recusa pelos MODs da tentativa anterior, a ${ALVO_W}, tomou o lugar da frase ` +
+    `da espera: «${naEspera.frase}»`);
+  assert.equal(naEspera.botao, 'AGUARDANDO PERMISSÃO',
+    `a recusa da tentativa anterior trocou o estado da espera para «${naEspera.botao}»`);
+  await dizONoRegistro(ALVO_W, 'ModsNaoAceitos');
+  await page.evaluate(() => voltarParaAEntrada());
+
+  // ---- 4. Não só pelos MODs: a velha recusada pela portaria depois que o
+  // hospedar entrou não abre a espera por cima da sessão.
+  await correr({ alvo: PORTARIA_W2, atraso: 600, recusa: NA_PORTARIA }, { via: 'hospedar', alvo: AQUI_W });
+  const naFrente = await page.evaluate(() => (document.getElementById('tela-auth').hidden ? 'a sessão' : `a tela de entrada no modo ${$('tela-auth').dataset.modo}`));
+  if (naFrente === 'a tela de entrada no modo espera') await page.evaluate(() => voltarParaAEntrada());
+  assert.notEqual(naFrente, 'a tela de entrada no modo espera',
+    `a tentativa a ${PORTARIA_W2}, pendente na portaria depois que o hospedar já tinha entrado no servidor daqui, abriu ` +
+    'a espera por cima da sessão, e a espera bate de novo no servidor desta máquina');
+  await dizONoRegistro(PORTARIA_W2, 'AdmissionPending');
+  await page.evaluate(() => ejetar());
+
+  // ---- 5. A frase dos MODs diz o que esta versão faz, e o que ela manda
+  // fazer funciona.
+  const frase = await page.evaluate(([recusa]) => fraseDeErro(recusa), [PELOS_MODS]);
+  assert.ok(frase.includes(`${MOD_R.id} ${MOD_R.version}`), `a frase dos MODs deixou de mostrar a lista: «${frase}»`);
+  assert.ok(!/não existe/.test(frase),
+    `a frase dos MODs ainda diz que a tela de aceitar não existe, e ela existe: «${frase}»`);
+  assert.ok(/entre de novo/i.test(frase),
+    `a frase dos MODs não diz o que a pessoa pode fazer com esta versão — entrar de novo, que abre a pergunta: «${frase}»`);
+  await page.evaluate(([alvo, recusa]) => {
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = { [alvo]: recusa };
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    irParaOServidor(alvo, null, null);
+  }, [ALVO_W, PELOS_MODS]);
+  await page.waitForFunction(() => !document.getElementById('mods-aceite').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('entrar de novo no servidor não abriu a pergunta dos MODs, e a frase promete o que esta versão não faz'));
+  await page.evaluate(() => fecharAceiteDeMods());
+
+  // ---- 6. O convite da tentativa velha não chega ao registro.
+  const noLog = await page.evaluate((convite) => testCalls
+    .filter(c => c.cmd === 'registrar_da_janela' && JSON.stringify(c.args ?? null).includes(convite)).length, CONVITE_W2);
+  assert.equal(noLog, 0, 'o convite da tentativa velha foi escrito no seele.log junto com a recusa dela');
+
+  assert.deepEqual(erros, [], 'a cena do lote W2 lançou erro na página');
+  await page.close();
+}
+
+// --------------------------------------------------------------------------
+// Lote W2 da F5, rodada 2 da revisão: o CONECTAR sempre tem dono
+// --------------------------------------------------------------------------
+//
+// **O caso** (I1 da revisão). A tentativa velha fica suspensa **antes** de
+// apagar o CONECTAR — na pergunta do nome, a primeira entrada sem nome desta
+// execução, ou esperando o `apelido_local` —, e a mais nova começa e termina
+// nesse meio-tempo pelo HOSPEDAR AQUI, que continua alcançável por Tab por
+// baixo da caixa. Depois a velha seguia: apagava o CONECTAR, chamava o
+// `connect`, e o `finally` dela, que desde o `6af0bedd` só devolve o botão à
+// mais nova, não o devolvia. Quem saía da sessão achava o CONECTAR apagado e a
+// lista de servidores sem abrir.
+//
+// **O que vale agora.** Só a tentativa que ainda é a mais nova mexe no botão:
+// a que outra já substituiu desiste antes de apagá-lo (e antes de perguntar o
+// nome e de chamar o `connect`), e conta isso ao `seele.log`; o `finally` da
+// pergunta do nome também só devolve o botão à mais nova.
+
+async function oConectarTemDono(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    // Por alvo, como na cena acima; e por comando, para segurar o
+    // `apelido_local` de quem pergunta.
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.testAtrasoPorComando = {};
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        const espera = window.testAtrasoPorComando[cmd];
+        if (espera) await new Promise(ok => setTimeout(ok, espera));
+        if (cmd === 'connect') {
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          // O `AlreadyConnected` do `main.rs` chega cru, como o `?? falha` de
+          // `conectar` espera.
+          if (recusa) throw (typeof recusa === 'string' ? recusa : { error: recusa, trail: [] });
+          return { snapshot, veredito: null, geracao: window.testCalls.length };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    // Sem nome nesta máquina: a primeira entrada pergunta.
+    table: respostas({
+      apelido_local: '', snapshot: null, microfones: [], saidas: [],
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
+    }),
+    snapshot: retrato(),
+  });
+
+  /**
+   * Uma janela nova, na entrada, com a velha a caminho de `alvo`. Com
+   * `atrasoDoApelido`, o `apelido_local` leva esse tempo para todo mundo; com
+   * `hospedarAos`, a nova começa pelo `hospedar()` depois desse tempo.
+   */
+  async function abrirComAVelha(alvo, { atrasoDoApelido = 0, hospedarAos = null } = {}) {
+    await page.goto(`http://127.0.0.1:${porta}`);
+    await page.waitForTimeout(500);
+    await page.evaluate(([alvo, atrasoDoApelido, hospedarAos]) => {
+      // Quando a velha chegar ao `connect`, a sessão da nova já está de pé.
+      window.testRecusaPorAlvo[alvo] = 'AlreadyConnected';
+      if (atrasoDoApelido) window.testAtrasoPorComando.apelido_local = atrasoDoApelido;
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      window.testAntes = testCalls.length;
+      irParaOServidor(alvo, null, null);
+      if (hospedarAos !== null) setTimeout(() => { window.testHospedou = hospedar(); }, hospedarAos);
+    }, [alvo, atrasoDoApelido, hospedarAos]);
+  }
+  const estado = () => page.evaluate(() => ({
+    pergunta: !document.getElementById('perfil').hidden,
+    dentro: !document.getElementById('tela-sessao').hidden || !document.getElementById('tela-auth').hidden,
+    conectar: document.getElementById('botao-conectar').disabled ? 'apagado' : 'aceso',
+    connects: testCalls.slice(testAntes).filter(c => c.cmd === 'connect').map(c => c.args.server),
+    registro: testCalls.slice(testAntes).filter(c => c.cmd === 'registrar_da_janela').map(c => [c.args.nivel, c.args.oQue]),
+  }));
+  /** A pessoa sai da sessão e aperta CONECTAR: a lista de servidores abre. */
+  async function aEntradaAindaFunciona(caso) {
+    // O diálogo do link, que o `hospedar` abre, fechado como a pessoa o fecha.
+    await page.evaluate(() => { if (!document.getElementById('porta').hidden) fecharPorta(); });
+    await page.evaluate(() => ejetar());
+    assert.equal(await page.isVisible('#tela-boot'), true, `${caso}: desconectar não voltou à entrada, e o CONECTAR não foi medido`);
+    const depois = await estado();
+    assert.equal(depois.conectar, 'aceso',
+      `${caso}: de volta à entrada, o CONECTAR ficou apagado — a tentativa velha o apagou depois que a mais nova já o ` +
+      'tinha devolvido, e ninguém o devolve: a lista de servidores não abre, e a pessoa só sai dali hospedando de novo ou fechando o app');
+    await page.click('#botao-conectar', { timeout: 1500 });
+    await page.waitForFunction(() => !document.getElementById('servidores').hidden, null, { timeout: 3000 })
+      .catch(() => assert.fail(`${caso}: o CONECTAR aceso não abriu a lista de servidores`));
+    await page.evaluate(() => fecharServidores());
+  }
+  const desistiuNoRegistro = async (caso, alvo) => {
+    const linhas = (await estado()).registro.filter(([, frase]) => frase.includes(alvo));
+    assert.deepEqual(linhas.map(([nivel]) => nivel), ['aviso'],
+      `${caso}: a tentativa a ${alvo}, que outra já tinha substituído, desistiu sem deixar uma linha (e uma só) no ` +
+      `seele.log como aviso: ${JSON.stringify(linhas)}`);
+  };
+
+  // ---- 1. A sequência do revisor: a velha na pergunta do nome, a nova entra
+  // pelo HOSPEDAR AQUI, a caixa fecha, a pessoa sai da sessão.
+  await abrirComAVelha(ALVO_W);
+  await page.waitForFunction(() => !document.getElementById('perfil').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('a primeira entrada sem nome não perguntou o nome, e este caso não mede nada'));
+  await page.evaluate(() => { window.testHospedou = hospedar(); });
+  await page.waitForFunction(() => !document.getElementById('tela-sessao').hidden || !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('o hospedar não entrou com a pergunta do nome aberta, e este caso não mede nada'));
+  await page.evaluate(() => testHospedou);
+  await page.evaluate(() => fecharPerfil());
+  await page.waitForTimeout(400);
+  const depoisDaCaixa = await estado();
+  assert.equal(depoisDaCaixa.conectar, 'aceso',
+    'a pergunta do nome fechou depois que o hospedar já tinha entrado, e a tentativa velha apagou o CONECTAR que a mais nova ' +
+    'tinha devolvido: o `finally` dela não o devolve, e ninguém mais o devolve');
+  assert.deepEqual(depoisDaCaixa.connects, [AQUI_W],
+    `a tentativa velha seguiu até o connect depois que outra a tinha substituído (${JSON.stringify(depoisDaCaixa.connects)}): ` +
+    'com a nova dentro, ele volta AlreadyConnected; com a nova ainda andando, ele revogaria a geração dela');
+  await desistiuNoRegistro('a velha na pergunta do nome', ALVO_W);
+  await aEntradaAindaFunciona('a velha na pergunta do nome');
+
+  // ---- 2. A velha esperando o `apelido_local` quando a nova começa: ela não
+  // abre a pergunta do nome por cima da nova.
+  //
+  // As duas esperam 500 ms pelo `apelido_local`. A velha volta primeiro e,
+  // sem a conferência, perguntava o nome — e a nova, achando a marca posta,
+  // entrava com a caixa da velha aberta por cima da sessão.
+  await abrirComAVelha(OUTRO_ALVO_W, { atrasoDoApelido: 500, hospedarAos: 100 });
+  await page.waitForFunction(() => !document.getElementById('perfil').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('ninguém perguntou o nome, e este caso não mede nada'));
+  await page.waitForTimeout(200);
+  const comACaixa = await estado();
+  assert.equal(comACaixa.dentro, false,
+    'a pergunta do nome está aberta por cima da sessão: foi a tentativa velha que a abriu, depois que a mais nova começou, e a nova entrou por baixo dela');
+  await page.evaluate(() => { window.testAtrasoPorComando = {}; fecharPerfil(); });
+  await page.waitForFunction(() => !document.getElementById('tela-sessao').hidden || !document.getElementById('tela-auth').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('a mais nova não entrou depois de responder ao nome'));
+  await page.evaluate(() => testHospedou);
+  await page.waitForTimeout(200);
+  assert.deepEqual((await estado()).connects, [AQUI_W],
+    `a tentativa velha seguiu até o connect depois que outra a tinha substituído: ${JSON.stringify((await estado()).connects)}`);
+  await desistiuNoRegistro('a velha esperando o apelido', OUTRO_ALVO_W);
+  await aEntradaAindaFunciona('a velha esperando o apelido');
+
+  // ---- 3. A velha na pergunta do nome, e a nova ainda andando quando a caixa
+  // fecha: o `finally` da pergunta não devolve o CONECTAR à velha.
+  await abrirComAVelha(ALVO_W);
+  await page.waitForFunction(() => !document.getElementById('perfil').hidden, null, { timeout: 3000 })
+    .catch(() => assert.fail('a primeira entrada sem nome não perguntou o nome, e este caso não mede nada'));
+  await page.evaluate((aqui) => { window.testAtrasoPorAlvo[aqui] = 1200; window.testHospedou = hospedar(); }, AQUI_W);
+  await page.waitForFunction((aqui) => testCalls.some(c => c.cmd === 'connect' && c.args.server === aqui), AQUI_W, { timeout: 3000 })
+    .catch(() => assert.fail('o hospedar não chegou ao connect, e este caso não mede nada'));
+  await page.evaluate(() => fecharPerfil());
+  await page.waitForTimeout(300);
+  assert.equal((await estado()).conectar, 'apagado',
+    'a pergunta do nome da tentativa velha fechou com a mais nova ainda andando, e o `finally` dela reacendeu o CONECTAR: ' +
+    'um clique ali abre uma terceira entrada por baixo da que está em curso');
+  await page.evaluate(() => testHospedou);
+  await page.waitForTimeout(200);
+  assert.equal((await estado()).conectar, 'aceso', 'a mais nova terminou e o CONECTAR ficou apagado: quem devolve o botão é ela');
+  await desistiuNoRegistro('a velha com a nova andando', ALVO_W);
+  await page.evaluate((aqui) => { delete window.testAtrasoPorAlvo[aqui]; }, AQUI_W);
+
+  assert.deepEqual(erros, [], 'a cena do CONECTAR do lote W2 lançou erro na página');
+  await page.close();
+}
+
+// --------------------------------------------------------------------------
+// Lote W2 da F5, rodada 2 da revisão: a batida da espera só cala a si mesma
+// --------------------------------------------------------------------------
+//
+// **O caso** (M1 da revisão, que já existia antes do W2). A espera da portaria
+// bate de novo sozinha; quem sai dela pela porta com uma batida no ar deixa
+// essa batida calada quando ela volta (`levarParaAEspera`). A bandeira era um
+// sim, e calava **qualquer** falha que voltasse com a batida no ar: quem saía
+// e apertava HOSPEDAR AQUI tinha a recusa da entrada nova calada, sem tela e
+// sem registro. Agora a bandeira guarda o número da tentativa da batida: a
+// falha de outra tentativa fala na linha vermelha, e a da batida, calada na
+// tela, vai ao `seele.log`.
+
+async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        if (cmd === 'connect') {
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          if (recusa) throw { error: recusa, trail: [] };
+          return { snapshot, veredito: null, geracao: window.testCalls.length };
+        }
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
+    }),
+    snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  const NA_PORTARIA = { Refused: { reason: 'AdmissionPending' } };
+  const LOTADO = { Refused: { reason: 'ServerFull' } };
+
+  /** A espera aberta por uma batida pendente na portaria. */
+  async function abrirAEspera() {
+    await page.evaluate(([alvo, recusa]) => {
+      window.testAtrasoPorAlvo = {};
+      window.testRecusaPorAlvo = { [alvo]: recusa };
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      irParaOServidor(alvo, null, null);
+    }, [PORTARIA_W2, NA_PORTARIA]);
+    await page.waitForFunction(() => !document.getElementById('tela-auth').hidden && $('tela-auth').dataset.modo === 'espera', null, { timeout: 3000 })
+      .catch(() => assert.fail('a batida pendente não abriu a espera, e este caso não mede nada'));
+  }
+  const respondida = (alvo) => page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    alvo, { timeout: 3000 },
+  ).catch(() => assert.fail(`a tentativa a ${alvo} não voltou, e este caso não mede nada`));
+  const noRegistro = (trecho) => page.evaluate((trecho) => testCalls.slice(testAntes)
+    .filter(c => c.cmd === 'registrar_da_janela' && String(c.args?.oQue).includes(trecho))
+    .map(c => [c.args.nivel, c.args.oQue]), trecho);
+
+  // ---- 1. A sonda do revisor: a batida no ar, a pessoa sai da espera e
+  // aperta HOSPEDAR AQUI, e o servidor daqui recusa a entrada (lotado) antes
+  // de a batida voltar. Quem fala é a entrada nova.
+  await abrirAEspera();
+  await page.evaluate(([alvo, aqui, lotado]) => {
+    window.testAtrasoPorAlvo[alvo] = 1500;
+    window.testRecusaPorAlvo[aqui] = lotado;
+    window.testAntes = testCalls.length;
+    window.testBatida = baterDeNovo();
+    setTimeout(() => voltarParaAEntrada(), 100);
+    setTimeout(() => { window.testHospedou = hospedar(); }, 200);
+  }, [PORTARIA_W2, AQUI_W, LOTADO]);
+  await respondida(AQUI_W);
+  await page.waitForTimeout(100);
+  const daNova = await page.evaluate(([lotado]) => ({
+    escrita: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+    titulo: fraseDeErro(lotado).split('\n')[0],
+  }), [LOTADO]);
+  assert.ok(daNova.escrita !== null && daNova.escrita.startsWith(daNova.titulo),
+    `a pessoa saiu da espera com uma batida no ar e apertou HOSPEDAR AQUI; a entrada nova foi recusada («${daNova.titulo}») ` +
+    `e a linha vermelha ${daNova.escrita === null ? 'ficou calada' : `disse «${daNova.escrita}»`}: a batida no ar calou a falha de outra tentativa, sem tela e sem registro`);
+  // A batida volta depois, já substituída: calada na tela (W2), no registro.
+  await respondida(PORTARIA_W2);
+  await page.evaluate(() => testBatida);
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => document.getElementById('tela-auth').hidden), true,
+    'a batida que voltou depois de a pessoa sair da espera e entrar por outro caminho reabriu a espera');
+  assert.ok((await page.evaluate(() => $('boot-erro').textContent)).startsWith(daNova.titulo),
+    'a batida que voltou depois tirou da linha vermelha a recusa da entrada nova');
+  assert.deepEqual((await noRegistro(PORTARIA_W2)).map(([nivel]) => nivel), ['aviso'],
+    `a batida que voltou depois de outra tentativa começar não deixou uma linha (e uma só) no seele.log: ${JSON.stringify(await noRegistro(PORTARIA_W2))}`);
+  await page.evaluate(() => { if (!document.getElementById('porta').hidden) fecharPorta(); return ejetar(); });
+
+  // ---- 2. Só a batida: a pessoa sai da espera e não faz mais nada. A batida
+  // volta calada na tela — a espera foi largada de propósito —, e no registro.
+  await abrirAEspera();
+  await page.evaluate((alvo) => {
+    window.testAtrasoPorAlvo[alvo] = 600;
+    window.testAntes = testCalls.length;
+    window.testBatida = baterDeNovo();
+    setTimeout(() => voltarParaAEntrada(), 100);
+  }, PORTARIA_W2);
+  await respondida(PORTARIA_W2);
+  await page.evaluate(() => testBatida);
+  await page.waitForTimeout(100);
+  const calada = await page.evaluate(() => ({
+    espera: !document.getElementById('tela-auth').hidden,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+  }));
+  assert.deepEqual(calada, { espera: false, linha: null },
+    `a batida que voltou depois de a pessoa sair da espera falou na tela: ${JSON.stringify(calada)}`);
+  const daBatida = await noRegistro(PORTARIA_W2);
+  assert.deepEqual(daBatida.map(([nivel]) => nivel), ['aviso'],
+    `a batida que voltou depois de a pessoa sair da espera foi calada na tela sem deixar uma linha (e uma só) no seele.log: ${JSON.stringify(daBatida)}`);
+  assert.ok(daBatida[0][1].includes('AdmissionPending'),
+    `a linha da batida calada não diz o motivo: ${JSON.stringify(daBatida)}`);
+
+  // ---- 3. Duas batidas sobrepostas (rodada 3 da revisão, R2-M1). O relógio
+  // da espera é religado pelo `visibilitychange` com uma batida no ar, e uma
+  // segunda sai antes de a primeira voltar. A primeira, voltando, não pode
+  // zerar a marca da segunda: com a marca zerada, a segunda volta pendente
+  // depois que a pessoa saiu e reabre a espera por cima da entrada que ela
+  // escolheu — o que a marca existe para evitar. É o `finally` de
+  // `baterDeNovo`, que só zera a própria marca.
+  await abrirAEspera();
+  await page.evaluate((alvo) => {
+    pararDeBater();
+    window.testAntes = testCalls.length;
+    window.testAtrasoPorAlvo[alvo] = 600;
+    window.testB1 = baterDeNovo();
+    setTimeout(() => { window.testAtrasoPorAlvo[alvo] = 1200; window.testB2 = baterDeNovo(); }, 300);
+    setTimeout(() => voltarParaAEntrada(), 800);
+  }, PORTARIA_W2);
+  await page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).filter(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida).length >= 2,
+    PORTARIA_W2, { timeout: 4000 },
+  ).catch(() => assert.fail('as duas batidas não voltaram, e este caso não mede nada'));
+  await page.evaluate(() => Promise.all([testB1, testB2]));
+  await page.waitForTimeout(100);
+  const depoisDasDuas = await page.evaluate(() => ({
+    espera: !document.getElementById('tela-auth').hidden,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+  }));
+  if (depoisDasDuas.espera) await page.evaluate(() => voltarParaAEntrada());
+  assert.deepEqual(depoisDasDuas, { espera: false, linha: null },
+    'com duas batidas sobrepostas, a primeira voltou e zerou a marca da segunda; a segunda voltou depois de a pessoa sair ' +
+    `da espera e falou na tela por cima da entrada que ela escolheu: ${JSON.stringify(depoisDasDuas)}`);
+  const dasDuas = (await noRegistro(PORTARIA_W2)).map(([nivel, frase]) => [nivel, frase.includes('batida da espera') ? 'batida' : 'substituída']);
+  assert.deepEqual(dasDuas, [['aviso', 'substituída'], ['aviso', 'batida']],
+    'cada uma das duas batidas sobrepostas devia deixar a sua linha no seele.log — a primeira como tentativa substituída, ' +
+    `a segunda como a batida largada: ${JSON.stringify(await noRegistro(PORTARIA_W2))}`);
+
+  assert.deepEqual(erros, [], 'a cena da batida da espera do lote W2 lançou erro na página');
   await page.close();
 }
 
@@ -1048,6 +1599,9 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
 
     await aVoltaDoAceiteLevaACredencial(browser, server.address().port);
     await oApelidoTomadoNaoPerdeATentativa(browser, server.address().port);
+    await aTentativaSubstituidaNaoFala(browser, server.address().port);
+    await oConectarTemDono(browser, server.address().port);
+    await aBatidaDaEsperaSoCalaASiMesma(browser, server.address().port);
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
@@ -1058,5 +1612,9 @@ async function oApelidoTomadoNaoPerdeATentativa(browser, porta) {
     console.log('lote W: desistir no meio da obtenção ou da gravação não deixa o sim dos MODs valendo');
     console.log('lote W: depois do apelido tomado, a tentativa seguinte ao mesmo servidor leva o apelido novo e o convite, e entra; a outro servidor, não leva nada');
     console.log('lote W: entrar, trocar de alvo e desistir da pergunta dos MODs esquecem a credencial, e ela não aparece fora do connect');
+    console.log('lote W2: a recusa de uma tentativa que outra substituiu não fala na entrada nem na espera, e vai ao seele.log');
+    console.log('lote W2: a frase dos MODs manda entrar de novo, e entrar de novo abre a pergunta');
+    console.log('lote W2: a tentativa substituída não apaga o CONECTAR, não pergunta o nome nem chama o connect, e conta ao seele.log que desistiu');
+    console.log('lote W2: a batida da espera só cala a si mesma, e conta ao seele.log; a falha de outra tentativa fala na linha vermelha');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

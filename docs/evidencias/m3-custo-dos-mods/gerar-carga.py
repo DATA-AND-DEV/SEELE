@@ -29,7 +29,7 @@ import sys
 
 AQUI = pathlib.Path(__file__).resolve().parent
 MODELO = AQUI / "m3-carga"
-CENARIOS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo"]
+CENARIOS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo", "cartoes"]
 
 LARGURA, ALTURA = 480, 144
 QUADROS, ATRASO_CS = 60, 16  # 60 × 160 ms = 9,6 s, abaixo dos 10 s do teto

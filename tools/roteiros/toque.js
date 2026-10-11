@@ -6,9 +6,10 @@
 //    teclado fica onde estava.
 // 2. **RECUSAR** manda o `recusar` de quem toca, e o `Parou` apaga a faixa.
 // 3. **ATENDER de dentro do servidor que esta janela hospeda** desmonta só o
-//    cliente (`desmontar_a_sessao`) e **nunca** chama o `disconnect`, que
-//    derrubaria todo mundo que está no servidor; entra na sala pelo `connect`
-//    com o alvo que o `atender` deu, e senta na sala de voz.
+//    cliente (o `disconnect`, que desde a tarefa 19 nunca derruba hospedagem) e
+//    **nunca** chama o `parar_de_hospedar`, que derrubaria todo mundo que está
+//    no servidor; entra na sala pelo `connect` com o alvo que o `atender` deu, e
+//    senta na sala de voz.
 // 4. **A falha dupla não deixa ninguém sozinho na sala**: a primeira entrada
 //    que não chega à sala oferece TENTAR DE NOVO, e a segunda encerra a ligação.
 //
@@ -101,14 +102,14 @@ await ate(() => chamados().slice(antesDoAtender).includes("enter_voice_room"), 3
 const ordem = chamados().slice(antesDoAtender);
 relatar("ATENDER chamou: " + ordem.join(", "));
 exigir(
-  !ordem.includes("disconnect"),
-  "ATENDER chamou o `disconnect`, e o servidor que esta janela hospeda caiu com todo mundo dentro",
+  !ordem.includes("parar_de_hospedar"),
+  "ATENDER chamou o `parar_de_hospedar`, e o servidor que esta janela hospeda caiu com todo mundo dentro",
 );
 const posicao = (cmd) => ordem.indexOf(cmd);
 exigir(
   posicao("atender") >= 0 &&
-    posicao("atender") < posicao("desmontar_a_sessao") &&
-    posicao("desmontar_a_sessao") < posicao("connect") &&
+    posicao("atender") < posicao("disconnect") &&
+    posicao("disconnect") < posicao("connect") &&
     posicao("connect") < posicao("enter_voice_room"),
   "ATENDER não seguiu «decidir, desmontar só o cliente, entrar na sala, sentar»: " + ordem.join(", "),
 );
