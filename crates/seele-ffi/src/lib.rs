@@ -1615,6 +1615,23 @@ impl Connection {
         config: ConnectConfig,
         olhos: Option<Arc<dyn EventListener>>,
     ) -> Result<(Arc<Self>, Trust), ConnectFailure> {
+        // **O apelido que o `Hello` não leva é recusado aqui, antes de tudo**
+        // (pendência 58, item 55; lote C55 da F5). O teto é do fio, em bytes,
+        // e o apelido está na mão antes de qualquer endereço: conferido aqui,
+        // nada é resolvido, discado nem lido do disco. Sem isto, o QUIC e o TLS
+        // abriam, o `encode` do `Hello` o recusava, e a falha chegava à janela
+        // como `Unreachable`, com o servidor de pé.
+        if config.nickname.len() > seele_core::MAX_NICKNAME_LEN {
+            tracing::warn!(
+                bytes = config.nickname.len(),
+                teto = seele_core::MAX_NICKNAME_LEN,
+                "o apelido passa do teto do fio, em bytes: o Hello não o leva, e a conexão não abre"
+            );
+            return Err(ConnectionError::ApelidoGrandeDemais {
+                limite_bytes: seele_core::MAX_NICKNAME_LEN as u64,
+            }
+            .into());
+        }
         let (address, server_name, pin_key) = resolve(&config.server)?;
         if config.codigo_esperado.is_some() && config.expected_fingerprint.is_some() {
             tracing::warn!(

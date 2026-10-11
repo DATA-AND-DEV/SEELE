@@ -1672,6 +1672,20 @@ pub enum ConnectionError {
     /// duas máquinas. Unitária: não há impressão a comparar, porque a que quem
     /// atendeu mostrou é a do servidor verdadeiro.
     ChaveNaoProvada,
+    /// O apelido desta entrada passa do teto do fio, em **bytes**, e o `Hello`
+    /// não o levaria (pendência 58, item 55; lote C55 da F5).
+    ///
+    /// **Recusado antes de abrir a conexão**, em `Connection::connect`: o
+    /// apelido está na mão antes de qualquer endereço ser discado, e nada sai
+    /// desta máquina. Era `Unreachable`: o QUIC e o TLS abriam, o `encode` do
+    /// `Hello` recusava o apelido, e a escrita do `Hello` traduzia isso como
+    /// «nada respondeu», com o servidor de pé. A janela conferia o apelido em
+    /// caracteres, então um gravado de antes pode passar do teto. O teto vem
+    /// junto, para a frase dizer o número; o desfecho é encurtar o apelido.
+    ApelidoGrandeDemais {
+        /// O teto do apelido, em bytes (`MAX_NICKNAME_LEN`).
+        limite_bytes: u64,
+    },
     /// The server refused the session, and said why.
     Refused {
         /// The enumerated reason.

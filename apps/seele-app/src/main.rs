@@ -2593,78 +2593,139 @@ mod a_entrada_velha_que_chega_tarde {
     }
 }
 
-/// **A medida do `Hello` com um apelido grande demais** (pendência 58, item
-/// 55; lote C55 da F5).
+/// **O apelido grande demais é recusado com nome, antes de abrir a conexão**
+/// (pendência 58, item 55; lote C55 da F5).
 ///
 /// O apelido gravado nesta máquina (`escolher_apelido_local`) vai no `Hello` da
 /// conexão seguinte, e o `seele-proto` o limita a `MAX_NICKNAME_LEN` **bytes**.
 /// O campo do perfil contava caracteres até este lote, então um apelido de 20
-/// letras `á` (40 bytes) podia estar gravado. Este instrumento mede o que o
-/// `connect` do app faz com ele, contra um servidor de verdade nesta máquina,
-/// pela casa temporária do módulo do E54 (`a_entrada_velha_que_chega_tarde`),
-/// que é a única `SEELE_HOME` dos testes deste binário.
+/// letras `á` (40 bytes) pode estar gravado de antes. O teste conecta pelo
+/// `connect` do app, contra um servidor de verdade nesta máquina, pela casa
+/// temporária do módulo do E54 (`a_entrada_velha_que_chega_tarde`), que é a
+/// única `SEELE_HOME` dos testes deste binário.
 ///
-/// Medido em 11/10/2026, no `3b1f57c8` (a base do lote), com a HOME falsa:
+/// **Medido na base do lote** (`3b1f57c8`), com este teste ainda em
+/// `#[ignore]` como instrumento:
 /// - 16 `á` (32 B, no teto): `Ok(geracao 1)` em 16 ms, e o servidor a vê;
 /// - 20 `á` (40 B): `{"error":"Unreachable", …}` em 5 ms, com a trilha
 ///   `Parada` → `Tentando` (127.0.0.1) → `Desistiu { Unreachable }` aos 3 ms,
-///   e ninguém presente no servidor. A janela lê «NADA RESPONDEU NESSE
-///   ENDEREÇO» (`frases.js`) com o servidor de pé, e tentar de novo dá o mesmo.
+///   e ninguém presente no servidor. O QUIC e o TLS abriam, o `encode` do
+///   `Hello` recusava o apelido, e a escrita do `Hello`
+///   (`seele-core/src/client.rs`, `handshake`) traduzia qualquer erro em
+///   `ConnectError::Unreachable`. A janela lia «NADA RESPONDEU NESSE
+///   ENDEREÇO» com o servidor de pé.
 ///
-/// O caminho, pela leitura: o QUIC e o TLS abrem, o `encode` do `Hello` recusa
-/// o apelido, e a escrita do `Hello` (`seele-core/src/client.rs`, `handshake`)
-/// traduz qualquer erro em `ConnectError::Unreachable`, com o `warn` «could not
-/// send Hello» e o erro do `encode` dentro, no `seele.log`.
-///
-/// Para refazer:
-///
-/// ```sh
-/// cargo test -p seele-app --bin seele-app -- o_apelido_grande_demais_no_hello --ignored --nocapture
-/// ```
+/// **Agora** a FFI confere o apelido antes de abrir a conexão
+/// (`Connection::abrir`) e recusa com `ConnectionError::ApelidoGrandeDemais`,
+/// que leva o teto. A trilha vazia é a prova de que nada foi tentado: a
+/// chegada não começou, e nenhum candidato foi discado.
 #[cfg(test)]
 mod o_apelido_grande_demais_no_hello {
     use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
     use super::{connect, Session};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use tauri::Manager;
 
     #[test]
-    #[ignore = "instrumento da medida"]
-    fn medida() {
+    fn o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao() {
         let _vez = vez();
         runtime().block_on(async {
-            let (endereco, servidor) = servidor("Medida").await;
-            for apelido in ["á".repeat(16), "á".repeat(20)] {
-                let app = app();
-                let comeco = Instant::now();
-                let resultado = tokio::time::timeout(
-                    Duration::from_secs(30),
-                    connect(
-                        app.clone(),
-                        app.state::<Session>(),
-                        endereco.to_string(),
-                        apelido.clone(),
-                        false,
-                        None,
-                    ),
-                )
-                .await
-                .expect("o connect não voltou");
-                let gasto = comeco.elapsed();
-                let dito = match &resultado {
-                    Ok(entrada) => format!("Ok(geracao {})", entrada.geracao),
-                    Err(falha) => serde_json::to_string(falha).unwrap_or_default(),
-                };
-                tokio::time::sleep(Duration::from_millis(300)).await;
-                let presentes = servidor.server().presentes.lock().await.todos().len();
-                eprintln!(
-                    "MEDIDA: apelido de {} B: {dito} em {gasto:?}; presentes no servidor: {presentes}",
-                    apelido.len()
-                );
-                if let Ok(sessao) = app.state::<Session>().connection() {
-                    sessao.disconnect();
+            let teto = seele_ffi::Connection::limites_dos_campos().apelido;
+            let (endereco, servidor) = servidor("Apelido").await;
+            let mut vermelhos = Vec::new();
+
+            // Vinte letras `á` para o teto de hoje: 40 bytes, a medida da base.
+            let grande = "á".repeat(teto / 2 + 4);
+            let primeira = app();
+            let resultado = tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    primeira.clone(),
+                    primeira.state::<Session>(),
+                    endereco.to_string(),
+                    grande.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido grande demais não voltou");
+            match &resultado {
+                Ok(entrada) => vermelhos.push(format!(
+                    "um apelido de {} bytes entrou (geração {}), e o fio leva {teto}",
+                    grande.len(),
+                    entrada.geracao
+                )),
+                Err(falha) => {
+                    let dita = serde_json::to_value(falha).unwrap_or_default();
+                    let esperada =
+                        serde_json::json!({ "ApelidoGrandeDemais": { "limite_bytes": teto } });
+                    if dita.get("error") != Some(&esperada) {
+                        vermelhos.push(format!(
+                            "um apelido de {} bytes não voltou recusado com nome e teto \
+                             ({esperada}), e a janela não sabe o que dizer: {dita}",
+                            grande.len()
+                        ));
+                    }
+                    let tentou = !matches!(
+                        dita.get("trail").and_then(serde_json::Value::as_array),
+                        Some(trilha) if trilha.is_empty()
+                    );
+                    if tentou {
+                        vermelhos.push(format!(
+                            "a conexão foi aberta para um apelido que o `Hello` não leva: a \
+                             trilha não está vazia: {}",
+                            dita.get("trail").cloned().unwrap_or_default()
+                        ));
+                    }
                 }
             }
+            if let Ok(sessao) = primeira.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            // E um apelido no teto ainda entra: sem isto, um `connect` que
+            // recusasse tudo passaria.
+            let certo = "á".repeat(teto / 2);
+            let segunda = app();
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    segunda.clone(),
+                    segunda.state::<Session>(),
+                    endereco.to_string(),
+                    certo.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido no teto não voltou")
+            {
+                Ok(_) => {
+                    let presentes = servidor.server().presentes.lock().await.todos().len();
+                    if presentes != 1 {
+                        vermelhos.push(format!(
+                            "depois das duas tentativas, o servidor tem {presentes} presentes, \
+                             e não só a do apelido no teto"
+                        ));
+                    }
+                }
+                Err(falha) => vermelhos.push(format!(
+                    "um apelido de {} bytes, no teto, não entrou: {}",
+                    certo.len(),
+                    serde_json::to_value(&falha).unwrap_or_default()
+                )),
+            }
+            if let Ok(sessao) = segunda.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            assert!(
+                vermelhos.is_empty(),
+                "o apelido grande demais no `Hello`:\n  {}",
+                vermelhos.join("\n  ")
+            );
         });
     }
 }
