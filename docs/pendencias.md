@@ -9623,8 +9623,27 @@ pendência. A revisão dele deixou:
       perfil, e o `abrirPerfil` escondia a frase e trocava o que se escreveu
       pelo apelido gravado. Agora o `catch` não reabre, e a cena está no mesmo
       roteiro.
-    - **Fica para a F4:** o `connect` da ponte do navegador (tarefa 34) vai
-      ter de devolver a mesma recusa, com o mesmo nome, quando existir.
+    - **Fica para a F4, para quando o `connect` da ponte existir (tarefa
+      34):** a entrada da casca do navegador é uma oitava porta do apelido, e
+      não confere os bytes (M3 da revisão do C55, pela leitura). O campo
+      `#cel-entrada-apelido` (`celular-entrada.js`) é livre e vai direto ao
+      `connect` da ponte (`identidade-web.js`). Hoje esse `connect` é
+      `AINDA_A_FAZER`, e nada chega ao fio. Quando ele existir:
+      - ele devolve a mesma recusa, `ApelidoGrandeDemais`, com o mesmo nome;
+      - o ENTRAR do celular confere o campo com `passaDoTeto("apelido", …)`;
+      - o `desfecho` de `identidade-web.js` trata a recusa como uma que segue,
+        com o campo marcado. Sem isso, ela cai em `recusado`, a tentativa se
+        encerra, e o campo onde a pessoa escreveu some. A frase da casa manda
+        abrir o PERFIL, que não é onde ela escreveu.
+    - **Lido, e não medido: a sala pessoal sobe com o apelido gravado como
+      nome do servidor** (a observação fora da contagem da revisão do C55).
+      `sala.rs` usa o apelido gravado (`preferences.nickname()`) como
+      `ServerConfig.name` e como o apelido da conta do dono
+      (`hospedagem.rs`). O `Session` do aperto de mão leva o nome sob
+      `MAX_CLIENT_NAME_LEN` (64 B, `control.rs`). Desde o C55, um apelido
+      novo tem até 32 B e cabe. Um gravado de antes, acima de 64 B, poderia
+      impedir quem liga de entrar: na v0.15.1 publicada o perfil contava 32
+      caracteres, e 22 ideogramas já são 66 B. Ninguém mediu.
 
 ### Fora da F5, só como referência
 
