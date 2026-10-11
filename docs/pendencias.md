@@ -9527,7 +9527,9 @@ pendência. A revisão dele deixou:
     *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
-55. **P61 · A recusa local de um campo grande demais não chega à janela.**
+55. **P61 · A recusa local de um campo grande demais não chega à janela.
+    Consertada em 11/10/2026 pelo lote C55, menos o apelido já gravado
+    grande demais, que espera uma decisão.**
     Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
     (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
     registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
@@ -9575,6 +9577,51 @@ pendência. A revisão dele deixou:
       conexão (o teto é `MAX_NICKNAME_LEN`, em bytes), ou a falha de
       codificação do `Hello` ter nome próprio em vez de virar `Unreachable`.
     *Fonte:* `F5/lote-p61-report.md`, rodadas 1 e 2, M2 e R1-M5.
+    **Em 11/10/2026, o lote C55 da F5** (`F5/lote-c55-report.md`, commits
+    `20f1f331` a `95f9945a`, mais o do relatório):
+    - **Os tetos vêm de um lugar só.** O comando `limites_dos_campos`
+      (`main.rs`), no molde de `limite_da_mensagem`, devolve
+      `seele_ffi::Connection::limites_dos_campos`, que lê do `seele-proto` pelos
+      reexports do `seele-core` (`MAX_NICKNAME_LEN`, `MAX_CHANNEL_NAME_LEN`,
+      `MAX_VOICE_ROOM_LIMIT`, `MAX_CLIENT_NAME_LEN`, `MAX_ALERT_TEXT_LEN`). A
+      ponte do navegador os serve pelas `CONSTANTES_DO_DESKTOP`, que o guarda
+      do `tests/web.rs` confere contra a FFI. O fio não mudou.
+    - **Os sete caminhos conferem em bytes antes de mandar** (`passaDoTeto`, em
+      `base.js`) e dizem «PASSA DE N BYTES — ENCURTE.», com os bytes que o
+      texto tem (`fraseDoTeto`, em `frases.js`): o apelido na sessão e o
+      gravado (`guardarOApelido`), o nome de canal e de sala (o diálogo de
+      nomear), o nome do servidor em CONFIGURAÇÕES (`renomearServidor`) e ao
+      hospedar (`confirmarPreparar`, antes de subir o servidor) e o motivo do
+      banimento (o BANIR, antes de armar). Os cinco `maxlength` saíram.
+    - **Os lugares da sala nova são ajustados, e não recusados.** Ninguém
+      escreve o número: ele é copiado da primeira sala do servidor. A cópia
+      fora de 1 a `lugares_da_sala` vira o teto, e o ajuste vai ao
+      `seele.log`. O `250` escrito à mão em `tela-sessao.js` saiu.
+    - **As provas:** o roteiro `tools/roteiros/tetos-dos-campos.js`, no
+      `ci.yml` e no `publicar.sh`, com um caso por caminho, e os guardas
+      `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui` (`frontend.rs`) e
+      `nenhuma_tela_le_um_teto_de_campo_que_nao_existe` (`main.rs`).
+    - **Continua aberto: o apelido gravado grande demais antes do lote.** A
+      conferência ao gravar impede um novo. Um que já está gravado ainda dá
+      «NADA RESPONDEU NESSE ENDEREÇO»: medido de novo pelo `connect` do app
+      (o instrumento `o_apelido_grande_demais_no_hello`, em `#[ignore]`), 40 B
+      voltam `Unreachable` em 5 ms, e o servidor não vê ninguém. E encurtar o
+      apelido no perfil não basta: a tentativa seguinte leva o apelido de
+      antes, guardado em `ultimoApelido` (`tela-boot.js`, `conectar`), e só
+      fechar o app o esquece (medido por um roteiro de medida, fora do
+      repositório). O conserto pede uma variante nova de `ConnectionError`, e
+      a orquestradora decide antes: o `connect` da FFI conferir o apelido
+      antes de abrir a conexão (a recomendação do lote), ou a falha de
+      codificação do `Hello` ganhar nome no núcleo e na FFI. Nos dois, o
+      `catch` de `conectar` esquece o `ultimoApelido` nessa recusa, como já
+      faz no `NicknameTaken`. Sem variante, só a janela conferindo em
+      `conectar`, antes do `connect`. As três mexem no `conectar`, que é da F8.
+    - **Achado fora do lote:** a recusa de gravar o apelido some do perfil.
+      Em `guardarOApelido` (`camada-nomear.js`), o `catch` escreve a frase em
+      `#perfil-erro` e chama `abrirPerfil()`, que a esconde e põe de volta no
+      campo o apelido gravado. Medido com `escolher_apelido_local` recusando
+      `NaoGravei`: o perfil fica aberto, sem frase, e o que se escreveu some.
+      A conferência de tamanho deste lote não passa por esse `catch`.
 
 ### Fora da F5, só como referência
 
