@@ -42,7 +42,7 @@
 
 use std::collections::BTreeMap;
 
-use seele_proto::media::{MediaError, MediaHeader, HEADER_LEN, MEDIA_HEADER_VERSION};
+use seele_proto::media::{MediaError, MediaHeader, HEADER_LEN};
 use seele_voz::fontes::TabelaDeFontes;
 use seele_voz::gate::{GateConfig, GateMetrics, GateMode, VoiceGate};
 use seele_voz::jitter::{Decision, JitterBuffer, JitterConfig};
@@ -169,7 +169,6 @@ impl Envio {
         }
         let seq = self.relogio.pacote_saiu();
         let cabecalho = MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc: self.ssrc,
             seq,
             timestamp: carimbo,
@@ -602,7 +601,6 @@ mod testes {
     fn de(ssrc: u32, seq: u16) -> Vec<u8> {
         let mut datagrama = vec![0_u8; HEADER_LEN + 2];
         MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc,
             seq,
             timestamp: u32::from(seq) * 960,
