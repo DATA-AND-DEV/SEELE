@@ -891,3 +891,28 @@ zero (a carga, os 37 roteiros, as duas bancadas da ponte e a do celular; o
   como prova de etapa nenhuma, e cada etapa foi verificada de novo, sozinha.
 
 App 727/727 na ponta.
+
+## A 21 quebrou duas bancadas da janela (11/10)
+
+A F5 achou, na `versao/0.16` pura (`57fd0841`), a `conversa-com-estado` caindo
+inteira e a `ajustes-v013` reprovando por «nenhum erro na página», as duas com
+«Cannot read properties of undefined (reading 'catch')» em
+`camada-hospedagem.js:137`. Os dubles de janela das bancadas têm
+`onCloseRequested() {}`, que devolve `undefined`, e o `.catch` do ouvinte da 21
+estourava na carga, levando junto o VOLTAR e o PARAR do mesmo arquivo.
+
+**O conserto** (`07c6ae0f`): o registro vai em
+`Promise.resolve(janelaDoApp?.onCloseRequested?.(…))`. O guarda da exceção do
+fechar passou a ler a chamada direta **e** a opcional, e a reprovar qualquer
+outra menção ao método: com a forma nova, o guarda antigo não achava ouvinte
+nenhum, e um veto sem as condições passaria calado (provado por reversão).
+
+**O erro foi meu, e é o segundo do mesmo tipo** depois da bancada do celular:
+a verificação rodava a carga, os roteiros, as bancadas da ponte e a do
+celular, e não as 34 bancadas da janela. Agora roda todas. Com o conserto, 33
+de 34 passam; a do executor no navegador pede o motor com o wasi-sdk, que não
+baixei, e não carrega a camada.
+
+**A regra, daqui em diante, para toda mexida na `ui/`, no duble ou na carga:**
+a carga, os roteiros, as duas bancadas da ponte, a do celular **e todas as
+bancadas da janela** (`apps/seele-app/bancada/*.cjs`), antes da entrega.

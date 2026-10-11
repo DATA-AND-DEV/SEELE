@@ -11150,7 +11150,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // **E a exceção do `onCloseRequested`** (tarefa 21 da F7, decidida pela
     // orquestradora em 10/10, no molde da do `beforeunload`): fechar o SEELE com
     // o servidor guardado no ar tira todo mundo dele, e a página pergunta antes.
-    // O `close-requested` cru continua proibido. Cada `onCloseRequested(` tem de
+    // O `close-requested` cru continua proibido. Cada chamada do `onCloseRequested`
+    // (direta ou `?.(`) tem de
     // mostrar, **antes** do `preventDefault`: as duas credenciais esquecidas
     // (`fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`), e o veto só com o
     // servidor guardado no ar: `invoke("meu_servidor")`, **depois** o `return`
@@ -11163,11 +11164,24 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
              próprio fechamento sem as condições do `onCloseRequested`, e a credencial \
              da tentativa, que só existe na memória dela, sobreviveria ao fechar."
         );
-        for (em, _) in texto.match_indices("onCloseRequested(") {
+        for (em, _) in texto.match_indices("onCloseRequested") {
+            // **A chamada, direta ou opcional.** O `?.(` é a forma que não
+            // derruba o script num runtime (ou num duble de bancada) sem o
+            // método. Qualquer outra menção — o método passado adiante, lido
+            // num `typeof` — reprova: este guarda só lê a chamada, e um ouvinte
+            // registrado por outro caminho escaparia das condições do veto.
+            let depois = &texto[em + "onCloseRequested".len()..];
+            let resto = depois.strip_prefix("?.").unwrap_or(depois);
+            assert!(
+                resto.starts_with('('),
+                "`{nome}` menciona o `onCloseRequested` sem chamá-lo (`onCloseRequested(` \
+                 ou `onCloseRequested?.(`), e este guarda só lê a chamada: um ouvinte \
+                 registrado por outro caminho escaparia das condições do veto (tarefa 21 \
+                 da F7)."
+            );
             // A chamada inteira, pelos parênteses balanceados, e não até o
             // primeiro `.catch(`: um `.catch(` dentro do ouvinte, antes do
             // `preventDefault`, cortaria o trecho cedo, e o veto passaria calado.
-            let resto = &texto[em + "onCloseRequested".len()..];
             let mut fundura = 0usize;
             let fim = resto
                 .char_indices()
@@ -11190,8 +11204,8 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
                 // A contagem não sabe de string: um `")"` num literal do ouvinte
                 // fecha o trecho cedo, e um `preventDefault` depois do corte
                 // passaria calado. Sem ele no trecho, ele também não pode estar
-                // entre o corte e o próximo `onCloseRequested(`.
-                let ate_o_proximo = resto.find("onCloseRequested(").unwrap_or(resto.len());
+                // entre o corte e a próxima menção ao `onCloseRequested`.
+                let ate_o_proximo = resto.find("onCloseRequested").unwrap_or(resto.len());
                 assert!(
                     !resto[..ate_o_proximo].contains("preventDefault"),
                     "`{nome}`: o guarda não conseguiu ler o ouvinte do `onCloseRequested` \
