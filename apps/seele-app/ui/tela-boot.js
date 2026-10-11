@@ -450,8 +450,9 @@ async function conectar(alvo, apelido, credencial) {
     // A frase manda escolher outro e entrar de novo, e o lugar de escolher é o
     // perfil. Com o recusado em `ultimoApelido`, a tentativa seguinte não lia
     // mais o perfil, e o nome novo ficava gravado sem sair da máquina — o
-    // relato do `d084cfb4`, agora com um nome que alguém escolheu.
-    if (motivo?.Refused?.reason === "NicknameTaken") {
+    // relato do `d084cfb4`, agora com um nome que alguém escolheu. E o
+    // apelido grande demais, que a FFI recusa antes de discar (lote C55).
+    if (motivo?.Refused?.reason === "NicknameTaken" || motivo?.ApelidoGrandeDemais) {
       ultimoApelido = null;
       // E a credencial desta tentativa fica para a seguinte a este alvo — o
       // `alvo` desta chamada, e não o `ultimoAlvo`, pela razão do lote R logo

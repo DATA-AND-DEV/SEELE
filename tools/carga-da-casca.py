@@ -250,6 +250,14 @@ window.__TAURI__ = {
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente
       // sobre isso não prova nada sobre ele.
+      // **O apelido que o fio não leva é recusado como o produto o recusa**
+      // (`Connection::abrir` da FFI, lote C55 da F5): com o nome e o teto, e
+      // antes de haver sessão nenhuma.
+      if (cmd === "connect" &&
+          new TextEncoder().encode((args && args.nickname) || "").length > SEELE_LIMITES_DOS_CAMPOS.apelido) {
+        throw { error: { ApelidoGrandeDemais: { limite_bytes: SEELE_LIMITES_DOS_CAMPOS.apelido } },
+                trail: [], origem_da_impressao: null, a_lista_guardou: false };
+      }
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
       if (cmd === "hospedar") window.__SEELE_HOSPEDANDO = true;

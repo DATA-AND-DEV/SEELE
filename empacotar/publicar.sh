@@ -1153,6 +1153,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/aceite-de-mods-que-falha.js \
         --roteiro tools/roteiros/aceite-de-mods-que-nao-abre.js \
         --roteiro tools/roteiros/aceite-de-mods.js \
+        --roteiro tools/roteiros/apelido-no-hello.js \
         --roteiro tools/roteiros/apelido-recusado.js \
         --roteiro tools/roteiros/apps-mais-novos.js \
         --roteiro tools/roteiros/atualizacao.js \

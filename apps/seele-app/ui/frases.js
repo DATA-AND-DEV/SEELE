@@ -627,6 +627,18 @@ function fraseDeErro(erro, apelido, deOnde) {
         "Confirme por outro canal antes de continuar."
       );
     }
+    // **O apelido gravado que o `Hello` não leva** (pendência 58, item 55;
+    // lote C55 da F5). A FFI o recusa antes de discar, com o teto em bytes; era
+    // NADA RESPONDEU NESSE ENDEREÇO, com o servidor de pé. O remédio é do
+    // perfil, e a tentativa seguinte lê o apelido de lá (`conectar` esquece o
+    // recusado).
+    if (erro.ApelidoGrandeDemais) {
+      const teto = erro.ApelidoGrandeDemais.limite_bytes;
+      return (
+        `SEU APELIDO PASSA DE ${teto} BYTES.\n` +
+        "Abra o PERFIL, encurte o apelido e entre de novo: uma letra acentuada ocupa dois bytes, e um ideograma, três."
+      );
+    }
     // A impressão prometia uma chave e quem atendeu ofertou outra. Não é
     // troca de chave — nenhum pino prova o servidor ali — então a frase acusa
     // quem prometeu, e não a continuidade do servidor.

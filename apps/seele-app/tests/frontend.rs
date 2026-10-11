@@ -12899,8 +12899,13 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
     // outra chave a pessoa o trocava no perfil e a tentativa seguinte mandava o
     // recusado de novo — o mesmo relato de cima, com um nome que alguém
     // escolheu. A `ajustes-v013.cjs` troca o apelido e confere o que sai.
+    //
+    // **E o apelido grande demais** (lote C55 da F5), pela mesma porta: a FFI o
+    // recusa antes de discar (`ApelidoGrandeDemais`), a frase manda encurtá-lo
+    // no perfil, e o recusado guardado aqui voltava na tentativa seguinte. O
+    // roteiro `apelido-no-hello.js` encurta e confere o que sai.
     let recusa = corpo
-        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\") {")
+        .split_once("if (motivo?.Refused?.reason === \"NicknameTaken\"")
         .and_then(|(_, depois)| depois.split_once('}'))
         .map(|(bloco, _)| bloco);
     assert!(
@@ -12908,6 +12913,16 @@ fn the_shell_never_remembers_a_nickname_nobody_chose() {
         "a casca deixou de esquecer o apelido que o servidor recusou por ser de \
          outra chave: a pessoa troca o nome no perfil, como a frase manda, e a \
          tentativa seguinte manda o recusado de novo.\n{corpo}"
+    );
+    assert!(
+        recusa.is_some_and(|bloco| {
+            bloco
+                .split_once('{')
+                .is_some_and(|(condicao, _)| condicao.contains("motivo?.ApelidoGrandeDemais"))
+        }),
+        "a casca deixou de esquecer o apelido grande demais que a FFI recusa antes de \
+         discar: a pessoa o encurta no perfil, como a frase manda, e a tentativa \
+         seguinte manda o recusado de novo.\n{corpo}"
     );
 }
 
