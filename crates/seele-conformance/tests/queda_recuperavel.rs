@@ -72,16 +72,34 @@ async fn servidor() -> Result<(SocketAddr, Arc<Daemon>)> {
     Ok((endereco, servidor))
 }
 
-/// O que a FFI entregou à janela.
+/// O que a FFI entregou à janela, e o enlace **como a janela o lê**.
+///
+/// O enlace é lido do retrato no próprio aviso, como a janela faz ao receber
+/// `TelemetryChanged`. Medido na fase A: a faixa da bateria dura de 6 a 8 ms
+/// quando a primeira volta dá certo, e uma amostra de 20 ms de fora nunca a vê.
 #[derive(Default)]
 struct Gravador {
     eventos: std::sync::Mutex<Vec<Event>>,
+    conexao: std::sync::OnceLock<std::sync::Weak<Connection>>,
+    /// `true` para cada leitura na bateria, `false` para cada uma de pé.
+    enlaces: std::sync::Mutex<Vec<bool>>,
 }
 
 impl seele_ffi::EventListener for Gravador {
     fn on_event(&self, event: Event) {
+        let le_o_retrato = matches!(event, Event::TelemetryChanged | Event::Ended { .. });
         if let Ok(mut eventos) = self.eventos.lock() {
             eventos.push(event);
+        }
+        if !le_o_retrato {
+            return;
+        }
+        let Some(conexao) = self.conexao.get().and_then(std::sync::Weak::upgrade) else {
+            return;
+        };
+        let na_bateria = matches!(conexao.snapshot().link, LinkState::InternalBattery { .. });
+        if let Ok(mut enlaces) = self.enlaces.lock() {
+            enlaces.push(na_bateria);
         }
     }
 }
@@ -94,6 +112,22 @@ impl Gravador {
             .iter()
             .find(|evento| matches!(evento, Event::Ended { .. }))
             .cloned()
+    }
+
+    /// Até onde o enlace já foi lido: o que vem depois é desta marca em diante.
+    fn marca(&self) -> usize {
+        self.enlaces.lock().map_or(0, |enlaces| enlaces.len())
+    }
+
+    /// Se, desde `marca`, a janela leu a faixa da bateria e depois a volta.
+    fn faixa_e_volta_desde(&self, marca: usize) -> bool {
+        self.enlaces.lock().is_ok_and(|enlaces| {
+            let depois = enlaces.get(marca..).unwrap_or_default();
+            depois
+                .iter()
+                .position(|na_bateria| *na_bateria)
+                .is_some_and(|faixa| depois[faixa..].iter().any(|na_bateria| !na_bateria))
+        })
     }
 }
 
@@ -125,6 +159,7 @@ async fn ana(
         .await?
         .map_err(|falha| anyhow::anyhow!("a FFI não entrou: {falha:?}"))?;
     let gravador = Arc::new(Gravador::default());
+    let _ = gravador.conexao.set(Arc::downgrade(&ana));
     ana.subscribe(gravador.clone());
     if aparelho.is_some() {
         ana.set_voice_mode(VoiceMode::Open);
@@ -154,10 +189,6 @@ async fn esperar(o_que: &str, mut feito: impl FnMut() -> bool) -> Result<()> {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     Ok(())
-}
-
-fn na_bateria(conexao: &Connection) -> bool {
-    matches!(conexao.snapshot().link, LinkState::InternalBattery { .. })
 }
 
 fn despedir(servidor: &Daemon, quem: PersonId, reason: DisconnectReason) {
@@ -215,9 +246,12 @@ async fn ficar_para_tras_mostra_a_faixa_e_a_volta_e_nao_o_fim() -> Result<()> {
     let casa = tempfile::tempdir()?;
     let (ana, gravador, quem) = ana(endereco, casa.path(), None).await?;
 
+    let marca = gravador.marca();
     despedir(&servidor, quem, DisconnectReason::FellBehind);
-    esperar("a faixa da bateria aparecer", || na_bateria(&ana)).await?;
-    esperar("a volta", || !na_bateria(&ana)).await?;
+    esperar("a janela ler a faixa da bateria e depois a volta", || {
+        gravador.faixa_e_volta_desde(marca)
+    })
+    .await?;
     // Uma volta inteira do laço depois da volta: o que viesse atrás dela, viria.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -270,24 +304,24 @@ async fn a_volta_traz_o_buraco_e_o_que_ficou_sem_resposta_uma_vez_cada() -> Resu
         mensagens.append_batch(&buraco)?;
     }
 
-    // **No instante**: três mensagens e a despedida logo atrás.
-    for numero in 1..=3 {
+    // **No instante**: seis mensagens e a despedida logo atrás. Cada uma
+    // depende da repetição: ou o servidor não chegou a lê-la, ou gravou e o
+    // eco foi para uma sessão que já tinha acabado — e ela fica em
+    // `SemResposta` na tela. (A bateria dura milissegundos, medido na fase A:
+    // não há janela para escrever «durante» ela.)
+    let marca = gravador.marca();
+    for numero in 1..=6 {
         ana.send_message(LINHA.0, format!("no-instante-{numero}"))
             .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
     }
     despedir(&servidor, quem, DisconnectReason::FellBehind);
-    esperar("a faixa da bateria aparecer", || na_bateria(&ana)).await?;
-    // **Durante a bateria**: o motor sem conexão não guarda o `Dizer`, e a
-    // primeira tentativa de volta só sai 500 ms depois da queda.
-    for numero in 1..=3 {
-        ana.send_message(LINHA.0, format!("na-bateria-{numero}"))
-            .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
-    }
-    esperar("a volta", || !na_bateria(&ana)).await?;
+    esperar("a janela ler a faixa da bateria e depois a volta", || {
+        gravador.faixa_e_volta_desde(marca)
+    })
+    .await?;
 
-    let dela: Vec<String> = (1..=3)
+    let dela: Vec<String> = (1..=6)
         .map(|numero| format!("no-instante-{numero}"))
-        .chain((1..=3).map(|numero| format!("na-bateria-{numero}")))
         .collect();
     esperar("o buraco e as seis dela aparecerem confirmadas", || {
         let mensagens = ana.messages();
@@ -320,11 +354,11 @@ async fn a_volta_traz_o_buraco_e_o_que_ficou_sem_resposta_uma_vez_cada() -> Resu
         );
     }
     // Na ordem em que ela escreveu: o servidor numera na ordem em que grava.
-    let ids: Vec<u64> = (1..=3)
+    let ids: Vec<u64> = (1..=6)
         .map(|numero| {
             mensagens
                 .iter()
-                .find(|m| m.body == format!("na-bateria-{numero}"))
+                .find(|m| m.body == format!("no-instante-{numero}"))
                 .map(|m| m.id)
                 .expect("já conferida acima")
         })
@@ -358,10 +392,10 @@ async fn a_voz_fecha_no_fim_e_volta_na_queda() -> Result<()> {
     let (ana_na_queda, gravador, quem) = ana(endereco, casa.path(), Some(aparelho)).await?;
     esperar("a voz abrir", || mentira::contagem(aparelho).abertos == 1).await?;
     let antes = mentira::contagem(aparelho).aberturas;
+    let marca = gravador.marca();
     despedir(&daemon, quem, DisconnectReason::FellBehind);
-    esperar("a faixa da bateria aparecer", || na_bateria(&ana_na_queda)).await?;
     esperar("a voz reabrir na volta", || {
-        !na_bateria(&ana_na_queda)
+        gravador.faixa_e_volta_desde(marca)
             && mentira::contagem(aparelho).aberturas > antes
             && mentira::contagem(aparelho).abertos == 1
     })
