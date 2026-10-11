@@ -853,3 +853,41 @@ da ponte) não a incluía.
 ou na carga roda a bancada do celular antes da entrega, junto com os roteiros
 e as bancadas da ponte. Ela usa o duble da carga, então qualquer mudança nele a
 alcança. A minha verificação passou a rodá-la.
+
+## A metade da casca da tarefa 18 (11/10)
+
+Sobre a `versao/0.16` da 15ª (`a400c4eb`), com o W2, o W3, o E54 e o
+`depoisDeConectar` da F8 já dentro. Cada etapa verde sozinha, verificada do
+zero (a carga, os 37 roteiros, as duas bancadas da ponte e a do celular; o
+`--test frontend`):
+
+| etapa | commit |
+|---|---|
+| o duble responde o `onde_estou` pela sessão, como o Rust (Guardado no endereço do servidor hospedado, Outro fora dele, Nenhum sem sessão) | `714fbeb5` |
+| a dispensa de conferir a própria chave vem do `onde_estou` depois do `connect`, e não do endereço; o `nossoServidorEm` sai; os guardas; o passo 6 do `meu-servidor.js` | `c4317f0b` |
+| HOSPEDAR AQUI, com o guardado no ar, volta a ele; o passo 7 | `aada60a5` |
+
+- **«Estou no meu servidor?» tem uma resposta só.** A última régua própria era
+  o `nossoServidorEm` da entrada: o endereço que a janela hospedou. Agora o
+  `conectar` pergunta ao `onde_estou` depois do `connect`, e só «Guardado» (a
+  chave do aperto de mão é a do servidor daqui) dispensa a `#tela-auth`. O mesmo
+  endereço com outra chave confere.
+- **O desenho da F5 e da F8 não mudou**: a conferência da tentativa logo depois
+  do `connect` (o guarda do lote E54 reprovou a minha primeira versão, que
+  perguntava antes dela), e o `depoisDeConectar` logo depois de uma
+  conferência. A pergunta é uma espera e fica entre duas conferências, como
+  depois de cada espera da entrada (lote W2).
+- **O guarda da dispensa mudou de nome**:
+  `a_dispensa_de_conferir_a_propria_chave_vem_da_chave_desta_conexao`, no
+  lugar de `the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after`.
+- **Reversões, cada uma reprovando:** o código de antes (passo 6); a pergunta
+  antes da primeira conferência; sem a segunda conferência; «!== "Nenhum"»; o
+  endereço de volta; a `tela-sessao` pelo `estado_da_porta`; sem o conserto do
+  HOSPEDAR AQUI (passo 7).
+- **Medido no caminho:** uma rodada da bancada do celular reprovou o
+  `aba-servidor-390-papel` com a máquina carregada e um roteiro meu rodando
+  junto; isolado ele passou 3 de 3, e as rodadas inteiras seguintes passaram.
+  E duas vezes mexi em arquivo com a verificação rodando: a rodada não valeu
+  como prova de etapa nenhuma, e cada etapa foi verificada de novo, sozinha.
+
+App 727/727 na ponta.
