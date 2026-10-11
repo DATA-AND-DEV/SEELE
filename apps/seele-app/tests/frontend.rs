@@ -19667,3 +19667,157 @@ fn sair_nao_derruba_o_servidor_de_ninguem() {
          «receber ligações»:\n{parar}"
     );
 }
+
+/// Os números escritos numa linha de script: cada sequência de algarismos que
+/// não está colada a uma letra, a um `_` ou a um ponto (`v2`, `0.5` e `x_32`
+/// não contam).
+fn numeros_da_linha(linha: &str) -> Vec<usize> {
+    let bytes = linha.as_bytes();
+    let colado = |byte: Option<&u8>| {
+        byte.is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'.')
+    };
+    let mut achados = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let comeco = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        let antes = comeco.checked_sub(1).and_then(|j| bytes.get(j));
+        if !colado(antes) && !colado(bytes.get(i)) {
+            if let Ok(numero) = linha[comeco..i].parse() {
+                achados.push(numero);
+            }
+        }
+    }
+    achados
+}
+
+/// **Nenhum teto do fio dos campos é escrito à mão na `ui/`** (pendência 58,
+/// item 55; lote C55 da F5).
+///
+/// Os campos que o fio carrega — o apelido, o nome de um canal ou de uma sala,
+/// o nome do servidor e o motivo de um banimento — tinham `maxlength`, e os
+/// lugares de uma sala nova tinham um `250` escrito à mão. O `maxlength` conta
+/// caracteres, e o fio conta **bytes**: vinte letras `á` cabiam no apelido e
+/// não no `Hello`. Os tetos agora vêm do Rust (`limites_dos_campos`), e cada
+/// campo os confere em bytes por `passaDoTeto`, em `base.js`. Este guarda
+/// reprova a volta de um teto escrito à mão, nas duas formas em que ele morava:
+///
+/// - um `maxlength` num dos cinco campos do `index.html`, com qualquer número:
+///   um teto em caracteres num campo que o fio conta em bytes é o defeito;
+/// - um número igual a um dos tetos numa linha de script que trata do tamanho
+///   de um campo: que põe `maxLength`, que conta `bytesDe(`, que pede um teto
+///   (`passaDoTeto`, `tetosDosCampos`), que fala dos lugares de uma sala, ou
+///   que nomeia um dos cinco campos.
+///
+/// Os tetos são lidos da FFI, e não escritos aqui. A única cópia deles na
+/// `ui/` é a das `CONSTANTES_DO_DESKTOP` da ponte do navegador, que não tem
+/// Rust a quem perguntar: o guarda `as_constantes_da_ponte_sao_as_do_desktop`,
+/// de `tests/web.rs`, a confere contra a FFI, e por isso ela fica fora daqui.
+#[test]
+fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
+    const CAMPOS: [&str; 5] = [
+        "perfil-apelido",
+        "nomear-valor",
+        "server-nome-valor",
+        "preparar-nome",
+        "moderar-motivo",
+    ];
+    const MARCAS: [&str; 7] = [
+        "maxLength",
+        "maxlength",
+        "bytesDe(",
+        "passaDoTeto",
+        "tetosDosCampos",
+        "lugaresDeUmaSalaNova",
+        "lugares",
+    ];
+    // Os números iguais a um teto que não são teto de campo nenhum do fio,
+    // cada um com o motivo, conferido na hora de entrar aqui.
+    const EXCECOES: &[(&str, &str, &str)] = &[(
+        "camada-sala.js",
+        "nome.maxLength = 48;",
+        "o nome que esta máquina dá a um contato da agenda da sala pessoal: ele fica no \
+         disco desta máquina (`seele_core::agenda`), e não vai ao fio",
+    )];
+
+    let limites = seele_ffi::Connection::limites_dos_campos();
+    let tetos = [
+        limites.apelido,
+        limites.nome_de_canal,
+        usize::from(limites.lugares_da_sala),
+        limites.nome_do_servidor,
+        limites.motivo_do_banimento,
+    ];
+    let mut a_mao = Vec::new();
+
+    let pagina = without_comments(&read("ui/index.html"));
+    for id in CAMPOS {
+        let marca = format!("id=\"{id}\"");
+        let Some(onde) = pagina.find(&marca) else {
+            panic!("o `index.html` não tem mais `#{id}`, e este guarda olharia o nada");
+        };
+        let abre = pagina[..onde]
+            .rfind('<')
+            .expect("o id está dentro de uma etiqueta");
+        let fecha = onde + pagina[onde..].find('>').expect("a etiqueta fecha");
+        let etiqueta = &pagina[abre..=fecha];
+        if etiqueta.contains("maxlength") {
+            a_mao.push(format!("index.html, #{id}: {etiqueta}"));
+        }
+    }
+
+    let mut excecoes_vistas = BTreeSet::new();
+    for nome in ui_files(".js") {
+        let mut fonte = without_comments(&read(&format!("ui/{nome}")));
+        if nome == "ponte-web.js" {
+            let (antes, depois) = fonte
+                .split_once("const CONSTANTES_DO_DESKTOP = Object.freeze(")
+                .expect("a ponte declara `CONSTANTES_DO_DESKTOP`");
+            let (_, resto) = depois
+                .split_once(");")
+                .expect("`CONSTANTES_DO_DESKTOP` fecha");
+            fonte = format!("{antes}{resto}");
+        }
+        for linha in fonte.lines() {
+            let do_tamanho = MARCAS.iter().any(|marca| linha.contains(marca))
+                || CAMPOS.iter().any(|campo| linha.contains(campo));
+            if !do_tamanho
+                || !numeros_da_linha(linha)
+                    .iter()
+                    .any(|numero| tetos.contains(numero))
+            {
+                continue;
+            }
+            if let Some((_, excecao, _)) = EXCECOES
+                .iter()
+                .find(|(arquivo, excecao, _)| *arquivo == nome && linha.trim() == *excecao)
+            {
+                excecoes_vistas.insert(*excecao);
+                continue;
+            }
+            a_mao.push(format!("{nome}: {}", linha.trim()));
+        }
+    }
+
+    assert!(
+        a_mao.is_empty(),
+        "um teto do fio voltou a ser escrito à mão na `ui/` (os tetos de hoje são {tetos:?}). \
+         Um `maxlength` conta caracteres e o fio conta bytes, e um número copiado envelhece \
+         calado quando o fio muda: o teto vem de `limites_dos_campos`, e quem confere é \
+         `passaDoTeto`, em bytes.\n  {}",
+        a_mao.join("\n  ")
+    );
+    for (arquivo, excecao, _) in EXCECOES {
+        assert!(
+            excecoes_vistas.contains(excecao),
+            "a exceção `{excecao}`, de `{arquivo}`, não está mais lá: tire-a da lista, que \
+             uma exceção sem dono é uma porta que ninguém confere"
+        );
+    }
+}

@@ -12979,7 +12979,8 @@ mod a_tela_le_os_limites_que_o_rust_manda {
     /// A janela pede cada teto pelo nome, e um nome que o Rust não serializa
     /// não lança: chega `undefined`, `passaDoTeto` não confere nada, e o campo
     /// volta a mandar calado o que o núcleo recusa. As chaves vêm de um
-    /// `LimitesDosCampos` serializado de verdade.
+    /// `LimitesDosCampos` serializado de verdade. E, na outra mão, todo teto
+    /// que o Rust serializa tem uma tela que o lê.
     #[test]
     fn nenhuma_tela_le_um_teto_de_campo_que_nao_existe() {
         let Ok(serde_json::Value::Object(mapa)) =
@@ -13003,6 +13004,17 @@ mod a_tela_le_os_limites_que_o_rust_manda {
             "estas telas leem um teto de campo que o Rust não serializa, e o que chega é \
              `undefined`, que não confere nada: {culpados:?}. As chaves que existem são \
              {chaves:?}"
+        );
+        // E todo teto que o Rust manda tem quem o confira: um teto sem leitor é
+        // um campo que voltou a mandar sem conferir, ou um teto que sobrou.
+        let sem_leitor: Vec<_> = chaves
+            .iter()
+            .filter(|chave| !lidos.iter().any(|(_, campo)| campo == *chave))
+            .collect();
+        assert!(
+            sem_leitor.is_empty(),
+            "nenhuma tela confere estes tetos de `limites_dos_campos`: {sem_leitor:?}. Os \
+             lidos são {lidos:?}"
         );
     }
 }
