@@ -479,6 +479,30 @@ PE_DO_ROTEIRO = """
 """
 
 
+def duble_montado() -> str:
+    """O duble com todo marcador preenchido, num lugar só para quem monta a
+    página com ele: esta carga e a bancada do celular
+    (`tools/bancada-do-celular.py`). Um marcador novo entra aqui, e as duas o
+    recebem.
+
+    **E nenhum fica sem valor.** A 21 da F7 pôs no duble o
+    `__PERMISSOES_DA_JANELA__`, que esta carga preenchia e a bancada, que
+    repetia as trocas por conta própria, não: a página morria no primeiro
+    script com «is not defined», e a bancada inteira reprovava sem dizer por
+    quê (décima quarta integração, 11/10). Um marcador que sobrar para aqui,
+    com o nome dele. O `__TAURI__` é o nome do objeto, e não um marcador."""
+    duble = (
+        DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
+        .replace("__PERMISSOES_DA_JANELA__", permissoes_da_janela())
+        .replace("__VERSAO_DO_SERVIDOR__", versao_do_servidor())
+        .replace("__LINHA__", linha_desta_janela())
+    )
+    sobrando = sorted(set(re.findall(r"__[A-Z][A-Z_]*__", duble)) - {"__TAURI__"})
+    if sobrando:
+        raise SystemExit(f"o duble tem marcadores sem valor: {sobrando}")
+    return duble
+
+
 def navegador() -> str:
     """O primeiro `chrome-headless-shell` que este computador já tem."""
     for raiz in [
@@ -861,13 +885,7 @@ def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) ->
         if roteiro_pedido:
             corpo = roteiro_pedido.read_text()
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
-        duble = (
-            DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
-            .replace("__PERMISSOES_DA_JANELA__", permissoes_da_janela())
-            .replace("__VERSAO_DO_SERVIDOR__", versao_do_servidor())
-            .replace("__LINHA__", linha_desta_janela())
-        )
-        pagina.write_text(texto[:corte] + duble + texto[corte:] + roteiro)
+        pagina.write_text(texto[:corte] + duble_montado() + texto[corte:] + roteiro)
 
         tudo, venceu = rodar_navegador(
             [
