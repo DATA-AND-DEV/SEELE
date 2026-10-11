@@ -1456,6 +1456,38 @@ pub struct PreviewRules {
     pub types: Vec<String>,
 }
 
+/// Os tetos dos campos que a casca escreve e o fio carrega (pendência 58, item
+/// 55; lote C55 da F5).
+///
+/// # Por que a casca precisa destes números
+///
+/// Pela razão de [`crate::Connection::limite_da_mensagem`], cinco vezes. Os
+/// campos da janela contavam **caracteres** (`maxlength`), e o fio conta
+/// **bytes**: um apelido de 20 letras `á` cabe nos 32 caracteres do campo e
+/// ocupa 40 bytes. Desde a rodada 1 do lote P61, o núcleo recusa esse comando
+/// sem mandar o quadro e o registra no `seele.log` (`Motor::recusar_aqui`), e o
+/// enlace segue; mas a janela não fica sabendo, e o pedido some calado. Com os
+/// tetos aqui, a janela confere antes de mandar e diz o número.
+///
+/// Os números saem do `seele-proto`, pelos reexports do `seele-core`, e não de
+/// uma cópia: são os que o `encode` confere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct LimitesDosCampos {
+    /// O apelido, em bytes: o do `SetNickname` e o do `Hello`, que leva o
+    /// apelido gravado nesta máquina (`MAX_NICKNAME_LEN`).
+    pub apelido: usize,
+    /// O nome de um canal ou de uma sala de voz, em bytes, ao criar e ao
+    /// renomear (`MAX_CHANNEL_NAME_LEN`).
+    pub nome_de_canal: usize,
+    /// Quantas pessoas uma sala nova pode ter, no máximo (`MAX_VOICE_ROOM_LIMIT`).
+    /// O mínimo é um: uma sala em que ninguém entra não é sala.
+    pub lugares_da_sala: u16,
+    /// O nome do servidor, em bytes (`MAX_CLIENT_NAME_LEN`).
+    pub nome_do_servidor: usize,
+    /// O motivo de um banimento, em bytes (`MAX_ALERT_TEXT_LEN`).
+    pub motivo_do_banimento: usize,
+}
+
 /// Why a file was not drawn.
 ///
 /// Four, and they are four because they ask different things of the person

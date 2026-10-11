@@ -881,6 +881,21 @@ function desconhecida(erro) {
 }
 
 /**
+ * A frase de um campo que passa do teto do fio (pendência 58, item 55).
+ *
+ * Diz o teto e o que fazer, e diz quantos bytes o texto tem: o teto é em
+ * **bytes**, e quem escreve conta letras. Vinte letras `á` são 40 bytes, e sem
+ * o número quem lê conta vinte, acha que cabe em 32, e não entende a recusa.
+ * A segunda linha é a explicação que falta a essa conta.
+ */
+function fraseDoTeto(teto, bytes) {
+  return (
+    `PASSA DE ${teto} BYTES — ENCURTE.\n` +
+    `Este tem ${bytes}: uma letra acentuada ocupa dois, e um ideograma, três.`
+  );
+}
+
+/**
  * Enum → frase. A fronteira erro→texto do produto fica aqui, e é por isso que
  * nenhuma mensagem para gente é escrita em Rust.
  */

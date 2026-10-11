@@ -93,6 +93,56 @@ function elemento(tag, classe, texto) {
   return nodo;
 }
 
+// ----------------------------------------------- os tetos dos campos do fio
+//
+// Pendência 58, item 55 (lote C55 da F5). Os campos que a janela escreve e o fio
+// carrega — o apelido, o nome de um canal ou de uma sala, o nome do servidor e
+// o motivo de um banimento — tinham `maxlength`, que conta caracteres, e o fio
+// conta **bytes**: um nome acentuado cabia no campo e não no quadro. Desde o
+// lote P61 o núcleo recusa um comando assim sem derrubar o enlace, e o registra
+// no `seele.log`; mas a janela não ficava sabendo, e o pedido sumia calado.
+// Agora cada campo confere aqui antes de mandar, e diz o teto.
+
+/** Quantos bytes UTF-8 este texto ocupa. */
+function bytesDe(texto) {
+  return new TextEncoder().encode(texto).length;
+}
+
+/**
+ * Os tetos dos campos (`limites_dos_campos`), pedidos uma vez, ou `null`.
+ *
+ * Do Rust, que os lê do `seele-proto` pela FFI, e não de um número escrito
+ * aqui: são os que o `encode` confere, e o guarda
+ * `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui`, de `tests/frontend.rs`,
+ * reprova uma cópia. Uma pergunta que falhou não fica guardada: a seguinte
+ * pergunta de novo.
+ */
+let tetosPedidos = null;
+
+function tetosDosCampos() {
+  tetosPedidos ??= invoke("limites_dos_campos").catch((falha) => {
+    console.warn("limites_dos_campos:", falha);
+    tetosPedidos = null;
+    return null;
+  });
+  return tetosPedidos;
+}
+
+/**
+ * A frase de um texto que passa do teto do campo, ou `null` quando ele cabe.
+ *
+ * `campo` é o nome do teto em `limites_dos_campos`, e o texto é o que vai sair,
+ * já aparado. Sem o teto (a ponte não respondeu), nada é dito: avisar a partir
+ * de um palpite seria pior que não avisar, e o núcleo continua recusando o que
+ * não cabe, como antes.
+ */
+async function passaDoTeto(campo, texto) {
+  const teto = (await tetosDosCampos())?.[campo];
+  if (typeof teto !== "number") return null;
+  const bytes = bytesDe(texto);
+  return bytes > teto ? fraseDoTeto(teto, bytes) : null;
+}
+
 // ------------------------------------------------- a casca do navegador (P5)
 //
 // O que a casca do celular troca no desktop, e só isto (spec da F8, §9.4). Cada

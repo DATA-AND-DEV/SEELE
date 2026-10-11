@@ -665,9 +665,9 @@ fn inteiro_do_main(main: &str, nome: &str) -> u64 {
 }
 
 /// **O que a ponte responde sem perguntar a ninguém é o que o desktop
-/// responde.** As constantes da casca (o teto da mensagem, as regras da
-/// prévia e do ícone, as APIs de MOD aceitas, os domínios de GIF e os
-/// controles da voz sem ajuste guardado) moram no Rust. Na ponte elas são uma
+/// responde.** As constantes da casca (o teto da mensagem, os tetos dos
+/// campos, as regras da prévia e do ícone, as APIs de MOD aceitas, os domínios
+/// de GIF e os controles da voz sem ajuste guardado) moram no Rust. Na ponte elas são uma
 /// cópia, e este guarda é o que impede a cópia de discordar: quando o Rust
 /// muda, ele reprova e diz o valor novo.
 #[test]
@@ -697,6 +697,10 @@ fn as_constantes_da_ponte_sao_as_do_desktop() {
         .collect();
     let do_desktop = serde_json::json!({
         "limite_da_mensagem": seele_ffi::Connection::limite_da_mensagem(),
+        // Os tetos dos campos que a janela escreve (pendência 58, item 55; lote
+        // C55 da F5): a ponte os serve ao perfil do navegador, que grava o
+        // apelido desta origem com a mesma conferência do desktop.
+        "limites_dos_campos": seele_ffi::Connection::limites_dos_campos(),
         "regras_de_previa": seele_ffi::Connection::preview_rules(),
         "regras_do_icone_do_server": {
             "limite_bytes": inteiro_do_main(&main, "TETO_DO_ICONE"),

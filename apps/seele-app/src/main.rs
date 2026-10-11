@@ -4743,6 +4743,19 @@ const fn limite_da_mensagem() -> usize {
     seele_ffi::Connection::limite_da_mensagem()
 }
 
+/// Os tetos dos outros campos que a janela escreve: o apelido, o nome de um
+/// canal ou de uma sala, os lugares de uma sala nova, o nome do servidor e o
+/// motivo de um banimento (os textos em **bytes**).
+///
+/// O molde de [`limite_da_mensagem`], e pela mesma razão: os campos contavam
+/// caracteres, o fio conta bytes, e o que passava do teto o núcleo recusava
+/// sem a janela saber (pendência 58, item 55; lote C55 da F5). Ver
+/// `seele_ffi::LimitesDosCampos`.
+#[tauri::command]
+const fn limites_dos_campos() -> seele_ffi::LimitesDosCampos {
+    seele_ffi::Connection::limites_dos_campos()
+}
+
 #[tauri::command]
 fn mod_request(
     session: State<'_, Session>,
@@ -12483,6 +12496,7 @@ fn main() {
             reenviar_mensagem,
             descartar_mensagem,
             limite_da_mensagem,
+            limites_dos_campos,
             criar_voice_room,
             criar_linha,
             renomear_voice_room,

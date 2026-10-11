@@ -3168,11 +3168,6 @@ invoke("limite_da_mensagem")
   })
   .catch((falha) => console.warn("limite da mensagem:", falha));
 
-/** Quantos bytes UTF-8 este texto ocupa. */
-function bytesDe(texto) {
-  return new TextEncoder().encode(texto).length;
-}
-
 /**
  * Acende o aviso de tamanho **antes** de a pessoa tentar mandar.
  *

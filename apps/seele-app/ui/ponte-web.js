@@ -211,7 +211,8 @@ const COMANDOS_DA_PONTE = new Set([
   "ha_ajustes_de_acessibilidade", "icone_do_server", "imagem_da_pessoa",
   "instalar_mod_do_catalogo", "leave_voice_room",
   "lembrar_aparencia_do_servidor", "ler_imagem_mod", "limite_da_mensagem",
-  "messages", "meu_retrato", "microfone_escolhido", "microfones",
+  "limites_dos_campos", "messages", "meu_retrato", "microfone_escolhido",
+  "microfones",
   "midia_do_mod", "midia_em_bytes", "mod_request", "modo_de_voz_escolhido",
   "mods_instalados", "open_channel", "pasta_de_downloads",
   "pedaco_do_escolhido", "pedir_quadro_chave", "permissao_de_microfone",
@@ -375,6 +376,13 @@ const AINDA_A_FAZER = new Map([
  */
 const CONSTANTES_DO_DESKTOP = Object.freeze({
   "limite_da_mensagem": 4096,
+  "limites_dos_campos": {
+    "apelido": 32,
+    "nome_de_canal": 48,
+    "lugares_da_sala": 250,
+    "nome_do_servidor": 64,
+    "motivo_do_banimento": 512
+  },
   "regras_de_previa": { "limit": 4194304, "types": ["image/png", "image/jpeg", "image/gif", "image/webp"] },
   "regras_do_icone_do_server": { "limite_bytes": 8192, "lado": 256 },
   "apis_de_mod_aceitas": [5, 4, 3],
@@ -785,6 +793,7 @@ const ATENDIMENTOS_DA_PONTE = Object.freeze({
   // PARA FALAR da faixa de voz.
   tecla_de_falar: () => (CASCA_DA_PONTE === "larga" ? guardadoNaOrigem(CHAVES_DA_ORIGEM.tecla) : null),
   limite_da_mensagem: () => structuredClone(CONSTANTES_DO_DESKTOP.limite_da_mensagem),
+  limites_dos_campos: () => structuredClone(CONSTANTES_DO_DESKTOP.limites_dos_campos),
   regras_de_previa: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_de_previa),
   regras_do_icone_do_server: () => structuredClone(CONSTANTES_DO_DESKTOP.regras_do_icone_do_server),
   apis_de_mod_aceitas: () => structuredClone(CONSTANTES_DO_DESKTOP.apis_de_mod_aceitas),

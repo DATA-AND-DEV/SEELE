@@ -68,11 +68,11 @@ pub use types::{
     AberturaDoAudio, Attachment, AttachmentRefusal, CaptureDevice, Channel, ChannelWeight,
     ConnectionError, ControlesDaVoz, EndReason, EstadoDoAparelho, EstadoDoEnvio,
     EstadoDoTesteDeMicrofone, Event, ExclusaoDoSom, FalhaAoLocalizar, FonteDeTela, LimitesDeTela,
-    LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice, NoticeReason,
-    PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview, PreviewRefusal,
-    PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band, Snapshot, SomDaTela,
-    TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust, VoiceMode, VoiceRoom,
-    VoiceRoomSync, VolumeRefusal,
+    LimitesDosCampos, LinkState, LinkTrust, Message, MotivoDaRecusa, NotSavedReason, Notice,
+    NoticeReason, PermissaoDeMicrofone, PermissaoDeTela, Person, PlaybackDevice, Preview,
+    PreviewRefusal, PreviewRules, SaveDestination, SaveRefused, Severity, SignalBand as Band,
+    Snapshot, SomDaTela, TelaEmCurso, Telemetry, TemaDaSessao, Transfer, TransmissaoNaSala, Trust,
+    VoiceMode, VoiceRoom, VoiceRoomSync, VolumeRefusal,
 };
 
 /// O que a casca gráfica precisa do core além de um [`Connection`] vivo.
@@ -1942,6 +1942,23 @@ impl Connection {
     #[must_use]
     pub const fn limite_da_mensagem() -> usize {
         seele_core::MAX_BODY_LEN
+    }
+
+    /// Os tetos dos campos que a casca escreve: o apelido, o nome de um canal
+    /// ou de uma sala, os lugares de uma sala nova, o nome do servidor e o
+    /// motivo de um banimento. Ver [`LimitesDosCampos`].
+    ///
+    /// O molde é [`Self::limite_da_mensagem`]: a casca lê daqui, e nenhum
+    /// número do fio fica escrito à mão na janela.
+    #[must_use]
+    pub const fn limites_dos_campos() -> LimitesDosCampos {
+        LimitesDosCampos {
+            apelido: seele_core::MAX_NICKNAME_LEN,
+            nome_de_canal: seele_core::MAX_CHANNEL_NAME_LEN,
+            lugares_da_sala: seele_core::MAX_VOICE_ROOM_LIMIT,
+            nome_do_servidor: seele_core::MAX_CLIENT_NAME_LEN,
+            motivo_do_banimento: seele_core::MAX_ALERT_TEXT_LEN,
+        }
     }
 
     /// Says something in o canal.
