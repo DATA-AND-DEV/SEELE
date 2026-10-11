@@ -266,6 +266,18 @@ window.__TAURI__ = {
         }
         return resposta;
       }
+      // **O `onde_estou` pela sessão, como o Rust** (tarefa 18 da F7): a sessão
+      // que entrou no endereço do servidor que esta janela hospeda está no
+      // «Guardado»; em outro endereço, no «Outro»; sem sessão, em «Nenhum». O
+      // Rust decide pela chave conferida no aperto de mão, e o duble não tem
+      // chave: o endereço do `hospedar` faz as vezes dela. Um roteiro que quer
+      // outra resposta a põe em `SEELE_RESPOSTAS.onde_estou`, que vem antes.
+      if (cmd === "onde_estou") {
+        if (!window.__SEELE_EM_SESSAO || !window.__SEELE_ARGS.connect) return "Nenhum";
+        const noMeu = window.__SEELE_HOSPEDANDO
+          && window.__SEELE_ARGS.connect.server === SEELE_RESPOSTAS.hospedar.aqui;
+        return noMeu ? "Guardado" : "Outro";
+      }
       if (/conhecid|fontes|lista|dispositiv|visitad|salas|canais|pessoas|^microfones$|^saidas$/i.test(cmd)) return [];
       // **Os três comandos do caminho de HOSPEDAR AQUI**, com o formato de
       // `servidores::Servidor` e `versoes::VersaoInstalada`. Sem eles o `null`
