@@ -1391,6 +1391,255 @@ async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
   await page.close();
 }
 
+// --------------------------------------------------------------------------
+// Lote E54 da F5: a entrada velha que chega tarde não toma a tela
+// --------------------------------------------------------------------------
+//
+// **O caso** (pendência 58, item 54; R2-M2 da revisão do W2). O W2 calou a
+// tentativa velha que volta **recusada**; esta é a que volta **entrando**. A
+// revisão mediu: uma velha a 192.0.2.17 leva 1,2 s; aos 100 ms o `hospedar()`
+// entra no servidor daqui; aos 1,9 s a velha volta, reabre `#tela-auth` em
+// `aperto` com o endereço dela por cima da sessão, e a geração da sessão volta
+// à dela. No Rust era pior: a conexão dela tomava o slot da nova (medido em
+// `a_entrada_velha_que_chega_tarde`, no `main.rs`).
+//
+// **O que vale agora.** O `connect` do Rust recusa a velha quando a nova já
+// chegou a ele (a recusa cai no ramo do W2). Quando a nova ainda não chegou —
+// está no `conferir_esta_versao` —, a velha entra no Rust, e a janela não a
+// mostra: registra, e pede ao Rust que solte a sessão dela pela geração dela
+// (`soltar_a_entrada`).
+
+/** O convite que a tentativa velha leva: ele não pode chegar ao registro. */
+const CONVITE_E54 = `convite-do-lote-e54-${process.pid}-${Date.now()}`;
+
+async function aEntradaVelhaNaoTomaATela(browser, porta) {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  const erros = []; page.on('pageerror', e => erros.push(e.message));
+  await page.addInitScript(({ table, snapshot }) => {
+    window.testTable = table; window.testCalls = [];
+    window.testAtrasoPorAlvo = {};
+    window.testRecusaPorAlvo = {};
+    window.testAtrasoPorComando = {};
+    // **O slot do Rust, quando a cena o modela**: o `connect` volta
+    // `AlreadyConnected` com ele cheio (o começo do `connect` no `main.rs`), e
+    // `soltar_a_entrada` o esvazia só pela geração que está nele.
+    window.testModeloDoSlot = false;
+    window.testModeloDaGeracao = false;
+    window.testSlot = null;
+    window.testGeracao = 0;
+    window.__TAURI__ = {
+      core: { invoke: async (cmd, args) => {
+        const chamada = { cmd, args };
+        window.testCalls.push(chamada);
+        if (cmd === 'connect') {
+          if (window.testModeloDoSlot && window.testSlot) {
+            chamada.respondida = true;
+            throw { error: 'AlreadyConnected', trail: [] };
+          }
+          const geracao = ++window.testGeracao;
+          chamada.geracao = geracao;
+          const atraso = window.testAtrasoPorAlvo[args.server];
+          const recusa = window.testRecusaPorAlvo[args.server];
+          if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+          chamada.respondida = true;
+          if (recusa) throw { error: recusa, trail: [] };
+          // A geração do Rust, quando a cena a modela: um `connect` que outro
+          // começou depois dele volta como `largar_a_substituida` o devolve.
+          if (window.testModeloDaGeracao && geracao !== window.testGeracao) {
+            throw { error: 'NotConnected', trail: [], substituida: true };
+          }
+          if (window.testModeloDoSlot) window.testSlot = { server: args.server, geracao };
+          return { snapshot, veredito: null, geracao };
+        }
+        if (cmd === 'soltar_a_entrada') {
+          chamada.soltou = window.testSlot !== null && window.testSlot.geracao === args.geracao;
+          if (chamada.soltou) window.testSlot = null;
+          return chamada.soltou;
+        }
+        if (cmd === 'desmontar_a_sessao' || cmd === 'disconnect') window.testSlot = null;
+        const atraso = window.testAtrasoPorComando[cmd];
+        if (atraso) await new Promise(ok => setTimeout(ok, atraso));
+        return window.testTable[cmd] ?? null;
+      } },
+      event: { listen: async () => () => {} },
+      window: { getCurrentWindow: () => ({ onCloseRequested() {}, isMaximized: async () => false }) },
+    };
+  }, {
+    table: respostas({
+      apelido_local: 'Bia', snapshot: null, microfones: [], saidas: [],
+      hospedar: {
+        aqui: AQUI_W, convite: `seele://${AQUI_W}?fp=ab`, alcance: 'SoRedeLocal',
+        porta_recusada: null, encontro_recusado: null,
+      },
+    }),
+    snapshot: retrato(),
+  });
+  await page.goto(`http://127.0.0.1:${porta}`);
+  await page.waitForTimeout(500);
+
+  /** O que a pessoa vê, e a geração em que a janela está. */
+  const aTela = () => page.evaluate(() => ({
+    entrada: !document.getElementById('tela-boot').hidden,
+    sessao: !document.getElementById('tela-sessao').hidden,
+    autenticacao: document.getElementById('tela-auth').hidden
+      ? null : `${$('tela-auth').dataset.modo} ${$('auth-endereco').textContent}`,
+    linha: $('boot-erro').hidden ? null : $('boot-erro').textContent,
+    geracao: geracaoDaSessao,
+  }));
+  /** As chamadas a `cmd` desde o começo do caso. */
+  const desde = (cmd) => page.evaluate((cmd) => testCalls.slice(testAntes).filter(c => c.cmd === cmd), cmd);
+  /** A geração que o `connect` deu à tentativa a `alvo`, neste caso. */
+  const geracaoDe = (alvo) => page.evaluate((alvo) => testCalls.slice(testAntes)
+    .find(c => c.cmd === 'connect' && c.args.server === alvo)?.geracao ?? null, alvo);
+  const respondida = (alvo) => page.waitForFunction(
+    (alvo) => testCalls.slice(testAntes).some(c => c.cmd === 'connect' && c.args.server === alvo && c.respondida),
+    alvo, { timeout: 4000 },
+  ).catch(() => assert.fail(`a tentativa a ${alvo} não voltou, e este caso não mede nada`));
+  /** A velha começa, e aos 100 ms o `hospedar()` a substitui. */
+  async function correr(atrasoDaVelha, depoisDoHospedar) {
+    await page.evaluate(([alvo, convite, atraso, conferir]) => {
+      window.testAtrasoPorAlvo = { [alvo]: atraso };
+      window.testAtrasoPorComando = {};
+      for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+      $('tela-boot').hidden = false;
+      window.testAntes = testCalls.length;
+      irParaOServidor(alvo, null, convite);
+      setTimeout(() => {
+        if (conferir) window.testAtrasoPorComando.conferir_esta_versao = conferir;
+        hospedar();
+      }, 100);
+    }, [ALVO_W, CONVITE_E54, atrasoDaVelha, depoisDoHospedar]);
+  }
+  /** As linhas que a entrada largada deixou no `seele.log`, pelo nível. */
+  const noRegistro = () => page.evaluate((alvo) => testCalls.slice(testAntes)
+    .filter(c => c.cmd === 'registrar_da_janela' && String(c.args?.oQue).includes(alvo))
+    .map(c => [c.args.nivel, c.args.oQue]), ALVO_W);
+  const sair = () => page.evaluate(() => { if (!document.getElementById('porta').hidden) fecharPorta(); return ejetar(); });
+
+  // ---- 1. A sequência que a revisão do W2 mediu: a velha leva 1,2 s e
+  // entra; aos 100 ms o `hospedar()` entra no servidor daqui. A janela, sozinha:
+  // a velha volta entrando, e não toca na tela.
+  await correr(1200, 0);
+  await respondida(AQUI_W);
+  await page.waitForTimeout(600);
+  const comANova = await aTela();
+  assert.equal(comANova.entrada, false, 'o hospedar do meio da corrida não entrou, e a corrida não foi medida');
+  await respondida(ALVO_W);
+  await page.waitForTimeout(600);
+  const depoisDaVelha = await aTela();
+  assert.deepEqual(depoisDaVelha, comANova,
+    `a tentativa a ${ALVO_W}, que entrou 1,2 s depois de o hospedar ter entrado no servidor daqui, tomou a tela da ` +
+    `sessão: antes ${JSON.stringify(comANova)}, depois ${JSON.stringify(depoisDaVelha)}`);
+  const daVelha = await geracaoDe(ALVO_W);
+  const soltar1 = await desde('soltar_a_entrada');
+  assert.deepEqual(soltar1.map(c => c.args.geracao), [daVelha],
+    `a janela não pediu ao Rust que soltasse a sessão da tentativa largada (geração ${daVelha}), e só ela: ` +
+    `${JSON.stringify(soltar1.map(c => c.args))} — sem isso a conexão dela fica no slot sem tela`);
+  const linhas1 = await noRegistro();
+  assert.deepEqual(linhas1.map(([nivel]) => nivel), ['aviso'],
+    `a entrada largada não deixou uma linha (e uma só) no seele.log como aviso: ${JSON.stringify(linhas1)}`);
+  await sair();
+
+  // ---- 1b. A mesma corrida, com a geração do Rust modelada: a nova chega ao
+  // `connect` antes de a velha terminar, e o Rust devolve a velha recusada
+  // como substituída. Ela cai no ramo do W2: nada na tela, uma linha no
+  // registro, e nada a soltar — o Rust já fechou a conexão dela.
+  await page.evaluate(() => { window.testModeloDaGeracao = true; });
+  await correr(1200, 0);
+  await respondida(AQUI_W);
+  await page.waitForTimeout(600);
+  const comANova1b = await aTela();
+  await respondida(ALVO_W);
+  await page.waitForTimeout(600);
+  const depois1b = await aTela();
+  assert.deepEqual(depois1b, comANova1b,
+    `a recusa da tentativa a ${ALVO_W} como substituída, que o Rust devolve depois de a nova entrar, falou na tela: ` +
+    `antes ${JSON.stringify(comANova1b)}, depois ${JSON.stringify(depois1b)}`);
+  assert.deepEqual((await desde('soltar_a_entrada')).map(c => c.args), [],
+    'a janela pediu para soltar uma entrada que o Rust recusou como substituída, e que nunca esteve no slot');
+  const linhas1b = await noRegistro();
+  assert.deepEqual(linhas1b.map(([nivel]) => nivel), ['aviso'],
+    `a recusa como substituída não deixou uma linha (e uma só) no seele.log como aviso: ${JSON.stringify(linhas1b)}`);
+  await sair();
+  await page.evaluate(() => { window.testModeloDaGeracao = false; });
+
+  // ---- 2. A outra ordem, com o slot do Rust modelado: a velha entra no Rust
+  // antes de a nova chegar ao `connect` (a nova espera 600 ms no
+  // `conferir_esta_versao`). A janela larga a velha e o slot fica livre: a nova
+  // entra, em vez de receber `AlreadyConnected`.
+  await page.evaluate(() => { window.testModeloDoSlot = true; window.testSlot = null; });
+  await correr(300, 600);
+  await respondida(ALVO_W);
+  await respondida(AQUI_W);
+  await page.waitForTimeout(300);
+  const naOutraOrdem = await aTela();
+  const slot = await page.evaluate(() => window.testSlot);
+  assert.deepEqual({ linha: naOutraOrdem.linha, entrada: naOutraOrdem.entrada, slot: slot?.server ?? null },
+    { linha: null, entrada: false, slot: AQUI_W },
+    `a tentativa a ${ALVO_W} entrou no Rust antes de o hospedar chegar ao connect, e a entrada nova não ficou com a ` +
+    `sessão: ${JSON.stringify({ tela: naOutraOrdem, slot })}`);
+  assert.equal(naOutraOrdem.autenticacao === null || !naOutraOrdem.autenticacao.includes(ALVO_W), true,
+    `a autenticação mostra o servidor que a pessoa deixou: «${naOutraOrdem.autenticacao}»`);
+  const soltar2 = await desde('soltar_a_entrada');
+  assert.deepEqual(soltar2.map(c => [c.args.geracao, c.soltou]), [[await geracaoDe(ALVO_W), true]],
+    `a sessão da tentativa largada não foi solta pela geração dela: ${JSON.stringify(soltar2.map(c => [c.args, c.soltou]))}`);
+  await sair();
+  await page.evaluate(() => { window.testModeloDoSlot = false; window.testSlot = null; });
+
+  // ---- 3. A batida da espera que entra depois de a pessoa sair da espera (a
+  // mesma família, pedida pelo brief do E54). A espera abre por uma batida
+  // pendente na portaria; quem hospeda admite; a batida seguinte leva 600 ms, e
+  // aos 100 ms a pessoa sai da espera pela porta. Ela continua sendo a
+  // tentativa mais nova — sair da espera não começa outra —, então a
+  // conferência de cima não a pega.
+  await page.evaluate(([alvo, recusa]) => {
+    window.testAtrasoPorAlvo = {};
+    window.testAtrasoPorComando = {};
+    window.testRecusaPorAlvo = { [alvo]: recusa };
+    for (const secao of document.querySelectorAll('section.tela')) secao.hidden = true;
+    $('tela-boot').hidden = false;
+    irParaOServidor(alvo, null, null);
+  }, [PORTARIA_W2, { Refused: { reason: 'AdmissionPending' } }]);
+  await page.waitForFunction(() => !document.getElementById('tela-auth').hidden && $('tela-auth').dataset.modo === 'espera', null, { timeout: 3000 })
+    .catch(() => assert.fail('a batida pendente não abriu a espera, e este caso não mede nada'));
+  await page.evaluate((alvo) => {
+    pararDeBater();
+    window.testRecusaPorAlvo = {};
+    window.testAtrasoPorAlvo = { [alvo]: 600 };
+    window.testAntes = testCalls.length;
+    window.testBatida = baterDeNovo();
+    setTimeout(() => voltarParaAEntrada(), 100);
+  }, PORTARIA_W2);
+  await page.waitForTimeout(300);
+  const naEntrada = await aTela();
+  assert.deepEqual([naEntrada.entrada, naEntrada.autenticacao], [true, null],
+    `sair da espera não voltou à entrada, e este caso não mede nada: ${JSON.stringify(naEntrada)}`);
+  await respondida(PORTARIA_W2);
+  await page.evaluate(() => testBatida);
+  await page.waitForTimeout(200);
+  const depoisDaBatida = await aTela();
+  const daBatida = await geracaoDe(PORTARIA_W2);
+  const soltar3 = await desde('soltar_a_entrada');
+  const linhas3 = await page.evaluate((alvo) => testCalls.slice(testAntes)
+    .filter(c => c.cmd === 'registrar_da_janela' && String(c.args?.oQue).includes(alvo))
+    .map(c => c.args.nivel), PORTARIA_W2);
+  assert.deepEqual(
+    { tela: depoisDaBatida, soltar: soltar3.map(c => c.args.geracao), registro: linhas3 },
+    { tela: naEntrada, soltar: [daBatida], registro: ['aviso'] },
+    'a batida da espera que entrou depois de a pessoa sair da espera tomou a tela da entrada que ela escolheu, ' +
+    `ou não foi solta e registrada: ${JSON.stringify({ antes: naEntrada, depois: depoisDaBatida, soltar: soltar3.map(c => c.args), registro: linhas3 })}`);
+  await page.evaluate(() => { if (!document.getElementById('tela-auth').hidden) voltarParaAEntrada(); });
+
+  // ---- O convite da tentativa velha não chega a comando nenhum além do
+  // `connect`: nem ao registro, nem ao pedido de soltar.
+  const vazou = await page.evaluate((convite) => testCalls
+    .filter(c => c.cmd !== 'connect' && JSON.stringify(c.args ?? null).includes(convite)).map(c => c.cmd), CONVITE_E54);
+  assert.deepEqual(vazou, [], `o convite da tentativa velha foi a comandos além do connect: ${JSON.stringify(vazou)}`);
+
+  assert.deepEqual(erros, [], 'a cena do lote E54 lançou erro na página');
+  await page.close();
+}
+
 (async () => {
   const server = servir();
   await new Promise(ok => server.listen(0, '127.0.0.1', ok));
@@ -1602,6 +1851,7 @@ async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
     await aTentativaSubstituidaNaoFala(browser, server.address().port);
     await oConectarTemDono(browser, server.address().port);
     await aBatidaDaEsperaSoCalaASiMesma(browser, server.address().port);
+    await aEntradaVelhaNaoTomaATela(browser, server.address().port);
 
     console.log('v0.13: contexto, resolução, navegação, página imersiva/Escape e avisos verificados em Chromium');
     console.log(`lote J: a faixa de contexto acompanha a tecla e o modo, a entrada por link pergunta o nome antes do connect, e o título da pergunta não se sobrepõe (folga de ${titulo.folga}px entre as tintas)`);
@@ -1616,5 +1866,7 @@ async function aBatidaDaEsperaSoCalaASiMesma(browser, porta) {
     console.log('lote W2: a frase dos MODs manda entrar de novo, e entrar de novo abre a pergunta');
     console.log('lote W2: a tentativa substituída não apaga o CONECTAR, não pergunta o nome nem chama o connect, e conta ao seele.log que desistiu');
     console.log('lote W2: a batida da espera só cala a si mesma, e conta ao seele.log; a falha de outra tentativa fala na linha vermelha');
+    console.log('lote E54: a tentativa que outra substituiu e entra depois não toca na tela, vai ao seele.log, e a sessão dela é solta pela geração dela');
+    console.log('lote E54: a batida de uma espera que a pessoa largou, admitida depois, também não toca na tela, e é solta');
   } finally { await browser.close(); server.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });
