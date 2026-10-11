@@ -149,7 +149,8 @@ pub(crate) async fn subir_em(
             .ok()
             .and_then(|preferencias| preferencias.nickname().map(str::to_owned))
             .unwrap_or_else(|| "SEELE".to_owned());
-    seele_server::hospedagem::Hospedagem::iniciar_sala(porta, semente.bytes(), &apelido, ponto)
+    let apelido = nome_da_sala(&apelido);
+    seele_server::hospedagem::Hospedagem::iniciar_sala(porta, semente.bytes(), apelido, ponto)
         .await
         .map_err(|erro| {
             let falha = match crate::classificar(&erro) {
@@ -159,6 +160,36 @@ pub(crate) async fn subir_em(
             tracing::warn!(?falha, erro = %format!("{erro:#}"), "a sala pessoal não subiu");
             falha
         })
+}
+
+/// O nome com que a sala sobe: o apelido gravado, **cortado na última fronteira
+/// de caractere dentro do teto do nome do servidor** (lote S64 da F5; pendência
+/// 58, item 55).
+///
+/// O nome vai no `Session` de quem entra, sob o teto do fio, em bytes. Um
+/// apelido gravado antes do lote C55 pode passar dele: a v0.15.1 contava 32
+/// caracteres no perfil, e 22 ideogramas são 66 B. Sem o corte, a sala subia e
+/// tocava, e quem entrava, já atendido, era recusado com `ProtocolViolation`, o
+/// dono inclusive («PROTOCOLO VIOLADO», na janela dele).
+///
+/// Cortado, e não trocado pelo «SEELE»: quem liga continua lendo o nome de
+/// quem recebe. Só o nome do servidor tem teto aqui: a conta de quem recebe
+/// aceita o mesmo nome, e ele não sai da sala enquanto o dono não entra, e o
+/// dono entra com um apelido que cabe (o C55 recusa o outro antes de discar).
+fn nome_da_sala(apelido: &str) -> &str {
+    let teto = seele_ffi::Connection::limites_dos_campos().nome_do_servidor;
+    if apelido.len() <= teto {
+        return apelido;
+    }
+    let cortado = &apelido[..apelido.floor_char_boundary(teto)];
+    tracing::warn!(
+        bytes = apelido.len(),
+        teto,
+        ficou = cortado.len(),
+        "o apelido gravado passa do teto do nome do servidor, em bytes: a sala sobe com ele \
+         cortado, e o PERFIL o mostra inteiro"
+    );
+    cortado
 }
 
 /// Onde e como a sala sobe. A janela de verdade usa [`Subida::da_producao`];
@@ -1014,6 +1045,76 @@ mod a_sala_pessoal {
         .await
         .unwrap();
         desligar(app.handle()).await;
+    }
+
+    /// **Um apelido gravado acima do teto do nome do servidor não fecha a sala**
+    /// (lote S64 da F5; pendência 58, item 55). A sala sobe com o apelido
+    /// gravado como nome, e o nome vai no `Session` de quem entra, sob o teto
+    /// do fio, em bytes. A v0.15.1 contava 32 **caracteres** no perfil, e 22
+    /// ideogramas são 66 B. Medido antes do conserto: a sala subia e tocava, e
+    /// quem entrava, já atendido, recebia `Disconnecting { ProtocolViolation }`
+    /// («PROTOCOLO VIOLADO»), o dono inclusive, a cada tentativa.
+    ///
+    /// Quem entra aqui é o dono, pelo código, como o ATENDER entra. É a única
+    /// entrada de cliente na sala que o produto tem hoje: o cliente de quem liga
+    /// ainda não lê o `Tocando` (tarefa 6e da F7), e o `Session` que o servidor
+    /// manda é o mesmo para os dois. O dono entra com um apelido curto, porque o
+    /// gravado o C55 já recusa antes de discar.
+    #[test]
+    fn um_apelido_gravado_acima_do_teto_do_nome_do_servidor_nao_impede_ninguem_de_entrar() {
+        let teto = seele_ffi::Connection::limites_dos_campos().nome_do_servidor;
+        let gravado = "語".repeat(22);
+        assert!(
+            gravado.len() > teto,
+            "o apelido da prova cabe no teto de {teto} B: a prova não prova nada"
+        );
+        let casa = casa_com_a_chave(4);
+        seele_ffi::preferences::Preferences::open(casa.path().join("preferences"))
+            .unwrap()
+            .set_nickname(Some(&gravado))
+            .unwrap();
+        let app = app_de_teste();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let (nome, rastro) = crate::rastro_de_teste::capturar(|| {
+            runtime.block_on(async {
+                let (_recepcao, porta) = sala_no_ar(&app, &casa).await;
+                let conexao = conectar_o_dono(&casa, porta).await;
+                let mut nome = String::new();
+                for _ in 0..200 {
+                    nome = conexao.snapshot().server;
+                    if !nome.is_empty() {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                tokio::task::spawn_blocking(move || {
+                    conexao.encerrar_e_esperar(std::time::Duration::from_secs(5))
+                })
+                .await
+                .unwrap();
+                desligar(app.handle()).await;
+                nome
+            })
+        });
+
+        assert_eq!(
+            nome,
+            "語".repeat(21),
+            "quem entrou não vê o apelido cortado na última fronteira de caractere dentro de \
+             {teto} B"
+        );
+        assert!(
+            rastro.contains("WARN")
+                && rastro.contains("o apelido gravado passa do teto do nome do servidor")
+                && rastro.contains("bytes=66")
+                && rastro.contains(&format!("teto={teto}"))
+                && rastro.contains("ficou=63"),
+            "o seele.log não diz que o apelido foi cortado:\n{rastro}"
+        );
     }
 
     /// SEU CÓDIGO é o do dono da sala que esta máquina sobe: o número que toca

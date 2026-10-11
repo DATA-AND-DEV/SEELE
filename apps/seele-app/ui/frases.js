@@ -627,6 +627,18 @@ function fraseDeErro(erro, apelido, deOnde) {
         "Confirme por outro canal antes de continuar."
       );
     }
+    // **O apelido gravado que o `Hello` não leva** (pendência 58, item 55;
+    // lote C55 da F5). A FFI o recusa antes de discar, com o teto em bytes; era
+    // NADA RESPONDEU NESSE ENDEREÇO, com o servidor de pé. O remédio é do
+    // perfil, e a tentativa seguinte lê o apelido de lá (`conectar` esquece o
+    // recusado).
+    if (erro.ApelidoGrandeDemais) {
+      const teto = erro.ApelidoGrandeDemais.limite_bytes;
+      return (
+        `SEU APELIDO PASSA DE ${teto} BYTES.\n` +
+        "Abra o PERFIL, encurte o apelido e entre de novo: uma letra acentuada ocupa dois bytes, e um ideograma, três."
+      );
+    }
     // A impressão prometia uma chave e quem atendeu ofertou outra. Não é
     // troca de chave — nenhum pino prova o servidor ali — então a frase acusa
     // quem prometeu, e não a continuidade do servidor.
@@ -878,6 +890,21 @@ function desconhecida(erro) {
   // guarda do ADR 0033 reprova o uso coloquial — com razão, porque quem lê
   // aprendeu o outro sentido na tela ao lado.
   return `ALGO FALHOU E ESTE APP NÃO SABE EXPLICAR O QUÊ.\nSe for relatar, copie o texto abaixo:\n${detalhe}`;
+}
+
+/**
+ * A frase de um campo que passa do teto do fio (pendência 58, item 55).
+ *
+ * Diz o teto e o que fazer, e diz quantos bytes o texto tem: o teto é em
+ * **bytes**, e quem escreve conta letras. Vinte letras `á` são 40 bytes, e sem
+ * o número quem lê conta vinte, acha que cabe em 32, e não entende a recusa.
+ * A segunda linha é a explicação que falta a essa conta.
+ */
+function fraseDoTeto(teto, bytes) {
+  return (
+    `PASSA DE ${teto} BYTES — ENCURTE.\n` +
+    `Este tem ${bytes}: uma letra acentuada ocupa dois, e um ideograma, três.`
+  );
 }
 
 /**

@@ -62,6 +62,7 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
 PROTO_MODS = RAIZ / "crates" / "seele-proto" / "src" / "mods.rs"
 PROTO_VERSAO = RAIZ / "crates" / "seele-proto" / "src" / "version.rs"
+PROTO_CONTROLE = RAIZ / "crates" / "seele-proto" / "src" / "control.rs"
 CAPACIDADE_DA_JANELA = RAIZ / "apps" / "seele-app" / "capabilities" / "janela.json"
 
 
@@ -106,6 +107,36 @@ def versao_do_servidor() -> str:
     return achado.group(1)
 
 
+def limites_dos_campos() -> str:
+    """`limites_dos_campos` lido do Rust, pela razão de `apis_aceitas`.
+
+    Os tetos são as constantes do `seele-proto` que a FFI entrega à janela
+    (`Connection::limites_dos_campos`, lote C55 da F5), com os nomes dos campos
+    de `LimitesDosCampos`. Escritos à mão aqui, um teto que mudasse no fio
+    deixaria o roteiro `tetos-dos-campos.js` conferindo contra o número velho.
+    Falha alto se uma constante mudar de forma.
+    """
+    texto = PROTO_CONTROLE.read_text()
+    campos = {
+        "apelido": "MAX_NICKNAME_LEN",
+        "nome_de_canal": "MAX_CHANNEL_NAME_LEN",
+        "lugares_da_sala": "MAX_VOICE_ROOM_LIMIT",
+        "nome_do_servidor": "MAX_CLIENT_NAME_LEN",
+        "motivo_do_banimento": "MAX_ALERT_TEXT_LEN",
+    }
+    tetos = {}
+    for campo, constante in campos.items():
+        achado = re.search(rf"pub const {constante}: (?:usize|u16) = ([0-9_ *]+);", texto)
+        if not achado:
+            raise SystemExit(f"não achei `{constante}` em {PROTO_CONTROLE}; o duble precisa dela.")
+        fatores = [int(f.strip().replace("_", "")) for f in achado.group(1).split("*")]
+        produto = 1
+        for fator in fatores:
+            produto *= fator
+        tetos[campo] = produto
+    return json.dumps(tetos)
+
+
 def linha_desta_janela() -> str:
     """A linha desta janela, com a mesma regra de `Linha::do_servidor`.
 
@@ -131,6 +162,7 @@ const seelePermitido = (comando) => {
 };
 const SEELE_VERSAO_DO_SERVIDOR = "__VERSAO_DO_SERVIDOR__";
 const SEELE_LINHA = "__LINHA__";
+const SEELE_LIMITES_DOS_CAMPOS = __LIMITES_DOS_CAMPOS__;
 const SEELE_RESPOSTAS = {
   hospedar: { aqui: "127.0.0.1:8383", convite: "seele://127.0.0.1:8383?fp=abc",
               alcance: "SoRedeLocal", porta_recusada: null, encontro_recusado: null },
@@ -243,6 +275,14 @@ window.__TAURI__ = {
       // quadro na tela inicial faria o duble mentir sobre a única pergunta que
       // separa os dois modos do diálogo de perfil, e um aparelho que mente
       // sobre isso não prova nada sobre ele.
+      // **O apelido que o fio não leva é recusado como o produto o recusa**
+      // (`Connection::abrir` da FFI, lote C55 da F5): com o nome e o teto, e
+      // antes de haver sessão nenhuma.
+      if (cmd === "connect" &&
+          new TextEncoder().encode((args && args.nickname) || "").length > SEELE_LIMITES_DOS_CAMPOS.apelido) {
+        throw { error: { ApelidoGrandeDemais: { limite_bytes: SEELE_LIMITES_DOS_CAMPOS.apelido } },
+                trail: [], origem_da_impressao: null, a_lista_guardou: false };
+      }
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
       if (cmd === "hospedar") window.__SEELE_HOSPEDANDO = true;
@@ -301,6 +341,10 @@ window.__TAURI__ = {
       // Com `null`, `ultimaQueEsteBuildEntende` estourava em `.length` e o
       // catálogo inteiro virava «ALGO FALHOU».
       if (cmd === "apis_de_mod_aceitas") return SEELE_APIS_ACEITAS;
+      // Os tetos dos campos, lidos do `seele-proto` (ver `limites_dos_campos`).
+      // Com o `null`, a janela não confere campo nenhum, e o roteiro
+      // `tetos-dos-campos.js` reprovaria por isso.
+      if (cmd === "limites_dos_campos") return structuredClone(SEELE_LIMITES_DOS_CAMPOS);
       if (cmd === "pacotes_no_cache") return [];
       if (cmd === "criar_servidor") {
         const nome = ((args && args.nome) || "").trim();
@@ -496,6 +540,7 @@ def duble_montado() -> str:
         .replace("__PERMISSOES_DA_JANELA__", permissoes_da_janela())
         .replace("__VERSAO_DO_SERVIDOR__", versao_do_servidor())
         .replace("__LINHA__", linha_desta_janela())
+        .replace("__LIMITES_DOS_CAMPOS__", limites_dos_campos())
     )
     sobrando = sorted(set(re.findall(r"__[A-Z][A-Z_]*__", duble)) - {"__TAURI__"})
     if sobrando:

@@ -379,3 +379,98 @@ Branch da frente: `0.16/lotes`, a partir de `versao/0.16` em `d4eb6f1`. Cada lot
   - **O índice da 1.0** foi atualizado.
   - **A pendência 58**, «O que a F5 da 0.16 deixou», tem 51 itens.
   - **O que a revisão mudou:** tirou uma atribuição sem prova, a do «panicked» do 51-15, e acertou a medida da 50 para o teste de hoje.
+
+## 10 e 11/10: os lotes depois da décima integração
+
+Cada lote nasceu de um achado medido, passou por revisão cética até não sobrar
+Importante, e entrou no `0.16/lotes` por `--no-ff`. Os relatórios estão nesta
+pasta (`lote-<id>-report.md`).
+
+- **V → integrado** (merge `04a923d6`): a tecla do push-to-talk não fica presa
+  numa volta nem atravessa a sessão seguinte. **W → integrado** (`cd1851ca`): o
+  sim dos MODs só fica gravado com a pergunta aberta. Os dois entraram na décima
+  integração (`e3970b14`).
+- **X → integrado** (`793763c1`), a pendência 59. Obter um MOD para outro
+  servidor não reaplica no hospedado (`UsoDoCatalogo`), e o sim de quem hospeda só
+  é gravado com a sessão no guardado — decidido **pela impressão do certificado**
+  (`Connection::impressao_do_servidor` na FFI, `onde_estou_em` pela chave), e não
+  pelo endereço, por decisão da orquestradora. A revisão e a F7 acharam a fiação
+  do `onde_estou_na` sem prova; o commit D a prendeu.
+- **Y → integrado** (`2ab23f69`), dois intermitentes medidos:
+  - a volta que esperava 20 s por nada era **defeito de produto**: no macOS, o
+    socket de pilha dupla do cliente podia cair numa porta que um socket IPv4 não
+    conectado segura (no endereço exato ou no curinga), e a resposta ia para ele.
+    `client::socket_de_quem_conecta` liga explícito e propõe outra porta. Existe
+    na v0.15.1 (pendência 60); a orquestradora o deixou só na 0.16;
+  - o `par_lento`: a medida desmentiu o «lote que ainda não gravou» — eram
+    falantes desligados com `FellBehind`. O teste espera por sinais do servidor,
+    exige zero recusas, e a despedida calada reprova pela asserção, com números.
+- **W2 → integrado** (`6374a600`): a tentativa de entrada substituída não fala na
+  tela (para toda recusa), e vai ao `seele.log`; só a mais nova mexe no CONECTAR;
+  a frase dos MODs que dizia que a tela de aceite «ainda não existe» (alcançável
+  desde o lote W, `8effec98`, e não na v0.15.1) diz a verdade.
+- **W3 → integrado** (`353859c2`): o roteiro `aceite-de-mods.js` media o duble, e
+  não o produto (quebrado duas vezes: `ea75ac5d` e o lote W); os roteiros dos
+  MODs passam a exigir o que dizem. De passagem, três defeitos de produto, entre
+  eles **uma corrida de consentimento trocado** (ADR 0045): a pessoa lia a lista
+  de um pedido e o ACEITAR gravava o conjunto do outro, inclusive um MOD que roda
+  na máquina de quem hospeda.
+- **RT → integrado** (`adf72932`): os roteiros da casca rodam no CI (job
+  `bancadas`) e na `bateria()` do `publicar.sh`, cada um numa lista explícita, com
+  um guarda que lê os dois como o shell lê. A carga ganhou prazo por roteiro, sem
+  órfãos no Ctrl+C, e um `--autoteste` em todo `cargo test`; três roteiros verdes
+  que não provavam nada passaram a exigir o que dizem.
+- **E54 → integrado** (`e05e1681`), o item 54 da 58. **Medido com dois `Daemon`
+  reais: uma entrada velha que terminava depois da nova gravava a sua conexão no
+  slot, e a mensagem seguinte ia ao servidor que a pessoa deixou.** O `connect`
+  confere a geração com o cadeado do slot na mão; `soltar_a_entrada(geracao)`; a
+  janela confere uma vez antes do `depoisDeConectar` da F8. Consertar só a janela
+  pioraria o defeito. Portado para a 0.15.2 (abaixo).
+- **P61 → integrado** (`3b1f57c8`), o cliente da pendência 61. Medido antes do
+  conserto, com um aparelho de mentira que atravessa a FFI: um `FellBehind` virava
+  «ENLACE ENCERRADO» enquanto o núcleo reconectava, e **a voz reabria e
+  transmitia debaixo de «encerrado»**. Uma regra só decide o fim
+  (`seele-sessao/src/despedida.rs`); na volta, a busca do buraco do histórico e a
+  repetição das `SemResposta` com a mesma chave; o TENTAR DE NOVO confere o
+  tamanho, e um erro de validação de comando vira recusa local em vez de queda.
+- **C55 → integrado** (`17f641d9`), o item 55 da 58: a janela confere os campos em
+  bytes antes de mandar, com os tetos do fio de um lugar só; o apelido grande
+  demais no `Hello` é recusado com nome pela FFI antes de discar, e não mais como
+  «NADA RESPONDEU NESSE ENDEREÇO».
+
+### Os portes para a 0.15.2 (ramos sobre `6702b944`, para a bateria da linha)
+
+- **`0.15/e54`** (`b16be654`): a metade do Rust do E54 inteira, e a janela na
+  prova menor (só o `catch`). O Windows fica para uma rodada do `--bin` numa
+  máquina Windows antes da tag.
+- **`0.15/p61-voz`** (`fb3f043b`): o predicado único, em 7 linhas, para a voz não
+  transmitir debaixo de «encerrado»; e a D à parte (`8fc4ba93`), o TENTAR DE NOVO
+  de uma recusada por tamanho sem derrubar o enlace.
+
+### O que deu errado comigo, e ficou corrigido
+
+- **Uma conferência que mentiu.** Os passos com HOME falsa ficavam numa função de
+  shell, e o `perl -e 'exec @ARGV'` não acha função: não rodavam e saíam 0 com o
+  log vazio. Afetou o app da conferência do `e05e1681` e o app e a conformidade da
+  do `3b1f57c8`. Contei à orquestradora, refiz com um script executável, e o
+  resumo passou a registrar o tamanho de cada log.
+- **Uma rodada de teste com a HOME de verdade.** O teste novo do E54, antes de a
+  casa temporária ser exigida, rodou duas vezes com a `~/.config/seele` real:
+  entradas TOFU de `127.0.0.1` no `pins`, e o `retrato.png` lido e mandado a um
+  servidor de teste local. A orquestradora tirou as entradas com o sim do dono;
+  todo teste do módulo confere agora a casa antes de qualquer `connect`.
+- **Uma sonda que matou navegadores de outro agente** (o lote RT olhava todo
+  `chrome-headless-shell` da máquina). Avisei a revisão atingida, que refez o que
+  caiu na janela; a sonda passou a olhar só o grupo que ela abriu.
+
+### Decisões que tomei sem pedir (o ledger traz o motivo e o custo de cada uma)
+
+- Cada intermitente virou lote com a medida antes do conserto, e não um prazo maior.
+- Dois lotes em paralelo só com arquivos disjuntos; a conformidade, um arquivo por
+  vez, e nunca o `quarto_pelo_link`, que é o único que usa a 8384.
+- A metade «janela» do item 55 virou lote próprio (C55), e o P61 ficou com a
+  contenção no núcleo (opção B), sem mexer de novo no `state.rs` da F4.
+- Rodadas curtas de Menores foram aceitas sem nova re-revisão quando o conserto era
+  de uma linha descrita pela revisão, com o vermelho e a reversão medidos.
+- A D do porte da voz foi para um commit à parte, para a orquestradora levar ou
+  deixar.

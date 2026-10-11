@@ -1739,8 +1739,10 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// Um teste deste módulo por vez: a casa é uma só, e a identidade e os
     /// pinos dela são arquivos que dois `connect` de testes diferentes
-    /// escreveriam ao mesmo tempo.
-    fn vez() -> std::sync::MutexGuard<'static, ()> {
+    /// escreveriam ao mesmo tempo. **E os do módulo vizinho que usa esta casa**
+    /// (`o_apelido_grande_demais_no_hello`, lote C55 da F5): a `SEELE_HOME` é
+    /// do processo, e uma segunda casa a trocaria por baixo destes testes.
+    pub(super) fn vez() -> std::sync::MutexGuard<'static, ()> {
         static VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
         VEZ.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1748,7 +1750,7 @@ mod a_entrada_velha_que_chega_tarde {
 
     /// O runtime de um teste deste módulo: uma thread só, a do teste, para o
     /// `seele.log` capturado ver o que o `connect` escreve.
-    fn runtime() -> tokio::runtime::Runtime {
+    pub(super) fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -1756,7 +1758,7 @@ mod a_entrada_velha_que_chega_tarde {
     }
 
     /// Um servidor de verdade, em porta zero e banco em memória.
-    async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
+    pub(super) async fn servidor(nome: &str) -> (SocketAddr, Arc<Daemon>) {
         let config = ServerConfig {
             name: nome.into(),
             listen: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -1785,7 +1787,7 @@ mod a_entrada_velha_que_chega_tarde {
     /// esquecer; e a casa que o app vai usar é conferida antes de qualquer
     /// `connect`, para um caminho novo do `config_dir` reprovar em vez de
     /// escrever na casa de alguém.
-    fn app() -> &'static AppHandle<MockRuntime> {
+    pub(super) fn app() -> &'static AppHandle<MockRuntime> {
         let casa = casa();
         let app = mock_builder()
             .manage(Session::default())
@@ -2595,6 +2597,143 @@ mod a_entrada_velha_que_chega_tarde {
             "a entrada que a janela largou não foi solta como devia:\n  {}",
             vermelhos.join("\n  ")
         );
+    }
+}
+
+/// **O apelido grande demais é recusado com nome, antes de abrir a conexão**
+/// (pendência 58, item 55; lote C55 da F5).
+///
+/// O apelido gravado nesta máquina (`escolher_apelido_local`) vai no `Hello` da
+/// conexão seguinte, e o `seele-proto` o limita a `MAX_NICKNAME_LEN` **bytes**.
+/// O campo do perfil contava caracteres até este lote, então um apelido de 20
+/// letras `á` (40 bytes) pode estar gravado de antes. O teste conecta pelo
+/// `connect` do app, contra um servidor de verdade nesta máquina, pela casa
+/// temporária do módulo do E54 (`a_entrada_velha_que_chega_tarde`), que é a
+/// única `SEELE_HOME` dos testes deste binário.
+///
+/// **Medido na base do lote** (`3b1f57c8`), com este teste ainda em
+/// `#[ignore]` como instrumento:
+/// - 16 `á` (32 B, no teto): `Ok(geracao 1)` em 16 ms, e o servidor a vê;
+/// - 20 `á` (40 B): `{"error":"Unreachable", …}` em 5 ms, com a trilha
+///   `Parada` → `Tentando` (127.0.0.1) → `Desistiu { Unreachable }` aos 3 ms,
+///   e ninguém presente no servidor. O QUIC e o TLS abriam, o `encode` do
+///   `Hello` recusava o apelido, e a escrita do `Hello`
+///   (`seele-core/src/client.rs`, `handshake`) traduzia qualquer erro em
+///   `ConnectError::Unreachable`. A janela lia «NADA RESPONDEU NESSE
+///   ENDEREÇO» com o servidor de pé.
+///
+/// **Agora** a FFI confere o apelido antes de abrir a conexão
+/// (`Connection::abrir`) e recusa com `ConnectionError::ApelidoGrandeDemais`,
+/// que leva o teto. A trilha vazia é a prova de que nada foi tentado: a
+/// chegada não começou, e nenhum candidato foi discado.
+#[cfg(test)]
+mod o_apelido_grande_demais_no_hello {
+    use super::a_entrada_velha_que_chega_tarde::{app, runtime, servidor, vez};
+    use super::{connect, Session};
+    use std::time::Duration;
+    use tauri::Manager;
+
+    #[test]
+    fn o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao() {
+        let _vez = vez();
+        runtime().block_on(async {
+            let teto = seele_ffi::Connection::limites_dos_campos().apelido;
+            let (endereco, servidor) = servidor("Apelido").await;
+            let mut vermelhos = Vec::new();
+
+            // Vinte letras `á` para o teto de hoje: 40 bytes, a medida da base.
+            let grande = "á".repeat(teto / 2 + 4);
+            let primeira = app();
+            let resultado = tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    primeira.clone(),
+                    primeira.state::<Session>(),
+                    endereco.to_string(),
+                    grande.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido grande demais não voltou");
+            match &resultado {
+                Ok(entrada) => vermelhos.push(format!(
+                    "um apelido de {} bytes entrou (geração {}), e o fio leva {teto}",
+                    grande.len(),
+                    entrada.geracao
+                )),
+                Err(falha) => {
+                    let dita = serde_json::to_value(falha).unwrap_or_default();
+                    let esperada =
+                        serde_json::json!({ "ApelidoGrandeDemais": { "limite_bytes": teto } });
+                    if dita.get("error") != Some(&esperada) {
+                        vermelhos.push(format!(
+                            "um apelido de {} bytes não voltou recusado com nome e teto \
+                             ({esperada}), e a janela não sabe o que dizer: {dita}",
+                            grande.len()
+                        ));
+                    }
+                    let tentou = !matches!(
+                        dita.get("trail").and_then(serde_json::Value::as_array),
+                        Some(trilha) if trilha.is_empty()
+                    );
+                    if tentou {
+                        vermelhos.push(format!(
+                            "a conexão foi aberta para um apelido que o `Hello` não leva: a \
+                             trilha não está vazia: {}",
+                            dita.get("trail").cloned().unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+            if let Ok(sessao) = primeira.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            // E um apelido no teto ainda entra: sem isto, um `connect` que
+            // recusasse tudo passaria.
+            let certo = "á".repeat(teto / 2);
+            let segunda = app();
+            match tokio::time::timeout(
+                Duration::from_secs(30),
+                connect(
+                    segunda.clone(),
+                    segunda.state::<Session>(),
+                    endereco.to_string(),
+                    certo.clone(),
+                    false,
+                    None,
+                ),
+            )
+            .await
+            .expect("o connect com o apelido no teto não voltou")
+            {
+                Ok(_) => {
+                    let presentes = servidor.server().presentes.lock().await.todos().len();
+                    if presentes != 1 {
+                        vermelhos.push(format!(
+                            "depois das duas tentativas, o servidor tem {presentes} presentes, \
+                             e não só a do apelido no teto"
+                        ));
+                    }
+                }
+                Err(falha) => vermelhos.push(format!(
+                    "um apelido de {} bytes, no teto, não entrou: {}",
+                    certo.len(),
+                    serde_json::to_value(&falha).unwrap_or_default()
+                )),
+            }
+            if let Ok(sessao) = segunda.state::<Session>().connection() {
+                sessao.disconnect();
+            }
+
+            assert!(
+                vermelhos.is_empty(),
+                "o apelido grande demais no `Hello`:\n  {}",
+                vermelhos.join("\n  ")
+            );
+        });
     }
 }
 
@@ -4670,6 +4809,19 @@ fn descartar_mensagem(
 #[tauri::command]
 const fn limite_da_mensagem() -> usize {
     seele_ffi::Connection::limite_da_mensagem()
+}
+
+/// Os tetos dos outros campos que a janela escreve: o apelido, o nome de um
+/// canal ou de uma sala, os lugares de uma sala nova, o nome do servidor e o
+/// motivo de um banimento (os textos em **bytes**).
+///
+/// O molde de [`limite_da_mensagem`], e pela mesma razão: os campos contavam
+/// caracteres, o fio conta bytes, e o que passava do teto o núcleo recusava
+/// sem a janela saber (pendência 58, item 55; lote C55 da F5). Ver
+/// `seele_ffi::LimitesDosCampos`.
+#[tauri::command]
+const fn limites_dos_campos() -> seele_ffi::LimitesDosCampos {
+    seele_ffi::Connection::limites_dos_campos()
 }
 
 #[tauri::command]
@@ -12417,6 +12569,7 @@ fn main() {
             reenviar_mensagem,
             descartar_mensagem,
             limite_da_mensagem,
+            limites_dos_campos,
             criar_voice_room,
             criar_linha,
             renomear_voice_room,
@@ -13307,6 +13460,87 @@ mod a_tela_le_os_limites_que_o_rust_manda {
             culpados.is_empty(),
             "estas telas leem um limite de imagem que o Rust não serializa, e o que \
              chega é `undefined`: {culpados:?}. As chaves que existem são {chaves:?}"
+        );
+    }
+
+    /// Os tetos que cada tela lê de `limites_dos_campos`, por arquivo: os nomes
+    /// passados a `passaDoTeto("…"` e os lidos direto de `tetosDosCampos())?.…`.
+    fn tetos_lidos_pelas_telas() -> Vec<(String, String)> {
+        let raiz = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui");
+        let mut lidos = Vec::new();
+        let mut arquivos: Vec<_> = std::fs::read_dir(&raiz)
+            .expect("ui/ tem de ser legível")
+            .filter_map(Result::ok)
+            .map(|entrada| entrada.file_name().to_string_lossy().into_owned())
+            .filter(|nome| nome.ends_with(".js"))
+            .collect();
+        arquivos.sort();
+        for arquivo in arquivos {
+            let script = std::fs::read_to_string(raiz.join(&arquivo))
+                .unwrap_or_else(|erro| panic!("{arquivo} tem de ser legível: {erro}"));
+            for pedaco in script.split("passaDoTeto(\"").skip(1) {
+                if let Some(campo) = pedaco.split('"').next() {
+                    lidos.push((arquivo.clone(), campo.to_owned()));
+                }
+            }
+            for pedaco in script.split("tetosDosCampos())?.").skip(1) {
+                // `?.[campo]` é o acesso por nome variável do próprio
+                // `passaDoTeto`, cujos nomes são os de quem o chama, lidos acima.
+                if pedaco.starts_with('[') {
+                    continue;
+                }
+                let campo: String = pedaco
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                lidos.push((arquivo.clone(), campo));
+            }
+        }
+        lidos
+    }
+
+    /// **E os tetos dos campos, pela mesma razão** (pendência 58, item 55; lote
+    /// C55 da F5).
+    ///
+    /// A janela pede cada teto pelo nome, e um nome que o Rust não serializa
+    /// não lança: chega `undefined`, `passaDoTeto` não confere nada, e o campo
+    /// volta a mandar calado o que o núcleo recusa. As chaves vêm de um
+    /// `LimitesDosCampos` serializado de verdade. E, na outra mão, todo teto
+    /// que o Rust serializa tem uma tela que o lê.
+    #[test]
+    fn nenhuma_tela_le_um_teto_de_campo_que_nao_existe() {
+        let Ok(serde_json::Value::Object(mapa)) =
+            serde_json::to_value(seele_ffi::Connection::limites_dos_campos())
+        else {
+            panic!("`LimitesDosCampos` tem de serializar para objeto");
+        };
+        let chaves: std::collections::BTreeSet<&str> = mapa.keys().map(String::as_str).collect();
+        let lidos = tetos_lidos_pelas_telas();
+        assert!(
+            !lidos.is_empty(),
+            "nenhuma tela lê um teto de `limites_dos_campos`, ou a leitura deste guarda \
+             quebrou: ele passaria sem olhar nada"
+        );
+        let culpados: Vec<_> = lidos
+            .iter()
+            .filter(|(_, campo)| !chaves.contains(campo.as_str()))
+            .collect();
+        assert!(
+            culpados.is_empty(),
+            "estas telas leem um teto de campo que o Rust não serializa, e o que chega é \
+             `undefined`, que não confere nada: {culpados:?}. As chaves que existem são \
+             {chaves:?}"
+        );
+        // E todo teto que o Rust manda tem quem o confira: um teto sem leitor é
+        // um campo que voltou a mandar sem conferir, ou um teto que sobrou.
+        let sem_leitor: Vec<_> = chaves
+            .iter()
+            .filter(|chave| !lidos.iter().any(|(_, campo)| campo == *chave))
+            .collect();
+        assert!(
+            sem_leitor.is_empty(),
+            "nenhuma tela confere estes tetos de `limites_dos_campos`: {sem_leitor:?}. Os \
+             lidos são {lidos:?}"
         );
     }
 }

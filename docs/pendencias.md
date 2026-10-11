@@ -9527,7 +9527,9 @@ pendência. A revisão dele deixou:
     *Fonte:* o relatório do W2 (`F5/lote-w2-report.md`), que o registra como
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
-55. **P61 · A recusa local de um campo grande demais não chega à janela.**
+55. **P61 · A recusa local de um campo grande demais não chega à janela.
+    Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado, e a sala
+    pessoal com um apelido antigo pelo S64.**
     Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
     (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
     registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
@@ -9575,6 +9577,108 @@ pendência. A revisão dele deixou:
       conexão (o teto é `MAX_NICKNAME_LEN`, em bytes), ou a falha de
       codificação do `Hello` ter nome próprio em vez de virar `Unreachable`.
     *Fonte:* `F5/lote-p61-report.md`, rodadas 1 e 2, M2 e R1-M5.
+    **Em 11/10/2026, o lote C55 da F5** (`F5/lote-c55-report.md`, commits
+    `20f1f331` a `13fe85da`, mais os do relatório):
+    - **Os tetos vêm de um lugar só.** O comando `limites_dos_campos`
+      (`main.rs`), no molde de `limite_da_mensagem`, devolve
+      `seele_ffi::Connection::limites_dos_campos`, que lê do `seele-proto` pelos
+      reexports do `seele-core` (`MAX_NICKNAME_LEN`, `MAX_CHANNEL_NAME_LEN`,
+      `MAX_VOICE_ROOM_LIMIT`, `MAX_CLIENT_NAME_LEN`, `MAX_ALERT_TEXT_LEN`). A
+      ponte do navegador os serve pelas `CONSTANTES_DO_DESKTOP`, que o guarda
+      do `tests/web.rs` confere contra a FFI. O fio não mudou.
+    - **Os sete caminhos conferem em bytes antes de mandar** (`passaDoTeto`, em
+      `base.js`) e dizem «PASSA DE N BYTES — ENCURTE.», com os bytes que o
+      texto tem (`fraseDoTeto`, em `frases.js`): o apelido na sessão e o
+      gravado (`guardarOApelido`), o nome de canal e de sala (o diálogo de
+      nomear), o nome do servidor em CONFIGURAÇÕES (`renomearServidor`) e ao
+      hospedar (`confirmarPreparar`, antes de subir o servidor) e o motivo do
+      banimento (o BANIR, antes de armar). Os cinco `maxlength` saíram.
+    - **Os lugares da sala nova são ajustados, e não recusados.** Ninguém
+      escreve o número: ele é copiado da primeira sala do servidor. A cópia
+      fora de 1 a `lugares_da_sala` vira o teto, e o ajuste vai ao
+      `seele.log`. O `250` escrito à mão em `tela-sessao.js` saiu.
+    - **As provas:** o roteiro `tools/roteiros/tetos-dos-campos.js`, no
+      `ci.yml` e no `publicar.sh`, com um caso por caminho, e os guardas
+      `nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui` (`frontend.rs`) e
+      `nenhuma_tela_le_um_teto_de_campo_que_nao_existe` (`main.rs`).
+    - **O apelido gravado grande demais antes do lote.** A conferência ao
+      gravar impede um novo. Um que já estava gravado dava «NADA RESPONDEU
+      NESSE ENDEREÇO»: 40 B voltavam `Unreachable` em 5 ms, e o servidor não
+      via ninguém. E encurtar o apelido no perfil não bastava: a tentativa
+      seguinte levava o de antes, guardado em `ultimoApelido` (`conectar`, em
+      `tela-boot.js`). A orquestradora escolheu a opção 1:
+      - **na FFI:** `Connection::abrir` confere o apelido antes de resolver,
+        discar ou ler o disco, e recusa com
+        `ConnectionError::ApelidoGrandeDemais { limite_bytes }`, uma variante
+        só da FFI;
+      - **na janela:** a frase «SEU APELIDO PASSA DE N BYTES.» manda abrir o
+        PERFIL e encurtar, e o `catch` de `conectar` trata a recusa como o
+        `NicknameTaken`: esquece o `ultimoApelido` e guarda a credencial.
+
+      As provas são o teste
+      `o_apelido_grande_demais_e_recusado_com_nome_antes_de_abrir_a_conexao`
+      (`main.rs`, com a trilha vazia) e o roteiro
+      `tools/roteiros/apelido-no-hello.js`.
+    - **A recusa de gravar o apelido sumia do perfil.** Era um achado do lote,
+      e o conserto entrou nele. O `catch` de `guardarOApelido` reabria o
+      perfil, e o `abrirPerfil` escondia a frase e trocava o que se escreveu
+      pelo apelido gravado. Agora o `catch` não reabre, e a cena está no mesmo
+      roteiro.
+    - **Fica para a F4, para quando o `connect` da ponte existir (tarefa
+      34):** a entrada da casca do navegador é uma oitava porta do apelido, e
+      não confere os bytes (M3 da revisão do C55, pela leitura). O campo
+      `#cel-entrada-apelido` (`celular-entrada.js`) é livre e vai direto ao
+      `connect` da ponte (`identidade-web.js`). Hoje esse `connect` é
+      `AINDA_A_FAZER`, e nada chega ao fio. Quando ele existir:
+      - ele devolve a mesma recusa, `ApelidoGrandeDemais`, com o mesmo nome;
+      - o ENTRAR do celular confere o campo com `passaDoTeto("apelido", …)`;
+      - o `desfecho` de `identidade-web.js` trata a recusa como uma que segue,
+        com o campo marcado. Sem isso, ela cai em `recusado`, a tentativa se
+        encerra, e o campo onde a pessoa escreveu some. A frase da casa manda
+        abrir o PERFIL, que não é onde ela escreveu.
+    - **Medido e consertado em 11/10/2026 pelo lote S64 da F5: a sala pessoal
+      com um apelido gravado acima de 64 B** (a observação fora da contagem da
+      revisão do C55; commit `b4d1e8f8`). A sala sobe com o apelido gravado
+      (`preferences.nickname()`, em `sala.rs`) como `ServerConfig.name` e como
+      o apelido da conta do dono (`hospedagem.rs`), e o `Session` leva o nome
+      sob `MAX_CLIENT_NAME_LEN` (64 B, `control.rs`). A v0.15.1 publicada
+      contava 32 caracteres no perfil, e 22 ideogramas são 66 B. Medido com 22
+      `語` gravados, a sala subida pelo `sala::subir_em`, como o app a sobe:
+      - **a sala sobe**, toca e é atendida. O `register_or_find` aceita os
+        66 B na conta do dono, e nada quebra ali;
+      - **quem liga é atendido e recusado.** Depois do `Tocando` e do ATENDER,
+        recebe `Disconnecting { ProtocolViolation }` no lugar do `Session`, e a
+        campainha conta a ligação como atendida. Medido com o par cru da
+        conformidade (`sala_pessoal.rs`), porque nenhum cliente lê o
+        `Tocando` ainda (tarefa 6e da F7);
+      - **o dono também não entra.** Com o apelido gravado, o C55 recusa antes
+        de discar («SEU APELIDO PASSA DE 32 BYTES»). Encurtado no PERFIL, a sala
+        continua no ar com o nome velho, e o ATENDER recebe
+        `Refused { ProtocolViolation }` («PROTOCOLO VIOLADO») a cada tentativa,
+        até a sala subir de novo;
+      - **o `seele.log` do dono diz, e a janela não.** Cerca de 1 s depois, em
+        INFO, o `seele_server` escreve ``session closed … handshake refused:
+        could not send Session: field `server` is 66 bytes, over its 64-byte
+        limit``;
+      - **com 64 B, entra.** Com 40 B (20 `á`), o dono entra com um apelido
+        curto: a conta dele, de 40 B, não sai da sala antes de ele entrar, e é
+        renomeada quando ele entra.
+
+      **O conserto:** `nome_da_sala` (`sala.rs`) corta o apelido na última
+      fronteira de caractere dentro de `nome_do_servidor`, lido de
+      `Connection::limites_dos_campos`. O `seele.log` diz quantos bytes o
+      apelido tinha e quantos ficaram. Cortado, e não trocado pelo «SEELE»,
+      porque assim quem liga continua lendo o nome de quem recebe. A prova é
+      `um_apelido_gravado_acima_do_teto_do_nome_do_servidor_nao_impede_ninguem_de_entrar`
+      (`sala.rs`): a sala sobe com os 66 B gravados, e o dono entra pelo
+      código, como o ATENDER entra, e lê 21 ideogramas no nome. As duas
+      reversões, sem o corte e sem a linha do `seele.log`, reprovam. O fio não
+      mudou.
+      - **Fica, e é da F7:** quem liga pela FFI (`codigo_esperado`) não passa
+        do `Tocando` em sala nenhuma, com qualquer apelido. O núcleo escreve
+        «expected Session» no `seele.log` de quem liga, e a FFI devolve
+        `Refused { reason: Incompatible }`. É a tarefa 6e (Task 16 do plano da
+        F7, à espera da F1). O S64 só anota.
 
 ### Fora da F5, só como referência
 

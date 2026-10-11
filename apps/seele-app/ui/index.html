@@ -581,7 +581,9 @@
     <div class="server-campo">
       <label class="server-nome-campo">
         <span class="rotulo">NOME DESTE SERVIDOR</span>
-        <input id="preparar-nome" type="text" maxlength="64" spellcheck="false"
+        <!-- Sem `maxlength`, que contava caracteres: o teto do fio é em bytes, e
+             quem o confere é `confirmarPreparar` (pendência 58, item 55). -->
+        <input id="preparar-nome" type="text" spellcheck="false"
                autocomplete="off" placeholder="nome do servidor">
       </label>
     </div>
@@ -3784,16 +3786,16 @@
                 <label class="server-nome-campo">
                   <span class="rotulo">NOME DESTE SERVIDOR</span>
                   <!--
-                    `maxlength` é a mesma aproximação que os campos de criar
-                    sala e canal já fazem: o teto do protocolo é em **bytes** e
-                    este atributo conta caracteres, então um nome de 64 letras
-                    acentuadas ainda passa do teto. A recusa é **local**, e não
-                    do servidor: o núcleo não manda o quadro, registra no
-                    `seele.log` o comando e o campo, e o enlace segue (M2 da
-                    revisão do lote P61; antes, a sessão caía). A janela ainda
-                    não a mostra: o que falta está na pendência 58.
+                    **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5).
+                    Ele contava caracteres, e o teto do protocolo é em
+                    **bytes**: um nome acentuado cabia aqui e passava do teto, e
+                    o núcleo o recusava sem mandar o quadro, só com uma linha no
+                    `seele.log` (M2 da revisão do lote P61; antes, a sessão
+                    caía). Quem confere agora é `renomearServidor`, em bytes,
+                    com o teto lido do Rust (`limites_dos_campos`), e a recusa
+                    diz o número em `#server-servidor-erro`.
                   -->
-                  <input id="server-nome-valor" name="nome" maxlength="64"
+                  <input id="server-nome-valor" name="nome"
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>
@@ -4062,11 +4064,17 @@
 
         A nota diz o que **não** muda, e ela importa: quem troca de nome pode
         esperar que o passado o acompanhe, e ele não acompanha.
+
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        32 e contava caracteres, e o fio conta 32 **bytes**: vinte letras `á`
+        cabiam aqui e não no `Hello`. Quem confere agora é `guardarOApelido`, em
+        bytes, com o teto lido do Rust (`limites_dos_campos`), e a recusa diz o
+        número em `#perfil-erro`.
       -->
       <label class="nomear-campo">
         <span class="rotulo">APELIDO</span>
         <input id="perfil-apelido" aria-describedby="perfil-sem-nome"
-               name="apelido" maxlength="32"
+               name="apelido"
                spellcheck="false" autocomplete="off"
                placeholder="como as pessoas te veem">
         <!--
@@ -4147,9 +4155,15 @@
       <h2 id="nomear-titulo" class="nomear-titulo">NOMEAR</h2>
     </div>
     <form id="nomear-forma" class="nomear-corpo" autocomplete="off">
+      <!--
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        48 e contava caracteres, e o fio conta 48 **bytes**. Quem confere agora
+        é o `submit` de `camada-nomear.js`, em bytes, com o teto lido do Rust
+        (`limites_dos_campos`), e a recusa diz o número em `#nomear-erro`.
+      -->
       <label class="nomear-campo">
         <span id="nomear-rotulo" class="rotulo">NOME</span>
-        <input id="nomear-valor" name="nome" maxlength="48" required
+        <input id="nomear-valor" name="nome" required
                spellcheck="false" autocomplete="off">
       </label>
       <!--
@@ -4524,12 +4538,22 @@
                 <option value="30">30 dias</option>
               </select>
             </label>
+            <!--
+              **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele
+              dizia 200 e contava caracteres, e o fio leva 512 **bytes**: 200
+              ideogramas são 600. Quem confere agora é o BANIR
+              (`camada-moderar.js`), em bytes, com o teto lido do Rust
+              (`limites_dos_campos`), e a recusa diz o número logo abaixo, onde
+              se escreveu — o `#moderar-erro` mora na confirmação, que um
+              motivo recusado não chega a abrir.
+            -->
             <label class="moderar-campo">
               <span class="rotulo">MOTIVO</span>
-              <input id="moderar-motivo" name="motivo" maxlength="200"
+              <input id="moderar-motivo" name="motivo"
                      spellcheck="false" autocomplete="off"
                      placeholder="opcional, e só para o seu registro">
             </label>
+            <p id="moderar-motivo-erro" class="erro" role="alert" hidden></p>
             <button id="moderar-banir" class="moderar-verbo" type="button">BANIR</button>
             <span class="nota">Encerra a sessão e barra a volta. O motivo fica
               com quem hospeda e nunca chega a quem foi banido.</span>
