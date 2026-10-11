@@ -1720,6 +1720,28 @@ async fn flush(
                 client_message_id,
                 reason: motivo,
             }),
+            // **Não anunciada ao canal**: ver `Gravacao::Apagada`. Só quem
+            // repetiu recebe a recusa, pelo mesmo caminho das outras — e é ela
+            // que tira a chave da conta do que está no ar (`TETO_NO_AR`).
+            Gravacao::Apagada {
+                channel,
+                author,
+                client_message_id,
+                id,
+            } => {
+                tracing::info!(
+                    ?channel,
+                    ?author,
+                    ?id,
+                    "a chave repetida é de uma mensagem apagada pela moderação: recusada, e não anunciada"
+                );
+                events.send(Event::MessageRejected {
+                    channel,
+                    author,
+                    client_message_id,
+                    reason: seele_proto::control::MessageRefusal::Apagada,
+                })
+            }
         };
     }
 }

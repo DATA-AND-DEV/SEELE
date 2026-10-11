@@ -1176,6 +1176,7 @@ roteiros_da_casca() {
         --roteiro tools/roteiros/perfil-salva-sessao.js \
         --roteiro tools/roteiros/perfil-salva.js \
         --roteiro tools/roteiros/perfil-sessao.js \
+        --roteiro tools/roteiros/recusa-apagada.js \
         --roteiro tools/roteiros/recusa-sem-dono.js \
         --roteiro tools/roteiros/renomear-canal.js \
         --roteiro tools/roteiros/rodape-do-operador.js \

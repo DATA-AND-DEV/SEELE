@@ -1704,6 +1704,9 @@ const RECUSAS_DE_MENSAGEM = {
   PermissionDenied: "não pode escrever neste canal",
   NoSuchChannel: "este canal não existe mais",
   StorageFailed: "o servidor não conseguiu gravar",
+  // A moderação apagou a mensagem enquanto quem a escreveu estava fora, e a
+  // repetição não a traz de volta. Tentar de novo nunca passa: ver `seloDoEnvio`.
+  Apagada: "apagada pela moderação",
 };
 
 /**
@@ -1751,6 +1754,10 @@ function seloDoEnvio(mensagem) {
   // As duas que pedem decisão de quem escreveu: recusada e sem resposta. As
   // duas ganham os mesmos dois botões, e a frase é o que as separa — porque o
   // que se faz com elas é o mesmo, e o que se sabe sobre elas não é.
+  // **A apagada não volta**: a moderação tirou a mensagem do canal, e repetir
+  // recebe a mesma recusa. Ela fica com DESISTIR só, que devolve o texto ao
+  // campo e fecha a pendente.
+  let semVolta = false;
   if (estado === "SemResposta") {
     selo.dataset.envio = "sem-resposta";
     selo.append(
@@ -1764,6 +1771,7 @@ function seloDoEnvio(mensagem) {
     selo.dataset.envio = "falhou";
     const motivo = typeof estado === "object" ? estado.Recusada : null;
     selo.append(elemento("span", "envio-frase", `não foi gravada: ${fraseDaRecusa(motivo)}`));
+    semVolta = motivo === "Apagada";
   }
 
   if (chave) {
@@ -1778,7 +1786,8 @@ function seloDoEnvio(mensagem) {
     // «Desistir» devolve o texto ao compositor — ver `agirNaPendente`. O nome
     // diz o que a pessoa está decidindo, e não o que o programa faz com a lista.
     desistir.title = "devolve o texto ao campo de escrever";
-    selo.append(tentar, desistir);
+    if (semVolta) selo.append(desistir);
+    else selo.append(tentar, desistir);
   }
   return selo;
 }

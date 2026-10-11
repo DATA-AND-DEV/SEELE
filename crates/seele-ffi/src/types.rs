@@ -388,6 +388,9 @@ pub enum MotivoDaRecusa {
     },
     /// O armazenamento do servidor não aceitou a gravação.
     StorageFailed,
+    /// A moderação apagou esta mensagem enquanto quem a escreveu estava fora, e
+    /// a repetição não a traz de volta. Tentar de novo nunca passa.
+    Apagada,
 }
 
 impl From<seele_core::MessageRefusal> for MotivoDaRecusa {
@@ -397,6 +400,7 @@ impl From<seele_core::MessageRefusal> for MotivoDaRecusa {
             seele_core::MessageRefusal::NoSuchChannel => Self::NoSuchChannel,
             seele_core::MessageRefusal::TooLong { limit } => Self::TooLong { limit },
             seele_core::MessageRefusal::StorageFailed => Self::StorageFailed,
+            seele_core::MessageRefusal::Apagada => Self::Apagada,
         }
     }
 }
