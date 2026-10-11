@@ -47,7 +47,7 @@ mudam o texto abaixo, e cada seção já as segue.
 | pergunta | resposta |
 |---|---|
 | dois MODs com a porta do tema (§9) | **um tema por servidor**, o escolhido por quem administra (D-api-5) |
-| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado); **os números** (256 alvos por ponto, 128 no agregado) **saem da M3** |
+| o teto de contribuições (§12) | **o modelo está decidido** (os pontos por alvo fora do agregado), **e os números também** (11/10): 256 alvos por ponto e 128 sem alvo, pela bancada, porque no app a lista de 251 não se mede pela acessibilidade (§12, «A lista de 251») |
 | o que não entrar na 6 | **é candidato da API 7** (Servidor 1.1), e fica escrito no ADR 0056 |
 
 ---
@@ -1626,8 +1626,9 @@ pontos de CPU e +374 MiB, e as capas são quase metade disso. Para comparar, a
 MESA arrastando (API 5) sobe o jitter em +1,1 ms, mais que todos os pontos da 6
 juntos. **O que a campanha não mediu**: Windows e iPhone; o `carga-regioes+voz`
 mediu cinco regiões, e não oito, porque, com quem usa na sala, a chamada
-esconde a vista da conversa; e a lista de pessoas com 250 cartões, de que o teto
-de contribuições abaixo depende.
+esconde a vista da conversa; e a lista de pessoas com 250 cartões, que no app
+não se mede pela acessibilidade (abaixo, «A lista de 251»): o teto de
+contribuições saiu da bancada.
 
 **O teto de contribuições muda de modelo antes do congelamento** (o bloqueio C
 do PERFIS, 09/10). Com cartão, avatar e capa por pessoa, 128 por MOD dão **42
@@ -1639,14 +1640,14 @@ pessoas**, e uma sala vai até 250 (`control.rs:77` [c]). O modelo da 6:
   contribuição por alvo, por MOD e por modo** (registrar de novo para o mesmo
   alvo é `atualizar`, e não uma segunda; o mesmo MOD pode substituir o cartão
   de uma pessoa e acrescentar à linha dela, que são duas coisas), e até um teto
-  de alvos por ponto, maior que a sala (partida: 256) [c, tarefa 5, Step 7];
+  de alvos por ponto, maior que a sala (256) [c, tarefa 5, Step 7];
 - **o teto agregado** (128 por MOD) fica para os pontos sem alvo: as regiões,
   as entradas de navegação, as ferramentas do compositor;
-- **o modelo está decidido** (dono, 09/10/2026); os números (256 alvos, 128
-  sem alvo) **esperam a M3 com a API 6**, que mede a lista de pessoas com 250
-  cartões de MOD (tarefa 11). Até lá, o laboratório de cada MOD os tem como
-  opções, e não como constantes (o J do PERFIS): os mesmos números valem para
-  o aviso do servidor (1 KiB, 4 por segundo) e para as capas animadas.
+- **o modelo está decidido** (dono, 09/10/2026), **e os números também**
+  (orquestradora, 11/10): **256 alvos por ponto e 128 sem alvo**, pela bancada,
+  e não pelo app (abaixo, «A lista de 251»). O laboratório de cada MOD, que os
+  tinha como opções (o J do PERFIS), passa a tê-los como os do contrato, como
+  já tinha o aviso do servidor (1 KiB, 4 por segundo) e as capas animadas.
 
 **A lista de 251, e contra o que ela se lê** (10/10 e 11/10). A primeira
 `carga-cartoes` não chegou a medir: a página travou — o WebContent acima de
@@ -1664,9 +1665,30 @@ mudou ficou para depois. **Por isso a `carga-cartoes` se lê contra a
 `lista-251`** — os mesmos 251, no mesmo ritmo, sem MOD (decisão da
 orquestradora, 11/10) —, e não contra o `sem-mod` de uma pessoa, contra o qual
 a lista entraria na conta do MOD; a `lista-251` contra o `sem-mod` diz, à
-parte, o custo da lista. Os 256 alvos e os 128 sem alvo esperam essa medida, na
-build da campanha remendada com o conserto
-(`docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh`).
+parte, o custo da lista.
+
+**No app, a lista de 251 não se mede pela acessibilidade** (a orquestradora,
+11/10, na build da campanha remendada com o conserto, `6e845e0d+6717dc2c`,
+por `docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh`). A
+`lista-251` reprovou antes de medir, com «a lista tem 1 pessoas, e não 251»:
+com 249 calados e sem MOD, o WebContent a 107%, o cabeçalho «PESSOAS 1 EM
+SALAS · 251 NO SERVIDOR» sempre na árvore de acessibilidade, e os nomes da
+lista nunca; o ENTRAR NA SALA saía da árvore, e o aperto, quando ele foi
+achado, não pegou. Cada consulta voltava em 3 a 4 s: não é prazo. A leitura:
+com a lista refeita inteira a cada quadro, os nós são trocados a cada quadro,
+e a árvore não assenta — **quem usa leitor de tela não usa a lista nem o
+ENTRAR NA SALA com umas 250 pessoas**. É a (b) da pendência 63, que passa a
+defeito de acessibilidade. Com isso, os números de 251 não se dirigem no app,
+e a `carga-cartoes` não foi medida nele.
+
+**Os números congelam pela bancada** (decisão da orquestradora, 11/10): **256
+alvos por ponto e 128 contribuições sem alvo**. Com o conserto, pelo ouvinte de
+verdade (`tools/lista-grande.cjs`, modo `evento`, no Chromium, com a ponte
+simulada), 251 pessoas deixam a página a 98% sem MOD e a 99% com um cartão de
+32 linhas em cada uma e as 128 sem alvo: **quem satura a página com 251 é a
+lista, e não o MOD**. E o servidor é dimensionado em 50 pessoas
+(`specs/04-servidor-seele.md`), abaixo de onde esses custos aparecem. Fica sem
+medida: o app (WebKit) com 251, o WebView2 e o iPhone.
 
 **A montagem por partes** (MESA item 1, PERFIS R8; decidido aqui em 09/10, a
 pedido da MESA, porque muda o desenho da ficha): uma superfície montada ganha

@@ -395,7 +395,7 @@
       "«usar apresentação padrão» existe no controle nativo de MODs",
       "uma contribuição para uma região que a casca não tem é recusada com motivo nomeado, e a aba DIAGNÓSTICO conta"
     ],
-    "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (partida: 256); o agregado (partida: 128) é dos pontos sem alvo; o modelo está decidido (09/10), os números saem da M3",
+    "teto": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto agregado: uma contribuição por alvo e por MOD, até um teto de alvos por ponto (256); o agregado (128) é dos pontos sem alvo; o modelo está decidido (09/10), e os números (11/10), pela bancada: no app, a lista de 251 não se mede pela acessibilidade (§12)",
     "descarte": "sai com a instância do MOD",
     "servidor.aparencia": "um ponto registrável na 6 (decidido em 10/10, D-api-2): o MOD de janela pinta a aparência por ele como na 5, e o tema do servidor (17d) se soma; é também a porta de quem vê («o SEELE desenha» tira o tema daquele servidor nesta máquina); se as duas portas brigarem na mesma sessão, a regra de quem vence vai ao §9",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS"
@@ -726,7 +726,7 @@
   },
   "decisoes-do-dono-de-09-10": {
     "tema": "um tema por servidor, o escolhido por quem administra (D-api-5)",
-    "teto-de-contribuicoes": "o modelo está decidido (os pontos por alvo fora do agregado); os números, 256 alvos por ponto e 128 no agregado, saem da M3",
+    "teto-de-contribuicoes": "o modelo está decidido (os pontos por alvo fora do agregado); os números, 256 alvos por ponto e 128 no agregado, decididos em 11/10 pela bancada (§12, «A lista de 251»)",
     "api-7": "o que não entrar na 6 é candidato da API 7 (Servidor 1.1), escrito no ADR 0056"
   }
 }

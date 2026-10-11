@@ -419,7 +419,8 @@
     "servidor.aparencia": "um ponto registrável na 6 (decidido em 10/10, D-api-2): o MOD de janela pinta a aparência por ele como na 5, e o tema do servidor (17d) se soma; é também a porta de quem vê («o SEELE desenha» tira o tema daquele servidor nesta máquina); se as duas portas brigarem na mesma sessão, a regra de quem vence vai ao §9",
     "listarNaBarra": "booleano opcional numa entrada de servidor.navegacao; padrão true; false tira a entrada da lista de quem não tem uso para ela, sem mudar permissão; no celular, vale na gaveta SALAS",
     "alvos-por-ponto": 256,
-    "teto-o-que-e": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto: uma contribuição por alvo, por MOD e por modo, até alvos-por-ponto alvos em cada ponto; o teto é o das contribuições sem alvo de pé, por MOD"
+    "teto-o-que-e": "os pontos por alvo (pessoa.*, canal.item, sala.acoes) não contam no teto: uma contribuição por alvo, por MOD e por modo, até alvos-por-ponto alvos em cada ponto; o teto é o das contribuições sem alvo de pé, por MOD",
+    "medido": "numa bancada (tools/lista-grande.cjs, no Chromium, com a ponte simulada), depois do redesenho da lista juntado em um por quadro: 251 pessoas deixam a página a 98% sem MOD e a 99% com um cartão de 32 linhas em cada uma e as 128 sem alvo — quem satura a página é a lista, e não o MOD; no app, a lista de 251 não se mede pela acessibilidade, e o servidor é dimensionado em 50 pessoas"
   },
   "capa": {
     "ponto": "pessoa.capa",
