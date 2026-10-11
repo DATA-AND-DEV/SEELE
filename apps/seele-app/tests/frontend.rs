@@ -606,10 +606,9 @@ fn every_command_the_frontend_calls_is_registered() {
 //
 // `onde_estou` esteve aqui de 2026-10-09 a 2026-10-10: entrou com a metade do
 // `main.rs` da tarefa 18 da F7 (Plano 2), e saiu quando a faixa `#toque` passou
-// a perguntá-lo (tarefa 26). **A metade da casca da 18 continua por fazer**: o
-// `estado_da_porta().hospedando` da `tela-sessao.js` e o `nossoServidorEm` da
-// `tela-boot.js` ainda respondem «estou no meu servidor?» pelo critério deles.
-// Está no andamento da F7, porque este guarda já não a cobra.
+// a perguntá-lo (tarefa 26). A metade da casca da 18 veio depois: a
+// `tela-sessao.js` com as tarefas 19 e 20, e a `tela-boot.js` na 18 (o guarda
+// `estou_no_meu_servidor_tem_uma_resposta_so`).
 //
 // `escolher_o_tema_do_servidor` esteve aqui entre as duas metades da tarefa
 // 17f.0 da F3 (a escolha de quem administra, D-api-5): o comando entrou num
@@ -12007,73 +12006,62 @@ fn no_class_is_drawn_by_two_stylesheets_without_being_a_declared_refinement() {
 /// hospedar que falha não pode dispensar a conferência da conexão seguinte, que
 /// essa vai a um servidor alheio de verdade.
 ///
-/// **A dispensa deixou de ser um sim e passou a ser um endereço** — A05 da
-/// auditoria de 17/09. A bandeira booleana era lida e apagada na primeira linha
-/// de `conectar`, e isso confundia «a tentativa falhou» com «a mesma tentativa
-/// está continuando»: uma entrada que para no aceite de MODs é retomada por
-/// `aceitarOsMods`, e a intenção já tinha sido consumida — quem hospedava caía
-/// na tela de conferir a própria chave.
+/// **A dispensa foi um sim, depois um endereço, e é a chave** (tarefa 18 da F7).
 ///
-/// Guardar o endereço resolve as duas de uma vez, e por construção: continuar
-/// para o mesmo alvo reconhece a intenção, e **qualquer outro alvo não casa**,
-/// então não há o que vazar para a conexão seguinte. É uma propriedade mais
-/// forte que a de antes, e não um afrouxamento dela.
+/// A bandeira booleana era lida e apagada na primeira linha de `conectar`, e
+/// confundia «a tentativa falhou» com «a mesma tentativa está continuando» (A05
+/// da auditoria de 17/09). O endereço resolveu isso, mas ficou com o defeito de
+/// todo endereço: o de uma rede local volta a ser de outra máquina no dia
+/// seguinte, e a dispensa dependia de alguém zerá-lo a tempo.
+///
+/// Agora quem responde é o `onde_estou`, **depois** do `connect` desta
+/// tentativa: «Guardado» só quando a chave conferida no aperto de mão é a do
+/// servidor que esta janela hospeda. Uma tentativa de hospedar que falha não
+/// dispensa nada na seguinte, porque a seguinte pergunta de novo, pela chave
+/// dela; o mesmo endereço com outra chave pede a conferência
+/// (`tools/roteiros/meu-servidor.js`, passo 6). E a pergunta vem **antes** da
+/// conferência da tentativa (F5 e F8): entre ela e o `depoisDeConectar` não há
+/// espera nenhuma.
 #[test]
-fn the_flag_that_skips_the_key_check_is_cleared_before_the_attempt_and_not_after() {
+fn a_dispensa_de_conferir_a_propria_chave_vem_da_chave_desta_conexao() {
     let boot = read("ui/tela-boot.js");
-    let conectar = js_function(&boot, "async function conectar(");
-
-    // A dispensa é uma comparação com o alvo desta conexão, e não a leitura de
-    // um sim. Sem o `=== ultimoAlvo`, ela voltaria a valer em qualquer endereço.
+    let conectar = without_comments(&js_function(&boot, "async function conectar("));
+    let posicao = |agulha: &str| {
+        conectar
+            .find(agulha)
+            .unwrap_or_else(|| panic!("`conectar` perdeu `{agulha}`:\n{conectar}"))
+    };
+    let entra = posicao("invoke(\"connect\"");
+    let pergunta = posicao("invoke(\"onde_estou\")");
+    // A conferência **depois** da pergunta: a primeira, logo depois do `connect`,
+    // é do guarda do lote E54 (`a_entrada_que_outra_substituiu_nao_toca_na_tela_e_e_solta`).
+    let confere = conectar[pergunta..]
+        .find("if (esta !== tentativas || aBatidaFoiLargada(esta))")
+        .map(|onde| pergunta + onde)
+        .unwrap_or_else(|| {
+            panic!("`conectar` não confere a tentativa depois de perguntar ao `onde_estou`:\n{conectar}")
+        });
+    let depois = posicao("depoisDeConectar(resposta, alvo, nossoServidor)");
     assert!(
-        conectar.contains("nossoServidorEm === ultimoAlvo"),
-        "`conectar` não compara a dispensa com o alvo desta conexão, então ela \
-         valeria para qualquer endereço:\n{conectar}"
-    );
-    assert!(
-        !boot.contains("nossoServidorEm = true"),
-        "a dispensa voltou a ser um sim solto; ela tem de ser o endereço que \
-         esta janela hospeda, ou volta a vazar para a conexão seguinte"
-    );
-
-    // E quem a liga é só o hospedar, com o endereço que acabou de subir.
-    let ligam =
-        boot.matches("nossoServidorEm = ").count() - boot.matches("nossoServidorEm = null").count();
-    assert_eq!(
-        ligam, 1,
-        "a dispensa da conferência de chave é escrita em {ligam} lugares; só \
-         `hospedar` pode escrevê-la"
-    );
-    let hospedar = js_function(&boot, "async function hospedar(");
-    assert!(
-        hospedar.contains("nossoServidorEm = anfitriao.aqui"),
-        "`hospedar` não prende a dispensa ao endereço que acabou de subir: {hospedar}"
-    );
-    // **E a entrada vai ao mesmo `aqui`** (lote X da F5, rodada 2). A dispensa
-    // é `nossoServidorEm === ultimoAlvo`: entrando por outro endereço, quem
-    // hospeda volta a ser mandado conferir a própria chave. O sim de quem
-    // hospeda não depende mais disto: desde a impressão, o Rust reconhece o
-    // servidor daqui pela chave (`onde_estou_em`), entre por onde entrar.
-    assert!(
-        hospedar.contains("ultimoAlvo = anfitriao.aqui"),
-        "`hospedar` entra no próprio servidor por outro endereço que não o `aqui`: a \
-         dispensa de conferir a própria chave não casa com o alvo: {hospedar}"
-    );
-
-    // **E ela morre com a hospedagem.** Um endereço de rede local volta a ser de
-    // outra máquina no dia seguinte: mantê-la depois de o servidor cair seria
-    // dispensar a conferência justamente onde ela passa a valer. Desde a tarefa
-    // 19 da F7 quem derruba o servidor é o PARAR DE HOSPEDAR, e é ele que a zera
-    // (a tela de fim zerava quando o SAIR derrubava).
-    let parar = js_function(
-        &read("ui/camada-hospedagem.js"),
-        "async function pararDeHospedarOMeuServidor(",
+        entra < pergunta && pergunta < confere && confere < depois,
+        "a dispensa de `conectar` não é perguntada ao `onde_estou` depois do `connect` \
+         desta tentativa e antes da conferência dela:\n{conectar}"
     );
     assert!(
-        parar.contains("invoke(\"parar_de_hospedar\")") && parar.contains("nossoServidorEm = null"),
-        "nada zera a dispensa quando a hospedagem cai, e o mesmo endereço na mão \
-         de outra máquina herdaria a dispensa:\n{parar}"
+        conectar.contains("=== \"Guardado\""),
+        "a dispensa de `conectar` não exige o servidor guardado: a sala pessoal, ou \
+         qualquer resposta que não seja «Guardado», dispensaria a conferência:\n{conectar}"
     );
+    // **Nenhum endereço volta a dispensar a conferência.**
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        assert!(
+            !texto.contains("nossoServidorEm"),
+            "`{nome}` voltou a guardar o endereço do servidor daqui (`nossoServidorEm`): \
+             a dispensa de conferir a chave volta a valer para um endereço, e não para \
+             a chave"
+        );
+    }
 
     // **E a bandeira tem de decidir alguma coisa do outro lado.**
     //
@@ -16456,9 +16444,10 @@ fn o_aceite_de_quem_hospeda_e_gravado_para_o_endereco_onde_ele_esta() {
 /// dos três dizia em qual das duas a sessão está, e cada tela respondia do seu
 /// jeito.
 ///
-/// Esta é a metade do `main.rs`. A da casca (`tela-sessao.js` e
-/// `tela-boot.js`) entra quando esses arquivos passarem a perguntar ao
-/// `onde_estou`, na vez da F7 neles.
+/// As duas metades: a do `main.rs`, e a da casca, em que a `tela-sessao.js` (o
+/// SAIR, o `+`, a trilha) e a `tela-boot.js` (a dispensa de conferir a própria
+/// chave) perguntam ao `onde_estou`. «Há servidor no ar?» é outra pergunta (a
+/// portaria, a linha de ESTE SERVIDOR) e continua no `estado_do_servidor`.
 #[test]
 fn estou_no_meu_servidor_tem_uma_resposta_so() {
     let app = without_comments(&read("src/main.rs"));
@@ -16478,6 +16467,30 @@ fn estou_no_meu_servidor_tem_uma_resposta_so() {
         regra_da_lista.contains("porta_desta_maquina("),
         "a lista de visitados voltou a ler o endereço do jeito dela:\n{regra_da_lista}"
     );
+
+    // **A metade da casca.** Quem pergunta «estou no meu servidor?» pergunta ao
+    // `onde_estou`, e nenhum script guarda a resposta pelo critério dele.
+    for (arquivo, funcao) in [
+        ("ui/tela-sessao.js", "async function estouNoMeuServidor("),
+        ("ui/tela-boot.js", "async function conectar("),
+    ] {
+        let corpo = without_comments(&js_function(&read(arquivo), funcao));
+        assert!(
+            corpo.contains("invoke(\"onde_estou\")"),
+            "`{funcao}` (`{arquivo}`) deixou de perguntar ao `onde_estou` se esta \
+             sessão está no servidor daqui:\n{corpo}"
+        );
+    }
+    for nome in ui_files(".js") {
+        let texto = without_comments(&read(&format!("ui/{nome}")));
+        for criterio in ["nossoServidorEm", "hospedandoAqui"] {
+            assert!(
+                !texto.contains(criterio),
+                "`{nome}` voltou a responder «estou no meu servidor?» pelo critério dele \
+                 (`{criterio}`), e não pelo `onde_estou`"
+            );
+        }
+    }
 }
 
 /// O caminho entre pares tem onde ser consentido, da tela até o núcleo.

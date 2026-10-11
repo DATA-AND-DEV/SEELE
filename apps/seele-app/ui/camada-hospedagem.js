@@ -11,10 +11,9 @@
 // - VOLTAR AO MEU SERVIDOR entra pelo `conectar` de sempre, no endereço desta
 //   máquina, na porta em que ele atende;
 // - PARAR DE HOSPEDAR pergunta antes, porque derrubar tira todo mundo, e só
-//   então chama o `parar_de_hospedar`. Com o servidor vão o link da porta e a
-//   dispensa de conferir a própria chave (`nossoServidorEm`, de
-//   `tela-boot.js`): um endereço de rede local volta a ser de outra máquina no
-//   dia seguinte.
+//   então chama o `parar_de_hospedar`. Com o servidor vai o link da porta. A
+//   dispensa de conferir a própria chave não precisa ir: desde a tarefa 18 ela
+//   é da chave (`onde_estou`, em `conectar`), e não de um endereço guardado.
 //
 // A pergunta «há servidor no ar?» é do Rust, e é feita quando a entrada
 // aparece. No navegador, que não hospeda, a ponte responde que não há, e o
@@ -56,7 +55,6 @@ async function pararDeHospedarOMeuServidor() {
     console.warn("parar_de_hospedar:", falha);
   }
   esquecerOLinkDaPorta();
-  nossoServidorEm = null;
   await desenharMeuServidor();
 }
 

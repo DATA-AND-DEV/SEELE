@@ -12,6 +12,10 @@
 //    caixa da troca de servidor; dentro do próprio, não.
 // 5. **PARAR DE HOSPEDAR pergunta antes**, e só no sim chama o
 //    `parar_de_hospedar`; depois o bloco some.
+// 6. **A dispensa de conferir a chave é da chave, e não do endereço** (tarefa
+//    18 da F7). Entrar no próprio servidor passa direto porque o `onde_estou`
+//    reconhece a chave dele; o mesmo endereço com outra chave — outra máquina
+//    na mesma rede, no dia seguinte — pede a conferência.
 
 const chamados = () => window.__SEELE_HISTORICO.map(([cmd]) => cmd);
 
@@ -49,7 +53,21 @@ const aviso = document.getElementById("boot-meu-servidor-frase").textContent;
 relatar("a entrada: " + aviso);
 exigir(aviso.includes("VOCÊ CONTINUA HOSPEDANDO") && aviso.includes("Casa"), "o aviso não diz o que continua: «" + aviso + "»");
 
+// 6. O mesmo endereço, com outra chave: a conferência aparece.
+SEELE_RESPOSTAS.onde_estou = "Outro";
+document.getElementById("boot-voltar-ao-meu-servidor").click();
+await ate(() => visivel("tela-auth") === "VISIVEL" || visivel("tela-sessao") === "VISIVEL", 2000);
+exigir(
+  visivel("tela-auth") === "VISIVEL",
+  "o endereço do servidor daqui, com a chave de outro, entrou sem conferir: a dispensa ficou no endereço",
+);
+document.getElementById("auth-voltar").click();
+await ate(() => visivel("tela-boot") === "VISIVEL", 2000);
+exigir(visivel("tela-boot") === "VISIVEL", "voltar da conferência não levou à entrada");
+
+// 3, com a chave do servidor daqui: entra direto.
 delete SEELE_RESPOSTAS.onde_estou;
+await ate(() => visivel("boot-meu-servidor") === "VISIVEL", 1500);
 const antesDeVoltar = window.__SEELE_HISTORICO.length;
 document.getElementById("boot-voltar-ao-meu-servidor").click();
 await ate(() => chamados().slice(antesDeVoltar).includes("connect"), 2000);
