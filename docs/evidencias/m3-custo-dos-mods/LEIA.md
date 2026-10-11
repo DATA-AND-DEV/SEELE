@@ -123,6 +123,8 @@ testes).
 | `gerar-carga.py` | as variantes do MOD de carga, com os GIFs da capa |
 | `m3-carga/` | o modelo do MOD de carga sintético da API 6 |
 | `conferir-carga.rs` | confere uma variante contra o prelúdio da cópia |
+| `preparar-conserto-63.sh` | a `carga-cartoes` de novo, com o conserto da pendência 63 na cópia da campanha, que fica marcada `<commit>+6717dc2c` |
+| `remendar-conserto-63.py` | o `tela-sessao.js` do `6717dc2c` na cópia, letra por letra, e o número da voz do falante |
 
 ## A campanha da API 6 (tarefa 11 do plano da F3)
 
@@ -340,6 +342,22 @@ foi medido.
 ainda deixam a página a 98% — cada quadro refaz a lista inteira, e redesenhar
 só a linha que mudou ficou para depois (pendência 63). Contra o `sem-mod` de
 uma pessoa, a lista entraria na conta do MOD.
+
+**Para medir de novo** (decisão da orquestradora, 10/10: com 251, na build da
+M3 remendada com o conserto, e não com menos pessoas):
+
+```sh
+sh docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh /tmp/m3-6
+sh /tmp/m3-6/roteiro/campanha-api6.sh sem-mod sem-mod+voz carga-cartoes carga-cartoes+voz
+```
+
+O remendo é o diff do `6717dc2c`, conferido linha por linha contra o
+`tela-sessao.js` do `6e845e0d`, e a bancada `um-redesenho-por-quadro.cjs`
+reprova a cópia sem ele (251 retratos) e passa com ele (73 ms de atraso
+máximo). O app medido nos 24 fica guardado ao lado (`SEELE-6e845e0d.app`), e o
+`COMMIT_DA_MEDICAO` marcado faz o `resumir-api6.py` recusar ler a
+`carga-cartoes` nova contra o `sem-mod` velho: as referências são medidas de
+novo, na mesma build.
 
 **O teto de 256 alvos por ponto não congela sobre isto.** Com os cartões, a
 fila aparece a partir de 200 pessoas, abaixo do teto; e sem MOD nenhum, com
