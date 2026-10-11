@@ -34,15 +34,29 @@ para o instalador.
 Uso:
     python3 tools/carga-da-casca.py            # só a carga
     python3 tools/carga-da-casca.py --roteiro tools/roteiros/hospedar.js
+    python3 tools/carga-da-casca.py --roteiro tools/roteiros/a.js --roteiro tools/roteiros/b.js
+    python3 tools/carga-da-casca.py --autoteste   # os consertos da carga, sem navegador
+
+Com mais de um `--roteiro`, cada um roda com a sua carga, todos rodam mesmo
+depois de um vermelho, e o fim diz quais reprovaram e com que frase. É assim
+que o job `bancadas` do `ci.yml` e a bateria do `empacotar/publicar.sh` os
+rodam, cada um com a lista inteira da pasta (o teste
+`todo_roteiro_da_pasta_roda_no_ci_e_no_publicar`, em
+`xtask/src/check_runtime.rs`, reprova o roteiro que faltar numa delas).
 """
 
 import argparse
+import json
+import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import traceback
+import urllib.parse
 
 RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
@@ -160,8 +174,8 @@ window.__SEELE_VOLUMES = {};
 window.__SEELE_EM_SESSAO = false;
 // **Hospedar não é estar em sessão.** `connect` entra no servidor de outro e
 // não hospeda nada, e o `estado_do_servidor` do produto só diz `hospedando:
-// true` com uma `Hospedagem` aberta nesta janela. `disconnect` a derruba, como
-// no Rust.
+// true` com uma `Hospedagem` aberta nesta janela. `parar_de_hospedar` a
+// derruba, como no Rust; o `disconnect` não, desde a tarefa 19 da F7.
 window.__SEELE_HOSPEDANDO = false;
 // As mensagens de apps mais novos que o servidor hospedado pulou. Um roteiro
 // troca os dois números para ver a linha de ESTE SERVIDOR com cada um.
@@ -207,7 +221,13 @@ window.__TAURI__ = {
       if (cmd === "connect" || cmd === "hospedar") window.__SEELE_EM_SESSAO = true;
       if (cmd === "disconnect") window.__SEELE_EM_SESSAO = false;
       if (cmd === "hospedar") window.__SEELE_HOSPEDANDO = true;
-      if (cmd === "disconnect") window.__SEELE_HOSPEDANDO = false;
+      // Desde a tarefa 19 da F7, sair não derruba a hospedagem: quem derruba é
+      // o `parar_de_hospedar`, como no Rust.
+      if (cmd === "parar_de_hospedar") window.__SEELE_HOSPEDANDO = false;
+      // O servidor guardado no ar, no formato do `MeuServidor` de `main.rs`.
+      if (cmd === "meu_servidor") {
+        return window.__SEELE_HOSPEDANDO ? { alvo: "127.0.0.1:8383", nome: "Casa" } : null;
+      }
       if (cmd === "snapshot" && !window.__SEELE_EM_SESSAO) throw "NotConnected";
       // **Um comando pode recusar.** Sem isto o duble só sabia responder, e
       // metade da casca — toda tela que existe por causa de uma recusa — não
@@ -329,7 +349,11 @@ window.__TAURI__ = {
 
 CABECA_DO_ROTEIRO = """<script>
 window.__SEELE_RELATO = [];
-const relatar = (linha) => window.__SEELE_RELATO.push(linha);
+// **Sempre texto.** O relato viaja em JSON (ver `PE_DO_ROTEIRO`), que guarda o
+// tipo: um `relatar(n)` com um número chegava ao aparelho como número, e um
+// `relatar(undefined)` como `null`, e os dois o derrubavam. Antes do JSON, o
+// `join` convertia tudo em texto, e é isso que volta a valer.
+const relatar = (linha) => window.__SEELE_RELATO.push(String(linha));
 const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 const visivel = (id) => {
   const el = document.getElementById(id);
@@ -378,7 +402,11 @@ PE_DO_ROTEIRO = """
   } catch (erro) {
     if (!(erro && erro.reprovado)) relatar("ROTEIRO ESTOUROU: " + erro);
   }
-  console.log("SEELE-RELATO " + window.__SEELE_RELATO.join(" | "));
+  // **Codificado, para atravessar o registro do navegador inteiro.** O Chromium
+  // escreve a linha entre aspas duplas e não escapa as de dentro, e o aparelho
+  // lia até a primeira: uma aspa num relato **antes** de um `exigir` que
+  // reprovava escondia o REPROVADO, e a carga saía limpa (medido no lote RT).
+  console.log("SEELE-RELATO " + encodeURIComponent(JSON.stringify(window.__SEELE_RELATO)));
   console.log("SEELE-SEM-RESPOSTA " + [...window.__SEELE_SEM_RESPOSTA].sort().join(" "));
 }, 800);
 </script>
@@ -405,9 +433,74 @@ def navegador() -> str:
     raise SystemExit(2)
 
 
-def main() -> int:
+def rodar_navegador(comando: list[str], prazo_s: float) -> tuple[str, bool]:
+    """Roda o navegador e devolve o que ele escreveu e se o prazo venceu.
+
+    **Num grupo de processos só dele, e o prazo mata o grupo inteiro.** Um
+    roteiro que gira para sempre (`for (;;) {}`) prende o renderer, e o
+    navegador nunca sai, nem com o orçamento de tempo virtual. Sem prazo aqui,
+    quem parava a carga era o prazo de quem chamou, e o `kill -9` da etapa do
+    `publicar.sh` atinge só o subshell: o Python da carga e o
+    `chrome-headless-shell` ficavam órfãos, com o renderer a 100% de CPU, depois
+    de 40 minutos de espera (M2 da revisão do lote RT, medido de novo aqui).
+
+    O grupo, e não só o processo principal: o renderer, o da GPU e o
+    utilitário são filhos dele. No macOS, matar só o principal bastou (medido:
+    nenhum filho vivo 3 s depois); no Linux do CI não foi medido, e o grupo
+    cobre os dois sem depender de como cada sistema trata os filhos.
+    """
+    processo = subprocess.Popen(
+        comando,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        saida, erro = processo.communicate(timeout=prazo_s)
+        return saida + erro, False
+    except subprocess.TimeoutExpired:
+        matar_o_grupo(processo)
+        saida, erro = processo.communicate()
+        return (saida or "") + (erro or ""), True
+    except BaseException:
+        # **Qualquer outra saída antecipada mata o grupo também.** O grupo
+        # próprio põe o navegador fora do alcance do Ctrl+C do terminal, que vai
+        # só ao grupo da frente: interromper à mão uma carga com um roteiro que
+        # trava deixava 5 processos órfãos, o renderer a 100% (R2-M2 da revisão
+        # do lote RT, medido de novo aqui). O `KeyboardInterrupt` chega aqui
+        # sozinho; o SIGTERM, pelo tratador que `main` instala.
+        matar_o_grupo(processo)
+        raise
+
+
+def matar_o_grupo(processo: subprocess.Popen) -> None:
+    """Mata o grupo de processos do navegador, se ele ainda existir, e colhe o
+    principal, que é filho da carga e ficaria zumbi até ela sair."""
+    try:
+        os.killpg(processo.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        processo.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def terminar_pelo_sinal(numero: int, _quadro) -> None:
+    """O SIGTERM vira `SystemExit`, que passa pelo `except` de
+    `rodar_navegador` e mata o navegador antes de a carga sair. Sem isto, o
+    Python sai na hora e não limpa nada."""
+    raise SystemExit(128 + numero)
+
+
+def argumentos_da_carga() -> argparse.ArgumentParser:
+    """Os argumentos da carga, num lugar só: `main` os lê, e o autoteste
+    confere a leitura deles sem abrir navegador nenhum."""
     argumentos = argparse.ArgumentParser(description=__doc__)
-    argumentos.add_argument("--roteiro", type=pathlib.Path, default=None)
+    # Repetível. Antes, o segundo `--roteiro` tomava o lugar do primeiro em
+    # silêncio, e um vermelho na frente da lista sumia sem ter rodado.
+    argumentos.add_argument("--roteiro", type=pathlib.Path, action="append", default=None)
     argumentos.add_argument("--janela", default="1440,900")
     # Para comparar contra uma versão antiga: aponte para o `ui/` de um
     # `git worktree`, e o mesmo roteiro roda contra o passado.
@@ -418,8 +511,280 @@ def main() -> int:
     # Todo `console.*` da página, e não só os estouros: quando a casca falha em
     # silêncio, o `console.warn` é o que ela tinha para dizer.
     argumentos.add_argument("--tudo", action="store_true")
-    opcoes = argumentos.parse_args()
+    # Quanto um roteiro pode levar, em segundos de verdade, antes de a carga
+    # matar o navegador e reprová-lo. O orçamento de tempo virtual é de 5 s, e
+    # cada roteiro de hoje leva menos de um segundo neste Mac; 60 é folga para
+    # um runner lento, e não para um roteiro que gira para sempre (ver
+    # `rodar_navegador`).
+    argumentos.add_argument("--prazo-por-roteiro", type=float, default=60.0)
+    # Sem navegador: confere os consertos da carga contra o código dela (ver
+    # `autoteste`). O `cargo test -p xtask` o roda.
+    argumentos.add_argument("--autoteste", action="store_true")
+    return argumentos
 
+
+def main() -> int:
+    signal.signal(signal.SIGTERM, terminar_pelo_sinal)
+    argumentos = argumentos_da_carga()
+    opcoes = argumentos.parse_args()
+    if opcoes.autoteste:
+        return autoteste()
+    roteiros = opcoes.roteiro or []
+    if len(roteiros) > 1 and opcoes.foto:
+        argumentos.error("--foto guarda a foto de um roteiro só; com vários, "
+                         "cada um cobriria a do anterior.")
+    if len(roteiros) > 1:
+        return varios(opcoes, roteiros)
+    return 1 if carregar_sem_cair(opcoes, roteiros[0] if roteiros else None) else 0
+
+
+def carregar_sem_cair(opcoes: argparse.Namespace, roteiro: pathlib.Path | None) -> list[str]:
+    """`carregar`, e um defeito do aparelho num roteiro vira motivo daquele
+    roteiro, e não uma lista parada no meio.
+
+    **A carga nunca pode cair.** Um traceback no meio de `varios` parava a
+    lista ali: os roteiros seguintes não rodavam, e o resumo que diz quem
+    reprovou não saía (M1 da revisão do lote RT). O traceback continua sendo
+    escrito, porque é o diagnóstico. A falta do navegador não passa por aqui:
+    ela é `SystemExit`, e para tudo de propósito.
+    """
+    try:
+        return carregar(opcoes, roteiro)
+    except Exception as erro:  # noqa: BLE001 — qualquer defeito vira motivo
+        traceback.print_exc(file=sys.stdout)
+        motivo = f"a carga caiu neste roteiro: {type(erro).__name__}: {erro}"
+        print(motivo)
+        return [motivo]
+
+
+def varios(opcoes: argparse.Namespace, roteiros: list[pathlib.Path],
+           carregar_um=None) -> int:
+    """Todos os roteiros, cada um com a sua carga, e no fim quais reprovaram.
+
+    **Todos, e não até o primeiro vermelho**: saber que dois quebraram é outra
+    informação que saber que um quebrou. E o fim repete, numa linha por motivo,
+    o roteiro e a frase com que ele reprovou: a bateria do `publicar.sh` mostra
+    só as últimas linhas do que a etapa disse, e é ali que a frase tem de estar.
+    """
+    # **Dito antes de rodar, e sem esperar o buffer.** Um roteiro que pendura
+    # não reprova: quem o para é o prazo de quem chamou (`timeout-minutes` no
+    # CI, `PRAZO_DA_ETAPA_S` no `publicar.sh`), e a última linha escrita tem de
+    # ser o nome dele. Com a saída num arquivo ou num cano, o Python guardaria
+    # essa linha no buffer, e o `kill -9` do prazo a levaria junto.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    # Quem carrega cada roteiro: a carga de verdade, ou a de mentira do
+    # autoteste, que mede a lista sem abrir navegador.
+    carregar_um = carregar_um or carregar_sem_cair
+    reprovados = []
+    for roteiro in roteiros:
+        print(f"roteiro: rodando {roteiro}")
+        if roteiro.is_file():
+            motivos = carregar_um(opcoes, roteiro)
+        else:
+            motivos = ["o arquivo do roteiro não existe"]
+            print(motivos[0])
+        if motivos:
+            reprovados.append((roteiro, motivos))
+        print()
+    if not reprovados:
+        print(f"roteiros: os {len(roteiros)} passaram.")
+        return 0
+    print(f"roteiros: {len(reprovados)} de {len(roteiros)} reprovaram:")
+    for roteiro, motivos in reprovados:
+        for motivo in motivos:
+            print(f"  {roteiro}: {motivo}")
+    return 1
+
+
+def ler_saida(tudo: str) -> tuple[list[list[str]], list[str], list[str], list[str]]:
+    """O que a página disse ao navegador: os relatos, as partes deles, os
+    estouros e as falhas do roteiro (um REPROVADO, ou um roteiro que estourou).
+
+    Uma função à parte para o autoteste ler, sem navegador, uma linha do console
+    no formato do Chromium pelo mesmo código que lê a de verdade.
+    """
+    # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
+    # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
+    estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
+    # Cada relato é a lista que o roteiro relatou, em JSON e codificada para URL
+    # (ver `PE_DO_ROTEIRO`): o código não tem aspa nem espaço, e o que o roteiro
+    # escreveu volta inteiro, com aspas, quebras e « | » dentro.
+    relatos = [json.loads(urllib.parse.unquote(codigo))
+               for codigo in re.findall(r"SEELE-RELATO ([^\s\"]*)", tudo)]
+    partes = [parte for relato in relatos for parte in relato]
+    falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
+    return relatos, partes, estouros, falhas
+
+
+def autoteste() -> int:
+    """Os consertos da carga, conferidos contra o código dela e sem navegador.
+
+    M3 da revisão do lote RT: o relato que atravessa a aspa e os vários
+    `--roteiro` numa chamada só se provavam por reversão à mão, e o segundo,
+    revertido, deixaria o CI verde rodando um roteiro só. Cada caso abaixo
+    reprova se o seu conserto for revertido (as reversões estão no relatório do
+    lote). O `cargo test -p xtask` roda isto
+    (`a_carga_da_casca_passa_no_proprio_autoteste`, em
+    `xtask/src/check_runtime.rs`).
+    """
+    import contextlib
+    import io
+    import time
+
+    roteiro_a = RAIZ / "tools" / "roteiros" / "perfil-entrada.js"
+    roteiro_b = RAIZ / "tools" / "roteiros" / "perfil-sessao.js"
+
+    def a_aspa() -> str | None:
+        # A linha como o Chromium a escreve: entre aspas, sem escapar as de
+        # dentro. O código é o que `PE_DO_ROTEIRO` produz: `JSON.stringify` e
+        # `encodeURIComponent` (que deixa de fora `-_.!~*'()`).
+        dito = ['com "aspas" aqui', "REPROVADO: depois da aspa"]
+        codigo = urllib.parse.quote(json.dumps(dito, ensure_ascii=False, separators=(",", ":")),
+                                    safe="-_.!~*'()")
+        linha = (f'[1010/200000.000000:INFO:CONSOLE(4938)] "SEELE-RELATO {codigo}", '
+                 "source: file:///tmp/x/ui/index.html (4938)")
+        _, partes, _, falhas = ler_saida(linha)
+        if partes != dito:
+            return f"o relato voltou como {partes!r}, e não como {dito!r}"
+        if falhas != ["REPROVADO: depois da aspa"]:
+            return f"o REPROVADO depois da aspa não virou falha: {falhas!r}"
+        return None
+
+    def os_argumentos() -> str | None:
+        opcoes = argumentos_da_carga().parse_args(
+            ["--roteiro", str(roteiro_a), "--roteiro", str(roteiro_b)])
+        if opcoes.roteiro != [roteiro_a, roteiro_b]:
+            return f"dois --roteiro viraram {opcoes.roteiro!r}"
+        return None
+
+    def a_lista() -> str | None:
+        rodados = []
+
+        def de_mentira(_opcoes, roteiro):
+            rodados.append(roteiro)
+            return ["REPROVADO: o primeiro"] if roteiro == roteiro_a else []
+
+        dito = io.StringIO()
+        with contextlib.redirect_stdout(dito):
+            codigo = varios(argparse.Namespace(), [roteiro_a, roteiro_b], de_mentira)
+        if rodados != [roteiro_a, roteiro_b]:
+            return f"a lista rodou {rodados!r}, e não os dois"
+        if codigo != 1:
+            return f"um roteiro reprovou e a lista saiu com {codigo}"
+        if f"  {roteiro_a}: REPROVADO: o primeiro" not in dito.getvalue():
+            return "o fim da lista não diz o roteiro que reprovou e a frase"
+        return None
+
+    def nao_cai() -> str | None:
+        global carregar
+        de_verdade = carregar
+
+        def que_cai(_opcoes, _roteiro):
+            raise RuntimeError("um defeito do aparelho")
+
+        carregar = que_cai
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                motivos = carregar_sem_cair(argparse.Namespace(), roteiro_a)
+        except Exception as erro:  # noqa: BLE001 — é o que se mede
+            return f"a carga caiu: {type(erro).__name__}: {erro}"
+        finally:
+            carregar = de_verdade
+        if motivos != ["a carga caiu neste roteiro: RuntimeError: um defeito do aparelho"]:
+            return f"o defeito virou {motivos!r}"
+        return None
+
+    def o_prazo() -> str | None:
+        # Um «navegador» que abre um filho, diz o número dele e dorme: o prazo
+        # tem de matar os dois, como mata o renderer do de verdade.
+        falso = ("import subprocess, sys, time; "
+                 "filho = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                 "print(filho.pid, flush=True); time.sleep(30)")
+        comeco = time.monotonic()
+        saida, venceu = rodar_navegador([sys.executable, "-c", falso], 1.0)
+        gasto = time.monotonic() - comeco
+        if not venceu:
+            return f"o prazo de 1 s não venceu, e o «navegador» rodou {gasto:.1f} s"
+        if gasto > 10:
+            return (f"o prazo venceu, mas a carga esperou {gasto:.1f} s: um filho do "
+                    "«navegador» continuou vivo e segurou a saída")
+        filho = int(saida.split()[0])
+        for _ in range(30):
+            try:
+                os.kill(filho, 0)
+            except ProcessLookupError:
+                return None
+            time.sleep(0.1)
+        os.kill(filho, signal.SIGKILL)
+        return f"o filho do navegador ({filho}) continuou vivo depois do prazo"
+
+    def o_sinal() -> str | None:
+        # R2-M2: um SIGTERM no meio da espera, mandado pela própria carga a si
+        # mesma 0,5 s depois de abrir o «navegador», tem de matar o grupo
+        # dele antes de a carga sair. O «navegador» escreve num arquivo o
+        # número dele e o do filho, porque a saída se perde com o sinal.
+        with tempfile.TemporaryDirectory() as pasta:
+            numeros = pathlib.Path(pasta) / "numeros"
+            falso = ("import subprocess, sys, os, time; "
+                     "filho = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                     f"open({str(numeros)!r}, 'w').write(f'{{os.getpid()}} {{filho.pid}}'); "
+                     "time.sleep(30)")
+            anterior = signal.signal(signal.SIGALRM,
+                                     lambda *_: os.kill(os.getpid(), signal.SIGTERM))
+            signal.setitimer(signal.ITIMER_REAL, 0.5)
+            try:
+                rodar_navegador([sys.executable, "-c", falso], 30.0)
+                return "o SIGTERM não interrompeu a espera pelo «navegador»"
+            except SystemExit:
+                pass
+            finally:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                signal.signal(signal.SIGALRM, anterior)
+            vivos = []
+            for numero in numeros.read_text().split():
+                for _ in range(30):
+                    try:
+                        os.kill(int(numero), 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.1)
+                else:
+                    vivos.append(numero)
+                    os.kill(int(numero), signal.SIGKILL)
+            if vivos:
+                return f"depois do SIGTERM, continuaram vivos: {' '.join(vivos)}"
+            return None
+
+    casos = [
+        ("o relato atravessa a aspa", a_aspa),
+        ("vários --roteiro numa chamada", os_argumentos),
+        ("a lista roda todos e diz quem reprovou", a_lista),
+        ("a carga não cai", nao_cai),
+        ("o prazo mata o navegador e os filhos", o_prazo),
+        ("um SIGTERM no meio mata o navegador e os filhos", o_sinal),
+    ]
+    falharam = 0
+    for nome, caso in casos:
+        try:
+            falha = caso()
+        except Exception as erro:  # noqa: BLE001 — o caso que estoura reprova
+            falha = f"estourou: {type(erro).__name__}: {erro}"
+        if falha:
+            falharam += 1
+            print(f"autoteste: {nome}: FALHOU — {falha}")
+        else:
+            print(f"autoteste: {nome}: ok")
+    if falharam:
+        print(f"autoteste: {falharam} de {len(casos)} falharam")
+        return 1
+    print(f"autoteste: os {len(casos)} passaram")
+    return 0
+
+
+def carregar(opcoes: argparse.Namespace, roteiro_pedido: pathlib.Path | None) -> list[str]:
+    """Uma carga, com um roteiro ou sem nenhum. Escreve o que viu e devolve os
+    motivos da reprovação: os estouros e as falhas do roteiro, ou nada."""
     with tempfile.TemporaryDirectory() as temporaria:
         pasta = pathlib.Path(temporaria) / "ui"
         shutil.copytree(opcoes.casca, pasta)
@@ -427,8 +792,8 @@ def main() -> int:
         texto = pagina.read_text()
         corte = texto.index("<script src=")
         roteiro = ""
-        if opcoes.roteiro:
-            corpo = opcoes.roteiro.read_text()
+        if roteiro_pedido:
+            corpo = roteiro_pedido.read_text()
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
         duble = (
             DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
@@ -437,36 +802,41 @@ def main() -> int:
         )
         pagina.write_text(texto[:corte] + duble + texto[corte:] + roteiro)
 
-        saida = subprocess.run(
+        tudo, venceu = rodar_navegador(
             [
                 navegador(),
                 "--headless",
                 "--disable-gpu",
+                # **Como o Playwright o abre.** As bancadas do mesmo job do CI
+                # rodam o Chromium pelo Playwright, que passa `--no-sandbox`
+                # sempre que não se pede o contrário (`chromiumSandbox !== true`
+                # no `playwright-core`). Este aparelho abre o navegador direto,
+                # e o Ubuntu 24.04 restringe por AppArmor os espaços de nome
+                # sem privilégio de que a caixa de areia do Chromium precisa: se
+                # o runner do Actions mantém essa restrição não foi medido, e o
+                # que a página carrega é uma cópia da casca deste repositório.
+                "--no-sandbox",
                 f"--window-size={opcoes.janela}",
                 "--virtual-time-budget=5000",
                 "--screenshot=" + str(pasta / "foto.png"),
                 f"file://{pagina}",
             ],
-            capture_output=True,
-            text=True,
+            opcoes.prazo_por_roteiro,
         )
 
-        if opcoes.foto:
+        if opcoes.foto and (pasta / "foto.png").exists():
             shutil.copy(pasta / "foto.png", opcoes.foto)
 
-    tudo = saida.stdout + saida.stderr
-    # `(in promise)` também: uma rejeição que ninguém pegou é um estouro, e
-    # `desenharVersoes` estourou assim sem que este aparelho dissesse nada.
-    estouros = sorted(set(re.findall(r"Uncaught (?:\(in promise\) )?[A-Za-z]*Error: [^\"]*", tudo)))
-    relatos = re.findall(r"SEELE-RELATO ([^\"]*)", tudo)
-    partes = [parte for linha in relatos for parte in linha.split(" | ")]
+    relatos, partes, estouros, falhas = ler_saida(tudo)
     sem_resposta = sorted({c for linha in re.findall(r"SEELE-SEM-RESPOSTA ([^\"]*)", tudo)
                            for c in linha.split()})
     # Um roteiro que reprovou, que estourou no meio, ou que nem chegou ao fim
     # dentro do orçamento de tempo não é uma carga limpa — e as três coisas
     # terminavam com «carga limpa» antes.
-    falhas = [p for p in partes if p.startswith(("REPROVADO", "ROTEIRO ESTOUROU"))]
-    if opcoes.roteiro and not relatos:
+    if venceu:
+        falhas.append(f"o roteiro não terminou em {opcoes.prazo_por_roteiro:g} s, e o "
+                      "navegador que a carga abriu foi morto com os filhos dele")
+    elif roteiro_pedido and not relatos:
         falhas.append("o roteiro não chegou ao fim: nenhum relato saiu da página")
 
     if opcoes.tudo:
@@ -488,9 +858,9 @@ def main() -> int:
         for f in falhas:
             print(f"  {f}")
     if estouros or falhas:
-        return 1
+        return estouros + falhas
     print("\ncarga limpa: nenhum script estourou.")
-    return 0
+    return []
 
 
 if __name__ == "__main__":

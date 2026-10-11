@@ -182,6 +182,56 @@ pub enum Falha {
     /// will actually ask.
     #[error("mod yard went past its size ceiling")]
     QuintalCheio,
+    /// A resposta de um `aoPedir` passou de 1 MiB. Variante própria, e não o
+    /// `QuintalCheio` de antes: o MOD recebe o quintal cheio pelo nome, e uma
+    /// resposta grande não é um quintal cheio.
+    #[error("mod reply went past its size ceiling")]
+    RespostaGrandeDemais,
+}
+
+/// **O quintal de um MOD como ele está no JavaScript**, e os bytes dele, numa
+/// leitura só: a da gravação ([`Anfitriao::recolher_quintal`], que recusa
+/// acima de [`Anfitriao::TETO_DO_QUINTAL`]) e a de `dados.uso()`, que a metade
+/// de servidor lê (pedido da MESA, item 9). Chave mais valor, em UTF-8 — os
+/// bytes que o banco guarda. As chaves próprias do objeto, e só elas: o `uso` e
+/// o `teto` moram no protótipo, e não são gravados.
+fn ler_o_quintal<'js>(
+    dados: &rquickjs::Object<'js>,
+) -> rquickjs::Result<(BTreeMap<String, String>, usize)> {
+    let mut quintal = BTreeMap::new();
+    let mut bytes = 0_usize;
+    for par in dados.props::<String, String>() {
+        let (chave, valor) = par?;
+        bytes = bytes
+            .saturating_add(chave.len())
+            .saturating_add(valor.len());
+        quintal.insert(chave, valor);
+    }
+    Ok((quintal, bytes))
+}
+
+/// O `dados` de uma chamada: o quintal como objeto, com `uso()` e `teto` no
+/// protótipo, fora das chaves dele.
+fn quintal_em_js<'js>(
+    ctx: &rquickjs::Ctx<'js>,
+    quintal: &BTreeMap<String, String>,
+) -> rquickjs::Result<rquickjs::Object<'js>> {
+    let proto = rquickjs::Object::new(ctx.clone())?;
+    proto.set("teto", Anfitriao::TETO_DO_QUINTAL)?;
+    proto.set(
+        "uso",
+        Function::new(
+            ctx.clone(),
+            |rquickjs::function::This(dados): rquickjs::function::This<rquickjs::Object<'js>>|
+             -> rquickjs::Result<usize> { Ok(ler_o_quintal(&dados)?.1) },
+        )?,
+    )?;
+    let dados = rquickjs::Object::new(ctx.clone())?;
+    dados.set_prototype(Some(&proto))?;
+    for (chave, valor) in quintal {
+        dados.set(chave.as_str(), valor.as_str())?;
+    }
+    Ok(dados)
 }
 
 /// O ` at "…"` de uma falha, quando há onde.
@@ -852,10 +902,7 @@ impl Anfitriao {
                     Lancado::na_chamada,
                 )
             };
-            let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
-            for (chave, valor) in quintal.iter() {
-                dados.set(chave.as_str(), valor.as_str()).map_err(falhou)?;
-            }
+            let dados = quintal_em_js(&ctx, quintal).map_err(falhou)?;
             ctx.globals().set("dados", dados).map_err(falhou)?;
 
             let Ok(f) = ctx.globals().get::<_, Function<'_>>("aoAcontecer") else {
@@ -907,10 +954,7 @@ impl Anfitriao {
                     Lancado::na_chamada,
                 )
             };
-            let dados = rquickjs::Object::new(ctx.clone()).map_err(falhou)?;
-            for (k, v) in quintal.iter() {
-                dados.set(k.as_str(), v.as_str()).map_err(falhou)?;
-            }
+            let dados = quintal_em_js(&ctx, quintal).map_err(falhou)?;
             ctx.globals().set("dados", dados).map_err(falhou)?;
             let f = ctx
                 .globals()
@@ -927,7 +971,7 @@ impl Anfitriao {
         let resposta = resposta.inspect_err(|_| self.esquecer_o_declarado())?;
         if resposta.len() > 1024 * 1024 {
             self.esquecer_o_declarado();
-            return Err(Falha::QuintalCheio);
+            return Err(Falha::RespostaGrandeDemais);
         }
         self.recolher_quintal(id, quintal)
             .inspect_err(|_| self.esquecer_o_declarado())?;
@@ -1035,27 +1079,19 @@ impl Anfitriao {
             let Ok(dados) = ctx.globals().get::<_, rquickjs::Object<'_>>("dados") else {
                 return Ok(());
             };
-            let mut novo = BTreeMap::new();
-            let mut bytes = 0_usize;
-            for par in dados.props::<String, String>() {
-                // Ler o quintal pode rodar um getter do MOD: a falha é lida
-                // como a de uma chamada, sob o mesmo teto.
-                let (chave, valor) = par.map_err(|erro| {
-                    falha_da_volta(
-                        &ctx,
-                        &hospede.passos,
-                        self.teto_de_consultas,
-                        &erro,
-                        Lancado::na_chamada,
-                    )
-                })?;
-                bytes = bytes
-                    .saturating_add(chave.len())
-                    .saturating_add(valor.len());
-                if bytes > Self::TETO_DO_QUINTAL {
-                    return Err(Falha::QuintalCheio);
-                }
-                novo.insert(chave, valor);
+            // Ler o quintal pode rodar um getter do MOD: a falha é lida como a
+            // de uma chamada, sob o mesmo teto. A conta é a de `dados.uso()`.
+            let (novo, bytes) = ler_o_quintal(&dados).map_err(|erro| {
+                falha_da_volta(
+                    &ctx,
+                    &hospede.passos,
+                    self.teto_de_consultas,
+                    &erro,
+                    Lancado::na_chamada,
+                )
+            })?;
+            if bytes > Self::TETO_DO_QUINTAL {
+                return Err(Falha::QuintalCheio);
             }
             *quintal = novo;
             Ok(())
@@ -2560,5 +2596,63 @@ mod tests {
             .chamar("seele/mesa", "PersonJoined", "{}", &mut BTreeMap::new())
             .expect("o momento falhou");
         assert_eq!(anfitriao.tomar_avisos().len(), 1);
+    }
+
+    /// **O orçamento do quintal, legível pela metade de servidor** (pedido da
+    /// MESA, item 9; rascunho da API 6, §8): `dados.uso()` dá os bytes como a
+    /// gravação os conta — chave mais valor, em UTF-8 —, e `dados.teto` é o teto
+    /// da gravação. Nenhum dos dois vira chave do quintal.
+    #[test]
+    fn o_quintal_diz_o_uso_e_o_teto() {
+        let mut anfitriao = quem_avisa(
+            "globalThis.aoPedir = () => { dados.nome = 'ç'; \
+               return JSON.stringify({ uso: dados.uso(), teto: dados.teto }); }; \
+             globalThis.aoAcontecer = () => { dados.visto = String(dados.uso()); };",
+        );
+        let mut quintal = BTreeMap::from([("ab".to_owned(), "xyz".to_owned())]);
+        let resposta = anfitriao
+            .pedir(
+                "seele/mesa",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut quintal,
+            )
+            .expect("o pedido");
+        let lido: serde_json::Value = serde_json::from_str(&resposta).expect("JSON");
+        // «ab» e «xyz», 5 bytes; «nome» e «ç», 4 e 2 (UTF-8).
+        assert_eq!(lido["uso"], 11, "o uso não é a conta da gravação: {lido}");
+        assert_eq!(lido["teto"], Anfitriao::TETO_DO_QUINTAL, "{lido}");
+        assert_eq!(
+            quintal.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["ab", "nome"],
+            "o uso ou o teto viraram chave do quintal"
+        );
+        // Pelo caminho dos momentos também.
+        anfitriao
+            .chamar("seele/mesa", "PersonJoined", "{}", &mut quintal)
+            .expect("o momento");
+        assert_eq!(quintal.get("visto").map(String::as_str), Some("11"));
+    }
+
+    /// **Uma resposta grande não é um quintal cheio.** O `pedir` recusava a
+    /// resposta acima de 1 MiB com `QuintalCheio`, e a recusa que o MOD passa
+    /// a receber pelo nome diria «quintal cheio» a quem só respondeu demais.
+    #[test]
+    fn uma_resposta_grande_nao_e_quintal_cheio() {
+        let mut anfitriao = quem_avisa("globalThis.aoPedir = () => 'a'.repeat(1024 * 1024 + 1);");
+        let falha = anfitriao
+            .pedir(
+                "seele/mesa",
+                seele_proto::ids::PersonId(7),
+                "{}",
+                "{}",
+                &mut BTreeMap::new(),
+            )
+            .expect_err("a resposta grande passou");
+        assert!(
+            !matches!(falha, Falha::QuintalCheio),
+            "a resposta grande saiu como quintal cheio: {falha:?}"
+        );
     }
 }

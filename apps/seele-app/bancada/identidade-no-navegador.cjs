@@ -27,7 +27,17 @@
 //    pela validade do link;
 // 6. o `persist()` é pedido antes de a chave nascer;
 // 7. o fragmento sai da barra na carga, e o link da carga é entregue uma vez;
-// 8. quem já é conhecido entra pela chave, sem gastar o convite.
+// 8. quem já é conhecido entra pela chave, sem gastar o convite;
+// 9. **a casca de verdade**: a página inteira (`ui/`), sem casca injetada, com
+//    e sem o `CELULAR` da casca do celular. O `numa-aba` só no celular. Os
+//    casos de cima injetam a casca e não exercitam o caminho padrão: fixá-lo em
+//    «larga» passava por eles (achado da orquestradora na décima segunda);
+// 10. **os SERVIDORES DESTE APARELHO**: o `conhecidos()` do mais recente ao
+//     mais antigo, com o nome que chega depois (`lembrarONome`), e o
+//     `entrarNoConhecido` pela chave, sem convite, e com `link-vencido` quando
+//     os hashes guardados venceram, sem bater em servidor nenhum;
+// 11. **a identidade da página** (`identidadeDaPagina()`): uma só, que abre
+//     sozinha o link da carga, e a casca não vê o token.
 //
 // Sai com 1 no primeiro caso que falhar, dizendo qual.
 
@@ -58,14 +68,17 @@ const confere = (caso, condicao, detalhe) => {
 };
 
 const pasta = fs.mkdtempSync(path.join(os.tmpdir(), "identidade-no-navegador-"));
-for (const nome of ["ponte-web.js", "identidade-web.js"]) {
+for (const nome of ["ponte-web.js", "voz-web.js", "identidade-web.js"]) {
   fs.copyFileSync(path.join(raiz, "ui", nome), path.join(pasta, nome));
 }
 fs.copyFileSync(caminhoDoWasm, path.join(pasta, "seele_web.wasm"));
+// A página inteira, para o caso 9: uma cópia da `ui/`, servida em `/ui/`.
+fs.cpSync(path.join(raiz, "ui"), path.join(pasta, "ui"), { recursive: true });
 fs.writeFileSync(
   path.join(pasta, "index.html"),
   `<!doctype html><meta charset="utf-8"><title>identidade</title>
 <script src="ponte-web.js"></script>
+<script src="voz-web.js"></script>
 <script src="identidade-web.js"></script>
 <script src="bancada.js"></script>`,
 );
@@ -161,7 +174,15 @@ window.tudoQueAOrigemGuarda = async () => {
 );
 
 const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; frame-ancestors 'none'";
-const TIPOS = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm" };
+const TIPOS = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
+  ".png": "image/png",
+  ".wasm": "application/wasm",
+};
 
 function servir() {
   return http.createServer((pedido, resposta) => {
@@ -171,7 +192,11 @@ function servir() {
       resposta.writeHead(404).end();
       return;
     }
-    resposta.writeHead(200, { "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream", "content-security-policy": CSP });
+    // A página inteira vai sem o cabeçalho da página mínima, como na
+    // `ponte-sem-gesto.cjs`: ela tem a política dela.
+    const cabecalhos = { "content-type": TIPOS[path.extname(nome)] ?? "application/octet-stream" };
+    if (!nome.startsWith("ui/")) cabecalhos["content-security-policy"] = CSP;
+    resposta.writeHead(200, cabecalhos);
     resposta.end(fs.readFileSync(arquivo));
   });
 }
@@ -271,6 +296,9 @@ async function principal() {
     const hellos = await rodar(() => window.servidor.entradas.splice(0));
     confere("1", caso1.primeira.erro === "mods-a-aceitar" && caso1.primeira.conjunto === "c1", `a primeira entrada: ${JSON.stringify(caso1.primeira)}`);
     confere("1", caso1.depois.ok === true, `a volta depois do aceite: ${JSON.stringify(caso1.depois)}`);
+    // A resposta do `persist()` chega com o `{ ok: true }`: com a tentativa
+    // encerrada, o `ler()` já não a tem (achado da F8).
+    confere("6", caso1.depois.persistencia === caso1.persistencia, `a entrada que deu certo não trouxe a persistência: ${JSON.stringify(caso1.depois)}`);
     confere("1", hellos.length === 2 && hellos.every((h) => h.token === TOKEN), `a volta não levou o mesmo token: ${JSON.stringify(hellos.map((h) => h.token))}`);
     confere("1", hellos.length === 2 && hellos[0].chave === hellos[1].chave && hellos[0].chave.length === 64, "a volta não levou a mesma chave");
     confere("1", hellos.length === 2 && hellos[0].hashes[0] === HASH, `os hashes do link não chegaram ao alvo: ${JSON.stringify(hellos[0])}`);
@@ -293,6 +321,31 @@ async function principal() {
     const volta = await rodar(() => window.servidor.entradas.splice(0));
     confere("8", conhecido.estado === "ja-conhecido" && conhecido.entrou.ok === true, `o servidor já conhecido: ${JSON.stringify(conhecido)}`);
     confere("8", volta.length === 1 && volta[0].token === null && volta[0].chave === hellos[0].chave, `quem já é conhecido gastou o convite ou trocou de chave: ${JSON.stringify(volta)}`);
+
+    // 10. Os SERVIDORES DESTE APARELHO.
+    const OUTRO = "55".repeat(32);
+    const aparelho = await rodar(async ([l, impressao, outro]) => {
+      // Um segundo servidor, entrado depois: ele vem primeiro na lista.
+      const depois = await window.criar({ agora: Date.now() + 60_000 });
+      await depois.abrir(l);
+      const entrou = await depois.entrar("ana");
+      const identidade = await window.criar();
+      const antesDoNome = await identidade.conhecidos();
+      const lembrou = await identidade.lembrarONome(impressao, "Casa");
+      const lista = await identidade.conhecidos();
+      const conhecida = await identidade.entrarNoConhecido(impressao, "ana");
+      const vencida = await (await window.criar({ agora: Date.now() + 400 * 86400_000 })).entrarNoConhecido(impressao, "ana");
+      const desconhecida = await identidade.entrarNoConhecido("66".repeat(32), "ana");
+      return { entrou, antesDoNome, lembrou, lista, conhecida, vencida, desconhecida, outro };
+    }, [link({ fp: OUTRO }), IMPRESSAO, OUTRO]);
+    const pelaChave = await rodar(() => window.servidor.entradas.splice(0));
+    const [primeiro, segundo] = aparelho.lista;
+    confere("10", aparelho.lista.length === 2 && primeiro.impressao === OUTRO && segundo.impressao === IMPRESSAO, `a lista não vem do mais recente ao mais antigo: ${JSON.stringify(aparelho.lista)}`);
+    confere("10", aparelho.antesDoNome.every((s) => s.nome === null) && aparelho.lembrou === true && segundo.nome === "Casa", `o nome que chega depois: ${JSON.stringify(aparelho)}`);
+    confere("10", aparelho.lista.every((s) => s.podeEntrar === true && typeof s.visto === "number"), `o podeEntrar e o visto: ${JSON.stringify(aparelho.lista)}`);
+    confere("10", aparelho.conhecida.ok === true, `entrar no conhecido: ${JSON.stringify(aparelho.conhecida)}`);
+    confere("10", aparelho.vencida.erro === "link-vencido" && aparelho.desconhecida.erro === "recusado", `o vencido e o desconhecido: ${JSON.stringify(aparelho)}`);
+    confere("10", pelaChave.length === 2 && pelaChave[1].token === null && pelaChave[1].chave === hellos[0].chave && pelaChave[1].impressao === IMPRESSAO, `entrar no conhecido gastou convite, trocou de chave, ou o vencido bateu no servidor: ${JSON.stringify(pelaChave)}`);
 
     // 3. O agoraNao() esquece.
     const outra = "11".repeat(32);
@@ -337,6 +390,59 @@ async function principal() {
     }, [link({ fp: "33".repeat(32), ate }), ate]);
     confere("5", vencida.erro === "convite-vencido", `o convite que venceu na entrada: ${JSON.stringify(vencida)}`);
     await rodar(() => window.servidor.entradas.splice(0));
+
+    // 11. A identidade da página: abre o link da carga sozinha, e a casca não
+    // vê o token. O analisador do produto não tem origem até o D-web-2, então o
+    // link cai em `outra-origem`, e é o que se espera dela hoje.
+    const daPagina = await contexto.newPage();
+    daPagina.on("pageerror", (erro) => doConsole.push(`daPagina: pageerror: ${erro.message}`));
+    await daPagina.goto(`${endereco}#198.51.100.7:8383?fp=${IMPRESSAO}&convite=${TOKEN}`);
+    const pagina11 = await daPagina.evaluate(async () => {
+      const identidade = await identidadeDaPagina();
+      const outra = await identidadeDaPagina();
+      return { lida: identidade.ler(), mesma: identidade === outra, sobrou: tomarOLinkDaCarga(), url: location.href };
+    });
+    confere("11", pagina11.mesma, "a página tem duas identidades");
+    confere("11", pagina11.lida && pagina11.lida.estado === "outra-origem", `a identidade da página não abriu o link da carga: ${JSON.stringify(pagina11.lida)}`);
+    confere("11", pagina11.sobrou === null, "o link da carga continua à mão depois de a identidade abri-lo");
+    confere("11", !JSON.stringify(pagina11).includes(TOKEN), `o token apareceu para quem lê a identidade: ${JSON.stringify(pagina11)}`);
+    await daPagina.close();
+
+    // 9. A casca de verdade, sem nada injetado: a escolha guardada decide a
+    // marca, a casca do celular sobe e põe o `CELULAR`, e a identidade pergunta
+    // por ele pelo caminho padrão.
+    const lido = {
+      alvo: "198.51.100.7:8383",
+      alternativos: [],
+      impressao: "44".repeat(32),
+      convite: TOKEN,
+      sala: null,
+      versao: "1.0",
+      hashes: [HASH],
+      ate: FUTURO,
+    };
+    for (const [casca, esperado, opcoes] of [
+      ["celular", "numa-aba", { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }],
+      ["larga", "pronto", { viewport: { width: 1280, height: 860 } }],
+    ]) {
+      const real = await navegador.newContext(opcoes);
+      const pagina = await real.newPage();
+      pagina.on("pageerror", (erro) => doConsole.push(`${casca}: pageerror: ${erro.message}`));
+      await pagina.addInitScript((c) => localStorage.setItem("seele.casca", c), casca);
+      await pagina.goto(`${endereco}ui/index.html`);
+      const visto = await pagina.evaluate(async (l) => {
+        const identidade = criarIdentidadeDoNavegador({ analisar: () => ({ link: l }), conectar: async () => ({}) });
+        return {
+          marca: document.documentElement.dataset.casca,
+          celular: typeof CELULAR === "object" && CELULAR !== null,
+          estado: (await identidade.abrir("o link da bancada")).estado,
+        };
+      }, lido);
+      confere("9", visto.marca === casca, `a página da casca ${casca} saiu com a marca ${visto.marca}`);
+      confere("9", visto.celular === (casca === "celular"), `o CELULAR da casca ${casca}: ${visto.celular}`);
+      confere("9", visto.estado === esperado, `na casca ${casca}, sem nada injetado, o link abriu ${visto.estado}, e não ${esperado}`);
+      await real.close();
+    }
 
     confere("console", doConsole.length === 0, doConsole.join(" | "));
   } finally {

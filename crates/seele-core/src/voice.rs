@@ -36,7 +36,9 @@ use seele_audio::playout::PlayoutClock;
 use seele_audio::relogio::{carimbo_do_quadro, RelogioDeMidia};
 use seele_audio::resample::RateConverter;
 use seele_audio::supervisor::{AvisoDeAparelho, CicloDoAparelho, DeviceState, Reabertura};
-use seele_audio::telemetry::{AudioTelemetry, FalhaLocal, LocalTelemetry, SourceTelemetry};
+use seele_audio::telemetry::{
+    AudioTelemetry, CabecalhosRecusados, FalhaLocal, LocalTelemetry, SourceTelemetry,
+};
 use seele_audio::{FRAME_MS, FRAME_SAMPLES, SAMPLE_RATE_HZ};
 use seele_proto::ids::{ScreenId, Ssrc};
 use seele_proto::MediaHeader;
@@ -1488,6 +1490,36 @@ impl Drop for Voice {
     }
 }
 
+/// Um datagrama de voz que chegou: o cabeçalho e o Opus, ou `None` com a recusa
+/// contada em `recusados`.
+///
+/// **A recusa não é calada.** O laço jogava fora, sem contar nem dizer, todo
+/// datagrama cujo cabeçalho o `decode` recusava. Na M3 da API 6 (10/10/2026),
+/// um falante que gravava o número do protocolo no lugar do número do
+/// cabeçalho teve toda a voz jogada fora por quem ouvia, e a única pista era
+/// o jitter de chegada parado em zero, porque nenhuma fonte chegava a nascer.
+/// A primeira recusa de cada laço vai ao log, com o motivo (no de versão, a
+/// achada e a esperada); as seguintes, que chegam cinquenta por segundo, só
+/// são contadas, na telemetria (`cabecalhos_recusados`).
+fn ler_o_datagrama<'a>(
+    bytes: &'a [u8],
+    recusados: &mut CabecalhosRecusados,
+) -> Option<(MediaHeader, &'a [u8])> {
+    match MediaHeader::decode(bytes) {
+        Ok(lido) => Some(lido),
+        Err(erro) => {
+            if recusados.contar(&erro) {
+                tracing::warn!(
+                    ?erro,
+                    "um datagrama de voz foi recusado pelo cabeçalho; os seguintes \
+                     só são contados, na telemetria (`cabecalhos_recusados`)"
+                );
+            }
+            None
+        }
+    }
+}
+
 /// One talker being decoded. Quem é (o SSRC) e quando chegou o último quadro
 /// dele moram na [`TabelaDeFontes`], que é quem o cria e o esquece.
 struct Source {
@@ -1858,6 +1890,7 @@ async fn pipeline(
     let mut supressao_avisada = false;
     let mut mixer = Mixer::new();
     let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(ssrc.get());
+    let mut recusados = CabecalhosRecusados::default();
     // O decodificador do som da tela, à parte dos das pessoas.
     //
     // À parte porque a fonte é outra: a voz de cada um chega por datagrama, com
@@ -1935,7 +1968,9 @@ async fn pipeline(
         while let Ok(Ok(bytes)) = tokio::time::timeout(Duration::from_millis(1), media.next()).await
         {
             let arrival_ms = started.elapsed().as_secs_f64() * 1000.0;
-            let Ok((header, payload)) = MediaHeader::decode(&bytes) else {
+            // Um cabeçalho recusado é contado, e dito no log na primeira vez:
+            // ver `ler_o_datagrama`.
+            let Some((header, payload)) = ler_o_datagrama(&bytes, &mut recusados) else {
                 continue;
             };
             // A própria voz voltando não é de ninguém para tocar, e uma fonte
@@ -2297,7 +2332,8 @@ async fn pipeline(
                 )
                 .with_playout(playout.metrics())
                 .with_pacing(ritmo.metrics())
-                .with_silencio_digital(silencio.marcado()),
+                .with_silencio_digital(silencio.marcado())
+                .with_cabecalhos_recusados(recusados),
                 sources: sources
                     .iter()
                     .map(|(de_quem, source)| {
@@ -3699,6 +3735,200 @@ mod silencio_digital {
         assert!(
             !detector.observar(&zeros(), true),
             "o mudo não apagou a marca do silêncio digital"
+        );
+    }
+}
+
+#[cfg(test)]
+mod jitter_de_chegada {
+    //! **O jitter de chegada sai do caminho de recepção** (achado da M3 da API
+    //! 6, 10/10/2026: na 0.16 o `snapshot.telemetry.jitter_ms` deu zero exato
+    //! em todas as amostras com voz, e na 0.15.1, com o mesmo falante, a
+    //! mediana era 1 ms).
+    //!
+    //! O `pipeline` não roda em teste (um aparelho do `cpal` e uma conexão
+    //! QUIC), e por isso este teste repete as instruções do laço que levam um
+    //! datagrama até a telemetria: a tabela de quem fala, o buffer de jitter
+    //! de cada fonte e a lista de fontes da telemetria. O
+    //! [`a_replica_e_o_laco_de_hoje`] confere que cada instrução repetida está
+    //! no `pipeline`, com o mesmo texto. Do outro lado, o `seele-ffi` prova que
+    //! um jitter de chegada na telemetria chega à tela (`medir_a_volta`).
+    use super::{ler_o_datagrama, CabecalhosRecusados, Source, TabelaDeFontes};
+    use seele_audio::codec::VoiceDecoder;
+    use seele_audio::drift::DriftTracker;
+    use seele_audio::jitter::{JitterBuffer, JitterConfig};
+    use seele_audio::telemetry::{AudioTelemetry, LocalTelemetry, SourceTelemetry};
+    use seele_audio::SAMPLE_RATE_HZ;
+    use seele_proto::{MediaHeader, HEADER_LEN};
+
+    const EU: u32 = 5;
+    const ANA: u32 = 7;
+
+    /// Cem datagramas de 20 ms da Ana, cada um chegando com um atraso de 0 a
+    /// 4,5 ms, como numa rede de verdade, com `primeiro_byte` no lugar do
+    /// número do cabeçalho; e a telemetria que o laço montaria depois deles.
+    fn telemetria_depois_de_uma_fala(primeiro_byte: u8) -> AudioTelemetry {
+        let mut sources: TabelaDeFontes<Source> = TabelaDeFontes::nova(EU);
+        let mut recusados = CabecalhosRecusados::default();
+        for quadro in 0..100_u16 {
+            let arrival_ms = f64::from(quadro) * 20.0 + f64::from(quadro % 4) * 1.5;
+            let mut bytes = vec![0_u8; HEADER_LEN + 3];
+            MediaHeader {
+                version: seele_proto::MEDIA_HEADER_VERSION,
+                ssrc: ANA,
+                seq: quadro,
+                timestamp: u32::from(quadro) * 960,
+            }
+            .encode_datagram(&[0xF8, 0xFF, 0xFE], &mut bytes)
+            .expect("um datagrama");
+            bytes[0] = primeiro_byte;
+            // As instruções do laço, na ordem dele.
+            let Some((header, payload)) = ler_o_datagrama(&bytes, &mut recusados) else {
+                continue;
+            };
+            let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {
+                VoiceDecoder::new().ok().map(|decoder| Source {
+                    buffer: JitterBuffer::new(JitterConfig::default()),
+                    drift: DriftTracker::new(),
+                    decoder,
+                })
+            }) else {
+                continue;
+            };
+            let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;
+            source.drift.observe(arrival_ms - sent_ms, arrival_ms);
+            source
+                .buffer
+                .push(header.seq, header.timestamp, arrival_ms, payload.to_vec());
+        }
+        AudioTelemetry {
+            local: LocalTelemetry::default(),
+            sources: sources
+                .iter()
+                .map(|(de_quem, source)| {
+                    SourceTelemetry::assemble(de_quem, source.buffer.metrics())
+                })
+                .collect(),
+        }
+    }
+
+    /// **Uma fonte com chegada variada deixa um jitter de chegada na
+    /// telemetria**, diferente de zero: é o número que vai para a tela.
+    ///
+    /// Com o primeiro byte do falante da M3 (o número do protocolo), este
+    /// teste reprova do jeito que a M3 viu: a Ana não chega à lista de
+    /// fontes, e o jitter fica no zero inicial.
+    #[test]
+    fn uma_fonte_com_chegada_variada_deixa_o_jitter_de_chegada_na_telemetria() {
+        let telemetria = telemetria_depois_de_uma_fala(seele_proto::MEDIA_HEADER_VERSION);
+        assert_eq!(
+            telemetria.sources.len(),
+            1,
+            "a Ana não chegou à lista de fontes da telemetria"
+        );
+        let chegada = telemetria
+            .worst_arrival_jitter_ms()
+            .expect("uma fonte na telemetria");
+        assert!(
+            chegada > 0.5,
+            "a chegada variou de 0 a 4,5 ms e o jitter de chegada deu {chegada} ms"
+        );
+    }
+
+    /// Cada instrução repetida acima está no `pipeline`, com o mesmo texto.
+    #[test]
+    fn a_replica_e_o_laco_de_hoje() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        for exigido in [
+            "let Some((header, payload)) = ler_o_datagrama(&bytes, &mut recusados) else {",
+            "let Some(source) = sources.chegou(header.ssrc, arrival_ms, || {",
+            "buffer: JitterBuffer::new(JitterConfig::default()),",
+            "let sent_ms = f64::from(header.timestamp) / f64::from(SAMPLE_RATE_HZ) * 1000.0;",
+            "source.drift.observe(arrival_ms - sent_ms, arrival_ms);",
+            ".push(header.seq, header.timestamp, arrival_ms, payload.to_vec());",
+            "SourceTelemetry::assemble(de_quem, source.buffer.metrics())",
+        ] {
+            assert!(
+                laco.contains(exigido),
+                "o `pipeline` não tem mais `{exigido}`, e este teste repete um laço que não existe"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod cabecalhos_recusados {
+    //! **O laço conta e diz o cabeçalho que recusa** (achado da M3 da API 6,
+    //! 10/10/2026). O `pipeline` não roda em teste, mas a leitura do
+    //! datagrama é a função que ele chama, [`super::ler_o_datagrama`], e o
+    //! [`o_laco_le_por_ela`] confere que ele não lê de outro jeito.
+    use super::{ler_o_datagrama, CabecalhosRecusados};
+    use seele_proto::{MediaHeader, HEADER_LEN, MEDIA_HEADER_VERSION};
+
+    fn datagrama(versao: u8) -> Vec<u8> {
+        let mut saida = vec![0_u8; HEADER_LEN + 3];
+        MediaHeader {
+            version: MEDIA_HEADER_VERSION,
+            ssrc: 7,
+            seq: 1,
+            timestamp: 960,
+        }
+        .encode_datagram(&[0xF8, 0xFF, 0xFE], &mut saida)
+        .expect("um datagrama");
+        saida[0] = versao;
+        saida
+    }
+
+    /// **Um datagrama de outra versão é recusado e contado**, e um certo
+    /// passa sem contar nada.
+    #[test]
+    fn o_cabecalho_de_outra_versao_e_contado_e_o_certo_passa() {
+        let mut recusados = CabecalhosRecusados::default();
+        let do_protocolo = datagrama(seele_proto::PROTOCOL_VERSION);
+        assert!(ler_o_datagrama(&do_protocolo, &mut recusados).is_none());
+        assert!(ler_o_datagrama(&do_protocolo, &mut recusados).is_none());
+        assert_eq!(
+            recusados.versao, 2,
+            "o laço recusou dois cabeçalhos de outra versão e contou {}",
+            recusados.versao
+        );
+        let certo = datagrama(MEDIA_HEADER_VERSION);
+        assert!(ler_o_datagrama(&certo, &mut recusados).is_some());
+        assert_eq!(
+            recusados.total(),
+            2,
+            "um cabeçalho certo foi contado como recusado"
+        );
+        assert!(ler_o_datagrama(&[1, 2, 3], &mut recusados).is_none());
+        assert_eq!(recusados.curtos, 1);
+    }
+
+    /// O laço lê o datagrama por ela, e leva a conta à telemetria.
+    #[test]
+    fn o_laco_le_por_ela() {
+        let fonte = include_str!("voice.rs");
+        let laco = fonte
+            .split_once("\nasync fn pipeline(")
+            .expect("o `pipeline`")
+            .1
+            .split_once("\n}\n")
+            .expect("o fim do `pipeline`")
+            .0;
+        assert!(
+            laco.contains("ler_o_datagrama(&bytes, &mut recusados)")
+                && laco.contains(".with_cabecalhos_recusados(recusados)"),
+            "o laço deixou de ler o datagrama por `ler_o_datagrama`, ou de levar a conta à telemetria"
+        );
+        assert!(
+            !laco.contains(concat!("MediaHeader::", "decode(")),
+            "o laço voltou a ler o cabeçalho por conta própria, e a recusa volta a ser calada"
         );
     }
 }

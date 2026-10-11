@@ -9635,12 +9635,40 @@ escreve e não lê é desligada com `FellBehind`, e a cauda do que ela mandou n�
 gravada. O que a sessão leu antes de desligar foi gravado, e o cliente de verdade
 repete o resto com a mesma chave. **A revisão do Y mostrou que também acontece com um cliente que lê**, quando ele
 escreve em rajada: o comentário do braço `Lagged` em `seele-server/src/session.rs`,
-que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Não consertado**: decidir na
-revisão final da 0.16 se é defeito ou contrato, e escrever a resposta aqui.
+que dizia «só com quem parou de ler», estava errado e foi corrigido pelo Y. **Medido pela F1 em 10/10** (`f5a4b51e`, `F1/pendencia-61-medida.md`): o lote do escritor
+não tem teto e é anunciado sem `await`; acima de 1024 mensagens num lote, ele passa à frente
+de **toda** sessão viva, e todas caem com `FellBehind`. Uma pessoa, uma colagem, um MOD ou
+uma sala não chegam lá; **18 conexões de um script chegam** (17 × 58 nunca derrubou; 18 × 58
+derrubou todo mundo nas 3 rodadas), e num servidor aberto não há teto de sessões. Quando
+acontece, a janela mostra a tela de fim enquanto o servidor a mantém sentada na sala; o que
+ela mandava no instante pode se perder sem aviso, e nada repete nem busca o buraco.
+
+**Decisão da orquestradora: defeito.** Desligar quem parou de ler é contrato; desligar todo
+mundo por um lote é uma porta de negação de serviço. Consertar na 0.16: no servidor, o teto
+do lote do escritor e a contrapressão por conexão; no cliente, só as razões de fim encerram,
+e na volta o histórico é buscado e o `SemResposta` repetido com a mesma chave.
 
 Junto, do mesmo achado: o `tipo_de_fluxo.rs` perdeu a tolerância dele no
 `becb0257` (o mesmo commit que desfez o conserto do `par_lento`), e os sockets que
 os testes esquecem de propósito continuam vazando (não roubam mais respostas).
+
+**O conserto do servidor, medido pela F1 em 10/10** (`1ebf85a4` na 0.16; relatório em
+`F1/pendencia-61-medida.md`, seção 5): o `TETO_DO_LOTE` (um quarto do anel) e a
+contrapressão `TETO_NO_AR` (8 mensagens no ar por conexão), com o `rajada_de_muitos.rs`
+sem `#[ignore]`. Cada metade foi medida sozinha, nas duas linhas: **só o teto do lote passa
+o 18 × 58 e reprova o 24 × 58 com 4 KiB** (3 de 3), porque segura um anúncio e não uma
+sequência deles; só a contrapressão passa os dois; as duas juntas passam, e o teto ainda
+segura o que a contrapressão não segura (mais de 128 conexões com mensagens no ar). **A
+linha 0.15 reproduz igual** (`40066a7c`, que no servidor só difere da v0.15.1 publicada no
+`assentar`): 19 de 19 e 25 de 25 sessões para trás sem conserto.
+
+**Decisão da orquestradora (10/10): entra na 0.15.2, com as duas metades.** Uma porta de
+negação de serviço que 18 conexões abrem não espera a 0.16. O porte é o
+`F1/pendencia-61-linha-0.15.patch` (5 arquivos, mais o `tokio` com `test-util` nas
+`dev-dependencies` do `seele-server`, que não entra no binário), num commit sobre
+`40066a7c`, com a bateria inteira da linha e a prova pela reversão. A 0.15.2 pronta passa a
+ser esse commit. A metade do cliente (só as razões de fim encerram; o histórico buscado na
+volta) fica na 0.16.
 
 ## 62 · O pedido de MOD ignora o papel mínimo do canal, e nada grava o papel mínimo
 
@@ -9659,3 +9687,29 @@ permissão por MOD no dia em que algo gravasse o papel mínimo.
 **Na 0.16:** consertado na tarefa 16 da F3, antes de qualquer recurso gravar as
 colunas. **Na linha 0.15:** fica como está, porque ali não há nem haverá caminho
 que grave o papel mínimo.
+
+## 63 · A lista de pessoas se redesenha inteira a cada `PersonState`, e com 200 pessoas e cartões de MOD a página não vence
+
+**Aberta em 2026-10-10**, achada pela M3 da API 6 (a `carga-cartoes`, 251 pessoas) e medida pela
+F3 numa bancada (`tools/lista-grande.cjs`, `df7f5efb`, `9899d0ae`). No app de verdade, com 251
+pessoas e um cartão de MOD por pessoa, o WebContent ficou acima de 100% de CPU por minutos, a memória
+subiu de 1,13 para 1,33 GB em dois, e nenhum cartão apareceu na tela.
+
+**A cadeia, pelo código:** cada sessão manda um `PersonState` por segundo a todas as conexões, sem
+filtro (`session.rs`, o `TELEMETRY_INTERVAL` de 1 s); cada um vira um `RosterChanged` sem junção na
+FFI e no app; e a janela responde a cada um com um `atualizar()` inteiro, o retrato pela ponte e a lista
+redesenhada. N eventos por segundo, cada um do tamanho de N: o custo cresce com o quadrado.
+
+**A medida da F3 (Chromium do Playwright, janelas de 5 s):** com 251 pessoas e cartões, a fila de
+redesenho chega a 4,9 s e não esvazia; a partir de 200 pessoas com cartões ela já aparece; sem MOD
+nenhum, 251 pessoas deixam a página a 99%. Juntando o redesenho em no máximo um por quadro, a fila
+some (99% com cartões, 98% sem MOD); só o tique de 500 ms deixa a página a 14%. Com 10 pessoas nada
+disso aparece, e é por isso que só a M3 o viu.
+
+**Decisão da orquestradora:** defeito, na 0.16. O `specs/04` dimensiona o servidor em 50 pessoas e
+nada leva dado a lugar errado, então **não entra na 0.15.2**. O conserto mínimo é juntar o redesenho
+(no máximo um `atualizar()` por quadro, na janela, que serve ao desktop, à casca larga e ao celular),
+com a bancada da F3 como guarda, provada pela reversão. Atualizar só a linha que mudou fica para depois.
+O lado do servidor (um `PersonState` de cada pessoa a todas as outras, por segundo: N² mensagens) é
+medido junto, antes de alguém prometer mais que 50 pessoas. **O teto de 256 alvos por ponto da API 6 não
+congela antes da medida com o conserto.**

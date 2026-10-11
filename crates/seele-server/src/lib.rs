@@ -635,7 +635,7 @@ impl Daemon {
 
         let persistence = Arc::new(tokio::sync::Mutex::new(persistence));
 
-        let (events, _) = tokio::sync::broadcast::channel(1024);
+        let (events, _) = tokio::sync::broadcast::channel(server::ANEL_DO_BARRAMENTO);
         let writes = server::spawn_writer(Arc::clone(&persistence), events.clone());
         // **A retenção, quando quem hospeda a escolheu.** R15: `Messages::prune`
         // existia e nada em produção a chamava, então um servidor
