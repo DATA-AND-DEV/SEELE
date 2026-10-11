@@ -1333,9 +1333,21 @@ impl Room {
                 changed.transfers = true;
             }
 
+            // **Só a regra do motor acaba a sessão**, e é a mesma função que
+            // ele chama: `crate::enlace::a_sessao_acabou_aqui`. Aqui era toda
+            // `Disconnecting`, e a janela dizia «encerrado» enquanto o motor
+            // reconectava e a voz voltava a transmitir por baixo.
+            //
+            // A recuperável é uma queda com nome: a faixa chega pelo estado do
+            // enlace, como numa queda de rede, e o que cabe aqui é o mesmo que
+            // aquela queda faz com o que esta máquina esperava.
             ServerMessage::Disconnecting { reason } => {
-                self.ended = Some(Ended { reason: *reason });
-                changed.ended = true;
+                if crate::enlace::a_sessao_acabou_aqui(*reason) {
+                    self.ended = Some(Ended { reason: *reason });
+                    changed.ended = true;
+                } else if self.envios_sem_resposta() {
+                    changed.messages = true;
+                }
             }
 
             // A room somebody made while this client was already connected.

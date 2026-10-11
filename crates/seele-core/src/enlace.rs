@@ -338,7 +338,12 @@ pub enum Motivo {
 /// contra uma decisão que só uma pessoa pode tomar é a casca dizendo
 /// «reconectando» para quem precisa ler uma lista e responder — ADR 0045, «um
 /// servidor que troca de MOD pergunta de novo», e perguntar exige alguém.
-fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
+///
+/// **O `Room` pergunta a esta mesma função** antes de marcar fim
+/// (`crate::state`). Ele marcava fim para toda `Disconnecting`, e a janela
+/// dizia «encerrado» enquanto este motor reconectava e a voz voltava por baixo
+/// (pendência 61 da 0.16, portada para a 0.15.2).
+pub(crate) fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
     matches!(
         motivo,
         DisconnectReason::Kicked | DisconnectReason::Banned | DisconnectReason::ModsMudaram
