@@ -338,7 +338,12 @@ pub enum Motivo {
 /// contra uma decisão que só uma pessoa pode tomar é a casca dizendo
 /// «reconectando» para quem precisa ler uma lista e responder — ADR 0045, «um
 /// servidor que troca de MOD pergunta de novo», e perguntar exige alguém.
-fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
+///
+/// **O `Room` pergunta a esta mesma função** antes de marcar fim
+/// (`crate::state`). Ele marcava fim para toda `Disconnecting`, e a janela
+/// dizia «encerrado» enquanto este motor reconectava e a voz voltava por baixo
+/// (pendência 61 da 0.16, portada para a 0.15.2).
+pub(crate) fn a_sessao_acabou_aqui(motivo: DisconnectReason) -> bool {
     matches!(
         motivo,
         DisconnectReason::Kicked | DisconnectReason::Banned | DisconnectReason::ModsMudaram
@@ -5577,6 +5582,46 @@ mod tests {
                 a_sessao_acabou_aqui(motivo),
                 acaba,
                 "{motivo:?} mudou de lado sem que este teste mudasse junto"
+            );
+        }
+    }
+
+    /// **O motor acaba a sessão onde o `Room` acaba** (porte da pendência 61
+    /// da 0.16 para a 0.15.2).
+    ///
+    /// O `Room` marcava fim para toda `Disconnecting`, e este motor reconecta
+    /// em quase todas: a janela dizia «encerrado» e a voz voltava por baixo.
+    /// Aqui o nome que **este** motor chama para decidir entre acabar e
+    /// reconectar é conferido contra o `Room`, razão por razão. Uma lista
+    /// própria de um dos dois, que divergisse da do outro, reprova.
+    #[test]
+    fn o_motor_acaba_a_sessao_onde_o_room_acaba() {
+        for motivo in [
+            DisconnectReason::Incompatible,
+            DisconnectReason::CredentialRejected,
+            DisconnectReason::HandshakeTimeout,
+            DisconnectReason::Kicked,
+            DisconnectReason::Banned,
+            DisconnectReason::ServerFull,
+            DisconnectReason::ScheduledMaintenance,
+            DisconnectReason::ServerShuttingDown,
+            DisconnectReason::Timeout,
+            DisconnectReason::ProtocolViolation,
+            DisconnectReason::RateLimited,
+            DisconnectReason::FellBehind,
+            DisconnectReason::AdmissionPending,
+            DisconnectReason::AdmissionDenied,
+            DisconnectReason::NicknameTaken,
+            DisconnectReason::ModsRecusados,
+            DisconnectReason::ModsMudaram,
+            DisconnectReason::ModsIndisponiveis,
+        ] {
+            let mut room = crate::state::Room::new();
+            let changed = room.apply(&ServerMessage::Disconnecting { reason: motivo });
+            assert_eq!(
+                (changed.ended, room.ended.is_some()),
+                (a_sessao_acabou_aqui(motivo), a_sessao_acabou_aqui(motivo)),
+                "{motivo:?}: o motor e o `Room` discordam sobre o fim"
             );
         }
     }
