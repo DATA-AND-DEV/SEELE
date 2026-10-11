@@ -893,3 +893,28 @@ começar.
     e o servidor de mentira estourava antes de anotar.
   A bancada passou a anotar a entrada sem chave e a conferir a ordem do
   `persist()` e da chave, e as duas reprovam.
+
+## 10/10, noite: o que ninguém pegou vai ao `seele.log` (pedido da orquestradora)
+
+- **O achado da F7:** o botão vermelho não fechava o app. O `destroy()` da
+  janela era recusado pela ACL do Tauri, a recusa caía numa promise sem ninguém
+  olhando, e nada ia ao `seele.log`: a página não tinha ouvinte global.
+- **O `base.js` ganha dois ouvintes**, o de `unhandledrejection` e o de
+  `error`. Eles mandam ao `registrar_da_janela` (`onde=sem-dono`, nível
+  `erro`) o motivo, com a pilha quando há e com o lugar quando o solto não é um
+  erro. A tela não muda, e o console segue dizendo o que já dizia.
+- **O teto:** dez linhas por minuto. As seguintes são contadas e ditas numa
+  linha só, no fim do minuto. É no JS também porque, no Rust, a linha da janela
+  sem MOD gasta do balde do catálogo, o dos outros avisos da janela.
+- **O roteiro** `tools/roteiros/recusa-sem-dono.js` reprova sem os ouvintes, e
+  cada peça foi provada por reversão (as seis reprovam).
+- **Os 35 roteiros que já existiam** seguem verdes, e nenhum deixa linha
+  `sem-dono`, lidos por uma cópia do aparelho que diz o que o duble recebeu.
+  Também verdes: `check-runtime`, `ponte-sem-gesto` (o `registrar_da_janela`
+  não está entre os comandos que a carga chama sozinha), a bancada da voz, a da
+  identidade e os guardas da janela (294), do celular (8) e da web (12).
+- **Achado latente no aparelho dos roteiros:** o `carga-da-casca.py` lê o
+  relato do console até a primeira aspa dupla. Um relato com aspas antes de um
+  `REPROVADO` esconde a reprovação, e o aparelho diz «carga limpa» com saída 0
+  (medido com um roteiro de duas linhas). Hoje não esconde nada: lidos até o
+  `", source:`, os 36 dão o mesmo resultado.
