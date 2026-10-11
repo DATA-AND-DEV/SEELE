@@ -9687,3 +9687,29 @@ permissão por MOD no dia em que algo gravasse o papel mínimo.
 **Na 0.16:** consertado na tarefa 16 da F3, antes de qualquer recurso gravar as
 colunas. **Na linha 0.15:** fica como está, porque ali não há nem haverá caminho
 que grave o papel mínimo.
+
+## 63 · A lista de pessoas se redesenha inteira a cada `PersonState`, e com 200 pessoas e cartões de MOD a página não vence
+
+**Aberta em 2026-10-10**, achada pela M3 da API 6 (a `carga-cartoes`, 251 pessoas) e medida pela
+F3 numa bancada (`tools/lista-grande.cjs`, `df7f5efb`, `9899d0ae`). No app de verdade, com 251
+pessoas e um cartão de MOD por pessoa, o WebContent ficou acima de 100% de CPU por minutos, a memória
+subiu de 1,13 para 1,33 GB em dois, e nenhum cartão apareceu na tela.
+
+**A cadeia, pelo código:** cada sessão manda um `PersonState` por segundo a todas as conexões, sem
+filtro (`session.rs`, o `TELEMETRY_INTERVAL` de 1 s); cada um vira um `RosterChanged` sem junção na
+FFI e no app; e a janela responde a cada um com um `atualizar()` inteiro, o retrato pela ponte e a lista
+redesenhada. N eventos por segundo, cada um do tamanho de N: o custo cresce com o quadrado.
+
+**A medida da F3 (Chromium do Playwright, janelas de 5 s):** com 251 pessoas e cartões, a fila de
+redesenho chega a 4,9 s e não esvazia; a partir de 200 pessoas com cartões ela já aparece; sem MOD
+nenhum, 251 pessoas deixam a página a 99%. Juntando o redesenho em no máximo um por quadro, a fila
+some (99% com cartões, 98% sem MOD); só o tique de 500 ms deixa a página a 14%. Com 10 pessoas nada
+disso aparece, e é por isso que só a M3 o viu.
+
+**Decisão da orquestradora:** defeito, na 0.16. O `specs/04` dimensiona o servidor em 50 pessoas e
+nada leva dado a lugar errado, então **não entra na 0.15.2**. O conserto mínimo é juntar o redesenho
+(no máximo um `atualizar()` por quadro, na janela, que serve ao desktop, à casca larga e ao celular),
+com a bancada da F3 como guarda, provada pela reversão. Atualizar só a linha que mudou fica para depois.
+O lado do servidor (um `PersonState` de cada pessoa a todas as outras, por segundo: N² mensagens) é
+medido junto, antes de alguém prometer mais que 50 pessoas. **O teto de 256 alvos por ponto da API 6 não
+congela antes da medida com o conserto.**
