@@ -8273,3 +8273,47 @@ grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
 grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
 ```
 
+## 57 · Consertada em 2026-10-11, sem confirmação de campo · Numa queda com nome, a janela dizia «encerrado» e a voz voltava a transmitir por baixo
+
+**Publicada na v0.15.1.** O `Room` (`crates/seele-core/src/state.rs`) marcava
+fim para toda `Disconnecting`, e o motor do enlace só acaba a sessão em
+`Kicked`, `Banned` e `ModsMudaram`: nas outras, ele reconecta pela bateria. A
+FFI emitia `Ended`, a janela dizia «encerrado» e revogava a geração, e a
+reconexão por baixo reabria a voz no `Aviso::Reconectado`. O microfone voltava
+a transmitir sem a tela dizer.
+
+Medido nesta linha pela FFI, em `queda_recuperavel.rs`: em cada uma das seis
+razões que o motor reconecta, `Ended` chegava, a faixa da bateria e a volta
+eram lidas, e o servidor a tinha sentada na sala de novo. Das seis, o servidor
+0.15 só escreve duas no meio de uma sessão:
+- `FellBehind`, quando o barramento passa à frente da sessão. Antes de
+  `6702b944`, uma rajada fazia isso com todo mundo de uma vez.
+- `RateLimited`, quando a pessoa passa do limite de quadros.
+
+As outras quatro, o protocolo permite e este servidor não escreve no meio de
+uma sessão.
+
+**O conserto** é o porte da fase B da pendência 61 da 0.16, no ramo
+`0.15/p61-voz`. O `Room` pergunta à mesma função que o motor chama,
+`a_sessao_acabou_aqui`, e só marca fim onde ela diz. A recuperável deixa o que
+esta máquina esperava em `SemResposta`, como a queda de rede. A FFI e o fio não
+mudam.
+
+**O que fica de fora, de propósito:**
+- **As fases C e D da 0.16 não vieram.** Na volta, o buraco do canal não é
+  buscado, e o que ficou `SemResposta` não é repetido sozinho: fica o TENTAR DE
+  NOVO, como numa queda de rede desta linha. E o TENTAR DE NOVO
+  (`reenviar_mensagem`) não confere o tamanho como o envio confere. Isso foi
+  lido, e não medido nesta linha.
+- **`ServerShuttingDown` continua do lado da queda**, e não do fim como na 0.16.
+  O servidor 0.15 só o usa na recusa do aperto de mão.
+- **A voz não foi medida com um aparelho.** Esta linha não tem o aparelho de
+  mentira da 0.16. A prova mostra onde a voz reabre: no `Aviso::Reconectado` de
+  uma sessão que a tela mostra viva.
+
+```sh
+grep -n "a_sessao_acabou_aqui" crates/seele-core/src/state.rs
+grep -n "fn so_as_despedidas_que_acabam_a_sessao_marcam_o_fim" crates/seele-core/src/state.rs
+grep -n "fn o_motor_acaba_a_sessao_onde_o_room_acaba" crates/seele-core/src/enlace.rs
+```
+
