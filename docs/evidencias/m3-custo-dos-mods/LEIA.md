@@ -368,11 +368,30 @@ máximo). O app medido nos 24 fica guardado ao lado (`SEELE-6e845e0d.app`), e o
 `carga-cartoes` nova contra o `sem-mod` velho: as referências são medidas de
 novo, na mesma build.
 
-**O teto de 256 alvos por ponto não congela sobre isto.** Com os cartões, a
-fila aparece a partir de 200 pessoas, abaixo do teto; e sem MOD nenhum, com
-251, a página já passa o tempo todo redesenhando (99%), só que sem fila. O dono
-do conserto (juntar o `RosterChanged`, redesenhar só a linha que mudou) está
-por definir; o pedido está com a orquestradora.
+**O que a rodada de 11/10 deu** (a orquestradora, na build remendada,
+`6e845e0d+6717dc2c`). O `sem-mod` vale. A `lista-251` reprovou antes de medir
+(«a lista tem 1 pessoas, e não 251»): a página desenha, e a árvore de
+acessibilidade não acompanha — os nomes da lista nunca aparecem nela, e o
+ENTRAR NA SALA sai dela (a (b) da pendência 63; rascunho §12, «A lista de
+251»). Com isso, a `carga-cartoes` não se dirige no app, e o teto de
+contribuições congelou pela bancada (decisão da orquestradora, 11/10).
+
+**E a voz da rodada de 11/10 não vale, nem a CPU dela.** Nos `+voz`, o jitter
+saiu 0 exato nas duas leituras (a barra pela acessibilidade, 29 amostras, e o
+`seele.log`, 31) — e a da barra não passa pelo remendo do jitter, então não é
+ele. O `seele.log` do app diz por quê: «o áudio não abriu em 10s; a sala segue
+sem voz». Medido pela F3 no mesmo Mac, logo depois, com o roteiro da campanha:
+o app da campanha (`SEELE-6e845e0d.app`, sem o conserto) dá o mesmo aviso e o
+mesmo zero, e o `sem-mod+voz` válido de 10/10 não tem o aviso. **Não é o
+conserto: é o áudio do Mac que não abriu para o app**, por um motivo que o
+registro não diz. Sem áudio, o `+voz` não mede voz: a CPU do `sem-mod+voz` de
+11/10 foi 9,0%, contra 10,3% em 10/10. Antes de um `+voz` novo valer, o
+`seele.log` dele não pode ter esse aviso.
+
+**O teto de 256 alvos por ponto não congelou sobre a fila** (10/10): com os
+cartões, ela aparecia a partir de 200 pessoas, abaixo do teto. Congelou em
+11/10, depois do conserto, pela bancada e não pelo app — 256 alvos e 128 sem
+alvo; quem satura a página com 251 é a lista, e não o MOD (rascunho §12).
 
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6
