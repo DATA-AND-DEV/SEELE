@@ -431,6 +431,11 @@ IDENTIDADE_DO_CASO = r"""() => {
     conectar: async (alvo, apelido, credencial) => {
       window.__conexoes.push({ endereco: alvo.endereco, apelido, credencial });
       const resposta = window.__respostas.shift();
+      // «connect»: o connect do duble, como o da ponte fará na 2.6, com a
+      // resposta inteira do desktop (a sessão, o veredito).
+      if (resposta === "connect") {
+        return window.__TAURI__.core.invoke("connect", { server: alvo.endereco, nickname: apelido, audio: true, joinSecret: credencial });
+      }
       if (resposta === "espera") await new Promise((soltar) => { window.__soltarAConexao = soltar; });
       else if (resposta) throw resposta;
     },
@@ -745,6 +750,35 @@ def entrada_espera(pg: Page) -> list[str]:
         falhas.append(f"a saída da espera tem {e['saida'][1]} de altura")
     if e["vaza"]:
         falhas.append("a espera rola de lado no celular")
+    return falhas
+
+
+def entrada_abre_a_sessao(pg: Page) -> list[str]:
+    """A «ENTRAR EM» abre a sessão: o ENTRAR chama o `entrar` da identidade, o
+    `conectar` dela chega ao `connect` (aqui o do duble, como o da ponte fará na
+    2.6), e o `{ ok: true, resposta }` passa pelo `depoisDeConectar`, o mesmo do
+    desktop. Com a impressão conferida, o aperto não aparece (D-celular-3), e a
+    sessão abre sem outro toque."""
+    falhas = []
+    pg.evaluate(IDENTIDADE_DO_CASO)
+    pg.evaluate(f"""() => {{
+      SEELE_RESPOSTAS.connect = {{ snapshot: SEELE_QUADRO, veredito: {CONFERIDA} }};
+      window.__respostas.push("connect");
+      window.__apertos = 0;
+      const tela = document.getElementById('tela-auth');
+      new MutationObserver(() => {{
+        if (!tela.hidden && tela.dataset.modo === 'aperto' && !tela.hasAttribute('data-entrada-direta')) window.__apertos++;
+      }}).observe(tela, {{ attributes: true, attributeFilter: ['hidden', 'data-modo', 'data-entrada-direta'] }});
+    }}""")
+    usar_a_entrada(pg, link="https://pagina.invalid/#pronto")
+    pg.fill("#cel-entrada-apelido", "rafa")
+    tocar_acao(pg, pg.evaluate("FRASES_DO_CELULAR.entrada.entrarEm.entrar"))
+    pg.wait_for_timeout(1500)
+    e = pg.evaluate(ESTADO_DA_ENTRADA)
+    if not e["sessao"] or e["apertos"]:
+        falhas.append(f"o ENTRAR da «ENTRAR EM» não abriu a sessão, ou parou no aperto: {e}")
+    if pg.evaluate("!document.getElementById('tela-boot').hidden"):
+        falhas.append("depois do ENTRAR, a tela de entrada continua à vista")
     return falhas
 
 
@@ -2640,6 +2674,7 @@ CASOS: dict[str, Caso] = {
     "entrada-com-aperto": Caso(levar=entrada_com_aperto, entrar=False, raiz="#tela-auth"),
     "entrada-direta-falha": Caso(levar=entrada_direta_falha, entrar=False, raiz="#tela-auth"),
     "entrada-espera": Caso(levar=entrada_espera, entrar=False, raiz="#tela-auth"),
+    "entrada-abre-a-sessao": Caso(levar=entrada_abre_a_sessao, entrar=False, medir=False),
     "entrada-direta-larga": Caso(levar=entrada_direta_na_larga, marca="larga", aparelhos=("1440",), entrar=False, medir=False),
     # A escolha da casca à mão (Tarefa 18), nas duas cascas, e sem armazenamento.
     # A tela cheia da larga sai junto com a do navegador (achado da F4).
