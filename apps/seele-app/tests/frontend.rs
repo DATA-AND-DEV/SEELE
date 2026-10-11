@@ -160,7 +160,16 @@ fn command_parameters(source: &str) -> std::collections::BTreeMap<String, BTreeS
         let Some(abre) = resto.find('(') else {
             continue;
         };
-        let nome = resto[..abre].trim().to_owned();
+        // **Sem os genéricos.** Desde o lote E54 o `connect` é
+        // `connect<R: tauri::Runtime>(`, para um teste chamá-lo pelo runtime
+        // falso do Tauri; lido até o `(`, o nome virava `connect<R: …>`, e o
+        // guarda dos argumentos deixava de achar o `connect` e o pulava calado.
+        let nome = resto[..abre]
+            .split('<')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
         let Some(fecha) = resto[abre..].find(')') else {
             continue;
         };
@@ -460,6 +469,17 @@ fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
     let mut erros: Vec<String> = Vec::new();
     for (comando, _, chave) in invoked_with_arguments(&script) {
         let Some(parametros) = comandos.get(&comando) else {
+            // **Definido aqui e não lido é cegueira, e não ausência** (lote
+            // E54): o `connect` genérico saiu da leitura de cima com outro
+            // nome, e este guarda o pulava sem dizer nada.
+            if source.contains(&format!("fn {comando}("))
+                || source.contains(&format!("fn {comando}<"))
+            {
+                erros.push(format!(
+                    "`{comando}` está em main.rs, e este guarda não leu os parâmetros dele: \
+                     o que o frontend manda a ele deixou de ser conferido"
+                ));
+            }
             continue; // o guarda de baixo cuida de comando inexistente
         };
         let esperados: BTreeSet<String> =
@@ -1187,7 +1207,18 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
 ///
 /// `\n}\n` terminates: every brace inside a body is indented.
 fn body_of(source: &str, signature: &str) -> String {
-    let Some(after) = source.split(signature).nth(1) else {
+    // **Com ou sem genéricos** (lote E54, porte para a 0.15.2). O `connect`
+    // passou a ser `async fn connect<R: tauri::Runtime>(`, para um teste do
+    // `main.rs` chamá-lo pelo runtime falso do Tauri; procurado só por
+    // `async fn connect(`, ele seria dado como sumido. Sem achar a assinatura
+    // como foi escrita, o `(` do fim vira `<` e procura de novo — e, sem achar
+    // nenhuma das duas, reprova como antes.
+    let generica = signature.strip_suffix('(').map(|nome| format!("{nome}<"));
+    let Some(after) = source.split(signature).nth(1).or_else(|| {
+        generica
+            .as_deref()
+            .and_then(|generica| source.split(generica).nth(1))
+    }) else {
         panic!("main.rs no longer has `{signature}`");
     };
     let Some(body) = after.split("\n}\n").next() else {
@@ -13466,7 +13497,9 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
 
     // E a ponte de eventos não fala em nome de uma sessão morta.
     let ponte = rust
-        .split_once("impl EventListener for Bridge")
+        // Sem o começo do `impl`: desde o lote E54 ele é genérico sobre o
+        // runtime (`impl<R: tauri::Runtime> EventListener for Bridge<R>`).
+        .split_once("EventListener for Bridge")
         .expect("a ponte de eventos")
         .1;
     let ponte = ponte.split_once("\n}\n").map_or(ponte, |(a, _)| a);

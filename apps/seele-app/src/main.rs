@@ -823,8 +823,8 @@ impl ModsNativos {
 /// que está de pé. O que não bate é **contado** antes de ser descartado: um
 /// contador que sobe depois de uma saída é a prova de que alguma coisa da
 /// sessão anterior continuava falando, e sem ele isso seria invisível.
-struct Bridge {
-    app: AppHandle,
+struct Bridge<R: tauri::Runtime = tauri::Wry> {
+    app: AppHandle<R>,
     /// A execução em que esta ponte nasceu.
     geracao: u64,
     /// O número que está de pé agora, compartilhado com a `Session`.
@@ -833,7 +833,7 @@ struct Bridge {
     descartados: Arc<std::sync::atomic::AtomicU64>,
 }
 
-impl EventListener for Bridge {
+impl<R: tauri::Runtime> EventListener for Bridge<R> {
     fn on_event(&self, event: Event) {
         if self.geracao != self.de_pe.load(std::sync::atomic::Ordering::Acquire) {
             self.descartados
@@ -880,7 +880,7 @@ impl EventListener for Bridge {
 /// configuration and the core knows how to persist an identity. `$SEELE_HOME`
 /// comes first so the desktop app and `connection` can be told to be the same person —
 /// which is what makes a session resumable between them.
-fn config_dir(app: &AppHandle) -> String {
+fn config_dir<R: tauri::Runtime>(app: &AppHandle<R>) -> String {
     if let Ok(home) = std::env::var("SEELE_HOME") {
         return home;
     }
@@ -997,8 +997,8 @@ impl From<ConnectionError> for FalhaDaEntrada {
 }
 
 #[tauri::command]
-async fn connect(
-    app: AppHandle,
+async fn connect<R: tauri::Runtime>(
+    app: AppHandle<R>,
     session: State<'_, Session>,
     server: String,
     nickname: String,
@@ -6539,7 +6539,7 @@ async fn escolher_minha_imagem(
 /// 8 KiB de PNG, e binário num arquivo de `nome <TAB> valor` faria uma edição à
 /// mão virar conversa de suporte. É a mesma decisão que `conhecidos` já tomou
 /// para a imagem de cada servidor.
-fn caminho_do_retrato(app: &AppHandle) -> std::path::PathBuf {
+fn caminho_do_retrato<R: tauri::Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("retrato.png")
 }
 
@@ -6565,7 +6565,7 @@ fn gravar_retrato(app: &AppHandle, bytes: Option<&[u8]>) -> Result<(), Connectio
 }
 
 /// Os bytes do retrato desta máquina, se há um.
-fn retrato_guardado(app: &AppHandle) -> Option<Vec<u8>> {
+fn retrato_guardado<R: tauri::Runtime>(app: &AppHandle<R>) -> Option<Vec<u8>> {
     std::fs::read(caminho_do_retrato(app)).ok()
 }
 
@@ -7479,7 +7479,9 @@ fn consentir_no_caminho_entre_pares(
     Ok(())
 }
 
-fn preferencias(app: &AppHandle) -> Option<seele_ffi::preferences::Preferences> {
+fn preferencias<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+) -> Option<seele_ffi::preferences::Preferences> {
     seele_ffi::preferences::Preferences::open(
         std::path::PathBuf::from(config_dir(app)).join("preferences"),
     )
@@ -7655,7 +7657,7 @@ fn escolher_saida(
 }
 
 /// Onde fica a lista de servidores visitados.
-fn caminho_dos_conhecidos(app: &AppHandle) -> std::path::PathBuf {
+fn caminho_dos_conhecidos<R: tauri::Runtime>(app: &AppHandle<R>) -> std::path::PathBuf {
     std::path::PathBuf::from(config_dir(app)).join("conhecidos")
 }
 
