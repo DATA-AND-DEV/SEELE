@@ -30,6 +30,9 @@ use crate::rt::{
 use crate::supervisor::FalhaDeAparelho;
 use crate::SAMPLE_RATE_HZ;
 
+#[cfg(feature = "aparelho-de-mentira")]
+pub mod mentira;
+
 /// O retorno de erro que os dois lados entregam ao `cpal`.
 ///
 /// **É o seam da troca de aparelho, e existe como função por causa do teste.**
@@ -358,8 +361,7 @@ impl DeviceError {
 /// backend, so this must be built and dropped on the same thread.
 pub struct AudioIo {
     /// Held to keep the streams alive. Dropping them stops audio.
-    _input: cpal::Stream,
-    _output: cpal::Stream,
+    _vivos: Vivos,
 
     /// Captured mono samples, at [`AudioIo::capture_rate_hz`].
     pub captured: Consumer<f32>,
@@ -394,6 +396,19 @@ pub struct AudioIo {
     /// they can do is read this channel and see the name is not the one they
     /// picked.
     pub playback: Option<PlaybackDevice>,
+}
+
+/// O que segura os dois lados de pé.
+///
+/// Os dois fluxos do `cpal`, sempre no produto. Num teste com o recurso
+/// `aparelho-de-mentira`, a linha que faz as vezes dos dois — ver `mentira`.
+enum Vivos {
+    Cpal {
+        _input: cpal::Stream,
+        _output: cpal::Stream,
+    },
+    #[cfg(feature = "aparelho-de-mentira")]
+    Mentira { _linha: mentira::Linha },
 }
 
 /// One capture device the host is offering right now.
@@ -690,6 +705,12 @@ fn negociar(device: &cpal::Device, side: Side) -> Result<cpal::SupportedStreamCo
 /// a preference written down by an older run, or an id from another host.
 /// Otherwise the same failures as [`open_default`].
 pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
+    // **Antes do `cpal`, e antes de qualquer outra coisa**: um id de mentira
+    // nunca chega ao host, nem para ser enumerado. Ver `mentira`.
+    #[cfg(feature = "aparelho-de-mentira")]
+    if let Some(nome) = mentira::pedido(wanted) {
+        return Ok(mentira::abrir(nome, ring_ms));
+    }
     let host = cpal::default_host();
 
     let input_device = resolve(&host, wanted.capture, Side::Input)?;
@@ -819,8 +840,10 @@ pub fn open(wanted: Wanted<'_>, ring_ms: u32) -> Result<AudioIo, DeviceError> {
     })?;
 
     Ok(AudioIo {
-        _input: input,
-        _output: output,
+        _vivos: Vivos::Cpal {
+            _input: input,
+            _output: output,
+        },
         captured,
         to_device,
         counters,

@@ -16,6 +16,11 @@
 //! desktop e o navegador montam com as mesmas funções. O que no
 //! `Room` dependia do vídeo, o `teto_de_video`, ficou no `seele-core`, ao lado
 //! do teto (`seele_core::tela::TetoDaSala`).
+//!
+//! A regra de quais despedidas acabam a sessão (`despedida`) mora aqui pelo
+//! mesmo motivo, e o `seele-core` a reexporta também: o `Room` e o motor do
+//! enlace a chamam, e uma regra só não tem como discordar de si mesma
+//! (pendência 61, lote P61 da F5).
 
 #![cfg_attr(
     test,
@@ -25,6 +30,7 @@
 use seele_proto::ids::{PersonId, SessionId, Ssrc};
 
 pub mod assento;
+pub mod despedida;
 pub mod retrato;
 pub mod state;
 
