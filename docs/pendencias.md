@@ -8273,3 +8273,32 @@ grep -n "const PRAZO: Duration" crates/seele-core/src/encontro.rs
 grep -n "timeout(PRAZO, resolver(bilhete))" crates/seele-core/src/encontro.rs
 ```
 
+## 56 · Consertada em 2026-10-11, sem confirmação de campo · Uma tentativa de entrada velha que termina depois da nova tomava a conexão
+
+**Publicada na v0.15.1.** Duas tentativas de entrada passavam pelo
+`AlreadyConnected` do `connect` (`apps/seele-app/src/main.rs`) antes de qualquer
+uma terminar; a velha, lenta, terminava depois da nova e gravava a conexão dela
+no slot da sessão. A mensagem seguinte ia ao servidor que a pessoa tinha
+deixado, e o retrato desta máquina também. Medido nesta linha com dois
+servidores de verdade, no módulo `a_entrada_velha_que_chega_tarde`.
+
+**O conserto** é o porte do lote E54 da 0.16 (ramo `0.15/e54`): o `connect`
+confere o slot e revoga com o cadeado dele na mão, confere a geração antes dos
+efeitos de entrada e de novo ao gravar o slot, e a tentativa que outra
+substituiu é fechada, vai ao `seele.log` como WARN e volta à janela com
+`substituida: true`. A janela registra essa recusa e não pinta a linha vermelha.
+A FFI e o fio não mudam.
+
+**O que fica de fora, de propósito.** A 0.15 não tem o contador de tentativas
+da janela nem o `soltar_a_entrada` da 0.16: a velha que entra antes de a nova
+chegar ao Rust continua entrando, e a tela bate com o slot.
+
+**E o preço nos testes.** Sem o conserto da pendência 50, a conexão largada só
+some do servidor pelo prazo de ociosidade, e os testes do módulo esperam até
+30 s por isso: o módulo leva uns 66 s.
+
+```sh
+grep -n "fn largar_a_substituida" apps/seele-app/src/main.rs
+grep -n "mod a_entrada_velha_que_chega_tarde" apps/seele-app/src/main.rs
+grep -n "falha?.substituida === true" apps/seele-app/ui/tela-boot.js
+```

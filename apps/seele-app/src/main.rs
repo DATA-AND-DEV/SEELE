@@ -1733,7 +1733,7 @@ mod a_entrada_velha_que_chega_tarde {
     /// `disconnect` da FFI da 0.15 pede o fim, e a thread da conexão acaba sem
     /// esperar o `CONNECTION_CLOSE` sair: o servidor só vê a saída pelo prazo
     /// de ociosidade, 20 s (`seele_proto::transport::IDLE_TIMEOUT`, que o app
-    /// não enxerga). Medido no porte: a velha largada sumiu do servidor velho
+    /// não enxerga). É a pendência 50 desta linha (`docs/pendencias.md`). Medido no porte: a velha largada sumiu do servidor velho
     /// 18 s depois de o teste começar a esperar (uns 20 s depois de largada),
     /// e uma saída comum da nova, pelo mesmo `disconnect`, em 20 s. Na 0.16 o
     /// P50-1 (`dde763b5`) fez o `Enlace::sair` esperar a despedida, e lá a
