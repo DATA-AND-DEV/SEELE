@@ -1739,6 +1739,34 @@ impl Connection {
         voice_room: u32,
         password: Option<String>,
     ) -> Result<(), ConnectionError> {
+        // **Uma senha maior que o teto do fio é recusada aqui, antes de pedir**
+        // (R1-M4 da revisão do lote P61). O teto é em bytes, e o campo da
+        // janela conta caracteres. Sem isto, o pedido ia ao núcleo, que o
+        // recusa sem escrever o quadro; mas o `Room` já tinha sentado a pessoa
+        // na sala pedida, e não tinha como saber qual das entradas no ar
+        // desfazer. Aqui a pessoa não é sentada, e lê a mesma recusa que o
+        // servidor daria a uma senha errada — que nenhuma senha deste tamanho
+        // deixa de ser.
+        if password
+            .as_ref()
+            .is_some_and(|senha| senha.len() > seele_core::MAX_NICKNAME_LEN)
+        {
+            tracing::warn!(
+                sala = voice_room,
+                "a senha passa do teto do fio, em bytes: a entrada não sai, e é recusada aqui"
+            );
+            let recusa = seele_core::Notice {
+                severity: seele_core::AlertSeverity::Warning,
+                reason: seele_core::AlertReason::VoiceRoomEntryRefused,
+                operator_text: None,
+            };
+            let notice = aviso_de(&recusa);
+            if let Ok(mut room) = self.shared.room.lock() {
+                room.notice = Some(recusa);
+            }
+            self.shared.notify(&Event::NoticeRaised { notice });
+            return Ok(());
+        }
         self.command(Command::EnterVoiceRoom(VoiceRoomId(voice_room), password))
     }
 

@@ -3553,11 +3553,12 @@ impl Motor {
         let Some(cliente) = self.cliente.as_mut() else {
             return;
         };
-        // O nome, sem os valores, para a recusa local dizer qual foi; e se é
-        // uma entrada, que a recusa tem de desfazer. Lidos antes do `match`,
-        // que consome o comando.
+        // O nome, sem os valores, para a recusa local dizer qual foi; e, se é
+        // uma entrada, o número dela, que a recusa tem de desfazer. Lidos antes
+        // do `match`, que consome o comando.
         let nome = comando.nome();
-        let e_entrada = matches!(comando, Comando::EntrarNaVoiceRoom(..));
+        let entrada =
+            matches!(comando, Comando::EntrarNaVoiceRoom(..)).then_some(numero_da_entrada);
         let resultado = match comando {
             // Nada a mandar ao servidor: é estado desta máquina.
             Comando::LembrarCaminho(_) => Ok(()),
@@ -3854,7 +3855,7 @@ impl Motor {
         // sessão, a voz e o resto iam junto, por um nome comprido.
         if let Err(erro) = resultado {
             match recusa_local(&erro) {
-                Some(recusa) => self.recusar_aqui(nome, recusa, e_entrada),
+                Some(recusa) => self.recusar_aqui(nome, recusa, entrada),
                 None => self.cair(),
             }
         }
@@ -3867,32 +3868,29 @@ impl Motor {
     /// e o caminho mais barato é a casca conferir o tamanho antes de mandar,
     /// como o envio de mensagem já faz.
     ///
-    /// A entrada numa sala com senha grande demais é desfeita aqui, como o
-    /// servidor a desfaria: com a mesma recusa que ele manda a uma senha
-    /// errada (`VoiceRoomEntryRefused`, que nenhuma senha deste tamanho deixa
-    /// de merecer). Ela desfaz a entrada pendente do motor — sem isso, a volta
-    /// a refaria a cada queda — e vai à casca, cujo `Room` desfaz o assento
-    /// especulativo pela mesma porta (`seele_sessao::assento`) e mostra o aviso
-    /// que já existe para a entrada recusada.
+    /// A entrada numa sala com senha grande demais (`entrada`, o número dela)
+    /// é desfeita aqui **pelo número**, pela porta de quem pediu
+    /// ([`crate::assento::EntradasPendentes::desfazer`]): sem isso, a volta a
+    /// refaria a cada queda. Não pela recusa do servidor, que desfaz o pedido
+    /// mais antigo no ar — com outra entrada no ar, era essa que se desfazia
+    /// (R1-M4 da revisão do P61).
+    ///
+    /// A casca não recebe nada daqui: a do app confere a senha antes de pedir
+    /// (`seele_ffi::Connection::enter_voice_room`), e o `Room` dela nunca senta
+    /// a pessoa numa entrada que não vai sair.
     fn recusar_aqui(
         &mut self,
         comando: &'static str,
         recusa: &seele_proto::control::ControlError,
-        e_entrada: bool,
+        entrada: Option<u64>,
     ) {
         tracing::warn!(
             comando,
             %recusa,
             "o comando não saiu: um campo dele não cabe no fio; a recusa é local, e o enlace segue"
         );
-        if e_entrada {
-            let recusada = ServerMessage::Alert {
-                severity: seele_proto::control::AlertSeverity::Warning,
-                reason: seele_proto::control::AlertReason::VoiceRoomEntryRefused,
-                operator_text: None,
-            };
-            self.ouvir_o_assento(&recusada);
-            let _ = self.avisos.send(Aviso::Mensagem(Box::new(recusada)));
+        if let Some(numero) = entrada {
+            self.entradas.desfazer(&mut self.voice_room, numero);
         }
     }
 
@@ -6661,6 +6659,59 @@ mod tests {
         assert_eq!(destino.marca_do_aviso(), None);
     }
 
+    /// **A recusa local desfaz a entrada que ela recusou, e não a mais antiga
+    /// no ar** (R1-M4 da revisão do P61).
+    ///
+    /// O caso do revisor: ela na sala 1; a entrada A (sala 2) no ar; a entrada
+    /// B (sala 3) com a senha grande demais, recusada aqui. A recusa local ia
+    /// pela porta do servidor, que recusa o pedido mais antigo no ar — A —, e
+    /// depois do `Pong` de A (o servidor a pôs na 2) o motor ficava na 3, com a
+    /// confirmada na 1 e B no ar para sempre.
+    #[test]
+    fn a_recusa_local_desfaz_a_entrada_que_ela_recusou() {
+        use seele_proto::control::ControlError;
+        let grande = ControlError::FieldTooLong {
+            field: "password",
+            len: 40,
+            limit: 32,
+        };
+        let pong = |numero: u64| ServerMessage::Pong {
+            timestamp: crate::assento::carimbo_da_entrada(numero),
+        };
+        let mut motor = motor_de_teste();
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(1), None));
+        motor.ouvir_o_assento(&pong(1));
+        assert_eq!(motor.voice_room, Some(VoiceRoomId(1)));
+
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), None));
+        motor.lembrar(&Comando::EntrarNaVoiceRoom(
+            VoiceRoomId(3),
+            Some("x".repeat(40)),
+        ));
+        let numero_de_b = motor.entradas.ultimo_numero().expect("B foi pedida");
+        motor.recusar_aqui("EntrarNaVoiceRoom", &grande, Some(numero_de_b));
+        assert_eq!(
+            (
+                motor.voice_room,
+                motor.entradas.confirmada(motor.voice_room)
+            ),
+            (Some(VoiceRoomId(2)), Some(VoiceRoomId(1))),
+            "a recusa local não devolveu o assento a A, ainda no ar"
+        );
+
+        // O servidor decide A: a pôs na 2.
+        motor.ouvir_o_assento(&pong(2));
+        assert_eq!(
+            (
+                motor.voice_room,
+                motor.entradas.confirmada(motor.voice_room),
+                motor.entradas.len()
+            ),
+            (Some(VoiceRoomId(2)), Some(VoiceRoomId(2)), 0),
+            "o motor, o áudio e o servidor discordam depois da recusa local"
+        );
+    }
+
     /// **Um campo grande demais é recusa daquele comando, e não queda** (M2 da
     /// revisão do P61).
     ///
@@ -6694,7 +6745,8 @@ mod tests {
         let senha = "segredo-que-nao-vai-ao-log".repeat(2);
         motor.lembrar(&Comando::EntrarNaVoiceRoom(VoiceRoomId(2), Some(senha)));
         assert_eq!(motor.voice_room, Some(VoiceRoomId(2)));
-        motor.recusar_aqui("EntrarNaVoiceRoom", &grande(), true);
+        let numero = motor.entradas.ultimo_numero();
+        motor.recusar_aqui("EntrarNaVoiceRoom", &grande(), numero);
 
         assert_eq!(
             motor.voice_room, None,

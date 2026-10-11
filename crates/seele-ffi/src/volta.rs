@@ -1215,6 +1215,43 @@ mod tests {
         );
     }
 
+    /// **Uma senha que não cabe no fio é recusada antes de pedir** (R1-M4 da
+    /// revisão do P61): nada vai ao enlace, o `Room` não senta a pessoa na sala
+    /// pedida — e então não há entrada no ar para desfazer —, e a recusa é a
+    /// que o servidor daria a uma senha errada.
+    #[test]
+    fn uma_senha_grande_demais_nao_pede_a_entrada() {
+        let shared = crate::tests::compartilhado_de_teste();
+        let (commands, mut fila) = tokio::sync::mpsc::unbounded_channel();
+        let conexao = crate::Connection {
+            commands,
+            shared: std::sync::Arc::clone(&shared),
+            encerrada: std::sync::Mutex::new(None),
+        };
+        let antes = shared.room.lock().unwrap().current_voice_room;
+
+        conexao
+            .enter_voice_room(3, Some("á".repeat(17)))
+            .expect("a recusa é local, e não erro de conexão");
+        assert!(
+            fila.try_recv().is_err(),
+            "a entrada com a senha grande demais foi pedida ao enlace"
+        );
+        let room = shared.room.lock().unwrap();
+        assert_eq!(room.current_voice_room, antes, "o `Room` sentou a pessoa");
+        assert_eq!(
+            room.notice.as_ref().map(|aviso| aviso.reason),
+            Some(seele_core::AlertReason::VoiceRoomEntryRefused)
+        );
+        drop(room);
+
+        // No teto, ela sai.
+        conexao
+            .enter_voice_room(3, Some("x".repeat(seele_core::MAX_NICKNAME_LEN)))
+            .unwrap();
+        assert!(fila.try_recv().is_ok(), "uma senha no teto não foi pedida");
+    }
+
     #[test]
     fn a_conferencia_do_tamanho_e_a_do_teto_do_fio() {
         assert_eq!(grande_demais(&"a".repeat(seele_core::MAX_BODY_LEN)), None);
