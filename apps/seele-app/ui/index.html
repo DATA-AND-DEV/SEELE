@@ -3784,16 +3784,16 @@
                 <label class="server-nome-campo">
                   <span class="rotulo">NOME DESTE SERVIDOR</span>
                   <!--
-                    `maxlength` é a mesma aproximação que os campos de criar
-                    sala e canal já fazem: o teto do protocolo é em **bytes** e
-                    este atributo conta caracteres, então um nome de 64 letras
-                    acentuadas ainda passa do teto. A recusa é **local**, e não
-                    do servidor: o núcleo não manda o quadro, registra no
-                    `seele.log` o comando e o campo, e o enlace segue (M2 da
-                    revisão do lote P61; antes, a sessão caía). A janela ainda
-                    não a mostra: o que falta está na pendência 58.
+                    **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5).
+                    Ele contava caracteres, e o teto do protocolo é em
+                    **bytes**: um nome acentuado cabia aqui e passava do teto, e
+                    o núcleo o recusava sem mandar o quadro, só com uma linha no
+                    `seele.log` (M2 da revisão do lote P61; antes, a sessão
+                    caía). Quem confere agora é `renomearServidor`, em bytes,
+                    com o teto lido do Rust (`limites_dos_campos`), e a recusa
+                    diz o número em `#server-servidor-erro`.
                   -->
-                  <input id="server-nome-valor" name="nome" maxlength="64"
+                  <input id="server-nome-valor" name="nome"
                          spellcheck="false" autocomplete="off"
                          placeholder="nome do servidor">
                 </label>

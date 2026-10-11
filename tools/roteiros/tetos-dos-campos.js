@@ -157,4 +157,34 @@ await caso("lugares da sala nova", async () => {
   }
 });
 
+// ------------------------------------- o nome do servidor, em CONFIGURAÇÕES
+//
+// `#server-nome-valor` manda ao sair do campo (`change`). A recusa fica no
+// `#server-servidor-erro`, e o campo continua com o que se escreveu.
+await caso("nome do servidor na configuração", async () => {
+  document.getElementById("botao-server-sessao").click();
+  exigir(await ate(() => visivel("tela-server") === "VISIVEL", 900), "CONFIGURAÇÕES não abriu");
+  document.getElementById("secao-servidor").click();
+  exigir(await ate(() => visivel("painel-servidor") === "VISIVEL", 900), "ESTE SERVIDOR não abriu");
+  const campo = document.getElementById("server-nome-valor");
+  const grande = passa(TETOS.nome_do_servidor);
+  campo.focus();
+  campo.value = grande;
+  campo.dispatchEvent(new Event("change"));
+  await ate(() => visivel("server-servidor-erro") === "VISIVEL", 600);
+  exigir(!mandou("renomear_server").some((a) => a?.name === grande),
+    `um nome de servidor de ${grande.length} letras e ${bytesDe(grande)} bytes saiu, e o núcleo o recusa calado`);
+  exigir(visivel("server-servidor-erro") === "VISIVEL" &&
+      texto("server-servidor-erro").includes(`${TETOS.nome_do_servidor} BYTES`),
+    `a recusa não diz o teto em ESTE SERVIDOR: «${texto("server-servidor-erro")}»`);
+  exigir(campo.value === grande, "o campo perdeu o nome recusado, e não há o que encurtar");
+  const certo = cabe(TETOS.nome_do_servidor);
+  campo.value = certo;
+  campo.dispatchEvent(new Event("change"));
+  exigir(await ate(() => mandou("renomear_server").some((a) => a?.name === certo), 600),
+    `um nome de servidor de ${bytesDe(certo)} bytes, no teto, não saiu`);
+  document.getElementById("server-fechar").click();
+  await ate(() => visivel("tela-server") !== "VISIVEL", 600);
+});
+
 relatar(`tempo virtual gasto: ${Math.round(performance.now())} ms`);
