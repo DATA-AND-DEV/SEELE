@@ -581,7 +581,9 @@
     <div class="server-campo">
       <label class="server-nome-campo">
         <span class="rotulo">NOME DESTE SERVIDOR</span>
-        <input id="preparar-nome" type="text" maxlength="64" spellcheck="false"
+        <!-- Sem `maxlength`, que contava caracteres: o teto do fio é em bytes, e
+             quem o confere é `confirmarPreparar` (pendência 58, item 55). -->
+        <input id="preparar-nome" type="text" spellcheck="false"
                autocomplete="off" placeholder="nome do servidor">
       </label>
     </div>

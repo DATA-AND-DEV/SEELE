@@ -24,10 +24,16 @@ const acentos = (n) => "á".repeat(n);
 /** O menor texto acentuado que passa de `teto` bytes, e o maior que cabe. */
 const passa = (teto) => acentos(Math.floor(teto / 2) + 1);
 const cabe = (teto) => acentos(Math.floor(teto / 2));
-/** Os argumentos de cada vez que a janela mandou `cmd`. */
-const mandou = (cmd) => window.__SEELE_HISTORICO.filter(([c]) => c === cmd).map(([, a]) => a);
+/**
+ * Os argumentos de cada vez que a janela mandou `cmd` **neste caso**: o que um
+ * caso anterior mandou, reprovado ou não, não conta a favor nem contra.
+ */
+let comecoDoCaso = 0;
+const mandou = (cmd) =>
+  window.__SEELE_HISTORICO.slice(comecoDoCaso).filter(([c]) => c === cmd).map(([, a]) => a);
 const texto = (id) => document.getElementById(id)?.textContent ?? "";
 const caso = async (nome, corpo) => {
+  comecoDoCaso = window.__SEELE_HISTORICO.length;
   try {
     await corpo();
     relatar(`${nome}: ok`);
@@ -62,6 +68,34 @@ await caso("apelido gravado", async () => {
     `um apelido de ${bytesDe(certo)} bytes, no teto, não foi gravado`);
   await ate(() => visivel("perfil") !== "VISIVEL", 300);
 });
+
+// --------------------------------------- o nome do servidor, ao hospedar
+//
+// `#preparar-nome` vai ao registro local (`criar_servidor`) e, depois de o
+// servidor subir e a janela entrar, ao `renomear_server`. Conferido antes de
+// tudo isso: um nome que não cabe no fio subia o servidor com o nome recusado
+// calado lá dentro.
+await caso("nome do servidor ao hospedar", async () => {
+  document.getElementById("botao-hospedar").click();
+  exigir(await ate(() => visivel("tela-preparar") === "VISIVEL", 900), "PREPARAR ESTE SERVIDOR não abriu");
+  const grande = passa(TETOS.nome_do_servidor);
+  document.getElementById("preparar-nome").value = grande;
+  document.getElementById("preparar-confirmar").click();
+  await ate(() => visivel("preparar-erro") === "VISIVEL", 600);
+  const subiu = mandou("criar_servidor").length > 0 || mandou("hospedar").length > 0;
+  exigir(!subiu && !mandou("renomear_server").some((a) => a?.name === grande),
+    `um nome de servidor de ${grande.length} letras e ${bytesDe(grande)} bytes subiu o servidor, e o renomear_server dele o núcleo recusa calado`);
+  exigir(visivel("preparar-erro") === "VISIVEL" && texto("preparar-erro").includes(`${TETOS.nome_do_servidor} BYTES`),
+    `a recusa não diz o teto em PREPARAR: «${texto("preparar-erro")}»`);
+  exigir(visivel("tela-preparar") === "VISIVEL", "a tela de preparar saiu com o nome recusado");
+  const certo = cabe(TETOS.nome_do_servidor);
+  document.getElementById("preparar-nome").value = certo;
+  document.getElementById("preparar-confirmar").click();
+  exigir(await ate(() => mandou("renomear_server").some((a) => a?.name === certo), 1500),
+    `um nome de servidor de ${bytesDe(certo)} bytes, no teto, não chegou ao servidor que subiu`);
+});
+const porta = document.getElementById("porta");
+if (porta && !porta.hidden) document.getElementById("porta-entendi").click();
 
 // Com sessão, para os casos de dentro do servidor.
 if (visivel("tela-sessao") !== "VISIVEL") await entrarNaSessao();

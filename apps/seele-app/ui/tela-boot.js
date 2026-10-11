@@ -1335,6 +1335,16 @@ async function confirmarPreparar() {
     // **Registrar antes de levantar.** Um registro com um servidor que nunca
     // subiu se explica; um servidor no ar que ninguém pediu, não.
     const nome = $("preparar-nome").value.trim();
+    // O teto do fio, em bytes, antes de subir (pendência 58, item 55): o nome
+    // só chega ao `renomear_server` depois da entrada, e o núcleo o recusaria
+    // calado com o servidor já no ar.
+    const grandeDemais = await passaDoTeto("nome_do_servidor", nome);
+    if (grandeDemais) {
+      erro.hidden = false;
+      erro.textContent = grandeDemais;
+      $("preparar-nome").focus();
+      return;
+    }
     const guardado = await invoke("criar_servidor", { nome });
     servidorEscolhido = guardado.id;
 
