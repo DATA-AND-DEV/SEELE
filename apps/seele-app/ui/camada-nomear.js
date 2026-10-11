@@ -100,6 +100,16 @@ $("nomear-forma").addEventListener("submit", async (evento) => {
   const confirmar = $("nomear-confirmar");
   confirmar.disabled = true;
   try {
+    // **O teto do fio, em bytes, antes de mandar** (pendência 58, item 55;
+    // lote C55 da F5). Tudo o que passa por aqui é nome de canal ou de sala, e
+    // os dois têm o mesmo teto. Era um `maxlength="48"` no campo, que contava
+    // caracteres: um nome acentuado cabia nele e não no quadro, e o núcleo o
+    // recusava sem a janela saber. A recusa fica aqui, onde se escreveu.
+    const grandeDemais = await passaDoTeto("nome_de_canal", nome);
+    if (grandeDemais) {
+      recusarNome(grandeDemais);
+      return;
+    }
     await aoConfirmarNome(nome);
     fecharNomear();
   } catch (falha) {

@@ -4153,9 +4153,15 @@
       <h2 id="nomear-titulo" class="nomear-titulo">NOMEAR</h2>
     </div>
     <form id="nomear-forma" class="nomear-corpo" autocomplete="off">
+      <!--
+        **Sem `maxlength`** (pendência 58, item 55; lote C55 da F5). Ele dizia
+        48 e contava caracteres, e o fio conta 48 **bytes**. Quem confere agora
+        é o `submit` de `camada-nomear.js`, em bytes, com o teto lido do Rust
+        (`limites_dos_campos`), e a recusa diz o número em `#nomear-erro`.
+      -->
       <label class="nomear-campo">
         <span id="nomear-rotulo" class="rotulo">NOME</span>
-        <input id="nomear-valor" name="nome" maxlength="48" required
+        <input id="nomear-valor" name="nome" required
                spellcheck="false" autocomplete="off">
       </label>
       <!--

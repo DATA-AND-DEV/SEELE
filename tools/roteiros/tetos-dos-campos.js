@@ -86,4 +86,40 @@ await caso("apelido na sessão", async () => {
   await ate(() => visivel("perfil") !== "VISIVEL", 300);
 });
 
+// ----------------------------------------- o nome de um canal ou de uma sala
+//
+// O diálogo de nomear (`#nomear-valor`) é um só para criar e renomear canal e
+// sala: a conferência mora nele, e duas portas dele provam que ela vale para
+// as duas.
+await caso("nome de canal ou sala", async () => {
+  const grande = passa(TETOS.nome_de_canal);
+  document.getElementById("nova-linha").click();
+  exigir(await ate(() => visivel("nomear") === "VISIVEL", 900), "o NOVO CANAL não abriu");
+  document.getElementById("nomear-valor").value = grande;
+  document.getElementById("nomear-confirmar").click();
+  await ate(() => visivel("nomear-erro") === "VISIVEL", 600);
+  exigir(!mandou("criar_linha").some((a) => a?.name === grande),
+    `um nome de canal de ${grande.length} letras e ${bytesDe(grande)} bytes saiu, e o núcleo o recusa calado`);
+  exigir(visivel("nomear-erro") === "VISIVEL" && texto("nomear-erro").includes(`${TETOS.nome_de_canal} BYTES`),
+    `a recusa não diz o teto no diálogo: «${texto("nomear-erro")}»`);
+  exigir(visivel("nomear") === "VISIVEL", "o diálogo fechou com o nome recusado");
+  const certo = cabe(TETOS.nome_de_canal);
+  document.getElementById("nomear-valor").value = certo;
+  document.getElementById("nomear-confirmar").click();
+  exigir(await ate(() => mandou("criar_linha").some((a) => a?.name === certo), 600),
+    `um nome de canal de ${bytesDe(certo)} bytes, no teto, não saiu`);
+  await ate(() => visivel("nomear") !== "VISIVEL", 600);
+
+  const sala = document.querySelector("button.voice_room-nome");
+  exigir(sala, "nenhuma sala com o nome em botão, para renomear");
+  sala.click();
+  exigir(await ate(() => visivel("nomear") === "VISIVEL", 900), "o RENOMEAR A SALA não abriu");
+  document.getElementById("nomear-valor").value = grande;
+  document.getElementById("nomear-confirmar").click();
+  await ate(() => visivel("nomear-erro") === "VISIVEL", 600);
+  exigir(!mandou("renomear_voice_room").some((a) => a?.name === grande),
+    `um nome de sala de ${bytesDe(grande)} bytes saiu ao renomear`);
+  document.getElementById("nomear-cancelar").click();
+});
+
 relatar(`tempo virtual gasto: ${Math.round(performance.now())} ms`);
