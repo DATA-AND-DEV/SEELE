@@ -36,7 +36,11 @@ A segunda rodada (passos 10 a 12) fez os três.
 | `b23fb430` | passo 10: o `connect` da FFI recusa o apelido grande demais com nome, antes de abrir a conexão; o instrumento vira teste |
 | `d85192bc` | passo 11: a janela diz a frase e esquece o `ultimoApelido`; o roteiro `apelido-no-hello.js` |
 | `13fe85da` | passo 12: a recusa de gravar o apelido fica no perfil |
-| este | o relatório e o item 55 com a segunda rodada |
+| `05115c0c` | o relatório e o item 55 com a segunda rodada |
+| `aa3280bc` | revisão, M1: a cena do apelido gravado devolve o apelido num `finally` |
+| `c15aa0e8` | revisão, M2: o guarda dos tetos vê `fraseDoTeto(N, …)` e a constante com o teto |
+| `90700636` | revisão: o item 55 ganha o M3 e a sala pessoal, lida |
+| este | o relatório com a rodada da revisão |
 
 Os arquivos que o lote mexeu:
 - `crates/seele-core/src/lib.rs`: quatro reexports do `seele-proto`;
@@ -186,17 +190,29 @@ fica registrada aqui.
 ## Os guardas
 
 - **`nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui`** (`frontend.rs`),
-  com os tetos lidos da FFI. Ele reprova duas coisas:
+  com os tetos lidos da FFI. Ele reprova três coisas:
   - um `maxlength` num dos cinco campos do `index.html`, com qualquer número;
   - um número igual a um teto numa linha de script que trata de tamanho de
     campo: que põe `maxLength`, que conta `bytesDe(`, que pede um teto
-    (`passaDoTeto`, `tetosDosCampos`), que fala dos lugares de uma sala, ou
-    que nomeia um dos cinco campos.
+    (`passaDoTeto`, `tetosDosCampos`), que diz a frase dele (`fraseDoTeto`),
+    que fala dos lugares de uma sala, ou que nomeia um dos cinco campos;
+  - uma constante declarada com um número igual a um teto
+    (`const TETO_DO_MOTIVO = 512;`), em qualquer script.
+
+  A terceira forma e o `fraseDoTeto` entre as marcas vieram do M2 da
+  revisão. Antes deles, as duas sondas do revisor passavam pelo guarda.
 
   As `CONSTANTES_DO_DESKTOP` da ponte ficam fora, porque o `web.rs` as
-  confere. Há uma exceção, com o motivo escrito: o `maxLength = 48` do nome de
-  um contato da agenda (`camada-sala.js`), que fica nesta máquina e não vai ao
-  fio. Uma exceção que sumir também reprova.
+  confere. Há quatro exceções, cada uma com o motivo escrito, nenhuma de
+  campo do fio:
+  - o `maxLength = 48` do nome de um contato da agenda (`camada-sala.js`);
+  - o `INTERVALO = 250` do ritmo da fala, em milissegundos (`base.js`);
+  - os `TETO_DE_GRUPOS = 32` e `TETO_DO_TITULO_DE_GRUPO = 64` do arranjo de
+    grupos de um MOD (`tela-sessao.js`).
+
+  Uma exceção que sumir também reprova. O comentário do guarda diz o que um
+  guarda textual não vê: um teto montado por conta (`256 * 2`), ou escrito
+  como propriedade de objeto numa linha sem marca.
 - **`nenhuma_tela_le_um_teto_de_campo_que_nao_existe`** (`main.rs`, ao lado
   do guarda das regras do ícone). Um nome de teto que o Rust não serializa
   chega `undefined`, e `passaDoTeto` não conferiria nada, calado. Este guarda
@@ -309,7 +325,8 @@ limpo depois de cada rodada.
 `limit: lugaresDeUmaSalaNova` de antes), pelo roteiro. Cada reversão reprova
 a cena do seu campo, e só ela:
 - **R1, o apelido:** reprovam «apelido gravado» e «apelido na sessão». É uma
-  conferência só para as duas portas, e as outras cinco cenas passam;
+  conferência só para as duas portas, e as outras cinco cenas passam. Isso
+  vale de novo desde o `aa3280bc` (M1 da revisão, abaixo);
 - **R2, o nome de canal:** reprova só «nome de canal ou sala»;
 - **R3, os lugares:** reprova só «lugares da sala nova»;
 - **R4, o nome em CONFIGURAÇÕES:** reprova só «nome do servidor na
@@ -343,6 +360,23 @@ a cena do seu campo, e só ela:
 - **R10, o `catch` do perfil reabrindo de novo:** reprova só «a recusa de
   gravar o apelido».
 
+**A rodada da revisão** (M1 e M2), pelo mesmo script:
+- **A R1 refeita.** Na ponta `05115c0c`, a R1 não dava o que a linha acima
+  diz, e a revisão mediu isso. A cena «apelido gravado», reprovada, deixava os
+  34 B gravados no duble. Desde o passo 11, o duble os recusa no `connect`.
+  Então a entrada na sessão caía com «a sessão não ficou visível depois de
+  HOSPEDAR AQUI», e as cinco cenas de dentro dela nem rodavam. Reproduzi
+  antes do conserto: duas linhas vermelhas, e nenhuma cena de sessão. Com o
+  `finally` que devolve o apelido e fecha o perfil (`aa3280bc`), a R1 reprova
+  «apelido gravado» e «apelido na sessão», e as outras cinco cenas passam. As
+  R2 a R6 refeitas na mesma ponta reprovam, cada uma, só a sua cena;
+- **P1a, a sonda do revisor:** `fraseDoTeto(512, tamanho)` no BANIR, numa
+  conta sem `bytesDe(`. Antes do `c15aa0e8`, o guarda passava («1 passed»).
+  Depois, reprova com a linha;
+- **P1b, a outra sonda:** `const TETO_DO_MOTIVO = 512;` no BANIR. Antes, o
+  guarda passava. Depois, reprova com a linha;
+- **G1, G2 e G3 refeitas depois do M2:** continuam reprovando.
+
 **O que a reversão achou no próprio roteiro.** Na primeira rodada, R2 e R3
 reprovaram também «nome do servidor na configuração» («o campo perdeu o nome
 recusado»). Não era o produto: o caso escrevia o nome antes de o
@@ -353,6 +387,13 @@ disso, as seis reversões reprovaram cada uma só a sua cena, e o roteiro
 passou cinco vezes seguidas.
 
 ## O que rodou
+
+**Na rodada da revisão**, no `90700636`:
+- `--test frontend`, com HOME falsa, pelo script: 296;
+- os roteiros `tetos-dos-campos.js` (7 de 7) e `apelido-no-hello.js` (2 de
+  2), três vezes cada;
+- `cargo fmt --all -- --check`: limpo;
+- `cargo clippy -p seele-app --all-targets -- -D warnings`: limpo.
 
 No `13fe85da`, a ponta da segunda rodada:
 - **`cargo test -p seele-app`**, todos os alvos, com HOME falsa, pelo script
@@ -384,6 +425,19 @@ reexports. O microfone não foi aberto.
 - **O nome de um contato da agenda** (`camada-sala.js`, `maxLength = 48`).
   Ele fica no disco desta máquina e não vai ao fio, e é a exceção nomeada no
   guarda.
-- **A recusa nova no navegador.** O `connect` da ponte ainda é a tarefa 34
-  (F4). Quando ele existir, vai ter de devolver a mesma recusa, com o mesmo
-  nome, para a `fraseDeErro` dizê-la.
+- **A recusa nova no navegador, e a oitava porta do apelido** (M3 da
+  revisão, pela leitura). O `#cel-entrada-apelido` da entrada da casca do
+  navegador (`celular-entrada.js`) vai ao `connect` da ponte sem conferir os
+  bytes. O `connect` da ponte ainda é a tarefa 34 (F4), e nada chega ao fio.
+  Quando ele existir, faltam três coisas:
+  - ele devolver a mesma recusa, com o mesmo nome;
+  - o ENTRAR do celular conferir o campo com `passaDoTeto`;
+  - o `desfecho` de `identidade-web.js` tratar a recusa como uma que segue,
+    com o campo marcado.
+
+  Isso está no item 55 da pendência 58.
+- **A sala pessoal com o apelido gravado como nome** (fora da contagem da
+  revisão; lido, não medido). `sala.rs` sobe a sala com o apelido gravado
+  como `ServerConfig.name`, e o `Session` leva o nome sob 64 B. Desde o C55,
+  um apelido novo tem até 32 B e cabe. Um gravado de antes, acima de 64 B,
+  poderia impedir quem liga de entrar. Também está no item 55.
