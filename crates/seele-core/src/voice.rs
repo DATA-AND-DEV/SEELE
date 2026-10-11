@@ -2130,7 +2130,6 @@ async fn pipeline(
                     .relogio_seq
                     .store(u32::from(seq), Ordering::Relaxed);
                 let header = MediaHeader {
-                    version: seele_proto::MEDIA_HEADER_VERSION,
                     // The server refuses anything but the ssrc it assigned — G2.
                     ssrc: ssrc.get(),
                     seq,
@@ -3774,7 +3773,6 @@ mod jitter_de_chegada {
             let arrival_ms = f64::from(quadro) * 20.0 + f64::from(quadro % 4) * 1.5;
             let mut bytes = vec![0_u8; HEADER_LEN + 3];
             MediaHeader {
-                version: seele_proto::MEDIA_HEADER_VERSION,
                 ssrc: ANA,
                 seq: quadro,
                 timestamp: u32::from(quadro) * 960,
@@ -3875,7 +3873,6 @@ mod cabecalhos_recusados {
     fn datagrama(versao: u8) -> Vec<u8> {
         let mut saida = vec![0_u8; HEADER_LEN + 3];
         MediaHeader {
-            version: MEDIA_HEADER_VERSION,
             ssrc: 7,
             seq: 1,
             timestamp: 960,

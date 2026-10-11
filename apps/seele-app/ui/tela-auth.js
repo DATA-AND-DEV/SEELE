@@ -575,7 +575,7 @@ function levarParaAEspera(falha, endereco, tentativa) {
   // pela revisão, e igual na base). Agora ela guarda o número da tentativa da
   // batida, e a falha de outra tentativa segue para a linha vermelha. **E a da
   // batida não some sem rastro**: vai ao `seele.log`, como aviso.
-  if (tela.hidden && batendoDaEspera !== null && batendoDaEspera === tentativa) {
+  if (aBatidaFoiLargada(tentativa)) {
     const dito = falha instanceof Error ? String(falha) : JSON.stringify(falha);
     registrarNoAnfitriao(
       "espera",
@@ -691,6 +691,21 @@ let esperando = false;
  * com a batida no ar era tomada por ela e calada. Ver `levarParaAEspera`.
  */
 let batendoDaEspera = null;
+
+/**
+ * **A batida desta espera, largada**: a tentativa `tentativa` é a batida que
+ * esta tela mandou, e a pessoa já saiu da espera pela porta.
+ *
+ * Nenhuma das duas voltas dela fala por cima da entrada que a pessoa escolheu:
+ * a falha é calada em `levarParaAEspera` (lote W2), e a entrada é largada em
+ * `conectar` (lote E54 da F5). A entrada largada era a que faltava: sair da
+ * espera não começa outra tentativa, então a batida continuava sendo a mais
+ * nova, e, admitida depois, reabria esta tela em aperto de mão por cima da
+ * entrada (medido na `ajustes-v013.cjs`, `aEntradaVelhaNaoTomaATela`, passo 3).
+ */
+function aBatidaFoiLargada(tentativa) {
+  return $("tela-auth").hidden && batendoDaEspera !== null && batendoDaEspera === tentativa;
+}
 
 /**
  * Para de contar e apaga a contagem da tela.

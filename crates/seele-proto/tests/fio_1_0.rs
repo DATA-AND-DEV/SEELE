@@ -53,7 +53,7 @@ use seele_proto::screen::{
 };
 use seele_proto::stream::StreamType;
 use seele_proto::volume::{PedidoDeImagem, RespostaDeImagem, VolumeHeader, VolumeRefusal};
-use seele_proto::{MediaHeader, FAIXA, MEDIA_HEADER_VERSION};
+use seele_proto::{MediaHeader, FAIXA};
 
 /// Onde os bytes-ouro moram, a partir da raiz do crate.
 const ARQUIVO: &str = "tests/fio_1_0.txt";
@@ -710,7 +710,6 @@ fn cabecalhos() -> Vec<(String, Vec<u8>)> {
 
     let mut voz = [0_u8; seele_proto::HEADER_LEN + 2];
     let len = MediaHeader {
-        version: MEDIA_HEADER_VERSION,
         ssrc: 0xDEAD_BEEF,
         seq: 0x1234,
         timestamp: 0x0009_6000,

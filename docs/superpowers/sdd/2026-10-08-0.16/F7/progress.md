@@ -707,3 +707,128 @@ passo do roteiro reprova na reversão.
 - **a confirmação ao fechar (21)** pede decisão da orquestradora: o guarda de
   credencial da F5 proíbe vetar o fechamento da janela, e no macOS o botão do
   sistema e o Cmd+Q passam sem pergunta.
+
+## Tarefa 21: a confirmação ao fechar (10/10)
+
+Decidida pela orquestradora em 10/10, no molde da exceção do `beforeunload`.
+No `0.16/sala-viva`, em três commits, cada um verde sozinho:
+
+| etapa | commit |
+|---|---|
+| a `esquecerARecusaDoApelido()` da F5, por `cherry-pick` do `ca2589f9` (`0.16/lotes`), com o mesmo `patch-id` | `b276e569` |
+| a exceção no guarda do lote R (isolado) | `a1423896` |
+| o ouvinte, o duble e o roteiro `fechar.js` | `730048aa` |
+
+- **Um ouvinte só, no `camada-hospedagem.js`**: o `onCloseRequested` cobre o
+  botão vermelho do macOS, o Alt+F4 e o botão da casca (o `close()` também pede
+  o fechar). A parte 1 aprovada, uma pergunta no `#janela-fechar` com a linha
+  do `base.js` num commit isolado, ficou desnecessária.
+- **Antes de qualquer veto, as credenciais da tentativa somem**:
+  `fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`. A segunda é da F5:
+  o guarda dela proíbe outro script de nomear o `recusaDoApelido`.
+- **Só o guardado pergunta.** Sem servidor no ar (`meu_servidor` devolve
+  `null`), fecha direto. A sala pessoal não pergunta: ela se despede sozinha.
+- **A exceção no guarda do lote R** (`a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta`,
+  parte 4), revisada pela F5:
+  - o `close-requested` cru continua proibido;
+  - cada `onCloseRequested(` é cobrado, e o trecho vai até o parêntese que
+    fecha a chamada, não até o primeiro `.catch(`;
+  - antes do `preventDefault`: as duas credenciais, e `invoke("meu_servidor")`
+    antes do `if (!meu) return;`;
+  - um corte cedo (um `")"` num texto) reprova dizendo que o guarda não leu o
+    ouvinte, em vez de passar calado. Os dois últimos itens vieram da revisão
+    da F5.
+
+**Reversões, cada uma reprovando:** segurar antes de esquecer; não esquecer o
+apelido; segurar sem perguntar pelo servidor; o `close-requested` cru; um
+`.catch(` antes do veto; um `")"` num texto antes do veto; o `return` antes da
+pergunta. As duas últimas passavam caladas sem os ajustes da F5.
+
+**O roteiro `fechar.js`:** sem servidor, o pedido passa e a recusa do apelido
+é esquecida; com o guardado no ar, o pedido é segurado e a caixa cita o
+servidor, sem fechar antes do sim; depois do sim, a janela fecha e o pedido
+seguinte passa.
+
+**Como está:** cada etapa sozinha passa o `--test frontend` (292), a carga, os 33
+roteiros e as duas bancadas da ponte; sem o ouvinte, o `fechar.js` reprova («a
+casca não ouve o pedido de fechar a janela»). Com a (a) e a (b) na árvore: app
+718/718 e a bancada do celular passa.
+
+**O que ficou de fora — o Cmd+Q.** Medido no código (tauri 2.11.5,
+tauri-runtime-wry 2.11.4, tao 0.35.3, muda 0.19.3): o item Quit do macOS manda
+o `terminate:`, o `tao` não implementa `applicationShouldTerminate:`, e o
+`applicationWillTerminate:` vai direto ao `RunEvent::Exit`. O Cmd+Q, o Sair do
+Dock e o logout passam ao largo do `onCloseRequested` **e** do `ExitRequested`:
+não perguntam, não despedem as hospedagens e **não despedem nem a própria
+sessão** (o `despedir_se` da pendência 50, que na `v0.15.1` publicada também só
+roda no `ExitRequested`). Leitura de código, ainda sem medida em tempo de
+execução. A orquestradora deu o sim para os dois consertos, escritos na pausa da M3:
+(a) o Sair nosso no menu do macOS, que fecha a janela e passa pela pergunta;
+(b) a despedida de melhor esforço no `RunEvent::Exit`, com teto de 1 s. Os dois
+estão escritos, com 5 testes e 2 guardas, cada um reprovando na reversão (11),
+e **ficam sem commit até a medida no app de verdade**, que a orquestradora roda
+(a tecla e o clique são dela): se o runtime não entregar a despedida no
+`RunEvent::Exit`, a (b) sai. O desenho e a medida estão no plano, na tarefa 21.
+
+## A 21 medida no app: a janela que não fechava, a (a) e a (b) (10/10)
+
+A orquestradora rodou duas medidas no app de verdade, com builds `.app` de
+nome próprio (`SEELE-sem-ab` e `SEELE-com-ab`), o `seeled` numa porta só dele
+como medida de quem ficou, e um segundo cliente.
+
+**A primeira medida achou um defeito da 21**: o botão vermelho, o Sair do menu
+e o sim da pergunta não fechavam nada. O processo seguia vivo, sem janela à
+vista, dentro do servidor por minutos, sem uma linha de saída no `seele.log`.
+
+- **A causa, medida antes do conserto.** Com um ouvinte de `onCloseRequested`
+  de pé, o Tauri segura o fechar no Rust e entrega a decisão à página; sem
+  `preventDefault`, quem termina de fechar é o embrulho do `@tauri-apps/api`,
+  pelo `destroy()`. A capacidade `janela` dava o `close` e não o `destroy`:
+  «window.destroy not allowed», numa promise que ninguém via (a página não tem
+  ouvinte de `unhandledrejection`). Reproduzido pelo runtime falso contra a ACL
+  gerada.
+- **O conserto** (`ba9772c9`): o `core:window:allow-destroy`, com o esquema
+  gerado, e o guarda `a_pagina_que_ouve_o_fechar_consegue_terminar_de_fechar`
+  (`tests/permissoes.rs`), que reprova sem a permissão.
+- **Por que o roteiro não pegou** (`1e0a2a8a`): o duble aceitava tudo. Agora ele
+  fecha como o Tauri — o `close()` vira pedido quando há ouvinte, sem veto o
+  embrulho chama o `destroy()`, e as permissões vêm do `janela.json` — e o
+  `fechar.js` exige a janela destruída. Sem a permissão, ele reprova com a
+  frase do Tauri.
+
+**A segunda medida**, com o conserto e com diagnóstico que não foi a commit
+(a página dizendo ao `seele.log` quando recebe o Cmd+Q; todo evento do menu):
+
+| saída | sem a (a) e a (b) | com a (a) e a (b) |
+|---|---|---|
+| botão vermelho | sai em ~1 s; o servidor vê na hora | igual, e «a despedida já tinha rodado» no fim |
+| item Sair do menu | — | `seele-sair` → «Sair do menu…» → a saída; o servidor vê na hora |
+| Cmd+Q pela tecla | a página recebe o keydown, o app sai pelo `terminate:`, **o servidor só vê 20 s depois** | a página recebe, o menu dispara o `seele-sair`, a saída; o servidor vê na hora |
+| `quit app` (Dock, logout) | o servidor só vê 20 s depois | «se despediram levou_ms=96»; o servidor vê na hora |
+
+Com o guardado no ar (`--hospedar`, um segundo cliente dentro): o Cmd+Q mostra
+«FECHAR O SEELE»; CANCELAR deixa tudo de pé; o sim fecha em ~1 s, e quem estava
+dentro lê «O SERVIDOR ESTÁ ENCERRANDO».
+
+**Os commits:** a (b) em `ef364aa9` (a despedida do fim no `RunEvent::Exit`,
+teto de 1 s) e a (a) em `f835b52d` (o Sair nosso no menu do macOS). App
+719/719; 33/33 roteiros; as duas bancadas da ponte.
+
+**Decidido e registrado:**
+- **o «Quit and Keep Windows» (Option+Cmd+Q) sai do menu.** É o alternativo que
+  o AppKit só põe ao lado de um Sair com `terminate:`. O SEELE não restaura
+  janelas na reabertura (o `tao` não usa a restauração de estado do AppKit), e
+  ele só fazia o que o Cmd+Q antigo fazia: sair sem perguntar. Recuperá-lo
+  reabriria esse atalho.
+
+**O que ficou sem resposta ou de fora:**
+- **o Cmd+Q da primeira medida não se explica pela ACL**: a linha «Sair do
+  menu» sai antes do `close()`, e naquela rodada ela não saiu. A segunda medida,
+  com o mesmo envio, não reproduziu. Fica como observado uma vez, sem causa;
+- o Cmd+Q com a janela minimizada não foi medido (o `AXMinimized` não pegou);
+- **as listas do RT** (`0.16/lotes`): o `fechar.js` tem de entrar na lista do
+  job `bancadas` do `.github/workflows/ci.yml` e na `roteiros_da_casca` do
+  `empacotar/publicar.sh`, entre o `escolher-transmissao.js` e o `hospedar.js`.
+  As listas não existem no `0.16/sala-viva`: entram no encontro da 14ª;
+- a página sem ouvinte global de `unhandledrejection`, que deixou este defeito
+  mudo, é do `base.js` e ficou com a orquestradora.

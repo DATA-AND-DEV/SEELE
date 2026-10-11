@@ -30,8 +30,10 @@
 //! 250 da lista pesariam na máquina medida. Eles entram no ritmo da portaria
 //! (`taxa.rs`: 30 apertos de rajada por endereço, repostos a 30 por minuto; todos
 //! saem de 127.0.0.1, e o app também): 28 de uma vez, e depois um a cada 2,05 s,
-//! tentando de novo quando recusados. Cada um drena o que chega, e uma queda vai
-//! ao stderr com o motivo. Prontos, eles dizem `M3 calados prontos=<n>`.
+//! tentando de novo quando recusados, e levando já na primeira tentativa o
+//! conjunto de MODs que o primeiro aceitou. Cada um drena o que chega, e uma
+//! queda vai ao stderr com o motivo. Um que não entra diz e segue, e os outros
+//! ficam. Prontos, eles dizem `M3 calados prontos=<entraram> de <n>`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::cast_precision_loss,
          clippy::cast_possible_truncation, clippy::indexing_slicing)]
 
@@ -77,7 +79,8 @@ async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos:
     let fim = comeco + Duration::from_secs(segundos);
     let mut tarefas = Vec::with_capacity(n);
     let mut aceito = None;
-    for i in 0..n {
+    let mut ficaram_de_fora = 0_usize;
+    'calados: for i in 0..n {
         if i >= RAJADA {
             tokio::time::sleep(RITMO).await;
         }
@@ -92,7 +95,15 @@ async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos:
                     eprintln!("M3 calado {apelido} recusado ({erro}); de novo em {} ms", RITMO.as_millis());
                     tokio::time::sleep(RITMO).await;
                 }
-                Err(erro) => return Err(erro.context(format!("{apelido} não entrou"))),
+                // **Diz e segue** (decidido em 10/10): um calado que não entra não
+                // derruba os outros. O roteiro conta os da lista pela
+                // acessibilidade e não mede com menos, então a medida continua
+                // protegida, e a falha diz quantos faltam em vez de todos sumirem.
+                Err(erro) => {
+                    eprintln!("M3 calado {apelido} não entrou: {erro}");
+                    ficaram_de_fora += 1;
+                    continue 'calados;
+                }
             }
         };
         tarefas.push(tokio::spawn(async move {
@@ -105,7 +116,11 @@ async fn muitos_calados(endereco: SocketAddr, n: usize, prefixo: &str, segundos:
             }
         }));
     }
-    println!("M3 calados prontos={n} em {:.0} s", comeco.elapsed().as_secs_f64());
+    println!(
+        "M3 calados prontos={} de {n} em {:.0} s",
+        n - ficaram_de_fora,
+        comeco.elapsed().as_secs_f64()
+    );
     for tarefa in tarefas {
         let _ = tarefa.await;
     }

@@ -29,7 +29,10 @@ medida de outra coisa.
    existe), e na 0.16 quem ouve jogava fora todo datagrama do falante: nos sete
    primeiros cenários com voz da campanha, nada foi decodificado, e o jitter
    saía 0 exato. Remendo, e não troca no arquivo, para a base continuar
-   compilando com o mesmo `m3-falante.rs`.
+   compilando com o mesmo `m3-falante.rs`. **Depois da 13ª integração da
+   0.16** o `MediaHeader` perdeu o campo `version` (o `encode` grava sempre o
+   número da voz, e o tipo não deixa escolher outro): numa cópia sem o campo,
+   o remendo tira a linha em vez de trocá-la.
 """
 
 import pathlib
@@ -71,9 +74,15 @@ def main():
     trocar(fonte, "crates/seele-server/examples/m3-servidor.rs",
            "server_half: manifesto.server.is_some(),",
            "server_half: manifesto.server.is_some(),\n                    api: manifesto.api,")
-    trocar(fonte, "crates/seele-core/examples/m3-falante.rs",
-           "version: seele_proto::PROTOCOL_VERSION,",
-           "version: seele_proto::MEDIA_HEADER_VERSION,")
+    # Com o campo (a 0.16 até a 13ª integração), o número da voz no lugar do
+    # do protocolo; sem ele, a linha sai, e o `encode` grava o número da voz.
+    if "pub version: u8" in (fonte / "crates/seele-proto/src/media.rs").read_text():
+        trocar(fonte, "crates/seele-core/examples/m3-falante.rs",
+               "version: seele_proto::PROTOCOL_VERSION,",
+               "version: seele_proto::MEDIA_HEADER_VERSION,")
+    else:
+        trocar(fonte, "crates/seele-core/examples/m3-falante.rs",
+               "            version: seele_proto::PROTOCOL_VERSION,\n", "")
 
 
 if __name__ == "__main__":

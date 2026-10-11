@@ -73,6 +73,19 @@ windows = { version = "0.62", features = [
 ] }
 windows-core = "0.62"
 
+[features]
+# **O aparelho de mentira** (lote P61 da F5, pendência 61): um par de aparelhos
+# que não é placa de som nenhuma, aberto pelo mesmo `device::open` de sempre
+# quando o id pedido começa com `device::mentira::PREFIXO`. É por ele que um
+# teste da conformidade abre a voz **pela FFI**, inteira — a porta da voz, a
+# reabertura na volta, o laço, o codificador e o canal de mídia —, sem abrir o
+# microfone nem a saída da máquina em que roda.
+#
+# **Nunca ligado no binário do produto**: com o resolvedor 2, a feature de uma
+# dependência de teste não se une ao build normal, e um `compile_error!` em
+# `device/mentira.rs` recusa um build otimizado com ela.
+aparelho-de-mentira = []
+
 # **Folha própria, e a razão é uma linha só.**
 #
 # `unsafe_code` precisa ser `deny` em vez de `forbid`: a captura de áudio por

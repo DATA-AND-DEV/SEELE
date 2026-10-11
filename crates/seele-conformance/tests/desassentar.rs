@@ -150,7 +150,6 @@ async fn visitante(endereco: SocketAddr, chave: &SigningKey) -> Result<Client> {
 /// Um datagrama de voz bem-formado vindo de uma fonte.
 fn datagrama(ssrc: Ssrc, seq: u16) -> Vec<u8> {
     let header = MediaHeader {
-        version: seele_proto::MEDIA_HEADER_VERSION,
         ssrc: ssrc.get(),
         seq,
         timestamp: u32::from(seq) * 960,

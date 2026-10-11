@@ -123,6 +123,8 @@ testes).
 | `gerar-carga.py` | as variantes do MOD de carga, com os GIFs da capa |
 | `m3-carga/` | o modelo do MOD de carga sintético da API 6 |
 | `conferir-carga.rs` | confere uma variante contra o prelúdio da cópia |
+| `preparar-conserto-63.sh` | a `carga-cartoes` de novo, com o conserto da pendência 63 na cópia da campanha, que fica marcada `<commit>+6717dc2c` |
+| `remendar-conserto-63.py` | o `tela-sessao.js` do `6717dc2c` na cópia, letra por letra, e o número da voz do falante |
 
 ## A campanha da API 6 (tarefa 11 do plano da F3)
 
@@ -252,6 +254,14 @@ foram medidas, e o molde mudado não as alcança.
   aceito na primeira recusa vai na primeira tentativa de todo calado seguinte,
   e só o primeiro paga dois. Conferido por ela contra o `m3-servidor` **com** o
   `m3-carga-cartoes`: 40 em 25 s, nenhuma recusa.
+- **Um calado que não entra diz e segue** (decidido em 10/10, depois da
+  campanha): antes, o `Err` derrubava o processo e os 250 sumiam, e o roteiro
+  esperava 15 minutos por um «prontos» que não vinha. Agora ele vai ao `.out`
+  com o motivo, os outros ficam, e a linha final diz quantos entraram de quantos
+  (`prontos=<entraram> de <n>`); o roteiro não mede sem os 251 na lista, então a
+  medida continua protegida, e a falha diz quantos faltam. **A campanha que deu
+  números não usou o `--calados`**, e por isso o que ela mediu não muda; só a
+  `carga-cartoes` o usa, e a de 10/10 rodou a versão anterior, que aborta.
 - **O cenário só mede com a lista inteira**: o roteiro conta pela
   acessibilidade os cartões distintos (`cartão <apelido> · linha 1`) e só
   segue com os 251; o relato leva `cartoes_na_lista`. O `carga_a_vista` leva o
@@ -289,6 +299,71 @@ doze cenários com voz da campanha mediram o jitter**, e ele vale neles.
 primeira consulta** (a orquestradora, 10/10). O `esperar` do `m3.py` repete a
 consulta até o prazo, e por isso já cobre o caso; uma ferramenta que consulte
 uma vez só leria uma tela vazia.
+
+**A `carga-cartoes` travou a página, e a causa é do produto, não do MOD**
+(10/10). Com os 251, o WebContent passou de 100% de CPU por 4,5 min, a memória
+subiu de 1,13 para 1,33 GB, e nenhum cartão nem o agregado chegou à tela; com
+10 pessoas, chegaram na hora. Pela leitura: cada sessão do servidor manda um
+`PersonState` por segundo (`TELEMETRY_INTERVAL`, `session.rs:175`) a **todas**
+as conexões (`session.rs:5404`); cada um marca `changed.roster`
+(`seele-sessao/src/state.rs:1169`), que vira um `Event::RosterChanged` sem
+junção nenhuma (`seele-ffi/src/lib.rs:5870`, `notify`); o app o emite tal qual
+(`apps/seele-app/src/main.rs:906`), e a janela responde a cada um com um
+`atualizar()` (`tela-sessao.js:4973`) — o retrato inteiro pela ponte e a lista
+inteira redesenhada. Com N pessoas, N redesenhos completos por segundo, cada
+um do tamanho de N: o custo cresce com o quadrado.
+
+Medido com `tools/lista-grande.cjs`, com os eventos
+vindos de fora da página e no ritmo do servidor (5 s; o Chromium do Playwright,
+não o WebKit, e a ponte simulada por JSON — a de verdade custa mais):
+
+| pessoas | MOD | um evento, um `atualizar()` (hoje) | no máximo um por quadro | só o tique de 500 ms |
+|---|---|---|---|---|
+| 251 | cartões + 128 | **fila de 4,9 s em 5 s**, 68 quadros em 9,9 s | 99%, 88 quadros, sem fila | 14%, 548 quadros |
+| 251 | só os cartões | **fila de 3,5 s**, 64 quadros em 8,5 s | 100%, 134 quadros | 9%, 578 quadros |
+| 251 | só as 128 sem alvo | 98%, 98 quadros, sem fila | 100%, 188 quadros | — |
+| 251 | sem | 99%, 232–377 quadros, sem fila | 98%, 557 quadros | 6%, 598 quadros |
+| 200 | só os cartões | 99%, 67 quadros, fila de 0,1 s | — | — |
+| 100 | só os cartões | 100%, 325 quadros | — | — |
+| 100 | sem | 42%, 600 quadros | — | — |
+
+(600 quadros em 5 s é a página livre.) **Depois do conserto** (`6717dc2c`: no
+máximo um `atualizar()` por quadro, na janela; guarda em
+`apps/seele-app/bancada/um-redesenho-por-quadro.cjs`), medido pelo ouvinte de
+verdade: com 251, os cartões e as 128, fila de 0,1 s e a página a 99%, 93
+quadros — o mesmo da coluna do meio. A fila não esvazia enquanto os eventos
+chegarem, e eles chegam enquanto houver sessão: é a CPU presa e a memória
+subindo da M3. Juntar os eventos por quadro tira a fila e não tira o custo —
+cada quadro ainda refaz a lista inteira. Que o cartão não tenha aparecido na
+M3 é coerente com isso (o registro do MOD esperando atrás da fila), mas não
+foi medido.
+
+**Para a `carga-cartoes` depois do conserto**: sem MOD nenhum, 251 pessoas
+ainda deixam a página a 98% — cada quadro refaz a lista inteira, e redesenhar
+só a linha que mudou ficou para depois (pendência 63). Contra o `sem-mod` de
+uma pessoa, a lista entraria na conta do MOD.
+
+**Para medir de novo** (decisão da orquestradora, 10/10: com 251, na build da
+M3 remendada com o conserto, e não com menos pessoas):
+
+```sh
+sh docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh /tmp/m3-6
+sh /tmp/m3-6/roteiro/campanha-api6.sh sem-mod sem-mod+voz carga-cartoes carga-cartoes+voz
+```
+
+O remendo é o diff do `6717dc2c`, conferido linha por linha contra o
+`tela-sessao.js` do `6e845e0d`, e a bancada `um-redesenho-por-quadro.cjs`
+reprova a cópia sem ele (251 retratos) e passa com ele (73 ms de atraso
+máximo). O app medido nos 24 fica guardado ao lado (`SEELE-6e845e0d.app`), e o
+`COMMIT_DA_MEDICAO` marcado faz o `resumir-api6.py` recusar ler a
+`carga-cartoes` nova contra o `sem-mod` velho: as referências são medidas de
+novo, na mesma build.
+
+**O teto de 256 alvos por ponto não congela sobre isto.** Com os cartões, a
+fila aparece a partir de 200 pessoas, abaixo do teto; e sem MOD nenhum, com
+251, a página já passa o tempo todo redesenhando (99%), só que sem fila. O dono
+do conserto (juntar o `RosterChanged`, redesenhar só a linha que mudou) está
+por definir; o pedido está com a orquestradora.
 
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-api6.sh /tmp/m3-6

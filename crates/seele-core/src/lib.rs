@@ -38,6 +38,7 @@ pub mod chegada;
 pub mod client;
 pub mod confere_codigo;
 pub mod conhecidos;
+pub use seele_sessao::despedida;
 pub mod encontro;
 pub mod enlace;
 pub mod entrada;
@@ -199,6 +200,12 @@ pub use seele_proto::transport::key_fingerprint;
 pub use seele_proto::volume::VolumeRefusal;
 
 pub use seele_proto::control::MAX_BODY_LEN;
+/// O teto do apelido, e também da senha de uma sala de voz, em **bytes**.
+///
+/// Reexportado para a FFI conferir a senha antes de pedir a entrada (R1-M4 da
+/// revisão do lote P61): uma senha acima dele não cabe no fio, e o núcleo a
+/// recusaria sem que o `Room` da casca soubesse qual entrada desfazer.
+pub use seele_proto::control::MAX_NICKNAME_LEN;
 pub use seele_proto::ids::{
     AttachmentId, ChannelId, ClientMessageId, MessageId, PersonId, RoleId, ScreenId, SessionId,
     Ssrc, VoiceRoomId,
