@@ -111,6 +111,19 @@ pub enum Event {
         /// Por quê, de uma lista fechada.
         reason: seele_proto::control::MessageRefusal,
     },
+    /// Quem escreveu repetiu a chave de uma mensagem que a moderação apagou.
+    ///
+    /// **Interno: nunca vira quadro.** A mensagem não é anunciada a ninguém
+    /// (ver `persistence::messages::Gravacao::Apagada`); este evento existe só
+    /// para a sessão de quem repetiu tirar a chave da conta do que está no ar
+    /// (`session::TETO_NO_AR`). Sem ele, cada repetição de uma apagada ficava no
+    /// ar para sempre, e oito delas paravam a leitura daquela conexão.
+    ApagadaRepetida {
+        /// Quem repetiu.
+        author: seele_proto::ids::PersonId,
+        /// A chave repetida.
+        client_message_id: Option<seele_proto::ids::ClientMessageId>,
+    },
     /// A retenção apagou histórico. R15.
     ///
     /// Vai para todo mundo sem filtro de canal: a limpeza é por idade e
@@ -1581,6 +1594,25 @@ async fn flush(
                 client_message_id,
                 reason: motivo,
             }),
+            // **Não anunciada a ninguém**: ver `Gravacao::Apagada`. Só a sessão
+            // de quem repetiu fica sabendo, para tirar a chave do ar.
+            Gravacao::Apagada {
+                channel,
+                author,
+                client_message_id,
+                id,
+            } => {
+                tracing::info!(
+                    ?channel,
+                    ?author,
+                    ?id,
+                    "a chave repetida é de uma mensagem apagada pela moderação: não anunciada"
+                );
+                events.send(Event::ApagadaRepetida {
+                    author,
+                    client_message_id,
+                })
+            }
         };
     }
 }
