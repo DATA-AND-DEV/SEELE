@@ -22,6 +22,9 @@
 //! leva a janela da faixa à volta. Agora ela reabre numa sessão que a tela
 //! mostra viva, e não debaixo de «encerrado».
 //!
+//! E a fase D da 0.16, à parte: o TENTAR DE NOVO de uma mensagem recusada por
+//! tamanho não derruba o enlace, e a recusa continua dizendo por quê.
+//!
 //! # Como a despedida é encenada
 //!
 //! - **A de verdade**: o barramento recebe oito vezes o anel de uma vez, como
@@ -49,7 +52,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use seele_ffi::types::{EstadoDoEnvio, Event, LinkState};
+use seele_ffi::types::{EstadoDoEnvio, Event, LinkState, MotivoDaRecusa};
 use seele_ffi::{ConnectConfig, Connection, EventListener};
 use seele_proto::control::DisconnectReason;
 use seele_proto::ids::{ChannelId, PersonId, VoiceRoomId};
@@ -151,6 +154,16 @@ impl Gravador {
                     .collect()
             },
         )
+    }
+
+    /// Se, desde `marca`, a janela leu a faixa da bateria alguma vez.
+    fn leu_a_bateria_desde(&self, marca: Marca) -> bool {
+        self.enlaces.lock().is_ok_and(|enlaces| {
+            enlaces
+                .get(marca.enlaces..)
+                .unwrap_or_default()
+                .contains(&true)
+        })
     }
 
     /// Se, desde `marca`, a janela leu a faixa da bateria e depois a volta.
@@ -347,6 +360,80 @@ async fn cada_despedida_recuperavel_mostra_a_faixa_e_a_volta_e_nao_o_fim() -> Re
     }
     assert!(achados.is_empty(), "{}", achados.join("\n"));
     dizer_e_ver_confirmada(&ana, "ainda aqui").await?;
+
+    ana.disconnect();
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **O TENTAR DE NOVO de uma recusada por tamanho é frase, e não queda** (a
+/// fase D da 0.16, à parte).
+///
+/// Medido na revisão do porte, pela FFI, sobre a v0.15.1: o `send_message`
+/// confere o teto e recusa com `TooLong`, mas o `reenviar_mensagem` mandava o
+/// corpo ao enlace. O quadro se recusava a ser codificado, o núcleo derrubava a
+/// conexão (queda e volta em ~22 ms, a cada toque), e a pendente passava de
+/// «não foi gravada: passa do teto» a «o enlace caiu antes da resposta — pode
+/// ter sido gravada», que é falso: o corpo nunca saiu desta máquina.
+///
+/// Sem sono: a mensagem dita logo depois do TENTAR DE NOVO só sai confirmada
+/// quando o motor já processou o comando anterior, que vem antes na mesma fila.
+#[tokio::test(flavor = "multi_thread")]
+async fn tentar_de_novo_uma_grande_demais_nao_derruba_o_enlace() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let casa = tempfile::tempdir()?;
+    let (ana, gravador, quem) = ana(endereco, casa.path()).await?;
+
+    // Um acento a mais que o teto, em bytes: o caso do doc de
+    // `Connection::limite_da_mensagem`.
+    let teto = Connection::limite_da_mensagem();
+    let recusa = EstadoDoEnvio::Recusada(MotivoDaRecusa::TooLong {
+        limit: u32::try_from(teto)?,
+    });
+    let estado_de = |chave: &str| {
+        ana.messages()
+            .into_iter()
+            .find(|m| m.client_message_id.as_deref() == Some(chave))
+            .map(|m| m.estado)
+    };
+    let chave = ana
+        .send_message(LINHA.0, "á".repeat(teto / 2 + 1))
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    assert_eq!(
+        estado_de(&chave),
+        Some(recusa),
+        "o envio não recusou o corpo acima do teto"
+    );
+
+    let marca = gravador.marca();
+    for toque in 1..=2 {
+        assert_eq!(
+            ana.reenviar_mensagem(&chave),
+            Ok(true),
+            "o TENTAR DE NOVO #{toque} não achou a pendente"
+        );
+    }
+    let viva = dizer_e_ver_confirmada(&ana, "depois do tentar de novo").await;
+
+    assert!(
+        !gravador.leu_a_bateria_desde(marca),
+        "o TENTAR DE NOVO numa mensagem grande demais derrubou o enlace: a janela leu a \
+         faixa da bateria, e a pendente ficou em {:?}",
+        estado_de(&chave)
+    );
+    assert_eq!(
+        estado_de(&chave),
+        Some(recusa),
+        "a pendente deixou de dizer por que não sai"
+    );
+    viva?;
+    assert_eq!(
+        gravador.fins_desde(marca),
+        Vec::new(),
+        "a janela recebeu a tela de fim"
+    );
+    assert!(sentada(&servidor, quem).await, "ela saiu da sala");
 
     ana.disconnect();
     servidor.shutdown();

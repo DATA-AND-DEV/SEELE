@@ -1646,13 +1646,8 @@ impl Connection {
         // **O teto é conferido aqui**, e não descoberto quando o quadro se
         // recusa a ser codificado. Ver [`Self::limite_da_mensagem`]: o caminho
         // antigo encerrava a sessão.
-        if corpo.len() > seele_core::MAX_BODY_LEN {
-            #[allow(
-                clippy::cast_possible_truncation,
-                reason = "o teto é 4 KiB e cabe folgado num u32"
-            )]
-            let limite = seele_core::MAX_BODY_LEN as u32;
-            self.recusar_pendente(id, seele_core::MessageRefusal::TooLong { limit: limite });
+        if let Some(recusa) = grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
             return Ok(id.get().to_string());
         }
 
@@ -1693,6 +1688,12 @@ impl Connection {
         }) else {
             return Ok(false);
         };
+        // A mesma conferência do envio: sem ela, cada toque numa recusada por
+        // tamanho derrubava o enlace. Ver [`grande_demais`].
+        if let Some(recusa) = grande_demais(&corpo) {
+            self.recusar_pendente(id, recusa);
+            return Ok(true);
+        }
         self.anotar_pendente(channel, id, corpo.clone());
         self.command(Command::Send {
             channel,
@@ -5108,6 +5109,20 @@ fn agora_em_segundos() -> i64 {
         .map_or(0, |desde| {
             i64::try_from(desde.as_secs()).unwrap_or(i64::MAX)
         })
+}
+
+/// A recusa de um corpo acima do teto, ou nada.
+///
+/// **Uma conferência só, para o envio e para o TENTAR DE NOVO.** Acima do teto
+/// o quadro se recusa a ser codificado, e o núcleo trata isso como o enlace
+/// morrendo. O TENTAR DE NOVO não conferia: cada toque numa recusada por
+/// tamanho derrubava a conexão e trocava «passa do teto» por «pode ter sido
+/// gravada», sobre um corpo que nunca saiu desta máquina (medido na revisão do
+/// porte da P61 para a 0.15.2).
+fn grande_demais(corpo: &str) -> Option<seele_core::MessageRefusal> {
+    (corpo.len() > seele_core::MAX_BODY_LEN).then(|| seele_core::MessageRefusal::TooLong {
+        limit: u32::try_from(seele_core::MAX_BODY_LEN).unwrap_or(u32::MAX),
+    })
 }
 
 fn next_client_message_id() -> u64 {
