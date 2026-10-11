@@ -11210,6 +11210,11 @@ fn main() {
                     }
                 }
             }
+            // **E o Cmd+Q passa pela janela** (tarefa 21 da F7): o Sair do menu
+            // padrão saía sem perguntar e sem despedir ninguém. Ver
+            // `trocar_o_sair_do_mac`.
+            #[cfg(target_os = "macos")]
+            trocar_o_sair_do_mac(app.handle());
             // O módulo de vídeo passa a morar ao lado do banco, e não dentro do
             // pacote.
             //
@@ -11684,6 +11689,174 @@ fn despedir_no_fim_do_app(handle: &tauri::AppHandle) {
         },
     );
     dizer_a_despedida_do_fim(desfecho, levou);
+}
+
+/// O id do Sair nosso no menu do macOS ([`trocar_o_sair_do_mac`]).
+#[cfg(target_os = "macos")]
+const ID_DO_SAIR: &str = "seele-sair";
+
+/// **O Cmd+Q do macOS passa pela janela** (tarefa 21 da F7).
+///
+/// O Sair do menu padrão do Tauri (`PredefinedMenuItem::quit`) manda o
+/// `terminate:` ao `NSApplication`, e o Cmd+Q ia direto ao `RunEvent::Exit`
+/// (ver o fecho do `app.run`): sem perguntar, com o servidor guardado no ar, e
+/// sem despedir nem a sessão nem as hospedagens. O nosso fecha a janela
+/// principal ([`sair_pelo_menu`]), e o Cmd+Q passa a ser o botão vermelho: a
+/// página pergunta, se houver o que perguntar, e a saída segurada do
+/// `ExitRequested` despede todo mundo.
+///
+/// **O resto do menu é o padrão, item por item**, inclusive o Editar: sem ele,
+/// o Cmd+C, o Cmd+V e o Cmd+Z param nos campos da página. Por isso o menu é o
+/// que o Tauri já instalou (no `build`, antes do `setup`), e só o último item
+/// do submenu do app é trocado, com o mesmo texto e o mesmo atalho — e só se
+/// ele for mesmo o Sair. Se outra versão do Tauri mudar o menu, o padrão fica,
+/// e o `seele.log` diz. O menu antes e depois sai no `seele.log` em `debug`.
+#[cfg(target_os = "macos")]
+fn trocar_o_sair_do_mac(app: &AppHandle) {
+    let Some(menu) = app.menu() else {
+        tracing::warn!(
+            "o macOS ficou sem o menu padrão, e o Sair nosso não entrou: o Cmd+Q sai sem \
+             perguntar e sem se despedir"
+        );
+        return;
+    };
+    tracing::debug!(menu = %listar_o_menu(&menu), "o menu do macOS, antes do Sair nosso");
+    match trocar_o_sair(app, &menu) {
+        Ok(true) => {
+            tracing::debug!(menu = %listar_o_menu(&menu), "o menu do macOS, com o Sair nosso");
+        }
+        Ok(false) => tracing::warn!(
+            menu = %listar_o_menu(&menu),
+            "o último item do submenu do app não é o Sair padrão, e o menu ficou como \
+             estava: o Cmd+Q sai sem perguntar e sem se despedir"
+        ),
+        Err(erro) => tracing::warn!(
+            %erro,
+            "não consegui trocar o Sair do menu do macOS: o Cmd+Q sai sem perguntar e sem \
+             se despedir"
+        ),
+    }
+    app.on_menu_event(|app, evento| {
+        if evento.id().as_ref() == ID_DO_SAIR {
+            sair_pelo_menu(app);
+        }
+    });
+}
+
+/// Troca o último item do submenu do app pelo Sair nosso, com o mesmo texto e o
+/// mesmo atalho, se ele for o Sair padrão; `false` quando não é.
+#[cfg(target_os = "macos")]
+fn trocar_o_sair(app: &AppHandle, menu: &tauri::menu::Menu<tauri::Wry>) -> tauri::Result<bool> {
+    let Some(tauri::menu::MenuItemKind::Submenu(do_app)) = menu.items()?.into_iter().next() else {
+        return Ok(false);
+    };
+    let itens = do_app.items()?;
+    let Some(padrao) = itens.last().and_then(|item| item.as_predefined_menuitem()) else {
+        return Ok(false);
+    };
+    // O texto do Sair padrão é «Quit <nome do app>» (`muda` 0.19.3,
+    // `platform_impl/macos`, `new_predefined`); o nosso leva o mesmo.
+    let texto = padrao.text()?;
+    if !texto.starts_with("Quit") {
+        return Ok(false);
+    }
+    let nosso = tauri::menu::MenuItem::with_id(app, ID_DO_SAIR, &texto, true, Some("CmdOrCtrl+Q"))?;
+    do_app.remove_at(itens.len().saturating_sub(1))?;
+    do_app.append(&nosso)?;
+    Ok(true)
+}
+
+/// O menu numa linha, item por item: `Título[item | item | —]`. O id só
+/// aparece nos itens que não são do sistema, que é como o Sair nosso se
+/// distingue do padrão.
+#[cfg(target_os = "macos")]
+fn listar_o_menu(menu: &tauri::menu::Menu<tauri::Wry>) -> String {
+    fn item(kind: &tauri::menu::MenuItemKind<tauri::Wry>) -> String {
+        use tauri::menu::MenuItemKind;
+        match kind {
+            MenuItemKind::Submenu(sub) => format!(
+                "{}[{}]",
+                sub.text().unwrap_or_default(),
+                sub.items()
+                    .unwrap_or_default()
+                    .iter()
+                    .map(item)
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            ),
+            MenuItemKind::Predefined(sistema) => {
+                let texto = sistema.text().unwrap_or_default();
+                if texto.is_empty() {
+                    "—".to_owned()
+                } else {
+                    texto
+                }
+            }
+            MenuItemKind::MenuItem(nosso) => {
+                format!(
+                    "{} #{}",
+                    nosso.text().unwrap_or_default(),
+                    nosso.id().as_ref()
+                )
+            }
+            MenuItemKind::Check(marca) => marca.text().unwrap_or_default(),
+            MenuItemKind::Icon(icone) => icone.text().unwrap_or_default(),
+        }
+    }
+    menu.items()
+        .unwrap_or_default()
+        .iter()
+        .map(item)
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
+/// **O Sair nosso: o caminho do botão vermelho.** Pede o fechar da janela
+/// principal, e a página decide: com o servidor guardado no ar ela pergunta,
+/// sem nada no ar ela deixa fechar. Fechada a janela, a saída segurada do
+/// `ExitRequested` despede todo mundo.
+///
+/// Com o guardado no ar, a pergunta vai aparecer: a janela vem para a frente
+/// antes, porque um Cmd+Q com ela minimizada perguntaria a ninguém, e o app
+/// pareceria não querer fechar.
+#[cfg(target_os = "macos")]
+fn sair_pelo_menu(app: &AppHandle) {
+    let Some(janela) = app.get_webview_window("main") else {
+        // Sem a janela não há página para perguntar: a saída vai pelo
+        // `RunEvent::Exit`, com a despedida do fim.
+        tracing::info!("Sair do menu sem a janela principal: o app sai pela despedida do fim");
+        app.exit(0);
+        return;
+    };
+    let guardado_no_ar = app
+        .state::<Session>()
+        .hospedagens
+        .lock()
+        .map(|hospedagens| hospedagens.guardado.is_some())
+        .unwrap_or(false);
+    if guardado_no_ar {
+        for (passo, feito) in [
+            ("unminimize", janela.unminimize()),
+            ("show", janela.show()),
+            ("set_focus", janela.set_focus()),
+        ] {
+            if let Err(erro) = feito {
+                tracing::warn!(passo, %erro, "o Sair do menu não trouxe a janela para a frente");
+            }
+        }
+    }
+    tracing::info!(
+        guardado_no_ar,
+        "Sair do menu: pede o fechar da janela principal"
+    );
+    if let Err(erro) = janela.close() {
+        tracing::warn!(
+            %erro,
+            "o Sair do menu não conseguiu pedir o fechar da janela: o app sai pela \
+             despedida do fim, sem perguntar"
+        );
+        app.exit(0);
+    }
 }
 
 /// Quanto a saída do app espera os MODs nativos confirmarem a parada.

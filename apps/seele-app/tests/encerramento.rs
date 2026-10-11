@@ -474,3 +474,62 @@ fn sair_sem_fechar_a_janela_tambem_se_despede() {
         "as hospedagens têm {das_hospedagens} ms dentro de um teto de {do_fim} ms"
     );
 }
+
+#[test]
+fn o_cmd_q_do_mac_passa_pela_janela() {
+    // Tarefa 21 da F7. O Sair do menu padrão do Tauri manda o `terminate:`, e
+    // o Cmd+Q saía sem perguntar, com o servidor guardado no ar, e sem
+    // despedir ninguém. O nosso fecha a janela principal, que é o caminho do
+    // botão vermelho. O menu do `muda` só nasce na thread principal do macOS,
+    // que um teste não tem: a prova de comportamento (o Cmd+Q pergunta, sai
+    // direto sem nada no ar, e despede) é medida no app. Aqui fica a ligação.
+    let fonte = main_rs();
+    assert!(
+        fonte.contains(
+            "#[cfg(target_os = \"macos\")]\n            trocar_o_sair_do_mac(app.handle());"
+        ),
+        "o `setup` deixou de trocar o Sair do menu do macOS: o Cmd+Q volta a sair sem \
+         perguntar e sem se despedir"
+    );
+    let compacto = |nome: &str| -> String { corpo(&fonte, nome).split_whitespace().collect() };
+
+    let troca = compacto("trocar_o_sair_do_mac");
+    for agulha in [
+        "app.menu()",
+        "trocar_o_sair(app,&menu)",
+        "app.on_menu_event(",
+        "==ID_DO_SAIR",
+        "sair_pelo_menu(app)",
+    ] {
+        assert!(
+            troca.contains(agulha),
+            "a troca do Sair deixou de fazer `{agulha}`:\n{troca}"
+        );
+    }
+
+    // Só o Sair muda, e com o mesmo atalho; o Editar e o resto ficam.
+    let sair = compacto("trocar_o_sair");
+    for agulha in [
+        "starts_with(\"Quit\")",
+        "MenuItem::with_id(app,ID_DO_SAIR,&texto,true,Some(\"CmdOrCtrl+Q\"))",
+        "remove_at(itens.len().saturating_sub(1))",
+        "append(&nosso)",
+    ] {
+        assert!(
+            sair.contains(agulha),
+            "a troca do Sair deixou de fazer `{agulha}`:\n{sair}"
+        );
+    }
+
+    // O Sair pede o fechar da janela, que é o que a página ouve, e não a
+    // destrói: destruir pularia a pergunta.
+    let pelo_menu = compacto("sair_pelo_menu");
+    assert!(
+        pelo_menu.contains("get_webview_window(\"main\")") && pelo_menu.contains("janela.close()"),
+        "o Sair do menu deixou de pedir o fechar da janela principal:\n{pelo_menu}"
+    );
+    assert!(
+        !pelo_menu.contains("destroy("),
+        "o Sair do menu destrói a janela, e a página não pergunta:\n{pelo_menu}"
+    );
+}
