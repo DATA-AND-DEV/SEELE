@@ -16,6 +16,9 @@
 //    18 da F7). Entrar no próprio servidor passa direto porque o `onde_estou`
 //    reconhece a chave dele; o mesmo endereço com outra chave — outra máquina
 //    na mesma rede, no dia seguinte — pede a conferência.
+// 7. **HOSPEDAR AQUI, com o servidor daqui no ar, volta a ele** (tarefa 18):
+//    não hospeda de novo — o Rust responderia «JÁ ESTOU HOSPEDANDO» — nem abre
+//    a tela de preparar.
 
 const chamados = () => window.__SEELE_HISTORICO.map(([cmd]) => cmd);
 
@@ -98,6 +101,21 @@ await recarregarTrilha();
 exigir(
   document.querySelector("#trilha-outros .trilha-voltar") === null,
   "dentro do próprio servidor, a trilha oferece voltar a ele",
+);
+
+// 7. HOSPEDAR AQUI com o servidor daqui no ar.
+await sairDoServidorParaAEntrada();
+await ate(() => visivel("boot-meu-servidor") === "VISIVEL", 1500);
+const antesDoHospedar = window.__SEELE_HISTORICO.length;
+document.getElementById("botao-hospedar").click();
+await ate(() => visivel("tela-sessao") === "VISIVEL" || visivel("tela-preparar") === "VISIVEL", 2000);
+const aoHospedar = chamados().slice(antesDoHospedar);
+relatar("HOSPEDAR AQUI com o servidor no ar chamou: " + aoHospedar.join(", "));
+exigir(!aoHospedar.includes("hospedar"), "HOSPEDAR AQUI tentou hospedar de novo com o servidor daqui no ar");
+exigir(visivel("tela-preparar") !== "VISIVEL", "HOSPEDAR AQUI abriu a tela de preparar com o servidor daqui no ar");
+exigir(
+  window.__SEELE_ARGS.connect?.server === "127.0.0.1:8383" && visivel("tela-sessao") === "VISIVEL",
+  "HOSPEDAR AQUI, com o servidor daqui no ar, não voltou a ele",
 );
 
 // 5. Sair de novo, e PARAR DE HOSPEDAR.

@@ -895,6 +895,22 @@ $("botao-hospedar").addEventListener("click", () => {
  * que nasceu.
  */
 async function abrirHospedagem() {
+  // **Com o servidor guardado no ar, HOSPEDAR AQUI volta a ele** (tarefa 18 da
+  // F7). Desde a tarefa 19 sair não o derruba, e quem aperta HOSPEDAR AQUI com
+  // ele no ar quer o servidor que já hospeda: hospedar de novo daria «JÁ ESTOU
+  // HOSPEDANDO», e a tela de preparar ofereceria criar um segundo que não
+  // cabe. É o caminho do VOLTAR AO MEU SERVIDOR (`camada-hospedagem.js`): o
+  // `conectar` de sempre, no endereço desta máquina, sem credencial.
+  let meu = null;
+  try {
+    meu = await invoke("meu_servidor");
+  } catch {
+    meu = null;
+  }
+  if (meu?.alvo) {
+    await conectar(meu.alvo);
+    return;
+  }
   let guardados = [];
   try {
     guardados = await invoke("servidores_guardados");
