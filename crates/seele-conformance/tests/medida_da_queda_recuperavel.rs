@@ -95,6 +95,9 @@ struct Gravador {
     eventos: std::sync::Mutex<Vec<(Instant, Event)>>,
     conexao: std::sync::OnceLock<std::sync::Weak<Connection>>,
     enlaces: std::sync::Mutex<Vec<(Instant, String)>>,
+    /// Avisado uma vez, no instante em que a janela lê a volta depois da
+    /// bateria. Ver `a_pagina_que_o_limitador_descarta`.
+    na_volta: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
 }
 
 impl seele_ffi::EventListener for Gravador {
@@ -111,8 +114,22 @@ impl seele_ffi::EventListener for Gravador {
         };
         let agora = enlace(&conexao);
         if let Ok(mut enlaces) = self.enlaces.lock() {
+            let voltou = agora == "Online"
+                && enlaces
+                    .last()
+                    .is_some_and(|(_, ultimo)| ultimo.starts_with("Bateria"));
             if enlaces.last().is_none_or(|(_, ultimo)| *ultimo != agora) {
                 enlaces.push((Instant::now(), agora));
+            }
+            if voltou {
+                if let Some(aviso) = self
+                    .na_volta
+                    .lock()
+                    .ok()
+                    .and_then(|mut na_volta| na_volta.take())
+                {
+                    let _ = aviso.send(());
+                }
             }
         }
     }
@@ -375,6 +392,118 @@ async fn tentar_de_novo_uma_recusada_por_tamanho() -> Result<()> {
         "MEDIDA-TOOLONG antes={estado_recusada:?} reenviou={reenviou:?} \
          | trajeto={trajeto:?} | fim={fim:?} | sentada_no_servidor={sentada:?} \
          | gravadas_no_canal={gravadas}",
+    );
+    ana.disconnect();
+    servidor.shutdown();
+    Ok(())
+}
+
+/// **A página que o limitador do servidor descarta** (I2 da revisão do P61): o
+/// que acontece com a busca do buraco quando o balde da conexão nova acaba no
+/// meio dela.
+///
+/// No instante em que a janela lê a volta, outra linha manda 80 `SetMuted`
+/// pela FFI: o balde de 60 quadros se esgota, e o que a busca pede logo depois
+/// — o `FetchHistory` e o `Ping` da cerca da página seguinte — cai no
+/// `Descarta` do `Vigia`. Não dá para escolher qual dos dois cai: com o balde
+/// vazio, os dois caem juntos, e é o caso da cerca perdida. O caso do pedido
+/// descartado com a cerca passando está provado no crate
+/// (`volta::tests::o_pedido_descartado_e_pedido_de_novo_e_o_buraco_fecha_inteiro`).
+///
+/// Mede quantas do buraco de 1 500 estão na tela ao longo de 12 s.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "medida da rodada 1 do lote P61, e não guarda: rodar com --ignored --nocapture"]
+async fn a_pagina_que_o_limitador_descarta() -> Result<()> {
+    let _vaga = vaga::minha();
+    let (endereco, servidor) = servidor().await?;
+    let casa = tempfile::tempdir()?;
+    let gravador = Arc::new(Gravador::default());
+    let ana = entrar_pela_ffi(config(endereco, casa.path(), None)).await?;
+    let _ = gravador.conexao.set(Arc::downgrade(&ana));
+    ana.subscribe(gravador.clone());
+    ana.enter_voice_room(SALA.0, None)
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    ana.open_channel(LINHA.0)
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    ana.send_message(LINHA.0, "estou aqui".into())
+        .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
+    esperar("a primeira mensagem dela ser confirmada", || {
+        ana.messages()
+            .iter()
+            .any(|m| m.body == "estou aqui" && m.estado == EstadoDoEnvio::Confirmada)
+    })
+    .await?;
+    let quem = PersonId(ana.snapshot().me.expect("ela sabe quem é"));
+
+    // O buraco: 1 500 de outra pessoa, gravadas direto no banco.
+    let autor = bia(endereco).await?.session().person;
+    {
+        let mut banco = servidor.server().persistence.lock().await;
+        let mut mensagens = seele_server::persistence::messages::Messages::new(&mut banco);
+        let buraco: Vec<seele_server::persistence::messages::PendingMessage> = (1..=1_500)
+            .map(
+                |numero| seele_server::persistence::messages::PendingMessage {
+                    channel: LINHA,
+                    author: autor,
+                    author_nickname: "bia".into(),
+                    body: format!("buraco-{numero:04}"),
+                    replies_to: None,
+                    client_message_id: None,
+                },
+            )
+            .collect();
+        mensagens.append_batch(&buraco)?;
+    }
+
+    // A linha que esgota o balde, no instante da volta.
+    let (aviso, na_volta) = std::sync::mpsc::channel();
+    if let Ok(mut vaga) = gravador.na_volta.lock() {
+        *vaga = Some(aviso);
+    }
+    let esgotando = {
+        let ana = Arc::clone(&ana);
+        std::thread::spawn(move || {
+            if na_volta.recv_timeout(Duration::from_secs(20)).is_ok() {
+                for numero in 0..80 {
+                    let _ = ana.set_muted(numero % 2 == 0);
+                }
+            }
+        })
+    };
+
+    let comeco = Instant::now();
+    servidor
+        .server()
+        .events
+        .send(seele_server::server::Event::SessionEnded {
+            person: quem,
+            reason: seele_proto::control::DisconnectReason::FellBehind,
+        })
+        .map_err(|_| anyhow::anyhow!("o barramento caiu"))?;
+    let mut trajeto: Vec<(u128, usize)> = Vec::new();
+    while comeco.elapsed() < Duration::from_secs(12) {
+        let na_tela = ana
+            .messages()
+            .iter()
+            .filter(|m| m.body.starts_with("buraco-"))
+            .count();
+        if trajeto.last().is_none_or(|(_, antes)| *antes != na_tela) {
+            trajeto.push((comeco.elapsed().as_millis(), na_tela));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let _ = esgotando.join();
+    println!(
+        "MEDIDA-LIMITADOR enlace_lido_pela_janela={:?}",
+        gravador.enlaces_desde(comeco)
+    );
+    println!(
+        "MEDIDA-LIMITADOR buraco_na_tela(ms, quantas de 1500)={trajeto:?} | fim={:?}",
+        gravador
+            .eventos()
+            .iter()
+            .find(|(_, evento)| matches!(evento, Event::Ended { .. }))
+            .map(|(_, evento)| evento.clone())
     );
     ana.disconnect();
     servidor.shutdown();
