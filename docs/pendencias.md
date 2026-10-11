@@ -8284,14 +8284,31 @@ servidores de verdade, no módulo `a_entrada_velha_que_chega_tarde`.
 
 **O conserto** é o porte do lote E54 da 0.16 (ramo `0.15/e54`): o `connect`
 confere o slot e revoga com o cadeado dele na mão, confere a geração antes dos
-efeitos de entrada e de novo ao gravar o slot, e a tentativa que outra
-substituiu é fechada, vai ao `seele.log` como WARN e volta à janela com
-`substituida: true`. A janela registra essa recusa e não pinta a linha vermelha.
-A FFI e o fio não mudam.
+efeitos de entrada e de novo ao gravar o slot. A tentativa cuja geração caiu —
+outra entrada começou, ou a sessão dela acabou — é fechada, vai ao `seele.log`
+como WARN e volta à janela com `substituida: true`. A janela registra essa
+recusa e não pinta a linha vermelha. A FFI e o fio não mudam.
 
 **O que fica de fora, de propósito.** A 0.15 não tem o contador de tentativas
 da janela nem o `soltar_a_entrada` da 0.16: a velha que entra antes de a nova
-chegar ao Rust continua entrando, e a tela bate com o slot.
+chegar ao Rust continua entrando, e a tela bate com o slot. E a velha ainda
+mexe na tela da nova por três caminhos, todos anteriores ao porte (estão na
+v0.15.1). A 0.16 os fecha nos lotes W2 e E54; a 0.15.2 não os leva:
+
+- **a velha que falha tarde**, sem a marca, cai no ramo de toda falha do
+  `catch` de `conectar` (`apps/seele-app/ui/tela-boot.js`): pinta a linha
+  vermelha da entrada, escondida atrás da sessão e vista ao voltar a ela, ou
+  abre o aceite de MODs ou a espera por cima da sessão da nova
+  (`levarParaOAceiteDeMods`, `levarParaAEspera`). Na 0.16 o W2 a cala pelo
+  contador;
+- **o `finally` da velha** religa o CONECTAR e apaga a linha de etapa com a
+  nova ainda andando. Na 0.16 o W2 deixa só a mais nova religar o botão; a
+  linha de etapa lá continua sendo de qualquer tentativa;
+- **a batida da espera admitida depois de a pessoa sair da espera**:
+  `voltarParaAEntrada` (`apps/seele-app/ui/tela-auth.js`) para o relógio e não
+  larga a batida que já está no ar, e ela, admitida, reabre a autenticação por
+  cima da entrada que a pessoa escolheu. Na 0.16 o E54 a larga
+  (`aBatidaFoiLargada`).
 
 **E o preço nos testes.** Sem o conserto da pendência 50, a conexão largada só
 some do servidor pelo prazo de ociosidade, e os testes do módulo esperam até
@@ -8301,4 +8318,6 @@ some do servidor pelo prazo de ociosidade, e os testes do módulo esperam até
 grep -n "fn largar_a_substituida" apps/seele-app/src/main.rs
 grep -n "mod a_entrada_velha_que_chega_tarde" apps/seele-app/src/main.rs
 grep -n "falha?.substituida === true" apps/seele-app/ui/tela-boot.js
+grep -n "levarParaOAceiteDeMods(motivo\|levarParaAEspera(motivo\|} finally {" apps/seele-app/ui/tela-boot.js
+grep -n "function voltarParaAEntrada" apps/seele-app/ui/tela-auth.js
 ```
