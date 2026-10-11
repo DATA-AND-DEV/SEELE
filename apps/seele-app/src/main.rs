@@ -166,6 +166,13 @@ struct Session {
     /// Quem está tocando na sala pessoal agora (tarefa 24 da F7): a faixa da
     /// tela que abre com o toque já tocando, e o toque de quem se atende.
     toques: Mutex<toque::Toques>,
+    /// **A despedida da saída já rodou** (tarefa 21 da F7).
+    ///
+    /// A saída comum, a da última janela fechada, despede e só então sai; e o
+    /// runtime ainda manda o `RunEvent::Exit` depois dela. Sem esta marca, a
+    /// despedida do fim ([`despedir_no_fim`]) despediria de novo uma sessão já
+    /// despedida, e o `seele.log` contaria duas saídas.
+    despedida_feita: std::sync::atomic::AtomicBool,
     /// **Qual servidor guardado está de pé**, quando há um.
     ///
     /// Plano de isolamento de 18/09: «gestão indica servidor-alvo… nunca
@@ -11461,6 +11468,12 @@ fn main() {
             } = &evento
             {
                 api.prevent_exit();
+                // O `RunEvent::Exit` que vem depois desta saída não despede de
+                // novo (`despedir_no_fim`).
+                handle
+                    .state::<Session>()
+                    .despedida_feita
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
                 let saida = handle.clone();
                 tauri::async_runtime::spawn(async move {
                     use tauri::Manager as _;
@@ -11472,6 +11485,17 @@ fn main() {
                     saida.exit(0);
                 });
                 despedir_se(handle);
+            }
+            // **E quem sai sem fechar a janela** (tarefa 21 da F7): o Sair do
+            // Dock, o logout, um `quit` mandado de fora. O `NSApplication` manda
+            // o `terminate:`, o `tao` não implementa `applicationShouldTerminate:`,
+            // e o `applicationWillTerminate:` vem direto para cá, sem janela
+            // fechada e sem `ExitRequested` (`tao` 0.35.3, `app_state.rs`,
+            // `AppState::exit`; `tauri-runtime-wry` 2.11.4, `Event::LoopDestroyed`).
+            // Quando este fecho volta, o AppKit chama `exit()`: a despedida daqui
+            // é de melhor esforço, com teto, e diz no `seele.log` o que conseguiu.
+            if matches!(evento, tauri::RunEvent::Exit) {
+                despedir_no_fim_do_app(handle);
             }
         }),
         Err(error) => {
@@ -11530,6 +11554,136 @@ async fn despedir_das_hospedagens(sessao: &Session, teto: std::time::Duration) {
         }
     };
     tokio::join!(despedir(guardado), despedir(pessoal));
+}
+
+/// O teto da despedida de quem sai sem fechar a janela: **um segundo, e é
+/// inegociável** (decisão da orquestradora, 10/10). A saída nunca trava; o que
+/// não coube nele sai pelo prazo de ociosidade do servidor, 20 s.
+const TETO_DA_DESPEDIDA_NO_FIM: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// O que cada hospedagem tem dentro do [`TETO_DA_DESPEDIDA_NO_FIM`]. Menos que
+/// ele, para a espera de fora não vencer por um fio a hospedagem que ainda
+/// estava dentro do próprio teto. A sessão tem os ~700 ms dela
+/// ([`despedir_se`]), e as três metades correm juntas.
+const TETO_DAS_HOSPEDAGENS_NO_FIM: std::time::Duration = std::time::Duration::from_millis(800);
+
+/// O que a despedida do fim conseguiu ([`despedir_no_fim`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DespedidaNoFim {
+    /// A saída comum já tinha despedido todo mundo: nada a fazer.
+    JaFeita,
+    /// A sessão e as hospedagens acabaram dentro do teto.
+    Rodou,
+    /// O teto venceu, com alguma metade ainda andando: o processo sai assim
+    /// mesmo, e quem ficou pode notar a saída pelo prazo de ociosidade.
+    TetoVenceu,
+    /// Uma metade caiu (um pânico) antes de dizer que acabou.
+    Caiu,
+}
+
+/// **A despedida de quem sai sem fechar a janela**, de melhor esforço e com
+/// teto (tarefa 21 da F7).
+///
+/// O `RunEvent::Exit` do `terminate:` chega na thread principal, e o AppKit
+/// chama `exit()` assim que ela volta: uma espera sem teto aqui é um app que
+/// não fecha. As duas metades correm fora dela — a `sessao` numa thread, as
+/// `hospedagens` no runtime — e ela espera as duas até `teto`, contado do
+/// começo. O que passar disso é cortado pelo `exit()`.
+///
+/// Roda uma vez por processo: `feita` é a marca que a saída comum também põe
+/// ([`Session::despedida_feita`]).
+fn despedir_no_fim<S, H>(
+    feita: &std::sync::atomic::AtomicBool,
+    teto: std::time::Duration,
+    sessao: S,
+    hospedagens: H,
+) -> (DespedidaNoFim, std::time::Duration)
+where
+    S: FnOnce() + Send + 'static,
+    H: std::future::Future<Output = ()> + Send + 'static,
+{
+    if feita.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return (DespedidaNoFim::JaFeita, std::time::Duration::ZERO);
+    }
+    let comeco = std::time::Instant::now();
+    let (acabou, acabadas) = std::sync::mpsc::channel::<()>();
+    let acabou_a_sessao = acabou.clone();
+    if let Err(erro) = std::thread::Builder::new()
+        .name("despedida do fim".into())
+        .spawn(move || {
+            sessao();
+            let _ = acabou_a_sessao.send(());
+        })
+    {
+        // A metade da sessão não começou; a das hospedagens ainda vale.
+        tracing::warn!(%erro, "saída do app: a despedida da sessão não conseguiu thread");
+    }
+    tauri::async_runtime::spawn(async move {
+        hospedagens.await;
+        let _ = acabou.send(());
+    });
+    let prazo = comeco + teto;
+    for _ in 0..2 {
+        let resta = prazo.saturating_duration_since(std::time::Instant::now());
+        match acabadas.recv_timeout(resta) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                return (DespedidaNoFim::TetoVenceu, comeco.elapsed());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                return (DespedidaNoFim::Caiu, comeco.elapsed());
+            }
+        }
+    }
+    (DespedidaNoFim::Rodou, comeco.elapsed())
+}
+
+/// A linha do `seele.log` da despedida do fim: se rodou e quanto levou, ou que
+/// o teto venceu. Quem lê o log de quem «saiu e continuou aparecendo na sala»
+/// precisa achar esta linha, e não um silêncio.
+fn dizer_a_despedida_do_fim(desfecho: DespedidaNoFim, levou: std::time::Duration) {
+    let levou_ms = u64::try_from(levou.as_millis()).unwrap_or(u64::MAX);
+    let teto_ms = u64::try_from(TETO_DA_DESPEDIDA_NO_FIM.as_millis()).unwrap_or(u64::MAX);
+    match desfecho {
+        DespedidaNoFim::JaFeita => {
+            tracing::info!("saída do app: a despedida já tinha rodado ao fechar a última janela")
+        }
+        DespedidaNoFim::Rodou => tracing::info!(
+            levou_ms,
+            "saída do app sem fechar a janela (Sair do Dock, logout, um quit de fora): \
+             a sessão e as hospedagens se despediram"
+        ),
+        DespedidaNoFim::TetoVenceu => tracing::warn!(
+            levou_ms,
+            teto_ms,
+            "saída do app sem fechar a janela: o teto da despedida venceu, e quem ficou \
+             pode notar a saída pelo prazo de ociosidade, 20 s"
+        ),
+        DespedidaNoFim::Caiu => tracing::warn!(
+            levou_ms,
+            "saída do app sem fechar a janela: uma metade da despedida caiu antes de \
+             acabar, e quem ficou pode notar a saída pelo prazo de ociosidade, 20 s"
+        ),
+    }
+}
+
+/// A despedida do fim com as metades de verdade: [`despedir_se`] e
+/// [`despedir_das_hospedagens`].
+fn despedir_no_fim_do_app(handle: &tauri::AppHandle) {
+    let (da_sessao, das_hospedagens) = (handle.clone(), handle.clone());
+    let (desfecho, levou) = despedir_no_fim(
+        &handle.state::<Session>().despedida_feita,
+        TETO_DA_DESPEDIDA_NO_FIM,
+        move || despedir_se(&da_sessao),
+        async move {
+            despedir_das_hospedagens(
+                &das_hospedagens.state::<Session>(),
+                TETO_DAS_HOSPEDAGENS_NO_FIM,
+            )
+            .await;
+        },
+    );
+    dizer_a_despedida_do_fim(desfecho, levou);
 }
 
 /// Quanto a saída do app espera os MODs nativos confirmarem a parada.
@@ -11598,6 +11752,144 @@ fn despedir_da_sessao(sessao: &Session, teto: std::time::Duration) {
             "a despedida não terminou em 500 ms: quem ficou vai notar a saída pelo prazo de \
              ociosidade, 20 s"
         );
+    }
+}
+
+/// A despedida de quem sai sem fechar a janela (tarefa 21 da F7): o Sair do
+/// Dock, o logout, um `quit` de fora. O que se prova aqui é a forma, com
+/// metades de mentira; se o runtime ainda a entrega no `RunEvent::Exit` é
+/// medida no app de verdade.
+#[cfg(test)]
+mod a_despedida_do_fim {
+    use super::{despedir_no_fim, dizer_a_despedida_do_fim, DespedidaNoFim};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// **A saída nunca trava.** Com as duas metades presas, a despedida volta
+    /// no teto, e diz que ele venceu.
+    #[test]
+    fn a_despedida_do_fim_nunca_passa_do_teto() {
+        let feita = AtomicBool::new(false);
+        let teto = Duration::from_millis(300);
+        let comeco = Instant::now();
+        let (desfecho, levou) = despedir_no_fim(
+            &feita,
+            teto,
+            || std::thread::sleep(Duration::from_secs(3)),
+            async { tokio::time::sleep(Duration::from_secs(3)).await },
+        );
+        let medido = comeco.elapsed();
+        assert_eq!(desfecho, DespedidaNoFim::TetoVenceu);
+        assert!(
+            medido < teto + Duration::from_millis(200),
+            "a despedida do fim segurou a saída {medido:?}, com teto de {teto:?}: o \
+             AppKit espera, e o app não fecha"
+        );
+        assert!(levou >= teto, "o teto venceu e a conta diz {levou:?}");
+    }
+
+    /// **As duas metades, qualquer que acabe primeiro.** A despedida só diz
+    /// que rodou depois de a sessão **e** as hospedagens acabarem.
+    #[test]
+    fn a_despedida_do_fim_espera_as_duas_metades() {
+        for (da_sessao, das_hospedagens) in [(100, 250), (250, 100)] {
+            let feita = AtomicBool::new(false);
+            let sessao = Arc::new(AtomicBool::new(false));
+            let hospedagens = Arc::new(AtomicBool::new(false));
+            let (marca_a_sessao, marca_as_hospedagens) =
+                (Arc::clone(&sessao), Arc::clone(&hospedagens));
+            let (desfecho, _) = despedir_no_fim(
+                &feita,
+                Duration::from_secs(2),
+                move || {
+                    std::thread::sleep(Duration::from_millis(da_sessao));
+                    marca_a_sessao.store(true, Ordering::SeqCst);
+                },
+                async move {
+                    tokio::time::sleep(Duration::from_millis(das_hospedagens)).await;
+                    marca_as_hospedagens.store(true, Ordering::SeqCst);
+                },
+            );
+            assert_eq!(desfecho, DespedidaNoFim::Rodou);
+            assert!(
+                sessao.load(Ordering::SeqCst) && hospedagens.load(Ordering::SeqCst),
+                "a despedida do fim voltou antes de uma metade acabar (sessão em \
+                 {da_sessao} ms, hospedagens em {das_hospedagens} ms)"
+            );
+            assert!(
+                feita.load(Ordering::SeqCst),
+                "a despedida rodou e não ficou marcada"
+            );
+        }
+    }
+
+    /// **Uma vez por processo.** Depois da saída comum, que já despediu e
+    /// marcou, o `RunEvent::Exit` não despede de novo.
+    #[test]
+    fn a_despedida_do_fim_nao_repete_a_da_janela() {
+        let feita = AtomicBool::new(true);
+        let chamou = Arc::new(AtomicBool::new(false));
+        let (pela_sessao, pelas_hospedagens) = (Arc::clone(&chamou), Arc::clone(&chamou));
+        let (desfecho, _) = despedir_no_fim(
+            &feita,
+            Duration::from_secs(1),
+            move || pela_sessao.store(true, Ordering::SeqCst),
+            async move { pelas_hospedagens.store(true, Ordering::SeqCst) },
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(desfecho, DespedidaNoFim::JaFeita);
+        assert!(
+            !chamou.load(Ordering::SeqCst),
+            "a despedida do fim despediu de novo uma saída que já tinha se despedido"
+        );
+    }
+
+    /// **Uma metade que cai não vira «rodou».**
+    #[test]
+    fn a_despedida_do_fim_diz_quando_uma_metade_cai() {
+        let feita = AtomicBool::new(false);
+        let (desfecho, _) = despedir_no_fim(
+            &feita,
+            Duration::from_secs(1),
+            || panic!("a metade da sessão caiu (de propósito, no teste)"),
+            async {},
+        );
+        assert_eq!(desfecho, DespedidaNoFim::Caiu);
+    }
+
+    /// **O `seele.log` diz o que aconteceu**: se rodou e quanto levou, ou que
+    /// o teto venceu. Um silêncio aqui é a pergunta de quem usa, dias depois,
+    /// sem dado nenhum.
+    #[test]
+    fn a_despedida_do_fim_diz_no_log_o_que_conseguiu() {
+        for (desfecho, agulhas) in [
+            (DespedidaNoFim::JaFeita, &["já tinha rodado"][..]),
+            (
+                DespedidaNoFim::Rodou,
+                &["se despediram", "levou_ms=420"][..],
+            ),
+            (
+                DespedidaNoFim::TetoVenceu,
+                &[
+                    "WARN",
+                    "o teto da despedida venceu",
+                    "levou_ms=420",
+                    "teto_ms=1000",
+                ][..],
+            ),
+            (DespedidaNoFim::Caiu, &["WARN", "caiu antes de acabar"][..]),
+        ] {
+            let ((), rastro) = crate::rastro_de_teste::capturar(|| {
+                dizer_a_despedida_do_fim(desfecho, Duration::from_millis(420));
+            });
+            for agulha in agulhas {
+                assert!(
+                    rastro.contains(agulha),
+                    "a linha de {desfecho:?} não diz `{agulha}`: {rastro}"
+                );
+            }
+        }
     }
 }
 
