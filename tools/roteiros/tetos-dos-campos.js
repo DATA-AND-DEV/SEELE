@@ -122,4 +122,39 @@ await caso("nome de canal ou sala", async () => {
   document.getElementById("nomear-cancelar").click();
 });
 
+// ------------------------------------------------- os lugares da sala nova
+//
+// Ninguém escreve este número: ele é copiado da primeira sala do servidor
+// (`desenharCanais`). Um servidor configurado com uma sala de mais lugares que
+// o fio aceita fazia a sala nova sair com eles, e o núcleo a recusava calado.
+// A cópia que não cabe vira o teto; a que cabe continua valendo.
+await caso("lugares da sala nova", async () => {
+  const criar = async (nome) => {
+    document.getElementById("nova-voice_room").click();
+    exigir(await ate(() => visivel("nomear") === "VISIVEL", 900), "a NOVA SALA DE VOZ não abriu");
+    document.getElementById("nomear-valor").value = nome;
+    document.getElementById("nomear-confirmar").click();
+    await ate(() => mandou("criar_voice_room").some((a) => a?.name === nome), 600);
+    await ate(() => visivel("nomear") !== "VISIVEL", 300);
+    return mandou("criar_voice_room").find((a) => a?.name === nome)?.limit;
+  };
+  const original = SEELE_QUADRO.voice_rooms[0].limit;
+  try {
+    SEELE_QUADRO.voice_rooms[0].limit = TETOS.lugares_da_sala + 50;
+    await atualizar();
+    const grande = await criar("sala grande");
+    exigir(Number.isInteger(grande) && grande >= 1 && grande <= TETOS.lugares_da_sala,
+      `copiada de uma sala de ${TETOS.lugares_da_sala + 50} lugares, a sala nova saiu com ${grande}, e o fio aceita de 1 a ${TETOS.lugares_da_sala}`);
+    exigir(mandou("registrar_da_janela").some((a) => a?.nivel === "aviso" && a?.oQue?.includes(`${TETOS.lugares_da_sala + 50} lugares`)),
+      "o ajuste dos lugares da sala nova não foi ao seele.log");
+    SEELE_QUADRO.voice_rooms[0].limit = original;
+    await atualizar();
+    const copiada = await criar("sala copiada");
+    exigir(copiada === original,
+      `copiada de uma sala de ${original} lugares, que cabe no fio, a sala nova saiu com ${copiada}`);
+  } finally {
+    SEELE_QUADRO.voice_rooms[0].limit = original;
+  }
+});
+
 relatar(`tempo virtual gasto: ${Math.round(performance.now())} ms`);
