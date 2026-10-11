@@ -108,8 +108,12 @@ desenharMeuServidor().catch(() => {});
 let fecharSemPerguntar = false;
 
 const janelaDoApp = window.__TAURI__?.window?.getCurrentWindow?.();
-janelaDoApp
-  ?.onCloseRequested(async (pedido) => {
+// **O `Promise.resolve` e o `?.(` seguram a carga do script.** Um runtime sem o
+// método, ou um cujo método não devolve promessa — os dubles das bancadas da
+// janela devolvem `undefined` —, estourava aqui um `TypeError` na carga, e com
+// ele o VOLTAR e o PARAR deste arquivo (medido pela F5 na `versao/0.16`, 11/10).
+Promise.resolve(
+  janelaDoApp?.onCloseRequested?.(async (pedido) => {
     if (fecharSemPerguntar) return;
     fecharAceiteDeMods();
     esquecerARecusaDoApelido();
@@ -133,5 +137,5 @@ janelaDoApp
         await janelaDoApp.close();
       },
     );
-  })
-  .catch((falha) => console.warn("o pedido de fechar:", falha));
+  }),
+).catch((falha) => console.warn("o pedido de fechar:", falha));
