@@ -11136,14 +11136,85 @@ fn a_credencial_da_tentativa_so_vai_ao_connect_e_morre_com_a_pergunta() {
     // D-web-3) pergunta antes de sair com a sessão aberta. Ele passa se o
     // ouvinte esquecer a credencial (`fecharAceiteDeMods()`) antes de segurar
     // (`preventDefault`). Os dois do Tauri continuam proibidos sem saída.
+    //
+    // **E a exceção do `onCloseRequested`** (tarefa 21 da F7, decidida pela
+    // orquestradora em 10/10, no molde da do `beforeunload`): fechar o SEELE com
+    // o servidor guardado no ar tira todo mundo dele, e a página pergunta antes.
+    // O `close-requested` cru continua proibido. Cada `onCloseRequested(` tem de
+    // mostrar, **antes** do `preventDefault`: as duas credenciais esquecidas
+    // (`fecharAceiteDeMods()` e `esquecerARecusaDoApelido()`), e o veto só com o
+    // servidor guardado no ar: `invoke("meu_servidor")`, **depois** o `return`
+    // sem ele, e só então o `preventDefault`.
     for nome in ui_files(".js") {
         let texto = without_comments(&read(&format!("ui/{nome}")));
-        for segura in ["onCloseRequested", "close-requested"] {
+        assert!(
+            !texto.contains("close-requested"),
+            "`{nome}` passou a ouvir o `close-requested` cru: a página pode vetar o \
+             próprio fechamento sem as condições do `onCloseRequested`, e a credencial \
+             da tentativa, que só existe na memória dela, sobreviveria ao fechar."
+        );
+        for (em, _) in texto.match_indices("onCloseRequested(") {
+            // A chamada inteira, pelos parênteses balanceados, e não até o
+            // primeiro `.catch(`: um `.catch(` dentro do ouvinte, antes do
+            // `preventDefault`, cortaria o trecho cedo, e o veto passaria calado.
+            let resto = &texto[em + "onCloseRequested".len()..];
+            let mut fundura = 0usize;
+            let fim = resto
+                .char_indices()
+                .find_map(|(onde, c)| {
+                    match c {
+                        '(' => fundura += 1,
+                        ')' => {
+                            fundura -= 1;
+                            if fundura == 0 {
+                                return Some(onde);
+                            }
+                        }
+                        _ => {}
+                    }
+                    None
+                })
+                .unwrap_or(resto.len());
+            let ouvinte = &resto[..fim];
+            let Some(segura) = ouvinte.find("preventDefault") else {
+                // A contagem não sabe de string: um `")"` num literal do ouvinte
+                // fecha o trecho cedo, e um `preventDefault` depois do corte
+                // passaria calado. Sem ele no trecho, ele também não pode estar
+                // entre o corte e o próximo `onCloseRequested(`.
+                let ate_o_proximo = resto.find("onCloseRequested(").unwrap_or(resto.len());
+                assert!(
+                    !resto[..ate_o_proximo].contains("preventDefault"),
+                    "`{nome}`: o guarda não conseguiu ler o ouvinte do `onCloseRequested` \
+                     (um parêntese num texto fechou o trecho antes do `preventDefault`). \
+                     Tire o parêntese do literal, ou ensine o guarda a pular strings:\n{ouvinte}"
+                );
+                continue;
+            };
+            for antes in [
+                "fecharAceiteDeMods()",
+                "esquecerARecusaDoApelido()",
+                "invoke(\"meu_servidor\")",
+                "if (!meu) return;",
+            ] {
+                assert!(
+                    ouvinte.find(antes).is_some_and(|onde| onde < segura),
+                    "`{nome}` segura o fechar da janela sem `{antes}` antes do \
+                     `preventDefault`: ou a credencial da tentativa sobrevive na página \
+                     segurada, ou o fechar é segurado sem o servidor guardado no ar \
+                     (tarefa 21 da F7):\n{ouvinte}"
+                );
+            }
+            // O `return` sem servidor só confere algo **depois** da pergunta: um
+            // escrito antes dela não sabe se há servidor, e o veto passa a
+            // depender do que `meu` valia antes.
+            let pergunta = ouvinte.find("invoke(\"meu_servidor\")");
+            let sem_servidor = ouvinte.find("if (!meu) return;");
             assert!(
-                !texto.contains(segura),
-                "`{nome}` passou a usar `{segura}`: a página pode vetar o próprio \
-                 fechamento, e a credencial da tentativa, que só existe na memória \
-                 dela, sobreviveria ao fechar. Esqueça-a no fechar antes de segurar."
+                pergunta.zip(sem_servidor).is_some_and(|(p, r)| p < r),
+                "`{nome}` sai do ouvinte do fechar (`if (!meu) return;`) antes de \
+                 perguntar se há servidor no ar (`invoke(\"meu_servidor\")`): o `return` \
+                 não confere nada, e o fechar pode ser segurado sem o servidor guardado \
+                 no ar (tarefa 21 da F7):\n{ouvinte}"
             );
         }
         for (em, _) in texto.match_indices("\"beforeunload\"") {

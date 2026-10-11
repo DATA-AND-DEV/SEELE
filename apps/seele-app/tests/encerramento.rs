@@ -317,7 +317,13 @@ fn a_despedida_espera_o_quadro_sair() {
 /// `None` para qualquer outra forma: um teto que este guarda não sabe ler é um
 /// teto que ele não confere, e reprovar obriga quem o mudou a ensiná-lo.
 fn teto_da_espera(corpo: &str) -> Option<u64> {
-    let depois = corpo.split_once("encerrar_e_esperar(")?.1;
+    duracao_em_ms(corpo.split_once("encerrar_e_esperar(")?.1)
+}
+
+/// A `Duration` escrita no começo de `depois`, em milissegundos, quando ela é
+/// `Duration::from_millis(N)` ou `Duration::from_secs(N)`, com ou sem o
+/// `std::time::` na frente; `None` para qualquer outra forma.
+fn duracao_em_ms(depois: &str) -> Option<u64> {
     let depois = depois.strip_prefix("std::time::").unwrap_or(depois);
     let depois = depois.strip_prefix("Duration::")?;
     let (escala, numero) = match depois.strip_prefix("from_millis(") {
@@ -386,4 +392,144 @@ fn fechar_o_app_despede_as_duas_hospedagens() {
             "a despedida das hospedagens deixou de fazer `{agulha}`:\n{despedida}"
         );
     }
+}
+
+#[test]
+fn sair_sem_fechar_a_janela_tambem_se_despede() {
+    // Tarefa 21 da F7. O Sair do Dock, o logout e um `quit` mandado de fora
+    // chegam como `terminate:`, e o `tao` vai do `applicationWillTerminate:`
+    // direto ao `RunEvent::Exit`: sem janela fechada e sem `ExitRequested`, e
+    // por isso sem despedida nenhuma. A despedida do fim mora ali, de melhor
+    // esforço e com teto. A forma (o teto, as duas metades, uma vez só, a linha
+    // do log) está provada em `a_despedida_do_fim`, no `main.rs`; se o runtime
+    // ainda a entrega ali é medido no app. Aqui fica a ligação que só o fecho
+    // do `app.run` tem.
+    let fonte = main_rs();
+    let fecho: String = fecho_do_app_run(&fonte).split_whitespace().collect();
+    let Some(no_fim) =
+        fecho.find("ifmatches!(evento,tauri::RunEvent::Exit){despedir_no_fim_do_app(handle);}")
+    else {
+        panic!(
+            "o fim do processo deixou de chamar a despedida do fim: o Sair do Dock e o \
+             logout voltam a sair sem avisar ninguém, e quem ficou vê a pessoa na sala \
+             até o prazo de ociosidade:\n{fecho}"
+        );
+    };
+    // A saída comum marca a despedida feita, **dentro** do braço do
+    // `ExitRequested`, e o `RunEvent::Exit` que vem depois dela não despede de
+    // novo.
+    let (Some(janela), Some(marca)) = (
+        fecho.find("ExitRequested{code:None,"),
+        fecho.find(".despedida_feita.store(true,"),
+    ) else {
+        panic!("a saída comum deixou de marcar a despedida feita:\n{fecho}");
+    };
+    assert!(
+        janela < marca && marca < no_fim,
+        "a marca da despedida feita saiu do braço do `ExitRequested`:\n{fecho}"
+    );
+
+    let do_app: String = corpo(&fonte, "despedir_no_fim_do_app")
+        .split_whitespace()
+        .collect();
+    for agulha in [
+        "despedir_no_fim(",
+        ".despedida_feita",
+        "TETO_DA_DESPEDIDA_NO_FIM",
+        "despedir_se(&",
+        "despedir_das_hospedagens(",
+        "TETO_DAS_HOSPEDAGENS_NO_FIM",
+        "dizer_a_despedida_do_fim(",
+    ] {
+        assert!(
+            do_app.contains(agulha),
+            "a despedida do fim deixou de fazer `{agulha}`:\n{do_app}"
+        );
+    }
+
+    // **O teto de 1 s é inegociável** (orquestradora, 10/10): o AppKit chama
+    // `exit()` quando o fecho volta, e um teto maior é um app que demora a
+    // fechar. As hospedagens têm menos que ele, para a espera de fora não
+    // vencer por um fio quem ainda estava dentro do próprio teto.
+    let teto = |nome: &str| {
+        fonte
+            .split_once(&format!("const {nome}: std::time::Duration = "))
+            .and_then(|(_, depois)| duracao_em_ms(depois))
+    };
+    let (Some(do_fim), Some(das_hospedagens)) = (
+        teto("TETO_DA_DESPEDIDA_NO_FIM"),
+        teto("TETO_DAS_HOSPEDAGENS_NO_FIM"),
+    ) else {
+        panic!(
+            "os tetos da despedida do fim deixaram de ser `Duration::from_millis(N)` ou \
+             `Duration::from_secs(N)`, e este guarda não sabe lê-los"
+        );
+    };
+    assert!(
+        0 < do_fim && do_fim <= 1000,
+        "o teto da despedida do fim é {do_fim} ms: ele não passa de 1 s"
+    );
+    assert!(
+        das_hospedagens < do_fim,
+        "as hospedagens têm {das_hospedagens} ms dentro de um teto de {do_fim} ms"
+    );
+}
+
+#[test]
+fn o_cmd_q_do_mac_passa_pela_janela() {
+    // Tarefa 21 da F7. O Sair do menu padrão do Tauri manda o `terminate:`, e
+    // o Cmd+Q saía sem perguntar, com o servidor guardado no ar, e sem
+    // despedir ninguém. O nosso fecha a janela principal, que é o caminho do
+    // botão vermelho. O menu do `muda` só nasce na thread principal do macOS,
+    // que um teste não tem: a prova de comportamento (o Cmd+Q pergunta, sai
+    // direto sem nada no ar, e despede) é medida no app. Aqui fica a ligação.
+    let fonte = main_rs();
+    assert!(
+        fonte.contains(
+            "#[cfg(target_os = \"macos\")]\n            trocar_o_sair_do_mac(app.handle());"
+        ),
+        "o `setup` deixou de trocar o Sair do menu do macOS: o Cmd+Q volta a sair sem \
+         perguntar e sem se despedir"
+    );
+    let compacto = |nome: &str| -> String { corpo(&fonte, nome).split_whitespace().collect() };
+
+    let troca = compacto("trocar_o_sair_do_mac");
+    for agulha in [
+        "app.menu()",
+        "trocar_o_sair(app,&menu)",
+        "app.on_menu_event(",
+        "==ID_DO_SAIR",
+        "sair_pelo_menu(app)",
+    ] {
+        assert!(
+            troca.contains(agulha),
+            "a troca do Sair deixou de fazer `{agulha}`:\n{troca}"
+        );
+    }
+
+    // Só o Sair muda, e com o mesmo atalho; o Editar e o resto ficam.
+    let sair = compacto("trocar_o_sair");
+    for agulha in [
+        "starts_with(\"Quit\")",
+        "MenuItem::with_id(app,ID_DO_SAIR,&texto,true,Some(\"CmdOrCtrl+Q\"))",
+        "remove_at(itens.len().saturating_sub(1))",
+        "append(&nosso)",
+    ] {
+        assert!(
+            sair.contains(agulha),
+            "a troca do Sair deixou de fazer `{agulha}`:\n{sair}"
+        );
+    }
+
+    // O Sair pede o fechar da janela, que é o que a página ouve, e não a
+    // destrói: destruir pularia a pergunta.
+    let pelo_menu = compacto("sair_pelo_menu");
+    assert!(
+        pelo_menu.contains("get_webview_window(\"main\")") && pelo_menu.contains("janela.close()"),
+        "o Sair do menu deixou de pedir o fechar da janela principal:\n{pelo_menu}"
+    );
+    assert!(
+        !pelo_menu.contains("destroy("),
+        "o Sair do menu destrói a janela, e a página não pergunta:\n{pelo_menu}"
+    );
 }
