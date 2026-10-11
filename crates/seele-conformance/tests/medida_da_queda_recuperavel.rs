@@ -86,15 +86,34 @@ fn passar_todo_mundo_para_tras(servidor: &Daemon) {
 }
 
 /// O que a FFI entregou à janela, com a hora.
+///
+/// E o enlace **como a janela o lê** a cada aviso: a faixa da bateria dura
+/// menos que uma amostra de 20 ms quando a primeira tentativa de volta dá
+/// certo, e só lendo o retrato no próprio aviso ela aparece.
 #[derive(Default)]
 struct Gravador {
     eventos: std::sync::Mutex<Vec<(Instant, Event)>>,
+    conexao: std::sync::OnceLock<std::sync::Weak<Connection>>,
+    enlaces: std::sync::Mutex<Vec<(Instant, String)>>,
 }
 
 impl seele_ffi::EventListener for Gravador {
     fn on_event(&self, event: Event) {
+        let le_o_retrato = matches!(event, Event::TelemetryChanged | Event::Ended { .. });
         if let Ok(mut eventos) = self.eventos.lock() {
             eventos.push((Instant::now(), event));
+        }
+        if !le_o_retrato {
+            return;
+        }
+        let Some(conexao) = self.conexao.get().and_then(std::sync::Weak::upgrade) else {
+            return;
+        };
+        let agora = enlace(&conexao);
+        if let Ok(mut enlaces) = self.enlaces.lock() {
+            if enlaces.last().is_none_or(|(_, ultimo)| *ultimo != agora) {
+                enlaces.push((Instant::now(), agora));
+            }
         }
     }
 }
@@ -104,6 +123,22 @@ impl Gravador {
         self.eventos
             .lock()
             .map(|eventos| eventos.clone())
+            .unwrap_or_default()
+    }
+
+    /// O enlace como a janela o leu, a partir de `comeco`, em milissegundos.
+    fn enlaces_desde(&self, comeco: Instant) -> Vec<(u128, String)> {
+        self.enlaces
+            .lock()
+            .map(|enlaces| {
+                enlaces
+                    .iter()
+                    .filter(|(quando, _)| *quando >= comeco)
+                    .map(|(quando, enlace)| {
+                        (quando.duration_since(comeco).as_millis(), enlace.clone())
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -199,6 +234,7 @@ async fn a_voz_debaixo_da_tela_de_fim() -> Result<()> {
     let casa = tempfile::tempdir()?;
     let gravador = Arc::new(Gravador::default());
     let ana = entrar_pela_ffi(config(endereco, casa.path(), Some(aparelho))).await?;
+    let _ = gravador.conexao.set(Arc::downgrade(&ana));
     ana.subscribe(gravador.clone());
     // Sempre aberto: o que se mede é se a voz **sai**, e não o portão.
     ana.set_voice_mode(VoiceMode::Open);
@@ -254,6 +290,10 @@ async fn a_voz_debaixo_da_tela_de_fim() -> Result<()> {
     let ouvida_depois = ouvir_quem_fala(&mut depois, quem, Duration::from_millis(2500)).await;
 
     println!(
+        "MEDIDA-VOZ enlace_lido_pela_janela={:?}",
+        gravador.enlaces_desde(comeco)
+    );
+    println!(
         "MEDIDA-VOZ fim={qual_fim:?} eventos_depois_do_fim={depois_do_fim} \
          | antes_da_queda falando/calada={ouvida_antes:?} \
          | trajeto={trajeto:?} \
@@ -289,6 +329,7 @@ async fn tentar_de_novo_uma_recusada_por_tamanho() -> Result<()> {
     let casa = tempfile::tempdir()?;
     let gravador = Arc::new(Gravador::default());
     let ana = entrar_pela_ffi(config(endereco, casa.path(), None)).await?;
+    let _ = gravador.conexao.set(Arc::downgrade(&ana));
     ana.subscribe(gravador.clone());
     ana.enter_voice_room(SALA.0, None)
         .map_err(|erro| anyhow::anyhow!("{erro:?}"))?;
@@ -326,6 +367,10 @@ async fn tentar_de_novo_uma_recusada_por_tamanho() -> Result<()> {
     let sentada = servidor.server().occupancy.lock().await.onde_esta(quem);
     let gravadas = servidor.quantas_mensagens(LINHA).await?;
 
+    println!(
+        "MEDIDA-TOOLONG enlace_lido_pela_janela={:?}",
+        gravador.enlaces_desde(comeco)
+    );
     println!(
         "MEDIDA-TOOLONG antes={estado_recusada:?} reenviou={reenviou:?} \
          | trajeto={trajeto:?} | fim={fim:?} | sentada_no_servidor={sentada:?} \
