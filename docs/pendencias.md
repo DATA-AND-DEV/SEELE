@@ -9528,7 +9528,8 @@ pendência. A revisão dele deixou:
     pendência 58, e a revisão da rodada 2 do W2 (R2-M2, no ledger).
 
 55. **P61 · A recusa local de um campo grande demais não chega à janela.
-    Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado.**
+    Consertada em 11/10/2026 pelo lote C55, com o apelido já gravado, e a sala
+    pessoal com um apelido antigo pelo S64.**
     Desde a rodada 1 do P61, um comando com um campo acima do teto do fio
     (em **bytes**) não derruba mais o enlace: o núcleo não manda o quadro,
     registra o comando e o campo no `seele.log` (`Motor::recusar_aqui`, em
@@ -9635,15 +9636,49 @@ pendência. A revisão dele deixou:
         com o campo marcado. Sem isso, ela cai em `recusado`, a tentativa se
         encerra, e o campo onde a pessoa escreveu some. A frase da casa manda
         abrir o PERFIL, que não é onde ela escreveu.
-    - **Lido, e não medido: a sala pessoal sobe com o apelido gravado como
-      nome do servidor** (a observação fora da contagem da revisão do C55).
-      `sala.rs` usa o apelido gravado (`preferences.nickname()`) como
-      `ServerConfig.name` e como o apelido da conta do dono
-      (`hospedagem.rs`). O `Session` do aperto de mão leva o nome sob
-      `MAX_CLIENT_NAME_LEN` (64 B, `control.rs`). Desde o C55, um apelido
-      novo tem até 32 B e cabe. Um gravado de antes, acima de 64 B, poderia
-      impedir quem liga de entrar: na v0.15.1 publicada o perfil contava 32
-      caracteres, e 22 ideogramas já são 66 B. Ninguém mediu.
+    - **Medido e consertado em 11/10/2026 pelo lote S64 da F5: a sala pessoal
+      com um apelido gravado acima de 64 B** (a observação fora da contagem da
+      revisão do C55; commit `b4d1e8f8`). A sala sobe com o apelido gravado
+      (`preferences.nickname()`, em `sala.rs`) como `ServerConfig.name` e como
+      o apelido da conta do dono (`hospedagem.rs`), e o `Session` leva o nome
+      sob `MAX_CLIENT_NAME_LEN` (64 B, `control.rs`). A v0.15.1 publicada
+      contava 32 caracteres no perfil, e 22 ideogramas são 66 B. Medido com 22
+      `語` gravados, a sala subida pelo `sala::subir_em`, como o app a sobe:
+      - **a sala sobe**, toca e é atendida. O `register_or_find` aceita os
+        66 B na conta do dono, e nada quebra ali;
+      - **quem liga é atendido e recusado.** Depois do `Tocando` e do ATENDER,
+        recebe `Disconnecting { ProtocolViolation }` no lugar do `Session`, e a
+        campainha conta a ligação como atendida. Medido com o par cru da
+        conformidade (`sala_pessoal.rs`), porque nenhum cliente lê o
+        `Tocando` ainda (tarefa 6e da F7);
+      - **o dono também não entra.** Com o apelido gravado, o C55 recusa antes
+        de discar («SEU APELIDO PASSA DE 32 BYTES»). Encurtado no PERFIL, a sala
+        continua no ar com o nome velho, e o ATENDER recebe
+        `Refused { ProtocolViolation }` («PROTOCOLO VIOLADO») a cada tentativa,
+        até a sala subir de novo;
+      - **o `seele.log` do dono diz, e a janela não.** Cerca de 1 s depois, em
+        INFO, o `seele_server` escreve ``session closed … handshake refused:
+        could not send Session: field `server` is 66 bytes, over its 64-byte
+        limit``;
+      - **com 64 B, entra.** Com 40 B (20 `á`), o dono entra com um apelido
+        curto: a conta dele, de 40 B, não sai da sala antes de ele entrar, e é
+        renomeada quando ele entra.
+
+      **O conserto:** `nome_da_sala` (`sala.rs`) corta o apelido na última
+      fronteira de caractere dentro de `nome_do_servidor`, lido de
+      `Connection::limites_dos_campos`. O `seele.log` diz quantos bytes o
+      apelido tinha e quantos ficaram. Cortado, e não trocado pelo «SEELE»,
+      porque assim quem liga continua lendo o nome de quem recebe. A prova é
+      `um_apelido_gravado_acima_do_teto_do_nome_do_servidor_nao_impede_ninguem_de_entrar`
+      (`sala.rs`): a sala sobe com os 66 B gravados, e o dono entra pelo
+      código, como o ATENDER entra, e lê 21 ideogramas no nome. As duas
+      reversões, sem o corte e sem a linha do `seele.log`, reprovam. O fio não
+      mudou.
+      - **Fica, e é da F7:** quem liga pela FFI (`codigo_esperado`) não passa
+        do `Tocando` em sala nenhuma, com qualquer apelido. O núcleo escreve
+        «expected Session» no `seele.log` de quem liga, e a FFI devolve
+        `Refused { reason: Incompatible }`. É a tarefa 6e (Task 16 do plano da
+        F7, à espera da F1). O S64 só anota.
 
 ### Fora da F5, só como referência
 
