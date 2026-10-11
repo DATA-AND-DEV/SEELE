@@ -19712,6 +19712,26 @@ fn numeros_da_linha(linha: &str) -> Vec<usize> {
     achados
 }
 
+/// O número de uma linha que só declara uma constante com um número —
+/// `const X = 512;`, `let x = 512;`, `var x = 512;` —, ou `None`.
+fn numero_declarado(linha: &str) -> Option<usize> {
+    let linha = linha.trim();
+    let resto = ["const ", "let ", "var "]
+        .iter()
+        .find_map(|palavra| linha.strip_prefix(palavra))?;
+    let (nome, valor) = resto.split_once('=')?;
+    let nome = nome.trim();
+    if nome.is_empty()
+        || !nome
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    {
+        return None;
+    }
+    let valor = valor.trim();
+    valor.strip_suffix(';').unwrap_or(valor).trim().parse().ok()
+}
+
 /// **Nenhum teto do fio dos campos é escrito à mão na `ui/`** (pendência 58,
 /// item 55; lote C55 da F5).
 ///
@@ -19721,14 +19741,24 @@ fn numeros_da_linha(linha: &str) -> Vec<usize> {
 /// caracteres, e o fio conta **bytes**: vinte letras `á` cabiam no apelido e
 /// não no `Hello`. Os tetos agora vêm do Rust (`limites_dos_campos`), e cada
 /// campo os confere em bytes por `passaDoTeto`, em `base.js`. Este guarda
-/// reprova a volta de um teto escrito à mão, nas duas formas em que ele morava:
+/// reprova a volta de um teto escrito à mão, em três formas:
 ///
 /// - um `maxlength` num dos cinco campos do `index.html`, com qualquer número:
 ///   um teto em caracteres num campo que o fio conta em bytes é o defeito;
 /// - um número igual a um dos tetos numa linha de script que trata do tamanho
 ///   de um campo: que põe `maxLength`, que conta `bytesDe(`, que pede um teto
-///   (`passaDoTeto`, `tetosDosCampos`), que fala dos lugares de uma sala, ou
-///   que nomeia um dos cinco campos.
+///   (`passaDoTeto`, `tetosDosCampos`) ou diz a frase dele (`fraseDoTeto`),
+///   que fala dos lugares de uma sala, ou que nomeia um dos cinco campos;
+/// - uma constante declarada com um número igual a um dos tetos
+///   (`const TETO_DO_MOTIVO = 512;`), em qualquer script, porque é a forma
+///   de copiar um teto para usá-lo noutra linha.
+///
+/// As duas últimas vieram da revisão do lote (M2): `fraseDoTeto(512, …)` e
+/// uma constante com o teto passavam por este guarda.
+///
+/// **O que ele não vê, por ser textual:** um teto montado por conta
+/// (`256 * 2`), escrito como propriedade de um objeto (`{ motivo: 512 }`)
+/// numa linha sem marca, ou declarado com outro valor e corrigido depois.
 ///
 /// Os tetos são lidos da FFI, e não escritos aqui. A única cópia deles na
 /// `ui/` é a das `CONSTANTES_DO_DESKTOP` da ponte do navegador, que não tem
@@ -19743,23 +19773,44 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
         "preparar-nome",
         "moderar-motivo",
     ];
-    const MARCAS: [&str; 7] = [
+    const MARCAS: [&str; 8] = [
         "maxLength",
         "maxlength",
         "bytesDe(",
         "passaDoTeto",
         "tetosDosCampos",
+        "fraseDoTeto",
         "lugaresDeUmaSalaNova",
         "lugares",
     ];
     // Os números iguais a um teto que não são teto de campo nenhum do fio,
     // cada um com o motivo, conferido na hora de entrar aqui.
-    const EXCECOES: &[(&str, &str, &str)] = &[(
-        "camada-sala.js",
-        "nome.maxLength = 48;",
-        "o nome que esta máquina dá a um contato da agenda da sala pessoal: ele fica no \
-         disco desta máquina (`seele_core::agenda`), e não vai ao fio",
-    )];
+    const EXCECOES: &[(&str, &str, &str)] = &[
+        (
+            "camada-sala.js",
+            "nome.maxLength = 48;",
+            "o nome que esta máquina dá a um contato da agenda da sala pessoal: ele fica no \
+             disco desta máquina (`seele_core::agenda`), e não vai ao fio",
+        ),
+        (
+            "base.js",
+            "const INTERVALO = 250;",
+            "o ritmo da fala de um MOD, em milissegundos (rascunho da API 6, §7.2): é \
+             tempo, e não tamanho de campo",
+        ),
+        (
+            "tela-sessao.js",
+            "const TETO_DE_GRUPOS = 32;",
+            "quantos grupos uma lista que um MOD arranja mostra: é desenho desta janela, \
+             e não vai ao fio",
+        ),
+        (
+            "tela-sessao.js",
+            "const TETO_DO_TITULO_DE_GRUPO = 64;",
+            "quanto do título de cada grupo dessa lista se mostra: é desenho desta \
+             janela, e não vai ao fio",
+        ),
+    ];
 
     let limites = seele_ffi::Connection::limites_dos_campos();
     let tetos = [
@@ -19802,11 +19853,13 @@ fn nenhum_teto_do_fio_dos_campos_e_escrito_a_mao_na_ui() {
         for linha in fonte.lines() {
             let do_tamanho = MARCAS.iter().any(|marca| linha.contains(marca))
                 || CAMPOS.iter().any(|campo| linha.contains(campo));
-            if !do_tamanho
-                || !numeros_da_linha(linha)
+            let teto_na_linha = do_tamanho
+                && numeros_da_linha(linha)
                     .iter()
-                    .any(|numero| tetos.contains(numero))
-            {
+                    .any(|numero| tetos.contains(numero));
+            let teto_declarado =
+                numero_declarado(linha).is_some_and(|numero| tetos.contains(&numero));
+            if !teto_na_linha && !teto_declarado {
                 continue;
             }
             if let Some((_, excecao, _)) = EXCECOES
