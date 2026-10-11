@@ -48,6 +48,7 @@ RAIZ = pathlib.Path(__file__).resolve().parent.parent
 CASCA = RAIZ / "apps" / "seele-app" / "ui"
 PROTO_MODS = RAIZ / "crates" / "seele-proto" / "src" / "mods.rs"
 PROTO_VERSAO = RAIZ / "crates" / "seele-proto" / "src" / "version.rs"
+CAPACIDADE_DA_JANELA = RAIZ / "apps" / "seele-app" / "capabilities" / "janela.json"
 
 
 def apis_aceitas() -> str:
@@ -61,6 +62,22 @@ def apis_aceitas() -> str:
     if not achado:
         raise SystemExit(f"não achei `APIS_ACEITAS` em {PROTO_MODS}; o duble precisa dela.")
     return "[" + achado.group(1) + "]"
+
+
+def permissoes_da_janela() -> str:
+    """As permissões que a capacidade `janela` concede, lidas dela.
+
+    O duble recusa o que a ACL de verdade recusaria (`destroy`, `close`). A
+    confirmação ao fechar da tarefa 21 passou neste roteiro com a janela que
+    não fechava no app: o duble aceitava tudo, e a capacidade não dava o
+    `destroy` com que o `@tauri-apps/api` termina o fechar (medido em 10/10).
+    """
+    import json
+
+    permissoes = json.loads(CAPACIDADE_DA_JANELA.read_text()).get("permissions")
+    if not isinstance(permissoes, list):
+        raise SystemExit(f"não achei a lista `permissions` em {CAPACIDADE_DA_JANELA}; o duble precisa dela.")
+    return json.dumps([p for p in permissoes if isinstance(p, str)])
 
 
 def versao_do_servidor() -> str:
@@ -90,6 +107,14 @@ DUBLE = """<script>
 // `tools/carga-da-casca.py` sobre o que ele deliberadamente não finge.
 const SEELE_RETRATO = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGP4FCSPFTEMLQkA4oZYwU22lhgAAAAASUVORK5CYII=";
 const SEELE_APIS_ACEITAS = __APIS_ACEITAS__;
+const SEELE_PERMISSOES_DA_JANELA = __PERMISSOES_DA_JANELA__;
+// O comando da janela que a ACL de verdade recusaria é recusado aqui também,
+// com a frase do Tauri.
+const seelePermitido = (comando) => {
+  if (!SEELE_PERMISSOES_DA_JANELA.includes(`core:window:allow-${comando}`)) {
+    throw `window.${comando} not allowed. Permissions associated with this command: core:window:allow-${comando}`;
+  }
+};
 const SEELE_VERSAO_DO_SERVIDOR = "__VERSAO_DO_SERVIDOR__";
 const SEELE_LINHA = "__LINHA__";
 const SEELE_RESPOSTAS = {
@@ -324,9 +349,34 @@ window.__TAURI__ = {
   // pedir o fechar da janela como o sistema pede, e ver se ela fechou.
   window: { getCurrentWindow: () => ({
     minimize: async () => {}, toggleMaximize: async () => {},
-    close: async () => { window.__SEELE_FECHAMENTOS = (window.__SEELE_FECHAMENTOS ?? 0) + 1; },
+    // **O fechar como o Tauri 2 o faz.** Com um ouvinte de `onCloseRequested`
+    // de pé, o `close()` vira um pedido de fechar, o ouvinte decide, e sem
+    // `preventDefault` quem fecha é o `destroy()` do embrulho — que precisa da
+    // permissão dele. Sem ouvinte, o `close()` fecha. `__SEELE_DESTRUIDA` diz
+    // se a janela fechou de fato.
+    close: async () => {
+      seelePermitido("close");
+      window.__SEELE_FECHAMENTOS = (window.__SEELE_FECHAMENTOS ?? 0) + 1;
+      if (window.__SEELE_AO_FECHAR) await window.__SEELE_AO_FECHAR();
+      else window.__SEELE_DESTRUIDA = true;
+    },
+    destroy: async () => { seelePermitido("destroy"); window.__SEELE_DESTRUIDA = true; },
     isFullscreen: async () => false, setFullscreen: async () => {},
-    onCloseRequested: async (ouvinte) => { window.__SEELE_AO_FECHAR = ouvinte; return () => {}; },
+    // `__SEELE_AO_FECHAR()` é o sistema pedindo o fechar: devolve o pedido,
+    // com `segurado` dizendo se o ouvinte o vetou.
+    onCloseRequested: async (ouvinte) => {
+      window.__SEELE_AO_FECHAR = async () => {
+        const pedido = {
+          segurado: false,
+          preventDefault() { this.segurado = true; },
+          isPreventDefault() { return this.segurado; },
+        };
+        await ouvinte(pedido);
+        if (!pedido.isPreventDefault()) await window.__TAURI__.window.getCurrentWindow().destroy();
+        return pedido;
+      };
+      return () => {};
+    },
     listen: async () => () => {},
   }) },
   webviewWindow: { getCurrentWebviewWindow: () => ({ listen: async () => () => {} }) },
@@ -442,6 +492,7 @@ def main() -> int:
             roteiro = CABECA_DO_ROTEIRO + corpo + PE_DO_ROTEIRO
         duble = (
             DUBLE.replace("__APIS_ACEITAS__", apis_aceitas())
+            .replace("__PERMISSOES_DA_JANELA__", permissoes_da_janela())
             .replace("__VERSAO_DO_SERVIDOR__", versao_do_servidor())
             .replace("__LINHA__", linha_desta_janela())
         )
