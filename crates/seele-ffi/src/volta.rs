@@ -191,8 +191,17 @@ pub(crate) struct Buraco {
     /// A página que espera a vez de ser pedida de novo: quando, de que cursor,
     /// e por quê.
     agendada: Option<(Instant, Option<MessageId>, DeNovo)>,
-    /// Se a página de agora já foi pedida de novo. Uma vez por página.
-    pedida_de_novo: bool,
+    /// Se a página de agora já foi pedida de novo porque a cerca não voltou.
+    /// Uma vez por página.
+    ///
+    /// **Separado das respostas vazias** (R1-M1 da revisão do P61): as duas
+    /// razões de pedir de novo dividiam um indicador só, e uma cerca perdida
+    /// seguida de uma página vazia contava como duas respostas vazias — a busca
+    /// parava em «começo do canal» com uma resposta só.
+    sem_cerca_de_novo: bool,
+    /// Quantas vezes o servidor respondeu à página de agora sem nada abaixo do
+    /// cursor. Duas são o começo do canal.
+    vazias: u8,
     /// O próximo número de carimbo. Ver [`MARCA_DO_PING_DO_BURACO`].
     sequencia: u64,
 }
@@ -212,7 +221,8 @@ impl Buraco {
             paginas: 1,
             no_ar: None,
             agendada: None,
-            pedida_de_novo: false,
+            sem_cerca_de_novo: false,
+            vazias: 0,
             sequencia,
         };
         let pagina = buraco.pedir(None, None, agora);
@@ -293,10 +303,10 @@ impl Buraco {
         // vez a mesma página de novo; na segunda, a busca desiste e diz.
         let cursor = no_ar.cursor;
         self.no_ar = None;
-        if self.pedida_de_novo {
+        if self.sem_cerca_de_novo {
             return Some(Passo::Parou(Parada::SemResposta));
         }
-        self.pedida_de_novo = true;
+        self.sem_cerca_de_novo = true;
         Some(Passo::Pedir(self.pedir(
             cursor,
             Some(DeNovo::SemCerca),
@@ -335,14 +345,15 @@ impl Buraco {
             // do canal e o `FetchHistory` descartado pelo limitador, com o
             // `Ping` passando, dão a mesma página vazia. Pede de novo depois de
             // uma espera; o servidor que responde vazio de novo está no começo.
-            if self.pedida_de_novo {
+            self.vazias += 1;
+            if self.vazias >= 2 {
                 return Some(Passo::Parou(Parada::Comeco));
             }
-            self.pedida_de_novo = true;
             self.agendada = Some((agora + ESPERA_DA_PAGINA_VAZIA, no_ar.cursor, DeNovo::Vazia));
             return None;
         };
-        self.pedida_de_novo = false;
+        self.sem_cerca_de_novo = false;
+        self.vazias = 0;
         let Some(conhecida) = self.conhecida else {
             return Some(Passo::Parou(Parada::SoAMaisNova));
         };
@@ -948,6 +959,40 @@ mod tests {
             &[(2, Descarte::Cerca), (3, Descarte::Cerca)],
         );
         assert_eq!(parada, Parada::SemResposta);
+    }
+
+    /// **Uma cerca perdida não conta como a primeira resposta vazia** (R1-M1
+    /// da revisão do P61).
+    ///
+    /// A sequência do revisor: a cerca da página 2 se perde, a página é pedida
+    /// de novo, e esse pedido de novo é o que o limitador descarta — a cerca
+    /// volta, sem página. Era a primeira resposta vazia do servidor, e a busca
+    /// a contava como a segunda, porque o mesmo indicador marcava as duas
+    /// razões de pedir de novo: parava em «começo do canal», com 51 faltando.
+    #[test]
+    fn uma_cerca_perdida_nao_conta_como_resposta_vazia() {
+        let mut room = room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let gravadas: Vec<u64> = (1..=551).collect();
+        let (parada, _, pedidos) = simular(
+            &mut room,
+            &gravadas,
+            &[],
+            &[],
+            &[(2, Descarte::Cerca), (3, Descarte::Pedido)],
+        );
+        let faltam: Vec<u64> = (51..=551).filter(|id| !ids(&room).contains(id)).collect();
+        assert_eq!(
+            (parada, faltam.len()),
+            (Parada::Fechou, 0),
+            "uma cerca perdida e uma página vazia pararam a busca: {:?}",
+            pedidos
+                .iter()
+                .map(|p| (p.cursor, p.de_novo))
+                .collect::<Vec<_>>()
+        );
     }
 
     /// O começo do canal de verdade, numa divisa de página: a última página
