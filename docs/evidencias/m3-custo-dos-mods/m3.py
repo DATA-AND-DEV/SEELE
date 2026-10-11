@@ -40,7 +40,13 @@ declarado. Os cenários de carga sobem participantes calados (o `m3-falante
 --calado`): um posta 30 mensagens no canal 1; nas capas, a sala 1 fica com
 sete pessoas e a lista com vinte e sete; nos cartões, a lista tem 251 (os
 calados entram num processo só, no ritmo da portaria, antes do app, e o
-cenário só mede depois de a acessibilidade mostrar os 251 cartões). O jitter também é lido do
+cenário só mede depois de a acessibilidade mostrar os 251 cartões).
+    lista-251      a referência da carga-cartoes (decisão da orquestradora,
+                   11/10): os mesmos calados, no mesmo ritmo, e sem MOD nenhum;
+                   só mede depois de a acessibilidade achar as 251 pessoas da
+                   lista pelo nome. O §12 lê a `carga-cartoes` contra ela, e o
+                   `sem-mod` de uma pessoa diz, à parte, o custo da lista.
+O jitter também é lido do
 `seele.log` (a linha que o remendo da cópia escreve a cada 2 s), porque com o
 diálogo e a página a barra fica inerte e a acessibilidade não a lê.
 """
@@ -71,6 +77,9 @@ PACOTES = {
 CARGAS = ["regioes", "capas", "folhas", "avisos", "dialogo", "pagina", "palco", "tudo", "cartoes"]
 # A lista da carga-cartoes: quem usa e os calados (e o falante, com voz).
 LISTA = 251
+# Os cenários com a lista de 251: com os cartões do MOD, e a referência dela,
+# com os mesmos calados e sem MOD nenhum.
+COM_A_LISTA = {"carga-cartoes", "lista-251"}
 PACOTES.update({f"carga-{c}": RAIZ / f"pacotes/m3-carga-{c}" for c in CARGAS})
 # Os cenários de carga que precisam de quem usa dentro da sala: a capa anima no
 # cartão da chamada e na barra; o palco é da chamada.
@@ -126,6 +135,15 @@ def tem(pid, texto, fundura=None):
 def cartoes_na_lista(pid):
     """Os cartões de MOD distintos que a acessibilidade acha, fundo na árvore."""
     return len(set(re.findall(r"cartão (\S+) · linha 1", ax("textos", pid, "· linha 1", "200"))))
+
+
+def pessoas_na_lista(pid, voz):
+    """As pessoas da lista que a acessibilidade acha pelo nome, fundo na árvore:
+    os calados distintos (`m3-cartao-NNN`), o falante com voz, e quem usa — o
+    nome dele sai da chave e não é conhecido, mas a sessão aberta o prova."""
+    calados = set(re.findall(r"\bm3-cartao-\d{3}\b", ax("textos", pid, "m3-cartao-", "200")))
+    falante = 1 if voz and "falante-m3" in ax("textos", pid, "falante-m3", "200") else 0
+    return len(calados) + falante + 1
 
 
 def irmaos_webkit(pid: int):
@@ -249,6 +267,9 @@ def main():
     voz = extra == "voz"
     if base.startswith("carga-"):
         mods = [base]
+    elif base == "lista-251":
+        # Explícito: o `get` abaixo dá os três oficiais a qualquer outro nome.
+        mods = []
     else:
         mods = {"sem-mod": [], "1-mod": ["perfis"]}.get(base, ["perfis", "mesa", "estilo"])
     relato = {"cenario": a.cenario, "mods": mods, "voz": voz, "segundos": a.segundos,
@@ -299,14 +320,14 @@ def main():
         # **Os participantes da carga**, antes do app: um posta 30 mensagens no
         # canal 1 (a região da conversa); nas capas, a sala 1 fica com sete
         # pessoas contando quem usa e o falante, e a lista com vinte e sete.
-        if base.startswith("carga-"):
+        if base.startswith("carga-") or base in COM_A_LISTA:
             duracao = str(a.segundos + 240)
             endereco = f"127.0.0.1:{PORTA}"
             def calado(apelido, sala, *extra_args):
                 participantes.append(subprocess.Popen(
                     [str(FALANTE), endereco, str(sala), duracao, "--calado", "--apelido", apelido, *extra_args],
                     stdout=open(pasta / f"{apelido}.out", "w"), stderr=subprocess.STDOUT))
-            if base == "carga-cartoes":
+            if base in COM_A_LISTA:
                 # **Os calados da lista, num processo só, no ritmo da portaria**
                 # (30 apertos de rajada por endereço, repostos a 30 por minuto):
                 # uns 8 minutos, antes do app. Com voz, o falante é o 251º.
@@ -387,6 +408,12 @@ def main():
             esperar(lambda: cartoes_na_lista(pid) >= LISTA, 180, passo=5)
             relato["cartoes_na_lista"] = cartoes_na_lista(pid)
             assert relato["cartoes_na_lista"] >= LISTA, f"a lista tem {relato['cartoes_na_lista']} cartões, e não {LISTA}"
+        if base == "lista-251":
+            # **A mesma prova, sem cartão**: as pessoas da lista pelo nome.
+            esperar(lambda: pessoas_na_lista(pid, voz) >= LISTA, 180, passo=5)
+            relato["pessoas_na_lista"] = pessoas_na_lista(pid, voz)
+            assert relato["pessoas_na_lista"] >= LISTA, \
+                f"a lista tem {relato['pessoas_na_lista']} pessoas, e não {LISTA}"
         if base.startswith("carga-"):
             relato["carga_a_vista"] = carga_a_vista(pid, base, voz)
         registro = casa / "seele.log"

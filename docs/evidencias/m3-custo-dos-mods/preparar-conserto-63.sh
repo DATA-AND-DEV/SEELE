@@ -13,17 +13,23 @@
 #      novo);
 #   2. guarda o app da campanha ao lado (`SEELE-6e845e0d.app`), uma vez só: os
 #      24 cenários foram medidos nele;
-#   3. copia o falante da evidência (o do «diz e segue», `94fee0c0`) e aplica os
+#   3. troca o roteiro da pasta pelo da evidência, com a `lista-251` (a
+#      referência da `carga-cartoes`: os mesmos calados, sem MOD); se o da pasta
+#      não é o que o `preparar-cartoes.sh` pôs (`8fe32c96`), para, para ninguém
+#      perder o que mexeu;
+#   4. copia o falante da evidência (o do «diz e segue», `94fee0c0`) e aplica os
 #      remendos (`remendar-conserto-63.py`): o `tela-sessao.js` do `6717dc2c`,
 #      letra por letra, e o número da voz;
-#   4. recompila o app e o falante na mesma pasta de alvo;
-#   5. **marca a cópia**: o `COMMIT_DA_MEDICAO` passa a `<commit>+6717dc2c`, e
+#   5. recompila o app e o falante na mesma pasta de alvo;
+#   6. **marca a cópia**: o `COMMIT_DA_MEDICAO` passa a `<commit>+6717dc2c`, e
 #      cada relato o leva. O `resumir-api6.py` recusa misturar commits, e é isso
 #      que impede ler a `carga-cartoes` consertada contra o `sem-mod` de antes.
 set -eu
 PASTA=$(cd "$1" && pwd)
 AQUI=$(cd "$(dirname "$0")" && pwd)
+REPO=$(git -C "$AQUI" rev-parse --show-toplevel)
 COMMIT_DA_CAMPANHA=6e845e0d
+ROTEIRO_DOS_CARTOES=8fe32c96
 CONSERTO=6717dc2c
 APP="$PASTA/alvo/release/bundle/macos/SEELE.app"
 
@@ -40,6 +46,15 @@ esac
 GUARDADO="$PASTA/alvo/release/bundle/macos/SEELE-$COMMIT_DA_CAMPANHA.app"
 [ -d "$GUARDADO" ] || ditto "$APP" "$GUARDADO"
 
+# O roteiro: o que o `preparar-cartoes.sh` pôs, ou já o desta evidência (uma
+# preparação que parou no meio).
+if ! cmp -s "$AQUI/m3.py" "$PASTA/roteiro/m3.py"; then
+  git -C "$REPO" show "$ROTEIRO_DOS_CARTOES:docs/evidencias/m3-custo-dos-mods/m3.py" \
+    | cmp -s - "$PASTA/roteiro/m3.py" \
+    || { echo "o roteiro de $PASTA não é o dos cartões ($ROTEIRO_DOS_CARTOES): junte à mão"; exit 1; }
+  cp "$AQUI/m3.py" "$PASTA/roteiro/m3.py"
+fi
+
 cp "$AQUI/m3-falante.rs" "$PASTA/fonte/crates/seele-core/examples/m3-falante.rs"
 python3 -I "$AQUI/remendar-conserto-63.py" "$PASTA/fonte"
 
@@ -51,6 +66,7 @@ python3 -I "$AQUI/remendar-conserto-63.py" "$PASTA/fonte"
 echo "$COMMIT+$CONSERTO" > "$PASTA/fonte/COMMIT_DA_MEDICAO"
 echo "pronto: o app e o falante com o conserto, marcados $COMMIT+$CONSERTO"
 echo "        o da campanha ficou em alvo/release/bundle/macos/SEELE-$COMMIT_DA_CAMPANHA.app"
-# As referências também: o `resumir-api6.py` lê cada cenário contra o `sem-mod`
-# (ou o `sem-mod+voz`) do mesmo commit, e o app mudou.
-echo "        sh $PASTA/roteiro/campanha-api6.sh sem-mod sem-mod+voz carga-cartoes carga-cartoes+voz"
+# As referências também, na mesma build: o `resumir-api6.py` lê a
+# `carga-cartoes` contra a `lista-251`, a `lista-251` contra o `sem-mod`, e
+# recusa misturar commits.
+echo "        sh $PASTA/roteiro/campanha-api6.sh sem-mod sem-mod+voz lista-251 lista-251+voz carga-cartoes carga-cartoes+voz"

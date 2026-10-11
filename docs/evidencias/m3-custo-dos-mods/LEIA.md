@@ -123,7 +123,7 @@ testes).
 | `gerar-carga.py` | as variantes do MOD de carga, com os GIFs da capa |
 | `m3-carga/` | o modelo do MOD de carga sintético da API 6 |
 | `conferir-carga.rs` | confere uma variante contra o prelúdio da cópia |
-| `preparar-conserto-63.sh` | a `carga-cartoes` de novo, com o conserto da pendência 63 na cópia da campanha, que fica marcada `<commit>+6717dc2c` |
+| `preparar-conserto-63.sh` | a `carga-cartoes` de novo, com o conserto da pendência 63 na cópia da campanha, que fica marcada `<commit>+6717dc2c`, e o roteiro com a `lista-251` |
 | `remendar-conserto-63.py` | o `tela-sessao.js` do `6717dc2c` na cópia, letra por letra, e o número da voz do falante |
 
 ## A campanha da API 6 (tarefa 11 do plano da F3)
@@ -348,8 +348,17 @@ M3 remendada com o conserto, e não com menos pessoas):
 
 ```sh
 sh docs/evidencias/m3-custo-dos-mods/preparar-conserto-63.sh /tmp/m3-6
-sh /tmp/m3-6/roteiro/campanha-api6.sh sem-mod sem-mod+voz carga-cartoes carga-cartoes+voz
+sh /tmp/m3-6/roteiro/campanha-api6.sh sem-mod sem-mod+voz lista-251 lista-251+voz carga-cartoes carga-cartoes+voz
 ```
+
+**A referência da `carga-cartoes` é a `lista-251`** (decisão da orquestradora,
+11/10): os mesmos calados, no mesmo ritmo e com o mesmo apelido, contados pela
+acessibilidade antes de medir — pelo nome, que sem MOD não há cartão — e sem
+MOD nenhum. O `resumir-api6.py` lê a `carga-cartoes` contra ela (e a `+voz`
+contra a `+voz`), e a coluna «contra» diz contra quem cada linha se lê; a
+`lista-251` contra o `sem-mod` de uma pessoa diz, à parte, o custo da lista. Os
+dois `sem-mod` entram na rodada porque a build mudou e o resumo recusa misturar
+commits; sem calados, são os curtos.
 
 O remendo é o diff do `6717dc2c`, conferido linha por linha contra o
 `tela-sessao.js` do `6e845e0d`, e a bancada `um-redesenho-por-quadro.cjs`
