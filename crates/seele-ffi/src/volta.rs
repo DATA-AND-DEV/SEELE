@@ -48,10 +48,40 @@ pub(crate) const PAGINA_DO_BURACO: u16 = 200;
 /// Quantas páginas o buraco pede, no máximo: 2 000 mensagens.
 ///
 /// Um teto e não «até fechar»: uma queda de cinco minutos num canal muito
-/// movimentado não pode virar uma busca sem fim na volta. O que passa do teto
-/// fica onde sempre ficou — no histórico, para quem rolar a conversa — e o
-/// `seele.log` diz que o teto foi alcançado.
+/// movimentado não pode virar uma busca sem fim na volta.
+///
+/// **O que passa do teto não volta nesta sessão** (M1 da revisão do P61). A
+/// janela não tem como pedir histórico mais antigo: abrir um canal traz só a
+/// página mais nova, e não há pedido com cursor saindo da casca. O pedaço que
+/// ficou de fora aparece numa sessão nova, se ela o buscar. Por isso alcançar o
+/// teto vai ao `seele.log` como aviso, com o canal e o cursor de onde parou.
 pub(crate) const TETO_DE_PAGINAS: u32 = 10;
+
+/// Quanto a cerca de uma página tem para voltar (I2 da revisão do P61).
+///
+/// O limitador do servidor descarta quadros acima do balde, e o `Ping` da
+/// cerca é um quadro como os outros. Sem prazo, uma cerca descartada deixava a
+/// busca aberta e calada até a próxima queda. Cinco segundos é muito mais que
+/// uma página leva numa rede de verdade, e é o bastante para o balde voltar a
+/// ter fichas para o pedido de novo.
+pub(crate) const PRAZO_DA_PAGINA: Duration = Duration::from_secs(5);
+
+/// Quanto esperar antes de pedir de novo uma página que veio vazia.
+///
+/// Uma página vazia é o começo do canal **ou** o `FetchHistory` que o limitador
+/// descartou deixando passar o `Ping`; daqui não se distingue. Pedir de novo
+/// depois de um segundo — vinte fichas do balde — separa os dois: o servidor
+/// que responde vazio de novo está no começo do canal.
+pub(crate) const ESPERA_DA_PAGINA_VAZIA: Duration = Duration::from_secs(1);
+
+/// Por que uma página está sendo pedida de novo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeNovo {
+    /// A cerca não voltou no prazo: o `Ping` pode ter sido descartado.
+    SemCerca,
+    /// A página veio vazia: o `FetchHistory` pode ter sido descartado.
+    Vazia,
+}
 
 /// O que pedir ao enlace: uma página atrás de `cursor`, e logo atrás o `Ping`
 /// com `carimbo`.
@@ -61,6 +91,8 @@ pub(crate) struct Pagina {
     pub(crate) cursor: Option<MessageId>,
     pub(crate) limite: u16,
     pub(crate) carimbo: u64,
+    /// `Some` quando é a mesma página pedida de novo, e por quê.
+    pub(crate) de_novo: Option<DeNovo>,
 }
 
 /// Por que a busca do buraco parou.
@@ -68,19 +100,24 @@ pub(crate) struct Pagina {
 pub(crate) enum Parada {
     /// Chegou à última mensagem que esta sessão conhecia: o buraco fechou.
     Fechou,
-    /// Uma página não trouxe nada mais antigo: o começo do canal.
+    /// O começo do canal, **dito pelo servidor**: uma página que veio
+    /// incompleta, ou vazia duas vezes, a segunda depois de
+    /// [`ESPERA_DA_PAGINA_VAZIA`].
     Comeco,
     /// Esta sessão não conhecia mensagem nenhuma do canal: a página mais nova
     /// basta, como quando a pessoa abre o canal.
     SoAMaisNova,
     /// [`TETO_DE_PAGINAS`] páginas e o buraco ainda aberto.
     Teto,
+    /// A cerca da mesma página não voltou duas vezes no prazo: a busca
+    /// desiste, e diz isso.
+    SemResposta,
 }
 
-/// O que o laço faz depois de uma mensagem do servidor.
+/// O que o laço faz agora.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Passo {
-    /// Pede mais uma página.
+    /// Pede uma página.
     Pedir(Pagina),
     /// A busca acabou.
     Parou(Parada),
@@ -91,6 +128,8 @@ pub(crate) enum Passo {
 struct NoAr {
     cursor: Option<MessageId>,
     carimbo: u64,
+    /// Até quando a cerca dela tem para voltar.
+    prazo: Instant,
     /// Os ids deste canal, abaixo do cursor, que chegaram desde o pedido.
     ///
     /// **Todos, e não só o menor** (I1 da revisão do P61). Na janela de uma
@@ -120,6 +159,11 @@ impl NoAr {
             .or_else(|| self.ids.first())
             .copied()
     }
+
+    /// Se a página veio cheia: o servidor tinha mais abaixo do cursor.
+    fn cheia(&self) -> bool {
+        self.ids.len() >= usize::from(PAGINA_DO_BURACO)
+    }
 }
 
 /// A busca do buraco de um canal, página por página, de trás para a frente.
@@ -128,14 +172,27 @@ impl NoAr {
 /// cursor, a partir da mais nova), então o buraco é fechado da mais nova para a
 /// última conhecida. O `Room` guarda as mensagens por id e as ordena, então a
 /// ordem de chegada não importa, e o que já estava na tela não duplica.
+///
+/// # O relógio
+///
+/// A busca não tem relógio próprio: quem chama passa o `agora`, e pergunta a
+/// [`Self::quando`] até quando dormir. Quando esse instante chega,
+/// [`Self::vez`] diz o que fazer: pedir a página que esperava, ou tratar a
+/// cerca que não voltou.
 #[derive(Debug)]
 pub(crate) struct Buraco {
     canal: ChannelId,
     /// A última mensagem deste canal que esta sessão conhecia na queda.
     conhecida: Option<MessageId>,
-    /// Quantas páginas já foram pedidas.
+    /// Quantas páginas já foram pedidas, sem contar as pedidas de novo.
     paginas: u32,
-    no_ar: NoAr,
+    /// A página no ar, se há uma.
+    no_ar: Option<NoAr>,
+    /// A página que espera a vez de ser pedida de novo: quando, de que cursor,
+    /// e por quê.
+    agendada: Option<(Instant, Option<MessageId>, DeNovo)>,
+    /// Se a página de agora já foi pedida de novo. Uma vez por página.
+    pedida_de_novo: bool,
     /// O próximo número de carimbo. Ver [`MARCA_DO_PING_DO_BURACO`].
     sequencia: u64,
 }
@@ -146,30 +203,44 @@ impl Buraco {
     /// `sequencia` é de onde os carimbos desta busca contam: quem chama a
     /// carrega de uma busca para a outra, para um `Pong` velho não fechar uma
     /// página nova.
-    pub(crate) fn abrir(room: &Room, sequencia: u64) -> Option<(Self, Pagina)> {
+    pub(crate) fn abrir(room: &Room, sequencia: u64, agora: Instant) -> Option<(Self, Pagina)> {
         let canal = room.current_channel?;
         let conhecida = room.mensagens_do_canal(canal).last().map(|m| m.id);
-        let carimbo = MARCA_DO_PING_DO_BURACO | sequencia;
-        let buraco = Self {
+        let mut buraco = Self {
             canal,
             conhecida,
             paginas: 1,
-            no_ar: NoAr {
-                cursor: None,
-                carimbo,
-                ids: BTreeSet::new(),
-            },
-            sequencia: sequencia + 1,
+            no_ar: None,
+            agendada: None,
+            pedida_de_novo: false,
+            sequencia,
         };
-        Some((
-            buraco,
-            Pagina {
-                canal,
-                cursor: None,
-                limite: PAGINA_DO_BURACO,
-                carimbo,
-            },
-        ))
+        let pagina = buraco.pedir(None, None, agora);
+        Some((buraco, pagina))
+    }
+
+    /// Põe uma página no ar.
+    fn pedir(
+        &mut self,
+        cursor: Option<MessageId>,
+        de_novo: Option<DeNovo>,
+        agora: Instant,
+    ) -> Pagina {
+        let carimbo = MARCA_DO_PING_DO_BURACO | self.sequencia;
+        self.sequencia += 1;
+        self.no_ar = Some(NoAr {
+            cursor,
+            carimbo,
+            prazo: agora + PRAZO_DA_PAGINA,
+            ids: BTreeSet::new(),
+        });
+        Pagina {
+            canal: self.canal,
+            cursor,
+            limite: PAGINA_DO_BURACO,
+            carimbo,
+            de_novo,
+        }
     }
 
     /// De onde a próxima busca conta os carimbos.
@@ -187,55 +258,164 @@ impl Buraco {
         self.paginas
     }
 
+    /// O cursor da página no ar, ou da que espera: de onde a busca parou, se
+    /// parar agora.
+    pub(crate) fn cursor(&self) -> Option<MessageId> {
+        self.no_ar
+            .as_ref()
+            .and_then(|no_ar| no_ar.cursor)
+            .or_else(|| self.agendada.and_then(|(_, cursor, _)| cursor))
+    }
+
+    /// Até quando dormir: a vez da página que espera, ou o prazo da cerca da
+    /// página no ar.
+    pub(crate) fn quando(&self) -> Option<Instant> {
+        self.agendada
+            .map(|(quando, _, _)| quando)
+            .or_else(|| self.no_ar.as_ref().map(|no_ar| no_ar.prazo))
+    }
+
+    /// O instante de [`Self::quando`] chegou: pede a página que esperava, ou
+    /// trata a cerca que não voltou.
+    pub(crate) fn vez(&mut self, agora: Instant) -> Option<Passo> {
+        if let Some((quando, cursor, por_que)) = self.agendada {
+            if agora < quando {
+                return None;
+            }
+            self.agendada = None;
+            return Some(Passo::Pedir(self.pedir(cursor, Some(por_que), agora)));
+        }
+        let no_ar = self.no_ar.as_ref()?;
+        if agora < no_ar.prazo {
+            return None;
+        }
+        // A cerca não voltou: o limitador pode ter descartado o `Ping`. Uma
+        // vez a mesma página de novo; na segunda, a busca desiste e diz.
+        let cursor = no_ar.cursor;
+        self.no_ar = None;
+        if self.pedida_de_novo {
+            return Some(Passo::Parou(Parada::SemResposta));
+        }
+        self.pedida_de_novo = true;
+        Some(Passo::Pedir(self.pedir(
+            cursor,
+            Some(DeNovo::SemCerca),
+            agora,
+        )))
+    }
+
     /// Uma mensagem do servidor chegou. Devolve o passo seguinte quando ela é
-    /// o `Pong` da página no ar.
+    /// o `Pong` da página no ar e há o que fazer agora.
     ///
     /// Uma mensagem do canal abaixo do cursor entra na conta da página, venha
     /// ela da página ou ao vivo: daqui não se distingue uma da outra. Quem
     /// separa é [`NoAr::ate_onde`], pelo tamanho da página.
-    pub(crate) fn ouvir(&mut self, mensagem: &ServerMessage) -> Option<Passo> {
+    pub(crate) fn ouvir(&mut self, mensagem: &ServerMessage, agora: Instant) -> Option<Passo> {
+        let no_ar = self.no_ar.as_mut()?;
         match *mensagem {
             ServerMessage::MessageReceived { channel, id, .. } if channel == self.canal => {
-                if self.no_ar.cursor.is_none_or(|cursor| id < cursor) {
-                    self.no_ar.ids.insert(id);
+                if no_ar.cursor.is_none_or(|cursor| id < cursor) {
+                    no_ar.ids.insert(id);
                 }
                 None
             }
-            ServerMessage::Pong { timestamp } if timestamp == self.no_ar.carimbo => {
-                Some(self.decidir())
+            ServerMessage::Pong { timestamp } if timestamp == no_ar.carimbo => {
+                let no_ar = self.no_ar.take()?;
+                self.decidir(&no_ar, agora)
             }
             _ => None,
         }
     }
 
-    /// A página no ar chegou inteira: fechou, ou pede a seguinte.
-    fn decidir(&mut self) -> Passo {
-        let Some(menor) = self.no_ar.ate_onde() else {
-            return Passo::Parou(Parada::Comeco);
+    /// A página no ar chegou inteira: fechou, pede a seguinte, ou espera para
+    /// pedir a mesma de novo.
+    fn decidir(&mut self, no_ar: &NoAr, agora: Instant) -> Option<Passo> {
+        let Some(menor) = no_ar.ate_onde() else {
+            // **Vazia não é começo, sozinha** (I2 da revisão do P61). O começo
+            // do canal e o `FetchHistory` descartado pelo limitador, com o
+            // `Ping` passando, dão a mesma página vazia. Pede de novo depois de
+            // uma espera; o servidor que responde vazio de novo está no começo.
+            if self.pedida_de_novo {
+                return Some(Passo::Parou(Parada::Comeco));
+            }
+            self.pedida_de_novo = true;
+            self.agendada = Some((agora + ESPERA_DA_PAGINA_VAZIA, no_ar.cursor, DeNovo::Vazia));
+            return None;
         };
+        self.pedida_de_novo = false;
         let Some(conhecida) = self.conhecida else {
-            return Passo::Parou(Parada::SoAMaisNova);
+            return Some(Passo::Parou(Parada::SoAMaisNova));
         };
         if menor <= conhecida {
-            return Passo::Parou(Parada::Fechou);
+            return Some(Passo::Parou(Parada::Fechou));
+        }
+        // Incompleta: o servidor respondeu, e não tinha mais abaixo do cursor.
+        if !no_ar.cheia() {
+            return Some(Passo::Parou(Parada::Comeco));
         }
         if self.paginas >= TETO_DE_PAGINAS {
-            return Passo::Parou(Parada::Teto);
+            return Some(Passo::Parou(Parada::Teto));
         }
-        let carimbo = MARCA_DO_PING_DO_BURACO | self.sequencia;
-        self.sequencia += 1;
         self.paginas += 1;
-        self.no_ar = NoAr {
-            cursor: Some(menor),
-            carimbo,
-            ids: BTreeSet::new(),
-        };
-        Passo::Pedir(Pagina {
-            canal: self.canal,
-            cursor: Some(menor),
-            limite: PAGINA_DO_BURACO,
-            carimbo,
-        })
+        Some(Passo::Pedir(self.pedir(Some(menor), None, agora)))
+    }
+}
+
+/// Faz o que a busca mandou: pede a página, ou registra a parada.
+///
+/// Aqui e não no laço da FFI, para os dois braços que acordam a busca — a
+/// mensagem que chegou e o relógio dela — fazerem a mesma coisa.
+pub(crate) async fn seguir(
+    enlace: &seele_core::enlace::Enlace,
+    buraco: &mut Option<Buraco>,
+    carimbos: &mut u64,
+    passo: Passo,
+) {
+    match passo {
+        Passo::Pedir(pagina) => {
+            if let Some(por_que) = pagina.de_novo {
+                tracing::warn!(
+                    canal = pagina.canal.get(),
+                    cursor = pagina.cursor.map(MessageId::get),
+                    ?por_que,
+                    "a página da busca do buraco não teve resposta; pedindo de novo \
+                     (o limitador do servidor pode ter descartado o pedido ou a cerca)"
+                );
+            }
+            let _ = enlace
+                .historico_com_cerca(pagina.canal, pagina.cursor, pagina.limite, pagina.carimbo)
+                .await;
+        }
+        Passo::Parou(parada) => {
+            let Some(parado) = buraco.take() else {
+                return;
+            };
+            *carimbos = parado.sequencia();
+            let (canal, paginas, cursor) = (
+                parado.canal().get(),
+                parado.paginas(),
+                parado.cursor().map(MessageId::get),
+            );
+            match parada {
+                Parada::Teto => tracing::warn!(
+                    canal,
+                    paginas,
+                    cursor,
+                    "a busca do buraco alcançou o teto de páginas; o que é mais antigo que o \
+                     cursor não volta nesta sessão"
+                ),
+                Parada::SemResposta => tracing::warn!(
+                    canal,
+                    paginas,
+                    cursor,
+                    "a busca do buraco desistiu: a cerca da mesma página não voltou duas vezes \
+                     no prazo; o que é mais antigo que o cursor não volta nesta sessão"
+                ),
+                Parada::Fechou | Parada::Comeco | Parada::SoAMaisNova => {
+                    tracing::info!(canal, paginas, ?parada, "o buraco da volta fechou");
+                }
+            }
+        }
     }
 }
 
@@ -456,45 +636,89 @@ mod tests {
         buscar_com_ecos(room, gravadas, ao_vivo, &[])
     }
 
-    /// [`buscar`], com `ecos`: `(página, id)` é um eco ao vivo de uma linha
+    /// [`buscar`], com `ecos`: `(pedido, id)` é um eco ao vivo de uma linha
     /// **antiga** — a repetição de alguém, com a mesma chave, que o servidor
-    /// devolve com o id original a todo o canal — chegando na janela daquela
-    /// página (a primeira é a 1), depois do bloco dela e antes da cerca.
+    /// devolve com o id original a todo o canal — chegando na janela daquele
+    /// pedido (o primeiro é o 1), depois do bloco dele e antes da cerca.
     fn buscar_com_ecos(
         room: &mut Room,
         gravadas: &[u64],
         ao_vivo: &[u64],
         ecos: &[(u32, u64)],
     ) -> (Parada, u32) {
-        let (mut buraco, mut pedido) = Buraco::abrir(room, 1).expect("há canal aberto");
-        let mut primeira = true;
+        let (parada, paginas, _) = simular(room, gravadas, ao_vivo, ecos, &[]);
+        (parada, paginas)
+    }
+
+    /// O que o limitador do servidor descarta de um pedido da busca.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Descarte {
+        /// O `FetchHistory`: a cerca volta sem página nenhuma.
+        Pedido,
+        /// O `Ping`: a página chega, e a cerca nunca.
+        Cerca,
+    }
+
+    /// A busca inteira contra o servidor de mentira, com o relógio andando só
+    /// quando ela espera ([`Buraco::quando`]). `descartes` diz, por número de
+    /// pedido (o primeiro é o 1, e um pedido de novo conta), o que o limitador
+    /// descarta. Devolve a parada, as páginas e cada pedido que saiu.
+    fn simular(
+        room: &mut Room,
+        gravadas: &[u64],
+        ao_vivo: &[u64],
+        ecos: &[(u32, u64)],
+        descartes: &[(u32, Descarte)],
+    ) -> (Parada, u32, Vec<Pagina>) {
+        let mut agora = Instant::now();
+        let (mut buraco, mut pedido) = Buraco::abrir(room, 1, agora).expect("há canal aberto");
+        let mut pedidos = vec![pedido];
         let mut numero = 0_u32;
         loop {
             numero += 1;
+            let descarte = descartes
+                .iter()
+                .find(|(qual, _)| *qual == numero)
+                .map(|(_, descarte)| *descarte);
             let mut chegam: Vec<ServerMessage> = Vec::new();
-            if primeira {
+            if numero == 1 {
                 chegam.extend(ao_vivo.iter().map(|id| mensagem(*id, PersonId(9), None)));
-                primeira = false;
+            }
+            if descarte != Some(Descarte::Pedido) {
+                chegam.extend(
+                    pagina(gravadas, pedido.cursor, pedido.limite)
+                        .into_iter()
+                        .map(|id| mensagem(id, PersonId(9), None)),
+                );
             }
             chegam.extend(
-                pagina(gravadas, pedido.cursor, pedido.limite)
-                    .into_iter()
-                    .map(|id| mensagem(id, PersonId(9), None)),
-            );
-            chegam.extend(
                 ecos.iter()
-                    .filter(|(pagina, _)| *pagina == numero)
+                    .filter(|(qual, _)| *qual == numero)
                     .map(|(_, id)| mensagem(*id, PersonId(9), None)),
             );
-            chegam.push(pong(pedido.carimbo));
+            if descarte != Some(Descarte::Cerca) {
+                chegam.push(pong(pedido.carimbo));
+            }
             let mut passo = None;
             for chegou in &chegam {
                 room.apply(chegou);
-                if let Some(depois) = buraco.ouvir(chegou) {
+                if let Some(depois) = buraco.ouvir(chegou, agora) {
                     passo = Some(depois);
                 }
             }
-            match passo.expect("o `Pong` da página fecha a página") {
+            // Nada a fazer agora: a busca espera. O relógio anda até a vez dela.
+            let passo = match passo {
+                Some(passo) => passo,
+                None => {
+                    agora = buraco
+                        .quando()
+                        .expect("a busca não pediu, não parou e não espera nada: ficou calada");
+                    buraco
+                        .vez(agora)
+                        .expect("a vez da busca chegou e ela não disse nada")
+                }
+            };
+            match passo {
                 Passo::Pedir(proximo) => {
                     assert_eq!(proximo.canal, CANAL);
                     assert_ne!(proximo.carimbo & MARCA_DO_PING_DO_BURACO, 0);
@@ -503,9 +727,10 @@ mod tests {
                         0,
                         "o carimbo do buraco pegou o bit da entrada"
                     );
+                    pedidos.push(proximo);
                     pedido = proximo;
                 }
-                Passo::Parou(parada) => return (parada, buraco.paginas()),
+                Passo::Parou(parada) => return (parada, buraco.paginas(), pedidos),
             }
         }
     }
@@ -625,25 +850,152 @@ mod tests {
         assert_eq!(buscar(&mut room, &gravadas, &[]), (Parada::SoAMaisNova, 1));
     }
 
+    /// **Uma página vazia, sozinha, não é o começo do canal** (I2 da revisão do
+    /// P61).
+    ///
+    /// O limitador do servidor descarta quadros acima do balde. Se ele descarta
+    /// o `FetchHistory` e deixa passar o `Ping`, a cerca volta sem página
+    /// nenhuma — e a busca lia «começo do canal» e parava, com o buraco inteiro
+    /// de fora e o `seele.log` dizendo só «fechou».
+    #[test]
+    fn uma_pagina_vazia_sozinha_nao_e_o_comeco_do_canal() {
+        let mut room = room();
+        room.apply(&mensagem(1, PersonId(9), None));
+        let agora = Instant::now();
+        let (mut buraco, pedido) = Buraco::abrir(&room, 1, agora).expect("canal aberto");
+        // O pedido não chegou ao servidor; a cerca, sim.
+        let passo = buraco.ouvir(&pong(pedido.carimbo), agora);
+        assert_ne!(
+            passo,
+            Some(Passo::Parou(Parada::Comeco)),
+            "a busca leu «começo do canal» numa página que o servidor não respondeu"
+        );
+        // Ela espera, e pede a mesma página de novo, dizendo por quê.
+        assert_eq!(buraco.quando(), Some(agora + ESPERA_DA_PAGINA_VAZIA));
+        assert_eq!(buraco.vez(agora), None, "pediu de novo antes da espera");
+        let Some(Passo::Pedir(de_novo)) = buraco.vez(agora + ESPERA_DA_PAGINA_VAZIA) else {
+            panic!("a busca não pediu de novo a página vazia");
+        };
+        assert_eq!(
+            (de_novo.cursor, de_novo.de_novo),
+            (pedido.cursor, Some(DeNovo::Vazia))
+        );
+    }
+
+    /// **O `FetchHistory` descartado, com o `Ping` passando, não deixa o
+    /// buraco pela metade** (I2): a página vazia é pedida de novo depois da
+    /// espera, e a busca fecha o buraco inteiro.
+    #[test]
+    fn o_pedido_descartado_e_pedido_de_novo_e_o_buraco_fecha_inteiro() {
+        let mut room = room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let gravadas: Vec<u64> = (1..=551).collect();
+        let (parada, paginas, pedidos) =
+            simular(&mut room, &gravadas, &[], &[], &[(2, Descarte::Pedido)]);
+
+        assert_eq!(parada, Parada::Fechou);
+        assert_eq!(
+            paginas, 3,
+            "a página pedida de novo contou como página nova"
+        );
+        assert_eq!(
+            pedidos
+                .iter()
+                .filter(|p| p.de_novo == Some(DeNovo::Vazia))
+                .count(),
+            1
+        );
+        let faltam: Vec<u64> = (51..=551).filter(|id| !ids(&room).contains(id)).collect();
+        assert!(faltam.is_empty(), "faltam {} do buraco", faltam.len());
+    }
+
+    /// **A cerca descartada tem prazo** (I2): sem o `Pong`, a busca ficava
+    /// aberta e calada até a próxima queda. Agora, no prazo, ela pede a mesma
+    /// página de novo; e se a cerca não volta de novo, desiste dizendo.
+    #[test]
+    fn a_cerca_descartada_tem_prazo_e_a_pagina_e_pedida_de_novo() {
+        let mut room = room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let gravadas: Vec<u64> = (1..=551).collect();
+        let (parada, paginas, pedidos) =
+            simular(&mut room, &gravadas, &[], &[], &[(2, Descarte::Cerca)]);
+        assert_eq!(parada, Parada::Fechou);
+        assert_eq!(paginas, 3);
+        assert_eq!(
+            pedidos
+                .iter()
+                .filter(|p| p.de_novo == Some(DeNovo::SemCerca))
+                .count(),
+            1
+        );
+        let faltam: Vec<u64> = (51..=551).filter(|id| !ids(&room).contains(id)).collect();
+        assert!(faltam.is_empty(), "faltam {} do buraco", faltam.len());
+
+        // Duas vezes a mesma cerca: a busca desiste, e diz que desistiu.
+        let mut room = self::room();
+        for id in 51..=100 {
+            room.apply(&mensagem(id, PersonId(9), None));
+        }
+        let (parada, _, _) = simular(
+            &mut room,
+            &gravadas,
+            &[],
+            &[],
+            &[(2, Descarte::Cerca), (3, Descarte::Cerca)],
+        );
+        assert_eq!(parada, Parada::SemResposta);
+    }
+
+    /// O começo do canal de verdade, numa divisa de página: a última página
+    /// cheia é seguida de uma vazia, e a vazia, pedida de novo, vem vazia de
+    /// novo — o servidor disse duas vezes.
+    #[test]
+    fn o_comeco_numa_divisa_de_pagina_e_dito_duas_vezes() {
+        let mut room = room();
+        // A última conhecida foi apagada durante a queda; o canal tem duas
+        // páginas inteiras depois dela.
+        room.apply(&mensagem(5, PersonId(9), None));
+        let gravadas: Vec<u64> = (6..=405).collect();
+        let (parada, paginas, pedidos) = simular(&mut room, &gravadas, &[], &[], &[]);
+        assert_eq!(parada, Parada::Comeco);
+        assert_eq!(paginas, 3);
+        assert_eq!(
+            pedidos
+                .iter()
+                .filter(|p| p.de_novo == Some(DeNovo::Vazia))
+                .count(),
+            1
+        );
+    }
+
     #[test]
     fn o_pong_de_outra_cerca_nao_fecha_a_pagina() {
         // O `Pong` de rotina, o do `Ping` de entrada e o de uma busca velha
         // chegam no meio, e nenhum fecha a página no ar.
         let mut room = room();
         room.apply(&mensagem(1, PersonId(9), None));
-        let (mut buraco, pedido) = Buraco::abrir(&room, 40).expect("canal aberto");
+        let agora = Instant::now();
+        let (mut buraco, pedido) = Buraco::abrir(&room, 40, agora).expect("canal aberto");
         for outro in [
             3,
             seele_core::assento::carimbo_da_entrada(3),
             MARCA_DO_PING_DO_BURACO | 39,
         ] {
             assert_eq!(
-                buraco.ouvir(&pong(outro)),
+                buraco.ouvir(&pong(outro), agora),
                 None,
                 "o carimbo {outro:#x} fechou a página"
             );
         }
-        assert!(buraco.ouvir(&pong(pedido.carimbo)).is_some());
+        assert_eq!(buraco.ouvir(&mensagem(1, PersonId(9), None), agora), None);
+        assert_eq!(
+            buraco.ouvir(&pong(pedido.carimbo), agora),
+            Some(Passo::Parou(Parada::Fechou))
+        );
         assert_eq!(buraco.sequencia(), 41);
         assert_eq!(buraco.canal(), CANAL);
     }

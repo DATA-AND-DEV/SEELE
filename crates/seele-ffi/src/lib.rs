@@ -4386,40 +4386,12 @@ async fn drive(
                         // A página do buraco que estava no ar acabou? Depois do
                         // `fold`: a mensagem já está no `Room` quando a busca
                         // decide. Ver `volta::Buraco`.
-                        let passo = buraco.as_mut().and_then(|aberto| aberto.ouvir(&message));
+                        let passo = buraco
+                            .as_mut()
+                            .and_then(|aberto| aberto.ouvir(&message, Instant::now()));
                         if let Some(passo) = passo {
-                            match passo {
-                                volta::Passo::Pedir(pagina) => {
-                                    let _ = client
-                                        .historico_com_cerca(
-                                            pagina.canal,
-                                            pagina.cursor,
-                                            pagina.limite,
-                                            pagina.carimbo,
-                                        )
-                                        .await;
-                                }
-                                volta::Passo::Parou(parada) => {
-                                    if let Some(fechado) = buraco.take() {
-                                        carimbos_do_buraco = fechado.sequencia();
-                                        if parada == volta::Parada::Teto {
-                                            tracing::warn!(
-                                                canal = fechado.canal().get(),
-                                                paginas = fechado.paginas(),
-                                                "o buraco da volta passou do teto de páginas; \
-                                                 o resto fica no histórico"
-                                            );
-                                        } else {
-                                            tracing::info!(
-                                                canal = fechado.canal().get(),
-                                                paginas = fechado.paginas(),
-                                                ?parada,
-                                                "o buraco da volta fechou"
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                            volta::seguir(&client, &mut buraco, &mut carimbos_do_buraco, passo)
+                                .await;
                         }
                     }
                     seele_core::enlace::Aviso::Transferencia(estado) => {
@@ -4578,7 +4550,7 @@ async fn drive(
                         let pagina = match shared.room.lock() {
                             Ok(room) => {
                                 repeticao.na_volta(&room, Instant::now());
-                                volta::Buraco::abrir(&room, carimbos_do_buraco)
+                                volta::Buraco::abrir(&room, carimbos_do_buraco, Instant::now())
                             }
                             Err(_) => None,
                         }
@@ -4604,6 +4576,18 @@ async fn drive(
                         });
                         break;
                     }
+                }
+            }
+
+            // **O relógio da busca do buraco** (I2 da revisão do P61): a página
+            // vazia que espera para ser pedida de novo, ou o prazo da cerca da
+            // página no ar. Sem ele, uma cerca descartada pelo limitador do
+            // servidor deixava a busca aberta e calada até a próxima queda.
+            () = volta::esperar_ate(buraco.as_ref().and_then(volta::Buraco::quando)),
+                if buraco.as_ref().and_then(volta::Buraco::quando).is_some() => {
+                let passo = buraco.as_mut().and_then(|aberto| aberto.vez(Instant::now()));
+                if let Some(passo) = passo {
+                    volta::seguir(&client, &mut buraco, &mut carimbos_do_buraco, passo).await;
                 }
             }
 
