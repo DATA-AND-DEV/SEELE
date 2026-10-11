@@ -239,6 +239,25 @@ async function conectar(alvo, apelido, token) {
     // frase da origem certa. Ver `deOndeVeio`.
     entrarNaAutenticacao(snapshot, veredito, alvo, nossoServidor, deOndeVeio(resposta));
   } catch (falha) {
+    // **A tentativa que outra substituiu volta calada** (lote E54 da 0.16,
+    // portado para a 0.15.2). O `connect` do Rust larga a tentativa velha que
+    // termina depois de uma nova ter começado — a conexão dela é fechada lá, e
+    // a sessão de pé é a da nova (`largar_a_substituida`, em `main.rs`). Sem
+    // esta conferência, a recusa dela caía no ramo de baixo, e a linha
+    // vermelha aparecia com a frase de uma tentativa que a pessoa já tinha
+    // deixado. Vai ao `seele.log` como aviso, com o alvo e sem a credencial.
+    //
+    // A marca sai quando a geração caiu, e há duas causas: outra entrada que
+    // começou, ou o fim desta mesma sessão, que chega pelo `Ended` e abre a
+    // tela de fim. A frase diz as duas, e não promete «a nova».
+    if (falha?.substituida === true) {
+      registrarNoAnfitriao(
+        "entrada",
+        `a tentativa a ${alvo} não entrou: a geração dela já não está de pé — outra entrada começou, ou a sessão acabou —, e a conexão dela foi fechada`,
+        "aviso",
+      );
+      return;
+    }
     // `connect` responde por `FalhaDaEntrada` (em `main.rs`): o erro de sempre
     // **mais a trilha**, e mais de onde veio a impressão conferida. Quem escreve
     // a frase quer o erro e a origem; a trilha vai para o console, que é onde

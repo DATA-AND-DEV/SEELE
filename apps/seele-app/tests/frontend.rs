@@ -160,7 +160,16 @@ fn command_parameters(source: &str) -> std::collections::BTreeMap<String, BTreeS
         let Some(abre) = resto.find('(') else {
             continue;
         };
-        let nome = resto[..abre].trim().to_owned();
+        // **Sem os genéricos.** Desde o lote E54 o `connect` é
+        // `connect<R: tauri::Runtime>(`, para um teste chamá-lo pelo runtime
+        // falso do Tauri; lido até o `(`, o nome virava `connect<R: …>`, e o
+        // guarda dos argumentos deixava de achar o `connect` e o pulava calado.
+        let nome = resto[..abre]
+            .split('<')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
         let Some(fecha) = resto[abre..].find(')') else {
             continue;
         };
@@ -460,6 +469,17 @@ fn todo_argumento_que_o_frontend_manda_existe_no_comando() {
     let mut erros: Vec<String> = Vec::new();
     for (comando, _, chave) in invoked_with_arguments(&script) {
         let Some(parametros) = comandos.get(&comando) else {
+            // **Definido aqui e não lido é cegueira, e não ausência** (lote
+            // E54): o `connect` genérico saiu da leitura de cima com outro
+            // nome, e este guarda o pulava sem dizer nada.
+            if source.contains(&format!("fn {comando}("))
+                || source.contains(&format!("fn {comando}<"))
+            {
+                erros.push(format!(
+                    "`{comando}` está em main.rs, e este guarda não leu os parâmetros dele: \
+                     o que o frontend manda a ele deixou de ser conferido"
+                ));
+            }
             continue; // o guarda de baixo cuida de comando inexistente
         };
         let esperados: BTreeSet<String> =
@@ -1187,7 +1207,18 @@ fn the_event_name_the_script_branches_on_is_the_one_the_bridge_sends() {
 ///
 /// `\n}\n` terminates: every brace inside a body is indented.
 fn body_of(source: &str, signature: &str) -> String {
-    let Some(after) = source.split(signature).nth(1) else {
+    // **Com ou sem genéricos** (lote E54, porte para a 0.15.2). O `connect`
+    // passou a ser `async fn connect<R: tauri::Runtime>(`, para um teste do
+    // `main.rs` chamá-lo pelo runtime falso do Tauri; procurado só por
+    // `async fn connect(`, ele seria dado como sumido. Sem achar a assinatura
+    // como foi escrita, o `(` do fim vira `<` e procura de novo — e, sem achar
+    // nenhuma das duas, reprova como antes.
+    let generica = signature.strip_suffix('(').map(|nome| format!("{nome}<"));
+    let Some(after) = source.split(signature).nth(1).or_else(|| {
+        generica
+            .as_deref()
+            .and_then(|generica| source.split(generica).nth(1))
+    }) else {
         panic!("main.rs no longer has `{signature}`");
     };
     let Some(body) = after.split("\n}\n").next() else {
@@ -13466,7 +13497,9 @@ fn o_rust_recusa_comando_de_geracao_morta_e_conta() {
 
     // E a ponte de eventos não fala em nome de uma sessão morta.
     let ponte = rust
-        .split_once("impl EventListener for Bridge")
+        // Sem o começo do `impl`: desde o lote E54 ele é genérico sobre o
+        // runtime (`impl<R: tauri::Runtime> EventListener for Bridge<R>`).
+        .split_once("EventListener for Bridge")
         .expect("a ponte de eventos")
         .1;
     let ponte = ponte.split_once("\n}\n").map_or(ponte, |(a, _)| a);
@@ -15665,5 +15698,121 @@ fn o_modo_de_desenvolvedor_nao_toma_o_teclado_nem_o_clique() {
         "a camada dos contornos está em `z-index: {z}`, acima das camadas do produto \
          (alerta 19–21, configurações 24, aceite 27): ela passa a riscar os diálogos \
          abertos"
+    );
+}
+
+/// **A recusa da tentativa substituída chega calada** (lote E54 da 0.16,
+/// portado para a 0.15.2).
+///
+/// O `connect` do Rust larga a tentativa velha que termina depois de uma nova
+/// ter começado, e a devolve recusada com a marca `substituida`
+/// (`largar_a_substituida`, no `main.rs`). Esta linha não tem o contador de
+/// tentativas da janela (lote W da 0.16): sem conferir a marca, a recusa da
+/// velha caía no ramo de toda falha, e a linha vermelha da entrada aparecia
+/// com a frase de uma tentativa que a pessoa já tinha deixado. A bancada
+/// `ajustes-v013.cjs` mede o comportamento; este guarda prende a forma, sem
+/// ler comentário:
+///
+/// 1. a marca é a primeira decisão do `catch` de `conectar`, antes da linha
+///    vermelha, da espera e do aceite de MODs;
+/// 2. o ramo dela escreve uma linha no registro, como aviso, com o alvo e sem
+///    a credencial, e volta sem tocar em nada daquilo.
+#[test]
+fn a_recusa_da_tentativa_substituida_chega_calada() {
+    const DA_FALHA: &[&str] = &[
+        "erro.hidden",
+        "erro.textContent",
+        "fraseDeErro(",
+        "levarParaAEspera(",
+        "levarParaOAceiteDeMods(",
+    ];
+    let fonte = read("ui/tela-boot.js");
+    let conectar = js_function(&fonte, "async function conectar(");
+    // O `catch` do `connect`, e não o primeiro de `conectar`: o do
+    // `apelido_local` vem antes, com o mesmo `falha`.
+    let Some(connect) = conectar.find("invoke(\"connect\"") else {
+        panic!("`conectar` não chama mais o `connect`: {conectar}");
+    };
+    let Some(catch) = conectar[connect..]
+        .find("} catch (falha) {")
+        .map(|n| connect + n)
+    else {
+        panic!("`conectar` perdeu o `catch` do `connect`: {conectar}");
+    };
+    let depois = &conectar[catch + "} catch (falha) {".len()..];
+    let Some(abre) = depois.find("if (falha?.substituida === true)") else {
+        panic!(
+            "o `catch` de `conectar` não confere a marca da tentativa substituída \
+             (`if (falha?.substituida === true)`): a recusa de uma tentativa que outra \
+             substituiu pinta a linha vermelha por cima da sessão nova.\n{depois}"
+        );
+    };
+    let antes = &depois[..abre];
+    for passo in DA_FALHA {
+        assert!(
+            !antes.contains(passo),
+            "o `catch` de `conectar` faz `{passo}` antes de conferir a marca da tentativa \
+             substituída.\n{depois}"
+        );
+    }
+    let Some(chave) = depois[abre..].find('{').map(|n| abre + n) else {
+        panic!("a conferência da marca não tem bloco: {depois}");
+    };
+    let mut profundidade = 0_i32;
+    let mut fim = None;
+    for (indice, caractere) in depois[chave..].char_indices() {
+        match caractere {
+            '{' => profundidade += 1,
+            '}' => {
+                profundidade -= 1;
+                if profundidade == 0 {
+                    fim = Some(chave + indice);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(fim) = fim else {
+        panic!("o bloco da marca da tentativa substituída não fecha: {depois}");
+    };
+    let ramo = &depois[chave..fim];
+    for passo in DA_FALHA {
+        assert!(
+            !ramo.contains(passo),
+            "o ramo da tentativa substituída faz `{passo}`: a recusa dela aparece na tela.\n{ramo}"
+        );
+    }
+    assert!(
+        ramo.contains("return"),
+        "o ramo da tentativa substituída não volta, e segue para a linha vermelha.\n{ramo}"
+    );
+    let chamadas: Vec<Vec<String>> = ramo
+        .match_indices("registrarNoAnfitriao(")
+        .map(|(posicao, _)| {
+            argumentos_da_chamada(&ramo[posicao + "registrarNoAnfitriao".len()..])
+                .iter()
+                .map(|argumento| argumento.trim().to_owned())
+                .collect()
+        })
+        .collect();
+    assert!(
+        chamadas.len() == 1,
+        "o ramo da tentativa substituída não escreve a recusa no registro, uma vez ({} \
+         chamada(s)): calada na tela e fora do seele.log, ela some sem rastro.\n{ramo}",
+        chamadas.len()
+    );
+    let argumentos = &chamadas[0];
+    assert!(
+        argumentos.first().map(String::as_str) == Some("\"entrada\"")
+            && argumentos.get(2).map(String::as_str) == Some("\"aviso\"")
+            && argumentos.get(1).is_some_and(|frase| names(frase, "alvo")),
+        "a linha da tentativa substituída não vai como aviso da entrada, ou não diz o alvo \
+         ({argumentos:?})"
+    );
+    assert!(
+        !names(ramo, "token"),
+        "o ramo da tentativa substituída nomeia a credencial (`token`), e ela iria ao \
+         seele.log.\n{ramo}"
     );
 }
