@@ -124,6 +124,7 @@ testes).
 | `m3-carga/` | o modelo do MOD de carga sintético da API 6 |
 | `conferir-carga.rs` | confere uma variante contra o prelúdio da cópia |
 | `preparar-conserto-63.sh` | a `carga-cartoes` de novo, com o conserto da pendência 63 na cópia da campanha, que fica marcada `<commit>+6717dc2c`, e o roteiro com a `lista-251` |
+| `arvore-ax.py` | a árvore de acessibilidade com N pessoas na lista, sem MOD: o guarda da (b) da pendência 63 (sai 0 só se, em toda consulta, a lista inteira e o ENTRAR NA SALA estiverem na árvore) |
 | `remendar-conserto-63.py` | o `tela-sessao.js` do `6717dc2c` na cópia, letra por letra, e o número da voz do falante |
 
 ## A campanha da API 6 (tarefa 11 do plano da F3)
@@ -375,6 +376,16 @@ acessibilidade não acompanha — os nomes da lista nunca aparecem nela, e o
 ENTRAR NA SALA sai dela (a (b) da pendência 63; rascunho §12, «A lista de
 251»). Com isso, a `carga-cartoes` não se dirige no app, e o teto de
 contribuições congelou pela bancada (decisão da orquestradora, 11/10).
+
+**A árvore de acessibilidade não assenta nem com 50 pessoas** (F3, 11/10, com
+`arvore-ax.py`, na build remendada, sem MOD, a sessão desbloqueada do começo ao
+fim). Em 2 min de consultas: com 10, a lista inteira em 39 de 39 e, numa
+segunda rodada, em 38 de 39 — numa consulta ela sumiu inteira; com 50, em 18 de
+38 e em 10 de 38, oscilando entre 0 e 49 nomes sem convergir; com 100, em
+nenhuma. O ENTRAR NA SALA ficou na árvore com 50 e 100 (37 e 38 de 38) e o
+aperto entrou na sala. Toda consulta voltou em 0,2 s ou menos: não é prazo. A
+(b) da pendência 63 entrou na 0.16, com a F5 (decisão da orquestradora), e este
+arquivo é o guarda dela.
 
 **E a voz da rodada de 11/10 não vale, nem a CPU dela.** Nos `+voz`, o jitter
 saiu 0 exato nas duas leituras (a barra pela acessibilidade, 29 amostras, e o
