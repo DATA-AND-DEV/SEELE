@@ -1505,9 +1505,14 @@ furo — a área dela começa à direita da barra, e o que não couber rola dent
 dela. No resto, o modal continua modal: o Tab preso no diálogo, o Esc o
 fechando, e a sessão inerte e coberta [c, tarefa 9, Step 4b;
 `mods-superficies.js`, `foraDoModal` e `recortarOVeu`; `bancada/nucleo.cjs`,
-seção 3]. Agora
-para o que existe (a portaria, `#portaria-batendo`, `index.html:192` [c]); o
-item «a ligação» (`#toque`) fecha depois da 7d da sala pessoal. **É isso que
+seção 3]. **E a ligação** (`#toque`, a faixa de quem liga, da 7d; tarefa 9,
+Step 5, 11/10): medido antes, com um diálogo modal de MOD aberto, o ATENDER e
+o RECUSAR ficavam inertes, e o diálogo largo cruzava a faixa — uma ligação
+que chegasse não era atendida nem recusada. A mesma regra: ela fica acordada
+e no furo do véu, e a caixa do diálogo começa abaixo dela, com a ligação
+chegando antes ou depois do modal [c, `foraDoModal` e `--recorte-cima`;
+`bancada/nucleo.cjs`, seções 2 e 3]. Agora para o que existe (a portaria,
+`#portaria-batendo`, `index.html:192` [c], e a ligação). **É isso que
 põe o congelamento no fim do pacote** (spec-mestre, F7).
 
 ## 11. O celular
